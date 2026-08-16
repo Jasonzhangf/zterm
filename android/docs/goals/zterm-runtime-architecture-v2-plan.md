@@ -8,6 +8,8 @@
   active-version and lifecycle state are authoritative in `.appsdk/project.json`
   and `.appsdk/records/**`; product L5 device/package/OTA verification remains
   open
+- active-v2 status: implemented, awaiting AppSDK review/promotion/freeze; see
+  `.appsdk/records/**`
 
 ## Status Update 2026-08-16
 

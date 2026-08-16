@@ -7119,9 +7119,22 @@ if (bufferedBytes >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES) {
   intermediate state still saw the stale committed records and returned FAIL.
 - To follow the AppSDK pattern used for active-v1 (review source/config first,
   then create lifecycle records from the review verdict), the premature
-  top-level `evidence/review/promotion/regression/freeze` records are being
-  cleared before the fresh DSH review. They will be recreated only after that
-  review returns PASS.
+  top-level `evidence/review/promotion/regression/freeze` records are cleared
+  before the fresh DSH review and are recreated only after that review returns
+  PASS.
 - Current generated artifact remains `sha256:ab527a800da96f8f1bb3b038649c5882f3e016dd0eef0749e32bb9a50ae152e8`
   with public API `sha256:714d9cd3b2c3a632ac9618511fee742367b15d89e32c134bfb838f7966e592a2`;
   regression rerun is 297/297 at `2026-08-16T01:24:53Z`.
+
+# 2026-08-16 active-v2 records recreated after source-r4 PASS
+
+- DSH `zarchv2-activev2-source-r4` reviewed commit `77bbf60` and returned
+  literal `VERDICT: PASS` with no P0/P1.
+- Recreated top-level evidence/review/promotion/regression/freeze records with
+  review `REVIEW-20260816-DSH-ZARCHV2-ACTIVEV2-R4`, artifact
+  `sha256:ab527a800da96f8f1bb3b038649c5882f3e016dd0eef0749e32bb9a50ae152e8`,
+  and regression 297/297. Freeze record is marked `FREEZE-PENDING` and
+  `git_clean:false` until the actual freeze/publish command runs.
+- Added the non-blocking P2 doc pointer that active-v2 is implemented but not
+  yet promoted/frozen.
+- `appsdk verify android` passes for the recreated record graph.
