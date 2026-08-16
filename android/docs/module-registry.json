@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "promotion_status": "pending_review",
+  "promotion_status": "promoted",
   "description": "Project-level module registry. Resources stay the truth-store owner; modules group those resources into daemon, client, shared, relay, release, and observability ownership boundaries before function-map or runtime refactor.",
   "modules": [
     {

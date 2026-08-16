@@ -137,7 +137,13 @@
         "suite_id": "zterm-runtime-v2-regression"
       },
       "source_owner": "zterm-runtime-v2",
-      "stage": "frozen"
+      "stage": "source_implemented",
+      "version_base": {
+        "base_artifact_hash": "sha256:ea3b90ba83282ff4d66491d53c9794979dbf5ea8c7ecbc82a7a6085b86f92ffb",
+        "base_source_commit": "4c0416ff2767f173b9984d49965787c0afb76b9c",
+        "new_active_version": "active-v2",
+        "previous_active_version": "active-v1"
+      }
     }
   ],
   "project_id": "zterm-runtime-architecture-v2",

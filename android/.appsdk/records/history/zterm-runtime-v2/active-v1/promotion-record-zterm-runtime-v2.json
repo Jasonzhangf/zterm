@@ -1,0 +1,89 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/promotion-record.schema.json",
+  "artifact_hash": "sha256:ea3b90ba83282ff4d66491d53c9794979dbf5ea8c7ecbc82a7a6085b86f92ffb",
+  "base_artifact_hash": null,
+  "base_commit": "9c52d5dda9e03d7a9c010ee64944b7cd06a3b90c",
+  "change_reason_comment": "Promote reviewed ZTerm runtime architecture v2 after DSH r6 PASS, compile, architecture gates, regression 297/297, and daemon mirror close-loop.",
+  "change_set_id": "CS-20260816-ZARCHV2-001",
+  "compatibility_level": "compatible",
+  "created_at": "2026-08-16T00:05:08Z",
+  "design_id": "ZTERM-ARCH-V2-DESIGN-001",
+  "evidence_ids": [
+    "EVID-20260816-ZARCHV2-FINAL-001"
+  ],
+  "experiment_id": "zterm-runtime-architecture-v2",
+  "issue_id": "zterm-runtime-architecture-v2",
+  "migration_id": null,
+  "module_id": "zterm-runtime-v2",
+  "new_active_version": "active-v1",
+  "playground_cleanup_record_id": "cleanup-zterm-runtime-architecture-v2",
+  "previous_active_version": null,
+  "promotion_id": "PROMO-20260816-ZARCHV2-001",
+  "public_api_hash": "sha256:667eb211855040e4cf42ffbe3bc2627629c5c2dc0120dc7367b57fbc6f1985e3",
+  "required_gate_results": [
+    {
+      "gate_id": "contract_valid",
+      "producer": "appsdk",
+      "result": "pass"
+    },
+    {
+      "gate_id": "record_graph",
+      "producer": "appsdk",
+      "result": "pass"
+    },
+    {
+      "gate_id": "module_ownership",
+      "producer": "pnpm",
+      "result": "pass"
+    },
+    {
+      "gate_id": "module_dag",
+      "producer": "pnpm",
+      "result": "pass"
+    },
+    {
+      "gate_id": "payload_control_separation",
+      "producer": "pnpm",
+      "result": "pass"
+    },
+    {
+      "gate_id": "debug_isolation",
+      "producer": "pnpm",
+      "result": "pass"
+    },
+    {
+      "gate_id": "debug_bounded",
+      "producer": "pnpm",
+      "result": "pass"
+    },
+    {
+      "gate_id": "control_center_contract",
+      "producer": "pnpm",
+      "result": "pass"
+    },
+    {
+      "gate_id": "plugin_capabilities",
+      "producer": "pnpm",
+      "result": "pass"
+    },
+    {
+      "gate_id": "typecheck",
+      "producer": "pnpm",
+      "result": "pass"
+    },
+    {
+      "gate_id": "build",
+      "producer": "pnpm",
+      "result": "pass"
+    },
+    {
+      "gate_id": "source_to_dom",
+      "producer": "pnpm",
+      "result": "pass"
+    }
+  ],
+  "review_id": "REVIEW-20260816-DSH-ZARCHV2-R6",
+  "root_cause": "ZTerm runtime ownership and typed plane separation were not independently governed; v2 introduces unique module owners, registered edges, debug/control side channels, and plugin capability ports without changing business payload semantics.",
+  "scope_hash": "sha256:0ef1306a1574b5e053549cf15ee26d648d33fd41359805718bd1f39efa014cae",
+  "source_commit": "4c0416ff2767f173b9984d49965787c0afb76b9c"
+}

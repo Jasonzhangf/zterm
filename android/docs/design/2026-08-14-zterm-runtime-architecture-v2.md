@@ -1,9 +1,9 @@
 # ZTerm Runtime Architecture v2
 
 - Design ID: `ZTERM-ARCH-V2-DESIGN-001`
-- Status: confirmed for AppSDK Playground execution
-- Production ownership status: shared node/debug contract and client/daemon
-  observability production foundation slice implemented, `production_pending_review`
+- Status: confirmed; AppSDK `active-v1` promoted and frozen, `active-v2`
+  source implemented and awaiting review/promotion
+- Product verification status: L5 device/package/OTA verification remains open
 - Confirmed by: Jason
 - Confirmed at: `2026-08-15T00:45:30Z`
 - AppSDK project root: `android/`
@@ -36,7 +36,7 @@ This is an ownership and dependency refactor. It is not a product feature or pro
 
 ### 3.1 Logical modules without physical owners
 
-`client.terminal_channel_mux`, `daemon.input_queue`, `daemon.control_gateway`, `daemon.control_center`, `daemon.channel_mux`, `daemon.buffer_publisher`, `daemon.session_catalog`, `daemon.attachment_delivery`, `daemon.mirror_writer`, `client.sparse_buffer`, `client.renderer_window`, `client.dom_renderer`, `client.terminal_shell`, and `client.input_normalizer` now have production `owned_paths` with implementation moved out of the larger connection, message, buffer, render, and input runtimes. The remaining entries stay `production_pending_review` until AppSDK review/promotion completes; they no longer describe a pure target boundary.
+`client.terminal_channel_mux`, `daemon.input_queue`, `daemon.control_gateway`, `daemon.control_center`, `daemon.channel_mux`, `daemon.buffer_publisher`, `daemon.session_catalog`, `daemon.attachment_delivery`, `daemon.mirror_writer`, `client.sparse_buffer`, `client.renderer_window`, `client.dom_renderer`, `client.terminal_shell`, and `client.input_normalizer` have production `owned_paths` with implementation moved out of the larger connection, message, buffer, render, and input runtimes. The v2 AppSDK maps mark these entries active; no runtime path depends on Playground, Generated, or Protected source.
 
 ### 3.2 Central service locators
 
@@ -195,7 +195,8 @@ transport-message projections in `src/server/terminal-attachment-message-runtime
 only these types to `terminal-attachment-message-runtime.ts`; it no longer owns
 attachment delivery business state or wire projection code. The owner preserves
 the existing wire payload/error semantics and never emits a success frame for a
-receipt. This remains `production_pending_review` until AppSDK review/promotion.
+receipt. This slice is active in the current production source and included in
+the AppSDK `active-v1` freeze.
 
 ### 5.9 Daemon file transfer message route physical owner
 
@@ -215,8 +216,8 @@ file-transfer facade directly and no longer mutates
 The message route owner projects pending paste/attach start state and delegates
 exact file/screenshot handling to the existing
 `TerminalFileTransferRuntime` facade, preserving `session_required`, legacy wire
-semantics, and no fallback path. This remains `production_pending_review` until
-AppSDK review/promotion.
+semantics, and no fallback path. This slice is active in the current production
+source and included in the AppSDK `active-v1` freeze.
 
 ### 5.10 Daemon source adapter contract physical owner
 
@@ -228,7 +229,8 @@ readback snapshot shape, and adapter boundary shared by
 normalization. It owns no mirror revision, backend session truth, or client
 policy; `resource.mirror_store`, `resource.active_session`,
 `resource.renderer_window`, and `resource.ui_projection` remain forbidden.
-This remains `production_pending_review` until AppSDK review/promotion.
+This slice is active in the current production source and included in the
+AppSDK `active-v1` freeze.
 
 ### 5.11 Daemon mirror writer physical owner
 
@@ -241,8 +243,8 @@ snapshot to the canonical mirror object. `daemon.mirror_store` remains the
 owner of `resource.mirror_store`, revision, and runtime capture scheduling;
 `daemon.buffer_publisher` remains the owner of per-subscriber publication.
 The writer never owns revision, subscriber state, backend session truth,
-renderer, or client UI truth. This remains `production_pending_review` until
-AppSDK review/promotion.
+renderer, or client UI truth. This slice is active in the current production
+source and included in the AppSDK `active-v1` freeze.
 
 ### 5.12 Shared node/debug contract and observability physical owners
 
@@ -277,8 +279,9 @@ expiring `debug:control` permission; it never owns active session, transport,
 mirror, buffer assembly, sparse buffer, renderer, UI projection, backend
 session, tmux/WezTerm pane, file transfer, remote window, or native store truth.
 
-All four resources remain `production_pending_review` until AppSDK review,
-compile, promotion, Active/Protected, regression, and freeze complete.
+All four resources are active in the current production source and included in
+the AppSDK `active-v1` freeze; product L5 device/package verification remains
+open.
 
 ## 6. Foundation Node Contracts
 

@@ -4,7 +4,19 @@
 - Design ID: `ZTERM-ARCH-V2-DESIGN-001`
 - AppSDK project: `android/.appsdk/project.json`
 - Goal contract: `android/.appsdk/goal.json`
-- Status: confirmed; Phase 0/1, Phase 2, and Phase 3 Playground contracts implemented; Phase 2 production debug HTTP observability slice, Phase 3 production `client.terminal_channel_mux` ownership slice, Phase 4 production `client.buffer_frame_assembly`, `client.wire_ingress`, `client.sparse_buffer`, `client.dom_renderer`, `client.terminal_shell`, and `client.input_normalizer` ownership slices, Phase 5 production daemon control gateway/center, daemon buffer publisher, daemon session catalog, daemon attachment message delivery, daemon source adapter, daemon mirror writer, and daemon file transfer message route slices, Phase 6 plugin host first slice, and Phase 7 debug console, session drawer, file browser, settings update, remote window, quickbar, and terminal shell UI slices implemented, review/promotion pending
+- Status: confirmed; implementation phases 1-7 cutover complete; AppSDK
+  `active-v1` promoted and frozen; `active-v2` source implemented and awaiting
+  review/promotion; product L5 device/package/OTA verification remains open
+
+## Status Update 2026-08-16
+
+The AppSDK lifecycle for `zterm-runtime-v2` is promoted and frozen at
+`active-v1`. This plan was reopened as `active-v2` for AppSDK map/test-config
+truth corrections; the new version is implemented but not yet reviewed or
+promoted. Per-slice "review and promotion remain pending" phrases below apply
+to `active-v2` until a fresh review passes. Product L5 device/package/OTA
+verification also remains open and cannot be closed without an attached
+Android device and explicit release authorization.
 
 ## 1. Goal and Acceptance Criteria
 

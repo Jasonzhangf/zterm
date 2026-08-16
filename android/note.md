@@ -7020,6 +7020,22 @@ if (bufferedBytes >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES) {
 
 # 2026-08-16 AppSDK lifecycle closeout for ZTERM-ARCH-V2-DESIGN-001
 
+# 2026-08-16 active-v2 truth-source and gate fix
+
+- Reopened AppSDK `zterm-runtime-v2` as `active-v2` to fix post-freeze truth
+  sources: resource/function/mainline AppSDK maps marked active, module
+  promotion status aligned with active-v1 freeze, and plan/design/test-design
+  now separate AppSDK lifecycle from open L5 product verification.
+- Added `android/vitest.config.ts` exclusions so `protected/history/**`,
+  `generated/**`, and `playground/**` cannot be scanned as duplicate project
+  tests. `test:feature-registry` dropped from 184 to 92 tests across 12 files.
+- Verified full `pnpm run build` (prebuild gates), daemon mirror close-loop
+  all 9 cases plus replay/strict audit, AppSDK verify ok, and local APK build
+  `app-debug.apk` build 2647 sha256
+  `7a04723d74fb527419f53907a2cf8b41eea8cb89ceb05c5ea8bdfd6f6671ec41`.
+- Remaining: DSH/codex review for active-v2, AppSDK v2 promotion/freeze,
+  real-device L5/OTA, and playground cleanup execution.
+
 - Committed final governance records and AppSDK project contract:
   `c10000a` (`chore(android): finalize AppSDK v2 governance records before
   freeze`).

@@ -1,7 +1,8 @@
 # ZTerm Runtime Architecture v2 Test Design
 
 Design ID: `ZTERM-ARCH-V2-DESIGN-001`
-Phase: 1-3 Playground Contracts + Phase 2/3/4 production ownership slices
+Phase: 1-7 production ownership slices; AppSDK `active-v1` frozen, `active-v2`
+source implemented and awaiting review/promotion
 Experiment: `playground/experiments/zterm-runtime-architecture-v2`
 
 ## Lifecycle
@@ -50,14 +51,14 @@ Experiment: `playground/experiments/zterm-runtime-architecture-v2`
 
 ## Known Gaps
 
-- Production node and debug foundation contracts are bound under
-  `shared.node_contract`, `shared.debug_contract`, `client.observability`, and
-  `daemon.observability`, but review, promotion, Active/Protected, regression,
-  and freeze remain pending. The typed data/control/event/plugin experiments
-  used by other v2 phases remain Playground-only until their own production
-  slices are admitted.
-- `packages/shared/**` changes are limited to the registered debug
-  observability contracts required by the Android client/daemon edge.
+- AppSDK review, promotion, Active, Protected, regression, and freeze are
+  complete for `zterm-runtime-v2` `active-v1`.
+- `active-v2` AppSDK map/test-config corrections are implemented and pass the
+  local gates, but a fresh review/promotion is still required.
+- Product L5 device/package/OTA verification remains open and requires an
+  attached Android device plus explicit release authorization.
+- `packages/shared/**` production changes remain limited to registered typed
+  contracts required by the Android client/daemon edges.
 
 ## Phase 1 Production Foundation Contract Binding
 

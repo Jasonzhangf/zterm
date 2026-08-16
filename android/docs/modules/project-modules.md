@@ -40,7 +40,7 @@ Rules:
 - `status: pending_removal` marks a known violation kept visible on purpose. The count may only go down; fixing the import removes the entry.
 - Module `status: design` means the module is a target-state boundary. Do not report design modules as active truth.
 - `shared.terminal_types` / `shared.connection_types` are active modules. Their `owned_paths` bind the current Android stand-in files under `android/src/lib` together with their packages/shared homes, and the import-graph gate treats both sides as owned source.
-- Registry-level `promotion_status: pending_review` records that architecture modules are active current truth but production promotion/AppSDK review is not complete. A `promoted` value means the project-level promotion record exists; module `status` remains independent because an active architecture module can still be pending production review.
+- Registry-level `promotion_status: pending_review` records that architecture modules are active current truth but production promotion/AppSDK review is not complete. A `promoted` value means the project-level promotion record exists; module `status` remains independent because an active architecture module can still be pending production review. The v2 module registry is currently `promoted`; AppSDK `active-v2` is frozen, while product L5 device/OTA verification remains `pending_review`.
 - `module_dag` is active: the real cross-module import graph must stay acyclic. Ownership and import edges are the physical fix, not weakening the gate.
 
 ## Module DAG Ownership Baseline
