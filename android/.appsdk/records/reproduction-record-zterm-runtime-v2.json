@@ -1,16 +1,16 @@
 {
   "$schema": "https://appsdk.local/contracts/records/reproduction-record.schema.json",
-  "reproduction_id": "REPRO-20260816-ZARCHV2-ACTIVEV3-001",
+  "reproduction_id": "REPRO-20260816-ZARCHV2-ACTIVEV4-001",
   "issue_id": "zterm-runtime-architecture-v2",
   "module_id": "zterm-runtime-v2",
-  "worktree_id": "WT-20260816-ZARCHV2-ACTIVEV3-001",
-  "base_commit": "d626524",
+  "worktree_id": "WT-20260816-ZARCHV2-ACTIVEV4-001",
+  "base_commit": "fe29d3499345f99ee92738278b1e057e58d26efd",
   "input_hashes": [
-    "sha256:ab527a800da96f8f1bb3b038649c5882f3e016dd0eef0749e32bb9a50ae152e8",
-    "git:d626524"
+    "sha256:a26c67f3706fdaf518f60fd7953c4942854bfef63e68c707939a101eb29f9404",
+    "git:fe29d3499345f99ee92738278b1e057e58d26efd"
   ],
-  "baseline_evidence_id": "evid-20260816-zarchv2-activev3-baseline-001",
-  "first_divergence": "AppSDK 0.1.3 fails the pinned 0.1.2 project with MISSING_GOVERNANCE_MAP:module-registry.json and NON_CANONICAL_RECORD_CONTRACT_SET until the project is migrated to the v0.1.3 record contract set and module registry.",
+  "baseline_evidence_id": "evid-20260816-zarchv2-activev4-baseline-001",
+  "first_divergence": "At fe29d34, pnpm prebuild fails two final gates: lifecycle-contract-truth rejects a declared superseded state with no reachable transition after the 0.1.3 scaffold, and feature-registry-truth requires the intentionally external ../wterm/ path to exist in isolated worktrees and CI.",
   "result": "reproduced",
-  "created_at": "2026-08-16T00:30:00Z"
+  "created_at": "2026-08-16T06:30:00Z"
 }

@@ -7312,3 +7312,28 @@ if (bufferedBytes >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES) {
   recorded as non-blocking governance-completeness items.
 - `appsdk verify .` passes at architecture_stable with the final active-v3
   lifecycle records; active-v3 freeze/publish still follows.
+
+# 2026-08-16 final prebuild found two gate failures after freeze
+
+- `pnpm run prebuild` at `fe29d34` failed `test:feature-registry` and
+  `test:feature-registry` lifecycle contract gate.
+- Root causes confirmed in experiment worktrees:
+  - migration `1684f27` removed `admitted -> superseded` from
+    `contracts/goal-clarification-state-machine.json`; project schema still
+    permits `superseded`, and the project gate requires reachable states.
+  - `feature-registry-truth.test.ts` requires `../wterm/` to exist, which is
+    impossible in isolated worktrees and CI; the path is an intentional
+    external runtime boundary.
+- Fix design: `FD-20260816-APPSDK013-FINAL-GATE-01`; awaiting Jason approval
+  before formal edits and AppSDK lifecycle transition.
+
+# 2026-08-16 active-v4 lifecycle bound at architecture_stable
+
+- Candidate `f70f156` fixes the two final prebuild gate failures and the
+  isolated-worktree file-transfer dependency; AppSDK 0.1.3 promotion sequence
+  is bound to active-v4 records at `architecture_stable`.
+- Evidence: `appsdk verify .` PASS, full `pnpm run prebuild` PASS, focused
+  module regression 8 files / 297 tests PASS, relay local smoke PASS with RTC,
+  `pnpm run build` PASS.
+- Remaining before delivery: fresh DSH review on this exact candidate, then
+  active-v4 freeze/publish and final verification.

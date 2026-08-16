@@ -1,25 +1,25 @@
 {
   "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
-  "evidence_id": "evid-20260816-zarchv2-activev4-artifact-001",
+  "evidence_id": "evid-20260816-zarchv2-activev4-positive-001",
   "issue_id": "zterm-runtime-architecture-v2",
   "experiment_id": "zterm-runtime-architecture-v2-active-v4",
-  "phase": "artifact",
-  "kind": "artifact",
+  "phase": "positive_intervention",
+  "kind": "positive_test",
   "source_commit": "f70f156635e6ed48e0f50c30d8aed86fa614a432",
   "artifact_hash": "sha256:45e60a6c9f51069893619ed61a25575ffecdcf2de6b8895f8a1879f6c04da710",
   "scope": {
     "module_id": "zterm-runtime-v2",
     "feature_id": "zterm_runtime_architecture_v2_appsdk013_final_gates",
-    "entrypoint": "appsdk compile-module android --module zterm-runtime-v2"
+    "entrypoint": "vitest run src/lib/lifecycle-contract-truth.test.ts src/lib/feature-registry-truth.test.ts"
   },
   "producer": {
-    "adapter": "appsdk",
-    "identity": "appsdk-0.1.3"
+    "adapter": "codex+vitest",
+    "identity": "codex-zterm-v2-activev4-positive-20260816T070000Z"
   },
   "result": "pass",
   "confidence": 1,
-  "confidence_rationale": "AppSDK 0.1.3 compiled the active-v4 module artifact and verified its source, contract, and public API hashes after the final gate repair.",
-  "created_at": "2026-08-16T06:45:00Z",
+  "confidence_rationale": "Restoring admitted -> superseded makes the lifecycle contract gate pass, and allowing exactly the external ../wterm/ boundary to be absent makes the feature registry gate pass. Removing either intervention restores the baseline failure.",
+  "created_at": "2026-08-16T07:00:00Z",
   "expires_at": "2026-11-14T00:00:00Z",
   "input_hashes": [
     "sha256:45e60a6c9f51069893619ed61a25575ffecdcf2de6b8895f8a1879f6c04da710",

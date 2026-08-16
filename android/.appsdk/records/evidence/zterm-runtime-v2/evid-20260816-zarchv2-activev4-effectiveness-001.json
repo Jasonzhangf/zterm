@@ -1,0 +1,29 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "evidence_id": "evid-20260816-zarchv2-activev4-effectiveness-001",
+  "issue_id": "zterm-runtime-architecture-v2",
+  "experiment_id": "zterm-runtime-architecture-v2-active-v4",
+  "phase": "post_architecture_effectiveness",
+  "kind": "sample_replay",
+  "source_commit": "f70f156635e6ed48e0f50c30d8aed86fa614a432",
+  "artifact_hash": "sha256:45e60a6c9f51069893619ed61a25575ffecdcf2de6b8895f8a1879f6c04da710",
+  "scope": {
+    "module_id": "zterm-runtime-v2",
+    "feature_id": "zterm_runtime_architecture_v2_appsdk013_final_gates",
+    "entrypoint": "pnpm run prebuild && appsdk verify ."
+  },
+  "producer": {
+    "adapter": "codex+appsdk",
+    "identity": "codex-zterm-v2-activev4-effectiveness-20260816T073000Z"
+  },
+  "result": "pass",
+  "confidence": 1,
+  "confidence_rationale": "After architecture review, unchanged candidate source replays the baseline final-gate inputs and passes the targeted lifecycle/feature-registry tests, AppSDK verify, and the module regression/build gates.",
+  "created_at": "2026-08-16T07:30:00Z",
+  "expires_at": "2026-11-14T00:00:00Z",
+  "input_hashes": [
+    "sha256:a26c67f3706fdaf518f60fd7953c4942854bfef63e68c707939a101eb29f9404",
+    "git:fe29d3499345f99ee92738278b1e057e58d26efd"
+  ],
+  "scope_hash": "sha256:609824e13a30f94a639027b649769646818180c4bc299076380396be52cbbd1e"
+}
