@@ -2538,3 +2538,21 @@ Tags: #mempalace #source-only-search #generated-artifacts #zterm
   forbids executing. Prebuild/AppSDK verify and DSH review stay
   authorization-blocked until Jason chooses pinned-binary verification or an
   explicit reviewed v0.1.3 migration.
+
+# 2026-08-16 AppSDK 0.1.2 restore and final gate evidence
+
+- Restored the pinned global AppSDK from
+  `/Users/fanzhang/.local/lib/appsdk/0.1.2/appsdk` to
+  `/Users/fanzhang/.local/bin/appsdk`; SHA
+  `3685149eab60ed887737e1ff0c9a6ddbbd0add32424d40595e27296ebf7b8686` matches
+  `sdk.lock` and CI. The replaced 0.1.3 remains at
+  `~/.local/lib/appsdk/0.1.3/appsdk` and `/tmp/appsdk-0.1.3-backup`.
+- `appsdk verify android` returns `ok:true`; `pnpm run build` passed all
+  prebuild gates, feature registry 92/92, terminal regression 841, relay
+  smoke, type-check, and Vite build.
+- Installed APK/daemon still match the verified source artifacts; the local
+  `~/.zterm/updates/latest.json` is stale because it points to 2650 APK SHA
+  `06dc7da060f86001a3a5d45dbfb1e6f6ba687cafbb1984786d73e2164930da75` while the
+  verified installed `app-debug.apk` SHA is
+  `3198d6f69f83bcdb84e1303ed110c89e78856ddbd41b9ce1e40791c675100106`. OTA
+  republish and playground cleanup remain authorization-gated.

@@ -1,0 +1,30 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "evidence_id": "EVID-20260816-ZARCHV2-FINAL-APPSDK-GATE-001",
+  "issue_id": "zterm-runtime-architecture-v2",
+  "experiment_id": "zterm-runtime-architecture-v2-final-verification",
+  "kind": "gate",
+  "source_commit": "9d14fbd6de7443ed409bdecfc12b937cc1eb0689",
+  "artifact_hash": "sha256:3685149eab60ed887737e1ff0c9a6ddbbd0add32424d40595e27296ebf7b8686",
+  "scope": {
+    "module_id": "zterm-runtime-v2",
+    "feature_id": "zterm_runtime_architecture_v2_closeout",
+    "entrypoint": "/Users/fanzhang/.local/bin/appsdk verify android && pnpm run build"
+  },
+  "producer": {
+    "adapter": "codex",
+    "identity": "codex-zterm-v2-final-appsdk-gate-20260816T035800Z"
+  },
+  "result": "pass",
+  "confidence": 1,
+  "confidence_rationale": "Restored pinned global AppSDK 0.1.2 matching sdk.lock digest 3685149eab60ed887737e1ff0c9a6ddbbd0add32424d40595e27296ebf7b8686; appsdk verify android returned ok:true; full pnpm run build passed including AppSDK verify, feature registry 92/92, all wired architecture/plugin/UI/daemon gates, relay smoke, type-check, and Vite build.",
+  "created_at": "2026-08-16T03:58:16Z",
+  "expires_at": "2026-11-16T03:58:16Z",
+  "input_hashes": [
+    "sha256:3685149eab60ed887737e1ff0c9a6ddbbd0add32424d40595e27296ebf7b8686",
+    "sha256:f22cc651c866685e7c55a52f9838b5fac1b19d65044fec507cb574b3faee35f2",
+    "sha256:c5b906ae9d4be7cd62067728fa8c9b8b7ece80d0c7fb397c439e7de0d52a22a5",
+    "sha256:e04ba0234d8e7260bac6d90f2a471846bc8473c7f6d7b6338eb355098c3903e0"
+  ],
+  "scope_hash": "sha256:f22cc651c866685e7c55a52f9838b5fac1b19d65044fec507cb574b3faee35f2"
+}

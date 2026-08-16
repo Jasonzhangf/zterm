@@ -7282,3 +7282,23 @@ if (bufferedBytes >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES) {
   v0.1.2 -> v0.1.3 migration before use. Using `.appsdk/sdk.bin` remains
   forbidden by the original goal instruction, so prebuild/AppSDK verify and
   DSH review remain authorization-blocked.
+
+# 2026-08-16 AppSDK binary drift recheck
+
+- Reconfirmed global `/Users/fanzhang/.local/bin/appsdk` is v0.1.3
+  (`sha256:e3c36ae25c94d0c01c81cfe084fac7de8dc577f5ba3b8f91ae18b9d0587631a5`);
+  project `sdk.lock` and CI still pin v0.1.2
+  (`sha256:3685149eab60ed887737e1ff0c9a6ddbbd0add32424d40595e27296ebf7b8686`).
+- In a temporary detached worktree at `9d14fbd`, v0.1.3 `appsdk init`
+  installed the new contracts/docs/rules and added
+  `.appsdk/maps/module-registry.json`, but did not update
+  `.appsdk/project.json` record contract set or `sdk.lock`; v0.1.3 verify
+  still fails with `NON_CANONICAL_RECORD_CONTRACT_SET`. A real v0.1.3
+  migration therefore needs reviewed manual project contract/lock/record
+  migration, not a tool auto-upgrade.
+- The exact pinned v0.1.2 binary is already available at
+  `/Users/fanzhang/.local/lib/appsdk/0.1.2/appsdk` with the same SHA, so the
+  low-risk path remains restoring the global `/Users/fanzhang/.local/bin/appsdk`
+  after Jason authorization.
+- Decision still open: A = restore global v0.1.2; B = reviewed v0.1.3
+  migration. DSH `dsh-review` MCP was not exposed in this continuation.
