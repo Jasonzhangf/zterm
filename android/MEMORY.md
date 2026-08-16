@@ -21,6 +21,10 @@
   `VERDICT: PASS`; clean-checkout AppSDK verify and full Android prebuild both
   passed for that commit. Product L5 and playground removal remain
   `pending_authorization`.
+- Device `100.104.163.65:5555` (PLZ110) is reachable again and still runs the
+  older 2647 APK; current source APK is 2647 with SHA-256
+  `7a04723d...`, while OTA channels serve 2646/2645. L5 install/verify, OTA
+  publish, and playground physical removal still need explicit Jason approval.
 
 ## 2026-08-12 Herdr adapter integration boundary
 

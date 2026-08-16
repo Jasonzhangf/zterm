@@ -7209,3 +7209,22 @@ if (bufferedBytes >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES) {
   touch business source, registries, edge/owner maps, or payload surfaces.
 - Remaining: product L5 real-device/APK/OTA verification and playground
   cleanup execution still require explicit Jason authorization.
+
+# 2026-08-16 L5 preflight: device online, OTA gap confirmed
+
+- ADB wireless device `100.104.163.65:5555` (PLZ110, Android 16, arm64) is
+  online again; `adb connect 100.104.163.65:5555` succeeded.
+- Device currently runs `com.zterm.android` `0.1.3.2647` /
+  `versionCode=1100026470`; current source APK is also build 2647 but has a
+  newer SHA-256 (`7a04723d74fb527419f53907a2cf8b41eea8cb89ceb05c5ea8bdfd6f6671ec41`),
+  so a real-device run must install the current APK with `adb install -r`.
+- OTA channels are stale: local `127.0.0.1:3333` and Tailscale
+  `100.66.1.82:3333` serve `0.1.3.2646`; public Relay serves `0.1.3.2645`.
+  `release:verify` passes only for the stale `0.1.3.2646` assets.
+- Playground cleanup scope is small: `android/playground/experiments/zterm-runtime-architecture-v2`
+  is 100K / 18 files, and the AppSDK cleanup record remains
+  `pending_authorization` with `removed_paths: []`.
+- Next action requires explicit Jason authorization for: install/verify the
+  current APK on this device, run `terminal-real-device-evidence.ts`, publish
+  the local/Tailscale/Relay OTA update for `0.1.3.2647`, and physically remove
+  the playground directory.
