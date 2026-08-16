@@ -1,8 +1,8 @@
 # ZTerm Runtime Architecture v2 Test Design
 
 Design ID: `ZTERM-ARCH-V2-DESIGN-001`
-Phase: 1-7 production ownership slices; AppSDK `active-v1` frozen, `active-v2`
-source implemented and awaiting review/promotion
+Phase: 1-7 production ownership slices; AppSDK active-version and lifecycle
+state are authoritative in `.appsdk/project.json` and `.appsdk/records/**`
 Experiment: `playground/experiments/zterm-runtime-architecture-v2`
 
 ## Lifecycle

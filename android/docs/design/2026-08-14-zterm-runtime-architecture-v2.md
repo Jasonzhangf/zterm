@@ -1,8 +1,9 @@
 # ZTerm Runtime Architecture v2
 
 - Design ID: `ZTERM-ARCH-V2-DESIGN-001`
-- Status: confirmed; AppSDK `active-v1` promoted and frozen, `active-v2`
-  source implemented and awaiting review/promotion
+- Status: confirmed; implementation is complete. AppSDK active-version and
+  lifecycle state are authoritative in `.appsdk/project.json`,
+  `.appsdk/records/**`, and `active/lib/zterm-runtime-v2/current.json`.
 - Product verification status: L5 device/package/OTA verification remains open
 - Confirmed by: Jason
 - Confirmed at: `2026-08-15T00:45:30Z`

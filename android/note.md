@@ -7050,6 +7050,23 @@ if (bufferedBytes >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES) {
   `sha256:d5f1af7b40ce4d7527a467fedcaadf0b916c2adc15aaf33398f39d3b7acfa084`,
   module regression 297/297.
 
+# 2026-08-16 active-v2 docs finalized for lifecycle records
+
+- DSH r2 reviewed the P1 fix commit `873a384` and returned `VERDICT: PASS`
+  with no P0/P1/P2 findings.
+- Updated design/plan/test-design/project-modules to stop duplicating AppSDK
+  active-version state; `.appsdk/project.json`, `.appsdk/records/**`, and
+  `active/lib/zterm-runtime-v2/current.json` are the active truth.
+- Rebuilt module after docs update: artifact
+  `sha256:d16abe544615e2e67147ada6b79dc918330ecf47ae31f4c10bbe67784e26d5b9`,
+  public API
+  `sha256:6ebb51b0b4d2b37fde0ae98859db80d432b68ee2bf0d8591b9b9e6fb470e55fd`,
+  source
+  `sha256:aefab479f419208f5293e65ab05d167bbcf8a9875d3292b81fb886783dc1e9cb`.
+- The first compile rerun hit one flaky FileTransferSheet test under the full
+  prebuild; focused and full-file reruns passed, and the next full compile
+  passed.
+
 - Committed final governance records and AppSDK project contract:
   `c10000a` (`chore(android): finalize AppSDK v2 governance records before
   freeze`).

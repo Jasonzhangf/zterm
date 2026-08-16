@@ -4,17 +4,17 @@
 - Design ID: `ZTERM-ARCH-V2-DESIGN-001`
 - AppSDK project: `android/.appsdk/project.json`
 - Goal contract: `android/.appsdk/goal.json`
-- Status: confirmed; implementation phases 1-7 cutover complete; AppSDK
-  `active-v1` promoted and frozen; `active-v2` source implemented and awaiting
-  review/promotion; product L5 device/package/OTA verification remains open
+- Status: confirmed; implementation phases 1-7 cutover complete. AppSDK
+  active-version and lifecycle state are authoritative in `.appsdk/project.json`
+  and `.appsdk/records/**`; product L5 device/package/OTA verification remains
+  open
 
 ## Status Update 2026-08-16
 
-The AppSDK lifecycle for `zterm-runtime-v2` is promoted and frozen at
-`active-v1`. This plan was reopened as `active-v2` for AppSDK map/test-config
-truth corrections; the new version is implemented but not yet reviewed or
-promoted. Per-slice "review and promotion remain pending" phrases below apply
-to `active-v2` until a fresh review passes. Product L5 device/package/OTA
+This plan no longer duplicates AppSDK active-version state. The current
+version and frozen archive are tracked by `.appsdk/project.json`,
+`.appsdk/records/**`, `active/lib/zterm-runtime-v2/current.json`, and
+`protected/history-versions/zterm-runtime-v2/`. Product L5 device/package/OTA
 verification also remains open and cannot be closed without an attached
 Android device and explicit release authorization.
 
