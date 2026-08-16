@@ -66,6 +66,35 @@ describe('session-render-buffer-store', () => {
     expect(store.getSnapshot('s1').buffer).not.toBe(second);
   });
 
+  it('reuses unchanged source rows by reference without reading their cells again', () => {
+    const store = createSessionRenderBufferStore();
+    let charReads = 0;
+    const expensiveCell = {} as TerminalCell;
+    Object.defineProperties(expensiveCell, {
+      char: {
+        get() {
+          charReads += 1;
+          return 'b'.codePointAt(0) || 32;
+        },
+        enumerable: true,
+      },
+      fg: { value: 256, enumerable: true },
+      bg: { value: 256, enumerable: true },
+      flags: { value: 0, enumerable: true },
+      width: { value: 1, enumerable: true },
+    });
+
+    const unchangedRow = [expensiveCell];
+    const first = makeSnapshot([[makeCell('a')], unchangedRow], 1);
+    expect(store.setBuffer('s1', first)).toBe(true);
+
+    charReads = 0;
+    const second = makeSnapshot([[makeCell('c')], unchangedRow], 2);
+    expect(store.setBuffer('s1', second)).toBe(true);
+    expect(charReads).toBe(0);
+    expect(store.getSnapshot('s1').buffer.lines[1]).not.toBe(second.lines[1]);
+  });
+
   it('keeps an immutable render snapshot after publish even if the source snapshot mutates later', () => {
     const store = createSessionRenderBufferStore();
     const snapshot = makeSnapshot([[makeCell('a')], [makeCell('b')]], 1);
@@ -87,6 +116,8 @@ describe('session-render-buffer-store', () => {
     const snapshot = makeSnapshot([[makeCell('a')]], 1);
 
     expect(store.setBuffer('s1', snapshot, { immutableProjection: true })).toBe(true);
+    // This is the deterministic negative guard for the production path: if the
+    // immutable projection ever deep-clones rows, this assertion fails.
     expect(store.getSnapshot('s1').buffer.lines).toBe(snapshot.lines);
     expect(store.getSnapshot('s1').buffer.lines[0]).toBe(snapshot.lines[0]);
   });

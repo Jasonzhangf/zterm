@@ -298,13 +298,14 @@ Out of Scope：
 
 已应用修复：
 
-- `session-render-buffer-store.ts`：物理删除 per-session source-row clone
-  cache。非 immutable publish 始终 clone rows/gapRanges/cursor，避免 previous
-  snapshot 可能是 immutable live alias；immutable 生产路径不再为每个 commit
-  构造 rows-length `Map`。
+- `session-render-buffer-store.ts`：source-row clone cache 只存在于非
+  immutable publish 路径；cache 不写 identity、不复用 previous snapshot row，
+  避免 immutable -> non-immutable live alias。immutable 生产路径不再为每个
+  commit 构造 rows-length `Map`。
 - `session-render-buffer-store.test.ts`：mixed-mode 反例测试覆盖 row、gap
-  range、cursor 不别名；16ms perf guard 改为使用 `immutableProjection: true`
-  测量真实生产投影路径。
+  range、cursor 不别名；16ms perf guard 使用 `immutableProjection: true`
+  测量真实生产投影路径，并保留生产 immutable 路径与非 immutable clone 路径
+  的确定性 row-identity 负向断言。
 - 临时文件 `android/src/tmp-perf-bench.test.ts` 已删除。
 
 当前验证（candidate 提交前）：

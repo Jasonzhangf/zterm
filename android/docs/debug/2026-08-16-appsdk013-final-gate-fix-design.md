@@ -118,14 +118,16 @@ First divergence:
 
 Formal fix scope:
 
-- `session-render-buffer-store.ts`: remove the per-session source-row clone
-  cache entirely. Non-immutable publishes always clone rows, gap ranges, and
-  cursor because the previous snapshot may have been an immutable projection
-  that aliases live source data. Immutable production publishes do not allocate
-  a per-commit rows-length `Map`.
+- `session-render-buffer-store.ts`: keep a source-row clone cache only on the
+  non-immutable publish path. The cache never stores immutable identity entries
+  and never reuses a previous snapshot row object, so mixed-mode publishes
+  cannot alias live source data. Immutable production publishes do not
+  allocate a per-commit rows-length `Map`.
 - `session-render-buffer-store.test.ts`: keep the mixed-mode test proving a
   non-immutable publish after an immutable publish does not alias the live
   source row, gap ranges, or cursor. Move the 16ms timing guard onto the real
-  production projection path by publishing with `immutableProjection: true`.
+  production projection path by publishing with `immutableProjection: true`,
+  and keep deterministic row-identity guards for both the production immutable
+  path and the non-immutable clone path.
 - The 16ms timing guard is unchanged.
 - `tmp-perf-bench.test.ts` is removed before the candidate commit.
