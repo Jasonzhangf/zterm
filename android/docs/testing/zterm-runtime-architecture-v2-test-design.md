@@ -3,8 +3,8 @@
 Design ID: `ZTERM-ARCH-V2-DESIGN-001`
 Phase: 1-7 production ownership slices; AppSDK active-version and lifecycle
 state are authoritative in `.appsdk/project.json` and `.appsdk/records/**`
-active-v2 is implemented, DSH review R4 PASS, but not yet promoted/frozen; see
-`.appsdk/records/**`
+active-v2 is implemented, DSH review R4 PASS, AppSDK promoted/frozen and
+active-v2 published; see `.appsdk/records/**`
 Experiment: `playground/experiments/zterm-runtime-architecture-v2`
 
 ## Lifecycle

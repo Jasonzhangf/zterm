@@ -7138,3 +7138,16 @@ if (bufferedBytes >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES) {
 - Added the non-blocking P2 doc pointer that active-v2 is implemented but not
   yet promoted/frozen.
 - `appsdk verify android` passes for the recreated record graph.
+
+# 2026-08-16 active-v2 frozen and published
+
+- `appsdk promote-module android --module zterm-runtime-v2 --to frozen`
+  passed; module stage moved to `frozen` and protected archive was created at
+  `protected/history/zterm-runtime-v2/`.
+- `appsdk publish-active android --module zterm-runtime-v2 --version active-v2`
+  passed; `active/lib/zterm-runtime-v2/current.json` now binds active-v2 to
+  `sha256:ab527a800da96f8f1bb3b038649c5882f3e016dd0eef0749e32bb9a50ae152e8`.
+- Final `appsdk verify android` returns `ok:true`.
+- Remaining: product L5 real-device/APK/OTA verification and playground
+  cleanup execution require explicit Jason authorization; `adb devices` has no
+  device in this session.

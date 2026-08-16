@@ -1,0 +1,3156 @@
+{
+  "schema_version": 1,
+  "description": "Global feature owner registry for zterm Android. Every feature_id must have one owner surface and explicit gates before code changes.",
+  "features": [
+    {
+      "feature_id": "terminal.copy_mode",
+      "title": "Terminal copy mode and selection lifecycle",
+      "domain": "terminal-ui",
+      "owners": [
+        "src/pages/useTerminalPageCopyRuntime.ts",
+        "native/android/app/src/main/java/com/zterm/android/MainActivity.java"
+      ],
+      "allowed_paths": [
+        "src/pages/useTerminalPageCopyRuntime.ts",
+        "src/pages/TerminalPage.tsx",
+        "src/components/TerminalView.tsx",
+        "src/components/terminal/VisibleRow.tsx",
+        "src/components/terminal/TerminalHeader.tsx",
+        "native/android/app/src/main/java/com/zterm/android/MainActivity.java"
+      ],
+      "forbidden_paths": [
+        "src/server/",
+        "packages/shared/src/connection/"
+      ],
+      "required_gates": [
+        "src/pages/useTerminalPageCopyRuntime.test.tsx",
+        "src/components/terminal/system-copy-state-machine.test.tsx",
+        "src/components/terminal/system-copy-longpress-regression.test.tsx",
+        "src/components/TerminalView.selection-guard.test.tsx",
+        "src/components/terminal/VisibleRow.selection.test.tsx"
+      ],
+      "truth_sources": [
+        "docs/feature-gates.md",
+        "docs/ui-slices.md"
+      ]
+    },
+    {
+      "feature_id": "terminal.quickbar",
+      "title": "Terminal floating quickbar and split controls",
+      "domain": "terminal-ui",
+      "owners": [
+        "src/components/terminal/TerminalQuickBar.tsx",
+        "src/hooks/useShortcutActionStorage.ts",
+        "src/lib/terminal-shortcut-actions.ts",
+        "src/lib/plugin-quickbar/quickbar-contract.ts",
+        "src/lib/plugin-host/quickbar-ui-plugin.tsx",
+        "packages/shared/src/shortcuts/terminal-shortcut-composer.ts"
+      ],
+      "allowed_paths": [
+        "src/components/terminal/TerminalQuickBar.tsx",
+        "src/components/terminal/TerminalQuickBar.test.tsx",
+        "src/components/terminal/terminal-quickbar-helpers.tsx",
+        "src/lib/plugin-quickbar/",
+        "src/lib/plugin-host/quickbar-ui-plugin.tsx",
+        "src/lib/plugin-host/plugin-host-runtime.test.ts",
+        "src/hooks/useShortcutActionStorage.ts",
+        "src/hooks/useShortcutActionStorage.test.tsx",
+        "src/lib/terminal-shortcut-actions.ts",
+        "src/pages/TerminalPage.tsx",
+        "src/pages/TerminalPage.render-isolation.test.tsx",
+        "src/App.tsx",
+        "src/App.dynamic-refresh.test.tsx",
+        "src/pages/TerminalPageQuickBarAssembly.tsx",
+        "src/pages/useTerminalPageOverlays.ts",
+        "src/hooks/useTerminalWorkspace.ts",
+        "src/lib/terminal-layout-profile.ts",
+        "packages/shared/src/shortcuts/terminal-shortcut-composer.ts",
+        "packages/shared/src/shortcuts/terminal-shortcut-composer.test.ts"
+      ],
+      "forbidden_paths": [
+        "src/server/",
+        "packages/shared/src/connection/"
+      ],
+      "required_gates": [
+        "src/components/terminal/TerminalQuickBar.test.tsx",
+        "src/lib/plugin-quickbar/quickbar-ui-ownership.test.ts",
+        "src/lib/plugin-host/plugin-host-runtime.test.ts",
+        "src/pages/TerminalPage.render-isolation.test.tsx",
+        "src/App.dynamic-refresh.test.tsx",
+        "src/hooks/useShortcutActionStorage.test.tsx",
+        "../packages/shared/src/shortcuts/terminal-shortcut-composer.test.ts",
+        "src/pages/TerminalPage.real-quickbar-split.test.tsx",
+        "src/hooks/useTerminalWorkspace.test.tsx"
+      ],
+      "truth_sources": [
+        "docs/ui-slices.md",
+        "docs/testing/terminal-quickbar-shortcut-order-test-design.md",
+        "docs/decisions/0001-cross-platform-layout-profile.md"
+      ]
+    },
+    {
+      "feature_id": "terminal.keyboard_ime",
+      "title": "Terminal keyboard, IME lift, and viewport-safe shell lifecycle",
+      "domain": "terminal-ui",
+      "owners": [
+        "src/pages/terminal-keyboard-lift.ts",
+        "src/pages/TerminalPage.tsx",
+        "src/pages/TerminalPageStageShell.tsx",
+        "src/components/terminal/TerminalQuickBar.tsx",
+        "src/lib/android-ime-anchor-truth.test.ts",
+        "native/android/app/src/main/java/com/zterm/android/ImeAnchorPlugin.java",
+        "native/android/app/src/main/java/com/zterm/android/ImeAnchorInputLogic.java"
+      ],
+      "allowed_paths": [
+        "src/pages/terminal-keyboard-lift.ts",
+        "src/pages/terminal-keyboard-lift.test.ts",
+        "src/pages/TerminalPage.tsx",
+        "src/pages/TerminalPageStageShell.tsx",
+        "src/pages/TerminalPage.android-ime.test.tsx",
+        "src/pages/TerminalPage.lifecycle-cleanup.test.tsx",
+        "src/pages/TerminalPageStageShell.pane-stage.test.tsx",
+        "scripts/session-preview-source-dom-gate.tsx",
+        "src/components/terminal/TerminalQuickBar.tsx",
+        "src/components/terminal/TerminalQuickBar.test.tsx",
+        "src/plugins/ImeAnchorPlugin.ts",
+        "src/plugins/ScreenOrientationPlugin.ts",
+        "src/lib/android-ime-anchor-truth.test.ts",
+        "native/android/app/src/main/java/com/zterm/android/ImeAnchorPlugin.java",
+        "native/android/app/src/main/java/com/zterm/android/ScreenOrientationPlugin.java",
+        "native/android/app/src/main/java/com/zterm/android/ImeAnchorInputLogic.java",
+        "native/android/app/src/test/java/com/zterm/android/ImeAnchorInputLogicTest.java",
+        "native/android/app/src/test/java/com/zterm/android/ImeAnchorHardwareKeyMappingTest.java"
+      ],
+      "forbidden_paths": [
+        "src/server/",
+        "packages/shared/src/connection/"
+      ],
+      "required_gates": [
+        "src/pages/terminal-keyboard-lift.test.ts",
+        "src/pages/TerminalPage.android-ime.test.tsx",
+        "src/pages/TerminalPage.lifecycle-cleanup.test.tsx",
+        "src/pages/TerminalPageStageShell.pane-stage.test.tsx",
+        "src/components/terminal/TerminalQuickBar.test.tsx",
+        "src/lib/android-ime-anchor-truth.test.ts",
+        "native/android/app/src/test/java/com/zterm/android/ImeAnchorInputLogicTest.java",
+        "native/android/app/src/test/java/com/zterm/android/ImeAnchorHardwareKeyMappingTest.java"
+      ],
+      "truth_sources": [
+        "docs/architecture.md",
+        "docs/feature-gates.md",
+        "docs/testing/terminal-keyboard-ime-test-design.md"
+      ]
+    },
+    {
+      "feature_id": "terminal.schedule",
+      "title": "Scheduled terminal send lifecycle",
+      "domain": "daemon-automation",
+      "owners": [
+        "src/server/schedule-engine.ts",
+        "src/server/schedule-store.ts",
+        "src/server/schedule-dispatch.ts"
+      ],
+      "allowed_paths": [
+        "src/server/schedule-engine.ts",
+        "src/server/schedule-store.ts",
+        "src/server/schedule-dispatch.ts",
+        "src/pages/TerminalPage.tsx",
+        "packages/shared/src/schedule/"
+      ],
+      "forbidden_paths": [
+        "src/components/TerminalView.tsx",
+        "src/components/terminal/TerminalQuickBar.tsx"
+      ],
+      "required_gates": [
+        "src/server/schedule-engine.test.ts",
+        "src/server/schedule-store.test.ts",
+        "src/server/schedule-dispatch.test.ts",
+        "src/server/server.schedule-truth.test.ts",
+        "src/pages/TerminalPage.schedule-target.test.tsx"
+      ],
+      "truth_sources": [
+        "docs/architecture.md",
+        "docs/dev-workflow.md"
+      ]
+    },
+    {
+      "feature_id": "terminal.remote_screenshot",
+      "title": "Remote screenshot capture, transfer, preview, and save",
+      "domain": "daemon-file-transfer",
+      "owners": [
+        "src/lib/remote-screenshot-runtime.ts",
+        "src/components/terminal/RemoteWindowOverlay.tsx",
+        "src/server/terminal-file-transfer-list-runtime.ts",
+        "src/server/terminal-message-control-runtime.ts"
+      ],
+      "allowed_paths": [
+        "src/lib/remote-screenshot-runtime.ts",
+        "src/lib/file-transfer-message-runtime.ts",
+        "src/components/terminal/RemoteWindowOverlay.tsx",
+        "src/pages/TerminalPage.tsx",
+        "src/server/terminal-message-control-runtime.ts",
+        "src/server/terminal-file-transfer-list-runtime.ts",
+        "src/server/terminal-file-transfer-runtime.ts"
+      ],
+      "forbidden_paths": [
+        "src/components/TerminalView.tsx"
+      ],
+      "required_gates": [
+        "src/lib/remote-screenshot-runtime.test.ts",
+        "src/pages/TerminalPage.remote-screenshot.test.tsx",
+        "src/components/terminal/RemoteWindowOverlay.test.tsx",
+        "src/pages/TerminalPage.remote-window-overlay.test.tsx",
+        "src/server/terminal-file-transfer-list-runtime.test.ts",
+        "src/server/remote-screenshot-daemon-blackbox.test.ts",
+        "src/server/server.file-transfer-truth.test.ts"
+      ],
+      "truth_sources": [
+        "docs/architecture.md",
+        "docs/dev-workflow.md",
+        "docs/decisions/2026-07-19-remote-window-stream-truth.md",
+        "docs/testing/remote-window-stream-test-design.md"
+      ]
+    },
+    {
+      "feature_id": "desktop.remote_window_stream",
+      "title": "Remote app/window and iTerm2 pane video stream",
+      "domain": "remote-desktop",
+      "owners": [
+        "docs/decisions/2026-07-19-remote-window-stream-truth.md",
+        "src/server/remote-window-stream-daemon.ts",
+        "src/components/terminal/RemoteWindowOverlay.tsx",
+        "src/components/terminal/WindowGroupLayout.tsx",
+        "src/lib/remote-window-overlay-runtime.ts",
+        "src/lib/remote-window-message-runtime.ts",
+        "src/lib/remote-window-receiver-runtime.ts",
+        "src/contexts/session-context-remote-window-runtime.ts"
+      ],
+      "allowed_paths": [
+        "docs/decisions/2026-07-19-remote-window-stream-truth.md",
+        "docs/decisions/2026-07-29-remote-window-canvas-pipeline.md",
+        "docs/decisions/2026-08-09-remote-window-dual-stream-design.md",
+        "docs/testing/remote-window-stream-test-design.md",
+        "docs/testing/remote-window-canvas-pipeline-test-design.md",
+        "docs/testing/remote-window-dual-stream-test-design.md",
+        "docs/testing/remote-window-touch-action-sop.md",
+        "docs/resource-registry.json",
+        "docs/resource-map.md",
+        "docs/function-map.md",
+        "docs/feature-gates.md",
+        "docs/wiki/mainline-source.md",
+        "docs/wiki/mainline-call-map.json",
+        "docs/architecture.md",
+        "packages/shared/src/connection/protocol.ts",
+        "src/App.tsx",
+        "src/App.dynamic-refresh.test.tsx",
+        "src/App.relay-stream-lifecycle.test.tsx",
+        "src/lib/types.ts",
+        "src/lib/remote-window-message-runtime.ts",
+        "src/lib/remote-window-message-runtime.test.ts",
+        "src/lib/remote-window-overlay-runtime.ts",
+        "src/lib/remote-window-overlay-runtime.test.ts",
+        "src/lib/remote-window-touch-action-runtime.ts",
+        "src/lib/remote-window-touch-action-runtime.test.ts",
+        "src/lib/remote-window-touch-action-sop.test.ts",
+        "src/lib/remote-window-receiver-runtime.ts",
+        "src/lib/remote-window-receiver-runtime.test.ts",
+        "src/lib/remote-window-video-quality.ts",
+        "src/lib/remote-window-video-quality.test.ts",
+        "src/lib/remote-window-dual-stream-runtime.ts",
+        "src/lib/remote-window-dual-stream-runtime.test.ts",
+        "src/contexts/session-context-provider-runtime.ts",
+        "src/contexts/SessionContext.tsx",
+        "src/contexts/session-context-core.ts",
+        "src/contexts/session-context-interaction-runtime.ts",
+        "src/contexts/session-context-transfer-runtime.ts",
+        "src/contexts/session-context-transfer-runtime.test.ts",
+        "src/contexts/session-context-lifecycle.ts",
+        "src/contexts/session-context-lifecycle.test.tsx",
+        "src/contexts/session-context-message-assemblies.ts",
+        "src/contexts/session-context-message-assemblies.test.ts",
+        "src/contexts/session-context-provider-core-assemblies.ts",
+        "src/contexts/session-context-provider-facade-assemblies.ts",
+        "src/contexts/session-context-provider-runtime.ts",
+        "src/contexts/session-context-public-facade-runtime.ts",
+        "src/contexts/session-context-remote-window-runtime.ts",
+        "src/contexts/session-context-remote-window-runtime.test.ts",
+        "src/contexts/session-context-socket-message-runtime.ts",
+        "src/contexts/session-context-socket-message-runtime.test.ts",
+        "src/components/terminal/RemoteWindowOverlay.tsx",
+        "src/components/terminal/RemoteWindowOverlay.test.tsx",
+        "src/components/terminal/WindowGroupLayout.tsx",
+        "src/components/terminal/WindowGroupLayout.test.tsx",
+        "src/pages/TerminalPage.tsx",
+        "src/pages/TerminalPage.remote-window-overlay.test.tsx",
+        "src/server/server.ts",
+        "src/server/terminal-file-transfer-binary-runtime.ts",
+        "src/server/terminal-file-transfer-binary-runtime.test.ts",
+        "src/server/terminal-file-transfer-types.ts",
+        "src/server/terminal-message-runtime.ts",
+        "src/server/terminal-message-runtime.test.ts",
+        "src/server/remote-window-stream-daemon.ts",
+        "src/server/remote-window-stream-daemon.test.ts"
+      ],
+      "forbidden_paths": [
+        "src/components/TerminalView.tsx",
+        "src/lib/session-render-gate.ts",
+        "src/contexts/session-context-buffer-runtime.ts",
+        "src/server/terminal-mirror-runtime.ts",
+        "src/lib/remote-screenshot-runtime.ts"
+      ],
+      "required_gates": [
+        "src/lib/feature-registry-truth.test.ts",
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/function-map-resource-truth.test.ts",
+        "src/lib/mainline-resource-call-map.test.ts",
+        "src/lib/function-wiki-truth.test.ts",
+        "src/lib/remote-window-message-runtime.test.ts",
+        "src/lib/remote-window-overlay-runtime.test.ts",
+        "src/lib/remote-window-touch-action-runtime.test.ts",
+        "src/lib/remote-window-receiver-runtime.test.ts",
+        "src/lib/remote-window-video-quality.test.ts",
+        "src/lib/remote-window-touch-action-sop.test.ts",
+        "src/components/terminal/RemoteWindowOverlay.test.tsx",
+        "src/pages/TerminalPage.remote-window-overlay.test.tsx",
+        "src/contexts/session-context-transfer-runtime.test.ts",
+        "src/contexts/session-context-remote-window-runtime.test.ts",
+        "src/contexts/session-context-socket-message-runtime.test.ts",
+        "src/server/terminal-file-transfer-binary-runtime.test.ts",
+        "src/server/remote-window-stream-daemon.test.ts",
+        "src/server/terminal-message-runtime.test.ts",
+        "src/lib/remote-window-dual-stream-runtime.test.ts",
+        "docs/testing/remote-window-stream-test-design.md",
+        "docs/testing/remote-window-canvas-pipeline-test-design.md",
+        "docs/testing/remote-window-dual-stream-test-design.md"
+      ],
+      "truth_sources": [
+        "docs/architecture.md",
+        "docs/dev-workflow.md",
+        "docs/decisions/2026-07-19-remote-window-stream-truth.md",
+        "docs/decisions/2026-07-29-remote-window-canvas-pipeline.md",
+        "docs/decisions/2026-08-09-remote-window-dual-stream-design.md"
+      ]
+    },
+    {
+      "feature_id": "terminal.open_tabs",
+      "title": "Ephemeral open tab projection and explicit close lifecycle",
+      "domain": "terminal-session",
+      "owners": [
+        "src/hooks/useOpenTabRuntime.ts",
+        "src/hooks/useOpenTabLifecycleEffects.ts",
+        "src/lib/open-tab-persistence.ts"
+      ],
+      "allowed_paths": [
+        "src/hooks/useOpenTabRuntime.ts",
+        "src/hooks/useOpenTabLifecycleEffects.ts",
+        "src/hooks/useSessionOpenActions.ts",
+        "src/lib/open-tab-persistence.ts",
+        "src/lib/open-tab-intent.ts",
+        "src/lib/open-tab-open-policy.ts",
+        "src/lib/remote-tab-audit.ts"
+      ],
+      "forbidden_paths": [
+        "src/server/"
+      ],
+      "required_gates": [
+        "src/hooks/useOpenTabLifecycleEffects.test.tsx",
+        "src/lib/open-tab-history-truth.test.ts",
+        "src/lib/open-tab-persistence.test.ts",
+        "src/lib/open-tab-intent.test.ts"
+      ],
+      "truth_sources": [
+        "docs/architecture.md",
+        ".agents/skills/terminal-buffer-truth/SKILL.md",
+        "docs/testing/relay-login-home-and-ephemeral-tabs-test-design.md"
+      ]
+    },
+    {
+      "feature_id": "terminal.transport_lifecycle",
+      "title": "Client and daemon terminal transport lifecycle",
+      "domain": "terminal-transport",
+      "owners": [
+        "src/contexts/session-context-transport-runtime.ts",
+        "src/contexts/session-context-session-runtime.ts",
+        "src/contexts/session-context-infra-runtime.ts",
+        "src/contexts/session-context-tmux-management-runtime.ts",
+        "src/contexts/session-transport-open-helpers.ts",
+        "src/lib/session-reconnect-helpers.ts",
+        "src/lib/terminal-channel-mux-runtime.ts",
+        "src/lib/tmux-sessions.ts",
+        "src/server/terminal-bridge-runtime.ts",
+        "src/server/terminal-daemon-runtime.ts",
+        "src/server/terminal-channel-mux-runtime.ts",
+        "src/server/rtc-bridge.ts",
+        "packages/shared/src/connection/protocol.ts"
+      ],
+      "allowed_paths": [
+        "src/contexts/SessionContext.tsx",
+        "src/contexts/SessionContext.ws-refresh.test.tsx",
+        "src/contexts/session-context-activity-runtime.ts",
+        "src/contexts/session-context-activity-runtime.test.ts",
+        "src/contexts/session-context-session-orchestration-runtime.ts",
+        "src/contexts/session-context-session-runtime.ts",
+        "src/contexts/session-context-session-runtime.test.ts",
+        "src/contexts/session-context-infra-runtime.ts",
+        "src/contexts/session-context-infra-runtime.test.ts",
+        "src/contexts/session-context-socket-runtime.ts",
+        "src/contexts/session-context-socket-runtime.test.ts",
+        "src/contexts/session-context-target-network-probe-runtime.ts",
+        "src/contexts/session-context-target-network-probe-runtime.test.ts",
+        "src/contexts/session-context-transport-open-runtime.ts",
+        "src/contexts/session-context-transport-open-runtime.test.ts",
+        "src/contexts/session-context-transport-orchestration-runtime.ts",
+        "src/contexts/session-context-transport-orchestration-runtime.test.ts",
+        "src/contexts/session-context-transport-runtime.ts",
+        "src/contexts/session-context-tmux-management-runtime.ts",
+        "src/contexts/session-context-tmux-management-runtime.test.ts",
+        "src/contexts/session-sync-helpers.test.ts",
+        "src/contexts/session-transport-open-helpers.ts",
+        "src/lib/session-reconnect-helpers.ts",
+        "src/contexts/session-context-socket-message-runtime.ts",
+        "src/contexts/session-context-lifecycle.ts",
+        "src/lib/tmux-sessions.ts",
+        "src/lib/tmux-sessions.test.ts",
+        "src/lib/client-control-plane-transport.ts",
+        "src/lib/client-control-plane-transport.test.ts",
+        "src/lib/session-transport-runtime.ts",
+        "src/lib/terminal-channel-mux-runtime.ts",
+        "src/pages/TerminalPage.tsx",
+        "src/pages/TerminalPage.network-banner.test.tsx",
+        "src/server/terminal-bridge-runtime.ts",
+        "src/server/terminal-daemon-runtime.ts",
+        "src/server/terminal-daemon-runtime.test.ts",
+        "src/server/terminal-channel-mux-runtime.ts",
+        "src/server/rtc-bridge.ts",
+        "src/server/rtc-bridge.test.ts",
+        "src/server/terminal-transport-runtime.ts",
+        "src/server/terminal-message-runtime.ts",
+        "src/server/terminal-mirror-runtime.ts",
+        "src/server/terminal-runtime.ts",
+        "src/server/terminal-runtime-types.ts",
+        "src/lib/android-power-policy.test.ts",
+        "native/android/app/src/main/AndroidManifest.xml",
+        "native/android/app/src/main/java/com/zterm/android/BackgroundService.java",
+        "packages/shared/src/connection/protocol.ts",
+        "docs/goals/terminal-transport-multiplex-refactor-plan.md",
+        "packages/shared/src/connection/protocol.test.ts"
+      ],
+      "forbidden_paths": [
+        "src/components/TerminalView.tsx"
+      ],
+      "required_gates": [
+        "src/contexts/session-sync-helpers.test.ts",
+        "src/contexts/session-context-infra-runtime.test.ts",
+        "src/contexts/session-context-session-runtime.test.ts",
+        "src/contexts/session-context-socket-runtime.test.ts",
+        "src/contexts/session-context-target-network-probe-runtime.test.ts",
+        "src/contexts/session-context-lifecycle.test.tsx",
+        "src/contexts/session-context-transport-orchestration-runtime.test.ts",
+        "src/contexts/session-context-activity-runtime.test.ts",
+        "src/contexts/SessionContext.ws-refresh.test.tsx",
+        "src/server/server.daemon-runtime-truth.test.ts",
+        "src/server/server.transport-lifecycle-truth.test.ts",
+        "src/server/terminal-daemon-runtime.test.ts",
+        "src/server/terminal-mirror-runtime.test.ts",
+        "src/server/terminal-runtime.detached-session.test.ts",
+        "src/server/terminal-message-runtime.test.ts",
+        "src/server/terminal-transport-runtime.test.ts",
+        "src/lib/session-transport-runtime.test.ts",
+        "src/lib/terminal-channel-mux-runtime.test.ts",
+        "src/lib/client-control-plane-transport.test.ts",
+        "src/contexts/session-context-transport-runtime.test.ts",
+        "src/contexts/session-context-tmux-management-runtime.test.ts",
+        "src/lib/tmux-sessions.test.ts",
+        "src/server/rtc-bridge.test.ts",
+        "src/pages/TerminalPage.network-banner.test.tsx",
+        "src/lib/android-power-policy.test.ts",
+        "packages/shared/src/connection/protocol.test.ts"
+      ],
+      "truth_sources": [
+        ".agents/skills/terminal-buffer-truth/SKILL.md",
+        "docs/architecture.md",
+        "docs/decisions/2026-04-28-terminal-transport-session-lifecycle-truth.md",
+        "docs/testing/websocket-transport-reuse-test-design.md",
+        "docs/goals/terminal-transport-multiplex-refactor-plan.md"
+      ]
+    },
+    {
+      "feature_id": "terminal.daemon_input",
+      "title": "Daemon input receive, stale drop, queue, and tmux write lifecycle",
+      "domain": "daemon-input",
+      "owners": [
+        "src/contexts/session-context-input-runtime.ts",
+        "src/lib/reliable-input/reliable-input-queue.ts",
+        "src/server/terminal-message-runtime.ts",
+        "src/server/terminal-control-runtime.ts",
+        "src/server/terminal-bridge-runtime.ts",
+        "src/server/daemon-input-queue-runtime.ts",
+        "src/server/terminal-reliable-input-ack.ts"
+      ],
+      "allowed_paths": [
+        "src/contexts/session-context-input-runtime.ts",
+        "src/contexts/session-context-input-runtime.test.ts",
+        "src/lib/reliable-input/reliable-input-queue.ts",
+        "src/lib/reliable-input/reliable-input-queue.test.ts",
+        "src/lib/reliable-input/reliable-input-ownership.test.ts",
+        "src/server/daemon-input-queue-runtime.ts",
+        "src/server/daemon-input-queue-runtime.test.ts",
+        "src/server/terminal-message-runtime.ts",
+        "src/server/terminal-message-control-runtime.ts",
+        "src/server/terminal-bridge-runtime.ts",
+        "src/server/terminal-control-runtime.ts",
+        "src/server/terminal-debug-runtime.ts",
+        "src/server/terminal-mirror-runtime.ts",
+        "src/server/terminal-performance-scheduler.ts",
+        "src/server/terminal-reliable-input-ack.ts",
+        "src/server/terminal-runtime.ts"
+      ],
+      "forbidden_paths": [
+        "src/components/TerminalView.tsx",
+        "src/pages/TerminalPage.tsx"
+      ],
+      "required_gates": [
+        "src/contexts/session-context-input-runtime.test.ts",
+        "src/lib/reliable-input/reliable-input-ownership.test.ts",
+        "src/lib/reliable-input/reliable-input-queue.test.ts",
+        "src/server/daemon-input-queue-runtime.test.ts",
+        "src/server/terminal-bridge-runtime.test.ts",
+        "src/server/terminal-message-runtime.test.ts",
+        "src/server/terminal-mirror-runtime.test.ts",
+        "src/server/terminal-performance-scheduler.test.ts",
+        "src/server/server.control-truth.test.ts",
+        "src/server/server.bridge-runtime-truth.test.ts",
+        "src/server/terminal-runtime.detached-session.test.ts",
+        "src/server/server.transport-lifecycle-truth.test.ts"
+      ],
+      "truth_sources": [
+        ".agents/skills/terminal-buffer-truth/SKILL.md",
+        "docs/feature-gates.md"
+      ]
+    },
+    {
+      "feature_id": "terminal.buffer_render",
+      "title": "Daemon mirror, client buffer manager, and renderer commit path",
+      "domain": "terminal-render",
+      "owners": [
+        "packages/shared/src/connection/types.ts",
+        "src/lib/wire-ingress/buffer-wire-normalize.ts",
+        "src/lib/buffer-frame-assembly/session-buffer-frame-assembly-state.ts",
+        "src/lib/buffer-frame-assembly/session-buffer-frame-assembly.ts",
+        "src/lib/session-buffer-store.ts",
+        "src/contexts/session-context-buffer-runtime.ts",
+        "src/lib/session-render-gate.ts",
+        "src/components/TerminalView.tsx",
+        "src/components/terminal/VisibleRow.tsx",
+        "src/components/terminal/TerminalPreviewRow.tsx",
+        "src/components/useMirrorFixedZoomPan.ts",
+        "packages/shared/src/terminal/cell-render.ts",
+        "packages/shared/src/terminal/theme.ts",
+        "src/server/daemon-buffer-publisher-runtime.ts",
+        "src/server/terminal-buffer-sync-wire.ts"
+      ],
+      "allowed_paths": [
+        "packages/shared/src/connection/types.ts",
+        "packages/shared/src/terminal/cell-render.ts",
+        "packages/shared/src/terminal/cell-render.test.ts",
+        "packages/shared/src/terminal/theme.ts",
+        "src/lib/wire-ingress/buffer-wire-normalize.ts",
+        "src/lib/wire-ingress/buffer-wire-normalize.test.ts",
+        "src/lib/buffer-frame-assembly/session-buffer-frame-assembly-state.ts",
+        "src/lib/buffer-frame-assembly/session-buffer-frame-assembly.ts",
+        "src/lib/session-buffer-store.ts",
+        "src/contexts/session-context-buffer-runtime.ts",
+        "src/contexts/session-context-pull-runtime.ts",
+        "src/lib/session-render-gate.ts",
+        "src/lib/session-render-buffer-store.ts",
+        "src/lib/session-render-gate.tui-content.test.ts",
+        "src/components/TerminalView.tsx",
+        "src/components/terminal/VisibleRow.tsx",
+        "src/components/terminal/TerminalPreviewRow.tsx",
+        "src/components/useMirrorFixedZoomPan.ts",
+        "src/lib/terminal-buffer-replay.evidence.test.ts",
+        "src/components/TerminalView.dynamic-refresh.test.tsx",
+        "src/components/TerminalView.bottom-stale.test.tsx",
+        "src/components/TerminalView.theme.test.tsx",
+        "src/components/terminal/VisibleRow.selection.test.tsx",
+        "src/pages/TerminalPageStageShell.tsx",
+        "src/pages/TerminalPageStageShell.pane-stage.test.tsx",
+        "src/pages/useTerminalPageShellActionsRuntime.ts",
+        "src/pages/useTerminalPageShellActionsRuntime.test.tsx",
+        "docs/testing/terminal-refresh-buffer-truth-test-design.md",
+        "src/server/mirror-line-canonicalizer.ts",
+        "src/server/mirror-line-canonicalizer.test.ts",
+        "src/server/terminal-mirror-runtime.ts",
+        "src/server/terminal-buffer-sync-wire.ts",
+        "src/server/daemon-buffer-publisher-runtime.ts",
+        "src/server/daemon-buffer-publisher-runtime.test.ts",
+        "src/server/terminal-buffer-sync-wire.test.ts",
+        "src/server/terminal-mirror-runtime.backpressure.test.ts",
+        "src/server/terminal-source-adapter.ts",
+        "src/server/terminal-control-runtime.ts"
+      ],
+      "forbidden_paths": [
+        "src/pages/TerminalPage.tsx",
+        "src/components/terminal/TerminalQuickBar.tsx"
+      ],
+      "required_gates": [
+        "src/lib/wire-ingress/buffer-wire-normalize.test.ts",
+        "src/lib/buffer-frame-assembly/session-buffer-frame-assembly.test.ts",
+        "src/lib/session-render-gate.test.ts",
+        "src/lib/session-render-gate.tui-content.test.ts",
+        "src/lib/session-render-buffer-store.test.ts",
+        "src/components/TerminalView.dynamic-refresh.test.tsx",
+        "src/components/TerminalView.bottom-stale.test.tsx",
+        "src/components/TerminalView.theme.test.tsx",
+        "packages/shared/src/terminal/cell-render.test.ts",
+        "src/contexts/session-context-buffer-runtime.test.ts",
+        "src/contexts/multi-pane-refresh.test.ts",
+        "src/server/mirror-line-canonicalizer.test.ts",
+        "src/server/terminal-mirror-runtime.test.ts",
+        "src/server/terminal-mirror-runtime.backpressure.test.ts",
+        "src/server/daemon-buffer-publisher-runtime.test.ts",
+        "src/server/terminal-buffer-sync-wire.test.ts",
+        "src/server/terminal-mirror-capture.test.ts",
+        "src/server/server.mirror-capture-truth.test.ts"
+      ],
+      "truth_sources": [
+        ".agents/skills/terminal-buffer-truth/SKILL.md",
+        "docs/decisions/2026-04-23-terminal-head-buffer-render-truth.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md"
+      ]
+    },
+    {
+      "feature_id": "terminal.workspace_panes",
+      "title": "Workspace pane ownership, split layout, and pane-stage truth",
+      "domain": "terminal-workspace",
+      "owners": [
+        "src/hooks/useTerminalWorkspace.ts"
+      ],
+      "allowed_paths": [
+        "src/hooks/useTerminalWorkspace.ts",
+        "src/hooks/useTerminalWorkspace.test.tsx",
+        "src/lib/workspace-persistence.ts",
+        "src/lib/workspace-persistence.test.ts",
+        "src/components/terminal/TerminalHeader.tsx",
+        "src/components/terminal/TerminalHeader.test.tsx",
+        "src/pages/TerminalPage.tsx",
+        "src/pages/TerminalPageStageShell.tsx",
+        "src/pages/TerminalPageStageShell.pane-stage.test.tsx",
+        "src/pages/TerminalPage.render-scope.test.tsx",
+        "src/pages/TerminalPage.multi-pane-decouple.test.tsx",
+        "src/pages/TerminalPage.real-quickbar-split.test.tsx",
+        "packages/shared/src/workspace/workspace-model.ts",
+        "packages/shared/src/workspace/workspace-model.test.ts",
+        "packages/shared/src/workspace/workspace-model.actions.test.ts",
+        "packages/shared/src/react/pane-stage.tsx",
+        "packages/shared/src/react/pane-profile.ts",
+        "packages/shared/src/react/pane-profile.test.ts",
+        "packages/shared/src/react/pane-tabs.tsx"
+      ],
+      "forbidden_paths": [
+        "src/server/"
+      ],
+      "required_gates": [
+        "src/hooks/useTerminalWorkspace.test.tsx",
+        "src/lib/workspace-persistence.test.ts",
+        "src/components/terminal/TerminalHeader.test.tsx",
+        "src/pages/TerminalPageStageShell.pane-stage.test.tsx",
+        "src/pages/TerminalPage.render-scope.test.tsx",
+        "src/pages/TerminalPage.multi-pane-decouple.test.tsx",
+        "src/pages/TerminalPage.real-quickbar-split.test.tsx",
+        "packages/shared/src/workspace/workspace-model.test.ts",
+        "packages/shared/src/workspace/workspace-model.actions.test.ts",
+        "packages/shared/src/react/pane-profile.test.ts",
+        "mac/src/app/MacPaneWorkbench.split.test.tsx",
+        "win/src/windows-workspace.test.ts",
+        "win/src/WindowsDesktopApp.test.tsx"
+      ],
+      "truth_sources": [
+        "docs/ui-slices.md",
+        "docs/architecture.md",
+        "docs/feature-gates.md"
+      ]
+    },
+    {
+      "feature_id": "terminal.session_group_layout",
+      "title": "App-layer session group layout, stage slots, and render policy",
+      "domain": "terminal-ui",
+      "owners": [
+        "packages/shared/src/react/pane-profile.ts",
+        "src/lib/terminal-layout-profile.ts",
+        "src/lib/session-group-viewport.ts",
+        "src/pages/TerminalPageStageShell.tsx"
+      ],
+      "allowed_paths": [
+        "packages/shared/src/react/pane-profile.ts",
+        "packages/shared/src/react/pane-profile.test.ts",
+        "src/lib/terminal-layout-profile.ts",
+        "src/lib/terminal-layout-profile.test.ts",
+        "src/lib/session-group-viewport.ts",
+        "src/lib/bridge-settings.test.ts",
+        "src/lib/terminal-width-mode-manager.test.ts",
+        "src/App.tsx",
+        "src/pages/SettingsPage.tsx",
+        "src/pages/SettingsPage.theme.test.tsx",
+        "src/pages/TerminalPage.tsx",
+        "src/pages/TerminalPage.session-drawer.test.tsx",
+        "src/pages/TerminalPageStageShell.tsx",
+        "src/pages/TerminalPageStageShell.pane-stage.test.tsx",
+        "src/hooks/useTerminalWorkspace.ts",
+        "src/hooks/useTerminalWorkspace.test.tsx",
+        "packages/shared/src/connection/bridge-settings.ts",
+        "docs/features/terminal-session-group-layout.md",
+        "docs/testing/terminal-session-group-layout-test-design.md"
+      ],
+      "forbidden_paths": [
+        "src/server/",
+        "src/contexts/session-context-buffer-runtime.ts",
+        "src/components/TerminalView.tsx",
+        "packages/shared/src/connection/"
+      ],
+      "required_gates": [
+        "src/lib/terminal-layout-profile.test.ts",
+        "src/lib/bridge-settings.test.ts",
+        "src/pages/SettingsPage.theme.test.tsx",
+        "src/pages/TerminalPage.session-drawer.test.tsx",
+        "src/pages/TerminalPageStageShell.pane-stage.test.tsx",
+        "src/hooks/useTerminalWorkspace.test.tsx",
+        "src/lib/feature-registry-truth.test.ts"
+      ],
+      "truth_sources": [
+        "docs/features/terminal-session-group-layout.md",
+        "docs/testing/terminal-session-group-layout-test-design.md",
+        "docs/decisions/0001-cross-platform-layout-profile.md",
+        "docs/architecture.md",
+        "docs/feature-gates.md"
+      ]
+    },
+    {
+      "feature_id": "terminal.interaction_runtime",
+      "title": "Terminal page interaction routing, pane attach, and active session isolation",
+      "domain": "terminal-ui",
+      "owners": [
+        "src/pages/useTerminalPageInteractionRuntime.ts"
+      ],
+      "allowed_paths": [
+        "src/pages/useTerminalPageInteractionRuntime.ts",
+        "src/pages/TerminalPage.tsx",
+        "src/pages/TerminalPage.tab-isolation.test.tsx",
+        "src/pages/TerminalPage.multi-pane-decouple.test.tsx"
+      ],
+      "forbidden_paths": [
+        "src/server/",
+        "packages/shared/src/connection/"
+      ],
+      "required_gates": [
+        "src/pages/TerminalPage.tab-isolation.test.tsx",
+        "src/pages/TerminalPage.multi-pane-decouple.test.tsx"
+      ],
+      "truth_sources": [
+        "docs/architecture.md",
+        "docs/feature-gates.md"
+      ]
+    },
+    {
+      "feature_id": "terminal.shell_actions",
+      "title": "Terminal page shell actions, viewport mode routing, and tab manager scope",
+      "domain": "terminal-ui",
+      "owners": [
+        "src/pages/useTerminalPageShellActionsRuntime.ts",
+        "src/pages/TerminalPageStageShell.tsx",
+        "src/pages/terminal-page-shell-ui.tsx",
+        "src/pages/terminal-page-status-helpers.ts",
+        "src/pages/TerminalConnectionStatusStrip.tsx",
+        "src/pages/TerminalPageQuickBarAssembly.tsx",
+        "src/pages/terminal-page-debug-helpers.ts",
+        "src/pages/terminal-page-render-keys.ts",
+        "src/pages/terminal-page-quickbar-adapters.ts",
+        "src/pages/terminal-keyboard-lift.ts",
+        "src/pages/TerminalPageCopyMenu.tsx",
+        "src/pages/useTerminalPageCopyRuntime.ts",
+        "src/pages/terminal-copy-selection.ts",
+        "src/lib/terminal-shell-skin.ts"
+      ],
+      "allowed_paths": [
+        "src/pages/useTerminalPageShellActionsRuntime.ts",
+        "src/pages/useTerminalPageShellActionsRuntime.test.tsx",
+        "src/pages/TerminalPage.tsx",
+        "src/pages/TerminalPageStageShell.tsx",
+        "src/pages/terminal-page-shell-ui.tsx",
+        "src/pages/terminal-page-status-helpers.ts",
+        "src/pages/TerminalConnectionStatusStrip.tsx",
+        "src/pages/TerminalPageQuickBarAssembly.tsx",
+        "src/pages/terminal-page-debug-helpers.ts",
+        "src/pages/terminal-page-render-keys.ts",
+        "src/pages/terminal-page-quickbar-adapters.ts",
+        "src/pages/terminal-keyboard-lift.ts",
+        "src/pages/TerminalPageCopyMenu.tsx",
+        "src/pages/useTerminalPageCopyRuntime.ts",
+        "src/pages/terminal-copy-selection.ts",
+        "src/lib/terminal-shell-skin.ts",
+        "src/lib/terminal-shell-skin.test.ts",
+        "src/lib/session-viewport-mode-store.ts",
+        "src/pages/TerminalPageStageShell.pane-stage.test.tsx"
+      ],
+      "forbidden_paths": [
+        "src/server/",
+        "src/components/TerminalView.tsx"
+      ],
+      "required_gates": [
+        "src/pages/useTerminalPageShellActionsRuntime.test.tsx"
+      ],
+      "truth_sources": [
+        "docs/architecture.md",
+        "docs/feature-gates.md"
+      ]
+    },
+    {
+      "feature_id": "connections.history_projection",
+      "title": "Saved direct and Tailscale connection projection",
+      "domain": "connections",
+      "owners": [
+        "src/hooks/useSessionHistoryStorage.ts",
+        "packages/shared/src/react/use-host-storage.ts"
+      ],
+      "allowed_paths": [
+        "src/hooks/useSessionHistoryStorage.ts",
+        "packages/shared/src/react/use-host-storage.ts",
+        "src/App.tsx",
+        "src/lib/types.ts",
+        "src/pages/ConnectionsPage.tsx",
+        "src/pages/ConnectionsPage.test.tsx",
+        "src/pages/ConnectionPropertiesPage.tsx",
+        "src/hooks/useSessionOpenActions.ts",
+        "src/hooks/useSessionHistoryStorage.test.ts"
+      ],
+      "forbidden_paths": [
+        "src/server/",
+        "src/hooks/useOpenTabRuntime.ts"
+      ],
+      "required_gates": [
+        "src/lib/open-tab-history-truth.test.ts",
+        "src/hooks/useSessionHistoryStorage.test.ts",
+        "src/pages/ConnectionsPage.test.tsx",
+        "src/pages/ConnectionPropertiesPage.test.tsx"
+      ],
+      "truth_sources": [
+        "docs/architecture.md",
+        "docs/ui-slices.md"
+      ]
+    },
+    {
+      "feature_id": "connections.config_share",
+      "title": "Connection configuration QR and link share contract",
+      "domain": "connections",
+      "owners": [
+        "packages/shared/src/connection/connection-config-share.ts"
+      ],
+      "allowed_paths": [
+        "packages/shared/src/connection/connection-config-share.ts",
+        "packages/shared/src/connection/connection-config-share.test.ts",
+        "packages/shared/src/index.ts",
+        "packages/shared/src/react/use-host-storage.ts",
+        "package.json",
+        "pnpm-lock.yaml",
+        "native/android/app/src/main/AndroidManifest.xml",
+        "src/App.tsx",
+        "src/components/tmux/TmuxSessionPickerSheet.tsx",
+        "src/components/tmux/TmuxSessionPickerSheet.test.tsx",
+        "src/lib/connection-config-share-android-truth.test.ts",
+        "src/pages/ConnectionPropertiesPage.tsx",
+        "src/pages/ConnectionPropertiesPage.test.tsx",
+        "src/pages/ConnectionsPage.tsx",
+        "src/pages/ConnectionsPage.test.tsx",
+        "docs/testing/connection-config-share-test-design.md"
+      ],
+      "forbidden_paths": [
+        "src/server/",
+        "src/contexts/",
+        "src/components/TerminalView.tsx"
+      ],
+      "required_gates": [
+        "packages/shared/src/connection/connection-config-share.test.ts",
+        "src/lib/connection-config-share-android-truth.test.ts",
+        "docs/testing/connection-config-share-test-design.md"
+      ],
+      "truth_sources": [
+        "docs/architecture.md",
+        "docs/feature-gates.md",
+        "docs/testing/connection-config-share-test-design.md"
+      ]
+    },
+    {
+      "feature_id": "settings.config_transfer",
+      "title": "Settings config export and import feedback",
+      "domain": "settings",
+      "owners": [
+        "src/hooks/useConfigExport.ts"
+      ],
+      "allowed_paths": [
+        "src/hooks/useConfigExport.ts",
+        "src/hooks/useConfigExport.test.tsx",
+        "src/hooks/useAppUpdate.ts",
+        "src/hooks/useAppUpdate.test.tsx",
+        "src/lib/app-update.ts",
+        "src/lib/app-update.test.ts",
+        "src/lib/app-update-runtime.ts",
+        "src/lib/app-update-runtime.test.ts",
+        "src/lib/app-update-relay-manifest.ts",
+        "src/lib/app-update-relay-manifest.test.ts",
+        "src/App.tsx",
+        "src/pages/SettingsPage.tsx",
+        "src/pages/SettingsPage.theme.test.tsx",
+        "src/components/settings/AppUpdateSection.tsx",
+        "src/components/settings/AppUpdateSection.test.tsx",
+        "packages/shared/src/interaction/projection.ts",
+        "docs/testing/config-transfer-test-design.md"
+      ],
+      "forbidden_paths": [
+        "src/server/",
+        "src/contexts/",
+        "src/components/TerminalView.tsx"
+      ],
+      "required_gates": [
+        "src/hooks/useConfigExport.test.tsx",
+        "src/hooks/useAppUpdate.test.tsx",
+        "src/lib/app-update.test.ts",
+        "src/lib/app-update-relay-manifest.test.ts",
+        "src/lib/app-update-runtime.test.ts",
+        "src/pages/SettingsPage.theme.test.tsx",
+        "src/components/settings/AppUpdateSection.test.tsx",
+        "docs/testing/config-transfer-test-design.md"
+      ],
+      "truth_sources": [
+        "docs/architecture.md",
+        "docs/feature-gates.md",
+        "docs/testing/config-transfer-test-design.md"
+      ]
+    },
+    {
+      "feature_id": "relay.account_directory",
+      "title": "Relay multi-device account authentication, machine, endpoint, and session directory",
+      "domain": "relay",
+      "owners": [
+        "src/traversal-relay/store.ts",
+        "src/traversal-relay/server.ts",
+        "src/server/relay-client.ts",
+        "src/server/daemon-connection-endpoint-runtime.ts",
+        "src/lib/relay-account-directory.ts",
+        "packages/shared/src/connection/relay-directory.ts"
+      ],
+      "allowed_paths": [
+        "src/traversal-relay/store.ts",
+        "src/traversal-relay/server.ts",
+        "src/traversal-relay/store.test.ts",
+        "src/traversal-relay/server.test.ts",
+        "src/traversal-relay/relay-server-release-package.test.ts",
+        "src/server/relay-client.ts",
+        "src/server/relay-client.test.ts",
+        "src/server/daemon-connection-endpoint-runtime.ts",
+        "src/server/daemon-connection-endpoint-runtime.test.ts",
+        "src/server/daemon-config.ts",
+        "src/server/daemon-config.test.ts",
+        "src/lib/relay-account-directory.ts",
+        "src/lib/relay-account-directory.test.ts",
+        "src/lib/traversal-relay-client.ts",
+        "src/lib/traversal-relay-client.test.ts",
+        "scripts/traversal-relay-local-smoke.ts",
+        "scripts/prepare-relay-server-npm-package.mjs",
+        "scripts/verify-relay-server-package.mjs",
+        "packages/shared/src/connection/relay-directory.ts"
+      ],
+      "forbidden_paths": [
+        "src/components/TerminalView.tsx",
+        "src/pages/TerminalPage.tsx",
+        "src/contexts/session-context-buffer-runtime.ts"
+      ],
+      "required_gates": [
+        "src/traversal-relay/store.test.ts",
+        "src/traversal-relay/server.test.ts",
+        "src/traversal-relay/relay-server-release-package.test.ts",
+        "src/server/relay-client.test.ts",
+        "src/server/daemon-connection-endpoint-runtime.test.ts",
+        "src/lib/relay-account-directory.test.ts",
+        "src/lib/traversal-relay-client.test.ts",
+        "scripts/traversal-relay-local-smoke.ts",
+        "src/lib/traversal/socket.test.ts"
+      ],
+      "truth_sources": [
+        "docs/goals/relay-account-directory-and-route-plan.md",
+        "docs/testing/relay-account-directory-test-design.md",
+        "docs/architecture.md",
+        "docs/testing/websocket-transport-reuse-test-design.md"
+      ]
+    },
+    {
+      "feature_id": "relay.route_selection",
+      "title": "Relay and direct traversal best-route selection",
+      "domain": "relay",
+      "owners": [
+        "src/lib/traversal/route-selector.ts",
+        "src/lib/traversal/route-health-cache.ts",
+        "src/lib/traversal/config.ts",
+        "src/lib/traversal/socket.ts"
+      ],
+      "allowed_paths": [
+        "src/lib/traversal/route-selector.ts",
+        "src/lib/traversal/route-selector.test.ts",
+        "src/lib/traversal/route-health-cache.ts",
+        "src/lib/traversal/route-health-cache.test.ts",
+        "src/lib/traversal/config.ts",
+        "src/lib/traversal/config.test.ts",
+        "src/lib/traversal/socket.ts",
+        "src/lib/traversal/socket.test.ts",
+        "src/lib/traversal/route-diagnostics.ts",
+        "src/lib/traversal/types.ts",
+        "src/lib/bridge-settings.ts",
+        "packages/shared/src/connection/bridge-settings.ts",
+        "src/lib/types.ts",
+        "src/components/terminal/TerminalHeader.tsx",
+        "src/components/terminal/TabManagerSheet.tsx",
+        "src/components/terminal/pane-android-adapter.ts",
+        "packages/shared/src/connection/relay-directory.ts"
+      ],
+      "forbidden_paths": [
+        "src/traversal-relay/server.ts",
+        "src/server/terminal-message-runtime.ts",
+        "src/components/TerminalView.tsx"
+      ],
+      "required_gates": [
+        "src/lib/traversal/route-selector.test.ts",
+        "src/lib/traversal/route-health-cache.test.ts",
+        "src/lib/traversal/config.test.ts",
+        "src/lib/traversal/socket.test.ts"
+      ],
+      "truth_sources": [
+        "docs/goals/relay-account-directory-and-route-plan.md",
+        "docs/testing/relay-account-directory-test-design.md",
+        "docs/testing/session-transport-network-switch-test-design.md",
+        "docs/feature-gates.md"
+      ]
+    },
+    {
+      "feature_id": "relay.directory_ui",
+      "title": "Optional relay assurance and connection home projection",
+      "domain": "relay-ui",
+      "owners": [
+        "src/pages/ConnectionsPage.tsx",
+        "src/pages/SettingsPage.tsx",
+        "src/components/settings/RelayAccountSettingsSection.tsx",
+        "src/hooks/useTraversalRelayAccount.ts",
+        "src/components/tmux/TmuxSessionPickerSheet.tsx"
+      ],
+      "allowed_paths": [
+        "src/lib/traversal-relay-client.ts",
+        "src/lib/traversal-relay-client.test.ts",
+        "src/lib/home-connection-projection.ts",
+        "src/lib/home-connection-projection.test.ts",
+        "src/lib/traversal-relay-devices.ts",
+        "src/lib/traversal-relay-devices.test.ts",
+        "src/hooks/useTraversalRelayAccount.ts",
+        "src/hooks/useTraversalRelayAccount.test.tsx",
+        "src/hooks/useSessionOpenActions.ts",
+        "src/hooks/useSessionOpenActions.test.tsx",
+        "src/lib/session-picker.ts",
+        "src/lib/session-picker.test.ts",
+        "src/components/tmux/TmuxSessionPickerSheet.tsx",
+        "src/components/tmux/TmuxSessionPickerSheet.test.tsx",
+        "src/components/connection-form/RelayDevicePicker.tsx",
+        "src/App.tsx",
+        "src/App.relay-stream-lifecycle.test.tsx",
+        "src/pages/ConnectionsPage.tsx",
+        "src/pages/ConnectionsPage.test.tsx",
+        "src/pages/SettingsPage.tsx",
+        "src/pages/SettingsPage.relay-account.test.tsx",
+        "src/components/settings/RelayAccountSettingsSection.tsx",
+        "src/pages/ConnectionPropertiesPage.tsx",
+        "src/pages/ConnectionPropertiesPage.test.tsx",
+        "src/lib/relay-account-directory.ts"
+      ],
+      "forbidden_paths": [
+        "src/server/",
+        "src/contexts/session-context-buffer-runtime.ts",
+        "src/components/TerminalView.tsx"
+      ],
+      "required_gates": [
+        "src/App.relay-stream-lifecycle.test.tsx",
+        "src/lib/home-connection-projection.test.ts",
+        "src/lib/traversal-relay-devices.test.ts",
+        "src/lib/traversal-relay-client.test.ts",
+        "src/hooks/useTraversalRelayAccount.test.tsx",
+        "src/hooks/useSessionOpenActions.test.tsx",
+        "src/lib/session-picker.test.ts",
+        "src/components/tmux/TmuxSessionPickerSheet.test.tsx",
+        "src/pages/ConnectionsPage.test.tsx",
+        "src/pages/SettingsPage.relay-account.test.tsx",
+        "src/pages/ConnectionPropertiesPage.test.tsx"
+      ],
+      "truth_sources": [
+        "docs/goals/relay-account-directory-and-route-plan.md",
+        "docs/testing/relay-account-directory-test-design.md",
+        "docs/testing/relay-login-home-and-ephemeral-tabs-test-design.md",
+        "docs/ui-slices.md"
+      ]
+    },
+    {
+      "feature_id": "daemon.file_transfer",
+      "title": "Cross-side file transfer synchronization",
+      "domain": "file-transfer-sync",
+      "owners": [
+        "src/components/terminal/FileTransferSheet.tsx",
+        "src/lib/file-transfer-message-runtime.ts",
+        "src/lib/file-transfer-throughput-runtime.ts",
+        "src/plugins/StoragePermissionPlugin.ts",
+        "src/server/terminal-file-transfer-binary-runtime.ts",
+        "src/server/terminal-file-transfer-list-runtime.ts",
+        "native/android/app/src/main/java/com/zterm/android/StoragePermissionPlugin.java",
+        "native/android/app/src/main/java/com/zterm/android/StorageFileWriteLogic.java"
+      ],
+      "allowed_paths": [
+        "src/components/terminal/FileTransferSheet.test.tsx",
+        "src/lib/file-transfer-message-runtime.ts",
+        "src/lib/file-transfer-session-runtime.ts",
+        "src/lib/file-transfer-throughput-contract.test.ts",
+        "src/lib/file-transfer-throughput-runtime.ts",
+        "src/plugins/StoragePermissionPlugin.ts",
+        "src/components/terminal/FileTransferSheet.tsx",
+        "src/server/terminal-message-control-runtime.ts",
+        "src/server/terminal-file-transfer-runtime.ts",
+        "src/server/terminal-file-transfer-binary-runtime.ts",
+        "src/server/terminal-file-transfer-list-runtime.ts",
+        "src/server/terminal-file-transfer-message-runtime.ts",
+        "src/server/terminal-file-transfer-types.ts",
+        "src/server/terminal-file-transfer-binary-runtime.test.ts",
+        "src/server/terminal-file-transfer-message-runtime.test.ts",
+        "src/server/file-transfer-throughput-loopback.test.ts",
+        "native/android/app/src/main/java/com/zterm/android/StoragePermissionPlugin.java",
+        "native/android/app/src/main/java/com/zterm/android/StorageFileReadLogic.java",
+        "native/android/app/src/main/java/com/zterm/android/StorageFileWriteLogic.java",
+        "native/android/app/src/test/java/com/zterm/android/StorageFileReadLogicTest.java",
+        "native/android/app/src/test/java/com/zterm/android/StorageFileWriteLogicTest.java",
+        "native/android/app/build.gradle",
+        "contracts/file-transfer-throughput.json",
+        "scripts/run-file-transfer-throughput-gate.sh",
+        "docs/testing/file-transfer-test-design.md"
+      ],
+      "forbidden_paths": [
+        "src/components/TerminalView.tsx"
+      ],
+      "required_gates": [
+        "scripts/run-file-transfer-throughput-gate.sh",
+        "src/components/terminal/FileTransferSheet.test.tsx",
+        "src/lib/file-transfer-session-runtime.test.ts",
+        "src/lib/file-transfer-throughput-contract.test.ts",
+        "src/lib/file-transfer-throughput-runtime.test.ts",
+        "src/server/terminal-file-transfer-binary-runtime.test.ts",
+        "src/server/file-transfer-throughput-loopback.test.ts",
+        "src/server/server.file-transfer-truth.test.ts",
+        "native/android/app/src/test/java/com/zterm/android/StorageFileWriteLogicTest.java",
+        "docs/testing/file-transfer-test-design.md"
+      ],
+      "truth_sources": [
+        "docs/architecture.md",
+        "docs/feature-gates.md",
+        "docs/resource-map.md",
+        "docs/function-map.md",
+        "docs/wiki/mainline-call-map.json",
+        "docs/testing/file-transfer-test-design.md"
+      ]
+    },
+    {
+      "feature_id": "daemon.runtime_entry",
+      "owners": [
+        "src/server/server.ts",
+        "src/server/daemon-config.ts",
+        "src/server/terminal-daemon-runtime.ts"
+      ],
+      "allowed_paths": [
+        "src/server/server.ts",
+        "src/server/daemon-config.ts",
+        "src/server/terminal-daemon-runtime.ts",
+        "src/server/terminal-runtime.ts",
+        "src/server/terminal-bridge-runtime.ts",
+        "src/server/terminal-message-runtime.ts",
+        "src/server/terminal-mirror-runtime.ts",
+        "src/server/terminal-control-runtime.ts",
+        "src/server/terminal-schedule-runtime.ts",
+        "src/server/terminal-file-transfer-runtime.ts",
+        "src/server/terminal-http-runtime.ts",
+        "src/server/terminal-debug-runtime.ts",
+        "src/server/runtime-debug-store.ts",
+        "src/server/relay-client.ts",
+        "src/server/rtc-bridge.ts",
+        "src/server/remote-screenshot-daemon.ts"
+      ],
+      "forbidden_paths": [],
+      "required_gates": [
+        "src/server/server.daemon-runtime-truth.test.ts",
+        "src/server/server.core-support-truth.test.ts",
+        "src/server/server.http-truth.test.ts",
+        "src/server/server.debug-truth.test.ts"
+      ],
+      "truth_sources": [
+        "docs/wiki/daemon.md",
+        "docs/wiki/mainline-source.md",
+        "docs/architecture.md",
+        "docs/dev-workflow.md"
+      ]
+    },
+    {
+      "feature_id": "daemon.windows_wezterm_backend",
+      "title": "Windows WezTerm mux adapter and buffer contract",
+      "domain": "daemon-windows",
+      "owners": [
+        "src/server/wezterm-backend.ts",
+        "src/server/terminal-backend-selection.ts",
+        "src/server/terminal-control-runtime.ts",
+        "scripts/wezterm-daemon-protocol-smoke.ts",
+        "scripts/wezterm-daemon-remote-protocol-smoke.ts",
+        "scripts/wezterm-backend-input-smoke.ts",
+        "scripts/wezterm-backend-remote-smoke.ts"
+      ],
+      "allowed_paths": [
+        "src/server/server.ts",
+        "src/server/wezterm-backend.ts",
+        "src/server/wezterm-backend.test.ts",
+        "src/server/wezterm-backend-runtime.test.ts",
+        "src/server/terminal-source-adapter.ts",
+        "src/server/terminal-backend-selection.ts",
+        "src/server/terminal-backend-selection.test.ts",
+        "src/server/terminal-control-runtime.ts",
+        "src/server/terminal-message-control-runtime.ts",
+        "src/server/terminal-message-control-runtime.schedule.test.ts",
+        "src/server/terminal-message-runtime.test.ts",
+        "scripts/wezterm-daemon-protocol-smoke.ts",
+        "scripts/wezterm-daemon-remote-protocol-smoke.ts",
+        "scripts/wezterm-backend-input-smoke.ts",
+        "scripts/wezterm-backend-remote-smoke.ts",
+        "docs/decisions/2026-06-29-windows-wezterm-backend-contract.md",
+        "docs/function-map.md",
+        "docs/feature-gates.md",
+        "docs/feature-registry.json",
+        "docs/wiki/mainline-call-map.json",
+        "docs/wiki/mainline-source.md",
+        "docs/goals/windows-wezterm-backend-closeout-plan.md",
+        "docs/testing/windows-daemon-live-protocol-test-design.md",
+        "../win/README.md",
+        "../win/docs/spec.md",
+        "../win/docs/architecture.md",
+        "../win/docs/function-map.md",
+        "../win/task.md",
+        "../win/MEMORY.md",
+        "note.md",
+        "MEMORY.md"
+      ],
+      "forbidden_paths": [
+        "src/server/terminal-mirror-runtime.ts",
+        "src/server/terminal-mirror-capture.ts"
+      ],
+      "required_gates": [
+        "src/server/wezterm-backend.test.ts",
+        "src/server/wezterm-backend-runtime.test.ts",
+        "src/server/terminal-backend-selection.test.ts",
+        "src/server/terminal-control-runtime.input-queue.test.ts",
+        "src/server/terminal-message-runtime.test.ts",
+        "scripts/wezterm-daemon-protocol-smoke.ts",
+        "scripts/wezterm-daemon-remote-protocol-smoke.ts",
+        "scripts/wezterm-backend-remote-smoke.ts",
+        "scripts/wezterm-backend-input-smoke.ts",
+        "tsconfig.json"
+      ],
+      "truth_sources": [
+        "docs/decisions/2026-06-29-windows-wezterm-backend-contract.md",
+        ".agents/skills/terminal-buffer-truth/SKILL.md"
+      ]
+    },
+    {
+      "feature_id": "daemon.cli_shell",
+      "owners": [
+        "scripts/zterm-daemon.sh"
+      ],
+      "allowed_paths": [
+        "scripts/zterm-daemon.sh",
+        "scripts/windows/zterm-daemon.ps1",
+        "scripts/native/zterm-daemon.swift",
+        "scripts/install-global-daemon-cli.sh",
+        "scripts/prepare-global-daemon-release.sh",
+        "scripts/prepare-daemon-npm-package.mjs"
+      ],
+      "forbidden_paths": [],
+      "required_gates": [
+        "src/lib/function-wiki-truth.test.ts",
+        "src/lib/resource-registry-truth.test.ts",
+        "src/server/launch-agent-plist.test.ts",
+        "src/server/daemon-config.test.ts"
+      ],
+      "truth_sources": [
+        "docs/wiki/cli.md",
+        "docs/wiki/mainline-source.md",
+        "docs/function-map.md"
+      ]
+    },
+    {
+      "feature_id": "daemon.cli_node",
+      "owners": [
+        "scripts/runtime-debug-remote.ts",
+        "scripts/collect-runtime-audit.ts",
+        "scripts/analyze-runtime-debug.ts",
+        "scripts/weak-network-byte-proxy.ts",
+        "scripts/terminal-performance-probe.ts"
+      ],
+      "allowed_paths": [
+        "scripts/runtime-debug-remote.ts",
+        "scripts/collect-runtime-audit.ts",
+        "scripts/analyze-runtime-debug.ts",
+        "scripts/terminal-real-device-evidence.ts",
+        "scripts/traversal-relay-local-smoke.ts",
+        "scripts/daemon-mirror-close-loop.ts",
+        "scripts/weak-network-byte-proxy.ts",
+        "scripts/terminal-performance-probe.ts",
+        "scripts/build-function-wiki.mjs"
+      ],
+      "forbidden_paths": [],
+      "required_gates": [
+        "src/lib/function-wiki-truth.test.ts",
+        "src/lib/weak-network-byte-proxy.test.ts"
+      ],
+      "truth_sources": [
+        "docs/wiki/cli.md",
+        "docs/function-map.md"
+      ]
+    },
+    {
+      "feature_id": "daemon.support",
+      "owners": [
+        "scripts/setup-android-java.sh",
+        "scripts/ensure-pnpm-install.sh",
+        "scripts/app-version.mjs",
+        "scripts/build-android-debug.sh",
+        "scripts/prepare-update-bundle.mjs",
+        "scripts/verify-update-bundle.mjs"
+      ],
+      "allowed_paths": [
+        "contracts/app-version.json",
+        "native/android/app/build.gradle",
+        "scripts/app-version.d.mts",
+        "scripts/app-version.mjs",
+        "scripts/app-version.test.ts",
+        "scripts/build-android-debug.sh",
+        "scripts/setup-android-java.sh",
+        "scripts/ensure-pnpm-install.sh",
+        "scripts/prepare-update-bundle.mjs",
+        "scripts/tools/patch-apk-version.py",
+        "scripts/verify-update-bundle.mjs",
+        "scripts/verify-release-assets.mjs",
+        "scripts/verify-relay-server-package.mjs",
+        "scripts/check-wterm-runtime-published.mjs",
+        "scripts/check-no-source-js-pollution.mjs"
+      ],
+      "forbidden_paths": [],
+      "required_gates": [
+        "scripts/app-version.test.ts",
+        "scripts/verify-update-bundle.mjs",
+        "src/lib/function-wiki-truth.test.ts",
+        "src/lib/resource-registry-truth.test.ts"
+      ],
+      "truth_sources": [
+        "docs/wiki/cli.md",
+        "docs/function-map.md",
+        "docs/testing/app-update-version-test-design.md"
+      ]
+    },
+    {
+      "feature_id": "project.loop_governance",
+      "title": "Project loop governance and report-only triage loop",
+      "domain": "project-governance",
+      "owners": [
+        "docs/loops/LOOP.md",
+        "docs/loops/loop-manifest.json",
+        "src/lib/loop-governance-truth.test.ts"
+      ],
+      "allowed_paths": [
+        "docs/loops/LOOP.md",
+        "docs/loops/STATE.md",
+        "docs/loops/loop-constraints.md",
+        "docs/loops/loop-budget.md",
+        "docs/loops/loop-run-log.md",
+        "docs/loops/loop-manifest.json",
+        "docs/testing/loop-governance-test-design.md",
+        "docs/feature-registry.json",
+        "docs/function-map.md",
+        "docs/feature-gates.md",
+        "docs/wiki/mainline-call-map.json",
+        "src/lib/loop-governance-truth.test.ts",
+        "src/lib/function-wiki-truth.test.ts",
+        "package.json",
+        "../AGENTS.md",
+        "../.agents/skills/zterm-mobile-dev/SKILL.md",
+        "note.md",
+        "MEMORY.md"
+      ],
+      "forbidden_paths": [
+        "src/server/",
+        "src/pages/",
+        "src/components/",
+        "native/android/",
+        "../mac/evidence/"
+      ],
+      "required_gates": [
+        "src/lib/loop-governance-truth.test.ts",
+        "src/lib/feature-registry-truth.test.ts",
+        "src/lib/function-wiki-truth.test.ts"
+      ],
+      "truth_sources": [
+        "docs/loops/LOOP.md",
+        "docs/loops/loop-manifest.json",
+        "docs/testing/loop-governance-test-design.md",
+        "docs/function-map.md",
+        "docs/feature-gates.md"
+      ]
+    },
+    {
+      "feature_id": "mainline_source.android",
+      "owners": [
+        "native/android/app/src/main/AndroidManifest.xml",
+        "native/android/app/src/main/java/com/zterm/android/MainActivity.java",
+        "native/android/app/src/main/res/values/styles.xml",
+        "src/lib/terminal-shell-skin.ts",
+        "src/hooks/useAppPageState.ts",
+        "src/components/terminal/RenameDialog.tsx"
+      ],
+      "allowed_paths": [
+        "native/android/app/src/main/AndroidManifest.xml",
+        "native/android/app/src/main/java/com/zterm/android/MainActivity.java",
+        "native/android/app/src/main/res/values/styles.xml",
+        "native/android/app/src/main/assets/",
+        "src/index.css",
+        "src/lib/terminal-shell-skin.ts",
+        "src/lib/terminal-shell-skin.test.ts",
+        "src/hooks/useAppPageState.ts",
+        "src/hooks/useAppPageState.test.tsx",
+        "src/App.tsx",
+        "src/pages/SettingsPage.tsx",
+        "src/pages/SettingsPage.theme.test.tsx",
+        "src/pages/TerminalPage.tsx",
+        "src/pages/TerminalPageStageShell.tsx",
+        "src/pages/TerminalPageCopyMenu.tsx",
+        "src/pages/terminal-page-shell-ui.tsx",
+        "src/pages/useTerminalPageShellActionsRuntime.ts",
+        "src/pages/useTerminalPageShellActionsRuntime.test.tsx",
+        "src/pages/TerminalConnectionStatusStrip.tsx",
+        "src/pages/terminal-page-status-helpers.ts",
+        "src/pages/terminal-page-debug-helpers.ts",
+        "src/pages/terminal-page-render-keys.ts",
+        "src/pages/terminal-page-quickbar-adapters.ts",
+        "src/pages/terminal-copy-selection.ts",
+        "src/pages/terminal-keyboard-lift.ts",
+        "src/pages/TerminalPageQuickBarAssembly.tsx",
+        "src/components/TerminalView.tsx",
+        "src/components/terminal/VisibleRow.tsx",
+        "src/components/terminal/TerminalPreviewRow.tsx",
+        "src/components/useMirrorFixedZoomPan.ts",
+        "packages/shared/src/terminal/cell-render.ts",
+        "packages/shared/src/terminal/theme.ts",
+        "src/components/terminal/FileTransferSheet.tsx",
+        "src/components/terminal/FileTransferSheet.test.tsx",
+        "src/components/terminal/RenameDialog.tsx",
+        "src/components/terminal/RenameDialog.test.tsx",
+        "src/components/terminal/TerminalHeader.tsx",
+        "src/components/terminal/TerminalQuickBar.tsx",
+        "src/components/terminal/TerminalQuickBar.test.tsx",
+        "src/components/terminal/TerminalSessionDrawer.tsx",
+        "src/components/terminal/TerminalSessionDrawer.test.tsx",
+        "src/components/terminal/transfer-sheet-layout.ts",
+        "packages/shared/src/connection/bridge-settings.ts",
+        "packages/shared/src/react/pane-profile.ts",
+        "packages/shared/src/react/pane-profile.test.ts",
+        "docs/testing/terminal-shell-theme-test-design.md"
+      ],
+      "forbidden_paths": [],
+      "required_gates": [
+        "src/lib/feature-registry-truth.test.ts",
+        "src/lib/function-wiki-truth.test.ts",
+        "src/lib/android-task-transition-truth.test.ts",
+        "src/lib/terminal-shell-skin.test.ts",
+        "src/hooks/useAppPageState.test.tsx",
+        "src/components/terminal/RenameDialog.test.tsx"
+      ],
+      "truth_sources": [
+        "docs/wiki/mainline-source.md",
+        "docs/architecture.md",
+        "docs/ui-slices.md",
+        "docs/testing/terminal-shell-theme-test-design.md"
+      ]
+    },
+    {
+      "feature_id": "mainline_source.daemon",
+      "owners": [
+        "src/server/server.ts",
+        "src/server/terminal-runtime.ts",
+        "src/server/terminal-message-runtime.ts",
+        "src/server/daemon-input-queue-runtime.ts",
+        "src/server/terminal-reliable-input-ack.ts"
+      ],
+      "allowed_paths": [
+        "src/server/server.ts",
+        "src/server/terminal-daemon-runtime.ts",
+        "src/server/terminal-runtime.ts",
+        "src/server/terminal-bridge-runtime.ts",
+        "src/server/terminal-message-runtime.ts",
+        "src/server/daemon-input-queue-runtime.ts",
+        "src/server/terminal-reliable-input-ack.ts",
+        "src/server/terminal-mirror-runtime.ts",
+        "src/server/terminal-control-runtime.ts",
+        "src/server/terminal-message-control-runtime.ts",
+        "src/server/terminal-schedule-runtime.ts",
+        "src/server/terminal-file-transfer-runtime.ts",
+        "src/server/terminal-http-runtime.ts",
+        "src/server/terminal-debug-runtime.ts",
+        "src/server/terminal-transport-runtime.ts",
+        "src/server/relay-client.ts",
+        "src/server/remote-screenshot-daemon.ts"
+      ],
+      "forbidden_paths": [],
+      "required_gates": [
+        "src/server/server.daemon-runtime-truth.test.ts",
+        "src/server/daemon-input-queue-runtime.test.ts",
+        "src/lib/function-wiki-truth.test.ts"
+      ],
+      "truth_sources": [
+        "docs/wiki/daemon.md",
+        "docs/wiki/mainline-source.md",
+        "docs/architecture.md"
+      ]
+    },
+    {
+      "feature_id": "mainline_source.cli",
+      "owners": [
+        "scripts/zterm-daemon.sh",
+        "scripts/install-global-daemon-cli.sh",
+        "scripts/prepare-global-daemon-release.sh"
+      ],
+      "allowed_paths": [
+        "scripts/zterm-daemon.sh",
+        "scripts/install-global-daemon-cli.sh",
+        "scripts/prepare-global-daemon-release.sh",
+        "scripts/prepare-daemon-npm-package.mjs",
+        "scripts/prepare-relay-server-npm-package.mjs",
+        "scripts/build-function-wiki.mjs"
+      ],
+      "forbidden_paths": [],
+      "required_gates": [
+        "src/lib/function-wiki-truth.test.ts"
+      ],
+      "truth_sources": [
+        "docs/wiki/cli.md",
+        "docs/wiki/mainline-source.md",
+        "docs/function-map.md"
+      ]
+    },
+    {
+      "feature_id": "terminal.session_drawer",
+      "title": "Session drawer (left reveal, host rail, multi-host grouping, opened-first ordering)",
+      "domain": "terminal-ui",
+      "owners": [
+        "src/components/terminal/TerminalSessionDrawer.tsx"
+      ],
+      "allowed_paths": [
+        "docs/feature-gates.md",
+        "docs/function-map.md",
+        "docs/testing/terminal-session-drawer-gesture-test-design.md",
+        "src/App.tsx",
+        "src/lib/plugin-session-drawer/",
+        "src/lib/plugin-host/session-drawer-ui-plugin.tsx",
+        "src/components/terminal/TerminalSessionDrawer.test.tsx",
+        "src/components/terminal/TerminalSessionDrawer.tsx",
+        "src/lib/traversal-relay-devices.ts",
+        "src/lib/traversal-relay-devices.test.ts",
+        "src/lib/server-identity.ts",
+        "src/lib/server-identity.test.ts",
+        "src/pages/TerminalPage.tsx",
+        "src/pages/TerminalPage.session-drawer.test.tsx",
+        "src/pages/TerminalPage.session-preview.test.tsx",
+        "src/pages/TerminalPage.tab-isolation.test.tsx",
+        "src/lib/plugin-host/plugin-host-runtime.test.ts",
+        "src/App.dynamic-refresh.test.tsx",
+        "docs/module-registry.json",
+        "docs/resource-registry.json",
+        "docs/edge-registry.json",
+        "docs/feature-registry.json",
+        "docs/feature-gates.md",
+        "docs/resource-map.md",
+        "docs/modules/project-modules.md",
+        "docs/wiki/mainline-call-map.json",
+        "docs/wiki/mainline-source.md",
+        "docs/wiki/modules.md",
+        ".appsdk/maps/function-map.json",
+        ".appsdk/maps/resource-map.json",
+        ".appsdk/maps/verification-map.json",
+        "package.json",
+        ".github/workflows/ci.yml"
+      ],
+      "forbidden_paths": [
+        "src/server/"
+      ],
+      "required_gates": [
+        "src/components/terminal/TerminalSessionDrawer.test.tsx",
+        "src/lib/traversal-relay-devices.test.ts",
+        "src/lib/server-identity.test.ts",
+        "src/pages/TerminalPage.session-drawer.test.tsx",
+        "src/pages/TerminalPage.session-preview.test.tsx",
+        "src/pages/TerminalPage.tab-isolation.test.tsx",
+        "src/lib/plugin-host/plugin-host-runtime.test.ts",
+        "src/App.dynamic-refresh.test.tsx",
+        "src/lib/module-import-graph-truth.test.ts",
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/feature-registry-truth.test.ts"
+      ],
+      "truth_sources": [
+        "docs/function-map.md",
+        "docs/ui-slices.md",
+        "docs/testing/terminal-session-drawer-gesture-test-design.md"
+      ]
+    },
+    {
+      "feature_id": "windows.desktop_shell",
+      "title": "Windows desktop shell architecture and packaging",
+      "domain": "desktop-windows",
+      "owners": [
+        "../win/electron/main.ts",
+        "../win/electron/preload.cts",
+        "../win/src/WindowsDesktopApp.tsx",
+        "../win/src/windows-terminal-session.ts"
+      ],
+      "allowed_paths": [
+        "../win/package.json",
+        "../win/index.html",
+        "../win/vite.config.ts",
+        "../win/tsconfig.json",
+        "../win/tsconfig.node.json",
+        "../win/electron/",
+        "../win/src/",
+        "../win/README.md",
+        "../win/MEMORY.md",
+        "../win/task.md",
+        "../win/docs/spec.md",
+        "../win/docs/architecture.md",
+        "../win/docs/function-map.md",
+        "../win/docs/testing/windows-desktop-shell-test-design.md",
+        "../win/docs/windows-desktop-shell-manifest.json",
+        "packages/shared/src/terminal/mac-terminal-view.tsx",
+        "packages/shared/src/react/pane-stage.tsx",
+        "docs/function-map.md",
+        "docs/feature-registry.json",
+        "docs/resource-map.md",
+        "docs/resource-registry.json"
+      ],
+      "forbidden_paths": [
+        "src/server/",
+        "../wterm/",
+        "../mac/electron/",
+        "../mac/src/lib/local-tmux-transport.ts"
+      ],
+      "required_gates": [
+        "../win/src/windows-architecture-truth.test.ts",
+        "../win/src/windows-terminal-session.test.ts",
+        "../win/tsconfig.json",
+        "../win/tsconfig.node.json",
+        "../win/docs/testing/windows-desktop-shell-test-design.md",
+        "../win/docs/windows-desktop-shell-manifest.json",
+        "src/lib/feature-registry-truth.test.ts",
+        "src/lib/resource-registry-truth.test.ts"
+      ],
+      "truth_sources": [
+        "../win/docs/spec.md",
+        "../win/docs/architecture.md",
+        "../win/docs/function-map.md",
+        "../win/docs/testing/windows-desktop-shell-test-design.md"
+      ]
+    },
+    {
+      "feature_id": "terminal.session_preview",
+      "title": "Maximum-six real-time terminal session preview grid",
+      "domain": "terminal-ui",
+      "owners": [
+        "src/lib/session-preview-selection.ts",
+        "src/lib/session-preview-gesture.ts",
+        "src/components/terminal/TerminalPreviewGrid.tsx",
+        "src/pages/TerminalPageStageShell.tsx",
+        "src/pages/TerminalPage.tsx"
+      ],
+      "allowed_paths": [
+        "src/lib/session-preview-selection.ts",
+        "src/lib/session-preview-selection.test.ts",
+        "src/lib/session-preview-gesture.ts",
+        "src/lib/session-preview-gesture.test.ts",
+        "src/components/terminal/TerminalPreviewGrid.tsx",
+        "src/components/terminal/TerminalPreviewGrid.test.tsx",
+        "src/components/terminal/TerminalPreviewGrid.render-truth.test.tsx",
+        "scripts/session-preview-source-dom-gate.tsx",
+        "src/components/terminal/TerminalPreviewRow.tsx",
+        "src/components/terminal/TerminalSessionDrawer.tsx",
+        "src/components/terminal/TerminalSessionDrawer.test.tsx",
+        "src/components/TerminalView.tsx",
+        "src/components/TerminalView.dynamic-refresh.test.tsx",
+        "src/hooks/useSessionOpenActions.ts",
+        "src/hooks/useSessionOpenActions.test.tsx",
+        "src/pages/TerminalPage.tsx",
+        "src/pages/TerminalPageStageShell.tsx",
+        "src/pages/TerminalPage.session-preview.test.tsx",
+        "src/pages/TerminalPage.session-drawer.test.tsx",
+        "src/pages/TerminalPageStageShell.pane-stage.test.tsx",
+        "src/lib/types.ts",
+        "docs/testing/terminal-session-preview-test-design.md",
+        "docs/goals/terminal-session-preview-plan.md"
+      ],
+      "forbidden_paths": [
+        "src/server/",
+        "src/contexts/session-context-transport-runtime.ts",
+        "src/contexts/session-context-buffer-runtime.ts"
+      ],
+      "required_gates": [
+        "src/lib/session-preview-selection.test.ts",
+        "src/lib/session-preview-gesture.test.ts",
+        "src/components/terminal/TerminalPreviewGrid.test.tsx",
+        "src/components/terminal/TerminalPreviewGrid.render-truth.test.tsx",
+        "src/pages/TerminalPage.session-preview.test.tsx",
+        "src/hooks/useSessionOpenActions.test.tsx",
+        "src/lib/feature-registry-truth.test.ts",
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/function-wiki-truth.test.ts"
+      ],
+      "truth_sources": [
+        "docs/goals/terminal-session-preview-plan.md",
+        "docs/testing/terminal-session-preview-test-design.md",
+        "docs/resource-map.md",
+        "docs/function-map.md",
+        ".agents/skills/terminal-buffer-truth/SKILL.md"
+      ]
+    },
+    {
+      "feature_id": "daemon.session_idle_detection",
+      "title": "Daemon tmux session idle/stopped detection via control channel",
+      "domain": "daemon",
+      "owners": [
+        "src/server/terminal-session-activity-runtime.ts",
+        "src/server/terminal-daemon-runtime.ts"
+      ],
+      "allowed_paths": [
+        "src/server/terminal-session-activity-runtime.ts",
+        "src/server/terminal-session-activity-runtime.test.ts",
+        "src/server/terminal-message-control-runtime.ts",
+        "src/server/terminal-daemon-runtime.ts",
+        "src/server/terminal-daemon-runtime.test.ts",
+        "src/server/terminal-mux-channel-runtime.ts",
+        "src/server/terminal-message-runtime.ts",
+        "src/server/server.ts",
+        "packages/shared/src/connection/protocol.ts",
+        "packages/shared/src/connection/protocol.test.ts",
+        "docs/decisions/2026-07-30-session-idle-stopped-notification.md",
+        "docs/goals/session-idle-detection-plan.md",
+        "docs/resource-registry.json",
+        "docs/resource-map.md",
+        "docs/module-registry.json",
+        "docs/edge-registry.json",
+        "docs/function-map.md",
+        "docs/feature-registry.json",
+        "docs/feature-gates.md",
+        "docs/wiki/mainline-call-map.json",
+        "docs/wiki/mainline-source.md"
+      ],
+      "forbidden_paths": [
+        "src/components",
+        "src/pages",
+        "src/contexts",
+        "src/hooks",
+        "src/contexts/session-context-tmux-management-runtime.ts"
+      ],
+      "required_gates": [
+        "src/lib/feature-registry-truth.test.ts",
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/module-import-graph-truth.test.ts",
+        "src/lib/function-wiki-truth.test.ts",
+        "src/server/terminal-session-activity-runtime.test.ts",
+        "src/server/terminal-daemon-runtime.test.ts",
+        "packages/shared/src/connection/protocol.test.ts"
+      ],
+      "truth_sources": [
+        "docs/decisions/2026-07-30-session-idle-stopped-notification.md",
+        "docs/goals/session-idle-detection-plan.md"
+      ]
+    },
+    {
+      "feature_id": "daemon.herdr_backend",
+      "title": "Official Herdr single-session terminal adapter contract",
+      "domain": "daemon-herdr",
+      "owners": [
+        "src/server/herdr-frame-canonicalizer.ts",
+        "src/server/herdr-backend-runtime.ts",
+        "src/server/terminal-backend-selection.ts"
+      ],
+      "allowed_paths": [
+        "src/server/herdr-frame-canonicalizer.ts",
+        "src/server/herdr-frame-canonicalizer.test.ts",
+        "src/server/herdr-backend.ts",
+        "src/server/herdr-backend.test.ts",
+        "src/server/herdr-backend-runtime.ts",
+        "src/server/herdr-backend-runtime.test.ts",
+        "src/server/wezterm-backend.ts",
+        "src/server/terminal-source-adapter.ts",
+        "src/server/herdr-side-channel-truth.test.ts",
+        "src/server/herdr-process-transport.ts",
+        "src/server/herdr-process-transport.test.ts",
+        "src/server/server.herdr-selection-truth.test.ts",
+        "src/server/terminal-backend-selection.ts",
+        "src/server/terminal-backend-selection.test.ts",
+        "src/server/terminal-control-runtime.ts",
+        "src/server/terminal-message-control-runtime.ts",
+        "src/server/terminal-message-runtime.ts",
+        "src/server/terminal-mirror-runtime.ts",
+        "src/server/terminal-runtime.ts",
+        "src/server/terminal-mirror-capture.ts",
+        "src/server/server.ts",
+        "src/components/tmux/TmuxSessionPickerSheet.tsx",
+        "src/components/tmux/TmuxSessionPickerSheet.test.tsx",
+        "src/lib/session-picker.ts",
+        "src/lib/tmux-sessions.ts",
+        "src/lib/tmux-sessions.test.ts",
+        "src/lib/open-tab-restore.ts",
+        "src/lib/types.ts",
+        "src/lib/open-tab-persistence.ts",
+        "src/lib/open-tab-intent.ts",
+        "src/hooks/useSessionOpenActions.ts",
+        "src/contexts/session-wire-helpers.ts",
+        "src/contexts/session-context-transport-runtime.ts",
+        "src/contexts/session-context-session-runtime.ts",
+        "packages/shared/src/connection/protocol.ts",
+        "packages/shared/src/connection/types.ts",
+        "packages/shared/src/connection/tmux-sessions.ts",
+        "docs/goals/herdr-adapter-integration-plan.md",
+        "docs/resource-registry.json",
+        "docs/resource-map.md",
+        "docs/module-registry.json",
+        "docs/edge-registry.json",
+        "docs/function-map.md",
+        "docs/feature-gates.md",
+        "docs/feature-registry.json",
+        "docs/wiki/mainline-call-map.json",
+        "docs/wiki/mainline-source.md",
+        "docs/testing/herdr-adapter-test-design.md",
+        "docs/decisions/2026-08-14-herdr-history-live-latency-truth.md",
+        "MEMORY.md",
+        "note.md"
+      ],
+      "forbidden_paths": [
+        "src/pages/",
+        "../wterm/"
+      ],
+      "required_gates": [
+        "src/server/herdr-frame-canonicalizer.test.ts",
+        "src/server/herdr-backend-runtime.test.ts",
+        "src/server/herdr-process-transport.test.ts",
+        "src/server/herdr-side-channel-truth.test.ts",
+        "src/server/terminal-backend-selection.test.ts",
+        "src/server/terminal-control-runtime.input-queue.test.ts",
+        "src/components/tmux/TmuxSessionPickerSheet.test.tsx",
+        "src/lib/tmux-sessions.test.ts",
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/function-map-resource-truth.test.ts",
+        "src/lib/mainline-resource-call-map.test.ts"
+      ],
+      "truth_sources": [
+        "docs/goals/herdr-adapter-integration-plan.md",
+        "docs/resource-registry.json",
+        "docs/module-registry.json",
+        "docs/function-map.md",
+        "docs/wiki/mainline-call-map.json"
+      ],
+      "status": "pending",
+      "capability_gaps": [
+        "history range is adapter-owned from official `pane read recent` tail plus `pane get.scroll` total-row hint; the canonicalizer remains the live frame/cursor owner",
+        "official Herdr 0.8.0 caps recent history at 1000 lines; zterm publishes `herdr-history-limit-1000` and does not fabricate earlier rows",
+        "host-scroll metrics may gate viewport-relative cursor capability but never define absolute identities",
+        "official Herdr named-session rename is unsupported and must fail explicitly",
+        "Windows ConPTY and agent side-channel gates remain pending"
+      ]
+    },
+    {
+      "feature_id": "daemon.attachment_delivery",
+      "title": "Daemon image attachment queue, per-device delivery, preview, and expiry",
+      "domain": "daemon-attachment-delivery",
+      "owners": [
+        "src/server/attachment-delivery-runtime.ts",
+        "src/server/terminal-attachment-message-runtime.ts",
+        "src/server/terminal-http-runtime.ts",
+        ".agents/skills/zterm-send-image/SKILL.md"
+      ],
+      "allowed_paths": [
+        "src/server/attachment-delivery-runtime.ts",
+        "src/server/attachment-delivery-runtime.test.ts",
+        "src/server/terminal-attachment-message-runtime.ts",
+        "src/server/terminal-attachment-message-runtime.test.ts",
+        "src/server/terminal-message-runtime.ts",
+        "src/server/terminal-http-runtime.ts",
+        "src/server/terminal-http-runtime.attachment.test.ts",
+        "src/server/server.ts",
+        "scripts/zterm-send-image.mjs",
+        "docs/testing/attachment-delivery-test-design.md",
+        "docs/feature-registry.json",
+        "docs/edge-registry.json",
+        "docs/resource-registry.json",
+        "docs/module-registry.json",
+        "docs/function-map.md",
+        "docs/wiki/mainline-call-map.json",
+        "docs/wiki/mainline-source.md",
+        ".agents/skills/zterm-send-image/SKILL.md"
+      ],
+      "forbidden_paths": [
+        "src/components/TerminalView.tsx",
+        "src/contexts/session-context-transport-runtime.ts"
+      ],
+      "required_gates": [
+        "src/server/attachment-delivery-runtime.test.ts",
+        "src/server/terminal-attachment-message-runtime.test.ts",
+        "src/server/terminal-message-runtime.test.ts",
+        "src/lib/feature-registry-truth.test.ts",
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/module-import-graph-truth.test.ts"
+      ],
+      "truth_sources": [
+        "docs/testing/attachment-delivery-test-design.md",
+        "docs/resource-map.md",
+        "docs/function-map.md"
+      ]
+    },
+    {
+      "feature_id": "client.plugin_host",
+      "title": "Client capability-scoped plugin host",
+      "domain": "client-runtime",
+  "owners": [
+    "src/lib/plugin-host/plugin-host-runtime.ts",
+    "src/lib/plugin-host/network-identity-capability-plugin.ts",
+    "src/lib/plugin-host/debug-console-ui-plugin.tsx",
+    "packages/shared/src/terminal/plugin-contract.ts",
+    "packages/shared/src/terminal/plugin-capability-registry.ts",
+    "packages/shared/src/terminal/plugin-ui-slot.ts",
+    "packages/shared/src/terminal/plugin-ui-slot-registry.ts"
+  ],
+  "allowed_paths": [
+    "src/App.tsx",
+    "src/lib/plugin-host/",
+    "packages/shared/src/terminal/plugin-contract.ts",
+    "packages/shared/src/terminal/plugin-capability-registry.ts",
+    "packages/shared/src/terminal/plugin-ui-slot.ts",
+    "packages/shared/src/terminal/plugin-ui-slot-registry.ts",
+    "src/lib/plugin-debug-console/debug-console-contract.ts",
+    "src/pages/TerminalPageDebugOverlay.tsx",
+    "src/lib/plugin-host/plugin-host-ownership.test.ts",
+    "src/pages/TerminalPageDebugOverlay.test.tsx",
+    "src/pages/TerminalPage.render-scope.test.tsx",
+    "src/pages/TerminalPage.remote-window-overlay.test.tsx",
+    "package.json",
+        ".github/workflows/ci.yml",
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/module-registry.json",
+        "docs/resource-registry.json",
+        "docs/edge-registry.json",
+        "docs/feature-registry.json",
+        "docs/function-map.md",
+        "docs/feature-gates.md",
+        "docs/resource-map.md",
+        "docs/modules/project-modules.md",
+        "docs/wiki/mainline-call-map.json",
+        "docs/wiki/mainline-source.md",
+        "docs/wiki/modules.md",
+        ".appsdk/maps/function-map.json",
+        ".appsdk/maps/resource-map.json",
+        ".appsdk/maps/verification-map.json"
+      ],
+      "forbidden_paths": [
+        "src/server/",
+        "packages/shared/src/connection/",
+        "src/contexts/SessionContext.tsx"
+      ],
+  "required_gates": [
+    "src/lib/plugin-host/plugin-host-runtime.test.ts",
+    "src/lib/plugin-host/plugin-host-ownership.test.ts",
+    "src/pages/TerminalPageDebugOverlay.test.tsx",
+    "src/pages/TerminalPage.render-scope.test.tsx",
+    "src/pages/TerminalPage.remote-window-overlay.test.tsx",
+    "src/lib/module-import-graph-truth.test.ts",
+    "src/lib/feature-registry-truth.test.ts"
+  ],
+      "truth_sources": [
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/architecture.md",
+    "docs/feature-gates.md"
+  ]
+},
+{
+  "feature_id": "client.input_normalizer",
+  "title": "Client terminal committed-text normalization owner",
+  "domain": "client-input",
+  "owners": [
+    "src/lib/terminal-input-normalization.ts"
+  ],
+  "allowed_paths": [
+    "src/lib/terminal-input-normalization.ts",
+    "src/lib/terminal-input-normalization.test.ts",
+    "src/lib/input-normalizer-ownership.test.ts",
+    "src/pages/TerminalPage.tsx",
+    "src/components/TerminalView.tsx",
+    "package.json",
+    ".github/workflows/ci.yml",
+    "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+    "docs/goals/zterm-runtime-architecture-v2-plan.md",
+    "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+    "docs/testing/terminal-keyboard-ime-test-design.md",
+    "docs/module-registry.json",
+    "docs/resource-registry.json",
+    "docs/edge-registry.json",
+    "docs/feature-registry.json",
+    "docs/function-map.md",
+    "docs/feature-gates.md",
+    "docs/resource-map.md",
+    "docs/modules/project-modules.md",
+    "docs/wiki/mainline-call-map.json",
+    "docs/wiki/mainline-source.md",
+    "docs/wiki/modules.md",
+    ".appsdk/maps/function-map.json",
+    ".appsdk/maps/resource-map.json",
+    ".appsdk/maps/verification-map.json"
+  ],
+  "forbidden_paths": [
+    "src/server/",
+    "packages/shared/src/connection/",
+    "src/contexts/SessionContext.tsx"
+  ],
+  "required_gates": [
+    "src/lib/terminal-input-normalization.test.ts",
+    "src/lib/input-normalizer-ownership.test.ts",
+    "src/lib/module-import-graph-truth.test.ts",
+    "src/lib/resource-registry-truth.test.ts",
+    "src/lib/edge-registry-truth.test.ts",
+    "src/lib/feature-registry-truth.test.ts"
+  ],
+  "truth_sources": [
+    "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+    "docs/goals/zterm-runtime-architecture-v2-plan.md",
+    "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+    "docs/architecture.md",
+    "docs/feature-gates.md"
+  ]
+},
+{
+  "feature_id": "client.debug_console",
+  "title": "Client debug console UI plugin",
+  "domain": "client-runtime",
+  "owners": [
+    "src/lib/plugin-debug-console/debug-console-contract.ts",
+    "src/lib/plugin-host/debug-console-ui-plugin.tsx",
+    "src/pages/TerminalPageDebugOverlay.tsx",
+    "packages/shared/src/terminal/plugin-ui-slot.ts",
+    "packages/shared/src/terminal/plugin-ui-slot-registry.ts"
+  ],
+  "allowed_paths": [
+    "src/lib/plugin-debug-console/",
+    "src/lib/plugin-host/debug-console-ui-plugin.tsx",
+    "src/pages/TerminalPageDebugOverlay.tsx",
+    "src/pages/TerminalPageDebugOverlay.test.tsx",
+    "src/pages/TerminalPage.render-scope.test.tsx",
+    "src/pages/TerminalPage.remote-window-overlay.test.tsx",
+    "src/lib/plugin-host/plugin-host-runtime.test.ts",
+    "src/lib/plugin-host/plugin-host-ownership.test.ts",
+    "src/lib/architecture-boundary-truth.test.ts",
+    "src/lib/module-registry-truth.test.ts",
+    "src/lib/module-import-graph-truth.test.ts",
+    "src/lib/resource-registry-truth.test.ts",
+    "src/lib/edge-registry-truth.test.ts",
+    "src/lib/feature-registry-truth.test.ts",
+    "packages/shared/src/terminal/plugin-ui-slot.ts",
+    "packages/shared/src/terminal/plugin-ui-slot-registry.ts",
+    "package.json",
+    ".github/workflows/ci.yml",
+    "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+    "docs/goals/zterm-runtime-architecture-v2-plan.md",
+    "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+    "docs/module-registry.json",
+    "docs/resource-registry.json",
+    "docs/edge-registry.json",
+    "docs/feature-registry.json",
+    "docs/function-map.md",
+    "docs/feature-gates.md",
+    "docs/resource-map.md",
+    "docs/modules/project-modules.md",
+    "docs/wiki/mainline-call-map.json",
+    "docs/wiki/mainline-source.md",
+    "docs/wiki/modules.md",
+    ".appsdk/maps/function-map.json",
+    ".appsdk/maps/resource-map.json",
+    ".appsdk/maps/verification-map.json"
+  ],
+  "forbidden_paths": [
+    "src/server/",
+    "packages/shared/src/connection/",
+    "src/contexts/SessionContext.tsx",
+    "src/lib/session-buffer-store.ts"
+  ],
+  "required_gates": [
+    "src/lib/plugin-host/plugin-host-runtime.test.ts",
+    "src/pages/TerminalPageDebugOverlay.test.tsx",
+    "src/pages/TerminalPage.render-scope.test.tsx",
+    "src/pages/TerminalPage.remote-window-overlay.test.tsx",
+    "src/lib/module-import-graph-truth.test.ts",
+    "src/lib/resource-registry-truth.test.ts",
+    "src/lib/edge-registry-truth.test.ts",
+    "src/lib/feature-registry-truth.test.ts"
+  ],
+  "truth_sources": [
+    "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+    "docs/goals/zterm-runtime-architecture-v2-plan.md",
+    "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+    "docs/architecture.md",
+    "docs/feature-gates.md"
+  ]
+},
+{
+  "feature_id": "client.session_drawer_ui",
+  "title": "Client typed session drawer UI plugin slot",
+  "domain": "client-runtime",
+  "owners": [
+    "src/lib/plugin-session-drawer/session-drawer-contract.ts",
+    "src/lib/plugin-host/session-drawer-ui-plugin.tsx"
+  ],
+  "allowed_paths": [
+    "src/lib/plugin-session-drawer/",
+    "src/lib/plugin-host/session-drawer-ui-plugin.tsx",
+    "src/lib/plugin-host/plugin-host-runtime.test.ts",
+    "src/lib/plugin-host/plugin-host-ownership.test.ts",
+    "src/pages/TerminalPage.session-drawer.test.tsx",
+    "src/pages/TerminalPage.session-preview.test.tsx",
+    "src/pages/TerminalPage.tab-isolation.test.tsx",
+    "src/App.tsx",
+    "src/pages/TerminalPage.tsx",
+    "src/App.dynamic-refresh.test.tsx",
+    "src/components/terminal/TerminalSessionDrawer.tsx",
+    "src/components/terminal/TerminalSessionDrawer.test.tsx",
+    "src/lib/module-registry-truth.test.ts",
+    "src/lib/module-import-graph-truth.test.ts",
+    "src/lib/resource-registry-truth.test.ts",
+    "src/lib/edge-registry-truth.test.ts",
+    "src/lib/feature-registry-truth.test.ts",
+    "package.json",
+    ".github/workflows/ci.yml",
+    "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+    "docs/goals/zterm-runtime-architecture-v2-plan.md",
+    "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+    "docs/module-registry.json",
+    "docs/resource-registry.json",
+    "docs/edge-registry.json",
+    "docs/feature-registry.json",
+    "docs/function-map.md",
+    "docs/feature-gates.md",
+    "docs/resource-map.md",
+    "docs/modules/project-modules.md",
+    "docs/wiki/mainline-call-map.json",
+    "docs/wiki/mainline-source.md",
+    "docs/wiki/modules.md",
+    ".appsdk/maps/function-map.json",
+    ".appsdk/maps/resource-map.json",
+    ".appsdk/maps/verification-map.json"
+  ],
+  "forbidden_paths": [
+    "src/server/",
+    "packages/shared/src/connection/",
+    "src/contexts/SessionContext.tsx"
+  ],
+  "required_gates": [
+    "src/lib/plugin-host/plugin-host-runtime.test.ts",
+    "src/pages/TerminalPage.session-drawer.test.tsx",
+    "src/pages/TerminalPage.session-preview.test.tsx",
+    "src/pages/TerminalPage.tab-isolation.test.tsx",
+    "src/App.dynamic-refresh.test.tsx",
+    "src/lib/module-import-graph-truth.test.ts",
+    "src/lib/resource-registry-truth.test.ts",
+    "src/lib/edge-registry-truth.test.ts",
+    "src/lib/feature-registry-truth.test.ts"
+  ],
+  "truth_sources": [
+    "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+    "docs/goals/zterm-runtime-architecture-v2-plan.md",
+    "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+    "docs/architecture.md",
+    "docs/feature-gates.md"
+  ]
+},
+{
+  "feature_id": "client.file_browser_ui",
+  "title": "Client typed file browser UI plugin slot",
+  "domain": "client-runtime",
+  "owners": [
+    "src/lib/plugin-file-browser/file-browser-contract.ts",
+    "src/lib/plugin-host/file-browser-ui-plugin.tsx"
+  ],
+  "allowed_paths": [
+    "src/lib/plugin-file-browser/",
+    "src/lib/plugin-host/file-browser-ui-plugin.tsx",
+    "src/lib/plugin-host/plugin-host-runtime.test.ts",
+    "src/lib/plugin-host/plugin-host-ownership.test.ts",
+    "src/pages/TerminalPage.render-isolation.test.tsx",
+    "src/App.tsx",
+    "src/pages/TerminalPage.tsx",
+    "src/App.dynamic-refresh.test.tsx",
+    "src/components/terminal/FileTransferSheet.tsx",
+    "src/components/terminal/FileTransferSheet.test.tsx",
+    "src/lib/module-registry-truth.test.ts",
+    "src/lib/module-import-graph-truth.test.ts",
+    "src/lib/resource-registry-truth.test.ts",
+    "src/lib/edge-registry-truth.test.ts",
+    "src/lib/feature-registry-truth.test.ts",
+    "package.json",
+    ".github/workflows/ci.yml",
+    "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+    "docs/goals/zterm-runtime-architecture-v2-plan.md",
+    "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+    "docs/module-registry.json",
+    "docs/resource-registry.json",
+    "docs/edge-registry.json",
+    "docs/feature-registry.json",
+    "docs/function-map.md",
+    "docs/feature-gates.md",
+    "docs/resource-map.md",
+    "docs/modules/project-modules.md",
+    "docs/wiki/mainline-call-map.json",
+    "docs/wiki/mainline-source.md",
+    "docs/wiki/modules.md",
+    ".appsdk/maps/function-map.json",
+    ".appsdk/maps/resource-map.json",
+    ".appsdk/maps/verification-map.json"
+  ],
+  "forbidden_paths": [
+    "src/server/",
+    "packages/shared/src/connection/",
+    "src/contexts/SessionContext.tsx"
+  ],
+  "required_gates": [
+    "src/lib/plugin-host/plugin-host-runtime.test.ts",
+    "src/lib/plugin-file-browser/file-browser-ui-ownership.test.ts",
+    "src/pages/TerminalPage.render-isolation.test.tsx",
+    "src/App.dynamic-refresh.test.tsx",
+    "src/lib/module-import-graph-truth.test.ts",
+    "src/lib/resource-registry-truth.test.ts",
+    "src/lib/edge-registry-truth.test.ts",
+    "src/lib/feature-registry-truth.test.ts"
+  ],
+  "truth_sources": [
+    "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+    "docs/goals/zterm-runtime-architecture-v2-plan.md",
+    "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+    "docs/architecture.md",
+    "docs/feature-gates.md"
+  ]
+},
+{
+  "feature_id": "client.settings_update_ui",
+  "title": "Client typed settings update UI plugin slot",
+  "domain": "client-runtime",
+  "owners": [
+    "src/lib/plugin-settings-update/settings-update-contract.ts",
+    "src/lib/plugin-host/settings-update-ui-plugin.tsx"
+  ],
+  "allowed_paths": [
+    "src/lib/plugin-settings-update/",
+    "src/lib/plugin-host/settings-update-ui-plugin.tsx",
+    "src/lib/plugin-host/plugin-host-runtime.test.ts",
+    "src/lib/plugin-host/plugin-host-ownership.test.ts",
+    "src/pages/SettingsPage.plugin-render.test.tsx",
+    "src/App.tsx",
+    "src/pages/SettingsPage.tsx",
+    "src/App.dynamic-refresh.test.tsx",
+    "src/components/settings/AppUpdateSection.tsx",
+    "src/components/settings/AppUpdateSection.test.tsx",
+    "src/lib/module-registry-truth.test.ts",
+    "src/lib/module-import-graph-truth.test.ts",
+    "src/lib/resource-registry-truth.test.ts",
+    "src/lib/edge-registry-truth.test.ts",
+    "src/lib/feature-registry-truth.test.ts",
+    "package.json",
+    ".github/workflows/ci.yml",
+    "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+    "docs/goals/zterm-runtime-architecture-v2-plan.md",
+    "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+    "docs/module-registry.json",
+    "docs/resource-registry.json",
+    "docs/edge-registry.json",
+    "docs/feature-registry.json",
+    "docs/function-map.md",
+    "docs/feature-gates.md",
+    "docs/resource-map.md",
+    "docs/modules/project-modules.md",
+    "docs/wiki/mainline-call-map.json",
+    "docs/wiki/mainline-source.md",
+    "docs/wiki/modules.md",
+    ".appsdk/maps/function-map.json",
+    ".appsdk/maps/resource-map.json",
+    ".appsdk/maps/verification-map.json"
+  ],
+  "forbidden_paths": [
+    "src/server/",
+    "packages/shared/src/connection/",
+    "src/contexts/SessionContext.tsx"
+  ],
+  "required_gates": [
+    "src/lib/plugin-host/plugin-host-runtime.test.ts",
+    "src/lib/plugin-settings-update/settings-update-ui-ownership.test.ts",
+    "src/pages/SettingsPage.plugin-render.test.tsx",
+    "src/App.dynamic-refresh.test.tsx",
+    "src/lib/module-import-graph-truth.test.ts",
+    "src/lib/resource-registry-truth.test.ts",
+    "src/lib/edge-registry-truth.test.ts",
+    "src/lib/feature-registry-truth.test.ts"
+  ],
+  "truth_sources": [
+    "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+    "docs/goals/zterm-runtime-architecture-v2-plan.md",
+    "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+    "docs/architecture.md",
+    "docs/feature-gates.md"
+  ]
+},
+{
+  "feature_id": "client.remote_window_ui",
+  "title": "Client typed remote window UI plugin slot",
+  "domain": "client-runtime",
+  "owners": [
+    "src/lib/plugin-remote-window/remote-window-contract.ts",
+    "src/lib/plugin-host/remote-window-ui-plugin.tsx"
+  ],
+  "allowed_paths": [
+    "src/lib/plugin-remote-window/",
+    "src/lib/plugin-host/remote-window-ui-plugin.tsx",
+    "src/lib/plugin-host/plugin-host-runtime.test.ts",
+    "src/lib/plugin-host/plugin-host-ownership.test.ts",
+    "src/pages/TerminalPage.remote-window-overlay.test.tsx",
+    "src/pages/TerminalPage.android-ime.test.tsx",
+    "src/App.tsx",
+    "src/pages/TerminalPage.tsx",
+    "src/App.dynamic-refresh.test.tsx",
+    "src/components/terminal/RemoteWindowOverlay.tsx",
+    "src/components/terminal/RemoteWindowOverlay.test.tsx",
+    "src/lib/module-registry-truth.test.ts",
+    "src/lib/module-import-graph-truth.test.ts",
+    "src/lib/resource-registry-truth.test.ts",
+    "src/lib/edge-registry-truth.test.ts",
+    "src/lib/feature-registry-truth.test.ts",
+    "package.json",
+    ".github/workflows/ci.yml",
+    "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+    "docs/goals/zterm-runtime-architecture-v2-plan.md",
+    "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+    "docs/module-registry.json",
+    "docs/resource-registry.json",
+    "docs/edge-registry.json",
+    "docs/feature-registry.json",
+    "docs/function-map.md",
+    "docs/feature-gates.md",
+    "docs/resource-map.md",
+    "docs/modules/project-modules.md",
+    "docs/wiki/mainline-call-map.json",
+    "docs/wiki/mainline-source.md",
+    "docs/wiki/modules.md",
+    ".appsdk/maps/function-map.json",
+    ".appsdk/maps/resource-map.json",
+    ".appsdk/maps/verification-map.json"
+  ],
+  "forbidden_paths": [
+    "src/server/",
+    "packages/shared/src/connection/",
+    "src/contexts/SessionContext.tsx"
+  ],
+  "required_gates": [
+    "src/lib/plugin-host/plugin-host-runtime.test.ts",
+    "src/lib/plugin-remote-window/remote-window-ui-ownership.test.ts",
+    "src/pages/TerminalPage.remote-window-overlay.test.tsx",
+    "src/pages/TerminalPage.android-ime.test.tsx",
+    "src/App.dynamic-refresh.test.tsx",
+    "src/lib/module-import-graph-truth.test.ts",
+    "src/lib/resource-registry-truth.test.ts",
+    "src/lib/edge-registry-truth.test.ts",
+    "src/lib/feature-registry-truth.test.ts"
+  ],
+  "truth_sources": [
+    "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+    "docs/goals/zterm-runtime-architecture-v2-plan.md",
+    "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+    "docs/architecture.md",
+    "docs/feature-gates.md"
+  ]
+},
+{
+  "feature_id": "client.quickbar_ui",
+  "title": "Client typed quickbar UI plugin slot",
+  "domain": "client-runtime",
+  "owners": [
+    "src/lib/plugin-quickbar/quickbar-contract.ts",
+    "src/lib/plugin-host/quickbar-ui-plugin.tsx"
+  ],
+  "allowed_paths": [
+    "src/lib/plugin-quickbar/",
+    "src/lib/plugin-host/quickbar-ui-plugin.tsx",
+    "src/lib/plugin-host/plugin-host-runtime.test.ts",
+    "src/lib/plugin-host/plugin-host-ownership.test.ts",
+    "src/pages/TerminalPage.render-isolation.test.tsx",
+    "src/App.tsx",
+    "src/pages/TerminalPage.tsx",
+    "src/App.dynamic-refresh.test.tsx",
+    "src/components/terminal/TerminalQuickBar.tsx",
+    "src/components/terminal/TerminalQuickBar.test.tsx",
+    "src/lib/module-registry-truth.test.ts",
+    "src/lib/module-import-graph-truth.test.ts",
+    "src/lib/resource-registry-truth.test.ts",
+    "src/lib/edge-registry-truth.test.ts",
+    "src/lib/feature-registry-truth.test.ts",
+    "package.json",
+    ".github/workflows/ci.yml",
+    "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+    "docs/goals/zterm-runtime-architecture-v2-plan.md",
+    "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+    "docs/module-registry.json",
+    "docs/resource-registry.json",
+    "docs/edge-registry.json",
+    "docs/feature-registry.json",
+    "docs/function-map.md",
+    "docs/feature-gates.md",
+    "docs/resource-map.md",
+    "docs/modules/project-modules.md",
+    "docs/wiki/mainline-call-map.json",
+    "docs/wiki/mainline-source.md",
+    "docs/wiki/modules.md",
+    ".appsdk/maps/function-map.json",
+    ".appsdk/maps/resource-map.json",
+    ".appsdk/maps/verification-map.json"
+  ],
+  "forbidden_paths": [
+    "src/server/",
+    "packages/shared/src/connection/",
+    "src/contexts/SessionContext.tsx"
+  ],
+  "required_gates": [
+    "src/lib/plugin-host/plugin-host-runtime.test.ts",
+    "src/lib/plugin-quickbar/quickbar-ui-ownership.test.ts",
+    "src/pages/TerminalPage.render-isolation.test.tsx",
+    "src/App.dynamic-refresh.test.tsx",
+    "src/lib/module-import-graph-truth.test.ts",
+    "src/lib/resource-registry-truth.test.ts",
+    "src/lib/edge-registry-truth.test.ts",
+    "src/lib/feature-registry-truth.test.ts"
+  ],
+  "truth_sources": [
+    "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+    "docs/goals/zterm-runtime-architecture-v2-plan.md",
+    "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+    "docs/architecture.md",
+    "docs/feature-gates.md"
+  ]
+},
+{
+  "feature_id": "client.terminal_shell_ui",
+  "title": "Client typed terminal shell UI plugin slot",
+  "domain": "client-runtime",
+  "owners": [
+    "src/lib/plugin-terminal-shell/terminal-shell-contract.ts",
+    "src/lib/plugin-host/terminal-shell-ui-plugin.tsx"
+  ],
+  "allowed_paths": [
+    "src/lib/plugin-terminal-shell/",
+    "src/lib/plugin-host/terminal-shell-ui-plugin.tsx",
+    "src/lib/plugin-host/plugin-host-runtime.test.ts",
+    "src/lib/plugin-host/plugin-host-ownership.test.ts",
+    "src/pages/TerminalPage.render-isolation.test.tsx",
+    "src/App.tsx",
+    "src/pages/TerminalPage.tsx",
+    "src/App.dynamic-refresh.test.tsx",
+    "src/pages/TerminalPageStageShell.tsx",
+    "src/pages/terminal-page-shell-ui.tsx",
+    "src/pages/TerminalConnectionStatusStrip.tsx",
+    "src/pages/TerminalPageCopyMenu.tsx",
+    "src/lib/module-registry-truth.test.ts",
+    "src/lib/module-import-graph-truth.test.ts",
+    "src/lib/resource-registry-truth.test.ts",
+    "src/lib/edge-registry-truth.test.ts",
+    "src/lib/feature-registry-truth.test.ts",
+    "package.json",
+    ".github/workflows/ci.yml",
+    "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+    "docs/goals/zterm-runtime-architecture-v2-plan.md",
+    "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+    "docs/module-registry.json",
+    "docs/resource-registry.json",
+    "docs/edge-registry.json",
+    "docs/feature-registry.json",
+    "docs/function-map.md",
+    "docs/feature-gates.md",
+    "docs/resource-map.md",
+    "docs/modules/project-modules.md",
+    "docs/wiki/mainline-call-map.json",
+    "docs/wiki/mainline-source.md",
+    "docs/wiki/modules.md",
+    ".appsdk/maps/function-map.json",
+    ".appsdk/maps/resource-map.json",
+    ".appsdk/maps/verification-map.json"
+  ],
+  "forbidden_paths": [
+    "src/server/",
+    "packages/shared/src/connection/",
+    "src/contexts/SessionContext.tsx"
+  ],
+  "required_gates": [
+    "src/lib/plugin-host/plugin-host-runtime.test.ts",
+    "src/lib/plugin-terminal-shell/terminal-shell-ui-ownership.test.ts",
+    "src/pages/TerminalPage.render-isolation.test.tsx",
+    "src/App.dynamic-refresh.test.tsx",
+    "src/lib/module-import-graph-truth.test.ts",
+    "src/lib/resource-registry-truth.test.ts",
+    "src/lib/edge-registry-truth.test.ts",
+    "src/lib/feature-registry-truth.test.ts"
+  ],
+  "truth_sources": [
+    "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+    "docs/goals/zterm-runtime-architecture-v2-plan.md",
+    "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+    "docs/architecture.md",
+    "docs/feature-gates.md"
+  ]
+},
+{
+  "feature_id": "client.composition_root",
+      "title": "Client declared runtime composition root",
+      "domain": "client-runtime",
+      "owners": [
+        "src/lib/composition-root/client-composition-root.ts"
+      ],
+      "allowed_paths": [
+        "src/App.tsx",
+        "src/lib/composition-root/",
+        "package.json",
+        ".github/workflows/ci.yml",
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/module-registry.json",
+        "docs/resource-registry.json",
+        "docs/edge-registry.json",
+        "docs/feature-registry.json",
+        "docs/function-map.md",
+        "docs/feature-gates.md",
+        "docs/resource-map.md",
+        "docs/modules/project-modules.md",
+        "docs/wiki/mainline-call-map.json",
+        "docs/wiki/mainline-source.md",
+        "docs/wiki/modules.md",
+        ".appsdk/maps/function-map.json",
+        ".appsdk/maps/resource-map.json",
+        ".appsdk/maps/verification-map.json"
+      ],
+      "forbidden_paths": [
+        "src/server/",
+        "src/contexts/SessionContext.tsx",
+        "src/components/",
+        "src/pages/"
+      ],
+      "required_gates": [
+        "src/lib/composition-root/client-composition-root.test.ts",
+        "src/lib/composition-root/client-composition-root-ownership.test.ts",
+        "src/lib/module-import-graph-truth.test.ts",
+        "src/lib/feature-registry-truth.test.ts"
+      ],
+      "truth_sources": [
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/architecture.md",
+        "docs/feature-gates.md"
+      ]
+    },
+    {
+      "feature_id": "client.control_center",
+      "title": "Client control center and shared control contract",
+      "domain": "client-runtime",
+      "owners": [
+        "src/lib/control-center/client-control-center.ts",
+        "src/lib/plugin-host/plugin-host-control-node.ts",
+        "packages/shared/src/terminal/control-contract.ts"
+      ],
+      "allowed_paths": [
+        "src/App.tsx",
+        "src/lib/control-center/",
+        "src/lib/plugin-host/plugin-host-control-node.ts",
+        "src/lib/plugin-host/plugin-host-control-node.test.ts",
+        "packages/shared/src/terminal/control-contract.ts",
+        "packages/shared/package.json",
+        "package.json",
+        ".github/workflows/ci.yml",
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/module-registry.json",
+        "docs/resource-registry.json",
+        "docs/edge-registry.json",
+        "docs/feature-registry.json",
+        "docs/function-map.md",
+        "docs/feature-gates.md",
+        "docs/resource-map.md",
+        "docs/modules/project-modules.md",
+        "docs/wiki/mainline-call-map.json",
+        "docs/wiki/mainline-source.md",
+        "docs/wiki/modules.md",
+        ".appsdk/maps/function-map.json",
+        ".appsdk/maps/resource-map.json",
+        ".appsdk/maps/verification-map.json"
+      ],
+      "forbidden_paths": [
+        "src/server/",
+        "src/contexts/SessionContext.tsx",
+        "src/lib/plugin-host/plugin-host-runtime.ts"
+      ],
+      "required_gates": [
+        "src/lib/control-center/client-control-center.test.ts",
+        "src/lib/control-center/client-control-center-ownership.test.ts",
+        "src/lib/plugin-host/plugin-host-control-node.test.ts",
+        "src/lib/plugin-host/plugin-host-runtime.test.ts",
+        "src/lib/module-import-graph-truth.test.ts",
+        "src/lib/feature-registry-truth.test.ts"
+      ],
+      "truth_sources": [
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/architecture.md",
+        "docs/feature-gates.md"
+      ]
+    },
+    {
+      "feature_id": "daemon.control_center",
+      "title": "Daemon control gateway and control center",
+      "domain": "daemon-runtime",
+      "owners": [
+        "src/server/daemon-control-center-runtime.ts",
+        "src/server/daemon-control-gateway-runtime.ts"
+      ],
+      "allowed_paths": [
+        "src/server/daemon-control-center-runtime.ts",
+        "src/server/daemon-control-center-runtime.test.ts",
+        "src/server/daemon-control-center-ownership.test.ts",
+        "src/server/daemon-control-gateway-runtime.ts",
+        "src/server/terminal-message-runtime.ts",
+        "src/server/terminal-message-control-runtime.ts",
+        "packages/shared/src/terminal/control-contract.ts",
+        "package.json",
+        ".github/workflows/ci.yml",
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/module-registry.json",
+        "docs/resource-registry.json",
+        "docs/edge-registry.json",
+        "docs/feature-registry.json",
+        "docs/function-map.md",
+        "docs/feature-gates.md",
+        "docs/resource-map.md",
+        "docs/modules/project-modules.md",
+        "docs/wiki/mainline-call-map.json",
+        "docs/wiki/mainline-source.md",
+        "docs/wiki/modules.md",
+        "docs/wiki/daemon.md",
+        "docs/architecture.md",
+        ".appsdk/maps/function-map.json",
+        ".appsdk/maps/resource-map.json",
+        ".appsdk/maps/verification-map.json",
+        ".appsdk/records/evidence/"
+      ],
+      "forbidden_paths": [
+        "src/lib/",
+        "src/contexts/",
+        "src/components/",
+        "src/pages/"
+      ],
+      "required_gates": [
+        "src/server/daemon-control-center-runtime.test.ts",
+        "src/server/daemon-control-center-ownership.test.ts",
+        "src/server/terminal-message-runtime.test.ts",
+        "src/lib/module-import-graph-truth.test.ts",
+        "src/lib/feature-registry-truth.test.ts"
+      ],
+      "truth_sources": [
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/architecture.md",
+        "docs/feature-gates.md"
+      ]
+    },
+    {
+      "feature_id": "daemon.session_catalog",
+      "title": "Daemon backend session catalog ownership",
+      "domain": "daemon-runtime",
+      "owners": [
+        "src/server/daemon-session-catalog-runtime.ts"
+      ],
+      "allowed_paths": [
+        "src/server/daemon-session-catalog-runtime.ts",
+        "src/server/daemon-session-catalog-runtime.test.ts",
+        "src/server/daemon-session-catalog-ownership.test.ts",
+        "src/server/daemon-control-gateway-runtime.ts",
+        "src/server/terminal-message-control-runtime.ts",
+        "src/server/terminal-message-runtime.ts",
+        "package.json",
+        ".github/workflows/ci.yml",
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/module-registry.json",
+        "docs/resource-registry.json",
+        "docs/edge-registry.json",
+        "docs/feature-registry.json",
+        "docs/function-map.md",
+        "docs/feature-gates.md",
+        "docs/resource-map.md",
+        "docs/modules/project-modules.md",
+        "docs/wiki/mainline-call-map.json",
+        "docs/wiki/mainline-source.md",
+        "docs/wiki/modules.md",
+        "docs/wiki/daemon.md",
+        "docs/architecture.md",
+        "docs/decisions/2026-07-30-session-idle-stopped-notification.md",
+        ".appsdk/maps/function-map.json",
+        ".appsdk/maps/resource-map.json",
+        ".appsdk/maps/verification-map.json",
+        ".appsdk/records/evidence/"
+      ],
+      "forbidden_paths": [
+        "src/lib/",
+        "src/contexts/",
+        "src/components/",
+        "src/pages/",
+        "src/server/server.ts"
+      ],
+      "required_gates": [
+        "src/server/daemon-session-catalog-runtime.test.ts",
+        "src/server/daemon-session-catalog-ownership.test.ts",
+        "src/lib/module-import-graph-truth.test.ts",
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/feature-registry-truth.test.ts"
+      ],
+      "truth_sources": [
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/architecture.md",
+        "docs/feature-gates.md"
+      ]
+    },
+    {
+      "feature_id": "daemon.source_adapter",
+      "title": "Daemon terminal source adapter contract ownership",
+      "domain": "daemon-runtime",
+      "owners": [
+        "src/server/terminal-source-adapter.ts"
+      ],
+      "allowed_paths": [
+        "src/server/terminal-source-adapter.ts",
+        "src/server/terminal-source-adapter.test.ts",
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/module-registry.json",
+        "docs/edge-registry.json",
+        "docs/feature-registry.json",
+        "docs/function-map.md",
+        "docs/feature-gates.md",
+        "docs/resource-map.md",
+        "docs/modules/project-modules.md",
+        "docs/wiki/mainline-call-map.json",
+        "docs/wiki/mainline-source.md",
+        "docs/wiki/modules.md",
+        "docs/wiki/daemon.md",
+        "docs/architecture.md",
+        ".appsdk/maps/function-map.json",
+        ".appsdk/maps/resource-map.json",
+        ".appsdk/maps/verification-map.json",
+        ".appsdk/records/evidence/"
+      ],
+      "forbidden_paths": [
+        "src/lib/",
+        "src/contexts/",
+        "src/components/",
+        "src/pages/",
+        "src/server/server.ts"
+      ],
+      "required_gates": [
+        "src/server/terminal-source-adapter.test.ts",
+        "src/lib/module-import-graph-truth.test.ts",
+        "src/lib/feature-registry-truth.test.ts",
+        "src/lib/function-wiki-truth.test.ts"
+      ],
+      "truth_sources": [
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/architecture.md",
+        "docs/feature-gates.md"
+      ]
+    },
+    {
+      "feature_id": "daemon.mirror_writer",
+      "title": "Daemon mirror writer snapshot capture and commit ownership",
+      "domain": "daemon-runtime",
+      "owners": [
+        "src/server/terminal-mirror-capture.ts"
+      ],
+      "allowed_paths": [
+        "src/server/terminal-mirror-capture.ts",
+        "src/server/terminal-mirror-capture.test.ts",
+        "src/server/terminal-mirror-capture-continuity.test.ts",
+        "src/server/server.mirror-capture-truth.test.ts",
+        "src/server/terminal-mirror-writer-ownership.test.ts",
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/testing/module-edge-registry-test-design.md",
+        "docs/module-registry.json",
+        "docs/edge-registry.json",
+        "docs/feature-registry.json",
+        "docs/function-map.md",
+        "docs/feature-gates.md",
+        "docs/resource-map.md",
+        "docs/modules/project-modules.md",
+        "docs/wiki/mainline-call-map.json",
+        "docs/wiki/mainline-source.md",
+        "docs/wiki/modules.md",
+        "docs/wiki/daemon.md",
+        "docs/architecture.md",
+        "docs/decisions/2026-04-23-terminal-head-buffer-render-truth.md",
+        ".appsdk/maps/function-map.json",
+        ".appsdk/maps/resource-map.json",
+        ".appsdk/maps/verification-map.json",
+        ".appsdk/records/evidence/"
+      ],
+      "forbidden_paths": [
+        "src/server/terminal-mirror-runtime.ts",
+        "src/server/daemon-buffer-publisher-runtime.ts",
+        "src/server/terminal-message-runtime.ts",
+        "src/contexts/",
+        "src/components/",
+        "src/pages/"
+      ],
+      "required_gates": [
+        "src/server/terminal-mirror-capture.test.ts",
+        "src/server/terminal-mirror-capture-continuity.test.ts",
+        "src/server/server.mirror-capture-truth.test.ts",
+        "src/server/terminal-mirror-writer-ownership.test.ts",
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/module-import-graph-truth.test.ts",
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/feature-registry-truth.test.ts",
+        "src/lib/function-wiki-truth.test.ts"
+      ],
+      "truth_sources": [
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/testing/module-edge-registry-test-design.md",
+        "docs/architecture.md",
+        "docs/feature-gates.md",
+        "docs/decisions/2026-04-23-terminal-head-buffer-render-truth.md"
+      ]
+    },
+    {
+      "feature_id": "shared.node_contract",
+      "title": "Shared runtime node identity, lifecycle, and subscription contracts",
+      "domain": "shared-contract",
+      "owners": [
+        "packages/shared/src/terminal/node-contract.ts"
+      ],
+      "allowed_paths": [
+        "packages/shared/src/terminal/node-contract.ts",
+        "packages/shared/src/terminal/node-contract.test.ts",
+        "packages/shared/src/terminal/debug-contract.ts",
+        "packages/shared/src/terminal/debug-contract.test.ts",
+        "packages/shared/src/index.ts",
+        "packages/shared/package.json",
+        "src/lib/shared-contract-ownership.test.ts",
+        "src/lib/client-debug-snapshot.ts",
+        "src/lib/client-debug-snapshot.test.ts",
+        "src/server/runtime-debug-store.ts",
+        "src/server/runtime-debug-store.test.ts",
+        "src/server/terminal-debug-runtime.ts",
+        "src/server/terminal-debug-runtime.test.ts",
+        "src/server/server.ts",
+        "package.json",
+        ".github/workflows/ci.yml",
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/module-registry.json",
+        "docs/feature-registry.json",
+        "docs/resource-registry.json",
+        "docs/edge-registry.json",
+        "docs/function-map.md",
+        "docs/feature-gates.md",
+        "docs/resource-map.md",
+        "docs/modules/project-modules.md",
+        "docs/wiki/mainline-call-map.json",
+        "docs/wiki/mainline-source.md",
+        "docs/wiki/modules.md",
+        ".appsdk/maps/function-map.json",
+        ".appsdk/maps/resource-map.json",
+        ".appsdk/maps/verification-map.json",
+        ".appsdk/records/evidence/"
+      ],
+      "forbidden_paths": [
+        "src/contexts/",
+        "src/components/",
+        "src/pages/"
+      ],
+      "required_gates": [
+        "packages/shared/src/terminal/node-contract.test.ts",
+        "packages/shared/src/terminal/debug-contract.test.ts",
+        "src/lib/shared-contract-ownership.test.ts",
+        "src/lib/client-debug-snapshot.test.ts",
+        "src/server/runtime-debug-store.test.ts",
+        "src/server/terminal-debug-runtime.test.ts",
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/feature-registry-truth.test.ts"
+      ],
+      "truth_sources": [
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/architecture.md",
+        "docs/feature-gates.md"
+      ]
+    },
+    {
+      "feature_id": "shared.debug_contract",
+      "title": "Shared typed debug snapshots, events, filters, and permission contracts",
+      "domain": "shared-contract",
+      "owners": [
+        "packages/shared/src/terminal/debug-contract.ts"
+      ],
+      "allowed_paths": [
+        "packages/shared/src/terminal/debug-contract.ts",
+        "packages/shared/src/terminal/debug-contract.test.ts",
+        "packages/shared/src/terminal/node-contract.ts",
+        "packages/shared/src/terminal/node-contract.test.ts",
+        "packages/shared/src/index.ts",
+        "packages/shared/package.json",
+        "src/lib/shared-contract-ownership.test.ts",
+        "src/lib/client-debug-snapshot.ts",
+        "src/lib/client-debug-snapshot.test.ts",
+        "src/server/runtime-debug-store.ts",
+        "src/server/runtime-debug-store.test.ts",
+        "src/server/terminal-debug-runtime.ts",
+        "src/server/terminal-debug-runtime.test.ts",
+        "src/server/server.ts",
+        "package.json",
+        ".github/workflows/ci.yml",
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/module-registry.json",
+        "docs/feature-registry.json",
+        "docs/resource-registry.json",
+        "docs/edge-registry.json",
+        "docs/function-map.md",
+        "docs/feature-gates.md",
+        "docs/resource-map.md",
+        "docs/modules/project-modules.md",
+        "docs/wiki/mainline-call-map.json",
+        "docs/wiki/mainline-source.md",
+        "docs/wiki/modules.md",
+        ".appsdk/maps/function-map.json",
+        ".appsdk/maps/resource-map.json",
+        ".appsdk/maps/verification-map.json",
+        ".appsdk/records/evidence/"
+      ],
+      "forbidden_paths": [
+        "src/contexts/",
+        "src/components/",
+        "src/pages/"
+      ],
+      "required_gates": [
+        "packages/shared/src/terminal/debug-contract.test.ts",
+        "packages/shared/src/terminal/node-contract.test.ts",
+        "src/lib/shared-contract-ownership.test.ts",
+        "src/lib/client-debug-snapshot.test.ts",
+        "src/server/runtime-debug-store.test.ts",
+        "src/server/terminal-debug-runtime.test.ts",
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/feature-registry-truth.test.ts"
+      ],
+      "truth_sources": [
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/architecture.md",
+        "docs/feature-gates.md"
+      ]
+    },
+    {
+      "feature_id": "client.observability",
+      "title": "Client bounded debug snapshot, event, export, and permission observability",
+      "domain": "client-runtime",
+      "owners": [
+        "src/lib/client-debug-snapshot.ts",
+        "src/lib/runtime-debug-http-exporter.ts"
+      ],
+      "allowed_paths": [
+        "src/lib/client-debug-snapshot.ts",
+        "src/lib/client-debug-snapshot.test.ts",
+        "src/lib/runtime-debug-http-exporter.ts",
+        "src/lib/runtime-debug-http-exporter.test.ts",
+        "src/lib/shared-contract-ownership.test.ts",
+        "src/server/runtime-debug-store.ts",
+        "src/server/runtime-debug-store.test.ts",
+        "src/server/terminal-debug-runtime.ts",
+        "src/server/terminal-debug-runtime.test.ts",
+        "packages/shared/src/terminal/debug-contract.ts",
+        "packages/shared/src/terminal/debug-contract.test.ts",
+        "packages/shared/src/terminal/node-contract.ts",
+        "packages/shared/src/terminal/node-contract.test.ts",
+        "packages/shared/src/index.ts",
+        "packages/shared/package.json",
+        "package.json",
+        ".github/workflows/ci.yml",
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/module-registry.json",
+        "docs/feature-registry.json",
+        "docs/resource-registry.json",
+        "docs/edge-registry.json",
+        "docs/function-map.md",
+        "docs/feature-gates.md",
+        "docs/resource-map.md",
+        "docs/modules/project-modules.md",
+        "docs/wiki/mainline-call-map.json",
+        "docs/wiki/mainline-source.md",
+        "docs/wiki/modules.md",
+        ".appsdk/maps/function-map.json",
+        ".appsdk/maps/resource-map.json",
+        ".appsdk/maps/verification-map.json",
+        ".appsdk/records/evidence/"
+      ],
+      "forbidden_paths": [
+        "src/contexts/",
+        "src/components/",
+        "src/pages/"
+      ],
+      "required_gates": [
+        "src/lib/client-debug-snapshot.test.ts",
+        "src/lib/runtime-debug-http-exporter.test.ts",
+        "src/server/runtime-debug-store.test.ts",
+        "src/server/terminal-debug-runtime.test.ts",
+        "packages/shared/src/terminal/debug-contract.test.ts",
+        "packages/shared/src/terminal/node-contract.test.ts",
+        "src/lib/shared-contract-ownership.test.ts",
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/feature-registry-truth.test.ts"
+      ],
+      "truth_sources": [
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/architecture.md",
+        "docs/feature-gates.md"
+      ]
+    },
+    {
+      "feature_id": "daemon.observability",
+      "title": "Daemon bounded debug event, snapshot, and permission observability",
+      "domain": "daemon-runtime",
+      "owners": [
+        "src/server/runtime-debug-store.ts",
+        "src/server/terminal-debug-runtime.ts"
+      ],
+      "allowed_paths": [
+        "src/server/runtime-debug-store.ts",
+        "src/server/runtime-debug-store.test.ts",
+        "src/server/terminal-debug-runtime.ts",
+        "src/server/terminal-debug-runtime.test.ts",
+        "src/server/server.ts",
+        "src/lib/client-debug-snapshot.ts",
+        "src/lib/client-debug-snapshot.test.ts",
+        "src/lib/runtime-debug-http-exporter.ts",
+        "src/lib/runtime-debug-http-exporter.test.ts",
+        "src/lib/shared-contract-ownership.test.ts",
+        "packages/shared/src/terminal/debug-contract.ts",
+        "packages/shared/src/terminal/debug-contract.test.ts",
+        "packages/shared/src/terminal/node-contract.ts",
+        "packages/shared/src/terminal/node-contract.test.ts",
+        "packages/shared/src/index.ts",
+        "packages/shared/package.json",
+        "package.json",
+        ".github/workflows/ci.yml",
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/module-registry.json",
+        "docs/feature-registry.json",
+        "docs/resource-registry.json",
+        "docs/edge-registry.json",
+        "docs/function-map.md",
+        "docs/feature-gates.md",
+        "docs/resource-map.md",
+        "docs/modules/project-modules.md",
+        "docs/wiki/mainline-call-map.json",
+        "docs/wiki/mainline-source.md",
+        "docs/wiki/modules.md",
+        ".appsdk/maps/function-map.json",
+        ".appsdk/maps/resource-map.json",
+        ".appsdk/maps/verification-map.json",
+        ".appsdk/records/evidence/"
+      ],
+      "forbidden_paths": [
+        "src/contexts/",
+        "src/components/",
+        "src/pages/"
+      ],
+      "required_gates": [
+        "src/server/runtime-debug-store.test.ts",
+        "src/server/terminal-debug-runtime.test.ts",
+        "src/server/server.debug-truth.test.ts",
+        "packages/shared/src/terminal/debug-contract.test.ts",
+        "packages/shared/src/terminal/node-contract.test.ts",
+        "src/lib/shared-contract-ownership.test.ts",
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/feature-registry-truth.test.ts"
+      ],
+      "truth_sources": [
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/architecture.md",
+        "docs/feature-gates.md"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,1332 @@
+// @vitest-environment jsdom
+
+import { describe, expect, it, vi } from 'vitest';
+import type { Session } from '../lib/types';
+import {
+  buildActiveSessionRefreshPlan,
+  buildSessionTransportReusePlan,
+  buildReconnectHandshakeFailurePlan,
+  buildTransportOpenConnectedEffectPlan,
+  buildTransportOpenLiveFailureEffectPlan,
+  buildConnectedHeadRefreshPlan,
+  buildSessionConnectedUpdates,
+  buildSessionConnectingLabelUpdates,
+  buildSessionConnectionFields,
+  buildSessionConnectingUpdates,
+  buildSessionErrorUpdates,
+  buildSessionIdleAfterReconnectBlockedUpdates,
+  buildSessionReconnectAttemptProgressUpdates,
+  buildSessionReconnectingFailureUpdates,
+  buildSessionScheduleListLoadingState,
+  buildSessionReconnectingUpdates,
+  buildSessionScheduleErrorState,
+  buildSessionScheduleLoadingState,
+  buildSessionTransportPrimeState,
+  createPendingSessionTransportOpenIntent,
+} from './session-transport-open-helpers';
+import {
+  buildManagedSessionReuseKey,
+  findReusableManagedSession,
+  scoreReusableManagedSession,
+  shouldAutoReconnectSession,
+  shouldOpenManagedSessionTransport,
+} from '../lib/session-reconnect-helpers';
+import {
+  buildDefaultSessionVisibleRange,
+  normalizeSessionVisibleRangeState,
+  visibleRangeStatesEqual,
+} from './session-visible-range-helpers';
+import {
+  hasSessionLocalWindow,
+  buildSessionBufferSyncRequestPayload,
+  shouldPullFollowBuffer,
+  shouldPullVisibleRangeBuffer,
+} from './session-buffer-planner-helpers';
+import {
+  doesSessionPullStateCoverRequest,
+  doesSessionPullStateMatchExactLocalSnapshot,
+  settleSessionPullStatesWithBufferSync,
+} from '../lib/session-pull-state-helpers';
+import { buildBufferSyncRepairSignature } from '@zterm/shared/terminal/pull-state-planner';
+
+type TestSession = Session & {
+  buffer: import('../lib/types').SessionBufferState;
+  daemonHeadRevision: number;
+  daemonHeadEndIndex: number;
+};
+
+function makeSession(overrides?: Partial<TestSession>): TestSession {
+  return {
+    id: 'session-1',
+    hostId: 'host-1',
+    connectionName: 'conn-1',
+    bridgeHost: '100.127.23.27',
+    bridgePort: 3333,
+    sessionName: 'tmux-1',
+    title: 'tab-1',
+    ws: null,
+    state: 'connected',
+    hasUnread: false,
+    createdAt: 1,
+    daemonHeadRevision: 6,
+    daemonHeadEndIndex: 120,
+    buffer: {
+      lines: [],
+      gapRanges: [],
+      startIndex: 80,
+      endIndex: 120,
+      bufferHeadStartIndex: 0,
+      bufferTailEndIndex: 120,
+      cols: 80,
+      rows: 24,
+      cursorKeysApp: false,
+      cursor: null,
+      updateKind: 'replace',
+      revision: 6,
+    },
+    ...overrides,
+  };
+}
+
+describe('session sync helper refresh planner', () => {
+  it('requests head on explicit resume for active open transport', () => {
+    expect(buildActiveSessionRefreshPlan({
+      hasSession: true,
+      isRefreshTarget: true,
+      sessionState: 'connected',
+      wsReadyState: WebSocket.OPEN,
+      reconnectInFlight: false,
+      pendingTransportOpen: false,
+      allowReconnectIfUnavailable: true,
+      transportStale: false,
+      source: 'explicit-resume',
+    })).toEqual({
+      action: 'request-head',
+      resetPullBookkeeping: true,
+    });
+  });
+
+  it('keeps an open active transport on active tick even when recent server activity is stale', () => {
+    expect(buildActiveSessionRefreshPlan({
+      hasSession: true,
+      isRefreshTarget: true,
+      sessionState: 'connected',
+      wsReadyState: WebSocket.OPEN,
+      reconnectInFlight: false,
+      pendingTransportOpen: false,
+      allowReconnectIfUnavailable: true,
+      transportStale: true,
+      source: 'active-tick',
+    })).toEqual({
+      action: 'request-head',
+      resetPullBookkeeping: false,
+    });
+  });
+
+  it('does not probe or reconnect an open transport during active reentry even when activity is stale', () => {
+    expect(buildActiveSessionRefreshPlan({
+      hasSession: true,
+      isRefreshTarget: true,
+      sessionState: 'connected',
+      wsReadyState: WebSocket.OPEN,
+      reconnectInFlight: false,
+      pendingTransportOpen: false,
+      allowReconnectIfUnavailable: true,
+      transportStale: true,
+      source: 'active-reentry',
+    })).toEqual({
+      action: 'request-head',
+      resetPullBookkeeping: true,
+    });
+  });
+
+  it('does not probe or reconnect an open transport during explicit resume even when activity is stale', () => {
+    expect(buildActiveSessionRefreshPlan({
+      hasSession: true,
+      isRefreshTarget: true,
+      sessionState: 'connected',
+      wsReadyState: WebSocket.OPEN,
+      reconnectInFlight: false,
+      pendingTransportOpen: false,
+      allowReconnectIfUnavailable: true,
+      transportStale: true,
+      source: 'explicit-resume',
+    })).toEqual({
+      action: 'request-head',
+      resetPullBookkeeping: true,
+    });
+  });
+
+  it('allows explicit resume to reconnect a closed session transport', () => {
+    expect(buildActiveSessionRefreshPlan({
+      hasSession: true,
+      isRefreshTarget: true,
+      sessionState: 'closed',
+      wsReadyState: WebSocket.CLOSED,
+      reconnectInFlight: false,
+      pendingTransportOpen: false,
+      allowReconnectIfUnavailable: true,
+      transportStale: false,
+      source: 'explicit-resume',
+    })).toEqual({ action: 'reconnect' });
+  });
+
+  it('skips active tick when reconnect is already in flight', () => {
+    expect(buildActiveSessionRefreshPlan({
+      hasSession: true,
+      isRefreshTarget: true,
+      sessionState: 'reconnecting',
+      wsReadyState: WebSocket.CLOSED,
+      reconnectInFlight: true,
+      pendingTransportOpen: false,
+      allowReconnectIfUnavailable: true,
+      transportStale: false,
+      source: 'active-tick',
+    })).toEqual({ action: 'skip', reason: 'tick-blocked-by-reconnect' });
+  });
+
+  it('requests head during active tick for an already-open transport', () => {
+    expect(buildActiveSessionRefreshPlan({
+      hasSession: true,
+      isRefreshTarget: true,
+      sessionState: 'reconnecting',
+      wsReadyState: WebSocket.OPEN,
+      reconnectInFlight: false,
+      pendingTransportOpen: false,
+      allowReconnectIfUnavailable: false,
+      transportStale: false,
+      source: 'active-tick',
+    })).toEqual({
+      action: 'request-head',
+      resetPullBookkeeping: false,
+    });
+  });
+
+  it('requests head for a live non-focused pane target during active tick', () => {
+    expect(buildActiveSessionRefreshPlan({
+      hasSession: true,
+      isRefreshTarget: true,
+      sessionState: 'connected',
+      wsReadyState: WebSocket.OPEN,
+      reconnectInFlight: false,
+      pendingTransportOpen: false,
+      allowReconnectIfUnavailable: false,
+      transportStale: false,
+      source: 'active-tick',
+    })).toEqual({
+      action: 'request-head',
+      resetPullBookkeeping: false,
+    });
+  });
+
+
+  it('still requests head during active tick while the session is connecting', () => {
+    expect(buildActiveSessionRefreshPlan({
+      hasSession: true,
+      isRefreshTarget: true,
+      sessionState: 'connecting',
+      wsReadyState: WebSocket.OPEN,
+      reconnectInFlight: false,
+      pendingTransportOpen: false,
+      allowReconnectIfUnavailable: false,
+      transportStale: false,
+      source: 'active-tick',
+    })).toEqual({
+      action: 'request-head',
+      resetPullBookkeeping: false,
+    });
+  });
+
+  it('keeps active tick on the same client-owned head refresh path for connected panes', () => {
+    expect(buildActiveSessionRefreshPlan({
+      hasSession: true,
+      isRefreshTarget: true,
+      sessionState: 'connected',
+      wsReadyState: WebSocket.OPEN,
+      reconnectInFlight: false,
+      pendingTransportOpen: false,
+      allowReconnectIfUnavailable: false,
+      transportStale: false,
+      source: 'active-tick',
+    })).toEqual({
+      action: 'request-head',
+      resetPullBookkeeping: false,
+    });
+  });
+
+  it('lets the transport owner rebuild stale pending transport-open bookkeeping', () => {
+    expect(buildActiveSessionRefreshPlan({
+      hasSession: true,
+      isRefreshTarget: true,
+      sessionState: 'connecting',
+      wsReadyState: null,
+      reconnectInFlight: false,
+      pendingTransportOpen: true,
+      pendingTransportOpenStale: true,
+      allowReconnectIfUnavailable: true,
+      transportStale: false,
+      source: 'active-reentry',
+    })).toEqual({ action: 'reconnect' });
+  });
+
+  it('keeps active tick from force-replacing a fresh pending transport open', () => {
+    expect(buildActiveSessionRefreshPlan({
+      hasSession: true,
+      isRefreshTarget: true,
+      sessionState: 'connecting',
+      wsReadyState: WebSocket.CONNECTING,
+      reconnectInFlight: true,
+      pendingTransportOpen: true,
+      pendingTransportOpenStale: false,
+      allowReconnectIfUnavailable: true,
+      transportStale: false,
+      source: 'active-tick',
+    })).toEqual({ action: 'skip', reason: 'tick-blocked-by-reconnect' });
+  });
+
+  it('keeps an over-budget explicit resume pending transport open instead of replacing it', () => {
+    expect(buildActiveSessionRefreshPlan({
+      hasSession: true,
+      isRefreshTarget: true,
+      sessionState: 'connecting',
+      wsReadyState: WebSocket.CONNECTING,
+      reconnectInFlight: true,
+      pendingTransportOpen: true,
+      pendingTransportOpenStale: true,
+      allowReconnectIfUnavailable: true,
+      transportStale: false,
+      source: 'explicit-resume',
+    })).toEqual({ action: 'skip', reason: 'transport-open-pending' });
+  });
+
+  it('keeps an over-budget explicit resume connecting transport after its control intent settled', () => {
+    expect(buildActiveSessionRefreshPlan({
+      hasSession: true,
+      isRefreshTarget: true,
+      sessionState: 'connecting',
+      wsReadyState: WebSocket.CONNECTING,
+      reconnectInFlight: false,
+      pendingTransportOpen: false,
+      pendingTransportOpenStale: false,
+      allowReconnectIfUnavailable: true,
+      transportStale: false,
+      source: 'explicit-resume',
+    })).toEqual({ action: 'skip', reason: 'transport-open-pending' });
+  });
+
+  it('keeps explicit resume from replacing a fresh connecting transport after its control intent settled', () => {
+    expect(buildActiveSessionRefreshPlan({
+      hasSession: true,
+      isRefreshTarget: true,
+      sessionState: 'connecting',
+      wsReadyState: WebSocket.CONNECTING,
+      reconnectInFlight: false,
+      pendingTransportOpen: false,
+      pendingTransportOpenStale: false,
+      allowReconnectIfUnavailable: true,
+      transportStale: false,
+      source: 'explicit-resume',
+    })).toEqual({ action: 'skip', reason: 'transport-open-pending' });
+  });
+
+  it('keeps stale reconnect bookkeeping from creating a second websocket on explicit resume', () => {
+    expect(buildActiveSessionRefreshPlan({
+      hasSession: true,
+      isRefreshTarget: true,
+      sessionState: 'reconnecting',
+      wsReadyState: null,
+      reconnectInFlight: true,
+      pendingTransportOpen: false,
+      pendingTransportOpenStale: false,
+      allowReconnectIfUnavailable: true,
+      transportStale: false,
+      source: 'explicit-resume',
+    })).toEqual({ action: 'skip', reason: 'transport-unavailable' });
+  });
+
+  it('reconnects an unavailable transport inside the keepalive grace window because no socket can be reused', () => {
+    expect(buildActiveSessionRefreshPlan({
+      hasSession: true,
+      isRefreshTarget: true,
+      sessionState: 'connected',
+      wsReadyState: WebSocket.CLOSED,
+      reconnectInFlight: false,
+      pendingTransportOpen: false,
+      allowReconnectIfUnavailable: true,
+      keepaliveGraceActive: true,
+      transportStale: false,
+      source: 'explicit-resume',
+    })).toEqual({ action: 'reconnect' });
+  });
+
+  it('allows reconnect after the keepalive grace window expires', () => {
+    expect(buildActiveSessionRefreshPlan({
+      hasSession: true,
+      isRefreshTarget: true,
+      sessionState: 'connected',
+      wsReadyState: WebSocket.CLOSED,
+      reconnectInFlight: false,
+      pendingTransportOpen: false,
+      allowReconnectIfUnavailable: true,
+      keepaliveGraceActive: false,
+      transportStale: true,
+      source: 'explicit-resume',
+    })).toEqual({ action: 'reconnect' });
+  });
+});
+
+describe('session transport reuse planner', () => {
+  const targetKey = '127.0.0.1:3333:';
+
+  it('reuses an open same-target session transport for reconnect requests', () => {
+    expect(buildSessionTransportReusePlan({
+      currentTargetKey: targetKey,
+      requestedTargetKey: targetKey,
+      wsReadyState: WebSocket.OPEN,
+      pendingTransportOpen: false,
+      source: 'reconnect',
+    })).toEqual({
+      action: 'reuse-open',
+      reason: 'open-same-target',
+    });
+  });
+
+  it('waits for an existing connecting same-target transport instead of queueing a duplicate open', () => {
+    expect(buildSessionTransportReusePlan({
+      currentTargetKey: targetKey,
+      requestedTargetKey: targetKey,
+      wsReadyState: WebSocket.CONNECTING,
+      pendingTransportOpen: true,
+      pendingTransportOpenStale: false,
+      source: 'connect',
+    })).toEqual({
+      action: 'wait-existing-open',
+      reason: 'pending-open',
+    });
+  });
+
+  it('routes stale pending open bookkeeping back to the transport owner', () => {
+    expect(buildSessionTransportReusePlan({
+      currentTargetKey: targetKey,
+      requestedTargetKey: targetKey,
+      wsReadyState: null,
+      pendingTransportOpen: true,
+      pendingTransportOpenStale: true,
+      source: 'connect',
+    })).toEqual({
+      action: 'rebuild',
+      reason: 'stale-pending-open',
+    });
+  });
+
+  it('allows rebuild for closed or missing session transports', () => {
+    expect(buildSessionTransportReusePlan({
+      currentTargetKey: targetKey,
+      requestedTargetKey: targetKey,
+      wsReadyState: WebSocket.CLOSED,
+      pendingTransportOpen: false,
+      source: 'reconnect',
+    })).toEqual({
+      action: 'rebuild',
+      reason: 'closed',
+    });
+
+    expect(buildSessionTransportReusePlan({
+      currentTargetKey: targetKey,
+      requestedTargetKey: targetKey,
+      wsReadyState: null,
+      pendingTransportOpen: false,
+      source: 'connect',
+    })).toEqual({
+      action: 'rebuild',
+      reason: 'missing-socket',
+    });
+  });
+
+  it('does not reuse a socket from another target', () => {
+    expect(buildSessionTransportReusePlan({
+      currentTargetKey: '127.0.0.1:3333:',
+      requestedTargetKey: '100.66.1.82:3333:',
+      wsReadyState: WebSocket.OPEN,
+      pendingTransportOpen: false,
+      source: 'connect',
+    })).toEqual({
+      action: 'rebuild',
+      reason: 'target-mismatch',
+    });
+  });
+
+  it('keeps manual-close truth from becoming an implicit reconnect', () => {
+    expect(buildSessionTransportReusePlan({
+      currentTargetKey: targetKey,
+      requestedTargetKey: targetKey,
+      wsReadyState: WebSocket.CLOSED,
+      pendingTransportOpen: false,
+      manualClosed: true,
+      source: 'reconnect',
+    })).toEqual({
+      action: 'skip',
+      reason: 'manual-closed',
+    });
+  });
+});
+
+describe('session sync helper reconnect ownership', () => {
+  it('allows reconnect for the interactive active session', () => {
+    expect(shouldAutoReconnectSession({
+      sessionId: 'session-1',
+      activeSessionId: 'session-1',
+      liveSessionIds: [],
+    })).toBe(true);
+  });
+
+  it('allows reconnect for visible live panes even when they are not the interactive active session', () => {
+    expect(shouldAutoReconnectSession({
+      sessionId: 'session-2',
+      activeSessionId: 'session-1',
+      liveSessionIds: ['session-2', 'session-3'],
+    })).toBe(true);
+  });
+
+  it('blocks reconnect for sessions that are neither active nor visible live panes', () => {
+    expect(shouldAutoReconnectSession({
+      sessionId: 'session-4',
+      activeSessionId: 'session-1',
+      liveSessionIds: ['session-2', 'session-3'],
+    })).toBe(false);
+  });
+
+  it('still forces reconnect when explicitly requested', () => {
+    expect(shouldAutoReconnectSession({
+      sessionId: 'session-4',
+      activeSessionId: 'session-1',
+      liveSessionIds: [],
+      force: true,
+    })).toBe(true);
+  });
+});
+
+describe('session sync helper session connection config truth', () => {
+  const host = {
+    id: 'host-1',
+    createdAt: 1,
+    name: 'conn-1',
+    bridgeHost: '100.127.23.27',
+    bridgePort: 3333,
+    sessionName: 'tmux-1',
+    authToken: 'token-1',
+    authType: 'password' as const,
+    tags: [],
+    pinned: false,
+    autoCommand: 'top',
+  };
+
+  it('builds stable session connection fields from host identity', () => {
+    expect(buildSessionConnectionFields(host, 'tmux-resolved')).toEqual({
+      hostId: 'host-1',
+      connectionName: 'conn-1',
+      bridgeHost: '100.127.23.27',
+      bridgePort: 3333,
+      daemonHostId: undefined,
+      sessionName: 'tmux-resolved',
+      terminalBackend: 'tmux',
+      authToken: 'token-1',
+      autoCommand: 'top',
+    });
+  });
+
+  it('builds connecting updates without duplicating field assembly at call sites', () => {
+    expect(buildSessionConnectingUpdates(host, 'tmux-resolved')).toMatchObject({
+      hostId: 'host-1',
+      connectionName: 'conn-1',
+      sessionName: 'tmux-resolved',
+      state: 'connecting',
+      reconnectAttempt: 0,
+      lastError: undefined,
+    });
+  });
+
+  it('builds reconnecting updates with ws reset truth', () => {
+    expect(buildSessionReconnectingUpdates(host, 'tmux-resolved')).toMatchObject({
+      hostId: 'host-1',
+      connectionName: 'conn-1',
+      sessionName: 'tmux-resolved',
+      state: 'reconnecting',
+      reconnectAttempt: 0,
+      lastError: undefined,
+      ws: null,
+    });
+  });
+
+  it('builds transport prime state as single pre-open truth for connect and reconnect', () => {
+    expect(buildSessionTransportPrimeState(host, 'connect')).toEqual({
+      resolvedSessionName: 'tmux-1',
+      transportHost: {
+        ...host,
+        sessionName: 'tmux-1',
+      },
+      sessionUpdates: buildSessionConnectingUpdates(host, 'tmux-1'),
+    });
+    expect(buildSessionTransportPrimeState({
+      ...host,
+      sessionName: '   ',
+      name: 'conn-fallback',
+    }, 'reconnect')).toEqual({
+      resolvedSessionName: 'conn-fallback',
+      transportHost: {
+        ...host,
+        sessionName: 'conn-fallback',
+        name: 'conn-fallback',
+      },
+      sessionUpdates: buildSessionReconnectingUpdates({
+        ...host,
+        sessionName: '   ',
+        name: 'conn-fallback',
+      }, 'conn-fallback'),
+    });
+  });
+
+  it('builds schedule loading state from session name only', () => {
+    expect(buildSessionScheduleLoadingState('tmux-resolved')).toEqual({
+      sessionName: 'tmux-resolved',
+      jobs: [],
+      loading: true,
+    });
+  });
+
+  it('builds schedule error state by stopping loading and attaching error', () => {
+    expect(buildSessionScheduleErrorState({
+      sessionName: 'tmux-resolved',
+      jobs: [],
+      loading: true,
+      error: undefined,
+    }, 'boom')).toEqual({
+      sessionName: 'tmux-resolved',
+      jobs: [],
+      loading: false,
+      error: 'boom',
+    });
+  });
+
+  it('builds reconnect attempt progress updates without duplicating shape at call sites', () => {
+    expect(buildSessionReconnectAttemptProgressUpdates(3)).toEqual({
+      state: 'reconnecting',
+      reconnectAttempt: 3,
+      lastError: undefined,
+    });
+  });
+
+  it('builds connecting label updates from handshake session name only', () => {
+    expect(buildSessionConnectingLabelUpdates('tmux-renamed')).toEqual({
+      state: 'connecting',
+      sessionName: 'tmux-renamed',
+    });
+  });
+
+  it('builds session error updates with optional ws reset', () => {
+    expect(buildSessionErrorUpdates('boom')).toEqual({
+      state: 'error',
+      lastError: 'boom',
+    });
+    expect(buildSessionErrorUpdates('boom', { includeWsNull: true })).toEqual({
+      state: 'error',
+      lastError: 'boom',
+      ws: null,
+    });
+  });
+
+  it('builds reconnect-blocked idle updates as single truth', () => {
+    expect(buildSessionIdleAfterReconnectBlockedUpdates('skip')).toEqual({
+      state: 'idle',
+      lastError: 'skip',
+      reconnectAttempt: 0,
+      ws: null,
+    });
+  });
+
+  it('builds reconnecting failure updates with preserved next attempt', () => {
+    expect(buildSessionReconnectingFailureUpdates('boom', 4)).toEqual({
+      state: 'reconnecting',
+      lastError: 'boom',
+      reconnectAttempt: 4,
+      ws: null,
+    });
+  });
+
+  it('detects whether a session already has a local buffer window', () => {
+    const windowSession = makeSession();
+    expect(hasSessionLocalWindow(windowSession.buffer)).toBe(true);
+    const emptyWindowSession = makeSession({
+      buffer: {
+        ...makeSession().buffer,
+        startIndex: 10,
+        endIndex: 10,
+        revision: 0,
+      },
+    });
+    expect(hasSessionLocalWindow(emptyWindowSession.buffer)).toBe(false);
+    expect(hasSessionLocalWindow(null)).toBe(false);
+  });
+
+  it('treats an in-flight same-window tail refresh as exact only for the same daemon head revision', () => {
+    const pullState = {
+      purpose: 'tail-refresh' as const,
+      startedAt: 1,
+      targetHeadRevision: 6,
+      targetStartIndex: 96,
+      targetEndIndex: 120,
+      requestKnownRevision: 5,
+      requestLocalStartIndex: 0,
+      requestLocalEndIndex: 120,
+    };
+    const payload = {
+      knownRevision: 5,
+      localStartIndex: 0,
+      localEndIndex: 120,
+      requestStartIndex: 96,
+      requestEndIndex: 120,
+    };
+
+    expect(doesSessionPullStateMatchExactLocalSnapshot(pullState, payload, 6)).toBe(true);
+    expect(doesSessionPullStateMatchExactLocalSnapshot(pullState, payload, 7)).toBe(false);
+  });
+
+  it('builds connected updates as single truth', () => {
+    expect(buildSessionConnectedUpdates()).toEqual({
+      state: 'connected',
+      reconnectAttempt: 0,
+      lastError: undefined,
+    });
+  });
+
+  it('preserves existing daemon identity by not emitting daemonHostId when connected payload omits it', () => {
+    expect(buildSessionConnectedUpdates()).not.toHaveProperty('daemonHostId');
+    expect(buildSessionConnectedUpdates({ daemonHostId: 'daemon-host-1' })).toEqual({
+      state: 'connected',
+      reconnectAttempt: 0,
+      lastError: undefined,
+      daemonHostId: 'daemon-host-1',
+    });
+  });
+
+  it('records reliable input capability only when the daemon advertises it', () => {
+    expect(buildSessionConnectedUpdates()).not.toHaveProperty('reliableInputSupported');
+    expect(buildSessionConnectedUpdates({ reliableInputSupported: true })).toEqual({
+      state: 'connected',
+      reconnectAttempt: 0,
+      lastError: undefined,
+      reliableInputSupported: true,
+    });
+  });
+
+  it('builds schedule-list loading state on connected', () => {
+    expect(buildSessionScheduleListLoadingState({
+      sessionName: 'old',
+      jobs: [],
+      loading: false,
+      error: 'old-error',
+    }, 'new-name')).toEqual({
+      sessionName: 'new-name',
+      jobs: [],
+      loading: true,
+      error: undefined,
+    });
+  });
+
+  it('builds connected head refresh plan from active/live-window truth', () => {
+    expect(buildConnectedHeadRefreshPlan({
+      shouldLiveRefresh: true,
+      hadLocalWindowBeforeConnected: true,
+    })).toEqual({
+      shouldRequestHead: true,
+      shouldMarkPendingConnectTailRefresh: true,
+    });
+    expect(buildConnectedHeadRefreshPlan({
+      shouldLiveRefresh: true,
+      hadLocalWindowBeforeConnected: false,
+    })).toEqual({
+      shouldRequestHead: true,
+      shouldMarkPendingConnectTailRefresh: false,
+    });
+    expect(buildConnectedHeadRefreshPlan({
+      shouldLiveRefresh: false,
+      hadLocalWindowBeforeConnected: true,
+    })).toEqual({
+      shouldRequestHead: false,
+      shouldMarkPendingConnectTailRefresh: false,
+    });
+  });
+
+  it('builds connected effect plan from debug scope', () => {
+    expect(buildTransportOpenConnectedEffectPlan('connect')).toEqual({
+      debugEvent: 'session.ws.connected',
+      clearSupersededSockets: false,
+    });
+    expect(buildTransportOpenConnectedEffectPlan('reconnect')).toEqual({
+      debugEvent: 'session.ws.reconnect.connected',
+      clearSupersededSockets: true,
+    });
+  });
+
+  it('builds live failure effect plan from debug scope', () => {
+    expect(buildTransportOpenLiveFailureEffectPlan('connect')).toEqual({
+      clearPendingIntent: true,
+      clearTransportToken: true,
+      clearScheduleErrorState: true,
+      clearSupersededSockets: false,
+      scheduleReconnect: true,
+    });
+    expect(buildTransportOpenLiveFailureEffectPlan('reconnect')).toEqual({
+      clearPendingIntent: true,
+      clearTransportToken: true,
+      clearScheduleErrorState: true,
+      clearSupersededSockets: true,
+      scheduleReconnect: true,
+    });
+  });
+
+  it('builds reconnect handshake failure plan without embedding side effects', () => {
+    expect(buildReconnectHandshakeFailurePlan({
+      retryable: false,
+    })).toEqual({ action: 'terminal-error' });
+    expect(buildReconnectHandshakeFailurePlan({
+      retryable: true,
+    })).toEqual({ action: 'retry-reconnect' });
+  });
+});
+
+describe('session sync helper transport open intent truth', () => {
+  const host = {
+    id: 'host-1',
+    createdAt: 1,
+    name: 'conn-1',
+    bridgeHost: '100.127.23.27',
+    bridgePort: 3333,
+    sessionName: 'tmux-1',
+    authType: 'password' as const,
+    tags: [],
+    pinned: false,
+  };
+
+  it('routes first failure through handshake path and clears timeout once', () => {
+    const clearHandshakeTimeout = vi.fn();
+    const finalizeSocketFailureBaseline = vi.fn().mockReturnValue({ shouldContinue: true, manualClosed: false });
+    const onHandshakeFailure = vi.fn();
+    const intent = createPendingSessionTransportOpenIntent({
+      sessionId: 's-1',
+      host,
+      resolvedSessionName: 'tmux-1',
+      debugScope: 'connect',
+      clearHandshakeTimeout,
+      finalizeSocketFailureBaseline,
+      onHandshakeFailure,
+    });
+
+    intent.finalizeFailure('boom', true);
+
+    expect(intent.openRequestId).toMatch(/^s-1:open:/);
+    expect(clearHandshakeTimeout).toHaveBeenCalledTimes(1);
+    expect(finalizeSocketFailureBaseline).toHaveBeenCalledTimes(1);
+    expect(onHandshakeFailure).toHaveBeenCalledWith('boom', true, 'handshake');
+  });
+
+  it('routes post-connect failure through live path only once', () => {
+    const clearHandshakeTimeout = vi.fn();
+    const onHandshakeFailure = vi.fn();
+    const onHandshakeConnected = vi.fn();
+    const intent = createPendingSessionTransportOpenIntent({
+      sessionId: 's-1',
+      host,
+      resolvedSessionName: 'tmux-1',
+      debugScope: 'reconnect',
+      clearHandshakeTimeout,
+      finalizeSocketFailureBaseline: vi.fn(),
+      onHandshakeFailure,
+      onHandshakeConnected,
+    });
+
+    intent.onConnected({} as any);
+    intent.finalizeFailure('late-boom', true);
+    intent.finalizeFailure('late-boom-2', true);
+
+    expect(onHandshakeConnected).toHaveBeenCalledWith(expect.anything(), 'tmux-1');
+    expect(onHandshakeFailure).toHaveBeenCalledTimes(1);
+    expect(onHandshakeFailure).toHaveBeenCalledWith('late-boom', true, 'live');
+  });
+
+  it('clears mux channel allocation timeout without settling terminal connected', () => {
+    const clearHandshakeTimeout = vi.fn();
+    const onHandshakeFailure = vi.fn();
+    const onHandshakeConnected = vi.fn();
+    const onChannelAllocated = vi.fn();
+    const finalizeSocketFailureBaseline = vi.fn().mockReturnValue({ shouldContinue: true, manualClosed: false });
+    const intent = createPendingSessionTransportOpenIntent({
+      sessionId: 's-1',
+      host,
+      resolvedSessionName: 'tmux-1',
+      debugScope: 'connect',
+      clearHandshakeTimeout,
+      finalizeSocketFailureBaseline,
+      onHandshakeFailure,
+      onHandshakeConnected,
+      onChannelAllocated,
+    });
+
+    intent.onChannelAllocated?.();
+
+    expect(clearHandshakeTimeout).toHaveBeenCalledTimes(1);
+    expect(onChannelAllocated).toHaveBeenCalledTimes(1);
+    expect(finalizeSocketFailureBaseline).not.toHaveBeenCalled();
+    expect(onHandshakeFailure).not.toHaveBeenCalled();
+    expect(onHandshakeConnected).not.toHaveBeenCalled();
+
+    intent.onConnected({} as any);
+
+    expect(clearHandshakeTimeout).toHaveBeenCalledTimes(2);
+    expect(onHandshakeConnected).toHaveBeenCalledWith(expect.anything(), 'tmux-1');
+  });
+
+  it('generates a fresh openRequestId per pending open intent', () => {
+    const intent1 = createPendingSessionTransportOpenIntent({
+      sessionId: 's-1',
+      host,
+      resolvedSessionName: 'tmux-1',
+      debugScope: 'connect',
+      clearHandshakeTimeout: vi.fn(),
+      finalizeSocketFailureBaseline: vi.fn(),
+    });
+    const intent2 = createPendingSessionTransportOpenIntent({
+      sessionId: 's-1',
+      host,
+      resolvedSessionName: 'tmux-1',
+      debugScope: 'reconnect',
+      clearHandshakeTimeout: vi.fn(),
+      finalizeSocketFailureBaseline: vi.fn(),
+    });
+
+    expect(intent1.openRequestId).not.toBe(intent2.openRequestId);
+    expect(intent1.openRequestId).not.toBe('s-1');
+    expect(intent2.openRequestId).not.toBe('s-1');
+  });
+
+  it('suppresses handshake continuation when baseline says stop', () => {
+    const onHandshakeFailure = vi.fn();
+    const intent = createPendingSessionTransportOpenIntent({
+      sessionId: 's-1',
+      host,
+      resolvedSessionName: 'tmux-1',
+      debugScope: 'connect',
+      clearHandshakeTimeout: vi.fn(),
+      finalizeSocketFailureBaseline: vi.fn().mockReturnValue({ shouldContinue: false, manualClosed: true }),
+      onHandshakeFailure,
+    });
+
+    intent.finalizeFailure('manual-close', false);
+
+    expect(onHandshakeFailure).not.toHaveBeenCalled();
+  });
+});
+
+describe('session sync helper visible-range truth', () => {
+  it('normalizes visible range without renderer mode semantics', () => {
+    expect(normalizeSessionVisibleRangeState({
+      startIndex: -10,
+      endIndex: 120.9,
+      viewportRows: 24.8,
+    })).toEqual({
+      startIndex: 0,
+      endIndex: 120,
+      viewportRows: 24,
+    });
+  });
+
+  it('builds default visible range from session tail truth', () => {
+    const session = makeSession();
+    expect(buildDefaultSessionVisibleRange(session, undefined, session.buffer)).toEqual({
+      startIndex: 96,
+      endIndex: 120,
+      viewportRows: 24,
+    });
+  });
+
+  it('detects visible-range repair need from local gap coverage only', () => {
+    const session = makeSession({
+      buffer: {
+        ...makeSession().buffer,
+        startIndex: 56,
+        endIndex: 80,
+        gapRanges: [{ startIndex: 72, endIndex: 76 }],
+      },
+      daemonHeadEndIndex: 80,
+    });
+    expect(shouldPullVisibleRangeBuffer(session, {
+      startIndex: 56,
+      endIndex: 80,
+      viewportRows: 24,
+    }, null, session.buffer)).toBe(true);
+  });
+
+  it('does not request visible-range repair for hidden history outside the declared visible range', () => {
+    const session = makeSession({
+      daemonHeadEndIndex: 80,
+      buffer: {
+        ...makeSession().buffer,
+        startIndex: 56,
+        endIndex: 80,
+      },
+    });
+    expect(shouldPullVisibleRangeBuffer(session, {
+      startIndex: 56,
+      endIndex: 80,
+      viewportRows: 24,
+    }, null, session.buffer)).toBe(false);
+  });
+
+  it('keeps tail refresh independent from visible-range repair mode', () => {
+    const session = makeSession({
+      daemonHeadRevision: 7,
+      daemonHeadEndIndex: 120,
+      buffer: {
+        ...makeSession().buffer,
+        startIndex: 80,
+        endIndex: 120,
+        revision: 6,
+      },
+    });
+    expect(shouldPullFollowBuffer(session, {
+      startIndex: 96,
+      endIndex: 120,
+      viewportRows: 24,
+    }, session.buffer)).toBe(true);
+  });
+
+  it('re-fetches the visible follow window when daemon revision advances without tail growth', () => {
+    const session = makeSession({
+      daemonHeadRevision: 7,
+      daemonHeadEndIndex: 120,
+      buffer: {
+        ...makeSession().buffer,
+        startIndex: 80,
+        endIndex: 120,
+        revision: 6,
+      },
+    });
+    expect(buildSessionBufferSyncRequestPayload(
+      session,
+      session.buffer,
+      {
+        startIndex: 96,
+        endIndex: 120,
+        viewportRows: 24,
+      },
+      { purpose: 'tail-refresh' },
+    )).toMatchObject({
+      knownRevision: 6,
+      localStartIndex: 80,
+      localEndIndex: 120,
+      requestStartIndex: 96,
+      requestEndIndex: 120,
+    });
+  });
+
+  it('builds reading-repair payload from the visible range only', () => {
+    const session = makeSession({
+      daemonHeadEndIndex: 80,
+      buffer: {
+        ...makeSession().buffer,
+        startIndex: 56,
+        endIndex: 80,
+        revision: 5,
+        gapRanges: [{ startIndex: 72, endIndex: 76 }],
+      },
+    });
+    expect(buildSessionBufferSyncRequestPayload(
+      session,
+      session.buffer,
+      { startIndex: 56, endIndex: 80, viewportRows: 24 },
+      { purpose: 'reading-repair' },
+    )).toMatchObject({
+      knownRevision: 5,
+      localStartIndex: 56,
+      localEndIndex: 80,
+      requestStartIndex: 56,
+      requestEndIndex: 80,
+      missingRanges: [
+        { startIndex: 72, endIndex: 76 },
+      ],
+    });
+  });
+
+  it('keeps same-end follow refresh on the current tail screen when local tail still has gaps', () => {
+    const session = makeSession({
+      daemonHeadRevision: 6,
+      daemonHeadEndIndex: 80,
+      buffer: {
+        ...makeSession().buffer,
+        startIndex: 8,
+        endIndex: 80,
+        revision: 5,
+        gapRanges: [{ startIndex: 68, endIndex: 69 }],
+      },
+    });
+    expect(buildSessionBufferSyncRequestPayload(
+      session,
+      session.buffer,
+      { startIndex: 56, endIndex: 80, viewportRows: 24 },
+      { purpose: 'tail-refresh' },
+    )).toMatchObject({
+      knownRevision: 5,
+      localStartIndex: 8,
+      localEndIndex: 80,
+      requestStartIndex: 56,
+      requestEndIndex: 80,
+    });
+  });
+
+  it('keeps forced same-end tail refresh inside the current visible window', () => {
+    const session = makeSession({
+      daemonHeadRevision: 6,
+      daemonHeadEndIndex: 80,
+      buffer: {
+        ...makeSession().buffer,
+        startIndex: 8,
+        endIndex: 80,
+        revision: 5,
+        gapRanges: [{ startIndex: 68, endIndex: 69 }],
+      },
+    });
+    expect(buildSessionBufferSyncRequestPayload(
+      session,
+      session.buffer,
+      { startIndex: 56, endIndex: 80, viewportRows: 24 },
+      { purpose: 'tail-refresh', forceSameEndRefresh: true },
+    )).toMatchObject({
+      knownRevision: 5,
+      localStartIndex: 8,
+      localEndIndex: 80,
+      requestStartIndex: 56,
+      requestEndIndex: 80,
+    });
+  });
+
+  it('clamps tail-refresh request window to daemon authoritative head end', () => {
+    const session = makeSession({
+      daemonHeadRevision: 13822,
+      daemonHeadEndIndex: 136539,
+      buffer: {
+        ...makeSession().buffer,
+        startIndex: 135484,
+        endIndex: 136484,
+        revision: 13822,
+        rows: 30,
+      },
+    });
+    expect(buildSessionBufferSyncRequestPayload(
+      session,
+      session.buffer,
+      { startIndex: 136454, endIndex: 136539, viewportRows: 30 },
+      {
+        purpose: 'tail-refresh',
+        liveHead: {
+          revision: 13822,
+          latestEndIndex: 136484,
+          availableStartIndex: 133484,
+          availableEndIndex: 136484,
+          seenAt: 1,
+        },
+      },
+    )).toMatchObject({
+      knownRevision: 13822,
+      localStartIndex: 135484,
+      localEndIndex: 136484,
+      requestStartIndex: 136454,
+      requestEndIndex: 136484,
+    });
+  });
+
+  it('compares visible ranges by absolute range instead of renderer mode', () => {
+    expect(visibleRangeStatesEqual(
+      { startIndex: 56, endIndex: 80, viewportRows: 24 },
+      { startIndex: 56, endIndex: 80, viewportRows: 24 },
+    )).toBe(true);
+    expect(visibleRangeStatesEqual(
+      { startIndex: 56, endIndex: 80, viewportRows: 24 },
+      { startIndex: 57, endIndex: 80, viewportRows: 24 },
+    )).toBe(false);
+  });
+});
+
+describe('session sync helper managed session reuse truth', () => {
+  it('builds managed session reuse key from target identity only', () => {
+    expect(buildManagedSessionReuseKey({
+      bridgeHost: '100.127.23.27',
+      bridgePort: 3333,
+      sessionName: 'tmux-a',
+    })).toBe('bridge:100.127.23.27::3333::session:tmux-a');
+  });
+
+  it('returns null when caller does not supply a client sessionId (no host+sessionName fallback)', () => {
+    // Two managed sessions happen to share host+sessionName (e.g. rcc and rcc2-rename).
+    // The previous semantic-key matcher would pick the active one and silently
+    // collapse them. The new owner must refuse to do so without an explicit sessionId.
+    const winner = findReusableManagedSession({
+      sessionId: '',
+      sessions: [
+        makeSession({ id: 's-older', state: 'connected', createdAt: 1 }),
+        makeSession({ id: 's-active', state: 'connected', createdAt: 2 }),
+      ],
+      activeSessionId: 's-active',
+    });
+    expect(winner).toBeNull();
+  });
+
+  it('returns the exact session when caller supplies a matching client sessionId', () => {
+    const active = findReusableManagedSession({
+      sessionId: 's-active',
+      sessions: [
+        makeSession({ id: 's-older', state: 'connected', createdAt: 1 }),
+        makeSession({ id: 's-active', state: 'connected', createdAt: 2 }),
+        makeSession({ id: 's-newer', state: 'reconnecting', createdAt: 3 }),
+      ],
+      activeSessionId: 's-active',
+    });
+    expect(active?.id).toBe('s-active');
+    expect(scoreReusableManagedSession(active!, 's-active')).toBeGreaterThan(
+      scoreReusableManagedSession(makeSession({ id: 's-older', state: 'connected', createdAt: 1 }), 's-active'),
+    );
+
+    // sessionId that does not match any managed session returns null, even when
+    // host+sessionName would have matched under the old semantic-key matcher.
+    expect(findReusableManagedSession({
+      sessionId: 's-missing',
+      sessions: [
+        makeSession({ id: 's-older', state: 'connected', createdAt: 1 }),
+      ],
+      activeSessionId: 's-older',
+    })).toBeNull();
+  });
+
+  it('opens managed session transport only when there is no usable/opening transport truth', () => {
+    expect(shouldOpenManagedSessionTransport({
+      readyState: WebSocket.OPEN,
+      hasPendingOpenIntent: false,
+      sessionState: 'connected',
+    })).toBe(false);
+    expect(shouldOpenManagedSessionTransport({
+      readyState: WebSocket.CONNECTING,
+      hasPendingOpenIntent: false,
+      sessionState: 'connecting',
+    })).toBe(false);
+    expect(shouldOpenManagedSessionTransport({
+      readyState: WebSocket.CLOSED,
+      hasPendingOpenIntent: false,
+      sessionState: 'idle',
+    })).toBe(true);
+    expect(shouldOpenManagedSessionTransport({
+      readyState: WebSocket.CLOSED,
+      hasPendingOpenIntent: true,
+      sessionState: 'idle',
+    })).toBe(false);
+    expect(shouldOpenManagedSessionTransport({
+      readyState: null,
+      hasPendingOpenIntent: false,
+      sessionState: 'connected',
+    })).toBe(true);
+  });
+});
+
+describe('session sync helper pull-state truth', () => {
+  it('does not let an older in-flight pull cover a new request from a newer local snapshot', () => {
+    expect(doesSessionPullStateCoverRequest({
+      purpose: 'tail-refresh',
+      startedAt: 1,
+      targetHeadRevision: 71737,
+      targetStartIndex: 187513,
+      targetEndIndex: 187577,
+      requestKnownRevision: 71688,
+      requestLocalStartIndex: 186512,
+      requestLocalEndIndex: 187512,
+    }, {
+      knownRevision: 71736,
+      localStartIndex: 186513,
+      localEndIndex: 187513,
+      requestStartIndex: 187519,
+      requestEndIndex: 187550,
+    })).toBe(false);
+  });
+
+  it('still treats a narrower request from the same local snapshot as covered by the current in-flight pull', () => {
+    expect(doesSessionPullStateCoverRequest({
+      purpose: 'tail-refresh',
+      startedAt: 1,
+      targetHeadRevision: 71737,
+      targetStartIndex: 187513,
+      targetEndIndex: 187577,
+      requestKnownRevision: 71736,
+      requestLocalStartIndex: 186513,
+      requestLocalEndIndex: 187513,
+    }, {
+      knownRevision: 71736,
+      localStartIndex: 186513,
+      localEndIndex: 187513,
+      requestStartIndex: 187519,
+      requestEndIndex: 187550,
+      targetHeadRevision: 71737,
+    })).toBe(true);
+  });
+
+  it('treats same-gap reading repair requests as covered and different-gap requests as uncovered', () => {
+    const pullState = {
+      purpose: 'reading-repair' as const,
+      startedAt: 1,
+      targetHeadRevision: 5,
+      targetStartIndex: 20,
+      targetEndIndex: 80,
+      requestKnownRevision: 5,
+      requestLocalStartIndex: 0,
+      requestLocalEndIndex: 60,
+      repairSignature: buildBufferSyncRepairSignature([{ startIndex: 60, endIndex: 61 }]),
+    };
+    expect(doesSessionPullStateCoverRequest(pullState, {
+      knownRevision: 5,
+      localStartIndex: 0,
+      localEndIndex: 60,
+      requestStartIndex: 30,
+      requestEndIndex: 70,
+      targetHeadRevision: 5,
+      missingRanges: [{ startIndex: 60, endIndex: 61 }],
+    })).toBe(true);
+    expect(doesSessionPullStateCoverRequest(pullState, {
+      knownRevision: 5,
+      localStartIndex: 0,
+      localEndIndex: 60,
+      requestStartIndex: 30,
+      requestEndIndex: 70,
+      targetHeadRevision: 5,
+      missingRanges: [{ startIndex: 70, endIndex: 71 }],
+    })).toBe(false);
+  });
+
+  it('treats a compact same-end tail payload as settling an existing-window refresh', () => {
+    expect(settleSessionPullStatesWithBufferSync({
+      'tail-refresh': {
+        purpose: 'tail-refresh',
+        startedAt: 1,
+        targetHeadRevision: 7,
+        targetStartIndex: 48,
+        targetEndIndex: 120,
+        requestKnownRevision: 5,
+        requestLocalStartIndex: 0,
+        requestLocalEndIndex: 120,
+      },
+    }, {
+      revision: 7,
+      startIndex: 96,
+      endIndex: 120,
+      cols: 80,
+      rows: 24,
+      cursorKeysApp: false,
+      lines: [{ index: 96, cells: [] }],
+    })).toBe(null);
+  });
+});
