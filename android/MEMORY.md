@@ -1,5 +1,19 @@
 # MEMORY — Long-Term Memory
 
+## 2026-08-16 zterm-runtime-v2 active-v2 lifecycle
+
+- AppSDK `zterm-runtime-v2` active-v2 was frozen and published at
+  `0cd4c9a`; final governance record correction is `77637cf`.
+- `appsdk verify android` returns `ok:true` at `77637cf`; DSH
+  `zarchv2-activev2-final-r9` returned literal `VERDICT: PASS` with no P0/P1.
+- FreezeRecord `promotion_record_hash`/`regression_report_hash` are AppSDK
+  canonical compact-JSON sha256 values, not raw file sha256. Raw file hashes
+  differ and make `appsdk verify` fail with
+  `FREEZE_RECORD_REGRESSION_REPORT_MISMATCH`.
+- Playground archive is done; physical removal is still
+  `pending_authorization` and must not be claimed completed until Jason
+  authorizes it. Product L5 device/APK/OTA verification also remains pending.
+
 ## 2026-08-12 Herdr adapter integration boundary
 
 - 官方 Herdr 0.8.0 terminal session replay已验证：`terminal.frame.bytes` 是 ANSI/VT frame；full/delta、cursor movement、SGR、CJK/emoji width、alternate screen、resize、release、reconnect、input marker均有 playground 证据。`seq` 在 resize/reconnect 后重置，只能是 attachment-local transport metadata；zterm mirror revision 必须独立生成。

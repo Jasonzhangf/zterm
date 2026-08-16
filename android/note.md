@@ -7169,3 +7169,12 @@ if (bufferedBytes >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES) {
 - P2: duplicate `zone-transition-manifest.json` / `zone-transition.manifest.json`
   in the frozen archive remains; left untouched because both aliases already
   exist in the source contract set and appsdk resource manifest.
+
+# 2026-08-16 DSH final-r9 PASS
+
+- DSH `zarchv2-activev2-final-r9` reviewed commit `77637cf` and returned
+  literal `VERDICT: PASS` with no P0/P1.
+- Reviewer independently confirmed the compact-JSON hash claims, the pending
+  playground cleanup state, the byte-identical protected archive, and that no
+  functional code/test/build/runtime configuration changed.
+- `appsdk verify android` returns `{"ok":true}` at `77637cf`.
