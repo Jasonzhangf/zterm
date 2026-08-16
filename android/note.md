@@ -7302,3 +7302,13 @@ if (bufferedBytes >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES) {
   after Jason authorization.
 - Decision still open: A = restore global v0.1.2; B = reviewed v0.1.3
   migration. DSH `dsh-review` MCP was not exposed in this continuation.
+
+# 2026-08-16 AppSDK 0.1.3 migration source review PASS
+
+- DSH `zarchv2-appsdk013-source-r3` reviewed the AppSDK 0.1.3 migration
+  source/config snapshot and returned literal `VERDICT: PASS` with no P0/P1.
+- P2 findings: `.appsdk/maps/module-registry.json` is unwired and under-covers
+  source files; duplicate module-registry/contract surfaces remain. These are
+  recorded as non-blocking governance-completeness items.
+- `appsdk verify .` passes at architecture_stable with the final active-v3
+  lifecycle records; active-v3 freeze/publish still follows.

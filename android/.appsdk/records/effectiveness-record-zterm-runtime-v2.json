@@ -1,0 +1,28 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/effectiveness-record.schema.json",
+  "effectiveness_id": "EFF-20260816-ZARCHV2-ACTIVEV3-001",
+  "issue_id": "zterm-runtime-architecture-v2",
+  "module_id": "zterm-runtime-v2",
+  "fix_candidate_id": "FIX-20260816-ZARCHV2-ACTIVEV3-001",
+  "architecture_review_id": "REVIEW-20260816-DSH-ZARCHV2-ACTIVEV3-001",
+  "reviewed_commit": "44e23ef7b28cb265400e032e3338b52c19c7b65f",
+  "reviewed_tree_hash": "126c1391b8719641d06e1d785d2c9480b854b071",
+  "reproduction_input_hashes": [
+    "sha256:ab527a800da96f8f1bb3b038649c5882f3e016dd0eef0749e32bb9a50ae152e8",
+    "git:d626524"
+  ],
+  "baseline_evidence_id": "evid-20260816-zarchv2-activev3-baseline-001",
+  "fixed_replay_evidence_id": "evid-20260816-zarchv2-activev3-effectiveness-001",
+  "positive_evidence_ids": [
+    "evid-20260816-zarchv2-activev3-post-positive-001"
+  ],
+  "negative_evidence_ids": [
+    "evid-20260816-zarchv2-activev3-post-negative-001"
+  ],
+  "blackbox_evidence_ids": [
+    "evid-20260816-zarchv2-activev3-effectiveness-001"
+  ],
+  "source_unchanged_since_review": true,
+  "result": "pass",
+  "created_at": "2026-08-16T03:00:00Z"
+}

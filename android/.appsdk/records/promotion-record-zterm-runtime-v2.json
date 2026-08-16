@@ -1,25 +1,35 @@
 {
   "$schema": "https://appsdk.local/contracts/records/promotion-record.schema.json",
-  "artifact_hash": "sha256:ab527a800da96f8f1bb3b038649c5882f3e016dd0eef0749e32bb9a50ae152e8",
-  "base_artifact_hash": "sha256:ea3b90ba83282ff4d66491d53c9794979dbf5ea8c7ecbc82a7a6085b86f92ffb",
-  "base_commit": "4c0416ff2767f173b9984d49965787c0afb76b9c",
-  "change_reason_comment": "Promote active-v2 truth-source and gate corrections after DSH source-r4 PASS, compile, architecture gates, regression 297/297, and daemon mirror close-loop.",
-  "change_set_id": "CS-20260816-ZARCHV2-002",
-  "compatibility_level": "compatible",
-  "created_at": "2026-08-16T01:51:52Z",
-  "design_id": "ZTERM-ARCH-V2-DESIGN-001",
-  "evidence_ids": [
-    "EVID-20260816-ZARCHV2-ACTIVEV2-FINAL-001"
-  ],
-  "experiment_id": "zterm-runtime-architecture-v2-active-v2",
+  "promotion_id": "PROMO-20260816-ZARCHV2-ACTIVEV3-001",
   "issue_id": "zterm-runtime-architecture-v2",
-  "migration_id": null,
+  "experiment_id": "zterm-runtime-architecture-v2-active-v3",
   "module_id": "zterm-runtime-v2",
-  "new_active_version": "active-v2",
-  "playground_cleanup_record_id": "cleanup-zterm-runtime-architecture-v2",
-  "previous_active_version": "active-v1",
-  "promotion_id": "PROMO-20260816-ZARCHV2-002",
-  "public_api_hash": "sha256:714d9cd3b2c3a632ac9618511fee742367b15d89e32c134bfb838f7966e592a2",
+  "worktree_record_id": "WT-20260816-ZARCHV2-ACTIVEV3-001",
+  "reproduction_record_id": "REPRO-20260816-ZARCHV2-ACTIVEV3-001",
+  "fix_candidate_id": "FIX-20260816-ZARCHV2-ACTIVEV3-001",
+  "architecture_review_id": "REVIEW-20260816-DSH-ZARCHV2-ACTIVEV3-001",
+  "effectiveness_record_id": "EFF-20260816-ZARCHV2-ACTIVEV3-001",
+  "merge_record_id": "MERGE-20260816-ZARCHV2-ACTIVEV3-001",
+  "base_commit": "d626524",
+  "candidate_commit": "44e23ef7b28cb265400e032e3338b52c19c7b65f",
+  "merged_commit": "44e23ef7b28cb265400e032e3338b52c19c7b65f",
+  "source_commit": "44e23ef7b28cb265400e032e3338b52c19c7b65f",
+  "previous_active_version": "active-v2",
+  "new_active_version": "active-v3",
+  "base_artifact_hash": "sha256:ab527a800da96f8f1bb3b038649c5882f3e016dd0eef0749e32bb9a50ae152e8",
+  "artifact_hash": "sha256:a26c67f3706fdaf518f60fd7953c4942854bfef63e68c707939a101eb29f9404",
+  "scope_hash": "sha256:f3d06524422c1892cc6bf0969a28d64f46be2efcf34e7fc233859d16feb31349",
+  "public_api_hash": "sha256:5493017a89a37c360197c5f9d4d640b2c881ebb7d758ee19e7ff56786b49ffc4",
+  "review_id": "REVIEW-20260816-DSH-ZARCHV2-ACTIVEV3-001",
+  "evidence_ids": [
+    "evid-20260816-zarchv2-activev3-artifact-001",
+    "evid-20260816-zarchv2-activev3-verify-001",
+    "evid-20260816-zarchv2-activev3-positive-001",
+    "evid-20260816-zarchv2-activev3-negative-001",
+    "evid-20260816-zarchv2-activev3-effectiveness-001",
+    "evid-20260816-zarchv2-activev3-post-positive-001",
+    "evid-20260816-zarchv2-activev3-post-negative-001"
+  ],
   "required_gate_results": [
     {
       "gate_id": "contract_valid",
@@ -28,6 +38,16 @@
     },
     {
       "gate_id": "record_graph",
+      "producer": "appsdk",
+      "result": "pass"
+    },
+    {
+      "gate_id": "fix_lifecycle_graph",
+      "producer": "appsdk",
+      "result": "pass"
+    },
+    {
+      "gate_id": "mainline_merge_identity",
       "producer": "appsdk",
       "result": "pass"
     },
@@ -42,31 +62,6 @@
       "result": "pass"
     },
     {
-      "gate_id": "payload_control_separation",
-      "producer": "pnpm",
-      "result": "pass"
-    },
-    {
-      "gate_id": "debug_isolation",
-      "producer": "pnpm",
-      "result": "pass"
-    },
-    {
-      "gate_id": "debug_bounded",
-      "producer": "pnpm",
-      "result": "pass"
-    },
-    {
-      "gate_id": "control_center_contract",
-      "producer": "pnpm",
-      "result": "pass"
-    },
-    {
-      "gate_id": "plugin_capabilities",
-      "producer": "pnpm",
-      "result": "pass"
-    },
-    {
       "gate_id": "typecheck",
       "producer": "pnpm",
       "result": "pass"
@@ -77,13 +72,17 @@
       "result": "pass"
     },
     {
-      "gate_id": "source_to_dom",
-      "producer": "pnpm",
+      "gate_id": "regression_report",
+      "producer": "vitest",
       "result": "pass"
     }
   ],
-  "review_id": "REVIEW-20260816-DSH-ZARCHV2-ACTIVEV2-R4",
-  "root_cause": "Active-v1 AppSDK truth maps remained pending and Vitest scanned archived Protected tests; active-v2 aligns maps, module-registry documentation, and the Vitest gate with the already-implemented v2 architecture without changing runtime behavior or business payload semantics.",
-  "scope_hash": "sha256:19d2a3e8a4c3e6b4100cf4a73bd0a91363aa06378d1fdae4621754147d039d6e",
-  "source_commit": "77bbf60375d5a4d111c4bf5f5080e31e5ac70561"
+  "change_set_id": "CS-20260816-ZARCHV2-APPSDK013-001",
+  "migration_id": "MIG-20260816-ZARCHV2-APPSDK013-001",
+  "compatibility_level": "migration_required",
+  "root_cause": "AppSDK 0.1.3 adds fix lifecycle v2 record contracts and a required module registry; the frozen 0.1.2 project must migrate through WorktreeRecord, ReproductionRecord, FixCandidateRecord, Architecture ReviewRecord, EffectivenessRecord, MergeRecord, and PromotionRecord before the active-v3 artifact can freeze.",
+  "design_id": "ZTERM-ARCH-V2-DESIGN-001",
+  "change_reason_comment": "Migrate AppSDK governance from 0.1.2 to 0.1.3 without changing runtime source, business payload semantics, or the active-v2 artifact contract.",
+  "playground_cleanup_record_id": "cleanup-zterm-runtime-architecture-v2",
+  "created_at": "2026-08-16T05:00:00Z"
 }
