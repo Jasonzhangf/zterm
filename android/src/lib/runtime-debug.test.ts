@@ -3,6 +3,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_RUNTIME_DEBUG_TTL_MS,
+  MAX_RUNTIME_DEBUG_QUEUE,
   isRuntimeDebugEnabled,
   RUNTIME_DEBUG_CONSOLE_STORAGE_KEY,
   RUNTIME_DEBUG_EXPIRES_AT_STORAGE_KEY,
@@ -92,6 +93,24 @@ describe('runtime debug storage flag', () => {
     runtimeDebug('session.ws.connected', { sessionId: 's1' });
     expect(window.localStorage.getItem(RUNTIME_DEBUG_STORAGE_KEY)).toBe('1');
     expect(window.localStorage.getItem(RUNTIME_DEBUG_CONSOLE_STORAGE_KEY)).toBe('1');
+  });
+
+  it('keeps reliable input events when the debug queue overflows', () => {
+    setRuntimeDebugEnabled(true);
+    for (let index = 0; index < MAX_RUNTIME_DEBUG_QUEUE + 8; index += 1) {
+      runtimeDebug('session.ws.connect.buffer-sync', { sessionId: `s${index}` });
+    }
+    runtimeDebug('session.input.reliable-send', { sessionId: 'input-1', bytes: 8 });
+
+    const entries = [];
+    while (true) {
+      const batch = drainRuntimeDebugEntries();
+      entries.push(...batch);
+      if (batch.length === 0) {
+        break;
+      }
+    }
+    expect(entries.some((entry) => entry.scope === 'session.input.reliable-send')).toBe(true);
   });
 
   it('samples high-frequency active tick scopes before enqueueing', () => {

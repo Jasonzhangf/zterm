@@ -168,7 +168,8 @@ function isCriticalRuntimeDebugScope(scope: string) {
   return (
     scope.startsWith('terminal.ime.')
     || scope.startsWith('terminal.debug-input.')
-    || scope === 'session.input.send'
+    || scope.startsWith('session.input.send')
+    || scope.startsWith('session.input.reliable')
     || scope.startsWith('session.input.drop.')
     || scope === 'session.input.transport-unavailable'
   );

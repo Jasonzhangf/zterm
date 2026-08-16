@@ -433,11 +433,20 @@ async function clickWebViewKeyboardButton(serial: string) {
   return true;
 }
 
-async function ensureWebViewTerminalPage(serial: string, sessionName?: string) {
+async function ensureWebViewTerminalPage(serial: string, sessionName?: string, bridgeHost?: string) {
   let resumeRequested = false;
+  let connectionRequested = false;
   const deadline = Date.now() + 12_000;
   while (Date.now() <= deadline) {
     try {
+      const connectionClick = bridgeHost && !connectionRequested
+        ? `const ariaLabel = 'Open ' + ${JSON.stringify(bridgeHost)};
+           const connection = buttons.find((candidate) => candidate.getAttribute('aria-label') === ariaLabel);
+           if (connection) {
+             connection.click();
+             return { terminalPage: false, resumed: false, connectionRequested: true, button: ariaLabel };
+           }`
+        : '';
       const value = await evaluateWebViewExpression(
         serial,
         `(() => {
@@ -449,11 +458,12 @@ async function ensureWebViewTerminalPage(serial: string, sessionName?: string) {
           const button = buttons.find((candidate) => (
             candidate.getAttribute('aria-label')?.startsWith('Resume ')
           ));
-          if (!(button instanceof HTMLButtonElement)) {
-            return { terminalPage: false, resumed: false, button: '' };
+          if (button instanceof HTMLButtonElement) {
+            button.click();
+            return { terminalPage: false, resumed: true, button: button.getAttribute('aria-label') || '' };
           }
-          button.click();
-          return { terminalPage: false, resumed: true, button: button.getAttribute('aria-label') || '' };
+          ${connectionClick}
+          return { terminalPage: false, resumed: false, connectionRequested: false, button: '' };
         })()`,
       );
       if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -465,7 +475,9 @@ async function ensureWebViewTerminalPage(serial: string, sessionName?: string) {
       }
       if (state.resumed === true) {
         resumeRequested = true;
-      } else if (!resumeRequested) {
+      } else if (state.connectionRequested === true) {
+        connectionRequested = true;
+      } else if (!resumeRequested && !connectionRequested) {
         fail(`current Android WebView is not Terminal and has no Resume button for ${sessionName || 'the active session'}`);
       }
     } catch (error) {
@@ -475,7 +487,7 @@ async function ensureWebViewTerminalPage(serial: string, sessionName?: string) {
     }
     sleep(250);
   }
-  fail('Resume button did not open the Terminal page before the bounded verifier deadline');
+  fail('Resume/connection button did not open the Terminal page before the bounded verifier deadline');
 }
 
 async function ensureWebViewTerminalImeFocus(serial: string) {
@@ -576,9 +588,6 @@ async function collectRuntime(remote: { bridgeHost: string; bridgePort: number; 
   const daemonSessionId = remote.sessionId
     ? resolveApkSmokeDaemonSessionId(initialSnapshot, remote.sessionId)
     : null;
-  if (remote.sessionId && !daemonSessionId) {
-    fail(`daemon subscriber for client session ${remote.sessionId} was not found in the current transport snapshot`);
-  }
   const health = await fetchJson(healthUrl);
   const control = await fetchJson(controlUrl, {
     method: 'POST',
@@ -593,9 +602,6 @@ async function collectRuntime(remote: { bridgeHost: string; bridgePort: number; 
   const logsUrl = new URL('/debug/runtime/logs', baseUrl);
   addToken(logsUrl, remote.authToken);
   logsUrl.searchParams.set('limit', '400');
-  if (daemonSessionId) {
-    logsUrl.searchParams.set('sessionId', daemonSessionId);
-  }
   const logs = await fetchJson(logsUrl);
   return { health, control, snapshot, logs, daemonSessionId };
 }
@@ -640,7 +646,12 @@ function payloadMentionsSession(entry: Record<string, unknown>, sessionId: strin
   return payload.includes(`"sessionId":"${sessionId}"`);
 }
 
-function extractInputEvidence(logs: unknown, sessionId: string | null, minimumTimestamp: string) {
+function extractInputEvidence(
+  logs: unknown,
+  sessionId: string | null,
+  daemonSessionId: string | null,
+  minimumTimestamp: string,
+) {
   const minimumEpochMs = Date.parse(minimumTimestamp);
   const entries = readLogEntries(logs, 'entries')
     .filter((entry) => !Number.isFinite(minimumEpochMs) || entryEpochMs(entry) >= minimumEpochMs);
@@ -666,10 +677,13 @@ function extractInputEvidence(logs: unknown, sessionId: string | null, minimumTi
       physicalSessionIds.add(entry.sessionId.trim());
     }
   }
-  const daemonFiltered = daemonEntries.filter((entry) => (
-    typeof entry.sessionId === 'string'
-    && physicalSessionIds.has(entry.sessionId)
-  ));
+  const daemonFiltered = daemonEntries.filter((entry) => {
+    const entrySessionId = typeof entry.sessionId === 'string' ? entry.sessionId.trim() : '';
+    return Boolean(entrySessionId) && (
+      Boolean(daemonSessionId && entrySessionId === daemonSessionId)
+      || physicalSessionIds.has(entrySessionId)
+    );
+  });
   const anomalyInputsByPhysicalSession = new Map<string, Array<Record<string, unknown>>>();
   for (const entry of rawSessionEntries) {
     const physicalSessionId = typeof entry.sessionId === 'string' && entry.sessionId.trim()
@@ -766,18 +780,41 @@ async function main() {
   assertAppSurfaceVisible(beforeImeUi, beforeImeWindow, 'before-ime');
 
   const webViewStorage = await readWebViewLocalStorageSnapshot(serial);
-  const storageTarget = extractApkSmokeBridgeDebugTargetFromLocalStorageSnapshot(webViewStorage.snapshot);
+  let storageTarget = extractApkSmokeBridgeDebugTargetFromLocalStorageSnapshot(webViewStorage.snapshot);
   if (!storageTarget.target) {
     fail(`could not resolve active bridge target from current Android WebView localStorage truth (activeSessionId=${storageTarget.activeSessionId || 'null'})`);
   }
 
-  let runtimeClientSessionId = storageTarget.target.sessionId || null;
+  await ensureWebViewTerminalPage(serial, storageTarget.target.sessionName, storageTarget.target.bridgeHost);
+  const navigatedStorage = await readWebViewLocalStorageSnapshot(serial);
+  const navigatedTarget = extractApkSmokeBridgeDebugTargetFromLocalStorageSnapshot(navigatedStorage.snapshot);
+  if (navigatedTarget.target) {
+    storageTarget = navigatedTarget;
+  }
+
+  const initialTarget = storageTarget.target;
+  if (!initialTarget) {
+    fail(`could not resolve active bridge target after opening terminal (activeSessionId=${storageTarget.activeSessionId || 'null'})`);
+  }
+  let bridgeTarget: NonNullable<typeof storageTarget.target> = initialTarget;
+  let runtimeClientSessionId = bridgeTarget.sessionId || null;
   let baselineRuntime = await collectRuntime({
-    ...storageTarget.target,
+    ...bridgeTarget,
     sessionId: runtimeClientSessionId,
   });
   const startupReadyDeadline = Date.now() + POLL_TIMEOUT_MS;
   while (Date.now() <= startupReadyDeadline) {
+    const refreshedStorage = await readWebViewLocalStorageSnapshot(serial);
+    const refreshedTarget = extractApkSmokeBridgeDebugTargetFromLocalStorageSnapshot(refreshedStorage.snapshot);
+    if (refreshedTarget.target && (refreshedTarget.activeSessionId || refreshedTarget.target.sessionId)) {
+      storageTarget = refreshedTarget;
+      bridgeTarget = refreshedTarget.target;
+      runtimeClientSessionId = refreshedTarget.activeSessionId || refreshedTarget.target.sessionId || null;
+    }
+    baselineRuntime = await collectRuntime({
+      ...bridgeTarget,
+      sessionId: runtimeClientSessionId,
+    });
     baselineRuntime.snapshot = filterRuntimeSnapshotForDevice(
       filterApkSmokeRuntimeSnapshot(baselineRuntime.snapshot, smokeStartedAt) as Record<string, unknown>,
       deviceModel,
@@ -788,7 +825,7 @@ async function main() {
     if (currentSnapshotSessionId && currentSnapshotSessionId !== runtimeClientSessionId) {
       runtimeClientSessionId = currentSnapshotSessionId;
       baselineRuntime = await collectRuntime({
-        ...storageTarget.target,
+        ...bridgeTarget,
         sessionId: runtimeClientSessionId,
       });
       continue;
@@ -816,10 +853,6 @@ async function main() {
       break;
     }
     sleep(POLL_INTERVAL_MS);
-    baselineRuntime = await collectRuntime({
-      ...storageTarget.target,
-      sessionId: runtimeClientSessionId,
-    });
   }
   baselineRuntime.snapshot = filterRuntimeSnapshotForDevice(
     filterApkSmokeRuntimeSnapshot(baselineRuntime.snapshot, smokeStartedAt) as Record<string, unknown>,
@@ -829,11 +862,18 @@ async function main() {
     selectFreshApkSmokeSnapshotRecord(baselineRuntime.snapshot, smokeStartedAt),
   );
   const evidenceSessionId = runtimeClientSessionId || snapshotSessionId || null;
+  const baselineDaemonSessionId = resolveApkSmokeDaemonSessionId(
+    baselineRuntime.snapshot,
+    evidenceSessionId,
+  );
+  if (evidenceSessionId && !baselineDaemonSessionId) {
+    fail(`daemon subscriber for client session ${evidenceSessionId} was not found after startup stabilization`);
+  }
   if (!evidenceSessionId) {
     fail('current active client session was not resolved after startup stabilization');
   }
 
-  await ensureWebViewTerminalPage(serial, storageTarget.target.sessionName);
+  await ensureWebViewTerminalPage(serial, bridgeTarget.sessionName, bridgeTarget.bridgeHost);
   const terminalFocusState = await ensureWebViewTerminalImeFocus(serial);
   sleep(500);
   const afterImePng = capturePng(serial);
@@ -849,11 +889,16 @@ async function main() {
   const deadline = Date.now() + POLL_TIMEOUT_MS;
   let finalRuntime = baselineRuntime;
   let finalActiveSessionId = evidenceSessionId;
-  let finalEvidence = extractInputEvidence(baselineRuntime.logs, evidenceSessionId, smokeStartedAt);
+  let finalEvidence = extractInputEvidence(
+    baselineRuntime.logs,
+    evidenceSessionId,
+    baselineRuntime.daemonSessionId,
+    smokeStartedAt,
+  );
 
   while (Date.now() <= deadline) {
     finalRuntime = await collectRuntime({
-      ...storageTarget.target,
+      ...bridgeTarget,
       sessionId: runtimeClientSessionId,
     });
     finalRuntime.snapshot = filterRuntimeSnapshotForDevice(
@@ -868,7 +913,12 @@ async function main() {
       continue;
     }
     finalActiveSessionId = runtimeClientSessionId || currentSnapshotSessionId || evidenceSessionId;
-    finalEvidence = extractInputEvidence(finalRuntime.logs, finalActiveSessionId, smokeStartedAt);
+    finalEvidence = extractInputEvidence(
+      finalRuntime.logs,
+      finalActiveSessionId,
+      finalRuntime.daemonSessionId,
+      smokeStartedAt,
+    );
     if (
       finalActiveSessionId
       && finalEvidence.checks.clientInputSend
@@ -926,8 +976,8 @@ async function main() {
     daemonSessionId: finalRuntime.daemonSessionId || null,
     smokeStartedAt,
     deviceModel,
-    bridgeHost: storageTarget.target.bridgeHost,
-    bridgePort: storageTarget.target.bridgePort,
+    bridgeHost: bridgeTarget.bridgeHost,
+    bridgePort: bridgeTarget.bridgePort,
     inputSample: INPUT_SAMPLE,
     ime: {
       beforeVisible: inputMethodVisible(beforeImeInputMethod),
