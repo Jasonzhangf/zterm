@@ -7367,3 +7367,46 @@ if (bufferedBytes >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES) {
 - Evidence: `appsdk verify .` PASS at `controlled_verified`, targeted tests
   pass, `tsc --noEmit` exit 0, no live-product source changed, and the
   active-v3 archive is hash-consistent.
+- Regression/effectiveness re-verification should be bound to the new
+  active-v4 records before freeze/publish.
+- Evidence: `appsdk verify .` PASS at `controlled_verified`, targeted tests
+  pass, `tsc --noEmit` exit 0, no live-product source changed, and the
+  active-v3 archive is hash-consistent.
+
+# 2026-08-16 DSH finding feedback distilled to local skill
+
+- Root cause: DSH `zarchv2-activev4-final-r1` FAIL was governance review
+  hierarchy (override after a valid DSH FAIL) plus a reviewed tree that was
+  not the merged tree. The two together make the freeze/publish move
+  ungrounded.
+- Fix order taken: cleared premature records, demoted snapshot to
+  `controlled_verified`, re-ran DSH on the clean tree, recorded the PASS,
+  then add active-v4 lifecycle records bound to this exact HEAD before
+  `promote_module`/`freeze`/`publish_active`.
+- Local skill update: `.agents/skills/appsdk-project-governance/SKILL.md`
+  New Project Flow step 11 — never bind lifecycle records whose
+  `reviewer.adapter` overrides a valid DSH FAIL; if a DSH FAIL appears,
+  demote to `controlled_verified`, clear records, and re-review before any
+  record bind; the reviewed tree hash in the records must equal the merged
+  tree hash at the bind commit; treat this as a hard gate.
+
+
+# 2026-08-16 active-v4 promotion follow-up
+
+- DSH `zarchv2-activev4-source-r2` PASS at `controlled_verified` does not
+  yet authorize `promote_module`/`freeze`/`publish_active`. The next steps
+  must happen on the exact HEAD that produced this PASS:
+  1. Run the focused module regression (8 files / 297 tests) and the full
+     `pnpm run prebuild` again on this HEAD.
+  2. Bind active-v4 WorktreeRecord / ReproductionRecord /
+     FixCandidateRecord / ReviewRecord / EffectivenessRecord / MergeRecord
+     / PromotionRecord / RegressionReport / evidence bundle so the
+     `reviewed_tree_hash` matches HEAD's tree hash and the DSH review is
+     recorded verbatim.
+  3. `appsdk promote-module . --module zterm-runtime-v2 --to architecture_stable`.
+  4. DSH review the new HEAD that carries the active-v4 record bind
+     (`zarchv2-activev4-final-r2`) before any `freeze`/`publish_active`.
+  5. Only after the second DSH PASS may `appsdk promote-module ... --to
+     frozen` and `appsdk publish-active . --module zterm-runtime-v2
+     --version active-v4` run; OTA, merge-to-main, and playground cleanup
+     still require Jason authorization.
