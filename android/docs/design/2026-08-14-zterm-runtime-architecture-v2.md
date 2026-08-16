@@ -4,8 +4,8 @@
 - Status: confirmed; implementation is complete. AppSDK active-version and
   lifecycle state are authoritative in `.appsdk/project.json`,
   `.appsdk/records/**`, and `active/lib/zterm-runtime-v2/current.json`.
-- active-v2 status: implemented, awaiting AppSDK review/promotion/freeze; see
-  `.appsdk/records/**`
+- active-v2 status: implemented, DSH review R4 PASS, awaiting AppSDK
+  promotion/freeze; see `.appsdk/records/**`
 - Product verification status: L5 device/package/OTA verification remains open
 - Confirmed by: Jason
 - Confirmed at: `2026-08-15T00:45:30Z`
