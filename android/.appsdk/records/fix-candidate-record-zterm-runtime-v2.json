@@ -1,17 +1,27 @@
 {
   "$schema": "https://appsdk.local/contracts/records/fix-candidate-record.schema.json",
-  "fix_candidate_id": "FIX-20260816-ZARCHV2-ACTIVEV4-002",
+  "fix_candidate_id": "FIX-20260816-ZARCHV2-ACTIVEV4-003",
   "issue_id": "zterm-runtime-architecture-v2",
   "module_id": "zterm-runtime-v2",
   "worktree_id": "WT-20260816-ZARCHV2-ACTIVEV4-001",
   "base_commit": "150fe4688dccba0e46daab5ef324a2dfd629c971",
-  "head_commit": "519ffe2967699d1a6134bb10ffb1b10a71cb94b9",
-  "tree_hash": "65fa98941317d5dacb9987e076f15b1361a5106d",
-  "diff_hash": "sha256:23817a306a4ebfebed24609b50b3f9c60fc3ceefa5b5117f5a146a73c3e180ab",
-  "design_id": "FD-20260816-APPSDK013-FINAL-GATE-02",
+  "head_commit": "3015dee5d4eb8a41d9fbb88942f46c2872af7a19",
+  "tree_hash": "fece00db15cbbc872bf20d299b9d7a396a455dde",
+  "diff_hash": "sha256:de79e4a86ce4cfa4e4295226f6cf7af23928a45b3cdf6038c5f0f60d77cad2fa",
+  "design_id": "FD-20260816-APPSDK013-FINAL-GATE-03",
   "owner": "zterm-runtime-v2",
-  "scope_hash": "sha256:14abf6967a507e5300c4efd61f1526aa44a5b85acb879d34a0db98695d783720",
+  "scope_hash": "sha256:7f5313d58dc0f2c9e39ada71e3055e2aa5ffb8f365453c28b4e9f32453449690",
   "changed_paths": [
+    "android/.appsdk/records/evidence-record-zterm-runtime-v2.json",
+    "android/.appsdk/records/evidence/zterm-runtime-v2/evid-20260816-zarchv2-activev4-artifact-001.json",
+    "android/.appsdk/records/evidence/zterm-runtime-v2/evid-20260816-zarchv2-activev4-baseline-001.json",
+    "android/.appsdk/records/evidence/zterm-runtime-v2/evid-20260816-zarchv2-activev4-negative-001.json",
+    "android/.appsdk/records/evidence/zterm-runtime-v2/evid-20260816-zarchv2-activev4-positive-001.json",
+    "android/.appsdk/records/evidence/zterm-runtime-v2/evid-20260816-zarchv2-activev4-verify-001.json",
+    "android/.appsdk/records/fix-candidate-record-zterm-runtime-v2.json",
+    "android/.appsdk/records/regression-report-zterm-runtime-v2.json",
+    "android/.appsdk/records/reproduction-record-zterm-runtime-v2.json",
+    "android/.appsdk/records/worktree-record-zterm-runtime-v2.json",
     "android/docs/debug/2026-08-16-appsdk013-final-gate-fix-design.md",
     "android/docs/goals/appsdk-0.1.3-active-v4-plan.md",
     "android/docs/module-registry.json",
@@ -31,5 +41,5 @@
     "evid-20260816-zarchv2-activev4-positive-001",
     "evid-20260816-zarchv2-activev4-negative-001"
   ],
-  "created_at": "2026-08-16T19:30:00Z"
+  "created_at": "2026-08-16T19:54:30Z"
 }
