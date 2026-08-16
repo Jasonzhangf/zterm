@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "loop_id": "zterm.daily-triage",
+  "pattern": "daily-triage",
+  "mode": "L1",
+  "owner_feature": "project.loop_governance",
+  "state_file": "docs/loops/STATE.md",
+  "constraints_file": "docs/loops/loop-constraints.md",
+  "budget_file": "docs/loops/loop-budget.md",
+  "run_log_file": "docs/loops/loop-run-log.md",
+  "kill_switch": {
+    "file": "docs/loops/STATE.md",
+    "field": "kill_switch",
+    "inactive_value": "inactive",
+    "active_value": "active"
+  },
+  "allowed_modes": ["L1", "L2", "L3"],
+  "enabled_mode": "L1",
+  "actions_allowed": {
+    "read_project_truth": true,
+    "write_report": true,
+    "append_run_log": true,
+    "edit_product_code": false,
+    "start_or_stop_daemon": false,
+    "stage_or_commit": false,
+    "push_or_merge": false
+  },
+  "canonical_docs": [
+    "docs/loops/LOOP.md",
+    "docs/loops/STATE.md",
+    "docs/loops/loop-constraints.md",
+    "docs/loops/loop-budget.md",
+    "docs/loops/loop-run-log.md",
+    "docs/testing/loop-governance-test-design.md",
+    "docs/feature-registry.json",
+    "docs/function-map.md",
+    "docs/feature-gates.md",
+    "docs/wiki/mainline-call-map.json"
+  ],
+  "function_map": {
+    "feature_id": "project.loop_governance",
+    "path": "docs/function-map.md"
+  },
+  "mainline_call_ids": [
+    "android_mainline:App->TerminalPage",
+    "daemon_mainline:Server->DaemonDebugHub",
+    "cli_mainline:DevCLI->Shell"
+  ],
+  "verification_gates": [
+    "src/lib/loop-governance-truth.test.ts",
+    "src/lib/feature-registry-truth.test.ts",
+    "src/lib/function-wiki-truth.test.ts"
+  ],
+  "l1_report_required_fields": [
+    "feature_id",
+    "owner_path",
+    "allowed_path",
+    "forbidden_path_check",
+    "required_gate",
+    "mainline_call_id",
+    "status"
+  ],
+  "upgrade_policy": {
+    "l2_requires_human_approval": true,
+    "l2_requires_maker_checker": true,
+    "l2_max_attempts_per_item": 3,
+    "l3_enabled": false
+  }
+}

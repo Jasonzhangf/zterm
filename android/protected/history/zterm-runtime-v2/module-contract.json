@@ -1,0 +1,74 @@
+{
+  "active_artifact": "active/lib/zterm-runtime-v2/**",
+  "artifact_paths": [
+    "zterm-runtime-v2.web.tgz"
+  ],
+  "build": {
+    "args": [
+      "-lc",
+      "pnpm run build && rm -f generated/modules/zterm-runtime-v2/lib/zterm-runtime-v2.web.tgz && mkdir -p generated/modules/zterm-runtime-v2/lib && tar -czf generated/modules/zterm-runtime-v2/lib/zterm-runtime-v2.web.tgz -C dist ."
+    ],
+    "program": "bash",
+    "working_directory": "."
+  },
+  "contract_paths": [
+    "contracts/records/**",
+    "contracts/transitions/**",
+    "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+    "docs/goals/zterm-runtime-architecture-v2-plan.md"
+  ],
+  "dependency_modules": [],
+  "generated_outputs": [
+    "generated/modules/zterm-runtime-v2/**"
+  ],
+  "module_id": "zterm-runtime-v2",
+  "owned_paths": [
+    "playground/experiments/zterm-runtime-architecture-v2/**",
+    "src/**",
+    "native/android/app/src/main/**",
+    "docs/**",
+    "scripts/**",
+    "package.json",
+    "tsconfig.json",
+    "vite.config.ts",
+    "index.html"
+  ],
+  "regression": {
+    "allow_skipped": false,
+    "command": {
+      "args": [
+        "exec",
+        "vitest",
+        "run",
+        "src/server/terminal-message-runtime.test.ts",
+        "src/server/terminal-mirror-runtime.test.ts",
+        "src/server/daemon-buffer-publisher-runtime.test.ts",
+        "src/lib/runtime-architecture-v2.test.ts",
+        "src/lib/plugin-host/plugin-host-runtime.test.ts",
+        "src/pages/TerminalPage.render-isolation.test.tsx",
+        "src/App.dynamic-refresh.test.tsx",
+        "src/contexts/SessionContext.ws-refresh.test.tsx",
+        "--reporter=dot"
+      ],
+      "program": "pnpm",
+      "working_directory": "."
+    },
+    "input_paths": [
+      "playground/experiments/zterm-runtime-architecture-v2/**",
+      "src/**"
+    ],
+    "minimum_test_count": 1,
+    "ordinary_mode_after_freeze": "disabled",
+    "reenable_on": [
+      "source_change",
+      "contract_change",
+      "public_api_change",
+      "artifact_change",
+      "dependency_change"
+    ],
+    "required_before_freeze": true,
+    "suite_id": "zterm-runtime-v2-regression"
+  },
+  "source_owner": "zterm-runtime-v2",
+  "stage": "frozen"
+}

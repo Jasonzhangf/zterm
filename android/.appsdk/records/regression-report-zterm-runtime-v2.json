@@ -1,15 +1,7 @@
 {
   "$schema": "https://appsdk.local/contracts/records/regression-report.schema.json",
-  "regression_report_id": "REGR-20260816-ZARCHV2-001",
-  "module_id": "zterm-runtime-v2",
-  "source_commit": "4c0416ff2767f173b9984d49965787c0afb76b9c",
   "artifact_hash": "sha256:ea3b90ba83282ff4d66491d53c9794979dbf5ea8c7ecbc82a7a6085b86f92ffb",
-  "public_api_hash": "sha256:667eb211855040e4cf42ffbe3bc2627629c5c2dc0120dc7367b57fbc6f1985e3",
-  "scope_hash": "sha256:0ef1306a1574b5e053549cf15ee26d648d33fd41359805718bd1f39efa014cae",
-  "input_hash": "sha256:ea3b90ba83282ff4d66491d53c9794979dbf5ea8c7ecbc82a7a6085b86f92ffb",
-  "suite_id": "zterm-runtime-v2-regression",
   "command": {
-    "program": "pnpm",
     "args": [
       "exec",
       "vitest",
@@ -24,20 +16,28 @@
       "src/contexts/SessionContext.ws-refresh.test.tsx",
       "--reporter=dot"
     ],
+    "program": "pnpm",
     "working_directory": "."
   },
-  "test_count": 297,
-  "passed": 297,
+  "created_at": "2026-08-16T00:05:08Z",
   "failed": 0,
-  "skipped": 0,
-  "result": "pass",
+  "input_hash": "sha256:ea3b90ba83282ff4d66491d53c9794979dbf5ea8c7ecbc82a7a6085b86f92ffb",
+  "module_id": "zterm-runtime-v2",
+  "passed": 297,
   "producer": {
     "adapter": "vitest",
     "identity": "codex-zterm-v2-regression-20260816T000508Z"
   },
+  "public_api_hash": "sha256:667eb211855040e4cf42ffbe3bc2627629c5c2dc0120dc7367b57fbc6f1985e3",
+  "regression_report_id": "REGR-20260816-ZARCHV2-001",
+  "result": "pass",
+  "scope_hash": "sha256:0ef1306a1574b5e053549cf15ee26d648d33fd41359805718bd1f39efa014cae",
+  "skipped": 0,
+  "source_commit": "4c0416ff2767f173b9984d49965787c0afb76b9c",
+  "suite_id": "zterm-runtime-v2-regression",
   "test_characteristics": {
-    "whitebox": true,
-    "blackbox": true
+    "blackbox": true,
+    "whitebox": true
   },
-  "created_at": "2026-08-16T00:05:08Z"
+  "test_count": 297
 }

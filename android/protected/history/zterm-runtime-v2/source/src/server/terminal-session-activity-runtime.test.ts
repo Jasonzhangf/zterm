@@ -1,0 +1,224 @@
+import { describe, expect, it, vi } from 'vitest';
+import { isTerminalMuxServerFrame } from '@zterm/shared/protocol';
+import {
+  classifySessionActivities,
+  publishSessionActivitiesRuntime,
+  SESSION_IDLE_STOPPED_THRESHOLD_MS,
+} from './terminal-session-activity-runtime';
+import type {
+  SessionMirror,
+  TerminalSessionTransport,
+  TerminalTransportConnection,
+} from './terminal-runtime-types';
+
+function makeMirror(sessionName: string, lastLiveActivityAt: number, lifecycle: SessionMirror['lifecycle'] = 'ready'): SessionMirror {
+  const base: SessionMirror = {
+    key: sessionName,
+    sessionName,
+    scratchBridge: null,
+    lifecycle,
+    cols: 80,
+    rows: 24,
+    consecutiveFailures: 0,
+    cursorKeysApp: false,
+    revision: 0,
+    lastScrollbackCount: 0,
+    bufferStartIndex: 0,
+    bufferLines: [],
+    cursor: null,
+    lastFlushStartedAt: 0,
+    lastFlushCompletedAt: 0,
+    lastLiveActivityAt,
+    lastHeadBroadcastAt: 0,
+    flushInFlight: false,
+    flushPromise: null,
+    liveSyncTimer: null,
+    subscribers: new Set(),
+    quietFlushStreak: 0,
+    lastFlushHadContentChanges: false,
+  };
+  return base;
+}
+
+function makeConnection(mux = false): TerminalTransportConnection {
+  const transport: TerminalSessionTransport = {
+    kind: 'rtc',
+    readyState: 1,
+    requestOrigin: 'relay-host',
+    connectedSent: true,
+    sendText: vi.fn(),
+    close: vi.fn(),
+  };
+  return {
+    transportId: 'transport-1',
+    transport,
+    closeTransport: vi.fn(),
+    requestOrigin: 'relay-host',
+    role: 'session',
+    boundSubscriberId: null,
+    ...(mux
+      ? {
+          muxVersion: 1,
+          muxClientInstanceId: 'android-client-1',
+          muxChannels: new Map<string, string>(),
+        }
+      : {}),
+  };
+}
+
+describe('classifySessionActivities', () => {
+  const now = 100_000;
+  const threshold = SESSION_IDLE_STOPPED_THRESHOLD_MS;
+
+  it('returns empty array for empty map', () => {
+    const result = classifySessionActivities(new Map(), now, threshold);
+    expect(result).toEqual([]);
+  });
+
+  it('filters out mirrors with lastLiveActivityAt === 0 (uninitialized)', () => {
+    const mirrors = new Map<string, SessionMirror>([
+      ['s1', makeMirror('s1', 0)],
+    ]);
+    const result = classifySessionActivities(mirrors, now, threshold);
+    expect(result).toEqual([]);
+  });
+
+  it('reports stopped: false for recently active session', () => {
+    const mirrors = new Map<string, SessionMirror>([
+      ['active', makeMirror('active', now - 1_000)],
+    ]);
+    const result = classifySessionActivities(mirrors, now, threshold);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ name: 'active', stopped: false });
+  });
+
+  it('reports stopped: true only when the mirror failed (tmux capture keeps failing)', () => {
+    const mirrors = new Map<string, SessionMirror>([
+      ['stale', makeMirror('stale', now - threshold - 1, 'failed')],
+    ]);
+    const result = classifySessionActivities(mirrors, now, threshold);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ name: 'stale', stopped: true });
+  });
+
+  it('does not report stopped for an idle-but-alive session (no capture failure)', () => {
+    // rcc2-like: the session is alive and its mirror is healthy, but the
+    // screen simply has no new output for a long time. Idle is NOT stopped.
+    const mirrors = new Map<string, SessionMirror>([
+      ['idle-alive', makeMirror('idle-alive', now - threshold - 5_000, 'ready')],
+    ]);
+    const result = classifySessionActivities(mirrors, now, threshold);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ name: 'idle-alive', stopped: false });
+  });
+
+  it('reports stopped: true when failed idle exactly at threshold (boundary)', () => {
+    const mirrors = new Map<string, SessionMirror>([
+      ['boundary', makeMirror('boundary', now - threshold, 'failed')],
+    ]);
+    const result = classifySessionActivities(mirrors, now, threshold);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ name: 'boundary', stopped: true });
+  });
+
+  it('handles stopped->active resume', () => {
+    const mirrors = new Map<string, SessionMirror>([
+      ['resume', makeMirror('resume', now - 1_000, 'failed')],
+    ]);
+    const staleNow = now + threshold + 5_000;
+    const staleResult = classifySessionActivities(mirrors, staleNow, threshold);
+    expect(staleResult[0]).toMatchObject({ name: 'resume', stopped: true });
+    mirrors.get('resume')!.lastLiveActivityAt = staleNow - 500;
+    const resumedResult = classifySessionActivities(mirrors, staleNow, threshold);
+    expect(resumedResult[0]).toMatchObject({ name: 'resume', stopped: false });
+  });
+
+  it('handles multiple mirrors independently', () => {
+    const mirrors = new Map<string, SessionMirror>([
+      ['s1', makeMirror('s1', now - 1_000)],
+      ['s2', makeMirror('s2', 0)],
+      ['s3', makeMirror('s3', now - threshold - 1, 'failed')],
+      ['s4', makeMirror('s4', now - 500)],
+    ]);
+    const result = classifySessionActivities(mirrors, now, threshold);
+    expect(result).toHaveLength(3);
+    expect(result.map((r) => ({ name: r.name, stopped: r.stopped }))).toEqual([
+      { name: 's1', stopped: false },
+      { name: 's3', stopped: true },
+      { name: 's4', stopped: false },
+    ]);
+  });
+
+  it('sorts sessions alphabetically by name', () => {
+    const mirrors = new Map<string, SessionMirror>([
+      ['z', makeMirror('z', now - 1_000)],
+      ['a', makeMirror('a', now - 1_000)],
+    ]);
+    const result = classifySessionActivities(mirrors, now, threshold);
+    expect(result.map((r) => r.name)).toEqual(['a', 'z']);
+  });
+});
+
+describe('publishSessionActivitiesRuntime', () => {
+  const now = 100_000;
+  const mirrors = new Map<string, SessionMirror>([
+    ['demo', makeMirror('demo', now - 1_000)],
+  ]);
+
+  it('publishes a raw control message only for a legacy pre-mux connection', () => {
+    const connection = makeConnection(false);
+    const sendTransportMessage = vi.fn();
+
+    publishSessionActivitiesRuntime({
+      connection,
+      mirrors,
+      now,
+      sendTransportMessage,
+    });
+
+    expect(sendTransportMessage).toHaveBeenCalledTimes(1);
+    expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
+      type: 'session-activity',
+      payload: {
+        activities: [{
+          name: 'demo',
+          lastLiveActivityAt: now - 1_000,
+          stopped: false,
+        }],
+      },
+    });
+  });
+
+  it('publishes session activity through the target control envelope after mux negotiation', () => {
+    const connection = makeConnection(true);
+    const sendTransportMessage = vi.fn();
+
+    publishSessionActivitiesRuntime({
+      connection,
+      mirrors,
+      now,
+      sendTransportMessage,
+    });
+
+    expect(sendTransportMessage).toHaveBeenCalledTimes(1);
+    const frame = sendTransportMessage.mock.calls[0]?.[1];
+    expect(frame).toEqual({
+      type: 'mux-target-message',
+      payload: {
+        message: {
+          type: 'session-activity',
+          payload: {
+            activities: [{
+              name: 'demo',
+              lastLiveActivityAt: now - 1_000,
+              stopped: false,
+            }],
+          },
+        },
+      },
+    });
+    expect(isTerminalMuxServerFrame(frame)).toBe(true);
+    expect(frame).not.toMatchObject({ type: 'session-activity' });
+    expect(frame).not.toMatchObject({ type: 'mux-channel-message' });
+  });
+});

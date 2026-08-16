@@ -137,7 +137,7 @@
         "suite_id": "zterm-runtime-v2-regression"
       },
       "source_owner": "zterm-runtime-v2",
-      "stage": "architecture_stable"
+      "stage": "frozen"
     }
   ],
   "project_id": "zterm-runtime-architecture-v2",
