@@ -10,7 +10,7 @@
   "architecture_review_id": "REVIEW-20260816-DSH-ZARCHV2-ACTIVEV3-001",
   "effectiveness_record_id": "EFF-20260816-ZARCHV2-ACTIVEV3-001",
   "merge_record_id": "MERGE-20260816-ZARCHV2-ACTIVEV3-001",
-  "base_commit": "d626524",
+  "base_commit": "d626524c6f89f2168f3894a569c2916f63730338",
   "candidate_commit": "44e23ef7b28cb265400e032e3338b52c19c7b65f",
   "merged_commit": "44e23ef7b28cb265400e032e3338b52c19c7b65f",
   "source_commit": "44e23ef7b28cb265400e032e3338b52c19c7b65f",
