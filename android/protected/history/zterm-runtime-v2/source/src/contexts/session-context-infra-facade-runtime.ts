@@ -1,0 +1,667 @@
+import {
+  flushRuntimeDebugLogs as flushRuntimeDebugLogsViaHttp,
+  type DebugObservabilityTarget,
+} from '../lib/runtime-debug-http-exporter';
+import { createClientDaemonConnection } from '../lib/client-daemon-connection';
+import type { BridgeSettings } from '../lib/bridge-settings';
+import {
+  getSessionTerminalChannel,
+  setSessionChannelBodySubscribed,
+} from '../lib/terminal-channel-mux-runtime';
+import {
+  getSessionTargetTerminalTransport,
+  type SessionTransportRuntimeStore,
+} from '../lib/session-transport-runtime';
+import type { BridgeTransportSocket } from '../lib/traversal/types';
+import type { SessionHeartbeatStore } from '../lib/session-heartbeat-store';
+import type { SessionReconnectStore } from '../lib/session-reconnect-store';
+import type { SessionTailRefreshStore } from '../lib/session-tail-refresh-store';
+import type { BufferFrameAssemblyResourceState } from '../lib/buffer-frame-assembly/session-buffer-frame-assembly';
+import { probeHostReachable } from '../lib/reconnect-host-probe';
+import type { Host, Session, SessionBufferState, SessionRenderBufferSnapshot, SessionScheduleState, TerminalBufferPayload } from '../lib/types';
+import type { NetworkIdentityRuntime } from '../lib/network-identity';
+import type { RecordSessionTxOptions } from './session-context-pull-runtime';
+import type { RevisionResetExpectation, SessionAction, SessionManagerState } from './session-context-core';
+import type { SessionPullPurpose } from '../lib/session-pull-state-helpers';
+import {
+  buildTerminalMuxChannelBinary,
+  buildTerminalMuxChannelMessage,
+  buildTerminalMuxTargetMessage,
+  classifyTerminalMuxClientMessage,
+  type BridgeClientMessage,
+  type TerminalMuxClientFrame,
+} from '@zterm/shared/protocol';
+import {
+  CLIENT_TRANSPORT_HEARTBEAT_INTERVAL_MS,
+  CLIENT_TRANSPORT_HEARTBEAT_MAX_MISSES,
+  applySessionActionRuntime,
+  applyTransportDiagnosticsRuntime,
+  buildTraversalSocketForHostRuntime,
+  clearHeartbeatRuntime,
+  clearSessionHandshakeTimeoutInfraRuntime,
+  clearSessionPullStateInfraRuntime,
+  clearTailRefreshRuntimeInfra,
+  createSessionSyncRuntime,
+  createTransportInfraAccessorsRuntime,
+  deleteSessionSyncRuntime,
+  getSessionRenderBufferStoreRuntime,
+  getSessionRenderBufferSnapshotRuntime,
+  hasPendingSessionTransportOpenRuntime,
+  incrementConnectedSyncRuntime,
+  isPendingSessionTransportOpenStaleRuntime,
+  isReconnectInFlightRuntime,
+  isSessionTransportActiveRuntime,
+  shouldAcceptSessionLiveBufferRuntime,
+  isSessionTransportActivityStaleInfraRuntime,
+  markPendingInputTailRefreshInfraRuntime,
+  moveSessionSyncRuntime,
+  readSessionBufferSnapshotRuntime,
+  readSessionTransportTokenRuntime,
+  recordSessionRxInfraRuntime,
+  recordSessionRxBytesOnlyInfraRuntime,
+  recordSessionTxInfraRuntime,
+  resetSessionTransportPullBookkeepingInfraRuntime,
+  resolvePhysicalBodySubscribedSessionIdsRuntime,
+  resolveSessionCacheLinesRuntime,
+  sendSocketPayloadInfraRuntime,
+  setActiveSessionSyncRuntime,
+  setLiveSessionsSyncRuntime,
+  setScheduleStateForSessionRuntime,
+  setSessionHandshakeTimeoutInfraRuntime,
+  setSessionTitleSyncRuntime,
+  settleSessionPullStateInfraRuntime,
+  startSocketHeartbeatInfraRuntime,
+  updateSessionSyncRuntime,
+  writeSessionTransportTokenRuntime,
+} from './session-context-infra-runtime';
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function encodeArrayBufferToBase64(data: ArrayBuffer) {
+  const bytes = new Uint8Array(data);
+  let binary = '';
+  for (let offset = 0; offset < bytes.byteLength; offset += 0x8000) {
+    const chunk = bytes.subarray(offset, Math.min(offset + 0x8000, bytes.byteLength));
+    binary += String.fromCharCode(...chunk);
+  }
+  if (typeof btoa === 'function') {
+    return btoa(binary);
+  }
+  const bufferCtor = (globalThis as unknown as {
+    Buffer?: { from(input: string, encoding: 'binary'): { toString(encoding: 'base64'): string } };
+  }).Buffer;
+  if (bufferCtor) {
+    return bufferCtor.from(binary, 'binary').toString('base64');
+  }
+  throw new Error('terminal mux binary encoding unavailable');
+}
+
+function requireTerminalMuxChannel(
+  store: SessionTransportRuntimeStore,
+  sessionId: string,
+) {
+  const channel = getSessionTerminalChannel(store.terminalChannels, sessionId);
+  if (!channel || (channel.state !== 'opening' && channel.state !== 'open')) {
+    throw new Error(`terminal mux channel is not open for session ${sessionId}`);
+  }
+  return channel;
+}
+
+export function wrapSessionPayloadForTargetMuxRuntime(options: {
+  store: SessionTransportRuntimeStore;
+  sessionId: string;
+  ws: BridgeTransportSocket;
+  data: string | ArrayBuffer;
+}): string | ArrayBuffer {
+  const targetSocket = getSessionTargetTerminalTransport(options.store, options.sessionId);
+  if (!targetSocket || targetSocket !== options.ws) {
+    return options.data;
+  }
+  if (typeof options.data !== 'string') {
+    const channel = requireTerminalMuxChannel(options.store, options.sessionId);
+    return JSON.stringify(buildTerminalMuxChannelBinary(
+      channel.channelId,
+      encodeArrayBufferToBase64(options.data),
+    ));
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(options.data);
+  } catch {
+    const channel = requireTerminalMuxChannel(options.store, options.sessionId);
+    return JSON.stringify(buildTerminalMuxChannelMessage(channel.channelId, {
+      type: 'input',
+      payload: options.data,
+    }));
+  }
+
+  if (!isRecord(parsed) || typeof parsed.type !== 'string') {
+    throw new Error('terminal mux outbound payload requires a typed JSON message');
+  }
+  if (parsed.type.startsWith('mux-')) {
+    return options.data;
+  }
+  if (parsed.type === 'close') {
+    const channel = requireTerminalMuxChannel(options.store, options.sessionId);
+    const frame: TerminalMuxClientFrame = {
+      type: 'mux-channel-close',
+      payload: {
+        channelId: channel.channelId,
+        reason: 'client requested channel close',
+      },
+    };
+    return JSON.stringify(frame);
+  }
+
+  const message = parsed as BridgeClientMessage;
+  const lane = classifyTerminalMuxClientMessage(message);
+  if (lane === 'legacy') {
+    throw new Error(`legacy terminal message ${message.type} cannot be sent on mux target transport`);
+  }
+  if (lane === 'observability') {
+    throw new Error(`debug observability message ${message.type} cannot use the terminal mux channel`);
+  }
+  if (lane === 'target') {
+    return JSON.stringify(buildTerminalMuxTargetMessage(message as Parameters<typeof buildTerminalMuxTargetMessage>[0]));
+  }
+  const channel = requireTerminalMuxChannel(options.store, options.sessionId);
+  return JSON.stringify(buildTerminalMuxChannelMessage(
+    channel.channelId,
+    message as Parameters<typeof buildTerminalMuxChannelMessage>[1],
+  ));
+}
+
+export function createSessionInfraFacadeRuntime(options: {
+  stateRef: { current: SessionManagerState };
+  dispatch: React.Dispatch<SessionAction>;
+  reduceSessionAction: (state: SessionManagerState, action: SessionAction) => SessionManagerState;
+  transportRuntimeStoreRef: { current: any };
+  sessionBufferStoreRef: { current: any };
+  sessionRenderGateRef: { current: any };
+  sessionHeadStoreRef: { current: any };
+  sessionDebugMetricsStoreRef: { current: any };
+  scheduleStatesRef: { current: Record<string, SessionScheduleState> };
+  setScheduleStates: React.Dispatch<React.SetStateAction<Record<string, SessionScheduleState>>>;
+  sessionAttachTokensRef: { current: Map<string, string> };
+  pendingSessionTransportOpenIntentsRef: { current: Map<string, unknown> };
+  activeBodySubscriptionSuppressedRef: { current: boolean };
+  reconnectStore: SessionReconnectStore;
+  tailRefreshStore: SessionTailRefreshStore;
+  bufferFrameAssemblyRef: { current: Map<string, BufferFrameAssemblyResourceState> };
+  sessionPullStateRef: { current: Map<string, unknown> };
+  heartbeatStore: SessionHeartbeatStore;
+  handshakeTimeoutsRef: { current: Map<string, number> };
+  sessionRevisionResetRef: { current: Map<string, RevisionResetExpectation> };
+  lastHeadRequestAtRef: { current: Map<string, number> };
+  terminalCacheLines: number;
+  defaultRows: number;
+  bridgeSettings: BridgeSettings;
+  wsUrl?: string;
+  staleActivityMs: number;
+  runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
+  /** Client network-generation owner; generation stamps route-health isolation. */
+  networkIdentity?: NetworkIdentityRuntime;
+}) {
+  const applySessionAction = (action: SessionAction) => {
+    applySessionActionRuntime({
+      stateRef: options.stateRef,
+      action,
+      reduceSessionAction: options.reduceSessionAction,
+      dispatch: options.dispatch,
+    });
+  };
+
+  const readSessionBufferSnapshot = (sessionId: string): SessionBufferState => {
+    return readSessionBufferSnapshotRuntime({
+      sessionId,
+      sessionBufferStoreRef: options.sessionBufferStoreRef,
+    });
+  };
+
+  const updateSessionSync = (id: string, updates: Partial<Session>) => {
+    updateSessionSyncRuntime({
+      id,
+      updates,
+      applySessionAction,
+    });
+  };
+
+  const setActiveSessionSync = (id: string) => {
+    setActiveSessionSyncRuntime({
+      id,
+      applySessionAction,
+    });
+    reconcilePhysicalBodySubscriptions('active-session');
+  };
+
+  const setLiveSessionIdsSync = (ids: string[]) => {
+    setLiveSessionsSyncRuntime({
+      ids,
+      applySessionAction,
+    });
+    reconcilePhysicalBodySubscriptions('live-sessions');
+  };
+
+  const setActiveBodySubscriptionSuppressedSync = (suppressed: boolean, reason = 'active-body-subscription-suppressed') => {
+    if (options.activeBodySubscriptionSuppressedRef.current === suppressed) {
+      return;
+    }
+    options.activeBodySubscriptionSuppressedRef.current = suppressed;
+    reconcilePhysicalBodySubscriptions(reason);
+  };
+
+  const createSessionSync = (session: Session) => {
+    createSessionSyncRuntime({
+      session,
+      applySessionAction,
+    });
+  };
+
+  const deleteSessionSync = (id: string) => {
+    deleteSessionSyncRuntime({
+      id,
+      manualClose: true,
+      applySessionAction,
+    });
+  };
+
+  const moveSessionSync = (id: string, toIndex: number) => {
+    moveSessionSyncRuntime({
+      id,
+      toIndex,
+      applySessionAction,
+    });
+  };
+
+  const setSessionTitleSync = (id: string, title: string) => {
+    setSessionTitleSyncRuntime({
+      id,
+      title,
+      applySessionAction,
+    });
+  };
+
+  const incrementConnectedSync = () => {
+    incrementConnectedSyncRuntime({
+      applySessionAction,
+    });
+  };
+
+  const transportAccessors = createTransportInfraAccessorsRuntime(options.transportRuntimeStoreRef);
+
+  function reconcilePhysicalBodySubscriptions(reason: string) {
+    const liveSessionIds = resolvePhysicalBodySubscribedSessionIdsRuntime({
+      activeSessionId: options.stateRef.current.activeSessionId,
+      liveSessionIds: options.stateRef.current.liveSessionIds,
+      activeBodySubscriptionSuppressed: options.activeBodySubscriptionSuppressedRef.current,
+    });
+    for (const session of options.stateRef.current.sessions) {
+      const channel = transportAccessors.readSessionTerminalChannel(session.id);
+      const subscribed = liveSessionIds.has(session.id);
+      setSessionChannelBodySubscribed(options.transportRuntimeStoreRef.current.terminalChannels, session.id, subscribed);
+      const ws = channel
+        ? (
+          channel.state === 'open'
+            ? daemonConnection.readSessionSocket(session.id)
+            : null
+        )
+        : daemonConnection.readSessionSocket(session.id);
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        continue;
+      }
+      sendSocketPayload(session.id, ws, JSON.stringify({
+        type: 'body-subscription',
+        payload: {
+          version: 1,
+          subscribed,
+        },
+      }));
+      options.runtimeDebug('session.body-subscription.sent', {
+        sessionId: session.id,
+        subscribed,
+        reason,
+      });
+    }
+  }
+
+  const readSessionTransportToken = (sessionId: string) => {
+    return readSessionTransportTokenRuntime({
+      sessionId,
+      sessionAttachTokensRef: options.sessionAttachTokensRef,
+    });
+  };
+
+  const writeSessionTransportToken = (sessionId: string, token: string | null) => {
+    return writeSessionTransportTokenRuntime({
+      sessionId,
+      token,
+      sessionAttachTokensRef: options.sessionAttachTokensRef,
+    });
+  };
+
+  const isSessionTransportActive = (sessionId: string) => {
+    return isSessionTransportActiveRuntime({
+      sessionId,
+      stateRef: options.stateRef,
+    });
+  };
+
+
+  const shouldAcceptSessionLiveBuffer = (sessionId: string) => {
+    return shouldAcceptSessionLiveBufferRuntime({
+      sessionId,
+      stateRef: options.stateRef,
+      readSessionBufferSnapshot,
+    });
+  };
+
+  const hasPendingSessionTransportOpen = (sessionId: string) => {
+    return hasPendingSessionTransportOpenRuntime({
+      sessionId,
+      pendingSessionTransportOpenIntentsRef: options.pendingSessionTransportOpenIntentsRef,
+    });
+  };
+
+  const isPendingSessionTransportOpenStale = (sessionId: string, staleAfterMs?: number) => {
+    return isPendingSessionTransportOpenStaleRuntime({
+      sessionId,
+      pendingSessionTransportOpenIntentsRef: options.pendingSessionTransportOpenIntentsRef,
+      staleAfterMs,
+    });
+  };
+
+  const isReconnectInFlight = (sessionId: string) => {
+    return isReconnectInFlightRuntime({
+      sessionId,
+      reconnectStore: options.reconnectStore,
+    });
+  };
+
+  const resolveSessionCacheLines = (rows?: number | null) => {
+    return resolveSessionCacheLinesRuntime({
+      rows,
+      terminalCacheLines: options.terminalCacheLines,
+      defaultRows: options.defaultRows,
+    });
+  };
+
+  const getSessionRenderBufferSnapshot = (sessionId: string): SessionRenderBufferSnapshot => {
+    return getSessionRenderBufferSnapshotRuntime({
+      sessionId,
+      sessionRenderStoreRef: {
+        current: getSessionRenderBufferStoreRuntime({
+          sessionRenderGateRef: options.sessionRenderGateRef,
+        }),
+      },
+    });
+  };
+
+  const getSessionBufferStore = () => options.sessionBufferStoreRef.current;
+  const getSessionRenderBufferStore = () => getSessionRenderBufferStoreRuntime({
+    sessionRenderGateRef: options.sessionRenderGateRef,
+  });
+  const getSessionHeadStore = () => options.sessionHeadStoreRef.current;
+
+  const scheduleSessionRenderCommit = (sessionId: string) => {
+    options.sessionRenderGateRef.current.scheduleCommit(sessionId);
+  };
+
+  const recordSessionTx = (sessionId: string, data: string | ArrayBuffer, recordOptions?: RecordSessionTxOptions) => {
+    recordSessionTxInfraRuntime({
+      sessionId,
+      data,
+      refs: {
+        sessionDebugMetricsStoreRef: options.sessionDebugMetricsStoreRef,
+        sessionPullStateRef: options.sessionPullStateRef,
+      },
+      recordOptions,
+    });
+  };
+
+  const recordSessionRx = (sessionId: string, data: string | ArrayBuffer) => {
+    recordSessionRxInfraRuntime({
+      sessionId,
+      data,
+      refs: {
+        sessionDebugMetricsStoreRef: options.sessionDebugMetricsStoreRef,
+        heartbeatStore: options.heartbeatStore,
+        reconnectStore: options.reconnectStore,
+      },
+    });
+  };
+
+  const recordSessionRxBytesOnly = (sessionId: string, data: string | ArrayBuffer) => {
+    recordSessionRxBytesOnlyInfraRuntime({
+      sessionId,
+      data,
+      refs: {
+        sessionDebugMetricsStoreRef: options.sessionDebugMetricsStoreRef,
+      },
+    });
+  };
+
+  const markPendingInputTailRefresh = (sessionId: string, localRevision: number) => {
+    return markPendingInputTailRefreshInfraRuntime({
+      sessionId,
+      localRevision,
+      tailRefreshStore: options.tailRefreshStore,
+    });
+  };
+
+  const clearSessionPullState = (sessionId: string, purpose?: SessionPullPurpose) => {
+    clearSessionPullStateInfraRuntime({
+      sessionId,
+      sessionPullStateRef: options.sessionPullStateRef,
+      purpose,
+    });
+  };
+
+  const settleSessionPullState = (sessionId: string, payload: TerminalBufferPayload) => {
+    settleSessionPullStateInfraRuntime({
+      sessionId,
+      payload,
+      sessionPullStateRef: options.sessionPullStateRef,
+    });
+  };
+
+  const resetSessionTransportPullBookkeeping = (sessionId: string, reason: string) => {
+    resetSessionTransportPullBookkeepingInfraRuntime({
+      sessionId,
+      reason,
+      activeSessionId: options.stateRef.current.activeSessionId,
+      sessionPullStateRef: options.sessionPullStateRef,
+      tailRefreshStore: options.tailRefreshStore,
+      bufferFrameAssemblyRef: options.bufferFrameAssemblyRef,
+      runtimeDebug: options.runtimeDebug,
+    });
+  };
+
+  const isSessionTransportActivityStale = (sessionId: string) => {
+    return isSessionTransportActivityStaleInfraRuntime({
+      sessionId,
+      heartbeatStore: options.heartbeatStore,
+      staleActivityMs: options.staleActivityMs,
+    });
+  };
+
+  const sendSocketPayload = (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer, recordOptions?: RecordSessionTxOptions) => {
+    const outboundData = wrapSessionPayloadForTargetMuxRuntime({
+      store: options.transportRuntimeStoreRef.current,
+      sessionId,
+      ws,
+      data,
+    });
+    sendSocketPayloadInfraRuntime({
+      sessionId,
+      ws,
+      data: outboundData,
+      recordSessionTx,
+      recordOptions,
+    });
+  };
+
+  const daemonConnection = createClientDaemonConnection({
+    readSessionTransportResource: transportAccessors.readSessionTransportResource,
+    sendSocketPayload,
+  });
+
+  const buildTraversalSocketForHost = (host: Host, transportRole: 'control' | 'session' = 'session') => {
+    return buildTraversalSocketForHostRuntime({
+      host,
+      bridgeSettings: options.bridgeSettings,
+      wsUrl: options.wsUrl,
+      transportRole,
+      networkIdentity: options.networkIdentity,
+    });
+  };
+
+  const openDaemonTargetTransportSocket = (host: Host) => {
+    return buildTraversalSocketForHostRuntime({
+      host,
+      bridgeSettings: options.bridgeSettings,
+      wsUrl: options.wsUrl,
+      transportRole: 'session',
+      networkIdentity: options.networkIdentity,
+    });
+  };
+
+  const applyTransportDiagnostics = (sessionId: string, socket: BridgeTransportSocket) => {
+    applyTransportDiagnosticsRuntime({
+      sessionId,
+      socket,
+      updateSessionSync,
+      runtimeDebug: options.runtimeDebug,
+    });
+  };
+
+  const flushRuntimeDebugLogs = () => {
+    const target: DebugObservabilityTarget = {
+      targetHost: options.bridgeSettings.targetHost,
+      targetPort: options.bridgeSettings.targetPort,
+      targetAuthToken: options.bridgeSettings.targetAuthToken,
+    };
+    flushRuntimeDebugLogsViaHttp({
+      target,
+    });
+  };
+
+  const setScheduleStateForSession = (
+    sessionId: string,
+    nextState: SessionScheduleState | ((current: SessionScheduleState) => SessionScheduleState),
+  ) => {
+    setScheduleStateForSessionRuntime({
+      sessionId,
+      nextState,
+      setScheduleStates: options.setScheduleStates,
+      stateRef: options.stateRef,
+    });
+  };
+
+  const clearHeartbeat = (sessionId: string, heartbeatOptions?: { heartbeatKey?: string }) => {
+    clearHeartbeatRuntime({
+      sessionId,
+      heartbeatKey: heartbeatOptions?.heartbeatKey,
+      heartbeatStore: options.heartbeatStore,
+    });
+  };
+
+  const clearSessionHandshakeTimeout = (sessionId: string) => {
+    clearSessionHandshakeTimeoutInfraRuntime({
+      sessionId,
+      handshakeTimeoutsRef: options.handshakeTimeoutsRef,
+    });
+  };
+
+  const setSessionHandshakeTimeout = (sessionId: string, callback: () => void, delayMs: number) => {
+    return setSessionHandshakeTimeoutInfraRuntime({
+      sessionId,
+      callback,
+      delayMs,
+      handshakeTimeoutsRef: options.handshakeTimeoutsRef,
+    });
+  };
+
+  const clearTailRefreshRuntime = (sessionId: string) => {
+    clearTailRefreshRuntimeInfra({
+      sessionId,
+      sessionHeadStoreRef: options.sessionHeadStoreRef,
+      sessionRevisionResetRef: options.sessionRevisionResetRef,
+      lastHeadRequestAtRef: options.lastHeadRequestAtRef,
+      tailRefreshStore: options.tailRefreshStore,
+      bufferFrameAssemblyRef: options.bufferFrameAssemblyRef,
+    });
+  };
+
+  const startSocketHeartbeat = (
+    sessionId: string,
+    ws: BridgeTransportSocket,
+    finalizeFailure: (message: string, retryable: boolean) => void,
+    heartbeatOptions?: { heartbeatKey?: string },
+  ) => {
+    startSocketHeartbeatInfraRuntime({
+      sessionId,
+      heartbeatKey: heartbeatOptions?.heartbeatKey,
+      ws,
+      finalizeFailure,
+      heartbeatStore: options.heartbeatStore,
+      clientPingIntervalMs: CLIENT_TRANSPORT_HEARTBEAT_INTERVAL_MS,
+      maxConsecutiveMisses: CLIENT_TRANSPORT_HEARTBEAT_MAX_MISSES,
+      sendSocketPayload,
+    });
+  };
+
+  return {
+    applySessionAction,
+    readSessionBufferSnapshot,
+    updateSessionSync,
+    setActiveSessionSync,
+    setLiveSessionIdsSync,
+    setActiveBodySubscriptionSuppressedSync,
+    createSessionSync,
+    deleteSessionSync,
+    moveSessionSync,
+    setSessionTitleSync,
+    incrementConnectedSync,
+    ...transportAccessors,
+    readSessionTransportToken,
+    writeSessionTransportToken,
+    probeReconnectHost: async (bridgeHost: string, bridgePort: number) => {
+      const result = await probeHostReachable(bridgeHost, bridgePort, { protocol: 'http', timeoutMs: 1500 });
+      return result.reachable;
+    },
+    isSessionTransportActive,
+    shouldAcceptSessionLiveBuffer,
+    hasPendingSessionTransportOpen,
+    isPendingSessionTransportOpenStale,
+    isReconnectInFlight,
+    resolveSessionCacheLines,
+    getSessionRenderBufferSnapshot,
+    getSessionBufferStore,
+    getSessionRenderBufferStore,
+    getSessionHeadStore,
+    scheduleSessionRenderCommit,
+    recordSessionTx,
+    recordSessionRx,
+    recordSessionRxBytesOnly,
+    markPendingInputTailRefresh,
+    clearSessionPullState,
+    settleSessionPullState,
+    resetSessionTransportPullBookkeeping,
+    isSessionTransportActivityStale,
+    sendSocketPayload,
+    daemonConnection,
+    buildTraversalSocketForHost,
+    openDaemonTargetTransportSocket,
+    applyTransportDiagnostics,
+    flushRuntimeDebugLogs,
+    setScheduleStateForSession,
+    clearHeartbeat,
+    clearSessionHandshakeTimeout,
+    setSessionHandshakeTimeout,
+    clearTailRefreshRuntime,
+    startSocketHeartbeat,
+  };
+}

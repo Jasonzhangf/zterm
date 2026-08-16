@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">zterm</string>
+    <string name="title_activity_main">zterm</string>
+    <string name="package_name">com.zterm.android</string>
+    <string name="custom_url_scheme">com.zterm.android</string>
+</resources>

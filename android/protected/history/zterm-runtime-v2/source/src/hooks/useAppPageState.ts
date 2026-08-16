@@ -1,0 +1,208 @@
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import { App as CapacitorApp } from '@capacitor/app';
+import {
+  openConnectionPropertiesPage,
+  openConnectionsPage,
+  openSettingsPage,
+  openTerminalPage,
+  resolvePersistedPageStateTruth,
+  type AppPageState,
+} from '../lib/page-state';
+import { STORAGE_KEYS, type Host, type Session } from '../lib/types';
+
+function readPersistedPageState(options?: { allowTerminal?: boolean }): AppPageState {
+  if (typeof window === 'undefined') {
+    return openConnectionsPage();
+  }
+
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.ACTIVE_PAGE);
+    if (!raw) {
+      return openConnectionsPage();
+    }
+    const parsed = JSON.parse(raw) as Partial<AppPageState> | null;
+    if (!parsed || typeof parsed !== 'object') {
+      return openConnectionsPage();
+    }
+    if (parsed.kind === 'terminal' && options?.allowTerminal) {
+      return openTerminalPage();
+    }
+    if (parsed.kind === 'settings') {
+      return openSettingsPage();
+    }
+    if (parsed.kind === 'connection-properties') {
+      return openConnectionPropertiesPage({
+        hostId: typeof parsed.hostId === 'string' ? parsed.hostId : undefined,
+        draft: parsed.draft && typeof parsed.draft === 'object' ? parsed.draft : undefined,
+      });
+    }
+  } catch (error) {
+    console.error('[App] Failed to restore page state:', error);
+  }
+
+  return openConnectionsPage();
+}
+
+interface UseAppPageStateOptions {
+  hosts: Host[];
+  sessions: Session[];
+  runtimeActiveSessionId: string | null;
+  addHost: (host: Omit<Host, 'id' | 'createdAt'>) => Host;
+  updateHost: (id: string, updates: Omit<Host, 'id' | 'createdAt'>) => void;
+  deleteHost: (id: string) => void;
+  ensureTerminalPageVisible: () => void;
+  syncSavedHostToServerPreset?: (host: Omit<Host, 'id' | 'createdAt'>) => void;
+}
+
+export interface AppPageStateResult {
+  pageState: AppPageState;
+  setPageState: Dispatch<SetStateAction<AppPageState>>;
+  editingHost: Host | undefined;
+  editingDraft: Partial<Omit<Host, 'id' | 'createdAt'>> | undefined;
+  handleEdit: (host: Host) => void;
+  handleSaveHost: (hostData: Omit<Host, 'id' | 'createdAt'>) => void;
+  handleCancelHostForm: () => void;
+  handleDelete: (host: Host) => void;
+  handleOpenConnectionsPage: () => void;
+  handleOpenSettingsPage: () => void;
+}
+
+export function useAppPageState(options: UseAppPageStateOptions): AppPageStateResult {
+  const {
+    hosts,
+    sessions,
+    runtimeActiveSessionId,
+    addHost,
+    updateHost,
+    deleteHost,
+    ensureTerminalPageVisible,
+    syncSavedHostToServerPreset,
+  } = options;
+
+  const initialActiveSessionOwnsTerminal = sessions.some((session) => session.id === runtimeActiveSessionId);
+  const [pageState, setPageState] = useState<AppPageState>(() => {
+    return readPersistedPageState({ allowTerminal: initialActiveSessionOwnsTerminal });
+  });
+  const restoredRouteHandledRef = useRef(false);
+  const pageStateRef = useRef(pageState);
+
+  useEffect(() => {
+    pageStateRef.current = pageState;
+  }, [pageState]);
+
+  useEffect(() => {
+    let removed = false;
+    let listener: { remove: () => Promise<void> } | null = null;
+    void Promise.resolve(CapacitorApp.addListener('backButton', () => {
+      const currentPage = pageStateRef.current;
+      if (currentPage.kind === 'settings' || currentPage.kind === 'connection-properties') {
+        setPageState(openConnectionsPage());
+        return;
+      }
+      if (currentPage.kind === 'terminal') {
+        return;
+      }
+      void CapacitorApp.exitApp();
+    })).then((registered) => {
+      if (removed) {
+        void registered.remove();
+        return;
+      }
+      listener = registered;
+    });
+    return () => {
+      removed = true;
+      if (listener) {
+        void listener.remove();
+      }
+    };
+  }, []);
+
+  const activeSession = useMemo(
+    () => sessions.find((session) => session.id === runtimeActiveSessionId) || null,
+    [runtimeActiveSessionId, sessions],
+  );
+
+  useEffect(() => {
+    if (restoredRouteHandledRef.current || !activeSession) {
+      return;
+    }
+
+    restoredRouteHandledRef.current = true;
+    const persistedPage = readPersistedPageState({ allowTerminal: true });
+    if (persistedPage.kind === 'terminal') {
+      setPageState(openTerminalPage());
+      ensureTerminalPageVisible();
+      return;
+    }
+    setPageState(persistedPage);
+  }, [activeSession?.id, ensureTerminalPageVisible, runtimeActiveSessionId, sessions]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        STORAGE_KEYS.ACTIVE_PAGE,
+        JSON.stringify(resolvePersistedPageStateTruth(pageState, runtimeActiveSessionId)),
+      );
+    } catch (error) {
+      console.error('[App] Failed to persist page state:', error);
+    }
+  }, [activeSession, pageState, runtimeActiveSessionId]);
+
+  const editingHost = useMemo(() => {
+    if (pageState.kind !== 'connection-properties' || !pageState.hostId) {
+      return undefined;
+    }
+    return hosts.find((host) => host.id === pageState.hostId);
+  }, [hosts, pageState]);
+
+  const editingDraft = useMemo(() => {
+    if (pageState.kind !== 'connection-properties') {
+      return undefined;
+    }
+    return pageState.draft;
+  }, [pageState]);
+
+  const handleEdit = useCallback((host: Host) => {
+    setPageState(openConnectionPropertiesPage({ hostId: host.id }));
+  }, []);
+
+  const handleSaveHost = useCallback((hostData: Omit<Host, 'id' | 'createdAt'>) => {
+    if (editingHost) {
+      updateHost(editingHost.id, hostData);
+    } else {
+      addHost(hostData);
+    }
+    syncSavedHostToServerPreset?.(hostData);
+    setPageState(openConnectionsPage());
+  }, [addHost, editingHost, syncSavedHostToServerPreset, updateHost]);
+
+  const handleCancelHostForm = useCallback(() => {
+    setPageState(openConnectionsPage());
+  }, []);
+
+  const handleDelete = useCallback((host: Host) => {
+    deleteHost(host.id);
+  }, [deleteHost]);
+
+  const handleOpenConnectionsPage = useCallback(() => {
+    setPageState(openConnectionsPage());
+  }, []);
+
+  const handleOpenSettingsPage = useCallback(() => {
+    setPageState(openSettingsPage());
+  }, []);
+
+  return {
+    pageState,
+    setPageState,
+    editingHost,
+    editingDraft,
+    handleEdit,
+    handleSaveHost,
+    handleCancelHostForm,
+    handleDelete,
+    handleOpenConnectionsPage,
+    handleOpenSettingsPage,
+  };
+}
