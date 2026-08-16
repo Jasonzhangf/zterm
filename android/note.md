@@ -7191,3 +7191,21 @@ if (bufferedBytes >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES) {
   `PREVIOUS_ACTIVE_MISSING`).
 - Full Android `prebuild` passed: appsdk verify, feature registry 92/92, all
   wired architecture/plugin/UI/daemon gates, and relay smoke.
+
+# 2026-08-16 DSH final-r10 PASS for AppSDK record graph wiring
+
+- Committed the AppSDK `record_graph` CI/prebuild wiring and immutable
+  Active/Generated artifact tracking as `8f929a8`.
+- Clean detached worktree at `8f929a8` passed
+  `/Users/fanzhang/.local/bin/appsdk verify android`
+  (`{"ok":true}`), and `pnpm --dir android run test:appsdk-verify` also
+  returned `ok:true`.
+- Full `pnpm --dir android run prebuild` passed at `8f929a8`: AppSDK verify,
+  feature registry 92/92, all architecture/plugin/UI/daemon gates, relay smoke,
+  and the 841-test terminal regression layer.
+- DSH `zarchv2-activev2-record-graph-r10` returned literal `VERDICT: PASS`
+  with no P0/P1. Reviewer confirmed the sdk.lock digest matches the pinned CI
+  binary, Active/Generated hash chains are consistent, and the diff does not
+  touch business source, registries, edge/owner maps, or payload surfaces.
+- Remaining: product L5 real-device/APK/OTA verification and playground
+  cleanup execution still require explicit Jason authorization.

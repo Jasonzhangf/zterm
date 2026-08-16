@@ -17,6 +17,10 @@
   `appsdk verify` on a frozen project requires the immutable `active/lib/**`
   and `generated/**` artifacts to be present; clean CI therefore uses the
   pinned GitHub-release `appsdk` binary and tracked Active/Generated files.
+- DSH `zarchv2-activev2-record-graph-r10` passed commit `8f929a8` with literal
+  `VERDICT: PASS`; clean-checkout AppSDK verify and full Android prebuild both
+  passed for that commit. Product L5 and playground removal remain
+  `pending_authorization`.
 
 ## 2026-08-12 Herdr adapter integration boundary
 

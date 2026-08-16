@@ -13,6 +13,9 @@
 - AppSDK `record_graph` is wired into `android/package.json` prebuild and
   `.github/workflows/ci.yml`; the immutable Active/Generated artifacts are
   tracked so full `appsdk verify` is runnable from a clean checkout.
+- DSH `zarchv2-activev2-record-graph-r10` returned literal `VERDICT: PASS` for
+  commit `8f929a8`; clean-checkout AppSDK verify and full Android prebuild also
+  passed for that commit.
 
 ## Status Update 2026-08-16
 
