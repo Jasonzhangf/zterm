@@ -7109,3 +7109,19 @@ if (bufferedBytes >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES) {
   a new review turn, and note/MEMORY lacked evidence for the new artifact.
 - Next: align record timeline, mark freeze record as pre-freeze pending, run a
   fresh DSH review, then freeze/publish active-v2 and verify.
+
+# 2026-08-16 active-v2 record reset for fresh review
+
+- The active-v2 top-level records committed at `c5f9a2d` were premature:
+  they claimed a final freeze before active-v2 was published and re-pointed
+  the DSH R3 review at a later artifact without a fresh review.
+- `fb15983` set module stage to `architecture_stable`; DSH review of that
+  intermediate state still saw the stale committed records and returned FAIL.
+- To follow the AppSDK pattern used for active-v1 (review source/config first,
+  then create lifecycle records from the review verdict), the premature
+  top-level `evidence/review/promotion/regression/freeze` records are being
+  cleared before the fresh DSH review. They will be recreated only after that
+  review returns PASS.
+- Current generated artifact remains `sha256:ab527a800da96f8f1bb3b038649c5882f3e016dd0eef0749e32bb9a50ae152e8`
+  with public API `sha256:714d9cd3b2c3a632ac9618511fee742367b15d89e32c134bfb838f7966e592a2`;
+  regression rerun is 297/297 at `2026-08-16T01:24:53Z`.
