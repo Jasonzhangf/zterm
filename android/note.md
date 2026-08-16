@@ -7337,3 +7337,15 @@ if (bufferedBytes >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES) {
   `pnpm run build` PASS.
 - Remaining before delivery: fresh DSH review on this exact candidate, then
   active-v4 freeze/publish and final verification.
+
+# 2026-08-16 active-v4 controlled_verified DSH review snapshot
+
+- DSH `zarchv2-activev4-final-r1` returned FAIL because the committed
+  active-v4 records claimed a codex-agent architecture PASS after a valid DSH
+  FAIL and pointed the merged tree at the pre-record commit. The fix is to
+  clear premature lifecycle records and demote the snapshot to
+  `controlled_verified`, then run DSH on that exact tree before recreating
+  active-v4 records from the DSH verdict.
+- This snapshot intentionally removes the premature active-v4 top-level
+  records and evidence; runtime source, gate fixes, and AppSDK contracts
+  remain the active-v4 candidate.
