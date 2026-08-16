@@ -429,7 +429,6 @@ interface TerminalPageProps {
   onOpenDrawerRemoteSession?: (target: DrawerRemoteSessionTarget, sessionName: string, options?: { activate?: boolean; navigate?: boolean }) => string | null | undefined | void;
   onRenameRemoteSession?: (sessionId: string, nextSessionName: string) => void | Promise<void>;
   onCloseDrawerRemoteSession?: (target: DrawerRemoteSessionTarget, sessionName: string) => void | Promise<void>;
-  onRefreshDrawerHostSessions?: (hostKey?: string) => void | Promise<void>;
   onAuditOpenTabsAgainstRemoteSessions?: (reason: OpenTabAuditReason) => void | Promise<void>;
   relayDevices?: TraversalRelayDeviceSnapshot[];
   serverIdentityAliasInputs?: ServerIdentityInput[];
@@ -546,7 +545,6 @@ function TerminalPageComponent({
   onOpenQuickTabPicker,
   onOpenDrawerRemoteSession,
   onCloseDrawerRemoteSession,
-  onRefreshDrawerHostSessions,
   relayDevices = [],
   serverIdentityAliasInputs = [],
   sessionPickerDebugMode = null,
@@ -3400,7 +3398,6 @@ function TerminalPageComponent({
                 onAssignSessionGroupSlot: handleAssignSessionGroupSlot,
                 sessionGroupLayoutAxis,
                 onOpenQuickTabPicker: handleOpenQuickTabPickerFromDrawer,
-                onRefreshHostSessions: onRefreshDrawerHostSessions,
                 onDebugAddEvent: handleSessionDrawerDebugAddEvent,
                 previewSelectionMode: sessionPreviewSelectionMode,
                 previewSelectedSessionIds: drawerPreviewSelectedSessionIds,
@@ -3613,7 +3610,6 @@ function terminalPagePropsEqual(
     && prev.onOpenQuickTabPicker === next.onOpenQuickTabPicker
     && prev.onOpenDrawerRemoteSession === next.onOpenDrawerRemoteSession
     && prev.onCloseDrawerRemoteSession === next.onCloseDrawerRemoteSession
-    && prev.onRefreshDrawerHostSessions === next.onRefreshDrawerHostSessions
     && prev.sessionGroups === next.sessionGroups
     && terminalPageRelayDevicesUiKey(prev.relayDevices) === terminalPageRelayDevicesUiKey(next.relayDevices)
     && terminalPageServerIdentityAliasInputsUiKey(prev.serverIdentityAliasInputs)

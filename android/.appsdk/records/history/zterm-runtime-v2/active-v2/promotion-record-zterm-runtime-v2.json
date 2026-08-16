@@ -1,0 +1,89 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/promotion-record.schema.json",
+  "artifact_hash": "sha256:ab527a800da96f8f1bb3b038649c5882f3e016dd0eef0749e32bb9a50ae152e8",
+  "base_artifact_hash": "sha256:ea3b90ba83282ff4d66491d53c9794979dbf5ea8c7ecbc82a7a6085b86f92ffb",
+  "base_commit": "4c0416ff2767f173b9984d49965787c0afb76b9c",
+  "change_reason_comment": "Promote active-v2 truth-source and gate corrections after DSH source-r4 PASS, compile, architecture gates, regression 297/297, and daemon mirror close-loop.",
+  "change_set_id": "CS-20260816-ZARCHV2-002",
+  "compatibility_level": "compatible",
+  "created_at": "2026-08-16T01:51:52Z",
+  "design_id": "ZTERM-ARCH-V2-DESIGN-001",
+  "evidence_ids": [
+    "EVID-20260816-ZARCHV2-ACTIVEV2-FINAL-001"
+  ],
+  "experiment_id": "zterm-runtime-architecture-v2-active-v2",
+  "issue_id": "zterm-runtime-architecture-v2",
+  "migration_id": null,
+  "module_id": "zterm-runtime-v2",
+  "new_active_version": "active-v2",
+  "playground_cleanup_record_id": "cleanup-zterm-runtime-architecture-v2",
+  "previous_active_version": "active-v1",
+  "promotion_id": "PROMO-20260816-ZARCHV2-002",
+  "public_api_hash": "sha256:714d9cd3b2c3a632ac9618511fee742367b15d89e32c134bfb838f7966e592a2",
+  "required_gate_results": [
+    {
+      "gate_id": "contract_valid",
+      "producer": "appsdk",
+      "result": "pass"
+    },
+    {
+      "gate_id": "record_graph",
+      "producer": "appsdk",
+      "result": "pass"
+    },
+    {
+      "gate_id": "module_ownership",
+      "producer": "pnpm",
+      "result": "pass"
+    },
+    {
+      "gate_id": "module_dag",
+      "producer": "pnpm",
+      "result": "pass"
+    },
+    {
+      "gate_id": "payload_control_separation",
+      "producer": "pnpm",
+      "result": "pass"
+    },
+    {
+      "gate_id": "debug_isolation",
+      "producer": "pnpm",
+      "result": "pass"
+    },
+    {
+      "gate_id": "debug_bounded",
+      "producer": "pnpm",
+      "result": "pass"
+    },
+    {
+      "gate_id": "control_center_contract",
+      "producer": "pnpm",
+      "result": "pass"
+    },
+    {
+      "gate_id": "plugin_capabilities",
+      "producer": "pnpm",
+      "result": "pass"
+    },
+    {
+      "gate_id": "typecheck",
+      "producer": "pnpm",
+      "result": "pass"
+    },
+    {
+      "gate_id": "build",
+      "producer": "pnpm",
+      "result": "pass"
+    },
+    {
+      "gate_id": "source_to_dom",
+      "producer": "pnpm",
+      "result": "pass"
+    }
+  ],
+  "review_id": "REVIEW-20260816-DSH-ZARCHV2-ACTIVEV2-R4",
+  "root_cause": "Active-v1 AppSDK truth maps remained pending and Vitest scanned archived Protected tests; active-v2 aligns maps, module-registry documentation, and the Vitest gate with the already-implemented v2 architecture without changing runtime behavior or business payload semantics.",
+  "scope_hash": "sha256:19d2a3e8a4c3e6b4100cf4a73bd0a91363aa06378d1fdae4621754147d039d6e",
+  "source_commit": "77bbf60375d5a4d111c4bf5f5080e31e5ac70561"
+}

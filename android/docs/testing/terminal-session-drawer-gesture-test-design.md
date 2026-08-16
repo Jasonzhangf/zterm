@@ -59,11 +59,13 @@
 - Negative: the session list must not use `flex: 1` or another grow rule that turns unused drawer height into blank list space.
 - Positive: opening the drawer leaves one compact header row and keeps the drawer panel above the normal terminal chrome z-index ceiling.
 - Negative: portrait status/back/settings controls, debug overlay, copy menu, fixed quickbar, and instructional header paragraphs do not remain visible while the drawer is open.
+- Negative: opening the drawer must not request a host-session catalog refresh, mutate `lastOpenedAt`, or reorder the existing host/session projection.
+- Positive: a catalog update produced independently by the background owner may update the next drawer projection without coupling refresh work to drawer entry.
 
 ## Black-Box Impact
 
 - Opening the drawer while `zterm` is active and a stale persisted tab such as `routecodex2` exists must leave both persisted and runtime active session ids on `zterm`.
-- Drawer catalog refresh may mark the stale tab missing, but must not start its transport and must not project its error banner.
+- A background catalog refresh may mark the stale tab missing, but opening the drawer itself must not refresh, start its transport, change `lastOpenedAt`, reorder rows, or project its error banner.
 - Selecting a remote-only catalog row must not freeze the old visible center terminal while the new transport connects. The first tap must produce the same visible target that a second tap on the newly materialized live row would have produced.
 
 ## Required Gates
@@ -79,7 +81,7 @@
 - `src/contexts/session-context-transport-open-runtime.test.ts`
 - `test:feature-registry`
 - Android typecheck
-- Android packaged real-device smoke: active `zterm` -> edge-open drawer -> catalog refresh -> active remains `zterm`; no `routecodex2` transport/banner.
+- Android packaged real-device smoke: active `zterm` -> repeatedly edge-open/close drawer without catalog refresh or row reorder -> active remains `zterm`; no `routecodex2` transport/banner.
 
 ## Known Gap
 

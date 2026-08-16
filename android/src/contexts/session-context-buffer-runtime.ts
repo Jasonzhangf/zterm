@@ -1617,6 +1617,10 @@ function applyResolvedBufferSyncPayloadRuntime(options: ApplyResolvedBufferSyncP
     options.requestSessionBufferSync(options.sessionId, {
       reason: 'buffer-sync-revision-gap-sparse-payload',
       purpose: 'tail-refresh',
+      requestWindowOverride: {
+        requestStartIndex: incomingStartIndex,
+        requestEndIndex: incomingEndIndex,
+      },
       headOverride: {
         daemonHeadRevision: liveHead.revision,
         daemonHeadEndIndex: liveHead.latestEndIndex,

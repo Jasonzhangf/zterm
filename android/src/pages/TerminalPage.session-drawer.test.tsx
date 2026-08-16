@@ -1811,10 +1811,9 @@ describe('TerminalPage portrait session drawer', () => {
     expect(onSwitchSession).not.toHaveBeenCalled();
   });
 
-  it('refreshes drawer host sessions and opens remote-only sessions from the drawer', async () => {
+  it('opens projected remote-only sessions without refreshing on drawer entry', async () => {
     const sessions = [makeSession('s1')];
     sessions[0]!.daemonHostId = 'daemon-a';
-    const onRefreshDrawerHostSessions = vi.fn();
     const onOpenDrawerRemoteSession = vi.fn();
     const relayEndpointCandidates = [{
       id: 'relay-rtc:daemon-a',
@@ -1846,7 +1845,6 @@ describe('TerminalPage portrait session drawer', () => {
         onOpenConnections={vi.fn()}
         onOpenQuickTabPicker={vi.fn()}
         onOpenDrawerRemoteSession={onOpenDrawerRemoteSession}
-        onRefreshDrawerHostSessions={onRefreshDrawerHostSessions}
         onResize={vi.fn()}
         onTerminalInput={vi.fn()}
         onTerminalViewportChange={vi.fn()}
@@ -1866,7 +1864,6 @@ describe('TerminalPage portrait session drawer', () => {
     });
     fireEvent.touchEnd(resolvedSwipeSurface, { changedTouches: [{ clientX: 236, clientY: 206 }] });
 
-    await waitFor(() => expect(onRefreshDrawerHostSessions).toHaveBeenCalledWith('daemon-a'));
     expect(await screen.findByText('remote-beta')).toBeTruthy();
     fireEvent.click(await screen.findByTestId('terminal-session-drawer-select-remote:daemon:daemon-a::session:remote-beta'));
 
@@ -1923,7 +1920,6 @@ describe('TerminalPage portrait session drawer', () => {
         onOpenConnections={vi.fn()}
         onOpenQuickTabPicker={vi.fn()}
         onOpenDrawerRemoteSession={onOpenDrawerRemoteSession}
-        onRefreshDrawerHostSessions={vi.fn()}
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
@@ -1981,7 +1977,6 @@ describe('TerminalPage portrait session drawer', () => {
       onOpenConnections: vi.fn(),
       onOpenQuickTabPicker: vi.fn(),
       onOpenDrawerRemoteSession,
-      onRefreshDrawerHostSessions: vi.fn(),
       onResize: vi.fn(),
       onTerminalInput: vi.fn(),
       onTerminalViewportChange: vi.fn(),
@@ -2051,7 +2046,6 @@ describe('TerminalPage portrait session drawer', () => {
         onOpenQuickTabPicker={vi.fn()}
         onOpenDrawerRemoteSession={vi.fn()}
         onCloseDrawerRemoteSession={onCloseDrawerRemoteSession}
-        onRefreshDrawerHostSessions={vi.fn()}
         onResize={vi.fn()}
         onTerminalInput={vi.fn()}
         onTerminalViewportChange={vi.fn()}
@@ -2117,7 +2111,6 @@ describe('TerminalPage portrait session drawer', () => {
         onOpenQuickTabPicker={vi.fn()}
         onOpenDrawerRemoteSession={vi.fn()}
         onCloseDrawerRemoteSession={onCloseDrawerRemoteSession}
-        onRefreshDrawerHostSessions={vi.fn()}
         onResize={vi.fn()}
         onTerminalInput={vi.fn()}
         onTerminalViewportChange={vi.fn()}
@@ -2186,7 +2179,6 @@ describe('TerminalPage portrait session drawer', () => {
         onOpenQuickTabPicker={vi.fn()}
         onOpenDrawerRemoteSession={vi.fn()}
         onCloseDrawerRemoteSession={onCloseDrawerRemoteSession}
-        onRefreshDrawerHostSessions={vi.fn()}
         onResize={vi.fn()}
         onTerminalInput={vi.fn()}
         onTerminalViewportChange={vi.fn()}
@@ -2242,7 +2234,6 @@ describe('TerminalPage portrait session drawer', () => {
         onCloseSession={vi.fn()}
         onOpenConnections={vi.fn()}
         onOpenQuickTabPicker={vi.fn()}
-        onRefreshDrawerHostSessions={vi.fn()}
         onResize={vi.fn()}
         onTerminalInput={vi.fn()}
         onTerminalViewportChange={vi.fn()}
@@ -2300,7 +2291,6 @@ describe('TerminalPage portrait session drawer', () => {
         onCloseSession={vi.fn()}
         onOpenConnections={vi.fn()}
         onOpenQuickTabPicker={vi.fn()}
-        onRefreshDrawerHostSessions={vi.fn()}
         onResize={vi.fn()}
         onTerminalInput={vi.fn()}
         onTerminalViewportChange={vi.fn()}

@@ -60,7 +60,6 @@ export interface TerminalSessionDrawerProps {
   onAssignSessionGroupSlot?: (sessionId: string, slot: TerminalSessionGroupSlotName) => void;
   sessionGroupLayoutAxis?: TerminalSessionGroupLayoutAxis;
   onOpenQuickTabPicker: (hostKey?: string, createOptions?: { sessionName?: string; cwd?: string; terminalBackend?: 'tmux' | 'herdr' }) => void;
-  onRefreshHostSessions?: (hostKey?: string) => void;
   onDebugAddEvent?: (eventName: string) => void;
   previewSelectionMode?: boolean;
   previewSelectedSessionIds?: string[];
@@ -83,7 +82,6 @@ function TerminalSessionDrawerComponent({
   onAssignSessionGroupSlot,
   sessionGroupLayoutAxis = 'vertical',
   onOpenQuickTabPicker,
-  onRefreshHostSessions,
   onDebugAddEvent,
   previewSelectionMode = false,
   previewSelectedSessionIds = [],
@@ -238,25 +236,9 @@ function TerminalSessionDrawerComponent({
     }
     return hostGroups.find((g) => g.groupKey === effectiveHostKey) || hostGroups[0] || null;
   }, [effectiveHostKey, hostGroups, multiHost]);
-  const refreshHostKey = currentHostGroup?.hostKey;
-
   useEffect(() => {
     selectionPressRef.current = null;
   }, [open]);
-
-  useEffect(() => {
-    if (!open || !onRefreshHostSessions || !refreshHostKey) {
-      return;
-    }
-    // 打开动画（180ms）期间不触发刷新：避免"动画 + 列表重建"叠加成打开瞬间的
-    // 高频 DOM 重排（真机实测打开前 0.6s ~470 次 mutation = 用户感知的狂闪）。
-    const timer = window.setTimeout(() => {
-      void Promise.resolve(onRefreshHostSessions(refreshHostKey)).catch((error) => {
-        console.error('[TerminalSessionDrawer] Failed to refresh host sessions:', error);
-      });
-    }, 320);
-    return () => window.clearTimeout(timer);
-  }, [onRefreshHostSessions, open, refreshHostKey]);
 
   const openNewSessionDialog = () => {
     setNewSessionDraft({
@@ -1183,7 +1165,6 @@ function terminalSessionDrawerPropsEqual(
   if (prev.onCloseSession !== next.onCloseSession) mismatchFields.push('onCloseSession');
   if (prev.onAssignSessionGroupSlot !== next.onAssignSessionGroupSlot) mismatchFields.push('onAssignSessionGroupSlot');
   if (prev.onOpenQuickTabPicker !== next.onOpenQuickTabPicker) mismatchFields.push('onOpenQuickTabPicker');
-  if (prev.onRefreshHostSessions !== next.onRefreshHostSessions) mismatchFields.push('onRefreshHostSessions');
   if (prev.onDebugAddEvent !== next.onDebugAddEvent) mismatchFields.push('onDebugAddEvent');
   if (prev.onPreviewSelectionModeChange !== next.onPreviewSelectionModeChange) mismatchFields.push('onPreviewSelectionModeChange');
   if (prev.onTogglePreviewSession !== next.onTogglePreviewSession) mismatchFields.push('onTogglePreviewSession');

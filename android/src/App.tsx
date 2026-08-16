@@ -571,7 +571,6 @@ export function AppContent({
     handleSaveServerGroupSelection,
     handleSelectCleanSession,
     handleRemoteSessionsRefreshed,
-    handleRefreshDrawerHostSessions,
     handleForceRelaySession,
     handleUseAutoSession,
     handleUseWebSocketSession,
@@ -773,7 +772,6 @@ export function AppContent({
             onOpenDrawerRemoteSession={handleOpenGroupSession}
             onRenameRemoteSession={handleRenameRemoteSession}
             onCloseDrawerRemoteSession={handleCloseGroupSession}
-            onRefreshDrawerHostSessions={handleRefreshDrawerHostSessions}
             onAuditOpenTabsAgainstRemoteSessions={auditOpenTabsAgainstRemoteSessions}
             relayDevices={relayDevices}
             serverIdentityAliasInputs={homeSavedConnections}
