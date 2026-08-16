@@ -7092,3 +7092,20 @@ if (bufferedBytes >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES) {
   re-reviewed (DSH MCP was not available in this session). APK build, OTA
   release, real-device online verification, and Playground cleanup execution are
   still open and require explicit release authorization.
+
+# 2026-08-16 active-v2 final artifact rerun + DSH r1 FAIL
+
+- Stage changed to `architecture_stable`; full `appsdk compile android` after
+  stage change produced artifact `sha256:ab527a800da96f8f1bb3b038649c5882f3e016dd0eef0749e32bb9a50ae152e8`,
+  public API `sha256:714d9cd3b2c3a632ac9618511fee742367b15d89e32c134bfb838f7966e592a2`,
+  source/scope `sha256:19d2a3e8a4c3e6b4100cf4a73bd0a91363aa06378d1fdae4621754147d039d6e`.
+- Module regression rerun at 2026-08-16T01:24:53Z: 297/297, 8 files, no skips.
+- AppSDK record graph required promotion `experiment_id` to match evidence
+  (`zterm-runtime-architecture-v2-active-v2`); after alignment `appsdk verify`
+  passes.
+- DSH `zarchv2-activev2-final-r1` returned `VERDICT: FAIL`. Findings: records
+  timestamps not ordered after regression, active-v2 not yet published while
+  records claim final freeze, R3 review was re-pointed at a new artifact without
+  a new review turn, and note/MEMORY lacked evidence for the new artifact.
+- Next: align record timeline, mark freeze record as pre-freeze pending, run a
+  fresh DSH review, then freeze/publish active-v2 and verify.
