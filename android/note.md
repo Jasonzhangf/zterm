@@ -7247,3 +7247,13 @@ if (bufferedBytes >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES) {
   file-transfer Herdr server guards; feature/module/edge gates; typecheck;
   prebuild; Android APK build and available device smoke. OTA/public Relay
   publication remains unauthorized.
+- Verification: the focused UI/server suite passed 160 tests, typecheck,
+  feature registry 92 tests, shell-theme 188 Android + 6 shared tests, and
+  the installed 0.1.3.2649 APK was checked on the online device. The full
+  prebuild reached the existing relay smoke gate, which failed with `rtc smoke
+  timeout`; this is unrelated to the UI diff and prevents claiming a green
+  full prebuild.
+- Review: the first required MCP review attempt was a protocol failure
+  (`review_output_missing`, reviewer reported missing output-schema path).
+  The commit remains review-blocked because the connector did not expose the
+  documented stateless retry operation in this run.

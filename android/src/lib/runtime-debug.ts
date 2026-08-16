@@ -172,6 +172,7 @@ function isCriticalRuntimeDebugScope(scope: string) {
     || scope.startsWith('session.input.reliable')
     || scope.startsWith('session.input.drop.')
     || scope === 'session.input.transport-unavailable'
+    || scope === 'session.render-gate.flush.inspect'
   );
 }
 

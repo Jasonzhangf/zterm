@@ -113,6 +113,24 @@ describe('runtime debug storage flag', () => {
     expect(entries.some((entry) => entry.scope === 'session.input.reliable-send')).toBe(true);
   });
 
+  it('keeps render gate inspect evidence when the debug queue overflows', () => {
+    setRuntimeDebugEnabled(true);
+    for (let index = 0; index < MAX_RUNTIME_DEBUG_QUEUE + 8; index += 1) {
+      runtimeDebug('session.ws.connect.buffer-sync', { sessionId: `s${index}` });
+    }
+    runtimeDebug('session.render-gate.flush.inspect', { sessionId: 'render-1' });
+
+    const entries = [];
+    while (true) {
+      const batch = drainRuntimeDebugEntries();
+      entries.push(...batch);
+      if (batch.length === 0) {
+        break;
+      }
+    }
+    expect(entries.some((entry) => entry.scope === 'session.render-gate.flush.inspect')).toBe(true);
+  });
+
   it('samples high-frequency active tick scopes before enqueueing', () => {
     vi.useFakeTimers();
     try {
