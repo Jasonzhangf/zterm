@@ -7349,3 +7349,21 @@ if (bufferedBytes >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES) {
 - This snapshot intentionally removes the premature active-v4 top-level
   records and evidence; runtime source, gate fixes, and AppSDK contracts
   remain the active-v4 candidate.
+- This snapshot intentionally removes the premature active-v4 top-level
+  records and evidence; runtime source, gate fixes, and AppSDK contracts
+  remain the active-v4 candidate.
+
+# 2026-08-16 active-v4 source review DSH r2 PASS
+
+- DSH `zarchv2-activev4-source-r2` returned literal `VERDICT: PASS` with no
+  P0/P1 and three non-blocking P2 governance-completeness notes:
+  - `access.protected_paths` lists `protected/history/**` after the
+    active-v3 archive moved to `protected/history-versions/**`; the broad
+    `protected/**` denylist still covers the new location.
+  - active-v4 lifecycle records are intentionally absent at HEAD and will
+    be recreated from the DSH verdict during the next `promote_module` step.
+  - Regression/effectiveness re-verification should be bound to the new
+    active-v4 records before freeze/publish.
+- Evidence: `appsdk verify .` PASS at `controlled_verified`, targeted tests
+  pass, `tsc --noEmit` exit 0, no live-product source changed, and the
+  active-v3 archive is hash-consistent.
