@@ -7017,3 +7017,31 @@ if (bufferedBytes >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES) {
   diff regressions, debug read/subscribe capabilities are reserved but not yet
   independently gated. AppSDK still `draft`; v2 remains incomplete until
   promotion/device/OTA evidence.
+
+# 2026-08-16 AppSDK lifecycle closeout for ZTERM-ARCH-V2-DESIGN-001
+
+- Committed final governance records and AppSDK project contract:
+  `c10000a` (`chore(android): finalize AppSDK v2 governance records before
+  freeze`).
+- Ran global AppSDK 0.1.2 freeze:
+  `appsdk promote-module android --module zterm-runtime-v2 --to frozen`
+  passed; module stage moved to `frozen`, project stage remains
+  `controlled_verified`. SDK wrote real promotion/regression record hashes into
+  `freeze-record-zterm-runtime-v2.json` and created
+  `protected/history/zterm-runtime-v2`.
+- Committed the frozen archive and updated records as `f0cb077`
+  (`chore(android): freeze AppSDK zterm-runtime-v2 module and archive protected
+  history`).
+- Ran `appsdk publish-active android --module zterm-runtime-v2 --version
+  active-v1`; Active index now binds `active-v1` to
+  `sha256:ea3b90ba83282ff4d66491d53c9794979dbf5ea8c7ecbc82a7a6085b86f92ffb`.
+- Verified `appsdk verify android` returns `ok:true`; git worktree is clean;
+  generated/protected/active copies of the web library all hash to
+  `sha256:124830d1f3e35a74860f7e33c50981bdc9b30dbc5f02aa11dbeaa97c9a716f25`;
+  targeted source grep found no runtime import from `playground/`, `generated/`,
+  or `protected/`.
+- Remaining: DSH r6 reviewed source snapshot `4c0416f`; governance records and
+  AppSDK build/regression config changed after that review and were not
+  re-reviewed (DSH MCP was not available in this session). APK build, OTA
+  release, real-device online verification, and Playground cleanup execution are
+  still open and require explicit release authorization.

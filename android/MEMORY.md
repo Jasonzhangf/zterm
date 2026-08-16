@@ -2474,3 +2474,22 @@ Tags: #mempalace #source-only-search #generated-artifacts #zterm
 - AppSDK lifecycle remains `draft`; ZTERM-ARCH-V2-DESIGN-001 is not complete
   until promotion, Active/Protected archive, regression/freeze records, and
   device/OTA evidence are produced.
+
+# 2026-08-16 ZTerm v2 AppSDK lifecycle reached frozen + active-v1
+
+- AppSDK 0.1.2 lifecycle for `zterm-runtime-v2` is now frozen and active:
+  module stage `frozen`, active version `active-v1`, protected history
+  committed at `f0cb077`, record/freeze commit at `c10000a`.
+- The freeze record now carries real SDK-computed hashes:
+  `promotion_record_hash=sha256:392e84facbaff9d9506a7206e3153d2e6e23e99e684c56c0018535a4687ec8b6`,
+  `regression_report_hash=sha256:9b686c343336728f2b31dc39e57da0f3c2185780b7bea309dcedba67204eed2f`,
+  `library_hash=sha256:ea3b90ba83282ff4d66491d53c9794979dbf5ea8c7ecbc82a7a6085b86f92ffb`,
+  `public_api_hash=sha256:667eb211855040e4cf42ffbe3bc2627629c5c2dc0120dc7367b57fbc6f1985e3`.
+- `appsdk verify android` passes with `ok:true`; git worktree is clean.
+  Generated, Protected, and Active web artifact copies have identical file SHA
+  `sha256:124830d1f3e35a74860f7e33c50981bdc9b30dbc5f02aa11dbeaa97c9a716f25`.
+- This is not full product release: device APK/OTA and real-device online
+  verification remain required before declaring ZTERM-ARCH-V2-DESIGN-001
+  completely closed. DSH r6 PASS covers source snapshot `4c0416f`; later
+  governance-only record/config changes have not been independently re-reviewed
+  because DSH MCP was unavailable.
