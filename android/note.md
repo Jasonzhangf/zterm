@@ -7151,3 +7151,21 @@ if (bufferedBytes >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES) {
 - Remaining: product L5 real-device/APK/OTA verification and playground
   cleanup execution require explicit Jason authorization; `adb devices` has no
   device in this session.
+
+# 2026-08-16 DSH final-r8 findings triaged
+
+- DSH `zarchv2-activev2-final-r8` reviewed commit `0cd4c9a` and returned
+  literal `VERDICT: FAIL`.
+- P1 was not a dangling reference. The freeze record stores AppSDK canonical
+  compact-JSON sha256 values: `85e16590...` is the sha256 of compact
+  `promotion-record-zterm-runtime-v2.json`, and `1cc7f6da...` is the sha256 of
+  compact `regression-report-zterm-runtime-v2.json`. Replacing them with raw
+  file hashes makes `appsdk verify android` fail with
+  `FREEZE_RECORD_REGRESSION_REPORT_MISMATCH`; keeping the AppSDK-compatible
+  values makes it pass.
+- P2: the playground cleanup record claimed `removed_paths` although removal
+  was never authorized. Updated it to `status: pending_authorization` with
+  `removed_paths: []`; the archive is done, physical removal remains pending.
+- P2: duplicate `zone-transition-manifest.json` / `zone-transition.manifest.json`
+  in the frozen archive remains; left untouched because both aliases already
+  exist in the source contract set and appsdk resource manifest.
