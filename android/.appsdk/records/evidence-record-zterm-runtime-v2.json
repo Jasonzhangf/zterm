@@ -5,8 +5,8 @@
   "experiment_id": "zterm-runtime-architecture-v2-active-v4",
   "phase": "artifact",
   "kind": "artifact",
-  "source_commit": "0ec197d711231d23f20a633926b6afc46790a607",
-  "artifact_hash": "sha256:7f0ab5b674121a7db9a1a9e18cd5ab8c9cea146a24118c12b2a32befcd0ccd32",
+  "source_commit": "394679c85aa8dc869d727e72563025f7a63e5fb4",
+  "artifact_hash": "sha256:127c8bf4aa74c594627d78c29addba98ea7ba03e886688c763c0e2b06777a2b7",
   "scope": {
     "module_id": "zterm-runtime-v2",
     "feature_id": "zterm_runtime_architecture_v2_appsdk_013_active_v4_final_gates",
@@ -18,12 +18,12 @@
   },
   "result": "pass",
   "confidence": 1,
-  "confidence_rationale": "AppSDK 0.1.3 compiled the active-v4 module artifact and verified its source, contract, and public API hashes at 0ec197d.",
-  "created_at": "2026-08-16T20:07:18Z",
+  "confidence_rationale": "AppSDK 0.1.3 compiled the active-v4 module artifact and verified its source, contract, and public API hashes at 394679c.",
+  "created_at": "2026-08-16T20:49:20Z",
   "expires_at": "2026-11-14T00:00:00Z",
   "input_hashes": [
-    "sha256:7f0ab5b674121a7db9a1a9e18cd5ab8c9cea146a24118c12b2a32befcd0ccd32",
-    "git:0ec197d711231d23f20a633926b6afc46790a607"
+    "sha256:127c8bf4aa74c594627d78c29addba98ea7ba03e886688c763c0e2b06777a2b7",
+    "git:394679c85aa8dc869d727e72563025f7a63e5fb4"
   ],
-  "scope_hash": "sha256:7f5313d58dc0f2c9e39ada71e3055e2aa5ffb8f365453c28b4e9f32453449690"
+  "scope_hash": "sha256:4000e2903bfd07ca1dce5853b83d2b4e947bf3cc54c9ec150c746082c07fdca8"
 }
