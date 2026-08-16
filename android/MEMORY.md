@@ -2556,3 +2556,19 @@ Tags: #mempalace #source-only-search #generated-artifacts #zterm
   verified installed `app-debug.apk` SHA is
   `3198d6f69f83bcdb84e1303ed110c89e78856ddbd41b9ce1e40791c675100106`. OTA
   republish and playground cleanup remain authorization-gated.
+
+# 2026-08-16 drawer/renderer fix verification and daemon input bottleneck
+
+- `5dbf9b9` stops the drawer from refreshing or re-sorting sessions on entry;
+  `15df591` anchors the first frame to a visible cursor for a tall blank lower
+  pane and realigns reading scroll after a large buffer shift instead of
+  leaving blank padding until a manual scroll.
+- Source-only verification for those paths passed: shared renderer 26/26,
+  TerminalView dynamic refresh 79/79, buffer runtime 61/61, drawer UI 136/136,
+  frame assembly 109/109, feature registry 92/92, type-check.
+- Manual APK built from current main is `0.1.3.2651`
+  (`versionCode 1100026510`, sha256 `4b52f1f5a0083c3cf689a91d570c3711c54c339e69b1c27e89ccca031315d748`).
+- On this Mac, `tmux send-keys -l` costs roughly 57ms per call, so the daemon's
+  required 256-byte literal chunks give only ~5KB/s backend input throughput.
+  `long-input-echo` therefore cannot finish its ~360KB lab payload inside the
+  30s oracle timeout; there is no daemon/input diff in `d626524..HEAD`.
