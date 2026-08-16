@@ -2,7 +2,7 @@
   "$schema": "https://appsdk.local/contracts/records/regression-report.schema.json",
   "regression_report_id": "REGR-20260816-ZARCHV2-ACTIVEV4-001",
   "module_id": "zterm-runtime-v2",
-  "source_commit": "3015dee5d4eb8a41d9fbb88942f46c2872af7a19",
+  "source_commit": "0ec197d711231d23f20a633926b6afc46790a607",
   "artifact_hash": "sha256:7f0ab5b674121a7db9a1a9e18cd5ab8c9cea146a24118c12b2a32befcd0ccd32",
   "public_api_hash": "sha256:9225dd8d540dd1c26209beb6f5eb65264dc94c3d02af3f6be517f7162711f3b2",
   "scope_hash": "sha256:7f5313d58dc0f2c9e39ada71e3055e2aa5ffb8f365453c28b4e9f32453449690",
@@ -39,5 +39,5 @@
     "whitebox": true,
     "blackbox": true
   },
-  "created_at": "2026-08-16T19:54:30Z"
+  "created_at": "2026-08-16T20:07:18Z"
 }

@@ -5,9 +5,9 @@
   "module_id": "zterm-runtime-v2",
   "worktree_id": "WT-20260816-ZARCHV2-ACTIVEV4-001",
   "base_commit": "150fe4688dccba0e46daab5ef324a2dfd629c971",
-  "head_commit": "3015dee5d4eb8a41d9fbb88942f46c2872af7a19",
-  "tree_hash": "fece00db15cbbc872bf20d299b9d7a396a455dde",
-  "diff_hash": "sha256:de79e4a86ce4cfa4e4295226f6cf7af23928a45b3cdf6038c5f0f60d77cad2fa",
+  "head_commit": "0ec197d711231d23f20a633926b6afc46790a607",
+  "tree_hash": "483da070bb107e719c6a89e984965a867d9d965f",
+  "diff_hash": "sha256:0701c5f73e0a3628608bd084fbad314088afbbbef0f42b9b1dcb8e16a6301ccc",
   "design_id": "FD-20260816-APPSDK013-FINAL-GATE-03",
   "owner": "zterm-runtime-v2",
   "scope_hash": "sha256:7f5313d58dc0f2c9e39ada71e3055e2aa5ffb8f365453c28b4e9f32453449690",
@@ -15,6 +15,7 @@
     "android/.appsdk/records/evidence-record-zterm-runtime-v2.json",
     "android/.appsdk/records/evidence/zterm-runtime-v2/evid-20260816-zarchv2-activev4-artifact-001.json",
     "android/.appsdk/records/evidence/zterm-runtime-v2/evid-20260816-zarchv2-activev4-baseline-001.json",
+    "android/.appsdk/records/evidence/zterm-runtime-v2/evid-20260816-zarchv2-activev4-changed-suites-001.json",
     "android/.appsdk/records/evidence/zterm-runtime-v2/evid-20260816-zarchv2-activev4-negative-001.json",
     "android/.appsdk/records/evidence/zterm-runtime-v2/evid-20260816-zarchv2-activev4-positive-001.json",
     "android/.appsdk/records/evidence/zterm-runtime-v2/evid-20260816-zarchv2-activev4-verify-001.json",
@@ -42,5 +43,5 @@
     "evid-20260816-zarchv2-activev4-negative-001",
     "evid-20260816-zarchv2-activev4-changed-suites-001"
   ],
-  "created_at": "2026-08-16T19:54:30Z"
+  "created_at": "2026-08-16T20:07:18Z"
 }
