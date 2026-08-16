@@ -1,0 +1,29 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "evidence_id": "evid-20260816-zarchv2-activev4-positive-001",
+  "issue_id": "zterm-runtime-architecture-v2",
+  "experiment_id": "zterm-runtime-architecture-v2-active-v4",
+  "phase": "positive_intervention",
+  "kind": "positive_test",
+  "source_commit": "2fa2eaea288fcfdf6ddde0a4a568d2385a4bbf08",
+  "artifact_hash": "sha256:bfcfc97a0098dfe50fddd86b5596bbfcde3662439e865ab33c48a6a4b309b707",
+  "scope": {
+    "module_id": "zterm-runtime-v2",
+    "feature_id": "zterm_runtime_architecture_v2_appsdk_013_active_v4_final_gates",
+    "entrypoint": "pnpm run prebuild"
+  },
+  "producer": {
+    "adapter": "vitest",
+    "identity": "codex-zterm-v2-appsdk013-activev4-positive-20260816T170000Z"
+  },
+  "result": "pass",
+  "confidence": 1,
+  "confidence_rationale": "The candidate stabilizes all final gates: feature registry 12 files/92 tests, focused module regression 8 files/297 tests with 0 skipped, pnpm run prebuild PASS, and pnpm run build PASS.",
+  "created_at": "2026-08-16T17:09:58Z",
+  "expires_at": "2026-11-14T00:00:00Z",
+  "input_hashes": [
+    "sha256:bfcfc97a0098dfe50fddd86b5596bbfcde3662439e865ab33c48a6a4b309b707",
+    "git:2fa2eaea288fcfdf6ddde0a4a568d2385a4bbf08"
+  ],
+  "scope_hash": "sha256:69a5969fce2950c26fd197cf156e6b3196ed78c1c3aaa1e94cd214d995f3fd48"
+}
