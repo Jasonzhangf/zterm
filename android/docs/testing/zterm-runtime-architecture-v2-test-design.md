@@ -50,13 +50,14 @@ Experiment: `playground/experiments/zterm-runtime-architecture-v2`
 | `payload_control_separation` | `pnpm run test:feature-registry` | `architecture-boundary-truth.test.ts` static control/debug/business payload contract scan |
 | `adjacent_data_edges` | `pnpm run test:feature-registry` | `edge-registry-truth.test.ts` direct adjacent terminal data-plane chain lock |
 | `appsdk verify` | `/Users/fanzhang/.local/bin/appsdk verify android` | governance contracts |
+| `record_graph` | `pnpm run test:appsdk-verify` | AppSDK lifecycle record graph in prebuild and CI |
 
 ## Known Gaps
 
 - AppSDK review, promotion, Active, Protected, regression, and freeze are
   complete for `zterm-runtime-v2` `active-v1`.
-- `active-v2` AppSDK map/test-config corrections are implemented and pass the
-  local gates, but a fresh review/promotion is still required.
+- `active-v2` AppSDK lifecycle is promoted, frozen, and published;
+  `record_graph` is wired into Android prebuild and CI.
 - Product L5 device/package/OTA verification remains open and requires an
   attached Android device plus explicit release authorization.
 - `packages/shared/**` production changes remain limited to registered typed

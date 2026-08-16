@@ -13,6 +13,10 @@
 - Playground archive is done; physical removal is still
   `pending_authorization` and must not be claimed completed until Jason
   authorizes it. Product L5 device/APK/OTA verification also remains pending.
+- AppSDK `record_graph` now runs in Android `prebuild` and CI. Full
+  `appsdk verify` on a frozen project requires the immutable `active/lib/**`
+  and `generated/**` artifacts to be present; clean CI therefore uses the
+  pinned GitHub-release `appsdk` binary and tracked Active/Generated files.
 
 ## 2026-08-12 Herdr adapter integration boundary
 

@@ -7178,3 +7178,16 @@ if (bufferedBytes >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES) {
   playground cleanup state, the byte-identical protected archive, and that no
   functional code/test/build/runtime configuration changed.
 - `appsdk verify android` returns `{"ok":true}` at `77637cf`.
+
+# 2026-08-16 AppSDK record_graph CI/prebuild wiring
+
+- Added `test:appsdk-verify` to `android/package.json` and wired it into
+  `prebuild`, so every `pnpm build` starts with `appsdk verify .`.
+- Added an AppSDK `appsdk-governance` job to `.github/workflows/ci.yml` and a
+  pinned AppSDK install step to `.github/workflows/android-release.yml`.
+- Tracked the immutable `active/lib/**` and `generated/**` artifacts because
+  full `appsdk verify android` fails on a clean checkout without them
+  (`COMPILED_STAGE_REQUIRES_ARTIFACT` / `ACTIVE_ARTIFACT_MISSING` /
+  `PREVIOUS_ACTIVE_MISSING`).
+- Full Android `prebuild` passed: appsdk verify, feature registry 92/92, all
+  wired architecture/plugin/UI/daemon gates, and relay smoke.

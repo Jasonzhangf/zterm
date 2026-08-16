@@ -10,6 +10,9 @@
   open
 - active-v2 status: implemented, DSH review R4 PASS, AppSDK promoted/frozen and
   active-v2 published; see `.appsdk/records/**`
+- AppSDK `record_graph` is wired into `android/package.json` prebuild and
+  `.github/workflows/ci.yml`; the immutable Active/Generated artifacts are
+  tracked so full `appsdk verify` is runnable from a clean checkout.
 
 ## Status Update 2026-08-16
 

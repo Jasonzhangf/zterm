@@ -608,6 +608,8 @@ Before runtime cutover, CI and prebuild must enforce:
 11. Cordis/global events cannot carry terminal/file/media body types;
 12. target-state registry entries remain `design`/`pending` until physical paths and gates exist;
 13. docs, registries, function map, mainline map, tests, and source symbols remain lockstep.
+14. AppSDK `record_graph`/`contract_valid`/`vcs_clean`/`regression_report`
+    verify runs in Android `prebuild` and CI.
 
 ## 14. AppSDK Lifecycle
 
