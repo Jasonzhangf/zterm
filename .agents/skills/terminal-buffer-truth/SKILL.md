@@ -773,6 +773,8 @@ tmux truth
 - Android IME 改变 shell geometry 时，IME 只能影响外层容器 / quickbar 位置，不能进入 TerminalView 内容 viewport 计算链；页面层必须冻结 terminal content geometry，禁止用 IME 高度生成 renderer layout refresh / viewport demand，也禁止触发 upstream `onResize` 改 tmux rows。
 - 大面积刷新若遇到 revision-gap sparse payload，client 必须拒绝合并错误 sparse body 并请求 authoritative tail；同时应 schedule 当前稳定 local buffer 的 render commit，把已确认 truth 重推给 renderer。禁止把 sparse payload 当 fallback 成功，也禁止等待 tail 期间让 renderer 没有任何稳定帧信号。
 - 大面积刷新若是 contiguous sparse tail jump，post-apply visible-gap repair 必须先判断是否已有本地窗口且旧 visible range 是否贴旧 tail：已有窗口且贴旧 tail 代表 follow，应改用新 tail 默认 visible range 查 gap；初始 sparse 首帧或不贴旧 tail 代表 reading/未定，必须保留旧 visible range，禁止吞掉 renderer 后续 reading-gap 请求或把用户历史阅读位置重解释成新 tail。
+- 高 pane 新首帧若 cursor 可见、cursor 在 tail viewport 之外、且 tail window 全部为空白，follow anchor 可以落到 `cursorRowIndex + 1`，让首屏显示 prompt 而不是空白下 pane；tail window 有真实内容或 cursor 已靠近 tail 时仍必须保持 tail follow。cursor metadata 不能作为 body repaint 源。
+- reading 遇到大面积 buffer shift 时，只有上一帧 padding delta 超过 viewport 高度才把 native scroll 映射到当前 effectiveRenderBottomIndex；小 padding 变化不得重锚，避免普通历史读取在刷新时跳动。没有上一帧或 viewport 高度未知时保持原位置。
 - 若现场表现为“**能输入但画面停在旧 buffer / session drawer 卡 connecting / 杀 APP 秒连但后台回来不刷**”，先判 client 读链恢复断裂：
   1. WebSocket 是客户端物理 transport，不是 daemon 持有的永久 per-session 真源；daemon 真源是 tmux mirror
   2. `ws.readyState === OPEN` 或 input 可写只证明写路径可用，不证明 `buffer-head -> buffer-sync -> local apply -> render commit` 已恢复
