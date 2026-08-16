@@ -1,6 +1,6 @@
 {
   "$schema": "https://appsdk.local/contracts/records/regression-report.schema.json",
-  "artifact_hash": "sha256:ea3b90ba83282ff4d66491d53c9794979dbf5ea8c7ecbc82a7a6085b86f92ffb",
+  "artifact_hash": "sha256:e708beeda01157b4ca36e85ec90ba7005d060e0300375bc43f642fae25c61091",
   "command": {
     "args": [
       "exec",
@@ -19,21 +19,21 @@
     "program": "pnpm",
     "working_directory": "."
   },
-  "created_at": "2026-08-16T00:05:08Z",
+  "created_at": "2026-08-16T01:05:00Z",
   "failed": 0,
-  "input_hash": "sha256:ea3b90ba83282ff4d66491d53c9794979dbf5ea8c7ecbc82a7a6085b86f92ffb",
+  "input_hash": "sha256:e708beeda01157b4ca36e85ec90ba7005d060e0300375bc43f642fae25c61091",
   "module_id": "zterm-runtime-v2",
   "passed": 297,
   "producer": {
     "adapter": "vitest",
-    "identity": "codex-zterm-v2-regression-20260816T000508Z"
+    "identity": "codex-zterm-v2-activev2-regression-20260816T010500Z"
   },
-  "public_api_hash": "sha256:667eb211855040e4cf42ffbe3bc2627629c5c2dc0120dc7367b57fbc6f1985e3",
-  "regression_report_id": "REGR-20260816-ZARCHV2-001",
+  "public_api_hash": "sha256:a295e84d2359b477392aca9b1a2903d203a0b46ac81098448f0d9d8243f3e2ca",
+  "regression_report_id": "REGR-20260816-ZARCHV2-ACTIVEV2-001",
   "result": "pass",
-  "scope_hash": "sha256:0ef1306a1574b5e053549cf15ee26d648d33fd41359805718bd1f39efa014cae",
+  "scope_hash": "sha256:19d2a3e8a4c3e6b4100cf4a73bd0a91363aa06378d1fdae4621754147d039d6e",
   "skipped": 0,
-  "source_commit": "4c0416ff2767f173b9984d49965787c0afb76b9c",
+  "source_commit": "77bbf60375d5a4d111c4bf5f5080e31e5ac70561",
   "suite_id": "zterm-runtime-v2-regression",
   "test_characteristics": {
     "blackbox": true,
