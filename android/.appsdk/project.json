@@ -145,7 +145,7 @@
       "stage": "architecture_stable",
       "version_base": {
         "base_artifact_hash": "sha256:ab527a800da96f8f1bb3b038649c5882f3e016dd0eef0749e32bb9a50ae152e8",
-        "base_source_commit": "77bbf60375d5a4d111c4bf5f5080e31e5ac70561",
+        "base_source_commit": "d626524c6f89f2168f3894a569c2916f63730338",
         "new_active_version": "active-v3",
         "previous_active_version": "active-v2"
       }
