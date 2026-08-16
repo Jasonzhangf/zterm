@@ -1,0 +1,9 @@
+{
+  "cleanup_id": "cleanup-zterm-runtime-architecture-v2",
+  "disposition": "archive_then_remove",
+  "removed_paths": [
+    "playground/experiments/zterm-runtime-architecture-v2/**"
+  ],
+  "archived_evidence_path": "protected/history/zterm-runtime-v2",
+  "created_at": "2026-08-16T00:05:08Z"
+}

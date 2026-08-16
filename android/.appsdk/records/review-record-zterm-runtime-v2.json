@@ -1,0 +1,20 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/review-record.schema.json",
+  "review_id": "REVIEW-20260816-DSH-ZARCHV2-R6",
+  "issue_id": "zterm-runtime-architecture-v2",
+  "promotion_id": "PROMO-20260816-ZARCHV2-001",
+  "reviewer": {
+    "adapter": "dsh",
+    "identity": "zarchv2-current-dsh-r6"
+  },
+  "verdict": "pass",
+  "evidence_ids": [
+    "EVID-20260816-ZARCHV2-FINAL-001"
+  ],
+  "reviewed_commit": "4c0416ff2767f173b9984d49965787c0afb76b9c",
+  "reviewed_artifact_hash": "sha256:ea3b90ba83282ff4d66491d53c9794979dbf5ea8c7ecbc82a7a6085b86f92ffb",
+  "reviewed_scope_hash": "sha256:0ef1306a1574b5e053549cf15ee26d648d33fd41359805718bd1f39efa014cae",
+  "ai_confidence": 1,
+  "confidence_rationale": "DSH zarchv2-current-dsh-r6 returned literal VERDICT: PASS with no P0/P1; all changed runtime architecture gates and build evidence were verified.",
+  "created_at": "2026-08-16T00:05:08Z"
+}

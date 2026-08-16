@@ -1,0 +1,27 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "evidence_id": "EVID-20260816-ZARCHV2-FINAL-001",
+  "issue_id": "zterm-runtime-architecture-v2",
+  "experiment_id": "zterm-runtime-architecture-v2",
+  "kind": "gate",
+  "source_commit": "4c0416ff2767f173b9984d49965787c0afb76b9c",
+  "artifact_hash": "sha256:ea3b90ba83282ff4d66491d53c9794979dbf5ea8c7ecbc82a7a6085b86f92ffb",
+  "scope": {
+    "module_id": "zterm-runtime-v2",
+    "feature_id": "zterm_runtime_architecture_v2_closeout",
+    "entrypoint": "/Users/fanzhang/.local/bin/appsdk verify /Volumes/extension/code/zterm/android"
+  },
+  "producer": {
+    "adapter": "appsdk",
+    "identity": "codex-zterm-v2-closeout-20260816T000508Z"
+  },
+  "result": "pass",
+  "confidence": 1,
+  "confidence_rationale": "appsdk verify, compile, prebuild gates, selected regression 297/297, and daemon mirror close-loop passed for zterm-runtime-v2",
+  "created_at": "2026-08-16T00:05:08Z",
+  "expires_at": "2026-11-14T00:05:08Z",
+  "input_hashes": [
+    "sha256:ea3b90ba83282ff4d66491d53c9794979dbf5ea8c7ecbc82a7a6085b86f92ffb"
+  ],
+  "scope_hash": "sha256:0ef1306a1574b5e053549cf15ee26d648d33fd41359805718bd1f39efa014cae"
+}

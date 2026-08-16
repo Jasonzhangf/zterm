@@ -1,0 +1,33 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/freeze-record.schema.json",
+  "freeze_id": "FREEZE-20260816-ZARCHV2-001",
+  "issue_id": "zterm-runtime-architecture-v2",
+  "module_id": "zterm-runtime-v2",
+  "promotion_id": "PROMO-20260816-ZARCHV2-001",
+  "promotion_record_hash": "sha256:replace-with-promotion-hash",
+  "artifact_record_id": "EVID-20260816-ZARCHV2-FINAL-001",
+  "regression_report_id": "REGR-20260816-ZARCHV2-001",
+  "regression_report_hash": "sha256:replace-with-regression-hash",
+  "source_commit_or_tag": "4c0416ff2767f173b9984d49965787c0afb76b9c",
+  "active_version": "active-v1",
+  "previous_active_version": null,
+  "library_hash": "sha256:ea3b90ba83282ff4d66491d53c9794979dbf5ea8c7ecbc82a7a6085b86f92ffb",
+  "public_api_hash": "sha256:667eb211855040e4cf42ffbe3bc2627629c5c2dc0120dc7367b57fbc6f1985e3",
+  "review_id": "REVIEW-20260816-DSH-ZARCHV2-R6",
+  "previous_active_immutable": false,
+  "git_clean": true,
+  "clean_scope": {
+    "base_commit": "4c0416ff2767f173b9984d49965787c0afb76b9c",
+    "changed_paths": [],
+    "ignored_paths": [],
+    "generated_policy": "tracked_hash"
+  },
+  "owners": {
+    "vcs": "git",
+    "compiler": "appsdk 0.1.2",
+    "api_extractor": "appsdk 0.1.2",
+    "review": "dsh zarchv2-current-dsh-r6",
+    "artifact_registry": "appsdk 0.1.2"
+  },
+  "created_at": "2026-08-16T00:05:08Z"
+}
