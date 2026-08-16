@@ -37,16 +37,24 @@ describe('TerminalConnectionStatusStrip', () => {
     expect(screen.getByTestId('terminal-connection-status-strip')).toBeTruthy();
     expect(screen.getByTestId('terminal-connection-status-route').textContent).toContain('UDP');
     expect(screen.getByTestId('terminal-connection-status-session').textContent).toBe('shared');
+    expect(screen.getByTestId('terminal-connection-status-backend').textContent).toBe('tmux');
   });
 
-  it('renders on the second portrait top row so Sessions and status cannot overlap', () => {
+  it('keeps route, session, backend, and rates in the first portrait top row', () => {
     render(
       <TerminalConnectionStatusStrip
-        session={makeSession()}
+        session={makeSession({ terminalBackend: 'herdr' })}
         topInsetPx={0}
       />,
     );
-    expect(screen.getByTestId('terminal-connection-status-strip').style.top).toBe('50px');
+    const strip = screen.getByTestId('terminal-connection-status-strip');
+    expect(strip.style.top).toBe('8px');
+    expect(strip.contains(screen.getByTestId('terminal-connection-status-route'))).toBe(true);
+    expect(strip.contains(screen.getByTestId('terminal-connection-status-session'))).toBe(true);
+    expect(strip.contains(screen.getByTestId('terminal-connection-status-backend'))).toBe(true);
+    expect(strip.contains(screen.getByTestId('terminal-connection-status-rates'))).toBe(true);
+    expect(screen.getByTestId('terminal-connection-status-session').textContent).toBe('shared');
+    expect(screen.getByTestId('terminal-connection-status-backend').textContent).toBe('herdr');
   });
 
   it('renders nothing without a session', () => {

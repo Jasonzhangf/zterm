@@ -70,8 +70,11 @@ vi.mock('../components/terminal/RemoteScreenshotSheet', () => ({
   RemoteScreenshotSheet: () => null,
 }));
 
-const renderQuickBar = (_props: TerminalQuickBarProps) => (
-  <div data-testid="terminal-quickbar" />
+const renderQuickBar = (props: TerminalQuickBarProps) => (
+  <div
+    data-testid="terminal-quickbar"
+    data-file-transfer-supported={props.fileTransferSupported ? 'true' : 'false'}
+  />
 );
 
 vi.mock('../components/TerminalView', () => ({
@@ -250,6 +253,7 @@ describe('TerminalPage portrait session drawer', () => {
     expect(screen.getByTestId('terminal-portrait-back-button')).toBeTruthy();
     expect(screen.getByTestId('terminal-portrait-settings-button')).toBeTruthy();
     expect(screen.getByTestId('terminal-quickbar')).toBeTruthy();
+    expect(screen.queryByTestId('terminal-portrait-session-drawer-button')).toBeNull();
 
     expect(screen.getByTestId('terminal-session-drawer').getAttribute('aria-hidden')).toBe('true');
 
@@ -312,7 +316,7 @@ describe('TerminalPage portrait session drawer', () => {
     expect(screen.getByTestId('plugin-session-drawer-slot')).toBeTruthy();
   });
 
-  it('keeps the portrait top controls and terminal stage on separate rows', () => {
+  it('keeps one portrait status row above the terminal stage without a Sessions button', () => {
     const session = makeSession('s1');
     session.daemonHostId = 'daemon-a';
     render(
@@ -337,13 +341,43 @@ describe('TerminalPage portrait session drawer', () => {
     );
 
     const status = screen.getByTestId('terminal-connection-status-strip');
-    const sessionsButton = screen.getByTestId('terminal-portrait-session-drawer-button');
+    const backButton = screen.getByTestId('terminal-portrait-back-button');
+    const settingsButton = screen.getByTestId('terminal-portrait-settings-button');
     const stage = screen.getByTestId('terminal-stage-shell');
-    expect(Number.parseInt(status.style.top, 10)).toBeGreaterThan(Number.parseInt(sessionsButton.style.top, 10));
+    expect(screen.queryByTestId('terminal-portrait-session-drawer-button')).toBeNull();
+    expect(status.style.top).toBe(backButton.style.top);
+    expect(status.style.top).toBe(settingsButton.style.top);
     expect(Number.parseInt(stage.style.top, 10)).toBeGreaterThan(Number.parseInt(status.style.top, 10) + 34);
   });
 
-  it('keeps a visible portrait entry point and a visible drawer surface', () => {
+  it('projects Herdr file-transfer capability as unsupported', () => {
+    const session = makeSession('s1');
+    session.terminalBackend = 'herdr';
+    render(
+      <TerminalPage
+        sessions={[session]}
+        sessionGroups={[]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    expect(screen.getByTestId('terminal-quickbar').getAttribute('data-file-transfer-supported')).toBe('false');
+    expect(screen.getByTestId('terminal-connection-status-backend').textContent).toBe('herdr');
+  });
+
+  it('keeps the portrait drawer reachable by edge swipe after removing the button', () => {
     const session = makeSession('s1');
     render(
       <TerminalPage
@@ -372,10 +406,17 @@ describe('TerminalPage portrait session drawer', () => {
       />,
     );
 
-    const openButton = screen.getByTestId('terminal-portrait-session-drawer-button');
-    expect(openButton).toBeTruthy();
+    expect(screen.queryByTestId('terminal-portrait-session-drawer-button')).toBeNull();
     expect(screen.getByTestId('terminal-session-drawer').getAttribute('aria-hidden')).toBe('true');
-    fireEvent.click(openButton);
+    const swipeSurface = document.querySelector(
+      '[data-testid^="terminal-swipe-surface-"][data-swipe-enabled="true"]',
+    ) as HTMLElement;
+    fireEvent.touchStart(swipeSurface, { touches: [{ clientX: 56, clientY: 200 }] });
+    fireEvent.touchMove(swipeSurface, {
+      touches: [{ clientX: 236, clientY: 206 }],
+      cancelable: true,
+    });
+    fireEvent.touchEnd(swipeSurface, { changedTouches: [{ clientX: 236, clientY: 206 }] });
     const drawer = screen.getByTestId('terminal-session-drawer');
     expect(drawer.getAttribute('aria-hidden')).toBe('false');
     expect(screen.getByTestId('terminal-session-drawer-header')).toBeTruthy();

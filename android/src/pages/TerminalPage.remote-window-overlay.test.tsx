@@ -33,6 +33,7 @@ const renderQuickBar = (props: TerminalQuickBarProps) => (
   <div
     data-testid="terminal-quickbar"
     data-remote-window-input-active={props.remoteWindowInputActive ? 'true' : 'false'}
+    data-file-transfer-supported={props.fileTransferSupported ? 'true' : 'false'}
     ref={(element) => {
       if (element) {
         props.onMeasuredHeightChange?.(112);
@@ -316,6 +317,7 @@ describe('TerminalPage remote window overlay', () => {
       expect(screen.queryByTestId('terminal-view-s1')).toBeTruthy();
       expect(screen.getByTestId('terminal-quickbar')).toBeTruthy();
       expect(screen.getByTestId('terminal-quickbar').getAttribute('data-remote-window-input-active')).toBe('true');
+      expect(screen.getByTestId('terminal-quickbar').getAttribute('data-file-transfer-supported')).toBe('true');
       expect(onActiveBodySubscriptionSuppressedChange).toHaveBeenLastCalledWith(false);
     });
 

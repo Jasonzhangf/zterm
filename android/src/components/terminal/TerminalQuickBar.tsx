@@ -78,6 +78,7 @@ export interface TerminalQuickBarProps {
   onSendSequence?: (sequence: string) => void;
   onImagePaste?: (sessionId: string, file: File) => Promise<void> | void;
   onFileAttach?: (sessionId: string, file: File) => Promise<void> | void;
+  fileTransferSupported?: boolean;
   onRequestRemoteScreenshot?: (sessionId: string) => Promise<unknown> | void;
   keyboardVisible?: boolean;
   keyboardInsetPx?: number;
@@ -162,6 +163,7 @@ function TerminalQuickBarComponent({
   keyboardInsetPx = 0,
   onImagePaste,
   onFileAttach,
+  fileTransferSupported = true,
   onRequestRemoteScreenshot,
   onToggleKeyboard,
   onQuickActionsChange,
@@ -587,6 +589,9 @@ function TerminalQuickBarComponent({
         return;
       }
       if (action.id === "remote-screenshot") {
+        if (!fileTransferSupported) {
+          return;
+        }
         if (!activeSessionId) {
           showToast("当前没有可用的目标 session");
           return;
@@ -614,6 +619,7 @@ function TerminalQuickBarComponent({
     },
     [
       activeSessionId,
+      fileTransferSupported,
       isRemoteWindowTerminalOnlyAction,
       onCollapsedChange,
       onRequestRemoteScreenshot,
@@ -1457,7 +1463,9 @@ function TerminalQuickBarComponent({
     const fixed = options?.fixed ?? false;
     const repeatable = isRepeatableAction(action);
     const repeatActive = repeatingActionId === action.id;
-    const disabled = isRemoteWindowTerminalOnlyAction(action.id);
+    const disabled =
+      isRemoteWindowTerminalOnlyAction(action.id)
+      || (!fileTransferSupported && action.id === "remote-screenshot");
     const actionDisplayLabel = resolveShortcutVisualLabel(action.label);
     const actionUsesSpaceBarVisual = isSpaceShortcutLabel(action.label);
     return (
@@ -1661,21 +1669,27 @@ function TerminalQuickBarComponent({
   ) => {
     const compact = options?.compact ?? false;
     const actionDisplayLabel = resolveShortcutVisualLabel(action.label);
+    const disabled = !fileTransferSupported;
     return (
       <button
         key={action.id}
         tabIndex={-1}
-    onPointerDown={(event) => {
+        disabled={disabled}
+        onPointerDown={(event) => {
           event.stopPropagation();
           blurCurrentTarget(event.currentTarget);
         }}
         onClick={(event) => {
           event.stopPropagation();
           blurCurrentTarget(event.currentTarget);
+          if (disabled) {
+            return;
+          }
           action.onClick();
         }}
         onFocus={(event) => event.currentTarget.blur()}
         aria-label={action.label}
+        aria-disabled={disabled}
         data-transfer-tool-button={action.id}
         style={{
           minHeight: compact ? "32px" : "34px",
@@ -1687,17 +1701,20 @@ function TerminalQuickBarComponent({
                 : "34px",
           border: "1px solid rgba(255,255,255,0.10)",
           borderRadius: "12px",
-          backgroundColor: "rgba(31, 38, 53, 0.92)",
-          color: "#fff",
+          backgroundColor: disabled
+            ? "rgba(68, 74, 86, 0.48)"
+            : "rgba(31, 38, 53, 0.92)",
+          color: disabled ? "rgba(218, 224, 235, 0.46)" : "#fff",
           fontSize: compact ? "12px" : "13px",
           fontWeight: 800,
-          cursor: "pointer",
+          cursor: disabled ? "not-allowed" : "pointer",
           touchAction: "manipulation",
           flexShrink: 0,
           padding: actionDisplayLabel.length > 1 ? "0 10px" : "0",
           display: "inline-flex",
           alignItems: "center",
           justifyContent: "center",
+          opacity: disabled ? 0.58 : 1,
         }}
       >
         {actionDisplayLabel}
@@ -1993,6 +2010,7 @@ function TerminalQuickBarComponent({
       <input
         ref={imageInputRef}
         type="file"
+        disabled={!fileTransferSupported}
         accept="image/*"
         multiple
         tabIndex={-1}
@@ -2015,6 +2033,7 @@ function TerminalQuickBarComponent({
       <input
         ref={fileInputRef}
         type="file"
+        disabled={!fileTransferSupported}
         tabIndex={-1}
         aria-hidden="true"
         style={{
@@ -3546,6 +3565,7 @@ function TerminalQuickBarComponent({
           data-quickbar-allow-pointer="true"
           type="button"
           tabIndex={-1}
+          disabled={!fileTransferSupported}
           onFocus={(event) => event.currentTarget.blur()}
           onPointerDown={(event) => {
             if (event.pointerType === "touch") {
@@ -3629,7 +3649,7 @@ function TerminalQuickBarComponent({
             }
           }}
           onClick={() => {
-            if (suppressBubbleClickRef.current) {
+            if (!fileTransferSupported || suppressBubbleClickRef.current) {
               return;
             }
             setFloatingMenuOpen(false);
@@ -3734,8 +3754,11 @@ function TerminalQuickBarComponent({
               boxShadow: "0 8px 18px rgba(0,0,0,0.24)",
               transform: "none",
               touchAction: "none",
+              cursor: fileTransferSupported ? "pointer" : "not-allowed",
+              opacity: fileTransferSupported ? 1 : 0.58,
             }}
             aria-label="文件浏览"
+            aria-disabled={!fileTransferSupported}
           >
             📁
           </button>

@@ -1422,6 +1422,36 @@ describe("TerminalQuickBar", () => {
     );
   });
 
+  it("disables unsupported Herdr file-transfer actions without invoking handlers", () => {
+    const onImagePaste = vi.fn();
+    const onFileAttach = vi.fn();
+    const onOpenFileTransfer = vi.fn();
+    const onRequestRemoteScreenshot = vi.fn();
+
+    renderQuickBar({
+      fileTransferSupported: false,
+      onImagePaste,
+      onFileAttach,
+      onOpenFileTransfer,
+      onRequestRemoteScreenshot,
+    });
+
+    for (const name of ["图片", "文件", "同步", "截图", "文件浏览"]) {
+      const button = screen.getByRole<HTMLButtonElement>("button", { name });
+      expect(button.disabled).toBe(true);
+      fireEvent.click(button);
+    }
+    const fileInputs = Array.from(
+      document.querySelectorAll<HTMLInputElement>('input[type="file"]'),
+    );
+    expect(fileInputs).toHaveLength(2);
+    expect(fileInputs.every((input) => input.disabled)).toBe(true);
+    expect(onImagePaste).not.toHaveBeenCalled();
+    expect(onFileAttach).not.toHaveBeenCalled();
+    expect(onOpenFileTransfer).not.toHaveBeenCalled();
+    expect(onRequestRemoteScreenshot).not.toHaveBeenCalled();
+  });
+
   it("shows screenshot transfer state on the visible third-row toolbar while keeping keyboard in the old fixed spot", async () => {
     renderQuickBar({
       remoteScreenshotStatus: "transferring",

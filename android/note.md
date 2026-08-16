@@ -7228,3 +7228,22 @@ if (bufferedBytes >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES) {
   current APK on this device, run `terminal-real-device-evidence.ts`, publish
   the local/Tailscale/Relay OTA update for `0.1.3.2647`, and physically remove
   the playground directory.
+
+# 2026-08-16 terminal top row and Herdr transfer capability
+
+- Scope: remove the redundant portrait `Sessions` button while preserving the
+  existing drawer edge-swipe owner; return route/session/rates to one top row;
+  add a compact current-backend projection; disable terminal file-transfer
+  intents for Herdr while preserving remote-window image paste.
+- Architecture: `terminal.shell_actions` owns status/stage projection,
+  `client.terminal_shell_ui` and `client.quickbar_ui` own typed plugin slots,
+  and `terminal.quickbar` owns action availability. No daemon, mirror, buffer,
+  renderer, geometry, or backend adapter changes are allowed.
+- Boundary treatment: the Sessions control is physically removed; status and
+  backend remain a UI projection; Herdr capability is separated as a typed
+  QuickBar input. The existing daemon
+  `herdr_file_transfer_unsupported` fail-fast guard remains authoritative.
+- Required proof: red/green status, drawer gesture, and QuickBar tests;
+  file-transfer Herdr server guards; feature/module/edge gates; typecheck;
+  prebuild; Android APK build and available device smoke. OTA/public Relay
+  publication remains unauthorized.

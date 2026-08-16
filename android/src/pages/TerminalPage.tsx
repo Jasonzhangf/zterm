@@ -3123,6 +3123,9 @@ function TerminalPageComponent({
       onSendSequence: handleQuickBarSendSequence,
       onImagePaste: handleQuickBarImagePaste,
       onFileAttach,
+      fileTransferSupported:
+        Boolean(remoteWindowInputContext)
+        || terminalActionSession?.terminalBackend !== 'herdr',
       keyboardVisible: terminalImeActive && effectiveKeyboardLiftPx > 0,
       keyboardInsetPx: quickBarShellKeyboardLiftPx,
       onToggleKeyboard: handleToggleKeyboard,
@@ -3164,6 +3167,7 @@ function TerminalPageComponent({
     absoluteLineNumbersVisible,
     activeDraft,
     terminalActionSessionId,
+    terminalActionSession?.terminalBackend,
     debugOverlayVisible,
     effectiveKeyboardLiftPx,
     handleSetSplitCount,
@@ -3379,33 +3383,6 @@ function TerminalPageComponent({
                   ) : null}
                 </>
               ) : null}
-              <button
-                type="button"
-                aria-label="打开 session 抽屉"
-                data-testid="terminal-portrait-session-drawer-button"
-                onClick={() => setSessionDrawerOpen(true)}
-                style={{
-                  position: 'absolute',
-                  top: `${Math.max(8, headerTopInsetPx + 8)}px`,
-                  left: '52px',
-                  zIndex: 151,
-                  height: '34px',
-                  padding: '0 10px',
-                  borderRadius: '12px',
-                  border: '1px solid var(--zterm-panel-border)',
-                  background: 'var(--zterm-panel-surface)',
-                  color: 'var(--zterm-panel-text)',
-                  fontSize: '12px',
-                  fontWeight: 850,
-                  lineHeight: 1,
-                  boxShadow: '0 8px 18px rgba(0,0,0,0.18)',
-                  backdropFilter: 'blur(8px)',
-                  pointerEvents: sessionDrawerOpen ? 'none' : 'auto',
-                  opacity: sessionDrawerOpen ? 0 : 1,
-                }}
-              >
-                Sessions
-              </button>
               {renderSessionDrawer ? renderSessionDrawer({
                 open: sessionDrawerOpen,
                 topInsetPx: headerTopInsetPx,

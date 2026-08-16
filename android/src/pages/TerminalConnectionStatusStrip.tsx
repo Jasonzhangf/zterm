@@ -8,7 +8,6 @@ import { formatDebugRate } from './terminal-page-debug-helpers';
 import type { Session, SessionDebugOverlayMetrics } from '../lib/types';
 import {
   formatConnectionRouteLabel,
-  formatTerminalBackendSuffix,
   resolveConnectionActivityLabel,
   resolveEffectiveConnectionStatus,
   TERMINAL_PORTRAIT_STATUS_STRIP_TOP_OFFSET_PX,
@@ -76,20 +75,21 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
       ? '#ffd27a'
       : 'var(--zterm-panel-muted)';
   const visibleRouteLabel = activityLabel || routeLabel;
+  const terminalBackend = session.terminalBackend === 'herdr' ? 'herdr' : 'tmux';
 
   return (
     <>
       <div
       data-testid='terminal-connection-status-strip'
       className='zterm-connection-status-strip'
-      aria-label={`连接状态 ${visibleRouteLabel} session ${session.sessionName}${formatTerminalBackendSuffix(session.terminalBackend)} 上行 ${formatDebugRate(uplinkBps)} 下行 ${formatDebugRate(downlinkBps)}`}
+      aria-label={`连接状态 ${visibleRouteLabel} session ${session.sessionName} 后端 ${terminalBackend} 上行 ${formatDebugRate(uplinkBps)} 下行 ${formatDebugRate(downlinkBps)}`}
       role='button'
       tabIndex={0}
       onClick={() => setRouteMenuOpen((current) => !current)}
       style={{
         position: 'absolute',
         top: `${Math.max(TERMINAL_PORTRAIT_STATUS_STRIP_TOP_OFFSET_PX, topInsetPx + TERMINAL_PORTRAIT_STATUS_STRIP_TOP_OFFSET_PX)}px`,
-        left: '94px',
+        left: '52px',
         right: '84px',
         zIndex: 15,
         height: '34px',
@@ -146,7 +146,7 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
       <button
         type="button"
         data-testid='terminal-connection-status-session'
-        aria-label={`重命名 session ${session.sessionName}${formatTerminalBackendSuffix(session.terminalBackend)}`}
+        aria-label={`重命名 session ${session.sessionName}`}
         onClick={(event) => {
           event.stopPropagation();
           setRouteMenuOpen(false);
@@ -172,8 +172,26 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
           cursor: onRenameRemoteSession ? 'text' : 'default',
         }}
       >
-        {session.sessionName}{formatTerminalBackendSuffix(session.terminalBackend)}
+        {session.sessionName}
       </button>
+      <span
+        data-testid='terminal-connection-status-backend'
+        aria-label={`当前终端后端 ${terminalBackend}`}
+        style={{
+          flex: '0 0 auto',
+          minWidth: '28px',
+          padding: '2px 4px',
+          borderRadius: '5px',
+          border: '1px solid var(--zterm-panel-border)',
+          color: 'var(--zterm-panel-muted)',
+          fontSize: '8px',
+          fontWeight: 850,
+          lineHeight: 1,
+          textAlign: 'center',
+        }}
+      >
+        {terminalBackend}
+      </span>
       <span
         data-testid='terminal-connection-status-rates'
         style={{

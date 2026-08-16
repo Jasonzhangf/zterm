@@ -1374,7 +1374,7 @@ describe("TerminalPage Android IME bridge", () => {
         />,
       );
 
-      expect(screen.getByTestId("terminal-stage-shell").getAttribute("style") || "").toContain("top: 108px;");
+      expect(screen.getByTestId("terminal-stage-shell").getAttribute("style") || "").toContain("top: 66px;");
     } finally {
       Object.defineProperty(window, "innerWidth", { configurable: true, value: originalInnerWidth });
       Object.defineProperty(window, "innerHeight", { configurable: true, value: originalInnerHeight });
