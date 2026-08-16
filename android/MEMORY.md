@@ -2519,3 +2519,22 @@ Tags: #mempalace #source-only-search #generated-artifacts #zterm
   completely closed. DSH r6 PASS covers source snapshot `4c0416f`; later
   governance-only record/config changes have not been independently re-reviewed
   because DSH MCP was unavailable.
+
+# 2026-08-16 L5 real-device input/render close loop and AppSDK binary drift
+
+- Confirmed: reliable input and render-gate evidence were dropped by the
+  bounded client runtime-debug queue because only `session.input.send` was
+  critical. `session.input.send*`, `session.input.reliable*`, and
+  `session.render-gate.flush.inspect` are now protected; unit tests cover
+  queue overflow for both input and render evidence.
+- Confirmed on device `100.104.163.65:5555` with APK `0.1.3.2650`:
+  `clientInputSend`, `daemonInputReceive`, `daemonInputWrite`, `bufferHead`,
+  `bufferApplied`, `renderCommit`, and `noLocalTruthAnomaly` all true.
+  Evidence is under `android/evidence/real-device/2026-08-15-203142/`.
+- Blocker: the global `/Users/fanzhang/.local/bin/appsdk` changed to 0.1.3
+  while the project lock remains 0.1.2. 0.1.3 requires a reviewed migration
+  (`module-registry.json` plus the v0.1.3 record contract set), and the exact
+  pinned 0.1.2 binary is `android/.appsdk/sdk.bin`, which the original goal
+  forbids executing. Prebuild/AppSDK verify and DSH review stay
+  authorization-blocked until Jason chooses pinned-binary verification or an
+  explicit reviewed v0.1.3 migration.
