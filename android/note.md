@@ -7257,3 +7257,28 @@ if (bufferedBytes >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES) {
   (`review_output_missing`, reviewer reported missing output-schema path).
   The commit remains review-blocked because the connector did not expose the
   documented stateless retry operation in this run.
+
+# 2026-08-16 L5 real-device evidence: input/render close loop PASS
+
+- Root cause for `clientInputSend: false`: client runtime debug queue evicted
+  reliable-input events because `isCriticalRuntimeDebugScope()` only protected
+  `session.input.send`; fixed by also protecting `session.input.send*` and
+  `session.input.reliable*`, with an overflow unit test.
+- Second verifier failure was `renderCommit: false`: render-gate inspect was
+  sampled at 1500ms but still evicted by the same bounded queue; fixed by
+  protecting `session.render-gate.flush.inspect`, with an overflow unit test.
+- Commits: `d9eb904` reliable-input evidence, `6d27b8d` render-gate evidence
+  (amended after concurrent Herdr terminal shell commit `dc4ce9d`).
+- APK `0.1.3.2650` (`sha256:3198d6f69f83bcdb84e1303ed110c89e78856ddbd41b9ce1e40791c675100106`)
+  installed on `100.104.163.65:5555`; verifier passed all checks:
+  `clientInputSend`, `daemonInputReceive`, `daemonInputWrite`, `bufferHead`,
+  `bufferApplied`, `renderCommit`, `noLocalTruthAnomaly`.
+- Evidence: `android/evidence/real-device/2026-08-15-203142/summary.json`.
+- Blocker: `/Users/fanzhang/.local/bin/appsdk` was replaced with 0.1.3 at
+  20:25; project `sdk.lock` is still pinned to 0.1.2 and its exact binary is
+  `android/.appsdk/sdk.bin` (`sha256:3685149eab60ed887737e1ff0c9a6ddbbd0add32424d40595e27296ebf7b8686`).
+  Global 0.1.3 fails with `MISSING_GOVERNANCE_MAP:module-registry.json`, then
+  `NON_CANONICAL_RECORD_CONTRACT_SET`; its bundled docs require a reviewed
+  v0.1.2 -> v0.1.3 migration before use. Using `.appsdk/sdk.bin` remains
+  forbidden by the original goal instruction, so prebuild/AppSDK verify and
+  DSH review remain authorization-blocked.
