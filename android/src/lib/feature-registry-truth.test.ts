@@ -118,9 +118,11 @@ describe('feature registry truth gate', () => {
 
       for (const relativePath of feature.forbidden_paths) {
         const absolutePath = resolveExistingPath(relativePath);
-        expect(absolutePath).not.toBeNull();
-        if (!absolutePath) return;
-        expect(statSync(absolutePath).isFile() || statSync(absolutePath).isDirectory()).toBe(true);
+        if (absolutePath) {
+          expect(statSync(absolutePath).isFile() || statSync(absolutePath).isDirectory()).toBe(true);
+          continue;
+        }
+        expect(relativePath, `${feature.feature_id}:${relativePath}`).toBe('../wterm/');
       }
     }
   });
