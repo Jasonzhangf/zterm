@@ -131,3 +131,33 @@ Formal fix scope:
   path and the non-immutable clone path.
 - The 16ms timing guard is unchanged.
 - `tmp-perf-bench.test.ts` is removed before the candidate commit.
+
+## DSH final review round 5 (2026-08-16)
+
+Symptom: `zarchv2-activev4-final-394679c-20260816T205000Z` returns
+`VERDICT: FAIL` with one P1 and two P2 findings.
+
+First divergence:
+
+- The review target was detached at `394679c`; the record-binding commit
+  `1fa7efe` existed only as later uncommitted working-tree edits, so DSH read
+  the stale committed evidence against the compiled artifact.
+- The non-immutable source-row clone cache returned a cached clone for the same
+  row array reference without re-reading cell contents. A producer that mutates
+  a row array in place under a stable reference can publish a stale clone.
+- `vitest.setup.ts` installed `window.localStorage` only when a `window` global
+  existed, leaving pure-node test environments without the deterministic
+  storage mock.
+
+Formal fix scope:
+
+- `session-render-buffer-store.ts`: reuse a cached non-immutable clone only
+  after `rowsEqual(row, reusedClone)` validates the current source row. A
+  stable row reference with in-place cell mutation now gets a fresh clone.
+- `session-render-buffer-store.test.ts`: add a red regression for in-place
+  mutation under a stable row reference, and change the unchanged-row guard to
+  prove the cache re-reads content before reusing the same clone.
+- `vitest.setup.ts`: install the deterministic in-memory storage on
+  `globalThis` unconditionally and on `window` when present.
+- The next DSH review must run against a clean committed HEAD that contains
+  both the source fix and the rebound lifecycle records.

@@ -315,3 +315,17 @@ Out of Scope：
 - focused regression：8 files / 297 tests / 0 skipped PASS
 - 后续还需完成 prebuild、build、tsc、AppSDK compile/verify、records 绑定与
   DSH final round 4。
+
+## 15. 2026-08-16 round 5 DSH FAIL
+
+- DSH final `zarchv2-activev4-final-394679c-20260816T205000Z`：
+  `VERDICT: FAIL`，P1 + P2 见
+  `docs/debug/2026-08-16-appsdk013-final-gate-fix-design.md` round 5。
+- P1：review target 是 detached `394679c`，record rebind 只存在于未提交
+  working-tree 编辑，DSH 读到 stale committed evidence。
+- P2：非 immutable clone cache 对同 row reference 不重读内容就复用 clone，
+  in-place 修改会发布 stale row。
+- P2：`vitest.setup.ts` 只在 `window` 存在时安装 localStorage mock。
+- 本 round candidate 必须：验证 clone 内容后复用、补 in-place 红测、统一
+  安装 global/window storage mock，并在 clean committed HEAD（源码 + 新 records
+  一起提交）重跑全部 gate 与 DSH。

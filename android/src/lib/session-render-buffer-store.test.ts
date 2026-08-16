@@ -66,7 +66,7 @@ describe('session-render-buffer-store', () => {
     expect(store.getSnapshot('s1').buffer).not.toBe(second);
   });
 
-  it('reuses unchanged source rows by reference without reading their cells again', () => {
+  it('reuses unchanged source-row clones only after validating their current content', () => {
     const store = createSessionRenderBufferStore();
     let charReads = 0;
     const expensiveCell = {} as TerminalCell;
@@ -87,12 +87,32 @@ describe('session-render-buffer-store', () => {
     const unchangedRow = [expensiveCell];
     const first = makeSnapshot([[makeCell('a')], unchangedRow], 1);
     expect(store.setBuffer('s1', first)).toBe(true);
+    const unchangedClone = store.getSnapshot('s1').buffer.lines[1];
 
     charReads = 0;
     const second = makeSnapshot([[makeCell('c')], unchangedRow], 2);
     expect(store.setBuffer('s1', second)).toBe(true);
-    expect(charReads).toBe(0);
+    expect(charReads).toBeGreaterThan(0);
     expect(store.getSnapshot('s1').buffer.lines[1]).not.toBe(second.lines[1]);
+    expect(store.getSnapshot('s1').buffer.lines[1]).toBe(unchangedClone);
+  });
+
+  it('does not publish a stale clone when the same source row mutates in place', () => {
+    const store = createSessionRenderBufferStore();
+    const sourceRow = [makeCell('a')];
+    const first = makeSnapshot([sourceRow], 1);
+    expect(store.setBuffer('s1', first)).toBe(true);
+
+    sourceRow[0]!.char = 'z'.codePointAt(0) || 32;
+    const second = makeSnapshot([sourceRow], 2);
+    expect(store.setBuffer('s1', second)).toBe(true);
+
+    const stored = store.getSnapshot('s1').buffer;
+    expect(stored.lines[0]).not.toBe(sourceRow);
+    expect(String.fromCodePoint(stored.lines[0]![0]!.char)).toBe('z');
+
+    sourceRow[0]!.char = 'q'.codePointAt(0) || 32;
+    expect(String.fromCodePoint(stored.lines[0]![0]!.char)).toBe('z');
   });
 
   it('keeps an immutable render snapshot after publish even if the source snapshot mutates later', () => {

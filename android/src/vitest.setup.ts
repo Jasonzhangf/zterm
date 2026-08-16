@@ -23,8 +23,13 @@ function createMemoryStorage(): Storage {
   };
 }
 
+const memoryStorage = createMemoryStorage();
+Object.defineProperty(globalThis, 'localStorage', {
+  configurable: true,
+  value: memoryStorage,
+});
+
 if (typeof window !== 'undefined') {
-  const memoryStorage = createMemoryStorage();
   Object.defineProperty(window, 'localStorage', {
     configurable: true,
     value: memoryStorage,

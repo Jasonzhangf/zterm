@@ -66,13 +66,15 @@ function cloneRenderBuffer(
   nextSourceRows?: Map<TerminalCell[], TerminalCell[]>,
 ): SessionRenderBufferSnapshot {
   // Non-immutable publishes clone once per source row and reuse that clone for
-  // the same source-row identity. Never reuse the previous snapshot row object:
-  // an immutable projection may have stored the live source row there.
+  // the same source-row identity only after re-reading the current row. This
+  // defensive path allows in-place cell mutation under a stable row reference.
+  // Never reuse the previous snapshot row object: an immutable projection may
+  // have stored the live source row there.
   return {
     ...buffer,
     lines: buffer.lines.map((row) => {
       const reusedClone = previousSourceRows?.get(row);
-      if (reusedClone) {
+      if (reusedClone && rowsEqual(row, reusedClone)) {
         nextSourceRows?.set(row, reusedClone);
         return reusedClone;
       }
