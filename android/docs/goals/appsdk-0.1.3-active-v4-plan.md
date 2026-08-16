@@ -240,3 +240,77 @@ Out of Scope：
   `docs/debug/2026-08-16-appsdk013-final-gate-fix-design.md` round 2。
 - 本计划后续 candidate 必须先修复上述 findings，再重跑完整 gate 与 DSH final；
   发布/合并类动作仍等 Jason 授权。
+
+## 12. 2026-08-16 DSH final round 3 基线
+
+- main HEAD：`15df591f6cbc4adb02ab420b1a9d3d7ee88cc3c8`，仍是 0.1.2 +
+  active-v2。
+- claim worktree：
+  `playground/appsdk-active-v4-20260816T135755Z-Macstudio.local-63423-9d5e57bc0333`，
+  branch `work/appsdk-active-v4-20260816T135755Z`，HEAD
+  `6ae9528`，仅追加 lifecycle records。
+- DSH final `zarchv2-activev4-final-6ae9528-20260816T192400Z`：
+  `VERDICT: FAIL`，P1 + P2 见
+  `/Users/fanzhang/.dsh/reviews/zarchv2-activev4-final-6ae9528-20260816T192400Z/review.final.md`。
+- P1：`session-render-buffer-store.ts` immutable 路径写入 source-row identity
+  cache；后续同 session 非 immutable publish 可能把 live source row 别名进
+  immutable snapshot。当前生产调用恒为 `immutableProjection: true`，不可达但
+  未测试、未 gate。
+- P2：perf guard 只测 1 行增量（80 cells），无法暴露 full-clone 回归；阈值
+  16ms 不放松，需改成能证明 full rewrite 会失败的负向断言。
+- P2：regression report 绑定 `519ffe2`，未列出 changed suites，实际修复 commit
+  是 `6da2968`；records 必须绑定 exact HEAD 并包含 changed suites。
+- P2：immutable 生产热路径每 commit 构造 identity Map 且 session 生命周期内
+  不释放；cache 应只属于非 immutable source→clone 路径，或明确作用域/清理。
+- 当前 worktree 有未提交临时文件 `android/src/tmp-perf-bench.test.ts`，提交前
+  必须物理删除。
+- authorization gates 仍 `awaiting_jason`；freeze/publish/merge/OTA/cleanup
+  均不得在未授权时执行。
+
+## 13. Round 3 修复范围与下一步
+
+必须完成：
+
+1. 修复 P1：immutable 路径不得写 `sourceRowClonesBySession` 或写入后立即清除；
+   cache 只保留 source→clone 语义。
+2. 补 mixed-mode 测试：同 session 先 immutable publish，再非 immutable publish
+   同 row reference；断言 render row 与 live source row 不别名，源 row 后续原地
+   mutate 不污染 snapshot。
+3. 将 perf guard 切到真实生产投影路径（`immutableProjection: true`），保留
+   16ms 产品阈值；删除 `tmp-perf-bench.test.ts`。
+4. 重跑 changed suites、feature registry 92/92、聚焦回归 297/297、prebuild、
+   build、tsc、module/registry gates。
+5. `appsdk compile-module` 生成新 artifact，绑定新 artifact/public API/scope/
+   contract hash 到 lifecycle records。
+6. `appsdk verify .` + detached clean worktree verify PASS。
+7. 对 exact 新 HEAD 重跑 DSH final（仅 DSH MCP + `opencode-go/deepseek-v4-flash`），
+   必须明确 PASS；FAIL 则继续修复并重新走全部 gate。
+
+禁止：
+
+- 放松 16ms guard、绕过 DSH、使用 Codex review 替代 DSH、fallback、脚本批量
+  替换、手改 `android/active/lib/**`、`android/protected/**`、
+  `android/generated/**`、`.appsdk/sdk.lock`。
+- 在 Jason 明确授权前执行 freeze/publish/merge/OTA/cleanup，或标记 Promotion/
+  Freeze/Merge records 已完成。
+
+## 14. 2026-08-16 round 3 candidate fixes
+
+已应用修复：
+
+- `session-render-buffer-store.ts`：物理删除 per-session source-row clone
+  cache。非 immutable publish 始终 clone rows/gapRanges/cursor，避免 previous
+  snapshot 可能是 immutable live alias；immutable 生产路径不再为每个 commit
+  构造 rows-length `Map`。
+- `session-render-buffer-store.test.ts`：mixed-mode 反例测试覆盖 row、gap
+  range、cursor 不别名；16ms perf guard 改为使用 `immutableProjection: true`
+  测量真实生产投影路径。
+- 临时文件 `android/src/tmp-perf-bench.test.ts` 已删除。
+
+当前验证（candidate 提交前）：
+
+- changed suites：3 files / 65 tests PASS
+- feature registry：12 files / 92 tests PASS
+- focused regression：8 files / 297 tests / 0 skipped PASS
+- 后续还需完成 prebuild、build、tsc、AppSDK compile/verify、records 绑定与
+  DSH final round 4。

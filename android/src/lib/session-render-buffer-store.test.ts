@@ -66,35 +66,6 @@ describe('session-render-buffer-store', () => {
     expect(store.getSnapshot('s1').buffer).not.toBe(second);
   });
 
-  it('reuses unchanged source rows by reference without reading their cells again', () => {
-    const store = createSessionRenderBufferStore();
-    let charReads = 0;
-    const expensiveCell = {} as TerminalCell;
-    Object.defineProperties(expensiveCell, {
-      char: {
-        get() {
-          charReads += 1;
-          return 'b'.codePointAt(0) || 32;
-        },
-        enumerable: true,
-      },
-      fg: { value: 256, enumerable: true },
-      bg: { value: 256, enumerable: true },
-      flags: { value: 0, enumerable: true },
-      width: { value: 1, enumerable: true },
-    });
-
-    const unchangedRow = [expensiveCell];
-    const first = makeSnapshot([[makeCell('a')], unchangedRow], 1);
-    expect(store.setBuffer('s1', first)).toBe(true);
-
-    charReads = 0;
-    const second = makeSnapshot([[makeCell('c')], unchangedRow], 2);
-    expect(store.setBuffer('s1', second)).toBe(true);
-    expect(charReads).toBe(0);
-    expect(store.getSnapshot('s1').buffer.lines[1]).not.toBe(second.lines[1]);
-  });
-
   it('keeps an immutable render snapshot after publish even if the source snapshot mutates later', () => {
     const store = createSessionRenderBufferStore();
     const snapshot = makeSnapshot([[makeCell('a')], [makeCell('b')]], 1);
@@ -118,6 +89,36 @@ describe('session-render-buffer-store', () => {
     expect(store.setBuffer('s1', snapshot, { immutableProjection: true })).toBe(true);
     expect(store.getSnapshot('s1').buffer.lines).toBe(snapshot.lines);
     expect(store.getSnapshot('s1').buffer.lines[0]).toBe(snapshot.lines[0]);
+  });
+
+  it('never aliases live source rows after an immutable publish switches to a non-immutable publish', () => {
+    const store = createSessionRenderBufferStore();
+    const sourceRow = [makeCell('a')];
+    const first = makeSnapshot([sourceRow], 1);
+    first.gapRanges = [{ startIndex: 1, endIndex: 2 }];
+    first.cursor = { rowIndex: 4, col: 5, visible: true };
+
+    expect(store.setBuffer('s1', first, { immutableProjection: true })).toBe(true);
+    expect(store.getSnapshot('s1').buffer.lines[0]).toBe(sourceRow);
+
+    sourceRow[0]!.char = 'z'.codePointAt(0) || 32;
+    const second = makeSnapshot([sourceRow], 2);
+    second.gapRanges = first.gapRanges;
+    second.cursor = first.cursor;
+    expect(store.setBuffer('s1', second)).toBe(true);
+
+    const stored = store.getSnapshot('s1').buffer;
+    expect(stored.lines[0]).not.toBe(sourceRow);
+    expect(String.fromCodePoint(stored.lines[0]![0]!.char)).toBe('z');
+    expect(stored.gapRanges).not.toBe(first.gapRanges);
+    expect(stored.cursor).not.toBe(first.cursor);
+
+    sourceRow[0]!.char = 'q'.codePointAt(0) || 32;
+    first.gapRanges[0]!.startIndex = 9;
+    first.cursor.rowIndex = 8;
+    expect(String.fromCodePoint(stored.lines[0]![0]!.char)).toBe('z');
+    expect(stored.gapRanges[0]!.startIndex).toBe(1);
+    expect(stored.cursor?.rowIndex).toBe(4);
   });
 
   it('rejects a lower-revision render snapshot instead of publishing older rows over newer rows', () => {
@@ -178,7 +179,7 @@ describe('session-render-buffer-store', () => {
 });
 
 describe('session-render-buffer-store perf', () => {
-  it('incremental render publish cost stays bounded for a realistic 1000x80 buffer', () => {
+  it('production immutable render publish cost stays bounded for a realistic 1000x80 buffer', () => {
     const store = createSessionRenderBufferStore();
     const cols = 80;
     const rows = 1000;
@@ -194,10 +195,9 @@ describe('session-render-buffer-store perf', () => {
     const snapshot = makeSnapshot(lines, 1);
 
     // Warm up before measuring so JIT and lazy paths do not turn a stable
-    // publish into a cold-start flake under a loaded dev machine. Rows are
-    // replaced on change because row reference identity is the buffer contract;
-    // unchanged rows must be reused without cloning their 80 cells.
-    store.setBuffer('s1', snapshot);
+    // publish into a cold-start flake under a loaded dev machine. This is the
+    // exact render-gate projection mode used on every daemon push.
+    store.setBuffer('s1', snapshot, { immutableProjection: true });
     const warmupIterations = 20;
     for (let i = 0; i < warmupIterations; i += 1) {
       snapshot.lines[0] = snapshot.lines[0]!.map((cell, col) => (
@@ -209,7 +209,7 @@ describe('session-render-buffer-store perf', () => {
           : cell
       ));
       snapshot.revision = i + 2;
-      store.setBuffer('s1', snapshot);
+      store.setBuffer('s1', snapshot, { immutableProjection: true });
     }
 
     const iterations = 50;
@@ -224,17 +224,15 @@ describe('session-render-buffer-store perf', () => {
           : cell
       ));
       snapshot.revision = i + warmupIterations + 2;
-      store.setBuffer('s1', snapshot);
+      store.setBuffer('s1', snapshot, { immutableProjection: true });
     }
     const elapsed = performance.now() - start;
     const perPublish = elapsed / iterations;
-    // CI baseline observed: well under 1ms per incremental publish after row
-    // reference reuse (M-series dev box, Node 26, vitest 1.6).
-    // Hard guard at 16ms (one 60Hz frame) — a single publish must NOT eat a full frame
-    // because this runs on every daemon push and would compound across many sessions.
-    // Real-device numbers should be measured via a true device Profiler run; the
-    // CI guard catches catastrophic regressions (e.g. losing source-row reuse and
-    // cloning every row on every incremental push).
+    // CI baseline observed: well under 1ms per immutable projection publish
+    // (M-series dev box, Node 26, vitest 1.6). Hard guard at 16ms (one 60Hz
+    // frame): a single publish must NOT eat a full frame because this runs on
+    // every daemon push and would compound across many sessions.
+    // Real-device numbers should be measured via a true device Profiler run.
     expect(perPublish).toBeLessThan(16);
   });
 });
