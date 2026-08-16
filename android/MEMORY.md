@@ -2566,8 +2566,8 @@ Tags: #mempalace #source-only-search #generated-artifacts #zterm
 - Source-only verification for those paths passed: shared renderer 26/26,
   TerminalView dynamic refresh 79/79, buffer runtime 61/61, drawer UI 136/136,
   frame assembly 109/109, feature registry 92/92, type-check.
-- Manual APK built from current main is `0.1.3.2651`
-  (`versionCode 1100026510`, sha256 `4b52f1f5a0083c3cf689a91d570c3711c54c339e69b1c27e89ccca031315d748`).
+- Manual APK built from current main is `0.1.3.2652`
+  (`versionCode 1100026520`, sha256 `97fe6e94c5c1965c737877e457423e34006fa7d741b03e939c8010800d1c4fb0`).
 - On this Mac, `tmux send-keys -l` costs roughly 57ms per call, so the daemon's
   required 256-byte literal chunks give only ~5KB/s backend input throughput.
   `long-input-echo` therefore cannot finish its ~360KB lab payload inside the
