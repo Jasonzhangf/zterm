@@ -10,7 +10,7 @@
     "git:150fe4688dccba0e46daab5ef324a2dfd629c971"
   ],
   "baseline_evidence_id": "evid-20260816-zarchv2-activev4-baseline-001",
-  "first_divergence": "At 150fe46, the clean active-v4 worktree fails the final gate stabilization path: module-import-graph-truth reports src/vitest.setup.ts unowned, Node 26/jsdom leaves window.localStorage unavailable for remote-window overlay tests, FileTransferSheet's Storage.prototype spy targets a different localStorage instance, the session-render-buffer perf guard is cold-start flaky under the loaded host, and the prebuild default 5s test timeout is too tight for the full UI regression surface.",
+  "first_divergence": "At 150fe46, the clean active-v4 worktree fails the final gate stabilization path: module-import-graph-truth reports src/vitest.setup.ts unowned, Node/jsdom Storage.prototype spies target a different localStorage instance, FileTransferSheet's setItem spy does not intercept the storage write, the session-render-buffer perf guard is flaky above 16ms on the loaded host, and the prebuild timeout is too tight. DSH round 2 reproduced FileTransferSheet and perf failures against 9f653d8 and rejected vitest.setup.ts ownership in shared.test_contracts.",
   "result": "reproduced",
   "created_at": "2026-08-16T15:00:00Z"
 }
