@@ -3,8 +3,9 @@
  * 从 useSessionOpenActions.ts 拆出：target 匹配 / 可复用 session 解析 / session group 解析。
  */
 import { DEFAULT_BRIDGE_PORT } from './mobile-config';
+import { resolveRelayDaemonCanonicalHostId } from './relay-account-directory';
 import { sessionSemanticOwnersMatch } from './session-semantic-identity';
-import type { Session, SessionGroupHistory } from './types';
+import type { Session, SessionGroupHistory, TraversalRelayDeviceSnapshot } from './types';
 import type { BridgeTarget } from './session-picker';
 
 export function buildGeneratedSessionName() {
@@ -88,15 +89,33 @@ export function resolveReusableOpenSessionForTarget(
 
 export function resolveSessionGroupForTarget(
   sessionGroups: SessionGroupHistory[],
-  target: Pick<BridgeTarget, 'bridgeHost' | 'bridgePort' | 'daemonHostId' | 'relayHostId'> & { terminalBackend?: 'tmux' | 'herdr' },
+  target: Pick<BridgeTarget, 'bridgeHost' | 'bridgePort' | 'daemonHostId' | 'relayHostId' | 'authToken'> & { terminalBackend?: 'tmux' | 'herdr' },
+  relayDevices: TraversalRelayDeviceSnapshot[] = [],
 ) {
+  const canonicalTargetDaemonHostId = resolveRelayDaemonCanonicalHostId({
+    daemonHostId: target.daemonHostId,
+    relayHostId: target.relayHostId,
+    authToken: target.authToken,
+    bridgeHost: target.bridgeHost,
+    bridgePort: target.bridgePort,
+  }, relayDevices) || target.daemonHostId || target.relayHostId;
   return sessionGroups.find((group) => (
     (group.terminalBackend || 'tmux') === (target.terminalBackend || 'tmux')
-    && sessionSemanticOwnersMatch(group, {
-      bridgeHost: target.bridgeHost,
-      bridgePort: target.bridgePort,
-      daemonHostId: target.daemonHostId || target.relayHostId,
-    })
+    && sessionSemanticOwnersMatch(
+      {
+        ...group,
+        daemonHostId: resolveRelayDaemonCanonicalHostId({
+          daemonHostId: group.daemonHostId,
+          authToken: group.authToken,
+          bridgeHost: group.bridgeHost,
+          bridgePort: group.bridgePort,
+        }, relayDevices) || group.daemonHostId,
+      },
+      {
+        bridgeHost: target.bridgeHost,
+        bridgePort: target.bridgePort,
+        daemonHostId: canonicalTargetDaemonHostId,
+      },
+    )
   )) || null;
 }
-

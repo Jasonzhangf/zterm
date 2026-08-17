@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   DEFAULT_BRIDGE_SETTINGS,
   normalizeBridgeSettings,
@@ -95,7 +95,7 @@ export function useBridgeSettingsStorage() {
     setSettingsState(readStoredBridgeSettings());
   }, []);
 
-  const setSettings = (next: BridgeSettings | ((current: BridgeSettings) => BridgeSettings)) => {
+  const setSettings = useCallback((next: BridgeSettings | ((current: BridgeSettings) => BridgeSettings)) => {
     setSettingsState((current) => {
       const value = typeof next === 'function' ? next(current) : next;
       if (typeof window !== 'undefined') {
@@ -104,7 +104,7 @@ export function useBridgeSettingsStorage() {
       }
       return value;
     });
-  };
+  }, []);
 
   return {
     settings,

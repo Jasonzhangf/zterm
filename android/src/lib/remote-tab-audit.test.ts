@@ -234,6 +234,83 @@ describe('auditOpenTabsAgainstRemoteSessions', () => {
     expect(pruneSpy).not.toHaveBeenCalled();
   });
 
+  it('canonicalizes stale tabs and session groups before pruning against relay directory truth', async () => {
+    const staleGroup = {
+      id: 'daemon:daemon-old',
+      name: '10.0.2.2',
+      bridgeHost: '10.0.2.2',
+      bridgePort: 8080,
+      daemonHostId: 'daemon-old',
+      authToken: 'token-a',
+      sessionNames: ['my-session'],
+      lastOpenedAt: Date.now(),
+      missingSessionNames: [],
+    };
+    const staleTab = {
+      sessionId: 'session-stale',
+      hostId: 'host-stale',
+      connectionName: 'Stale',
+      bridgeHost: '10.0.2.2',
+      bridgePort: 8080,
+      daemonHostId: 'daemon-old',
+      sessionName: 'my-session',
+      authToken: 'token-a',
+      createdAt: Date.now(),
+    };
+    deps.openTabStateRef.current.tabs = [staleTab];
+    deps.sessionGroups = [staleGroup];
+    deps.relayDevices = [{
+      deviceId: 'mac-studio',
+      deviceName: 'Mac Studio',
+      platform: 'darwin',
+      appVersion: '0.1.3',
+      updatedAt: '2026-08-17T00:00:00.000Z',
+      client: { connected: false, lastSeenAt: '2026-08-17T00:00:00.000Z' },
+      daemon: {
+        connected: true,
+        lastSeenAt: '2026-08-17T00:00:00.000Z',
+        hostId: 'mac-studio',
+        version: '0.1.3',
+        endpoints: [{
+          id: 'lan:192.168.0.3:8080',
+          kind: 'lan',
+          host: '192.168.0.3',
+          port: 8080,
+          authToken: 'token-a',
+          authRequired: true,
+          lastSeenAt: '2026-08-17T00:00:00.000Z',
+        }],
+        sessions: [],
+      },
+    }];
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Map([['daemon:mac-studio', ['my-session']]]),
+    );
+
+    vi.resetModules();
+    vi.doMock('./open-tab-restore', () => ({
+      fetchRemoteTmuxSessionNamesByOwner: fetchMock,
+    }));
+    vi.doMock('./runtime-debug', () => ({
+      runtimeDebug: vi.fn(),
+    }));
+
+    const { auditOpenTabsAgainstRemoteSessions: audit } = await import('./remote-tab-audit');
+    await audit('test-reason', deps);
+
+    expect(fetchMock).toHaveBeenCalledWith(expect.objectContaining({
+      targets: [
+        expect.objectContaining({ daemonHostId: 'mac-studio' }),
+        expect.objectContaining({ daemonHostId: 'mac-studio' }),
+      ],
+      relayDevices: deps.relayDevices,
+    }));
+    expect(deps.pruneSessionGroupSelectionToRemoteTruth).toHaveBeenCalledWith(
+      expect.objectContaining({ daemonHostId: 'mac-studio' }),
+      ['my-session'],
+    );
+  });
+
   it('passes current open sessions and mux target manager to remote owner fetch', async () => {
     const tab: PersistedOpenTab = {
       sessionId: 'session-1',

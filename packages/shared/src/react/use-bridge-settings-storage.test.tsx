@@ -125,6 +125,21 @@ describe('useBridgeSettingsStorage', () => {
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.BRIDGE_SETTINGS) || '{}').terminalWidthMode).toBe('mirror-fixed');
   });
 
+  it('keeps the setter identity stable across unrelated renders', () => {
+    const setters: Array<ReturnType<typeof useBridgeSettingsStorage>['setSettings']> = [];
+
+    function Harness() {
+      const { setSettings } = useBridgeSettingsStorage();
+      setters.push(setSettings);
+      return <div />;
+    }
+
+    const view = render(<Harness />);
+    view.rerender(<Harness />);
+
+    expect(setters[0]).toBe(setters[1]);
+  });
+
   it('detects adaptive-phone as the first-launch default on narrow viewports', () => {
     Object.defineProperty(window, 'innerWidth', {
       configurable: true,

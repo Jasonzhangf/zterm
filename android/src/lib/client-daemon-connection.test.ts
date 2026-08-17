@@ -90,4 +90,74 @@ describe('client.daemon_connection interface', () => {
       finalizeFailure,
     });
   });
+
+  it('reuses an OPEN same-target transport instead of building a second socket', () => {
+    const existingSocket = { readyState: WebSocket.OPEN };
+    const openSessionTargetTransport = vi.fn(() => ({ readyState: WebSocket.CONNECTING }) as any);
+    const connection = createClientDaemonConnection({
+      readSessionTransportResource: () => createResource(existingSocket),
+      sendSocketPayload: vi.fn(),
+      openSessionTargetTransport,
+    });
+
+    expect(connection.openSessionTargetTransport?.({
+      sessionId: 'session-1',
+      host: makeHost(),
+      debugScope: 'connect',
+      finalizeFailure: vi.fn(),
+    })).toBe(existingSocket);
+
+    expect(openSessionTargetTransport).not.toHaveBeenCalled();
+  });
+
+  it('reuses a CONNECTING same-target transport instead of building a second socket', () => {
+    const existingSocket = { readyState: WebSocket.CONNECTING };
+    const openSessionTargetTransport = vi.fn(() => ({ readyState: WebSocket.CONNECTING }) as any);
+    const connection = createClientDaemonConnection({
+      readSessionTransportResource: () => createResource(existingSocket),
+      sendSocketPayload: vi.fn(),
+      openSessionTargetTransport,
+    });
+
+    expect(connection.openSessionTargetTransport?.({
+      sessionId: 'session-1',
+      host: makeHost(),
+      debugScope: 'reconnect',
+      finalizeFailure: vi.fn(),
+    })).toBe(existingSocket);
+
+    expect(openSessionTargetTransport).not.toHaveBeenCalled();
+  });
+
+  it('builds a new transport only when the same-target socket is missing or closed', () => {
+    const openSessionTargetTransport = vi.fn(() => ({ readyState: WebSocket.CONNECTING }) as any);
+    const connection = createClientDaemonConnection({
+      readSessionTransportResource: () => createResource({ readyState: WebSocket.CLOSED }),
+      sendSocketPayload: vi.fn(),
+      openSessionTargetTransport,
+    });
+
+    expect(connection.openSessionTargetTransport?.({
+      sessionId: 'session-1',
+      host: makeHost(),
+      debugScope: 'connect',
+      finalizeFailure: vi.fn(),
+    })).toEqual(openSessionTargetTransport.mock.results[0]?.value);
+
+    expect(openSessionTargetTransport).toHaveBeenCalledTimes(1);
+  });
 });
+
+function makeHost() {
+  return {
+    id: 'host-1',
+    createdAt: 1,
+    name: 'Mac Studio',
+    bridgeHost: '100.66.1.82',
+    bridgePort: 3333,
+    sessionName: 'zterm',
+    authType: 'password' as const,
+    tags: [],
+    pinned: false,
+  };
+}

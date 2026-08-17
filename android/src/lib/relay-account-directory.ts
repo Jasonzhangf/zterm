@@ -111,6 +111,79 @@ export interface RelayDirectoryMachineProjection {
   sessions: RelayDirectoryDaemon['sessions'];
 }
 
+export interface RelayDaemonIdentityInput {
+  daemonHostId?: string | null;
+  relayHostId?: string | null;
+  relayDeviceId?: string | null;
+  authToken?: string | null;
+  bridgeHost?: string | null;
+  bridgePort?: number | null;
+}
+
+function normalizeDaemonIdentityText(value: string | null | undefined) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+export function resolveRelayDaemonCanonicalHostId(
+  input: RelayDaemonIdentityInput,
+  devices: TraversalRelayDeviceSnapshot[],
+) {
+  const onlineDevices = devices.filter((device) => (
+    device.daemon.connected
+    && device.daemon.hostId.trim()
+  ));
+  const canonicalHostIds = new Set(onlineDevices.map((device) => device.daemon.hostId.trim()));
+  const candidateHostId = normalizeDaemonIdentityText(input.daemonHostId)
+    || normalizeDaemonIdentityText(input.relayHostId);
+  if (candidateHostId && canonicalHostIds.has(candidateHostId)) {
+    return candidateHostId;
+  }
+
+  const relayDeviceId = normalizeDaemonIdentityText(input.relayDeviceId);
+  if (relayDeviceId) {
+    const matched = onlineDevices.filter((device) => device.deviceId.trim() === relayDeviceId);
+    if (matched.length === 1) {
+      return matched[0]!.daemon.hostId.trim();
+    }
+  }
+
+  const authToken = normalizeDaemonIdentityText(input.authToken);
+  if (authToken) {
+    const matched = new Set<string>();
+    for (const device of onlineDevices) {
+      for (const endpoint of device.daemon.endpoints || []) {
+        if ((endpoint.authToken || '').trim() === authToken) {
+          matched.add(device.daemon.hostId.trim());
+        }
+      }
+    }
+    if (matched.size === 1) {
+      return [...matched][0]!;
+    }
+  }
+
+  const bridgeHost = normalizeDaemonIdentityText(input.bridgeHost);
+  const bridgePort = typeof input.bridgePort === 'number' ? input.bridgePort : 0;
+  if (bridgeHost && bridgePort > 0) {
+    const matched = new Set<string>();
+    for (const device of onlineDevices) {
+      for (const endpoint of device.daemon.endpoints || []) {
+        if (
+          (endpoint.host || '').trim() === bridgeHost
+          && endpoint.port === bridgePort
+        ) {
+          matched.add(device.daemon.hostId.trim());
+        }
+      }
+    }
+    if (matched.size === 1) {
+      return [...matched][0]!;
+    }
+  }
+
+  return null;
+}
+
 function snapshotTruthScore(device: TraversalRelayDeviceSnapshot) {
   return (device.daemon.connected ? 1_000_000 : 0)
     + (device.daemon.sessions?.length || 0) * 1_000

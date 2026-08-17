@@ -1,7 +1,8 @@
 import { runtimeDebug } from './runtime-debug';
 import { fetchRemoteTmuxSessionNamesByOwner } from './open-tab-restore';
 import type { BridgeSettings } from './bridge-settings';
-import type { Host, PersistedOpenTab, Session, SessionGroupHistory } from './types';
+import { resolveRelayDaemonCanonicalHostId } from './relay-account-directory';
+import type { Host, PersistedOpenTab, Session, SessionGroupHistory, TraversalRelayDeviceSnapshot } from './types';
 import type { TerminalMuxTargetClientMessage } from '@zterm/shared/protocol';
 
 export interface RemoteTabAuditDeps {
@@ -9,6 +10,7 @@ export interface RemoteTabAuditDeps {
   sessionGroups: SessionGroupHistory[];
   bridgeSettingsRef: { current: BridgeSettings };
   hostsRef: { current: Host[] };
+  relayDevices?: TraversalRelayDeviceSnapshot[];
   sessionsRef?: { current: Session[] };
   prioritySessionIdsRef?: { current: Array<string | null | undefined> };
   manageTmuxSessionsOnOpenTransport?: (
@@ -27,6 +29,23 @@ function buildAuditOwnerKey(target: Pick<PersistedOpenTab | SessionGroupHistory,
   return ('terminalBackend' in target && target.terminalBackend === 'herdr')
     ? `${ownerKey}::backend:herdr`
     : ownerKey;
+}
+
+function canonicalizeAuditTarget<T extends {
+  daemonHostId?: string;
+  bridgeHost: string;
+  bridgePort: number;
+  authToken?: string;
+}>(target: T, relayDevices: TraversalRelayDeviceSnapshot[]): T {
+  const canonicalDaemonHostId = resolveRelayDaemonCanonicalHostId({
+    daemonHostId: target.daemonHostId,
+    authToken: target.authToken,
+    bridgeHost: target.bridgeHost,
+    bridgePort: target.bridgePort,
+  }, relayDevices);
+  return canonicalDaemonHostId && canonicalDaemonHostId !== target.daemonHostId?.trim()
+    ? { ...target, daemonHostId: canonicalDaemonHostId }
+    : target;
 }
 
 function shouldAuditSessionGroups(reason: string) {
@@ -52,10 +71,14 @@ export async function auditOpenTabsAgainstRemoteSessions(
 
   const auditToken = deps.remoteOpenTabAuditTokenRef.current + 1;
   deps.remoteOpenTabAuditTokenRef.current = auditToken;
+  const canonicalAuditTargets = auditTargets.map((target) => (
+    canonicalizeAuditTarget(target, deps.relayDevices || [])
+  ));
   const sessionNamesByTarget = await fetchRemoteTmuxSessionNamesByOwner({
-    targets: auditTargets,
+    targets: canonicalAuditTargets,
     bridgeSettings: deps.bridgeSettingsRef.current,
     hosts: deps.hostsRef.current,
+    relayDevices: deps.relayDevices,
     openSessions: deps.sessionsRef?.current,
     prioritySessionIds: deps.prioritySessionIdsRef?.current,
     manageTmuxSessionsOnOpenTransport: deps.manageTmuxSessionsOnOpenTransport,
@@ -65,7 +88,7 @@ export async function auditOpenTabsAgainstRemoteSessions(
   }
 
   const prunedOwnerKeys = new Set<string>();
-  for (const target of auditTargets) {
+  for (const target of canonicalAuditTargets) {
     const ownerKey = buildAuditOwnerKey(target);
     if (prunedOwnerKeys.has(ownerKey)) {
       continue;
@@ -86,8 +109,9 @@ export async function auditOpenTabsAgainstRemoteSessions(
     return;
   }
 
-    const missingTabs = currentTabs.filter((tab) => {
-    const remoteSessionNames = sessionNamesByTarget.get(buildAuditOwnerKey(tab));
+  const missingTabs = currentTabs.filter((tab) => {
+    const canonicalTab = canonicalizeAuditTarget(tab, deps.relayDevices || []);
+    const remoteSessionNames = sessionNamesByTarget.get(buildAuditOwnerKey(canonicalTab));
     // If no entry in map at all, or entry is empty array, treat as "unknown" - do NOT close tabs
     if (!remoteSessionNames || remoteSessionNames.length === 0) {
       return false;

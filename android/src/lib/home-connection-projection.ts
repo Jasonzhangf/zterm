@@ -1,5 +1,10 @@
-import { type BridgeServerPreset, type BridgeSettings } from './bridge-settings';
+import {
+  canonicalizeBridgeServerPresets,
+  type BridgeServerPreset,
+  type BridgeSettings,
+} from './bridge-settings';
 import { DEFAULT_BRIDGE_PORT } from './mobile-config';
+import { resolveRelayDaemonCanonicalHostId } from './relay-account-directory';
 import { resolveRelayDeviceBridgeTarget } from './session-picker';
 import { isOnlineTraversalRelayDaemonDevice } from './traversal-relay-devices';
 import type { Host, TraversalRelayDeviceSnapshot } from './types';
@@ -106,13 +111,22 @@ function mergeHomeConnectionRouteCandidates(base: Host, supplement: Host): Host 
   };
 }
 
-function buildHomeConnectionFromPreset(server: BridgeServerPreset): Host | null {
+function buildHomeConnectionFromPreset(
+  server: BridgeServerPreset,
+  relayDevices: TraversalRelayDeviceSnapshot[],
+): Host | null {
   const bridgeHost = server.targetHost?.trim() || '';
   if (!bridgeHost) {
     return null;
   }
   const bridgePort = Number.isFinite(server.targetPort) ? server.targetPort : DEFAULT_BRIDGE_PORT;
-  const daemonHostId = server.relayHostId?.trim() || '';
+  const daemonHostId = resolveRelayDaemonCanonicalHostId({
+    relayHostId: server.relayHostId,
+    relayDeviceId: server.relayDeviceId,
+    authToken: server.authToken,
+    bridgeHost,
+    bridgePort,
+  }, relayDevices) || server.relayHostId?.trim() || '';
   return {
     id: `bridge-preset:${server.id || `${bridgeHost}:${bridgePort}`}`,
     createdAt: 0,
@@ -258,7 +272,23 @@ export function projectHomeSavedConnections(
   };
 
   hosts.forEach(addConnection);
-  const servers: BridgeServerPreset[] = Array.isArray(bridgeSettings.servers) ? [...bridgeSettings.servers] : [];
+  const rawServers: BridgeServerPreset[] = Array.isArray(bridgeSettings.servers) ? [...bridgeSettings.servers] : [];
+  const canonicalizedServers = canonicalizeBridgeServerPresets(rawServers);
+  const rawServerOrder = new Map(rawServers.map((server, index) => [server.id, index]));
+  const servers: BridgeServerPreset[] = [...canonicalizedServers.servers].sort((left, right) => {
+    const leftIndex = rawServerOrder.get(left.id);
+    const rightIndex = rawServerOrder.get(right.id);
+    if (leftIndex !== undefined && rightIndex !== undefined) {
+      return leftIndex - rightIndex;
+    }
+    if (leftIndex !== undefined) {
+      return -1;
+    }
+    if (rightIndex !== undefined) {
+      return 1;
+    }
+    return left.name.localeCompare(right.name);
+  });
   const targetHost = bridgeSettings.targetHost?.trim() || '';
   const targetPort = Number.isFinite(bridgeSettings.targetPort) ? bridgeSettings.targetPort : DEFAULT_BRIDGE_PORT;
 
@@ -276,7 +306,7 @@ export function projectHomeSavedConnections(
   }
 
   for (const server of servers) {
-    const homeConnection = buildHomeConnectionFromPreset(server);
+    const homeConnection = buildHomeConnectionFromPreset(server, relayDevices);
     if (!homeConnection) {
       continue;
     }

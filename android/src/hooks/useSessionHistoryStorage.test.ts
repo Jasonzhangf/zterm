@@ -1,10 +1,49 @@
 // @vitest-environment jsdom
 
-import { act, renderHook } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { useSessionHistoryStorage } from './useSessionHistoryStorage';
+import type { TraversalRelayDeviceSnapshot } from '../lib/types';
 
 describe('useSessionHistoryStorage daemon-first truth', () => {
+  const canonicalRelayDevice = (): TraversalRelayDeviceSnapshot => {
+    const now = new Date().toISOString();
+    return {
+      deviceId: 'mac-studio',
+      deviceName: 'Mac Studio',
+      platform: 'darwin',
+      appVersion: '0.1.3',
+      updatedAt: now,
+      client: { connected: false, lastSeenAt: now },
+      daemon: {
+        connected: true,
+        lastSeenAt: now,
+        hostId: 'mac-studio',
+        version: '0.1.3',
+        endpoints: [
+          {
+            id: 'lan:192.168.0.3:3333',
+            kind: 'lan',
+            host: '192.168.0.3',
+            port: 3333,
+            authToken: 'token-a',
+            authRequired: true,
+            lastSeenAt: now,
+          },
+          {
+            id: 'relay-rtc:mac-studio',
+            kind: 'relay-rtc',
+            relayHostId: 'mac-studio',
+            authToken: 'token-a',
+            authRequired: true,
+            lastSeenAt: now,
+          },
+        ],
+        sessions: [],
+      },
+    };
+  };
+
   beforeEach(() => {
     const storage = new Map<string, string>();
     Object.defineProperty(window, 'localStorage', {
@@ -225,6 +264,107 @@ describe('useSessionHistoryStorage daemon-first truth', () => {
           relayHostId: 'daemon-host-a',
         }),
       ],
+    }));
+  });
+
+  it('merges stale and canonical session groups after relay device truth arrives', async () => {
+    window.localStorage.setItem('zterm:session-groups', JSON.stringify([
+      {
+        id: 'daemon:daemon-old',
+        name: '10.0.2.2',
+        bridgeHost: '10.0.2.2',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-old',
+        terminalBackend: 'tmux',
+        authToken: 'token-a',
+        sessionNames: ['zterm-drawer-b'],
+        missingSessionNames: ['zterm-drawer-b'],
+        lastOpenedAt: 1,
+      },
+      {
+        id: 'daemon:mac-studio',
+        name: '192.168.0.3',
+        bridgeHost: '192.168.0.3',
+        bridgePort: 3333,
+        daemonHostId: 'mac-studio',
+        terminalBackend: 'tmux',
+        authToken: 'token-a',
+        sessionNames: ['zterm'],
+        missingSessionNames: [],
+        lastOpenedAt: 2,
+      },
+    ]));
+
+    const { result } = renderHook(() => useSessionHistoryStorage([canonicalRelayDevice()]));
+
+    await waitFor(() => {
+      expect(result.current.sessionGroups).toEqual([
+        expect.objectContaining({
+          id: 'daemon:mac-studio',
+          daemonHostId: 'mac-studio',
+          sessionNames: expect.arrayContaining(['zterm', 'zterm-drawer-b']),
+          missingSessionNames: ['zterm-drawer-b'],
+        }),
+      ]);
+    });
+
+    const persisted = JSON.parse(window.localStorage.getItem('zterm:session-groups') || '[]');
+    expect(persisted).toEqual([
+      expect.objectContaining({
+        daemonHostId: 'mac-studio',
+        sessionNames: expect.arrayContaining(['zterm', 'zterm-drawer-b']),
+      }),
+    ]);
+  });
+
+  it('keeps stale alias session names when refreshing the canonical group', async () => {
+    window.localStorage.setItem('zterm:session-groups', JSON.stringify([
+      {
+        id: 'daemon:daemon-old',
+        name: '10.0.2.2',
+        bridgeHost: '10.0.2.2',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-old',
+        terminalBackend: 'tmux',
+        authToken: 'token-a',
+        sessionNames: ['zterm-drawer-b'],
+        missingSessionNames: [],
+        lastOpenedAt: 1,
+      },
+      {
+        id: 'daemon:mac-studio',
+        name: '192.168.0.3',
+        bridgeHost: '192.168.0.3',
+        bridgePort: 3333,
+        daemonHostId: 'mac-studio',
+        terminalBackend: 'tmux',
+        authToken: 'token-a',
+        sessionNames: ['zterm'],
+        missingSessionNames: [],
+        lastOpenedAt: 2,
+      },
+    ]));
+
+    const { result } = renderHook(() => useSessionHistoryStorage([canonicalRelayDevice()]));
+    await waitFor(() => {
+      expect(result.current.sessionGroups).toHaveLength(1);
+    });
+
+    act(() => {
+      result.current.setSessionGroupSelection({
+        name: '192.168.0.3',
+        bridgeHost: '192.168.0.3',
+        bridgePort: 3333,
+        daemonHostId: 'mac-studio',
+        terminalBackend: 'tmux',
+        authToken: 'token-a',
+        sessionNames: ['zterm'],
+      });
+    });
+
+    expect(result.current.sessionGroups[0]).toEqual(expect.objectContaining({
+      daemonHostId: 'mac-studio',
+      sessionNames: expect.arrayContaining(['zterm', 'zterm-drawer-b']),
     }));
   });
 

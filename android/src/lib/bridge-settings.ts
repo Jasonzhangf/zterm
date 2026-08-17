@@ -4,6 +4,7 @@ import {
   TERMINAL_SHELL_SKIN_OPTIONS,
   buildDaemonStartCommand,
   buildServerPresetId,
+  canonicalizeBridgeServerPresets,
   describeBridgePresetIdentity,
   formatBridgeTarget,
   getDefaultBridgeServer,
@@ -33,6 +34,7 @@ export {
   setDefaultBridgeServer,
   sortBridgeServers,
   upsertBridgeServer,
+  canonicalizeBridgeServerPresets,
 };
 export type { BridgeServerPreset, BridgeSettings, TerminalShellSkin, TerminalSessionGroupLayoutMode, TraversalRelayClientSettings };
 export type TraversalPath = 'rtc-direct' | 'tailscale' | 'ipv6' | 'ipv4' | 'rtc-relay';
