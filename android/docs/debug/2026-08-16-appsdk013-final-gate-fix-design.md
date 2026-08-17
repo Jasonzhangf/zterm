@@ -161,3 +161,21 @@ Formal fix scope:
   `globalThis` unconditionally and on `window` when present.
 - The next DSH review must run against a clean committed HEAD that contains
   both the source fix and the rebound lifecycle records.
+
+## Main closeout binary divergence (2026-08-17)
+
+Symptom: `pnpm --dir android run test:appsdk-verify` failed with
+`NON_CANONICAL_RECORD_CONTRACT_SET`, while the pinned AppSDK 0.1.3 binary
+returned `ok:true` for the same main tree.
+
+First divergence: the package script delegated directly to PATH. PATH selected
+`/Users/fanzhang/.local/bin/appsdk` 0.1.2 (SHA `3685149e...`), while
+`.appsdk/sdk.lock`, CI, and release require 0.1.3 (SHA `e3c36ae2...`). The 0.1.2
+binary rejects the 0.1.3 canonical record set before the project can enforce
+its pinned compiler digest.
+
+Formal fix: `scripts/verify-appsdk-binary.mjs` resolves the exact PATH binary,
+checks its reported version and bytes against `.appsdk/project.json` and
+`.appsdk/sdk.lock`, and fails before `appsdk verify` on any drift. Package,
+prebuild, CI, and release all use that gate. The AppSDK compiler remains the
+owner of contract validation and lifecycle mutation.

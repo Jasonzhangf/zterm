@@ -28,7 +28,7 @@ jobs:
           echo "$RUNNER_TEMP/appsdk" >> "$GITHUB_PATH"
 
       - name: AppSDK record graph verify
-        run: appsdk verify android
+        run: node android/scripts/verify-appsdk-binary.mjs android && appsdk verify android
 
   repo-layout:
     name: App repo layout gate
