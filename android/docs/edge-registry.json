@@ -3427,6 +3427,11 @@
     },
     {
       "from_module": "client.connection_home",
+      "to_module": "client.settings_update",
+      "status": "active"
+    },
+    {
+      "from_module": "client.connection_home",
       "to_module": "client.runtime",
       "status": "active"
     },
@@ -3693,11 +3698,6 @@
     {
       "from_module": "client.session_runtime",
       "to_module": "client.sparse_buffer",
-      "status": "active"
-    },
-    {
-      "from_module": "client.settings_update",
-      "to_module": "client.connection_home",
       "status": "active"
     },
     {

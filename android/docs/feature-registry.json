@@ -1088,6 +1088,7 @@
         "src/components/tmux/TmuxSessionPickerSheet.test.tsx",
         "src/pages/ConnectionsPage.test.tsx",
         "src/pages/SettingsPage.relay-account.test.tsx",
+        "src/components/settings/connection-config-entries.test.ts",
         "src/pages/ConnectionPropertiesPage.test.tsx"
       ],
       "truth_sources": [
