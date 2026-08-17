@@ -5,8 +5,8 @@
   "experiment_id": "zterm-runtime-architecture-v2-active-v4",
   "phase": "positive_intervention",
   "kind": "positive_test",
-  "source_commit": "fbe665b36664810d21c68db58844db62ca65f69b",
-  "artifact_hash": "sha256:13b9ae081bc5ef69177b6902a220c6af8e466433b5670291d1946679f1e86f4d",
+  "source_commit": "0a6a1d204374bb55db82aa9f66d01765fb6a80db",
+  "artifact_hash": "sha256:75dec58077a00acf1f4f0895c5ad314edbe1411ea6697728b469d8dadbb1fc04",
   "scope": {
     "module_id": "zterm-runtime-v2",
     "feature_id": "zterm_runtime_architecture_v2_appsdk_013_active_v4_final_gates",
@@ -14,16 +14,16 @@
   },
   "producer": {
     "adapter": "vitest",
-    "identity": "codex-zterm-v2-appsdk013-activev4-closeout-positive-20260817T041300Z"
+    "identity": "codex-zterm-v2-appsdk013-activev4-closeout-positive-20260817T054500Z"
   },
   "result": "pass",
   "confidence": 1,
-  "confidence_rationale": "The candidate locks the standard AppSDK gate: test:appsdk-verify returns ok:true with the 0.1.3 binary matching sdk.lock, feature registry 92/92, focused module regression 297/297 with 0 skipped, changed suites 65/65, type-check PASS, prebuild/build PASS, and appsdk compile-module PASS.",
-  "created_at": "2026-08-17T04:13:00Z",
+  "confidence_rationale": "The candidate locks the standard AppSDK gate: test:appsdk-verify returns ok:true with the 0.1.3 binary matching sdk.lock, feature registry 92/92, focused module regression 297/297 with 0 skipped, type-check PASS, full prebuild/build PASS, and appsdk compile-module PASS.",
+  "created_at": "2026-08-17T05:45:00Z",
   "expires_at": "2026-11-14T00:00:00Z",
   "input_hashes": [
-    "sha256:13b9ae081bc5ef69177b6902a220c6af8e466433b5670291d1946679f1e86f4d",
-    "git:fbe665b36664810d21c68db58844db62ca65f69b"
+    "sha256:75dec58077a00acf1f4f0895c5ad314edbe1411ea6697728b469d8dadbb1fc04",
+    "git:0a6a1d204374bb55db82aa9f66d01765fb6a80db"
   ],
   "scope_hash": "sha256:ad06d8f40b865c3b89440b0b0049a7c4a87ae9538a2163f98edf18903f31ac21"
 }

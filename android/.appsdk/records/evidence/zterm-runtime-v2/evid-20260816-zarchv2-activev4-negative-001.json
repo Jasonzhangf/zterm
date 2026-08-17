@@ -5,25 +5,25 @@
   "experiment_id": "zterm-runtime-architecture-v2-active-v4",
   "phase": "negative_intervention",
   "kind": "negative_test",
-  "source_commit": "fbe665b36664810d21c68db58844db62ca65f69b",
-  "artifact_hash": "sha256:13b9ae081bc5ef69177b6902a220c6af8e466433b5670291d1946679f1e86f4d",
+  "source_commit": "0a6a1d204374bb55db82aa9f66d01765fb6a80db",
+  "artifact_hash": "sha256:75dec58077a00acf1f4f0895c5ad314edbe1411ea6697728b469d8dadbb1fc04",
   "scope": {
     "module_id": "zterm-runtime-v2",
     "feature_id": "zterm_runtime_architecture_v2_appsdk_013_active_v4_final_gates",
-    "entrypoint": "git diff 91f69b2..fbe665b -- runtime owned paths"
+    "entrypoint": "git diff 91f69b2..0a6a1d2 --name-only && PATH=<0.1.2 dir> pnpm --dir android run test:appsdk-verify"
   },
   "producer": {
     "adapter": "git",
-    "identity": "codex-zterm-v2-appsdk013-activev4-closeout-negative-20260817T041300Z"
+    "identity": "codex-zterm-v2-appsdk013-activev4-closeout-negative-20260817T054500Z"
   },
   "result": "pass",
   "confidence": 1,
-  "confidence_rationale": "Negative guard confirms the candidate changes no daemon/transport/render/session or business payload semantics. The diff is limited to AppSDK binary lock gate, package/prebuild/CI/release wiring, governance docs, and the compiled artifact; running the standard gate with PATH appsdk 0.1.2 fails before appsdk verify.",
-  "created_at": "2026-08-17T04:13:00Z",
+  "confidence_rationale": "Negative guard confirms the candidate changes no daemon/transport/render/session or business payload semantics. The diff is limited to AppSDK binary lock gate, package/prebuild/CI/release wiring, governance maps/docs, and the compiled artifact; running the standard gate with PATH appsdk 0.1.2 fails before appsdk verify.",
+  "created_at": "2026-08-17T05:45:00Z",
   "expires_at": "2026-11-14T00:00:00Z",
   "input_hashes": [
-    "sha256:13b9ae081bc5ef69177b6902a220c6af8e466433b5670291d1946679f1e86f4d",
-    "git:fbe665b36664810d21c68db58844db62ca65f69b"
+    "sha256:75dec58077a00acf1f4f0895c5ad314edbe1411ea6697728b469d8dadbb1fc04",
+    "git:0a6a1d204374bb55db82aa9f66d01765fb6a80db"
   ],
   "scope_hash": "sha256:ad06d8f40b865c3b89440b0b0049a7c4a87ae9538a2163f98edf18903f31ac21"
 }
