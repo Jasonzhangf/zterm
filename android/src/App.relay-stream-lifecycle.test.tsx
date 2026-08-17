@@ -397,6 +397,19 @@ describe('App relay device stream reconnect lifecycle', () => {
     expect(MockRelayWebSocket.instances).toHaveLength(1);
   });
 
+  it('does not restart the relay device stream when only the settings setter identity changes', { timeout: 10000 }, async () => {
+    const bridgeSettings = makeRelayBridgeSettings(true);
+    const view = render(<AppContent bridgeSettings={bridgeSettings} setBridgeSettings={vi.fn()} />);
+    await waitFor(() => expect(connectRelayDevicesStreamMock).toHaveBeenCalled(), { timeout: 10000 });
+    expect(MockRelayWebSocket.instances).toHaveLength(1);
+
+    view.rerender(<AppContent bridgeSettings={bridgeSettings} setBridgeSettings={vi.fn()} />);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(MockRelayWebSocket.instances).toHaveLength(1);
+    expect(connectRelayDevicesStreamMock).toHaveBeenCalledTimes(1);
+  });
+
   it('refreshes relay account control truth before opening the device stream', { timeout: 10000 }, async () => {
     const staleRelaySettings = {
       ...makeRelayBridgeSettings(true).traversalRelay,

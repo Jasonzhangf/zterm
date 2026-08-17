@@ -264,4 +264,142 @@ describe('bridge-settings helpers', () => {
       buildBridgeServerPresetIdentityId('100.127.23.27', 40807, 'daemon-a'),
     );
   });
+
+  it('migrates one stale daemon preset to the unique device-backed canonical preset', () => {
+    const staleId = buildBridgeServerPresetIdentityId('10.0.2.2', 3333, 'daemon-old');
+    const canonicalId = buildBridgeServerPresetIdentityId('192.168.0.3', 3333, 'mac-studio');
+    const settings = normalizeBridgeSettings({
+      ...baseSettings,
+      targetHost: '192.168.0.3',
+      targetPort: 3333,
+      targetAuthToken: 'token-a',
+      defaultServerId: staleId,
+      servers: [
+        {
+          id: staleId,
+          name: 'Emulator bridge',
+          targetHost: '10.0.2.2',
+          targetPort: 3333,
+          authToken: 'token-a',
+          relayHostId: 'daemon-old',
+        },
+        {
+          id: canonicalId,
+          name: 'Mac Studio',
+          targetHost: '192.168.0.3',
+          targetPort: 3333,
+          authToken: 'token-a',
+          relayHostId: 'mac-studio',
+          relayDeviceId: 'mac-studio',
+        },
+      ],
+    });
+
+    expect(settings.servers).toEqual([
+      expect.objectContaining({
+        id: canonicalId,
+        targetHost: '192.168.0.3',
+        relayHostId: 'mac-studio',
+        relayDeviceId: 'mac-studio',
+      }),
+    ]);
+    expect(settings.defaultServerId).toBe(canonicalId);
+  });
+
+  it('migrates an upserted stale preset to the canonical device-backed daemon identity', () => {
+    const stale = upsertBridgeServer(baseSettings, {
+      name: 'Emulator bridge',
+      targetHost: '10.0.2.2',
+      targetPort: 3333,
+      authToken: 'token-a',
+      relayHostId: 'daemon-old',
+    });
+    const canonical = upsertBridgeServer(stale, {
+      name: 'Mac Studio',
+      targetHost: '192.168.0.3',
+      targetPort: 3333,
+      authToken: 'token-a',
+      relayHostId: 'mac-studio',
+      relayDeviceId: 'mac-studio',
+    });
+
+    expect(canonical.servers).toEqual([
+      expect.objectContaining({
+        targetHost: '192.168.0.3',
+        relayHostId: 'mac-studio',
+        relayDeviceId: 'mac-studio',
+      }),
+    ]);
+    expect(canonical.defaultServerId).toBe(
+      buildBridgeServerPresetIdentityId('192.168.0.3', 3333, 'mac-studio'),
+    );
+  });
+
+  it('uses a self-named relay device host as the canonical identity for duplicate device registrations', () => {
+    const settings = normalizeBridgeSettings({
+      ...baseSettings,
+      targetHost: '192.168.0.3',
+      targetPort: 3333,
+      targetAuthToken: 'token-a',
+      servers: [
+        {
+          id: buildBridgeServerPresetIdentityId('10.0.2.2', 3333, 'daemon-old'),
+          name: 'Stale identity',
+          targetHost: '10.0.2.2',
+          targetPort: 3333,
+          authToken: 'token-a',
+          relayHostId: 'daemon-old',
+          relayDeviceId: 'mac-studio',
+        },
+        {
+          id: buildBridgeServerPresetIdentityId('192.168.0.3', 3333, 'mac-studio'),
+          name: 'Canonical identity',
+          targetHost: '192.168.0.3',
+          targetPort: 3333,
+          authToken: 'token-a',
+          relayHostId: 'mac-studio',
+          relayDeviceId: 'mac-studio',
+        },
+      ],
+    });
+
+    expect(settings.servers).toEqual([
+      expect.objectContaining({
+        targetHost: '192.168.0.3',
+        relayHostId: 'mac-studio',
+        relayDeviceId: 'mac-studio',
+      }),
+    ]);
+  });
+
+  it('does not merge different relay devices that share one daemon auth token', () => {
+    const settings = normalizeBridgeSettings({
+      ...baseSettings,
+      servers: [
+        {
+          id: buildBridgeServerPresetIdentityId('192.168.0.3', 3333, 'daemon-a'),
+          name: 'Daemon A',
+          targetHost: '192.168.0.3',
+          targetPort: 3333,
+          authToken: 'shared-token',
+          relayHostId: 'daemon-a',
+          relayDeviceId: 'device-a',
+        },
+        {
+          id: buildBridgeServerPresetIdentityId('192.168.0.4', 3333, 'daemon-b'),
+          name: 'Daemon B',
+          targetHost: '192.168.0.4',
+          targetPort: 3333,
+          authToken: 'shared-token',
+          relayHostId: 'daemon-b',
+          relayDeviceId: 'device-b',
+        },
+      ],
+    });
+
+    expect(settings.servers.map((server) => server.relayHostId).sort()).toEqual([
+      'daemon-a',
+      'daemon-b',
+    ]);
+  });
 });

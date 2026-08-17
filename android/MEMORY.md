@@ -2572,3 +2572,10 @@ Tags: #mempalace #source-only-search #generated-artifacts #zterm
   required 256-byte literal chunks give only ~5KB/s backend input throughput.
   `long-input-echo` therefore cannot finish its ~360KB lab payload inside the
   30s oracle timeout; there is no daemon/input diff in `d626524..HEAD`.
+
+# 2026-08-17 relay stale host identity migration
+
+- Relay reconnect 根因是客户端持久化里旧 hostId 与 canonical hostId 并存；
+  daemon 配置真源 `/Users/fanzhang/.zterm/config.json` 只有 `mac-studio`。
+- 已确认修复方向：preset/Home/session-history/open-tab/remote-audit 统一
+  canonical host resolution；不同 authToken 或不同 device 不得误并。

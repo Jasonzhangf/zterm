@@ -97,6 +97,13 @@ export function createClientDaemonConnection(options: {
       if (!options.openSessionTargetTransport) {
         throw new Error('client.daemon_connection target transport opener is unavailable');
       }
+      const currentTargetSocket = readSessionTargetSocket(openOptions.sessionId);
+      if (
+        currentTargetSocket
+        && (currentTargetSocket.readyState === WebSocket.OPEN || currentTargetSocket.readyState === WebSocket.CONNECTING)
+      ) {
+        return currentTargetSocket;
+      }
       return options.openSessionTargetTransport(openOptions);
     },
     sendSessionRaw,

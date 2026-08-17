@@ -18,7 +18,7 @@ import { openConnectionsPage, openTerminalPage, type AppPageState } from '../lib
 import { runtimeDebug } from '../lib/runtime-debug';
 import type { OpenTabRuntimeSwitchReason } from '../lib/open-tab-runtime-switch';
 import type { BridgeSettings } from '../lib/bridge-settings';
-import type { Host, PersistedOpenTab, Session, SessionGroupHistory } from '../lib/types';
+import type { Host, PersistedOpenTab, Session, SessionGroupHistory, TraversalRelayDeviceSnapshot } from '../lib/types';
 import { useOpenTabLifecycleEffects, type OpenTabAuditReason } from './useOpenTabLifecycleEffects';
 import { useOpenTabRestoreRuntimeSync } from './useOpenTabRestoreRuntimeSync';
 import { useOpenTabSessionActions } from './useOpenTabSessionActions';
@@ -55,6 +55,7 @@ interface UseOpenTabRuntimeOptions {
   restoreSwitchReason: OpenTabRuntimeSwitchReason;
   sessions: Session[];
   sessionGroups: SessionGroupHistory[];
+  relayDevices?: TraversalRelayDeviceSnapshot[];
   runtimeActiveSessionId: string | null;
   createSession: (
     host: Host,
@@ -143,6 +144,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     restoreSwitchReason,
     sessions,
     sessionGroups,
+    relayDevices = [],
     runtimeActiveSessionId,
     createSession,
     closeSession,
@@ -400,6 +402,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
       sessionGroups,
       bridgeSettingsRef,
       hostsRef,
+      relayDevices,
       sessionsRef,
       prioritySessionIdsRef: {
         current: [terminalActiveSessionIdRef.current, runtimeActiveSessionIdRef.current],
@@ -408,7 +411,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
       remoteOpenTabAuditTokenRef,
       pruneSessionGroupSelectionToRemoteTruth,
     });
-  }, [manageTmuxSessionsOnOpenTransport, pruneSessionGroupSelectionToRemoteTruth, sessionGroups]);
+  }, [manageTmuxSessionsOnOpenTransport, pruneSessionGroupSelectionToRemoteTruth, relayDevices, sessionGroups]);
   useEffect(() => {
     sessionsRef.current = sessions;
     runtimeActiveSessionIdRef.current = runtimeActiveSessionId;

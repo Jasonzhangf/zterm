@@ -14,10 +14,8 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import java.net.Inet4Address;
-import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 
 /**
@@ -51,48 +49,18 @@ public class NetworkIdentityPlugin extends Plugin {
         JSArray interfaces = new JSArray();
         String connectionType = "none";
         boolean connected = false;
-        Network[] networks = cm.getAllNetworks();
         Network activeNetwork = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? cm.getActiveNetwork() : null;
-        if (networks != null) {
-            List<Network> sorted = new ArrayList<>();
-            for (Network network : networks) {
-                sorted.add(network);
-            }
-            sorted.sort((left, right) -> {
-                if (activeNetwork != null && activeNetwork.equals(left) != (activeNetwork.equals(right))) {
-                    return activeNetwork.equals(left) ? -1 : 1;
-                }
-                NetworkCapabilities leftCaps = cm.getNetworkCapabilities(left);
-                NetworkCapabilities rightCaps = cm.getNetworkCapabilities(right);
-                int priority = Integer.compare(transportPriority(leftCaps), transportPriority(rightCaps));
-                if (priority != 0) {
-                    return priority;
-                }
-                return String.valueOf(left).compareTo(String.valueOf(right));
-            });
-            if (activeNetwork != null) {
-                NetworkCapabilities activeCaps = cm.getNetworkCapabilities(activeNetwork);
-                if (activeCaps != null) {
-                    connectionType = classify(activeCaps);
-                }
-            }
-            for (Network network : sorted) {
-                NetworkCapabilities caps = cm.getNetworkCapabilities(network);
-                if (caps == null) {
-                    continue;
-                }
-                String type = classify(caps);
-                if ("none".equals(connectionType)) {
-                    connectionType = type;
-                }
+        if (activeNetwork != null) {
+            NetworkCapabilities activeCaps = cm.getNetworkCapabilities(activeNetwork);
+            if (activeCaps != null) {
+                connectionType = classify(activeCaps);
                 connected = true;
                 JSObject entry = new JSObject();
-                entry.put("name", String.valueOf(network));
-                entry.put("vpn", caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN));
-                entry.put("validated", caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED));
-                entry.put("transport", type);
+                entry.put("vpn", activeCaps.hasTransport(NetworkCapabilities.TRANSPORT_VPN));
+                entry.put("validated", activeCaps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED));
+                entry.put("transport", connectionType);
                 StringBuilder signature = new StringBuilder();
-                LinkProperties link = cm.getLinkProperties(network);
+                LinkProperties link = cm.getLinkProperties(activeNetwork);
                 if (link != null && link.getLinkAddresses() != null) {
                     List<String> addresses = new ArrayList<>();
                     for (LinkAddress linkAddress : link.getLinkAddresses()) {
@@ -130,25 +98,6 @@ public class NetworkIdentityPlugin extends Plugin {
         result.put("connectionType", connectionType);
         result.put("interfaces", interfaces);
         return result;
-    }
-
-    private static int transportPriority(NetworkCapabilities caps) {
-        if (caps == null) {
-            return 100;
-        }
-        if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
-            return 0;
-        }
-        if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
-            return 1;
-        }
-        if (caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) {
-            return 2;
-        }
-        if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) {
-            return 3;
-        }
-        return 4;
     }
 
     private static String classify(NetworkCapabilities caps) {

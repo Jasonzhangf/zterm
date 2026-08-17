@@ -1,9 +1,10 @@
 import type { BridgeSettings } from './bridge-settings';
 import { normalizeOpenTabIntentState } from './open-tab-intent';
+import { resolveRelayDaemonCanonicalHostId } from './relay-account-directory';
 import { buildSessionSemanticOwnerKey, sessionSemanticOwnersMatch } from './session-semantic-identity';
 import { fetchTmuxSessions } from './tmux-sessions';
 import { normalizeRemoteTmuxSessionNames } from './tmux-session-list';
-import type { Host, PersistedOpenTab, Session } from './types';
+import type { Host, PersistedOpenTab, Session, TraversalRelayDeviceSnapshot } from './types';
 import type { TerminalMuxTargetClientMessage } from '@zterm/shared/protocol';
 
 const OPEN_TAB_REMOTE_RESTORE_TIMEOUT_MS = 2500;
@@ -150,6 +151,19 @@ function resolveCanonicalRemoteSessionOwnerHost(
     return null;
   }
   if (endpointOwnerIds.size === 0 && endpointMatches.length !== 1) {
+    const authToken = target.authToken?.trim() || '';
+    if (authToken) {
+      const authMatches = hosts.filter((host) => (
+        (host.authToken || '').trim() === authToken
+        && resolveOwnerHostId(host)
+      ));
+      const authOwnerIds = new Set(authMatches.map(resolveOwnerHostId).filter(Boolean));
+      if (authOwnerIds.size === 1) {
+        return authMatches.reduce<Host | null>((current, candidate) => (
+          pickPreferredOwnerHost(current, candidate as Host)
+        ), null);
+      }
+    }
     return null;
   }
 
@@ -158,9 +172,25 @@ function resolveCanonicalRemoteSessionOwnerHost(
   ), null);
 }
 
+function canonicalizeRemoteSessionOwnerTarget(
+  target: RemoteSessionOwnerTarget,
+  relayDevices: TraversalRelayDeviceSnapshot[],
+) {
+  const canonicalDaemonHostId = resolveRelayDaemonCanonicalHostId({
+    daemonHostId: target.daemonHostId,
+    authToken: target.authToken,
+    bridgeHost: target.bridgeHost,
+    bridgePort: target.bridgePort,
+  }, relayDevices);
+  return canonicalDaemonHostId && canonicalDaemonHostId !== target.daemonHostId?.trim()
+    ? { ...target, daemonHostId: canonicalDaemonHostId }
+    : target;
+}
+
 export function resolveRemoteSessionOwnerTargets(options: {
   targets: Array<Pick<PersistedOpenTab, 'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'authToken' | 'terminalBackend'>>;
   hosts?: Array<Pick<Host, 'daemonHostId' | 'relayHostId' | 'bridgeHost' | 'bridgePort' | 'authToken' | 'terminalBackend' | 'pinned' | 'lastConnected' | 'createdAt'>>;
+  relayDevices?: TraversalRelayDeviceSnapshot[];
 }) {
   const resolvedTargetsByOwner = new Map<string, RemoteSessionOwnerTarget>();
   const preferredHostsByOwner = new Map<string, Pick<Host, 'daemonHostId' | 'relayHostId' | 'bridgeHost' | 'bridgePort' | 'authToken' | 'pinned' | 'lastConnected' | 'createdAt'>>();
@@ -177,14 +207,15 @@ export function resolveRemoteSessionOwnerTargets(options: {
   }
 
   for (const target of options.targets) {
-    const canonicalHost = resolveCanonicalRemoteSessionOwnerHost(target, options.hosts || []);
+    const canonicalTarget = canonicalizeRemoteSessionOwnerTarget(target, options.relayDevices || []);
+    const canonicalHost = resolveCanonicalRemoteSessionOwnerHost(canonicalTarget, options.hosts || []);
     const ownerTarget = canonicalHost ? {
-      daemonHostId: canonicalHost.daemonHostId || canonicalHost.relayHostId || target.daemonHostId,
+      daemonHostId: canonicalHost.daemonHostId || canonicalHost.relayHostId || canonicalTarget.daemonHostId,
       bridgeHost: canonicalHost.bridgeHost,
       bridgePort: canonicalHost.bridgePort,
-      authToken: canonicalHost.authToken || target.authToken,
-      terminalBackend: target.terminalBackend,
-    } : target;
+      authToken: canonicalHost.authToken || canonicalTarget.authToken,
+      terminalBackend: canonicalTarget.terminalBackend,
+    } : canonicalTarget;
     const ownerKey = buildRemoteSessionOwnerKey({
       daemonHostId: ownerTarget.daemonHostId,
       bridgeHost: ownerTarget.bridgeHost,
@@ -197,7 +228,7 @@ export function resolveRemoteSessionOwnerTargets(options: {
     const preferredHost = preferredHostsByOwner.get(ownerKey);
     if (preferredHost) {
       resolvedTargetsByOwner.set(ownerKey, {
-        daemonHostId: preferredHost.daemonHostId || preferredHost.relayHostId || target.daemonHostId,
+        daemonHostId: preferredHost.daemonHostId || preferredHost.relayHostId || canonicalTarget.daemonHostId,
         bridgeHost: preferredHost.bridgeHost,
         bridgePort: preferredHost.bridgePort,
         authToken: preferredHost.authToken || ownerTarget.authToken,
@@ -221,6 +252,7 @@ export async function fetchRemoteTmuxSessionNamesByOwner(options: {
   targets: Array<Pick<PersistedOpenTab, 'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'authToken' | 'terminalBackend'>>;
   bridgeSettings: TraversalSettings;
   hosts?: Array<Pick<Host, 'daemonHostId' | 'relayHostId' | 'bridgeHost' | 'bridgePort' | 'authToken' | 'terminalBackend' | 'pinned' | 'lastConnected' | 'createdAt'>>;
+  relayDevices?: TraversalRelayDeviceSnapshot[];
   openSessions?: Array<Pick<Session, 'id' | 'state' | 'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'terminalBackend' | 'createdAt'>>;
   prioritySessionIds?: Array<string | null | undefined>;
   manageTmuxSessionsOnOpenTransport?: (
@@ -233,6 +265,7 @@ export async function fetchRemoteTmuxSessionNamesByOwner(options: {
   const resolvedTargets = resolveRemoteSessionOwnerTargets({
     targets: options.targets,
     hosts: options.hosts,
+    relayDevices: options.relayDevices,
   });
 
   const fetchResults = await Promise.all(resolvedTargets.map(async (target) => {
@@ -343,6 +376,7 @@ export async function filterRestorableOpenTabsByRemoteTmuxSessions(options: {
   tabs: PersistedOpenTab[];
   bridgeSettings: TraversalSettings;
   hosts?: Array<Pick<Host, 'daemonHostId' | 'relayHostId' | 'bridgeHost' | 'bridgePort' | 'authToken' | 'terminalBackend' | 'pinned' | 'lastConnected' | 'createdAt'>>;
+  relayDevices?: TraversalRelayDeviceSnapshot[];
 }): Promise<RestoreTabAvailabilityResult> {
   if (options.tabs.length === 0) {
     return {
@@ -355,6 +389,7 @@ export async function filterRestorableOpenTabsByRemoteTmuxSessions(options: {
     targets: options.tabs,
     bridgeSettings: options.bridgeSettings,
     hosts: options.hosts,
+    relayDevices: options.relayDevices,
   });
 
   return filterRestorableOpenTabsByRemoteSessionNames({
@@ -368,11 +403,13 @@ export async function resolveRemoteRestorableOpenTabState(options: {
   activeSessionId: string | null;
   bridgeSettings: TraversalSettings;
   hosts?: Array<Pick<Host, 'daemonHostId' | 'relayHostId' | 'bridgeHost' | 'bridgePort' | 'authToken' | 'terminalBackend' | 'pinned' | 'lastConnected' | 'createdAt'>>;
+  relayDevices?: TraversalRelayDeviceSnapshot[];
 }): Promise<RemoteRestorableOpenTabState> {
   const availability = await filterRestorableOpenTabsByRemoteTmuxSessions({
     tabs: options.tabs,
     bridgeSettings: options.bridgeSettings,
     hosts: options.hosts,
+    relayDevices: options.relayDevices,
   });
   const normalizedState = normalizeOpenTabIntentState(
     availability.restorableTabs,

@@ -225,6 +225,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
   const [pickerInitialSessions, setPickerInitialSessions] = useState<string[]>([]);
   const [pickerScopePaneId, setPickerScopePaneId] = useState<string | null>(null);
   const sessionGroupsRef = useRef(sessionGroups);
+  const relayDevicesRef = useRef(relayDevices);
   const openDraftAsSessionRef = useRef<((host: HostDraft, options?: {
     rememberName?: string;
     activate?: boolean;
@@ -249,6 +250,10 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
   useEffect(() => {
     sessionGroupsRef.current = sessionGroups;
   }, [sessionGroups]);
+
+  useEffect(() => {
+    relayDevicesRef.current = relayDevices;
+  }, [relayDevices]);
 
   const openDraftAsSession = useCallback((
     draft: HostDraft,
@@ -833,7 +838,11 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
   const handleOpenSavedConnection = useCallback((host: Host) => {
     const target = buildBridgeTargetFromHost(host);
     const existingSessionName = host.sessionName.trim();
-    const historyGroup = resolveSessionGroupForTarget(sessionGroupsRef.current, target);
+    const historyGroup = resolveSessionGroupForTarget(
+      sessionGroupsRef.current,
+      target,
+      relayDevicesRef.current,
+    );
     const historySessionName = historyGroup?.lastOpenedSessionName?.trim() || '';
     const preferredExistingSessionName = existingSessionName || historySessionName;
     setPickerMode(null);

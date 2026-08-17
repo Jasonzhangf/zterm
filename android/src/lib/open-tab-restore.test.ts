@@ -433,6 +433,63 @@ describe('open-tab restore truth', () => {
     );
   });
 
+  it('canonicalizes a stale target from the relay account directory before remote tmux audit', async () => {
+    fetchTmuxSessionsMock.mockResolvedValueOnce(['zterm']);
+
+    const { fetchRemoteTmuxSessionNamesByOwner } = await import('./open-tab-restore');
+
+    const result = await fetchRemoteTmuxSessionNamesByOwner({
+      targets: [{
+        bridgeHost: '10.0.2.2',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-old',
+        authToken: 'token-a',
+      }],
+      relayDevices: [{
+        deviceId: 'mac-studio',
+        deviceName: 'Mac Studio',
+        platform: 'darwin',
+        appVersion: '0.1.3',
+        updatedAt: '2026-08-17T00:00:00.000Z',
+        client: { connected: false, lastSeenAt: '2026-08-17T00:00:00.000Z' },
+        daemon: {
+          connected: true,
+          lastSeenAt: '2026-08-17T00:00:00.000Z',
+          hostId: 'mac-studio',
+          version: '0.1.3',
+          endpoints: [{
+            id: 'lan:192.168.0.3:3333',
+            kind: 'lan',
+            host: '192.168.0.3',
+            port: 3333,
+            authToken: 'token-a',
+            authRequired: true,
+            lastSeenAt: '2026-08-17T00:00:00.000Z',
+          }],
+          sessions: [],
+        },
+      }],
+      bridgeSettings: {
+        signalUrl: '',
+        turnServerUrl: '',
+        turnUsername: '',
+        turnCredential: '',
+        transportMode: 'auto',
+        traversalRelay: undefined,
+      },
+    });
+
+    expect(result.get('daemon:mac-studio')).toEqual(['zterm']);
+    expect(fetchTmuxSessionsMock).toHaveBeenCalledTimes(1);
+    expect(fetchTmuxSessionsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        daemonHostId: 'mac-studio',
+        relayHostId: 'mac-studio',
+      }),
+      expect.any(Object),
+    );
+  });
+
   it('uses an existing open mux target transport for remote tmux owner audit', async () => {
     const manageTmuxSessionsOnOpenTransport = vi.fn(async () => ['zterm', 'alpha']);
 

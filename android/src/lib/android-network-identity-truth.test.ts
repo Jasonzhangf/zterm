@@ -12,6 +12,8 @@ describe('Android network identity plugin', () => {
     expect(activity).toContain('registerPlugin(NetworkIdentityPlugin.class)');
     expect(plugin).toContain('@CapacitorPlugin(name = "NetworkIdentity")');
     expect(plugin).toContain('public void snapshot(PluginCall call)');
+    expect(plugin).toContain('cm.getActiveNetwork()');
+    expect(plugin).not.toContain('cm.getAllNetworks()');
     expect(plugin).toContain('TRANSPORT_WIFI');
     expect(plugin).toContain('TRANSPORT_CELLULAR');
     expect(plugin).toContain('TRANSPORT_VPN');

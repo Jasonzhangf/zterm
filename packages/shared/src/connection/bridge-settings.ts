@@ -219,6 +219,163 @@ export function sortBridgeServers(servers: BridgeServerPreset[]) {
   });
 }
 
+export interface CanonicalizedBridgeServers {
+  servers: BridgeServerPreset[];
+  idAliases: Map<string, string>;
+}
+
+function canonicalBridgeServerAliases(servers: BridgeServerPreset[]) {
+  const hostIdAliases = new Map<string, string>();
+  const deviceIdAliases = new Map<string, string>();
+  const serversByAuthToken = new Map<string, BridgeServerPreset[]>();
+  const serversByRelayDeviceId = new Map<string, BridgeServerPreset[]>();
+
+  for (const server of servers) {
+    const authToken = server.authToken?.trim() || '';
+    const relayDeviceId = server.relayDeviceId?.trim() || '';
+    const relayHostId = resolveBridgePresetDaemonHostId(server);
+    if (authToken && relayHostId) {
+      const existing = serversByAuthToken.get(authToken) || [];
+      existing.push(server);
+      serversByAuthToken.set(authToken, existing);
+    }
+    if (relayDeviceId && relayHostId) {
+      const existing = serversByRelayDeviceId.get(relayDeviceId) || [];
+      existing.push(server);
+      serversByRelayDeviceId.set(relayDeviceId, existing);
+    }
+  }
+
+  for (const group of serversByAuthToken.values()) {
+    const relayHostIds = [...new Set(group.map((server) => resolveBridgePresetDaemonHostId(server)))];
+    if (relayHostIds.length <= 1) {
+      continue;
+    }
+    const deviceBackedHostIds = new Set(
+      group
+        .filter((server) => server.relayDeviceId?.trim())
+        .map((server) => resolveBridgePresetDaemonHostId(server)),
+    );
+    if (deviceBackedHostIds.size !== 1) {
+      continue;
+    }
+    const canonicalHostId = [...deviceBackedHostIds][0]!;
+    for (const relayHostId of relayHostIds) {
+      if (relayHostId !== canonicalHostId) {
+        hostIdAliases.set(relayHostId, canonicalHostId);
+      }
+    }
+  }
+
+  for (const group of serversByRelayDeviceId.values()) {
+    const relayHostIds = [...new Set(group.map((server) => resolveBridgePresetDaemonHostId(server)))];
+    const relayDeviceId = group[0]!.relayDeviceId!.trim();
+    if (relayHostIds.length !== 1) {
+      const selfNamedHostIds = relayHostIds.filter((hostId) => hostId === relayDeviceId);
+      if (selfNamedHostIds.length === 1) {
+        const canonicalHostId = selfNamedHostIds[0]!;
+        for (const relayHostId of relayHostIds) {
+          if (relayHostId !== canonicalHostId) {
+            hostIdAliases.set(relayHostId, canonicalHostId);
+          }
+        }
+        deviceIdAliases.set(relayDeviceId, canonicalHostId);
+      }
+      continue;
+    }
+    deviceIdAliases.set(relayDeviceId, relayHostIds[0]!);
+  }
+
+  return { hostIdAliases, deviceIdAliases };
+}
+
+function bridgeServerCanonicalityScore(server: BridgeServerPreset) {
+  const relayDeviceId = server.relayDeviceId?.trim() || '';
+  const relayHostId = resolveBridgePresetDaemonHostId(server);
+  return (relayDeviceId ? 1 : 0) + (relayDeviceId && relayHostId === relayDeviceId ? 2 : 0);
+}
+
+export function canonicalizeBridgeServerPresets(servers: BridgeServerPreset[]): CanonicalizedBridgeServers {
+  const { hostIdAliases, deviceIdAliases } = canonicalBridgeServerAliases(servers);
+  const nextById = new Map<string, BridgeServerPreset>();
+  const scoreById = new Map<string, number>();
+  const idAliases = new Map<string, string>();
+  const aliasEntries: Array<{
+    sourceId: string;
+    canonicalHostId: string;
+    authToken: string;
+    relayDeviceId: string;
+    targetHost: string;
+    targetPort: number;
+  }> = [];
+
+  for (const server of servers) {
+    const relayDeviceId = server.relayDeviceId?.trim() || '';
+    const currentHostId = resolveBridgePresetDaemonHostId(server);
+    const aliasCanonicalHostId = (
+      hostIdAliases.get(currentHostId)
+      || (relayDeviceId ? deviceIdAliases.get(relayDeviceId) : '')
+      || ''
+    ).trim();
+    if (aliasCanonicalHostId && aliasCanonicalHostId !== currentHostId) {
+      aliasEntries.push({
+        sourceId: server.id,
+        canonicalHostId: aliasCanonicalHostId,
+        authToken: server.authToken?.trim() || '',
+        relayDeviceId,
+        targetHost: server.targetHost,
+        targetPort: server.targetPort,
+      });
+      continue;
+    }
+    const canonicalHostId = (
+      aliasCanonicalHostId
+      || currentHostId
+    ).trim();
+    const canonicalized = canonicalHostId && canonicalHostId !== currentHostId
+      ? {
+          ...server,
+          relayHostId: canonicalHostId,
+          id: buildBridgeServerPresetIdentityId(server.targetHost, server.targetPort, canonicalHostId),
+        }
+      : server;
+    const canonicalityScore = bridgeServerCanonicalityScore(server);
+    idAliases.set(server.id, canonicalized.id);
+
+    const existing = nextById.get(canonicalized.id);
+    if (!existing) {
+      nextById.set(canonicalized.id, canonicalized);
+      scoreById.set(canonicalized.id, canonicalityScore);
+      continue;
+    }
+    if (canonicalityScore > (scoreById.get(canonicalized.id) || 0)) {
+      nextById.set(canonicalized.id, canonicalized);
+      scoreById.set(canonicalized.id, canonicalityScore);
+    }
+  }
+
+  for (const entry of aliasEntries) {
+    const canonicalServers = [...nextById.values()].filter((server) => (
+      resolveBridgePresetDaemonHostId(server) === entry.canonicalHostId
+      && (!entry.authToken || server.authToken?.trim() === entry.authToken)
+    ));
+    const preferred = canonicalServers.find((server) => (
+      entry.relayDeviceId
+      && server.relayDeviceId?.trim() === entry.relayDeviceId
+    ));
+    idAliases.set(
+      entry.sourceId,
+      (preferred || canonicalServers[0])?.id
+        || buildBridgeServerPresetIdentityId(entry.targetHost, entry.targetPort, entry.canonicalHostId),
+    );
+  }
+
+  return {
+    servers: sortBridgeServers([...nextById.values()]),
+    idAliases,
+  };
+}
+
 export function upsertBridgeServer(
   settings: BridgeSettings,
   input: {
@@ -260,11 +417,15 @@ export function upsertBridgeServer(
   };
 
   const existing = settings.servers.find((server) => server.id === id);
-  const servers = sortBridgeServers(
+  const canonicalized = canonicalizeBridgeServerPresets(
     existing
       ? settings.servers.map((server) => (server.id === id ? { ...server, ...preset } : server))
       : [...settings.servers, preset],
   );
+  const servers = canonicalized.servers;
+  const canonicalDefaultServerId = settings.defaultServerId
+    ? canonicalized.idAliases.get(settings.defaultServerId) || settings.defaultServerId
+    : id;
 
   return {
     ...settings,
@@ -272,7 +433,7 @@ export function upsertBridgeServer(
     targetPort,
     targetAuthToken: authToken,
     servers,
-    defaultServerId: settings.defaultServerId || id,
+    defaultServerId: canonicalDefaultServerId,
   };
 }
 
@@ -411,10 +572,12 @@ export function normalizeBridgeSettings(input: unknown): BridgeSettings {
       || item === 'rtc-relay'
     ))
     : undefined;
+  const canonicalizedServers = canonicalizeBridgeServerPresets(servers);
+  const canonicalServers = canonicalizedServers.servers;
   const mergedServers =
-    targetHost && servers.every((server) => server.targetHost !== targetHost || server.targetPort !== targetPort)
+    targetHost && canonicalServers.every((server) => server.targetHost !== targetHost || server.targetPort !== targetPort)
       ? sortBridgeServers([
-          ...servers,
+          ...canonicalServers,
           {
             id: buildBridgeServerPresetIdentityId(targetHost, targetPort),
             name: targetHost,
@@ -423,12 +586,16 @@ export function normalizeBridgeSettings(input: unknown): BridgeSettings {
             authToken: targetAuthToken || '',
           },
         ])
-      : sortBridgeServers(servers);
+      : canonicalServers;
 
   const normalizedDefaultServerId =
     typeof candidate.defaultServerId === 'string' && candidate.defaultServerId.trim()
       ? (() => {
           const rawDefaultServerId = candidate.defaultServerId.trim();
+          const canonicalDefaultServerId = canonicalizedServers.idAliases.get(rawDefaultServerId);
+          if (canonicalDefaultServerId && mergedServers.some((server) => server.id === canonicalDefaultServerId)) {
+            return canonicalDefaultServerId;
+          }
           if (mergedServers.some((server) => server.id === rawDefaultServerId)) {
             return rawDefaultServerId;
           }

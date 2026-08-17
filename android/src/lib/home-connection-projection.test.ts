@@ -161,6 +161,51 @@ describe('home connection projection relay route visibility', () => {
     ]));
   });
 
+  it('projects one canonical Home row when stored bridge presets still use a stale relay host id', () => {
+    const relayDevice: TraversalRelayDeviceSnapshot = {
+      ...makeRelayDevice(),
+      daemon: {
+        ...makeRelayDevice().daemon,
+        endpoints: (makeRelayDevice().daemon.endpoints || []).map((endpoint) => ({
+          ...endpoint,
+          authToken: 'token-a',
+        })),
+      },
+    };
+    const settings: BridgeSettings = {
+      ...bridgeSettings,
+      servers: [
+        {
+          id: '10.0.2.2:3333::daemon:daemon-old',
+          name: 'Emulator bridge',
+          targetHost: '10.0.2.2',
+          targetPort: 3333,
+          authToken: 'token-a',
+          relayHostId: 'daemon-old',
+        },
+        {
+          id: '192.168.0.3:3333::daemon:mac-studio',
+          name: 'Mac Studio',
+          targetHost: '192.168.0.3',
+          targetPort: 3333,
+          authToken: 'token-a',
+          relayHostId: 'mac-studio',
+          relayDeviceId: 'mac-studio',
+        },
+      ],
+    };
+
+    const projected = projectHomeSavedConnections([], settings, [relayDevice]);
+
+    expect(projected).toHaveLength(1);
+    expect(projected[0]).toEqual(expect.objectContaining({
+      daemonHostId: 'mac-studio',
+      relayHostId: 'mac-studio',
+      relayDeviceId: 'device-mac',
+      bridgeHost: '192.168.0.3',
+    }));
+  });
+
   it('opens the merged Home server target through the automatic route order', () => {
     const projected = projectHomeSavedConnections(
       [makeSavedHost()],

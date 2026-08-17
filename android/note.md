@@ -7302,3 +7302,17 @@ if (bufferedBytes >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES) {
   after Jason authorization.
 - Decision still open: A = restore global v0.1.2; B = reviewed v0.1.3
   migration. DSH `dsh-review` MCP was not exposed in this continuation.
+
+# 2026-08-17 relay stale host identity migration
+
+- 根因：同一 daemon 同时存在旧 `daemon-Macstudio.local-...` 与 canonical
+  `mac-studio`，客户端按两条 hostId 创建 relay transport，旧身份失败后持续
+  reconnect。daemon 配置真源只有 `mac-studio`。
+- 修复：bridge presets 按 authToken + 唯一 device-backed host 归并，Home
+  projection / session history / open-tab restore / remote audit 都先解析
+  canonical host；同一 relayDeviceId 下 self-named host 作为 canonical。
+- 验证：type-check、feature-registry 92/92、受影响 83/83、prebuild 主要闸门
+  PASS；模拟器安装 `0.1.3.2653` 后 Home 只剩 1 个 canonical server，会话组只
+  有 `daemon:mac-studio`，`/ws/client` 只出现 `hostId=mac-studio`。
+- 未完成：DSH MCP 本会话未暴露；构建脚本 publish Relay 步骤失败，未确认
+  OTA 远端是否已更新，需要 Jason 决定是否补发。

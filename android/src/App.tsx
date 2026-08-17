@@ -256,7 +256,7 @@ export function AppContent({
   const { shortcutActions, setShortcutActions } = useShortcutActionStorage();
   const shortcutFrequencyStorage = useShortcutFrequencyStorage();
   const { drafts: sessionDrafts, setDraft: setSessionDraft, clearDraft: clearSessionDraft, pruneDrafts } = useSessionDraftStorage();
-  const { sessionGroups, setSessionGroupSelection, markSessionGroupEntered, deleteSessionGroup, pruneSessionGroupSelectionToRemoteTruth } = useSessionHistoryStorage();
+  const { sessionGroups, setSessionGroupSelection, markSessionGroupEntered, deleteSessionGroup, pruneSessionGroupSelectionToRemoteTruth } = useSessionHistoryStorage(relayDevices);
   const sessions = state.sessions;
 
   useBackgroundLiveSessionHandoff({
@@ -450,6 +450,7 @@ export function AppContent({
     restoreSwitchReason: pageState.kind === 'terminal' ? 'explicit-resume' : 'restore-sync',
     sessions,
     sessionGroups,
+    relayDevices,
     runtimeActiveSessionId: state.activeSessionId,
     createSession,
     closeSession,
