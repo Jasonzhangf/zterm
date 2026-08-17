@@ -977,6 +977,69 @@ describe('TerminalPage portrait session drawer', () => {
     expect(drawerList.getAllByText('freehand')).toHaveLength(1);
   });
 
+  it('deduplicates drawer rows that share a physical endpoint and session name when identity keys differ', async () => {
+    const directSession = makeSession('direct-rcc');
+    directSession.bridgeHost = '100.66.1.82';
+    directSession.bridgePort = 3333;
+    directSession.daemonHostId = undefined;
+    directSession.sessionName = 'rcc';
+    directSession.title = 'rcc';
+    directSession.connectionName = '100.66.1.82';
+
+    render(
+      <TerminalPage
+        sessions={[directSession]}
+        activeSession={directSession}
+        sessionGroups={[
+          {
+            id: 'group-direct-mac-studio',
+            name: '100.66.1.82',
+            bridgeHost: '100.66.1.82',
+            bridgePort: 3333,
+            sessionNames: ['rcc'],
+            lastOpenedAt: 2,
+          },
+          {
+            id: 'daemon:mac-studio',
+            name: 'Mac Studio',
+            bridgeHost: '100.66.1.82',
+            bridgePort: 3333,
+            daemonHostId: 'mac-studio',
+            sessionNames: ['rcc'],
+            lastOpenedAt: 1,
+          },
+        ]}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onOpenDrawerRemoteSession={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    const swipeSurface = document.querySelector('[data-testid^="terminal-swipe-surface-"][data-swipe-enabled="true"]') as HTMLElement | null;
+    expect(swipeSurface).toBeTruthy();
+    fireEvent.touchStart(swipeSurface!, { touches: [{ clientX: 56, clientY: 200 }] });
+    fireEvent.touchMove(swipeSurface!, {
+      touches: [{ clientX: 236, clientY: 206 }],
+      cancelable: true,
+    });
+    fireEvent.touchEnd(swipeSurface!, { changedTouches: [{ clientX: 236, clientY: 206 }] });
+
+    await waitFor(() => expect(screen.getByTestId('terminal-session-drawer-list')).toBeTruthy());
+    const drawerList = within(screen.getByTestId('terminal-session-drawer-list'));
+    expect(drawerList.getAllByTestId(/terminal-session-drawer-row-/)).toHaveLength(1);
+    expect(drawerList.getAllByText('rcc')).toHaveLength(1);
+  });
+
   it('uses saved server daemon identity aliases when Relay directory only exposes rtc endpoint', async () => {
     const directSession = makeSession('direct-rcc');
     directSession.bridgeHost = '100.66.1.82';
@@ -2067,6 +2130,7 @@ describe('TerminalPage portrait session drawer', () => {
 
     await waitFor(() => expect(screen.getByText('remote-beta')).toBeTruthy());
     fireEvent.click(screen.getByTestId('terminal-session-drawer-close-remote:daemon:daemon-a::session:remote-beta'));
+    fireEvent.click(await screen.findByTestId('zterm-dialog-confirm'));
 
     expect(onCloseSession).not.toHaveBeenCalled();
     expect(onCloseDrawerRemoteSession).toHaveBeenCalledWith(
@@ -2087,6 +2151,7 @@ describe('TerminalPage portrait session drawer', () => {
     const sessions = [makeSession('s1')];
     sessions[0]!.daemonHostId = 'daemon-a';
     const onCloseSession = vi.fn();
+    const onSwitchSession = vi.fn();
     const onCloseDrawerRemoteSession = vi.fn(async () => undefined);
 
     render(
@@ -2103,7 +2168,7 @@ describe('TerminalPage portrait session drawer', () => {
           lastOpenedAt: 1,
         }]}
         activeSession={sessions[0]}
-        onSwitchSession={vi.fn()}
+        onSwitchSession={onSwitchSession}
         onMoveSession={vi.fn()}
         onRenameSession={vi.fn()}
         onCloseSession={onCloseSession}
@@ -2131,6 +2196,7 @@ describe('TerminalPage portrait session drawer', () => {
 
     await waitFor(() => expect(screen.getByText('tab-s1')).toBeTruthy());
     fireEvent.click(screen.getByTestId('terminal-session-drawer-close-s1'));
+    fireEvent.click(await screen.findByTestId('zterm-dialog-confirm'));
 
     expect(onCloseDrawerRemoteSession).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -2144,17 +2210,18 @@ describe('TerminalPage portrait session drawer', () => {
       }),
       'tmux-s1',
     );
-    await waitFor(() => expect(onCloseSession).toHaveBeenCalledWith('s1', 'terminal-session-drawer-remote-close-success'));
+    await waitFor(() => expect(screen.getByTestId('terminal-session-drawer').getAttribute('aria-hidden')).toBe('true'));
+    expect(onSwitchSession).not.toHaveBeenCalled();
+    expect(onCloseSession).not.toHaveBeenCalled();
   });
 
-  it('does not close the local tab when opened catalog remote kill fails', async () => {
+  it('shows the product dialog when opened catalog remote kill fails', async () => {
     const sessions = [makeSession('s1')];
     sessions[0]!.daemonHostId = 'daemon-a';
     const onCloseSession = vi.fn();
     const onCloseDrawerRemoteSession = vi.fn(async () => {
       throw new Error('remote kill failed');
     });
-    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => undefined);
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
     render(
@@ -2198,8 +2265,10 @@ describe('TerminalPage portrait session drawer', () => {
 
     await waitFor(() => expect(screen.getByText('tab-s1')).toBeTruthy());
     fireEvent.click(screen.getByTestId('terminal-session-drawer-close-s1'));
+    fireEvent.click(await screen.findByTestId('zterm-dialog-confirm'));
 
-    await waitFor(() => expect(alertSpy).toHaveBeenCalledWith('remote kill failed'));
+    await waitFor(() => expect(screen.getByTestId('zterm-dialog-message').textContent).toContain('无法关闭 tmux-s1'));
+    expect(screen.getByTestId('zterm-dialog-detail').textContent).toContain('remote kill failed');
     expect(consoleErrorSpy).toHaveBeenCalled();
     expect(onCloseSession).not.toHaveBeenCalled();
   });

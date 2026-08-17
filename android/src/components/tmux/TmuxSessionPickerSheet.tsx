@@ -11,10 +11,11 @@ import { useTraversalRelayDaemonDevices } from '../../hooks/useTraversalRelayDae
 import { DEFAULT_BRIDGE_PORT } from '../../lib/mobile-config';
 import { mobileTheme } from '../../lib/mobile-ui';
 import { RenameDialog } from '../terminal/RenameDialog';
+import { ZtermDialog } from '../terminal/ZtermDialog';
 import { formatTargetBadge, isLikelyTailscaleHost } from '../../lib/network-target';
 import { normalizeBridgeTarget, resolveRelayDeviceBridgeTarget } from '../../lib/session-picker';
 import { normalizeRemoteTmuxSessionNames } from '../../lib/tmux-session-list';
-import { type BridgeTarget, createTmuxSession, fetchTmuxSessions, killTmuxSession, renameTmuxSession } from '../../lib/tmux-sessions';
+import { type BridgeTarget, createTmuxSession, fetchTmuxSessions, renameTmuxSession } from '../../lib/tmux-sessions';
 import type { ConfigShareQuickAction, ConfigShareShortcutAction, Host } from '../../lib/types';
 import {
   formatRefreshAge,
@@ -56,6 +57,7 @@ interface TmuxSessionPickerSheetProps {
   onOpenTmuxSession: (target: BridgeTarget, sessionName: string) => void;
   onOpenMultipleTmuxSessions: (target: BridgeTarget, sessionNames: string[]) => void;
   onSelectCleanSession: (target: BridgeTarget) => void;
+  onKillTmuxSession: (target: BridgeTarget, sessionName: string) => Promise<void>;
   onImportConnectionLink?: (input: string) => { ok: true; name: string } | { ok: false; error: string };
   onSaveGroupSelection?: (target: BridgeTarget, sessionNames: string[]) => void;
   onRemoteSessionsRefreshed?: (target: BridgeTarget, sessionNames: string[]) => void;
@@ -97,6 +99,7 @@ export function TmuxSessionPickerSheet({
   onOpenTmuxSession,
   onOpenMultipleTmuxSessions,
   onSelectCleanSession,
+  onKillTmuxSession,
   onImportConnectionLink,
   onSaveGroupSelection,
   onRemoteSessionsRefreshed,
@@ -122,6 +125,8 @@ export function TmuxSessionPickerSheet({
     currentName: string;
   } | null>(null);
   const [renameErrorMessage, setRenameErrorMessage] = useState('');
+  const [killConfirmSession, setKillConfirmSession] = useState<string | null>(null);
+  const [killBusy, setKillBusy] = useState(false);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null);
   const [clockTick, setClockTick] = useState(0);
   const [connectionImportInput, setConnectionImportInput] = useState('');
@@ -474,21 +479,28 @@ export function TmuxSessionPickerSheet({
   };
 
   const handleKillSession = async (sessionName: string) => {
-    const confirmed = window.confirm(`Kill tmux session ${sessionName}?`);
-    if (!confirmed) {
+    setKillConfirmSession(sessionName);
+    setActionErrorMessage('');
+  };
+
+  const handleConfirmKillSession = async () => {
+    const sessionName = killConfirmSession;
+    if (!sessionName) {
       return;
     }
-
+    setKillBusy(true);
     setBusyAction(`kill:${sessionName}`);
     setActionErrorMessage('');
     try {
-      await killTmuxSession(selectedTarget, bridgeSettings, sessionName);
+      await onKillTmuxSession(selectedTarget, sessionName);
       setSelectedSessions((current) => current.filter((item) => item !== sessionName));
       setActionErrorMessage('');
       await handleRefreshNow();
     } catch (error) {
       setActionErrorMessage(error instanceof Error ? error.message : String(error));
     } finally {
+      setKillConfirmSession(null);
+      setKillBusy(false);
       setBusyAction(null);
     }
   };
@@ -1308,6 +1320,7 @@ export function TmuxSessionPickerSheet({
                 )}
                 {missingRemote ? null : (
                 <button
+                  aria-label={row.openTab ? undefined : `关闭 session ${sessionName}`}
                   onClick={() => {
                     if (row.openTab) {
                       onCloseOpenTab?.(row.openTab.id, 'quick-tab-picker-close-button');
@@ -1473,6 +1486,20 @@ export function TmuxSessionPickerSheet({
           setRenameErrorMessage('');
         }}
         onSubmit={submitRename}
+      />
+      <ZtermDialog
+        open={killConfirmSession !== null}
+        tone="warning"
+        title="关闭 tmux session"
+        message={killConfirmSession ? `确定关闭 ${killConfirmSession}？` : ''}
+        showCancel
+        busy={killBusy}
+        confirmLabel="关闭"
+        cancelLabel="取消"
+        onCancel={() => setKillConfirmSession(null)}
+        onConfirm={() => {
+          void handleConfirmKillSession();
+        }}
       />
     </div>
   );

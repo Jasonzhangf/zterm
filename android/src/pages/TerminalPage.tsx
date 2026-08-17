@@ -39,6 +39,7 @@ import type {
   TerminalRemoteWindowSlot,
 } from '../lib/plugin-remote-window/remote-window-contract';
 import { TabManagerSheet } from '../components/terminal/TabManagerSheet';
+import { ZtermDialog } from '../components/terminal/ZtermDialog';
 import type { TerminalQuickBarSlot } from '../lib/plugin-quickbar/quickbar-contract';
 import type {
   TerminalShellUiSlot,
@@ -640,6 +641,19 @@ function TerminalPageComponent({
     nonce: number;
   } | null>(null);
   const [sessionDrawerOpen, setSessionDrawerOpen] = useState(false);
+  const [drawerCloseDialog, setDrawerCloseDialog] = useState<{
+    sessionId: string;
+    sessionName: string;
+    title: string;
+    target: DrawerRemoteSessionTarget;
+    busy: boolean;
+  } | null>(null);
+  const [terminalDialog, setTerminalDialog] = useState<{
+    tone: 'info' | 'success' | 'warning' | 'error';
+    title: string;
+    message: string;
+    detail?: string;
+  } | null>(null);
   const [attachmentDrawerOpen, setAttachmentDrawerOpen] = useState(false);
   // Open the attachment drawer when the user taps an attachment notification
   // (AppContent dispatches zterm:open-attachment-drawer on tap).
@@ -1241,6 +1255,9 @@ function TerminalPageComponent({
       localSessionId: string | null;
     }>();
     const rowIdByCanonicalSessionKey = new Map<string, string>();
+    // 同一物理 endpoint 可能同时存在于 bridge-only 历史组和 daemon 组，
+    // canonical key 会因 alias 解析不同而分叉；stable key 做第二层防重。
+    const rowIdByStableSessionKey = new Map<string, string>();
     const items: TerminalSessionDrawerItem[] = [];
     for (const group of sessionGroups) {
       const missing = new Set(group.missingSessionNames || []);
@@ -1296,8 +1313,12 @@ function TerminalPageComponent({
           ...(groupBackend === 'herdr' ? { terminalBackend: 'herdr' as const } : {}),
         };
         const canonicalSessionRowKey = `${serverIdentity.key}${backendSuffix}::session:${sessionName}`;
-        const existingRowId = rowIdByCanonicalSessionKey.get(canonicalSessionRowKey);
+        const stableKey = `catalog:${group.bridgeHost}:${group.bridgePort}${backendSuffix}::session:${sessionName}`;
+        const existingRowId = rowIdByCanonicalSessionKey.get(canonicalSessionRowKey)
+          || rowIdByStableSessionKey.get(stableKey);
         if (existingRowId) {
+          rowIdByCanonicalSessionKey.set(canonicalSessionRowKey, existingRowId);
+          rowIdByStableSessionKey.set(stableKey, existingRowId);
           const existingCloseTarget = closeTargets.get(existingRowId);
           closeTargets.set(existingRowId, {
             target: useRelayRouteTarget ? remoteCatalogTarget : existingCloseTarget?.target || remoteCatalogTarget,
@@ -1316,6 +1337,7 @@ function TerminalPageComponent({
           continue;
         }
         rowIdByCanonicalSessionKey.set(canonicalSessionRowKey, id);
+        rowIdByStableSessionKey.set(stableKey, id);
         closeTargets.set(id, {
           target: remoteCatalogTarget,
           sessionName,
@@ -1334,7 +1356,7 @@ function TerminalPageComponent({
           // stableKey 必须不受 relay 身份归并抖动影响（daemonHostId 在 alias 间
           // 振荡会让 ownerKey/identity key 亚秒级变化 → React key 变 → 整列表重建）。
           // 用物理端点（bridgeHost:bridgePort）+ sessionName 作为纯稳定键。
-          stableKey: `catalog:${group.bridgeHost}:${group.bridgePort}${backendSuffix}::session:${sessionName}`,
+          stableKey,
           title: liveSession?.customName || liveSession?.title || sessionName,
           status: liveSession ? normalizeDrawerStatus(liveSession.state) : 'idle',
           paneLabel: undefined,
@@ -1677,7 +1699,11 @@ function TerminalPageComponent({
   const handleRequestRemoteScreenshot = useCallback(async () => {
     const targetSessionId = terminalActionSessionId;
     if (!targetSessionId || !onRequestRemoteScreenshot) {
-      alert('当前没有可用的目标 session');
+      setTerminalDialog({
+        tone: 'warning',
+        title: '无法截图',
+        message: '当前没有可用的目标 session',
+      });
       return;
     }
 
@@ -1942,10 +1968,18 @@ function TerminalPageComponent({
         writeFile: Filesystem.writeFile,
       });
       closeRemoteScreenshotPreview();
-      alert(`截图已保存到 ${savedPath}`);
+      setTerminalDialog({
+        tone: 'success',
+        title: '截图已保存',
+        message: `已保存到 ${savedPath}`,
+      });
     } catch (error) {
       setRemoteScreenshotPreview((current) => remoteScreenshotPreviewRuntimeRef.current.restorePreviewReady(current));
-      alert(error instanceof Error ? error.message : '保存远程截图失败');
+      setTerminalDialog({
+        tone: 'error',
+        title: '保存失败',
+        message: error instanceof Error ? error.message : '保存远程截图失败',
+      });
     }
   }, [closeRemoteScreenshotPreview, remoteScreenshotPreview]);
 
@@ -3021,24 +3055,51 @@ function TerminalPageComponent({
     const remoteCloseTarget = drawerRemoteSessions.closeTargets.get(sessionId);
     if (remoteCloseTarget) {
       if (!onCloseDrawerRemoteSession) {
-        window.alert?.('Remote close is unavailable.');
+        setTerminalDialog({
+          tone: 'error',
+          title: '远程关闭不可用',
+          message: '当前连接不支持关闭远程 tmux session。',
+        });
         return;
       }
-      void Promise.resolve(onCloseDrawerRemoteSession(remoteCloseTarget.target, remoteCloseTarget.sessionName))
-        .then(() => {
-          if (remoteCloseTarget.localSessionId) {
-            onCloseSession(remoteCloseTarget.localSessionId, 'terminal-session-drawer-remote-close-success');
-          }
-        })
-        .catch((error) => {
-          const message = error instanceof Error ? error.message : String(error);
-          console.error('[TerminalPage] Failed to close remote tmux session from drawer:', error);
-          window.alert?.(message);
-        });
+      const title = drawerSessions.find((item) => item.id === sessionId)?.title
+        || remoteCloseTarget.sessionName;
+      setDrawerCloseDialog({
+        sessionId,
+        sessionName: remoteCloseTarget.sessionName,
+        title,
+        target: remoteCloseTarget.target,
+        busy: false,
+      });
       return;
     }
     onCloseSession(sessionId, 'terminal-session-drawer-close-button');
-  }, [drawerRemoteSessions.closeTargets, onCloseDrawerRemoteSession, onCloseSession]);
+  }, [drawerRemoteSessions.closeTargets, drawerSessions, onCloseDrawerRemoteSession, onCloseSession]);
+
+  const handleConfirmDrawerClose = useCallback(() => {
+    if (!drawerCloseDialog) {
+      return;
+    }
+    const pending = drawerCloseDialog;
+    setDrawerCloseDialog((current) => current ? { ...current, busy: true } : current);
+    void (async () => {
+      try {
+        await onCloseDrawerRemoteSession?.(pending.target, pending.sessionName);
+        setDrawerCloseDialog(null);
+        setSessionDrawerOpen(false);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error('[TerminalPage] Failed to close remote tmux session from drawer:', error);
+        setDrawerCloseDialog(null);
+        setTerminalDialog({
+          tone: 'error',
+          title: '关闭失败',
+          message: `无法关闭 ${pending.sessionName}`,
+          detail: message,
+        });
+      }
+    })();
+  }, [drawerCloseDialog, onCloseDrawerRemoteSession]);
 
   const handleOpenQuickTabPickerForPane = useCallback((paneId?: string, hostKey?: string, createOptions?: { sessionName?: string; cwd?: string; terminalBackend?: 'tmux' | 'herdr' }) => {
     if (paneId) {
@@ -3580,6 +3641,29 @@ function TerminalPageComponent({
           void handleSaveRemoteScreenshot();
         }}
         onDiscard={closeRemoteScreenshotPreview}
+      />
+      <ZtermDialog
+        open={Boolean(drawerCloseDialog)}
+        tone="warning"
+        title={drawerCloseDialog ? `关闭 ${drawerCloseDialog.title}` : '关闭 session'}
+        message={drawerCloseDialog
+          ? `将先断开当前连接，再终止 tmux session "${drawerCloseDialog.sessionName}"。`
+          : ''}
+        showCancel
+        busy={Boolean(drawerCloseDialog?.busy)}
+        confirmLabel="断开并关闭"
+        cancelLabel="取消"
+        onCancel={() => setDrawerCloseDialog(null)}
+        onConfirm={handleConfirmDrawerClose}
+      />
+      <ZtermDialog
+        open={Boolean(terminalDialog)}
+        tone={terminalDialog?.tone || 'error'}
+        title={terminalDialog?.title || '操作失败'}
+        message={terminalDialog?.message}
+        detail={terminalDialog?.detail}
+        confirmLabel="知道了"
+        onConfirm={() => setTerminalDialog(null)}
       />
     </div>
   );

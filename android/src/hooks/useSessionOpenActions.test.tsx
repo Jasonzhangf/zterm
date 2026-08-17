@@ -47,6 +47,7 @@ function createOptions(overrides: Partial<any> = {}) {
   const renameRemoteSession = vi.fn();
   const setPageState = vi.fn();
   const auditOpenTabsAgainstRemoteSessions = vi.fn(async () => undefined);
+  const onError = overrides.onError || vi.fn();
   const manageTmuxSessionsOnOpenTransport = overrides.manageTmuxSessionsOnOpenTransport || vi.fn(async () => null);
   const queryTerminalSessionCatalogOnOpenTransport = overrides.queryTerminalSessionCatalogOnOpenTransport || vi.fn(async () => null);
   const applyOpenTabState = vi.fn((nextState: { tabs: any[]; activeSessionId: string | null }, persistOptions?: { preserveActiveSessionId?: string | null; switchRuntime?: OpenTabRuntimeSwitchReason }) => {
@@ -110,6 +111,7 @@ function createOptions(overrides: Partial<any> = {}) {
     queryTerminalSessionCatalogOnOpenTransport,
     renameRemoteSession,
     setPageState,
+    onError,
     auditOpenTabsAgainstRemoteSessions,
   };
 
@@ -134,6 +136,7 @@ function createOptions(overrides: Partial<any> = {}) {
       renameRemoteSession,
       applyOpenTabState,
       setPageState,
+      onError,
       auditOpenTabsAgainstRemoteSessions,
       manageTmuxSessionsOnOpenTransport,
       queryTerminalSessionCatalogOnOpenTransport,
@@ -1533,7 +1536,7 @@ describe('useSessionOpenActions explicit-open truth', () => {
     expect(fetchTmuxSessionsMock).not.toHaveBeenCalled();
   });
 
-  it('closes drawer remote tmux sessions through the existing open mux target transport before local close', async () => {
+  it('uses an existing open mux target transport when the drawer target session is not open locally', async () => {
     const manageTmuxSessionsOnOpenTransport = vi.fn(async () => ['alpha']);
     const harness = createOptions({
       runtimeActiveSessionId: 'active-zterm',
@@ -1572,6 +1575,196 @@ describe('useSessionOpenActions explicit-open truth', () => {
         sessionNames: ['alpha'],
       }),
     );
+  });
+
+  it('disconnects a matching open session before killing it on the remote target', async () => {
+    const manageTmuxSessionsOnOpenTransport = vi.fn(async () => {
+      expect(harness.spies.closeSession).toHaveBeenCalledWith('session-beta');
+      return ['alpha'];
+    });
+    const harness = createOptions({
+      runtimeActiveSessionId: 'active-zterm',
+      manageTmuxSessionsOnOpenTransport,
+      sessions: [
+        {
+          id: 'active-zterm',
+          bridgeHost: '100.127.23.27',
+          bridgePort: 3333,
+          daemonHostId: 'daemon-a',
+          sessionName: 'zterm',
+          state: 'connected',
+          createdAt: 10,
+        },
+        {
+          id: 'session-beta',
+          bridgeHost: '100.127.23.27',
+          bridgePort: 3333,
+          daemonHostId: 'daemon-a',
+          sessionName: 'beta',
+          state: 'connected',
+          createdAt: 20,
+        },
+      ],
+    });
+    const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
+    harness.refs.openTabStateRef.current = normalizeOpenTabIntentState([{
+      sessionId: 'session-beta',
+      hostId: 'daemon-a',
+      connectionName: 'Daemon A',
+      bridgeHost: '100.127.23.27',
+      bridgePort: 3333,
+      daemonHostId: 'daemon-a',
+      sessionName: 'beta',
+      authToken: 'token-a',
+      createdAt: 20,
+    }], 'session-beta');
+
+    await act(async () => {
+      await result.current.handleCloseGroupSession({
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        relayHostId: 'daemon-a',
+        authToken: 'token-a',
+      }, 'beta');
+    });
+
+    expect(harness.spies.switchSession).not.toHaveBeenCalled();
+    expect(harness.spies.closeSession).toHaveBeenCalledWith('session-beta');
+    expect(harness.refs.openTabStateRef.current).toEqual({
+      tabs: [],
+      activeSessionId: null,
+    });
+    expect(harness.refs.closedOpenTabSessionIdsRef.current.has('session-beta')).toBe(true);
+    expect(manageTmuxSessionsOnOpenTransport).toHaveBeenCalledWith(
+      'active-zterm',
+      { type: 'tmux-kill-session', payload: { sessionName: 'beta' } },
+    );
+    expect(manageTmuxSessionsOnOpenTransport).not.toHaveBeenCalledWith(
+      'session-beta',
+      { type: 'tmux-kill-session', payload: { sessionName: 'beta' } },
+    );
+    expect(killTmuxSessionMock).not.toHaveBeenCalled();
+  });
+
+  it('falls back to a legacy tmux kill after closing the only matching open session', async () => {
+    const manageTmuxSessionsOnOpenTransport = vi.fn(async () => null);
+    const harness = createOptions({
+      manageTmuxSessionsOnOpenTransport,
+      sessions: [{
+        id: 'session-beta',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        sessionName: 'beta',
+        state: 'connected',
+        createdAt: 10,
+      }],
+    });
+    const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
+
+    await act(async () => {
+      await result.current.handleCloseGroupSession({
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        relayHostId: 'daemon-a',
+        authToken: 'token-a',
+      }, 'beta');
+    });
+
+    expect(harness.spies.closeSession).toHaveBeenCalledWith('session-beta');
+    expect(manageTmuxSessionsOnOpenTransport).not.toHaveBeenCalled();
+    expect(killTmuxSessionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        relayHostId: 'daemon-a',
+        authToken: 'token-a',
+      }),
+      expect.any(Object),
+      'beta',
+    );
+  });
+
+  it('does not close unrelated sessions when killing a drawer remote session', async () => {
+    const manageTmuxSessionsOnOpenTransport = vi.fn(async () => ['alpha']);
+    const harness = createOptions({
+      runtimeActiveSessionId: 'active-zterm',
+      manageTmuxSessionsOnOpenTransport,
+      sessions: [{
+        id: 'active-zterm',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        sessionName: 'zterm',
+        state: 'connected',
+        createdAt: 10,
+      }],
+    });
+    const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
+
+    await act(async () => {
+      await result.current.handleCloseGroupSession({
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        relayHostId: 'daemon-a',
+        authToken: 'token-a',
+      }, 'beta');
+    });
+
+    expect(harness.spies.closeSession).not.toHaveBeenCalled();
+    expect(manageTmuxSessionsOnOpenTransport).toHaveBeenCalledWith(
+      'active-zterm',
+      { type: 'tmux-kill-session', payload: { sessionName: 'beta' } },
+    );
+  });
+
+  it('does not report a successful close when the remote kill fails after local disconnect', async () => {
+    const manageTmuxSessionsOnOpenTransport = vi.fn(async () => null);
+    killTmuxSessionMock.mockRejectedValueOnce(new Error('target transport failed'));
+    const harness = createOptions({
+      manageTmuxSessionsOnOpenTransport,
+      sessions: [{
+        id: 'session-beta',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        sessionName: 'beta',
+        state: 'connected',
+        createdAt: 10,
+      }],
+    });
+    const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
+    harness.refs.openTabStateRef.current = normalizeOpenTabIntentState([{
+      sessionId: 'session-beta',
+      hostId: 'daemon-a',
+      connectionName: 'Daemon A',
+      bridgeHost: '100.127.23.27',
+      bridgePort: 3333,
+      daemonHostId: 'daemon-a',
+      sessionName: 'beta',
+      authToken: 'token-a',
+      createdAt: 20,
+    }], 'session-beta');
+
+    await expect(result.current.handleCloseGroupSession({
+      bridgeHost: '100.127.23.27',
+      bridgePort: 3333,
+      daemonHostId: 'daemon-a',
+      relayHostId: 'daemon-a',
+      authToken: 'token-a',
+    }, 'beta')).rejects.toThrow('target transport failed');
+
+    expect(harness.spies.closeSession).toHaveBeenCalledWith('session-beta');
+    expect(manageTmuxSessionsOnOpenTransport).not.toHaveBeenCalled();
+    expect(harness.spies.setSessionGroupSelection).not.toHaveBeenCalled();
+    expect(harness.refs.openTabStateRef.current).toEqual({
+      tabs: [],
+      activeSessionId: null,
+    });
   });
 
   it('refreshes a relay daemon drawer host through a route-aware target instead of the saved direct route', async () => {
@@ -1712,7 +1905,6 @@ describe('useSessionOpenActions explicit-open truth', () => {
   });
 
   it('does not rebuild force-relay when explicit relay prerequisites are missing', () => {
-    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => undefined);
     const harness = createOptions();
     harness.refs.openTabStateRef.current = normalizeOpenTabIntentState([{
       sessionId: 'session-live',
@@ -1731,7 +1923,7 @@ describe('useSessionOpenActions explicit-open truth', () => {
       result.current.handleForceRelaySession('session-live');
     });
 
-    expect(alertSpy).toHaveBeenCalledWith('请先在 Settings 登录 Relay 控制面。');
+    expect(harness.spies.onError).toHaveBeenCalledWith('请先在 Settings 登录 Relay 控制面。');
     expect(harness.spies.closeSession).not.toHaveBeenCalled();
     expect(harness.spies.createSession).not.toHaveBeenCalled();
     expect(harness.spies.switchSession).not.toHaveBeenCalled();

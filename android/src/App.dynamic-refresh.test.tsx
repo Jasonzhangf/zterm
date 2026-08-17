@@ -1907,7 +1907,6 @@ describe('App dynamic refresh matrix', () => {
   });
 
   it('imports shared quick actions and shortcut actions from connection config deep links', async () => {
-    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => undefined);
     render(
       <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
     );
@@ -1946,7 +1945,7 @@ describe('App dynamic refresh matrix', () => {
     expect(shortcutActionHarness.setShortcutActions).toHaveBeenCalledWith([
       { id: 'sc-1', label: 'Ctrl+C', sequence: '\x03', order: 0, row: 'bottom-scroll' },
     ]);
-    expect(alertSpy).toHaveBeenCalledWith('Imported connection: Imported Mac，1 个文本快捷指令，1 个终端快捷键');
+    await waitFor(() => expect(screen.getByTestId('zterm-dialog-message').textContent).toContain('Imported Mac'));
   });
 
   it('does not restore current-process tab keys on cold launch', async () => {

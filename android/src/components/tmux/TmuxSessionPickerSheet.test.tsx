@@ -126,6 +126,7 @@ describe('TmuxSessionPickerSheet relay directory projection', () => {
         onClose={vi.fn()}
         onOpenTmuxSession={vi.fn()}
         onOpenMultipleTmuxSessions={vi.fn()}
+        onKillTmuxSession={vi.fn()}
         onSelectCleanSession={vi.fn()}
         onRemoteSessionsRefreshed={onRemoteSessionsRefreshed}
       />,
@@ -168,6 +169,7 @@ describe('TmuxSessionPickerSheet relay directory projection', () => {
         onClose={vi.fn()}
         onOpenTmuxSession={onOpenTmuxSession}
         onOpenMultipleTmuxSessions={vi.fn()}
+        onKillTmuxSession={vi.fn()}
         onSelectCleanSession={vi.fn()}
       />,
     );
@@ -199,6 +201,7 @@ describe('TmuxSessionPickerSheet relay directory projection', () => {
         onClose={vi.fn()}
         onOpenTmuxSession={vi.fn()}
         onOpenMultipleTmuxSessions={vi.fn()}
+        onKillTmuxSession={vi.fn()}
         onSelectCleanSession={vi.fn()}
       />,
     );
@@ -230,6 +233,7 @@ describe('TmuxSessionPickerSheet relay directory projection', () => {
         onClose={vi.fn()}
         onOpenTmuxSession={vi.fn()}
         onOpenMultipleTmuxSessions={vi.fn()}
+        onKillTmuxSession={vi.fn()}
         onSelectCleanSession={vi.fn()}
         onRemoteSessionsRefreshed={onRemoteSessionsRefreshed}
       />,
@@ -269,6 +273,7 @@ describe('TmuxSessionPickerSheet relay directory projection', () => {
         onClose={vi.fn()}
         onOpenTmuxSession={vi.fn()}
         onOpenMultipleTmuxSessions={vi.fn()}
+        onKillTmuxSession={vi.fn()}
         onSelectCleanSession={vi.fn()}
       />,
     );
@@ -306,6 +311,7 @@ describe('TmuxSessionPickerSheet relay directory projection', () => {
         onClose={vi.fn()}
         onOpenTmuxSession={vi.fn()}
         onOpenMultipleTmuxSessions={vi.fn()}
+        onKillTmuxSession={vi.fn()}
         onSelectCleanSession={vi.fn()}
       />,
     );
@@ -322,6 +328,44 @@ describe('TmuxSessionPickerSheet relay directory projection', () => {
     expect(screen.getByRole('textbox', { name: '新的 session 名称' })).toBeTruthy();
     expect(alertSpy).not.toHaveBeenCalled();
     alertSpy.mockRestore();
+  });
+
+  it('delegates remote kill to the app-owned disconnect-before-kill flow', async () => {
+    tmuxSessionsMock.fetchTmuxSessions.mockResolvedValue(['zterm']);
+    const onKillTmuxSession = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <TmuxSessionPickerSheet
+        mode="quick-tab"
+        open
+        servers={[]}
+        bridgeSettings={bridgeSettings}
+        initialTarget={{ bridgeHost: '100.66.1.82', bridgePort: 3333, authToken: 'token-direct' }}
+        onClose={vi.fn()}
+        onOpenTmuxSession={vi.fn()}
+        onOpenMultipleTmuxSessions={vi.fn()}
+        onSelectCleanSession={vi.fn()}
+        onKillTmuxSession={onKillTmuxSession}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('Connect'));
+    await screen.findByText('zterm');
+    fireEvent.click(screen.getByRole('button', { name: '关闭 session zterm' }));
+    expect(screen.getByTestId('zterm-dialog')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('zterm-dialog-confirm'));
+
+    await waitFor(() => {
+      expect(onKillTmuxSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          bridgeHost: '100.66.1.82',
+          bridgePort: 3333,
+          authToken: 'token-direct',
+        }),
+        'zterm',
+      );
+    });
+    expect(tmuxSessionsMock.killTmuxSession).not.toHaveBeenCalled();
   });
 
   it('renames an open tab through the app-owned dialog', async () => {
@@ -346,6 +390,7 @@ describe('TmuxSessionPickerSheet relay directory projection', () => {
         onRenameOpenTab={onRenameOpenTab}
         onOpenTmuxSession={vi.fn()}
         onOpenMultipleTmuxSessions={vi.fn()}
+        onKillTmuxSession={vi.fn()}
         onSelectCleanSession={vi.fn()}
       />,
     );
@@ -388,6 +433,7 @@ describe('TmuxSessionPickerSheet relay directory projection', () => {
         onClose={vi.fn()}
         onOpenTmuxSession={vi.fn()}
         onOpenMultipleTmuxSessions={vi.fn()}
+        onKillTmuxSession={vi.fn()}
         onSelectCleanSession={vi.fn()}
       />,
     );
@@ -422,6 +468,7 @@ describe('TmuxSessionPickerSheet relay directory projection', () => {
         onClose={vi.fn()}
         onOpenTmuxSession={onOpenTmuxSession}
         onOpenMultipleTmuxSessions={vi.fn()}
+        onKillTmuxSession={vi.fn()}
         onSelectCleanSession={vi.fn()}
       />,
     );
@@ -461,6 +508,7 @@ describe('TmuxSessionPickerSheet relay directory projection', () => {
         onClose={vi.fn()}
         onOpenTmuxSession={onOpenTmuxSession}
         onOpenMultipleTmuxSessions={vi.fn()}
+        onKillTmuxSession={vi.fn()}
         onSelectCleanSession={vi.fn()}
       />,
     );
@@ -498,6 +546,7 @@ describe('TmuxSessionPickerSheet relay directory projection', () => {
         onClose={vi.fn()}
         onOpenTmuxSession={vi.fn()}
         onOpenMultipleTmuxSessions={vi.fn()}
+        onKillTmuxSession={vi.fn()}
         onSelectCleanSession={vi.fn()}
         onRemoteSessionsRefreshed={onRemoteSessionsRefreshed}
       />,
@@ -543,6 +592,7 @@ describe('TmuxSessionPickerSheet relay directory projection', () => {
         onClose={vi.fn()}
         onOpenTmuxSession={vi.fn()}
         onOpenMultipleTmuxSessions={vi.fn()}
+        onKillTmuxSession={vi.fn()}
         onSelectCleanSession={vi.fn()}
       />,
     );
@@ -566,6 +616,7 @@ describe('TmuxSessionPickerSheet relay directory projection', () => {
         onClose={vi.fn()}
         onOpenTmuxSession={vi.fn()}
         onOpenMultipleTmuxSessions={vi.fn()}
+        onKillTmuxSession={vi.fn()}
         onSelectCleanSession={onSelectCleanSession}
       />,
     );
@@ -591,6 +642,7 @@ describe('TmuxSessionPickerSheet relay directory projection', () => {
         onClose={vi.fn()}
         onOpenTmuxSession={vi.fn()}
         onOpenMultipleTmuxSessions={vi.fn()}
+        onKillTmuxSession={vi.fn()}
         onSelectCleanSession={vi.fn()}
         onImportConnectionLink={onImportConnectionLink}
       />,
@@ -647,6 +699,7 @@ describe('TmuxSessionPickerSheet relay directory projection', () => {
         onClose={vi.fn()}
         onOpenTmuxSession={vi.fn()}
         onOpenMultipleTmuxSessions={vi.fn()}
+        onKillTmuxSession={vi.fn()}
         onSelectCleanSession={vi.fn()}
       />,
     );

@@ -13,6 +13,7 @@ import { GeneralSection } from '../components/connection-form/GeneralSection';
 import { RelayDevicePicker } from '../components/connection-form/RelayDevicePicker';
 import { RemoteAccessSection } from '../components/connection-form/RemoteAccessSection';
 import { TerminalSection } from '../components/connection-form/TerminalSection';
+import { ZtermDialog } from '../components/terminal/ZtermDialog';
 import { useTraversalRelayDaemonDevices } from '../hooks/useTraversalRelayDaemonDevices';
 import type { BridgeSettings } from '../lib/bridge-settings';
 import { getDefaultBridgeServer, resolveBridgePresetDaemonHostId } from '../lib/bridge-settings';
@@ -92,6 +93,7 @@ export function ConnectionPropertiesPage({
   const [shareQrSvg, setShareQrSvg] = useState('');
   const [shareState, setShareState] = useState<'idle' | 'copied' | 'error'>('idle');
   const [shareError, setShareError] = useState('');
+  const [formDialog, setFormDialog] = useState<string | null>(null);
   const { devices: relayDevices, refresh: refreshRelayDevices } = useTraversalRelayDaemonDevices(
     Boolean(bridgeSettings.traversalRelay?.accessToken),
   );
@@ -249,21 +251,21 @@ export function ConnectionPropertiesPage({
 
   const handleSave = () => {
     if (!form.name.trim()) {
-      alert('请填写必填字段：名称');
+      setFormDialog('请填写必填字段：名称');
       return;
     }
 
     if (daemonFirst) {
       if (!selectedDaemonHostId) {
-        alert('请先选择一个在线 daemon 设备');
+        setFormDialog('请先选择一个在线 daemon 设备');
         return;
       }
       if (!form.bridgeHost.trim() || !form.authToken.trim()) {
-        alert('请先填写这个 daemon 对应的 bridge host 和 token。');
+        setFormDialog('请先填写这个 daemon 对应的 bridge host 和 token。');
         return;
       }
     } else if (!form.bridgeHost.trim()) {
-      alert('请填写必填字段：bridge 主机地址');
+      setFormDialog('请填写必填字段：bridge 主机地址');
       return;
     }
 
@@ -272,7 +274,7 @@ export function ConnectionPropertiesPage({
       && bridgeSettings.traversalRelay?.accessToken
       && !form.relayHostId.trim()
     ) {
-      alert('RTC First 模式下请先选择一个在线的 Relay Daemon 设备');
+      setFormDialog('RTC First 模式下请先选择一个在线的 Relay Daemon 设备');
       return;
     }
 
@@ -410,6 +412,7 @@ export function ConnectionPropertiesPage({
   };
 
   return (
+    <>
     <div
       data-testid="connection-properties-scroll"
       style={{
@@ -924,5 +927,14 @@ export function ConnectionPropertiesPage({
         )}
       </div>
     </div>
+    <ZtermDialog
+      open={formDialog !== null}
+      tone="warning"
+      title="保存连接"
+      message={formDialog || ''}
+      confirmLabel="知道了"
+      onConfirm={() => setFormDialog(null)}
+    />
+    </>
   );
 }

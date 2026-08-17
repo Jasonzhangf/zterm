@@ -1421,7 +1421,8 @@
         "native/android/app/src/main/res/values/styles.xml",
         "src/lib/terminal-shell-skin.ts",
         "src/hooks/useAppPageState.ts",
-        "src/components/terminal/RenameDialog.tsx"
+        "src/components/terminal/RenameDialog.tsx",
+        "src/components/terminal/ZtermDialog.tsx"
       ],
       "allowed_paths": [
         "native/android/app/src/main/AndroidManifest.xml",
@@ -1460,6 +1461,8 @@
         "src/components/terminal/FileTransferSheet.test.tsx",
         "src/components/terminal/RenameDialog.tsx",
         "src/components/terminal/RenameDialog.test.tsx",
+        "src/components/terminal/ZtermDialog.tsx",
+        "src/components/terminal/ZtermDialog.test.tsx",
         "src/components/terminal/TerminalHeader.tsx",
         "src/components/terminal/TerminalQuickBar.tsx",
         "src/components/terminal/TerminalQuickBar.test.tsx",
@@ -1478,7 +1481,8 @@
         "src/lib/android-task-transition-truth.test.ts",
         "src/lib/terminal-shell-skin.test.ts",
         "src/hooks/useAppPageState.test.tsx",
-        "src/components/terminal/RenameDialog.test.tsx"
+        "src/components/terminal/RenameDialog.test.tsx",
+        "src/components/terminal/ZtermDialog.test.tsx"
       ],
       "truth_sources": [
         "docs/wiki/mainline-source.md",

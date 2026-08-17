@@ -10,6 +10,7 @@ import { Capacitor } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { parseConnectionConfigShareLink } from '@zterm/shared';
 import { TmuxSessionPickerSheet } from './components/tmux/TmuxSessionPickerSheet';
+import { ZtermDialog } from './components/terminal/ZtermDialog';
 import { SessionProvider, useSession } from './contexts/SessionContext';
 import { useAppUpdate } from './hooks/useAppUpdate';
 import { useScreenOrientationLock } from './hooks/useScreenOrientationLock';
@@ -129,6 +130,11 @@ export function AppContent({
   renderTerminalShell,
 }: AppContentProps) {
   const [pendingPaneAttachIntent, setPendingPaneAttachIntent] = useState<{ sessionIds: string[]; paneId: string; nonce: number } | null>(null);
+  const [appDialog, setAppDialog] = useState<{
+    tone: 'info' | 'success' | 'warning' | 'error';
+    title: string;
+    message: string;
+  } | null>(null);
   useEffect(() => {
     if (!networkIdentity) {
       return;
@@ -341,10 +347,18 @@ export function AppContent({
         }
         const result = handleImportConnectionShareLink(url);
         if (!result.ok) {
-          alert(`Connection import failed: ${result.error}`);
+          setAppDialog({
+            tone: 'error',
+            title: '导入失败',
+            message: result.error,
+          });
           return;
         }
-        alert(`Imported connection: ${result.name}`);
+        setAppDialog({
+          tone: 'success',
+          title: '导入成功',
+          message: `已导入连接：${result.name}`,
+        });
       });
     void Promise.resolve(listenerResult).then((handle) => {
         if (!handle) {
@@ -356,7 +370,11 @@ export function AppContent({
         }
         listenerHandle = handle;
       }).catch((error) => {
-      alert(`Connection deep link listener failed: ${error instanceof Error ? error.message : String(error)}`);
+      setAppDialog({
+        tone: 'error',
+        title: '连接导入失败',
+        message: error instanceof Error ? error.message : String(error),
+      });
     });
     return () => {
       disposed = true;
@@ -611,6 +629,13 @@ export function AppContent({
         nonce: Date.now(),
       });
     },
+    onError: (message) => {
+      setAppDialog({
+        tone: 'error',
+        title: '连接失败',
+        message,
+      });
+    },
     setPageState,
     auditOpenTabsAgainstRemoteSessions,
   });
@@ -708,20 +733,36 @@ export function AppContent({
             onExportConfig={() => {
               void exportConfig().then((result) => {
                 if (result.ok) {
-                  alert(`配置已导出：${result.uri || result.path}`);
+                  setAppDialog({
+                    tone: 'success',
+                    title: '配置已导出',
+                    message: result.uri || result.path,
+                  });
                   return;
                 }
-                alert(`配置导出失败：${result.error}`);
+                setAppDialog({
+                  tone: 'error',
+                  title: '配置导出失败',
+                  message: result.error,
+                });
               });
             }}
             onImportConfig={() => {
               void importConfig().then((result) => {
                 if (result.ok) {
-                  alert(`配置已导入：${result.path}`);
+                  setAppDialog({
+                    tone: 'success',
+                    title: '配置已导入',
+                    message: result.path,
+                  });
                   globalThis.location?.reload();
                   return;
                 }
-                alert(`配置导入失败：${result.error}`);
+                setAppDialog({
+                  tone: 'error',
+                  title: '配置导入失败',
+                  message: result.error,
+                });
               });
             }}
             configExporting={configExporting}
@@ -900,10 +941,11 @@ export function AppContent({
         onRenameOpenTab={handleRenameSession}
         onCloseOpenTab={handleCloseSession}
         onOpenTmuxSession={handleOpenSingleTmuxSession}
-            onOpenMultipleTmuxSessions={handleOpenMultipleTmuxSessions}
-            onSelectCleanSession={handleSelectCleanSession}
-            shareableHosts={hosts}
-            quickActions={quickActions}
+        onOpenMultipleTmuxSessions={handleOpenMultipleTmuxSessions}
+        onSelectCleanSession={handleSelectCleanSession}
+        onKillTmuxSession={(target, sessionName) => handleCloseGroupSession(target, sessionName)}
+        shareableHosts={hosts}
+        quickActions={quickActions}
             shortcutActions={shortcutActions}
             onImportConnectionLink={handleImportConnectionShareLink}
             onSaveGroupSelection={(target, sessionNames) => {
@@ -1034,6 +1076,14 @@ export function AppContent({
           </div>
         </div>
       )}
+      <ZtermDialog
+        open={Boolean(appDialog)}
+        tone={appDialog?.tone || 'info'}
+        title={appDialog?.title || ''}
+        message={appDialog?.message}
+        confirmLabel="知道了"
+        onConfirm={() => setAppDialog(null)}
+      />
     </div>
   );
 }

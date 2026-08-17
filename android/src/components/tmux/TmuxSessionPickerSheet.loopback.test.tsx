@@ -52,6 +52,7 @@ describeRealHerdrLoopback('TmuxSessionPickerSheet installed daemon loopback', ()
         onClose={vi.fn()}
         onOpenTmuxSession={vi.fn()}
         onOpenMultipleTmuxSessions={vi.fn()}
+        onKillTmuxSession={vi.fn()}
         onSelectCleanSession={vi.fn()}
       />,
     );
@@ -78,6 +79,7 @@ describeRealHerdrLoopback('TmuxSessionPickerSheet installed daemon loopback', ()
         onClose={vi.fn()}
         onOpenTmuxSession={vi.fn()}
         onOpenMultipleTmuxSessions={vi.fn()}
+        onKillTmuxSession={vi.fn()}
         onSelectCleanSession={vi.fn()}
       />,
     );

@@ -582,7 +582,9 @@ describe('ConnectionPropertiesPage', () => {
     fireEvent.click(screen.getByText('Other Mac'));
     fireEvent.click(screen.getByText('Save'));
 
-    expect(window.alert).toHaveBeenCalledWith('请先填写这个 daemon 对应的 bridge host 和 token。');
+    expect(screen.getByTestId('zterm-dialog-message').textContent).toContain(
+      '请先填写这个 daemon 对应的 bridge host 和 token。',
+    );
     expect(onSave).not.toHaveBeenCalled();
   });
 
@@ -605,7 +607,9 @@ describe('ConnectionPropertiesPage', () => {
     fireEvent.click(screen.getByText('RTC First'));
     fireEvent.click(screen.getByText('Save'));
 
-    expect(window.alert).toHaveBeenCalledWith('RTC First 模式下请先选择一个在线的 Relay Daemon 设备');
+    expect(screen.getByTestId('zterm-dialog-message').textContent).toContain(
+      'RTC First 模式下请先选择一个在线的 Relay Daemon 设备',
+    );
     expect(onSave).not.toHaveBeenCalled();
   });
 

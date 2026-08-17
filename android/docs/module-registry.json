@@ -115,6 +115,8 @@
         "src/lib/session-activity-notify.ts",
         "src/components/terminal/AttachmentDrawer.tsx",
         "src/components/terminal/RenameDialog.tsx",
+        "src/components/terminal/ZtermDialog.tsx",
+        "src/components/terminal/ZtermDialog.test.tsx",
         "src/components/terminal/attachment-drawer-helpers.ts",
         "src/components/terminal/terminal-copy-gesture.ts",
         "src/lib/terminal-mouse-wheel-sgr.ts",

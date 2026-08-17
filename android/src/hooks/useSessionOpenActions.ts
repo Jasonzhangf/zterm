@@ -8,6 +8,7 @@ import {
   clearClosedTabReuseKeysForOwner,
 } from '../lib/open-tab-persistence';
 import {
+  deriveCloseOpenTabIntent,
   upsertOpenTabIntentSession,
   renameRemoteOpenTabIntentSession,
 } from '../lib/open-tab-intent';
@@ -42,6 +43,7 @@ import {
   resolveReusableOpenSessionForTarget,
   resolveSessionGroupForTarget,
 } from '../lib/session-open-helpers';
+import { sessionSemanticReuseMatch } from '../lib/session-semantic-identity';
 import { listOnlineTraversalRelayDaemonDevices } from '../lib/traversal-relay-devices';
 
 type PickerMode = 'new-connection' | 'quick-tab' | 'edit-group' | null;
@@ -125,6 +127,7 @@ interface UseSessionOpenActionsOptions {
     options?: { preserveActiveSessionId?: string | null; switchRuntime?: OpenTabRuntimeSwitchReason },
   ) => { tabs: PersistedOpenTab[]; activeSessionId: string | null };
   onSessionsOpenedInPane?: (sessionIds: string[], paneId: string) => void;
+  onError?: (message: string) => void;
   setPageState: Dispatch<SetStateAction<AppPageState>>;
   auditOpenTabsAgainstRemoteSessions: (reason: OpenTabAuditReason) => Promise<void>;
 }
@@ -141,7 +144,7 @@ export interface SessionOpenActionsResult {
   handleOpenMultipleTmuxSessions: (target: BridgeTarget, sessionNames: string[]) => void;
   handleOpenGroupSession: (group: SessionOpenGroupTarget, sessionName: string, options?: { activate?: boolean; navigate?: boolean }) => string;
   handleRenameRemoteSession: (sessionId: string, nextSessionName: string) => Promise<void>;
-  handleCloseGroupSession: (group: SessionOpenGroupTarget & { name?: string; sessionNames?: string[] }, sessionName: string) => Promise<void>;
+  handleCloseGroupSession: (group: BridgeTarget & { name?: string; sessionNames?: string[] }, sessionName: string) => Promise<void>;
   handleOpenServerGroups: (groups: Array<{
     name: string;
     bridgeHost: string;
@@ -200,6 +203,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     ensureTerminalPageVisible,
     applyOpenTabState,
     onSessionsOpenedInPane,
+    onError,
     setPageState,
     auditOpenTabsAgainstRemoteSessions,
   } = options;
@@ -212,6 +216,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     closedOpenTabReuseKeysRef,
     pendingMaterializedOpenTabSessionIdsRef,
     terminalActiveSessionIdRef,
+    runtimeActiveSessionIdRef,
   } = runtimeRefs;
 
   const [pickerMode, setPickerMode] = useState<PickerMode>(null);
@@ -603,10 +608,17 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     target: BridgeTarget,
     message: TerminalMuxTargetClientMessage,
     fallbackOptions?: { includeEmptyCreateOptions?: boolean },
+    excludedSessionIds: string[] = [],
   ) => {
     const routedMessage: TerminalMuxTargetClientMessage = message;
+    const excludedSessionIdSet = new Set(
+      excludedSessionIds.map((sessionId) => sessionId.trim()).filter(Boolean),
+    );
+    const reusableSessions = sessionsRef.current.filter(
+      (session) => !excludedSessionIdSet.has(session.id),
+    );
     const reusableSession = resolveReusableOpenSessionForTarget(
-      sessionsRef.current,
+      reusableSessions,
       target,
       '',
       [terminalActiveSessionIdRef.current, runtimeActiveSessionId],
@@ -732,27 +744,63 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
   ]);
 
   const handleCloseGroupSession = useCallback(async (
-    group: SessionOpenGroupTarget & { name?: string; sessionNames?: string[] },
+    group: BridgeTarget & { name?: string; sessionNames?: string[] },
     sessionName: string,
   ) => {
-    const target = normalizeBridgeTarget({
-      bridgeHost: group.bridgeHost,
-      bridgePort: group.bridgePort,
-      daemonHostId: group.daemonHostId,
-      relayHostId: group.relayHostId || group.daemonHostId,
-      authToken: group.authToken,
-      ...(group.terminalBackend === 'herdr' ? { terminalBackend: 'herdr' as const } : {}),
-      relayEndpointCandidates: group.relayEndpointCandidates || [],
-      transportMode: group.transportMode,
-    });
-    const sessionNames = await manageTmuxSessionsForTarget(target, {
-      type: 'tmux-kill-session',
-      payload: {
+    const target = normalizeBridgeTarget(group);
+    const closedSessionIds: string[] = [];
+    for (const session of sessionsRef.current) {
+      if (session.state === 'closed') {
+        continue;
+      }
+      if (sessionSemanticReuseMatch(session, {
+        daemonHostId: target.daemonHostId || target.relayHostId,
+        bridgeHost: target.bridgeHost,
+        bridgePort: target.bridgePort,
         sessionName,
+        terminalBackend: target.terminalBackend || 'tmux',
+      })) {
+        closedSessionIds.push(session.id);
+        closeSession(session.id);
+        const closeResult = deriveCloseOpenTabIntent(openTabStateRef.current, session.id, {
+          runtimeActiveSessionId: runtimeActiveSessionIdRef.current,
+          nextActiveCandidateSessionIds: sessionsRef.current
+            .filter((candidate) => candidate.id !== session.id)
+            .map((candidate) => candidate.id),
+          runtimeSessions: sessionsRef.current,
+        });
+        if (closeResult.closedReuseKeyVariants.length > 0) {
+          for (const key of closeResult.closedReuseKeyVariants) {
+            closedOpenTabReuseKeysRef.current.add(key);
+          }
+        }
+        closedOpenTabSessionIdsRef.current.add(session.id);
+        applyOpenTabState(closeResult.nextState);
+      }
+    }
+    const sessionNames = await manageTmuxSessionsForTarget(
+      target,
+      {
+        type: 'tmux-kill-session',
+        payload: {
+          sessionName,
+        },
       },
-    });
+      undefined,
+      closedSessionIds,
+    );
     handleRemoteSessionsRefreshed(target, sessionNames ?? []);
-  }, [handleRemoteSessionsRefreshed, manageTmuxSessionsForTarget]);
+  }, [
+    applyOpenTabState,
+    closeSession,
+    closedOpenTabReuseKeysRef,
+    closedOpenTabSessionIdsRef,
+    handleRemoteSessionsRefreshed,
+    manageTmuxSessionsForTarget,
+    openTabStateRef,
+    runtimeActiveSessionIdRef,
+    sessionsRef,
+  ]);
 
   const handleSelectCleanSession = useCallback((target: BridgeTarget) => {
     rememberBridgeTarget(target, target.bridgeHost);
@@ -869,7 +917,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
           const draft = buildDraftFromTmuxSession(hosts, bridgeSettingsRef.current.servers, target, existingSessionName);
           handleQuickConnectDraft(draft, host.name || target.bridgeHost || target.daemonHostId || target.relayHostId);
         } catch (error) {
-          window.alert?.(error instanceof Error ? error.message : String(error));
+          onError?.(error instanceof Error ? error.message : String(error));
         }
       })();
       return;
@@ -905,7 +953,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
         const draft = buildDraftFromTmuxSession(hosts, bridgeSettingsRef.current.servers, target, sessionName);
         handleQuickConnectDraft(draft, host.name || target.bridgeHost || target.daemonHostId || target.relayHostId);
       } catch (error) {
-        window.alert?.(error instanceof Error ? error.message : String(error));
+        onError?.(error instanceof Error ? error.message : String(error));
       }
     })();
   }, [applyOpenTabState, bridgeSettingsRef, closedOpenTabReuseKeysRef, closedOpenTabSessionIdsRef, createSession, ensureTerminalPageVisible, handleQuickConnectDraft, handleRemoteSessionsRefreshed, hosts, manageTmuxSessionsForTarget, markSessionGroupEntered, openTabStateRef, pendingMaterializedOpenTabSessionIdsRef, runtimeActiveSessionId, sessionsRef, terminalActiveSessionIdRef]);
@@ -1030,7 +1078,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
             onSessionsOpenedInPane?.([opened.sessionId], paneId);
           }
         } catch (error) {
-          window.alert?.(error instanceof Error ? error.message : String(error));
+          onError?.(error instanceof Error ? error.message : String(error));
         }
       })();
       return;
@@ -1100,16 +1148,16 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     const liveSession = sessionsRef.current.find((item) => item.id === normalizedSessionId) || null;
     const relayAccessToken = bridgeSettingsRef.current.traversalRelay?.accessToken?.trim();
     if (!relayAccessToken) {
-      window.alert?.('请先在 Settings 登录 Relay 控制面。');
+      onError?.('请先在 Settings 登录 Relay 控制面。');
       return;
     }
     if (!tab) {
-      window.alert?.('当前 tab 缺少连接信息，无法强制 Relay。请从 Relay Daemon 设备重新打开。');
+      onError?.('当前 tab 缺少连接信息，无法强制 Relay。请从 Relay Daemon 设备重新打开。');
       return;
     }
     const relayHostId = resolveCanonicalRelayHostId(tab) || tab.daemonHostId?.trim() || liveSession?.daemonHostId?.trim() || '';
     if (!relayHostId) {
-      window.alert?.('当前 tab 缺少 daemonHostId，无法强制 Relay。请从 Relay Daemon 设备重新打开。');
+      onError?.('当前 tab 缺少 daemonHostId，无法强制 Relay。请从 Relay Daemon 设备重新打开。');
       return;
     }
 
@@ -1150,7 +1198,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     const tab = openTabStateRef.current.tabs.find((item) => item.sessionId === normalizedSessionId);
     const liveSession = sessionsRef.current.find((item) => item.id === normalizedSessionId) || null;
     if (!tab) {
-      window.alert?.('当前 tab 缺少连接信息，无法切回 Auto。请从连接列表重新打开。');
+      onError?.('当前 tab 缺少连接信息，无法切回 Auto。请从连接列表重新打开。');
       return;
     }
     const relayHostId = tab.daemonHostId?.trim() || liveSession?.daemonHostId?.trim() || '';
@@ -1185,7 +1233,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     const tab = openTabStateRef.current.tabs.find((item) => item.sessionId === normalizedSessionId);
     const liveSession = sessionsRef.current.find((item) => item.id === normalizedSessionId) || null;
     if (!tab) {
-      window.alert?.('当前 tab 缺少连接信息，无法切到直连。请从连接列表重新打开。');
+      onError?.('当前 tab 缺少连接信息，无法切到直连。请从连接列表重新打开。');
       return;
     }
     const relayHostId = tab.daemonHostId?.trim() || liveSession?.daemonHostId?.trim() || '';
