@@ -83,6 +83,17 @@ session-picker-refresh / drawer refresh
 -> legacy tmux fetch only when no matching open target exists
 ```
 
+Drawer remote kill uses the same owner and commits local deletion only after
+the daemon accepts the kill:
+
+```text
+drawer kill intent
+-> stop only the matching logical session while preserving target transport
+-> send tmux-kill-session through a healthy sibling channel or the preserved target transport
+-> daemon success: finalize matching local session/open-tab deletion
+-> timeout/error: preserve local open-tab intent and every sibling channel
+```
+
 ## L1 Pure Planner Cases
 
 Positive reuse:
@@ -147,6 +158,12 @@ Negative:
 - Given the same unavailable socket after the keepalive grace window expires, it must call the same unique reconnect owner.
 - Given reconnect already in flight inside the grace window, it must keep the existing in-flight behavior and must not queue a duplicate reconnect.
 - Given manual close, it must skip reconnect.
+
+`useSessionOpenActions.handleCloseGroupSession()`:
+- Positive: when `tmux-kill-session` succeeds, the matching logical session is first stopped with `preserveTargetTransport`, then finalized locally; unrelated same-target sessions are never closed.
+- Positive: when a healthy same-target sibling session exists, the target control request uses that sibling instead of the stopped session.
+- Negative: transport unavailable, malformed response, daemon error, or timeout must reject explicitly without writing closed tombstones or deleting the matching open-tab intent.
+- Negative: a failed kill must not close, switch, reconnect, or otherwise mutate an unrelated same-target session; its mux channel and target physical transport remain the current truth.
 
 `client.daemon_connection.openSessionTargetTransport()`:
 - Given current same-target daemon-target transport is `OPEN`, it must not cleanup or build a second physical socket.

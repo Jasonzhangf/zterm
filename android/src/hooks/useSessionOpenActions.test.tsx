@@ -1732,7 +1732,7 @@ describe('useSessionOpenActions explicit-open truth', () => {
     );
   });
 
-  it('does not report a successful close when the remote kill fails after local disconnect', async () => {
+  it('preserves the local tab when the remote kill transport is unavailable', async () => {
     const manageTmuxSessionsOnOpenTransport = vi.fn(async () => null);
     const harness = createOptions({
       manageTmuxSessionsOnOpenTransport,
@@ -1768,53 +1768,75 @@ describe('useSessionOpenActions explicit-open truth', () => {
     }, 'beta')).rejects.toThrow('Existing terminal transport is unavailable for tmux management');
 
     expect(harness.spies.closeSession).toHaveBeenNthCalledWith(1, 'session-beta', { preserveTargetTransport: true });
-    expect(harness.spies.closeSession).toHaveBeenNthCalledWith(2, 'session-beta');
+    expect(harness.spies.closeSession).toHaveBeenCalledTimes(1);
     expect(manageTmuxSessionsOnOpenTransport).toHaveBeenCalledWith(
       'session-beta',
       { type: 'tmux-kill-session', payload: { sessionName: 'beta' } },
     );
     expect(harness.spies.setSessionGroupSelection).not.toHaveBeenCalled();
     expect(harness.refs.openTabStateRef.current).toEqual({
-      tabs: [],
-      activeSessionId: null,
+      tabs: [expect.objectContaining({
+        sessionId: 'session-beta',
+        sessionName: 'beta',
+      })],
+      activeSessionId: 'session-beta',
     });
-    expect(harness.spies.applyOpenTabState).toHaveBeenCalledWith(
-      {
-        tabs: [],
-        activeSessionId: null,
-      },
-      undefined,
-    );
+    expect(harness.spies.applyOpenTabState).not.toHaveBeenCalled();
+    expect(harness.refs.closedOpenTabSessionIdsRef.current.has('session-beta')).toBe(false);
   });
 
-  it('finalizes the stopped session and switches away when the remote kill times out', async () => {
+  it('preserves the stopped session and sibling session when the remote kill times out', async () => {
     const manageTmuxSessionsOnOpenTransport = vi.fn(async () => {
       throw new Error('Timed out while managing tmux sessions');
     });
     const harness = createOptions({
-      runtimeActiveSessionId: 'session-beta',
+      runtimeActiveSessionId: 'session-alpha',
       manageTmuxSessionsOnOpenTransport,
-      sessions: [{
-        id: 'session-beta',
+      sessions: [
+        {
+          id: 'session-alpha',
+          bridgeHost: '100.127.23.27',
+          bridgePort: 3333,
+          daemonHostId: 'daemon-a',
+          sessionName: 'alpha',
+          state: 'connected',
+          createdAt: 10,
+        },
+        {
+          id: 'session-beta',
+          bridgeHost: '100.127.23.27',
+          bridgePort: 3333,
+          daemonHostId: 'daemon-a',
+          sessionName: 'beta',
+          state: 'connected',
+          createdAt: 20,
+        },
+      ],
+    });
+    harness.refs.openTabStateRef.current = normalizeOpenTabIntentState([
+      {
+        sessionId: 'session-alpha',
+        hostId: 'daemon-a',
+        connectionName: 'Daemon A',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        sessionName: 'alpha',
+        authToken: 'token-a',
+        createdAt: 10,
+      },
+      {
+        sessionId: 'session-beta',
+        hostId: 'daemon-a',
+        connectionName: 'Daemon A',
         bridgeHost: '100.127.23.27',
         bridgePort: 3333,
         daemonHostId: 'daemon-a',
         sessionName: 'beta',
-        state: 'connected',
+        authToken: 'token-a',
         createdAt: 20,
-      }],
-    });
-    harness.refs.openTabStateRef.current = normalizeOpenTabIntentState([{
-      sessionId: 'session-beta',
-      hostId: 'daemon-a',
-      connectionName: 'Daemon A',
-      bridgeHost: '100.127.23.27',
-      bridgePort: 3333,
-      daemonHostId: 'daemon-a',
-      sessionName: 'beta',
-      authToken: 'token-a',
-      createdAt: 20,
-    }], 'session-beta');
+      },
+    ], 'session-alpha');
     const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
 
     await expect(result.current.handleCloseGroupSession({
@@ -1826,15 +1848,20 @@ describe('useSessionOpenActions explicit-open truth', () => {
     }, 'beta')).rejects.toThrow('Timed out while managing tmux sessions');
 
     expect(harness.spies.closeSession).toHaveBeenNthCalledWith(1, 'session-beta', { preserveTargetTransport: true });
-    expect(harness.spies.closeSession).toHaveBeenNthCalledWith(2, 'session-beta');
-    expect(harness.spies.applyOpenTabState).toHaveBeenCalledWith(
-      {
-        tabs: [],
-        activeSessionId: null,
-      },
-      undefined,
+    expect(harness.spies.closeSession).toHaveBeenCalledTimes(1);
+    expect(manageTmuxSessionsOnOpenTransport).toHaveBeenCalledWith(
+      'session-alpha',
+      { type: 'tmux-kill-session', payload: { sessionName: 'beta' } },
     );
-    expect(harness.refs.closedOpenTabSessionIdsRef.current.has('session-beta')).toBe(true);
+    expect(harness.spies.applyOpenTabState).not.toHaveBeenCalled();
+    expect(harness.spies.switchSession).not.toHaveBeenCalled();
+    expect(harness.refs.openTabStateRef.current.tabs.map((tab) => tab.sessionId)).toEqual([
+      'session-alpha',
+      'session-beta',
+    ]);
+    expect(harness.refs.openTabStateRef.current.activeSessionId).toBe('session-alpha');
+    expect(harness.refs.closedOpenTabSessionIdsRef.current.has('session-alpha')).toBe(false);
+    expect(harness.refs.closedOpenTabSessionIdsRef.current.has('session-beta')).toBe(false);
   });
 
   it('refreshes a relay daemon drawer host through a route-aware target instead of the saved direct route', async () => {

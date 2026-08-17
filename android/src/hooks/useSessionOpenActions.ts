@@ -798,36 +798,26 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
           : undefined,
       );
     };
-    let sessionNames: string[] | null = null;
-    let closeError: unknown = null;
-    try {
-      const hasHealthyReusableSession = Boolean(resolveReusableOpenSessionForTarget(
-        sessionsRef.current.filter((candidate) => !stoppedSessionIdSet.has(candidate.id)),
-        target,
-        '',
-        [terminalActiveSessionIdRef.current, runtimeActiveSessionId],
-        false,
-      ));
-      sessionNames = await manageTmuxSessionsForTarget(
-        target,
-        {
-          type: 'tmux-kill-session',
-          payload: {
-            sessionName,
-          },
+    const hasHealthyReusableSession = Boolean(resolveReusableOpenSessionForTarget(
+      sessionsRef.current.filter((candidate) => !stoppedSessionIdSet.has(candidate.id)),
+      target,
+      '',
+      [terminalActiveSessionIdRef.current, runtimeActiveSessionId],
+      false,
+    ));
+    const sessionNames = await manageTmuxSessionsForTarget(
+      target,
+      {
+        type: 'tmux-kill-session',
+        payload: {
+          sessionName,
         },
-        undefined,
-        hasHealthyReusableSession ? stoppedSessionIds : [],
-      );
-    } catch (error) {
-      closeError = error;
-    } finally {
-      for (const sessionId of stoppedSessionIds) {
-        finalizeStoppedSession(sessionId);
-      }
-    }
-    if (closeError) {
-      throw closeError;
+      },
+      undefined,
+      hasHealthyReusableSession ? stoppedSessionIds : [],
+    );
+    for (const sessionId of stoppedSessionIds) {
+      finalizeStoppedSession(sessionId);
     }
     handleRemoteSessionsRefreshed(target, sessionNames ?? []);
   }, [
