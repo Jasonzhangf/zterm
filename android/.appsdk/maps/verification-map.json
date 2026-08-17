@@ -3,7 +3,8 @@
   "gates":[
     {"gate_id":"contract_valid","command":"appsdk verify .","required_for":["compile","promotion","freeze"]},
     {"gate_id":"sdk_pinned","command":"appsdk pin-lock . --binary /Users/fanzhang/.local/bin/appsdk","required_for":["compile","promotion","freeze"]},
-    {"gate_id":"record_graph","command":"appsdk verify .","required_for":["architecture_stable","freeze","publish"]},
+    {"gate_id":"sdk_binary_locked","command":"pnpm run test:appsdk-verify","required_for":["compile","promotion","freeze"],"status":"active"},
+    {"gate_id":"record_graph","command":"pnpm run test:appsdk-verify","required_for":["architecture_stable","freeze","publish"],"status":"active"},
     {"gate_id":"module_ownership","command":"pnpm run test:feature-registry","required_for":["implementation","review","promotion"]},
     {"gate_id":"shared_contract_ownership","command":"pnpm run test:shared-contract-ownership","required_for":["implementation","review","promotion"],"status":"active"},
     {"gate_id":"terminal_channel_mux_ownership","command":"pnpm run test:feature-registry","required_for":["implementation","review","promotion"],"status":"active"},

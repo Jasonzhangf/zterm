@@ -2,11 +2,11 @@
   "$schema": "https://appsdk.local/contracts/records/regression-report.schema.json",
   "regression_report_id": "REGR-20260816-ZARCHV2-ACTIVEV4-001",
   "module_id": "zterm-runtime-v2",
-  "source_commit": "08047f4a4d09bf182b6f528dedb2be16c44e3f20",
-  "artifact_hash": "sha256:46853d61c160bc51cdf3ddecde759443f83b9df927008a4df90904f56e0be0b5",
-  "public_api_hash": "sha256:28cd5c2a9fd2c8cbd377da74ad15f3bc854c860221b719113ce7148d62991886",
+  "source_commit": "fbe665b36664810d21c68db58844db62ca65f69b",
+  "artifact_hash": "sha256:13b9ae081bc5ef69177b6902a220c6af8e466433b5670291d1946679f1e86f4d",
+  "public_api_hash": "sha256:2acda36c625ff9b329a919c69bf99aef1826dd26276f186a51e42710dfab607f",
   "scope_hash": "sha256:ad06d8f40b865c3b89440b0b0049a7c4a87ae9538a2163f98edf18903f31ac21",
-  "input_hash": "sha256:46853d61c160bc51cdf3ddecde759443f83b9df927008a4df90904f56e0be0b5",
+  "input_hash": "sha256:13b9ae081bc5ef69177b6902a220c6af8e466433b5670291d1946679f1e86f4d",
   "suite_id": "zterm-runtime-v2-regression",
   "command": {
     "program": "pnpm",
@@ -33,11 +33,11 @@
   "result": "pass",
   "producer": {
     "adapter": "vitest",
-    "identity": "codex-zterm-v2-appsdk013-activev4-regression-20260816T212603Z"
+    "identity": "codex-zterm-v2-appsdk013-activev4-closeout-regression-20260817T041230Z"
   },
   "test_characteristics": {
     "whitebox": true,
     "blackbox": true
   },
-  "created_at": "2026-08-16T21:26:03Z"
+  "created_at": "2026-08-17T04:12:30Z"
 }

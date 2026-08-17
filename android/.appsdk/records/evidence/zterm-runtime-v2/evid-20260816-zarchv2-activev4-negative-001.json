@@ -5,25 +5,25 @@
   "experiment_id": "zterm-runtime-architecture-v2-active-v4",
   "phase": "negative_intervention",
   "kind": "negative_test",
-  "source_commit": "08047f4a4d09bf182b6f528dedb2be16c44e3f20",
-  "artifact_hash": "sha256:46853d61c160bc51cdf3ddecde759443f83b9df927008a4df90904f56e0be0b5",
+  "source_commit": "fbe665b36664810d21c68db58844db62ca65f69b",
+  "artifact_hash": "sha256:13b9ae081bc5ef69177b6902a220c6af8e466433b5670291d1946679f1e86f4d",
   "scope": {
     "module_id": "zterm-runtime-v2",
     "feature_id": "zterm_runtime_architecture_v2_appsdk_013_active_v4_final_gates",
-    "entrypoint": "git diff 150fe46..2fa2eae -- runtime owned paths"
+    "entrypoint": "git diff 91f69b2..fbe665b -- runtime owned paths"
   },
   "producer": {
     "adapter": "git",
-    "identity": "codex-zterm-v2-appsdk013-activev4-negative-20260816T212603Z"
+    "identity": "codex-zterm-v2-appsdk013-activev4-closeout-negative-20260817T041300Z"
   },
   "result": "pass",
   "confidence": 1,
-  "confidence_rationale": "Negative guard confirms the candidate changes no daemon/transport/business payload semantics. The runtime-source diff stays inside client.renderer_window and the test environment; the non-immutable clone cache now validates source content before reuse, with no payload or control metadata changes.",
-  "created_at": "2026-08-16T21:26:03Z",
+  "confidence_rationale": "Negative guard confirms the candidate changes no daemon/transport/render/session or business payload semantics. The diff is limited to AppSDK binary lock gate, package/prebuild/CI/release wiring, governance docs, and the compiled artifact; running the standard gate with PATH appsdk 0.1.2 fails before appsdk verify.",
+  "created_at": "2026-08-17T04:13:00Z",
   "expires_at": "2026-11-14T00:00:00Z",
   "input_hashes": [
-    "sha256:46853d61c160bc51cdf3ddecde759443f83b9df927008a4df90904f56e0be0b5",
-    "git:08047f4a4d09bf182b6f528dedb2be16c44e3f20"
+    "sha256:13b9ae081bc5ef69177b6902a220c6af8e466433b5670291d1946679f1e86f4d",
+    "git:fbe665b36664810d21c68db58844db62ca65f69b"
   ],
   "scope_hash": "sha256:ad06d8f40b865c3b89440b0b0049a7c4a87ae9538a2163f98edf18903f31ac21"
 }
