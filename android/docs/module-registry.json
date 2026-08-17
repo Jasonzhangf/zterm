@@ -1718,7 +1718,8 @@
         "src/lib/session-reconnect-store.ts",
         "src/lib/session-transport-runtime.ts",
         "src/lib/traversal/",
-        "src/plugins/NetworkIdentityPlugin.ts"
+        "src/plugins/NetworkIdentityPlugin.ts",
+        "native/android/app/src/main/java/com/zterm/android/NetworkIdentityPlugin.java"
       ]
     },
     {

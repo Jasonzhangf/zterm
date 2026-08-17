@@ -682,20 +682,22 @@
         "src/lib/network-identity.ts",
         "src/lib/session-heartbeat-store.ts",
         "src/lib/session-reconnect-store.ts",
-        "src/lib/session-transport-runtime.ts",
-        "src/lib/traversal/",
-        "src/plugins/NetworkIdentityPlugin.ts"
-      ],
-      "forbidden_paths": [
-        "active/lib/**",
-        "protected/**",
-        "generated/**"
-      ],
-      "verification_gates": [
-        "fix_lifecycle_graph",
-        "mainline_merge_identity"
-      ]
-    },
+      "src/lib/session-transport-runtime.ts",
+      "src/lib/traversal/",
+      "src/plugins/NetworkIdentityPlugin.ts",
+      "native/android/app/src/main/java/com/zterm/android/NetworkIdentityPlugin.java"
+    ],
+    "forbidden_paths": [
+      "active/lib/**",
+      "protected/**",
+      "generated/**"
+    ],
+    "verification_gates": [
+      "fix_lifecycle_graph",
+      "mainline_merge_identity",
+      "android_network_identity"
+    ]
+  },
     {
       "module_id": "client.session_runtime",
       "status": "active",

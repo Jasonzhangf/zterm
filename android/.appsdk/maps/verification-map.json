@@ -56,5 +56,7 @@
     {"gate_id":"source_to_dom","command":"pnpm run daemon:mirror:close-loop","required_for":["data_plane","runtime_closeout"]},
     {"gate_id":"vcs_clean","command":"appsdk verify .","required_for":["freeze"]},
     {"gate_id":"regression_report","command":"appsdk verify .","required_for":["freeze","frozen_integrity"]}
+    ,
+    {"gate_id":"android_network_identity","command":"pnpm exec vitest run src/lib/android-network-identity-truth.test.ts","required_for":["implementation","review","promotion"],"status":"active","binding_paths":["native/android/app/src/main/java/com/zterm/android/NetworkIdentityPlugin.java","src/plugins/NetworkIdentityPlugin.ts","src/lib/network-identity.ts","src/lib/android-network-identity-truth.test.ts","android/.appsdk/maps/module-registry.json","docs/module-registry.json"]}
   ]
 }

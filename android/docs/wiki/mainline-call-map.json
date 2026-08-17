@@ -38,128 +38,128 @@
           "id": "Main",
           "label": "src/main.tsx"
         },
-      {
-        "id": "App",
-        "label": "src/App.tsx"
-      },
-      {
-        "id": "PluginHost",
-        "label": "src/lib/plugin-host/plugin-host-runtime.ts#createPluginHost"
-      },
-      {
-        "id": "CompositionRoot",
-        "label": "src/lib/composition-root/client-composition-root.ts#ClientCompositionRoot"
-      },
-      {
-        "id": "ControlCenter",
-        "label": "src/lib/control-center/client-control-center.ts#ClientControlCenter"
-      },
-      {
-        "id": "PluginHostControlNode",
-        "label": "src/lib/plugin-host/plugin-host-control-node.ts#PluginHostControlNode"
-      },
-      {
-        "id": "CapabilityRegistry",
-        "label": "packages/shared/src/terminal/plugin-capability-registry.ts#PluginCapabilityRegistry"
-      },
-      {
-        "id": "UiSlotRegistry",
-        "label": "packages/shared/src/terminal/plugin-ui-slot-registry.ts#PluginUiSlotRegistry"
-      },
-      {
-        "id": "DebugConsoleContract",
-        "label": "src/lib/plugin-debug-console/debug-console-contract.ts#TerminalDebugOverlayProps"
-      },
-      {
-        "id": "DebugConsoleUiPlugin",
-        "label": "src/lib/plugin-host/debug-console-ui-plugin.tsx#DebugConsoleUiPlugin"
-      },
-      {
-        "id": "TerminalDebugOverlay",
-        "label": "src/pages/TerminalPageDebugOverlay.tsx#TerminalDebugOverlay"
-      },
-      {
-        "id": "SessionDrawerContract",
-        "label": "src/lib/plugin-session-drawer/session-drawer-contract.ts#TerminalSessionDrawerSlot"
-      },
-      {
-        "id": "SessionDrawerUiPlugin",
-        "label": "src/lib/plugin-host/session-drawer-ui-plugin.tsx#SessionDrawerUiPlugin"
-      },
-      {
-        "id": "TerminalSessionDrawer",
-        "label": "src/components/terminal/TerminalSessionDrawer.tsx#TerminalSessionDrawer"
-      },
-      {
-        "id": "FileBrowserContract",
-        "label": "src/lib/plugin-file-browser/file-browser-contract.ts#TerminalFileBrowserSlot"
-      },
-      {
-        "id": "FileBrowserUiPlugin",
-        "label": "src/lib/plugin-host/file-browser-ui-plugin.tsx#FileBrowserUiPlugin"
-      },
-      {
-        "id": "FileTransferSheetPluginRender",
-        "label": "src/components/terminal/FileTransferSheet.tsx#FileTransferSheet"
-      },
-      {
-        "id": "SettingsUpdateContract",
-        "label": "src/lib/plugin-settings-update/settings-update-contract.ts#SettingsUpdateUiSlot"
-      },
-      {
-        "id": "SettingsUpdateUiPlugin",
-        "label": "src/lib/plugin-host/settings-update-ui-plugin.tsx#SettingsUpdateUiPlugin"
-      },
-      {
-        "id": "AppUpdateSectionPluginRender",
-        "label": "src/components/settings/AppUpdateSection.tsx#AppUpdateSection"
-      },
-      {
-        "id": "RemoteWindowContract",
-        "label": "src/lib/plugin-remote-window/remote-window-contract.ts#TerminalRemoteWindowSlot"
-      },
-      {
-        "id": "RemoteWindowUiPlugin",
-        "label": "src/lib/plugin-host/remote-window-ui-plugin.tsx#RemoteWindowUiPlugin"
-      },
-      {
-        "id": "RemoteWindowOverlayPluginRender",
-        "label": "src/components/terminal/RemoteWindowOverlay.tsx#RemoteWindowOverlay"
-      },
-      {
-        "id": "QuickBarContract",
-        "label": "src/lib/plugin-quickbar/quickbar-contract.ts#TerminalQuickBarSlot"
-      },
-      {
-        "id": "QuickBarUiPlugin",
-        "label": "src/lib/plugin-host/quickbar-ui-plugin.tsx#QuickBarUiPlugin"
-      },
-      {
-        "id": "TerminalShellContract",
-        "label": "src/lib/plugin-terminal-shell/terminal-shell-contract.ts#TerminalShellUiSlot"
-      },
-      {
-        "id": "TerminalShellUiPlugin",
-        "label": "src/lib/plugin-host/terminal-shell-ui-plugin.tsx#TerminalShellUiPlugin"
-      },
-      {
-        "id": "TerminalQuickBarPluginRender",
-        "label": "src/components/terminal/TerminalQuickBar.tsx#TerminalQuickBar"
-      },
-      {
-        "id": "SettingsPage",
-        "label": "src/pages/SettingsPage.tsx#SettingsPage"
-      },
-      {
-        "id": "NetworkIdentityCapability",
-        "label": "src/lib/plugin-host/network-identity-capability-plugin.ts#NetworkIdentityCapabilityPlugin"
-      },
-      {
-        "id": "NetworkIdentityRuntime",
-        "label": "src/lib/network-identity.ts#createNetworkIdentityRuntime"
-      },
-      {
-        "id": "RelayControlRuntime",
+        {
+          "id": "App",
+          "label": "src/App.tsx"
+        },
+        {
+          "id": "PluginHost",
+          "label": "src/lib/plugin-host/plugin-host-runtime.ts#createPluginHost"
+        },
+        {
+          "id": "CompositionRoot",
+          "label": "src/lib/composition-root/client-composition-root.ts#ClientCompositionRoot"
+        },
+        {
+          "id": "ControlCenter",
+          "label": "src/lib/control-center/client-control-center.ts#ClientControlCenter"
+        },
+        {
+          "id": "PluginHostControlNode",
+          "label": "src/lib/plugin-host/plugin-host-control-node.ts#PluginHostControlNode"
+        },
+        {
+          "id": "CapabilityRegistry",
+          "label": "packages/shared/src/terminal/plugin-capability-registry.ts#PluginCapabilityRegistry"
+        },
+        {
+          "id": "UiSlotRegistry",
+          "label": "packages/shared/src/terminal/plugin-ui-slot-registry.ts#PluginUiSlotRegistry"
+        },
+        {
+          "id": "DebugConsoleContract",
+          "label": "src/lib/plugin-debug-console/debug-console-contract.ts#TerminalDebugOverlayProps"
+        },
+        {
+          "id": "DebugConsoleUiPlugin",
+          "label": "src/lib/plugin-host/debug-console-ui-plugin.tsx#DebugConsoleUiPlugin"
+        },
+        {
+          "id": "TerminalDebugOverlay",
+          "label": "src/pages/TerminalPageDebugOverlay.tsx#TerminalDebugOverlay"
+        },
+        {
+          "id": "SessionDrawerContract",
+          "label": "src/lib/plugin-session-drawer/session-drawer-contract.ts#TerminalSessionDrawerSlot"
+        },
+        {
+          "id": "SessionDrawerUiPlugin",
+          "label": "src/lib/plugin-host/session-drawer-ui-plugin.tsx#SessionDrawerUiPlugin"
+        },
+        {
+          "id": "TerminalSessionDrawer",
+          "label": "src/components/terminal/TerminalSessionDrawer.tsx#TerminalSessionDrawer"
+        },
+        {
+          "id": "FileBrowserContract",
+          "label": "src/lib/plugin-file-browser/file-browser-contract.ts#TerminalFileBrowserSlot"
+        },
+        {
+          "id": "FileBrowserUiPlugin",
+          "label": "src/lib/plugin-host/file-browser-ui-plugin.tsx#FileBrowserUiPlugin"
+        },
+        {
+          "id": "FileTransferSheetPluginRender",
+          "label": "src/components/terminal/FileTransferSheet.tsx#FileTransferSheet"
+        },
+        {
+          "id": "SettingsUpdateContract",
+          "label": "src/lib/plugin-settings-update/settings-update-contract.ts#SettingsUpdateUiSlot"
+        },
+        {
+          "id": "SettingsUpdateUiPlugin",
+          "label": "src/lib/plugin-host/settings-update-ui-plugin.tsx#SettingsUpdateUiPlugin"
+        },
+        {
+          "id": "AppUpdateSectionPluginRender",
+          "label": "src/components/settings/AppUpdateSection.tsx#AppUpdateSection"
+        },
+        {
+          "id": "RemoteWindowContract",
+          "label": "src/lib/plugin-remote-window/remote-window-contract.ts#TerminalRemoteWindowSlot"
+        },
+        {
+          "id": "RemoteWindowUiPlugin",
+          "label": "src/lib/plugin-host/remote-window-ui-plugin.tsx#RemoteWindowUiPlugin"
+        },
+        {
+          "id": "RemoteWindowOverlayPluginRender",
+          "label": "src/components/terminal/RemoteWindowOverlay.tsx#RemoteWindowOverlay"
+        },
+        {
+          "id": "QuickBarContract",
+          "label": "src/lib/plugin-quickbar/quickbar-contract.ts#TerminalQuickBarSlot"
+        },
+        {
+          "id": "QuickBarUiPlugin",
+          "label": "src/lib/plugin-host/quickbar-ui-plugin.tsx#QuickBarUiPlugin"
+        },
+        {
+          "id": "TerminalShellContract",
+          "label": "src/lib/plugin-terminal-shell/terminal-shell-contract.ts#TerminalShellUiSlot"
+        },
+        {
+          "id": "TerminalShellUiPlugin",
+          "label": "src/lib/plugin-host/terminal-shell-ui-plugin.tsx#TerminalShellUiPlugin"
+        },
+        {
+          "id": "TerminalQuickBarPluginRender",
+          "label": "src/components/terminal/TerminalQuickBar.tsx#TerminalQuickBar"
+        },
+        {
+          "id": "SettingsPage",
+          "label": "src/pages/SettingsPage.tsx#SettingsPage"
+        },
+        {
+          "id": "NetworkIdentityCapability",
+          "label": "src/lib/plugin-host/network-identity-capability-plugin.ts#NetworkIdentityCapabilityPlugin"
+        },
+        {
+          "id": "NetworkIdentityRuntime",
+          "label": "src/lib/network-identity.ts#createNetworkIdentityRuntime"
+        },
+        {
+          "id": "RelayControlRuntime",
           "label": "src/hooks/useRelayDeviceStream.ts#useRelayDeviceStream"
         },
         {
@@ -1248,6 +1248,21 @@
           "relation_status": "via"
         },
         {
+          "from": "Native",
+          "to": "NetworkIdentityCapability",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "native Android NetworkIdentityPlugin.registerPlugin binds NetworkIdentity capability on MainActivity",
+          "semantic_output": "network identity capability is registered in the plugin host, allowing the JS-side wrapper to forward snapshot() calls to the native producer",
+          "status": "anchored",
+          "edge_id": "android_mainline:Native->NetworkIdentityCapability",
+          "resource_from": "resource.platform_terminal_surface",
+          "resource_to": "resource.client_plugin_host",
+          "via_resources": [
+            "resource.plugin_capability_registry"
+          ],
+          "relation_status": "direct"
+        },
+        {
           "from": "SessionContext",
           "to": "SessionLifecycle",
           "owner_feature": "terminal.transport_lifecycle",
@@ -1632,7 +1647,9 @@
           "edge_id": "android_mainline:SharedNodeContract->ClientDebugSnapshotRegistry",
           "resource_from": "resource.runtime_node_registry",
           "resource_to": "resource.client_debug_hub",
-          "via_resources": ["resource.debug_snapshot_registry"],
+          "via_resources": [
+            "resource.debug_snapshot_registry"
+          ],
           "relation_status": "via"
         },
         {
@@ -1890,7 +1907,9 @@
           "edge_id": "android_mainline:RemoteWindowDualStreamSwitch->RemoteWindowMessageRuntime",
           "resource_from": "resource.remote_window_dual_stream_switch",
           "resource_to": "resource.session_transport",
-          "via_resources": ["resource.active_session"],
+          "via_resources": [
+            "resource.active_session"
+          ],
           "relation_status": "via"
         },
         {
@@ -3146,8 +3165,8 @@
           "from": "PreviewModeOwner",
           "to": "PreviewLiveSetProjector",
           "owner_feature": "terminal.session_preview",
-      "semantic_input": "preview-open state and resolved selected ids independent of foreground lifecycle",
-      "semantic_output": "deduplicated stable live session id projection consumed by the dedicated background handoff owner",
+          "semantic_input": "preview-open state and resolved selected ids independent of foreground lifecycle",
+          "semantic_output": "deduplicated stable live session id projection consumed by the dedicated background handoff owner",
           "status": "anchored",
           "edge_id": "android_preview:PreviewModeOwner->PreviewLiveSetProjector",
           "resource_from": "resource.session_preview_mode",
@@ -3201,7 +3220,7 @@
           "to": "TerminalPreviewTile",
           "owner_feature": "terminal.session_preview",
           "semantic_input": "primary or child container slot for one selected open session",
-      "semantic_output": "one read-only tile projection per session; child title/body tap promotes to primary without activation, primary title/body tap activates the full shell, visual ordinal badges stay out of the titlebar, and secondary child previews use passive tail rendering with compact local typography without resize callbacks",
+          "semantic_output": "one read-only tile projection per session; child title/body tap promotes to primary without activation, primary title/body tap activates the full shell, visual ordinal badges stay out of the titlebar, and secondary child previews use passive tail rendering with compact local typography without resize callbacks",
           "status": "anchored",
           "edge_id": "android_preview:WindowGroupLayout->TerminalPreviewTile",
           "resource_from": "resource.ui_projection",
@@ -4335,7 +4354,9 @@
           "edge_id": "daemon_mainline:Http->AttachmentHttpIn01AuthenticatedRequest",
           "resource_from": "resource.daemon_process",
           "resource_to": "resource.attachment_delivery",
-          "via_resources": ["resource.daemon_process"],
+          "via_resources": [
+            "resource.daemon_process"
+          ],
           "relation_status": "via"
         },
         {
@@ -4426,7 +4447,9 @@
           "edge_id": "daemon_mainline:SharedNodeContract->DaemonDebugHub",
           "resource_from": "resource.runtime_node_registry",
           "resource_to": "resource.daemon_debug_hub",
-          "via_resources": ["resource.debug_snapshot_registry"],
+          "via_resources": [
+            "resource.debug_snapshot_registry"
+          ],
           "relation_status": "via"
         },
         {
