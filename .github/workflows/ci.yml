@@ -16,6 +16,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: pnpm/action-setup@v4
+
       - name: Install pinned AppSDK binary
         env:
           APPSDK_URL: https://github.com/Jasonzhangf/appsdk/releases/download/v0.1.3/appsdk-0.1.3-macos-arm64
@@ -28,7 +30,7 @@ jobs:
           echo "$RUNNER_TEMP/appsdk" >> "$GITHUB_PATH"
 
       - name: AppSDK record graph verify
-        run: appsdk verify android
+        run: pnpm --dir android run test:appsdk-verify
 
   repo-layout:
     name: App repo layout gate

@@ -5,25 +5,25 @@
   "experiment_id": "zterm-runtime-architecture-v2-active-v4",
   "phase": "fix_candidate",
   "kind": "positive_test",
-  "source_commit": "08047f4a4d09bf182b6f528dedb2be16c44e3f20",
-  "artifact_hash": "sha256:46853d61c160bc51cdf3ddecde759443f83b9df927008a4df90904f56e0be0b5",
+  "source_commit": "c11485f9c72d3a59f548f2ef90824ef727e9be7b",
+  "artifact_hash": "sha256:b36be6bb152fbcda62452d9879c41f3877637c14af68d3d49613a13c4b879397",
   "scope": {
     "module_id": "zterm-runtime-v2",
     "feature_id": "zterm_runtime_architecture_v2_appsdk_013_active_v4_final_gates",
-    "entrypoint": "pnpm exec vitest run src/lib/session-render-buffer-store.test.ts src/components/terminal/FileTransferSheet.test.tsx src/hooks/useOpenTabRuntime.test.tsx --reporter=dot"
+    "entrypoint": "pnpm run test:appsdk-verify && pnpm run test:feature-registry && pnpm exec tsc -p tsconfig.json --noEmit --pretty false"
   },
   "producer": {
     "adapter": "vitest",
-    "identity": "codex-zterm-v2-appsdk013-activev4-changed-suites-20260816T212603Z"
+    "identity": "codex-zterm-v2-appsdk013-activev4-closeout-changed-suites-20260817T072000Z"
   },
   "result": "pass",
   "confidence": 1,
-  "confidence_rationale": "Changed suites pass on the recorded source commit: session-render-buffer-store 11/11, FileTransferSheet 49/49, useOpenTabRuntime 5/5 (3 files / 65 tests). This records the suites intentionally excluded from the focused 297-test regression report.",
-  "created_at": "2026-08-16T21:26:03Z",
+  "confidence_rationale": "Changed suites pass on the recorded source commit: appsdk binary gate 11/11, feature registry 93/93, function wiki lockstep, and tsc --noEmit. This records the suites covered by the candidate changes before the focused 297-test regression report.",
+  "created_at": "2026-08-17T07:26:00Z",
   "expires_at": "2026-11-14T00:00:00Z",
   "input_hashes": [
-    "sha256:46853d61c160bc51cdf3ddecde759443f83b9df927008a4df90904f56e0be0b5",
-    "git:08047f4a4d09bf182b6f528dedb2be16c44e3f20"
+    "sha256:b36be6bb152fbcda62452d9879c41f3877637c14af68d3d49613a13c4b879397",
+    "git:c11485f9c72d3a59f548f2ef90824ef727e9be7b"
   ],
   "scope_hash": "sha256:ad06d8f40b865c3b89440b0b0049a7c4a87ae9538a2163f98edf18903f31ac21"
 }

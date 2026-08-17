@@ -329,3 +329,18 @@ Out of Scope：
 - 本 round candidate 必须：验证 clone 内容后复用、补 in-place 红测、统一
   安装 global/window storage mock，并在 clean committed HEAD（源码 + 新 records
   一起提交）重跑全部 gate 与 DSH。
+
+## 16. 2026-08-17 main closeout 基线
+
+- 当前 main HEAD：`91f69b2`，AppSDK migration 已合并，但 module 仍为
+  `controlled_verified`，`current.json` 仍指向 active-v3。
+- 直接运行固定路径 AppSDK 0.1.3 对 main 返回 `ok:true`；标准 package gate
+  曾解析到 `/Users/fanzhang/.local/bin/appsdk` 的 0.1.2，并以
+  `NON_CANONICAL_RECORD_CONTRACT_SET` 失败。
+- 首个分歧是执行 binary 真源漂移，不是 0.1.3 contract 内容。标准 gate 必须先
+  校验 PATH 所选 binary 的版本和 SHA 与 `.appsdk/sdk.lock` 完全一致，再调用
+  `appsdk verify`；CI、release 和 prebuild 复用同一 gate。
+- active-v4 顶层缺 Effectiveness、Merge、Promotion、Freeze records；现有 review
+  绑定 `55eec27`，不能作为当前 main exact-HEAD 完成证据。
+- 本轮使用独立 claim `appsdk.active_v4_governance_closeout` 和独立 clean worktree；
+  原 `appsdk.active_v4_promotion` stale claim 不接管、不删除。

@@ -1,19 +1,19 @@
 {
-  "artifact_hash": "sha256:46853d61c160bc51cdf3ddecde759443f83b9df927008a4df90904f56e0be0b5",
+  "artifact_hash": "sha256:b36be6bb152fbcda62452d9879c41f3877637c14af68d3d49613a13c4b879397",
   "artifact_paths": [
     "zterm-runtime-v2.web.tgz"
   ],
   "artifact_schema": 1,
   "artifacts": [
     {
-      "hash": "sha256:c3c4fdf07e1d98f965b6ae1299da5a41f3c091f4947060367dcab35773aa7186",
+      "hash": "sha256:a7d9261dbe414672adaa67b1db04e4a04528c89933de3ea8dce43358607349e1",
       "path": "zterm-runtime-v2.web.tgz"
     }
   ],
   "build": {
     "args": [
       "-lc",
-      "pnpm run build && rm -f generated/modules/zterm-runtime-v2/lib/zterm-runtime-v2.web.tgz && mkdir -p generated/modules/zterm-runtime-v2/lib && tar -czf generated/modules/zterm-runtime-v2/lib/zterm-runtime-v2.web.tgz -C dist ."
+      "ZTERM_BUILD_NUMBER=2652 pnpm run build && rm -f generated/modules/zterm-runtime-v2/lib/zterm-runtime-v2.web.tgz && mkdir -p generated/modules/zterm-runtime-v2/lib && find dist -type d -exec chmod 0755 {} + && find dist -type f -exec chmod 0644 {} + && find dist -exec touch -h -t 200001010000 {} + && (cd dist && find . -print0 | LC_ALL=C sort -z | COPYFILE_DISABLE=1 tar --null --no-recursion --format ustar --uid 0 --gid 0 --uname root --gname root -cf - -T -) | gzip -n > generated/modules/zterm-runtime-v2/lib/zterm-runtime-v2.web.tgz"
     ],
     "program": "bash",
     "working_directory": "."
@@ -21,7 +21,7 @@
   "contract_hash": "sha256:01dc04b8ec8b0fd9b8df5f824f8533085d70bed136dde7335caae426cd8ddff7",
   "dependency_hashes": [],
   "module_id": "zterm-runtime-v2",
-  "public_api_hash": "sha256:28cd5c2a9fd2c8cbd377da74ad15f3bc854c860221b719113ce7148d62991886",
-  "source_hash": "sha256:ad06d8f40b865c3b89440b0b0049a7c4a87ae9538a2163f98edf18903f31ac21",
+  "public_api_hash": "sha256:acf510b4127b4539c145cc596773bd4f22d3c17d23b8a2fc2cde1012dde5faa9",
+  "source_hash": "sha256:74c17396494a46552aae32688149046db32a3cba7baf9f0ea4920bd6ee323273",
   "stage": "controlled_verified"
 }

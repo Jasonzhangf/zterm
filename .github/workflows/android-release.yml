@@ -56,6 +56,9 @@ jobs:
           test "$(shasum -a 256 "$RUNNER_TEMP/appsdk/appsdk" | awk '{print $1}')" = "$APPSDK_SHA256"
           echo "$RUNNER_TEMP/appsdk" >> "$GITHUB_PATH"
 
+      - name: Verify AppSDK binary and record graph
+        run: pnpm --dir android run test:appsdk-verify
+
       - name: Repo layout gate
         run: pnpm run test:repo-layout
 

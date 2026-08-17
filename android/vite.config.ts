@@ -7,10 +7,15 @@ import { buildDisplayVersion, computeNormalVersionCode } from './scripts/app-ver
 const pkg = JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf-8')) as { version: string };
 const appPackageName = 'com.zterm.android';
 const buildMetaPath = resolve(__dirname, '.build-meta.json');
+const envBuildNumber = process.env.ZTERM_BUILD_NUMBER
+  ? Number.parseInt(process.env.ZTERM_BUILD_NUMBER, 10)
+  : undefined;
 const buildMeta = existsSync(buildMetaPath)
   ? (JSON.parse(readFileSync(buildMetaPath, 'utf-8')) as { buildNumber?: number })
   : { buildNumber: 1000 };
-const appBuildNumber = String(Math.max(1000, Math.floor(buildMeta.buildNumber || 1000))).padStart(4, '0');
+const appBuildNumber = String(
+  Math.max(1000, Math.floor(envBuildNumber ?? buildMeta.buildNumber ?? 1000)),
+).padStart(4, '0');
 const appDisplayVersion = buildDisplayVersion(pkg.version, Number.parseInt(appBuildNumber, 10));
 const isVitest = process.env.VITEST === 'true';
 const appVersionCode = computeNormalVersionCode(Number.parseInt(appBuildNumber, 10));

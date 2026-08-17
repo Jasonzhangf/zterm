@@ -1302,6 +1302,25 @@
         "fix_lifecycle_graph",
         "mainline_merge_identity"
       ]
+    },
+    {
+      "module_id": "observability.appsdk_governance",
+      "status": "active",
+      "owner": "appsdk.binary_gate",
+      "owned_paths": [
+        "scripts/verify-appsdk-binary.mjs",
+        "scripts/verify-appsdk-binary.test.mjs"
+      ],
+      "forbidden_paths": [
+        "src/**",
+        "active/lib/**",
+        "protected/**"
+      ],
+      "verification_gates": [
+        "sdk_binary_locked",
+        "record_graph",
+        "module_ownership"
+      ]
     }
   ]
 }

@@ -3533,6 +3533,38 @@
         "docs/decisions/2026-08-09-remote-window-dual-stream-design.md",
         "docs/testing/remote-window-dual-stream-test-design.md"
       ]
+    },
+    {
+      "resource_id": "resource.appsdk_compiler_identity",
+      "status": "active",
+      "resource_type": "governance_control_resource",
+      "identity": "The one PATH-selected AppSDK compiler executable whose version and bytes match project.json and sdk.lock",
+      "owner_feature": "appsdk.binary_gate",
+      "truth_store": "scripts/verify-appsdk-binary.mjs",
+      "allowed_operations": [
+        "resolve_exact_executable",
+        "verify_version",
+        "verify_digest",
+        "execute_record_graph_verify"
+      ],
+      "direct_relations": [],
+      "indirect_relations": [],
+      "via_resources": [],
+      "forbidden_direct_relations": [
+        "resource.daemon_process",
+        "resource.session_transport",
+        "resource.mirror_store",
+        "resource.ui_projection"
+      ],
+      "required_gates": [
+        "scripts/verify-appsdk-binary.test.mjs",
+        "src/lib/resource-registry-truth.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/function-map.md",
+        "docs/testing/appsdk-binary-gate-test-design.md"
+      ]
     }
   ],
   "required_indirect_relations": [

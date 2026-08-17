@@ -47,6 +47,15 @@ describe('function wiki truth gate', () => {
     }
   });
 
+  it('keeps generated mainline html in lockstep with every mermaid section', () => {
+    const html = read('docs/wiki/generated/mainline-source.html');
+
+    expect(html).toContain('<h2>Android Mainline</h2>');
+    expect(html).toContain('<h2>Daemon Mainline</h2>');
+    expect(html).toContain('<h2>CLI Mainline</h2>');
+    expect(html).toContain('AppSdkPrebuildGate');
+  });
+
   it('keeps daemon and cli function ids in the function map', () => {
     const functionMap = read('docs/function-map.md');
     for (const id of requiredFunctionMapIds) {

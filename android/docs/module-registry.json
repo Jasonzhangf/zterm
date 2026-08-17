@@ -3198,6 +3198,43 @@
         "src/lib/remote-window-dual-stream-runtime.ts",
         "src/lib/remote-window-dual-stream-runtime.test.ts"
       ]
+    },
+    {
+      "module_id": "observability.appsdk_governance",
+      "runtime_side": "observability",
+      "level": 1,
+      "parent_module_id": "observability.governance",
+      "owner_feature": "appsdk.binary_gate",
+      "responsibility": "Own the project-side preflight that resolves one AppSDK executable, verifies its project/lock version and digest, then invokes record-graph verification through that exact executable.",
+      "owned_resources": [
+        "resource.appsdk_compiler_identity"
+      ],
+      "consumed_resources": [],
+      "pending_resources": [],
+      "public_interfaces": [
+        "scripts/verify-appsdk-binary.mjs"
+      ],
+      "forbidden_resources": [
+        "resource.daemon_process",
+        "resource.session_transport",
+        "resource.mirror_store",
+        "resource.ui_projection"
+      ],
+      "canonical_docs": [
+        "docs/testing/appsdk-binary-gate-test-design.md",
+        "docs/modules/project-modules.md",
+        "docs/resource-map.md"
+      ],
+      "required_gates": [
+        "scripts/verify-appsdk-binary.test.mjs",
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/resource-registry-truth.test.ts"
+      ],
+      "status": "active",
+      "owned_paths": [
+        "scripts/verify-appsdk-binary.mjs",
+        "scripts/verify-appsdk-binary.test.mjs"
+      ]
     }
   ]
 }

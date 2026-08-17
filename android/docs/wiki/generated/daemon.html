@@ -2,6 +2,7 @@
 <html><head><meta charset="utf-8"><title>Daemon Wiki</title><style>
 body { margin: 24px; background: #f7f3ea; color: #1d2525; font-family: ui-sans-serif, system-ui, sans-serif; }
 h1 { font-size: 24px; margin-bottom: 18px; }
+h2 { font-size: 18px; margin: 28px 0 8px; }
 .wiki-graph { width: 100%; max-width: 1400px; min-height: 220px; background: #fffaf0; border: 1px solid #d9cdb9; border-radius: 18px; box-shadow: 0 12px 36px rgba(50, 40, 25, 0.12); }
 .node rect { fill: #fbf7ed; stroke: #365b54; stroke-width: 1.5; }
 .node text { fill: #1d2525; font-size: 13px; font-weight: 650; }
@@ -158,8 +159,7 @@ h1 { font-size: 24px; margin-bottom: 18px; }
   <rect x="1390" y="34" width="260" height="56" rx="12" />
   <text x="1406" y="68">rtc-bridge.ts (WebRTC signaling)</text>
 </g>
-</svg>
-<pre class="source">flowchart TD
+</svg><pre class="source">flowchart TD
   CLI[&quot;scripts/zterm-daemon.sh run&quot;] --&gt; Stage[&quot;stage_daemon_runtime&quot;]
   Stage --&gt; Server[&quot;src/server/server.ts&quot;]
   Server --&gt; Config[&quot;daemon-config.ts&quot;]

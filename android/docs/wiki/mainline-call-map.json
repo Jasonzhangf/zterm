@@ -4832,6 +4832,30 @@
         {
           "id": "PackageBin",
           "label": "package/bin/zterm-daemon"
+        },
+        {
+          "id": "AppSdkPrebuildGate",
+          "label": "package.json#prebuild"
+        },
+        {
+          "id": "AppSdkCiGate",
+          "label": ".github/workflows/ci.yml#appsdk-governance"
+        },
+        {
+          "id": "AppSdkReleaseGate",
+          "label": ".github/workflows/android-release.yml#Verify AppSDK binary and record graph"
+        },
+        {
+          "id": "AppSdkPackageGate",
+          "label": "package.json#test:appsdk-verify"
+        },
+        {
+          "id": "AppSdkBinaryPreflight",
+          "label": "scripts/verify-appsdk-binary.mjs#verifyPinnedAppSdkBinary"
+        },
+        {
+          "id": "AppSdkRecordGraphVerify",
+          "label": "same absolute AppSDK binary#verify"
         }
       ],
       "edges": [
@@ -5042,6 +5066,71 @@
           "resource_to": "resource.daemon_runtime_artifact",
           "via_resources": [],
           "relation_status": "direct"
+        },
+        {
+          "from": "AppSdkPrebuildGate",
+          "to": "AppSdkPackageGate",
+          "owner_feature": "appsdk.binary_gate",
+          "semantic_input": "local prebuild governance gate intent",
+          "semantic_output": "canonical package AppSDK verification command",
+          "status": "anchored",
+          "edge_id": "cli_mainline:AppSdkPrebuildGate->AppSdkPackageGate",
+          "resource_from": "resource.appsdk_compiler_identity",
+          "resource_to": "resource.appsdk_compiler_identity",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "AppSdkCiGate",
+          "to": "AppSdkPackageGate",
+          "owner_feature": "appsdk.binary_gate",
+          "semantic_input": "CI governance gate intent",
+          "semantic_output": "canonical package AppSDK verification command",
+          "status": "anchored",
+          "edge_id": "cli_mainline:AppSdkCiGate->AppSdkPackageGate",
+          "resource_from": "resource.appsdk_compiler_identity",
+          "resource_to": "resource.appsdk_compiler_identity",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "AppSdkReleaseGate",
+          "to": "AppSdkPackageGate",
+          "owner_feature": "appsdk.binary_gate",
+          "semantic_input": "Android release governance gate intent",
+          "semantic_output": "canonical package AppSDK verification command",
+          "status": "anchored",
+          "edge_id": "cli_mainline:AppSdkReleaseGate->AppSdkPackageGate",
+          "resource_from": "resource.appsdk_compiler_identity",
+          "resource_to": "resource.appsdk_compiler_identity",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "AppSdkPackageGate",
+          "to": "AppSdkBinaryPreflight",
+          "owner_feature": "appsdk.binary_gate",
+          "semantic_input": "project path plus PATH-selected compiler",
+          "semantic_output": "exact compiler identity validation",
+          "status": "anchored",
+          "edge_id": "cli_mainline:AppSdkPackageGate->AppSdkBinaryPreflight",
+          "resource_from": "resource.appsdk_compiler_identity",
+          "resource_to": "resource.appsdk_compiler_identity",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "AppSdkBinaryPreflight",
+          "to": "AppSdkRecordGraphVerify",
+          "owner_feature": "appsdk.binary_gate",
+          "semantic_input": "validated absolute compiler path",
+          "semantic_output": "record graph verification result from the same executable",
+          "status": "anchored",
+          "edge_id": "cli_mainline:AppSdkBinaryPreflight->AppSdkRecordGraphVerify",
+          "resource_from": "resource.appsdk_compiler_identity",
+          "resource_to": "resource.appsdk_compiler_identity",
+          "via_resources": [],
+          "relation_status": "observer"
         }
       ]
     }
