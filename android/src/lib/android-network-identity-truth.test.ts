@@ -59,6 +59,7 @@ describe('Android network identity plugin', () => {
         resource_id: string;
         owner: string;
         truth_store: string;
+        allowed_operations: string[];
         binding_paths: string[];
         required_gates?: string[];
         status: string;
