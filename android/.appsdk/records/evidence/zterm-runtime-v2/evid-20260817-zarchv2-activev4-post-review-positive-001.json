@@ -1,0 +1,29 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "evidence_id": "evid-20260817-zarchv2-activev4-post-review-positive-001",
+  "issue_id": "zterm-runtime-architecture-v2",
+  "experiment_id": "zterm-runtime-architecture-v2-active-v4",
+  "phase": "positive_intervention",
+  "kind": "positive_test",
+  "source_commit": "c11485f9c72d3a59f548f2ef90824ef727e9be7b",
+  "artifact_hash": "sha256:b36be6bb152fbcda62452d9879c41f3877637c14af68d3d49613a13c4b879397",
+  "scope": {
+    "module_id": "zterm-runtime-v2",
+    "feature_id": "zterm_runtime_architecture_v2_appsdk_013_active_v4_final_gates",
+    "entrypoint": "pnpm run test:appsdk-verify && pnpm run test:feature-registry && pnpm exec tsc -p tsconfig.json --noEmit --pretty false"
+  },
+  "producer": {
+    "adapter": "vitest",
+    "identity": "codex-zterm-v2-appsdk013-activev4-closeout-post-review-20260817T074600Z"
+  },
+  "result": "pass",
+  "confidence": 1,
+  "confidence_rationale": "Post-DSH replay confirms unchanged candidate still passes exact AppSDK binary gate 11/11, feature registry 93/93, and tsc --noEmit on clean detached commit 5197b38.",
+  "created_at": "2026-08-17T07:46:00Z",
+  "expires_at": "2026-11-14T00:00:00Z",
+  "input_hashes": [
+    "sha256:b36be6bb152fbcda62452d9879c41f3877637c14af68d3d49613a13c4b879397",
+    "git:c11485f9c72d3a59f548f2ef90824ef727e9be7b"
+  ],
+  "scope_hash": "sha256:ad06d8f40b865c3b89440b0b0049a7c4a87ae9538a2163f98edf18903f31ac21"
+}
