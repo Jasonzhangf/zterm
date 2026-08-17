@@ -12,12 +12,35 @@ const pages = [
   ['modules.md', 'Project Modules Wiki'],
 ];
 
-function extractFirstMermaid(source) {
-  const match = source.match(/```mermaid\n([\s\S]*?)```/);
-  if (!match) {
+function extractMermaidBlocks(source) {
+  const lines = source.split('\n');
+  const blocks = [];
+  let heading = 'Mainline';
+  let index = 0;
+
+  while (index < lines.length) {
+    const line = lines[index].trim();
+    if (line.startsWith('## ')) {
+      heading = line.slice(3).trim();
+    } else if (line === '```mermaid') {
+      const diagram = [];
+      index += 1;
+      while (index < lines.length && lines[index].trim() !== '```') {
+        diagram.push(lines[index]);
+        index += 1;
+      }
+      if (index >= lines.length) {
+        throw new Error('unclosed mermaid block');
+      }
+      blocks.push({ heading, diagram: diagram.join('\n').trim() });
+    }
+    index += 1;
+  }
+
+  if (blocks.length === 0) {
     throw new Error('missing mermaid block');
   }
-  return match[1].trim();
+  return blocks;
 }
 
 function escapeHtml(value) {
@@ -158,12 +181,19 @@ function renderSvg(diagram) {
 </svg>`;
 }
 
-function renderHtml(title, diagram) {
-  const svg = renderSvg(diagram);
+function renderHtml(title, blocks) {
+  const sections = blocks.map((block) => {
+    const svg = renderSvg(block.diagram);
+    const source = `<pre class="source">${escapeHtml(block.diagram)}</pre>`;
+    const heading = blocks.length > 1 ? `<h2>${escapeHtml(block.heading)}</h2>` : '';
+    return `${heading}${svg}${source}`;
+  }).join('\n');
+
   return `<!doctype html>
 <html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>
 body { margin: 24px; background: #f7f3ea; color: #1d2525; font-family: ui-sans-serif, system-ui, sans-serif; }
 h1 { font-size: 24px; margin-bottom: 18px; }
+h2 { font-size: 18px; margin: 28px 0 8px; }
 .wiki-graph { width: 100%; max-width: 1400px; min-height: 220px; background: #fffaf0; border: 1px solid #d9cdb9; border-radius: 18px; box-shadow: 0 12px 36px rgba(50, 40, 25, 0.12); }
 .node rect { fill: #fbf7ed; stroke: #365b54; stroke-width: 1.5; }
 .node text { fill: #1d2525; font-size: 13px; font-weight: 650; }
@@ -172,8 +202,7 @@ h1 { font-size: 24px; margin-bottom: 18px; }
 .source { margin-top: 18px; white-space: pre-wrap; color: #5a635f; font-size: 12px; }
 </style></head><body>
 <h1>${title}</h1>
-${svg}
-<pre class="source">${escapeHtml(diagram)}</pre>
+${sections}
 </body></html>
 `;
 }
@@ -183,6 +212,6 @@ mkdirSync(outDir, { recursive: true });
 
 for (const [file, title] of pages) {
   const sourcePath = join(root, 'docs/wiki', file);
-  const diagram = extractFirstMermaid(readFileSync(sourcePath, 'utf8'));
-  writeFileSync(join(outDir, file.replace(/\.md$/, '.html')), renderHtml(title, diagram));
+  const blocks = extractMermaidBlocks(readFileSync(sourcePath, 'utf8'));
+  writeFileSync(join(outDir, file.replace(/\.md$/, '.html')), renderHtml(title, blocks));
 }
