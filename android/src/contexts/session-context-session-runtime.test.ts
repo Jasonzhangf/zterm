@@ -173,11 +173,13 @@ describe('closeSessionRuntime', () => {
     const deleteSessionSync = vi.fn();
     const setScheduleStates = vi.fn();
 
+    const reconnectStore = createSessionReconnectStore();
+
     closeSessionRuntime({
       sessionId: 'session-1',
       closeOptions: { preserveTargetTransport: true },
       refs: {
-        reconnectStore: createSessionReconnectStore(),
+        reconnectStore,
         pendingSessionTransportOpenIntentsRef: { current: new Map() },
         tailRefreshStore: createSessionTailRefreshStore(),
         lastActiveReentryAtRef: { current: new Map() },
@@ -225,6 +227,7 @@ describe('closeSessionRuntime', () => {
     expect(clearSessionTransportRuntime).not.toHaveBeenCalled();
     expect(deleteSessionSync).not.toHaveBeenCalled();
     expect(setScheduleStates).not.toHaveBeenCalled();
+    expect(reconnectStore.isManualClosed('session-1')).toBe(false);
   });
 
   it('does not send a channel-bound message when the mux channel is already closed', () => {
@@ -1392,9 +1395,11 @@ describe('session transport reuse runtime gates', () => {
     expect(queueConnectTransportOpenIntent).not.toHaveBeenCalled();
   });
 
-  it('reconnectSessionRuntime reuses an open same-target socket without cleanup or forced reconnect', () => {
+  it('reconnectSessionRuntime restores a paused session on an open same-target socket', () => {
     const cleanupSocket = vi.fn();
     const scheduleReconnect = vi.fn();
+    const updateSessionSync = vi.fn();
+    const reconcilePhysicalBodySubscriptions = vi.fn();
 
     reconnectSessionRuntime({
       sessionId: 'session-1',
@@ -1408,6 +1413,8 @@ describe('session transport reuse runtime gates', () => {
               bridgeHost: '127.0.0.1',
               bridgePort: 3333,
               sessionName: 'tmux-1',
+              state: 'disconnected',
+              lastError: 'disconnecting before remote kill',
               authToken: undefined,
               autoCommand: undefined,
               createdAt: 1,
@@ -1427,17 +1434,26 @@ describe('session transport reuse runtime gates', () => {
       runtimeDebug: vi.fn(),
       cleanupSocket,
       writeSessionTransportHost: vi.fn(),
-      updateSessionSync: vi.fn(),
+      updateSessionSync,
+      reconcilePhysicalBodySubscriptions,
       scheduleReconnect,
     } as any);
 
     expect(cleanupSocket).not.toHaveBeenCalled();
     expect(scheduleReconnect).not.toHaveBeenCalled();
+    expect(updateSessionSync).toHaveBeenCalledWith('session-1', expect.objectContaining({
+      state: 'connected',
+      reconnectAttempt: 0,
+      lastError: undefined,
+    }));
+    expect(reconcilePhysicalBodySubscriptions).toHaveBeenCalledWith('reconnect-reuse-open');
   });
 
   it('reconnectSessionRuntime reuses an open same-target mux target socket when the legacy session socket is empty', () => {
     const cleanupSocket = vi.fn();
     const scheduleReconnect = vi.fn();
+    const updateSessionSync = vi.fn();
+    const reconcilePhysicalBodySubscriptions = vi.fn();
     const targetSocket = { readyState: WebSocket.OPEN } as any;
 
     reconnectSessionRuntime({
@@ -1471,12 +1487,19 @@ describe('session transport reuse runtime gates', () => {
       runtimeDebug: vi.fn(),
       cleanupSocket,
       writeSessionTransportHost: vi.fn(),
-      updateSessionSync: vi.fn(),
+      updateSessionSync,
+      reconcilePhysicalBodySubscriptions,
       scheduleReconnect,
     } as any);
 
     expect(cleanupSocket).not.toHaveBeenCalled();
     expect(scheduleReconnect).not.toHaveBeenCalled();
+    expect(updateSessionSync).toHaveBeenCalledWith('session-1', expect.objectContaining({
+      state: 'connected',
+      reconnectAttempt: 0,
+      lastError: undefined,
+    }));
+    expect(reconcilePhysicalBodySubscriptions).toHaveBeenCalledWith('reconnect-reuse-open');
   });
 
   it('reconnectSessionRuntime reopens a closed mux channel on the existing target transport', () => {
@@ -1516,6 +1539,7 @@ describe('session transport reuse runtime gates', () => {
       cleanupSocket,
       writeSessionTransportHost: vi.fn(),
       updateSessionSync: vi.fn(),
+      reconcilePhysicalBodySubscriptions: vi.fn(),
       scheduleReconnect,
     } as any);
 
@@ -1569,6 +1593,7 @@ describe('session transport reuse runtime gates', () => {
       cleanupControlSocket,
       writeSessionTransportHost: vi.fn(),
       updateSessionSync: vi.fn(),
+      reconcilePhysicalBodySubscriptions: vi.fn(),
       scheduleReconnect,
     } as any);
 
@@ -1625,6 +1650,7 @@ describe('session transport reuse runtime gates', () => {
       cleanupSocket: vi.fn(),
       writeSessionTransportHost: vi.fn(),
       updateSessionSync: vi.fn(),
+      reconcilePhysicalBodySubscriptions: vi.fn(),
       scheduleReconnect,
     } as any);
 
@@ -1673,6 +1699,7 @@ describe('session transport reuse runtime gates', () => {
       cleanupSocket,
       writeSessionTransportHost: vi.fn(),
       updateSessionSync: vi.fn(),
+      reconcilePhysicalBodySubscriptions: vi.fn(),
       scheduleReconnect,
     } as any);
 
@@ -1720,6 +1747,7 @@ describe('session transport reuse runtime gates', () => {
       cleanupSocket,
       writeSessionTransportHost: vi.fn(),
       updateSessionSync: vi.fn(),
+      reconcilePhysicalBodySubscriptions: vi.fn(),
       scheduleReconnect,
     } as any);
 

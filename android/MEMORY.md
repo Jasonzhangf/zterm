@@ -2572,3 +2572,53 @@ Tags: #mempalace #source-only-search #generated-artifacts #zterm
   required 256-byte literal chunks give only ~5KB/s backend input throughput.
   `long-input-echo` therefore cannot finish its ~360KB lab payload inside the
   30s oracle timeout; there is no daemon/input diff in `d626524..HEAD`.
+
+# 2026-08-16 2652 rebuilt APK and emulator runtime evidence
+
+- Full `pnpm run build` at `6f808fa` passes with pinned AppSDK 0.1.2 after
+  `prebuild` chmods the android-local node-pty `spawn-helper`; DSH
+  `zterm-6f808fa-build-prebuild-20260816T150500Z` returns literal
+  `VERDICT: PASS` with only P2 robustness notes.
+- Rebuilt debug APK is `0.1.3.2652` (`1100026520`, sha256
+  `a7920ee574a12cf40be6f8944c2e4ea543f48401ab9d83d54ed109233be0ee3c`);
+  rollback APK is `0.1.3.2652.1` (`1100026521`, sha256
+  `447bd5aa88bc8a3e2da2c8a64557b9d6bbe3cf1784b9bdbcbbf92cf717741fef`).
+- Emulator-5554 with the rebuilt APK connected to the host daemon and verified
+  the two product fixes live: drawer close/reopen preserved the same 21-session
+  order, and `seq 1 100000` rendered 47 visible rows with 0 gap fills and no
+  dominant black screenshot region.
+- `~/.zterm/updates/latest.json` now points to 2652; local and Tailscale OTA
+  are live. Public Relay and real-device OTA remain open.
+
+# 2026-08-16 local + Tailscale OTA 2652 live
+
+- Local and Tailscale update channels now serve the verified drawer/black-screen
+  fix APK: `0.1.3.2652`, `1100026520`, sha
+  `a7920ee574a12cf40be6f8944c2e4ea543f48401ab9d83d54ed109233be0ee3c`, rollback
+  `0.1.3.2652.1`, `1100026521`, sha
+  `447bd5aa88bc8a3e2da2c8a64557b9d6bbe3cf1784b9bdbcbbf92cf717741fef`.
+- `prepare-update-bundle.mjs` writes `update-dist`, `release-dist`,
+  `~/.zterm/updates`, and legacy `~/.wterm/updates`; the live daemon serves the
+  same directory without restart. Verify with `verify-update-bundle.mjs` after
+  sourcing `setup-android-java.sh`, because `apkanalyzer` needs Java in PATH.
+- Public Relay was not published in this round; real phone
+  `100.104.163.65:5555` was still offline, so real-device OTA remains the
+  remaining L5 gap.
+
+# 2026-08-16 full-suite split verification
+
+- `@roamhq/wrtc` native teardown still SIGSEGVs `vitest run` after
+  `src/server/remote-window-stream-daemon.test.ts` in the default threads pool.
+  The file itself passes 64/64 with `--pool=forks
+  --poolOptions.forks.singleFork`; all other 384 files pass with
+  `--no-file-parallelism` (3506 passed / 10 skipped). Combined full suite is
+  3570 passed / 10 skipped.
+- Real device `100.104.163.65:5555` remains offline; 2652 real-device L5
+  install/OTA verification is still the remaining product gap.
+
+## 2026-08-17 AppSDK 0.1.3 active-v4 governance closeout
+
+- 候选 commit `5197b38`（branch `work/appsdk-active-v4-closeout-20260817T022328Z`）；candidate source `c11485f`、tree `c4bd28b`、artifact `sha256:b36be6bb…`、diff `sha256:f9f1dc15…`。DSH `zarchv2-appsdk013-closeout-5197b38-20260817T073000Z` 字面 `VERDICT: PASS`，无 P0/P1；仅 4 条 P2（lifecycle 未闭环、determinism gate 未入 CI、CI 缺 Node pin、`vite.config.ts` build number 校验缺失）。
+- 已在 work 分支 commit `0df63f02` 补 `review-record-zterm-runtime-v2.json` + `effectiveness-record-zterm-runtime-v2.json` + 4 条 post-review evidence，绑定 candidate source `c11485f` 与 DSH review 身份；source_unchanged_since_review=true。clean detached `/private/tmp/zterm-appsdk013-closeout-verify-5197b38` 复测：`appsdk verify android` ok:true、`test:appsdk-verify` 11/11、feature registry 93/93、focused regression 297/297 0 skipped、tsc PASS、negative PATH 0.1.2 触发 `APPSDK_BINARY_DIGEST_MISMATCH`。
+- 未授权：merge claim 分支到 main、`appsdk promote-module --to <stable>`、`appsdk freeze`、`appsdk publish-active --version active-v4`、`active/lib/zterm-runtime-v2/current.json` 切到 active-v4、OTA 升级通道重新发布、playground cleanup。授权门禁当前 `authorized_appsdk_013_pending_tails`，pending decisions `ota-republish` / `playground-cleanup` 仍待 Jason 拍板；未授权动作不替 Jason 决策。
+- 真源 hashes：appsdk binary `sha256:e3c36ae2…`、`sdk.lock` compiler_digest 同；resource/function/mainline/verification map hashes 已记录在 review record 与 determinism evidence。

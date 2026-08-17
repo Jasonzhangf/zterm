@@ -43,6 +43,7 @@ function createOptions(overrides: Partial<any> = {}) {
   const pruneSessionGroupSelectionToRemoteTruth = vi.fn();
   const ensureTerminalPageVisible = vi.fn();
   const closeSession = vi.fn();
+  const reconnectSession = vi.fn();
   const switchSession = vi.fn();
   const renameRemoteSession = vi.fn();
   const setPageState = vi.fn();
@@ -102,6 +103,7 @@ function createOptions(overrides: Partial<any> = {}) {
     markSessionGroupEntered,
     createSession,
     closeSession,
+    reconnectSession,
     switchSession,
     runtimeActiveSessionId: overrides.runtimeActiveSessionId ?? null,
     runtimeRefs,
@@ -132,6 +134,7 @@ function createOptions(overrides: Partial<any> = {}) {
       pruneSessionGroupSelectionToRemoteTruth,
       ensureTerminalPageVisible,
       closeSession,
+      reconnectSession,
       switchSession,
       renameRemoteSession,
       applyOpenTabState,
@@ -1647,6 +1650,7 @@ describe('useSessionOpenActions explicit-open truth', () => {
     expect(harness.spies.switchSession).not.toHaveBeenCalled();
     expect(harness.spies.closeSession).toHaveBeenNthCalledWith(1, 'session-beta', { preserveTargetTransport: true });
     expect(harness.spies.closeSession).toHaveBeenNthCalledWith(2, 'session-beta');
+    expect(harness.spies.reconnectSession).not.toHaveBeenCalled();
     expect(harness.refs.openTabStateRef.current).toEqual({
       tabs: [],
       activeSessionId: null,
@@ -1769,6 +1773,8 @@ describe('useSessionOpenActions explicit-open truth', () => {
 
     expect(harness.spies.closeSession).toHaveBeenNthCalledWith(1, 'session-beta', { preserveTargetTransport: true });
     expect(harness.spies.closeSession).toHaveBeenCalledTimes(1);
+    expect(harness.spies.reconnectSession).toHaveBeenCalledTimes(1);
+    expect(harness.spies.reconnectSession).toHaveBeenCalledWith('session-beta');
     expect(manageTmuxSessionsOnOpenTransport).toHaveBeenCalledWith(
       'session-beta',
       { type: 'tmux-kill-session', payload: { sessionName: 'beta' } },
@@ -1849,6 +1855,9 @@ describe('useSessionOpenActions explicit-open truth', () => {
 
     expect(harness.spies.closeSession).toHaveBeenNthCalledWith(1, 'session-beta', { preserveTargetTransport: true });
     expect(harness.spies.closeSession).toHaveBeenCalledTimes(1);
+    expect(harness.spies.reconnectSession).toHaveBeenCalledTimes(1);
+    expect(harness.spies.reconnectSession).toHaveBeenCalledWith('session-beta');
+    expect(harness.spies.reconnectSession).not.toHaveBeenCalledWith('session-alpha');
     expect(manageTmuxSessionsOnOpenTransport).toHaveBeenCalledWith(
       'session-alpha',
       { type: 'tmux-kill-session', payload: { sessionName: 'beta' } },

@@ -88,10 +88,10 @@ the daemon accepts the kill:
 
 ```text
 drawer kill intent
--> stop only the matching logical session while preserving target transport
+-> reversibly pause only the matching logical session without a manual-close marker while preserving target transport
 -> send tmux-kill-session through a healthy sibling channel or the preserved target transport
 -> daemon success: finalize matching local session/open-tab deletion
--> timeout/error: preserve local open-tab intent and every sibling channel
+-> timeout/error: invoke SessionContext reconnectSession for only the paused matching session, preserve the open-tab intent and every sibling channel, then rethrow
 ```
 
 ## L1 Pure Planner Cases
@@ -163,6 +163,7 @@ Negative:
 - Positive: when `tmux-kill-session` succeeds, the matching logical session is first stopped with `preserveTargetTransport`, then finalized locally; unrelated same-target sessions are never closed.
 - Positive: when a healthy same-target sibling session exists, the target control request uses that sibling instead of the stopped session.
 - Negative: transport unavailable, malformed response, daemon error, or timeout must reject explicitly without writing closed tombstones or deleting the matching open-tab intent.
+- Negative: the reversible pre-kill pause must not write a manual-close marker; after timeout or transport-unavailable rejection, the handler must invoke the real `reconnectSession` lifecycle transition for the paused session before rethrowing.
 - Negative: a failed kill must not close, switch, reconnect, or otherwise mutate an unrelated same-target session; its mux channel and target physical transport remain the current truth.
 
 `client.daemon_connection.openSessionTargetTransport()`:

@@ -17,6 +17,7 @@ const MAX_RECONNECT_ATTEMPTS = 12;
 import {
   buildSessionConnectionFields,
   buildSessionClosedUpdates,
+  buildSessionConnectedUpdates,
   buildSessionErrorUpdates,
   buildSessionIdleAfterReconnectBlockedUpdates,
   buildSessionReconnectAttemptProgressUpdates,
@@ -339,7 +340,9 @@ export function closeSessionRuntime(options: {
   setScheduleStates: React.Dispatch<React.SetStateAction<Record<string, SessionScheduleState>>>;
   deleteSessionSync: (id: string) => void;
 }) {
-  options.refs.reconnectStore.markManualClosed(options.sessionId);
+  if (!options.closeOptions?.preserveTargetTransport) {
+    options.refs.reconnectStore.markManualClosed(options.sessionId);
+  }
   deletePendingSessionTransportOpenIntent(
     options.refs.pendingSessionTransportOpenIntentsRef.current as Parameters<typeof deletePendingSessionTransportOpenIntent>[0],
     options.sessionId,
@@ -472,6 +475,7 @@ export function reconnectSessionRuntime(options: {
   cleanupControlSocket?: (sessionId: string, shouldClose?: boolean) => void;
   writeSessionTransportHost: (sessionId: string, host: Host) => unknown;
   updateSessionSync: (id: string, updates: Partial<Session>) => void;
+  reconcilePhysicalBodySubscriptions: (reason: string) => void;
   scheduleReconnect: (
     sessionId: string,
     message: string,
@@ -539,6 +543,8 @@ export function reconnectSessionRuntime(options: {
     options.clearReconnectForSession(options.sessionId);
     options.refs.reconnectStore.clearManualClosed(options.sessionId);
     options.writeSessionTransportHost(options.sessionId, primeState.transportHost);
+    options.updateSessionSync(options.sessionId, buildSessionConnectedUpdates());
+    options.reconcilePhysicalBodySubscriptions('reconnect-reuse-open');
     return;
   }
   if (reusePlan.action === 'wait-existing-open' || reusePlan.action === 'skip') {

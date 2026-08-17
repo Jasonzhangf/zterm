@@ -620,6 +620,7 @@ export function createSessionInfraFacadeRuntime(options: {
     setActiveSessionSync,
     setLiveSessionIdsSync,
     setActiveBodySubscriptionSuppressedSync,
+    reconcilePhysicalBodySubscriptions,
     createSessionSync,
     deleteSessionSync,
     moveSessionSync,

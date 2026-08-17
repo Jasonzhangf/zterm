@@ -7172,6 +7172,14 @@ if (bufferedBytes >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES) {
 
 # 2026-08-16 DSH final-r9 PASS
 
+# 2026-08-16 DSH final d626524 PASS
+
+- DSH `zarchv2-final-d626524-20260816T214500Z` reviewed `d626524` (docs-only
+  clarification after `1ac5ff1`) and returned literal `VERDICT: PASS` with no
+  findings.
+- Authorization gates remain awaiting Jason: AppSDK binary ratify/migrate,
+  OTA republish scope, playground physical cleanup.
+
 - DSH `zarchv2-activev2-final-r9` reviewed commit `77637cf` and returned
   literal `VERDICT: PASS` with no P0/P1.
 - Reviewer independently confirmed the compact-JSON hash claims, the pending
@@ -7302,3 +7310,194 @@ if (bufferedBytes >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES) {
   after Jason authorization.
 - Decision still open: A = restore global v0.1.2; B = reviewed v0.1.3
   migration. DSH `dsh-review` MCP was not exposed in this continuation.
+
+# 2026-08-16 DSH final-49eb200 FAIL: authorization gate not closed
+
+- DSH `zarchv2-final-49eb200-20260816T040338Z` returned `VERDICT: FAIL`.
+- P0: prior global AppSDK 0.1.2 restore and final gate records were produced
+  while the binary-drift decision was still authorization-gated and no Jason
+  decision was recorded.
+- P1: final evidence records were self-produced before the required independent
+  review and while product OTA/cleanup steps remained pending.
+- P2: `~/.zterm/updates/latest.json` still serves stale 2650 APK SHA
+  `06dc7da0...` instead of verified installed APK SHA `3198d6f6...`; OTA
+  republish and playground physical cleanup remain pending.
+- Current source/AppSDK facts are consistent: `appsdk verify android` returns
+  `ok:true` with pinned 0.1.2, installed daemon server.cjs hash matches
+  release-dist, device APK 0.1.3.2650 is installed, and L5 runtime checks all
+  passed. The remaining blocker is explicit Jason authorization/decision for
+  pinned-binary verification, OTA republish, and playground cleanup.
+
+# 2026-08-16 fresh HEAD full build PASS after DSH FAIL
+
+- Re-ran `PATH=/Users/fanzhang/.local/lib/appsdk/0.1.2:$PATH pnpm --dir android run build`
+  at `49eb200`; full prebuild passed (AppSDK verify ok, feature registry 92/92,
+  all wired architecture/plugin/UI/daemon gates, relay smoke), terminal
+  regression 841/841, type-check, and Vite build.
+- Device/daemon state unchanged: APK `0.1.3.2650` SHA
+  `3198d6f6...` installed, daemon `server.cjs` SHA `8c6814b2...` matches
+  release-dist, local and Tailscale health ok.
+- The remaining blocker is unchanged: explicit Jason decision for AppSDK
+  binary, OTA republish, and playground cleanup; DSH final review stays FAIL
+  until those authorization gates are recorded and closed.
+
+# 2026-08-16 source-only DSH PASS for L5 evidence source snapshot
+
+- Built a temporary source-only review snapshot at
+  `/tmp/zterm-v2-source-review-20260816T041500Z` from `8f929a8` plus the exact
+  `android/src` and `android/scripts` diff of `8f929a8..49eb200`; verified
+  `SOURCE_DIFF_IDENTICAL` to main.
+- DSH `zarchv2-source-09dad78-20260816T041333Z` returned literal
+  `VERDICT: PASS`, no P0/P1, with two P2 notes:
+  - P2-1: Herdr file-transfer/remote-screenshot capability truth is projected
+    client-side without a registered feature owner.
+  - P2-2: `fileTransferSupported` conflates file transfer and remote
+    screenshot and can enable file attach for Herdr with a remote-window
+    overlay; existing daemon fail-fast guard remains authoritative.
+- This source PASS does not replace the final `49eb200` DSH gate; the final
+  review still requires the authorization decisions and OTA/cleanup closure.
+
+# 2026-08-16 P2 capability split fix verified
+
+- Split QuickBar capability flags:
+  `fileTransferSupported` (Herdr false always),
+  `imagePasteSupported` (Herdr true only during remote-window input),
+  `remoteScreenshotSupported` (Herdr false always).
+- Registered the Herdr capability gap in `docs/feature-registry.json` and
+  `docs/resource-registry.json`, updated function map and feature gates, and
+  added `terminal-page-status-helpers.test.ts` as a registered gate.
+- Verification:
+  targeted 118 tests PASS, feature registry 92/92 PASS, type-check PASS,
+  full prebuild/build PASS with pinned AppSDK 0.1.2.
+- Authorization gates for AppSDK ratify/OTA republish/playground cleanup remain
+  awaiting Jason.
+
+# 2026-08-16 current HEAD d626524 re-verification
+
+- Re-ran at `d626524`:
+  `appsdk verify .` with pinned 0.1.2 -> `ok:true`, feature registry 92/92,
+  type-check clean, targeted QuickBar/projection/remote-window/session-drawer
+  101/101, and full `pnpm run build` (all prebuild gates + Vite) PASS.
+- DSH `zarchv2-final-d626524-20260816T214500Z` remains literal `VERDICT: PASS`.
+- Global `/Users/fanzhang/.local/bin/appsdk` is currently 0.1.3 again
+  (SHA `e3c36ae2...`), while project `sdk.lock` pins 0.1.2; the current
+  verification above deliberately used the pinned 0.1.2 binary at
+  `/Users/fanzhang/.local/lib/appsdk/0.1.2/appsdk`.
+- AppSDK ratify/migrate, OTA republish, and playground cleanup still require
+  explicit Jason authorization.
+
+# 2026-08-16 drawer + large refresh renderer closeout
+
+- Committed `5dbf9b9` (drawer no longer refreshes/re-sorts on open) and
+  `15df591` (renderer anchor/realign fixes for tall pane and large refresh).
+- Pre-commit gates passed: shared renderer 26/26, TerminalView dynamic refresh
+  79/79, session-context-buffer-runtime 61/61, session-drawer-ui 136/136,
+  terminal frame assembly 109/109, feature registry 92/92, type-check, shared
+  contract ownership, runtime architecture v2.
+- Main-tree full prebuild re-ran with pinned AppSDK 0.1.2; most gates passed.
+  Two unrelated timing/perf tests failed under host load 40-50 (`android-ime`
+  zero-delay IME timer, `session-render-buffer-store` 1000x80 clone perf), so
+  full `pnpm build` is not green in this session. Type-check + Vite production
+  build PASS after the prebuild stop.
+- Manual debug APK built from current main: `0.1.3.2652`
+  (`1100026520`), sha256 `97fe6e94...4fb0`, path
+  `android/native/android/app/build/outputs/apk/debug/app-debug.apk`.
+- `daemon:mirror:close-loop` still only fails `long-input-echo`: source diff
+  `d626524..HEAD` has no daemon/input changes; repeated runs time out because
+  tmux literal send-keys costs ~57ms per 256-byte chunk on this host, far
+  slower than the 30s oracle allows for the ~360KB lab payload.
+- Real device `100.104.163.65:5555` is offline in Tailscale, so drawer and
+  black-screen L5 verification remains pending; install command is
+  `adb install -r <APK>` once the device returns.
+
+# 2026-08-16 active-v4 compile/verify recheck
+
+- Re-ran `appsdk compile-module . --module zterm-runtime-v2` in the claimed
+  active-v4 worktree at `2fa2eae`; AppSDK records bound the active-v4 artifact
+  evidence and the worktree is clean.
+- `appsdk verify .` returned `ok:true` at `2fa2eae` in both the claim worktree
+  and the detached `/private/tmp/zterm-appsdk013-activev4-verify-2fa2eae`.
+- Freeze/publish/merge/OTA/cleanup remain blocked by
+  `.agent-collab/handoff/zterm-v2-authorization-gates.json`
+  (`status: awaiting_jason`); no irreversible action was executed.
+
+# 2026-08-16 0.1.3.2652 full rebuild + emulator runtime evidence
+
+- Full `pnpm run build` now PASS at `cde9deb` with pinned AppSDK 0.1.2 after
+  adding node-pty `spawn-helper` chmod to `prebuild` (package.json only).
+- Rebuilt Android debug APK from the new `dist`: `0.1.3.2652`,
+  `versionCode=1100026520`, sha256
+  `a7920ee574a12cf40be6f8944c2e4ea543f48401ab9d83d54ed109233be0ee3c`.
+  Rollback APK: `0.1.3.2652.1`, `1100026521`, sha256
+  `447bd5aa88bc8a3e2da2c8a64557b9d6bbe3cf1784b9bdbcbbf92cf717741fef`.
+- APK bundle contains `0.1.3.2652`, no `onRefreshHostSessions` /
+  `Failed to refresh host sessions`, and keeps `revision-gap-sparse-payload`.
+- Emulator-5554 installed new APK and connected to the host daemon via
+  `10.0.2.2:3333` with `wterm-4123456`.
+- Drawer runtime check: closed and reopened the portrait drawer with a real
+  daemon catalog; 21 session rows kept the exact same order before and after
+  reopen.
+- Large refresh runtime check: selected `zterm-blank-repro-2652`, sent
+  `seq 1 100000` into the tmux pane. Renderer showed 47 visible rows, 0 gap
+  fills, first row `99958`, last row `100004`, and the screenshot histogram
+  was light/white with no dominant black region.
+- Real phone `100.104.163.65:5555` remains offline; OTA republish and AppSDK
+  decision still require Jason authorization.
+
+# 2026-08-16 DSH PASS for prebuild fix
+
+- Committed the prebuild node-pty helper chmod as `6f808fa`.
+- DSH `zterm-6f808fa-build-prebuild-20260816T150500Z` returned literal
+  `VERDICT: PASS`; no P0/P1. P2 notes: chmod failure is intentionally
+  non-fatal, path pattern diverges slightly from `predev`/`serve:server`, and
+  CI does not invoke `prebuild`.
+- Rebuilt 2652 APK and emulator runtime evidence remain valid; OTA/AppSDK
+  authorization still pending.
+
+# 2026-08-16 local + Tailscale OTA 2652 published
+
+- Jason "继续" treated as authorization for the recommended path: AppSDK stays
+  pinned 0.1.2, publish 2652 to local and Tailscale daemon update dirs, no
+  public Relay publish, no playground deletion.
+- `prepare-update-bundle.mjs` succeeded from rebuilt `app-debug.apk` +
+  `app-rollback-debug.apk`; `verify-update-bundle.mjs` returned `ok:true`
+  after sourcing `setup-android-java.sh`.
+- `~/.zterm/updates`, `~/.wterm/updates`, `update-dist`, and `release-dist`
+  now all point to `0.1.3.2652` / `1100026520` / sha
+  `a7920ee574a12cf40be6f8944c2e4ea543f48401ab9d83d54ed109233be0ee3c`.
+- Live daemon HTTP checks passed on `127.0.0.1:3333` and `100.66.1.82:3333`:
+  `/updates/latest.json` returns 2652 and `/updates/zterm-0.1.3.2652.apk`
+  returns 200.
+- Remaining: real phone is still offline; public Relay not published; cleanup
+  not executed.
+
+# 2026-08-16 full-suite verification split
+
+- Full `vitest run` in threads crashes after
+  `src/server/remote-window-stream-daemon.test.ts` finishes with SIGSEGV
+  (`@roamhq/wrtc` native teardown). The same file passes 64/64 when run with
+  `--pool=forks --poolOptions.forks.singleFork`.
+- All other 384 test files pass with `--no-file-parallelism`:
+  3506 passed / 10 skipped. Combined with the fork run, the complete suite is
+  3570 tests passed / 10 skipped.
+- Real phone `100.104.163.65:5555` is still offline in Tailscale, so real-device
+  install of 2652 remains open.
+
+# 2026-08-17 AppSDK 0.1.3 active-v4 governance closeout
+
+- 候选 commit：`5197b38` (claims branch `work/appsdk-active-v4-closeout-20260817T022328Z`)，candidate source = `c11485f`，tree = `c4bd28b`，diff = `sha256:f9f1dc15...`，artifact = `sha256:b36be6bb...`，scope = `sha256:ad06d8f4...`。
+- 已 commit：`0df63f02` (work branch only) `chore(appsdk): record closeout review and post-review effectiveness for active-v4`，新增 `review-record-zterm-runtime-v2.json`、`effectiveness-record-zterm-runtime-v2.json` 以及 post-review 4 条 evidence，绑定 DSH `zarchv2-appsdk013-closeout-5197b38-20260817T073000Z` VERDICT:PASS。
+- 验证（clean detached `/private/tmp/zterm-appsdk013-closeout-verify-5197b38`）：`appsdk verify android` ok:true stage controlled_verified；`node scripts/verify-appsdk-binary.mjs .` ok:true digest `sha256:e3c36ae2`；`pnpm run test:appsdk-verify` 11/11 PASS；feature registry 93/93 PASS；focused regression 297/297 0 skipped；tsc PASS；negative replay `PATH=/private/tmp/zterm-appsdk-negative-bin:$PATH` 触发 APPSDK_BINARY_DIGEST_MISMATCH（0.1.2 sha256 `3685149e…` vs sdk.lock `e3c36ae2…`）。
+- 授权门禁：`.agent-collab/handoff/zterm-v2-authorization-gates.json` status `authorized_appsdk_013_pending_tails`；pending decisions: `ota-republish` (本地+Tailscale ok,public relay not ok)、`playground-cleanup` (留)。DSH PASS 之后只有 merge→main、`appsdk promote-module --to <stable>`→freeze→`publish-active --version active-v4` 还需要 Jason 显式授权；当前未执行任何不可逆动作。
+- 仍缺口（DSH P2-1 + 已显式 P2）：active-v4 lifecycle records 缺 promotion/freeze/merge；`android/active/lib/zterm-runtime-v2/current.json` 仍指向 active-v3；determinism gate 未入 CI；CI 缺 Node pin；`vite.config.ts` build number 校验缺失。`merge → main → lifecycle 闭环` 等 Jason 授权后做。
+
+# 2026-08-17 active-v4 closeout — pending irreversible decisions
+
+- 授权门禁仍 `authorized_appsdk_013_pending_tails`，未授权 merge/freeze/publish/cleanup/public-Relay。DSH PASS 只是治理范围（91f69b2..5197b38）的 PASS，不代替业务侧变更的 review。
+- claim 分支 `work/appsdk-active-v4-closeout-20260817T022328Z` 相对 main 净 12 commits、75 文件，业务源 `android/src/**` + `packages/shared/**` + `NetworkIdentityPlugin.java` 共 `+191/-2167`，删除 `relay-account-directory.ts`、`ZtermDialog.tsx` 等。这些是历史 DSH review 范围之外的尾段；merge 前需要 Jason 决定是合全集、拆分 governance-only，还是把业务侧单独走一轮 DSH。
+- 完整决策清单：`/Volumes/extension/code/zterm/.agent-collab/runs/20260817T022328Z-Macstudio.local-16231-850833f861db/active-v4-closeout-decision-pack.json`。
+
+# 2026-08-17 active-v4 closeout — DSH coverage corrected
+
+- 重新核对：work/appsdk-active-v4-closeout-20260817T022328Z 唯一落在 DSH 范围（91f69b2..5197b38）之外的提交是 0df63f0（6 个 governance record 文件）。bridge-settings / home-connection / relay-account-directory 删档 / NetworkIdentityPlugin.java / TerminalPage 会话抽屉简化全部在 DSH 评审范围 89ae33d..5197b38 内；决策包 warning 已修正。
+- 当前不可逆动作仍是 merge claim→main → promote/freeze/publish-active/cleanup，等待 Jason 拍板；OTA 仍未授权 Public Relay。

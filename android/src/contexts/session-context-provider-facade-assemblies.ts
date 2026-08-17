@@ -90,6 +90,7 @@ export function useSessionProviderFacadeAssemblies(
     writeSessionTransportHost: core.writeSessionTransportHost,
     writeSessionTerminalChannelName: core.writeSessionTerminalChannelName,
     writeSessionTransportToken: core.writeSessionTransportToken,
+    reconcilePhysicalBodySubscriptions: core.reconcilePhysicalBodySubscriptions,
     daemonConnection: core.daemonConnection,
     readSessionTransportHost: core.readSessionTransportHost,
     readSessionTransportRuntime: core.readSessionTransportRuntime,

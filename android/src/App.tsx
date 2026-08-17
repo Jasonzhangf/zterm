@@ -606,6 +606,7 @@ export function AppContent({
     markSessionGroupEntered,
     createSession,
     closeSession,
+    reconnectSession,
     switchSession,
     renameRemoteSession,
     manageTmuxSessionsOnOpenTransport,

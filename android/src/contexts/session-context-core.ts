@@ -57,7 +57,8 @@ export interface SessionCloseOptions {
    * Keep the daemon-target transport alive while stopping a logical session
    * for a later remote kill. The session is marked disconnected and its body
    * subscription is turned off, but the mux channel/control transport are not
-   * closed yet so the caller can still send target control messages.
+   * closed yet so the caller can still send target control messages. This is
+   * a reversible pre-kill pause, not a committed manual close.
    */
   preserveTargetTransport?: boolean;
 }

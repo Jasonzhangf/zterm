@@ -89,6 +89,7 @@ interface SessionLifecycleRuntimeOptions {
   writeSessionTransportHost: (sessionId: string, host: Host) => unknown;
   writeSessionTerminalChannelName: (sessionId: string, sessionName: string) => unknown;
   writeSessionTransportToken: (sessionId: string, token: string | null) => string | null;
+  reconcilePhysicalBodySubscriptions: (reason: string) => void;
   daemonConnection: ClientDaemonConnection;
   readSessionTransportHost: (sessionId: string) => Host | null;
   readSessionTransportRuntime: (sessionId: string) => { targetKey: string | null } | null;
@@ -240,6 +241,7 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
       cleanupControlSocket: options.cleanupControlSocket,
       writeSessionTransportHost: options.writeSessionTransportHost,
       updateSessionSync: options.updateSessionSync,
+      reconcilePhysicalBodySubscriptions: options.reconcilePhysicalBodySubscriptions,
       scheduleReconnect: options.scheduleReconnect,
     });
   };

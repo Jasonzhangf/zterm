@@ -131,6 +131,7 @@ interface UseSessionOpenActionsOptions {
   onError?: (message: string) => void;
   setPageState: Dispatch<SetStateAction<AppPageState>>;
   auditOpenTabsAgainstRemoteSessions: (reason: OpenTabAuditReason) => Promise<void>;
+  reconnectSession: (sessionId: string) => void;
 }
 
 export interface SessionOpenActionsResult {
@@ -207,6 +208,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     onError,
     setPageState,
     auditOpenTabsAgainstRemoteSessions,
+    reconnectSession,
   } = options;
 
   const {
@@ -805,17 +807,25 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
       [terminalActiveSessionIdRef.current, runtimeActiveSessionId],
       false,
     ));
-    const sessionNames = await manageTmuxSessionsForTarget(
-      target,
-      {
-        type: 'tmux-kill-session',
-        payload: {
-          sessionName,
+    let sessionNames: string[] | null | undefined;
+    try {
+      sessionNames = await manageTmuxSessionsForTarget(
+        target,
+        {
+          type: 'tmux-kill-session',
+          payload: {
+            sessionName,
+          },
         },
-      },
-      undefined,
-      hasHealthyReusableSession ? stoppedSessionIds : [],
-    );
+        undefined,
+        hasHealthyReusableSession ? stoppedSessionIds : [],
+      );
+    } catch (killError) {
+      for (const sessionId of stoppedSessionIds) {
+        reconnectSession(sessionId);
+      }
+      throw killError;
+    }
     for (const sessionId of stoppedSessionIds) {
       finalizeStoppedSession(sessionId);
     }
@@ -828,6 +838,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     handleRemoteSessionsRefreshed,
     manageTmuxSessionsForTarget,
     openTabStateRef,
+    reconnectSession,
     resolveReusableOpenSessionForTarget,
     runtimeActiveSessionIdRef,
     sessionsRef,

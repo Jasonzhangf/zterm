@@ -159,6 +159,7 @@ export interface SessionProviderCoreAssembliesResult {
   setActiveSessionSync: (id: string) => void;
   setLiveSessionIdsSync: (ids: string[]) => void;
   setActiveBodySubscriptionSuppressedSync: (suppressed: boolean, reason?: string) => void;
+  reconcilePhysicalBodySubscriptions: (reason: string) => void;
   createSessionSync: (session: Session) => void;
   deleteSessionSync: (id: string) => void;
   moveSessionSync: (id: string, toIndex: number) => void;
