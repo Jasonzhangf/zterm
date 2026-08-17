@@ -1571,7 +1571,8 @@
         "resource.settings_update_ui_contract",
         "resource.remote_window_ui_contract",
         "resource.quickbar_ui_contract",
-        "resource.terminal_shell_ui_contract"
+        "resource.terminal_shell_ui_contract",
+        "resource.platform_network_signal"
       ],
       "indirect_relations": [
         "resource.session_transport",

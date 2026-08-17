@@ -3215,6 +3215,49 @@
         "docs/debug/2026-08-16-appsdk013-final-gate-fix-design.md",
         "docs/goals/appsdk-0.1.3-active-v4-plan.md"
       ]
+    },
+    {
+      "feature_id": "android_network_identity_snapshot",
+      "title": "Native Android network identity snapshot and capability binding",
+      "domain": "android-platform",
+      "owners": [
+        "src/plugins/NetworkIdentityPlugin.ts",
+        "native/android/app/src/main/java/com/zterm/android/NetworkIdentityPlugin.java"
+      ],
+      "allowed_paths": [
+        "src/plugins/NetworkIdentityPlugin.ts",
+        "src/lib/network-identity.ts",
+        "src/lib/android-network-identity-truth.test.ts",
+        "native/android/app/src/main/java/com/zterm/android/NetworkIdentityPlugin.java",
+        "android/docs/feature-gates.md",
+        "android/docs/feature-registry.json",
+        "android/docs/function-map.md",
+        "android/docs/resource-registry.json",
+        "android/docs/wiki/generated/mainline-source.html",
+        "android/docs/wiki/mainline-call-map.json",
+        "android/docs/wiki/mainline-source.md",
+        "android/.appsdk/maps/function-map.json",
+        "android/.appsdk/maps/module-registry.json",
+        "android/.appsdk/maps/resource-map.json",
+        "android/.appsdk/maps/verification-map.json",
+        "android/docs/module-registry.json",
+        "android/package.json",
+        ".github/workflows/ci.yml"
+      ],
+      "forbidden_paths": [
+        "src/server/",
+        "packages/shared/src/connection/"
+      ],
+      "required_gates": [
+        "src/lib/android-network-identity-truth.test.ts",
+        "src/lib/feature-registry-truth.test.ts"
+      ],
+      "truth_sources": [
+        "docs/function-map.md",
+        "docs/feature-gates.md",
+        "docs/resource-registry.json",
+        "docs/wiki/mainline-call-map.json"
+      ]
     }
   ]
 }

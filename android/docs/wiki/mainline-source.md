@@ -8,6 +8,8 @@ Worker-readable source ownership map. Generated diagram: `docs/wiki/generated/ma
 flowchart TD
   Native["native/android/app/src/main"] --> Capacitor["capacitor.config.ts"]
   Capacitor --> Vite["vite.config.ts"]
+  Native --> NetworkIdentityWrapper["src/plugins/NetworkIdentityPlugin.ts#registerPlugin(NetworkIdentity)"]
+  NetworkIdentityWrapper --> PluginHost["src/plugins/NetworkIdentityPlugin.ts#NetworkIdentityPlugin (Capacitor registerPlugin)"]
   Vite --> Main["src/main.tsx"]
   Main --> App["src/App.tsx"]
   App --> CompositionRoot["src/lib/composition-root/client-composition-root.ts#ClientCompositionRoot"]
