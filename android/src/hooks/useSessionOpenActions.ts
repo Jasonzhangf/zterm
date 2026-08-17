@@ -763,38 +763,34 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
       })) {
         stoppedSessionIds.push(session.id);
         closeSession(session.id, { preserveTargetTransport: true });
-        const closeResult = deriveCloseOpenTabIntent(openTabStateRef.current, session.id, {
-          runtimeActiveSessionId: runtimeActiveSessionIdRef.current,
-          nextActiveCandidateSessionIds: sessionsRef.current
-            .filter((candidate) => candidate.id !== session.id)
-            .map((candidate) => candidate.id),
-          runtimeSessions: sessionsRef.current,
-        });
-        if (closeResult.closedReuseKeyVariants.length > 0) {
-          for (const key of closeResult.closedReuseKeyVariants) {
-            closedOpenTabReuseKeysRef.current.add(key);
-          }
-        }
-        closedOpenTabSessionIdsRef.current.add(session.id);
-        applyOpenTabState(closeResult.nextState);
       }
     }
-    let sessionNames: string[] = [];
-    try {
-      sessionNames = await manageTmuxSessionsForTarget(
-        target,
-        {
-          type: 'tmux-kill-session',
-          payload: {
-            sessionName,
-          },
+    const sessionNames = await manageTmuxSessionsForTarget(
+      target,
+      {
+        type: 'tmux-kill-session',
+        payload: {
+          sessionName,
         },
-        undefined,
-      );
-    } finally {
-      for (const sessionId of stoppedSessionIds) {
-        closeSession(sessionId);
+      },
+      undefined,
+    );
+    for (const sessionId of stoppedSessionIds) {
+      closeSession(sessionId);
+      const closeResult = deriveCloseOpenTabIntent(openTabStateRef.current, sessionId, {
+        runtimeActiveSessionId: runtimeActiveSessionIdRef.current,
+        nextActiveCandidateSessionIds: sessionsRef.current
+          .filter((candidate) => candidate.id !== sessionId)
+          .map((candidate) => candidate.id),
+        runtimeSessions: sessionsRef.current,
+      });
+      if (closeResult.closedReuseKeyVariants.length > 0) {
+        for (const key of closeResult.closedReuseKeyVariants) {
+          closedOpenTabReuseKeysRef.current.add(key);
+        }
       }
+      closedOpenTabSessionIdsRef.current.add(sessionId);
+      applyOpenTabState(closeResult.nextState);
     }
     handleRemoteSessionsRefreshed(target, sessionNames ?? []);
   }, [

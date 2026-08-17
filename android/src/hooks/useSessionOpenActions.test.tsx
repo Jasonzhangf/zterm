@@ -1580,6 +1580,21 @@ describe('useSessionOpenActions explicit-open truth', () => {
   it('disconnects a matching open session before killing it on the remote target', async () => {
     const manageTmuxSessionsOnOpenTransport = vi.fn(async () => {
       expect(harness.spies.closeSession).toHaveBeenCalledWith('session-beta', { preserveTargetTransport: true });
+      expect(harness.refs.openTabStateRef.current).toEqual({
+        tabs: [{
+          sessionId: 'session-beta',
+          hostId: 'daemon-a',
+          connectionName: 'Daemon A',
+          bridgeHost: '100.127.23.27',
+          bridgePort: 3333,
+          daemonHostId: 'daemon-a',
+          sessionName: 'beta',
+          authToken: 'token-a',
+          createdAt: 20,
+        }],
+        activeSessionId: 'session-beta',
+      });
+      expect(harness.spies.applyOpenTabState).not.toHaveBeenCalled();
       return ['alpha'];
     });
     const harness = createOptions({
@@ -1753,16 +1768,27 @@ describe('useSessionOpenActions explicit-open truth', () => {
     }, 'beta')).rejects.toThrow('Existing terminal transport is unavailable for tmux management');
 
     expect(harness.spies.closeSession).toHaveBeenNthCalledWith(1, 'session-beta', { preserveTargetTransport: true });
-    expect(harness.spies.closeSession).toHaveBeenNthCalledWith(2, 'session-beta');
+    expect(harness.spies.closeSession).toHaveBeenCalledTimes(1);
     expect(manageTmuxSessionsOnOpenTransport).toHaveBeenCalledWith(
       'session-beta',
       { type: 'tmux-kill-session', payload: { sessionName: 'beta' } },
     );
     expect(harness.spies.setSessionGroupSelection).not.toHaveBeenCalled();
     expect(harness.refs.openTabStateRef.current).toEqual({
-      tabs: [],
-      activeSessionId: null,
+      tabs: [{
+        sessionId: 'session-beta',
+        hostId: 'daemon-a',
+        connectionName: 'Daemon A',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        sessionName: 'beta',
+        authToken: 'token-a',
+        createdAt: 20,
+      }],
+      activeSessionId: 'session-beta',
     });
+    expect(harness.spies.applyOpenTabState).not.toHaveBeenCalled();
   });
 
   it('refreshes a relay daemon drawer host through a route-aware target instead of the saved direct route', async () => {
