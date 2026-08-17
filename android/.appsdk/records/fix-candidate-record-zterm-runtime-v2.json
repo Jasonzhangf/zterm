@@ -5,9 +5,9 @@
   "module_id": "zterm-runtime-v2",
   "worktree_id": "WT-20260817-ZARCHV2-ACTIVEV4-CLOSEOUT-001",
   "base_commit": "91f69b2a36f00e075a87a35e66879bb7ebd88271",
-  "head_commit": "0a6a1d204374bb55db82aa9f66d01765fb6a80db",
-  "tree_hash": "a03a176964c245eef8c3bd6084f4fcb3799b9d79",
-  "diff_hash": "sha256:4c79e47d2370d1fc3c169c4e9b894358791c8ae9287f018838319e5bf896d414",
+  "head_commit": "c11485f9c72d3a59f548f2ef90824ef727e9be7b",
+  "tree_hash": "c4bd28b0051d1c2225dc2fed9293d2d13220852b",
+  "diff_hash": "sha256:f9f1dc150aa3e430d6841d3efa5002af7aabad42cea8991e580f526950994b70",
   "design_id": "FD-20260816-APPSDK013-FINAL-GATE-01",
   "owner": "zterm-runtime-v2",
   "scope_hash": "sha256:ad06d8f40b865c3b89440b0b0049a7c4a87ae9538a2163f98edf18903f31ac21",
@@ -19,6 +19,7 @@
     "android/.appsdk/maps/module-registry.json",
     "android/.appsdk/maps/resource-map.json",
     "android/.appsdk/maps/verification-map.json",
+    "android/.appsdk/project.json",
     "android/docs/debug/2026-08-16-appsdk013-final-gate-fix-design.md",
     "android/docs/feature-gates.md",
     "android/docs/feature-registry.json",
@@ -29,19 +30,27 @@
     "android/docs/resource-map.md",
     "android/docs/resource-registry.json",
     "android/docs/testing/appsdk-binary-gate-test-design.md",
+    "android/docs/wiki/generated/cli.html",
+    "android/docs/wiki/generated/daemon.html",
+    "android/docs/wiki/generated/mainline-source.html",
+    "android/docs/wiki/generated/modules.html",
     "android/docs/wiki/mainline-call-map.json",
     "android/docs/wiki/mainline-source.md",
     "android/generated/modules/zterm-runtime-v2/lib/zterm-runtime-v2.web.tgz",
     "android/generated/modules/zterm-runtime-v2/module.compiled.json",
     "android/package.json",
+    "android/scripts/build-function-wiki.mjs",
     "android/scripts/verify-appsdk-binary.mjs",
-    "android/scripts/verify-appsdk-binary.test.mjs"
+    "android/scripts/verify-appsdk-binary.test.mjs",
+    "android/src/lib/function-wiki-truth.test.ts",
+    "android/vite.config.ts"
   ],
   "verification_evidence_ids": [
     "evid-20260816-zarchv2-activev4-verify-001",
     "evid-20260816-zarchv2-activev4-positive-001",
     "evid-20260816-zarchv2-activev4-negative-001",
-    "evid-20260816-zarchv2-activev4-changed-suites-001"
+    "evid-20260816-zarchv2-activev4-changed-suites-001",
+    "evid-20260817-zarchv2-activev4-determinism-001"
   ],
-  "created_at": "2026-08-17T03:39:20Z"
+  "created_at": "2026-08-17T07:26:00Z"
 }
