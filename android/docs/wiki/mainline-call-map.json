@@ -47,6 +47,10 @@
           "label": "src/App.tsx"
         },
         {
+          "id": "App_createAppPluginHost",
+          "label": "src/App.tsx#createAppPluginHost"
+        },
+        {
           "id": "PluginHost",
           "label": "src/lib/plugin-host/plugin-host-runtime.ts#createPluginHost"
         },
@@ -1265,13 +1269,13 @@
           "relation_status": "observer"
         },
         {
-          "from": "NetworkIdentityWrapper",
+          "from": "App_createAppPluginHost",
           "to": "PluginHost",
           "owner_feature": "android_network_identity_snapshot",
-          "semantic_input": "App provides the JS NetworkIdentity wrapper as network:native-snapshot",
-          "semantic_output": "plugin host can relay the native snapshot capability",
+          "semantic_input": "App.createAppPluginHost calls host.provideCapability('network:native-snapshot', readNativeNetworkIdentitySnapshot)",
+          "semantic_output": "plugin host exposes network:native-snapshot capability through the declared registry",
           "status": "anchored",
-          "edge_id": "android_mainline:NetworkIdentityWrapper->PluginHost",
+          "edge_id": "android_mainline:App_createAppPluginHost->PluginHost",
           "resource_from": "resource.platform_network_signal",
           "resource_to": "resource.client_plugin_host",
           "via_resources": [

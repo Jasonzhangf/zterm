@@ -9,7 +9,6 @@ flowchart TD
   Native["native/android/app/src/main"] --> Capacitor["capacitor.config.ts"]
   Capacitor --> Vite["vite.config.ts"]
   Native --> NetworkIdentityWrapper["src/plugins/NetworkIdentityPlugin.ts#registerPlugin(NetworkIdentity)"]
-  NetworkIdentityWrapper --> PluginHost["src/plugins/NetworkIdentityPlugin.ts#NetworkIdentityPlugin (Capacitor registerPlugin)"]
   Vite --> Main["src/main.tsx"]
   Main --> App["src/App.tsx"]
   App --> CompositionRoot["src/lib/composition-root/client-composition-root.ts#ClientCompositionRoot"]
@@ -17,6 +16,8 @@ flowchart TD
   App --> ControlCenter["src/lib/control-center/client-control-center.ts#ClientControlCenter"]
   ControlCenter --> PluginHostControlNode["src/lib/plugin-host/plugin-host-control-node.ts#PluginHostControlNode"]
   PluginHostControlNode --> PluginHost
+  App --> App_createAppPluginHost["src/App.tsx#createAppPluginHost (App.createAppPluginHost)"]
+  App_createAppPluginHost --> PluginHost["src/lib/plugin-host/plugin-host-runtime.ts#createPluginHost"]
   App --> PluginHost["src/lib/plugin-host/plugin-host-runtime.ts#createPluginHost"]
   PluginHost --> CapabilityRegistry["packages/shared/src/terminal/plugin-capability-registry.ts#PluginCapabilityRegistry"]
   PluginHost --> UiSlotRegistry["packages/shared/src/terminal/plugin-ui-slot-registry.ts#PluginUiSlotRegistry"]
