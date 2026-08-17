@@ -1579,7 +1579,7 @@ describe('useSessionOpenActions explicit-open truth', () => {
 
   it('disconnects a matching open session before killing it on the remote target', async () => {
     const manageTmuxSessionsOnOpenTransport = vi.fn(async () => {
-      expect(harness.spies.closeSession).toHaveBeenCalledWith('session-beta');
+      expect(harness.spies.closeSession).toHaveBeenCalledWith('session-beta', { preserveTargetTransport: true });
       return ['alpha'];
     });
     const harness = createOptions({
@@ -1630,7 +1630,8 @@ describe('useSessionOpenActions explicit-open truth', () => {
     });
 
     expect(harness.spies.switchSession).not.toHaveBeenCalled();
-    expect(harness.spies.closeSession).toHaveBeenCalledWith('session-beta');
+    expect(harness.spies.closeSession).toHaveBeenNthCalledWith(1, 'session-beta', { preserveTargetTransport: true });
+    expect(harness.spies.closeSession).toHaveBeenNthCalledWith(2, 'session-beta');
     expect(harness.refs.openTabStateRef.current).toEqual({
       tabs: [],
       activeSessionId: null,
@@ -1647,8 +1648,8 @@ describe('useSessionOpenActions explicit-open truth', () => {
     expect(killTmuxSessionMock).not.toHaveBeenCalled();
   });
 
-  it('falls back to a legacy tmux kill after closing the only matching open session', async () => {
-    const manageTmuxSessionsOnOpenTransport = vi.fn(async () => null);
+  it('uses the preserved transport of the only matching open session for the remote kill', async () => {
+    const manageTmuxSessionsOnOpenTransport = vi.fn(async () => ['alpha']);
     const harness = createOptions({
       manageTmuxSessionsOnOpenTransport,
       sessions: [{
@@ -1673,19 +1674,13 @@ describe('useSessionOpenActions explicit-open truth', () => {
       }, 'beta');
     });
 
-    expect(harness.spies.closeSession).toHaveBeenCalledWith('session-beta');
-    expect(manageTmuxSessionsOnOpenTransport).not.toHaveBeenCalled();
-    expect(killTmuxSessionMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        bridgeHost: '100.127.23.27',
-        bridgePort: 3333,
-        daemonHostId: 'daemon-a',
-        relayHostId: 'daemon-a',
-        authToken: 'token-a',
-      }),
-      expect.any(Object),
-      'beta',
+    expect(harness.spies.closeSession).toHaveBeenNthCalledWith(1, 'session-beta', { preserveTargetTransport: true });
+    expect(harness.spies.closeSession).toHaveBeenNthCalledWith(2, 'session-beta');
+    expect(manageTmuxSessionsOnOpenTransport).toHaveBeenCalledWith(
+      'session-beta',
+      { type: 'tmux-kill-session', payload: { sessionName: 'beta' } },
     );
+    expect(killTmuxSessionMock).not.toHaveBeenCalled();
   });
 
   it('does not close unrelated sessions when killing a drawer remote session', async () => {
@@ -1724,7 +1719,6 @@ describe('useSessionOpenActions explicit-open truth', () => {
 
   it('does not report a successful close when the remote kill fails after local disconnect', async () => {
     const manageTmuxSessionsOnOpenTransport = vi.fn(async () => null);
-    killTmuxSessionMock.mockRejectedValueOnce(new Error('target transport failed'));
     const harness = createOptions({
       manageTmuxSessionsOnOpenTransport,
       sessions: [{
@@ -1756,10 +1750,14 @@ describe('useSessionOpenActions explicit-open truth', () => {
       daemonHostId: 'daemon-a',
       relayHostId: 'daemon-a',
       authToken: 'token-a',
-    }, 'beta')).rejects.toThrow('target transport failed');
+    }, 'beta')).rejects.toThrow('Existing terminal transport is unavailable for tmux management');
 
-    expect(harness.spies.closeSession).toHaveBeenCalledWith('session-beta');
-    expect(manageTmuxSessionsOnOpenTransport).not.toHaveBeenCalled();
+    expect(harness.spies.closeSession).toHaveBeenNthCalledWith(1, 'session-beta', { preserveTargetTransport: true });
+    expect(harness.spies.closeSession).toHaveBeenNthCalledWith(2, 'session-beta');
+    expect(manageTmuxSessionsOnOpenTransport).toHaveBeenCalledWith(
+      'session-beta',
+      { type: 'tmux-kill-session', payload: { sessionName: 'beta' } },
+    );
     expect(harness.spies.setSessionGroupSelection).not.toHaveBeenCalled();
     expect(harness.refs.openTabStateRef.current).toEqual({
       tabs: [],

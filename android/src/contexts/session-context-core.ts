@@ -52,6 +52,11 @@ export interface SessionManagerState {
   connectedCount: number;
 }
 
+export interface SessionCloseOptions {
+  /** Keep the daemon-target transport alive after stopping the logical session. */
+  preserveTargetTransport?: boolean;
+}
+
 export type SessionAction =
   | { type: 'CREATE_SESSION'; session: Session }
   | { type: 'UPDATE_SESSION'; id: string; updates: Partial<Session> }
@@ -215,7 +220,7 @@ export interface SessionContextValue {
   scheduleStates: Record<string, SessionScheduleState>;
   getSessionDebugMetrics: (sessionId: string) => SessionDebugOverlayMetrics | null;
   createSession: (host: Host, options?: CreateSessionOptions) => string;
-  closeSession: (id: string) => void;
+  closeSession: (id: string, options?: SessionCloseOptions) => void;
   switchSession: (id: string, options?: { refreshSource?: 'explicit-resume' | 'active-reentry' }) => void;
   setLiveSessionIds: (ids: string[]) => void;
   setActiveBodySubscriptionSuppressed: (suppressed: boolean) => void;

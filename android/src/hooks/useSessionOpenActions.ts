@@ -38,6 +38,7 @@ import type { TerminalSessionCatalog } from '@zterm/shared/protocol';
 import type { Host, PersistedOpenTab, Session, SessionGroupHistory, TraversalRelayDeviceSnapshot } from '../lib/types';
 import type { RelayEndpointCandidate } from '@zterm/shared/relay-directory';
 import type { TerminalMuxTargetClientMessage } from '@zterm/shared/protocol';
+import type { SessionCloseOptions } from '../contexts/session-context-core';
 import {
   buildGeneratedSessionName,
   resolveReusableOpenSessionForTarget,
@@ -108,7 +109,7 @@ interface UseSessionOpenActionsOptions {
       sessionId?: string;
     },
   ) => string;
-  closeSession: (sessionId: string) => void;
+  closeSession: (sessionId: string, options?: SessionCloseOptions) => void;
   switchSession: (sessionId: string) => void;
   renameRemoteSession: (sessionId: string, name: string) => void;
   manageTmuxSessionsOnOpenTransport?: (
@@ -748,7 +749,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     sessionName: string,
   ) => {
     const target = normalizeBridgeTarget(group);
-    const closedSessionIds: string[] = [];
+    const stoppedSessionIds: string[] = [];
     for (const session of sessionsRef.current) {
       if (session.state === 'closed') {
         continue;
@@ -760,8 +761,8 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
         sessionName,
         terminalBackend: target.terminalBackend || 'tmux',
       })) {
-        closedSessionIds.push(session.id);
-        closeSession(session.id);
+        stoppedSessionIds.push(session.id);
+        closeSession(session.id, { preserveTargetTransport: true });
         const closeResult = deriveCloseOpenTabIntent(openTabStateRef.current, session.id, {
           runtimeActiveSessionId: runtimeActiveSessionIdRef.current,
           nextActiveCandidateSessionIds: sessionsRef.current
@@ -778,17 +779,23 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
         applyOpenTabState(closeResult.nextState);
       }
     }
-    const sessionNames = await manageTmuxSessionsForTarget(
-      target,
-      {
-        type: 'tmux-kill-session',
-        payload: {
-          sessionName,
+    let sessionNames: string[] = [];
+    try {
+      sessionNames = await manageTmuxSessionsForTarget(
+        target,
+        {
+          type: 'tmux-kill-session',
+          payload: {
+            sessionName,
+          },
         },
-      },
-      undefined,
-      closedSessionIds,
-    );
+        undefined,
+      );
+    } finally {
+      for (const sessionId of stoppedSessionIds) {
+        closeSession(sessionId);
+      }
+    }
     handleRemoteSessionsRefreshed(target, sessionNames ?? []);
   }, [
     applyOpenTabState,

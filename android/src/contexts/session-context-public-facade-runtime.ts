@@ -37,6 +37,7 @@ import {
 } from './session-context-tmux-management-runtime';
 import type {
   CreateSessionOptions,
+  SessionCloseOptions,
   SessionContextValue,
   SessionManagerState,
 } from './session-context-core';
@@ -350,7 +351,7 @@ export function buildSessionContextValueRuntime(options: {
   scheduleStates: Record<string, SessionScheduleState>;
   getSessionDebugMetrics: (sessionId: string) => SessionDebugOverlayMetrics | null;
   createSession: (host: Session['hostId'] extends string ? any : never, options?: CreateSessionOptions) => string;
-  closeSession: (id: string) => void;
+  closeSession: (id: string, options?: SessionCloseOptions) => void;
   switchSession: (id: string) => void;
   moveSession: (id: string, toIndex: number) => void;
   renameSession: (id: string, name: string) => void;

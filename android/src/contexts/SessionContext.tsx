@@ -23,6 +23,7 @@ import {
 } from './session-context-provider-assemblies';
 import {
   initialSessionManagerState,
+  type SessionCloseOptions,
   type SessionContextValue,
   type SessionProviderProps,
   sessionReducer,
@@ -308,7 +309,7 @@ export function SessionProvider({
   const stableFacade = useMemo(() => ({
     getSessionDebugMetrics: (sessionId: string) => contextRuntimeRef.current.getSessionDebugMetrics(sessionId),
     createSession: (...args: Parameters<typeof createSession>) => contextRuntimeRef.current.createSession(...args),
-    closeSession: (id: string) => contextRuntimeRef.current.closeSession(id),
+    closeSession: (id: string, options?: SessionCloseOptions) => contextRuntimeRef.current.closeSession(id, options),
     switchSession: (id: string, options?: { refreshSource?: 'explicit-resume' | 'active-reentry' }) => (
       contextRuntimeRef.current.switchSession(id, options)
     ),

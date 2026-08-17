@@ -10,6 +10,7 @@ import type { ClientDaemonConnection } from '../lib/client-daemon-connection';
 import type { SessionTailRefreshStore } from '../lib/session-tail-refresh-store';
 import type { SessionReconnectRuntime, SessionReconnectStore } from '../lib/session-reconnect-store';
 import type { BufferFrameAssemblyResourceState } from '../lib/buffer-frame-assembly/session-buffer-frame-assembly';
+import type { SessionCloseOptions } from './session-context-core';
 // 连续自动重连失败上限：达到后停止自动重试并显式报错（避免网络黑洞下
 // 无限循环耗电 + 用户无法感知），active-reentry / resume 仍可手动恢复。
 const MAX_RECONNECT_ATTEMPTS = 12;
@@ -304,6 +305,7 @@ export function createSessionRuntime(options: {
 
 export function closeSessionRuntime(options: {
   sessionId: string;
+  closeOptions?: SessionCloseOptions;
   refs: {
     reconnectStore: SessionReconnectStore;
     pendingSessionTransportOpenIntentsRef: MutableRefObject<Map<string, unknown>>;
@@ -356,6 +358,9 @@ export function closeSessionRuntime(options: {
   options.cleanupSocket(options.sessionId, true);
   if ((targetRuntime?.sessionIds.length || 0) <= 1) {
     options.cleanupControlSocket(options.sessionId, true);
+  }
+  if (options.closeOptions?.preserveTargetTransport) {
+    return;
   }
   options.writeSessionTransportToken(options.sessionId, null);
   options.clearSessionTransportRuntime(options.sessionId);

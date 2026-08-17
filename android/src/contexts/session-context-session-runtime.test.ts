@@ -158,6 +158,60 @@ describe('closeSessionRuntime', () => {
     expect(cleanupSocket).toHaveBeenCalledWith('session-1', true);
     expect(cleanupControlSocket).toHaveBeenCalledWith('session-1', true);
   });
+
+  it('keeps the target transport alive when close preserves it for a later remote kill', () => {
+    const sendSocketPayload = vi.fn();
+    const cleanupSocket = vi.fn();
+    const cleanupControlSocket = vi.fn();
+    const writeSessionTransportToken = vi.fn();
+    const clearSessionTransportRuntime = vi.fn();
+    const deleteSessionSync = vi.fn();
+    const setScheduleStates = vi.fn();
+
+    closeSessionRuntime({
+      sessionId: 'session-1',
+      closeOptions: { preserveTargetTransport: true },
+      refs: {
+        reconnectStore: createSessionReconnectStore(),
+        pendingSessionTransportOpenIntentsRef: { current: new Map() },
+        tailRefreshStore: createSessionTailRefreshStore(),
+        lastActiveReentryAtRef: { current: new Map() },
+        lastConnectedBaselineAtRef: { current: new Map() },
+        sessionVisibleRangeRef: { current: new Map() },
+        sessionRevisionResetRef: { current: new Map() },
+        bufferFrameAssemblyRef: { current: new Map() },
+        sessionBufferStoreRef: { current: { deleteSession: vi.fn() } },
+        sessionRenderGateRef: { current: { deleteSession: vi.fn() } },
+        sessionHeadStoreRef: { current: { deleteSession: vi.fn() } },
+        sessionDebugMetricsStoreRef: { current: { clearSession: vi.fn() } },
+      },
+      clearReconnectForSession: vi.fn(),
+      readSessionTransportRuntime: () => ({ targetKey: 'target-a' }),
+      readSessionTargetRuntime: () => ({ sessionIds: ['session-1'] }),
+      daemonConnection: makeDaemonConnection({ socket: { readyState: WebSocket.OPEN } as any }),
+      sendSocketPayload,
+      runtimeDebug: vi.fn(),
+      cleanupSocket,
+      cleanupControlSocket,
+      writeSessionTransportToken,
+      clearSessionTransportRuntime,
+      setScheduleStates,
+      deleteSessionSync,
+    });
+
+    expect(sendSocketPayload).toHaveBeenCalledWith(
+      'session-1',
+      expect.objectContaining({ readyState: WebSocket.OPEN }),
+      JSON.stringify({ type: 'close' }),
+    );
+    expect(cleanupSocket).toHaveBeenCalledWith('session-1', true);
+    expect(cleanupControlSocket).toHaveBeenCalledWith('session-1', true);
+    expect(writeSessionTransportToken).not.toHaveBeenCalled();
+    expect(clearSessionTransportRuntime).not.toHaveBeenCalled();
+    expect(deleteSessionSync).not.toHaveBeenCalled();
+    expect(setScheduleStates).not.toHaveBeenCalled();
+  });
+
 });
 
 describe('scheduleReconnectRuntime', () => {

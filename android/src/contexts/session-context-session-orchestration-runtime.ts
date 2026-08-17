@@ -6,7 +6,7 @@ import type { SessionHeartbeatStore } from '../lib/session-heartbeat-store';
 import type { SessionTailRefreshStore } from '../lib/session-tail-refresh-store';
 import type { SessionReconnectStore } from '../lib/session-reconnect-store';
 import type { BufferFrameAssemblyResourceState } from '../lib/buffer-frame-assembly/session-buffer-frame-assembly';
-import type { CreateSessionOptions } from './session-context-core';
+import type { CreateSessionOptions, SessionCloseOptions } from './session-context-core';
 import {
   closeSessionRuntime,
   connectSessionRuntime,
@@ -160,9 +160,10 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
     });
   };
 
-  const closeSession = (sessionId: string) => {
+  const closeSession = (sessionId: string, closeOptions?: SessionCloseOptions) => {
     closeSessionRuntime({
       sessionId,
+      closeOptions,
       refs: {
         reconnectStore: options.refs.reconnectStore,
         pendingSessionTransportOpenIntentsRef: options.refs.pendingSessionTransportOpenIntentsRef,
