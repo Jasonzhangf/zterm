@@ -72,6 +72,21 @@ describe('Android network identity plugin', () => {
     expect(signal?.binding_paths).toContain('native/android/app/src/main/java/com/zterm/android/NetworkIdentityPlugin.java');
     expect(signal?.binding_paths).toContain('src/plugins/NetworkIdentityPlugin.ts');
     expect(signal?.required_gates ?? []).toContain('android_network_identity');
+
+    const canonical = JSON.parse(readRepo('android/docs/resource-registry.json')) as {
+      resources: Array<{
+        resource_id: string;
+        owner_feature: string;
+        allowed_operations: string[];
+        truth_store: string;
+        required_gates: string[];
+      }>;
+    };
+    const canonicalSignal = canonical.resources.find((resource) => resource.resource_id === 'resource.platform_network_signal');
+    expect(canonicalSignal?.owner_feature).toBe('terminal.transport_lifecycle');
+    expect(canonicalSignal?.allowed_operations).toEqual(signal?.allowed_operations);
+    expect(canonicalSignal?.truth_store).toContain('NetworkIdentityPlugin.java');
+    expect(canonicalSignal?.required_gates).toContain('src/lib/android-network-identity-truth.test.ts');
   });
 
   it('registers the native snapshot producer in the AppSDK function and verification maps', () => {

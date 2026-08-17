@@ -85,6 +85,9 @@ jobs:
       - name: Feature registry and architecture truth gates
         run: pnpm --dir android run test:feature-registry
 
+      - name: Android network identity owner gate
+        run: pnpm --dir android run test:android-network-identity
+
       - name: Shared foundation contract ownership gate
         run: pnpm --dir android run test:shared-contract-ownership
 

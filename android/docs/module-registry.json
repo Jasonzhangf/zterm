@@ -1719,7 +1719,8 @@
         "src/lib/session-transport-runtime.ts",
         "src/lib/traversal/",
         "src/plugins/NetworkIdentityPlugin.ts",
-        "native/android/app/src/main/java/com/zterm/android/NetworkIdentityPlugin.java"
+        "native/android/app/src/main/java/com/zterm/android/NetworkIdentityPlugin.java",
+        "src/lib/android-network-identity-truth.test.ts"
       ]
     },
     {
