@@ -78,7 +78,7 @@
       "build": {
         "args": [
           "-lc",
-          "pnpm run build && rm -f generated/modules/zterm-runtime-v2/lib/zterm-runtime-v2.web.tgz && mkdir -p generated/modules/zterm-runtime-v2/lib && tar -czf generated/modules/zterm-runtime-v2/lib/zterm-runtime-v2.web.tgz -C dist ."
+          "ZTERM_BUILD_NUMBER=2652 pnpm run build && rm -f generated/modules/zterm-runtime-v2/lib/zterm-runtime-v2.web.tgz && mkdir -p generated/modules/zterm-runtime-v2/lib && tar -czf generated/modules/zterm-runtime-v2/lib/zterm-runtime-v2.web.tgz -C dist ."
         ],
         "program": "bash",
         "working_directory": "."
