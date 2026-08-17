@@ -41,6 +41,7 @@ function makeDaemonConnection(options: {
       sessionId,
       socket,
       terminalSocket: 'terminalSocket' in options ? options.terminalSocket : null,
+      targetRuntime: options.channelState ? { key: 'target-a' } : null,
       channel: options.channelState ? { state: options.channelState } : null,
     })),
     readSessionSocket: vi.fn(() => socket),
@@ -103,6 +104,7 @@ describe('closeSessionRuntime', () => {
       cleanupControlSocket,
       writeSessionTransportToken,
       clearSessionTransportRuntime,
+      updateSessionSync: vi.fn(),
       setScheduleStates,
       deleteSessionSync,
     });
@@ -124,6 +126,7 @@ describe('closeSessionRuntime', () => {
   it('also closes the shared control transport when the last target session is closed', () => {
     const cleanupSocket = vi.fn();
     const cleanupControlSocket = vi.fn();
+    const updateSessionSync = vi.fn();
 
     closeSessionRuntime({
       sessionId: 'session-1',
@@ -151,6 +154,7 @@ describe('closeSessionRuntime', () => {
       cleanupControlSocket,
       writeSessionTransportToken: vi.fn(),
       clearSessionTransportRuntime: vi.fn(),
+      updateSessionSync,
       setScheduleStates: vi.fn(),
       deleteSessionSync: vi.fn(),
     });
@@ -163,6 +167,7 @@ describe('closeSessionRuntime', () => {
     const sendSocketPayload = vi.fn();
     const cleanupSocket = vi.fn();
     const cleanupControlSocket = vi.fn();
+    const updateSessionSync = vi.fn();
     const writeSessionTransportToken = vi.fn();
     const clearSessionTransportRuntime = vi.fn();
     const deleteSessionSync = vi.fn();
@@ -195,6 +200,7 @@ describe('closeSessionRuntime', () => {
       cleanupControlSocket,
       writeSessionTransportToken,
       clearSessionTransportRuntime,
+      updateSessionSync,
       setScheduleStates,
       deleteSessionSync,
     });
@@ -202,14 +208,67 @@ describe('closeSessionRuntime', () => {
     expect(sendSocketPayload).toHaveBeenCalledWith(
       'session-1',
       expect.objectContaining({ readyState: WebSocket.OPEN }),
-      JSON.stringify({ type: 'close' }),
+      JSON.stringify({
+        type: 'body-subscription',
+        payload: {
+          version: 1,
+          subscribed: false,
+        },
+      }),
     );
-    expect(cleanupSocket).toHaveBeenCalledWith('session-1', true);
-    expect(cleanupControlSocket).toHaveBeenCalledWith('session-1', true);
+    expect(cleanupSocket).toHaveBeenCalledWith('session-1', false);
+    expect(cleanupControlSocket).not.toHaveBeenCalled();
+    expect(updateSessionSync).toHaveBeenCalledWith('session-1', expect.objectContaining({
+      state: 'disconnected',
+    }));
     expect(writeSessionTransportToken).not.toHaveBeenCalled();
     expect(clearSessionTransportRuntime).not.toHaveBeenCalled();
     expect(deleteSessionSync).not.toHaveBeenCalled();
     expect(setScheduleStates).not.toHaveBeenCalled();
+  });
+
+  it('does not send a channel-bound message when the mux channel is already closed', () => {
+    const sendSocketPayload = vi.fn();
+    const cleanupSocket = vi.fn();
+    const cleanupControlSocket = vi.fn();
+
+    closeSessionRuntime({
+      sessionId: 'session-1',
+      refs: {
+        reconnectStore: createSessionReconnectStore(),
+        pendingSessionTransportOpenIntentsRef: { current: new Map() },
+        tailRefreshStore: createSessionTailRefreshStore(),
+        lastActiveReentryAtRef: { current: new Map() },
+        lastConnectedBaselineAtRef: { current: new Map() },
+        sessionVisibleRangeRef: { current: new Map() },
+        sessionRevisionResetRef: { current: new Map() },
+        bufferFrameAssemblyRef: { current: new Map() },
+        sessionBufferStoreRef: { current: { deleteSession: vi.fn() } },
+        sessionRenderGateRef: { current: { deleteSession: vi.fn() } },
+        sessionHeadStoreRef: { current: { deleteSession: vi.fn() } },
+        sessionDebugMetricsStoreRef: { current: { clearSession: vi.fn() } },
+      },
+      clearReconnectForSession: vi.fn(),
+      readSessionTransportRuntime: () => ({ targetKey: 'target-a' }),
+      readSessionTargetRuntime: () => ({ sessionIds: ['session-1'] }),
+      daemonConnection: makeDaemonConnection({
+        socket: { readyState: WebSocket.OPEN } as any,
+        channelState: 'closed',
+      }),
+      sendSocketPayload,
+      runtimeDebug: vi.fn(),
+      cleanupSocket,
+      cleanupControlSocket,
+      writeSessionTransportToken: vi.fn(),
+      clearSessionTransportRuntime: vi.fn(),
+      updateSessionSync: vi.fn(),
+      setScheduleStates: vi.fn(),
+      deleteSessionSync: vi.fn(),
+    });
+
+    expect(sendSocketPayload).not.toHaveBeenCalled();
+    expect(cleanupSocket).toHaveBeenCalledWith('session-1', true);
+    expect(cleanupControlSocket).toHaveBeenCalledWith('session-1', true);
   });
 
 });

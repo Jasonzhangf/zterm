@@ -16,6 +16,7 @@ import type { SessionCloseOptions } from './session-context-core';
 const MAX_RECONNECT_ATTEMPTS = 12;
 import {
   buildSessionConnectionFields,
+  buildSessionClosedUpdates,
   buildSessionErrorUpdates,
   buildSessionIdleAfterReconnectBlockedUpdates,
   buildSessionReconnectAttemptProgressUpdates,
@@ -334,6 +335,7 @@ export function closeSessionRuntime(options: {
   cleanupControlSocket: (sessionId: string, shouldClose?: boolean) => void;
   writeSessionTransportToken: (sessionId: string, token: string | null) => string | null;
   clearSessionTransportRuntime: (sessionId: string) => unknown;
+  updateSessionSync: (id: string, updates: Partial<Session>) => void;
   setScheduleStates: React.Dispatch<React.SetStateAction<Record<string, SessionScheduleState>>>;
   deleteSessionSync: (id: string) => void;
 }) {
@@ -345,22 +347,36 @@ export function closeSessionRuntime(options: {
   options.clearReconnectForSession(options.sessionId);
   const transportRuntime = options.readSessionTransportRuntime(options.sessionId);
   const targetRuntime = options.readSessionTargetRuntime(options.sessionId);
-
-  const ws = options.daemonConnection.readSessionSocket(options.sessionId);
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    options.sendSocketPayload(options.sessionId, ws, JSON.stringify({ type: 'close' }));
+  const sessionResource = options.daemonConnection.readSessionResource(options.sessionId);
+  const ws = sessionResource.socket;
+  const channelMessageOpen = !sessionResource.targetRuntime || !sessionResource.channel
+    || sessionResource.channel.state === 'opening'
+    || sessionResource.channel.state === 'open';
+  if (ws && ws.readyState === WebSocket.OPEN && channelMessageOpen) {
+    const stopMessage = options.closeOptions?.preserveTargetTransport
+      ? JSON.stringify({
+          type: 'body-subscription',
+          payload: {
+            version: 1,
+            subscribed: false,
+          },
+        })
+      : JSON.stringify({ type: 'close' });
+    options.sendSocketPayload(options.sessionId, ws, stopMessage);
   }
   options.runtimeDebug('session.close', {
     sessionId: options.sessionId,
     targetKey: transportRuntime?.targetKey || null,
     targetSessionCount: targetRuntime?.sessionIds.length || 0,
+    preserveTargetTransport: Boolean(options.closeOptions?.preserveTargetTransport),
   });
-  options.cleanupSocket(options.sessionId, true);
+  options.cleanupSocket(options.sessionId, options.closeOptions?.preserveTargetTransport ? false : true);
+  if (options.closeOptions?.preserveTargetTransport) {
+    options.updateSessionSync(options.sessionId, buildSessionClosedUpdates('disconnecting before remote kill'));
+    return;
+  }
   if ((targetRuntime?.sessionIds.length || 0) <= 1) {
     options.cleanupControlSocket(options.sessionId, true);
-  }
-  if (options.closeOptions?.preserveTargetTransport) {
-    return;
   }
   options.writeSessionTransportToken(options.sessionId, null);
   options.clearSessionTransportRuntime(options.sessionId);

@@ -188,6 +188,7 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
       cleanupControlSocket: options.cleanupControlSocket,
       writeSessionTransportToken: options.writeSessionTransportToken,
       clearSessionTransportRuntime: options.clearSessionTransportRuntime,
+      updateSessionSync: options.updateSessionSync,
       setScheduleStates: options.setScheduleStates,
       deleteSessionSync: options.deleteSessionSync,
     });
