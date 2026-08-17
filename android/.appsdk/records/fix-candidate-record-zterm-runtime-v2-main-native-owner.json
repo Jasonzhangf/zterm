@@ -5,9 +5,9 @@
   "module_id": "zterm-runtime-v2",
   "worktree_id": "WT-20260817-ZARCHV2-ACTIVEV4-MAIN-CLOSEOUT-001",
   "base_commit": "b941affb7c89021bb5662a7686fc52847a639e6c",
-  "head_commit": "6a981dabba928f50928a0da71b4a332cac8afcc1",
-  "tree_hash": "ed77d27fe58d726c127e3a89adf7f67218f5e153",
-  "diff_hash": "sha256:7e13e124177d983f716a38b1bf79d58355c790193284d9913ff97103599e9207",
+  "head_commit": "c0f0fb330c1d153cd237f68918903c2f4e5770bb",
+  "tree_hash": "a3c61e30850168548ae0c4f356318da3a9251dc1",
+  "diff_hash": "sha256:6db77d2a1e3e1a13448c12b0f7cd98c26a9940a9e92ecc0db21e37060e34eab5",
   "design_id": "FD-20260817-APPSDK013-ACTIVEV4-MAIN-NATIVE-OWNER-01",
   "owner": "zterm-runtime-v2",
   "scope_hash": "sha256:e939fc3be8c64425b047abeb47a1c108890be6427825360f742cb7b44edb9790",
@@ -17,8 +17,13 @@
     "android/.appsdk/maps/resource-map.json",
     "android/.appsdk/maps/verification-map.json",
     "android/docs/module-registry.json",
+    "android/docs/resource-registry.json",
     "android/docs/wiki/mainline-call-map.json",
-    "android/src/lib/android-network-identity-truth.test.ts"
+    "android/docs/function-map.md",
+    "android/src/lib/android-network-identity-truth.test.ts",
+    "android/package.json",
+    ".github/workflows/ci.yml",
+    "android/generated/modules/zterm-runtime-v2/module.compiled.json"
   ],
   "verification_evidence_ids": [
     "evid-20260817-zarchv2-activev4-main-verify-001",
@@ -30,4 +35,3 @@
   ],
   "created_at": "2026-08-17T19:50:00Z"
 }
-
