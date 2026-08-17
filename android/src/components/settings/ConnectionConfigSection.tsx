@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useTraversalRelayAccount } from '../../hooks/useTraversalRelayAccount';
 import {
+  canonicalizeBridgeServerPresets,
   describeBridgePresetIdentity,
   resolveBridgePresetDaemonHostId,
   setDefaultBridgeServer,
@@ -47,12 +48,26 @@ interface RelayOnlineEntry {
 
 type UnifiedEntry = ConnectionEntry | RelayOnlineEntry;
 
+function resolvePresetCanonicalDaemonHostId(
+  server: BridgeServerPreset,
+  relayDevices: TraversalRelayDeviceSnapshot[],
+) {
+  return resolveRelayDaemonCanonicalHostId({
+    relayHostId: server.relayHostId,
+    relayDeviceId: server.relayDeviceId,
+    authToken: server.authToken,
+    bridgeHost: server.targetHost,
+    bridgePort: server.targetPort,
+  }, relayDevices) || resolveBridgePresetDaemonHostId(server);
+}
+
 function resolveBoundBridgePreset(
   servers: BridgeServerPreset[],
   relayHostId: string,
+  relayDevices: TraversalRelayDeviceSnapshot[],
 ): BridgeServerPreset | null {
   return servers.find((server) => {
-    const serverHostId = resolveBridgePresetDaemonHostId(server);
+    const serverHostId = resolvePresetCanonicalDaemonHostId(server, relayDevices);
     return serverHostId === relayHostId && server.targetHost?.trim() && server.authToken?.trim();
   }) || null;
 }
@@ -62,6 +77,9 @@ export function buildConnectionConfigEntries(
   relayDevices: TraversalRelayDeviceSnapshot[],
 ): UnifiedEntry[] {
   const entries: UnifiedEntry[] = [];
+  const canonicalized = canonicalizeBridgeServerPresets(settings.servers);
+  const canonicalizedServers = canonicalized.servers;
+  const effectiveDefaultServerId = canonicalized.idAliases.get(settings.defaultServerId || '') || settings.defaultServerId;
 
   // Online relay devices deduplicated by canonical hostId
   const canonicalDeviceMap = new Map<string, TraversalRelayDeviceSnapshot[]>();
@@ -79,7 +97,7 @@ export function buildConnectionConfigEntries(
   // Merge relay online devices
   for (const [canonicalHostId, devices] of canonicalDeviceMap) {
     const primaryDevice = devices[0]!;
-    const boundPreset = resolveBoundBridgePreset(settings.servers, canonicalHostId);
+    const boundPreset = resolveBoundBridgePreset(canonicalizedServers, canonicalHostId, relayDevices);
     const displayLabel = primaryDevice.deviceName?.trim() || canonicalHostId;
     entries.push({
       kind: 'relay-online',
@@ -92,16 +110,18 @@ export function buildConnectionConfigEntries(
   }
 
   // Bridge server presets
-  const presets = sortBridgeServers(settings.servers);
+  const presets = sortBridgeServers(canonicalizedServers);
   const assignedHostIds = new Set(canonicalDeviceMap.keys());
   for (const server of presets) {
-    const daemonHostId = resolveBridgePresetDaemonHostId(server);
-    // Skip presets already covered by relay online daemon
-    if (daemonHostId && assignedHostIds.has(daemonHostId)) {
+    const daemonHostId = resolvePresetCanonicalDaemonHostId(server, relayDevices);
+    // Complete presets are shown through the unified relay-online row.
+    // Incomplete presets stay visible so their saved target is still manageable.
+    const completePreset = Boolean(server.targetHost?.trim() && server.authToken?.trim());
+    if (completePreset && daemonHostId && assignedHostIds.has(daemonHostId)) {
       continue;
     }
     const identity = describeBridgePresetIdentity(server);
-    const active = server.id === settings.defaultServerId;
+    const active = server.id === effectiveDefaultServerId;
     entries.push({
       kind: 'bridge-preset',
       server,
@@ -137,6 +157,11 @@ export function ConnectionConfigSection({
   const accountName = account?.user?.username || account?.username || settings.traversalRelay?.username || 'Unknown';
   const deviceCount = relayDevices.length;
   const busy = relayBusy !== null;
+  const relayStatusIsError = Boolean(
+    relayStatus
+    && !relayStatus.includes('已登录')
+    && !relayBusy
+  );
 
   // Draft state for adding a new bridge preset
   const [draft, setDraft] = useState({
@@ -152,11 +177,21 @@ export function ConnectionConfigSection({
     () => account?.username || settings.traversalRelay?.username || '',
   );
   const [loginPassword, setLoginPassword] = useState('');
+  const [expanded, setExpanded] = useState(false);
 
   // Unified entries
+  const canonicalizedSettings = canonicalizeBridgeServerPresets(settings.servers);
+  const effectiveDefaultServerId = canonicalizedSettings.idAliases.get(settings.defaultServerId || '') || settings.defaultServerId;
   const entries = buildConnectionConfigEntries(settings, relayDevices);
 
   const canAddServer = draft.targetHost.trim().length > 0;
+  const hasDefaultServer = canonicalizedSettings.servers.some((server) => server.id === effectiveDefaultServerId);
+  const defaultServer = canonicalizedSettings.servers.find((server) => server.id === effectiveDefaultServerId) || null;
+  const connectionSummary = [
+    loggedIn ? `${accountName} 已登录` : 'Relay 未登录',
+    defaultServer ? `默认 ${defaultServer.name || defaultServer.targetHost}` : '无默认直连',
+    `${entries.length} 个连接`,
+  ].join(' · ');
   const handleAddServer = () => {
     const targetHost = draft.targetHost.trim();
     if (!targetHost) {
@@ -194,7 +229,43 @@ export function ConnectionConfigSection({
 
   return (
     <div style={settingsSectionStyle()}>
-      <SettingsSectionTitle>连接配置</SettingsSectionTitle>
+      <button
+        type="button"
+        data-testid="settings-connection-config-expand"
+        onClick={() => setExpanded((current) => !current)}
+        style={{
+          width: '100%',
+          border: `1px solid ${mobileTheme.colors.lightBorder}`,
+          borderRadius: '18px',
+          padding: '14px 16px',
+          backgroundColor: '#ffffff',
+          color: mobileTheme.colors.lightText,
+          boxShadow: mobileTheme.shadow.soft,
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '12px',
+          textAlign: 'left',
+        }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: '15px', fontWeight: 900 }}>连接配置</div>
+          <div
+            data-testid="settings-connection-config-summary"
+            style={{ marginTop: '5px', fontSize: '12px', color: mobileTheme.colors.lightMuted, lineHeight: 1.45 }}
+          >
+            {connectionSummary}
+          </div>
+        </div>
+        <span style={{ flex: '0 0 auto', fontSize: '12px', fontWeight: 800, color: mobileTheme.colors.shell }}>
+          {expanded ? '收起' : '展开'}
+        </span>
+      </button>
+
+      {expanded ? (
+        <>
+      <SettingsSectionTitle>Relay 与直连</SettingsSectionTitle>
 
       {/* Relay account card */}
       <div
@@ -343,8 +414,17 @@ export function ConnectionConfigSection({
             >
               {busy ? '登录中…' : '登录'}
             </button>
-            <div style={{ fontSize: '12px', color: mobileTheme.colors.lightMuted, lineHeight: 1.5 }}>
-              凭据仅发送到固定 Relay 服务
+            <div
+              data-testid="settings-relay-login-status"
+              role={relayStatusIsError ? 'alert' : 'status'}
+              style={{
+                minHeight: '20px',
+                fontSize: '12px',
+                lineHeight: 1.5,
+                color: relayStatusIsError ? '#a22c3f' : mobileTheme.colors.lightMuted,
+              }}
+            >
+              {relayStatus && !relayStatus.includes('已登录') ? relayStatus : '凭据仅发送到固定 Relay 服务'}
             </div>
           </form>
         )}
@@ -473,20 +553,18 @@ export function ConnectionConfigSection({
 
             // relay-online entry
             const device = entry.device;
-            const isOnline = device.daemon.connected;
             return (
-              <button
+              <div
                 key={`relay:${device.deviceId}:${entry.canonicalHostId}`}
-                type="button"
+                data-testid="settings-relay-online-entry"
                 style={{
-                  border: `1px solid ${isOnline ? 'rgba(8,122,70,0.30)' : mobileTheme.colors.lightBorder}`,
+                  border: '1px solid rgba(8,122,70,0.30)',
                   borderRadius: '20px',
                   padding: '14px 16px',
                   textAlign: 'left',
                   backgroundColor: '#ffffff',
                   color: mobileTheme.colors.lightText,
                   boxShadow: mobileTheme.shadow.soft,
-                  cursor: 'pointer',
                   display: 'flex',
                   justifyContent: 'space-between',
                   gap: '12px',
@@ -500,10 +578,10 @@ export function ConnectionConfigSection({
                       fontWeight: 800,
                       padding: '2px 7px',
                       borderRadius: '999px',
-                      backgroundColor: isOnline ? 'rgba(8,122,70,0.12)' : '#eef3f8',
-                      color: isOnline ? '#087a46' : mobileTheme.colors.lightMuted,
+                      backgroundColor: 'rgba(8,122,70,0.12)',
+                      color: '#087a46',
                     }}>
-                      {isOnline ? '在线' : '离线'}
+                      在线
                     </span>
                     {entry.boundBridgePreset ? (
                       <span style={{ fontSize: '11px', color: '#087a46' }}>已绑定</span>
@@ -524,13 +602,13 @@ export function ConnectionConfigSection({
                 <span style={{ fontSize: '11px', opacity: 0.8, flex: '0 0 auto', color: mobileTheme.colors.lightMuted }}>
                   Relay
                 </span>
-              </button>
+              </div>
             );
           })}
         </div>
       )}
 
-      {entries.some((e) => e.kind === 'bridge-preset' && e.active) && (
+      {hasDefaultServer && (
         <button
           onClick={onRemoveDefaultServer}
           style={{
@@ -546,6 +624,8 @@ export function ConnectionConfigSection({
           移除默认服务器
         </button>
       )}
+        </>
+      ) : null}
     </div>
   );
 }

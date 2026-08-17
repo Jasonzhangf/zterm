@@ -1768,27 +1768,73 @@ describe('useSessionOpenActions explicit-open truth', () => {
     }, 'beta')).rejects.toThrow('Existing terminal transport is unavailable for tmux management');
 
     expect(harness.spies.closeSession).toHaveBeenNthCalledWith(1, 'session-beta', { preserveTargetTransport: true });
-    expect(harness.spies.closeSession).toHaveBeenCalledTimes(1);
+    expect(harness.spies.closeSession).toHaveBeenNthCalledWith(2, 'session-beta');
     expect(manageTmuxSessionsOnOpenTransport).toHaveBeenCalledWith(
       'session-beta',
       { type: 'tmux-kill-session', payload: { sessionName: 'beta' } },
     );
     expect(harness.spies.setSessionGroupSelection).not.toHaveBeenCalled();
     expect(harness.refs.openTabStateRef.current).toEqual({
-      tabs: [{
-        sessionId: 'session-beta',
-        hostId: 'daemon-a',
-        connectionName: 'Daemon A',
+      tabs: [],
+      activeSessionId: null,
+    });
+    expect(harness.spies.applyOpenTabState).toHaveBeenCalledWith(
+      {
+        tabs: [],
+        activeSessionId: null,
+      },
+      undefined,
+    );
+  });
+
+  it('finalizes the stopped session and switches away when the remote kill times out', async () => {
+    const manageTmuxSessionsOnOpenTransport = vi.fn(async () => {
+      throw new Error('Timed out while managing tmux sessions');
+    });
+    const harness = createOptions({
+      runtimeActiveSessionId: 'session-beta',
+      manageTmuxSessionsOnOpenTransport,
+      sessions: [{
+        id: 'session-beta',
         bridgeHost: '100.127.23.27',
         bridgePort: 3333,
         daemonHostId: 'daemon-a',
         sessionName: 'beta',
-        authToken: 'token-a',
+        state: 'connected',
         createdAt: 20,
       }],
-      activeSessionId: 'session-beta',
     });
-    expect(harness.spies.applyOpenTabState).not.toHaveBeenCalled();
+    harness.refs.openTabStateRef.current = normalizeOpenTabIntentState([{
+      sessionId: 'session-beta',
+      hostId: 'daemon-a',
+      connectionName: 'Daemon A',
+      bridgeHost: '100.127.23.27',
+      bridgePort: 3333,
+      daemonHostId: 'daemon-a',
+      sessionName: 'beta',
+      authToken: 'token-a',
+      createdAt: 20,
+    }], 'session-beta');
+    const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
+
+    await expect(result.current.handleCloseGroupSession({
+      bridgeHost: '100.127.23.27',
+      bridgePort: 3333,
+      daemonHostId: 'daemon-a',
+      relayHostId: 'daemon-a',
+      authToken: 'token-a',
+    }, 'beta')).rejects.toThrow('Timed out while managing tmux sessions');
+
+    expect(harness.spies.closeSession).toHaveBeenNthCalledWith(1, 'session-beta', { preserveTargetTransport: true });
+    expect(harness.spies.closeSession).toHaveBeenNthCalledWith(2, 'session-beta');
+    expect(harness.spies.applyOpenTabState).toHaveBeenCalledWith(
+      {
+        tabs: [],
+        activeSessionId: null,
+      },
+      undefined,
+    );
+    expect(harness.refs.closedOpenTabSessionIdsRef.current.has('session-beta')).toBe(true);
   });
 
   it('refreshes a relay daemon drawer host through a route-aware target instead of the saved direct route', async () => {

@@ -95,6 +95,10 @@ function renderSettings(overrides: Partial<ComponentProps<typeof SettingsPage>> 
   );
 }
 
+function openConnectionConfig() {
+  fireEvent.click(screen.getByTestId('settings-connection-config-expand'));
+}
+
 describe('SettingsPage Relay account configuration', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -134,6 +138,7 @@ describe('SettingsPage Relay account configuration', () => {
 
     renderSettings({ onRelaySettingsChange, onSave });
 
+    openConnectionConfig();
     expect(screen.getByTestId('settings-relay-fixed-host').textContent).toBe('relay.codewhisper.cc');
     fireEvent.change(screen.getByLabelText('Relay account'), { target: { value: 'jason' } });
     fireEvent.change(screen.getByLabelText('Relay password'), { target: { value: 'secret' } });
@@ -198,6 +203,7 @@ describe('SettingsPage Relay account configuration', () => {
       },
     });
 
+    openConnectionConfig();
     expect(screen.getByText('SIGNED IN')).toBeTruthy();
     const signedInPanel = screen.getByTestId('settings-relay-signed-in-panel');
     expect(signedInPanel.textContent).toContain('已登录');
@@ -208,10 +214,110 @@ describe('SettingsPage Relay account configuration', () => {
     expect(screen.queryByLabelText('Relay password')).toBeNull();
   });
 
+  it('shows relay login errors without hiding the logged-out form', () => {
+    vi.mocked(useTraversalRelayAccount).mockReturnValue({
+      account: null,
+      relayDevices: [],
+      relayStatus: '账号或密码错误',
+      relayBusy: null,
+      refreshLocalAccount: vi.fn(),
+      syncRelay,
+      logoutRelay,
+    });
+
+    renderSettings();
+
+    openConnectionConfig();
+    expect(screen.getByLabelText('Relay account')).toBeTruthy();
+    expect(screen.getByLabelText('Relay password')).toBeTruthy();
+    expect(screen.getByRole('alert').textContent).toContain('账号或密码错误');
+  });
+
+  it('keeps in-progress relay login status neutral', () => {
+    vi.mocked(useTraversalRelayAccount).mockReturnValue({
+      account: null,
+      relayDevices: [],
+      relayStatus: '登录中…',
+      relayBusy: 'login',
+      refreshLocalAccount: vi.fn(),
+      syncRelay,
+      logoutRelay,
+    });
+
+    renderSettings();
+
+    openConnectionConfig();
+    const status = screen.getByTestId('settings-relay-login-status');
+    expect(status.getAttribute('role')).toBe('status');
+    expect(status.textContent).toContain('登录中…');
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('keeps remove-default visible when the default preset is subsumed by an online relay daemon', () => {
+    const now = new Date().toISOString();
+    vi.mocked(useTraversalRelayAccount).mockReturnValue({
+      account: null,
+      relayDevices: [
+        {
+          deviceId: 'mac-device',
+          deviceName: 'Mac Studio',
+          platform: 'darwin',
+          appVersion: '0.1.3',
+          client: { connected: true, lastSeenAt: now },
+          daemon: {
+            connected: true,
+            lastSeenAt: now,
+            hostId: 'mac-studio',
+            version: '0.1.3',
+            endpoints: [
+              {
+                id: 'relay-rtc:mac-studio',
+                kind: 'relay-rtc',
+                relayHostId: 'mac-studio',
+                authRequired: true,
+                lastSeenAt: now,
+              },
+            ],
+            sessions: [],
+          },
+          updatedAt: now,
+        },
+      ],
+      relayStatus: '',
+      relayBusy: null,
+      refreshLocalAccount: vi.fn(),
+      syncRelay,
+      logoutRelay,
+    });
+
+    renderSettings({
+      settings: {
+        ...baseSettings,
+        defaultServerId: 'preset-1',
+        servers: [
+          {
+            id: 'preset-1',
+            name: 'Mac Studio',
+            targetHost: '100.66.1.82',
+            targetPort: 3333,
+            authToken: 'token',
+            relayHostId: 'mac-studio',
+          },
+        ],
+      },
+    });
+
+    openConnectionConfig();
+    expect(screen.getByTestId('settings-relay-online-entry')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '移除默认服务器' })).toBeTruthy();
+    expect(screen.getByTestId('settings-connection-config-summary').textContent).toContain('默认 Mac Studio');
+  });
+
   it('adds a direct server inside Settings so Home can project it as a server row', () => {
     const onSave = vi.fn();
     renderSettings({ onSave });
 
+    openConnectionConfig();
     fireEvent.change(screen.getByLabelText('Server name'), { target: { value: 'Mac Studio' } });
     fireEvent.change(screen.getByLabelText('Server host'), { target: { value: '100.66.1.82' } });
     fireEvent.change(screen.getByLabelText('Server auth token'), { target: { value: 'wterm-4123456' } });
@@ -235,10 +341,13 @@ describe('SettingsPage Relay account configuration', () => {
     }));
   });
 
-  it('keeps upgrade controls visible before server and relay configuration', () => {
+  it('collapses connection configuration until expanded and keeps upgrade controls above it', () => {
     const onCheckForUpdate = vi.fn();
     renderSettings({ onCheckForUpdate });
 
+    expect(screen.getByTestId('settings-connection-config-summary')).toBeTruthy();
+    expect(screen.queryByLabelText('Server name')).toBeNull();
+    openConnectionConfig();
     const updateSection = screen.getByTestId('settings-update-section');
     const serverNameInput = screen.getByLabelText('Server name');
     expect(updateSection.compareDocumentPosition(serverNameInput) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);

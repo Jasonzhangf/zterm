@@ -18,10 +18,24 @@ export interface ZtermDialogProps {
 }
 
 const toneAccent: Record<ZtermDialogTone, string> = {
-  info: '#6aa7ff',
-  success: '#1fd67a',
-  warning: '#ffb454',
-  error: '#ff7e7e',
+  info: 'var(--zterm-dialog-info, var(--zterm-panel-accent, #6aa7ff))',
+  success: 'var(--zterm-dialog-success, var(--zterm-panel-accent, #1fd67a))',
+  warning: 'var(--zterm-dialog-warning, var(--zterm-panel-danger, #ffb454))',
+  error: 'var(--zterm-dialog-error, var(--zterm-panel-danger, #ff7e7e))',
+};
+
+const toneSoftBackground: Record<ZtermDialogTone, string> = {
+  info: 'var(--zterm-dialog-info-soft, rgba(106,167,255,0.13))',
+  success: 'var(--zterm-dialog-success-soft, rgba(31,214,122,0.13))',
+  warning: 'var(--zterm-dialog-warning-soft, rgba(255,180,84,0.13))',
+  error: 'var(--zterm-dialog-error-soft, rgba(255,126,126,0.13))',
+};
+
+const toneBorder: Record<ZtermDialogTone, string> = {
+  info: 'var(--zterm-dialog-info-border, rgba(106,167,255,0.34))',
+  success: 'var(--zterm-dialog-success-border, rgba(31,214,122,0.34))',
+  warning: 'var(--zterm-dialog-warning-border, rgba(255,180,84,0.34))',
+  error: 'var(--zterm-dialog-error-border, rgba(255,126,126,0.34))',
 };
 
 const toneGlyph: Record<ZtermDialogTone, string> = {
@@ -89,7 +103,7 @@ export function ZtermDialog({
           alignItems: 'center',
           justifyContent: 'center',
           padding: '18px',
-          backgroundColor: 'rgba(8, 12, 20, 0.62)',
+          backgroundColor: 'var(--zterm-sheet-overlay, rgba(8, 12, 20, 0.62))',
           backdropFilter: 'blur(6px)',
           WebkitBackdropFilter: 'blur(6px)',
           animation: 'ztermDialogFade 160ms ease-out',
@@ -135,8 +149,8 @@ export function ZtermDialog({
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                background: `${accent}22`,
-                border: `1px solid ${accent}55`,
+                background: toneSoftBackground[tone],
+                border: `1px solid ${toneBorder[tone]}`,
                 color: accent,
                 fontSize: '18px',
                 fontWeight: 900,
@@ -150,7 +164,7 @@ export function ZtermDialog({
                     width: '18px',
                     height: '18px',
                     borderRadius: '50%',
-                    border: `2px solid ${accent}55`,
+                    border: `2px solid ${toneBorder[tone]}`,
                     borderTopColor: accent,
                     animation: 'ztermDialogSpin 700ms linear infinite',
                   }}
@@ -190,7 +204,7 @@ export function ZtermDialog({
               marginTop: '10px',
               padding: '10px 12px',
               borderRadius: '10px',
-              background: 'rgba(255,255,255,0.04)',
+              background: 'var(--zterm-panel-surface, rgba(255,255,255,0.04))',
               border: '1px solid var(--zterm-panel-border, rgba(255,255,255,0.10))',
               fontSize: '12px',
               lineHeight: 1.5,
@@ -245,7 +259,7 @@ export function ZtermDialog({
               border: 'none',
               borderRadius: '12px',
               background: accent,
-              color: '#07110b',
+              color: 'var(--zterm-dialog-accent-text, #07110b)',
               fontSize: '14px',
               fontWeight: 900,
               opacity: busy ? 0.55 : 1,

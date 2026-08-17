@@ -358,6 +358,7 @@ describe('SettingsPage terminal theme selection', () => {
       />,
     );
 
+    fireEvent.click(screen.getByTestId('settings-connection-config-expand'));
     expect(screen.getByTestId('settings-relay-fixed-host').textContent).toBe('relay.codewhisper.cc');
     expect(screen.queryByPlaceholderText('https://your-relay.example.com/relay/')).toBeNull();
   });

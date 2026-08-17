@@ -34,6 +34,9 @@ function makeRelayDevice(
     deviceName: string;
     hostId: string;
     connected: boolean;
+    endpointAuthToken: string;
+    endpointHost: string;
+    endpointPort: number;
   }> = {},
 ): TraversalRelayDeviceSnapshot {
   const now = new Date().toISOString();
@@ -54,6 +57,9 @@ function makeRelayDevice(
           id: 'relay-rtc:mac-studio',
           kind: 'relay-rtc',
           relayHostId: overrides.hostId || 'mac-studio',
+          ...(overrides.endpointAuthToken ? { authToken: overrides.endpointAuthToken } : {}),
+          ...(overrides.endpointHost ? { host: overrides.endpointHost } : {}),
+          ...(overrides.endpointPort ? { port: overrides.endpointPort } : {}),
           authRequired: true,
           lastSeenAt: now,
         },
@@ -114,6 +120,87 @@ describe('buildConnectionConfigEntries', () => {
       server: { id: 'preset-1' },
       daemonHostId: 'linux-box',
     });
+  });
+
+  it('keeps an incomplete preset visible when its daemon is online', () => {
+    const settings: BridgeSettings = {
+      ...baseSettings,
+      servers: [
+        {
+          id: 'preset-1',
+          name: 'Mac Studio Incomplete',
+          targetHost: '100.66.1.82',
+          targetPort: 3333,
+          relayHostId: 'mac-studio',
+        },
+      ],
+    };
+    const entries = buildConnectionConfigEntries(settings, [makeRelayDevice()]);
+    const relayEntries = entries.filter((entry) => entry.kind === 'relay-online');
+    const presetEntries = entries.filter((entry) => entry.kind === 'bridge-preset');
+    expect(relayEntries).toHaveLength(1);
+    expect(presetEntries).toHaveLength(1);
+    expect(presetEntries[0]).toMatchObject({
+      server: { id: 'preset-1' },
+      daemonHostId: 'mac-studio',
+    });
+  });
+
+  it('resolves stale preset host aliases to the online canonical daemon', () => {
+    const settings: BridgeSettings = {
+      ...baseSettings,
+      servers: [
+        {
+          id: 'preset-1',
+          name: 'Mac Studio',
+          targetHost: '100.66.1.82',
+          targetPort: 3333,
+          authToken: 'token-a',
+          relayHostId: 'mac-studio',
+          relayDeviceId: 'device-a',
+        },
+        {
+          id: 'preset-2',
+          name: 'Mac Studio Old',
+          targetHost: '100.66.1.99',
+          targetPort: 3333,
+          authToken: 'token-a',
+          relayHostId: 'mac-studio-old',
+        },
+      ],
+    };
+    const entries = buildConnectionConfigEntries(settings, [makeRelayDevice()]);
+    expect(entries.filter((entry) => entry.kind === 'relay-online')).toHaveLength(1);
+    expect(entries.filter((entry) => entry.kind === 'bridge-preset')).toHaveLength(0);
+  });
+
+  it('resolves a preset to an online daemon by relay endpoint authToken', () => {
+    const settings: BridgeSettings = {
+      ...baseSettings,
+      servers: [
+        {
+          id: 'preset-1',
+          name: 'Mac Studio Token',
+          targetHost: '100.66.1.82',
+          targetPort: 3333,
+          authToken: 'token-endpoint',
+          relayHostId: 'mac-studio-old',
+        },
+      ],
+    };
+    const entries = buildConnectionConfigEntries(settings, [
+      makeRelayDevice({ hostId: 'mac-studio', endpointAuthToken: 'token-endpoint' }),
+    ]);
+    const relayEntries = entries.filter((entry) => entry.kind === 'relay-online');
+    expect(relayEntries).toHaveLength(1);
+    expect(relayEntries[0]).toMatchObject({
+      canonicalHostId: 'mac-studio',
+      boundBridgePreset: {
+        id: 'preset-1',
+        targetHost: '100.66.1.82',
+      },
+    });
+    expect(entries.filter((entry) => entry.kind === 'bridge-preset')).toHaveLength(0);
   });
 
   it('reports bound preset identity for the unified relay-online entry', () => {

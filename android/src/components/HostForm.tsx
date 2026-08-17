@@ -16,6 +16,7 @@ export function HostForm({ host, onSave, onCancel }: HostFormProps) {
   const [name, setName] = useState(host?.name || '');
   const [hostname, setHostname] = useState(host?.bridgeHost || '');
   const [port, setPort] = useState(host?.bridgePort || DEFAULT_BRIDGE_PORT);
+  const [formError, setFormError] = useState('');
   const [sessionName, setSessionName] = useState(host?.sessionName || '');
   const [authType, setAuthType] = useState<'password' | 'key'>(host?.authType || 'password');
   const [password, setPassword] = useState(host?.password || '');
@@ -43,9 +44,10 @@ export function HostForm({ host, onSave, onCancel }: HostFormProps) {
 
   const handleSubmit = () => {
     if (!name || !hostname) {
-      alert('请填写必填字段：名称、bridge 主机地址');
+      setFormError('请填写必填字段：名称、bridge 主机地址');
       return;
     }
+    setFormError('');
 
     onSave({
       name,
@@ -128,6 +130,25 @@ export function HostForm({ host, onSave, onCancel }: HostFormProps) {
           保存
         </button>
       </div>
+
+      {formError ? (
+        <div
+          data-testid="host-form-error"
+          role="alert"
+          style={{
+            margin: '12px 16px 0',
+            padding: '10px 12px',
+            borderRadius: '8px',
+            border: '1px solid rgba(255, 124, 146, 0.35)',
+            backgroundColor: 'rgba(103, 29, 37, 0.42)',
+            color: '#ffd0d0',
+            fontSize: '13px',
+            lineHeight: 1.45,
+          }}
+        >
+          {formError}
+        </div>
+      ) : null}
 
       {/* 表单内容 */}
       <div style={{

@@ -153,15 +153,13 @@ describe('SessionScheduleSheet', () => {
 
   it('does not submit when text is empty', () => {
     const onSave = vi.fn();
-    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
     renderSheet({ onSave });
 
     const createButton = screen.getByText('Create');
     fireEvent.click(createButton);
 
     expect(onSave).not.toHaveBeenCalled();
-    expect(alertSpy).toHaveBeenCalledWith('先填写要发送的文本。');
-    alertSpy.mockRestore();
+    expect(screen.getByTestId('schedule-validation-error').textContent).toBe('先填写要发送的文本。');
   });
 
   it('toggles job enabled state', () => {

@@ -126,6 +126,7 @@ export function SessionScheduleSheet({
   const [draft, setDraft] = useState<ScheduleJobDraft>(() => createDefaultDraft(sessionName, composerSeedText));
   const [intervalValue, setIntervalValue] = useState(30);
   const [intervalUnit, setIntervalUnit] = useState<IntervalUnit>('minutes');
+  const [validationError, setValidationError] = useState('');
 
   useEffect(() => {
     if (!open) {
@@ -135,6 +136,7 @@ export function SessionScheduleSheet({
     setDraft(createDefaultDraft(sessionName, composerSeedText));
     setIntervalValue(30);
     setIntervalUnit('minutes');
+    setValidationError('');
   }, [open, sessionName, composerSeedNonce, composerSeedText]);
 
   const editingJob = useMemo(
@@ -156,12 +158,13 @@ export function SessionScheduleSheet({
 
   const submitDraft = () => {
     if (!draft.payload.text.trim()) {
-      window.alert('先填写要发送的文本。');
+      setValidationError('先填写要发送的文本。');
       return;
     }
     if (busy) {
       return;
     }
+    setValidationError('');
 
     const nextDraft: ScheduleJobDraft = {
       ...draft,
@@ -237,6 +240,25 @@ export function SessionScheduleSheet({
             <button type="button" onClick={onClose} style={ghostButtonStyle}>Done</button>
           </div>
         </div>
+
+        {validationError ? (
+          <div
+            data-testid="schedule-validation-error"
+            role="alert"
+            style={{
+              marginTop: '10px',
+              borderRadius: '12px',
+              border: '1px solid rgba(255, 120, 120, 0.35)',
+              background: 'rgba(103, 29, 37, 0.42)',
+              color: '#ffd0d0',
+              padding: '8px 10px',
+              fontSize: '12px',
+              lineHeight: 1.35,
+            }}
+          >
+            {validationError}
+          </div>
+        ) : null}
 
         {busy || scheduleState.error ? (
           <div

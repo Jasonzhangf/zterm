@@ -755,6 +755,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
   ) => {
     const target = normalizeBridgeTarget(group);
     const stoppedSessionIds: string[] = [];
+    const stoppedSessionIdSet = new Set<string>();
     for (const session of sessionsRef.current) {
       if (session.state === 'closed') {
         continue;
@@ -767,20 +768,11 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
         terminalBackend: target.terminalBackend || 'tmux',
       })) {
         stoppedSessionIds.push(session.id);
+        stoppedSessionIdSet.add(session.id);
         closeSession(session.id, { preserveTargetTransport: true });
       }
     }
-    const sessionNames = await manageTmuxSessionsForTarget(
-      target,
-      {
-        type: 'tmux-kill-session',
-        payload: {
-          sessionName,
-        },
-      },
-      undefined,
-    );
-    for (const sessionId of stoppedSessionIds) {
+    const finalizeStoppedSession = (sessionId: string) => {
       closeSession(sessionId);
       const closeResult = deriveCloseOpenTabIntent(openTabStateRef.current, sessionId, {
         runtimeActiveSessionId: runtimeActiveSessionIdRef.current,
@@ -795,7 +787,47 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
         }
       }
       closedOpenTabSessionIdsRef.current.add(sessionId);
-      applyOpenTabState(closeResult.nextState);
+      const activeSessionWasStopped = (
+        runtimeActiveSessionIdRef.current === sessionId
+        || terminalActiveSessionIdRef.current === sessionId
+      );
+      applyOpenTabState(
+        closeResult.nextState,
+        activeSessionWasStopped && closeResult.nextState.activeSessionId
+          ? { switchRuntime: 'explicit-resume' }
+          : undefined,
+      );
+    };
+    let sessionNames: string[] | null = null;
+    let closeError: unknown = null;
+    try {
+      const hasHealthyReusableSession = Boolean(resolveReusableOpenSessionForTarget(
+        sessionsRef.current.filter((candidate) => !stoppedSessionIdSet.has(candidate.id)),
+        target,
+        '',
+        [terminalActiveSessionIdRef.current, runtimeActiveSessionId],
+        false,
+      ));
+      sessionNames = await manageTmuxSessionsForTarget(
+        target,
+        {
+          type: 'tmux-kill-session',
+          payload: {
+            sessionName,
+          },
+        },
+        undefined,
+        hasHealthyReusableSession ? stoppedSessionIds : [],
+      );
+    } catch (error) {
+      closeError = error;
+    } finally {
+      for (const sessionId of stoppedSessionIds) {
+        finalizeStoppedSession(sessionId);
+      }
+    }
+    if (closeError) {
+      throw closeError;
     }
     handleRemoteSessionsRefreshed(target, sessionNames ?? []);
   }, [
@@ -806,8 +838,10 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     handleRemoteSessionsRefreshed,
     manageTmuxSessionsForTarget,
     openTabStateRef,
+    resolveReusableOpenSessionForTarget,
     runtimeActiveSessionIdRef,
     sessionsRef,
+    terminalActiveSessionIdRef,
   ]);
 
   const handleSelectCleanSession = useCallback((target: BridgeTarget) => {

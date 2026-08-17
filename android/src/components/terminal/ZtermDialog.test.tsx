@@ -92,4 +92,21 @@ describe('ZtermDialog', () => {
     );
     expect(screen.queryByTestId('zterm-dialog')).toBeNull();
   });
+
+  it('uses shell theme tokens instead of fixed dark error colors', () => {
+    render(
+      <div className="zterm-terminal-shell" data-terminal-shell-skin="blue">
+        <ZtermDialog
+          open
+          tone="error"
+          title="关闭失败"
+          message="daemon did not answer"
+          onConfirm={vi.fn()}
+        />
+      </div>,
+    );
+
+    expect(screen.getByTestId('zterm-dialog').style.backgroundColor).toContain('--zterm-sheet-overlay');
+    expect(screen.getByTestId('zterm-dialog-glyph').style.color).toMatch(/--zterm-dialog-error|--zterm-panel-danger/);
+  });
 });
