@@ -1314,7 +1314,9 @@
       "owner": "appsdk.binary_gate",
       "owned_paths": [
         "scripts/verify-appsdk-binary.mjs",
-        "scripts/verify-appsdk-binary.test.mjs"
+        "scripts/verify-appsdk-binary.test.mjs",
+        "generated/modules/zterm-runtime-v2/lib/zterm-runtime-v2.web.tgz",
+        "generated/modules/zterm-runtime-v2/module.compiled.json"
       ],
       "forbidden_paths": [
         "src/**",

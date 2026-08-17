@@ -1,5 +1,10 @@
 # 2026-07-29 remote-window sibling switch / screenshot / fullscreen gesture diagnosis
 
+# 2026-08-17 AppSDK active-v4 main closeout continuation
+
+- Previous Codex review rejected candidate `5dab76b` on four concrete issues: generated module artifacts lacked ownership and allowed-path bindings; the Native -> NetworkIdentityWrapper resource edge contradicted `resource.platform_network_signal`; the JS wrapper retained `snapshot.interfaces || []`; and the generated bundle still contained the old web fallback.
+- Candidate worktree now has explicit malformed-snapshot rejection, same-resource observer mapping, deterministic artifact resource/function/module ownership, and generated paths in both affected feature allowlists. Required next evidence is canonical wiki regeneration, pinned `appsdk compile-module`, emitted-bundle inspection, then the mapped regression stack and a fresh review against the final candidate commit.
+
 # 2026-08-14 Phase 3 production client.terminal_channel_mux cutover
 
 - Phase 3 first production slice: `client.terminal_channel_mux` now owns `src/lib/terminal-channel-mux-runtime.ts` (`TerminalChannelMuxStore`). `SessionTransportRuntimeStore.terminalChannels` embeds the store; `TargetTransportRuntime` no longer owns `channels`.

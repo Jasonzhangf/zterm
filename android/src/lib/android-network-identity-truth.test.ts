@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
+import { requireNativeNetworkInterfaces } from '../plugins/NetworkIdentityPlugin';
+
 const androidRoot = resolve(__dirname, '../../native/android/app/src/main');
 const repoRoot = resolve(__dirname, '../../..');
 
@@ -135,5 +137,13 @@ describe('Android network identity plugin', () => {
     expect(wrapper).not.toContain("web: () => ({");
     expect(wrapper).not.toContain("console.warn");
     expect(wrapper).not.toContain("return []");
+  });
+
+  it('rejects malformed native interface snapshots explicitly', () => {
+    expect(() =>
+      requireNativeNetworkInterfaces({
+        interfaces: undefined as never,
+      }),
+    ).toThrow('invalid interfaces');
   });
 });

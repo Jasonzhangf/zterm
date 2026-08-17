@@ -1259,10 +1259,10 @@
           "semantic_output": "Capacitor NetworkIdentity plugin call can resolve a native network snapshot",
           "status": "anchored",
           "edge_id": "android_mainline:Native->NetworkIdentityWrapper",
-          "resource_from": "resource.platform_terminal_surface",
+          "resource_from": "resource.platform_network_signal",
           "resource_to": "resource.platform_network_signal",
           "via_resources": [],
-          "relation_status": "direct"
+          "relation_status": "observer"
         },
         {
           "from": "NetworkIdentityWrapper",

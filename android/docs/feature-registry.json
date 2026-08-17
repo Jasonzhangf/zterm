@@ -3195,7 +3195,9 @@
         ".appsdk/maps/mainline-call-map.json",
         ".appsdk/maps/module-registry.json",
         ".appsdk/maps/resource-map.json",
-        ".appsdk/maps/verification-map.json"
+        ".appsdk/maps/verification-map.json",
+        "generated/modules/zterm-runtime-v2/lib/zterm-runtime-v2.web.tgz",
+        "generated/modules/zterm-runtime-v2/module.compiled.json"
       ],
       "forbidden_paths": [
         "src/",
@@ -3242,7 +3244,9 @@
         "android/.appsdk/maps/verification-map.json",
         "android/docs/module-registry.json",
         "android/package.json",
-        ".github/workflows/ci.yml"
+        ".github/workflows/ci.yml",
+        "android/generated/modules/zterm-runtime-v2/lib/zterm-runtime-v2.web.tgz",
+        "android/generated/modules/zterm-runtime-v2/module.compiled.json"
       ],
       "forbidden_paths": [
         "src/server/",
