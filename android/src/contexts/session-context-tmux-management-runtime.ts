@@ -125,7 +125,7 @@ function createOpenTransportRequestRuntime<T>(
   const resource = options.daemonConnection
     ? options.daemonConnection.readSessionResource(options.sessionId)
     : options.readSessionTransportResource(options.sessionId);
-  const ws = resource.terminalSocket;
+  const ws = resource.targetRuntime?.terminalTransport || resource.terminalSocket;
   if (!resource.targetRuntime?.terminalMuxReady || !ws || ws.readyState !== TRANSPORT_OPEN) {
     return Promise.resolve(null);
   }

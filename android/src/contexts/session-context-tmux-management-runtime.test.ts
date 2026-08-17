@@ -135,6 +135,55 @@ describe('session tmux target management runtime', () => {
     expect(readSessionTransportResource).not.toHaveBeenCalled();
   });
 
+  it('keeps target requests on a preserved transport after the session channel resource is gone', async () => {
+    const terminalTransport = { readyState: 1 } as any;
+    const resource: SessionTransportResource = {
+      sessionId: 'session-1',
+      runtime: null,
+      targetRuntime: {
+        key: 'target-1',
+        daemonTargetId: 'target-1',
+        routeCandidateKey: 'route-1',
+        routeGeneration: 0,
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        authToken: '',
+        controlTransport: null,
+        terminalTransport,
+        terminalMuxReady: true,
+        sessionIds: ['session-1'],
+      },
+      targetKey: 'target-1',
+      host: null,
+      socket: null,
+      socketReadyState: null,
+      socketState: 'missing',
+      controlSocket: null,
+      requestedTerminalGeometry: null,
+      terminalSocket: null,
+      channel: null,
+    };
+    const harness = createHarness(resource);
+    const wireFrame = JSON.parse(harness.sendSocketPayload.mock.calls[0][2] as string);
+
+    expect(harness.sendSocketPayload).toHaveBeenCalledWith(
+      'session-1',
+      terminalTransport,
+      expect.any(String),
+    );
+
+    settleSessionTmuxTargetRequestRuntime({
+      pendingRequestsRef: harness.pendingRequestsRef,
+      requestId: wireFrame.payload.requestId,
+      message: {
+        type: 'sessions',
+        payload: { sessions: ['beta'] },
+      },
+    });
+
+    await expect(harness.request).resolves.toEqual(['beta']);
+  });
+
   it('rejects malformed sessions truth instead of projecting it as an empty success', async () => {
     const harness = createHarness(createResource());
     const wireFrame = JSON.parse(harness.sendSocketPayload.mock.calls[0][2] as string);
