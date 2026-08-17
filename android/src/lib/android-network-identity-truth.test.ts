@@ -47,10 +47,13 @@ describe('Android network identity plugin', () => {
 
     const appsdkOwner = appsdkMap.modules.find((module) => module.owned_paths.includes(nativePath));
     const docsOwner = docsMap.modules.find((module) => module.owned_paths.includes(nativePath));
+    const wrapperPath = 'src/plugins/NetworkIdentityPlugin.ts';
 
     expect(appsdkOwner?.module_id, 'appsdk map must own the native producer').toBe('client.daemon_connection');
     expect(docsOwner?.module_id, 'docs map must own the native producer').toBe('client.daemon_connection');
     expect(appsdkOwner?.verification_gates, 'appsdk owner must declare android_network_identity gate').toContain('android_network_identity');
+    expect(appsdkMap.modules.find((module) => module.owned_paths.includes(wrapperPath))?.module_id).toBe('client.daemon_connection');
+    expect(docsMap.modules.find((module) => module.owned_paths.includes(wrapperPath))?.module_id).toBe('client.daemon_connection');
   });
 
   it('registers the platform_network_signal resource against client.daemon_connection in the AppSDK resource map', () => {
@@ -120,5 +123,17 @@ describe('Android network identity plugin', () => {
     expect(gate?.status).toBe('active');
     expect(gate?.command).toContain('android-network-identity-truth.test.ts');
     expect(gate?.binding_paths).toContain('native/android/app/src/main/java/com/zterm/android/NetworkIdentityPlugin.java');
+  });
+
+  it('rejects silent fallback and catch-to-empty native snapshot errors', () => {
+    const wrapper = readFileSync(
+      resolve(__dirname, '../plugins/NetworkIdentityPlugin.ts'),
+      'utf8',
+    );
+
+    expect(wrapper).toContain("snapshot requires a native Android runtime");
+    expect(wrapper).not.toContain("web: () => ({");
+    expect(wrapper).not.toContain("console.warn");
+    expect(wrapper).not.toContain("return []");
   });
 });

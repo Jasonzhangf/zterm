@@ -14,11 +14,6 @@ export interface NetworkIdentityPluginShape {
 
 const NetworkIdentityNative = registerPlugin<NetworkIdentityPluginShape>(
   "NetworkIdentity",
-  {
-    web: () => ({
-      snapshot: async () => ({ connected: false, connectionType: "unknown", interfaces: [] }),
-    }),
-  },
 );
 
 export function isNativeNetworkIdentitySupported() {
@@ -27,15 +22,10 @@ export function isNativeNetworkIdentitySupported() {
 
 export async function readNativeNetworkIdentitySnapshot(): Promise<NetworkInterfaceFingerprint[]> {
   if (!isNativeNetworkIdentitySupported()) {
-    return [];
+    throw new Error('NetworkIdentity snapshot requires a native Android runtime');
   }
-  try {
-    const snapshot = await NetworkIdentityNative.snapshot();
-    return snapshot.interfaces || [];
-  } catch (error) {
-    console.warn("[NetworkIdentity] native snapshot failed:", error);
-    return [];
-  }
+  const snapshot = await NetworkIdentityNative.snapshot();
+  return snapshot.interfaces || [];
 }
 
 export const NetworkIdentityPlugin = NetworkIdentityNative;

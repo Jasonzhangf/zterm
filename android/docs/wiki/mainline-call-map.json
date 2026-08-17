@@ -1249,16 +1249,31 @@
         },
         {
           "from": "Native",
-          "to": "NetworkIdentityCapability",
-          "owner_feature": "terminal.transport_lifecycle",
-          "semantic_input": "native Android NetworkIdentityPlugin.registerPlugin binds NetworkIdentity capability on MainActivity",
-          "semantic_output": "network identity capability is registered in the plugin host, allowing the JS-side wrapper to forward snapshot() calls to the native producer",
+          "to": "NetworkIdentityWrapper",
+          "owner_feature": "android_network_identity_snapshot",
+          "semantic_input": "MainActivity registerPlugin(NetworkIdentityPlugin.class) exposes native snapshot",
+          "semantic_output": "Capacitor NetworkIdentity plugin call can resolve a native network snapshot",
           "status": "anchored",
-          "edge_id": "android_mainline:Native->NetworkIdentityCapability",
+          "edge_id": "android_mainline:Native->NetworkIdentityWrapper",
           "resource_from": "resource.platform_terminal_surface",
-          "resource_to": "resource.client_plugin_host",
+          "resource_to": "resource.platform_network_signal",
           "via_resources": [],
           "relation_status": "direct"
+        },
+        {
+          "from": "NetworkIdentityWrapper",
+          "to": "PluginHost",
+          "owner_feature": "android_network_identity_snapshot",
+          "semantic_input": "App provides the JS NetworkIdentity wrapper as network:native-snapshot",
+          "semantic_output": "plugin host can relay the native snapshot capability",
+          "status": "anchored",
+          "edge_id": "android_mainline:NetworkIdentityWrapper->PluginHost",
+          "resource_from": "resource.platform_network_signal",
+          "resource_to": "resource.client_plugin_host",
+          "via_resources": [
+            "resource.plugin_capability_registry"
+          ],
+          "relation_status": "via"
         },
         {
           "from": "SessionContext",
