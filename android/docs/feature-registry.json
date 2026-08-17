@@ -1041,7 +1041,7 @@
       "owners": [
         "src/pages/ConnectionsPage.tsx",
         "src/pages/SettingsPage.tsx",
-        "src/components/settings/RelayAccountSettingsSection.tsx",
+        "src/components/settings/ConnectionConfigSection.tsx",
         "src/hooks/useTraversalRelayAccount.ts",
         "src/components/tmux/TmuxSessionPickerSheet.tsx"
       ],
@@ -1067,7 +1067,7 @@
         "src/pages/ConnectionsPage.test.tsx",
         "src/pages/SettingsPage.tsx",
         "src/pages/SettingsPage.relay-account.test.tsx",
-        "src/components/settings/RelayAccountSettingsSection.tsx",
+        "src/components/settings/ConnectionConfigSection.tsx",
         "src/pages/ConnectionPropertiesPage.tsx",
         "src/pages/ConnectionPropertiesPage.test.tsx",
         "src/lib/relay-account-directory.ts"

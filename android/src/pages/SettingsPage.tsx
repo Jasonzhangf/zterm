@@ -22,8 +22,7 @@ import type {
   AppUpdateManifestCandidate,
   SettingsUpdateUiSlot,
 } from '../lib/plugin-settings-update/settings-update-contract';
-import { RememberedServersSection } from '../components/settings/RememberedServersSection';
-import { RelayAccountSettingsSection } from '../components/settings/RelayAccountSettingsSection';
+import { ConnectionConfigSection } from '../components/settings/ConnectionConfigSection';
 import { SettingsSectionTitle, settingsInputStyle, settingsSectionStyle } from '../components/settings/SettingsSection';
 import { TerminalThemeSection } from '../components/settings/TerminalThemeSection';
 import {
@@ -321,16 +320,12 @@ export function SettingsPage({
           onRollbackToPrevious,
         }) : null}
 
-        <RememberedServersSection
+        <ConnectionConfigSection
           settings={draft}
           onSettingsChange={(updater) => setDraft((current) => updater(current))}
           onRemoveDefaultServer={() =>
             setDraft((current) => removeBridgeServer(current, defaultServer?.id || current.defaultServerId || ''))
           }
-        />
-
-        <RelayAccountSettingsSection
-          relaySettings={draft.traversalRelay}
           onRelaySettingsChange={handleRelaySettingsChange}
         />
 

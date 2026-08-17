@@ -266,7 +266,8 @@ describe('ConnectionPropertiesPage', () => {
     fireEvent.change(screen.getByPlaceholderText('例如：MacStudio'), { target: { value: ' Relay Mac ' } });
     fireEvent.click(screen.getByText('Claw Mac'));
 
-    expect(screen.queryByPlaceholderText('100.127.23.27[:40807] 或 macstudio.tailnet')).toBeNull();
+    expect(screen.getByDisplayValue('100.64.0.10')).toBeTruthy();
+    expect(screen.getByDisplayValue('token-a')).toBeTruthy();
     expect(screen.getByText('当前绑定：MacStudio')).toBeTruthy();
     expect(screen.getByText('bridgeHost: 100.64.0.10')).toBeTruthy();
     expect(screen.getByText('authToken: 已绑定')).toBeTruthy();
@@ -396,7 +397,7 @@ describe('ConnectionPropertiesPage', () => {
 
     fireEvent.change(screen.getByPlaceholderText('例如：MacStudio'), { target: { value: ' Relay Missing Map ' } });
     fireEvent.click(screen.getByText('Other Mac'));
-    expect(screen.getByText('这个 daemon 还没有绑定 bridge preset。先手工填写 bridge host 和 token，然后保存会把它写入连接列表。')).toBeTruthy();
+    expect(screen.getByText('当前选中的 daemon 还没有绑定 bridge preset。请在上方填写 bridge host 和 token，保存后会写入连接列表。')).toBeTruthy();
     fireEvent.change(screen.getByPlaceholderText('100.127.23.27[:40807] 或 macstudio.tailnet'), {
       target: { value: '100.86.84.63' },
     });
@@ -498,7 +499,7 @@ describe('ConnectionPropertiesPage', () => {
 
     fireEvent.click(screen.getByText('Other Mac'));
 
-    expect(await screen.findByText('这个 daemon 还没有绑定 bridge preset。先手工填写 bridge host 和 token，然后保存会把它写入连接列表。')).toBeTruthy();
+    expect(await screen.findByText('当前选中的 daemon 还没有绑定 bridge preset。请在上方填写 bridge host 和 token，保存后会写入连接列表。')).toBeTruthy();
     expect(screen.queryByText('bridgeHost: 100.64.0.10')).toBeNull();
     fireEvent.change(screen.getByPlaceholderText('100.127.23.27[:40807] 或 macstudio.tailnet'), {
       target: { value: '100.86.84.63' },
@@ -536,7 +537,7 @@ describe('ConnectionPropertiesPage', () => {
     );
   });
 
-  it('blocks daemon-first save until manual bridge host and token are filled', async () => {
+  it('saves successfully when a selected daemon has manual bridge host and token filled', async () => {
     const onSave = vi.fn();
     window.localStorage.setItem(
       RELAY_ACCOUNT_STORAGE_KEY,
@@ -580,12 +581,23 @@ describe('ConnectionPropertiesPage', () => {
 
     fireEvent.change(screen.getByPlaceholderText('例如：MacStudio'), { target: { value: ' Relay Missing Values ' } });
     fireEvent.click(screen.getByText('Other Mac'));
+    fireEvent.change(screen.getByPlaceholderText('100.127.23.27[:40807] 或 macstudio.tailnet'), {
+      target: { value: '100.86.84.63' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('daemon 的共享 token'), { target: { value: 'token-new' } });
     fireEvent.click(screen.getByText('Save'));
 
-    expect(screen.getByTestId('zterm-dialog-message').textContent).toContain(
-      '请先填写这个 daemon 对应的 bridge host 和 token。',
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'Relay Missing Values',
+        bridgeHost: '100.86.84.63',
+        bridgePort: 3333,
+        authToken: 'token-new',
+        daemonHostId: 'daemon-host-unmapped',
+        relayHostId: 'daemon-host-unmapped',
+        relayDeviceId: 'daemon-device-2',
+      }),
     );
-    expect(onSave).not.toHaveBeenCalled();
   });
 
   it('blocks rtc-first save until a relay daemon device is selected', () => {

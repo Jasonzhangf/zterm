@@ -137,7 +137,7 @@ describe('SettingsPage Relay account configuration', () => {
     expect(screen.getByTestId('settings-relay-fixed-host').textContent).toBe('relay.codewhisper.cc');
     fireEvent.change(screen.getByLabelText('Relay account'), { target: { value: 'jason' } });
     fireEvent.change(screen.getByLabelText('Relay password'), { target: { value: 'secret' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    fireEvent.click(screen.getByRole('button', { name: '登录' }));
 
     await waitFor(() => expect(syncRelay).toHaveBeenCalledWith('login', {
       relayBaseUrl: '',
@@ -200,10 +200,12 @@ describe('SettingsPage Relay account configuration', () => {
 
     expect(screen.getByText('SIGNED IN')).toBeTruthy();
     const signedInPanel = screen.getByTestId('settings-relay-signed-in-panel');
+    expect(signedInPanel.textContent).toContain('已登录');
     expect(signedInPanel.textContent).toContain('jason');
-    expect(signedInPanel.textContent).toContain('1 device');
-    expect(screen.getByRole('button', { name: 'Sign in again' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Sign out' })).toBeTruthy();
+    expect(signedInPanel.textContent).toContain('1 设备');
+    expect(screen.getByRole('button', { name: '退出登录' })).toBeTruthy();
+    expect(screen.queryByLabelText('Relay account')).toBeNull();
+    expect(screen.queryByLabelText('Relay password')).toBeNull();
   });
 
   it('adds a direct server inside Settings so Home can project it as a server row', () => {
@@ -214,7 +216,7 @@ describe('SettingsPage Relay account configuration', () => {
     fireEvent.change(screen.getByLabelText('Server host'), { target: { value: '100.66.1.82' } });
     fireEvent.change(screen.getByLabelText('Server auth token'), { target: { value: 'wterm-4123456' } });
     fireEvent.change(screen.getByLabelText('Daemon ID'), { target: { value: 'mac-studio' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Add Server' }));
+    fireEvent.click(screen.getByRole('button', { name: '添加服务器' }));
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({

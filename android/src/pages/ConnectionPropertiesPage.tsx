@@ -97,8 +97,6 @@ export function ConnectionPropertiesPage({
   const { devices: relayDevices, refresh: refreshRelayDevices } = useTraversalRelayDaemonDevices(
     Boolean(bridgeSettings.traversalRelay?.accessToken),
   );
-  const daemonFirst = Boolean(bridgeSettings.traversalRelay?.accessToken) && relayDevices.length > 0;
-
   useEffect(() => {
     setForm(buildInitialState(host, draft, bridgeSettings));
     setTagInput('');
@@ -155,7 +153,6 @@ export function ConnectionPropertiesPage({
     () => findBridgePresetForDaemonHostId(bridgeSettings.servers, selectedDaemonHostId),
     [bridgeSettings.servers, selectedDaemonHostId],
   );
-  const daemonNeedsManualBinding = daemonFirst && Boolean(selectedDaemonHostId) && !daemonBoundServer;
 
   useEffect(() => {
     if (host || shareScope !== 'single' || !selectedShareHostId) {
@@ -255,16 +252,7 @@ export function ConnectionPropertiesPage({
       return;
     }
 
-    if (daemonFirst) {
-      if (!selectedDaemonHostId) {
-        setFormDialog('请先选择一个在线 daemon 设备');
-        return;
-      }
-      if (!form.bridgeHost.trim() || !form.authToken.trim()) {
-        setFormDialog('请先填写这个 daemon 对应的 bridge host 和 token。');
-        return;
-      }
-    } else if (!form.bridgeHost.trim()) {
+    if (!form.bridgeHost.trim()) {
       setFormDialog('请填写必填字段：bridge 主机地址');
       return;
     }
@@ -339,34 +327,20 @@ export function ConnectionPropertiesPage({
   };
 
   const handleDiscoverSessions = async () => {
-    if (daemonFirst && !selectedDaemonHostId) {
-      setAvailableSessions([]);
-      setSessionDiscoveryState('idle');
-      setSessionDiscoveryError('先选择一个在线 daemon，再点击 Connect。');
-      return;
-    }
-
-    if (daemonFirst && (!form.bridgeHost.trim() || !form.authToken.trim())) {
-      setAvailableSessions([]);
-      setSessionDiscoveryState('idle');
-      setSessionDiscoveryError('请先填写这个 daemon 对应的 bridge host 和 token。');
-      return;
-    }
-
     const bridgeHost = form.bridgeHost.trim();
     const authToken = form.authToken.trim();
 
     if (!bridgeHost) {
       setAvailableSessions([]);
       setSessionDiscoveryState('idle');
-      setSessionDiscoveryError(daemonFirst ? '请先填写这个 daemon 对应的 bridge host 和 token。' : '先填写 bridge host，再点击 Connect。');
+      setSessionDiscoveryError('先填写 bridge host，再点击 Connect。');
       return;
     }
 
     if (!authToken) {
       setAvailableSessions([]);
       setSessionDiscoveryState('idle');
-      setSessionDiscoveryError(daemonFirst ? '请先填写这个 daemon 对应的 bridge host 和 token。' : '先填写 auth token，再点击 Connect。');
+      setSessionDiscoveryError('先填写 auth token，再点击 Connect。');
       return;
     }
 
@@ -610,7 +584,7 @@ export function ConnectionPropertiesPage({
           onSessionNameChange={(sessionName) => setForm((current) => ({ ...current, sessionName }))}
         />
 
-        {!daemonFirst && rememberedServerViews.length > 0 && (
+        {rememberedServerViews.length > 0 && (
           <ConnectionSection
             title="Remembered Servers"
             description={
@@ -658,68 +632,50 @@ export function ConnectionPropertiesPage({
           </ConnectionSection>
         )}
 
-        {!daemonFirst ? (
-          <ConnectionSectionFields
-            bridgeHost={form.bridgeHost}
-            onBridgeHostChange={handleBridgeHostChange}
-            bridgePort={form.bridgePort}
-            onBridgePortChange={(bridgePort) => setForm((current) => ({ ...current, bridgePort }))}
-            authToken={form.authToken}
-            onAuthTokenChange={(authToken) => setForm((current) => ({ ...current, authToken }))}
-          />
-        ) : (
+        <ConnectionSectionFields
+          bridgeHost={form.bridgeHost}
+          onBridgeHostChange={handleBridgeHostChange}
+          bridgePort={form.bridgePort}
+          onBridgePortChange={(bridgePort) => setForm((current) => ({ ...current, bridgePort }))}
+          authToken={form.authToken}
+          onAuthTokenChange={(authToken) => setForm((current) => ({ ...current, authToken }))}
+        />
+
+        {selectedDaemonHostId ? (
           <ConnectionSection
             title="Daemon Bridge Binding"
-            description="relay 已登录时，连接配置以 daemon 为一级真相。bridge/ws/turn/signal 对用户透明，这里只展示当前 daemon 绑定到的 bridge preset。"
+            description={daemonBoundServer
+              ? '当前 daemon 已绑定 bridge preset；直连字段仍可手工修改。'
+              : '当前 daemon 尚未绑定 bridge preset；直连字段保存后会写入连接列表。'}
           >
-            {selectedDaemonHostId ? (
-              daemonBoundServer ? (
-                <div
-                  style={{
-                    borderRadius: '18px',
-                    backgroundColor: '#ffffff',
-                    padding: '14px 16px',
-                    display: 'grid',
-                    gap: '6px',
-                    boxShadow: mobileTheme.shadow.soft,
-                    fontSize: '12px',
-                    color: mobileTheme.colors.lightMuted,
-                  }}
-                >
-                  <div style={{ fontSize: '14px', fontWeight: 800, color: mobileTheme.colors.lightText }}>
-                    当前绑定：{daemonBoundServer.name}
-                  </div>
-                  <div>daemonHostId: {selectedDaemonHostId}</div>
-                  <div>bridgeHost: {daemonBoundServer.targetHost}</div>
-                  <div>bridgePort: {daemonBoundServer.targetPort}</div>
-                  <div>authToken: {daemonBoundServer.authToken?.trim() ? '已绑定' : '未绑定'}</div>
+            {daemonBoundServer ? (
+              <div
+                style={{
+                  borderRadius: '18px',
+                  backgroundColor: '#ffffff',
+                  padding: '14px 16px',
+                  display: 'grid',
+                  gap: '6px',
+                  boxShadow: mobileTheme.shadow.soft,
+                  fontSize: '12px',
+                  color: mobileTheme.colors.lightMuted,
+                }}
+              >
+                <div style={{ fontSize: '14px', fontWeight: 800, color: mobileTheme.colors.lightText }}>
+                  当前绑定：{daemonBoundServer.name}
                 </div>
-              ) : daemonNeedsManualBinding ? (
-                <div style={{ display: 'grid', gap: '12px' }}>
-                  <div style={{ fontSize: '13px', color: mobileTheme.colors.danger, lineHeight: 1.6 }}>
-                    这个 daemon 还没有绑定 bridge preset。先手工填写 bridge host 和 token，然后保存会把它写入连接列表。
-                  </div>
-                  <ConnectionSectionFields
-                    bridgeHost={form.bridgeHost}
-                    onBridgeHostChange={handleBridgeHostChange}
-                    bridgePort={form.bridgePort}
-                    onBridgePortChange={(bridgePort) => setForm((current) => ({ ...current, bridgePort }))}
-                    authToken={form.authToken}
-                    onAuthTokenChange={(authToken) => setForm((current) => ({ ...current, authToken }))}
-                  />
-                </div>
-              ) : (
-                <div style={{ fontSize: '13px', color: mobileTheme.colors.danger, lineHeight: 1.6 }}>
-                  当前 daemon 还没有绑定可用 bridge server 预设。先在连接配置中保存这个 daemon 的 bridge host/token。
-                </div>
-              )
+                <div>daemonHostId: {selectedDaemonHostId}</div>
+                <div>bridgeHost: {daemonBoundServer.targetHost}</div>
+                <div>bridgePort: {daemonBoundServer.targetPort}</div>
+                <div>authToken: {daemonBoundServer.authToken?.trim() ? '已绑定' : '未绑定'}</div>
+              </div>
             ) : (
               <div style={{ fontSize: '13px', color: mobileTheme.colors.lightMuted, lineHeight: 1.6 }}>
-                先在下方选择一个在线 daemon，随后这里会自动显示它绑定的 bridge preset。
+                当前选中的 daemon 还没有绑定 bridge preset。请在上方填写 bridge host 和 token，保存后会写入连接列表。
               </div>
             )}
           </ConnectionSection>
-        )}
+        ) : null}
 
         <RemoteAccessSection
           transportMode={form.transportMode}
@@ -744,7 +700,7 @@ export function ConnectionPropertiesPage({
 
         <ConnectionSection
           title="Detected Tmux Sessions"
-          description={daemonFirst ? '先选 daemon，再显式 Connect / Refresh 拉这个 daemon 下的 tmux session。' : '填写好 host + token 后，显式点 Connect / Refresh 才会拉 tmux session。'}
+          description={'填写好 host + token 后，显式点 Connect / Refresh 才会拉 tmux session。'}
         >
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '12px' }}>
             <button
@@ -765,7 +721,7 @@ export function ConnectionPropertiesPage({
             </button>
           </div>
           <div style={{ color: mobileTheme.colors.lightMuted, lineHeight: 1.6 }}>
-            {sessionDiscoveryState === 'idle' && (sessionDiscoveryError || (daemonFirst ? 'Select daemon, then tap Connect.' : 'Fill bridge host + token, then tap Connect.'))}
+            {sessionDiscoveryState === 'idle' && (sessionDiscoveryError || 'Fill bridge host + token, then tap Connect.')}
             {sessionDiscoveryState === 'loading' && 'Loading tmux sessions...'}
             {sessionDiscoveryState === 'error' && `Failed to load tmux sessions: ${sessionDiscoveryError}`}
             {sessionDiscoveryState === 'done' && availableSessions.length === 0 && 'No existing tmux session on this server yet.'}

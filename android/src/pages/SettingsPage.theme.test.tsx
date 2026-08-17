@@ -97,7 +97,7 @@ describe('SettingsPage terminal theme selection', () => {
     expect(screen.getByText('Night Owl')).toBeTruthy();
     expect(screen.getByText('Kanagawa Wave')).toBeTruthy();
     expect(screen.getByText('Rose Pine Moon')).toBeTruthy();
-    expect(screen.getByText('Relay Account')).toBeTruthy();
+    expect(screen.getByText('连接配置')).toBeTruthy();
   });
 
   it('persists terminal theme immediately when a theme card is selected', () => {

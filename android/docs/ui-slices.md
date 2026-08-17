@@ -74,7 +74,7 @@
   - 显示当前进程 active Sessions 与 deduped connectable server rows
   - 不显示 Relay 登录表单；不显示或管理 Session group、saved tab list、live Session 子列表
 
-- `src/pages/SettingsPage.tsx` / `src/components/settings/RelayAccountSettingsSection.tsx`
+- `src/pages/SettingsPage.tsx` / `src/components/settings/ConnectionConfigSection.tsx`
   - 固定 relay 服务 `relay.codewhisper.cc` 的账号/密码登录、退出登录
   - 新 server preset / remembered bridge entry 配置入口
 
@@ -154,7 +154,7 @@
 - 范围：
   - `ConnectionsPage`
   - `SettingsPage`
-  - `RelayAccountSettingsSection`
+  - `ConnectionConfigSection`
   - `useTraversalRelayAccount`
   - 默认 relay service `relay.codewhisper.cc`
 - 成功标准：
