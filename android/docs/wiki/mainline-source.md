@@ -330,7 +330,18 @@ flowchart TD
   Install --> GlobalBin["~/.local/bin/zterm-daemon"]
   Npm["scripts/prepare-daemon-npm-package.mjs"] --> PackageBin["package/bin/zterm-daemon"]
   Npm --> WinShell
+  AppSdkPrebuildGate["package.json#prebuild"] --> AppSdkPackageGate["package.json#test:appsdk-verify"]
+  AppSdkCiGate[".github/workflows/ci.yml#appsdk-governance"] --> AppSdkPackageGate
+  AppSdkReleaseGate[".github/workflows/android-release.yml#Verify AppSDK binary and record graph"] --> AppSdkPackageGate
+  AppSdkPackageGate --> AppSdkBinaryPreflight["scripts/verify-appsdk-binary.mjs#verifyPinnedAppSdkBinary"]
+  AppSdkBinaryPreflight --> AppSdkRecordGraphVerify["same absolute AppSDK binary#verify"]
 ```
+
+The AppSDK branch is a governance control path. Prebuild, CI, and Android
+release converge on `test:appsdk-verify`; the preflight resolves one executable,
+validates project/lock version and digest, and invokes record verification
+through that same absolute path. It has no daemon, terminal, Active, or
+Protected business-resource edge.
 
 ## Global Resource Flow
 

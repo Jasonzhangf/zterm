@@ -374,12 +374,14 @@ Relay design rules:
 | `release.update_artifact` | build outputs and release verifiers | APK/update/daemon release artifacts | release artifact source | direct daemon start |
 | `release.daemon_artifact` | verified staged daemon bundle | deterministic runtime artifact consumed by process start | executable artifact truth | authoring source execution |
 | `observability.debug_channel` | bounded metadata, trace, logs, diagnostics, HTTP observability ingestion | debug snapshot, trace summary, evidence metadata, accepted observability response | observe-only diagnostics; dedicated HTTP channel is default-deny and POST-only for mutation | business payload truth, terminal text ownership, terminal mux/session transport dependency |
+| `observability.appsdk_governance` | package prebuild, CI, and release gate intent | exact locked AppSDK record-graph verification result | `resource.appsdk_compiler_identity` project-side preflight | product runtime truth, second compiler path, Active/Protected mutation |
 
 Release / observability design rules:
 
 - Release artifact must promote to daemon artifact before runtime start.
 - Observability can explain a failure; it cannot make a request successful or alter business payload.
 - `resource.observability_channel` is the dedicated target-level HTTP side channel for bounded client log/snapshot ingestion and expiring debug control. It must not depend on active session, terminal channel, transport subscriber, mirror, sparse buffer, renderer, or UI truth.
+- `observability.appsdk_governance` resolves and validates one AppSDK executable, then uses that same absolute path for record verification. AppSDK remains the compiler/record owner; the project module cannot duplicate compiler or lifecycle implementation.
 
 ## Current Feature To Module Map
 

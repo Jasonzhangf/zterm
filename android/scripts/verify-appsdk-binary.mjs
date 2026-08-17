@@ -10,8 +10,7 @@ const projectPath = join(projectRoot, '.appsdk', 'project.json');
 
 async function findExecutable(name) {
   for (const directory of (process.env.PATH ?? '').split(delimiter)) {
-    if (!directory) continue;
-    const candidate = join(directory, name);
+    const candidate = resolve(directory || '.', name);
     try {
       await access(candidate, constants.X_OK);
       return candidate;
@@ -22,29 +21,40 @@ async function findExecutable(name) {
   throw new Error(`APPSDK_BINARY_MISSING:${name}`);
 }
 
-const [lock, project, binaryPath] = await Promise.all([
-  readFile(lockPath, 'utf8').then(JSON.parse),
-  readFile(projectPath, 'utf8').then(JSON.parse),
-  findExecutable('appsdk'),
-]);
+async function verifyPinnedAppSdkBinary() {
+  const [lock, project, binaryPath] = await Promise.all([
+    readFile(lockPath, 'utf8').then(JSON.parse),
+    readFile(projectPath, 'utf8').then(JSON.parse),
+    findExecutable('appsdk'),
+  ]);
 
-const binary = await readFile(binaryPath);
-const digest = `sha256:${createHash('sha256').update(binary).digest('hex')}`;
-const expectedVersion = project?.sdk?.version;
-const versionProbe = spawnSync(binaryPath, ['version'], { encoding: 'utf8' });
-const actualVersion = versionProbe.stdout.trim();
+  const binary = await readFile(binaryPath);
+  const digest = `sha256:${createHash('sha256').update(binary).digest('hex')}`;
+  const expectedVersion = project?.sdk?.version;
 
-if (versionProbe.status !== 0) {
-  throw new Error(`APPSDK_VERSION_PROBE_FAILED:${binaryPath}`);
-}
-if (lock.version !== expectedVersion) {
-  throw new Error(`APPSDK_LOCK_VERSION_MISMATCH:${lock.version}:${expectedVersion}`);
-}
-if (actualVersion !== `appsdk ${expectedVersion} (rust)`) {
-  throw new Error(`APPSDK_BINARY_VERSION_MISMATCH:${actualVersion}:${expectedVersion}`);
-}
-if (lock.digest !== digest || lock.compiler_digest !== digest) {
-  throw new Error(`APPSDK_BINARY_DIGEST_MISMATCH:${digest}:${lock.compiler_digest}`);
+  if (lock.version !== expectedVersion) {
+    throw new Error(`APPSDK_LOCK_VERSION_MISMATCH:${lock.version}:${expectedVersion}`);
+  }
+  if (lock.digest !== digest || lock.compiler_digest !== digest) {
+    throw new Error(`APPSDK_BINARY_DIGEST_MISMATCH:${digest}:${lock.compiler_digest}`);
+  }
+
+  const versionProbe = spawnSync(binaryPath, ['version'], { encoding: 'utf8' });
+  const actualVersion = typeof versionProbe.stdout === 'string'
+    ? versionProbe.stdout.trim()
+    : '';
+  if (versionProbe.error || versionProbe.status !== 0) {
+    throw new Error(`APPSDK_VERSION_PROBE_FAILED:${binaryPath}`);
+  }
+  if (actualVersion !== `appsdk ${expectedVersion} (rust)`) {
+    throw new Error(`APPSDK_BINARY_VERSION_MISMATCH:${actualVersion}:${expectedVersion}`);
+  }
+
+  console.log(JSON.stringify({ ok: true, binary: binaryPath, version: expectedVersion, digest }));
+  const verification = spawnSync(binaryPath, ['verify', projectRoot], { stdio: 'inherit' });
+  if (verification.status !== 0) {
+    throw new Error(`APPSDK_VERIFY_FAILED:${binaryPath}:${verification.status ?? verification.signal}`);
+  }
 }
 
-console.log(JSON.stringify({ ok: true, binary: binaryPath, version: expectedVersion, digest }));
+await verifyPinnedAppSdkBinary();
