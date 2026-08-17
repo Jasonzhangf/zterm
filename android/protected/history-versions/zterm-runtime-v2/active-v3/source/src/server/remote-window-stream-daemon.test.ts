@@ -1,0 +1,3426 @@
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { EventEmitter } from 'node:events';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { PassThrough } from 'node:stream';
+import { describe, expect, it, vi } from 'vitest';
+import type { RemoteWindowStreamStatusPayload } from '@zterm/shared/protocol';
+import type { RemoteWindowCaptureSourceFactory } from './remote-window-capture';
+import {
+  buildScreenCaptureKitStartupTimeoutMessage,
+  buildScreenCaptureKitConfig,
+  buildRemoteWindowImagePasteInputPayloads,
+  buildRemoteWindowInputConfig,
+  buildMacosAppWindowTargets,
+  buildRemoteWindowStreamTargets,
+  createDefaultRemoteWindowInputHelper,
+  createRemoteWindowStreamDaemonRuntime,
+  flattenIterm2SplitTree,
+  isRemoteWindowInputConfigStale,
+  MACOS_REMOTE_WINDOW_INPUT_SWIFT,
+  SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT,
+  parseTmuxClientTargets,
+  resolveRemoteWindowInputConfigStaleMs,
+  resolveRemoteWindowInputHelperTimeoutMs,
+  shouldCoalesceRemoteWindowQueuedFocusBeforeInput,
+  shouldRefreshRemoteWindowQueuedInputAfterFocus,
+  shouldRefreshRemoteWindowQueuedInputAfterRealInput,
+  startScreenCaptureKitFrameSource,
+  summarizeRemoteWindowCatalogError,
+  type Iterm2RawCatalog,
+  type Iterm2RawNode,
+  type MacosAppWindowCatalog,
+} from './remote-window-stream-daemon';
+
+async function flushPromiseQueue() {
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, 0);
+  });
+}
+
+function makeStreamTarget() {
+  return {
+    streamTargetId: 'iterm2-pane:window-1:tab-1:left',
+    videoTarget: {
+      kind: 'iterm2-pane' as const,
+      appBundleId: 'com.googlecode.iterm2',
+      pid: 123,
+      windowId: 'window-1',
+      title: 'left-pane',
+      windowBoundsTopLeftPx: { x: 10, y: 20, width: 302, height: 250 },
+      paneRectInContentPx: { x: 0, y: 0, width: 100, height: 200 },
+      cropRectTopLeftPx: { x: 10, y: 70, width: 100, height: 200 },
+      contentTopInsetPx: 50,
+    },
+    inputTarget: {
+      kind: 'iterm2-pane' as const,
+      itermSessionId: 'left',
+      tty: '/dev/ttys001',
+    },
+    streamMode: 'view' as const,
+    focusPolicy: 'bring-to-focus' as const,
+    inputRoute: 'iterm2-api' as const,
+    capture: {
+      source: 'ScreenCaptureKit' as const,
+      coordinateSpace: 'macos-top-left-px' as const,
+      scale: 1,
+      createdAt: '2026-07-19T00:00:00.000Z',
+    },
+  };
+}
+
+function makeAppStreamTarget() {
+  const target = makeStreamTarget();
+  return {
+    ...target,
+    streamTargetId: 'app-window:123:456',
+    videoTarget: {
+      kind: 'app-window' as const,
+      appBundleId: 'com.apple.TextEdit',
+      pid: 123,
+      windowId: '456',
+      title: 'TextEdit',
+      windowBoundsTopLeftPx: { x: 10, y: 20, width: 800, height: 600 },
+      cropRectTopLeftPx: { x: 10, y: 20, width: 800, height: 600 },
+    },
+    inputTarget: {
+      kind: 'app-window' as const,
+    },
+    streamMode: 'interactive' as const,
+    focusPolicy: 'bring-to-focus' as const,
+    inputRoute: 'os-event' as const,
+  };
+}
+
+class FakeRemoteWindowPeerConnection {
+  public onicecandidate: ((event: { candidate: { toJSON: () => Record<string, unknown> } | null }) => void) | null = null;
+
+  public onconnectionstatechange: (() => void) | null = null;
+
+  public connectionState: RTCPeerConnectionState = 'connected';
+
+  public localDescription: RTCSessionDescriptionInit | null = null;
+
+  public remoteDescription: RTCSessionDescriptionInit | null = null;
+
+  public addTrack = vi.fn();
+
+  public addTransceiver = vi.fn();
+
+  public close = vi.fn(() => {
+    this.connectionState = 'closed';
+  });
+
+  public addIceCandidate = vi.fn(async (candidate: RTCIceCandidateInit) => candidate);
+
+  public setRemoteDescription = vi.fn(async (description: RTCSessionDescriptionInit) => {
+    this.remoteDescription = description;
+  });
+
+  public createAnswer = vi.fn(async () => ({
+    type: 'answer' as const,
+    sdp: 'daemon-answer-sdp',
+  }));
+
+  public setLocalDescription = vi.fn(async (description: RTCSessionDescriptionInit) => {
+    this.localDescription = description;
+    this.onicecandidate?.({
+      candidate: {
+        toJSON: () => ({
+          candidate: 'candidate:daemon',
+          sdpMid: '0',
+          sdpMLineIndex: 0,
+          usernameFragment: 'daemon',
+        }),
+      },
+    });
+  });
+}
+
+function makeFakeMediaStreamTrack() {
+  return { stop: vi.fn() } as unknown as MediaStreamTrack & { stop: ReturnType<typeof vi.fn> };
+}
+
+function makeFakeRtpSender(
+  initialParameters: RTCRtpSendParameters = { encodings: [{} as RTCRtpEncodingParameters] } as RTCRtpSendParameters,
+) {
+  let parameters: RTCRtpSendParameters = initialParameters;
+  return {
+    getParameters: vi.fn(() => parameters),
+    setParameters: vi.fn(async (nextParameters: RTCRtpSendParameters) => {
+      parameters = nextParameters;
+    }),
+  } as unknown as RTCRtpSender & {
+    getParameters: ReturnType<typeof vi.fn>;
+    setParameters: ReturnType<typeof vi.fn>;
+  };
+}
+
+function makeNestedItermTree(): Iterm2RawNode {
+  return {
+    type: 'splitter',
+    vertical: true,
+    children: [
+      {
+        type: 'session',
+        sessionId: 'left',
+        title: 'left-pane',
+        tty: '/dev/ttys001',
+        frame: { x: 0, y: 0, width: 100, height: 200 },
+      },
+      {
+        type: 'splitter',
+        vertical: false,
+        children: [
+          {
+            type: 'session',
+            sessionId: 'right-top',
+            title: 'right-top-pane',
+            tty: '/dev/ttys002',
+            frame: { x: 0, y: 0, width: 200, height: 100 },
+          },
+          {
+            type: 'session',
+            sessionId: 'right-bottom',
+            title: 'right-bottom-pane',
+            tty: '/dev/ttys003',
+            frame: { x: 0, y: 101, width: 200, height: 99 },
+          },
+        ],
+      },
+    ],
+  };
+}
+
+function makeCatalog(): Iterm2RawCatalog {
+  return {
+    windows: [{
+      windowId: 'window-1',
+      title: 'iTerm2 Gate',
+      pid: 123,
+      frame: { x: 10, y: 20, width: 302, height: 250 },
+      tabs: [{
+        tabId: 'tab-1',
+        activeSessionId: 'left',
+        root: makeNestedItermTree(),
+      }],
+    }],
+  };
+}
+
+function makeAppWindowCatalog(): MacosAppWindowCatalog {
+  return {
+    windows: [
+      {
+        windowId: '64',
+        ownerName: 'Google Chrome',
+        appBundleId: 'com.google.Chrome',
+        pid: 487,
+        title: 'Chrome Window',
+        frame: { x: 700, y: 139, width: 1200, height: 800 },
+        displayId: '8',
+        displayBoundsTopLeftPx: { x: 0, y: 0, width: 3840, height: 2160 },
+      },
+      {
+        windowId: '33',
+        ownerName: 'iTerm',
+        appBundleId: 'com.googlecode.iterm2',
+        pid: 479,
+        title: 'Default (tmux)',
+        frame: { x: 10, y: 20, width: 302, height: 250 },
+        displayId: '8',
+        displayBoundsTopLeftPx: { x: 0, y: 0, width: 3840, height: 2160 },
+      },
+    ],
+  };
+}
+
+function makeTempExecutable(prefix: string, body: string) {
+  const tempRoot = mkdtempSync(join(tmpdir(), prefix));
+  const executablePath = join(tempRoot, 'runner');
+  writeFileSync(executablePath, body);
+  chmodSync(executablePath, 0o755);
+  return {
+    executablePath,
+    cleanup: () => rmSync(tempRoot, { recursive: true, force: true }),
+  };
+}
+
+function makeLiveComplexItermTree(): Iterm2RawNode {
+  return {
+    type: 'splitter',
+    vertical: true,
+    children: [
+      {
+        type: 'splitter',
+        vertical: false,
+        children: [
+          {
+            type: 'session',
+            sessionId: 'left-top',
+            title: 'left-top',
+            frame: { x: 0, y: 0, width: 801, height: 987 },
+          },
+          {
+            type: 'session',
+            sessionId: 'left-bottom',
+            title: 'left-bottom',
+            frame: { x: 0, y: 988, width: 801, height: 989 },
+          },
+        ],
+      },
+      {
+        type: 'splitter',
+        vertical: false,
+        children: [
+          {
+            type: 'splitter',
+            vertical: true,
+            children: [
+              {
+                type: 'session',
+                sessionId: 'middle-a-top-left',
+                title: 'middle-a-top-left',
+                frame: { x: 0, y: 0, width: 682, height: 978 },
+              },
+              {
+                type: 'session',
+                sessionId: 'middle-a-top-right',
+                title: 'middle-a-top-right',
+                frame: { x: 683, y: 0, width: 710, height: 978 },
+              },
+            ],
+          },
+          {
+            type: 'splitter',
+            vertical: true,
+            children: [
+              {
+                type: 'session',
+                sessionId: 'middle-a-bottom-left',
+                title: 'middle-a-bottom-left',
+                frame: { x: 0, y: 0, width: 699, height: 998 },
+              },
+              {
+                type: 'session',
+                sessionId: 'middle-a-bottom-right',
+                title: 'middle-a-bottom-right',
+                frame: { x: 700, y: 0, width: 693, height: 998 },
+              },
+            ],
+          },
+        ],
+      },
+      {
+        type: 'splitter',
+        vertical: false,
+        children: [
+          {
+            type: 'session',
+            sessionId: 'middle-b-top',
+            title: 'middle-b-top',
+            frame: { x: 0, y: 0, width: 787, height: 978 },
+          },
+          {
+            type: 'session',
+            sessionId: 'middle-b-bottom',
+            title: 'middle-b-bottom',
+            frame: { x: 0, y: 979, width: 787, height: 998 },
+          },
+        ],
+      },
+      {
+        type: 'splitter',
+        vertical: false,
+        children: [
+          {
+            type: 'session',
+            sessionId: 'right-top',
+            title: 'right-top',
+            frame: { x: 0, y: 0, width: 815, height: 987 },
+          },
+          {
+            type: 'session',
+            sessionId: 'right-bottom',
+            title: 'right-bottom',
+            frame: { x: 0, y: 988, width: 815, height: 989 },
+          },
+        ],
+      },
+    ],
+  };
+}
+
+describe('remote window stream daemon owner', () => {
+  it('builds remote input config with target window focus metadata', () => {
+    const target = makeAppStreamTarget();
+    const config = buildRemoteWindowInputConfig({
+      requestId: 'rw-input-config',
+      streamId: 'stream-input-config',
+      targetId: target.streamTargetId,
+      clientSentAt: Date.now(),
+      event: {
+        kind: 'scroll',
+        unit: 'pixel',
+        deltaX: 12,
+        deltaY: 24,
+        x: 120,
+        y: 140,
+        normalizedX: 0.2,
+        normalizedY: 0.3,
+      },
+    }, target, { daemonReceivedAtMs: 7_777 });
+
+    expect(config).toEqual({
+      daemonReceivedAtMs: 7_777,
+      clientSentAt: expect.any(Number),
+      pid: 123,
+      appBundleId: 'com.apple.TextEdit',
+      focusPolicy: 'bring-to-focus',
+      window: {
+        windowId: '456',
+        title: 'TextEdit',
+        bounds: { x: 10, y: 20, width: 800, height: 600 },
+      },
+      event: expect.objectContaining({
+        kind: 'scroll',
+        deltaX: 12,
+        deltaY: 24,
+      }),
+    });
+  });
+
+  it('uses daemon-local receive time, not client wall clock, for input stale checks', () => {
+    expect(isRemoteWindowInputConfigStale({
+      daemonReceivedAtMs: 20_000,
+    }, 20_999)).toBe(false);
+    expect(isRemoteWindowInputConfigStale({
+      daemonReceivedAtMs: 20_000,
+    }, 21_001)).toBe(true);
+    expect(isRemoteWindowInputConfigStale({
+      daemonReceivedAtMs: Number.NaN,
+    }, 20_001)).toBe(true);
+  });
+
+  it('keeps action execution bounded while real input keeps the one-second queued realtime budget', () => {
+    const target = makeAppStreamTarget();
+    const focusConfig = buildRemoteWindowInputConfig({
+      requestId: 'rw-focus-timeout-policy',
+      streamId: 'stream-timeout-policy',
+      targetId: target.streamTargetId,
+      clientSentAt: 1_000,
+      event: { kind: 'focus' },
+    }, target, { daemonReceivedAtMs: 20_000 });
+    const pointerConfig = buildRemoteWindowInputConfig({
+      requestId: 'rw-pointer-timeout-policy',
+      streamId: 'stream-timeout-policy',
+      targetId: target.streamTargetId,
+      clientSentAt: 1_000,
+      event: {
+        kind: 'pointer',
+        phase: 'down',
+        pointerId: 1,
+        button: 'left',
+        buttons: 1,
+        x: 120,
+        y: 140,
+        normalizedX: 0.5,
+        normalizedY: 0.5,
+      },
+    }, target, { daemonReceivedAtMs: 20_000 });
+    const otherWindowPointerConfig = {
+      ...pointerConfig,
+      window: {
+        ...pointerConfig.window,
+        windowId: 'other-window',
+      },
+    };
+
+    expect(resolveRemoteWindowInputHelperTimeoutMs(focusConfig)).toBe(3_000);
+    expect(resolveRemoteWindowInputHelperTimeoutMs(pointerConfig)).toBe(3_000);
+    expect(resolveRemoteWindowInputConfigStaleMs(pointerConfig)).toBe(1_000);
+    expect(isRemoteWindowInputConfigStale(
+      focusConfig,
+      22_500,
+      resolveRemoteWindowInputHelperTimeoutMs(focusConfig),
+    )).toBe(false);
+    expect(isRemoteWindowInputConfigStale(
+      pointerConfig,
+      21_001,
+      resolveRemoteWindowInputConfigStaleMs(pointerConfig),
+    )).toBe(true);
+    expect(shouldRefreshRemoteWindowQueuedInputAfterFocus(focusConfig, pointerConfig)).toBe(true);
+    expect(shouldRefreshRemoteWindowQueuedInputAfterFocus(focusConfig, otherWindowPointerConfig)).toBe(false);
+    expect(shouldRefreshRemoteWindowQueuedInputAfterFocus(pointerConfig, focusConfig)).toBe(false);
+    expect(shouldCoalesceRemoteWindowQueuedFocusBeforeInput(focusConfig, pointerConfig)).toBe(true);
+    expect(shouldCoalesceRemoteWindowQueuedFocusBeforeInput(focusConfig, otherWindowPointerConfig)).toBe(false);
+    expect(shouldCoalesceRemoteWindowQueuedFocusBeforeInput(pointerConfig, focusConfig)).toBe(false);
+    expect(shouldRefreshRemoteWindowQueuedInputAfterRealInput(pointerConfig, pointerConfig)).toBe(true);
+    expect(shouldRefreshRemoteWindowQueuedInputAfterRealInput(pointerConfig, otherWindowPointerConfig)).toBe(false);
+    expect(shouldRefreshRemoteWindowQueuedInputAfterRealInput(focusConfig, pointerConfig)).toBe(false);
+  });
+
+  it('keeps an explicit standalone focus while refreshing a later same-target input after success', async () => {
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const childEvents = new EventEmitter();
+    const fakeChild = {
+      stdin,
+      stdout,
+      stderr,
+      killed: false,
+      kill: vi.fn((signal?: NodeJS.Signals) => {
+        fakeChild.killed = true;
+        childEvents.emit('exit', null, signal || null);
+        return true;
+      }),
+      on: childEvents.on.bind(childEvents),
+    };
+    const processFactory = vi.fn(() => {
+      process.nextTick(() => stdout.write(`${JSON.stringify({ ready: true })}\n`));
+      return fakeChild as any;
+    });
+    let inputBuffer = '';
+    const writtenKinds: string[] = [];
+    stdin.setEncoding('utf8');
+    stdin.on('data', (chunk) => {
+      inputBuffer += String(chunk);
+      let index = inputBuffer.indexOf('\n');
+      while (index >= 0) {
+        const raw = inputBuffer.slice(0, index).trim();
+        inputBuffer = inputBuffer.slice(index + 1);
+        if (raw) {
+          const config = JSON.parse(raw) as { event?: { kind?: string } };
+          writtenKinds.push(String(config.event?.kind || 'unknown'));
+          const delay = config.event?.kind === 'focus' ? 1200 : 0;
+          setTimeout(() => {
+            stdout.write(`${JSON.stringify({ ok: true, kind: config.event?.kind })}\n`);
+          }, delay);
+        }
+        index = inputBuffer.indexOf('\n');
+      }
+    });
+    const helper = createDefaultRemoteWindowInputHelper({
+      swiftBinary: 'fake-swift',
+      processFactory,
+    });
+    const target = makeAppStreamTarget();
+
+    try {
+      await helper.warm();
+      const daemonReceivedAtMs = Date.now();
+      const focusConfig = buildRemoteWindowInputConfig({
+        requestId: 'rw-slow-focus',
+        streamId: 'stream-slow-focus',
+        targetId: target.streamTargetId,
+        clientSentAt: daemonReceivedAtMs,
+        event: { kind: 'focus' },
+      }, target, { daemonReceivedAtMs });
+      const pointerConfig = buildRemoteWindowInputConfig({
+        requestId: 'rw-slow-focus-pointer',
+        streamId: 'stream-slow-focus',
+        targetId: target.streamTargetId,
+        clientSentAt: daemonReceivedAtMs,
+        event: {
+          kind: 'pointer',
+          phase: 'down',
+          pointerId: 1,
+          button: 'left',
+          buttons: 1,
+          x: 120,
+          y: 140,
+          normalizedX: 0.5,
+          normalizedY: 0.5,
+        },
+      }, target, { daemonReceivedAtMs });
+      const focusPromise = helper.send(focusConfig);
+      await new Promise((resolve) => {
+        setTimeout(resolve, 40);
+      });
+      const pointerPromise = helper.send(pointerConfig);
+      await expect(Promise.all([focusPromise, pointerPromise])).resolves.toEqual([undefined, undefined]);
+      expect(writtenKinds).toEqual(['focus', 'pointer']);
+    } finally {
+      helper.dispose();
+    }
+  }, 10_000);
+
+  it('allows a real action to spend its focus budget after passing the queued stale gate', async () => {
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const childEvents = new EventEmitter();
+    const fakeChild = {
+      stdin,
+      stdout,
+      stderr,
+      killed: false,
+      kill: vi.fn((signal?: NodeJS.Signals) => {
+        fakeChild.killed = true;
+        childEvents.emit('exit', null, signal || null);
+        return true;
+      }),
+      on: childEvents.on.bind(childEvents),
+    };
+    const processFactory = vi.fn(() => {
+      process.nextTick(() => stdout.write(`${JSON.stringify({ ready: true })}\n`));
+      return fakeChild as any;
+    });
+    const writtenKinds: string[] = [];
+    let inputBuffer = '';
+    stdin.setEncoding('utf8');
+    stdin.on('data', (chunk) => {
+      inputBuffer += String(chunk);
+      let index = inputBuffer.indexOf('\n');
+      while (index >= 0) {
+        const raw = inputBuffer.slice(0, index).trim();
+        inputBuffer = inputBuffer.slice(index + 1);
+        if (raw) {
+          const config = JSON.parse(raw) as { event?: { kind?: string } };
+          writtenKinds.push(String(config.event?.kind || 'unknown'));
+          setTimeout(() => {
+            stdout.write(`${JSON.stringify({ ok: true })}\n`);
+          }, 1200);
+        }
+        index = inputBuffer.indexOf('\n');
+      }
+    });
+    const helper = createDefaultRemoteWindowInputHelper({
+      swiftBinary: 'fake-swift',
+      processFactory,
+    });
+    const target = makeAppStreamTarget();
+
+    try {
+      await helper.warm();
+      const daemonReceivedAtMs = Date.now();
+      const clickConfig = buildRemoteWindowInputConfig({
+        requestId: 'rw-click-focus-budget',
+        streamId: 'stream-click-focus-budget',
+        targetId: target.streamTargetId,
+        clientSentAt: daemonReceivedAtMs,
+        event: {
+          kind: 'click',
+          pointerId: 1,
+          button: 'left',
+          clickCount: 1,
+          x: 120,
+          y: 140,
+          normalizedX: 0.5,
+          normalizedY: 0.5,
+        },
+      }, target, { daemonReceivedAtMs });
+
+      await expect(helper.send(clickConfig)).resolves.toBeUndefined();
+      expect(writtenKinds).toEqual(['click']);
+    } finally {
+      helper.dispose();
+    }
+  }, 10_000);
+
+  it('coalesces redundant same-target focus bursts so real actions do not stale behind focus work', async () => {
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const childEvents = new EventEmitter();
+    const fakeChild = {
+      stdin,
+      stdout,
+      stderr,
+      killed: false,
+      kill: vi.fn((signal?: NodeJS.Signals) => {
+        fakeChild.killed = true;
+        childEvents.emit('exit', null, signal || null);
+        return true;
+      }),
+      on: childEvents.on.bind(childEvents),
+    };
+    const processFactory = vi.fn(() => {
+      process.nextTick(() => stdout.write(`${JSON.stringify({ ready: true })}\n`));
+      return fakeChild as any;
+    });
+    let inputBuffer = '';
+    const writtenPointerIds: number[] = [];
+    const writtenKinds: string[] = [];
+    stdin.setEncoding('utf8');
+    stdin.on('data', (chunk) => {
+      inputBuffer += String(chunk);
+      let index = inputBuffer.indexOf('\n');
+      while (index >= 0) {
+        const raw = inputBuffer.slice(0, index).trim();
+        inputBuffer = inputBuffer.slice(index + 1);
+        if (raw) {
+          const config = JSON.parse(raw) as { event?: { kind?: string; pointerId?: number } };
+          if (typeof config.event?.pointerId === 'number') {
+            writtenPointerIds.push(config.event.pointerId);
+          }
+          writtenKinds.push(String(config.event?.kind || 'unknown'));
+          setTimeout(() => {
+            stdout.write(`${JSON.stringify({ ok: true })}\n`);
+          }, 650);
+        }
+        index = inputBuffer.indexOf('\n');
+      }
+    });
+    const helper = createDefaultRemoteWindowInputHelper({
+      swiftBinary: 'fake-swift',
+      processFactory,
+    });
+    const target = makeAppStreamTarget();
+
+    const makeConfigPair = (index: number) => {
+      const daemonReceivedAtMs = Date.now();
+      const focusConfig = buildRemoteWindowInputConfig({
+        requestId: `rw-burst-focus-${index}`,
+        streamId: 'stream-burst-focus',
+        targetId: target.streamTargetId,
+        clientSentAt: daemonReceivedAtMs,
+        event: { kind: 'focus' },
+      }, target, { daemonReceivedAtMs });
+      const pointerConfig = buildRemoteWindowInputConfig({
+        requestId: `rw-burst-pointer-${index}`,
+        streamId: 'stream-burst-focus',
+        targetId: target.streamTargetId,
+        clientSentAt: daemonReceivedAtMs,
+        event: {
+          kind: 'pointer',
+          phase: 'down',
+          pointerId: index,
+          button: 'left',
+          buttons: 1,
+          x: 120,
+          y: 140,
+          normalizedX: 0.5,
+          normalizedY: 0.5,
+        },
+      }, target, { daemonReceivedAtMs });
+      return [focusConfig, pointerConfig] as const;
+    };
+
+    try {
+      await helper.warm();
+      const configs = [1, 2, 3].flatMap((index) => [...makeConfigPair(index)]);
+      await expect(Promise.all(configs.map((config) => helper.send(config)))).resolves.toHaveLength(6);
+      expect(writtenPointerIds).toEqual([1, 2, 3]);
+      expect(writtenKinds).toEqual(['pointer', 'pointer', 'pointer']);
+    } finally {
+      helper.dispose();
+    }
+  }, 10_000);
+
+  it('keeps same-target action-only bursts fresh behind inline focus work', async () => {
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const childEvents = new EventEmitter();
+    const fakeChild = {
+      stdin,
+      stdout,
+      stderr,
+      killed: false,
+      kill: vi.fn((signal?: NodeJS.Signals) => {
+        fakeChild.killed = true;
+        childEvents.emit('exit', null, signal || null);
+        return true;
+      }),
+      on: childEvents.on.bind(childEvents),
+    };
+    const processFactory = vi.fn(() => {
+      process.nextTick(() => stdout.write(`${JSON.stringify({ ready: true })}\n`));
+      return fakeChild as any;
+    });
+    let inputBuffer = '';
+    const writtenKinds: string[] = [];
+    stdin.setEncoding('utf8');
+    stdin.on('data', (chunk) => {
+      inputBuffer += String(chunk);
+      let index = inputBuffer.indexOf('\n');
+      while (index >= 0) {
+        const raw = inputBuffer.slice(0, index).trim();
+        inputBuffer = inputBuffer.slice(index + 1);
+        if (raw) {
+          const config = JSON.parse(raw) as { event?: { kind?: string; phase?: string } };
+          writtenKinds.push(
+            config.event?.kind === 'key'
+              ? `key:${config.event.phase || 'unknown'}`
+              : String(config.event?.kind || 'unknown'),
+          );
+          setTimeout(() => {
+            stdout.write(`${JSON.stringify({ ok: true })}\n`);
+          }, 1200);
+        }
+        index = inputBuffer.indexOf('\n');
+      }
+    });
+    const helper = createDefaultRemoteWindowInputHelper({
+      swiftBinary: 'fake-swift',
+      processFactory,
+    });
+    const target = makeAppStreamTarget();
+
+    try {
+      await helper.warm();
+      const daemonReceivedAtMs = Date.now();
+      const configs = [
+        buildRemoteWindowInputConfig({
+          requestId: 'rw-action-burst-click',
+          streamId: 'stream-action-burst',
+          targetId: target.streamTargetId,
+          clientSentAt: daemonReceivedAtMs,
+          event: {
+            kind: 'click',
+            pointerId: 1,
+            button: 'left',
+            clickCount: 1,
+            x: 120,
+            y: 140,
+            normalizedX: 0.5,
+            normalizedY: 0.5,
+          },
+        }, target, { daemonReceivedAtMs }),
+        buildRemoteWindowInputConfig({
+          requestId: 'rw-action-burst-gesture',
+          streamId: 'stream-action-burst',
+          targetId: target.streamTargetId,
+          clientSentAt: daemonReceivedAtMs,
+          event: {
+            kind: 'gesture',
+            gesture: 'swipe',
+            phase: 'end',
+            unit: 'pixel',
+            pointerId: 2,
+            startX: 120,
+            startY: 220,
+            x: 120,
+            y: 80,
+            startNormalizedX: 0.5,
+            startNormalizedY: 0.7,
+            normalizedX: 0.5,
+            normalizedY: 0.3,
+            deltaX: 0,
+            deltaY: -140,
+            durationMs: 420,
+            velocityX: 0,
+            velocityY: -140 / 420,
+          },
+        }, target, { daemonReceivedAtMs }),
+        buildRemoteWindowInputConfig({
+          requestId: 'rw-action-burst-scroll',
+          streamId: 'stream-action-burst',
+          targetId: target.streamTargetId,
+          clientSentAt: daemonReceivedAtMs,
+          event: {
+            kind: 'scroll',
+            unit: 'pixel',
+            deltaX: 0,
+            deltaY: 96,
+            x: 120,
+            y: 140,
+            normalizedX: 0.5,
+            normalizedY: 0.5,
+          },
+        }, target, { daemonReceivedAtMs }),
+        buildRemoteWindowInputConfig({
+          requestId: 'rw-action-burst-key-down',
+          streamId: 'stream-action-burst',
+          targetId: target.streamTargetId,
+          clientSentAt: daemonReceivedAtMs,
+          event: {
+            kind: 'key',
+            phase: 'down',
+            key: 'z',
+            code: 'KeyZ',
+            text: 'z',
+          },
+        }, target, { daemonReceivedAtMs }),
+        buildRemoteWindowInputConfig({
+          requestId: 'rw-action-burst-key-up',
+          streamId: 'stream-action-burst',
+          targetId: target.streamTargetId,
+          clientSentAt: daemonReceivedAtMs,
+          event: {
+            kind: 'key',
+            phase: 'up',
+            key: 'z',
+            code: 'KeyZ',
+            text: 'z',
+          },
+        }, target, { daemonReceivedAtMs }),
+      ];
+
+      const settled = await Promise.allSettled(configs.map((config) => helper.send(config)));
+      expect(settled).toEqual(configs.map(() => ({ status: 'fulfilled', value: undefined })));
+      expect(writtenKinds).toEqual(['click', 'gesture', 'scroll', 'key:down', 'key:up']);
+    } finally {
+      helper.dispose();
+    }
+  }, 12_000);
+
+  it('still drops stale queued action-only input for a different target', async () => {
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const childEvents = new EventEmitter();
+    const fakeChild = {
+      stdin,
+      stdout,
+      stderr,
+      killed: false,
+      kill: vi.fn((signal?: NodeJS.Signals) => {
+        fakeChild.killed = true;
+        childEvents.emit('exit', null, signal || null);
+        return true;
+      }),
+      on: childEvents.on.bind(childEvents),
+    };
+    const processFactory = vi.fn(() => {
+      process.nextTick(() => stdout.write(`${JSON.stringify({ ready: true })}\n`));
+      return fakeChild as any;
+    });
+    let inputBuffer = '';
+    const writtenKinds: string[] = [];
+    stdin.setEncoding('utf8');
+    stdin.on('data', (chunk) => {
+      inputBuffer += String(chunk);
+      let index = inputBuffer.indexOf('\n');
+      while (index >= 0) {
+        const raw = inputBuffer.slice(0, index).trim();
+        inputBuffer = inputBuffer.slice(index + 1);
+        if (raw) {
+          const config = JSON.parse(raw) as { event?: { kind?: string } };
+          writtenKinds.push(String(config.event?.kind || 'unknown'));
+          setTimeout(() => {
+            stdout.write(`${JSON.stringify({ ok: true })}\n`);
+          }, 1200);
+        }
+        index = inputBuffer.indexOf('\n');
+      }
+    });
+    const helper = createDefaultRemoteWindowInputHelper({
+      swiftBinary: 'fake-swift',
+      processFactory,
+    });
+    const target = makeAppStreamTarget();
+    const otherTarget = {
+      ...target,
+      streamTargetId: 'app-window:123:999',
+      videoTarget: {
+        ...target.videoTarget,
+        windowId: '999',
+        title: 'Other TextEdit',
+      },
+    };
+
+    try {
+      await helper.warm();
+      const daemonReceivedAtMs = Date.now();
+      const clickConfig = buildRemoteWindowInputConfig({
+        requestId: 'rw-stale-other-click',
+        streamId: 'stream-stale-other',
+        targetId: target.streamTargetId,
+        clientSentAt: daemonReceivedAtMs,
+        event: {
+          kind: 'click',
+          pointerId: 1,
+          button: 'left',
+          clickCount: 1,
+          x: 120,
+          y: 140,
+          normalizedX: 0.5,
+          normalizedY: 0.5,
+        },
+      }, target, { daemonReceivedAtMs });
+      const otherScrollConfig = buildRemoteWindowInputConfig({
+        requestId: 'rw-stale-other-scroll',
+        streamId: 'stream-stale-other',
+        targetId: otherTarget.streamTargetId,
+        clientSentAt: daemonReceivedAtMs,
+        event: {
+          kind: 'scroll',
+          unit: 'pixel',
+          deltaX: 0,
+          deltaY: 96,
+          x: 120,
+          y: 140,
+          normalizedX: 0.5,
+          normalizedY: 0.5,
+        },
+      }, otherTarget, { daemonReceivedAtMs });
+
+      await expect(Promise.all([
+        helper.send(clickConfig),
+        helper.send(otherScrollConfig),
+      ])).rejects.toThrow('remote window input stale');
+      expect(writtenKinds).toEqual(['click']);
+    } finally {
+      helper.dispose();
+    }
+  }, 10_000);
+
+  it('keeps scroll input compatible with the macOS helper schema', () => {
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('let phase: String?');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).not.toContain('let phase: String\n');
+  });
+
+  it('marks the persistent macOS input helper ready before it accepts realtime input', () => {
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('func writeReady()');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('writeReady()');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('"{\\"ready\\":true}"');
+  });
+
+  it('keeps gesture input compatible with the macOS helper schema', () => {
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('let gesture: String?');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('config.event.kind == "gesture"');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('remote gesture input missing delta or coordinates');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).not.toContain('usleep(sleepMicros)');
+  });
+
+  it('replays touch swipe gestures as bounded scroll steps instead of one unbounded wheel event', () => {
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('let REMOTE_GESTURE_REPLAY_MAX_STEP_PX = 120.0');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('let REMOTE_GESTURE_REPLAY_MAX_STEPS = 12');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('func boundedGestureReplayStepCount(deltaX: Double, deltaY: Double) -> Int');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('Int(ceil(magnitude / REMOTE_GESTURE_REPLAY_MAX_STEP_PX))');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('func postGestureSwipeScrollEvent');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toMatch(
+      /for step in 0..<stepCount[\s\S]*postScrollEvent\(x: stepX, y: stepY, deltaX: stepDeltaX, deltaY: stepDeltaY/,
+    );
+  });
+
+  it('requires macOS helper focus verification before reporting input success', () => {
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('func activateTargetApplication(_ config: InputConfig, _ app: NSRunningApplication)');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('func frontmostProcessPidFromSystemEvents() -> Int32?');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('func waitForRunningApplication(_ pid: Int32) -> NSRunningApplication?');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('usleep(50000)');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('tell application \\"System Events\\" to get unix id of first application process whose frontmost is true');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('System Events\\" to set frontmost of first process whose unix id is');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('/usr/bin/osascript');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('kAXFrontmostAttribute');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('frontmostPidMatches');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('focusedWindowMatchesTarget');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('config.event.kind == "focus"');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('remote input target app is not running pid=');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('remote input target app did not become frontmost');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('remote input target window did not become focused');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).not.toContain('NSAppleScript');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).not.toContain('NSWorkspace.shared.frontmostApplication');
+  });
+
+  it('short-circuits repeated focus when the target window is already focused', () => {
+    const fastPathIndex = MACOS_REMOTE_WINDOW_INPUT_SWIFT.indexOf(
+      'frontmostPidMatches(config.pid)',
+    );
+    const focusAttemptIndex = MACOS_REMOTE_WINDOW_INPUT_SWIFT.indexOf('for attempt in 0..<3');
+
+    expect(fastPathIndex).toBeGreaterThan(0);
+    expect(focusAttemptIndex).toBeGreaterThan(fastPathIndex);
+  });
+
+  it('moves the macOS cursor to the remote input coordinate before scroll and gesture wheel events', () => {
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('func postMouseMove(x: Double, y: Double)');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('postMouseMove(x: x, y: y)');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toMatch(
+      /func postScrollEvent[\s\S]*postMouseMove\(x: x, y: y\)[\s\S]*scrollWheelEvent2Source/,
+    );
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toMatch(
+      /config\.event\.kind == "gesture"[\s\S]*postGestureSwipeScrollEvent\(/,
+    );
+  });
+
+  it('maps pressed left pointer movement to a macOS dragged mouse event', () => {
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('func mouseType(phase: String, button: String?, buttons: Int?)');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toMatch(
+      /phase == "move"[\s\S]*buttons[\s\S]*\.leftMouseDragged/,
+    );
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('mouseType(phase: phase, button: config.event.button, buttons: config.event.buttons)');
+  });
+
+  it('maps Command+V through a real macOS virtual key code for remote-window image paste', () => {
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('"KeyV": 9');
+  });
+
+  it('builds remote-window image paste Command+V input with fresh client timestamps', () => {
+    let now = 1_725_000_000_000;
+    const payloads = buildRemoteWindowImagePasteInputPayloads({
+      requestPrefix: 'paste-image-rw',
+      streamId: 'stream-paste',
+      targetId: 'app-window:123:456',
+      now: () => {
+        now += 7;
+        return now;
+      },
+    });
+
+    expect(payloads).toEqual([
+      {
+        requestId: 'paste-image-rw-0',
+        streamId: 'stream-paste',
+        targetId: 'app-window:123:456',
+        clientSentAt: 1_725_000_000_007,
+        event: {
+          kind: 'key',
+          phase: 'down',
+          key: 'v',
+          code: 'KeyV',
+          metaKey: true,
+        },
+      },
+      {
+        requestId: 'paste-image-rw-1',
+        streamId: 'stream-paste',
+        targetId: 'app-window:123:456',
+        clientSentAt: 1_725_000_000_014,
+        event: {
+          kind: 'key',
+          phase: 'up',
+          key: 'v',
+          code: 'KeyV',
+          metaKey: true,
+        },
+      },
+    ]);
+  });
+
+  it('builds selectable non-iTerm2 app-window manifests from the macOS app catalog', () => {
+    const targets = buildMacosAppWindowTargets(makeAppWindowCatalog(), '2026-07-19T00:00:00.000Z');
+    const chrome = targets.find((target) => target.videoTarget.appBundleId === 'com.google.Chrome');
+
+    expect(targets).toHaveLength(2);
+    expect(chrome).toMatchObject({
+      streamTargetId: 'app-window:487:64',
+      videoTarget: {
+        kind: 'app-window',
+        appBundleId: 'com.google.Chrome',
+        pid: 487,
+        windowId: '64',
+        title: 'Chrome Window',
+        cropRectTopLeftPx: { x: 700, y: 139, width: 1200, height: 800 },
+      },
+      inputTarget: {
+        kind: 'app-window',
+      },
+      streamMode: 'interactive',
+      focusPolicy: 'bring-to-focus',
+      inputRoute: 'os-event',
+      capture: {
+        displayId: '8',
+        displayBoundsTopLeftPx: { x: 0, y: 0, width: 3840, height: 2160 },
+      },
+    });
+  });
+
+  it('uses the ScreenCaptureKit window frame when AX contentFrame has a title-bar offset', () => {
+    const targets = buildMacosAppWindowTargets({
+      windows: [{
+        ...makeAppWindowCatalog().windows[0],
+        contentFrame: { x: 700, y: 168, width: 1200, height: 771 },
+      }],
+    }, '2026-07-19T00:00:00.000Z');
+
+    expect(targets[0]?.videoTarget).toMatchObject({
+      windowBoundsTopLeftPx: { x: 700, y: 139, width: 1200, height: 800 },
+      cropRectTopLeftPx: { x: 700, y: 139, width: 1200, height: 800 },
+    });
+  });
+
+  it('flattens nested iTerm2 splitters before applying top-left crop math', () => {
+    const panes = flattenIterm2SplitTree(makeNestedItermTree());
+
+    expect(panes.map((pane) => [pane.sessionId, pane.frame])).toEqual([
+      ['left', { x: 0, y: 0, width: 100, height: 200 }],
+      ['right-top', { x: 101, y: 0, width: 200, height: 100 }],
+      ['right-bottom', { x: 101, y: 101, width: 200, height: 99 }],
+    ]);
+  });
+
+  it('does not double-count positioned leaf offsets in a real nested iTerm2 split tree', () => {
+    const panes = flattenIterm2SplitTree(makeLiveComplexItermTree());
+    const paneById = new Map(panes.map((pane) => [pane.sessionId, pane]));
+
+    expect(paneById.get('middle-a-top-left')?.frame.x).toBe(802);
+    expect(paneById.get('middle-a-top-right')?.frame.x).toBe(1485);
+    expect(paneById.get('middle-b-top')?.frame.x).toBe(2196);
+    expect(paneById.get('right-top')?.frame.x).toBe(2984);
+    expect(paneById.get('right-bottom')?.frame).toEqual({
+      x: 2984,
+      y: 988,
+      width: 815,
+      height: 989,
+    });
+
+    const catalog: Iterm2RawCatalog = {
+      windows: [{
+        windowId: 'live-complex-window',
+        title: 'iTerm2',
+        frame: { x: 0, y: 85, width: 3799, height: 2045 },
+        tabs: [{
+          tabId: 'live-complex-tab',
+          root: makeLiveComplexItermTree(),
+        }],
+      }],
+    };
+    const targets = buildRemoteWindowStreamTargets(
+      catalog,
+      new Map(),
+      '2026-07-19T00:00:00.000Z',
+    );
+
+    for (const target of targets.filter((entry) => entry.videoTarget.kind === 'iterm2-pane')) {
+      const windowBounds = target.videoTarget.windowBoundsTopLeftPx;
+      const crop = target.videoTarget.cropRectTopLeftPx;
+      expect(crop).toBeDefined();
+      expect(crop!.x).toBeGreaterThanOrEqual(windowBounds.x);
+      expect(crop!.y).toBeGreaterThanOrEqual(windowBounds.y);
+      expect(crop!.x + crop!.width).toBeLessThanOrEqual(windowBounds.x + windowBounds.width);
+      expect(crop!.y + crop!.height).toBeLessThanOrEqual(windowBounds.y + windowBounds.height);
+    }
+  });
+
+  it('rejects pane manifests whose flattened content exceeds the owning window', () => {
+    const catalog = makeCatalog();
+    catalog.windows[0]!.frame.width = 300;
+
+    expect(() => buildRemoteWindowStreamTargets(
+      catalog,
+      new Map(),
+      '2026-07-19T00:00:00.000Z',
+    )).toThrow('content bounds exceed window bounds');
+  });
+
+  it('builds app-window and pane manifests with tmux reverse lookup and no inverted-y crop', () => {
+    const tmuxTargets = parseTmuxClientTargets([
+      '/dev/ttys002\tzterm\t@1\t%2',
+      '/dev/ttys999\tother\t@3\t%4',
+    ].join('\n'));
+
+    const targets = buildRemoteWindowStreamTargets(makeCatalog(), tmuxTargets, '2026-07-19T00:00:00.000Z');
+    const appTarget = targets.find((target) => target.videoTarget.kind === 'app-window');
+    const paneTargets = targets.filter((target) => target.videoTarget.kind === 'iterm2-pane');
+    const tmuxPane = paneTargets.find((target) => target.inputTarget.itermSessionId === 'right-top');
+    const bottomPane = paneTargets.find((target) => target.inputTarget.itermSessionId === 'right-bottom');
+
+    expect(appTarget?.videoTarget.cropRectTopLeftPx).toEqual({ x: 10, y: 20, width: 302, height: 250 });
+    expect(appTarget?.streamMode).toBe('interactive');
+    expect(paneTargets).toHaveLength(3);
+    expect(tmuxPane?.inputTarget).toMatchObject({
+      kind: 'tmux-pane',
+      tty: '/dev/ttys002',
+      tmuxSession: 'zterm',
+      tmuxWindowId: '@1',
+      tmuxPaneId: '%2',
+    });
+    expect(tmuxPane?.focusPolicy).toBe('no-focus-steal');
+    expect(tmuxPane?.inputRoute).toBe('tmux-input');
+    expect(tmuxPane?.streamMode).toBe('view');
+    expect(tmuxPane?.videoTarget.windowId).toBe('window-1');
+    expect(tmuxPane?.videoTarget.cropRectTopLeftPx).toEqual({ x: 111, y: 70, width: 200, height: 100 });
+    expect(bottomPane?.videoTarget.cropRectTopLeftPx).toEqual({ x: 111, y: 171, width: 200, height: 99 });
+    expect(bottomPane?.videoTarget.cropRectTopLeftPx?.y).not.toBe(70);
+  });
+
+  it('keeps non-tmux iTerm2 panes selectable without fake tmux metadata', () => {
+    const targets = buildRemoteWindowStreamTargets(
+      makeCatalog(),
+      new Map(),
+      '2026-07-19T00:00:00.000Z',
+      { includeAppWindowTargets: false },
+    );
+
+    expect(targets).toHaveLength(3);
+    for (const target of targets) {
+      expect(target.inputTarget).toMatchObject({
+        kind: 'iterm2-pane',
+      });
+      expect(target.streamMode).toBe('view');
+      expect(target.inputTarget.tmuxSession).toBeUndefined();
+      expect(target.focusPolicy).toBe('bring-to-focus');
+      expect(target.inputRoute).toBe('iterm2-api');
+    }
+  });
+
+  it('returns an explicit unsupported-platform error without querying iTerm2', async () => {
+    const runIterm2Python = vi.fn(async () => JSON.stringify(makeCatalog()));
+    const runMacosAppWindowCatalog = vi.fn(async () => JSON.stringify(makeAppWindowCatalog()));
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'linux',
+      runIterm2Python,
+      runMacosAppWindowCatalog,
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    const response = await runtime.listTargets({ requestId: 'rw-linux' });
+
+    expect(runIterm2Python).not.toHaveBeenCalled();
+    expect(runMacosAppWindowCatalog).not.toHaveBeenCalled();
+    expect(response).toEqual({
+      requestId: 'rw-linux',
+      code: 'remote_window_platform_unsupported',
+      message: 'remote window stream catalog is only available on macOS daemon hosts',
+    });
+  });
+
+  it('queries iTerm2 and returns typed target manifests on macOS daemon hosts', async () => {
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      now: () => '2026-07-19T00:00:00.000Z',
+      runIterm2Python: vi.fn(async () => JSON.stringify(makeCatalog())),
+      runMacosAppWindowCatalog: vi.fn(async () => JSON.stringify(makeAppWindowCatalog())),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '/dev/ttys001\talpha\t@5\t%6\n' })),
+    });
+
+    const response = await runtime.listTargets({ requestId: 'rw-darwin', includeAppWindows: false });
+
+    expect('targets' in response ? response.targets.length : 0).toBe(3);
+    expect('targets' in response ? response.targets[0]?.inputTarget : null).toMatchObject({
+      kind: 'tmux-pane',
+      tmuxSession: 'alpha',
+      tmuxWindowId: '@5',
+      tmuxPaneId: '%6',
+    });
+    expect('targets' in response ? response.targets[0]?.videoTarget.windowId : null).toBe('33');
+  });
+
+  it('returns non-iTerm2 app windows and non-tmux iTerm2 panes in the same catalog response', async () => {
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      now: () => '2026-07-19T00:00:00.000Z',
+      runMacosAppWindowCatalog: vi.fn(async () => JSON.stringify(makeAppWindowCatalog())),
+      runIterm2Python: vi.fn(async () => JSON.stringify(makeCatalog())),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    const response = await runtime.listTargets({ requestId: 'rw-combined' });
+    expect('targets' in response ? response.targets : []).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          streamTargetId: 'app-window:487:64',
+          videoTarget: expect.objectContaining({
+            kind: 'app-window',
+            appBundleId: 'com.google.Chrome',
+          }),
+          inputTarget: { kind: 'app-window' },
+        }),
+        expect.objectContaining({
+          streamTargetId: 'iterm2-pane:window-1:tab-1:left',
+          videoTarget: expect.objectContaining({
+            windowId: '33',
+          }),
+          inputTarget: expect.objectContaining({
+            kind: 'iterm2-pane',
+          }),
+        }),
+      ]),
+    );
+    expect('targets' in response ? response.targets.filter((target) => target.videoTarget.kind === 'app-window') : []).toHaveLength(2);
+    expect('targets' in response ? response.targets.filter((target) => target.videoTarget.kind === 'iterm2-pane') : []).toHaveLength(3);
+  });
+
+  it('returns stale daemon target catalog immediately while a background refresh runs', async () => {
+    let nowMs = 10_000;
+    const refreshGate: { release?: (value: string) => void } = {};
+    const firstCatalog = makeAppWindowCatalog();
+    const secondCatalog = makeAppWindowCatalog();
+    secondCatalog.windows = [{
+      ...secondCatalog.windows[0]!,
+      windowId: '99',
+      title: 'New cached window',
+    }];
+    const runMacosAppWindowCatalog = vi.fn()
+      .mockResolvedValueOnce(JSON.stringify(firstCatalog))
+      .mockImplementationOnce(() => new Promise<string>((resolve) => {
+        refreshGate.release = resolve;
+      }));
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      nowMs: () => nowMs,
+      targetCatalogCacheTtlMs: 500,
+      runMacosAppWindowCatalog,
+      runIterm2Python: vi.fn(async () => JSON.stringify({ windows: [] })),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    const first = await runtime.listTargets({
+      requestId: 'rw-first',
+      includeIterm2: false,
+    });
+    expect('targets' in first ? first.targets.map((target) => target.videoTarget.title) : []).toContain('Chrome Window');
+
+    nowMs += 501;
+    const second = await runtime.listTargets({
+      requestId: 'rw-second',
+      includeIterm2: false,
+    });
+    expect('targets' in second ? second.targets.map((target) => target.videoTarget.title) : []).toContain('Chrome Window');
+    expect('targets' in second ? second.requestId : '').toBe('rw-second');
+    expect(runMacosAppWindowCatalog).toHaveBeenCalledTimes(2);
+
+    refreshGate.release?.(JSON.stringify(secondCatalog));
+    await flushPromiseQueue();
+
+    nowMs += 1;
+    const third = await runtime.listTargets({
+      requestId: 'rw-third',
+      includeIterm2: false,
+    });
+    expect('targets' in third ? third.targets.map((target) => target.videoTarget.title) : []).toContain('New cached window');
+    expect(runMacosAppWindowCatalog).toHaveBeenCalledTimes(2);
+  });
+
+  it('honors force-refresh by bypassing the daemon target catalog cache', async () => {
+    const firstCatalog = makeAppWindowCatalog();
+    const secondCatalog = makeAppWindowCatalog();
+    secondCatalog.windows = [{
+      ...secondCatalog.windows[0]!,
+      windowId: '100',
+      title: 'Forced catalog window',
+    }];
+    const runMacosAppWindowCatalog = vi.fn()
+      .mockResolvedValueOnce(JSON.stringify(firstCatalog))
+      .mockResolvedValueOnce(JSON.stringify(secondCatalog));
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      targetCatalogCacheTtlMs: 60_000,
+      runMacosAppWindowCatalog,
+      runIterm2Python: vi.fn(async () => JSON.stringify({ windows: [] })),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    await runtime.listTargets({ requestId: 'rw-first', includeIterm2: false });
+    const refreshed = await runtime.listTargets({
+      requestId: 'rw-refresh',
+      includeIterm2: false,
+      forceRefresh: true,
+    });
+
+    expect('targets' in refreshed ? refreshed.targets.map((target) => target.videoTarget.title) : []).toContain('Forced catalog window');
+    expect(runMacosAppWindowCatalog).toHaveBeenCalledTimes(2);
+  });
+
+  it('warms the daemon target catalog cache for the first picker request', async () => {
+    const runMacosAppWindowCatalog = vi.fn(async () => JSON.stringify(makeAppWindowCatalog()));
+    const runIterm2Python = vi.fn(async () => JSON.stringify(makeCatalog()));
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      warmTargetCatalogOnStart: true,
+      runMacosAppWindowCatalog,
+      runIterm2Python,
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    const response = await runtime.listTargets({ requestId: 'rw-warmed' });
+
+    expect('targets' in response ? response.targets.length : 0).toBeGreaterThan(0);
+    expect(runMacosAppWindowCatalog).toHaveBeenCalledTimes(1);
+    expect(runIterm2Python).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps app-window targets selectable while surfacing iTerm2 catalog errors explicitly', async () => {
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      runMacosAppWindowCatalog: vi.fn(async () => JSON.stringify(makeAppWindowCatalog())),
+      runIterm2Python: vi.fn(async () => {
+        throw new Error('No module named iterm2');
+      }),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    const response = await runtime.listTargets({ requestId: 'rw-partial' });
+
+    expect('targets' in response ? response.targets.map((target) => target.streamTargetId) : []).toContain('app-window:487:64');
+    expect('errors' in response ? response.errors : []).toEqual([{
+      requestId: 'rw-partial',
+      code: 'iterm2_api_unavailable',
+      message: 'iTerm2 Python API unavailable: missing Python module iterm2',
+    }]);
+  });
+
+  it('does not expose the inline Python catalog script in user-visible daemon errors', async () => {
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      runMacosAppWindowCatalog: vi.fn(async () => JSON.stringify(makeAppWindowCatalog())),
+      runIterm2Python: vi.fn(async () => {
+        throw new Error([
+          'Command failed: python3 -c import json import iterm2 def frame_dict(frame): return {"x": frame.origin.x}',
+          'Traceback (most recent call last):',
+          '  File "<string>", line 3, in <module>',
+          "ModuleNotFoundError: No module named 'iterm2'",
+        ].join('\n'));
+      }),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    const response = await runtime.listTargets({ requestId: 'rw-short-error' });
+    const errorMessage = 'errors' in response ? response.errors?.[0]?.message || '' : '';
+
+    expect(errorMessage).toBe('iTerm2 Python API unavailable: missing Python module iterm2');
+    expect(errorMessage).not.toContain('python3 -c');
+    expect(errorMessage).not.toContain('frame_dict');
+  });
+
+  it('summarizes long catalog failures without dropping the explicit failure reason', () => {
+    const message = summarizeRemoteWindowCatalogError(
+      new Error([
+        'Command failed: swift -e import AppKit func number(_ value: Any?) -> Double? { return nil }',
+        'remote permission denied while listing windows',
+      ].join('\n')),
+      'macOS app window catalog unavailable',
+    );
+
+    expect(message).toBe('remote permission denied while listing windows');
+    expect(message).not.toContain('swift -e');
+    expect(message.length).toBeLessThanOrEqual(220);
+  });
+
+  it('reports app-window catalog timeout without exposing the inline Swift script', async () => {
+    const runner = makeTempExecutable('zterm-remote-window-catalog-timeout-', `#!/bin/sh
+sleep 2
+`);
+    try {
+      const runtime = createRemoteWindowStreamDaemonRuntime({
+        platform: 'darwin',
+        swiftBinary: runner.executablePath,
+        appWindowCatalogTimeoutMs: 80,
+        runIterm2Python: vi.fn(async () => JSON.stringify({ windows: [] })),
+        runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+      });
+
+      const response = await runtime.listTargets({
+        requestId: 'rw-catalog-timeout',
+        includeAppWindows: true,
+        includeIterm2: false,
+        forceRefresh: true,
+      });
+
+      expect(response).toEqual({
+        requestId: 'rw-catalog-timeout',
+        code: 'app_window_catalog_unavailable',
+        message: 'macOS app window catalog timed out after 80ms',
+      });
+      const message = 'message' in response ? response.message : '';
+      expect(message).not.toContain('swift -e');
+      expect(message).not.toContain('import AppKit');
+    } finally {
+      runner.cleanup();
+    }
+  });
+
+  it('adds timeout and stderr detail to ScreenCaptureKit startup timeout errors', async () => {
+    expect(buildScreenCaptureKitStartupTimeoutMessage(
+      'ScreenCaptureKit capture start waiting for frame permission gate\n',
+      80,
+    )).toBe(
+      'ScreenCaptureKit capture did not produce a frame before timeout after 80ms: ScreenCaptureKit capture start waiting for frame permission gate',
+    );
+
+    const runner = makeTempExecutable('zterm-remote-window-capture-timeout-', `#!/bin/sh
+echo "ScreenCaptureKit capture start waiting for frame permission gate" >&2
+sleep 2
+`);
+    try {
+      await expect(startScreenCaptureKitFrameSource(makeAppStreamTarget(), {
+        frameRate: 12,
+        startupTimeoutMs: 80,
+        swiftBinary: runner.executablePath,
+        onFrame: vi.fn(),
+        onError: vi.fn(),
+      })).rejects.toThrow('ScreenCaptureKit capture did not produce a frame before timeout after 80ms');
+    } finally {
+      runner.cleanup();
+    }
+  });
+
+  it('formats ScreenCaptureKit startup timeout without stderr detail', () => {
+    expect(buildScreenCaptureKitStartupTimeoutMessage('', 20_000)).toBe(
+      'ScreenCaptureKit capture did not produce a frame before timeout after 20000ms',
+    );
+  });
+
+  it('configures ScreenCaptureKit with bounded frame queue depth and explicit FPS interval', async () => {
+    expect(buildScreenCaptureKitConfig(makeAppStreamTarget(), 60)).toMatchObject({
+      frameRate: 60,
+      queueDepth: 3,
+      cropRect: { x: 10, y: 20, width: 800, height: 600 },
+    });
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('streamConfiguration.queueDepth = max(3, min(3, queueDepth))');
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('streamConfiguration.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(max(1, frameRate)))');
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('try await stream.updateConfiguration(nextConfig)');
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('Task { @MainActor in');
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('try? await Task.sleep(for: .milliseconds(50))');
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('windowId: command.windowId');
+    // 防回归：组合与单窗口两个主循环都必须校验 captureLoopGeneration，
+    // 否则旧循环会在 startSingleWindowCapture/startCompositeCapture 复位
+    // compositeStopped=false 后复活，用旧 content 快照持续发黑帧。
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT.match(/while !compositeStopped && generation == captureLoopGeneration/g)).toHaveLength(2);
+    // 防回归：单窗口 update-config 必须重枚举 SCShareableContent 并验证目标窗口存在，
+    // 否则启动后新出现的窗口 miss 时 ACK ok:true（假阳性）并输出全黑帧。
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('target window not found in fresh shareable content');
+
+    expect(buildScreenCaptureKitConfig(makeAppStreamTarget(), 60)).toMatchObject({
+      frameRate: 60,
+      queueDepth: 3,
+    });
+  });
+
+  it('keeps the ScreenCaptureKit command channel open and updates capture dimensions', async () => {
+    const runner = makeTempExecutable('zterm-remote-window-capture-update-', `#!/usr/bin/env node
+function writeFrame(width, height) {
+  const rgba = Buffer.alloc(width * height * 4, 12);
+  const header = Buffer.alloc(16);
+  header.write('ZRW1', 0, 'ascii');
+  header.writeUInt32LE(width, 4);
+  header.writeUInt32LE(height, 8);
+  header.writeUInt32LE(rgba.length, 12);
+  process.stdout.write(Buffer.concat([header, rgba]));
+}
+writeFrame(2, 2);
+process.stdin.setEncoding('utf8');
+let buffer = '';
+process.stdin.on('data', (chunk) => {
+  buffer += chunk;
+  let newline = buffer.indexOf('\\n');
+  while (newline >= 0) {
+    const line = buffer.slice(0, newline).trim();
+    buffer = buffer.slice(newline + 1);
+    if (line) {
+      const command = JSON.parse(line);
+      const width = Math.max(1, Math.round(command.cropRect.width));
+      const height = Math.max(1, Math.round(command.cropRect.height));
+      process.stderr.write('ZTERM_REMOTE_WINDOW_CAPTURE_UPDATE ' + JSON.stringify({ seq: command.seq, ok: true, width, height }) + '\\n');
+      writeFrame(width, height);
+    }
+    newline = buffer.indexOf('\\n');
+  }
+});
+setInterval(() => {}, 1000);
+`);
+    const frames: Array<{ width: number; height: number }> = [];
+    try {
+      const source = await startScreenCaptureKitFrameSource(makeAppStreamTarget(), {
+        frameRate: 30,
+        startupTimeoutMs: 10_000,
+        swiftBinary: runner.executablePath,
+        onFrame: (frame) => frames.push({ width: frame.width, height: frame.height }),
+        onError: vi.fn(),
+      });
+      const nextTarget = makeAppStreamTarget();
+      nextTarget.videoTarget.windowBoundsTopLeftPx = { x: 10, y: 20, width: 800, height: 1477 };
+      nextTarget.videoTarget.cropRectTopLeftPx = { x: 10, y: 20, width: 800, height: 1477 };
+
+      if (!source.updateTarget) {
+        throw new Error('expected updateTarget to be available');
+      }
+      await source.updateTarget(nextTarget);
+
+      expect(source.width).toBe(800);
+      expect(source.height).toBe(1477);
+      expect(frames).toContainEqual({ width: 2, height: 2 });
+      await vi.waitFor(() => {
+        expect(frames).toContainEqual({ width: 800, height: 1477 });
+      });
+      expect(frames).toContainEqual({ width: 800, height: 1477 });
+      source.stop();
+    } finally {
+      runner.cleanup();
+    }
+  });
+
+  it('surfaces iTerm2 API failures explicitly instead of falling back to screenshot or terminal buffer truth', async () => {
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      runIterm2Python: vi.fn(async () => {
+        throw new Error('No module named iterm2');
+      }),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    const response = await runtime.listTargets({ requestId: 'rw-error', includeAppWindows: false });
+
+    expect(response).toEqual({
+      requestId: 'rw-error',
+      code: 'iterm2_api_unavailable',
+      message: 'iTerm2 Python API unavailable: missing Python module iterm2',
+    });
+  });
+
+  it('starts a real stream lifecycle with capture frames feeding only the WebRTC video source', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    const fakeTrack = makeFakeMediaStreamTrack();
+    const fakeVideoSource = {
+      createTrack: vi.fn(() => fakeTrack),
+      onFrame: vi.fn(),
+    };
+    const captureStop = vi.fn();
+    const statuses: unknown[] = [];
+    const candidates: unknown[] = [];
+    const captureSourceFactory = vi.fn(async (_target, options) => {
+      options.onFrame({
+        width: 2,
+        height: 2,
+        rgba: new Uint8Array(16).fill(12),
+      });
+      return {
+        width: 2,
+        height: 2,
+        frameRate: options.frameRate,
+        stop: captureStop,
+      };
+    });
+    const rgbaToI420 = vi.fn((_rgba, i420) => {
+      i420.data.fill(7);
+    });
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      captureSourceFactory,
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => fakeVideoSource as any),
+      rgbaToI420,
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    const result = await runtime.startStream({
+      requestId: 'rw-start',
+      streamId: 'stream-1',
+      target: makeStreamTarget(),
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+    }, {
+      sendIceCandidate: (payload) => candidates.push(payload),
+      sendStatus: (payload) => statuses.push(payload),
+    });
+
+    expect('answer' in result ? result : null).toMatchObject({
+      requestId: 'rw-start',
+      streamId: 'stream-1',
+      targetId: 'iterm2-pane:window-1:tab-1:left',
+      answer: { type: 'answer', sdp: 'daemon-answer-sdp' },
+      capture: {
+        source: 'ScreenCaptureKit',
+        frameWidth: 2,
+        frameHeight: 2,
+        frameRate: 30,
+        targetKind: 'iterm2-pane',
+      },
+      transport: { kind: 'webrtc-video' },
+    });
+    expect(fakePeer.setRemoteDescription).toHaveBeenCalledWith({
+      type: 'offer',
+      sdp: 'android-offer-sdp',
+    });
+    expect(fakePeer.addTrack).toHaveBeenCalledWith(fakeTrack);
+    expect(captureSourceFactory).toHaveBeenCalledWith(
+      makeStreamTarget(),
+      expect.objectContaining({
+        frameRate: 30,
+        swiftBinary: 'swift',
+        onFrame: expect.any(Function),
+        onError: expect.any(Function),
+      }),
+    );
+    expect(rgbaToI420).toHaveBeenCalled();
+    expect(fakeVideoSource.onFrame).toHaveBeenCalledWith({
+      width: 2,
+      height: 2,
+      data: new Uint8Array(6).fill(7),
+    });
+    expect(statuses).toEqual([
+      { requestId: 'rw-start', streamId: 'stream-1', purpose: 'focus', phase: 'starting' },
+      {
+        requestId: 'rw-start',
+        streamId: 'stream-1',
+        purpose: 'focus',
+        phase: 'streaming',
+        framesSent: 1,
+        frameWidth: 2,
+        frameHeight: 2,
+      },
+    ]);
+    expect(candidates).toEqual([{
+      requestId: 'rw-start',
+      streamId: 'stream-1',
+      purpose: 'focus',
+      candidate: {
+        candidate: 'candidate:daemon',
+        sdpMid: '0',
+        sdpMLineIndex: 0,
+        usernameFragment: 'daemon',
+      },
+    }]);
+  });
+
+  it('keeps low-rate preview and high-quality focus streams independent in daemon lifecycle', async () => {
+    const canvasPeer = new FakeRemoteWindowPeerConnection();
+    const focusPeer = new FakeRemoteWindowPeerConnection();
+    canvasPeer.addTrack.mockReturnValue(makeFakeRtpSender());
+    focusPeer.addTrack.mockReturnValue(makeFakeRtpSender());
+    const peers = [canvasPeer, focusPeer];
+    const tracks = [makeFakeMediaStreamTrack(), makeFakeMediaStreamTrack()];
+    const videoSources = tracks.map((track) => ({
+      createTrack: vi.fn(() => track),
+      onFrame: vi.fn(),
+    }));
+    const captureStops = [vi.fn(), vi.fn()];
+    let captureIndex = 0;
+    const captureSourceFactory: RemoteWindowCaptureSourceFactory = vi.fn(async (_target, options) => {
+      options.onFrame({
+        width: 2,
+        height: 2,
+        rgba: new Uint8Array(16).fill(12),
+      });
+      const index = captureIndex;
+      captureIndex += 1;
+      return {
+        width: 2,
+        height: 2,
+        frameRate: options.frameRate,
+        stop: captureStops[index]!,
+      };
+    });
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      captureSourceFactory,
+      peerConnectionFactory: vi.fn(() => peers.shift() as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => videoSources.shift() as any),
+      rgbaToI420: vi.fn((_rgba, i420) => {
+        i420.data.fill(7);
+      }),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    await expect(runtime.startStream({
+      requestId: 'rw-canvas',
+      streamId: 'canvas-stream',
+      purpose: 'preview',
+      target: makeStreamTarget(),
+      offer: { type: 'offer', sdp: 'canvas-offer' },
+      videoBitrate: { preset: '2mbps', bitrateMbps: 2, maxBitrateBps: 2_000_000 },
+    })).resolves.toMatchObject({
+      streamId: 'canvas-stream',
+      purpose: 'preview',
+      capture: { maxBitrateBps: 2_000_000 },
+    });
+    await expect(runtime.startStream({
+      requestId: 'rw-focus',
+      streamId: 'focus-stream',
+      purpose: 'focus',
+      target: makeStreamTarget(),
+      offer: { type: 'offer', sdp: 'focus-offer' },
+      videoBitrate: { preset: '20mbps', bitrateMbps: 20, maxBitrateBps: 20_000_000 },
+    })).resolves.toMatchObject({
+      streamId: 'focus-stream',
+      purpose: 'focus',
+      capture: { maxBitrateBps: 20_000_000 },
+    });
+
+    await expect(runtime.stopStream({
+      requestId: 'rw-stop-focus',
+      streamId: 'focus-stream',
+      purpose: 'focus',
+    })).resolves.toMatchObject({
+      streamId: 'focus-stream',
+      purpose: 'focus',
+      phase: 'stopped',
+    });
+    await expect(runtime.addIceCandidate({
+      streamId: 'canvas-stream',
+      candidate: { candidate: 'candidate:canvas' },
+    })).resolves.toBe(true);
+    expect(captureStops[0]).not.toHaveBeenCalled();
+    expect(captureStops[1]).toHaveBeenCalledTimes(1);
+  });
+
+  it('defers the first capture frame only until the sender local description is ready', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    fakePeer.connectionState = 'new';
+    const fakeTrack = makeFakeMediaStreamTrack();
+    const fakeVideoSource = {
+      createTrack: vi.fn(() => fakeTrack),
+      onFrame: vi.fn(),
+    };
+    const statuses: unknown[] = [];
+    let pushFrame: (frame: { width: number; height: number; rgba: Uint8Array }) => void = () => undefined;
+    const captureSourceFactory = vi.fn(async (_target, options) => {
+      pushFrame = options.onFrame;
+      options.onFrame({
+        width: 2,
+        height: 2,
+        rgba: new Uint8Array(16).fill(12),
+      });
+      return {
+        width: 2,
+        height: 2,
+        frameRate: options.frameRate,
+        stop: vi.fn(),
+      };
+    });
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      captureSourceFactory,
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => fakeVideoSource as any),
+      rgbaToI420: vi.fn((_rgba, i420) => {
+        i420.data.fill(7);
+      }),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    const result = await runtime.startStream({
+      requestId: 'rw-early-frame',
+      streamId: 'stream-early-frame',
+      target: makeStreamTarget(),
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+    }, {
+      sendStatus: (payload) => statuses.push(payload),
+    });
+
+    expect('answer' in result).toBe(true);
+    expect(fakePeer.connectionState).toBe('new');
+    expect(fakeVideoSource.onFrame).toHaveBeenCalledTimes(1);
+    expect(fakeVideoSource.onFrame).toHaveBeenCalledWith({
+      width: 2,
+      height: 2,
+      data: new Uint8Array(6).fill(7),
+    });
+    pushFrame({
+      width: 2,
+      height: 2,
+      rgba: new Uint8Array(16).fill(13),
+    });
+    expect(fakeVideoSource.onFrame).toHaveBeenCalledTimes(2);
+    expect(statuses).toEqual([
+      { requestId: 'rw-early-frame', streamId: 'stream-early-frame', purpose: 'focus', phase: 'starting' },
+      {
+        requestId: 'rw-early-frame',
+        streamId: 'stream-early-frame',
+        purpose: 'focus',
+        phase: 'streaming',
+        framesSent: 1,
+        frameWidth: 2,
+        frameHeight: 2,
+      },
+    ]);
+  });
+
+  it('does not replay pending frames after the stream is stopped', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    fakePeer.connectionState = 'new';
+    const fakeTrack = makeFakeMediaStreamTrack();
+    const fakeVideoSource = {
+      createTrack: vi.fn(() => fakeTrack),
+      onFrame: vi.fn(),
+    };
+    const captureStop = vi.fn();
+    const statuses: unknown[] = [];
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      captureSourceFactory: vi.fn(async (_target, options) => {
+        options.onFrame({
+          width: 2,
+          height: 2,
+          rgba: new Uint8Array(16).fill(12),
+        });
+        return {
+          width: 2,
+          height: 2,
+          frameRate: options.frameRate,
+          stop: captureStop,
+        };
+      }),
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => fakeVideoSource as any),
+      rgbaToI420: vi.fn((_rgba, i420) => {
+        i420.data.fill(7);
+      }),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    const result = await runtime.startStream({
+      requestId: 'rw-early-frame-stop',
+      streamId: 'stream-early-frame-stop',
+      target: makeStreamTarget(),
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+    }, {
+      sendStatus: (payload) => statuses.push(payload),
+    });
+
+    expect('answer' in result).toBe(true);
+    expect(fakeVideoSource.onFrame).toHaveBeenCalledTimes(1);
+
+    const stopped = await runtime.stopStream({
+      requestId: 'rw-stop-before-connected',
+      streamId: 'stream-early-frame-stop',
+    });
+    fakePeer.connectionState = 'connected';
+    fakePeer.onconnectionstatechange?.();
+
+    expect(stopped).toMatchObject({
+      requestId: 'rw-stop-before-connected',
+      streamId: 'stream-early-frame-stop',
+      phase: 'stopped',
+      framesSent: 1,
+    });
+    expect(captureStop).toHaveBeenCalledTimes(1);
+    expect(fakeVideoSource.onFrame).toHaveBeenCalledTimes(1);
+    expect(statuses).toEqual([
+      { requestId: 'rw-early-frame-stop', streamId: 'stream-early-frame-stop', purpose: 'focus', phase: 'starting' },
+      {
+        requestId: 'rw-early-frame-stop',
+        streamId: 'stream-early-frame-stop',
+        purpose: 'focus',
+        phase: 'streaming',
+        framesSent: 1,
+        frameWidth: 2,
+        frameHeight: 2,
+      },
+      {
+        requestId: 'rw-early-frame-stop',
+        streamId: 'stream-early-frame-stop',
+        purpose: 'focus',
+        phase: 'stopped',
+        framesSent: 1,
+        message: 'remote window stream stopped',
+      },
+    ]);
+  });
+
+  it('uses addTrack for stream start so bitrate requests still negotiate a sendonly video track', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    const fakeSender = makeFakeRtpSender();
+    fakePeer.addTrack.mockReturnValue(fakeSender);
+    const fakeTrack = makeFakeMediaStreamTrack();
+    const fakeVideoSource = {
+      createTrack: vi.fn(() => fakeTrack),
+      onFrame: vi.fn(),
+    };
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      captureSourceFactory: vi.fn(async (_target, options) => {
+        options.onFrame({
+          width: 2,
+          height: 2,
+          rgba: new Uint8Array(16).fill(12),
+        });
+        return {
+          width: 2,
+          height: 2,
+          frameRate: 12,
+          stop: vi.fn(),
+        };
+      }),
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => fakeVideoSource as any),
+      rgbaToI420: vi.fn((_rgba, i420) => {
+        i420.data.fill(7);
+      }),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    const started = await runtime.startStream({
+      requestId: 'rw-bitrate-start',
+      streamId: 'stream-bitrate',
+      target: makeStreamTarget(),
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+      videoBitrate: { preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
+    });
+
+    expect('answer' in started ? started.capture.maxBitrateBps : null).toBe(5_000_000);
+    expect(fakePeer.addTrack).toHaveBeenCalledWith(fakeTrack);
+    expect(fakePeer.addTransceiver).not.toHaveBeenCalled();
+    expect(fakeSender.setParameters).toHaveBeenCalledWith(expect.objectContaining({
+      encodings: [expect.objectContaining({ maxBitrate: 5_000_000, maxFramerate: 30 })],
+    }));
+    expect(fakePeer.setLocalDescription.mock.invocationCallOrder[0]).toBeLessThan(
+      fakeSender.setParameters.mock.invocationCallOrder[0]!,
+    );
+
+    const updated = await runtime.updateStreamQuality({
+      requestId: 'rw-bitrate-update',
+      streamId: 'stream-bitrate',
+      targetId: 'iterm2-pane:window-1:tab-1:left',
+      videoBitrate: { preset: 'fullscreen', bitrateMbps: 20, maxBitrateBps: 20_000_000 },
+    });
+
+    expect(updated).toEqual({
+      requestId: 'rw-bitrate-update',
+      streamId: 'stream-bitrate',
+      purpose: 'focus',
+      targetId: 'iterm2-pane:window-1:tab-1:left',
+      accepted: true,
+      videoBitrate: { preset: 'fullscreen', bitrateMbps: 20, maxBitrateBps: 20_000_000, maxFrameRateFps: 60 },
+    });
+    expect(fakeSender.setParameters).toHaveBeenLastCalledWith(expect.objectContaining({
+      encodings: [expect.objectContaining({ maxBitrate: 20_000_000, maxFramerate: 60 })],
+    }));
+  });
+
+  it('starts remote window stream without fabricating sender encodings for video bitrate', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    const fakeSender = makeFakeRtpSender({ encodings: [] } as unknown as RTCRtpSendParameters);
+    fakePeer.addTransceiver = undefined as unknown as FakeRemoteWindowPeerConnection['addTransceiver'];
+    fakePeer.addTrack.mockReturnValue(fakeSender);
+    const fakeTrack = makeFakeMediaStreamTrack();
+    const statuses: RemoteWindowStreamStatusPayload[] = [];
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      captureSourceFactory: vi.fn(async (_target, options) => {
+        options.onFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(12) });
+        return { width: 2, height: 2, frameRate: 12, stop: vi.fn() };
+      }),
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => ({
+        createTrack: vi.fn(() => fakeTrack),
+        onFrame: vi.fn(),
+      } as any)),
+      rgbaToI420: vi.fn((_rgba, i420) => {
+        i420.data.fill(7);
+      }),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    const started = await runtime.startStream({
+      requestId: 'rw-bitrate-empty-start',
+      streamId: 'stream-bitrate-empty',
+      target: makeStreamTarget(),
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+      videoBitrate: { preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
+    }, {
+      sendStatus: (status) => {
+        statuses.push(status);
+      },
+    });
+
+    expect('answer' in started).toBe(true);
+    if ('answer' in started) {
+      expect(started.capture).not.toHaveProperty('maxBitrateBps');
+    }
+    expect(fakeSender.setParameters).not.toHaveBeenCalled();
+    expect(statuses).toContainEqual({
+      requestId: 'rw-bitrate-empty-start',
+      streamId: 'stream-bitrate-empty',
+      purpose: 'focus',
+      phase: 'starting',
+      message: 'video bitrate not applied: remote window video bitrate sender has no encodings to update',
+    });
+
+    const updated = await runtime.updateStreamQuality({
+      requestId: 'rw-bitrate-empty-update',
+      streamId: 'stream-bitrate-empty',
+      targetId: 'iterm2-pane:window-1:tab-1:left',
+      videoBitrate: { preset: '10mbps', bitrateMbps: 10, maxBitrateBps: 10_000_000 },
+    });
+
+    expect(updated).toEqual({
+      requestId: 'rw-bitrate-empty-update',
+      streamId: 'stream-bitrate-empty',
+      code: 'remote_window_stream_quality_failed',
+      message: 'remote window video bitrate sender has no encodings to update',
+    });
+    expect(fakeSender.setParameters).not.toHaveBeenCalled();
+  });
+
+  it('rejects stream quality updates for the wrong target without changing sender parameters', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    const fakeSender = makeFakeRtpSender();
+    fakePeer.addTrack.mockReturnValue(fakeSender);
+    const fakeTrack = makeFakeMediaStreamTrack();
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      captureSourceFactory: vi.fn(async (_target, options) => {
+        options.onFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(12) });
+        return { width: 2, height: 2, frameRate: 12, stop: vi.fn() };
+      }),
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => ({
+        createTrack: vi.fn(() => fakeTrack),
+        onFrame: vi.fn(),
+      } as any)),
+      rgbaToI420: vi.fn((_rgba, i420) => {
+        i420.data.fill(7);
+      }),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    await runtime.startStream({
+      requestId: 'rw-bitrate-mismatch-start',
+      streamId: 'stream-bitrate-mismatch',
+      target: makeStreamTarget(),
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+      videoBitrate: { preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
+    });
+    fakeSender.setParameters.mockClear();
+
+    const updated = await runtime.updateStreamQuality({
+      requestId: 'rw-bitrate-mismatch',
+      streamId: 'stream-bitrate-mismatch',
+      targetId: 'wrong-target',
+      videoBitrate: { preset: '10mbps', bitrateMbps: 10, maxBitrateBps: 10_000_000 },
+    });
+
+    expect(updated).toEqual({
+      requestId: 'rw-bitrate-mismatch',
+      streamId: 'stream-bitrate-mismatch',
+      code: 'remote_window_stream_quality_target_mismatch',
+      message: 'remote window stream quality target mismatch: wrong-target',
+    });
+    expect(fakeSender.setParameters).not.toHaveBeenCalled();
+  });
+
+  it('allocates I420 planes correctly for odd-sized capture frames', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    const fakeTrack = makeFakeMediaStreamTrack();
+    const fakeVideoSource = {
+      createTrack: vi.fn(() => fakeTrack),
+      onFrame: vi.fn(),
+    };
+    const target = makeStreamTarget();
+    target.videoTarget.windowBoundsTopLeftPx = { x: 10, y: 20, width: 1037, height: 1177 };
+    target.videoTarget.cropRectTopLeftPx = { x: 10, y: 20, width: 1037, height: 1177 };
+    const expectedI420Bytes = 1037 * 1177 + Math.ceil(1037 / 2) * Math.ceil(1177 / 2) * 2;
+    const rgbaToI420 = vi.fn((_rgba, i420) => {
+      i420.data.fill(11);
+    });
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      captureSourceFactory: vi.fn(async (_target, options) => {
+        options.onFrame({
+          width: 1037,
+          height: 1177,
+          rgba: new Uint8Array(1037 * 1177 * 4).fill(12),
+        });
+        return {
+          width: 1037,
+          height: 1177,
+          frameRate: 12,
+          stop: vi.fn(),
+        };
+      }),
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => fakeVideoSource as any),
+      rgbaToI420,
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    const result = await runtime.startStream({
+      requestId: 'rw-odd-start',
+      streamId: 'stream-odd',
+      target,
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+    });
+
+    expect('answer' in result).toBe(true);
+    expect(rgbaToI420).toHaveBeenCalledWith(
+      expect.objectContaining({
+        width: 1037,
+        height: 1177,
+        data: expect.objectContaining({ byteLength: 1037 * 1177 * 4 }),
+      }),
+      expect.objectContaining({
+        width: 1037,
+        height: 1177,
+        data: expect.objectContaining({ byteLength: expectedI420Bytes }),
+      }),
+    );
+    expect(fakeVideoSource.onFrame).toHaveBeenCalledWith({
+      width: 1037,
+      height: 1177,
+      data: new Uint8Array(expectedI420Bytes).fill(11),
+    });
+  });
+
+  it('stops the stream instead of crashing when a later frame conversion fails', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    const fakeTrack = makeFakeMediaStreamTrack();
+    const fakeVideoSource = {
+      createTrack: vi.fn(() => fakeTrack),
+      onFrame: vi.fn(),
+    };
+    let pushFrame: (frame: { width: number; height: number; rgba: Uint8Array }) => void = () => undefined;
+    const captureStop = vi.fn();
+    const statuses: unknown[] = [];
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      captureSourceFactory: vi.fn(async (_target, options) => {
+        pushFrame = options.onFrame;
+        options.onFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(1) });
+        return { width: 2, height: 2, frameRate: 12, stop: captureStop };
+      }),
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => fakeVideoSource as any),
+      rgbaToI420: vi.fn((rgba, i420) => {
+        if (rgba.width === 3) {
+          throw new Error('odd frame converter failure');
+        }
+        i420.data.fill(9);
+      }),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    const result = await runtime.startStream({
+      requestId: 'rw-late-frame-failure',
+      streamId: 'stream-late-frame-failure',
+      target: makeStreamTarget(),
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+    }, {
+      sendStatus: (payload) => statuses.push(payload),
+    });
+
+    expect('answer' in result).toBe(true);
+    expect(() => {
+      pushFrame({ width: 3, height: 3, rgba: new Uint8Array(36).fill(2) });
+    }).not.toThrow();
+    expect(captureStop).toHaveBeenCalledTimes(1);
+    expect(fakeTrack.stop).toHaveBeenCalledTimes(1);
+    expect(fakePeer.close).toHaveBeenCalledTimes(1);
+    expect(statuses).toContainEqual(expect.objectContaining({
+      requestId: 'rw-late-frame-failure',
+      streamId: 'stream-late-frame-failure',
+      phase: 'stopped',
+      framesSent: 1,
+      message: 'remote window frame conversion failed: odd frame converter failure',
+    }));
+    expect(await runtime.addIceCandidate({
+      streamId: 'stream-late-frame-failure',
+      candidate: { candidate: 'candidate:after-failure' },
+    })).toBe(false);
+  });
+
+  it('rejects invalid stream targets without starting capture or screenshot fallback', async () => {
+    const captureSourceFactory = vi.fn();
+    const invalidTarget = makeStreamTarget() as any;
+    delete invalidTarget.videoTarget.cropRectTopLeftPx;
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      captureSourceFactory,
+      peerConnectionFactory: vi.fn(() => new FakeRemoteWindowPeerConnection() as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => ({
+        createTrack: vi.fn(() => makeFakeMediaStreamTrack()),
+        onFrame: vi.fn(),
+      } as any)),
+      rgbaToI420: vi.fn(),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    const result = await runtime.startStream({
+      requestId: 'rw-invalid',
+      streamId: 'stream-invalid',
+      target: invalidTarget,
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+    });
+
+    expect(result).toEqual({
+      requestId: 'rw-invalid',
+      streamId: 'stream-invalid',
+      code: 'remote_window_stream_start_failed',
+      message: 'remote window stream target requires cropRectTopLeftPx',
+    });
+    expect(captureSourceFactory).not.toHaveBeenCalled();
+  });
+
+  it('cleans peer and track resources when capture start fails', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    const fakeTrack = makeFakeMediaStreamTrack();
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      captureSourceFactory: vi.fn(async () => {
+        throw new Error('ScreenCaptureKit capture start failure');
+      }),
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => ({
+        createTrack: vi.fn(() => fakeTrack),
+        onFrame: vi.fn(),
+      } as any)),
+      rgbaToI420: vi.fn(),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    const result = await runtime.startStream({
+      requestId: 'rw-capture-fail',
+      streamId: 'stream-capture-fail',
+      target: makeStreamTarget(),
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+    });
+
+    expect(result).toEqual({
+      requestId: 'rw-capture-fail',
+      streamId: 'stream-capture-fail',
+      code: 'remote_window_stream_start_failed',
+      message: 'ScreenCaptureKit capture start failure',
+    });
+    expect(fakeTrack.stop).toHaveBeenCalledTimes(1);
+    expect(fakePeer.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('adds ICE candidates, stops exactly once, and ignores late capture frames after close', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    const fakeTrack = makeFakeMediaStreamTrack();
+    const fakeVideoSource = {
+      createTrack: vi.fn(() => fakeTrack),
+      onFrame: vi.fn(),
+    };
+    const captureStop = vi.fn();
+    let pushFrame: (frame: { width: number; height: number; rgba: Uint8Array }) => void = () => undefined;
+    const statuses: unknown[] = [];
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      captureSourceFactory: vi.fn(async (_target, options) => {
+        pushFrame = options.onFrame;
+        options.onFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(1) });
+        return { width: 2, height: 2, frameRate: 12, stop: captureStop };
+      }),
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      rtcIceCandidateFactory: vi.fn((candidate) => candidate as RTCIceCandidate),
+      videoSourceFactory: vi.fn(() => fakeVideoSource as any),
+      rgbaToI420: vi.fn((_rgba, i420) => {
+        i420.data.fill(9);
+      }),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    await runtime.startStream({
+      requestId: 'rw-start-stop',
+      streamId: 'stream-stop',
+      target: makeStreamTarget(),
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+    }, {
+      sendStatus: (payload) => statuses.push(payload),
+    });
+
+    expect(await runtime.addIceCandidate({
+      requestId: 'rw-candidate',
+      streamId: 'stream-stop',
+      candidate: { candidate: 'candidate:android', sdpMid: '0', sdpMLineIndex: 0 },
+    })).toBe(true);
+    expect(fakePeer.addIceCandidate).toHaveBeenCalledWith({
+      candidate: 'candidate:android',
+      sdpMid: '0',
+      sdpMLineIndex: 0,
+      usernameFragment: null,
+    });
+
+    const stopped = await runtime.stopStream({ requestId: 'rw-stop', streamId: 'stream-stop' });
+    const stoppedAgain = await runtime.stopStream({ requestId: 'rw-stop-2', streamId: 'stream-stop' });
+    pushFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(2) });
+
+    expect(stopped).toMatchObject({
+      requestId: 'rw-stop',
+      streamId: 'stream-stop',
+      purpose: 'focus',
+      phase: 'stopped',
+      framesSent: 1,
+    });
+    expect(stoppedAgain).toMatchObject({
+      requestId: 'rw-stop-2',
+      streamId: 'stream-stop',
+      phase: 'stopped',
+      framesSent: 0,
+    });
+    expect(captureStop).toHaveBeenCalledTimes(1);
+    expect(fakeTrack.stop).toHaveBeenCalledTimes(1);
+    expect(fakePeer.close).toHaveBeenCalledTimes(1);
+    expect(fakeVideoSource.onFrame).toHaveBeenCalledTimes(1);
+    expect(await runtime.addIceCandidate({
+      streamId: 'stream-stop',
+      candidate: { candidate: 'candidate:late' },
+    })).toBe(false);
+    expect(statuses).toContainEqual(expect.objectContaining({
+      requestId: 'rw-start-stop',
+      streamId: 'stream-stop',
+      purpose: 'focus',
+      phase: 'stopped',
+      framesSent: 1,
+    }));
+  });
+
+  it('injects os-event input only into the active selected stream target', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    const fakeTrack = makeFakeMediaStreamTrack();
+    const target = makeAppStreamTarget();
+    const runRemoteWindowInputEvent = vi.fn(async () => undefined);
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      captureSourceFactory: vi.fn(async (_target, options) => {
+        options.onFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(1) });
+        return { width: 2, height: 2, frameRate: 12, stop: vi.fn() };
+      }),
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => ({
+        createTrack: vi.fn(() => fakeTrack),
+        onFrame: vi.fn(),
+      } as any)),
+      rgbaToI420: vi.fn((_rgba, i420) => {
+        i420.data.fill(9);
+      }),
+      runRemoteWindowInputEvent,
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    await runtime.startStream({
+      requestId: 'rw-input-start',
+      streamId: 'stream-input',
+      target,
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+    });
+
+    const focusResult = await runtime.injectInput({
+      requestId: 'rw-input-focus',
+      streamId: 'stream-input',
+      targetId: 'app-window:123:456',
+      clientSentAt: Date.now(),
+      event: {
+        kind: 'focus',
+      },
+    });
+
+    expect(focusResult).toEqual({
+      requestId: 'rw-input-focus',
+      streamId: 'stream-input',
+      targetId: 'app-window:123:456',
+      accepted: true,
+    });
+    expect(runRemoteWindowInputEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: 'rw-input-focus',
+        event: { kind: 'focus' },
+      }),
+      target,
+      expect.objectContaining({ swiftBinary: 'swift' }),
+    );
+    runRemoteWindowInputEvent.mockClear();
+
+    const result = await runtime.injectInput({
+      requestId: 'rw-input',
+      streamId: 'stream-input',
+      targetId: 'app-window:123:456',
+      clientSentAt: Date.now(),
+      event: {
+        kind: 'pointer',
+        phase: 'down',
+        pointerId: 1,
+        button: 'left',
+        buttons: 1,
+        x: 100,
+        y: 120,
+        normalizedX: 0.5,
+        normalizedY: 0.6,
+      },
+    });
+
+    expect(result).toEqual({
+      requestId: 'rw-input',
+      streamId: 'stream-input',
+      targetId: 'app-window:123:456',
+      accepted: true,
+    });
+    expect(runRemoteWindowInputEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: 'rw-input',
+        event: expect.objectContaining({ kind: 'pointer', x: 100 }),
+      }),
+      target,
+      expect.objectContaining({ swiftBinary: 'swift' }),
+    );
+
+    runRemoteWindowInputEvent.mockClear();
+    const scrollResult = await runtime.injectInput({
+      requestId: 'rw-input-scroll',
+      streamId: 'stream-input',
+      targetId: 'app-window:123:456',
+      clientSentAt: Date.now(),
+      event: {
+        kind: 'scroll',
+        unit: 'pixel',
+        deltaX: 0,
+        deltaY: 48,
+        x: 100,
+        y: 120,
+        normalizedX: 0.5,
+        normalizedY: 0.6,
+      },
+    });
+    expect(scrollResult).toEqual({
+      requestId: 'rw-input-scroll',
+      streamId: 'stream-input',
+      targetId: 'app-window:123:456',
+      accepted: true,
+    });
+	    expect(runRemoteWindowInputEvent).toHaveBeenCalledWith(
+	      expect.objectContaining({
+	        requestId: 'rw-input-scroll',
+	        event: expect.objectContaining({ kind: 'scroll', deltaY: 48 }),
+	      }),
+	      target,
+	      expect.objectContaining({ swiftBinary: 'swift' }),
+	    );
+
+	    runRemoteWindowInputEvent.mockClear();
+	    const gestureResult = await runtime.injectInput({
+	      requestId: 'rw-input-gesture',
+	      streamId: 'stream-input',
+	      targetId: 'app-window:123:456',
+	      clientSentAt: Date.now(),
+	      event: {
+	        kind: 'gesture',
+	        gesture: 'swipe',
+	        phase: 'end',
+	        unit: 'pixel',
+	        pointerId: 1,
+	        startX: 100,
+	        startY: 170,
+	        x: 100,
+	        y: 120,
+	        startNormalizedX: 0.5,
+	        startNormalizedY: 0.85,
+	        normalizedX: 0.5,
+	        normalizedY: 0.6,
+	        deltaX: 0,
+	        deltaY: 50,
+	        durationMs: 120,
+	        velocityX: 0,
+	        velocityY: 416.67,
+	      },
+	    });
+	    expect(gestureResult).toEqual({
+	      requestId: 'rw-input-gesture',
+	      streamId: 'stream-input',
+	      targetId: 'app-window:123:456',
+	      accepted: true,
+	    });
+	    expect(runRemoteWindowInputEvent).toHaveBeenCalledWith(
+	      expect.objectContaining({
+	        requestId: 'rw-input-gesture',
+	        event: expect.objectContaining({ kind: 'gesture', gesture: 'swipe', deltaY: 50 }),
+	      }),
+	      target,
+	      expect.objectContaining({ swiftBinary: 'swift' }),
+	    );
+	  });
+
+  it('applies app-window resize to the active capture source and returns target/capture truth', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    const fakeTrack = makeFakeMediaStreamTrack();
+    const target = makeAppStreamTarget();
+    let captureWidth = 800;
+    let captureHeight = 600;
+    const updateTarget = vi.fn(async (nextTarget) => {
+      captureWidth = nextTarget.videoTarget.cropRectTopLeftPx?.width || 0;
+      captureHeight = nextTarget.videoTarget.cropRectTopLeftPx?.height || 0;
+    });
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      now: () => '2026-07-25T00:00:00.000Z',
+      captureSourceFactory: vi.fn(async (_target, options) => {
+        options.onFrame({ width: captureWidth, height: captureHeight, rgba: new Uint8Array(captureWidth * captureHeight * 4).fill(1) });
+        return {
+          get width() {
+            return captureWidth;
+          },
+          get height() {
+            return captureHeight;
+          },
+          frameRate: 30,
+          updateTarget,
+          stop: vi.fn(),
+        };
+      }),
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => ({
+        createTrack: vi.fn(() => fakeTrack),
+        onFrame: vi.fn(),
+      } as any)),
+      rgbaToI420: vi.fn((_rgba, i420) => {
+        i420.data.fill(9);
+      }),
+      runRemoteWindowInputEvent: vi.fn(async () => undefined),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    await runtime.startStream({
+      requestId: 'rw-resize-start',
+      streamId: 'stream-resize',
+      target,
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+    });
+
+    const result = await runtime.injectInput({
+      requestId: 'rw-resize',
+      streamId: 'stream-resize',
+      targetId: target.streamTargetId,
+      clientSentAt: Date.now(),
+      event: {
+        kind: 'window-resize',
+        width: 800,
+        height: 1477,
+      },
+    });
+
+    expect(updateTarget).toHaveBeenCalledWith(expect.objectContaining({
+      streamTargetId: target.streamTargetId,
+      videoTarget: expect.objectContaining({
+        windowBoundsTopLeftPx: { x: 10, y: 20, width: 800, height: 1477 },
+        cropRectTopLeftPx: { x: 10, y: 20, width: 800, height: 1477 },
+      }),
+    }));
+    expect(result).toEqual({
+      requestId: 'rw-resize',
+      streamId: 'stream-resize',
+      targetId: target.streamTargetId,
+      accepted: true,
+      target: expect.objectContaining({
+        videoTarget: expect.objectContaining({
+          windowBoundsTopLeftPx: { x: 10, y: 20, width: 800, height: 1477 },
+          cropRectTopLeftPx: { x: 10, y: 20, width: 800, height: 1477 },
+        }),
+      }),
+      capture: {
+        source: 'ScreenCaptureKit',
+        frameWidth: 800,
+        frameHeight: 1477,
+        frameRate: 30,
+        targetKind: 'app-window',
+      },
+    });
+  });
+
+  it('rejects app-window resize when the active capture source cannot update target truth', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    const fakeTrack = makeFakeMediaStreamTrack();
+    const target = makeAppStreamTarget();
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      captureSourceFactory: vi.fn(async (_target, options) => {
+        options.onFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(1) });
+        return { width: 2, height: 2, frameRate: 12, stop: vi.fn() };
+      }),
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => ({
+        createTrack: vi.fn(() => fakeTrack),
+        onFrame: vi.fn(),
+      } as any)),
+      rgbaToI420: vi.fn((_rgba, i420) => {
+        i420.data.fill(9);
+      }),
+      runRemoteWindowInputEvent: vi.fn(async () => undefined),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    await runtime.startStream({
+      requestId: 'rw-resize-missing-start',
+      streamId: 'stream-resize-missing',
+      target,
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+    });
+
+    const result = await runtime.injectInput({
+      requestId: 'rw-resize-missing',
+      streamId: 'stream-resize-missing',
+      targetId: target.streamTargetId,
+      clientSentAt: Date.now(),
+      event: {
+        kind: 'window-resize',
+        width: 800,
+        height: 1477,
+      },
+    });
+
+    expect(result).toEqual({
+      requestId: 'rw-resize-missing',
+      streamId: 'stream-resize-missing',
+      code: 'remote_window_input_failed',
+      message: 'remote window active capture source cannot update target resize',
+    });
+  });
+
+  it('accepts remote-window input without trusting Android client wall-clock timestamps', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    const fakeTrack = makeFakeMediaStreamTrack();
+    const target = makeAppStreamTarget();
+    const runRemoteWindowInputEvent = vi.fn(async () => undefined);
+    const nowMs = vi.fn()
+      .mockReturnValueOnce(50_000)
+      .mockReturnValueOnce(50_100);
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      nowMs,
+      captureSourceFactory: vi.fn(async (_target, options) => {
+        options.onFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(1) });
+        return { width: 2, height: 2, frameRate: 12, stop: vi.fn() };
+      }),
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => ({
+        createTrack: vi.fn(() => fakeTrack),
+        onFrame: vi.fn(),
+      } as any)),
+      rgbaToI420: vi.fn((_rgba, i420) => {
+        i420.data.fill(9);
+      }),
+      runRemoteWindowInputEvent,
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    await runtime.startStream({
+      requestId: 'rw-input-start-clock-skew',
+      streamId: 'stream-input-clock-skew',
+      target,
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+    });
+
+    const missingTimestampResult = await runtime.injectInput({
+      requestId: 'rw-input-missing-sent-at',
+      streamId: 'stream-input-clock-skew',
+      targetId: target.streamTargetId,
+      event: {
+        kind: 'key',
+        phase: 'down',
+        key: 'v',
+        code: 'KeyV',
+        metaKey: true,
+      },
+    });
+
+    expect(missingTimestampResult).toEqual({
+      requestId: 'rw-input-missing-sent-at',
+      streamId: 'stream-input-clock-skew',
+      targetId: target.streamTargetId,
+      accepted: true,
+    });
+    expect(runRemoteWindowInputEvent).toHaveBeenLastCalledWith(
+      expect.objectContaining({ requestId: 'rw-input-missing-sent-at' }),
+      target,
+      expect.objectContaining({ daemonReceivedAtMs: 50_000 }),
+    );
+
+    const staleLookingClientClockResult = await runtime.injectInput({
+      requestId: 'rw-input-client-clock-old',
+      streamId: 'stream-input-clock-skew',
+      targetId: target.streamTargetId,
+      clientSentAt: 1,
+      event: {
+        kind: 'key',
+        phase: 'up',
+        key: 'v',
+        code: 'KeyV',
+        metaKey: true,
+      },
+    });
+
+    expect(staleLookingClientClockResult).toEqual({
+      requestId: 'rw-input-client-clock-old',
+      streamId: 'stream-input-clock-skew',
+      targetId: target.streamTargetId,
+      accepted: true,
+    });
+    expect(runRemoteWindowInputEvent).toHaveBeenLastCalledWith(
+      expect.objectContaining({ requestId: 'rw-input-client-clock-old', clientSentAt: 1 }),
+      target,
+      expect.objectContaining({ daemonReceivedAtMs: 50_100 }),
+    );
+  });
+
+  it('uses one persistent macOS input helper for pointer, scroll, gesture, and key events', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    const fakeTrack = makeFakeMediaStreamTrack();
+    const target = makeAppStreamTarget();
+    const inputHelper = {
+      warm: vi.fn(async () => undefined),
+      send: vi.fn(async () => undefined),
+      dispose: vi.fn(),
+    };
+    const remoteWindowInputHelperFactory = vi.fn(() => inputHelper);
+    const nowMs = vi.fn(() => 88_000);
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      nowMs,
+      captureSourceFactory: vi.fn(async (_target, options) => {
+        options.onFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(1) });
+        return { width: 2, height: 2, frameRate: 12, stop: vi.fn() };
+      }),
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => ({
+        createTrack: vi.fn(() => fakeTrack),
+        onFrame: vi.fn(),
+      } as any)),
+      rgbaToI420: vi.fn((_rgba, i420) => {
+        i420.data.fill(9);
+      }),
+      remoteWindowInputHelperFactory,
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    await runtime.startStream({
+      requestId: 'rw-input-start-helper',
+      streamId: 'stream-input-helper',
+      target,
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+    });
+
+    await runtime.injectInput({
+      requestId: 'rw-input-helper-click',
+      streamId: 'stream-input-helper',
+      targetId: target.streamTargetId,
+      clientSentAt: Date.now(),
+      event: {
+        kind: 'click',
+        pointerId: 1,
+        button: 'left',
+        clickCount: 1,
+        x: 100,
+        y: 120,
+        normalizedX: 0.5,
+        normalizedY: 0.6,
+      },
+    });
+	    await runtime.injectInput({
+	      requestId: 'rw-input-helper-scroll',
+	      streamId: 'stream-input-helper',
+      targetId: target.streamTargetId,
+      clientSentAt: Date.now(),
+      event: {
+        kind: 'scroll',
+        unit: 'pixel',
+        deltaX: 4,
+        deltaY: 48,
+        x: 100,
+        y: 120,
+        normalizedX: 0.5,
+	        normalizedY: 0.6,
+	      },
+	    });
+	    await runtime.injectInput({
+	      requestId: 'rw-input-helper-gesture',
+	      streamId: 'stream-input-helper',
+	      targetId: target.streamTargetId,
+	      clientSentAt: Date.now(),
+	      event: {
+	        kind: 'gesture',
+	        gesture: 'swipe',
+	        phase: 'end',
+	        unit: 'pixel',
+	        pointerId: 1,
+	        startX: 100,
+	        startY: 170,
+	        x: 100,
+	        y: 120,
+	        startNormalizedX: 0.5,
+	        startNormalizedY: 0.85,
+	        normalizedX: 0.5,
+	        normalizedY: 0.6,
+	        deltaX: 0,
+	        deltaY: 50,
+	        durationMs: 120,
+	        velocityX: 0,
+	        velocityY: 416.67,
+	      },
+	    });
+	    await runtime.injectInput({
+	      requestId: 'rw-input-helper-key',
+      streamId: 'stream-input-helper',
+      targetId: target.streamTargetId,
+      clientSentAt: Date.now(),
+      event: {
+        kind: 'key',
+        phase: 'down',
+        key: 'Z',
+        code: 'KeyZ',
+	        text: 'Z',
+	      },
+	    });
+
+    expect(remoteWindowInputHelperFactory).toHaveBeenCalledTimes(1);
+    expect(inputHelper.warm).toHaveBeenCalledTimes(1);
+    expect(inputHelper.send).toHaveBeenCalledTimes(4);
+    expect(inputHelper.send).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      daemonReceivedAtMs: 88_000,
+      event: expect.objectContaining({ kind: 'click' }),
+      window: expect.objectContaining({ bounds: target.videoTarget.windowBoundsTopLeftPx }),
+    }));
+    expect(inputHelper.send).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      event: expect.objectContaining({ kind: 'scroll', deltaY: 48 }),
+    }));
+    expect(inputHelper.send).toHaveBeenNthCalledWith(3, expect.objectContaining({
+      event: expect.objectContaining({ kind: 'gesture', gesture: 'swipe', deltaY: 50 }),
+    }));
+    expect(inputHelper.send).toHaveBeenNthCalledWith(4, expect.objectContaining({
+      event: expect.objectContaining({ kind: 'key', text: 'Z' }),
+    }));
+
+    runtime.dispose('helper lifecycle test complete');
+    expect(inputHelper.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it('warms the macOS input helper during stream start without emitting focus or pointer input', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    const fakeTrack = makeFakeMediaStreamTrack();
+    const target = makeAppStreamTarget();
+    const inputHelper = {
+      warm: vi.fn(async () => undefined),
+      send: vi.fn(async () => undefined),
+      dispose: vi.fn(),
+    };
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      captureSourceFactory: vi.fn(async (_target, options) => {
+        options.onFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(1) });
+        return { width: 2, height: 2, frameRate: 12, stop: vi.fn() };
+      }),
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => ({
+        createTrack: vi.fn(() => fakeTrack),
+        onFrame: vi.fn(),
+      } as any)),
+      rgbaToI420: vi.fn((_rgba, i420) => {
+        i420.data.fill(9);
+      }),
+      remoteWindowInputHelperFactory: vi.fn(() => inputHelper),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    const started = await runtime.startStream({
+      requestId: 'rw-input-warm-start',
+      streamId: 'stream-input-warm',
+      target,
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+    });
+
+    expect(started).toMatchObject({
+      requestId: 'rw-input-warm-start',
+      streamId: 'stream-input-warm',
+      targetId: target.streamTargetId,
+    });
+    expect(inputHelper.warm).toHaveBeenCalledTimes(1);
+    expect(inputHelper.send).not.toHaveBeenCalled();
+  });
+
+  it('fails interactive stream start explicitly when the input helper is not ready', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    const fakeTrack = makeFakeMediaStreamTrack();
+    const target = makeAppStreamTarget();
+    const captureStop = vi.fn();
+    const inputHelper = {
+      warm: vi.fn(async () => {
+        throw new Error('remote window input helper did not become ready before timeout');
+      }),
+      send: vi.fn(async () => undefined),
+      dispose: vi.fn(),
+    };
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      captureSourceFactory: vi.fn(async (_target, options) => {
+        options.onFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(1) });
+        return { width: 2, height: 2, frameRate: 12, stop: captureStop };
+      }),
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => ({
+        createTrack: vi.fn(() => fakeTrack),
+        onFrame: vi.fn(),
+      } as any)),
+      rgbaToI420: vi.fn((_rgba, i420) => {
+        i420.data.fill(9);
+      }),
+      remoteWindowInputHelperFactory: vi.fn(() => inputHelper),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    const result = await runtime.startStream({
+      requestId: 'rw-input-warm-timeout',
+      streamId: 'stream-input-warm-timeout',
+      target,
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+    });
+
+    expect(result).toMatchObject({
+      requestId: 'rw-input-warm-timeout',
+      streamId: 'stream-input-warm-timeout',
+      code: 'remote_window_stream_start_failed',
+      message: 'remote window input helper did not become ready before timeout',
+    });
+    expect(captureStop).toHaveBeenCalledTimes(1);
+    expect(fakeTrack.stop).toHaveBeenCalledTimes(1);
+    expect(fakePeer.close).toHaveBeenCalledTimes(1);
+    expect(inputHelper.send).not.toHaveBeenCalled();
+  });
+
+  it('rejects remote input for target mismatch, stopped streams, and no-focus generic os-event policy', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    const fakeTrack = makeFakeMediaStreamTrack();
+    const target = makeAppStreamTarget();
+    const runRemoteWindowInputEvent = vi.fn(async () => undefined);
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      captureSourceFactory: vi.fn(async (_target, options) => {
+        options.onFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(1) });
+        return { width: 2, height: 2, frameRate: 12, stop: vi.fn() };
+      }),
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => ({
+        createTrack: vi.fn(() => fakeTrack),
+        onFrame: vi.fn(),
+      } as any)),
+      rgbaToI420: vi.fn((_rgba, i420) => {
+        i420.data.fill(9);
+      }),
+      runRemoteWindowInputEvent,
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    await runtime.startStream({
+      requestId: 'rw-input-start-negative',
+      streamId: 'stream-input-negative',
+      target,
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+    });
+
+    const mismatch = await runtime.injectInput({
+      requestId: 'rw-input-mismatch',
+      streamId: 'stream-input-negative',
+      targetId: 'other-target',
+      clientSentAt: Date.now(),
+      event: {
+        kind: 'key',
+        phase: 'down',
+        key: 'a',
+        code: 'KeyA',
+        text: 'a',
+      },
+    });
+    expect(mismatch).toMatchObject({
+      requestId: 'rw-input-mismatch',
+      streamId: 'stream-input-negative',
+      code: 'remote_window_input_failed',
+      message: 'remote window input target mismatch: other-target',
+    });
+
+    const noFocusTarget = { ...target, focusPolicy: 'no-focus-steal' as const };
+    await runtime.startStream({
+      requestId: 'rw-input-start-no-focus',
+      streamId: 'stream-input-no-focus',
+      target: noFocusTarget,
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+    });
+    const noFocus = await runtime.injectInput({
+      requestId: 'rw-input-no-focus',
+      streamId: 'stream-input-no-focus',
+      targetId: noFocusTarget.streamTargetId,
+      clientSentAt: Date.now(),
+      event: {
+        kind: 'pointer',
+        phase: 'down',
+        pointerId: 2,
+        button: 'left',
+        buttons: 1,
+        x: 100,
+        y: 120,
+        normalizedX: 0.5,
+        normalizedY: 0.5,
+      },
+    });
+    expect(noFocus).toMatchObject({
+      code: 'remote_window_input_failed',
+      message: 'remote window OS input requires bring-to-focus policy',
+    });
+
+    const invalidScroll = await runtime.injectInput({
+      requestId: 'rw-input-invalid-scroll',
+      streamId: 'stream-input-negative',
+      targetId: target.streamTargetId,
+      clientSentAt: Date.now(),
+      event: {
+        kind: 'scroll',
+        unit: 'pixel',
+        deltaX: 0,
+        deltaY: Number.NaN,
+        x: 100,
+        y: 120,
+        normalizedX: 0.5,
+        normalizedY: 0.5,
+      },
+    });
+	    expect(invalidScroll).toMatchObject({
+	      code: 'remote_window_input_failed',
+	      message: 'remote window scroll input coordinates or delta are invalid',
+	    });
+
+	    const invalidGesture = await runtime.injectInput({
+	      requestId: 'rw-input-invalid-gesture',
+	      streamId: 'stream-input-negative',
+	      targetId: target.streamTargetId,
+	      clientSentAt: Date.now(),
+	      event: {
+	        kind: 'gesture',
+	        gesture: 'swipe',
+	        phase: 'end',
+	        unit: 'pixel',
+	        pointerId: 1,
+	        startX: 100,
+	        startY: 170,
+	        x: 100,
+	        y: 120,
+	        startNormalizedX: 0.5,
+	        startNormalizedY: 1.2,
+	        normalizedX: 0.5,
+	        normalizedY: 0.6,
+	        deltaX: 0,
+	        deltaY: 50,
+	        durationMs: 120,
+	        velocityX: 0,
+	        velocityY: 416.67,
+	      },
+	    });
+	    expect(invalidGesture).toMatchObject({
+	      code: 'remote_window_input_failed',
+	      message: 'remote window gesture input normalized coordinates are out of range',
+	    });
+
+    await runtime.stopStream({ requestId: 'rw-stop-input', streamId: 'stream-input-negative' });
+    const stopped = await runtime.injectInput({
+      requestId: 'rw-input-stopped',
+      streamId: 'stream-input-negative',
+      targetId: target.streamTargetId,
+      clientSentAt: Date.now(),
+      event: {
+        kind: 'key',
+        phase: 'down',
+        key: 'a',
+        code: 'KeyA',
+        text: 'a',
+      },
+    });
+    expect(stopped).toMatchObject({
+      requestId: 'rw-input-stopped',
+      streamId: 'stream-input-negative',
+      code: 'remote_window_input_stream_missing',
+    });
+    expect(runRemoteWindowInputEvent).not.toHaveBeenCalled();
+  });
+});
+
+describe('remote window stream update-focus pending gate', () => {
+  it('rejects a second updateFocus while the previous focus-ready is still pending', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    const fakeTrack = makeFakeMediaStreamTrack();
+    const target = makeStreamTarget();
+    const updateTarget = vi.fn(async () => undefined);
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      captureSourceFactory: vi.fn(async () => {
+        // No immediate frame: pendingFocusReady stays set until a frame arrives.
+        return {
+          width: 2,
+          height: 2,
+          frameRate: 30,
+          updateTarget,
+          stop: vi.fn(),
+        };
+      }),
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => ({
+        createTrack: vi.fn(() => fakeTrack),
+        onFrame: vi.fn(),
+      } as any)),
+      rgbaToI420: vi.fn((_rgba, i420) => {
+        i420.data.fill(9);
+      }),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    await runtime.startStream({
+      requestId: 'rw-focus-busy-start',
+      streamId: 'stream-focus-busy',
+      target,
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+    });
+
+    const first = await runtime.updateFocus({
+      requestId: 'rw-focus-busy-1',
+      streamId: 'stream-focus-busy',
+      revision: 1,
+      target: {
+        ...target,
+        videoTarget: { ...target.videoTarget, windowId: 'window-1' },
+      },
+    });
+    expect('phase' in first && first.phase).toBe('accepted');
+
+    const second = await runtime.updateFocus({
+      requestId: 'rw-focus-busy-2',
+      streamId: 'stream-focus-busy',
+      revision: 2,
+      target: {
+        ...target,
+        videoTarget: { ...target.videoTarget, windowId: 'window-2' },
+      },
+    });
+    expect(second).toEqual({
+      requestId: 'rw-focus-busy-2',
+      streamId: 'stream-focus-busy',
+      code: 'remote_window_stream_update_focus_busy',
+      message: 'remote window focus update already in flight',
+    });
+  });
+
+  it('propagates capture updateTarget rejection so the router can emit update_focus_failed', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    const fakeTrack = makeFakeMediaStreamTrack();
+    const target = makeStreamTarget();
+    const updateTarget = vi.fn(async () => {
+      throw new Error('target window not found in fresh shareable content');
+    });
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      captureSourceFactory: vi.fn(async () => ({
+        width: 2,
+        height: 2,
+        frameRate: 30,
+        updateTarget,
+        stop: vi.fn(),
+      })),
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => ({
+        createTrack: vi.fn(() => fakeTrack),
+        onFrame: vi.fn(),
+      } as any)),
+      rgbaToI420: vi.fn((_rgba, i420) => {
+        i420.data.fill(9);
+      }),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    await runtime.startStream({
+      requestId: 'rw-focus-reject-start',
+      streamId: 'stream-focus-reject',
+      target,
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+    });
+
+    await expect(runtime.updateFocus({
+      requestId: 'rw-focus-reject',
+      streamId: 'stream-focus-reject',
+      revision: 1,
+      target: {
+        ...target,
+        videoTarget: { ...target.videoTarget, windowId: 'window-ghost' },
+      },
+    })).rejects.toThrow('target window not found in fresh shareable content');
+  });
+});
+
+describe('remote window single-window overview gate', () => {
+  it('does not start an overview capture for a single app-window target (no duplicate full-res capture)', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    fakePeer.connectionState = 'new';
+    const fakeTrack = makeFakeMediaStreamTrack();
+    const captureSourceFactory = vi.fn(async () => ({
+      width: 2,
+      height: 2,
+      frameRate: 30,
+      stop: vi.fn(),
+    }));
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      captureSourceFactory,
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => ({
+        createTrack: vi.fn(() => fakeTrack),
+        onFrame: vi.fn(),
+      } as any)),
+      rgbaToI420: vi.fn((_rgba, i420) => {
+        i420.data.fill(9);
+      }),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    const singleWindowTarget = {
+      ...makeStreamTarget(),
+      videoTarget: {
+        ...makeStreamTarget().videoTarget,
+        kind: 'app-window' as const,
+        appBundleId: 'com.google.Chrome',
+        windowId: 'app-window:487:64',
+      },
+    };
+
+    await runtime.startStream({
+      requestId: 'rw-single-overview',
+      streamId: 'stream-single-overview',
+      target: singleWindowTarget,
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+    });
+
+    // Single app-window: only the focus capture may run; no overview lane.
+    expect(captureSourceFactory).toHaveBeenCalledTimes(1);
+  });
+
+  it('starts a low-bitrate overview capture when the target has composite windows', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    fakePeer.connectionState = 'new';
+    const fakeTrack = makeFakeMediaStreamTrack();
+    const captureSourceFactory = vi.fn(async () => ({
+      width: 2,
+      height: 2,
+      frameRate: 30,
+      stop: vi.fn(),
+    }));
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      captureSourceFactory,
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => ({
+        createTrack: vi.fn(() => fakeTrack),
+        onFrame: vi.fn(),
+      } as any)),
+      rgbaToI420: vi.fn((_rgba, i420) => {
+        i420.data.fill(9);
+      }),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    const compositeTarget = {
+      ...makeStreamTarget(),
+      videoTarget: {
+        ...makeStreamTarget().videoTarget,
+        kind: 'app-window' as const,
+        appBundleId: 'com.google.Chrome',
+        windowId: 'app-window:487:64',
+      },
+      compositeWindows: [
+        {
+          windowId: 'app-window:487:65',
+          title: 'Second window',
+          windowBoundsTopLeftPx: { x: 0, y: 0, width: 800, height: 600 },
+          cropRectTopLeftPx: { x: 0, y: 0, width: 800, height: 600 },
+        },
+      ],
+    };
+
+    await runtime.startStream({
+      requestId: 'rw-composite-overview',
+      streamId: 'stream-composite-overview',
+      target: compositeTarget,
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+    });
+
+    // Composite target: focus + overview lanes both capture.
+    expect(captureSourceFactory).toHaveBeenCalledTimes(2);
+  });
+});

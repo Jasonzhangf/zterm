@@ -1,0 +1,97 @@
+export interface SessionSemanticIdentityInput {
+  daemonHostId?: string | null;
+  relayHostId?: string | null;
+  bridgeHost?: string | null;
+  bridgePort?: number | null;
+  sessionName: string;
+  terminalBackend?: 'tmux' | 'herdr';
+}
+
+export interface SessionSemanticOwnerInput {
+  daemonHostId?: string | null;
+  relayHostId?: string | null;
+  bridgeHost?: string | null;
+  bridgePort?: number | null;
+}
+
+function asTrimmedString(value?: string | null) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function normalizeBridgePort(value?: number | null) {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.max(0, Math.floor(value))
+    : 0;
+}
+
+export function resolveSessionSemanticDaemonId(input: SessionSemanticOwnerInput) {
+  return asTrimmedString(input.daemonHostId) || asTrimmedString(input.relayHostId);
+}
+
+export function buildSessionSemanticOwnerKey(input: SessionSemanticOwnerInput) {
+  const daemonHostId = resolveSessionSemanticDaemonId(input);
+  if (daemonHostId) {
+    return `daemon:${daemonHostId}`;
+  }
+
+  const bridgeHost = asTrimmedString(input.bridgeHost);
+  const bridgePort = normalizeBridgePort(input.bridgePort);
+  return `bridge:${bridgeHost}::${bridgePort}`;
+}
+
+export function buildSessionSemanticReuseKey(input: SessionSemanticIdentityInput) {
+  const ownerKey = buildSessionSemanticOwnerKey(input);
+  return input.terminalBackend === 'herdr'
+    ? `${ownerKey}::backend:herdr::session:${asTrimmedString(input.sessionName)}`
+    : `${ownerKey}::session:${asTrimmedString(input.sessionName)}`;
+}
+
+export function buildSessionSemanticOwnerKeyVariants(input: SessionSemanticOwnerInput) {
+  const variants: string[] = [];
+  const daemonHostId = resolveSessionSemanticDaemonId(input);
+  const bridgeHost = asTrimmedString(input.bridgeHost);
+  const bridgePort = normalizeBridgePort(input.bridgePort);
+
+  if (daemonHostId) {
+    variants.push(`daemon:${daemonHostId}`);
+  }
+  if (bridgeHost || bridgePort > 0) {
+    variants.push(`bridge:${bridgeHost}::${bridgePort}`);
+  }
+
+  return [...new Set(variants)];
+}
+
+export function buildSessionSemanticReuseKeyVariants(input: SessionSemanticIdentityInput) {
+  const sessionName = asTrimmedString(input.sessionName);
+  const backendSuffix = input.terminalBackend === 'herdr' ? '::backend:herdr' : '';
+  return buildSessionSemanticOwnerKeyVariants(input)
+    .map((ownerKey) => `${ownerKey}${backendSuffix}::session:${sessionName}`);
+}
+
+export function sessionSemanticOwnersMatch(
+  left: SessionSemanticOwnerInput,
+  right: SessionSemanticOwnerInput,
+) {
+  const leftDaemonId = resolveSessionSemanticDaemonId(left);
+  const rightDaemonId = resolveSessionSemanticDaemonId(right);
+  if (leftDaemonId && rightDaemonId) {
+    return leftDaemonId === rightDaemonId;
+  }
+
+  return (
+    asTrimmedString(left.bridgeHost) === asTrimmedString(right.bridgeHost)
+    && normalizeBridgePort(left.bridgePort) === normalizeBridgePort(right.bridgePort)
+  );
+}
+
+export function sessionSemanticReuseMatch(
+  left: SessionSemanticIdentityInput,
+  right: SessionSemanticIdentityInput,
+) {
+  return (
+    asTrimmedString(left.sessionName) === asTrimmedString(right.sessionName)
+    && (left.terminalBackend || 'tmux') === (right.terminalBackend || 'tmux')
+    && sessionSemanticOwnersMatch(left, right)
+  );
+}

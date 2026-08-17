@@ -1,0 +1,249 @@
+// @vitest-environment jsdom
+
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ComponentProps } from 'react';
+import { SettingsPage } from './SettingsPage';
+import { AppUpdateSection } from '../components/settings/AppUpdateSection';
+import type { BridgeSettings, TraversalRelayClientSettings } from '../lib/bridge-settings';
+import { DEFAULT_TERMINAL_CACHE_LINES } from '../lib/mobile-config';
+
+const syncRelay = vi.fn();
+const logoutRelay = vi.fn();
+
+vi.mock('../hooks/useTraversalRelayAccount', () => ({
+  useTraversalRelayAccount: vi.fn(() => ({
+    account: null,
+    relayDevices: [],
+    relayStatus: '',
+    relayBusy: null,
+    refreshLocalAccount: vi.fn(),
+    syncRelay,
+    logoutRelay,
+  })),
+}));
+
+import { useTraversalRelayAccount } from '../hooks/useTraversalRelayAccount';
+
+const baseSettings: BridgeSettings = {
+  targetHost: '',
+  targetPort: 3333,
+  targetAuthToken: '',
+  signalUrl: '',
+  turnServerUrl: '',
+  turnUsername: '',
+  turnCredential: '',
+  transportMode: 'auto',
+  terminalCacheLines: DEFAULT_TERMINAL_CACHE_LINES,
+  terminalThemeId: 'classic-dark',
+  terminalWidthMode: 'mirror-fixed',
+  terminalSessionGroupLayoutMode: 'auto',
+  shortcutSmartSort: true,
+  servers: [],
+  defaultServerId: undefined,
+  traversalRelay: undefined,
+};
+
+const relaySettings: TraversalRelayClientSettings = {
+  relayBaseUrl: 'https://relay.codewhisper.cc:18443/relay/',
+  accessToken: 'token',
+  userId: 'u1',
+  username: 'jason',
+  deviceId: 'android-1',
+  deviceName: 'ZTerm Android',
+  platform: 'android',
+  wsDevicesUrl: 'wss://relay.codewhisper.cc:18443/relay/ws/devices',
+  wsHostUrl: 'wss://relay.codewhisper.cc:18443/relay/ws/host',
+  wsClientUrl: 'wss://relay.codewhisper.cc:18443/relay/ws/client',
+  turnUrl: '',
+  turnUsername: '',
+  turnCredential: '',
+  updatedAt: 1,
+};
+
+function renderSettings(overrides: Partial<ComponentProps<typeof SettingsPage>> = {}) {
+  return render(
+    <SettingsPage
+      settings={baseSettings}
+      currentVersionName="0.1.3"
+      currentVersionCode={1030000}
+      updatePreferences={{
+        manifestUrl: '',
+        autoCheckOnLaunch: false,
+        skippedVersionCode: undefined,
+        ignoreUntilManualCheck: false,
+        lastCheckedAt: undefined,
+        lastSeenVersionCode: undefined,
+      }}
+      latestManifest={null}
+      updateChecking={false}
+      updateInstalling={false}
+      updateError={null}
+      hasNewVersion={false}
+      hasUpdateIgnorePolicy={false}
+      onSave={vi.fn()}
+      onRelaySettingsChange={vi.fn()}
+      onUpdatePreferencesChange={vi.fn()}
+      onCheckForUpdate={vi.fn()}
+      onInstallUpdate={vi.fn()}
+      onResetUpdateIgnorePolicy={vi.fn()}
+      onTerminalThemeChange={vi.fn()}
+      onBack={vi.fn()}
+      renderSettingsUpdate={(props) => <AppUpdateSection {...props} />}
+      {...overrides}
+    />,
+  );
+}
+
+describe('SettingsPage Relay account configuration', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(useTraversalRelayAccount).mockReturnValue({
+      account: null,
+      relayDevices: [],
+      relayStatus: '',
+      relayBusy: null,
+      refreshLocalAccount: vi.fn(),
+      syncRelay,
+      logoutRelay,
+    });
+  });
+
+  afterEach(cleanup);
+
+  it('keeps Relay auth in Settings and writes returned settings to the app owner', async () => {
+    const onRelaySettingsChange = vi.fn();
+    const onSave = vi.fn();
+    syncRelay.mockResolvedValueOnce({
+      account: {
+        username: 'jason',
+        password: '',
+        relayBaseUrl: relaySettings.relayBaseUrl,
+        accessToken: 'token',
+        user: { id: 'u1', username: 'jason', createdAt: 'now' },
+        deviceId: 'android-1',
+        deviceName: 'ZTerm Android',
+        platform: 'android',
+        devices: [],
+        directory: null,
+        updatedAt: 1,
+        relaySettings,
+      },
+      relaySettings,
+    });
+
+    renderSettings({ onRelaySettingsChange, onSave });
+
+    expect(screen.getByTestId('settings-relay-fixed-host').textContent).toBe('relay.codewhisper.cc');
+    fireEvent.change(screen.getByLabelText('Relay account'), { target: { value: 'jason' } });
+    fireEvent.change(screen.getByLabelText('Relay password'), { target: { value: 'secret' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+
+    await waitFor(() => expect(syncRelay).toHaveBeenCalledWith('login', {
+      relayBaseUrl: '',
+      username: 'jason',
+      password: 'secret',
+    }, undefined));
+    expect(onRelaySettingsChange).toHaveBeenCalledWith(relaySettings);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      traversalRelay: relaySettings,
+    }));
+  });
+
+  it('renders a clear signed-in account panel after relay login', () => {
+    vi.mocked(useTraversalRelayAccount).mockReturnValue({
+      account: {
+        username: 'jason',
+        password: '',
+        relayBaseUrl: relaySettings.relayBaseUrl,
+        accessToken: 'token',
+        user: { id: 'u1', username: 'jason', createdAt: 'now' },
+        deviceId: 'android-1',
+        deviceName: 'ZTerm Android',
+        platform: 'android',
+        devices: [],
+        directory: null,
+        updatedAt: 1,
+        relaySettings,
+      },
+      relayDevices: [
+        {
+          deviceId: 'mac-device',
+          deviceName: 'Mac Studio',
+          platform: 'darwin',
+          appVersion: '0.1.3',
+          client: { connected: false, lastSeenAt: '' },
+          daemon: {
+            connected: true,
+            lastSeenAt: '2026-07-16T10:00:00.000Z',
+            hostId: 'mac-studio',
+            version: '0.1.3',
+          },
+          updatedAt: '2026-07-16T10:00:00.000Z',
+        },
+      ],
+      relayStatus: '',
+      relayBusy: null,
+      refreshLocalAccount: vi.fn(),
+      syncRelay,
+      logoutRelay,
+    });
+
+    renderSettings({
+      settings: {
+        ...baseSettings,
+        traversalRelay: relaySettings,
+      },
+    });
+
+    expect(screen.getByText('SIGNED IN')).toBeTruthy();
+    const signedInPanel = screen.getByTestId('settings-relay-signed-in-panel');
+    expect(signedInPanel.textContent).toContain('jason');
+    expect(signedInPanel.textContent).toContain('1 device');
+    expect(screen.getByRole('button', { name: 'Sign in again' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Sign out' })).toBeTruthy();
+  });
+
+  it('adds a direct server inside Settings so Home can project it as a server row', () => {
+    const onSave = vi.fn();
+    renderSettings({ onSave });
+
+    fireEvent.change(screen.getByLabelText('Server name'), { target: { value: 'Mac Studio' } });
+    fireEvent.change(screen.getByLabelText('Server host'), { target: { value: '100.66.1.82' } });
+    fireEvent.change(screen.getByLabelText('Server auth token'), { target: { value: 'wterm-4123456' } });
+    fireEvent.change(screen.getByLabelText('Daemon ID'), { target: { value: 'mac-studio' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add Server' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      servers: [
+        expect.objectContaining({
+          name: 'Mac Studio',
+          targetHost: '100.66.1.82',
+          targetPort: 3333,
+          authToken: 'wterm-4123456',
+          relayHostId: 'mac-studio',
+        }),
+      ],
+      targetHost: '100.66.1.82',
+      targetPort: 3333,
+      targetAuthToken: 'wterm-4123456',
+    }));
+  });
+
+  it('keeps upgrade controls visible before server and relay configuration', () => {
+    const onCheckForUpdate = vi.fn();
+    renderSettings({ onCheckForUpdate });
+
+    const updateSection = screen.getByTestId('settings-update-section');
+    const serverNameInput = screen.getByLabelText('Server name');
+    expect(updateSection.compareDocumentPosition(serverNameInput) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    expect(screen.getByText('版本与升级')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '下载并安装' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '检查更新' }));
+    expect(onCheckForUpdate).toHaveBeenCalledTimes(1);
+  });
+});

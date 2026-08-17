@@ -151,6 +151,7 @@ Client connection boundary:
 | `shared.node_contract` | Runtime node identity, lifecycle, disposal, subscription, and typed adjacent node contracts. |
 | `shared.debug_contract` | Versioned debug snapshots, debug events, filters, sensitivity classes, bounded stores, and expiring debug permission contracts. |
 | `shared.test_contracts` | Static gates for module, edge, resource, function, and mainline maps. |
+| `shared.test_environment` | Deterministic Vitest/jsdom browser Storage and environment bootstrap. |
 
 Shared contract boundary:
 
@@ -344,6 +345,7 @@ Client design rules:
 | `shared.plugin_contract` | plugin manifests, capability ports, lifecycle contracts | unique capability registry, typed UI slot registry, and plugin contract types | capability/UI slot contract only | plugin runtime state, raw business resource access |
 | `shared.control_contract` | control commands, results, correlation ids, deadlines, idempotency keys, audit entries | branded control contract types | control contract only | runtime state, business routing, terminal/file/media body truth |
 | `shared.test_contracts` | registry and black-box gate requirements | reusable test contract expectations | test contract surface | feature-specific runtime implementation |
+| `shared.test_environment` | Vitest/jsdom bootstrap | in-memory browser Storage | test environment only | runtime state, terminal/buffer/renderer truth |
 
 Shared design rules:
 

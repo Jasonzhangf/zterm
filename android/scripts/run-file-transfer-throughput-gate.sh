@@ -15,6 +15,13 @@ pnpm exec vitest run \
   src/server/server.file-transfer-truth.test.ts \
   --reporter dot
 
+# The Android unit gate consumes Capacitor-generated native plugin sources that
+# are not committed. Build the web bundle directly so `cap sync` can regenerate
+# them without re-entering the package-level `prebuild` lifecycle.
+pnpm run type-check
+pnpm exec vite build
+npx cap sync android
+
 cd "${ANDROID_ROOT}/native/android"
 source "${ANDROID_ROOT}/scripts/setup-android-java.sh"
 ./gradlew app:testDebugUnitTest \

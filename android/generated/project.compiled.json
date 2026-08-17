@@ -1,5 +1,5 @@
 {
-  "artifact_hash": "sha256:0ddfe2eede9141a3af72093900b309b4ae66273449a6cb62c3b47a517a97fc21",
+  "artifact_hash": "sha256:582d99f1e0037e7ba43b67b3309536becdb25468187013d94cc3a68dcb3e047e",
   "artifact_schema": 1,
   "modules": [
     {
@@ -56,7 +56,7 @@
         "suite_id": "zterm-runtime-v2-regression"
       },
       "source_owner": "zterm-runtime-v2",
-      "stage": "frozen"
+      "stage": "controlled_verified"
     }
   ],
   "project_id": "zterm-runtime-architecture-v2",
@@ -64,6 +64,6 @@
     "bundle_manifest": ".appsdk/contracts/sdk-bundle.manifest.json",
     "name": "appsdk",
     "resource_record": ".appsdk/sdk-resources.json",
-    "version": "0.1.2"
+    "version": "0.1.3"
   }
 }

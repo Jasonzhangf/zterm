@@ -1,7 +1,15 @@
 {
   "$schema": "https://appsdk.local/contracts/records/regression-report.schema.json",
-  "artifact_hash": "sha256:ab527a800da96f8f1bb3b038649c5882f3e016dd0eef0749e32bb9a50ae152e8",
+  "regression_report_id": "REGR-20260816-ZARCHV2-ACTIVEV4-001",
+  "module_id": "zterm-runtime-v2",
+  "source_commit": "08047f4a4d09bf182b6f528dedb2be16c44e3f20",
+  "artifact_hash": "sha256:46853d61c160bc51cdf3ddecde759443f83b9df927008a4df90904f56e0be0b5",
+  "public_api_hash": "sha256:28cd5c2a9fd2c8cbd377da74ad15f3bc854c860221b719113ce7148d62991886",
+  "scope_hash": "sha256:ad06d8f40b865c3b89440b0b0049a7c4a87ae9538a2163f98edf18903f31ac21",
+  "input_hash": "sha256:46853d61c160bc51cdf3ddecde759443f83b9df927008a4df90904f56e0be0b5",
+  "suite_id": "zterm-runtime-v2-regression",
   "command": {
+    "program": "pnpm",
     "args": [
       "exec",
       "vitest",
@@ -16,28 +24,20 @@
       "src/contexts/SessionContext.ws-refresh.test.tsx",
       "--reporter=dot"
     ],
-    "program": "pnpm",
     "working_directory": "."
   },
-  "created_at": "2026-08-16T01:24:53Z",
-  "failed": 0,
-  "input_hash": "sha256:ab527a800da96f8f1bb3b038649c5882f3e016dd0eef0749e32bb9a50ae152e8",
-  "module_id": "zterm-runtime-v2",
+  "test_count": 297,
   "passed": 297,
+  "failed": 0,
+  "skipped": 0,
+  "result": "pass",
   "producer": {
     "adapter": "vitest",
-    "identity": "codex-zterm-v2-activev2-regression-20260816T012453Z"
+    "identity": "codex-zterm-v2-appsdk013-activev4-regression-20260816T212603Z"
   },
-  "public_api_hash": "sha256:714d9cd3b2c3a632ac9618511fee742367b15d89e32c134bfb838f7966e592a2",
-  "regression_report_id": "REGR-20260816-ZARCHV2-ACTIVEV2-001",
-  "result": "pass",
-  "scope_hash": "sha256:19d2a3e8a4c3e6b4100cf4a73bd0a91363aa06378d1fdae4621754147d039d6e",
-  "skipped": 0,
-  "source_commit": "77bbf60375d5a4d111c4bf5f5080e31e5ac70561",
-  "suite_id": "zterm-runtime-v2-regression",
   "test_characteristics": {
-    "blackbox": true,
-    "whitebox": true
+    "whitebox": true,
+    "blackbox": true
   },
-  "test_count": 297
+  "created_at": "2026-08-16T21:26:03Z"
 }

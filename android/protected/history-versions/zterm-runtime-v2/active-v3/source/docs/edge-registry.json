@@ -1,0 +1,4221 @@
+{
+  "schema_version": 1,
+  "description": "Allowed project module/resource edges. Each edge is adjacent, resource-bound, and tied to existing mainline_call_id entries when code already exists. Future refactor work must add here before implementation.",
+  "edges": [
+    {
+      "edge_id": "edge.release.update_artifact_to_daemon_artifact",
+      "from_module": "release.update_artifact",
+      "to_module": "release.daemon_artifact",
+      "resource_from": "resource.release_update_artifact",
+      "resource_to": "resource.daemon_runtime_artifact",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "daemon.support",
+      "allowed_callers": [
+        "scripts/build-android-debug.sh",
+        "scripts/prepare-update-bundle.mjs",
+        "scripts/prepare-global-daemon-release.sh"
+      ],
+      "forbidden_callers": [
+        "src/pages/**",
+        "src/server/**"
+      ],
+      "request_chain": [
+        "ReleaseIn01BuildOutput",
+        "ReleaseIn02VerifiedArtifact"
+      ],
+      "response_chain": [
+        "ReleaseOut01PromotedArtifact"
+      ],
+      "error_chain": [
+        "ReleaseError01VerificationFailure"
+      ],
+      "mainline_call_ids": [
+        "cli_mainline:DevCLI->Shell",
+        "cli_mainline:Release->DaemonReleaseOut01StageRuntime",
+        "cli_mainline:Release->Install",
+        "cli_mainline:Npm->PackageBin"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/resource-registry-truth.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.release.daemon_artifact_to_daemon_process",
+      "from_module": "release.daemon_artifact",
+      "to_module": "daemon.runtime_entry",
+      "resource_from": "resource.daemon_runtime_artifact",
+      "resource_to": "resource.daemon_process",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "daemon.cli_shell",
+      "allowed_callers": [
+        "scripts/zterm-daemon.sh",
+        "scripts/windows/zterm-daemon.ps1"
+      ],
+      "forbidden_callers": [
+        "src/server/**"
+      ],
+      "request_chain": [
+        "DaemonStartIn01ArtifactPath",
+        "DaemonStartIn02RuntimeProcess"
+      ],
+      "response_chain": [
+        "DaemonStartOut01HealthReady"
+      ],
+      "error_chain": [
+        "DaemonStartError01MissingArtifact",
+        "DaemonStartError02HealthTimeout"
+      ],
+      "mainline_call_ids": [
+        "cli_mainline:Shell->Runtime",
+        "cli_mainline:WinTask->Runtime",
+        "cli_mainline:DaemonReleaseOut02VerifyDeterminism->Runtime"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/resource-registry-truth.test.ts"
+      ],
+      "status": "active",
+      "forbidden_caller_notes": [
+        "src/server/** runtime-source scan"
+      ]
+    },
+    {
+      "edge_id": "edge.daemon.process_to_terminal_backend",
+      "from_module": "daemon.runtime_entry",
+      "to_module": "daemon.terminal_backend",
+      "resource_from": "resource.daemon_process",
+      "resource_to": "resource.terminal_backend",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "daemon.runtime_entry",
+      "allowed_callers": [
+        "src/server/server.ts",
+        "src/server/terminal-daemon-runtime.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**"
+      ],
+      "request_chain": [
+        "DaemonRuntimeIn01ProcessStart",
+        "DaemonRuntimeIn02BackendWiring"
+      ],
+      "response_chain": [
+        "DaemonRuntimeOut01BackendReady"
+      ],
+      "error_chain": [
+        "DaemonRuntimeError01BackendInit"
+      ],
+      "mainline_call_ids": [
+        "daemon_mainline:Server->DaemonRuntime",
+        "daemon_mainline:Server->Runtime"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/server/server.daemon-runtime-truth.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.daemon.terminal_backend_to_tmux_session",
+      "from_module": "daemon.terminal_backend",
+      "to_module": "daemon.terminal_backend",
+      "resource_from": "resource.backend_session",
+      "resource_to": "resource.tmux_session",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "daemon.runtime_entry",
+      "allowed_callers": [
+        "src/server/terminal-runtime.ts",
+        "src/server/terminal-control-runtime.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**"
+      ],
+      "request_chain": [
+        "BackendIn01SessionRequest",
+        "BackendIn02TmuxSession"
+      ],
+      "response_chain": [
+        "BackendOut01TmuxAttached"
+      ],
+      "error_chain": [
+        "BackendError01TmuxUnavailable"
+      ],
+      "mainline_call_ids": [
+        "daemon_mainline:Control->Tmux"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/server/server.daemon-runtime-truth.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.daemon.mirror_writer_to_backend_truth",
+      "from_module": "daemon.mirror_writer",
+      "to_module": "daemon.terminal_backend",
+      "resource_from": "resource.mirror_store",
+      "resource_to": "resource.terminal_backend",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "daemon.mirror_writer",
+      "allowed_callers": [
+        "src/server/terminal-mirror-capture.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/contexts/**"
+      ],
+      "request_chain": [
+        "MirrorIn01CaptureTick",
+        "MirrorIn02TmuxReadback"
+      ],
+      "response_chain": [
+        "MirrorOut01CanonicalRows"
+      ],
+      "error_chain": [
+        "MirrorError01CaptureFailure"
+      ],
+      "mainline_call_ids": [
+        "daemon_mainline:Mirror->Capture"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/server/terminal-mirror-runtime.test.ts",
+        "src/server/terminal-mirror-capture.test.ts",
+        "src/server/terminal-mirror-writer-ownership.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.daemon.mirror_store_to_buffer_publisher",
+      "from_module": "daemon.mirror_store",
+      "to_module": "daemon.buffer_publisher",
+      "resource_from": "resource.mirror_store",
+      "resource_to": "resource.daemon_buffer_publisher",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "terminal.buffer_render",
+      "allowed_callers": [
+        "src/server/terminal-mirror-runtime.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/contexts/**"
+      ],
+      "request_chain": [
+        "MirrorOut01ChangedSpan",
+        "PublisherIn01QueueChangedSpan"
+      ],
+      "response_chain": [
+        "PublisherOut01PendingAccepted"
+      ],
+      "error_chain": [
+        "PublisherError01Backpressure",
+        "PublisherError02SendFailure"
+      ],
+      "mainline_call_ids": [
+        "daemon_mainline:Mirror->BufferPublisher"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/server/daemon-buffer-publisher-runtime.test.ts",
+        "src/server/terminal-mirror-runtime.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.daemon.buffer_publisher_to_transport_subscriber",
+      "from_module": "daemon.buffer_publisher",
+      "to_module": "daemon.transport_subscriber",
+      "resource_from": "resource.daemon_buffer_publisher",
+      "resource_to": "resource.transport_subscriber",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "terminal.buffer_render",
+      "allowed_callers": [
+        "src/server/daemon-buffer-publisher-runtime.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/contexts/**"
+      ],
+      "request_chain": [
+        "PublisherIn02FlushPending",
+        "TransportOut01SubscriberBodyFrame"
+      ],
+      "response_chain": [
+        "PublisherOut02ExplicitFlushStatus"
+      ],
+      "error_chain": [
+        "TransportError01Backpressure",
+        "TransportError02SubscriberClosed",
+        "TransportError03StaleTransport"
+      ],
+      "mainline_call_ids": [
+        "daemon_mainline:BufferPublisher->TransportSend"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/server/daemon-buffer-publisher-runtime.test.ts",
+        "src/server/terminal-mirror-runtime.test.ts",
+        "src/server/terminal-transport-runtime.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.daemon.terminal_channel_to_subscriber",
+      "from_module": "client.terminal_channel_mux",
+      "to_module": "daemon.transport_subscriber",
+      "resource_from": "resource.terminal_channel",
+      "resource_to": "resource.transport_subscriber",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "terminal.transport_lifecycle",
+      "allowed_callers": [
+        "src/lib/session-transport-runtime.ts",
+        "src/server/terminal-runtime.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**"
+      ],
+      "request_chain": [
+        "TerminalChannelIn01Open",
+        "TerminalChannelIn02SubscriberAttach"
+      ],
+      "response_chain": [
+        "TerminalChannelOut01OpenAck"
+      ],
+      "error_chain": [
+        "TerminalChannelError01OpenRejected",
+        "TerminalChannelError02SubscriberAttachFailed"
+      ],
+      "mainline_call_ids": [
+        "daemon_mainline:MuxHandshake->ChannelRegistry",
+        "daemon_mainline:ChannelRegistry->Runtime"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/session-transport-runtime.test.ts",
+        "src/server/terminal-transport-runtime.test.ts"
+      ],
+      "status": "active",
+      "forbidden_caller_notes": [
+        "src/pages/** direct socket open",
+        "src/components/** direct socket open"
+      ]
+    },
+    {
+      "edge_id": "edge.client.open_tab_to_active_session",
+      "from_module": "client.session_runtime",
+      "to_module": "client.session_runtime",
+      "resource_from": "resource.open_tab",
+      "resource_to": "resource.active_session",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "terminal.open_tabs",
+      "allowed_callers": [
+        "src/hooks/useOpenTabRuntime.ts",
+        "src/lib/open-tab-intent.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/terminal/TerminalSessionDrawer.tsx",
+        "src/server/**"
+      ],
+      "request_chain": [
+        "OpenTabIn01ExplicitIntent",
+        "OpenTabIn02ActiveProjection"
+      ],
+      "response_chain": [
+        "OpenTabOut01ActiveSession"
+      ],
+      "error_chain": [
+        "OpenTabError01UnknownSession"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:SessionOpenOwner->SessionContext"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/open-tab-intent.test.ts"
+      ],
+      "status": "active",
+      "forbidden_caller_notes": [
+        "src/components/terminal/TerminalSessionDrawer.tsx direct mutation"
+      ]
+    },
+    {
+      "edge_id": "edge.client.active_session_to_session_transport",
+      "from_module": "client.session_runtime",
+      "to_module": "client.daemon_connection",
+      "resource_from": "resource.active_session",
+      "resource_to": "resource.session_transport",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "terminal.transport_lifecycle",
+      "allowed_callers": [
+        "src/contexts/session-context-session-runtime.ts",
+        "src/contexts/session-context-transport-open-runtime.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**"
+      ],
+      "request_chain": [
+        "SessionTransportIn01ActiveSession",
+        "SessionTransportIn02OpenOrReuse"
+      ],
+      "response_chain": [
+        "SessionTransportOut01TransportReady"
+      ],
+      "error_chain": [
+        "SessionTransportError01TargetUnavailable"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:App->SessionContext",
+        "android_mainline:TransportOrchestration->TransportOpen"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/contexts/session-context-transport-runtime.test.ts"
+      ],
+      "status": "active",
+      "forbidden_caller_notes": [
+        "src/components/** direct socket open",
+        "src/pages/** direct socket open"
+      ]
+    },
+    {
+      "edge_id": "edge.client.session_transport_to_target",
+      "from_module": "client.daemon_connection",
+      "to_module": "client.connection_home",
+      "resource_from": "resource.session_transport",
+      "resource_to": "resource.transport_target",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "terminal.transport_lifecycle",
+      "allowed_callers": [
+        "src/contexts/session-context-transport-open-runtime.ts",
+        "src/contexts/session-context-infra-runtime.ts",
+        "src/lib/traversal/socket.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/TerminalPage.tsx"
+      ],
+      "request_chain": [
+        "TargetSelectIn01DaemonTargetId",
+        "TargetSelectIn02RouteCandidateSet"
+      ],
+      "response_chain": [
+        "TargetSelectOut01SelectedRoute"
+      ],
+      "error_chain": [
+        "TargetSelectError01NoReachableRoute"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:TransportOpen->TraversalSocketFactory",
+        "android_mainline:TraversalSocketFactory->TraversalSocket"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/session-transport-runtime.test.ts"
+      ],
+      "status": "active",
+      "forbidden_caller_notes": [
+        "src/pages/TerminalPage.tsx direct route construction"
+      ]
+    },
+    {
+      "edge_id": "edge.client.session_transport_to_daemon_target_transport",
+      "from_module": "client.daemon_connection",
+      "to_module": "client.daemon_connection",
+      "resource_from": "resource.session_transport",
+      "resource_to": "resource.daemon_target_transport",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "terminal.transport_lifecycle",
+      "allowed_callers": [
+        "src/lib/session-transport-runtime.ts",
+        "src/lib/traversal/socket.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**"
+      ],
+      "request_chain": [
+        "TargetTransportIn01SelectedRoute",
+        "TargetTransportIn02PhysicalOpenOrReuse"
+      ],
+      "response_chain": [
+        "TargetTransportOut01PhysicalReady"
+      ],
+      "error_chain": [
+        "TargetTransportError01ConnectFailed",
+        "TargetTransportError02RtcTimeout"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:TransportOpen->TargetTransportRuntime",
+        "android_mainline:TraversalSocket->TargetTransportRuntime"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/session-transport-runtime.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client.platform_network_signal_to_daemon_target_transport",
+      "from_module": "client.session_runtime",
+      "to_module": "client.daemon_connection",
+      "resource_from": "resource.platform_network_signal",
+      "resource_to": "resource.daemon_target_transport",
+      "via_resources": [
+        "resource.session_transport"
+      ],
+      "relation_status": "via",
+      "owner_feature": "terminal.transport_lifecycle",
+      "allowed_callers": [
+        "src/hooks/useOpenTabLifecycleEffects.ts",
+        "src/hooks/useOpenTabRuntime.ts",
+        "src/App.tsx",
+        "src/contexts/SessionContext.tsx",
+        "src/contexts/session-context-provider-facade-assemblies.ts",
+        "src/contexts/session-context-public-facade-runtime.ts",
+        "src/contexts/session-context-provider-core-assemblies.ts",
+        "src/contexts/session-context-transport-orchestration-runtime.ts",
+        "src/contexts/session-context-transport-runtime.ts",
+        "src/lib/session-transport-runtime.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**"
+      ],
+      "request_chain": [
+        "TargetNetworkProbeIn01PlatformGeneration",
+        "TargetNetworkProbeIn02ExactSocketPing"
+      ],
+      "response_chain": [
+        "TargetNetworkProbeOut01GenerationHealthy"
+      ],
+      "error_chain": [
+        "TargetNetworkProbeError01GenerationTimeout",
+        "TargetNetworkProbeError02SendFailure",
+        "TargetNetworkProbeError03TerminalSocketState"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:PlatformNetworkSignal->OpenTabNetworkBinding",
+        "android_mainline:OpenTabNetworkBinding->AppNetworkBinding",
+        "android_mainline:AppNetworkBinding->SessionContextNetworkFacade",
+        "android_mainline:SessionContextNetworkFacade->SessionProviderNetworkBinding",
+        "android_mainline:SessionProviderNetworkBinding->SessionPublicFacadeBinding",
+        "android_mainline:SessionPublicFacadeBinding->SessionProviderCoreBinding",
+        "android_mainline:SessionProviderCoreBinding->TargetNetworkSignalOrchestration",
+        "android_mainline:TargetNetworkSignalOrchestration->TargetTransportAccessors",
+        "android_mainline:TargetNetworkSignalOrchestration->TerminalMuxPingBuilder",
+        "android_mainline:TargetTransportAccessors->TargetTransportStoreEnumeration",
+        "android_mainline:TargetTransportStoreEnumeration->TargetNetworkProbeDispatch",
+        "android_mainline:TargetNetworkProbeDispatch->TargetNetworkProbe",
+        "android_mainline:MuxHandshake->TargetMuxFrameLifecycle",
+        "android_mainline:TargetMuxFrameLifecycle->TargetNetworkActivityBinding",
+        "android_mainline:TargetNetworkActivityBinding->TargetNetworkProbe",
+        "android_mainline:TargetNetworkProbe->TargetFailureRouter",
+        "android_mainline:TargetFailureRouter->TerminalTransportError01TargetFailure",
+        "android_mainline:TargetFailureRouter->IdleTargetRetirement"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/hooks/useOpenTabLifecycleEffects.test.tsx",
+        "src/contexts/session-context-target-network-probe-runtime.test.ts",
+        "src/contexts/session-context-transport-orchestration-runtime.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client.daemon_target_transport_health",
+      "from_module": "client.daemon_connection",
+      "to_module": "client.daemon_connection",
+      "resource_from": "resource.daemon_target_transport",
+      "resource_to": "resource.daemon_target_transport",
+      "via_resources": [],
+      "relation_status": "observer",
+      "owner_feature": "terminal.transport_lifecycle",
+      "allowed_callers": [
+        "src/contexts/session-context-socket-runtime.ts",
+        "packages/shared/src/connection/protocol.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**"
+      ],
+      "request_chain": [
+        "TargetTransportHealthIn01HeartbeatTimestamp"
+      ],
+      "response_chain": [
+        "TargetTransportHealthOut01MuxPing"
+      ],
+      "error_chain": [
+        "TargetTransportHealthError01InvalidTimestamp"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:TargetTransportRuntime->TargetHeartbeat",
+        "android_mainline:TargetHeartbeat->TerminalMuxPingBuilder"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/contexts/session-context-socket-runtime.test.ts",
+        "packages/shared/src/connection/protocol.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client.target_mux_ready_to_active_session_priority",
+      "from_module": "client.daemon_connection",
+      "to_module": "client.session_runtime",
+      "resource_from": "resource.daemon_target_transport",
+      "resource_to": "resource.active_session",
+      "via_resources": [
+        "resource.session_transport"
+      ],
+      "relation_status": "observer",
+      "owner_feature": "terminal.transport_lifecycle",
+      "allowed_callers": [
+        "src/contexts/session-context-transport-runtime.ts",
+        "src/contexts/session-context-transport-orchestration-runtime.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**"
+      ],
+      "request_chain": [
+        "MuxReadyIn01TargetReady"
+      ],
+      "response_chain": [
+        "MuxReadyOut01ActiveSessionPriority"
+      ],
+      "error_chain": [
+        "TerminalTransportError01TargetFailure"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:TargetMuxFrameLifecycle->ActiveSessionPriority"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/contexts/session-context-transport-runtime.test.ts",
+        "src/contexts/SessionContext.ws-refresh.test.tsx"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client.daemon_target_transport_to_terminal_channel",
+      "from_module": "client.daemon_connection",
+      "to_module": "client.terminal_channel_mux",
+      "resource_from": "resource.daemon_target_transport",
+      "resource_to": "resource.terminal_channel",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "terminal.transport_lifecycle",
+      "allowed_callers": [
+        "src/lib/session-transport-runtime.ts",
+        "packages/shared/src/connection/protocol.ts",
+        "src/contexts/session-context-transport-runtime.ts",
+        "src/contexts/session-context-transport-orchestration-runtime.ts",
+        "src/contexts/session-context-transport-open-runtime.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**"
+      ],
+      "request_chain": [
+        "MuxIn01PhysicalReady",
+        "MuxIn02ChannelOpen"
+      ],
+      "response_chain": [
+        "MuxOut01ChannelOpenAck"
+      ],
+      "error_chain": [
+        "MuxError01Unsupported",
+        "MuxError02ChannelRejected"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:TargetTransportRuntime->MuxHandshake",
+        "android_mainline:ActiveSessionPriority->ChannelRuntime",
+        "android_mainline:TargetTransportRuntime->ChannelRuntime"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/session-transport-runtime.test.ts",
+        "src/contexts/session-context-transport-runtime.test.ts",
+        "src/contexts/SessionContext.ws-refresh.test.tsx"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client.platform_input_to_session_transport",
+      "from_module": "client.input_runtime",
+      "to_module": "client.daemon_connection",
+      "resource_from": "resource.platform_input_channel",
+      "resource_to": "resource.session_transport",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "terminal.keyboard_ime",
+      "allowed_callers": [
+        "src/pages/TerminalPage.tsx",
+        "src/contexts/session-context-input-runtime.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/TerminalView.tsx",
+        "src/server/**"
+      ],
+      "request_chain": [
+        "InputIn01PlatformTextOrKey",
+        "InputIn02TransportFrame"
+      ],
+      "response_chain": [
+        "InputOut01AcceptedOrQueued"
+      ],
+      "error_chain": [
+        "InputError01NoActiveTransport",
+        "InputError02UnsupportedContext"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:TerminalPage->SessionContext"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/pages/TerminalPage.android-ime.test.tsx",
+        "src/contexts/session-context-input-runtime.test.ts"
+      ],
+      "status": "active",
+      "forbidden_caller_notes": [
+        "src/components/TerminalView.tsx direct backend write"
+      ]
+    },
+    {
+      "edge_id": "edge.daemon.input_queue_to_backend",
+      "from_module": "daemon.input_queue",
+      "to_module": "daemon.terminal_backend",
+      "resource_from": "resource.daemon_input_queue",
+      "resource_to": "resource.backend_session",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "terminal.daemon_input",
+      "allowed_callers": [
+        "src/server/daemon-input-queue-runtime.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**"
+      ],
+      "request_chain": [
+        "DaemonInputIn01TransportFrame",
+        "DaemonInputIn02QueuedWrite"
+      ],
+      "response_chain": [
+        "DaemonInputOut01WriteAck"
+      ],
+      "error_chain": [
+        "DaemonInputError01StaleInput",
+        "DaemonInputError02BackendUnavailable"
+      ],
+      "mainline_call_ids": [
+        "daemon_mainline:InputQueue->Backend"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/server/daemon-input-queue-runtime.test.ts",
+        "src/server/terminal-message-runtime.test.ts",
+        "src/server/terminal-control-runtime.input-queue.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.daemon.transport_subscriber_to_control_gateway",
+      "from_module": "daemon.transport_subscriber",
+      "to_module": "daemon.control_gateway",
+      "resource_from": "resource.transport_subscriber",
+      "resource_to": "resource.daemon_control_gateway",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "daemon.control_center",
+      "allowed_callers": [
+        "src/server/terminal-message-runtime.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**",
+        "src/lib/**"
+      ],
+      "request_chain": [
+        "ControlGatewayIn01LegacyMessage",
+        "ControlGatewayIn02TypedCommand"
+      ],
+      "response_chain": [
+        "ControlGatewayOut01Dispatched"
+      ],
+      "error_chain": [
+        "ControlGatewayError01UnknownCommand"
+      ],
+      "mainline_call_ids": [
+        "daemon_mainline:Message->Control"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/server/daemon-control-center-runtime.test.ts",
+        "src/server/daemon-control-center-ownership.test.ts",
+        "src/server/terminal-message-runtime.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.daemon.control_gateway_to_control_center",
+      "from_module": "daemon.control_gateway",
+      "to_module": "daemon.control_center",
+      "resource_from": "resource.daemon_control_gateway",
+      "resource_to": "resource.daemon_control_center",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "daemon.control_center",
+      "allowed_callers": [
+        "src/server/daemon-control-gateway-runtime.ts"
+      ],
+      "forbidden_callers": [
+        "src/server/terminal-message-runtime.ts",
+        "src/server/terminal-runtime.ts",
+        "src/components/**",
+        "src/pages/**",
+        "src/lib/**"
+      ],
+      "request_chain": [
+        "DaemonControlIn01TypedCommand",
+        "DaemonControlIn02CenterDispatch"
+      ],
+      "response_chain": [
+        "DaemonControlOut01CenterResult"
+      ],
+      "error_chain": [
+        "DaemonControlError01InvalidCommand",
+        "DaemonControlError02CapabilityDenied",
+        "DaemonControlError03DeadlineExceeded",
+        "DaemonControlError04UnknownCommand"
+      ],
+      "mainline_call_ids": [
+        "daemon_mainline:Message->Control"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/server/daemon-control-center-runtime.test.ts",
+        "src/server/daemon-control-center-ownership.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.daemon.control_gateway_to_schedule_runtime",
+      "from_module": "daemon.control_gateway",
+      "to_module": "daemon.schedule_runtime",
+      "resource_from": "resource.daemon_control_gateway",
+      "resource_to": "resource.schedule_job",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "daemon.control_center",
+      "allowed_callers": [
+        "src/server/daemon-control-gateway-runtime.ts"
+      ],
+      "forbidden_callers": [
+        "src/server/terminal-message-runtime.ts",
+        "src/components/**",
+        "src/pages/**",
+        "src/lib/**"
+      ],
+      "request_chain": [
+        "ScheduleControlIn01CommandOwner",
+        "ScheduleControlIn02ScheduleOwner"
+      ],
+      "response_chain": [
+        "ScheduleControlOut01Dispatched"
+      ],
+      "error_chain": [
+        "ScheduleControlError01OwnerFailure"
+      ],
+      "mainline_call_ids": [
+        "daemon_mainline:Control->Schedule"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/server/daemon-control-center-runtime.test.ts",
+        "src/server/terminal-message-runtime.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.daemon.control_gateway_to_session_catalog",
+      "from_module": "daemon.control_gateway",
+      "to_module": "daemon.session_catalog",
+      "resource_from": "resource.daemon_control_gateway",
+      "resource_to": "resource.daemon_session_catalog",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "daemon.session_catalog",
+      "allowed_callers": [
+        "src/server/daemon-control-gateway-runtime.ts"
+      ],
+      "forbidden_callers": [
+        "src/server/terminal-message-runtime.ts",
+        "src/server/terminal-runtime.ts",
+        "src/components/**",
+        "src/pages/**",
+        "src/lib/**"
+      ],
+      "request_chain": [
+        "SessionCatalogIn01ListSessions",
+        "SessionCatalogIn02BuildCatalog"
+      ],
+      "response_chain": [
+        "SessionCatalogOut01SessionsPayload",
+        "SessionCatalogOut02IdleFacts"
+      ],
+      "error_chain": [
+        "SessionCatalogError01ListSessionsFailed"
+      ],
+      "mainline_call_ids": [
+        "daemon_mainline:ControlGateway->SessionCatalog"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/server/daemon-session-catalog-runtime.test.ts",
+        "src/server/daemon-session-catalog-ownership.test.ts",
+        "src/server/terminal-message-runtime.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.daemon.schedule_runtime_to_session_catalog",
+      "from_module": "daemon.schedule_runtime",
+      "to_module": "daemon.session_catalog",
+      "resource_from": "resource.backend_session",
+      "resource_to": "resource.daemon_session_catalog",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "daemon.session_catalog",
+      "allowed_callers": [
+        "src/server/terminal-message-control-runtime.ts"
+      ],
+      "forbidden_callers": [
+        "src/server/terminal-message-runtime.ts",
+        "src/server/terminal-runtime.ts",
+        "src/components/**",
+        "src/pages/**",
+        "src/lib/**"
+      ],
+      "request_chain": [
+        "SessionCatalogIn03CatalogRefresh",
+        "SessionCatalogIn04BackendEnumeration"
+      ],
+      "response_chain": [
+        "SessionCatalogOut03CatalogRepublished"
+      ],
+      "error_chain": [
+        "SessionCatalogError02CatalogBuildFailed"
+      ],
+      "mainline_call_ids": [
+        "daemon_mainline:Control->SessionCatalog"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/server/daemon-session-catalog-runtime.test.ts",
+        "src/server/daemon-session-catalog-ownership.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.daemon.control_center_to_terminal_backend",
+      "from_module": "daemon.control_center",
+      "to_module": "daemon.terminal_backend",
+      "resource_from": "resource.daemon_control_center",
+      "resource_to": "resource.backend_session",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "daemon.control_center",
+      "allowed_callers": [
+        "src/server/daemon-control-gateway-runtime.ts"
+      ],
+      "forbidden_callers": [
+        "src/server/terminal-message-runtime.ts",
+        "src/components/**",
+        "src/pages/**",
+        "src/lib/**"
+      ],
+      "request_chain": [
+        "TmuxControlIn01CommandOwner",
+        "TmuxControlIn02BackendOwner"
+      ],
+      "response_chain": [
+        "TmuxControlOut01Dispatched"
+      ],
+      "error_chain": [
+        "TmuxControlError01OwnerFailure"
+      ],
+      "mainline_call_ids": [
+        "daemon_mainline:Control->Tmux"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/server/daemon-control-center-runtime.test.ts",
+        "src/server/terminal-message-runtime.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.daemon.mirror_store_to_client_buffer_frame_assembly",
+      "from_module": "daemon.mirror_store",
+      "to_module": "client.buffer_frame_assembly",
+      "resource_from": "resource.mirror_store",
+      "resource_to": "resource.client_buffer_frame_assembly",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "terminal.buffer_render",
+      "allowed_callers": [
+        "src/server/terminal-mirror-runtime.ts",
+        "src/contexts/session-context-buffer-runtime.ts",
+        "src/lib/buffer-frame-assembly/session-buffer-frame-assembly.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/TerminalView.tsx"
+      ],
+      "request_chain": [
+        "BufferSyncIn01MirrorPatch",
+        "BufferSyncIn02FrameAssembly"
+      ],
+      "response_chain": [
+        "BufferSyncOut01AssembledFrame"
+      ],
+      "error_chain": [
+        "BufferSyncError01InvalidFrame"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:SocketMessage->BufferWireNormalize",
+        "android_mainline:ChannelDemux->BufferWireNormalize",
+        "android_mainline:BufferWireNormalize->BufferSyncIngress",
+        "android_mainline:BufferSyncIngress->BufferFrameAssembly",
+        "android_mainline:SocketMessage->BufferHeadFrameExpiry",
+        "android_mainline:BufferHeadFrameExpiry->BufferFrameAssembly"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/buffer-frame-assembly/session-buffer-frame-assembly.test.ts",
+        "src/contexts/session-context-buffer-runtime.test.ts"
+      ],
+      "status": "active",
+      "forbidden_caller_notes": [
+        "src/components/TerminalView.tsx direct daemon read"
+      ]
+    },
+    {
+      "edge_id": "edge.client_buffer_frame_assembly_to_client_sparse_buffer",
+      "from_module": "client.buffer_frame_assembly",
+      "to_module": "client.sparse_buffer",
+      "resource_from": "resource.client_buffer_frame_assembly",
+      "resource_to": "resource.client_sparse_buffer",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "terminal.buffer_render",
+      "allowed_callers": [
+        "src/lib/buffer-frame-assembly/session-buffer-frame-assembly.ts",
+        "src/contexts/session-context-buffer-runtime.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/TerminalView.tsx",
+        "src/server/**"
+      ],
+      "request_chain": [
+        "BufferSyncIn02FrameAssembly",
+        "BufferSyncIn03SparseApply"
+      ],
+      "response_chain": [
+        "BufferSyncOut02SparseRevision"
+      ],
+      "error_chain": [
+        "BufferSyncError02StaleRevision",
+        "BufferSyncError03GapRequestRequired"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:BufferFrameAssembly->BufferSparseApply"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/buffer-frame-assembly/session-buffer-frame-assembly.test.ts",
+        "src/contexts/session-context-buffer-runtime.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client_sparse_buffer_to_renderer",
+      "from_module": "client.sparse_buffer",
+      "to_module": "client.renderer_window",
+      "resource_from": "resource.client_sparse_buffer",
+      "resource_to": "resource.renderer_window",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "terminal.buffer_render",
+      "allowed_callers": [
+        "src/contexts/session-context-buffer-runtime.ts",
+        "src/lib/session-render-buffer-store.ts",
+        "src/lib/session-render-gate.ts",
+        "src/components/TerminalView.tsx",
+        "src/pages/TerminalPageStageShell.tsx"
+      ],
+      "forbidden_callers": [
+        "src/server/**"
+      ],
+      "request_chain": [
+        "RenderIn01SparseRows",
+        "RenderIn02VisibleCommit"
+      ],
+      "response_chain": [
+        "RenderOut01DomRows"
+      ],
+      "error_chain": [
+        "RenderError01MissingVisibleRange"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:BufferSparseApply->RenderGate",
+        "android_mainline:TerminalView->Renderer",
+        "android_mainline:Renderer->RenderGate"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/components/TerminalView.dynamic-refresh.test.tsx"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client_renderer_to_ui_projection",
+      "from_module": "client.dom_renderer",
+      "to_module": "client.terminal_shell",
+      "resource_from": "resource.renderer_window",
+      "resource_to": "resource.ui_projection",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "terminal.buffer_render",
+      "allowed_callers": [
+        "src/components/TerminalView.tsx",
+        "src/pages/TerminalPageStageShell.tsx"
+      ],
+      "forbidden_callers": [
+        "src/server/**"
+      ],
+      "request_chain": [
+        "UiProjectionIn01RendererSnapshot",
+        "UiProjectionIn02TerminalSurface"
+      ],
+      "response_chain": [
+        "UiProjectionOut01VisibleTerminal"
+      ],
+      "error_chain": [
+        "UiProjectionError01RendererUnavailable"
+  ],
+  "mainline_call_ids": [
+    "android_mainline:TerminalPage->TerminalShellContract",
+    "android_mainline:TerminalShellContract->StageShell",
+    "android_mainline:StageShell->TerminalView"
+  ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/components/TerminalView.dynamic-refresh.test.tsx"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client_ui_to_preview_selection",
+      "from_module": "client.app_shell",
+      "to_module": "client.session_drawer_preview",
+      "resource_from": "resource.ui_projection",
+      "resource_to": "resource.session_preview_selection",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "terminal.session_preview",
+      "allowed_callers": [
+        "src/components/terminal/TerminalSessionDrawer.tsx",
+        "src/components/terminal/TerminalPreviewGrid.tsx",
+        "src/lib/session-preview-selection.ts"
+      ],
+      "forbidden_callers": [
+        "src/lib/traversal/socket.ts",
+        "src/server/**"
+      ],
+      "request_chain": [
+        "PreviewIn01UiIntent",
+        "PreviewIn02SelectionUpdate"
+      ],
+      "response_chain": [
+        "PreviewOut01OrderedSelection"
+      ],
+      "error_chain": [
+        "PreviewError01SelectionLimit",
+        "PreviewError02MissingOpenSession"
+      ],
+      "mainline_call_ids": [
+        "android_preview:SessionDrawer->PreviewSelectionOwner",
+        "android_preview:PreviewAddMenu->PreviewSelectionOwner"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/session-preview-selection.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client_ui_to_remote_window_overlay",
+      "from_module": "client.app_shell",
+      "to_module": "client.remote_window_overlay",
+      "resource_from": "resource.ui_projection",
+      "resource_to": "resource.remote_window_overlay",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "desktop.remote_window_stream",
+      "allowed_callers": [
+        "src/pages/TerminalPage.tsx",
+        "src/components/terminal/RemoteWindowOverlay.tsx"
+      ],
+      "forbidden_callers": [
+        "src/server/**"
+      ],
+      "request_chain": [
+        "RemoteWindowUiIn01OverlayIntent",
+        "RemoteWindowUiIn02OverlayProjection"
+      ],
+      "response_chain": [
+        "RemoteWindowUiOut01OverlayState"
+      ],
+      "error_chain": [
+        "RemoteWindowUiError01UnsupportedTarget"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:TerminalPage->RemoteWindowOverlay"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/remote-window-overlay-runtime.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client_remote_window_overlay_to_touch_action",
+      "from_module": "client.remote_window_overlay",
+      "to_module": "client.remote_window_overlay",
+      "resource_from": "resource.remote_window_overlay",
+      "resource_to": "resource.remote_window_touch_action",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "desktop.remote_window_stream",
+      "allowed_callers": [
+        "src/components/terminal/RemoteWindowOverlay.tsx",
+        "src/lib/remote-window-touch-action-runtime.ts"
+      ],
+      "forbidden_callers": [
+        "src/server/**"
+      ],
+      "request_chain": [
+        "RemoteWindowActionIn01SurfaceGesture",
+        "RemoteWindowActionIn02ActionRecord"
+      ],
+      "response_chain": [
+        "RemoteWindowActionOut01DispatchIntent"
+      ],
+      "error_chain": [
+        "RemoteWindowActionError01StaleAction",
+        "RemoteWindowActionError02UnsupportedInputRoute"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:RemoteWindowOverlay->RemoteWindowTouchAction"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/remote-window-touch-action-runtime.test.ts"
+      ],
+      "status": "active",
+      "forbidden_caller_notes": [
+        "src/server/** direct UI event"
+      ]
+    },
+    {
+      "edge_id": "edge.client_touch_action_to_daemon_remote_window_stream",
+      "from_module": "client.remote_window_overlay",
+      "to_module": "daemon.remote_window_stream",
+      "resource_from": "resource.remote_window_touch_action",
+      "resource_to": "resource.remote_window_stream",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "desktop.remote_window_stream",
+      "allowed_callers": [
+        "src/lib/remote-window-touch-action-runtime.ts",
+        "src/contexts/session-context-remote-window-runtime.ts",
+        "src/server/remote-window-stream-daemon.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/terminal/RemoteWindowOverlay.tsx"
+      ],
+      "request_chain": [
+        "RemoteWindowInputIn01ActionRecord",
+        "RemoteWindowInputIn02DaemonOsEvent"
+      ],
+      "response_chain": [
+        "RemoteWindowInputOut01ActionResult"
+      ],
+      "error_chain": [
+        "RemoteWindowInputError01FocusFailed",
+        "RemoteWindowInputError02InjectionFailed"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:RemoteWindowTouchAction->RemoteWindowInputRuntime",
+        "daemon_mainline:RemoteWindowStream->RemoteWindowInput"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/remote-window-touch-action-runtime.test.ts",
+        "src/server/remote-window-stream-daemon.test.ts"
+      ],
+      "status": "active",
+      "forbidden_caller_notes": [
+        "src/components/terminal/RemoteWindowOverlay.tsx direct daemon call"
+      ]
+    },
+    {
+      "edge_id": "edge.daemon_remote_window_stream_to_daemon_process",
+      "from_module": "daemon.remote_window_stream",
+      "to_module": "daemon.runtime_entry",
+      "resource_from": "resource.remote_window_stream",
+      "resource_to": "resource.daemon_process",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "desktop.remote_window_stream",
+      "allowed_callers": [
+        "src/server/remote-window-stream-daemon.ts",
+        "src/server/server.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**"
+      ],
+      "request_chain": [
+        "RemoteWindowDaemonIn01CatalogOrStreamRequest",
+        "RemoteWindowDaemonIn02ProcessLocalCapture"
+      ],
+      "response_chain": [
+        "RemoteWindowDaemonOut01StreamState"
+      ],
+      "error_chain": [
+        "RemoteWindowDaemonError01PermissionDenied",
+        "RemoteWindowDaemonError02CaptureUnavailable"
+      ],
+      "mainline_call_ids": [
+        "daemon_mainline:Control->RemoteWindowStream",
+        "daemon_mainline:RemoteWindowStream->RemoteWindowCapture"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/server/remote-window-stream-daemon.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.daemon_process_to_connection_gateway",
+      "from_module": "daemon.runtime_entry",
+      "to_module": "daemon.connection_gateway",
+      "resource_from": "resource.daemon_process",
+      "resource_to": "resource.daemon_connection_gateway",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "terminal.transport_lifecycle",
+      "allowed_callers": [
+        "src/server/server.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**"
+      ],
+      "request_chain": [
+        "DaemonGatewayIn01ProcessConfig",
+        "DaemonGatewayIn02PhysicalIngress"
+      ],
+      "response_chain": [
+        "DaemonGatewayOut01Ready"
+      ],
+      "error_chain": [
+        "DaemonGatewayError01EndpointDiscovery",
+        "DaemonGatewayError02IngressInit"
+      ],
+      "mainline_call_ids": [
+        "daemon_mainline:Server->RelayHostControl",
+        "daemon_mainline:Server->Transport"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/module-import-graph-truth.test.ts",
+        "src/server/daemon-connection-endpoint-runtime.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.daemon_connection_gateway_to_relay_account_directory",
+      "from_module": "daemon.connection_gateway",
+      "to_module": "relay.account_directory",
+      "resource_from": "resource.daemon_connection_gateway",
+      "resource_to": "resource.relay_account_directory",
+      "via_resources": [
+        "resource.relay_control_connection"
+      ],
+      "relation_status": "via",
+      "owner_feature": "relay.account_directory",
+      "allowed_callers": [
+        "src/server/relay-client.ts",
+        "src/traversal-relay/server.ts"
+      ],
+      "forbidden_callers": [
+        "src/server/terminal-message-runtime.ts",
+        "src/components/**",
+        "src/pages/**"
+      ],
+      "request_chain": [
+        "RelayControlIn01DaemonEndpointTruth",
+        "RelayControlIn02DirectoryUpdate"
+      ],
+      "response_chain": [
+        "RelayControlOut01AccountDirectoryGeneration"
+      ],
+      "error_chain": [
+        "RelayControlError01InvalidDirectoryPayload",
+        "RelayControlError02ControlUnavailable"
+      ],
+      "mainline_call_ids": [
+        "daemon_mainline:RelayHostControl->DaemonEndpointDirectory",
+        "daemon_mainline:DaemonEndpointDirectory->RelayDirectoryPublish"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/server/relay-client.test.ts",
+        "packages/shared/src/connection/relay-directory.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.relay_account_directory_to_transport_target",
+      "from_module": "relay.account_directory",
+      "to_module": "client.connection_home",
+      "resource_from": "resource.relay_account_directory",
+      "resource_to": "resource.transport_target",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "relay.account_directory",
+      "allowed_callers": [
+        "src/hooks/useRelayDeviceStream.ts",
+        "src/lib/client-control-directory-runtime.ts",
+        "src/lib/relay-device-stream-runtime.ts",
+        "src/lib/traversal-relay-client.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/TerminalView.tsx",
+        "src/contexts/session-context-buffer-runtime.ts",
+        "src/server/terminal-mirror-runtime.ts"
+      ],
+      "request_chain": [
+        "RelayDirectoryIn01ValidatedSnapshot",
+        "RelayDirectoryIn02StableDaemonProjection"
+      ],
+      "response_chain": [
+        "RelayDirectoryOut01TransportTargetCandidates"
+      ],
+      "error_chain": [
+        "RelayDirectoryError01InvalidEndpoint",
+        "RelayDirectoryError02UnknownDaemon"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:RelayDirectoryProjection->ClientControlPlaneTransport",
+        "android_mainline:RelayControlSocket->RelayAccountStore",
+        "android_mainline:RelayAccountStore->RelayDirectoryProjection"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/client-control-directory-runtime.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.daemon_connection_gateway_to_transport_subscriber",
+      "from_module": "daemon.connection_gateway",
+      "to_module": "daemon.transport_subscriber",
+      "resource_from": "resource.daemon_target_transport",
+      "resource_to": "resource.transport_subscriber",
+      "via_resources": [
+        "resource.terminal_channel"
+      ],
+      "relation_status": "via",
+      "owner_feature": "terminal.transport_lifecycle",
+      "allowed_callers": [
+        "src/server/terminal-bridge-runtime.ts",
+        "src/server/terminal-transport-runtime.ts"
+      ],
+      "forbidden_callers": [
+        "src/server/relay-client.ts",
+        "src/traversal-relay/server.ts",
+        "src/pages/**"
+      ],
+      "request_chain": [
+        "DaemonTransportIn01PhysicalPeer",
+        "DaemonTransportIn02MuxHandshake",
+        "DaemonTransportIn03ChannelSubscriber"
+      ],
+      "response_chain": [
+        "DaemonTransportOut01ChannelReady"
+      ],
+      "error_chain": [
+        "DaemonTransportError01HandshakeRejected",
+        "DaemonTransportError02ChannelOpenRejected"
+      ],
+      "mainline_call_ids": [
+        "daemon_mainline:Bridge->MuxHandshake",
+        "daemon_mainline:MuxHandshake->ChannelRegistry"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/module-import-graph-truth.test.ts",
+        "src/server/terminal-transport-runtime.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.relay_peer_lease_to_transport_target",
+      "from_module": "relay.peer_lease",
+      "to_module": "client.connection_home",
+      "resource_from": "resource.relay_peer_lease",
+      "resource_to": "resource.transport_target",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "relay.route_selection",
+      "allowed_callers": [
+        "src/traversal-relay/server.ts",
+        "src/lib/traversal/route-selector.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**"
+      ],
+      "request_chain": [
+        "RelayLeaseIn01ClientDevice",
+        "RelayLeaseIn02RouteCandidate"
+      ],
+      "response_chain": [
+        "RelayLeaseOut01ReusablePeer"
+      ],
+      "error_chain": [
+        "RelayLeaseError01MissingDeviceId",
+        "RelayLeaseError02ExpiredLease"
+      ],
+      "mainline_call_ids": [
+        "daemon_mainline:Relay->RelayPeerLease"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/traversal-relay/server.test.ts"
+      ],
+      "status": "active",
+      "forbidden_caller_notes": [
+        "src/pages/** direct lease mutation"
+      ]
+    },
+    {
+      "edge_id": "edge.relay_peer_lease_to_daemon_target_transport_via_target",
+      "from_module": "relay.peer_lease",
+      "to_module": "client.daemon_connection",
+      "resource_from": "resource.relay_peer_lease",
+      "resource_to": "resource.daemon_target_transport",
+      "via_resources": [
+        "resource.transport_target"
+      ],
+      "relation_status": "via",
+      "owner_feature": "relay.route_selection",
+      "allowed_callers": [
+        "src/lib/traversal/route-selector.ts",
+        "src/lib/session-transport-runtime.ts"
+      ],
+      "forbidden_callers": [
+        "src/server/terminal-mirror-runtime.ts",
+        "src/traversal-relay/server.ts"
+      ],
+      "request_chain": [
+        "RelayRouteIn01PeerLease",
+        "RelayRouteIn02TargetTransportProbe"
+      ],
+      "response_chain": [
+        "RelayRouteOut01PhysicalTransportCandidate"
+      ],
+      "error_chain": [
+        "RelayRouteError01LeaseNotReusable",
+        "RelayRouteError02TransportConnectFailed"
+      ],
+      "mainline_call_ids": [
+        "daemon_mainline:RelayPeerLease->MuxHandshake"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/mainline-resource-call-map.test.ts"
+      ],
+      "status": "active",
+      "forbidden_caller_notes": [
+        "src/traversal-relay/server.ts terminal-channel mutation"
+      ]
+    },
+    {
+      "edge_id": "edge.observability_daemon_process_to_debug_channel",
+      "from_module": "daemon.runtime_entry",
+      "to_module": "observability.debug_channel",
+      "resource_from": "resource.daemon_process",
+      "resource_to": "resource.debug_channel",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "daemon.cli_node",
+      "allowed_callers": [
+        "src/server/terminal-debug-runtime.ts",
+        "src/lib/terminal-performance-trace.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**"
+      ],
+      "request_chain": [
+        "DebugIn01RuntimeMetadata",
+        "DebugIn02BoundedTrace"
+      ],
+      "response_chain": [
+        "DebugOut01DiagnosticSnapshot"
+      ],
+      "error_chain": [
+        "DebugError01Unavailable"
+      ],
+      "mainline_call_ids": [
+        "daemon_mainline:Server->DaemonDebugHub"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/terminal-performance-trace.test.ts"
+      ],
+      "status": "active",
+      "forbidden_caller_notes": [
+        "src/components/** business truth",
+        "src/pages/** business truth"
+      ]
+    },
+    {
+      "edge_id": "edge.observability_daemon_process_to_observability_channel",
+      "from_module": "daemon.runtime_entry",
+      "to_module": "observability.debug_channel",
+      "resource_from": "resource.daemon_process",
+      "resource_to": "resource.observability_channel",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "daemon.cli_node",
+      "allowed_callers": [
+        "src/server/terminal-http-runtime.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**"
+      ],
+      "request_chain": [
+        "DebugObservabilityIn01LogIngest",
+        "DebugObservabilityIn02SnapshotIngest",
+        "DebugObservabilityIn03ControlLease"
+      ],
+      "response_chain": [
+        "DebugObservabilityOut01Accepted"
+      ],
+      "error_chain": [
+        "DebugObservabilityError01Rejected"
+      ],
+      "mainline_call_ids": [
+        "daemon_mainline:Server->Http",
+        "daemon_mainline:Http->DebugObservabilityIn01LogIngest",
+        "daemon_mainline:Http->DebugObservabilityIn02SnapshotIngest",
+        "daemon_mainline:Http->DebugObservabilityIn03ControlLease"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/runtime-debug-http-exporter.test.ts",
+        "src/server/terminal-debug-runtime.test.ts",
+        "src/server/terminal-http-runtime.debug-observability.test.ts"
+      ],
+      "status": "active",
+      "forbidden_caller_notes": [
+        "src/components/** business payload",
+        "src/pages/** business payload"
+      ]
+    },
+    {
+      "edge_id": "edge.observability_client_exporter_to_daemon_http",
+      "from_module": "observability.debug_channel",
+      "to_module": "daemon.runtime_entry",
+      "resource_from": "resource.observability_channel",
+      "resource_to": "resource.daemon_process",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "daemon.cli_node",
+      "allowed_callers": [
+        "src/lib/runtime-debug-http-exporter.ts",
+        "src/contexts/session-context-infra-facade-runtime.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**"
+      ],
+      "request_chain": [
+        "DebugObservabilityClientIn01HttpPost",
+        "DebugObservabilityClientIn02BoundedExport"
+      ],
+      "response_chain": [
+        "DebugObservabilityClientOut01Accepted"
+      ],
+      "error_chain": [
+        "DebugObservabilityClientError01TransportUnavailable",
+        "DebugObservabilityClientError02OverflowDropped"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:SessionContext->RuntimeDebugHttpExporter"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/runtime-debug-http-exporter.test.ts",
+        "src/server/terminal-debug-runtime.test.ts",
+        "src/server/terminal-http-runtime.debug-observability.test.ts"
+      ],
+      "status": "active",
+      "forbidden_caller_notes": [
+        "src/components/** direct HTTP debug mutation",
+        "src/pages/** direct HTTP debug mutation"
+      ]
+    },
+    {
+      "edge_id": "edge.client_file_upload_window_to_dispatch",
+      "from_module": "client.file_browser",
+      "to_module": "client.file_browser",
+      "resource_from": "resource.client_file_browser",
+      "resource_to": "resource.client_file_browser",
+      "via_resources": [],
+      "relation_status": "observer",
+      "owner_feature": "daemon.file_transfer",
+      "allowed_callers": [
+        "src/lib/file-transfer-throughput-runtime.ts",
+        "src/components/terminal/FileTransferSheet.tsx"
+      ],
+      "forbidden_callers": [
+        "src/server/**",
+        "src/components/TerminalView.tsx"
+      ],
+      "request_chain": [
+        "ClientFileTransferUploadOut02BoundedWindow",
+        "ClientFileTransferUploadOut03ChunkDispatch"
+      ],
+      "response_chain": [
+        "ClientFileTransferUploadAckIn01SocketDispatch",
+        "ClientFileTransferUploadAckIn02SessionProjection"
+      ],
+      "error_chain": [
+        "ClientFileTransferUploadErrorIn01ProgressTimeout"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:ClientFileTransferUploadOut02BoundedWindow->ClientFileTransferUploadOut03ChunkDispatch"
+      ],
+      "required_gates": [
+        "scripts/run-file-transfer-throughput-gate.sh",
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/file-transfer-throughput-runtime.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client_file_browser_to_target_mux_request",
+      "from_module": "client.file_browser",
+      "to_module": "client.daemon_connection",
+      "resource_from": "resource.client_file_browser",
+      "resource_to": "resource.target_mux_request",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "daemon.file_transfer",
+      "allowed_callers": [
+        "src/components/terminal/FileTransferSheet.tsx",
+        "src/contexts/session-context-transfer-runtime.ts",
+        "src/lib/file-transfer-throughput-runtime.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/TerminalView.tsx",
+        "src/server/**"
+      ],
+      "request_chain": [
+        "ClientFileTransferUploadOut03ChunkDispatch",
+        "ClientFileTransferUploadOut04MuxSend"
+      ],
+      "response_chain": [
+        "ClientFileTransferUploadAckIn01SocketDispatch",
+        "ClientFileTransferUploadAckIn02SessionProjection"
+      ],
+      "error_chain": [
+        "ClientFileTransferUploadErrorOut01WireFrameLimit",
+        "ClientFileTransferUploadErrorIn01ProgressTimeout"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:ClientFileTransferUploadOut03ChunkDispatch->ClientFileTransferUploadOut04MuxSend"
+      ],
+      "required_gates": [
+        "scripts/run-file-transfer-throughput-gate.sh",
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/file-transfer-throughput-runtime.test.ts",
+        "src/components/terminal/FileTransferSheet.test.tsx"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client_file_native_batch_to_write_dispatch",
+      "from_module": "client.file_browser",
+      "to_module": "client.file_browser",
+      "resource_from": "resource.client_file_browser",
+      "resource_to": "resource.client_file_browser",
+      "via_resources": [],
+      "relation_status": "observer",
+      "owner_feature": "daemon.file_transfer",
+      "allowed_callers": [
+        "src/lib/file-transfer-throughput-runtime.ts",
+        "src/components/terminal/FileTransferSheet.tsx"
+      ],
+      "forbidden_callers": [
+        "src/server/**",
+        "src/components/TerminalView.tsx"
+      ],
+      "request_chain": [
+        "ClientFileTransferDownloadIn04NativeWriteBatch",
+        "ClientFileTransferDownloadIn05NativeWriteDispatch"
+      ],
+      "response_chain": [
+        "ClientFileTransferDownloadPersistOut01BytesWritten"
+      ],
+      "error_chain": [
+        "ClientFileTransferDownloadErrorIn02NativeWriteFailure"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:ClientFileTransferDownloadIn04NativeWriteBatch->ClientFileTransferDownloadIn05NativeWriteDispatch"
+      ],
+      "required_gates": [
+        "scripts/run-file-transfer-throughput-gate.sh",
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/file-transfer-throughput-runtime.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client_file_browser_to_native_file_store",
+      "from_module": "client.file_browser",
+      "to_module": "client.runtime",
+      "resource_from": "resource.client_file_browser",
+      "resource_to": "resource.client_native_file_store",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "daemon.file_transfer",
+      "allowed_callers": [
+        "src/components/terminal/FileTransferSheet.tsx",
+        "src/lib/file-transfer-throughput-runtime.ts",
+        "src/plugins/StoragePermissionPlugin.ts",
+        "native/android/app/src/main/java/com/zterm/android/StoragePermissionPlugin.java"
+      ],
+      "forbidden_callers": [
+        "src/server/**",
+        "src/components/TerminalView.tsx"
+      ],
+      "request_chain": [
+        "ClientFileTransferDownloadIn05NativeWriteDispatch",
+        "ClientFileTransferDownloadIn06NativeStore"
+      ],
+      "response_chain": [
+        "ClientFileTransferDownloadPersistOut01BytesWritten",
+        "ClientFileTransferDownloadPersistOut02VerifiedStat"
+      ],
+      "error_chain": [
+        "ClientFileTransferDownloadErrorIn02NativeWriteFailure",
+        "ClientFileTransferDownloadErrorIn03SizeMismatch"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:ClientFileTransferDownloadIn05NativeWriteDispatch->ClientFileTransferDownloadIn06NativeStore"
+      ],
+      "required_gates": [
+        "scripts/run-file-transfer-throughput-gate.sh",
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/file-transfer-throughput-runtime.test.ts",
+        "native/android/app/src/test/java/com/zterm/android/StorageFileWriteLogicTest.java"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client_target_mux_request_to_file_browser",
+      "from_module": "client.daemon_connection",
+      "to_module": "client.file_browser",
+      "resource_from": "resource.target_mux_request",
+      "resource_to": "resource.client_file_browser",
+      "via_resources": [
+        "resource.daemon_target_transport",
+        "resource.terminal_channel"
+      ],
+      "relation_status": "via",
+      "owner_feature": "daemon.file_transfer",
+      "allowed_callers": [
+        "src/contexts/session-context-socket-message-runtime.ts",
+        "src/lib/file-transfer-message-runtime.ts",
+        "src/lib/file-transfer-session-runtime.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/TerminalView.tsx",
+        "src/server/**"
+      ],
+      "request_chain": [
+        "ClientFileTransferDownloadIn01SocketDispatch",
+        "ClientFileTransferDownloadIn02SessionProjection"
+      ],
+      "response_chain": [
+        "ClientFileTransferDownloadIn03SheetPersistence"
+      ],
+      "error_chain": [
+        "ClientFileTransferDownloadErrorIn01StaleRequest"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:ClientFileTransferUploadAckIn01SocketDispatch->ClientFileTransferUploadAckIn02SessionProjection",
+        "android_mainline:ClientFileTransferDownloadIn01SocketDispatch->ClientFileTransferDownloadIn02SessionProjection"
+      ],
+      "required_gates": [
+        "scripts/run-file-transfer-throughput-gate.sh",
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/file-transfer-session-runtime.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.daemon_file_transfer_to_transport_subscriber",
+      "from_module": "daemon.file_transfer",
+      "to_module": "daemon.transport_subscriber",
+      "resource_from": "resource.file_transfer",
+      "resource_to": "resource.transport_subscriber",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "daemon.file_transfer",
+      "allowed_callers": [
+        "src/server/terminal-file-transfer-binary-runtime.ts",
+        "src/server/terminal-file-transfer-list-runtime.ts",
+        "src/server/terminal-file-transfer-message-runtime.ts",
+        "src/server/terminal-file-transfer-runtime.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**"
+      ],
+      "request_chain": [
+        "DaemonFileTransferUploadProgressOut01CumulativeAck",
+        "DaemonFileTransferTransportOut01Send"
+      ],
+      "response_chain": [
+        "DaemonFileTransferUploadProgressOut01CumulativeAck",
+        "DaemonFileTransferUploadSuccessOut01Complete"
+      ],
+      "error_chain": [
+        "DaemonFileTransferUploadErrorOut01ChunkRejected",
+        "DaemonFileTransferUploadErrorOut02CompletionRejected"
+      ],
+      "mainline_call_ids": [
+        "daemon_mainline:DaemonFileTransferUploadProgressOut01CumulativeAck->DaemonFileTransferTransportOut01Send",
+        "daemon_mainline:DaemonFileTransferUploadSuccessOut01Complete->DaemonFileTransferTransportOut01Send",
+        "daemon_mainline:DaemonFileTransferUploadErrorOut01ChunkRejected->DaemonFileTransferTransportOut01Send",
+        "daemon_mainline:DaemonFileTransferUploadErrorOut02CompletionRejected->DaemonFileTransferTransportOut01Send"
+      ],
+      "required_gates": [
+        "scripts/run-file-transfer-throughput-gate.sh",
+        "src/lib/edge-registry-truth.test.ts",
+        "src/server/terminal-file-transfer-binary-runtime.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.relay_control_connection_to_relay_account_store",
+      "from_module": "relay.account_directory",
+      "to_module": "relay.account_directory",
+      "resource_from": "resource.relay_control_connection",
+      "resource_to": "resource.relay_account_directory",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "relay.account_directory",
+      "request_chain": [
+        "RelayControlIn01DevicesSnapshot",
+        "RelayControlIn02DirectorySnapshot"
+      ],
+      "response_chain": [
+        "RelayAccountStoreOut01MergedState"
+      ],
+      "error_chain": [
+        "RelayAccountStoreError01IdentityMismatch",
+        "RelayAccountStoreError02MissingDirectory"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:RelayControlSocket->RelayAccountStore"
+      ],
+      "allowed_callers": [
+        "src/lib/traversal-relay-client.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**",
+        "src/server/**"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/traversal-relay-client.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.daemon.mirror_store_to_session_idle_facts",
+      "from_module": "daemon.mirror_store",
+      "to_module": "daemon.session_idle_detection",
+      "resource_from": "resource.mirror_store",
+      "resource_to": "resource.session_idle_facts",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "daemon.session_idle_detection",
+      "allowed_callers": [
+        "src/server/terminal-session-activity-runtime.ts",
+        "src/server/terminal-message-control-runtime.ts",
+        "src/server/daemon-session-catalog-runtime.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**",
+        "src/hooks/**",
+        "src/contexts/**"
+      ],
+      "request_chain": [
+        "IdleActivityClassifierIn01MirrorWalk"
+      ],
+      "response_chain": [
+        "IdleActivityClassifierOut01ClassifiedFacts"
+      ],
+      "error_chain": [
+        "IdleActivityClassifierError00InvalidMirrorData"
+      ],
+      "mainline_call_ids": [
+        "daemon_mainline:IdleActivityClassifierIn01MirrorWalk->IdleActivityClassifierOut01ClassifiedFacts",
+        "daemon_mainline:IdleActivityClassifierOut01ClassifiedFacts->IdleSessionBroadcastOut01TransportPublish"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/server/terminal-session-activity-runtime.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.daemon.session_idle_facts_to_daemon_target_transport",
+      "from_module": "daemon.session_idle_detection",
+      "to_module": "daemon.transport_subscriber",
+      "resource_from": "resource.session_idle_facts",
+      "resource_to": "resource.transport_subscriber",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "daemon.session_idle_detection",
+      "allowed_callers": [
+        "src/server/terminal-daemon-runtime.ts",
+        "src/server/terminal-message-control-runtime.ts",
+        "src/server/daemon-session-catalog-runtime.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**",
+        "src/hooks/**",
+        "src/contexts/**"
+      ],
+      "request_chain": [
+        "IdleSessionBroadcastOut01TransportPublish"
+      ],
+      "response_chain": [
+        "IdleSessionBroadcastOut01TransportPublish"
+      ],
+      "error_chain": [
+        "IdleSessionBroadcastError01TransportWrite"
+      ],
+      "mainline_call_ids": [
+        "daemon_mainline:IdleActivityClassifierOut01ClassifiedFacts->IdleSessionBroadcastOut01TransportPublish"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client_remote_window_overlay_to_dual_stream_switch",
+      "from_module": "client.remote_window_overlay",
+      "to_module": "client.remote_window_dual_stream_switch",
+      "resource_from": "resource.remote_window_overlay",
+      "resource_to": "resource.remote_window_dual_stream_switch",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "desktop.remote_window_stream",
+      "allowed_callers": [
+        "src/components/terminal/RemoteWindowOverlay.tsx",
+        "src/lib/remote-window-dual-stream-runtime.ts"
+      ],
+      "forbidden_callers": [
+        "src/server/**",
+        "src/pages/**"
+      ],
+      "request_chain": [
+        "RemoteWindowSwitchIn01TargetSelection",
+        "RemoteWindowSwitchIn02OverviewCrop"
+      ],
+      "response_chain": [
+        "RemoteWindowSwitchOut01FocusCommit"
+      ],
+      "error_chain": [
+        "RemoteWindowSwitchError01StaleResult",
+        "RemoteWindowSwitchError02FocusUpdate"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:RemoteWindowOverlay->RemoteWindowDualStreamSwitch"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/remote-window-dual-stream-runtime.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client_dual_stream_switch_to_daemon_remote_window_stream",
+      "from_module": "client.remote_window_dual_stream_switch",
+      "to_module": "daemon.remote_window_stream",
+      "resource_from": "resource.remote_window_dual_stream_switch",
+      "resource_to": "resource.remote_window_stream",
+      "via_resources": [
+        "resource.transport_target"
+      ],
+      "relation_status": "indirect",
+      "owner_feature": "desktop.remote_window_stream",
+      "allowed_callers": [
+        "src/lib/remote-window-dual-stream-runtime.ts",
+        "src/contexts/session-context-remote-window-runtime.ts",
+        "src/lib/remote-window-message-runtime.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/terminal/RemoteWindowOverlay.tsx",
+        "src/server/**"
+      ],
+      "request_chain": [
+        "RemoteWindowSwitchIn03FocusUpdate"
+      ],
+      "response_chain": [
+        "RemoteWindowSwitchOut02FocusReady"
+      ],
+      "error_chain": [
+        "RemoteWindowSwitchError03DaemonUpdate"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:RemoteWindowDualStreamSwitch->RemoteWindowMessageRuntime",
+        "daemon_mainline:Control->RemoteWindowStream"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/remote-window-message-runtime.test.ts",
+        "src/server/remote-window-stream-daemon.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client.app_shell_to_plugin_host",
+      "from_module": "client.app_shell",
+      "to_module": "client.plugin_host",
+      "resource_from": "resource.platform_terminal_surface",
+      "resource_to": "resource.client_plugin_host",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "client.plugin_host",
+      "allowed_callers": [
+        "src/App.tsx"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**",
+        "src/server/**"
+      ],
+      "request_chain": [
+        "PluginHostIn01AppCompose",
+        "PluginHostIn02Install"
+      ],
+      "response_chain": [
+        "PluginHostOut01Installed"
+      ],
+      "error_chain": [
+        "PluginHostError01DuplicatePlugin"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:App->PluginHost"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/plugin-host/plugin-host-runtime.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client.app_shell_to_control_center",
+      "from_module": "client.app_shell",
+      "to_module": "client.control_center",
+      "resource_from": "resource.platform_terminal_surface",
+      "resource_to": "resource.client_control_center",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "client.control_center",
+      "allowed_callers": [
+        "src/App.tsx"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**",
+        "src/server/**",
+        "src/contexts/**",
+        "src/hooks/**"
+      ],
+      "request_chain": [
+        "ControlIn01AppIntent",
+        "ControlIn02CenterDispatch"
+      ],
+      "response_chain": [
+        "ControlOut01CenterResult"
+      ],
+      "error_chain": [
+        "ControlError01InvalidCommand",
+        "ControlError02CapabilityDenied",
+        "ControlError03DeadlineExceeded",
+        "ControlError04UnknownCommand"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:App->ControlCenter"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/control-center/client-control-center.test.ts",
+        "src/lib/control-center/client-control-center-ownership.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client.control_center_to_plugin_host",
+      "from_module": "client.control_center",
+      "to_module": "client.plugin_host",
+      "resource_from": "resource.client_control_center",
+      "resource_to": "resource.client_plugin_host",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "client.control_center",
+      "allowed_callers": [
+        "src/App.tsx",
+        "src/lib/plugin-host/plugin-host-control-node.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**",
+        "src/server/**",
+        "src/contexts/**",
+        "src/hooks/**",
+        "src/plugins/**"
+      ],
+      "request_chain": [
+        "ControlIn03PluginHostDispose",
+        "ControlIn04PluginHostOwnerExecute"
+      ],
+      "response_chain": [
+        "ControlOut02PluginHostDisposed"
+      ],
+      "error_chain": [
+        "ControlError05PluginHostDispose"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:ControlCenter->PluginHostControlNode",
+        "android_mainline:PluginHostControlNode->PluginHost"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/control-center/client-control-center.test.ts",
+        "src/lib/control-center/client-control-center-ownership.test.ts",
+        "src/lib/plugin-host/plugin-host-control-node.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client.app_shell_to_composition_root",
+      "from_module": "client.app_shell",
+      "to_module": "client.composition_root",
+      "resource_from": "resource.platform_terminal_surface",
+      "resource_to": "resource.client_composition_root",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "client.composition_root",
+      "allowed_callers": [
+        "src/App.tsx"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**",
+        "src/server/**",
+        "src/contexts/**",
+        "src/hooks/**"
+      ],
+      "request_chain": [
+        "CompositionRootIn01AppEntry",
+        "CompositionRootIn02BindPorts"
+      ],
+      "response_chain": [
+        "CompositionRootOut01ResolvedPorts"
+      ],
+      "error_chain": [
+        "CompositionRootError01UnboundPort"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:App->CompositionRoot"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/composition-root/client-composition-root.test.ts",
+        "src/lib/composition-root/client-composition-root-ownership.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client.app_shell_to_input_normalizer",
+      "from_module": "client.app_shell",
+      "to_module": "client.input_normalizer",
+      "resource_from": "resource.platform_terminal_surface",
+      "resource_to": "resource.client_input_normalizer",
+      "via_resources": [],
+      "relation_status": "observer",
+      "owner_feature": "client.input_normalizer",
+      "allowed_callers": [
+        "src/pages/TerminalPage.tsx"
+      ],
+      "forbidden_callers": [
+        "src/server/**",
+        "src/contexts/**",
+        "src/hooks/**",
+        "src/lib/**"
+      ],
+      "request_chain": [
+        "InputNormalizerIn01CommittedText",
+        "InputNormalizerOut02NormalizedText"
+      ],
+      "response_chain": [
+        "InputNormalizerOut02NormalizedText"
+      ],
+      "error_chain": [
+        "InputNormalizerError01InvalidText"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:TerminalPage->InputNormalizerIn01CommittedText",
+        "android_mainline:InputNormalizerIn01CommittedText->InputNormalizerOut02NormalizedText"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/input-normalizer-ownership.test.ts",
+        "src/lib/terminal-input-normalization.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client.dom_renderer_to_input_normalizer",
+      "from_module": "client.dom_renderer",
+      "to_module": "client.input_normalizer",
+      "resource_from": "resource.renderer_window",
+      "resource_to": "resource.client_input_normalizer",
+      "via_resources": [],
+      "relation_status": "observer",
+      "owner_feature": "client.input_normalizer",
+      "allowed_callers": [
+        "src/components/TerminalView.tsx"
+      ],
+      "forbidden_callers": [
+        "src/server/**",
+        "src/contexts/**",
+        "src/hooks/**",
+        "src/pages/**",
+        "src/lib/**"
+      ],
+      "request_chain": [
+        "InputNormalizerIn01CommittedText",
+        "InputNormalizerOut02NormalizedText"
+      ],
+      "response_chain": [
+        "InputNormalizerOut02NormalizedText"
+      ],
+      "error_chain": [
+        "InputNormalizerError01InvalidText"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:TerminalView->InputNormalizerIn01CommittedText",
+        "android_mainline:InputNormalizerIn01CommittedText->InputNormalizerOut02NormalizedText"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/input-normalizer-ownership.test.ts",
+        "src/lib/terminal-input-normalization.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client.composition_root_to_plugin_host",
+      "from_module": "client.composition_root",
+      "to_module": "client.plugin_host",
+      "resource_from": "resource.client_composition_root",
+      "resource_to": "resource.client_plugin_host",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "client.composition_root",
+      "allowed_callers": [
+        "src/lib/composition-root/client-composition-root.ts",
+        "src/App.tsx"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**",
+        "src/server/**",
+        "src/contexts/**",
+        "src/hooks/**"
+      ],
+      "request_chain": [
+        "CompositionRootIn02BindPorts",
+        "CompositionRootIn03ResolvePluginHost"
+      ],
+      "response_chain": [
+        "CompositionRootOut02PluginHostBound"
+      ],
+      "error_chain": [
+        "CompositionRootError02DuplicatePort"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:CompositionRoot->PluginHost"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/module-import-graph-truth.test.ts",
+        "src/lib/composition-root/client-composition-root.test.ts",
+        "src/lib/composition-root/client-composition-root-ownership.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client.plugin_host_to_capability_registry",
+      "from_module": "client.plugin_host",
+      "to_module": "shared.plugin_contract",
+      "resource_from": "resource.client_plugin_host",
+      "resource_to": "resource.plugin_capability_registry",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "client.plugin_host",
+      "allowed_callers": [
+        "src/lib/plugin-host/plugin-host-runtime.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**",
+        "src/server/**",
+        "src/plugins/**"
+      ],
+      "request_chain": [
+        "PluginCapabilityIn01Install",
+        "PluginCapabilityIn02Resolve"
+      ],
+      "response_chain": [
+        "PluginCapabilityOut01Bound"
+      ],
+      "error_chain": [
+        "PluginCapabilityError01Duplicate",
+        "PluginCapabilityError02Undeclared"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:App->PluginHost",
+        "android_mainline:PluginHost->CapabilityRegistry"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/plugin-host/plugin-host-runtime.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client.plugin_host_to_ui_slot_registry",
+      "from_module": "client.plugin_host",
+      "to_module": "shared.plugin_contract",
+      "resource_from": "resource.client_plugin_host",
+      "resource_to": "resource.plugin_ui_slot_registry",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "client.plugin_host",
+      "allowed_callers": [
+        "src/lib/plugin-host/plugin-host-runtime.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**",
+        "src/server/**",
+        "src/plugins/**",
+        "src/contexts/**"
+      ],
+      "request_chain": [
+        "UiSlotIn01Register",
+        "UiSlotIn02Resolve"
+      ],
+      "response_chain": [
+        "UiSlotOut01Bound"
+      ],
+      "error_chain": [
+        "UiSlotError01Duplicate",
+        "UiSlotError02Unavailable"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:PluginHost->UiSlotRegistry"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/plugin-host/plugin-host-runtime.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client.plugin_host_to_debug_console_ui",
+      "from_module": "client.plugin_host",
+      "to_module": "client.debug_console",
+      "resource_from": "resource.client_plugin_host",
+      "resource_to": "resource.debug_console_ui_contract",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "client.debug_console",
+      "allowed_callers": [
+        "src/lib/plugin-host/debug-console-ui-plugin.tsx"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**",
+        "src/server/**",
+        "src/plugins/**",
+        "src/contexts/**",
+        "src/hooks/**"
+      ],
+      "request_chain": [
+        "DebugConsoleIn01UiSlotProvide",
+        "DebugConsoleIn02OverlayRender"
+      ],
+      "response_chain": [
+        "DebugConsoleOut01SlotRegistered"
+      ],
+      "error_chain": [
+        "DebugConsoleError01DuplicateSlot",
+        "DebugConsoleError02UnavailableSlot"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:PluginHost->DebugConsoleUiPlugin",
+        "android_mainline:DebugConsoleUiPlugin->DebugConsoleContract",
+        "android_mainline:DebugConsoleUiPlugin->TerminalDebugOverlay"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/plugin-host/plugin-host-runtime.test.ts",
+        "src/pages/TerminalPageDebugOverlay.test.tsx",
+        "src/pages/TerminalPage.render-scope.test.tsx",
+        "src/pages/TerminalPage.remote-window-overlay.test.tsx"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client.app_shell_to_debug_console_ui",
+      "from_module": "client.app_shell",
+      "to_module": "client.debug_console",
+      "resource_from": "resource.platform_terminal_surface",
+      "resource_to": "resource.debug_console_ui_contract",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "client.debug_console",
+      "allowed_callers": [
+        "src/App.tsx",
+        "src/pages/TerminalPage.tsx"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/contexts/**",
+        "src/hooks/**",
+        "src/lib/**",
+        "src/plugins/**",
+        "src/server/**"
+      ],
+      "request_chain": [
+        "DebugConsoleIn01SlotRender",
+        "DebugConsoleIn02TerminalProjection"
+      ],
+      "response_chain": [
+        "DebugConsoleOut01OverlayProjected"
+      ],
+      "error_chain": [
+        "DebugConsoleError01SlotMissing"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:App->DebugConsoleContract",
+        "android_mainline:TerminalPage->TerminalDebugOverlay"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/plugin-host/plugin-host-runtime.test.ts",
+        "src/pages/TerminalPageDebugOverlay.test.tsx",
+        "src/pages/TerminalPage.render-scope.test.tsx",
+        "src/pages/TerminalPage.remote-window-overlay.test.tsx"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client.plugin_host_to_session_drawer_ui",
+      "from_module": "client.plugin_host",
+      "to_module": "client.session_drawer_ui",
+      "resource_from": "resource.client_plugin_host",
+      "resource_to": "resource.session_drawer_ui_contract",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "client.session_drawer_ui",
+      "allowed_callers": [
+        "src/lib/plugin-host/session-drawer-ui-plugin.tsx"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**",
+        "src/server/**",
+        "src/plugins/**",
+        "src/contexts/**",
+        "src/hooks/**"
+      ],
+      "request_chain": [
+        "SessionDrawerIn01UiSlotProvide",
+        "SessionDrawerIn02DrawerRender"
+      ],
+      "response_chain": [
+        "SessionDrawerOut01SlotRegistered"
+      ],
+      "error_chain": [
+        "SessionDrawerError01DuplicateSlot",
+        "SessionDrawerError02UnavailableSlot"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:PluginHost->SessionDrawerUiPlugin",
+        "android_mainline:SessionDrawerUiPlugin->SessionDrawerContract",
+        "android_mainline:SessionDrawerUiPlugin->TerminalSessionDrawer"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/plugin-host/plugin-host-runtime.test.ts",
+        "src/pages/TerminalPage.session-drawer.test.tsx",
+        "src/pages/TerminalPage.session-preview.test.tsx",
+        "src/pages/TerminalPage.tab-isolation.test.tsx"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client.app_shell_to_session_drawer_ui",
+      "from_module": "client.app_shell",
+      "to_module": "client.session_drawer_ui",
+      "resource_from": "resource.platform_terminal_surface",
+      "resource_to": "resource.session_drawer_ui_contract",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "client.session_drawer_ui",
+      "allowed_callers": [
+        "src/App.tsx",
+        "src/pages/TerminalPage.tsx"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/contexts/**",
+        "src/hooks/**",
+        "src/lib/**",
+        "src/plugins/**",
+        "src/server/**"
+      ],
+      "request_chain": [
+        "SessionDrawerIn01SlotRender",
+        "SessionDrawerIn02TerminalProjection"
+      ],
+      "response_chain": [
+        "SessionDrawerOut01DrawerProjected"
+      ],
+      "error_chain": [
+        "SessionDrawerError01SlotMissing"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:App->SessionDrawerContract",
+        "android_mainline:TerminalPage->SessionDrawerContract"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/plugin-host/plugin-host-runtime.test.ts",
+        "src/pages/TerminalPage.session-drawer.test.tsx",
+        "src/pages/TerminalPage.session-preview.test.tsx",
+        "src/pages/TerminalPage.tab-isolation.test.tsx",
+        "src/App.dynamic-refresh.test.tsx"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client.plugin_host_to_file_browser_ui",
+      "from_module": "client.plugin_host",
+      "to_module": "client.file_browser",
+      "resource_from": "resource.client_plugin_host",
+      "resource_to": "resource.file_browser_ui_contract",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "client.file_browser_ui",
+      "allowed_callers": [
+        "src/lib/plugin-host/file-browser-ui-plugin.tsx"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**",
+        "src/server/**",
+        "src/plugins/**",
+        "src/contexts/**",
+        "src/hooks/**"
+      ],
+      "request_chain": [
+        "FileBrowserIn01UiSlotProvide",
+        "FileBrowserIn02SheetRender"
+      ],
+      "response_chain": [
+        "FileBrowserOut01SlotRegistered"
+      ],
+      "error_chain": [
+        "FileBrowserError01DuplicateSlot",
+        "FileBrowserError02UnavailableSlot"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:PluginHost->FileBrowserUiPlugin",
+        "android_mainline:FileBrowserUiPlugin->FileBrowserContract",
+        "android_mainline:FileBrowserUiPlugin->FileTransferSheetPluginRender"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/plugin-host/plugin-host-runtime.test.ts",
+        "src/lib/plugin-file-browser/file-browser-ui-ownership.test.ts",
+        "src/pages/TerminalPage.render-isolation.test.tsx"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client.app_shell_to_file_browser_ui",
+      "from_module": "client.app_shell",
+      "to_module": "client.file_browser",
+      "resource_from": "resource.platform_terminal_surface",
+      "resource_to": "resource.file_browser_ui_contract",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "client.file_browser_ui",
+      "allowed_callers": [
+        "src/App.tsx",
+        "src/pages/TerminalPage.tsx"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/contexts/**",
+        "src/hooks/**",
+        "src/lib/**",
+        "src/plugins/**",
+        "src/server/**"
+      ],
+      "request_chain": [
+        "FileBrowserIn01SlotRender",
+        "FileBrowserIn02TerminalProjection"
+      ],
+      "response_chain": [
+        "FileBrowserOut01SheetProjected"
+      ],
+      "error_chain": [
+        "FileBrowserError01SlotMissing"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:App->FileBrowserContract",
+        "android_mainline:TerminalPage->FileBrowserContract"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/plugin-host/plugin-host-runtime.test.ts",
+        "src/lib/plugin-file-browser/file-browser-ui-ownership.test.ts",
+        "src/pages/TerminalPage.render-isolation.test.tsx",
+        "src/App.dynamic-refresh.test.tsx"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client.plugin_host_to_settings_update_ui",
+      "from_module": "client.plugin_host",
+      "to_module": "client.settings_update",
+      "resource_from": "resource.client_plugin_host",
+      "resource_to": "resource.settings_update_ui_contract",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "client.settings_update_ui",
+      "allowed_callers": [
+        "src/lib/plugin-host/settings-update-ui-plugin.tsx"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**",
+        "src/server/**",
+        "src/plugins/**",
+        "src/contexts/**",
+        "src/hooks/**"
+      ],
+      "request_chain": [
+        "SettingsUpdateIn01UiSlotProvide",
+        "SettingsUpdateIn02SectionRender"
+      ],
+      "response_chain": [
+        "SettingsUpdateOut01SlotRegistered"
+      ],
+      "error_chain": [
+        "SettingsUpdateError01DuplicateSlot",
+        "SettingsUpdateError02UnavailableSlot"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:PluginHost->SettingsUpdateUiPlugin",
+        "android_mainline:SettingsUpdateUiPlugin->SettingsUpdateContract",
+        "android_mainline:SettingsUpdateUiPlugin->AppUpdateSectionPluginRender"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/plugin-host/plugin-host-runtime.test.ts",
+        "src/lib/plugin-settings-update/settings-update-ui-ownership.test.ts",
+        "src/pages/SettingsPage.plugin-render.test.tsx"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client.app_shell_to_settings_update_ui",
+      "from_module": "client.app_shell",
+      "to_module": "client.settings_update",
+      "resource_from": "resource.platform_terminal_surface",
+      "resource_to": "resource.settings_update_ui_contract",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "client.settings_update_ui",
+      "allowed_callers": [
+        "src/App.tsx",
+        "src/pages/SettingsPage.tsx"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/contexts/**",
+        "src/hooks/**",
+        "src/lib/**",
+        "src/plugins/**",
+        "src/server/**"
+      ],
+      "request_chain": [
+        "SettingsUpdateIn01SlotRender",
+        "SettingsUpdateIn02SettingsProjection"
+      ],
+      "response_chain": [
+        "SettingsUpdateOut01SectionProjected"
+      ],
+      "error_chain": [
+        "SettingsUpdateError01SlotMissing"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:App->SettingsUpdateContract",
+        "android_mainline:SettingsPage->SettingsUpdateContract"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/plugin-host/plugin-host-runtime.test.ts",
+        "src/lib/plugin-settings-update/settings-update-ui-ownership.test.ts",
+        "src/pages/SettingsPage.plugin-render.test.tsx",
+        "src/App.dynamic-refresh.test.tsx"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client.plugin_host_to_remote_window_ui",
+      "from_module": "client.plugin_host",
+      "to_module": "client.remote_window_ui",
+      "resource_from": "resource.client_plugin_host",
+      "resource_to": "resource.remote_window_ui_contract",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "client.remote_window_ui",
+      "allowed_callers": [
+        "src/lib/plugin-host/remote-window-ui-plugin.tsx"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**",
+        "src/server/**",
+        "src/plugins/**",
+        "src/contexts/**",
+        "src/hooks/**"
+      ],
+      "request_chain": [
+        "RemoteWindowUiIn01UiSlotProvide",
+        "RemoteWindowUiIn02OverlayRender"
+      ],
+      "response_chain": [
+        "RemoteWindowUiOut01SlotRegistered"
+      ],
+      "error_chain": [
+        "RemoteWindowUiError01DuplicateSlot",
+        "RemoteWindowUiError02UnavailableSlot"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:PluginHost->RemoteWindowUiPlugin",
+        "android_mainline:RemoteWindowUiPlugin->RemoteWindowContract",
+        "android_mainline:RemoteWindowUiPlugin->RemoteWindowOverlayPluginRender"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/plugin-host/plugin-host-runtime.test.ts",
+        "src/lib/plugin-remote-window/remote-window-ui-ownership.test.ts",
+        "src/pages/TerminalPage.remote-window-overlay.test.tsx",
+        "src/pages/TerminalPage.android-ime.test.tsx"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client.app_shell_to_remote_window_ui",
+      "from_module": "client.app_shell",
+      "to_module": "client.remote_window_ui",
+      "resource_from": "resource.platform_terminal_surface",
+      "resource_to": "resource.remote_window_ui_contract",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "client.remote_window_ui",
+      "allowed_callers": [
+        "src/App.tsx",
+        "src/pages/TerminalPage.tsx"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/contexts/**",
+        "src/hooks/**",
+        "src/lib/**",
+        "src/plugins/**",
+        "src/server/**"
+      ],
+      "request_chain": [
+        "RemoteWindowUiIn01SlotRender",
+        "RemoteWindowUiIn02TerminalProjection"
+      ],
+      "response_chain": [
+        "RemoteWindowUiOut01OverlayProjected"
+      ],
+      "error_chain": [
+        "RemoteWindowUiError01SlotMissing"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:App->RemoteWindowContract",
+        "android_mainline:TerminalPage->RemoteWindowContract"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/plugin-host/plugin-host-runtime.test.ts",
+        "src/lib/plugin-remote-window/remote-window-ui-ownership.test.ts",
+        "src/pages/TerminalPage.remote-window-overlay.test.tsx",
+        "src/pages/TerminalPage.android-ime.test.tsx",
+        "src/App.dynamic-refresh.test.tsx"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client.remote_window_ui_to_remote_window_overlay",
+      "from_module": "client.remote_window_ui",
+      "to_module": "client.remote_window_overlay",
+      "resource_from": "resource.remote_window_ui_contract",
+      "resource_to": "resource.remote_window_overlay",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "client.remote_window_ui",
+      "allowed_callers": [
+        "src/lib/plugin-remote-window/remote-window-contract.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**",
+        "src/contexts/**",
+        "src/hooks/**",
+        "src/plugins/**",
+        "src/server/**",
+        "src/lib/plugin-host/**"
+      ],
+      "request_chain": [
+        "RemoteWindowUiIn03ContractTypeImport",
+        "RemoteWindowUiIn04OverlayProjection"
+      ],
+      "response_chain": [
+        "RemoteWindowUiOut02ContractBound"
+      ],
+      "error_chain": [
+        "RemoteWindowUiError03OverlayContractMissing"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:RemoteWindowContract->RemoteWindowOverlay"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/module-import-graph-truth.test.ts",
+        "src/lib/plugin-remote-window/remote-window-ui-ownership.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client.plugin_host_to_quickbar_ui",
+      "from_module": "client.plugin_host",
+      "to_module": "client.quickbar_ui",
+      "resource_from": "resource.client_plugin_host",
+      "resource_to": "resource.quickbar_ui_contract",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "client.quickbar_ui",
+      "allowed_callers": [
+        "src/lib/plugin-host/quickbar-ui-plugin.tsx"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**",
+        "src/server/**",
+        "src/plugins/**",
+        "src/contexts/**",
+        "src/hooks/**"
+      ],
+      "request_chain": [
+        "QuickBarUiIn01UiSlotProvide",
+        "QuickBarUiIn02QuickBarRender"
+      ],
+      "response_chain": [
+        "QuickBarUiOut01SlotRegistered"
+      ],
+      "error_chain": [
+        "QuickBarUiError01DuplicateSlot",
+        "QuickBarUiError02UnavailableSlot"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:PluginHost->QuickBarUiPlugin",
+        "android_mainline:QuickBarUiPlugin->QuickBarContract",
+        "android_mainline:QuickBarUiPlugin->TerminalQuickBarPluginRender"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/plugin-host/plugin-host-runtime.test.ts",
+        "src/lib/plugin-quickbar/quickbar-ui-ownership.test.ts",
+        "src/pages/TerminalPage.render-isolation.test.tsx",
+        "src/App.dynamic-refresh.test.tsx"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client.app_shell_to_quickbar_ui",
+      "from_module": "client.app_shell",
+      "to_module": "client.quickbar_ui",
+      "resource_from": "resource.platform_terminal_surface",
+      "resource_to": "resource.quickbar_ui_contract",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "client.quickbar_ui",
+      "allowed_callers": [
+        "src/App.tsx",
+        "src/pages/TerminalPage.tsx"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/contexts/**",
+        "src/hooks/**",
+        "src/lib/**",
+        "src/plugins/**",
+        "src/server/**"
+      ],
+      "request_chain": [
+        "QuickBarUiIn01SlotRender",
+        "QuickBarUiIn02TerminalProjection"
+      ],
+      "response_chain": [
+        "QuickBarUiOut01QuickBarProjected"
+      ],
+      "error_chain": [
+        "QuickBarUiError01SlotMissing"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:App->QuickBarContract",
+        "android_mainline:TerminalPage->QuickBarContract"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/plugin-host/plugin-host-runtime.test.ts",
+        "src/lib/plugin-quickbar/quickbar-ui-ownership.test.ts",
+        "src/pages/TerminalPage.render-isolation.test.tsx",
+        "src/App.dynamic-refresh.test.tsx"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client.quickbar_ui_to_input_runtime",
+      "from_module": "client.quickbar_ui",
+      "to_module": "client.input_runtime",
+      "resource_from": "resource.quickbar_ui_contract",
+      "resource_to": "resource.platform_input_channel",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "client.quickbar_ui",
+      "allowed_callers": [
+        "src/lib/plugin-quickbar/quickbar-contract.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**",
+        "src/contexts/**",
+        "src/hooks/**",
+        "src/plugins/**",
+        "src/server/**",
+        "src/lib/plugin-host/**"
+      ],
+      "request_chain": [
+        "QuickBarUiIn03ContractTypeImport",
+        "QuickBarUiIn04InputProjection"
+      ],
+      "response_chain": [
+        "QuickBarUiOut02ContractBound"
+      ],
+      "error_chain": [
+        "QuickBarUiError03InputContractMissing"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:QuickBarContract->TerminalQuickBarPluginRender"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/module-import-graph-truth.test.ts",
+        "src/lib/plugin-quickbar/quickbar-ui-ownership.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client.plugin_host_to_terminal_shell_ui",
+      "from_module": "client.plugin_host",
+      "to_module": "client.terminal_shell_ui",
+      "resource_from": "resource.client_plugin_host",
+      "resource_to": "resource.terminal_shell_ui_contract",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "client.terminal_shell_ui",
+      "allowed_callers": [
+        "src/lib/plugin-host/terminal-shell-ui-plugin.tsx"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**",
+        "src/server/**",
+        "src/plugins/**",
+        "src/contexts/**",
+        "src/hooks/**"
+      ],
+      "request_chain": [
+        "TerminalShellUiIn01UiSlotProvide"
+      ],
+      "response_chain": [
+        "TerminalShellUiOut01SlotRegistered"
+      ],
+      "error_chain": [
+        "TerminalShellUiError01DuplicateSlot"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:PluginHost->TerminalShellUiPlugin"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/plugin-host/plugin-host-runtime.test.ts",
+        "src/lib/plugin-terminal-shell/terminal-shell-ui-ownership.test.ts",
+        "src/pages/TerminalPage.render-isolation.test.tsx",
+        "src/App.dynamic-refresh.test.tsx"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client.app_shell_to_terminal_shell_ui",
+      "from_module": "client.app_shell",
+      "to_module": "client.terminal_shell_ui",
+      "resource_from": "resource.platform_terminal_surface",
+      "resource_to": "resource.terminal_shell_ui_contract",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "client.terminal_shell_ui",
+      "allowed_callers": [
+        "src/App.tsx",
+        "src/pages/TerminalPage.tsx"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/contexts/**",
+        "src/hooks/**",
+        "src/lib/**",
+        "src/plugins/**",
+        "src/server/**"
+      ],
+      "request_chain": [
+        "TerminalShellUiIn02SlotRender",
+        "TerminalShellUiIn03TerminalProjection"
+      ],
+      "response_chain": [
+        "TerminalShellUiOut02ShellProjected"
+      ],
+      "error_chain": [
+        "TerminalShellUiError02SlotMissing"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:App->TerminalShellContract",
+        "android_mainline:TerminalPage->TerminalShellContract"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/plugin-host/plugin-host-runtime.test.ts",
+        "src/lib/plugin-terminal-shell/terminal-shell-ui-ownership.test.ts",
+        "src/pages/TerminalPage.render-isolation.test.tsx",
+        "src/App.dynamic-refresh.test.tsx"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client.terminal_shell_ui_to_terminal_shell",
+      "from_module": "client.terminal_shell_ui",
+      "to_module": "client.terminal_shell",
+      "resource_from": "resource.terminal_shell_ui_contract",
+      "resource_to": "resource.ui_projection",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "client.terminal_shell_ui",
+      "allowed_callers": [
+        "src/lib/plugin-terminal-shell/terminal-shell-contract.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**",
+        "src/contexts/**",
+        "src/hooks/**",
+        "src/plugins/**",
+        "src/server/**",
+        "src/lib/plugin-host/**"
+      ],
+      "request_chain": [
+        "TerminalShellUiIn04ContractTypeImport",
+        "TerminalShellUiIn05ShellProjection"
+      ],
+      "response_chain": [
+        "TerminalShellUiOut03ContractBound"
+      ],
+      "error_chain": [
+        "TerminalShellUiError03ShellProjectionMissing"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:TerminalShellContract->StageShell"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/module-import-graph-truth.test.ts",
+        "src/lib/plugin-terminal-shell/terminal-shell-ui-ownership.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client.plugin_host_to_terminal_shell",
+      "from_module": "client.plugin_host",
+      "to_module": "client.terminal_shell",
+      "resource_from": "resource.client_plugin_host",
+      "resource_to": "resource.ui_projection",
+      "via_resources": [
+        "resource.plugin_ui_slot_registry",
+        "resource.terminal_shell_ui_contract"
+      ],
+      "relation_status": "via",
+      "owner_feature": "client.terminal_shell_ui",
+      "allowed_callers": [
+        "src/lib/plugin-host/terminal-shell-ui-plugin.tsx"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**",
+        "src/server/**",
+        "src/plugins/**",
+        "src/contexts/**",
+        "src/hooks/**"
+      ],
+      "request_chain": [
+        "TerminalShellUiIn06ShellComponentsRender"
+      ],
+      "response_chain": [
+        "TerminalShellUiOut04ShellComponentsProjected"
+      ],
+      "error_chain": [
+        "TerminalShellUiError04ShellComponentsUnavailable"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:TerminalShellUiPlugin->StageShell"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/module-import-graph-truth.test.ts",
+        "src/lib/plugin-host/plugin-host-runtime.test.ts",
+        "src/lib/plugin-terminal-shell/terminal-shell-ui-ownership.test.ts"
+      ],
+      "status": "active"
+    }
+  ],
+  "import_edges_description": "Module-level import allowlist derived from the real src import graph. Gate: src/lib/module-import-graph-truth.test.ts. Every cross-module import edge in code must appear here, and every entry here must exist in code (lockstep both directions). status=pending_removal marks a known violation that must trend to zero; adding new pending_removal entries requires an explicit decision doc.",
+  "import_edges": [
+    {
+      "from_module": "client.app_shell",
+      "to_module": "client.connection_home",
+      "status": "active"
+    },
+    {
+      "from_module": "client.app_shell",
+      "to_module": "client.composition_root",
+      "status": "active"
+    },
+    {
+      "from_module": "client.app_shell",
+      "to_module": "client.control_center",
+      "status": "active"
+    },
+    {
+      "from_module": "client.app_shell",
+      "to_module": "client.plugin_host",
+      "status": "active"
+    },
+    {
+      "from_module": "client.app_shell",
+      "to_module": "client.daemon_connection",
+      "status": "active"
+    },
+    {
+      "from_module": "client.app_shell",
+      "to_module": "client.file_browser",
+      "status": "active"
+    },
+    {
+      "from_module": "client.app_shell",
+      "to_module": "client.input_runtime",
+      "status": "active"
+    },
+    {
+      "from_module": "client.app_shell",
+      "to_module": "client.remote_window_overlay",
+      "status": "active"
+    },
+    {
+      "from_module": "client.app_shell",
+      "to_module": "client.renderer_window",
+      "status": "active"
+    },
+    {
+      "from_module": "client.app_shell",
+      "to_module": "client.runtime",
+      "status": "active"
+    },
+    {
+      "from_module": "client.app_shell",
+      "to_module": "client.session_drawer_preview",
+      "status": "active"
+    },
+    {
+      "from_module": "client.app_shell",
+      "to_module": "client.session_runtime",
+      "status": "active"
+    },
+    {
+      "from_module": "client.app_shell",
+      "to_module": "client.settings_update",
+      "status": "active"
+    },
+    {
+      "from_module": "client.app_shell",
+      "to_module": "client.remote_window_ui",
+      "status": "active"
+    },
+    {
+      "from_module": "client.app_shell",
+      "to_module": "observability.debug_channel",
+      "status": "active"
+    },
+    {
+      "from_module": "client.app_shell",
+      "to_module": "shared.connection_types",
+      "status": "active"
+    },
+    {
+      "from_module": "client.app_shell",
+      "to_module": "shared.pane_layout",
+      "status": "active"
+    },
+    {
+      "from_module": "client.app_shell",
+      "to_module": "shared.terminal_types",
+      "status": "active"
+    },
+    {
+      "from_module": "client.app_shell",
+      "to_module": "client.terminal_shell",
+      "status": "active"
+    },
+    {
+      "from_module": "client.buffer_frame_assembly",
+      "to_module": "shared.terminal_types",
+      "status": "active"
+    },
+    {
+      "from_module": "client.wire_ingress",
+      "to_module": "shared.terminal_types",
+      "status": "active"
+    },
+    {
+      "from_module": "client.sparse_buffer",
+      "to_module": "shared.terminal_types",
+      "status": "active"
+    },
+    {
+      "from_module": "client.buffer_store",
+      "to_module": "client.wire_ingress",
+      "status": "active"
+    },
+    {
+      "from_module": "client.buffer_store",
+      "to_module": "client.sparse_buffer",
+      "status": "active"
+    },
+    {
+      "from_module": "client.session_runtime",
+      "to_module": "client.wire_ingress",
+      "status": "active"
+    },
+    {
+      "from_module": "client.buffer_store",
+      "to_module": "client.daemon_connection",
+      "status": "active"
+    },
+    {
+      "from_module": "client.buffer_store",
+      "to_module": "client.buffer_frame_assembly",
+      "status": "active"
+    },
+    {
+      "from_module": "client.buffer_store",
+      "to_module": "observability.debug_channel",
+      "status": "active"
+    },
+    {
+      "from_module": "client.buffer_store",
+      "to_module": "shared.terminal_types",
+      "status": "active"
+    },
+    {
+      "from_module": "client.connection_home",
+      "to_module": "client.runtime",
+      "status": "active"
+    },
+    {
+      "from_module": "client.connection_home",
+      "to_module": "client.daemon_connection",
+      "status": "active"
+    },
+    {
+      "from_module": "client.connection_home",
+      "to_module": "observability.debug_channel",
+      "status": "active"
+    },
+    {
+      "from_module": "client.connection_home",
+      "to_module": "shared.connection_types",
+      "status": "active"
+    },
+    {
+      "from_module": "client.connection_home",
+      "to_module": "shared.terminal_types",
+      "status": "active"
+    },
+    {
+      "from_module": "client.daemon_connection",
+      "to_module": "shared.connection_types",
+      "status": "active"
+    },
+    {
+      "from_module": "client.daemon_connection",
+      "to_module": "shared.terminal_types",
+      "status": "active"
+    },
+    {
+      "from_module": "client.file_browser",
+      "to_module": "client.daemon_connection",
+      "status": "active"
+    },
+    {
+      "from_module": "client.file_browser",
+      "to_module": "client.runtime",
+      "status": "active"
+    },
+    {
+      "from_module": "client.file_browser",
+      "to_module": "shared.terminal_types",
+      "status": "active"
+    },
+    {
+      "from_module": "client.input_runtime",
+      "to_module": "client.runtime",
+      "status": "active"
+    },
+    {
+      "from_module": "client.input_runtime",
+      "to_module": "shared.terminal_types",
+      "status": "active"
+    },
+    {
+      "from_module": "client.remote_window_overlay",
+      "to_module": "client.daemon_connection",
+      "status": "active"
+    },
+    {
+      "from_module": "client.remote_window_overlay",
+      "to_module": "client.runtime",
+      "status": "active"
+    },
+    {
+      "from_module": "client.remote_window_overlay",
+      "to_module": "shared.connection_types",
+      "status": "active"
+    },
+    {
+      "from_module": "client.remote_window_overlay",
+      "to_module": "shared.terminal_types",
+      "status": "active"
+    },
+    {
+      "from_module": "client.renderer_window",
+      "to_module": "client.buffer_store",
+      "status": "active"
+    },
+    {
+      "from_module": "client.renderer_window",
+      "to_module": "observability.debug_channel",
+      "status": "active"
+    },
+    {
+      "from_module": "client.renderer_window",
+      "to_module": "shared.connection_types",
+      "status": "active"
+    },
+    {
+      "from_module": "client.renderer_window",
+      "to_module": "shared.terminal_types",
+      "status": "active"
+    },
+    {
+      "from_module": "client.renderer_window",
+      "to_module": "client.sparse_buffer",
+      "status": "active"
+    },
+    {
+      "from_module": "client.dom_renderer",
+      "to_module": "client.renderer_window",
+      "status": "active"
+    },
+    {
+      "from_module": "client.dom_renderer",
+      "to_module": "client.runtime",
+      "status": "active"
+    },
+    {
+      "from_module": "client.dom_renderer",
+      "to_module": "shared.terminal_types",
+      "status": "active"
+    },
+    {
+      "from_module": "client.session_drawer_preview",
+      "to_module": "client.dom_renderer",
+      "status": "active"
+    },
+    {
+      "from_module": "client.terminal_shell",
+      "to_module": "client.input_runtime",
+      "status": "active"
+    },
+    {
+      "from_module": "client.terminal_shell",
+      "to_module": "client.dom_renderer",
+      "status": "active"
+    },
+    {
+      "from_module": "client.terminal_shell",
+      "to_module": "client.renderer_window",
+      "status": "active"
+    },
+    {
+      "from_module": "client.terminal_shell",
+      "to_module": "client.session_drawer_preview",
+      "status": "active"
+    },
+    {
+      "from_module": "client.terminal_shell",
+      "to_module": "client.runtime",
+      "status": "active"
+    },
+    {
+      "from_module": "client.terminal_shell",
+      "to_module": "shared.terminal_types",
+      "status": "active"
+    },
+    {
+      "from_module": "client.terminal_shell",
+      "to_module": "shared.pane_layout",
+      "status": "active"
+    },
+    {
+      "from_module": "client.terminal_shell",
+      "to_module": "shared.connection_types",
+      "status": "active"
+    },
+    {
+      "from_module": "client.runtime",
+      "to_module": "observability.debug_channel",
+      "status": "active"
+    },
+    {
+      "from_module": "client.runtime",
+      "to_module": "shared.terminal_types",
+      "status": "active"
+    },
+    {
+      "from_module": "client.session_drawer_preview",
+      "to_module": "client.renderer_window",
+      "status": "active"
+    },
+    {
+      "from_module": "client.session_drawer_preview",
+      "to_module": "client.runtime",
+      "status": "active"
+    },
+    {
+      "from_module": "client.session_drawer_preview",
+      "to_module": "client.session_runtime",
+      "status": "active"
+    },
+    {
+      "from_module": "client.session_drawer_preview",
+      "to_module": "shared.connection_types",
+      "status": "active"
+    },
+    {
+      "from_module": "client.session_drawer_preview",
+      "to_module": "shared.pane_layout",
+      "status": "active"
+    },
+    {
+      "from_module": "client.session_drawer_preview",
+      "to_module": "shared.terminal_types",
+      "status": "active"
+    },
+    {
+      "from_module": "client.session_runtime",
+      "to_module": "client.buffer_store",
+      "status": "active"
+    },
+    {
+      "from_module": "client.session_runtime",
+      "to_module": "client.buffer_frame_assembly",
+      "status": "active"
+    },
+    {
+      "from_module": "client.session_runtime",
+      "to_module": "client.connection_home",
+      "status": "active"
+    },
+    {
+      "from_module": "client.session_runtime",
+      "to_module": "client.daemon_connection",
+      "status": "active"
+    },
+    {
+      "from_module": "client.session_runtime",
+      "to_module": "client.file_browser",
+      "status": "active"
+    },
+    {
+      "from_module": "client.session_runtime",
+      "to_module": "client.remote_window_overlay",
+      "status": "active"
+    },
+    {
+      "from_module": "client.session_runtime",
+      "to_module": "client.reliable_input",
+      "status": "active"
+    },
+    {
+      "from_module": "client.session_runtime",
+      "to_module": "client.renderer_window",
+      "status": "active"
+    },
+    {
+      "from_module": "client.session_runtime",
+      "to_module": "client.runtime",
+      "status": "active"
+    },
+    {
+      "from_module": "client.session_runtime",
+      "to_module": "observability.debug_channel",
+      "status": "active"
+    },
+    {
+      "from_module": "client.session_runtime",
+      "to_module": "shared.connection_types",
+      "status": "active"
+    },
+    {
+      "from_module": "client.session_runtime",
+      "to_module": "shared.terminal_types",
+      "status": "active"
+    },
+    {
+      "from_module": "client.session_runtime",
+      "to_module": "client.sparse_buffer",
+      "status": "active"
+    },
+    {
+      "from_module": "client.settings_update",
+      "to_module": "client.connection_home",
+      "status": "active"
+    },
+    {
+      "from_module": "client.settings_update",
+      "to_module": "client.runtime",
+      "status": "active"
+    },
+    {
+      "from_module": "client.settings_update",
+      "to_module": "shared.connection_types",
+      "status": "active"
+    },
+    {
+      "from_module": "client.settings_update",
+      "to_module": "shared.terminal_types",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.file_transfer",
+      "to_module": "daemon.runtime",
+      "status": "active",
+      "allowed_callers": [
+        "src/server/terminal-file-transfer-binary-runtime.ts",
+        "src/server/terminal-file-transfer-list-runtime.ts",
+        "src/server/terminal-file-transfer-message-runtime.ts",
+        "src/server/terminal-file-transfer-runtime.ts",
+        "src/server/terminal-file-transfer-types.ts"
+      ],
+      "allowed_callees": [
+        "src/server/terminal-runtime-types.ts"
+      ]
+    },
+    {
+      "from_module": "daemon.connection_gateway",
+      "to_module": "daemon.mirror_store",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.connection_gateway",
+      "to_module": "daemon.transport_subscriber",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.transport_subscriber",
+      "to_module": "daemon.attachment_delivery",
+      "status": "active",
+      "allowed_callers": [
+        "src/server/terminal-message-runtime.ts"
+      ],
+      "allowed_callees": [
+        "src/server/terminal-attachment-message-runtime.ts"
+      ]
+    },
+    {
+      "from_module": "daemon.attachment_delivery",
+      "to_module": "daemon.runtime",
+      "status": "active",
+      "allowed_callers": [
+        "src/server/terminal-attachment-message-runtime.ts"
+      ],
+      "allowed_callees": [
+        "src/server/terminal-runtime-types.ts"
+      ]
+    },
+    {
+      "from_module": "daemon.mirror_store",
+      "to_module": "daemon.runtime",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.mirror_writer",
+      "to_module": "daemon.source_adapter",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.mirror_writer",
+      "to_module": "daemon.runtime",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.terminal_backend",
+      "to_module": "daemon.source_adapter",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.runtime_entry",
+      "to_module": "daemon.runtime",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.runtime_entry",
+      "to_module": "daemon.mirror_writer",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.runtime_entry",
+      "to_module": "daemon.connection_gateway",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.runtime_entry",
+      "to_module": "daemon.file_transfer",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.runtime_entry",
+      "to_module": "daemon.mirror_store",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.runtime_entry",
+      "to_module": "daemon.remote_window_stream",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.runtime_entry",
+      "to_module": "daemon.schedule_runtime",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.runtime_entry",
+      "to_module": "daemon.terminal_backend",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.runtime_entry",
+      "to_module": "daemon.transport_subscriber",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.runtime_entry",
+      "to_module": "observability.debug_channel",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.schedule_runtime",
+      "to_module": "daemon.runtime",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.terminal_backend",
+      "to_module": "daemon.runtime",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.transport_subscriber",
+      "to_module": "daemon.file_transfer",
+      "status": "active",
+      "allowed_callers": [
+        "src/server/terminal-message-runtime.ts"
+      ],
+      "allowed_callees": [
+        "src/server/terminal-file-transfer-message-runtime.ts"
+      ]
+    },
+    {
+      "from_module": "daemon.transport_subscriber",
+      "to_module": "daemon.runtime",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.transport_subscriber",
+      "to_module": "daemon.remote_window_stream",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.transport_subscriber",
+      "to_module": "daemon.schedule_runtime",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.transport_subscriber",
+      "to_module": "daemon.input_queue",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.transport_subscriber",
+      "to_module": "daemon.control_gateway",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.control_gateway",
+      "to_module": "daemon.control_center",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.control_gateway",
+      "to_module": "daemon.schedule_runtime",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.control_gateway",
+      "to_module": "daemon.session_catalog",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.control_gateway",
+      "to_module": "daemon.runtime",
+      "status": "active"
+    },
+    {
+      "from_module": "observability.debug_channel",
+      "to_module": "shared.connection_types",
+      "status": "active"
+    },
+    {
+      "from_module": "observability.debug_channel",
+      "to_module": "shared.terminal_types",
+      "status": "active"
+    },
+    {
+      "from_module": "relay.account_directory",
+      "to_module": "shared.terminal_types",
+      "status": "active"
+    },
+    {
+      "from_module": "shared.terminal_types",
+      "to_module": "shared.connection_types",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.schedule_runtime",
+      "to_module": "daemon.session_idle_detection",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.schedule_runtime",
+      "to_module": "daemon.session_catalog",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.session_catalog",
+      "to_module": "daemon.runtime",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.session_catalog",
+      "to_module": "daemon.session_idle_detection",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.session_idle_detection",
+      "to_module": "daemon.runtime",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.runtime_entry",
+      "to_module": "daemon.session_idle_detection",
+      "status": "active"
+    },
+    {
+      "from_module": "client.reliable_input",
+      "to_module": "shared.terminal_types",
+      "status": "active"
+    },
+    {
+      "from_module": "client.reliable_input",
+      "to_module": "client.daemon_connection",
+      "status": "active"
+    },
+    {
+      "from_module": "client.file_browser",
+      "to_module": "client.reliable_input",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.runtime_entry",
+      "to_module": "daemon.attachment_delivery",
+      "status": "active",
+      "allowed_callers": [
+        "src/server/server.ts"
+      ],
+      "allowed_callees": [
+        "src/server/attachment-delivery-runtime.ts"
+      ],
+      "request_chain": [
+        "AttachmentHttpIn01AuthenticatedRequest",
+        "AttachmentIn02DeliveryOwner"
+      ],
+      "response_chain": [
+        "AttachmentOut03DurableManifestAndAssets"
+      ],
+      "error_chain": [
+        "AttachmentError01Rejected"
+      ],
+      "mainline_call_ids": [
+        "daemon_mainline:Http->AttachmentHttpIn01AuthenticatedRequest"
+      ]
+    },
+    {
+      "from_module": "client.remote_window_overlay",
+      "to_module": "client.remote_window_dual_stream_switch",
+      "status": "active"
+    },
+    {
+      "from_module": "client.remote_window_ui",
+      "to_module": "client.remote_window_overlay",
+      "status": "active"
+    },
+    {
+      "from_module": "client.daemon_connection",
+      "to_module": "client.terminal_channel_mux",
+      "status": "active"
+    },
+    {
+      "from_module": "client.session_runtime",
+      "to_module": "client.terminal_channel_mux",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.remote_window_stream",
+      "to_module": "shared.terminal_types",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.input_queue",
+      "to_module": "daemon.runtime",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.mirror_store",
+      "to_module": "daemon.input_queue",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.runtime_entry",
+      "to_module": "daemon.input_queue",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.channel_mux",
+      "to_module": "daemon.runtime",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.runtime_entry",
+      "to_module": "daemon.channel_mux",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.mirror_store",
+      "to_module": "daemon.buffer_publisher",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.buffer_publisher",
+      "to_module": "daemon.runtime",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.buffer_publisher",
+      "to_module": "daemon.transport_subscriber",
+      "status": "active"
+    },
+    {
+      "from_module": "client.app_shell",
+      "to_module": "client.debug_console",
+      "status": "active"
+    },
+    {
+      "from_module": "client.app_shell",
+      "to_module": "client.session_drawer_ui",
+      "status": "active"
+    },
+    {
+      "from_module": "client.plugin_host",
+      "to_module": "client.debug_console",
+      "status": "active"
+    },
+    {
+      "from_module": "client.plugin_host",
+      "to_module": "client.session_drawer_ui",
+      "status": "active"
+    },
+    {
+      "from_module": "client.plugin_host",
+      "to_module": "client.file_browser",
+      "status": "active"
+    },
+    {
+      "from_module": "client.plugin_host",
+      "to_module": "client.settings_update",
+      "status": "active"
+    },
+    {
+      "from_module": "client.plugin_host",
+      "to_module": "client.remote_window_ui",
+      "status": "active"
+    },
+    {
+      "from_module": "client.plugin_host",
+      "to_module": "client.quickbar_ui",
+      "status": "active"
+    },
+    {
+      "from_module": "client.plugin_host",
+      "to_module": "client.terminal_shell_ui",
+      "status": "active"
+    },
+    {
+      "from_module": "client.plugin_host",
+      "to_module": "client.terminal_shell",
+      "status": "active"
+    },
+    {
+      "from_module": "client.app_shell",
+      "to_module": "client.terminal_shell_ui",
+      "status": "active"
+    },
+    {
+      "from_module": "client.terminal_shell_ui",
+      "to_module": "client.terminal_shell",
+      "status": "active"
+    },
+    {
+      "from_module": "client.plugin_host",
+      "to_module": "client.input_runtime",
+      "status": "active"
+    },
+    {
+      "from_module": "client.quickbar_ui",
+      "to_module": "client.input_runtime",
+      "status": "active"
+    },
+    {
+      "from_module": "client.app_shell",
+      "to_module": "client.quickbar_ui",
+      "status": "active"
+    },
+    {
+      "from_module": "client.plugin_host",
+      "to_module": "client.remote_window_overlay",
+      "status": "active"
+    },
+    {
+      "from_module": "client.plugin_host",
+      "to_module": "client.session_drawer_preview",
+      "status": "active"
+    },
+    {
+      "from_module": "client.session_drawer_ui",
+      "to_module": "client.session_drawer_preview",
+      "status": "active"
+    },
+    {
+      "from_module": "client.debug_console",
+      "to_module": "client.terminal_shell",
+      "status": "active"
+    },
+    {
+      "from_module": "client.debug_console",
+      "to_module": "shared.terminal_types",
+      "status": "active"
+    },
+    {
+      "from_module": "client.app_shell",
+      "to_module": "client.input_normalizer",
+      "status": "active"
+    },
+    {
+      "from_module": "client.dom_renderer",
+      "to_module": "client.input_normalizer",
+      "status": "active"
+    },
+    {
+      "from_module": "shared.debug_contract",
+      "to_module": "shared.node_contract",
+      "status": "active"
+    },
+    {
+      "from_module": "shared.node_contract",
+      "to_module": "shared.control_contract",
+      "status": "active"
+    },
+    {
+      "from_module": "client.app_shell",
+      "to_module": "shared.control_contract",
+      "status": "active"
+    },
+    {
+      "from_module": "observability.debug_channel",
+      "to_module": "shared.debug_contract",
+      "status": "active"
+    },
+    {
+      "from_module": "observability.debug_channel",
+      "to_module": "shared.node_contract",
+      "status": "active"
+    },
+    {
+      "from_module": "client.control_center",
+      "to_module": "shared.control_contract",
+      "status": "active"
+    },
+    {
+      "from_module": "client.plugin_host",
+      "to_module": "shared.plugin_contract",
+      "status": "active"
+    },
+    {
+      "from_module": "client.plugin_host",
+      "to_module": "shared.control_contract",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.control_center",
+      "to_module": "shared.control_contract",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.control_gateway",
+      "to_module": "shared.control_contract",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.runtime_entry",
+      "to_module": "shared.debug_contract",
+      "status": "active"
+    }
+  ]
+}

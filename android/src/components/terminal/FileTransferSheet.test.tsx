@@ -2130,7 +2130,7 @@ describe("FileTransferSheet", () => {
 
   it("fails local edit-copy open visibly when edit-copy state cannot be persisted", async () => {
     const setItemSpy = vi
-      .spyOn(Storage.prototype, "setItem")
+      .spyOn(window.localStorage, "setItem")
       .mockImplementation(() => {
         throw new Error("quota exceeded");
       });

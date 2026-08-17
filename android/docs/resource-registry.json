@@ -3300,6 +3300,33 @@
       ]
     },
     {
+      "resource_id": "resource.shared_test_environment",
+      "resource_type": "test_environment_truth",
+      "identity": "Deterministic Vitest/jsdom browser Storage and environment bootstrap used by client tests",
+      "owner_feature": "mainline_source.android",
+      "truth_store": "src/vitest.setup.ts",
+      "allowed_operations": [
+        "provide_memory_storage",
+        "bootstrap_jsdom_test_environment"
+      ],
+      "direct_relations": [],
+      "indirect_relations": [],
+      "via_resources": [],
+      "forbidden_direct_relations": [
+        "resource.tmux_session",
+        "resource.mirror_store",
+        "resource.ui_projection"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/module-registry-truth.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/modules/project-modules.md"
+      ]
+    },
+    {
       "resource_id": "resource.relay_control_connection",
       "resource_type": "control_transport_truth",
       "identity": "Role-scoped persistent Relay control WebSocket for one authenticated daemon host or Android device; never a terminal data transport",

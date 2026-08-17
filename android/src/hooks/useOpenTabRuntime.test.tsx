@@ -273,7 +273,7 @@ describe('useOpenTabRuntime explicit resume gating', () => {
   it('runs legacy storage cleanup once across rerenders', () => {
     localStorage.setItem(STORAGE_KEYS.SAVED_TAB_LISTS, 'legacy');
     localStorage.setItem('zterm:closed-tab-reuse-keys', 'legacy');
-    const removeItem = vi.spyOn(Storage.prototype, 'removeItem');
+    const removeItem = vi.spyOn(window.localStorage, 'removeItem');
     const options = {
       bridgeSettings: { servers: [] } as any,
       hosts: [],

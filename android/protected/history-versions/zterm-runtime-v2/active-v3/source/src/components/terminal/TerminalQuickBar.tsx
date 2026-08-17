@@ -1,0 +1,4136 @@
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode, type TouchEvent } from "react";
+import { createPortal } from "react-dom";
+import { Capacitor } from "@capacitor/core";
+import { Keyboard } from "@capacitor/keyboard";
+import { mobileTheme } from "../../lib/mobile-ui";
+import {
+  DeviceClipboardPlugin,
+  isNativeClipboardSupported,
+} from "../../plugins/DeviceClipboardPlugin";
+import { encodeTerminalSgrMouseWheel } from "../../lib/terminal-mouse-wheel-sgr";
+import type { QuickAction, TerminalShortcutAction } from "../../lib/types";
+import {
+  FIXED_BUTTON_MIN_WIDTH,
+  FIXED_CLUSTER_PADDING_X,
+  FLOATING_BUBBLE_DRAG_THRESHOLD_PX,
+  FLOATING_BUBBLE_MARGIN,
+  FLOATING_BUBBLE_SIZE,
+  QUICK_BAR_FIXED_COLUMNS,
+  QUICK_BAR_ROW_GAP,
+  QUICK_BAR_SIDE_PADDING,
+  REPEATABLE_ACTION_LONG_PRESS_MS,
+  REPEATABLE_ACTION_REPEAT_MS,
+  SHORTCUT_COMMON_TOKENS,
+  SHORTCUT_KEYBOARD_TOKENS,
+  SHORTCUT_ROW_META,
+  SHORTCUT_ROW_ORDER,
+  blurCurrentTarget,
+  buildVisibleShortcutRowActions,
+  compactOverlayIconButton,
+  compactOverlayTextButton,
+  createDraftActionId,
+  createShortcutActionId,
+  clampFloatingBubblePosition,
+  dedupeClipboardHistory,
+  floatingPillButton,
+  formatSnippetPreview,
+  isSingleShortcutToken,
+  isSpaceShortcutLabel,
+  isBuiltInShortcutAction,
+  lightEditorInputStyle,
+  moveItem,
+  moveShortcutActionWithinRow,
+  normalizeDraftActions,
+  normalizeSequenceForImmediateSend,
+  normalizeShortcutActions,
+  overlayIconButton,
+  overlayTextButton,
+  readStoredBubblePosition,
+  readStoredClipboardHistory,
+  renderShortcutVisualNode,
+  resolveOverlayViewportMetrics,
+  resolvePresetShortcutTokens,
+  resolveShortcutComposerLabelFromSequence,
+  resolveShortcutDisplayMeta,
+  resolveShortcutVisualLabel,
+  shortcutTokenGridButton,
+  sortShortcutActions,
+  toDraftActions,
+  validateShortcutTokensForRow,
+  writeStoredBubblePosition,
+  writeStoredClipboardHistory,
+  type DraftQuickAction,
+  type DraftShortcutAction,
+  type FloatingPanelTab,
+  type ShortcutEditorMode,
+  type ShortcutEditorTab,
+  type ShortcutRow,
+  type ShortcutToken,
+} from "./terminal-quickbar-helpers";
+import { shouldAllowQuickBarShellPointerEvent } from "./terminal-quickbar-shell-guards";
+import { buildTerminalShortcutSequence } from "../../../../packages/shared/src/shortcuts/terminal-shortcut-composer";
+import { resolveTerminalOrientation } from "../../lib/terminal-viewport-metrics";
+
+export interface TerminalQuickBarProps {
+  activeSessionId?: string | null;
+  quickActions: QuickAction[];
+  shortcutActions: TerminalShortcutAction[];
+  onSendSequence?: (sequence: string) => void;
+  onImagePaste?: (sessionId: string, file: File) => Promise<void> | void;
+  onFileAttach?: (sessionId: string, file: File) => Promise<void> | void;
+  fileTransferSupported?: boolean;
+  imagePasteSupported?: boolean;
+  remoteScreenshotSupported?: boolean;
+  onRequestRemoteScreenshot?: (sessionId: string) => Promise<unknown> | void;
+  keyboardVisible?: boolean;
+  keyboardInsetPx?: number;
+  onToggleKeyboard?: () => void;
+  onQuickActionsChange?: (actions: QuickAction[]) => void;
+  onShortcutActionsChange?: (actions: TerminalShortcutAction[]) => void;
+  sessionDraft: string;
+  onSessionDraftChange?: (value: string) => void;
+  onSessionDraftSend?: (value: string) => void;
+  onOpenScheduleComposer?: (text: string) => void;
+  splitAvailable?: boolean;
+  splitVisible?: boolean;
+  shellMode?: "inline" | "floating-collapsed";
+  collapseAvailable?: boolean;
+  collapsed?: boolean;
+  onCollapsedChange?: (collapsed: boolean) => void;
+  currentSplitCount?: number;
+  splitCountOptions?: number[];
+  onSetSplitCount?: (count: number) => void;
+  onToggleSplitLayout?: () => void;
+  onCycleSplitPane?: () => void;
+  onEditorDomFocusChange?: (active: boolean) => void;
+  onMeasuredHeightChange?: (height: number) => void;
+  onOpenFileTransfer?: (mode?: "browser" | "sync") => void;
+  /** Open the attachment drawer (received/history files). */
+  onOpenAttachment?: () => void;
+  onToggleDebugOverlay?: () => void;
+  debugOverlayVisible?: boolean;
+  onToggleAbsoluteLineNumbers?: () => void;
+  copyDebugLabel?: string;
+  absoluteLineNumbersVisible?: boolean;
+  copyModeActive?: boolean;
+  onToggleCopyMode?: () => void;
+  remoteScreenshotStatus?:
+    | "idle"
+    | "capturing"
+    | "transferring"
+    | "preview-ready"
+    | "saving"
+    | "failed";
+  remoteWindowInputActive?: boolean;
+  shortcutSmartSort?: boolean;
+  shortcutFrequencyMap?: Record<string, number>;
+  onShortcutUse?: (shortcutId: string) => void;
+}
+
+interface ImageUploadBatchState {
+  total: number;
+  completed: number;
+  activeFileName: string;
+}
+
+const QUICKBAR_HORIZONTAL_PAN_LOCK_PX = 8;
+const QUICKBAR_COLLAPSE_SWIPE_PX = 48;
+const TOP_SHORTCUT_EDITOR_ENTRY: { id: string; label: string; sequence: string } = {
+  id: "shortcut-editor-top",
+  label: "+",
+  sequence: "",
+};
+const BOTTOM_SHORTCUT_EDITOR_ENTRY: { id: string; label: string; sequence: string } = {
+  id: "shortcut-editor-bottom",
+  label: "+",
+  sequence: "",
+};
+const QUICKBAR_COLLAPSED_BOTTOM_GESTURE_GUARD_PX =
+  FLOATING_BUBBLE_SIZE + FLOATING_BUBBLE_MARGIN * 2;
+const QUICKBAR_COLLAPSED_REVEAL_SURFACE_HEIGHT_PX =
+  QUICKBAR_COLLAPSED_BOTTOM_GESTURE_GUARD_PX * 2;
+
+function ViewportOverlayPortal({ children }: { children: ReactNode }) {
+  if (typeof document === "undefined") {
+    return <>{children}</>;
+  }
+  return createPortal(children, document.body);
+}
+
+function TerminalQuickBarComponent({
+  activeSessionId,
+  quickActions,
+  shortcutActions,
+  keyboardVisible = false,
+  keyboardInsetPx = 0,
+  onImagePaste,
+  onFileAttach,
+  fileTransferSupported = true,
+  imagePasteSupported = true,
+  remoteScreenshotSupported = true,
+  onRequestRemoteScreenshot,
+  onToggleKeyboard,
+  onQuickActionsChange,
+  onShortcutActionsChange,
+  onSendSequence,
+  sessionDraft,
+  onSessionDraftChange,
+  onSessionDraftSend,
+  onOpenScheduleComposer,
+  splitAvailable = false,
+  splitVisible = false,
+  shellMode = "inline",
+  collapseAvailable = false,
+  collapsed = false,
+  onCollapsedChange,
+  currentSplitCount = splitVisible ? 2 : 1,
+  splitCountOptions = [],
+  onSetSplitCount,
+  onToggleSplitLayout,
+  onCycleSplitPane,
+  onEditorDomFocusChange,
+  onMeasuredHeightChange,
+  onOpenFileTransfer,
+  onOpenAttachment,
+  onToggleDebugOverlay,
+  debugOverlayVisible,
+  onToggleAbsoluteLineNumbers,
+  copyDebugLabel,
+  absoluteLineNumbersVisible,
+  copyModeActive = false,
+  onToggleCopyMode,
+  remoteScreenshotStatus = "idle",
+  remoteWindowInputActive = false,
+  shortcutSmartSort = false,
+  shortcutFrequencyMap,
+  onShortcutUse,
+}: TerminalQuickBarProps) {
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [shortcutEditorOpen, setShortcutEditorOpen] = useState(false);
+  const [shortcutEditorMode, setShortcutEditorMode] =
+    useState<ShortcutEditorMode>("list");
+  const [floatingMenuOpen, setFloatingMenuOpen] = useState(false);
+  const [floatingPanelTab, setFloatingPanelTab] =
+    useState<FloatingPanelTab>("quick-actions");
+  const [draftActions, setDraftActions] = useState<DraftQuickAction[]>(() =>
+    toDraftActions(quickActions),
+  );
+  const [draftShortcutActions, setDraftShortcutActions] = useState<
+    DraftShortcutAction[]
+  >(() => sortShortcutActions(shortcutActions));
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draftLabel, setDraftLabel] = useState("");
+  const [draftTextInput, setDraftTextInput] = useState("");
+  const [editingShortcutId, setEditingShortcutId] = useState<string | null>(
+    null,
+  );
+  const [draftShortcutLabel, setDraftShortcutLabel] = useState("");
+  const [draftShortcutSequence, setDraftShortcutSequence] = useState("");
+  const [draftShortcutRow, setDraftShortcutRow] =
+    useState<ShortcutRow>("top-scroll");
+  const [draftShortcutTokens, setDraftShortcutTokens] = useState<
+    ShortcutToken[]
+  >([]);
+  const [shortcutEditorTab, setShortcutEditorTab] =
+    useState<ShortcutEditorTab>("keyboard");
+  const [draftShortcutTextInput, setDraftShortcutTextInput] = useState("");
+  const [clipboardHistory, setClipboardHistory] = useState<string[]>([]);
+  const [clipboardBusy, setClipboardBusy] = useState(false);
+  const [clipboardError, setClipboardError] = useState<string | null>(null);
+  const [floatingBubblePosition, setFloatingBubblePosition] = useState<{
+    x: number | null;
+    y: number | null;
+  }>(() => readStoredBubblePosition());
+  const [repeatingActionId, setRepeatingActionId] = useState<string | null>(
+    null,
+  );
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [imageUploadBatch, setImageUploadBatch] =
+    useState<ImageUploadBatchState | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
+  const doubleTapRef = useRef<{ id: string; timer: number } | null>(null);
+  const suppressKeyboardClickRef = useRef(false);
+  const suppressBubbleClickRef = useRef(false);
+  const suppressActionClickRef = useRef<string | null>(null);
+  const tmuxCopyPressActiveRef = useRef(false);
+  const tmuxCopySuppressClickRef = useRef(false);
+  const repeatLongPressTimerRef = useRef<number | null>(null);
+  const repeatIntervalTimerRef = useRef<number | null>(null);
+  const pressedRepeatableActionIdRef = useRef<string | null>(null);
+  const floatingBubbleDragRef = useRef({
+    pointerId: -1,
+    active: false,
+    startX: 0,
+    startY: 0,
+    originX: 0,
+    originY: 0,
+    width: FLOATING_BUBBLE_SIZE,
+    height: FLOATING_BUBBLE_SIZE,
+  });
+  const floatingBubbleTouchDragRef = useRef({
+    active: false,
+    moved: false,
+    startX: 0,
+    startY: 0,
+    lastX: 0,
+    lastY: 0,
+    originX: 0,
+    originY: 0,
+    width: FLOATING_BUBBLE_SIZE,
+    height: FLOATING_BUBBLE_SIZE,
+  });
+  const quickBarPanRef = useRef<{
+    active: boolean;
+    axis: "horizontal" | "vertical" | null;
+    horizontalPanAllowed: boolean;
+    startX: number;
+    startY: number;
+    lastX: number;
+    lastY: number;
+    startScrollLeft: number;
+  }>({
+    active: false,
+    axis: null,
+    horizontalPanAllowed: false,
+    startX: 0,
+    startY: 0,
+    lastX: 0,
+    lastY: 0,
+    startScrollLeft: 0,
+  });
+  const collapsedRevealPanRef = useRef({
+    active: false,
+    startX: 0,
+    startY: 0,
+    lastX: 0,
+    lastY: 0,
+  });
+  const normalizedSplitCountOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          splitCountOptions.filter(
+            (count) => Number.isFinite(count) && count >= 1,
+          ),
+        ),
+      ).sort((a, b) => a - b),
+    [splitCountOptions],
+  );
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const floatingPanelRef = useRef<HTMLDivElement | null>(null);
+  const floatingBubbleRef = useRef<HTMLButtonElement | null>(null);
+  const shortcutEditorOverlayRef = useRef<HTMLDivElement | null>(null);
+  const shortcutEditorScrollRef = useRef<HTMLDivElement | null>(null);
+  const domEditorFocusTimerRef = useRef<number | null>(null);
+  const quickInputTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const quickInputSessionIdRef = useRef<string | null>(activeSessionId || null);
+  const quickInputDirtyRef = useRef(false);
+  const quickInputValueRef = useRef(sessionDraft || "");
+  const [quickInputValue, setQuickInputValue] = useState(sessionDraft || "");
+  const [landscape, setLandscape] = useState(
+    () => resolveTerminalOrientation() === "landscape",
+  );
+
+  const sortedQuickActions = useMemo(
+    () => quickActions.slice().sort((a, b) => a.order - b.order),
+    [quickActions],
+  );
+  const sortedShortcutActions = useMemo(() => {
+    if (!shortcutSmartSort || !shortcutFrequencyMap)
+      return sortShortcutActions(shortcutActions);
+    const freq = shortcutFrequencyMap;
+    return [...shortcutActions].sort((left, right) => {
+      if (left.row !== right.row) {
+        return (
+          SHORTCUT_ROW_ORDER.indexOf(left.row) -
+          SHORTCUT_ROW_ORDER.indexOf(right.row)
+        );
+      }
+      const lf = freq[left.id] || 0;
+      const rf = freq[right.id] || 0;
+      if (lf !== rf) return rf - lf; // higher frequency first
+      return left.order - right.order; // fallback to manual order
+    });
+  }, [shortcutActions, shortcutSmartSort, shortcutFrequencyMap]);
+  const draftShortcutBuild = useMemo(
+    () => buildTerminalShortcutSequence(draftShortcutTokens),
+    [draftShortcutTokens],
+  );
+  const draftShortcutRowError = useMemo(
+    () =>
+      validateShortcutTokensForRow(
+        draftShortcutRow,
+        draftShortcutTokens,
+        draftShortcutBuild,
+      ),
+    [draftShortcutBuild, draftShortcutRow, draftShortcutTokens],
+  );
+  const draftShortcutEffectiveError =
+    draftShortcutBuild.error || draftShortcutRowError;
+  const floatingPanelBottomPx = 124;
+  const floatingBubbleBottomPx = 72;
+  const editingIndex = editingId
+    ? draftActions.findIndex((action) => action.id === editingId)
+    : -1;
+  const editingShortcutIndex = editingShortcutId
+    ? draftShortcutActions.findIndex(
+        (action) => action.id === editingShortcutId,
+      )
+    : -1;
+  const draftShortcutRowMeta = SHORTCUT_ROW_META[draftShortcutRow];
+  const availableKeyboardShortcutTokens = useMemo(
+    () =>
+      draftShortcutRow === "top-scroll"
+        ? SHORTCUT_KEYBOARD_TOKENS.filter((token) => token.kind !== "modifier")
+        : SHORTCUT_KEYBOARD_TOKENS,
+    [draftShortcutRow],
+  );
+  const availableCommonShortcutTokens = useMemo(
+    () =>
+      draftShortcutRow === "top-scroll"
+        ? SHORTCUT_COMMON_TOKENS.filter(isSingleShortcutToken)
+        : SHORTCUT_COMMON_TOKENS,
+    [draftShortcutRow],
+  );
+  const [overlayViewportMetrics, setOverlayViewportMetrics] = useState(() =>
+    resolveOverlayViewportMetrics(keyboardInsetPx),
+  );
+  const overlaySheetHeightStyle =
+    overlayViewportMetrics.sheetHeightPx !== null
+      ? `${overlayViewportMetrics.sheetHeightPx}px`
+      : "calc(100dvh - 16px)";
+  const overlayBottomInsetStyle = `${overlayViewportMetrics.bottomInsetPx}px`;
+  const persistQuickInputValue = useCallback(
+    (nextValue: string) => {
+      quickInputDirtyRef.current = true;
+      quickInputValueRef.current = nextValue;
+      setQuickInputValue(nextValue);
+      onSessionDraftChange?.(nextValue);
+    },
+    [onSessionDraftChange],
+  );
+
+  useEffect(() => {
+    quickInputValueRef.current = quickInputValue;
+    if ((sessionDraft || "") === quickInputValue) {
+      quickInputDirtyRef.current = false;
+    }
+  }, [quickInputValue, sessionDraft]);
+
+  useEffect(() => {
+    const nextSessionId = activeSessionId || null;
+    const nextPersistedValue = sessionDraft || "";
+    const sessionChanged = quickInputSessionIdRef.current !== nextSessionId;
+    quickInputSessionIdRef.current = nextSessionId;
+    const quickInputFocused =
+      typeof document !== "undefined" &&
+      document.activeElement === quickInputTextareaRef.current;
+
+    if (sessionChanged) {
+      quickInputDirtyRef.current = false;
+      quickInputValueRef.current = nextPersistedValue;
+      setQuickInputValue(nextPersistedValue);
+      return;
+    }
+
+    if (
+      !quickInputFocused ||
+      !quickInputDirtyRef.current ||
+      nextPersistedValue === quickInputValueRef.current
+    ) {
+      quickInputValueRef.current = nextPersistedValue;
+      setQuickInputValue((current) =>
+        current === nextPersistedValue ? current : nextPersistedValue,
+      );
+      if (nextPersistedValue === quickInputValueRef.current) {
+        quickInputDirtyRef.current = false;
+      }
+    }
+  }, [activeSessionId, sessionDraft]);
+
+  const sendSessionDraft = () => {
+    const payload = normalizeSequenceForImmediateSend(
+      quickInputValueRef.current,
+    );
+    if (!payload) {
+      return;
+    }
+    quickInputDirtyRef.current = false;
+    quickInputValueRef.current = "";
+    setQuickInputValue("");
+    onSessionDraftChange?.("");
+    onSessionDraftSend?.(payload);
+  };
+
+  const showToast = useCallback((message: string) => {
+    if (toastTimerRef.current !== null) {
+      window.clearTimeout(toastTimerRef.current);
+    }
+    setToastMessage(message);
+    toastTimerRef.current = window.setTimeout(() => {
+      toastTimerRef.current = null;
+      setToastMessage(null);
+    }, 1500);
+  }, []);
+
+  const handleQuickActionDoubleTap = useCallback(
+    (actionId: string, sequence: string) => {
+      const now = Date.now();
+      const prev = doubleTapRef.current;
+      if (prev && prev.id === actionId && now - prev.timer < 400) {
+        doubleTapRef.current = null;
+        const payload = normalizeSequenceForImmediateSend(sequence);
+        if (payload) {
+          onSendSequence?.(payload);
+          showToast("已发送");
+        }
+      } else {
+        doubleTapRef.current = { id: actionId, timer: now };
+        window.setTimeout(() => {
+          if (doubleTapRef.current?.id === actionId) {
+            doubleTapRef.current = null;
+          }
+        }, 420);
+      }
+    },
+    [onSendSequence, showToast],
+  );
+
+  const handleClipboardDoubleTap = useCallback(
+    (entry: string, index: number) => {
+      const key = `clip-${index}`;
+      const now = Date.now();
+      const prev = doubleTapRef.current;
+      if (prev && prev.id === key && now - prev.timer < 400) {
+        doubleTapRef.current = null;
+        const payload = normalizeSequenceForImmediateSend(entry);
+        if (payload) {
+          onSendSequence?.(payload);
+          showToast("已发送");
+        }
+      } else {
+        doubleTapRef.current = { id: key, timer: now };
+        window.setTimeout(() => {
+          if (doubleTapRef.current?.id === key) {
+            doubleTapRef.current = null;
+          }
+        }, 420);
+      }
+    },
+    [onSendSequence, showToast],
+  );
+
+  const clearRepeatLongPressTimer = useCallback(() => {
+    if (repeatLongPressTimerRef.current !== null) {
+      window.clearTimeout(repeatLongPressTimerRef.current);
+      repeatLongPressTimerRef.current = null;
+    }
+  }, []);
+
+  const stopRepeatingAction = useCallback(() => {
+    clearRepeatLongPressTimer();
+    pressedRepeatableActionIdRef.current = null;
+    if (repeatIntervalTimerRef.current !== null) {
+      window.clearInterval(repeatIntervalTimerRef.current);
+      repeatIntervalTimerRef.current = null;
+    }
+    setRepeatingActionId(null);
+  }, [clearRepeatLongPressTimer]);
+
+  const isRemoteWindowTerminalOnlyAction = useCallback(
+    (actionId: string) => {
+      if (!remoteWindowInputActive) {
+        return false;
+      }
+      return (
+        actionId === "tmux-copy" ||
+        actionId === "split-toggle" ||
+        actionId.startsWith("split-count-")
+      );
+    },
+    [remoteWindowInputActive],
+  );
+
+  const triggerActionSequence = useCallback(
+    (action: { id: string; label: string; sequence: string }) => {
+      if (isRemoteWindowTerminalOnlyAction(action.id)) {
+        return;
+      }
+      if (action.id === "keyboard") {
+        onToggleKeyboard?.();
+        return;
+      }
+         if (action.id === "tmux-copy") {
+           onToggleCopyMode?.();
+           return;
+         }
+      if (action.id === "debug-overlay") {
+        onToggleDebugOverlay?.();
+        return;
+      }
+      if (action.id === "line-numbers") {
+        onToggleAbsoluteLineNumbers?.();
+        return;
+      }
+      if (action.id === "attachment-drawer") {
+        onOpenAttachment?.();
+        return;
+      }
+      if (action.id.startsWith("split-count-")) {
+        const count = Number.parseInt(
+          action.id.slice("split-count-".length),
+          10,
+        );
+        if (Number.isFinite(count)) {
+          onSetSplitCount?.(count);
+        }
+        return;
+      }
+      if (action.id === "split-toggle") {
+        onToggleSplitLayout?.();
+        return;
+      }
+      if (action.id === "remote-screenshot") {
+        if (!remoteScreenshotSupported) {
+          return;
+        }
+        if (!activeSessionId) {
+          showToast("当前没有可用的目标 session");
+          return;
+        }
+        void Promise.resolve(
+          onRequestRemoteScreenshot?.(activeSessionId),
+        ).catch((error) => {
+          showToast(error instanceof Error ? `远程截图失败：${error.message}` : "远程截图失败");
+        });
+        return;
+      }
+      if (
+        action.id === "paste" ||
+        (action.label === "Paste" && action.sequence === "\x16")
+      ) {
+        void handleClipboardPaste();
+        return;
+      }
+      if (action.id.startsWith("shortcut-editor")) {
+        openShortcutEditor();
+        return;
+      }
+      onSendSequence?.(action.sequence);
+      onShortcutUse?.(action.id);
+    },
+    [
+      activeSessionId,
+      remoteScreenshotSupported,
+      isRemoteWindowTerminalOnlyAction,
+      onCollapsedChange,
+      onRequestRemoteScreenshot,
+      onSendSequence,
+      onShortcutUse,
+      onSetSplitCount,
+      showToast,
+      onToggleAbsoluteLineNumbers,
+      onToggleCopyMode,
+      onToggleDebugOverlay,
+      onToggleKeyboard,
+      onToggleSplitLayout,
+    ],
+  );
+
+  const isRepeatableAction = useCallback(
+    (action: { id: string; label: string; sequence: string }) => {
+      if (!action.sequence) {
+        return false;
+      }
+      if (
+        action.id === "keyboard" ||
+        action.id === "remote-screenshot" ||
+        action.id === "debug-overlay" ||
+        action.id === "tmux-copy" ||
+        action.id === "paste"
+      ) {
+        return false;
+      }
+      if (action.id.startsWith("shortcut-editor")) {
+        return false;
+      }
+      return true;
+    },
+    [],
+  );
+
+  const triggerCopyModeFromPressStart = useCallback(
+    (action: { id: string; label: string; sequence: string }) => {
+      if (isRemoteWindowTerminalOnlyAction(action.id)) {
+        return true;
+      }
+      if (action.id !== "tmux-copy") {
+        return false;
+      }
+      if (tmuxCopyPressActiveRef.current) {
+        tmuxCopySuppressClickRef.current = true;
+        suppressActionClickRef.current = action.id;
+        return true;
+      }
+      tmuxCopyPressActiveRef.current = true;
+      tmuxCopySuppressClickRef.current = true;
+      suppressActionClickRef.current = action.id;
+      if (repeatingActionId) {
+        stopRepeatingAction();
+      }
+      triggerActionSequence(action);
+      return true;
+    },
+    [isRemoteWindowTerminalOnlyAction, repeatingActionId, stopRepeatingAction, triggerActionSequence],
+  );
+
+  const finishCopyModePress = useCallback(
+    (action: { id: string; label: string; sequence: string }) => {
+      if (action.id !== "tmux-copy") {
+        return false;
+      }
+      tmuxCopyPressActiveRef.current = false;
+      suppressActionClickRef.current = action.id;
+      return true;
+    },
+    [],
+  );
+
+  const startRepeatingAction = useCallback(
+    (action: { id: string; label: string; sequence: string }) => {
+      stopRepeatingAction();
+      suppressActionClickRef.current = action.id;
+      setRepeatingActionId(action.id);
+      triggerActionSequence(action);
+      repeatIntervalTimerRef.current = window.setInterval(() => {
+        triggerActionSequence(action);
+      }, REPEATABLE_ACTION_REPEAT_MS);
+    },
+    [stopRepeatingAction, triggerActionSequence],
+  );
+
+  const persistDraftActions = (nextActions: DraftQuickAction[]) => {
+    const normalized = normalizeDraftActions(nextActions);
+    onQuickActionsChange?.(normalized);
+    setDraftActions(toDraftActions(normalized));
+  };
+
+  const persistShortcutActions = (nextActions: DraftShortcutAction[]) => {
+    const normalized = normalizeShortcutActions(nextActions);
+    onShortcutActionsChange?.(normalized);
+    setDraftShortcutActions(sortShortcutActions(normalized));
+  };
+
+  const persistClipboardHistory = (nextItems: string[]) => {
+    const normalized = dedupeClipboardHistory(nextItems);
+    setClipboardHistory(normalized);
+    writeStoredClipboardHistory(normalized);
+  };
+
+  const cleanupEmptyDraftActions = (actions: DraftQuickAction[]) =>
+    actions.filter(
+      (action) =>
+        action.label.trim().length > 0 || action.textInput.trim().length > 0,
+    );
+
+  const openEditor = (
+    mode: "list" | "create" | "edit" = "list",
+    action?: DraftQuickAction,
+  ) => {
+    setDraftActions(toDraftActions(sortedQuickActions));
+    setFloatingMenuOpen(false);
+    if (mode === "edit" && action) {
+      setEditingId(action.id);
+      setDraftLabel(action.label);
+      setDraftTextInput(action.textInput);
+    } else if (mode === "create") {
+      const nextId = createDraftActionId();
+      const nextActions = [
+        ...toDraftActions(sortedQuickActions),
+        {
+          id: nextId,
+          label: "",
+          textInput: "",
+          sequence: "",
+          order: sortedQuickActions.length,
+        },
+      ];
+      persistDraftActions(nextActions);
+      setDraftActions(nextActions);
+      setEditingId(nextId);
+      setDraftLabel("");
+      setDraftTextInput("");
+    } else {
+      setEditingId(null);
+      setDraftLabel("");
+      setDraftTextInput("");
+    }
+    setEditorOpen(true);
+  };
+
+  const closeEditor = () => {
+    const cleaned = cleanupEmptyDraftActions(draftActions);
+    if (cleaned.length !== draftActions.length) {
+      persistDraftActions(cleaned);
+    }
+    setEditorOpen(false);
+    setEditingId(null);
+    setDraftLabel("");
+    setDraftTextInput("");
+  };
+
+  const openDraftForm = (action?: DraftQuickAction) => {
+    if (action) {
+      setEditingId(action.id);
+      setDraftLabel(action.label);
+      setDraftTextInput(action.textInput);
+      return;
+    }
+
+    const nextId = createDraftActionId();
+    const nextAction: DraftQuickAction = {
+      id: nextId,
+      label: "",
+      textInput: "",
+      sequence: "",
+      order: draftActions.length,
+    };
+    const nextActions = [...draftActions, nextAction];
+    persistDraftActions(nextActions);
+    setEditingId(nextId);
+    setDraftLabel("");
+    setDraftTextInput("");
+  };
+
+  const updateEditingAction = (nextLabel: string, nextTextInput: string) => {
+    if (!editingId) {
+      return;
+    }
+
+    const nextActions = draftActions.map((action) =>
+      action.id === editingId
+        ? {
+            ...action,
+            label: nextLabel,
+            textInput: nextTextInput,
+            sequence: nextTextInput.replace(/\r?\n/g, "\r"),
+          }
+        : action,
+    );
+    persistDraftActions(nextActions);
+  };
+
+  const screenshotToolLabel = useMemo(() => {
+    switch (remoteScreenshotStatus) {
+      case "capturing":
+        return "截图中";
+      case "transferring":
+        return "传图中";
+      case "preview-ready":
+        return "预览中";
+      case "saving":
+        return "保存中";
+      case "failed":
+        return "截图失败";
+      default:
+        return "截图";
+    }
+  }, [remoteScreenshotStatus]);
+
+  const handleImagePickerButtonClick = useCallback(() => {
+    const input = imageInputRef.current;
+    if (!input) {
+      return;
+    }
+    const pickerInput = input as HTMLInputElement & { showPicker?: () => void };
+    try {
+      if (typeof pickerInput.showPicker === "function") {
+        pickerInput.showPicker();
+      } else {
+        input.click();
+      }
+    } catch {
+      input.click();
+    }
+    if (Capacitor.isNativePlatform() && keyboardVisible) {
+      void Keyboard.hide().catch(() => {});
+    }
+  }, [keyboardVisible]);
+
+  const handleImageInputChange = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const selectedFiles = Array.from(event.target.files || []);
+      event.currentTarget.value = "";
+      if (selectedFiles.length === 0) {
+        return;
+      }
+      const imageFiles = selectedFiles.filter((file) =>
+        (file.type || "").startsWith("image/"),
+      );
+      if (imageFiles.length === 0) {
+        showToast("未选择可发送的图片");
+        return;
+      }
+      const targetSessionId = activeSessionId || null;
+      if (!targetSessionId) {
+        showToast("当前没有可用的目标 session");
+        return;
+      }
+      const uploadFiles = imageFiles.slice(0, 9);
+      if (imageFiles.length > 9) {
+        showToast("一次最多发送 9 张图片");
+      }
+      setImageUploadBatch({
+        total: uploadFiles.length,
+        completed: 0,
+        activeFileName: uploadFiles[0]?.name || "",
+      });
+      try {
+        for (let index = 0; index < uploadFiles.length; index += 1) {
+          const file = uploadFiles[index]!;
+          setImageUploadBatch({
+            total: uploadFiles.length,
+            completed: index,
+            activeFileName: file.name,
+          });
+          await onImagePaste?.(targetSessionId, file);
+        }
+        setImageUploadBatch(null);
+        showToast(
+          uploadFiles.length === 1
+            ? "图片已发送"
+            : `已发送 ${uploadFiles.length} 张图片`,
+        );
+      } catch (error) {
+        setImageUploadBatch(null);
+        showToast(
+          error instanceof Error
+            ? `图片发送失败：${error.message}`
+            : "图片发送失败",
+        );
+      }
+    },
+    [activeSessionId, onImagePaste, showToast],
+  );
+
+  const handleFilePickerButtonClick = useCallback(() => {
+    const input = fileInputRef.current;
+    if (!input) {
+      return;
+    }
+    const pickerInput = input as HTMLInputElement & { showPicker?: () => void };
+    try {
+      if (typeof pickerInput.showPicker === "function") {
+        pickerInput.showPicker();
+      } else {
+        input.click();
+      }
+    } catch {
+      input.click();
+    }
+    if (Capacitor.isNativePlatform() && keyboardVisible) {
+      void Keyboard.hide().catch(() => {});
+    }
+  }, [keyboardVisible]);
+
+
+  const handleSyncSheetButtonClick = useCallback(() => {
+    onOpenFileTransfer?.("sync");
+  }, [onOpenFileTransfer]);
+
+  const transferToolActions = useMemo(
+    () => [
+      {
+        id: "file-picker-button",
+        label: "文件",
+        onClick: handleFilePickerButtonClick,
+        supported: fileTransferSupported,
+      },
+      {
+        id: "image-picker-button",
+        label: "图片",
+        onClick: handleImagePickerButtonClick,
+        supported: imagePasteSupported,
+      },
+      {
+        id: "sync-sheet-button",
+        label: "同步",
+        onClick: handleSyncSheetButtonClick,
+        supported: fileTransferSupported,
+      },
+    ],
+    [
+      handleFilePickerButtonClick,
+      handleImagePickerButtonClick,
+      handleSyncSheetButtonClick,
+      fileTransferSupported,
+      imagePasteSupported,
+    ],
+  );
+
+  const toolRowActions = useMemo(
+    () => [
+      { id: "remote-screenshot", label: screenshotToolLabel, sequence: "" },
+      { id: "line-numbers", label: "行号", sequence: "" },
+      { id: "debug-overlay", label: "状态", sequence: "" },
+    ],
+    [screenshotToolLabel],
+  );
+  const splitToolActions = useMemo(() => {
+    if (!splitAvailable) {
+      return [];
+    }
+    if (normalizedSplitCountOptions.length > 0) {
+      return normalizedSplitCountOptions.map((count) => ({
+        id: `split-count-${count}`,
+        label:
+          count === currentSplitCount ? `${count} 分屏 ✓` : `${count} 分屏`,
+        sequence: "",
+      }));
+    }
+    return [
+      {
+        id: "split-toggle",
+        label: splitVisible ? "关闭分屏" : "开启分屏",
+        sequence: "",
+      },
+    ];
+  }, [
+    currentSplitCount,
+    normalizedSplitCountOptions,
+    splitAvailable,
+    splitVisible,
+  ]);
+
+  const topFixedActions = useMemo(
+    () => [
+      { id: "tmux-copy", label: "拷贝", sequence: "" },
+      { id: "arrow-up", label: "↑", sequence: "\x1b[A" },
+      { id: "keyboard", label: "键盘", sequence: "" },
+    ],
+    [],
+  );
+
+  const bottomFixedActions = useMemo(
+    () => [
+      { id: "arrow-left", label: "←", sequence: "\x1b[D" },
+      { id: "arrow-down", label: "↓", sequence: "\x1b[B" },
+      { id: "arrow-right", label: "→", sequence: "\x1b[C" },
+    ],
+    [],
+  );
+
+  const [topScrollActions, bottomScrollActions] = useMemo(() => {
+    const consumedSequences = new Set<string>();
+    return [
+      buildVisibleShortcutRowActions(
+        "top-scroll",
+        sortedShortcutActions,
+        consumedSequences,
+      ),
+      buildVisibleShortcutRowActions(
+        "bottom-scroll",
+        sortedShortcutActions,
+        consumedSequences,
+      ),
+    ];
+  }, [sortedShortcutActions]);
+  const mergedScrollActions = useMemo(
+    () => [...topScrollActions, ...bottomScrollActions],
+    [bottomScrollActions, topScrollActions],
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const rescueBubblePosition = () => {
+      setFloatingBubblePosition((current) => {
+        if (current.x === null || current.y === null) {
+          return current;
+        }
+
+        const bubbleWidth =
+          floatingBubbleRef.current?.offsetWidth || FLOATING_BUBBLE_SIZE;
+        const bubbleHeight =
+          floatingBubbleRef.current?.offsetHeight || FLOATING_BUBBLE_SIZE;
+        const clamped = clampFloatingBubblePosition(
+          current.x,
+          current.y,
+          bubbleWidth,
+          bubbleHeight,
+          keyboardInsetPx,
+        );
+        if (clamped.x === current.x && clamped.y === current.y) {
+          return current;
+        }
+        return clamped;
+      });
+    };
+
+    rescueBubblePosition();
+    window.addEventListener("resize", rescueBubblePosition);
+    window.visualViewport?.addEventListener("resize", rescueBubblePosition);
+
+    return () => {
+      window.removeEventListener("resize", rescueBubblePosition);
+      window.visualViewport?.removeEventListener(
+        "resize",
+        rescueBubblePosition,
+      );
+    };
+  }, [keyboardInsetPx]);
+
+  useEffect(() => {
+    if (shellMode !== "floating-collapsed") {
+      return;
+    }
+    setFloatingMenuOpen(false);
+  }, [shellMode]);
+
+  const scrollTrackShellStyle = {
+    flex: 1,
+    minWidth: 0,
+    display: "flex",
+    alignItems: "center",
+    overflow: "hidden",
+    backgroundColor: "transparent",
+  } as const;
+
+  const fixedClusterStyle = {
+    display: "grid",
+    gridTemplateColumns: `repeat(${QUICK_BAR_FIXED_COLUMNS}, minmax(${FIXED_BUTTON_MIN_WIDTH}px, 1fr))`,
+    gap: `${QUICK_BAR_ROW_GAP}px`,
+    flexShrink: 0,
+    alignItems: "center",
+    padding: `2px ${FIXED_CLUSTER_PADDING_X}px`,
+    borderRadius: "12px",
+    backgroundColor: "var(--zterm-fixed-cluster-bg)",
+    border: "1px solid var(--zterm-fixed-cluster-border)",
+    boxShadow: "0 2px 5px var(--zterm-fixed-cluster-shadow)",
+    width: `${QUICK_BAR_FIXED_COLUMNS * FIXED_BUTTON_MIN_WIDTH + (QUICK_BAR_FIXED_COLUMNS - 1) * QUICK_BAR_ROW_GAP + FIXED_CLUSTER_PADDING_X * 2}px`,
+  } as const;
+
+  const scrollTrackStyle = {
+    width: "100%",
+    minWidth: 0,
+    display: "flex",
+    gap: `${QUICK_BAR_ROW_GAP}px`,
+    overflowX: "auto",
+    overflowY: "hidden",
+    WebkitOverflowScrolling: "touch",
+    touchAction: "pan-x",
+    scrollbarWidth: "none",
+    padding: "3px 4px",
+  } as const;
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    setClipboardHistory(readStoredClipboardHistory());
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    writeStoredBubblePosition(floatingBubblePosition);
+  }, [floatingBubblePosition]);
+
+  useEffect(() => {
+    if (!floatingMenuOpen || typeof document === "undefined") {
+      return;
+    }
+
+    const closeIfOutside = (event: PointerEvent | MouseEvent | TouchEvent) => {
+      const target = event.target as Node | null;
+      if (!target) {
+        return;
+      }
+      if (
+        floatingPanelRef.current?.contains(target) ||
+        floatingBubbleRef.current?.contains(target)
+      ) {
+        return;
+      }
+      setFloatingMenuOpen(false);
+    };
+
+    document.addEventListener("pointerdown", closeIfOutside, true);
+    return () => {
+      document.removeEventListener("pointerdown", closeIfOutside, true);
+    };
+  }, [floatingMenuOpen]);
+
+  useEffect(() => {
+    if (!shortcutEditorOpen || !shortcutEditorScrollRef.current) {
+      return;
+    }
+
+    const scrollElement = shortcutEditorScrollRef.current;
+    const resetScroll = () => {
+      scrollElement.scrollTop = 0;
+    };
+
+    resetScroll();
+    const rafId = window.requestAnimationFrame(resetScroll);
+    return () => {
+      window.cancelAnimationFrame(rafId);
+    };
+  }, [editingShortcutId, shortcutEditorMode, shortcutEditorOpen]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const syncLandscape = () => {
+      setLandscape(resolveTerminalOrientation() === "landscape");
+    };
+    syncLandscape();
+    window.addEventListener("resize", syncLandscape);
+    window.visualViewport?.addEventListener("resize", syncLandscape);
+    return () => {
+      window.removeEventListener("resize", syncLandscape);
+      window.visualViewport?.removeEventListener("resize", syncLandscape);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const syncOverlayViewportMetrics = () => {
+      const nextMetrics = resolveOverlayViewportMetrics(keyboardInsetPx);
+      setOverlayViewportMetrics((current) =>
+        current.sheetHeightPx === nextMetrics.sheetHeightPx &&
+        current.bottomInsetPx === nextMetrics.bottomInsetPx
+          ? current
+          : nextMetrics,
+      );
+    };
+
+    syncOverlayViewportMetrics();
+    window.addEventListener("resize", syncOverlayViewportMetrics);
+    window.visualViewport?.addEventListener(
+      "resize",
+      syncOverlayViewportMetrics,
+    );
+    window.visualViewport?.addEventListener(
+      "scroll",
+      syncOverlayViewportMetrics,
+    );
+
+    return () => {
+      window.removeEventListener("resize", syncOverlayViewportMetrics);
+      window.visualViewport?.removeEventListener(
+        "resize",
+        syncOverlayViewportMetrics,
+      );
+      window.visualViewport?.removeEventListener(
+        "scroll",
+        syncOverlayViewportMetrics,
+      );
+    };
+  }, [keyboardInsetPx]);
+
+  useEffect(
+    () => () => {
+      if (domEditorFocusTimerRef.current !== null) {
+        window.clearTimeout(domEditorFocusTimerRef.current);
+        domEditorFocusTimerRef.current = null;
+      }
+    },
+    [],
+  );
+
+  const captureSystemClipboard = async () => {
+    try {
+      setClipboardBusy(true);
+      setClipboardError(null);
+      const text = await (async () => {
+        if (isNativeClipboardSupported()) {
+          const result = await DeviceClipboardPlugin.readText();
+          return typeof result.value === "string" ? result.value : "";
+        }
+        if (
+          typeof navigator === "undefined" ||
+          !navigator.clipboard?.readText
+        ) {
+          throw new Error("当前环境不支持读取系统剪贴板");
+        }
+        return navigator.clipboard.readText();
+      })();
+      if (text.length === 0) {
+        setClipboardError("系统剪贴板当前为空");
+        return;
+      }
+      persistClipboardHistory([text, ...clipboardHistory]);
+    } catch (error) {
+      setClipboardError(
+        error instanceof Error ? error.message : "读取系统剪贴板失败",
+      );
+    } finally {
+      setClipboardBusy(false);
+    }
+  };
+
+  const handleClipboardPaste = async () => {
+    try {
+      setClipboardBusy(true);
+      setClipboardError(null);
+      const text = await (async () => {
+        if (isNativeClipboardSupported()) {
+          const result = await DeviceClipboardPlugin.readText();
+          return typeof result.value === "string" ? result.value : "";
+        }
+        if (
+          typeof navigator === "undefined" ||
+          !navigator.clipboard?.readText
+        ) {
+          throw new Error("当前环境不支持读取系统剪贴板");
+        }
+        return navigator.clipboard.readText();
+      })();
+      if (text.length === 0) {
+        setClipboardError("系统剪贴板当前为空");
+        return;
+      }
+      persistClipboardHistory([text, ...clipboardHistory]);
+      onSendSequence?.(text);
+    } catch (error) {
+      setClipboardError(
+        error instanceof Error ? error.message : "读取系统剪贴板失败",
+      );
+    } finally {
+      setClipboardBusy(false);
+    }
+  };
+
+  const buildShortcutTokensFromSequence = (
+    label: string,
+    sequence: string,
+  ): ShortcutToken[] => {
+    return resolvePresetShortcutTokens(label, sequence);
+  };
+
+  const syncDraftShortcutTokens = (tokens: ShortcutToken[]) => {
+    const built = buildTerminalShortcutSequence(tokens);
+    setDraftShortcutTokens(tokens);
+    setDraftShortcutSequence(built.sequence);
+  };
+
+  const resetShortcutForm = () => {
+    setEditingShortcutId(null);
+    setDraftShortcutLabel("");
+    setDraftShortcutSequence("");
+    setDraftShortcutRow("top-scroll");
+    setDraftShortcutTokens([]);
+    setShortcutEditorTab("keyboard");
+    setDraftShortcutTextInput("");
+  };
+
+  const openShortcutEditor = () => {
+    setDraftShortcutActions(sortShortcutActions(shortcutActions));
+    setFloatingMenuOpen(false);
+    resetShortcutForm();
+    setShortcutEditorMode("list");
+    setShortcutEditorOpen(true);
+  };
+
+  const openShortcutForm = (row: ShortcutRow, action?: DraftShortcutAction) => {
+    if (action && isBuiltInShortcutAction(action.id)) {
+      return;
+    }
+    setDraftShortcutActions(sortShortcutActions(shortcutActions));
+    setFloatingMenuOpen(false);
+    setShortcutEditorTab("keyboard");
+    setDraftShortcutTextInput("");
+    if (action) {
+      setEditingShortcutId(action.id);
+      setDraftShortcutLabel(action.label);
+      setDraftShortcutRow(action.row);
+      syncDraftShortcutTokens(
+        buildShortcutTokensFromSequence(action.label, action.sequence),
+      );
+    } else {
+      setEditingShortcutId(null);
+      setDraftShortcutLabel("");
+      setDraftShortcutRow(row);
+      syncDraftShortcutTokens([]);
+    }
+    setShortcutEditorMode("form");
+    setShortcutEditorOpen(true);
+  };
+
+  const backToShortcutList = () => {
+    resetShortcutForm();
+    setShortcutEditorMode("list");
+  };
+
+  const closeShortcutEditor = () => {
+    onEditorDomFocusChange?.(false);
+    setShortcutEditorOpen(false);
+    setShortcutEditorMode("list");
+    resetShortcutForm();
+  };
+
+  const appendShortcutToken = (
+    token: ShortcutToken,
+    row?: "top-scroll" | "bottom-scroll",
+  ) => {
+    setDraftShortcutTokens((current) => {
+      const next = [...current, token];
+      const built = buildTerminalShortcutSequence(next);
+      setDraftShortcutSequence(built.sequence);
+      return next;
+    });
+    if (row) {
+      setDraftShortcutRow(row);
+    }
+  };
+
+  const removeShortcutToken = (index: number) => {
+    setDraftShortcutTokens((current) => {
+      const next = current.filter((_, tokenIndex) => tokenIndex !== index);
+      const built = buildTerminalShortcutSequence(next);
+      setDraftShortcutSequence(built.sequence);
+      return next;
+    });
+  };
+
+  const clearShortcutTokens = () => {
+    setDraftShortcutTokens([]);
+    setDraftShortcutSequence("");
+  };
+
+  const saveShortcutForm = () => {
+    if (editingShortcutId && isBuiltInShortcutAction(editingShortcutId)) {
+      return;
+    }
+    const nextSequence = draftShortcutBuild.sequence;
+    if (!nextSequence || draftShortcutEffectiveError) {
+      return;
+    }
+
+    const nextLabel = resolveShortcutComposerLabelFromSequence(
+      draftShortcutLabel.trim() || draftShortcutBuild.preview,
+    );
+
+    const nextActions = editingShortcutId
+      ? draftShortcutActions.map((action) =>
+          action.id === editingShortcutId
+            ? {
+                ...action,
+                label: nextLabel,
+                sequence: nextSequence,
+                row: draftShortcutRow,
+              }
+            : action,
+        )
+      : [
+          ...draftShortcutActions,
+          {
+            id: createShortcutActionId(),
+            label: nextLabel,
+            sequence: nextSequence,
+            row: draftShortcutRow,
+            order: draftShortcutActions.filter(
+              (action) => action.row === draftShortcutRow,
+            ).length,
+          },
+        ];
+
+    persistShortcutActions(nextActions);
+    backToShortcutList();
+  };
+
+  const appendShortcutTextInput = () => {
+    const value = draftShortcutTextInput.trim();
+    if (!value) {
+      return;
+    }
+    appendShortcutToken({
+      label: value,
+      sequence: value,
+      kind: "text",
+    });
+    setDraftShortcutTextInput("");
+  };
+
+  const renderBaseActionButton = (
+    action: { id: string; label: string; sequence: string },
+    options?: { fixed?: boolean; compact?: boolean; ariaLabel?: string },
+  ) => {
+    const compact = options?.compact ?? false;
+    const fixed = options?.fixed ?? false;
+    const repeatable = isRepeatableAction(action);
+    const repeatActive = repeatingActionId === action.id;
+    const disabled =
+      isRemoteWindowTerminalOnlyAction(action.id)
+      || (!remoteScreenshotSupported && action.id === "remote-screenshot");
+    const actionDisplayLabel = resolveShortcutVisualLabel(action.label);
+    const actionUsesSpaceBarVisual = isSpaceShortcutLabel(action.label);
+    return (
+      <button
+        key={action.id}
+        tabIndex={-1}
+        disabled={disabled}
+        onPointerDown={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          blurCurrentTarget(event.currentTarget);
+          if (disabled) {
+            return;
+          }
+          if (triggerCopyModeFromPressStart(action)) {
+            return;
+          }
+          if (action.id !== "keyboard") {
+            if (!repeatable) {
+              return;
+            }
+            clearRepeatLongPressTimer();
+            pressedRepeatableActionIdRef.current = action.id;
+            repeatLongPressTimerRef.current = window.setTimeout(() => {
+              repeatLongPressTimerRef.current = null;
+              if (pressedRepeatableActionIdRef.current !== action.id) {
+                return;
+              }
+              startRepeatingAction(action);
+            }, REPEATABLE_ACTION_LONG_PRESS_MS);
+            return;
+          }
+          suppressKeyboardClickRef.current = true;
+          onToggleKeyboard?.();
+          window.setTimeout(() => {
+            suppressKeyboardClickRef.current = false;
+          }, 220);
+        }}
+        onPointerUp={() => {
+          clearRepeatLongPressTimer();
+          pressedRepeatableActionIdRef.current = null;
+          if (action.id === "tmux-copy") {
+            finishCopyModePress(action);
+          }
+        }}
+        onPointerCancel={() => {
+          clearRepeatLongPressTimer();
+          pressedRepeatableActionIdRef.current = null;
+          if (action.id === "tmux-copy") {
+            tmuxCopyPressActiveRef.current = false;
+          }
+        }}
+        onPointerLeave={() => {
+          clearRepeatLongPressTimer();
+          pressedRepeatableActionIdRef.current = null;
+          if (action.id === "tmux-copy") {
+            tmuxCopyPressActiveRef.current = false;
+          }
+        }}
+        onTouchStart={(event) => {
+          if (action.id !== "tmux-copy") {
+            return;
+          }
+          event.preventDefault();
+          event.stopPropagation();
+          blurCurrentTarget(event.currentTarget);
+          triggerCopyModeFromPressStart(action);
+        }}
+        onTouchEnd={(event) => {
+          if (action.id !== "tmux-copy") {
+            return;
+          }
+          event.preventDefault();
+          event.stopPropagation();
+          blurCurrentTarget(event.currentTarget);
+          finishCopyModePress(action);
+        }}
+        onTouchCancel={() => {
+          if (action.id === "tmux-copy") {
+            tmuxCopyPressActiveRef.current = false;
+          }
+        }}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          blurCurrentTarget(event.currentTarget);
+          if (disabled) {
+            return;
+          }
+          if (repeatActive) {
+            stopRepeatingAction();
+            suppressActionClickRef.current = null;
+            return;
+          }
+          if (suppressActionClickRef.current === action.id) {
+            suppressActionClickRef.current = null;
+            return;
+          }
+          if (action.id === "tmux-copy" && tmuxCopySuppressClickRef.current) {
+            tmuxCopyPressActiveRef.current = false;
+            tmuxCopySuppressClickRef.current = false;
+            return;
+          }
+          if (action.id === "keyboard") {
+            if (suppressKeyboardClickRef.current) {
+              return;
+            }
+          }
+          if (repeatingActionId) {
+            stopRepeatingAction();
+          }
+          triggerActionSequence(action);
+        }}
+        onFocus={(event) => event.currentTarget.blur()}
+        aria-label={options?.ariaLabel ?? action.label}
+        aria-pressed={repeatActive || (action.id === "tmux-copy" && copyModeActive)}
+        aria-disabled={disabled}
+        style={{
+          minHeight: compact ? "32px" : "34px",
+          width: fixed ? "100%" : undefined,
+          minWidth: actionUsesSpaceBarVisual
+            ? "58px"
+            : actionDisplayLabel.length > 3
+              ? "58px"
+              : actionDisplayLabel.length > 1
+                ? "48px"
+                : "34px",
+          padding: fixed ? "0 6px" : "0 10px",
+          border: "none",
+          outline: "none",
+          borderRadius: "10px",
+          backgroundColor: repeatActive
+            ? "rgba(113, 164, 255, 0.28)"
+            : disabled
+              ? "rgba(68, 74, 86, 0.48)"
+              : action.id === "keyboard" && keyboardVisible
+                ? "rgba(31,214,122,0.18)"
+                : action.id === "tmux-copy" && copyModeActive
+                  ? "rgba(113, 164, 255, 0.28)"
+                  : action.id === "debug-overlay" && debugOverlayVisible
+                    ? "rgba(31,214,122,0.18)"
+                    : action.id === "line-numbers" && absoluteLineNumbersVisible
+                      ? "rgba(31,214,122,0.18)"
+                      : action.id === "remote-screenshot" &&
+                          remoteScreenshotStatus !== "idle"
+                        ? "rgba(113, 164, 255, 0.18)"
+                        : fixed
+                          ? "rgba(22, 28, 41, 0.92)"
+                          : "rgba(31, 38, 53, 0.82)",
+          color: repeatActive
+            ? "#bcd3ff"
+            : disabled
+              ? "rgba(218, 224, 235, 0.46)"
+              : action.id === "keyboard" && keyboardVisible
+                ? mobileTheme.colors.accent
+                : action.id === "tmux-copy" && copyModeActive
+                  ? "#8db7ff"
+                  : action.id === "debug-overlay" && debugOverlayVisible
+                    ? mobileTheme.colors.accent
+                    : action.id === "line-numbers" && absoluteLineNumbersVisible
+                      ? mobileTheme.colors.accent
+                      : action.id === "remote-screenshot" &&
+                          remoteScreenshotStatus !== "idle"
+                        ? "#8db7ff"
+                        : "#fff",
+          fontSize: fixed
+            ? "13px"
+            : action.id === "continue"
+              ? "11px"
+              : actionDisplayLabel.length > 3
+                ? "11px"
+                : "14px",
+          fontWeight: 700,
+          cursor: disabled ? "not-allowed" : "pointer",
+          flexShrink: 0,
+          appearance: "none",
+          WebkitTapHighlightColor: "transparent",
+          touchAction: "manipulation",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+          opacity: disabled ? 0.58 : 1,
+          boxShadow: disabled
+            ? "inset 0 0 0 1px rgba(255,255,255,0.06)"
+            : repeatActive
+            ? "inset 0 0 0 1px rgba(141,183,255,0.55)"
+            : action.id === "remote-screenshot" &&
+                remoteScreenshotStatus !== "idle"
+              ? "inset 0 0 0 1px rgba(141,183,255,0.42)"
+              : "none",
+        }}
+      >
+        {renderShortcutVisualNode(action.label, "button")}
+      </button>
+    );
+  };
+
+  const renderTransferToolButton = (
+    action: { id: string; label: string; onClick: () => void; supported?: boolean },
+    options?: { compact?: boolean },
+  ) => {
+    const compact = options?.compact ?? false;
+    const actionDisplayLabel = resolveShortcutVisualLabel(action.label);
+    const disabled = action.supported === false;
+    return (
+      <button
+        key={action.id}
+        tabIndex={-1}
+        disabled={disabled}
+        onPointerDown={(event) => {
+          event.stopPropagation();
+          blurCurrentTarget(event.currentTarget);
+        }}
+        onClick={(event) => {
+          event.stopPropagation();
+          blurCurrentTarget(event.currentTarget);
+          if (disabled) {
+            return;
+          }
+          action.onClick();
+        }}
+        onFocus={(event) => event.currentTarget.blur()}
+        aria-label={action.label}
+        aria-disabled={disabled}
+        data-transfer-tool-button={action.id}
+        style={{
+          minHeight: compact ? "32px" : "34px",
+          minWidth:
+            actionDisplayLabel.length > 3
+              ? "58px"
+              : actionDisplayLabel.length > 1
+                ? "48px"
+                : "34px",
+          border: "1px solid rgba(255,255,255,0.10)",
+          borderRadius: "12px",
+          backgroundColor: disabled
+            ? "rgba(68, 74, 86, 0.48)"
+            : "rgba(31, 38, 53, 0.92)",
+          color: disabled ? "rgba(218, 224, 235, 0.46)" : "#fff",
+          fontSize: compact ? "12px" : "13px",
+          fontWeight: 800,
+          cursor: disabled ? "not-allowed" : "pointer",
+          touchAction: "manipulation",
+          flexShrink: 0,
+          padding: actionDisplayLabel.length > 1 ? "0 10px" : "0",
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          opacity: disabled ? 0.58 : 1,
+        }}
+      >
+        {actionDisplayLabel}
+      </button>
+    );
+  };
+
+  useEffect(
+    () => () => {
+      stopRepeatingAction();
+      suppressActionClickRef.current = null;
+      tmuxCopyPressActiveRef.current = false;
+      tmuxCopySuppressClickRef.current = false;
+    },
+    [stopRepeatingAction],
+  );
+
+  const shellCollapsed =
+    (shellMode === "floating-collapsed" || collapsed) &&
+    !floatingMenuOpen &&
+    !editorOpen &&
+    !shortcutEditorOpen;
+
+  useEffect(() => {
+    const host = rootRef.current;
+    if (!host) {
+      return;
+    }
+
+    const syncHeight = () => {
+      if (shellCollapsed) {
+        onMeasuredHeightChange?.(0);
+        return;
+      }
+      const measuredPx = Math.max(
+        0,
+        Math.round(
+          host.getBoundingClientRect().height || host.offsetHeight || 0,
+        ),
+      );
+      // Keyboard lift is applied by TerminalQuickBarShell outside this component.
+      // Report only this quickbar chrome height so the stage can reserve it once.
+      onMeasuredHeightChange?.(measuredPx);
+    };
+
+    syncHeight();
+    const observer = new ResizeObserver(syncHeight);
+    observer.observe(host);
+    window.addEventListener("resize", syncHeight);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", syncHeight);
+    };
+  }, [keyboardInsetPx, keyboardVisible, onMeasuredHeightChange, shellCollapsed]);
+
+  const blockShellEvent = (event: React.SyntheticEvent<HTMLElement>) => {
+    const target = event.target as HTMLElement | null;
+    if (
+      event.type.startsWith("touch") &&
+      target?.closest('[data-quickbar-pan-surface="true"]')
+    ) {
+      return;
+    }
+    if (shouldAllowQuickBarShellPointerEvent(target)) {
+      return;
+    }
+    event.stopPropagation();
+    event.preventDefault();
+  };
+
+  const getQuickBarScrollTracks = useCallback(() => {
+    const root = rootRef.current;
+    if (!root) {
+      return [];
+    }
+    return Array.from(
+      root.querySelectorAll<HTMLElement>('[data-quickbar-scroll-track="true"]'),
+    );
+  }, []);
+
+  const getQuickBarPrimaryScrollLeft = useCallback(() => {
+    return getQuickBarScrollTracks()[0]?.scrollLeft || 0;
+  }, [getQuickBarScrollTracks]);
+
+  const setQuickBarScrollLeft = useCallback(
+    (nextScrollLeft: number) => {
+      const tracks = getQuickBarScrollTracks();
+      for (const track of tracks) {
+        track.scrollLeft = Math.max(
+          0,
+          Math.min(nextScrollLeft, Math.max(0, track.scrollWidth - track.clientWidth)),
+        );
+      }
+    },
+    [getQuickBarScrollTracks],
+  );
+
+  const handleQuickBarRowsTouchStart = useCallback((event: TouchEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement | null;
+    if (event.touches.length !== 1) {
+      quickBarPanRef.current.active = false;
+      quickBarPanRef.current.axis = null;
+      return;
+    }
+    const touch = event.touches[0];
+    const horizontalPanAllowed = !(
+      target?.closest('[data-quickbar-scroll-track="true"]') ||
+      shouldAllowQuickBarShellPointerEvent(target)
+    );
+    quickBarPanRef.current = {
+      active: true,
+      axis: null,
+      horizontalPanAllowed,
+      startX: touch.clientX,
+      startY: touch.clientY,
+      lastX: touch.clientX,
+      lastY: touch.clientY,
+      startScrollLeft: getQuickBarPrimaryScrollLeft(),
+    };
+  }, [getQuickBarPrimaryScrollLeft]);
+
+  const handleQuickBarRowsTouchMove = useCallback((event: TouchEvent<HTMLDivElement>) => {
+    const pan = quickBarPanRef.current;
+    const touch = event.touches[0];
+    if (!pan.active || !touch || event.touches.length !== 1) {
+      return;
+    }
+    pan.lastX = touch.clientX;
+    pan.lastY = touch.clientY;
+    const deltaX = touch.clientX - pan.startX;
+    const deltaY = touch.clientY - pan.startY;
+    if (!pan.axis) {
+      if (
+        Math.abs(deltaX) < QUICKBAR_HORIZONTAL_PAN_LOCK_PX &&
+        Math.abs(deltaY) < QUICKBAR_HORIZONTAL_PAN_LOCK_PX
+      ) {
+        return;
+      }
+      pan.axis = Math.abs(deltaX) >= Math.abs(deltaY) ? "horizontal" : "vertical";
+    }
+    if (pan.axis !== "horizontal") {
+      return;
+    }
+    if (!pan.horizontalPanAllowed) {
+      return;
+    }
+    event.preventDefault();
+    setQuickBarScrollLeft(pan.startScrollLeft - deltaX);
+  }, [setQuickBarScrollLeft]);
+
+  const resetQuickBarRowsGesture = useCallback(() => {
+    quickBarPanRef.current.active = false;
+    quickBarPanRef.current.axis = null;
+  }, []);
+
+  const handleQuickBarRowsTouchEnd = useCallback(() => {
+    const pan = quickBarPanRef.current;
+    const deltaY = pan.lastY - pan.startY;
+    if (
+      pan.active &&
+      pan.axis === "vertical" &&
+      collapseAvailable &&
+      !collapsed &&
+      deltaY >= QUICKBAR_COLLAPSE_SWIPE_PX
+    ) {
+      onCollapsedChange?.(true);
+    }
+    resetQuickBarRowsGesture();
+  }, [
+    collapseAvailable,
+    collapsed,
+    onCollapsedChange,
+    resetQuickBarRowsGesture,
+  ]);
+
+  const handleCollapsedRevealTouchStart = useCallback((event: TouchEvent<HTMLDivElement>) => {
+    if (event.touches.length !== 1) {
+      collapsedRevealPanRef.current.active = false;
+      return;
+    }
+    const touch = event.touches[0];
+    collapsedRevealPanRef.current = {
+      active: true,
+      startX: touch.clientX,
+      startY: touch.clientY,
+      lastX: touch.clientX,
+      lastY: touch.clientY,
+    };
+  }, []);
+
+  const handleCollapsedRevealTouchMove = useCallback((event: TouchEvent<HTMLDivElement>) => {
+    const touch = event.touches[0];
+    const pan = collapsedRevealPanRef.current;
+    if (!pan.active || !touch || event.touches.length !== 1) {
+      return;
+    }
+    pan.lastX = touch.clientX;
+    pan.lastY = touch.clientY;
+    const deltaX = touch.clientX - pan.startX;
+    const deltaY = touch.clientY - pan.startY;
+    if (Math.abs(deltaY) > Math.abs(deltaX) && deltaY < 0) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }, []);
+
+  const handleCollapsedRevealTouchEnd = useCallback(() => {
+    const pan = collapsedRevealPanRef.current;
+    const deltaX = pan.lastX - pan.startX;
+    const deltaY = pan.lastY - pan.startY;
+    if (
+      pan.active &&
+      Math.abs(deltaY) > Math.abs(deltaX) &&
+      deltaY <= -QUICKBAR_COLLAPSE_SWIPE_PX
+    ) {
+      onCollapsedChange?.(false);
+    }
+    collapsedRevealPanRef.current.active = false;
+  }, [onCollapsedChange]);
+
+  const resetCollapsedRevealGesture = useCallback(() => {
+    collapsedRevealPanRef.current.active = false;
+  }, []);
+
+  return (
+    <div
+      ref={rootRef}
+      className="zterm-neo-quickbar"
+      data-quickbar-surface={shellCollapsed || floatingMenuOpen ? "transparent" : "expanded"}
+      onFocusCapture={(event) => {
+        const target = event.target as HTMLElement | null;
+        if (!target) {
+          return;
+        }
+        if (target instanceof HTMLInputElement && target.type === "file") {
+          return;
+        }
+        if (
+          target instanceof HTMLInputElement ||
+          target instanceof HTMLTextAreaElement
+        ) {
+          onEditorDomFocusChange?.(true);
+        }
+      }}
+      onBlurCapture={() => {
+        if (domEditorFocusTimerRef.current !== null) {
+          window.clearTimeout(domEditorFocusTimerRef.current);
+        }
+        domEditorFocusTimerRef.current = window.setTimeout(() => {
+          domEditorFocusTimerRef.current = null;
+          const activeElement = document.activeElement;
+          const stillFocused =
+            (rootRef.current?.contains(activeElement) ||
+              shortcutEditorOverlayRef.current?.contains(activeElement)) &&
+            (activeElement instanceof HTMLInputElement ||
+              activeElement instanceof HTMLTextAreaElement) &&
+            !(
+              activeElement instanceof HTMLInputElement &&
+              activeElement.type === "file"
+            );
+          onEditorDomFocusChange?.(Boolean(stillFocused));
+        }, 0);
+      }}
+      onPointerDownCapture={(event) => {
+        blockShellEvent(event);
+      }}
+      onTouchStartCapture={(event) => {
+        blockShellEvent(event);
+      }}
+      onMouseDownCapture={(event) => {
+        blockShellEvent(event);
+      }}
+      onClickCapture={(event) => {
+        blockShellEvent(event);
+      }}
+      style={{
+        padding: shellCollapsed
+          ? "0"
+          : floatingMenuOpen
+            ? "0"
+            : `8px 0 calc(${mobileTheme.safeArea.bottom} + 6px)`,
+        position: "relative",
+        backgroundColor:
+          shellCollapsed || floatingMenuOpen
+            ? "transparent"
+            : "var(--zterm-neo-quickbar-bg)",
+        borderTop:
+          shellCollapsed || floatingMenuOpen
+            ? "none"
+            : "1px solid var(--zterm-neo-border)",
+      }}
+    >
+      <input
+        ref={imageInputRef}
+        type="file"
+        disabled={!imagePasteSupported}
+        accept="image/*"
+        multiple
+        tabIndex={-1}
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          width: "1px",
+          height: "1px",
+          padding: 0,
+          margin: "-1px",
+          overflow: "hidden",
+          clip: "rect(0, 0, 0, 0)",
+          whiteSpace: "nowrap",
+          border: 0,
+          opacity: 0,
+          pointerEvents: "none",
+        }}
+        onChange={handleImageInputChange}
+      />
+      <input
+        ref={fileInputRef}
+        type="file"
+        disabled={!fileTransferSupported}
+        tabIndex={-1}
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          width: "1px",
+          height: "1px",
+          padding: 0,
+          margin: "-1px",
+          overflow: "hidden",
+          clip: "rect(0, 0, 0, 0)",
+          whiteSpace: "nowrap",
+          border: 0,
+          opacity: 0,
+          pointerEvents: "none",
+        }}
+        onChange={async (event) => {
+          const file = event.target.files?.[0];
+          event.currentTarget.value = "";
+          if (!file) {
+            return;
+          }
+          const targetSessionId = activeSessionId || null;
+          if (!targetSessionId) {
+            showToast("当前没有可用的目标 session");
+            return;
+          }
+          try {
+            await onFileAttach?.(targetSessionId, file);
+          } catch (error) {
+            showToast(error instanceof Error ? `传文件失败：${error.message}` : "传文件失败");
+          }
+        }}
+      />
+      {editorOpen && (
+        <div
+          data-quickbar-allow-pointer="true"
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 120,
+            backgroundColor: "rgba(8, 10, 18, 0.78)",
+            backdropFilter: "blur(10px)",
+            display: "flex",
+            alignItems: "flex-end",
+            paddingBottom: overlayBottomInsetStyle,
+          }}
+        >
+          <div
+            style={{
+              width: "100%",
+              height: overlaySheetHeightStyle,
+              maxHeight: overlaySheetHeightStyle,
+              borderRadius: "26px 26px 0 0",
+              backgroundColor: "#f7f8fb",
+              color: mobileTheme.colors.lightText,
+              boxShadow: "0 -20px 50px rgba(0,0,0,0.28)",
+              display: "flex",
+              flexDirection: "column",
+              minHeight: 0,
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                padding: "10px 18px 12px",
+                borderBottom: "1px solid rgba(23, 27, 45, 0.08)",
+                backgroundColor: "#fff",
+              }}
+            >
+              <div
+                style={{
+                  width: "42px",
+                  height: "5px",
+                  borderRadius: "999px",
+                  backgroundColor: "rgba(23, 27, 45, 0.15)",
+                  margin: "0 auto 12px",
+                }}
+              />
+              <div
+                style={{ display: "flex", alignItems: "center", gap: "12px" }}
+              >
+                <button
+                  onClick={closeEditor}
+                  style={{
+                    width: "34px",
+                    height: "34px",
+                    borderRadius: "999px",
+                    border: "none",
+                    backgroundColor: "#eef2f8",
+                    color: mobileTheme.colors.lightText,
+                    fontSize: "20px",
+                    cursor: "pointer",
+                    flexShrink: 0,
+                  }}
+                  aria-label="Close shortcut editor"
+                >
+                  ×
+                </button>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: "20px", fontWeight: 800 }}>
+                    快捷输入设置
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div
+              data-testid="quick-action-editor-scroll"
+              style={{
+                flex: 1,
+                minHeight: 0,
+                padding: "16px",
+                overflowY: "auto",
+                WebkitOverflowScrolling: "touch",
+                touchAction: "pan-y",
+                overscrollBehaviorY: "contain",
+                display: "flex",
+                flexDirection: "column",
+                gap: "14px",
+                paddingBottom: "calc(20px + env(safe-area-inset-bottom, 0px))",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "12px",
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: "14px", fontWeight: 700 }}>
+                    当前快捷输入
+                  </div>
+                </div>
+                <button
+                  onClick={() => openDraftForm()}
+                  style={{
+                    minHeight: "38px",
+                    padding: "0 14px",
+                    borderRadius: "999px",
+                    border: "none",
+                    backgroundColor: "rgba(22, 119, 255, 0.12)",
+                    color: "#1677ff",
+                    fontWeight: 800,
+                    cursor: "pointer",
+                    flexShrink: 0,
+                  }}
+                >
+                  + 添加
+                </button>
+              </div>
+
+              <div
+                style={{
+                  borderRadius: "20px",
+                  backgroundColor: "#fff",
+                  border: "1px solid rgba(23, 27, 45, 0.08)",
+                  overflow: "hidden",
+                }}
+              >
+                {draftActions.length === 0 ? (
+                  <div style={{ height: "12px" }} />
+                ) : (
+                  draftActions.map((action, index) => (
+                    <div
+                      key={action.id}
+                      style={{
+                        padding: "14px 16px",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "12px",
+                        borderTop:
+                          index === 0
+                            ? "none"
+                            : "1px solid rgba(23, 27, 45, 0.08)",
+                      }}
+                    >
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: "17px", fontWeight: 600 }}>
+                          {action.label || "未命名"}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: "12px",
+                            color: mobileTheme.colors.lightMuted,
+                            marginTop: "4px",
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                          }}
+                        >
+                          {formatSnippetPreview(action.textInput) || "(空文本)"}
+                        </div>
+                      </div>
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "8px",
+                          flexShrink: 0,
+                        }}
+                      >
+                        <button
+                          onClick={() =>
+                            persistDraftActions(
+                              moveItem(draftActions, index, index - 1),
+                            )
+                          }
+                          disabled={index === 0}
+                          style={overlayIconButton(index === 0)}
+                          aria-label={`Move ${action.label} up`}
+                        >
+                          ↑
+                        </button>
+                        <button
+                          onClick={() =>
+                            persistDraftActions(
+                              moveItem(draftActions, index, index + 1),
+                            )
+                          }
+                          disabled={index === draftActions.length - 1}
+                          style={overlayIconButton(
+                            index === draftActions.length - 1,
+                          )}
+                          aria-label={`Move ${action.label} down`}
+                        >
+                          ↓
+                        </button>
+                        <button
+                          onClick={() => openDraftForm(action)}
+                          style={overlayTextButton(
+                            "#eef2f8",
+                            mobileTheme.colors.lightText,
+                          )}
+                        >
+                          编辑
+                        </button>
+                        <button
+                          onClick={() => {
+                            persistDraftActions(
+                              draftActions.filter(
+                                (item) => item.id !== action.id,
+                              ),
+                            );
+                            if (editingId === action.id) {
+                              setEditingId(null);
+                              setDraftLabel("");
+                              setDraftTextInput("");
+                            }
+                          }}
+                          style={overlayTextButton(
+                            "rgba(255, 124, 146, 0.12)",
+                            mobileTheme.colors.danger,
+                          )}
+                        >
+                          删除
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {(editingId !== null || draftActions.length === 0) && (
+                <div
+                  style={{
+                    borderRadius: "20px",
+                    backgroundColor: "#fff",
+                    border: "1px solid rgba(23, 27, 45, 0.08)",
+                    padding: "16px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "12px",
+                  }}
+                >
+                  <div>
+                    <div style={{ fontSize: "16px", fontWeight: 700 }}>
+                      {editingIndex >= 0 ? "编辑快捷输入" : "新增快捷输入"}
+                    </div>
+                  </div>
+
+                  <input
+                    value={draftLabel}
+                    onChange={(event) => {
+                      const nextValue = event.target.value;
+                      setDraftLabel(nextValue);
+                      updateEditingAction(nextValue, draftTextInput);
+                    }}
+                    placeholder="显示名称"
+                    style={lightEditorInputStyle()}
+                  />
+                  <textarea
+                    value={draftTextInput}
+                    onChange={(event) => {
+                      const nextValue = event.target.value;
+                      setDraftTextInput(nextValue);
+                      updateEditingAction(draftLabel, nextValue);
+                    }}
+                    placeholder="保存好的字符串，例如：git status"
+                    style={{
+                      ...lightEditorInputStyle(),
+                      minHeight: "96px",
+                      resize: "vertical",
+                      whiteSpace: "pre-wrap",
+                    }}
+                  />
+
+                  <div style={{ display: "flex", gap: "10px" }}>
+                    <button
+                      onClick={closeEditor}
+                      style={{
+                        width: "100%",
+                        minHeight: "44px",
+                        border: "none",
+                        borderRadius: "14px",
+                        backgroundColor: "#eef2f8",
+                        color: mobileTheme.colors.lightText,
+                        fontWeight: 700,
+                        cursor: "pointer",
+                      }}
+                    >
+                      完成
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {shortcutEditorOpen && (
+        <ViewportOverlayPortal>
+          <div
+            ref={shortcutEditorOverlayRef}
+            data-quickbar-allow-pointer="true"
+            data-testid="shortcut-editor-overlay"
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 240,
+              backgroundColor: "rgba(8, 10, 18, 0.78)",
+              backdropFilter: "blur(10px)",
+              display: "flex",
+              alignItems: "flex-end",
+              paddingBottom: overlayBottomInsetStyle,
+            }}
+          >
+            <div
+              style={{
+                width: "100%",
+                height: overlaySheetHeightStyle,
+                maxHeight: overlaySheetHeightStyle,
+                borderRadius: "26px 26px 0 0",
+                backgroundColor: "#f7f8fb",
+                color: mobileTheme.colors.lightText,
+                boxShadow: "0 -20px 50px rgba(0,0,0,0.28)",
+                display: "flex",
+                flexDirection: "column",
+                minHeight: 0,
+                overflow: "hidden",
+              }}
+            >
+            <div
+              style={{
+                padding: "10px 18px 12px",
+                borderBottom: "1px solid rgba(23, 27, 45, 0.08)",
+                backgroundColor: "#fff",
+              }}
+            >
+              <div
+                style={{
+                  width: "42px",
+                  height: "5px",
+                  borderRadius: "999px",
+                  backgroundColor: "rgba(23, 27, 45, 0.15)",
+                  margin: "0 auto 12px",
+                }}
+              />
+              <div
+                style={{ display: "flex", alignItems: "center", gap: "12px" }}
+              >
+                {shortcutEditorMode === "form" ? (
+                  <button
+                    onClick={backToShortcutList}
+                    style={{
+                      width: "34px",
+                      height: "34px",
+                      borderRadius: "999px",
+                      border: "none",
+                      backgroundColor: "#eef2f8",
+                      color: mobileTheme.colors.lightText,
+                      fontSize: "20px",
+                      cursor: "pointer",
+                      flexShrink: 0,
+                    }}
+                    aria-label="返回快捷键列表"
+                  >
+                    ‹
+                  </button>
+                ) : (
+                  <div
+                    style={{ width: "34px", height: "34px", flexShrink: 0 }}
+                  />
+                )}
+                <div style={{ flex: 1 }}>
+                  <div
+                    style={{
+                      fontSize: "20px",
+                      fontWeight: 800,
+                      textAlign: "center",
+                    }}
+                  >
+                    {shortcutEditorMode === "form"
+                      ? editingShortcutIndex >= 0
+                        ? "编辑快捷键"
+                        : "添加快捷键"
+                      : "快捷按键设置"}
+                  </div>
+                </div>
+                <button
+                  onClick={closeShortcutEditor}
+                  style={{
+                    width: "34px",
+                    height: "34px",
+                    borderRadius: "999px",
+                    border: "none",
+                    backgroundColor: "#eef2f8",
+                    color: mobileTheme.colors.lightText,
+                    fontSize: "20px",
+                    cursor: "pointer",
+                    flexShrink: 0,
+                  }}
+                  aria-label="关闭快捷键设置"
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+
+            <div
+              ref={shortcutEditorScrollRef}
+              data-testid="shortcut-editor-scroll"
+              style={{
+                flex: 1,
+                minHeight: 0,
+                padding: "16px",
+                overflowY: "auto",
+                overflowX: "hidden",
+                WebkitOverflowScrolling: "touch",
+                touchAction: "pan-y",
+                overscrollBehaviorY: "contain",
+                paddingBottom: "calc(20px + env(safe-area-inset-bottom, 0px))",
+              }}
+            >
+              {shortcutEditorMode === "list" ? (
+                <div
+                  data-testid="shortcut-editor-list"
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "14px",
+                    minHeight: "max-content",
+                  }}
+                >
+                  <div>
+                    <div style={{ fontSize: "14px", fontWeight: 700 }}>
+                      当前滚动快捷键
+                    </div>
+                    <div
+                      style={{
+                        fontSize: "12px",
+                        color: mobileTheme.colors.lightMuted,
+                        marginTop: "4px",
+                      }}
+                    >
+                      三行分开管理：第一行工具栏，第二行只放单按键，第三行只放组合键
+                      / 复合动作。
+                    </div>
+                  </div>
+
+                  {SHORTCUT_ROW_ORDER.map((row) => {
+                    const rowMeta = SHORTCUT_ROW_META[row];
+                    const rowActions = draftShortcutActions.filter(
+                      (action) => action.row === row,
+                    );
+                    return (
+                      <div
+                        key={row}
+                        style={{
+                          borderRadius: "20px",
+                          backgroundColor: "#fff",
+                          border: "1px solid rgba(23, 27, 45, 0.08)",
+                          overflow: "hidden",
+                        }}
+                      >
+                        <div
+                          style={{
+                            padding: "16px",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: "12px",
+                            backgroundColor: "#fff",
+                          }}
+                        >
+                          <div>
+                            <div style={{ fontSize: "16px", fontWeight: 800 }}>
+                              {rowMeta.title}
+                            </div>
+                            <div
+                              style={{
+                                fontSize: "12px",
+                                color: mobileTheme.colors.lightMuted,
+                                marginTop: "4px",
+                              }}
+                            >
+                              {rowMeta.summary}
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => openShortcutForm(row)}
+                            style={{
+                              minHeight: "38px",
+                              padding: "0 14px",
+                              borderRadius: "999px",
+                              border: "none",
+                              backgroundColor: "rgba(22, 119, 255, 0.12)",
+                              color: "#1677ff",
+                              fontWeight: 800,
+                              cursor: "pointer",
+                              flexShrink: 0,
+                            }}
+                          >
+                            {rowMeta.addLabel}
+                          </button>
+                        </div>
+
+                        {rowActions.length === 0 ? (
+                          <div
+                            style={{
+                              padding: "0 16px 18px",
+                              fontSize: "13px",
+                              color: mobileTheme.colors.lightMuted,
+                            }}
+                          >
+                            当前还没有内容，点右侧按钮进入详情页添加。
+                          </div>
+                        ) : (
+                          rowActions.map((action, index) => {
+                            const displayMeta = resolveShortcutDisplayMeta(
+                              action.label,
+                              action.sequence,
+                            );
+                            return (
+                              <div
+                                key={action.id}
+                                style={{
+                                  padding: "12px 14px",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "10px",
+                                  borderTop: "1px solid rgba(23, 27, 45, 0.08)",
+                                }}
+                              >
+                                <button
+                                  onClick={
+                                    isBuiltInShortcutAction(action.id)
+                                      ? undefined
+                                      : () => openShortcutForm(row, action)
+                                  }
+                                  aria-label={
+                                    isBuiltInShortcutAction(action.id)
+                                      ? action.label
+                                      : `查看 ${action.label || "未命名快捷键"} 详情`
+                                  }
+                                  style={{
+                                    flex: 1,
+                                    minWidth: 0,
+                                    border: "none",
+                                    background: "transparent",
+                                    padding: 0,
+                                    textAlign: "left",
+                                    cursor: isBuiltInShortcutAction(action.id)
+                                      ? "default"
+                                      : "pointer",
+                                  }}
+                                >
+                                  <div
+                                    style={{
+                                      fontSize: displayMeta.titleUsesKeycap
+                                        ? "28px"
+                                        : "16px",
+                                      lineHeight: displayMeta.titleUsesKeycap
+                                        ? 1
+                                        : 1.2,
+                                      fontWeight: displayMeta.titleUsesKeycap
+                                        ? 700
+                                        : 600,
+                                      color: mobileTheme.colors.lightText,
+                                    }}
+                                  >
+                                    {displayMeta.titleUsesKeycap
+                                      ? renderShortcutVisualNode(
+                                          displayMeta.titleSourceLabel,
+                                          "list",
+                                        )
+                                      : displayMeta.title}
+                                  </div>
+                                  {displayMeta.subtitle ? (
+                                    <div
+                                      style={{
+                                        fontSize: "12px",
+                                        color: mobileTheme.colors.lightMuted,
+                                        marginTop: displayMeta.titleUsesKeycap
+                                          ? "4px"
+                                          : "3px",
+                                        lineHeight: 1.2,
+                                      }}
+                                    >
+                                      {displayMeta.subtitle}
+                                    </div>
+                                  ) : null}
+                                </button>
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "flex-end",
+                                    gap: "6px",
+                                    flexWrap: "wrap",
+                                    flexShrink: 0,
+                                  }}
+                                >
+                                  {!isBuiltInShortcutAction(action.id) ? (
+                                    <button
+                                      onClick={() =>
+                                        openShortcutForm(row, action)
+                                      }
+                                      style={compactOverlayTextButton(
+                                        "rgba(22, 119, 255, 0.12)",
+                                        "#1677ff",
+                                      )}
+                                      aria-label={`编辑 ${action.label || "未命名快捷键"}`}
+                                    >
+                                      编辑
+                                    </button>
+                                  ) : null}
+                                  <button
+                                    onClick={() =>
+                                      persistShortcutActions(
+                                        moveShortcutActionWithinRow(
+                                          draftShortcutActions,
+                                          row,
+                                          index,
+                                          index - 1,
+                                        ),
+                                      )
+                                    }
+                                    disabled={index === 0}
+                                    style={compactOverlayIconButton(
+                                      index === 0,
+                                    )}
+                                    aria-label={`上移 ${action.label}`}
+                                  >
+                                    ↑
+                                  </button>
+                                  <button
+                                    onClick={() =>
+                                      persistShortcutActions(
+                                        moveShortcutActionWithinRow(
+                                          draftShortcutActions,
+                                          row,
+                                          index,
+                                          index + 1,
+                                        ),
+                                      )
+                                    }
+                                    disabled={index === rowActions.length - 1}
+                                    style={compactOverlayIconButton(
+                                      index === rowActions.length - 1,
+                                    )}
+                                    aria-label={`下移 ${action.label}`}
+                                  >
+                                    ↓
+                                  </button>
+                                  {!isBuiltInShortcutAction(action.id) ? (
+                                    <button
+                                      onClick={() =>
+                                        persistShortcutActions(
+                                          draftShortcutActions.filter(
+                                            (item) => item.id !== action.id,
+                                          ),
+                                        )
+                                      }
+                                      style={compactOverlayTextButton(
+                                        "rgba(255, 124, 146, 0.12)",
+                                        mobileTheme.colors.danger,
+                                      )}
+                                      aria-label={`删除 ${action.label}`}
+                                    >
+                                      删除
+                                    </button>
+                                  ) : null}
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div
+                  style={{
+                    borderRadius: "24px",
+                    backgroundColor: "#fff",
+                    border: "1px solid rgba(23, 27, 45, 0.08)",
+                    padding: "18px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "14px",
+                  }}
+                >
+                  <input
+                    value={draftShortcutLabel}
+                    onChange={(event) =>
+                      setDraftShortcutLabel(event.target.value)
+                    }
+                    placeholder="快捷键名称 / 显示名称"
+                    style={lightEditorInputStyle()}
+                  />
+                  <div
+                    style={{
+                      borderRadius: "16px",
+                      backgroundColor: "#eef2f8",
+                      padding: "12px 14px",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "6px",
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: "13px",
+                        fontWeight: 800,
+                        color: "#1677ff",
+                      }}
+                    >
+                      {draftShortcutRowMeta.formTag}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: "12px",
+                        color: mobileTheme.colors.lightMuted,
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      {draftShortcutRowMeta.formHint}
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr 1fr",
+                      gap: "8px",
+                      borderRadius: "18px",
+                      backgroundColor: "#eef2f5",
+                      padding: "6px",
+                    }}
+                  >
+                    <button
+                      onClick={() => setShortcutEditorTab("keyboard")}
+                      style={{
+                        minHeight: "44px",
+                        borderRadius: "14px",
+                        border: "none",
+                        backgroundColor:
+                          shortcutEditorTab === "keyboard"
+                            ? "#ffffff"
+                            : "transparent",
+                        color:
+                          shortcutEditorTab === "keyboard"
+                            ? "#1677ff"
+                            : mobileTheme.colors.lightText,
+                        fontWeight: 800,
+                        cursor: "pointer",
+                        boxShadow:
+                          shortcutEditorTab === "keyboard"
+                            ? "0 1px 2px rgba(0,0,0,0.06)"
+                            : "none",
+                      }}
+                    >
+                      键盘按键
+                    </button>
+                    <button
+                      onClick={() => setShortcutEditorTab("common")}
+                      style={{
+                        minHeight: "44px",
+                        borderRadius: "14px",
+                        border: "none",
+                        backgroundColor:
+                          shortcutEditorTab === "common"
+                            ? "#ffffff"
+                            : "transparent",
+                        color:
+                          shortcutEditorTab === "common"
+                            ? "#1677ff"
+                            : mobileTheme.colors.lightText,
+                        fontWeight: 800,
+                        cursor: "pointer",
+                        boxShadow:
+                          shortcutEditorTab === "common"
+                            ? "0 1px 2px rgba(0,0,0,0.06)"
+                            : "none",
+                      }}
+                    >
+                      系统操作
+                    </button>
+                  </div>
+                  <textarea
+                    value={draftShortcutBuild.preview || draftShortcutSequence}
+                    readOnly
+                    placeholder={
+                      draftShortcutRow === "top-scroll"
+                        ? "点击下方按钮选择单个按键"
+                        : "点击下方按钮组合快捷键"
+                    }
+                    style={{
+                      ...lightEditorInputStyle(),
+                      minHeight: "74px",
+                      whiteSpace: "pre-wrap",
+                    }}
+                  />
+
+                  <div
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      gap: "8px",
+                      alignItems: "center",
+                    }}
+                  >
+                    {draftShortcutTokens.length === 0 ? (
+                      <div
+                        style={{
+                          fontSize: "12px",
+                          color: mobileTheme.colors.lightMuted,
+                        }}
+                      >
+                        当前还没有加入特殊键
+                      </div>
+                    ) : (
+                      draftShortcutTokens.map((token, index) => (
+                        <button
+                          key={`${token.label}-${index}`}
+                          onClick={() => removeShortcutToken(index)}
+                          style={floatingPillButton(
+                            "rgba(22, 119, 255, 0.08)",
+                            "#1677ff",
+                          )}
+                        >
+                          {token.label} ×
+                        </button>
+                      ))
+                    )}
+                    <button
+                      onClick={clearShortcutTokens}
+                      disabled={draftShortcutTokens.length === 0}
+                      style={floatingPillButton(
+                        draftShortcutTokens.length === 0
+                          ? "#f3f5f9"
+                          : "#eef2f8",
+                        draftShortcutTokens.length === 0
+                          ? "#c3cad7"
+                          : mobileTheme.colors.lightText,
+                      )}
+                    >
+                      清空
+                    </button>
+                  </div>
+
+                  {draftShortcutEffectiveError ? (
+                    <div
+                      style={{
+                        fontSize: "12px",
+                        color: mobileTheme.colors.danger,
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      {draftShortcutEffectiveError}
+                    </div>
+                  ) : null}
+
+                  {shortcutEditorTab === "keyboard" ? (
+                    <>
+                      <div style={{ display: "flex", gap: "8px" }}>
+                        <input
+                          value={draftShortcutTextInput}
+                          onChange={(event) =>
+                            setDraftShortcutTextInput(event.target.value)
+                          }
+                          placeholder={draftShortcutRowMeta.inputPlaceholder}
+                          style={{
+                            ...lightEditorInputStyle(),
+                            minHeight: "40px",
+                            flex: 1,
+                          }}
+                        />
+                        <button
+                          onClick={appendShortcutTextInput}
+                          style={{
+                            minWidth: "84px",
+                            minHeight: "40px",
+                            border: "none",
+                            borderRadius: "14px",
+                            backgroundColor: "rgba(22, 119, 255, 0.12)",
+                            color: "#1677ff",
+                            fontWeight: 800,
+                            cursor: "pointer",
+                          }}
+                        >
+                          加入
+                        </button>
+                      </div>
+
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "repeat(5, minmax(0, 1fr))",
+                          gap: "6px",
+                        }}
+                      >
+                        {availableKeyboardShortcutTokens.map((token) => (
+                          <button
+                            key={`${token.label}-${token.sequence}`}
+                            onClick={() => appendShortcutToken(token)}
+                            aria-label={token.label}
+                            style={shortcutTokenGridButton(
+                              token.kind === "modifier",
+                              draftShortcutTokens.some(
+                                (current) =>
+                                  current.label === token.label &&
+                                  current.sequence === token.sequence,
+                              ),
+                            )}
+                          >
+                            <span
+                              style={{
+                                display: "block",
+                                width: "100%",
+                                lineHeight: 1.1,
+                                textAlign: "center",
+                              }}
+                            >
+                              {renderShortcutVisualNode(token.label, "token")}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+                        gap: "6px",
+                      }}
+                    >
+                      {availableCommonShortcutTokens.map((token) => (
+                        <button
+                          key={`${token.label}-${token.sequence}`}
+                          onClick={() => appendShortcutToken(token)}
+                          style={shortcutTokenGridButton(
+                            false,
+                            draftShortcutTokens.some(
+                              (current) =>
+                                current.label === token.label &&
+                                current.sequence === token.sequence,
+                            ),
+                          )}
+                        >
+                          {token.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  <button
+                    onClick={saveShortcutForm}
+                    disabled={
+                      !draftShortcutBuild.sequence ||
+                      Boolean(draftShortcutEffectiveError)
+                    }
+                    style={{
+                      width: "100%",
+                      minHeight: "52px",
+                      border: "none",
+                      borderRadius: "16px",
+                      backgroundColor: "#1677ff",
+                      color: "#fff",
+                      fontWeight: 800,
+                      fontSize: "18px",
+                      cursor:
+                        !draftShortcutBuild.sequence ||
+                        draftShortcutEffectiveError
+                          ? "not-allowed"
+                          : "pointer",
+                      opacity:
+                        !draftShortcutBuild.sequence ||
+                        draftShortcutEffectiveError
+                          ? 0.55
+                          : 1,
+                      marginTop: "6px",
+                    }}
+                  >
+                    {editingShortcutIndex >= 0 ? "保存快捷键" : "添加快捷键"}
+                  </button>
+                </div>
+              )}
+            </div>
+            </div>
+          </div>
+        </ViewportOverlayPortal>
+      )}
+
+      {floatingMenuOpen && !editorOpen && (
+        <>
+          <div
+            data-quickbar-allow-pointer="true"
+            onClick={() => setFloatingMenuOpen(false)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 129,
+              backgroundColor: "rgba(5, 8, 14, 0.18)",
+            }}
+          />
+          <div
+            ref={floatingPanelRef}
+            className="zterm-quick-input-panel"
+            data-quickbar-allow-pointer="true"
+            style={{
+              position: "fixed",
+              right: "12px",
+              bottom: `calc(${floatingPanelBottomPx + Math.max(0, keyboardInsetPx)}px + env(safe-area-inset-bottom, 0px))`,
+              zIndex: 130,
+              width: "min(320px, calc(100vw - 24px))",
+              maxHeight: `min(500px, calc(100dvh - ${Math.max(156, keyboardInsetPx + 64)}px))`,
+              borderRadius: "18px",
+              backgroundColor: "rgba(23, 27, 45, 0.96)",
+              color: "#fff",
+              boxShadow: "0 20px 50px rgba(0,0,0,0.32)",
+              display: "flex",
+              flexDirection: "column",
+              minHeight: 0,
+              overflow: "hidden",
+              border: "1px solid rgba(255,255,255,0.08)",
+            }}
+          >
+            <div
+              style={{
+                padding: "10px 10px 8px",
+                borderBottom: "1px solid rgba(255,255,255,0.08)",
+                display: "flex",
+                flexDirection: "column",
+                gap: "8px",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "10px",
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: "15px", fontWeight: 800 }}>
+                    快捷输入
+                  </div>
+                  {copyDebugLabel ? (
+                    <div
+                      style={{
+                        marginTop: "4px",
+                        fontSize: "11px",
+                        color: "rgba(134,239,172,0.95)",
+                      }}
+                    >
+                      {copyDebugLabel}
+                    </div>
+                  ) : null}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setFloatingMenuOpen(false)}
+                  style={{
+                    width: "34px",
+                    height: "34px",
+                    borderRadius: "999px",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                    backgroundColor: "rgba(255,255,255,0.08)",
+                    color: "#fff",
+                    fontSize: "18px",
+                    fontWeight: 800,
+                    cursor: "pointer",
+                    flexShrink: 0,
+                  }}
+                  aria-label="关闭快捷输入"
+                >
+                  ×
+                </button>
+              </div>
+
+              <div
+                className="zterm-quick-input-editor-shell"
+                style={{
+                  borderRadius: "18px",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  backgroundColor: "rgba(14, 19, 31, 0.88)",
+                  boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.02)",
+                  padding: "6px",
+                }}
+              >
+                <textarea
+                  ref={quickInputTextareaRef}
+                  value={quickInputValue}
+                  onChange={(event) =>
+                    persistQuickInputValue(event.target.value)
+                  }
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !event.shiftKey) {
+                      event.preventDefault();
+                      sendSessionDraft();
+                    }
+                  }}
+                  placeholder="预输入内容，按 session 持久化"
+                  style={{
+                    width: "100%",
+                    minHeight: "86px",
+                    maxHeight: "160px",
+                    resize: "vertical",
+                    padding: "9px 10px",
+                    borderRadius: "12px",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                    backgroundColor: "rgba(255,255,255,0.04)",
+                    color: "#fff",
+                    fontSize: "14px",
+                    whiteSpace: "pre-wrap",
+                    lineHeight: 1.35,
+                  }}
+                />
+              </div>
+
+              <div style={{ display: "flex", gap: "8px" }}>
+                <button
+                  onClick={() => {
+                    setFloatingMenuOpen(false);
+                    onOpenScheduleComposer?.(quickInputValueRef.current);
+                  }}
+                  disabled={!activeSessionId}
+                  style={{
+                    flex: 1,
+                    minHeight: "36px",
+                    border: "1px solid rgba(113, 164, 255, 0.24)",
+                    borderRadius: "12px",
+                    backgroundColor: "rgba(113, 164, 255, 0.12)",
+                    color: "#8db7ff",
+                    fontWeight: 800,
+                    opacity: !activeSessionId ? 0.45 : 1,
+                    cursor: !activeSessionId ? "not-allowed" : "pointer",
+                  }}
+                >
+                  定时
+                </button>
+                <button
+                  onClick={() => {
+                    sendSessionDraft();
+                  }}
+                  style={{
+                    flex: 1,
+                    minHeight: "36px",
+                    border: "1px solid rgba(31,214,122,0.18)",
+                    borderRadius: "12px",
+                    backgroundColor: "rgba(31,214,122,0.18)",
+                    color: mobileTheme.colors.accent,
+                    fontWeight: 800,
+                  }}
+                >
+                  发送
+                </button>
+              </div>
+            </div>
+
+            {splitAvailable && (
+              <div
+                style={{
+                  padding: "8px 10px 0",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "6px",
+                  alignItems: "stretch",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: "8px",
+                    alignItems: "center",
+                  }}
+                >
+                  {normalizedSplitCountOptions.map((count) => {
+                    const active = count === currentSplitCount;
+                    const disabled = isRemoteWindowTerminalOnlyAction(`split-count-${count}`);
+                    return (
+                      <button
+                        key={`split-count-${count}`}
+                        type="button"
+                        onClick={() => {
+                          if (disabled) {
+                            return;
+                          }
+                          onSetSplitCount?.(count);
+                          setFloatingMenuOpen(false);
+                        }}
+                        disabled={disabled}
+                        aria-label={`${count} 分屏`}
+                        aria-disabled={disabled}
+                        style={{
+                          minWidth: "72px",
+                          minHeight: "34px",
+                          padding: "0 10px",
+                          border: `1px solid ${active ? "rgba(113, 164, 255, 0.28)" : "rgba(255,255,255,0.08)"}`,
+                          borderRadius: "14px",
+                          backgroundColor: active
+                            ? "rgba(113, 164, 255, 0.18)"
+                            : disabled
+                              ? "rgba(68, 74, 86, 0.48)"
+                            : "rgba(31, 38, 53, 0.82)",
+                          color: disabled ? "rgba(218, 224, 235, 0.46)" : active ? "#8db7ff" : "#fff",
+                          fontWeight: 800,
+                          opacity: disabled ? 0.58 : 1,
+                          cursor: disabled ? "not-allowed" : "pointer",
+                        }}
+                      >
+                        {count} 分屏
+                      </button>
+                    );
+                  })}
+                  {normalizedSplitCountOptions.length === 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (isRemoteWindowTerminalOnlyAction("split-toggle")) {
+                          return;
+                        }
+                        onToggleSplitLayout?.();
+                        setFloatingMenuOpen(false);
+                      }}
+                      disabled={isRemoteWindowTerminalOnlyAction("split-toggle")}
+                      aria-disabled={isRemoteWindowTerminalOnlyAction("split-toggle")}
+                      style={{
+                        flex: 1,
+                        minHeight: "40px",
+                        border: "1px solid rgba(113, 164, 255, 0.24)",
+                        borderRadius: "14px",
+                        backgroundColor: isRemoteWindowTerminalOnlyAction("split-toggle")
+                          ? "rgba(68, 74, 86, 0.48)"
+                          : splitVisible
+                          ? "rgba(113, 164, 255, 0.18)"
+                          : "rgba(31, 38, 53, 0.82)",
+                        color: isRemoteWindowTerminalOnlyAction("split-toggle")
+                          ? "rgba(218, 224, 235, 0.46)"
+                          : splitVisible ? "#8db7ff" : "#fff",
+                        fontWeight: 800,
+                        opacity: isRemoteWindowTerminalOnlyAction("split-toggle") ? 0.58 : 1,
+                        cursor: isRemoteWindowTerminalOnlyAction("split-toggle") ? "not-allowed" : "pointer",
+                      }}
+                    >
+                      {splitVisible ? "关闭分屏" : "开启分屏"}
+                    </button>
+                  ) : null}
+                </div>
+                {splitVisible && onCycleSplitPane ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onCycleSplitPane();
+                      setFloatingMenuOpen(false);
+                    }}
+                    style={{
+                      width: "110px",
+                      minHeight: "34px",
+                      border: "1px solid rgba(255,255,255,0.08)",
+                      borderRadius: "14px",
+                      backgroundColor: "rgba(22, 28, 41, 0.92)",
+                      color: "#fff",
+                      fontWeight: 700,
+                    }}
+                  >
+                    切换副屏
+                  </button>
+                ) : null}
+              </div>
+            )}
+
+            <div style={{ padding: "8px 10px 0", display: "flex", gap: "8px", alignItems: "center" }}>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: "6px",
+                  flex: 1,
+                  minWidth: 0,
+                  padding: "3px",
+                  borderRadius: "13px",
+                  backgroundColor: "rgba(14, 19, 31, 0.72)",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                }}
+              >
+                <button
+                  onClick={() => setFloatingPanelTab("quick-actions")}
+                  style={floatingPillButton(
+                    floatingPanelTab === "quick-actions"
+                      ? "rgba(31,214,122,0.18)"
+                      : "rgba(31, 38, 53, 0.82)",
+                    floatingPanelTab === "quick-actions"
+                      ? mobileTheme.colors.accent
+                      : "#fff",
+                  )}
+                >
+                  快捷
+                </button>
+                <button
+                  onClick={() => setFloatingPanelTab("clipboard")}
+                  style={floatingPillButton(
+                    floatingPanelTab === "clipboard"
+                      ? "rgba(113, 164, 255, 0.18)"
+                      : "transparent",
+                    floatingPanelTab === "clipboard"
+                      ? "#8db7ff"
+                      : "#fff",
+                  )}
+                >
+                  剪贴板
+                </button>
+              </div>
+            </div>
+
+            <div
+              data-testid="floating-quick-menu-scroll"
+              style={{
+                flex: 1,
+                minHeight: 0,
+                padding: "8px 10px 10px",
+                overflowY: "auto",
+                WebkitOverflowScrolling: "touch",
+                touchAction: "pan-y",
+                maxHeight: `${10 * 50}px`,
+                display: "flex",
+                flexDirection: "column",
+                gap: "6px",
+              }}
+            >
+              {floatingPanelTab === "quick-actions" ? (
+                sortedQuickActions.length === 0 ? (
+                  <div style={{ height: "8px" }} />
+                ) : (
+                  sortedQuickActions.map((action) => {
+                    const draftAction = {
+                      ...action,
+                      textInput: action.sequence,
+                    };
+                    return (
+                      <div
+                        key={action.id}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "8px",
+                        }}
+                      >
+                        <button
+                          onClick={() => {
+                            handleQuickActionDoubleTap(
+                              action.id,
+                              action.sequence,
+                            );
+                          }}
+                          style={{
+                            flex: 1,
+                            minWidth: 0,
+                            minHeight: "36px",
+                            border: "none",
+                            borderRadius: "14px",
+                            backgroundColor: "rgba(255,255,255,0.08)",
+                            color: "#fff",
+                            padding: "0 10px",
+                            textAlign: "left",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: "8px",
+                            fontWeight: 700,
+                            cursor: "pointer",
+                          }}
+                        >
+                          <span
+                            style={{
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {action.label || "未命名"}
+                          </span>
+                          <span
+                            style={{
+                              fontSize: "11px",
+                              color: "rgba(255,255,255,0.55)",
+                              flexShrink: 0,
+                            }}
+                          >
+                            {formatSnippetPreview(action.sequence) || "(空)"}
+                          </span>
+                        </button>
+                        <button
+                          onClick={() => openEditor("edit", draftAction)}
+                          style={{
+                            width: "36px",
+                            height: "36px",
+                            borderRadius: "12px",
+                            border: "none",
+                            backgroundColor: "rgba(255,255,255,0.1)",
+                            color: "#fff",
+                            fontSize: "16px",
+                            cursor: "pointer",
+                            flexShrink: 0,
+                          }}
+                          aria-label={`Edit ${action.label || "quick action"}`}
+                        >
+                          ✎
+                        </button>
+                      </div>
+                    );
+                  })
+                )
+              ) : (
+                <>
+                  <button
+                    onClick={() => {
+                      void captureSystemClipboard();
+                    }}
+                    style={{
+                      minHeight: "40px",
+                      border: "none",
+                      borderRadius: "14px",
+                      backgroundColor: "rgba(255,255,255,0.12)",
+                      color: "#fff",
+                      fontWeight: 800,
+                    }}
+                  >
+                    {clipboardBusy ? "读取中…" : "读取系统剪贴板"}
+                  </button>
+                  {clipboardError && (
+                    <div
+                      style={{
+                        fontSize: "12px",
+                        color: "rgba(255, 173, 96, 0.92)",
+                        lineHeight: 1.4,
+                      }}
+                    >
+                      {clipboardError}
+                    </div>
+                  )}
+                  {clipboardHistory.length === 0 ? (
+                    <div style={{ height: "8px" }} />
+                  ) : (
+                    clipboardHistory.map((entry, index) => (
+                      <button
+                        key={`${index}-${entry.slice(0, 12)}`}
+                        onClick={() => handleClipboardDoubleTap(entry, index)}
+                        style={{
+                          width: "100%",
+                          minHeight: "46px",
+                          border: "none",
+                          borderRadius: "14px",
+                          backgroundColor: "rgba(255,255,255,0.08)",
+                          color: "#fff",
+                          padding: "10px 14px",
+                          textAlign: "left",
+                          fontWeight: 600,
+                          lineHeight: 1.35,
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontSize: "11px",
+                            color: "rgba(255,255,255,0.5)",
+                            marginBottom: "4px",
+                          }}
+                        >
+                          Clipboard #{index + 1}
+                        </div>
+                        <div
+                          style={{
+                            whiteSpace: "pre-wrap",
+                            wordBreak: "break-word",
+                          }}
+                        >
+                          {entry}
+                        </div>
+                      </button>
+                    ))
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+
+      {!editorOpen && !shortcutEditorOpen && (
+        <>
+        <button
+          data-quickbar-allow-pointer="true"
+          type="button"
+          tabIndex={-1}
+          disabled={!fileTransferSupported}
+          onFocus={(event) => event.currentTarget.blur()}
+          onPointerDown={(event) => {
+            if (event.pointerType === "touch") {
+              return;
+            }
+            event.preventDefault();
+            blurCurrentTarget(event.currentTarget);
+            event.currentTarget.setPointerCapture(event.pointerId);
+            const rect = event.currentTarget.getBoundingClientRect();
+            floatingBubbleDragRef.current = {
+              pointerId: event.pointerId,
+              active: false,
+              startX: event.clientX,
+              startY: event.clientY,
+              originX: rect.left,
+              originY: rect.top,
+              width: rect.width || FLOATING_BUBBLE_SIZE,
+              height: rect.height || FLOATING_BUBBLE_SIZE,
+            };
+          }}
+          onPointerMove={(event) => {
+            if (event.pointerType === "touch") {
+              return;
+            }
+            const drag = floatingBubbleDragRef.current;
+            if (drag.pointerId !== event.pointerId) {
+              return;
+            }
+            const deltaX = event.clientX - drag.startX;
+            const deltaY = event.clientY - drag.startY;
+            if (
+              !drag.active &&
+              Math.hypot(deltaX, deltaY) >= FLOATING_BUBBLE_DRAG_THRESHOLD_PX
+            ) {
+              drag.active = true;
+              suppressBubbleClickRef.current = true;
+            }
+            if (!drag.active) {
+              return;
+            }
+            event.preventDefault();
+            setFloatingBubblePosition(
+              clampFloatingBubblePosition(
+                drag.originX + deltaX,
+                drag.originY + deltaY,
+                drag.width,
+                drag.height,
+                keyboardInsetPx,
+              ),
+            );
+          }}
+          onPointerUp={(event) => {
+            if (event.pointerType === "touch") {
+              return;
+            }
+            if (floatingBubbleDragRef.current.pointerId === event.pointerId) {
+              if (floatingBubbleDragRef.current.active) {
+                suppressBubbleClickRef.current = true;
+                window.setTimeout(() => {
+                  suppressBubbleClickRef.current = false;
+                }, 180);
+              }
+              floatingBubbleDragRef.current.active = false;
+              floatingBubbleDragRef.current.pointerId = -1;
+            }
+            event.currentTarget.releasePointerCapture(event.pointerId);
+          }}
+          onPointerCancel={(event) => {
+            if (event.pointerType === "touch") {
+              return;
+            }
+            floatingBubbleDragRef.current.active = false;
+            floatingBubbleDragRef.current.pointerId = -1;
+            try {
+              event.currentTarget.releasePointerCapture(event.pointerId);
+            } catch (error) {
+              console.warn(
+                "[TerminalQuickBar] Failed to release file browser bubble pointer capture:",
+                error,
+              );
+            }
+          }}
+          onClick={() => {
+            if (!fileTransferSupported || suppressBubbleClickRef.current) {
+              return;
+            }
+            setFloatingMenuOpen(false);
+            onOpenFileTransfer?.("browser");
+          }}
+          onTouchStart={(event) => {
+            event.stopPropagation();
+            const touch = event.touches[0];
+            if (!touch) {
+              return;
+            }
+            const rect = event.currentTarget.getBoundingClientRect();
+            floatingBubbleTouchDragRef.current = {
+              active: false,
+              moved: false,
+              startX: touch.clientX,
+              startY: touch.clientY,
+              lastX: touch.clientX,
+              lastY: touch.clientY,
+              originX: rect.left,
+              originY: rect.top,
+              width: rect.width || FLOATING_BUBBLE_SIZE,
+              height: rect.height || FLOATING_BUBBLE_SIZE,
+            };
+          }}
+          onTouchMove={(event) => {
+            const touch = event.touches[0];
+            const drag = floatingBubbleTouchDragRef.current;
+            if (!touch) {
+              return;
+            }
+            drag.lastX = touch.clientX;
+            drag.lastY = touch.clientY;
+            const deltaX = touch.clientX - drag.startX;
+            const deltaY = touch.clientY - drag.startY;
+            if (
+              !drag.active &&
+              Math.hypot(deltaX, deltaY) >= FLOATING_BUBBLE_DRAG_THRESHOLD_PX
+            ) {
+              drag.active = true;
+              suppressBubbleClickRef.current = true;
+            }
+            if (!drag.active) {
+              return;
+            }
+            event.preventDefault();
+            event.stopPropagation();
+            drag.moved = true;
+            setFloatingBubblePosition(
+              clampFloatingBubblePosition(
+                drag.originX + deltaX,
+                drag.originY + deltaY,
+                drag.width,
+                drag.height,
+                keyboardInsetPx,
+              ),
+            );
+          }}
+          onTouchEnd={() => {
+            if (floatingBubbleTouchDragRef.current.active) {
+              suppressBubbleClickRef.current = true;
+              window.setTimeout(() => {
+                suppressBubbleClickRef.current = false;
+              }, 180);
+            }
+            floatingBubbleTouchDragRef.current.active = false;
+            floatingBubbleTouchDragRef.current.moved = false;
+          }}
+          onTouchCancel={() => {
+            floatingBubbleTouchDragRef.current.active = false;
+            floatingBubbleTouchDragRef.current.moved = false;
+          }}
+            style={{
+              position: "fixed",
+              right: collapsed
+                ? `${FLOATING_BUBBLE_MARGIN}px`
+                : floatingBubblePosition.x === null
+                  ? `${FLOATING_BUBBLE_MARGIN}px`
+                  : "auto",
+              bottom: collapsed
+                ? `calc(${FLOATING_BUBBLE_MARGIN}px + env(safe-area-inset-bottom, 0px))`
+                : floatingBubblePosition.y === null
+                  ? `calc(${floatingBubbleBottomPx + Math.max(0, keyboardInsetPx)}px + env(safe-area-inset-bottom, 0px))`
+                  : "auto",
+              left:
+                collapsed || floatingBubblePosition.x === null
+                  ? "auto"
+                  : `${floatingBubblePosition.x}px`,
+              top:
+                collapsed || floatingBubblePosition.y === null
+                  ? "auto"
+                  : `${floatingBubblePosition.y}px`,
+              zIndex: 128,
+              width: `${FLOATING_BUBBLE_SIZE}px`,
+              height: `${FLOATING_BUBBLE_SIZE}px`,
+              borderRadius: "999px",
+              border: "1px solid rgba(255,255,255,0.12)",
+              background: "rgba(18, 24, 38, 0.72)",
+              color: "#fff",
+              fontSize: "20px",
+              fontWeight: 800,
+              boxShadow: "0 8px 18px rgba(0,0,0,0.24)",
+              transform: "none",
+              touchAction: "none",
+              cursor: fileTransferSupported ? "pointer" : "not-allowed",
+              opacity: fileTransferSupported ? 1 : 0.58,
+            }}
+            aria-label="文件浏览"
+            aria-disabled={!fileTransferSupported}
+          >
+            📁
+          </button>
+        </>
+      )}
+
+      {shellMode === "inline" && !shellCollapsed && !floatingMenuOpen && (
+        <div
+          data-testid="terminal-quickbar-shell-rows"
+          data-quickbar-pan-surface="true"
+          onTouchStart={handleQuickBarRowsTouchStart}
+          onTouchMove={handleQuickBarRowsTouchMove}
+          onTouchEnd={handleQuickBarRowsTouchEnd}
+          onTouchCancel={resetQuickBarRowsGesture}
+          style={{ position: "relative", touchAction: "pan-y" }}
+        >
+          {landscape ? (
+            <>
+              <div
+                data-quickbar-shell-row="true"
+                style={{
+                  minHeight: "40px",
+                  display: "flex",
+                  alignItems: "stretch",
+                  gap: `${QUICK_BAR_ROW_GAP}px`,
+                  padding: `0 ${QUICK_BAR_SIDE_PADDING}px`,
+                  marginBottom: `${QUICK_BAR_ROW_GAP}px`,
+                }}
+              >
+                <div
+                  data-testid="quickbar-fixed-cluster-top"
+                  data-quickbar-fixed-cluster="true"
+                  style={fixedClusterStyle}
+                >
+                  {topFixedActions.map((action) =>
+                    renderBaseActionButton(action, {
+                      fixed: true,
+                      compact: true,
+                    }),
+                  )}
+                </div>
+                <div style={scrollTrackShellStyle}>
+                  <div
+                    data-quickbar-scroll-track="true"
+                    style={scrollTrackStyle}
+                  >
+                    {mergedScrollActions.map((action) =>
+                      renderBaseActionButton(action, { compact: true }),
+                    )}
+                    {renderBaseActionButton(TOP_SHORTCUT_EDITOR_ENTRY, {
+                      compact: true,
+                      ariaLabel: "编辑第一行快捷按钮",
+                    })}
+                    {renderBaseActionButton(BOTTOM_SHORTCUT_EDITOR_ENTRY, {
+                      compact: true,
+                      ariaLabel: "编辑第二行快捷按钮",
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              <div
+                data-quickbar-shell-row="true"
+                style={{
+                  minHeight: "40px",
+                  display: "flex",
+                  alignItems: "stretch",
+                  gap: `${QUICK_BAR_ROW_GAP}px`,
+                  padding: `2px ${QUICK_BAR_SIDE_PADDING}px 4px`,
+                  backgroundColor: "rgba(255,255,255,0.02)",
+                }}
+              >
+                <div
+                  data-testid="quickbar-fixed-cluster-bottom"
+                  data-quickbar-fixed-cluster="true"
+                  style={fixedClusterStyle}
+                >
+                  {bottomFixedActions.map((action) =>
+                    renderBaseActionButton(action, {
+                      fixed: true,
+                      compact: true,
+                    }),
+                  )}
+                </div>
+                <div style={scrollTrackShellStyle}>
+                  <div
+                    data-testid="quickbar-tool-row"
+                    data-quickbar-scroll-track="true"
+                    style={scrollTrackStyle}
+                  >
+                    {renderBaseActionButton(
+                      { id: "terminal-scroll-up", label: "↑滚", sequence: encodeTerminalSgrMouseWheel("up", 1, 1) },
+                      { compact: true },
+                    )}
+                    {renderBaseActionButton(
+                      { id: "terminal-scroll-down", label: "↓滚", sequence: encodeTerminalSgrMouseWheel("down", 1, 1) },
+                      { compact: true },
+                    )}
+                    {renderBaseActionButton(
+                      { id: "attachment-drawer", label: "📎", sequence: "" },
+                      { compact: true },
+                    )}
+                    {splitToolActions.map((action) =>
+                      renderBaseActionButton(action, { compact: true }),
+                    )}
+                    {transferToolActions.map((action) =>
+                      renderTransferToolButton(action, { compact: true }),
+                    )}
+                    {toolRowActions.map((action) =>
+                      renderBaseActionButton(action, { compact: true }),
+                    )}
+                  </div>
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div
+                data-quickbar-shell-row="true"
+                style={{
+                  minHeight: "40px",
+                  display: "flex",
+                  alignItems: "stretch",
+                  gap: `${QUICK_BAR_ROW_GAP}px`,
+                  padding: `0 ${QUICK_BAR_SIDE_PADDING}px`,
+                  marginBottom: `${QUICK_BAR_ROW_GAP}px`,
+                }}
+              >
+                <div
+                  data-testid="quickbar-fixed-cluster-top"
+                  data-quickbar-fixed-cluster="true"
+                  style={fixedClusterStyle}
+                >
+                  {topFixedActions.map((action) =>
+                    renderBaseActionButton(action, {
+                      fixed: true,
+                      compact: true,
+                    }),
+                  )}
+                </div>
+                <div style={scrollTrackShellStyle}>
+                  <div
+                    data-quickbar-scroll-track="true"
+                    style={scrollTrackStyle}
+                  >
+                    {topScrollActions.map((action) =>
+                      renderBaseActionButton(action, { compact: true }),
+                    )}
+                    {renderBaseActionButton(TOP_SHORTCUT_EDITOR_ENTRY, {
+                      compact: true,
+                      ariaLabel: "编辑第一行快捷按钮",
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              <div
+                data-quickbar-shell-row="true"
+                style={{
+                  minHeight: "40px",
+                  display: "flex",
+                  alignItems: "stretch",
+                  gap: `${QUICK_BAR_ROW_GAP}px`,
+                  padding: `2px ${QUICK_BAR_SIDE_PADDING}px 4px`,
+                  backgroundColor: "rgba(255,255,255,0.02)",
+                }}
+              >
+                <div
+                  data-testid="quickbar-fixed-cluster-bottom"
+                  data-quickbar-fixed-cluster="true"
+                  style={fixedClusterStyle}
+                >
+                  {bottomFixedActions.map((action) =>
+                    renderBaseActionButton(action, {
+                      fixed: true,
+                      compact: true,
+                    }),
+                  )}
+                </div>
+                <div style={scrollTrackShellStyle}>
+                  <div
+                    data-quickbar-scroll-track="true"
+                    style={scrollTrackStyle}
+                  >
+                    {bottomScrollActions.map((action) =>
+                      renderBaseActionButton(action, { compact: true }),
+                    )}
+                    {renderBaseActionButton(BOTTOM_SHORTCUT_EDITOR_ENTRY, {
+                      compact: true,
+                      ariaLabel: "编辑第二行快捷按钮",
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              <div
+                data-quickbar-shell-row="true"
+                style={{
+                  display: "flex",
+                  alignItems: "stretch",
+                  padding: `2px ${QUICK_BAR_SIDE_PADDING}px 4px`,
+                }}
+              >
+                <div style={scrollTrackShellStyle}>
+                  <div
+                    data-testid="quickbar-tool-row"
+                    data-quickbar-scroll-track="true"
+                    style={scrollTrackStyle}
+                  >
+                    {renderBaseActionButton(
+                      { id: "terminal-scroll-up", label: "↑滚", sequence: encodeTerminalSgrMouseWheel("up", 1, 1) },
+                      { compact: true },
+                    )}
+                    {renderBaseActionButton(
+                      { id: "terminal-scroll-down", label: "↓滚", sequence: encodeTerminalSgrMouseWheel("down", 1, 1) },
+                      { compact: true },
+                    )}
+                    {renderBaseActionButton(
+                      { id: "attachment-drawer", label: "📎", sequence: "" },
+                      { compact: true },
+                    )}
+                    {splitToolActions.map((action) =>
+                      renderBaseActionButton(action),
+                    )}
+                    {transferToolActions.map((action) =>
+                      renderTransferToolButton(action),
+                    )}
+                    {toolRowActions.map((action) =>
+                      renderBaseActionButton(action),
+                    )}
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+      {shellMode === "inline" && shellCollapsed && !floatingMenuOpen ? (
+        <>
+          <div
+            data-testid="terminal-quickbar-collapsed-reveal-surface"
+            data-quickbar-allow-pointer="true"
+            onTouchStart={handleCollapsedRevealTouchStart}
+            onTouchMove={handleCollapsedRevealTouchMove}
+            onTouchEnd={handleCollapsedRevealTouchEnd}
+            onTouchCancel={resetCollapsedRevealGesture}
+            onClick={() => onCollapsedChange?.(false)}
+            style={{
+              position: "fixed",
+              left: 0,
+              right: 0,
+              bottom: 0,
+              zIndex: 127,
+              height: `calc(${QUICKBAR_COLLAPSED_REVEAL_SURFACE_HEIGHT_PX}px + env(safe-area-inset-bottom, 0px))`,
+              touchAction: "none",
+            }}
+          />
+          <div
+            data-testid="terminal-quickbar-collapsed-keyboard"
+            style={{
+              position: "fixed",
+              right: `calc(${FLOATING_BUBBLE_SIZE + FLOATING_BUBBLE_MARGIN + 8}px + env(safe-area-inset-right, 0px))`,
+              bottom: `calc(${FLOATING_BUBBLE_MARGIN}px + env(safe-area-inset-bottom, 0px))`,
+              zIndex: 128,
+              width: "78px",
+              height: `${FLOATING_BUBBLE_SIZE}px`,
+            }}
+          >
+            {renderBaseActionButton(
+              { id: "keyboard", label: "键盘", sequence: "" },
+              { fixed: true, compact: true },
+            )}
+          </div>
+        </>
+      ) : null}
+      {toastMessage && (
+        <div
+          style={{
+            position: "fixed",
+            top: "40%",
+            left: "50%",
+            transform: "translate(-50%, -50%)",
+            zIndex: 200,
+            backgroundColor: "rgba(23, 27, 45, 0.92)",
+            color: "#fff",
+            padding: "12px 24px",
+            borderRadius: "16px",
+            fontSize: "15px",
+            fontWeight: 700,
+            pointerEvents: "none",
+            boxShadow: "0 8px 32px rgba(0,0,0,0.32)",
+          }}
+        >
+          {toastMessage}
+        </div>
+      )}
+      {imageUploadBatch ? (
+        <div
+          data-testid="terminal-quickbar-image-upload-progress"
+          style={{
+            position: "fixed",
+            left: "50%",
+            bottom: `calc(${FLOATING_BUBBLE_MARGIN + FLOATING_BUBBLE_SIZE + 20}px + env(safe-area-inset-bottom, 0px))`,
+            transform: "translateX(-50%)",
+            zIndex: 205,
+            minWidth: "220px",
+            maxWidth: "min(86vw, 320px)",
+            padding: "12px 14px",
+            borderRadius: "16px",
+            border: "1px solid rgba(255,255,255,0.1)",
+            background:
+              "linear-gradient(180deg, rgba(18, 24, 38, 0.96), rgba(10, 14, 24, 0.96))",
+            color: "#fff",
+            boxShadow: "0 12px 36px rgba(0,0,0,0.28)",
+            pointerEvents: "none",
+            display: "flex",
+            alignItems: "center",
+            gap: "12px",
+          }}
+        >
+          <div
+            aria-hidden="true"
+            style={{
+              width: "18px",
+              height: "18px",
+              borderRadius: "999px",
+              border: "2px solid rgba(255,255,255,0.22)",
+              borderTopColor: mobileTheme.colors.accent,
+              animation: "terminal-quickbar-spin 0.9s linear infinite",
+              flexShrink: 0,
+            }}
+          />
+          <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: "4px" }}>
+            <div
+              style={{
+                fontSize: "13px",
+                fontWeight: 800,
+                color: "#f4f8ff",
+                whiteSpace: "nowrap",
+              }}
+            >
+              发送图片 {Math.min(imageUploadBatch.completed + 1, imageUploadBatch.total)}/{imageUploadBatch.total}
+            </div>
+            <div
+              style={{
+                fontSize: "12px",
+                color: "rgba(220,232,255,0.78)",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {imageUploadBatch.activeFileName}
+            </div>
+          </div>
+        </div>
+      ) : null}
+      <style>
+        {`@keyframes terminal-quickbar-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}
+      </style>
+    </div>
+  );
+}
+
+export const TerminalQuickBar = memo(TerminalQuickBarComponent);
+TerminalQuickBar.displayName = "TerminalQuickBar";

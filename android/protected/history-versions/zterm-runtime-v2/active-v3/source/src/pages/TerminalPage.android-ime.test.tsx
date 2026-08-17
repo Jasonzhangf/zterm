@@ -1,0 +1,3208 @@
+// @vitest-environment jsdom
+
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import { useState, type ComponentProps } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { STORAGE_KEYS, type RemoteWindowStreamTargetManifest, type Session } from "../lib/types";
+import {
+  TerminalPage as TerminalPageBase,
+  resolveKeyboardLiftPx,
+  resolveLayoutViewportHeight,
+  resolveTerminalHeaderTopInsetPx,
+} from "./TerminalPage";
+import { ImeAnchor } from "../plugins/ImeAnchorPlugin";
+import { RemoteWindowOverlay } from "../components/terminal/RemoteWindowOverlay";
+import type { RemoteWindowUiProps } from "../lib/plugin-remote-window/remote-window-contract";
+import type { TerminalQuickBarProps } from "../components/terminal/TerminalQuickBar";
+import { renderTerminalShellUi } from "../lib/plugin-host/terminal-shell-ui-plugin";
+import { resetClientDebugSnapshotForTests } from "../lib/client-debug-snapshot";
+
+const imeListeners = new Map<string, (event: any) => void>();
+const debugInputListeners = new Map<string, (event: any) => void>();
+const keyboardListeners = new Map<string, (event: any) => void>();
+const renderRemoteWindow = (props: RemoteWindowUiProps) => (
+  <RemoteWindowOverlay {...props} />
+);
+const { nativeClipboardWriteText } = vi.hoisted(() => ({
+  nativeClipboardWriteText: vi.fn(async () => undefined),
+}));
+
+vi.mock("@capacitor/core", () => ({
+  Capacitor: {
+    getPlatform: () => "android",
+    isNativePlatform: () => true,
+  },
+  registerPlugin: () => ({
+    sendInput: vi.fn(async () => ({ ok: true })),
+    addListener: vi.fn(
+      async (eventName: string, listener: (event: any) => void) => {
+        debugInputListeners.set(eventName, listener);
+        return {
+          remove: vi.fn(async () => {
+            debugInputListeners.delete(eventName);
+          }),
+        };
+      },
+    ),
+  }),
+}));
+
+vi.mock("@capacitor/keyboard", () => ({
+  Keyboard: {
+    addListener: vi.fn(
+      async (eventName: string, listener: (event: any) => void) => {
+        keyboardListeners.set(eventName, listener);
+        return {
+          remove: vi.fn(async () => {
+            keyboardListeners.delete(eventName);
+          }),
+        };
+      },
+    ),
+    hide: vi.fn(async () => undefined),
+    show: vi.fn(async () => undefined),
+  },
+}));
+
+vi.mock("../plugins/ImeAnchorPlugin", () => ({
+  ImeAnchor: {
+    show: vi.fn(async () => ({})),
+    hide: vi.fn(async () => undefined),
+    blur: vi.fn(async () => undefined),
+    getState: vi.fn(async () => ({ keyboardVisible: false, keyboardHeight: 0 })),
+    setEditorActive: vi.fn(async () => ({})),
+    addListener: vi.fn(
+      async (eventName: string, listener: (event: any) => void) => {
+        imeListeners.set(eventName, listener);
+        return {
+          remove: vi.fn(async () => {
+            imeListeners.delete(eventName);
+          }),
+        };
+      },
+    ),
+  },
+}));
+
+vi.mock("../plugins/DeviceClipboardPlugin", () => ({
+  DeviceClipboardPlugin: {
+    readText: vi.fn(async () => ({ value: "" })),
+    writeText: nativeClipboardWriteText,
+  },
+  isNativeClipboardSupported: () => true,
+}));
+
+vi.mock("../plugins/StoragePermissionPlugin", () => ({
+  StoragePermissionPlugin: {
+    check: vi.fn(async () => ({
+      granted: true,
+      mode: "manage-external-storage",
+    })),
+    request: vi.fn(async () => ({
+      granted: true,
+      mode: "manage-external-storage",
+    })),
+  },
+}));
+
+vi.mock("../components/terminal/TerminalHeader", () => ({
+  TerminalHeader: ({ topInsetPx }: { topInsetPx?: number }) => (
+    <div
+      data-testid="terminal-header"
+      data-top-inset={String(topInsetPx || 0)}
+    />
+  ),
+}));
+
+vi.mock("../components/terminal/TabManagerSheet", () => ({
+  TabManagerSheet: () => null,
+}));
+
+const renderQuickBar = (props: TerminalQuickBarProps) => (
+  <div
+    data-testid="terminal-quickbar"
+    data-keyboard-visible={props.keyboardVisible ? "true" : "false"}
+    data-keyboard-inset={String(props.keyboardInsetPx || 0)}
+    data-session-draft={props.sessionDraft || ""}
+    data-copy-mode-active={props.copyModeActive ? "true" : "false"}
+  >
+      <button onClick={() => props.onEditorDomFocusChange?.(true)}>
+        focus-quick-editor
+      </button>
+      <button onClick={() => props.onEditorDomFocusChange?.(false)}>
+        blur-quick-editor
+      </button>
+      <button onClick={() => props.onMeasuredHeightChange?.(184)}>
+        measure-quickbar
+      </button>
+      <button onClick={() => props.onToggleKeyboard?.()}>toggle-keyboard</button>
+      <button onClick={() => props.onToggleCopyMode?.()}>toggle-copy-mode</button>
+      <div data-testid="terminal-quickbar-draft">{props.sessionDraft || ""}</div>
+    </div>
+);
+
+function TerminalPage(props: ComponentProps<typeof TerminalPageBase>) {
+  return (
+    <TerminalPageBase
+      {...props}
+      renderQuickBar={props.renderQuickBar || renderQuickBar}
+      renderTerminalShell={props.renderTerminalShell || renderTerminalShellUi}
+    />
+  );
+}
+
+vi.mock("../components/TerminalView", () => ({
+  TerminalView: ({
+    sessionId,
+    allowDomFocus,
+    onActivateInput,
+    onInput,
+    onLongPressRow,
+    onResize,
+    onWidthModeChange,
+    widthMode,
+    copyModeActive,
+    copyStartRowIndex,
+    copyEndRowIndex,
+    copyPreviewRowIndex,
+    followResetEpoch,
+  }: {
+    sessionId: string;
+    allowDomFocus?: boolean;
+    onActivateInput?: () => void;
+    onInput?: (sessionId: string, data: string) => void;
+    onLongPressRow?: (
+      sessionId: string,
+      rowIndex: number,
+      clientX: number,
+      clientY: number,
+    ) => void;
+    onResize?: (...args: any[]) => void;
+    onWidthModeChange?: (...args: any[]) => void;
+    widthMode?: string;
+    copyModeActive?: boolean;
+    copyStartRowIndex?: number | null;
+    copyEndRowIndex?: number | null;
+    copyPreviewRowIndex?: number | null;
+    followResetEpoch?: number;
+  }) => (
+    <div
+      data-testid={`terminal-view-${sessionId}`}
+      data-allow-dom-focus={allowDomFocus ? "true" : "false"}
+      data-has-onresize={onResize ? "true" : "false"}
+      data-has-onwidthmodechange={onWidthModeChange ? "true" : "false"}
+      data-width-mode={widthMode || "adaptive-phone"}
+      data-copy-mode-active={copyModeActive ? "true" : "false"}
+      data-copy-start={copyStartRowIndex ?? ""}
+      data-copy-end={copyEndRowIndex ?? ""}
+      data-copy-preview={copyPreviewRowIndex ?? ""}
+      data-follow-reset-epoch={String(followResetEpoch || 0)}
+      onClick={() => onActivateInput?.()}
+    >
+      <textarea
+        data-wterm-input="true"
+        data-terminal-input-session-id={sessionId}
+        defaultValue=""
+        onKeyDown={(event) => {
+          if (!allowDomFocus) {
+            return;
+          }
+          if (!onInput) {
+            return;
+          }
+          if (event.key === "ArrowUp") {
+            onInput(sessionId, "\u001b[A");
+            return;
+          }
+          if (event.key === "Escape") {
+            onInput(sessionId, "\u001b");
+          }
+        }}
+      />
+      <button onClick={() => onLongPressRow?.(sessionId, 100, 44, 120)}>
+        longpress-row-100
+      </button>
+      <button onClick={() => onLongPressRow?.(sessionId, 102, 44, 160)}>
+        longpress-row-102
+      </button>
+    </div>
+  ),
+}));
+
+// TerminalPage reads attachment counts from SessionContext (badge/drawer).
+// These page-level tests render TerminalPage directly without the app-level
+// SessionProvider, so provide the minimal session facade the page consumes.
+vi.mock("../contexts/SessionContext", () => ({
+  useSession: () => ({
+    getPendingAttachmentCount: () => 0,
+    getPendingAttachments: () => [],
+  }),
+}));
+
+type TestSession = Session & { buffer: import("../lib/types").SessionBufferState };
+
+function makeSession(id: string): TestSession {
+  return {
+    id,
+    hostId: `host-${id}`,
+    connectionName: `conn-${id}`,
+    bridgeHost: "100.127.23.27",
+    bridgePort: 3333,
+    sessionName: `tmux-${id}`,
+    title: `tab-${id}`,
+    ws: null,
+    state: "connected",
+    hasUnread: false,
+    createdAt: 1,
+    buffer: {
+      lines: [],
+      gapRanges: [],
+      startIndex: 0,
+      endIndex: 0,
+      bufferHeadStartIndex: 0,
+      bufferTailEndIndex: 0,
+      cols: 80,
+      rows: 24,
+      cursorKeysApp: false,
+      cursor: null,
+      updateKind: "replace",
+      revision: 1,
+    },
+  };
+}
+
+function makeRemoteWindowTarget(): RemoteWindowStreamTargetManifest {
+  return {
+    streamTargetId: "app-1",
+    videoTarget: {
+      kind: "app-window",
+      appBundleId: "com.apple.TextEdit",
+      pid: 123,
+      windowId: "window-1",
+      title: "TextEdit",
+      windowBoundsTopLeftPx: { x: 10, y: 20, width: 800, height: 600 },
+      cropRectTopLeftPx: { x: 10, y: 40, width: 800, height: 560 },
+    },
+    inputTarget: {
+      kind: "app-window",
+    },
+    streamMode: "interactive",
+    focusPolicy: "bring-to-focus",
+    inputRoute: "os-event",
+    capture: {
+      source: "ScreenCaptureKit",
+      coordinateSpace: "macos-top-left-px",
+      scale: 1,
+      createdAt: "2026-07-19T00:00:00.000Z",
+    },
+  };
+}
+
+async function flushAndroidImeFocusTimer() {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 80));
+  });
+}
+
+beforeEach(() => {
+  resetClientDebugSnapshotForTests();
+  vi.mocked(ImeAnchor.show).mockClear();
+  vi.mocked(ImeAnchor.hide).mockClear();
+  vi.mocked(ImeAnchor.getState).mockClear();
+  vi.mocked(ImeAnchor.getState).mockResolvedValue({ keyboardVisible: false, keyboardHeight: 0 });
+  imeListeners.clear();
+  keyboardListeners.clear();
+  nativeClipboardWriteText.mockClear();
+  const storageBacking = new Map<string, string>();
+  vi.stubGlobal("localStorage", {
+    get length() {
+      return storageBacking.size;
+    },
+    clear() {
+      storageBacking.clear();
+    },
+    getItem(key: string) {
+      return storageBacking.has(key) ? storageBacking.get(key)! : null;
+    },
+    key(index: number) {
+      return Array.from(storageBacking.keys())[index] ?? null;
+    },
+    removeItem(key: string) {
+      storageBacking.delete(key);
+    },
+    setItem(key: string, value: string) {
+      storageBacking.set(key, String(value));
+    },
+  } as Storage);
+});
+
+afterEach(() => {
+  cleanup();
+  resetClientDebugSnapshotForTests();
+  vi.unstubAllGlobals();
+  imeListeners.clear();
+  debugInputListeners.clear();
+  keyboardListeners.clear();
+});
+
+describe("TerminalPage Android IME bridge", () => {
+
+  it("does not proactively show Android IME on terminal page mount", async () => {
+    const session = makeSession("s1");
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    await waitFor(() => {
+      expect(imeListeners.has("keyboardState")).toBe(true);
+    });
+    await flushAndroidImeFocusTimer();
+
+    expect(vi.mocked(ImeAnchor.show)).not.toHaveBeenCalled();
+  });
+
+  it("routes Android IME text, backspace, and Enter to the active remote-window stream", async () => {
+    const session = makeSession("s1");
+    const mediaStream = { id: "media-stream-1" } as MediaStream;
+    const onTerminalInput = vi.fn();
+    const onSendRemoteWindowInput = vi.fn();
+    const onRequestRemoteWindowTargets = vi.fn(async () => ({
+      requestId: "rw-1",
+      targets: [makeRemoteWindowTarget()],
+      errors: [],
+    }));
+    const onRequestRemoteWindowStreamStart = vi.fn(async (
+      _sessionId: string,
+      _target: RemoteWindowStreamTargetManifest,
+      streamId: string,
+    ) => ({
+      streamId,
+      mediaStream,
+      started: {
+        requestId: "rw-start-1",
+        streamId,
+        targetId: "app-1",
+        answer: { type: "answer" as const, sdp: "v=0" },
+        capture: {
+          source: "ScreenCaptureKit" as const,
+          frameWidth: 800,
+          frameHeight: 560,
+          frameRate: 30,
+          targetKind: "app-window" as const,
+        },
+        transport: {
+          kind: "webrtc-video" as const,
+        },
+      },
+    }));
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={onTerminalInput}
+        onTerminalViewportChange={vi.fn()}
+        onRequestRemoteWindowTargets={onRequestRemoteWindowTargets}
+        onRequestRemoteWindowStreamStart={onRequestRemoteWindowStreamStart}
+        onSendRemoteWindowInput={onSendRemoteWindowInput}
+        renderRemoteWindow={renderRemoteWindow}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    await waitFor(() => {
+      expect(imeListeners.has("input")).toBe(true);
+      expect(imeListeners.has("backspace")).toBe(true);
+      expect(imeListeners.has("key")).toBe(true);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "打开远程窗口" }));
+    await screen.findByTestId("remote-window-target-app-1");
+    fireEvent.click(screen.getByTestId("remote-window-target-app-1"));
+
+    await waitFor(() => {
+      expect(onRequestRemoteWindowStreamStart).toHaveBeenCalled();
+    });
+    expect(onSendRemoteWindowInput).not.toHaveBeenCalled();
+
+    act(() => {
+      imeListeners.get("input")?.({ text: "中文￥\ninput" });
+      imeListeners.get("backspace")?.({ count: 1 });
+      imeListeners.get("key")?.({ key: "Enter", code: "Enter" });
+    });
+
+    await waitFor(() => {
+      expect(onSendRemoteWindowInput.mock.calls.map((call) => call[1].event.kind)).toEqual([
+        "key",
+        "key",
+        "key",
+        "key",
+        "key",
+      ]);
+      expect(onSendRemoteWindowInput.mock.calls.some((call) => call[1].event.kind === "focus")).toBe(false);
+      expect(onSendRemoteWindowInput).toHaveBeenCalledWith("s1", expect.objectContaining({
+        targetId: "app-1",
+        event: expect.objectContaining({
+          kind: "key",
+          phase: "down",
+          key: "中文￥\ninput",
+          text: "中文￥\ninput",
+        }),
+      }));
+      expect(onSendRemoteWindowInput).toHaveBeenCalledWith("s1", expect.objectContaining({
+        targetId: "app-1",
+        event: expect.objectContaining({
+          kind: "key",
+          phase: "down",
+          key: "Backspace",
+          code: "Backspace",
+        }),
+      }));
+      expect(onSendRemoteWindowInput).toHaveBeenCalledWith("s1", expect.objectContaining({
+        targetId: "app-1",
+        event: expect.objectContaining({
+          kind: "key",
+          phase: "down",
+          key: "Enter",
+          code: "Enter",
+        }),
+      }));
+    });
+    expect(onTerminalInput).not.toHaveBeenCalled();
+  });
+
+  it("does not show Android IME when tapping the terminal surface", async () => {
+    const session = makeSession("s1");
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    const initialEpoch = Number(
+      screen
+        .getByTestId("terminal-view-s1")
+        .getAttribute("data-follow-reset-epoch") || "0",
+    );
+    fireEvent.click(screen.getByTestId("terminal-view-s1"));
+    await waitFor(() => {
+      expect(
+        Number(
+          screen
+            .getByTestId("terminal-view-s1")
+            .getAttribute("data-follow-reset-epoch") || "0",
+        ),
+      ).toBeGreaterThan(initialEpoch);
+    });
+    await flushAndroidImeFocusTimer();
+
+    expect(vi.mocked(ImeAnchor.show)).not.toHaveBeenCalled();
+  });
+
+  it("disables DOM terminal focus on Android and routes native IME input to active session", async () => {
+    const session = makeSession("s1");
+    const onTerminalInput = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={onTerminalInput}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    await waitFor(() => {
+      expect(imeListeners.has("keyboardState")).toBe(true);
+    });
+    await flushAndroidImeFocusTimer();
+    await waitFor(() => {
+      expect(imeListeners.has("keyboardState")).toBe(true);
+    });
+    await waitFor(() => {
+      expect(imeListeners.has("keyboardState")).toBe(true);
+    });
+    act(() => {
+      imeListeners.get("keyboardState")?.({ visible: true, height: 320 });
+    });
+
+    await waitFor(() => {
+      expect(imeListeners.has("keyboardState")).toBe(true);
+    });
+    await flushAndroidImeFocusTimer();
+    await waitFor(() => {
+      expect(imeListeners.has("keyboardState")).toBe(true);
+    });
+    act(() => {
+      imeListeners.get("keyboardState")?.({ visible: true, height: 320 });
+    });
+
+    await waitFor(() => {
+      expect(imeListeners.has("input")).toBe(true);
+      expect(imeListeners.has("backspace")).toBe(true);
+    });
+
+    expect(
+      screen
+        .getByTestId("terminal-view-s1")
+        .getAttribute("data-allow-dom-focus"),
+    ).toBe("false");
+    expect(
+      screen.getByTestId("terminal-view-s1").getAttribute("data-has-onresize"),
+    ).toBe("false");
+
+    imeListeners.get("input")?.({ text: "语音输入\n下一行" });
+    imeListeners.get("backspace")?.({ count: 2 });
+
+    expect(onTerminalInput).toHaveBeenCalledWith("s1", "语音输入 下一行");
+    expect(onTerminalInput).not.toHaveBeenCalledWith("s1", "语音输入\r下一行");
+    expect(onTerminalInput).toHaveBeenCalledWith("s1", "\x7f\x7f");
+  });
+
+  it("routes Android DebugInput diagnostics through the same active terminal input path", async () => {
+    const session = makeSession("s1");
+    const onTerminalInput = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={onTerminalInput}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    await waitFor(() => {
+      expect(debugInputListeners.has("debug-input")).toBe(true);
+    });
+
+    debugInputListeners.get("debug-input")?.({ text: "debug-probe", newline: "\r" });
+
+    expect(onTerminalInput).toHaveBeenCalledWith("s1", "debug-probe\r");
+  });
+
+  it("routes Android IME input to the focused split pane session instead of the old runtime active session", async () => {
+    localStorage.setItem(
+      STORAGE_KEYS.TERMINAL_LAYOUT,
+      JSON.stringify({
+        panes: [
+          {
+            id: "pane-1",
+            size: 0.5,
+            activeTabId: "tab-s1",
+            tabs: [{ id: "tab-s1", sessionId: "s1" }],
+          },
+          {
+            id: "pane-2",
+            size: 0.5,
+            activeTabId: "tab-s2",
+            tabs: [{ id: "tab-s2", sessionId: "s2" }],
+          },
+        ],
+        activePaneId: "pane-1",
+      }),
+    );
+    const session1 = makeSession("s1");
+    const session2 = makeSession("s2");
+    const onTerminalInput = vi.fn();
+    const onSwitchSession = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={[session1, session2]}
+        activeSession={session1}
+        onSwitchSession={onSwitchSession}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={onTerminalInput}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    await waitFor(() => {
+      expect(imeListeners.has("input")).toBe(true);
+      expect(screen.getByTestId("terminal-view-s2")).toBeTruthy();
+    });
+
+    const paneShell = screen
+      .getAllByTestId("terminal-pane-shell")
+      .find((element) => element.getAttribute("data-pane-id") === "pane-2");
+    expect(paneShell).toBeTruthy();
+
+    fireEvent.pointerDown(paneShell!);
+    await waitFor(() => expect(onSwitchSession).toHaveBeenCalledWith("s2"));
+
+    imeListeners.get("input")?.({ text: "pane2" });
+
+    expect(onTerminalInput).toHaveBeenCalledWith("s2", "pane2");
+    expect(onTerminalInput).not.toHaveBeenCalledWith("s1", "pane2");
+  });
+
+  it("routes Android IME input to the newly selected tab immediately after active session changes", async () => {
+    const session1 = makeSession("s1");
+    const session2 = makeSession("s2");
+    const onTerminalInput = vi.fn();
+
+    function Harness() {
+      const [activeSessionId, setActiveSessionId] = useState("s1");
+      const activeSession = activeSessionId === "s2" ? session2 : session1;
+      return (
+        <>
+          <button type="button" onClick={() => setActiveSessionId("s2")}>
+            switch-to-s2
+          </button>
+          <TerminalPage
+            sessions={[session1, session2]}
+            activeSession={activeSession}
+            onSwitchSession={setActiveSessionId}
+            onMoveSession={vi.fn()}
+            onRenameSession={vi.fn()}
+            onCloseSession={vi.fn()}
+            onOpenConnections={vi.fn()}
+            onOpenQuickTabPicker={vi.fn()}
+            onResize={vi.fn()}
+            onTerminalInput={onTerminalInput}
+            onTerminalViewportChange={vi.fn()}
+            quickActions={[]}
+            shortcutActions={[]}
+            sessionDraft=""
+          />
+        </>
+      );
+    }
+
+    render(<Harness />);
+
+    await waitFor(() => expect(imeListeners.has("input")).toBe(true));
+    fireEvent.click(screen.getByText("switch-to-s2"));
+    imeListeners.get("input")?.({ text: "fast-after-switch" });
+
+    // 2026-08-09 BUG #4 fix: long input (>16 chars) is now deferred into a microtask.
+    // Wait for the microtask flush before asserting routing.
+    await waitFor(() => {
+      expect(onTerminalInput).toHaveBeenCalledWith("s2", "fast-after-switch");
+    });
+    expect(onTerminalInput).not.toHaveBeenCalledWith("s1", "fast-after-switch");
+  });
+
+  it("does not route fast post-switch IME input through a stale activeSessionIdRef owner", async () => {
+    const session1 = makeSession("s1");
+    const session2 = makeSession("s2");
+    const onTerminalInput = vi.fn();
+
+    function Harness() {
+      const [activeSessionId, setActiveSessionId] = useState("s1");
+      const activeSession = activeSessionId === "s2" ? session2 : session1;
+      return (
+        <>
+          <button type="button" onClick={() => setActiveSessionId("s2")}>
+            switch-to-s2
+          </button>
+          <TerminalPage
+            sessions={[session1, session2]}
+            activeSession={activeSession}
+            onSwitchSession={setActiveSessionId}
+            onMoveSession={vi.fn()}
+            onRenameSession={vi.fn()}
+            onCloseSession={vi.fn()}
+            onOpenConnections={vi.fn()}
+            onOpenQuickTabPicker={vi.fn()}
+            onResize={vi.fn()}
+            onTerminalInput={onTerminalInput}
+            onTerminalViewportChange={vi.fn()}
+            quickActions={[]}
+            shortcutActions={[]}
+            sessionDraft=""
+          />
+        </>
+      );
+    }
+
+    render(<Harness />);
+
+    await waitFor(() => expect(imeListeners.has("input")).toBe(true));
+    fireEvent.click(screen.getByText("switch-to-s2"));
+
+    imeListeners.get("input")?.({ text: "switch-race-1" });
+    imeListeners.get("input")?.({ text: "switch-race-2" });
+
+    expect(onTerminalInput).toHaveBeenCalledWith("s2", "switch-race-1");
+    expect(onTerminalInput).toHaveBeenCalledWith("s2", "switch-race-2");
+    expect(onTerminalInput).not.toHaveBeenCalledWith("s1", "switch-race-1");
+    expect(onTerminalInput).not.toHaveBeenCalledWith("s1", "switch-race-2");
+  });
+
+  it("keeps editor overlay draft outside terminal body truth on Android", async () => {
+    const session = makeSession("s1");
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft="overlay-draft-中文"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(
+        screen
+          .getByTestId("terminal-quickbar")
+          .getAttribute("data-session-draft"),
+      ).toBe("overlay-draft-中文");
+    });
+
+    expect(screen.getByTestId("terminal-quickbar-draft").textContent).toBe(
+      "overlay-draft-中文",
+    );
+    expect(screen.getByTestId("terminal-view-s1").textContent).not.toContain(
+      "overlay-draft-中文",
+    );
+  });
+
+  it("renders the copy menu when copy mode is active and a row is long-pressed", async () => {
+    const session = makeSession("s1");
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    // copy mode not active: longpress does nothing
+    fireEvent.click(screen.getByText("longpress-row-100"));
+    expect(screen.queryByTestId("terminal-copy-menu")).toBeNull();
+
+    // activate copy mode then longpress: menu should appear
+    fireEvent.click(screen.getByText("toggle-copy-mode"));
+    fireEvent.click(screen.getByText("longpress-row-100"));
+
+    expect(screen.queryByTestId("terminal-copy-menu")).not.toBeNull();
+  });
+
+  it("updates quick bar copy button state immediately when toggled", () => {
+    const session = makeSession("s1");
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    const quickBar = screen.getByTestId("terminal-quickbar");
+    const terminalView = screen.getByTestId("terminal-view-s1");
+    expect(quickBar.getAttribute("data-copy-mode-active")).toBe("false");
+    expect(terminalView.getAttribute("data-copy-mode-active")).toBe("false");
+
+    fireEvent.click(screen.getByText("toggle-copy-mode"));
+    expect(quickBar.getAttribute("data-copy-mode-active")).toBe("true");
+    expect(terminalView.getAttribute("data-copy-mode-active")).toBe("true");
+
+    fireEvent.click(screen.getByText("toggle-copy-mode"));
+    expect(quickBar.getAttribute("data-copy-mode-active")).toBe("false");
+    expect(terminalView.getAttribute("data-copy-mode-active")).toBe("false");
+  });
+
+  it("releases editor mode before keyboard toggle and requests Android IME focus", async () => {
+    const session = makeSession("s1");
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    await waitFor(() => expect(imeListeners.has("input")).toBe(true));
+
+    fireEvent.click(screen.getByText("focus-quick-editor"));
+    expect(vi.mocked(ImeAnchor.setEditorActive)).toHaveBeenCalledWith({
+      active: true,
+    });
+
+    vi.mocked(ImeAnchor.show).mockClear();
+    fireEvent.click(screen.getByText("toggle-keyboard"));
+    await flushAndroidImeFocusTimer();
+
+    await waitFor(() => {
+      expect(vi.mocked(ImeAnchor.setEditorActive)).toHaveBeenCalledWith({
+        active: false,
+      });
+      expect(vi.mocked(ImeAnchor.show)).toHaveBeenCalled();
+    });
+  });
+
+  it("requests follow alignment before showing Android IME from keyboard toggle", async () => {
+    const session = makeSession("s1");
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    const initialEpoch = Number(
+      screen
+        .getByTestId("terminal-view-s1")
+        .getAttribute("data-follow-reset-epoch") || "0",
+    );
+    vi.mocked(ImeAnchor.show).mockClear();
+    fireEvent.click(screen.getByText("toggle-keyboard"));
+
+    await waitFor(() => {
+      expect(
+        Number(
+          screen
+            .getByTestId("terminal-view-s1")
+            .getAttribute("data-follow-reset-epoch") || "0",
+        ),
+      ).toBeGreaterThan(initialEpoch);
+    });
+    expect(vi.mocked(ImeAnchor.show)).not.toHaveBeenCalled();
+    await flushAndroidImeFocusTimer();
+    expect(vi.mocked(ImeAnchor.show)).toHaveBeenCalledTimes(1);
+  });
+
+  it("realigns follow again after Android IME becomes visible from keyboard toggle", async () => {
+    const session = makeSession("s1");
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    await waitFor(() => {
+      expect(imeListeners.has("keyboardState")).toBe(true);
+    });
+    fireEvent.click(screen.getByText("toggle-keyboard"));
+
+    await waitFor(() => {
+      expect(
+        Number(
+          screen
+            .getByTestId("terminal-view-s1")
+            .getAttribute("data-follow-reset-epoch") || "0",
+        ),
+      ).toBeGreaterThan(0);
+    });
+    const toggleEpoch = Number(
+      screen
+        .getByTestId("terminal-view-s1")
+        .getAttribute("data-follow-reset-epoch") || "0",
+    );
+
+    act(() => {
+      imeListeners.get("keyboardState")?.({ visible: true, height: 320 });
+    });
+
+    await waitFor(() => {
+      expect(
+        Number(
+          screen
+            .getByTestId("terminal-view-s1")
+            .getAttribute("data-follow-reset-epoch") || "0",
+        ),
+      ).toBeGreaterThan(toggleEpoch);
+    });
+  });
+
+  it("shows Android IME when keyboard was requested but no inset is visible", async () => {
+    const session = makeSession("s1");
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    vi.mocked(ImeAnchor.hide).mockClear();
+    vi.mocked(ImeAnchor.show).mockClear();
+    vi.mocked(ImeAnchor.getState).mockResolvedValueOnce({
+      keyboardVisible: false,
+      keyboardHeight: 0,
+    });
+    fireEvent.click(screen.getByText("toggle-keyboard"));
+
+    await waitFor(() => {
+      expect(vi.mocked(ImeAnchor.getState)).toHaveBeenCalled();
+    });
+    await flushAndroidImeFocusTimer();
+    expect(vi.mocked(ImeAnchor.hide)).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(vi.mocked(ImeAnchor.show)).toHaveBeenCalled();
+    });
+  });
+
+  it("uses ImeAnchor state instead of stale local requested state before toggling Android IME", async () => {
+    const session = makeSession("s1");
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    await waitFor(() => {
+      expect(imeListeners.has("keyboardState")).toBe(true);
+    });
+    act(() => {
+      imeListeners.get("keyboardState")?.({ visible: true, height: 320 });
+    });
+    await waitFor(() => {
+      expect(
+        screen
+          .getByTestId("terminal-quickbar")
+          .getAttribute("data-keyboard-visible"),
+      ).toBe("true");
+    });
+
+    vi.mocked(ImeAnchor.getState).mockResolvedValueOnce({
+      keyboardVisible: false,
+      keyboardHeight: 0,
+    });
+    vi.mocked(ImeAnchor.hide).mockClear();
+    vi.mocked(ImeAnchor.show).mockClear();
+    fireEvent.click(screen.getByText("toggle-keyboard"));
+
+    await waitFor(() => {
+      expect(vi.mocked(ImeAnchor.getState)).toHaveBeenCalled();
+    });
+    await flushAndroidImeFocusTimer();
+    expect(vi.mocked(ImeAnchor.hide)).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(vi.mocked(ImeAnchor.show)).toHaveBeenCalled();
+    });
+  });
+
+  it("copy menu clears when switching tabs away from active copy session", async () => {
+    const session1 = makeSession("s1");
+    const session2 = makeSession("s2");
+
+    function Harness() {
+      const [activeSessionId, setActiveSessionId] = useState("s1");
+      const activeSession = activeSessionId === "s2" ? session2 : session1;
+      return (
+        <>
+          <button type="button" onClick={() => setActiveSessionId("s2")}>
+            switch-to-s2
+          </button>
+          <TerminalPage
+            sessions={[session1, session2]}
+            activeSession={activeSession}
+            onSwitchSession={setActiveSessionId}
+            onMoveSession={vi.fn()}
+            onRenameSession={vi.fn()}
+            onCloseSession={vi.fn()}
+            onOpenConnections={vi.fn()}
+            onOpenQuickTabPicker={vi.fn()}
+            onResize={vi.fn()}
+            onTerminalInput={vi.fn()}
+            onTerminalViewportChange={vi.fn()}
+            quickActions={[]}
+            shortcutActions={[]}
+            sessionDraft=""
+          />
+        </>
+      );
+    }
+
+    render(<Harness />);
+
+    fireEvent.click(screen.getByText("toggle-copy-mode"));
+    fireEvent.click(screen.getByText("longpress-row-100"));
+    expect(screen.queryByTestId("terminal-copy-menu")).not.toBeNull();
+
+    fireEvent.click(screen.getByText("switch-to-s2"));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("terminal-copy-menu")).toBeNull();
+    });
+  });
+
+  it("keeps the Android terminal container stable without passing upstream terminal resize", async () => {
+    const session = makeSession("s1");
+    const onResize = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={onResize}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    await waitFor(() => {
+      expect(keyboardListeners.has("keyboardDidShow")).toBe(true);
+    });
+
+    const terminalView = screen.getByTestId("terminal-view-s1");
+    const stage = screen.getByTestId("terminal-stage-shell");
+    expect(stage.getAttribute("style") || "").toContain("bottom: 0px;");
+    expect(terminalView.getAttribute("data-has-onresize")).toBe("false");
+    expect(terminalView.getAttribute("data-has-onwidthmodechange")).toBe(
+      "false",
+    );
+
+    keyboardListeners.get("keyboardDidShow")?.({ keyboardHeight: 320 });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("terminal-stage-shell").getAttribute("style") || "").toContain("bottom: 320px;");
+      expect(
+        screen
+          .getByTestId("terminal-view-s1")
+          .getAttribute("data-has-onresize"),
+      ).toBe("false");
+      expect(
+        screen
+          .getByTestId("terminal-view-s1")
+          .getAttribute("data-has-onwidthmodechange"),
+      ).toBe("false");
+    });
+    expect(onResize).not.toHaveBeenCalled();
+  });
+
+  it("keeps the terminal surface covering its parent when the first viewport measurement is short", () => {
+    const originalInnerWidth = window.innerWidth;
+    const originalInnerHeight = window.innerHeight;
+    const originalClientWidth = document.documentElement.clientWidth;
+    const originalClientHeight = document.documentElement.clientHeight;
+    const originalVisualViewport = window.visualViewport;
+    const session = makeSession("s1");
+
+    try {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: 393 });
+      Object.defineProperty(window, "innerHeight", { configurable: true, value: 540 });
+      Object.defineProperty(document.documentElement, "clientWidth", { configurable: true, value: 393 });
+      Object.defineProperty(document.documentElement, "clientHeight", { configurable: true, value: 540 });
+      Object.defineProperty(window, "visualViewport", {
+        configurable: true,
+        value: {
+          width: 393,
+          height: 540,
+          offsetTop: 0,
+          offsetLeft: 0,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+        },
+      });
+
+      const { container, rerender } = render(
+        <TerminalPage
+          appForegroundActive={false}
+          sessions={[session]}
+          activeSession={session}
+          onSwitchSession={vi.fn()}
+          onMoveSession={vi.fn()}
+          onRenameSession={vi.fn()}
+          onCloseSession={vi.fn()}
+          onOpenConnections={vi.fn()}
+          onOpenQuickTabPicker={vi.fn()}
+          onResize={vi.fn()}
+          onTerminalInput={vi.fn()}
+          onTerminalViewportChange={vi.fn()}
+          quickActions={[]}
+          shortcutActions={[]}
+          sessionDraft=""
+        />,
+      );
+
+      const shell = container.querySelector(".zterm-terminal-shell") as HTMLElement;
+      expect(shell.style.height).toBe("540px");
+      expect(shell.style.minHeight).toBe("100%");
+      expect(shell.style.maxHeight).toBe("");
+
+      Object.defineProperty(window, "innerHeight", { configurable: true, value: 852 });
+      Object.defineProperty(document.documentElement, "clientHeight", { configurable: true, value: 852 });
+      Object.defineProperty(window, "visualViewport", {
+        configurable: true,
+        value: { width: 393, height: 852, offsetTop: 0, offsetLeft: 0, addEventListener: vi.fn(), removeEventListener: vi.fn() },
+      });
+      rerender(
+        <TerminalPage
+          appForegroundActive
+          sessions={[session]}
+          activeSession={session}
+          onSwitchSession={vi.fn()}
+          onMoveSession={vi.fn()}
+          onRenameSession={vi.fn()}
+          onCloseSession={vi.fn()}
+          onOpenConnections={vi.fn()}
+          onOpenQuickTabPicker={vi.fn()}
+          onResize={vi.fn()}
+          onTerminalInput={vi.fn()}
+          onTerminalViewportChange={vi.fn()}
+          quickActions={[]}
+          shortcutActions={[]}
+          sessionDraft=""
+        />,
+      );
+      expect(shell.style.height).toBe("852px");
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalInnerWidth });
+      Object.defineProperty(window, "innerHeight", { configurable: true, value: originalInnerHeight });
+      Object.defineProperty(document.documentElement, "clientWidth", { configurable: true, value: originalClientWidth });
+      Object.defineProperty(document.documentElement, "clientHeight", { configurable: true, value: originalClientHeight });
+      Object.defineProperty(window, "visualViewport", { configurable: true, value: originalVisualViewport });
+    }
+  });
+
+  it("reserves Android status-bar safe area for the portrait terminal stage", () => {
+    const originalInnerWidth = window.innerWidth;
+    const originalInnerHeight = window.innerHeight;
+    const originalClientWidth = document.documentElement.clientWidth;
+    const originalClientHeight = document.documentElement.clientHeight;
+    const originalVisualViewport = window.visualViewport;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 393 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 852 });
+    Object.defineProperty(document.documentElement, "clientWidth", { configurable: true, value: 393 });
+    Object.defineProperty(document.documentElement, "clientHeight", { configurable: true, value: 852 });
+    Object.defineProperty(window, "visualViewport", {
+      configurable: true,
+      value: {
+        width: 393,
+        height: 852,
+        offsetTop: 0,
+        offsetLeft: 0,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      },
+    });
+
+    try {
+      const session = makeSession("s1");
+      render(
+        <TerminalPage
+          sessions={[session]}
+          activeSession={session}
+          onSwitchSession={vi.fn()}
+          onMoveSession={vi.fn()}
+          onRenameSession={vi.fn()}
+          onCloseSession={vi.fn()}
+          onOpenConnections={vi.fn()}
+          onOpenQuickTabPicker={vi.fn()}
+          onResize={vi.fn()}
+          onTerminalInput={vi.fn()}
+          onTerminalViewportChange={vi.fn()}
+          quickActions={[]}
+          shortcutActions={[]}
+          sessionDraft=""
+        />,
+      );
+
+      expect(screen.getByTestId("terminal-stage-shell").getAttribute("style") || "").toContain("top: 66px;");
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalInnerWidth });
+      Object.defineProperty(window, "innerHeight", { configurable: true, value: originalInnerHeight });
+      Object.defineProperty(document.documentElement, "clientWidth", { configurable: true, value: originalClientWidth });
+      Object.defineProperty(document.documentElement, "clientHeight", { configurable: true, value: originalClientHeight });
+      Object.defineProperty(window, "visualViewport", { configurable: true, value: originalVisualViewport });
+    }
+  });
+
+  it("keeps the terminal stage container stable while lifting quickbar above the IME", async () => {
+    const originalInnerHeight = window.innerHeight;
+    const originalInnerWidth = window.innerWidth;
+    const originalDocumentClientHeight = document.documentElement.clientHeight;
+    const originalDocumentClientWidth = document.documentElement.clientWidth;
+    const originalVisualViewport = window.visualViewport;
+
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 393,
+    });
+    Object.defineProperty(document.documentElement, "clientWidth", {
+      configurable: true,
+      value: 393,
+    });
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: 900,
+    });
+    Object.defineProperty(document.documentElement, "clientHeight", {
+      configurable: true,
+      value: 900,
+    });
+    Object.defineProperty(window, "visualViewport", {
+      configurable: true,
+      value: {
+        width: 393,
+        height: 600,
+        offsetTop: 0,
+        offsetLeft: 0,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      },
+    });
+
+    const session = makeSession("s1");
+
+    try {
+      render(
+        <TerminalPage
+          sessions={[session]}
+          activeSession={session}
+          onSwitchSession={vi.fn()}
+          onMoveSession={vi.fn()}
+          onRenameSession={vi.fn()}
+          onCloseSession={vi.fn()}
+          onOpenConnections={vi.fn()}
+          onOpenQuickTabPicker={vi.fn()}
+          onResize={vi.fn()}
+          onTerminalInput={vi.fn()}
+          onTerminalViewportChange={vi.fn()}
+          quickActions={[]}
+          shortcutActions={[]}
+          sessionDraft=""
+        />,
+      );
+
+      await waitFor(() => {
+        expect(imeListeners.has("keyboardState")).toBe(true);
+      });
+
+      fireEvent.click(screen.getByText("measure-quickbar"));
+      imeListeners.get("keyboardState")?.({ visible: true, height: 320 });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("terminal-quickbar").getAttribute("data-keyboard-inset")).toBe("300");
+      });
+
+      expect(screen.getByTestId("terminal-stage-shell").style.bottom).toBe("484px");
+      expect(screen.getByTestId("terminal-quickbar-shell").style.bottom).toBe("300px");
+    } finally {
+      Object.defineProperty(window, "innerHeight", {
+        configurable: true,
+        value: originalInnerHeight,
+      });
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        value: originalInnerWidth,
+      });
+      Object.defineProperty(document.documentElement, "clientHeight", {
+        configurable: true,
+        value: originalDocumentClientHeight,
+      });
+      Object.defineProperty(document.documentElement, "clientWidth", {
+        configurable: true,
+        value: originalDocumentClientWidth,
+      });
+      Object.defineProperty(window, "visualViewport", {
+        configurable: true,
+        value: originalVisualViewport,
+      });
+    }
+  });
+
+  it("adds foldable portrait bottom chrome lift to both stage and quickbar shell", async () => {
+    const originalInnerHeight = window.innerHeight;
+    const originalInnerWidth = window.innerWidth;
+    const originalDocumentClientHeight = document.documentElement.clientHeight;
+    const originalDocumentClientWidth = document.documentElement.clientWidth;
+    const originalVisualViewport = window.visualViewport;
+    const session = makeSession("s1");
+
+    try {
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        value: 712,
+      });
+      Object.defineProperty(document.documentElement, "clientWidth", {
+        configurable: true,
+        value: 712,
+      });
+      Object.defineProperty(window, "innerHeight", {
+        configurable: true,
+        value: 770,
+      });
+      Object.defineProperty(document.documentElement, "clientHeight", {
+        configurable: true,
+        value: 770,
+      });
+      Object.defineProperty(window, "visualViewport", {
+        configurable: true,
+        value: {
+          width: 712,
+          height: 770,
+          offsetTop: 0,
+          offsetLeft: 0,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+        },
+      });
+
+      render(
+        <TerminalPage
+          sessions={[session]}
+          activeSession={session}
+          onSwitchSession={vi.fn()}
+          onMoveSession={vi.fn()}
+          onRenameSession={vi.fn()}
+          onCloseSession={vi.fn()}
+          onOpenConnections={vi.fn()}
+          onOpenQuickTabPicker={vi.fn()}
+          onResize={vi.fn()}
+          onTerminalInput={vi.fn()}
+          onTerminalViewportChange={vi.fn()}
+          quickActions={[]}
+          shortcutActions={[]}
+          sessionDraft=""
+        />,
+      );
+
+      fireEvent.click(screen.getByText("measure-quickbar"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("terminal-stage-shell").style.bottom).toBe("198px");
+        expect(screen.getByTestId("terminal-quickbar-shell").style.bottom).toBe("14px");
+      });
+      expect(screen.getByTestId("terminal-view-s1").getAttribute("data-has-onresize")).toBe("false");
+      expect(screen.getByTestId("terminal-view-s1").getAttribute("data-has-onwidthmodechange")).toBe("false");
+    } finally {
+      Object.defineProperty(window, "innerHeight", {
+        configurable: true,
+        value: originalInnerHeight,
+      });
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        value: originalInnerWidth,
+      });
+      Object.defineProperty(document.documentElement, "clientHeight", {
+        configurable: true,
+        value: originalDocumentClientHeight,
+      });
+      Object.defineProperty(document.documentElement, "clientWidth", {
+        configurable: true,
+        value: originalDocumentClientWidth,
+      });
+      Object.defineProperty(window, "visualViewport", {
+        configurable: true,
+        value: originalVisualViewport,
+      });
+    }
+  });
+
+  it("adds compact landscape bottom chrome lift without entering the renderer resize path", async () => {
+    const originalInnerHeight = window.innerHeight;
+    const originalInnerWidth = window.innerWidth;
+    const originalDocumentClientHeight = document.documentElement.clientHeight;
+    const originalDocumentClientWidth = document.documentElement.clientWidth;
+    const originalVisualViewport = window.visualViewport;
+    const session = makeSession("s1");
+
+    try {
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        value: 900,
+      });
+      Object.defineProperty(document.documentElement, "clientWidth", {
+        configurable: true,
+        value: 900,
+      });
+      Object.defineProperty(window, "innerHeight", {
+        configurable: true,
+        value: 393,
+      });
+      Object.defineProperty(document.documentElement, "clientHeight", {
+        configurable: true,
+        value: 393,
+      });
+      Object.defineProperty(window, "visualViewport", {
+        configurable: true,
+        value: {
+          width: 900,
+          height: 393,
+          offsetTop: 0,
+          offsetLeft: 0,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+        },
+      });
+
+      render(
+        <TerminalPage
+          sessions={[session]}
+          activeSession={session}
+          onSwitchSession={vi.fn()}
+          onMoveSession={vi.fn()}
+          onRenameSession={vi.fn()}
+          onCloseSession={vi.fn()}
+          onOpenConnections={vi.fn()}
+          onOpenQuickTabPicker={vi.fn()}
+          onResize={vi.fn()}
+          onTerminalInput={vi.fn()}
+          onTerminalViewportChange={vi.fn()}
+          quickActions={[]}
+          shortcutActions={[]}
+          sessionDraft=""
+        />,
+      );
+
+      fireEvent.click(screen.getByText("measure-quickbar"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("terminal-stage-shell").style.bottom).toBe("194px");
+        expect(screen.getByTestId("terminal-quickbar-shell").style.bottom).toBe("10px");
+      });
+      expect(screen.getByTestId("terminal-view-s1").getAttribute("data-has-onresize")).toBe("false");
+      expect(screen.getByTestId("terminal-view-s1").getAttribute("data-has-onwidthmodechange")).toBe("false");
+    } finally {
+      Object.defineProperty(window, "innerHeight", {
+        configurable: true,
+        value: originalInnerHeight,
+      });
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        value: originalInnerWidth,
+      });
+      Object.defineProperty(document.documentElement, "clientHeight", {
+        configurable: true,
+        value: originalDocumentClientHeight,
+      });
+      Object.defineProperty(document.documentElement, "clientWidth", {
+        configurable: true,
+        value: originalDocumentClientWidth,
+      });
+      Object.defineProperty(window, "visualViewport", {
+        configurable: true,
+        value: originalVisualViewport,
+      });
+    }
+  });
+
+  it("does not freeze the terminal shell height or add a second lift when Android already resized the viewport", async () => {
+    const originalInnerHeight = window.innerHeight;
+    const originalInnerWidth = window.innerWidth;
+    const originalDocumentClientHeight = document.documentElement.clientHeight;
+    const originalDocumentClientWidth = document.documentElement.clientWidth;
+    const originalVisualViewport = window.visualViewport;
+    const session = makeSession("s1");
+
+    try {
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        value: 393,
+      });
+      Object.defineProperty(document.documentElement, "clientWidth", {
+        configurable: true,
+        value: 393,
+      });
+      Object.defineProperty(window, "innerHeight", {
+        configurable: true,
+        value: 900,
+      });
+      Object.defineProperty(document.documentElement, "clientHeight", {
+        configurable: true,
+        value: 900,
+      });
+      Object.defineProperty(window, "visualViewport", {
+        configurable: true,
+        value: {
+          width: 393,
+          height: 900,
+          offsetTop: 0,
+          offsetLeft: 0,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+        },
+      });
+
+      render(
+        <TerminalPage
+          sessions={[session]}
+          activeSession={session}
+          onSwitchSession={vi.fn()}
+          onMoveSession={vi.fn()}
+          onRenameSession={vi.fn()}
+          onCloseSession={vi.fn()}
+          onOpenConnections={vi.fn()}
+          onOpenQuickTabPicker={vi.fn()}
+          onResize={vi.fn()}
+          onTerminalInput={vi.fn()}
+          onTerminalViewportChange={vi.fn()}
+          quickActions={[]}
+          shortcutActions={[]}
+          sessionDraft=""
+        />,
+      );
+
+      fireEvent.click(screen.getByText("measure-quickbar"));
+
+      Object.defineProperty(window, "innerHeight", {
+        configurable: true,
+        value: 600,
+      });
+      Object.defineProperty(document.documentElement, "clientHeight", {
+        configurable: true,
+        value: 600,
+      });
+      Object.defineProperty(window, "visualViewport", {
+        configurable: true,
+        value: {
+          width: 393,
+          height: 600,
+          offsetTop: 0,
+          offsetLeft: 0,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+        },
+      });
+
+      imeListeners.get("keyboardState")?.({ visible: true, height: 320 });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("terminal-quickbar").getAttribute("data-keyboard-inset")).toBe("0");
+      });
+
+      expect(screen.getByTestId("terminal-stage-shell").style.bottom).toBe("184px");
+    } finally {
+      Object.defineProperty(window, "innerHeight", {
+        configurable: true,
+        value: originalInnerHeight,
+      });
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        value: originalInnerWidth,
+      });
+      Object.defineProperty(document.documentElement, "clientHeight", {
+        configurable: true,
+        value: originalDocumentClientHeight,
+      });
+      Object.defineProperty(document.documentElement, "clientWidth", {
+        configurable: true,
+        value: originalDocumentClientWidth,
+      });
+      Object.defineProperty(window, "visualViewport", {
+        configurable: true,
+        value: originalVisualViewport,
+      });
+    }
+  });
+
+  it("reclassifies keyboard-first overlay geometry when adjustResize settles on visual viewport resize", async () => {
+    const originalInnerHeight = window.innerHeight;
+    const originalInnerWidth = window.innerWidth;
+    const originalDocumentClientHeight = document.documentElement.clientHeight;
+    const originalDocumentClientWidth = document.documentElement.clientWidth;
+    const originalVisualViewport = window.visualViewport;
+    let visualViewportResizeListener: EventListenerOrEventListenerObject | null = null;
+    const visualViewport = {
+      width: 393,
+      height: 900,
+      offsetTop: 0,
+      offsetLeft: 0,
+      addEventListener: vi.fn((eventName: string, listener: EventListenerOrEventListenerObject) => {
+        if (eventName === "resize") {
+          visualViewportResizeListener = listener;
+        }
+      }),
+      removeEventListener: vi.fn(),
+    };
+    const session = makeSession("s1");
+
+    try {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: 393 });
+      Object.defineProperty(document.documentElement, "clientWidth", { configurable: true, value: 393 });
+      Object.defineProperty(window, "innerHeight", { configurable: true, value: 900 });
+      Object.defineProperty(document.documentElement, "clientHeight", { configurable: true, value: 900 });
+      Object.defineProperty(window, "visualViewport", { configurable: true, value: visualViewport });
+
+      render(
+        <TerminalPage
+          sessions={[session]}
+          activeSession={session}
+          onSwitchSession={vi.fn()}
+          onMoveSession={vi.fn()}
+          onRenameSession={vi.fn()}
+          onCloseSession={vi.fn()}
+          onOpenConnections={vi.fn()}
+          onOpenQuickTabPicker={vi.fn()}
+          onResize={vi.fn()}
+          onTerminalInput={vi.fn()}
+          onTerminalViewportChange={vi.fn()}
+          quickActions={[]}
+          shortcutActions={[]}
+          sessionDraft=""
+        />,
+      );
+
+      await waitFor(() => {
+        expect(imeListeners.has("keyboardState")).toBe(true);
+        expect(visualViewportResizeListener).not.toBeNull();
+      });
+      fireEvent.click(screen.getByText("measure-quickbar"));
+      act(() => {
+        imeListeners.get("keyboardState")?.({ visible: true, height: 320 });
+      });
+      await waitFor(() => {
+        expect(screen.getByTestId("terminal-quickbar").getAttribute("data-keyboard-inset")).toBe("320");
+      });
+
+      Object.defineProperty(window, "innerHeight", { configurable: true, value: 600 });
+      Object.defineProperty(document.documentElement, "clientHeight", { configurable: true, value: 600 });
+      visualViewport.height = 600;
+      act(() => {
+        if (typeof visualViewportResizeListener === "function") {
+          visualViewportResizeListener(new Event("resize"));
+        } else {
+          visualViewportResizeListener?.handleEvent(new Event("resize"));
+        }
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("terminal-quickbar").getAttribute("data-keyboard-inset")).toBe("0");
+        expect(screen.getByTestId("terminal-stage-shell").style.bottom).toBe("184px");
+      });
+    } finally {
+      Object.defineProperty(window, "innerHeight", { configurable: true, value: originalInnerHeight });
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalInnerWidth });
+      Object.defineProperty(document.documentElement, "clientHeight", { configurable: true, value: originalDocumentClientHeight });
+      Object.defineProperty(document.documentElement, "clientWidth", { configurable: true, value: originalDocumentClientWidth });
+      Object.defineProperty(window, "visualViewport", { configurable: true, value: originalVisualViewport });
+    }
+  });
+
+  it("keeps Android adaptive-phone upstream geometry on the width-mode channel instead of the resize channel", async () => {
+    const session = makeSession("s1");
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        onTerminalWidthModeChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        terminalWidthMode="adaptive-phone"
+      />,
+    );
+
+    const terminalView = screen.getByTestId("terminal-view-s1");
+    expect(terminalView.getAttribute("data-has-onresize")).toBe("false");
+    expect(terminalView.getAttribute("data-has-onwidthmodechange")).toBe(
+      "true",
+    );
+    expect(terminalView.getAttribute("data-width-mode")).toBe("adaptive-phone");
+  });
+
+  it("passes settings terminal width mode down to the active renderer", async () => {
+    const session = makeSession("s1");
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        terminalWidthMode="mirror-fixed"
+      />,
+    );
+
+    expect(
+      screen.getByTestId("terminal-view-s1").getAttribute("data-width-mode"),
+    ).toBe("mirror-fixed");
+  });
+
+  it("defaults missing settings width mode to adaptive-phone instead of mirror-fixed", async () => {
+    const session = makeSession("s1");
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    expect(
+      screen.getByTestId("terminal-view-s1").getAttribute("data-width-mode"),
+    ).toBe("adaptive-phone");
+  });
+
+  it("suspends ImeAnchor routing while quick bar DOM editor owns focus but still keeps shell keyboard inset", async () => {
+    const session = makeSession("s1");
+    const onTerminalInput = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={onTerminalInput}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    await waitFor(() => {
+      expect(imeListeners.has("input")).toBe(true);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "focus-quick-editor" }));
+
+    await waitFor(() => {
+      expect(ImeAnchor.blur).toHaveBeenCalled();
+      expect(ImeAnchor.setEditorActive).toHaveBeenCalledWith({ active: true });
+    });
+
+    keyboardListeners.get("keyboardDidShow")?.({ keyboardHeight: 280 });
+
+    await waitFor(() => {
+      expect(
+        screen
+          .getByTestId("terminal-quickbar")
+          .getAttribute("data-keyboard-visible"),
+      ).toBe("false");
+      expect(
+        screen
+          .getByTestId("terminal-quickbar")
+          .getAttribute("data-keyboard-inset"),
+      ).toBe("280");
+    });
+
+    imeListeners.get("input")?.({ text: "不该发到 terminal" });
+    expect(onTerminalInput).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "blur-quick-editor" }));
+
+    imeListeners.get("input")?.({ text: "恢复路由" });
+
+    await waitFor(() => {
+      expect(onTerminalInput).toHaveBeenCalledWith("s1", "恢复路由");
+    });
+    expect(vi.mocked(ImeAnchor.setEditorActive)).toHaveBeenLastCalledWith({
+      active: false,
+    });
+  });
+
+  it("keeps stage stable while quick bar editor owns focus without translating terminal content", async () => {
+    const session = makeSession("s1");
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    const stage = screen.getByTestId("terminal-stage-shell");
+    expect(stage.getAttribute("style") || "").toContain("bottom: 0px;");
+
+    fireEvent.click(screen.getByRole("button", { name: "focus-quick-editor" }));
+
+    await waitFor(() => {
+      expect(ImeAnchor.setEditorActive).toHaveBeenCalledWith({ active: true });
+    });
+
+    keyboardListeners.get("keyboardDidShow")?.({ keyboardHeight: 280 });
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("terminal-quickbar").getAttribute("data-keyboard-inset"),
+      ).toBe("280");
+    });
+
+    await waitFor(() => {
+      const stable = stage.getAttribute("style") || "";
+      expect(stable).toContain("bottom: 280px;");
+      expect(stable).not.toContain("transform: translateY");
+      expect(screen.getByTestId("terminal-quickbar-shell").getAttribute("style") || "").toContain("bottom: 280px;");
+    });
+  });
+
+  it("does not proactively show ImeAnchor when quick editor yields focus while keyboard is visible", async () => {
+    const session = makeSession("s1");
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    await waitFor(() => {
+      expect(keyboardListeners.has("keyboardDidShow")).toBe(true);
+    });
+
+    keyboardListeners.get("keyboardDidShow")?.({ keyboardHeight: 280 });
+    fireEvent.click(screen.getByRole("button", { name: "focus-quick-editor" }));
+
+    await waitFor(() => {
+      expect(ImeAnchor.blur).toHaveBeenCalled();
+    });
+
+    vi.mocked(ImeAnchor.show).mockClear();
+    vi.mocked(ImeAnchor.setEditorActive).mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "blur-quick-editor" }));
+
+    await flushAndroidImeFocusTimer();
+    expect(vi.mocked(ImeAnchor.show)).not.toHaveBeenCalled();
+    expect(vi.mocked(ImeAnchor.setEditorActive)).toHaveBeenLastCalledWith({
+      active: false,
+    });
+  });
+
+  it("toggles native editor-active state while handing IME focus between terminal and quick editor", async () => {
+    const session = makeSession("s1");
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "focus-quick-editor" }));
+    fireEvent.click(screen.getByRole("button", { name: "blur-quick-editor" }));
+
+    const calls = vi
+      .mocked(ImeAnchor.setEditorActive)
+      .mock.calls.map(([payload]) => payload?.active);
+    expect(calls).toContain(true);
+    expect(calls[calls.length - 1]).toBe(false);
+  });
+
+  it("hides ImeAnchor when toggling the already-requested Android keyboard off", async () => {
+    const session = makeSession("s1");
+
+    try {
+      render(
+        <TerminalPage
+          sessions={[session]}
+          activeSession={session}
+          onSwitchSession={vi.fn()}
+          onMoveSession={vi.fn()}
+          onRenameSession={vi.fn()}
+          onCloseSession={vi.fn()}
+          onOpenConnections={vi.fn()}
+          onOpenQuickTabPicker={vi.fn()}
+          onResize={vi.fn()}
+          onTerminalInput={vi.fn()}
+          onTerminalViewportChange={vi.fn()}
+          quickActions={[]}
+          shortcutActions={[]}
+          sessionDraft=""
+        />,
+      );
+
+      await waitFor(() => {
+        expect(keyboardListeners.has("keyboardDidShow")).toBe(true);
+      });
+      keyboardListeners.get("keyboardDidShow")?.({ keyboardHeight: 320 });
+      await waitFor(() => {
+        expect(
+          screen
+            .getByTestId("terminal-quickbar")
+            .getAttribute("data-keyboard-visible"),
+        ).toBe("true");
+      });
+
+      vi.mocked(ImeAnchor.hide).mockClear();
+      vi.mocked(ImeAnchor.getState).mockResolvedValueOnce({
+        keyboardVisible: true,
+        keyboardHeight: 320,
+      });
+      fireEvent.click(screen.getByRole("button", { name: "toggle-keyboard" }));
+
+      await flushAndroidImeFocusTimer();
+
+      expect(vi.mocked(ImeAnchor.hide)).toHaveBeenCalledTimes(1);
+      expect(
+        screen
+          .getByTestId("terminal-quickbar")
+          .getAttribute("data-keyboard-visible"),
+      ).toBe("false");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not proactively show ImeAnchor when tapping the Android terminal surface while keyboard stays visible", async () => {
+    const session = makeSession("s1");
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    await waitFor(() => {
+      expect(keyboardListeners.has("keyboardDidShow")).toBe(true);
+    });
+
+    keyboardListeners.get("keyboardDidShow")?.({ keyboardHeight: 320 });
+    await waitFor(() => {
+      expect(
+        screen
+          .getByTestId("terminal-quickbar")
+          .getAttribute("data-keyboard-visible"),
+      ).toBe("true");
+    });
+    vi.mocked(ImeAnchor.show).mockClear();
+    fireEvent.click(screen.getByTestId("terminal-view-s1"));
+
+    await flushAndroidImeFocusTimer();
+    expect(vi.mocked(ImeAnchor.show)).not.toHaveBeenCalled();
+  });
+
+  it("does not proactively show ImeAnchor when the active terminal session changes while keyboard is visible", async () => {
+    const sessionOne = makeSession("s1");
+    const sessionTwo = makeSession("s2");
+
+    const view = render(
+      <TerminalPage
+        sessions={[sessionOne, sessionTwo]}
+        activeSession={sessionOne}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    await waitFor(() => {
+      expect(keyboardListeners.has("keyboardDidShow")).toBe(true);
+    });
+
+    keyboardListeners.get("keyboardDidShow")?.({ keyboardHeight: 320 });
+    await waitFor(() => {
+      expect(
+        screen
+          .getByTestId("terminal-quickbar")
+          .getAttribute("data-keyboard-visible"),
+      ).toBe("true");
+    });
+
+    vi.mocked(ImeAnchor.show).mockClear();
+    vi.mocked(ImeAnchor.setEditorActive).mockClear();
+
+    view.rerender(
+      <TerminalPage
+        sessions={[sessionOne, sessionTwo]}
+        activeSession={sessionTwo}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    await flushAndroidImeFocusTimer();
+
+    expect(vi.mocked(ImeAnchor.show)).not.toHaveBeenCalled();
+    expect(vi.mocked(ImeAnchor.setEditorActive)).not.toHaveBeenCalled();
+
+    const onTerminalInput = vi.fn();
+    view.rerender(
+      <TerminalPage
+        sessions={[sessionOne, sessionTwo]}
+        activeSession={sessionTwo}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={onTerminalInput}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    imeListeners.get("input")?.({ text: "hello-after-switch" });
+
+    // 2026-08-09 BUG #4 fix: long input (>16 chars) is now deferred into a microtask.
+    await waitFor(() => {
+      expect(onTerminalInput).toHaveBeenCalledWith("s2", "hello-after-switch");
+    });
+  });
+
+  it("routes hardware special keys through the active session after tab switch", async () => {
+    const sessionOne = makeSession("s1");
+    const sessionTwo = makeSession("s2");
+    const onTerminalInput = vi.fn();
+
+    const view = render(
+      <TerminalPage
+        sessions={[sessionOne, sessionTwo]}
+        activeSession={sessionOne}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={onTerminalInput}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    await waitFor(() => {
+      expect(imeListeners.has("key")).toBe(true);
+    });
+
+    view.rerender(
+      <TerminalPage
+        sessions={[sessionOne, sessionTwo]}
+        activeSession={sessionTwo}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={onTerminalInput}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    imeListeners.get("key")?.({ key: "ArrowUp", code: "ArrowUp" });
+    imeListeners.get("key")?.({ key: "Escape", code: "Escape" });
+    imeListeners.get("key")?.({ key: "Backspace", code: "Backspace" });
+    imeListeners.get("key")?.({ key: "Delete", code: "Delete" });
+    imeListeners.get("key")?.({ key: "c", code: "KeyC", ctrlKey: true });
+
+    expect(onTerminalInput).toHaveBeenNthCalledWith(1, "s2", "\u001b[A");
+    expect(onTerminalInput).toHaveBeenNthCalledWith(2, "s2", "\u001b");
+    expect(onTerminalInput).toHaveBeenNthCalledWith(3, "s2", "\x7f");
+    expect(onTerminalInput).toHaveBeenNthCalledWith(4, "s2", "\u001b[3~");
+    expect(onTerminalInput).toHaveBeenNthCalledWith(5, "s2", "\u0003");
+  });
+
+  it("maps Android IME shift enter to a newline and plain enter to submit", async () => {
+    const session = makeSession("s1");
+    const onTerminalInput = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={onTerminalInput}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    await waitFor(() => {
+      expect(imeListeners.has("key")).toBe(true);
+    });
+
+    imeListeners.get("key")?.({ key: "Enter", code: "Enter", shiftKey: true });
+    imeListeners.get("key")?.({ key: "Enter", code: "Enter" });
+
+    expect(onTerminalInput).toHaveBeenNthCalledWith(1, "s1", "\n");
+    expect(onTerminalInput).toHaveBeenNthCalledWith(2, "s1", "\r");
+  });
+
+  it("uses native ImeAnchor keyboardState to raise terminal chrome on Android", async () => {
+    const session = makeSession("s1");
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    await flushAndroidImeFocusTimer();
+
+    await waitFor(() => {
+      expect(imeListeners.has("keyboardState")).toBe(true);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "toggle-keyboard" }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    act(() => {
+      imeListeners.get("keyboardState")?.({ visible: true, height: 320 });
+    });
+
+    await waitFor(() => {
+      expect(
+        screen
+          .getByTestId("terminal-quickbar")
+          .getAttribute("data-keyboard-visible"),
+      ).toBe("true");
+      expect(
+        screen
+          .getByTestId("terminal-quickbar")
+          .getAttribute("data-keyboard-inset"),
+      ).toBe("320");
+    });
+  });
+
+  it("does not request Android terminal keyboard on initial entry without the keyboard button", async () => {
+    const session = makeSession("s1");
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    await waitFor(() => {
+      expect(imeListeners.has("keyboardState")).toBe(true);
+    });
+    await flushAndroidImeFocusTimer();
+    expect(vi.mocked(ImeAnchor.show)).not.toHaveBeenCalled();
+
+    act(() => {
+      imeListeners.get("keyboardState")?.({ visible: true, height: 320 });
+    });
+
+    await waitFor(() => {
+      expect(vi.mocked(ImeAnchor.show)).not.toHaveBeenCalled();
+      expect(
+        screen
+          .getByTestId("terminal-quickbar")
+          .getAttribute("data-keyboard-visible"),
+      ).toBe("true");
+    });
+  });
+
+  it("keeps terminal stage content geometry stable while only the quick bar moves when keyboard is visible", async () => {
+    const session = makeSession("s1");
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    const terminalStage = screen.getByTestId("terminal-stage-shell");
+    const quickBarShell = screen.getByTestId("terminal-quickbar-shell");
+    expect(terminalStage.getAttribute("style") || "").toContain(
+      "bottom: 0px;",
+    );
+    expect(terminalStage.getAttribute("style") || "").not.toContain(
+      "transform: translateY",
+    );
+    expect(quickBarShell.getAttribute("style") || "").toContain("bottom: 0px;");
+
+    await waitFor(() => {
+      expect(imeListeners.has("keyboardState")).toBe(true);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "toggle-keyboard" }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    act(() => {
+      imeListeners.get("keyboardState")?.({ visible: true, height: 320 });
+    });
+
+    await waitFor(() => {
+      const style = terminalStage.getAttribute("style") || "";
+      expect(style).toContain("bottom: 320px;");
+      expect(style).not.toContain("transform: translateY");
+      expect(quickBarShell.getAttribute("style") || "").toContain(
+        "bottom: 320px;",
+      );
+    });
+  });
+
+  it("keeps a non-zero terminal header top inset on Android even when CSS safe-area env is unavailable", () => {
+    const session = makeSession("s1");
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    expect(
+      Number(
+        screen.getByTestId("terminal-header").getAttribute("data-top-inset") ||
+          "0",
+      ),
+    ).toBeGreaterThan(0);
+  });
+
+  it("does not reattach native IME listeners on buffer rerenders and still routes to latest active session", async () => {
+    const session = makeSession("s1");
+    const onTerminalInput = vi.fn();
+
+    const view = render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={onTerminalInput}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    await waitFor(() => {
+      expect(imeListeners.has("input")).toBe(true);
+      expect(imeListeners.has("backspace")).toBe(true);
+    });
+    const addListenerCallsBeforeRerender = vi.mocked(ImeAnchor.addListener).mock
+      .calls.length;
+
+    const updatedSession: TestSession = {
+      ...session,
+      buffer: {
+        ...session.buffer,
+        revision: 2,
+        endIndex: 1,
+      },
+    };
+
+    view.rerender(
+      <TerminalPage
+        sessions={[updatedSession]}
+        activeSession={updatedSession}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={onTerminalInput}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    imeListeners.get("input")?.({ text: "still-immediate" });
+
+    expect(vi.mocked(ImeAnchor.addListener).mock.calls.length).toBe(
+      addListenerCallsBeforeRerender,
+    );
+    expect(onTerminalInput).toHaveBeenCalledWith("s1", "still-immediate");
+  });
+
+  it("keeps native IME routing alive after a voice-style CJK commit without needing an extra priming character", async () => {
+    const session = makeSession("s1");
+    const onTerminalInput = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={onTerminalInput}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    await waitFor(() => {
+      expect(imeListeners.has("input")).toBe(true);
+    });
+
+    imeListeners.get("input")?.({ text: "语音识别结果" });
+    imeListeners.get("input")?.({ text: "!" });
+
+    await waitFor(() => {
+      expect(onTerminalInput).toHaveBeenCalledWith("s1", "语音识别结果");
+      expect(onTerminalInput).toHaveBeenCalledWith("s1", "!");
+    });
+  });
+
+  it("normalizes Android IME full-width latin, digits, punctuation, and space to half-width before sending to terminal", async () => {
+    const session = makeSession("s1");
+    const onTerminalInput = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={onTerminalInput}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    await waitFor(() => {
+      expect(imeListeners.has("input")).toBe(true);
+    });
+
+    imeListeners.get("input")?.({ text: "ＡＢＣ１２３，．！　中文" });
+
+    await waitFor(() => {
+      expect(onTerminalInput).toHaveBeenCalledWith("s1", "ABC123,.! 中文");
+    });
+  });
+
+  it("treats voice IME line breaks as text separators, not terminal Enter", async () => {
+    const session = makeSession("s1");
+    const onTerminalInput = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={onTerminalInput}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    await waitFor(() => {
+      expect(imeListeners.has("input")).toBe(true);
+    });
+
+    imeListeners.get("input")?.({ text: "第一段语音😀\n第二段，含特殊符号￥\r\n第三段" });
+
+    await waitFor(() => {
+      expect(onTerminalInput).toHaveBeenCalledWith(
+        "s1",
+        "第一段语音😀 第二段,含特殊符号￥ 第三段",
+      );
+    });
+    expect(onTerminalInput).not.toHaveBeenCalledWith(expect.any(String), expect.stringContaining("\r"));
+    expect(onTerminalInput).not.toHaveBeenCalledWith(expect.any(String), expect.stringContaining("\n"));
+  });
+
+  it("flushes a committed CJK result immediately without waiting for a later priming space", async () => {
+    const session = makeSession("s1");
+    const onTerminalInput = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={onTerminalInput}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    await waitFor(() => {
+      expect(imeListeners.has("input")).toBe(true);
+    });
+
+    imeListeners.get("input")?.({ text: "你好" });
+
+    await waitFor(() => {
+      expect(onTerminalInput).toHaveBeenCalledWith("s1", "你好");
+    });
+
+    expect(onTerminalInput).toHaveBeenCalledTimes(1);
+    expect(onTerminalInput).not.toHaveBeenCalledWith("s1", " ");
+  });
+
+  it("keeps routing later native IME input after a buffer rerender that follows a voice-style commit", async () => {
+    const session = makeSession("s1");
+    const onTerminalInput = vi.fn();
+
+    const view = render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={onTerminalInput}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    await waitFor(() => {
+      expect(imeListeners.has("input")).toBe(true);
+    });
+
+    imeListeners.get("input")?.({ text: "语音识别结果" });
+
+    const updatedSession: TestSession = {
+      ...session,
+      buffer: {
+        ...session.buffer,
+        revision: 2,
+        endIndex: 1,
+      },
+    };
+
+    view.rerender(
+      <TerminalPage
+        sessions={[updatedSession]}
+        activeSession={updatedSession}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={onTerminalInput}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    imeListeners.get("input")?.({ text: "继续输入" });
+
+    await waitFor(() => {
+      expect(onTerminalInput).toHaveBeenCalledWith("s1", "语音识别结果");
+      expect(onTerminalInput).toHaveBeenCalledWith("s1", "继续输入");
+    });
+  });
+});
+
+describe("resolveKeyboardLiftPx", () => {
+  it("falls back to reported keyboard inset when WebView viewport metrics do not expose IME occlusion", () => {
+    const originalInnerHeight = window.innerHeight;
+    const originalVisualViewport = window.visualViewport;
+
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: 900,
+    });
+    Object.defineProperty(window, "visualViewport", {
+      configurable: true,
+      value: {
+        height: 900,
+        offsetTop: 0,
+      },
+    });
+
+    expect(resolveKeyboardLiftPx(320)).toBe(320);
+
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: originalInnerHeight,
+    });
+    Object.defineProperty(window, "visualViewport", {
+      configurable: true,
+      value: originalVisualViewport,
+    });
+  });
+
+  it("caps reported keyboard inset when layout and visual viewport bottoms are already aligned", () => {
+    const originalInnerHeight = window.innerHeight;
+    const originalDocumentClientHeight = document.documentElement.clientHeight;
+    const originalVisualViewport = window.visualViewport;
+
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: 600,
+    });
+    Object.defineProperty(document.documentElement, "clientHeight", {
+      configurable: true,
+      value: 600,
+    });
+    Object.defineProperty(window, "visualViewport", {
+      configurable: true,
+      value: {
+        height: 598,
+        offsetTop: 2,
+      },
+    });
+
+    expect(resolveKeyboardLiftPx(320, 600)).toBe(228);
+
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: originalInnerHeight,
+    });
+    Object.defineProperty(document.documentElement, "clientHeight", {
+      configurable: true,
+      value: originalDocumentClientHeight,
+    });
+    Object.defineProperty(window, "visualViewport", {
+      configurable: true,
+      value: originalVisualViewport,
+    });
+  });
+  it("caps the lift to the actual occluded bottom height when the keyboard overlays content", () => {
+    const originalInnerHeight = window.innerHeight;
+    const originalVisualViewport = window.visualViewport;
+
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: 900,
+    });
+    Object.defineProperty(window, "visualViewport", {
+      configurable: true,
+      value: {
+        height: 620,
+        offsetTop: 0,
+      },
+    });
+
+    expect(resolveKeyboardLiftPx(400)).toBe(280);
+
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: originalInnerHeight,
+    });
+    Object.defineProperty(window, "visualViewport", {
+      configurable: true,
+      value: originalVisualViewport,
+    });
+  });
+
+  it("does not over-lift when innerHeight has already shrunk to visualViewport height on Android", () => {
+    const originalInnerHeight = window.innerHeight;
+    const originalDocumentClientHeight = document.documentElement.clientHeight;
+    const originalVisualViewport = window.visualViewport;
+
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: 620,
+    });
+    Object.defineProperty(document.documentElement, "clientHeight", {
+      configurable: true,
+      value: 900,
+    });
+    Object.defineProperty(window, "visualViewport", {
+      configurable: true,
+      value: {
+        height: 620,
+        offsetTop: 0,
+      },
+    });
+
+    expect(resolveKeyboardLiftPx(280)).toBe(280);
+
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: originalInnerHeight,
+    });
+    Object.defineProperty(document.documentElement, "clientHeight", {
+      configurable: true,
+      value: originalDocumentClientHeight,
+    });
+    Object.defineProperty(window, "visualViewport", {
+      configurable: true,
+      value: originalVisualViewport,
+    });
+  });
+
+  it("does not add lift when the stable shell proves WebView already resized to keyboard top", () => {
+    const originalInnerHeight = window.innerHeight;
+    const originalDocumentClientHeight = document.documentElement.clientHeight;
+    const originalVisualViewport = window.visualViewport;
+
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: 620,
+    });
+    Object.defineProperty(document.documentElement, "clientHeight", {
+      configurable: true,
+      value: 620,
+    });
+    Object.defineProperty(window, "visualViewport", {
+      configurable: true,
+      value: {
+        height: 618,
+        offsetTop: 2,
+      },
+    });
+
+    expect(resolveKeyboardLiftPx(320, 900)).toBe(0);
+
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: originalInnerHeight,
+    });
+    Object.defineProperty(document.documentElement, "clientHeight", {
+      configurable: true,
+      value: originalDocumentClientHeight,
+    });
+    Object.defineProperty(window, "visualViewport", {
+      configurable: true,
+      value: originalVisualViewport,
+    });
+  });
+});
+
+describe("resolveTerminalHeaderTopInsetPx", () => {
+  it("keeps Android header inset stable when visualViewport offsetTop jumps during IME popup", () => {
+    const originalVisualViewport = window.visualViewport;
+
+    Object.defineProperty(window, "visualViewport", {
+      configurable: true,
+      value: {
+        offsetTop: 96,
+      },
+    });
+
+    expect(resolveTerminalHeaderTopInsetPx(true)).toBe(16);
+
+    Object.defineProperty(window, "visualViewport", {
+      configurable: true,
+      value: originalVisualViewport,
+    });
+  });
+});
+
+describe("resolveLayoutViewportHeight", () => {
+  it("prefers stable layout viewport height when Android IME shrinks innerHeight on a tablet", () => {
+    const originalInnerHeight = window.innerHeight;
+    const originalDocumentClientHeight = document.documentElement.clientHeight;
+    const originalVisualViewport = window.visualViewport;
+
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: 620,
+    });
+    Object.defineProperty(document.documentElement, "clientHeight", {
+      configurable: true,
+      value: 1366,
+    });
+    Object.defineProperty(window, "visualViewport", {
+      configurable: true,
+      value: {
+        height: 620,
+        offsetTop: 0,
+      },
+    });
+
+    expect(resolveLayoutViewportHeight()).toBe(1366);
+
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: originalInnerHeight,
+    });
+    Object.defineProperty(document.documentElement, "clientHeight", {
+      configurable: true,
+      value: originalDocumentClientHeight,
+    });
+    Object.defineProperty(window, "visualViewport", {
+      configurable: true,
+      value: originalVisualViewport,
+    });
+  });
+});
+
+describe("resolveKeyboardLiftPx with stable layout viewport height override", () => {
+  it("does not use stable layout height as extra lift when Android already resized all viewport metrics", () => {
+    const originalInnerHeight = window.innerHeight;
+    const originalDocumentClientHeight = document.documentElement.clientHeight;
+    const originalVisualViewport = window.visualViewport;
+
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: 328,
+    });
+    Object.defineProperty(document.documentElement, "clientHeight", {
+      configurable: true,
+      value: 328,
+    });
+    Object.defineProperty(window, "visualViewport", {
+      configurable: true,
+      value: {
+        height: 328,
+        offsetTop: 0,
+      },
+    });
+
+    expect(resolveKeyboardLiftPx(303, 615)).toBe(0);
+
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: originalInnerHeight,
+    });
+    Object.defineProperty(document.documentElement, "clientHeight", {
+      configurable: true,
+      value: originalDocumentClientHeight,
+    });
+    Object.defineProperty(window, "visualViewport", {
+      configurable: true,
+      value: originalVisualViewport,
+    });
+  });
+
+  // 2026-08-09 BUG #4 (regression lock): IME input listener 在每个同步回调里
+  // 禁止直接同步调用 terminalInputHandlerRef.current —— 必须推到 microtask
+  // 红测：如果同步调用 onTerminalInput 超过一次，证明同步链未被拆解，
+  // 长语音 commit 期间 main thread 会阻塞 16ms+，daemon stale inbound detach
+  it("deferes IME input listener handler via microtask, not synchronously (BUG #4 regression)", async () => {
+    const session = makeSession("s1");
+    const onTerminalInput = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={onTerminalInput}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    await waitFor(() => {
+      expect(imeListeners.has("input")).toBe(true);
+    });
+
+    // back-to-back IME input — long voice commit simulation
+    imeListeners.get("input")?.({ text: "今天我们要做的是关于终端连接方式的完整审计" });
+    imeListeners.get("input")?.({ text: "今天我们要做的是关于终端连接方式的完整审计" });
+    imeListeners.get("input")?.({ text: "今天我们要做的是关于终端连接方式的完整审计" });
+
+    // 红测（BUG #4）：修复后，超过 16 字符的长 IME input listener 必须把 emitToActiveSession
+    // 推到 microtask，同步栈里调用次数应该 ≤ 1。当前实现同步触发 3 次 → 测试 FAIL。
+    expect(onTerminalInput.mock.calls.length).toBeLessThanOrEqual(1);
+
+    // 等 microtask flush,确认 input 最终还是到达了 terminal
+    await waitFor(() => {
+      expect(onTerminalInput.mock.calls.length).toBeGreaterThan(0);
+    });
+  });
+
+  // 2026-08-09 BUG #5 (regression lock): emitRemoteWindowInputEvents 返回 false 时
+  // input 必须 fallback 到 terminal emitToActiveSession
+  // 当前实现已经正确（默认 mock 让 emitRemoteWindowInputEvents 返回 false），
+  // 此测试是反向锁，证明当前 fallback 路径有效；任何后续重构破坏 fallback 会立即失败
+  it("falls back to terminal input when remote-window overlay is unavailable (BUG #5 regression)", async () => {
+    const session = makeSession("s1");
+    const onTerminalInput = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={onTerminalInput}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    await waitFor(() => {
+      expect(imeListeners.has("input")).toBe(true);
+    });
+
+    imeListeners.get("input")?.({ text: "fallback-test" });
+
+    // BUG #5 锁：input 必须到达 terminal（onTerminalInput 被调用）
+    // 这是正向锁，证明 fallback 路径有效
+    await waitFor(() => {
+      expect(onTerminalInput).toHaveBeenCalledWith("s1", expect.stringContaining("fallback-test"));
+    });
+  });
+});
