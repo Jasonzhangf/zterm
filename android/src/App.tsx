@@ -200,6 +200,7 @@ export function AppContent({
     setActiveBodySubscriptionSuppressed,
     resumeActiveSessionTransport,
     notifyTargetNetworkSignal,
+    reportTargetNetworkProbeError,
     sendTerminalResize,
     sendInput,
     sendImagePaste,
@@ -235,12 +236,12 @@ export function AppContent({
     }
     void networkIdentity.resample().catch((error: unknown) => {
       const snapshotError = projectNetworkIdentitySnapshotError(error);
-      notifyTargetNetworkSignal({
-        source: 'native-snapshot-error',
+      reportTargetNetworkProbeError({
+        type: 'TargetNetworkProbeError04NativeSnapshot',
         message: snapshotError.message,
       });
     });
-  }, [networkIdentity, notifyTargetNetworkSignal]);
+  }, [networkIdentity, reportTargetNetworkProbeError]);
   useAttachmentNotifications({ getPendingAttachments });
   const screenOrientationLock = useScreenOrientationLock();
   void sendMessageRaw;
@@ -464,6 +465,7 @@ export function AppContent({
     reconnectSession,
     resumeActiveSessionTransport,
     notifyTargetNetworkSignal,
+    reportTargetNetworkProbeError,
     manageTmuxSessionsOnOpenTransport,
     clearSessionDraft,
     ensureTerminalPageVisible,

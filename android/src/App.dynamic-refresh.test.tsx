@@ -94,6 +94,7 @@ const sessionHarness = vi.hoisted(() => {
   const reconnectSession = vi.fn();
   const resumeActiveSessionTransport = vi.fn(() => true);
   const notifyTargetNetworkSignal = vi.fn();
+  const reportTargetNetworkProbeError = vi.fn();
   const setLiveSessionIds = vi.fn();
   const setActiveBodySubscriptionSuppressed = vi.fn();
   const createSession = vi.fn();
@@ -143,6 +144,7 @@ const sessionHarness = vi.hoisted(() => {
     reconnectSession,
     resumeActiveSessionTransport,
     notifyTargetNetworkSignal,
+    reportTargetNetworkProbeError,
     setLiveSessionIds,
     setActiveBodySubscriptionSuppressed,
     createSession,
@@ -189,6 +191,7 @@ const sessionHarness = vi.hoisted(() => {
       resumeActiveSessionTransport.mockReset();
       resumeActiveSessionTransport.mockReturnValue(true);
       notifyTargetNetworkSignal.mockReset();
+      reportTargetNetworkProbeError.mockReset();
       setLiveSessionIds.mockReset();
       setActiveBodySubscriptionSuppressed.mockReset();
       createSession.mockReset();
@@ -405,6 +408,7 @@ vi.mock('./contexts/SessionContext', () => ({
     setActiveBodySubscriptionSuppressed: sessionHarness.setActiveBodySubscriptionSuppressed,
     resumeActiveSessionTransport: sessionHarness.resumeActiveSessionTransport,
     notifyTargetNetworkSignal: sessionHarness.notifyTargetNetworkSignal,
+    reportTargetNetworkProbeError: sessionHarness.reportTargetNetworkProbeError,
     getActiveSession: () => sessionHarness.readStaleActiveSession(),
     getSession: sessionHarness.getSession,
     getSessionRenderBufferSnapshot: sessionHarness.getSessionRenderBufferSnapshot,
@@ -1580,8 +1584,8 @@ describe('App dynamic refresh matrix', () => {
       />,
     );
 
-    await waitFor(() => expect(sessionHarness.notifyTargetNetworkSignal).toHaveBeenCalledWith({
-      source: 'native-snapshot-error',
+    await waitFor(() => expect(sessionHarness.reportTargetNetworkProbeError).toHaveBeenCalledWith({
+      type: 'TargetNetworkProbeError04NativeSnapshot',
       message: 'NetworkIdentity native snapshot capability is not active',
     }));
   });
@@ -1601,8 +1605,8 @@ describe('App dynamic refresh matrix', () => {
     );
 
     await waitFor(() => expect(sampleInterfaces).toHaveBeenCalledTimes(1));
-    expect(sessionHarness.notifyTargetNetworkSignal).not.toHaveBeenCalledWith(
-      expect.objectContaining({ source: 'native-snapshot-error' }),
+    expect(sessionHarness.reportTargetNetworkProbeError).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'TargetNetworkProbeError04NativeSnapshot' }),
     );
   });
 

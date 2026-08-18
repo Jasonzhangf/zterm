@@ -29,10 +29,6 @@ export type SessionTargetNetworkSignal =
     source: 'foreground-resume';
     networkGeneration?: number;
     fingerprintChanged?: boolean;
-  }
-  | {
-    source: 'native-snapshot-error';
-    message: string;
   };
 
 export interface TargetNetworkProbeError01GenerationTimeout {

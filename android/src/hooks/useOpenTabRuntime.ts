@@ -24,7 +24,10 @@ import { useOpenTabRestoreRuntimeSync } from './useOpenTabRestoreRuntimeSync';
 import { useOpenTabSessionActions } from './useOpenTabSessionActions';
 import { auditOpenTabsAgainstRemoteSessions as auditOpenTabsAgainstRemoteSessionsLib } from '../lib/remote-tab-audit';
 import type { TerminalMuxTargetClientMessage } from '@zterm/shared/protocol';
-import type { SessionTargetNetworkSignal } from '../contexts/session-context-target-network-probe-runtime';
+import type {
+  SessionTargetNetworkProbeFailure,
+  SessionTargetNetworkSignal,
+} from '../contexts/session-context-target-network-probe-runtime';
 import type { NetworkIdentityRuntime } from '../lib/network-identity';
 
 function buildSessionStructureSignature(
@@ -76,6 +79,7 @@ interface UseOpenTabRuntimeOptions {
   notifyTargetNetworkSignal: (
     signal: SessionTargetNetworkSignal,
   ) => void;
+  reportTargetNetworkProbeError?: (failure: SessionTargetNetworkProbeFailure) => void;
   manageTmuxSessionsOnOpenTransport?: (
     sessionId: string,
     message: TerminalMuxTargetClientMessage,
@@ -153,6 +157,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     renameSession,
     resumeActiveSessionTransport,
     notifyTargetNetworkSignal,
+    reportTargetNetworkProbeError,
     manageTmuxSessionsOnOpenTransport,
     clearSessionDraft,
     ensureTerminalPageVisible,
@@ -507,6 +512,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     recordBackgroundEnteredAt: options.recordBackgroundEnteredAt,
     auditOpenTabsAgainstRemoteSessions,
     notifyTargetNetworkSignal,
+    reportTargetNetworkProbeError,
     bumpFollowResetEpoch,
     lastBackgroundEnteredAtRef,
     networkIdentity,

@@ -14,7 +14,10 @@ import {
 } from '../plugins/BackgroundServicePlugin';
 import type { Session } from '../lib/types';
 import { projectNetworkIdentitySnapshotError, type NetworkIdentityRuntime } from '../lib/network-identity';
-import type { SessionTargetNetworkSignal } from '../contexts/session-context-target-network-probe-runtime';
+import type {
+  SessionTargetNetworkProbeFailure,
+  SessionTargetNetworkSignal,
+} from '../contexts/session-context-target-network-probe-runtime';
 
 export type OpenTabAuditReason =
   | 'visibilitychange'
@@ -50,6 +53,7 @@ interface UseOpenTabLifecycleEffectsOptions {
   notifyTargetNetworkSignal: (
     signal: SessionTargetNetworkSignal,
   ) => void;
+  reportTargetNetworkProbeError?: (failure: SessionTargetNetworkProbeFailure) => void;
   bumpFollowResetEpoch: () => void;
   /** Client network-generation owner. When present, platform network events and
    *  foreground resume are stamped with generation/fingerprint changes so the
@@ -116,6 +120,7 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
     onForegroundResume,
     auditOpenTabsAgainstRemoteSessions,
     notifyTargetNetworkSignal,
+    reportTargetNetworkProbeError,
     bumpFollowResetEpoch,
     networkIdentity,
   } = options;
@@ -125,6 +130,7 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
     onForegroundResume,
     auditOpenTabsAgainstRemoteSessions,
     notifyTargetNetworkSignal,
+    reportTargetNetworkProbeError,
     bumpFollowResetEpoch,
     networkIdentity,
   });
@@ -133,6 +139,7 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
     onForegroundResume,
     auditOpenTabsAgainstRemoteSessions,
     notifyTargetNetworkSignal,
+    reportTargetNetworkProbeError,
     bumpFollowResetEpoch,
     networkIdentity,
   };
@@ -163,8 +170,11 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
       sample = await runtime.resampleWithStatus({ connected, connectionType });
     } catch (error: unknown) {
       const snapshotError = projectNetworkIdentitySnapshotError(error);
-      callbacksRef.current.notifyTargetNetworkSignal({
-        source: 'native-snapshot-error',
+      if (!callbacksRef.current.reportTargetNetworkProbeError) {
+        throw new Error('client.daemon_connection native snapshot error owner is unavailable');
+      }
+      callbacksRef.current.reportTargetNetworkProbeError({
+        type: 'TargetNetworkProbeError04NativeSnapshot',
         message: snapshotError.message,
       });
       return;

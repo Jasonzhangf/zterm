@@ -7519,3 +7519,9 @@ if (bufferedBytes >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES) {
 
 - Candidate `9548789` review confirmed the bounded error slot is directionally correct, but found the canonical `android_network_identity_snapshot` feature/AppSDK function binding omitted the real session-runtime relay callers and tests. The implementation creates `TargetNetworkProbeError04NativeSnapshot` in `session-context-transport-orchestration-runtime.ts` and submits it through `client.daemon_connection`; those paths must be registered as allowed adjacent relay paths before review can pass.
 - The current uncommitted `client-daemon-connection` change replaces the append-only probe-error array with one current typed error and explicit acknowledgement. No production consumer currently reads the new facade; map registration must therefore describe it as the bounded client.daemon_connection error slot, not as a second transport truth.
+
+# 2026-08-18 active-v4 P0 typed network-error continuation
+
+- Exact candidate `cdb4207` has two blocking review findings: native snapshot failures are repacked as `SessionTargetNetworkSignal` source/message, and `client.daemon_connection` retains typed failures in an unconsumed slot.
+- Owner decision: native snapshot failure remains `TargetNetworkProbeError04NativeSnapshot` on a dedicated typed context callback; the normal platform signal union must contain only network status/generation signals. The daemon-connection owner will retain the latest typed failure and invoke a registered typed consumer at report time; orchestration registers the runtime-debug/error projection callback. No error enters session/wire/business payload.
+- Required positive/negative coverage: typed failure reaches the registered consumer and retained slot; healthy platform signal does not enter the error chain; stale failure acknowledgement cannot consume the newer failure.

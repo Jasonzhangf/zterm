@@ -69,6 +69,7 @@ export function createClientDaemonConnection(options: {
   readSessionTransportResource: (sessionId: string) => SessionTransportResource;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
   openSessionTargetTransport?: (options: ClientDaemonConnectionOpenTargetTransportOptions) => BridgeTransportSocket;
+  onTargetNetworkProbeError?: (failure: SessionTargetNetworkProbeFailure) => void;
 }): ClientDaemonConnection {
   let targetNetworkProbeError: SessionTargetNetworkProbeFailure | null = null;
   const readSessionResource = (sessionId: string) => options.readSessionTransportResource(sessionId);
@@ -115,6 +116,7 @@ export function createClientDaemonConnection(options: {
     sendSessionMessage: sendSessionRaw as ClientDaemonConnection['sendSessionMessage'],
     reportTargetNetworkProbeError: (failure) => {
       targetNetworkProbeError = failure;
+      options.onTargetNetworkProbeError?.(failure);
     },
     readTargetNetworkProbeError: () => targetNetworkProbeError,
     acknowledgeTargetNetworkProbeError: (failure) => {

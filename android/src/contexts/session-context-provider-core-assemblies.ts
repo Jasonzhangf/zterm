@@ -255,6 +255,7 @@ export function useSessionProviderCoreAssemblies(
     scheduleReconnect,
     queueConnectTransportOpenIntent,
     notifyTargetNetworkSignal,
+    reportTargetNetworkProbeError,
     sendTerminalResize,
   } = useMemo(() => createSessionTransportOrchestrationRuntime({
     stateRef: options.stateRef,
@@ -574,6 +575,7 @@ export function useSessionProviderCoreAssemblies(
     cleanupSocket,
     queueConnectTransportOpenIntent,
     notifyTargetNetworkSignal,
+    reportTargetNetworkProbeError,
     sendTerminalResize,
     readTargetTransportRuntimes,
     readSessionTransportResource,
@@ -612,6 +614,7 @@ export function useSessionProviderCoreAssemblies(
     moveSessionSync,
     queueConnectTransportOpenIntent,
     notifyTargetNetworkSignal,
+    reportTargetNetworkProbeError,
     sendTerminalResize,
     readSessionBufferSnapshot,
     readTargetTransportRuntimes,

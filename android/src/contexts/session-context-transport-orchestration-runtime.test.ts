@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   handleTargetMuxTransportFailureRuntime,
   notifyTargetNetworkSignalRuntime,
+  reportTargetNetworkProbeErrorRuntime,
   resolveMuxChannelClosedWithControlStatusRuntime,
   routeTargetSocketFailureRuntime,
 } from './session-context-transport-orchestration-runtime';
@@ -68,24 +69,22 @@ describe('notifyTargetNetworkSignalRuntime', () => {
   it('routes native snapshot failure into the daemon-connection error owner', () => {
     const submitTargetNetworkProbeError = vi.fn();
     const runtime = createSessionTargetNetworkProbeRuntime({ probeTimeoutMs: 2_500, now: Date.now });
+    const runtimeDebug = vi.fn();
 
-    expect(notifyTargetNetworkSignalRuntime({
-      signal: {
-        source: 'native-snapshot-error',
+    reportTargetNetworkProbeErrorRuntime({
+      failure: {
+        type: 'TargetNetworkProbeError04NativeSnapshot',
         message: 'native snapshot unavailable',
       },
-      targetRuntimes: [],
-      targetNetworkProbeRuntime: runtime,
-      sendTargetProbe: vi.fn(),
-      submitTargetSocketFailure: vi.fn(),
-      submitTargetNetworkProbeError,
-      runtimeDebug: vi.fn(),
-    })).toEqual([]);
+      daemonConnection: { reportTargetNetworkProbeError: submitTargetNetworkProbeError },
+      runtimeDebug,
+    });
 
     expect(submitTargetNetworkProbeError).toHaveBeenCalledWith({
       type: 'TargetNetworkProbeError04NativeSnapshot',
       message: 'native snapshot unavailable',
     });
+    expect(runtimeDebug).toHaveBeenCalledWith('session.mux.target-network-probe.error-chain', expect.any(Object));
     runtime.dispose();
   });
 

@@ -3,6 +3,7 @@ import type { BridgeTransportSocket } from '../lib/traversal/types';
 import type { SessionHeartbeatStore } from '../lib/session-heartbeat-store';
 import type { SessionReconnectStore } from '../lib/session-reconnect-store';
 import type { SessionTransportResource } from '../lib/session-transport-runtime';
+import type { ClientDaemonConnection } from '../lib/client-daemon-connection';
 import { createClientDaemonConnection } from '../lib/client-daemon-connection';
 import { getResolvedSessionName } from '../lib/connection-target';
 import type {
@@ -35,7 +36,6 @@ import {
 } from '@zterm/shared/protocol';
 import type {
   SessionTargetNetworkProbeFailure,
-  TargetNetworkProbeError04NativeSnapshot,
   SessionTargetNetworkProbeRuntime,
   SessionTargetNetworkProbeResult,
   SessionTargetNetworkSignal,
@@ -78,6 +78,23 @@ import {
 
 interface MutableRefObject<T> {
   current: T;
+}
+
+export function reportTargetNetworkProbeErrorRuntime(options: {
+  failure: SessionTargetNetworkProbeFailure;
+  daemonConnection: Pick<ClientDaemonConnection, 'reportTargetNetworkProbeError'>;
+  runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
+}) {
+  if (!options.daemonConnection.reportTargetNetworkProbeError) {
+    throw new Error('client.daemon_connection native snapshot error owner is unavailable');
+  }
+  options.daemonConnection.reportTargetNetworkProbeError(options.failure);
+  options.runtimeDebug('session.mux.target-network-probe.error-chain', {
+    errorType: options.failure.type,
+    message: options.failure.type === 'TargetNetworkProbeError04NativeSnapshot'
+      ? options.failure.message
+      : undefined,
+  });
 }
 
 export function resolveMuxChannelClosedWithControlStatusRuntime(options: {
@@ -351,22 +368,6 @@ export function notifyTargetNetworkSignalRuntime(options: {
   runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
 }) {
   const outcomes: TargetNetworkProbeOutcome[] = [];
-  if (options.signal.source === 'native-snapshot-error') {
-    const error: TargetNetworkProbeError04NativeSnapshot = {
-      type: 'TargetNetworkProbeError04NativeSnapshot',
-      message: options.signal.message,
-    };
-    if (!options.submitTargetNetworkProbeError) {
-      throw new Error('target network probe error owner is unavailable');
-    }
-    options.submitTargetNetworkProbeError(error);
-    options.runtimeDebug('session.mux.target-network-probe.native-snapshot-error', {
-      errorType: error.type,
-      message: error.message,
-    });
-    return outcomes;
-  }
-
   const shouldWakeReconnects = options.signal.source === 'foreground-resume'
     || options.signal.connected === true;
   if (shouldWakeReconnects) {
@@ -826,13 +827,10 @@ export function createSessionTransportOrchestrationRuntime(options: {
   };
 
   const submitTargetNetworkProbeError = (failure: SessionTargetNetworkProbeFailure) => {
-    if (!daemonConnection.reportTargetNetworkProbeError) {
-      throw new Error('client.daemon_connection native snapshot error owner is unavailable');
-    }
-    daemonConnection.reportTargetNetworkProbeError(failure);
-    options.runtimeDebug('session.mux.target-network-probe.error-chain', {
-      errorType: failure.type,
-      message: failure.type === 'TargetNetworkProbeError04NativeSnapshot' ? failure.message : undefined,
+    reportTargetNetworkProbeErrorRuntime({
+      failure,
+      daemonConnection,
+      runtimeDebug: options.runtimeDebug,
     });
   };
 
@@ -905,6 +903,12 @@ export function createSessionTransportOrchestrationRuntime(options: {
   const daemonConnection = createClientDaemonConnection({
     readSessionTransportResource: options.readSessionTransportResource,
     sendSocketPayload: options.sendSocketPayload,
+    onTargetNetworkProbeError: (failure) => {
+      options.runtimeDebug('session.mux.target-network-probe.error-consumed', {
+        errorType: failure.type,
+        message: failure.type === 'TargetNetworkProbeError04NativeSnapshot' ? failure.message : undefined,
+      });
+    },
     openSessionTargetTransport: ({ sessionId, host, debugScope, finalizeFailure }) => {
       const ws = options.openDaemonTargetTransportSocket(host);
       options.applyTransportDiagnostics(sessionId, ws);
@@ -1205,6 +1209,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
     scheduleReconnect,
     queueConnectTransportOpenIntent,
     notifyTargetNetworkSignal,
+    reportTargetNetworkProbeError: submitTargetNetworkProbeError,
     sendTerminalResize,
   };
 }

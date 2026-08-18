@@ -58,7 +58,10 @@ import {
 import type { BridgeTransportSocket } from '../lib/traversal/types';
 import type { SessionBufferHeadState } from './session-buffer-planner-helpers';
 import type { ClientDaemonConnection } from '../lib/client-daemon-connection';
-import type { SessionTargetNetworkSignal } from './session-context-target-network-probe-runtime';
+import type {
+  SessionTargetNetworkProbeFailure,
+  SessionTargetNetworkSignal,
+} from './session-context-target-network-probe-runtime';
 import type { TargetTransportRuntime } from '../lib/session-transport-runtime';
 
 export function createSessionPublicFacadeRuntime(options: {
@@ -101,6 +104,7 @@ export function createSessionPublicFacadeRuntime(options: {
   notifyTargetNetworkSignal: (
     signal: SessionTargetNetworkSignal,
   ) => void;
+  reportTargetNetworkProbeError: (failure: SessionTargetNetworkProbeFailure) => void;
   sendTerminalResize: (sessionId: string, cols?: number | null, rows?: number | null, widthMode?: 'adaptive-phone' | 'mirror-fixed') => boolean;
   setLiveSessionIdsSync: (ids: string[]) => void;
   setActiveBodySubscriptionSuppressedSync: (suppressed: boolean, reason?: string) => void;
@@ -333,6 +337,7 @@ export function createSessionPublicFacadeRuntime(options: {
     setActiveBodySubscriptionSuppressed,
     resumeActiveSessionTransport,
     notifyTargetNetworkSignal: options.notifyTargetNetworkSignal,
+    reportTargetNetworkProbeError: options.reportTargetNetworkProbeError,
     sendTerminalResize,
     updateSessionViewport,
     getActiveSession,
@@ -365,6 +370,7 @@ export function buildSessionContextValueRuntime(options: {
   notifyTargetNetworkSignal: (
     signal: SessionTargetNetworkSignal,
   ) => void;
+  reportTargetNetworkProbeError: (failure: SessionTargetNetworkProbeFailure) => void;
   sendTerminalResize: (sessionId: string, cols?: number | null, rows?: number | null, widthMode?: 'adaptive-phone' | 'mirror-fixed') => boolean;
   sendMessage: (sessionId: string, msg: ClientMessage) => void;
   sendInput: (sessionId: string, data: string) => void;
@@ -455,6 +461,7 @@ export function buildSessionContextValueRuntime(options: {
     setActiveBodySubscriptionSuppressed: options.setActiveBodySubscriptionSuppressed,
     resumeActiveSessionTransport: options.resumeActiveSessionTransport,
     notifyTargetNetworkSignal: options.notifyTargetNetworkSignal,
+    reportTargetNetworkProbeError: options.reportTargetNetworkProbeError,
     sendTerminalResize: options.sendTerminalResize,
     sendMessage: options.sendMessage,
     sendInput: options.sendInput,
