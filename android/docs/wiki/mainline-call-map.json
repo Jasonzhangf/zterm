@@ -171,10 +171,6 @@
           "label": "src/hooks/useRelayDeviceStream.ts#useRelayDeviceStream"
         },
         {
-          "id": "RelayControlSocket",
-          "label": "src/lib/traversal-relay-client.ts#connectTraversalRelayDevicesStream"
-        },
-        {
           "id": "RelayDirectoryProjection",
           "label": "src/lib/client-control-directory-runtime.ts#ClientControlDirectoryRuntime.replaceFromDevices"
         },
@@ -569,6 +565,18 @@
         {
           "id": "TerminalTargetControlOut01ListSessions",
           "label": "src/contexts/session-context-tmux-management-runtime.ts#manageTmuxSessionsOnOpenTransportRuntime"
+        },
+        {
+          "id": "TargetNetworkProbeError04NativeSnapshot",
+          "label": "TargetNetworkProbeError04NativeSnapshot"
+        },
+        {
+          "id": "TargetNetworkProbeError04NativeSnapshot",
+          "label": "TargetNetworkProbeError04NativeSnapshot"
+        },
+        {
+          "id": "DaemonConnectionErrorChain",
+          "label": "DaemonConnectionErrorChain"
         }
       ],
       "edges": [
@@ -585,19 +593,6 @@
           "via_resources": [
             "resource.relay_account_directory"
           ],
-          "relation_status": "observer"
-        },
-        {
-          "from": "RelayControlRuntime",
-          "to": "RelayControlSocket",
-          "owner_feature": "relay.account_directory",
-          "semantic_input": "account control URL, token, and stable device identity",
-          "semantic_output": "role-scoped persistent control WebSocket",
-          "status": "anchored",
-          "edge_id": "android_mainline:RelayControlRuntime->RelayControlSocket",
-          "resource_from": "resource.relay_control_connection",
-          "resource_to": "resource.relay_control_connection",
-          "via_resources": [],
           "relation_status": "observer"
         },
         {
@@ -2936,19 +2931,6 @@
           "relation_status": "observer"
         },
         {
-          "from": "RelayControlSocket",
-          "to": "RelayAccountStore",
-          "owner_feature": "relay.account_directory",
-          "semantic_input": "validated devices-snapshot or directory-snapshot message on the open control socket",
-          "semantic_output": "merge against the current stored account for the same token and base URL; reject mismatched account identity",
-          "status": "anchored",
-          "edge_id": "android_mainline:RelayControlSocket->RelayAccountStore",
-          "resource_from": "resource.relay_control_connection",
-          "resource_to": "resource.relay_account_directory",
-          "via_resources": [],
-          "relation_status": "direct"
-        },
-        {
           "from": "RelayAccountStore",
           "to": "RelayDirectoryProjection",
           "owner_feature": "relay.account_directory",
@@ -3016,6 +2998,60 @@
             "resource.session_transport"
           ],
           "relation_status": "via"
+        },
+        {
+          "from": "RelayControlRuntime",
+          "to": "RelayAccountStore",
+          "owner_feature": "relay.account_directory",
+          "semantic_input": "account control URL, token, and stable device identity",
+          "semantic_output": "confirmed account directory snapshot stored for relay endpoint projection",
+          "status": "anchored",
+          "edge_id": "android_mainline:RelayControlRuntime->RelayAccountStore",
+          "resource_from": "resource.relay_control_connection",
+          "resource_to": "resource.relay_account_directory",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "RelayDirectoryProjection",
+          "to": "TraversalSocketFactory",
+          "owner_feature": "relay.account_directory",
+          "semantic_input": "confirmed endpoint directory projection",
+          "semantic_output": "route candidate resolution for terminal socket factory",
+          "status": "anchored",
+          "edge_id": "android_mainline:RelayDirectoryProjection->TraversalSocketFactory",
+          "resource_from": "resource.relay_account_directory",
+          "resource_to": "resource.transport_target",
+          "via_resources": [
+            "resource.transport_target"
+          ],
+          "relation_status": "observer"
+        },
+        {
+          "from": "NetworkIdentityRuntime",
+          "to": "TargetNetworkProbeError04NativeSnapshot",
+          "owner_feature": "android_network_identity_snapshot",
+          "semantic_input": "native snapshot/malformed-snapshot failure inside NetworkIdentityRuntime",
+          "semantic_output": "typed TargetNetworkProbeError04NativeSnapshot projected into the daemon-connection error chain",
+          "status": "anchored",
+          "edge_id": "android_mainline:NetworkIdentityRuntime->TargetNetworkProbeError04NativeSnapshot",
+          "resource_from": "resource.platform_network_signal",
+          "resource_to": "resource.platform_network_signal",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "TargetNetworkProbeError04NativeSnapshot",
+          "to": "DaemonConnectionErrorChain",
+          "owner_feature": "android_network_identity_snapshot",
+          "semantic_input": "typed native snapshot error envelope",
+          "semantic_output": "retained error routed into the client daemon-connection error chain",
+          "status": "anchored",
+          "edge_id": "android_mainline:TargetNetworkProbeError04NativeSnapshot->DaemonConnectionErrorChain",
+          "resource_from": "resource.platform_network_signal",
+          "resource_to": "resource.platform_network_signal",
+          "via_resources": [],
+          "relation_status": "observer"
         }
       ]
     },

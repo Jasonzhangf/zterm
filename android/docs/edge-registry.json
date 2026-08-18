@@ -1121,12 +1121,12 @@
       ],
       "error_chain": [
         "UiProjectionError01RendererUnavailable"
-  ],
-  "mainline_call_ids": [
-    "android_mainline:TerminalPage->TerminalShellContract",
-    "android_mainline:TerminalShellContract->StageShell",
-    "android_mainline:StageShell->TerminalView"
-  ],
+      ],
+      "mainline_call_ids": [
+        "android_mainline:TerminalPage->TerminalShellContract",
+        "android_mainline:TerminalShellContract->StageShell",
+        "android_mainline:StageShell->TerminalView"
+      ],
       "required_gates": [
         "src/lib/edge-registry-truth.test.ts",
         "src/components/TerminalView.dynamic-refresh.test.tsx"
@@ -1439,8 +1439,8 @@
       ],
       "mainline_call_ids": [
         "android_mainline:RelayDirectoryProjection->ClientControlPlaneTransport",
-        "android_mainline:RelayControlSocket->RelayAccountStore",
-        "android_mainline:RelayAccountStore->RelayDirectoryProjection"
+        "android_mainline:RelayAccountStore->RelayDirectoryProjection",
+        "android_mainline:RelayControlRuntime->RelayAccountStore"
       ],
       "required_gates": [
         "src/lib/edge-registry-truth.test.ts",
@@ -1966,7 +1966,7 @@
         "RelayAccountStoreError02MissingDirectory"
       ],
       "mainline_call_ids": [
-        "android_mainline:RelayControlSocket->RelayAccountStore"
+        "android_mainline:RelayControlRuntime->RelayAccountStore"
       ],
       "allowed_callers": [
         "src/lib/traversal-relay-client.ts"

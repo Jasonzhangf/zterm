@@ -332,6 +332,28 @@ describe('function wiki truth gate', () => {
     ))).toBe(true);
   });
 
+  it('keeps every function-map mainline edge in the machine-readable call map', () => {
+    const manifest = JSON.parse(read('docs/wiki/mainline-call-map.json')) as {
+      lifecycles: Array<{
+        lifecycle_id: string;
+        edges: Array<{ edge_id: string }>;
+      }>;
+    };
+    const manifestEdgeIds = new Set(
+      manifest.lifecycles.flatMap((lifecycle) => lifecycle.edges.map((edge) => edge.edge_id)),
+    );
+    const functionMap = read('docs/function-map.md');
+    const functionMapMainlineIds = Array.from(
+      functionMap.matchAll(/`((?:android|daemon|cli)_mainline:[^`]+)`/g),
+      (match) => match[1],
+    );
+
+    expect(functionMapMainlineIds.length).toBeGreaterThan(0);
+    for (const mainlineId of functionMapMainlineIds) {
+      expect(manifestEdgeIds.has(mainlineId), mainlineId).toBe(true);
+    }
+  });
+
   it('keeps generated html offline and sourced from mermaid diagrams', () => {
     for (const file of ['daemon', 'cli', 'mainline-source', 'modules']) {
       const md = read(`docs/wiki/${file}.md`);
