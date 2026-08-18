@@ -194,4 +194,20 @@ describe('createSessionTargetNetworkProbeRuntime', () => {
       socket,
     });
   });
+
+  it('preserves native snapshot failure as a typed transport error', () => {
+    vi.useFakeTimers();
+    const onFailure = vi.fn();
+    const runtime = createSessionTargetNetworkProbeRuntime({ probeTimeoutMs: 2_500, now: Date.now });
+
+    runtime.probe({
+      targetKey: 'daemon-a',
+      socket: createSocket(),
+      sendProbe: vi.fn(),
+      onFailure,
+    });
+
+    runtime.dispose();
+    expect(onFailure).not.toHaveBeenCalled();
+  });
 });

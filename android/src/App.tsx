@@ -44,7 +44,7 @@ import { useBackgroundLiveSessionHandoff } from './hooks/useOpenTabLifecycleEffe
 import { useAttachmentNotifications } from './hooks/useAttachmentNotifications';
 import { createNetworkIdentityRuntime } from './lib/network-identity';
 import { readNativeNetworkIdentitySnapshot } from './plugins/NetworkIdentityPlugin';
-import type { NetworkIdentityRuntime } from './lib/network-identity';
+import { projectNetworkIdentitySnapshotError, type NetworkIdentityRuntime } from './lib/network-identity';
 import { createPluginHost } from './lib/plugin-host/plugin-host-runtime';
 import { NetworkIdentityCapabilityPlugin } from './lib/plugin-host/network-identity-capability-plugin';
 import { DebugConsoleUiPlugin } from './lib/plugin-host/debug-console-ui-plugin';
@@ -135,14 +135,6 @@ export function AppContent({
     title: string;
     message: string;
   } | null>(null);
-  useEffect(() => {
-    if (!networkIdentity) {
-      return;
-    }
-    void networkIdentity.resample().catch((error) => {
-      console.warn('[App] initial network identity resample failed:', error);
-    });
-  }, [networkIdentity]);
   const { relayDevices, refreshControlDirectory } = useRelayDeviceStream({
     bridgeSettings,
     setBridgeSettings,
@@ -237,6 +229,18 @@ export function AppContent({
     getPendingAttachments,
     recordBackgroundEnteredAt,
   } = useSession();
+  useEffect(() => {
+    if (!networkIdentity) {
+      return;
+    }
+    void networkIdentity.resample().catch((error: unknown) => {
+      const snapshotError = projectNetworkIdentitySnapshotError(error);
+      notifyTargetNetworkSignal({
+        source: 'native-snapshot-error',
+        message: snapshotError.message,
+      });
+    });
+  }, [networkIdentity, notifyTargetNetworkSignal]);
   useAttachmentNotifications({ getPendingAttachments });
   const screenOrientationLock = useScreenOrientationLock();
   void sendMessageRaw;

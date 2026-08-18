@@ -508,7 +508,8 @@
       "error_chain": [
         "TargetNetworkProbeError01GenerationTimeout",
         "TargetNetworkProbeError02SendFailure",
-        "TargetNetworkProbeError03TerminalSocketState"
+        "TargetNetworkProbeError03TerminalSocketState",
+        "TargetNetworkProbeError04NativeSnapshot"
       ],
       "mainline_call_ids": [
         "android_mainline:PlatformNetworkSignal->OpenTabNetworkBinding",

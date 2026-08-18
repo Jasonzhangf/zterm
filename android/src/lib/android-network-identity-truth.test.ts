@@ -136,6 +136,7 @@ describe('Android network identity plugin', () => {
     expect(wrapper).toContain("snapshot requires a native Android runtime");
     expect(wrapper).not.toContain("web: () => ({");
     expect(wrapper).not.toContain("console.warn");
+    expect(wrapper).toContain("NetworkIdentitySnapshotError");
     expect(wrapper).not.toContain("return []");
   });
 

@@ -53,6 +53,31 @@ export interface NetworkIdentityRuntimeOptions {
   sampleInterfaces?: () => Promise<NetworkInterfaceFingerprint[]> | NetworkInterfaceFingerprint[];
 }
 
+/**
+ * Explicit control-plane failure for the ephemeral platform network signal.
+ * Native snapshot absence, malformed snapshots, and sample-interfaces failures
+ * must reach the client.daemon_connection error chain instead of being
+ * replaced with an empty or stale network fingerprint.
+ */
+export class NetworkIdentitySnapshotError extends Error {
+  readonly kind: 'TargetNetworkProbeError04NativeSnapshot';
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'NetworkIdentitySnapshotError';
+    this.kind = 'TargetNetworkProbeError04NativeSnapshot';
+  }
+}
+
+export function projectNetworkIdentitySnapshotError(error: unknown): NetworkIdentitySnapshotError {
+  if (error instanceof NetworkIdentitySnapshotError) {
+    return error;
+  }
+  return new NetworkIdentitySnapshotError(
+    error instanceof Error ? error.message : String(error),
+  );
+}
+
 function fingerprintEquals(left: NetworkFingerprint, right: NetworkFingerprint) {
   if (left.connected !== right.connected || left.connectionType !== right.connectionType) {
     return false;

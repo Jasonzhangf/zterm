@@ -29,6 +29,10 @@ export type SessionTargetNetworkSignal =
     source: 'foreground-resume';
     networkGeneration?: number;
     fingerprintChanged?: boolean;
+  }
+  | {
+    source: 'native-snapshot-error';
+    message: string;
   };
 
 export interface TargetNetworkProbeError01GenerationTimeout {
@@ -50,10 +54,16 @@ export interface TargetNetworkProbeError03TerminalSocketState {
   readyState: number;
 }
 
+export interface TargetNetworkProbeError04NativeSnapshot {
+  type: 'TargetNetworkProbeError04NativeSnapshot';
+  message: string;
+}
+
 export type SessionTargetNetworkProbeFailure =
   | TargetNetworkProbeError01GenerationTimeout
   | TargetNetworkProbeError02SendFailure
-  | TargetNetworkProbeError03TerminalSocketState;
+  | TargetNetworkProbeError03TerminalSocketState
+  | TargetNetworkProbeError04NativeSnapshot;
 
 interface PendingSessionTargetNetworkProbe {
   socket: BridgeTransportSocket;

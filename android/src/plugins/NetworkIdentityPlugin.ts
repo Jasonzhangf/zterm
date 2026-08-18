@@ -1,5 +1,6 @@
 import { Capacitor, registerPlugin } from "@capacitor/core";
 
+import { NetworkIdentitySnapshotError } from "../lib/network-identity";
 import type { NetworkInterfaceFingerprint } from "../lib/network-identity";
 
 export interface NetworkIdentitySnapshot {
@@ -16,7 +17,7 @@ export function requireNativeNetworkInterfaces(
   snapshot: Pick<NetworkIdentitySnapshot, "interfaces">,
 ): NetworkInterfaceFingerprint[] {
   if (!Array.isArray(snapshot.interfaces)) {
-    throw new Error(
+    throw new NetworkIdentitySnapshotError(
       "NetworkIdentity native snapshot returned invalid interfaces",
     );
   }
@@ -33,7 +34,9 @@ export function isNativeNetworkIdentitySupported() {
 
 export async function readNativeNetworkIdentitySnapshot(): Promise<NetworkInterfaceFingerprint[]> {
   if (!isNativeNetworkIdentitySupported()) {
-    throw new Error('NetworkIdentity snapshot requires a native Android runtime');
+    throw new NetworkIdentitySnapshotError(
+      'NetworkIdentity snapshot requires a native Android runtime',
+    );
   }
   const snapshot = await NetworkIdentityNative.snapshot();
   return requireNativeNetworkInterfaces(snapshot);

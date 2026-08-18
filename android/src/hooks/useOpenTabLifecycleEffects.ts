@@ -13,7 +13,7 @@ import {
   recordBackgroundHeartbeat,
 } from '../plugins/BackgroundServicePlugin';
 import type { Session } from '../lib/types';
-import type { NetworkIdentityRuntime } from '../lib/network-identity';
+import { projectNetworkIdentitySnapshotError, type NetworkIdentityRuntime } from '../lib/network-identity';
 import type { SessionTargetNetworkSignal } from '../contexts/session-context-target-network-probe-runtime';
 
 export type OpenTabAuditReason =
@@ -161,8 +161,12 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
     let sample;
     try {
       sample = await runtime.resampleWithStatus({ connected, connectionType });
-    } catch (error) {
-      console.warn('[App] Failed to resample network identity on foreground resume:', error);
+    } catch (error: unknown) {
+      const snapshotError = projectNetworkIdentitySnapshotError(error);
+      callbacksRef.current.notifyTargetNetworkSignal({
+        source: 'native-snapshot-error',
+        message: snapshotError.message,
+      });
       return;
     }
     if (sample.fingerprintChanged) {

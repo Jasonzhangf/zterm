@@ -65,6 +65,48 @@ function makeClosedChannel(sessionName = 'demo') {
 }
 
 describe('notifyTargetNetworkSignalRuntime', () => {
+  it('routes native snapshot failure into the daemon-connection error owner', () => {
+    const submitTargetNetworkProbeError = vi.fn();
+    const runtime = createSessionTargetNetworkProbeRuntime({ probeTimeoutMs: 2_500, now: Date.now });
+
+    expect(notifyTargetNetworkSignalRuntime({
+      signal: {
+        source: 'native-snapshot-error',
+        message: 'native snapshot unavailable',
+      },
+      targetRuntimes: [],
+      targetNetworkProbeRuntime: runtime,
+      sendTargetProbe: vi.fn(),
+      submitTargetSocketFailure: vi.fn(),
+      submitTargetNetworkProbeError,
+      runtimeDebug: vi.fn(),
+    })).toEqual([]);
+
+    expect(submitTargetNetworkProbeError).toHaveBeenCalledWith({
+      type: 'TargetNetworkProbeError04NativeSnapshot',
+      message: 'native snapshot unavailable',
+    });
+    runtime.dispose();
+  });
+
+  it('does not enter the native snapshot error chain for a healthy signal', () => {
+    const submitTargetNetworkProbeError = vi.fn();
+    const runtime = createSessionTargetNetworkProbeRuntime({ probeTimeoutMs: 2_500, now: Date.now });
+
+    notifyTargetNetworkSignalRuntime({
+      signal: { connected: true, connectionType: 'wifi', source: 'capacitor' },
+      targetRuntimes: [],
+      targetNetworkProbeRuntime: runtime,
+      sendTargetProbe: vi.fn(),
+      submitTargetSocketFailure: vi.fn(),
+      submitTargetNetworkProbeError,
+      runtimeDebug: vi.fn(),
+    });
+
+    expect(submitTargetNetworkProbeError).not.toHaveBeenCalled();
+    runtime.dispose();
+  });
+
   it('wakes scheduled reconnects on positive network recovery even when no socket remains', () => {
     const wakeScheduledReconnects = vi.fn();
     const targetNetworkProbeRuntime = createSessionTargetNetworkProbeRuntime({ probeTimeoutMs: 2_500, now: Date.now });

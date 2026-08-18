@@ -5,6 +5,7 @@ import type { SessionTransportResource } from './session-transport-runtime';
 import { TraversalSocket } from './traversal/socket';
 import type { BridgeTransportSocket, TraversalTargetSource } from './traversal/types';
 import type { TraversalRouteHealthScope } from './traversal/route-health-cache';
+import type { SessionTargetNetworkProbeFailure } from '../contexts/session-context-target-network-probe-runtime';
 
 export interface ClientDaemonConnectionSocketFactoryOptions {
   overrideUrl?: string;
@@ -34,6 +35,8 @@ export interface ClientDaemonConnection {
   openSessionTargetTransport?: (options: ClientDaemonConnectionOpenTargetTransportOptions) => BridgeTransportSocket;
   sendSessionMessage(sessionId: string, message: ClientMessage): boolean;
   sendSessionRaw(sessionId: string, message: unknown): boolean;
+  reportTargetNetworkProbeError?: (failure: SessionTargetNetworkProbeFailure) => void;
+  readTargetNetworkProbeErrors?: () => readonly SessionTargetNetworkProbeFailure[];
 }
 
 export interface ClientDaemonConnectionOpenTargetTransportOptions {
@@ -66,6 +69,7 @@ export function createClientDaemonConnection(options: {
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
   openSessionTargetTransport?: (options: ClientDaemonConnectionOpenTargetTransportOptions) => BridgeTransportSocket;
 }): ClientDaemonConnection {
+  const targetNetworkProbeErrors: SessionTargetNetworkProbeFailure[] = [];
   const readSessionResource = (sessionId: string) => options.readSessionTransportResource(sessionId);
   const readSessionSocket = (sessionId: string) => readSessionResource(sessionId).socket || null;
   const readSessionTargetSocket = (sessionId: string) => readSessionResource(sessionId).terminalSocket || null;
@@ -108,5 +112,9 @@ export function createClientDaemonConnection(options: {
     },
     sendSessionRaw,
     sendSessionMessage: sendSessionRaw as ClientDaemonConnection['sendSessionMessage'],
+    reportTargetNetworkProbeError: (failure) => {
+      targetNetworkProbeErrors.push(failure);
+    },
+    readTargetNetworkProbeErrors: () => targetNetworkProbeErrors,
   };
 }

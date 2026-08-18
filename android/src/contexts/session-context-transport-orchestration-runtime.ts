@@ -35,6 +35,7 @@ import {
 } from '@zterm/shared/protocol';
 import type {
   SessionTargetNetworkProbeFailure,
+  TargetNetworkProbeError04NativeSnapshot,
   SessionTargetNetworkProbeRuntime,
   SessionTargetNetworkProbeResult,
   SessionTargetNetworkSignal,
@@ -322,6 +323,8 @@ function projectTargetNetworkProbeFailureMessage(failure: SessionTargetNetworkPr
       return 'network generation target probe send failed';
     case 'TargetNetworkProbeError03TerminalSocketState':
       return `network generation target transport terminal state ${failure.readyState}`;
+    case 'TargetNetworkProbeError04NativeSnapshot':
+      return `native network identity snapshot failed: ${failure.message}`;
     default: {
       const unreachableFailure: never = failure;
       throw new Error(`unhandled target network probe failure: ${String(unreachableFailure)}`);
@@ -343,10 +346,27 @@ export function notifyTargetNetworkSignalRuntime(options: {
     socket: BridgeTransportSocket,
     message: string,
   ) => void;
+  submitTargetNetworkProbeError?: (failure: SessionTargetNetworkProbeFailure) => void;
   wakeScheduledReconnects?: () => void;
   runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
 }) {
   const outcomes: TargetNetworkProbeOutcome[] = [];
+  if (options.signal.source === 'native-snapshot-error') {
+    const error: TargetNetworkProbeError04NativeSnapshot = {
+      type: 'TargetNetworkProbeError04NativeSnapshot',
+      message: options.signal.message,
+    };
+    if (!options.submitTargetNetworkProbeError) {
+      throw new Error('target network probe error owner is unavailable');
+    }
+    options.submitTargetNetworkProbeError(error);
+    options.runtimeDebug('session.mux.target-network-probe.native-snapshot-error', {
+      errorType: error.type,
+      message: error.message,
+    });
+    return outcomes;
+  }
+
   const shouldWakeReconnects = options.signal.source === 'foreground-resume'
     || options.signal.connected === true;
   if (shouldWakeReconnects) {
@@ -395,6 +415,10 @@ export function notifyTargetNetworkSignalRuntime(options: {
             source: options.signal.source,
             readyState: failure.socket.readyState,
           });
+          return;
+        }
+        if (failure.type === 'TargetNetworkProbeError04NativeSnapshot') {
+          options.submitTargetNetworkProbeError?.(failure);
           return;
         }
         options.submitTargetSocketFailure(
@@ -801,6 +825,17 @@ export function createSessionTransportOrchestrationRuntime(options: {
     });
   };
 
+  const submitTargetNetworkProbeError = (failure: SessionTargetNetworkProbeFailure) => {
+    if (!daemonConnection.reportTargetNetworkProbeError) {
+      throw new Error('client.daemon_connection native snapshot error owner is unavailable');
+    }
+    daemonConnection.reportTargetNetworkProbeError(failure);
+    options.runtimeDebug('session.mux.target-network-probe.error-chain', {
+      errorType: failure.type,
+      message: failure.type === 'TargetNetworkProbeError04NativeSnapshot' ? failure.message : undefined,
+    });
+  };
+
   const bindTargetMuxTransportSocketLifecycle = (bindOptions: {
     sessionId: string;
     host: Host;
@@ -911,6 +946,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
         probeSocket.send(JSON.stringify(buildTerminalMuxPing(sentAt)));
       },
       submitTargetSocketFailure,
+      submitTargetNetworkProbeError,
       runtimeDebug: options.runtimeDebug,
     })
   );

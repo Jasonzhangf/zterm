@@ -1310,7 +1310,8 @@
         "snapshot_active_network",
         "notify_network_generation",
         "trigger_target_health_probe",
-        "read_native_network_identity_snapshot"
+        "read_native_network_identity_snapshot",
+        "report_native_snapshot_error"
       ],
       "direct_relations": [
         "resource.session_transport"

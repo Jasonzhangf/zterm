@@ -231,6 +231,7 @@ describe('edge registry truth gate', () => {
       'TargetNetworkProbeError01GenerationTimeout',
       'TargetNetworkProbeError02SendFailure',
       'TargetNetworkProbeError03TerminalSocketState',
+      'TargetNetworkProbeError04NativeSnapshot',
     ]);
     expect(edge?.mainline_call_ids).toEqual([
       'android_mainline:PlatformNetworkSignal->OpenTabNetworkBinding',
