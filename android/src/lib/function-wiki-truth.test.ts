@@ -176,6 +176,7 @@ describe('function wiki truth gate', () => {
       expect(featureIds.has(lifecycle.owner_feature), lifecycle.owner_feature).toBe(true);
 
       const nodeIds = new Set(lifecycle.nodes.map((node) => node.id));
+      expect(nodeIds.size, `${lifecycle.lifecycle_id}:duplicate-node-id`).toBe(lifecycle.nodes.length);
       expect(nodeIds.has(lifecycle.entrypoint), lifecycle.entrypoint).toBe(true);
 
       for (const docPath of lifecycle.canonical_docs) {

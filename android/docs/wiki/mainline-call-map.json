@@ -571,10 +571,6 @@
           "label": "TargetNetworkProbeError04NativeSnapshot"
         },
         {
-          "id": "TargetNetworkProbeError04NativeSnapshot",
-          "label": "TargetNetworkProbeError04NativeSnapshot"
-        },
-        {
           "id": "DaemonConnectionErrorChain",
           "label": "DaemonConnectionErrorChain"
         }
@@ -3036,7 +3032,7 @@
           "status": "anchored",
           "edge_id": "android_mainline:NetworkIdentityRuntime->TargetNetworkProbeError04NativeSnapshot",
           "resource_from": "resource.platform_network_signal",
-          "resource_to": "resource.platform_network_signal",
+          "resource_to": "resource.session_transport",
           "via_resources": [],
           "relation_status": "observer"
         },
@@ -3049,7 +3045,7 @@
           "status": "anchored",
           "edge_id": "android_mainline:TargetNetworkProbeError04NativeSnapshot->DaemonConnectionErrorChain",
           "resource_from": "resource.platform_network_signal",
-          "resource_to": "resource.platform_network_signal",
+          "resource_to": "resource.session_transport",
           "via_resources": [],
           "relation_status": "observer"
         }
