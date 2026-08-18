@@ -23,5 +23,5 @@
   "module_id": "zterm-runtime-v2",
   "public_api_hash": "sha256:42699f64b69d0e555a6b43baa29dd381e27c245b417f5c60bce8f7e6155e5abd",
   "source_hash": "sha256:a096788f1f066d5a8d6c6a6358943484ba462812fe934b377f92c01090685fb6",
-  "stage": "controlled_verified"
+  "stage": "architecture_stable"
 }
