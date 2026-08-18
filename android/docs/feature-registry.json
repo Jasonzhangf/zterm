@@ -3224,7 +3224,8 @@
       "domain": "android-platform",
       "owners": [
         "src/plugins/NetworkIdentityPlugin.ts",
-        "native/android/app/src/main/java/com/zterm/android/NetworkIdentityPlugin.java"
+        "native/android/app/src/main/java/com/zterm/android/NetworkIdentityPlugin.java",
+        "src/lib/client-daemon-connection.ts"
       ],
       "allowed_paths": [
         "src/plugins/NetworkIdentityPlugin.ts",
@@ -3247,7 +3248,14 @@
         ".github/workflows/ci.yml",
         "android/generated/modules/zterm-runtime-v2/lib/zterm-runtime-v2.web.tgz",
         "android/generated/modules/zterm-runtime-v2/module.compiled.json",
-        "src/App.tsx"
+        "src/App.tsx",
+        "src/contexts/session-context-target-network-probe-runtime.ts",
+        "src/contexts/session-context-target-network-probe-runtime.test.ts",
+        "src/contexts/session-context-transport-orchestration-runtime.ts",
+        "src/contexts/session-context-transport-orchestration-runtime.test.ts",
+        "src/hooks/useOpenTabLifecycleEffects.ts",
+        "src/lib/client-daemon-connection.ts",
+        "src/lib/client-daemon-connection.test.ts"
       ],
       "forbidden_paths": [
         "src/server/",
@@ -3255,7 +3263,10 @@
       ],
       "required_gates": [
         "src/lib/android-network-identity-truth.test.ts",
-        "src/lib/feature-registry-truth.test.ts"
+        "src/lib/feature-registry-truth.test.ts",
+        "src/contexts/session-context-target-network-probe-runtime.test.ts",
+        "src/contexts/session-context-transport-orchestration-runtime.test.ts",
+        "src/lib/client-daemon-connection.test.ts"
       ],
       "truth_sources": [
         "docs/function-map.md",

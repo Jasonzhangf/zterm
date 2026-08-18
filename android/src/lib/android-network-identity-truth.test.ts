@@ -127,6 +127,34 @@ describe('Android network identity plugin', () => {
     expect(gate?.binding_paths).toContain('native/android/app/src/main/java/com/zterm/android/NetworkIdentityPlugin.java');
   });
 
+  it('binds the typed native-error relay and bounded daemon error slot', () => {
+    const featureRegistry = JSON.parse(readRepo('android/docs/feature-registry.json')) as {
+      features: Array<{ feature_id: string; allowed_paths: string[]; required_gates: string[] }>;
+    };
+    const feature = featureRegistry.features.find((entry) => entry.feature_id === 'android_network_identity_snapshot');
+    expect(feature?.allowed_paths).toEqual(expect.arrayContaining([
+      'src/contexts/session-context-target-network-probe-runtime.ts',
+      'src/contexts/session-context-target-network-probe-runtime.test.ts',
+      'src/contexts/session-context-transport-orchestration-runtime.ts',
+      'src/contexts/session-context-transport-orchestration-runtime.test.ts',
+      'src/hooks/useOpenTabLifecycleEffects.ts',
+      'src/lib/client-daemon-connection.ts',
+      'src/lib/client-daemon-connection.test.ts',
+    ]));
+    expect(feature?.required_gates).toEqual(expect.arrayContaining([
+      'src/contexts/session-context-target-network-probe-runtime.test.ts',
+      'src/contexts/session-context-transport-orchestration-runtime.test.ts',
+      'src/lib/client-daemon-connection.test.ts',
+    ]));
+
+    const resourceRegistry = JSON.parse(readRepo('android/docs/resource-registry.json')) as {
+      resources: Array<{ resource_id: string; truth_store: string; allowed_operations: string[] }>;
+    };
+    const signal = resourceRegistry.resources.find((resource) => resource.resource_id === 'resource.platform_network_signal');
+    expect(signal?.truth_store).toContain('client-daemon-connection.ts current typed error slot');
+    expect(signal?.allowed_operations).toContain('acknowledge_native_snapshot_error');
+  });
+
   it('rejects silent fallback and catch-to-empty native snapshot errors', () => {
     const wrapper = readFileSync(
       resolve(__dirname, '../plugins/NetworkIdentityPlugin.ts'),

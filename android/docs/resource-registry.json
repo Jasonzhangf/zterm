@@ -1305,13 +1305,14 @@
       "resource_type": "platform_signal",
       "identity": "Ephemeral Android network identity snapshot and network-generation notification used only to trigger bounded daemon-target health probing",
       "owner_feature": "terminal.transport_lifecycle",
-      "truth_store": "native/android/app/src/main/java/com/zterm/android/NetworkIdentityPlugin.java buildSnapshot; src/plugins/NetworkIdentityPlugin.ts readNativeNetworkIdentitySnapshot; client.daemon_connection consumes the ephemeral event and probes each current daemon-target transport generation; no persisted reachability or foreground truth",
+      "truth_store": "native/android/app/src/main/java/com/zterm/android/NetworkIdentityPlugin.java buildSnapshot; src/plugins/NetworkIdentityPlugin.ts readNativeNetworkIdentitySnapshot; client.daemon_connection consumes the ephemeral event and probes each current daemon-target transport generation; client-daemon-connection.ts current typed error slot; no persisted reachability or foreground truth",
       "allowed_operations": [
         "snapshot_active_network",
         "notify_network_generation",
         "trigger_target_health_probe",
         "read_native_network_identity_snapshot",
-        "report_native_snapshot_error"
+        "report_native_snapshot_error",
+        "acknowledge_native_snapshot_error"
       ],
       "direct_relations": [
         "resource.session_transport"

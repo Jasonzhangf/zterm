@@ -252,6 +252,8 @@ describe('edge registry truth gate', () => {
       'android_mainline:TargetNetworkProbe->TargetFailureRouter',
       'android_mainline:TargetFailureRouter->TerminalTransportError01TargetFailure',
       'android_mainline:TargetFailureRouter->IdleTargetRetirement',
+      'android_mainline:NetworkIdentityRuntime->TargetNetworkProbeError04NativeSnapshot',
+      'android_mainline:TargetNetworkProbeError04NativeSnapshot->DaemonConnectionErrorChain',
     ]);
     expect(read('src/hooks/useOpenTabLifecycleEffects.ts')).toContain('notifyTargetNetworkSignal');
     expect(read('src/hooks/useOpenTabRuntime.ts')).toContain('notifyTargetNetworkSignal,');

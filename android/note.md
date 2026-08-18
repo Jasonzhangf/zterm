@@ -7514,3 +7514,8 @@ if (bufferedBytes >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES) {
 
 - 重新核对：work/appsdk-active-v4-closeout-20260817T022328Z 唯一落在 DSH 范围（91f69b2..5197b38）之外的提交是 0df63f0（6 个 governance record 文件）。bridge-settings / home-connection / relay-account-directory 删档 / NetworkIdentityPlugin.java / TerminalPage 会话抽屉简化全部在 DSH 评审范围 89ae33d..5197b38 内；决策包 warning 已修正。
 - 当前不可逆动作仍是 merge claim→main → promote/freeze/publish-active/cleanup，等待 Jason 拍板；OTA 仍未授权 Public Relay。
+
+# 2026-08-18 active-v4 network-error owner review closeout
+
+- Candidate `9548789` review confirmed the bounded error slot is directionally correct, but found the canonical `android_network_identity_snapshot` feature/AppSDK function binding omitted the real session-runtime relay callers and tests. The implementation creates `TargetNetworkProbeError04NativeSnapshot` in `session-context-transport-orchestration-runtime.ts` and submits it through `client.daemon_connection`; those paths must be registered as allowed adjacent relay paths before review can pass.
+- The current uncommitted `client-daemon-connection` change replaces the append-only probe-error array with one current typed error and explicit acknowledgement. No production consumer currently reads the new facade; map registration must therefore describe it as the bounded client.daemon_connection error slot, not as a second transport truth.

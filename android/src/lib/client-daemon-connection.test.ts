@@ -146,6 +146,31 @@ describe('client.daemon_connection interface', () => {
 
     expect(openSessionTargetTransport).toHaveBeenCalledTimes(1);
   });
+
+  it('retains only the current typed probe error and supports explicit acknowledgement', () => {
+    const connection = createClientDaemonConnection({
+      readSessionTransportResource: () => createResource(null),
+      sendSocketPayload: vi.fn(),
+    });
+    const first = {
+      type: 'TargetNetworkProbeError04NativeSnapshot' as const,
+      message: 'first snapshot failure',
+    };
+    const second = {
+      type: 'TargetNetworkProbeError04NativeSnapshot' as const,
+      message: 'second snapshot failure',
+    };
+
+    connection.reportTargetNetworkProbeError?.(first);
+    connection.reportTargetNetworkProbeError?.(second);
+
+    expect(connection.readTargetNetworkProbeError?.()).toBe(second);
+    expect(connection.acknowledgeTargetNetworkProbeError?.(first)).toBe(false);
+    expect(connection.readTargetNetworkProbeError?.()).toBe(second);
+    expect(connection.acknowledgeTargetNetworkProbeError?.(second)).toBe(true);
+    expect(connection.readTargetNetworkProbeError?.()).toBeNull();
+    expect(connection.acknowledgeTargetNetworkProbeError?.()).toBe(false);
+  });
 });
 
 function makeHost() {

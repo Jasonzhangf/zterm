@@ -529,7 +529,9 @@
         "android_mainline:TargetNetworkActivityBinding->TargetNetworkProbe",
         "android_mainline:TargetNetworkProbe->TargetFailureRouter",
         "android_mainline:TargetFailureRouter->TerminalTransportError01TargetFailure",
-        "android_mainline:TargetFailureRouter->IdleTargetRetirement"
+        "android_mainline:TargetFailureRouter->IdleTargetRetirement",
+        "android_mainline:NetworkIdentityRuntime->TargetNetworkProbeError04NativeSnapshot",
+        "android_mainline:TargetNetworkProbeError04NativeSnapshot->DaemonConnectionErrorChain"
       ],
       "required_gates": [
         "src/lib/edge-registry-truth.test.ts",
