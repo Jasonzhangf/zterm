@@ -44,7 +44,7 @@ import { useBackgroundLiveSessionHandoff } from './hooks/useOpenTabLifecycleEffe
 import { useAttachmentNotifications } from './hooks/useAttachmentNotifications';
 import { createNetworkIdentityRuntime } from './lib/network-identity';
 import { readNativeNetworkIdentitySnapshot } from './plugins/NetworkIdentityPlugin';
-import type { NetworkIdentityRuntime } from './lib/network-identity';
+import { projectNetworkIdentitySnapshotError, type NetworkIdentityRuntime } from './lib/network-identity';
 import { createPluginHost } from './lib/plugin-host/plugin-host-runtime';
 import { NetworkIdentityCapabilityPlugin } from './lib/plugin-host/network-identity-capability-plugin';
 import { DebugConsoleUiPlugin } from './lib/plugin-host/debug-console-ui-plugin';
@@ -135,14 +135,6 @@ export function AppContent({
     title: string;
     message: string;
   } | null>(null);
-  useEffect(() => {
-    if (!networkIdentity) {
-      return;
-    }
-    void networkIdentity.resample().catch((error) => {
-      console.warn('[App] initial network identity resample failed:', error);
-    });
-  }, [networkIdentity]);
   const { relayDevices, refreshControlDirectory } = useRelayDeviceStream({
     bridgeSettings,
     setBridgeSettings,
@@ -208,6 +200,7 @@ export function AppContent({
     setActiveBodySubscriptionSuppressed,
     resumeActiveSessionTransport,
     notifyTargetNetworkSignal,
+    reportTargetNetworkProbeError,
     sendTerminalResize,
     sendInput,
     sendImagePaste,
@@ -237,6 +230,18 @@ export function AppContent({
     getPendingAttachments,
     recordBackgroundEnteredAt,
   } = useSession();
+  useEffect(() => {
+    if (!networkIdentity) {
+      return;
+    }
+    void networkIdentity.resample().catch((error: unknown) => {
+      const snapshotError = projectNetworkIdentitySnapshotError(error);
+      reportTargetNetworkProbeError({
+        type: 'TargetNetworkProbeError04NativeSnapshot',
+        message: snapshotError.message,
+      });
+    });
+  }, [networkIdentity, reportTargetNetworkProbeError]);
   useAttachmentNotifications({ getPendingAttachments });
   const screenOrientationLock = useScreenOrientationLock();
   void sendMessageRaw;
@@ -460,6 +465,7 @@ export function AppContent({
     reconnectSession,
     resumeActiveSessionTransport,
     notifyTargetNetworkSignal,
+    reportTargetNetworkProbeError,
     manageTmuxSessionsOnOpenTransport,
     clearSessionDraft,
     ensureTerminalPageVisible,
@@ -1161,11 +1167,15 @@ export default function App() {
       setPluginRuntimeError(error instanceof Error ? error : new Error(String(error)));
     });
   }, [pluginHost]);
-  const networkIdentityRuntime = useMemo(() => createNetworkIdentityRuntime({
-    sampleInterfaces: pluginRuntimeReady
-      ? pluginHost.readCapability<typeof readNativeNetworkIdentitySnapshot>('network:sample-interfaces')
-      : undefined,
-  }), [pluginHost, pluginRuntimeReady]);
+  const networkIdentityRuntime = useMemo(() => (
+    pluginRuntimeReady
+      ? createNetworkIdentityRuntime({
+        sampleInterfaces: pluginHost.readCapability<typeof readNativeNetworkIdentitySnapshot>(
+          'network:sample-interfaces',
+        ),
+      })
+      : undefined
+  ), [pluginHost, pluginRuntimeReady]);
   const debugConsoleRender = pluginRuntimeReady
     ? pluginHost
       .readUiSlot<TerminalDebugOverlayProps>(DEBUG_CONSOLE_UI_SLOT_ID)

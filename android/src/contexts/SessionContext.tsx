@@ -7,7 +7,10 @@ import type {
   SessionScheduleState,
 } from '../lib/types';
 import type { RemoteWindowControlMessage } from '../lib/remote-window-message-runtime';
-import type { SessionTargetNetworkSignal } from './session-context-target-network-probe-runtime';
+import type {
+  SessionTargetNetworkProbeFailure,
+  SessionTargetNetworkSignal,
+} from './session-context-target-network-probe-runtime';
 import { DEFAULT_BRIDGE_SETTINGS } from '../lib/bridge-settings';
 import {
   DEFAULT_TERMINAL_CACHE_LINES,
@@ -111,6 +114,7 @@ export function SessionProvider({
     setActiveBodySubscriptionSuppressed,
     resumeActiveSessionTransport,
     notifyTargetNetworkSignal,
+    reportTargetNetworkProbeError,
     sendTerminalResize,
     sendMessage,
     sendInput,
@@ -206,6 +210,7 @@ export function SessionProvider({
     setActiveBodySubscriptionSuppressed,
     resumeActiveSessionTransport,
     notifyTargetNetworkSignal,
+    reportTargetNetworkProbeError,
     sendTerminalResize,
     sendMessage,
     sendInput,
@@ -263,6 +268,7 @@ export function SessionProvider({
     setActiveBodySubscriptionSuppressed,
     resumeActiveSessionTransport,
     notifyTargetNetworkSignal,
+    reportTargetNetworkProbeError,
     sendTerminalResize,
     sendMessage,
     sendInput,
@@ -332,6 +338,9 @@ export function SessionProvider({
     notifyTargetNetworkSignal: (
       signal: SessionTargetNetworkSignal,
     ) => contextRuntimeRef.current.notifyTargetNetworkSignal(signal),
+    reportTargetNetworkProbeError: (failure: SessionTargetNetworkProbeFailure) => (
+      contextRuntimeRef.current.reportTargetNetworkProbeError(failure)
+    ),
     sendTerminalResize: (sessionId: string, cols?: number | null, rows?: number | null, widthMode?: 'adaptive-phone' | 'mirror-fixed') => (
       contextRuntimeRef.current.sendTerminalResize(sessionId, cols, rows, widthMode)
     ),

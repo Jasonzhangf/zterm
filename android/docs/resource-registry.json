@@ -452,17 +452,17 @@
         "stop",
         "dispose"
       ],
-  "direct_relations": [
-    "resource.plugin_capability_registry",
-    "resource.plugin_ui_slot_registry",
-    "resource.debug_console_ui_contract",
-    "resource.session_drawer_ui_contract",
-    "resource.file_browser_ui_contract",
-    "resource.settings_update_ui_contract",
-    "resource.remote_window_ui_contract",
-    "resource.quickbar_ui_contract",
-    "resource.terminal_shell_ui_contract"
-  ],
+      "direct_relations": [
+        "resource.plugin_capability_registry",
+        "resource.plugin_ui_slot_registry",
+        "resource.debug_console_ui_contract",
+        "resource.session_drawer_ui_contract",
+        "resource.file_browser_ui_contract",
+        "resource.settings_update_ui_contract",
+        "resource.remote_window_ui_contract",
+        "resource.quickbar_ui_contract",
+        "resource.terminal_shell_ui_contract"
+      ],
       "indirect_relations": [
         "resource.platform_network_signal"
       ],
@@ -1303,12 +1303,17 @@
     {
       "resource_id": "resource.platform_network_signal",
       "resource_type": "platform_signal",
-      "identity": "Ephemeral Android network-generation notification used only to trigger bounded daemon-target health probing",
+      "identity": "Ephemeral Android network identity snapshot and network-generation notification used only to trigger bounded daemon-target health probing",
       "owner_feature": "terminal.transport_lifecycle",
-      "truth_store": "client.daemon_connection consumes ephemeral platform events and probes each current daemon-target transport generation; no persisted reachability or foreground truth",
+      "truth_store": "native/android/app/src/main/java/com/zterm/android/NetworkIdentityPlugin.java buildSnapshot; src/plugins/NetworkIdentityPlugin.ts readNativeNetworkIdentitySnapshot; client.daemon_connection consumes the ephemeral event and probes each current daemon-target transport generation; client-daemon-connection.ts current typed error slot and registered typed error consumer; no persisted reachability or foreground truth",
       "allowed_operations": [
+        "snapshot_active_network",
         "notify_network_generation",
-        "trigger_target_health_probe"
+        "trigger_target_health_probe",
+        "read_native_network_identity_snapshot",
+        "report_native_snapshot_error",
+        "consume_native_snapshot_error",
+        "acknowledge_native_snapshot_error"
       ],
       "direct_relations": [
         "resource.session_transport"
@@ -1328,6 +1333,7 @@
         "resource.client_sparse_buffer"
       ],
       "required_gates": [
+        "src/lib/android-network-identity-truth.test.ts",
         "src/hooks/useOpenTabLifecycleEffects.test.tsx",
         "src/contexts/session-context-target-network-probe-runtime.test.ts",
         "src/contexts/session-context-transport-orchestration-runtime.test.ts"
@@ -1557,19 +1563,19 @@
         "route_user_intent",
         "host_platform_controls"
       ],
-  "direct_relations": [
-    "resource.ui_projection",
-    "resource.client_plugin_host",
-    "resource.client_composition_root",
-    "resource.client_control_center",
-    "resource.debug_console_ui_contract",
-    "resource.session_drawer_ui_contract",
-    "resource.file_browser_ui_contract",
-    "resource.settings_update_ui_contract",
-    "resource.remote_window_ui_contract",
-    "resource.quickbar_ui_contract",
-    "resource.terminal_shell_ui_contract"
-  ],
+      "direct_relations": [
+        "resource.ui_projection",
+        "resource.client_plugin_host",
+        "resource.client_composition_root",
+        "resource.client_control_center",
+        "resource.debug_console_ui_contract",
+        "resource.session_drawer_ui_contract",
+        "resource.file_browser_ui_contract",
+        "resource.settings_update_ui_contract",
+        "resource.remote_window_ui_contract",
+        "resource.quickbar_ui_contract",
+        "resource.terminal_shell_ui_contract"
+      ],
       "indirect_relations": [
         "resource.session_transport",
         "resource.backend_session"
@@ -3433,13 +3439,30 @@
       "identity": "Durable daemon image attachment original and preview files",
       "owner_feature": "daemon.attachment_delivery",
       "truth_store": "~/.zterm/attachments/outbox/<attachmentId>",
-      "allowed_operations": ["enqueue_atomic", "read_verified_asset", "expire", "delete_after_ttl"],
-      "direct_relations": ["resource.attachment_delivery"],
+      "allowed_operations": [
+        "enqueue_atomic",
+        "read_verified_asset",
+        "expire",
+        "delete_after_ttl"
+      ],
+      "direct_relations": [
+        "resource.attachment_delivery"
+      ],
       "indirect_relations": [],
-      "via_resources": ["resource.daemon_process"],
-      "forbidden_direct_relations": ["resource.ui_projection"],
-      "required_gates": ["src/server/attachment-delivery-runtime.test.ts", "src/lib/resource-registry-truth.test.ts"],
-      "canonical_docs": ["docs/testing/attachment-delivery-test-design.md", "docs/resource-map.md"]
+      "via_resources": [
+        "resource.daemon_process"
+      ],
+      "forbidden_direct_relations": [
+        "resource.ui_projection"
+      ],
+      "required_gates": [
+        "src/server/attachment-delivery-runtime.test.ts",
+        "src/lib/resource-registry-truth.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/testing/attachment-delivery-test-design.md",
+        "docs/resource-map.md"
+      ]
     },
     {
       "resource_id": "resource.attachment_delivery",
@@ -3447,13 +3470,29 @@
       "identity": "Per-device attachment delivery status and receipts",
       "owner_feature": "daemon.attachment_delivery",
       "truth_store": "attachment manifest deliveries[]",
-      "allowed_operations": ["list_pending_for_device", "record_receipt", "expire"],
-      "direct_relations": ["resource.attachment_store"],
+      "allowed_operations": [
+        "list_pending_for_device",
+        "record_receipt",
+        "expire"
+      ],
+      "direct_relations": [
+        "resource.attachment_store"
+      ],
       "indirect_relations": [],
-      "via_resources": ["resource.daemon_process"],
-      "forbidden_direct_relations": ["resource.ui_projection"],
-      "required_gates": ["src/server/attachment-delivery-runtime.test.ts", "src/lib/resource-registry-truth.test.ts"],
-      "canonical_docs": ["docs/testing/attachment-delivery-test-design.md", "docs/resource-map.md"]
+      "via_resources": [
+        "resource.daemon_process"
+      ],
+      "forbidden_direct_relations": [
+        "resource.ui_projection"
+      ],
+      "required_gates": [
+        "src/server/attachment-delivery-runtime.test.ts",
+        "src/lib/resource-registry-truth.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/testing/attachment-delivery-test-design.md",
+        "docs/resource-map.md"
+      ]
     },
     {
       "resource_id": "resource.session_idle_facts",
@@ -3535,6 +3574,40 @@
       ]
     },
     {
+      "resource_id": "resource.appsdk_compiled_artifact",
+      "status": "active",
+      "resource_type": "governance_artifact_resource",
+      "identity": "Deterministic zterm-runtime-v2 compiled manifest and web bundle emitted only by the pinned AppSDK compiler",
+      "owner_feature": "appsdk.binary_gate",
+      "truth_store": "generated/modules/zterm-runtime-v2/module.compiled.json and generated/modules/zterm-runtime-v2/lib/zterm-runtime-v2.web.tgz",
+      "allowed_operations": [
+        "compile_deterministic_artifact",
+        "record_artifact_hash",
+        "verify_source_artifact_match"
+      ],
+      "direct_relations": [
+        "resource.appsdk_compiler_identity"
+      ],
+      "indirect_relations": [],
+      "via_resources": [],
+      "forbidden_direct_relations": [
+        "resource.daemon_process",
+        "resource.session_transport",
+        "resource.mirror_store",
+        "resource.ui_projection"
+      ],
+      "required_gates": [
+        "src/lib/android-network-identity-truth.test.ts",
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/resource-registry-truth.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/function-map.md",
+        "docs/testing/appsdk-binary-gate-test-design.md"
+      ]
+    },
+    {
       "resource_id": "resource.appsdk_compiler_identity",
       "status": "active",
       "resource_type": "governance_control_resource",
@@ -3547,7 +3620,9 @@
         "verify_digest",
         "execute_record_graph_verify"
       ],
-      "direct_relations": [],
+      "direct_relations": [
+        "resource.appsdk_compiled_artifact"
+      ],
       "indirect_relations": [],
       "via_resources": [],
       "forbidden_direct_relations": [

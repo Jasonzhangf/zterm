@@ -1,5 +1,18 @@
 # 2026-07-29 remote-window sibling switch / screenshot / fullscreen gesture diagnosis
 
+# 2026-08-17 AppSDK active-v4 main closeout continuation
+
+- Latest review isolated one P0: native network-interface snapshot failures are
+  thrown by `NetworkIdentityPlugin` but initial/foreground callers either leave
+  the rejection unhandled or only log it, so the failure never enters the
+  registered `client.daemon_connection` error chain. The fix must add typed
+  `TargetNetworkProbeError04NativeSnapshot` transport-owner projection and
+  remove UI catch-to-return behavior; native success must remain outside that
+  chain.
+
+- Previous Codex review rejected candidate `5dab76b` on four concrete issues: generated module artifacts lacked ownership and allowed-path bindings; the Native -> NetworkIdentityWrapper resource edge contradicted `resource.platform_network_signal`; the JS wrapper retained `snapshot.interfaces || []`; and the generated bundle still contained the old web fallback.
+- Candidate worktree now has explicit malformed-snapshot rejection, same-resource observer mapping, deterministic artifact resource/function/module ownership, and generated paths in both affected feature allowlists. Required next evidence is canonical wiki regeneration, pinned `appsdk compile-module`, emitted-bundle inspection, then the mapped regression stack and a fresh review against the final candidate commit.
+
 # 2026-08-14 Phase 3 production client.terminal_channel_mux cutover
 
 - Phase 3 first production slice: `client.terminal_channel_mux` now owns `src/lib/terminal-channel-mux-runtime.ts` (`TerminalChannelMuxStore`). `SessionTransportRuntimeStore.terminalChannels` embeds the store; `TargetTransportRuntime` no longer owns `channels`.
@@ -7501,3 +7514,14 @@ if (bufferedBytes >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES) {
 
 - 重新核对：work/appsdk-active-v4-closeout-20260817T022328Z 唯一落在 DSH 范围（91f69b2..5197b38）之外的提交是 0df63f0（6 个 governance record 文件）。bridge-settings / home-connection / relay-account-directory 删档 / NetworkIdentityPlugin.java / TerminalPage 会话抽屉简化全部在 DSH 评审范围 89ae33d..5197b38 内；决策包 warning 已修正。
 - 当前不可逆动作仍是 merge claim→main → promote/freeze/publish-active/cleanup，等待 Jason 拍板；OTA 仍未授权 Public Relay。
+
+# 2026-08-18 active-v4 network-error owner review closeout
+
+- Candidate `9548789` review confirmed the bounded error slot is directionally correct, but found the canonical `android_network_identity_snapshot` feature/AppSDK function binding omitted the real session-runtime relay callers and tests. The implementation creates `TargetNetworkProbeError04NativeSnapshot` in `session-context-transport-orchestration-runtime.ts` and submits it through `client.daemon_connection`; those paths must be registered as allowed adjacent relay paths before review can pass.
+- The current uncommitted `client-daemon-connection` change replaces the append-only probe-error array with one current typed error and explicit acknowledgement. No production consumer currently reads the new facade; map registration must therefore describe it as the bounded client.daemon_connection error slot, not as a second transport truth.
+
+# 2026-08-18 active-v4 P0 typed network-error continuation
+
+- Exact candidate `cdb4207` has two blocking review findings: native snapshot failures are repacked as `SessionTargetNetworkSignal` source/message, and `client.daemon_connection` retains typed failures in an unconsumed slot.
+- Owner decision: native snapshot failure remains `TargetNetworkProbeError04NativeSnapshot` on a dedicated typed context callback; the normal platform signal union must contain only network status/generation signals. The daemon-connection owner will retain the latest typed failure and invoke a registered typed consumer at report time; orchestration registers the runtime-debug/error projection callback. No error enters session/wire/business payload.
+- Required positive/negative coverage: typed failure reaches the registered consumer and retained slot; healthy platform signal does not enter the error chain; stale failure acknowledgement cannot consume the newer failure.

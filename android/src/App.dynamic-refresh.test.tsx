@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildConnectionConfigShareLink } from '@zterm/shared';
 import App from './App';
 import { STORAGE_KEYS } from './lib/types';
+import { createNetworkIdentityRuntime } from './lib/network-identity';
 
 function makeSession(id: string, revision: number) {
   return {
@@ -93,6 +94,7 @@ const sessionHarness = vi.hoisted(() => {
   const reconnectSession = vi.fn();
   const resumeActiveSessionTransport = vi.fn(() => true);
   const notifyTargetNetworkSignal = vi.fn();
+  const reportTargetNetworkProbeError = vi.fn();
   const setLiveSessionIds = vi.fn();
   const setActiveBodySubscriptionSuppressed = vi.fn();
   const createSession = vi.fn();
@@ -142,6 +144,7 @@ const sessionHarness = vi.hoisted(() => {
     reconnectSession,
     resumeActiveSessionTransport,
     notifyTargetNetworkSignal,
+    reportTargetNetworkProbeError,
     setLiveSessionIds,
     setActiveBodySubscriptionSuppressed,
     createSession,
@@ -188,6 +191,7 @@ const sessionHarness = vi.hoisted(() => {
       resumeActiveSessionTransport.mockReset();
       resumeActiveSessionTransport.mockReturnValue(true);
       notifyTargetNetworkSignal.mockReset();
+      reportTargetNetworkProbeError.mockReset();
       setLiveSessionIds.mockReset();
       setActiveBodySubscriptionSuppressed.mockReset();
       createSession.mockReset();
@@ -404,6 +408,7 @@ vi.mock('./contexts/SessionContext', () => ({
     setActiveBodySubscriptionSuppressed: sessionHarness.setActiveBodySubscriptionSuppressed,
     resumeActiveSessionTransport: sessionHarness.resumeActiveSessionTransport,
     notifyTargetNetworkSignal: sessionHarness.notifyTargetNetworkSignal,
+    reportTargetNetworkProbeError: sessionHarness.reportTargetNetworkProbeError,
     getActiveSession: () => sessionHarness.readStaleActiveSession(),
     getSession: sessionHarness.getSession,
     getSessionRenderBufferSnapshot: sessionHarness.getSessionRenderBufferSnapshot,
@@ -1566,6 +1571,43 @@ describe('App dynamic refresh matrix', () => {
       connectionType: 'unknown',
       source: 'window-online',
     });
+  });
+
+  it('projects an initial native snapshot failure into the transport error chain', async () => {
+    const networkIdentity = createNetworkIdentityRuntime();
+
+    render(
+      <AppContent
+        bridgeSettings={{ servers: [] } as any}
+        setBridgeSettings={vi.fn()}
+        networkIdentity={networkIdentity}
+      />,
+    );
+
+    await waitFor(() => expect(sessionHarness.reportTargetNetworkProbeError).toHaveBeenCalledWith({
+      type: 'TargetNetworkProbeError04NativeSnapshot',
+      message: 'NetworkIdentity native snapshot capability is not active',
+    }));
+  });
+
+  it('does not project an error when the initial native snapshot succeeds', async () => {
+    const sampleInterfaces = vi.fn().mockResolvedValue([
+      { name: 'wlan0', addressesSignature: 'v4:192.0.2.1', vpn: false },
+    ]);
+    const networkIdentity = createNetworkIdentityRuntime({ sampleInterfaces });
+
+    render(
+      <AppContent
+        bridgeSettings={{ servers: [] } as any}
+        setBridgeSettings={vi.fn()}
+        networkIdentity={networkIdentity}
+      />,
+    );
+
+    await waitFor(() => expect(sampleInterfaces).toHaveBeenCalledTimes(1));
+    expect(sessionHarness.reportTargetNetworkProbeError).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'TargetNetworkProbeError04NativeSnapshot' }),
+    );
   });
 
   it('does not resume transports for online events while the app is hidden', async () => {

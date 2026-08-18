@@ -47,6 +47,7 @@ import type { RemoteWindowTargetCatalogCacheStore } from './session-context-remo
 import type { SessionTmuxTargetRequestStore } from './session-context-tmux-management-runtime';
 import type {
   SessionTargetNetworkProbeRuntime,
+  SessionTargetNetworkProbeFailure,
   SessionTargetNetworkSignal,
 } from './session-context-target-network-probe-runtime';
 import type { SessionPullStates } from '../lib/session-pull-state-helpers';
@@ -193,6 +194,7 @@ export interface SessionProviderCoreAssembliesResult {
   notifyTargetNetworkSignal: (
     signal: SessionTargetNetworkSignal,
   ) => void;
+  reportTargetNetworkProbeError: (failure: SessionTargetNetworkProbeFailure) => void;
   readTargetTransportRuntimes: () => TargetTransportRuntime[];
   readSessionTransportResource: (sessionId: string) => SessionTransportResource;
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;

@@ -8,6 +8,7 @@ Worker-readable source ownership map. Generated diagram: `docs/wiki/generated/ma
 flowchart TD
   Native["native/android/app/src/main"] --> Capacitor["capacitor.config.ts"]
   Capacitor --> Vite["vite.config.ts"]
+  Native --> NetworkIdentityWrapper["src/plugins/NetworkIdentityPlugin.ts#registerPlugin(NetworkIdentity)"]
   Vite --> Main["src/main.tsx"]
   Main --> App["src/App.tsx"]
   App --> CompositionRoot["src/lib/composition-root/client-composition-root.ts#ClientCompositionRoot"]
@@ -15,6 +16,8 @@ flowchart TD
   App --> ControlCenter["src/lib/control-center/client-control-center.ts#ClientControlCenter"]
   ControlCenter --> PluginHostControlNode["src/lib/plugin-host/plugin-host-control-node.ts#PluginHostControlNode"]
   PluginHostControlNode --> PluginHost
+  App --> App_createAppPluginHost["src/App.tsx#createAppPluginHost (App.createAppPluginHost)"]
+  App_createAppPluginHost --> PluginHost["src/lib/plugin-host/plugin-host-runtime.ts#createPluginHost"]
   App --> PluginHost["src/lib/plugin-host/plugin-host-runtime.ts#createPluginHost"]
   PluginHost --> CapabilityRegistry["packages/shared/src/terminal/plugin-capability-registry.ts#PluginCapabilityRegistry"]
   PluginHost --> UiSlotRegistry["packages/shared/src/terminal/plugin-ui-slot-registry.ts#PluginUiSlotRegistry"]
@@ -45,11 +48,16 @@ flowchart TD
   SettingsPage --> SettingsUpdateContract
   PluginHost --> NetworkIdentityCapability["src/lib/plugin-host/network-identity-capability-plugin.ts#NetworkIdentityCapabilityPlugin"]
   NetworkIdentityCapability --> NetworkIdentityRuntime["src/lib/network-identity.ts#createNetworkIdentityRuntime"]
+  NetworkIdentityRuntime --> AppNativeSnapshotErrorProjector["src/App.tsx#AppContent initial snapshot error"]
+  NetworkIdentityRuntime --> LifecycleNativeSnapshotErrorProjector["src/hooks/useOpenTabLifecycleEffects.ts#refreshNetworkIdentityForForeground"]
+  AppNativeSnapshotErrorProjector --> AppNetworkBinding
+  LifecycleNativeSnapshotErrorProjector --> OpenTabNetworkBinding
+  TargetNetworkSignalOrchestration --> TargetNetworkProbeError04NativeSnapshot["src/contexts/session-context-transport-orchestration-runtime.ts#reportTargetNetworkProbeErrorRuntime"]
+  TargetNetworkProbeError04NativeSnapshot --> DaemonConnectionErrorChain["src/lib/client-daemon-connection.ts#createClientDaemonConnection current typed error slot + registered typed error consumer"]
   App --> TerminalShellSkinResolver["src/lib/terminal-shell-skin.ts#resolveEffectiveTerminalShellSkin + resolveTerminalRendererThemeForSkin"]
   TerminalShellSkinResolver --> TerminalPage["src/pages/TerminalPage.tsx"]
   App --> RelayControlRuntime["src/hooks/useRelayDeviceStream.ts#useRelayDeviceStream"]
-  RelayControlRuntime --> RelayControlSocket["src/lib/traversal-relay-client.ts#connectTraversalRelayDevicesStream"]
-  RelayControlSocket --> RelayAccountStore["src/lib/traversal-relay-client.ts#connectTraversalRelayDevicesStream"]
+  RelayControlRuntime --> RelayAccountStore["src/lib/relay-device-stream-runtime.ts#createRelayDeviceStreamRuntime"]
   RelayAccountStore --> RelayDirectoryProjection["src/lib/client-control-directory-runtime.ts#ClientControlDirectoryRuntime.replaceFromDevices"]
   RelayDirectoryProjection --> ClientControlPlaneTransport["src/lib/client-control-plane-transport.ts#ClientControlPlaneTransport"]
   ClientControlPlaneTransport --> TransportTargetResolver["src/lib/client-control-directory-runtime.ts#mergeHostWithClientControlDirectory"]

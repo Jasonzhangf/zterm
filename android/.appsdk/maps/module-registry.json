@@ -496,6 +496,7 @@
         "native/android/app/src/main/java/com/zterm/android/MainActivity.java",
         "native/android/app/src/main/res/values/styles.xml",
         "src/App.tsx",
+        "src/App.dynamic-refresh.test.tsx",
         "src/components/terminal/SessionScheduleSheet.tsx",
         "src/components/terminal/TerminalHeader.tsx",
         "src/components/terminal/pane-android-adapter.ts",
@@ -684,18 +685,25 @@
         "src/lib/session-reconnect-store.ts",
         "src/lib/session-transport-runtime.ts",
         "src/lib/traversal/",
-        "src/plugins/NetworkIdentityPlugin.ts"
-      ],
-      "forbidden_paths": [
-        "active/lib/**",
-        "protected/**",
-        "generated/**"
-      ],
-      "verification_gates": [
-        "fix_lifecycle_graph",
-        "mainline_merge_identity"
-      ]
-    },
+        "src/plugins/NetworkIdentityPlugin.ts",
+        "native/android/app/src/main/java/com/zterm/android/NetworkIdentityPlugin.java",
+        "src/lib/android-network-identity-truth.test.ts",
+        "src/lib/network-identity.test.ts",
+        "src/lib/client-daemon-connection.test.ts",
+        "src/contexts/session-context-target-network-probe-runtime.test.ts",
+        "src/contexts/session-context-transport-orchestration-runtime.test.ts"
+    ],
+    "forbidden_paths": [
+      "active/lib/**",
+      "protected/**",
+      "generated/**"
+    ],
+    "verification_gates": [
+      "fix_lifecycle_graph",
+      "mainline_merge_identity",
+      "android_network_identity"
+    ]
+  },
     {
       "module_id": "client.session_runtime",
       "status": "active",
@@ -728,6 +736,7 @@
         "src/hooks/useOpenTabLifecycleEffects.ts",
         "src/hooks/useOpenTabRestoreRuntimeSync.ts",
         "src/hooks/useOpenTabRuntime.ts",
+        "src/hooks/useOpenTabLifecycleEffects.test.tsx",
         "src/hooks/useOpenTabSessionActions.ts",
         "src/hooks/useSessionDraftStorage.ts",
         "src/hooks/useSessionHistoryStorage.ts",
@@ -1311,7 +1320,9 @@
       "owner": "appsdk.binary_gate",
       "owned_paths": [
         "scripts/verify-appsdk-binary.mjs",
-        "scripts/verify-appsdk-binary.test.mjs"
+        "scripts/verify-appsdk-binary.test.mjs",
+        "generated/modules/zterm-runtime-v2/lib/zterm-runtime-v2.web.tgz",
+        "generated/modules/zterm-runtime-v2/module.compiled.json"
       ],
       "forbidden_paths": [
         "src/**",

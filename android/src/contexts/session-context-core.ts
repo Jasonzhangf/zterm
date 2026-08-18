@@ -24,7 +24,10 @@ import type {
   TerminalViewportState,
   TerminalVisibleRange,
 } from '../lib/types';
-import type { SessionTargetNetworkSignal } from './session-context-target-network-probe-runtime';
+import type {
+  SessionTargetNetworkProbeFailure,
+  SessionTargetNetworkSignal,
+} from './session-context-target-network-probe-runtime';
 import type { TerminalMuxTargetClientMessage, TerminalSessionCatalog } from '@zterm/shared/protocol';
 import type { SessionRenderBufferSnapshot } from '../lib/types';
 import type { SessionBufferStore } from '../lib/session-buffer-store';
@@ -242,6 +245,7 @@ export interface SessionContextValue {
   notifyTargetNetworkSignal: (
     signal: SessionTargetNetworkSignal,
   ) => void;
+  reportTargetNetworkProbeError: (failure: SessionTargetNetworkProbeFailure) => void;
   sendMessage: (sessionId: string, msg: ClientMessage) => void;
   sendInput: (sessionId: string, data: string) => void;
   sendImagePaste: (

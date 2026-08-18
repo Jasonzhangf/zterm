@@ -3,6 +3,7 @@ import type { BridgeTransportSocket } from '../lib/traversal/types';
 import type { SessionHeartbeatStore } from '../lib/session-heartbeat-store';
 import type { SessionReconnectStore } from '../lib/session-reconnect-store';
 import type { SessionTransportResource } from '../lib/session-transport-runtime';
+import type { ClientDaemonConnection } from '../lib/client-daemon-connection';
 import { createClientDaemonConnection } from '../lib/client-daemon-connection';
 import { getResolvedSessionName } from '../lib/connection-target';
 import type {
@@ -77,6 +78,23 @@ import {
 
 interface MutableRefObject<T> {
   current: T;
+}
+
+export function reportTargetNetworkProbeErrorRuntime(options: {
+  failure: SessionTargetNetworkProbeFailure;
+  daemonConnection: Pick<ClientDaemonConnection, 'reportTargetNetworkProbeError'>;
+  runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
+}) {
+  if (!options.daemonConnection.reportTargetNetworkProbeError) {
+    throw new Error('client.daemon_connection native snapshot error owner is unavailable');
+  }
+  options.daemonConnection.reportTargetNetworkProbeError(options.failure);
+  options.runtimeDebug('session.mux.target-network-probe.error-chain', {
+    errorType: options.failure.type,
+    message: options.failure.type === 'TargetNetworkProbeError04NativeSnapshot'
+      ? options.failure.message
+      : undefined,
+  });
 }
 
 export function resolveMuxChannelClosedWithControlStatusRuntime(options: {
@@ -322,6 +340,8 @@ function projectTargetNetworkProbeFailureMessage(failure: SessionTargetNetworkPr
       return 'network generation target probe send failed';
     case 'TargetNetworkProbeError03TerminalSocketState':
       return `network generation target transport terminal state ${failure.readyState}`;
+    case 'TargetNetworkProbeError04NativeSnapshot':
+      return `native network identity snapshot failed: ${failure.message}`;
     default: {
       const unreachableFailure: never = failure;
       throw new Error(`unhandled target network probe failure: ${String(unreachableFailure)}`);
@@ -343,6 +363,7 @@ export function notifyTargetNetworkSignalRuntime(options: {
     socket: BridgeTransportSocket,
     message: string,
   ) => void;
+  submitTargetNetworkProbeError: (failure: SessionTargetNetworkProbeFailure) => void;
   wakeScheduledReconnects?: () => void;
   runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
 }) {
@@ -395,6 +416,10 @@ export function notifyTargetNetworkSignalRuntime(options: {
             source: options.signal.source,
             readyState: failure.socket.readyState,
           });
+          return;
+        }
+        if (failure.type === 'TargetNetworkProbeError04NativeSnapshot') {
+          options.submitTargetNetworkProbeError(failure);
           return;
         }
         options.submitTargetSocketFailure(
@@ -801,6 +826,14 @@ export function createSessionTransportOrchestrationRuntime(options: {
     });
   };
 
+  const submitTargetNetworkProbeError = (failure: SessionTargetNetworkProbeFailure) => {
+    reportTargetNetworkProbeErrorRuntime({
+      failure,
+      daemonConnection,
+      runtimeDebug: options.runtimeDebug,
+    });
+  };
+
   const bindTargetMuxTransportSocketLifecycle = (bindOptions: {
     sessionId: string;
     host: Host;
@@ -870,6 +903,12 @@ export function createSessionTransportOrchestrationRuntime(options: {
   const daemonConnection = createClientDaemonConnection({
     readSessionTransportResource: options.readSessionTransportResource,
     sendSocketPayload: options.sendSocketPayload,
+    onTargetNetworkProbeError: (failure) => {
+      options.runtimeDebug('session.mux.target-network-probe.error-consumed', {
+        errorType: failure.type,
+        message: failure.type === 'TargetNetworkProbeError04NativeSnapshot' ? failure.message : undefined,
+      });
+    },
     openSessionTargetTransport: ({ sessionId, host, debugScope, finalizeFailure }) => {
       const ws = options.openDaemonTargetTransportSocket(host);
       options.applyTransportDiagnostics(sessionId, ws);
@@ -911,6 +950,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
         probeSocket.send(JSON.stringify(buildTerminalMuxPing(sentAt)));
       },
       submitTargetSocketFailure,
+      submitTargetNetworkProbeError,
       runtimeDebug: options.runtimeDebug,
     })
   );
@@ -1169,6 +1209,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
     scheduleReconnect,
     queueConnectTransportOpenIntent,
     notifyTargetNetworkSignal,
+    reportTargetNetworkProbeError: submitTargetNetworkProbeError,
     sendTerminalResize,
   };
 }

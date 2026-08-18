@@ -53,6 +53,31 @@ export interface NetworkIdentityRuntimeOptions {
   sampleInterfaces?: () => Promise<NetworkInterfaceFingerprint[]> | NetworkInterfaceFingerprint[];
 }
 
+/**
+ * Explicit control-plane failure for the ephemeral platform network signal.
+ * Native snapshot absence, malformed snapshots, and sample-interfaces failures
+ * must reach the client.daemon_connection error chain instead of being
+ * replaced with an empty or stale network fingerprint.
+ */
+export class NetworkIdentitySnapshotError extends Error {
+  readonly kind: 'TargetNetworkProbeError04NativeSnapshot';
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'NetworkIdentitySnapshotError';
+    this.kind = 'TargetNetworkProbeError04NativeSnapshot';
+  }
+}
+
+export function projectNetworkIdentitySnapshotError(error: unknown): NetworkIdentitySnapshotError {
+  if (error instanceof NetworkIdentitySnapshotError) {
+    return error;
+  }
+  return new NetworkIdentitySnapshotError(
+    error instanceof Error ? error.message : String(error),
+  );
+}
+
 function fingerprintEquals(left: NetworkFingerprint, right: NetworkFingerprint) {
   if (left.connected !== right.connected || left.connectionType !== right.connectionType) {
     return false;
@@ -82,7 +107,7 @@ export function createNetworkIdentityRuntime(options: NetworkIdentityRuntimeOpti
   let generation = 0;
   let fingerprint: NetworkFingerprint | null = null;
 
-  const sampleInterfaces = options.sampleInterfaces || (async () => []);
+  const sampleInterfaces = options.sampleInterfaces;
 
   const compareAndAdvance = (next: NetworkFingerprint): NetworkIdentitySample => {
     const fingerprintChanged = !fingerprint || !fingerprintEquals(fingerprint, next);
@@ -157,6 +182,15 @@ export function createNetworkIdentityRuntime(options: NetworkIdentityRuntimeOpti
     return connectionType;
   };
 
+  const requireNativeSampler = () => {
+    if (!sampleInterfaces) {
+      throw new NetworkIdentitySnapshotError(
+        'NetworkIdentity native snapshot capability is not active',
+      );
+    }
+    return sampleInterfaces;
+  };
+
   return {
     readGeneration: () => generation,
     readFingerprint: () => fingerprint,
@@ -169,7 +203,8 @@ export function createNetworkIdentityRuntime(options: NetworkIdentityRuntimeOpti
       return completeProvisionalStatus(next) || compareAndAdvance(next);
     },
     resample: async () => {
-      const interfaces = Array.isArray(sampleInterfaces) ? sampleInterfaces : await sampleInterfaces();
+      const sampler = requireNativeSampler();
+      const interfaces = Array.isArray(sampler) ? sampler : await sampler();
       const next: NetworkFingerprint = {
         connected: fingerprint?.connected ?? true,
         connectionType: fingerprint?.connectionType || 'unknown',
@@ -178,7 +213,8 @@ export function createNetworkIdentityRuntime(options: NetworkIdentityRuntimeOpti
       return completeProvisionalInterfaces(next) || compareAndAdvance(next);
     },
     resampleWithStatus: async (input) => {
-      const interfaces = Array.isArray(sampleInterfaces) ? sampleInterfaces : await sampleInterfaces();
+      const sampler = requireNativeSampler();
+      const interfaces = Array.isArray(sampler) ? sampler : await sampler();
       const next: NetworkFingerprint = {
         connected: Boolean(input.connected),
         connectionType: resolveStatusForExistingFingerprint(input),

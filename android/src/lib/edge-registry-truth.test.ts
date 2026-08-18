@@ -231,6 +231,7 @@ describe('edge registry truth gate', () => {
       'TargetNetworkProbeError01GenerationTimeout',
       'TargetNetworkProbeError02SendFailure',
       'TargetNetworkProbeError03TerminalSocketState',
+      'TargetNetworkProbeError04NativeSnapshot',
     ]);
     expect(edge?.mainline_call_ids).toEqual([
       'android_mainline:PlatformNetworkSignal->OpenTabNetworkBinding',
@@ -251,7 +252,17 @@ describe('edge registry truth gate', () => {
       'android_mainline:TargetNetworkProbe->TargetFailureRouter',
       'android_mainline:TargetFailureRouter->TerminalTransportError01TargetFailure',
       'android_mainline:TargetFailureRouter->IdleTargetRetirement',
+      'android_mainline:NetworkIdentityRuntime->AppNativeSnapshotErrorProjector',
+      'android_mainline:AppNativeSnapshotErrorProjector->AppNetworkBinding',
+      'android_mainline:NetworkIdentityRuntime->LifecycleNativeSnapshotErrorProjector',
+      'android_mainline:LifecycleNativeSnapshotErrorProjector->OpenTabNetworkBinding',
+      'android_mainline:TargetNetworkSignalOrchestration->TargetNetworkProbeError04NativeSnapshot',
+      'android_mainline:TargetNetworkProbeError04NativeSnapshot->DaemonConnectionErrorChain',
     ]);
+    expect(read('src/App.tsx')).toContain('projectNetworkIdentitySnapshotError(error)');
+    expect(read('src/hooks/useOpenTabLifecycleEffects.ts')).toContain(
+      'projectNetworkIdentitySnapshotError(error)',
+    );
     expect(read('src/hooks/useOpenTabLifecycleEffects.ts')).toContain('notifyTargetNetworkSignal');
     expect(read('src/hooks/useOpenTabRuntime.ts')).toContain('notifyTargetNetworkSignal,');
     expect(read('src/App.tsx')).toContain('notifyTargetNetworkSignal,');
@@ -263,6 +274,19 @@ describe('edge registry truth gate', () => {
     );
     expect(read('src/contexts/session-context-transport-orchestration-runtime.ts')).toContain(
       'export function notifyTargetNetworkSignalRuntime',
+    );
+    expect(read('src/contexts/session-context-transport-orchestration-runtime.ts')).toContain(
+      'export function reportTargetNetworkProbeErrorRuntime',
+    );
+    expect(read('src/contexts/session-context-transport-orchestration-runtime.ts')).toContain(
+      'onTargetNetworkProbeError',
+    );
+    expect(read('src/contexts/session-context-target-network-probe-runtime.ts')).not.toContain(
+      "source: 'native-snapshot-error'",
+    );
+    expect(read('src/App.tsx')).toContain('reportTargetNetworkProbeError({');
+    expect(read('src/hooks/useOpenTabLifecycleEffects.ts')).toContain(
+      'reportTargetNetworkProbeError({',
     );
     expect(read('src/contexts/session-context-transport-runtime.ts')).toContain(
       'export function createSessionContextTransportAccessors',

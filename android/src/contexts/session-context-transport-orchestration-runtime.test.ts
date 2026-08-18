@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   handleTargetMuxTransportFailureRuntime,
   notifyTargetNetworkSignalRuntime,
+  reportTargetNetworkProbeErrorRuntime,
   resolveMuxChannelClosedWithControlStatusRuntime,
   routeTargetSocketFailureRuntime,
 } from './session-context-transport-orchestration-runtime';
@@ -65,6 +66,46 @@ function makeClosedChannel(sessionName = 'demo') {
 }
 
 describe('notifyTargetNetworkSignalRuntime', () => {
+  it('routes native snapshot failure into the daemon-connection error owner', () => {
+    const submitTargetNetworkProbeError = vi.fn();
+    const runtime = createSessionTargetNetworkProbeRuntime({ probeTimeoutMs: 2_500, now: Date.now });
+    const runtimeDebug = vi.fn();
+
+    reportTargetNetworkProbeErrorRuntime({
+      failure: {
+        type: 'TargetNetworkProbeError04NativeSnapshot',
+        message: 'native snapshot unavailable',
+      },
+      daemonConnection: { reportTargetNetworkProbeError: submitTargetNetworkProbeError },
+      runtimeDebug,
+    });
+
+    expect(submitTargetNetworkProbeError).toHaveBeenCalledWith({
+      type: 'TargetNetworkProbeError04NativeSnapshot',
+      message: 'native snapshot unavailable',
+    });
+    expect(runtimeDebug).toHaveBeenCalledWith('session.mux.target-network-probe.error-chain', expect.any(Object));
+    runtime.dispose();
+  });
+
+  it('does not enter the native snapshot error chain for a healthy signal', () => {
+    const submitTargetNetworkProbeError = vi.fn();
+    const runtime = createSessionTargetNetworkProbeRuntime({ probeTimeoutMs: 2_500, now: Date.now });
+
+    notifyTargetNetworkSignalRuntime({
+      signal: { connected: true, connectionType: 'wifi', source: 'capacitor' },
+      targetRuntimes: [],
+      targetNetworkProbeRuntime: runtime,
+      sendTargetProbe: vi.fn(),
+      submitTargetSocketFailure: vi.fn(),
+      submitTargetNetworkProbeError,
+      runtimeDebug: vi.fn(),
+    });
+
+    expect(submitTargetNetworkProbeError).not.toHaveBeenCalled();
+    runtime.dispose();
+  });
+
   it('wakes scheduled reconnects on positive network recovery even when no socket remains', () => {
     const wakeScheduledReconnects = vi.fn();
     const targetNetworkProbeRuntime = createSessionTargetNetworkProbeRuntime({ probeTimeoutMs: 2_500, now: Date.now });
@@ -75,6 +116,7 @@ describe('notifyTargetNetworkSignalRuntime', () => {
       targetNetworkProbeRuntime,
       sendTargetProbe: vi.fn(),
       submitTargetSocketFailure: vi.fn(),
+      submitTargetNetworkProbeError: vi.fn(),
       wakeScheduledReconnects,
       runtimeDebug: vi.fn(),
     })).toEqual([]);
@@ -93,6 +135,7 @@ describe('notifyTargetNetworkSignalRuntime', () => {
       targetNetworkProbeRuntime,
       sendTargetProbe: vi.fn(),
       submitTargetSocketFailure: vi.fn(),
+      submitTargetNetworkProbeError: vi.fn(),
       wakeScheduledReconnects,
       runtimeDebug: vi.fn(),
     });
@@ -124,6 +167,7 @@ describe('notifyTargetNetworkSignalRuntime', () => {
       targetNetworkProbeRuntime,
       sendTargetProbe,
       submitTargetSocketFailure,
+      submitTargetNetworkProbeError: vi.fn(),
       wakeScheduledReconnects,
       runtimeDebug: vi.fn(),
     })).toEqual([
@@ -167,6 +211,7 @@ describe('notifyTargetNetworkSignalRuntime', () => {
       targetNetworkProbeRuntime,
       sendTargetProbe,
       submitTargetSocketFailure,
+      submitTargetNetworkProbeError: vi.fn(),
       runtimeDebug,
     };
 
@@ -201,6 +246,7 @@ describe('notifyTargetNetworkSignalRuntime', () => {
       targetNetworkProbeRuntime,
       sendTargetProbe,
       submitTargetSocketFailure: vi.fn(),
+      submitTargetNetworkProbeError: vi.fn(),
       runtimeDebug: vi.fn(),
     })).toEqual([{ targetKey: 'daemon-idle', result: 'started' }]);
     expect(sendTargetProbe).toHaveBeenCalledWith('daemon-idle', socket, 1_000);
@@ -222,6 +268,7 @@ describe('notifyTargetNetworkSignalRuntime', () => {
         throw new Error('send failed');
       },
       submitTargetSocketFailure,
+      submitTargetNetworkProbeError: vi.fn(),
       runtimeDebug: vi.fn(),
     })).toEqual([
       { targetKey: 'daemon-a', result: 'send-failed' },
@@ -248,6 +295,7 @@ describe('notifyTargetNetworkSignalRuntime', () => {
       targetNetworkProbeRuntime,
       sendTargetProbe,
       submitTargetSocketFailure,
+      submitTargetNetworkProbeError: vi.fn(),
       runtimeDebug: vi.fn(),
     })).toEqual([
       { targetKey: 'daemon-a', result: 'terminal-socket' },
@@ -275,6 +323,7 @@ describe('notifyTargetNetworkSignalRuntime', () => {
       targetNetworkProbeRuntime,
       sendTargetProbe,
       submitTargetSocketFailure,
+      submitTargetNetworkProbeError: vi.fn(),
       runtimeDebug: vi.fn(),
     })).toEqual([
       { targetKey: 'daemon-a', result: 'still-connecting' },
@@ -301,6 +350,7 @@ describe('notifyTargetNetworkSignalRuntime', () => {
       targetNetworkProbeRuntime,
       sendTargetProbe: vi.fn(),
       submitTargetSocketFailure,
+      submitTargetNetworkProbeError: vi.fn(),
       runtimeDebug: vi.fn(),
     })).toEqual([
       { targetKey: 'daemon-a', result: 'started' },

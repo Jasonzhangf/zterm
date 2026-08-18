@@ -1,5 +1,6 @@
 import { Capacitor, registerPlugin } from "@capacitor/core";
 
+import { NetworkIdentitySnapshotError } from "../lib/network-identity";
 import type { NetworkInterfaceFingerprint } from "../lib/network-identity";
 
 export interface NetworkIdentitySnapshot {
@@ -12,13 +13,31 @@ export interface NetworkIdentityPluginShape {
   snapshot(): Promise<NetworkIdentitySnapshot>;
 }
 
+export function requireNativeNetworkInterfaces(
+  snapshot: Pick<NetworkIdentitySnapshot, "interfaces">,
+): NetworkInterfaceFingerprint[] {
+  if (!Array.isArray(snapshot.interfaces)) {
+    throw new NetworkIdentitySnapshotError(
+      "NetworkIdentity native snapshot returned invalid interfaces",
+    );
+  }
+  for (const entry of snapshot.interfaces) {
+    if (
+      !entry
+      || typeof entry.name !== 'string'
+      || typeof entry.addressesSignature !== 'string'
+      || typeof entry.vpn !== 'boolean'
+    ) {
+      throw new NetworkIdentitySnapshotError(
+        "NetworkIdentity native snapshot returned invalid interface entry",
+      );
+    }
+  }
+  return snapshot.interfaces;
+}
+
 const NetworkIdentityNative = registerPlugin<NetworkIdentityPluginShape>(
   "NetworkIdentity",
-  {
-    web: () => ({
-      snapshot: async () => ({ connected: false, connectionType: "unknown", interfaces: [] }),
-    }),
-  },
 );
 
 export function isNativeNetworkIdentitySupported() {
@@ -27,15 +46,12 @@ export function isNativeNetworkIdentitySupported() {
 
 export async function readNativeNetworkIdentitySnapshot(): Promise<NetworkInterfaceFingerprint[]> {
   if (!isNativeNetworkIdentitySupported()) {
-    return [];
+    throw new NetworkIdentitySnapshotError(
+      'NetworkIdentity snapshot requires a native Android runtime',
+    );
   }
-  try {
-    const snapshot = await NetworkIdentityNative.snapshot();
-    return snapshot.interfaces || [];
-  } catch (error) {
-    console.warn("[NetworkIdentity] native snapshot failed:", error);
-    return [];
-  }
+  const snapshot = await NetworkIdentityNative.snapshot();
+  return requireNativeNetworkInterfaces(snapshot);
 }
 
 export const NetworkIdentityPlugin = NetworkIdentityNative;

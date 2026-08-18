@@ -8,6 +8,9 @@
 - Mainline chain: `android_mainline:PlatformNetworkSignal->OpenTabNetworkBinding` -> `android_mainline:OpenTabNetworkBinding->AppNetworkBinding` -> `android_mainline:AppNetworkBinding->SessionContextNetworkFacade` -> `android_mainline:SessionContextNetworkFacade->SessionProviderNetworkBinding` -> `android_mainline:SessionProviderNetworkBinding->SessionPublicFacadeBinding` -> `android_mainline:SessionPublicFacadeBinding->SessionProviderCoreBinding` -> `android_mainline:SessionProviderCoreBinding->TargetNetworkSignalOrchestration` -> `android_mainline:TargetNetworkSignalOrchestration->TargetTransportAccessors` -> `android_mainline:TargetTransportAccessors->TargetTransportStoreEnumeration` -> `android_mainline:TargetTransportStoreEnumeration->TargetNetworkProbeDispatch` -> `android_mainline:TargetNetworkProbeDispatch->TargetNetworkProbe`
 - Recovery return: `TransportHealth -> SessionRuntime -> TransportReusePlan -> TransportOpen`
 - Allowed behavior: retain the logical session and cached buffer while replacing only a stale physical WebSocket.
+- Native network-interface snapshot failure is a typed `TargetNetworkProbeError04NativeSnapshot`
+  outcome owned by `client.daemon_connection`; it must be retained in the error chain and
+  must never be converted into an empty interface list or a console-only UI warning.
 - Forbidden behavior: UI/page reconnect loops, daemon client-network state, fallback endpoints, parallel replacement sockets, or treating `readyState === OPEN` as sufficient health truth.
 
 ## Lifecycle Contract
@@ -40,6 +43,8 @@ Positive:
 - A valid frame during the bounded probe keeps the same socket and route generation.
 - A synchronous probe send failure returns `send-failed` and enters `TerminalTransportError01TargetFailure`; it cannot be projected as `started`.
 - Probe timeout retires the exact socket once and schedules one target rebuild through the existing failure owner.
+- Native snapshot failure enters the target network error chain without retiring a healthy
+  target socket; a successful native snapshot does not enter that chain.
 - A retained physical target with zero logical sessions is still probed; failure retires that exact idle generation without inventing a logical session or reconnect job.
 - The target socket listener validates inbound activity by `targetKey + exact socket`, not by the session that originally opened it; deleting the last logical session followed by a valid `mux-pong` keeps the idle target generation alive.
 - Heartbeat and network-generation probes both serialize through the shared `buildTerminalMuxPing` contract builder.

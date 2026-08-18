@@ -453,7 +453,9 @@ describe('useOpenTabLifecycleEffects', () => {
 
   it('stamps capacitor network changes with generation and retires stale transports across generations', async () => {
     const notifyTargetNetworkSignal = vi.fn();
-    const networkIdentity = createNetworkIdentityRuntime();
+    const networkIdentity = createNetworkIdentityRuntime({
+      sampleInterfaces: async () => [],
+    });
 
     const HarnessWithNetworkIdentity = () => {
       const sessionsRef = useRef<Session[]>([baseSession]);
@@ -507,7 +509,9 @@ describe('useOpenTabLifecycleEffects', () => {
 
   it('recovers a backgrounded network change on foreground resume with a cross-generation signal', async () => {
     const notifyTargetNetworkSignal = vi.fn();
-    const networkIdentity = createNetworkIdentityRuntime();
+    const networkIdentity = createNetworkIdentityRuntime({
+      sampleInterfaces: async () => [],
+    });
     capacitorNetworkHarness.getStatus.mockResolvedValue({ connected: true, connectionType: 'cellular' });
 
     const HarnessWithNetworkIdentity = () => {

@@ -5,6 +5,7 @@ import type { SessionTransportResource } from './session-transport-runtime';
 import { TraversalSocket } from './traversal/socket';
 import type { BridgeTransportSocket, TraversalTargetSource } from './traversal/types';
 import type { TraversalRouteHealthScope } from './traversal/route-health-cache';
+import type { SessionTargetNetworkProbeFailure } from '../contexts/session-context-target-network-probe-runtime';
 
 export interface ClientDaemonConnectionSocketFactoryOptions {
   overrideUrl?: string;
@@ -34,6 +35,9 @@ export interface ClientDaemonConnection {
   openSessionTargetTransport?: (options: ClientDaemonConnectionOpenTargetTransportOptions) => BridgeTransportSocket;
   sendSessionMessage(sessionId: string, message: ClientMessage): boolean;
   sendSessionRaw(sessionId: string, message: unknown): boolean;
+  reportTargetNetworkProbeError?: (failure: SessionTargetNetworkProbeFailure) => void;
+  readTargetNetworkProbeError?: () => SessionTargetNetworkProbeFailure | null;
+  acknowledgeTargetNetworkProbeError?: (failure?: SessionTargetNetworkProbeFailure) => boolean;
 }
 
 export interface ClientDaemonConnectionOpenTargetTransportOptions {
@@ -65,7 +69,9 @@ export function createClientDaemonConnection(options: {
   readSessionTransportResource: (sessionId: string) => SessionTransportResource;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
   openSessionTargetTransport?: (options: ClientDaemonConnectionOpenTargetTransportOptions) => BridgeTransportSocket;
+  onTargetNetworkProbeError?: (failure: SessionTargetNetworkProbeFailure) => void;
 }): ClientDaemonConnection {
+  let targetNetworkProbeError: SessionTargetNetworkProbeFailure | null = null;
   const readSessionResource = (sessionId: string) => options.readSessionTransportResource(sessionId);
   const readSessionSocket = (sessionId: string) => readSessionResource(sessionId).socket || null;
   const readSessionTargetSocket = (sessionId: string) => readSessionResource(sessionId).terminalSocket || null;
@@ -108,5 +114,17 @@ export function createClientDaemonConnection(options: {
     },
     sendSessionRaw,
     sendSessionMessage: sendSessionRaw as ClientDaemonConnection['sendSessionMessage'],
+    reportTargetNetworkProbeError: (failure) => {
+      targetNetworkProbeError = failure;
+      options.onTargetNetworkProbeError?.(failure);
+    },
+    readTargetNetworkProbeError: () => targetNetworkProbeError,
+    acknowledgeTargetNetworkProbeError: (failure) => {
+      if (!targetNetworkProbeError || (failure && failure !== targetNetworkProbeError)) {
+        return false;
+      }
+      targetNetworkProbeError = null;
+      return true;
+    },
   };
 }

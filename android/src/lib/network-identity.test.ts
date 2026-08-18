@@ -7,6 +7,34 @@ function interfaces(...entries: Array<[name: string, signature: string, vpn?: bo
 }
 
 describe('createNetworkIdentityRuntime', () => {
+  it('rejects resample when the native snapshot capability is not active', async () => {
+    const runtime = createNetworkIdentityRuntime();
+
+    await expect(runtime.resample()).rejects.toMatchObject({
+      kind: 'TargetNetworkProbeError04NativeSnapshot',
+      message: 'NetworkIdentity native snapshot capability is not active',
+    });
+    await expect(runtime.resampleWithStatus({
+      connected: true,
+      connectionType: 'wifi',
+    })).rejects.toMatchObject({
+      kind: 'TargetNetworkProbeError04NativeSnapshot',
+      message: 'NetworkIdentity native snapshot capability is not active',
+    });
+  });
+
+  it('does not reject resample when an active sampler is present', async () => {
+    const runtime = createNetworkIdentityRuntime({
+      sampleInterfaces: () => interfaces(['wlan0', 'aaa']),
+    });
+
+    const sample = await runtime.resampleWithStatus({
+      connected: true,
+      connectionType: 'wifi',
+    });
+    expect(sample.fingerprint.interfaces).toHaveLength(1);
+  });
+
   it('starts at generation 0 with no fingerprint', () => {
     const runtime = createNetworkIdentityRuntime();
     expect(runtime.readGeneration()).toBe(0);

@@ -146,6 +146,50 @@ describe('client.daemon_connection interface', () => {
 
     expect(openSessionTargetTransport).toHaveBeenCalledTimes(1);
   });
+
+  it('retains only the current typed probe error and supports explicit acknowledgement', () => {
+    const onTargetNetworkProbeError = vi.fn();
+    const connection = createClientDaemonConnection({
+      readSessionTransportResource: () => createResource(null),
+      sendSocketPayload: vi.fn(),
+      onTargetNetworkProbeError,
+    });
+    const first = {
+      type: 'TargetNetworkProbeError04NativeSnapshot' as const,
+      message: 'first snapshot failure',
+    };
+    const second = {
+      type: 'TargetNetworkProbeError04NativeSnapshot' as const,
+      message: 'second snapshot failure',
+    };
+
+    connection.reportTargetNetworkProbeError?.(first);
+    connection.reportTargetNetworkProbeError?.(second);
+
+    expect(onTargetNetworkProbeError).toHaveBeenNthCalledWith(1, first);
+    expect(onTargetNetworkProbeError).toHaveBeenNthCalledWith(2, second);
+    expect(connection.readTargetNetworkProbeError?.()).toBe(second);
+    expect(connection.acknowledgeTargetNetworkProbeError?.(first)).toBe(false);
+    expect(connection.readTargetNetworkProbeError?.()).toBe(second);
+    expect(connection.acknowledgeTargetNetworkProbeError?.(second)).toBe(true);
+    expect(connection.readTargetNetworkProbeError?.()).toBeNull();
+    expect(connection.acknowledgeTargetNetworkProbeError?.()).toBe(false);
+  });
+
+  it('keeps a typed probe error visible when no consumer is registered', () => {
+    const connection = createClientDaemonConnection({
+      readSessionTransportResource: () => createResource(null),
+      sendSocketPayload: vi.fn(),
+    });
+    const failure = {
+      type: 'TargetNetworkProbeError04NativeSnapshot' as const,
+      message: 'consumer unavailable',
+    };
+
+    connection.reportTargetNetworkProbeError?.(failure);
+
+    expect(connection.readTargetNetworkProbeError?.()).toBe(failure);
+  });
 });
 
 function makeHost() {
