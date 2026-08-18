@@ -84,12 +84,8 @@ public class NetworkIdentityPlugin extends Plugin {
                     }
                 }
                 entry.put("addressesSignature", signature.toString());
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    String ifaceName = link != null ? link.getInterfaceName() : null;
-                    if (ifaceName != null) {
-                        entry.put("name", ifaceName);
-                    }
-                }
+                String ifaceName = link != null ? link.getInterfaceName() : null;
+                entry.put("name", ifaceName != null ? ifaceName : "");
                 interfaces.put(entry);
             }
         }

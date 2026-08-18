@@ -1270,6 +1270,7 @@
         "native/android/app/src/main/java/com/zterm/android/MainActivity.java",
         "native/android/app/src/main/res/values/styles.xml",
         "src/App.tsx",
+        "src/App.dynamic-refresh.test.tsx",
         "src/components/terminal/SessionScheduleSheet.tsx",
         "src/components/terminal/TerminalHeader.tsx",
         "src/components/terminal/pane-android-adapter.ts",
@@ -1720,7 +1721,11 @@
         "src/lib/traversal/",
         "src/plugins/NetworkIdentityPlugin.ts",
         "native/android/app/src/main/java/com/zterm/android/NetworkIdentityPlugin.java",
-        "src/lib/android-network-identity-truth.test.ts"
+        "src/lib/android-network-identity-truth.test.ts",
+        "src/lib/network-identity.test.ts",
+        "src/lib/client-daemon-connection.test.ts",
+        "src/contexts/session-context-target-network-probe-runtime.test.ts",
+        "src/contexts/session-context-transport-orchestration-runtime.test.ts"
       ]
     },
     {
@@ -1787,6 +1792,7 @@
         "src/lib/client-control-plane-transport.ts",
         "src/lib/session-reconnect-helpers.ts",
         "src/hooks/useOpenTabLifecycleEffects.ts",
+        "src/hooks/useOpenTabLifecycleEffects.test.tsx",
         "src/hooks/useOpenTabRestoreRuntimeSync.ts",
         "src/hooks/useOpenTabRuntime.ts",
         "src/hooks/useOpenTabSessionActions.ts",

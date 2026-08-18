@@ -1586,6 +1586,26 @@ describe('App dynamic refresh matrix', () => {
     }));
   });
 
+  it('does not project an error when the initial native snapshot succeeds', async () => {
+    const sampleInterfaces = vi.fn().mockResolvedValue([
+      { name: 'wlan0', addressesSignature: 'v4:192.0.2.1', vpn: false },
+    ]);
+    const networkIdentity = createNetworkIdentityRuntime({ sampleInterfaces });
+
+    render(
+      <AppContent
+        bridgeSettings={{ servers: [] } as any}
+        setBridgeSettings={vi.fn()}
+        networkIdentity={networkIdentity}
+      />,
+    );
+
+    await waitFor(() => expect(sampleInterfaces).toHaveBeenCalledTimes(1));
+    expect(sessionHarness.notifyTargetNetworkSignal).not.toHaveBeenCalledWith(
+      expect.objectContaining({ source: 'native-snapshot-error' }),
+    );
+  });
+
   it('does not resume transports for online events while the app is hidden', async () => {
     render(
       <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,

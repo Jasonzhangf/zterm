@@ -530,14 +530,21 @@
         "android_mainline:TargetNetworkProbe->TargetFailureRouter",
         "android_mainline:TargetFailureRouter->TerminalTransportError01TargetFailure",
         "android_mainline:TargetFailureRouter->IdleTargetRetirement",
-        "android_mainline:NetworkIdentityRuntime->TargetNetworkProbeError04NativeSnapshot",
+        "android_mainline:NetworkIdentityRuntime->AppNativeSnapshotErrorProjector",
+        "android_mainline:AppNativeSnapshotErrorProjector->AppNetworkBinding",
+        "android_mainline:NetworkIdentityRuntime->LifecycleNativeSnapshotErrorProjector",
+        "android_mainline:LifecycleNativeSnapshotErrorProjector->OpenTabNetworkBinding",
+        "android_mainline:TargetNetworkSignalOrchestration->TargetNetworkProbeError04NativeSnapshot",
         "android_mainline:TargetNetworkProbeError04NativeSnapshot->DaemonConnectionErrorChain"
       ],
       "required_gates": [
         "src/lib/edge-registry-truth.test.ts",
+        "src/App.dynamic-refresh.test.tsx",
+        "src/lib/network-identity.test.ts",
         "src/hooks/useOpenTabLifecycleEffects.test.tsx",
         "src/contexts/session-context-target-network-probe-runtime.test.ts",
-        "src/contexts/session-context-transport-orchestration-runtime.test.ts"
+        "src/contexts/session-context-transport-orchestration-runtime.test.ts",
+        "src/lib/client-daemon-connection.test.ts"
       ],
       "status": "active"
     },

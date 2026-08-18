@@ -1165,11 +1165,15 @@ export default function App() {
       setPluginRuntimeError(error instanceof Error ? error : new Error(String(error)));
     });
   }, [pluginHost]);
-  const networkIdentityRuntime = useMemo(() => createNetworkIdentityRuntime({
-    sampleInterfaces: pluginRuntimeReady
-      ? pluginHost.readCapability<typeof readNativeNetworkIdentitySnapshot>('network:sample-interfaces')
-      : undefined,
-  }), [pluginHost, pluginRuntimeReady]);
+  const networkIdentityRuntime = useMemo(() => (
+    pluginRuntimeReady
+      ? createNetworkIdentityRuntime({
+        sampleInterfaces: pluginHost.readCapability<typeof readNativeNetworkIdentitySnapshot>(
+          'network:sample-interfaces',
+        ),
+      })
+      : undefined
+  ), [pluginHost, pluginRuntimeReady]);
   const debugConsoleRender = pluginRuntimeReady
     ? pluginHost
       .readUiSlot<TerminalDebugOverlayProps>(DEBUG_CONSOLE_UI_SLOT_ID)

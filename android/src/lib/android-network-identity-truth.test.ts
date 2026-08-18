@@ -24,6 +24,7 @@ describe('Android network identity plugin', () => {
     expect(plugin).toContain('TRANSPORT_WIFI');
     expect(plugin).toContain('TRANSPORT_CELLULAR');
     expect(plugin).toContain('TRANSPORT_VPN');
+    expect(plugin).toContain('entry.put("name", ifaceName != null ? ifaceName : "")');
   });
 
   it('exposes a JS wrapper that reads local interfaces through Capacitor', () => {
@@ -56,6 +57,21 @@ describe('Android network identity plugin', () => {
     expect(appsdkOwner?.verification_gates, 'appsdk owner must declare android_network_identity gate').toContain('android_network_identity');
     expect(appsdkMap.modules.find((module) => module.owned_paths.includes(wrapperPath))?.module_id).toBe('client.daemon_connection');
     expect(docsMap.modules.find((module) => module.owned_paths.includes(wrapperPath))?.module_id).toBe('client.daemon_connection');
+
+    for (const [path, owner] of [
+      ['src/lib/network-identity.test.ts', 'client.daemon_connection'],
+      ['src/hooks/useOpenTabLifecycleEffects.test.tsx', 'client.session_runtime'],
+      ['src/App.dynamic-refresh.test.tsx', 'client.app_shell'],
+    ] as const) {
+      expect(
+        appsdkMap.modules.find((module) => module.owned_paths.includes(path))?.module_id,
+        `appsdk map must own ${path}`,
+      ).toBe(owner);
+      expect(
+        docsMap.modules.find((module) => module.owned_paths.includes(path))?.module_id,
+        `docs map must own ${path}`,
+      ).toBe(owner);
+    }
   });
 
   it('registers the platform_network_signal resource against client.daemon_connection in the AppSDK resource map', () => {
@@ -174,6 +190,28 @@ describe('Android network identity plugin', () => {
         interfaces: undefined as never,
       }),
     ).toThrow('invalid interfaces');
+  });
+
+  it('accepts a complete native interface entry and preserves producer extras', () => {
+    const entry = {
+      name: 'wlan0',
+      addressesSignature: 'v4:192.0.2.1',
+      vpn: false,
+      validated: true,
+      transport: 'wifi',
+    };
+
+    expect(requireNativeNetworkInterfaces({ interfaces: [entry] })).toEqual([entry]);
+  });
+
+  it('accepts the native producer empty interface-name sentinel', () => {
+    const entry = {
+      name: '',
+      addressesSignature: '',
+      vpn: false,
+    };
+
+    expect(requireNativeNetworkInterfaces({ interfaces: [entry] })).toEqual([entry]);
   });
 
   it.each([

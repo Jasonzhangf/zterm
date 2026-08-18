@@ -48,8 +48,12 @@ flowchart TD
   SettingsPage --> SettingsUpdateContract
   PluginHost --> NetworkIdentityCapability["src/lib/plugin-host/network-identity-capability-plugin.ts#NetworkIdentityCapabilityPlugin"]
   NetworkIdentityCapability --> NetworkIdentityRuntime["src/lib/network-identity.ts#createNetworkIdentityRuntime"]
-  NetworkIdentityRuntime --> TargetNetworkProbeError04NativeSnapshot["src/contexts/session-context-target-network-probe-runtime.ts#TargetNetworkProbeError04NativeSnapshot"]
-  TargetNetworkProbeError04NativeSnapshot --> DaemonConnectionErrorChain["src/lib/client-daemon-connection.ts#createClientDaemonConnection"]
+  NetworkIdentityRuntime --> AppNativeSnapshotErrorProjector["src/App.tsx#AppContent initial snapshot error"]
+  NetworkIdentityRuntime --> LifecycleNativeSnapshotErrorProjector["src/hooks/useOpenTabLifecycleEffects.ts#refreshNetworkIdentityForForeground"]
+  AppNativeSnapshotErrorProjector --> AppNetworkBinding
+  LifecycleNativeSnapshotErrorProjector --> OpenTabNetworkBinding
+  TargetNetworkSignalOrchestration --> TargetNetworkProbeError04NativeSnapshot["src/contexts/session-context-transport-orchestration-runtime.ts#notifyTargetNetworkSignalRuntime"]
+  TargetNetworkProbeError04NativeSnapshot --> DaemonConnectionErrorChain["src/lib/client-daemon-connection.ts#createClientDaemonConnection current typed error slot"]
   App --> TerminalShellSkinResolver["src/lib/terminal-shell-skin.ts#resolveEffectiveTerminalShellSkin + resolveTerminalRendererThemeForSkin"]
   TerminalShellSkinResolver --> TerminalPage["src/pages/TerminalPage.tsx"]
   App --> RelayControlRuntime["src/hooks/useRelayDeviceStream.ts#useRelayDeviceStream"]

@@ -154,6 +154,8 @@ describe('function wiki truth gate', () => {
           status: string;
           edge_id?: string;
           semantic_input?: string;
+          resource_from?: string;
+          resource_to?: string;
         }>;
       }>;
     };
@@ -226,8 +228,14 @@ describe('function wiki truth gate', () => {
 
     const androidMainline = manifest.lifecycles.find((lifecycle) => lifecycle.lifecycle_id === 'android_mainline');
     const platformSignalNode = androidMainline?.nodes.find((node) => node.id === 'PlatformNetworkSignal');
+    const lifecycleSnapshotErrorNode = androidMainline?.nodes.find(
+      (node) => node.id === 'LifecycleNativeSnapshotErrorProjector',
+    );
     const openTabBindingNode = androidMainline?.nodes.find((node) => node.id === 'OpenTabNetworkBinding');
     const appBindingNode = androidMainline?.nodes.find((node) => node.id === 'AppNetworkBinding');
+    const appSnapshotErrorNode = androidMainline?.nodes.find(
+      (node) => node.id === 'AppNativeSnapshotErrorProjector',
+    );
     const contextFacadeNode = androidMainline?.nodes.find((node) => node.id === 'SessionContextNetworkFacade');
     const providerBindingNode = androidMainline?.nodes.find((node) => node.id === 'SessionProviderNetworkBinding');
     const publicFacadeBindingNode = androidMainline?.nodes.find((node) => node.id === 'SessionPublicFacadeBinding');
@@ -240,11 +248,21 @@ describe('function wiki truth gate', () => {
     const targetMuxFrameLifecycleNode = androidMainline?.nodes.find((node) => node.id === 'TargetMuxFrameLifecycle');
     const targetNetworkActivityBindingNode = androidMainline?.nodes.find((node) => node.id === 'TargetNetworkActivityBinding');
     const targetFailureRouterNode = androidMainline?.nodes.find((node) => node.id === 'TargetFailureRouter');
+    const nativeSnapshotErrorNode = androidMainline?.nodes.find(
+      (node) => node.id === 'TargetNetworkProbeError04NativeSnapshot',
+    );
+    const daemonConnectionErrorNode = androidMainline?.nodes.find(
+      (node) => node.id === 'DaemonConnectionErrorChain',
+    );
     expect(platformSignalNode?.label).toBe(
       'src/hooks/useOpenTabLifecycleEffects.ts#useOpenTabLifecycleEffects (signal-only)',
     );
     expect(openTabBindingNode?.label).toBe('src/hooks/useOpenTabRuntime.ts#useOpenTabRuntime');
     expect(appBindingNode?.label).toBe('src/App.tsx#AppContent');
+    expect(appSnapshotErrorNode?.label).toContain('src/App.tsx#AppContent');
+    expect(lifecycleSnapshotErrorNode?.label).toBe(
+      'src/hooks/useOpenTabLifecycleEffects.ts#refreshNetworkIdentityForForeground',
+    );
     expect(targetProbeDispatchNode?.label).toBe(
       'src/contexts/session-context-transport-orchestration-runtime.ts#notifyTargetNetworkSignalRuntime',
     );
@@ -278,6 +296,12 @@ describe('function wiki truth gate', () => {
     );
     expect(targetFailureRouterNode?.label).toBe(
       'src/contexts/session-context-transport-orchestration-runtime.ts#routeTargetSocketFailureRuntime',
+    );
+    expect(nativeSnapshotErrorNode?.label).toBe(
+      'src/contexts/session-context-transport-orchestration-runtime.ts#notifyTargetNetworkSignalRuntime',
+    );
+    expect(daemonConnectionErrorNode?.label).toContain(
+      'src/lib/client-daemon-connection.ts#createClientDaemonConnection',
     );
     expect(read('src/hooks/useOpenTabLifecycleEffects.ts')).toContain(
       'export function useOpenTabLifecycleEffects',
@@ -331,6 +355,24 @@ describe('function wiki truth gate', () => {
     expect(androidMainline?.edges.some((edge) => (
       edge.edge_id === 'android_mainline:TargetNetworkSignalOrchestration->TerminalMuxPingBuilder'
     ))).toBe(true);
+    for (const edgeId of [
+      'android_mainline:NetworkIdentityRuntime->AppNativeSnapshotErrorProjector',
+      'android_mainline:AppNativeSnapshotErrorProjector->AppNetworkBinding',
+      'android_mainline:NetworkIdentityRuntime->LifecycleNativeSnapshotErrorProjector',
+      'android_mainline:LifecycleNativeSnapshotErrorProjector->OpenTabNetworkBinding',
+      'android_mainline:TargetNetworkSignalOrchestration->TargetNetworkProbeError04NativeSnapshot',
+      'android_mainline:TargetNetworkProbeError04NativeSnapshot->DaemonConnectionErrorChain',
+    ]) {
+      expect(androidMainline?.edges.some((edge) => edge.edge_id === edgeId), edgeId).toBe(true);
+    }
+    for (const edgeId of [
+      'android_mainline:TargetNetworkSignalOrchestration->TargetNetworkProbeError04NativeSnapshot',
+      'android_mainline:TargetNetworkProbeError04NativeSnapshot->DaemonConnectionErrorChain',
+    ]) {
+      const edge = androidMainline?.edges.find((candidate) => candidate.edge_id === edgeId);
+      expect(edge?.resource_from, edgeId).toBe('resource.platform_network_signal');
+      expect(edge?.resource_to, edgeId).toBe('resource.platform_network_signal');
+    }
   });
 
   it('keeps every function-map mainline edge in the machine-readable call map', () => {
