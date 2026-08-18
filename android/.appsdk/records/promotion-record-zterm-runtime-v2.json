@@ -10,7 +10,7 @@
   "architecture_review_id": "REVIEW-20260818-DSH-ZARCHV2-ACTIVEV4-MAIN-CLOSEOUT-001",
   "effectiveness_record_id": "EFF-20260818-ZARCHV2-ACTIVEV4-MAIN-CLOSEOUT-001",
   "merge_record_id": "MERGE-20260818-ZARCHV2-ACTIVEV4-MAIN-CLOSEOUT-001",
-  "base_commit": "b941affb7c89021bb5662a7686fc52847a639e6c",
+  "base_commit": "44e23ef7b28cb265400e032e3338b52c19c7b65f",
   "candidate_commit": "86076987a70345d88b90070f0014e8b2f243ca01",
   "merged_commit": "86076987a70345d88b90070f0014e8b2f243ca01",
   "source_commit": "86076987a70345d88b90070f0014e8b2f243ca01",
