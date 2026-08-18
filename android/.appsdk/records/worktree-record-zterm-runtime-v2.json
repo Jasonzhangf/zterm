@@ -1,15 +1,15 @@
 {
   "$schema": "https://appsdk.local/contracts/records/worktree-record.schema.json",
-  "worktree_id": "WT-20260817-ZARCHV2-ACTIVEV4-CLOSEOUT-001",
+  "worktree_id": "WT-20260817-ZARCHV2-ACTIVEV4-MAIN-CLOSEOUT-001",
   "issue_id": "zterm-runtime-architecture-v2",
   "module_id": "zterm-runtime-v2",
   "base_ref": "main",
-  "base_commit": "91f69b2a36f00e075a87a35e66879bb7ebd88271",
-  "branch": "work/appsdk-active-v4-closeout-20260817T022328Z",
-  "head_commit": "c11485f9c72d3a59f548f2ef90824ef727e9be7b",
+  "base_commit": "b941affb7c89021bb5662a7686fc52847a639e6c",
+  "branch": "work/appsdk-active-v4-main-closeout-20260817T184155Z",
+  "head_commit": "86076987a70345d88b90070f0014e8b2f243ca01",
   "initial_clean": true,
   "final_clean": true,
   "isolation_mode": "isolated_worktree",
-  "scope_hash": "sha256:ad06d8f40b865c3b89440b0b0049a7c4a87ae9538a2163f98edf18903f31ac21",
-  "created_at": "2026-08-17T02:23:28Z"
+  "scope_hash": "sha256:e939fc3be8c64425b047abeb47a1c108890be6427825360f742cb7b44edb9790",
+  "created_at": "2026-08-17T18:41:55Z"
 }

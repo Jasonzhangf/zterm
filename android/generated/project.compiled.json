@@ -1,5 +1,5 @@
 {
-  "artifact_hash": "sha256:582d99f1e0037e7ba43b67b3309536becdb25468187013d94cc3a68dcb3e047e",
+  "artifact_hash": "sha256:2c1504954711bd395e7b9ffa62326ccb1c6042f8a7a0a52486fdf9e90ec88d2c",
   "artifact_schema": 1,
   "modules": [
     {
@@ -56,7 +56,7 @@
         "suite_id": "zterm-runtime-v2-regression"
       },
       "source_owner": "zterm-runtime-v2",
-      "stage": "controlled_verified"
+      "stage": "architecture_stable"
     }
   ],
   "project_id": "zterm-runtime-architecture-v2",

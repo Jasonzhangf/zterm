@@ -142,7 +142,7 @@
         "suite_id": "zterm-runtime-v2-regression"
       },
       "source_owner": "zterm-runtime-v2",
-      "stage": "controlled_verified",
+      "stage": "architecture_stable",
       "version_base": {
         "base_artifact_hash": "sha256:a26c67f3706fdaf518f60fd7953c4942854bfef63e68c707939a101eb29f9404",
         "base_source_commit": "44e23ef7b28cb265400e032e3338b52c19c7b65f",
