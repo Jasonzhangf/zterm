@@ -99,6 +99,15 @@ describe('function wiki truth gate', () => {
     expect(plan).toContain(
       '`planned_target`: `crates/zterm-transport-core/src/target_network_probe.rs`',
     );
+    expect(plan).toContain(
+      '`native_snapshot_error_policy`: the typed `TargetNetworkProbeError04NativeSnapshot` must stay on the explicit error chain',
+    );
+    expect(plan).toContain(
+      '`native_snapshot_error_current_owner`: `android/src/contexts/session-context-transport-orchestration-runtime.ts#reportTargetNetworkProbeErrorRuntime` and `#notifyTargetNetworkSignalRuntime`',
+    );
+    expect(plan).toContain(
+      '`native_snapshot_error_planned_rust_boundary`: `crates/zterm-transport-core/src/target_network_probe.rs` owns typed failure classification and error-chain emission',
+    );
   });
 
   it('keeps terminal frame assembly Rust migration explicitly planned', () => {

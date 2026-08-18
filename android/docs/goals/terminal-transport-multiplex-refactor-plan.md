@@ -520,6 +520,9 @@ The current target-network probe policy is implemented in TypeScript, but its id
 - `current_owner`: `android/src/contexts/session-context-target-network-probe-runtime.ts#createSessionTargetNetworkProbeRuntime`
 - `planned_target`: `crates/zterm-transport-core/src/target_network_probe.rs`
 - `planned_rust_semantics`: target/socket-generation identity, pending-probe dedupe state, probe outcome, and target failure-transition policy
+- `native_snapshot_error_policy`: the typed `TargetNetworkProbeError04NativeSnapshot` must stay on the explicit error chain from platform-signal orchestration to the client daemon-connection error owner; missing error-owner wiring is fail-fast and must never become a silent no-op
+- `native_snapshot_error_current_owner`: `android/src/contexts/session-context-transport-orchestration-runtime.ts#reportTargetNetworkProbeErrorRuntime` and `#notifyTargetNetworkSignalRuntime`
+- `native_snapshot_error_planned_rust_boundary`: `crates/zterm-transport-core/src/target_network_probe.rs` owns typed failure classification and error-chain emission; TypeScript retains only native/platform callback adaptation and transport IO
 - `post_migration_ts_boundary`: platform event adapter, WebSocket IO, and timer scheduling only
 - `activation`: create the Rust crate and target path, pass TS/Rust parity tests, wire the bridge, change this registry entry to active, then physically remove the old TS policy owner
 - `gate`: `android/src/lib/function-wiki-truth.test.ts`

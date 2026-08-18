@@ -363,7 +363,7 @@ export function notifyTargetNetworkSignalRuntime(options: {
     socket: BridgeTransportSocket,
     message: string,
   ) => void;
-  submitTargetNetworkProbeError?: (failure: SessionTargetNetworkProbeFailure) => void;
+  submitTargetNetworkProbeError: (failure: SessionTargetNetworkProbeFailure) => void;
   wakeScheduledReconnects?: () => void;
   runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
 }) {
@@ -419,7 +419,7 @@ export function notifyTargetNetworkSignalRuntime(options: {
           return;
         }
         if (failure.type === 'TargetNetworkProbeError04NativeSnapshot') {
-          options.submitTargetNetworkProbeError?.(failure);
+          options.submitTargetNetworkProbeError(failure);
           return;
         }
         options.submitTargetSocketFailure(

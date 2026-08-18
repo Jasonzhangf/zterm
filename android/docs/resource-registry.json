@@ -1312,6 +1312,7 @@
         "trigger_target_health_probe",
         "read_native_network_identity_snapshot",
         "report_native_snapshot_error",
+        "consume_native_snapshot_error",
         "acknowledge_native_snapshot_error"
       ],
       "direct_relations": [
