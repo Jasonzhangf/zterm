@@ -1,0 +1,26 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "evidence_id": "evid-20260817-zarchv2-activev4-main-negative-001",
+  "issue_id": "zterm-runtime-architecture-v2",
+  "experiment_id": "zterm-runtime-architecture-v2-active-v4-main-closeout",
+  "phase": "negative_intervention",
+  "kind": "negative_test",
+  "source_commit": "86076987a70345d88b90070f0014e8b2f243ca01",
+  "scope": {
+    "module_id": "zterm-runtime-v2",
+    "feature_id": "zterm_runtime_architecture_v2_active_v4_main_negative"
+  },
+  "producer": {
+    "adapter": "vitest",
+    "identity": "android-network-identity-focused-suite"
+  },
+  "result": "pass",
+  "confidence": 1,
+  "confidence_rationale": "Negative cases prove healthy signals do not enter the typed error chain and stale error acknowledgement cannot consume a newer failure; all 124 focused tests passed.",
+  "created_at": "2026-08-18T10:40:00Z",
+  "expires_at": "2026-11-16T00:00:00Z",
+  "input_hashes": [
+    "git:86076987a70345d88b90070f0014e8b2f243ca01"
+  ],
+  "scope_hash": "sha256:e939fc3be8c64425b047abeb47a1c108890be6427825360f742cb7b44edb9790"
+}
