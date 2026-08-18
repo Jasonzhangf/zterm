@@ -22,6 +22,8 @@
              避免后台切前台 / 冷启动时白色 windowBackground 造成白屏闪烁 -->
         <item name="android:background">@drawable/splash</item>
         <item name="windowSplashScreenBackground">#FF1E1E1E</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_logo</item>
+        <item name="windowSplashScreenIconBackgroundColor">#FF1E1E1E</item>
         <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
     </style>
 </resources>

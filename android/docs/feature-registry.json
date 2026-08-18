@@ -1420,6 +1420,7 @@
       "owners": [
         "native/android/app/src/main/AndroidManifest.xml",
         "native/android/app/src/main/java/com/zterm/android/MainActivity.java",
+        "native/android/app/src/main/res/drawable/",
         "native/android/app/src/main/res/values/styles.xml",
         "src/lib/terminal-shell-skin.ts",
         "src/hooks/useAppPageState.ts",
@@ -1429,6 +1430,7 @@
       "allowed_paths": [
         "native/android/app/src/main/AndroidManifest.xml",
         "native/android/app/src/main/java/com/zterm/android/MainActivity.java",
+        "native/android/app/src/main/res/drawable/",
         "native/android/app/src/main/res/values/styles.xml",
         "native/android/app/src/main/assets/",
         "src/index.css",

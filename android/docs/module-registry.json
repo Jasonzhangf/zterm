@@ -1268,6 +1268,7 @@
       "status": "active",
       "owned_paths": [
         "native/android/app/src/main/java/com/zterm/android/MainActivity.java",
+        "native/android/app/src/main/res/drawable/",
         "native/android/app/src/main/res/values/styles.xml",
         "src/App.tsx",
         "src/App.dynamic-refresh.test.tsx",
