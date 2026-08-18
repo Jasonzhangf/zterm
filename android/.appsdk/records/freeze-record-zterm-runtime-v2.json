@@ -24,9 +24,9 @@
   "previous_active_immutable": true,
   "previous_active_version": "active-v3",
   "promotion_id": "PROMO-20260818-ZARCHV2-ACTIVEV4-MAIN-CLOSEOUT-001",
-  "promotion_record_hash": "sha256:e54e1dd40ddd9238989a3630ac45f0fcd6332e5e6fd41a04c813b11b2afa8368",
+  "promotion_record_hash": "sha256:38b83ce2b568391c555e6a775f11a948956e033f67cea22f5f974b547b7029a8",
   "public_api_hash": "sha256:42699f64b69d0e555a6b43baa29dd381e27c245b417f5c60bce8f7e6155e5abd",
-  "regression_report_hash": "sha256:ac568d7bd04c050f8cc5ee0fd478c60940b446da0857de5ebb153fb409451b52",
+  "regression_report_hash": "sha256:45102c33e0cfff02c41a025bfe4ba080cd674aa58d6714dd8ebbf693ae3f42ba",
   "regression_report_id": "REGR-20260818-ZARCHV2-ACTIVEV4-MAIN-CLOSEOUT-001",
   "review_id": "REVIEW-20260818-DSH-ZARCHV2-ACTIVEV4-MAIN-CLOSEOUT-001",
   "source_commit_or_tag": "86076987a70345d88b90070f0014e8b2f243ca01"

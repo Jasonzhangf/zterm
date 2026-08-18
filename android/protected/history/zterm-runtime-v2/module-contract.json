@@ -1,0 +1,80 @@
+{
+  "active_artifact": "active/lib/zterm-runtime-v2/**",
+  "artifact_paths": [
+    "zterm-runtime-v2.web.tgz"
+  ],
+  "build": {
+    "args": [
+      "-lc",
+      "ZTERM_BUILD_NUMBER=2652 pnpm run build && rm -f generated/modules/zterm-runtime-v2/lib/zterm-runtime-v2.web.tgz && mkdir -p generated/modules/zterm-runtime-v2/lib && find dist -type d -exec chmod 0755 {} + && find dist -type f -exec chmod 0644 {} + && find dist -exec touch -h -t 200001010000 {} + && (cd dist && find . -print0 | LC_ALL=C sort -z | COPYFILE_DISABLE=1 tar --null --no-recursion --format ustar --uid 0 --gid 0 --uname root --gname root -cf - -T -) | gzip -n > generated/modules/zterm-runtime-v2/lib/zterm-runtime-v2.web.tgz"
+    ],
+    "program": "bash",
+    "working_directory": "."
+  },
+  "contract_paths": [
+    "contracts/records/**",
+    "contracts/transitions/**",
+    "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+    "docs/goals/zterm-runtime-architecture-v2-plan.md"
+  ],
+  "dependency_modules": [],
+  "generated_outputs": [
+    "generated/modules/zterm-runtime-v2/**"
+  ],
+  "module_id": "zterm-runtime-v2",
+  "owned_paths": [
+    "playground/experiments/zterm-runtime-architecture-v2/**",
+    "src/**",
+    "native/android/app/src/main/**",
+    "docs/**",
+    "scripts/**",
+    "package.json",
+    "tsconfig.json",
+    "vite.config.ts",
+    "index.html"
+  ],
+  "regression": {
+    "allow_skipped": false,
+    "command": {
+      "args": [
+        "exec",
+        "vitest",
+        "run",
+        "src/server/terminal-message-runtime.test.ts",
+        "src/server/terminal-mirror-runtime.test.ts",
+        "src/server/daemon-buffer-publisher-runtime.test.ts",
+        "src/lib/runtime-architecture-v2.test.ts",
+        "src/lib/plugin-host/plugin-host-runtime.test.ts",
+        "src/pages/TerminalPage.render-isolation.test.tsx",
+        "src/App.dynamic-refresh.test.tsx",
+        "src/contexts/SessionContext.ws-refresh.test.tsx",
+        "--reporter=dot"
+      ],
+      "program": "pnpm",
+      "working_directory": "."
+    },
+    "input_paths": [
+      "playground/experiments/zterm-runtime-architecture-v2/**",
+      "src/**"
+    ],
+    "minimum_test_count": 1,
+    "ordinary_mode_after_freeze": "disabled",
+    "reenable_on": [
+      "source_change",
+      "contract_change",
+      "public_api_change",
+      "artifact_change",
+      "dependency_change"
+    ],
+    "required_before_freeze": true,
+    "suite_id": "zterm-runtime-v2-regression"
+  },
+  "source_owner": "zterm-runtime-v2",
+  "stage": "frozen",
+  "version_base": {
+    "base_artifact_hash": "sha256:a26c67f3706fdaf518f60fd7953c4942854bfef63e68c707939a101eb29f9404",
+    "base_source_commit": "44e23ef7b28cb265400e032e3338b52c19c7b65f",
+    "new_active_version": "active-v4",
+    "previous_active_version": "active-v3"
+  }
+}

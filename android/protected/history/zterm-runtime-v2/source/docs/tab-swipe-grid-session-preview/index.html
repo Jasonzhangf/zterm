@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Session Drawer Static Preview</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #070b11;
+  --terminal: #0b111a;
+  --surface: rgba(16, 22, 34, 0.98);
+  --surface-2: rgba(255, 255, 255, 0.04);
+  --border: rgba(255, 255, 255, 0.08);
+  --accent: #6aa7ff;
+  --accent-bg: rgba(106, 167, 255, 0.16);
+  --text: #dce8ff;
+  --text-dim: rgba(220, 232, 255, 0.58);
+  --success: #44e2a0;
+  --warn: #f5b659;
+  --danger: #ff727d;
+  --drawer-width: min(280px, 72vw);
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+}
+
+body {
+  position: relative;
+}
+
+.app {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.terminal-stage {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.03), transparent 120px),
+    var(--terminal);
+}
+
+.terminal-body {
+  position: absolute;
+  inset: 0;
+  padding: 18px 18px 28px calc(var(--drawer-width) + 18px);
+  color: rgba(220, 232, 255, 0.84);
+  font-family: "SF Mono", "Menlo", monospace;
+  font-size: 14px;
+  line-height: 1.62;
+  overflow: hidden;
+  white-space: pre-wrap;
+}
+
+.term-line { margin-bottom: 2px; }
+.prompt { color: var(--success); }
+.cursor {
+  display: inline-block;
+  width: 8px;
+  height: 16px;
+  background: rgba(220, 232, 255, 0.86);
+  vertical-align: -2px;
+}
+
+.drawer-shadow {
+  position: absolute;
+  top: 0;
+  left: var(--drawer-width);
+  bottom: 0;
+  width: 20px;
+  background: linear-gradient(90deg, rgba(0,0,0,0.36), transparent);
+  pointer-events: none;
+}
+
+.session-drawer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: var(--drawer-width);
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  backdrop-filter: blur(20px);
+}
+
+.drawer-handle {
+  position: absolute;
+  top: 50%;
+  right: -12px;
+  transform: translateY(-50%);
+  width: 12px;
+  height: 68px;
+  border-radius: 0 8px 8px 0;
+  background: rgba(106, 167, 255, 0.18);
+  border: 1px solid rgba(106, 167, 255, 0.22);
+  border-left: none;
+}
+
+.drawer-header {
+  padding: 14px 12px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.drawer-kicker {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+
+.drawer-title {
+  font-size: 18px;
+  font-weight: 780;
+  line-height: 1.15;
+  margin-bottom: 10px;
+}
+
+.drawer-subtitle {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-dim);
+}
+
+.drawer-body {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 10px;
+}
+
+.drawer-body::-webkit-scrollbar {
+  width: 0;
+}
+
+.group-label {
+  margin: 4px 2px 8px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(220, 232, 255, 0.35);
+}
+
+.session-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.session-row {
+  min-height: 72px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.session-row.active {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.session-main {
+  min-width: 0;
+}
+
+.session-title {
+  font-size: 15px;
+  font-weight: 760;
+  line-height: 1.15;
+  margin-bottom: 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-meta {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-state {
+  margin-top: 7px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: rgba(220, 232, 255, 0.74);
+}
+
+.state-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--success);
+}
+
+.state-dot.warn { background: var(--warn); }
+.state-dot.offline { background: rgba(255, 114, 125, 0.72); }
+
+.session-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.pane-badge {
+  min-width: 34px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 900;
+  color: var(--accent);
+  background: rgba(106, 167, 255, 0.18);
+}
+
+.session-action {
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(220, 232, 255, 0.72);
+  font-size: 15px;
+  background: rgba(255,255,255,0.04);
+}
+
+.drawer-footer {
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.footer-main-action {
+  min-height: 52px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.05);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 760;
+}
+
+.footer-plus {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: rgba(106, 167, 255, 0.18);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.gesture-note {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  padding: 9px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(7, 11, 17, 0.8);
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 700;
+}
+</style>
+</head>
+<body>
+  <div class="app">
+    <div class="terminal-stage">
+      <div class="session-drawer">
+        <div class="drawer-handle"></div>
+        <div class="drawer-header">
+          <div class="drawer-kicker">Right Swipe Revealed</div>
+          <div class="drawer-title">Sessions</div>
+          <div class="drawer-subtitle">左侧单列 session 列表。右侧 terminal 保持可见。左滑收起，点击进入，底部 + 打开 session picker。</div>
+        </div>
+
+        <div class="drawer-body">
+          <div class="group-label">Current Pane</div>
+          <div class="session-list">
+            <div class="session-row active">
+              <div class="session-main">
+                <div class="session-title">demo</div>
+                <div class="session-meta">100.127.23.27 · tmux:demo</div>
+                <div class="session-state">
+                  <div class="state-dot"></div>
+                  <span>Connected · active</span>
+                </div>
+              </div>
+              <div class="session-side">
+                <div class="pane-badge">P1</div>
+                <div class="session-action">×</div>
+              </div>
+            </div>
+
+            <div class="session-row">
+              <div class="session-main">
+                <div class="session-title">android-dev</div>
+                <div class="session-meta">100.66.1.82:3333 · tmux:android</div>
+                <div class="session-state">
+                  <div class="state-dot"></div>
+                  <span>Connected</span>
+                </div>
+              </div>
+              <div class="session-side">
+                <div class="pane-badge">P1</div>
+                <div class="session-action">›</div>
+              </div>
+            </div>
+
+            <div class="session-row">
+              <div class="session-main">
+                <div class="session-title">server-prod</div>
+                <div class="session-meta">192.168.1.100 · tmux:ops</div>
+                <div class="session-state">
+                  <div class="state-dot warn"></div>
+                  <span>Connecting</span>
+                </div>
+              </div>
+              <div class="session-side">
+                <div class="pane-badge">P2</div>
+                <div class="session-action">›</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="group-label" style="margin-top: 14px;">More Sessions</div>
+          <div class="session-list">
+            <div class="session-row">
+              <div class="session-main">
+                <div class="session-title">mac-mini</div>
+                <div class="session-meta">100.64.22.11 · tmux:build</div>
+                <div class="session-state">
+                  <div class="state-dot offline"></div>
+                  <span>Disconnected</span>
+                </div>
+              </div>
+              <div class="session-side">
+                <div class="pane-badge">P3</div>
+                <div class="session-action">＋</div>
+              </div>
+            </div>
+
+            <div class="session-row">
+              <div class="session-main">
+                <div class="session-title">pi-hole</div>
+                <div class="session-meta">pi.local · tmux:net</div>
+                <div class="session-state">
+                  <div class="state-dot offline"></div>
+                  <span>Closed</span>
+                </div>
+              </div>
+              <div class="session-side">
+                <div class="pane-badge">P4</div>
+                <div class="session-action">＋</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="drawer-footer">
+          <div class="footer-main-action">
+            <div class="footer-plus">+</div>
+            <span>New Session</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="drawer-shadow"></div>
+
+      <div class="terminal-body">
+        <div class="term-line prompt">fanzhang@macstudio ~/code/zterm % tmux ls</div>
+        <div class="term-line">demo: 1 windows (created Mon Jun 22 11:24:13 2026)</div>
+        <div class="term-line">android: 1 windows (created Mon Jun 22 11:24:40 2026)</div>
+        <div class="term-line">ops: 1 windows (created Mon Jun 22 11:25:11 2026)</div>
+        <div class="term-line"></div>
+        <div class="term-line prompt">fanzhang@macstudio ~/code/zterm % tail -f android/evidence/runtime.log</div>
+        <div class="term-line">[11:59:21] pane=1 session=demo revision=1841 changed=0 head=ready</div>
+        <div class="term-line">[11:59:22] pane=1 session=demo subscribers=1 widthMode=mirror-fixed</div>
+        <div class="term-line">[11:59:23] pane=1 session=demo inputLatency=14ms queue=0</div>
+        <div class="term-line"></div>
+        <div class="term-line prompt">fanzhang@macstudio ~/code/zterm % <span class="cursor"></span></div>
+      </div>
+
+      <div class="gesture-note">左滑收起 · 上下滑动选择 · 点击切换 · 底部 + 打开 session picker</div>
+    </div>
+  </div>
+</body>
+</html>
