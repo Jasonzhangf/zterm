@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 
 import { requireNativeNetworkInterfaces } from '../plugins/NetworkIdentityPlugin';
@@ -9,6 +10,10 @@ const repoRoot = resolve(__dirname, '../../..');
 
 function readRepo(relativePath: string): string {
   return readFileSync(resolve(repoRoot, relativePath), 'utf8');
+}
+
+function readRepoBytes(relativePath: string): Buffer {
+  return readFileSync(resolve(repoRoot, relativePath));
 }
 
 describe('Android network identity plugin', () => {
@@ -171,6 +176,32 @@ describe('Android network identity plugin', () => {
     expect(signal?.truth_store).toContain('registered typed error consumer');
     expect(signal?.allowed_operations).toContain('consume_native_snapshot_error');
     expect(signal?.allowed_operations).toContain('acknowledge_native_snapshot_error');
+  });
+
+  it('binds aggregate lifecycle identity and the physical tgz digest separately', () => {
+    const manifest = JSON.parse(readRepo('android/generated/modules/zterm-runtime-v2/module.compiled.json')) as {
+      artifact_hash: string;
+      artifacts: Array<{ path: string; hash: string }>;
+    };
+    const promotion = JSON.parse(readRepo('android/.appsdk/records/promotion-record-zterm-runtime-v2.json')) as {
+      artifact_hash: string;
+    };
+    const review = JSON.parse(readRepo('android/.appsdk/records/review-record-zterm-runtime-v2.json')) as {
+      reviewed_artifact_hash: string;
+    };
+    const regression = JSON.parse(readRepo('android/.appsdk/records/regression-report-zterm-runtime-v2.json')) as {
+      artifact_hash: string;
+      input_hash: string;
+    };
+    const artifactPath = `android/generated/modules/zterm-runtime-v2/lib/${manifest.artifacts[0]?.path || ''}`;
+    const artifactBytes = readRepoBytes(artifactPath);
+    const artifactDigest = `sha256:${createHash('sha256').update(artifactBytes).digest('hex')}`;
+
+    expect(manifest.artifacts[0]?.hash).toBe(artifactDigest);
+    expect(promotion.artifact_hash).toBe(manifest.artifact_hash);
+    expect(review.reviewed_artifact_hash).toBe(manifest.artifact_hash);
+    expect(regression.artifact_hash).toBe(manifest.artifact_hash);
+    expect(regression.input_hash).toBe(manifest.artifact_hash);
   });
 
   it('rejects silent fallback and catch-to-empty native snapshot errors', () => {

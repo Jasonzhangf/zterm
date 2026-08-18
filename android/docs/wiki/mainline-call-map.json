@@ -3017,21 +3017,6 @@
           "relation_status": "observer"
         },
         {
-          "from": "RelayDirectoryProjection",
-          "to": "TraversalSocketFactory",
-          "owner_feature": "relay.account_directory",
-          "semantic_input": "confirmed endpoint directory projection",
-          "semantic_output": "route candidate resolution for terminal socket factory",
-          "status": "anchored",
-          "edge_id": "android_mainline:RelayDirectoryProjection->TraversalSocketFactory",
-          "resource_from": "resource.relay_account_directory",
-          "resource_to": "resource.transport_target",
-          "via_resources": [
-            "resource.transport_target"
-          ],
-          "relation_status": "observer"
-        },
-        {
           "from": "NetworkIdentityRuntime",
           "to": "AppNativeSnapshotErrorProjector",
           "owner_feature": "android_network_identity_snapshot",

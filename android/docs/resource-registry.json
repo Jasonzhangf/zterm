@@ -3577,7 +3577,7 @@
       "resource_id": "resource.appsdk_compiled_artifact",
       "status": "active",
       "resource_type": "governance_artifact_resource",
-      "identity": "Deterministic zterm-runtime-v2 compiled manifest and web bundle emitted only by the pinned AppSDK compiler",
+      "identity": "Deterministic zterm-runtime-v2 compiled manifest and web bundle emitted only by the pinned AppSDK compiler; module.compiled.json.artifact_hash is the compiler-verified aggregate module identity and artifacts[].hash binds each committed artifact's physical bytes",
       "owner_feature": "appsdk.binary_gate",
       "truth_store": "generated/modules/zterm-runtime-v2/module.compiled.json and generated/modules/zterm-runtime-v2/lib/zterm-runtime-v2.web.tgz",
       "allowed_operations": [

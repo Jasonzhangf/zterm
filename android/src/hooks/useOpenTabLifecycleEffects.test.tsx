@@ -10,6 +10,7 @@ import {
   useOpenTabLifecycleEffects,
 } from './useOpenTabLifecycleEffects';
 import type { Session } from '../lib/types';
+import type { SessionTargetNetworkProbeFailure } from '../contexts/session-context-target-network-probe-runtime';
 
 const capacitorAppHarness = vi.hoisted(() => {
   const listenersByEventName: Record<string, Array<(payload: any) => void>> = {};
@@ -112,11 +113,13 @@ function LifecycleHarness({
   onForegroundResume,
   auditOpenTabsAgainstRemoteSessions,
   onForegroundActiveChange = vi.fn(),
+  reportTargetNetworkProbeError = vi.fn(),
   sessions = [baseSession],
 }: {
   onForegroundResume: (reason: 'visibilitychange' | 'resume' | 'appStateChange') => void;
   auditOpenTabsAgainstRemoteSessions: (reason: any) => Promise<void>;
   onForegroundActiveChange?: (active: boolean) => void;
+  reportTargetNetworkProbeError?: (failure: SessionTargetNetworkProbeFailure) => void;
   sessions?: Session[];
 }) {
   const sessionsRef = useRef<Session[]>(sessions);
@@ -135,6 +138,7 @@ function LifecycleHarness({
     onForegroundResume,
     auditOpenTabsAgainstRemoteSessions,
     notifyTargetNetworkSignal: vi.fn(),
+    reportTargetNetworkProbeError,
     bumpFollowResetEpoch: vi.fn(),
   });
 
@@ -315,6 +319,7 @@ describe('useOpenTabLifecycleEffects', () => {
         activeSessionId: 's1',
       });
       const foregroundRefreshRuntimeRef = useRef(createForegroundRefreshRuntime());
+      const reportTargetNetworkProbeError = vi.fn();
 
       useOpenTabLifecycleEffects({
         sessionsRef,
@@ -325,6 +330,7 @@ describe('useOpenTabLifecycleEffects', () => {
         onForegroundResume: vi.fn(),
         auditOpenTabsAgainstRemoteSessions: auditOpenTabs,
         notifyTargetNetworkSignal,
+        reportTargetNetworkProbeError,
         bumpFollowResetEpoch: vi.fn(),
       });
 
@@ -358,6 +364,7 @@ describe('useOpenTabLifecycleEffects', () => {
         activeSessionId: 's1',
       });
       const foregroundRefreshRuntimeRef = useRef(createForegroundRefreshRuntime());
+      const reportTargetNetworkProbeError = vi.fn();
 
       useOpenTabLifecycleEffects({
         sessionsRef,
@@ -368,6 +375,7 @@ describe('useOpenTabLifecycleEffects', () => {
         onForegroundResume: vi.fn(),
         auditOpenTabsAgainstRemoteSessions: vi.fn(async () => undefined),
         notifyTargetNetworkSignal,
+        reportTargetNetworkProbeError,
         bumpFollowResetEpoch: vi.fn(),
       });
 
@@ -397,6 +405,7 @@ describe('useOpenTabLifecycleEffects', () => {
       const sessionsRef = useRef<Session[]>([]);
       const openTabStateRef = useRef({ tabs: [], activeSessionId: null });
       const foregroundRefreshRuntimeRef = useRef(createForegroundRefreshRuntime());
+      const reportTargetNetworkProbeError = vi.fn();
 
       useOpenTabLifecycleEffects({
         sessionsRef,
@@ -406,6 +415,7 @@ describe('useOpenTabLifecycleEffects', () => {
         onForegroundResume: vi.fn(),
         auditOpenTabsAgainstRemoteSessions: auditOpenTabs,
         notifyTargetNetworkSignal,
+        reportTargetNetworkProbeError,
         bumpFollowResetEpoch: vi.fn(),
       });
       return <div>mounted</div>;
@@ -428,6 +438,7 @@ describe('useOpenTabLifecycleEffects', () => {
       const sessionsRef = useRef<Session[]>([]);
       const openTabStateRef = useRef({ tabs: [], activeSessionId: null });
       const foregroundRefreshRuntimeRef = useRef(createForegroundRefreshRuntime());
+      const reportTargetNetworkProbeError = vi.fn();
 
       useOpenTabLifecycleEffects({
         sessionsRef,
@@ -437,6 +448,7 @@ describe('useOpenTabLifecycleEffects', () => {
         onForegroundResume: vi.fn(),
         auditOpenTabsAgainstRemoteSessions: auditOpenTabs,
         notifyTargetNetworkSignal,
+        reportTargetNetworkProbeError,
         bumpFollowResetEpoch: vi.fn(),
       });
       return <div>mounted</div>;
@@ -445,9 +457,11 @@ describe('useOpenTabLifecycleEffects', () => {
     render(<HarnessNoActiveSession />);
     capacitorAppHarness.emit('appStateChange', { isActive: true });
 
-    expect(notifyTargetNetworkSignal).toHaveBeenCalledWith({
-      source: 'foreground-resume',
-    });
+    expect(notifyTargetNetworkSignal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: 'foreground-resume',
+      }),
+    );
     expect(auditOpenTabs).not.toHaveBeenCalled();
   });
 
@@ -461,6 +475,7 @@ describe('useOpenTabLifecycleEffects', () => {
       const sessionsRef = useRef<Session[]>([baseSession]);
       const openTabStateRef = useRef({ tabs: [{ sessionId: 's1' }], activeSessionId: 's1' });
       const foregroundRefreshRuntimeRef = useRef(createForegroundRefreshRuntime());
+      const reportTargetNetworkProbeError = vi.fn();
 
       useOpenTabLifecycleEffects({
         sessionsRef,
@@ -470,6 +485,7 @@ describe('useOpenTabLifecycleEffects', () => {
         onForegroundResume: vi.fn(),
         auditOpenTabsAgainstRemoteSessions: vi.fn(async () => undefined),
         notifyTargetNetworkSignal,
+        reportTargetNetworkProbeError,
         bumpFollowResetEpoch: vi.fn(),
         networkIdentity,
       });
@@ -507,12 +523,11 @@ describe('useOpenTabLifecycleEffects', () => {
     });
   });
 
-  it('recovers a backgrounded network change on foreground resume with a cross-generation signal', async () => {
+  it('routes a native snapshot failure to the daemon-connection typed error owner', async () => {
     const notifyTargetNetworkSignal = vi.fn();
-    const networkIdentity = createNetworkIdentityRuntime({
-      sampleInterfaces: async () => [],
-    });
-    capacitorNetworkHarness.getStatus.mockResolvedValue({ connected: true, connectionType: 'cellular' });
+    const reportTargetNetworkProbeError = vi.fn();
+    const networkIdentity = createNetworkIdentityRuntime();
+    capacitorNetworkHarness.getStatus.mockResolvedValue({ connected: true, connectionType: 'wifi' });
 
     const HarnessWithNetworkIdentity = () => {
       const sessionsRef = useRef<Session[]>([baseSession]);
@@ -527,6 +542,51 @@ describe('useOpenTabLifecycleEffects', () => {
         onForegroundResume: vi.fn(),
         auditOpenTabsAgainstRemoteSessions: vi.fn(async () => undefined),
         notifyTargetNetworkSignal,
+        reportTargetNetworkProbeError,
+        bumpFollowResetEpoch: vi.fn(),
+        networkIdentity,
+      });
+      return <div>mounted</div>;
+    };
+
+    render(<HarnessWithNetworkIdentity />);
+    capacitorAppHarness.emit('appStateChange', { isActive: true });
+
+    await vi.waitFor(() => {
+      expect(reportTargetNetworkProbeError).toHaveBeenCalledWith({
+        type: 'TargetNetworkProbeError04NativeSnapshot',
+        message: 'NetworkIdentity native snapshot capability is not active',
+      });
+    });
+    expect(notifyTargetNetworkSignal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: 'foreground-resume',
+      }),
+    );
+  });
+
+  it('recovers a backgrounded network change on foreground resume with a cross-generation signal', async () => {
+    const notifyTargetNetworkSignal = vi.fn();
+    const networkIdentity = createNetworkIdentityRuntime({
+      sampleInterfaces: async () => [],
+    });
+    capacitorNetworkHarness.getStatus.mockResolvedValue({ connected: true, connectionType: 'cellular' });
+
+    const HarnessWithNetworkIdentity = () => {
+      const sessionsRef = useRef<Session[]>([baseSession]);
+      const openTabStateRef = useRef({ tabs: [{ sessionId: 's1' }], activeSessionId: 's1' });
+      const foregroundRefreshRuntimeRef = useRef(createForegroundRefreshRuntime());
+      const reportTargetNetworkProbeError = vi.fn();
+
+      useOpenTabLifecycleEffects({
+        sessionsRef,
+        openTabStateRef,
+        foregroundRefreshRuntimeRef,
+        retainedSessionCount: 1,
+        onForegroundResume: vi.fn(),
+        auditOpenTabsAgainstRemoteSessions: vi.fn(async () => undefined),
+        notifyTargetNetworkSignal,
+        reportTargetNetworkProbeError,
         bumpFollowResetEpoch: vi.fn(),
         networkIdentity,
       });

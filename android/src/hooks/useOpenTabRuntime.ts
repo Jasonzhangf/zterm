@@ -79,7 +79,7 @@ interface UseOpenTabRuntimeOptions {
   notifyTargetNetworkSignal: (
     signal: SessionTargetNetworkSignal,
   ) => void;
-  reportTargetNetworkProbeError?: (failure: SessionTargetNetworkProbeFailure) => void;
+  reportTargetNetworkProbeError: (failure: SessionTargetNetworkProbeFailure) => void;
   manageTmuxSessionsOnOpenTransport?: (
     sessionId: string,
     message: TerminalMuxTargetClientMessage,

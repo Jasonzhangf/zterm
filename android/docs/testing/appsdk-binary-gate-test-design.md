@@ -95,3 +95,14 @@ with the AppSDK 0.1.3 binary whose SHA-256 equals `sdk.lock.compiler_digest`.
 This gate proves compiler identity and record-graph invocation. It does not by
 itself prove candidate source, artifact, lifecycle records, installation, or
 runtime behavior; those remain separate AppSDK and project closeout gates.
+
+## Compiled Artifact Hash Contract
+
+`module.compiled.json` is emitted by the pinned AppSDK compiler and carries two
+different hash contracts. The top-level `artifact_hash` is the aggregate module
+identity validated by `appsdk verify`; lifecycle promotion, review, regression,
+freeze, and Active publication records bind this value. Each `artifacts[].hash`
+is the raw SHA-256 of that artifact's committed bytes. The web bundle entry must
+therefore equal the digest of
+`generated/modules/zterm-runtime-v2/lib/zterm-runtime-v2.web.tgz`. A gate checks
+both bindings so neither the aggregate identity nor the physical tgz can drift.

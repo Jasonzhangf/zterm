@@ -53,7 +53,7 @@ interface UseOpenTabLifecycleEffectsOptions {
   notifyTargetNetworkSignal: (
     signal: SessionTargetNetworkSignal,
   ) => void;
-  reportTargetNetworkProbeError?: (failure: SessionTargetNetworkProbeFailure) => void;
+  reportTargetNetworkProbeError: (failure: SessionTargetNetworkProbeFailure) => void;
   bumpFollowResetEpoch: () => void;
   /** Client network-generation owner. When present, platform network events and
    *  foreground resume are stamped with generation/fingerprint changes so the
@@ -170,11 +170,15 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
       sample = await runtime.resampleWithStatus({ connected, connectionType });
     } catch (error: unknown) {
       const snapshotError = projectNetworkIdentitySnapshotError(error);
-      if (!callbacksRef.current.reportTargetNetworkProbeError) {
-        throw new Error('client.daemon_connection native snapshot error owner is unavailable');
+      const reportTargetNetworkProbeError = callbacksRef.current.reportTargetNetworkProbeError;
+      if (reportTargetNetworkProbeError) {
+        reportTargetNetworkProbeError({
+          type: 'TargetNetworkProbeError04NativeSnapshot',
+          message: snapshotError.message,
+        });
+        return;
       }
-      callbacksRef.current.reportTargetNetworkProbeError({
-        type: 'TargetNetworkProbeError04NativeSnapshot',
+      runtimeDebug('app.network.identity.native-snapshot-error-owner-missing', {
         message: snapshotError.message,
       });
       return;

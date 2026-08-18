@@ -407,6 +407,47 @@ describe('function wiki truth gate', () => {
     }
   });
 
+  it('keeps the relay directory route adjacent and rendered in the mermaid source', () => {
+    const manifest = JSON.parse(read('docs/wiki/mainline-call-map.json')) as {
+      lifecycles: Array<{
+        lifecycle_id: string;
+        edges: Array<{ from: string; to: string }>;
+      }>;
+    };
+    const mainline = read('docs/wiki/mainline-source.md');
+    const renderedEdges = new Set(
+      Array.from(
+        mainline.matchAll(/^\s*([A-Za-z0-9_]+)(?:\[[^\n]*\])?\s*-->\s*([A-Za-z0-9_]+)/gm),
+        (match) => `${match[1]}->${match[2]}`,
+      ),
+    );
+    const androidMainline = manifest.lifecycles.find((lifecycle) => (
+      lifecycle.lifecycle_id === 'android_mainline'
+    ));
+
+    const relayDirectoryEdges = (androidMainline?.edges || []).filter((edge) => (
+      edge.from === 'RelayDirectoryProjection'
+      || edge.from === 'ClientControlPlaneTransport'
+      || edge.from === 'TransportTargetResolver'
+    ));
+    const expectedRelayDirectoryEdges = [
+      'RelayDirectoryProjection->ClientControlPlaneTransport',
+      'ClientControlPlaneTransport->TransportTargetResolver',
+      'TransportTargetResolver->TraversalSocketFactory',
+    ];
+
+    expect(relayDirectoryEdges.map((edge) => `${edge.from}->${edge.to}`)).toEqual(
+      expect.arrayContaining(expectedRelayDirectoryEdges),
+    );
+    expect(relayDirectoryEdges).not.toContainEqual({
+      from: 'RelayDirectoryProjection',
+      to: 'TraversalSocketFactory',
+    });
+    for (const renderedEdge of expectedRelayDirectoryEdges) {
+      expect(renderedEdges.has(renderedEdge), `${renderedEdge} must be in mainline-source.md`).toBe(true);
+    }
+  });
+
   it('keeps generated html offline and sourced from mermaid diagrams', () => {
     for (const file of ['daemon', 'cli', 'mainline-source', 'modules']) {
       const md = read(`docs/wiki/${file}.md`);
