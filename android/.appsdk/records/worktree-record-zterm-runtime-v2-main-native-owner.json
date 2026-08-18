@@ -6,7 +6,7 @@
   "base_ref": "main",
   "base_commit": "b941affb7c89021bb5662a7686fc52847a639e6c",
   "branch": "work/appsdk-active-v4-main-closeout-20260817T184155Z",
-  "head_commit": "c878d47e4de216b03da44e08b233b2f2cb08f0a0",
+  "head_commit": "d06a9b889f38c0ac5d4670791561b5b6f2114708",
   "initial_clean": true,
   "final_clean": true,
   "isolation_mode": "isolated_worktree",
