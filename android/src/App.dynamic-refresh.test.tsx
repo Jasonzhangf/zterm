@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildConnectionConfigShareLink } from '@zterm/shared';
 import App from './App';
 import { STORAGE_KEYS } from './lib/types';
+import { createNetworkIdentityRuntime } from './lib/network-identity';
 
 function makeSession(id: string, revision: number) {
   return {
@@ -1566,6 +1567,23 @@ describe('App dynamic refresh matrix', () => {
       connectionType: 'unknown',
       source: 'window-online',
     });
+  });
+
+  it('projects an initial native snapshot failure into the transport error chain', async () => {
+    const networkIdentity = createNetworkIdentityRuntime();
+
+    render(
+      <AppContent
+        bridgeSettings={{ servers: [] } as any}
+        setBridgeSettings={vi.fn()}
+        networkIdentity={networkIdentity}
+      />,
+    );
+
+    await waitFor(() => expect(sessionHarness.notifyTargetNetworkSignal).toHaveBeenCalledWith({
+      source: 'native-snapshot-error',
+      message: 'NetworkIdentity native snapshot capability is not active',
+    }));
   });
 
   it('does not resume transports for online events while the app is hidden', async () => {

@@ -21,6 +21,18 @@ export function requireNativeNetworkInterfaces(
       "NetworkIdentity native snapshot returned invalid interfaces",
     );
   }
+  for (const entry of snapshot.interfaces) {
+    if (
+      !entry
+      || typeof entry.name !== 'string'
+      || typeof entry.addressesSignature !== 'string'
+      || typeof entry.vpn !== 'boolean'
+    ) {
+      throw new NetworkIdentitySnapshotError(
+        "NetworkIdentity native snapshot returned invalid interface entry",
+      );
+    }
+  }
   return snapshot.interfaces;
 }
 

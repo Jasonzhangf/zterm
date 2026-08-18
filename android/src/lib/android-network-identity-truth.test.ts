@@ -175,4 +175,15 @@ describe('Android network identity plugin', () => {
       }),
     ).toThrow('invalid interfaces');
   });
+
+  it.each([
+    [null],
+    [{ name: 1, addressesSignature: 'sig', vpn: false }],
+    [{ name: 'wlan0', addressesSignature: 1, vpn: false }],
+    [{ name: 'wlan0', addressesSignature: 'sig', vpn: 'false' }],
+  ])('rejects malformed native interface entry %j', (entry) => {
+    expect(() => requireNativeNetworkInterfaces({ interfaces: [entry] as never })).toThrow(
+      'invalid interface entry',
+    );
+  });
 });

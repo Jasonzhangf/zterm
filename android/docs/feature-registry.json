@@ -3225,6 +3225,7 @@
       "owners": [
         "src/plugins/NetworkIdentityPlugin.ts",
         "native/android/app/src/main/java/com/zterm/android/NetworkIdentityPlugin.java",
+        "src/lib/network-identity.ts",
         "src/lib/client-daemon-connection.ts"
       ],
       "allowed_paths": [
@@ -3256,6 +3257,10 @@
         "src/hooks/useOpenTabLifecycleEffects.ts",
         "src/lib/client-daemon-connection.ts",
         "src/lib/client-daemon-connection.test.ts"
+        ,
+        "src/lib/network-identity.test.ts",
+        "src/hooks/useOpenTabLifecycleEffects.test.tsx",
+        "src/App.dynamic-refresh.test.tsx"
       ],
       "forbidden_paths": [
         "src/server/",
@@ -3266,7 +3271,10 @@
         "src/lib/feature-registry-truth.test.ts",
         "src/contexts/session-context-target-network-probe-runtime.test.ts",
         "src/contexts/session-context-transport-orchestration-runtime.test.ts",
-        "src/lib/client-daemon-connection.test.ts"
+        "src/lib/client-daemon-connection.test.ts",
+        "src/lib/network-identity.test.ts",
+        "src/hooks/useOpenTabLifecycleEffects.test.tsx",
+        "src/App.dynamic-refresh.test.tsx"
       ],
       "truth_sources": [
         "docs/function-map.md",
