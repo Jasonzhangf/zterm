@@ -3215,6 +3215,50 @@
         "docs/debug/2026-08-16-appsdk013-final-gate-fix-design.md",
         "docs/goals/appsdk-0.1.3-active-v4-plan.md"
       ]
+    },
+    {
+      "feature_id": "client.android_connection_service",
+      "title": "Android client native connection service ownership",
+      "domain": "client-connection",
+      "owners": [
+        "src/lib/android-connection-service-commands.ts",
+        "src/lib/android-connection-service-snapshot.ts",
+        "src/plugins/AndroidConnectionServicePlugin.ts",
+        "src/contexts/android-connection-service-runtime.ts",
+        "docs/goals/connection-service-owner-migration-plan.md",
+        "docs/testing/connection-service-owner-test-design.md"
+      ],
+      "allowed_paths": [
+        "src/lib/android-connection-service-commands.ts",
+        "src/lib/android-connection-service-snapshot.ts",
+        "src/lib/android-connection-service-snapshot.test.ts",
+        "src/lib/android-connection-service-commands.test.ts",
+        "src/plugins/AndroidConnectionServicePlugin.ts",
+        "src/plugins/AndroidConnectionServicePlugin.test.ts",
+        "src/contexts/android-connection-service-runtime.ts",
+        "src/contexts/android-connection-service-runtime.test.ts",
+        "native/android/app/src/main/java/com/zterm/android/AndroidConnectionService.java",
+        "native/android/app/src/main/java/com/zterm/android/AndroidConnectionServicePlugin.java",
+        "docs/goals/connection-service-owner-migration-plan.md",
+        "docs/testing/connection-service-owner-test-design.md",
+        "docs/function-map.md"
+      ],
+      "forbidden_paths": [
+        "src/components/TerminalView.tsx"
+      ],
+      "required_gates": [
+        "docs/testing/connection-service-owner-test-design.md",
+        "src/lib/android-connection-service-snapshot.test.ts",
+        "src/lib/android-connection-service-commands.test.ts",
+        "src/plugins/AndroidConnectionServicePlugin.test.ts",
+        "src/contexts/android-connection-service-runtime.test.ts",
+        "src/lib/feature-registry-truth.test.ts"
+      ],
+      "truth_sources": [
+        "docs/goals/connection-service-owner-migration-plan.md",
+        "docs/testing/connection-service-owner-test-design.md",
+        "docs/function-map.md"
+      ]
     }
   ]
 }

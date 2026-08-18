@@ -1,6 +1,8 @@
 import { buildEmptyScheduleState } from '@zterm/shared';
 import { DEFAULT_TERMINAL_CACHE_LINES, resolveTerminalRequestWindowLines } from '../lib/mobile-config';
 import type { BridgeSettings } from '../lib/bridge-settings';
+import { Capacitor } from '@capacitor/core';
+import { openAndroidConnectionServiceTransportSocket } from '../lib/android-connection-service-factory';
 import { resolveTraversalConfigFromHost } from '../lib/traversal/config';
 import { createClientDaemonTraversalSocket } from '../lib/client-daemon-connection';
 import {
@@ -8,6 +10,7 @@ import {
   mergeHostWithClientControlDirectory,
 } from '../lib/client-control-directory-runtime';
 import { ClientControlPlaneTransport } from '../lib/client-control-plane-transport';
+
 import type { NetworkIdentityRuntime } from '../lib/network-identity';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
 import type { SessionHeartbeatStore } from '../lib/session-heartbeat-store';
@@ -385,6 +388,7 @@ export function shouldUseLegacyWsOverrideForHostRuntime(host: Host) {
   return !hasRelayRtcEndpointCandidate(host);
 }
 
+
 export function buildTraversalSocketForHostRuntime(options: {
   host: Host;
   bridgeSettings: BridgeSettings;
@@ -394,21 +398,23 @@ export function buildTraversalSocketForHostRuntime(options: {
    *  across WiFi/cellular/VPN/IP changes. */
   networkIdentity?: NetworkIdentityRuntime;
 }) {
+  if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
+    // Android: physical connection is owned by AndroidConnectionService (native).
+    // JS layer receives a projected socket. No JS WebSocket, heartbeat, or reconnect.
+    return openAndroidConnectionServiceTransportSocket(options.host, options.transportRole || 'session');
+  }
+
   const openConfirmedTransport = () => {
     const resolvedHost = mergeHostWithClientControlDirectory(
       options.host,
       defaultClientControlDirectoryRuntime,
     );
-    // 保留成功连接过的直连字段作为兜底候选：目录 endpoints 优先（带最新 authToken），
-    // host 直连 IP 兜底——网络切换后 daemon 侧 IP 未变时，旧直连 IP 仍可恢复连接，
-    // 不因目录 entry 存在而丢弃（buildTraversalPlan 按 endpoint 去重，目录候选先打）。
-    const transportHost = resolvedHost;
     const confirmedRelaySettings = defaultClientControlDirectoryRuntime.readRelaySettings();
-    const traversal = resolveTraversalConfigFromHost(transportHost, confirmedRelaySettings
+    const traversal = resolveTraversalConfigFromHost(resolvedHost, confirmedRelaySettings
       ? { ...options.bridgeSettings, traversalRelay: confirmedRelaySettings }
       : options.bridgeSettings);
     const overrideUrl = (() => {
-      if (!options.wsUrl || !shouldUseLegacyWsOverrideForHostRuntime(transportHost)) {
+      if (!options.wsUrl || !shouldUseLegacyWsOverrideForHostRuntime(resolvedHost)) {
         return undefined;
       }
       try {
@@ -424,7 +430,7 @@ export function buildTraversalSocketForHostRuntime(options: {
       autoReconnect: false,
       routeHealthScope: {
         accountId: options.bridgeSettings.traversalRelay?.userId,
-        daemonHostId: transportHost.daemonHostId?.trim() || transportHost.relayHostId?.trim(),
+        daemonHostId: resolvedHost.daemonHostId?.trim() || resolvedHost.relayHostId?.trim(),
         networkGeneration: options.networkIdentity?.readGeneration(),
       },
     });
