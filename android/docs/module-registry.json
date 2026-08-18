@@ -3285,6 +3285,8 @@
       "owned_paths": [
         "src/lib/android-connection-service-commands.ts",
         "src/lib/android-connection-service-snapshot.ts",
+        "src/lib/android-connection-service-factory.ts",
+        "src/lib/android-connection-service-socket.ts",
         "src/plugins/AndroidConnectionServicePlugin.ts",
         "src/contexts/android-connection-service-runtime.ts",
         "native/android/app/src/main/java/com/zterm/android/AndroidConnectionService.java",

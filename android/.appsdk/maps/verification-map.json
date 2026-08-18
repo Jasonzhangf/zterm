@@ -56,6 +56,6 @@
     {"gate_id":"source_to_dom","command":"pnpm run daemon:mirror:close-loop","required_for":["data_plane","runtime_closeout"]},
     {"gate_id":"vcs_clean","command":"appsdk verify .","required_for":["freeze"]},
     {"gate_id":"regression_report","command":"appsdk verify .","required_for":["freeze","frozen_integrity"]},
-    {"gate_id":"connection_service_owner","command":"pnpm run test:android-connection-service && pnpm run test:transport-network-lifecycle && pnpm run test:feature-registry","required_for":["implementation","review","promotion"],"status":"design","binding_paths":["docs/testing/connection-service-owner-test-design.md","package.json"]}
+    {"gate_id":"connection_service_owner","command":"pnpm run test:android-connection-service && pnpm run test:transport-network-lifecycle && pnpm run test:feature-registry && pnpm run type-check && pnpm --dir native/android ./gradlew :app:testDebugUnitTest :app:compileDebugJavaWithJavac","required_for":["implementation","review","promotion"],"status":"active","binding_paths":["docs/testing/connection-service-owner-test-design.md","package.json","native/android/app/src/test/java/com/zterm/android/AndroidConnectionStateMachineTest.java"]}
   ]
 }

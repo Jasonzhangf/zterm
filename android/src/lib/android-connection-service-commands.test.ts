@@ -21,7 +21,11 @@ describe('Android connection service control contract', () => {
           authToken: 'token',
         },
       },
-      { type: 'release-target', reason: 'user-closed' },
+      {
+        type: 'release-target',
+        targetKey: 'daemon:mac-studio',
+        reason: 'user-closed',
+      },
     ];
 
     for (const command of commands) {
@@ -38,6 +42,49 @@ describe('Android connection service control contract', () => {
       type: 'notify-target-network-signal',
       fingerprintChanged: true,
     })).toThrow(/unsupported Android connection service command/);
+  });
+
+  it('requires target identity for every channel command', () => {
+    const commands: AndroidConnectionCommand[] = [
+      {
+        type: 'open-channel',
+        targetKey: 'daemon:mac-studio',
+        channelId: 'channel-1',
+        sessionName: 'shell',
+      },
+      {
+        type: 'channel-message',
+        targetKey: 'daemon:mac-studio',
+        channelId: 'channel-1',
+        message: { type: 'ping' },
+      },
+      {
+        type: 'channel-binary',
+        targetKey: 'daemon:mac-studio',
+        channelId: 'channel-1',
+        dataBase64: 'AQI=',
+      },
+      {
+        type: 'close-channel',
+        targetKey: 'daemon:mac-studio',
+        channelId: 'channel-1',
+        reason: 'user-close',
+      },
+    ];
+
+    for (const command of commands) {
+      expect(parseAndroidConnectionCommand(command)).toEqual(command);
+    }
+
+    expect(() => parseAndroidConnectionCommand({
+      type: 'open-channel',
+      channelId: 'channel-1',
+      sessionName: 'shell',
+    })).toThrow(/channel open command/);
+    expect(() => parseAndroidConnectionCommand({
+      type: 'release-target',
+      reason: 'user-closed',
+    })).toThrow(/release target/);
   });
 
   it('keeps service control separate from terminal business payloads', () => {

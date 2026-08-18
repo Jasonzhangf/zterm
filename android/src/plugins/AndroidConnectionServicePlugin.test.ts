@@ -54,7 +54,11 @@ describe('AndroidConnectionServicePlugin', () => {
           authToken: 'token',
         },
       },
-      { type: 'release-target', reason: 'user-close' },
+      {
+        type: 'release-target',
+        targetKey: 'daemon:mac-studio',
+        reason: 'user-close',
+      },
     ];
 
     for (const command of commands) {
@@ -72,7 +76,10 @@ describe('AndroidConnectionServicePlugin', () => {
         targetKey: 'daemon:mac-studio',
       }),
     }));
-    expect(pluginCalls.releaseTarget).toHaveBeenCalledWith({ reason: 'user-close' });
+    expect(pluginCalls.releaseTarget).toHaveBeenCalledWith({
+      targetKey: 'daemon:mac-studio',
+      reason: 'user-close',
+    });
   });
 
   it('never schedules JS heartbeat/reconnect timers or calls evaluateJavascript', () => {
@@ -85,22 +92,26 @@ describe('AndroidConnectionServicePlugin', () => {
   it('keeps channel business messages on typed service commands', () => {
     sendAndroidConnectionCommand({
       type: 'open-channel',
+      targetKey: 'daemon:mac-studio',
       channelId: 'channel-1',
       sessionName: 'shell',
       options: { cols: 80, rows: 24 },
     });
     sendAndroidConnectionCommand({
       type: 'channel-message',
+      targetKey: 'daemon:mac-studio',
       channelId: 'channel-1',
       message: { type: 'buffer-sync-request', payload: { startIndex: 0, endIndex: 10 } },
     });
     sendAndroidConnectionCommand({
       type: 'channel-binary',
+      targetKey: 'daemon:mac-studio',
       channelId: 'channel-1',
       dataBase64: 'AQI=',
     });
     sendAndroidConnectionCommand({
       type: 'close-channel',
+      targetKey: 'daemon:mac-studio',
       channelId: 'channel-1',
       reason: 'user-close',
     });
@@ -112,13 +123,48 @@ describe('AndroidConnectionServicePlugin', () => {
     }));
     expect(pluginCalls.sendChannelBinary).toHaveBeenCalledWith({
       type: 'channel-binary',
+      targetKey: 'daemon:mac-studio',
       channelId: 'channel-1',
       dataBase64: 'AQI=',
     });
     expect(pluginCalls.closeChannel).toHaveBeenCalledWith({
       type: 'close-channel',
+      targetKey: 'daemon:mac-studio',
       channelId: 'channel-1',
       reason: 'user-close',
+    });
+  });
+
+  it('requires target identity when releasing a target', () => {
+    expect(() => sendAndroidConnectionCommand({
+      type: 'release-target',
+      reason: 'user-close',
+    } as never)).toThrow(/release target/);
+  });
+
+  it('reads snapshots through the target-scoped service projection', async () => {
+    pluginCalls.readSnapshot.mockResolvedValue({
+      state: 'healthy',
+      generation: 'g1',
+      target: {
+        targetKey: 'daemon:mac-studio',
+        bridgeHost: '100.66.1.82',
+        bridgePort: 3333,
+      },
+      route: { mode: 'auto' },
+      channels: [],
+      lastHeartbeatAt: 10,
+      lastActivityAt: 10,
+      nextRetryAt: null,
+      error: null,
+    });
+
+    const { readAndroidConnectionServiceSnapshot } = await import('./AndroidConnectionServicePlugin');
+    await expect(readAndroidConnectionServiceSnapshot('daemon:mac-studio')).resolves.toMatchObject({
+      target: { targetKey: 'daemon:mac-studio' },
+    });
+    expect(pluginCalls.readSnapshot).toHaveBeenCalledWith({
+      targetKey: 'daemon:mac-studio',
     });
   });
 });

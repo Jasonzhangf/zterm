@@ -10,6 +10,7 @@ import type {
 import type { AndroidConnectionServiceSnapshot } from '../lib/android-connection-service-snapshot';
 
 export interface AndroidConnectionServiceServerFrame {
+  targetKey: string;
   type: 'mux-ready' | 'mux-target-message' | 'mux-pong' | 'mux-error';
   generation: string;
   receivedAt: number;
@@ -17,6 +18,7 @@ export interface AndroidConnectionServiceServerFrame {
 }
 
 export interface AndroidConnectionServiceChannelMessage {
+  targetKey: string;
   generation: string;
   channelId: string;
   message: Record<string, unknown>;
@@ -26,17 +28,20 @@ export interface AndroidConnectionServiceErrorEvent {
   kind: 'command-rejected' | 'physical-error';
   errorCode: string;
   errorMessage: string;
+  targetKey?: string;
   command?: Record<string, unknown>;
 }
 
 export interface AndroidConnectionServiceChannelOpenedEvent {
   kind: 'channel-opened';
+  targetKey: string;
   channelId: string;
   snapshot: AndroidConnectionServiceSnapshot;
 }
 
 export interface AndroidConnectionServiceChannelClosedEvent {
   kind: 'channel-closed';
+  targetKey: string;
   channelId: string;
 }
 
@@ -52,12 +57,12 @@ export type AndroidConnectionServiceListenerMap = {
 interface AndroidConnectionServiceNativePlugin {
   setManualRoutePolicy(options: { policy: AndroidConnectionServiceRoutePolicy }): Promise<{ ok: boolean }>;
   bindTarget(options: { target: AndroidConnectionServiceTarget }): Promise<{ ok: boolean }>;
-  releaseTarget(options: { reason: string }): Promise<{ ok: boolean }>;
-  openChannel(options: { channelId: string; sessionName: string; options?: Record<string, unknown> }): Promise<{ ok: boolean }>;
-  sendChannelMessage(options: { channelId: string; message: Record<string, unknown> }): Promise<{ ok: boolean }>;
-  sendChannelBinary(options: { channelId: string; dataBase64: string }): Promise<{ ok: boolean }>;
-  closeChannel(options: { channelId: string; reason: string }): Promise<{ ok: boolean }>;
-  readSnapshot(): Promise<AndroidConnectionServiceSnapshot>;
+  releaseTarget(options: { targetKey: string; reason: string }): Promise<{ ok: boolean }>;
+  openChannel(options: { targetKey: string; channelId: string; sessionName: string; options?: Record<string, unknown> }): Promise<{ ok: boolean }>;
+  sendChannelMessage(options: { targetKey: string; channelId: string; message: Record<string, unknown> }): Promise<{ ok: boolean }>;
+  sendChannelBinary(options: { targetKey: string; channelId: string; dataBase64: string }): Promise<{ ok: boolean }>;
+  closeChannel(options: { targetKey: string; channelId: string; reason: string }): Promise<{ ok: boolean }>;
+  readSnapshot(options: { targetKey: string }): Promise<AndroidConnectionServiceSnapshot>;
   addListener<EventName extends keyof AndroidConnectionServiceListenerMap>(
     eventName: EventName,
     listenerFunc: (event: AndroidConnectionServiceListenerMap[EventName]) => void,
@@ -102,7 +107,10 @@ export function sendAndroidConnectionCommand(command: AndroidConnectionCommand):
     case 'bind-target':
       return AndroidConnectionService.bindTarget({ target: parsed.target });
     case 'release-target':
-      return AndroidConnectionService.releaseTarget({ reason: parsed.reason });
+      return AndroidConnectionService.releaseTarget({
+        targetKey: parsed.targetKey,
+        reason: parsed.reason,
+      });
     case 'open-channel':
       return AndroidConnectionService.openChannel(parsed);
     case 'channel-message':
@@ -116,8 +124,10 @@ export function sendAndroidConnectionCommand(command: AndroidConnectionCommand):
 
 export const AndroidConnectionServicePlugin = AndroidConnectionService;
 
-export async function readAndroidConnectionServiceSnapshot(): Promise<AndroidConnectionServiceSnapshot> {
-  return AndroidConnectionService.readSnapshot();
+export async function readAndroidConnectionServiceSnapshot(
+  targetKey: string,
+): Promise<AndroidConnectionServiceSnapshot> {
+  return AndroidConnectionService.readSnapshot({ targetKey });
 }
 
 export function addAndroidConnectionServiceListener<EventName extends keyof AndroidConnectionServiceListenerMap>(

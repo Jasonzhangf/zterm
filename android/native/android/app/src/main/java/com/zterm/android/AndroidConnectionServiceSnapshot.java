@@ -94,6 +94,10 @@ public final class AndroidConnectionServiceSnapshot {
         return new Builder(State.IDLE).build();
     }
 
+    public static AndroidConnectionServiceSnapshot emptyForTarget(AndroidConnectionServiceTarget target) {
+        return new Builder(State.IDLE).target(target).build();
+    }
+
     public Builder toBuilder() {
         return new Builder(state)
             .generation(generation)

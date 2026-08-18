@@ -41,9 +41,6 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
     if (this.disposed) {
       throw new Error('AndroidConnectionServiceTransportSocket is disposed');
     }
-    const snapshot = await readAndroidConnectionServiceSnapshot();
-    this.applySnapshot(snapshot);
-
     const handles = await Promise.all([
       addAndroidConnectionServiceListener('androidConnectionSnapshot', (snapshot) => {
         if (this.disposed) {
@@ -77,6 +74,8 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
       }),
     ]);
     this.removeListeners.push(...handles.map((handle) => () => handle.remove()));
+    const snapshot = await readAndroidConnectionServiceSnapshot(this.targetKey);
+    this.applySnapshot(snapshot);
   }
 
   send(data: string | ArrayBuffer): void {
@@ -102,7 +101,7 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
       this.reportFailure(`unsupported terminal channel frame: ${parsed.type}`, { authFailure: false });
       return;
     }
-    void sendAndroidConnectionCommand(command);
+    void sendAndroidConnectionCommand({ ...command, targetKey: this.targetKey });
   }
 
   close(_code?: number, _reason?: string): void {
@@ -138,7 +137,6 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
   private applySnapshot(snapshot: AndroidConnectionServiceSnapshot) {
     const isThisTarget = snapshot.target?.targetKey === this.targetKey;
     if (!isThisTarget) {
-      this.readyState = WebSocket.CLOSED;
       return;
     }
     if (snapshot.state === 'mux-ready' || snapshot.state === 'channels-ready' || snapshot.state === 'healthy') {
@@ -160,7 +158,7 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
   }
 
   private dispatchServerFrame(frame: AndroidConnectionServiceServerFrame) {
-    if (this.disposed || this.readyState !== WebSocket.OPEN) {
+    if (this.disposed || frame.targetKey !== this.targetKey || this.readyState !== WebSocket.OPEN) {
       return;
     }
     this.onmessage?.({
@@ -172,7 +170,7 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
   }
 
   private dispatchChannelOpened(event: AndroidConnectionServiceChannelOpenedEvent) {
-    if (this.disposed) {
+    if (this.disposed || event.targetKey !== this.targetKey) {
       return;
     }
     if (this.readyState !== WebSocket.OPEN) {
@@ -191,7 +189,7 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
   }
 
   private dispatchChannelMessage(event: AndroidConnectionServiceChannelMessage) {
-    if (this.disposed || this.readyState !== WebSocket.OPEN) {
+    if (this.disposed || event.targetKey !== this.targetKey || this.readyState !== WebSocket.OPEN) {
       return;
     }
     this.onmessage?.({
@@ -206,7 +204,7 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
   }
 
   private dispatchChannelClosed(event: AndroidConnectionServiceChannelClosedEvent) {
-    if (this.disposed) {
+    if (this.disposed || event.targetKey !== this.targetKey) {
       return;
     }
     this.onmessage?.({

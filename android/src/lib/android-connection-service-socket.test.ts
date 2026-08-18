@@ -7,7 +7,7 @@ const plugin = vi.hoisted(() => ({
 }));
 
 vi.mock('../plugins/AndroidConnectionServicePlugin', () => ({
-  readAndroidConnectionServiceSnapshot: () => plugin.readSnapshot(),
+  readAndroidConnectionServiceSnapshot: (targetKey: string) => plugin.readSnapshot(targetKey),
   addAndroidConnectionServiceListener: (eventName: string, callback: (event: unknown) => void) => (
     plugin.addListener(eventName, callback)
   ),
@@ -76,6 +76,16 @@ describe('AndroidConnectionServiceTransportSocket', () => {
     expect(socket.readyState).toBe(WebSocket.OPEN);
   });
 
+  it('reads the initial snapshot for its own target', async () => {
+    const { add } = listenerMock();
+    plugin.addListener.mockImplementation(add);
+    const socket = new AndroidConnectionServiceTransportSocket(target, 'shell');
+
+    await socket.start();
+
+    expect(plugin.readSnapshot).toHaveBeenCalledWith('daemon:mac-studio');
+  });
+
   it('maps channel frames to typed service commands without owning transport', () => {
     const socket = new AndroidConnectionServiceTransportSocket(target, 'shell');
     socket.send(JSON.stringify({
@@ -87,12 +97,47 @@ describe('AndroidConnectionServiceTransportSocket', () => {
     }));
     expect(plugin.sendCommand).toHaveBeenCalledWith({
       type: 'channel-message',
+      targetKey: 'daemon:mac-studio',
       channelId: 'channel-1',
       message: expect.objectContaining({ type: 'buffer-sync-request' }),
     });
     expect(plugin.sendCommand).not.toHaveBeenCalledWith(expect.objectContaining({
       type: 'bind-target',
     }));
+  });
+
+  it('ignores events projected for a different target', async () => {
+    const { listeners, add } = listenerMock();
+    plugin.addListener.mockImplementation(add);
+    const socket = new AndroidConnectionServiceTransportSocket(target, 'shell');
+    const opened = vi.fn();
+    socket.onopen = opened;
+
+    await socket.start();
+    listeners.get('androidConnectionSnapshot')?.({
+      state: 'mux-ready',
+      generation: 'other-generation',
+      target: {
+        ...target,
+        targetKey: 'daemon:other',
+      },
+      route: { mode: 'auto' },
+      channels: [],
+      lastHeartbeatAt: null,
+      lastActivityAt: 2,
+      nextRetryAt: null,
+      error: null,
+    });
+    listeners.get('androidConnectionServerFrame')?.({
+      targetKey: 'daemon:other',
+      type: 'mux-ready',
+      generation: 'other-generation',
+      receivedAt: 2,
+      payload: {},
+    });
+
+    expect(opened).not.toHaveBeenCalled();
+    expect(socket.readyState).toBe(WebSocket.CONNECTING);
   });
 
   it('routes auth terminal errors as close events instead of scheduling reconnect', async () => {

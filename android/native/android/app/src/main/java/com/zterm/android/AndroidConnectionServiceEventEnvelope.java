@@ -23,6 +23,7 @@ public final class AndroidConnectionServiceEventEnvelope {
     public final AndroidConnectionCommand rejectedCommand;
     public final String errorCode;
     public final String errorMessage;
+    public final String targetKey;
     public final String channelId;
     public final AndroidConnectionServiceServerFrameEvent serverFrame;
     public final AndroidConnectionServiceChannelMessageEvent channelMessage;
@@ -33,6 +34,7 @@ public final class AndroidConnectionServiceEventEnvelope {
         this.rejectedCommand = b.rejectedCommand;
         this.errorCode = b.errorCode;
         this.errorMessage = b.errorMessage;
+        this.targetKey = b.targetKey;
         this.channelId = b.channelId;
         this.serverFrame = b.serverFrame;
         this.channelMessage = b.channelMessage;
@@ -41,6 +43,9 @@ public final class AndroidConnectionServiceEventEnvelope {
     public JSONObject toJson() throws JSONException {
         JSONObject json = new JSONObject();
         json.put("kind", kind.wireName());
+        if (targetKey != null && !targetKey.trim().isEmpty()) {
+            json.put("targetKey", targetKey);
+        }
         switch (kind) {
             case STATE_CHANGED:
                 json.put("snapshot", snapshot == null ? JSONObject.NULL : snapshot.toJson());
@@ -78,6 +83,7 @@ public final class AndroidConnectionServiceEventEnvelope {
     public static AndroidConnectionServiceEventEnvelope commandRejected(
         AndroidConnectionCommand command, String errorCode, String errorMessage) {
         return new Builder(Kind.COMMAND_REJECTED).rejectedCommand(command)
+            .targetKey(command == null ? null : command.targetKey)
             .errorCode(errorCode).errorMessage(errorMessage).build();
     }
 
@@ -86,12 +92,13 @@ public final class AndroidConnectionServiceEventEnvelope {
     }
 
     public static AndroidConnectionServiceEventEnvelope channelOpened(
-        String channelId, AndroidConnectionServiceSnapshot snapshot) {
-        return new Builder(Kind.CHANNEL_OPENED).channelId(channelId).snapshot(snapshot).build();
+        String targetKey, String channelId, AndroidConnectionServiceSnapshot snapshot) {
+        return new Builder(Kind.CHANNEL_OPENED).targetKey(targetKey).channelId(channelId)
+            .snapshot(snapshot).build();
     }
 
-    public static AndroidConnectionServiceEventEnvelope channelClosed(String channelId) {
-        return new Builder(Kind.CHANNEL_CLOSED).channelId(channelId).build();
+    public static AndroidConnectionServiceEventEnvelope channelClosed(String targetKey, String channelId) {
+        return new Builder(Kind.CHANNEL_CLOSED).targetKey(targetKey).channelId(channelId).build();
     }
 
     public static AndroidConnectionServiceEventEnvelope serverFrame(AndroidConnectionServiceServerFrameEvent frame) {
@@ -108,6 +115,7 @@ public final class AndroidConnectionServiceEventEnvelope {
         private AndroidConnectionCommand rejectedCommand;
         private String errorCode;
         private String errorMessage;
+        private String targetKey;
         private String channelId;
         private AndroidConnectionServiceServerFrameEvent serverFrame;
         private AndroidConnectionServiceChannelMessageEvent channelMessage;
@@ -117,6 +125,7 @@ public final class AndroidConnectionServiceEventEnvelope {
         public Builder rejectedCommand(AndroidConnectionCommand v) { this.rejectedCommand = v; return this; }
         public Builder errorCode(String v) { this.errorCode = v; return this; }
         public Builder errorMessage(String v) { this.errorMessage = v; return this; }
+        public Builder targetKey(String v) { this.targetKey = v; return this; }
         public Builder channelId(String v) { this.channelId = v; return this; }
         public Builder serverFrame(AndroidConnectionServiceServerFrameEvent v) { this.serverFrame = v; return this; }
         public Builder channelMessage(AndroidConnectionServiceChannelMessageEvent v) { this.channelMessage = v; return this; }
@@ -130,6 +139,9 @@ public final class AndroidConnectionServiceEventEnvelope {
                     break;
                 case CHANNEL_OPENED:
                 case CHANNEL_CLOSED:
+                    if (targetKey == null || targetKey.trim().isEmpty()) {
+                        throw new IllegalArgumentException(kind.wireName() + " targetKey required");
+                    }
                     if (channelId == null || channelId.trim().isEmpty()) {
                         throw new IllegalArgumentException(kind.wireName() + " channelId required");
                     }

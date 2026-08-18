@@ -38,7 +38,7 @@ Foreground/background, pause/resume, visibility change, app state change, Activi
 
 ## 2. Current Root Cause
 
-The current implementation is still:
+The pre-migration implementation was:
 
 ```text
 BackgroundService
@@ -48,7 +48,7 @@ BackgroundService
   -> SessionContext WebSocket/heartbeat/reconnect
 ```
 
-The first divergence is `BackgroundService.java` + `BackgroundServicePlugin.ts` treating the WebView as the transport keepalive owner. Android timers wake JS, and JS owns socket, route, heartbeat, network validation, generation, and reconnect. This fails Jason's requirement because:
+The first divergence was `BackgroundService.java` + `BackgroundServicePlugin.ts` treating the WebView as the transport keepalive owner. This slice removes that owner and moves the native WebSocket path into `AndroidConnectionService`; desired-state persistence and native WebRTC/Relay media ownership remain separate pending slices.
 
 - Background return depends on WebView renderer survival.
 - Activity/WebView recreation can break a physical transport that should stay owned by the process.

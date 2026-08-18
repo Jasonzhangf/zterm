@@ -5,13 +5,6 @@ import { shouldResumeForeground } from '@zterm/shared/terminal/foreground-resume
 import { SESSION_STATUS_EVENT } from '../contexts/SessionContext';
 import { createForegroundRefreshRuntime, markForegroundRuntimeHidden } from '../lib/app-foreground-refresh';
 import { runtimeDebug } from '../lib/runtime-debug';
-import {
-  startBackgroundService,
-  stopBackgroundService,
-  updateSessionCount,
-  setBackgroundHeartbeatCallback,
-  recordBackgroundHeartbeat,
-} from '../plugins/BackgroundServicePlugin';
 import type { Session } from '../lib/types';
 import type { NetworkIdentityRuntime } from '../lib/network-identity';
 import type { SessionTargetNetworkSignal } from '../contexts/session-context-target-network-probe-runtime';
@@ -39,7 +32,6 @@ interface UseOpenTabLifecycleEffectsOptions {
     activeSessionId: string | null;
   }>;
   foregroundRefreshRuntimeRef: MutableRefObject<ReturnType<typeof createForegroundRefreshRuntime>>;
-  retainedSessionCount: number;
   onForegroundActiveChange?: (active: boolean) => void;
   onForegroundResume?: (reason: ForegroundResumeSignalReason) => void;
   lastBackgroundEnteredAtRef?: MutableRefObject<Map<string, number>>;
@@ -55,8 +47,6 @@ interface UseOpenTabLifecycleEffectsOptions {
    *  foreground resume are stamped with generation/fingerprint changes so the
    *  transport owner can retire stale physical transports immediately. */
   networkIdentity?: NetworkIdentityRuntime;
-  /** 后台心跳发送接口 */
-  sendBackgroundHeartbeat?: () => void;
 }
 
 export function useBackgroundLiveSessionHandoff(options: {
@@ -111,7 +101,6 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
     sessionsRef,
     openTabStateRef,
     foregroundRefreshRuntimeRef,
-    retainedSessionCount,
     onForegroundActiveChange,
     onForegroundResume,
     auditOpenTabsAgainstRemoteSessions,
@@ -136,7 +125,6 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
     bumpFollowResetEpoch,
     networkIdentity,
   };
-  const nativeBackgroundServiceRunningRef = useRef(false);
   // Foreground-resume path: re-read the platform status + local interfaces so a
   // network change that happened while hidden (and whose event was dropped) is
   // recovered as a generation change. The immediate same-generation signal is
@@ -234,53 +222,6 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
       callbacksRef.current.onForegroundActiveChange?.(active);
     };
 
-    const countRetainedSessions = () => (
-      sessionsRef.current.filter((session) => session.state !== 'closed').length
-    );
-
-    /**
-     * 后台心跳回调 - 定期发送 ping 保持连接活跃
-     */
-    const sendBackgroundHeartbeat = () => {
-      if (!options.sendBackgroundHeartbeat) {
-        return;
-      }
-      options.sendBackgroundHeartbeat();
-      recordBackgroundHeartbeat();
-      runtimeDebug('app.background.heartbeat.sent', {});
-    };
-    const startNativeBackgroundService = () => {
-      const sessionCount = countRetainedSessions();
-      if (sessionCount <= 0) {
-        if (nativeBackgroundServiceRunningRef.current) {
-          stopBackgroundService();
-          setBackgroundHeartbeatCallback(null);
-          nativeBackgroundServiceRunningRef.current = false;
-        }
-        return;
-      }
-      if (nativeBackgroundServiceRunningRef.current) {
-        updateSessionCount(sessionCount);
-        return;
-      }
-      nativeBackgroundServiceRunningRef.current = true;
-      startBackgroundService(sessionCount);
-
-      runtimeDebug('app.background.service.start', {
-        sessionCount,
-        handoffWakeLockMs: BACKGROUND_HANDOFF_WAKE_LOCK_MS,
-        lifecycleOwner: 'retained-session-count',
-      });
-    };
-
-    const enableBackgroundHeartbeat = () => {
-      setBackgroundHeartbeatCallback(sendBackgroundHeartbeat);
-    };
-
-    const disableBackgroundHeartbeat = () => {
-      setBackgroundHeartbeatCallback(null);
-    };
-
     const markHidden = () => {
       markForegroundRuntimeHidden(foregroundRefreshRuntimeRef.current, document.visibilityState);
       projectForegroundActive(false);
@@ -300,8 +241,6 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
           options.lastBackgroundEnteredAtRef.current.set(session.id, now);
         }
       }
-      startNativeBackgroundService();
-      enableBackgroundHeartbeat();
     };
 
     const onVisibilityChange = () => {
@@ -316,14 +255,12 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
 
       if (document.visibilityState === 'visible' && foregroundRefreshRuntimeRef.current.wasHidden) {
         projectForegroundActive(true);
-        disableBackgroundHeartbeat();
         maybeProjectForegroundResume('visibilitychange');
       }
     };
 
     const onDocumentResume = () => {
       projectForegroundActive(true);
-      disableBackgroundHeartbeat();
       runtimeDebug('app.document.resume', {});
       maybeProjectForegroundResume('resume');
     };
@@ -380,7 +317,6 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
         return;
       }
       projectForegroundActive(true);
-      disableBackgroundHeartbeat();
       maybeProjectForegroundResume('appStateChange');
     });
 
@@ -410,40 +346,6 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
     maybeProjectForegroundResume,
     openTabStateRef,
   ]);
-
-  useEffect(() => () => {
-    if (!nativeBackgroundServiceRunningRef.current) {
-      return;
-    }
-    nativeBackgroundServiceRunningRef.current = false;
-    setBackgroundHeartbeatCallback(null);
-    stopBackgroundService();
-    runtimeDebug('app.background.service.stop.lifecycle-dispose', {});
-  }, []);
-
-  useEffect(() => {
-    if (retainedSessionCount <= 0) {
-      if (nativeBackgroundServiceRunningRef.current) {
-        nativeBackgroundServiceRunningRef.current = false;
-        setBackgroundHeartbeatCallback(null);
-        stopBackgroundService();
-        runtimeDebug('app.background.service.stop.empty', {});
-      }
-      return;
-    }
-    if (!nativeBackgroundServiceRunningRef.current) {
-      nativeBackgroundServiceRunningRef.current = true;
-      startBackgroundService(retainedSessionCount);
-      runtimeDebug('app.background.service.start.retained', {
-        sessionCount: retainedSessionCount,
-      });
-      return;
-    }
-    updateSessionCount(retainedSessionCount);
-    runtimeDebug('app.background.service.update', {
-      sessionCount: retainedSessionCount,
-    });
-  }, [retainedSessionCount, options.sendBackgroundHeartbeat]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {

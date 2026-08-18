@@ -7,6 +7,7 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
+import android.os.Binder;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
@@ -23,6 +24,7 @@ import org.json.JSONObject;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -85,12 +87,17 @@ public class AndroidConnectionService extends Service {
 
     private static final Object LISTENER_LOCK = new Object();
     private static final List<AndroidConnectionServiceListener> STATIC_LISTENERS = new ArrayList<>();
-    private static volatile AndroidConnectionServiceSnapshot LAST_SNAPSHOT = AndroidConnectionServiceSnapshot.empty();
+    private static final Map<String, AndroidConnectionServiceSnapshot> LAST_SNAPSHOTS =
+        new ConcurrentHashMap<>();
 
     private Handler workerHandler;
     private HandlerThread workerThread;
     private PowerManager.WakeLock wakeLock;
     private PowerManager powerManager;
+    private android.net.ConnectivityManager connectivityManager;
+    private android.net.ConnectivityManager.NetworkCallback networkCallback;
+    private android.net.Network activeDefaultNetwork;
+    private long networkGeneration;
     private OkHttpClient httpClient;
     private final Map<String, TargetRuntime> targets = new ConcurrentHashMap<>();
     private final Map<String, String> policyByTargetKey = new ConcurrentHashMap<>();
@@ -103,6 +110,9 @@ public class AndroidConnectionService extends Service {
         workerThread.start();
         workerHandler = new Handler(workerThread.getLooper());
         powerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
+        connectivityManager = (android.net.ConnectivityManager)
+            getSystemService(Context.CONNECTIVITY_SERVICE);
+        registerNetworkCallback();
         ensureNotificationChannel();
         httpClient = new OkHttpClient.Builder()
             .connectTimeout(12, TimeUnit.SECONDS)
@@ -110,7 +120,7 @@ public class AndroidConnectionService extends Service {
             .pingInterval(0, TimeUnit.MILLISECONDS)
             .build();
         clientInstanceId = "android-service-" + UUID.randomUUID();
-        publishSnapshot(AndroidConnectionServiceSnapshot.empty());
+        publishServiceIdle();
     }
 
     @Override
@@ -143,7 +153,8 @@ public class AndroidConnectionService extends Service {
             runtime.close("service-destroy");
         }
         targets.clear();
-        publishSnapshot(AndroidConnectionServiceSnapshot.empty());
+        unregisterNetworkCallback();
+        publishServiceIdle();
         releaseWakeLock();
         if (workerThread != null) {
             Looper looper = workerThread.getLooper();
@@ -157,7 +168,18 @@ public class AndroidConnectionService extends Service {
     @Nullable
     @Override
     public IBinder onBind(Intent intent) {
-        return null;
+        return new LocalBinder();
+    }
+
+    /**
+     * Binding is only the UI observer lifetime. The started service and its
+     * retained targets outlive this binder and are released only by an
+     * explicit release-target command.
+     */
+    public final class LocalBinder extends Binder {
+        public AndroidConnectionService getService() {
+            return AndroidConnectionService.this;
+        }
     }
 
     /** Typed entry used by the Capacitor plugin and tests. */
@@ -198,12 +220,18 @@ public class AndroidConnectionService extends Service {
                     break;
                 }
                 case ACTION_RELEASE: {
+                    String targetKey = intent.getStringExtra("targetKey");
                     String reason = intent.getStringExtra(EXTRA_REASON);
-                    if (reason == null || reason.trim().isEmpty()) {
-                        reason = "unspecified";
+                    if (targetKey == null || targetKey.trim().isEmpty()) {
+                        publishEvent(AndroidConnectionServiceEventEnvelope.physicalError(
+                            "invalid-command", "release with no target key"));
+                        return;
                     }
+                    if (reason == null || reason.trim().isEmpty()) reason = "unspecified";
+                    String releaseTargetKey = targetKey.trim();
                     String releaseReason = reason;
-                    postToWorker(() -> dispatch(AndroidConnectionCommand.releaseTarget(releaseReason)));
+                    postToWorker(() -> dispatch(
+                        AndroidConnectionCommand.releaseTarget(releaseTargetKey, releaseReason)));
                     break;
                 }
                 case ACTION_COMMAND: {
@@ -233,6 +261,80 @@ public class AndroidConnectionService extends Service {
         workerHandler.post(runnable);
     }
 
+    private void registerNetworkCallback() {
+        if (connectivityManager == null || networkCallback != null) {
+            return;
+        }
+        networkCallback = new android.net.ConnectivityManager.NetworkCallback() {
+            @Override
+            public void onAvailable(android.net.Network network) {
+                onDefaultNetworkAvailable(network);
+            }
+
+            @Override
+            public void onLost(android.net.Network network) {
+                onDefaultNetworkLost(network);
+            }
+
+            @Override
+            public void onCapabilitiesChanged(
+                android.net.Network network,
+                android.net.NetworkCapabilities capabilities) {
+                // Capability changes (validated, metered, bandwidth, VPN
+                // metadata) do not replace the physical default network.
+                // Rebuilding every target here caused healthy Relay sockets
+                // to reconnect during ordinary capability updates.
+            }
+        };
+        try {
+            connectivityManager.registerDefaultNetworkCallback(networkCallback, workerHandler);
+        } catch (RuntimeException error) {
+            Log.w(TAG, "network callback registration rejected: " + error.getMessage());
+            networkCallback = null;
+        }
+    }
+
+    private void unregisterNetworkCallback() {
+        if (connectivityManager == null || networkCallback == null) {
+            return;
+        }
+        try {
+            connectivityManager.unregisterNetworkCallback(networkCallback);
+        } catch (RuntimeException error) {
+            Log.w(TAG, "network callback unregister rejected: " + error.getMessage());
+        }
+        networkCallback = null;
+        activeDefaultNetwork = null;
+    }
+
+    private void onDefaultNetworkAvailable(android.net.Network network) {
+        postToWorker(() -> {
+            if (Objects.equals(activeDefaultNetwork, network)) {
+                return;
+            }
+            activeDefaultNetwork = network;
+            networkGeneration += 1L;
+            acquireWakeLock(10_000L);
+            for (TargetRuntime runtime : targets.values()) {
+                runtime.retireForNetworkChange("default-network-changed");
+            }
+        });
+    }
+
+    private void onDefaultNetworkLost(android.net.Network network) {
+        postToWorker(() -> {
+            if (!Objects.equals(activeDefaultNetwork, network)) {
+                return;
+            }
+            activeDefaultNetwork = null;
+            networkGeneration += 1L;
+            acquireWakeLock(10_000L);
+            for (TargetRuntime runtime : targets.values()) {
+                runtime.retireForNetworkChange("default-network-lost");
+            }
+        });
+    }
+
     private void dispatch(AndroidConnectionCommand command) {
         try {
             switch (command.type) {
@@ -243,7 +345,7 @@ public class AndroidConnectionService extends Service {
                     bindTarget(command.target);
                     break;
                 case RELEASE_TARGET:
-                    releaseTarget(command.reason);
+                    releaseTarget(command.targetKey, command.reason);
                     break;
                 case OPEN_CHANNEL:
                     handleOpenChannel(command);
@@ -305,7 +407,6 @@ public class AndroidConnectionService extends Service {
         AndroidConnectionServiceRoutePolicy policy = parsePolicyKey(policyKey);
         TargetRuntime runtime = new TargetRuntime(target, policy);
         targets.put(target.targetKey, runtime);
-        acquireWakeLock();
         runtime.startOrContinue();
     }
 
@@ -318,13 +419,27 @@ public class AndroidConnectionService extends Service {
         return null;
     }
 
-    private void releaseTarget(String reason) {
-        for (TargetRuntime runtime : targets.values()) {
-            runtime.close(reason);
+    private void releaseTarget(String targetKey, String reason) {
+        TargetRuntime runtime = targetRuntime(targetKey);
+        if (runtime == null) {
+            publishEvent(AndroidConnectionServiceEventEnvelope.physicalError(
+                "unknown-target", "release-target target is not bound"));
+            return;
         }
-        targets.clear();
-        releaseWakeLock();
-        publishSnapshot(AndroidConnectionServiceSnapshot.empty());
+        runtime.close(reason);
+        targets.remove(targetKey);
+        policyByTargetKey.remove(targetKey);
+        LAST_SNAPSHOTS.remove(targetKey);
+        if (targets.isEmpty()) {
+            releaseWakeLock();
+            publishServiceIdle();
+            stopForeground(true);
+            stopSelf();
+            return;
+        }
+        for (TargetRuntime candidate : targets.values()) {
+            publishSnapshot(candidate.snapshot());
+        }
     }
 
     private void rejectCommand(AndroidConnectionCommand command, String code, String message) {
@@ -332,16 +447,16 @@ public class AndroidConnectionService extends Service {
     }
 
     private void handleOpenChannel(AndroidConnectionCommand command) {
-        TargetRuntime runtime = soleTarget();
+        TargetRuntime runtime = targetRuntime(command.targetKey);
         if (runtime == null) {
-            rejectCommand(command, "unknown-target", "open-channel requires exactly one bound target");
+            rejectCommand(command, "unknown-target", "open-channel target is not bound");
             return;
         }
         runtime.sendChannelOpen(command);
     }
 
     private void handleChannelMessageCommand(AndroidConnectionCommand command) {
-        TargetRuntime runtime = soleTarget();
+        TargetRuntime runtime = targetRuntime(command.targetKey);
         if (runtime == null) {
             rejectCommand(command, "unknown-target", "channel command requires a bound target");
             return;
@@ -350,7 +465,7 @@ public class AndroidConnectionService extends Service {
     }
 
     private void handleChannelBinaryCommand(AndroidConnectionCommand command) {
-        TargetRuntime runtime = soleTarget();
+        TargetRuntime runtime = targetRuntime(command.targetKey);
         if (runtime == null) {
             rejectCommand(command, "unknown-target", "channel command requires a bound target");
             return;
@@ -359,7 +474,7 @@ public class AndroidConnectionService extends Service {
     }
 
     private void handleCloseChannel(AndroidConnectionCommand command) {
-        TargetRuntime runtime = soleTarget();
+        TargetRuntime runtime = targetRuntime(command.targetKey);
         if (runtime == null) {
             rejectCommand(command, "unknown-target", "close-channel requires a bound target");
             return;
@@ -367,11 +482,11 @@ public class AndroidConnectionService extends Service {
         runtime.sendCloseChannel(command);
     }
 
-    private TargetRuntime soleTarget() {
-        if (targets.size() != 1) {
+    private TargetRuntime targetRuntime(String targetKey) {
+        if (targetKey == null || targetKey.trim().isEmpty()) {
             return null;
         }
-        return targets.values().iterator().next();
+        return targets.get(targetKey.trim());
     }
 
     private static JSONObject buildBinaryFrame(String channelId, String channelDataBase64) {
@@ -407,8 +522,16 @@ public class AndroidConnectionService extends Service {
     }
 
     private void publishSnapshot(AndroidConnectionServiceSnapshot snapshot) {
-        LAST_SNAPSHOT = snapshot;
+        if (snapshot.target != null && snapshot.target.targetKey != null) {
+            LAST_SNAPSHOTS.put(snapshot.target.targetKey, snapshot);
+        }
         publishEvent(AndroidConnectionServiceEventEnvelope.stateChanged(snapshot));
+    }
+
+    private void publishServiceIdle() {
+        LAST_SNAPSHOTS.clear();
+        publishEvent(AndroidConnectionServiceEventEnvelope.stateChanged(
+            AndroidConnectionServiceSnapshot.empty()));
     }
 
     private void publishEvent(AndroidConnectionServiceEventEnvelope event) {
@@ -442,13 +565,13 @@ public class AndroidConnectionService extends Service {
         return new NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("zterm")
             .setContentText("连接服务运行中")
-            .setSmallIcon(android.R.drawable.ic_menu_manage)
+            .setSmallIcon(com.zterm.android.R.drawable.ic_notification_logo)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
             .build();
     }
 
-    private void acquireWakeLock() {
+    private void acquireWakeLock(long timeoutMs) {
         if (powerManager == null || wakeLock != null && wakeLock.isHeld()) {
             return;
         }
@@ -457,7 +580,7 @@ public class AndroidConnectionService extends Service {
                 PowerManager.PARTIAL_WAKE_LOCK,
                 getPackageName() + ":android-connection");
             wakeLock.setReferenceCounted(false);
-            wakeLock.acquire();
+            wakeLock.acquire(timeoutMs);
         } catch (RuntimeException error) {
             Log.w(TAG, "wake lock acquire rejected: " + error.getMessage());
             wakeLock = null;
@@ -487,7 +610,9 @@ public class AndroidConnectionService extends Service {
         volatile int heartbeatMisses;
         volatile long lastActivityAt;
         volatile long lastPingAt;
+        volatile long transportNetworkGeneration;
         volatile boolean stopped;
+        final Map<String, ChannelIntent> desiredChannels = new LinkedHashMap<>();
 
         TargetRuntime(AndroidConnectionServiceTarget target, AndroidConnectionServiceRoutePolicy routePolicy) {
             this.target = target;
@@ -537,6 +662,7 @@ public class AndroidConnectionService extends Service {
                 return;
             }
             generation = nextGeneration;
+            transportNetworkGeneration = networkGeneration;
             candidateIndex = 0;
             heartbeatMisses = 0;
             lastActivityAt = System.currentTimeMillis();
@@ -675,7 +801,8 @@ public class AndroidConnectionService extends Service {
 
         @Override
         public void onOpen(WebSocket webSocket, Response response) {
-            if (stopped || socket != webSocket || generation == null) {
+            if (stopped || socket != webSocket || generation == null
+                || transportNetworkGeneration != networkGeneration) {
                 closeQuietly(webSocket);
                 return;
             }
@@ -686,7 +813,8 @@ public class AndroidConnectionService extends Service {
 
         @Override
         public void onMessage(WebSocket webSocket, String text) {
-            if (stopped || socket != webSocket || generation == null) {
+            if (stopped || socket != webSocket || generation == null
+                || transportNetworkGeneration != networkGeneration) {
                 return;
             }
             try {
@@ -698,7 +826,8 @@ public class AndroidConnectionService extends Service {
 
         @Override
         public void onMessage(WebSocket webSocket, ByteString bytes) {
-            if (stopped || socket != webSocket || generation == null) {
+            if (stopped || socket != webSocket || generation == null
+                || transportNetworkGeneration != networkGeneration) {
                 return;
             }
             transportFailure("binary-server-frame-not-supported",
@@ -707,7 +836,7 @@ public class AndroidConnectionService extends Service {
 
         @Override
         public void onFailure(WebSocket webSocket, Throwable throwable, @Nullable Response response) {
-            if (stopped || socket != webSocket) {
+            if (stopped || socket != webSocket || transportNetworkGeneration != networkGeneration) {
                 return;
             }
             String message = throwable == null ? "websocket failure" : String.valueOf(throwable.getMessage());
@@ -724,7 +853,7 @@ public class AndroidConnectionService extends Service {
 
         @Override
         public void onClosed(WebSocket webSocket, int code, String reason) {
-            if (stopped || socket != webSocket) {
+            if (stopped || socket != webSocket || transportNetworkGeneration != networkGeneration) {
                 return;
             }
             String reasonText = reason == null ? "closed" : reason;
@@ -845,6 +974,7 @@ public class AndroidConnectionService extends Service {
             stateMachine.dispatch(AndroidConnectionServiceEvent.muxReady(generation),
                 System.currentTimeMillis());
             publishServerFrame(AndroidConnectionServiceServerFrameEvent.Kind.MUX_READY, payload);
+            replayDesiredChannels();
         }
 
         private void handleChannelOpened(JSONObject payload) throws JSONException {
@@ -855,7 +985,7 @@ public class AndroidConnectionService extends Service {
             stateMachine.dispatch(AndroidConnectionServiceEvent.channelOpened(
                 generation, channelId, System.currentTimeMillis()), System.currentTimeMillis());
             publishEvent(AndroidConnectionServiceEventEnvelope.channelOpened(
-                channelId, stateMachine.readSnapshot()));
+                target.targetKey, channelId, stateMachine.readSnapshot()));
             publishServerFrame(AndroidConnectionServiceServerFrameEvent.Kind.MUX_TARGET_MESSAGE,
                 payload);
         }
@@ -868,6 +998,7 @@ public class AndroidConnectionService extends Service {
             }
             publishEvent(AndroidConnectionServiceEventEnvelope.channelMessage(
                 new AndroidConnectionServiceChannelMessageEvent.Builder()
+                    .targetKey(target.targetKey)
                     .generation(generation)
                     .channelId(channelId)
                     .message(message)
@@ -882,7 +1013,7 @@ public class AndroidConnectionService extends Service {
             stateMachine.dispatch(AndroidConnectionServiceEvent.channelClosed(
                 generation, channelId, payload.optString("reason", "closed")),
                 System.currentTimeMillis());
-            publishEvent(AndroidConnectionServiceEventEnvelope.channelClosed(channelId));
+            publishEvent(AndroidConnectionServiceEventEnvelope.channelClosed(target.targetKey, channelId));
         }
 
         private void handleMuxError(JSONObject payload) {
@@ -911,7 +1042,8 @@ public class AndroidConnectionService extends Service {
 
         private void send(JSONObject frame) {
             WebSocket current = socket;
-            if (current == null || generation == null) {
+            if (current == null || generation == null
+                || transportNetworkGeneration != networkGeneration) {
                 return;
             }
             try {
@@ -925,16 +1057,25 @@ public class AndroidConnectionService extends Service {
         }
 
         void sendChannelOpen(AndroidConnectionCommand command) {
+            desiredChannels.put(command.channelId,
+                new ChannelIntent(command.channelId, command.sessionName, command.channelOptions));
+            if (!isMuxReady()) {
+                return;
+            }
+            sendChannelOpenFrame(command.channelId, command.sessionName, command.channelOptions);
+        }
+
+        private void sendChannelOpenFrame(String channelId, String sessionName, JSONObject options) {
             JSONObject frame = new JSONObject();
             try {
                 frame.put("type", "mux-channel-open");
                 JSONObject payload = new JSONObject();
-                payload.put("channelId", command.channelId);
-                payload.put("sessionName", command.sessionName);
-                if (command.channelOptions != null) {
-                    for (java.util.Iterator<String> keys = command.channelOptions.keys(); keys.hasNext(); ) {
+                payload.put("channelId", channelId);
+                payload.put("sessionName", sessionName);
+                if (options != null) {
+                    for (java.util.Iterator<String> keys = options.keys(); keys.hasNext(); ) {
                         String key = keys.next();
-                        payload.put(key, command.channelOptions.get(key));
+                        payload.put(key, options.get(key));
                     }
                 }
                 frame.put("payload", payload);
@@ -942,6 +1083,25 @@ public class AndroidConnectionService extends Service {
                 throw new IllegalArgumentException("channel-open serialization failed", error);
             }
             send(frame);
+        }
+
+        private boolean isMuxReady() {
+            if (stateMachine == null) {
+                return false;
+            }
+            AndroidConnectionServiceSnapshot.State state = stateMachine.readSnapshot().state;
+            return state == AndroidConnectionServiceSnapshot.State.MUX_READY
+                || state == AndroidConnectionServiceSnapshot.State.CHANNELS_READY
+                || state == AndroidConnectionServiceSnapshot.State.HEALTHY;
+        }
+
+        private void replayDesiredChannels() {
+            if (!isMuxReady()) {
+                return;
+            }
+            for (ChannelIntent channel : desiredChannels.values()) {
+                sendChannelOpenFrame(channel.channelId, channel.sessionName, channel.options);
+            }
         }
 
 
@@ -969,22 +1129,11 @@ public class AndroidConnectionService extends Service {
             }
             send(buildBinaryFrame(channelId, dataBase64));
         }
-        void sendRawChannelFrame(String frameJson) {
-            WebSocket current = socket;
-            if (current == null || generation == null) {
+        void sendCloseChannel(AndroidConnectionCommand command) {
+            desiredChannels.remove(command.channelId);
+            if (!isMuxReady()) {
                 return;
             }
-            try {
-                boolean enqueued = current.send(frameJson);
-                if (!enqueued) {
-                    transportFailure("websocket-send", "channel frame not enqueued");
-                }
-            } catch (RuntimeException error) {
-                transportFailure("websocket-send", String.valueOf(error.getMessage()));
-            }
-        }
-
-        void sendCloseChannel(AndroidConnectionCommand command) {
             JSONObject frame = new JSONObject();
             try {
                 frame.put("type", "mux-channel-close");
@@ -1038,6 +1187,22 @@ public class AndroidConnectionService extends Service {
             scheduleBackoff();
         }
 
+        void retireForNetworkChange(String reason) {
+            if (stopped) {
+                return;
+            }
+            closeCurrent(reason);
+            if (generation == null) {
+                startOrContinue();
+                return;
+            }
+            String failedGeneration = generation;
+            generation = null;
+            stateMachine.dispatch(AndroidConnectionServiceEvent.transportFailure(
+                failedGeneration, reason), System.currentTimeMillis());
+            scheduleBackoff();
+        }
+
         private void terminalFailure(String code, String message) {
             if (stopped || generation == null) {
                 return;
@@ -1074,6 +1239,7 @@ public class AndroidConnectionService extends Service {
         private void publishServerFrame(AndroidConnectionServiceServerFrameEvent.Kind kind, JSONObject payload) {
             publishEvent(AndroidConnectionServiceEventEnvelope.serverFrame(
                 new AndroidConnectionServiceServerFrameEvent.Builder(kind)
+                    .targetKey(target.targetKey)
                     .generation(generation)
                     .receivedAt(System.currentTimeMillis())
                     .payload(payload)
@@ -1095,6 +1261,7 @@ public class AndroidConnectionService extends Service {
 
         void close(String reason) {
             stopped = true;
+            desiredChannels.clear();
             closeQuietly(socket);
             socket = null;
             generation = null;
@@ -1120,6 +1287,24 @@ public class AndroidConnectionService extends Service {
                 webSocket.close(1000, "service-close");
             } catch (RuntimeException ignored) {
                 webSocket.cancel();
+            }
+        }
+
+        AndroidConnectionServiceSnapshot snapshot() {
+            return stateMachine == null
+                ? AndroidConnectionServiceSnapshot.empty()
+                : stateMachine.readSnapshot();
+        }
+
+        final class ChannelIntent {
+            final String channelId;
+            final String sessionName;
+            final JSONObject options;
+
+            ChannelIntent(String channelId, String sessionName, JSONObject options) {
+                this.channelId = channelId;
+                this.sessionName = sessionName;
+                this.options = options;
             }
         }
     }
@@ -1166,12 +1351,16 @@ public class AndroidConnectionService extends Service {
     static void resetForTests() {
         synchronized (LISTENER_LOCK) {
             STATIC_LISTENERS.clear();
-            LAST_SNAPSHOT = AndroidConnectionServiceSnapshot.empty();
+            LAST_SNAPSHOTS.clear();
         }
     }
 
-    static AndroidConnectionServiceSnapshot lastSnapshotForTests() {
-        return LAST_SNAPSHOT;
+    static AndroidConnectionServiceSnapshot lastSnapshotForTests(String targetKey) {
+        if (targetKey == null || targetKey.trim().isEmpty()) {
+            return AndroidConnectionServiceSnapshot.empty();
+        }
+        AndroidConnectionServiceSnapshot snapshot = LAST_SNAPSHOTS.get(targetKey.trim());
+        return snapshot == null ? AndroidConnectionServiceSnapshot.empty() : snapshot;
     }
 
     static void registerListenerForTests(AndroidConnectionServiceListener listener) {

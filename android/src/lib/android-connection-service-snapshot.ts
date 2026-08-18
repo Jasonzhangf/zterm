@@ -45,7 +45,7 @@ export interface AndroidConnectionServiceSnapshot {
 export type AndroidConnectionServiceEvent =
   | { type: 'bind-target'; target: AndroidConnectionServiceTarget }
   | { type: 'set-route-policy'; policy: AndroidConnectionServiceRoutePolicy }
-  | { type: 'release-target'; reason: string }
+  | { type: 'release-target'; targetKey: string; reason: string }
   | { type: 'transport-opening'; generation: string }
   | { type: 'mux-ready'; generation: string }
   | { type: 'channel-opened'; generation: string; channelId: string }

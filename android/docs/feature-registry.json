@@ -433,7 +433,8 @@
         "src/server/terminal-runtime-types.ts",
         "src/lib/android-power-policy.test.ts",
         "native/android/app/src/main/AndroidManifest.xml",
-        "native/android/app/src/main/java/com/zterm/android/BackgroundService.java",
+        "native/android/app/src/main/java/com/zterm/android/AndroidConnectionService.java",
+        "native/android/app/src/main/java/com/zterm/android/AndroidConnectionServicePlugin.java",
         "packages/shared/src/connection/protocol.ts",
         "docs/goals/terminal-transport-multiplex-refactor-plan.md",
         "packages/shared/src/connection/protocol.test.ts"
@@ -3233,6 +3234,9 @@
         "src/lib/android-connection-service-snapshot.ts",
         "src/lib/android-connection-service-snapshot.test.ts",
         "src/lib/android-connection-service-commands.test.ts",
+        "src/lib/android-connection-service-factory.ts",
+        "src/lib/android-connection-service-socket.ts",
+        "src/lib/android-connection-service-socket.test.ts",
         "src/plugins/AndroidConnectionServicePlugin.ts",
         "src/plugins/AndroidConnectionServicePlugin.test.ts",
         "src/contexts/android-connection-service-runtime.ts",
@@ -3250,6 +3254,7 @@
         "docs/testing/connection-service-owner-test-design.md",
         "src/lib/android-connection-service-snapshot.test.ts",
         "src/lib/android-connection-service-commands.test.ts",
+        "src/lib/android-connection-service-socket.test.ts",
         "src/plugins/AndroidConnectionServicePlugin.test.ts",
         "src/contexts/android-connection-service-runtime.test.ts",
         "src/lib/feature-registry-truth.test.ts"

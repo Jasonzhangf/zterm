@@ -49,26 +49,31 @@ export type AndroidConnectionCommand =
     }
   | {
       type: 'release-target';
+      targetKey: string;
       reason: string;
     }
   | {
       type: 'open-channel';
+      targetKey: string;
       channelId: string;
       sessionName: string;
       options?: Record<string, unknown>;
     }
   | {
       type: 'channel-message';
+      targetKey: string;
       channelId: string;
       message: Record<string, unknown>;
     }
   | {
       type: 'channel-binary';
+      targetKey: string;
       channelId: string;
       dataBase64: string;
     }
   | {
       type: 'close-channel';
+      targetKey: string;
       channelId: string;
       reason: string;
     };
@@ -148,47 +153,52 @@ export function parseAndroidConnectionCommand(value: unknown): AndroidConnection
         target: parseTarget(value.target),
       };
     case 'release-target':
-      if (!isNonEmptyString(value.reason)) {
-        throw new Error('invalid Android connection service release reason');
+      if (!isNonEmptyString(value.targetKey) || !isNonEmptyString(value.reason)) {
+        throw new Error('invalid Android connection service release target');
       }
       return {
         type: 'release-target',
+        targetKey: value.targetKey.trim(),
         reason: value.reason.trim(),
       };
     case 'open-channel':
-      if (!isNonEmptyString(value.channelId) || !isNonEmptyString(value.sessionName)) {
+      if (!isNonEmptyString(value.targetKey) || !isNonEmptyString(value.channelId) || !isNonEmptyString(value.sessionName)) {
         throw new Error('invalid Android connection service channel open command');
       }
       return {
         type: 'open-channel',
+        targetKey: value.targetKey.trim(),
         channelId: value.channelId.trim(),
         sessionName: value.sessionName.trim(),
         ...(isRecord(value.options) ? { options: value.options } : {}),
       };
     case 'channel-message':
-      if (!isNonEmptyString(value.channelId) || !isRecord(value.message)) {
+      if (!isNonEmptyString(value.targetKey) || !isNonEmptyString(value.channelId) || !isRecord(value.message)) {
         throw new Error('invalid Android connection service channel message command');
       }
       return {
         type: 'channel-message',
+        targetKey: value.targetKey.trim(),
         channelId: value.channelId.trim(),
         message: value.message,
       };
     case 'channel-binary':
-      if (!isNonEmptyString(value.channelId) || !isNonEmptyString(value.dataBase64)) {
+      if (!isNonEmptyString(value.targetKey) || !isNonEmptyString(value.channelId) || !isNonEmptyString(value.dataBase64)) {
         throw new Error('invalid Android connection service channel binary command');
       }
       return {
         type: 'channel-binary',
+        targetKey: value.targetKey.trim(),
         channelId: value.channelId.trim(),
         dataBase64: value.dataBase64,
       };
     case 'close-channel':
-      if (!isNonEmptyString(value.channelId) || !isNonEmptyString(value.reason)) {
+      if (!isNonEmptyString(value.targetKey) || !isNonEmptyString(value.channelId) || !isNonEmptyString(value.reason)) {
         throw new Error('invalid Android connection service channel close command');
       }
       return {
         type: 'close-channel',
+        targetKey: value.targetKey.trim(),
         channelId: value.channelId.trim(),
         reason: value.reason.trim(),
       };

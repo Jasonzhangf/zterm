@@ -27,11 +27,10 @@ export function openAndroidConnectionServiceTransportSocket(
   sessionName: string,
 ): BridgeTransportSocket {
   const target = buildAndroidConnectionServiceTarget(host);
-  void sendAndroidConnectionCommand({
+  const socket = new AndroidConnectionServiceTransportSocket(target, sessionName);
+  void socket.start().then(() => sendAndroidConnectionCommand({
     type: 'bind-target',
     target,
-  });
-  const socket = new AndroidConnectionServiceTransportSocket(target, sessionName);
-  void socket.start();
+  }));
   return socket;
 }

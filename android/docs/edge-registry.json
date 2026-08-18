@@ -4122,6 +4122,21 @@
       "status": "active"
     },
     {
+      "from_module": "client.session_runtime",
+      "to_module": "client.connection_service",
+      "status": "active"
+    },
+    {
+      "from_module": "client.connection_service",
+      "to_module": "shared.terminal_types",
+      "status": "active"
+    },
+    {
+      "from_module": "client.connection_service",
+      "to_module": "client.daemon_connection",
+      "status": "active"
+    },
+    {
       "from_module": "daemon.remote_window_stream",
       "to_module": "shared.terminal_types",
       "status": "active"

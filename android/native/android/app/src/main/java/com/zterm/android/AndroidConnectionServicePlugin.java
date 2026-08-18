@@ -1,7 +1,10 @@
 package com.zterm.android;
 
 import android.content.Intent;
+import android.content.ComponentName;
+import android.content.ServiceConnection;
 import android.os.Build;
+import android.os.IBinder;
 
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -23,6 +26,18 @@ import org.json.JSONObject;
  */
 @CapacitorPlugin(name = "AndroidConnectionService")
 public final class AndroidConnectionServicePlugin extends Plugin {
+    private boolean serviceBound;
+    private final ServiceConnection serviceConnection = new ServiceConnection() {
+        @Override
+        public void onServiceConnected(ComponentName name, IBinder binder) {
+            serviceBound = true;
+        }
+
+        @Override
+        public void onServiceDisconnected(ComponentName name) {
+            serviceBound = false;
+        }
+    };
     private final AndroidConnectionServiceListener serviceListener = new AndroidConnectionServiceListener() {
         @Override
         public void onEvent(AndroidConnectionServiceEventEnvelope event) {
@@ -86,6 +101,10 @@ public final class AndroidConnectionServicePlugin extends Plugin {
 
     @Override
     protected void handleOnDestroy() {
+        if (serviceBound) {
+            getContext().unbindService(serviceConnection);
+            serviceBound = false;
+        }
         AndroidConnectionService.unregisterListenerForTests(serviceListener);
         super.handleOnDestroy();
     }
@@ -126,36 +145,45 @@ public final class AndroidConnectionServicePlugin extends Plugin {
 
     @PluginMethod
     public void releaseTarget(PluginCall call) {
+        String targetKey = call.getString("targetKey");
         String reason = call.getString("reason", "user-release");
-        sendCommand(AndroidConnectionCommand.releaseTarget(reason));
+        if (targetKey == null || targetKey.trim().isEmpty()) {
+            call.reject("targetKey is required");
+            return;
+        }
+        sendCommand(AndroidConnectionCommand.releaseTarget(targetKey.trim(), reason));
         call.resolve(ok());
     }
 
     @PluginMethod
     public void openChannel(PluginCall call) {
+        String targetKey = call.getString("targetKey");
         String channelId = call.getString("channelId");
         String sessionName = call.getString("sessionName");
-        if (channelId == null || channelId.trim().isEmpty()
+        if (targetKey == null || targetKey.trim().isEmpty()
+            || channelId == null || channelId.trim().isEmpty()
             || sessionName == null || sessionName.trim().isEmpty()) {
-            call.reject("channelId and sessionName are required");
+            call.reject("targetKey, channelId and sessionName are required");
             return;
         }
         sendCommand(AndroidConnectionCommand.openChannel(
-            channelId.trim(), sessionName.trim(), call.getObject("options")));
+            targetKey.trim(), channelId.trim(), sessionName.trim(), call.getObject("options")));
         call.resolve(ok());
     }
 
     @PluginMethod
     public void sendChannelMessage(PluginCall call) {
+        String targetKey = call.getString("targetKey");
         String channelId = call.getString("channelId");
         JSObject messageBody = call.getObject("message");
-        if (channelId == null || channelId.trim().isEmpty() || messageBody == null) {
-            call.reject("channelId and message are required");
+        if (targetKey == null || targetKey.trim().isEmpty()
+            || channelId == null || channelId.trim().isEmpty() || messageBody == null) {
+            call.reject("targetKey, channelId and message are required");
             return;
         }
         try {
             sendCommand(AndroidConnectionCommand.channelMessage(
-                channelId.trim(), new JSONObject(messageBody.toString())));
+                targetKey.trim(), channelId.trim(), new JSONObject(messageBody.toString())));
             call.resolve(ok());
         } catch (JSONException error) {
             call.reject("invalid channel message", error);
@@ -164,35 +192,44 @@ public final class AndroidConnectionServicePlugin extends Plugin {
 
     @PluginMethod
     public void sendChannelBinary(PluginCall call) {
+        String targetKey = call.getString("targetKey");
         String channelId = call.getString("channelId");
         String dataBase64 = call.getString("dataBase64");
-        if (channelId == null || channelId.trim().isEmpty()
+        if (targetKey == null || targetKey.trim().isEmpty()
+            || channelId == null || channelId.trim().isEmpty()
             || dataBase64 == null || dataBase64.isEmpty()) {
-            call.reject("channelId and dataBase64 are required");
+            call.reject("targetKey, channelId and dataBase64 are required");
             return;
         }
         sendCommand(AndroidConnectionCommand.channelBinary(
-            channelId.trim(), dataBase64));
+            targetKey.trim(), channelId.trim(), dataBase64));
         call.resolve(ok());
     }
 
     @PluginMethod
     public void closeChannel(PluginCall call) {
+        String targetKey = call.getString("targetKey");
         String channelId = call.getString("channelId");
-        if (channelId == null || channelId.trim().isEmpty()) {
-            call.reject("channelId is required");
+        if (targetKey == null || targetKey.trim().isEmpty()
+            || channelId == null || channelId.trim().isEmpty()) {
+            call.reject("targetKey and channelId are required");
             return;
         }
         sendCommand(AndroidConnectionCommand.closeChannel(
-            channelId.trim(), call.getString("reason", "user-close")));
+            targetKey.trim(), channelId.trim(), call.getString("reason", "user-close")));
         call.resolve(ok());
     }
 
     @PluginMethod
     public void readSnapshot(PluginCall call) {
+        String targetKey = call.getString("targetKey");
+        if (targetKey == null || targetKey.trim().isEmpty()) {
+            call.reject("targetKey is required");
+            return;
+        }
         try {
             call.resolve(JSObject.fromJSONObject(
-                AndroidConnectionService.lastSnapshotForTests().toJson()));
+                AndroidConnectionService.lastSnapshotForTests(targetKey.trim()).toJson()));
         } catch (JSONException error) {
             call.reject("snapshot serialization failed", error);
         }
@@ -207,6 +244,18 @@ public final class AndroidConnectionServicePlugin extends Plugin {
             throw new IllegalArgumentException("command serialization failed", error);
         }
         startService(intent);
+        bindToStartedService();
+    }
+
+    private void bindToStartedService() {
+        if (serviceBound) {
+            return;
+        }
+        Intent intent = new Intent(getContext(), AndroidConnectionService.class);
+        serviceBound = getContext().bindService(
+            intent,
+            serviceConnection,
+            android.content.Context.BIND_NOT_FOREGROUND);
     }
 
     private void startService(Intent intent) {

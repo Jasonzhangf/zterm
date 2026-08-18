@@ -564,19 +564,19 @@
         },
         {
           "id": "AndroidConnectionService",
-          "label": "native/android/app/src/main/java/com/zterm/android/AndroidConnectionService.java (target owner; pending slice)"
+          "label": "native/android/app/src/main/java/com/zterm/android/AndroidConnectionService.java (WebSocket target owner)"
         },
         {
           "id": "AndroidConnectionServicePlugin",
-          "label": "native/android/app/src/main/java/com/zterm/android/AndroidConnectionServicePlugin.java (target owner; pending slice)"
+          "label": "native/android/app/src/main/java/com/zterm/android/AndroidConnectionServicePlugin.java (typed IPC projection)"
         },
         {
           "id": "AndroidConnectionServiceSnapshot",
-          "label": "src/lib/android-connection-service-snapshot.ts (target owner; pending slice)"
+          "label": "src/lib/android-connection-service-snapshot.ts (target-scoped projection)"
         },
         {
           "id": "AndroidConnectionServiceRuntime",
-          "label": "src/contexts/android-connection-service-runtime.ts (target owner; pending slice)"
+          "label": "src/contexts/android-connection-service-runtime.ts (UI projection)"
         },
         {
           "id": "AndroidConnectionServiceIn01SetManualRoutePolicy",

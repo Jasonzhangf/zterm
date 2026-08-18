@@ -92,8 +92,6 @@ interface UseOpenTabRuntimeOptions {
   networkIdentity?: NetworkIdentityRuntime;
   /** SessionProvider facade: records background entry time into the session context's own ref. */
   recordBackgroundEnteredAt?: (sessionIds: string[], at: number) => void;
-  /** 后台心跳发送函数 */
-  sendBackgroundHeartbeat?: () => void;
 }
 
 export interface OpenTabRuntimeRefs {
@@ -160,7 +158,6 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     pruneSessionGroupSelectionToRemoteTruth,
     onForegroundActiveChange,
     onForegroundResume,
-    sendBackgroundHeartbeat,
   } = options;
   const networkIdentity = options.networkIdentity;
 
@@ -218,11 +215,6 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     }
     return materializeOpenTabRuntimeSessions(openTabState.tabs, sessions);
   }, [openTabState.tabs, sessions]);
-  const retainedTerminalSessionCount = useMemo(
-    () => terminalSessions.filter((session) => session.state !== 'closed').length,
-    [terminalSessions],
-  );
-
   const terminalActiveSession = useMemo(() => {
     if (terminalSessions.length === 0) {
       return null;
@@ -500,10 +492,8 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     sessionsRef,
     openTabStateRef,
     foregroundRefreshRuntimeRef,
-    retainedSessionCount: retainedTerminalSessionCount,
     onForegroundActiveChange,
     onForegroundResume,
-    sendBackgroundHeartbeat,
     recordBackgroundEnteredAt: options.recordBackgroundEnteredAt,
     auditOpenTabsAgainstRemoteSessions,
     notifyTargetNetworkSignal,

@@ -21,17 +21,6 @@ public class MainActivity extends BridgeActivity {
     private static final String PREFS_NAME = "zterm_webview_cache_version";
     private static final String PREF_VERSION_CODE = "versionCode";
 
-    /** Static WebView reference for BackgroundService (JS heartbeat wake-up). */
-    private static WebView staticWebView;
-    private static volatile boolean activityInForeground;
-
-    public static WebView getStaticWebView() {
-        return staticWebView;
-    }
-
-    public static boolean isActivityInForeground() {
-        return activityInForeground;
-    }
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -47,34 +36,10 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(DeviceClipboardPlugin.class);
         registerPlugin(DebugInputPlugin.class);
         registerPlugin(StoragePermissionPlugin.class);
-        registerPlugin(BackgroundServicePlugin.class);
         registerPlugin(AndroidConnectionServicePlugin.class);
         registerPlugin(ScreenOrientationPlugin.class);
         registerPlugin(NetworkIdentityPlugin.class);
         super.onCreate(savedInstanceState);
-        if (getBridge() != null && getBridge().getWebView() != null) {
-            staticWebView = getBridge().getWebView();
-        }
-        // Inject JS-to-Logcat bridge
-        if (getBridge() != null && getBridge().getWebView() != null) {
-            final android.webkit.WebView wv = getBridge().getWebView();
-            wv.addJavascriptInterface(new Object() {
-                @android.webkit.JavascriptInterface
-                public void log(String tag, String msg) {
-                    android.util.Log.i("zterm[" + tag + "]", msg);
-                }
-            }, "ZTermLog");
-            // Test the bridge
-            wv.postDelayed(new Runnable() {
-                @Override
-                public void run() {
-                    wv.evaluateJavascript(
-                        "if(window.ZTermLog && window.ZTermLog.log) { window.ZTermLog.log('boot', 'evaluateJavascript bridge OK'); } else { console.error('[zterm:boot] ZTermLog missing in evaluateJavascript'); }",
-                        null
-                    );
-                }
-            }, 2000);
-        }
         Log.i(TAG, "onCreate()");
         if (getBridge() != null && getBridge().getWebView() != null) {
             final WebView wv = getBridge().getWebView();
@@ -159,14 +124,12 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onStop() {
         super.onStop();
-        activityInForeground = false;
         Log.i(TAG, "onStop()");
     }
 
     @Override
     public void onStart() {
         super.onStart();
-        activityInForeground = true;
         Log.i(TAG, "onStart()");
     }
 

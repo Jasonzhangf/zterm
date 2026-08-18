@@ -2,7 +2,7 @@
 
 Date: 2026-08-18
 Feature: `client.android_connection_service`
-Owner module: `client.connection_service` (status: `design`)
+Owner module: `client.connection_service` (status: `design`; native WebSocket slice implemented, desired-state journal and native WebRTC/Relay slices pending)
 
 ## Scope
 

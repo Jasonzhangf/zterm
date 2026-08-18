@@ -17,6 +17,7 @@ public final class AndroidConnectionCommand {
     public final AndroidConnectionServiceRoutePolicy policy;
     public final AndroidConnectionServiceTarget target;
     public final String reason;
+    public final String targetKey;
     public final String sessionName;
     public final String channelId;
     public final JSONObject channelMessage;
@@ -27,6 +28,7 @@ public final class AndroidConnectionCommand {
                                     AndroidConnectionServiceRoutePolicy policy,
                                     AndroidConnectionServiceTarget target,
                                     String reason,
+                                    String targetKey,
                                     String sessionName,
                                     String channelId,
                                     JSONObject channelMessage,
@@ -36,6 +38,7 @@ public final class AndroidConnectionCommand {
         this.policy = policy;
         this.target = target;
         this.reason = reason;
+        this.targetKey = targetKey;
         this.sessionName = sessionName;
         this.channelId = channelId;
         this.channelMessage = channelMessage;
@@ -45,38 +48,38 @@ public final class AndroidConnectionCommand {
 
     public static AndroidConnectionCommand setRoutePolicy(AndroidConnectionServiceRoutePolicy policy) {
         return new AndroidConnectionCommand(Type.SET_ROUTE_POLICY, policy, null, null,
-            null, null, null, null, null);
+            null, null, null, null, null, null);
     }
 
     public static AndroidConnectionCommand bindTarget(AndroidConnectionServiceTarget target) {
         return new AndroidConnectionCommand(Type.BIND_TARGET, null, target, null,
-            null, null, null, null, null);
+            null, null, null, null, null, null);
     }
 
-    public static AndroidConnectionCommand releaseTarget(String reason) {
+    public static AndroidConnectionCommand releaseTarget(String targetKey, String reason) {
         return new AndroidConnectionCommand(Type.RELEASE_TARGET, null, null,
             reason == null || reason.trim().isEmpty() ? "unspecified" : reason.trim(),
-            null, null, null, null, null);
+            targetKey, null, null, null, null, null);
     }
 
-    public static AndroidConnectionCommand openChannel(String channelId, String sessionName, JSONObject options) {
+    public static AndroidConnectionCommand openChannel(String targetKey, String channelId, String sessionName, JSONObject options) {
         return new AndroidConnectionCommand(Type.OPEN_CHANNEL, null, null, null,
-            sessionName, channelId, null, null, options);
+            targetKey, sessionName, channelId, null, null, options);
     }
 
-    public static AndroidConnectionCommand channelMessage(String channelId, JSONObject message) {
+    public static AndroidConnectionCommand channelMessage(String targetKey, String channelId, JSONObject message) {
         return new AndroidConnectionCommand(Type.CHANNEL_MESSAGE, null, null, null,
-            null, channelId, message, null, null);
+            targetKey, null, channelId, message, null, null);
     }
 
-    public static AndroidConnectionCommand channelBinary(String channelId, String dataBase64) {
+    public static AndroidConnectionCommand channelBinary(String targetKey, String channelId, String dataBase64) {
         return new AndroidConnectionCommand(Type.CHANNEL_BINARY, null, null, null,
-            null, channelId, null, dataBase64, null);
+            targetKey, null, channelId, null, dataBase64, null);
     }
 
-    public static AndroidConnectionCommand closeChannel(String channelId, String reason) {
+    public static AndroidConnectionCommand closeChannel(String targetKey, String channelId, String reason) {
         return new AndroidConnectionCommand(Type.CLOSE_CHANNEL, null, null, reason,
-            null, channelId, null, null, null);
+            targetKey, null, channelId, null, null, null);
     }
 
     public JSONObject toJson() throws JSONException {
@@ -92,26 +95,31 @@ public final class AndroidConnectionCommand {
                 break;
             case RELEASE_TARGET:
                 json.put("type", "release-target");
+                json.put("targetKey", targetKey);
                 json.put("reason", reason);
                 break;
             case OPEN_CHANNEL:
                 json.put("type", "open-channel");
+                json.put("targetKey", targetKey);
                 json.put("channelId", channelId);
                 json.put("sessionName", sessionName);
                 if (channelOptions != null) json.put("options", channelOptions);
                 break;
             case CHANNEL_MESSAGE:
                 json.put("type", "channel-message");
+                json.put("targetKey", targetKey);
                 json.put("channelId", channelId);
                 json.put("message", channelMessage);
                 break;
             case CHANNEL_BINARY:
                 json.put("type", "channel-binary");
+                json.put("targetKey", targetKey);
                 json.put("channelId", channelId);
                 json.put("dataBase64", channelDataBase64);
                 break;
             case CLOSE_CHANNEL:
                 json.put("type", "close-channel");
+                json.put("targetKey", targetKey);
                 json.put("channelId", channelId);
                 json.put("reason", reason);
                 break;
@@ -128,19 +136,30 @@ public final class AndroidConnectionCommand {
             case "bind-target":
                 return bindTarget(AndroidConnectionServiceTarget.fromJson(json.optJSONObject("target")));
             case "release-target":
-                return releaseTarget(json.optString("reason", "unspecified"));
+                return releaseTarget(requireTargetKey(json), json.optString("reason", "unspecified"));
             case "open-channel":
-                return openChannel(json.optString("channelId", ""),
+                return openChannel(requireTargetKey(json), json.optString("channelId", ""),
                     json.optString("sessionName", ""), json.optJSONObject("options"));
             case "channel-message":
-                return channelMessage(json.optString("channelId", ""), json.optJSONObject("message"));
+                return channelMessage(requireTargetKey(json), json.optString("channelId", ""),
+                    json.optJSONObject("message"));
             case "channel-binary":
-                return channelBinary(json.optString("channelId", ""), json.optString("dataBase64", ""));
+                return channelBinary(requireTargetKey(json), json.optString("channelId", ""),
+                    json.optString("dataBase64", ""));
             case "close-channel":
-                return closeChannel(json.optString("channelId", ""), json.optString("reason", "user-close"));
+                return closeChannel(requireTargetKey(json), json.optString("channelId", ""),
+                    json.optString("reason", "user-close"));
             default:
                 throw new IllegalArgumentException("unknown command type: " + wireType);
         }
+    }
+
+    private static String requireTargetKey(JSONObject json) {
+        String targetKey = json.optString("targetKey", "").trim();
+        if (targetKey.isEmpty()) {
+            throw new IllegalArgumentException("channel command targetKey missing");
+        }
+        return targetKey;
     }
 
     /**
