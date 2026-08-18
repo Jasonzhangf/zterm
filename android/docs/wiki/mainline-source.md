@@ -52,8 +52,8 @@ flowchart TD
   NetworkIdentityRuntime --> LifecycleNativeSnapshotErrorProjector["src/hooks/useOpenTabLifecycleEffects.ts#refreshNetworkIdentityForForeground"]
   AppNativeSnapshotErrorProjector --> AppNetworkBinding
   LifecycleNativeSnapshotErrorProjector --> OpenTabNetworkBinding
-  TargetNetworkSignalOrchestration --> TargetNetworkProbeError04NativeSnapshot["src/contexts/session-context-transport-orchestration-runtime.ts#notifyTargetNetworkSignalRuntime"]
-  TargetNetworkProbeError04NativeSnapshot --> DaemonConnectionErrorChain["src/lib/client-daemon-connection.ts#createClientDaemonConnection current typed error slot"]
+  TargetNetworkSignalOrchestration --> TargetNetworkProbeError04NativeSnapshot["src/contexts/session-context-transport-orchestration-runtime.ts#reportTargetNetworkProbeErrorRuntime"]
+  TargetNetworkProbeError04NativeSnapshot --> DaemonConnectionErrorChain["src/lib/client-daemon-connection.ts#createClientDaemonConnection current typed error slot + registered typed error consumer"]
   App --> TerminalShellSkinResolver["src/lib/terminal-shell-skin.ts#resolveEffectiveTerminalShellSkin + resolveTerminalRendererThemeForSkin"]
   TerminalShellSkinResolver --> TerminalPage["src/pages/TerminalPage.tsx"]
   App --> RelayControlRuntime["src/hooks/useRelayDeviceStream.ts#useRelayDeviceStream"]

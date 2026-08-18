@@ -576,11 +576,11 @@
         },
         {
           "id": "TargetNetworkProbeError04NativeSnapshot",
-          "label": "src/contexts/session-context-transport-orchestration-runtime.ts#notifyTargetNetworkSignalRuntime"
+          "label": "src/contexts/session-context-transport-orchestration-runtime.ts#reportTargetNetworkProbeErrorRuntime"
         },
         {
           "id": "DaemonConnectionErrorChain",
-          "label": "src/lib/client-daemon-connection.ts#createClientDaemonConnection (current typed error slot)"
+          "label": "src/lib/client-daemon-connection.ts#createClientDaemonConnection (current typed error slot + registered typed error consumer)"
         }
       ],
       "edges": [
@@ -3036,7 +3036,7 @@
           "to": "AppNativeSnapshotErrorProjector",
           "owner_feature": "android_network_identity_snapshot",
           "semantic_input": "initial native snapshot rejection from AppContent networkIdentity.resample",
-          "semantic_output": "NetworkIdentitySnapshotError projected to a native-snapshot-error platform signal",
+          "semantic_output": "NetworkIdentitySnapshotError projected to the typed native snapshot error callback",
           "status": "anchored",
           "edge_id": "android_mainline:NetworkIdentityRuntime->AppNativeSnapshotErrorProjector",
           "resource_from": "resource.platform_network_signal",
@@ -3048,8 +3048,8 @@
           "from": "AppNativeSnapshotErrorProjector",
           "to": "AppNetworkBinding",
           "owner_feature": "android_network_identity_snapshot",
-          "semantic_input": "initial native-snapshot-error platform signal",
-          "semantic_output": "App-owned SessionContext network callback invocation",
+          "semantic_input": "initial typed native snapshot error callback",
+          "semantic_output": "App-owned SessionContext typed error callback invocation",
           "status": "anchored",
           "edge_id": "android_mainline:AppNativeSnapshotErrorProjector->AppNetworkBinding",
           "resource_from": "resource.platform_network_signal",
@@ -3062,7 +3062,7 @@
           "to": "LifecycleNativeSnapshotErrorProjector",
           "owner_feature": "android_network_identity_snapshot",
           "semantic_input": "foreground native snapshot rejection from resampleWithStatus",
-          "semantic_output": "NetworkIdentitySnapshotError projected to a native-snapshot-error platform signal",
+          "semantic_output": "NetworkIdentitySnapshotError projected to the typed native snapshot error callback",
           "status": "anchored",
           "edge_id": "android_mainline:NetworkIdentityRuntime->LifecycleNativeSnapshotErrorProjector",
           "resource_from": "resource.platform_network_signal",
@@ -3074,8 +3074,8 @@
           "from": "LifecycleNativeSnapshotErrorProjector",
           "to": "OpenTabNetworkBinding",
           "owner_feature": "android_network_identity_snapshot",
-          "semantic_input": "foreground native-snapshot-error platform signal",
-          "semantic_output": "open-tab lifecycle callback invocation",
+          "semantic_input": "foreground typed native snapshot error callback",
+          "semantic_output": "open-tab lifecycle typed error callback invocation",
           "status": "anchored",
           "edge_id": "android_mainline:LifecycleNativeSnapshotErrorProjector->OpenTabNetworkBinding",
           "resource_from": "resource.platform_network_signal",
@@ -3087,8 +3087,8 @@
           "from": "TargetNetworkSignalOrchestration",
           "to": "TargetNetworkProbeError04NativeSnapshot",
           "owner_feature": "android_network_identity_snapshot",
-          "semantic_input": "native-snapshot-error received through the adjacent App/context/provider facade chain",
-          "semantic_output": "typed TargetNetworkProbeError04NativeSnapshot submitted to the retained-error owner",
+          "semantic_input": "typed native snapshot error received through the adjacent App/context/provider facade chain",
+          "semantic_output": "TargetNetworkProbeError04NativeSnapshot submitted to the retained-error owner",
           "status": "anchored",
           "edge_id": "android_mainline:TargetNetworkSignalOrchestration->TargetNetworkProbeError04NativeSnapshot",
           "resource_from": "resource.platform_network_signal",
@@ -3101,7 +3101,7 @@
           "to": "DaemonConnectionErrorChain",
           "owner_feature": "android_network_identity_snapshot",
           "semantic_input": "typed native snapshot error submitted by the orchestration owner",
-          "semantic_output": "replace the current retained daemon-connection error without changing transport truth",
+          "semantic_output": "retain the latest typed error and invoke the registered consumer without changing transport truth",
           "status": "anchored",
           "edge_id": "android_mainline:TargetNetworkProbeError04NativeSnapshot->DaemonConnectionErrorChain",
           "resource_from": "resource.platform_network_signal",

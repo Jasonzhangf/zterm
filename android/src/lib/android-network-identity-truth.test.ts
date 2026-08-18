@@ -168,6 +168,8 @@ describe('Android network identity plugin', () => {
     };
     const signal = resourceRegistry.resources.find((resource) => resource.resource_id === 'resource.platform_network_signal');
     expect(signal?.truth_store).toContain('client-daemon-connection.ts current typed error slot');
+    expect(signal?.truth_store).toContain('registered typed error consumer');
+    expect(signal?.allowed_operations).toContain('consume_native_snapshot_error');
     expect(signal?.allowed_operations).toContain('acknowledge_native_snapshot_error');
   });
 

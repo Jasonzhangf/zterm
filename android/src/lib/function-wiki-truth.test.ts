@@ -103,7 +103,7 @@ describe('function wiki truth gate', () => {
       '`native_snapshot_error_policy`: the typed `TargetNetworkProbeError04NativeSnapshot` must stay on the explicit error chain',
     );
     expect(plan).toContain(
-      '`native_snapshot_error_current_owner`: `android/src/contexts/session-context-transport-orchestration-runtime.ts#reportTargetNetworkProbeErrorRuntime` and `#notifyTargetNetworkSignalRuntime`',
+      '`native_snapshot_error_current_owner`: `android/src/contexts/session-context-transport-orchestration-runtime.ts#reportTargetNetworkProbeErrorRuntime`',
     );
     expect(plan).toContain(
       '`native_snapshot_error_planned_rust_boundary`: `crates/zterm-transport-core/src/target_network_probe.rs` owns typed failure classification and error-chain emission',
@@ -307,11 +307,12 @@ describe('function wiki truth gate', () => {
       'src/contexts/session-context-transport-orchestration-runtime.ts#routeTargetSocketFailureRuntime',
     );
     expect(nativeSnapshotErrorNode?.label).toBe(
-      'src/contexts/session-context-transport-orchestration-runtime.ts#notifyTargetNetworkSignalRuntime',
+      'src/contexts/session-context-transport-orchestration-runtime.ts#reportTargetNetworkProbeErrorRuntime',
     );
     expect(daemonConnectionErrorNode?.label).toContain(
       'src/lib/client-daemon-connection.ts#createClientDaemonConnection',
     );
+    expect(daemonConnectionErrorNode?.label).toContain('registered typed error consumer');
     expect(read('src/hooks/useOpenTabLifecycleEffects.ts')).toContain(
       'export function useOpenTabLifecycleEffects',
     );

@@ -275,6 +275,19 @@ describe('edge registry truth gate', () => {
     expect(read('src/contexts/session-context-transport-orchestration-runtime.ts')).toContain(
       'export function notifyTargetNetworkSignalRuntime',
     );
+    expect(read('src/contexts/session-context-transport-orchestration-runtime.ts')).toContain(
+      'export function reportTargetNetworkProbeErrorRuntime',
+    );
+    expect(read('src/contexts/session-context-transport-orchestration-runtime.ts')).toContain(
+      'onTargetNetworkProbeError',
+    );
+    expect(read('src/contexts/session-context-target-network-probe-runtime.ts')).not.toContain(
+      "source: 'native-snapshot-error'",
+    );
+    expect(read('src/App.tsx')).toContain('reportTargetNetworkProbeError({');
+    expect(read('src/hooks/useOpenTabLifecycleEffects.ts')).toContain(
+      'reportTargetNetworkProbeError({',
+    );
     expect(read('src/contexts/session-context-transport-runtime.ts')).toContain(
       'export function createSessionContextTransportAccessors',
     );

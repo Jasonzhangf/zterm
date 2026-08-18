@@ -356,11 +356,11 @@ h2 { font-size: 18px; margin: 28px 0 8px; }
 </g>
 <g class="node" data-node-id="TargetNetworkProbeError04NativeSnapshot">
   <rect x="6010" y="34" width="260" height="56" rx="12" />
-  <text x="6026" y="68">src/contexts/session-context-transport-orchestration-runtime.ts#notifyTargetNetworkSignalRuntime</text>
+  <text x="6026" y="68">src/contexts/session-context-transport-orchestration-runtime.ts#reportTargetNetworkProbeErrorRuntime</text>
 </g>
 <g class="node" data-node-id="DaemonConnectionErrorChain">
   <rect x="6340" y="34" width="260" height="56" rx="12" />
-  <text x="6356" y="68">src/lib/client-daemon-connection.ts#createClientDaemonConnection current typed error slot</text>
+  <text x="6356" y="68">src/lib/client-daemon-connection.ts#createClientDaemonConnection current typed error slot + registered typed error consumer</text>
 </g>
 <g class="node" data-node-id="TerminalShellSkinResolver">
   <rect x="1720" y="394" width="260" height="56" rx="12" />
@@ -829,8 +829,8 @@ h2 { font-size: 18px; margin: 28px 0 8px; }
   NetworkIdentityRuntime --&gt; LifecycleNativeSnapshotErrorProjector[&quot;src/hooks/useOpenTabLifecycleEffects.ts#refreshNetworkIdentityForForeground&quot;]
   AppNativeSnapshotErrorProjector --&gt; AppNetworkBinding
   LifecycleNativeSnapshotErrorProjector --&gt; OpenTabNetworkBinding
-  TargetNetworkSignalOrchestration --&gt; TargetNetworkProbeError04NativeSnapshot[&quot;src/contexts/session-context-transport-orchestration-runtime.ts#notifyTargetNetworkSignalRuntime&quot;]
-  TargetNetworkProbeError04NativeSnapshot --&gt; DaemonConnectionErrorChain[&quot;src/lib/client-daemon-connection.ts#createClientDaemonConnection current typed error slot&quot;]
+  TargetNetworkSignalOrchestration --&gt; TargetNetworkProbeError04NativeSnapshot[&quot;src/contexts/session-context-transport-orchestration-runtime.ts#reportTargetNetworkProbeErrorRuntime&quot;]
+  TargetNetworkProbeError04NativeSnapshot --&gt; DaemonConnectionErrorChain[&quot;src/lib/client-daemon-connection.ts#createClientDaemonConnection current typed error slot + registered typed error consumer&quot;]
   App --&gt; TerminalShellSkinResolver[&quot;src/lib/terminal-shell-skin.ts#resolveEffectiveTerminalShellSkin + resolveTerminalRendererThemeForSkin&quot;]
   TerminalShellSkinResolver --&gt; TerminalPage[&quot;src/pages/TerminalPage.tsx&quot;]
   App --&gt; RelayControlRuntime[&quot;src/hooks/useRelayDeviceStream.ts#useRelayDeviceStream&quot;]
