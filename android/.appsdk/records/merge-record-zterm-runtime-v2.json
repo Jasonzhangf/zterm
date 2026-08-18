@@ -7,10 +7,10 @@
   "effectiveness_id": "EFF-20260818-ZARCHV2-ACTIVEV4-MAIN-CLOSEOUT-001",
   "mainline_ref": "main",
   "candidate_commit": "86076987a70345d88b90070f0014e8b2f243ca01",
-  "merge_commit": "PENDING_MAINLINE_MERGE",
+  "merge_commit": "507a130035d27d01a4d7b17e90daf06267c468d0",
   "candidate_tree_hash": "3484814748253e18e4a1779e66ef523897ecf099",
-  "merged_tree_hash": "PENDING_MAINLINE_MERGE",
+  "merged_tree_hash": "3484814748253e18e4a1779e66ef523897ecf099",
   "change_identity": "exact",
   "result": "pass",
-  "created_at": "2026-08-18T14:30:00Z"
+  "created_at": "2026-08-18T15:46:23Z"
 }
