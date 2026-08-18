@@ -4,7 +4,7 @@
   "module_id": "zterm-runtime-v2",
   "source_commit": "86076987a70345d88b90070f0014e8b2f243ca01",
   "artifact_hash": "sha256:a021a660aab1dc2d4a35a7c3ef0ab453428d70111bb3f71da5de7c21c94c2c18",
-  "public_api_hash": "sha256:ba699c8ee9f7f89d75e625dee2d6261ef89290e74160a00ba6213934e4bf4808",
+  "public_api_hash": "sha256:42699f64b69d0e555a6b43baa29dd381e27c245b417f5c60bce8f7e6155e5abd",
   "scope_hash": "sha256:e939fc3be8c64425b047abeb47a1c108890be6427825360f742cb7b44edb9790",
   "input_hash": "sha256:a021a660aab1dc2d4a35a7c3ef0ab453428d70111bb3f71da5de7c21c94c2c18",
   "suite_id": "zterm-runtime-v2-regression",
