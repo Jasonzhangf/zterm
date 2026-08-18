@@ -1,12 +1,12 @@
 {
-  "artifact_hash": "sha256:0883ed0c34d8940d8afe46b6bee5c1f0b2890deeed6beb0c365df58451bef356",
+  "artifact_hash": "sha256:c21ea383d261bef51cfcc5d5b96768928f9601a380ee56d162e4f5a62e6148bb",
   "artifact_paths": [
     "zterm-runtime-v2.web.tgz"
   ],
   "artifact_schema": 1,
   "artifacts": [
     {
-      "hash": "sha256:5cff2d411d40e2111ec216b807d84f4d596b502071ec3133ffc5e56c462462ca",
+      "hash": "sha256:78ba02e10526df5978d3b414146cfbe81fb316cbac24c20e24716fd63dd1db25",
       "path": "zterm-runtime-v2.web.tgz"
     }
   ],
@@ -21,7 +21,7 @@
   "contract_hash": "sha256:01dc04b8ec8b0fd9b8df5f824f8533085d70bed136dde7335caae426cd8ddff7",
   "dependency_hashes": [],
   "module_id": "zterm-runtime-v2",
-  "public_api_hash": "sha256:5d93da203b7c85f6eb9c404fbcc19fb710aea0047bf52d424740b9f9e28c6765",
-  "source_hash": "sha256:a8961737f64a531c10e4ca4a8127d99f713215ca9e7d4ba9306fd1c8da67ec85",
+  "public_api_hash": "sha256:5738ff0b30365fe0121924cef860b38c9bb5849c7e3e09aaaa0c5cf274e974e9",
+  "source_hash": "sha256:92b398c567cfeb25219f0bbd69510b8cc5730f28e2292a978c9178a0b2a49f70",
   "stage": "controlled_verified"
 }
