@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -24,6 +24,10 @@ describe('Android task transition truth', () => {
   it('uses one opaque runtime theme when Android needs a task representation', () => {
     expect(themeSource).toContain('<item name="android:windowBackground">#FF1E1E1E</item>');
     expect(themeSource).toContain('<item name="android:colorBackground">#FF1E1E1E</item>');
+    expect(themeSource).toContain(
+      '<item name="windowSplashScreenAnimatedIcon">@drawable/splash_logo</item>',
+    );
+    expect(existsSync(resolve(androidRoot, 'res/drawable/splash_logo.png'))).toBe(true);
     expect(themeSource).toContain(
       '<item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>',
     );
