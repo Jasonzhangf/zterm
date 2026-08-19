@@ -3286,6 +3286,120 @@
         "src/lib/plugin-terminal-shell/terminal-shell-ui-ownership.test.ts"
       ],
       "status": "active"
+    },
+    {
+      "edge_id": "edge.client.manual_route_policy_to_connection_service_ipc",
+      "from_module": "client.app_shell",
+      "to_module": "client.connection_service",
+      "resource_from": "resource.client_manual_route_policy",
+      "resource_to": "resource.client_connection_service_ipc",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "client.android_connection_service",
+      "allowed_callers": [
+        "src/pages/ConnectionsPage.tsx"
+      ],
+      "forbidden_callers": [
+        "src/hooks/useOpenTabLifecycleEffects.ts",
+        "src/contexts/**"
+      ],
+      "request_chain": [
+        "AndroidConnectionServiceIn01SetManualRoutePolicy",
+        "AndroidConnectionServiceIn02IpcDispatch"
+      ],
+      "response_chain": [
+        "AndroidConnectionServiceOut01Snapshot"
+      ],
+      "error_chain": [
+        "AndroidConnectionServiceError01CommandRejected"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:AndroidConnectionServiceIn01SetManualRoutePolicy->AndroidConnectionServicePlugin",
+        "android_mainline:AndroidConnectionServicePlugin->AndroidConnectionService",
+        "android_mainline:AndroidConnectionService->AndroidConnectionServiceOut01Snapshot",
+        "android_mainline:AndroidConnectionServiceOut03CommandRejected->AndroidConnectionServiceError01CommandRejected"
+      ],
+      "required_gates": [
+        "docs/testing/connection-service-owner-test-design.md",
+        "src/lib/edge-registry-truth.test.ts"
+      ],
+      "status": "design"
+    },
+    {
+      "edge_id": "edge.client.connection_service_snapshot_to_app_shell",
+      "from_module": "client.connection_service",
+      "to_module": "client.app_shell",
+      "resource_from": "resource.client_service_snapshot",
+      "resource_to": "resource.ui_projection",
+      "via_resources": [
+        "resource.client_connection_service_ipc"
+      ],
+      "relation_status": "via",
+      "owner_feature": "client.android_connection_service",
+      "allowed_callers": [
+        "src/App.tsx"
+      ],
+      "forbidden_callers": [
+        "src/hooks/useOpenTabLifecycleEffects.ts",
+        "src/lib/traversal/**"
+      ],
+      "request_chain": [
+        "AndroidConnectionServiceIn01SnapshotEvent",
+        "AndroidConnectionServiceIn02Projection"
+      ],
+      "response_chain": [
+        "AndroidConnectionServiceOut01ProjectedSnapshot"
+      ],
+      "error_chain": [
+        "AndroidConnectionServiceError01InvalidSnapshot"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:AndroidConnectionServiceOut01Snapshot->AndroidConnectionServiceSnapshot",
+        "android_mainline:AndroidConnectionServiceSnapshot->AndroidConnectionServiceRuntime",
+        "android_mainline:AndroidConnectionServiceRuntime->SessionContext"
+      ],
+      "required_gates": [
+        "docs/testing/connection-service-owner-test-design.md",
+        "src/lib/edge-registry-truth.test.ts"
+      ],
+      "status": "design"
+    },
+    {
+      "edge_id": "edge.client.connection_service_ipc_to_android_connection_service",
+      "from_module": "client.connection_service",
+      "to_module": "client.connection_service",
+      "resource_from": "resource.client_connection_service_ipc",
+      "resource_to": "resource.android_connection_service",
+      "via_resources": [
+        "resource.client_connection_service_ipc"
+      ],
+      "relation_status": "via",
+      "owner_feature": "client.android_connection_service",
+      "allowed_callers": [
+        "docs/testing/connection-service-owner-test-design.md"
+      ],
+      "forbidden_callers": [
+        "src/hooks/**",
+        "src/pages/**"
+      ],
+      "request_chain": [
+        "AndroidConnectionServiceIn01IpcCommand",
+        "AndroidConnectionServiceIn02ServiceDispatch"
+      ],
+      "response_chain": [
+        "AndroidConnectionServiceOut01ServiceSnapshot"
+      ],
+      "error_chain": [
+        "AndroidConnectionServiceError01CommandRejected"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:AndroidConnectionServicePlugin->AndroidConnectionService"
+      ],
+      "required_gates": [
+        "docs/testing/connection-service-owner-test-design.md",
+        "src/lib/edge-registry-truth.test.ts"
+      ],
+      "status": "design"
     }
   ],
   "import_edges_description": "Module-level import allowlist derived from the real src import graph. Gate: src/lib/module-import-graph-truth.test.ts. Every cross-module import edge in code must appear here, and every entry here must exist in code (lockstep both directions). status=pending_removal marks a known violation that must trend to zero; adding new pending_removal entries requires an explicit decision doc.",
@@ -4015,6 +4129,21 @@
     {
       "from_module": "client.session_runtime",
       "to_module": "client.terminal_channel_mux",
+      "status": "active"
+    },
+    {
+      "from_module": "client.session_runtime",
+      "to_module": "client.connection_service",
+      "status": "active"
+    },
+    {
+      "from_module": "client.connection_service",
+      "to_module": "shared.terminal_types",
+      "status": "active"
+    },
+    {
+      "from_module": "client.connection_service",
+      "to_module": "client.daemon_connection",
       "status": "active"
     },
     {

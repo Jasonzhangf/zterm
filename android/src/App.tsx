@@ -214,7 +214,6 @@ export function AppContent({
     sendRemoteWindowInput,
     resizeRemoteWindowTarget,
     sendMessageRaw,
-    sendTargetHeartbeat,
     manageTmuxSessionsOnOpenTransport,
     queryTerminalSessionCatalogOnOpenTransport,
     onFileTransferMessage,
@@ -475,7 +474,6 @@ export function AppContent({
     onForegroundResume: handleForegroundResumeAfterControlRefresh,
     recordBackgroundEnteredAt,
     networkIdentity,
-    sendBackgroundHeartbeat: sendTargetHeartbeat,
   });
 
   const markRuntimeSessionEntered = useCallback((sessionId: string) => {

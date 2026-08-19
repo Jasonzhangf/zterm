@@ -581,6 +581,54 @@
         {
           "id": "DaemonConnectionErrorChain",
           "label": "src/lib/client-daemon-connection.ts#createClientDaemonConnection (current typed error slot + registered typed error consumer)"
+        },
+        {
+          "id": "AndroidConnectionService",
+          "label": "native/android/app/src/main/java/com/zterm/android/AndroidConnectionService.java (WebSocket target owner)"
+        },
+        {
+          "id": "AndroidConnectionServicePlugin",
+          "label": "native/android/app/src/main/java/com/zterm/android/AndroidConnectionServicePlugin.java (typed IPC projection)"
+        },
+        {
+          "id": "AndroidConnectionServiceSnapshot",
+          "label": "src/lib/android-connection-service-snapshot.ts (target-scoped projection)"
+        },
+        {
+          "id": "AndroidConnectionServiceRuntime",
+          "label": "src/contexts/android-connection-service-runtime.ts (UI projection)"
+        },
+        {
+          "id": "AndroidConnectionServiceIn01SetManualRoutePolicy",
+          "label": "AndroidConnectionServiceIn01SetManualRoutePolicy"
+        },
+        {
+          "id": "AndroidConnectionServiceIn02BindTarget",
+          "label": "AndroidConnectionServiceIn02BindTarget"
+        },
+        {
+          "id": "AndroidConnectionServiceIn03ReleaseTarget",
+          "label": "AndroidConnectionServiceIn03ReleaseTarget"
+        },
+        {
+          "id": "AndroidConnectionServiceOut01Snapshot",
+          "label": "AndroidConnectionServiceOut01Snapshot"
+        },
+        {
+          "id": "AndroidConnectionServiceOut02ServerFrame",
+          "label": "AndroidConnectionServiceOut02ServerFrame"
+        },
+        {
+          "id": "AndroidConnectionServiceOut03CommandRejected",
+          "label": "AndroidConnectionServiceOut03CommandRejected"
+        },
+        {
+          "id": "AndroidConnectionServiceOut04PhysicalError",
+          "label": "AndroidConnectionServiceOut04PhysicalError"
+        },
+        {
+          "id": "AndroidConnectionServiceError01CommandRejected",
+          "label": "AndroidConnectionServiceError01CommandRejected"
         }
       ],
       "edges": [
@@ -3093,6 +3141,175 @@
           "resource_to": "resource.platform_network_signal",
           "via_resources": [],
           "relation_status": "observer"
+        },
+        {
+          "from": "AndroidConnectionServiceIn01SetManualRoutePolicy",
+          "to": "AndroidConnectionServicePlugin",
+          "owner_feature": "client.android_connection_service",
+          "semantic_input": "user-selected service route policy",
+          "semantic_output": "typed SetManualRoutePolicy command at the IPC bridge",
+          "status": "partial",
+          "edge_id": "android_mainline:AndroidConnectionServiceIn01SetManualRoutePolicy->AndroidConnectionServicePlugin",
+          "resource_from": "resource.client_manual_route_policy",
+          "resource_to": "resource.client_connection_service_ipc",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "AndroidConnectionServiceIn02BindTarget",
+          "to": "AndroidConnectionServicePlugin",
+          "owner_feature": "client.android_connection_service",
+          "semantic_input": "resolved target identity",
+          "semantic_output": "typed BindTarget command at the IPC bridge",
+          "status": "partial",
+          "edge_id": "android_mainline:AndroidConnectionServiceIn02BindTarget->AndroidConnectionServicePlugin",
+          "resource_from": "resource.transport_target",
+          "resource_to": "resource.client_connection_service_ipc",
+          "via_resources": ["resource.android_connection_service"],
+          "relation_status": "via"
+        },
+        {
+          "from": "AndroidConnectionServiceIn03ReleaseTarget",
+          "to": "AndroidConnectionServicePlugin",
+          "owner_feature": "client.android_connection_service",
+          "semantic_input": "release target reason",
+          "semantic_output": "typed ReleaseTarget command at the IPC bridge",
+          "status": "partial",
+          "edge_id": "android_mainline:AndroidConnectionServiceIn03ReleaseTarget->AndroidConnectionServicePlugin",
+          "resource_from": "resource.client_connection_service_ipc",
+          "resource_to": "resource.client_connection_service_ipc",
+          "via_resources": ["resource.android_connection_service"],
+          "relation_status": "via"
+        },
+        {
+          "from": "AndroidConnectionServicePlugin",
+          "to": "AndroidConnectionService",
+          "owner_feature": "client.android_connection_service",
+          "semantic_input": "typed command",
+          "semantic_output": "native service applied command",
+          "status": "partial",
+          "edge_id": "android_mainline:AndroidConnectionServicePlugin->AndroidConnectionService",
+          "resource_from": "resource.client_connection_service_ipc",
+          "resource_to": "resource.android_connection_service",
+          "via_resources": ["resource.client_connection_service_ipc"],
+          "relation_status": "via"
+        },
+        {
+          "from": "AndroidConnectionService",
+          "to": "AndroidConnectionServiceOut01Snapshot",
+          "owner_feature": "client.android_connection_service",
+          "semantic_input": "service truth state",
+          "semantic_output": "immutable service snapshot",
+          "status": "partial",
+          "edge_id": "android_mainline:AndroidConnectionService->AndroidConnectionServiceOut01Snapshot",
+          "resource_from": "resource.android_connection_service",
+          "resource_to": "resource.client_service_snapshot",
+          "via_resources": ["resource.client_service_snapshot"],
+          "relation_status": "via"
+        },
+        {
+          "from": "AndroidConnectionService",
+          "to": "AndroidConnectionServiceOut02ServerFrame",
+          "owner_feature": "client.android_connection_service",
+          "semantic_input": "mux server frame",
+          "semantic_output": "server-frame projection event",
+          "status": "partial",
+          "edge_id": "android_mainline:AndroidConnectionService->AndroidConnectionServiceOut02ServerFrame",
+          "resource_from": "resource.android_connection_service",
+          "resource_to": "resource.client_service_snapshot",
+          "via_resources": ["resource.client_connection_service_ipc"],
+          "relation_status": "via"
+        },
+        {
+          "from": "AndroidConnectionService",
+          "to": "AndroidConnectionServiceOut03CommandRejected",
+          "owner_feature": "client.android_connection_service",
+          "semantic_input": "rejected command",
+          "semantic_output": "command-rejected projection event",
+          "status": "partial",
+          "edge_id": "android_mainline:AndroidConnectionService->AndroidConnectionServiceOut03CommandRejected",
+          "resource_from": "resource.android_connection_service",
+          "resource_to": "resource.client_connection_service_ipc",
+          "via_resources": ["resource.client_connection_service_ipc"],
+          "relation_status": "via"
+        },
+        {
+          "from": "AndroidConnectionService",
+          "to": "AndroidConnectionServiceOut04PhysicalError",
+          "owner_feature": "client.android_connection_service",
+          "semantic_input": "physical transport error",
+          "semantic_output": "physical-error projection event",
+          "status": "partial",
+          "edge_id": "android_mainline:AndroidConnectionService->AndroidConnectionServiceOut04PhysicalError",
+          "resource_from": "resource.android_connection_service",
+          "resource_to": "resource.client_service_snapshot",
+          "via_resources": ["resource.client_connection_service_ipc"],
+          "relation_status": "via"
+        },
+        {
+          "from": "AndroidConnectionServiceOut01Snapshot",
+          "to": "AndroidConnectionServiceSnapshot",
+          "owner_feature": "client.android_connection_service",
+          "semantic_input": "snapshot payload",
+          "semantic_output": "snapshot projection",
+          "status": "partial",
+          "edge_id": "android_mainline:AndroidConnectionServiceOut01Snapshot->AndroidConnectionServiceSnapshot",
+          "resource_from": "resource.client_service_snapshot",
+          "resource_to": "resource.client_service_snapshot",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "AndroidConnectionServiceSnapshot",
+          "to": "AndroidConnectionServiceRuntime",
+          "owner_feature": "client.android_connection_service",
+          "semantic_input": "snapshot projection",
+          "semantic_output": "runtime reducer state",
+          "status": "partial",
+          "edge_id": "android_mainline:AndroidConnectionServiceSnapshot->AndroidConnectionServiceRuntime",
+          "resource_from": "resource.client_service_snapshot",
+          "resource_to": "resource.client_service_snapshot",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "AndroidConnectionServiceOut02ServerFrame",
+          "to": "AndroidConnectionServiceRuntime",
+          "owner_feature": "client.android_connection_service",
+          "semantic_input": "server-frame projection event",
+          "semantic_output": "runtime reducer terminal channel binding",
+          "status": "partial",
+          "edge_id": "android_mainline:AndroidConnectionServiceOut02ServerFrame->AndroidConnectionServiceRuntime",
+          "resource_from": "resource.client_service_snapshot",
+          "resource_to": "resource.client_service_snapshot",
+          "via_resources": ["resource.client_connection_service_ipc"],
+          "relation_status": "via"
+        },
+        {
+          "from": "AndroidConnectionServiceRuntime",
+          "to": "SessionContext",
+          "owner_feature": "client.android_connection_service",
+          "semantic_input": "runtime reducer state",
+          "semantic_output": "projection consumer binding",
+          "status": "partial",
+          "edge_id": "android_mainline:AndroidConnectionServiceRuntime->SessionContext",
+          "resource_from": "resource.client_service_snapshot",
+          "resource_to": "resource.session_transport",
+          "via_resources": ["resource.client_service_snapshot"],
+          "relation_status": "via"
+        },
+        {
+          "from": "AndroidConnectionServiceOut03CommandRejected",
+          "to": "AndroidConnectionServiceError01CommandRejected",
+          "owner_feature": "client.android_connection_service",
+          "semantic_input": "rejected command",
+          "semantic_output": "command-rejected error",
+          "status": "partial",
+          "edge_id": "android_mainline:AndroidConnectionServiceOut03CommandRejected->AndroidConnectionServiceError01CommandRejected",
+          "resource_from": "resource.client_connection_service_ipc",
+          "resource_to": "resource.client_connection_service_ipc",
+          "via_resources": [],
+          "relation_status": "direct"
         }
       ]
     },
