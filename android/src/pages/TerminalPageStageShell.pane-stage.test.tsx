@@ -100,6 +100,8 @@ describe('TerminalStageShell shared PaneStage integration (red baseline)', () =>
     );
     expect(container.querySelector('[data-testid="pane-stage-single"]')).toBeTruthy();
     expect(container.querySelector('[data-testid="pane-stage-split"]')).toBeFalsy();
+    expect((container.querySelector('[data-testid="terminal-stage-shell"] > div') as HTMLElement).style.display).toBe('flex');
+    expect((container.querySelector('[data-testid="terminal-stage-shell"] > div') as HTMLElement).style.flexDirection).toBe('column');
   });
 
   it('renders split mode via shared PaneStage when splitVisible=true', async () => {
@@ -235,6 +237,45 @@ describe('TerminalStageShell shared PaneStage integration (red baseline)', () =>
     expect(style).toContain('bottom: 30px;');
     expect(style).not.toContain('bottom: 310px;');
     expect(style).not.toContain('transform: translateY');
+  });
+
+  it('repositions the terminal container when the measured top inset changes', async () => {
+    const { TerminalStageShell } = await import('./TerminalPageStageShell');
+    const props = {
+      interactiveSession: null,
+      renderedPaneSessions: [],
+      visiblePaneEntries: [],
+      splitVisible: false,
+      activePaneId: 'pane-main',
+      terminalChromeTopPx: 20,
+      terminalChromeBottomPx: 30,
+      terminalKeyboardRequested: false,
+      isAndroid: true,
+      handleTerminalViewportChange: vi.fn(),
+      handleSwipeTab: vi.fn(),
+      handleActiveTerminalActivateInput: vi.fn(),
+      onActivatePane: vi.fn(),
+      focusNonce: 0,
+      terminalFontSize: 14,
+      terminalThemeId: 'default',
+      terminalWidthMode: 'mirror-fixed' as const,
+      absoluteLineNumbersVisible: false,
+      copySelection: {
+        active: false,
+        sessionId: null,
+        startRowIndex: null,
+        endRowIndex: null,
+        menu: null,
+      },
+      onLongPressRow: vi.fn(),
+    };
+    const view = render(<TerminalStageShell {...props} />);
+
+    expect(screen.getByTestId('terminal-stage-shell').style.top).toBe('20px');
+
+    view.rerender(<TerminalStageShell {...props} terminalChromeTopPx={8} />);
+
+    expect(screen.getByTestId('terminal-stage-shell').style.top).toBe('8px');
   });
 
   it('passes left-edge-only drawer swipe ownership when mirror-fixed crop pan is active', async () => {

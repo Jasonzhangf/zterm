@@ -30,14 +30,14 @@ afterEach(() => {
 
 beforeEach(() => {
   const m = new Map<string,string>();
-  (globalThis as any).localStorage = {
+  vi.stubGlobal('localStorage', {
     get length(){ return m.size;},
     clear(){ m.clear(); },
     getItem(k:string){ return m.has(k)?m.get(k)!:null; },
     key(i:number){ return [...m.keys()][i] ?? null; },
     removeItem(k:string){ m.delete(k); },
     setItem(k:string,v:string){ m.set(k,String(v)); },
-  } as Storage;
+  } as Storage);
 });
 
 vi.mock('@capacitor/core', () => ({
@@ -85,10 +85,38 @@ function TerminalPage(props: ComponentProps<typeof TerminalPageBase>) {
 }
 
 // Track TerminalView renders to verify decoupling
-const terminalViewCalls: {sessionId: string; active: boolean; live: boolean}[] = [];
+const terminalViewCalls: {
+  sessionId: string;
+  active: boolean;
+  live: boolean;
+  onViewportChange?: (sessionId: string, viewState: {
+    mode: 'follow' | 'reading';
+    viewportEndIndex: number;
+    viewportRows: number;
+  }) => void;
+}[] = [];
 vi.mock('../components/TerminalView', () => ({
-  TerminalView: ({ sessionId, active, live }: { sessionId: string; active?: boolean; live?: boolean }) => {
-    terminalViewCalls.push({ sessionId, active: !!active, live: !!live });
+  TerminalView: ({
+    sessionId,
+    active,
+    live,
+    onViewportChange,
+  }: {
+    sessionId: string;
+    active?: boolean;
+    live?: boolean;
+    onViewportChange?: (sessionId: string, viewState: {
+      mode: 'follow' | 'reading';
+      viewportEndIndex: number;
+      viewportRows: number;
+    }) => void;
+  }) => {
+    terminalViewCalls.push({
+      sessionId,
+      active: !!active,
+      live: !!live,
+      onViewportChange,
+    });
     return (
       <div
         data-testid={`terminal-view-${sessionId}`}
@@ -259,7 +287,7 @@ describe('multi-pane pull decoupling', () => {
     expect(s2Calls.every(c => c.active === false)).toBe(true);
   });
 
-  it('announces every split-visible pane as live and emits first-frame viewport demand for inactive panes', () => {
+  it('announces every split-visible pane as live and lets each renderer own its measured viewport demand', () => {
     localStorage.setItem('zterm:terminal-layout', JSON.stringify({
       panes: [
         { id: 'pane-1', size: 0.5, activeTabId: 'tab-s1', tabs: [{ id: 'tab-s1', sessionId: 's1' }] },
@@ -283,10 +311,21 @@ describe('multi-pane pull decoupling', () => {
 
     expect(onLiveSessionIdsChange).toHaveBeenCalledWith(['s1', 's2']);
     expect(terminalViewCalls.filter(c => c.sessionId === 's2').every(c => c.live)).toBe(true);
-    expect(onTerminalViewportChange).toHaveBeenCalledWith('s2', {
-      mode: 'follow',
+    expect(onTerminalViewportChange).not.toHaveBeenCalledWith('s2', expect.objectContaining({
       viewportEndIndex: 0,
       viewportRows: 24,
+    }));
+
+    const inactivePaneView = terminalViewCalls.find((call) => call.sessionId === 's2');
+    inactivePaneView?.onViewportChange?.('s2', {
+      mode: 'follow',
+      viewportEndIndex: 120,
+      viewportRows: 12,
+    });
+    expect(onTerminalViewportChange).toHaveBeenCalledWith('s2', {
+      mode: 'follow',
+      viewportEndIndex: 120,
+      viewportRows: 12,
     });
   });
 });

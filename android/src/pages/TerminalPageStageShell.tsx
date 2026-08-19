@@ -573,6 +573,8 @@ const TerminalStageShell = ReactMemo(
           style={{
             flex: 1,
             minHeight: 0,
+            display: "flex",
+            flexDirection: "column",
             margin: paneProfile.stage.outerMargin,
             borderRadius: paneProfile.stage.containerRadius,
             backgroundColor: splitVisible
@@ -689,6 +691,7 @@ const TerminalStageShell = ReactMemo(
     prev.sessionGroupLayoutAxis === next.sessionGroupLayoutAxis &&
     prev.splitVisible === next.splitVisible &&
     prev.activePaneId === next.activePaneId &&
+    prev.terminalChromeTopPx === next.terminalChromeTopPx &&
     prev.terminalChromeBottomPx === next.terminalChromeBottomPx &&
     resolveRenderedSessionsInputEpochKey(
       prev.inputResetEpochBySession,

@@ -774,6 +774,7 @@ tmux truth
 - 大面积刷新若遇到 revision-gap sparse payload，client 必须拒绝合并错误 sparse body 并请求 authoritative tail；同时应 schedule 当前稳定 local buffer 的 render commit，把已确认 truth 重推给 renderer。禁止把 sparse payload 当 fallback 成功，也禁止等待 tail 期间让 renderer 没有任何稳定帧信号。
 - 大面积刷新若是 contiguous sparse tail jump，post-apply visible-gap repair 必须先判断是否已有本地窗口且旧 visible range 是否贴旧 tail：已有窗口且贴旧 tail 代表 follow，应改用新 tail 默认 visible range 查 gap；初始 sparse 首帧或不贴旧 tail 代表 reading/未定，必须保留旧 visible range，禁止吞掉 renderer 后续 reading-gap 请求或把用户历史阅读位置重解释成新 tail。
 - 高 pane 新首帧若 cursor 可见、cursor 在 tail viewport 之外、且 tail window 全部为空白，follow anchor 可以落到 `cursorRowIndex + 1`，让首屏显示 prompt 而不是空白下 pane；tail window 有真实内容或 cursor 已靠近 tail 时仍必须保持 tail follow。cursor metadata 不能作为 body repaint 源。
+- Android shell shrink 黑屏先查 `client.terminal_shell` 的 flex geometry：承载 `PaneStage` 的 absolute stage wrapper 必须是 `display:flex; flex-direction:column; min-height:0`，否则 `flex:1` 不会把稳定高度传给 pane/.wterm，最终表现为 renderer host 高度 0 或过期。Shell memo comparator 必须覆盖所有影响 absolute `top/bottom` 的 measured inset props；漏掉 `terminalChromeTopPx` 会让容器位置停在旧值。修复必须留在 shell geometry owner，不能在 buffer manager 伪造 viewport 或加渲染 fallback。
 - reading 遇到大面积 buffer shift 时，只有上一帧 padding delta 超过 viewport 高度才把 native scroll 映射到当前 effectiveRenderBottomIndex；小 padding 变化不得重锚，避免普通历史读取在刷新时跳动。没有上一帧或 viewport 高度未知时保持原位置。
 - 若现场表现为“**能输入但画面停在旧 buffer / session drawer 卡 connecting / 杀 APP 秒连但后台回来不刷**”，先判 client 读链恢复断裂：
   1. WebSocket 是客户端物理 transport，不是 daemon 持有的永久 per-session 真源；daemon 真源是 tmux mirror
@@ -938,3 +939,9 @@ tmux truth
 - `adaptive-phone` 也不是 client 本地排版：正确链路只能是 client 上报 measured cols -> daemon adaptive lease owner 请求 tmux reflow -> tmux capture/readback 更新 mirror truth -> client 固定行高渲染。
 - 反模式：把 `viewportCols` / `widthMode` 放进 render geometry revision key、无 tmux truth 时补 80 cols、修改 shared renderer row/cell/theme 背景来掩盖旧 buffer 或空 buffer、用 UI border/scrollbar/IME 变化触发 terminal content geometry refresh。
 - 红测要求：session enter / drawer switch / explicit resume 必须证明 first `buffer-head-request` 到达当前 active resource，head 后按 tmux `availableStartIndex/latestEndIndex/rows` 拉 `buffer-sync`；renderer 测试只证明消费 fixed mirror truth，不证明或制造排版。
+
+## 2026-08-18 terminal container shrink boundary
+
+- 容器缩小或恢复时，先验证 `TerminalStageShell -> PaneStage -> .wterm -> ResizeObserver/clientHeight -> renderer viewport demand` 的实际尺寸链；shell stage wrapper 必须是可计算高度的 column flex 容器，不能只设置 `flex: 1`。
+- `TerminalView` 是 DOM 高度和 `viewportRows` 的唯一 owner。`TerminalPage` / pane 编排层禁止读取 `buffer.rows`、`buffer.endIndex` 伪造非 active pane 的 viewport demand；该路径会把 buffer truth 和 renderer window 混成第二语义，并可能在 shrink 后黑屏。
+- shrink 验收必须同时检查：stage/`.wterm` `clientHeight > 0`、renderer 上报的 `viewportRows` 随高度变化、absolute tail 行连续、没有 `data-terminal-line-discontinuous`；再恢复原尺寸确认 geometry 和尾行继续收敛。

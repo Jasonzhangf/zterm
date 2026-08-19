@@ -5096,6 +5096,83 @@ describe('TerminalView minimal mirror render', () => {
     }
   });
 
+  it('keeps the authoritative tail rendered and publishes measured rows after the container shrinks', async () => {
+    vi.useFakeTimers();
+    try {
+      const onViewportChange = vi.fn();
+      const session = makeSession({
+        revision: 1,
+        lines: buildRows(80),
+        bufferTailEndIndex: 80,
+      });
+
+      const view = render(
+        <div style={{ width: '640px', height: '408px' }}>
+          <TerminalView
+            sessionId={session.id}
+            initialBufferLines={session.buffer.lines}
+            bufferStartIndex={session.buffer.startIndex}
+            bufferEndIndex={session.buffer.endIndex}
+            bufferTailEndIndex={session.buffer.bufferTailEndIndex}
+            bufferGapRanges={session.buffer.gapRanges}
+            cursorKeysApp={session.buffer.cursorKeysApp}
+            active
+            onInput={vi.fn()}
+            onViewportChange={onViewportChange}
+            fontSize={5}
+            showAbsoluteLineNumbers
+          />
+        </div>,
+      );
+
+      const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
+      let scrollHeight = 1360;
+      Object.defineProperty(scroller, 'scrollHeight', {
+        configurable: true,
+        get() {
+          return scrollHeight;
+        },
+      });
+
+      await act(async () => {
+        vi.advanceTimersByTime(120);
+      });
+      expect(onViewportChange).toHaveBeenLastCalledWith(session.id, {
+        mode: 'follow',
+        viewportEndIndex: 80,
+        viewportRows: 24,
+      });
+
+      onViewportChange.mockClear();
+      mockClientHeight = 204;
+      scrollHeight = 1360;
+      act(() => {
+        ResizeObserverMock.triggerAll();
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(120);
+      });
+
+      const renderedRows = readRenderedIndexedRows(view.container);
+      expect(renderedRows.length).toBeGreaterThan(0);
+      expect(renderedRows[renderedRows.length - 1]).toMatchObject({
+        absoluteIndex: 79,
+        text: 'row-080',
+      });
+      const renderedLineNumbers = readRenderedLineNumbers(view.container);
+      expect(renderedLineNumbers[renderedLineNumbers.length - 1]).toBe(79);
+      expect(view.container.querySelector('[data-terminal-line-discontinuous="true"]')).toBeNull();
+      expect(onViewportChange).toHaveBeenLastCalledWith(session.id, {
+        mode: 'follow',
+        viewportEndIndex: 80,
+        viewportRows: 12,
+      });
+      expect(onViewportChange.mock.calls.some(([, payload]) => payload?.mode === 'reading')).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('keeps follow line numbers anchored to the latest tail during IME-style relayout and rapid tail refreshes', async () => {
     vi.useFakeTimers();
     try {

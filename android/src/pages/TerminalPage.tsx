@@ -1521,23 +1521,6 @@ function TerminalPageComponent({
     onLiveSessionIdsChange(livePaneSessionIds);
   }, [livePaneSessionIds, livePaneSessionIdsKey, onLiveSessionIdsChange]);
 
-  useLayoutEffect(() => {
-    if (!splitVisible || !onTerminalViewportChange) {
-      return;
-    }
-    renderedPaneSessions.forEach((session) => {
-      if (session.id === interactiveSession?.id) {
-        return;
-      }
-      const renderBuffer = sessionBufferStore?.getSnapshot(session.id).buffer;
-      onTerminalViewportChange(session.id, {
-        mode: 'follow',
-        viewportEndIndex: renderBuffer?.endIndex ?? 0,
-        viewportRows: renderBuffer?.rows ?? 24,
-      });
-    });
-  }, [interactiveSession?.id, livePaneSessionIdsKey, onTerminalViewportChange, renderedPaneSessions, sessionBufferStore, splitVisible]);
-
   useEffect(() => {
     return () => {
       previousLivePaneSessionIdsKeyRef.current = '';

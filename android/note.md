@@ -7525,3 +7525,28 @@ if (bufferedBytes >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES) {
 - Exact candidate `cdb4207` has two blocking review findings: native snapshot failures are repacked as `SessionTargetNetworkSignal` source/message, and `client.daemon_connection` retains typed failures in an unconsumed slot.
 - Owner decision: native snapshot failure remains `TargetNetworkProbeError04NativeSnapshot` on a dedicated typed context callback; the normal platform signal union must contain only network status/generation signals. The daemon-connection owner will retain the latest typed failure and invoke a registered typed consumer at report time; orchestration registers the runtime-debug/error projection callback. No error enters session/wire/business payload.
 - Required positive/negative coverage: typed failure reaches the registered consumer and retained slot; healthy platform signal does not enter the error chain; stale failure acknowledgement cannot consume the newer failure.
+# 2026-08-18 terminal container shrink black-screen investigation
+
+## Architecture mapping before implementation
+
+- Feature block: `client.buffer_render` with the `client.terminal_shell` layout projection edge.
+- Resources: `resource.client_sparse_buffer` -> `resource.renderer_window` is an observer/demand edge; `resource.client.terminal_shell` -> `resource.renderer_window` supplies measured DOM layout only. No direct shell -> buffer truth edge.
+- Unique owners:
+  - `android/src/pages/TerminalPageStageShell.tsx`: shell/pane/container geometry projection.
+  - `android/src/components/TerminalView.tsx`: DOM measurement, renderer viewport/follow/reading/render geometry, immutable render projection.
+  - `packages/shared/src/terminal/renderer/row.ts` and `viewport.ts`: pure renderer geometry and viewport demand helpers.
+  - `android/src/lib/session-render-buffer-store.ts` and session buffer runtime: sparse buffer truth and range repair.
+- Allowed paths: the shell may size the `.wterm` host; `TerminalView` may measure that host and publish measured viewport demand; buffer runtime may consume demand and apply authoritative buffer-sync.
+- Forbidden paths: shell/page effects must not fabricate a renderer viewport from `buffer.rows/endIndex`; renderer must not resize tmux/daemon geometry; buffer owner must not own `follow`, `reading`, `renderBottomIndex`, or container geometry.
+- Current classification: split-page viewport fabrication is a separation fix at the projection edge, not a buffer fallback. The shrink geometry fix, if needed, remains in `TerminalView`/shared renderer owner.
+- Required positive/negative proof:
+  - positive: after a real host-height shrink, renderer publishes the measured smaller viewport and keeps the same absolute buffer tail/render rows.
+  - negative: a page-level non-interactive-pane effect cannot overwrite renderer demand with buffer geometry; buffer snapshot remains unchanged and no synthetic rows/cols are introduced.
+- Hypothesis H1: the first semantic divergence is a transient or fabricated viewport projection during shell shrink, causing renderer follow realignment and buffer demand to use the wrong row count. Confirmation requires a failing shrink test showing demand/DOM rows diverge while buffer truth is stable. Falsification is stable measured demand plus an independent buffer snapshot failure.
+
+## Root cause confirmed
+
+- `TerminalStageShell`'s absolute stage wrapper had `flex: 1` but was not itself a flex container. The plugin shell therefore did not give its inner `PaneStage` a stable height; when the outer viewport shrank, the pane/`.wterm` height could collapse or remain stale, while buffer truth stayed valid. This is a shell geometry owner defect, not a buffer repair defect.
+- `TerminalStageShell`'s custom memo comparator also omitted `terminalChromeTopPx`, so a top inset/layout change could be ignored after the component had memoized the previous absolute position.
+- Fixes are limited to `client.terminal_shell`: make the stage wrapper a column flex container, include the measured top inset in memo identity, and remove the page-level split effect that fabricated viewport demand from buffer metadata. `TerminalView` remains the only DOM measurement/renderer viewport owner; the sparse buffer is unchanged.
+- Positive evidence: 80 TerminalView shrink tests, 13 StageShell tests, 7 multi-pane decoupling tests, 14 base TerminalView tests, and 3 viewport-metrics tests pass; the StageShell regression first failed before the comparator fix and passed after it.
