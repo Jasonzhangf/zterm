@@ -11,6 +11,22 @@ flowchart TD
   Native --> NetworkIdentityWrapper["src/plugins/NetworkIdentityPlugin.ts#registerPlugin(NetworkIdentity)"]
   Vite --> Main["src/main.tsx"]
   Main --> App["src/App.tsx"]
+  App --> AndroidConnectionServiceIn01SetManualRoutePolicy["AndroidConnectionServiceIn01SetManualRoutePolicy (user command only)"]
+  App --> AndroidConnectionServiceIn02BindTarget["AndroidConnectionServiceIn02BindTarget (typed command)"]
+  App --> AndroidConnectionServiceIn03ReleaseTarget["AndroidConnectionServiceIn03ReleaseTarget (typed command)"]
+  AndroidConnectionServiceIn01SetManualRoutePolicy --> AndroidConnectionServicePlugin["native AndroidConnectionServicePlugin"]
+  AndroidConnectionServiceIn02BindTarget --> AndroidConnectionServicePlugin
+  AndroidConnectionServiceIn03ReleaseTarget --> AndroidConnectionServicePlugin
+  AndroidConnectionServicePlugin --> AndroidConnectionService["native AndroidConnectionService (WebSocket owner)"]
+  AndroidConnectionService --> AndroidConnectionServiceOut01Snapshot["AndroidConnectionServiceOut01Snapshot"]
+  AndroidConnectionService --> AndroidConnectionServiceOut02ServerFrame["AndroidConnectionServiceOut02ServerFrame"]
+  AndroidConnectionService --> AndroidConnectionServiceOut03CommandRejected["AndroidConnectionServiceOut03CommandRejected"]
+  AndroidConnectionService --> AndroidConnectionServiceOut04PhysicalError["AndroidConnectionServiceOut04PhysicalError"]
+  AndroidConnectionServiceOut01Snapshot --> AndroidConnectionServiceSnapshot["src/lib/android-connection-service-snapshot.ts"]
+  AndroidConnectionServiceSnapshot --> AndroidConnectionServiceRuntime["src/contexts/android-connection-service-runtime.ts (projection)"]
+  AndroidConnectionServiceOut02ServerFrame --> AndroidConnectionServiceRuntime
+  AndroidConnectionServiceRuntime --> SessionContext
+  AndroidConnectionServiceOut03CommandRejected --> AndroidConnectionServiceError01CommandRejected["AndroidConnectionServiceError01CommandRejected"]
   App --> CompositionRoot["src/lib/composition-root/client-composition-root.ts#ClientCompositionRoot"]
   CompositionRoot --> PluginHost
   App --> ControlCenter["src/lib/control-center/client-control-center.ts#ClientControlCenter"]

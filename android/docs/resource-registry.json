@@ -3640,6 +3640,218 @@
         "docs/function-map.md",
         "docs/testing/appsdk-binary-gate-test-design.md"
       ]
+    },
+    {
+      "resource_id": "resource.android_connection_service",
+      "resource_type": "platform_client_truth",
+      "status": "design",
+      "identity": "Native Android foreground service that owns the physical WebSocket transport, mux handshake, heartbeat, network-generation validation, reconnect/backoff, and desired route policy for the Android client.",
+      "owner_feature": "client.android_connection_service",
+      "truth_store": "native/android/app/src/main/java/com/zterm/android/AndroidConnectionService.java (target owner; pending slice).",
+      "allowed_operations": [
+        "open_physical_transport",
+        "reuse_physical_transport",
+        "probe_exact_physical_generation",
+        "reconnect_with_backoff",
+        "send_mux_ping",
+        "send_mux_frame",
+        "receive_mux_frame",
+        "validate_network_generation",
+        "close_physical_transport",
+        "apply_manual_route_policy",
+        "reject_stale_generation"
+      ],
+      "direct_relations": [
+        "resource.client_connection_service_ipc",
+        "resource.client_service_snapshot",
+        "resource.client_manual_route_policy",
+        "resource.transport_target",
+        "resource.route_policy",
+        "resource.relay_peer_lease"
+      ],
+      "indirect_relations": [
+        "resource.terminal_channel",
+        "resource.client_sparse_buffer",
+        "resource.client_buffer_frame_assembly",
+        "resource.renderer_window",
+        "resource.backend_session"
+      ],
+      "via_resources": [
+        "resource.client_connection_service_ipc",
+        "resource.terminal_channel"
+      ],
+      "forbidden_direct_relations": [
+        "resource.open_tab",
+        "resource.active_session",
+        "resource.platform_terminal_surface",
+        "resource.ui_projection",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.tmux_session",
+        "resource.mirror_store"
+      ],
+      "required_gates": [
+        "android/docs/testing/connection-service-owner-test-design.md",
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/feature-registry-truth.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/goals/connection-service-owner-migration-plan.md",
+        "docs/testing/connection-service-owner-test-design.md",
+        "docs/function-map.md",
+        "docs/resource-map.md"
+      ]
+    },
+    {
+      "resource_id": "resource.client_connection_service_ipc",
+      "resource_type": "platform_client_truth",
+      "status": "design",
+      "identity": "Typed Capacitor IPC bridge between the WebView/React UI and the native AndroidConnectionService; carries only control-plane commands and snapshot/event payloads.",
+      "owner_feature": "client.android_connection_service",
+      "truth_store": "native/android/app/src/main/java/com/zterm/android/AndroidConnectionServicePlugin.java (target owner; pending slice).",
+      "allowed_operations": [
+        "send_set_manual_route_policy",
+        "send_bind_target",
+        "send_release_target",
+        "subscribe_snapshot",
+        "unsubscribe_snapshot",
+        "emit_state_changed_event",
+        "emit_server_frame_event",
+        "emit_command_rejected_event",
+        "emit_physical_error_event"
+      ],
+      "direct_relations": [
+        "resource.android_connection_service",
+        "resource.client_service_snapshot",
+        "resource.client_manual_route_policy",
+        "resource.client_connection_service_ipc"
+      ],
+      "indirect_relations": [
+        "resource.session_transport",
+        "resource.daemon_target_transport"
+      ],
+      "via_resources": [
+        "resource.android_connection_service"
+      ],
+      "forbidden_direct_relations": [
+        "resource.open_tab",
+        "resource.active_session",
+        "resource.platform_terminal_surface",
+        "resource.ui_projection",
+        "resource.tmux_session",
+        "resource.mirror_store",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.terminal_channel"
+      ],
+      "required_gates": [
+        "android/docs/testing/connection-service-owner-test-design.md",
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/feature-registry-truth.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/goals/connection-service-owner-migration-plan.md",
+        "docs/testing/connection-service-owner-test-design.md",
+        "docs/function-map.md"
+      ]
+    },
+    {
+      "resource_id": "resource.client_service_snapshot",
+      "resource_type": "platform_client_truth",
+      "status": "design",
+      "identity": "Immutable projection of the AndroidConnectionService state at the moment of capture; consumed by the UI to render only.",
+      "owner_feature": "client.android_connection_service",
+      "truth_store": "src/lib/android-connection-service-snapshot.ts (target owner; pending slice).",
+      "allowed_operations": [
+        "project_state",
+        "project_generation",
+        "project_target",
+        "project_route",
+        "project_channels",
+        "project_last_heartbeat_at",
+        "project_last_activity_at",
+        "project_next_retry_at",
+        "project_error"
+      ],
+      "direct_relations": [
+        "resource.android_connection_service",
+        "resource.client_service_snapshot"
+      ],
+      "indirect_relations": [
+        "resource.platform_terminal_surface",
+        "resource.ui_projection"
+      ],
+      "via_resources": [
+        "resource.android_connection_service"
+      ],
+      "forbidden_direct_relations": [
+        "resource.open_tab",
+        "resource.active_session",
+        "resource.tmux_session",
+        "resource.mirror_store",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.terminal_channel"
+      ],
+      "required_gates": [
+        "android/docs/testing/connection-service-owner-test-design.md",
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/feature-registry-truth.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/goals/connection-service-owner-migration-plan.md",
+        "docs/testing/connection-service-owner-test-design.md",
+        "docs/function-map.md"
+      ]
+    },
+    {
+      "resource_id": "resource.client_manual_route_policy",
+      "resource_type": "platform_client_truth",
+      "status": "design",
+      "identity": "User-selected explicit route policy command from the UI to the AndroidConnectionService; the only UI command that may change connection behavior.",
+      "owner_feature": "client.android_connection_service",
+      "truth_store": "src/lib/android-connection-service-commands.ts (target owner; pending slice).",
+      "allowed_operations": [
+        "select_direct_route",
+        "select_relay_route",
+        "select_manual_route",
+        "reject_webrtc_route",
+        "validate_acquired_route"
+      ],
+      "direct_relations": [
+        "resource.client_connection_service_ipc",
+        "resource.route_policy"
+      ],
+      "indirect_relations": [
+        "resource.android_connection_service"
+      ],
+      "via_resources": [
+        "resource.client_connection_service_ipc"
+      ],
+      "forbidden_direct_relations": [
+        "resource.open_tab",
+        "resource.active_session",
+        "resource.session_transport",
+        "resource.daemon_target_transport",
+        "resource.platform_network_signal",
+        "resource.platform_terminal_surface",
+        "resource.tmux_session",
+        "resource.mirror_store",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window"
+      ],
+      "required_gates": [
+        "android/docs/testing/connection-service-owner-test-design.md",
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/feature-registry-truth.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/goals/connection-service-owner-migration-plan.md",
+        "docs/testing/connection-service-owner-test-design.md",
+        "docs/function-map.md"
+      ]
     }
   ],
   "required_indirect_relations": [
@@ -4053,6 +4265,54 @@
     {
       "from": "resource.relay_account_directory",
       "to": "resource.relay_account_directory"
+    },
+    {
+      "from": "resource.client_manual_route_policy",
+      "to": "resource.client_connection_service_ipc"
+    },
+    {
+      "from": "resource.client_connection_service_ipc",
+      "to": "resource.client_connection_service_ipc"
+    },
+    {
+      "from": "resource.client_connection_service_ipc",
+      "to": "resource.client_service_snapshot"
+    },
+    {
+      "from": "resource.client_connection_service_ipc",
+      "to": "resource.client_manual_route_policy"
+    },
+    {
+      "from": "resource.client_service_snapshot",
+      "to": "resource.client_service_snapshot"
+    },
+    {
+      "from": "resource.client_service_snapshot",
+      "to": "resource.android_connection_service"
+    },
+    {
+      "from": "resource.android_connection_service",
+      "to": "resource.client_connection_service_ipc"
+    },
+    {
+      "from": "resource.android_connection_service",
+      "to": "resource.client_service_snapshot"
+    },
+    {
+      "from": "resource.android_connection_service",
+      "to": "resource.client_manual_route_policy"
+    },
+    {
+      "from": "resource.android_connection_service",
+      "to": "resource.transport_target"
+    },
+    {
+      "from": "resource.android_connection_service",
+      "to": "resource.route_policy"
+    },
+    {
+      "from": "resource.android_connection_service",
+      "to": "resource.relay_peer_lease"
     }
   ]
 }

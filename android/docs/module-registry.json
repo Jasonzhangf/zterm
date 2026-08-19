@@ -3250,6 +3250,60 @@
         "generated/modules/zterm-runtime-v2/lib/zterm-runtime-v2.web.tgz",
         "generated/modules/zterm-runtime-v2/module.compiled.json"
       ]
+    },
+    {
+      "module_id": "client.connection_service",
+      "runtime_side": "client",
+      "level": 1,
+      "parent_module_id": "client.runtime",
+      "owner_feature": "client.android_connection_service",
+      "responsibility": "Sole Android native owner of the physical WebSocket transport, route auth, mux handshake, heartbeat, network-generation validation, reconnect/backoff, and desired route policy. UI never owns transport, heartbeat, or reconnect. (Slice status: design until native transport ownership is installed and verified.)",
+      "owned_resources": [],
+      "consumed_resources": [],
+      "pending_resources": [
+        "resource.android_connection_service",
+        "resource.client_connection_service_ipc",
+        "resource.client_service_snapshot",
+        "resource.client_manual_route_policy"
+      ],
+      "public_interfaces": [
+        "docs/goals/connection-service-owner-migration-plan.md",
+        "docs/testing/connection-service-owner-test-design.md"
+      ],
+      "forbidden_resources": [
+        "resource.open_tab",
+        "resource.active_session",
+        "resource.platform_terminal_surface",
+        "resource.ui_projection",
+        "resource.tmux_session",
+        "resource.mirror_store",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.backend_session"
+      ],
+      "canonical_docs": [
+        "docs/goals/connection-service-owner-migration-plan.md",
+        "docs/testing/connection-service-owner-test-design.md",
+        "docs/architecture.md",
+        "docs/resource-map.md"
+      ],
+      "required_gates": [
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/feature-registry-truth.test.ts",
+        "src/lib/resource-registry-truth.test.ts",
+        "docs/testing/connection-service-owner-test-design.md"
+      ],
+      "status": "design",
+      "owned_paths": [
+        "src/lib/android-connection-service-commands.ts",
+        "src/lib/android-connection-service-snapshot.ts",
+        "src/lib/android-connection-service-factory.ts",
+        "src/lib/android-connection-service-socket.ts",
+        "src/plugins/AndroidConnectionServicePlugin.ts",
+        "src/contexts/android-connection-service-runtime.ts",
+        "native/android/app/src/main/java/com/zterm/android/AndroidConnectionService.java",
+        "native/android/app/src/main/java/com/zterm/android/AndroidConnectionServicePlugin.java"
+      ]
     }
   ]
 }

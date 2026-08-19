@@ -1334,6 +1334,33 @@
         "record_graph",
         "module_ownership"
       ]
+    },
+    {
+      "module_id": "client.connection_service",
+      "status": "design",
+      "owner": "client.connection_service",
+      "owned_paths": [
+        "src/lib/android-connection-service-commands.ts",
+        "src/lib/android-connection-service-snapshot.ts",
+        "src/lib/android-connection-service-factory.ts",
+        "src/lib/android-connection-service-socket.ts",
+        "src/plugins/AndroidConnectionServicePlugin.ts",
+        "src/contexts/android-connection-service-runtime.ts",
+        "native/android/app/src/main/java/com/zterm/android/AndroidConnectionService.java",
+        "native/android/app/src/main/java/com/zterm/android/AndroidConnectionServicePlugin.java"
+      ],
+      "forbidden_paths": [
+        "active/lib/**",
+        "protected/**",
+        "generated/**"
+      ],
+      "verification_gates": [
+        "connection_service_owner",
+        "module_ownership",
+        "module_dag",
+        "payload_control_separation",
+        "typecheck"
+      ]
     }
   ]
 }

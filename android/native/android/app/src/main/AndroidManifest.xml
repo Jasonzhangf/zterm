@@ -47,15 +47,14 @@
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
 
-        <!-- 后台服务 -->
         <service
-            android:name=".BackgroundService"
+            android:name=".AndroidConnectionService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="persistent terminal control and session transport keepalive" />
+                android:value="persistent terminal connection lifecycle" />
         </service>
 
     </application>
