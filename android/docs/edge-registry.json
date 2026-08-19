@@ -1308,6 +1308,7 @@
       "owner_feature": "desktop.remote_window_stream",
       "allowed_callers": [
         "src/server/remote-window-stream-daemon.ts",
+        "src/server/remote-window-stream-session.ts",
         "src/server/server.ts"
       ],
       "forbidden_callers": [
@@ -3400,6 +3401,119 @@
         "src/lib/edge-registry-truth.test.ts"
       ],
       "status": "design"
+    },
+    {
+      "edge_id": "edge.daemon_remote_window_stream_to_canvas_layout",
+      "from_module": "daemon.remote_window_stream",
+      "to_module": "daemon.remote_window_stream",
+      "resource_from": "resource.remote_window_stream",
+      "resource_to": "resource.remote_window_canvas_layout",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "desktop.remote_window_stream",
+      "allowed_callers": [
+        "src/server/remote-window-stream-daemon.ts",
+        "src/server/remote-window-canvas-layout.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**"
+      ],
+      "request_chain": [
+        "RemoteWindowLayoutIn01ValidatedTarget",
+        "RemoteWindowLayoutIn02GenerationBuild"
+      ],
+      "response_chain": [
+        "RemoteWindowLayoutOut01PublishedCanvasLayout"
+      ],
+      "error_chain": [
+        "RemoteWindowLayoutError01InvalidGeometry"
+      ],
+      "mainline_call_ids": [
+        "daemon_mainline:RemoteWindowStream->RemoteWindowCanvasLayout"
+      ],
+      "required_gates": [
+        "src/server/remote-window-canvas-layout.test.ts",
+        "src/server/remote-window-stream-daemon.test.ts",
+        "src/lib/edge-registry-truth.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.daemon_remote_window_stream_to_focus_stream",
+      "from_module": "daemon.remote_window_stream",
+      "to_module": "daemon.remote_window_stream",
+      "resource_from": "resource.remote_window_stream",
+      "resource_to": "resource.remote_window_focus_stream",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "desktop.remote_window_stream",
+      "allowed_callers": [
+        "src/server/remote-window-stream-daemon.ts",
+        "src/server/remote-window-quality.ts",
+        "src/server/remote-window-capture.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**"
+      ],
+      "request_chain": [
+        "RemoteWindowQualityIn01GroupRequest",
+        "RemoteWindowQualityIn02FocusLaneApply"
+      ],
+      "response_chain": [
+        "RemoteWindowQualityOut01FocusBudgetApplied"
+      ],
+      "error_chain": [
+        "RemoteWindowQualityError01TransactionRejected"
+      ],
+      "mainline_call_ids": [
+        "daemon_mainline:RemoteWindowStream->RemoteWindowQuality"
+      ],
+      "required_gates": [
+        "src/server/remote-window-quality.test.ts",
+        "src/server/remote-window-stream-daemon.test.ts",
+        "src/lib/edge-registry-truth.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.daemon_remote_window_stream_to_overview_stream",
+      "from_module": "daemon.remote_window_stream",
+      "to_module": "daemon.remote_window_stream",
+      "resource_from": "resource.remote_window_stream",
+      "resource_to": "resource.remote_window_overview_stream",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "desktop.remote_window_stream",
+      "allowed_callers": [
+        "src/server/remote-window-stream-daemon.ts",
+        "src/server/remote-window-quality.ts",
+        "src/server/remote-window-capture.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**"
+      ],
+      "request_chain": [
+        "RemoteWindowQualityIn01GroupRequest",
+        "RemoteWindowQualityIn03OverviewLaneApply"
+      ],
+      "response_chain": [
+        "RemoteWindowQualityOut02OverviewBudgetApplied"
+      ],
+      "error_chain": [
+        "RemoteWindowQualityError02GroupRollback"
+      ],
+      "mainline_call_ids": [
+        "daemon_mainline:RemoteWindowStream->RemoteWindowQuality"
+      ],
+      "required_gates": [
+        "src/server/remote-window-quality.test.ts",
+        "src/server/remote-window-stream-daemon.test.ts",
+        "src/lib/edge-registry-truth.test.ts"
+      ],
+      "status": "active"
     }
   ],
   "import_edges_description": "Module-level import allowlist derived from the real src import graph. Gate: src/lib/module-import-graph-truth.test.ts. Every cross-module import edge in code must appear here, and every entry here must exist in code (lockstep both directions). status=pending_removal marks a known violation that must trend to zero; adding new pending_removal entries requires an explicit decision doc.",

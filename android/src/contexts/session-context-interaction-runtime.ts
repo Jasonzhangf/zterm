@@ -27,6 +27,7 @@ import type {
   RemoteWindowInputEventPayload,
   RemoteWindowStreamPurpose,
   RemoteWindowStreamQualityRequestPayload,
+  RemoteWindowStreamQualityResultPayload,
   RemoteWindowStreamStatusPayload,
   RemoteWindowStreamTargetsResponsePayload,
   RemoteWindowStreamTargetManifest,
@@ -64,7 +65,7 @@ interface RemoteWindowMessageRuntimeLike {
     },
   ) => Promise<RemoteWindowStreamTargetsResponsePayload>;
   requestStreamStart: (...args: any[]) => Promise<any>;
-  sendStreamQuality: (...args: any[]) => void;
+  sendStreamQuality: (...args: any[]) => Promise<RemoteWindowStreamQualityResultPayload>;
   sendStreamUpdateFocus: (...args: any[]) => void;
   sendStreamIceCandidate: (...args: any[]) => void;
   stopStream: (...args: any[]) => Promise<RemoteWindowStreamStatusPayload>;

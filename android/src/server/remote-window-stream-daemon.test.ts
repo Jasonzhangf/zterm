@@ -390,6 +390,89 @@ describe('remote window stream daemon owner', () => {
     });
   });
 
+  it('maps composite input through the published canvas/source rectangles', () => {
+    const target = {
+      ...makeAppStreamTarget(),
+      compositeWindows: [{
+        appBundleId: 'com.apple.TextEdit',
+        pid: 123,
+        windowId: 'secondary',
+        title: 'Secondary',
+        windowBoundsTopLeftPx: { x: 1_000, y: 500, width: 400, height: 300 },
+      }],
+    };
+    const config = buildRemoteWindowInputConfig({
+      requestId: 'rw-input-composite',
+      streamId: 'stream-input-composite',
+      targetId: target.streamTargetId,
+      layoutGeneration: 7,
+      event: {
+        kind: 'click',
+        pointerId: 1,
+        button: 'left',
+        x: 410,
+        y: 320,
+        normalizedX: 0.5,
+        normalizedY: 0.5,
+      },
+    }, target, {
+      canvasLayout: {
+        version: 1,
+        layoutGeneration: 7,
+        canvasSize: { width: 800, height: 600 },
+        focusTargetId: target.streamTargetId,
+        windows: [{
+          windowId: 'secondary',
+          sourceRectTopLeftPx: { x: 1_000, y: 500, width: 400, height: 300 },
+          canvasRectPx: { x: 200, y: 100, width: 400, height: 400 },
+          zIndex: 0,
+        }],
+      },
+    });
+    expect(config.event).toMatchObject({ kind: 'click', x: 1_200, y: 650 });
+  });
+
+  it('fails composite input outside the published layout instead of selecting a fallback window', () => {
+    const target = {
+      ...makeAppStreamTarget(),
+      compositeWindows: [{
+        appBundleId: 'com.apple.TextEdit',
+        pid: 123,
+        windowId: 'secondary',
+        title: 'Secondary',
+        windowBoundsTopLeftPx: { x: 1_000, y: 500, width: 400, height: 300 },
+      }],
+    };
+    expect(() => buildRemoteWindowInputConfig({
+      requestId: 'rw-input-outside',
+      streamId: 'stream-input-outside',
+      targetId: target.streamTargetId,
+      layoutGeneration: 7,
+      event: {
+        kind: 'click',
+        pointerId: 1,
+        button: 'left',
+        x: 790,
+        y: 590,
+        normalizedX: 0.99,
+        normalizedY: 0.99,
+      },
+    }, target, {
+      canvasLayout: {
+        version: 1,
+        layoutGeneration: 7,
+        canvasSize: { width: 800, height: 600 },
+        focusTargetId: target.streamTargetId,
+        windows: [{
+          windowId: 'secondary',
+          sourceRectTopLeftPx: { x: 1_000, y: 500, width: 400, height: 300 },
+          canvasRectPx: { x: 200, y: 100, width: 400, height: 400 },
+          zIndex: 0,
+        }],
+      },
+    })).toThrow('outside the published layout');
+  });
+
   it('uses daemon-local receive time, not client wall clock, for input stale checks', () => {
     expect(isRemoteWindowInputConfigStale({
       daemonReceivedAtMs: 20_000,
@@ -1747,6 +1830,40 @@ setInterval(() => {}, 1000);
     }]);
   });
 
+  it('fails negotiation explicitly without rewriting SDP or starting capture', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    fakePeer.setRemoteDescription.mockRejectedValueOnce(new Error('offer rejected'));
+    const captureSourceFactory = vi.fn();
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      captureSourceFactory,
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => ({
+        createTrack: vi.fn(() => makeFakeMediaStreamTrack()),
+        onFrame: vi.fn(),
+      } as any)),
+      rgbaToI420: vi.fn(),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+    const result = await runtime.startStream({
+      requestId: 'rw-negotiation-fail',
+      streamId: 'stream-negotiation-fail',
+      target: makeStreamTarget(),
+      offer: { type: 'offer', sdp: 'invalid-client-offer' },
+    });
+    expect(result).toMatchObject({
+      requestId: 'rw-negotiation-fail',
+      streamId: 'stream-negotiation-fail',
+      code: 'remote_window_stream_start_failed',
+      message: 'offer rejected',
+    });
+    expect(fakePeer.setRemoteDescription).toHaveBeenCalledTimes(1);
+    expect(fakePeer.setRemoteDescription).toHaveBeenCalledWith({ type: 'offer', sdp: 'invalid-client-offer' });
+    expect(captureSourceFactory).not.toHaveBeenCalled();
+    expect(fakePeer.close).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps low-rate preview and high-quality focus streams independent in daemon lifecycle', async () => {
     const canvasPeer = new FakeRemoteWindowPeerConnection();
     const focusPeer = new FakeRemoteWindowPeerConnection();
@@ -1772,6 +1889,7 @@ setInterval(() => {}, 1000);
         width: 2,
         height: 2,
         frameRate: options.frameRate,
+        updateFrameRate: vi.fn(async () => undefined),
         stop: captureStops[index]!,
       };
     });
@@ -2006,6 +2124,7 @@ setInterval(() => {}, 1000);
           width: 2,
           height: 2,
           frameRate: 12,
+          updateFrameRate: vi.fn(async () => undefined),
           stop: vi.fn(),
         };
       }),
@@ -2039,6 +2158,8 @@ setInterval(() => {}, 1000);
     const updated = await runtime.updateStreamQuality({
       requestId: 'rw-bitrate-update',
       streamId: 'stream-bitrate',
+      streamGroupId: 'stream-bitrate',
+      revision: 1,
       targetId: 'iterm2-pane:window-1:tab-1:left',
       videoBitrate: { preset: 'fullscreen', bitrateMbps: 20, maxBitrateBps: 20_000_000 },
     });
@@ -2046,10 +2167,17 @@ setInterval(() => {}, 1000);
     expect(updated).toEqual({
       requestId: 'rw-bitrate-update',
       streamId: 'stream-bitrate',
+      streamGroupId: 'stream-bitrate',
+      revision: 1,
       purpose: 'focus',
       targetId: 'iterm2-pane:window-1:tab-1:left',
-      accepted: true,
-      videoBitrate: { preset: 'fullscreen', bitrateMbps: 20, maxBitrateBps: 20_000_000, maxFrameRateFps: 60 },
+      status: 'applied',
+      requestedVideoBitrate: { preset: 'fullscreen', bitrateMbps: 20, maxBitrateBps: 20_000_000 },
+      appliedVideoBitrate: { preset: 'fullscreen', bitrateMbps: 20, maxBitrateBps: 20_000_000, maxFrameRateFps: 60 },
+      appliedGroupBudget: {
+        totalMaxBitrateBps: 20_000_000,
+        focus: { maxBitrateBps: 20_000_000, maxFrameRateFps: 60 },
+      },
     });
     expect(fakeSender.setParameters).toHaveBeenLastCalledWith(expect.objectContaining({
       encodings: [expect.objectContaining({ maxBitrate: 20_000_000, maxFramerate: 60 })],
@@ -2067,7 +2195,7 @@ setInterval(() => {}, 1000);
       platform: 'darwin',
       captureSourceFactory: vi.fn(async (_target, options) => {
         options.onFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(12) });
-        return { width: 2, height: 2, frameRate: 12, stop: vi.fn() };
+        return { width: 2, height: 2, frameRate: 12, updateFrameRate: vi.fn(async () => undefined), stop: vi.fn() };
       }),
       peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
       rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
@@ -2103,12 +2231,14 @@ setInterval(() => {}, 1000);
       streamId: 'stream-bitrate-empty',
       purpose: 'focus',
       phase: 'starting',
-      message: 'video bitrate not applied: remote window video bitrate sender has no encodings to update',
+      message: 'video bitrate not applied: remote window quality sender has no encodings to update',
     });
 
     const updated = await runtime.updateStreamQuality({
       requestId: 'rw-bitrate-empty-update',
       streamId: 'stream-bitrate-empty',
+      streamGroupId: 'stream-bitrate-empty',
+      revision: 1,
       targetId: 'iterm2-pane:window-1:tab-1:left',
       videoBitrate: { preset: '10mbps', bitrateMbps: 10, maxBitrateBps: 10_000_000 },
     });
@@ -2116,8 +2246,16 @@ setInterval(() => {}, 1000);
     expect(updated).toEqual({
       requestId: 'rw-bitrate-empty-update',
       streamId: 'stream-bitrate-empty',
-      code: 'remote_window_stream_quality_failed',
-      message: 'remote window video bitrate sender has no encodings to update',
+      streamGroupId: 'stream-bitrate-empty',
+      revision: 1,
+      purpose: 'focus',
+      targetId: 'iterm2-pane:window-1:tab-1:left',
+      status: 'rejected',
+      requestedVideoBitrate: { preset: '10mbps', bitrateMbps: 10, maxBitrateBps: 10_000_000 },
+      error: {
+        code: 'remote_window_stream_quality_failed',
+        message: 'remote window quality sender has no encodings to update',
+      },
     });
     expect(fakeSender.setParameters).not.toHaveBeenCalled();
   });
@@ -2131,7 +2269,7 @@ setInterval(() => {}, 1000);
       platform: 'darwin',
       captureSourceFactory: vi.fn(async (_target, options) => {
         options.onFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(12) });
-        return { width: 2, height: 2, frameRate: 12, stop: vi.fn() };
+        return { width: 2, height: 2, frameRate: 12, updateFrameRate: vi.fn(async () => undefined), stop: vi.fn() };
       }),
       peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
       rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
@@ -2157,6 +2295,8 @@ setInterval(() => {}, 1000);
     const updated = await runtime.updateStreamQuality({
       requestId: 'rw-bitrate-mismatch',
       streamId: 'stream-bitrate-mismatch',
+      streamGroupId: 'stream-bitrate-mismatch',
+      revision: 1,
       targetId: 'wrong-target',
       videoBitrate: { preset: '10mbps', bitrateMbps: 10, maxBitrateBps: 10_000_000 },
     });
@@ -2164,10 +2304,80 @@ setInterval(() => {}, 1000);
     expect(updated).toEqual({
       requestId: 'rw-bitrate-mismatch',
       streamId: 'stream-bitrate-mismatch',
-      code: 'remote_window_stream_quality_target_mismatch',
-      message: 'remote window stream quality target mismatch: wrong-target',
+      streamGroupId: 'stream-bitrate-mismatch',
+      revision: 1,
+      purpose: 'focus',
+      targetId: 'wrong-target',
+      status: 'rejected',
+      requestedVideoBitrate: { preset: '10mbps', bitrateMbps: 10, maxBitrateBps: 10_000_000 },
+      error: {
+        code: 'remote_window_stream_quality_target_mismatch',
+        message: 'remote window stream quality target mismatch: wrong-target',
+      },
     });
     expect(fakeSender.setParameters).not.toHaveBeenCalled();
+  });
+
+  it('rejects a concurrent quality revision while the current group transaction is applying', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    const fakeSender = makeFakeRtpSender();
+    let releaseApply: () => void = () => undefined;
+    fakeSender.setParameters.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      releaseApply = resolve;
+    }));
+    fakePeer.addTrack.mockReturnValue(fakeSender);
+    const fakeTrack = makeFakeMediaStreamTrack();
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      captureSourceFactory: vi.fn(async () => ({
+        width: 2,
+        height: 2,
+        frameRate: 12,
+        updateFrameRate: vi.fn(async () => undefined),
+        stop: vi.fn(),
+      })),
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => ({
+        createTrack: vi.fn(() => fakeTrack),
+        onFrame: vi.fn(),
+      } as any)),
+      rgbaToI420: vi.fn((_rgba, i420) => {
+        i420.data.fill(7);
+      }),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+    await runtime.startStream({
+      requestId: 'rw-quality-busy-start',
+      streamId: 'stream-quality-busy',
+      target: makeStreamTarget(),
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+    });
+    const first = runtime.updateStreamQuality({
+      requestId: 'rw-quality-busy-1',
+      streamId: 'stream-quality-busy',
+      streamGroupId: 'stream-quality-busy',
+      revision: 1,
+      targetId: 'iterm2-pane:window-1:tab-1:left',
+      videoBitrate: { preset: '10mbps', bitrateMbps: 10, maxBitrateBps: 10_000_000 },
+    });
+    await Promise.resolve();
+
+    const concurrent = await runtime.updateStreamQuality({
+      requestId: 'rw-quality-busy-2',
+      streamId: 'stream-quality-busy',
+      streamGroupId: 'stream-quality-busy',
+      revision: 2,
+      targetId: 'iterm2-pane:window-1:tab-1:left',
+      videoBitrate: { preset: '20mbps', bitrateMbps: 20, maxBitrateBps: 20_000_000 },
+    });
+    expect(concurrent).toMatchObject({
+      status: 'rejected',
+      revision: 2,
+      error: { code: 'remote_window_stream_quality_busy' },
+    });
+    releaseApply();
+    await expect(first).resolves.toMatchObject({ status: 'applied', revision: 1 });
   });
 
   it('allocates I420 planes correctly for odd-sized capture frames', async () => {
@@ -3422,5 +3632,87 @@ describe('remote window single-window overview gate', () => {
 
     // Composite target: focus + overview lanes both capture.
     expect(captureSourceFactory).toHaveBeenCalledTimes(2);
+  });
+
+  it('accepts only the currently published layout generation for composite coordinate input', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    fakePeer.connectionState = 'new';
+    const fakeTrack = makeFakeMediaStreamTrack();
+    const runRemoteWindowInputEvent = vi.fn(async () => undefined);
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      captureSourceFactory: vi.fn(async () => ({
+        width: 800,
+        height: 600,
+        frameRate: 30,
+        updateFrameRate: vi.fn(async () => undefined),
+        stop: vi.fn(),
+      })),
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => ({
+        createTrack: vi.fn(() => fakeTrack),
+        onFrame: vi.fn(),
+      } as any)),
+      rgbaToI420: vi.fn((_rgba, i420) => {
+        i420.data.fill(9);
+      }),
+      runRemoteWindowInputEvent,
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+    const compositeTarget = {
+      ...makeAppStreamTarget(),
+      compositeWindows: [{
+        appBundleId: 'com.apple.TextEdit',
+        pid: 123,
+        windowId: 'secondary',
+        title: 'Secondary',
+        windowBoundsTopLeftPx: { x: 1_000, y: 500, width: 400, height: 300 },
+        cropRectTopLeftPx: { x: 1_000, y: 500, width: 400, height: 300 },
+      }],
+    };
+    const started = await runtime.startStream({
+      requestId: 'rw-layout-generation-start',
+      streamId: 'stream-layout-generation',
+      target: compositeTarget,
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+    });
+    expect('answer' in started).toBe(true);
+    if (!('answer' in started) || !started.canvasLayout) {
+      throw new Error('composite stream did not publish canvas layout');
+    }
+    const canvasWindow = started.canvasLayout.windows[0]!;
+    const clickEvent = {
+      kind: 'click' as const,
+      pointerId: 1,
+      button: 'left' as const,
+      x: canvasWindow.canvasRectPx.x + canvasWindow.canvasRectPx.width / 2,
+      y: canvasWindow.canvasRectPx.y + canvasWindow.canvasRectPx.height / 2,
+      normalizedX: 0.5,
+      normalizedY: 0.5,
+    };
+
+    const stale = await runtime.injectInput({
+      requestId: 'rw-layout-generation-stale',
+      streamId: 'stream-layout-generation',
+      targetId: compositeTarget.streamTargetId,
+      layoutGeneration: started.canvasLayout.layoutGeneration - 1,
+      event: clickEvent,
+    });
+    expect(stale).toMatchObject({
+      code: 'remote_window_input_failed',
+      message: expect.stringContaining('layout generation mismatch'),
+    });
+    expect(runRemoteWindowInputEvent).not.toHaveBeenCalled();
+
+    const accepted = await runtime.injectInput({
+      requestId: 'rw-layout-generation-current',
+      streamId: 'stream-layout-generation',
+      targetId: compositeTarget.streamTargetId,
+      layoutGeneration: started.canvasLayout.layoutGeneration,
+      event: clickEvent,
+    });
+    expect(accepted).toMatchObject({ accepted: true });
+    expect(runRemoteWindowInputEvent).toHaveBeenCalledTimes(1);
   });
 });

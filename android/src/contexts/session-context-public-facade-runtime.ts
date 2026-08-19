@@ -6,6 +6,7 @@ import type {
   RemoteScreenshotStatusPayload,
   RemoteWindowInputEventPayload,
   RemoteWindowStreamQualityRequestPayload,
+  RemoteWindowStreamQualityResultPayload,
   RemoteWindowStreamPurpose,
   RemoteWindowStreamTargetManifest,
   RemoteWindowStreamTargetsResponsePayload,
@@ -398,7 +399,7 @@ export function buildSessionContextValueRuntime(options: {
   updateRemoteWindowStreamQuality: (
     sessionId: string,
     payload: Omit<RemoteWindowStreamQualityRequestPayload, 'requestId'>,
-  ) => void;
+  ) => Promise<RemoteWindowStreamQualityResultPayload>;
   updateRemoteWindowFocus: (
     sessionId: string,
     streamId: string,

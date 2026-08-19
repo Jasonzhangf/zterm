@@ -184,7 +184,8 @@ flowchart TD
   RemoteWindowOverlay --> RemoteWindowDualStreamSwitch["src/lib/remote-window-dual-stream-runtime.ts#beginRemoteWindowDualStreamSwitch"]
   RemoteWindowDualStreamSwitch --> RemoteWindowMessageRuntime
   RemoteWindowOverlay --> RemoteWindowOverlayRuntime["src/lib/remote-window-overlay-runtime.ts#beginRemoteWindowStreamHandoff"]
-  RemoteWindowOverlay --> RemoteWindowStreamQualityRuntime["src/contexts/session-context-remote-window-runtime.ts#updateRemoteWindowStreamQualityRuntime"]
+  RemoteWindowOverlay --> RemoteWindowQualityController["src/lib/remote-window-quality-controller.ts#beginRemoteWindowQualityRequest + acceptRemoteWindowQualityResult"]
+  RemoteWindowQualityController --> RemoteWindowStreamQualityRuntime["src/contexts/session-context-remote-window-runtime.ts#updateRemoteWindowStreamQualityRuntime"]
   RemoteWindowOverlay --> RemoteWindowTouchAction["src/lib/remote-window-touch-action-runtime.ts#dispatchRemoteWindowTouchInputActionRuntime"]
   RemoteWindowTouchAction --> RemoteWindowInputRuntime["src/contexts/session-context-remote-window-runtime.ts#sendRemoteWindowInputRuntime"]
   RemoteWindowInputRuntime --> RemoteWindowMessageRuntime
@@ -306,10 +307,13 @@ flowchart TD
   DaemonFileTransferTransportOut01Send --> TransportSend
   Control --> Screenshot["src/server/remote-screenshot-daemon.ts"]
   Control --> RemoteWindowStream["src/server/remote-window-stream-daemon.ts#createRemoteWindowStreamDaemonRuntime"]
-  RemoteWindowStream --> RemoteWindowCapture["src/server/remote-window-stream-daemon.ts#startScreenCaptureKitFrameSource"]
+  RemoteWindowStream --> RemoteWindowCatalog["src/server/remote-window-catalog-runtime.ts#createRemoteWindowCatalogRuntime"]
+  RemoteWindowStream --> RemoteWindowCanvasLayout["src/server/remote-window-canvas-layout.ts#buildRemoteWindowCanvasLayoutV1"]
+  RemoteWindowStream --> RemoteWindowQuality["src/server/remote-window-quality.ts#applyRemoteWindowStreamGroupQuality"]
+  RemoteWindowStream --> RemoteWindowCapture["src/server/remote-window-capture.ts#startScreenCaptureKitFrameSource"]
   RemoteWindowCapture --> RemoteWindowMedia["src/server/remote-window-stream-daemon.ts#startStream"]
   RemoteWindowStream --> RemoteWindowInput["src/server/remote-window-stream-daemon.ts#injectInput"]
-  RemoteWindowStream --> RemoteWindowCleanup["src/server/remote-window-stream-daemon.ts#stopStream"]
+  RemoteWindowStream --> RemoteWindowCleanup["src/server/remote-window-stream-session.ts#releaseRemoteWindowStreamSessionResources"]
   Server --> Http["src/server/terminal-http-runtime.ts"]
   Http --> DebugObservabilityIn01LogIngest["src/server/terminal-http-runtime.ts#/debug/runtime/logs"]
   Http --> DebugObservabilityIn02SnapshotIngest["src/server/terminal-http-runtime.ts#/debug/runtime/snapshot"]

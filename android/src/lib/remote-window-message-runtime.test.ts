@@ -426,6 +426,8 @@ describe('remote window message runtime', () => {
       ws,
       payload: {
         streamId: 'stream-3',
+        streamGroupId: 'stream-3',
+        revision: 4,
         purpose: 'focus',
         targetId: 'target-3',
         videoBitrate: { preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
@@ -438,6 +440,8 @@ describe('remote window message runtime', () => {
       payload: {
         requestId: expect.stringMatching(/^rw-quality-471-/),
         streamId: 'stream-3',
+        streamGroupId: 'stream-3',
+        revision: 4,
         purpose: 'focus',
         targetId: 'target-3',
         videoBitrate: { preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
@@ -448,12 +452,47 @@ describe('remote window message runtime', () => {
       payload: {
         requestId: 'rw-quality-1',
         streamId: 'stream-3',
+        streamGroupId: 'stream-3',
+        revision: 4,
         purpose: 'focus',
         targetId: 'target-3',
-        accepted: true,
-        videoBitrate: { preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
+        status: 'applied',
+        requestedVideoBitrate: { preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
+        appliedVideoBitrate: { preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
       },
     } as ServerMessage)).toBe(true);
+  });
+
+  it('resolves quality ACK only for the exact request stream group and revision', async () => {
+    const sendSocketPayload = vi.fn();
+    const runtime = createRemoteWindowMessageRuntime({ now: () => 472 });
+    const request = runtime.sendStreamQuality('session-1', {
+      ws: makeSocket(),
+      payload: {
+        streamId: 'stream-3',
+        streamGroupId: 'group-3',
+        revision: 5,
+        targetId: 'target-3',
+        videoBitrate: { preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
+      },
+      sendSocketPayload,
+    });
+    const requestId = JSON.parse(sendSocketPayload.mock.calls[0][2] as string).payload.requestId;
+    const result = {
+      requestId,
+      streamId: 'stream-3',
+      streamGroupId: 'wrong-group',
+      revision: 5,
+      targetId: 'target-3',
+      status: 'applied' as const,
+      requestedVideoBitrate: { preset: '5mbps' as const, bitrateMbps: 5 as const, maxBitrateBps: 5_000_000 },
+      appliedVideoBitrate: { preset: '5mbps' as const, bitrateMbps: 5 as const, maxBitrateBps: 5_000_000 },
+    };
+    expect(runtime.dispatch({ type: 'remote-window-stream-quality-result', payload: result })).toBe(false);
+    expect(runtime.getPendingCount()).toBe(1);
+    const exact = { ...result, streamGroupId: 'group-3' };
+    expect(runtime.dispatch({ type: 'remote-window-stream-quality-result', payload: exact })).toBe(true);
+    await expect(request).resolves.toEqual(exact);
   });
 
   it('sends remote input events with a generated request id', () => {

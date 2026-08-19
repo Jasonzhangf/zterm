@@ -89,20 +89,28 @@ describe('resource registry truth gate', () => {
     }
   });
 
-  it('keeps not-yet-implemented canvas truth resources marked as design or pending', () => {
+  it('separates active dual-stream layout truth from future encoder design resources', () => {
     const registry = JSON.parse(read('docs/resource-registry.json')) as ResourceRegistry;
     const byId = new Map(registry.resources.map((resource) => [resource.resource_id, resource]));
 
     for (const resourceId of [
       'resource.remote_window_canvas_raw',
-      'resource.remote_window_canvas_layout',
       'resource.remote_window_canvas_encode',
-      'resource.remote_window_focus_stream',
     ]) {
       const resource = byId.get(resourceId);
       expect(resource, resourceId).toBeTruthy();
       expect(resource?.status, resourceId).toMatch(/^(design|pending)$/);
       expect(resource?.required_gates, resourceId).toContain('docs/testing/remote-window-canvas-pipeline-test-design.md');
+    }
+    for (const resourceId of [
+      'resource.remote_window_canvas_layout',
+      'resource.remote_window_focus_stream',
+      'resource.remote_window_overview_stream',
+    ]) {
+      const resource = byId.get(resourceId);
+      expect(resource, resourceId).toBeTruthy();
+      expect(resource?.status, resourceId).toBe('active');
+      expect(resource?.required_gates.some((gate) => gate.endsWith('.test.ts')), resourceId).toBe(true);
     }
   });
 

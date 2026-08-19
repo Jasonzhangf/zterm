@@ -1,9 +1,6 @@
 import wrtc from '@roamhq/wrtc';
 
 import {
-  buildRemoteWindowTargetCatalogCacheKey,
-  cloneRemoteWindowTargetCatalogResponse,
-  cloneRemoteWindowTargetCatalogResult,
   normalizeRtcDescription,
   normalizeIceCandidate,
   normalizeRemoteWindowVideoBitrateConfig,
@@ -14,6 +11,7 @@ import type {
   RemoteWindowStreamIceCandidatePayload,
   RemoteWindowInputEventPayload,
   RemoteWindowInputResultPayload,
+  RemoteWindowCanvasLayoutV1,
   RemoteWindowStreamErrorPayload,
   RemoteWindowStreamRequestPayload,
   RemoteWindowStreamQualityRequestPayload,
@@ -29,39 +27,35 @@ import type {
   RemoteWindowStreamFocusResultPayload,
   RemoteWindowVideoBitrateConfig,
 } from '@zterm/shared/protocol';
-import { ITERM2_CATALOG_PYTHON, MACOS_APP_WINDOW_CATALOG_SWIFT } from './remote-window-scripts';
+import { buildRemoteWindowCanvasLayoutV1 } from './remote-window-canvas-layout';
+import { applyRemoteWindowStreamGroupQuality } from './remote-window-quality';
 import {
-  remoteWindowError,
-  summarizeRemoteWindowCatalogError,
+  releaseRemoteWindowStreamSessionResources,
+  type RemoteWindowStreamSessionResources,
+} from './remote-window-stream-session';
+import {
   truncateRemoteWindowErrorMessage,
 } from './remote-window-support';
 import {
   DEFAULT_ITERM2_PYTHON_TIMEOUT_MS,
   DEFAULT_MACOS_APP_WINDOW_CATALOG_TIMEOUT_MS,
-  buildMacosAppWindowTargets,
-  buildRemoteWindowStreamTargets,
-  parseIterm2Catalog,
-  parseMacosAppWindowCatalog,
-  parseTmuxClientTargets,
   runDefaultIterm2Python,
   runDefaultMacosAppWindowCatalog,
-  type Iterm2RawCatalog,
-  type MacosAppWindowCatalog,
-  type TmuxClientTarget,
 } from './remote-window-catalog';
+import { createRemoteWindowCatalogRuntime } from './remote-window-catalog-runtime';
 import {
   buildRemoteWindowInputConfig,
   createDefaultRemoteWindowInputHelper,
   type RemoteWindowInputEventRunner,
   type RemoteWindowInputHelper,
 } from './remote-window-input-helper';
+import { validateRemoteWindowInputPayload } from './remote-window-input-policy';
 import {
   DEFAULT_SCREEN_CAPTURE_KIT_STARTUP_TIMEOUT_MS,
   buildResizedRemoteWindowTarget,
   startScreenCaptureKitFrameSource,
   validateStreamTargetForCapture,
   type RemoteWindowCaptureFrame,
-  type RemoteWindowCaptureFrameSource,
   type RemoteWindowCaptureSourceFactory,
 } from './remote-window-capture';
 
@@ -74,7 +68,6 @@ export * from './remote-window-capture';
 const DEFAULT_REMOTE_WINDOW_FRAME_RATE = 30;
 const DEFAULT_REMOTE_WINDOW_TARGET_CATALOG_CACHE_TTL_MS = 60_000;
 // 双流：总览（overview）流固定低码率 + 低帧率（组合画布整体预览/即时切换占位）
-const OVERVIEW_LOW_BITRATE_BPS = 1_500_000;
 const OVERVIEW_FRAME_RATE_FPS = 8;
 /** 远程窗口输入 bring-to-focus 防抖：该窗口内只每 3s 最多执行一次 focus 切换 */
 const REMOTE_WINDOW_FOCUS_DEBOUNCE_MS = 15_000;
@@ -159,44 +152,38 @@ export interface RemoteWindowStreamDaemonRuntime {
   dispose: (reason?: string) => void;
 }
 
-interface RemoteWindowTargetCatalogCacheEntry {
-  updatedAtMs: number;
-  response: RemoteWindowStreamTargetsResponsePayload;
-}
-
 export interface RemoteWindowStreamDaemonHandlers {
   sendIceCandidate?: (payload: RemoteWindowStreamIceCandidatePayload) => void;
   sendStatus?: (payload: RemoteWindowStreamStatusPayload) => void;
   sendFocusResult?: (payload: RemoteWindowStreamFocusResultPayload) => void;
 }
 
-interface ActiveRemoteWindowStream {
+interface ActiveRemoteWindowStream extends Omit<RemoteWindowStreamSessionResources, 'sendStatus'> {
   streamId: string;
   purpose: RemoteWindowStreamPurpose;
   requestId: string;
   targetId: string;
   target: RemoteWindowStreamTargetManifest;
+  canvasLayout: RemoteWindowCanvasLayoutV1 | null;
+  layoutGeneration: number;
+  qualityRevision: number;
+  pendingQualityRevision: number | null;
+  streamGroupId: string;
   overviewTarget: RemoteWindowStreamTargetManifest | null;
   // overview 画布主窗口固定为流的初始 target：focus 切换只改 entry.target，
   // 不漂移 overview 画布（client 的 state.target 也不随 focus 切换更新，
   // 两者必须保持对齐，否则缩略图/crop 坐标错位）。
   overviewMainTarget: RemoteWindowStreamTargetManifest | null;
-  peerConnection: RTCPeerConnection;
   // focus（高码率主窗口）流：主 track
   videoSender: RTCRtpSender | null;
   videoSource: RtcVideoSourceLike;
-  videoTrack: MediaStreamTrack;
   videoBitrate: RemoteWindowVideoBitrateConfig | null;
-  captureSource: RemoteWindowCaptureFrameSource | null;
   // overview（低码率总览）流：组合 target 时启用
   overviewVideoSender?: RTCRtpSender | null;
   overviewVideoSource?: RtcVideoSourceLike;
-  overviewVideoTrack?: MediaStreamTrack;
-  overviewCaptureSource?: RemoteWindowCaptureFrameSource | null;
   overviewFramesSent?: number;
   compositePollTimer: ReturnType<typeof setInterval> | null;
   handlers: RemoteWindowStreamDaemonHandlers;
-  framesSent: number;
   focusRevision: number;
   pendingFocusReady: RemoteWindowStreamFocusResultPayload | null;
   pendingVideoFrame: {
@@ -220,47 +207,6 @@ interface RemoteWindowResizeApplyResult {
 
 
 
-
-
-type RemoteWindowVideoBitrateApplyResult =
-  | { applied: true; videoBitrate: RemoteWindowVideoBitrateConfig }
-  | { applied: false; reason: string };
-
-async function applyRemoteWindowVideoBitrate(
-  sender: RTCRtpSender | null,
-  config: RemoteWindowVideoBitrateConfig,
-): Promise<RemoteWindowVideoBitrateApplyResult> {
-  if (
-    !sender
-    || typeof sender.getParameters !== 'function'
-    || typeof sender.setParameters !== 'function'
-  ) {
-    return {
-      applied: false,
-      reason: 'remote window video bitrate control is not available on this WebRTC sender',
-    };
-  }
-  const currentParameters = sender.getParameters();
-  const currentEncodings = Array.isArray(currentParameters.encodings)
-    ? currentParameters.encodings
-    : [];
-  if (currentEncodings.length === 0) {
-    return {
-      applied: false,
-      reason: 'remote window video bitrate sender has no encodings to update',
-    };
-  }
-  const nextParameters = {
-    ...currentParameters,
-    encodings: currentEncodings.map((encoding) => ({
-      ...encoding,
-      maxBitrate: config.maxBitrateBps,
-      maxFramerate: config.maxFrameRateFps,
-    })),
-  } as RTCRtpSendParameters;
-  await sender.setParameters(nextParameters);
-  return { applied: true, videoBitrate: config };
-}
 
 
 function addRemoteWindowVideoTrack(
@@ -362,186 +308,19 @@ export function createRemoteWindowStreamDaemonRuntime(
     Math.floor(deps.targetCatalogCacheTtlMs ?? DEFAULT_REMOTE_WINDOW_TARGET_CATALOG_CACHE_TTL_MS),
   );
   const nowMs = deps.nowMs || Date.now;
-  const targetCatalogCache = new Map<string, RemoteWindowTargetCatalogCacheEntry>();
-  const targetCatalogRefreshes = new Map<string, Promise<RemoteWindowStreamTargetsResponsePayload | RemoteWindowStreamErrorPayload>>();
-
-  async function queryIterm2Catalog() {
-    const stdout = await runIterm2Python(ITERM2_CATALOG_PYTHON, {
-      pythonBinary,
-      timeoutMs: iterm2PythonTimeoutMs,
-    });
-    return parseIterm2Catalog(stdout);
-  }
-
-  async function queryMacosAppWindowCatalog() {
-    const stdout = await runMacosAppWindowCatalog(MACOS_APP_WINDOW_CATALOG_SWIFT, {
-      swiftBinary,
-      timeoutMs: appWindowCatalogTimeoutMs,
-    });
-    return parseMacosAppWindowCatalog(stdout);
-  }
-
-  async function listTargetsLive(
-    payload: RemoteWindowStreamRequestPayload,
-  ): Promise<RemoteWindowStreamTargetsResponsePayload | RemoteWindowStreamErrorPayload> {
-    const createdAt = now();
-    const includeAppWindows = payload.includeAppWindows !== false;
-    const includeIterm2 = payload.includeIterm2 !== false;
-    const targets: RemoteWindowStreamTargetManifest[] = [];
-    const errors: RemoteWindowStreamErrorPayload[] = [];
-
-    let macosAppWindowCatalogOk = false;
-    let macosAppWindowCatalog: MacosAppWindowCatalog | null = null;
-    if (includeAppWindows) {
-      try {
-        macosAppWindowCatalog = await queryMacosAppWindowCatalog();
-        targets.push(...buildMacosAppWindowTargets(macosAppWindowCatalog, createdAt));
-        macosAppWindowCatalogOk = true;
-      } catch (error) {
-        const message = summarizeRemoteWindowCatalogError(error, 'macOS app window catalog unavailable');
-        errors.push(remoteWindowError(payload, 'app_window_catalog_unavailable', message || 'macOS app window catalog unavailable'));
-      }
-    }
-
-    let catalog: Iterm2RawCatalog | null = null;
-    if (includeIterm2) {
-      try {
-        catalog = await queryIterm2Catalog();
-      } catch (error) {
-        const message = summarizeRemoteWindowCatalogError(error, 'iTerm2 Python API unavailable');
-        errors.push(remoteWindowError(payload, 'iterm2_api_unavailable', message || 'iTerm2 Python API unavailable'));
-      }
-    }
-
-    let tmuxTargets = new Map<string, TmuxClientTarget>();
-    if (catalog) {
-      if (!macosAppWindowCatalogOk) {
-        try {
-          macosAppWindowCatalog = await queryMacosAppWindowCatalog();
-          macosAppWindowCatalogOk = true;
-        } catch (error) {
-          const message = summarizeRemoteWindowCatalogError(error, 'macOS app window catalog unavailable');
-          errors.push(remoteWindowError(payload, 'app_window_catalog_unavailable', message || 'macOS app window catalog unavailable'));
-        }
-      }
-      try {
-        tmuxTargets = parseTmuxClientTargets(deps.runTmux([
-          'list-clients',
-          '-F',
-          '#{client_tty}\t#{session_name}\t#{window_id}\t#{pane_id}',
-        ]).stdout);
-      } catch {
-        tmuxTargets = new Map<string, TmuxClientTarget>();
-      }
-    }
-
-    if (catalog) {
-      try {
-        targets.push(...buildRemoteWindowStreamTargets(catalog, tmuxTargets, createdAt, {
-          includeAppWindowTargets: false,
-          macosAppWindowCatalog,
-          requireCaptureWindowForPanes: true,
-        }));
-      } catch (error) {
-        const message = summarizeRemoteWindowCatalogError(error, 'remote window target manifest invalid');
-        errors.push(remoteWindowError(payload, 'remote_window_manifest_invalid', message || 'remote window target manifest invalid'));
-      }
-    }
-
-    if (targets.length > 0) {
-      return {
-        requestId: payload.requestId,
-        targets,
-        ...(errors.length > 0 ? { errors } : {}),
-      };
-    }
-    return errors[0] || {
-      requestId: payload.requestId,
-      targets: [],
-    };
-  }
-
-  function startTargetCatalogRefresh(
-    cacheKey: string,
-    payload: RemoteWindowStreamRequestPayload,
-  ) {
-    const existing = targetCatalogRefreshes.get(cacheKey);
-    if (existing) {
-      return existing;
-    }
-    const refreshPayload = {
-      ...payload,
-      requestId: payload.requestId || `rw-catalog-refresh-${nowMs()}`,
-    };
-    const refresh = listTargetsLive(refreshPayload)
-      .catch((error: unknown) => remoteWindowError(
-        refreshPayload,
-        'remote_window_catalog_failed',
-        error instanceof Error ? error.message : 'remote window catalog failed',
-      ))
-      .then((result) => {
-        if ('targets' in result) {
-          targetCatalogCache.set(cacheKey, {
-            updatedAtMs: nowMs(),
-            response: cloneRemoteWindowTargetCatalogResponse(result, result.requestId),
-          });
-        }
-        return result;
-      })
-      .finally(() => {
-        if (targetCatalogRefreshes.get(cacheKey) === refresh) {
-          targetCatalogRefreshes.delete(cacheKey);
-        }
-      });
-    targetCatalogRefreshes.set(cacheKey, refresh);
-    return refresh;
-  }
-
-  async function refreshTargetCatalog(
-    cacheKey: string,
-    payload: RemoteWindowStreamRequestPayload,
-  ) {
-    const result = await startTargetCatalogRefresh(cacheKey, payload);
-    return cloneRemoteWindowTargetCatalogResult(result, payload.requestId);
-  }
-
-  function warmTargetCatalog() {
-    if (platform !== 'darwin') {
-      return;
-    }
-    const payload: RemoteWindowStreamRequestPayload = {
-      requestId: `rw-catalog-warm-${nowMs()}`,
-      includeAppWindows: true,
-      includeIterm2: true,
-    };
-    void startTargetCatalogRefresh(
-      buildRemoteWindowTargetCatalogCacheKey(payload),
-      payload,
-    );
-  }
-
-  async function listTargets(
-    payload: RemoteWindowStreamRequestPayload,
-  ): Promise<RemoteWindowStreamTargetsResponsePayload | RemoteWindowStreamErrorPayload> {
-    if (!payload.requestId) {
-      return remoteWindowError(payload, 'remote_window_request_invalid', 'remote window target request requires requestId');
-    }
-    if (platform !== 'darwin') {
-      return remoteWindowError(payload, 'remote_window_platform_unsupported', 'remote window stream catalog is only available on macOS daemon hosts');
-    }
-    const cacheKey = buildRemoteWindowTargetCatalogCacheKey(payload);
-    const cached = targetCatalogCache.get(cacheKey) || null;
-    const cacheAgeMs = cached ? nowMs() - cached.updatedAtMs : Number.POSITIVE_INFINITY;
-    const cacheFresh = Boolean(cached && cacheAgeMs >= 0 && cacheAgeMs < targetCatalogCacheTtlMs);
-    if (!payload.forceRefresh && cached && cacheFresh) {
-      return cloneRemoteWindowTargetCatalogResponse(cached.response, payload.requestId);
-    }
-    if (!payload.forceRefresh && cached) {
-      void startTargetCatalogRefresh(cacheKey, payload);
-      return cloneRemoteWindowTargetCatalogResponse(cached.response, payload.requestId);
-    }
-    return refreshTargetCatalog(cacheKey, payload);
-  }
+  const catalogRuntime = createRemoteWindowCatalogRuntime({
+    platform,
+    pythonBinary,
+    swiftBinary,
+    iterm2PythonTimeoutMs,
+    appWindowCatalogTimeoutMs,
+    targetCatalogCacheTtlMs,
+    now,
+    nowMs,
+    runIterm2Python,
+    runMacosAppWindowCatalog,
+    runTmux: deps.runTmux,
+  });
 
   function buildStreamError(
     payload: { requestId?: string; streamId?: string },
@@ -567,43 +346,12 @@ export function createRemoteWindowStreamDaemonRuntime(
     }
     activeStreams.delete(entry.streamId);
     entry.pendingVideoFrame = null;
-    try {
-      entry.captureSource?.stop();
-    } catch {
-      // Capture cleanup must not prevent peer cleanup.
-    }
+    releaseRemoteWindowStreamSessionResources({
+      ...entry,
+      sendStatus: entry.handlers.sendStatus,
+    }, reason);
     entry.captureSource = null;
-    try {
-      entry.overviewCaptureSource?.stop();
-    } catch {
-      // Overview capture cleanup must not prevent peer cleanup.
-    }
     entry.overviewCaptureSource = null;
-    try {
-      entry.videoTrack.stop();
-    } catch {
-      // Track cleanup must remain exactly once even if the track is already stopped.
-    }
-    try {
-      entry.overviewVideoTrack?.stop();
-    } catch {
-      // Overview track cleanup must remain exactly once.
-    }
-    entry.peerConnection.onicecandidate = null;
-    entry.peerConnection.onconnectionstatechange = null;
-    try {
-      entry.peerConnection.close();
-    } catch {
-      // Peer cleanup must not mask the stream cleanup path.
-    }
-    entry.handlers.sendStatus?.({
-      requestId: entry.requestId,
-      streamId: entry.streamId,
-      purpose: entry.purpose,
-      phase: 'stopped',
-      framesSent: entry.framesSent,
-      message: reason,
-    });
     return true;
   }
 
@@ -644,6 +392,7 @@ export function createRemoteWindowStreamDaemonRuntime(
         framesSent: entry.framesSent,
         frameWidth: captureFrame.width,
         frameHeight: captureFrame.height,
+        ...(entry.canvasLayout ? { canvasLayout: entry.canvasLayout } : {}),
       });
     }
     if (entry.pendingFocusReady) {
@@ -701,138 +450,6 @@ export function createRemoteWindowStreamDaemonRuntime(
     }
   }
 
-  function validateRemoteWindowInput(payload: RemoteWindowInputEventPayload, entry: ActiveRemoteWindowStream) {
-    if (!payload.requestId || !payload.streamId || !payload.targetId) {
-      throw new Error('remote window input requires requestId, streamId, and targetId');
-    }
-    if (payload.targetId !== entry.targetId) {
-      throw new Error(`remote window input target mismatch: ${payload.targetId}`);
-    }
-    if (entry.target.inputRoute === 'os-event' && entry.target.focusPolicy !== 'bring-to-focus') {
-      throw new Error('remote window OS input requires bring-to-focus policy');
-    }
-    if (entry.target.inputRoute !== 'os-event') {
-      throw new Error(`remote window input route is not implemented: ${entry.target.inputRoute}`);
-    }
-    if (payload.event.kind === 'focus') {
-      return;
-    }
-    if (payload.event.kind === 'window-resize') {
-      if (
-        !Number.isFinite(payload.event.width)
-        || !Number.isFinite(payload.event.height)
-        || payload.event.width < 120
-        || payload.event.height < 120
-      ) {
-        throw new Error('remote window resize dimensions are invalid');
-      }
-      return;
-    }
-    if (payload.event.kind === 'click') {
-      const values = [
-        payload.event.x,
-        payload.event.y,
-        payload.event.normalizedX,
-        payload.event.normalizedY,
-      ];
-      if (!values.every((value) => Number.isFinite(value))) {
-        throw new Error('remote window click input coordinates are invalid');
-      }
-      if (payload.event.normalizedX < 0 || payload.event.normalizedX > 1 || payload.event.normalizedY < 0 || payload.event.normalizedY > 1) {
-        throw new Error('remote window click input normalized coordinates are out of range');
-      }
-      if (payload.event.button !== 'left' && payload.event.button !== 'middle' && payload.event.button !== 'right') {
-        throw new Error('remote window click input button is invalid');
-      }
-      if (
-        payload.event.clickCount !== undefined
-        && (
-          !Number.isInteger(payload.event.clickCount)
-          || payload.event.clickCount < 1
-          || payload.event.clickCount > 3
-        )
-      ) {
-        throw new Error('remote window click input click count is invalid');
-      }
-    }
-    if (payload.event.kind === 'pointer') {
-      const values = [
-        payload.event.x,
-        payload.event.y,
-        payload.event.normalizedX,
-        payload.event.normalizedY,
-      ];
-      if (!values.every((value) => Number.isFinite(value))) {
-        throw new Error('remote window pointer input coordinates are invalid');
-      }
-      if (payload.event.normalizedX < 0 || payload.event.normalizedX > 1 || payload.event.normalizedY < 0 || payload.event.normalizedY > 1) {
-        throw new Error('remote window pointer input normalized coordinates are out of range');
-      }
-    }
-    if (payload.event.kind === 'scroll') {
-      const values = [
-        payload.event.x,
-        payload.event.y,
-        payload.event.normalizedX,
-        payload.event.normalizedY,
-        payload.event.deltaX,
-        payload.event.deltaY,
-      ];
-      if (!values.every((value) => Number.isFinite(value))) {
-        throw new Error('remote window scroll input coordinates or delta are invalid');
-      }
-      if (payload.event.normalizedX < 0 || payload.event.normalizedX > 1 || payload.event.normalizedY < 0 || payload.event.normalizedY > 1) {
-        throw new Error('remote window scroll input normalized coordinates are out of range');
-      }
-      if (payload.event.unit !== 'pixel') {
-        throw new Error('remote window scroll input unit is invalid');
-      }
-    }
-    if (payload.event.kind === 'gesture') {
-      const values = [
-        payload.event.startX,
-        payload.event.startY,
-        payload.event.x,
-        payload.event.y,
-        payload.event.startNormalizedX,
-        payload.event.startNormalizedY,
-        payload.event.normalizedX,
-        payload.event.normalizedY,
-        payload.event.deltaX,
-        payload.event.deltaY,
-        payload.event.durationMs,
-        payload.event.velocityX,
-        payload.event.velocityY,
-      ];
-      if (!values.every((value) => Number.isFinite(value))) {
-        throw new Error('remote window gesture input coordinates, delta, or timing are invalid');
-      }
-      if (
-        payload.event.startNormalizedX < 0
-        || payload.event.startNormalizedX > 1
-        || payload.event.startNormalizedY < 0
-        || payload.event.startNormalizedY > 1
-        || payload.event.normalizedX < 0
-        || payload.event.normalizedX > 1
-        || payload.event.normalizedY < 0
-        || payload.event.normalizedY > 1
-      ) {
-        throw new Error('remote window gesture input normalized coordinates are out of range');
-      }
-      if (
-        payload.event.gesture !== 'swipe'
-        || payload.event.phase !== 'end'
-        || payload.event.unit !== 'pixel'
-        || payload.event.durationMs <= 0
-      ) {
-        throw new Error('remote window gesture input contract is invalid');
-      }
-    }
-    if (payload.event.kind === 'key' && payload.event.phase !== 'down' && payload.event.phase !== 'up') {
-      throw new Error('remote window key input phase is invalid');
-    }
-  }
-
   async function startStream(
     payload: RemoteWindowStreamStartRequestPayload,
     handlers: RemoteWindowStreamDaemonHandlers = {},
@@ -876,6 +493,11 @@ export function createRemoteWindowStreamDaemonRuntime(
         requestId: payload.requestId,
         targetId: payload.target.streamTargetId,
         target: payload.target,
+        canvasLayout: buildRemoteWindowCanvasLayoutV1(payload.target, 1),
+        layoutGeneration: 1,
+        qualityRevision: 0,
+        pendingQualityRevision: null,
+        streamGroupId: payload.streamId,
         overviewTarget: null,
         overviewMainTarget: payload.target,
         peerConnection,
@@ -928,38 +550,10 @@ export function createRemoteWindowStreamDaemonRuntime(
           : {}),
       });
 
-      let remoteOfferSdp = payload.offer.sdp;
-      try {
-        await peerConnection.setRemoteDescription(createRtcSessionDescription({
-          type: payload.offer.type,
-          sdp: payload.offer.sdp,
-        }));
-      } catch (offerError) {
-        // 新版 Chrome WebView offer 可能含 wrtc 不支持的 codec（H265/AV1/flexfec 等），
-        // 直接解析失败（Invalid SDP line）。降级：用本机 wrtc 生成的 offer 做模板，
-        // 只替换 client 的 o=/ice-ufrag/ice-pwd/fingerprint，保证协商字段一致。
-        const fallbackPc = createPeerConnection({ iceServers: [] });
-        try {
-          fallbackPc.addTransceiver('video', { direction: 'recvonly' });
-          const fallbackOffer = await fallbackPc.createOffer();
-          const fallbackSdp = fallbackOffer.sdp ?? '';
-          const clientLines = String(payload.offer.sdp).split('\n');
-          const getClientLine = (prefix: string) => clientLines.find((l) => l.startsWith(prefix)) || '';
-          remoteOfferSdp = fallbackSdp.split('\n').map((line) => {
-            if (line.startsWith('o=')) return getClientLine('o=') || line;
-            if (line.startsWith('a=ice-ufrag')) return getClientLine('a=ice-ufrag') || line;
-            if (line.startsWith('a=ice-pwd')) return getClientLine('a=ice-pwd') || line;
-            if (line.startsWith('a=fingerprint')) return getClientLine('a=fingerprint') || line;
-            return line;
-          }).join('\n');
-          await peerConnection.setRemoteDescription(createRtcSessionDescription({
-            type: payload.offer.type,
-            sdp: remoteOfferSdp,
-          }));
-        } finally {
-          fallbackPc.close();
-        }
-      }
+      await peerConnection.setRemoteDescription(createRtcSessionDescription({
+        type: payload.offer.type,
+        sdp: payload.offer.sdp,
+      }));
 
       // Overview（低码率总览）lane 只对真正组合（多个窗口）启用。单个
       // app-window 目标强制启动 overview 会让 Swift 回退全分辨率单窗口捕获，
@@ -1032,19 +626,6 @@ export function createRemoteWindowStreamDaemonRuntime(
         entry.overviewVideoTrack = overviewVideoTrack;
         entry.overviewVideoSender = overviewVideoSender || null;
         entry.overviewCaptureSource = overviewCaptureSource;
-        // 总览流固定低码率
-        try {
-          await applyRemoteWindowVideoBitrate(
-            overviewVideoSender || null,
-            {
-              preset: '2mbps',
-              bitrateMbps: 2,
-              maxBitrateBps: OVERVIEW_LOW_BITRATE_BPS,
-            },
-          );
-        } catch {
-          // 总览码率应用失败不阻断主流
-        }
         // 组合模式自动增删：周期刷新同 app 窗口 catalog → 只更新 overview 捕获
         entry.compositePollTimer = setInterval(() => {
           if (!entry || !isCurrentStream(entry)) {
@@ -1056,8 +637,7 @@ export function createRemoteWindowStreamDaemonRuntime(
               return;
             }
             try {
-              const catalog = await queryMacosAppWindowCatalog();
-              const targets = buildMacosAppWindowTargets(catalog, now());
+              const targets = await catalogRuntime.listAppWindowTargets();
               const sameApp = targets.filter((item) => (
                 item.videoTarget.kind === 'app-window'
                 && item.videoTarget.appBundleId === activeEntry.target.videoTarget.appBundleId
@@ -1091,8 +671,30 @@ export function createRemoteWindowStreamDaemonRuntime(
               };
               await overviewCapture.updateTarget(nextOverviewTarget);
               activeEntry.overviewTarget = nextOverviewTarget;
-            } catch {
-              // 自动增删轮询失败不打断串流
+              activeEntry.layoutGeneration += 1;
+              activeEntry.canvasLayout = buildRemoteWindowCanvasLayoutV1(
+                nextOverviewTarget,
+                activeEntry.layoutGeneration,
+              );
+              if (activeEntry.canvasLayout) {
+                activeEntry.handlers.sendStatus?.({
+                  requestId: activeEntry.requestId,
+                  streamId: activeEntry.streamId,
+                  purpose: activeEntry.purpose,
+                  phase: 'streaming',
+                  framesSent: activeEntry.framesSent,
+                  canvasLayout: activeEntry.canvasLayout,
+                });
+              }
+            } catch (error) {
+              activeEntry.handlers.sendStatus?.({
+                requestId: activeEntry.requestId,
+                streamId: activeEntry.streamId,
+                purpose: activeEntry.purpose,
+                phase: 'streaming',
+                framesSent: activeEntry.framesSent,
+                message: `overview catalog/layout update rejected: ${error instanceof Error ? error.message : String(error)}`,
+              });
             }
           })();
         }, 3_000);
@@ -1106,13 +708,15 @@ export function createRemoteWindowStreamDaemonRuntime(
       flushPendingRemoteWindowVideoFrame(entry);
       if (requestedVideoBitrate) {
         try {
-          const applyResult = await applyRemoteWindowVideoBitrate(videoSender || null, requestedVideoBitrate);
-          if (applyResult.applied) {
-            videoBitrate = applyResult.videoBitrate;
-            entry.videoBitrate = videoBitrate;
-          } else {
-            videoBitrateWarning = applyResult.reason;
-          }
+          await applyRemoteWindowStreamGroupQuality({
+            requested: requestedVideoBitrate,
+            focusSender: videoSender || null,
+            focusCaptureSource: entry.captureSource,
+            overviewSender: entry.overviewVideoSender,
+            overviewCaptureSource: entry.overviewCaptureSource,
+          });
+          videoBitrate = requestedVideoBitrate;
+          entry.videoBitrate = videoBitrate;
         } catch (error) {
           videoBitrateWarning = formatRemoteWindowVideoBitrateError(error);
         }
@@ -1141,6 +745,7 @@ export function createRemoteWindowStreamDaemonRuntime(
           ...(entry.videoBitrate ? { maxBitrateBps: entry.videoBitrate.maxBitrateBps } : {}),
           targetKind: payload.target.videoTarget.kind,
         },
+        ...(entry.canvasLayout ? { canvasLayout: entry.canvasLayout } : {}),
         transport: {
           kind: 'webrtc-video',
         },
@@ -1212,32 +817,99 @@ export function createRemoteWindowStreamDaemonRuntime(
       return buildStreamError(payload, 'remote_window_stream_quality_missing', `remote window stream is not active: ${payload.streamId}`);
     }
     if (payload.targetId !== entry.targetId) {
-      return buildStreamError(payload, 'remote_window_stream_quality_target_mismatch', `remote window stream quality target mismatch: ${payload.targetId}`);
+      return {
+        requestId: payload.requestId,
+        streamId: payload.streamId,
+        streamGroupId: payload.streamGroupId,
+        revision: payload.revision,
+        purpose: entry.purpose,
+        targetId: payload.targetId,
+        status: 'rejected',
+        requestedVideoBitrate: payload.videoBitrate,
+        error: {
+          code: 'remote_window_stream_quality_target_mismatch',
+          message: `remote window stream quality target mismatch: ${payload.targetId}`,
+        },
+      };
     }
+    if (payload.streamGroupId !== entry.streamGroupId || !Number.isSafeInteger(payload.revision) || payload.revision <= entry.qualityRevision) {
+      return {
+        requestId: payload.requestId,
+        streamId: payload.streamId,
+        streamGroupId: payload.streamGroupId,
+        revision: payload.revision,
+        purpose: entry.purpose,
+        targetId: payload.targetId,
+        status: 'rejected',
+        requestedVideoBitrate: payload.videoBitrate,
+        error: {
+          code: 'remote_window_stream_quality_stale',
+          message: `remote window stream quality revision is stale: ${payload.revision}`,
+        },
+      };
+    }
+    if (entry.pendingQualityRevision !== null) {
+      return {
+        requestId: payload.requestId,
+        streamId: payload.streamId,
+        streamGroupId: payload.streamGroupId,
+        revision: payload.revision,
+        purpose: entry.purpose,
+        targetId: payload.targetId,
+        status: 'rejected',
+        requestedVideoBitrate: payload.videoBitrate,
+        error: {
+          code: 'remote_window_stream_quality_busy',
+          message: `remote window stream quality revision ${entry.pendingQualityRevision} is still applying`,
+        },
+      };
+    }
+    entry.pendingQualityRevision = payload.revision;
     try {
       const videoBitrate = normalizeRemoteWindowVideoBitrateConfig(payload.videoBitrate);
       if (!videoBitrate) {
         throw new Error('remote window stream quality requires videoBitrate');
       }
-      const applyResult = await applyRemoteWindowVideoBitrate(entry.videoSender, videoBitrate);
-      if (!applyResult.applied) {
-        throw new Error(applyResult.reason);
-      }
-      entry.videoBitrate = applyResult.videoBitrate;
+      const appliedGroupBudget = await applyRemoteWindowStreamGroupQuality({
+        requested: videoBitrate,
+        focusSender: entry.videoSender,
+        focusCaptureSource: entry.captureSource,
+        overviewSender: entry.overviewVideoSender,
+        overviewCaptureSource: entry.overviewCaptureSource,
+      });
+      entry.videoBitrate = videoBitrate;
+      entry.qualityRevision = payload.revision;
       return {
         requestId: payload.requestId,
         streamId: payload.streamId,
+        streamGroupId: payload.streamGroupId,
+        revision: payload.revision,
         purpose: entry.purpose,
         targetId: payload.targetId,
-        accepted: true,
-        videoBitrate: applyResult.videoBitrate,
+        status: 'applied',
+        requestedVideoBitrate: payload.videoBitrate,
+        appliedVideoBitrate: videoBitrate,
+        appliedGroupBudget,
       };
     } catch (error) {
-      return buildStreamError(
-        payload,
-        'remote_window_stream_quality_failed',
-        formatRemoteWindowVideoBitrateError(error),
-      );
+      return {
+        requestId: payload.requestId,
+        streamId: payload.streamId,
+        streamGroupId: payload.streamGroupId,
+        revision: payload.revision,
+        purpose: entry.purpose,
+        targetId: payload.targetId,
+        status: 'rejected',
+        requestedVideoBitrate: payload.videoBitrate,
+        error: {
+          code: 'remote_window_stream_quality_failed',
+          message: formatRemoteWindowVideoBitrateError(error),
+        },
+      };
+    } finally {
+      if (entry.pendingQualityRevision === payload.revision) {
+        entry.pendingQualityRevision = null;
+      }
     }
   }
 
@@ -1304,8 +976,19 @@ export function createRemoteWindowStreamDaemonRuntime(
     }
     const daemonReceivedAtMs = nowMs();
     try {
-      validateRemoteWindowInput(payload, entry);
-      await runRemoteWindowInputEvent(payload, entry.target, {
+      validateRemoteWindowInputPayload(payload, {
+        targetId: entry.targetId,
+        target: entry.target,
+        canvasLayout: entry.canvasLayout,
+      });
+      const mappedPayload: RemoteWindowInputEventPayload = {
+        ...payload,
+        event: buildRemoteWindowInputConfig(payload, entry.target, {
+          daemonReceivedAtMs,
+          canvasLayout: entry.canvasLayout,
+        }).event,
+      };
+      await runRemoteWindowInputEvent(mappedPayload, entry.target, {
         swiftBinary,
         runTmux: deps.runTmux,
         daemonReceivedAtMs,
@@ -1340,18 +1023,17 @@ export function createRemoteWindowStreamDaemonRuntime(
     for (const entry of Array.from(activeStreams.values())) {
       cleanupStream(entry, reason);
     }
-    targetCatalogCache.clear();
-    targetCatalogRefreshes.clear();
+    catalogRuntime.dispose();
     remoteWindowInputHelper?.dispose();
     remoteWindowInputHelper = null;
   }
 
   if (deps.warmTargetCatalogOnStart) {
-    warmTargetCatalog();
+    catalogRuntime.warm();
   }
 
   return {
-    listTargets,
+    listTargets: catalogRuntime.listTargets,
     startStream,
     addIceCandidate,
     stopStream,

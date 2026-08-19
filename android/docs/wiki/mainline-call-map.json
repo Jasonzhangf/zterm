@@ -132,7 +132,7 @@
         },
         {
           "id": "RemoteWindowOverlayPluginRender",
-          "label": "src/components/terminal/RemoteWindowOverlay.tsx#RemoteWindowOverlay"
+          "label": "src/components/terminal/RemoteWindowOverlay.tsx#RemoteWindowOverlay facade + src/components/terminal/RemoteWindowOverlayController.tsx#RemoteWindowOverlayController"
         },
         {
           "id": "QuickBarContract",
@@ -392,7 +392,7 @@
         },
         {
           "id": "RemoteWindowOverlay",
-          "label": "src/components/terminal/RemoteWindowOverlay.tsx#RemoteWindowOverlay"
+          "label": "src/components/terminal/RemoteWindowOverlay.tsx#RemoteWindowOverlay facade + src/components/terminal/RemoteWindowOverlayController.tsx#RemoteWindowOverlayController"
         },
         {
           "id": "WindowGroupLayout",
@@ -421,6 +421,10 @@
         {
           "id": "RemoteWindowStreamQualityRuntime",
           "label": "src/contexts/session-context-remote-window-runtime.ts#updateRemoteWindowStreamQualityRuntime"
+        },
+        {
+          "id": "RemoteWindowQualityController",
+          "label": "src/lib/remote-window-quality-controller.ts#beginRemoteWindowQualityRequest + acceptRemoteWindowQualityResult + rejectRemoteWindowQualityRequest"
         },
         {
           "id": "RemoteWindowInputRuntime",
@@ -1982,17 +1986,28 @@
         },
         {
           "from": "RemoteWindowOverlay",
-          "to": "RemoteWindowStreamQualityRuntime",
+          "to": "RemoteWindowQualityController",
           "owner_feature": "desktop.remote_window_stream",
           "semantic_input": "active stream id, target id, selected per-window bitrate preset, measured browser network quality, and WebRTC stats",
-          "semantic_output": "floating-preview low bitrate, desktop-area-proportional default bitrate, network-capped quality, or stats-driven downgrade/restore remote-window-stream-quality-request with max frame-rate sent over existing active session transport without restarting capture or receiver",
+          "semantic_output": "revision-bound requested quality state; applied UI truth changes only after a matching ACK and rejected/timeout state remains visible",
           "status": "anchored",
-          "edge_id": "android_mainline:RemoteWindowOverlay->RemoteWindowStreamQualityRuntime",
+          "edge_id": "android_mainline:RemoteWindowOverlay->RemoteWindowQualityController",
+          "resource_from": "resource.remote_window_overlay",
+          "resource_to": "resource.remote_window_overlay",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "RemoteWindowQualityController",
+          "to": "RemoteWindowStreamQualityRuntime",
+          "owner_feature": "desktop.remote_window_stream",
+          "semantic_input": "stream-group id, monotonic revision, target id, and bounded ABR bitrate/capture-cadence request",
+          "semantic_output": "request-id/group/revision matched applied or rejected quality result over the existing transport",
+          "status": "anchored",
+          "edge_id": "android_mainline:RemoteWindowQualityController->RemoteWindowStreamQualityRuntime",
           "resource_from": "resource.remote_window_overlay",
           "resource_to": "resource.session_transport",
-          "via_resources": [
-            "resource.active_session"
-          ],
+          "via_resources": ["resource.active_session"],
           "relation_status": "via"
         },
         {
@@ -3830,8 +3845,20 @@
           "label": "src/server/remote-window-stream-daemon.ts#createRemoteWindowStreamDaemonRuntime"
         },
         {
+          "id": "RemoteWindowCatalog",
+          "label": "src/server/remote-window-catalog-runtime.ts#createRemoteWindowCatalogRuntime"
+        },
+        {
+          "id": "RemoteWindowCanvasLayout",
+          "label": "src/server/remote-window-canvas-layout.ts#buildRemoteWindowCanvasLayoutV1"
+        },
+        {
+          "id": "RemoteWindowQuality",
+          "label": "src/server/remote-window-quality.ts#applyRemoteWindowStreamGroupQuality"
+        },
+        {
           "id": "RemoteWindowCapture",
-          "label": "src/server/remote-window-stream-daemon.ts#startScreenCaptureKitFrameSource"
+          "label": "src/server/remote-window-capture.ts#startScreenCaptureKitFrameSource"
         },
         {
           "id": "RemoteWindowMedia",
@@ -3839,11 +3866,11 @@
         },
         {
           "id": "RemoteWindowInput",
-          "label": "src/server/remote-window-stream-daemon.ts#injectInput"
+          "label": "src/server/remote-window-input-policy.ts#validateRemoteWindowInputPayload + src/server/remote-window-input-helper.ts#buildRemoteWindowInputConfig + createDefaultRemoteWindowInputHelper"
         },
         {
           "id": "RemoteWindowCleanup",
-          "label": "src/server/remote-window-stream-daemon.ts#stopStream"
+          "label": "src/server/remote-window-stream-daemon.ts#stopStream + src/server/remote-window-stream-session.ts#releaseRemoteWindowStreamSessionResources"
         },
         {
           "id": "Http",
@@ -4479,6 +4506,32 @@
         },
         {
           "from": "RemoteWindowStream",
+          "to": "RemoteWindowCanvasLayout",
+          "owner_feature": "desktop.remote_window_stream",
+          "semantic_input": "daemon target catalog truth plus next monotonic layout generation",
+          "semantic_output": "one typed source-to-canvas layout consumed by capture projection and generation-bound input mapping",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:RemoteWindowStream->RemoteWindowCanvasLayout",
+          "resource_from": "resource.remote_window_stream",
+          "resource_to": "resource.remote_window_canvas_layout",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "RemoteWindowStream",
+          "to": "RemoteWindowQuality",
+          "owner_feature": "desktop.remote_window_stream",
+          "semantic_input": "one stream-group requested bitrate/cadence revision plus active focus/overview lanes",
+          "semantic_output": "atomically applied focus-first total budget and capture cadence, or typed rejection with rollback",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:RemoteWindowStream->RemoteWindowQuality",
+          "resource_from": "resource.remote_window_stream",
+          "resource_to": "resource.remote_window_focus_stream",
+          "via_resources": ["resource.remote_window_overview_stream"],
+          "relation_status": "via"
+        },
+        {
+          "from": "RemoteWindowStream",
           "to": "RemoteWindowInput",
           "owner_feature": "desktop.remote_window_stream",
           "semantic_input": "remote-window-input payload plus active stream target lease",
@@ -4521,7 +4574,7 @@
           "to": "RemoteWindowCleanup",
           "owner_feature": "desktop.remote_window_stream",
           "semantic_input": "stop request, capture/media error, transport close, or dispose",
-          "semantic_output": "exactly-once cleanup for capture/media/timers/stream state",
+          "semantic_output": "exactly-once gateway registry/timer cleanup plus session-owned capture/media/peer release with explicit aggregated cleanup errors",
           "status": "anchored",
           "edge_id": "daemon_mainline:RemoteWindowStream->RemoteWindowCleanup",
           "resource_from": "resource.remote_window_stream",

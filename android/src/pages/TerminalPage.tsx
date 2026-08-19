@@ -140,6 +140,7 @@ import {
   type PasteImageStartPayload,
   type RemoteWindowInputEventPayload,
   type RemoteWindowStreamQualityRequestPayload,
+  type RemoteWindowStreamQualityResultPayload,
   type RemoteWindowStreamPurpose,
   type RemoteWindowStreamTargetManifest,
   type RemoteWindowStreamTargetsResponsePayload,
@@ -466,7 +467,7 @@ interface TerminalPageProps {
   onUpdateRemoteWindowStreamQuality?: (
     sessionId: string,
     payload: Omit<RemoteWindowStreamQualityRequestPayload, 'requestId'>,
-  ) => void;
+  ) => Promise<RemoteWindowStreamQualityResultPayload>;
   onUpdateRemoteWindowFocus?: (
     sessionId: string,
     streamId: string,

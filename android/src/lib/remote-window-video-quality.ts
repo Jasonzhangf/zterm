@@ -36,6 +36,8 @@ export interface RemoteWindowVideoStatsSample {
 
 export interface RemoteWindowVideoAdaptiveState {
   mode: 'normal' | 'degraded';
+  /** 0 is baseline; 1..3 are bounded degradation steps. */
+  level: 0 | 1 | 2 | 3;
   degradedAtMs: number | null;
   stableSinceMs: number | null;
   weakSampleCount: number;
@@ -171,12 +173,15 @@ export function buildRemoteWindowVideoBitrateConfig(
 
 export function buildDegradedRemoteWindowVideoBitrateConfig(
   config: RemoteWindowVideoBitrateConfig,
+  level: 1 | 2 | 3 = 1,
 ): RemoteWindowVideoBitrateConfig {
-  const maxFrameRateFps = Math.max(5, Math.floor((config.maxFrameRateFps ?? 30) / 2)) as RemoteWindowVideoBitrateConfig['maxFrameRateFps'];
+  const divisor = 4 ** level;
+  const frameRateDivisor = 2 ** level;
+  const maxFrameRateFps = Math.max(5, Math.floor((config.maxFrameRateFps ?? 30) / frameRateDivisor)) as RemoteWindowVideoBitrateConfig['maxFrameRateFps'];
   return {
     ...config,
     bitrateMbps: config.bitrateMbps,
-    maxBitrateBps: Math.max(500_000, Math.floor(config.maxBitrateBps / 4)),
+    maxBitrateBps: Math.max(500_000, Math.floor(config.maxBitrateBps / divisor)),
     maxFrameRateFps,
   };
 }
@@ -225,6 +230,7 @@ export function resolveRemoteWindowVideoAdaptiveDecision(options: {
 }): RemoteWindowVideoAdaptiveDecision {
   const previous = options.previous || {
     mode: 'normal' as const,
+    level: 0 as const,
     degradedAtMs: null,
     stableSinceMs: null,
     weakSampleCount: 0,
@@ -234,7 +240,7 @@ export function resolveRemoteWindowVideoAdaptiveDecision(options: {
     return {
       state: previous,
       config: previous.mode === 'degraded'
-        ? buildDegradedRemoteWindowVideoBitrateConfig(options.baseline)
+        ? buildDegradedRemoteWindowVideoBitrateConfig(options.baseline, Math.max(1, previous.level) as 1 | 2 | 3)
         : options.baseline,
       reason: previous.mode === 'degraded' ? 'hold' : 'baseline',
     };
@@ -247,6 +253,7 @@ export function resolveRemoteWindowVideoAdaptiveDecision(options: {
       return {
         state: {
           mode: 'normal',
+          level: 0,
           degradedAtMs: null,
           stableSinceMs: null,
           weakSampleCount,
@@ -255,36 +262,50 @@ export function resolveRemoteWindowVideoAdaptiveDecision(options: {
         reason: 'baseline',
       };
     }
+    if (previous.mode === 'degraded' && weakSampleCount < weakSamplesBeforeDowngrade) {
+      return {
+        state: { ...previous, stableSinceMs: null, weakSampleCount },
+        config: buildDegradedRemoteWindowVideoBitrateConfig(options.baseline, Math.max(1, previous.level) as 1 | 2 | 3),
+        reason: 'hold',
+      };
+    }
+    const level = Math.min(3, previous.level + 1) as 1 | 2 | 3;
     return {
       state: {
         mode: 'degraded',
+        level,
         degradedAtMs: previous.degradedAtMs ?? sample.sampledAtMs,
         stableSinceMs: null,
-        weakSampleCount,
+        weakSampleCount: 0,
       },
-      config: buildDegradedRemoteWindowVideoBitrateConfig(options.baseline),
+      config: buildDegradedRemoteWindowVideoBitrateConfig(options.baseline, level),
       reason: previous.mode === 'degraded' ? 'hold' : 'downgrade',
     };
   }
   if (previous.mode !== 'degraded') {
     return {
-      state: { mode: 'normal', degradedAtMs: null, stableSinceMs: null, weakSampleCount: 0 },
+      state: { mode: 'normal', level: 0, degradedAtMs: null, stableSinceMs: null, weakSampleCount: 0 },
       config: options.baseline,
       reason: 'baseline',
     };
   }
   const stableSinceMs = previous.stableSinceMs ?? sample.sampledAtMs;
-  const restoreStableMs = Math.max(1, Math.floor(options.restoreStableMs ?? 8_000));
+  const restoreStableMs = Math.max(1, Math.floor(options.restoreStableMs ?? 12_000));
   if (sample.sampledAtMs - stableSinceMs >= restoreStableMs) {
+    const level = Math.max(0, previous.level - 1) as 0 | 1 | 2;
     return {
-      state: { mode: 'normal', degradedAtMs: null, stableSinceMs: null, weakSampleCount: 0 },
-      config: options.baseline,
+      state: level === 0
+        ? { mode: 'normal', level: 0, degradedAtMs: null, stableSinceMs: null, weakSampleCount: 0 }
+        : { mode: 'degraded', level, degradedAtMs: previous.degradedAtMs, stableSinceMs: sample.sampledAtMs, weakSampleCount: 0 },
+      config: level === 0
+        ? options.baseline
+        : buildDegradedRemoteWindowVideoBitrateConfig(options.baseline, level),
       reason: 'restore',
     };
   }
   return {
     state: { ...previous, stableSinceMs, weakSampleCount: 0 },
-    config: buildDegradedRemoteWindowVideoBitrateConfig(options.baseline),
+    config: buildDegradedRemoteWindowVideoBitrateConfig(options.baseline, Math.max(1, previous.level) as 1 | 2 | 3),
     reason: 'hold',
   };
 }

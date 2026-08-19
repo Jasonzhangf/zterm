@@ -729,15 +729,26 @@ describe('session context remote window runtime', () => {
     expect(stopReceiver).toHaveBeenCalledWith('stream-1');
   });
 
-  it('sends stream quality updates over the existing stream transport', () => {
+  it('sends acknowledged stream quality updates over the existing stream transport', async () => {
     const ws = makeSocket();
-    const sendStreamQuality = vi.fn();
+    const sendStreamQuality = vi.fn(async () => ({
+      requestId: 'quality-1',
+      streamId: 'stream-1',
+      streamGroupId: 'stream-1',
+      revision: 1,
+      targetId: 'target-1',
+      status: 'applied' as const,
+      requestedVideoBitrate: { preset: '10mbps' as const, bitrateMbps: 10 as const, maxBitrateBps: 10_000_000 },
+      appliedVideoBitrate: { preset: '10mbps' as const, bitrateMbps: 10 as const, maxBitrateBps: 10_000_000 },
+    }));
     const sendSocketPayload = vi.fn();
 
-    updateRemoteWindowStreamQualityRuntime({
+    await updateRemoteWindowStreamQualityRuntime({
       sessionId: ' session-1 ',
       payload: {
         streamId: 'stream-1',
+        streamGroupId: 'stream-1',
+        revision: 1,
         targetId: 'target-1',
         videoBitrate: { preset: '10mbps', bitrateMbps: 10, maxBitrateBps: 10_000_000 },
       },
@@ -759,6 +770,8 @@ describe('session context remote window runtime', () => {
       ws,
       payload: {
         streamId: 'stream-1',
+        streamGroupId: 'stream-1',
+        revision: 1,
         targetId: 'target-1',
         videoBitrate: { preset: '10mbps', bitrateMbps: 10, maxBitrateBps: 10_000_000 },
       },

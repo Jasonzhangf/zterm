@@ -3,6 +3,7 @@ import type {
   RemoteWindowInputEventPayload,
   RemoteWindowStreamStatusPayload,
   RemoteWindowStreamQualityRequestPayload,
+  RemoteWindowStreamQualityResultPayload,
   RemoteWindowStreamStartedPayload,
   RemoteWindowStreamPurpose,
   RemoteWindowStreamTargetManifest,
@@ -48,7 +49,7 @@ interface RemoteWindowStreamMessageRuntimeLike extends RemoteWindowCatalogMessag
       payload: Omit<RemoteWindowStreamQualityRequestPayload, 'requestId'>;
       sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
     },
-  ) => void;
+  ) => Promise<RemoteWindowStreamQualityResultPayload>;
   sendStreamUpdateFocus: (
     sessionId: string,
     options: {
@@ -346,7 +347,7 @@ export function updateRemoteWindowStreamQualityRuntime(options: {
     sessions: options.sessions,
     daemonConnection: options.daemonConnection,
   });
-  options.remoteWindowMessageRuntime.sendStreamQuality(targetSessionId, {
+  return options.remoteWindowMessageRuntime.sendStreamQuality(targetSessionId, {
     ws,
     payload: options.payload,
     sendSocketPayload: options.sendSocketPayload,

@@ -398,3 +398,195 @@ Out of scope: terminal mirror/buffer/renderer, unrelated session heartbeat regre
 ### Definition of done
 
 Done means the 15t-1 live trace proves overview frame availability, immediate selected crop, matching focus first-frame ready, and high-quality commit; stale/error/close paths are proven not to commit; all required gates pass; installed versions match the reviewed source; and no unresolved composite-capture blocker remains.
+
+## 2026-08-19 Architecture / UI / ABR / Gesture Remediation Plan
+
+This section supersedes conflicting implementation details above for the remediation scope below. The canonical product boundary remains `docs/decisions/2026-07-19-remote-window-stream-truth.md`; implementation must also reconcile the canvas, multi-window UI, touch-input, dual-stream, registry, function-map, and mainline-call-map documents before runtime edits.
+
+### Objective and acceptance criteria
+
+Refactor `desktop.remote_window_stream` into independently owned client and daemon modules, remove duplicate layout truth and silent compatibility paths, improve the Android remote-control UI, replace fire-and-forget quality changes with an acknowledged adaptive-bitrate controller, and make touch/mouse gesture semantics deterministic.
+
+Acceptance requires:
+
+1. Daemon owns one typed canvas layout with monotonic `layoutGeneration`; Android consumes published rectangles and never recomputes macOS/canvas layout.
+2. Active code depends only on active registry resources; current overview/focus resources are separated from future VideoToolbox design resources.
+3. `RemoteWindowOverlay.tsx` becomes a thin composition/view surface; catalog, lifecycle, receiver, quality, projection, gesture, and debug ownership are separate.
+4. Daemon gateway only routes typed requests; capture, layout, encoder quality, input, catalog, and stream lifecycle have independent owners.
+5. SDP rewrite fallback and silent quality catches are physically removed; unsupported negotiation and quality application return typed errors.
+6. Android UI uses at least 48x48 CSS-pixel hit targets for primary touch actions, valid non-nested interactive elements, clear icons/labels, fixed primary controls, an overflow sheet for secondary controls, and separate user status versus developer diagnostics.
+7. A child-window close affordance cannot close the whole stream; it is removed until a typed remove-window operation exists, or it waits for daemon ACK before changing projection.
+8. Quality control tracks `requested -> applied | rejected` by request/revision; stale ACK cannot commit, rejected/timeout updates are visible, and `lastApplied` changes only after matching acceptance.
+9. ABR enforces one stream-group budget across focus and overview, uses delta WebRTC stats plus hysteresis, steps down quickly and restores gradually, never exceeds the user ceiling, and updates sender plus capture cadence without rebuilding capture, receiver, session transport, or coordinate truth.
+10. Touch and mouse modes have separate state machines. Gesture classification locks for the pointer sequence; touch scroll never moves the cursor; mouse mode supports pointer down/move/up drag; pair-to-single transition depends on zoom and input mode; long press has one timer owner.
+11. Automated positive/negative gates, installed daemon/runtime identity, online Android UI/input replay, controlled weak-network traces, resource cleanup, DSH Review PASS, targeted commit, and push all complete.
+
+### Scope and boundaries
+
+In scope:
+
+- Remote-window resource/module/edge/function/mainline/test-design truth.
+- Android remote-window controller, receiver, quality controller, projection/view, gesture arena, picker, toolbar, app/window switch UI, and diagnostics projection.
+- Shared typed layout, quality request/result/error, stream-group budget, and input-mode contracts.
+- Daemon catalog, stream session, layout, capture cadence, sender quality, focus/overview budget, input injection, negotiation failure, and exact cleanup.
+- Focused unit/page/server tests, architecture gates, typecheck/build, installed Mac daemon, online Android, controlled network tests, and true target-event replay.
+
+Out of scope:
+
+- Terminal mirror, sparse buffer, renderer, tmux width, session transport redesign, Relay account redesign, unrelated file transfer, and unrelated UI polish.
+- Screenshot, terminal buffer, stale canvas, SDP rewrite, extra transport, or stream restart as fallback.
+- Public Relay OTA without Jason's explicit authorization.
+- Removing or overwriting unrelated dirty worktree changes.
+
+### Architecture and owner plan
+
+Required client owners:
+
+- `client.remote_window_controller`: picker, target lock, stream lifecycle, transactional handoff.
+- `client.remote_window_receiver`: peer connection, tracks, playback, stats deltas.
+- `client.remote_window_quality`: selected ceiling, network cap, requested/applied/rejected state, ABR decisions.
+- `client.remote_window_gesture_arena`: touch/mouse pointer sequence and one long-press owner.
+- `client.remote_window_projection`: floating/fullscreen/IME geometry only.
+- `client.remote_window_view`: pure render and intent callbacks.
+- `client.remote_window_debug_projection`: debug-only diagnostics.
+
+Required daemon owners:
+
+- `daemon.remote_window_gateway`: typed routing only.
+- `daemon.remote_window_stream_session`: stream registry, lifecycle, exact cleanup.
+- `daemon.remote_window_catalog`: app/window/iTerm catalog and cache.
+- `daemon.remote_window_canvas_layout`: only layout builder and `layoutGeneration` owner.
+- `daemon.remote_window_capture`: ScreenCaptureKit source, target update, cadence update.
+- `daemon.remote_window_quality`: stream-group budget and sender/capture quality transaction.
+- `daemon.remote_window_input`: focus verification and OS event injection.
+
+Required contracts:
+
+- `RemoteWindowCanvasLayoutV1`: generation, canvas size, focus target, source/canvas rectangles, z-order.
+- Quality request/result: request id, revision, stream/group id, target id, requested config, accepted/applied config or typed error.
+- Stream-group budget: group/focus/overview bitrate and FPS.
+- Input mode: `direct-touch | mouse-emulation`; cursor policy is derived by the daemon input owner rather than optional behavior scattered across events.
+
+Forbidden architecture:
+
+- Android layout builder or macOS coordinate reconstruction.
+- Active modules consuming `status: design` resources.
+- UI component owning WebRTC, ABR retry, transport, or daemon coordinate truth.
+- Daemon gateway containing layout, capture, encode, or input algorithms.
+- Control/debug fields mixed into media or business payloads.
+- Duplicate long-press, layout, quality, or input-policy implementations.
+
+### UI and interaction plan
+
+- Top bar: target identity, effective-quality/network chip, minimize/fullscreen, close.
+- Fixed bottom dock: Touch/Mouse, keyboard, screenshot, More.
+- More sheet: fill remote window, user bitrate ceiling, scroll tuning, user-readable stream state, developer diagnostics entry.
+- Replace `[]`, `#`, `KB`, and bare `x/-` placeholders with shared SVG icons and accessible labels.
+- Primary hit surfaces are at least 48x48; thumbnail destructive actions meet the same touch contract.
+- Picker/app switch rows use sibling buttons, never nested interactive elements.
+- User status reports route, requested/applied quality, RTT/loss/freeze summary, and downgrade reason; raw ids/rects remain developer-only.
+- Add a short first-use gesture guide and persistent mode indicator without covering video.
+
+### Adaptive bitrate plan
+
+- Convert receiver counters to per-sample deltas; add bytes/frames/packet-loss throughput signals where available.
+- Smooth throughput/RTT with EWMA; severe freeze/loss may downshift immediately, ordinary weakness requires consecutive samples.
+- Use a bounded bitrate ladder and FPS ladder. Never exceed the user ceiling or route/network cap.
+- Restore only after a stable 10-15 second window and climb one step at a time; enforce a minimum dwell/cooldown.
+- Allocate one total budget across focus and overview. Under weak networks, overview must shrink before it can starve focus.
+- Apply quality as one transaction to existing sender encodings and ScreenCaptureKit cadence. No sender encoding fabrication and no stream restart.
+- Publish requested, applied, rejected, reason, and measured signals through typed control/debug resources.
+
+### Gesture plan
+
+Direct Touch:
+
+- tap -> remote click;
+- drag at 1x -> remote scroll with no cursor movement;
+- drag while zoomed -> local pan;
+- coherent two-finger vertical move -> remote scroll;
+- opposite-axis two-finger move -> local pinch;
+- double tap -> 1x/2x local zoom;
+- long press -> one right click plus haptic.
+
+Mouse Emulation:
+
+- move -> pointer move;
+- tap -> left click;
+- hold/drag -> pointer down, pointer moves, pointer up;
+- two-finger move -> wheel scroll;
+- two-finger tap or explicit action -> right click.
+
+State rules:
+
+- `candidate -> scroll | pinch | drag | longPress` commits once and cannot change until the pointer sequence ends.
+- First and later direct-touch scroll events share no-cursor semantics.
+- Pair-to-single transition uses current mode and zoom truth; unzoomed direct touch cannot enter meaningless local pan.
+- Pointer cancel, second-finger arrival, slop crossing, mode change, background, stream switch, and close cancel the one long-press timer deterministically.
+
+### Primary file plan
+
+Architecture/docs before runtime:
+
+- `android/docs/resource-registry.json`
+- `android/docs/module-registry.json`
+- `android/docs/edge-registry.json`
+- `android/docs/function-map.md`
+- `android/docs/wiki/mainline-call-map.json`
+- `android/docs/wiki/mainline-source.md`
+- remote-window decisions and test designs
+
+Expected runtime surfaces after registry approval:
+
+- `packages/shared/src/connection/protocol.ts`
+- current remote-window client/server files, split into the owners declared above
+- `android/src/components/terminal/RemoteWindowOverlay.tsx`
+- `android/src/pages/SettingsPage.tsx`
+- focused client/page/server tests and live probes
+
+Do not create final filenames or symbols before their module/resource/edge ownership is active in the registries.
+
+### Risks and prevention
+
+- Layout migration can misroute input: generation mismatch must fail closed; old and new layout paths cannot coexist.
+- Refactor can break live media: preserve protocol-visible behavior with characterization tests before moving code.
+- ABR can oscillate: use hysteresis, stepwise restore, dwell time, and deterministic clock tests.
+- Dual streams can exceed budget: enforce group allocation, not two independent controllers.
+- UI redesign can hide actions: portrait/landscape/IME/accessibility screenshots and hit-target tests are mandatory.
+- Gesture races can duplicate events: one arena, one timer, sequence ids, positive/negative target-event replay.
+- Existing dirty files belong to other work: use the required semantic claim and clean issue worktree; merge only the reviewed change set.
+
+### Verification matrix
+
+| Layer | Required proof |
+| --- | --- |
+| Registry/architecture | active/design consistency, unique layout builder, owned paths, real import/call edges, forbidden fallback/duplicate-owner red gates |
+| Characterization | current catalog/start/dual-stream/input/cleanup behavior locked before refactor |
+| Client unit/page | controller, receiver, quality ACK/stale/reject, view hit targets/a11y, Touch/Mouse gesture state machines, pair-to-single, first-scroll no-cursor |
+| Daemon unit | negotiation error, no SDP rewrite, layout generation, group budget, sender/capture cadence transaction, explicit overview failure, exact cleanup |
+| Build | focused tests, feature/registry gates, typecheck, Android build, diff check |
+| Installed daemon | prepared/installed SHA equality, scoped restart, new PID/uptime, health, live catalog/video/quality/input/cleanup |
+| Android live | installed APK identity, portrait/landscape/IME UI, repeated touch/mouse actions, visible effective quality, no hidden primary actions |
+| Network live | bandwidth/RTT/loss/freeze steps, fast downshift, slow stepwise restore, group budget, no transport/receiver/capture rebuild |
+| Input live | Android/CDP request, daemon accepted result, controlled AppKit file-backed OS event log, no touch-scroll cursor movement, real mouse drag |
+| Review/delivery | DSH Review PASS after all live gates; any post-review code change invalidates evidence and requires rerun; targeted commit/push |
+
+### Ordered implementation
+
+1. Search MemoryPalace; read current note/MEMORY, resource/module/edge registries, function/mainline/verification maps, decisions, test designs, and live source.
+2. Establish `.agent-collab` run/claim and one clean issue worktree under `playground/`; preserve current dirty main tree.
+3. Write architecture mapping and update docs/registries/gates first. Separate active overview/focus truth from future encoder design resources.
+4. Add characterization and red tests for duplicate layout, active-to-design dependencies, SDP fallback, quality ACK, first-scroll cursor policy, gesture lock, pair transition, mouse drag, invalid UI nesting, hit sizes, and child-close semantics.
+5. Implement daemon-owned layout contract and remove client recomputation.
+6. Split daemon and client owners without retaining old dual paths.
+7. Implement UI hierarchy/accessibility changes.
+8. Implement quality request/applied state machine, group-budget ABR, and dynamic capture cadence.
+9. Implement deterministic Touch/Mouse gesture arenas and remove duplicate long-press ownership.
+10. Run focused/full mapped gates, typecheck, build, architecture self-audit, and diff check in the clean worktree.
+11. Handoff/merge the exact change set; install/restart the scoped daemon, verify installed SHA/PID/health, build/install Android without clearing data, and run online UI/network/input/resource-cleanup gates.
+12. Run DSH Review with `opencode-go/deepseek-v4-flash`; fix and repeat all invalidated verification until semantic PASS.
+13. Commit and push only the reviewed scope. Update note/MEMORY/skill if new reusable truth was proven; re-mine and search the zterm MemoryPalace wing.
+
+### Definition of done
+
+Done means all duplicate/forbidden runtime paths are physically removed; registries describe current active truth; one daemon layout generation drives video projection and input mapping; client and daemon owners are independently testable; UI is usable on real Android portrait/landscape/IME states; requested/applied quality is acknowledged and visible; controlled weak-network tests prove bounded fast-down/slow-up behavior and a focus/overview group budget without lifecycle rebuilds; Touch and Mouse modes pass deterministic automated and real OS-event replay; installed daemon/APK identities match reviewed source; required gates and DSH Review pass; exact cleanup, commit, and push are complete; and no P0/P1 finding remains open.

@@ -87,6 +87,7 @@ export type {
   TerminalSessionCapabilitiesPayload,
   RemoteWindowInputEventPayload,
   RemoteWindowInputResultPayload,
+  RemoteWindowCanvasLayoutV1,
   RemoteWindowStreamErrorPayload,
   RemoteWindowStreamIceCandidate,
   RemoteWindowStreamIceCandidatePayload,

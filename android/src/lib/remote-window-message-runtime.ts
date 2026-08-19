@@ -10,6 +10,7 @@ import type {
   RemoteWindowStreamRequestPayload,
   RemoteWindowStreamRtcDescription,
   RemoteWindowStreamQualityRequestPayload,
+  RemoteWindowStreamQualityResultPayload,
   RemoteWindowStreamPurpose,
   RemoteWindowStreamTargetsResponsePayload,
   RemoteWindowVideoBitrateConfig,
@@ -53,15 +54,27 @@ interface PendingRemoteWindowStreamStopRequest {
   reject: (error: Error) => void;
 }
 
+interface PendingRemoteWindowStreamQualityRequest {
+  kind: 'stream-quality';
+  streamId: string;
+  streamGroupId: string;
+  revision: number;
+  timeoutId: number | null;
+  resolve: (payload: RemoteWindowStreamQualityResultPayload) => void;
+  reject: (error: Error) => void;
+}
+
 type PendingRemoteWindowRequest =
   | PendingRemoteWindowTargetsRequest
   | PendingRemoteWindowStreamStartRequest
-  | PendingRemoteWindowStreamStopRequest;
+  | PendingRemoteWindowStreamStopRequest
+  | PendingRemoteWindowStreamQualityRequest;
 type RemoteWindowMessageSubscriber = (msg: RemoteWindowControlMessage) => void | Promise<unknown>;
 
 export const REMOTE_WINDOW_TARGETS_REQUEST_TIMEOUT_MS = 15000;
 export const REMOTE_WINDOW_STREAM_START_REQUEST_TIMEOUT_MS = 40_000;
 export const REMOTE_WINDOW_STREAM_STOP_REQUEST_TIMEOUT_MS = 15_000;
+export const REMOTE_WINDOW_STREAM_QUALITY_REQUEST_TIMEOUT_MS = 10_000;
 
 export function isRemoteWindowControlMessage(msg: ServerMessage): msg is RemoteWindowControlMessage {
   return msg.type === 'remote-window-targets-response'
@@ -93,10 +106,12 @@ export function createRemoteWindowMessageRuntime(input?: {
   const pendingRequests = new Map<string, PendingRemoteWindowTargetsRequest>();
   const pendingStreamStarts = new Map<string, PendingRemoteWindowStreamStartRequest>();
   const pendingStreamStops = new Map<string, PendingRemoteWindowStreamStopRequest>();
+  const pendingStreamQuality = new Map<string, PendingRemoteWindowStreamQualityRequest>();
   const subscribers = new Set<RemoteWindowMessageSubscriber>();
   const targetsTimeoutMs = input?.timeoutMs ?? REMOTE_WINDOW_TARGETS_REQUEST_TIMEOUT_MS;
   const streamStartTimeoutMs = input?.timeoutMs ?? REMOTE_WINDOW_STREAM_START_REQUEST_TIMEOUT_MS;
   const streamStopTimeoutMs = input?.timeoutMs ?? REMOTE_WINDOW_STREAM_STOP_REQUEST_TIMEOUT_MS;
+  const streamQualityTimeoutMs = input?.timeoutMs ?? REMOTE_WINDOW_STREAM_QUALITY_REQUEST_TIMEOUT_MS;
   const setTimeoutFn = input?.setTimeoutFn ?? globalThis.setTimeout.bind(globalThis);
   const clearTimeoutFn = input?.clearTimeoutFn ?? globalThis.clearTimeout.bind(globalThis);
   const now = input?.now ?? (() => Date.now());
@@ -183,6 +198,24 @@ export function createRemoteWindowMessageRuntime(input?: {
       activePending.timeoutId = null;
       activePending.reject(new Error('Remote window stream stop timed out'));
     }, streamStopTimeoutMs) as unknown as number;
+    return true;
+  };
+
+  const armPendingStreamQualityTimeout = (requestId: string) => {
+    const pending = pendingStreamQuality.get(requestId);
+    if (!pending) {
+      return false;
+    }
+    clearPendingTimeout(pending);
+    pending.timeoutId = setTimeoutFn(() => {
+      const activePending = pendingStreamQuality.get(requestId);
+      if (!activePending) {
+        return;
+      }
+      pendingStreamQuality.delete(requestId);
+      activePending.timeoutId = null;
+      activePending.reject(new Error('Remote window stream quality timed out'));
+    }, streamQualityTimeoutMs) as unknown as number;
     return true;
   };
 
@@ -298,14 +331,34 @@ export function createRemoteWindowMessageRuntime(input?: {
       if (!targetSessionId || !streamId || !targetId) {
         throw new Error('Remote window stream quality requires sessionId, streamId, and targetId');
       }
-      sendClientMessage(targetSessionId, options.ws, options.sendSocketPayload, {
-        type: 'remote-window-stream-quality-request',
-        payload: {
-          ...options.payload,
+      const requestId = `rw-quality-${now()}-${Math.random().toString(36).slice(2, 8)}`;
+      return new Promise<RemoteWindowStreamQualityResultPayload>((resolve, reject) => {
+        const pending: PendingRemoteWindowStreamQualityRequest = {
+          kind: 'stream-quality',
           streamId,
-          targetId,
-          requestId: `rw-quality-${now()}-${Math.random().toString(36).slice(2, 8)}`,
-        },
+          streamGroupId: options.payload.streamGroupId,
+          revision: options.payload.revision,
+          timeoutId: null,
+          resolve,
+          reject,
+        };
+        pendingStreamQuality.set(requestId, pending);
+        armPendingStreamQualityTimeout(requestId);
+        try {
+          sendClientMessage(targetSessionId, options.ws, options.sendSocketPayload, {
+            type: 'remote-window-stream-quality-request',
+            payload: {
+              ...options.payload,
+              streamId,
+              targetId,
+              requestId,
+            },
+          });
+        } catch (error) {
+          pendingStreamQuality.delete(requestId);
+          clearPendingTimeout(pending);
+          reject(error instanceof Error ? error : new Error(String(error)));
+        }
       });
     },
 
@@ -487,6 +540,13 @@ export function createRemoteWindowMessageRuntime(input?: {
         stopPending.reject(buildRemoteWindowError(payload));
         return true;
       }
+      const qualityPending = pendingStreamQuality.get(payload.requestId);
+      if (qualityPending && (!payload.streamId || payload.streamId === qualityPending.streamId)) {
+        pendingStreamQuality.delete(payload.requestId);
+        clearPendingTimeout(qualityPending);
+        qualityPending.reject(buildRemoteWindowError(payload));
+        return true;
+      }
       return false;
     },
 
@@ -516,7 +576,27 @@ export function createRemoteWindowMessageRuntime(input?: {
         return handled || observed;
       }
       if (msg.type === 'remote-window-stream-quality-result') {
-        return notifySubscribers(msg);
+        const pending = pendingStreamQuality.get(msg.payload.requestId);
+        let handled = false;
+        if (
+          pending
+          && pending.streamId === msg.payload.streamId
+          && pending.streamGroupId === msg.payload.streamGroupId
+          && pending.revision === msg.payload.revision
+        ) {
+          handled = true;
+          pendingStreamQuality.delete(msg.payload.requestId);
+          clearPendingTimeout(pending);
+          if (msg.payload.status === 'applied') {
+            pending.resolve(msg.payload);
+          } else {
+            const error = new Error(msg.payload.error?.message || 'Remote window stream quality rejected');
+            error.name = msg.payload.error?.code || 'remote_window_stream_quality_rejected';
+            pending.reject(error);
+          }
+        }
+        const observed = notifySubscribers(msg);
+        return handled || observed;
       }
       if (msg.type === 'remote-window-stream-focus-result') {
         return notifySubscribers(msg);
@@ -552,15 +632,20 @@ export function createRemoteWindowMessageRuntime(input?: {
         pending.reject(new Error(reason));
       }
       pendingStreamStops.clear();
+      for (const pending of pendingStreamQuality.values()) {
+        clearPendingTimeout(pending);
+        pending.reject(new Error(reason));
+      }
+      pendingStreamQuality.clear();
       subscribers.clear();
     },
 
     getPendingCount() {
-      return pendingRequests.size + pendingStreamStarts.size + pendingStreamStops.size;
+      return pendingRequests.size + pendingStreamStarts.size + pendingStreamStops.size + pendingStreamQuality.size;
     },
 
     getPendingRequestIds() {
-      return [...pendingRequests.keys(), ...pendingStreamStarts.keys(), ...pendingStreamStops.keys()];
+      return [...pendingRequests.keys(), ...pendingStreamStarts.keys(), ...pendingStreamStops.keys(), ...pendingStreamQuality.keys()];
     },
   };
 

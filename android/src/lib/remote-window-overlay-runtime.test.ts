@@ -13,7 +13,6 @@ import {
   failRemoteWindowStream,
   failRemoteWindowTargetCatalog,
   initialRemoteWindowOverlayState,
-  resolveRemoteWindowCompositeWindowLayout,
   selectRemoteWindowTarget,
   shrinkRemoteWindowOverlay,
   upsertRemoteWindowCatalogTarget,
@@ -311,54 +310,6 @@ describe('remote window composite layout', () => {
       ...overrides,
     } as RemoteWindowStreamTargetManifest;
   }
-
-  it('returns null for a single-window target', () => {
-    expect(resolveRemoteWindowCompositeWindowLayout(makeTarget())).toBeNull();
-  });
-
-  it('lays out same-app windows in a single row', () => {
-    const target = makeTarget({
-      compositeWindows: [
-        {
-          windowId: '200',
-          title: 'Preview',
-          windowBoundsTopLeftPx: { x: 900, y: 20, width: 400, height: 500 },
-          cropRectTopLeftPx: { x: 900, y: 20, width: 400, height: 500 },
-        },
-      ],
-    });
-    const layout = resolveRemoteWindowCompositeWindowLayout(target);
-    expect(layout).not.toBeNull();
-    expect(layout!.canvasWidth).toBe(1920);
-    expect(layout!.canvasHeight).toBe(1080);
-    expect(layout!.windows).toHaveLength(2);
-    expect(layout!.windows[0]).toMatchObject({ windowId: '100', offsetX: 0 });
-    expect(layout!.windows[1]).toMatchObject({ windowId: '200', offsetX: 800 });
-  });
-
-  it('deduplicates a synthetic primary entry and fits the complete row into 1080P', () => {
-    const target = makeTarget({
-      compositeWindows: [
-        {
-          windowId: '100',
-          title: 'Synthetic primary',
-          windowBoundsTopLeftPx: { x: 10, y: 20, width: 800, height: 600 },
-          cropRectTopLeftPx: { x: 10, y: 20, width: 800, height: 600 },
-        },
-        ...['200', '300', '400'].map((windowId) => ({
-          windowId,
-          title: windowId,
-          windowBoundsTopLeftPx: { x: 0, y: 0, width: 1000, height: 1000 },
-          cropRectTopLeftPx: { x: 0, y: 0, width: 1000, height: 1000 },
-        })),
-      ],
-    });
-    const layout = resolveRemoteWindowCompositeWindowLayout(target);
-    expect(layout!.windows.map((window) => window.windowId)).toEqual(['100', '200', '300', '400']);
-    const last = layout!.windows[layout!.windows.length - 1]!;
-    expect(last.offsetX + last.width).toBeLessThanOrEqual(layout!.canvasWidth);
-    expect(last.height).toBeLessThanOrEqual(layout!.canvasHeight);
-  });
 
   it('does not attach windows from other apps even with shared/missing bundle id', () => {
     const wechat = makeTarget({

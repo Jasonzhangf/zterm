@@ -1,11 +1,11 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import type {
   RemoteWindowInputEventPayload,
+  RemoteWindowCanvasLayoutV1,
   RemoteWindowStreamRect,
   RemoteWindowStreamTargetManifest,
 } from '@zterm/shared/protocol';
 import { MACOS_REMOTE_WINDOW_INPUT_SWIFT } from './remote-window-scripts';
-import { resolveRemoteWindowCompositeLayout } from './remote-window-capture';
 import { REMOTE_WINDOW_ERROR_MESSAGE_MAX_CHARS } from './remote-window-support';
 
 const REMOTE_WINDOW_INPUT_STALE_MS = 1_000;
@@ -596,41 +596,63 @@ export function createDefaultRemoteWindowInputHelper(options: {
 export function mapRemoteWindowInputToCompositeTarget(
   event: RemoteWindowInputEventPayload['event'],
   target: RemoteWindowStreamTargetManifest,
+  layout: RemoteWindowCanvasLayoutV1 | null,
 ): RemoteWindowInputEventPayload['event'] {
   if (!target.compositeWindows || target.compositeWindows.length === 0) {
     return event;
   }
-  if (event.kind !== 'pointer' && event.kind !== 'click' && event.kind !== 'scroll') {
+  if (event.kind !== 'pointer' && event.kind !== 'click' && event.kind !== 'scroll' && event.kind !== 'gesture') {
     return event;
   }
-  const layout = resolveRemoteWindowCompositeLayout(target);
   if (!layout) {
     return event;
   }
   const mainCrop = target.videoTarget.cropRectTopLeftPx ?? target.videoTarget.windowBoundsTopLeftPx;
   // client 的 x/y = 画布左上（主窗口 crop 左上）+ normalized × 画布尺寸 → 画布内坐标
-  const canvasX = event.x - mainCrop.x;
-  const canvasY = event.y - mainCrop.y;
-  const hit = layout.windows.find((w) => (
-    canvasX >= w.offsetX
-    && canvasX < w.offsetX + w.cropRect.width
-    && canvasY >= w.offsetY
-    && canvasY < w.offsetY + w.cropRect.height
+  const anchorX = event.kind === 'gesture' ? event.startX : event.x;
+  const anchorY = event.kind === 'gesture' ? event.startY : event.y;
+  const canvasX = anchorX - mainCrop.x;
+  const canvasY = anchorY - mainCrop.y;
+  const hit = layout.windows.find((window) => (
+    canvasX >= window.canvasRectPx.x
+    && canvasX < window.canvasRectPx.x + window.canvasRectPx.width
+    && canvasY >= window.canvasRectPx.y
+    && canvasY < window.canvasRectPx.y + window.canvasRectPx.height
   ));
-  const windowSlot = hit ?? layout.windows[0];
-  const localX = canvasX - windowSlot.offsetX;
-  const localY = canvasY - windowSlot.offsetY;
+  if (!hit) {
+    throw new Error('remote window canvas input is outside the published layout');
+  }
+  const windowSlot = hit;
+  const sourceScaleX = windowSlot.sourceRectTopLeftPx.width / windowSlot.canvasRectPx.width;
+  const sourceScaleY = windowSlot.sourceRectTopLeftPx.height / windowSlot.canvasRectPx.height;
+  const mapPoint = (x: number, y: number) => ({
+    x: windowSlot.sourceRectTopLeftPx.x
+      + ((x - mainCrop.x - windowSlot.canvasRectPx.x) * sourceScaleX),
+    y: windowSlot.sourceRectTopLeftPx.y
+      + ((y - mainCrop.y - windowSlot.canvasRectPx.y) * sourceScaleY),
+  });
+  const mappedEnd = mapPoint(event.x, event.y);
+  if (event.kind === 'gesture') {
+    const mappedStart = mapPoint(event.startX, event.startY);
+    return {
+      ...event,
+      startX: mappedStart.x,
+      startY: mappedStart.y,
+      x: mappedEnd.x,
+      y: mappedEnd.y,
+    };
+  }
   return {
     ...event,
-    x: windowSlot.windowBounds.x + localX,
-    y: windowSlot.windowBounds.y + localY,
+    x: mappedEnd.x,
+    y: mappedEnd.y,
   };
 }
 
 export function buildRemoteWindowInputConfig(
   payload: RemoteWindowInputEventPayload,
   target: RemoteWindowStreamTargetManifest,
-  options: { daemonReceivedAtMs?: number; skipFocus?: boolean } = {},
+  options: { daemonReceivedAtMs?: number; skipFocus?: boolean; canvasLayout?: RemoteWindowCanvasLayoutV1 | null } = {},
 ): RemoteWindowInputConfig {
   return {
     daemonReceivedAtMs: Number.isFinite(options.daemonReceivedAtMs)
@@ -646,7 +668,7 @@ export function buildRemoteWindowInputConfig(
       bounds: target.videoTarget.windowBoundsTopLeftPx,
     },
     clientSentAt: payload.clientSentAt,
-    event: mapRemoteWindowInputToCompositeTarget(payload.event, target),
+    event: mapRemoteWindowInputToCompositeTarget(payload.event, target, options.canvasLayout ?? null),
   };
 }
 

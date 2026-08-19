@@ -1,0 +1,99 @@
+import { describe, expect, it, vi } from 'vitest';
+import { applyRemoteWindowStreamGroupQuality, resolveRemoteWindowStreamGroupBudget } from './remote-window-quality';
+
+const requested = {
+  preset: '5mbps' as const,
+  bitrateMbps: 5 as const,
+  maxBitrateBps: 5_000_000,
+  maxFrameRateFps: 12 as const,
+};
+
+describe('remote window stream-group quality owner', () => {
+  it('reserves overview inside one total budget and protects focus first', () => {
+    expect(resolveRemoteWindowStreamGroupBudget({ requested, hasOverview: true })).toEqual({
+      totalMaxBitrateBps: 5_000_000,
+      focus: { maxBitrateBps: 4_000_000, maxFrameRateFps: 12 },
+      overview: { maxBitrateBps: 1_000_000, maxFrameRateFps: 8 },
+    });
+    expect(resolveRemoteWindowStreamGroupBudget({
+      requested: { ...requested, preset: '2mbps', bitrateMbps: 2, maxBitrateBps: 2_000_000, maxFrameRateFps: 5 },
+      hasOverview: true,
+    })).toMatchObject({
+      totalMaxBitrateBps: 2_000_000,
+      focus: { maxBitrateBps: 1_600_000, maxFrameRateFps: 5 },
+      overview: { maxBitrateBps: 400_000, maxFrameRateFps: 5 },
+    });
+  });
+
+  it('applies sender and capture cadence without changing encoding structure', async () => {
+    const focusSet = vi.fn(async () => undefined);
+    const overviewSet = vi.fn(async () => undefined);
+    const focusCadence = vi.fn(async () => undefined);
+    const overviewCadence = vi.fn(async () => undefined);
+    await expect(applyRemoteWindowStreamGroupQuality({
+      requested,
+      focusSender: {
+        getParameters: () => ({ encodings: [{ rid: 'f' }] }),
+        setParameters: focusSet,
+      } as unknown as RTCRtpSender,
+      focusCaptureSource: { width: 1, height: 1, frameRate: 30, updateFrameRate: focusCadence, stop: vi.fn() },
+      overviewSender: {
+        getParameters: () => ({ encodings: [{ rid: 'o' }] }),
+        setParameters: overviewSet,
+      } as unknown as RTCRtpSender,
+      overviewCaptureSource: { width: 1, height: 1, frameRate: 8, updateFrameRate: overviewCadence, stop: vi.fn() },
+    })).resolves.toMatchObject({ totalMaxBitrateBps: 5_000_000 });
+    expect(focusSet).toHaveBeenCalledWith(expect.objectContaining({
+      encodings: [{ rid: 'f', maxBitrate: 4_000_000, maxFramerate: 12 }],
+    }));
+    expect(overviewSet).toHaveBeenCalledWith(expect.objectContaining({
+      encodings: [{ rid: 'o', maxBitrate: 1_000_000, maxFramerate: 8 }],
+    }));
+    expect(focusCadence).toHaveBeenCalledWith(12);
+    expect(overviewCadence).toHaveBeenCalledWith(8);
+  });
+
+  it('rejects before mutation when any active lane cannot be controlled', async () => {
+    const focusSet = vi.fn(async () => undefined);
+    await expect(applyRemoteWindowStreamGroupQuality({
+      requested,
+      focusSender: {
+        getParameters: () => ({ encodings: [{ rid: 'f' }] }),
+        setParameters: focusSet,
+      } as unknown as RTCRtpSender,
+      focusCaptureSource: { width: 1, height: 1, frameRate: 30, updateFrameRate: vi.fn(), stop: vi.fn() },
+      overviewSender: {
+        getParameters: () => ({ encodings: [] }),
+        setParameters: vi.fn(),
+      } as unknown as RTCRtpSender,
+      overviewCaptureSource: { width: 1, height: 1, frameRate: 8, updateFrameRate: vi.fn(), stop: vi.fn() },
+    })).rejects.toThrow(/no encodings/);
+    expect(focusSet).not.toHaveBeenCalled();
+  });
+
+  it('rolls every lane back when a later mutation rejects', async () => {
+    const focusSet = vi.fn(async () => undefined);
+    const overviewSet = vi.fn(async () => undefined);
+    const focusCadence = vi.fn(async () => undefined);
+    const overviewCadence = vi.fn()
+      .mockRejectedValueOnce(new Error('overview cadence rejected'))
+      .mockResolvedValueOnce(undefined);
+    await expect(applyRemoteWindowStreamGroupQuality({
+      requested,
+      focusSender: {
+        getParameters: () => ({ encodings: [{ rid: 'f', maxBitrate: 9_000_000 }] }),
+        setParameters: focusSet,
+      } as unknown as RTCRtpSender,
+      focusCaptureSource: { width: 1, height: 1, frameRate: 30, updateFrameRate: focusCadence, stop: vi.fn() },
+      overviewSender: {
+        getParameters: () => ({ encodings: [{ rid: 'o', maxBitrate: 2_000_000 }] }),
+        setParameters: overviewSet,
+      } as unknown as RTCRtpSender,
+      overviewCaptureSource: { width: 1, height: 1, frameRate: 8, updateFrameRate: overviewCadence, stop: vi.fn() },
+    })).rejects.toThrow('overview cadence rejected');
+    expect(focusSet).toHaveBeenLastCalledWith({ encodings: [{ rid: 'f', maxBitrate: 9_000_000 }] });
+    expect(focusCadence).toHaveBeenLastCalledWith(30);
+    expect(overviewSet).toHaveBeenLastCalledWith({ encodings: [{ rid: 'o', maxBitrate: 2_000_000 }] });
+    expect(overviewCadence).toHaveBeenLastCalledWith(8);
+  });
+});

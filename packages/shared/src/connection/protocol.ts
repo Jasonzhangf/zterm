@@ -183,6 +183,22 @@ export interface RemoteWindowStreamRect {
   height: number;
 }
 
+export interface RemoteWindowCanvasLayoutV1 {
+  version: 1;
+  layoutGeneration: number;
+  canvasSize: {
+    width: number;
+    height: number;
+  };
+  focusTargetId: string;
+  windows: Array<{
+    windowId: string;
+    sourceRectTopLeftPx: RemoteWindowStreamRect;
+    canvasRectPx: RemoteWindowStreamRect;
+    zIndex: number;
+  }>;
+}
+
 export interface RemoteWindowStreamTargetManifest {
   streamTargetId: string;
   videoTarget: {
@@ -267,6 +283,18 @@ export interface RemoteWindowVideoBitrateConfig {
   maxFrameRateFps?: 5 | 8 | 10 | 12 | 15 | 30 | 60;
 }
 
+export interface RemoteWindowStreamGroupBudget {
+  totalMaxBitrateBps: number;
+  focus: {
+    maxBitrateBps: number;
+    maxFrameRateFps: number;
+  };
+  overview?: {
+    maxBitrateBps: number;
+    maxFrameRateFps: number;
+  };
+}
+
 export interface RemoteWindowStreamStartRequestPayload {
   requestId: string;
   streamId: string;
@@ -310,6 +338,7 @@ export interface RemoteWindowStreamStartedPayload {
     maxBitrateBps?: number;
     targetKind: 'app-window' | 'iterm2-pane';
   };
+  canvasLayout?: RemoteWindowCanvasLayoutV1;
   transport: {
     kind: 'webrtc-video';
     selectedRoute?: string;
@@ -332,6 +361,7 @@ export interface RemoteWindowStreamStatusPayload {
   frameWidth?: number;
   frameHeight?: number;
   message?: string;
+  canvasLayout?: RemoteWindowCanvasLayoutV1;
 }
 
 export interface RemoteWindowStreamStopRequestPayload {
@@ -343,6 +373,8 @@ export interface RemoteWindowStreamStopRequestPayload {
 export interface RemoteWindowStreamQualityRequestPayload {
   requestId: string;
   streamId: string;
+  streamGroupId: string;
+  revision: number;
   purpose?: RemoteWindowStreamPurpose;
   targetId: string;
   videoBitrate: RemoteWindowVideoBitrateConfig;
@@ -351,16 +383,26 @@ export interface RemoteWindowStreamQualityRequestPayload {
 export interface RemoteWindowStreamQualityResultPayload {
   requestId: string;
   streamId: string;
+  streamGroupId: string;
+  revision: number;
   purpose?: RemoteWindowStreamPurpose;
   targetId: string;
-  accepted: boolean;
-  videoBitrate: RemoteWindowVideoBitrateConfig;
+  status: 'applied' | 'rejected';
+  requestedVideoBitrate: RemoteWindowVideoBitrateConfig;
+  appliedVideoBitrate?: RemoteWindowVideoBitrateConfig;
+  appliedGroupBudget?: RemoteWindowStreamGroupBudget;
+  error?: {
+    code: string;
+    message: string;
+  };
 }
 
 export interface RemoteWindowInputEventPayload {
   requestId: string;
   streamId: string;
   targetId: string;
+  /** Required for composite-canvas input; daemon rejects stale/missing generations. */
+  layoutGeneration?: number;
   clientSentAt?: number;
   event:
     | {

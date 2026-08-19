@@ -211,8 +211,10 @@ function fail(message: string): never {
 function summarizeQualityUpdate(message: ServerMessage) {
   if (message.type === 'remote-window-stream-quality-result') {
     return {
-      accepted: message.payload.accepted,
-      videoBitrate: message.payload.videoBitrate,
+      accepted: message.payload.status === 'applied',
+      videoBitrate: message.payload.appliedVideoBitrate,
+      groupBudget: message.payload.appliedGroupBudget,
+      error: message.payload.error,
     };
   }
   if (message.type === 'remote-window-error' && message.payload.code === 'remote_window_stream_quality_failed') {
@@ -226,7 +228,7 @@ function summarizeQualityUpdate(message: ServerMessage) {
 }
 
 function assertQualityUpdateContract(message: ServerMessage, label: string) {
-  if (message.type === 'remote-window-stream-quality-result' && message.payload.accepted === true) {
+  if (message.type === 'remote-window-stream-quality-result' && message.payload.status === 'applied') {
     return;
   }
   if (message.type === 'remote-window-error' && message.payload.code === 'remote_window_stream_quality_failed') {
@@ -833,6 +835,8 @@ async function main() {
       payload: {
         requestId: degradedQualityRequestId,
         streamId,
+        streamGroupId: streamId,
+        revision: 1,
         targetId: target.streamTargetId,
         videoBitrate: {
           preset: '2mbps',
@@ -859,6 +863,8 @@ async function main() {
       payload: {
         requestId: restoredQualityRequestId,
         streamId,
+        streamGroupId: streamId,
+        revision: 2,
         targetId: target.streamTargetId,
         videoBitrate: {
           preset: '2mbps',

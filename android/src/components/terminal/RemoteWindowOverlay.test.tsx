@@ -146,6 +146,25 @@ async function waitForActionRemoteInputCount(sendInput: ReturnType<typeof vi.fn>
   });
 }
 
+function createAppliedQualityMock() {
+  return vi.fn(async (_sessionId: string, payload: {
+    streamId: string;
+    streamGroupId: string;
+    revision: number;
+    targetId: string;
+    videoBitrate: any;
+  }) => ({
+    requestId: `quality-${payload.revision}`,
+    streamId: payload.streamId,
+    streamGroupId: payload.streamGroupId,
+    revision: payload.revision,
+    targetId: payload.targetId,
+    status: 'applied' as const,
+    requestedVideoBitrate: payload.videoBitrate,
+    appliedVideoBitrate: payload.videoBitrate,
+  }));
+}
+
 describe('RemoteWindowOverlay', () => {
   afterEach(() => {
     cleanup();
@@ -196,13 +215,14 @@ describe('RemoteWindowOverlay', () => {
     });
     fireEvent.click(screen.getByTestId('remote-window-target-app-status'));
 
-    fireEvent.click(screen.getByTestId('remote-window-stream-status-toggle'));
+    fireEvent.click(screen.getByTestId('remote-window-more-toggle'));
     const panel = screen.getByTestId('remote-window-stream-status-panel');
+    fireEvent.click(screen.getByText('开发诊断'));
     expect(panel.textContent).toContain('session: session-status');
     expect(panel.textContent).toContain('phase: targetLocked');
     expect(panel.textContent).toContain('target: app-status');
 
-    fireEvent.click(screen.getByTestId('remote-window-stream-status-toggle'));
+    fireEvent.click(screen.getByTestId('remote-window-more-toggle'));
     expect(screen.queryByTestId('remote-window-stream-status-panel')).toBeNull();
   });
 
@@ -224,7 +244,7 @@ describe('RemoteWindowOverlay', () => {
     expect((overlay as HTMLElement).style.minHeight).toBe('100%');
     window.dispatchEvent(new Event('orientationchange'));
     window.dispatchEvent(new Event('resize'));
-    expect(screen.getByTestId('remote-window-stream-status-toggle')).toBeTruthy();
+    expect(screen.getByTestId('remote-window-more-toggle')).toBeTruthy();
   });
 
   it('lists an app group as one picker row and switches sibling windows inside the video surface', async () => {
@@ -485,7 +505,7 @@ describe('RemoteWindowOverlay', () => {
     await waitFor(() => {
       expect(requestScreenshot).toHaveBeenCalledTimes(1);
     });
-    fireEvent.click(screen.getByTestId('remote-window-video-window-close-app-child'));
+    fireEvent.click(screen.getByRole('button', { name: '关闭远程窗口' }));
 
     fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
     await act(async () => {
@@ -1281,7 +1301,7 @@ describe('RemoteWindowOverlay', () => {
       streamId,
       mediaStream,
     }));
-    const updateStreamQuality = vi.fn();
+    const updateStreamQuality = createAppliedQualityMock();
 
     render(
       <RemoteWindowOverlay
@@ -1309,7 +1329,7 @@ describe('RemoteWindowOverlay', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '全屏远程窗口' }));
     expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('fullscreen');
-    expect(updateStreamQuality).not.toHaveBeenCalled();
+    await waitFor(() => expect(updateStreamQuality).toHaveBeenCalledTimes(1));
   });
 
   it.skip('remembers a high bitrate selection without raising the floating preview bitrate (moved to settings)', async () => {
@@ -1322,7 +1342,7 @@ describe('RemoteWindowOverlay', () => {
       streamId,
       mediaStream,
     }));
-    const updateStreamQuality = vi.fn();
+    const updateStreamQuality = createAppliedQualityMock();
 
     render(
       <RemoteWindowOverlay
@@ -1367,7 +1387,7 @@ describe('RemoteWindowOverlay', () => {
       mediaStream,
       collectStats,
     }));
-    const updateStreamQuality = vi.fn();
+    const updateStreamQuality = createAppliedQualityMock();
 
     render(
       <RemoteWindowOverlay
@@ -2059,6 +2079,31 @@ describe('RemoteWindowOverlay', () => {
     expect(controlStrip.contains(screen.getByTestId('remote-window-touch-scroll-fraction-select'))).toBe(true);
     expect(controlStrip.contains(screen.getByTestId('remote-window-bitrate-select'))).toBe(true);
     expect(controlStrip.style.overflowX).toBe('auto');
+  });
+
+  it('keeps primary controls structurally valid with 48px touch targets and no child close action', async () => {
+    const mainWindow = makeTarget('app-main', 'WeChat', 'app-window');
+    const childWindow = {
+      ...makeTarget('app-child', 'WeChat Image', 'app-window'),
+      videoTarget: { ...mainWindow.videoTarget, windowId: 'window-2', title: 'WeChat Image' },
+    };
+    const requestTargets = vi.fn(async () => ({ requestId: 'rw-controls', targets: [mainWindow, childWindow] }));
+
+    render(<RemoteWindowOverlay activeSessionId="session-controls" requestTargets={requestTargets} />);
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    fireEvent.click(await screen.findByTestId('remote-window-app-group-com-apple-TextEdit-123'));
+
+    const controls = [
+      ...screen.getByTestId('remote-window-primary-actions').querySelectorAll('button'),
+      ...screen.getByTestId('remote-window-control-strip').querySelectorAll('button'),
+      screen.getByTestId('remote-window-active-app-switch-button'),
+    ] as HTMLElement[];
+    for (const control of controls) {
+      expect(Number.parseFloat(control.style.width || control.style.minWidth)).toBeGreaterThanOrEqual(48);
+      expect(Number.parseFloat(control.style.height || control.style.minHeight)).toBeGreaterThanOrEqual(48);
+      expect(control.querySelector('button')).toBeNull();
+    }
+    expect(screen.queryByLabelText('关闭子窗口')).toBeNull();
   });
 
   it('resizes the floating overlay from the edge while preserving the source aspect ratio', async () => {
@@ -2870,7 +2915,8 @@ describe('RemoteWindowOverlay', () => {
       expect(Number.parseFloat(content.style.height)).toBeCloseTo(200, 1);
     });
     expect(overlay.getAttribute('data-display-mode')).toBe('fill');
-    expect(screen.getByRole('button', { name: '按手机全屏尺寸调整远程窗口' })).toBeTruthy();
+    fireEvent.click(screen.getByTestId('remote-window-more-toggle'));
+    expect(screen.getByTestId('remote-window-fullscreen-display-toggle')).toBeTruthy();
   });
 
   it('keeps a resize ACK target in the cached picker catalog after the stream closes', async () => {
@@ -2978,6 +3024,7 @@ describe('RemoteWindowOverlay', () => {
     fireEvent.click(screen.getByTestId('remote-window-target-app-1'));
     await screen.findByTestId('remote-window-video');
     fireEvent.click(screen.getByRole('button', { name: '全屏远程窗口' }));
+    fireEvent.click(screen.getByTestId('remote-window-more-toggle'));
     fireEvent.click(screen.getByTestId('remote-window-fullscreen-display-toggle'));
 
     const surface = screen.getByTestId('remote-window-video-surface');

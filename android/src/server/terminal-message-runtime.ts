@@ -595,7 +595,7 @@ export function createTerminalMessageRuntime(
         break;
       case 'remote-window-stream-quality-request':
         void deps.remoteWindowStreamRuntime.updateStreamQuality(message.payload).then((payload) => {
-          deps.sendTransportMessage(connection.transport, 'accepted' in payload
+          deps.sendTransportMessage(connection.transport, 'status' in payload
             ? { type: 'remote-window-stream-quality-result', payload }
             : { type: 'remote-window-error', payload });
         }).catch((error: unknown) => {

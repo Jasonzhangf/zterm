@@ -1,0 +1,137 @@
+import { forwardRef, type CSSProperties, type HTMLAttributes, type ReactNode } from 'react';
+import { RemoteWindowIcon } from './remote-window-icons';
+import { styles } from './remote-window-overlay-styles';
+
+export interface RemoteWindowLockedToolbarProps {
+  activeTitle: string;
+  appSwitchContent: ReactNode;
+  appSwitchOpen: boolean;
+  dragHandleProps: HTMLAttributes<HTMLDivElement>;
+  gestureGuide: string;
+  inputMode: 'touch' | 'mouse';
+  inputSupported: boolean;
+  mode: 'floating' | 'fullscreen';
+  moreContent: ReactNode;
+  moreOpen: boolean;
+  screenshotBusy: boolean;
+  screenshotButtonStyle: CSSProperties;
+  targetKindLabel: string;
+  onClose: () => void;
+  onFullscreen: () => void;
+  onRequestKeyboard: () => void;
+  onScreenshot: () => void;
+  onShrink: () => void;
+  onToggleAppSwitch: () => void;
+  onToggleInputMode: () => void;
+  onToggleMore: () => void;
+}
+
+export const RemoteWindowLockedToolbar = forwardRef<HTMLDivElement, RemoteWindowLockedToolbarProps>(function RemoteWindowLockedToolbar({
+  activeTitle,
+  appSwitchContent,
+  appSwitchOpen,
+  dragHandleProps,
+  gestureGuide,
+  inputMode,
+  inputSupported,
+  mode,
+  moreContent,
+  moreOpen,
+  screenshotBusy,
+  screenshotButtonStyle,
+  targetKindLabel,
+  onClose,
+  onFullscreen,
+  onRequestKeyboard,
+  onScreenshot,
+  onShrink,
+  onToggleAppSwitch,
+  onToggleInputMode,
+  onToggleMore,
+}, ref) {
+  return (
+    <div ref={ref} data-testid="remote-window-locked-toolbar" style={styles.lockedToolbar}>
+      <div {...dragHandleProps} data-testid="remote-window-drag-handle">
+        <div style={styles.lockedTitle}>
+          <span style={styles.targetKind}>{targetKindLabel}</span>
+          <span data-testid="remote-window-input-mode" style={styles.inputModeBadge}>
+            {inputSupported ? '可操作' : '只读'}
+          </span>
+          <span style={styles.activeAppSwitch}>
+            <button
+              type="button"
+              data-testid="remote-window-active-app-switch-button"
+              data-no-drag="true"
+              aria-haspopup="listbox"
+              aria-expanded={appSwitchOpen ? 'true' : 'false'}
+              onClick={onToggleAppSwitch}
+              style={styles.activeAppSwitchButton}
+            >
+              {activeTitle}
+            </button>
+            {appSwitchOpen ? appSwitchContent : null}
+          </span>
+        </div>
+        <div data-testid="remote-window-primary-actions" style={styles.lockedPrimaryActions}>
+          {mode === 'fullscreen' ? (
+            <button type="button" aria-label="缩小远程窗口" onClick={onShrink} style={styles.headerIconButton}>
+              <RemoteWindowIcon name="minimize" />
+            </button>
+          ) : (
+            <button type="button" aria-label="全屏远程窗口" onClick={onFullscreen} style={styles.headerIconButton}>
+              <RemoteWindowIcon name="fullscreen" />
+            </button>
+          )}
+          <button type="button" aria-label="关闭远程窗口" onClick={onClose} style={styles.headerIconButton}>
+            <RemoteWindowIcon name="close" />
+          </button>
+        </div>
+      </div>
+      <div data-testid="remote-window-control-strip" data-no-drag="true" style={styles.lockedControlStrip}>
+        <button
+          type="button"
+          data-testid="remote-window-input-mode-toggle"
+          data-no-drag="true"
+          aria-label={inputMode === 'touch' ? '切换为鼠标模式' : '切换为触控模式'}
+          onClick={onToggleInputMode}
+          style={inputMode === 'touch' ? styles.headerModeButtonActive : styles.headerModeButton}
+        >
+          {inputMode === 'touch' ? '触控' : '鼠标'}
+        </button>
+        <button
+          type="button"
+          data-no-drag="true"
+          aria-label="截屏远程窗口"
+          aria-busy={screenshotBusy ? 'true' : undefined}
+          disabled={screenshotBusy}
+          onClick={onScreenshot}
+          style={screenshotButtonStyle}
+        >
+          <RemoteWindowIcon name="screenshot" />
+        </button>
+        <button
+          type="button"
+          data-no-drag="true"
+          aria-label="调起远程窗口键盘"
+          onClick={onRequestKeyboard}
+          style={styles.headerIconButton}
+        >
+          <RemoteWindowIcon name="keyboard" />
+        </button>
+        <button
+          type="button"
+          data-no-drag="true"
+          data-testid="remote-window-more-toggle"
+          aria-label="更多远程窗口控制"
+          aria-expanded={moreOpen ? 'true' : 'false'}
+          onClick={onToggleMore}
+          style={moreOpen ? styles.headerIconButtonBusy : styles.headerIconButton}
+        >
+          <RemoteWindowIcon name="more" />
+        </button>
+      </div>
+      <div data-testid="remote-window-gesture-guide" style={styles.gestureGuide}>{gestureGuide}</div>
+      {moreOpen ? moreContent : null}
+    </div>
+  );
+});

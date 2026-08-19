@@ -387,7 +387,7 @@ describe('TerminalPage remote screenshot preview', () => {
 
     await waitFor(() => {
       expect(Filesystem.writeFile).not.toHaveBeenCalled();
-      expect(alert).toHaveBeenCalledWith(expect.stringContaining('创建截图保存目录失败'));
+      expect(screen.getByTestId('zterm-dialog-message').textContent).toContain('创建截图保存目录失败');
       expect(screen.getByTestId('remote-screenshot-sheet')).toBeTruthy();
     });
   });
@@ -432,7 +432,7 @@ describe('TerminalPage remote screenshot preview', () => {
     fireEvent.click(screen.getByText('保存到下载'));
 
     await waitFor(() => {
-      expect(alert).toHaveBeenCalledWith('The supplied data is not valid base64 content.');
+      expect(screen.getByTestId('zterm-dialog-message').textContent).toBe('The supplied data is not valid base64 content.');
       expect(screen.getByTestId('terminal-quickbar').getAttribute('data-remote-screenshot-status')).toBe('preview-ready');
     });
 

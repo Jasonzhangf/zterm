@@ -2207,6 +2207,7 @@
     },
     {
       "resource_id": "resource.remote_window_stream",
+      "status": "active",
       "resource_type": "daemon_backend_truth",
       "identity": "Remote app/window/iTerm2 pane catalog, coordinate manifest, capture frame source, WebRTC media sender, and remote input target lease",
       "owner_feature": "desktop.remote_window_stream",
@@ -2231,9 +2232,8 @@
       "direct_relations": [
         "resource.daemon_process",
         "resource.transport_target",
-        "resource.remote_window_canvas_raw",
         "resource.remote_window_canvas_layout",
-        "resource.remote_window_canvas_encode",
+        "resource.remote_window_overview_stream",
         "resource.remote_window_focus_stream"
       ],
       "indirect_relations": [
@@ -2304,7 +2304,7 @@
     },
     {
       "resource_id": "resource.remote_window_canvas_layout",
-      "status": "design",
+      "status": "active",
       "resource_type": "daemon_backend_truth",
       "identity": "Daemon-owned source-window-to-canvas layout generation, source rects, canvas rects, z-order, and focus target",
       "owner_feature": "desktop.remote_window_stream",
@@ -2379,11 +2379,11 @@
     },
     {
       "resource_id": "resource.remote_window_focus_stream",
-      "status": "design",
+      "status": "active",
       "resource_type": "daemon_backend_truth",
-      "identity": "Daemon-owned optional high-quality focus stream used when verified ROI encoding is unavailable or disabled",
+      "identity": "Daemon-owned active high-quality focus WebRTC lane, sender quality state, capture cadence, and target revision",
       "owner_feature": "desktop.remote_window_stream",
-      "truth_store": "docs/decisions/2026-07-29-remote-window-canvas-pipeline.md",
+      "truth_store": "docs/decisions/2026-08-09-remote-window-dual-stream-design.md",
       "allowed_operations": [
         "select_focus_target",
         "encode_focus_stream",
@@ -2409,6 +2409,44 @@
         "docs/resource-map.md",
         "docs/function-map.md",
         "docs/decisions/2026-07-29-remote-window-canvas-pipeline.md"
+      ]
+    },
+    {
+      "resource_id": "resource.remote_window_overview_stream",
+      "status": "active",
+      "resource_type": "daemon_backend_truth",
+      "identity": "Daemon-owned active low-rate overview WebRTC lane, fixed canvas capture, sender quality state, and published layout generation",
+      "owner_feature": "desktop.remote_window_stream",
+      "truth_store": "docs/decisions/2026-08-09-remote-window-dual-stream-design.md",
+      "allowed_operations": [
+        "capture_overview_canvas",
+        "publish_canvas_layout_generation",
+        "apply_group_budget",
+        "update_capture_cadence",
+        "stop_overview_stream"
+      ],
+      "direct_relations": [
+        "resource.remote_window_canvas_layout",
+        "resource.remote_window_focus_stream",
+        "resource.transport_target"
+      ],
+      "indirect_relations": [],
+      "via_resources": [],
+      "forbidden_direct_relations": [
+        "resource.mirror_store",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.ui_projection"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/server/remote-window-canvas-layout.test.ts",
+        "src/server/remote-window-quality.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/function-map.md",
+        "docs/decisions/2026-08-09-remote-window-dual-stream-design.md"
       ]
     },
     {
@@ -2567,6 +2605,7 @@
     },
     {
       "resource_id": "resource.remote_window_overlay",
+      "status": "active",
       "resource_type": "projection_resource",
       "identity": "Android remote window picker, floating stream overlay, in-video primary-plus-children sibling window switcher, locked container QuickBar/IME lift projection, fullscreen aspect-fit zoom/pan without minimap, default remote target resize fill intent, and Back/minimize/close/touch-action/screenshot intent",
       "owner_feature": "desktop.remote_window_stream",
@@ -2621,6 +2660,7 @@
     },
     {
       "resource_id": "resource.remote_window_touch_action",
+      "status": "active",
       "resource_type": "projection_resource",
       "identity": "Client-side remote window touch/action classifier and dispatch boundary between WebView/UI surfaces and remote-window input transport",
       "owner_feature": "desktop.remote_window_stream",

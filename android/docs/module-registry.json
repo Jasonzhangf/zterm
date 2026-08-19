@@ -14,9 +14,7 @@
       "consumed_resources": [],
       "pending_resources": [
         "resource.remote_window_canvas_raw",
-        "resource.remote_window_canvas_layout",
-        "resource.remote_window_canvas_encode",
-        "resource.remote_window_focus_stream"
+        "resource.remote_window_canvas_encode"
       ],
       "public_interfaces": [
         "docs/modules/project-modules.md"
@@ -1178,9 +1176,12 @@
       "level": 1,
       "parent_module_id": "daemon.runtime",
       "owner_feature": "desktop.remote_window_stream",
-      "responsibility": "Own desktop app/window/iTerm2 catalog, coordinate manifests, ScreenCaptureKit capture, WebRTC sender, input helper, action injection, screenshot target manifests, cleanup, and design tracking for future remote-window canvas raw/layout/encode/focus resources.",
+      "responsibility": "Own typed remote-window gateway/session lifecycle plus the active catalog, daemon-only canvas layout generation, ScreenCaptureKit capture/cadence, focus/overview group quality transaction, input helper, action injection, and exact cleanup.",
       "owned_resources": [
-        "resource.remote_window_stream"
+        "resource.remote_window_stream",
+        "resource.remote_window_canvas_layout",
+        "resource.remote_window_overview_stream",
+        "resource.remote_window_focus_stream"
       ],
       "consumed_resources": [
         "resource.daemon_process",
@@ -1214,8 +1215,18 @@
         "src/server/remote-window-scripts.ts",
         "src/server/remote-window-support.ts",
         "src/server/remote-window-catalog.ts",
+        "src/server/remote-window-catalog-runtime.ts",
+        "src/server/remote-window-catalog-runtime.test.ts",
         "src/server/remote-window-input-helper.ts",
+        "src/server/remote-window-input-policy.ts",
+        "src/server/remote-window-input-policy.test.ts",
         "src/server/remote-window-capture.ts",
+        "src/server/remote-window-canvas-layout.ts",
+        "src/server/remote-window-canvas-layout.test.ts",
+        "src/server/remote-window-quality.ts",
+        "src/server/remote-window-quality.test.ts",
+        "src/server/remote-window-stream-session.ts",
+        "src/server/remote-window-stream-session.test.ts",
         "src/server/remote-window-stream-daemon-helpers.ts",
         "src/server/remote-window-app-window-catalog-script.ts",
         "src/server/remote-window-iterm2-catalog-script.ts",
@@ -2335,12 +2346,11 @@
         "resource.transport_target"
       ],
       "pending_resources": [
-        "resource.remote_window_canvas_layout",
-        "resource.remote_window_canvas_encode",
-        "resource.remote_window_focus_stream"
+        "resource.remote_window_canvas_encode"
       ],
       "public_interfaces": [
         "src/components/terminal/RemoteWindowOverlay.tsx",
+        "src/components/terminal/RemoteWindowOverlayController.tsx",
         "src/lib/remote-window-overlay-runtime.ts",
         "src/lib/remote-window-touch-action-runtime.ts"
       ],
@@ -2364,6 +2374,7 @@
       "status": "active",
       "owned_paths": [
         "src/components/terminal/RemoteWindowOverlay.tsx",
+        "src/components/terminal/RemoteWindowOverlayController.tsx",
         "src/components/terminal/draggable-bubble-shared.ts",
         "src/contexts/session-context-remote-window-runtime.ts",
         "src/lib/remote-window-input-mapping.ts",
@@ -2372,10 +2383,37 @@
         "src/lib/remote-window-receiver-runtime.ts",
         "src/lib/remote-window-touch-action-runtime.ts",
         "src/lib/remote-window-video-quality.ts",
+        "src/lib/remote-window-quality-controller.ts",
+        "src/lib/remote-window-quality-controller.test.ts",
         "src/components/terminal/remote-window-overlay-constants.ts",
         "src/components/terminal/remote-window-overlay-storage.ts",
         "src/components/terminal/remote-window-overlay-helpers.ts",
         "src/components/terminal/remote-window-overlay-styles.ts"
+        ,"src/components/terminal/remote-window-icons.tsx",
+        "src/components/terminal/RemoteWindowDeveloperDiagnostics.tsx",
+        "src/components/terminal/RemoteWindowLockedToolbar.tsx",
+        "src/components/terminal/RemoteWindowTargetPicker.tsx",
+        "src/components/terminal/RemoteWindowTargetPicker.test.tsx",
+        "src/components/terminal/RemoteWindowAppSwitch.tsx",
+        "src/components/terminal/RemoteWindowAppSwitch.test.tsx",
+        "src/components/terminal/RemoteWindowMorePanel.tsx",
+        "src/components/terminal/RemoteWindowMorePanel.test.tsx",
+        "src/components/terminal/RemoteWindowVideoContent.tsx",
+        "src/components/terminal/RemoteWindowVideoContent.test.tsx",
+        "src/components/terminal/useRemoteWindowQuality.ts",
+        "src/components/terminal/useRemoteWindowQuality.test.tsx",
+        "src/components/terminal/useRemoteWindowPlayback.ts",
+        "src/components/terminal/useRemoteWindowPlayback.test.tsx",
+        "src/components/terminal/useRemoteWindowCompositeCanvas.ts",
+        "src/components/terminal/useRemoteWindowCompositeCanvas.test.tsx",
+        "src/components/terminal/useRemoteWindowCatalog.ts",
+        "src/components/terminal/useRemoteWindowCatalog.test.tsx",
+        "src/components/terminal/useRemoteWindowViewport.ts",
+        "src/components/terminal/useRemoteWindowViewport.test.tsx",
+        "src/components/terminal/useRemoteWindowFocusSwitch.ts",
+        "src/components/terminal/useRemoteWindowFocusSwitch.test.tsx",
+        "src/components/terminal/useRemoteWindowThumbnails.ts",
+        "src/components/terminal/useRemoteWindowThumbnails.test.tsx"
       ]
     },
     {
@@ -3192,11 +3230,10 @@
       ],
       "consumed_resources": [
         "resource.remote_window_overlay",
-        "resource.remote_window_stream"
-      ],
-      "pending_resources": [
+        "resource.remote_window_stream",
         "resource.remote_window_focus_stream"
       ],
+      "pending_resources": [],
       "public_interfaces": [
         "src/lib/remote-window-dual-stream-runtime.ts"
       ],

@@ -207,9 +207,12 @@ function createRuntime(options?: {
     updateStreamQuality: vi.fn(async (): Promise<RemoteWindowQualityResult> => ({
       requestId: 'remote-window-quality-default',
       streamId: 'stream-default',
+      streamGroupId: 'stream-default',
+      revision: 1,
       targetId: 'target-default',
-      accepted: true,
-      videoBitrate: { preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
+      status: 'applied',
+      requestedVideoBitrate: { preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
+      appliedVideoBitrate: { preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
     })),
     updateFocus: vi.fn(async () => ({
       requestId: 'remote-window-focus-default',
@@ -1565,9 +1568,12 @@ describe('terminal message runtime explicit error truth', () => {
     const qualityPayload = {
       requestId: 'rw-quality-1',
       streamId: 'stream-1',
+      streamGroupId: 'stream-1',
+      revision: 1,
       targetId: 'target-1',
-      accepted: true,
-      videoBitrate: { preset: '10mbps' as const, bitrateMbps: 10 as const, maxBitrateBps: 10_000_000 },
+      status: 'applied' as const,
+      requestedVideoBitrate: { preset: '10mbps' as const, bitrateMbps: 10 as const, maxBitrateBps: 10_000_000 },
+      appliedVideoBitrate: { preset: '10mbps' as const, bitrateMbps: 10 as const, maxBitrateBps: 10_000_000 },
     };
     remoteWindowStreamRuntime.updateStreamQuality.mockResolvedValueOnce(qualityPayload);
 
@@ -1576,6 +1582,8 @@ describe('terminal message runtime explicit error truth', () => {
       payload: {
         requestId: 'rw-quality-1',
         streamId: 'stream-1',
+        streamGroupId: 'stream-1',
+        revision: 1,
         targetId: 'target-1',
         videoBitrate: { preset: '10mbps', bitrateMbps: 10, maxBitrateBps: 10_000_000 },
       },
@@ -1585,6 +1593,8 @@ describe('terminal message runtime explicit error truth', () => {
     expect(remoteWindowStreamRuntime.updateStreamQuality).toHaveBeenCalledWith({
       requestId: 'rw-quality-1',
       streamId: 'stream-1',
+      streamGroupId: 'stream-1',
+      revision: 1,
       targetId: 'target-1',
       videoBitrate: { preset: '10mbps', bitrateMbps: 10, maxBitrateBps: 10_000_000 },
     });
@@ -1610,6 +1620,8 @@ describe('terminal message runtime explicit error truth', () => {
       payload: {
         requestId: 'rw-quality-fail',
         streamId: 'stream-1',
+        streamGroupId: 'stream-1',
+        revision: 1,
         targetId: 'target-1',
         videoBitrate: { preset: '10mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
       },

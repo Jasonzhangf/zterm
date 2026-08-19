@@ -1,0 +1,132 @@
+import type {
+  RemoteWindowStreamGroupBudget,
+  RemoteWindowVideoBitrateConfig,
+} from '@zterm/shared/protocol';
+import type { RemoteWindowCaptureFrameSource } from './remote-window-capture';
+
+const OVERVIEW_MAX_BITRATE_BPS = 1_500_000;
+const OVERVIEW_MIN_BITRATE_BPS = 250_000;
+const OVERVIEW_MAX_FRAME_RATE_FPS = 8;
+
+export function resolveRemoteWindowStreamGroupBudget(options: {
+  requested: RemoteWindowVideoBitrateConfig;
+  hasOverview: boolean;
+}): RemoteWindowStreamGroupBudget {
+  const totalMaxBitrateBps = options.requested.maxBitrateBps;
+  const requestedFrameRate = options.requested.maxFrameRateFps ?? 30;
+  if (!options.hasOverview) {
+    return {
+      totalMaxBitrateBps,
+      focus: {
+        maxBitrateBps: totalMaxBitrateBps,
+        maxFrameRateFps: requestedFrameRate,
+      },
+    };
+  }
+  const proportionalOverview = Math.floor(totalMaxBitrateBps * 0.2);
+  const overviewMaxBitrateBps = Math.min(
+    OVERVIEW_MAX_BITRATE_BPS,
+    Math.max(OVERVIEW_MIN_BITRATE_BPS, proportionalOverview),
+  );
+  return {
+    totalMaxBitrateBps,
+    focus: {
+      maxBitrateBps: totalMaxBitrateBps - overviewMaxBitrateBps,
+      maxFrameRateFps: requestedFrameRate,
+    },
+    overview: {
+      maxBitrateBps: overviewMaxBitrateBps,
+      maxFrameRateFps: Math.min(requestedFrameRate, OVERVIEW_MAX_FRAME_RATE_FPS),
+    },
+  };
+}
+
+interface RemoteWindowQualityLane {
+  sender: RTCRtpSender | null;
+  captureSource: RemoteWindowCaptureFrameSource | null;
+  budget: RemoteWindowStreamGroupBudget['focus'];
+}
+
+interface PreparedRemoteWindowQualityLane extends RemoteWindowQualityLane {
+  currentParameters: RTCRtpSendParameters;
+  nextParameters: RTCRtpSendParameters;
+  previousFrameRate: number;
+}
+
+function prepareLane(lane: RemoteWindowQualityLane): PreparedRemoteWindowQualityLane {
+  if (!lane.sender || typeof lane.sender.getParameters !== 'function' || typeof lane.sender.setParameters !== 'function') {
+    throw new Error('remote window quality sender is unavailable');
+  }
+  if (!lane.captureSource?.updateFrameRate) {
+    throw new Error('remote window capture cadence control is unavailable');
+  }
+  const currentParameters = lane.sender.getParameters();
+  const encodings = Array.isArray(currentParameters.encodings) ? currentParameters.encodings : [];
+  if (encodings.length === 0) {
+    throw new Error('remote window quality sender has no encodings to update');
+  }
+  return {
+    ...lane,
+    currentParameters,
+    previousFrameRate: lane.captureSource.frameRate,
+    nextParameters: {
+      ...currentParameters,
+      encodings: encodings.map((encoding) => ({
+        ...encoding,
+        maxBitrate: lane.budget.maxBitrateBps,
+        maxFramerate: lane.budget.maxFrameRateFps,
+      })),
+    },
+  };
+}
+
+export async function applyRemoteWindowStreamGroupQuality(options: {
+  requested: RemoteWindowVideoBitrateConfig;
+  focusSender: RTCRtpSender | null;
+  focusCaptureSource: RemoteWindowCaptureFrameSource | null;
+  overviewSender?: RTCRtpSender | null;
+  overviewCaptureSource?: RemoteWindowCaptureFrameSource | null;
+}): Promise<RemoteWindowStreamGroupBudget> {
+  const hasOverview = Boolean(options.overviewSender || options.overviewCaptureSource);
+  const budget = resolveRemoteWindowStreamGroupBudget({
+    requested: options.requested,
+    hasOverview,
+  });
+  const lanes = [prepareLane({
+    sender: options.focusSender,
+    captureSource: options.focusCaptureSource,
+    budget: budget.focus,
+  })];
+  if (budget.overview) {
+    lanes.push(prepareLane({
+      sender: options.overviewSender ?? null,
+      captureSource: options.overviewCaptureSource ?? null,
+      budget: budget.overview,
+    }));
+  }
+  const applied: PreparedRemoteWindowQualityLane[] = [];
+  try {
+    for (const lane of lanes) {
+      // Register before the first mutation so a failure between sender and
+      // capture updates restores this partially-applied lane too.
+      applied.push(lane);
+      await lane.sender!.setParameters(lane.nextParameters);
+      await lane.captureSource!.updateFrameRate!(lane.budget.maxFrameRateFps);
+    }
+    return budget;
+  } catch (error) {
+    const rollbackErrors: string[] = [];
+    for (const lane of applied.reverse()) {
+      try {
+        await lane.sender!.setParameters(lane.currentParameters);
+        await lane.captureSource!.updateFrameRate!(lane.previousFrameRate);
+      } catch (rollbackError) {
+        rollbackErrors.push(rollbackError instanceof Error ? rollbackError.message : String(rollbackError));
+      }
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(rollbackErrors.length > 0
+      ? `${message}; quality rollback failed: ${rollbackErrors.join('; ')}`
+      : message);
+  }
+}
