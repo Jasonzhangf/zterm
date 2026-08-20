@@ -34,6 +34,7 @@ public final class AndroidConnectionServiceEvent {
     public final String channelId;
     public final Long atMillis;
     public final String message;
+    public final String muxReadyPayloadJson;
 
     private AndroidConnectionServiceEvent(Builder b) {
         this.type = b.type;
@@ -44,6 +45,7 @@ public final class AndroidConnectionServiceEvent {
         this.channelId = b.channelId;
         this.atMillis = b.atMillis;
         this.message = b.message;
+        this.muxReadyPayloadJson = b.muxReadyPayloadJson;
     }
 
     public static AndroidConnectionServiceEvent bindTarget(AndroidConnectionServiceTarget target) {
@@ -62,8 +64,9 @@ public final class AndroidConnectionServiceEvent {
         return new Builder(Type.TRANSPORT_OPENING).generation(generation).build();
     }
 
-    public static AndroidConnectionServiceEvent muxReady(String generation) {
-        return new Builder(Type.MUX_READY).generation(generation).build();
+    public static AndroidConnectionServiceEvent muxReady(String generation, String muxReadyPayloadJson) {
+        return new Builder(Type.MUX_READY).generation(generation)
+            .muxReadyPayloadJson(muxReadyPayloadJson).build();
     }
 
     public static AndroidConnectionServiceEvent channelOpened(String generation, String channelId, long at) {
@@ -119,6 +122,7 @@ public final class AndroidConnectionServiceEvent {
         private String channelId;
         private Long atMillis;
         private String message;
+        private String muxReadyPayloadJson;
 
         public Builder(Type type) { this.type = type; }
 
@@ -129,6 +133,7 @@ public final class AndroidConnectionServiceEvent {
         public Builder channelId(String v) { this.channelId = v; return this; }
         public Builder at(long v) { this.atMillis = v; return this; }
         public Builder message(String v) { this.message = v; return this; }
+        public Builder muxReadyPayloadJson(String v) { this.muxReadyPayloadJson = v; return this; }
 
         public AndroidConnectionServiceEvent build() {
             if (generation == null && (type == Type.TRANSPORT_OPENING
@@ -144,6 +149,10 @@ public final class AndroidConnectionServiceEvent {
                 || type == Type.WEBRTC_NOT_SUPPORTED
                 || type == Type.RECONNECT_ATTEMPT)) {
                 throw new IllegalArgumentException("event " + type + " requires generation");
+            }
+            if (type == Type.MUX_READY
+                && (muxReadyPayloadJson == null || muxReadyPayloadJson.trim().isEmpty())) {
+                throw new IllegalArgumentException("event MUX_READY requires exact payload");
             }
             return new AndroidConnectionServiceEvent(this);
         }

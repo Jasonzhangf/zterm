@@ -384,7 +384,7 @@ export function notifyTargetNetworkSignalRuntime(options: {
     const message = `client network generation changed to ${options.signal.networkGeneration ?? 'unknown'}`;
     for (const targetRuntime of options.targetRuntimes) {
       const socket = targetRuntime.terminalTransport;
-      if (!socket) {
+      if (!socket || socket.transportOwnership === 'service') {
         continue;
       }
       options.submitTargetSocketFailure(targetRuntime.key, socket, message);
@@ -400,7 +400,7 @@ export function notifyTargetNetworkSignalRuntime(options: {
 
   for (const targetRuntime of options.targetRuntimes) {
     const socket = targetRuntime.terminalTransport;
-    if (!socket) {
+    if (!socket || socket.transportOwnership === 'service') {
       continue;
     }
     const result = options.targetNetworkProbeRuntime.probe({
@@ -902,6 +902,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
 
   const daemonConnection = createClientDaemonConnection({
     readSessionTransportResource: options.readSessionTransportResource,
+    readTargetTerminalSocket: options.readTargetTerminalSocket,
     sendSocketPayload: options.sendSocketPayload,
     onTargetNetworkProbeError: (failure) => {
       options.runtimeDebug('session.mux.target-network-probe.error-consumed', {

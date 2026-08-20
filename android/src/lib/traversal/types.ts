@@ -135,6 +135,8 @@ export interface BridgeSocketMessageLike {
 
 export interface BridgeTransportSocket {
   readonly readyState: number;
+  /** Physical lifecycle owner. Service-owned sockets already negotiated mux. */
+  readonly transportOwnership?: 'client' | 'service';
   readonly bufferedAmount?: number;
   onopen: ((event?: Event) => void) | null;
   onmessage: ((event: BridgeSocketMessageLike) => void) | null;

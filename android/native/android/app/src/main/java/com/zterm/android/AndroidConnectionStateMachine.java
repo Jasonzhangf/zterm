@@ -89,6 +89,7 @@ public final class AndroidConnectionStateMachine {
                 consecutiveHeartbeatMisses = 0;
                 snapshot = snapshot.toBuilder()
                     .generation(event.generation)
+                    .muxReadyPayloadJson(null)
                     .nextRetryAt(null)
                     .error(null)
                     .build();
@@ -100,7 +101,10 @@ public final class AndroidConnectionStateMachine {
                 if (snapshot.state != AndroidConnectionServiceSnapshot.State.CONNECTING
                     && snapshot.state != AndroidConnectionServiceSnapshot.State.MUX_READY) return false;
                 consecutiveHeartbeatMisses = 0;
-                snapshot = copyWithState(snapshot.toBuilder().error(null).build(),
+                snapshot = copyWithState(snapshot.toBuilder()
+                    .error(null)
+                    .muxReadyPayloadJson(event.muxReadyPayloadJson)
+                    .build(),
                     AndroidConnectionServiceSnapshot.State.MUX_READY);
                 publish();
                 return true;
@@ -282,6 +286,7 @@ public final class AndroidConnectionStateMachine {
             .lastActivityAt(source.lastActivityAt)
             .nextRetryAt(source.nextRetryAt)
             .error(source.error)
+            .muxReadyPayloadJson(source.muxReadyPayloadJson)
             .build();
     }
 

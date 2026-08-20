@@ -24,6 +24,7 @@ public final class AndroidConnectionServiceEventEnvelope {
     public final String errorCode;
     public final String errorMessage;
     public final String targetKey;
+    public final String generation;
     public final String channelId;
     public final AndroidConnectionServiceServerFrameEvent serverFrame;
     public final AndroidConnectionServiceChannelMessageEvent channelMessage;
@@ -35,6 +36,7 @@ public final class AndroidConnectionServiceEventEnvelope {
         this.errorCode = b.errorCode;
         this.errorMessage = b.errorMessage;
         this.targetKey = b.targetKey;
+        this.generation = b.generation;
         this.channelId = b.channelId;
         this.serverFrame = b.serverFrame;
         this.channelMessage = b.channelMessage;
@@ -60,10 +62,12 @@ public final class AndroidConnectionServiceEventEnvelope {
                 json.put("errorMessage", errorMessage == null ? "" : errorMessage);
                 break;
             case CHANNEL_OPENED:
+                json.put("generation", generation);
                 json.put("channelId", channelId == null ? "" : channelId);
                 json.put("snapshot", snapshot == null ? JSONObject.NULL : snapshot.toJson());
                 break;
             case CHANNEL_CLOSED:
+                json.put("generation", generation);
                 json.put("channelId", channelId == null ? "" : channelId);
                 break;
             case SERVER_FRAME:
@@ -92,13 +96,15 @@ public final class AndroidConnectionServiceEventEnvelope {
     }
 
     public static AndroidConnectionServiceEventEnvelope channelOpened(
-        String targetKey, String channelId, AndroidConnectionServiceSnapshot snapshot) {
-        return new Builder(Kind.CHANNEL_OPENED).targetKey(targetKey).channelId(channelId)
+        String targetKey, String generation, String channelId, AndroidConnectionServiceSnapshot snapshot) {
+        return new Builder(Kind.CHANNEL_OPENED).targetKey(targetKey).generation(generation).channelId(channelId)
             .snapshot(snapshot).build();
     }
 
-    public static AndroidConnectionServiceEventEnvelope channelClosed(String targetKey, String channelId) {
-        return new Builder(Kind.CHANNEL_CLOSED).targetKey(targetKey).channelId(channelId).build();
+    public static AndroidConnectionServiceEventEnvelope channelClosed(
+        String targetKey, String generation, String channelId) {
+        return new Builder(Kind.CHANNEL_CLOSED).targetKey(targetKey).generation(generation)
+            .channelId(channelId).build();
     }
 
     public static AndroidConnectionServiceEventEnvelope serverFrame(AndroidConnectionServiceServerFrameEvent frame) {
@@ -116,6 +122,7 @@ public final class AndroidConnectionServiceEventEnvelope {
         private String errorCode;
         private String errorMessage;
         private String targetKey;
+        private String generation;
         private String channelId;
         private AndroidConnectionServiceServerFrameEvent serverFrame;
         private AndroidConnectionServiceChannelMessageEvent channelMessage;
@@ -126,6 +133,7 @@ public final class AndroidConnectionServiceEventEnvelope {
         public Builder errorCode(String v) { this.errorCode = v; return this; }
         public Builder errorMessage(String v) { this.errorMessage = v; return this; }
         public Builder targetKey(String v) { this.targetKey = v; return this; }
+        public Builder generation(String v) { this.generation = v; return this; }
         public Builder channelId(String v) { this.channelId = v; return this; }
         public Builder serverFrame(AndroidConnectionServiceServerFrameEvent v) { this.serverFrame = v; return this; }
         public Builder channelMessage(AndroidConnectionServiceChannelMessageEvent v) { this.channelMessage = v; return this; }
@@ -144,6 +152,9 @@ public final class AndroidConnectionServiceEventEnvelope {
                     }
                     if (channelId == null || channelId.trim().isEmpty()) {
                         throw new IllegalArgumentException(kind.wireName() + " channelId required");
+                    }
+                    if (generation == null || generation.trim().isEmpty()) {
+                        throw new IllegalArgumentException(kind.wireName() + " generation required");
                     }
                     break;
                 case SERVER_FRAME:

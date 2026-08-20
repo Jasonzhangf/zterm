@@ -10,6 +10,7 @@ const pluginCalls = vi.hoisted(() => ({
   sendChannelBinary: vi.fn(),
   closeChannel: vi.fn(),
   pulseSessionNotification: vi.fn(),
+  sendTargetMessage: vi.fn(),
   readSnapshot: vi.fn(),
   addListener: vi.fn(),
 }));
@@ -37,6 +38,7 @@ describe('AndroidConnectionServicePlugin', () => {
     pluginCalls.sendChannelBinary.mockReset();
     pluginCalls.closeChannel.mockReset();
     pluginCalls.pulseSessionNotification.mockReset();
+    pluginCalls.sendTargetMessage.mockReset();
     pluginCalls.readSnapshot.mockReset();
     pluginCalls.addListener.mockReset();
   });
@@ -122,6 +124,12 @@ describe('AndroidConnectionServicePlugin', () => {
       targetKey: 'daemon:mac-studio',
       channelId: 'channel-1',
     });
+    sendAndroidConnectionCommand({
+      type: 'target-message',
+      targetKey: 'daemon:mac-studio',
+      requestId: 'request-1',
+      message: { type: 'list-sessions' },
+    });
 
     expect(pluginCalls.openChannel).toHaveBeenCalledWith(expect.objectContaining({ channelId: 'channel-1' }));
     expect(pluginCalls.sendChannelMessage).toHaveBeenCalledWith(expect.objectContaining({
@@ -144,6 +152,12 @@ describe('AndroidConnectionServicePlugin', () => {
       type: 'pulse-session-notification',
       targetKey: 'daemon:mac-studio',
       channelId: 'channel-1',
+    });
+    expect(pluginCalls.sendTargetMessage).toHaveBeenCalledWith({
+      type: 'target-message',
+      targetKey: 'daemon:mac-studio',
+      requestId: 'request-1',
+      message: { type: 'list-sessions' },
     });
   });
 

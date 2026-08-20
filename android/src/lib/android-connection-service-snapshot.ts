@@ -40,6 +40,7 @@ export interface AndroidConnectionServiceSnapshot {
   lastActivityAt: number | null;
   nextRetryAt: number | null;
   error: AndroidConnectionServiceError | null;
+  muxReadyPayload: Record<string, unknown> | null;
 }
 
 export type AndroidConnectionServiceEvent =
@@ -47,7 +48,7 @@ export type AndroidConnectionServiceEvent =
   | { type: 'set-route-policy'; policy: AndroidConnectionServiceRoutePolicy }
   | { type: 'release-target'; targetKey: string; reason: string }
   | { type: 'transport-opening'; generation: string }
-  | { type: 'mux-ready'; generation: string }
+  | { type: 'mux-ready'; generation: string; muxReadyPayload: Record<string, unknown> }
   | { type: 'channel-opened'; generation: string; channelId: string }
   | { type: 'channel-closed'; generation: string; channelId: string; reason: string }
   | { type: 'heartbeat-pong'; generation: string; at: number }
@@ -74,6 +75,7 @@ const EMPTY_SNAPSHOT: AndroidConnectionServiceSnapshot = {
   lastActivityAt: null,
   nextRetryAt: null,
   error: null,
+  muxReadyPayload: null,
 };
 
 function readonlySnapshot(snapshot: AndroidConnectionServiceSnapshot): AndroidConnectionServiceSnapshot {
@@ -83,6 +85,7 @@ function readonlySnapshot(snapshot: AndroidConnectionServiceSnapshot): AndroidCo
     route: snapshot.route ? { ...snapshot.route } : null,
     channels: snapshot.channels.map((channel) => ({ ...channel })),
     error: snapshot.error ? { ...snapshot.error } : null,
+    muxReadyPayload: snapshot.muxReadyPayload ? { ...snapshot.muxReadyPayload } : null,
   };
 }
 
@@ -183,6 +186,7 @@ export function createAndroidConnectionServiceStateMachine(options: AndroidConne
           ...snapshot,
           state: 'connecting',
           generation: event.generation,
+          muxReadyPayload: null,
           error: null,
           nextRetryAt: null,
         };
@@ -196,6 +200,7 @@ export function createAndroidConnectionServiceStateMachine(options: AndroidConne
           ...snapshot,
           state: 'mux-ready',
           error: null,
+          muxReadyPayload: { ...event.muxReadyPayload },
         };
         consecutiveHeartbeatMisses = 0;
         return true;

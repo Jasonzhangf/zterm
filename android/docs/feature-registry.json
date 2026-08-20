@@ -3427,6 +3427,7 @@
         "src/plugins/AndroidConnectionServicePlugin.test.ts",
         "src/contexts/android-connection-service-runtime.ts",
         "src/contexts/android-connection-service-runtime.test.ts",
+        "native/android/app/src/main/java/com/zterm/android/AndroidConnectionCommand.java",
         "native/android/app/src/main/java/com/zterm/android/AndroidConnectionService.java",
         "native/android/app/src/main/java/com/zterm/android/AndroidConnectionServicePlugin.java",
         "docs/goals/connection-service-owner-migration-plan.md",

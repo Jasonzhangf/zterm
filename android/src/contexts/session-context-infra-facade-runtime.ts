@@ -2,7 +2,9 @@ import {
   flushRuntimeDebugLogs as flushRuntimeDebugLogsViaHttp,
   type DebugObservabilityTarget,
 } from '../lib/runtime-debug-http-exporter';
+import { Capacitor } from '@capacitor/core';
 import { createClientDaemonConnection } from '../lib/client-daemon-connection';
+import { openAndroidConnectionServiceTransportSocket } from '../lib/android-connection-service-factory';
 import type { BridgeSettings } from '../lib/bridge-settings';
 import {
   getSessionTerminalChannel,
@@ -519,6 +521,9 @@ export function createSessionInfraFacadeRuntime(options: {
   };
 
   const openDaemonTargetTransportSocket = (host: Host) => {
+    if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
+      return openAndroidConnectionServiceTransportSocket(host, host.sessionName || host.name || 'shell');
+    }
     return buildTraversalSocketForHostRuntime({
       host,
       bridgeSettings: options.bridgeSettings,

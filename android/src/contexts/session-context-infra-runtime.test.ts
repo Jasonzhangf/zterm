@@ -454,7 +454,7 @@ describe('applyTransportDiagnosticsRuntime', () => {
 });
 
 describe('buildTraversalSocketForHostRuntime direct fallback after network change', () => {
-  it('does not force Android through the unverified native connection projection', () => {
+  it('keeps the platform-neutral transport runtime free of native Android service ownership', () => {
     const source = readFileSync(resolve(import.meta.dirname, 'session-context-infra-runtime.ts'), 'utf8');
 
     expect(source).not.toContain('openAndroidConnectionServiceTransportSocket');

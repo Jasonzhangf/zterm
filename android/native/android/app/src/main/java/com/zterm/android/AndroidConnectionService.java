@@ -371,6 +371,9 @@ public class AndroidConnectionService extends Service {
                 case PULSE_SESSION_NOTIFICATION:
                     handlePulseSessionNotification(command);
                     break;
+                case TARGET_MESSAGE:
+                    handleTargetMessageCommand(command);
+                    break;
                 default:
                     rejectCommand(command, "invalid-command", "unsupported command type");
             }
@@ -509,6 +512,19 @@ public class AndroidConnectionService extends Service {
             return;
         }
         pulseSessionNotification(command.targetKey, command.channelId);
+    }
+
+    private void handleTargetMessageCommand(AndroidConnectionCommand command) {
+        TargetRuntime runtime = targetRuntime(command.targetKey);
+        if (runtime == null) {
+            rejectCommand(command, "unknown-target", "target-message requires a bound target");
+            return;
+        }
+        if (command.targetMessage == null) {
+            rejectCommand(command, "invalid-command", "target-message payload is missing");
+            return;
+        }
+        runtime.sendTargetMessage(command.requestId, command.targetMessage);
     }
 
     private TargetRuntime targetRuntime(String targetKey) {
@@ -1140,7 +1156,8 @@ public class AndroidConnectionService extends Service {
                 transportFailure("mux-capabilities", "mux capabilities missing");
                 return;
             }
-            stateMachine.dispatch(AndroidConnectionServiceEvent.muxReady(generation),
+            stateMachine.dispatch(AndroidConnectionServiceEvent.muxReady(
+                generation, payload.toString()),
                 System.currentTimeMillis());
             publishServerFrame(AndroidConnectionServiceServerFrameEvent.Kind.MUX_READY, payload);
             replayDesiredChannels();
@@ -1159,9 +1176,7 @@ public class AndroidConnectionService extends Service {
                 channel.opened = true;
             }
             publishEvent(AndroidConnectionServiceEventEnvelope.channelOpened(
-                target.targetKey, channelId, stateMachine.readSnapshot()));
-            publishServerFrame(AndroidConnectionServiceServerFrameEvent.Kind.MUX_TARGET_MESSAGE,
-                payload);
+                target.targetKey, generation, channelId, stateMachine.readSnapshot()));
             refreshNotification();
         }
 
@@ -1193,7 +1208,8 @@ public class AndroidConnectionService extends Service {
                 channel.opened = false;
             }
             cancelSessionNotificationPulse(target.targetKey, channelId);
-            publishEvent(AndroidConnectionServiceEventEnvelope.channelClosed(target.targetKey, channelId));
+            publishEvent(AndroidConnectionServiceEventEnvelope.channelClosed(
+                target.targetKey, generation, channelId));
             refreshNotification();
         }
 
@@ -1300,6 +1316,26 @@ public class AndroidConnectionService extends Service {
                 frame.put("payload", payload);
             } catch (JSONException error) {
                 transportFailure("channel-message", String.valueOf(error.getMessage()));
+                return;
+            }
+            send(frame);
+        }
+
+        void sendTargetMessage(String requestId, JSONObject message) {
+            if (message == null) {
+                throw new IllegalArgumentException("target message is required");
+            }
+            JSONObject frame = new JSONObject();
+            try {
+                frame.put("type", "mux-target-message");
+                JSONObject payload = new JSONObject();
+                if (requestId != null && !requestId.trim().isEmpty()) {
+                    payload.put("requestId", requestId.trim());
+                }
+                payload.put("message", message);
+                frame.put("payload", payload);
+            } catch (JSONException error) {
+                transportFailure("target-message", String.valueOf(error.getMessage()));
                 return;
             }
             send(frame);

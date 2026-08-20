@@ -28,9 +28,30 @@ export function openAndroidConnectionServiceTransportSocket(
 ): BridgeTransportSocket {
   const target = buildAndroidConnectionServiceTarget(host);
   const socket = new AndroidConnectionServiceTransportSocket(target, sessionName);
-  void socket.start().then(() => sendAndroidConnectionCommand({
-    type: 'bind-target',
-    target,
-  }));
+  // Startup is not detached: every rejection enters the socket's typed error
+  // chain via reportFailure, which the caller consumes through the
+  // BridgeTransportSocket.onerror/onclose contract. No silent promise.
+  const startup = socket.start();
+  startup.then(
+    () => {
+      sendAndroidConnectionCommand({ type: 'bind-target', target }).then(
+        (result) => {
+          if (!result?.ok) {
+            socket.reportFailure('bind-target rejected by connection service');
+          }
+        },
+        (error) => {
+          socket.reportFailure(
+            `bind-target rejected: ${String(error?.message ?? error)}`,
+          );
+        },
+      );
+    },
+    (error) => {
+      socket.reportFailure(
+        `connection service startup failed: ${String(error?.message ?? error)}`,
+      );
+    },
+  );
   return socket;
 }
