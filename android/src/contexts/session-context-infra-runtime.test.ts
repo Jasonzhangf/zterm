@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { DEFAULT_BRIDGE_SETTINGS, type BridgeSettings } from '../lib/bridge-settings';
 import { buildTraversalPlan } from '../lib/traversal/config';
 import { TraversalSocket } from '../lib/traversal/socket';
@@ -452,6 +454,13 @@ describe('applyTransportDiagnosticsRuntime', () => {
 });
 
 describe('buildTraversalSocketForHostRuntime direct fallback after network change', () => {
+  it('does not force Android through the unverified native connection projection', () => {
+    const source = readFileSync(resolve(import.meta.dirname, 'session-context-infra-runtime.ts'), 'utf8');
+
+    expect(source).not.toContain('openAndroidConnectionServiceTransportSocket');
+    expect(source).not.toContain('AndroidConnectionService (native)');
+  });
+
   it('keeps successfully-connected direct endpoints as fallback candidates when the control directory entry is stale', () => {
     const host = buildHost({
       daemonHostId: 'mac-studio',

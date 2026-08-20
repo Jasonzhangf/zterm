@@ -24,7 +24,6 @@ android/node_modules/
 android/dist/
 android/.turbo/
 /.build-meta.json
-android/.build-meta.json
 android/update-dist/
 android/note.md
 android/.beads/*

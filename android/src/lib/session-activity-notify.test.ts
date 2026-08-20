@@ -24,6 +24,25 @@ describe('createSessionActivityNotifier', () => {
     scheduleNotification.mockClear();
   });
 
+  it('pulses the matching connected session notification action once', () => {
+    const pulseTarget = vi.fn();
+    const notifier = createSessionActivityNotifier({
+      resolveTarget: (sessionName) => sessionName === 'demo'
+        ? { targetKey: 'daemon:one', channelId: 'channel-demo' }
+        : null,
+      pulseTarget,
+    });
+
+    notifier.handleActivity(activity('demo', true, 5_000));
+    notifier.handleActivity(activity('demo', true, 5_000));
+
+    expect(pulseTarget).toHaveBeenCalledTimes(1);
+    expect(pulseTarget).toHaveBeenCalledWith({
+      targetKey: 'daemon:one',
+      channelId: 'channel-demo',
+    });
+  });
+
   it('notifies once when a session transitions into stopped', () => {
     const notifier = createSessionActivityNotifier();
     notifier.handleActivity(activity('demo', true));

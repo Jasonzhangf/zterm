@@ -38,6 +38,8 @@
         "src/lib/session-attachment-fetch-runtime.ts",
         "src/lib/notification-helper.ts",
         "src/lib/session-activity-notify.ts",
+        "src/lib/android-notification-deep-link.ts",
+        "src/lib/android-notification-deep-link.test.ts",
         "src/components/terminal/AttachmentDrawer.tsx",
         "src/components/terminal/RenameDialog.tsx",
         "src/components/terminal/ZtermDialog.tsx",
@@ -1359,7 +1361,9 @@
         "src/plugins/AndroidConnectionServicePlugin.ts",
         "src/contexts/android-connection-service-runtime.ts",
         "native/android/app/src/main/java/com/zterm/android/AndroidConnectionService.java",
-        "native/android/app/src/main/java/com/zterm/android/AndroidConnectionServicePlugin.java"
+        "native/android/app/src/main/java/com/zterm/android/AndroidConnectionServicePlugin.java",
+        "native/android/app/src/main/java/com/zterm/android/AndroidConnectionCommand.java",
+        "docs/testing/android-notification-session-actions-test-design.md"
       ],
       "forbidden_paths": [
         "active/lib/**",

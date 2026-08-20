@@ -221,6 +221,20 @@ public final class AndroidConnectionServicePlugin extends Plugin {
     }
 
     @PluginMethod
+    public void pulseSessionNotification(PluginCall call) {
+        String targetKey = call.getString("targetKey");
+        String channelId = call.getString("channelId");
+        if (targetKey == null || targetKey.trim().isEmpty()
+            || channelId == null || channelId.trim().isEmpty()) {
+            call.reject("targetKey and channelId are required");
+            return;
+        }
+        sendCommand(AndroidConnectionCommand.pulseSessionNotification(
+            targetKey.trim(), channelId.trim()));
+        call.resolve(ok());
+    }
+
+    @PluginMethod
     public void readSnapshot(PluginCall call) {
         String targetKey = call.getString("targetKey");
         if (targetKey == null || targetKey.trim().isEmpty()) {

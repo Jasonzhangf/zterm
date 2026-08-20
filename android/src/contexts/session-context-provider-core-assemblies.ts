@@ -29,6 +29,7 @@ import type {
 import type { AttachmentAssetDataPayload, AttachmentHistoryPayload, PendingAttachmentsPayload, SessionActivity } from '@zterm/shared/protocol';
 import { createSessionActivityNotifier } from '../lib/session-activity-notify';
 import { rememberRelayHostConnection } from '../lib/relay-host-recent-connection';
+import { sendAndroidConnectionCommand } from '../plugins/AndroidConnectionServicePlugin';
 
 
 
@@ -75,7 +76,37 @@ export function useSessionProviderCoreAssemblies(
     attachmentFetchRuntimeRef,
   } = options.refs;
 
-  const sessionActivityNotifierRef = useRef(createSessionActivityNotifier());
+  const sessionActivityNotifierRef = useRef(createSessionActivityNotifier({
+    resolveTarget: (sessionName) => {
+      const session = options.stateRef.current.sessions.find((candidate) => (
+        candidate.sessionName === sessionName && candidate.state !== 'closed'
+      ));
+      if (!session) {
+        return null;
+      }
+      const resource = getSessionTransportResource(transportRuntimeStoreRef.current, session.id);
+      if (!resource.targetKey || !resource.channel?.channelId) {
+        return null;
+      }
+      return {
+        targetKey: resource.targetKey,
+        channelId: resource.channel.channelId,
+      };
+    },
+    pulseTarget: (target) => {
+      void sendAndroidConnectionCommand({
+        type: 'pulse-session-notification',
+        targetKey: target.targetKey,
+        channelId: target.channelId,
+      }).catch((error) => {
+        runtimeDebug('client.notification.session-pulse-error', {
+          targetKey: target.targetKey,
+          channelId: target.channelId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    },
+  }));
   useEffect(() => () => {
     sessionActivityNotifierRef.current.dispose();
   }, []);

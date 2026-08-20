@@ -3403,6 +3403,93 @@
       "status": "design"
     },
     {
+      "edge_id": "edge.client.session_activity_to_android_notification_projection",
+      "from_module": "client.session_runtime",
+      "to_module": "client.connection_service",
+      "resource_from": "resource.session_idle_facts",
+      "resource_to": "resource.android_notification_projection",
+      "via_resources": [
+        "resource.terminal_channel",
+        "resource.client_connection_service_ipc"
+      ],
+      "relation_status": "via",
+      "owner_feature": "client.android_notification_sessions",
+      "allowed_callers": [
+        "src/contexts/session-context-provider-core-assemblies.ts",
+        "src/lib/session-activity-notify.ts"
+      ],
+      "forbidden_callers": [
+        "src/server/**",
+        "src/components/TerminalView.tsx"
+      ],
+      "request_chain": [
+        "SessionActivityIn01Fact",
+        "SessionActivityIn02TargetResolution",
+        "SessionActivityIn03PulseCommand"
+      ],
+      "response_chain": [
+        "NotificationProjectionOut01PulseScheduled"
+      ],
+      "error_chain": [
+        "NotificationProjectionError01PulseRejected"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:SessionActivityNotifier->AndroidConnectionServicePlugin",
+        "android_mainline:AndroidConnectionServicePlugin->AndroidConnectionService"
+      ],
+      "required_gates": [
+        "docs/testing/android-notification-session-actions-test-design.md",
+        "src/lib/edge-registry-truth.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client.notification_action_to_session_open_owner",
+      "from_module": "client.connection_service",
+      "to_module": "client.app_shell",
+      "resource_from": "resource.android_notification_projection",
+      "resource_to": "resource.ui_projection",
+      "via_resources": [
+        "resource.client_connection_service_ipc",
+        "resource.active_session"
+      ],
+      "relation_status": "via",
+      "owner_feature": "client.android_notification_sessions",
+      "allowed_callers": [
+        "native/android/app/src/main/java/com/zterm/android/AndroidConnectionService.java",
+        "native/android/app/src/main/java/com/zterm/android/MainActivity.java",
+        "src/App.tsx",
+        "src/lib/android-notification-deep-link.ts"
+      ],
+      "forbidden_callers": [
+        "src/server/**",
+        "src/components/TerminalView.tsx"
+      ],
+      "request_chain": [
+        "NotificationActionIn01PendingIntent",
+        "NotificationActionIn02AppUrl",
+        "NotificationActionIn03SessionOpenIntent"
+      ],
+      "response_chain": [
+        "NotificationActionOut01SessionVisible"
+      ],
+      "error_chain": [
+        "NotificationActionError01InvalidDeepLink",
+        "NotificationActionError02SessionNotFound"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:AndroidConnectionService->MainActivity",
+        "android_mainline:MainActivity->App",
+        "android_mainline:App->SessionOpenOwner"
+      ],
+      "required_gates": [
+        "docs/testing/android-notification-session-actions-test-design.md",
+        "src/lib/android-notification-deep-link.test.ts",
+        "src/lib/edge-registry-truth.test.ts"
+      ],
+      "status": "active"
+    },
+    {
       "edge_id": "edge.daemon_remote_window_stream_to_canvas_layout",
       "from_module": "daemon.remote_window_stream",
       "to_module": "daemon.remote_window_stream",

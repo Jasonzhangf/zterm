@@ -9,6 +9,7 @@ const pluginCalls = vi.hoisted(() => ({
   sendChannelMessage: vi.fn(),
   sendChannelBinary: vi.fn(),
   closeChannel: vi.fn(),
+  pulseSessionNotification: vi.fn(),
   readSnapshot: vi.fn(),
   addListener: vi.fn(),
 }));
@@ -35,6 +36,7 @@ describe('AndroidConnectionServicePlugin', () => {
     pluginCalls.sendChannelMessage.mockReset();
     pluginCalls.sendChannelBinary.mockReset();
     pluginCalls.closeChannel.mockReset();
+    pluginCalls.pulseSessionNotification.mockReset();
     pluginCalls.readSnapshot.mockReset();
     pluginCalls.addListener.mockReset();
   });
@@ -115,6 +117,11 @@ describe('AndroidConnectionServicePlugin', () => {
       channelId: 'channel-1',
       reason: 'user-close',
     });
+    sendAndroidConnectionCommand({
+      type: 'pulse-session-notification',
+      targetKey: 'daemon:mac-studio',
+      channelId: 'channel-1',
+    });
 
     expect(pluginCalls.openChannel).toHaveBeenCalledWith(expect.objectContaining({ channelId: 'channel-1' }));
     expect(pluginCalls.sendChannelMessage).toHaveBeenCalledWith(expect.objectContaining({
@@ -132,6 +139,11 @@ describe('AndroidConnectionServicePlugin', () => {
       targetKey: 'daemon:mac-studio',
       channelId: 'channel-1',
       reason: 'user-close',
+    });
+    expect(pluginCalls.pulseSessionNotification).toHaveBeenCalledWith({
+      type: 'pulse-session-notification',
+      targetKey: 'daemon:mac-studio',
+      channelId: 'channel-1',
     });
   });
 

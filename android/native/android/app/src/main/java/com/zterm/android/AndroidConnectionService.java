@@ -3,9 +3,11 @@ package com.zterm.android;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Binder;
 import android.os.Handler;
@@ -84,6 +86,9 @@ public class AndroidConnectionService extends Service {
     private static final long INITIAL_BACKOFF_MS = 1_000L;
     private static final long MAX_BACKOFF_MS = 30_000L;
     private static final int MUX_PROTOCOL_VERSION = 1;
+    private static final int MAX_NOTIFICATION_SESSION_ACTIONS = 3;
+    private static final int NOTIFICATION_PULSE_UPDATES = 6;
+    private static final long NOTIFICATION_PULSE_INTERVAL_MS = 350L;
 
     private static final Object LISTENER_LOCK = new Object();
     private static final List<AndroidConnectionServiceListener> STATIC_LISTENERS = new ArrayList<>();
@@ -92,6 +97,7 @@ public class AndroidConnectionService extends Service {
 
     private Handler workerHandler;
     private HandlerThread workerThread;
+    private NotificationManager notificationManager;
     private PowerManager.WakeLock wakeLock;
     private PowerManager powerManager;
     private android.net.ConnectivityManager connectivityManager;
@@ -101,6 +107,8 @@ public class AndroidConnectionService extends Service {
     private OkHttpClient httpClient;
     private final Map<String, TargetRuntime> targets = new ConcurrentHashMap<>();
     private final Map<String, String> policyByTargetKey = new ConcurrentHashMap<>();
+    private final Map<String, Integer> notificationPulseUpdateCounts = new ConcurrentHashMap<>();
+    private final Map<String, Long> notificationPulseGenerations = new ConcurrentHashMap<>();
     private String clientInstanceId;
 
     @Override
@@ -112,6 +120,7 @@ public class AndroidConnectionService extends Service {
         powerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
         connectivityManager = (android.net.ConnectivityManager)
             getSystemService(Context.CONNECTIVITY_SERVICE);
+        notificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
         registerNetworkCallback();
         ensureNotificationChannel();
         httpClient = new OkHttpClient.Builder()
@@ -359,6 +368,9 @@ public class AndroidConnectionService extends Service {
                 case CLOSE_CHANNEL:
                     handleCloseChannel(command);
                     break;
+                case PULSE_SESSION_NOTIFICATION:
+                    handlePulseSessionNotification(command);
+                    break;
                 default:
                     rejectCommand(command, "invalid-command", "unsupported command type");
             }
@@ -397,6 +409,7 @@ public class AndroidConnectionService extends Service {
         TargetRuntime existing = targets.get(target.targetKey);
         if (existing != null && existing.target.equals(target)) {
             existing.startOrContinue();
+            refreshNotification();
             return;
         }
         if (existing != null) {
@@ -408,6 +421,7 @@ public class AndroidConnectionService extends Service {
         TargetRuntime runtime = new TargetRuntime(target, policy);
         targets.put(target.targetKey, runtime);
         runtime.startOrContinue();
+        refreshNotification();
     }
 
     private AndroidConnectionStateMachine stateMachineForTests() {
@@ -427,6 +441,7 @@ public class AndroidConnectionService extends Service {
             return;
         }
         runtime.close(reason);
+        cancelSessionNotificationPulses(targetKey);
         targets.remove(targetKey);
         policyByTargetKey.remove(targetKey);
         LAST_SNAPSHOTS.remove(targetKey);
@@ -440,6 +455,7 @@ public class AndroidConnectionService extends Service {
         for (TargetRuntime candidate : targets.values()) {
             publishSnapshot(candidate.snapshot());
         }
+        refreshNotification();
     }
 
     private void rejectCommand(AndroidConnectionCommand command, String code, String message) {
@@ -453,6 +469,7 @@ public class AndroidConnectionService extends Service {
             return;
         }
         runtime.sendChannelOpen(command);
+        refreshNotification();
     }
 
     private void handleChannelMessageCommand(AndroidConnectionCommand command) {
@@ -480,6 +497,18 @@ public class AndroidConnectionService extends Service {
             return;
         }
         runtime.sendCloseChannel(command);
+        cancelSessionNotificationPulse(command.targetKey, command.channelId);
+        refreshNotification();
+    }
+
+    private void handlePulseSessionNotification(AndroidConnectionCommand command) {
+        TargetRuntime runtime = targetRuntime(command.targetKey);
+        if (runtime == null || !runtime.hasNotificationChannel(command.channelId)) {
+            rejectCommand(command, "unknown-channel",
+                "pulse-session-notification requires a connected projected channel");
+            return;
+        }
+        pulseSessionNotification(command.targetKey, command.channelId);
     }
 
     private TargetRuntime targetRuntime(String targetKey) {
@@ -530,6 +559,8 @@ public class AndroidConnectionService extends Service {
 
     private void publishServiceIdle() {
         LAST_SNAPSHOTS.clear();
+        notificationPulseUpdateCounts.clear();
+        notificationPulseGenerations.clear();
         publishEvent(AndroidConnectionServiceEventEnvelope.stateChanged(
             AndroidConnectionServiceSnapshot.empty()));
     }
@@ -562,13 +593,151 @@ public class AndroidConnectionService extends Service {
     }
 
     private Notification createNotification() {
-        return new NotificationCompat.Builder(this, CHANNEL_ID)
+        List<NotificationSessionAction> sessions = new ArrayList<>();
+        for (TargetRuntime runtime : targets.values()) {
+            if (!runtime.isMuxReady()) {
+                continue;
+            }
+            for (TargetRuntime.ChannelIntent channel : runtime.desiredChannels.values()) {
+                if (channel.opened && nonEmpty(channel.sessionName)) {
+                    sessions.add(new NotificationSessionAction(
+                        runtime.target.targetKey, channel.channelId, channel.sessionName));
+                }
+            }
+        }
+        sessions.sort((left, right) -> {
+            boolean leftPulsing = notificationPulseUpdateCounts.containsKey(
+                notificationPulseKey(left.targetKey, left.channelId));
+            boolean rightPulsing = notificationPulseUpdateCounts.containsKey(
+                notificationPulseKey(right.targetKey, right.channelId));
+            if (leftPulsing != rightPulsing) {
+                return leftPulsing ? -1 : 1;
+            }
+            int targetComparison = left.targetKey.compareTo(right.targetKey);
+            return targetComparison != 0
+                ? targetComparison
+                : left.channelId.compareTo(right.channelId);
+        });
+
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("zterm")
-            .setContentText("连接服务运行中")
+            .setContentText(sessions.isEmpty()
+                ? "连接服务运行中"
+                : sessions.size() + " 个会话已连接")
             .setSmallIcon(com.zterm.android.R.drawable.ic_notification_logo)
             .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setOngoing(true)
-            .build();
+            .setContentIntent(buildAppPendingIntent())
+            .setOngoing(true);
+
+        int actionCount = Math.min(MAX_NOTIFICATION_SESSION_ACTIONS, sessions.size());
+        for (int index = 0; index < actionCount; index += 1) {
+            NotificationSessionAction session = sessions.get(index);
+            String pulseKey = notificationPulseKey(session.targetKey, session.channelId);
+            Integer pulseCount = notificationPulseUpdateCounts.get(pulseKey);
+            boolean pulseOn = pulseCount != null && pulseCount % 2 == 0;
+            String title = pulseOn ? "● " + session.sessionName : session.sessionName;
+            builder.addAction(new NotificationCompat.Action.Builder(
+                com.zterm.android.R.drawable.ic_notification_logo,
+                title,
+                buildSessionPendingIntent(session))
+                .build());
+        }
+        return builder.build();
+    }
+
+    private PendingIntent buildAppPendingIntent() {
+        Intent intent = new Intent(this, MainActivity.class);
+        intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        return PendingIntent.getActivity(this, NOTIFICATION_ID, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+    }
+
+    private PendingIntent buildSessionPendingIntent(NotificationSessionAction session) {
+        Uri uri = Uri.parse("zterm://session/open?targetKey=" + Uri.encode(session.targetKey)
+            + "&channelId=" + Uri.encode(session.channelId)
+            + "&sessionName=" + Uri.encode(session.sessionName));
+        Intent intent = new Intent(this, MainActivity.class);
+        intent.setAction(Intent.ACTION_VIEW);
+        intent.setData(uri);
+        intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        int requestCode = (session.targetKey + "\n" + session.channelId).hashCode();
+        return PendingIntent.getActivity(this, requestCode, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+    }
+
+    private void refreshNotification() {
+        if (notificationManager != null) {
+            notificationManager.notify(NOTIFICATION_ID, createNotification());
+        }
+    }
+
+    private void pulseSessionNotification(String targetKey, String channelId) {
+        String pulseKey = notificationPulseKey(targetKey, channelId);
+        long pulseGeneration = notificationPulseGenerations.getOrDefault(pulseKey, 0L) + 1L;
+        notificationPulseGenerations.put(pulseKey, pulseGeneration);
+        notificationPulseUpdateCounts.put(pulseKey, 0);
+        refreshNotification();
+        scheduleNotificationPulseStep(targetKey, channelId, pulseKey, pulseGeneration);
+    }
+
+    private void scheduleNotificationPulseStep(
+        String targetKey,
+        String channelId,
+        String pulseKey,
+        long pulseGeneration) {
+        if (workerHandler == null) {
+            return;
+        }
+        workerHandler.postDelayed(() -> {
+            if (notificationPulseGenerations.getOrDefault(pulseKey, 0L) != pulseGeneration) {
+                return;
+            }
+            TargetRuntime runtime = targetRuntime(targetKey);
+            if (runtime == null || !runtime.hasNotificationChannel(channelId)) {
+                notificationPulseUpdateCounts.remove(pulseKey);
+                notificationPulseGenerations.remove(pulseKey);
+                refreshNotification();
+                return;
+            }
+            int updateCount = notificationPulseUpdateCounts.getOrDefault(pulseKey, 0) + 1;
+            if (updateCount >= NOTIFICATION_PULSE_UPDATES) {
+                notificationPulseUpdateCounts.remove(pulseKey);
+                notificationPulseGenerations.remove(pulseKey);
+                refreshNotification();
+                return;
+            }
+            notificationPulseUpdateCounts.put(pulseKey, updateCount);
+            refreshNotification();
+            scheduleNotificationPulseStep(targetKey, channelId, pulseKey, pulseGeneration);
+        }, NOTIFICATION_PULSE_INTERVAL_MS);
+    }
+
+    private void cancelSessionNotificationPulse(String targetKey, String channelId) {
+        String pulseKey = notificationPulseKey(targetKey, channelId);
+        notificationPulseUpdateCounts.remove(pulseKey);
+        notificationPulseGenerations.remove(pulseKey);
+    }
+
+    private void cancelSessionNotificationPulses(String targetKey) {
+        String prefix = targetKey + "\n";
+        notificationPulseUpdateCounts.keySet().removeIf(key -> key.startsWith(prefix));
+        notificationPulseGenerations.keySet().removeIf(key -> key.startsWith(prefix));
+    }
+
+    private static String notificationPulseKey(String targetKey, String channelId) {
+        return targetKey + "\n" + channelId;
+    }
+
+    private static final class NotificationSessionAction {
+        final String targetKey;
+        final String channelId;
+        final String sessionName;
+
+        NotificationSessionAction(String targetKey, String channelId, String sessionName) {
+            this.targetKey = targetKey;
+            this.channelId = channelId;
+            this.sessionName = sessionName;
+        }
     }
 
     private void acquireWakeLock(long timeoutMs) {
@@ -975,6 +1144,7 @@ public class AndroidConnectionService extends Service {
                 System.currentTimeMillis());
             publishServerFrame(AndroidConnectionServiceServerFrameEvent.Kind.MUX_READY, payload);
             replayDesiredChannels();
+            refreshNotification();
         }
 
         private void handleChannelOpened(JSONObject payload) throws JSONException {
@@ -984,10 +1154,15 @@ public class AndroidConnectionService extends Service {
             }
             stateMachine.dispatch(AndroidConnectionServiceEvent.channelOpened(
                 generation, channelId, System.currentTimeMillis()), System.currentTimeMillis());
+            ChannelIntent channel = desiredChannels.get(channelId);
+            if (channel != null) {
+                channel.opened = true;
+            }
             publishEvent(AndroidConnectionServiceEventEnvelope.channelOpened(
                 target.targetKey, channelId, stateMachine.readSnapshot()));
             publishServerFrame(AndroidConnectionServiceServerFrameEvent.Kind.MUX_TARGET_MESSAGE,
                 payload);
+            refreshNotification();
         }
 
         private void handleChannelMessage(JSONObject payload) throws JSONException {
@@ -1013,7 +1188,13 @@ public class AndroidConnectionService extends Service {
             stateMachine.dispatch(AndroidConnectionServiceEvent.channelClosed(
                 generation, channelId, payload.optString("reason", "closed")),
                 System.currentTimeMillis());
+            ChannelIntent channel = desiredChannels.get(channelId);
+            if (channel != null) {
+                channel.opened = false;
+            }
+            cancelSessionNotificationPulse(target.targetKey, channelId);
             publishEvent(AndroidConnectionServiceEventEnvelope.channelClosed(target.targetKey, channelId));
+            refreshNotification();
         }
 
         private void handleMuxError(JSONObject payload) {
@@ -1100,6 +1281,7 @@ public class AndroidConnectionService extends Service {
                 return;
             }
             for (ChannelIntent channel : desiredChannels.values()) {
+                channel.opened = false;
                 sendChannelOpenFrame(channel.channelId, channel.sessionName, channel.options);
             }
         }
@@ -1300,12 +1482,19 @@ public class AndroidConnectionService extends Service {
             final String channelId;
             final String sessionName;
             final JSONObject options;
+            volatile boolean opened;
 
             ChannelIntent(String channelId, String sessionName, JSONObject options) {
                 this.channelId = channelId;
                 this.sessionName = sessionName;
                 this.options = options;
+                this.opened = false;
             }
+        }
+
+        boolean hasNotificationChannel(String channelId) {
+            ChannelIntent channel = desiredChannels.get(channelId);
+            return channel != null && channel.opened && isMuxReady();
         }
     }
 

@@ -20,4 +20,11 @@ describe('Android app update process truth', () => {
     expect(appUpdatePluginSource).not.toContain('Local Storage');
     expect(appUpdatePluginSource).not.toContain('localStorage');
   });
+
+  it('checks the downloaded APK metadata before handing it to the installer', () => {
+    expect(appUpdatePluginSource).toContain('expectedVersionCode');
+    expect(appUpdatePluginSource).toContain('expectedVersionName');
+    expect(appUpdatePluginSource).toContain('getInstalledVersionCode()');
+    expect(appUpdatePluginSource).toContain('升级包版本不高于当前已安装版本');
+  });
 });

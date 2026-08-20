@@ -32,8 +32,8 @@ const buildMeta = existsSync(buildMetaPath)
 
 const DEFAULT_APK_PATH = resolve(projectRoot, 'native/android/app/build/outputs/apk/debug/app-debug.apk');
 const DEFAULT_ROLLBACK_APK_PATH = resolve(projectRoot, 'native/android/app/build/outputs/apk/debug/app-rollback-debug.apk');
-const apkPath = process.argv[2] ? resolve(process.cwd(), process.argv[2]) : DEFAULT_APK_PATH;
-const rollbackApkPath = process.argv[3] ? resolve(process.cwd(), process.argv[3]) : DEFAULT_ROLLBACK_APK_PATH;
+const apkPath = process.argv[2] ? resolve(projectRoot, process.argv[2]) : DEFAULT_APK_PATH;
+const rollbackApkPath = process.argv[3] ? resolve(projectRoot, process.argv[3]) : DEFAULT_ROLLBACK_APK_PATH;
 const outputDir = resolve(projectRoot, 'update-dist');
 const releaseDistDir = resolve(projectRoot, 'release-dist');
 const daemonUpdatesDir = process.env.WTERM_UPDATES_DIR
@@ -80,6 +80,31 @@ const rollbackVersionCode = computeRollbackVersionCode(versionCode);
 const rollbackApkName = `zterm-${rollbackVersionName}.apk`;
 const publishedRollbackApkPath = resolve(outputDir, rollbackApkName);
 const releaseRollbackApkPath = resolve(releaseDistDir, rollbackApkName);
+
+const apkAnalyzer = process.env.APKANALYZER
+  || resolve(homedir(), 'Library/Android/sdk/cmdline-tools/latest/bin/apkanalyzer');
+
+function readApkVersion(path) {
+  return {
+    versionName: exec([apkAnalyzer, 'manifest', 'version-name', path]).trim(),
+    versionCode: Number.parseInt(exec([apkAnalyzer, 'manifest', 'version-code', path]).trim(), 10),
+  };
+}
+
+const normalApkVersion = readApkVersion(apkPath);
+const rollbackApkVersion = readApkVersion(rollbackApkPath);
+if (normalApkVersion.versionName !== versionName || normalApkVersion.versionCode !== versionCode) {
+  throw new Error(
+    `normal APK metadata mismatch: expected ${versionName}/${versionCode}, `
+      + `actual ${normalApkVersion.versionName}/${normalApkVersion.versionCode}`,
+  );
+}
+if (rollbackApkVersion.versionName !== rollbackVersionName || rollbackApkVersion.versionCode !== rollbackVersionCode) {
+  throw new Error(
+    `rollback APK metadata mismatch: expected ${rollbackVersionName}/${rollbackVersionCode}, `
+      + `actual ${rollbackApkVersion.versionName}/${rollbackApkVersion.versionCode}`,
+  );
+}
 
 copyFileSync(apkPath, targetApkPath);
 copyFileSync(apkPath, latestAliasPath);

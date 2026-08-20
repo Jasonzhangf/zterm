@@ -62,6 +62,7 @@ interface AndroidConnectionServiceNativePlugin {
   sendChannelMessage(options: { targetKey: string; channelId: string; message: Record<string, unknown> }): Promise<{ ok: boolean }>;
   sendChannelBinary(options: { targetKey: string; channelId: string; dataBase64: string }): Promise<{ ok: boolean }>;
   closeChannel(options: { targetKey: string; channelId: string; reason: string }): Promise<{ ok: boolean }>;
+  pulseSessionNotification(options: { targetKey: string; channelId: string }): Promise<{ ok: boolean }>;
   readSnapshot(options: { targetKey: string }): Promise<AndroidConnectionServiceSnapshot>;
   addListener<EventName extends keyof AndroidConnectionServiceListenerMap>(
     eventName: EventName,
@@ -80,6 +81,7 @@ const AndroidConnectionService = registerPlugin<AndroidConnectionServiceNativePl
       sendChannelMessage: async () => ({ ok: false }),
       sendChannelBinary: async () => ({ ok: false }),
       closeChannel: async () => ({ ok: false }),
+      pulseSessionNotification: async () => ({ ok: false }),
       readSnapshot: async () => ({
         state: 'idle',
         generation: null,
@@ -119,6 +121,8 @@ export function sendAndroidConnectionCommand(command: AndroidConnectionCommand):
       return AndroidConnectionService.sendChannelBinary(parsed);
     case 'close-channel':
       return AndroidConnectionService.closeChannel(parsed);
+    case 'pulse-session-notification':
+      return AndroidConnectionService.pulseSessionNotification(parsed);
   }
 }
 

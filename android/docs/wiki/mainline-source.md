@@ -27,6 +27,13 @@ flowchart TD
   AndroidConnectionServiceOut02ServerFrame --> AndroidConnectionServiceRuntime
   AndroidConnectionServiceRuntime --> SessionContext
   AndroidConnectionServiceOut03CommandRejected --> AndroidConnectionServiceError01CommandRejected["AndroidConnectionServiceError01CommandRejected"]
+  AndroidConnectionService --> MainActivity["native/android/app/src/main/java/com/zterm/android/MainActivity.java"]
+  MainActivity --> App
+  App --> AndroidNotificationDeepLinkParser["src/lib/android-notification-deep-link.ts#parseAndroidNotificationDeepLink"]
+  AndroidNotificationDeepLinkParser --> SessionOpenOwner["src/hooks/useSessionOpenActions.ts#useSessionOpenActions"]
+  SessionActivityNotifier["src/lib/session-activity-notify.ts#createSessionActivityNotifier"] --> AndroidConnectionServicePlugin
+  AndroidConnectionServiceIn04PulseSessionNotification["AndroidConnectionServiceIn04PulseSessionNotification"] --> AndroidConnectionServicePlugin
+  AndroidConnectionService --> NotificationProjectionOut01PulseScheduled["AndroidConnectionService#pulseSessionNotification"]
   App --> CompositionRoot["src/lib/composition-root/client-composition-root.ts#ClientCompositionRoot"]
   CompositionRoot --> PluginHost
   App --> ControlCenter["src/lib/control-center/client-control-center.ts#ClientControlCenter"]

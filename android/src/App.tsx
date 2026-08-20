@@ -42,6 +42,8 @@ import { projectHomeSavedConnections } from './lib/home-connection-projection';
 import type { Host, TerminalWidthMode } from './lib/types';
 import { useBackgroundLiveSessionHandoff } from './hooks/useOpenTabLifecycleEffects';
 import { useAttachmentNotifications } from './hooks/useAttachmentNotifications';
+import { buildTransportTargetKey } from './lib/session-transport-runtime';
+import { parseAndroidNotificationDeepLink } from './lib/android-notification-deep-link';
 import { createNetworkIdentityRuntime } from './lib/network-identity';
 import { readNativeNetworkIdentitySnapshot } from './plugins/NetworkIdentityPlugin';
 import { projectNetworkIdentitySnapshotError, type NetworkIdentityRuntime } from './lib/network-identity';
@@ -344,41 +346,78 @@ export function AppContent({
   useEffect(() => {
     let disposed = false;
     let listenerHandle: { remove: () => Promise<void> | void } | null = null;
-    const listenerResult = CapacitorApp.addListener('appUrlOpen', (event) => {
-        const url = typeof event.url === 'string' ? event.url : '';
-        if (!url.startsWith('zterm://connection/import') && !url.startsWith('https://zterm.app/connection/import')) {
-          return;
-        }
-        const result = handleImportConnectionShareLink(url);
-        if (!result.ok) {
+    const handleAppUrl = (url: unknown) => {
+      if (typeof url !== 'string' || !url.trim()) {
+        return;
+      }
+      const deepLink = parseAndroidNotificationDeepLink(url);
+      if (deepLink.kind === 'session-open') {
+        openSessionDeepLinkRef.current?.(
+          deepLink.value.targetKey,
+          deepLink.value.channelId,
+          deepLink.value.sessionName,
+        );
+        return;
+      }
+      if (deepLink.kind === 'invalid') {
           setAppDialog({
             tone: 'error',
-            title: '导入失败',
-            message: result.error,
+            title: '会话入口无效',
+            message: deepLink.message,
           });
           return;
-        }
+      }
+      if (!url.startsWith('zterm://connection/import') && !url.startsWith('https://zterm.app/connection/import')) {
+        return;
+      }
+      const result = handleImportConnectionShareLink(url);
+      if (!result.ok) {
         setAppDialog({
-          tone: 'success',
-          title: '导入成功',
-          message: `已导入连接：${result.name}`,
+          tone: 'error',
+          title: '导入失败',
+          message: result.error,
         });
+        return;
+      }
+      setAppDialog({
+        tone: 'success',
+        title: '导入成功',
+        message: `已导入连接：${result.name}`,
       });
+    };
+    const listenerResult = CapacitorApp.addListener('appUrlOpen', (event) => {
+      handleAppUrl(event.url);
+    });
     void Promise.resolve(listenerResult).then((handle) => {
-        if (!handle) {
-          return;
-        }
-        if (disposed) {
-          void handle.remove();
-          return;
-        }
-        listenerHandle = handle;
-      }).catch((error) => {
+      if (!handle) {
+        return;
+      }
+      if (disposed) {
+        void handle.remove();
+        return;
+      }
+      listenerHandle = handle;
+    }).catch((error) => {
       setAppDialog({
         tone: 'error',
-        title: '连接导入失败',
+        title: '会话入口监听失败',
         message: error instanceof Error ? error.message : String(error),
       });
+    });
+    void (typeof CapacitorApp.getLaunchUrl === 'function'
+      ? CapacitorApp.getLaunchUrl()
+      : Promise.resolve({ url: undefined })).then((launch) => {
+      if (!disposed && launch?.url) {
+        handleAppUrl(launch.url);
+      }
+    }).catch((error) => {
+      if (!disposed) {
+        setAppDialog({
+          tone: 'error',
+          title: '读取启动入口失败',
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
     });
     return () => {
       disposed = true;
@@ -393,6 +432,7 @@ export function AppContent({
   // a window event (same pattern as SESSION_STATUS_EVENT). Tapping a
   // session-stopped notification jumps straight into that tmux session.
   const handleStoppedSessionNotificationRef = useRef<((sessionName: string) => void) | null>(null);
+  const openSessionDeepLinkRef = useRef<((targetKey: string, channelId: string, sessionName: string) => void) | null>(null);
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) {
       return;
@@ -656,6 +696,41 @@ export function AppContent({
     if (recentHost) {
       handleOpenSingleTmuxSession(buildBridgeTargetFromHost(recentHost), sessionName);
     }
+  };
+
+  openSessionDeepLinkRef.current = (targetKey, channelId, sessionName) => {
+    if (!targetKey.trim() || !sessionName.trim()) {
+      return;
+    }
+    const buildKey = (candidate: Pick<Host, 'bridgeHost' | 'bridgePort' | 'authToken'> & Partial<Pick<Host,
+      'daemonHostId' | 'relayHostId' | 'relayDeviceId' | 'tailscaleHost' | 'ipv6Host' | 'ipv4Host'
+      | 'signalUrl' | 'relayEndpointCandidates' | 'transportMode'>>) => buildTransportTargetKey(candidate);
+    const matchingSession = [...state.sessions]
+      .sort((left, right) => (
+        right.id === state.activeSessionId ? 1 : 0
+      ) - (left.id === state.activeSessionId ? 1 : 0))
+      .find((candidate) => (
+        candidate.state !== 'closed'
+        && candidate.sessionName === sessionName.trim()
+        && buildKey(candidate) === targetKey.trim()
+      ));
+    if (matchingSession) {
+      handleSwitchSessionWithHistory(matchingSession.id);
+      ensureTerminalPageVisible();
+      return;
+    }
+    const matchingHost = hosts.find((host) => buildKey(host) === targetKey.trim());
+    if (matchingHost) {
+      handleOpenSingleTmuxSession(buildBridgeTargetFromHost(matchingHost), sessionName.trim());
+      return;
+    }
+    setAppDialog({
+      tone: 'warning',
+      title: '会话不可用',
+      message: channelId.trim()
+        ? `未找到目标 ${targetKey.trim()} 的会话 ${sessionName.trim()}。`
+        : `未找到目标 ${targetKey.trim()} 的会话。`,
+    });
   };
 
   const handleResumeHomeSession = useCallback((sessionId: string) => {

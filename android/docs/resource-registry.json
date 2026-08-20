@@ -3892,6 +3892,52 @@
         "docs/testing/connection-service-owner-test-design.md",
         "docs/function-map.md"
       ]
+    },
+    {
+      "resource_id": "resource.android_notification_projection",
+      "resource_type": "projection_resource",
+      "status": "active",
+      "identity": "Bounded Android foreground-service notification projection of connected terminal channel actions and target-scoped activity pulse state.",
+      "owner_feature": "client.android_connection_service",
+      "truth_store": "native/android/app/src/main/java/com/zterm/android/AndroidConnectionService.java notification projection",
+      "allowed_operations": [
+        "project_connected_channel_action",
+        "project_stable_session_deep_link",
+        "pulse_matching_session_action",
+        "remove_closed_or_stale_action"
+      ],
+      "direct_relations": [
+        "resource.android_connection_service",
+        "resource.client_connection_service_ipc",
+        "resource.ui_projection"
+      ],
+      "indirect_relations": [
+        "resource.terminal_channel",
+        "resource.active_session"
+      ],
+      "via_resources": [
+        "resource.android_connection_service",
+        "resource.client_connection_service_ipc"
+      ],
+      "forbidden_direct_relations": [
+        "resource.mirror_store",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.tmux_session",
+        "resource.backend_session"
+      ],
+      "required_gates": [
+        "docs/testing/android-notification-session-actions-test-design.md",
+        "src/lib/feature-registry-truth.test.ts",
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/edge-registry-truth.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/architecture.md",
+        "docs/resource-map.md",
+        "docs/function-map.md",
+        "docs/testing/android-notification-session-actions-test-design.md"
+      ]
     }
   ],
   "required_indirect_relations": [

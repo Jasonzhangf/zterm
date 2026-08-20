@@ -4,6 +4,8 @@ export interface DownloadAndInstallOptions {
   url: string;
   sha256?: string;
   expectedPackageName?: string;
+  expectedVersionCode?: number;
+  expectedVersionName?: string;
 }
 
 export interface RollbackBackupInfo {
@@ -20,6 +22,8 @@ export interface AppUpdatePlugin {
   downloadAndInstall(options: DownloadAndInstallOptions): Promise<{
     filePath: string;
     sha256: string;
+    versionCode?: number;
+    versionName?: string;
     packageName?: string;
   }>;
   backupCurrentApk(): Promise<RollbackBackupInfo>;

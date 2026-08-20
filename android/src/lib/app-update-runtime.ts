@@ -332,6 +332,8 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
           url: apkUrl,
           sha256: entry.sha256,
           expectedPackageName: deps.packageName,
+          expectedVersionCode: entry.versionCode,
+          expectedVersionName: entry.versionName,
         });
 
         setSnapshot((current) => ({
@@ -589,6 +591,8 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
           url: installTarget.apkUrl,
           sha256: installTarget.sha256,
           expectedPackageName: deps.packageName,
+          expectedVersionCode: installTarget.versionCode,
+          expectedVersionName: installTarget.versionName,
         });
 
         const nextPreferences = normalizeAppUpdatePreferences({

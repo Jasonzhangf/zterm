@@ -1,8 +1,6 @@
 import { buildEmptyScheduleState } from '@zterm/shared';
 import { DEFAULT_TERMINAL_CACHE_LINES, resolveTerminalRequestWindowLines } from '../lib/mobile-config';
 import type { BridgeSettings } from '../lib/bridge-settings';
-import { Capacitor } from '@capacitor/core';
-import { openAndroidConnectionServiceTransportSocket } from '../lib/android-connection-service-factory';
 import { resolveTraversalConfigFromHost } from '../lib/traversal/config';
 import { createClientDaemonTraversalSocket } from '../lib/client-daemon-connection';
 import {
@@ -398,12 +396,6 @@ export function buildTraversalSocketForHostRuntime(options: {
    *  across WiFi/cellular/VPN/IP changes. */
   networkIdentity?: NetworkIdentityRuntime;
 }) {
-  if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
-    // Android: physical connection is owned by AndroidConnectionService (native).
-    // JS layer receives a projected socket. No JS WebSocket, heartbeat, or reconnect.
-    return openAndroidConnectionServiceTransportSocket(options.host, options.transportRole || 'session');
-  }
-
   const openConfirmedTransport = () => {
     const resolvedHost = mergeHostWithClientControlDirectory(
       options.host,

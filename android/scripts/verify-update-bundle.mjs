@@ -3,10 +3,11 @@ import { execFileSync } from 'child_process';
 import { existsSync, readFileSync, statSync } from 'fs';
 import { basename, resolve } from 'path';
 import { homedir } from 'os';
-import { computeNormalVersionCode } from './app-version.mjs';
+import { buildDisplayVersion, computeNormalVersionCode } from './app-version.mjs';
 
 const projectRoot = resolve(import.meta.dirname, '..');
 const updateDistDir = resolve(projectRoot, 'update-dist');
+const releaseDistDir = resolve(projectRoot, 'release-dist');
 const daemonUpdatesDir = process.env.WTERM_UPDATES_DIR
   ? resolve(process.env.WTERM_UPDATES_DIR)
   : resolve(homedir(), '.zterm/updates');
@@ -43,8 +44,16 @@ function readApkVersion(path) {
 
 const updateManifestPath = requireFile(resolve(updateDistDir, 'latest.json'));
 const daemonManifestPath = requireFile(resolve(daemonUpdatesDir, 'latest.json'));
+const releaseManifestPath = requireFile(resolve(releaseDistDir, 'latest.json'));
+const buildMetaPath = requireFile(resolve(projectRoot, '.build-meta.json'));
 const updateManifest = readJson(updateManifestPath);
 const daemonManifest = readJson(daemonManifestPath);
+const releaseManifest = readJson(releaseManifestPath);
+const buildMeta = readJson(buildMetaPath);
+const packageJson = readJson(resolve(projectRoot, 'package.json'));
+const expectedBuildNumber = Number(buildMeta.buildNumber);
+const expectedVersionName = buildDisplayVersion(packageJson.version, expectedBuildNumber);
+const expectedVersionCode = computeNormalVersionCode(expectedBuildNumber);
 
 for (const key of ['versionName', 'versionCode', 'apkUrl', 'sha256', 'size']) {
   if (!updateManifest[key]) {
@@ -68,12 +77,38 @@ const previousRollbackPath = previousRollback
   ? requireFile(resolve(updateDistDir, basename(previousRollback.apkUrl)))
   : null;
 const previousRollbackVersion = previousRollbackPath ? readApkVersion(previousRollbackPath) : null;
+let apkWebAssetsError = null;
+try {
+  execFileSync(
+    process.execPath,
+    [
+      resolve(projectRoot, 'scripts', 'verify-web-assets-version.mjs'),
+      updateApkPath,
+      String(updateManifest.buildNumber),
+    ],
+    { encoding: 'utf8', stdio: 'pipe' },
+  );
+} catch (error) {
+  apkWebAssetsError = error instanceof Error ? error.message : String(error);
+}
 
 const checks = {
   manifestVersionAligned:
     updateManifest.versionName === daemonManifest.versionName
     && updateManifest.versionCode === daemonManifest.versionCode
     && basename(updateManifest.apkUrl) === basename(daemonManifest.apkUrl),
+  buildMetaMatchesManifest:
+    Number.isSafeInteger(expectedBuildNumber)
+    && updateManifest.buildNumber === expectedBuildNumber,
+  manifestMatchesContract:
+    updateManifest.versionName === expectedVersionName
+    && updateManifest.versionCode === expectedVersionCode,
+  releaseManifestMatchesUpdate:
+    releaseManifest.versionName === updateManifest.versionName
+    && releaseManifest.versionCode === updateManifest.versionCode
+    && basename(releaseManifest.apkUrl) === basename(updateManifest.apkUrl)
+    && releaseManifest.sha256 === updateManifest.sha256,
+  apkWebAssetsMatchManifest: apkWebAssetsError === null,
   updateApkShaMatchesManifest: sha256(updateApkPath) === updateManifest.sha256,
   daemonApkShaMatchesManifest: sha256(daemonApkPath) === daemonManifest.sha256,
   updateAndDaemonApkShaMatch: sha256(updateApkPath) === sha256(daemonApkPath),
@@ -110,6 +145,7 @@ const result = {
   updateApkPath,
   daemonApkPath,
   checks,
+  apkWebAssetsError,
 };
 
 console.log(JSON.stringify(result, null, 2));

@@ -70,6 +70,11 @@ describe('Android connection service control contract', () => {
         channelId: 'channel-1',
         reason: 'user-close',
       },
+      {
+        type: 'pulse-session-notification',
+        targetKey: 'daemon:mac-studio',
+        channelId: 'channel-1',
+      },
     ];
 
     for (const command of commands) {

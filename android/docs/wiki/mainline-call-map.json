@@ -633,6 +633,26 @@
         {
           "id": "AndroidConnectionServiceError01CommandRejected",
           "label": "AndroidConnectionServiceError01CommandRejected"
+        },
+        {
+          "id": "SessionActivityNotifier",
+          "label": "src/lib/session-activity-notify.ts#createSessionActivityNotifier"
+        },
+        {
+          "id": "AndroidNotificationDeepLinkParser",
+          "label": "src/lib/android-notification-deep-link.ts#parseAndroidNotificationDeepLink"
+        },
+        {
+          "id": "MainActivity",
+          "label": "native/android/app/src/main/java/com/zterm/android/MainActivity.java"
+        },
+        {
+          "id": "AndroidConnectionServiceIn04PulseSessionNotification",
+          "label": "AndroidConnectionServiceIn04PulseSessionNotification"
+        },
+        {
+          "id": "NotificationProjectionOut01PulseScheduled",
+          "label": "AndroidConnectionService#pulseSessionNotification"
         }
       ],
       "edges": [
@@ -3325,6 +3345,97 @@
           "resource_to": "resource.client_connection_service_ipc",
           "via_resources": [],
           "relation_status": "direct"
+        },
+        {
+          "from": "SessionActivityNotifier",
+          "to": "AndroidConnectionServicePlugin",
+          "owner_feature": "client.android_notification_sessions",
+          "semantic_input": "daemon session-activity fact resolved to the matching connected target/channel",
+          "semantic_output": "typed pulse-session-notification command",
+          "status": "anchored",
+          "edge_id": "android_mainline:SessionActivityNotifier->AndroidConnectionServicePlugin",
+          "resource_from": "resource.session_idle_facts",
+          "resource_to": "resource.client_connection_service_ipc",
+          "via_resources": ["resource.android_notification_projection"],
+          "relation_status": "via"
+        },
+        {
+          "from": "AndroidConnectionServiceIn04PulseSessionNotification",
+          "to": "AndroidConnectionServicePlugin",
+          "owner_feature": "client.android_notification_sessions",
+          "semantic_input": "session notification pulse intent",
+          "semantic_output": "typed native IPC command",
+          "status": "anchored",
+          "edge_id": "android_mainline:AndroidConnectionServiceIn04PulseSessionNotification->AndroidConnectionServicePlugin",
+          "resource_from": "resource.android_notification_projection",
+          "resource_to": "resource.client_connection_service_ipc",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "AndroidConnectionService",
+          "to": "MainActivity",
+          "owner_feature": "client.android_notification_sessions",
+          "semantic_input": "session action PendingIntent with targetKey/channelId/sessionName",
+          "semantic_output": "warm or cold app URL entry",
+          "status": "anchored",
+          "edge_id": "android_mainline:AndroidConnectionService->MainActivity",
+          "resource_from": "resource.android_notification_projection",
+          "resource_to": "resource.ui_projection",
+          "via_resources": ["resource.client_connection_service_ipc"],
+          "relation_status": "via"
+        },
+        {
+          "from": "MainActivity",
+          "to": "App",
+          "owner_feature": "client.android_notification_sessions",
+          "semantic_input": "Capacitor appUrlOpen or launch URL",
+          "semantic_output": "single App-owned URL routing path",
+          "status": "anchored",
+          "edge_id": "android_mainline:MainActivity->App",
+          "resource_from": "resource.ui_projection",
+          "resource_to": "resource.ui_projection",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "App",
+          "to": "AndroidNotificationDeepLinkParser",
+          "owner_feature": "client.android_notification_sessions",
+          "semantic_input": "untrusted notification URL",
+          "semantic_output": "validated session-open intent or explicit invalid-url error",
+          "status": "anchored",
+          "edge_id": "android_mainline:App->AndroidNotificationDeepLinkParser",
+          "resource_from": "resource.ui_projection",
+          "resource_to": "resource.android_notification_projection",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "AndroidNotificationDeepLinkParser",
+          "to": "SessionOpenOwner",
+          "owner_feature": "client.android_notification_sessions",
+          "semantic_input": "validated target/channel/session identity",
+          "semantic_output": "existing-session switch or explicit session-open intent",
+          "status": "anchored",
+          "edge_id": "android_mainline:AndroidNotificationDeepLinkParser->SessionOpenOwner",
+          "resource_from": "resource.android_notification_projection",
+          "resource_to": "resource.active_session",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "App",
+          "to": "SessionOpenOwner",
+          "owner_feature": "client.android_notification_sessions",
+          "semantic_input": "validated session notification intent",
+          "semantic_output": "existing session switch or explicit session open",
+          "status": "anchored",
+          "edge_id": "android_mainline:App->SessionOpenOwner",
+          "resource_from": "resource.ui_projection",
+          "resource_to": "resource.active_session",
+          "via_resources": [],
+          "relation_status": "observer"
         }
       ]
     },

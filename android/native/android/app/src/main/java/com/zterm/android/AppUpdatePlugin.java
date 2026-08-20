@@ -116,6 +116,8 @@ public class AppUpdatePlugin extends Plugin {
         String url = call.getString("url", "").trim();
         String sha256 = call.getString("sha256", "").trim().toLowerCase(Locale.US);
         String expectedPackageName = call.getString("expectedPackageName", "").trim();
+        long expectedVersionCode = call.getLong("expectedVersionCode", -1L);
+        String expectedVersionName = call.getString("expectedVersionName", "").trim();
 
         if (url.isEmpty()) {
             call.reject("回退 APK URL 不能为空");
@@ -142,6 +144,17 @@ public class AppUpdatePlugin extends Plugin {
                 String resolvedVersionName = packageInfo.versionName != null
                     ? packageInfo.versionName
                     : String.valueOf(resolvedVersionCode);
+
+                if (expectedVersionCode > 0 && expectedVersionCode != resolvedVersionCode) {
+                    throw new IllegalStateException(
+                        "回退 APK versionCode 不匹配：期望 " + expectedVersionCode
+                            + " 实际 " + resolvedVersionCode);
+                }
+                if (!expectedVersionName.isEmpty() && !expectedVersionName.equals(resolvedVersionName)) {
+                    throw new IllegalStateException(
+                        "回退 APK versionName 不匹配：期望 " + expectedVersionName
+                            + " 实际 " + resolvedVersionName);
+                }
 
                 if (!canInstallPackages()) {
                     getActivity().runOnUiThread(() -> {
@@ -205,6 +218,8 @@ public class AppUpdatePlugin extends Plugin {
         String url = call.getString("url", "").trim();
         String sha256 = call.getString("sha256", "").trim().toLowerCase(Locale.US);
         String expectedPackageName = call.getString("expectedPackageName", "").trim();
+        long expectedVersionCode = call.getLong("expectedVersionCode", -1L);
+        String expectedVersionName = call.getString("expectedVersionName", "").trim();
 
         if (url.isEmpty()) {
             call.reject("升级包 URL 不能为空");
@@ -219,6 +234,36 @@ public class AppUpdatePlugin extends Plugin {
 
                 if (!expectedPackageName.isEmpty() && !expectedPackageName.equals(resolvedPackageName)) {
                     throw new IllegalStateException("升级包包名校验失败");
+                }
+
+                PackageInfo packageInfo = readPackageArchiveInfo(targetFile);
+                long resolvedVersionCode = packageInfo != null
+                    ? (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+                        ? packageInfo.getLongVersionCode()
+                        : packageInfo.versionCode)
+                    : -1L;
+                String resolvedVersionName = packageInfo != null && packageInfo.versionName != null
+                    ? packageInfo.versionName
+                    : String.valueOf(resolvedVersionCode);
+
+                if (expectedVersionCode > 0 && expectedVersionCode != resolvedVersionCode) {
+                    throw new IllegalStateException(
+                        "升级包 versionCode 不匹配：期望 " + expectedVersionCode
+                            + " 实际 " + resolvedVersionCode
+                            + "（请勿重复安装旧版本，升级清单可能已变更）");
+                }
+                if (!expectedVersionName.isEmpty() && !expectedVersionName.equals(resolvedVersionName)) {
+                    throw new IllegalStateException(
+                        "升级包 versionName 不匹配：期望 " + expectedVersionName
+                            + " 实际 " + resolvedVersionName);
+                }
+
+                long installedVersionCode = getInstalledVersionCode();
+                if (resolvedVersionCode <= installedVersionCode) {
+                    throw new IllegalStateException(
+                        "升级包版本不高于当前已安装版本：当前 " + installedVersionCode
+                            + " 升级包 " + resolvedVersionCode
+                            + "（升级清单或 APK 元信息不一致，请勿使用旧包覆盖）");
                 }
 
                 if (!canInstallPackages()) {
@@ -243,6 +288,8 @@ public class AppUpdatePlugin extends Plugin {
                         JSObject result = new JSObject();
                         result.put("filePath", finalTargetFile.getAbsolutePath());
                         result.put("sha256", computeSha256(finalTargetFile));
+                        result.put("versionCode", resolvedVersionCode);
+                        result.put("versionName", resolvedVersionName);
                         result.put("packageName", resolvedPackageName);
                         call.resolve(result);
                     } catch (Exception error) {
@@ -517,6 +564,26 @@ public class AppUpdatePlugin extends Plugin {
         }
         //noinspection deprecation
         return packageManager.getPackageArchiveInfo(apkFile.getAbsolutePath(), 0);
+    }
+
+    private long getInstalledVersionCode() throws Exception {
+        PackageManager packageManager = getContext().getPackageManager();
+        PackageInfo packageInfo;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            packageInfo = packageManager.getPackageInfo(
+                getContext().getPackageName(),
+                PackageManager.PackageInfoFlags.of(0)
+            );
+        } else {
+            //noinspection deprecation
+            packageInfo = packageManager.getPackageInfo(getContext().getPackageName(), 0);
+        }
+        if (packageInfo == null) {
+            throw new IllegalStateException("无法读取当前已安装版本");
+        }
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+            ? packageInfo.getLongVersionCode()
+            : packageInfo.versionCode;
     }
 
     private JSObject resolveRollbackApkBaseInfo() {

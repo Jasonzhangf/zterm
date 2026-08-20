@@ -337,6 +337,8 @@ describe('app-update-runtime', () => {
       url: 'https://stale.example.com/zterm-0.1.1.1493.apk',
       sha256: 'abc123',
       expectedPackageName: 'com.zterm.android',
+      expectedVersionCode: 1011493,
+      expectedVersionName: '0.1.1.1493',
     });
   });
 

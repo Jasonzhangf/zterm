@@ -111,6 +111,8 @@
         "src/lib/session-attachment-fetch-runtime.ts",
         "src/lib/notification-helper.ts",
         "src/lib/session-activity-notify.ts",
+        "src/lib/android-notification-deep-link.ts",
+        "src/lib/android-notification-deep-link.test.ts",
         "src/components/terminal/AttachmentDrawer.tsx",
         "src/components/terminal/RenameDialog.tsx",
         "src/components/terminal/ZtermDialog.tsx",
@@ -3307,7 +3309,9 @@
       "parent_module_id": "client.runtime",
       "owner_feature": "client.android_connection_service",
       "responsibility": "Sole Android native owner of the physical WebSocket transport, route auth, mux handshake, heartbeat, network-generation validation, reconnect/backoff, and desired route policy. UI never owns transport, heartbeat, or reconnect. (Slice status: design until native transport ownership is installed and verified.)",
-      "owned_resources": [],
+      "owned_resources": [
+        "resource.android_notification_projection"
+      ],
       "consumed_resources": [],
       "pending_resources": [
         "resource.android_connection_service",
@@ -3334,7 +3338,8 @@
         "docs/goals/connection-service-owner-migration-plan.md",
         "docs/testing/connection-service-owner-test-design.md",
         "docs/architecture.md",
-        "docs/resource-map.md"
+        "docs/resource-map.md",
+        "docs/testing/android-notification-session-actions-test-design.md"
       ],
       "required_gates": [
         "src/lib/module-registry-truth.test.ts",
@@ -3342,7 +3347,7 @@
         "src/lib/resource-registry-truth.test.ts",
         "docs/testing/connection-service-owner-test-design.md"
       ],
-      "status": "design",
+      "status": "active",
       "owned_paths": [
         "src/lib/android-connection-service-commands.ts",
         "src/lib/android-connection-service-snapshot.ts",
@@ -3351,7 +3356,9 @@
         "src/plugins/AndroidConnectionServicePlugin.ts",
         "src/contexts/android-connection-service-runtime.ts",
         "native/android/app/src/main/java/com/zterm/android/AndroidConnectionService.java",
-        "native/android/app/src/main/java/com/zterm/android/AndroidConnectionServicePlugin.java"
+        "native/android/app/src/main/java/com/zterm/android/AndroidConnectionServicePlugin.java",
+        "native/android/app/src/main/java/com/zterm/android/AndroidConnectionCommand.java",
+        "docs/testing/android-notification-session-actions-test-design.md"
       ]
     }
   ]

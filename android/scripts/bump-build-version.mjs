@@ -1,7 +1,8 @@
 import { existsSync, readFileSync, writeFileSync } from 'fs';
-import { resolve } from 'path';
+import { dirname, resolve } from 'path';
+import { fileURLToPath } from 'url';
 
-const BUILD_META_PATH = resolve(process.cwd(), '.build-meta.json');
+const BUILD_META_PATH = resolve(dirname(fileURLToPath(import.meta.url)), '..', '.build-meta.json');
 const DEFAULT_BUILD_NUMBER = 1000;
 
 function readBuildMeta() {

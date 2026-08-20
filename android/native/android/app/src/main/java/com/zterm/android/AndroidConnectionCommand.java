@@ -11,7 +11,7 @@ import org.json.JSONObject;
  * through this surface — those data classes own their own channels.
  */
 public final class AndroidConnectionCommand {
-    public enum Type { SET_ROUTE_POLICY, BIND_TARGET, RELEASE_TARGET, OPEN_CHANNEL, CHANNEL_MESSAGE, CHANNEL_BINARY, CLOSE_CHANNEL }
+    public enum Type { SET_ROUTE_POLICY, BIND_TARGET, RELEASE_TARGET, OPEN_CHANNEL, CHANNEL_MESSAGE, CHANNEL_BINARY, CLOSE_CHANNEL, PULSE_SESSION_NOTIFICATION }
 
     public final Type type;
     public final AndroidConnectionServiceRoutePolicy policy;
@@ -82,6 +82,11 @@ public final class AndroidConnectionCommand {
             targetKey, null, channelId, null, null, null);
     }
 
+    public static AndroidConnectionCommand pulseSessionNotification(String targetKey, String channelId) {
+        return new AndroidConnectionCommand(Type.PULSE_SESSION_NOTIFICATION, null, null, null,
+            targetKey, null, channelId, null, null, null);
+    }
+
     public JSONObject toJson() throws JSONException {
         JSONObject json = new JSONObject();
         switch (type) {
@@ -123,6 +128,11 @@ public final class AndroidConnectionCommand {
                 json.put("channelId", channelId);
                 json.put("reason", reason);
                 break;
+            case PULSE_SESSION_NOTIFICATION:
+                json.put("type", "pulse-session-notification");
+                json.put("targetKey", targetKey);
+                json.put("channelId", channelId);
+                break;
         }
         return json;
     }
@@ -149,6 +159,8 @@ public final class AndroidConnectionCommand {
             case "close-channel":
                 return closeChannel(requireTargetKey(json), json.optString("channelId", ""),
                     json.optString("reason", "user-close"));
+            case "pulse-session-notification":
+                return pulseSessionNotification(requireTargetKey(json), json.optString("channelId", ""));
             default:
                 throw new IllegalArgumentException("unknown command type: " + wireType);
         }
@@ -180,6 +192,7 @@ public final class AndroidConnectionCommand {
             case CHANNEL_MESSAGE:
             case CHANNEL_BINARY:
             case CLOSE_CHANNEL:
+            case PULSE_SESSION_NOTIFICATION:
                 throw new IllegalStateException("channel command is not a state-machine event");
             default:
                 throw new IllegalStateException("unhandled command: " + type);

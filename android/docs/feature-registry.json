@@ -1416,6 +1416,7 @@
         "scripts/ensure-pnpm-install.sh",
         "scripts/app-version.mjs",
         "scripts/build-android-debug.sh",
+        "scripts/verify-web-assets-version.mjs",
         "scripts/prepare-update-bundle.mjs",
         "scripts/verify-update-bundle.mjs"
       ],
@@ -1426,6 +1427,8 @@
         "scripts/app-version.mjs",
         "scripts/app-version.test.ts",
         "scripts/build-android-debug.sh",
+        "scripts/verify-web-assets-version.mjs",
+        "scripts/verify-web-assets-version.test.mjs",
         "scripts/setup-android-java.sh",
         "scripts/ensure-pnpm-install.sh",
         "scripts/prepare-update-bundle.mjs",
@@ -1439,6 +1442,7 @@
       "forbidden_paths": [],
       "required_gates": [
         "scripts/app-version.test.ts",
+        "scripts/verify-web-assets-version.test.mjs",
         "scripts/verify-update-bundle.mjs",
         "src/lib/function-wiki-truth.test.ts",
         "src/lib/resource-registry-truth.test.ts"
@@ -3445,6 +3449,69 @@
         "docs/goals/connection-service-owner-migration-plan.md",
         "docs/testing/connection-service-owner-test-design.md",
         "docs/function-map.md"
+      ]
+    },
+    {
+      "feature_id": "client.android_notification_sessions",
+      "title": "Android connected-session notification actions",
+      "domain": "client-notification",
+      "owners": [
+        "native/android/app/src/main/java/com/zterm/android/AndroidConnectionService.java",
+        "src/lib/session-activity-notify.ts"
+      ],
+      "allowed_paths": [
+        "native/android/app/src/main/AndroidManifest.xml",
+        "native/android/app/src/main/java/com/zterm/android/AndroidConnectionCommand.java",
+        "native/android/app/src/main/java/com/zterm/android/AndroidConnectionService.java",
+        "native/android/app/src/main/java/com/zterm/android/AndroidConnectionServicePlugin.java",
+        "src/App.tsx",
+        "src/contexts/session-context-provider-core-assemblies.ts",
+        "src/lib/android-connection-service-commands.ts",
+        "src/lib/android-connection-service-commands.test.ts",
+        "src/lib/android-notification-deep-link.ts",
+        "src/lib/android-notification-deep-link.test.ts",
+        "src/lib/session-activity-notify.ts",
+        "src/lib/session-activity-notify.test.ts",
+        "src/plugins/AndroidConnectionServicePlugin.ts",
+        "src/plugins/AndroidConnectionServicePlugin.test.ts",
+        "docs/testing/android-notification-session-actions-test-design.md",
+        "docs/feature-registry.json",
+        "docs/function-map.md",
+        "docs/feature-gates.md",
+        "docs/resource-registry.json",
+        "docs/resource-map.md",
+        "docs/module-registry.json",
+        "docs/edge-registry.json",
+        "docs/wiki/mainline-call-map.json",
+        "docs/wiki/mainline-source.md",
+        ".appsdk/maps/function-map.json",
+        ".appsdk/maps/verification-map.json",
+        ".appsdk/maps/module-registry.json",
+        ".appsdk/maps/resource-map.json"
+      ],
+      "forbidden_paths": [
+        "src/server/",
+        "packages/shared/src/connection/",
+        "src/components/TerminalView.tsx"
+      ],
+      "required_gates": [
+        "docs/testing/android-notification-session-actions-test-design.md",
+        "src/lib/android-connection-service-commands.test.ts",
+        "src/lib/android-notification-deep-link.test.ts",
+        "src/plugins/AndroidConnectionServicePlugin.test.ts",
+        "src/lib/session-activity-notify.test.ts",
+        "src/lib/feature-registry-truth.test.ts",
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/module-import-graph-truth.test.ts"
+      ],
+      "truth_sources": [
+        "docs/architecture.md",
+        "docs/resource-registry.json",
+        "docs/resource-map.md",
+        "docs/function-map.md",
+        "docs/wiki/mainline-call-map.json",
+        "docs/testing/android-notification-session-actions-test-design.md"
       ]
     }
   ]

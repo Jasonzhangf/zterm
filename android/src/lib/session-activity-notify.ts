@@ -1,6 +1,16 @@
 import type { SessionActivity } from '@zterm/shared/protocol';
 import { scheduleNotification } from './notification-helper';
 
+export interface SessionActivityNotificationTarget {
+  targetKey: string;
+  channelId: string;
+}
+
+export interface SessionActivityNotifierOptions {
+  resolveTarget: (sessionName: string) => SessionActivityNotificationTarget | null;
+  pulseTarget: (target: SessionActivityNotificationTarget) => void;
+}
+
 /**
  * Session idle/stopped notification runtime (client side).
  *
@@ -32,7 +42,12 @@ interface SessionNotifyState {
   lastSeenActivityAt: number;
 }
 
-export function createSessionActivityNotifier(): SessionActivityNotifier {
+export function createSessionActivityNotifier(
+  options: SessionActivityNotifierOptions = {
+    resolveTarget: () => null,
+    pulseTarget: () => undefined,
+  },
+): SessionActivityNotifier {
   // sessionName -> per-session notification state
   const state = new Map<string, SessionNotifyState>();
 
@@ -60,6 +75,10 @@ export function createSessionActivityNotifier(): SessionActivityNotifier {
             body: `tmux 会话 ${activity.name} 已停止输出（可能任务结束或卡住）`,
             extra: { kind: 'session-stopped', sessionName: activity.name },
           });
+          const target = options.resolveTarget(activity.name);
+          if (target) {
+            options.pulseTarget(target);
+          }
         } else {
           // Already notified for this idle run — stay silent even if the
           // daemon keeps publishing stopped facts (no recovery update yet).
