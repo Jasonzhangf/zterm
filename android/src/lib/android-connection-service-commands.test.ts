@@ -70,6 +70,17 @@ describe('Android connection service control contract', () => {
         channelId: 'channel-1',
         reason: 'user-close',
       },
+      {
+        type: 'pulse-session-notification',
+        targetKey: 'daemon:mac-studio',
+        channelId: 'channel-1',
+      },
+      {
+        type: 'target-message',
+        targetKey: 'daemon:mac-studio',
+        requestId: 'request-1',
+        message: { type: 'list-sessions' },
+      },
     ];
 
     for (const command of commands) {
@@ -85,6 +96,10 @@ describe('Android connection service control contract', () => {
       type: 'release-target',
       reason: 'user-closed',
     })).toThrow(/release target/);
+    expect(() => parseAndroidConnectionCommand({
+      type: 'target-message',
+      targetKey: 'daemon:mac-studio',
+    })).toThrow(/target message command/);
   });
 
   it('keeps service control separate from terminal business payloads', () => {

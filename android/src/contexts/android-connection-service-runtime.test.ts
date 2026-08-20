@@ -16,6 +16,7 @@ const snapshot: AndroidConnectionServiceSnapshot = {
   lastActivityAt: 1000,
   nextRetryAt: null,
   error: null,
+  muxReadyPayload: { version: 1, daemonHostId: 'daemon-host' },
 };
 
 describe('Android connection service UI projection runtime', () => {

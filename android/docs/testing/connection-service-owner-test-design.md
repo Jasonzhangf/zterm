@@ -10,6 +10,8 @@ The migration must make `AndroidConnectionService` the sole owner of the physica
 
 WebRTC native ownership is out of scope. A WebRTC-only route must fail explicitly until a separate slice lands.
 
+The service projection carries the exact `mux-ready` payload and target generation. A late WebView listener replays the current healthy projection without opening a second physical transport or sending a JS mux hello.
+
 ## Required Gates
 
 1. `pnpm --dir android run test:feature-registry`
@@ -43,6 +45,7 @@ WebRTC native ownership is out of scope. A WebRTC-only route must fail explicitl
 - The only other mutating commands are typed `BindTarget` and `ReleaseTarget`.
 - `allowReconnectIfUnavailable`, `fingerprintChanged`, `notifyTargetNetworkSignal`, and UI lifecycle state are not accepted as service commands.
 - Snapshot/event values remain on the control/projection side-channel and never enter terminal body, `buffer-sync`, input, file, remote-window, or metadata payloads.
+- Target control frames preserve `requestId` and typed `message` through `target-message` IPC into native `mux-target-message`; malformed target commands reject explicitly.
 - The bridge schedules no JS heartbeat/reconnect timer and does not call `evaluateJavascript`.
 
 ### UI projection runtime

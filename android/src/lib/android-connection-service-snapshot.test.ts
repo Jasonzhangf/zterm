@@ -3,6 +3,7 @@ import {
   createAndroidConnectionServiceStateMachine,
   type AndroidConnectionServiceEvent,
 } from './android-connection-service-snapshot';
+import { buildTerminalMuxReady } from '@zterm/shared/protocol';
 
 const target = {
   targetKey: 'daemon:mac-studio',
@@ -10,6 +11,7 @@ const target = {
   bridgePort: 3333,
   authToken: 'token',
 };
+const muxReadyPayload = buildTerminalMuxReady({ daemonHostId: 'daemon-host' }).payload;
 
 function send(
   machine: ReturnType<typeof createAndroidConnectionServiceStateMachine>,
@@ -25,7 +27,7 @@ describe('Android connection service state machine', () => {
 
     expect(send(machine, { type: 'bind-target', target }).state).toBe('resolving-target');
     expect(send(machine, { type: 'transport-opening', generation: 'g1' }).state).toBe('connecting');
-    expect(send(machine, { type: 'mux-ready', generation: 'g1' }).state).toBe('mux-ready');
+    expect(send(machine, { type: 'mux-ready', generation: 'g1', muxReadyPayload }).state).toBe('mux-ready');
     expect(send(machine, { type: 'channel-opened', generation: 'g1', channelId: 'c1' }).state).toBe('channels-ready');
     expect(send(machine, { type: 'heartbeat-pong', generation: 'g1', at: 1100 }).state).toBe('healthy');
     expect(machine.readSnapshot().generation).toBe('g1');
@@ -35,7 +37,7 @@ describe('Android connection service state machine', () => {
     const machine = createAndroidConnectionServiceStateMachine({ now: () => 1000 });
     send(machine, { type: 'bind-target', target });
     send(machine, { type: 'transport-opening', generation: 'g1' });
-    send(machine, { type: 'mux-ready', generation: 'g1' });
+    send(machine, { type: 'mux-ready', generation: 'g1', muxReadyPayload });
     send(machine, { type: 'channel-opened', generation: 'g1', channelId: 'c1' });
     send(machine, { type: 'heartbeat-pong', generation: 'g1', at: 1100 });
 
@@ -99,11 +101,12 @@ describe('Android connection service state machine', () => {
     send(machine, { type: 'bind-target', target });
     send(machine, { type: 'transport-opening', generation: 'g1' });
     machine.detachProjection();
-    send(machine, { type: 'mux-ready', generation: 'g1' });
+    send(machine, { type: 'mux-ready', generation: 'g1', muxReadyPayload });
 
     expect(machine.attachProjection()).toMatchObject({
       state: 'mux-ready',
       generation: 'g1',
+      muxReadyPayload,
     });
   });
 });

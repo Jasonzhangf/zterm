@@ -35,6 +35,7 @@ export interface AndroidConnectionServiceErrorEvent {
 export interface AndroidConnectionServiceChannelOpenedEvent {
   kind: 'channel-opened';
   targetKey: string;
+  generation: string;
   channelId: string;
   snapshot: AndroidConnectionServiceSnapshot;
 }
@@ -42,6 +43,7 @@ export interface AndroidConnectionServiceChannelOpenedEvent {
 export interface AndroidConnectionServiceChannelClosedEvent {
   kind: 'channel-closed';
   targetKey: string;
+  generation: string;
   channelId: string;
 }
 
@@ -62,6 +64,8 @@ interface AndroidConnectionServiceNativePlugin {
   sendChannelMessage(options: { targetKey: string; channelId: string; message: Record<string, unknown> }): Promise<{ ok: boolean }>;
   sendChannelBinary(options: { targetKey: string; channelId: string; dataBase64: string }): Promise<{ ok: boolean }>;
   closeChannel(options: { targetKey: string; channelId: string; reason: string }): Promise<{ ok: boolean }>;
+  pulseSessionNotification(options: { targetKey: string; channelId: string }): Promise<{ ok: boolean }>;
+  sendTargetMessage(options: { targetKey: string; requestId?: string; message: Record<string, unknown> }): Promise<{ ok: boolean }>;
   readSnapshot(options: { targetKey: string }): Promise<AndroidConnectionServiceSnapshot>;
   addListener<EventName extends keyof AndroidConnectionServiceListenerMap>(
     eventName: EventName,
@@ -80,6 +84,8 @@ const AndroidConnectionService = registerPlugin<AndroidConnectionServiceNativePl
       sendChannelMessage: async () => ({ ok: false }),
       sendChannelBinary: async () => ({ ok: false }),
       closeChannel: async () => ({ ok: false }),
+      pulseSessionNotification: async () => ({ ok: false }),
+      sendTargetMessage: async () => ({ ok: false }),
       readSnapshot: async () => ({
         state: 'idle',
         generation: null,
@@ -90,6 +96,7 @@ const AndroidConnectionService = registerPlugin<AndroidConnectionServiceNativePl
         lastActivityAt: null,
         nextRetryAt: null,
         error: null,
+        muxReadyPayload: null,
       }),
       addListener: async () => ({ remove: async () => undefined }),
     }),
@@ -119,6 +126,10 @@ export function sendAndroidConnectionCommand(command: AndroidConnectionCommand):
       return AndroidConnectionService.sendChannelBinary(parsed);
     case 'close-channel':
       return AndroidConnectionService.closeChannel(parsed);
+    case 'target-message':
+      return AndroidConnectionService.sendTargetMessage(parsed);
+    case 'pulse-session-notification':
+      return AndroidConnectionService.pulseSessionNotification(parsed);
   }
 }
 

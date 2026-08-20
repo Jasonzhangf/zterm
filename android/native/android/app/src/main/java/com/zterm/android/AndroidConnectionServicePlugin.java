@@ -221,6 +221,26 @@ public final class AndroidConnectionServicePlugin extends Plugin {
     }
 
     @PluginMethod
+    public void sendTargetMessage(PluginCall call) {
+        String targetKey = call.getString("targetKey");
+        String requestId = call.getString("requestId", "");
+        JSObject messageBody = call.getObject("message");
+        if (targetKey == null || targetKey.trim().isEmpty() || messageBody == null) {
+            call.reject("targetKey and message are required");
+            return;
+        }
+        try {
+            sendCommand(AndroidConnectionCommand.targetMessage(
+                targetKey.trim(),
+                requestId == null ? "" : requestId.trim(),
+                new JSONObject(messageBody.toString())));
+            call.resolve(ok());
+        } catch (JSONException error) {
+            call.reject("invalid target message", error);
+        }
+    }
+
+    @PluginMethod
     public void readSnapshot(PluginCall call) {
         String targetKey = call.getString("targetKey");
         if (targetKey == null || targetKey.trim().isEmpty()) {

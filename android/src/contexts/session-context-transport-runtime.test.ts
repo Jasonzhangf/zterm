@@ -561,6 +561,48 @@ describe('handleTargetMuxServerFrameRuntime', () => {
 });
 
 describe('bindTargetMuxTransportSocketLifecycleRuntime', () => {
+  it('does not send JS mux hello or start JS heartbeat for a service-owned socket', () => {
+    const ws = {
+      readyState: WebSocket.OPEN,
+      transportOwnership: 'service',
+      onopen: null,
+      onmessage: null,
+      onerror: null,
+      onclose: null,
+      getDiagnostics: () => ({ reason: '' }),
+    } as any;
+    const sendSocketPayload = vi.fn();
+    const startSocketHeartbeat = vi.fn();
+    const startMuxHandshakeTimeout = vi.fn();
+
+    bindTargetMuxTransportSocketLifecycleRuntime({
+      sessionId: 'session-anchor',
+      targetKey: 'mac-studio',
+      targetHeartbeatKey: 'target:mac-studio',
+      host: makeHost(),
+      ws,
+      debugScope: 'connect',
+      readTargetTerminalSocket: () => ws,
+      readRequestedTerminalGeometry: () => null,
+      getOpeningTerminalChannelsForTarget: () => [],
+      readPrioritySessionId: () => 'session-anchor',
+      setTargetMuxReady: vi.fn(),
+      sendSocketPayload,
+      handleTargetMuxServerFrame: vi.fn(),
+      applyTransportDiagnostics: vi.fn(),
+      startSocketHeartbeat,
+      startMuxHandshakeTimeout,
+      runtimeDebug: vi.fn(),
+      finalizeFailure: vi.fn(),
+    });
+
+    ws.onopen?.();
+
+    expect(sendSocketPayload).not.toHaveBeenCalled();
+    expect(startSocketHeartbeat).not.toHaveBeenCalled();
+    expect(startMuxHandshakeTimeout).not.toHaveBeenCalled();
+  });
+
   it('sends mux-hello on target open and flushes opening channels only after mux-ready', () => {
     const ws = {
       readyState: WebSocket.OPEN,

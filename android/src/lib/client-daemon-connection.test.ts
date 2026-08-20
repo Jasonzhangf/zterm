@@ -129,6 +129,29 @@ describe('client.daemon_connection interface', () => {
     expect(openSessionTargetTransport).not.toHaveBeenCalled();
   });
 
+  it('reuses a service-owned target transport when the session terminal socket was moved aside', () => {
+    const serviceSocket = {
+      readyState: WebSocket.OPEN,
+      transportOwnership: 'service' as const,
+    };
+    const openSessionTargetTransport = vi.fn(() => ({ readyState: WebSocket.CONNECTING }) as any);
+    const connection = createClientDaemonConnection({
+      readSessionTransportResource: () => createResource(null),
+      readTargetTerminalSocket: () => serviceSocket as any,
+      sendSocketPayload: vi.fn(),
+      openSessionTargetTransport,
+    });
+
+    expect(connection.openSessionTargetTransport?.({
+      sessionId: 'session-1',
+      host: makeHost(),
+      debugScope: 'reconnect',
+      finalizeFailure: vi.fn(),
+    })).toBe(serviceSocket);
+
+    expect(openSessionTargetTransport).not.toHaveBeenCalled();
+  });
+
   it('builds a new transport only when the same-target socket is missing or closed', () => {
     const openSessionTargetTransport = vi.fn(() => ({ readyState: WebSocket.CONNECTING }) as any);
     const connection = createClientDaemonConnection({

@@ -76,6 +76,17 @@ export type AndroidConnectionCommand =
       targetKey: string;
       channelId: string;
       reason: string;
+    }
+  | {
+      type: 'pulse-session-notification';
+      targetKey: string;
+      channelId: string;
+    }
+  | {
+      type: 'target-message';
+      targetKey: string;
+      requestId?: string;
+      message: Record<string, unknown>;
     };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -201,6 +212,25 @@ export function parseAndroidConnectionCommand(value: unknown): AndroidConnection
         targetKey: value.targetKey.trim(),
         channelId: value.channelId.trim(),
         reason: value.reason.trim(),
+      };
+    case 'target-message':
+      if (!isNonEmptyString(value.targetKey) || !isRecord(value.message)) {
+        throw new Error('invalid Android connection service target message command');
+      }
+      return {
+        type: 'target-message',
+        targetKey: value.targetKey.trim(),
+        ...(isNonEmptyString(value.requestId) ? { requestId: value.requestId.trim() } : {}),
+        message: value.message,
+      };
+    case 'pulse-session-notification':
+      if (!isNonEmptyString(value.targetKey) || !isNonEmptyString(value.channelId)) {
+        throw new Error('invalid Android connection service notification pulse command');
+      }
+      return {
+        type: 'pulse-session-notification',
+        targetKey: value.targetKey.trim(),
+        channelId: value.channelId.trim(),
       };
     default:
       throw new Error(`unsupported Android connection service command: ${String(value.type)}`);
