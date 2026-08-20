@@ -221,17 +221,23 @@ public final class AndroidConnectionServicePlugin extends Plugin {
     }
 
     @PluginMethod
-    public void pulseSessionNotification(PluginCall call) {
+    public void sendTargetMessage(PluginCall call) {
         String targetKey = call.getString("targetKey");
-        String channelId = call.getString("channelId");
-        if (targetKey == null || targetKey.trim().isEmpty()
-            || channelId == null || channelId.trim().isEmpty()) {
-            call.reject("targetKey and channelId are required");
+        String requestId = call.getString("requestId", "");
+        JSObject messageBody = call.getObject("message");
+        if (targetKey == null || targetKey.trim().isEmpty() || messageBody == null) {
+            call.reject("targetKey and message are required");
             return;
         }
-        sendCommand(AndroidConnectionCommand.pulseSessionNotification(
-            targetKey.trim(), channelId.trim()));
-        call.resolve(ok());
+        try {
+            sendCommand(AndroidConnectionCommand.targetMessage(
+                targetKey.trim(),
+                requestId == null ? "" : requestId.trim(),
+                new JSONObject(messageBody.toString())));
+            call.resolve(ok());
+        } catch (JSONException error) {
+            call.reject("invalid target message", error);
+        }
     }
 
     @PluginMethod

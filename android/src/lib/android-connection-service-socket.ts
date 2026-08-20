@@ -22,15 +22,34 @@ import type { AndroidConnectionServiceTarget } from './android-connection-servic
  */
 export class AndroidConnectionServiceTransportSocket implements BridgeTransportSocket {
   readonly bufferedAmount = 0;
+  readonly transportOwnership = 'service' as const;
   readyState: number = WebSocket.CONNECTING;
-  onopen: ((event?: Event) => void) | null = null;
-  onmessage: ((event: BridgeSocketMessageLike) => void) | null = null;
+  private openHandler: ((event?: Event) => void) | null = null;
+  private messageHandler: ((event: BridgeSocketMessageLike) => void) | null = null;
+  get onopen(): ((event?: Event) => void) | null { return this.openHandler; }
+  set onopen(handler: ((event?: Event) => void) | null) {
+    this.openHandler = handler;
+    if (handler) this.scheduleOpenProjection();
+  }
+  get onmessage(): ((event: BridgeSocketMessageLike) => void) | null { return this.messageHandler; }
+  set onmessage(handler: ((event: BridgeSocketMessageLike) => void) | null) {
+    this.messageHandler = handler;
+    if (handler) this.scheduleOpenProjection();
+  }
   onerror: ((event?: Event) => void) | null = null;
   onclose: ((event?: BridgeSocketCloseLike) => void) | null = null;
 
   private readonly targetKey: string;
   private disposed = false;
   private removeListeners: Array<() => Promise<void>> = [];
+  private readyGeneration: string | null = null;
+  private pendingGeneration: string | null = null;
+  private readonly retiredGenerations = new Set<string>();
+  private muxReadyGeneration: string | null = null;
+  private projectedOpenGeneration: string | null = null;
+  private muxReadyPayload: Record<string, unknown> | null = null;
+  private muxReadyPayloadGeneration: string | null = null;
+  private openProjectionScheduled = false;
 
   constructor(target: AndroidConnectionServiceTarget, _sessionName: string) {
     this.targetKey = target.targetKey;
@@ -120,6 +139,7 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
     };
     this.disposed = true;
     this.readyState = WebSocket.CLOSED;
+    this.removeNativeListeners();
     this.onclose?.(event);
     this.onerror?.(new Event('error'));
   }
@@ -139,11 +159,38 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
     if (!isThisTarget) {
       return;
     }
+    if (snapshot.state === 'resolving-target' || snapshot.state === 'connecting') {
+      if (snapshot.generation && this.retiredGenerations.has(snapshot.generation)) return;
+      if (this.readyGeneration) {
+        if (!snapshot.generation || snapshot.generation === this.readyGeneration) return;
+        this.retiredGenerations.add(this.readyGeneration);
+        this.readyGeneration = null;
+        this.muxReadyGeneration = null;
+        this.muxReadyPayload = null;
+        this.muxReadyPayloadGeneration = null;
+      } else if (this.pendingGeneration && snapshot.generation && snapshot.generation !== this.pendingGeneration) {
+        this.retiredGenerations.add(this.pendingGeneration);
+      }
+      this.readyState = WebSocket.CONNECTING;
+      this.pendingGeneration = snapshot.generation;
+      return;
+    }
     if (snapshot.state === 'mux-ready' || snapshot.state === 'channels-ready' || snapshot.state === 'healthy') {
+      if ((snapshot.generation != null && this.retiredGenerations.has(snapshot.generation))
+        || (this.readyGeneration && snapshot.generation !== this.readyGeneration)
+        || (this.pendingGeneration && snapshot.generation !== this.pendingGeneration)) return;
+      const payload = isRecord(snapshot.muxReadyPayload)
+        ? snapshot.muxReadyPayload
+        : this.muxReadyPayloadGeneration === snapshot.generation ? this.muxReadyPayload : null;
+      if (!snapshot.generation || !payload) return;
+      this.readyGeneration = snapshot.generation;
+      this.pendingGeneration = null;
+      this.muxReadyPayload = { ...payload };
+      this.muxReadyPayloadGeneration = snapshot.generation;
       if (this.readyState !== WebSocket.OPEN) {
         this.readyState = WebSocket.OPEN;
-        this.onopen?.(new Event('open'));
       }
+      this.scheduleOpenProjection();
       return;
     }
     if (snapshot.state === 'authentication-error' || snapshot.state === 'terminal-error') {
@@ -153,12 +200,35 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
       return;
     }
     if (snapshot.state === 'backoff-reconnect') {
+      if (snapshot.generation && this.readyGeneration && snapshot.generation !== this.readyGeneration) return;
       this.readyState = WebSocket.CLOSED;
+      const retiredGeneration = snapshot.generation || this.readyGeneration || this.pendingGeneration;
+      if (retiredGeneration) this.retiredGenerations.add(retiredGeneration);
+      this.readyGeneration = null;
+      this.pendingGeneration = null;
+      this.muxReadyGeneration = null;
+      this.muxReadyPayload = null;
+      this.muxReadyPayloadGeneration = null;
+      this.projectedOpenGeneration = null;
     }
   }
 
   private dispatchServerFrame(frame: AndroidConnectionServiceServerFrame) {
-    if (this.disposed || frame.targetKey !== this.targetKey || this.readyState !== WebSocket.OPEN) {
+    if (this.disposed || frame.targetKey !== this.targetKey) return;
+    if (this.retiredGenerations.has(frame.generation)
+      || (this.readyGeneration && frame.generation !== this.readyGeneration)
+      || (!this.readyGeneration && this.pendingGeneration && frame.generation !== this.pendingGeneration)) return;
+    if (frame.type === 'mux-ready') {
+      if (this.muxReadyGeneration === frame.generation) return;
+      this.readyGeneration = frame.generation;
+      this.pendingGeneration = null;
+      if (this.readyState !== WebSocket.OPEN) this.readyState = WebSocket.OPEN;
+      this.muxReadyPayload = { ...frame.payload };
+      this.muxReadyPayloadGeneration = frame.generation;
+      this.scheduleOpenProjection();
+      return;
+    }
+    if (this.readyState !== WebSocket.OPEN) {
       return;
     }
     this.onmessage?.({
@@ -170,12 +240,8 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
   }
 
   private dispatchChannelOpened(event: AndroidConnectionServiceChannelOpenedEvent) {
-    if (this.disposed || event.targetKey !== this.targetKey) {
+    if (!this.acceptsReadyGeneration(event.targetKey, event.generation)) {
       return;
-    }
-    if (this.readyState !== WebSocket.OPEN) {
-      this.readyState = WebSocket.OPEN;
-      this.onopen?.(new Event('open'));
     }
     this.onmessage?.({
       data: JSON.stringify({
@@ -189,7 +255,7 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
   }
 
   private dispatchChannelMessage(event: AndroidConnectionServiceChannelMessage) {
-    if (this.disposed || event.targetKey !== this.targetKey || this.readyState !== WebSocket.OPEN) {
+    if (!this.acceptsReadyGeneration(event.targetKey, event.generation)) {
       return;
     }
     this.onmessage?.({
@@ -204,7 +270,7 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
   }
 
   private dispatchChannelClosed(event: AndroidConnectionServiceChannelClosedEvent) {
-    if (this.disposed || event.targetKey !== this.targetKey) {
+    if (!this.acceptsReadyGeneration(event.targetKey, event.generation)) {
       return;
     }
     this.onmessage?.({
@@ -224,10 +290,39 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
     }
     this.disposed = true;
     this.readyState = WebSocket.CLOSED;
+    this.removeNativeListeners();
+    this.onclose?.({ code: 1000, reason });
+  }
+
+  private removeNativeListeners() {
     for (const remove of this.removeListeners.splice(0)) {
       void remove();
     }
-    this.onclose?.({ code: 1000, reason });
+  }
+
+  private acceptsReadyGeneration(targetKey: string, generation: string) {
+    return !this.disposed && targetKey === this.targetKey
+      && this.readyState === WebSocket.OPEN && generation === this.readyGeneration;
+  }
+
+  private scheduleOpenProjection() {
+    if (this.openProjectionScheduled || this.disposed || !this.onopen) return;
+    this.openProjectionScheduled = true;
+    queueMicrotask(() => {
+      this.openProjectionScheduled = false;
+      if (this.disposed || this.readyState !== WebSocket.OPEN || !this.onopen) return;
+      const generation = this.readyGeneration;
+      if (!generation) return;
+      if (this.projectedOpenGeneration !== generation) {
+        this.projectedOpenGeneration = generation;
+        this.onopen(new Event('open'));
+      }
+      if (this.onmessage && this.muxReadyGeneration !== generation
+        && this.muxReadyPayloadGeneration === generation && this.muxReadyPayload) {
+        this.muxReadyGeneration = generation;
+        this.onmessage({ data: JSON.stringify({ type: 'mux-ready', payload: this.muxReadyPayload }) });
+      }
+    });
   }
 }
 
@@ -286,6 +381,15 @@ function mapFrameToCommand(frame: Record<string, unknown>) {
         type: 'close-channel' as const,
         channelId,
         reason: typeof payload.reason === 'string' && payload.reason ? payload.reason : 'user-close',
+      };
+    }
+    case 'mux-target-message': {
+      const payload = isRecord(frame.payload) ? frame.payload : {};
+      if (!isRecord(payload.message)) return null;
+      return {
+        type: 'target-message' as const,
+        ...(typeof payload.requestId === 'string' && payload.requestId ? { requestId: payload.requestId } : {}),
+        message: payload.message,
       };
     }
     default:

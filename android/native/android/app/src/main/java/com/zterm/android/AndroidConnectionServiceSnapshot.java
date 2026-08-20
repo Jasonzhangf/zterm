@@ -77,6 +77,7 @@ public final class AndroidConnectionServiceSnapshot {
     public final Long lastActivityAt;
     public final Long nextRetryAt;
     public final ErrorValue error;
+    public final String muxReadyPayloadJson;
 
     private AndroidConnectionServiceSnapshot(Builder b) {
         this.state = b.state;
@@ -88,6 +89,7 @@ public final class AndroidConnectionServiceSnapshot {
         this.lastActivityAt = b.lastActivityAt;
         this.nextRetryAt = b.nextRetryAt;
         this.error = b.error;
+        this.muxReadyPayloadJson = b.muxReadyPayloadJson;
     }
 
     public static AndroidConnectionServiceSnapshot empty() {
@@ -107,7 +109,8 @@ public final class AndroidConnectionServiceSnapshot {
             .lastHeartbeatAt(lastHeartbeatAt)
             .lastActivityAt(lastActivityAt)
             .nextRetryAt(nextRetryAt)
-            .error(error);
+            .error(error)
+            .muxReadyPayloadJson(muxReadyPayloadJson);
     }
 
     public JSONObject toJson() throws JSONException {
@@ -123,6 +126,8 @@ public final class AndroidConnectionServiceSnapshot {
         json.put("lastActivityAt", lastActivityAt == null ? JSONObject.NULL : lastActivityAt);
         json.put("nextRetryAt", nextRetryAt == null ? JSONObject.NULL : nextRetryAt);
         json.put("error", error == null ? JSONObject.NULL : error.toJson());
+        json.put("muxReadyPayload", muxReadyPayloadJson == null
+            ? JSONObject.NULL : new JSONObject(muxReadyPayloadJson));
         return json;
     }
 
@@ -140,7 +145,8 @@ public final class AndroidConnectionServiceSnapshot {
             && Objects.equals(lastActivityAt, that.lastActivityAt)
             && Objects.equals(nextRetryAt, that.nextRetryAt)
             && Objects.equals(error == null ? null : error.code, that.error == null ? null : that.error.code)
-            && Objects.equals(error == null ? null : error.message, that.error == null ? null : that.error.message);
+            && Objects.equals(error == null ? null : error.message, that.error == null ? null : that.error.message)
+            && Objects.equals(muxReadyPayloadJson, that.muxReadyPayloadJson);
     }
 
     private static boolean channelsEqual(List<Channel> a, List<Channel> b) {
@@ -157,7 +163,7 @@ public final class AndroidConnectionServiceSnapshot {
         return Objects.hash(state, generation, target, route == null ? null : route.mode,
             route == null ? null : route.path, channels.size(), lastHeartbeatAt,
             lastActivityAt, nextRetryAt, error == null ? null : error.code,
-            error == null ? null : error.message);
+            error == null ? null : error.message, muxReadyPayloadJson);
     }
 
     public static final class Builder {
@@ -170,6 +176,7 @@ public final class AndroidConnectionServiceSnapshot {
         private Long lastActivityAt;
         private Long nextRetryAt;
         private ErrorValue error;
+        private String muxReadyPayloadJson;
 
         public Builder(State state) { this.state = state; }
         public Builder generation(String v) { this.generation = v; return this; }
@@ -180,6 +187,7 @@ public final class AndroidConnectionServiceSnapshot {
         public Builder lastActivityAt(Long v) { this.lastActivityAt = v; return this; }
         public Builder nextRetryAt(Long v) { this.nextRetryAt = v; return this; }
         public Builder error(ErrorValue v) { this.error = v; return this; }
+        public Builder muxReadyPayloadJson(String v) { this.muxReadyPayloadJson = v; return this; }
         public AndroidConnectionServiceSnapshot build() { return new AndroidConnectionServiceSnapshot(this); }
     }
 }

@@ -28,9 +28,17 @@ export function openAndroidConnectionServiceTransportSocket(
 ): BridgeTransportSocket {
   const target = buildAndroidConnectionServiceTarget(host);
   const socket = new AndroidConnectionServiceTransportSocket(target, sessionName);
-  void socket.start().then(() => sendAndroidConnectionCommand({
-    type: 'bind-target',
-    target,
-  }));
+  const startup = socket.start();
+  startup.then(
+    () => {
+      sendAndroidConnectionCommand({ type: 'bind-target', target }).then(
+        (result) => {
+          if (!result?.ok) socket.reportFailure('bind-target rejected by connection service');
+        },
+        (error) => socket.reportFailure(`bind-target rejected: ${String(error?.message ?? error)}`),
+      );
+    },
+    (error) => socket.reportFailure(`connection service startup failed: ${String(error?.message ?? error)}`),
+  );
   return socket;
 }

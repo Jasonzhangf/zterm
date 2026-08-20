@@ -902,6 +902,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
 
   const daemonConnection = createClientDaemonConnection({
     readSessionTransportResource: options.readSessionTransportResource,
+    readTargetTerminalSocket: options.readTargetTerminalSocket,
     sendSocketPayload: options.sendSocketPayload,
     onTargetNetworkProbeError: (failure) => {
       options.runtimeDebug('session.mux.target-network-probe.error-consumed', {

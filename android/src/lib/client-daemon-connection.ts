@@ -67,6 +67,7 @@ function formatSocketReadyState(ws: BridgeTransportSocket | null) {
 
 export function createClientDaemonConnection(options: {
   readSessionTransportResource: (sessionId: string) => SessionTransportResource;
+  readTargetTerminalSocket?: (targetKey: string) => BridgeTransportSocket | null;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
   openSessionTargetTransport?: (options: ClientDaemonConnectionOpenTargetTransportOptions) => BridgeTransportSocket;
   onTargetNetworkProbeError?: (failure: SessionTargetNetworkProbeFailure) => void;
@@ -109,6 +110,18 @@ export function createClientDaemonConnection(options: {
         && (currentTargetSocket.readyState === WebSocket.OPEN || currentTargetSocket.readyState === WebSocket.CONNECTING)
       ) {
         return currentTargetSocket;
+      }
+      const resource = readSessionResource(openOptions.sessionId);
+      const targetKey = resource.targetKey;
+      if (targetKey) {
+        const targetSocket = options.readTargetTerminalSocket?.(targetKey) || null;
+        if (
+          targetSocket
+          && targetSocket.transportOwnership === 'service'
+          && (targetSocket.readyState === WebSocket.OPEN || targetSocket.readyState === WebSocket.CONNECTING)
+        ) {
+          return targetSocket;
+        }
       }
       return options.openSessionTargetTransport(openOptions);
     },

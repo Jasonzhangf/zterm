@@ -317,6 +317,9 @@ export function createSessionPublicFacadeRuntime(options: {
       if (!ws || ws.readyState !== WebSocket.OPEN || !targetRuntime.terminalMuxReady || !anchorSessionId) {
         continue;
       }
+      if (ws.transportOwnership === 'service') {
+        continue;
+      }
       options.sendSocketPayload(
         anchorSessionId,
         ws,

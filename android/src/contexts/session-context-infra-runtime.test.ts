@@ -454,11 +454,11 @@ describe('applyTransportDiagnosticsRuntime', () => {
 });
 
 describe('buildTraversalSocketForHostRuntime direct fallback after network change', () => {
-  it('does not force Android through the unverified native connection projection', () => {
+  it('routes Android daemon target sockets through the native service projection factory', () => {
     const source = readFileSync(resolve(import.meta.dirname, 'session-context-infra-runtime.ts'), 'utf8');
 
-    expect(source).not.toContain('openAndroidConnectionServiceTransportSocket');
-    expect(source).not.toContain('AndroidConnectionService (native)');
+    expect(source).toContain("Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android'");
+    expect(source).toContain('openAndroidConnectionServiceTransportSocket');
   });
 
   it('keeps successfully-connected direct endpoints as fallback candidates when the control directory entry is stale', () => {

@@ -428,6 +428,12 @@ export function bindTargetMuxTransportSocketLifecycleRuntime(options: {
       return;
     }
     options.applyTransportDiagnostics(options.sessionId, options.ws);
+    if (options.ws.transportOwnership === 'service') {
+      options.runtimeDebug(`session.mux.${options.debugScope}.service-ready`, {
+        sessionId: options.sessionId,
+      });
+      return;
+    }
     options.sendSocketPayload(
       options.sessionId,
       options.ws,

@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
   createSessionTransportRuntimeStore,
   getSessionTransportRuntime,
@@ -54,6 +56,15 @@ function unwrap(data: string | ArrayBuffer) {
   expect(typeof data).toBe('string');
   return JSON.parse(data as string);
 }
+
+describe('Android connection service platform wiring', () => {
+  it('routes Android daemon target sockets through the native service projection factory', () => {
+    const source = readFileSync(resolve(import.meta.dirname, 'session-context-infra-facade-runtime.ts'), 'utf8');
+
+    expect(source).toContain("Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android'");
+    expect(source).toContain('openAndroidConnectionServiceTransportSocket(host,');
+  });
+});
 
 describe('wrapSessionPayloadForTargetMuxRuntime', () => {
   it('leaves non-target sockets unchanged', () => {
