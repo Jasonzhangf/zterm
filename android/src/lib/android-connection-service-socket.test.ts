@@ -158,6 +158,79 @@ describe('AndroidConnectionServiceTransportSocket', () => {
     expect(socket.readyState).toBe(WebSocket.OPEN);
   });
 
+  it('replays already-open native channels after a WebView adapter is recreated', async () => {
+    const { add } = listenerMock();
+    plugin.addListener.mockImplementation(add);
+    const snapshot = {
+      state: 'channels-ready' as const,
+      generation: 'g-restored-channel',
+      target,
+      route: { mode: 'auto' as const },
+      channels: [{ channelId: 'channel-restored', state: 'open' as const }],
+      lastHeartbeatAt: 3,
+      lastActivityAt: 3,
+      nextRetryAt: null,
+      error: null,
+      muxReadyPayload,
+    };
+    plugin.readSnapshot.mockResolvedValue(snapshot);
+    const socket = new AndroidConnectionServiceTransportSocket(target, 'shell');
+    const messages: string[] = [];
+
+    await socket.start();
+    socket.onopen = vi.fn();
+    socket.onmessage = (event) => messages.push(String(event.data));
+    await Promise.resolve();
+
+    expect(messages.map((message) => JSON.parse(message))).toEqual([
+      { type: 'mux-ready', payload: muxReadyPayload },
+      {
+        type: 'mux-channel-opened',
+        payload: {
+          channelId: 'channel-restored',
+          snapshot,
+        },
+      },
+    ]);
+  });
+
+  it('does not duplicate a channel opened event already recovered from the same snapshot', async () => {
+    const { listeners, add } = listenerMock();
+    plugin.addListener.mockImplementation(add);
+    const snapshot = {
+      state: 'channels-ready' as const,
+      generation: 'g-channel-dedupe',
+      target,
+      route: { mode: 'auto' as const },
+      channels: [{ channelId: 'channel-dedupe', state: 'open' as const }],
+      lastHeartbeatAt: 3,
+      lastActivityAt: 3,
+      nextRetryAt: null,
+      error: null,
+      muxReadyPayload,
+    };
+    plugin.readSnapshot.mockResolvedValue(snapshot);
+    const socket = new AndroidConnectionServiceTransportSocket(target, 'shell');
+    const messages: string[] = [];
+
+    await socket.start();
+    socket.onopen = vi.fn();
+    socket.onmessage = (event) => messages.push(String(event.data));
+    await Promise.resolve();
+    listeners.get('androidConnectionChannelOpened')?.({
+      kind: 'channel-opened',
+      targetKey: target.targetKey,
+      generation: snapshot.generation,
+      channelId: 'channel-dedupe',
+      snapshot,
+    });
+
+    expect(messages.map((message) => JSON.parse(message).type)).toEqual([
+      'mux-ready',
+      'mux-channel-opened',
+    ]);
+  });
+
   it('does not expose a native service socket as a JS heartbeat owner', async () => {
     const { listeners, add } = listenerMock();
     plugin.addListener.mockImplementation(add);

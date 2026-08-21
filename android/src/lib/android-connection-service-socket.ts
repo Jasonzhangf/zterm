@@ -49,6 +49,10 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
   private projectedOpenGeneration: string | null = null;
   private muxReadyPayload: Record<string, unknown> | null = null;
   private muxReadyPayloadGeneration: string | null = null;
+  private readySnapshot: AndroidConnectionServiceSnapshot | null = null;
+  private readyChannelIds = new Set<string>();
+  private projectedChannelIds = new Set<string>();
+  private projectedChannelsGeneration: string | null = null;
   private openProjectionScheduled = false;
 
   constructor(target: AndroidConnectionServiceTarget, _sessionName: string) {
@@ -168,6 +172,10 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
         this.muxReadyGeneration = null;
         this.muxReadyPayload = null;
         this.muxReadyPayloadGeneration = null;
+        this.readySnapshot = null;
+        this.readyChannelIds.clear();
+        this.projectedChannelIds.clear();
+        this.projectedChannelsGeneration = null;
       } else if (this.pendingGeneration && snapshot.generation && snapshot.generation !== this.pendingGeneration) {
         this.retiredGenerations.add(this.pendingGeneration);
       }
@@ -187,6 +195,10 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
       this.pendingGeneration = null;
       this.muxReadyPayload = { ...payload };
       this.muxReadyPayloadGeneration = snapshot.generation;
+      this.readySnapshot = snapshot;
+      this.readyChannelIds = new Set(snapshot.channels
+        .filter((channel) => channel.state === 'open')
+        .map((channel) => channel.channelId));
       if (this.readyState !== WebSocket.OPEN) {
         this.readyState = WebSocket.OPEN;
       }
@@ -210,6 +222,10 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
       this.muxReadyPayload = null;
       this.muxReadyPayloadGeneration = null;
       this.projectedOpenGeneration = null;
+      this.readySnapshot = null;
+      this.readyChannelIds.clear();
+      this.projectedChannelIds.clear();
+      this.projectedChannelsGeneration = null;
     }
   }
 
@@ -243,15 +259,9 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
     if (!this.acceptsReadyGeneration(event.targetKey, event.generation)) {
       return;
     }
-    this.onmessage?.({
-      data: JSON.stringify({
-        type: 'mux-channel-opened',
-        payload: {
-          channelId: event.channelId,
-          snapshot: event.snapshot,
-        },
-      }),
-    });
+    this.readySnapshot = event.snapshot;
+    this.readyChannelIds.add(event.channelId);
+    this.projectChannelOpened(event.generation, event.channelId, event.snapshot);
   }
 
   private dispatchChannelMessage(event: AndroidConnectionServiceChannelMessage) {
@@ -273,6 +283,8 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
     if (!this.acceptsReadyGeneration(event.targetKey, event.generation)) {
       return;
     }
+    this.readyChannelIds.delete(event.channelId);
+    this.projectedChannelIds.delete(event.channelId);
     this.onmessage?.({
       data: JSON.stringify({
         type: 'mux-channel-closed',
@@ -305,6 +317,29 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
       && this.readyState === WebSocket.OPEN && generation === this.readyGeneration;
   }
 
+  private projectChannelOpened(
+    generation: string,
+    channelId: string,
+    snapshot: AndroidConnectionServiceSnapshot,
+  ) {
+    if (!this.onmessage || generation !== this.readyGeneration) return;
+    if (this.projectedChannelsGeneration !== generation) {
+      this.projectedChannelsGeneration = generation;
+      this.projectedChannelIds.clear();
+    }
+    if (this.projectedChannelIds.has(channelId)) return;
+    this.projectedChannelIds.add(channelId);
+    this.onmessage({
+      data: JSON.stringify({
+        type: 'mux-channel-opened',
+        payload: {
+          channelId,
+          snapshot,
+        },
+      }),
+    });
+  }
+
   private scheduleOpenProjection() {
     if (this.openProjectionScheduled || this.disposed || !this.onopen) return;
     this.openProjectionScheduled = true;
@@ -321,6 +356,11 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
         && this.muxReadyPayloadGeneration === generation && this.muxReadyPayload) {
         this.muxReadyGeneration = generation;
         this.onmessage({ data: JSON.stringify({ type: 'mux-ready', payload: this.muxReadyPayload }) });
+      }
+      if (this.readySnapshot) {
+        for (const channelId of this.readyChannelIds) {
+          this.projectChannelOpened(generation, channelId, this.readySnapshot);
+        }
       }
     });
   }
