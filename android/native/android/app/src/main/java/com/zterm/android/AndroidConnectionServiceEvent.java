@@ -32,6 +32,7 @@ public final class AndroidConnectionServiceEvent {
     public final String reason;
     public final String generation;
     public final String channelId;
+    public final String sessionName;
     public final Long atMillis;
     public final String message;
     public final String muxReadyPayloadJson;
@@ -43,6 +44,7 @@ public final class AndroidConnectionServiceEvent {
         this.reason = b.reason;
         this.generation = b.generation;
         this.channelId = b.channelId;
+        this.sessionName = b.sessionName;
         this.atMillis = b.atMillis;
         this.message = b.message;
         this.muxReadyPayloadJson = b.muxReadyPayloadJson;
@@ -69,8 +71,10 @@ public final class AndroidConnectionServiceEvent {
             .muxReadyPayloadJson(muxReadyPayloadJson).build();
     }
 
-    public static AndroidConnectionServiceEvent channelOpened(String generation, String channelId, long at) {
-        return new Builder(Type.CHANNEL_OPENED).generation(generation).channelId(channelId).at(at).build();
+    public static AndroidConnectionServiceEvent channelOpened(
+        String generation, String channelId, String sessionName, long at) {
+        return new Builder(Type.CHANNEL_OPENED).generation(generation).channelId(channelId)
+            .sessionName(sessionName).at(at).build();
     }
 
     public static AndroidConnectionServiceEvent channelClosed(String generation, String channelId, String reason) {
@@ -120,6 +124,7 @@ public final class AndroidConnectionServiceEvent {
         private String reason;
         private String generation;
         private String channelId;
+        private String sessionName;
         private Long atMillis;
         private String message;
         private String muxReadyPayloadJson;
@@ -131,6 +136,7 @@ public final class AndroidConnectionServiceEvent {
         public Builder reason(String v) { this.reason = v; return this; }
         public Builder generation(String v) { this.generation = v; return this; }
         public Builder channelId(String v) { this.channelId = v; return this; }
+        public Builder sessionName(String v) { this.sessionName = v; return this; }
         public Builder at(long v) { this.atMillis = v; return this; }
         public Builder message(String v) { this.message = v; return this; }
         public Builder muxReadyPayloadJson(String v) { this.muxReadyPayloadJson = v; return this; }
@@ -153,6 +159,10 @@ public final class AndroidConnectionServiceEvent {
             if (type == Type.MUX_READY
                 && (muxReadyPayloadJson == null || muxReadyPayloadJson.trim().isEmpty())) {
                 throw new IllegalArgumentException("event MUX_READY requires exact payload");
+            }
+            if (type == Type.CHANNEL_OPENED
+                && (sessionName == null || sessionName.trim().isEmpty())) {
+                throw new IllegalArgumentException("event CHANNEL_OPENED requires sessionName");
             }
             return new AndroidConnectionServiceEvent(this);
         }

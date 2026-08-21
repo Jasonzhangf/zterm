@@ -29,7 +29,8 @@ public class AndroidConnectionStateMachineTest {
         assertTrue(machine.dispatch(AndroidConnectionServiceEvent.transportOpening("gen-1"), 2));
         assertTrue(machine.dispatch(AndroidConnectionServiceEvent.muxReady(
             "gen-1", "{\"version\":1,\"daemonHostId\":\"daemon-host-exact\"}"), 3));
-        assertTrue(machine.dispatch(AndroidConnectionServiceEvent.channelOpened("gen-1", "channel-a", 4), 4));
+        assertTrue(machine.dispatch(
+            AndroidConnectionServiceEvent.channelOpened("gen-1", "channel-a", "shell", 4), 4));
         assertTrue(machine.dispatch(AndroidConnectionServiceEvent.heartbeatPong("gen-1", 5), 5));
 
         AndroidConnectionServiceSnapshot snapshot = machine.readSnapshot();
@@ -38,6 +39,7 @@ public class AndroidConnectionStateMachineTest {
         assertEquals(Long.valueOf(5L), snapshot.lastHeartbeatAt);
         assertEquals(1, snapshot.channels.size());
         assertEquals(AndroidConnectionServiceSnapshot.Channel.State.OPEN, snapshot.channels.get(0).state);
+        assertEquals("shell", snapshot.channels.get(0).sessionName);
         assertEquals("{\"version\":1,\"daemonHostId\":\"daemon-host-exact\"}",
             snapshot.muxReadyPayloadJson);
         assertFalse(snapshots.isEmpty());

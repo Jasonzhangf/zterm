@@ -9,6 +9,7 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import okhttp3.WebSocket;
 import org.json.JSONObject;
@@ -120,6 +121,7 @@ public final class AndroidConnectionServiceTransportTest {
             AndroidConnectionStateMachine stateMachine = readyStateMachine();
             setField(runtime, "stateMachine", stateMachine);
             setField(runtime, "generation", "gen-1");
+            setDesiredChannel(runtime, "channel-a", "shell");
             Method handleChannelOpened = runtime.getClass().getDeclaredMethod(
                 "handleChannelOpened", JSONObject.class);
             handleChannelOpened.setAccessible(true);
@@ -135,6 +137,253 @@ public final class AndroidConnectionServiceTransportTest {
         } finally {
             AndroidConnectionService.resetForTests();
         }
+    }
+
+    @Test
+    public void channelOpenReplacesStaleChannelForSameRemoteSession() throws Exception {
+        AndroidConnectionService.resetForTests();
+        List<AndroidConnectionServiceEventEnvelope> events = new ArrayList<>();
+        AndroidConnectionService.registerListenerForTests(new AndroidConnectionServiceListener() {
+            @Override
+            public void onSnapshot(AndroidConnectionServiceSnapshot snapshot) {
+            }
+
+            @Override
+            public void onEvent(AndroidConnectionServiceEventEnvelope event) {
+                events.add(event);
+            }
+        });
+        try {
+            AndroidConnectionService service = new AndroidConnectionService();
+            Object runtime = newRuntime(service);
+            AndroidConnectionStateMachine stateMachine = readyStateMachine();
+            setField(runtime, "stateMachine", stateMachine);
+            setField(runtime, "generation", "gen-1");
+            setField(runtime, "transportNetworkGeneration", 0L);
+            setField(service, "networkGeneration", 0L);
+            List<String> sent = new ArrayList<>();
+            setField(runtime, "socket", fakeSocket(sent, true));
+            Method sendChannelOpen = runtime.getClass().getDeclaredMethod(
+                "sendChannelOpen", AndroidConnectionCommand.class);
+            sendChannelOpen.setAccessible(true);
+
+            sendChannelOpen.invoke(runtime, AndroidConnectionCommand.openChannel(
+                "target-a", "channel-old", "shell", null));
+            setDesiredChannelOpened(runtime, "channel-old", true);
+            sendChannelOpen.invoke(runtime, AndroidConnectionCommand.openChannel(
+                "target-a", "channel-new", "shell", null));
+
+            assertEquals(3, sent.size());
+            assertEquals("mux-channel-open", new JSONObject(sent.get(0)).getString("type"));
+            assertEquals("mux-channel-close", new JSONObject(sent.get(1)).getString("type"));
+            assertEquals("channel-old", new JSONObject(sent.get(1)).getJSONObject("payload")
+                .getString("channelId"));
+            assertEquals("mux-channel-open", new JSONObject(sent.get(2)).getString("type"));
+            assertEquals("channel-new", new JSONObject(sent.get(2)).getJSONObject("payload")
+                .getString("channelId"));
+            Field desiredChannelsField = runtime.getClass().getDeclaredField("desiredChannels");
+            desiredChannelsField.setAccessible(true);
+            Map<?, ?> desiredChannels = (Map<?, ?>) desiredChannelsField.get(runtime);
+            assertTrue(desiredChannels.containsKey("channel-new"));
+            assertTrue(!desiredChannels.containsKey("channel-old"));
+        } finally {
+            AndroidConnectionService.resetForTests();
+        }
+    }
+
+    @Test
+    public void repeatedOpenReusesAlreadyOpenedChannelWithoutDuplicateWireOpen() throws Exception {
+        AndroidConnectionService.resetForTests();
+        List<AndroidConnectionServiceEventEnvelope> events = new ArrayList<>();
+        AndroidConnectionService.registerListenerForTests(new AndroidConnectionServiceListener() {
+            @Override
+            public void onSnapshot(AndroidConnectionServiceSnapshot snapshot) {
+            }
+
+            @Override
+            public void onEvent(AndroidConnectionServiceEventEnvelope event) {
+                events.add(event);
+            }
+        });
+        try {
+            AndroidConnectionService service = new AndroidConnectionService();
+            Object runtime = newRuntime(service);
+            setField(runtime, "stateMachine", readyStateMachine());
+            setField(runtime, "generation", "gen-1");
+            setField(runtime, "transportNetworkGeneration", 0L);
+            setField(service, "networkGeneration", 0L);
+            List<String> sent = new ArrayList<>();
+            setField(runtime, "socket", fakeSocket(sent, true));
+            Method sendChannelOpen = runtime.getClass().getDeclaredMethod(
+                "sendChannelOpen", AndroidConnectionCommand.class);
+            sendChannelOpen.setAccessible(true);
+
+            sendChannelOpen.invoke(runtime, AndroidConnectionCommand.openChannel(
+                "target-a", "channel-a", "shell", null));
+            setDesiredChannelOpened(runtime, "channel-a", true);
+            sendChannelOpen.invoke(runtime, AndroidConnectionCommand.openChannel(
+                "target-a", "channel-a", "shell", null));
+
+            assertEquals(1, sent.size());
+            assertEquals(1, events.stream().filter(event ->
+                event.kind == AndroidConnectionServiceEventEnvelope.Kind.CHANNEL_OPENED).count());
+        } finally {
+            AndroidConnectionService.resetForTests();
+        }
+    }
+
+    @Test
+    public void staleChannelReplacementRebindsQueuedBusinessFramesToReplacement()
+        throws Exception {
+        AndroidConnectionService.resetForTests();
+        AndroidConnectionService service = new AndroidConnectionService();
+        Object runtime = newRuntime(service);
+        setField(runtime, "stateMachine", readyStateMachine());
+        setField(runtime, "generation", "gen-1");
+        setField(runtime, "transportNetworkGeneration", 0L);
+        setField(service, "networkGeneration", 0L);
+        List<String> sent = new ArrayList<>();
+        setField(runtime, "socket", fakeSocket(sent, true));
+        Method sendChannelOpen = runtime.getClass().getDeclaredMethod(
+            "sendChannelOpen", AndroidConnectionCommand.class);
+        sendChannelOpen.setAccessible(true);
+
+        sendChannelOpen.invoke(runtime, AndroidConnectionCommand.openChannel(
+            "target-a", "channel-old", "shell", null));
+        JSONObject queuedMessage = new JSONObject().put("type", "mux-channel-message")
+            .put("payload", new JSONObject().put("channelId", "channel-old"));
+        Method sendOrQueue = runtime.getClass().getDeclaredMethod(
+            "sendOrQueue", JSONObject.class, String.class,
+            AndroidConnectionCommand.class, boolean.class);
+        sendOrQueue.setAccessible(true);
+        sendOrQueue.invoke(runtime, queuedMessage, "channel-old",
+            AndroidConnectionCommand.channelMessage(
+                "target-a", "channel-old", new JSONObject()), true);
+
+        sendChannelOpen.invoke(runtime, AndroidConnectionCommand.openChannel(
+            "target-a", "channel-new", "shell", null));
+
+        Field pendingFramesField = runtime.getClass().getDeclaredField("pendingFrames");
+        pendingFramesField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        Map<String, java.util.ArrayDeque<JSONObject>> pendingFrames =
+            (Map<String, java.util.ArrayDeque<JSONObject>>) pendingFramesField.get(runtime);
+        Field desiredChannelsField = runtime.getClass().getDeclaredField("desiredChannels");
+        desiredChannelsField.setAccessible(true);
+        Map<?, ?> desiredChannels = (Map<?, ?>) desiredChannelsField.get(runtime);
+        // Stale replacement only kicks in when desiredChannels has channel-old (which is removed
+        // once channel-old sees mux-channel-open ack). Since we never marked channel-old opened,
+        // sendChannelOpen re-creates it; rebind path applies during the second sendChannelOpen.
+        assertTrue(pendingFrames.containsKey("channel-new"));
+        assertTrue(!desiredChannels.containsKey("channel-old"));
+        assertEquals(1, pendingFrames.get("channel-new").size());
+        assertEquals(queuedMessage.toString(), pendingFrames.get("channel-new").peekFirst().toString());
+    }
+
+    @Test
+    public void crossBackendSameSessionNameChannelsArePreserved() throws Exception {
+        AndroidConnectionService.resetForTests();
+        AndroidConnectionService service = new AndroidConnectionService();
+        Object runtime = newRuntime(service);
+        setField(runtime, "stateMachine", readyStateMachine());
+        setField(runtime, "generation", "gen-1");
+        setField(runtime, "transportNetworkGeneration", 0L);
+        setField(service, "networkGeneration", 0L);
+        List<String> sent = new ArrayList<>();
+        setField(runtime, "socket", fakeSocket(sent, true));
+        Method sendChannelOpen = runtime.getClass().getDeclaredMethod(
+            "sendChannelOpen", AndroidConnectionCommand.class);
+        sendChannelOpen.setAccessible(true);
+
+        JSONObject tmuxOptions = new JSONObject().put("backend", "tmux");
+        JSONObject herdrOptions = new JSONObject().put("backend", "herdr");
+        sendChannelOpen.invoke(runtime, AndroidConnectionCommand.openChannel(
+            "target-a", "channel-tmux", "shell", tmuxOptions));
+        sendChannelOpen.invoke(runtime, AndroidConnectionCommand.openChannel(
+            "target-a", "channel-herdr", "shell", herdrOptions));
+
+        Field desiredChannelsField = runtime.getClass().getDeclaredField("desiredChannels");
+        desiredChannelsField.setAccessible(true);
+        Map<?, ?> desiredChannels = (Map<?, ?>) desiredChannelsField.get(runtime);
+        assertTrue(desiredChannels.containsKey("channel-tmux"));
+        assertTrue(desiredChannels.containsKey("channel-herdr"));
+    }
+
+    @Test
+    public void repeatedOpenAfterTransportFailureDoesNotTakeIdempotentPath()
+        throws Exception {
+        AndroidConnectionService.resetForTests();
+        List<AndroidConnectionServiceEventEnvelope> events = new ArrayList<>();
+        AndroidConnectionService.registerListenerForTests(new AndroidConnectionServiceListener() {
+            @Override
+            public void onSnapshot(AndroidConnectionServiceSnapshot snapshot) {
+            }
+
+            @Override
+            public void onEvent(AndroidConnectionServiceEventEnvelope event) {
+                events.add(event);
+            }
+        });
+        try {
+            AndroidConnectionService service = new AndroidConnectionService();
+            Object runtime = newRuntime(service);
+            setField(runtime, "stateMachine", readyStateMachine());
+            setField(runtime, "generation", null);
+            setField(runtime, "transportNetworkGeneration", 0L);
+            setField(service, "networkGeneration", 0L);
+            List<String> sent = new ArrayList<>();
+            setField(runtime, "socket", fakeSocket(sent, true));
+            Method sendChannelOpen = runtime.getClass().getDeclaredMethod(
+                "sendChannelOpen", AndroidConnectionCommand.class);
+            sendChannelOpen.setAccessible(true);
+
+            sendChannelOpen.invoke(runtime, AndroidConnectionCommand.openChannel(
+                "target-a", "channel-a", "shell", null));
+            setDesiredChannelOpened(runtime, "channel-a", true);
+            // generation is null after transportFailure; idempotent branch must not fire.
+            sendChannelOpen.invoke(runtime, AndroidConnectionCommand.openChannel(
+                "target-a", "channel-a", "shell", null));
+
+            assertEquals(0, events.stream().filter(event ->
+                event.kind == AndroidConnectionServiceEventEnvelope.Kind.CHANNEL_OPENED).count());
+        } finally {
+            AndroidConnectionService.resetForTests();
+        }
+    }
+
+    private static void setDesiredChannelOpened(Object runtime, String channelId, boolean opened)
+        throws Exception {
+        Field desiredChannelsField = runtime.getClass().getDeclaredField("desiredChannels");
+        desiredChannelsField.setAccessible(true);
+        Map<?, ?> desiredChannels = (Map<?, ?>) desiredChannelsField.get(runtime);
+        Object channel = desiredChannels.get(channelId);
+        Field openedField = channel.getClass().getDeclaredField("opened");
+        openedField.setAccessible(true);
+        openedField.setBoolean(channel, opened);
+    }
+
+    private static void setDesiredChannel(Object runtime, String channelId, String sessionName)
+        throws Exception {
+        Field desiredChannelsField = runtime.getClass().getDeclaredField("desiredChannels");
+        desiredChannelsField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> desiredChannels =
+            (Map<String, Object>) desiredChannelsField.get(runtime);
+        Class<?> runtimeClass = runtime.getClass();
+        Class<?> channelClass = null;
+        for (Class<?> declared : runtimeClass.getDeclaredClasses()) {
+            if (declared.getSimpleName().equals("ChannelIntent")) {
+                channelClass = declared;
+                break;
+            }
+        }
+        if (channelClass == null) {
+            throw new IllegalStateException("ChannelIntent class not found");
+        }
+        Object channel = channelClass.getDeclaredConstructor(
+            runtimeClass, String.class, String.class, JSONObject.class)
+            .newInstance(runtime, channelId, sessionName, null);
+        desiredChannels.put(channelId, channel);
     }
 
     private static AndroidConnectionStateMachine readyStateMachine() {

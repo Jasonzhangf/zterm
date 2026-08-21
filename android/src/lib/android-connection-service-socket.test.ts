@@ -65,7 +65,7 @@ describe('AndroidConnectionServiceTransportSocket', () => {
   it('projects mux-ready from native service events', async () => {
     const { listeners, add } = listenerMock();
     plugin.addListener.mockImplementation(add);
-    const socket = new AndroidConnectionServiceTransportSocket(target, 'shell');
+    const socket = new AndroidConnectionServiceTransportSocket(target);
     const opened = vi.fn();
     socket.onopen = opened;
 
@@ -91,7 +91,7 @@ describe('AndroidConnectionServiceTransportSocket', () => {
   it('projects a mux-ready frame while the initial service snapshot is still connecting', async () => {
     const { listeners, add } = listenerMock();
     plugin.addListener.mockImplementation(add);
-    const socket = new AndroidConnectionServiceTransportSocket(target, 'shell');
+    const socket = new AndroidConnectionServiceTransportSocket(target);
     const opened = vi.fn();
     const messages: string[] = [];
     socket.onopen = opened;
@@ -115,7 +115,7 @@ describe('AndroidConnectionServiceTransportSocket', () => {
   it('reads the initial snapshot for its own target', async () => {
     const { add } = listenerMock();
     plugin.addListener.mockImplementation(add);
-    const socket = new AndroidConnectionServiceTransportSocket(target, 'shell');
+    const socket = new AndroidConnectionServiceTransportSocket(target);
 
     await socket.start();
 
@@ -141,7 +141,7 @@ describe('AndroidConnectionServiceTransportSocket', () => {
       error: null,
       muxReadyPayload,
     });
-    const socket = new AndroidConnectionServiceTransportSocket(target, 'shell');
+    const socket = new AndroidConnectionServiceTransportSocket(target);
     const opened = vi.fn();
     const messages: string[] = [];
 
@@ -166,7 +166,7 @@ describe('AndroidConnectionServiceTransportSocket', () => {
       generation: 'g-restored-channel',
       target,
       route: { mode: 'auto' as const },
-      channels: [{ channelId: 'channel-restored', state: 'open' as const }],
+      channels: [{ channelId: 'channel-restored', state: 'open' as const, sessionName: 'shell' }],
       lastHeartbeatAt: 3,
       lastActivityAt: 3,
       nextRetryAt: null,
@@ -174,7 +174,7 @@ describe('AndroidConnectionServiceTransportSocket', () => {
       muxReadyPayload,
     };
     plugin.readSnapshot.mockResolvedValue(snapshot);
-    const socket = new AndroidConnectionServiceTransportSocket(target, 'shell');
+    const socket = new AndroidConnectionServiceTransportSocket(target);
     const messages: string[] = [];
 
     await socket.start();
@@ -188,6 +188,7 @@ describe('AndroidConnectionServiceTransportSocket', () => {
         type: 'mux-channel-opened',
         payload: {
           channelId: 'channel-restored',
+          sessionName: 'shell',
           snapshot,
         },
       },
@@ -202,7 +203,7 @@ describe('AndroidConnectionServiceTransportSocket', () => {
       generation: 'g-channel-dedupe',
       target,
       route: { mode: 'auto' as const },
-      channels: [{ channelId: 'channel-dedupe', state: 'open' as const }],
+      channels: [{ channelId: 'channel-dedupe', state: 'open' as const, sessionName: 'shell' }],
       lastHeartbeatAt: 3,
       lastActivityAt: 3,
       nextRetryAt: null,
@@ -210,7 +211,7 @@ describe('AndroidConnectionServiceTransportSocket', () => {
       muxReadyPayload,
     };
     plugin.readSnapshot.mockResolvedValue(snapshot);
-    const socket = new AndroidConnectionServiceTransportSocket(target, 'shell');
+    const socket = new AndroidConnectionServiceTransportSocket(target);
     const messages: string[] = [];
 
     await socket.start();
@@ -222,6 +223,7 @@ describe('AndroidConnectionServiceTransportSocket', () => {
       targetKey: target.targetKey,
       generation: snapshot.generation,
       channelId: 'channel-dedupe',
+      sessionName: 'shell',
       snapshot,
     });
 
@@ -234,7 +236,7 @@ describe('AndroidConnectionServiceTransportSocket', () => {
   it('does not expose a native service socket as a JS heartbeat owner', async () => {
     const { listeners, add } = listenerMock();
     plugin.addListener.mockImplementation(add);
-    const socket = new AndroidConnectionServiceTransportSocket(target, 'shell');
+    const socket = new AndroidConnectionServiceTransportSocket(target);
     const opened = vi.fn();
     socket.onopen = opened;
 
@@ -264,7 +266,7 @@ describe('AndroidConnectionServiceTransportSocket', () => {
   it('does not replay a duplicate native mux-ready generation', async () => {
     const { listeners, add } = listenerMock();
     plugin.addListener.mockImplementation(add);
-    const socket = new AndroidConnectionServiceTransportSocket(target, 'shell');
+    const socket = new AndroidConnectionServiceTransportSocket(target);
     const messages: string[] = [];
     socket.onmessage = (event) => messages.push(String(event.data));
 
@@ -317,7 +319,7 @@ describe('AndroidConnectionServiceTransportSocket', () => {
       error: null,
       muxReadyPayload: null,
     });
-    const socket = new AndroidConnectionServiceTransportSocket(target, 'shell');
+    const socket = new AndroidConnectionServiceTransportSocket(target);
     const messages: string[] = [];
     socket.onmessage = (event) => messages.push(String(event.data));
     socket.onopen = vi.fn();
@@ -343,7 +345,7 @@ describe('AndroidConnectionServiceTransportSocket', () => {
       error: null,
       muxReadyPayload: null,
     });
-    const socket = new AndroidConnectionServiceTransportSocket(target, 'shell');
+    const socket = new AndroidConnectionServiceTransportSocket(target);
     await socket.start();
     listeners.get('androidConnectionServerFrame')?.({
       targetKey: target.targetKey,
@@ -396,7 +398,7 @@ describe('AndroidConnectionServiceTransportSocket', () => {
       error: null,
       muxReadyPayload,
     });
-    const socket = new AndroidConnectionServiceTransportSocket(target, 'shell');
+    const socket = new AndroidConnectionServiceTransportSocket(target);
     const opened = vi.fn();
     const messages: string[] = [];
 
@@ -412,7 +414,7 @@ describe('AndroidConnectionServiceTransportSocket', () => {
   it('projects open once per healthy native generation', async () => {
     const { listeners, add } = listenerMock();
     plugin.addListener.mockImplementation(add);
-    const socket = new AndroidConnectionServiceTransportSocket(target, 'shell');
+    const socket = new AndroidConnectionServiceTransportSocket(target);
     const opened = vi.fn();
     const messages: string[] = [];
     socket.onopen = opened;
@@ -457,7 +459,7 @@ describe('AndroidConnectionServiceTransportSocket', () => {
   it('rejects stale mux-ready and payload frames after a new generation is ready', async () => {
     const { listeners, add } = listenerMock();
     plugin.addListener.mockImplementation(add);
-    const socket = new AndroidConnectionServiceTransportSocket(target, 'shell');
+    const socket = new AndroidConnectionServiceTransportSocket(target);
     const messages: string[] = [];
     socket.onopen = vi.fn();
     socket.onmessage = (event) => messages.push(String(event.data));
@@ -506,7 +508,7 @@ describe('AndroidConnectionServiceTransportSocket', () => {
   it('rejects stale channel events after a new generation is ready', async () => {
     const { listeners, add } = listenerMock();
     plugin.addListener.mockImplementation(add);
-    const socket = new AndroidConnectionServiceTransportSocket(target, 'shell');
+    const socket = new AndroidConnectionServiceTransportSocket(target);
     const messages: string[] = [];
     socket.onopen = vi.fn();
     socket.onmessage = (event) => messages.push(String(event.data));
@@ -536,6 +538,7 @@ describe('AndroidConnectionServiceTransportSocket', () => {
       targetKey: target.targetKey,
       generation: 'g-old',
       channelId: 'channel-1',
+      sessionName: 'shell',
       snapshot: snapshot('healthy', 'g-old'),
     });
     listeners.get('androidConnectionChannelMessage')?.({
@@ -557,7 +560,7 @@ describe('AndroidConnectionServiceTransportSocket', () => {
   it('accepts the next mux generation after native backoff reconnect', async () => {
     const { listeners, add } = listenerMock();
     plugin.addListener.mockImplementation(add);
-    const socket = new AndroidConnectionServiceTransportSocket(target, 'shell');
+    const socket = new AndroidConnectionServiceTransportSocket(target);
     const opened = vi.fn();
     const messages: string[] = [];
     socket.onopen = opened;
@@ -618,7 +621,7 @@ describe('AndroidConnectionServiceTransportSocket', () => {
   it('removes native listeners when projection failure disposes the socket', async () => {
     const { removes, add } = listenerMock();
     plugin.addListener.mockImplementation(add);
-    const socket = new AndroidConnectionServiceTransportSocket(target, 'shell');
+    const socket = new AndroidConnectionServiceTransportSocket(target);
 
     await socket.start();
     socket.reportFailure('terminal failure');
@@ -633,7 +636,7 @@ describe('AndroidConnectionServiceTransportSocket', () => {
   it('keeps target release explicit instead of releasing the service on UI close', async () => {
     const { add } = listenerMock();
     plugin.addListener.mockImplementation(add);
-    const socket = new AndroidConnectionServiceTransportSocket(target, 'shell');
+    const socket = new AndroidConnectionServiceTransportSocket(target);
 
     await socket.start();
     socket.close(1000, 'ui-detach');
@@ -645,7 +648,7 @@ describe('AndroidConnectionServiceTransportSocket', () => {
   });
 
   it('maps channel frames to typed service commands without owning transport', () => {
-    const socket = new AndroidConnectionServiceTransportSocket(target, 'shell');
+    const socket = new AndroidConnectionServiceTransportSocket(target);
     socket.send(JSON.stringify({
       type: 'mux-channel-message',
       payload: {
@@ -665,7 +668,7 @@ describe('AndroidConnectionServiceTransportSocket', () => {
   });
 
   it('maps mux-target-message frames to typed service commands without closing the transport', () => {
-    const socket = new AndroidConnectionServiceTransportSocket(target, 'shell');
+    const socket = new AndroidConnectionServiceTransportSocket(target);
     socket.send(JSON.stringify({
       type: 'mux-target-message',
       payload: {
@@ -686,7 +689,7 @@ describe('AndroidConnectionServiceTransportSocket', () => {
   it('ignores events projected for a different target', async () => {
     const { listeners, add } = listenerMock();
     plugin.addListener.mockImplementation(add);
-    const socket = new AndroidConnectionServiceTransportSocket(target, 'shell');
+    const socket = new AndroidConnectionServiceTransportSocket(target);
     const opened = vi.fn();
     socket.onopen = opened;
 
@@ -720,7 +723,7 @@ describe('AndroidConnectionServiceTransportSocket', () => {
   it('routes auth terminal errors as close events instead of scheduling reconnect', async () => {
     const { listeners, add } = listenerMock();
     plugin.addListener.mockImplementation(add);
-    const socket = new AndroidConnectionServiceTransportSocket(target, 'shell');
+    const socket = new AndroidConnectionServiceTransportSocket(target);
     const closed = vi.fn();
     socket.onclose = closed;
 
@@ -769,7 +772,7 @@ describe('AndroidConnectionServiceTransportSocket', () => {
       authType: 'password',
       tags: [],
       pinned: false,
-    }, 'shell');
+    });
     const closed = vi.fn();
     socket.onclose = closed;
     socket.onerror = vi.fn();
@@ -801,7 +804,7 @@ describe('AndroidConnectionServiceTransportSocket', () => {
       authType: 'password',
       tags: [],
       pinned: false,
-    }, 'shell');
+    });
     const closed = vi.fn();
     socket.onclose = closed;
     socket.onerror = vi.fn();

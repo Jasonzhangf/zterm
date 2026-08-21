@@ -62,7 +62,7 @@ describe('Android connection service platform wiring', () => {
     const source = readFileSync(resolve(import.meta.dirname, 'session-context-infra-facade-runtime.ts'), 'utf8');
 
     expect(source).toContain("Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android'");
-    expect(source).toContain('openAndroidConnectionServiceTransportSocket(host,');
+    expect(source).toContain('openAndroidConnectionServiceTransportSocket(host)');
   });
 });
 

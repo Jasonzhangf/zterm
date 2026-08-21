@@ -26,6 +26,7 @@ public final class AndroidConnectionServiceEventEnvelope {
     public final String targetKey;
     public final String generation;
     public final String channelId;
+    public final String sessionName;
     public final AndroidConnectionServiceServerFrameEvent serverFrame;
     public final AndroidConnectionServiceChannelMessageEvent channelMessage;
 
@@ -38,6 +39,7 @@ public final class AndroidConnectionServiceEventEnvelope {
         this.targetKey = b.targetKey;
         this.generation = b.generation;
         this.channelId = b.channelId;
+        this.sessionName = b.sessionName;
         this.serverFrame = b.serverFrame;
         this.channelMessage = b.channelMessage;
     }
@@ -64,6 +66,7 @@ public final class AndroidConnectionServiceEventEnvelope {
             case CHANNEL_OPENED:
                 json.put("generation", generation == null ? "" : generation);
                 json.put("channelId", channelId == null ? "" : channelId);
+                json.put("sessionName", sessionName == null ? "" : sessionName);
                 json.put("snapshot", snapshot == null ? JSONObject.NULL : snapshot.toJson());
                 break;
             case CHANNEL_CLOSED:
@@ -96,9 +99,10 @@ public final class AndroidConnectionServiceEventEnvelope {
     }
 
     public static AndroidConnectionServiceEventEnvelope channelOpened(
-        String targetKey, String generation, String channelId, AndroidConnectionServiceSnapshot snapshot) {
+        String targetKey, String generation, String channelId, String sessionName,
+        AndroidConnectionServiceSnapshot snapshot) {
         return new Builder(Kind.CHANNEL_OPENED).targetKey(targetKey).generation(generation).channelId(channelId)
-            .snapshot(snapshot).build();
+            .sessionName(sessionName).snapshot(snapshot).build();
     }
 
     public static AndroidConnectionServiceEventEnvelope channelClosed(
@@ -124,6 +128,7 @@ public final class AndroidConnectionServiceEventEnvelope {
         private String targetKey;
         private String generation;
         private String channelId;
+        private String sessionName;
         private AndroidConnectionServiceServerFrameEvent serverFrame;
         private AndroidConnectionServiceChannelMessageEvent channelMessage;
 
@@ -135,6 +140,7 @@ public final class AndroidConnectionServiceEventEnvelope {
         public Builder targetKey(String v) { this.targetKey = v; return this; }
         public Builder generation(String v) { this.generation = v; return this; }
         public Builder channelId(String v) { this.channelId = v; return this; }
+        public Builder sessionName(String v) { this.sessionName = v; return this; }
         public Builder serverFrame(AndroidConnectionServiceServerFrameEvent v) { this.serverFrame = v; return this; }
         public Builder channelMessage(AndroidConnectionServiceChannelMessageEvent v) { this.channelMessage = v; return this; }
         public AndroidConnectionServiceEventEnvelope build() {
@@ -155,6 +161,10 @@ public final class AndroidConnectionServiceEventEnvelope {
                     }
                     if (generation == null || generation.trim().isEmpty()) {
                         throw new IllegalArgumentException(kind.wireName() + " generation required");
+                    }
+                    if (kind == Kind.CHANNEL_OPENED
+                        && (sessionName == null || sessionName.trim().isEmpty())) {
+                        throw new IllegalArgumentException(kind.wireName() + " sessionName required");
                     }
                     break;
                 case SERVER_FRAME:

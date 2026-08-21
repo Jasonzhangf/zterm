@@ -1175,15 +1175,18 @@ public class AndroidConnectionService extends Service {
             if (channelId.trim().isEmpty()) {
                 throw new IllegalArgumentException("mux channel-opened channelId missing");
             }
-            stateMachine.dispatch(AndroidConnectionServiceEvent.channelOpened(
-                generation, channelId, System.currentTimeMillis()), System.currentTimeMillis());
             ChannelIntent channel = desiredChannels.get(channelId);
+            stateMachine.dispatch(AndroidConnectionServiceEvent.channelOpened(
+                generation, channelId, channel == null ? "" : channel.sessionName,
+                System.currentTimeMillis()), System.currentTimeMillis());
             if (channel != null) {
                 channel.opened = true;
             }
             drainPendingFrames(channelId);
             publishEvent(AndroidConnectionServiceEventEnvelope.channelOpened(
-                target.targetKey, generation, channelId, stateMachine.readSnapshot()));
+                target.targetKey, generation, channelId,
+                channel == null ? "" : channel.sessionName,
+                stateMachine.readSnapshot()));
             refreshNotification();
         }
 
@@ -1356,12 +1359,79 @@ public class AndroidConnectionService extends Service {
         }
 
         void sendChannelOpen(AndroidConnectionCommand command) {
+            ChannelIntent existing = desiredChannels.get(command.channelId);
+            if (existing != null && existing.opened
+                && isMuxReady()
+                && generation != null
+                && sameChannelIdentity(
+                    existing.sessionName, existing.options,
+                    command.sessionName, command.channelOptions)) {
+                drainPendingFrames(command.channelId);
+                publishEvent(AndroidConnectionServiceEventEnvelope.channelOpened(
+                    target.targetKey, generation, command.channelId,
+                    existing.sessionName,
+                    stateMachine == null ? AndroidConnectionServiceSnapshot.empty()
+                        : stateMachine.readSnapshot()));
+                refreshNotification();
+                return;
+            }
+            closeStaleChannelsForSession(
+                command.channelId, command.sessionName, command.channelOptions);
             desiredChannels.put(command.channelId,
                 new ChannelIntent(command.channelId, command.sessionName, command.channelOptions));
             if (!isMuxReady()) {
                 return;
             }
             sendChannelOpenFrame(command.channelId, command.sessionName, command.channelOptions, command);
+        }
+
+        private static String optionBackend(JSONObject options) {
+            if (options == null) return "";
+            String backend = options.optString("backend", "");
+            return backend == null ? "" : backend.trim();
+        }
+
+        private boolean sameChannelIdentity(
+            String leftSession, JSONObject leftOptions,
+            String rightSession, JSONObject rightOptions) {
+            String leftNormalized = leftSession == null ? "" : leftSession.trim();
+            String rightNormalized = rightSession == null ? "" : rightSession.trim();
+            if (leftNormalized.isEmpty() || !leftNormalized.equals(rightNormalized)) {
+                return false;
+            }
+            return optionBackend(leftOptions).equals(optionBackend(rightOptions));
+        }
+
+        private void closeStaleChannelsForSession(
+            String channelId, String sessionName, JSONObject options) {
+            String normalizedSessionName = sessionName == null ? "" : sessionName.trim();
+            if (normalizedSessionName.isEmpty()) {
+                return;
+            }
+            for (ChannelIntent channel : new ArrayList<>(desiredChannels.values())) {
+                if (channel.channelId.equals(channelId)
+                    || !sameChannelIdentity(
+                        channel.sessionName, channel.options,
+                        normalizedSessionName, options)) {
+                    continue;
+                }
+                java.util.ArrayDeque<JSONObject> queued = pendingFrames.remove(channel.channelId);
+                sendCloseChannel(AndroidConnectionCommand.closeChannel(
+                    target.targetKey, channel.channelId, "replaced-by-new-client-channel"));
+                if (queued != null && !queued.isEmpty()) {
+                    java.util.ArrayDeque<JSONObject> replacementQueue =
+                        pendingFrames.computeIfAbsent(channelId, key -> new java.util.ArrayDeque<>());
+                    for (JSONObject frame : queued) {
+                        while (replacementQueue.size()
+                            >= TARGET_RUNTIME_MAX_PENDING_FRAMES_PER_CHANNEL) {
+                            replacementQueue.removeFirst();
+                            droppedFrames.put(channelId,
+                                droppedFrames.getOrDefault(channelId, 0L) + 1L);
+                        }
+                        replacementQueue.addLast(frame);
+                    }
+                }
+            }
         }
 
         private void sendChannelOpenFrame(String channelId, String sessionName, JSONObject options,

@@ -37,16 +37,27 @@ public final class AndroidConnectionServiceSnapshot {
 
         public final String channelId;
         public final State state;
+        public final String sessionName;
 
         public Channel(String channelId, State state) {
             this.channelId = channelId;
             this.state = state;
+            this.sessionName = "";
+        }
+
+        public Channel(String channelId, State state, String sessionName) {
+            this.channelId = channelId;
+            this.state = state;
+            this.sessionName = sessionName == null ? "" : sessionName;
         }
 
         public JSONObject toJson() throws JSONException {
             JSONObject json = new JSONObject();
             json.put("channelId", channelId);
             json.put("state", state.wireName());
+            if (!sessionName.isEmpty()) {
+                json.put("sessionName", sessionName);
+            }
             return json;
         }
     }
@@ -153,17 +164,20 @@ public final class AndroidConnectionServiceSnapshot {
         if (a.size() != b.size()) return false;
         for (int i = 0; i < a.size(); i++) {
             if (!Objects.equals(a.get(i).channelId, b.get(i).channelId)
-                || a.get(i).state != b.get(i).state) return false;
+                || a.get(i).state != b.get(i).state
+                || !Objects.equals(a.get(i).sessionName, b.get(i).sessionName)) return false;
         }
         return true;
     }
 
     @Override
     public int hashCode() {
+        int channelHash = 0;
+        for (Channel channel : channels) channelHash = 31 * channelHash + Objects.hashCode(channel.sessionName);
         return Objects.hash(state, generation, target, route == null ? null : route.mode,
             route == null ? null : route.path, channels.size(), lastHeartbeatAt,
             lastActivityAt, nextRetryAt, error == null ? null : error.code,
-            error == null ? null : error.message, muxReadyPayloadJson);
+            error == null ? null : error.message, muxReadyPayloadJson, channelHash);
     }
 
     public static final class Builder {

@@ -113,6 +113,7 @@ public final class AndroidConnectionStateMachine {
                 if (snapshot.state != AndroidConnectionServiceSnapshot.State.MUX_READY
                     && snapshot.state != AndroidConnectionServiceSnapshot.State.CHANNELS_READY) return false;
                 if (event.channelId == null || event.channelId.trim().isEmpty()) return false;
+                if (event.sessionName == null || event.sessionName.trim().isEmpty()) return false;
                 List<AndroidConnectionServiceSnapshot.Channel> channels = new ArrayList<>(snapshot.channels);
                 boolean exists = false;
                 for (AndroidConnectionServiceSnapshot.Channel channel : channels) {
@@ -124,7 +125,8 @@ public final class AndroidConnectionStateMachine {
                 if (!exists) {
                     channels.add(new AndroidConnectionServiceSnapshot.Channel(
                         event.channelId,
-                        AndroidConnectionServiceSnapshot.Channel.State.OPEN));
+                        AndroidConnectionServiceSnapshot.Channel.State.OPEN,
+                        event.sessionName));
                 }
                 snapshot = copyWithState(snapshot.toBuilder()
                     .channels(channels)
@@ -141,7 +143,8 @@ public final class AndroidConnectionStateMachine {
                     if (channel.channelId.equals(event.channelId)) {
                         closedChannels.add(new AndroidConnectionServiceSnapshot.Channel(
                             channel.channelId,
-                            AndroidConnectionServiceSnapshot.Channel.State.CLOSED));
+                            AndroidConnectionServiceSnapshot.Channel.State.CLOSED,
+                            channel.sessionName));
                     } else {
                         closedChannels.add(channel);
                     }

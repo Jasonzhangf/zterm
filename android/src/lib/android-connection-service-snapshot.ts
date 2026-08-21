@@ -17,6 +17,7 @@ export type AndroidConnectionServiceState =
 export interface AndroidConnectionServiceChannelSnapshot {
   channelId: string;
   state: 'opening' | 'open' | 'closing' | 'closed';
+  sessionName?: string;
 }
 
 export interface AndroidConnectionServiceError {
