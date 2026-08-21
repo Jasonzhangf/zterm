@@ -797,7 +797,8 @@ public class AndroidConnectionService extends Service {
         volatile long lastPingAt;
         volatile long transportNetworkGeneration;
         volatile boolean stopped;
-        final Map<String, ChannelIntent> desiredChannels = new LinkedHashMap<>();
+        final Map<String, ChannelIntent> desiredChannels =
+            java.util.Collections.synchronizedMap(new LinkedHashMap<>());
 
         /** Per-channel pending frames waiting for transport to become ready. */
         private final java.util.Map<String, java.util.ArrayDeque<org.json.JSONObject>> pendingFrames =
@@ -1379,7 +1380,10 @@ public class AndroidConnectionService extends Service {
             ChannelIntent reusable = findOpenedChannelForIdentity(
                 command.sessionName, command.channelOptions);
             if (reusable != null && !reusable.channelId.equals(command.channelId)) {
+                // Drain both the reused channel and the requested id: frames may have
+                // been buffered against either before the reuse decision landed.
                 drainPendingFrames(reusable.channelId);
+                drainPendingFrames(command.channelId);
                 publishEvent(AndroidConnectionServiceEventEnvelope.channelOpened(
                     target.targetKey, generation, reusable.channelId,
                     reusable.sessionName,
@@ -1388,10 +1392,10 @@ public class AndroidConnectionService extends Service {
                 refreshNotification();
                 return;
             }
-            closeStaleChannelsForSession(
-                command.channelId, command.sessionName, command.channelOptions);
             desiredChannels.put(command.channelId,
                 new ChannelIntent(command.channelId, command.sessionName, command.channelOptions));
+            closeStaleChannelsForSession(
+                command.channelId, command.sessionName, command.channelOptions);
             if (!isMuxReady()) {
                 return;
             }
@@ -1399,12 +1403,14 @@ public class AndroidConnectionService extends Service {
         }
 
         private ChannelIntent findOpenedChannelForIdentity(String sessionName, JSONObject options) {
-            for (ChannelIntent channel : desiredChannels.values()) {
-                if (!channel.opened || !sameChannelIdentity(
-                    channel.sessionName, channel.options, sessionName, options)) {
-                    continue;
+            synchronized (desiredChannels) {
+                for (ChannelIntent channel : desiredChannels.values()) {
+                    if (!channel.opened || !sameChannelIdentity(
+                        channel.sessionName, channel.options, sessionName, options)) {
+                        continue;
+                    }
+                    return channel;
                 }
-                return channel;
             }
             return null;
         }
@@ -1432,7 +1438,11 @@ public class AndroidConnectionService extends Service {
             if (normalizedSessionName.isEmpty()) {
                 return;
             }
-            for (ChannelIntent channel : new ArrayList<>(desiredChannels.values())) {
+            List<ChannelIntent> snapshotCopy;
+            synchronized (desiredChannels) {
+                snapshotCopy = new ArrayList<>(desiredChannels.values());
+            }
+            for (ChannelIntent channel : snapshotCopy) {
                 if (channel.channelId.equals(channelId)
                     || !sameChannelIdentity(
                         channel.sessionName, channel.options,
@@ -1493,9 +1503,11 @@ public class AndroidConnectionService extends Service {
             if (!isMuxReady()) {
                 return;
             }
-            for (ChannelIntent channel : desiredChannels.values()) {
-                channel.opened = false;
-                sendChannelOpenFrame(channel.channelId, channel.sessionName, channel.options, null);
+            synchronized (desiredChannels) {
+                for (ChannelIntent channel : desiredChannels.values()) {
+                    channel.opened = false;
+                    sendChannelOpenFrame(channel.channelId, channel.sessionName, channel.options, null);
+                }
             }
         }
 
