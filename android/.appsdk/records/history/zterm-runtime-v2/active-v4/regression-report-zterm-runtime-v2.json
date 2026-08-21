@@ -1,0 +1,43 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/regression-report.schema.json",
+  "artifact_hash": "sha256:a021a660aab1dc2d4a35a7c3ef0ab453428d70111bb3f71da5de7c21c94c2c18",
+  "command": {
+    "args": [
+      "exec",
+      "vitest",
+      "run",
+      "src/server/terminal-message-runtime.test.ts",
+      "src/server/terminal-mirror-runtime.test.ts",
+      "src/server/daemon-buffer-publisher-runtime.test.ts",
+      "src/lib/runtime-architecture-v2.test.ts",
+      "src/lib/plugin-host/plugin-host-runtime.test.ts",
+      "src/pages/TerminalPage.render-isolation.test.tsx",
+      "src/App.dynamic-refresh.test.tsx",
+      "src/contexts/SessionContext.ws-refresh.test.tsx",
+      "--reporter=dot"
+    ],
+    "program": "pnpm",
+    "working_directory": "."
+  },
+  "created_at": "2026-08-18T11:00:00Z",
+  "failed": 0,
+  "input_hash": "sha256:a021a660aab1dc2d4a35a7c3ef0ab453428d70111bb3f71da5de7c21c94c2c18",
+  "module_id": "zterm-runtime-v2",
+  "passed": 299,
+  "producer": {
+    "adapter": "vitest",
+    "identity": "codex-zterm-v2-activev4-main-closeout-20260818T105400Z"
+  },
+  "public_api_hash": "sha256:42699f64b69d0e555a6b43baa29dd381e27c245b417f5c60bce8f7e6155e5abd",
+  "regression_report_id": "REGR-20260818-ZARCHV2-ACTIVEV4-MAIN-CLOSEOUT-001",
+  "result": "pass",
+  "scope_hash": "sha256:e939fc3be8c64425b047abeb47a1c108890be6427825360f742cb7b44edb9790",
+  "skipped": 0,
+  "source_commit": "86076987a70345d88b90070f0014e8b2f243ca01",
+  "suite_id": "zterm-runtime-v2-regression",
+  "test_characteristics": {
+    "blackbox": true,
+    "whitebox": true
+  },
+  "test_count": 299
+}

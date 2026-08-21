@@ -1,0 +1,30 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "evidence_id": "evid-20260818-zarchv2-activev4-mainmerged-verify-001",
+  "issue_id": "zterm-runtime-architecture-v2",
+  "experiment_id": "zterm-runtime-architecture-v2-active-v4",
+  "phase": "fix_candidate",
+  "kind": "gate",
+  "source_commit": "b941affb7c89021bb5662a7686fc52847a639e6c",
+  "artifact_hash": "sha256:35fa8b353330c1969f5f5147aeed65dfcf7775fb4e6295a39ac9bc714d4a43be",
+  "scope": {
+    "module_id": "zterm-runtime-v2",
+    "feature_id": "zterm_runtime_architecture_v2_appsdk_013_active_v4_final_gates",
+    "entrypoint": "appsdk verify android"
+  },
+  "producer": {
+    "adapter": "appsdk",
+    "identity": "appsdk-0.1.3"
+  },
+  "result": "pass",
+  "confidence": 1,
+  "confidence_rationale": "AppSDK 0.1.3 verify returns ok:true at merged main HEAD b941aff with stage controlled_verified and the locked 0.1.3 compiler digest sha256:e3c36ae2.",
+  "created_at": "2026-08-18T12:30:00Z",
+  "expires_at": "2026-11-15T00:00:00Z",
+  "input_hashes": [
+    "sha256:35fa8b353330c1969f5f5147aeed65dfcf7775fb4e6295a39ac9bc714d4a43be",
+    "git:b941affb7c89021bb5662a7686fc52847a639e6c",
+    "tree:327f27ca0c8d1daf6787c0925e53a26667c9258b"
+  ],
+  "scope_hash": "sha256:102415cdecb8ca6c30f1729adeb74eb566cbdf4c34098da9ded8f50656785a57"
+}

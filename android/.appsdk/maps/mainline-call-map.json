@@ -1,28 +1,17 @@
 {
   "schema_version": 1,
-  "lifecycle_id":"zterm-runtime-architecture-v2",
-  "entrypoint":"goal_confirmed",
-  "nodes":["goal_confirmed","governance_bound","playground_contracts","production_foundation_contracts","debug_plane","client_control_plane","client_data_plane","daemon_control_plane","daemon_data_plane","plugin_host","review_pass","sdk_binary_preflight","record_graph_verify","compile","promotion","active","protected","freeze","verify"],
-  "edges":[
-    {"from":"goal_confirmed","to":"governance_bound","owner":"appsdk::goal","relation_status":"active"},
-    {"from":"governance_bound","to":"playground_contracts","owner":"shared.node_contract","relation_status":"active"},
-    {"from":"playground_contracts","to":"production_foundation_contracts","owner":"shared.node_contract+shared.debug_contract+client.observability+daemon.observability","relation_status":"active"},
-    {"from":"production_foundation_contracts","to":"debug_plane","owner":"client.observability+daemon.observability","relation_status":"active"},
-    {"from":"playground_contracts","to":"debug_plane","owner":"client.observability+daemon.observability","relation_status":"active"},
-    {"from":"debug_plane","to":"client_control_plane","owner":"client.control_center","relation_status":"active"},
-    {"from":"client_control_plane","to":"client_data_plane","owner":"client.data_plane","relation_status":"active"},
-    {"from":"client_data_plane","to":"daemon_control_plane","owner":"daemon.control_center","relation_status":"active"},
-    {"from":"daemon_control_plane","to":"daemon_data_plane","owner":"daemon.data_plane","relation_status":"active"},
-    {"from":"daemon_data_plane","to":"plugin_host","owner":"client.plugin_host","relation_status":"active"},
-    {"from":"plugin_host","to":"review_pass","owner":"appsdk::review","relation_status":"active"},
-    {"from":"review_pass","to":"sdk_binary_preflight","owner":"appsdk::compiler","relation_status":"active"},
-    {"from":"sdk_binary_preflight","to":"record_graph_verify","owner":"appsdk::compiler","relation_status":"active"},
-    {"from":"record_graph_verify","to":"compile","owner":"appsdk::compiler","relation_status":"active"},
-    {"from":"compile","to":"promotion","owner":"appsdk::lifecycle","relation_status":"active"},
-    {"from":"promotion","to":"active","owner":"appsdk::publisher","relation_status":"active"},
-    {"from":"active","to":"protected","owner":"appsdk::freezer","relation_status":"active"},
-    {"from":"protected","to":"freeze","owner":"appsdk::freezer","relation_status":"active"},
-    {"from":"freeze","to":"verify","owner":"appsdk::verifier","relation_status":"active"},
-    {"from":"verify","to":"playground_contracts","owner":"appsdk::workspace","return_path":true,"relation_status":"active"}
+  "lifecycle_id": "appsdk-governance",
+  "chains": [
+    {"chain_id":"single-worker-v1","scenario_condition":"parallel_pair_disabled","entry_symbol":"assert_fix_merge_gate","terminal_symbol":"assert_single_merge_gate"},
+    {"chain_id":"parallel-worktree-v1","scenario_condition":"parallel_pair_enabled","entry_symbol":"assert_fix_merge_gate","terminal_symbol":"assert_parallel_merge_gate"}
+  ],
+  "edges": [
+    {"chain_id":"single-worker-v1","from":"effectiveness_verified","to":"mainline_merged","owner":"appsdk::fix_lifecycle","caller":"assert_fix_merge_gate","callee":"assert_single_merge_gate","path":"rust/src/main.rs","input_resource_id":"fix_effectiveness","output_resource_id":"mainline_merge","error_resource_id":"lifecycle_error"},
+    {"chain_id":"parallel-worktree-v1","from":"scenario_selected","to":"collaboration_claimed","owner":"appsdk::development_scenarios","caller":"assert_fix_merge_gate","callee":"assert_parallel_merge_gate","path":"rust/src/main.rs","input_resource_id":"development_scenarios","output_resource_id":"worker_collaboration","error_resource_id":"lifecycle_error"},
+    {"chain_id":"parallel-worktree-v1","from":"collaboration_claimed","to":"merge_queued","owner":"appsdk::collaboration","caller":"assert_parallel_merge_gate","callee":"read_record","path":"rust/src/main.rs","input_resource_id":"collaboration_index","output_resource_id":"merge_queue","error_resource_id":"lifecycle_error"},
+    {"chain_id":"parallel-worktree-v1","from":"merge_queued","to":"integration_verified","owner":"appsdk::merge_queue","caller":"assert_parallel_merge_gate","callee":"git_value","path":"rust/src/main.rs","input_resource_id":"merge_queue_state","output_resource_id":"integration_candidate","error_resource_id":"lifecycle_error"},
+    {"chain_id":"parallel-worktree-v1","from":"integration_verified","to":"remote_verified","owner":"appsdk::host_vcs","caller":"assert_parallel_merge_gate","callee":"git_ls_remote","path":"rust/src/main.rs","input_resource_id":"integration_candidate","output_resource_id":"mainline_receipt","error_resource_id":"lifecycle_error"},
+    {"chain_id":"parallel-worktree-v1","from":"remote_verified","to":"mainline_merged","owner":"appsdk::merge_queue","caller":"assert_parallel_merge_gate","callee":"read_record","path":"rust/src/main.rs","input_resource_id":"mainline_receipt","output_resource_id":"mainline_merge","error_resource_id":"lifecycle_error"},
+    {"chain_id":"shared-promotion-v1","from":"mainline_merged","to":"promotion","owner":"appsdk::lifecycle","caller":"assert_fix_lifecycle_graph","callee":"assert_fix_merge_gate","path":"rust/src/main.rs","input_resource_id":"mainline_merge","output_resource_id":"lifecycle_records","error_resource_id":"lifecycle_error"}
   ]
 }

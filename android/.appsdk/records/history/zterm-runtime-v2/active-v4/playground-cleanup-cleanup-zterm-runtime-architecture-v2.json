@@ -1,0 +1,8 @@
+{
+  "cleanup_id": "cleanup-zterm-runtime-architecture-v2",
+  "disposition": "archive_then_remove",
+  "status": "pending_authorization",
+  "removed_paths": [],
+  "archived_evidence_path": "protected/history/zterm-runtime-v2",
+  "created_at": "2026-08-16T00:05:08Z"
+}
