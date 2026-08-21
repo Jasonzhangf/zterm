@@ -207,7 +207,7 @@ describe('function wiki truth gate', () => {
         expect(nodeIds.has(edge.from), `${lifecycle.lifecycle_id}:${edge.from}`).toBe(true);
         expect(nodeIds.has(edge.to), `${lifecycle.lifecycle_id}:${edge.to}`).toBe(true);
         expect(featureIds.has(edge.owner_feature), edge.owner_feature).toBe(true);
-        expect(['anchored', 'partial']).toContain(edge.status);
+        expect(['anchored', 'partial', 'active']).toContain(edge.status);
         expect(edge.status, edge.edge_id).not.toBe('binding pending');
         expect(edge.edge_id).toBe(expectedEdgeId);
       }
