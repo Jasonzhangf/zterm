@@ -173,19 +173,13 @@ public final class AndroidConnectionServiceTransportTest {
             sendChannelOpen.invoke(runtime, AndroidConnectionCommand.openChannel(
                 "target-a", "channel-new", "shell", null));
 
-            assertEquals(3, sent.size());
+            assertEquals(1, sent.size());
             assertEquals("mux-channel-open", new JSONObject(sent.get(0)).getString("type"));
-            assertEquals("mux-channel-close", new JSONObject(sent.get(1)).getString("type"));
-            assertEquals("channel-old", new JSONObject(sent.get(1)).getJSONObject("payload")
-                .getString("channelId"));
-            assertEquals("mux-channel-open", new JSONObject(sent.get(2)).getString("type"));
-            assertEquals("channel-new", new JSONObject(sent.get(2)).getJSONObject("payload")
-                .getString("channelId"));
             Field desiredChannelsField = runtime.getClass().getDeclaredField("desiredChannels");
             desiredChannelsField.setAccessible(true);
             Map<?, ?> desiredChannels = (Map<?, ?>) desiredChannelsField.get(runtime);
-            assertTrue(desiredChannels.containsKey("channel-new"));
-            assertTrue(!desiredChannels.containsKey("channel-old"));
+            assertTrue(desiredChannels.containsKey("channel-old"));
+            assertTrue(!desiredChannels.containsKey("channel-new"));
         } finally {
             AndroidConnectionService.resetForTests();
         }
@@ -346,6 +340,55 @@ public final class AndroidConnectionServiceTransportTest {
 
             assertEquals(0, events.stream().filter(event ->
                 event.kind == AndroidConnectionServiceEventEnvelope.Kind.CHANNEL_OPENED).count());
+        } finally {
+            AndroidConnectionService.resetForTests();
+        }
+    }
+
+    @Test
+    public void webViewRecreationReusesExistingOpenedChannelWithoutWireOpen()
+        throws Exception {
+        AndroidConnectionService.resetForTests();
+        List<AndroidConnectionServiceEventEnvelope> events = new ArrayList<>();
+        AndroidConnectionService.registerListenerForTests(new AndroidConnectionServiceListener() {
+            @Override
+            public void onSnapshot(AndroidConnectionServiceSnapshot snapshot) {
+            }
+
+            @Override
+            public void onEvent(AndroidConnectionServiceEventEnvelope event) {
+                events.add(event);
+            }
+        });
+        try {
+            AndroidConnectionService service = new AndroidConnectionService();
+            Object runtime = newRuntime(service);
+            setField(runtime, "stateMachine", readyStateMachine());
+            setField(runtime, "generation", "gen-1");
+            setField(runtime, "transportNetworkGeneration", 0L);
+            setField(service, "networkGeneration", 0L);
+            List<String> sent = new ArrayList<>();
+            setField(runtime, "socket", fakeSocket(sent, true));
+            Method sendChannelOpen = runtime.getClass().getDeclaredMethod(
+                "sendChannelOpen", AndroidConnectionCommand.class);
+            sendChannelOpen.setAccessible(true);
+
+            sendChannelOpen.invoke(runtime, AndroidConnectionCommand.openChannel(
+                "target-a", "channel-original", "shell", null));
+            setDesiredChannelOpened(runtime, "channel-original", true);
+
+            // WebView recreation: new channelId requested for same session.
+            events.clear();
+            sent.clear();
+            sendChannelOpen.invoke(runtime, AndroidConnectionCommand.openChannel(
+                "target-a", "channel-recreated", "shell", null));
+
+            assertEquals(0, sent.size());
+            assertEquals(1, events.stream().filter(event ->
+                event.kind == AndroidConnectionServiceEventEnvelope.Kind.CHANNEL_OPENED).count());
+            assertEquals("channel-original", events.stream()
+                .filter(event -> event.kind == AndroidConnectionServiceEventEnvelope.Kind.CHANNEL_OPENED)
+                .findFirst().get().channelId);
         } finally {
             AndroidConnectionService.resetForTests();
         }

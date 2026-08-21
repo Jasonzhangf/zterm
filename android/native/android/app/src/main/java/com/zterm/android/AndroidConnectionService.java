@@ -1210,6 +1210,7 @@ public class AndroidConnectionService extends Service {
             if (channelId.trim().isEmpty()) {
                 throw new IllegalArgumentException("mux channel-closed channelId missing");
             }
+            desiredChannels.remove(channelId);
             stateMachine.dispatch(AndroidConnectionServiceEvent.channelClosed(
                 generation, channelId, payload.optString("reason", "closed")),
                 System.currentTimeMillis());
@@ -1375,6 +1376,18 @@ public class AndroidConnectionService extends Service {
                 refreshNotification();
                 return;
             }
+            ChannelIntent reusable = findOpenedChannelForIdentity(
+                command.sessionName, command.channelOptions);
+            if (reusable != null && !reusable.channelId.equals(command.channelId)) {
+                drainPendingFrames(reusable.channelId);
+                publishEvent(AndroidConnectionServiceEventEnvelope.channelOpened(
+                    target.targetKey, generation, reusable.channelId,
+                    reusable.sessionName,
+                    stateMachine == null ? AndroidConnectionServiceSnapshot.empty()
+                        : stateMachine.readSnapshot()));
+                refreshNotification();
+                return;
+            }
             closeStaleChannelsForSession(
                 command.channelId, command.sessionName, command.channelOptions);
             desiredChannels.put(command.channelId,
@@ -1383,6 +1396,17 @@ public class AndroidConnectionService extends Service {
                 return;
             }
             sendChannelOpenFrame(command.channelId, command.sessionName, command.channelOptions, command);
+        }
+
+        private ChannelIntent findOpenedChannelForIdentity(String sessionName, JSONObject options) {
+            for (ChannelIntent channel : desiredChannels.values()) {
+                if (!channel.opened || !sameChannelIdentity(
+                    channel.sessionName, channel.options, sessionName, options)) {
+                    continue;
+                }
+                return channel;
+            }
+            return null;
         }
 
         private static String optionBackend(JSONObject options) {
