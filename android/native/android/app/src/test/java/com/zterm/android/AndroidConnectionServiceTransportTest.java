@@ -100,6 +100,54 @@ public final class AndroidConnectionServiceTransportTest {
         assertEquals(1, pendingCount.invoke(runtime));
     }
 
+    @Test
+    public void channelOpenedPublishesExactlyOneTypedProjection() throws Exception {
+        AndroidConnectionService.resetForTests();
+        List<AndroidConnectionServiceEventEnvelope> events = new ArrayList<>();
+        AndroidConnectionService.registerListenerForTests(new AndroidConnectionServiceListener() {
+            @Override
+            public void onSnapshot(AndroidConnectionServiceSnapshot snapshot) {
+            }
+
+            @Override
+            public void onEvent(AndroidConnectionServiceEventEnvelope event) {
+                events.add(event);
+            }
+        });
+        try {
+            AndroidConnectionService service = new AndroidConnectionService();
+            Object runtime = newRuntime(service);
+            AndroidConnectionStateMachine stateMachine = readyStateMachine();
+            setField(runtime, "stateMachine", stateMachine);
+            setField(runtime, "generation", "gen-1");
+            Method handleChannelOpened = runtime.getClass().getDeclaredMethod(
+                "handleChannelOpened", JSONObject.class);
+            handleChannelOpened.setAccessible(true);
+
+            handleChannelOpened.invoke(runtime, new JSONObject()
+                .put("channelId", "channel-a")
+                .put("sessionName", "shell"));
+
+            assertEquals(1, events.stream().filter(event ->
+                event.kind == AndroidConnectionServiceEventEnvelope.Kind.CHANNEL_OPENED).count());
+            assertEquals(0, events.stream().filter(event ->
+                event.kind == AndroidConnectionServiceEventEnvelope.Kind.SERVER_FRAME).count());
+        } finally {
+            AndroidConnectionService.resetForTests();
+        }
+    }
+
+    private static AndroidConnectionStateMachine readyStateMachine() {
+        AndroidConnectionStateMachine stateMachine = new AndroidConnectionStateMachine(snapshot -> { });
+        stateMachine.dispatch(AndroidConnectionServiceEvent.bindTarget(target()), 1L);
+        stateMachine.dispatch(AndroidConnectionServiceEvent.transportOpening("gen-1"), 2L);
+        stateMachine.dispatch(AndroidConnectionServiceEvent.muxReady(
+            "gen-1",
+            "{\"version\":1,\"capabilities\":{\"channelEnvelope\":true,\"targetMessages\":true}}"),
+            3L);
+        return stateMachine;
+    }
+
     private static Object newRuntime(AndroidConnectionService service) throws Exception {
         Class<?> runtimeClass = Class.forName(
             "com.zterm.android.AndroidConnectionService$TargetRuntime");

@@ -1184,8 +1184,6 @@ public class AndroidConnectionService extends Service {
             drainPendingFrames(channelId);
             publishEvent(AndroidConnectionServiceEventEnvelope.channelOpened(
                 target.targetKey, generation, channelId, stateMachine.readSnapshot()));
-            publishServerFrame(AndroidConnectionServiceServerFrameEvent.Kind.MUX_TARGET_MESSAGE,
-                payload);
             refreshNotification();
         }
 
