@@ -11,7 +11,7 @@ import org.json.JSONObject;
  * through this surface — those data classes own their own channels.
  */
 public final class AndroidConnectionCommand {
-    public enum Type { SET_ROUTE_POLICY, BIND_TARGET, RELEASE_TARGET, OPEN_CHANNEL, CHANNEL_MESSAGE, CHANNEL_BINARY, CLOSE_CHANNEL, TARGET_MESSAGE }
+    public enum Type { SET_ROUTE_POLICY, BIND_TARGET, RELEASE_TARGET, OPEN_CHANNEL, CHANNEL_MESSAGE, CHANNEL_BINARY, CLOSE_CHANNEL, TARGET_MESSAGE, PULSE_SESSION_NOTIFICATION }
 
     public final Type type;
     public final AndroidConnectionServiceRoutePolicy policy;
@@ -102,7 +102,7 @@ public final class AndroidConnectionCommand {
 
     public static AndroidConnectionCommand pulseSessionNotification(String targetKey, String channelId) {
         return new AndroidConnectionCommand(Type.PULSE_SESSION_NOTIFICATION, null, null, null,
-            targetKey, null, channelId, null, null, null);
+            targetKey, null, channelId, null, null, null, null, null);
     }
 
     public JSONObject toJson() throws JSONException {

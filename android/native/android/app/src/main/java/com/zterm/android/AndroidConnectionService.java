@@ -111,6 +111,9 @@ public class AndroidConnectionService extends Service {
     private final Map<String, Long> notificationPulseGenerations = new ConcurrentHashMap<>();
     private String clientInstanceId;
 
+    /** Maximum per-channel pending frame window for transient transport outages. */
+    static final int TARGET_RUNTIME_MAX_PENDING_FRAMES_PER_CHANNEL = 256;
+
     @Override
     public void onCreate() {
         super.onCreate();
@@ -796,6 +799,12 @@ public class AndroidConnectionService extends Service {
         volatile boolean stopped;
         final Map<String, ChannelIntent> desiredChannels = new LinkedHashMap<>();
 
+        /** Per-channel pending frames waiting for transport to become ready. */
+        private final java.util.Map<String, java.util.ArrayDeque<org.json.JSONObject>> pendingFrames =
+            new java.util.LinkedHashMap<>();
+        /** Per-channel dropped-frame counters (overflow / typed rejection). */
+        private final java.util.Map<String, Long> droppedFrames = new java.util.LinkedHashMap<>();
+
         TargetRuntime(AndroidConnectionServiceTarget target, AndroidConnectionServiceRoutePolicy routePolicy) {
             this.target = target;
             this.routePolicy = routePolicy == null ? AndroidConnectionServiceRoutePolicy.auto() : routePolicy;
@@ -1172,6 +1181,7 @@ public class AndroidConnectionService extends Service {
             if (channel != null) {
                 channel.opened = true;
             }
+            drainPendingFrames(channelId);
             publishEvent(AndroidConnectionServiceEventEnvelope.channelOpened(
                 target.targetKey, generation, channelId, stateMachine.readSnapshot()));
             publishServerFrame(AndroidConnectionServiceServerFrameEvent.Kind.MUX_TARGET_MESSAGE,
@@ -1246,16 +1256,118 @@ public class AndroidConnectionService extends Service {
             }
         }
 
+        private void sendOrQueue(JSONObject frame, String channelId,
+                                 AndroidConnectionCommand source) {
+            sendOrQueue(frame, channelId, source, false);
+        }
+
+        private void sendOrQueue(JSONObject frame, String channelId,
+                                 AndroidConnectionCommand source,
+                                 boolean requireOpenedChannel) {
+            WebSocket current = socket;
+            if (stopped) {
+                publishFrameRejected(source, "frame-dropped-transport-retired", "target stopped");
+                return;
+            }
+            if (current != null && generation != null
+                && transportNetworkGeneration == networkGeneration
+                && isMuxReady()
+                && (channelId == null
+                    || !requireOpenedChannel || isChannelOpened(channelId))) {
+                try {
+                    boolean enqueued = current.send(frame.toString());
+                    if (!enqueued) {
+                        transportFailure("websocket-send", "mux frame not enqueued");
+                    }
+                } catch (RuntimeException error) {
+                    transportFailure("websocket-send", String.valueOf(error.getMessage()));
+                }
+                return;
+            }
+            if (channelId == null || channelId.trim().isEmpty()) {
+                publishFrameRejected(source, "frame-dropped-transport-pending",
+                    "transport not ready for target-level frame");
+                return;
+            }
+            String safeChannelId = channelId.trim();
+            java.util.ArrayDeque<JSONObject> queue = pendingFrames.get(safeChannelId);
+            if (queue == null) {
+                queue = new java.util.ArrayDeque<>();
+                pendingFrames.put(safeChannelId, queue);
+            }
+            if (queue.size() >= TARGET_RUNTIME_MAX_PENDING_FRAMES_PER_CHANNEL) {
+                droppedFrames.put(safeChannelId,
+                    droppedFrames.getOrDefault(safeChannelId, 0L) + 1L);
+                publishFrameRejected(source, "frame-dropped-pending-overflow",
+                    "pending frame window exceeded " + TARGET_RUNTIME_MAX_PENDING_FRAMES_PER_CHANNEL);
+                return;
+            }
+            queue.addLast(frame);
+        }
+
+        private boolean isChannelOpened(String channelId) {
+            ChannelIntent channel = desiredChannels.get(channelId);
+            return channel != null && channel.opened;
+        }
+
+        private void publishFrameRejected(AndroidConnectionCommand source, String code, String message) {
+            if (source == null) {
+                publishEvent(AndroidConnectionServiceEventEnvelope.physicalError(code, message));
+            } else {
+                publishEvent(AndroidConnectionServiceEventEnvelope.commandRejected(source, code, message));
+            }
+        }
+
+        private void drainPendingFrames(String channelId) {
+            WebSocket current = socket;
+            if (current == null || generation == null
+                || transportNetworkGeneration != networkGeneration) {
+                return;
+            }
+            java.util.ArrayDeque<JSONObject> queue = pendingFrames.get(channelId);
+            if (queue == null) {
+                return;
+            }
+            while (!queue.isEmpty()) {
+                JSONObject frame = queue.peekFirst();
+                try {
+                    if (!current.send(frame.toString())) {
+                        transportFailure("websocket-send", "mux frame not enqueued during drain");
+                        return;
+                    }
+                    queue.removeFirst();
+                } catch (RuntimeException error) {
+                    transportFailure("websocket-send", String.valueOf(error.getMessage()));
+                    return;
+                }
+            }
+            pendingFrames.remove(channelId);
+            droppedFrames.remove(channelId);
+        }
+
+        int pendingFrameCountForTests() {
+            int count = 0;
+            for (java.util.ArrayDeque<JSONObject> queue : pendingFrames.values()) {
+                count += queue.size();
+            }
+            return count;
+        }
+
+        long droppedFrameCountForTests(String channelId) {
+            return droppedFrames.getOrDefault(channelId, 0L);
+        }
+
         void sendChannelOpen(AndroidConnectionCommand command) {
             desiredChannels.put(command.channelId,
                 new ChannelIntent(command.channelId, command.sessionName, command.channelOptions));
             if (!isMuxReady()) {
                 return;
             }
-            sendChannelOpenFrame(command.channelId, command.sessionName, command.channelOptions);
+            sendChannelOpenFrame(command.channelId, command.sessionName, command.channelOptions, command);
         }
 
-        private void sendChannelOpenFrame(String channelId, String sessionName, JSONObject options) {
+        private void sendChannelOpenFrame(String channelId, String sessionName, JSONObject options,
+                                          AndroidConnectionCommand source) {
             JSONObject frame = new JSONObject();
             try {
                 frame.put("type", "mux-channel-open");
@@ -1272,7 +1384,7 @@ public class AndroidConnectionService extends Service {
             } catch (JSONException error) {
                 throw new IllegalArgumentException("channel-open serialization failed", error);
             }
-            send(frame);
+            sendOrQueue(frame, channelId, source);
         }
 
         private boolean isMuxReady() {
@@ -1291,7 +1403,7 @@ public class AndroidConnectionService extends Service {
             }
             for (ChannelIntent channel : desiredChannels.values()) {
                 channel.opened = false;
-                sendChannelOpenFrame(channel.channelId, channel.sessionName, channel.options);
+                sendChannelOpenFrame(channel.channelId, channel.sessionName, channel.options, null);
             }
         }
 
@@ -1311,14 +1423,16 @@ public class AndroidConnectionService extends Service {
                 transportFailure("channel-message", String.valueOf(error.getMessage()));
                 return;
             }
-            send(frame);
+            sendOrQueue(frame, channelId,
+                AndroidConnectionCommand.channelMessage(target.targetKey, channelId, message), true);
         }
 
         void sendChannelBinary(String channelId, String dataBase64) {
             if (dataBase64 == null || dataBase64.isEmpty()) {
                 throw new IllegalArgumentException("channel binary data is required");
             }
-            send(buildBinaryFrame(channelId, dataBase64));
+            sendOrQueue(buildBinaryFrame(channelId, dataBase64), channelId,
+                AndroidConnectionCommand.channelBinary(target.targetKey, channelId, dataBase64), true);
         }
 
         void sendTargetMessage(String requestId, JSONObject message) {
@@ -1338,10 +1452,12 @@ public class AndroidConnectionService extends Service {
                 transportFailure("target-message", String.valueOf(error.getMessage()));
                 return;
             }
-            send(frame);
+            sendOrQueue(frame, null,
+                AndroidConnectionCommand.targetMessage(target.targetKey, requestId, message));
         }
         void sendCloseChannel(AndroidConnectionCommand command) {
             desiredChannels.remove(command.channelId);
+            pendingFrames.remove(command.channelId);
             if (!isMuxReady()) {
                 return;
             }
@@ -1355,7 +1471,7 @@ public class AndroidConnectionService extends Service {
             } catch (JSONException error) {
                 throw new IllegalArgumentException("channel-close serialization failed", error);
             }
-            send(frame);
+            sendOrQueue(frame, command.channelId, command);
         }
 
         private void scheduleBackoff() {
@@ -1473,6 +1589,8 @@ public class AndroidConnectionService extends Service {
         void close(String reason) {
             stopped = true;
             desiredChannels.clear();
+            pendingFrames.clear();
+            droppedFrames.clear();
             closeQuietly(socket);
             socket = null;
             generation = null;
