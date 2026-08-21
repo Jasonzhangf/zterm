@@ -378,17 +378,48 @@ public final class AndroidConnectionServiceTransportTest {
             setDesiredChannelOpened(runtime, "channel-original", true);
 
             // WebView recreation: new channelId requested for same session.
+            // Queue a frame under the requested id first so we can verify the
+            // reuse path drains it along with the reused channel's queue.
+            JSONObject queuedMessage = new JSONObject().put("type", "mux-channel-message")
+                .put("payload", new JSONObject().put("channelId", "channel-recreated"));
+            Method sendOrQueue = runtime.getClass().getDeclaredMethod(
+                "sendOrQueue", JSONObject.class, String.class,
+                AndroidConnectionCommand.class, boolean.class);
+            sendOrQueue.setAccessible(true);
+            sendOrQueue.invoke(runtime, queuedMessage, "channel-recreated",
+                AndroidConnectionCommand.channelMessage(
+                    "target-a", "channel-recreated", new JSONObject()), true);
+
             events.clear();
             sent.clear();
             sendChannelOpen.invoke(runtime, AndroidConnectionCommand.openChannel(
                 "target-a", "channel-recreated", "shell", null));
 
-            assertEquals(0, sent.size());
+            assertEquals(0, events.stream().filter(event ->
+                event.kind == AndroidConnectionServiceEventEnvelope.Kind.SERVER_FRAME).count());
             assertEquals(1, events.stream().filter(event ->
                 event.kind == AndroidConnectionServiceEventEnvelope.Kind.CHANNEL_OPENED).count());
             assertEquals("channel-original", events.stream()
                 .filter(event -> event.kind == AndroidConnectionServiceEventEnvelope.Kind.CHANNEL_OPENED)
                 .findFirst().get().channelId);
+            Field pendingFramesField = runtime.getClass().getDeclaredField("pendingFrames");
+            pendingFramesField.setAccessible(true);
+            @SuppressWarnings("unchecked")
+            Map<String, java.util.ArrayDeque<JSONObject>> pendingFrames =
+                (Map<String, java.util.ArrayDeque<JSONObject>>) pendingFramesField.get(runtime);
+            assertTrue(!pendingFrames.containsKey("channel-recreated"));
+            // The frame queued under the requested id must have drained to wire
+            // (sent contains the mux-channel-message frame).
+            assertTrue(sent.size() >= 1);
+            assertTrue(sent.stream().anyMatch(frame -> {
+                try {
+                    return new JSONObject(frame).getString("type").equals("mux-channel-message")
+                        && new JSONObject(frame).getJSONObject("payload")
+                            .getString("channelId").equals("channel-recreated");
+                } catch (Exception error) {
+                    return false;
+                }
+            }));
         } finally {
             AndroidConnectionService.resetForTests();
         }

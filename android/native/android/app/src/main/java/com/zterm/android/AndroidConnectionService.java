@@ -614,10 +614,12 @@ public class AndroidConnectionService extends Service {
             if (!runtime.isMuxReady()) {
                 continue;
             }
-            for (TargetRuntime.ChannelIntent channel : runtime.desiredChannels.values()) {
-                if (channel.opened && nonEmpty(channel.sessionName)) {
-                    sessions.add(new NotificationSessionAction(
-                        runtime.target.targetKey, channel.channelId, channel.sessionName));
+            synchronized (runtime.desiredChannels) {
+                for (TargetRuntime.ChannelIntent channel : runtime.desiredChannels.values()) {
+                    if (channel.opened && nonEmpty(channel.sessionName)) {
+                        sessions.add(new NotificationSessionAction(
+                            runtime.target.targetKey, channel.channelId, channel.sessionName));
+                    }
                 }
             }
         }
