@@ -33,8 +33,18 @@ import { sendAndroidConnectionCommand } from '../plugins/AndroidConnectionServic
 
 
 
-const SESSION_HANDSHAKE_TIMEOUT_MS = 4000;
-const SESSION_TERMINAL_READY_TIMEOUT_MS = 10000;
+// Stopgap: 0.1.3.2678 was killing the mux handshake at the 4s mark even when
+// the daemon snapshot had already reported mux-ready and a healthy channel
+// (live target daemon produces ~2-3s hello/mux-ready/channel-opened). The
+// old 4s window turned every channel open into a "terminal mux channel open
+// timeout" -> target failure -> 4s reconnect loop. Raise both budgets so the
+// adapter has time to project the native snapshot, and so a slow but healthy
+// open path never tears down the physical transport. Once the long-term
+// native snapshot projection fix lands in 0.1.3.2685+ these can drop back to
+// the production values, but they must remain higher than the original
+// bound for at least one cycle.
+const SESSION_HANDSHAKE_TIMEOUT_MS = 15000;
+const SESSION_TERMINAL_READY_TIMEOUT_MS = 20000;
 const ACTIVE_TRANSPORT_STALE_ACTIVITY_MS = 2500;
 const DEFAULT_TERMINAL_SESSION_VIEWPORT = {
   cols: 80,
