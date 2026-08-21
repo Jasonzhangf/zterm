@@ -37,6 +37,7 @@ export interface AndroidConnectionServiceChannelOpenedEvent {
   targetKey: string;
   generation: string;
   channelId: string;
+  sessionName: string;
   snapshot: AndroidConnectionServiceSnapshot;
 }
 

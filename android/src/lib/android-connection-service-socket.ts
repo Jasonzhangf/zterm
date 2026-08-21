@@ -55,7 +55,7 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
   private projectedChannelsGeneration: string | null = null;
   private openProjectionScheduled = false;
 
-  constructor(target: AndroidConnectionServiceTarget, _sessionName: string) {
+  constructor(target: AndroidConnectionServiceTarget) {
     this.targetKey = target.targetKey;
     this.readyState = WebSocket.CONNECTING;
   }
@@ -261,7 +261,12 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
     }
     this.readySnapshot = event.snapshot;
     this.readyChannelIds.add(event.channelId);
-    this.projectChannelOpened(event.generation, event.channelId, event.snapshot);
+    this.projectChannelOpened(
+      event.generation,
+      event.channelId,
+      event.sessionName,
+      event.snapshot,
+    );
   }
 
   private dispatchChannelMessage(event: AndroidConnectionServiceChannelMessage) {
@@ -320,6 +325,7 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
   private projectChannelOpened(
     generation: string,
     channelId: string,
+    sessionName: string,
     snapshot: AndroidConnectionServiceSnapshot,
   ) {
     if (!this.onmessage || generation !== this.readyGeneration) return;
@@ -334,6 +340,7 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
         type: 'mux-channel-opened',
         payload: {
           channelId,
+          sessionName,
           snapshot,
         },
       }),
@@ -359,7 +366,16 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
       }
       if (this.readySnapshot) {
         for (const channelId of this.readyChannelIds) {
-          this.projectChannelOpened(generation, channelId, this.readySnapshot);
+          const channelSessionName = this.readySnapshot.channels.find(
+            (channel) => channel.channelId === channelId,
+          )?.sessionName;
+          if (!channelSessionName) continue;
+          this.projectChannelOpened(
+            generation,
+            channelId,
+            channelSessionName,
+            this.readySnapshot,
+          );
         }
       }
     });

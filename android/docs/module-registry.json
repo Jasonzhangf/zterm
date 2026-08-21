@@ -3310,15 +3310,13 @@
       "owner_feature": "client.android_connection_service",
       "responsibility": "Sole Android native owner of the physical WebSocket transport, route auth, mux handshake, heartbeat, network-generation validation, reconnect/backoff, and desired route policy. UI never owns transport, heartbeat, or reconnect. (Slice status: design until native transport ownership is installed and verified.)",
       "owned_resources": [
-        "resource.android_notification_projection"
-      ],
-      "consumed_resources": [],
-      "pending_resources": [
+        "resource.android_notification_projection",
         "resource.android_connection_service",
         "resource.client_connection_service_ipc",
-        "resource.client_service_snapshot",
-        "resource.client_manual_route_policy"
+        "resource.client_service_snapshot"
       ],
+      "consumed_resources": [],
+      "pending_resources": [],
       "public_interfaces": [
         "docs/goals/connection-service-owner-migration-plan.md",
         "docs/testing/connection-service-owner-test-design.md"

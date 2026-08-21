@@ -3363,7 +3363,7 @@
         "docs/testing/connection-service-owner-test-design.md",
         "src/lib/edge-registry-truth.test.ts"
       ],
-      "status": "design"
+      "status": "active"
     },
     {
       "edge_id": "edge.client.connection_service_ipc_to_android_connection_service",
@@ -3400,7 +3400,7 @@
         "docs/testing/connection-service-owner-test-design.md",
         "src/lib/edge-registry-truth.test.ts"
       ],
-      "status": "design"
+      "status": "active"
     },
     {
       "edge_id": "edge.client.session_activity_to_android_notification_projection",

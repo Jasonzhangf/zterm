@@ -3684,10 +3684,10 @@
     {
       "resource_id": "resource.android_connection_service",
       "resource_type": "platform_client_truth",
-      "status": "design",
+      "status": "active",
       "identity": "Native Android foreground service that owns the physical WebSocket transport, mux handshake, heartbeat, network-generation validation, reconnect/backoff, and desired route policy for the Android client.",
       "owner_feature": "client.android_connection_service",
-      "truth_store": "native/android/app/src/main/java/com/zterm/android/AndroidConnectionService.java (target owner; pending slice).",
+      "truth_store": "native/android/app/src/main/java/com/zterm/android/AndroidConnectionService.java (target owner; active).",
       "allowed_operations": [
         "open_physical_transport",
         "reuse_physical_transport",
@@ -3747,10 +3747,10 @@
     {
       "resource_id": "resource.client_connection_service_ipc",
       "resource_type": "platform_client_truth",
-      "status": "design",
+      "status": "active",
       "identity": "Typed Capacitor IPC bridge between the WebView/React UI and the native AndroidConnectionService; carries only control-plane commands and snapshot/event payloads.",
       "owner_feature": "client.android_connection_service",
-      "truth_store": "native/android/app/src/main/java/com/zterm/android/AndroidConnectionServicePlugin.java (target owner; pending slice).",
+      "truth_store": "native/android/app/src/main/java/com/zterm/android/AndroidConnectionServicePlugin.java (target owner; active).",
       "allowed_operations": [
         "send_set_manual_route_policy",
         "send_bind_target",
@@ -3800,10 +3800,10 @@
     {
       "resource_id": "resource.client_service_snapshot",
       "resource_type": "platform_client_truth",
-      "status": "design",
+      "status": "active",
       "identity": "Immutable projection of the AndroidConnectionService state at the moment of capture; consumed by the UI to render only.",
       "owner_feature": "client.android_connection_service",
-      "truth_store": "src/lib/android-connection-service-snapshot.ts (target owner; pending slice).",
+      "truth_store": "src/lib/android-connection-service-snapshot.ts (target owner; active).",
       "allowed_operations": [
         "project_state",
         "project_generation",

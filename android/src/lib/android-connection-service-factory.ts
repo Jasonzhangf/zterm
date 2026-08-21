@@ -24,10 +24,9 @@ export function buildAndroidConnectionServiceTarget(host: Host): AndroidConnecti
 
 export function openAndroidConnectionServiceTransportSocket(
   host: Host,
-  sessionName: string,
 ): BridgeTransportSocket {
   const target = buildAndroidConnectionServiceTarget(host);
-  const socket = new AndroidConnectionServiceTransportSocket(target, sessionName);
+  const socket = new AndroidConnectionServiceTransportSocket(target);
   const startup = socket.start();
   startup.then(
     () => {

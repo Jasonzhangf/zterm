@@ -1351,18 +1351,25 @@
     },
     {
       "module_id": "client.connection_service",
-      "status": "design",
+      "status": "active",
       "owner": "client.connection_service",
       "owned_paths": [
         "src/lib/android-connection-service-commands.ts",
         "src/lib/android-connection-service-snapshot.ts",
         "src/lib/android-connection-service-factory.ts",
         "src/lib/android-connection-service-socket.ts",
+        "src/lib/android-connection-service-socket.test.ts",
         "src/plugins/AndroidConnectionServicePlugin.ts",
         "src/contexts/android-connection-service-runtime.ts",
         "native/android/app/src/main/java/com/zterm/android/AndroidConnectionService.java",
+        "native/android/app/src/main/java/com/zterm/android/AndroidConnectionServiceEvent.java",
+        "native/android/app/src/main/java/com/zterm/android/AndroidConnectionServiceEventEnvelope.java",
+        "native/android/app/src/main/java/com/zterm/android/AndroidConnectionServiceSnapshot.java",
+        "native/android/app/src/main/java/com/zterm/android/AndroidConnectionStateMachine.java",
         "native/android/app/src/main/java/com/zterm/android/AndroidConnectionServicePlugin.java",
         "native/android/app/src/main/java/com/zterm/android/AndroidConnectionCommand.java",
+        "native/android/app/src/test/java/com/zterm/android/AndroidConnectionServiceTransportTest.java",
+        "native/android/app/src/test/java/com/zterm/android/AndroidConnectionStateMachineTest.java",
         "docs/testing/android-notification-session-actions-test-design.md"
       ],
       "forbidden_paths": [
