@@ -820,7 +820,8 @@ public class AndroidConnectionService extends Service {
         volatile long transportNetworkGeneration;
         volatile boolean stopped;
         volatile boolean sendRetryPending;
-        private boolean drainingPendingFrames;
+        private final java.util.Set<String> drainingPendingFrames =
+            new java.util.HashSet<>();
         private final java.util.ArrayDeque<DeferredSend> retryDeferredFrames =
             new java.util.ArrayDeque<>();
         private final java.util.Map<String, Long> channelLifecycleEpochs =
@@ -1417,6 +1418,20 @@ public class AndroidConnectionService extends Service {
                 if (retrySocket.send(frame.toString())) {
                     sendRetryPending = false;
                     consumeSuccessfulRetryFrame(frame, safeRetryChannelId);
+                    java.util.ArrayDeque<JSONObject> sameChannelQueue =
+                        safeRetryChannelId == null || safeRetryChannelId.isEmpty()
+                            ? null : pendingFrames.get(safeRetryChannelId);
+                    if (!isChannelLifecycleFrame(frame)
+                        && sameChannelQueue != null && !sameChannelQueue.isEmpty()) {
+                        if (drainingPendingFrames.contains(safeRetryChannelId)) {
+                            // The active drain owns this channel's remaining FIFO.
+                            return;
+                        }
+                        drainPendingFrames(safeRetryChannelId);
+                    }
+                    if (sendRetryPending) {
+                        return;
+                    }
                     DeferredSend deferred = retryDeferredFrames.pollFirst();
                     if (deferred != null) {
                         attemptSendWithRetry(
@@ -1428,12 +1443,12 @@ public class AndroidConnectionService extends Service {
                             retrySocket,
                             retryGeneration,
                             retryNetworkGeneration,
-                            deferred.lifecycleEpoch,
-                            1
-                        );
+                                deferred.lifecycleEpoch,
+                                1
+                            );
                     } else if (safeRetryChannelId != null && !safeRetryChannelId.isEmpty()
                         && !isChannelLifecycleFrame(frame)
-                        && !drainingPendingFrames) {
+                        && !drainingPendingFrames.contains(safeRetryChannelId)) {
                         drainPendingFrames(safeRetryChannelId);
                     }
                     return;
@@ -1548,7 +1563,7 @@ public class AndroidConnectionService extends Service {
         }
 
         private void drainPendingFrames(String channelId) {
-            if (drainingPendingFrames) {
+            if (!drainingPendingFrames.add(channelId)) {
                 return;
             }
             WebSocket current = socket;
@@ -1560,7 +1575,6 @@ public class AndroidConnectionService extends Service {
             if (queue == null) {
                 return;
             }
-            drainingPendingFrames = true;
             try {
                 while (!queue.isEmpty()) {
                     JSONObject frame = queue.peekFirst();
@@ -1579,7 +1593,7 @@ public class AndroidConnectionService extends Service {
                     }
                 }
             } finally {
-                drainingPendingFrames = false;
+                drainingPendingFrames.remove(channelId);
                 if (queue.isEmpty()) {
                     pendingFrames.remove(channelId);
                     droppedFrames.remove(channelId);

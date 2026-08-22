@@ -924,6 +924,60 @@ public final class AndroidConnectionServiceTransportTest {
     }
 
     @Test
+    public void crossChannelDeferredDoesNotBreakChannelFifo() throws Exception {
+        AndroidConnectionService.resetForTests();
+        List<AndroidConnectionServiceEventEnvelope> events = new ArrayList<>();
+        AndroidConnectionService.registerListenerForTests(new AndroidConnectionServiceListener() {
+            @Override public void onSnapshot(AndroidConnectionServiceSnapshot snapshot) { }
+            @Override public void onEvent(AndroidConnectionServiceEventEnvelope event) {
+                events.add(event);
+            }
+        });
+        try {
+            AndroidConnectionService service = new AndroidConnectionService();
+            Object runtime = newRuntime(service);
+            setField(runtime, "stateMachine", readyStateMachine());
+            setField(runtime, "generation", "gen-1");
+            setField(runtime, "transportNetworkGeneration", 0L);
+            setField(service, "networkGeneration", 0L);
+            Field pendingFramesField = runtime.getClass().getDeclaredField("pendingFrames");
+            pendingFramesField.setAccessible(true);
+            @SuppressWarnings("unchecked")
+            Map<String, java.util.ArrayDeque<JSONObject>> pendingFrames =
+                (Map<String, java.util.ArrayDeque<JSONObject>>) pendingFramesField.get(runtime);
+            java.util.ArrayDeque<JSONObject> queue = new java.util.ArrayDeque<>();
+            queue.addLast(new JSONObject().put("seq", 0));
+            queue.addLast(new JSONObject().put("seq", 1));
+            pendingFrames.put("channel-a", queue);
+            List<String> sent = new ArrayList<>();
+            setField(runtime, "socket", fakeSocketWithSendResults(sent, new boolean[]{true, true, true}));
+
+            setField(runtime, "sendRetryPending", true);
+            Method sendOrQueue = runtime.getClass().getDeclaredMethod(
+                "sendOrQueue", JSONObject.class, String.class,
+                AndroidConnectionCommand.class, boolean.class);
+            sendOrQueue.setAccessible(true);
+            sendOrQueue.invoke(runtime, new JSONObject().put("seq", "deferred"),
+                "channel-b",
+                AndroidConnectionCommand.channelMessage(
+                    "target-a", "channel-b", new JSONObject()), false);
+            setField(runtime, "sendRetryPending", false);
+            Method drainPendingFrames = runtime.getClass().getDeclaredMethod(
+                "drainPendingFrames", String.class);
+            drainPendingFrames.setAccessible(true);
+
+            drainPendingFrames.invoke(runtime, "channel-a");
+
+            assertEquals(0, new JSONObject(sent.get(0)).optInt("seq"));
+            assertEquals(1, new JSONObject(sent.get(1)).optInt("seq"));
+            assertEquals("deferred", new JSONObject(sent.get(2)).optString("seq"));
+            assertEquals(3, sent.size());
+        } finally {
+            AndroidConnectionService.resetForTests();
+        }
+    }
+
+    @Test
     public void drainPendingFramesUsesRetryOwnerInsteadOfImmediateTeardown() throws Exception {
         AndroidConnectionService.resetForTests();
         List<AndroidConnectionServiceEventEnvelope> events = new ArrayList<>();
