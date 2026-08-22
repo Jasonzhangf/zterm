@@ -7382,7 +7382,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     let screenshotTimeout: (() => void) | null = null;
     const realSetTimeout = window.setTimeout.bind(window);
     const setTimeoutSpy = vi.spyOn(window, 'setTimeout').mockImplementation(((handler: TimerHandler, timeout?: number, ...args: any[]) => {
-      if (timeout === 15000 && typeof handler === 'function' && screenshotTimeout === null) {
+      if (timeout === 15000 && typeof handler === 'function') {
         screenshotTimeout = () => (handler as (...invokeArgs: any[]) => void)(...args);
         return 9001 as unknown as number;
       }
