@@ -10,6 +10,9 @@ import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
+import android.os.Handler;
+import android.os.Looper;
 
 import okhttp3.WebSocket;
 import org.json.JSONObject;
@@ -63,6 +66,7 @@ public final class AndroidConnectionServiceTransportTest {
         });
         try {
             AndroidConnectionService service = new AndroidConnectionService();
+            setField(service, "workerHandler", new Handler(Looper.getMainLooper()));
             Object runtime = newRuntime(service);
             Method sendTargetMessage = runtime.getClass().getDeclaredMethod(
                 "sendTargetMessage", String.class, JSONObject.class);
@@ -117,6 +121,7 @@ public final class AndroidConnectionServiceTransportTest {
         });
         try {
             AndroidConnectionService service = new AndroidConnectionService();
+            setField(service, "workerHandler", new Handler(Looper.getMainLooper()));
             Object runtime = newRuntime(service);
             AndroidConnectionStateMachine stateMachine = readyStateMachine();
             setField(runtime, "stateMachine", stateMachine);
@@ -155,6 +160,7 @@ public final class AndroidConnectionServiceTransportTest {
         });
         try {
             AndroidConnectionService service = new AndroidConnectionService();
+            setField(service, "workerHandler", new Handler(Looper.getMainLooper()));
             Object runtime = newRuntime(service);
             AndroidConnectionStateMachine stateMachine = readyStateMachine();
             setField(runtime, "stateMachine", stateMachine);
@@ -204,6 +210,7 @@ public final class AndroidConnectionServiceTransportTest {
         });
         try {
             AndroidConnectionService service = new AndroidConnectionService();
+            setField(service, "workerHandler", new Handler(Looper.getMainLooper()));
             Object runtime = newRuntime(service);
             setField(runtime, "stateMachine", readyStateMachine());
             setField(runtime, "generation", "gen-1");
@@ -323,6 +330,7 @@ public final class AndroidConnectionServiceTransportTest {
         });
         try {
             AndroidConnectionService service = new AndroidConnectionService();
+            setField(service, "workerHandler", new Handler(Looper.getMainLooper()));
             Object runtime = newRuntime(service);
             setField(runtime, "stateMachine", readyStateMachine());
             setField(runtime, "generation", null);
@@ -365,6 +373,7 @@ public final class AndroidConnectionServiceTransportTest {
         });
         try {
             AndroidConnectionService service = new AndroidConnectionService();
+            setField(service, "workerHandler", new Handler(Looper.getMainLooper()));
             Object runtime = newRuntime(service);
             setField(runtime, "stateMachine", readyStateMachine());
             setField(runtime, "generation", "gen-1");
@@ -517,5 +526,103 @@ public final class AndroidConnectionServiceTransportTest {
             : target.getClass().getDeclaredField(name);
         field.setAccessible(true);
         field.set(target, value);
+    }
+
+    private static WebSocket fakeSocketWithSendResults(List<String> sent, boolean[] results) {
+        AtomicInteger callIndex = new AtomicInteger(0);
+        return (WebSocket) Proxy.newProxyInstance(
+            WebSocket.class.getClassLoader(),
+            new Class<?>[] { WebSocket.class },
+            (proxy, method, args) -> {
+                if ("send".equals(method.getName())) {
+                    int index = callIndex.getAndIncrement();
+                    sent.add(String.valueOf(args[0]));
+                    if (index < results.length) {
+                        return results[index];
+                    }
+                    return true;
+                }
+                if ("toString".equals(method.getName())) return "fake-websocket";
+                if (method.getReturnType() == boolean.class) return false;
+                if (method.getReturnType() == int.class) return 0;
+                return null;
+            });
+    }
+
+    @Test
+    public void singleSendFailureDoesNotTearDownConnection() throws Exception {
+        AndroidConnectionService.resetForTests();
+        List<AndroidConnectionServiceEventEnvelope> events = new ArrayList<>();
+        AndroidConnectionService.registerListenerForTests(new AndroidConnectionServiceListener() {
+            @Override public void onSnapshot(AndroidConnectionServiceSnapshot snapshot) { }
+            @Override public void onEvent(AndroidConnectionServiceEventEnvelope event) {
+                events.add(event);
+            }
+        });
+        try {
+            AndroidConnectionService service = new AndroidConnectionService();
+            Object runtime = newRuntime(service);
+            setField(runtime, "stateMachine", readyStateMachine());
+            setField(runtime, "generation", "gen-1");
+            setField(runtime, "transportNetworkGeneration", 0L);
+            setField(service, "networkGeneration", 0L);
+            List<String> sent = new ArrayList<>();
+            // First send fails, second send succeeds
+            WebSocket socket = fakeSocketWithSendResults(sent, new boolean[]{false, true});
+            setField(runtime, "socket", socket);
+            Method sendOrQueue = runtime.getClass().getDeclaredMethod(
+                "sendOrQueue", JSONObject.class, String.class,
+                AndroidConnectionCommand.class, boolean.class);
+            sendOrQueue.setAccessible(true);
+
+            // First frame fails to enqueue, retry succeeds in-place
+            sendOrQueue.invoke(runtime, new JSONObject().put("type", "mux-ping"),
+                null, (AndroidConnectionCommand) null, false);
+
+            // In-place retry: first attempt failed, second attempt succeeded
+            assertEquals("retry succeeded without teardown", 2, sent.size());
+            assertTrue("no transport failure event for single retryable failure",
+                events.stream().noneMatch(e -> e.kind == AndroidConnectionServiceEventEnvelope.Kind.PHYSICAL_ERROR));
+        } finally {
+            AndroidConnectionService.resetForTests();
+        }
+    }
+
+    @Test
+    public void threeConsecutiveFailuresTriggerTransportFailure() throws Exception {
+        AndroidConnectionService.resetForTests();
+        List<AndroidConnectionServiceEventEnvelope> events = new ArrayList<>();
+        AndroidConnectionService.registerListenerForTests(new AndroidConnectionServiceListener() {
+            @Override public void onSnapshot(AndroidConnectionServiceSnapshot snapshot) { }
+            @Override public void onEvent(AndroidConnectionServiceEventEnvelope event) {
+                events.add(event);
+            }
+        });
+        try {
+            AndroidConnectionService service = new AndroidConnectionService();
+            setField(service, "workerHandler", new Handler(Looper.getMainLooper()));
+            Object runtime = newRuntime(service);
+            setField(runtime, "stateMachine", readyStateMachine());
+            setField(runtime, "generation", "gen-1");
+            setField(runtime, "transportNetworkGeneration", 0L);
+            setField(service, "networkGeneration", 0L);
+            List<String> sent = new ArrayList<>();
+            // All 3 send attempts within a single call fail
+            WebSocket socket = fakeSocketWithSendResults(sent, new boolean[]{false, false, false});
+            setField(runtime, "socket", socket);
+            Method sendOrQueue = runtime.getClass().getDeclaredMethod(
+                "sendOrQueue", JSONObject.class, String.class,
+                AndroidConnectionCommand.class, boolean.class);
+            sendOrQueue.setAccessible(true);
+
+            // Single sendOrQueue call with all 3 attempts failing triggers teardown
+            sendOrQueue.invoke(runtime, new JSONObject().put("type", "mux-ping"),
+                null, (AndroidConnectionCommand) null, false);
+
+            assertTrue("persistent failure must escalate to transport failure",
+                events.stream().anyMatch(e -> e.kind == AndroidConnectionServiceEventEnvelope.Kind.PHYSICAL_ERROR));
+        } finally {
+            AndroidConnectionService.resetForTests();
+        }
     }
 }
