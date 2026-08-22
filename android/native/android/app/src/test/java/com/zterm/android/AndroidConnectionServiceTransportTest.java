@@ -978,6 +978,72 @@ public final class AndroidConnectionServiceTransportTest {
     }
 
     @Test
+    public void unavailableDrainDoesNotPoisonLaterFlush() throws Exception {
+        AndroidConnectionService.resetForTests();
+        AndroidConnectionService service = new AndroidConnectionService();
+        Object runtime = newRuntime(service);
+        setField(runtime, "stateMachine", readyStateMachine());
+        setField(runtime, "transportNetworkGeneration", 0L);
+        setField(service, "networkGeneration", 0L);
+        Field pendingFramesField = runtime.getClass().getDeclaredField("pendingFrames");
+        pendingFramesField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        Map<String, java.util.ArrayDeque<JSONObject>> pendingFrames =
+            (Map<String, java.util.ArrayDeque<JSONObject>>) pendingFramesField.get(runtime);
+        java.util.ArrayDeque<JSONObject> queue = new java.util.ArrayDeque<>();
+        queue.addLast(new JSONObject().put("seq", 0));
+        pendingFrames.put("channel-a", queue);
+        List<String> sent = new ArrayList<>();
+        Method drainPendingFrames = runtime.getClass().getDeclaredMethod(
+            "drainPendingFrames", String.class);
+        drainPendingFrames.setAccessible(true);
+
+        drainPendingFrames.invoke(runtime, "channel-a");
+        assertEquals(0, sent.size());
+
+        setField(runtime, "generation", "gen-1");
+        setField(runtime, "socket", fakeSocketWithSendResults(sent, new boolean[]{true}));
+        drainPendingFrames.invoke(runtime, "channel-a");
+
+        assertEquals(1, sent.size());
+        assertTrue(pendingFrames.get("channel-a") == null
+            || pendingFrames.get("channel-a").isEmpty());
+    }
+
+    @Test
+    public void emptyQueueDrainDoesNotPoisonLaterFlush() throws Exception {
+        AndroidConnectionService.resetForTests();
+        AndroidConnectionService service = new AndroidConnectionService();
+        Object runtime = newRuntime(service);
+        setField(runtime, "stateMachine", readyStateMachine());
+        setField(runtime, "generation", "gen-1");
+        setField(runtime, "transportNetworkGeneration", 0L);
+        setField(service, "networkGeneration", 0L);
+        Field pendingFramesField = runtime.getClass().getDeclaredField("pendingFrames");
+        pendingFramesField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        Map<String, java.util.ArrayDeque<JSONObject>> pendingFrames =
+            (Map<String, java.util.ArrayDeque<JSONObject>>) pendingFramesField.get(runtime);
+        List<String> sent = new ArrayList<>();
+        setField(runtime, "socket", fakeSocketWithSendResults(sent, new boolean[]{true}));
+        Method drainPendingFrames = runtime.getClass().getDeclaredMethod(
+            "drainPendingFrames", String.class);
+        drainPendingFrames.setAccessible(true);
+
+        drainPendingFrames.invoke(runtime, "channel-a");
+        assertEquals(0, sent.size());
+
+        java.util.ArrayDeque<JSONObject> queue = new java.util.ArrayDeque<>();
+        queue.addLast(new JSONObject().put("seq", 0));
+        pendingFrames.put("channel-a", queue);
+        drainPendingFrames.invoke(runtime, "channel-a");
+
+        assertEquals(1, sent.size());
+        assertTrue(pendingFrames.get("channel-a") == null
+            || pendingFrames.get("channel-a").isEmpty());
+    }
+
+    @Test
     public void drainPendingFramesUsesRetryOwnerInsteadOfImmediateTeardown() throws Exception {
         AndroidConnectionService.resetForTests();
         List<AndroidConnectionServiceEventEnvelope> events = new ArrayList<>();

@@ -1563,9 +1563,6 @@ public class AndroidConnectionService extends Service {
         }
 
         private void drainPendingFrames(String channelId) {
-            if (!drainingPendingFrames.add(channelId)) {
-                return;
-            }
             WebSocket current = socket;
             if (current == null || generation == null
                 || transportNetworkGeneration != networkGeneration) {
@@ -1573,6 +1570,9 @@ public class AndroidConnectionService extends Service {
             }
             java.util.ArrayDeque<JSONObject> queue = pendingFrames.get(channelId);
             if (queue == null) {
+                return;
+            }
+            if (!drainingPendingFrames.add(channelId)) {
                 return;
             }
             try {
