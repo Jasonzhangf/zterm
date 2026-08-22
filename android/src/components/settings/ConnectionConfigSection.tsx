@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTraversalRelayAccount } from '../../hooks/useTraversalRelayAccount';
 import {
   canonicalizeBridgeServerPresets,
@@ -153,6 +153,34 @@ export function ConnectionConfigSection({
   } = useTraversalRelayAccount(settings.traversalRelay);
 
   const loggedIn = Boolean(account?.accessToken || settings.traversalRelay?.accessToken);
+  // Auto-sync relay daemon devices into the bridge server list whenever the
+  // device set changes (login, refresh, app upgrade with stored session).
+  const syncedDeviceIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    for (const device of relayDevices) {
+      if (syncedDeviceIdsRef.current.has(device.deviceId)) {
+        continue;
+      }
+      syncedDeviceIdsRef.current.add(device.deviceId);
+      const endpoints = device.daemon.endpoints || [];
+      const preferred = endpoints.find((e) => e.kind === 'tailscale')
+        || endpoints.find((e) => e.kind === 'lan')
+        || endpoints.find((e) => e.kind === 'ipv4' && e.host)
+        || endpoints.find((e) => e.host);
+      if (!preferred?.host || !preferred.port) {
+        continue;
+      }
+      onSettingsChange((current) => upsertBridgeServer(current, {
+        name: device.deviceName,
+        targetHost: preferred.host!,
+        targetPort: preferred.port!,
+        authToken: preferred.authToken,
+        relayHostId: device.daemon.hostId,
+        relayDeviceId: device.deviceId,
+        relayDeviceName: device.deviceName,
+      }));
+    }
+  }, [relayDevices, onSettingsChange]);
   const relayHost = new URL(getDefaultTraversalRelayBaseUrl()).hostname;
   const accountName = account?.user?.username || account?.username || settings.traversalRelay?.username || 'Unknown';
   const deviceCount = relayDevices.length;
@@ -219,29 +247,6 @@ export function ConnectionConfigSection({
     }
     setLoginPassword('');
     onRelaySettingsChange(result.relaySettings);
-    // Sync daemon servers from the relay account into the local server list.
-    // Without this, a freshly logged-in device sees an empty server list even
-    // though the account has registered daemons with reachable endpoints.
-    const devices = result.account?.devices || [];
-    for (const device of devices) {
-      const endpoints = device.daemon.endpoints || [];
-      const preferred = endpoints.find((e) => e.kind === 'tailscale')
-        || endpoints.find((e) => e.kind === 'lan')
-        || endpoints.find((e) => e.kind === 'ipv4' && e.host)
-        || endpoints.find((e) => e.host);
-      if (!preferred?.host || !preferred.port) {
-        continue;
-      }
-      onSettingsChange((current) => upsertBridgeServer(current, {
-        name: device.deviceName,
-        targetHost: preferred.host!,
-        targetPort: preferred.port!,
-        authToken: preferred.authToken,
-        relayHostId: device.daemon.hostId,
-        relayDeviceId: device.deviceId,
-        relayDeviceName: device.deviceName,
-      }));
-    }
   };
 
   const handleLogout = () => {

@@ -61,6 +61,25 @@ export function useTraversalRelayAccount(initialRelaySettings?: TraversalRelayCl
     refreshLocalAccount();
   }, [refreshLocalAccount, initialRelaySettings?.accessToken, initialRelaySettings?.relayBaseUrl]);
 
+  // Auto-refresh: if a stored account exists on mount (e.g. app upgrade while
+  // already logged in), pull fresh device data from the relay without requiring
+  // the user to re-login or navigate to settings.
+  useEffect(() => {
+    const stored = readTraversalRelayAccountState();
+    if (!stored?.accessToken || !stored.relayBaseUrl) {
+      return;
+    }
+    let cancelled = false;
+    traversalRelayRefreshMe(stored).then((result) => {
+      if (cancelled) return;
+      setAccount(result.account);
+      setRelayDevices(projectRelayDevicesFromAccountState(result.account));
+    }).catch(() => {
+      // Silent: refresh failure is non-blocking; stale local state is still usable.
+    });
+    return () => { cancelled = true; };
+  }, []);
+
   const syncRelay = useCallback(async (
     mode: 'login' | 'register' | 'refresh',
     draft: RelayDraftAccount,
