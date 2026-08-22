@@ -7,21 +7,29 @@ import {
 } from './file-transfer-throughput-runtime';
 
 function createProgressGate() {
-  let acknowledgedChunks = 0;
+  const progress = {
+    acknowledgedChunks: 0,
+  };
   const waiters = new Set<{ minimum: number; resolve: () => void }>();
 
   return {
+    get acknowledgedChunks() {
+      return progress.acknowledgedChunks;
+    },
     acknowledge(nextAcknowledgedChunks: number) {
-      acknowledgedChunks = Math.max(acknowledgedChunks, nextAcknowledgedChunks);
+      progress.acknowledgedChunks = Math.max(
+        progress.acknowledgedChunks,
+        nextAcknowledgedChunks,
+      );
       for (const waiter of Array.from(waiters)) {
-        if (acknowledgedChunks >= waiter.minimum) {
+        if (progress.acknowledgedChunks >= waiter.minimum) {
           waiters.delete(waiter);
           waiter.resolve();
         }
       }
     },
     waitForProgress(minimum: number) {
-      if (acknowledgedChunks >= minimum) {
+      if (progress.acknowledgedChunks >= minimum) {
         return Promise.resolve();
       }
       return new Promise<void>((resolve) => {
@@ -78,6 +86,38 @@ describe('file-transfer-throughput-runtime', () => {
 
     progress.acknowledge(10);
     await expect(run).resolves.toBeUndefined();
+  });
+
+  it('resumes from the latest cumulative acknowledgement after a transient upload wait failure', async () => {
+    const progress = createProgressGate();
+    const sentIndexes: number[] = [];
+    let resumeCount = 0;
+    let sawDisconnect = false;
+
+    const run = sendBoundedFileUploadChunks({
+      totalChunks: 4,
+      readChunk: async (chunkIndex) => `chunk-${chunkIndex}`,
+      sendChunk: (chunkIndex) => {
+        sentIndexes.push(chunkIndex);
+        progress.acknowledge(chunkIndex + 1);
+      },
+      waitForProgress: async (minimum) => {
+        if (minimum >= 2 && !sawDisconnect) {
+          sawDisconnect = true;
+          throw new Error('transport disconnected');
+        }
+        return progress.waitForProgress(minimum);
+      },
+      waitForResume: async () => {
+        resumeCount += 1;
+      },
+      getResumeChunkIndex: () => progress.acknowledgedChunks,
+    });
+
+    await expect(run).resolves.toBeUndefined();
+    expect(sawDisconnect).toBe(true);
+    expect(resumeCount).toBe(1);
+    expect(sentIndexes).toEqual([0, 1, 2, 3]);
   });
 
   it('does not send beyond the bounded window when progress stalls', async () => {

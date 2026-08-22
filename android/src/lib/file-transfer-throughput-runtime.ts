@@ -11,6 +11,8 @@ interface SendBoundedFileUploadChunksOptions<TChunk> {
   readChunk: (chunkIndex: number) => Promise<TChunk>;
   sendChunk: (chunkIndex: number, chunk: TChunk) => void;
   waitForProgress: (minimumAcknowledgedChunks: number) => Promise<void>;
+  waitForResume?: (error: unknown) => Promise<void>;
+  getResumeChunkIndex?: () => number;
 }
 
 export async function sendBoundedFileUploadChunks<TChunk>(
@@ -20,26 +22,41 @@ export async function sendBoundedFileUploadChunks<TChunk>(
     throw new Error(`invalid upload chunk count: ${options.totalChunks}`);
   }
 
-  const startChunkIndex = options.startChunkIndex ?? 0;
-  if (
-    !Number.isInteger(startChunkIndex) ||
-    startChunkIndex < 0 ||
-    startChunkIndex >= options.totalChunks
-  ) {
-    throw new Error(`invalid upload resume index: ${startChunkIndex}`);
-  }
-
-  for (let chunkIndex = startChunkIndex; chunkIndex < options.totalChunks; chunkIndex += 1) {
-    if (chunkIndex >= FILE_TRANSFER_UPLOAD_WINDOW_CHUNKS) {
-      await options.waitForProgress(
-        chunkIndex - FILE_TRANSFER_UPLOAD_WINDOW_CHUNKS + 1,
-      );
+  let startChunkIndex = options.startChunkIndex ?? 0;
+  for (;;) {
+    if (
+      !Number.isInteger(startChunkIndex) ||
+      startChunkIndex < 0 ||
+      startChunkIndex > options.totalChunks
+    ) {
+      throw new Error(`invalid upload resume index: ${startChunkIndex}`);
     }
-    const chunk = await options.readChunk(chunkIndex);
-    options.sendChunk(chunkIndex, chunk);
-  }
 
-  await options.waitForProgress(options.totalChunks);
+    try {
+      for (let chunkIndex = startChunkIndex; chunkIndex < options.totalChunks; chunkIndex += 1) {
+        if (chunkIndex >= FILE_TRANSFER_UPLOAD_WINDOW_CHUNKS) {
+          await options.waitForProgress(
+            chunkIndex - FILE_TRANSFER_UPLOAD_WINDOW_CHUNKS + 1,
+          );
+        }
+        const chunk = await options.readChunk(chunkIndex);
+        options.sendChunk(chunkIndex, chunk);
+      }
+
+      await options.waitForProgress(options.totalChunks);
+      return;
+    } catch (error) {
+      if (!options.waitForResume || !options.getResumeChunkIndex) {
+        throw error;
+      }
+      await options.waitForResume(error);
+      startChunkIndex = options.getResumeChunkIndex();
+      if (startChunkIndex === options.totalChunks) {
+        await options.waitForProgress(options.totalChunks);
+        return;
+      }
+    }
+  }
 }
 
 interface WriteFileTransferChunkBatchesOptions {
