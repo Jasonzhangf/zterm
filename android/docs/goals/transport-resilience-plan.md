@@ -36,6 +36,25 @@ UI Layer
 
 ## Phase 1: Stop-the-Bleeding (P0)
 
+Implementation order is fixed by evidence. Each step must close before the
+next starts; do not skip ahead on optimism.
+
+### T0: Diagnose T1 red-test stack before any code change
+
+- File: `android/native/android/app/src/test/java/com/zterm/android/AndroidConnectionServiceTransportTest.java`
+- Symptom (handoff 2026-08-22): `threeConsecutiveFailuresTriggerTransportFailure`
+  throws an NPE at the `sendOrQueue.invoke(...)` call site in a pure-JVM test.
+  The prior handoff inferred possible causes but did not capture the stack.
+- Required action:
+  1. Run this single test with `--info --stacktrace`.
+  2. Record the first project-owned frame and every `Caused by:` entry in
+     `android/note.md`.
+  3. Open the cited line before editing implementation code.
+- Candidate sites, to be confirmed or rejected by the stack only:
+  `transportFailure` -> `stateMachine.dispatch(...)`, `publishEvent(...)`,
+  `scheduleBackoff()`, or a mock-backed WebSocket close path.
+- Forbidden action: no further speculative edits to `AndroidConnectionService.java`.
+
 ### T1: Send failure does not tear down connection
 
 - File: `android/native/android/app/src/main/java/com/zterm/android/AndroidConnectionService.java`
@@ -113,6 +132,45 @@ UI Layer
 | Feature registry | All | `pnpm --dir android run test:feature-registry -- --reporter dot` |
 | Build + OTA | Release | `pnpm --dir android run build:android` |
 | Device smoke | L5 | Install APK → connect → start file upload → toggle airplane mode → reconnect → verify resume completes without user-visible error |
+
+## Execution Sequencing
+
+1. **T0** - capture and record the real NPE stack for
+   `threeConsecutiveFailuresTriggerTransportFailure`; identify the exact
+   project-owned line before changing service code.
+2. **T1** - patch only the line(s) named by the T0 stack; re-run all
+   transport tests until both T1 tests are green.
+3. **T2** - add the red resume test, implement per-chunk ACK + resume,
+   then make daemon-side duplicate prevention explicit.
+4. **T3** - add red blip/outage tests, implement generation-scoped
+   physical-error debounce with silent recovery cleanup.
+5. **Global gates** - transport unit suite, type-check, feature registry.
+6. **Build + OTA** - bump build, normal APK, rollback APK, prepare update
+   bundle, verify update bundle.
+7. **Live smoke** when ADB is online: install APK, connect, upload a file,
+   toggle airplane mode during transfer, reconnect, verify resume without a
+   user-visible intermediate error.
+8. **Commit + push** after each task closes; never batch unrelated dirty work.
+
+## Red-Test Anchors
+
+Each behavior must have a failing-first test that locks both success and
+failure paths.
+
+| Test | Class | Locks |
+|------|-------|-------|
+| T1a | `AndroidConnectionServiceTransportTest` | One send failure retries in place; no physical error; second send succeeds |
+| T1b | `AndroidConnectionServiceTransportTest` | Three consecutive failures escalate exactly once |
+| T2  | new file-transfer runtime test | Mid-upload disconnect resumes from last acknowledged chunk; no duplicate daemon write |
+| T3a | `AndroidConnectionServiceTransportTest` | Two-second blip emits zero JS physical errors |
+| T3b | `AndroidConnectionServiceTransportTest` | Eight-second outage emits one JS physical error; recovery clears timer silently |
+
+## Non-Goals for Phase 1
+
+- No mux protocol change; v1 JSON remains the wire contract.
+- No native WebRTC migration.
+- No public relay policy change.
+- No OTA publish without green gates plus device smoke, unless Jason explicitly overrides.
 
 ## Success Criteria
 
