@@ -1,0 +1,193 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Daemon Wiki</title><style>
+body { margin: 24px; background: #f7f3ea; color: #1d2525; font-family: ui-sans-serif, system-ui, sans-serif; }
+h1 { font-size: 24px; margin-bottom: 18px; }
+h2 { font-size: 18px; margin: 28px 0 8px; }
+.wiki-graph { width: 100%; max-width: 1400px; min-height: 220px; background: #fffaf0; border: 1px solid #d9cdb9; border-radius: 18px; box-shadow: 0 12px 36px rgba(50, 40, 25, 0.12); }
+.node rect { fill: #fbf7ed; stroke: #365b54; stroke-width: 1.5; }
+.node text { fill: #1d2525; font-size: 13px; font-weight: 650; }
+.edge { fill: none; stroke: #b46a3c; stroke-width: 2; }
+.arrow { fill: #b46a3c; }
+.source { margin-top: 18px; white-space: pre-wrap; color: #5a635f; font-size: 12px; }
+</style></head><body>
+<h1>Daemon Wiki</h1>
+<svg class="wiki-graph" viewBox="0 0 2380 844" role="img" aria-label="Mainline graph">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" class="arrow" />
+    </marker>
+  </defs>
+  <path d="M 330 62 C 365 62, 365 62, 400 62" class="edge" marker-end="url(#arrow)" />
+<path d="M 660 62 C 695 62, 695 62, 730 62" class="edge" marker-end="url(#arrow)" />
+<path d="M 990 62 C 1025 62, 1025 62, 1060 62" class="edge" marker-end="url(#arrow)" />
+<path d="M 990 62 C 1025 62, 1025 152, 1060 152" class="edge" marker-end="url(#arrow)" />
+<path d="M 990 62 C 1520 62, 1520 62, 2050 62" class="edge" marker-end="url(#arrow)" />
+<path d="M 990 62 C 1025 62, 1025 242, 1060 242" class="edge" marker-end="url(#arrow)" />
+<path d="M 990 62 C 1025 62, 1025 332, 1060 332" class="edge" marker-end="url(#arrow)" />
+<path d="M 990 62 C 1025 62, 1025 422, 1060 422" class="edge" marker-end="url(#arrow)" />
+<path d="M 990 62 C 1025 62, 1025 512, 1060 512" class="edge" marker-end="url(#arrow)" />
+<path d="M 990 62 C 1025 62, 1025 602, 1060 602" class="edge" marker-end="url(#arrow)" />
+<path d="M 1320 242 C 1355 242, 1355 152, 1390 152" class="edge" marker-end="url(#arrow)" />
+<path d="M 1650 152 C 1685 152, 1685 62, 1720 62" class="edge" marker-end="url(#arrow)" />
+<path d="M 1650 152 C 1685 152, 1685 152, 1720 152" class="edge" marker-end="url(#arrow)" />
+<path d="M 1650 422 C 1685 422, 1685 152, 1720 152" class="edge" marker-end="url(#arrow)" />
+<path d="M 1320 242 C 1355 242, 1355 242, 1390 242" class="edge" marker-end="url(#arrow)" />
+<path d="M 1650 242 C 1685 242, 1685 242, 1720 242" class="edge" marker-end="url(#arrow)" />
+<path d="M 1650 242 C 1685 242, 1685 332, 1720 332" class="edge" marker-end="url(#arrow)" />
+<path d="M 1980 332 C 2015 332, 2015 62, 2050 62" class="edge" marker-end="url(#arrow)" />
+<path d="M 1320 242 C 1355 242, 1355 332, 1390 332" class="edge" marker-end="url(#arrow)" />
+<path d="M 1650 332 C 1685 332, 1685 422, 1720 422" class="edge" marker-end="url(#arrow)" />
+<path d="M 1650 332 C 1685 332, 1685 512, 1720 512" class="edge" marker-end="url(#arrow)" />
+<path d="M 1320 242 C 1355 242, 1355 422, 1390 422" class="edge" marker-end="url(#arrow)" />
+<path d="M 1650 422 C 1685 422, 1685 422, 1720 422" class="edge" marker-end="url(#arrow)" />
+<path d="M 1650 422 C 1685 422, 1685 602, 1720 602" class="edge" marker-end="url(#arrow)" />
+<path d="M 1650 422 C 1685 422, 1685 692, 1720 692" class="edge" marker-end="url(#arrow)" />
+<path d="M 1650 422 C 1685 422, 1685 782, 1720 782" class="edge" marker-end="url(#arrow)" />
+<path d="M 1320 422 C 1355 422, 1355 512, 1390 512" class="edge" marker-end="url(#arrow)" />
+<path d="M 1320 422 C 1355 422, 1355 602, 1390 602" class="edge" marker-end="url(#arrow)" />
+<path d="M 1320 422 C 1355 422, 1355 692, 1390 692" class="edge" marker-end="url(#arrow)" />
+<path d="M 1320 152 C 1355 152, 1355 62, 1390 62" class="edge" marker-end="url(#arrow)" />
+  <g class="node" data-node-id="CLI">
+  <rect x="70" y="34" width="260" height="56" rx="12" />
+  <text x="86" y="68">scripts/zterm-daemon.sh run</text>
+</g>
+<g class="node" data-node-id="Stage">
+  <rect x="400" y="34" width="260" height="56" rx="12" />
+  <text x="416" y="68">stage_daemon_runtime</text>
+</g>
+<g class="node" data-node-id="Server">
+  <rect x="730" y="34" width="260" height="56" rx="12" />
+  <text x="746" y="68">src/server/server.ts</text>
+</g>
+<g class="node" data-node-id="Config">
+  <rect x="1060" y="34" width="260" height="56" rx="12" />
+  <text x="1076" y="68">daemon-config.ts</text>
+</g>
+<g class="node" data-node-id="Bridge">
+  <rect x="1060" y="124" width="260" height="56" rx="12" />
+  <text x="1076" y="158">terminal-bridge-runtime.ts</text>
+</g>
+<g class="node" data-node-id="Transport">
+  <rect x="2050" y="34" width="260" height="56" rx="12" />
+  <text x="2066" y="68">terminal-transport-runtime.ts (connections map)</text>
+</g>
+<g class="node" data-node-id="Message">
+  <rect x="1060" y="214" width="260" height="56" rx="12" />
+  <text x="1076" y="248">terminal-message-runtime.ts (route message)</text>
+</g>
+<g class="node" data-node-id="Http">
+  <rect x="1060" y="304" width="260" height="56" rx="12" />
+  <text x="1076" y="338">terminal-http-runtime.ts</text>
+</g>
+<g class="node" data-node-id="Daemon">
+  <rect x="1060" y="394" width="260" height="56" rx="12" />
+  <text x="1076" y="428">terminal-daemon-runtime.ts (lifecycle orchestrator)</text>
+</g>
+<g class="node" data-node-id="Core">
+  <rect x="1060" y="484" width="260" height="56" rx="12" />
+  <text x="1076" y="518">terminal-core-support.ts (tmux helpers)</text>
+</g>
+<g class="node" data-node-id="AttachToken">
+  <rect x="1060" y="574" width="260" height="56" rx="12" />
+  <text x="1076" y="608">terminal-attach-token-runtime.ts</text>
+</g>
+<g class="node" data-node-id="ControlGateway">
+  <rect x="1390" y="124" width="260" height="56" rx="12" />
+  <text x="1406" y="158">daemon-control-gateway-runtime.ts (typed control ingress)</text>
+</g>
+<g class="node" data-node-id="ControlCenter">
+  <rect x="1720" y="34" width="260" height="56" rx="12" />
+  <text x="1736" y="68">daemon-control-center-runtime.ts (capability/audit routing)</text>
+</g>
+<g class="node" data-node-id="SessionCatalog">
+  <rect x="1720" y="124" width="260" height="56" rx="12" />
+  <text x="1736" y="158">daemon-session-catalog-runtime.ts (backend session catalog)</text>
+</g>
+<g class="node" data-node-id="Control">
+  <rect x="1390" y="394" width="260" height="56" rx="12" />
+  <text x="1406" y="428">terminal-message-control-runtime.ts</text>
+</g>
+<g class="node" data-node-id="Mirror">
+  <rect x="1390" y="214" width="260" height="56" rx="12" />
+  <text x="1406" y="248">terminal-mirror-runtime.ts (tmux mirror truth)</text>
+</g>
+<g class="node" data-node-id="Capture">
+  <rect x="1720" y="214" width="260" height="56" rx="12" />
+  <text x="1736" y="248">terminal-mirror-capture.ts (daemon.mirror_writer)</text>
+</g>
+<g class="node" data-node-id="BufferPublisher">
+  <rect x="1720" y="304" width="260" height="56" rx="12" />
+  <text x="1736" y="338">daemon-buffer-publisher-runtime.ts (buffer-sync publication)</text>
+</g>
+<g class="node" data-node-id="InputQueue">
+  <rect x="1390" y="304" width="260" height="56" rx="12" />
+  <text x="1406" y="338">daemon-input-queue-runtime.ts (input receive/write queue)</text>
+</g>
+<g class="node" data-node-id="ControlRt">
+  <rect x="1720" y="394" width="260" height="56" rx="12" />
+  <text x="1736" y="428">terminal-control-runtime.ts (tmux spawn/write)</text>
+</g>
+<g class="node" data-node-id="InputAck">
+  <rect x="1720" y="484" width="260" height="56" rx="12" />
+  <text x="1736" y="518">terminal-reliable-input-ack.ts (seq dedupe)</text>
+</g>
+<g class="node" data-node-id="Schedule">
+  <rect x="1720" y="574" width="260" height="56" rx="12" />
+  <text x="1736" y="608">terminal-schedule-runtime.ts</text>
+</g>
+<g class="node" data-node-id="Transfer">
+  <rect x="1720" y="664" width="260" height="56" rx="12" />
+  <text x="1736" y="698">terminal-file-transfer-runtime.ts</text>
+</g>
+<g class="node" data-node-id="Screenshot">
+  <rect x="1720" y="754" width="260" height="56" rx="12" />
+  <text x="1736" y="788">remote-screenshot-daemon.ts</text>
+</g>
+<g class="node" data-node-id="Heartbeat">
+  <rect x="1390" y="484" width="260" height="56" rx="12" />
+  <text x="1406" y="518">ws heartbeat loop (30s ping)</text>
+</g>
+<g class="node" data-node-id="MemoryGuard">
+  <rect x="1390" y="574" width="260" height="56" rx="12" />
+  <text x="1406" y="608">memory guard (2.5GB RSS / 1.5GB heap)</text>
+</g>
+<g class="node" data-node-id="Relay">
+  <rect x="1390" y="664" width="260" height="56" rx="12" />
+  <text x="1406" y="698">relay-client.ts (TURN relay host)</text>
+</g>
+<g class="node" data-node-id="RtcBridge">
+  <rect x="1390" y="34" width="260" height="56" rx="12" />
+  <text x="1406" y="68">rtc-bridge.ts (WebRTC signaling)</text>
+</g>
+</svg><pre class="source">flowchart TD
+  CLI[&quot;scripts/zterm-daemon.sh run&quot;] --&gt; Stage[&quot;stage_daemon_runtime&quot;]
+  Stage --&gt; Server[&quot;src/server/server.ts&quot;]
+  Server --&gt; Config[&quot;daemon-config.ts&quot;]
+  Server --&gt; Bridge[&quot;terminal-bridge-runtime.ts&quot;]
+  Server --&gt; Transport[&quot;terminal-transport-runtime.ts (connections map)&quot;]
+  Server --&gt; Message[&quot;terminal-message-runtime.ts (route message)&quot;]
+  Server --&gt; Http[&quot;terminal-http-runtime.ts&quot;]
+  Server --&gt; Daemon[&quot;terminal-daemon-runtime.ts (lifecycle orchestrator)&quot;]
+  Server --&gt; Core[&quot;terminal-core-support.ts (tmux helpers)&quot;]
+  Server --&gt; AttachToken[&quot;terminal-attach-token-runtime.ts&quot;]
+  Message --&gt; ControlGateway[&quot;daemon-control-gateway-runtime.ts (typed control ingress)&quot;]
+  ControlGateway --&gt; ControlCenter[&quot;daemon-control-center-runtime.ts (capability/audit routing)&quot;]
+  ControlGateway --&gt; SessionCatalog[&quot;daemon-session-catalog-runtime.ts (backend session catalog)&quot;]
+  Control --&gt; SessionCatalog
+  Message --&gt; Mirror[&quot;terminal-mirror-runtime.ts (tmux mirror truth)&quot;]
+  Mirror --&gt; Capture[&quot;terminal-mirror-capture.ts (daemon.mirror_writer)&quot;]
+  Mirror --&gt; BufferPublisher[&quot;daemon-buffer-publisher-runtime.ts (buffer-sync publication)&quot;]
+  BufferPublisher --&gt; Transport
+  Message --&gt; InputQueue[&quot;daemon-input-queue-runtime.ts (input receive/write queue)&quot;]
+  InputQueue --&gt; ControlRt
+  InputQueue --&gt; InputAck[&quot;terminal-reliable-input-ack.ts (seq dedupe)&quot;]
+  Message --&gt; Control[&quot;terminal-message-control-runtime.ts&quot;]
+  Control --&gt; ControlRt[&quot;terminal-control-runtime.ts (tmux spawn/write)&quot;]
+  Control --&gt; Schedule[&quot;terminal-schedule-runtime.ts&quot;]
+  Control --&gt; Transfer[&quot;terminal-file-transfer-runtime.ts&quot;]
+  Control --&gt; Screenshot[&quot;remote-screenshot-daemon.ts&quot;]
+  Daemon --&gt; Heartbeat[&quot;ws heartbeat loop (30s ping)&quot;]
+  Daemon --&gt; MemoryGuard[&quot;memory guard (2.5GB RSS / 1.5GB heap)&quot;]
+  Daemon --&gt; Relay[&quot;relay-client.ts (TURN relay host)&quot;]
+  Bridge --&gt; RtcBridge[&quot;rtc-bridge.ts (WebRTC signaling)&quot;]</pre>
+</body></html>
