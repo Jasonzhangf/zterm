@@ -219,6 +219,29 @@ export function ConnectionConfigSection({
     }
     setLoginPassword('');
     onRelaySettingsChange(result.relaySettings);
+    // Sync daemon servers from the relay account into the local server list.
+    // Without this, a freshly logged-in device sees an empty server list even
+    // though the account has registered daemons with reachable endpoints.
+    const devices = result.account?.devices || [];
+    for (const device of devices) {
+      const endpoints = device.daemon.endpoints || [];
+      const preferred = endpoints.find((e) => e.kind === 'tailscale')
+        || endpoints.find((e) => e.kind === 'lan')
+        || endpoints.find((e) => e.kind === 'ipv4' && e.host)
+        || endpoints.find((e) => e.host);
+      if (!preferred?.host || !preferred.port) {
+        continue;
+      }
+      onSettingsChange((current) => upsertBridgeServer(current, {
+        name: device.deviceName,
+        targetHost: preferred.host!,
+        targetPort: preferred.port!,
+        authToken: preferred.authToken,
+        relayHostId: device.daemon.hostId,
+        relayDeviceId: device.deviceId,
+        relayDeviceName: device.deviceName,
+      }));
+    }
   };
 
   const handleLogout = () => {
