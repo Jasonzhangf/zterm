@@ -87,6 +87,7 @@ public class AndroidConnectionService extends Service {
     private static final long MAX_BACKOFF_MS = 30_000L;
     static final int SEND_RETRY_MAX = 3;
     static final long SEND_RETRY_DELAY_MS = 200L;
+    static final long PHYSICAL_ERROR_DEBOUNCE_MS = 5_000L;
     private static final int MUX_PROTOCOL_VERSION = 1;
     private static final int MAX_NOTIFICATION_SESSION_ACTIONS = 3;
     private static final int NOTIFICATION_PULSE_UPDATES = 6;
@@ -797,6 +798,8 @@ public class AndroidConnectionService extends Service {
         volatile long nextRetryAt;
         volatile int backoffIndex;
         volatile int sendRetryCount;
+        volatile long physicalErrorFirstAtMillis;
+        volatile boolean physicalErrorProjected;
         volatile int heartbeatMisses;
         volatile long lastActivityAt;
         volatile long lastPingAt;
@@ -1244,6 +1247,8 @@ public class AndroidConnectionService extends Service {
         private void recordServerActivity() {
             heartbeatMisses = 0;
             lastActivityAt = System.currentTimeMillis();
+            physicalErrorFirstAtMillis = 0L;
+            physicalErrorProjected = false;
             stateMachine.dispatch(AndroidConnectionServiceEvent.serverActivity(
                 generation, lastActivityAt), lastActivityAt);
         }
@@ -1609,13 +1614,21 @@ public class AndroidConnectionService extends Service {
             if (stopped || generation == null) {
                 return;
             }
+            long nowMillis = System.currentTimeMillis();
+            if (physicalErrorFirstAtMillis == 0L) {
+                physicalErrorFirstAtMillis = nowMillis;
+            }
             closeQuietly(socket);
             socket = null;
             String failedGeneration = generation;
             generation = null;
             stateMachine.dispatch(AndroidConnectionServiceEvent.transportFailure(
-                failedGeneration, message), System.currentTimeMillis());
-            publishEvent(AndroidConnectionServiceEventEnvelope.physicalError(code, message));
+                failedGeneration, message), nowMillis);
+            if (!physicalErrorProjected
+                && nowMillis - physicalErrorFirstAtMillis >= PHYSICAL_ERROR_DEBOUNCE_MS) {
+                physicalErrorProjected = true;
+                publishEvent(AndroidConnectionServiceEventEnvelope.physicalError(code, message));
+            }
             scheduleBackoff();
         }
 

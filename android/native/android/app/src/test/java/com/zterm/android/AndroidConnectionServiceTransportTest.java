@@ -528,6 +528,25 @@ public final class AndroidConnectionServiceTransportTest {
         field.set(target, value);
     }
 
+    private static Object newDebouncedFailureRuntime(AndroidConnectionService service)
+        throws Exception {
+        setField(service, "workerHandler", new Handler(Looper.getMainLooper()));
+        Object runtime = newRuntime(service);
+        setField(runtime, "stateMachine", readyStateMachine());
+        setField(runtime, "generation", "gen-1");
+        setField(runtime, "transportNetworkGeneration", 0L);
+        setField(service, "networkGeneration", 0L);
+        return runtime;
+    }
+
+    private static void invokeTransportFailure(Object runtime, String code, String message)
+        throws Exception {
+        Method transportFailure = runtime.getClass().getDeclaredMethod(
+            "transportFailure", String.class, String.class);
+        transportFailure.setAccessible(true);
+        transportFailure.invoke(runtime, code, message);
+    }
+
     private static WebSocket fakeSocketWithSendResults(List<String> sent, boolean[] results) {
         AtomicInteger callIndex = new AtomicInteger(0);
         return (WebSocket) Proxy.newProxyInstance(
@@ -619,8 +638,89 @@ public final class AndroidConnectionServiceTransportTest {
             sendOrQueue.invoke(runtime, new JSONObject().put("type", "mux-ping"),
                 null, (AndroidConnectionCommand) null, false);
 
-            assertTrue("persistent failure must escalate to transport failure",
-                events.stream().anyMatch(e -> e.kind == AndroidConnectionServiceEventEnvelope.Kind.PHYSICAL_ERROR));
+            Field stateMachineField = runtime.getClass().getDeclaredField("stateMachine");
+            stateMachineField.setAccessible(true);
+            AndroidConnectionStateMachine stateMachine =
+                (AndroidConnectionStateMachine) stateMachineField.get(runtime);
+            assertEquals("persistent send failure must retire the transport generation",
+                AndroidConnectionServiceSnapshot.State.BACKOFF_RECONNECT,
+                stateMachine.readSnapshot().state);
+            assertTrue("sub-5s teardown must not project a physical error",
+                events.stream().noneMatch(e ->
+                    e.kind == AndroidConnectionServiceEventEnvelope.Kind.PHYSICAL_ERROR));
+        } finally {
+            AndroidConnectionService.resetForTests();
+        }
+    }
+
+    @Test
+    public void shortPhysicalFailureDoesNotProjectToJs() throws Exception {
+        AndroidConnectionService.resetForTests();
+        List<AndroidConnectionServiceEventEnvelope> events = new ArrayList<>();
+        AndroidConnectionService.registerListenerForTests(new AndroidConnectionServiceListener() {
+            @Override public void onSnapshot(AndroidConnectionServiceSnapshot snapshot) { }
+            @Override public void onEvent(AndroidConnectionServiceEventEnvelope event) {
+                events.add(event);
+            }
+        });
+        try {
+            Object runtime = newDebouncedFailureRuntime(new AndroidConnectionService());
+
+            invokeTransportFailure(runtime, "websocket", "brief blip");
+
+            assertTrue(events.stream().noneMatch(event ->
+                event.kind == AndroidConnectionServiceEventEnvelope.Kind.PHYSICAL_ERROR));
+        } finally {
+            AndroidConnectionService.resetForTests();
+        }
+    }
+
+    @Test
+    public void sustainedPhysicalFailureProjectsExactlyOnce() throws Exception {
+        AndroidConnectionService.resetForTests();
+        List<AndroidConnectionServiceEventEnvelope> events = new ArrayList<>();
+        AndroidConnectionService.registerListenerForTests(new AndroidConnectionServiceListener() {
+            @Override public void onSnapshot(AndroidConnectionServiceSnapshot snapshot) { }
+            @Override public void onEvent(AndroidConnectionServiceEventEnvelope event) {
+                events.add(event);
+            }
+        });
+        try {
+            Object runtime = newDebouncedFailureRuntime(new AndroidConnectionService());
+            setField(runtime, "physicalErrorFirstAtMillis",
+                System.currentTimeMillis() - 8_000L);
+
+            invokeTransportFailure(runtime, "websocket", "sustained outage");
+            setField(runtime, "generation", "gen-2");
+            invokeTransportFailure(runtime, "websocket", "repeat while already projected");
+
+            assertEquals(1, events.stream().filter(event ->
+                event.kind == AndroidConnectionServiceEventEnvelope.Kind.PHYSICAL_ERROR).count());
+        } finally {
+            AndroidConnectionService.resetForTests();
+        }
+    }
+
+    @Test
+    public void recoveryClearsPendingPhysicalFailureProjection() throws Exception {
+        AndroidConnectionService.resetForTests();
+        List<AndroidConnectionServiceEventEnvelope> events = new ArrayList<>();
+        AndroidConnectionService.registerListenerForTests(new AndroidConnectionServiceListener() {
+            @Override public void onSnapshot(AndroidConnectionServiceSnapshot snapshot) { }
+            @Override public void onEvent(AndroidConnectionServiceEventEnvelope event) {
+                events.add(event);
+            }
+        });
+        try {
+            Object runtime = newDebouncedFailureRuntime(new AndroidConnectionService());
+            Method recordServerActivity = runtime.getClass().getDeclaredMethod("recordServerActivity");
+            recordServerActivity.setAccessible(true);
+            recordServerActivity.invoke(runtime);
+
+            invokeTransportFailure(runtime, "websocket", "failure after recovery");
+
+            assertTrue(events.stream().noneMatch(event ->
+                event.kind == AndroidConnectionServiceEventEnvelope.Kind.PHYSICAL_ERROR));
         } finally {
             AndroidConnectionService.resetForTests();
         }
