@@ -1283,16 +1283,6 @@
         "native/android/app/src/main/java/com/zterm/android/MainActivity.java",
         "native/android/app/src/main/res/drawable/",
         "native/android/app/src/main/res/drawable-v24/",
-        "native/android/app/src/main/res/drawable-port-mdpi/",
-        "native/android/app/src/main/res/drawable-port-hdpi/",
-        "native/android/app/src/main/res/drawable-port-xhdpi/",
-        "native/android/app/src/main/res/drawable-port-xxhdpi/",
-        "native/android/app/src/main/res/drawable-port-xxxhdpi/",
-        "native/android/app/src/main/res/drawable-land-mdpi/",
-        "native/android/app/src/main/res/drawable-land-hdpi/",
-        "native/android/app/src/main/res/drawable-land-xhdpi/",
-        "native/android/app/src/main/res/drawable-land-xxhdpi/",
-        "native/android/app/src/main/res/drawable-land-xxxhdpi/",
         "native/android/app/src/main/res/values/styles.xml",
         "src/App.tsx",
         "src/App.dynamic-refresh.test.tsx",
@@ -1325,10 +1315,10 @@
         "resource.plugin_ui_slot_registry"
       ],
       "pending_resources": [],
-  "public_interfaces": [
-    "src/lib/plugin-host/plugin-host-runtime.ts",
-    "src/lib/plugin-host/network-identity-capability-plugin.ts",
-    "src/lib/plugin-host/plugin-host-control-node.ts"
+      "public_interfaces": [
+        "src/lib/plugin-host/plugin-host-runtime.ts",
+        "src/lib/plugin-host/network-identity-capability-plugin.ts",
+        "src/lib/plugin-host/plugin-host-control-node.ts"
       ],
       "forbidden_resources": [
         "resource.session_transport",
@@ -1352,10 +1342,10 @@
       "required_gates": [
         "src/lib/module-registry-truth.test.ts",
         "src/lib/edge-registry-truth.test.ts",
-    "src/lib/module-import-graph-truth.test.ts",
-    "src/lib/plugin-host/plugin-host-runtime.test.ts",
-    "src/lib/plugin-host/plugin-host-control-node.test.ts"
-  ],
+        "src/lib/module-import-graph-truth.test.ts",
+        "src/lib/plugin-host/plugin-host-runtime.test.ts",
+        "src/lib/plugin-host/plugin-host-control-node.test.ts"
+      ],
       "status": "active",
       "owned_paths": [
         "src/lib/plugin-host/"
@@ -2390,8 +2380,8 @@
         "src/components/terminal/remote-window-overlay-constants.ts",
         "src/components/terminal/remote-window-overlay-storage.ts",
         "src/components/terminal/remote-window-overlay-helpers.ts",
-        "src/components/terminal/remote-window-overlay-styles.ts"
-        ,"src/components/terminal/remote-window-icons.tsx",
+        "src/components/terminal/remote-window-overlay-styles.ts",
+        "src/components/terminal/remote-window-icons.tsx",
         "src/components/terminal/RemoteWindowDeveloperDiagnostics.tsx",
         "src/components/terminal/RemoteWindowLockedToolbar.tsx",
         "src/components/terminal/RemoteWindowTargetPicker.tsx",
