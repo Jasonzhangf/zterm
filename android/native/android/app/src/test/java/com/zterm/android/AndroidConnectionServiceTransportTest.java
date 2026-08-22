@@ -826,6 +826,104 @@ public final class AndroidConnectionServiceTransportTest {
     }
 
     @Test
+    public void muxHelloRetriesDuringHandshakeWithoutMuxReady() throws Exception {
+        AndroidConnectionService.resetForTests();
+        AtomicReference<Runnable> scheduledRetry = new AtomicReference<>();
+        List<AndroidConnectionServiceEventEnvelope> events = new ArrayList<>();
+        AndroidConnectionService.registerListenerForTests(new AndroidConnectionServiceListener() {
+            @Override public void onSnapshot(AndroidConnectionServiceSnapshot snapshot) { }
+            @Override public void onEvent(AndroidConnectionServiceEventEnvelope event) {
+                events.add(event);
+            }
+        });
+        try {
+            AndroidConnectionService service = new AndroidConnectionService();
+            setField(service, "sendRetryScheduler",
+                (java.util.function.BiConsumer<Runnable, Long>) (runnable, delayMillis) ->
+                    scheduledRetry.set(runnable));
+            Object runtime = newRuntime(service);
+            AndroidConnectionStateMachine stateMachine = new AndroidConnectionStateMachine(snapshot -> { });
+            stateMachine.dispatch(AndroidConnectionServiceEvent.bindTarget(target()), 1L);
+            stateMachine.dispatch(AndroidConnectionServiceEvent.transportOpening("gen-1"), 2L);
+            setField(runtime, "stateMachine", stateMachine);
+            setField(runtime, "generation", "gen-1");
+            setField(runtime, "transportNetworkGeneration", 0L);
+            setField(service, "networkGeneration", 0L);
+            List<String> sent = new ArrayList<>();
+            setField(runtime, "socket", fakeSocketWithSendResults(sent, new boolean[]{false}));
+            Method sendMuxHello = runtime.getClass().getDeclaredMethod("sendMuxHello");
+            sendMuxHello.setAccessible(true);
+
+            sendMuxHello.invoke(runtime);
+
+            // The fake records wire attempts, including a failed first attempt.
+            assertEquals(1, sent.size());
+            assertEquals(1, scheduledRetry.get() == null ? 0 : 1);
+
+            scheduledRetry.get().run();
+
+            assertEquals(2, sent.size());
+            assertEquals("mux-hello", new JSONObject(sent.get(1)).optString("type"));
+            assertTrue(events.stream().noneMatch(event ->
+                event.kind == AndroidConnectionServiceEventEnvelope.Kind.PHYSICAL_ERROR));
+        } finally {
+            AndroidConnectionService.resetForTests();
+        }
+    }
+
+    @Test
+    public void delayedRetryConsumesPendingQueueHeadAndContinuesFifo() throws Exception {
+        AndroidConnectionService.resetForTests();
+        List<AndroidConnectionServiceEventEnvelope> events = new ArrayList<>();
+        AtomicReference<Runnable> scheduledRetry = new AtomicReference<>();
+        AndroidConnectionService.registerListenerForTests(new AndroidConnectionServiceListener() {
+            @Override public void onSnapshot(AndroidConnectionServiceSnapshot snapshot) { }
+            @Override public void onEvent(AndroidConnectionServiceEventEnvelope event) {
+                events.add(event);
+            }
+        });
+        try {
+            AndroidConnectionService service = new AndroidConnectionService();
+            setField(service, "sendRetryScheduler",
+                (java.util.function.BiConsumer<Runnable, Long>) (runnable, delayMillis) ->
+                    scheduledRetry.set(runnable));
+            Object runtime = newRuntime(service);
+            setField(runtime, "stateMachine", readyStateMachine());
+            setField(runtime, "generation", "gen-1");
+            setField(runtime, "transportNetworkGeneration", 0L);
+            setField(service, "networkGeneration", 0L);
+            Field pendingFramesField = runtime.getClass().getDeclaredField("pendingFrames");
+            pendingFramesField.setAccessible(true);
+            @SuppressWarnings("unchecked")
+            Map<String, java.util.ArrayDeque<JSONObject>> pendingFrames =
+                (Map<String, java.util.ArrayDeque<JSONObject>>) pendingFramesField.get(runtime);
+            java.util.ArrayDeque<JSONObject> queue = new java.util.ArrayDeque<>();
+            queue.addLast(new JSONObject().put("seq", 0));
+            queue.addLast(new JSONObject().put("seq", 1));
+            pendingFrames.put("channel-a", queue);
+            List<String> sent = new ArrayList<>();
+            setField(runtime, "socket", fakeSocketWithSendResults(sent, new boolean[]{false, true, true}));
+            Method drainPendingFrames = runtime.getClass().getDeclaredMethod(
+                "drainPendingFrames", String.class);
+            drainPendingFrames.setAccessible(true);
+
+            drainPendingFrames.invoke(runtime, "channel-a");
+
+            assertEquals(1, sent.size());
+            assertEquals(2, pendingFrames.get("channel-a").size());
+
+            scheduledRetry.get().run();
+
+            assertEquals(3, sent.size());
+            assertTrue(pendingFrames.get("channel-a") == null || pendingFrames.get("channel-a").isEmpty());
+            assertEquals(0, new JSONObject(sent.get(1)).optInt("seq"));
+            assertEquals(1, new JSONObject(sent.get(2)).optInt("seq"));
+        } finally {
+            AndroidConnectionService.resetForTests();
+        }
+    }
+
+    @Test
     public void drainPendingFramesUsesRetryOwnerInsteadOfImmediateTeardown() throws Exception {
         AndroidConnectionService.resetForTests();
         List<AndroidConnectionServiceEventEnvelope> events = new ArrayList<>();

@@ -88,6 +88,9 @@ jobs:
       - name: Android network identity owner gate
         run: pnpm --dir android run test:android-network-identity
 
+      - name: Android connection service native gate
+        run: pnpm --dir android run test:android-connection-service:native
+
       - name: Shared foundation contract ownership gate
         run: pnpm --dir android run test:shared-contract-ownership
 

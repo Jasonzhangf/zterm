@@ -3408,6 +3408,7 @@
         "src/contexts/android-connection-service-runtime.test.ts",
         "native/android/app/src/main/java/com/zterm/android/AndroidConnectionService.java",
         "native/android/app/src/main/java/com/zterm/android/AndroidConnectionServicePlugin.java",
+        "native/android/app/src/test/java/com/zterm/android/AndroidConnectionServiceTransportTest.java",
         "docs/goals/connection-service-owner-migration-plan.md",
         "docs/testing/connection-service-owner-test-design.md",
         "docs/function-map.md"
@@ -3417,6 +3418,8 @@
       ],
       "required_gates": [
         "docs/testing/connection-service-owner-test-design.md",
+        "native/android/app/src/test/java/com/zterm/android/AndroidConnectionServiceTransportTest.java",
+        "scripts/run-android-connection-service-native-gate.sh",
         "src/lib/android-connection-service-snapshot.test.ts",
         "src/lib/android-connection-service-commands.test.ts",
         "src/lib/android-connection-service-socket.test.ts",

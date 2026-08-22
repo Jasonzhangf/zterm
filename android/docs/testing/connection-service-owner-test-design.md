@@ -17,10 +17,11 @@ The service projection carries the exact `mux-ready` payload and target generati
 1. `pnpm --dir android run test:feature-registry`
 2. `pnpm --dir android run test:transport-network-lifecycle`
 3. `pnpm --dir android run test:android-connection-service`
-4. `pnpm --dir android run type-check`
-5. `pnpm --dir android run build`
-6. `pnpm --dir android run build:android`
-7. Real ADB online regression when an online device exists.
+4. `pnpm --dir android run test:android-connection-service:native`
+5. `pnpm --dir android run type-check`
+6. `pnpm --dir android run build`
+7. `pnpm --dir android run build:android`
+8. Real ADB online regression when an online device exists.
 
 ## Test Layers
 
@@ -59,7 +60,7 @@ The service projection carries the exact `mux-ready` payload and target generati
 
 ### Native tests
 
-`AndroidConnectionServiceTest.java` and `AndroidConnectionServicePluginTest.java` must use fake clock/handler and fake socket seams to cover heartbeat survival across Activity detach, three-miss retirement, auth stop, backoff scheduling, stale generation rejection, and manual route command validation.
+`AndroidConnectionServiceTest.java`, `AndroidConnectionServiceTransportTest.java`, and `AndroidConnectionServicePluginTest.java` must use fake clock/handler and fake socket seams to cover heartbeat survival across Activity detach, three-miss retirement, auth stop, backoff scheduling, stale generation rejection, manual route command validation, mux-hello retry before mux-ready, and atomic pending-frame consumption with FIFO continuation.
 
 ### Existing regression gates
 
