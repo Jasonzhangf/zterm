@@ -11,6 +11,11 @@ import type {
   FileUploadStartPayload,
   TransferProgress,
 } from './types';
+import {
+  FILE_TRANSFER_UPLOAD_RESUME_RETRY_DELAY_MS,
+  FILE_TRANSFER_UPLOAD_RESUME_RETRY_LIMIT,
+  type UploadResumePolicy,
+} from './file-transfer-throughput-runtime';
 
 export interface FileTransferSessionRuntimeState {
   remotePath: string;
@@ -245,6 +250,30 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
     });
   };
 
+  const readUploadResumeChunk = (requestId: string): number | null => {
+    const totalChunks = uploadChunkCounts.get(requestId);
+    if (totalChunks === undefined) {
+      return null;
+    }
+    const transfer = findTransfer(requestId);
+    if (transfer?.status === 'done') {
+      return totalChunks;
+    }
+    if (!transfer || transfer.status === 'error') {
+      return null;
+    }
+    const acknowledgedChunks = Number.isInteger(transfer.transferredBytes)
+      ? transfer.transferredBytes
+      : 0;
+    return Math.min(Math.max(acknowledgedChunks, 0), totalChunks);
+  };
+
+  const createUploadResumePolicy = (requestId: string): UploadResumePolicy => ({
+    maxAttempts: FILE_TRANSFER_UPLOAD_RESUME_RETRY_LIMIT,
+    delayMs: FILE_TRANSFER_UPLOAD_RESUME_RETRY_DELAY_MS,
+    getResumeChunkIndex: () => readUploadResumeChunk(requestId),
+  });
+
   return {
     getState() {
       return state;
@@ -353,6 +382,8 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
     startUpload(entry: { name: string; size: number }, targetDir: string, chunkCount: number) {
       const requestId = `ful-${now()}-${randomId()}`;
       uploadChunkCounts.set(requestId, chunkCount);
+      uploadProgressWaiters.set(requestId, new Set());
+      const resumePolicy = createUploadResumePolicy(requestId);
       state = {
         ...state,
         transfers: [
@@ -391,6 +422,7 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
           type: 'file-upload-end' as const,
           payload: { requestId } satisfies FileUploadEndPayload,
         },
+        resumePolicy,
         waitForProgress: (minTransferredChunks: number, timeoutMs = 15000) => (
           waitForUploadProgress(requestId, minTransferredChunks, timeoutMs)
         ),
@@ -694,21 +726,7 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
     },
 
     getUploadResumeChunk(requestId: string): number | null {
-      const totalChunks = uploadChunkCounts.get(requestId);
-      if (totalChunks === undefined) {
-        return null;
-      }
-      const transfer = findTransfer(requestId);
-      if (transfer?.status === 'done') {
-        return totalChunks;
-      }
-      if (!transfer || transfer.status === 'error') {
-        return null;
-      }
-      const acknowledgedChunks = Number.isInteger(transfer.transferredBytes)
-        ? transfer.transferredBytes
-        : 0;
-      return Math.min(Math.max(acknowledgedChunks, 0), totalChunks);
+      return readUploadResumeChunk(requestId);
     },
 
     markTransferError(requestId: string, error: string) {

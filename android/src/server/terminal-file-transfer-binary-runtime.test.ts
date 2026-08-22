@@ -231,6 +231,104 @@ describe('terminal-file-transfer-binary-runtime', () => {
     }));
   });
 
+  it('rejects a conflicting duplicate chunk and never persists the upload', () => {
+    uploadDir = mkdtempSync(join(tmpdir(), 'zterm-upload-conflict-'));
+    const session = makeSession();
+    const sentMessages: ServerMessage[] = [];
+    const runtime = createTerminalFileTransferBinaryRuntime({
+      uploadDir,
+      downloadsDir: uploadDir,
+      wtermHomeDir: uploadDir,
+      platform: 'darwin',
+      sendMessage: (_session, message) => sentMessages.push(message),
+      getSessionMirror: () => makeReadyMirror(),
+      scheduleMirrorLiveSync: vi.fn(),
+      writeToTmuxSession: vi.fn(),
+      writeToLiveMirror: vi.fn(() => true),
+      readTmuxPaneCurrentPath: vi.fn(() => uploadDir!),
+      runCommand: vi.fn(),
+      captureRemoteScreenshot: vi.fn(async ({ outputPath }) => ({ outputPath })),
+      logTimePrefix: () => '2026-07-28 00:00:00',
+    });
+
+    runtime.handleFileUploadStart(session, {
+      requestId: 'upload-conflict',
+      targetDir: uploadDir,
+      fileName: 'conflict.bin',
+      fileSize: 2,
+      chunkCount: 2,
+    });
+    runtime.handleFileUploadChunk(session, {
+      requestId: 'upload-conflict',
+      chunkIndex: 0,
+      dataBase64: Buffer.from('a').toString('base64'),
+    });
+    runtime.handleFileUploadChunk(session, {
+      requestId: 'upload-conflict',
+      chunkIndex: 0,
+      dataBase64: Buffer.from('z').toString('base64'),
+    });
+
+    expect(sentMessages).toContainEqual(expect.objectContaining({
+      type: 'file-upload-error',
+      payload: expect.objectContaining({
+        requestId: 'upload-conflict',
+        error: 'Conflicting duplicate chunk 0',
+      }),
+    }));
+
+    runtime.handleFileUploadEnd(session, { requestId: 'upload-conflict' });
+    expect(() => statSync(join(uploadDir!, 'conflict.bin'))).toThrow();
+    expect(sentMessages).not.toContainEqual(expect.objectContaining({
+      type: 'file-upload-complete',
+      payload: expect.objectContaining({ requestId: 'upload-conflict' }),
+    }));
+  });
+
+  it('acknowledges an identical retried chunk without duplicating upload truth', () => {
+    uploadDir = mkdtempSync(join(tmpdir(), 'zterm-upload-idempotent-'));
+    const session = makeSession();
+    const sentMessages: ServerMessage[] = [];
+    const runtime = createTerminalFileTransferBinaryRuntime({
+      uploadDir,
+      downloadsDir: uploadDir,
+      wtermHomeDir: uploadDir,
+      platform: 'darwin',
+      sendMessage: (_session, message) => sentMessages.push(message),
+      getSessionMirror: () => makeReadyMirror(),
+      scheduleMirrorLiveSync: vi.fn(),
+      writeToTmuxSession: vi.fn(),
+      writeToLiveMirror: vi.fn(() => true),
+      readTmuxPaneCurrentPath: vi.fn(() => uploadDir!),
+      runCommand: vi.fn(),
+      captureRemoteScreenshot: vi.fn(async ({ outputPath }) => ({ outputPath })),
+      logTimePrefix: () => '2026-07-28 00:00:00',
+    });
+
+    runtime.handleFileUploadStart(session, {
+      requestId: 'upload-idempotent',
+      targetDir: uploadDir,
+      fileName: 'idempotent.bin',
+      fileSize: 2,
+      chunkCount: 2,
+    });
+    const firstChunk = {
+      requestId: 'upload-idempotent',
+      chunkIndex: 0,
+      dataBase64: Buffer.from('a').toString('base64'),
+    };
+    runtime.handleFileUploadChunk(session, firstChunk);
+    runtime.handleFileUploadChunk(session, { ...firstChunk });
+
+    const progressIndexes = sentMessages.flatMap((message) => (
+      message.type === 'file-upload-progress'
+      && message.payload.requestId === 'upload-idempotent'
+        ? [message.payload.chunkIndex]
+        : []
+    ));
+    expect(progressIndexes).toEqual([0, 1, 1]);
+  });
+
   it('rejects completion when persisted file size differs from the exact upload truth', () => {
     uploadDir = mkdtempSync(join(tmpdir(), 'zterm-upload-persisted-size-'));
     const session = makeSession();

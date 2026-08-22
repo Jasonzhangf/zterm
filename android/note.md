@@ -98,3 +98,27 @@
 - Controller growth is now mechanically bounded at 3,200 lines in `remote-window-boundary-truth.test.ts`; current controller is 3,078 lines and forbidden owner patterns lock catalog, playback, quality, viewport, focus-switch, canvas, picker, More, diagnostics, and video view outside it.
 - Canonical `pnpm build` remains externally blocked, but the blocker changed because the global AppSDK binary was replaced during this run: project lock requires `appsdk 0.1.3` SHA `e3c36a…`, while `/Users/fanzhang/.local/bin/appsdk` is now `appsdk 0.1.4` SHA `c26e50…`. The pin gate correctly rejects `APPSDK_BINARY_DIGEST_MISMATCH`; do not update the project lock or bypass the gate as part of remote-window work.
 - Memory closeout is also externally blocked by the managed sandbox. The required `scripts/mempalace-mine-zterm.sh` cannot update `/Volumes/extension/code/memory/zterm-mempalace-corpus-safe` (`Operation not permitted`), and even a read query cannot open `~/.mempalace/palace` because the CLI attempts a database write and receives `attempt to write a readonly database`. The safe corpus/`wing=zterm` policy was preserved; the repository root and a temporary alternate wing were not indexed.
+# 2026-08-22 remote-window stream A-H first slice architecture mapping
+
+- 功能块：`desktop.remote_window_stream` 的 receiver negotiation / daemon stream start / typed protocol contract。
+- 唯一 owner：Android offer/track attach 由 `src/lib/remote-window-receiver-runtime.ts` 拥有；daemon sender/capture start 由 `src/server/remote-window-stream-daemon.ts` 拥有；wire contract 由 `packages/shared/src/connection/protocol.ts` 拥有。
+- 整改分类：**分离下沉**。把 single-window `focus-only` 与 app-group `overview-focus` media plan 变成共享 typed contract；不以 target kind、timeout 或 fallback 在 receiver/daemon 各自猜测第二 lane。Early ICE 只由各自 PeerConnection lifecycle owner 暂存并在 remote description 应用后顺序 flush。
+- Allowed paths：overlay intent -> receiver offer -> typed start request -> daemon stream owner -> ScreenCaptureKit/WebRTC sender -> receiver track attach。控制/诊断继续走 typed status/error chain。
+- Forbidden paths：screenshot、terminal buffer、旧视频、静默 full-display capture、业务 media payload 内嵌控制语义、无条件 TURN、UI 直接操作 PeerConnection、未协商第二 lane 的伪造 track。
+- 保持不变：route-derived ICE、ScreenCaptureKit `queueDepth=3`、Android background stop/close、一个 PeerConnection 最多 focus/overview 两条 video lane。
+- 必跑 gate：shared protocol、receiver、daemon stream 定向测试；remote-window protocol/architecture registry gates；type-check；daemon build/package；`git diff --check`。真实 loopback、安装 daemon、Android/Mac rendered-pixel 与 cleanup 只能在相应 macOS/ADB 资源可用时宣称通过。
+- 实现文档缺口：用户给出的 `/Volumes/extension/code/zterm/android/docs/goals/remote-window-stream-remediation-plan.md` 在当前容器及 Git 历史中均不存在；本 slice 不猜测未提供的 A-H 细目，仅执行提示中明确的 P0 启动契约与 early ICE 要求。
+
+## 2026-08-22 transport resilience Phase 1 verification
+
+- T1/T3：`JAVA_HOME=/Applications/Android Studio.app/Contents/jbr/Contents/Home` 下 `./gradlew :app:testDebugUnitTest --tests com.zterm.android.AndroidConnectionServiceTransportTest` PASS；覆盖单次失败原地重试、三次失败升级、延迟重试 generation fence、旧 generation 帧顺序回队、短故障不投影、持续故障只投影一次、恢复清 timer。
+- T2：`pnpm --dir android exec vitest run src/lib/file-transfer-session-runtime.test.ts src/lib/file-transfer-throughput-runtime.test.ts src/server/terminal-file-transfer-binary-runtime.test.ts --no-file-parallelism` PASS，3 files / 32 tests。daemon 正向幂等锁住相同 chunk 重发只重复 ACK 不二次写入；冲突 chunk 显式删除 pending upload 且 end 不落盘。
+- Global gates：`pnpm --dir android run type-check` PASS；`pnpm --dir android run test:feature-registry -- --reporter dot` PASS，13 files / 102 tests；`git diff --check` clean。
+- 未做 live smoke：无在线 ADB / 真机断网样本；不得宣称端到端断点续传已闭环。
+
+## 2026-08-22 DSH review round 2 fix
+
+- DSH r2 FAIL 两个 P1 已修：target-level `send()` 现在统一走 `attemptSendWithRetry()`（mux hello/heartbeat 同样获得三次重试）；`drainPendingFrames()` 改走 retry owner，FIFO 保持、lifecycle epoch fence、成功才移除队列。
+- 新增正测 `targetSendRetriesBeforeTearingDown` 和 `drainPendingFramesUsesRetryOwnerInsteadOfImmediateTeardown`，锁住 hello/heartbeat/drain 的 transient send failure 不再立即 teardown。
+- 回归：Gradle transport suite 22/22 PASS；file-transfer/session/daemon idempotency 32/32 PASS；typecheck PASS；feature registry 102/102 PASS；assembleDebug BUILD SUCCESSFUL。
+- APK sha256: `3053774ff0d8241feaf959e4892c8d8789606ad3dcbc293afc048463f58d4940`

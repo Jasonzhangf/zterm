@@ -48,8 +48,6 @@ import type {
 } from "../../lib/types";
 
 const FILE_CHUNK_SIZE = FILE_TRANSFER_WIRE_CHUNK_BYTES; // must match daemon wire chunk
-const UPLOAD_RESUME_RETRY_LIMIT = 8;
-const UPLOAD_RESUME_RETRY_DELAY_MS = 3000;
 const SHEET_TEXT = "var(--zterm-panel-text)";
 const SHEET_MUTED = "var(--zterm-panel-muted)";
 const SHEET_BORDER = "var(--zterm-panel-border)";
@@ -790,7 +788,6 @@ export function FileTransferSheet({
       ReturnType<typeof createFileTransferSessionRuntime>["startUpload"]
     > | null = null;
     let endSent = false;
-    let resumeAttempts = 0;
     const sendUploadMessage = (message: unknown) => {
       const sender = sendJsonRef.current;
       if (!sender) {
@@ -815,22 +812,7 @@ export function FileTransferSheet({
       await sendBoundedFileUploadChunks({
         totalChunks: options.totalChunks,
         waitForProgress: currentUploadRequest.waitForProgress,
-        waitForResume: async () => {
-          resumeAttempts += 1;
-          if (resumeAttempts > UPLOAD_RESUME_RETRY_LIMIT) {
-            throw new Error("upload resume window expired");
-          }
-          await new Promise((resolve) => setTimeout(resolve, UPLOAD_RESUME_RETRY_DELAY_MS));
-        },
-        getResumeChunkIndex: () => {
-          const resumeChunk = fileTransferRuntimeRef.current.getUploadResumeChunk(
-            currentUploadRequest.requestId,
-          );
-          if (resumeChunk === null) {
-            throw new Error("upload can no longer be resumed");
-          }
-          return resumeChunk;
-        },
+        resume: currentUploadRequest.resumePolicy,
         readChunk: options.readChunk,
         sendChunk: (chunkIndex, dataBase64) => {
           const chunkMessage = currentUploadRequest.buildChunkMessage(
@@ -1141,7 +1123,6 @@ export function FileTransferSheet({
         let uploadRequest: ReturnType<
           ReturnType<typeof createFileTransferSessionRuntime>["startUpload"]
         > | null = null;
-        let resumeAttempts = 0;
         try {
           const targetDir = remotePath.trim();
           if (!targetDir) {
@@ -1177,22 +1158,7 @@ export function FileTransferSheet({
           await sendBoundedFileUploadChunks({
             totalChunks: chunkCount,
             waitForProgress: currentUploadRequest.waitForProgress,
-            waitForResume: async () => {
-              resumeAttempts += 1;
-              if (resumeAttempts > UPLOAD_RESUME_RETRY_LIMIT) {
-                throw new Error("upload resume window expired");
-              }
-              await new Promise((resolve) => setTimeout(resolve, UPLOAD_RESUME_RETRY_DELAY_MS));
-            },
-            getResumeChunkIndex: () => {
-              const resumeChunk = fileTransferRuntimeRef.current.getUploadResumeChunk(
-                currentUploadRequest.requestId,
-              );
-              if (resumeChunk === null) {
-                throw new Error("upload can no longer be resumed");
-              }
-              return resumeChunk;
-            },
+            resume: currentUploadRequest.resumePolicy,
             readChunk: async (chunkIndex) => {
               const offset = chunkIndex * FILE_CHUNK_SIZE;
               const length =

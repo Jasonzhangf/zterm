@@ -4,6 +4,14 @@ export const FILE_TRANSFER_UPLOAD_WINDOW_CHUNKS =
   throughputContract.upload_window_chunks;
 export const FILE_TRANSFER_NATIVE_WRITE_BATCH_CHUNKS =
   throughputContract.native_write_batch_chunks;
+export const FILE_TRANSFER_UPLOAD_RESUME_RETRY_LIMIT = 8;
+export const FILE_TRANSFER_UPLOAD_RESUME_RETRY_DELAY_MS = 3000;
+
+export interface UploadResumePolicy {
+  maxAttempts: number;
+  delayMs: number;
+  getResumeChunkIndex: () => number | null;
+}
 
 interface SendBoundedFileUploadChunksOptions<TChunk> {
   totalChunks: number;
@@ -11,8 +19,7 @@ interface SendBoundedFileUploadChunksOptions<TChunk> {
   readChunk: (chunkIndex: number) => Promise<TChunk>;
   sendChunk: (chunkIndex: number, chunk: TChunk) => void;
   waitForProgress: (minimumAcknowledgedChunks: number) => Promise<void>;
-  waitForResume?: (error: unknown) => Promise<void>;
-  getResumeChunkIndex?: () => number;
+  resume?: UploadResumePolicy;
 }
 
 export async function sendBoundedFileUploadChunks<TChunk>(
@@ -23,6 +30,7 @@ export async function sendBoundedFileUploadChunks<TChunk>(
   }
 
   let startChunkIndex = options.startChunkIndex ?? 0;
+  let resumeAttempts = 0;
   for (;;) {
     if (
       !Number.isInteger(startChunkIndex) ||
@@ -46,11 +54,20 @@ export async function sendBoundedFileUploadChunks<TChunk>(
       await options.waitForProgress(options.totalChunks);
       return;
     } catch (error) {
-      if (!options.waitForResume || !options.getResumeChunkIndex) {
+      const resume = options.resume;
+      if (!resume) {
         throw error;
       }
-      await options.waitForResume(error);
-      startChunkIndex = options.getResumeChunkIndex();
+      resumeAttempts += 1;
+      if (resumeAttempts > resume.maxAttempts) {
+        throw new Error("upload resume window expired");
+      }
+      await new Promise((resolve) => setTimeout(resolve, resume.delayMs));
+      const resumeChunkIndex = resume.getResumeChunkIndex();
+      if (resumeChunkIndex === null) {
+        throw new Error("upload can no longer be resumed");
+      }
+      startChunkIndex = resumeChunkIndex;
       if (startChunkIndex === options.totalChunks) {
         await options.waitForProgress(options.totalChunks);
         return;

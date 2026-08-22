@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createFileTransferSessionRuntime } from './file-transfer-session-runtime';
+import {
+  FILE_TRANSFER_UPLOAD_RESUME_RETRY_DELAY_MS,
+  FILE_TRANSFER_UPLOAD_RESUME_RETRY_LIMIT,
+} from './file-transfer-throughput-runtime';
 
 describe('file-transfer-session-runtime', () => {
   it('owns remote list request/response truth', async () => {
@@ -220,6 +224,12 @@ describe('file-transfer-session-runtime', () => {
     runtime.open('/remote/home');
     const upload = runtime.startUpload({ name: 'resume.bin', size: 3072 }, '/remote/home', 3);
 
+    expect(upload.resumePolicy).toEqual({
+      maxAttempts: FILE_TRANSFER_UPLOAD_RESUME_RETRY_LIMIT,
+      delayMs: FILE_TRANSFER_UPLOAD_RESUME_RETRY_DELAY_MS,
+      getResumeChunkIndex: expect.any(Function),
+    });
+    expect(upload.resumePolicy.getResumeChunkIndex()).toBe(0);
     expect(runtime.getUploadResumeChunk(upload.requestId)).toBe(0);
 
     await runtime.applyMessage({
@@ -237,6 +247,7 @@ describe('file-transfer-session-runtime', () => {
       payload: { requestId: upload.requestId },
     });
     expect(runtime.getUploadResumeChunk(upload.requestId)).toBe(3);
+    expect(upload.resumePolicy.getResumeChunkIndex()).toBe(3);
     expect(runtime.getUploadResumeChunk('missing-upload')).toBeNull();
   });
 

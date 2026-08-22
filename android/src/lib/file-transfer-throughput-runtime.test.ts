@@ -108,15 +108,65 @@ describe('file-transfer-throughput-runtime', () => {
         }
         return progress.waitForProgress(minimum);
       },
-      waitForResume: async () => {
-        resumeCount += 1;
+      resume: {
+        maxAttempts: 2,
+        delayMs: 0,
+        getResumeChunkIndex: () => {
+          resumeCount += 1;
+          return progress.acknowledgedChunks;
+        },
       },
-      getResumeChunkIndex: () => progress.acknowledgedChunks,
     });
 
     await expect(run).resolves.toBeUndefined();
     expect(sawDisconnect).toBe(true);
     expect(resumeCount).toBe(1);
+    expect(sentIndexes).toEqual([0, 1, 2, 3]);
+  });
+
+  it('stops after the bounded upload resume window', async () => {
+    const sentIndexes: number[] = [];
+
+    const run = sendBoundedFileUploadChunks({
+      totalChunks: 4,
+      readChunk: async (chunkIndex) => `chunk-${chunkIndex}`,
+      sendChunk: (chunkIndex) => {
+        sentIndexes.push(chunkIndex);
+      },
+      waitForProgress: async () => {
+        throw new Error('transport disconnected');
+      },
+      resume: {
+        maxAttempts: 1,
+        delayMs: 0,
+        getResumeChunkIndex: () => 0,
+      },
+    });
+
+    await expect(run).rejects.toThrow('upload resume window expired');
+    expect(sentIndexes).toEqual([0, 1, 2, 3, 0, 1, 2, 3]);
+  });
+
+  it('stops when the acknowledged upload resume point is gone', async () => {
+    const sentIndexes: number[] = [];
+
+    const run = sendBoundedFileUploadChunks({
+      totalChunks: 4,
+      readChunk: async (chunkIndex) => `chunk-${chunkIndex}`,
+      sendChunk: (chunkIndex) => {
+        sentIndexes.push(chunkIndex);
+      },
+      waitForProgress: async () => {
+        throw new Error('transport disconnected');
+      },
+      resume: {
+        maxAttempts: 8,
+        delayMs: 0,
+        getResumeChunkIndex: () => null,
+      },
+    });
+
+    await expect(run).rejects.toThrow('upload can no longer be resumed');
     expect(sentIndexes).toEqual([0, 1, 2, 3]);
   });
 

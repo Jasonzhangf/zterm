@@ -99,6 +99,7 @@ public class AndroidConnectionService extends Service {
         new ConcurrentHashMap<>();
 
     private Handler workerHandler;
+    private java.util.function.BiConsumer<Runnable, Long> sendRetryScheduler;
     private HandlerThread workerThread;
     private NotificationManager notificationManager;
     private PowerManager.WakeLock wakeLock;
@@ -123,6 +124,8 @@ public class AndroidConnectionService extends Service {
         workerThread = new HandlerThread("zterm-conn-svc-worker");
         workerThread.start();
         workerHandler = new Handler(workerThread.getLooper());
+        sendRetryScheduler = (runnable, delayMillis) ->
+            workerHandler.postDelayed(runnable, delayMillis);
         powerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
         connectivityManager = (android.net.ConnectivityManager)
             getSystemService(Context.CONNECTIVITY_SERVICE);
@@ -274,6 +277,18 @@ public class AndroidConnectionService extends Service {
             return;
         }
         workerHandler.post(runnable);
+    }
+
+    void setSendRetrySchedulerForTests(java.util.function.BiConsumer<Runnable, Long> scheduler) {
+        this.sendRetryScheduler = scheduler;
+    }
+
+    private void scheduleSendRetry(Runnable retry) {
+        java.util.function.BiConsumer<Runnable, Long> scheduler = sendRetryScheduler;
+        if (scheduler == null) {
+            return;
+        }
+        scheduler.accept(retry, SEND_RETRY_DELAY_MS);
     }
 
     private void registerNetworkCallback() {
@@ -797,7 +812,6 @@ public class AndroidConnectionService extends Service {
         volatile int candidateIndex;
         volatile long nextRetryAt;
         volatile int backoffIndex;
-        volatile int sendRetryCount;
         volatile long physicalErrorFirstAtMillis;
         volatile boolean physicalErrorProjected;
         volatile int heartbeatMisses;
@@ -805,6 +819,11 @@ public class AndroidConnectionService extends Service {
         volatile long lastPingAt;
         volatile long transportNetworkGeneration;
         volatile boolean stopped;
+        volatile boolean sendRetryPending;
+        private final java.util.ArrayDeque<DeferredSend> retryDeferredFrames =
+            new java.util.ArrayDeque<>();
+        private final java.util.Map<String, Long> channelLifecycleEpochs =
+            new java.util.concurrent.ConcurrentHashMap<>();
         final Map<String, ChannelIntent> desiredChannels =
             java.util.Collections.synchronizedMap(new LinkedHashMap<>());
 
@@ -864,6 +883,7 @@ public class AndroidConnectionService extends Service {
             generation = nextGeneration;
             transportNetworkGeneration = networkGeneration;
             candidateIndex = 0;
+            sendRetryPending = false;
             heartbeatMisses = 0;
             lastActivityAt = System.currentTimeMillis();
             lastPingAt = 0L;
@@ -1259,14 +1279,12 @@ public class AndroidConnectionService extends Service {
                 || transportNetworkGeneration != networkGeneration) {
                 return;
             }
-            try {
-                boolean enqueued = current.send(frame.toString());
-                if (!enqueued) {
-                    transportFailure("websocket-send", "mux frame not enqueued");
-                }
-            } catch (RuntimeException error) {
-                transportFailure("websocket-send", String.valueOf(error.getMessage()));
-            }
+            // Route all target-level sends through the generation-fenced retry owner.
+            // On failure, attemptSendWithRetry applies up to SEND_RETRY_MAX retries
+            // before escalating to transportFailure. This means mux hello, heartbeat,
+            // and any other target-level frames all receive the same retry treatment.
+            attemptSendWithRetry(frame, null, null, false,
+                current, generation, transportNetworkGeneration, null, 1);
         }
 
         private void sendOrQueue(JSONObject frame, String channelId,
@@ -1287,20 +1305,32 @@ public class AndroidConnectionService extends Service {
                 && isMuxReady()
                 && (channelId == null
                     || !requireOpenedChannel || isChannelOpened(channelId))) {
-                for (int attempt = 1; attempt <= SEND_RETRY_MAX; attempt += 1) {
-                    try {
-                        boolean enqueued = current.send(frame.toString());
-                        if (enqueued) {
-                            sendRetryCount = 0;
-                            return;
-                        }
-                    } catch (RuntimeException error) {
-                        // Fall through to retry.
-                    }
-                    sendRetryCount = attempt;
+                boolean isChannelClose = source != null
+                    && source.type == AndroidConnectionCommand.Type.CLOSE_CHANNEL;
+                if (!sendRetryPending || isChannelClose) {
+                    attemptSendWithRetry(frame, channelId, source, requireOpenedChannel,
+                        current, generation, transportNetworkGeneration,
+                        channelLifecycleEpoch(channelId), 1);
+                    return;
                 }
-                sendRetryCount = 0;
-                transportFailure("websocket-send", "send failed after " + SEND_RETRY_MAX + " attempts");
+                String safeChannelId = channelId == null ? null : channelId.trim();
+                if (safeChannelId == null || safeChannelId.isEmpty()) {
+                    publishFrameRejected(source, "frame-dropped-transport-pending",
+                        "target frame retry already in progress");
+                    return;
+                }
+                if (retryDeferredFrames.size()
+                    >= TARGET_RUNTIME_MAX_PENDING_FRAMES_PER_CHANNEL) {
+                    droppedFrames.put(safeChannelId,
+                        droppedFrames.getOrDefault(safeChannelId, 0L) + 1L);
+                    publishFrameRejected(source, "frame-dropped-pending-overflow",
+                        "deferred frame window exceeded "
+                            + TARGET_RUNTIME_MAX_PENDING_FRAMES_PER_CHANNEL);
+                    return;
+                }
+                retryDeferredFrames.addLast(new DeferredSend(
+                    frame, channelId, source, requireOpenedChannel,
+                    channelLifecycleEpoch(channelId)));
                 return;
             }
             if (channelId == null || channelId.trim().isEmpty()) {
@@ -1329,6 +1359,144 @@ public class AndroidConnectionService extends Service {
             return channel != null && channel.opened;
         }
 
+        private Long channelLifecycleEpoch(String channelId) {
+            String safeChannelId = channelId == null ? null : channelId.trim();
+            return safeChannelId == null || safeChannelId.isEmpty()
+                ? null : channelLifecycleEpochs.get(safeChannelId);
+        }
+
+        private void attemptSendWithRetry(
+            JSONObject frame,
+            String channelId,
+            AndroidConnectionCommand source,
+            boolean requireOpenedChannel,
+            WebSocket retrySocket,
+            String retryGeneration,
+            long retryNetworkGeneration,
+            Long retryLifecycleEpoch,
+            int attempt
+        ) {
+            String safeRetryChannelId = channelId == null ? null : channelId.trim();
+            Long currentLifecycleEpoch = channelLifecycleEpoch(channelId);
+            boolean channelRetired = safeRetryChannelId != null && !safeRetryChannelId.isEmpty()
+                && !java.util.Objects.equals(retryLifecycleEpoch, currentLifecycleEpoch);
+            if (stopped || channelRetired || socket != retrySocket || generation == null
+                || !retryGeneration.equals(generation)
+                || retryNetworkGeneration != transportNetworkGeneration
+                || retryNetworkGeneration != networkGeneration
+                || !isMuxReady()
+                || (currentLifecycleEpoch != null && requireOpenedChannel
+                    && !isChannelOpened(safeRetryChannelId))) {
+                sendRetryPending = false;
+                if (safeRetryChannelId != null && !safeRetryChannelId.isEmpty()
+                    && requireOpenedChannel
+                    && currentLifecycleEpoch != null
+                    && !desiredChannels.containsKey(safeRetryChannelId)) {
+                    retryDeferredFrames.removeIf(deferred ->
+                        safeRetryChannelId.equals(deferred.channelId == null
+                            ? null : deferred.channelId.trim()));
+                    return;
+                }
+                parkCurrentAndDeferredForReconnect(new DeferredSend(
+                    frame, channelId, source, requireOpenedChannel, retryLifecycleEpoch));
+                return;
+            }
+            try {
+                if (retrySocket.send(frame.toString())) {
+                    sendRetryPending = false;
+                    DeferredSend deferred = retryDeferredFrames.pollFirst();
+                    if (deferred != null) {
+                        attemptSendWithRetry(
+                            deferred.frame,
+                            deferred.channelId,
+                            deferred.source,
+                            deferred.requireOpenedChannel,
+                            retrySocket,
+                            retryGeneration,
+                            retryNetworkGeneration,
+                            deferred.lifecycleEpoch,
+                            1
+                        );
+                    }
+                    return;
+                }
+            } catch (RuntimeException error) {
+                if (attempt >= SEND_RETRY_MAX) {
+                    sendRetryPending = false;
+                    parkCurrentAndDeferredForReconnect(new DeferredSend(
+                        frame, channelId, source, requireOpenedChannel,
+                        retryLifecycleEpoch));
+                    transportFailure("websocket-send", String.valueOf(error.getMessage()));
+                    return;
+                }
+            }
+            if (attempt >= SEND_RETRY_MAX) {
+                sendRetryPending = false;
+                parkCurrentAndDeferredForReconnect(new DeferredSend(
+                    frame, channelId, source, requireOpenedChannel, retryLifecycleEpoch));
+                transportFailure(
+                    "websocket-send",
+                    "send failed after " + SEND_RETRY_MAX + " attempts");
+                return;
+            }
+            sendRetryPending = true;
+            final Long scheduledLifecycleEpoch = currentLifecycleEpoch;
+            scheduleSendRetry(() -> attemptSendWithRetry(
+                frame,
+                channelId,
+                source,
+                requireOpenedChannel,
+                retrySocket,
+                retryGeneration,
+                retryNetworkGeneration,
+                scheduledLifecycleEpoch,
+                attempt + 1
+            ));
+        }
+
+        private void parkCurrentAndDeferredForReconnect(DeferredSend current) {
+            java.util.ArrayDeque<DeferredSend> deferredFrames = new java.util.ArrayDeque<>();
+            if (current != null
+                && current.channelId != null
+                && !current.channelId.trim().isEmpty()) {
+                deferredFrames.addLast(current);
+            }
+            deferredFrames.addAll(retryDeferredFrames);
+            for (DeferredSend deferred : deferredFrames) {
+                String channelId = deferred.channelId == null ? null : deferred.channelId.trim();
+                if (channelId == null || channelId.isEmpty()) {
+                    continue;
+                }
+                java.util.ArrayDeque<JSONObject> queue = pendingFrames.get(channelId);
+                if (queue == null) {
+                    queue = new java.util.ArrayDeque<>();
+                    pendingFrames.put(channelId, queue);
+                }
+                queue.addLast(deferred.frame);
+            }
+            retryDeferredFrames.clear();
+        }
+
+        private static final class DeferredSend {
+            final JSONObject frame;
+            final String channelId;
+            final AndroidConnectionCommand source;
+            final boolean requireOpenedChannel;
+            final Long lifecycleEpoch;
+
+            DeferredSend(JSONObject frame,
+                         String channelId,
+                         AndroidConnectionCommand source,
+                         boolean requireOpenedChannel,
+                         Long lifecycleEpoch) {
+                this.frame = frame;
+                this.channelId = channelId;
+                this.source = source;
+                this.requireOpenedChannel = requireOpenedChannel;
+                this.lifecycleEpoch = lifecycleEpoch;
+            }
+        }
+
         private void publishFrameRejected(AndroidConnectionCommand source, String code, String message) {
             if (source == null) {
                 publishEvent(AndroidConnectionServiceEventEnvelope.physicalError(code, message));
@@ -1349,14 +1517,17 @@ public class AndroidConnectionService extends Service {
             }
             while (!queue.isEmpty()) {
                 JSONObject frame = queue.peekFirst();
-                try {
-                    if (!current.send(frame.toString())) {
-                        transportFailure("websocket-send", "mux frame not enqueued during drain");
-                        return;
-                    }
-                    queue.removeFirst();
-                } catch (RuntimeException error) {
-                    transportFailure("websocket-send", String.valueOf(error.getMessage()));
+                attemptSendWithRetry(frame, channelId, null, false,
+                    current, generation, transportNetworkGeneration,
+                    channelLifecycleEpoch(channelId), 1);
+                if (sendRetryPending) {
+                    // Retry scheduled; keep frame at head of queue for next drain.
+                    return;
+                }
+                queue.removeFirst();
+                if (stateMachine != null
+                    && stateMachine.readSnapshot().state == AndroidConnectionServiceSnapshot.State.BACKOFF_RECONNECT) {
+                    // Retries exhausted; reconnect will replay desired channels.
                     return;
                 }
             }
@@ -1398,8 +1569,11 @@ public class AndroidConnectionService extends Service {
             // receive CHANNEL_OPENED for an unregistered channelId, leaving the
             // session stuck in "opening" and blocking all input. Always open
             // with the exact requested channelId so the client mapping is 1:1.
+            long lifecycleEpoch = nextChannelLifecycleEpoch.incrementAndGet();
+            channelLifecycleEpochs.put(command.channelId, lifecycleEpoch);
             desiredChannels.put(command.channelId,
-                new ChannelIntent(command.channelId, command.sessionName, command.channelOptions));
+                new ChannelIntent(
+                    command.channelId, command.sessionName, command.channelOptions, lifecycleEpoch));
             closeStaleChannelsForSession(
                 command.channelId, command.sessionName, command.channelOptions);
             if (!isMuxReady()) {
@@ -1568,6 +1742,13 @@ public class AndroidConnectionService extends Service {
         void sendCloseChannel(AndroidConnectionCommand command) {
             desiredChannels.remove(command.channelId);
             pendingFrames.remove(command.channelId);
+            String channelId = command.channelId == null ? null : command.channelId.trim();
+            if (channelId != null && !channelId.isEmpty()) {
+                channelLifecycleEpochs.put(channelId, nextChannelLifecycleEpoch.incrementAndGet());
+                retryDeferredFrames.removeIf(deferred ->
+                    channelId.equals(deferred.channelId == null
+                        ? null : deferred.channelId.trim()));
+            }
             if (!isMuxReady()) {
                 return;
             }
@@ -1708,6 +1889,7 @@ public class AndroidConnectionService extends Service {
             stopped = true;
             desiredChannels.clear();
             pendingFrames.clear();
+            retryDeferredFrames.clear();
             droppedFrames.clear();
             closeQuietly(socket);
             socket = null;
@@ -1747,15 +1929,20 @@ public class AndroidConnectionService extends Service {
             final String channelId;
             final String sessionName;
             final JSONObject options;
+            final long lifecycleEpoch;
             volatile boolean opened;
 
-            ChannelIntent(String channelId, String sessionName, JSONObject options) {
+            ChannelIntent(String channelId, String sessionName, JSONObject options, long lifecycleEpoch) {
                 this.channelId = channelId;
                 this.sessionName = sessionName;
                 this.options = options;
+                this.lifecycleEpoch = lifecycleEpoch;
                 this.opened = false;
             }
         }
+
+        private static final java.util.concurrent.atomic.AtomicLong
+            nextChannelLifecycleEpoch = new java.util.concurrent.atomic.AtomicLong();
 
         boolean hasNotificationChannel(String channelId) {
             ChannelIntent channel = desiredChannels.get(channelId);
