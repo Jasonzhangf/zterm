@@ -20,7 +20,7 @@
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
         <!-- 深色启动/warm-start 首帧背景：终端主题表面 #1e1e1e，
              避免后台切前台 / 冷启动时白色 windowBackground 造成白屏闪烁 -->
-        <item name="android:background">@drawable/splash</item>
+        <item name="android:background">#FF1E1E1E</item>
         <item name="windowSplashScreenBackground">#FF1E1E1E</item>
         <item name="windowSplashScreenAnimatedIcon">@drawable/splash_logo</item>
         <item name="windowSplashScreenIconBackgroundColor">#FF1E1E1E</item>

@@ -20,23 +20,9 @@ const splashLogoPaths = [
   'drawable-xxxhdpi/splash_logo.png',
 ];
 
-const staticSplashPaths = [
-  'drawable/splash.png',
-  'drawable-port-mdpi/splash.png',
-  'drawable-port-hdpi/splash.png',
-  'drawable-port-xhdpi/splash.png',
-  'drawable-port-xxhdpi/splash.png',
-  'drawable-port-xxxhdpi/splash.png',
-  'drawable-land-mdpi/splash.png',
-  'drawable-land-hdpi/splash.png',
-  'drawable-land-xhdpi/splash.png',
-  'drawable-land-xxhdpi/splash.png',
-  'drawable-land-xxxhdpi/splash.png',
-];
-
 function findLogoBounds(path: string) {
   const image = PNG.sync.read(readFileSync(resolve(androidRoot, 'res', path)));
-  const background = { red: 30, green: 30, blue: 30 };
+  const background = { red: 255, green: 255, blue: 255 };
   let left = image.width;
   let top = image.height;
   let right = -1;
@@ -108,15 +94,10 @@ describe('Android task transition truth', () => {
     }
   });
 
-  it('keeps the static splash background logo at the same aspect ratio and centered bounds', () => {
-    for (const path of staticSplashPaths) {
-      const bounds = findLogoBounds(path);
-      const aspectRatio = bounds.width / bounds.height;
-
-      expect(aspectRatio, path).toBeGreaterThan(1.1);
-      expect(aspectRatio, path).toBeLessThan(1.2);
-      expect(Math.abs(bounds.centerX - bounds.canvasCenterX), path).toBeLessThanOrEqual(1);
-      expect(Math.abs(bounds.centerY - bounds.canvasCenterY), path).toBeLessThanOrEqual(1);
-    }
+  it('never stretches a fullscreen bitmap as the launch window background', () => {
+    // Warm/background starts show the launch theme before the SplashScreen
+    // icon; a bitmap here is stretched to the window, so only a solid color
+    // is allowed.
+    expect(themeSource).not.toContain('@drawable/splash"');
   });
 });
