@@ -211,6 +211,35 @@ describe('file-transfer-session-runtime', () => {
     expect(runtime.getState().transfers[0]?.status).toBe('done');
   });
 
+  it('exposes the last acknowledged upload chunk as the resume point', async () => {
+    const runtime = createFileTransferSessionRuntime({
+      now: () => 320,
+      randomId: () => 'rsme',
+    });
+
+    runtime.open('/remote/home');
+    const upload = runtime.startUpload({ name: 'resume.bin', size: 3072 }, '/remote/home', 3);
+
+    expect(runtime.getUploadResumeChunk(upload.requestId)).toBe(0);
+
+    await runtime.applyMessage({
+      type: 'file-upload-progress',
+      payload: {
+        requestId: upload.requestId,
+        chunkIndex: 1,
+        totalChunks: 3,
+      },
+    });
+    expect(runtime.getUploadResumeChunk(upload.requestId)).toBe(1);
+
+    await runtime.applyMessage({
+      type: 'file-upload-complete',
+      payload: { requestId: upload.requestId },
+    });
+    expect(runtime.getUploadResumeChunk(upload.requestId)).toBe(3);
+    expect(runtime.getUploadResumeChunk('missing-upload')).toBeNull();
+  });
+
   it('fails upload progress waiters when daemon returns an explicit upload error', async () => {
     const runtime = createFileTransferSessionRuntime({
       now: () => 310,

@@ -149,6 +149,7 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
   let previewExpectedChunks: number | null = null;
   const waiters = new Map<string, () => void>();
   const uploadProgressWaiters = new Map<string, Set<UploadProgressWaiter>>();
+  const uploadChunkCounts = new Map<string, number>();
   const now = deps?.now ?? (() => Date.now());
   const randomId = deps?.randomId ?? (() => Math.random().toString(36).slice(2, 6));
 
@@ -258,6 +259,7 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
       for (const [requestId] of uploadProgressWaiters) {
         clearUploadProgressWaiters(requestId, new Error('file transfer sheet reopened'));
       }
+      uploadChunkCounts.clear();
       state = {
         ...createDefaultState(),
         remotePath: initialRemotePath.trim(),
@@ -350,6 +352,7 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
 
     startUpload(entry: { name: string; size: number }, targetDir: string, chunkCount: number) {
       const requestId = `ful-${now()}-${randomId()}`;
+      uploadChunkCounts.set(requestId, chunkCount);
       state = {
         ...state,
         transfers: [
@@ -688,6 +691,24 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
         transfers: [...state.transfers, transfer],
       };
       return state;
+    },
+
+    getUploadResumeChunk(requestId: string): number | null {
+      const totalChunks = uploadChunkCounts.get(requestId);
+      if (totalChunks === undefined) {
+        return null;
+      }
+      const transfer = findTransfer(requestId);
+      if (transfer?.status === 'done') {
+        return totalChunks;
+      }
+      if (!transfer || transfer.status === 'error') {
+        return null;
+      }
+      const acknowledgedChunks = Number.isInteger(transfer.transferredBytes)
+        ? transfer.transferredBytes
+        : 0;
+      return Math.min(Math.max(acknowledgedChunks, 0), totalChunks);
     },
 
     markTransferError(requestId: string, error: string) {

@@ -7,6 +7,7 @@ export const FILE_TRANSFER_NATIVE_WRITE_BATCH_CHUNKS =
 
 interface SendBoundedFileUploadChunksOptions<TChunk> {
   totalChunks: number;
+  startChunkIndex?: number;
   readChunk: (chunkIndex: number) => Promise<TChunk>;
   sendChunk: (chunkIndex: number, chunk: TChunk) => void;
   waitForProgress: (minimumAcknowledgedChunks: number) => Promise<void>;
@@ -19,7 +20,16 @@ export async function sendBoundedFileUploadChunks<TChunk>(
     throw new Error(`invalid upload chunk count: ${options.totalChunks}`);
   }
 
-  for (let chunkIndex = 0; chunkIndex < options.totalChunks; chunkIndex += 1) {
+  const startChunkIndex = options.startChunkIndex ?? 0;
+  if (
+    !Number.isInteger(startChunkIndex) ||
+    startChunkIndex < 0 ||
+    startChunkIndex >= options.totalChunks
+  ) {
+    throw new Error(`invalid upload resume index: ${startChunkIndex}`);
+  }
+
+  for (let chunkIndex = startChunkIndex; chunkIndex < options.totalChunks; chunkIndex += 1) {
     if (chunkIndex >= FILE_TRANSFER_UPLOAD_WINDOW_CHUNKS) {
       await options.waitForProgress(
         chunkIndex - FILE_TRANSFER_UPLOAD_WINDOW_CHUNKS + 1,

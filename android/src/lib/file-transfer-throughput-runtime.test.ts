@@ -32,6 +32,22 @@ function createProgressGate() {
 }
 
 describe('file-transfer-throughput-runtime', () => {
+  it('resumes from the requested acknowledged chunk instead of resending written chunks', async () => {
+    const sentIndexes: number[] = [];
+
+    await sendBoundedFileUploadChunks({
+      totalChunks: 5,
+      startChunkIndex: 2,
+      readChunk: async (chunkIndex) => `chunk-${chunkIndex}`,
+      sendChunk: (chunkIndex) => {
+        sentIndexes.push(chunkIndex);
+      },
+      waitForProgress: () => Promise.resolve(),
+    });
+
+    expect(sentIndexes).toEqual([2, 3, 4]);
+  });
+
   it('keeps upload in flight at eight chunks and opens one slot per cumulative ACK', async () => {
     const progress = createProgressGate();
     const sentIndexes: number[] = [];
