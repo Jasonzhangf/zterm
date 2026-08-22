@@ -85,6 +85,8 @@ public class AndroidConnectionService extends Service {
     private static final int HEARTBEAT_MISSES_BEFORE_RECONNECT = 3;
     private static final long INITIAL_BACKOFF_MS = 1_000L;
     private static final long MAX_BACKOFF_MS = 30_000L;
+    static final int SEND_RETRY_MAX = 3;
+    static final long SEND_RETRY_DELAY_MS = 200L;
     private static final int MUX_PROTOCOL_VERSION = 1;
     private static final int MAX_NOTIFICATION_SESSION_ACTIONS = 3;
     private static final int NOTIFICATION_PULSE_UPDATES = 6;
@@ -794,6 +796,7 @@ public class AndroidConnectionService extends Service {
         volatile int candidateIndex;
         volatile long nextRetryAt;
         volatile int backoffIndex;
+        volatile int sendRetryCount;
         volatile int heartbeatMisses;
         volatile long lastActivityAt;
         volatile long lastPingAt;
@@ -1279,14 +1282,20 @@ public class AndroidConnectionService extends Service {
                 && isMuxReady()
                 && (channelId == null
                     || !requireOpenedChannel || isChannelOpened(channelId))) {
-                try {
-                    boolean enqueued = current.send(frame.toString());
-                    if (!enqueued) {
-                        transportFailure("websocket-send", "mux frame not enqueued");
+                for (int attempt = 1; attempt <= SEND_RETRY_MAX; attempt += 1) {
+                    try {
+                        boolean enqueued = current.send(frame.toString());
+                        if (enqueued) {
+                            sendRetryCount = 0;
+                            return;
+                        }
+                    } catch (RuntimeException error) {
+                        // Fall through to retry.
                     }
-                } catch (RuntimeException error) {
-                    transportFailure("websocket-send", String.valueOf(error.getMessage()));
+                    sendRetryCount = attempt;
                 }
+                sendRetryCount = 0;
+                transportFailure("websocket-send", "send failed after " + SEND_RETRY_MAX + " attempts");
                 return;
             }
             if (channelId == null || channelId.trim().isEmpty()) {
