@@ -173,13 +173,16 @@ public final class AndroidConnectionServiceTransportTest {
             sendChannelOpen.invoke(runtime, AndroidConnectionCommand.openChannel(
                 "target-a", "channel-new", "shell", null));
 
-            assertEquals(1, sent.size());
+            // New behavior: opening a new channelId for the same session first
+            // closes the stale channel (wire close), then opens the requested id
+            // (wire open). Total wire messages: initial open + close + new open.
+            assertEquals(3, sent.size());
             assertEquals("mux-channel-open", new JSONObject(sent.get(0)).getString("type"));
             Field desiredChannelsField = runtime.getClass().getDeclaredField("desiredChannels");
             desiredChannelsField.setAccessible(true);
             Map<?, ?> desiredChannels = (Map<?, ?>) desiredChannelsField.get(runtime);
-            assertTrue(desiredChannels.containsKey("channel-old"));
-            assertTrue(!desiredChannels.containsKey("channel-new"));
+            assertTrue(!desiredChannels.containsKey("channel-old"));
+            assertTrue(desiredChannels.containsKey("channel-new"));
         } finally {
             AndroidConnectionService.resetForTests();
         }
@@ -395,23 +398,25 @@ public final class AndroidConnectionServiceTransportTest {
             sendChannelOpen.invoke(runtime, AndroidConnectionCommand.openChannel(
                 "target-a", "channel-recreated", "shell", null));
 
+            // New behavior: opening a new channelId always sends a wire open for
+            // that exact id and waits for the daemon to confirm. No immediate
+            // CHANNEL_OPENED is published because the daemon response is async.
             assertEquals(0, events.stream().filter(event ->
                 event.kind == AndroidConnectionServiceEventEnvelope.Kind.SERVER_FRAME).count());
-            assertEquals(1, events.stream().filter(event ->
+            assertEquals(0, events.stream().filter(event ->
                 event.kind == AndroidConnectionServiceEventEnvelope.Kind.CHANNEL_OPENED).count());
-            assertEquals("channel-original", events.stream()
-                .filter(event -> event.kind == AndroidConnectionServiceEventEnvelope.Kind.CHANNEL_OPENED)
-                .findFirst().get().channelId);
             Field pendingFramesField = runtime.getClass().getDeclaredField("pendingFrames");
             pendingFramesField.setAccessible(true);
             @SuppressWarnings("unchecked")
             Map<String, java.util.ArrayDeque<JSONObject>> pendingFrames =
                 (Map<String, java.util.ArrayDeque<JSONObject>>) pendingFramesField.get(runtime);
-            assertTrue(!pendingFrames.containsKey("channel-recreated"));
-            // The frame queued under the requested id must have drained to wire
-            // (sent contains the mux-channel-message frame).
-            assertTrue(sent.size() >= 1);
-            assertTrue(sent.stream().anyMatch(frame -> {
+            // The queued input frame stays pending until the daemon confirms the
+            // new channel (async), so it must NOT have drained yet.
+            assertTrue(pendingFrames.containsKey("channel-recreated"));
+            // Wire traffic: mux-channel-close for channel-original + mux-channel-open
+            // for channel-recreated.
+            assertTrue(sent.size() >= 2);
+            assertTrue(sent.stream().noneMatch(frame -> {
                 try {
                     return new JSONObject(frame).getString("type").equals("mux-channel-message")
                         && new JSONObject(frame).getJSONObject("payload")

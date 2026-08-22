@@ -1379,21 +1379,11 @@ public class AndroidConnectionService extends Service {
                 refreshNotification();
                 return;
             }
-            ChannelIntent reusable = findOpenedChannelForIdentity(
-                command.sessionName, command.channelOptions);
-            if (reusable != null && !reusable.channelId.equals(command.channelId)) {
-                // Drain both the reused channel and the requested id: frames may have
-                // been buffered against either before the reuse decision landed.
-                drainPendingFrames(reusable.channelId);
-                drainPendingFrames(command.channelId);
-                publishEvent(AndroidConnectionServiceEventEnvelope.channelOpened(
-                    target.targetKey, generation, reusable.channelId,
-                    reusable.sessionName,
-                    stateMachine == null ? AndroidConnectionServiceSnapshot.empty()
-                        : stateMachine.readSnapshot()));
-                refreshNotification();
-                return;
-            }
+            // Close any stale channel for this session identity before opening
+            // a new one. Reusing a different channelId caused the JS side to
+            // receive CHANNEL_OPENED for an unregistered channelId, leaving the
+            // session stuck in "opening" and blocking all input. Always open
+            // with the exact requested channelId so the client mapping is 1:1.
             desiredChannels.put(command.channelId,
                 new ChannelIntent(command.channelId, command.sessionName, command.channelOptions));
             closeStaleChannelsForSession(

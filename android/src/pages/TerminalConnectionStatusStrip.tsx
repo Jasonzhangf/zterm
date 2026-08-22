@@ -3,6 +3,7 @@
  * 只消费 Session 投影与回调；不持有 session 生命周期 / 传输真相。
  */
 import { memo as ReactMemo, useEffect, useState, type ComponentProps } from 'react';
+import { useRef } from 'react';
 import { RenameDialog } from '../components/terminal/RenameDialog';
 import { formatDebugRate } from './terminal-page-debug-helpers';
 import type { Session, SessionDebugOverlayMetrics } from '../lib/types';
@@ -12,6 +13,8 @@ import {
   resolveEffectiveConnectionStatus,
   TERMINAL_PORTRAIT_STATUS_STRIP_TOP_OFFSET_PX,
 } from './terminal-page-status-helpers';
+
+const CONNECTION_STATUS_DEBOUNCE_MS = 2000;
 
 const connectionRouteOptionStyle = {
   minHeight: '34px',
@@ -46,6 +49,9 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
   const [routeMenuOpen, setRouteMenuOpen] = useState(false);
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
   const [renameErrorMessage, setRenameErrorMessage] = useState<string | null>(null);
+  const stableStatusRef = useRef<'connected' | 'unstable' | 'error'>('unstable');
+  const unstableSinceRef = useRef<number>(0);
+  const debouncedStatusRef = useRef<string>('waiting');
 
   useEffect(() => {
     if (!session) {
@@ -67,7 +73,42 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
   const uplinkBps = metrics?.uplinkBps || 0;
   const downlinkBps = metrics?.downlinkBps || 0;
   const routeLabel = formatConnectionRouteLabel(session);
-  const status = resolveEffectiveConnectionStatus(session, metrics);
+
+  // Connection status debounce: brief connecting/reconnecting blips within
+  // the debounce window do not flash. Error/closed transitions show immediately.
+  const rawStatus = resolveEffectiveConnectionStatus(session, metrics);
+  const now = Date.now();
+  const isTerminalState = rawStatus === 'error' || rawStatus === 'closed';
+  const isStableConnected = !isTerminalState
+    && rawStatus !== 'connecting'
+    && rawStatus !== 'reconnecting'
+    && (!session.lastError || session.state === 'connected');
+  if (isStableConnected) {
+    stableStatusRef.current = 'connected';
+    unstableSinceRef.current = 0;
+    debouncedStatusRef.current = rawStatus;
+  } else if (isTerminalState) {
+    stableStatusRef.current = 'error';
+    unstableSinceRef.current = 0;
+    debouncedStatusRef.current = rawStatus;
+  } else {
+    // Transitional state (connecting/reconnecting)
+    if (stableStatusRef.current === 'connected' && unstableSinceRef.current === 0) {
+      unstableSinceRef.current = now;
+    }
+    const elapsedMs = now - unstableSinceRef.current;
+    if (elapsedMs < CONNECTION_STATUS_DEBOUNCE_MS && stableStatusRef.current === 'connected') {
+      // Still within debounce window: keep showing as connected/stable
+      debouncedStatusRef.current = 'waiting';
+    } else {
+      debouncedStatusRef.current = rawStatus;
+      if (stableStatusRef.current === 'connected') {
+        stableStatusRef.current = 'unstable';
+      }
+    }
+  }
+
+  const status = debouncedStatusRef.current as typeof rawStatus;
   const activityLabel = resolveConnectionActivityLabel(session, status);
   const statusTone = status === 'error' || status === 'closed'
     ? '#ff8a8a'
