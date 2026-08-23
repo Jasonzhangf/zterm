@@ -334,6 +334,8 @@ async function main() {
     payload: {
       requestId: requestId('start'),
       streamId,
+      mediaPlan: 'single-focus',
+      mediaPlanVersion: 1,
       target,
       offer: {
         type: 'offer',

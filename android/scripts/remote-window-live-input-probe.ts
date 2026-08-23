@@ -789,6 +789,8 @@ async function main() {
       payload: {
         requestId: requestId('start'),
         streamId,
+        mediaPlan: 'single-focus',
+        mediaPlanVersion: 1,
         target,
         offer: {
           type: offer.type,
@@ -836,6 +838,8 @@ async function main() {
         requestId: degradedQualityRequestId,
         streamId,
         streamGroupId: streamId,
+        mediaPlan: 'single-focus',
+        mediaPlanVersion: 1 as const,
         revision: 1,
         targetId: target.streamTargetId,
         videoBitrate: {
@@ -864,6 +868,8 @@ async function main() {
         requestId: restoredQualityRequestId,
         streamId,
         streamGroupId: streamId,
+        mediaPlan: 'single-focus',
+        mediaPlanVersion: 1 as const,
         revision: 2,
         targetId: target.streamTargetId,
         videoBitrate: {
