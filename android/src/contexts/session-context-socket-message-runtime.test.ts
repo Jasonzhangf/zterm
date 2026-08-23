@@ -831,6 +831,8 @@ describe('session-context-socket-message-runtime remote window messages', () => 
           requestId: 'rw-start-1',
           streamId: 'stream-1',
           targetId: 'pane-1',
+          mediaPlan: 'single-focus' as const,
+          mediaPlanVersion: 1 as const,
           answer: { type: 'answer', sdp: 'answer-sdp' },
           capture: {
             source: 'ScreenCaptureKit',

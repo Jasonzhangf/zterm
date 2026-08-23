@@ -188,6 +188,8 @@ describe('remote window message runtime', () => {
     void runtime.requestStreamStart('session-1', {
       ws: makeSocket(),
       streamId: 'stream-1',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       target: makeTarget(),
       offer: { type: 'offer', sdp: 'offer-sdp' },
       sendSocketPayload: vi.fn(),
@@ -212,6 +214,8 @@ describe('remote window message runtime', () => {
         requestId: 'rw-start-1',
         streamId: 'stream-1',
         targetId: 'pane-1',
+        mediaPlan: 'single-focus' as const,
+        mediaPlanVersion: 1 as const,
         answer: { type: 'answer', sdp: 'answer-sdp' },
         capture: {
           source: 'ScreenCaptureKit',
@@ -250,6 +254,8 @@ describe('remote window message runtime', () => {
       ws: makeSocket(),
       streamId: 'stream-1',
       purpose: 'preview',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       target: makeTarget(),
       offer: { type: 'offer', sdp: 'offer-sdp' },
       iceServers: [{ urls: 'stun:relay.codewhisper.cc:3478' }],
@@ -264,6 +270,8 @@ describe('remote window message runtime', () => {
         requestId: expect.stringMatching(/^rw-start-45-/),
         streamId: 'stream-1',
         purpose: 'preview',
+        mediaPlan: 'single-focus' as const,
+        mediaPlanVersion: 1 as const,
         target: { streamTargetId: 'pane-1' },
         offer: { type: 'offer', sdp: 'offer-sdp' },
         videoBitrate: { preset: '20mbps', bitrateMbps: 20, maxBitrateBps: 20_000_000 },
@@ -275,6 +283,8 @@ describe('remote window message runtime', () => {
       streamId: 'stream-1',
       purpose: 'preview',
       targetId: 'pane-1',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       answer: { type: 'answer', sdp: 'answer-sdp' },
       capture: {
         source: 'ScreenCaptureKit',
@@ -289,6 +299,8 @@ describe('remote window message runtime', () => {
     await expect(request).resolves.toMatchObject({
       streamId: 'stream-1',
       targetId: 'pane-1',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       answer: { type: 'answer', sdp: 'answer-sdp' },
       capture: { source: 'ScreenCaptureKit', frameWidth: 640 },
     });
@@ -305,6 +317,8 @@ describe('remote window message runtime', () => {
     const request = runtime.requestStreamStart('session-1', {
       ws: makeSocket(),
       streamId: 'stream-2',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       target: makeTarget('pane-2'),
       offer: { type: 'offer', sdp: 'offer-sdp' },
       sendSocketPayload: vi.fn(),
@@ -324,11 +338,13 @@ describe('remote window message runtime', () => {
       streamId: 'stream-2',
       code: 'screen_capture_failed',
       message: 'ScreenCaptureKit capture start failure',
+      failureStage: 'focus-capture-start',
     });
 
     await expect(request).rejects.toMatchObject({
       name: 'screen_capture_failed',
       message: 'ScreenCaptureKit capture start failure',
+      failureStage: 'focus-capture-start',
     });
     expect(runtime.getPendingCount()).toBe(0);
   });
@@ -427,6 +443,8 @@ describe('remote window message runtime', () => {
       payload: {
         streamId: 'stream-3',
         streamGroupId: 'stream-3',
+        mediaPlan: 'single-focus' as const,
+        mediaPlanVersion: 1 as const,
         revision: 4,
         purpose: 'focus',
         targetId: 'target-3',
@@ -441,6 +459,8 @@ describe('remote window message runtime', () => {
         requestId: expect.stringMatching(/^rw-quality-471-/),
         streamId: 'stream-3',
         streamGroupId: 'stream-3',
+        mediaPlan: 'single-focus' as const,
+        mediaPlanVersion: 1 as const,
         revision: 4,
         purpose: 'focus',
         targetId: 'target-3',
@@ -453,6 +473,8 @@ describe('remote window message runtime', () => {
         requestId: 'rw-quality-1',
         streamId: 'stream-3',
         streamGroupId: 'stream-3',
+        mediaPlan: 'single-focus' as const,
+        mediaPlanVersion: 1 as const,
         revision: 4,
         purpose: 'focus',
         targetId: 'target-3',
@@ -471,6 +493,8 @@ describe('remote window message runtime', () => {
       payload: {
         streamId: 'stream-3',
         streamGroupId: 'group-3',
+        mediaPlan: 'single-focus' as const,
+        mediaPlanVersion: 1 as const,
         revision: 5,
         targetId: 'target-3',
         videoBitrate: { preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
@@ -482,6 +506,8 @@ describe('remote window message runtime', () => {
       requestId,
       streamId: 'stream-3',
       streamGroupId: 'wrong-group',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       revision: 5,
       targetId: 'target-3',
       status: 'applied' as const,

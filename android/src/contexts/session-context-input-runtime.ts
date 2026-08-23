@@ -195,18 +195,18 @@ export async function ensureSessionReadyForTransfer(options: {
   timeoutMs: number;
   sessionsRef: MutableRefObject<Session[]>;
   daemonConnection: ClientDaemonConnection;
+  requestReconnect?: (sessionId: string, reason: string) => void;
 }) {
   const readReadyState = () => {
     const session = options.sessionsRef.current.find((item) => item.id === options.sessionId) || null;
     const ws = options.daemonConnection.readSessionSocket(options.sessionId) || null;
-    const ready =
-      Boolean(session)
-      && session?.state === 'connected'
+    const ready = Boolean(session)
       && Boolean(ws)
       && ws?.readyState === WebSocket.OPEN;
     return {
       session,
       ws,
+      socketState: ws ? (ws.readyState === WebSocket.OPEN ? 'open' : 'not-open') : 'missing',
       ready,
     };
   };
@@ -220,9 +220,7 @@ export async function ensureSessionReadyForTransfer(options: {
     throw new Error('Active session no longer exists');
   }
 
-  if (initial.session.state !== 'connecting' && initial.session.state !== 'reconnecting') {
-    throw new Error(`Active session is not ready yet (${initial.session.state || 'missing'})`);
-  }
+  options.requestReconnect?.(options.sessionId, 'transfer transport unavailable');
 
   const startedAt = Date.now();
   while (Date.now() - startedAt < options.timeoutMs) {
@@ -235,5 +233,7 @@ export async function ensureSessionReadyForTransfer(options: {
 
   const latest = readReadyState();
   const stateLabel = latest.session?.state || 'missing';
-  throw new Error(`Active session is not ready yet (${stateLabel})`);
+  throw new Error(
+    `Active session is not ready yet (state=${stateLabel}, transport=${latest.socketState})`,
+  );
 }

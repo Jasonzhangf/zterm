@@ -14,6 +14,9 @@ export interface RemoteWindowVideoDebugSnapshot {
   lastEvent: string;
   lastError: string;
   updatedAt: number | null;
+  trackAttachedAt: number | null;
+  decodedFirstFrameAt: number | null;
+  playingAt: number | null;
 }
 
 export interface RemoteWindowLiveDiagnostics {
@@ -62,6 +65,9 @@ export function useRemoteWindowPlayback({
     playRejected: 0,
     framesReceived: 0,
     lastError: '-',
+    trackAttachedAt: null as number | null,
+    decodedFirstFrameAt: null as number | null,
+    playingAt: null as number | null,
   });
 
   const updateVisibility = useCallback((visible: boolean) => {
@@ -89,6 +95,9 @@ export function useRemoteWindowPlayback({
       lastEvent,
       lastError: stats.lastError,
       updatedAt: Date.now(),
+      trackAttachedAt: stats.trackAttachedAt,
+      decodedFirstFrameAt: stats.decodedFirstFrameAt,
+      playingAt: stats.playingAt,
     };
     setVideoDebugSnapshot(snapshot);
     onVideoDebug?.(snapshot);
@@ -111,6 +120,7 @@ export function useRemoteWindowPlayback({
     ) {
       return;
     }
+    playbackStatsRef.current.playingAt ??= Date.now();
     updateVisibility(true);
     publishDebugSnapshot(lastEvent, { visible: true });
   }, [publishDebugSnapshot, updateVisibility, videoElementRef]);
@@ -146,6 +156,7 @@ export function useRemoteWindowPlayback({
     if (typeof requestFrame === 'function' && !frameCallbackRef.current) {
       const onVideoFrame = () => {
         playbackStatsRef.current.framesReceived += 1;
+        playbackStatsRef.current.decodedFirstFrameAt ??= Date.now();
         const received = playbackStatsRef.current.framesReceived;
         if (received === 1 || received % 60 === 0) {
           console.log(
@@ -222,6 +233,9 @@ export function useRemoteWindowPlayback({
       playRejected: 0,
       framesReceived: 0,
       lastError: '-',
+      trackAttachedAt: receiverMediaStream ? Date.now() : null,
+      decodedFirstFrameAt: null,
+      playingAt: null,
     };
     if (!receiverMediaStream) {
       playbackBindingRef.current = null;

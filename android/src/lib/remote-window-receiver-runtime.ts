@@ -5,6 +5,7 @@ import type {
   RemoteWindowStreamStartedPayload,
   RemoteWindowStreamTargetManifest,
 } from './types';
+import { getRemoteWindowMediaPlanContract } from '@zterm/shared/protocol';
 import type { RemoteWindowVideoStatsSample } from './remote-window-video-quality';
 
 export interface RemoteWindowReceiverStartResult {
@@ -13,7 +14,15 @@ export interface RemoteWindowReceiverStartResult {
   mediaStream: MediaStream;
   overviewMediaStream?: MediaStream;
   started: RemoteWindowStreamStartedPayload;
+  startupTelemetry?: RemoteWindowReceiverStartupTelemetry;
   collectStats?: () => Promise<RemoteWindowVideoStatsSample | null>;
+}
+
+export interface RemoteWindowReceiverStartupTelemetry {
+  captureStartedAt: number;
+  answerAppliedAt: number;
+  focusTrackAttachedAt: number;
+  overviewTrackAttachedAt?: number;
 }
 
 export const REMOTE_WINDOW_RECEIVER_TRACK_TIMEOUT_MS = 25_000;
@@ -25,9 +34,20 @@ interface ActiveRemoteWindowReceiverStream {
   mediaStream: MediaStream;
   overviewMediaStream: MediaStream | null;
   cleanupDone: boolean;
+  needsOverview: boolean;
   trackAttached: boolean;
   overviewTrackAttached: boolean;
-  trackTimeoutId: ReturnType<typeof setTimeout> | null;
+  requiredLaneRoles: readonly ('focus' | 'overview')[];
+  remoteDescriptionApplied: boolean;
+  pendingIceCandidates: RTCIceCandidateInit[];
+  remoteStartDispatched: boolean;
+  pendingLocalIceCandidates: RemoteWindowStreamIceCandidatePayload['candidate'][];
+  captureStartedAt: number | null;
+  answerAppliedAt: number | null;
+  focusTrackAttachedAt: number | null;
+  overviewTrackAttachedAt: number | null;
+  trackTimeoutIds: Map<'focus' | 'overview', ReturnType<typeof setTimeout>>;
+  trackWaitStartedAt: number | null;
   resolveTrack: ((result: { mediaStream: MediaStream; overviewMediaStream: MediaStream | null }) => void) | null;
   rejectTrack: ((error: Error) => void) | null;
   statsBaseline: {
@@ -91,11 +111,13 @@ export function createRemoteWindowReceiverRuntime(input?: {
   trackTimeoutMs?: number;
   setTimeoutFn?: typeof globalThis.setTimeout;
   clearTimeoutFn?: typeof globalThis.clearTimeout;
+  nowMs?: () => number;
 }) {
   const activeStreams = new Map<string, ActiveRemoteWindowReceiverStream>();
   const trackTimeoutMs = Math.max(1, Math.floor(input?.trackTimeoutMs ?? REMOTE_WINDOW_RECEIVER_TRACK_TIMEOUT_MS));
   const setTimeoutFn = input?.setTimeoutFn ?? globalThis.setTimeout.bind(globalThis);
   const clearTimeoutFn = input?.clearTimeoutFn ?? globalThis.clearTimeout.bind(globalThis);
+  const nowMs = input?.nowMs ?? Date.now;
   const createPeerConnection = () => resolvePeerConnectionFactory(input?.peerConnectionFactory);
   const createMediaStream = () => resolveMediaStreamFactory(input?.mediaStreamFactory);
 
@@ -109,14 +131,14 @@ export function createRemoteWindowReceiverRuntime(input?: {
     }
     entry.cleanupDone = true;
     activeStreams.delete(entry.streamId);
-    if (entry.trackTimeoutId !== null) {
-      clearTimeoutFn(entry.trackTimeoutId);
-      entry.trackTimeoutId = null;
+    for (const timeoutId of entry.trackTimeoutIds.values()) {
+      clearTimeoutFn(timeoutId);
     }
+    entry.trackTimeoutIds.clear();
     const pendingReject = entry.rejectTrack;
     entry.resolveTrack = null;
     entry.rejectTrack = null;
-    if (!entry.trackAttached && pendingReject) {
+    if (pendingReject) {
       pendingReject(new Error(reason));
     }
     entry.peerConnection.onicecandidate = null;
@@ -161,18 +183,32 @@ export function createRemoteWindowReceiverRuntime(input?: {
     entry.rejectTrack = reject;
   });
 
-  const armTrackTimeout = (entry: ActiveRemoteWindowReceiverStream) => {
-    if (!isCurrent(entry) || entry.trackAttached || entry.trackTimeoutId !== null) {
-      return false;
-    }
-    entry.trackTimeoutId = setTimeoutFn(() => {
-      if (!isCurrent(entry)) {
-        return;
+  const armTrackTimeouts = (entry: ActiveRemoteWindowReceiverStream) => {
+    entry.trackWaitStartedAt ??= nowMs();
+    for (const role of entry.requiredLaneRoles) {
+      const attached = role === 'focus' ? entry.trackAttached : entry.overviewTrackAttached;
+      if (!isCurrent(entry) || attached || entry.trackTimeoutIds.has(role)) {
+        continue;
       }
-      entry.trackTimeoutId = null;
-      entry.rejectTrack?.(new Error('Remote window receiver did not receive a video track'));
-    }, trackTimeoutMs);
-    return true;
+      const timeoutId = setTimeoutFn(() => {
+        if (!isCurrent(entry) || (role === 'focus' ? entry.trackAttached : entry.overviewTrackAttached)) {
+          return;
+        }
+        entry.trackTimeoutIds.delete(role);
+        const error = new Error(`Remote window receiver timed out waiting for required lane: ${role}`) as Error & {
+          failureStage: 'track-attach';
+          lane: 'focus' | 'overview';
+          elapsedMs: number;
+        };
+        error.name = 'remote_window_receiver_lane_timeout';
+        error.failureStage = 'track-attach';
+        error.lane = role;
+        error.elapsedMs = Math.max(0, nowMs() - (entry.trackWaitStartedAt ?? nowMs()));
+        entry.rejectTrack?.(error);
+      }, trackTimeoutMs);
+      entry.trackTimeoutIds.set(role, timeoutId);
+    }
+    return entry.trackTimeoutIds.size > 0;
   };
 
   const attachTrack = (
@@ -191,6 +227,7 @@ export function createRemoteWindowReceiverRuntime(input?: {
         entry.overviewMediaStream.addTrack(event.track);
       }
       entry.overviewTrackAttached = true;
+      entry.overviewTrackAttachedAt ??= Date.now();
     } else {
       if (eventStream) {
         entry.mediaStream = eventStream;
@@ -201,14 +238,23 @@ export function createRemoteWindowReceiverRuntime(input?: {
         }
       }
       entry.trackAttached = true;
+      entry.focusTrackAttachedAt ??= Date.now();
     }
-    if (entry.trackTimeoutId !== null) {
-      clearTimeoutFn(entry.trackTimeoutId);
-      entry.trackTimeoutId = null;
+    const attachedRole = isOverview ? 'overview' : 'focus';
+    const timeoutId = entry.trackTimeoutIds.get(attachedRole);
+    if (timeoutId !== undefined) {
+      clearTimeoutFn(timeoutId);
+      entry.trackTimeoutIds.delete(attachedRole);
     }
-    // 双流必须等 required tracks 全部到达；第一条 focus track 到达时不能
-    // 消费掉仍等待 overview track 的 resolver。
-    entry.resolveTrack?.({ mediaStream: entry.mediaStream, overviewMediaStream: entry.overviewMediaStream });
+    if (entry.trackAttached && (!entry.needsOverview || entry.overviewTrackAttached)) {
+      const resolveTrack = entry.resolveTrack;
+      entry.resolveTrack = null;
+      entry.rejectTrack = null;
+      resolveTrack?.({
+        mediaStream: entry.mediaStream,
+        overviewMediaStream: entry.needsOverview ? entry.overviewMediaStream : null,
+      });
+    }
   };
 
   const assertCurrent = (entry: ActiveRemoteWindowReceiverStream) => {
@@ -235,8 +281,11 @@ export function createRemoteWindowReceiverRuntime(input?: {
       }
       const peerConnection = createPeerConnection()({ iceServers: options.iceServers ?? [] });
       const mediaStream = createMediaStream()();
-      const needsOverview = options.target.videoTarget.kind === 'app-window'
-        || (options.target.compositeWindows ?? []).length > 0;
+      const mediaPlan = (options.target.compositeWindows ?? []).length > 0
+        ? 'overview-plus-focus' as const
+        : 'single-focus' as const;
+      const mediaPlanContract = getRemoteWindowMediaPlanContract(mediaPlan);
+      const needsOverview = mediaPlanContract.lanes.some((lane) => lane.role === 'overview');
       const entry: ActiveRemoteWindowReceiverStream = {
         streamId,
         purpose: options.purpose,
@@ -244,9 +293,20 @@ export function createRemoteWindowReceiverRuntime(input?: {
         mediaStream,
         overviewMediaStream: null,
         cleanupDone: false,
+        needsOverview,
         trackAttached: false,
         overviewTrackAttached: false,
-        trackTimeoutId: null,
+        requiredLaneRoles: mediaPlanContract.lanes.map((lane) => lane.role),
+        remoteDescriptionApplied: false,
+        pendingIceCandidates: [],
+        remoteStartDispatched: false,
+        pendingLocalIceCandidates: [],
+        captureStartedAt: null,
+        answerAppliedAt: null,
+        focusTrackAttachedAt: null,
+        overviewTrackAttachedAt: null,
+        trackTimeoutIds: new Map(),
+        trackWaitStartedAt: null,
         resolveTrack: null,
         rejectTrack: null,
         statsBaseline: null,
@@ -255,15 +315,22 @@ export function createRemoteWindowReceiverRuntime(input?: {
 
       try {
         // 双流：组合 target 协商两个 video transceiver（focus + overview）
-        peerConnection.addTransceiver('video', { direction: 'recvonly' });
-        if (needsOverview) {
+        for (const lane of mediaPlanContract.lanes) {
           peerConnection.addTransceiver('video', { direction: 'recvonly' });
+          if (!lane.requiredForStart) {
+            throw new Error(`Remote window media lane is not start-gated: ${lane.role}`);
+          }
         }
         peerConnection.onicecandidate = (event) => {
           if (!isCurrent(entry) || !event.candidate) {
             return;
           }
-          options.sendIceCandidate(normalizeLocalCandidate(event.candidate));
+          const candidate = normalizeLocalCandidate(event.candidate);
+          if (!entry.remoteStartDispatched) {
+            entry.pendingLocalIceCandidates.push(candidate);
+            return;
+          }
+          options.sendIceCandidate(candidate);
         };
         peerConnection.ontrack = (event) => attachTrack(entry, event);
         const trackPromise = waitForRequiredTracks(entry, needsOverview);
@@ -272,20 +339,45 @@ export function createRemoteWindowReceiverRuntime(input?: {
         await peerConnection.setLocalDescription(offer);
         assertCurrent(entry);
         const localOffer = normalizeRtcDescription(peerConnection.localDescription || offer, 'offer');
-        const started = await options.startRemote(localOffer);
+        const startedPromise = options.startRemote(localOffer);
+        entry.remoteStartDispatched = true;
+        for (const candidate of entry.pendingLocalIceCandidates.splice(0)) {
+          options.sendIceCandidate(candidate);
+        }
+        const started = await startedPromise;
         assertCurrent(entry);
+        entry.captureStartedAt = Date.now();
         if (started.streamId !== streamId) {
           throw new Error(`Remote window stream id mismatch: expected ${streamId}, got ${started.streamId}`);
         }
         if (started.targetId !== options.target.streamTargetId) {
           throw new Error(`Remote window target mismatch: expected ${options.target.streamTargetId}, got ${started.targetId}`);
         }
+        if (started.mediaPlan !== mediaPlan) {
+          throw new Error(`Remote window media plan mismatch: expected ${mediaPlan}, got ${started.mediaPlan}`);
+        }
+        if (started.mediaPlanVersion !== mediaPlanContract.version) {
+          throw new Error(`Remote window media plan version mismatch: expected ${mediaPlanContract.version}, got ${String(started.mediaPlanVersion)}`);
+        }
         const answer = normalizeRtcDescription(started.answer, 'answer');
         await peerConnection.setRemoteDescription(answer);
+        entry.answerAppliedAt = Date.now();
+        entry.remoteDescriptionApplied = true;
+        for (const candidate of entry.pendingIceCandidates.splice(0)) {
+          await peerConnection.addIceCandidate(candidate);
+        }
         assertCurrent(entry);
-        armTrackTimeout(entry);
+        armTrackTimeouts(entry);
         const attachedTracks = await trackPromise;
         assertCurrent(entry);
+        if (
+          entry.captureStartedAt === null
+          || entry.answerAppliedAt === null
+          || entry.focusTrackAttachedAt === null
+          || (needsOverview && entry.overviewTrackAttachedAt === null)
+        ) {
+          throw new Error('Remote window receiver startup telemetry is incomplete');
+        }
         return {
           streamId,
           ...(options.purpose ? { purpose: options.purpose } : {}),
@@ -294,6 +386,14 @@ export function createRemoteWindowReceiverRuntime(input?: {
             ? { overviewMediaStream: attachedTracks.overviewMediaStream }
             : {}),
           started,
+          startupTelemetry: {
+            captureStartedAt: entry.captureStartedAt,
+            answerAppliedAt: entry.answerAppliedAt,
+            focusTrackAttachedAt: entry.focusTrackAttachedAt,
+            ...(entry.overviewTrackAttachedAt !== null
+              ? { overviewTrackAttachedAt: entry.overviewTrackAttachedAt }
+              : {}),
+          },
           collectStats: () => runtime.getStatsSample(streamId),
         };
       } catch (error) {
@@ -307,12 +407,17 @@ export function createRemoteWindowReceiverRuntime(input?: {
       if (!entry || entry.cleanupDone) {
         return false;
       }
-      await entry.peerConnection.addIceCandidate({
+      const candidate = {
         candidate: payload.candidate.candidate,
         sdpMid: payload.candidate.sdpMid ?? null,
         sdpMLineIndex: payload.candidate.sdpMLineIndex ?? null,
         usernameFragment: payload.candidate.usernameFragment ?? null,
-      });
+      };
+      if (!entry.remoteDescriptionApplied) {
+        entry.pendingIceCandidates.push(candidate);
+        return true;
+      }
+      await entry.peerConnection.addIceCandidate(candidate);
       return true;
     },
 

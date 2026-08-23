@@ -19,6 +19,7 @@ import {
 import type { BridgeTransportSocket } from '../lib/traversal/types';
 import type { ClientDaemonConnection } from '../lib/client-daemon-connection';
 import type { BridgeSettings } from '../lib/bridge-settings';
+import type { FileTransferMessageRuntime } from '../lib/file-transfer-message-runtime';
 import type {
   PasteImageStartPayload,
   RemoteScreenshotCapture,
@@ -81,6 +82,7 @@ export function createSessionInteractionRuntime(options: {
   refs: {
     stateRef: StateRefLike;
     imagePasteWaiterRuntimeRef: { current: ImagePasteWaiterRuntime };
+    fileTransferMessageRuntimeRef: { current: Pick<FileTransferMessageRuntime, 'subscribe'> };
     remoteScreenshotRuntimeRef: { current: RemoteScreenshotRuntimeLike };
     remoteWindowTargetCatalogCacheRef?: { current: RemoteWindowTargetCatalogCacheStore };
     remoteWindowMessageRuntimeRef: { current: RemoteWindowMessageRuntimeLike };
@@ -136,6 +138,13 @@ export function createSessionInteractionRuntime(options: {
       timeoutMs,
       sessions: options.refs.stateRef.current.sessions,
       daemonConnection,
+      requestReconnect: options.scheduleReconnect
+        ? (sessionId, reason) => options.scheduleReconnect?.(sessionId, reason, true, {
+          immediate: true,
+          resetAttempt: false,
+          force: true,
+        })
+        : undefined,
     });
   };
 
@@ -151,6 +160,7 @@ export function createSessionInteractionRuntime(options: {
       imagePasteWaiterRuntime,
       imagePasteResultTimeoutMs: 30_000,
       ensureSessionReadyForPaste,
+      subscribeFileTransferMessages: options.refs.fileTransferMessageRuntimeRef.current.subscribe,
       sendSocketPayload: options.sendSocketPayload,
     });
   };

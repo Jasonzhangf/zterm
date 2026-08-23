@@ -1,5 +1,6 @@
-import type { RemoteWindowCanvasLayoutV1 } from '../../lib/types';
+import type { RemoteWindowCanvasLayoutV1, RemoteWindowStreamCapabilityTelemetry } from '../../lib/types';
 import type { RemoteWindowOverlayState } from '../../lib/remote-window-overlay-runtime';
+import type { RemoteWindowReceiverStartupTelemetry } from '../../lib/remote-window-receiver-runtime';
 import type {
   RemoteWindowLiveDiagnostics,
   RemoteWindowVideoDebugSnapshot,
@@ -20,6 +21,8 @@ export interface RemoteWindowDeveloperDiagnosticsProps {
   videoDebugSnapshot: RemoteWindowVideoDebugSnapshot | null;
   videoHasPlayed: boolean;
   viewportDebugSnapshot: RemoteWindowViewportDebugSnapshot | null;
+  startupTelemetry: RemoteWindowReceiverStartupTelemetry | null;
+  streamCapability: RemoteWindowStreamCapabilityTelemetry | null;
 }
 
 export function RemoteWindowDeveloperDiagnostics({
@@ -33,6 +36,8 @@ export function RemoteWindowDeveloperDiagnostics({
   videoDebugSnapshot,
   videoHasPlayed,
   viewportDebugSnapshot,
+  startupTelemetry,
+  streamCapability,
 }: RemoteWindowDeveloperDiagnosticsProps) {
   return (
     <details data-testid="remote-window-developer-diagnostics" style={styles.debugDiagnostics}>
@@ -44,10 +49,14 @@ export function RemoteWindowDeveloperDiagnostics({
       <div>target: {state.target?.streamTargetId || '-'}</div>
       <div>layout: {canvasLayout ? `v${canvasLayout.version} gen=${canvasLayout.layoutGeneration}` : '-'}</div>
       <div>receiver: {receiverAttached ? 'attached' : 'missing'} / played:{videoHasPlayed ? 'yes' : 'no'}</div>
+      <div>startup: capture={startupTelemetry?.captureStartedAt ?? '-'} answer={startupTelemetry?.answerAppliedAt ?? '-'} focus-track={startupTelemetry?.focusTrackAttachedAt ?? '-'} overview-track={startupTelemetry?.overviewTrackAttachedAt ?? '-'}</div>
+      <div>capability: {streamCapability ? `${streamCapability.mediaPlan}@v${streamCapability.mediaPlanVersion} lanes=${streamCapability.lanes.map((lane) => `${lane.role}:${lane.requiredForStart ? 'required' : 'optional'}`).join(',')} sck=${streamCapability.screenCaptureKit ? 'yes' : 'no'} typed-status=${streamCapability.typedPerLaneStatus ? 'yes' : 'no'}` : '-'}</div>
+      <div>preflight: {streamCapability ? `wrtc=${streamCapability.preflight.wrtc} abi=${streamCapability.preflight.abi} swift=${streamCapability.preflight.swiftHelper} permission=${streamCapability.preflight.screenRecordingPermission} capture=${streamCapability.preflight.capture} sender=${streamCapability.preflight.senderNegotiation}` : '-'}</div>
+      <div>playback: track={videoDebugSnapshot?.trackAttachedAt ?? '-'} decoded={videoDebugSnapshot?.decodedFirstFrameAt ?? '-'} playing={videoDebugSnapshot?.playingAt ?? '-'}</div>
       <div>frame: {receiverFrameSize ? `${receiverFrameSize.width}x${receiverFrameSize.height}` : '-'}</div>
       <div>video: {videoDebugSnapshot ? `${videoDebugSnapshot.videoWidth}x${videoDebugSnapshot.videoHeight} ready=${videoDebugSnapshot.readyState} frames=${videoDebugSnapshot.framesReceived}` : '-'}</div>
       <div>live: {liveDiagnostics ? `t=${liveDiagnostics.currentTime.toFixed(3)} track=${liveDiagnostics.trackState} frames=${liveDiagnostics.framesReceived}` : '-'}</div>
-      <div>error: {videoDebugSnapshot?.lastError || state.streamErrorMessage || '-'}</div>
+      <div>error: {state.streamFailureStage ? `[${state.streamFailureStage}] ` : ''}{videoDebugSnapshot?.lastError || state.streamErrorMessage || '-'}</div>
       <div>viewport: {viewportDebugSnapshot ? `${viewportDebugSnapshot.event} window=${viewportDebugSnapshot.window}` : '-'}</div>
     </details>
   );

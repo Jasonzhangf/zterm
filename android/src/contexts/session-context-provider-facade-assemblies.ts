@@ -220,6 +220,7 @@ export function useSessionProviderFacadeAssemblies(
     refs: {
       stateRef: options.stateRef,
       imagePasteWaiterRuntimeRef: options.refs.imagePasteWaiterRuntimeRef,
+      fileTransferMessageRuntimeRef: options.refs.fileTransferMessageRuntimeRef,
       remoteScreenshotRuntimeRef,
       remoteWindowMessageRuntimeRef,
       remoteWindowReceiverRuntimeRef,
@@ -241,6 +242,7 @@ export function useSessionProviderFacadeAssemblies(
     core.daemonConnection,
     options.bridgeSettings,
     options.refs.imagePasteWaiterRuntimeRef,
+    options.refs.fileTransferMessageRuntimeRef,
     options.stateRef,
     remoteScreenshotRuntimeRef,
     remoteWindowMessageRuntimeRef,

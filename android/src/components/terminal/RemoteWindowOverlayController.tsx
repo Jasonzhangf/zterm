@@ -14,6 +14,7 @@ import { App as CapacitorApp } from '@capacitor/app';
 import { useSharedDraggableDrag, SHARED_DRAG_SUPPRESS_CLICK_MS } from './draggable-bubble-shared';
 import type {
   RemoteWindowCanvasLayoutV1,
+  RemoteWindowStreamCapabilityTelemetry,
   RemoteWindowInputEventPayload,
   RemoteWindowStreamQualityRequestPayload,
   RemoteWindowStreamQualityResultPayload,
@@ -25,6 +26,7 @@ import type {
   RemoteWindowVideoBitratePreset,
 } from '../../lib/types';
 import type { RemoteWindowControlMessage } from '../../lib/remote-window-message-runtime';
+import type { RemoteWindowReceiverStartupTelemetry } from '../../lib/remote-window-receiver-runtime';
 import {
   acceptRemoteWindowFocusReady,
   commitRemoteWindowFocusProjection,
@@ -221,6 +223,7 @@ interface RemoteWindowStreamStartResult {
   mediaStream?: MediaStream | null;
   overviewMediaStream?: MediaStream | null;
   started?: RemoteWindowStreamStartedPayload;
+  startupTelemetry?: RemoteWindowReceiverStartupTelemetry;
   collectStats?: () => Promise<RemoteWindowVideoStatsSample | null>;
 }
 
@@ -340,6 +343,8 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   const [receiverMediaStream, setReceiverMediaStream] = useState<MediaStream | null>(null);
   const [overviewMediaStream, setOverviewMediaStream] = useState<MediaStream | null>(null);
   const [receiverFrameSize, setReceiverFrameSize] = useState<SurfaceSize | null>(null);
+  const [receiverStartupTelemetry, setReceiverStartupTelemetry] = useState<RemoteWindowReceiverStartupTelemetry | null>(null);
+  const [streamCapability, setStreamCapability] = useState<RemoteWindowStreamCapabilityTelemetry | null>(null);
   const [itermPaneTargetsExpanded, setItermPaneTargetsExpanded] = useState(false);
   const [appSwitchOpen, setAppSwitchOpen] = useState(false);
   const [streamStatusOpen, setStreamStatusOpen] = useState(false);
@@ -408,6 +413,8 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       setItermPaneTargetsExpanded(false);
       setAppSwitchOpen(false);
       setReceiverFrameSize(null);
+      setReceiverStartupTelemetry(null);
+      setStreamCapability(null);
     },
   });
   const surfacePointersRef = useRef<Map<number, SurfacePointerPosition>>(new Map());
@@ -461,6 +468,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     activeSessionId,
     streamId: qualityStreamId,
     targetId: qualityTargetId,
+    mediaPlan: streamCapability?.mediaPlan ?? null,
     streamReady: state.phase === 'targetLocked' && Boolean(state.streamStarted),
     focusStreamActive: Boolean(qualityStreamId && activeFocusStreamIdRef.current === qualityStreamId),
     mode: state.phase === 'targetLocked' ? state.mode : null,
@@ -869,6 +877,8 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     setReceiverMediaStream(null);
     setOverviewMediaStream(null);
     setReceiverFrameSize(null);
+    setReceiverStartupTelemetry(null);
+    setStreamCapability(null);
     setCanvasLayout(null);
     resetWindowThumbnails();
     collectStreamStatsRef.current = null;
@@ -938,6 +948,8 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     setReceiverMediaStream(null);
     setOverviewMediaStream(null);
     setReceiverFrameSize(null);
+    setReceiverStartupTelemetry(null);
+    setStreamCapability(null);
     setCanvasLayout(null);
     setState((current) => failRemoteWindowStream(
       current,
@@ -1306,15 +1318,20 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
         });
         return;
       }
-      if (msg.type === 'remote-window-stream-status' && msg.payload.canvasLayout) {
+      if (msg.type === 'remote-window-stream-status') {
         if (msg.payload.streamId !== activeStreamIdRef.current) {
           return;
         }
-        setCanvasLayout((current) => (
-          !current || msg.payload.canvasLayout!.layoutGeneration > current.layoutGeneration
-            ? msg.payload.canvasLayout!
-            : current
-        ));
+        if (msg.payload.stage === 'capability-verified' && msg.payload.capability) {
+          setStreamCapability(msg.payload.capability);
+        }
+        if (msg.payload.canvasLayout) {
+          setCanvasLayout((current) => (
+            !current || msg.payload.canvasLayout!.layoutGeneration > current.layoutGeneration
+              ? msg.payload.canvasLayout!
+              : current
+          ));
+        }
         return;
       }
       if (msg.type !== 'remote-window-input-result' || msg.payload.accepted !== true) {
@@ -1382,8 +1399,9 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       setFullscreenDisplayMode(initialFullscreenDisplayMode);
       setReceiverMediaStream(null);
       setOverviewMediaStream(null);
-    setOverviewMediaStream(null);
       setReceiverFrameSize(null);
+      setReceiverStartupTelemetry(null);
+      setStreamCapability(null);
     }
     // Every target change starts a new receiver lifecycle. Keep the browser's
     // native video placeholder hidden until this receiver has a real frame.
@@ -1570,6 +1588,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
           setReceiverMediaStream(committedResult.mediaStream || null);
           setOverviewMediaStream(committedResult.overviewMediaStream || null);
           setReceiverFrameSize(resolveStartedCaptureFrameSize(committedResult.started));
+          setReceiverStartupTelemetry(committedResult.startupTelemetry ?? null);
           setCanvasLayout(committedResult.started?.canvasLayout ?? null);
           collectStreamStatsRef.current = typeof committedResult.collectStats === 'function' ? committedResult.collectStats : null;
         }
@@ -1603,6 +1622,8 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
         setReceiverMediaStream(null);
         setOverviewMediaStream(null);
         setReceiverFrameSize(null);
+        setReceiverStartupTelemetry(null);
+        setStreamCapability(null);
         updateReceiverVideoVisibility(false);
         collectStreamStatsRef.current = null;
         resetQualityApplyState();
@@ -2935,6 +2956,8 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
         videoDebugSnapshot={videoDebugSnapshot}
         videoHasPlayed={videoHasPlayed}
         viewportDebugSnapshot={viewportDebugSnapshot}
+        startupTelemetry={receiverStartupTelemetry}
+        streamCapability={streamCapability}
       />}
     />
   ) : null;

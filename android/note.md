@@ -107,7 +107,6 @@
 - Forbidden paths：screenshot、terminal buffer、旧视频、静默 full-display capture、业务 media payload 内嵌控制语义、无条件 TURN、UI 直接操作 PeerConnection、未协商第二 lane 的伪造 track。
 - 保持不变：route-derived ICE、ScreenCaptureKit `queueDepth=3`、Android background stop/close、一个 PeerConnection 最多 focus/overview 两条 video lane。
 - 必跑 gate：shared protocol、receiver、daemon stream 定向测试；remote-window protocol/architecture registry gates；type-check；daemon build/package；`git diff --check`。真实 loopback、安装 daemon、Android/Mac rendered-pixel 与 cleanup 只能在相应 macOS/ADB 资源可用时宣称通过。
-- 实现文档缺口：用户给出的 `/Volumes/extension/code/zterm/android/docs/goals/remote-window-stream-remediation-plan.md` 在当前容器及 Git 历史中均不存在；本 slice 不猜测未提供的 A-H 细目，仅执行提示中明确的 P0 启动契约与 early ICE 要求。
 
 ## 2026-08-22 transport resilience Phase 1 verification
 
@@ -122,3 +121,29 @@
 - 新增正测 `targetSendRetriesBeforeTearingDown` 和 `drainPendingFramesUsesRetryOwnerInsteadOfImmediateTeardown`，锁住 hello/heartbeat/drain 的 transient send failure 不再立即 teardown。
 - 回归：Gradle transport suite 22/22 PASS；file-transfer/session/daemon idempotency 32/32 PASS；typecheck PASS；feature registry 102/102 PASS；assembleDebug BUILD SUCCESSFUL。
 - APK sha256: `3053774ff0d8241feaf959e4892c8d8789606ad3dcbc293afc048463f58d4940`
+- 后续收敛：移除 `mediaPlan` optional compatibility，start/started 两端改为 mandatory typed contract；client 保证 start request 先于 offer 期间收集的 local ICE，client/daemon 都在 remote description 应用前有界暂存 early ICE。daemon status 分 lane 发布 `capture-started`，receiver 记录 capture-confirmed / answer-applied / focus-or-overview track-attached，playback 独立记录 track binding / decoded first frame / playing。
+
+# 2026-08-23 remote-window A-H next slice architecture mapping
+
+- 功能块：`desktop.remote_window_stream` typed capability / startup failure-stage 诊断链。
+- 唯一 owner：daemon stream lifecycle 负责验证并发布 ScreenCaptureKit/WebRTC/media-plan capability 与失败阶段；shared protocol 只定义 wire type；client message runtime 只把 typed error 投影为保留 `failureStage` 的 Error，不建立第二套状态机。
+- 整改分类：**分离下沉**。capability 和 failure stage 走现有 `remote-window-stream-status` / `remote-window-error` 控制 side-channel，不进入视频帧、SDP、track metadata 或业务媒体 payload。
+- Allowed paths：daemon stream owner -> typed status/error -> session transport -> message runtime -> overlay diagnostics/error projection。
+- Forbidden paths：从 timeout 猜失败阶段、在 UI 根据错误字符串反推 capability、静默 fallback 到 screenshot/terminal/旧视频、宣称未验证的 VideoToolbox/ROI capability。
+- 保持不变：route-derived ICE、ScreenCaptureKit `queueDepth=3`、Android background stop/close、single-focus 一 lane、overview-plus-focus 两 lane。
+- 必跑 gate：shared protocol/message runtime、daemon start/capability/error tests、remote-window architecture gates、typecheck、process-isolated native loopback、Vite build；真实 ScreenCaptureKit/installed Android 仍须 macOS/ADB 证据。
+
+# 2026-08-23 同步 main 后的 A-H 差距复核
+
+- 已将当前分支 rebase 到 `main@dcbb19a`，并读取新出现的 `docs/goals/remote-window-stream-remediation-plan.md` 及综合审计。此前“实现文档不存在”的判断作废；后续以计划末尾的 A-H 校准批次为准。
+- A-H 边界：当前只继续 `media plan / per-lane startup / early ICE / capability preflight / real loopback / installed proof`，不提前进入 owner 大拆分、Touch 全量改造、Layout Planner V2、screenshot-loop 清除或性能重写。
+- 已实现部分：mandatory `mediaPlan`、single/composite lane 数、returned-plan mismatch、answer 前 early ICE 排队、capture/answer/track/decoded/playing 分离 telemetry，以及独立 native loopback 进程。
+- 仍需红测和实现：B 要求的 plan id/version、显式 lane role 与 `requiredForStart` 尚未进入同一 typed plan；D 尚缺每条 required lane 的 elapsed/timeout code 和完整 success/failure/non-terminal/already-terminal 矩阵；E 尚缺 duplicate/conflict/unknown identity 的显式 candidate 结果；F 尚未完成 wrtc/Swift helper/权限/ABI/capture/sender 的真实统一 preflight（当前 capability status 不能替代权限、capture 或 sender proof）；G loopback 尚未证明 ICE 顺序、真实帧、连续至少三帧与资源计数归零；H 仍无 online ADB/真实 Mac installed proof。
+- 唯一 owner/边：shared contract 定义 plan 与 status/error；receiver media owner 消费 plan 并拥有 peer/ICE/track timeout；daemon stream owner 执行 preflight/sender/capture/cleanup；overlay 只投影 typed result。禁止从 target kind、timeout 或错误字符串重建第二套 media/capability 真相。
+- 保持不变：route-derived ICE、ScreenCaptureKit `queueDepth=3`、Android background stop/close，以及一个 PeerConnection 最多 overview/focus 两条 video lane。
+- B 本轮继续收敛：shared protocol 新增 version-1 media-plan registry，明确 `single-focus=[focus required]`、`overview-plus-focus=[focus required, overview required]`；receiver transceiver 数和 daemon overview allocation 消费该 registry。start/started wire 现在强制携带 `mediaPlanVersion=1`，daemon 在 allocation 前 typed reject version mismatch，receiver 同样拒绝 returned version mismatch，capability status 回传 version 与 lane role/start requirement。quality transaction 显式引用 plan version 仍待后续收敛。
+- G 本轮收敛：独立 `@roamhq/wrtc` loopback 不再只观察 `ontrack`；现在双方 remote description 前有界暂存并顺序 flush ICE，等待 ICE gathering/application 完成，使用真实 `RTCVideoSink` 对每条 required lane 验证至少 3 帧，随后 stop sink/track、close peer，并验证 local track 已 ended。该 gate 仍不能替代安装版 ScreenCaptureKit/Android rendered-pixel 的 H 证据。
+- E 本轮收敛：daemon ICE owner 为每个 stream 保存 candidate fingerprint；重复、closed stream 和 bounded queue overflow 分别抛出 typed code，terminal message owner 原样投影为 `remote-window-error`，不再以 `false` 静默吞掉 late candidate。未知但可能尚未 registration 的 stream 仍按原顺序暂存，这是 early-ICE 正常路径而不是 unknown rejection。
+- F 本轮继续收敛：daemon 在 peer/capture allocation 前验证 Darwin ABI 与 wrtc peer/session/candidate/video-source/RGBA converter capability；unsupported ABI 或缺 capability 返回 `platform-capability` typed error。preflight telemetry 明确区分已验证的 wrtc/ABI、仅 configured 的 Swift helper，以及必须等待真实 lifecycle 的 permission/capture/sender `pending`，不再用一个布尔值伪装后续媒体成功。权限与 Swift executable 的真实安装版 probe 仍属于 H/live 缺口。
+- D 本轮继续收敛：receiver 从单个共享 track timeout 改为每条 required lane 独立 handle；track attach 只清本 lane，已 attach lane 的迟到 callback 保持 non-terminal。expiry 返回 `remote_window_receiver_lane_timeout`、`failureStage=track-attach`、精确 lane 和 elapsedMs，再由唯一 cleanup owner 关闭 peer/track/timer。
+- B/quality 本轮收敛：quality request/result wire 强制携带 active media plan id/version；client quality owner 只使用 daemon capability status 提供的 accepted plan，capability 尚未到达时不发 transaction。daemon entry 保存启动 plan，plan mismatch 在 sender/capture mutation 前以 `remote_window_stream_quality_media_plan_mismatch` 拒绝，ACK 原样回传 plan identity。

@@ -4,6 +4,7 @@ import type {
   RemoteWindowStreamIceCandidatePayload,
   RemoteWindowInputEventPayload,
   RemoteWindowStreamStartedPayload,
+  RemoteWindowStreamStartRequestPayload,
   RemoteWindowStreamStatusPayload,
   RemoteWindowStreamTargetManifest,
   RemoteWindowStreamErrorPayload,
@@ -89,8 +90,13 @@ export function isRemoteWindowControlMessage(msg: ServerMessage): msg is RemoteW
 
 function buildRemoteWindowError(payload: RemoteWindowStreamErrorPayload) {
   const message = payload.message || payload.code || 'remote window request failed';
-  const error = new Error(message);
+  const error = new Error(message) as Error & {
+    failureStage?: RemoteWindowStreamErrorPayload['failureStage'];
+  };
   error.name = payload.code || 'remote_window_error';
+  if (payload.failureStage) {
+    error.failureStage = payload.failureStage;
+  }
   return error;
 }
 
@@ -274,6 +280,8 @@ export function createRemoteWindowMessageRuntime(input?: {
       revision?: number;
       target: RemoteWindowStreamTargetManifest;
       purpose?: RemoteWindowStreamPurpose;
+      mediaPlan: RemoteWindowStreamStartRequestPayload['mediaPlan'];
+      mediaPlanVersion: RemoteWindowStreamStartRequestPayload['mediaPlanVersion'];
       offer: RemoteWindowStreamRtcDescription;
       iceServers?: Array<Record<string, unknown>>;
       videoBitrate?: RemoteWindowVideoBitrateConfig;
@@ -306,6 +314,8 @@ export function createRemoteWindowMessageRuntime(input?: {
               requestId,
               streamId,
               ...(options.purpose ? { purpose: options.purpose } : {}),
+              mediaPlan: options.mediaPlan,
+              mediaPlanVersion: options.mediaPlanVersion ?? 1,
               target: options.target,
               offer: options.offer,
               ...(options.iceServers ? { iceServers: options.iceServers } : {}),

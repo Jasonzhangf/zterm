@@ -238,7 +238,10 @@ describe('remote window overlay runtime', () => {
       targets: [makeTarget('pane-1', 'iterm2-pane')],
     });
     const locked = beginRemoteWindowStreamSetup(selectRemoteWindowTarget(picker, 'pane-1'), 'stream-1');
-    const failed = failRemoteWindowStream(locked, 'stream-1', new Error('ScreenCaptureKit capture start failure'));
+    const error = Object.assign(new Error('ScreenCaptureKit capture start failure'), {
+      failureStage: 'focus-capture-start' as const,
+    });
+    const failed = failRemoteWindowStream(locked, 'stream-1', error);
 
     expect(failed).toMatchObject({
       phase: 'targetLocked',
@@ -246,6 +249,7 @@ describe('remote window overlay runtime', () => {
       streamStarted: false,
       streamStatus: 'error',
       streamErrorMessage: 'ScreenCaptureKit capture start failure',
+      streamFailureStage: 'focus-capture-start',
     });
   });
 

@@ -10,6 +10,45 @@ function stream(id: string): MediaStream {
 }
 
 describe('useRemoteWindowPlayback owner', () => {
+  it('reports track attach, decoded first frame, and playing as separate telemetry facts', async () => {
+    const video = document.createElement('video') as HTMLVideoElement & {
+      requestVideoFrameCallback: (callback: () => void) => number;
+    };
+    const frameCallbacks: Array<() => void> = [];
+    video.requestVideoFrameCallback = vi.fn((callback: () => void) => {
+      frameCallbacks.push(callback);
+      return frameCallbacks.length;
+    });
+    let resolvePlay!: () => void;
+    video.play = vi.fn(() => new Promise<void>((resolve) => {
+      resolvePlay = resolve;
+    }));
+    const onVideoDebug = vi.fn();
+    const receiver = stream('telemetry');
+    const videoElementRef = { current: video };
+    const overviewVideoElementRef = { current: null };
+    renderHook(() => useRemoteWindowPlayback({
+      receiverMediaStream: receiver,
+      overviewMediaStream: null,
+      streamStatus: 'streaming',
+      streamId: receiver.id,
+      videoElementRef,
+      overviewVideoElementRef,
+      onVideoDebug,
+    }));
+
+    await waitFor(() => expect(onVideoDebug).toHaveBeenCalled());
+    expect(onVideoDebug.mock.calls[onVideoDebug.mock.calls.length - 1]?.[0]).toMatchObject({
+      trackAttachedAt: expect.any(Number),
+      decodedFirstFrameAt: null,
+      playingAt: null,
+    });
+    act(() => resolvePlay());
+    await waitFor(() => expect(onVideoDebug.mock.calls[onVideoDebug.mock.calls.length - 1]?.[0].playingAt).toEqual(expect.any(Number)));
+    act(() => frameCallbacks[0]?.());
+    await waitFor(() => expect(onVideoDebug.mock.calls[onVideoDebug.mock.calls.length - 1]?.[0].decodedFirstFrameAt).toEqual(expect.any(Number)));
+  });
+
   it('rejects a late frame reveal from the previous receiver epoch', async () => {
     const video = document.createElement('video') as HTMLVideoElement & {
       requestVideoFrameCallback: (callback: () => void) => number;

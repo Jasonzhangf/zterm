@@ -405,6 +405,8 @@ describe("TerminalPage Android IME bridge", () => {
         requestId: "rw-start-1",
         streamId,
         targetId: "app-1",
+        mediaPlan: 'single-focus' as const,
+        mediaPlanVersion: 1 as const,
         answer: { type: "answer" as const, sdp: "v=0" },
         capture: {
           source: "ScreenCaptureKit" as const,

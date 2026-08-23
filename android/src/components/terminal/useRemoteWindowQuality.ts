@@ -36,6 +36,7 @@ export interface UseRemoteWindowQualityOptions {
   activeSessionId: string | null | undefined;
   streamId: string | null;
   targetId: string | null;
+  mediaPlan: RemoteWindowStreamQualityRequestPayload['mediaPlan'] | null;
   streamReady: boolean;
   focusStreamActive: boolean;
   mode: 'floating' | 'fullscreen' | null;
@@ -49,6 +50,7 @@ export function useRemoteWindowQuality({
   activeSessionId,
   streamId,
   targetId,
+  mediaPlan,
   streamReady,
   focusStreamActive,
   mode,
@@ -91,7 +93,7 @@ export function useRemoteWindowQuality({
     qualityKey: string;
     videoBitrate: RemoteWindowVideoBitrateConfig;
   }) => {
-    if (!updateStreamQuality || hasRemoteWindowQualityKey(qualityApplyStateRef.current, options.qualityKey)) {
+    if (!updateStreamQuality || !mediaPlan || hasRemoteWindowQualityKey(qualityApplyStateRef.current, options.qualityKey)) {
       return;
     }
     const pending = beginRemoteWindowQualityRequest({
@@ -104,6 +106,8 @@ export function useRemoteWindowQuality({
     void updateStreamQuality(options.sessionId, {
       streamId: options.streamId,
       streamGroupId: options.streamId,
+      mediaPlan,
+      mediaPlanVersion: 1,
       revision: pending.revision,
       targetId: options.targetId,
       videoBitrate: options.videoBitrate,
@@ -120,7 +124,7 @@ export function useRemoteWindowQuality({
       qualityApplyStateRef.current = next;
       setQualityApplyState(next);
     });
-  }, [updateStreamQuality]);
+  }, [mediaPlan, updateStreamQuality]);
 
   const resetQualityState = useCallback(() => {
     adaptiveStateRef.current = null;

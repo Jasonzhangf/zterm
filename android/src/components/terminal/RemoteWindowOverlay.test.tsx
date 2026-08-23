@@ -79,6 +79,8 @@ function makeStartedPayload(
     requestId: `rw-started-${streamId}`,
     streamId,
     targetId,
+    mediaPlan: 'single-focus' as const,
+    mediaPlanVersion: 1 as const,
     answer: { type: 'answer' as const, sdp: 'daemon-answer-sdp' },
     capture: {
       source: 'ScreenCaptureKit' as const,
@@ -150,6 +152,8 @@ function createAppliedQualityMock() {
   return vi.fn(async (_sessionId: string, payload: {
     streamId: string;
     streamGroupId: string;
+    mediaPlan: 'single-focus' | 'overview-plus-focus';
+    mediaPlanVersion: 1;
     revision: number;
     targetId: string;
     videoBitrate: any;
@@ -157,12 +161,56 @@ function createAppliedQualityMock() {
     requestId: `quality-${payload.revision}`,
     streamId: payload.streamId,
     streamGroupId: payload.streamGroupId,
+    mediaPlan: 'single-focus' as const,
+    mediaPlanVersion: 1 as const,
     revision: payload.revision,
     targetId: payload.targetId,
     status: 'applied' as const,
     requestedVideoBitrate: payload.videoBitrate,
     appliedVideoBitrate: payload.videoBitrate,
   }));
+}
+
+function createCapabilityStatusChannel() {
+  let handler: ((msg: any) => void) | null = null;
+  return {
+    onRemoteWindowMessage: vi.fn((next: (msg: any) => void) => {
+      handler = next;
+      return () => {
+        if (handler === next) {
+          handler = null;
+        }
+      };
+    }),
+    publishCapabilityStatus(streamId: string) {
+      handler?.({
+        type: 'remote-window-stream-status',
+        payload: {
+          requestId: 'capability-status-1',
+          streamId,
+          purpose: 'focus',
+          phase: 'starting',
+          stage: 'capability-verified',
+          capability: {
+            mediaPlan: 'single-focus' as const,
+            mediaPlanVersion: 1 as const,
+            lanes: [{ role: 'focus', requiredForStart: true }],
+            maxVideoLanes: 1,
+            screenCaptureKit: true,
+            typedPerLaneStatus: true,
+            preflight: {
+              wrtc: 'available',
+              abi: 'supported',
+              swiftHelper: 'configured',
+              screenRecordingPermission: 'pending-capture',
+              capture: 'pending',
+              senderNegotiation: 'pending',
+            },
+          },
+        },
+      });
+    },
+  };
 }
 
 describe('RemoteWindowOverlay', () => {
@@ -1302,6 +1350,7 @@ describe('RemoteWindowOverlay', () => {
       mediaStream,
     }));
     const updateStreamQuality = createAppliedQualityMock();
+    const capabilityStatus = createCapabilityStatusChannel();
 
     render(
       <RemoteWindowOverlay
@@ -1309,12 +1358,14 @@ describe('RemoteWindowOverlay', () => {
         requestTargets={requestTargets}
         startStream={startStream}
         updateStreamQuality={updateStreamQuality}
+        onRemoteWindowMessage={capabilityStatus.onRemoteWindowMessage}
       />,
     );
 
     fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
     fireEvent.click(await screen.findByTestId('remote-window-target-app-1'));
     await screen.findByTestId('remote-window-video');
+    capabilityStatus.publishCapabilityStatus(startStream.mock.calls[0]![2] as string);
     expect(startStream).toHaveBeenCalledWith('session-1', expect.objectContaining({
       streamTargetId: 'app-1',
     }), expect.stringMatching(/^rw-stream-/), {
@@ -1343,6 +1394,7 @@ describe('RemoteWindowOverlay', () => {
       mediaStream,
     }));
     const updateStreamQuality = createAppliedQualityMock();
+    const capabilityStatus = createCapabilityStatusChannel();
 
     render(
       <RemoteWindowOverlay
@@ -1350,6 +1402,7 @@ describe('RemoteWindowOverlay', () => {
         requestTargets={requestTargets}
         startStream={startStream}
         updateStreamQuality={updateStreamQuality}
+        onRemoteWindowMessage={capabilityStatus.onRemoteWindowMessage}
       />,
     );
 
@@ -1388,6 +1441,7 @@ describe('RemoteWindowOverlay', () => {
       collectStats,
     }));
     const updateStreamQuality = createAppliedQualityMock();
+    const capabilityStatus = createCapabilityStatusChannel();
 
     render(
       <RemoteWindowOverlay
@@ -1395,12 +1449,14 @@ describe('RemoteWindowOverlay', () => {
         requestTargets={requestTargets}
         startStream={startStream}
         updateStreamQuality={updateStreamQuality}
+        onRemoteWindowMessage={capabilityStatus.onRemoteWindowMessage}
       />,
     );
 
     fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
     fireEvent.click(await screen.findByTestId('remote-window-target-app-1'));
     await screen.findByTestId('remote-window-video');
+    capabilityStatus.publishCapabilityStatus(startStream.mock.calls[0]![2] as string);
 
     await waitFor(() => {
       expect(updateStreamQuality).toHaveBeenCalledWith('session-1', expect.objectContaining({

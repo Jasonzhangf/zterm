@@ -5,6 +5,7 @@ import type {
   RemoteWindowStreamQualityRequestPayload,
   RemoteWindowStreamQualityResultPayload,
   RemoteWindowStreamStartedPayload,
+  RemoteWindowStreamStartRequestPayload,
   RemoteWindowStreamPurpose,
   RemoteWindowStreamTargetManifest,
   RemoteWindowVideoBitrateConfig,
@@ -35,6 +36,8 @@ interface RemoteWindowStreamMessageRuntimeLike extends RemoteWindowCatalogMessag
       ws: BridgeTransportSocket;
       streamId: string;
       purpose?: RemoteWindowStreamPurpose;
+      mediaPlan: RemoteWindowStreamStartRequestPayload['mediaPlan'];
+      mediaPlanVersion: RemoteWindowStreamStartRequestPayload['mediaPlanVersion'];
       target: RemoteWindowStreamTargetManifest;
       offer: { type: 'offer'; sdp: string };
       iceServers?: Array<Record<string, unknown>>;
@@ -303,6 +306,9 @@ export async function requestRemoteWindowStreamStartRuntime(options: {
       ws,
       bridgeSettings: options.bridgeSettings,
     });
+  const mediaPlan = (options.target.compositeWindows ?? []).length > 0
+    ? 'overview-plus-focus' as const
+    : 'single-focus' as const;
   return options.remoteWindowReceiverRuntime.startStream({
     streamId,
     purpose: options.purpose,
@@ -321,6 +327,8 @@ export async function requestRemoteWindowStreamStartRuntime(options: {
       ws,
       streamId,
       purpose: options.purpose,
+      mediaPlan,
+      mediaPlanVersion: 1,
       target: options.target,
       offer,
       iceServers: iceServers?.map((server) => ({ ...server })) as Array<Record<string, unknown>> | undefined,

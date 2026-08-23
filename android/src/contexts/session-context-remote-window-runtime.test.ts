@@ -31,13 +31,13 @@ function formatSocketReadyState(ws: { readyState?: number } | null) {
     return 'missing';
   }
   switch (ws.readyState) {
-    case WebSocket.CONNECTING:
+    case 0:
       return 'connecting';
-    case WebSocket.OPEN:
+    case 1:
       return 'open';
-    case WebSocket.CLOSING:
+    case 2:
       return 'closing';
-    case WebSocket.CLOSED:
+    case 3:
       return 'closed';
     default:
       return `unknown:${ws.readyState}`;
@@ -50,7 +50,7 @@ function makeDaemonConnection(wsOrFactory: any = makeSocket()) {
   );
   const readOpenSessionSocket = vi.fn((sessionId: string, purpose: string) => {
     const ws = readSocket(sessionId, purpose) || null;
-    if (ws && ws.readyState === WebSocket.OPEN) {
+    if (ws && ws.readyState === 1) {
       return ws;
     }
     throw new Error(`${purpose} requires an open daemon connection (socket=${formatSocketReadyState(ws)}, target=daemon=mac-studio, channel=missing)`);
@@ -309,7 +309,7 @@ describe('session context remote window runtime', () => {
     await expect(requestRemoteWindowTargetsRuntime({
       sessionId: 'session-1',
       sessions: [{ ...baseSession, state: 'connecting', bridgeHost: '100.66.1.82', bridgePort: 3333 }],
-      daemonConnection: makeDaemonConnection({ ...makeSocket(), readyState: WebSocket.CLOSED }),
+      daemonConnection: makeDaemonConnection({ ...makeSocket(), readyState: 3 }),
       remoteWindowMessageRuntime: { requestTargets: vi.fn() },
       sendSocketPayload: vi.fn(),
       targetCatalogCache,
@@ -337,7 +337,7 @@ describe('session context remote window runtime', () => {
     expect(() => resolveRemoteWindowCatalogTransport({
       sessionId: 'session-1',
       sessions: [{ ...baseSession, state: 'connecting' }],
-      daemonConnection: makeDaemonConnection({ ...makeSocket(), readyState: WebSocket.CLOSED }),
+      daemonConnection: makeDaemonConnection({ ...makeSocket(), readyState: 3 }),
     })).toThrow('Remote window catalog requires an open daemon connection (socket=closed');
   });
 
@@ -349,6 +349,8 @@ describe('session context remote window runtime', () => {
       requestId: 'rw-start-1',
       streamId: 'stream-1',
       targetId: 'pane-1',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       answer: { type: 'answer' as const, sdp: 'answer-sdp' },
       capture: {
         source: 'ScreenCaptureKit' as const,
@@ -419,6 +421,8 @@ describe('session context remote window runtime', () => {
       ws,
       streamId: 'stream-1',
       purpose: 'focus',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       target,
       offer: { type: 'offer', sdp: 'offer-sdp' },
       iceServers: undefined,
@@ -434,12 +438,16 @@ describe('session context remote window runtime', () => {
     const requestStreamStart = vi.fn(async (_sessionId: string, options: {
       streamId: string;
       purpose?: RemoteWindowStreamPurpose;
+      mediaPlan: 'single-focus' | 'overview-plus-focus';
+      mediaPlanVersion: 1,
       videoBitrate?: RemoteWindowVideoBitrateConfig;
     }) => ({
       requestId: `rw-start-${options.streamId}`,
       streamId: options.streamId,
       purpose: options.purpose,
       targetId: 'pane-1',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       answer: { type: 'answer' as const, sdp: `answer-${options.streamId}` },
       capture: {
         source: 'ScreenCaptureKit' as const,
@@ -512,10 +520,11 @@ describe('session context remote window runtime', () => {
     expect(requestStreamStart.mock.calls.map(([, options]) => ({
       streamId: options.streamId,
       purpose: options.purpose,
+      mediaPlan: options.mediaPlan,
       bitrate: options.videoBitrate!.maxBitrateBps,
     }))).toEqual([
-      { streamId: 'canvas-stream', purpose: 'preview', bitrate: 2_000_000 },
-      { streamId: 'focus-stream', purpose: 'focus', bitrate: 20_000_000 },
+      { streamId: 'canvas-stream', purpose: 'preview', mediaPlan: 'single-focus' as const, bitrate: 2_000_000 },
+      { streamId: 'focus-stream', purpose: 'focus', mediaPlan: 'single-focus' as const, bitrate: 20_000_000 },
     ]);
   });
 
@@ -563,6 +572,8 @@ describe('session context remote window runtime', () => {
       requestId: 'rw-start-1',
       streamId: 'stream-1',
       targetId: 'pane-1',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       answer: { type: 'answer' as const, sdp: 'answer-sdp' },
       capture: {
         source: 'ScreenCaptureKit' as const,
@@ -639,7 +650,7 @@ describe('session context remote window runtime', () => {
       streamId: 'stream-1',
       target: makeTarget(),
       sessions: [{ ...baseSession, state: 'connecting' }],
-      daemonConnection: makeDaemonConnection({ ...makeSocket(), readyState: WebSocket.CLOSED }),
+      daemonConnection: makeDaemonConnection({ ...makeSocket(), readyState: 3 }),
       remoteWindowMessageRuntime: {
         requestTargets: vi.fn(),
         requestStreamStart: vi.fn(),
@@ -735,6 +746,8 @@ describe('session context remote window runtime', () => {
       requestId: 'quality-1',
       streamId: 'stream-1',
       streamGroupId: 'stream-1',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       revision: 1,
       targetId: 'target-1',
       status: 'applied' as const,
@@ -748,6 +761,8 @@ describe('session context remote window runtime', () => {
       payload: {
         streamId: 'stream-1',
         streamGroupId: 'stream-1',
+        mediaPlan: 'single-focus' as const,
+        mediaPlanVersion: 1 as const,
         revision: 1,
         targetId: 'target-1',
         videoBitrate: { preset: '10mbps', bitrateMbps: 10, maxBitrateBps: 10_000_000 },
@@ -771,6 +786,8 @@ describe('session context remote window runtime', () => {
       payload: {
         streamId: 'stream-1',
         streamGroupId: 'stream-1',
+        mediaPlan: 'single-focus' as const,
+        mediaPlanVersion: 1 as const,
         revision: 1,
         targetId: 'target-1',
         videoBitrate: { preset: '10mbps', bitrateMbps: 10, maxBitrateBps: 10_000_000 },
@@ -844,7 +861,7 @@ describe('session context remote window runtime', () => {
         },
       },
       sessions: [{ ...baseSession, state: 'connecting' }],
-      daemonConnection: makeDaemonConnection({ ...makeSocket(), readyState: WebSocket.CLOSED }),
+      daemonConnection: makeDaemonConnection({ ...makeSocket(), readyState: 3 }),
       remoteWindowMessageRuntime: {
         requestTargets: vi.fn(),
         requestStreamStart: vi.fn(),

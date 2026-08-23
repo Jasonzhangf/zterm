@@ -42,6 +42,7 @@ import type {
 const TERMINAL_FILE_TRANSFER_MESSAGE_TYPES = new Set<TerminalFileTransferClientMessage['type']>([
   'paste-image-start',
   'paste-image',
+  'paste-image-from-upload',
   'attach-file-start',
   'remote-screenshot-request',
   'file-list-request',
@@ -541,7 +542,9 @@ export function createTerminalMessageRuntime(
             payload: {
               requestId: message.payload.requestId || '',
               streamId: message.payload.streamId || '',
-              code: 'remote_window_stream_candidate_failed',
+              code: error instanceof Error && error.name.startsWith('remote_window_')
+                ? error.name
+                : 'remote_window_stream_candidate_failed',
               message: error instanceof Error ? error.message : 'remote window stream ICE candidate failed',
             },
           });

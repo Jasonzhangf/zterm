@@ -151,6 +151,8 @@ describe('remote window receiver runtime', () => {
       requestId: 'rw-start-1',
       streamId: 'stream-1',
       targetId: 'pane-1',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       answer: { type: 'answer' as const, sdp: 'remote-answer-sdp' },
       capture: {
         source: 'ScreenCaptureKit' as const,
@@ -184,10 +186,15 @@ describe('remote window receiver runtime', () => {
       streamId: 'stream-1',
       mediaStream,
       started: { streamId: 'stream-1', targetId: 'pane-1' },
+      startupTelemetry: {
+        captureStartedAt: expect.any(Number),
+        answerAppliedAt: expect.any(Number),
+        focusTrackAttachedAt: expect.any(Number),
+      },
     });
   });
 
-  it('negotiates an independent overview track for an app window without synthetic composite children', async () => {
+  it('negotiates focus-only for a single app window', async () => {
     const runtime = createRuntime();
     const appTarget = {
       ...makeTarget(),
@@ -205,6 +212,8 @@ describe('remote window receiver runtime', () => {
         requestId: 'rw-app-start',
         streamId: 'app-stream',
         targetId: 'app-window:123:456',
+        mediaPlan: 'single-focus' as const,
+        mediaPlanVersion: 1 as const,
         answer: { type: 'answer' as const, sdp: 'answer-app' },
         capture: {
           source: 'ScreenCaptureKit' as const,
@@ -218,15 +227,132 @@ describe('remote window receiver runtime', () => {
     });
     await flushMicrotasks(20);
     const peer = MockRTCPeerConnection.instances[0]!;
+    expect(peer.addTransceiver).toHaveBeenCalledTimes(1);
+    const focusStream = peer.emitVideoTrack();
+    await expect(started).resolves.toMatchObject({
+      mediaStream: focusStream,
+      started: { mediaPlan: 'single-focus', mediaPlanVersion: 1 as const },
+    });
+  });
+
+  it('negotiates focus and overview only for a composite app group', async () => {
+    const timeoutHandlers: Array<() => void> = [];
+    const runtime = createRuntime(timeoutHandlers);
+    const target = {
+      ...makeTarget(),
+      compositeWindows: [{
+        windowId: 'window-2',
+        title: 'second',
+        windowBoundsTopLeftPx: { x: 1000, y: 80, width: 800, height: 600 },
+        cropRectTopLeftPx: { x: 1000, y: 80, width: 800, height: 600 },
+      }],
+    } as RemoteWindowStreamTargetManifest;
+    const started = runtime.startStream({
+      streamId: 'composite-stream',
+      target,
+      sendIceCandidate: vi.fn(),
+      startRemote: vi.fn(async () => ({
+        requestId: 'rw-composite-start',
+        streamId: 'composite-stream',
+        targetId: 'pane-1',
+        mediaPlan: 'overview-plus-focus' as const,
+        mediaPlanVersion: 1 as const,
+        answer: { type: 'answer' as const, sdp: 'answer-composite' },
+        capture: {
+          source: 'ScreenCaptureKit' as const,
+          frameWidth: 1920,
+          frameHeight: 1080,
+          frameRate: 30,
+          targetKind: 'iterm2-pane' as const,
+        },
+        transport: { kind: 'webrtc-video' as const },
+      })),
+    });
+    await flushMicrotasks(20);
+    const peer = MockRTCPeerConnection.instances[0]!;
     expect(peer.addTransceiver).toHaveBeenCalledTimes(2);
     const focusStream = peer.emitVideoTrack();
+    timeoutHandlers[0]?.();
     const overviewStream = new MockMediaStream([new MockMediaTrack()]);
     overviewStream.id = 'overview';
     peer.emitVideoTrack(overviewStream);
     await expect(started).resolves.toMatchObject({
       mediaStream: focusStream,
       overviewMediaStream: overviewStream,
+      started: { mediaPlan: 'overview-plus-focus', mediaPlanVersion: 1 as const },
     });
+  });
+
+  it('keeps the composite timeout armed after focus and reports the missing overview lane', async () => {
+    const timeoutHandlers: Array<() => void> = [];
+    const runtime = createRuntime(timeoutHandlers);
+    const target = {
+      ...makeTarget(),
+      compositeWindows: [{
+        windowId: 'window-2',
+        title: 'second',
+        windowBoundsTopLeftPx: { x: 1000, y: 80, width: 800, height: 600 },
+        cropRectTopLeftPx: { x: 1000, y: 80, width: 800, height: 600 },
+      }],
+    } as RemoteWindowStreamTargetManifest;
+    const started = runtime.startStream({
+      streamId: 'composite-timeout',
+      target,
+      sendIceCandidate: vi.fn(),
+      startRemote: vi.fn(async () => ({
+        requestId: 'rw-composite-timeout',
+        streamId: 'composite-timeout',
+        targetId: 'pane-1',
+        mediaPlan: 'overview-plus-focus' as const,
+        mediaPlanVersion: 1 as const,
+        answer: { type: 'answer' as const, sdp: 'answer-composite' },
+        capture: {
+          source: 'ScreenCaptureKit' as const,
+          frameWidth: 1920,
+          frameHeight: 1080,
+          frameRate: 30,
+          targetKind: 'iterm2-pane' as const,
+        },
+        transport: { kind: 'webrtc-video' as const },
+      })),
+    });
+    await flushMicrotasks(20);
+
+    MockRTCPeerConnection.instances[0]!.emitVideoTrack();
+    timeoutHandlers[1]?.();
+
+    await expect(started).rejects.toMatchObject({
+      name: 'remote_window_receiver_lane_timeout',
+      failureStage: 'track-attach',
+      lane: 'overview',
+      elapsedMs: expect.any(Number),
+    });
+    expect(MockRTCPeerConnection.instances[0]!.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a started response whose explicit media plan does not match the offer lanes', async () => {
+    const runtime = createRuntime();
+    await expect(runtime.startStream({
+      streamId: 'stream-plan-mismatch',
+      target: makeTarget(),
+      sendIceCandidate: vi.fn(),
+      startRemote: vi.fn(async () => ({
+        requestId: 'rw-plan-mismatch',
+        streamId: 'stream-plan-mismatch',
+        targetId: 'pane-1',
+        mediaPlan: 'overview-plus-focus' as const,
+        mediaPlanVersion: 1 as const,
+        answer: { type: 'answer' as const, sdp: 'remote-answer-sdp' },
+        capture: {
+          source: 'ScreenCaptureKit' as const,
+          frameWidth: 640,
+          frameHeight: 360,
+          frameRate: 30,
+          targetKind: 'iterm2-pane' as const,
+        },
+        transport: { kind: 'webrtc-video' as const },
+      })),
+    })).rejects.toThrow('Remote window media plan mismatch: expected single-focus, got overview-plus-focus');
   });
 
   it('sends local ICE candidates and applies remote candidates by stream id', async () => {
@@ -236,6 +362,8 @@ describe('remote window receiver runtime', () => {
       requestId: 'rw-start-1',
       streamId: 'stream-1',
       targetId: 'pane-1',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       answer: { type: 'answer' as const, sdp: 'remote-answer-sdp' },
       capture: {
         source: 'ScreenCaptureKit' as const,
@@ -277,6 +405,88 @@ describe('remote window receiver runtime', () => {
     });
   });
 
+  it('sends the start request before flushing local ICE gathered during offer creation', async () => {
+    const runtime = createRuntime();
+    const order: string[] = [];
+    const started = runtime.startStream({
+      streamId: 'stream-local-ice-order',
+      target: makeTarget(),
+      sendIceCandidate: () => order.push('candidate'),
+      startRemote: vi.fn(async () => {
+        order.push('start');
+        return {
+          requestId: 'rw-start-local-ice-order',
+          streamId: 'stream-local-ice-order',
+          targetId: 'pane-1',
+          mediaPlan: 'single-focus' as const,
+          mediaPlanVersion: 1 as const,
+          answer: { type: 'answer' as const, sdp: 'remote-answer-sdp' },
+          capture: {
+            source: 'ScreenCaptureKit' as const,
+            frameWidth: 640,
+            frameHeight: 360,
+            frameRate: 30,
+            targetKind: 'iterm2-pane' as const,
+          },
+          transport: { kind: 'webrtc-video' as const },
+        };
+      }),
+    });
+    const peer = MockRTCPeerConnection.instances[0]!;
+    peer.emitLocalCandidate();
+    await flushMicrotasks(20);
+    peer.emitVideoTrack();
+    await started;
+    expect(order).toEqual(['start', 'candidate']);
+  });
+
+  it('queues early remote ICE until the answer is applied, then flushes it in order', async () => {
+    const runtime = createRuntime();
+    let resolveStarted!: (payload: any) => void;
+    const startRemote = vi.fn(() => new Promise<import('./types').RemoteWindowStreamStartedPayload>((resolve) => {
+      resolveStarted = resolve;
+    }));
+    const started = runtime.startStream({
+      streamId: 'stream-early-ice',
+      target: makeTarget(),
+      sendIceCandidate: vi.fn(),
+      startRemote,
+    });
+    await flushMicrotasks(10);
+    const peer = MockRTCPeerConnection.instances[0]!;
+    await expect(runtime.addIceCandidate({
+      streamId: 'stream-early-ice',
+      candidate: { candidate: 'candidate:early', sdpMid: '0', sdpMLineIndex: 0 },
+    })).resolves.toBe(true);
+    expect(peer.addIceCandidate).not.toHaveBeenCalled();
+
+    resolveStarted({
+      requestId: 'rw-start-early',
+      streamId: 'stream-early-ice',
+      targetId: 'pane-1',
+      mediaPlan: 'single-focus',
+      mediaPlanVersion: 1 as const,
+      answer: { type: 'answer', sdp: 'remote-answer-sdp' },
+      capture: {
+        source: 'ScreenCaptureKit',
+        frameWidth: 640,
+        frameHeight: 360,
+        frameRate: 30,
+        targetKind: 'iterm2-pane',
+      },
+      transport: { kind: 'webrtc-video' },
+    });
+    await flushMicrotasks(10);
+    expect(peer.addIceCandidate).toHaveBeenCalledWith({
+      candidate: 'candidate:early',
+      sdpMid: '0',
+      sdpMLineIndex: 0,
+      usernameFragment: null,
+    });
+    peer.emitVideoTrack();
+    await expect(started).resolves.toMatchObject({ streamId: 'stream-early-ice' });
+  });
+
   it('collects WebRTC video stats for adaptive remote-window quality decisions', async () => {
     const runtime = createRuntime();
     const started = runtime.startStream({
@@ -287,6 +497,8 @@ describe('remote window receiver runtime', () => {
         requestId: 'rw-start-stats',
         streamId: 'stream-stats',
         targetId: 'pane-1',
+        mediaPlan: 'single-focus' as const,
+        mediaPlanVersion: 1 as const,
         answer: { type: 'answer' as const, sdp: 'remote-answer-sdp' },
         capture: {
           source: 'ScreenCaptureKit' as const,
@@ -369,6 +581,8 @@ describe('remote window receiver runtime', () => {
         requestId: 'rw-start-1',
         streamId: 'stream-1',
         targetId: 'pane-1',
+        mediaPlan: 'single-focus' as const,
+        mediaPlanVersion: 1 as const,
         answer: { type: 'answer' as const, sdp: 'remote-answer-sdp' },
         capture: {
           source: 'ScreenCaptureKit' as const,
@@ -402,6 +616,8 @@ describe('remote window receiver runtime', () => {
       streamId,
       purpose,
       targetId: 'pane-1',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       answer: { type: 'answer' as const, sdp: `answer-${offer.sdp}` },
       capture: {
         source: 'ScreenCaptureKit' as const,
@@ -476,6 +692,8 @@ describe('remote window receiver runtime', () => {
       requestId: string;
       streamId: string;
       targetId: string;
+      mediaPlan: 'single-focus';
+      mediaPlanVersion: 1,
       answer: { type: 'answer'; sdp: string };
       capture: {
         source: 'ScreenCaptureKit';
@@ -507,6 +725,8 @@ describe('remote window receiver runtime', () => {
       requestId: 'rw-start-1',
       streamId: 'stream-1',
       targetId: 'pane-1',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       answer: { type: 'answer', sdp: 'remote-answer-sdp' },
       capture: {
         source: 'ScreenCaptureKit',
@@ -563,6 +783,8 @@ describe('remote window receiver runtime', () => {
         requestId: 'rw-start-1',
         streamId: 'stream-1',
         targetId: 'pane-1',
+        mediaPlan: 'single-focus' as const,
+        mediaPlanVersion: 1 as const,
         answer: { type: 'answer' as const, sdp: 'remote-answer-sdp' },
         capture: {
           source: 'ScreenCaptureKit' as const,
@@ -578,7 +800,7 @@ describe('remote window receiver runtime', () => {
     await flushMicrotasks();
     timeoutHandlers[0]?.();
 
-    await expect(pending).rejects.toThrow('Remote window receiver did not receive a video track');
+    await expect(pending).rejects.toThrow('Remote window receiver timed out waiting for required lane: focus');
     expect(MockRTCPeerConnection.instances[0]!.close).toHaveBeenCalledTimes(1);
     expect(runtime.getActiveStreamIds()).toEqual([]);
   });

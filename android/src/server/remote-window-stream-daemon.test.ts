@@ -5,6 +5,49 @@ import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import type { RemoteWindowStreamStatusPayload } from '@zterm/shared/protocol';
+
+// Unit/protocol coverage injects every media primitive it exercises. Keep the
+// native addon out of this process so its global teardown cannot turn a green
+// deterministic corpus into a post-run SIGSEGV; real PeerConnection coverage
+// runs in the dedicated process-isolated loopback gate.
+vi.mock('@roamhq/wrtc', () => ({
+  default: {
+    RTCPeerConnection: class {
+      constructor() {
+        throw new Error('remote-window daemon unit test must inject RTCPeerConnection');
+      }
+    },
+    RTCSessionDescription: class {
+      type: RTCSdpType;
+      sdp: string;
+      constructor(description: RTCSessionDescriptionInit) {
+        this.type = description.type!;
+        this.sdp = description.sdp || '';
+      }
+    },
+    RTCIceCandidate: class {
+      constructor(candidate: RTCIceCandidateInit) {
+        Object.assign(this, candidate);
+      }
+    },
+    MediaStream: class {
+      id: string;
+      constructor(init?: { id?: string }) {
+        this.id = init?.id || '';
+      }
+    },
+    nonstandard: {
+      RTCVideoSource: class {
+        constructor() {
+          throw new Error('remote-window daemon unit test must inject RTCVideoSource');
+        }
+      },
+      rgbaToI420: () => {
+        throw new Error('remote-window daemon unit test must inject rgbaToI420');
+      },
+    },
+  },
+}));
 import type { RemoteWindowCaptureSourceFactory } from './remote-window-capture';
 import {
   buildScreenCaptureKitStartupTimeoutMessage,
@@ -1764,6 +1807,8 @@ setInterval(() => {}, 1000);
     const result = await runtime.startStream({
       requestId: 'rw-start',
       streamId: 'stream-1',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       target: makeStreamTarget(),
       offer: { type: 'offer', sdp: 'android-offer-sdp' },
     }, {
@@ -1806,7 +1851,38 @@ setInterval(() => {}, 1000);
       data: new Uint8Array(6).fill(7),
     });
     expect(statuses).toEqual([
+      {
+        requestId: 'rw-start',
+        streamId: 'stream-1',
+        purpose: 'focus',
+        phase: 'starting',
+        stage: 'capability-verified',
+        capability: {
+          mediaPlan: 'single-focus' as const,
+          mediaPlanVersion: 1 as const,
+          lanes: [{ role: 'focus', requiredForStart: true }],
+          maxVideoLanes: 1,
+          screenCaptureKit: true,
+          typedPerLaneStatus: true,
+          preflight: {
+            wrtc: 'available',
+            abi: 'supported',
+            swiftHelper: 'configured',
+            screenRecordingPermission: 'pending-capture',
+            capture: 'pending',
+            senderNegotiation: 'pending',
+          },
+        },
+      },
       { requestId: 'rw-start', streamId: 'stream-1', purpose: 'focus', phase: 'starting' },
+      {
+        requestId: 'rw-start',
+        streamId: 'stream-1',
+        purpose: 'focus',
+        phase: 'starting',
+        stage: 'capture-started',
+        lane: 'focus',
+      },
       {
         requestId: 'rw-start',
         streamId: 'stream-1',
@@ -1830,6 +1906,35 @@ setInterval(() => {}, 1000);
     }]);
   });
 
+  it('rejects an unsupported native WebRTC ABI before allocating peer or capture resources', async () => {
+    const captureSourceFactory = vi.fn();
+    const peerConnectionFactory = vi.fn();
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      arch: 'ia32',
+      captureSourceFactory,
+      peerConnectionFactory,
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    await expect(runtime.startStream({
+      requestId: 'rw-unsupported-abi',
+      streamId: 'stream-unsupported-abi',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
+      target: makeStreamTarget(),
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+    })).resolves.toEqual({
+      requestId: 'rw-unsupported-abi',
+      streamId: 'stream-unsupported-abi',
+      code: 'remote_window_webrtc_abi_unsupported',
+      message: 'remote window WebRTC ABI is unsupported: darwin-ia32',
+      failureStage: 'platform-capability',
+    });
+    expect(peerConnectionFactory).not.toHaveBeenCalled();
+    expect(captureSourceFactory).not.toHaveBeenCalled();
+  });
+
   it('fails negotiation explicitly without rewriting SDP or starting capture', async () => {
     const fakePeer = new FakeRemoteWindowPeerConnection();
     fakePeer.setRemoteDescription.mockRejectedValueOnce(new Error('offer rejected'));
@@ -1849,6 +1954,8 @@ setInterval(() => {}, 1000);
     const result = await runtime.startStream({
       requestId: 'rw-negotiation-fail',
       streamId: 'stream-negotiation-fail',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       target: makeStreamTarget(),
       offer: { type: 'offer', sdp: 'invalid-client-offer' },
     });
@@ -1857,11 +1964,57 @@ setInterval(() => {}, 1000);
       streamId: 'stream-negotiation-fail',
       code: 'remote_window_stream_start_failed',
       message: 'offer rejected',
+      failureStage: 'offer-apply',
     });
     expect(fakePeer.setRemoteDescription).toHaveBeenCalledTimes(1);
     expect(fakePeer.setRemoteDescription).toHaveBeenCalledWith({ type: 'offer', sdp: 'invalid-client-offer' });
     expect(captureSourceFactory).not.toHaveBeenCalled();
     expect(fakePeer.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a missing or mismatched media plan before creating peer/capture resources', async () => {
+    const peerConnectionFactory = vi.fn();
+    const captureSourceFactory = vi.fn();
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      peerConnectionFactory,
+      captureSourceFactory,
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+    const base = {
+      requestId: 'rw-plan-contract',
+      streamId: 'stream-plan-contract',
+      target: makeStreamTarget(),
+      offer: { type: 'offer' as const, sdp: 'android-offer-sdp' },
+    };
+
+    await expect(runtime.startStream(base as never)).resolves.toMatchObject({
+      code: 'remote_window_stream_media_plan_mismatch',
+      message: 'remote window media plan mismatch: expected single-focus, got undefined',
+    });
+    await expect(runtime.startStream({
+      ...base,
+      requestId: 'rw-plan-contract-mismatch',
+      streamId: 'stream-plan-contract-mismatch',
+      mediaPlan: 'overview-plus-focus',
+      mediaPlanVersion: 1 as const,
+    })).resolves.toMatchObject({
+      code: 'remote_window_stream_media_plan_mismatch',
+      message: 'remote window media plan mismatch: expected single-focus, got overview-plus-focus',
+    });
+    await expect(runtime.startStream({
+      ...base,
+      requestId: 'rw-plan-version-mismatch',
+      streamId: 'stream-plan-version-mismatch',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 2,
+    } as never)).resolves.toMatchObject({
+      code: 'remote_window_stream_media_plan_version_mismatch',
+      message: 'remote window media plan version mismatch: expected 1, got 2',
+      failureStage: 'media-plan-validation',
+    });
+    expect(peerConnectionFactory).not.toHaveBeenCalled();
+    expect(captureSourceFactory).not.toHaveBeenCalled();
   });
 
   it('keeps low-rate preview and high-quality focus streams independent in daemon lifecycle', async () => {
@@ -1909,6 +2062,8 @@ setInterval(() => {}, 1000);
       requestId: 'rw-canvas',
       streamId: 'canvas-stream',
       purpose: 'preview',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       target: makeStreamTarget(),
       offer: { type: 'offer', sdp: 'canvas-offer' },
       videoBitrate: { preset: '2mbps', bitrateMbps: 2, maxBitrateBps: 2_000_000 },
@@ -1921,6 +2076,8 @@ setInterval(() => {}, 1000);
       requestId: 'rw-focus',
       streamId: 'focus-stream',
       purpose: 'focus',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       target: makeStreamTarget(),
       offer: { type: 'offer', sdp: 'focus-offer' },
       videoBitrate: { preset: '20mbps', bitrateMbps: 20, maxBitrateBps: 20_000_000 },
@@ -1986,6 +2143,8 @@ setInterval(() => {}, 1000);
     const result = await runtime.startStream({
       requestId: 'rw-early-frame',
       streamId: 'stream-early-frame',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       target: makeStreamTarget(),
       offer: { type: 'offer', sdp: 'android-offer-sdp' },
     }, {
@@ -2007,7 +2166,16 @@ setInterval(() => {}, 1000);
     });
     expect(fakeVideoSource.onFrame).toHaveBeenCalledTimes(2);
     expect(statuses).toEqual([
+      {
+        requestId: 'rw-early-frame',
+        streamId: 'stream-early-frame',
+        purpose: 'focus',
+        phase: 'starting',
+        stage: 'capability-verified',
+        capability: { mediaPlan: 'single-focus' as const, mediaPlanVersion: 1 as const, lanes: [{ role: 'focus', requiredForStart: true }], maxVideoLanes: 1, screenCaptureKit: true, typedPerLaneStatus: true, preflight: { wrtc: 'available', abi: 'supported', swiftHelper: 'configured', screenRecordingPermission: 'pending-capture', capture: 'pending', senderNegotiation: 'pending' } },
+      },
       { requestId: 'rw-early-frame', streamId: 'stream-early-frame', purpose: 'focus', phase: 'starting' },
+      { requestId: 'rw-early-frame', streamId: 'stream-early-frame', purpose: 'focus', phase: 'starting', stage: 'capture-started', lane: 'focus' },
       {
         requestId: 'rw-early-frame',
         streamId: 'stream-early-frame',
@@ -2057,6 +2225,8 @@ setInterval(() => {}, 1000);
     const result = await runtime.startStream({
       requestId: 'rw-early-frame-stop',
       streamId: 'stream-early-frame-stop',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       target: makeStreamTarget(),
       offer: { type: 'offer', sdp: 'android-offer-sdp' },
     }, {
@@ -2082,7 +2252,16 @@ setInterval(() => {}, 1000);
     expect(captureStop).toHaveBeenCalledTimes(1);
     expect(fakeVideoSource.onFrame).toHaveBeenCalledTimes(1);
     expect(statuses).toEqual([
+      {
+        requestId: 'rw-early-frame-stop',
+        streamId: 'stream-early-frame-stop',
+        purpose: 'focus',
+        phase: 'starting',
+        stage: 'capability-verified',
+        capability: { mediaPlan: 'single-focus' as const, mediaPlanVersion: 1 as const, lanes: [{ role: 'focus', requiredForStart: true }], maxVideoLanes: 1, screenCaptureKit: true, typedPerLaneStatus: true, preflight: { wrtc: 'available', abi: 'supported', swiftHelper: 'configured', screenRecordingPermission: 'pending-capture', capture: 'pending', senderNegotiation: 'pending' } },
+      },
       { requestId: 'rw-early-frame-stop', streamId: 'stream-early-frame-stop', purpose: 'focus', phase: 'starting' },
+      { requestId: 'rw-early-frame-stop', streamId: 'stream-early-frame-stop', purpose: 'focus', phase: 'starting', stage: 'capture-started', lane: 'focus' },
       {
         requestId: 'rw-early-frame-stop',
         streamId: 'stream-early-frame-stop',
@@ -2140,6 +2319,8 @@ setInterval(() => {}, 1000);
     const started = await runtime.startStream({
       requestId: 'rw-bitrate-start',
       streamId: 'stream-bitrate',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       target: makeStreamTarget(),
       offer: { type: 'offer', sdp: 'android-offer-sdp' },
       videoBitrate: { preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
@@ -2159,6 +2340,8 @@ setInterval(() => {}, 1000);
       requestId: 'rw-bitrate-update',
       streamId: 'stream-bitrate',
       streamGroupId: 'stream-bitrate',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       revision: 1,
       targetId: 'iterm2-pane:window-1:tab-1:left',
       videoBitrate: { preset: 'fullscreen', bitrateMbps: 20, maxBitrateBps: 20_000_000 },
@@ -2168,6 +2351,8 @@ setInterval(() => {}, 1000);
       requestId: 'rw-bitrate-update',
       streamId: 'stream-bitrate',
       streamGroupId: 'stream-bitrate',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       revision: 1,
       purpose: 'focus',
       targetId: 'iterm2-pane:window-1:tab-1:left',
@@ -2212,6 +2397,8 @@ setInterval(() => {}, 1000);
     const started = await runtime.startStream({
       requestId: 'rw-bitrate-empty-start',
       streamId: 'stream-bitrate-empty',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       target: makeStreamTarget(),
       offer: { type: 'offer', sdp: 'android-offer-sdp' },
       videoBitrate: { preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
@@ -2238,6 +2425,8 @@ setInterval(() => {}, 1000);
       requestId: 'rw-bitrate-empty-update',
       streamId: 'stream-bitrate-empty',
       streamGroupId: 'stream-bitrate-empty',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       revision: 1,
       targetId: 'iterm2-pane:window-1:tab-1:left',
       videoBitrate: { preset: '10mbps', bitrateMbps: 10, maxBitrateBps: 10_000_000 },
@@ -2247,6 +2436,8 @@ setInterval(() => {}, 1000);
       requestId: 'rw-bitrate-empty-update',
       streamId: 'stream-bitrate-empty',
       streamGroupId: 'stream-bitrate-empty',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       revision: 1,
       purpose: 'focus',
       targetId: 'iterm2-pane:window-1:tab-1:left',
@@ -2255,6 +2446,25 @@ setInterval(() => {}, 1000);
       error: {
         code: 'remote_window_stream_quality_failed',
         message: 'remote window quality sender has no encodings to update',
+      },
+    });
+    expect(fakeSender.setParameters).not.toHaveBeenCalled();
+
+    const planMismatch = await runtime.updateStreamQuality({
+      requestId: 'rw-quality-plan-mismatch',
+      streamId: 'stream-bitrate-empty',
+      streamGroupId: 'stream-bitrate-empty',
+      mediaPlan: 'overview-plus-focus',
+      mediaPlanVersion: 1,
+      revision: 1,
+      targetId: makeStreamTarget().streamTargetId,
+      videoBitrate: { preset: '10mbps', bitrateMbps: 10, maxBitrateBps: 10_000_000 },
+    });
+    expect(planMismatch).toMatchObject({
+      status: 'rejected',
+      error: {
+        code: 'remote_window_stream_quality_media_plan_mismatch',
+        message: 'remote window stream quality media plan mismatch: expected single-focus@1, got overview-plus-focus@1',
       },
     });
     expect(fakeSender.setParameters).not.toHaveBeenCalled();
@@ -2286,6 +2496,8 @@ setInterval(() => {}, 1000);
     await runtime.startStream({
       requestId: 'rw-bitrate-mismatch-start',
       streamId: 'stream-bitrate-mismatch',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       target: makeStreamTarget(),
       offer: { type: 'offer', sdp: 'android-offer-sdp' },
       videoBitrate: { preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
@@ -2296,6 +2508,8 @@ setInterval(() => {}, 1000);
       requestId: 'rw-bitrate-mismatch',
       streamId: 'stream-bitrate-mismatch',
       streamGroupId: 'stream-bitrate-mismatch',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       revision: 1,
       targetId: 'wrong-target',
       videoBitrate: { preset: '10mbps', bitrateMbps: 10, maxBitrateBps: 10_000_000 },
@@ -2305,6 +2519,8 @@ setInterval(() => {}, 1000);
       requestId: 'rw-bitrate-mismatch',
       streamId: 'stream-bitrate-mismatch',
       streamGroupId: 'stream-bitrate-mismatch',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       revision: 1,
       purpose: 'focus',
       targetId: 'wrong-target',
@@ -2350,6 +2566,8 @@ setInterval(() => {}, 1000);
     await runtime.startStream({
       requestId: 'rw-quality-busy-start',
       streamId: 'stream-quality-busy',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       target: makeStreamTarget(),
       offer: { type: 'offer', sdp: 'android-offer-sdp' },
     });
@@ -2357,6 +2575,8 @@ setInterval(() => {}, 1000);
       requestId: 'rw-quality-busy-1',
       streamId: 'stream-quality-busy',
       streamGroupId: 'stream-quality-busy',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       revision: 1,
       targetId: 'iterm2-pane:window-1:tab-1:left',
       videoBitrate: { preset: '10mbps', bitrateMbps: 10, maxBitrateBps: 10_000_000 },
@@ -2367,6 +2587,8 @@ setInterval(() => {}, 1000);
       requestId: 'rw-quality-busy-2',
       streamId: 'stream-quality-busy',
       streamGroupId: 'stream-quality-busy',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       revision: 2,
       targetId: 'iterm2-pane:window-1:tab-1:left',
       videoBitrate: { preset: '20mbps', bitrateMbps: 20, maxBitrateBps: 20_000_000 },
@@ -2419,6 +2641,8 @@ setInterval(() => {}, 1000);
     const result = await runtime.startStream({
       requestId: 'rw-odd-start',
       streamId: 'stream-odd',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       target,
       offer: { type: 'offer', sdp: 'android-offer-sdp' },
     });
@@ -2475,12 +2699,13 @@ setInterval(() => {}, 1000);
     const result = await runtime.startStream({
       requestId: 'rw-late-frame-failure',
       streamId: 'stream-late-frame-failure',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       target: makeStreamTarget(),
       offer: { type: 'offer', sdp: 'android-offer-sdp' },
     }, {
       sendStatus: (payload) => statuses.push(payload),
     });
-
     expect('answer' in result).toBe(true);
     expect(() => {
       pushFrame({ width: 3, height: 3, rgba: new Uint8Array(36).fill(2) });
@@ -2495,10 +2720,10 @@ setInterval(() => {}, 1000);
       framesSent: 1,
       message: 'remote window frame conversion failed: odd frame converter failure',
     }));
-    expect(await runtime.addIceCandidate({
+    await expect(runtime.addIceCandidate({
       streamId: 'stream-late-frame-failure',
       candidate: { candidate: 'candidate:after-failure' },
-    })).toBe(false);
+    })).rejects.toMatchObject({ name: 'remote_window_stream_candidate_closed' });
   });
 
   it('rejects invalid stream targets without starting capture or screenshot fallback', async () => {
@@ -2521,6 +2746,8 @@ setInterval(() => {}, 1000);
     const result = await runtime.startStream({
       requestId: 'rw-invalid',
       streamId: 'stream-invalid',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       target: invalidTarget,
       offer: { type: 'offer', sdp: 'android-offer-sdp' },
     });
@@ -2530,6 +2757,7 @@ setInterval(() => {}, 1000);
       streamId: 'stream-invalid',
       code: 'remote_window_stream_start_failed',
       message: 'remote window stream target requires cropRectTopLeftPx',
+      failureStage: 'request-validation',
     });
     expect(captureSourceFactory).not.toHaveBeenCalled();
   });
@@ -2555,6 +2783,8 @@ setInterval(() => {}, 1000);
     const result = await runtime.startStream({
       requestId: 'rw-capture-fail',
       streamId: 'stream-capture-fail',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       target: makeStreamTarget(),
       offer: { type: 'offer', sdp: 'android-offer-sdp' },
     });
@@ -2564,6 +2794,7 @@ setInterval(() => {}, 1000);
       streamId: 'stream-capture-fail',
       code: 'remote_window_stream_start_failed',
       message: 'ScreenCaptureKit capture start failure',
+      failureStage: 'focus-capture-start',
     });
     expect(fakeTrack.stop).toHaveBeenCalledTimes(1);
     expect(fakePeer.close).toHaveBeenCalledTimes(1);
@@ -2596,13 +2827,33 @@ setInterval(() => {}, 1000);
       runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
     });
 
+    expect(await runtime.addIceCandidate({
+      requestId: 'rw-candidate-early',
+      streamId: 'stream-stop',
+      candidate: { candidate: 'candidate:early', sdpMid: '0', sdpMLineIndex: 0 },
+    })).toBe(true);
+    expect(fakePeer.addIceCandidate).not.toHaveBeenCalled();
+    await expect(runtime.addIceCandidate({
+      requestId: 'rw-candidate-early-duplicate',
+      streamId: 'stream-stop',
+      candidate: { candidate: 'candidate:early', sdpMid: '0', sdpMLineIndex: 0 },
+    })).rejects.toMatchObject({ name: 'remote_window_stream_candidate_duplicate' });
+
     await runtime.startStream({
       requestId: 'rw-start-stop',
       streamId: 'stream-stop',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       target: makeStreamTarget(),
       offer: { type: 'offer', sdp: 'android-offer-sdp' },
     }, {
       sendStatus: (payload) => statuses.push(payload),
+    });
+    expect(fakePeer.addIceCandidate).toHaveBeenCalledWith({
+      candidate: 'candidate:early',
+      sdpMid: '0',
+      sdpMLineIndex: 0,
+      usernameFragment: null,
     });
 
     expect(await runtime.addIceCandidate({
@@ -2638,10 +2889,10 @@ setInterval(() => {}, 1000);
     expect(fakeTrack.stop).toHaveBeenCalledTimes(1);
     expect(fakePeer.close).toHaveBeenCalledTimes(1);
     expect(fakeVideoSource.onFrame).toHaveBeenCalledTimes(1);
-    expect(await runtime.addIceCandidate({
+    await expect(runtime.addIceCandidate({
       streamId: 'stream-stop',
       candidate: { candidate: 'candidate:late' },
-    })).toBe(false);
+    })).rejects.toMatchObject({ name: 'remote_window_stream_candidate_closed' });
     expect(statuses).toContainEqual(expect.objectContaining({
       requestId: 'rw-start-stop',
       streamId: 'stream-stop',
@@ -2678,6 +2929,8 @@ setInterval(() => {}, 1000);
     await runtime.startStream({
       requestId: 'rw-input-start',
       streamId: 'stream-input',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       target,
       offer: { type: 'offer', sdp: 'android-offer-sdp' },
     });
@@ -2859,6 +3112,8 @@ setInterval(() => {}, 1000);
     await runtime.startStream({
       requestId: 'rw-resize-start',
       streamId: 'stream-resize',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       target,
       offer: { type: 'offer', sdp: 'android-offer-sdp' },
     });
@@ -2929,6 +3184,8 @@ setInterval(() => {}, 1000);
     await runtime.startStream({
       requestId: 'rw-resize-missing-start',
       streamId: 'stream-resize-missing',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       target,
       offer: { type: 'offer', sdp: 'android-offer-sdp' },
     });
@@ -2984,6 +3241,8 @@ setInterval(() => {}, 1000);
     await runtime.startStream({
       requestId: 'rw-input-start-clock-skew',
       streamId: 'stream-input-clock-skew',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       target,
       offer: { type: 'offer', sdp: 'android-offer-sdp' },
     });
@@ -3074,6 +3333,8 @@ setInterval(() => {}, 1000);
     await runtime.startStream({
       requestId: 'rw-input-start-helper',
       streamId: 'stream-input-helper',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       target,
       offer: { type: 'offer', sdp: 'android-offer-sdp' },
     });
@@ -3203,6 +3464,8 @@ setInterval(() => {}, 1000);
     const started = await runtime.startStream({
       requestId: 'rw-input-warm-start',
       streamId: 'stream-input-warm',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       target,
       offer: { type: 'offer', sdp: 'android-offer-sdp' },
     });
@@ -3250,6 +3513,8 @@ setInterval(() => {}, 1000);
     const result = await runtime.startStream({
       requestId: 'rw-input-warm-timeout',
       streamId: 'stream-input-warm-timeout',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       target,
       offer: { type: 'offer', sdp: 'android-offer-sdp' },
     });
@@ -3293,6 +3558,8 @@ setInterval(() => {}, 1000);
     await runtime.startStream({
       requestId: 'rw-input-start-negative',
       streamId: 'stream-input-negative',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       target,
       offer: { type: 'offer', sdp: 'android-offer-sdp' },
     });
@@ -3321,6 +3588,8 @@ setInterval(() => {}, 1000);
     await runtime.startStream({
       requestId: 'rw-input-start-no-focus',
       streamId: 'stream-input-no-focus',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       target: noFocusTarget,
       offer: { type: 'offer', sdp: 'android-offer-sdp' },
     });
@@ -3454,6 +3723,8 @@ describe('remote window stream update-focus pending gate', () => {
     await runtime.startStream({
       requestId: 'rw-focus-busy-start',
       streamId: 'stream-focus-busy',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       target,
       offer: { type: 'offer', sdp: 'android-offer-sdp' },
     });
@@ -3517,6 +3788,8 @@ describe('remote window stream update-focus pending gate', () => {
     await runtime.startStream({
       requestId: 'rw-focus-reject-start',
       streamId: 'stream-focus-reject',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       target,
       offer: { type: 'offer', sdp: 'android-offer-sdp' },
     });
@@ -3558,7 +3831,6 @@ describe('remote window single-window overview gate', () => {
       }),
       runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
     });
-
     const singleWindowTarget = {
       ...makeStreamTarget(),
       videoTarget: {
@@ -3572,6 +3844,8 @@ describe('remote window single-window overview gate', () => {
     await runtime.startStream({
       requestId: 'rw-single-overview',
       streamId: 'stream-single-overview',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
       target: singleWindowTarget,
       offer: { type: 'offer', sdp: 'android-offer-sdp' },
     });
@@ -3604,6 +3878,7 @@ describe('remote window single-window overview gate', () => {
       }),
       runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
     });
+    const statuses: RemoteWindowStreamStatusPayload[] = [];
 
     const compositeTarget = {
       ...makeStreamTarget(),
@@ -3626,12 +3901,40 @@ describe('remote window single-window overview gate', () => {
     await runtime.startStream({
       requestId: 'rw-composite-overview',
       streamId: 'stream-composite-overview',
+      mediaPlan: 'overview-plus-focus',
+      mediaPlanVersion: 1 as const,
       target: compositeTarget,
       offer: { type: 'offer', sdp: 'android-offer-sdp' },
+    }, {
+      sendStatus: (status) => statuses.push(status),
     });
 
     // Composite target: focus + overview lanes both capture.
     expect(captureSourceFactory).toHaveBeenCalledTimes(2);
+    expect(statuses).toContainEqual(expect.objectContaining({
+      stage: 'capability-verified',
+      capability: {
+        mediaPlan: 'overview-plus-focus',
+        mediaPlanVersion: 1 as const,
+        lanes: [
+          { role: 'focus', requiredForStart: true },
+          { role: 'overview', requiredForStart: true },
+        ],
+        maxVideoLanes: 2,
+        screenCaptureKit: true,
+        typedPerLaneStatus: true,
+          preflight: {
+            wrtc: 'available',
+            abi: 'supported',
+            swiftHelper: 'configured',
+            screenRecordingPermission: 'pending-capture',
+            capture: 'pending',
+            senderNegotiation: 'pending',
+          },
+      },
+    }));
+    expect(statuses).toContainEqual(expect.objectContaining({ stage: 'capture-started', lane: 'focus' }));
+    expect(statuses).toContainEqual(expect.objectContaining({ stage: 'capture-started', lane: 'overview' }));
   });
 
   it('accepts only the currently published layout generation for composite coordinate input', async () => {
@@ -3674,6 +3977,8 @@ describe('remote window single-window overview gate', () => {
     const started = await runtime.startStream({
       requestId: 'rw-layout-generation-start',
       streamId: 'stream-layout-generation',
+      mediaPlan: 'overview-plus-focus',
+      mediaPlanVersion: 1 as const,
       target: compositeTarget,
       offer: { type: 'offer', sdp: 'android-offer-sdp' },
     });

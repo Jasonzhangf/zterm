@@ -26,6 +26,7 @@
     "test:settings-update-ui": "pnpm exec vitest run src/lib/plugin-settings-update/settings-update-ui-ownership.test.ts src/lib/plugin-host/plugin-host-runtime.test.ts src/pages/SettingsPage.plugin-render.test.tsx src/App.dynamic-refresh.test.tsx",
     "test:settings-connection-config": "pnpm exec vitest run src/pages/SettingsPage.relay-account.test.tsx src/components/settings/connection-config-entries.test.ts",
     "test:remote-window-ui": "pnpm exec vitest run src/lib/plugin-remote-window/remote-window-ui-ownership.test.ts src/lib/plugin-host/plugin-host-runtime.test.ts src/pages/TerminalPage.remote-window-overlay.test.tsx src/pages/TerminalPage.android-ime.test.tsx src/App.dynamic-refresh.test.tsx",
+    "test:remote-window-webrtc-loopback": "node ./scripts/remote-window-webrtc-loopback-gate.mjs",
     "test:quickbar-ui": "pnpm exec vitest run src/lib/plugin-quickbar/quickbar-ui-ownership.test.ts src/lib/plugin-host/plugin-host-runtime.test.ts src/pages/TerminalPage.render-isolation.test.tsx src/App.dynamic-refresh.test.tsx",
     "test:terminal-shell-ui": "pnpm exec vitest run src/lib/plugin-terminal-shell/terminal-shell-ui-ownership.test.ts src/components/terminal/SessionScheduleSheet.test.tsx src/components/terminal/ZtermDialog.test.tsx src/lib/plugin-host/plugin-host-runtime.test.ts src/pages/TerminalPage.render-isolation.test.tsx src/App.dynamic-refresh.test.tsx",
     "test:composition-root": "pnpm exec vitest run src/lib/composition-root/client-composition-root.test.ts src/lib/composition-root/client-composition-root-ownership.test.ts",

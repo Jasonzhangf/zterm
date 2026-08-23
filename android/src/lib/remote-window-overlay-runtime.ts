@@ -1,5 +1,6 @@
 import type {
   RemoteWindowStreamErrorPayload,
+  RemoteWindowStreamFailureStage,
   RemoteWindowStreamTargetManifest,
   RemoteWindowStreamTargetsResponsePayload,
 } from './types';
@@ -35,6 +36,7 @@ export type RemoteWindowOverlayState =
       streamStatus: 'idle' | 'starting' | 'streaming' | 'error';
       streamId?: string;
       streamErrorMessage?: string | null;
+      streamFailureStage?: RemoteWindowStreamFailureStage | null;
       streamDegradedMessage?: string | null;
       streamHandoff?: RemoteWindowStreamHandoffState | null;
       streamHandoffErrorMessage?: string | null;
@@ -285,6 +287,7 @@ export function beginRemoteWindowStreamSetup(
     streamStarted: false,
     streamStatus: 'starting',
     streamErrorMessage: null,
+    streamFailureStage: null,
     streamDegradedMessage: null,
     streamHandoff: null,
     streamHandoffErrorMessage: null,
@@ -322,6 +325,7 @@ export function attachRemoteWindowStreamReceiver(
     streamStarted: true,
     streamStatus: 'streaming',
     streamErrorMessage: null,
+    streamFailureStage: null,
   };
 }
 
@@ -443,6 +447,9 @@ export function failRemoteWindowStream(
     streamStarted: false,
     streamStatus: 'error',
     streamErrorMessage: error instanceof Error ? error.message : String(error),
+    streamFailureStage: error && typeof error === 'object' && 'failureStage' in error
+      ? (error.failureStage as RemoteWindowStreamFailureStage | null | undefined) ?? null
+      : null,
   };
 }
 

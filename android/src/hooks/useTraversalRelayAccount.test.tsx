@@ -54,6 +54,54 @@ describe('useTraversalRelayAccount', () => {
   it('keeps relay account hook as pure account state owner and does not open device streams itself', () => {
     const connectSpy = vi.spyOn(relayClient, 'connectTraversalRelayDevicesStream');
     renderHook(() => useTraversalRelayAccount());
+    expect(relayClient.traversalRelayRefreshMe).not.toHaveBeenCalled();
+    expect(connectSpy).not.toHaveBeenCalled();
+  });
+
+  it('projects global relay runtime account changes without refreshing or opening a stream itself', async () => {
+    const connectSpy = vi.spyOn(relayClient, 'connectTraversalRelayDevicesStream');
+    const { result } = renderHook(() => useTraversalRelayAccount());
+    expect(result.current.relayDevices).toEqual([]);
+
+    vi.mocked(relayClient.readTraversalRelayAccountState).mockReturnValue({
+      username: 'jason',
+      password: '',
+      relayBaseUrl: 'https://coder2.codewhisper.cc/relay/',
+      accessToken: 'token',
+      user: { id: 'u1', username: 'jason', createdAt: 'now' },
+      deviceId: 'tablet-1',
+      deviceName: 'Jason Tablet',
+      platform: 'android',
+      devices: [{
+        deviceId: 'daemon-online',
+        deviceName: 'Mac Studio',
+        platform: 'mac',
+        appVersion: '0.1.3',
+        updatedAt: new Date().toISOString(),
+        client: { connected: false, lastSeenAt: new Date().toISOString() },
+        daemon: {
+          connected: true,
+          lastSeenAt: new Date().toISOString(),
+          hostId: 'daemon-host-online',
+          version: '0.1.3',
+        },
+      }],
+      directory: null,
+      updatedAt: 2,
+    });
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent('traversal-relay-account-change'));
+    });
+
+    expect(result.current.account?.updatedAt).toBe(2);
+    expect(result.current.relayDevices).toEqual([
+      expect.objectContaining({
+        deviceId: 'daemon-online',
+        daemon: expect.objectContaining({ hostId: 'daemon-host-online' }),
+      }),
+    ]);
+    expect(relayClient.traversalRelayRefreshMe).not.toHaveBeenCalled();
     expect(connectSpy).not.toHaveBeenCalled();
   });
 
