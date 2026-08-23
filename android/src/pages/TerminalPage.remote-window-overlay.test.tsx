@@ -610,20 +610,28 @@ describe('TerminalPage remote window overlay', () => {
       button: 0,
       buttons: 1,
     });
-    // 触控模式单指拖动 = 增量滚动：move 即发 scroll（转移时发首帧），up 收尾不再发事件
+    // Direct Touch single-finger drag = release-time gesture/swipe
+    fireEvent.pointerUp(surface, {
+      pointerId: 32,
+      pointerType: 'touch',
+      clientX: 100,
+      clientY: 40,
+      button: 0,
+      buttons: 0,
+    });
     await waitFor(() => {
       expect(remoteWindowPayloads(onSendRemoteWindowInput)).toHaveLength(1);
     });
     expectNoRemoteWindowInputFocus(onSendRemoteWindowInput);
     expect(onSendRemoteWindowInput.mock.calls.map((call) => call[1].event.kind)).toEqual([
-      'scroll',
+      'gesture',
     ]);
     expect(remoteWindowPayloads(onSendRemoteWindowInput).map((payload) => payload.event)).toEqual([
       expect.objectContaining({
-        kind: 'scroll',
+        kind: 'gesture',
+        gesture: 'swipe',
+        phase: 'end',
         unit: 'pixel',
-        normalizedX: 0.5,
-        normalizedY: 0.4,
       }),
     ]);
     expect(onTerminalInput).not.toHaveBeenCalled();
@@ -637,12 +645,8 @@ describe('TerminalPage remote window overlay', () => {
       buttons: 0,
     });
 
-    // up 收尾：滚动已增量注入，不再产生新事件
-    expect(remoteWindowPayloads(onSendRemoteWindowInput)).toHaveLength(1);
-
     await waitFor(() => {
-      expect(screen.getByTestId('terminal-debug-remote-window-event').textContent).toContain('scroll');
-      expect(screen.getByTestId('terminal-debug-remote-window-counts').textContent).toContain('S 1');
+      expect(screen.getByTestId('terminal-debug-remote-window-event').textContent).toContain('gesture:swipe');
     });
   });
 
