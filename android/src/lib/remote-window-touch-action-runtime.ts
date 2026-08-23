@@ -66,6 +66,15 @@ export type RemoteWindowTouchPointerState =
       startAtMs: number;
     }
   | {
+      mode: 'touchGestureDrag';
+      pointerId: number;
+      startClientX: number;
+      startClientY: number;
+      lastClientX: number;
+      lastClientY: number;
+      startAtMs: number;
+    }
+  | {
       mode: 'actionLongPress';
       pointerId: number;
       startClientX: number;
@@ -638,58 +647,17 @@ export function resolveRemoteWindowTouchPointerMoveRuntime(options: {
       }, true);
     }
     if (options.touchMode && pointer.pointerType === 'touch') {
-      // 触控模式单指拖动 = 远程滚动（注入 scroll action，不模拟鼠标拖拽）；
-      // 转移时即发首帧 scroll（start → current），后续 move 发增量
-      const rawDeltaX = pointer.clientX - state.startClientX;
-      const rawDeltaY = pointer.clientY - state.startClientY;
-      const { deltaX, deltaY } = resolveRemoteWindowPairScrollDeltaRuntime({
-        rawDeltaX,
-        rawDeltaY,
-        surfaceRect: {
-          width: options.geometry.surfaceRect.width,
-          height: options.geometry.surfaceRect.height,
-        },
-        sourceRect: {
-          width: options.geometry.sourceRect.width,
-          height: options.geometry.sourceRect.height,
-        },
-        scrollFraction: options.scrollFraction ?? REMOTE_WINDOW_TOUCH_SCROLL_DEFAULT_FRACTION,
-        inverted: options.invertGestureDirection ?? false,
-      });
-      const nextState = {
-        mode: 'actionScroll',
+      // Direct Touch single-finger drag tracks silently and emits one
+      // release-time gesture/swipe on pointer up (no realtime scroll).
+      return emptyResult({
+        mode: 'touchGestureDrag',
         pointerId: state.pointerId,
         startClientX: state.startClientX,
         startClientY: state.startClientY,
         lastClientX: pointer.clientX,
         lastClientY: pointer.clientY,
         startAtMs: state.startAtMs,
-      } as const;
-      if (deltaX === 0 && deltaY === 0) {
-        return withRemoteEvents(nextState, []);
-      }
-      const point = resolveRemoteWindowPairPointerGeometry({
-        geometry: options.geometry,
-        clientX: pointer.clientX,
-        clientY: pointer.clientY,
-      });
-      if (!point) {
-        return withRemoteEvents(nextState, []);
-      }
-      return withRemoteEvents(
-        nextState,
-        [{
-          kind: 'scroll',
-          unit: 'pixel',
-          deltaX,
-          deltaY,
-          x: point.x,
-          y: point.y,
-          normalizedX: point.normalizedX,
-          normalizedY: point.normalizedY,
-          moveCursor: false,
-        }],
-      );
+      }, true);
     }
     const downEvent = buildRemoteWindowPointerInputEventRuntime({
       pointer: {
@@ -861,6 +829,23 @@ export function resolveRemoteWindowTouchPointerUpRuntime(options: {
   if (state.mode === 'actionScroll' && state.pointerId === pointer.pointerId) {
     // 单指滚动已增量注入，抬起收尾
     return emptyResult(idle, true);
+  }
+
+  if (state.mode === 'touchGestureDrag' && state.pointerId === pointer.pointerId) {
+    if (pointer.timeMs - state.startAtMs > REMOTE_WINDOW_INPUT_STALE_MS) {
+      return emptyResult(idle, true);
+    }
+    const swipeEvent = buildRemoteWindowTouchGestureSwipeEventRuntime({
+      pointerId: state.pointerId,
+      startClientX: state.startClientX,
+      startClientY: state.startClientY,
+      endClientX: pointer.clientX,
+      endClientY: pointer.clientY,
+      startTimeMs: state.startAtMs,
+      endTimeMs: pointer.timeMs,
+      geometry,
+    });
+    return withRemoteEvents(idle, swipeEvent ? [swipeEvent] : []);
   }
 
   if (state.mode === 'actionDrag' && state.pointerId === pointer.pointerId) {

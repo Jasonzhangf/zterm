@@ -297,7 +297,7 @@ describe('remote-window-touch-action-runtime', () => {
     expect([...dragMove.remoteEvents, ...dragUp.remoteEvents].map((event) => event.kind === 'pointer' ? event.phase : null)).toEqual(['down', 'move', 'up']);
   });
 
-  it('maps an unzoomed direct-touch drag to realtime no-cursor scroll', () => {
+  it('maps an unzoomed direct-touch drag to one release-time gesture/swipe', () => {
     const down = resolveRemoteWindowTouchPointerDownRuntime({
       state: createRemoteWindowTouchPointerState(),
       pointer: pointer({ pointerId: 8, clientX: 130, clientY: 90 }),
@@ -310,10 +310,8 @@ describe('remote-window-touch-action-runtime', () => {
       geometry,
       touchMode: true,
     });
-    expect(firstMove.nextState.mode).toBe('actionScroll');
-    expect(firstMove.remoteEvents).toEqual([
-      expect.objectContaining({ kind: 'scroll', moveCursor: false }),
-    ]);
+    expect(firstMove.nextState.mode).toBe('touchGestureDrag');
+    expect(firstMove.remoteEvents).toEqual([]);
 
     const secondMove = resolveRemoteWindowTouchPointerMoveRuntime({
       state: firstMove.nextState,
@@ -328,8 +326,16 @@ describe('remote-window-touch-action-runtime', () => {
       touchMode: true,
     });
 
-    expect(secondMove.remoteEvents).toEqual([expect.objectContaining({ kind: 'scroll', moveCursor: false })]);
-    expect(up.remoteEvents).toEqual([]);
+    expect(secondMove.remoteEvents).toEqual([]);
+    expect(up.remoteEvents).toHaveLength(1);
+    const swipeEvent = up.remoteEvents[0];
+    expect(swipeEvent.kind).toBe('gesture');
+    if (swipeEvent.kind === 'gesture') {
+      expect(swipeEvent.gesture).toBe('swipe');
+      expect(swipeEvent.phase).toBe('end');
+      expect(swipeEvent.deltaY).not.toBe(0);
+    }
+    expect(up.remoteEvents.some((event) => event.kind === 'scroll')).toBe(false);
     expect(up.remoteEvents.some((event) => event.kind === 'pointer')).toBe(false);
   });
 
@@ -487,7 +493,7 @@ describe('remote-window-touch-action-runtime', () => {
       ]);
     });
 
-    it('maps a touch drag to incremental scroll actions instead of mouse drag in touch mode', () => {
+    it('maps a touch drag to one release-time gesture/swipe instead of mouse drag in touch mode', () => {
       const down = resolveRemoteWindowTouchPointerDownRuntime({
         state: createRemoteWindowTouchPointerState(),
         pointer: pointer({ clientX: 110, clientY: 70 }),
@@ -495,39 +501,40 @@ describe('remote-window-touch-action-runtime', () => {
         zoomedProjection: false,
         touchMode: true,
       });
-      const moveIntoScroll = resolveRemoteWindowTouchPointerMoveRuntime({
+      const moveIntoDrag = resolveRemoteWindowTouchPointerMoveRuntime({
         state: down.nextState,
         pointer: pointer({ clientX: 110, clientY: 90, timeMs: 1_030 }),
         geometry,
         touchMode: true,
       });
-      expect(moveIntoScroll.nextState.mode).toBe('actionScroll');
-      expect(moveIntoScroll.remoteEvents.length).toBe(1);
-      expect(moveIntoScroll.remoteEvents[0].kind).toBe('scroll');
+      expect(moveIntoDrag.nextState.mode).toBe('touchGestureDrag');
+      expect(moveIntoDrag.remoteEvents).toEqual([]);
 
-      const scrollMove = resolveRemoteWindowTouchPointerMoveRuntime({
-        state: moveIntoScroll.nextState,
+      const secondMove = resolveRemoteWindowTouchPointerMoveRuntime({
+        state: moveIntoDrag.nextState,
         pointer: pointer({ clientX: 110, clientY: 110, timeMs: 1_050 }),
         geometry,
         touchMode: true,
         scrollFraction: 1,
       });
-      expect(scrollMove.nextState.mode).toBe('actionScroll');
-      expect(scrollMove.remoteEvents.length).toBe(1);
-      const event = scrollMove.remoteEvents[0];
-      expect(event.kind).toBe('scroll');
-      if (event.kind === 'scroll') {
-        expect(event.deltaY).not.toBe(0);
-      }
+      expect(secondMove.nextState.mode).toBe('touchGestureDrag');
+      expect(secondMove.remoteEvents).toEqual([]);
 
       const up = resolveRemoteWindowTouchPointerUpRuntime({
-        state: scrollMove.nextState,
+        state: secondMove.nextState,
         pointer: pointer({ clientX: 110, clientY: 110, buttons: 0, timeMs: 1_060 }),
         geometry,
         touchMode: true,
       });
       expect(up.nextState.mode).toBe('idle');
-      expect(up.remoteEvents).toEqual([]);
+      expect(up.remoteEvents).toHaveLength(1);
+      const event = up.remoteEvents[0];
+      expect(event.kind).toBe('gesture');
+      if (event.kind === 'gesture') {
+        expect(event.gesture).toBe('swipe');
+        expect(event.phase).toBe('end');
+        expect(event.deltaY).not.toBe(0);
+      }
     });
 
     it('leaves long-press timing to the single overlay arena timer owner', () => {

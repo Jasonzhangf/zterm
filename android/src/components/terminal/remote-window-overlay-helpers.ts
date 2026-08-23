@@ -458,6 +458,7 @@ export function toRemoteWindowTouchGestureState(
     gesture.mode === 'actionPending'
     || gesture.mode === 'actionDrag'
     || gesture.mode === 'actionScroll'
+    || gesture.mode === 'touchGestureDrag'
     || gesture.mode === 'actionLongPress'
     || gesture.mode === 'twoFingerCandidate'
     || gesture.mode === 'twoFingerScroll'
