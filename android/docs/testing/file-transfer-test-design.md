@@ -30,6 +30,13 @@
 4. Client sends `file-upload-end` only after every chunk is cumulatively acknowledged.
 5. Daemon validates exact chunk count and byte count before publishing `file-upload-complete`; errors remain explicit.
 
+### Paste-Image Lifecycle
+
+1. Client sends a request-bound `file-upload-start` carrying paste-image metadata; daemon ignores client target/file names for this mode and stages bytes under its private upload directory.
+2. Client sends at most eight unacknowledged chunks through the same bounded window owner and resumes from the latest cumulative ACK.
+3. Daemon validates exact chunk count, total byte length, and persisted stat before acknowledging completion; duplicate identical chunks remain idempotent.
+4. Client sends `paste-image-from-upload` only after completion. Daemon consumes staged bytes once, normalizes to PNG, injects clipboard/input, and deletes staging.
+
 ### Download Lifecycle
 
 1. Daemon emits 16 KiB wire chunks without changing payload semantics.

@@ -7,12 +7,17 @@ import type {
   RemoteScreenshotStatusPayload,
   Session,
 } from '../lib/types';
+import {
+  FILE_TRANSFER_WIRE_CHUNK_BYTES,
+} from '@zterm/shared/protocol';
+import { sendBoundedFileUploadChunks } from '../lib/file-transfer-throughput-runtime';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
 import type { ClientDaemonConnection } from '../lib/client-daemon-connection';
 import {
   ensureSessionReadyForTransfer,
   sendInputThroughSessionTransport,
 } from './session-context-input-runtime';
+import type { FileTransferMessage } from '../lib/file-transfer-message-runtime';
 
 interface MutableRefObject<T> {
   current: T;
@@ -23,6 +28,92 @@ interface RuntimeDebugFn {
 }
 
 const TRANSFER_BINARY_CHUNK_BYTES = 16 * 1024;
+
+function createImageUploadAckRuntime(subscribe?: (
+  handler: (message: FileTransferMessage) => void,
+) => () => void) {
+  if (!subscribe) {
+    throw new Error('image upload progress subscription is required');
+  }
+  let acknowledgedChunks = 0;
+  let complete = false;
+  let error: string | null = null;
+  const waiters = new Set<{
+    minimumChunks: number;
+    resolve: () => void;
+    reject: (error: Error) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }>();
+
+  function settleWaiter(
+    waiter: { minimumChunks: number; resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> },
+    failure?: Error,
+  ) {
+    if (!waiters.delete(waiter)) return;
+    clearTimeout(waiter.timer);
+    if (failure) waiter.reject(failure);
+    else waiter.resolve();
+  }
+
+  const unsubscribe = subscribe((message) => {
+    if (message.type === 'file-upload-progress') {
+      acknowledgedChunks = Math.max(acknowledgedChunks, message.payload.chunkIndex);
+      for (const waiter of Array.from(waiters)) {
+        if (acknowledgedChunks >= waiter.minimumChunks) settleWaiter(waiter);
+      }
+      return;
+    }
+    if (message.type === 'file-upload-complete') {
+      complete = true;
+      for (const waiter of Array.from(waiters)) settleWaiter(waiter);
+      return;
+    }
+    if (message.type === 'file-upload-error') {
+      error = message.payload.error;
+      const failure = new Error(message.payload.error);
+      for (const waiter of Array.from(waiters)) settleWaiter(waiter, failure);
+    }
+  });
+
+  return {
+    waitForProgress(minimumChunks: number, timeoutMs: number) {
+      if (error) return Promise.reject(new Error(error || 'image upload failed'));
+      if (complete || acknowledgedChunks >= minimumChunks) return Promise.resolve();
+      return new Promise<void>((resolve, reject) => {
+        const waiter = {
+          minimumChunks,
+          resolve,
+          reject,
+          timer: setTimeout(() => {
+            waiters.delete(waiter);
+            reject(new Error(`image upload ACK timeout at chunk ${minimumChunks}`));
+          }, timeoutMs),
+        };
+        waiters.add(waiter);
+      });
+    },
+    getAcknowledgedChunks: () => acknowledgedChunks,
+    isComplete: () => complete,
+    dispose: unsubscribe,
+  };
+}
+
+function readFileChunkBase64(file: Blob, offset: number, length: number) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error || new Error('image chunk read failed'));
+    reader.onload = () => {
+      const result = String(reader.result || '');
+      const commaIndex = result.indexOf(',');
+      if (commaIndex < 0) {
+        reject(new Error('image chunk encoder returned an invalid data URL'));
+        return;
+      }
+      resolve(result.slice(commaIndex + 1));
+    };
+    reader.readAsDataURL(file.slice(offset, offset + length));
+  });
+}
 
 export interface ImagePasteWaiterRuntime {
   wait: (sessionId: string, timeoutMs?: number) => Promise<void>;
@@ -197,15 +288,32 @@ export async function ensureSessionReadyForPasteRuntime(options: {
   timeoutMs: number;
   sessions: Session[];
   daemonConnection: ClientDaemonConnection;
+  requestReconnect?: (sessionId: string, reason: string) => void;
 }) {
-  return ensureSessionReadyForTransfer({
-    sessionId: options.sessionId,
-    timeoutMs: options.timeoutMs,
-    sessionsRef: {
-      current: options.sessions,
-    },
-    daemonConnection: options.daemonConnection,
-  });
+  const sessionId = options.sessionId;
+  const readSocket = () => {
+    const ws = options.daemonConnection.readSessionSocket(sessionId) || null;
+    if (!ws) return null;
+    if (ws.readyState === WebSocket.OPEN) return ws;
+    if (ws.readyState === WebSocket.CONNECTING) return ws;
+    return null;
+  };
+  const initial = readSocket();
+  if (initial) return initial;
+  const session = options.sessions.find((item) => item.id === sessionId);
+  if (!session) {
+    throw new Error('Active session no longer exists');
+  }
+  if (options.requestReconnect) {
+    options.requestReconnect(sessionId, 'transfer transport unavailable');
+  }
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < options.timeoutMs) {
+    await new Promise((resolve) => window.setTimeout(resolve, 120));
+    const socket = readSocket();
+    if (socket) return socket;
+  }
+  throw new Error('Transfer transport did not recover before timeout');
 }
 
 export async function sendImagePasteRuntime(options: {
@@ -216,32 +324,80 @@ export async function sendImagePasteRuntime(options: {
   imagePasteResultTimeoutMs?: number;
   ensureSessionReadyForPaste: (sessionId: string, timeoutMs?: number) => Promise<BridgeTransportSocket>;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
+  subscribeFileTransferMessages: (
+    handler: (message: FileTransferMessage) => void,
+  ) => () => void;
 }) {
   const targetSessionId = options.sessionId.trim();
   if (!targetSessionId) {
     throw new Error('No target session for image paste');
   }
 
-  const ws = await options.ensureSessionReadyForPaste(targetSessionId);
-  const fileBuffer = await options.file.arrayBuffer();
-  const payload: PasteImageStartPayload = {
+  const requestId = `paste-image-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const metadata: PasteImageStartPayload = {
     name: options.file.name || 'upload',
     mimeType: options.file.type || 'application/octet-stream',
-    byteLength: fileBuffer.byteLength,
+    byteLength: options.file.size,
     ...(options.pasteTarget
       ? { pasteTarget: options.pasteTarget }
       : { pasteSequence: '\x16' }),
   };
+  const totalChunks = Math.max(1, Math.ceil(options.file.size / FILE_TRANSFER_WIRE_CHUNK_BYTES));
+  const acks = createImageUploadAckRuntime(options.subscribeFileTransferMessages);
 
-  options.sendSocketPayload(targetSessionId, ws, JSON.stringify({
-    type: 'paste-image-start',
-    payload,
-  } satisfies ClientMessage));
-  sendBinaryTransferPayload(targetSessionId, ws, fileBuffer, options.sendSocketPayload);
-  await options.imagePasteWaiterRuntime.wait(
-    targetSessionId,
-    options.imagePasteResultTimeoutMs,
-  );
+  try {
+    let ws = await options.ensureSessionReadyForPaste(targetSessionId);
+    options.sendSocketPayload(targetSessionId, ws, JSON.stringify({
+      type: 'file-upload-start',
+      payload: {
+        requestId,
+        targetDir: 'zterm-paste-staging',
+        fileName: `${requestId}.bin`,
+        fileSize: options.file.size,
+        chunkCount: totalChunks,
+        pasteImage: metadata,
+      },
+    } satisfies ClientMessage));
+
+    await sendBoundedFileUploadChunks({
+      totalChunks,
+      readChunk: (chunkIndex) => readFileChunkBase64(
+        options.file,
+        chunkIndex * FILE_TRANSFER_WIRE_CHUNK_BYTES,
+        FILE_TRANSFER_WIRE_CHUNK_BYTES,
+      ),
+      sendChunk: async (chunkIndex, dataBase64) => {
+        ws = await options.ensureSessionReadyForPaste(targetSessionId);
+        options.sendSocketPayload(targetSessionId, ws, JSON.stringify({
+          type: 'file-upload-chunk',
+          payload: { requestId, chunkIndex, dataBase64 },
+        } satisfies ClientMessage));
+      },
+      waitForProgress: (minimum) => acks.waitForProgress(minimum, 10_000),
+      resume: {
+        maxAttempts: 8,
+        delayMs: 3_000,
+        getResumeChunkIndex: () => acks.getAcknowledgedChunks(),
+      },
+    });
+
+    ws = await options.ensureSessionReadyForPaste(targetSessionId);
+    options.sendSocketPayload(targetSessionId, ws, JSON.stringify({
+      type: 'file-upload-end',
+      payload: { requestId },
+    } satisfies ClientMessage));
+    ws = await options.ensureSessionReadyForPaste(targetSessionId);
+    options.sendSocketPayload(targetSessionId, ws, JSON.stringify({
+      type: 'paste-image-from-upload',
+      payload: { requestId },
+    } satisfies ClientMessage));
+    await options.imagePasteWaiterRuntime.wait(
+      targetSessionId,
+      options.imagePasteResultTimeoutMs,
+    );
+  } finally {
+    acks.dispose();
+  }
 }
 
 export async function sendFileAttachRuntime(options: {

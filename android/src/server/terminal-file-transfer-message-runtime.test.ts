@@ -50,6 +50,7 @@ function createSession(): TerminalSession {
 function createFileTransferRuntimeStub(): TerminalFileTransferRuntime {
   return {
     handlePasteImage: vi.fn(),
+    handlePasteImageFromUpload: vi.fn(),
     handleFileListRequest: vi.fn(),
     handleFileCreateDirectoryRequest: vi.fn(),
     handleFileDownloadRequest: vi.fn(),

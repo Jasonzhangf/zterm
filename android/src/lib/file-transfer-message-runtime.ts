@@ -6,7 +6,7 @@ import type {
   ServerMessage,
 } from './types';
 
-type FileTransferMessage =
+export type FileTransferMessage =
   Extract<
     ServerMessage,
     | { type: 'file-list-response' }

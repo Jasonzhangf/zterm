@@ -37,6 +37,9 @@ export function createTerminalFileTransferRuntime(
     handlePasteImage: (session, payload) => {
       if (!rejectUnsupportedHerdrOperation(session, 'paste image')) binaryRuntime.handlePasteImage(session, payload);
     },
+    handlePasteImageFromUpload: (session, payload) => {
+      if (!rejectUnsupportedHerdrOperation(session, 'paste image')) binaryRuntime.handlePasteImageFromUpload(session, payload);
+    },
     handleFileListRequest: (session, payload) => {
       if (!rejectUnsupportedHerdrOperation(session, 'file listing')) listRuntime.handleFileListRequest(session, payload);
     },

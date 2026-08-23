@@ -7,6 +7,7 @@ import {
   type FileUploadChunkPayload,
   type FileUploadEndPayload,
   type FileUploadStartPayload,
+  type PasteImageFromUploadPayload,
   type PasteImagePayload,
   type PasteImageStartPayload,
   type RemoteScreenshotRequestPayload,
@@ -58,6 +59,7 @@ export interface TerminalFileTransferRuntimeDeps {
 
 export interface TerminalFileTransferRuntime {
   handlePasteImage: (session: TerminalSession, payload: PasteImagePayload) => void;
+  handlePasteImageFromUpload: (session: TerminalSession, payload: PasteImageFromUploadPayload) => void;
   handleFileListRequest: (session: TerminalSession, payload: FileListRequestPayload) => void;
   handleFileCreateDirectoryRequest: (session: TerminalSession, payload: FileCreateDirectoryRequestPayload) => void;
   handleFileDownloadRequest: (session: TerminalSession, payload: FileDownloadRequestPayload) => void;

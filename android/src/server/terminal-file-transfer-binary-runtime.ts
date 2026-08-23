@@ -1,10 +1,11 @@
-import { mkdirSync, statSync, unlinkSync, writeFileSync } from 'fs';
+import { mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'fs';
 import { extname, join } from 'path';
 import type {
   AttachFileStartPayload,
   FileUploadChunkPayload,
   FileUploadEndPayload,
   FileUploadStartPayload,
+  PasteImageFromUploadPayload,
   PasteImagePayload,
   PasteImageStartPayload,
 } from '@zterm/shared/protocol';
@@ -16,6 +17,7 @@ import type {
 
 export interface TerminalFileTransferBinaryRuntime {
   handlePasteImage: (session: TerminalSession, payload: PasteImagePayload) => void;
+  handlePasteImageFromUpload: (session: TerminalSession, payload: PasteImageFromUploadPayload) => void;
   handleFileUploadStart: (session: TerminalSession, payload: FileUploadStartPayload) => void;
   handleFileUploadChunk: (session: TerminalSession, payload: FileUploadChunkPayload) => void;
   handleFileUploadEnd: (session: TerminalSession, payload: FileUploadEndPayload) => void;
@@ -26,6 +28,12 @@ export function createTerminalFileTransferBinaryRuntime(
   deps: TerminalFileTransferRuntimeDeps,
 ): TerminalFileTransferBinaryRuntime {
   const pendingUploads = new Map<string, PendingUploadState>();
+  const pendingPasteImages = new Map<string, NonNullable<FileUploadStartPayload['pasteImage']>>();
+  const stagedPasteImages = new Map<string, { path: string; metadata: NonNullable<FileUploadStartPayload['pasteImage']>; bytes: number }>();
+
+  function getStagingDir() {
+    return join(deps.uploadDir, 'paste-staging');
+  }
 
   function sanitizeUploadFileName(input?: string) {
     const generatedName = `upload-${Date.now()}`;
@@ -163,12 +171,14 @@ export function createTerminalFileTransferBinaryRuntime(
       pasteTarget?: PasteImageStartPayload['pasteTarget'];
     },
     bufferFactory: () => { sourcePath: string; pngPath: string; bytes: number },
+    cleanupInput?: () => void,
   ) {
     try {
       const { sourcePath, pngPath, bytes } = bufferFactory();
       if (payload.pasteTarget?.kind === 'remote-window') {
         if (!deps.pasteImageToRemoteWindow) {
           cleanupClipboardImageFiles(sourcePath, pngPath);
+          cleanupInput?.();
           sendImagePasteError(session, 'remote window image paste is not available');
           return;
         }
@@ -179,8 +189,10 @@ export function createTerminalFileTransferBinaryRuntime(
         })).then(() => {
           sendImagePasted(session, payload, bytes);
           cleanupClipboardImageFiles(sourcePath, pngPath);
+          cleanupInput?.();
         }).catch((error) => {
           cleanupClipboardImageFiles(sourcePath, pngPath);
+          cleanupInput?.();
           sendImagePasteError(session, error instanceof Error ? error.message : String(error));
         });
         return;
@@ -189,6 +201,7 @@ export function createTerminalFileTransferBinaryRuntime(
       const mirror = deps.getSessionMirror(session);
       if (!mirror || mirror.lifecycle !== 'ready') {
         cleanupClipboardImageFiles(sourcePath, pngPath);
+        cleanupInput?.();
         deps.sendMessage(session, {
           type: 'error',
           payload: { message: 'Session is not ready for image paste', code: 'session_not_ready' },
@@ -200,6 +213,7 @@ export function createTerminalFileTransferBinaryRuntime(
       deps.scheduleMirrorLiveSync(mirror, 33);
       sendImagePasted(session, payload, bytes);
       cleanupClipboardImageFiles(sourcePath, pngPath);
+      cleanupInput?.();
     } catch (error) {
       sendImagePasteError(session, error instanceof Error ? error.message : String(error));
     }
@@ -209,20 +223,57 @@ export function createTerminalFileTransferBinaryRuntime(
     emitImagePaste(session, payload, () => persistClipboardImage(payload));
   }
 
+  function handlePasteImageFromUpload(session: TerminalSession, payload: PasteImageFromUploadPayload) {
+    const staged = stagedPasteImages.get(payload.requestId);
+    if (!staged) {
+      deps.sendMessage(session, {
+        type: 'error',
+        payload: {
+          message: 'No completed paste-image upload for requestId',
+          code: 'paste_image_no_pending',
+        },
+      });
+      return;
+    }
+    stagedPasteImages.delete(payload.requestId);
+    emitImagePaste(
+      session,
+      staged.metadata,
+      () => persistClipboardImageBuffer(
+        { name: staged.metadata.name, mimeType: staged.metadata.mimeType },
+        readFileSync(staged.path),
+      ),
+      () => {
+        try {
+          unlinkSync(staged.path);
+        } catch (error) {
+          logCleanupFailure('paste-image-upload', staged.path, error);
+        }
+      },
+    );
+  }
+
   function handleFileUploadStart(session: TerminalSession, payload: FileUploadStartPayload) {
     const { requestId, targetDir, fileName, fileSize, chunkCount } = payload;
 
-    mkdirSync(targetDir, { recursive: true });
+    const isPasteUpload = Boolean(payload.pasteImage);
+    const resolvedTargetDir = isPasteUpload ? getStagingDir() : targetDir;
+    const resolvedFileName = isPasteUpload ? `${requestId}.bin` : fileName;
+
+    mkdirSync(resolvedTargetDir, { recursive: true });
 
     pendingUploads.set(requestId, {
-      targetDir,
-      fileName,
+      targetDir: resolvedTargetDir,
+      fileName: resolvedFileName,
       fileSize,
       chunks: new Map(),
       totalChunks: chunkCount,
       receivedChunks: 0,
     });
 
+    if (payload.pasteImage) {
+      pendingPasteImages.set(requestId, payload.pasteImage);
+    }
     deps.sendMessage(session, {
       type: 'file-upload-progress',
       payload: { requestId, chunkIndex: 0, totalChunks: chunkCount },
@@ -313,8 +364,20 @@ export function createTerminalFileTransferBinaryRuntime(
         type: 'file-upload-complete',
         payload: { requestId, filePath, bytes: persistedBytes },
       });
-      deps.onFileUploadPersisted?.(upload.targetDir);
+      if (upload.targetDir !== getStagingDir()) {
+        deps.onFileUploadPersisted?.(upload.targetDir);
+      }
+      const pasteMetadata = pendingPasteImages.get(requestId);
+      if (pasteMetadata) {
+        stagedPasteImages.set(requestId, {
+          path: filePath,
+          metadata: pasteMetadata,
+          bytes: persistedBytes,
+        });
+        pendingPasteImages.delete(requestId);
+      }
     } catch (error) {
+      pendingPasteImages.delete(requestId);
       deps.sendMessage(session, {
         type: 'file-upload-error',
         payload: { requestId, error: error instanceof Error ? error.message : String(error) },
@@ -424,6 +487,7 @@ export function createTerminalFileTransferBinaryRuntime(
 
   return {
     handlePasteImage,
+    handlePasteImageFromUpload,
     handleFileUploadStart,
     handleFileUploadChunk,
     handleFileUploadEnd,

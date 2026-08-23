@@ -83,6 +83,7 @@ export interface FileUploadStartPayload {
   fileName: string;
   fileSize: number;
   chunkCount: number;
+  pasteImage?: PasteImageUploadMetadata;
 }
 
 /**
@@ -253,6 +254,7 @@ export interface RemoteWindowStreamErrorPayload {
   streamId?: string;
   code: string;
   message: string;
+  failureStage?: RemoteWindowStreamFailureStage;
 }
 
 export interface RemoteWindowStreamRtcDescription {
@@ -268,6 +270,72 @@ export interface RemoteWindowStreamIceCandidate {
 }
 
 export type RemoteWindowStreamPurpose = 'preview' | 'focus';
+
+export type RemoteWindowStreamMediaPlan = 'single-focus' | 'overview-plus-focus';
+
+export type RemoteWindowStreamLaneRole = 'focus' | 'overview';
+
+export interface RemoteWindowStreamMediaLaneContract {
+  role: RemoteWindowStreamLaneRole;
+  requiredForStart: true;
+}
+
+export interface RemoteWindowStreamMediaPlanContract {
+  id: RemoteWindowStreamMediaPlan;
+  version: 1;
+  lanes: readonly RemoteWindowStreamMediaLaneContract[];
+}
+
+const REMOTE_WINDOW_MEDIA_PLAN_CONTRACTS: Record<RemoteWindowStreamMediaPlan, RemoteWindowStreamMediaPlanContract> = {
+  'single-focus': {
+    id: 'single-focus',
+    version: 1,
+    lanes: [{ role: 'focus', requiredForStart: true }],
+  },
+  'overview-plus-focus': {
+    id: 'overview-plus-focus',
+    version: 1,
+    lanes: [
+      { role: 'focus', requiredForStart: true },
+      { role: 'overview', requiredForStart: true },
+    ],
+  },
+};
+
+export function getRemoteWindowMediaPlanContract(
+  id: RemoteWindowStreamMediaPlan,
+): RemoteWindowStreamMediaPlanContract {
+  return REMOTE_WINDOW_MEDIA_PLAN_CONTRACTS[id];
+}
+export type RemoteWindowStreamFailureStage =
+  | 'request-validation'
+  | 'platform-capability'
+  | 'stream-lifecycle'
+  | 'media-plan-validation'
+  | 'offer-apply'
+  | 'focus-capture-start'
+  | 'input-helper-warm'
+  | 'overview-capture-start'
+  | 'answer-create'
+  | 'answer-apply'
+  | 'track-attach';
+
+export interface RemoteWindowStreamCapabilityTelemetry {
+  mediaPlan: RemoteWindowStreamMediaPlan;
+  mediaPlanVersion: 1;
+  lanes: readonly RemoteWindowStreamMediaLaneContract[];
+  maxVideoLanes: 1 | 2;
+  screenCaptureKit: true;
+  typedPerLaneStatus: true;
+  preflight: {
+    wrtc: 'available';
+    abi: 'supported';
+    swiftHelper: 'configured';
+    screenRecordingPermission: 'pending-capture';
+    capture: 'pending';
+    senderNegotiation: 'pending';
+  };
+}
 
 export type RemoteWindowVideoBitratePreset =
   | '2mbps'
@@ -299,6 +367,8 @@ export interface RemoteWindowStreamStartRequestPayload {
   requestId: string;
   streamId: string;
   purpose?: RemoteWindowStreamPurpose;
+  mediaPlan: RemoteWindowStreamMediaPlan;
+  mediaPlanVersion: 1;
   target: RemoteWindowStreamTargetManifest;
   offer: RemoteWindowStreamRtcDescription;
   iceServers?: Array<Record<string, unknown>>;
@@ -328,6 +398,8 @@ export interface RemoteWindowStreamStartedPayload {
   requestId: string;
   streamId: string;
   purpose?: RemoteWindowStreamPurpose;
+  mediaPlan: RemoteWindowStreamMediaPlan;
+  mediaPlanVersion: 1;
   targetId: string;
   answer: RemoteWindowStreamRtcDescription;
   capture: {
@@ -357,6 +429,9 @@ export interface RemoteWindowStreamStatusPayload {
   streamId: string;
   purpose?: RemoteWindowStreamPurpose;
   phase: 'starting' | 'streaming' | 'stopped';
+  stage?: 'capability-verified' | 'capture-started';
+  lane?: 'focus' | 'overview';
+  capability?: RemoteWindowStreamCapabilityTelemetry;
   framesSent?: number;
   frameWidth?: number;
   frameHeight?: number;
@@ -374,6 +449,8 @@ export interface RemoteWindowStreamQualityRequestPayload {
   requestId: string;
   streamId: string;
   streamGroupId: string;
+  mediaPlan: RemoteWindowStreamMediaPlan;
+  mediaPlanVersion: 1;
   revision: number;
   purpose?: RemoteWindowStreamPurpose;
   targetId: string;
@@ -384,6 +461,8 @@ export interface RemoteWindowStreamQualityResultPayload {
   requestId: string;
   streamId: string;
   streamGroupId: string;
+  mediaPlan: RemoteWindowStreamMediaPlan;
+  mediaPlanVersion: 1;
   revision: number;
   purpose?: RemoteWindowStreamPurpose;
   targetId: string;
@@ -577,6 +656,21 @@ export interface AttachFileStartPayload {
   byteLength: number;
 }
 
+export interface PasteImageUploadMetadata {
+  name: string;
+  mimeType: string;
+  pasteSequence?: string;
+  pasteTarget?: {
+    kind: 'remote-window';
+    streamId: string;
+    targetId: string;
+  };
+}
+
+export interface PasteImageFromUploadPayload {
+  requestId: string;
+}
+
 export interface AttachmentAssetRequestPayload {
   attachmentId: string;
   deviceId: string;
@@ -618,6 +712,7 @@ export type BridgeClientMessage =
   | { type: 'input'; payload: string | TerminalReliableInputPayload }
   | { type: 'paste-image-start'; payload: PasteImageStartPayload }
   | { type: 'paste-image'; payload: PasteImagePayload }
+  | { type: 'paste-image-from-upload'; payload: PasteImageFromUploadPayload }
   | { type: 'attach-file-start'; payload: AttachFileStartPayload }
   | { type: 'remote-screenshot-request'; payload: RemoteScreenshotRequestPayload }
   | { type: 'remote-window-targets-request'; payload: RemoteWindowStreamRequestPayload }

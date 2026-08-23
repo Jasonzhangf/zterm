@@ -285,14 +285,16 @@ operation -> event -> projection
 ## 图片传送链路
 
 ```text
-mobile file picker -> websocket paste-image -> daemon temp file
+mobile file picker -> websocket file-upload staging (cumulative ACK)
+-> paste-image-from-upload -> daemon temp file
 -> sips normalize to png -> macOS clipboard -> tmux input Ctrl+V
 ```
 
 规则：
 
-- client 只负责选择本地图像并上传原始字节，不自行裁剪语义
+- client 通过唯一 bounded upload owner 分片上传原始字节；只消费累计 ACK，不自行裁剪语义
 - server 负责解码/格式统一（当前统一转成 PNG）
+- paste image staging 由 daemon 私有目录持有；只有 exact chunk count、总字节数和落盘 stat 一致后才允许 paste 指令消费
 - 剪贴板真源在本地 Mac/PC daemon，不在 mobile client
 - `Ctrl+V` 发送给当前 active tmux 会话，不广播给其他 tabs
 

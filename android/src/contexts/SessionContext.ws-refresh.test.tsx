@@ -7249,7 +7249,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     expect(MockWebSocket.instances).toHaveLength(2);
   });
 
-  it('sends image paste as metadata plus binary frame without reconnect side effects', async () => {
+  it('sends image paste as a resumable bounded upload without reconnect side effects', async () => {
     render(
       <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
         <SessionHarness />
@@ -7270,20 +7270,52 @@ describe('SessionContext websocket dynamic refresh', () => {
 
     fireEvent.click(screen.getByText('send-image'));
 
-    await waitFor(() => expect(ws.sent.length).toBeGreaterThanOrEqual(3));
+    await waitFor(() => {
+      const sentMessages = readSentMessages(ws);
+      expect(sentMessages.some((item) => item.type === 'file-upload-start')).toBe(true);
+      expect(sentMessages.some((item) => item.type === 'file-upload-chunk')).toBe(true);
+    });
 
     const sentMessages = readSentMessages(ws);
-    const pasteMeta = sentMessages.find((item) => item.type === 'paste-image-start');
+    const uploadStart = sentMessages.find((item) => item.type === 'file-upload-start');
 
-    expect(pasteMeta).toBeTruthy();
-    expect(pasteMeta.payload).toMatchObject({
-      name: 'proof.png',
-      mimeType: 'image/png',
-      byteLength: 4,
-      pasteSequence: '\u0016',
+    expect(uploadStart).toBeTruthy();
+    expect(uploadStart.payload).toMatchObject({
+      fileSize: 4,
+      chunkCount: 1,
+      targetDir: 'zterm-paste-staging',
+      fileName: expect.stringMatching(/^paste-image-\d+-[a-z0-9]+\.bin$/),
+      pasteImage: {
+        name: 'proof.png',
+        mimeType: 'image/png',
+        byteLength: 4,
+        pasteSequence: '\u0016',
+      },
     });
-    expect(sentMessages.some((item) => item.type === 'binary')).toBe(true);
+    expect(sentMessages.some((item) => item.type === 'binary')).toBe(false);
     expect(MockWebSocket.instances).toHaveLength(1);
+
+    const chunkMessage = sentMessages.find((item) => item.type === 'file-upload-chunk');
+    ws.triggerMessage({
+      type: 'file-upload-progress',
+      payload: {
+        requestId: uploadStart!.payload.requestId,
+        chunkIndex: 1,
+        totalChunks: 1,
+      },
+    });
+
+    await waitFor(() => {
+      const currentMessages = readSentMessages(ws);
+      expect(currentMessages.some((item) => item.type === 'file-upload-end')).toBe(true);
+      expect(currentMessages.some((item) => item.type === 'paste-image-from-upload')).toBe(true);
+    });
+
+    const pasteFromUpload = readSentMessages(ws).find(
+      (item) => item.type === 'paste-image-from-upload',
+    );
+    expect(pasteFromUpload?.payload).toEqual({ requestId: uploadStart!.payload.requestId });
+    expect(chunkMessage?.payload).toMatchObject({ chunkIndex: 0, dataBase64: expect.any(String) });
 
     ws.triggerMessage({
       type: 'image-pasted',

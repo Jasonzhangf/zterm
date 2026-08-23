@@ -21,7 +21,26 @@ import {
   type TerminalMuxTargetClientMessage,
   FILE_TRANSFER_WIRE_CHUNK_BYTES,
   FILE_TRANSFER_WIRE_FRAME_MAX_CHARS,
+  getRemoteWindowMediaPlanContract,
 } from './protocol';
+
+describe('remote-window media plan contract', () => {
+  it('defines versioned start-required lane roles for single and composite streams', () => {
+    expect(getRemoteWindowMediaPlanContract('single-focus')).toEqual({
+      id: 'single-focus',
+      version: 1,
+      lanes: [{ role: 'focus', requiredForStart: true }],
+    });
+    expect(getRemoteWindowMediaPlanContract('overview-plus-focus')).toEqual({
+      id: 'overview-plus-focus',
+      version: 1,
+      lanes: [
+        { role: 'focus', requiredForStart: true },
+        { role: 'overview', requiredForStart: true },
+      ],
+    });
+  });
+});
 
 describe('terminal mux protocol contract', () => {
   it('builds the only target-level mux ping envelope', () => {

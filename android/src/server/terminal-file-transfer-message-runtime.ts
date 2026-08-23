@@ -7,6 +7,7 @@ import type {
   FileUploadChunkPayload,
   FileUploadEndPayload,
   FileUploadStartPayload,
+  PasteImageFromUploadPayload,
   PasteImagePayload,
   PasteImageStartPayload,
   RemoteScreenshotRequestPayload,
@@ -23,6 +24,7 @@ export type TerminalFileTransferClientMessage = Extract<
   BridgeClientMessage,
   | { type: 'paste-image-start' }
   | { type: 'paste-image' }
+  | { type: 'paste-image-from-upload' }
   | { type: 'attach-file-start' }
   | { type: 'remote-screenshot-request' }
   | { type: 'file-list-request' }
@@ -107,6 +109,15 @@ export function createTerminalFileTransferMessageRuntime(
           break;
         }
         deps.fileTransferRuntime.handlePasteImage(session, message.payload as PasteImagePayload);
+        break;
+      case 'paste-image-from-upload':
+        if (!requireSession(session, connection, 'paste-image-from-upload')) {
+          break;
+        }
+        deps.fileTransferRuntime.handlePasteImageFromUpload(
+          session,
+          message.payload as PasteImageFromUploadPayload,
+        );
         break;
       case 'file-list-request':
         if (!requireSession(session, connection, 'file-list-request')) {
