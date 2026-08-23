@@ -147,3 +147,23 @@
 - F 本轮继续收敛：daemon 在 peer/capture allocation 前验证 Darwin ABI 与 wrtc peer/session/candidate/video-source/RGBA converter capability；unsupported ABI 或缺 capability 返回 `platform-capability` typed error。preflight telemetry 明确区分已验证的 wrtc/ABI、仅 configured 的 Swift helper，以及必须等待真实 lifecycle 的 permission/capture/sender `pending`，不再用一个布尔值伪装后续媒体成功。权限与 Swift executable 的真实安装版 probe 仍属于 H/live 缺口。
 - D 本轮继续收敛：receiver 从单个共享 track timeout 改为每条 required lane 独立 handle；track attach 只清本 lane，已 attach lane 的迟到 callback 保持 non-terminal。expiry 返回 `remote_window_receiver_lane_timeout`、`failureStage=track-attach`、精确 lane 和 elapsedMs，再由唯一 cleanup owner 关闭 peer/track/timer。
 - B/quality 本轮收敛：quality request/result wire 强制携带 active media plan id/version；client quality owner 只使用 daemon capability status 提供的 accepted plan，capability 尚未到达时不发 transaction。daemon entry 保存启动 plan，plan mismatch 在 sender/capture mutation 前以 `remote_window_stream_quality_media_plan_mismatch` 拒绝，ACK 原样回传 plan identity。
+
+## 2026-08-23 screenshot owner 拆分（计划步骤 owner 拆分）
+
+- 提交：`c2b3af5e refactor(remote-window): split screenshot owner into useRemoteWindowScreenshot`
+- 范围：
+  - 新增 `android/src/components/terminal/useRemoteWindowScreenshot.ts`（113 行）：状态机、capturing/saved/failed、feedback projection、activeSessionId/requestScreenshot guard
+  - 新增 `android/src/components/terminal/useRemoteWindowScreenshot.test.tsx`（151 行）：6 tests 覆盖 idle、capturing→saved、in-flight capturing feedback、rejection、无通道、reset
+  - `RemoteWindowOverlayController.tsx`：`setScreenshotStatus({phase:'idle'})` 3 处 → `screenshotController.reset()`；`handleRemoteWindowScreenshot` 从 30 行降到 3 行只委托 `capture(state.target)`
+  - `android/docs/module-registry.json`：`useRemoteWindowScreenshot.{ts,test.tsx}` 列入 `client.remote_window_overlay` 的 `owned_paths`
+- 闭环验证：
+  - `pnpm --dir android run type-check` PASS
+  - `pnpm --dir android run test:feature-registry -- --reporter dot` 13 files / 102 tests PASS
+  - `pnpm --dir android exec vitest run --no-file-parallelism <remote-window 13 files>` 100 passed / 4 skipped
+  - `pnpm --dir android run test:remote-window-webrtc-loopback` ok:true (single-focus 1 lane × 3 frames / overview-plus-focus 2 lanes × 3 frames, ICE order preserved)
+  - `pnpm exec vitest run packages/shared/src/connection/protocol.test.ts` 11 tests PASS
+- 剩余：
+  - 未改 wire/protocol/runtime/media — APK 2706 行为等价，不需要重建 APK
+  - plan 阶段 4-7（Media/Focus/Input/Gesture/Projection owner；touch 收敛已对齐；layout planner；screenshot loop 物理清除；WebRTC performance）未在本轮做
+  - `session-context-transfer-runtime.ts` 中 `ensureSessionReadyForTransfer` unused import 是他人 dirty，未触碰
+  - 不在 `RemoteWindowOverlay.tsx` 的剩余类型同步：注入 `useRemoteWindowScreenshot` 暴露的 `feedback` 用于未来的 toolbar toast（当前仅控制器内部消费）

@@ -14,7 +14,6 @@ import { sendBoundedFileUploadChunks } from '../lib/file-transfer-throughput-run
 import type { BridgeTransportSocket } from '../lib/traversal/types';
 import type { ClientDaemonConnection } from '../lib/client-daemon-connection';
 import {
-  ensureSessionReadyForTransfer,
   sendInputThroughSessionTransport,
 } from './session-context-input-runtime';
 import type { FileTransferMessage } from '../lib/file-transfer-message-runtime';
