@@ -164,6 +164,7 @@ import {
   useRemoteWindowThumbnails,
   type RemoteWindowScreenshotSaveResult,
 } from './useRemoteWindowThumbnails';
+import { useRemoteWindowScreenshot } from './useRemoteWindowScreenshot';
 export interface RemoteWindowOverlayProps {
   activeSessionId?: string | null;
   appForegroundActive?: boolean;
@@ -348,7 +349,11 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   const [itermPaneTargetsExpanded, setItermPaneTargetsExpanded] = useState(false);
   const [appSwitchOpen, setAppSwitchOpen] = useState(false);
   const [streamStatusOpen, setStreamStatusOpen] = useState(false);
-  const [screenshotStatus, setScreenshotStatus] = useState<RemoteWindowScreenshotStatus>({ phase: 'idle' });
+  const screenshotController = useRemoteWindowScreenshot({
+    activeSessionId,
+    requestScreenshot,
+  });
+  const screenshotStatus: RemoteWindowScreenshotStatus = screenshotController.status;
   const [entryOffset, setEntryOffsetState] = useState<FloatingEntryPosition>(() => readStoredEntryPosition());
   const floatingOffsetRef = useRef(floatingOffset);
   const floatingOverlayWidthPxRef = useRef(floatingOverlayWidthPx);
@@ -844,7 +849,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     surfaceGestureRef.current = null;
     surfacePinchStartRef.current = null;
     bitratePresetTouchedRef.current = false;
-    setScreenshotStatus({ phase: 'idle' });
+    screenshotController.reset();
     activeHandoffRef.current = null;
     handoffVideoVisibilityRef.current = null;
     streamRequestEpochRef.current += 1;
@@ -1394,7 +1399,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       setFloatingOverlayWidthPx(null);
       resetQualityApplyState();
       bitratePresetTouchedRef.current = false;
-      setScreenshotStatus({ phase: 'idle' });
+      screenshotController.reset();
       resetFullscreenViewport();
       setFullscreenDisplayMode(initialFullscreenDisplayMode);
       setReceiverMediaStream(null);
@@ -1548,7 +1553,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
           lastDefaultFullscreenFillKeyRef.current = null;
           resetQualityApplyState();
           bitratePresetTouchedRef.current = false;
-          setScreenshotStatus({ phase: 'idle' });
+          screenshotController.reset();
           resetFullscreenViewport();
           setFullscreenDisplayMode(initialFullscreenDisplayMode);
           setBitratePreset(selectedBitratePreset);
@@ -1655,28 +1660,8 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     if (state.phase !== 'targetLocked') {
       return;
     }
-    const targetSessionId = activeSessionId?.trim() || '';
-    if (!targetSessionId || !requestScreenshot) {
-      setScreenshotStatus({ phase: 'failed', message: '当前没有可用的截图通道' });
-      return;
-    }
-    const target = state.target;
-    setScreenshotStatus({ phase: 'capturing' });
-    void requestScreenshot(targetSessionId, target, { persist: true })
-      .then((result) => {
-        setScreenshotStatus({
-          phase: 'saved',
-          fileName: result.fileName,
-          savedPath: result.savedPath,
-        });
-      })
-      .catch((error) => {
-        setScreenshotStatus({
-          phase: 'failed',
-          message: error instanceof Error ? error.message : String(error),
-        });
-      });
-  }, [activeSessionId, requestScreenshot, state]);
+    void screenshotController.capture(state.target);
+  }, [screenshotController, state]);
 
   const resolveSurfaceInputGeometry = useCallback((): RemoteWindowTouchSurfaceGeometry | null => {
     if (state.phase !== 'targetLocked') {

@@ -2405,7 +2405,9 @@
         "src/components/terminal/useRemoteWindowFocusSwitch.ts",
         "src/components/terminal/useRemoteWindowFocusSwitch.test.tsx",
         "src/components/terminal/useRemoteWindowThumbnails.ts",
-        "src/components/terminal/useRemoteWindowThumbnails.test.tsx"
+        "src/components/terminal/useRemoteWindowThumbnails.test.tsx",
+        "src/components/terminal/useRemoteWindowScreenshot.ts",
+        "src/components/terminal/useRemoteWindowScreenshot.test.tsx"
       ]
     },
     {
