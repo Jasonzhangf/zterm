@@ -65,3 +65,10 @@ android/tmp-daemon-probe.cjs
 # Build artifacts
 android/release-dist/
 update-dist/
+
+# Local AppSDK/worktree probes; never release or stage generated scratch trees.
+/.appsdk-fresh-test-013/
+/.rwplanner-worktree
+/.worktree-appsdk-013-debug-2/
+/.worktree-appsdk-013-debug-3/
+/.worktree-appsdk-013-v4/
