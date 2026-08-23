@@ -408,3 +408,157 @@ multi-window 60s:
 8. installed daemon/APK 与验证源码一致。
 9. native process、peer、capture、temporary window、test session 无遗留。
 10. DSH Review 在所有前置验证完成后通过；若 DSH 明确 unavailable，按项目规则执行接管 review。
+
+---
+
+# 2026-08-22 计划校准：关键收敛与首批执行批次
+
+本节根据 `/Users/fanzhang/Downloads/remote-window-stream-remediation-plan.md` 追加。它是对本文件既有计划的实施边界校准，不覆盖前文历史记录。发生冲突时，以下已按现有 remote-window decision 与 test design 重新收敛的规则优先；仍需变更产品语义的部分，先完成对应 ADR amendment，再改代码。
+
+## A. 已锁定的关键收敛
+
+### A.1 路由相关 ICE 不改成无条件 TURN
+
+- `rtc-direct` 继续使用 direct/STUN。
+- `rtc-relay` 继续使用 TURN。
+- WS/Tailscale 路径不擅自添加 relay ICE。
+- 本轮修复 candidate 时序丢失、candidate 队列和阶段诊断；不以无条件 TURN 掩盖 signaling 或 route 真相。
+- route、candidate、negotiation、stage、diagnostic 等控制语义只能进入 typed side-channel / error chain，不得混入业务媒体 payload 或 `metadata`。
+
+### A.2 保留 ScreenCaptureKit `queueDepth=3`
+
+性能阶段不得直接把队列降为 1。现有测试设计已指出，连续 app-window capture 可能在第一帧后停滞；只有新的连续采集证据证明安全时，才允许另立变更并通过 capability gate。
+
+### A.3 保留 Android 后台停止串流契约
+
+Android 进入后台仍显式 stop/close 视频 PeerConnection。本轮不引入后台隐式保活，不把后台 projection、transport 或 session 复用误写成视频生命周期保活。
+
+### A.4 单窗口与 app-group 显式分型
+
+```text
+single-window  -> focus-only
+app-group      -> overview-focus
+```
+
+Client 不得再通过 `videoTarget.kind === app-window` 猜测 overview 是否存在。启动等待、track 数量、lane role、timeout、首帧完成条件全部读取同一个显式 `RemoteWindowMediaPlan`。
+
+app-group 使用一个 PeerConnection，最多两条视频 lane：overview 常驻，focus 单独切换；禁止为每个 sibling 启动独立 stream，禁止以 track 数量猜测媒体拓扑。
+
+### A.5 layout、projection、canvas pipeline 分层
+
+- daemon 继续作为 canvas layout 唯一真源；Android 只消费 layout metadata，不重算 macOS source/canvas 坐标。
+- 质量更新继续采用有 ACK、有 revision、可整体回滚的 stream-group transaction。
+- 先恢复现有 single-target focus-only 启动，再实现 app-group layout/compositor；不得在串流不可用时同时重写画布、手势和原生编码管线。
+- canvas decision 要求 layout、compositor、encoder、runtime facade 分层；禁止 screenshot loop、per-window stream 和静默 full-display capture 兜底。
+
+### A.6 Touch 先补 ADR amendment
+
+现有 truth 与 test design 对 Direct Touch 单指移动语义冲突，不能继续靠代码双路径兼容。Phase 0 必须新增日期化 ADR amendment，推荐目标如下：
+
+- Direct Touch：绝对触点、单击、长按右键、长按后拖拽、双指滚动、pinch 本地缩放。
+- Trackpad：单指相对移动、轻点点击、双击拖拽、双指滚动、双指轻点右键。
+- 若保留“单指拖动即滚动”，单独命名为 `Content Scroll`，不得混入 Direct Touch。
+- 所有长按、双击、第二指升级、scroll/pinch 竞争进入一个 `Gesture Arena`；React Controller 不再持有第二套 timer 或判定逻辑。
+
+### A.7 多窗口采用双层布局
+
+- daemon overview canvas layout：紧凑编码所有 source window，服务 overview lane。
+- Android presentation layout：按已批准设计展示“预览 rail + 大 focus”，只做本地投影。
+
+Layout Planner V2 的评分项固定为：
+
+```text
+unusedAreaPenalty
++ aspectScalePenalty
++ movementFromPreviousLayout
++ minTileViolation
++ slotReorderPenalty
+```
+
+加入 generation hysteresis，避免 catalog 刷新或 focus 改变造成所有窗口频繁跳位。layout、projection、input generation、stream-storm prevention、Mac pixel oracle 必须形成独立门禁。
+
+## B. 第一执行批次：只做八项
+
+首批工作不得扩张到 owner 大重构、canvas 全量改造或媒体性能重写，只完成以下八项：
+
+1. **A：文档语义收敛**
+   - 增加 Touch ADR amendment。
+   - 将 `focus-only`、`overview-focus`、`preview`、`overview`、`focus` 角色写入 decision/test design 交叉引用。
+   - 在 resource/function/mainline/verification map 中确认 remote-window owner 与允许边；缺 map 先补 map。
+
+2. **B：media plan 显式化**
+   - 为 single-window 和 app-group 建立显式 plan、plan id/version、lane role、required-for-start。
+   - 启动、status、receiver binding、quality transaction 只消费同一 plan。
+   - plan 与实际 SDP m-line/sender/track 不一致时返回 typed error，不进入 timeout 等待。
+
+3. **C：single-window focus-only 修复**
+   - 单 app-window 不再等待不存在的 overview。
+   - focus 到达不能清除错误 lane 的 overview timeout；timeout 按 plan 独立计算。
+   - 单窗口必须能走现有 direct/Tailscale/Relay route 的真实启动链路，不能用旧视频、截图或 terminal surface 冒充成功。
+
+4. **D：per-lane track / first-frame timeout**
+   - 分离 `captureStarted`、`answerApplied`、`trackAttached`、`decodedFirstFrame`、`playing`。
+   - 每条 required lane 单独记录 timeout、stage、error code、elapsed time。
+   - 覆盖 success、failure、non-terminal/still-running、already-terminal 正反测试。
+
+5. **E：early ICE candidate queue**
+   - candidate 早于 stream registration 到达时，按 stream/lane identity 暂存。
+   - registration 完成后按原顺序 flush；未知 identity、重复、冲突、关闭后 candidate 显式报错。
+   - 禁止静默丢弃，禁止把 candidate 控制状态塞入业务 payload。
+
+6. **F：capability 与启动阶段 telemetry**
+   - 对 `@roamhq/wrtc`、Swift helper、权限、ABI、capture、sender negotiation 做统一 preflight。
+   - telemetry 至少覆盖 route、capability result、capture started、answer applied、track attached、decoded first frame、playing、cleanup。
+   - capability 缺失显式返回，不伪造媒体成功。
+
+7. **G：真实 PeerConnection loopback**
+   - 用真实 PeerConnection 验证 plan、SDP、ICE、track role、首帧、close/cleanup。
+   - 不以纯函数、mock peer 或静态日志替代 loopback evidence。
+
+8. **H：installed Android 单窗口首帧 proof**
+   - 安装版 daemon + 安装版 Android APK + 真实 Mac 单窗口。
+   - 证明 video element 收到连续首帧并进入 playing；保留 APK/daemon identity、route、stage telemetry、首帧和 cleanup 证据。
+   - 无 online ADB 或运行环境时，明确记录缺口，不宣称完成。
+
+## C. 首批完成门槛
+
+第一执行批次完成前，禁止进入 Phase 2 owner 拆分、Phase 3 Touch 全量改造、Phase 4 Layout Planner V2、Phase 5 screenshot loop 清除或 Phase 6 性能优化。必须同时满足：
+
+- single-window `focus-only` 真实启动；app-group `overview-focus` 计划不被破坏。
+- early ICE candidate 无静默丢失，顺序和 identity 有证据。
+- 各启动阶段可区分，失败返回 typed stage/code。
+- loopback 与 installed Android 首帧 proof 均通过。
+- queueDepth=3、route-derived ICE、后台 stop/close 契约均未被改写。
+- 代码/测试变更完成模块边界自检、定向测试、构建、安装/重启和真实样本验证后，才允许 DSH Review；代码变更后旧证据全部失效并需重跑。
+
+## D. 后续阶段顺序
+
+```text
+Phase 0 文档/ADR/红测
+  -> 第一执行批次 A-H
+  -> owner 与 contract 拆分
+  -> Gesture Arena 与输入 QoS
+  -> daemon layout/compositor 与 Android projection
+  -> screenshot loop 物理移除
+  -> WebRTC quality/capture 性能
+  -> 安装版、多路由、真机与 cleanup closeout
+```
+
+任何阶段失败回到唯一 owner 修复；禁止通过增加 timeout、吞 error、伪造 track、静默降级或保留第二套语义路径制造绿灯。
+
+## E. 2026-08-22 首批实现证据与剩余缺口
+
+### 已完成
+
+- `single-focus` 与 `overview-plus-focus` 已进入 request/started wire contract；daemon 按 manifest 推导同一 plan，receiver 按同一 plan 建立 transceiver 并拒绝 returned-plan mismatch。
+- 早于 answer 的 remote ICE 由 receiver lifecycle owner 暂存，answer 应用后按到达顺序 flush。
+- composite receiver 只在 focus 和 overview 都 attach 后清除 track timeout 并 resolve；新增正测锁住“focus 先到不清 overview timeout”。
+- DSH 第一轮 FAIL 后已修复：composite timeout 提前清除、`session-context` 精确断言缺 `mediaPlan`、版本 bump 缺 OTA 证据。
+- 受影响验证全绿：完整 remote-window 映射测试 23 files / 216 tests，shared protocol 10 tests，architecture/function registry 102 tests，Android canonical build prebuild gate、typecheck、Vite production build、Gradle assembleDebug、rollback variant 全部成功。
+- Android 升级包 `0.1.3.2700` / versionCode `1100027000` 已生成并通过 update bundle 校验；normal APK SHA-256 为 `2e1f7300b758b368054bab59538e36dd59c03ef3d63d6bdaba554d99104c36fa`。本地 daemon 和 Tailscale `http://100.66.1.82:3333/updates/latest.json` 均返回该版本和 hash，APK HEAD 返回 200。
+
+### 未闭环
+
+- 当前 `adb devices` 无在线设备，无法执行覆盖安装、安装版 Android 单窗口首帧 proof、连续帧观察和 cleanup proof。
+- 本轮未发布 public Relay update channel；这是外部状态变更，需 Jason 明确授权后才能上传生产 Relay。
+- 因此 G/H 两项仍为显式缺口，不能宣称首批 A-H 全部完成或 DSH 最终 PASS。
