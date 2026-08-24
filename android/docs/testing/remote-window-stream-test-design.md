@@ -168,6 +168,7 @@ Current executable gates:
 
 12. Daemon stream owner
    - Capture starts only from the selected target manifest and rejects missing targets, missing/invalid crop rects, permission failures, and media setup failures explicitly.
+   - The installed daemon permission gate is preflight-only: both `--permission-probe` and `remote-window-capture` evaluate `CGPreflightScreenCaptureAccess()` without calling `CGRequestScreenCaptureAccess()`, sleeping, polling, retrying, or changing the TCC executable identity. Missing permission exits immediately with code 5 before capture allocation.
    - Capture frames must originate from ScreenCaptureKit/window capture and be fed into the WebRTC video sender; unit tests may inject a fake frame source only to lock lifecycle and cleanup.
    - A capture frame that arrives before `setLocalDescription` is not counted as sent and must not emit `streaming`; the daemon stores only the latest pending frame, flushes it once after the sender local description is ready, and drops it on stop/cleanup.
    - Continuous video refresh is a required live gate, not an optional quality check: the AppKit live probe must animate the selected app-window and assert `stopped.framesSent >= 3` on raw WebSocket, mux-channel, and Tailscale mux paths. A one-frame `trackSeen=true` / `framesSent=1` result is a red gate for “connected but frozen video”.

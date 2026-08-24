@@ -2671,3 +2671,10 @@ Tags: #mempalace #source-only-search #generated-artifacts #zterm
 - Fresh simulator proof on installed Android `0.1.3.2719`: a 100000-line refresh advanced the visible absolute first row by 100000; 100 CDP samples had 0 empty-row, gap, or discontinuity samples. Screenshot SHA `04c86d1d3caca7dd2f38674bfa6c9d233c0c00d8b725afa1322df7314f38cd1d` has terminal-region non-black fraction `0.961536`.
 - Reusable rule: permission preflight, runtime capability, and installed service entry must resolve to one installed executable identity. Never introduce a helper app or environment-variable alternate path; missing permission/capability must stop with a typed error.
 Tags: #daemon-permission #screen-recording #single-tcc-identity #no-fallback #emulator-large-refresh
+
+## 2026-08-24 Screen Recording preflight is read-only
+
+- This entry supersedes the same-day statement that the probe may call `CGRequestScreenCaptureAccess()` and poll. The installed `zterm-daemon` permission check may call `CGPreflightScreenCaptureAccess()` once only. It must never request, wait, poll, retry, reset TCC, or switch executables.
+- Missing Screen Recording permission is an allowed explicit failure: `--permission-probe` and `remote-window-capture` exit 5 before capture allocation. Permission must be granted explicitly in macOS System Settings; the daemon does not initiate the grant flow.
+- Verified installed binary SHA-256 `25dbfb2a6ce4ad8b51916f3daaed1a4f72ff11155a031b339ab349ee12c21829` imports `_CGPreflightScreenCaptureAccess` and has no `_CGRequestScreenCaptureAccess`; probe completes in 459 ms with the currently granted permission. Emulator `0.1.3.2719` 100000-line refresh retained 47 continuous rows in all 100 samples with zero empty/gap/discontinuity samples.
+Tags: #daemon-permission #preflight-only #no-request #no-poll #no-fallback

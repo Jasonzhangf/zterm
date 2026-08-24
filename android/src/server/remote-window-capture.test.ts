@@ -102,17 +102,15 @@ describe('remote-window capture config', () => {
 
   it('fails before capture startup when Screen Recording permission is not granted', () => {
     expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('CGPreflightScreenCaptureAccess()');
-    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('CGRequestScreenCaptureAccess()');
-    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('permissionDeadline');
     expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('Screen Recording permission is required');
     expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('exit(5)');
   });
 
-  it('waits for the async Screen Recording prompt instead of exiting immediately', () => {
-    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('while Date() < permissionDeadline');
-    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('Thread.sleep(forTimeInterval: 0.25)');
-    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT.indexOf('while Date() < permissionDeadline'))
-      .toBeLessThan(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT.indexOf('let sampleQueue'));
+  it('fails immediately without requesting, polling, or retrying Screen Recording permission', () => {
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).not.toContain('CGRequestScreenCaptureAccess()');
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).not.toContain('permissionDeadline');
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).not.toContain('Thread.sleep');
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).not.toMatch(/while\s+Date\(\)/u);
   });
 
   it('requires the installed capture binary instead of falling back to swift -e', async () => {

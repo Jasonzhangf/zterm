@@ -174,3 +174,10 @@
 - Installed verification: launchd runner contains only `ZTERM_DAEMON_NATIVE`, permission probe exits 0, daemon health is ready. Focused tests 110/110, type-check, feature registry 102/102, release artifact inspection, and isolated typed-failure probe passed.
 - Emulator-5554 / installed `0.1.3.2719`: fresh 100000-line refresh, 100 timed CDP samples, 0 empty rows, 0 gaps, 0 discontinuities, visible absolute range advanced by 100000. Screenshot `/tmp/zterm-emulator-large-refresh-rerun.png` SHA `04c86d1d3caca7dd2f38674bfa6c9d233c0c00d8b725afa1322df7314f38cd1d`, terminal-region non-black fraction `0.961536`.
 - Next: AGY Review only; do not stage unrelated dirty files.
+
+## 2026-08-24 permission fallback correction
+
+- Root cause: canonical ScreenCaptureKit Swift called `CGRequestScreenCaptureAccess()` and polled for 12 seconds after preflight denial; tests explicitly required that fallback.
+- Corrected owner: `hasScreenCapturePermission()` now performs one `CGPreflightScreenCaptureAccess()` only. Missing permission exits 5 immediately; no request, wait, retry, TCC reset, alternate executable, screenshot, or runtime compilation path exists.
+- Evidence before review: red test reproduced the request path; focused capture 8/8, daemon/service/screenshot 30/30, stream/message/capture 122/122, typecheck, feature registry 102/102, Swift compile, installed daemon SHA `25dbfb2a...`, exact launchd restart health ready, and emulator 100000-line refresh with 100/100 non-empty continuous samples.
+- Post-restart runtime evidence: staged `server.cjs` SHA `299ce64e...`, installed native daemon SHA `25dbfb2a...`; the bundle has no request/poll/screenshot/runtime-compile markers, and the binary imports preflight but not request. Emulator 100000-line refresh after restart produced 100/100 non-empty continuous CDP samples. AGY Review r4 passed with zero findings; MemoryPalace reindex remains blocked by an unrelated corpus-worker hang.

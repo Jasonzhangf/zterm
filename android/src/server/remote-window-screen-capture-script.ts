@@ -63,19 +63,7 @@ func stderrLine(_ message: String) {
 }
 
 func hasScreenCapturePermission() -> Bool {
-    var granted = CGPreflightScreenCaptureAccess()
-    if !granted {
-        _ = CGRequestScreenCaptureAccess()
-        let permissionDeadline = Date().addingTimeInterval(12)
-        while Date() < permissionDeadline {
-            Thread.sleep(forTimeInterval: 0.25)
-            granted = CGPreflightScreenCaptureAccess()
-            if granted {
-                break
-            }
-        }
-    }
-    return granted
+    CGPreflightScreenCaptureAccess()
 }
 
 func appendUInt32(_ value: UInt32, to data: inout Data) {

@@ -165,7 +165,7 @@ The daemon must fail explicitly for:
 - WebRTC sender failure
 - input return rejected by focus policy
 
-No fallback may silently downgrade this feature to screenshot, terminal buffer render, stale cached image, another TCC subject, or a runtime-generated capture process. Install-time permission probing and ScreenCaptureKit startup both use the one installed `zterm-daemon` binary: `--permission-probe` before service bootstrap, and the `remote-window-capture` subcommand as the runtime child.
+No fallback may silently downgrade this feature to screenshot, terminal buffer render, stale cached image, another TCC subject, or a runtime-generated capture process. Install-time permission probing and ScreenCaptureKit startup both use the one installed `zterm-daemon` binary: `--permission-probe` before service bootstrap, and the `remote-window-capture` subcommand as the runtime child. Permission probing is read-only: it may call `CGPreflightScreenCaptureAccess()` once, but must not call `CGRequestScreenCaptureAccess()`, wait, poll, retry, or switch executables. Missing permission exits immediately and leaves the caller with an explicit failure.
 
 ## Implementation Status
 
