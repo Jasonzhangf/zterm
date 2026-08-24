@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 import './index.css';
 
-const IS_DEV = typeof __APP_VERSION__ !== 'undefined' && (typeof process !== 'undefined' && (process as { env?: { NODE_ENV?: string } }).env?.NODE_ENV !== 'production');
+const IS_DEV = (import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV === true;
 
 class RootErrorBoundary extends React.Component<
   { children: React.ReactNode },

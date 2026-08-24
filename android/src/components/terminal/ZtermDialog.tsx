@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 export type ZtermDialogTone = 'info' | 'success' | 'warning' | 'error';
 
@@ -38,12 +38,43 @@ const toneBorder: Record<ZtermDialogTone, string> = {
   error: 'var(--zterm-dialog-error-border, rgba(255,126,126,0.34))',
 };
 
-const toneGlyph: Record<ZtermDialogTone, string> = {
-  info: 'i',
-  success: '✓',
-  warning: '!',
-  error: '×',
-};
+function ToneGlyph({ tone }: { tone: ZtermDialogTone }) {
+  const paths: Record<ZtermDialogTone, ReactNode> = {
+    info: (
+      <>
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 11v6" />
+        <path d="M12 7.5h.01" />
+      </>
+    ),
+    success: (
+      <>
+        <circle cx="12" cy="12" r="9" />
+        <path d="m8 12.5 2.5 2.5L16 9.5" />
+      </>
+    ),
+    warning: (
+      <>
+        <path d="m10.28 3.86-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.72-3.14l-8-14a2 2 0 0 0-3.44 0Z" />
+        <path d="M12 9v4" />
+        <path d="M12 17h.01" />
+      </>
+    ),
+    error: (
+      <>
+        <circle cx="12" cy="12" r="9" />
+        <path d="m15 9-6 6" />
+        <path d="m9 9 6 6" />
+      </>
+    ),
+  };
+
+  return (
+    <svg aria-hidden="true" fill="none" height="20" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" width="20">
+      {paths[tone]}
+    </svg>
+  );
+}
 
 export function ZtermDialog({
   open,
@@ -59,6 +90,11 @@ export function ZtermDialog({
   onCancel,
   onConfirm,
 }: ZtermDialogProps) {
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<Element | null>(null);
+  const [rendered, setRendered] = useState(open);
+  const [closing, setClosing] = useState(false);
+
   useEffect(() => {
     if (!open || !autoDismissMs || autoDismissMs <= 0) {
       return;
@@ -69,12 +105,92 @@ export function ZtermDialog({
     return () => window.clearTimeout(handle);
   }, [autoDismissMs, onConfirm, open]);
 
-  if (!open) {
+  useEffect(() => {
+    if (open) {
+      triggerRef.current = document.activeElement;
+      setClosing(false);
+      setRendered(true);
+      return;
+    }
+    if (!rendered) {
+      return;
+    }
+    setClosing(true);
+    const handle = window.setTimeout(() => {
+      setRendered(false);
+      setClosing(false);
+    }, 150);
+    return () => window.clearTimeout(handle);
+  }, [open, rendered]);
+
+  useEffect(() => {
+    if (!open || !rendered) {
+      return;
+    }
+    panelRef.current?.focus({ preventScroll: true });
+    const previousTrigger = triggerRef.current;
+    return () => {
+      if (previousTrigger instanceof HTMLElement) {
+        previousTrigger.focus({ preventScroll: true });
+      }
+    };
+  }, [open, rendered]);
+
+  useEffect(() => {
+    if (!open || !rendered) {
+      return;
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!busy) {
+          onCancel?.();
+        }
+        return;
+      }
+      if (event.key !== 'Tab') {
+        return;
+      }
+      const panel = panelRef.current;
+      if (!panel) {
+        return;
+      }
+      const focusable = Array.from(panel.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href]',
+      ));
+      if (focusable.length === 0) {
+        event.preventDefault();
+        panel.focus();
+        return;
+      }
+      const first = focusable[0]!;
+      const last = focusable[focusable.length - 1]!;
+      const active = document.activeElement;
+      if (event.shiftKey && (active === first || active === panel)) {
+        event.preventDefault();
+        last.focus();
+        return;
+      }
+      if (!event.shiftKey && (active === panel || active === first)) {
+        event.preventDefault();
+        first.focus();
+        return;
+      }
+      if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown, true);
+    return () => document.removeEventListener('keydown', handleKeyDown, true);
+  }, [busy, onCancel, open, rendered]);
+
+  if (!rendered) {
     return null;
   }
 
   const accent = toneAccent[tone];
-  const glyph = toneGlyph[tone];
   const handleConfirm = () => {
     if (busy) {
       return;
@@ -89,9 +205,7 @@ export function ZtermDialog({
   };
 
   return (
-    <>
-      <style>{`@keyframes ztermDialogFade{from{opacity:0}to{opacity:1}}@keyframes ztermDialogPop{from{transform:scale(.94);opacity:.4}to{transform:scale(1);opacity:1}}@keyframes ztermDialogSpin{to{transform:rotate(360deg)}}`}</style>
-      <div
+    <div
         data-testid="zterm-dialog"
         data-tone={tone}
         role="presentation"
@@ -104,9 +218,9 @@ export function ZtermDialog({
           justifyContent: 'center',
           padding: '18px',
           backgroundColor: 'var(--zterm-sheet-overlay, rgba(8, 12, 20, 0.62))',
-          backdropFilter: 'blur(6px)',
-          WebkitBackdropFilter: 'blur(6px)',
-          animation: 'ztermDialogFade 160ms ease-out',
+          animation: closing
+            ? 'ztermDialogExit 150ms ease-in forwards'
+            : 'ztermDialogFade 160ms ease-out',
         }}
         onPointerDown={(event) => {
           if (event.target === event.currentTarget) {
@@ -120,6 +234,8 @@ export function ZtermDialog({
           aria-modal="true"
           aria-label={title}
           data-testid="zterm-dialog-panel"
+          ref={panelRef}
+          tabIndex={-1}
           style={{
             width: 'min(100%, 360px)',
             borderRadius: '18px',
@@ -129,7 +245,9 @@ export function ZtermDialog({
             color: 'var(--zterm-panel-text, #f5f7fb)',
             border: '1px solid var(--zterm-panel-border, rgba(255,255,255,0.14))',
             boxShadow: '0 24px 60px rgba(0,0,0,0.44)',
-            animation: 'ztermDialogPop 220ms cubic-bezier(.2,.9,.3,1.2)',
+            animation: closing
+              ? 'ztermDialogPanelExit 150ms ease-in forwards'
+              : 'ztermDialogPop 220ms cubic-bezier(0.22, 1, 0.36, 1)',
           }}
         >
           <div
@@ -169,7 +287,7 @@ export function ZtermDialog({
                     animation: 'ztermDialogSpin 700ms linear infinite',
                   }}
                 />
-              ) : glyph}
+              ) : <ToneGlyph tone={tone} />}
             </div>
           <div
             style={{
@@ -270,6 +388,5 @@ export function ZtermDialog({
         </div>
       </div>
     </div>
-    </>
   );
 }

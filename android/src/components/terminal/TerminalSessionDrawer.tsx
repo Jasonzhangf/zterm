@@ -93,6 +93,7 @@ function TerminalSessionDrawerComponent({
 }: TerminalSessionDrawerProps) {
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
   const longPressTimerRef = useRef<number | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const suppressNextClickRef = useRef(false);
   const selectionPressRef = useRef<{ sessionId: string; x: number; y: number } | null>(null);
   const closeTouchHandledRef = useRef<string | null>(null);
@@ -108,6 +109,12 @@ function TerminalSessionDrawerComponent({
     cwd: string;
     terminalBackend: 'tmux' | 'herdr';
   } | null>(null);
+
+  useEffect(() => {
+    if (open) {
+      closeButtonRef.current?.focus({ preventScroll: true });
+    }
+  }, [open]);
 
   const buildDefaultSessionName = () => {
     const stamp = new Date()
@@ -261,13 +268,21 @@ function TerminalSessionDrawerComponent({
 
   return (
     <>
-      {open ? (
-        <button
-          type="button"
-          aria-label="关闭 session 抽屉"
-          data-testid="terminal-session-drawer-overlay"
-          onClick={onClose}
-          style={{
+      <button
+        type="button"
+        aria-label="关闭 session 抽屉"
+        aria-hidden={!open}
+        inert={!open}
+        data-testid="terminal-session-drawer-overlay"
+        disabled={!open}
+        tabIndex={open ? 0 : -1}
+        onClick={onClose}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            onClose();
+          }
+        }}
+        style={{
             position: 'absolute',
             inset: 0,
             border: 'none',
@@ -275,14 +290,18 @@ function TerminalSessionDrawerComponent({
             zIndex: 149,
             padding: 0,
             margin: 0,
-          }}
-        />
-      ) : null}
+            opacity: open ? 1 : 0,
+            pointerEvents: open ? 'auto' : 'none',
+            transition: 'opacity 150ms ease',
+        }}
+      />
       <aside
         aria-hidden={!open}
+        inert={!open}
         className="zterm-neo-drawer"
         data-terminal-shell-skin={terminalShellSkin}
         data-testid="terminal-session-drawer"
+        data-state={open ? 'open' : 'closed'}
         onTouchStartCapture={(event) => {
           onDebugAddEvent?.(`cap:start:${describeEventTarget(event.target)}`);
         }}
@@ -315,6 +334,11 @@ function TerminalSessionDrawerComponent({
             return;
           }
           onClose();
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            onClose();
+          }
         }}
         style={{
           position: 'absolute',
@@ -364,10 +388,11 @@ function TerminalSessionDrawerComponent({
               type="button"
               aria-label="关闭 session 抽屉"
               data-testid="terminal-session-drawer-close"
+              ref={closeButtonRef}
               onClick={onClose}
               style={{
-                width: '28px',
-                height: '28px',
+                width: '44px',
+                height: '44px',
                 padding: 0,
                 borderRadius: '8px',
                 border: '1px solid var(--zterm-panel-border)',
@@ -775,8 +800,8 @@ function TerminalSessionDrawerComponent({
                     activateCloseSession(session.id);
                   }}
                   style={{
-                    width: '24px',
-                    height: '24px',
+                    width: '44px',
+                    height: '44px',
                     borderRadius: '999px',
                     display: 'flex',
                     alignItems: 'center',

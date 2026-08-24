@@ -514,6 +514,9 @@ export function AppContent({
     onForegroundResume: handleForegroundResumeAfterControlRefresh,
     recordBackgroundEnteredAt,
     networkIdentity,
+    foregroundResamplesNetworkIdentity: !(
+      Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android'
+    ),
   });
 
   const markRuntimeSessionEntered = useCallback((sessionId: string) => {
@@ -631,6 +634,7 @@ export function AppContent({
     handleOpenGroupSession,
     handleRenameRemoteSession,
     handleCloseGroupSession,
+    handleRefreshDrawerHostSessions,
     handleSaveServerGroupSelection,
     handleSelectCleanSession,
     handleRemoteSessionsRefreshed,
@@ -894,6 +898,7 @@ export function AppContent({
             onOpenDrawerRemoteSession={handleOpenGroupSession}
             onRenameRemoteSession={handleRenameRemoteSession}
             onCloseDrawerRemoteSession={handleCloseGroupSession}
+            onRefreshRemoteSessions={handleRefreshDrawerHostSessions}
             onAuditOpenTabsAgainstRemoteSessions={auditOpenTabsAgainstRemoteSessions}
             relayDevices={relayDevices}
             serverIdentityAliasInputs={homeSavedConnections}
@@ -1182,6 +1187,8 @@ export default function App() {
   const pluginHostRef = useRef<PluginHost | null>(null);
   const controlCenterRef = useRef<ClientControlCenter | null>(null);
   const pluginStartRequestedRef = useRef(false);
+  const pluginRuntimeOwnersRef = useRef(0);
+  const pluginDisposeQueuedRef = useRef(false);
   const [pluginRuntimeReady, setPluginRuntimeReady] = useState(false);
   const [pluginRuntimeError, setPluginRuntimeError] = useState<Error | null>(null);
   if (
@@ -1195,6 +1202,7 @@ export default function App() {
     runtimeRoot.bind({ portId: 'plugin-host', value: nextPluginHost });
     runtimeRoot.bind({ portId: 'control-center', value: nextControlCenter });
     runtimeRoot.require(['plugin-host', 'control-center']);
+    pluginStartRequestedRef.current = false;
     const pluginHost = runtimeRoot.resolve<PluginHost>('plugin-host');
     const controlCenter = runtimeRoot.resolve<ClientControlCenter>('control-center');
     controlCenter.register(
@@ -1207,28 +1215,44 @@ export default function App() {
   }
   const pluginHost = pluginHostRef.current;
   const controlCenter = controlCenterRef.current;
-  useEffect(() => () => {
-    if (!controlCenter) {
-      return;
-    }
-    void controlCenter.execute({
-      command: createControlCommand(
-        'plugin-host.dispose',
-        'app-unmount-1',
-        'app-unmount',
-        { reason: 'app-unmount' },
-      ),
-      subject: 'app-shell',
-      capabilities: ['plugin-host:dispose'],
-      idempotencyKey: 'plugin-host.dispose:app-unmount',
-    }).then((result) => {
-      if (!result.ok) {
-        console.error('[zterm:control-center] plugin-host dispose failed', result.error);
+  useEffect(() => {
+    pluginRuntimeOwnersRef.current += 1;
+    return () => {
+      pluginRuntimeOwnersRef.current -= 1;
+      if (
+        pluginRuntimeOwnersRef.current > 0
+        || pluginDisposeQueuedRef.current
+        || !controlCenter
+        || !pluginHost
+      ) {
+        return;
       }
-    }).catch((error) => {
-      console.error('[zterm:control-center] plugin-host dispose failed', error);
-    });
-  }, [controlCenter]);
+      pluginDisposeQueuedRef.current = true;
+      queueMicrotask(() => {
+        pluginDisposeQueuedRef.current = false;
+        if (pluginRuntimeOwnersRef.current > 0) {
+          return;
+        }
+        void controlCenter.execute({
+          command: createControlCommand(
+            'plugin-host.dispose',
+            'app-unmount-1',
+            'app-unmount',
+            { reason: 'app-unmount' },
+          ),
+          subject: 'app-shell',
+          capabilities: ['plugin-host:dispose'],
+          idempotencyKey: 'plugin-host.dispose:app-unmount',
+        }).then((result) => {
+          if (!result.ok) {
+            console.error('[zterm:control-center] plugin-host dispose failed', result.error);
+          }
+        }).catch((error) => {
+          console.error('[zterm:control-center] plugin-host dispose failed', error);
+        });
+      });
+    };
+  }, [controlCenter, pluginHost]);
   useEffect(() => {
     if (pluginStartRequestedRef.current) {
       return;
@@ -1241,7 +1265,7 @@ export default function App() {
     });
   }, [pluginHost]);
   const networkIdentityRuntime = useMemo(() => (
-    pluginRuntimeReady
+    pluginRuntimeReady && Capacitor.isNativePlatform()
       ? createNetworkIdentityRuntime({
         sampleInterfaces: pluginHost.readCapability<typeof readNativeNetworkIdentitySnapshot>(
           'network:sample-interfaces',
@@ -1249,37 +1273,37 @@ export default function App() {
       })
       : undefined
   ), [pluginHost, pluginRuntimeReady]);
-  const debugConsoleRender = pluginRuntimeReady
+  const debugConsoleRender = pluginRuntimeReady && pluginHost.hasUiSlot(DEBUG_CONSOLE_UI_SLOT_ID)
     ? pluginHost
       .readUiSlot<TerminalDebugOverlayProps>(DEBUG_CONSOLE_UI_SLOT_ID)
       .render
     : undefined;
-  const sessionDrawerRender = pluginRuntimeReady
+  const sessionDrawerRender = pluginRuntimeReady && pluginHost.hasUiSlot(SESSION_DRAWER_UI_SLOT_ID)
     ? pluginHost
       .readUiSlot<SessionDrawerUiProps>(SESSION_DRAWER_UI_SLOT_ID)
       .render
     : undefined;
-  const fileBrowserRender = pluginRuntimeReady
+  const fileBrowserRender = pluginRuntimeReady && pluginHost.hasUiSlot(FILE_BROWSER_UI_SLOT_ID)
     ? pluginHost
       .readUiSlot<FileBrowserUiProps>(FILE_BROWSER_UI_SLOT_ID)
       .render
     : undefined;
-  const settingsUpdateRender = pluginRuntimeReady
+  const settingsUpdateRender = pluginRuntimeReady && pluginHost.hasUiSlot(SETTINGS_UPDATE_UI_SLOT_ID)
     ? pluginHost
       .readUiSlot<SettingsUpdateUiProps>(SETTINGS_UPDATE_UI_SLOT_ID)
       .render
     : undefined;
-  const remoteWindowRender = pluginRuntimeReady
+  const remoteWindowRender = pluginRuntimeReady && pluginHost.hasUiSlot(REMOTE_WINDOW_UI_SLOT_ID)
     ? pluginHost
       .readUiSlot<RemoteWindowUiProps>(REMOTE_WINDOW_UI_SLOT_ID)
       .render
     : undefined;
-  const quickBarRender = pluginRuntimeReady
+  const quickBarRender = pluginRuntimeReady && pluginHost.hasUiSlot(QUICKBAR_UI_SLOT_ID)
     ? pluginHost
       .readUiSlot<QuickBarUiProps>(QUICKBAR_UI_SLOT_ID)
       .render
     : undefined;
-  const terminalShellRender = pluginRuntimeReady
+  const terminalShellRender = pluginRuntimeReady && pluginHost.hasUiSlot(TERMINAL_SHELL_UI_SLOT_ID)
     ? pluginHost
       .readUiSlot<TerminalShellUiProps>(TERMINAL_SHELL_UI_SLOT_ID)
       .render

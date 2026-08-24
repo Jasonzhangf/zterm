@@ -1,11 +1,31 @@
 // @vitest-environment jsdom
 
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ZtermDialog } from './ZtermDialog';
 
 describe('ZtermDialog', () => {
   afterEach(cleanup);
+
+  it('defines every referenced dialog animation in the owning stylesheet', () => {
+    const stylesheet = readFileSync(
+      resolve(process.cwd(), 'src/index.css'),
+      'utf8',
+    );
+    const animationNames = [
+      'ztermDialogFade',
+      'ztermDialogPop',
+      'ztermDialogSpin',
+      'ztermDialogExit',
+      'ztermDialogPanelExit',
+    ];
+
+    for (const animationName of animationNames) {
+      expect(stylesheet).toContain(`@keyframes ${animationName}`);
+    }
+  });
 
   it('renders title, message and detail with the requested tone', () => {
     render(
@@ -29,7 +49,7 @@ describe('ZtermDialog', () => {
     expect(screen.getByTestId('zterm-dialog-detail').textContent).toContain(
       'TypeError: fetch failed',
     );
-    expect(screen.getByTestId('zterm-dialog-glyph').textContent).toBe('×');
+    expect(screen.getByTestId('zterm-dialog-glyph').querySelector('svg')).not.toBeNull();
   });
 
   it('invokes onConfirm when the primary button is clicked and does not block tests synchronously', () => {
@@ -91,6 +111,57 @@ describe('ZtermDialog', () => {
       />,
     );
     expect(screen.queryByTestId('zterm-dialog')).toBeNull();
+  });
+
+  it('closes through Escape without invoking the destructive action', () => {
+    const onCancel = vi.fn();
+    const onConfirm = vi.fn();
+    render(
+      <ZtermDialog
+        open
+        title="Kill session"
+        showCancel
+        onConfirm={onConfirm}
+        onCancel={onCancel}
+      />,
+    );
+
+    fireEvent.keyDown(screen.getByTestId('zterm-dialog-panel'), { key: 'Escape' });
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it('keeps keyboard focus inside the dialog', () => {
+    render(
+      <ZtermDialog
+        open
+        title="Kill session"
+        showCancel
+        confirmLabel="Kill"
+        cancelLabel="Cancel"
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    const panel = screen.getByTestId('zterm-dialog-panel');
+    expect(document.activeElement).toBe(panel);
+
+    fireEvent.keyDown(panel, { key: 'Tab' });
+    expect(document.activeElement).toBe(screen.getByTestId('zterm-dialog-cancel'));
+  });
+
+  it('plays a bounded exit transition before removing the dialog', async () => {
+    const { rerender } = render(
+      <ZtermDialog open title="Saved" onConfirm={vi.fn()} />,
+    );
+
+    rerender(<ZtermDialog open={false} title="Saved" onConfirm={vi.fn()} />);
+    const closingPanel = screen.getByTestId('zterm-dialog');
+    expect(closingPanel.style.animation).toContain('ztermDialogExit');
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('zterm-dialog')).toBeNull();
+    }, { timeout: 300 });
   });
 
   it('uses shell theme tokens instead of fixed dark error colors', () => {

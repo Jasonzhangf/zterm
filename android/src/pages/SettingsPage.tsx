@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   getDefaultBridgeServer,
   removeBridgeServer,
@@ -148,6 +148,43 @@ function buildAppUpdateManifestCandidates(settings: BridgeSettings): AppUpdateMa
   return candidates;
 }
 
+function ToggleGlyph({ checked }: { checked: boolean }) {
+  return (
+    <svg aria-hidden="true" fill="none" height="20" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" width="20">
+      {checked ? <path d="m5 12.5 4.5 4.5L19 7.5" /> : <circle cx="12" cy="12" r="8" />}
+    </svg>
+  );
+}
+
+function SettingsGroup({
+  title,
+  defaultOpen = false,
+  children,
+}: {
+  title: string;
+  defaultOpen?: boolean;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  return (
+    <details
+      className="zterm-settings-group"
+      data-testid="settings-group"
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary>
+        <span>{title}</span>
+        <svg aria-hidden="true" className="zterm-settings-chevron" fill="none" height="20" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" width="20">
+          <path d="m9 6 6 6-6 6" />
+        </svg>
+      </summary>
+      <div style={{ display: 'grid', gap: '16px', padding: '20px 24px 24px' }}>{children}</div>
+    </details>
+  );
+}
+
 export function SettingsPage({
   settings,
   currentVersionName,
@@ -293,41 +330,45 @@ export function SettingsPage({
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '18px 18px 32px' }}>
-        {renderSettingsUpdate ? renderSettingsUpdate({
-          currentVersionName,
-          currentVersionCode,
-          updateDraft,
-          latestManifest,
-          updateChecking,
-          updateInstalling,
-          updateError,
-          hasNewVersion,
-          hasUpdateIgnorePolicy,
-          suggestedManifestUrl,
-          manifestCandidates,
-          onUpdateDraftChange: (updater) => setUpdateDraft((current) => updater(current)),
-          onCheckForUpdate: () => onCheckForUpdate(updateDraft),
-          onInstallUpdate,
-          onResetUpdateIgnorePolicy,
-          onExportConfig,
-          onImportConfig,
-          configExporting,
-          configImporting,
-          rollbackBackup,
-          isRollingBack,
-          onRollback,
-          rollbackToPreviousEntry,
-          onRollbackToPrevious,
-        }) : null}
+        <SettingsGroup title="连接与升级" defaultOpen>
+          {renderSettingsUpdate ? renderSettingsUpdate({
+            currentVersionName,
+            currentVersionCode,
+            updateDraft,
+            latestManifest,
+            updateChecking,
+            updateInstalling,
+            updateError,
+            hasNewVersion,
+            hasUpdateIgnorePolicy,
+            suggestedManifestUrl,
+            manifestCandidates,
+            onUpdateDraftChange: (updater) => setUpdateDraft((current) => updater(current)),
+            onCheckForUpdate: () => onCheckForUpdate(updateDraft),
+            onInstallUpdate,
+            onResetUpdateIgnorePolicy,
+            onExportConfig,
+            onImportConfig,
+            configExporting,
+            configImporting,
+            rollbackBackup,
+            isRollingBack,
+            onRollback,
+            rollbackToPreviousEntry,
+            onRollbackToPrevious,
+          }) : null}
 
-        <ConnectionConfigSection
-          settings={draft}
-          onSettingsChange={(updater) => setDraft((current) => updater(current))}
-          onRemoveDefaultServer={() =>
-            setDraft((current) => removeBridgeServer(current, defaultServer?.id || current.defaultServerId || ''))
-          }
-          onRelaySettingsChange={handleRelaySettingsChange}
-        />
+          <ConnectionConfigSection
+            settings={draft}
+            onSettingsChange={(updater) => setDraft((current) => updater(current))}
+            onRemoveDefaultServer={() =>
+              setDraft((current) => removeBridgeServer(current, defaultServer?.id || current.defaultServerId || ''))
+            }
+            onRelaySettingsChange={handleRelaySettingsChange}
+          />
+        </SettingsGroup>
+
+        <SettingsGroup title="终端" defaultOpen>
 
         <div style={settingsSectionStyle()}>
           <SettingsSectionTitle>Terminal Cache</SettingsSectionTitle>
@@ -417,6 +458,9 @@ export function SettingsPage({
             })}
           </div>
         </div>
+        </SettingsGroup>
+
+        <SettingsGroup title="诊断与输入">
 
         <div style={settingsSectionStyle()}>
           <SettingsSectionTitle>Daemon Debug</SettingsSectionTitle>
@@ -445,7 +489,7 @@ export function SettingsPage({
               gap: '8px',
             }}
           >
-            <span style={{ fontSize: '18px' }}>{runtimeDebugEnabled ? '✓' : '○'}</span>
+            <ToggleGlyph checked={runtimeDebugEnabled} />
             Daemon Debug {runtimeDebugEnabled ? '已开启' : '已关闭'}
           </button>
         </div>
@@ -473,10 +517,13 @@ export function SettingsPage({
               gap: '8px',
             }}
           >
-            <span style={{ fontSize: '18px' }}>{draft.shortcutSmartSort ? '✓' : '○'}</span>
+            <ToggleGlyph checked={draft.shortcutSmartSort} />
             智能排序 {draft.shortcutSmartSort ? '已开启' : '已关闭'}
           </button>
         </div>
+        </SettingsGroup>
+
+        <SettingsGroup title="远程窗口">
 
         <div style={settingsSectionStyle()}>
           <SettingsSectionTitle>远程窗口</SettingsSectionTitle>
@@ -542,6 +589,9 @@ export function SettingsPage({
             {remoteScrollInverted ? '反向滚动（已开启）' : '正向滚动'}
           </button>
         </div>
+        </SettingsGroup>
+
+        <SettingsGroup title="外观">
 
         <TerminalThemeSection
           terminalThemeId={draft.terminalThemeId}
@@ -594,6 +644,7 @@ export function SettingsPage({
             })}
           </div>
         </div>
+        </SettingsGroup>
 
       </div>
     </div>

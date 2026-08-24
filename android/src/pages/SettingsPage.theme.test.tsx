@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SettingsPage } from './SettingsPage';
 import { AppUpdateSection } from '../components/settings/AppUpdateSection';
@@ -300,14 +300,59 @@ describe('SettingsPage terminal theme selection', () => {
       />,
     );
 
-    const button = screen.getByRole('button', { name: '○Daemon Debug 已关闭' });
+    const button = screen.getByRole('button', { name: 'Daemon Debug 已关闭' });
     fireEvent.click(button);
     expect(window.localStorage.getItem(RUNTIME_DEBUG_STORAGE_KEY)).toBe('1');
-    expect(screen.getByRole('button', { name: '✓Daemon Debug 已开启' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Daemon Debug 已开启' })).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: '✓Daemon Debug 已开启' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Daemon Debug 已开启' }));
     expect(window.localStorage.getItem(RUNTIME_DEBUG_STORAGE_KEY)).toBe(null);
-    expect(screen.getByRole('button', { name: '○Daemon Debug 已关闭' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Daemon Debug 已关闭' })).toBeTruthy();
+  });
+
+  it('progressively discloses advanced settings instead of stacking every card', () => {
+    render(
+      <SettingsPage
+        settings={baseSettings}
+        currentVersionName="0.0.0"
+        currentVersionCode={0}
+        updatePreferences={{
+          manifestUrl: '',
+          manifestSource: 'none',
+          autoCheckOnLaunch: true,
+          ignoreUntilManualCheck: false,
+          lastSeenVersionCode: undefined,
+        }}
+        latestManifest={null}
+        updateChecking={false}
+        updateInstalling={false}
+        updateError={null}
+        hasNewVersion={false}
+        hasUpdateIgnorePolicy={false}
+        onSave={vi.fn()}
+        onUpdatePreferencesChange={vi.fn()}
+        onCheckForUpdate={vi.fn()}
+        onInstallUpdate={vi.fn()}
+        onResetUpdateIgnorePolicy={vi.fn()}
+        onBack={vi.fn()}
+      />,
+    );
+
+    const groups = screen.getAllByTestId('settings-group');
+    expect(groups.map((group) => group.hasAttribute('open'))).toEqual([
+      true,
+      true,
+      false,
+      false,
+      false,
+    ]);
+
+    fireEvent.click(within(groups[0]!).getByText('连接与升级'));
+    expect(groups[0]!.hasAttribute('open')).toBe(false);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Daemon Debug 已关闭' }));
+    expect(groups[0]!.hasAttribute('open')).toBe(false);
+    expect(groups[2]!.hasAttribute('open')).toBe(false);
   });
 
   it('shows the fixed Relay service without exposing a configurable base-url field', () => {

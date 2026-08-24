@@ -431,6 +431,7 @@ interface TerminalPageProps {
   onOpenDrawerRemoteSession?: (target: DrawerRemoteSessionTarget, sessionName: string, options?: { activate?: boolean; navigate?: boolean }) => string | null | undefined | void;
   onRenameRemoteSession?: (sessionId: string, nextSessionName: string) => void | Promise<void>;
   onCloseDrawerRemoteSession?: (target: DrawerRemoteSessionTarget, sessionName: string) => void | Promise<void>;
+  onRefreshRemoteSessions?: (hostKey?: string) => void | Promise<void>;
   onAuditOpenTabsAgainstRemoteSessions?: (reason: OpenTabAuditReason) => void | Promise<void>;
   relayDevices?: TraversalRelayDeviceSnapshot[];
   serverIdentityAliasInputs?: ServerIdentityInput[];
@@ -547,6 +548,7 @@ function TerminalPageComponent({
   onOpenQuickTabPicker,
   onOpenDrawerRemoteSession,
   onCloseDrawerRemoteSession,
+  onRefreshRemoteSessions,
   relayDevices = [],
   serverIdentityAliasInputs = [],
   sessionPickerDebugMode = null,
@@ -665,23 +667,6 @@ function TerminalPageComponent({
       window.removeEventListener('zterm:open-attachment-drawer', onOpenAttachmentDrawer);
     };
   }, []);
-  // Trigger remote session audit when drawer opens to prune stale entries.
-  // 只在 drawer 从关闭→打开的变化沿触发一次（ref guard），避免 audit 引发的
-  // sessions 更新 + onAuditOpenTabsAgainstRemoteSessions 引用变化形成重渲染循环。
-  const drawerOpenAuditFiredRef = useRef(false);
-  useEffect(() => {
-    if (!sessionDrawerOpen) {
-      drawerOpenAuditFiredRef.current = false;
-      return;
-    }
-    if (drawerOpenAuditFiredRef.current) {
-      return;
-    }
-    drawerOpenAuditFiredRef.current = true;
-    if (onAuditOpenTabsAgainstRemoteSessions) {
-      void onAuditOpenTabsAgainstRemoteSessions('drawer-open');
-    }
-  }, [sessionDrawerOpen, onAuditOpenTabsAgainstRemoteSessions]);
   const { getPendingAttachmentCount, getPendingAttachments, queryAttachmentHistory, fetchAttachmentAsset } = useSession();
   const initialSessionPreviewRead = useMemo(() => {
     const storage = getBrowserStorage();
@@ -1397,6 +1382,41 @@ function TerminalPageComponent({
     }
     return [...hosts.values()];
   }, [drawerRemoteSessions.items, onlineRelayDaemonDevices]);
+  // Trigger live catalog refresh and remote session audit when drawer opens.
+  // 只在 drawer 从关闭→打开的变化沿触发一次（ref guard），避免远端目录更新、
+  // sessions 更新和回调引用变化形成重渲染循环。
+  const drawerOpenDiscoveryFiredRef = useRef(false);
+  useEffect(() => {
+    if (!sessionDrawerOpen) {
+      drawerOpenDiscoveryFiredRef.current = false;
+      return;
+    }
+    if (drawerOpenDiscoveryFiredRef.current) {
+      return;
+    }
+    drawerOpenDiscoveryFiredRef.current = true;
+    if (onAuditOpenTabsAgainstRemoteSessions) {
+      void onAuditOpenTabsAgainstRemoteSessions('drawer-open');
+    }
+    if (onRefreshRemoteSessions) {
+      const hostKeys = Array.from(new Set(
+        drawerHosts
+          .map((host) => host.hostKey?.trim())
+          .filter((hostKey): hostKey is string => Boolean(hostKey)),
+      ));
+      void Promise.allSettled(
+        hostKeys.map((hostKey) => (
+          Promise.resolve().then(() => onRefreshRemoteSessions(hostKey))
+        )),
+      ).then((results) => {
+        results.forEach((result, index) => {
+          if (result.status === 'rejected') {
+            console.warn(`[TerminalPage] Drawer remote session refresh failed for host ${hostKeys[index]}:`, result.reason);
+          }
+        });
+      });
+    }
+  }, [drawerHosts, onAuditOpenTabsAgainstRemoteSessions, onRefreshRemoteSessions, sessionDrawerOpen]);
   const drawerSessions = useMemo(() => {
     const activeSessionIds = new Set(renderedPaneSessions.map((session) => session.id));
 
@@ -2515,6 +2535,10 @@ function TerminalPageComponent({
         hideTimer = null;
       }
     };
+
+    if (!Capacitor.isNativePlatform()) {
+      return;
+    }
 
     const showListenerPromise = Keyboard.addListener('keyboardDidShow', (info) => {
       if (!disposed) {

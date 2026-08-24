@@ -985,4 +985,49 @@ describe('TerminalSessionDrawer', () => {
     expect(openStyle.backdropFilter).not.toContain('blur');
     expect(openStyle.boxShadow ?? '').toBe('none');
   });
+
+  it('keeps the scrim mounted for exit fading and uses 44px session close targets', () => {
+    const { rerender } = render(
+      <TerminalSessionDrawer
+        open={false}
+        topInsetPx={0}
+        bottomInsetPx={0}
+        sessions={sessions.map((s) => ({ ...s }))}
+        hosts={[{ hostKey: 'h1', hostLabel: 'Host 1' }]}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+    const overlay = screen.getByTestId('terminal-session-drawer-overlay') as HTMLButtonElement;
+    const drawer = screen.getByTestId('terminal-session-drawer');
+    expect(overlay.hasAttribute('inert')).toBe(true);
+    expect(drawer.hasAttribute('inert')).toBe(true);
+    expect(overlay.style.opacity).toBe('0');
+    expect(overlay.style.pointerEvents).toBe('none');
+
+    rerender(
+      <TerminalSessionDrawer
+        open
+        topInsetPx={0}
+        bottomInsetPx={0}
+        sessions={sessions.map((s) => ({ ...s }))}
+        hosts={[{ hostKey: 'h1', hostLabel: 'Host 1' }]}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+    expect(overlay.style.opacity).toBe('1');
+    expect(overlay.hasAttribute('inert')).toBe(false);
+    expect(drawer.hasAttribute('inert')).toBe(false);
+    expect(overlay.style.pointerEvents).toBe('auto');
+    expect(overlay.style.transition).toContain('opacity 150ms ease');
+
+    const closeTarget = screen.getByTestId(`terminal-session-drawer-close-${sessions[0]!.id}`) as HTMLElement;
+    expect(closeTarget.style.width).toBe('44px');
+    expect(closeTarget.style.height).toBe('44px');
+  });
 });
