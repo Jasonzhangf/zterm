@@ -387,7 +387,7 @@ describe('zterm daemon service script truth gates', () => {
   it('primes file-sync permissions during daemon service install before launchd bootstrap', () => {
     const script = readDaemonScript();
     const installBody = extractBlock(script, 'install_service() {', 900);
-    const preflightBody = extractBlock(script, 'prime_daemon_install_permissions() {', 1600);
+    const preflightBody = extractBlock(script, 'prime_daemon_install_permissions() {', 2600);
     expect(script).toContain('prime_daemon_install_permissions()');
     expect(installBody).toContain('write_launch_agent');
     expect(installBody).toContain('prime_daemon_install_permissions');
@@ -395,6 +395,45 @@ describe('zterm daemon service script truth gates', () => {
     expect(preflightBody).toContain('Downloads');
     expect(preflightBody).toContain('.zterm');
     expect(preflightBody).toContain('.zterm-permission-preflight');
+    expect(preflightBody).toContain("process.env.ZTERM_DAEMON_NATIVE");
+    expect(preflightBody).toContain("--permission-probe");
+    expect(preflightBody).toContain('ScreenCaptureKit permission preflight failed.');
+  });
+
+  it('uses one installed daemon binary for permission and capture entries', () => {
+    const sourceScript = readDaemonScript();
+    const releaseScript = readReleaseScript();
+    const sourceStageBody = extractBlock(sourceScript, 'stage_native_daemon_binary() {', 1500);
+    const sourceRunBody = extractBlock(sourceScript, 'run_foreground() {', 700);
+    const sourceLaunchBody = extractBlock(sourceScript, 'write_launch_agent() {', 5000);
+    const sourcePreflightBody = extractBlock(sourceScript, 'prime_daemon_install_permissions() {', 2600);
+    const releaseStageBody = extractBlock(releaseScript, 'stage_native_daemon_binary() {', 1500);
+    const releaseRunBody = extractBlock(releaseScript, 'run_foreground() {', 700);
+    const releaseLaunchBody = extractBlock(releaseScript, 'write_launch_agent() {', 5000);
+    const releasePreflightBody = extractBlock(releaseScript, 'prime_daemon_install_permissions() {', 2600);
+    const releaseNormalizeBody = extractBlock(releaseScript, 'normalize_release_tree_metadata() {', 1000);
+
+    expect(sourceScript).not.toContain('ZTerm Remote Capture');
+    expect(releaseScript).not.toContain('ZTerm Remote Capture');
+    expect(sourceScript).not.toContain('ZTERM_DAEMON_CAPTURE_NATIVE');
+    expect(releaseScript).not.toContain('ZTERM_DAEMON_CAPTURE_NATIVE');
+    expect(sourceScript).not.toContain('zterm-remote-window-capture');
+    expect(releaseScript).not.toContain('zterm-remote-window-capture');
+    expect(sourceStageBody).toContain('swiftc -swift-version 5 "$NATIVE_DAEMON_SOURCE" "$REMOTE_WINDOW_CAPTURE_SWIFT" -o "$NATIVE_DAEMON_BIN"');
+    expect(releaseStageBody).toContain('swiftc -swift-version 5 "${NATIVE_DAEMON_SOURCE}" "${REMOTE_WINDOW_CAPTURE_SWIFT}" -o "${NATIVE_DAEMON_BIN}"');
+    expect(releaseNormalizeBody).toContain('"${release_tree}/support/zterm-daemon"');
+    expect(releaseNormalizeBody).not.toContain('Remote Capture');
+    for (const body of [
+      sourceRunBody,
+      sourceLaunchBody,
+      sourcePreflightBody,
+      releaseRunBody,
+      releaseLaunchBody,
+      releasePreflightBody,
+    ]) {
+      expect(body).toMatch(/ZTERM_DAEMON_NATIVE=("\$\{NATIVE_DAEMON_BIN\}"|"\$NATIVE_DAEMON_BIN"|\$\{NATIVE_DAEMON_BIN\}|\$NATIVE_DAEMON_BIN)/u);
+      expect(body).not.toMatch(/\/usr\/sbin\/screencapture|capture-screen/u);
+    }
   });
 
   it('only emits package-resolve error after both require.resolve and filesystem fallback fail', () => {

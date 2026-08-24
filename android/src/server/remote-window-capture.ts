@@ -3,7 +3,6 @@ import type {
   RemoteWindowInputEventPayload,
   RemoteWindowStreamTargetManifest,
 } from '@zterm/shared/protocol';
-import { SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT } from './remote-window-scripts';
 import {
   buildScreenCaptureKitStartupTimeoutMessage,
   truncateRemoteWindowErrorMessage,
@@ -40,7 +39,7 @@ export type RemoteWindowCaptureSourceFactory = (
     frameRate: number;
     startupTimeoutMs: number;
     swiftBinary: string;
-    captureBinary?: string;
+    captureBinary: string;
     onFrame: (frame: RemoteWindowCaptureFrame) => void;
     onError: (error: Error) => void;
   },
@@ -155,8 +154,21 @@ export function buildScreenCaptureKitConfig(target: RemoteWindowStreamTargetMani
     }),
     canvasWidth: compositeLayout?.canvasSize.width,
     canvasHeight: compositeLayout?.canvasSize.height,
+    mainOffsetX: compositeLayout?.windows[0]?.canvasRectPx.x,
+    mainOffsetY: compositeLayout?.windows[0]?.canvasRectPx.y,
     outputWidth: compositeLayout?.windows[0]?.canvasRectPx.width,
     outputHeight: compositeLayout?.windows[0]?.canvasRectPx.height,
+  };
+}
+
+export function buildRemoteWindowCaptureUpdateCommand(
+  config: ReturnType<typeof buildScreenCaptureKitConfig>,
+  seq: number,
+) {
+  return {
+    ...config,
+    kind: 'update-config' as const,
+    seq,
   };
 }
 
@@ -172,7 +184,7 @@ function stopChildProcess(
   }
   if (pid > 0) {
     try {
-      // 进程组 SIGTERM——覆盖 swift 启动的 swift-frontend 子进程
+      // 进程组 SIGTERM——覆盖 capture 派生出的子进程
       process.kill(-pid, 'SIGTERM');
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ESRCH') {
@@ -180,7 +192,7 @@ function stopChildProcess(
       }
     }
   }
-  // Cleanup escalation: SCStream or swift-frontend may outlive SIGTERM.
+  // Cleanup escalation: SCStream may outlive SIGTERM.
   const killTimer = setTimeout(() => {
     try {
       child.kill('SIGKILL');
@@ -202,36 +214,30 @@ function stopChildProcess(
   }
 }
 
-export function startScreenCaptureKitFrameSource(
+export async function startScreenCaptureKitFrameSource(
   target: RemoteWindowStreamTargetManifest,
   options: {
     frameRate: number;
     startupTimeoutMs: number;
     swiftBinary: string;
-    captureBinary?: string;
+    captureBinary: string;
     onFrame: (frame: RemoteWindowCaptureFrame) => void;
     onError: (error: Error) => void;
   },
 ): Promise<RemoteWindowCaptureFrameSource> {
   let captureConfig = buildScreenCaptureKitConfig(target, options.frameRate);
-  const child = (options.captureBinary
-    ? spawn(options.captureBinary, [], {
-      env: {
-        ...process.env,
-        ZTERM_REMOTE_WINDOW_CAPTURE_CONFIG: JSON.stringify(captureConfig),
-      },
-      stdio: ['pipe', 'pipe', 'pipe'],
-      detached: true,
-    })
-    : spawn(options.swiftBinary, ['-swift-version', '5', '-e', SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT], {
+  if (!options.captureBinary?.trim()) {
+    throw new Error('installed ScreenCaptureKit capture binary is required');
+  }
+  const child = spawn(options.captureBinary, ["remote-window-capture"], {
     env: {
       ...process.env,
       ZTERM_REMOTE_WINDOW_CAPTURE_CONFIG: JSON.stringify(captureConfig),
     },
     stdio: ['pipe', 'pipe', 'pipe'],
-    // detached 独立进程组：stop 时按进程组杀，避免 swift-frontend 子进程变孤儿残留
+    // The installed daemon binary owns the TCC identity; never compile this source at runtime.
     detached: true,
-  })) as RemoteWindowCaptureChildProcess;
+  }) as RemoteWindowCaptureChildProcess;
   let stdoutBuffer = Buffer.alloc(0);
   let stderrBuffer = '';
   let stderrLineBuffer = '';

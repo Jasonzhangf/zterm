@@ -329,6 +329,7 @@ Android floating entry
 
 - `resource.remote_window_overlay` 只拥有 Android picker / floating overlay / fullscreen overlay / Back 缩小 / close intent 投影。
 - `resource.remote_window_stream` 是 daemon/native 侧唯一真源，拥有 app/window 枚举、iTerm2 pane 枚举、坐标归一化、tmux 反查、capture、encoder/WebRTC sender、input target lease。
+- 安装态 Screen Recording 权限主体唯一是已安装的 `zterm-daemon`：preflight 只执行 `zterm-daemon --permission-probe`；远程窗口 capture 只能从同一二进制的 `remote-window-capture` 子命令启动。禁止 Remote Capture bundle、独立 raw helper、Node 运行时编译或 `screencapture` fallback。
 - Android 不计算 macOS 坐标，不读取 iTerm2 split tree，不把 terminal buffer/render 当视频真源。
 - fullscreen Back 只从 fullscreen 缩小为 floating；只有 close 才释放 capture / encoder / WebRTC sender / target lease。
 - 后续鼠标键盘回传必须声明 `focusPolicy` 与 `inputRoute`。普通 app 的通用 OS input 默认要求 `bring-to-focus`；`no-focus-steal` 只可用于显式声明的 terminal-specific route，例如 iTerm2 API 或 tmux input。

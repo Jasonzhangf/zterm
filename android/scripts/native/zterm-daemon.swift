@@ -73,33 +73,49 @@ func captureScreen(to outputPath: String, windowId: String? = nil, rect: Capture
   }
 }
 
-let args = CommandLine.arguments
-if args.count >= 3 && args[1] == "capture-screen" {
-  var windowId: String?
-  var rect: CaptureRect?
-  var index = 3
-  while index < args.count {
-    let option = args[index]
-    if option == "--window-id" {
-      guard index + 1 < args.count else {
-        fail("missing --window-id value", code: 64)
+@main
+struct ZtermDaemonEntry {
+  static func main() {
+    let args = CommandLine.arguments
+    if args.dropFirst().first == "--permission-probe" {
+      guard hasScreenCapturePermission() else {
+        fail("Screen Recording permission is required; grant zterm-daemon in macOS Privacy settings", code: 5)
       }
-      windowId = args[index + 1]
-      index += 2
-      continue
+      exit(0)
     }
-    if option == "--rect" {
-      guard index + 1 < args.count else {
-        fail("missing --rect value", code: 64)
-      }
-      rect = parseRect(args[index + 1])
-      index += 2
-      continue
-    }
-    fail("unknown capture-screen option: \(option)", code: 64)
-  }
-  captureScreen(to: args[2], windowId: windowId, rect: rect)
-  exit(0)
-}
 
-fail("usage: zterm-daemon capture-screen <output.png> [--window-id <id> | --rect <x,y,w,h>]", code: 64)
+    if args.count >= 3 && args[1] == "capture-screen" {
+      var windowId: String?
+      var rect: CaptureRect?
+      var index = 3
+      while index < args.count {
+        let option = args[index]
+        if option == "--window-id" {
+          guard index + 1 < args.count else {
+            fail("missing --window-id value", code: 64)
+          }
+          windowId = args[index + 1]
+          index += 2
+          continue
+        }
+        if option == "--rect" {
+          guard index + 1 < args.count else {
+            fail("missing --rect value", code: 64)
+          }
+          rect = parseRect(args[index + 1])
+          index += 2
+          continue
+        }
+        fail("unknown capture-screen option: \(option)", code: 64)
+      }
+      captureScreen(to: args[2], windowId: windowId, rect: rect)
+      exit(0)
+    }
+
+    if args.count == 2 && args[1] == "remote-window-capture" {
+      startRemoteWindowCaptureProcess()
+    }
+
+    fail("usage: zterm-daemon --permission-probe | capture-screen <output.png> [...] | remote-window-capture", code: 64)
+  }
+}

@@ -5,6 +5,8 @@ import type {
 
 const REMOTE_WINDOW_CANVAS_WIDTH = 1920;
 const REMOTE_WINDOW_CANVAS_HEIGHT = 1080;
+const REMOTE_WINDOW_SIBLING_RAIL_HEIGHT = Math.round(REMOTE_WINDOW_CANVAS_HEIGHT * 0.3);
+const REMOTE_WINDOW_MAX_SIBLINGS = 3;
 
 export function buildRemoteWindowCanvasLayoutV1(
   target: RemoteWindowStreamTargetManifest,
@@ -23,7 +25,7 @@ export function buildRemoteWindowCanvasLayoutV1(
       sourceRectTopLeftPx: target.videoTarget.cropRectTopLeftPx
         ?? target.videoTarget.windowBoundsTopLeftPx,
     },
-    ...compositeWindows.map((window) => ({
+    ...compositeWindows.slice(0, REMOTE_WINDOW_MAX_SIBLINGS).map((window) => ({
       windowId: window.windowId,
       sourceRectTopLeftPx: window.cropRectTopLeftPx ?? window.windowBoundsTopLeftPx,
     })),
@@ -34,20 +36,50 @@ export function buildRemoteWindowCanvasLayoutV1(
   if (windows.length <= 1) {
     return null;
   }
-  const totalWidth = windows.reduce(
-    (sum, window) => sum + Math.max(1, window.sourceRectTopLeftPx.width),
-    0,
-  );
-  const maxHeight = windows.reduce(
-    (maximum, window) => Math.max(maximum, Math.max(1, window.sourceRectTopLeftPx.height)),
-    1,
-  );
-  const scale = Math.min(
-    1,
-    REMOTE_WINDOW_CANVAS_WIDTH / totalWidth,
-    REMOTE_WINDOW_CANVAS_HEIGHT / maxHeight,
-  );
-  let offsetX = 0;
+  const siblings = windows.slice(1);
+  const siblingSlotWidth = Math.floor(REMOTE_WINDOW_CANVAS_WIDTH / siblings.length);
+  const projectedWindows = windows.map((window, index) => {
+    const source = window.sourceRectTopLeftPx;
+    if (index === 0) {
+      const scale = Math.min(
+        REMOTE_WINDOW_CANVAS_WIDTH / Math.max(1, source.width),
+        (REMOTE_WINDOW_CANVAS_HEIGHT - REMOTE_WINDOW_SIBLING_RAIL_HEIGHT) / Math.max(1, source.height),
+      );
+      const width = Math.max(1, Math.round(source.width * scale));
+      const height = Math.max(1, Math.round(source.height * scale));
+      return {
+        windowId: window.windowId,
+        sourceRectTopLeftPx: { ...source },
+        canvasRectPx: {
+          x: Math.round((REMOTE_WINDOW_CANVAS_WIDTH - width) / 2),
+          y: REMOTE_WINDOW_SIBLING_RAIL_HEIGHT + Math.round(
+            (REMOTE_WINDOW_CANVAS_HEIGHT - REMOTE_WINDOW_SIBLING_RAIL_HEIGHT - height) / 2,
+          ),
+          width,
+          height,
+        },
+        zIndex: windows.length,
+      };
+    }
+    const siblingIndex = index - 1;
+    const scale = Math.min(
+      siblingSlotWidth / Math.max(1, source.width),
+      REMOTE_WINDOW_SIBLING_RAIL_HEIGHT / Math.max(1, source.height),
+    );
+    const width = Math.max(1, Math.round(source.width * scale));
+    const height = Math.max(1, Math.round(source.height * scale));
+    return {
+      windowId: window.windowId,
+      sourceRectTopLeftPx: { ...source },
+      canvasRectPx: {
+        x: siblingIndex * siblingSlotWidth + Math.round((siblingSlotWidth - width) / 2),
+        y: Math.round((REMOTE_WINDOW_SIBLING_RAIL_HEIGHT - height) / 2),
+        width,
+        height,
+      },
+      zIndex: siblingIndex,
+    };
+  });
   return {
     version: 1,
     layoutGeneration,
@@ -56,22 +88,6 @@ export function buildRemoteWindowCanvasLayoutV1(
       height: REMOTE_WINDOW_CANVAS_HEIGHT,
     },
     focusTargetId: target.streamTargetId,
-    windows: windows.map((window, index) => {
-      const width = Math.max(1, Math.round(window.sourceRectTopLeftPx.width * scale));
-      const height = Math.max(1, Math.round(window.sourceRectTopLeftPx.height * scale));
-      const result = {
-        windowId: window.windowId,
-        sourceRectTopLeftPx: { ...window.sourceRectTopLeftPx },
-        canvasRectPx: {
-          x: offsetX,
-          y: 0,
-          width,
-          height,
-        },
-        zIndex: index,
-      };
-      offsetX += width;
-      return result;
-    }),
+    windows: projectedWindows,
   };
 }

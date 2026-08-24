@@ -191,15 +191,38 @@ interface ActiveRemoteWindowStream extends Omit<RemoteWindowStreamSessionResourc
   handlers: RemoteWindowStreamDaemonHandlers;
   focusRevision: number;
   pendingFocusReady: RemoteWindowStreamFocusResultPayload | null;
-  pendingVideoFrame: {
-    frame: RemoteWindowCaptureFrame;
-  } | null;
+  pendingFocusFrame: RemoteWindowPendingMediaFrame | null;
+  pendingOverviewFrame?: RemoteWindowPendingMediaFrame | null;
   remoteDescriptionApplied: boolean;
   pendingIceCandidates: RTCIceCandidateInit[];
   focusCaptureStartedReported: boolean;
   overviewCaptureStartedReported: boolean;
   cleanupDone: boolean;
 }
+
+interface RemoteWindowPendingMediaFrame {
+  frame: RemoteWindowCaptureFrame;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 interface RemoteWindowResizeApplyResult {
   target: RemoteWindowStreamTargetManifest;
@@ -217,6 +240,33 @@ interface RemoteWindowResizeApplyResult {
 
 
 
+
+function enqueueRemoteWindowLatestFrame(
+  entry: Pick<ActiveRemoteWindowStream, 'pendingFocusFrame' | 'pendingOverviewFrame'>,
+  lane: 'focus' | 'overview',
+  frame: RemoteWindowCaptureFrame,
+) {
+  const pending: RemoteWindowPendingMediaFrame = { frame };
+  if (lane === 'overview') {
+    entry.pendingOverviewFrame = pending;
+    return;
+  }
+  entry.pendingFocusFrame = pending;
+}
+
+function takeRemoteWindowLatestFrame(
+  entry: Pick<ActiveRemoteWindowStream, 'pendingFocusFrame' | 'pendingOverviewFrame'>,
+  lane: 'focus' | 'overview',
+) {
+  if (lane === 'overview') {
+    const pending = entry.pendingOverviewFrame ?? null;
+    entry.pendingOverviewFrame = null;
+    return pending;
+  }
+  const pending = entry.pendingFocusFrame;
+  entry.pendingFocusFrame = null;
+  return pending;
+}
 
 function addRemoteWindowVideoTrack(
   peerConnection: RTCPeerConnection,
@@ -263,7 +313,7 @@ export function createRemoteWindowStreamDaemonRuntime(
   const arch = deps.arch || process.arch;
   const pythonBinary = (deps.pythonBinary || process.env.ZTERM_ITERM2_PYTHON || 'python3').trim();
   const swiftBinary = (deps.swiftBinary || process.env.ZTERM_MACOS_SWIFT || 'swift').trim();
-  const captureBinary = (deps.captureBinary || process.env.ZTERM_DAEMON_CAPTURE_NATIVE || '').trim() || undefined;
+  const captureBinary = (deps.captureBinary ?? process.env.ZTERM_DAEMON_NATIVE ?? '').trim();
   const iterm2PythonTimeoutMs = deps.iterm2PythonTimeoutMs || DEFAULT_ITERM2_PYTHON_TIMEOUT_MS;
   const appWindowCatalogTimeoutMs = deps.appWindowCatalogTimeoutMs || DEFAULT_MACOS_APP_WINDOW_CATALOG_TIMEOUT_MS;
   const captureStartupTimeoutMs = deps.captureStartupTimeoutMs || DEFAULT_SCREEN_CAPTURE_KIT_STARTUP_TIMEOUT_MS;
@@ -373,7 +423,8 @@ export function createRemoteWindowStreamDaemonRuntime(
     }
     activeStreams.delete(entry.streamId);
     markStreamClosed(entry.streamId);
-    entry.pendingVideoFrame = null;
+    entry.pendingFocusFrame = null;
+    entry.pendingOverviewFrame = null;
     releaseRemoteWindowStreamSessionResources({
       ...entry,
       sendStatus: entry.handlers.sendStatus,
@@ -433,13 +484,12 @@ export function createRemoteWindowStreamDaemonRuntime(
   }
 
   function flushPendingRemoteWindowVideoFrame(entry: ActiveRemoteWindowStream) {
-    if (!isCurrentStream(entry) || !isRemoteWindowPeerMediaReady(entry) || !entry.pendingVideoFrame) {
+    const pending = takeRemoteWindowLatestFrame(entry, 'focus');
+    if (!pending || !isCurrentStream(entry) || !isRemoteWindowPeerMediaReady(entry)) {
       return;
     }
-    const pending = entry.pendingVideoFrame;
-    entry.pendingVideoFrame = null;
     try {
-      sendRemoteWindowVideoFrame(entry, pending.frame);
+      sendRemoteWindowVideoFrame(entry, pending.frame, 'focus');
     } catch (error) {
       cleanupStream(
         entry,
@@ -457,15 +507,7 @@ export function createRemoteWindowStreamDaemonRuntime(
       return;
     }
     if (!isRemoteWindowPeerMediaReady(entry)) {
-      if (lane === 'focus') {
-        entry.pendingVideoFrame = {
-          frame: {
-            width: captureFrame.width,
-            height: captureFrame.height,
-            rgba: new Uint8Array(captureFrame.rgba),
-          },
-        };
-      }
+      enqueueRemoteWindowLatestFrame(entry, lane, captureFrame);
       return;
     }
     try {
@@ -493,6 +535,15 @@ export function createRemoteWindowStreamDaemonRuntime(
       markStreamClosed(payload.streamId);
       return buildStreamError(payload, 'remote_window_webrtc_abi_unsupported', `remote window WebRTC ABI is unsupported: ${platform}-${arch}`, 'platform-capability');
     }
+    if (!captureBinary) {
+      markStreamClosed(payload.streamId);
+      return buildStreamError(
+        payload,
+        'remote_window_capture_binary_missing',
+        'installed ScreenCaptureKit capture binary is required',
+        'platform-capability',
+      );
+    }
     if (
       typeof RTCPeerConnection !== 'function'
       || typeof RTCSessionDescription !== 'function'
@@ -509,7 +560,6 @@ export function createRemoteWindowStreamDaemonRuntime(
     if (activeStreams.has(payload.streamId)) {
       return buildStreamError(payload, 'remote_window_stream_exists', `remote window stream already exists: ${payload.streamId}`, 'stream-lifecycle');
     }
-
     const purpose: RemoteWindowStreamPurpose = payload.purpose ?? 'focus';
     let entry: ActiveRemoteWindowStream | null = null;
     let failureStage: RemoteWindowStreamFailureStage = 'request-validation';
@@ -580,7 +630,7 @@ export function createRemoteWindowStreamDaemonRuntime(
       let videoBitrate: RemoteWindowVideoBitrateConfig | null = null;
       let videoBitrateWarning: string | null = null;
 
-      entry = {
+      const streamEntry: ActiveRemoteWindowStream = {
         streamId: payload.streamId,
         purpose,
         requestId: payload.requestId,
@@ -606,7 +656,8 @@ export function createRemoteWindowStreamDaemonRuntime(
         framesSent: 0,
         focusRevision: 0,
         pendingFocusReady: null,
-        pendingVideoFrame: null,
+        pendingFocusFrame: null,
+        pendingOverviewFrame: hasOverviewLane ? null : undefined,
         remoteDescriptionApplied: false,
         pendingIceCandidates: pendingIceCandidatesByStream.get(payload.streamId) ?? [],
         focusCaptureStartedReported: false,
@@ -614,10 +665,11 @@ export function createRemoteWindowStreamDaemonRuntime(
         cleanupDone: false,
       };
       pendingIceCandidatesByStream.delete(payload.streamId);
-      activeStreams.set(payload.streamId, entry);
+      entry = streamEntry;
+      activeStreams.set(payload.streamId, streamEntry);
 
       peerConnection.onicecandidate = (event) => {
-        if (!entry || !isCurrentStream(entry) || !event.candidate) {
+        if (!isCurrentStream(streamEntry) || !event.candidate) {
           return;
         }
         handlers.sendIceCandidate?.({
@@ -628,15 +680,21 @@ export function createRemoteWindowStreamDaemonRuntime(
         });
       };
       peerConnection.onconnectionstatechange = () => {
-        if (!entry || !isCurrentStream(entry)) {
+        if (!isCurrentStream(streamEntry)) {
           return;
         }
         const state = peerConnection.connectionState;
         if (state === 'connected') {
-          flushPendingRemoteWindowVideoFrame(entry);
+          flushPendingRemoteWindowVideoFrame(streamEntry);
+          if (streamEntry.pendingOverviewFrame !== undefined && streamEntry.overviewVideoSource) {
+            const pendingOverview = takeRemoteWindowLatestFrame(streamEntry, 'overview');
+            if (pendingOverview) {
+              sendRemoteWindowVideoFrame(streamEntry, pendingOverview.frame, 'overview');
+            }
+          }
         }
         if (state === 'failed' || state === 'closed') {
-          cleanupStream(entry, `remote window WebRTC connection ${state}`);
+          cleanupStream(streamEntry, `remote window WebRTC connection ${state}`);
         }
       };
 
@@ -655,14 +713,13 @@ export function createRemoteWindowStreamDaemonRuntime(
         type: payload.offer.type,
         sdp: payload.offer.sdp,
       }));
-      entry.remoteDescriptionApplied = true;
-      for (const candidate of entry.pendingIceCandidates.splice(0)) {
+      streamEntry.remoteDescriptionApplied = true;
+      for (const candidate of streamEntry.pendingIceCandidates.splice(0)) {
         await peerConnection.addIceCandidate(createRtcIceCandidate(candidate));
       }
 
-      // Overview（低码率总览）lane 只对真正组合（多个窗口）启用。单个
-      // app-window 目标强制启动 overview 会让 Swift 回退全分辨率单窗口捕获，
-      // 造成 focus 与 overview 双份全分辨率 capture/带宽。
+      // Overview lane 只对真正组合（多个窗口）启用；单 app-window 目标不
+      // 启动第二路 capture，避免 focus 与 overview 出现双份全分辨率采样。
       // focus（高码率主窗口）流：主窗口单独捕获全分辨率；组合模式时剥离 compositeWindows
       const focusTarget: RemoteWindowStreamTargetManifest = hasCompositeWindows
         ? { ...payload.target, compositeWindows: undefined }
@@ -674,36 +731,36 @@ export function createRemoteWindowStreamDaemonRuntime(
         swiftBinary,
         captureBinary,
         onFrame: (frame) => {
-          if (!entry || !isCurrentStream(entry)) {
+          if (!isCurrentStream(streamEntry)) {
             return;
           }
-          if (!entry.focusCaptureStartedReported) {
-            entry.focusCaptureStartedReported = true;
-            entry.handlers.sendStatus?.({
-              requestId: entry.requestId,
-              streamId: entry.streamId,
-              purpose: entry.purpose,
+          if (!streamEntry.focusCaptureStartedReported) {
+            streamEntry.focusCaptureStartedReported = true;
+            streamEntry.handlers.sendStatus?.({
+              requestId: streamEntry.requestId,
+              streamId: streamEntry.streamId,
+              purpose: streamEntry.purpose,
               phase: 'starting',
               stage: 'capture-started',
               lane: 'focus',
             });
           }
-          handleRemoteWindowCaptureFrame(entry, frame, 'focus');
+          handleRemoteWindowCaptureFrame(streamEntry, frame, 'focus');
         },
         onError: (error) => {
-          if (!entry || !isCurrentStream(entry)) {
+          if (!isCurrentStream(streamEntry)) {
             return;
           }
-          cleanupStream(entry, error.message || 'remote window capture failed');
+          cleanupStream(streamEntry, error.message || 'remote window capture failed');
         },
       });
-      if (!isCurrentStream(entry)) {
+      if (!isCurrentStream(streamEntry)) {
         captureSource.stop();
         throw new Error('remote window stream was closed before capture started');
       }
-      entry.captureSource = captureSource;
-      if (!entry.focusCaptureStartedReported) {
-        entry.focusCaptureStartedReported = true;
+      streamEntry.captureSource = captureSource;
+      if (!streamEntry.focusCaptureStartedReported) {
+        streamEntry.focusCaptureStartedReported = true;
         handlers.sendStatus?.({
           requestId: payload.requestId,
           streamId: payload.streamId,
@@ -735,39 +792,39 @@ export function createRemoteWindowStreamDaemonRuntime(
           swiftBinary,
           captureBinary,
           onFrame: (frame) => {
-            if (!entry || !isCurrentStream(entry)) {
+            if (!isCurrentStream(streamEntry)) {
               return;
             }
-            if (!entry.overviewCaptureStartedReported) {
-              entry.overviewCaptureStartedReported = true;
-              entry.handlers.sendStatus?.({
-                requestId: entry.requestId,
-                streamId: entry.streamId,
-                purpose: entry.purpose,
+            if (!streamEntry.overviewCaptureStartedReported) {
+              streamEntry.overviewCaptureStartedReported = true;
+              streamEntry.handlers.sendStatus?.({
+                requestId: streamEntry.requestId,
+                streamId: streamEntry.streamId,
+                purpose: streamEntry.purpose,
                 phase: 'starting',
                 stage: 'capture-started',
                 lane: 'overview',
               });
             }
-            handleRemoteWindowCaptureFrame(entry, frame, 'overview');
+            handleRemoteWindowCaptureFrame(streamEntry, frame, 'overview');
           },
           onError: (error) => {
-            if (!entry || !isCurrentStream(entry)) {
+            if (!isCurrentStream(streamEntry)) {
               return;
             }
-            cleanupStream(entry, error.message || 'remote window overview capture failed');
+            cleanupStream(streamEntry, error.message || 'remote window overview capture failed');
           },
         });
-        if (!isCurrentStream(entry)) {
+        if (!isCurrentStream(streamEntry)) {
           overviewCaptureSource.stop();
           throw new Error('remote window stream was closed before overview capture started');
         }
-        entry.overviewVideoSource = overviewVideoSource;
-        entry.overviewVideoTrack = overviewVideoTrack;
-        entry.overviewVideoSender = overviewVideoSender || null;
-        entry.overviewCaptureSource = overviewCaptureSource;
-        if (!entry.overviewCaptureStartedReported) {
-          entry.overviewCaptureStartedReported = true;
+        streamEntry.overviewVideoSource = overviewVideoSource;
+        streamEntry.overviewVideoTrack = overviewVideoTrack;
+        streamEntry.overviewVideoSender = overviewVideoSender || null;
+        streamEntry.overviewCaptureSource = overviewCaptureSource;
+        if (!streamEntry.overviewCaptureStartedReported) {
+          streamEntry.overviewCaptureStartedReported = true;
           handlers.sendStatus?.({
             requestId: payload.requestId,
             streamId: payload.streamId,
@@ -778,12 +835,12 @@ export function createRemoteWindowStreamDaemonRuntime(
           });
         }
         // 组合模式自动增删：周期刷新同 app 窗口 catalog → 只更新 overview 捕获
-        entry.compositePollTimer = setInterval(() => {
-          if (!entry || !isCurrentStream(entry)) {
+        streamEntry.compositePollTimer = setInterval(() => {
+          if (!isCurrentStream(streamEntry)) {
             return;
           }
           void (async () => {
-            const activeEntry = entry;
+            const activeEntry = streamEntry;
             if (!activeEntry || !isCurrentStream(activeEntry)) {
               return;
             }
@@ -855,21 +912,21 @@ export function createRemoteWindowStreamDaemonRuntime(
       const answer = await peerConnection.createAnswer();
       failureStage = 'answer-apply';
       await peerConnection.setLocalDescription(answer);
-      if (!isCurrentStream(entry)) {
+      if (!isCurrentStream(streamEntry)) {
         throw new Error('remote window stream was closed before media negotiation completed');
       }
-      flushPendingRemoteWindowVideoFrame(entry);
+      flushPendingRemoteWindowVideoFrame(streamEntry);
       if (requestedVideoBitrate) {
         try {
           await applyRemoteWindowStreamGroupQuality({
             requested: requestedVideoBitrate,
             focusSender: videoSender || null,
-            focusCaptureSource: entry.captureSource,
-            overviewSender: entry.overviewVideoSender,
-            overviewCaptureSource: entry.overviewCaptureSource,
+          focusCaptureSource: streamEntry.captureSource,
+          overviewSender: streamEntry.overviewVideoSender,
+          overviewCaptureSource: streamEntry.overviewCaptureSource,
           });
           videoBitrate = requestedVideoBitrate;
-          entry.videoBitrate = videoBitrate;
+          streamEntry.videoBitrate = videoBitrate;
         } catch (error) {
           videoBitrateWarning = formatRemoteWindowVideoBitrateError(error);
         }
@@ -897,10 +954,10 @@ export function createRemoteWindowStreamDaemonRuntime(
           frameWidth: captureSource.width,
           frameHeight: captureSource.height,
           frameRate: captureSource.frameRate,
-          ...(entry.videoBitrate ? { maxBitrateBps: entry.videoBitrate.maxBitrateBps } : {}),
+        ...(streamEntry.videoBitrate ? { maxBitrateBps: streamEntry.videoBitrate.maxBitrateBps } : {}),
           targetKind: payload.target.videoTarget.kind,
         },
-        ...(entry.canvasLayout ? { canvasLayout: entry.canvasLayout } : {}),
+        ...(streamEntry.canvasLayout ? { canvasLayout: streamEntry.canvasLayout } : {}),
         transport: {
           kind: 'webrtc-video',
         },

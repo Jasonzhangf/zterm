@@ -25,11 +25,7 @@ NATIVE_DAEMON_SOURCE="${ROOT_DIR}/scripts/native/zterm-daemon.swift"
 NATIVE_DAEMON_BIN="${SUPPORT_DIR}/zterm-daemon"
 REMOTE_WINDOW_CAPTURE_SOURCE="${ROOT_DIR}/src/server/remote-window-screen-capture-script.ts"
 REMOTE_WINDOW_CAPTURE_EXTRACTOR="${ROOT_DIR}/scripts/native/extract-remote-window-capture-swift.mjs"
-REMOTE_WINDOW_CAPTURE_SWIFT="${SUPPORT_DIR}/remote-window-capture.swift"
-REMOTE_WINDOW_CAPTURE_BIN="${SUPPORT_DIR}/zterm-remote-window-capture"
-REMOTE_WINDOW_CAPTURE_APP="${SUPPORT_DIR}/ZTerm Remote Capture.app"
-REMOTE_WINDOW_CAPTURE_APP_BIN="${REMOTE_WINDOW_CAPTURE_APP}/Contents/MacOS/ZTerm Remote Capture"
-REMOTE_WINDOW_CAPTURE_INFO_PLIST="${ROOT_DIR}/scripts/native/remote-window-capture-Info.plist"
+REMOTE_WINDOW_CAPTURE_SWIFT="${RELEASE_DIST_DIR}/.remote-window-capture.swift"
 
 resolve_node_package_dir() {
   local package_name="${1:-}"
@@ -118,17 +114,13 @@ stage_native_daemon_binary() {
     echo "zterm-daemon native screenshot binary requires swiftc; install Xcode command line tools" >&2
     return 1
   fi
-  mkdir -p "${SUPPORT_DIR}" "${REMOTE_WINDOW_CAPTURE_APP}/Contents/MacOS"
-  if [[ ! -x "${NATIVE_DAEMON_BIN}" || "${NATIVE_DAEMON_BIN}" -ot "${NATIVE_DAEMON_SOURCE}" ]]; then
-    swiftc "${NATIVE_DAEMON_SOURCE}" -o "${NATIVE_DAEMON_BIN}"
-    chmod +x "${NATIVE_DAEMON_BIN}"
+  mkdir -p "${SUPPORT_DIR}"
+  if [[ -x "${NATIVE_DAEMON_BIN}" && "${NATIVE_DAEMON_BIN}" -nt "${NATIVE_DAEMON_SOURCE}" && "${NATIVE_DAEMON_BIN}" -nt "${REMOTE_WINDOW_CAPTURE_SOURCE}" ]]; then
+    return 0
   fi
   "${NODE_BIN}" "${REMOTE_WINDOW_CAPTURE_EXTRACTOR}" "${REMOTE_WINDOW_CAPTURE_SOURCE}" "${REMOTE_WINDOW_CAPTURE_SWIFT}"
-  swiftc -swift-version 5 "${REMOTE_WINDOW_CAPTURE_SWIFT}" -o "${REMOTE_WINDOW_CAPTURE_APP_BIN}"
-  cp "${REMOTE_WINDOW_CAPTURE_APP_BIN}" "${REMOTE_WINDOW_CAPTURE_BIN}"
-  cp "${REMOTE_WINDOW_CAPTURE_INFO_PLIST}" "${REMOTE_WINDOW_CAPTURE_APP}/Contents/Info.plist"
-  chmod +x "${REMOTE_WINDOW_CAPTURE_BIN}" "${REMOTE_WINDOW_CAPTURE_APP_BIN}"
-  codesign --force --deep --sign - "${REMOTE_WINDOW_CAPTURE_APP}" >/dev/null
+  swiftc -swift-version 5 "${NATIVE_DAEMON_SOURCE}" "${REMOTE_WINDOW_CAPTURE_SWIFT}" -o "${NATIVE_DAEMON_BIN}"
+  chmod +x "${NATIVE_DAEMON_BIN}"
 }
 
 write_support_script() {
@@ -163,7 +155,6 @@ LEGACY_LAUNCH_AGENT_PATH="${HOME}/Library/LaunchAgents/${LEGACY_LAUNCH_AGENT_LAB
 STAGED_DAEMON_ENTRY="${RUNTIME_DIR}/server.cjs"
 STAGED_NODE_PTY_HELPER_GLOB="${RUNTIME_DIR}/node_modules/node-pty/prebuilds/darwin-*/spawn-helper"
 NATIVE_DAEMON_BIN="${PACKAGE_ROOT}/support/zterm-daemon"
-REMOTE_WINDOW_CAPTURE_BIN="${PACKAGE_ROOT}/support/ZTerm Remote Capture.app/Contents/MacOS/ZTerm Remote Capture"
 ITERM2_PYTHON_VENV="${WTERM_HOME}/python/iterm2"
 ITERM2_PYTHON_BIN="${ITERM2_PYTHON_VENV}/bin/python3"
 
@@ -472,7 +463,7 @@ run_foreground() {
   mkdir -p "$LOG_DIR"
   chmod +x ${STAGED_NODE_PTY_HELPER_GLOB} 2>/dev/null || true
   cd "${HOME}"
-  exec env -u TMUX -u TMUX_PANE HOST="$HOST" PORT="$PORT" ZTERM_HOST="$HOST" ZTERM_PORT="$PORT" ZTERM_AUTH_TOKEN="${ZTERM_AUTH_TOKEN:-}" "$NODE_BIN" "$STAGED_DAEMON_ENTRY"
+  exec env -u TMUX -u TMUX_PANE HOST="$HOST" PORT="$PORT" ZTERM_HOST="$HOST" ZTERM_PORT="$PORT" ZTERM_AUTH_TOKEN="${ZTERM_AUTH_TOKEN:-}" ZTERM_DAEMON_NATIVE="$NATIVE_DAEMON_BIN" "$NODE_BIN" "$STAGED_DAEMON_ENTRY"
 }
 
 status_direct() {
@@ -550,7 +541,7 @@ start_direct() {
   chmod +x ${STAGED_NODE_PTY_HELPER_GLOB} 2>/dev/null || true
   (
     cd "${HOME}"
-    env -u TMUX -u TMUX_PANE HOST="$HOST" PORT="$PORT" ZTERM_HOST="$HOST" ZTERM_PORT="$PORT" ZTERM_AUTH_TOKEN="${ZTERM_AUTH_TOKEN:-}" \
+    env -u TMUX -u TMUX_PANE HOST="$HOST" PORT="$PORT" ZTERM_HOST="$HOST" ZTERM_PORT="$PORT" ZTERM_AUTH_TOKEN="${ZTERM_AUTH_TOKEN:-}" ZTERM_DAEMON_NATIVE="$NATIVE_DAEMON_BIN" \
       "$NODE_BIN" "$STAGED_DAEMON_ENTRY" >>"$log_file" 2>&1
   ) &
   local daemon_pid=$!
@@ -655,7 +646,7 @@ set -euo pipefail
 cd "${HOME}"
 export PATH="${HOME}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 chmod +x ${STAGED_NODE_PTY_HELPER_GLOB} 2>/dev/null || true
-exec env -u TMUX -u TMUX_PANE ZTERM_ITERM2_PYTHON="${ITERM2_PYTHON_BIN}" ZTERM_DAEMON_NATIVE="${NATIVE_DAEMON_BIN}" ZTERM_DAEMON_CAPTURE_NATIVE="${REMOTE_WINDOW_CAPTURE_BIN}" "${NODE_BIN}" "${STAGED_DAEMON_ENTRY}"
+exec env -u TMUX -u TMUX_PANE ZTERM_ITERM2_PYTHON="${ITERM2_PYTHON_BIN}" ZTERM_DAEMON_NATIVE="${NATIVE_DAEMON_BIN}" "${NODE_BIN}" "${STAGED_DAEMON_ENTRY}"
 RUNNER
   chmod +x "$DIRECT_RUNNER"
 
@@ -723,7 +714,7 @@ cleanup_child() {
   terminate_child
 }
 trap cleanup_child TERM INT
-env -u TMUX -u TMUX_PANE ZTERM_ITERM2_PYTHON="${ITERM2_PYTHON_BIN}" ZTERM_DAEMON_NATIVE="${NATIVE_DAEMON_BIN}" ZTERM_DAEMON_CAPTURE_NATIVE="${REMOTE_WINDOW_CAPTURE_BIN}" "${NODE_BIN}" "${STAGED_DAEMON_ENTRY}" &
+env -u TMUX -u TMUX_PANE ZTERM_ITERM2_PYTHON="${ITERM2_PYTHON_BIN}" ZTERM_DAEMON_NATIVE="${NATIVE_DAEMON_BIN}" "${NODE_BIN}" "${STAGED_DAEMON_ENTRY}" &
 child_pid="\$!"
 missed_health_checks=0
 child_start_epoch="\$(date +%s)"
@@ -811,7 +802,7 @@ prime_daemon_install_permissions() {
   echo "zterm daemon install permission preflight"
   echo "- macOS file sync uses this daemon process to read/write user-selected paths."
   echo "- Grant file access to Terminal/iTerm or the installed daemon runner when macOS prompts."
-  echo "- Remote screenshot uses zterm-daemon directly; grant Screen & System Audio Recording when macOS prompts."
+  echo "- Screen Recording and remote window capture use zterm-daemon directly."
 
   mkdir -p "$WTERM_HOME" "$UPLOAD_DIR" "$DOWNLOADS_DIR"
   ZTERM_DAEMON_NATIVE="$NATIVE_DAEMON_BIN" "$NODE_BIN" - <<'NODE'
@@ -833,19 +824,19 @@ for (const dir of dirs) {
   unlinkSync(probe);
 }
 
-const screenshotProbe = join(homedir(), '.zterm', '.zterm-screenshot-permission-preflight.png');
 try {
-  execFileSync(process.env.ZTERM_DAEMON_NATIVE, ['capture-screen', screenshotProbe], {
+  if (!process.env.ZTERM_DAEMON_NATIVE) {
+    throw new Error('installed ScreenCaptureKit capture binary is required');
+  }
+  execFileSync(process.env.ZTERM_DAEMON_NATIVE, ['--permission-probe'], {
     stdio: 'pipe',
-    timeout: 15000,
+    timeout: 20000,
   });
-  rmSync(screenshotProbe, { force: true });
 } catch (error) {
-  rmSync(screenshotProbe, { force: true });
   const stderr = error && error.stderr ? String(error.stderr) : '';
   const message = error && error.message ? String(error.message) : String(error);
-  console.error('zterm-daemon screenshot permission preflight failed.');
-  console.error('Open macOS System Settings -> Privacy & Security -> Screen & System Audio Recording, allow zterm-daemon/Terminal, then rerun zterm-daemon install-service.');
+  console.error('ScreenCaptureKit permission preflight failed.');
+  console.error('Open macOS System Settings -> Privacy & Security -> Screen Recording, allow zterm-daemon, then rerun zterm-daemon install-service.');
   if (stderr.trim()) console.error(stderr.trim());
   if (message.trim()) console.error(message.trim());
   process.exit(1);

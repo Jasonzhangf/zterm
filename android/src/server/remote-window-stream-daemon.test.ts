@@ -1647,6 +1647,7 @@ sleep 2
         frameRate: 12,
         startupTimeoutMs: 80,
         swiftBinary: runner.executablePath,
+        captureBinary: runner.executablePath,
         onFrame: vi.fn(),
         onError: vi.fn(),
       })).rejects.toThrow('ScreenCaptureKit capture did not produce a frame before timeout after 80ms');
@@ -1669,18 +1670,11 @@ sleep 2
     });
     expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('streamConfiguration.queueDepth = max(3, min(3, queueDepth))');
     expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('streamConfiguration.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(max(1, frameRate)))');
-    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('try await stream.updateConfiguration(nextConfig)');
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).not.toContain('SCScreenshotManager');
     expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('Task { @MainActor in');
-    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('try? await Task.sleep(for: .milliseconds(50))');
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('Screen Recording permission is required');
     expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('windowId: command.windowId');
-    // 防回归：组合与单窗口两个主循环都必须校验 captureLoopGeneration，
-    // 否则旧循环会在 startSingleWindowCapture/startCompositeCapture 复位
-    // compositeStopped=false 后复活，用旧 content 快照持续发黑帧。
-    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT.match(/while !compositeStopped && generation == captureLoopGeneration/g)).toHaveLength(2);
-    // 防回归：单窗口 update-config 必须重枚举 SCShareableContent 并验证目标窗口存在，
-    // 否则启动后新出现的窗口 miss 时 ACK ok:true（假阳性）并输出全黑帧。
-    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('target window not found in fresh shareable content');
-
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('remote window capture target not found in SCShareableContent');
     expect(buildScreenCaptureKitConfig(makeAppStreamTarget(), 60)).toMatchObject({
       frameRate: 60,
       queueDepth: 3,
@@ -1725,6 +1719,7 @@ setInterval(() => {}, 1000);
         frameRate: 30,
         startupTimeoutMs: 10_000,
         swiftBinary: runner.executablePath,
+        captureBinary: runner.executablePath,
         onFrame: (frame) => frames.push({ width: frame.width, height: frame.height }),
         onError: vi.fn(),
       });
@@ -2758,6 +2753,34 @@ setInterval(() => {}, 1000);
       code: 'remote_window_stream_start_failed',
       message: 'remote window stream target requires cropRectTopLeftPx',
       failureStage: 'request-validation',
+    });
+    expect(captureSourceFactory).not.toHaveBeenCalled();
+  });
+
+  it('fails without capture when the installed ScreenCaptureKit binary is missing', async () => {
+    const captureSourceFactory = vi.fn();
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      captureSourceFactory,
+      captureBinary: '',
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    const result = await runtime.startStream({
+      requestId: 'rw-missing-capture-binary',
+      streamId: 'stream-missing-capture-binary',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
+      target: makeStreamTarget(),
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+    });
+
+    expect(result).toEqual({
+      requestId: 'rw-missing-capture-binary',
+      streamId: 'stream-missing-capture-binary',
+      code: 'remote_window_capture_binary_missing',
+      message: 'installed ScreenCaptureKit capture binary is required',
+      failureStage: 'platform-capability',
     });
     expect(captureSourceFactory).not.toHaveBeenCalled();
   });

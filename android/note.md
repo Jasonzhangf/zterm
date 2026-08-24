@@ -167,3 +167,10 @@
   - plan 阶段 4-7（Media/Focus/Input/Gesture/Projection owner；touch 收敛已对齐；layout planner；screenshot loop 物理清除；WebRTC performance）未在本轮做
   - `session-context-transfer-runtime.ts` 中 `ensureSessionReadyForTransfer` unused import 是他人 dirty，未触碰
   - 不在 `RemoteWindowOverlay.tsx` 的剩余类型同步：注入 `useRemoteWindowScreenshot` 暴露的 `feedback` 用于未来的 toolbar toast（当前仅控制器内部消费）
+
+## 2026-08-24 daemon permission / large-refresh closeout
+
+- `desktop.remote_window_stream` permission/capture identity is now one installed executable: `zterm-daemon --permission-probe` for install preflight and `zterm-daemon remote-window-capture` for runtime. Remote Capture bundle, raw helper, alternate capture env, and runtime compilation paths are removed; missing capability returns typed `remote_window_capture_binary_missing / platform-capability` before the factory.
+- Installed verification: launchd runner contains only `ZTERM_DAEMON_NATIVE`, permission probe exits 0, daemon health is ready. Focused tests 110/110, type-check, feature registry 102/102, release artifact inspection, and isolated typed-failure probe passed.
+- Emulator-5554 / installed `0.1.3.2719`: fresh 100000-line refresh, 100 timed CDP samples, 0 empty rows, 0 gaps, 0 discontinuities, visible absolute range advanced by 100000. Screenshot `/tmp/zterm-emulator-large-refresh-rerun.png` SHA `04c86d1d3caca7dd2f38674bfa6c9d233c0c00d8b725afa1322df7314f38cd1d`, terminal-region non-black fraction `0.961536`.
+- Next: AGY Review only; do not stage unrelated dirty files.

@@ -93,6 +93,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - 已安装 APK 的 native plugin 面必须单独实测：通过 WebView CDP 调用 `StoragePermission.writeFileChunks({ path, chunks, append })` 并 `stat` 校验落盘字节后，才允许跑下载持久化测速；源码/Gradle 单测绿但设备返回 `UNIMPLEMENTED` 时，下载产品 E2E 仍为红。
 
 ### 2.2.2 Remote-window 输入 / 粘贴 / 码率规则
+- macOS Screen Recording 权限、install preflight 和 remote-window capture 必须共用安装态 `zterm-daemon` 这一唯一 TCC/可执行主体：preflight 只运行 `ZTERM_DAEMON_NATIVE --permission-probe`，runtime 只运行同一二进制的 `remote-window-capture` 子命令。禁止 Remote Capture app bundle、独立 raw helper、`ZTERM_DAEMON_CAPTURE_NATIVE`、Node 运行时编译或 screenshot fallback。缺权限/缺 capability 必须在 capture factory 前返回 typed error 并停止；不得切换主体或降级成功。
 - Remote-window image paste 的路由真源只能是 Android active focus context：remote-window context active 才允许发送 `pasteTarget.kind=remote-window`；terminal surface focus 必须清掉 context；否则同一 QuickBar image action 保持 terminal Ctrl+V paste path。daemon 不猜焦点，不按 app title/window list 自行决定投递目标。
 - Remote-window 粘贴执行必须复用 file-transfer paste-image owner 写 macOS clipboard；remote-window target 只追加 Command+V 注入，terminal target 只追加 terminal Ctrl+V。禁止新增第二套图片上传或 clipboard 流水线。
 - Remote-window 视频码率是 stream-local quality control：start 携带当前 preset，后续 selector 发送 `remote-window-stream-quality-request`；daemon 只在 stream owner 内校验并应用 WebRTC sender `maxBitrate`。应用码率时只能保留并修改 sender 现有 `RTCRtpSendParameters.encodings`，禁止在空 encodings 时伪造新 encoding；启动阶段没有可改 encoding 时显式报告码率未应用但不阻断视频，运行中切码率则返回显式失败。禁止用码率切换重启 capture、receiver、session transport 或改坐标真源。

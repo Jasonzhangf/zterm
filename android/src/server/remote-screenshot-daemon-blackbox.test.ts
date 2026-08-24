@@ -34,9 +34,13 @@ describe('remote screenshot daemon black-box contract', () => {
     expect(installBody).toContain('prime_daemon_install_permissions');
     expect(installBody.indexOf('prime_daemon_install_permissions')).toBeLessThan(installBody.indexOf('bootstrap_service'));
     expect(stageNativeBody).toContain('-nt "$NATIVE_DAEMON_SOURCE"');
+    expect(stageNativeBody).toContain('-nt "$REMOTE_WINDOW_CAPTURE_SOURCE"');
     expect(preflightBody).toMatch(/screen|screenshot|screencapture|ScreenCaptureKit/u);
     expect(preflightBody).toContain('zterm-daemon');
-    expect(preflightBody).toContain('capture-screen');
+    expect(preflightBody).toContain("process.env.ZTERM_DAEMON_NATIVE");
+    expect(preflightBody).not.toContain('ZTERM_DAEMON_CAPTURE_NATIVE');
+    expect(preflightBody).toContain('--permission-probe');
+    expect(preflightBody).toContain('ScreenCaptureKit permission preflight failed');
     expect(preflightBody).not.toContain("execFileSync('/usr/sbin/screencapture'");
     expect(preflightBody).not.toContain("execFileSync('/bin/launchctl'");
     expect(preflightBody).not.toMatch(/permission belongs to the GUI screenshot helper|Mac 端截图 helper/u);
@@ -45,10 +49,16 @@ describe('remote screenshot daemon black-box contract', () => {
   it('keeps packaged global daemon install-service aligned with source preflight', () => {
     const releaseScript = readProjectFile('scripts/prepare-global-daemon-release.sh');
     const installBody = extractBlock(releaseScript, 'install_service() {', 1200);
+    const preflightBody = extractBlock(releaseScript, 'prime_daemon_install_permissions() {', 2600);
 
     expect(releaseScript).toContain('prime_daemon_install_permissions()');
-    expect(releaseScript).toContain('capture-screen');
     expect(releaseScript).toContain('ZTERM_DAEMON_NATIVE');
+    expect(releaseScript).toContain('--permission-probe');
+    expect(releaseScript).not.toContain('ZTERM_DAEMON_CAPTURE_NATIVE');
+    expect(releaseScript).not.toContain('zterm-remote-window-capture');
+    expect(preflightBody).toContain("process.env.ZTERM_DAEMON_NATIVE");
+    expect(preflightBody).not.toContain('ZTERM_DAEMON_CAPTURE_NATIVE');
+    expect(preflightBody).not.toMatch(/\/usr\/sbin\/screencapture|capture-screen/u);
     expect(installBody).toContain('prime_daemon_install_permissions');
     expect(installBody.indexOf('prime_daemon_install_permissions')).toBeLessThan(installBody.indexOf('bootstrap_service'));
   });
