@@ -10,6 +10,7 @@ import type {
   TerminalSession,
   TerminalSessionTransport,
   TerminalTransportConnection,
+  TerminalTransportTextSendResult,
 } from './terminal-runtime-types';
 import type { RtcServerTransport } from './rtc-bridge';
 
@@ -45,7 +46,10 @@ export interface TerminalTransportRuntime {
   createWebSocketSessionTransport: (ws: WebSocket) => TerminalSessionTransport;
   createRtcSessionTransport: (transport: RtcServerTransport) => TerminalSessionTransport;
   sendTransportMessage: (transport: TerminalSessionTransport | null | undefined, message: TerminalTransportServerFrame) => void;
-  sendText: (transport: TerminalSessionTransport | null | undefined, text: string) => void;
+  sendText: (
+    transport: TerminalSessionTransport | null | undefined,
+    text: string,
+  ) => TerminalTransportTextSendResult;
   sendMessage: (session: TerminalTransportSubscriber, message: ServerMessage) => void;
   broadcastRuntimeDebugControl: (enabled: boolean, reason: string, sessionId?: string) => void;
   createTransportConnection: (
@@ -169,7 +173,7 @@ export function createTerminalTransportRuntime(
 
   function sendText(transport: TerminalSessionTransport | null | undefined, text: string) {
     if (!transport || transport.readyState !== WebSocket.OPEN) {
-      return;
+      return { status: 'not-open' } satisfies TerminalTransportTextSendResult;
     }
     const bytes = estimateTransportMessageBytes(text);
     try {
@@ -179,11 +183,14 @@ export function createTerminalTransportRuntime(
       transport.totalSendBytes = Math.max(0, Math.floor(transport.totalSendBytes || 0)) + bytes;
       transport.lastSendError = null;
       readTerminalTransportBackpressureSnapshot(transport);
+      return { status: 'sent', bytes } satisfies TerminalTransportTextSendResult;
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       transport.lastSendAt = Date.now();
       transport.lastSendBytes = bytes;
-      transport.lastSendError = error instanceof Error ? error.message : String(error);
-      throw error;
+      transport.lastSendError = message;
+      readTerminalTransportBackpressureSnapshot(transport);
+      return { status: 'error', error: message } satisfies TerminalTransportTextSendResult;
     }
   }
 

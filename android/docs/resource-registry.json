@@ -1944,9 +1944,11 @@
       "allowed_operations": [
         "queue_pending",
         "merge_ranges",
-        "hold_backpressure",
-        "flush_pending",
-        "broadcast_head",
+    "hold_backpressure",
+    "flush_pending",
+    "send_chunk",
+    "preserve_pending_on_send_failure",
+    "broadcast_head",
         "split_frame",
         "send_tail_seed"
       ],

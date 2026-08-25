@@ -24,6 +24,11 @@ export interface TerminalSessionTransport {
   connectedSent?: boolean;
 }
 
+export type TerminalTransportTextSendResult =
+  | { status: 'sent'; bytes: number }
+  | { status: 'not-open' }
+  | { status: 'error'; error: string };
+
 export interface TerminalTransportConnection {
   transportId: string;
   transport: TerminalSessionTransport;

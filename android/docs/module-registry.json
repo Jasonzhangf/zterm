@@ -756,7 +756,7 @@
       "level": 1,
       "parent_module_id": "daemon.runtime",
       "owner_feature": "terminal.buffer_render",
-      "responsibility": "Own per-subscriber buffer-sync pending state, range merge/collapse, backpressure hysteresis, head broadcast cache, oversized contiguous same-revision frame split, trace stages, and explicit flush statuses from daemon mirror truth to physical transport subscribers.",
+      "responsibility": "Own per-subscriber buffer-sync pending state, range merge/collapse, backpressure hysteresis, head broadcast cache, oversized contiguous same-revision frame split, per-chunk send-result handling, trace stages, and explicit flush statuses from daemon mirror truth to physical transport subscribers.",
       "owned_resources": [
         "resource.daemon_buffer_publisher"
       ],

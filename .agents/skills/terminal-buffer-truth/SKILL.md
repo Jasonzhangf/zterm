@@ -10,6 +10,14 @@ description: "terminal buffer / render / daemon mirror 真源与门禁"
 - `resource.renderer_window` may hand an explicitly immutable projected snapshot to `resource.client_sparse_buffer`'s render-store projection edge only after renderer-side equality/reuse checks complete. This removes duplicate full-window comparison/copy work; it does not change wire payload, buffer truth, visible-range ownership, or daemon behavior.
 - Performance trace storage is a bounded debug side channel. Eviction must remain metadata-only and O(1) per record; trace optimization must never trim terminal business payload or alter runtime truth.
 
+## Publisher send truth
+
+- `resource.daemon_buffer_publisher` may clear a subscriber's pending range only after every split frame chunk returns an explicit `sent` result from the transport owner. A `not-open` or `error` result preserves the authoritative pending range so the next transport generation can resend it.
+- When a pending range is observed on a new physical transport generation, the publisher must rebind `pendingTransportId` to that current generation before the next flush; otherwise a failed generation can strand the range until an unrelated scroll or mirror update creates a new request.
+- Trigger: a large buffer refresh reaches the client in part, then appears complete until scrolling causes a repair. Inspect `terminal-transport-runtime.ts` and `daemon-buffer-publisher-runtime.ts` before changing renderer or scroll code.
+- Anti-pattern: a void `sendText()` that silently returns for a closed transport, a publisher loop that ignores per-chunk status, or clearing pending after only the initial ready-state check.
+- Required gate: `src/server/daemon-buffer-publisher-runtime.test.ts` must cover both a single-chunk not-open result and a mid-frame transport close; the focused gate runs through `test:daemon-buffer-publisher`.
+
 ## 适用场景
 - terminal buffer / render / scroll / input 延迟问题
 - 出现“初次连接慢、输入不刷新、reading 拉不动、回到底部不 follow、带宽异常”

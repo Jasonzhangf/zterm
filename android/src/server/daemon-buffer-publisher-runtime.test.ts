@@ -20,7 +20,7 @@ function makeTransport(options: {
     readyState: options.readyState ?? 1,
     bufferedAmount: options.bufferedAmount ?? 0,
     backpressureCount: 0,
-    sendText: () => undefined,
+    sendText: () => ({ status: 'sent', bytes: 0 }),
     close: () => undefined,
   } satisfies TerminalSessionTransport;
 }
@@ -73,7 +73,7 @@ function makeDeps(overrides: Partial<DaemonBufferPublisherDeps> = {}): DaemonBuf
   return {
     sessions,
     sendMessage: () => undefined,
-    sendText: () => undefined,
+    sendText: () => ({ status: 'sent', bytes: 0 }),
     buildBufferHeadPayload: (sessionId, mirror) => ({
       sessionId,
       revision: mirror.revision,
@@ -101,6 +101,7 @@ describe('daemon buffer publisher runtime', () => {
       sendText: (transport, text) => {
         expect(transport).toBe(session.transport);
         sent.push(text);
+        return { status: 'sent', bytes: Buffer.byteLength(text) };
       },
     });
     const publisher = createDaemonBufferPublisherRuntime(deps);
@@ -121,7 +122,7 @@ describe('daemon buffer publisher runtime', () => {
     const session = makeSession('s1', transport);
     const deps = makeDeps({
       sessions: new Map([['s1', session]]),
-      sendText: () => undefined,
+      sendText: () => ({ status: 'sent', bytes: 0 }),
     });
     const publisher = createDaemonBufferPublisherRuntime(deps);
     const mirror = makeMirror(['s1']);
@@ -178,10 +179,12 @@ describe('daemon buffer publisher runtime', () => {
       sendText: (transport, text) => {
         expect(transport).toBe(session.transport);
         sent.push(text);
+        return { status: 'sent', bytes: Buffer.byteLength(text) };
       },
     });
     const publisher = createDaemonBufferPublisherRuntime(deps);
     const mirror = makeMirror(['s1'], 4);
+    mirror.bufferLines = Array.from({ length: 20_000 }, () => []);
 
     publisher.broadcastChangedRangesBufferSyncToSubscribers(
       mirror,
@@ -199,11 +202,73 @@ describe('daemon buffer publisher runtime', () => {
     expect(session.bufferSyncState?.lastSentRevision).toBe(4);
   });
 
+  it('preserves pending truth when a split-frame send becomes not-open mid-frame', () => {
+    const session = makeSession('s1');
+    let sentCount = 0;
+    const deps = makeDeps({
+      sessions: new Map([['s1', session]]),
+      buildChangedRangesBufferSyncPayload: (mirror, ranges) => ({
+        revision: mirror.revision,
+        startIndex: ranges[0]?.startIndex ?? mirror.bufferStartIndex,
+        endIndex: ranges[ranges.length - 1]?.endIndex ?? mirror.bufferStartIndex,
+        lines: Array.from({ length: 20_000 }, (_, index) => ({ i: index })),
+      }) as never,
+      sendText: (transport) => {
+        expect(transport).toBe(session.transport);
+        sentCount += 1;
+        if (sentCount === 2) {
+          session.transport!.readyState = WebSocket.CLOSED;
+          return { status: 'not-open' };
+        }
+        return { status: 'sent', bytes: 0 };
+      },
+    });
+    const publisher = createDaemonBufferPublisherRuntime(deps);
+    const mirror = makeMirror(['s1'], 4);
+    mirror.bufferLines = Array.from({ length: 20_000 }, () => []);
+
+    publisher.broadcastChangedRangesBufferSyncToSubscribers(
+      mirror,
+      [{ startIndex: 0, endIndex: 20_000 }],
+    );
+
+    expect(sentCount).toBe(2);
+    expect(publisher.flushPendingSubscriberBufferSync(mirror, 's1')).toBe('transport-not-open');
+    expect(session.bufferSyncState?.pendingLatestRevision).toBe(4);
+    expect(session.bufferSyncState?.pendingChangedAbsoluteRanges).toEqual([
+      { startIndex: 0, endIndex: 20_000 },
+    ]);
+  });
+
+  it('does not clear pending truth when a single-chunk send is rejected as not-open', () => {
+    const session = makeSession('s1');
+    const deps = makeDeps({
+      sessions: new Map([['s1', session]]),
+      sendText() {
+        session.transport!.readyState = WebSocket.CLOSED;
+        return { status: 'not-open' };
+      },
+    });
+    const publisher = createDaemonBufferPublisherRuntime(deps);
+    const mirror = makeMirror(['s1']);
+
+    publisher.broadcastChangedRangesBufferSyncToSubscribers(
+      mirror,
+      [{ startIndex: 1, endIndex: 2 }],
+    );
+
+    expect(session.bufferSyncState?.lastSentRevision).toBe(0);
+    expect(session.bufferSyncState?.pendingLatestRevision).toBe(1);
+    expect(session.bufferSyncState?.pendingChangedAbsoluteRanges).toEqual([
+      { startIndex: 1, endIndex: 2 },
+    ]);
+  });
+
   it('returns stale-transport without clearing the pending range', () => {
     const session = makeSession('s1');
     const deps = makeDeps({
       sessions: new Map([['s1', session]]),
-      sendText: () => undefined,
+    sendText: () => ({ status: 'sent', bytes: 0 }),
     });
     const publisher = createDaemonBufferPublisherRuntime(deps);
     const mirror = makeMirror(['s1']);
@@ -223,6 +288,9 @@ describe('daemon buffer publisher runtime', () => {
     expect(publisher.flushPendingSubscriberBufferSync(mirror, 's1')).toBe('stale-transport');
     expect(session.bufferSyncState?.resyncReason).toBe('transport-generation');
     expect(session.bufferSyncState?.pendingChangedAbsoluteRanges).toHaveLength(1);
+    expect(session.bufferSyncState?.pendingTransportId).toBe(session.transportId);
+    expect(publisher.flushPendingSubscriberBufferSync(mirror, 's1')).toBe('sent');
+    expect(session.bufferSyncState?.pendingLatestRevision).toBeNull();
   });
 });
 

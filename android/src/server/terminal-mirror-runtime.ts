@@ -20,6 +20,7 @@ import type {
   TerminalAttachPayload,
   TerminalGeometry,
   TmuxPaneMetrics,
+  TerminalTransportTextSendResult,
 } from './terminal-runtime-types';
 
 export interface TerminalMirrorRuntimeDeps {
@@ -27,7 +28,10 @@ export interface TerminalMirrorRuntimeDeps {
   sessions: Map<string, TerminalSession>;
   mirrors: Map<string, SessionMirror>;
   sendMessage: (session: TerminalSession, message: ServerMessage) => void;
-  sendText: (transport: import('./terminal-runtime-types').TerminalSessionTransport | null | undefined, text: string) => void;
+  sendText: (
+    transport: import('./terminal-runtime-types').TerminalSessionTransport | null | undefined,
+    text: string,
+  ) => TerminalTransportTextSendResult;
   recordPerformanceTrace?: (record: TerminalPerformanceTraceRecord) => void;
   sendScheduleStateToSession: (session: TerminalSession, sessionName?: string) => void;
   buildConnectedPayload: (

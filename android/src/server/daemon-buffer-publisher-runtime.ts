@@ -19,6 +19,7 @@ import type {
   TerminalSessionTransport,
   TerminalSubscriberBufferSyncResyncReason,
   TerminalSubscriberBufferSyncState,
+  TerminalTransportTextSendResult,
 } from './terminal-runtime-types';
 
 const SUBSCRIBER_PENDING_RANGE_LIMIT = 64;
@@ -32,7 +33,7 @@ export interface DaemonBufferPublisherDeps {
   sendText: (
     transport: TerminalSessionTransport | null | undefined,
     text: string,
-  ) => void;
+  ) => TerminalTransportTextSendResult;
   recordPerformanceTrace?: (record: TerminalPerformanceTraceRecord) => void;
   buildBufferHeadPayload: (
     sessionId: string,
@@ -310,6 +311,7 @@ export function createDaemonBufferPublisherRuntime(
     }
     if (state.pendingTransportId && state.pendingTransportId !== session.transportId) {
       markSubscriberBufferSyncResyncRequired(state, 'transport-generation', false);
+      state.pendingTransportId = session.transportId;
       return 'stale-transport';
     }
     validateSubscriberPendingBounds(state);
@@ -336,27 +338,34 @@ export function createDaemonBufferPublisherRuntime(
       subscriberId: session.id,
       transportKind: session.transport.kind,
     };
-    try {
-      deps.ensureSessionReady(session, mirror);
-      for (const message of messages) {
-        deps.recordPerformanceTrace?.({
-          ...traceBase,
-          stage: 'send-start',
-          at: Date.now(),
-          bytes: Buffer.byteLength(message.text, 'utf8'),
-          lineCount: Array.isArray(message.payload.lines) ? message.payload.lines.length : 0,
-        });
-        deps.sendText(session.transport, message.text);
-        deps.recordPerformanceTrace?.({
-          ...traceBase,
-          stage: 'send-done',
-          at: Date.now(),
-          bytes: Buffer.byteLength(message.text, 'utf8'),
-          lineCount: Array.isArray(message.payload.lines) ? message.payload.lines.length : 0,
-        });
+    deps.ensureSessionReady(session, mirror);
+    for (const message of messages) {
+      deps.recordPerformanceTrace?.({
+        ...traceBase,
+        stage: 'send-start',
+        at: Date.now(),
+        bytes: Buffer.byteLength(message.text, 'utf8'),
+        lineCount: Array.isArray(message.payload.lines) ? message.payload.lines.length : 0,
+      });
+      let sendResult: TerminalTransportTextSendResult;
+      try {
+        sendResult = deps.sendText(session.transport, message.text);
+      } catch {
+        return 'send-error';
       }
-    } catch {
-      return 'send-error';
+      if (sendResult.status === 'not-open') {
+        return 'transport-not-open';
+      }
+      if (sendResult.status === 'error') {
+        return 'send-error';
+      }
+      deps.recordPerformanceTrace?.({
+        ...traceBase,
+        stage: 'send-done',
+        at: Date.now(),
+        bytes: sendResult.bytes,
+        lineCount: Array.isArray(message.payload.lines) ? message.payload.lines.length : 0,
+      });
     }
     clearSubscriberPendingBufferSync(state, payload.revision);
     return 'sent';
