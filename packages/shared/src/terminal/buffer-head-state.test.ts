@@ -72,6 +72,30 @@ describe('resolveHeadAvailableBounds', () => {
 });
 
 describe('hasImpossibleLocalWindow', () => {
+  it('treats a lower authoritative end index on a strictly newer local revision as a revision reset instead of an impossible window', () => {
+    const head = makeHead({
+      revision: 8,
+      latestEndIndex: 50,
+      availableStartIndex: 47,
+      availableEndIndex: 50,
+    });
+    const buffer = makeBuffer({ startIndex: 100, endIndex: 200, revision: 9 });
+
+    expect(hasImpossibleLocalWindow(head, buffer)).toBe(false);
+  });
+
+  it('still marks the local window impossible when revisions match and the daemon range shrunk past it', () => {
+    const head = makeHead({
+      revision: 9,
+      latestEndIndex: 50,
+      availableStartIndex: 47,
+      availableEndIndex: 50,
+    });
+    const buffer = makeBuffer({ startIndex: 100, endIndex: 200, revision: 9 });
+
+    expect(hasImpossibleLocalWindow(head, buffer)).toBe(true);
+  });
+
   it('returns false when window is valid', () => {
     const head = makeHead({ availableEndIndex: 500 });
     const buffer = makeBuffer({ startIndex: 0, endIndex: 100 });

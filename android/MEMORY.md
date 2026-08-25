@@ -2695,3 +2695,11 @@ Tags: #remote-window-stream #wrtc-transactions #explicit-quality-failure #no-fal
 - Gates: focused capture/service/screenshot/file-transfer suite 49/49, type-check PASS, feature/architecture registry 13 files / 102 tests PASS. Product-path scan found no `/usr/sbin/screencapture`, `CGRequestScreenCaptureAccess()`, `ZTERM_DAEMON_CAPTURE_NATIVE`, raw helper, or Remote Capture identity. Emulator-5554 APK `0.1.3.2719` proved stream failure projects a typed error with no fallback; WebRTC UDP/ICE remains unreachable through emulator host mapping, so real-device video closure still requires a physical device or host-network emulator.
 - AGY Review task `agy-daemon-screenshot-no-fallback-20260825` passed with zero P0/P1 findings. Exact change set committed as `2f3037a5 fix: capture screenshots in daemon identity`; unrelated dirty worktree files remain untouched.
 Tags: #daemon-permission #screen-recording #single-tcc-identity #screenshot #no-fallback
+
+## 2026-08-25 tmux clear-history must shrink daemon absolute tail
+
+- `daemon.mirror_writer` must treat the current non-alternate tmux `history_size + pane_rows` readback as authoritative for `availableEndIndex`. Never floor it with the previous mirror cache end: after `tmux clear-history`, that cache floor prevents the daemon from publishing the smaller absolute tail and leaves stale client rows in place.
+- The only retained-tail exception is alternate-screen visible-only capture, whose intentional replacement range remains anchored to the previous tail. This exception must stay inside the daemon capture owner; renderer and UI must not compensate.
+- Shared head reconciliation must still inspect absolute bounds when head and local revisions are equal, because a same-revision range shrink is a valid reset signal. Strictly older daemon heads remain ignored.
+- Evidence baseline: emulator APK `0.1.3.2727`, fresh session `clear-history -> seq 1 1000000` produced continuous visible rows with zero gaps/empty rows; daemon mirror close-loop 9/9; AGY Review R2 controller no blocking findings.
+Tags: #terminal-buffer #daemon-mirror-writer #absolute-tail #clear-history #no-fallback

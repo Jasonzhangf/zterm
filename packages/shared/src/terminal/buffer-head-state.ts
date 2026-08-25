@@ -55,6 +55,18 @@ export function hasImpossibleLocalWindow(
   head: SessionBufferHeadState | null | undefined,
   buffer: SessionBufferState,
 ): boolean {
+  // Only a strictly newer local revision can make this head stale. An equal
+  // revision still has to evaluate the daemon's absolute range: the range may
+  // have shrunk after a tmux scrollback reset.
+  if (
+    head
+    && head.revision >= 0
+    && buffer.revision >= 0
+    && head.revision < buffer.revision
+  ) {
+    return false;
+  }
+
   const { availableEndIndex } = resolveHeadAvailableBounds(head, buffer);
 
   // If head has availableEndIndex and it's less than buffer.startIndex, we are beyond server.

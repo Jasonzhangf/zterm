@@ -63,6 +63,18 @@ describe('resolveTailRefreshWindow', () => {
     expect(result.requestEndIndex).toBe(100);
   });
 
+  it('Branch 2: scrollback reset requests the fresh authoritative tail, not the stale local window', () => {
+    const result = resolveTailRefreshWindow({
+      ...base,
+      authoritativeHeadStartIndex: 47,
+      viewportEndIndex: 50,
+      distanceToHead: 200,
+      invalidLocalWindow: false,
+    });
+    expect(result.requestStartIndex).toBe(47);
+    expect(result.requestEndIndex).toBe(50);
+  });
+
   it('Branch 3: distanceToHead > 0 → incremental from local end', () => {
     // distanceToHead = 20, so localEndIndex = 100 - 20 = 80
     const result = resolveTailRefreshWindow({

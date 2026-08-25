@@ -4142,6 +4142,67 @@ describe('session-context-buffer-runtime inactive gating', () => {
     expect(scheduleSessionRenderCommit).not.toHaveBeenCalled();
   });
 
+  it('requests tail-refresh instead of declaring the local window impossible when daemon end index resets', () => {
+    const sessionId = 'session-scrollback-reset';
+    const session = makeSession(sessionId);
+    session.buffer = createSessionBufferState({
+      lines: ['old-top', 'old-middle', 'old-bottom'],
+      startIndex: 100,
+      endIndex: 103,
+      bufferHeadStartIndex: 100,
+      bufferTailEndIndex: 103,
+      cols: 80,
+      rows: 3,
+      revision: 9,
+      cacheLines: 1000,
+    });
+
+    const refs = makeHeadRuntimeRefs({
+      sessions: [session],
+      activeSessionId: sessionId,
+    });
+
+    const runtimeDebug = vi.fn();
+    const requestSessionBufferSync = vi.fn(() => true);
+
+    handleBufferHeadRuntime({
+      sessionId,
+      latestRevision: 8,
+      latestEndIndex: 50,
+      availableStartIndex: 47,
+      availableEndIndex: 50,
+      cursor: null,
+      refs,
+      readSessionTransportSocket: () => ({ readyState: WebSocket.OPEN } as any),
+      readSessionBufferSnapshot: () => session.buffer,
+      commitSessionBufferUpdate: vi.fn(() => false),
+      scheduleSessionRenderCommit: vi.fn(),
+      isSessionTransportActive: () => true,
+      runtimeDebug,
+      requestSessionBufferSync,
+    });
+
+    expect(requestSessionBufferSync).toHaveBeenCalledWith(
+      sessionId,
+      expect.objectContaining({
+        reason: 'buffer-head-no-visible-range-active-bootstrap',
+        purpose: 'tail-refresh',
+        requestWindowOverride: {
+          requestStartIndex: 47,
+          requestEndIndex: 50,
+        },
+      }),
+    );
+    expect(runtimeDebug).toHaveBeenCalledWith(
+      'session.buffer.revision-reset.detected',
+      expect.objectContaining({
+        sessionId,
+        latestRevision: 8,
+        localRevision: 9,
+      }),
+    );
+  });
+
   it('does not schedule a render commit when buffer-head only advances daemon head metadata', () => {
     const sessionId = 'session-1';
     const session = makeSession(sessionId);

@@ -38,6 +38,9 @@ Owner feature: `terminal.buffer_render`.
 - `buffer-sync-contract.test.ts` proves daemon live diff `buffer-sync` payloads cover the complete authoritative changed span between the first and last changed range; it must not send non-adjacent rows with holes that make the client preserve stale middle rows.
 - `terminal-mirror-runtime.backpressure.test.ts` proves an oversized changed-span body refresh is split into contiguous `buffer-sync` chunks that cover every source row in order; it must not fall back to a short live-tail payload that drops changed rows outside the tail.
 - `terminal-mirror-capture.test.ts` proves daemon capture does not publish a transient half frame and does not let a live mirror tail anchor regress when tmux/TUI reports a shorter alternate-screen window.
+- `terminal-mirror-capture.test.ts` proves a tmux `history_size` shrink produces a new authoritative absolute tail instead of retaining the previous cache-sized anchor.
+- `terminal-mirror-capture.test.ts` proves a WezTerm external backend's available-line hint is its pane row count, never a mixed rows-plus-columns geometry value.
+- `buffer-head-state.test.ts` proves a strictly newer local revision does not make a stale head's lower end index an impossible-window failure, while an equal revision still honors a daemon range that has shrunk past the local window.
 - `mirror-line-canonicalizer.test.ts` proves ANSI foreground/background/attribute state emitted once by `tmux capture-pane -e` continues across physical soft-wrap rows until an explicit SGR reset; a reset on the preceding row must keep the next row at default rendition.
 - `session-context-buffer-runtime.test.ts` and `TerminalView.dynamic-refresh.test.tsx` prove a missed non-gap visible row cannot be hidden by a later same-tail sparse revision advance; the client must request one authoritative visible-window body repaint from the buffer owner instead of treating global revision equality as row freshness.
 - `session-context-buffer-runtime.test.ts` proves a sparse payload rejected across a revision gap schedules the current stable render immediately and requests the rejected payload's complete declared range. The repair must not depend on a later manual scroll to rediscover that range.
@@ -63,6 +66,8 @@ Owner feature: `terminal.buffer_render`.
   - oversized body refreshes where serialized bytes exceed the per-message budget,
   - fast TUI-like top/status/footer refresh,
   - alternate-screen tail anchor monotonicity when the visible pane has fewer authoritative rows than the existing mirror tail,
+  - scrollback shrink from a near-cache-sized window to a short authoritative tail,
+  - daemon head end/revision reset while the client still holds the old absolute window,
   - bottom row changing while the viewport stays in follow mode,
   - head-only metadata interleaved with body updates without repainting stale body text.
   - source row changed or cleared once, the client missed that non-gap body row, then a later same-tail sparse patch arrives; output DOM must converge to source only through an authoritative visible-window repaint.

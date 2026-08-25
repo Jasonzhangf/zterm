@@ -55,6 +55,51 @@ function makeReadyMirror(overrides?: Partial<SessionMirror>): SessionMirror {
 }
 
 describe('terminal mirror capture runtime', () => {
+  it('replaces a cache-sized absolute tail when tmux clear-history shrinks the authoritative source', async () => {
+    let historySize = 100000;
+    let captureIndex = 0;
+    const runTmux = vi.fn((args: string[]) => {
+      if (args[0] === 'display-message' && args.includes('#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{pane_dead}')) {
+        return { ok: true as const, stdout: `%1\t${historySize}\t3\t80\t0\t0\n` };
+      }
+      if (args[0] === 'display-message' && args.includes('#{cursor_x} #{cursor_y} #{cursor_flag} #{keypad_cursor_flag}')) {
+        return { ok: true as const, stdout: '0 2 1 0\n' };
+      }
+      if (args[0] === 'capture-pane') {
+        captureIndex += 1;
+        if (captureIndex <= 2) {
+          return { ok: true as const, stdout: 'old-top\nold-middle\nold-bottom\n' };
+        }
+        historySize = 0;
+        return { ok: true as const, stdout: 'new-top\nnew-middle\nnew-bottom\n' };
+      }
+      throw new Error(`unexpected tmux args: ${args.join(' ')}`);
+    });
+
+    const runtime = createTerminalMirrorCaptureRuntime({
+      resolveMirrorCacheLines: () => 100000,
+      buildExactTmuxPaneTarget: (sessionName) => `=${sessionName}:0.0`,
+      runTmux,
+      runTmuxAsync: async (args) => runTmux(args),
+      logTimePrefix: () => '2026-08-25 00:00:00',
+    });
+
+    const mirror = makeReadyMirror({
+      rows: 3,
+      bufferStartIndex: 0,
+      bufferLines: [row('seed-top'), row('seed-middle'), row('seed-bottom')],
+    });
+
+    await runtime.captureMirrorAuthoritativeBufferFromTmux(mirror);
+    expect(mirror.bufferStartIndex).toBe(100000);
+    expect(mirror.bufferLines.map(rowText)).toEqual(['old-top', 'old-middle', 'old-bottom']);
+
+    await runtime.captureMirrorAuthoritativeBufferFromTmux(mirror);
+    expect(mirror.bufferStartIndex).toBe(0);
+    expect(mirror.bufferLines.map(rowText)).toEqual(['new-top', 'new-middle', 'new-bottom']);
+    expect(mirror.lastScrollbackCount).toBe(0);
+  });
+
   it('converts tmux history_size into total canonical rows in normal mode', () => {
     const runTmux = vi.fn((args: string[]) => {
       if (args[0] === 'display-message' && args.includes('#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{pane_dead}')) {
@@ -356,6 +401,56 @@ describe('terminal mirror capture runtime', () => {
     await expect(runtime.captureMirrorAuthoritativeBufferFromTmux(makeReadyMirror({
       backend: 'herdr',
     }))).rejects.toThrow('terminal backend herdr requested for mirror capture but unavailable; refusing to fall back to tmux');
+  });
+
+  it('never derives tmux-like available line hints from wezterm columns', () => {
+    const runtime = createTerminalMirrorCaptureRuntime({
+      resolveMirrorCacheLines: (rows) => rows,
+      buildExactTmuxPaneTarget: (sessionName) => `=${sessionName}:0.0`,
+      runTmux: () => {
+        throw new Error('tmux must not be used for an available wezterm backend');
+      },
+      runTmuxAsync: async () => {
+        throw new Error('tmux must not be used for an available wezterm backend');
+      },
+      logTimePrefix: () => '2026-08-25 00:00:00',
+      terminalBackendKind: 'wezterm',
+      backendRuntimes: {
+        wezterm: {
+          kind: 'wezterm',
+          listSessions: () => [{
+            sessionName: 'demo',
+            paneId: 7,
+            workspace: 'demo',
+            title: 'demo',
+            cwd: '/tmp',
+            cols: 160,
+            rows: 24,
+          }],
+          createSession: () => {
+            throw new Error('unexpected createSession');
+          },
+          readSnapshot: async () => {
+            throw new Error('unexpected readSnapshot');
+          },
+          writeInput: () => {
+            throw new Error('unexpected writeInput');
+          },
+          closeSession: () => {
+            throw new Error('unexpected closeSession');
+          },
+          readCurrentPath: () => '/tmp',
+        },
+      },
+    });
+
+    expect(runtime.readTmuxPaneMetrics('demo')).toEqual({
+      paneId: '7',
+      tmuxAvailableLineCountHint: 24,
+      paneRows: 24,
+      paneCols: 160,
+      alternateOn: false,
+    });
   });
 
   it('keeps the mirror tail anchor monotonic when alternate-screen capture reports only the visible pane', async () => {

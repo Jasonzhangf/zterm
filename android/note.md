@@ -175,6 +175,13 @@
 - Emulator-5554 / installed `0.1.3.2719`: fresh 100000-line refresh, 100 timed CDP samples, 0 empty rows, 0 gaps, 0 discontinuities, visible absolute range advanced by 100000. Screenshot `/tmp/zterm-emulator-large-refresh-rerun.png` SHA `04c86d1d3caca7dd2f38674bfa6c9d233c0c00d8b725afa1322df7314f38cd1d`, terminal-region non-black fraction `0.961536`.
 - Next: AGY Review only; do not stage unrelated dirty files.
 
+## 2026-08-25 large-refresh absolute-tail correction
+
+- Root cause: `captureTmuxMirrorSnapshot()` used the previous mirror cache end index as a floor for the new tmux available-line count. After a large scrollback, `tmux clear-history` could shrink the authoritative tail but the daemon kept publishing the old absolute end, so the client retained stale rows and could render a black window during the subsequent refresh.
+- Fix owner: `daemon.mirror_writer` now uses the current non-alternate tmux `history_size + pane_rows` result as the authoritative available end. Only alternate-screen visible-only capture retains the previous tail anchor. Shared head handling also evaluates equal revisions when the daemon range shrinks; older revisions remain ignored.
+- Verification: feature registry 102/102, frame assembly 110/110, focused shared 44/44, Android focused 98/98, typecheck, Vite asset build, Gradle assembleDebug, daemon mirror close-loop 9/9, emulator APK `0.1.3.2727` fresh-session `clear-history -> seq 1 1000000` with continuous absolute rows and zero gaps/empty rows. AGY Review R2 passed with no blocking findings.
+- Boundary: no renderer/UI compensation, payload clipping, permission fallback, alternate capture path, or second mirror truth was added.
+
 ## 2026-08-24 permission fallback correction
 
 - Root cause: canonical ScreenCaptureKit Swift called `CGRequestScreenCaptureAccess()` and polled for 12 seconds after preflight denial; tests explicitly required that fallback.

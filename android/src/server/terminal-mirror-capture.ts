@@ -333,7 +333,7 @@ export function createTerminalMirrorCaptureRuntime(
         // Herdr does not expose a tmux history-size equivalent. Its absolute
         // range must come from the canonical snapshot, never from a derived
         // geometry value.
-        tmuxAvailableLineCountHint: backend === 'herdr' ? 0 : session.rows + session.cols,
+        tmuxAvailableLineCountHint: backend === 'herdr' ? 0 : session.rows,
         paneRows: session.rows,
         paneCols: session.cols,
         alternateOn: false,
@@ -485,10 +485,16 @@ export function createTerminalMirrorCaptureRuntime(
       capturedLineCount: capturedLines.length,
       scratchLineCount: nextBufferLines.length,
     });
-    const totalAvailableLines = Math.max(
-      resolvedAvailableLineCount,
-      getMirrorAvailableEndIndex(mirror),
-    );
+    // The mirror cache must never be used as a floor for the authoritative
+    // available end index when the new snapshot comes from a fresh tmux
+    // geometry read. clear-history, resize, and external readback changes must
+    // propagate as a smaller absolute tail so the client can reconcile instead
+    // of painting stale rows forever. Alternate-screen visible-only captures
+    // are the exception: they are stable and intentional full-range replacements
+    // whose previous tail anchor is retained below.
+    const totalAvailableLines = metrics.alternateOn
+      ? Math.max(resolvedAvailableLineCount, getMirrorAvailableEndIndex(mirror))
+      : resolvedAvailableLineCount;
     const computedStartIndex = Math.max(0, totalAvailableLines - nextBufferLines.length);
     const authoritativeWindow = resolveAuthoritativeMirrorCaptureWindow({
       nextLines: nextBufferLines,

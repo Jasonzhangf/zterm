@@ -229,6 +229,53 @@ describe('terminal-buffer canonical mirror patching', () => {
     expect(replayed.lines.map(cellsToLine)).toEqual(['new-1', 'new-2', 'new-3', 'new-4']);
   });
 
+  it('replay history follows the authoritative tail when scrollback shrinks under a higher revision', () => {
+    const replayed = replayBufferSyncHistory({
+      rows: 4,
+      cols: 80,
+      cacheLines: 1000,
+      history: [
+        {
+          type: 'buffer-sync',
+          payload: payload({
+            startIndex: 100,
+            endIndex: 104,
+            availableStartIndex: 100,
+            availableEndIndex: 104,
+            revision: 7,
+            lines: [
+              [100, 'old-100'],
+              [101, 'old-101'],
+              [102, 'old-102'],
+              [103, 'old-103'],
+            ],
+          }),
+        },
+        {
+          type: 'buffer-sync',
+          payload: payload({
+            startIndex: 47,
+            endIndex: 50,
+            availableStartIndex: 47,
+            availableEndIndex: 50,
+            revision: 8,
+            lines: [
+              [47, 'fresh-47'],
+              [48, 'fresh-48'],
+              [49, 'fresh-49'],
+            ],
+          }),
+        },
+      ],
+    });
+
+    expect(replayed.startIndex).toBe(47);
+    expect(replayed.endIndex).toBe(50);
+    expect(replayed.bufferTailEndIndex).toBe(50);
+    expect(replayed.lines.map(cellsToLine)).toEqual(['fresh-47', 'fresh-48', 'fresh-49']);
+    expect(replayed.gapRanges).toEqual([]);
+  });
+
   it('treats revision-only advances as a real buffer state change', () => {
     const current = applyBufferSyncToSessionBuffer(
       undefined,

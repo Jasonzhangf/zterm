@@ -25,6 +25,73 @@ function textLines(startIndex: number, count: number, prefix: string) {
 }
 
 describe('terminal buffer merge', () => {
+  it('keeps visible rows when a fresh authoritative tail payload starts before the local window', () => {
+    const current = createSessionBufferState({
+      lines: textLines(995, 8, 'current'),
+      startIndex: 995,
+      endIndex: 1003,
+      bufferHeadStartIndex: 995,
+      bufferTailEndIndex: 1003,
+      cols: 80,
+      rows: 4,
+      revision: 7,
+      cacheLines: 1000,
+    });
+    const payload: TerminalBufferPayload = {
+      startIndex: 0,
+      endIndex: 5,
+      availableStartIndex: 0,
+      availableEndIndex: 5,
+      revision: 8,
+      cols: 80,
+      rows: 4,
+      cursorKeysApp: false,
+      lines: lines(0, 5, 'fresh'),
+    };
+
+    const next = applyBufferSyncToSessionBuffer(current, payload, 1000);
+
+    expect(next.startIndex).toBe(0);
+    expect(next.endIndex).toBe(5);
+    expect(next.bufferTailEndIndex).toBe(5);
+    expect(next.lines.map(cellsToLine)).toEqual(['f', 'f', 'f', 'f', 'f']);
+    expect(next.gapRanges).toEqual([]);
+  });
+
+  it('moves to the authoritative tail when the daemon end index shrinks on a higher revision', () => {
+    const current = createSessionBufferState({
+      lines: textLines(100, 20, 'old'),
+      startIndex: 100,
+      endIndex: 120,
+      bufferHeadStartIndex: 100,
+      bufferTailEndIndex: 120,
+      cols: 80,
+      rows: 4,
+      revision: 7,
+      cacheLines: 1000,
+    });
+    const payload: TerminalBufferPayload = {
+      startIndex: 47,
+      endIndex: 50,
+      availableStartIndex: 47,
+      availableEndIndex: 50,
+      revision: 8,
+      cols: 80,
+      rows: 4,
+      cursorKeysApp: false,
+      lines: lines(47, 3, 'fresh'),
+    };
+
+    const next = applyBufferSyncToSessionBuffer(current, payload, 1000);
+
+    expect(next.startIndex).toBe(47);
+    expect(next.endIndex).toBe(50);
+    expect(next.bufferHeadStartIndex).toBe(47);
+    expect(next.bufferTailEndIndex).toBe(50);
+    expect(next.lines.map(cellsToLine)).toEqual(['f', 'f', 'f']);
+    expect(next.gapRanges).toEqual([]);
+  });
+
   it('keeps a current tail window anchored when a newer near-tail payload does not reach the authoritative tail', () => {
     const current = createSessionBufferState({
       lines: textLines(10606, 1000, 'current'),
