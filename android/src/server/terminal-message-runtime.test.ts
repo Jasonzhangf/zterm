@@ -1,7 +1,8 @@
 import { Buffer } from 'node:buffer';
 import { describe, expect, it, vi } from 'vitest';
 import { TERMINAL_INPUT_DAEMON_FRAME_MAX_BYTES } from '@zterm/shared/terminal/input-chunking';
-import type { TerminalTransportServerFrame } from '@zterm/shared/protocol';
+import { isTerminalMuxServerFrame, type TerminalTransportServerFrame } from '@zterm/shared/protocol';
+import { createTerminalChannelMuxRuntime } from './terminal-channel-mux-runtime';
 import { createTerminalMessageRuntime } from './terminal-message-runtime';
 import { createDaemonInputQueueRuntime } from './daemon-input-queue-runtime';
 import type {
@@ -138,6 +139,7 @@ function createRuntime(options?: {
   passThroughTransportSend?: boolean;
   failSessionActivityPublish?: boolean;
   failAttachTmux?: boolean;
+  useRealChannelMux?: boolean;
 }) {
   type RemoteWindowListTargetsResult = Awaited<ReturnType<RemoteWindowStreamDaemonRuntime['listTargets']>>;
       type RemoteWindowStartStreamResult = Awaited<ReturnType<RemoteWindowStreamDaemonRuntime['startStream']>>;
@@ -252,7 +254,11 @@ function createRuntime(options?: {
     sessions.set(subscriber.id, subscriber);
     return subscriber;
   });
-  const channelMuxRuntime = {
+  const channelMuxRuntime = options?.useRealChannelMux ? createTerminalChannelMuxRuntime({
+    sessions,
+    sendText: (transport, text) => sendTransportMessage(transport, JSON.parse(text)),
+    defaultSessionName: 'demo',
+  }) : {
     createMuxChannelSubscriber,
     ensureMuxChannels: (connection: TerminalTransportConnection) => {
       if (!connection.muxChannels) {
@@ -1760,6 +1766,73 @@ describe('terminal message runtime explicit error truth', () => {
     expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
       type: 'remote-window-error',
       payload: errorPayload,
+    });
+  });
+
+  it('wraps remote window channel responses in mux-channel-message frames', async () => {
+    const { runtime, remoteWindowStreamRuntime } = createRuntime({
+      useRealChannelMux: true,
+      passThroughTransportSend: true,
+    });
+    const connection = createConnection(null);
+    connection.muxVersion = 1;
+    remoteWindowStreamRuntime.startStream.mockRejectedValueOnce(
+      new Error('ScreenCaptureKit capture process exited code=4'),
+    );
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'mux-channel-open',
+      payload: {
+        channelId: 'rw-channel',
+        sessionName: 'remote-window',
+        bodySubscribed: false,
+      },
+    })));
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'mux-channel-message',
+      payload: {
+        channelId: 'rw-channel',
+        message: {
+          type: 'remote-window-stream-start-request',
+          payload: {
+            requestId: 'rw-mux-start',
+            streamId: 'rw-mux-stream',
+            mediaPlan: 'single-focus',
+            mediaPlanVersion: 1,
+            target: makeRemoteWindowTargetManifest(),
+            offer: { type: 'offer', sdp: 'android-offer' },
+          },
+        },
+      },
+    })));
+    await flushAsyncHandlers();
+
+    const physicalConnection = connection.transport;
+    const transportFrames = (physicalConnection.sendText as ReturnType<typeof vi.fn>).mock.calls
+      .map((call) => JSON.parse(call[0] as string) as TerminalTransportServerFrame);
+    expect(transportFrames.every(isTerminalMuxServerFrame)).toBe(true);
+    expect(transportFrames.some((frame) => frame.type === 'remote-window-error')).toBe(false);
+    const errorFrame = [...transportFrames].reverse().find((frame) => (
+      frame.type === 'mux-channel-message'
+      && frame.payload.message.type === 'remote-window-error'
+    ));
+    if (!errorFrame) {
+      throw new Error('expected a wrapped remote-window-error mux channel frame');
+    }
+    expect(errorFrame).toEqual({
+      type: 'mux-channel-message',
+      payload: {
+        channelId: 'rw-channel',
+        message: {
+          type: 'remote-window-error',
+          payload: {
+            requestId: 'rw-mux-start',
+            streamId: 'rw-mux-stream',
+            code: 'remote_window_stream_start_failed',
+            message: 'ScreenCaptureKit capture process exited code=4',
+          },
+        },
+      },
     });
   });
 });

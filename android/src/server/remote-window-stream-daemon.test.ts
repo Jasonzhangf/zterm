@@ -49,6 +49,7 @@ vi.mock('@roamhq/wrtc', () => ({
   },
 }));
 import type { RemoteWindowCaptureSourceFactory } from './remote-window-capture';
+import { RemoteWindowCaptureTargetUnavailableError } from './remote-window-capture';
 import {
   buildScreenCaptureKitStartupTimeoutMessage,
   buildScreenCaptureKitConfig,
@@ -1648,6 +1649,7 @@ sleep 2
         startupTimeoutMs: 80,
         swiftBinary: runner.executablePath,
         captureBinary: runner.executablePath,
+        validateTargets: async () => undefined,
         onFrame: vi.fn(),
         onError: vi.fn(),
       })).rejects.toThrow('ScreenCaptureKit capture did not produce a frame before timeout after 80ms');
@@ -1671,7 +1673,8 @@ sleep 2
     expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('streamConfiguration.queueDepth = max(3, min(3, queueDepth))');
     expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('streamConfiguration.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(max(1, frameRate)))');
     expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).not.toContain('SCScreenshotManager');
-    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('Task { @MainActor in');
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('DispatchQueue.global(qos: .userInitiated).async');
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('Task {');
     expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('Screen Recording permission is required');
     expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('windowId: command.windowId');
     expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('remote window capture target not found in SCShareableContent');
@@ -1720,6 +1723,7 @@ setInterval(() => {}, 1000);
         startupTimeoutMs: 10_000,
         swiftBinary: runner.executablePath,
         captureBinary: runner.executablePath,
+        validateTargets: async () => undefined,
         onFrame: (frame) => frames.push({ width: frame.width, height: frame.height }),
         onError: vi.fn(),
       });
@@ -1964,6 +1968,42 @@ setInterval(() => {}, 1000);
     expect(fakePeer.setRemoteDescription).toHaveBeenCalledTimes(1);
     expect(fakePeer.setRemoteDescription).toHaveBeenCalledWith({ type: 'offer', sdp: 'invalid-client-offer' });
     expect(captureSourceFactory).not.toHaveBeenCalled();
+    expect(fakePeer.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('projects stale fresh-content validation as target-validation instead of generic startup failure', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      captureSourceFactory: vi.fn(async () => {
+        throw new RemoteWindowCaptureTargetUnavailableError(['16260']);
+      }),
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => ({
+        createTrack: vi.fn(() => makeFakeMediaStreamTrack()),
+        onFrame: vi.fn(),
+      } as any)),
+      rgbaToI420: vi.fn(),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    const result = await runtime.startStream({
+      requestId: 'rw-stale-target',
+      streamId: 'stream-stale-target',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
+      target: makeAppStreamTarget(),
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+    });
+
+    expect(result).toMatchObject({
+      requestId: 'rw-stale-target',
+      streamId: 'stream-stale-target',
+      code: 'remote_window_target_not_found',
+      message: 'remote window target not found in fresh SCShareableContent: 16260',
+      failureStage: 'target-validation',
+    });
     expect(fakePeer.close).toHaveBeenCalledTimes(1);
   });
 

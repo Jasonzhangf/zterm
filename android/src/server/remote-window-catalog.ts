@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { spawn, type ChildProcess } from 'child_process';
 import type {
   RemoteWindowStreamRect,
   RemoteWindowStreamTargetManifest,
@@ -14,6 +14,80 @@ export const DEFAULT_MACOS_APP_WINDOW_CATALOG_TIMEOUT_MS = 15000;
 
 const ITERM2_APP_BUNDLE_ID = 'com.googlecode.iterm2';
 const ITERM2_PANE_GAP_PX = 1;
+
+function terminateProcessTree(child: ChildProcess) {
+  if (!child.pid) {
+    return;
+  }
+  try {
+    process.kill(-child.pid, 'SIGTERM');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ESRCH') {
+      throw error;
+    }
+  }
+}
+
+function runInlineScript(
+  command: string,
+  args: string[],
+  options: { timeoutMs: number; timeoutMessage: string; fallbackMessage: string },
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      detached: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+    let timedOut = false;
+    let settled = false;
+    const timeoutId = setTimeout(() => {
+      timedOut = true;
+      try {
+        terminateProcessTree(child);
+      } catch (error) {
+        settled = true;
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
+    }, options.timeoutMs);
+
+    const finish = (callback: () => void) => {
+      clearTimeout(timeoutId);
+      if (settled) return;
+      settled = true;
+      callback();
+    };
+    child.stdout.on('data', (chunk: Buffer) => stdoutChunks.push(chunk));
+    child.stderr.on('data', (chunk: Buffer) => stderrChunks.push(chunk));
+    child.on('error', (error: Error) => finish(() => reject(error)));
+    child.on('close', () => finish(() => {
+      const stdout = Buffer.concat(stdoutChunks).toString('utf8');
+      const stderr = Buffer.concat(stderrChunks).toString('utf8');
+      if (timedOut || child.exitCode !== 0) {
+        if (timedOut) {
+          reject(new Error([
+            stderr.trim(),
+            `${options.timeoutMessage} after ${options.timeoutMs}ms`,
+          ].filter(Boolean).join('\n')));
+          return;
+        }
+        const error = new Error(`Command failed: ${command} ${args.join(' ')}`);
+        reject(new Error(formatInlineScriptExecFailure(
+          error,
+          stdout,
+          stderr,
+          options.timeoutMs,
+          options.timeoutMessage,
+          options.fallbackMessage,
+        )));
+        return;
+      }
+      resolve(stdout);
+    }));
+  });
+}
 
 export interface MacosAppWindowCatalog {
   windows: MacosAppWindow[];
@@ -411,24 +485,10 @@ export function runDefaultIterm2Python(
   script: string,
   options: { pythonBinary: string; timeoutMs: number },
 ): Promise<string> {
-  return new Promise((resolve, reject) => {
-    execFile(options.pythonBinary, ['-c', script], {
-      timeout: options.timeoutMs,
-      windowsHide: true,
-    }, (error, stdout, stderr) => {
-      if (error) {
-        reject(new Error(formatInlineScriptExecFailure(
-          error,
-          stdout,
-          stderr,
-          options.timeoutMs,
-          'iTerm2 Python catalog timed out',
-          'iTerm2 Python API failed',
-        )));
-        return;
-      }
-      resolve(stdout);
-    });
+  return runInlineScript(options.pythonBinary, ['-c', script], {
+    timeoutMs: options.timeoutMs,
+    timeoutMessage: 'iTerm2 Python catalog timed out',
+    fallbackMessage: 'iTerm2 Python API failed',
   });
 }
 
@@ -436,24 +496,10 @@ export function runDefaultMacosAppWindowCatalog(
   script: string,
   options: { swiftBinary: string; timeoutMs: number },
 ): Promise<string> {
-  return new Promise((resolve, reject) => {
-    execFile(options.swiftBinary, ['-e', script], {
-      timeout: options.timeoutMs,
-      windowsHide: true,
-    }, (error, stdout, stderr) => {
-      if (error) {
-        reject(new Error(formatInlineScriptExecFailure(
-          error,
-          stdout,
-          stderr,
-          options.timeoutMs,
-          'macOS app window catalog timed out',
-          'macOS app window catalog failed',
-        )));
-        return;
-      }
-      resolve(stdout);
-    });
+  return runInlineScript(options.swiftBinary, ['-e', script], {
+    timeoutMs: options.timeoutMs,
+    timeoutMessage: 'macOS app window catalog timed out',
+    fallbackMessage: 'macOS app window catalog failed',
   });
 }
 

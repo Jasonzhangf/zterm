@@ -1,4 +1,4 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import type {
   RemoteWindowInputEventPayload,
   RemoteWindowStreamTargetManifest,
@@ -14,6 +14,7 @@ import { buildRemoteWindowCanvasLayoutV1 } from './remote-window-canvas-layout';
 export const DEFAULT_SCREEN_CAPTURE_KIT_STARTUP_TIMEOUT_MS = 20000;
 
 const REMOTE_WINDOW_CAPTURE_UPDATE_TIMEOUT_MS = 3_000;
+export const REMOTE_WINDOW_TARGET_VALIDATION_TIMEOUT_MS = 5_000;
 const REMOTE_WINDOW_CAPTURE_UPDATE_STDERR_PREFIX = 'ZTERM_REMOTE_WINDOW_CAPTURE_UPDATE ';
 
 const REMOTE_WINDOW_CAPTURE_FRAME_MAGIC = Buffer.from('ZRW1');
@@ -40,6 +41,7 @@ export type RemoteWindowCaptureSourceFactory = (
     startupTimeoutMs: number;
     swiftBinary: string;
     captureBinary: string;
+    validateTargets?: (config: ReturnType<typeof buildScreenCaptureKitConfig>) => Promise<void>;
     onFrame: (frame: RemoteWindowCaptureFrame) => void;
     onError: (error: Error) => void;
   },
@@ -51,6 +53,16 @@ interface RemoteWindowCaptureUpdateAck {
   width?: number;
   height?: number;
   error?: string;
+}
+
+export class RemoteWindowCaptureTargetUnavailableError extends Error {
+  readonly windowIds: readonly string[];
+
+  constructor(windowIds: readonly string[]) {
+    super(`remote window target not found in fresh SCShareableContent: ${windowIds.join(', ')}`);
+    this.name = 'RemoteWindowCaptureTargetUnavailableError';
+    this.windowIds = windowIds;
+  }
 }
 
 interface PendingRemoteWindowCaptureUpdate {
@@ -172,6 +184,46 @@ export function buildRemoteWindowCaptureUpdateCommand(
   };
 }
 
+async function validateScreenCaptureKitTargetWindows(
+  config: ReturnType<typeof buildScreenCaptureKitConfig>,
+  options: {
+    captureBinary: string;
+    timeoutMs?: number;
+  },
+): Promise<void> {
+  const windowIds = [
+    config.windowId,
+    ...(config.compositeWindows ?? []).map((window) => window.windowId),
+  ];
+  try {
+    await new Promise<void>((resolve, reject) => {
+      execFile(options.captureBinary, ['remote-window-validate', ...windowIds], {
+        timeout: Math.max(1, options.timeoutMs ?? REMOTE_WINDOW_TARGET_VALIDATION_TIMEOUT_MS),
+        windowsHide: true,
+      }, (error, _stdout, stderr) => {
+        if (!error) {
+          resolve();
+          return;
+        }
+        const detail = stderr.trim() || error.message;
+        if (error.code === 4 || detail.includes('target not found in fresh SCShareableContent')) {
+          reject(new RemoteWindowCaptureTargetUnavailableError(windowIds));
+          return;
+        }
+        reject(new Error(`remote window target validation failed: ${detail}`));
+      });
+    });
+  } catch (error) {
+    if (error instanceof RemoteWindowCaptureTargetUnavailableError) {
+      throw error;
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(message.startsWith('remote window target validation failed:')
+      ? message
+      : `remote window target validation failed: ${message}`);
+  }
+}
+
 function stopChildProcess(
   child: RemoteWindowCaptureChildProcess,
   onCleanupError: (error: Error) => void,
@@ -221,6 +273,7 @@ export async function startScreenCaptureKitFrameSource(
     startupTimeoutMs: number;
     swiftBinary: string;
     captureBinary: string;
+    validateTargets?: (config: ReturnType<typeof buildScreenCaptureKitConfig>) => Promise<void>;
     onFrame: (frame: RemoteWindowCaptureFrame) => void;
     onError: (error: Error) => void;
   },
@@ -229,6 +282,9 @@ export async function startScreenCaptureKitFrameSource(
   if (!options.captureBinary?.trim()) {
     throw new Error('installed ScreenCaptureKit capture binary is required');
   }
+  await (options.validateTargets ?? validateScreenCaptureKitTargetWindows)(captureConfig, {
+    captureBinary: options.captureBinary,
+  });
   const child = spawn(options.captureBinary, ["remote-window-capture"], {
     env: {
       ...process.env,

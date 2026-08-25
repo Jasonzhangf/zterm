@@ -9,7 +9,7 @@ PY
 )"
 WORKSPACE_ROOT="$(cd "${ROOT_DIR}/.." && pwd)"
 NODE_BIN="$(command -v node)"
-LOG_DIR="${HOME}/.wterm/logs"
+LOG_DIR="${HOME}/.zterm/logs"
 WTERM_HOME="${HOME}/.zterm"
 WTERM_BIN_DIR="${WTERM_HOME}/bin"
 RUNTIME_STATE_DIR="${WTERM_HOME}/run"

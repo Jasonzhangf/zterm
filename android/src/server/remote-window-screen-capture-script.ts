@@ -404,4 +404,34 @@ func startRemoteWindowCaptureProcess() {
 
     dispatchMain()
 }
+
+func startRemoteWindowValidateProcess(windowIds: [String]) {
+    guard hasScreenCapturePermission() else {
+        stderrLine("Screen Recording permission is required; grant zterm-daemon in macOS Privacy settings")
+        exit(5)
+    }
+
+    DispatchQueue.global(qos: .userInitiated).async {
+        Task {
+            do {
+                let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+                let availableIds = Set(content.windows.map { $0.windowID })
+                let missingIds = windowIds.filter { windowId in
+                    guard let numericId = UInt32(windowId) else { return true }
+                    return !availableIds.contains(numericId)
+                }
+                if !missingIds.isEmpty {
+                    stderrLine("remote window target not found in fresh SCShareableContent: \(missingIds.joined(separator: ", "))")
+                    exit(4)
+                }
+                exit(0)
+            } catch {
+                stderrLine("remote window target validation failed: " + String(describing: error))
+                exit(3)
+            }
+        }
+    }
+
+    dispatchMain()
+}
 `;

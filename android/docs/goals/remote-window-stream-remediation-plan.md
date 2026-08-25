@@ -562,3 +562,80 @@ Phase 0 文档/ADR/红测
 - 当前 `adb devices` 无在线设备，无法执行覆盖安装、安装版 Android 单窗口首帧 proof、连续帧观察和 cleanup proof。
 - 本轮未发布 public Relay update channel；这是外部状态变更，需 Jason 明确授权后才能上传生产 Relay。
 - 因此 G/H 两项仍为显式缺口，不能宣称首批 A-H 全部完成或 DSH 最终 PASS。
+
+## F. 2026-08-24 stale target 与 capture 失败显式回传收口
+
+### F.1 当前证据与根因
+
+2026-08-24 真实 Android -> daemon 链路证明：
+
+1. Android 安装包 `0.1.3.2719` 能从真实 drawer/picker 入口选中 `app-window` 并发送完整 WebRTC offer 和 ICE candidate。
+2. daemon 收到请求并尝试启动 ScreenCaptureKit capture。
+3. daemon stderr 出现确定性失败：`ScreenCaptureKit capture start failed ... target not found in SCShareableContent: 16260`。
+4. Android 没有收到及时 typed failure，最终 `<video>` 不存在并显示 `Remote window stream start timed out`。
+
+因此本轮不是媒体 plan 回归，而是两个相邻 P0：
+
+- catalog 枚举出的 `windowId` 在 `startStream` 时已经失效；daemon 在 spawn capture 前没有重新校验 target。
+- native capture process 非 0 退出后，daemon 没有及时把 typed `remote-window-error` 经 mux channel subscriber transport 回传；客户端只能等待通用 timeout。
+
+### F.2 范围
+
+In scope：
+
+- `android/src/server/remote-window-catalog.ts`
+- `android/src/server/remote-window-stream-daemon.ts`
+- `android/src/server/terminal-message-runtime.ts`
+- native capture 错误出口与相关 Swift source
+- shared remote-window typed error contract
+- client receiver/message runtime 的错误投影
+
+Out of scope：
+
+- terminal buffer/renderer
+- screenshot、旧视频、mock receiver 或任何降级路径
+- owner 大重构、canvas layout、gesture arena、WebRTC 性能重写
+- 无授权 OTA/public Relay 发布
+
+### F.3 技术契约
+
+1. catalog 是枚举投影，不是 stream-start 时的窗口存在性真源。daemon 必须在 spawn capture 前重新校验目标仍存在于当前 `SCShareableContent`。
+2. 目标不存在时必须在 `target-validation` stage 显式拒绝，返回 typed `remote_window_stream_start_failed` / `remote_window_target_not_found`；不得启动 capture 子进程。
+3. capture process exit code != 0、signal、stdout error、启动超时都必须转成带 stage/code/diagnostic 的显式错误。
+4. 所有 remote-window 响应和错误只能经 mux channel subscriber transport 包装成 `mux-channel-message`；禁止裸发到物理 mux transport。
+5. 客户端收到 typed failure 后立即终止 pending stream/cleanup peer/timer，并把具体原因投递到 overlay；不得继续等满 40 秒。
+6. 成功路径不得引入额外阻塞刷新；校验只发生在 stream start/update-focus 所需的目标上，不改变 catalog 缓存所有权。
+7. 控制语义只进 typed side-channel/error chain，不混入业务媒体 payload 或 metadata。
+
+### F.4 测试设计
+
+必须先红后绿，且正反成对：
+
+| 用例 | 正向锁住 | 反向锁住 |
+| --- | --- | --- |
+| stale window id | start 前重验 miss 时返回 target-not-found，且不 spawn capture | 窗口仍存在时不误杀正常启动 |
+| capture exit | 非 0/signal 转成 typed stage error | exit 0 不误报 |
+| mux routing | remote-window error 经 channel subscriber wrapper 发出 | 物理 transport 不出现裸 `remote-window-*` |
+| client timeout | typed failure 立即终态并清理 pending | success 后不被迟到的旧错误覆盖 |
+| protocol boundary | wire 只允许合法 `TerminalMuxServerFrame` | fallback/mock/裸发全部红灯 |
+
+### F.5 实施顺序
+
+1. 新建 clean playground worktree + claim：`desktop.remote_window_stream.stale_target_capture_error`。
+2. 按 resource/function/mainline/module/edge maps 核对唯一 owner 和允许边。
+3. 先补 F.4 红测。
+4. 最小修复 start 前目标重验、capture 错误出口、mux 回包路由和客户端终态。
+5. 同步 decision/test/function/mainline 文档；不改无关 registry。
+6. 运行定向测试、type-check、feature/resource gates、Android build。
+7. launchctl 重启安装版 daemon，emulator 覆盖安装同版本源码 APK。
+8. 真实入口验证现存窗口可出连续视频帧；关闭该窗口后再次选择应立即看到 typed target-not-found，而不是 timeout。
+9. 全部运行态验证通过后 AGY Review；PASS 后精确 commit/push。
+
+### F.6 Definition of Done
+
+1. 存在的 app-window 从真实 Android 入口启动，`<video data-testid="remote-window-video">` 有非零尺寸和连续渲染帧。
+2. 已失效 `windowId` 在 capture spawn 前被拒绝，客户端在秒级显示 typed target-not-found。
+3. capture 子进程失败不会留下 pending timeout、peer、timer 或 capture child。
+4. daemon stderr、CDP/logcat、UI 三方都能对齐同一 typed error/stage。
+5. 定向测试、构建、feature/resource gates、安装重启和真实样本全绿。
+6. AGY Review PASS；commit 只包含本节声明的 change set，push 后本地 HEAD、origin/main 和运行版本一致。

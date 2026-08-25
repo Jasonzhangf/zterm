@@ -1,11 +1,13 @@
-import { readFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { tmpdir } from 'node:os';
+import { describe, expect, it, vi } from 'vitest';
 import type { RemoteWindowStreamTargetManifest } from '@zterm/shared/protocol';
 import {
   startScreenCaptureKitFrameSource,
   buildRemoteWindowCaptureUpdateCommand,
   buildScreenCaptureKitConfig,
+  RemoteWindowCaptureTargetUnavailableError,
 } from './remote-window-capture';
 import { buildRemoteWindowCanvasLayoutV1 } from './remote-window-canvas-layout';
 import { SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT } from './remote-window-scripts';
@@ -34,6 +36,78 @@ function makeTarget(overrides: Partial<RemoteWindowStreamTargetManifest> = {}): 
 }
 
 describe('remote-window capture config', () => {
+  it('validates required windows against fresh ScreenCaptureKit truth before spawning the capture child', async () => {
+    const validatedWindowIds: string[][] = [];
+    const frames: Array<{ width: number }> = [];
+    const directory = mkdtempSync(join(tmpdir(), 'rw-capture-validate-'));
+    const captureBinary = join(directory, 'capture');
+    writeFileSync(captureBinary, `#!/usr/bin/env node
+if (process.argv[2] === 'remote-window-validate') process.exit(0);
+const rgba = Buffer.alloc(16, 12);
+const header = Buffer.alloc(16);
+header.write('ZRW1', 0, 'ascii');
+header.writeUInt32LE(2, 4);
+header.writeUInt32LE(2, 8);
+header.writeUInt32LE(rgba.length, 12);
+process.stdout.write(Buffer.concat([header, rgba]));
+setInterval(() => {}, 1000);
+`);
+    chmodSync(captureBinary, 0o755);
+    try {
+      const source = await startScreenCaptureKitFrameSource(makeTarget({
+        compositeWindows: [{
+          windowId: '200',
+          title: 'Preview',
+          windowBoundsTopLeftPx: { x: 900, y: 20, width: 400, height: 500 },
+          cropRectTopLeftPx: { x: 900, y: 20, width: 400, height: 500 },
+        }],
+      }), {
+        frameRate: 30,
+        startupTimeoutMs: 1_000,
+        swiftBinary: '/bin/echo',
+        captureBinary,
+        validateTargets: async (config) => {
+          validatedWindowIds.push([
+            config.windowId,
+            ...(config.compositeWindows ?? []).map((window) => window.windowId),
+          ]);
+        },
+        onFrame: (frame) => frames.push({ width: frame.width }),
+        onError: vi.fn(),
+      });
+
+      expect(validatedWindowIds).toEqual([['100', '200']]);
+      expect(frames).toContainEqual({ width: 2 });
+      source.stop();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a stale window before spawning the capture child', async () => {
+    await expect(startScreenCaptureKitFrameSource(makeTarget(), {
+      frameRate: 30,
+      startupTimeoutMs: 1_000,
+      swiftBinary: '/bin/echo',
+      captureBinary: '/usr/bin/true',
+      validateTargets: async () => {
+        throw new RemoteWindowCaptureTargetUnavailableError(['456']);
+      },
+      onFrame: () => undefined,
+      onError: () => undefined,
+    })).rejects.toThrow('remote window target not found in fresh SCShareableContent: 456');
+  });
+
+  it('keeps validation on the same installed daemon binary and ScreenCaptureKit truth', () => {
+    const captureRuntime = readFileSync(join(process.cwd(), 'src/server/remote-window-capture.ts'), 'utf8');
+    expect(captureRuntime).toContain("['remote-window-validate', ...windowIds]");
+    expect(captureRuntime).toContain('await (options.validateTargets ?? validateScreenCaptureKitTargetWindows)');
+    expect(captureRuntime.indexOf('await (options.validateTargets ?? validateScreenCaptureKitTargetWindows)'))
+      .toBeLessThan(captureRuntime.indexOf('const child = spawn(options.captureBinary'));
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('func startRemoteWindowValidateProcess');
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)');
+  });
+
   it('builds a capture config carrying composite windows and canvas size', () => {
     const target = makeTarget({
       compositeWindows: [

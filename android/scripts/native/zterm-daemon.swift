@@ -187,6 +187,10 @@ struct ZtermDaemonEntry {
       startRemoteWindowCaptureProcess()
     }
 
-    fail("usage: zterm-daemon --permission-probe | capture-screen <output.png> [...] | remote-window-capture", code: 64)
+    if args.count >= 3 && args[1] == "remote-window-validate" {
+      startRemoteWindowValidateProcess(windowIds: Array(args.dropFirst(2)) as [String])
+    }
+
+    fail("usage: zterm-daemon --permission-probe | capture-screen <output.png> [...] | remote-window-capture | remote-window-validate <window-id>...", code: 64)
   }
 }

@@ -312,6 +312,7 @@ export type RemoteWindowStreamFailureStage =
   | 'platform-capability'
   | 'stream-lifecycle'
   | 'media-plan-validation'
+  | 'target-validation'
   | 'offer-apply'
   | 'focus-capture-start'
   | 'input-helper-warm'

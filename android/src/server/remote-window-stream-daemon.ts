@@ -55,6 +55,7 @@ import { validateRemoteWindowInputPayload } from './remote-window-input-policy';
 import {
   DEFAULT_SCREEN_CAPTURE_KIT_STARTUP_TIMEOUT_MS,
   buildResizedRemoteWindowTarget,
+  RemoteWindowCaptureTargetUnavailableError,
   startScreenCaptureKitFrameSource,
   validateStreamTargetForCapture,
   type RemoteWindowCaptureFrame,
@@ -963,14 +964,15 @@ export function createRemoteWindowStreamDaemonRuntime(
         },
       };
     } catch (error) {
+      const targetUnavailable = error instanceof RemoteWindowCaptureTargetUnavailableError;
       if (entry) {
         cleanupStream(entry, error instanceof Error ? error.message : String(error));
       }
       return buildStreamError(
         payload,
-        'remote_window_stream_start_failed',
+        targetUnavailable ? 'remote_window_target_not_found' : 'remote_window_stream_start_failed',
         error instanceof Error ? error.message : 'remote window stream start failed',
-        failureStage,
+        targetUnavailable ? 'target-validation' : failureStage,
       );
     }
   }
