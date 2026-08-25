@@ -231,6 +231,13 @@ function assertQualityUpdateContract(message: ServerMessage, label: string) {
   if (message.type === 'remote-window-stream-quality-result' && message.payload.status === 'applied') {
     return;
   }
+  if (
+    message.type === 'remote-window-stream-quality-result'
+    && message.payload.status === 'rejected'
+    && message.payload.error?.code === 'remote_window_stream_quality_failed'
+  ) {
+    return;
+  }
   if (message.type === 'remote-window-error' && message.payload.code === 'remote_window_stream_quality_failed') {
     return;
   }

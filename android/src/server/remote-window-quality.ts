@@ -3,6 +3,7 @@ import type {
   RemoteWindowVideoBitrateConfig,
 } from '@zterm/shared/protocol';
 import type { RemoteWindowCaptureFrameSource } from './remote-window-capture';
+import { formatRemoteWindowVideoBitrateError } from './remote-window-stream-daemon-helpers';
 
 const OVERVIEW_MAX_BITRATE_BPS = 1_500_000;
 const OVERVIEW_MIN_BITRATE_BPS = 250_000;
@@ -49,7 +50,7 @@ interface RemoteWindowQualityLane {
 
 interface PreparedRemoteWindowQualityLane extends RemoteWindowQualityLane {
   currentParameters: RTCRtpSendParameters;
-  nextParameters: RTCRtpSendParameters;
+  previousEncodingParameters: Array<Pick<RTCRtpEncodingParameters, 'maxBitrate' | 'maxFramerate'>>;
   previousFrameRate: number;
 }
 
@@ -65,18 +66,22 @@ function prepareLane(lane: RemoteWindowQualityLane): PreparedRemoteWindowQuality
   if (encodings.length === 0) {
     throw new Error('remote window quality sender has no encodings to update');
   }
+  const previousEncodingParameters = encodings.map((encoding) => ({
+    maxBitrate: encoding.maxBitrate,
+    maxFramerate: encoding.maxFramerate,
+  }));
+  for (const encoding of encodings) {
+    // @roamhq/wrtc validates setParameters() by transaction id. Mutate the
+    // exact object returned by getParameters(); cloned parameters are a new
+    // transaction and make both apply and rollback fail.
+    encoding.maxBitrate = lane.budget.maxBitrateBps;
+    encoding.maxFramerate = lane.budget.maxFrameRateFps;
+  }
   return {
     ...lane,
     currentParameters,
+    previousEncodingParameters,
     previousFrameRate: lane.captureSource.frameRate,
-    nextParameters: {
-      ...currentParameters,
-      encodings: encodings.map((encoding) => ({
-        ...encoding,
-        maxBitrate: lane.budget.maxBitrateBps,
-        maxFramerate: lane.budget.maxFrameRateFps,
-      })),
-    },
   };
 }
 
@@ -110,7 +115,7 @@ export async function applyRemoteWindowStreamGroupQuality(options: {
       // Register before the first mutation so a failure between sender and
       // capture updates restores this partially-applied lane too.
       applied.push(lane);
-      await lane.sender!.setParameters(lane.nextParameters);
+      await lane.sender!.setParameters(lane.currentParameters);
       await lane.captureSource!.updateFrameRate!(lane.budget.maxFrameRateFps);
     }
     return budget;
@@ -118,13 +123,22 @@ export async function applyRemoteWindowStreamGroupQuality(options: {
     const rollbackErrors: string[] = [];
     for (const lane of applied.reverse()) {
       try {
-        await lane.sender!.setParameters(lane.currentParameters);
+        // @roamhq/wrtc consumes a transaction on successful setParameters().
+        // A rollback must request the sender's next transaction instead of
+        // reusing the object that already applied the degraded values.
+        const rollbackParameters = lane.sender!.getParameters();
+        rollbackParameters.encodings?.forEach((encoding, index) => {
+          const previous = lane.previousEncodingParameters[index];
+          encoding.maxBitrate = previous?.maxBitrate;
+          encoding.maxFramerate = previous?.maxFramerate;
+        });
+        await lane.sender!.setParameters(rollbackParameters);
         await lane.captureSource!.updateFrameRate!(lane.previousFrameRate);
       } catch (rollbackError) {
-        rollbackErrors.push(rollbackError instanceof Error ? rollbackError.message : String(rollbackError));
+        rollbackErrors.push(formatRemoteWindowVideoBitrateError(rollbackError));
       }
     }
-    const message = error instanceof Error ? error.message : String(error);
+    const message = formatRemoteWindowVideoBitrateError(error);
     throw new Error(rollbackErrors.length > 0
       ? `${message}; quality rollback failed: ${rollbackErrors.join('; ')}`
       : message);

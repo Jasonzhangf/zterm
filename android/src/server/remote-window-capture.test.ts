@@ -94,6 +94,8 @@ describe('remote-window capture config', () => {
   it('streams ScreenCaptureKit frames without a screenshot-loop fallback', () => {
     expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('SCStream(filter: filter, configuration: streamConfiguration, delegate: nil)');
     expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('try await stream.startCapture()');
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('var activeOutputs: [SCStreamOutput] = []');
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('activeOutputs.append(output)');
     expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('streamConfiguration.minimumFrameInterval');
     expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).not.toContain('SCScreenshotManager');
     expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).not.toContain('compositeFrameLoop');

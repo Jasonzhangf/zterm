@@ -221,7 +221,6 @@ final class FrameOutput: NSObject, SCStreamOutput {
 }
 
 func startRemoteWindowCaptureProcess() {
-    _ = NSApplication.shared
     if CommandLine.arguments.dropFirst().contains("--permission-probe") {
         guard hasScreenCapturePermission() else {
             stderrLine("Screen Recording permission is required; grant zterm-daemon in macOS Privacy settings")
@@ -251,6 +250,7 @@ func startRemoteWindowCaptureProcess() {
     }
     let sampleQueue = DispatchQueue(label: "zterm.remote-window.capture.sample")
     var activeStreams: [SCStream] = []
+    var activeOutputs: [SCStreamOutput] = []
 
 @Sendable func findScWindow(windowId: String, appBundleId: String, windowBounds: Rect, content: SCShareableContent) -> SCWindow? {
     let numericWindowId = UInt32(windowId)
@@ -270,6 +270,7 @@ func startRemoteWindowCaptureProcess() {
         try? await stream.stopCapture()
     }
     activeStreams.removeAll()
+    activeOutputs.removeAll()
 
     let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
     let mainWindow = CompositeWindow(
@@ -330,17 +331,22 @@ func startRemoteWindowCaptureProcess() {
         try stream.addStreamOutput(output, type: .screen, sampleHandlerQueue: sampleQueue)
         try await stream.startCapture()
         activeStreams.append(stream)
+        activeOutputs.append(output)
     }
 
     stderrLine("zterm remote window capture started (SCStream): \(allWindows.count) windows")
 }
 
-    Task { @MainActor in
+    // SCStream setup must not depend on the AppKit main run loop. This process
+    // only calls dispatchMain(), so a bare Task would never be scheduled.
+    DispatchQueue.global(qos: .userInitiated).async {
+        Task {
         do {
             try await startCapture(config: config)
         } catch {
             stderrLine("ScreenCaptureKit capture start failed: " + String(describing: error))
             exit(4)
+        }
         }
     }
 
@@ -359,7 +365,8 @@ func startRemoteWindowCaptureProcess() {
                     writeCaptureUpdate(seq: command.seq, ok: false, error: "unsupported capture command")
                     continue
                 }
-                Task { @MainActor in
+                DispatchQueue.global(qos: .userInitiated).async {
+                    Task {
                     do {
                         let nextConfig = CaptureConfig(
                             windowId: command.windowId,
@@ -386,6 +393,7 @@ func startRemoteWindowCaptureProcess() {
                         )
                     } catch {
                         writeCaptureUpdate(seq: command.seq, ok: false, error: error.localizedDescription)
+                    }
                     }
                 }
             } catch {

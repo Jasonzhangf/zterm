@@ -96,4 +96,54 @@ describe('remote window stream-group quality owner', () => {
     expect(overviewSet).toHaveBeenLastCalledWith({ encodings: [{ rid: 'o', maxBitrate: 2_000_000 }] });
     expect(overviewCadence).toHaveBeenLastCalledWith(8);
   });
+
+  it('requests a fresh native sender transaction before rolling back a partial lane', async () => {
+    let transaction = 0;
+    const getParameters = vi.fn(() => {
+      transaction += 1;
+      return {
+        transactionId: `transaction-${transaction}`,
+        encodings: [{ maxBitrate: 9_000_000, maxFramerate: 30 }],
+      } as RTCRtpSendParameters;
+    });
+    const setParameters = vi.fn(async (nextParameters: RTCRtpSendParameters) => {
+      if (nextParameters.transactionId !== `transaction-${transaction}`) {
+        throw new Error('Failed to set parameters since getParameters() has never been called on this sender');
+      }
+    });
+    const captureCadence = vi.fn()
+      .mockRejectedValueOnce(new Error('capture cadence rejected'));
+
+    await expect(applyRemoteWindowStreamGroupQuality({
+      requested,
+      focusSender: {
+        getParameters,
+        setParameters,
+      } as unknown as RTCRtpSender,
+      focusCaptureSource: { width: 1, height: 1, frameRate: 30, updateFrameRate: captureCadence, stop: vi.fn() },
+    })).rejects.toThrow('capture cadence rejected');
+
+    const [nextCall, rollbackCall] = setParameters.mock.calls;
+    expect(nextCall?.[0]).not.toBe(rollbackCall?.[0]);
+    expect(nextCall?.[0].transactionId).toBe('transaction-1');
+    expect(rollbackCall?.[0].transactionId).toBe('transaction-2');
+    expect(getParameters).toHaveBeenCalledTimes(2);
+    expect(rollbackCall?.[0].encodings).toEqual([{ maxBitrate: 9_000_000, maxFramerate: 30 }]);
+  });
+
+  it('projects native sender failures without an empty diagnostic message', async () => {
+    const invalidStateError = Object.assign(new Error(''), { name: 'InvalidStateError', code: 11 });
+    const setParameters = vi.fn(async () => {
+      throw invalidStateError;
+    });
+
+    await expect(applyRemoteWindowStreamGroupQuality({
+      requested,
+      focusSender: {
+        getParameters: () => ({ encodings: [{ maxBitrate: 9_000_000, maxFramerate: 30 }] }),
+        setParameters,
+      } as unknown as RTCRtpSender,
+      focusCaptureSource: { width: 1, height: 1, frameRate: 30, updateFrameRate: vi.fn(), stop: vi.fn() },
+    })).rejects.toThrow(/InvalidStateError/);
+  });
 });
