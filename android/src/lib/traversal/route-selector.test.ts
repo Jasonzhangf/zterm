@@ -158,7 +158,7 @@ describe('selectBestTraversalRoute', () => {
       scope,
     }).selected).toMatchObject({ id: 'relay-rtc:daemon-a' });
 
-    now = 2001;
+    now = 1500;
     const stillQuarantined = selectBestTraversalRoute({
       candidates: [tailscale, relay],
       healthCache: cache,
@@ -169,7 +169,7 @@ describe('selectBestTraversalRoute', () => {
       selectable: false,
     });
 
-    now = 31_001;
+    now = 2001;
     const recoveredSelection = selectBestTraversalRoute({
       candidates: [tailscale, relay],
       healthCache: cache,

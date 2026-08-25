@@ -16,7 +16,7 @@ import type { TraversalSettingsSource, TraversalTargetSource } from './types';
 import { selectBestTraversalRoute } from './route-selector';
 import {
   defaultTraversalRouteHealthCache,
-  type TraversalRouteHealthCache,
+  TraversalRouteHealthCache,
   type TraversalRouteHealthScope,
 } from './route-health-cache';
 
@@ -31,6 +31,7 @@ const RTC_DIRECT_CANDIDATE_TIMEOUT_MS = 5000 + RTC_DIRECT_OPEN_STABILITY_MS;
 const RTC_DIRECT_FAILURE_RETRY_TIMEOUT_MS = 3000;
 const RTC_RELAY_CANDIDATE_TIMEOUT_MS = 2500;
 const RTC_DISCONNECTED_GRACE_MS = 10000;
+const OPEN_CONFIRMATION_TIMEOUT_MS = 5000;
 const RECONNECT_BASE_DELAY_MS = 300;
 const RECONNECT_MAX_DELAY_MS = 5000;
 
@@ -335,6 +336,7 @@ class WebRtcBackend implements Backend {
 
   private scheduleDisconnectedClose(
     peerConnection: RTCPeerConnection,
+    signalSocket: WebSocket,
     handlers: {
       onclose: (event?: BridgeSocketCloseLike) => void;
     },
@@ -342,11 +344,7 @@ class WebRtcBackend implements Backend {
     if (this.disconnectedTimer !== null) {
       return;
     }
-    try {
-      peerConnection.restartIce?.();
-    } catch (error) {
-      console.warn('[TraversalSocket] Failed to restart RTC ICE after disconnected:', error);
-    }
+    this.initiateIceRestart(peerConnection, signalSocket);
     this.disconnectedTimer = window.setTimeout(() => {
       this.disconnectedTimer = null;
       if (this.peerConnection !== peerConnection || peerConnection.connectionState !== 'disconnected') {
@@ -355,6 +353,34 @@ class WebRtcBackend implements Backend {
       this.dispose();
       handlers.onclose({ code: 1006, reason: 'rtc peer disconnected' });
     }, RTC_DISCONNECTED_GRACE_MS);
+  }
+
+  private initiateIceRestart(
+    peerConnection: RTCPeerConnection,
+    signalSocket: WebSocket,
+  ) {
+    try {
+      peerConnection.restartIce?.();
+    } catch (error) {
+      console.warn('[TraversalSocket] restartIce failed:', error);
+    }
+    void (async () => {
+      try {
+        if (this.peerConnection !== peerConnection
+          || this.signalSocket !== signalSocket
+          || signalSocket.readyState !== OPEN) {
+          return;
+        }
+        const offer = await peerConnection.createOffer({ iceRestart: true });
+        await peerConnection.setLocalDescription(offer);
+        this.sendSignalMessage(signalSocket, {
+          type: 'rtc-offer',
+          payload: { sdp: offer.sdp, type: offer.type },
+        });
+      } catch (error) {
+        console.warn('[TraversalSocket] ICE restart signaling failed:', error);
+      }
+    })();
   }
 
   public start(handlers: {
@@ -436,7 +462,7 @@ class WebRtcBackend implements Backend {
             return;
           }
           if (peerConnection.connectionState === 'disconnected') {
-            this.scheduleDisconnectedClose(peerConnection, handlers);
+            this.scheduleDisconnectedClose(peerConnection, signalSocket, handlers);
             return;
           }
           if (peerConnection.connectionState === 'connected') {
@@ -566,7 +592,13 @@ export class TraversalSocket implements BridgeTransportSocket {
 
   private readonly autoReconnect: boolean;
 
+  private readonly requireOpenConfirmation: boolean;
+
   private cancelActiveBatch: ((code?: number, reason?: string) => void) | null = null;
+
+  private pendingConfirmationTimer: number | null = null;
+
+  private pendingSettle: (() => void) | null = null;
 
   public constructor(
     target: TraversalTargetSource,
@@ -576,6 +608,7 @@ export class TraversalSocket implements BridgeTransportSocket {
       routeHealthCache?: Pick<TraversalRouteHealthCache, 'get' | 'recordSuccess' | 'recordFailure'>;
       routeHealthScope?: TraversalRouteHealthScope;
       autoReconnect?: boolean;
+      requireOpenConfirmation?: boolean;
     },
   ) {
     const plan = buildTraversalPlanCached(target, settings, options?.overrideUrl);
@@ -589,6 +622,7 @@ export class TraversalSocket implements BridgeTransportSocket {
       daemonHostId: target.relayHostId || target.daemonHostId,
     };
     this.autoReconnect = options?.autoReconnect === true;
+    this.requireOpenConfirmation = options?.requireOpenConfirmation === true;
     this.diagnostics = {
       mode: plan.mode,
       stage: 'connecting',
@@ -874,7 +908,19 @@ export class TraversalSocket implements BridgeTransportSocket {
       }, timeoutMs);
       attempt.backend.start({
         onopen: () => {
-          settleWinner(attempt);
+          if (!this.requireOpenConfirmation) {
+            settleWinner(attempt);
+            return;
+          }
+          // Defer settlement until the upper layer confirms mux readiness.
+          // Runner-up candidates stay alive so a faster but broken route
+          // does not block a slower healthy one.
+          this.pendingSettle = () => settleWinner(attempt);
+          this.pendingConfirmationTimer = window.setTimeout(() => {
+            this.pendingConfirmationTimer = null;
+            this.pendingSettle = null;
+            failAttempt(attempt, 'mux-ready confirmation timeout', 'error');
+          }, OPEN_CONFIRMATION_TIMEOUT_MS);
         },
         onmessage: (event) => {
           this.onmessage?.(event);
@@ -945,9 +991,29 @@ export class TraversalSocket implements BridgeTransportSocket {
     this.backend.send(data);
   }
 
+  /**
+   * Upper layer confirms that mux handshake (or equivalent protocol-level
+   * readiness) has succeeded on the winning candidate. Only after this call
+   * does recordSuccess fire and runner-ups get closed.
+   */
+  public confirmTransportReady() {
+    if (this.pendingConfirmationTimer !== null) {
+      window.clearTimeout(this.pendingConfirmationTimer);
+      this.pendingConfirmationTimer = null;
+    }
+    const settle = this.pendingSettle;
+    this.pendingSettle = null;
+    settle?.();
+  }
+
   public close(code?: number, reason?: string) {
     this.closedByClient = true;
     this.clearReconnectTimer();
+    if (this.pendingConfirmationTimer !== null) {
+      window.clearTimeout(this.pendingConfirmationTimer);
+      this.pendingConfirmationTimer = null;
+    }
+    this.pendingSettle = null;
     this.diagnostics.stage = 'closed';
     this.cancelActiveBatch?.(code, reason);
     this.backend?.close(code, reason);

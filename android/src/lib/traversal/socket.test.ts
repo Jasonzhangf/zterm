@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TraversalSocket } from './socket';
-import { TraversalRouteHealthCache } from './route-health-cache';
+import { clearTraversalPlanCache } from './config';
+import { defaultTraversalRouteHealthCache, TraversalRouteHealthCache } from './route-health-cache';
 
 class MockWebSocket {
   static CONNECTING = 0;
@@ -259,7 +260,11 @@ function createRelayRtcSocket() {
 
 describe('TraversalSocket reconnect', () => {
   beforeEach(() => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({
+      toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'],
+    });
+    clearTraversalPlanCache();
+    defaultTraversalRouteHealthCache.clear();
     MockWebSocket.reset();
     MockRTCPeerConnection.reset();
     vi.stubGlobal('window', {

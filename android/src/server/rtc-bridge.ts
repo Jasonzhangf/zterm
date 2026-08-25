@@ -41,6 +41,8 @@ interface PeerState {
   transport: RtcPeerTransport;
   peerConnection: RTCPeerConnection | null;
   ready: boolean;
+  stale: boolean;
+  staleTimer: ReturnType<typeof setTimeout> | null;
   emitSignal: (message: SignalMessage) => void;
   closeSignal: (reason: string) => void;
   signalChain: Promise<void>;
@@ -142,6 +144,7 @@ class RtcPeerTransport implements RtcServerTransport {
 
 export function createRtcBridgeServer(options: CreateRtcBridgeServerOptions) {
   const peers = new Map<string, PeerState>();
+  const PEER_SIGNAL_GRACE_MS = 30_000;
 
   function upsertPeerTransport(
     peerId: string,
@@ -151,6 +154,7 @@ export function createRtcBridgeServer(options: CreateRtcBridgeServerOptions) {
   ) {
     const existing = peers.get(peerId);
     if (existing) {
+      clearPeerStale(existing);
       existing.emitSignal = emitSignal;
       existing.closeSignal = closeSignal;
       return existing;
@@ -160,6 +164,8 @@ export function createRtcBridgeServer(options: CreateRtcBridgeServerOptions) {
       transport: new RtcPeerTransport(peerId, requestOrigin),
       peerConnection: null,
       ready: false,
+      stale: false,
+      staleTimer: null,
       emitSignal,
       closeSignal,
       signalChain: Promise.resolve(),
@@ -170,11 +176,36 @@ export function createRtcBridgeServer(options: CreateRtcBridgeServerOptions) {
     return created;
   }
 
+  function markPeerStale(peerId: string, reason: string) {
+    const peer = peers.get(peerId);
+    if (!peer) {
+      return;
+    }
+    peer.stale = true;
+    if (peer.staleTimer) {
+      clearTimeout(peer.staleTimer);
+    }
+    peer.staleTimer = setTimeout(() => {
+      peer.staleTimer = null;
+      closePeer(peerId, `signal grace expired: ${reason}`);
+    }, PEER_SIGNAL_GRACE_MS);
+    peer.staleTimer.unref?.();
+  }
+
+  function clearPeerStale(peer: PeerState) {
+    peer.stale = false;
+    if (peer.staleTimer) {
+      clearTimeout(peer.staleTimer);
+      peer.staleTimer = null;
+    }
+  }
+
   function closePeer(peerId: string, reason: string) {
     const peer = peers.get(peerId);
     if (!peer) {
       return;
     }
+    clearPeerStale(peer);
     try {
       peer.peerConnection?.close();
     } catch (error) {
@@ -374,11 +405,11 @@ export function createRtcBridgeServer(options: CreateRtcBridgeServerOptions) {
       });
 
       signalSocket.on('close', () => {
-        closePeer(peerId, 'rtc signaling websocket closed');
+        markPeerStale(peerId, 'rtc signaling websocket closed');
       });
 
       signalSocket.on('error', () => {
-        closePeer(peerId, 'rtc signaling websocket error');
+        markPeerStale(peerId, 'rtc signaling websocket error');
       });
     },
     async handleRelaySignal(

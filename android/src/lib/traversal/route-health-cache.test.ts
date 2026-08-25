@@ -125,13 +125,13 @@ describe('TraversalRouteHealthCache', () => {
       status: 'failure',
     });
 
-    // Still quarantined inside the 30s cooldown.
-    now = 2001;
+    // Still quarantined inside the 1s cooldown.
+    now = 1500;
     expect(cache.get({ accountId: 'u1', daemonHostId: 'daemon-a' }, candidate)).toMatchObject({
       status: 'failure',
     });
 
-    now = 31_001;
+    now = 2001;
     expect(cache.get({ accountId: 'u1', daemonHostId: 'daemon-a' }, candidate)).toBeNull();
   });
 

@@ -85,6 +85,9 @@ public class AndroidConnectionService extends Service {
     private static final int HEARTBEAT_MISSES_BEFORE_RECONNECT = 3;
     private static final long INITIAL_BACKOFF_MS = 1_000L;
     private static final long MAX_BACKOFF_MS = 30_000L;
+    /** WakeLock must outlast max backoff + full heartbeat budget + margin. */
+    private static final long NETWORK_RECOVERY_WAKELOCK_TIMEOUT_MS =
+        MAX_BACKOFF_MS + HEARTBEAT_MISSES_BEFORE_RECONNECT * HEARTBEAT_INTERVAL_MS + 5_000L;
     static final int SEND_RETRY_MAX = 3;
     static final long SEND_RETRY_DELAY_MS = 200L;
     static final long PHYSICAL_ERROR_DEBOUNCE_MS = 5_000L;
@@ -107,6 +110,7 @@ public class AndroidConnectionService extends Service {
     private android.net.ConnectivityManager connectivityManager;
     private android.net.ConnectivityManager.NetworkCallback networkCallback;
     private android.net.Network activeDefaultNetwork;
+    private boolean activeNetworkHasVpn;
     private long networkGeneration;
     private OkHttpClient httpClient;
     private final Map<String, TargetRuntime> targets = new ConcurrentHashMap<>();
@@ -310,10 +314,7 @@ public class AndroidConnectionService extends Service {
             public void onCapabilitiesChanged(
                 android.net.Network network,
                 android.net.NetworkCapabilities capabilities) {
-                // Capability changes (validated, metered, bandwidth, VPN
-                // metadata) do not replace the physical default network.
-                // Rebuilding every target here caused healthy Relay sockets
-                // to reconnect during ordinary capability updates.
+                onDefaultNetworkCapabilitiesChanged(network, capabilities);
             }
         };
         try {
@@ -335,6 +336,7 @@ public class AndroidConnectionService extends Service {
         }
         networkCallback = null;
         activeDefaultNetwork = null;
+        activeNetworkHasVpn = false;
     }
 
     private void onDefaultNetworkAvailable(android.net.Network network) {
@@ -343,8 +345,9 @@ public class AndroidConnectionService extends Service {
                 return;
             }
             activeDefaultNetwork = network;
+            activeNetworkHasVpn = false;
             networkGeneration += 1L;
-            acquireWakeLock(10_000L);
+            acquireWakeLock(NETWORK_RECOVERY_WAKELOCK_TIMEOUT_MS);
             for (TargetRuntime runtime : targets.values()) {
                 runtime.retireForNetworkChange("default-network-changed");
             }
@@ -357,10 +360,39 @@ public class AndroidConnectionService extends Service {
                 return;
             }
             activeDefaultNetwork = null;
+            activeNetworkHasVpn = false;
             networkGeneration += 1L;
-            acquireWakeLock(10_000L);
+            acquireWakeLock(NETWORK_RECOVERY_WAKELOCK_TIMEOUT_MS);
             for (TargetRuntime runtime : targets.values()) {
                 runtime.retireForNetworkChange("default-network-lost");
+            }
+        });
+    }
+
+    /**
+     * Only retire when VPN overlay presence changes on the default network.
+     * Ordinary bandwidth/metered/validated updates must not disturb healthy
+     * sockets; a VPN appearing or disappearing changes the reachable address
+     * space and requires transport regeneration.
+     */
+    private void onDefaultNetworkCapabilitiesChanged(
+        android.net.Network network,
+        android.net.NetworkCapabilities capabilities) {
+        postToWorker(() -> {
+            if (!Objects.equals(activeDefaultNetwork, network)) {
+                return;
+            }
+            boolean hasVpn = capabilities != null
+                && capabilities.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN);
+            if (hasVpn == activeNetworkHasVpn) {
+                return;
+            }
+            activeNetworkHasVpn = hasVpn;
+            networkGeneration += 1L;
+            acquireWakeLock(NETWORK_RECOVERY_WAKELOCK_TIMEOUT_MS);
+            String reason = hasVpn ? "vpn-overlay-added" : "vpn-overlay-removed";
+            for (TargetRuntime runtime : targets.values()) {
+                runtime.retireForNetworkChange(reason);
             }
         });
     }
