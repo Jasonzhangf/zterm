@@ -1303,6 +1303,63 @@ describe('TraversalSocket reconnect', () => {
   });
 });
 
+describe('open confirmation policy', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    MockWebSocket.reset();
+    MockRTCPeerConnection.reset();
+    vi.stubGlobal('window', {
+      setTimeout: globalThis.setTimeout,
+      clearTimeout: globalThis.clearTimeout,
+    });
+    vi.stubGlobal('WebSocket', MockWebSocket);
+    vi.stubGlobal('RTCPeerConnection', MockRTCPeerConnection);
+  });
+
+  it('settles immediately for a single candidate without requiring confirmation', async () => {
+    const onopen = vi.fn();
+    const socket = createSocket();
+    socket.onopen = onopen;
+    await flushMicrotasks();
+
+    const ws = MockWebSocket.instances[0];
+    ws.triggerOpen();
+    await flushMicrotasks();
+
+    expect(onopen).toHaveBeenCalledTimes(1);
+    socket.close();
+  });
+
+  it('defers settlement for multiple candidates until confirmTransportReady is called', async () => {
+    const onopen = vi.fn();
+    const socket = new TraversalSocket({
+      bridgeHost: '203.0.113.10',
+      bridgePort: 3333,
+      authToken: 'token',
+      tailscaleHost: '100.66.1.82',
+      ipv4Host: '203.0.113.10',
+      transportMode: 'websocket' as const,
+    }, settings, {
+      routeHealthCache: new TraversalRouteHealthCache(),
+      requireOpenConfirmation: true,
+    });
+    socket.onopen = onopen;
+    await flushMicrotasks();
+
+    const firstWs = MockWebSocket.instances[0];
+    firstWs.triggerOpen();
+    await flushMicrotasks();
+
+    expect(onopen).not.toHaveBeenCalled();
+
+    socket.confirmTransportReady();
+    await flushMicrotasks();
+
+    expect(onopen).toHaveBeenCalledTimes(1);
+    socket.close();
+  });
+});
+
 describe('tailscale candidate dynamic verification', () => {
   beforeEach(() => {
     vi.useFakeTimers();
