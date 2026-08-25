@@ -73,6 +73,7 @@ function createHarness(options?: {
   const captures = [...(options?.captures || [])];
   const sendText = vi.fn((transport: TerminalSessionTransport | null | undefined, text: string) => {
     transport?.sendText(text);
+    return { status: 'sent' as const, bytes: Buffer.byteLength(text) };
   });
   const captureMirrorAuthoritativeBufferFromTmux = vi.fn(async (mirror: SessionMirror) => {
     const next = captures.shift();

@@ -111,4 +111,28 @@ describe('terminal transport performance truth', () => {
     expect(transport.lastSendError).toBeNull();
     expect(transport.backpressureCount).toBe(0);
   });
+
+  it('returns explicit send truth for closed and failed transports', () => {
+    const runtime = createRuntime();
+    const closed: TerminalSessionTransport = {
+      kind: 'ws',
+      readyState: WebSocket.CLOSED,
+      sendText: vi.fn(),
+      close: vi.fn(),
+    };
+    expect(runtime.sendText(closed, 'closed')).toEqual({ status: 'not-open' });
+
+    const failed: TerminalSessionTransport = {
+      kind: 'ws',
+      readyState: WebSocket.OPEN,
+      sendText: vi.fn(() => {
+        throw new Error('socket send failed');
+      }),
+      close: vi.fn(),
+    };
+    expect(runtime.sendText(failed, 'failed')).toEqual({
+      status: 'error',
+      error: 'socket send failed',
+    });
+  });
 });
