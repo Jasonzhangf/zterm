@@ -189,3 +189,10 @@
 - The canonical live probe treats protocol-valid `quality-result status=rejected` as an explicit failure; it neither retries into another capture path nor converts rejection into success.
 - Runtime evidence: installed runtime SHA equals release SHA `50d0591ae5b426587370df5d0d653f313f9e76e72a795bc6d0339ba33460d1c5`; `/health` PID 68870 ready; canonical mux probe passed with 197 frames sent and all input markers observed; focused quality tests 6/6, type-check, feature registry 102/102.
 - AGY Review task `agy-remote-window-20260824T230406Z`: controller `verdict=pass`, findings `[]`. Local and remote main are both at commit `c31dd79c`.
+
+## 2026-08-25 stale remote-window target explicit failure closeout
+
+- 根因：catalog 的 `windowId` 是枚举投影，窗口关闭后仍可能被 picker 使用；旧链路直接 spawn ScreenCaptureKit capture，fresh `SCShareableContent` 找不到目标后才失败，错误未及时经 mux channel 回传，Android 最终只能等 stream-start timeout。
+- 唯一修复点：`remote-window-capture.ts` 在 capture spawn 前调用同一已安装 `zterm-daemon remote-window-validate <windowId...>`；缺失目标抛 `RemoteWindowCaptureTargetUnavailableError`，daemon 投影 `remote_window_target_not_found` / `target-validation`。capture/daemon/message 流程不增加 screenshot、旧视频或其他 fallback。
+- 验证：定向 127/127、type-check、feature registry 102/102；Finder 正向探针 `trackSeen=true`、1347x679、ScreenCaptureKit 5 FPS、正常 stopped；无效 ID `99999` 直接 exit 4，stderr 为 fresh `SCShareableContent` target-not-found；health PID 94375 ready，installed daemon SHA `882d01404cb33fe1ec1eaa0a4abe68cb61857f83d14202f9209c0b3a93a3ae54`。
+- Review/交付：AGY task `agy-daemon-screenshot-no-fallback-20260825` PASS、findings=[]；精确 change set commit `94e35a89`，已 push，origin/main 与本地 HEAD 一致。其他 dirty 文件未暂存。

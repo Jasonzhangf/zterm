@@ -2695,3 +2695,11 @@ Tags: #remote-window-stream #wrtc-transactions #explicit-quality-failure #no-fal
 - Gates: focused capture/service/screenshot/file-transfer suite 49/49, type-check PASS, feature/architecture registry 13 files / 102 tests PASS. Product-path scan found no `/usr/sbin/screencapture`, `CGRequestScreenCaptureAccess()`, `ZTERM_DAEMON_CAPTURE_NATIVE`, raw helper, or Remote Capture identity. Emulator-5554 APK `0.1.3.2719` proved stream failure projects a typed error with no fallback; WebRTC UDP/ICE remains unreachable through emulator host mapping, so real-device video closure still requires a physical device or host-network emulator.
 - AGY Review task `agy-daemon-screenshot-no-fallback-20260825` passed with zero P0/P1 findings. Exact change set committed as `2f3037a5 fix: capture screenshots in daemon identity`; unrelated dirty worktree files remain untouched.
 Tags: #daemon-permission #screen-recording #single-tcc-identity #screenshot #no-fallback
+
+## 2026-08-25 stale remote-window target must fail before capture spawn
+
+- `remote-window` catalog entries are projections, not stream-start existence truth. Before spawning ScreenCaptureKit capture, validate every required window ID through the same installed `zterm-daemon remote-window-validate` binary and fresh `SCShareableContent`.
+- Missing IDs must stop immediately with typed `remote_window_target_not_found` and `failureStage=target-validation`; capture must not spawn. Do not wait for generic stream timeout or use screenshot/old-video/alternate executable fallback.
+- Capture target-validation errors and other remote-window responses must remain inside the mux channel subscriber wrapper (`mux-channel-message`); a physical mux transport must never receive a bare remote-window business/error frame.
+- Verified commit `94e35a89`: focused 127/127, type-check, feature registry 102/102, installed Finder `trackSeen=true` at 1347x679/5 FPS, invalid ID exit 4 with explicit fresh-content diagnostic, AGY PASS with zero findings.
+Tags: #remote-window-stream #stale-target #target-validation #explicit-failure #no-fallback #mux-channel
