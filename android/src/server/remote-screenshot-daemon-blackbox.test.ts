@@ -63,7 +63,7 @@ describe('remote screenshot daemon black-box contract', () => {
     expect(installBody.indexOf('prime_daemon_install_permissions')).toBeLessThan(installBody.indexOf('bootstrap_service'));
   });
 
-  it('keeps the legacy native screenshot fallback binary aligned with the packaged support binary', () => {
+  it('keeps the installed daemon screenshot binary aligned with the packaged support binary', () => {
     const releaseScript = readProjectFile('scripts/prepare-global-daemon-release.sh');
     const shimBlock = extractBlock(releaseScript, 'install_user_shims() {', 520);
 
@@ -71,12 +71,18 @@ describe('remote screenshot daemon black-box contract', () => {
     expect(shimBlock).toContain('chmod +x "${WTERM_BIN_DIR}/zterm-daemon"');
   });
 
-  it('captures window-id screenshots without macOS window shadow inflation', () => {
+  it('captures screenshots with ScreenCaptureKit inside one daemon identity', () => {
     const nativeDaemon = readProjectFile('scripts/native/zterm-daemon.swift');
-    const windowIdBlock = extractBlock(nativeDaemon, 'if let windowId = windowId {', 240);
+    const windowIdBlock = extractBlock(nativeDaemon, 'if let windowId = windowId {', 520);
+    const captureSource = readProjectFile('src/server/remote-window-screen-capture-script.ts');
 
-    expect(windowIdBlock).toContain('arguments.append("-o")');
-    expect(windowIdBlock.indexOf('arguments.append("-o")')).toBeLessThan(windowIdBlock.indexOf('arguments.append("-l\\(windowId)")'));
+    expect(windowIdBlock).toContain('SCContentFilter(desktopIndependentWindow: window)');
+    expect(nativeDaemon).toContain('guard hasScreenCapturePermission() else');
+    expect(captureSource).toContain('CGPreflightScreenCaptureAccess()');
+    expect(nativeDaemon).toContain('SCScreenshotManager.captureImage');
+    expect(nativeDaemon).not.toContain('CGRequestScreenCaptureAccess()');
+    expect(nativeDaemon).not.toContain('/usr/sbin/screencapture');
+    expect(nativeDaemon).not.toMatch(/(^|[^\w])Process\(\)/u);
   });
 
   it('does not expose helper/socket/start-Mac-app guidance to Android users', () => {
