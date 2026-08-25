@@ -34,6 +34,7 @@ export interface TerminalTransportConnection {
   muxVersion?: number;
   muxClientInstanceId?: string | null;
   muxChannels?: Map<string, string>;
+  muxChannelId?: string;
 }
 
 export interface PendingBinaryTransfer<TPayload extends { byteLength: number }> {

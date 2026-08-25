@@ -261,7 +261,10 @@ export function createTerminalMuxChannelRuntime(
           return;
         }
         await deps.handleMessage(
-          createMuxChannelMessageConnection(connection, subscriber),
+          {
+            ...createMuxChannelMessageConnection(connection, subscriber),
+            muxChannelId: envelope.channelId,
+          },
           Buffer.from(JSON.stringify(frame.payload.message)),
         );
         return;

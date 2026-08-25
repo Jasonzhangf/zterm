@@ -160,6 +160,9 @@ export function createTerminalMessageRuntime(
     connection: TerminalTransportConnection,
     message: ServerMessage,
   ) {
+    if (connection.muxVersion && !connection.muxChannelId) {
+      throw new Error('remote-window message requires a mux channel-bound connection');
+    }
     deps.sendTransportMessage(connection.transport, message);
   }
 
