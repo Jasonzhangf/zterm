@@ -28,6 +28,16 @@ describe('Android background power policy', () => {
     expect(source).toContain('WebSocket');
   });
 
+  it('retires the default network only for VPN overlay endpoint changes', () => {
+    const source = readFileSync(resolve(androidRoot, 'java/com/zterm/android/AndroidConnectionService.java'), 'utf8');
+
+    expect(source).toContain('hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN)');
+    expect(source).toContain('vpn-overlay-added');
+    expect(source).toContain('vpn-overlay-removed');
+    expect(source).toContain('if (hasVpn == activeNetworkHasVpn) {');
+    expect(source).toContain('retireForNetworkChange(reason)');
+  });
+
   it('does not auto-start native execution for zero sessions from activity stop', () => {
     const source = readFileSync(resolve(androidRoot, 'java/com/zterm/android/MainActivity.java'), 'utf8');
 

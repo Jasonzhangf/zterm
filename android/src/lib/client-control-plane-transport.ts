@@ -135,6 +135,10 @@ export class ClientControlPlaneTransport implements BridgeTransportSocket {
     this.inner?.close(code, reason);
   }
 
+  public confirmTransportReady() {
+    this.inner?.confirmTransportReady?.();
+  }
+
   public reportFailure(reason: string, options?: { authFailure?: boolean }) {
     this.failureReason = reason;
     this.inner?.reportFailure(reason, options);

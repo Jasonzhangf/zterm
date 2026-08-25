@@ -420,6 +420,7 @@ export function buildTraversalSocketForHostRuntime(options: {
     return createClientDaemonTraversalSocket(traversal.target, traversal.settings, {
       overrideUrl,
       autoReconnect: false,
+      requireMuxReadyConfirmation: true,
       routeHealthScope: {
         accountId: options.bridgeSettings.traversalRelay?.userId,
         daemonHostId: resolvedHost.daemonHostId?.trim() || resolvedHost.relayHostId?.trim(),

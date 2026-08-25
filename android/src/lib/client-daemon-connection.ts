@@ -10,6 +10,8 @@ import type { SessionTargetNetworkProbeFailure } from '../contexts/session-conte
 export interface ClientDaemonConnectionSocketFactoryOptions {
   overrideUrl?: string;
   autoReconnect?: boolean;
+  /** Defer route-health success until the upper layer confirms mux-ready. */
+  requireMuxReadyConfirmation?: boolean;
   /** Route-health isolation scope. Passing the client network generation here
    *  keeps WiFi/cellular/Tailscale route truth in separate buckets. */
   routeHealthScope?: TraversalRouteHealthScope;
@@ -23,6 +25,7 @@ export function createClientDaemonTraversalSocket(
   return new TraversalSocket(target, settings, {
     overrideUrl: options.overrideUrl,
     autoReconnect: options.autoReconnect === true,
+    requireOpenConfirmation: options.requireMuxReadyConfirmation === true,
     routeHealthScope: options.routeHealthScope,
   });
 }

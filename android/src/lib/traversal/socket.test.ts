@@ -1330,17 +1330,18 @@ describe('open confirmation policy', () => {
     socket.close();
   });
 
-  it('defers settlement for multiple candidates until confirmTransportReady is called', async () => {
+  it('notifies the upper layer on raw open but settles only after confirmTransportReady', async () => {
     const onopen = vi.fn();
+    const health = new TraversalRouteHealthCache();
     const socket = new TraversalSocket({
       bridgeHost: '203.0.113.10',
       bridgePort: 3333,
       authToken: 'token',
-      tailscaleHost: '100.66.1.82',
+      ipv6Host: '240e:1234::10',
       ipv4Host: '203.0.113.10',
       transportMode: 'websocket' as const,
     }, settings, {
-      routeHealthCache: new TraversalRouteHealthCache(),
+      routeHealthCache: health,
       requireOpenConfirmation: true,
     });
     socket.onopen = onopen;
@@ -1350,12 +1351,54 @@ describe('open confirmation policy', () => {
     firstWs.triggerOpen();
     await flushMicrotasks();
 
-    expect(onopen).not.toHaveBeenCalled();
+    expect(onopen).toHaveBeenCalledTimes(1);
+    expect(MockWebSocket.instances[1].readyState).toBe(MockWebSocket.CONNECTING);
+    expect(health.snapshot()).toHaveLength(0);
 
     socket.confirmTransportReady();
     await flushMicrotasks();
 
     expect(onopen).toHaveBeenCalledTimes(1);
+    expect(MockWebSocket.instances[1].readyState).toBe(MockWebSocket.CLOSED);
+    expect(health.snapshot()).toHaveLength(1);
+    socket.close();
+  });
+
+  it('promotes an opened fallback when mux-ready confirmation times out', async () => {
+    const onopen = vi.fn();
+    const health = new TraversalRouteHealthCache();
+    const socket = new TraversalSocket({
+      bridgeHost: '203.0.113.10',
+      bridgePort: 3333,
+      authToken: 'token',
+      ipv6Host: '240e:1234::10',
+      ipv4Host: '203.0.113.10',
+      transportMode: 'websocket' as const,
+    }, settings, {
+      routeHealthCache: health,
+      requireOpenConfirmation: true,
+    });
+    socket.onopen = onopen;
+    await flushMicrotasks();
+
+    MockWebSocket.instances[0].triggerOpen();
+    await flushMicrotasks();
+    MockWebSocket.instances[1].triggerOpen();
+    await flushMicrotasks();
+    expect(onopen).toHaveBeenCalledTimes(1);
+
+    vi.advanceTimersByTime(5_000);
+    await flushMicrotasks();
+
+    expect(onopen).toHaveBeenCalledTimes(2);
+    expect(MockWebSocket.instances[0].readyState).toBe(MockWebSocket.CLOSED);
+    expect(MockWebSocket.instances[1].readyState).toBe(MockWebSocket.OPEN);
+
+    socket.confirmTransportReady();
+    await flushMicrotasks();
+    const attempts = socket.getDiagnostics().attempts;
+    expect(attempts.filter((item) => item.stage === 'open')).toHaveLength(1);
+    expect(attempts.filter((item) => item.ok)).toHaveLength(1);
     socket.close();
   });
 });

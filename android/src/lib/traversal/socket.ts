@@ -823,9 +823,46 @@ export class TraversalSocket implements BridgeTransportSocket {
     };
     this.cancelActiveBatch = cancelBatch;
 
+    // While waiting for mux-ready confirmation, the first physically opened
+    // candidate is provisional. Runner-up backends stay connected as explicit
+    // fallbacks; they neither notify the upper layer nor feed protocol frames
+    // into it until they are promoted.
+    let provisionalAttempt: (typeof attempts)[number] | null = null;
+    const openedFallbacks: (typeof attempts)[number][] = [];
+
+    const promoteOpenedCandidate = (candidate: (typeof attempts)[number], reason: string | undefined) => {
+      provisionalAttempt = candidate;
+      if (candidate.timer !== null) {
+        window.clearTimeout(candidate.timer);
+        candidate.timer = null;
+      }
+      this.backend = candidate.backend;
+      this.activeCandidate = candidate.candidate;
+      this.pendingSettle = () => settleWinner(candidate);
+      this.pendingConfirmationTimer = window.setTimeout(() => {
+        this.pendingConfirmationTimer = null;
+        const failed = provisionalAttempt;
+        this.pendingSettle = null;
+        provisionalAttempt = null;
+        if (!failed || failed.settled || failed.advanced || this.closedByClient) {
+          return;
+        }
+        failAttempt(failed, reason || 'mux-ready confirmation timeout', 'error');
+        const next = openedFallbacks.shift();
+        if (next && !next.settled && !next.advanced && !this.closedByClient) {
+          promoteOpenedCandidate(next, undefined);
+          this.onopen?.();
+        }
+      }, OPEN_CONFIRMATION_TIMEOUT_MS);
+    };
+
     const failAttempt = (attempt: (typeof attempts)[number], reason: string, stage: 'closed' | 'error') => {
       if (attempt.settled || attempt.advanced || this.closedByClient) {
         return;
+      }
+      const fallbackIndex = openedFallbacks.indexOf(attempt);
+      if (fallbackIndex >= 0) {
+        openedFallbacks.splice(fallbackIndex, 1);
       }
       attempt.advanced = true;
       if (attempt.timer !== null) {
@@ -896,7 +933,9 @@ export class TraversalSocket implements BridgeTransportSocket {
       this.diagnostics.reason = undefined;
       this.diagnostics.resolvedPath = this.diagnostics.resolvedPath || attempt.candidate.path;
       this.diagnostics.resolvedEndpoint = attempt.candidate.endpoint;
-      this.onopen?.();
+      if (!this.requireOpenConfirmation) {
+        this.onopen?.();
+      }
     };
 
     for (const attempt of attempts) {
@@ -912,17 +951,28 @@ export class TraversalSocket implements BridgeTransportSocket {
             settleWinner(attempt);
             return;
           }
-          // Defer settlement until the upper layer confirms mux readiness.
-          // Runner-up candidates stay alive so a faster but broken route
-          // does not block a slower healthy one.
-          this.pendingSettle = () => settleWinner(attempt);
-          this.pendingConfirmationTimer = window.setTimeout(() => {
-            this.pendingConfirmationTimer = null;
-            this.pendingSettle = null;
-            failAttempt(attempt, 'mux-ready confirmation timeout', 'error');
-          }, OPEN_CONFIRMATION_TIMEOUT_MS);
+          if (this.pendingSettle !== null) {
+            // A faster candidate is already running the protocol handshake.
+            // Keep this backend connected until that candidate settles or the
+            // confirmation deadline promotes an opened fallback.
+            if (attempt.timer !== null) {
+              window.clearTimeout(attempt.timer);
+              attempt.timer = null;
+            }
+            openedFallbacks.push(attempt);
+            return;
+          }
+          promoteOpenedCandidate(attempt, undefined);
+          this.onopen?.();
         },
         onmessage: (event) => {
+          if (
+            this.requireOpenConfirmation
+            && !attempt.settled
+            && attempt !== provisionalAttempt
+          ) {
+            return;
+          }
           this.onmessage?.(event);
         },
         onerror: (reason) => {

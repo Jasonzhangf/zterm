@@ -221,6 +221,7 @@ function handleTmuxControlMessage(entry: TmuxControlTransportEntry, data: unknow
       clearTimeout(entry.negotiationTimer);
       entry.negotiationTimer = null;
     }
+    entry.ws.confirmTransportReady?.();
     drainTmuxControlTransport(entry);
     return;
   }
@@ -295,7 +296,11 @@ function createTmuxControlTransportEntry(
   traversalSettings: TmuxSessionTraversalSettings,
   overrideUrl?: string,
 ) {
-  const ws = createClientDaemonTraversalSocket(target satisfies TraversalTargetSource, traversalSettings, { overrideUrl });
+  const ws = createClientDaemonTraversalSocket(
+    target satisfies TraversalTargetSource,
+    traversalSettings,
+    { overrideUrl, requireMuxReadyConfirmation: true },
+  );
   const entry: TmuxControlTransportEntry = {
     key,
     ws,
