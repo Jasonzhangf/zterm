@@ -391,14 +391,14 @@ function TerminalSessionDrawerComponent({
               ref={closeButtonRef}
               onClick={onClose}
               style={{
-                width: '44px',
-                height: '44px',
+                width: '32px',
+                height: '32px',
                 padding: 0,
                 borderRadius: '8px',
                 border: '1px solid var(--zterm-panel-border)',
                 background: 'var(--zterm-panel-surface)',
                 color: 'var(--zterm-panel-text)',
-                fontSize: '16px',
+                fontSize: '15px',
                 lineHeight: 1,
                 fontWeight: 800,
               }}
@@ -800,16 +800,16 @@ function TerminalSessionDrawerComponent({
                     activateCloseSession(session.id);
                   }}
                   style={{
-                    width: '44px',
-                    height: '44px',
+                    width: '32px',
+                    height: '32px',
                     borderRadius: '999px',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    border: 'none',
+                    border: '1px solid var(--zterm-panel-border)',
                     background: 'var(--zterm-panel-surface)',
-                    color: 'var(--zterm-panel-muted)',
-                    fontSize: '14px',
+                    color: 'var(--zterm-panel-danger)',
+                    fontSize: '13px',
                     lineHeight: 1,
                     pointerEvents: 'auto',
                   }}

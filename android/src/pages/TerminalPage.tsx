@@ -3061,7 +3061,7 @@ function TerminalPageComponent({
 
   const handleCloseSessionFromDrawer = useCallback((sessionId: string) => {
     const remoteCloseTarget = drawerRemoteSessions.closeTargets.get(sessionId);
-    if (remoteCloseTarget) {
+    if (remoteCloseTarget && remoteCloseTarget.localSessionId !== sessionId) {
       if (!onCloseDrawerRemoteSession) {
         setTerminalDialog({
           tone: 'error',

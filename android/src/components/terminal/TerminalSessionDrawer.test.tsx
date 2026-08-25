@@ -170,6 +170,68 @@ describe('TerminalSessionDrawer', () => {
     expect(onPreviewSelectionModeChange).toHaveBeenCalledWith(false);
   });
 
+  it('keeps each session close action available while preview multi-select is active', () => {
+    const onCloseSession = vi.fn();
+    const onSelectSession = vi.fn();
+    const onTogglePreviewSession = vi.fn();
+
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={sessions}
+        previewSelectionMode
+        previewSelectedSessionIds={['s1']}
+        onClose={vi.fn()}
+        onSelectSession={onSelectSession}
+        onCloseSession={onCloseSession}
+        onOpenQuickTabPicker={vi.fn()}
+        onTogglePreviewSession={onTogglePreviewSession}
+      />,
+    );
+
+    const closeButton = screen.getByTestId('terminal-session-drawer-close-s1');
+    expect(closeButton).toBeTruthy();
+    fireEvent.click(closeButton);
+
+    expect(onCloseSession).toHaveBeenCalledWith('s1');
+    expect(onCloseSession).toHaveBeenCalledTimes(1);
+    expect(onSelectSession).not.toHaveBeenCalled();
+    expect(onTogglePreviewSession).not.toHaveBeenCalled();
+  });
+
+  it('keeps each session close action available while preview multi-select is active for touch activation', () => {
+    const onCloseSession = vi.fn();
+    const onSelectSession = vi.fn();
+    const onTogglePreviewSession = vi.fn();
+
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={sessions}
+        previewSelectionMode
+        previewSelectedSessionIds={['s1']}
+        onClose={vi.fn()}
+        onSelectSession={onSelectSession}
+        onCloseSession={onCloseSession}
+        onOpenQuickTabPicker={vi.fn()}
+        onTogglePreviewSession={onTogglePreviewSession}
+      />,
+    );
+
+    const closeButton = screen.getByTestId('terminal-session-drawer-close-s1');
+    fireEvent.touchStart(closeButton, {
+      touches: [{ clientX: 240, clientY: 120 }],
+    });
+    fireEvent.touchEnd(closeButton, {
+      changedTouches: [{ clientX: 240, clientY: 120 }],
+    });
+
+    expect(onCloseSession).toHaveBeenCalledWith('s1');
+    expect(onCloseSession).toHaveBeenCalledTimes(1);
+    expect(onSelectSession).not.toHaveBeenCalled();
+    expect(onTogglePreviewSession).not.toHaveBeenCalled();
+  });
+
   it('toggles preview selection from the visible checkbox control', () => {
     const onSelectSession = vi.fn();
     const onTogglePreviewSession = vi.fn();
@@ -1027,7 +1089,8 @@ describe('TerminalSessionDrawer', () => {
     expect(overlay.style.transition).toContain('opacity 150ms ease');
 
     const closeTarget = screen.getByTestId(`terminal-session-drawer-close-${sessions[0]!.id}`) as HTMLElement;
-    expect(closeTarget.style.width).toBe('44px');
-    expect(closeTarget.style.height).toBe('44px');
+    expect(closeTarget.style.width).toBe('32px');
+    expect(closeTarget.style.height).toBe('32px');
+    expect(closeTarget.style.color).toBe('var(--zterm-panel-danger)');
   });
 });

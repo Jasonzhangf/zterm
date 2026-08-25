@@ -2148,12 +2148,11 @@ describe('TerminalPage portrait session drawer', () => {
     );
   });
 
-  it('routes opened daemon catalog drawer close through remote tmux kill before closing the local tab', async () => {
+  it('routes an opened drawer session close through local open-tab close without remote kill dialog', async () => {
     const sessions = [makeSession('s1')];
     sessions[0]!.daemonHostId = 'daemon-a';
     const onCloseSession = vi.fn();
-    const onSwitchSession = vi.fn();
-    const onCloseDrawerRemoteSession = vi.fn(async () => undefined);
+    const onCloseDrawerRemoteSession = vi.fn();
 
     render(
       <TerminalPage
@@ -2169,7 +2168,7 @@ describe('TerminalPage portrait session drawer', () => {
           lastOpenedAt: 1,
         }]}
         activeSession={sessions[0]}
-        onSwitchSession={onSwitchSession}
+        onSwitchSession={vi.fn()}
         onMoveSession={vi.fn()}
         onRenameSession={vi.fn()}
         onCloseSession={onCloseSession}
@@ -2197,26 +2196,68 @@ describe('TerminalPage portrait session drawer', () => {
 
     await waitFor(() => expect(screen.getByText('tab-s1')).toBeTruthy());
     fireEvent.click(screen.getByTestId('terminal-session-drawer-close-s1'));
-    fireEvent.click(await screen.findByTestId('zterm-dialog-confirm'));
 
-    expect(onCloseDrawerRemoteSession).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: 'Daemon A',
-        bridgeHost: '100.127.23.27',
-        bridgePort: 3333,
-        daemonHostId: 'daemon-a',
-        relayHostId: 'daemon-a',
-        authToken: 'token-a',
-        sessionNames: ['tmux-s1', 'remote-beta'],
-      }),
-      'tmux-s1',
-    );
-    await waitFor(() => expect(screen.getByTestId('terminal-session-drawer').getAttribute('aria-hidden')).toBe('true'));
-    expect(onSwitchSession).not.toHaveBeenCalled();
-    expect(onCloseSession).not.toHaveBeenCalled();
+    expect(onCloseSession).toHaveBeenCalledWith('s1', 'terminal-session-drawer-close-button');
+    expect(onCloseSession).toHaveBeenCalledTimes(1);
+    expect(onCloseDrawerRemoteSession).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('zterm-dialog-confirm')).toBeNull();
   });
 
-  it('shows the product dialog when opened catalog remote kill fails', async () => {
+  it('does not remote-kill an opened daemon catalog drawer row through the close button', async () => {
+    const sessions = [makeSession('s1')];
+    sessions[0]!.daemonHostId = 'daemon-a';
+    const onCloseSession = vi.fn();
+    const onCloseDrawerRemoteSession = vi.fn(async () => undefined);
+
+    render(
+      <TerminalPage
+        sessions={sessions}
+        sessionGroups={[{
+          id: 'daemon:daemon-a',
+          name: 'Daemon A',
+          bridgeHost: '100.127.23.27',
+          bridgePort: 3333,
+          daemonHostId: 'daemon-a',
+          authToken: 'token-a',
+          sessionNames: ['tmux-s1', 'remote-beta'],
+          lastOpenedAt: 1,
+        }]}
+        activeSession={sessions[0]}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={onCloseSession}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onOpenDrawerRemoteSession={vi.fn()}
+        onCloseDrawerRemoteSession={onCloseDrawerRemoteSession}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    const swipeSurface = document.querySelector('[data-testid^="terminal-swipe-surface-"][data-swipe-enabled="true"]') as HTMLElement | null;
+    expect(swipeSurface).toBeTruthy();
+    fireEvent.touchStart(swipeSurface!, { touches: [{ clientX: 56, clientY: 200 }] });
+    fireEvent.touchMove(swipeSurface!, {
+      touches: [{ clientX: 236, clientY: 206 }],
+      cancelable: true,
+    });
+    fireEvent.touchEnd(swipeSurface!, { changedTouches: [{ clientX: 236, clientY: 206 }] });
+
+    await waitFor(() => expect(screen.getByText('tab-s1')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-close-s1'));
+
+    expect(onCloseSession).toHaveBeenCalledWith('s1', 'terminal-session-drawer-close-button');
+    expect(onCloseDrawerRemoteSession).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('zterm-dialog-confirm')).toBeNull();
+  });
+
+  it('keeps remote kill failure explicit without closing the local tab as a fallback', async () => {
     const sessions = [makeSession('s1')];
     sessions[0]!.daemonHostId = 'daemon-a';
     const onCloseSession = vi.fn();
@@ -2235,7 +2276,7 @@ describe('TerminalPage portrait session drawer', () => {
           bridgePort: 3333,
           daemonHostId: 'daemon-a',
           authToken: 'token-a',
-          sessionNames: ['tmux-s1'],
+          sessionNames: ['tmux-s1', 'remote-beta'],
           lastOpenedAt: 1,
         }]}
         activeSession={sessions[0]}
@@ -2264,11 +2305,11 @@ describe('TerminalPage portrait session drawer', () => {
     });
     fireEvent.touchEnd(swipeSurface, { changedTouches: [{ clientX: 236, clientY: 206 }] });
 
-    await waitFor(() => expect(screen.getByText('tab-s1')).toBeTruthy());
-    fireEvent.click(screen.getByTestId('terminal-session-drawer-close-s1'));
+    await waitFor(() => expect(screen.getByText('remote-beta')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-close-remote:daemon:daemon-a::session:remote-beta'));
     fireEvent.click(await screen.findByTestId('zterm-dialog-confirm'));
 
-    await waitFor(() => expect(screen.getByTestId('zterm-dialog-message').textContent).toContain('无法关闭 tmux-s1'));
+    await waitFor(() => expect(screen.getByTestId('zterm-dialog-message').textContent).toContain('无法关闭 remote-beta'));
     expect(screen.getByTestId('zterm-dialog-detail').textContent).toContain('remote kill failed');
     expect(consoleErrorSpy).toHaveBeenCalled();
     expect(onCloseSession).not.toHaveBeenCalled();
