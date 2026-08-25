@@ -415,14 +415,25 @@ func startRemoteWindowValidateProcess(windowIds: [String]) {
         Task {
             do {
                 let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-                let availableIds = Set(content.windows.map { $0.windowID })
                 let missingIds = windowIds.filter { windowId in
                     guard let numericId = UInt32(windowId) else { return true }
-                    return !availableIds.contains(numericId)
+                    return !content.windows.contains(where: { $0.windowID == numericId })
                 }
                 if !missingIds.isEmpty {
                     stderrLine("remote window target not found in fresh SCShareableContent: \(missingIds.joined(separator: ", "))")
                     exit(4)
+                }
+                for windowId in windowIds {
+                    guard let numericId = UInt32(windowId),
+                          let window = content.windows.first(where: { $0.windowID == numericId }) else {
+                        continue
+                    }
+                    guard content.displays.first(where: { $0.frame.contains(window.frame) }) != nil else {
+                        let frame = window.frame
+                        let frameDescription = "x:\(frame.origin.x),y:\(frame.origin.y),width:\(frame.size.width),height:\(frame.size.height)"
+                        stderrLine("remote window target frame is outside display for window \(windowId): frame={\(frameDescription)}")
+                        exit(6)
+                    }
                 }
                 exit(0)
             } catch {

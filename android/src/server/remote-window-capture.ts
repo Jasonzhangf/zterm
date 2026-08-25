@@ -65,6 +65,38 @@ export class RemoteWindowCaptureTargetUnavailableError extends Error {
   }
 }
 
+export class RemoteWindowCaptureTargetOutOfDisplayError extends Error {
+  readonly windowId: string;
+  readonly windowBounds: { x: number; y: number; width: number; height: number };
+  readonly displayBounds: { x: number; y: number; width: number; height: number };
+
+  constructor(
+    windowId: string,
+    windowBounds: { x: number; y: number; width: number; height: number },
+    displayBounds: { x: number; y: number; width: number; height: number },
+  ) {
+    super(
+      `remote window target frame is outside display for window ${windowId}: ` +
+      `frame={x:${windowBounds.x},y:${windowBounds.y},w:${windowBounds.width},h:${windowBounds.height}} ` +
+      `display={x:${displayBounds.x},y:${displayBounds.y},w:${displayBounds.width},h:${displayBounds.height}}`,
+    );
+    this.name = 'RemoteWindowCaptureTargetOutOfDisplayError';
+    this.windowId = windowId;
+    this.windowBounds = windowBounds;
+    this.displayBounds = displayBounds;
+  }
+}
+
+function rectInsideDisplay(
+  rect: { x: number; y: number; width: number; height: number },
+  display: { x: number; y: number; width: number; height: number },
+): boolean {
+  return rect.x >= display.x
+    && rect.y >= display.y
+    && rect.x + rect.width <= display.x + display.width
+    && rect.y + rect.height <= display.y + display.height;
+}
+
 interface PendingRemoteWindowCaptureUpdate {
   target: RemoteWindowStreamTargetManifest;
   timer: ReturnType<typeof setTimeout>;
@@ -94,6 +126,35 @@ export function validateStreamTargetForCapture(target: RemoteWindowStreamTargetM
     throw new Error('remote window stream crop rectangle must be drawable');
   }
   assertPaneCropWithinWindow(windowBounds, cropRect, target.streamTargetId);
+  const displayBounds = target.capture.displayBoundsTopLeftPx;
+  if (displayBounds) {
+    const focusBounds = {
+      x: windowBounds.x,
+      y: windowBounds.y,
+      width: windowBounds.width,
+      height: windowBounds.height,
+    };
+    if (!rectInsideDisplay(focusBounds, displayBounds)) {
+      throw new RemoteWindowCaptureTargetOutOfDisplayError(
+        target.videoTarget.windowId,
+        focusBounds,
+        displayBounds,
+      );
+    }
+  }
+  for (const composite of target.compositeWindows ?? []) {
+    const compositeBounds = validateRect(
+      composite.windowBoundsTopLeftPx,
+      `composite-window:${composite.windowId}.windowBoundsTopLeftPx`,
+    );
+    if (displayBounds && !rectInsideDisplay(compositeBounds, displayBounds)) {
+      throw new RemoteWindowCaptureTargetOutOfDisplayError(
+        composite.windowId,
+        compositeBounds,
+        displayBounds,
+      );
+    }
+  }
   return {
     windowBounds,
     cropRect,
@@ -210,11 +271,37 @@ async function validateScreenCaptureKitTargetWindows(
           reject(new RemoteWindowCaptureTargetUnavailableError(windowIds));
           return;
         }
+        if (error.code === 6 || detail.includes('remote window target frame is outside display')) {
+          const offendingId = detail.match(/for window (\S+):/u)?.[1]
+            || (detail.includes('focus') ? config.windowId : windowIds[0])
+            || windowIds[0];
+          const offendingBoundsMatch = detail.match(/frame=\{([^}]*)\}/u);
+          const offendingDisplayMatch = detail.match(/display=\{([^}]*)\}/u);
+          const parseRect = (raw: string | undefined) => {
+            if (!raw) return { x: 0, y: 0, width: 0, height: 0 };
+            const parts = raw.split(',').map((segment) => Number(segment.split(':')[1]));
+            return {
+              x: Number.isFinite(parts[0]) ? parts[0] : 0,
+              y: Number.isFinite(parts[1]) ? parts[1] : 0,
+              width: Number.isFinite(parts[2]) ? parts[2] : 0,
+              height: Number.isFinite(parts[3]) ? parts[3] : 0,
+            };
+          };
+          reject(new RemoteWindowCaptureTargetOutOfDisplayError(
+            offendingId,
+            parseRect(offendingBoundsMatch?.[1]),
+            parseRect(offendingDisplayMatch?.[1]),
+          ));
+          return;
+        }
         reject(new Error(`remote window target validation failed: ${detail}`));
       });
     });
   } catch (error) {
     if (error instanceof RemoteWindowCaptureTargetUnavailableError) {
+      throw error;
+    }
+    if (error instanceof RemoteWindowCaptureTargetOutOfDisplayError) {
       throw error;
     }
     const message = error instanceof Error ? error.message : String(error);

@@ -7,6 +7,8 @@ import {
   startScreenCaptureKitFrameSource,
   buildRemoteWindowCaptureUpdateCommand,
   buildScreenCaptureKitConfig,
+  validateStreamTargetForCapture,
+  RemoteWindowCaptureTargetOutOfDisplayError,
   RemoteWindowCaptureTargetUnavailableError,
 } from './remote-window-capture';
 import { buildRemoteWindowCanvasLayoutV1 } from './remote-window-canvas-layout';
@@ -98,6 +100,38 @@ setInterval(() => {}, 1000);
     })).rejects.toThrow('remote window target not found in fresh SCShareableContent: 456');
   });
 
+  it('rejects a composite window whose frame is outside the captured display before validation or spawn', async () => {
+    const validateTargets = vi.fn(async () => undefined);
+    const target = makeTarget({
+      compositeWindows: [{
+        windowId: '200',
+        title: 'Preview',
+        windowBoundsTopLeftPx: { x: 2694, y: 873, width: 1347, height: 679 },
+        cropRectTopLeftPx: { x: 2694, y: 873, width: 1347, height: 679 },
+      }],
+      capture: {
+        source: 'ScreenCaptureKit',
+        coordinateSpace: 'macos-top-left-px',
+        scale: 1,
+        displayBoundsTopLeftPx: { x: 0, y: 0, width: 3840, height: 2160 },
+        createdAt: '2026-08-08T00:00:00.000Z',
+      },
+    });
+
+    expect(() => validateStreamTargetForCapture(target))
+      .toThrow(RemoteWindowCaptureTargetOutOfDisplayError);
+    await expect(startScreenCaptureKitFrameSource(target, {
+      frameRate: 30,
+      startupTimeoutMs: 1_000,
+      swiftBinary: '/bin/echo',
+      captureBinary: '/usr/bin/true',
+      validateTargets,
+      onFrame: () => undefined,
+      onError: () => undefined,
+    })).rejects.toThrow('remote window target frame is outside display');
+    expect(validateTargets).not.toHaveBeenCalled();
+  });
+
   it('keeps validation on the same installed daemon binary and ScreenCaptureKit truth', () => {
     const captureRuntime = readFileSync(join(process.cwd(), 'src/server/remote-window-capture.ts'), 'utf8');
     expect(captureRuntime).toContain("['remote-window-validate', ...windowIds]");
@@ -106,6 +140,8 @@ setInterval(() => {}, 1000);
       .toBeLessThan(captureRuntime.indexOf('const child = spawn(options.captureBinary'));
     expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('func startRemoteWindowValidateProcess');
     expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)');
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('remote window target frame is outside display');
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('content.displays.first(where: { $0.frame.contains(window.frame) })');
   });
 
   it('builds a capture config carrying composite windows and canvas size', () => {
