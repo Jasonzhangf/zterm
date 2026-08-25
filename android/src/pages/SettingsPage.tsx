@@ -23,7 +23,13 @@ import type {
   SettingsUpdateUiSlot,
 } from '../lib/plugin-settings-update/settings-update-contract';
 import { ConnectionConfigSection } from '../components/settings/ConnectionConfigSection';
-import { SettingsSectionTitle, settingsInputStyle, settingsSectionStyle } from '../components/settings/SettingsSection';
+import {
+  settingsCardPadding,
+  settingsViewportPadding,
+  SettingsSectionTitle,
+  settingsInputStyle,
+  settingsSectionStyle,
+} from '../components/settings/SettingsSection';
 import { TerminalThemeSection } from '../components/settings/TerminalThemeSection';
 import {
   REMOTE_WINDOW_VIDEO_BITRATE_PRESETS,
@@ -180,7 +186,7 @@ function SettingsGroup({
           <path d="m9 6 6 6-6 6" />
         </svg>
       </summary>
-      <div style={{ display: 'grid', gap: '16px', padding: '20px 24px 24px' }}>{children}</div>
+      <div style={{ display: 'grid', gap: '16px', padding: settingsCardPadding, width: '100%', boxSizing: 'border-box', minWidth: 0 }}>{children}</div>
     </details>
   );
 }
@@ -280,7 +286,7 @@ export function SettingsPage({
           position: 'sticky',
           top: 0,
           zIndex: 10,
-          padding: `${mobileTheme.safeArea.top} 18px 18px`,
+          padding: `${mobileTheme.safeArea.top} ${settingsViewportPadding} 18px`,
           backgroundColor: 'rgba(237, 242, 246, 0.94)',
           backdropFilter: 'blur(14px)',
           display: 'flex',
@@ -314,7 +320,7 @@ export function SettingsPage({
             onUpdatePreferencesChange(updateDraft);
           }}
           style={{
-            minWidth: '92px',
+            minWidth: 'clamp(84px, 22vw, 112px)',
             height: '56px',
             borderRadius: '20px',
             border: 'none',
@@ -329,7 +335,7 @@ export function SettingsPage({
         </button>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '18px 18px 32px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: `${settingsViewportPadding} ${settingsViewportPadding} 32px`, width: '100%', boxSizing: 'border-box', minWidth: 0 }}>
         <SettingsGroup title="连接与升级" defaultOpen>
           {renderSettingsUpdate ? renderSettingsUpdate({
             currentVersionName,
@@ -609,7 +615,7 @@ export function SettingsPage({
           <div style={{ fontSize: '13px', lineHeight: 1.6, color: mobileTheme.colors.lightMuted }}>
             这里单独控制顶部栏、快捷栏和终端外壳，不改变终端 ANSI 颜色。默认跟主页保持白灰配色。
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(118px, 1fr))', gap: '10px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(118px, 100%), 1fr))', gap: '10px' }}>
             {TERMINAL_SHELL_SKIN_OPTIONS.map((option) => {
               const active = draft.terminalShellSkin === option.id;
               return (

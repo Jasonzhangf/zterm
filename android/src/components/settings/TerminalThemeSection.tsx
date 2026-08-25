@@ -46,7 +46,7 @@ export function TerminalThemeSection({
             这里会改终端 ANSI 16 色映射和默认前景/背景色。当前：{selectedTerminalTheme.name}。点主题卡会即时生效并持久化。
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(220px, 100%), 1fr))', gap: '12px' }}>
             {TERMINAL_THEME_OPTIONS.map((theme) => {
               const active = terminalThemeId === theme.id;
               return (
