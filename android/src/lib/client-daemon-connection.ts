@@ -23,6 +23,7 @@ export function createClientDaemonTraversalSocket(
   return new TraversalSocket(target, settings, {
     overrideUrl: options.overrideUrl,
     autoReconnect: options.autoReconnect === true,
+    requireOpenConfirmation: true,
     routeHealthScope: options.routeHealthScope,
   });
 }

@@ -706,6 +706,114 @@ describe('bindTargetMuxTransportSocketLifecycleRuntime', () => {
     });
   });
 
+  it('calls confirmTransportReady on mux-ready when the socket supports it', () => {
+    const confirmTransportReady = vi.fn();
+    const ws = {
+      readyState: WebSocket.OPEN,
+      onopen: null,
+      onmessage: null,
+      onerror: null,
+      onclose: null,
+      confirmTransportReady,
+      getDiagnostics: () => ({ reason: '' }),
+    } as any;
+
+    bindTargetMuxTransportSocketLifecycleRuntime({
+      sessionId: 'session-anchor',
+      targetKey: 'mac-studio',
+      targetHeartbeatKey: 'target:mac-studio',
+      host: makeHost(),
+      ws,
+      debugScope: 'connect',
+      readTargetTerminalSocket: () => ws,
+      readRequestedTerminalGeometry: () => ({ widthMode: 'mirror-fixed' }),
+      readPrioritySessionId: () => 'session-1',
+      getOpeningTerminalChannelsForTarget: () => [
+        {
+          channelId: 'channel-a',
+          sessionId: 'session-1',
+          sessionName: 'tmux-a',
+          targetKey: 'target-a',
+          state: 'opening',
+          bodySubscribed: true,
+          openedAt: 1,
+          closedAt: null,
+        },
+      ],
+      setTargetMuxReady: vi.fn(),
+      sendSocketPayload: vi.fn(),
+      handleTargetMuxServerFrame: vi.fn(),
+      applyTransportDiagnostics: vi.fn(),
+      runtimeDebug: vi.fn(),
+      finalizeFailure: vi.fn(),
+    });
+
+    ws.onopen?.();
+    ws.onmessage?.({
+      data: JSON.stringify({
+        type: 'mux-ready',
+        payload: {
+          version: 1,
+          capabilities: { version: 1, channelEnvelope: true, targetMessages: true },
+        },
+      }),
+    });
+
+    expect(confirmTransportReady).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not throw when confirmTransportReady is absent on mux-ready', () => {
+    const ws = {
+      readyState: WebSocket.OPEN,
+      onopen: null,
+      onmessage: null,
+      onerror: null,
+      onclose: null,
+      getDiagnostics: () => ({ reason: '' }),
+    } as any;
+
+    bindTargetMuxTransportSocketLifecycleRuntime({
+      sessionId: 'session-anchor',
+      targetKey: 'mac-studio',
+      targetHeartbeatKey: 'target:mac-studio',
+      host: makeHost(),
+      ws,
+      debugScope: 'connect',
+      readTargetTerminalSocket: () => ws,
+      readRequestedTerminalGeometry: () => ({ widthMode: 'mirror-fixed' }),
+      readPrioritySessionId: () => 'session-1',
+      getOpeningTerminalChannelsForTarget: () => [
+        {
+          channelId: 'channel-a',
+          sessionId: 'session-1',
+          sessionName: 'tmux-a',
+          targetKey: 'target-a',
+          state: 'opening',
+          bodySubscribed: true,
+          openedAt: 1,
+          closedAt: null,
+        },
+      ],
+      setTargetMuxReady: vi.fn(),
+      sendSocketPayload: vi.fn(),
+      handleTargetMuxServerFrame: vi.fn(),
+      applyTransportDiagnostics: vi.fn(),
+      runtimeDebug: vi.fn(),
+      finalizeFailure: vi.fn(),
+    });
+
+    ws.onopen?.();
+    expect(() => ws.onmessage?.({
+      data: JSON.stringify({
+        type: 'mux-ready',
+        payload: {
+          version: 1,
+          capabilities: { version: 1, channelEnvelope: true, targetMessages: true },
+        },
+      }),
+    })).not.toThrow();
+  });
+
   it('flushes the active opening channel first when mux-ready releases a shared target', () => {
     const ws = {
       readyState: WebSocket.OPEN,

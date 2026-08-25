@@ -492,6 +492,7 @@ export function bindTargetMuxTransportSocketLifecycleRuntime(options: {
           return;
         }
         options.setTargetMuxReady(options.targetKey, true);
+        options.ws.confirmTransportReady?.();
         options.runtimeDebug(`session.mux.${options.debugScope}.ready`, {
           sessionId: options.sessionId,
           prioritySessionId: priorityChannel?.sessionId || openingChannels[0]?.sessionId || null,
