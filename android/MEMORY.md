@@ -2678,3 +2678,11 @@ Tags: #daemon-permission #screen-recording #single-tcc-identity #no-fallback #em
 - Missing Screen Recording permission is an allowed explicit failure: `--permission-probe` and `remote-window-capture` exit 5 before capture allocation. Permission must be granted explicitly in macOS System Settings; the daemon does not initiate the grant flow.
 - Verified installed binary SHA-256 `25dbfb2a6ce4ad8b51916f3daaed1a4f72ff11155a031b339ab349ee12c21829` imports `_CGPreflightScreenCaptureAccess` and has no `_CGRequestScreenCaptureAccess`; probe completes in 459 ms with the currently granted permission. Emulator `0.1.3.2719` 100000-line refresh retained 47 continuous rows in all 100 samples with zero empty/gap/discontinuity samples.
 Tags: #daemon-permission #preflight-only #no-request #no-poll #no-fallback
+
+## 2026-08-24 remote-window capture/quality explicit failure
+
+- `desktop.remote_window_stream` must keep two failure semantics separate: ScreenCaptureKit lifecycle failure stops the stream, while `@roamhq/wrtc setParameters()` rejection is a typed quality failure. Neither becomes a screenshot, alternate executable, retry-into-success, or silent downgrade.
+- `@roamhq/wrtc` 0.10.0 validates each `setParameters()` by transaction identity. A lane apply must mutate the exact object returned by its current `getParameters()`; rollback after a consumed transaction must call `getParameters()` again before restoring previous encoding values.
+- Native sender errors must pass through `formatRemoteWindowVideoBitrateError`; `InvalidStateError code=11 message=""` is real and must be projected with a non-empty diagnostic rather than hidden or retried through another path.
+- Verified on installed daemon SHA `50d0591ae5b426587370df5d0d653f313f9e76e72a795bc6d0339ba33460d1c5`: canonical mux probe saw video frames (`framesSent=197`), all input markers, and non-empty explicit quality rejections. AGY Review `agy-remote-window-20260824T230406Z` passed with zero findings; commit `c31dd79c`.
+Tags: #remote-window-stream #wrtc-transactions #explicit-quality-failure #no-fallback

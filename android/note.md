@@ -181,3 +181,11 @@
 - Corrected owner: `hasScreenCapturePermission()` now performs one `CGPreflightScreenCaptureAccess()` only. Missing permission exits 5 immediately; no request, wait, retry, TCC reset, alternate executable, screenshot, or runtime compilation path exists.
 - Evidence before review: red test reproduced the request path; focused capture 8/8, daemon/service/screenshot 30/30, stream/message/capture 122/122, typecheck, feature registry 102/102, Swift compile, installed daemon SHA `25dbfb2a...`, exact launchd restart health ready, and emulator 100000-line refresh with 100/100 non-empty continuous samples.
 - Post-restart runtime evidence: staged `server.cjs` SHA `299ce64e...`, installed native daemon SHA `25dbfb2a...`; the bundle has no request/poll/screenshot/runtime-compile markers, and the binary imports preflight but not request. Emulator 100000-line refresh after restart produced 100/100 non-empty continuous CDP samples. AGY Review r4 passed with zero findings; MemoryPalace reindex remains blocked by an unrelated corpus-worker hang.
+
+## 2026-08-24 remote-window capture/quality explicit failure closeout
+
+- Commit `c31dd79cebae5f95a046e8846999ab1f22b7ac46` keeps ScreenCaptureKit outputs alive for the stream lifetime and removes the AppKit main-loop dependency from the capture startup/update tasks.
+- `@roamhq/wrtc` quality now mutates the exact sender transaction and requests a fresh transaction before rollback. Both original and rollback failures use the shared typed formatter, so native `InvalidStateError` cannot become an empty diagnostic.
+- The canonical live probe treats protocol-valid `quality-result status=rejected` as an explicit failure; it neither retries into another capture path nor converts rejection into success.
+- Runtime evidence: installed runtime SHA equals release SHA `50d0591ae5b426587370df5d0d653f313f9e76e72a795bc6d0339ba33460d1c5`; `/health` PID 68870 ready; canonical mux probe passed with 197 frames sent and all input markers observed; focused quality tests 6/6, type-check, feature registry 102/102.
+- AGY Review task `agy-remote-window-20260824T230406Z`: controller `verdict=pass`, findings `[]`. Local and remote main are both at commit `c31dd79c`.
