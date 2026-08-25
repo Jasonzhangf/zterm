@@ -49,7 +49,10 @@ vi.mock('@roamhq/wrtc', () => ({
   },
 }));
 import type { RemoteWindowCaptureSourceFactory } from './remote-window-capture';
-import { RemoteWindowCaptureTargetUnavailableError } from './remote-window-capture';
+import {
+  RemoteWindowCaptureTargetOutOfDisplayError,
+  RemoteWindowCaptureTargetUnavailableError,
+} from './remote-window-capture';
 import {
   buildScreenCaptureKitStartupTimeoutMessage,
   buildScreenCaptureKitConfig,
@@ -2005,6 +2008,64 @@ setInterval(() => {}, 1000);
       failureStage: 'target-validation',
     });
     expect(fakePeer.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('projects composite target frames outside the display as typed target-validation failure', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      captureSourceFactory: vi.fn(async () => {
+        throw new RemoteWindowCaptureTargetOutOfDisplayError('200', {
+          x: 2694,
+          y: 873,
+          width: 1347,
+          height: 679,
+        }, {
+          x: 0,
+          y: 0,
+          width: 3840,
+          height: 2160,
+        });
+      }),
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => ({
+        createTrack: vi.fn(() => makeFakeMediaStreamTrack()),
+        onFrame: vi.fn(),
+      } as any)),
+      rgbaToI420: vi.fn(),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    const result = await runtime.startStream({
+      requestId: 'rw-out-of-display',
+      streamId: 'stream-out-of-display',
+      mediaPlan: 'overview-plus-focus' as const,
+      mediaPlanVersion: 1 as const,
+      target: {
+        ...makeAppStreamTarget(),
+        compositeWindows: [{
+          windowId: '200',
+          title: 'Preview',
+          windowBoundsTopLeftPx: { x: 2694, y: 873, width: 1347, height: 679 },
+          cropRectTopLeftPx: { x: 2694, y: 873, width: 1347, height: 679 },
+        }],
+        capture: {
+          ...makeAppStreamTarget().capture,
+          displayBoundsTopLeftPx: { x: 0, y: 0, width: 3840, height: 2160 },
+        },
+      },
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+    });
+
+    expect(result).toMatchObject({
+      requestId: 'rw-out-of-display',
+      streamId: 'stream-out-of-display',
+      code: 'remote_window_target_out_of_display',
+      message: expect.stringContaining('remote window target frame is outside display'),
+      failureStage: 'target-validation',
+    });
+    expect(fakePeer.close).toHaveBeenCalledTimes(0);
   });
 
   it('rejects a missing or mismatched media plan before creating peer/capture resources', async () => {
