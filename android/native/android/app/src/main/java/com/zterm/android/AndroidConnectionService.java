@@ -1556,10 +1556,19 @@ public class AndroidConnectionService extends Service {
 
         private void publishFrameRejected(AndroidConnectionCommand source, String code, String message) {
             if (source == null) {
-                publishEvent(AndroidConnectionServiceEventEnvelope.physicalError(code, message));
+                publishPhysicalError(code, message);
             } else {
                 publishEvent(AndroidConnectionServiceEventEnvelope.commandRejected(source, code, message));
             }
+        }
+
+        private void publishPhysicalError(String code, String message) {
+            publishEvent(new AndroidConnectionServiceEventEnvelope.Builder(
+                AndroidConnectionServiceEventEnvelope.Kind.PHYSICAL_ERROR)
+                .targetKey(target.targetKey)
+                .errorCode(code)
+                .errorMessage(message)
+                .build());
         }
 
         private void drainPendingFrames(String channelId) {
@@ -1874,7 +1883,7 @@ public class AndroidConnectionService extends Service {
             if (!physicalErrorProjected
                 && nowMillis - physicalErrorFirstAtMillis >= PHYSICAL_ERROR_DEBOUNCE_MS) {
                 physicalErrorProjected = true;
-                publishEvent(AndroidConnectionServiceEventEnvelope.physicalError(code, message));
+                publishPhysicalError(code, message);
             }
             scheduleBackoff();
         }
@@ -1910,7 +1919,7 @@ public class AndroidConnectionService extends Service {
                 stateMachine.dispatch(AndroidConnectionServiceEvent.terminalFailure(
                     failedGeneration, message), System.currentTimeMillis());
             }
-            publishEvent(AndroidConnectionServiceEventEnvelope.physicalError(code, message));
+            publishPhysicalError(code, message);
         }
 
         /** Auth failures stop reconnect — no backoff retry. */
@@ -1924,7 +1933,7 @@ public class AndroidConnectionService extends Service {
             generation = null;
             stateMachine.dispatch(AndroidConnectionServiceEvent.authenticationFailure(
                 failedGeneration, message), System.currentTimeMillis());
-            publishEvent(AndroidConnectionServiceEventEnvelope.physicalError(code, message));
+            publishPhysicalError(code, message);
             // no scheduleBackoff() — auth failures are terminal
         }
 

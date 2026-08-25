@@ -51,6 +51,9 @@ interface UseOpenTabLifecycleEffectsOptions {
    *  foreground resume are stamped with generation/fingerprint changes so the
    *  transport owner can retire stale physical transports immediately. */
   networkIdentity?: NetworkIdentityRuntime;
+  /** AndroidConnectionService owns ConnectivityManager-driven replacement on
+   *  Android; WebView foreground resampling must not duplicate that decision. */
+  foregroundResamplesNetworkIdentity?: boolean;
 }
 
 export function useBackgroundLiveSessionHandoff(options: {
@@ -112,6 +115,7 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
     reportTargetNetworkProbeError,
     bumpFollowResetEpoch,
     networkIdentity,
+    foregroundResamplesNetworkIdentity = true,
   } = options;
 
   const callbacksRef = useRef({
@@ -122,6 +126,7 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
     reportTargetNetworkProbeError,
     bumpFollowResetEpoch,
     networkIdentity,
+    foregroundResamplesNetworkIdentity,
   });
   callbacksRef.current = {
     onForegroundActiveChange,
@@ -131,6 +136,7 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
     reportTargetNetworkProbeError,
     bumpFollowResetEpoch,
     networkIdentity,
+    foregroundResamplesNetworkIdentity,
   };
   // Foreground-resume path: re-read the platform status + local interfaces so a
   // network change that happened while hidden (and whose event was dropped) is
@@ -140,7 +146,7 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
   // retires every stale physical transport right away.
   const refreshNetworkIdentityForForeground = useCallback(async () => {
     const runtime = callbacksRef.current.networkIdentity;
-    if (!runtime) {
+    if (!runtime || callbacksRef.current.foregroundResamplesNetworkIdentity === false) {
       return;
     }
     let connected = true;

@@ -106,12 +106,24 @@ async function runPlan(mediaPlan) {
       await applyCandidate(receiver, candidate);
     }
 
-    for (let frameIndex = 0; frameIndex < 3; frameIndex += 1) {
+    await waitFor(
+      () => receiver.connectionState === 'connected' && sender.connectionState === 'connected',
+      `${mediaPlan} ICE connection`,
+    );
+
+    for (let frameIndex = 0; frameIndex < 6; frameIndex += 1) {
       sources.forEach((source, laneIndex) => {
+        const width = 320;
+        const height = 240;
+        const ySize = width * height;
+        const uvSize = (width / 2) * (height / 2);
+        const data = Buffer.alloc(ySize + uvSize * 2);
+        data.fill((laneIndex * 40 + frameIndex + 16) % 256, 0, ySize);
+        data.fill(128, ySize);
         source.onFrame({
-          width: 2,
-          height: 2,
-          data: Buffer.alloc(6, laneIndex + frameIndex + 1),
+          width,
+          height,
+          data,
         });
       });
       await new Promise((resolve) => setTimeout(resolve, 40));

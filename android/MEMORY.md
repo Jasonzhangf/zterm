@@ -2703,3 +2703,15 @@ Tags: #daemon-permission #screen-recording #single-tcc-identity #screenshot #no-
 - Capture target-validation errors and other remote-window responses must remain inside the mux channel subscriber wrapper (`mux-channel-message`); a physical mux transport must never receive a bare remote-window business/error frame.
 - Verified commit `94e35a89`: focused 127/127, type-check, feature registry 102/102, installed Finder `trackSeen=true` at 1347x679/5 FPS, invalid ID exit 4 with explicit fresh-content diagnostic, AGY PASS with zero findings.
 Tags: #remote-window-stream #stale-target #target-validation #explicit-failure #no-fallback #mux-channel
+
+## 2026-08-25 Composite window frame out-of-display validation
+
+**Problem**: Finder + .codex composite target (`app-window:4646:12601` focus + `app-window:4646:11353` composite) failed ScreenCaptureKit with Code=2 `display not found for frame {{2694,873},{1347,679}}`. The composite x=2694+width=1347=4041 exceeded the 3840-wide display. User saw a 20s timeout with no typed error before `<video>` appeared.
+
+**Root cause**: F.6 stale-target closeout only checked window ID existence in fresh SCShareableContent, not frame containment within the active display. `validateStreamTargetForCapture` checked focus crop ⊆ windowBounds but not any composite/focus frame ⊆ `capture.displayBoundsTopLeftPx`.
+
+**Fix**: TS pre-spawn gate in `validateStreamTargetForCapture` rejects when any required window frame is outside display bounds; throws typed `RemoteWindowCaptureTargetOutOfDisplayError(windowId, frameBounds, displayBounds)`. Swift `startRemoteWindowValidateProcess` adds secondary fresh SCShareableContent containment check using `content.displays.first(where: { $0.frame.contains(window.frame) })`, exits 6 for out-of-display. Both paths propagate as `code=remote_window_target_out_of_display / failureStage=target-validation`. No fallback.
+
+**Verification**: remote-window capture+daemon 86/86; feature-registry 13 files/102 PASS; new daemon binary SHA c5d0696e installed to `/Users/fanzhang/.zterm/bin/zterm-daemon`; live probe: `12601→exit 0`, `12601+11353→exit 6 with stderr "remote window target frame is outside display for window 11353"`, `99999→exit 4`; AGY Review PASS findings=[]; commit ce9996a4 pushed to origin/main.
+
+Tags: #remote-window-stream #composite-window-frame #out-of-display-validation #target-validation #no-fallback

@@ -21,6 +21,7 @@ vi.mock('../contexts/SessionContext', () => ({
 vi.mock('@capacitor/core', () => ({
   Capacitor: {
     getPlatform: () => 'web',
+    isNativePlatform: () => false,
   },
   registerPlugin: () => ({
     show: vi.fn(async () => ({})),

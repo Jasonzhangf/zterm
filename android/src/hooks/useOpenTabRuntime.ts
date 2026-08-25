@@ -94,6 +94,8 @@ interface UseOpenTabRuntimeOptions {
    *  the current generation so the transport owner can retire stale sockets
    *  immediately when WiFi/cellular/VPN/IP changes. */
   networkIdentity?: NetworkIdentityRuntime;
+  /** Native Android transport owner suppresses duplicate foreground resampling. */
+  foregroundResamplesNetworkIdentity?: boolean;
   /** SessionProvider facade: records background entry time into the session context's own ref. */
   recordBackgroundEnteredAt?: (sessionIds: string[], at: number) => void;
 }
@@ -506,6 +508,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     bumpFollowResetEpoch,
     lastBackgroundEnteredAtRef,
     networkIdentity,
+    foregroundResamplesNetworkIdentity: options.foregroundResamplesNetworkIdentity,
   });
 
   const {

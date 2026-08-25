@@ -2,8 +2,10 @@
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { RemoteWindowStreamTargetManifest } from '../../lib/types';
-import type { RemoteWindowScreenshotSaveResult } from './useRemoteWindowThumbnails';
-import { useRemoteWindowScreenshot } from './useRemoteWindowScreenshot';
+import {
+  useRemoteWindowScreenshot,
+  type RemoteWindowScreenshotSaveResult,
+} from './useRemoteWindowScreenshot';
 
 afterEach(cleanup);
 

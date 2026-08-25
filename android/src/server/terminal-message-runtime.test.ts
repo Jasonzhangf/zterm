@@ -1768,6 +1768,71 @@ describe('terminal message runtime explicit error truth', () => {
       payload: errorPayload,
     });
   });
+  describe('remote-window mux channel envelope', () => {
+    it('rejects an unwrapped remote-window request on the physical mux transport', async () => {
+      const { runtime, sendTransportMessage, remoteWindowStreamRuntime } = createRuntime();
+      const connection = createConnection(null);
+      await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+        type: 'mux-hello',
+        payload: { version: 1, clientInstanceId: 'client-a' },
+      })));
+      await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+        type: 'mux-channel-open',
+        payload: { channelId: 'rw-channel', sessionName: 'alpha' },
+      })));
+
+      await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+        type: 'remote-window-stream-start-request',
+        payload: { requestId: 'rw-start-1' },
+      })));
+
+      expect(remoteWindowStreamRuntime.startStream).not.toHaveBeenCalled();
+      expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, expect.objectContaining({
+        type: 'mux-error',
+        payload: expect.objectContaining({ code: 'mux_unwrapped_session_message' }),
+      }));
+    });
+
+    it('sends raw remote-window-stream-started without mux envelope when mux is not negotiated', async () => {
+      const { runtime, sendTransportMessage, remoteWindowStreamRuntime } = createRuntime();
+      const connection = createConnection(null);
+      const startedPayload = {
+        requestId: 'rw-start-raw',
+        streamId: 'stream-raw',
+        targetId: 'target-raw',
+        mediaPlan: 'single-focus' as const,
+        mediaPlanVersion: 1 as const,
+        answer: { type: 'answer' as const, sdp: 'raw-answer' },
+        capture: {
+          source: 'ScreenCaptureKit' as const,
+          frameWidth: 640,
+          frameHeight: 360,
+          frameRate: 12,
+          targetKind: 'app-window' as const,
+        },
+        transport: { kind: 'webrtc-video' as const },
+      };
+      remoteWindowStreamRuntime.startStream.mockResolvedValueOnce(startedPayload);
+
+      await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+        type: 'remote-window-stream-start-request',
+        payload: {
+          requestId: 'rw-start-raw',
+          streamId: 'stream-raw',
+          mediaPlan: 'single-focus' as const,
+          mediaPlanVersion: 1 as const,
+          target: makeRemoteWindowTargetManifest(),
+          offer: { type: 'offer', sdp: 'raw-offer' },
+        },
+      })));
+      await flushAsyncHandlers();
+
+      expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
+        type: 'remote-window-stream-started',
+        payload: startedPayload,
+      });
+    });
+  });
 
   it('wraps remote window channel responses in mux-channel-message frames', async () => {
     const { runtime, remoteWindowStreamRuntime } = createRuntime({

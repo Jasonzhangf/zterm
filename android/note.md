@@ -196,3 +196,18 @@
 - 唯一修复点：`remote-window-capture.ts` 在 capture spawn 前调用同一已安装 `zterm-daemon remote-window-validate <windowId...>`；缺失目标抛 `RemoteWindowCaptureTargetUnavailableError`，daemon 投影 `remote_window_target_not_found` / `target-validation`。capture/daemon/message 流程不增加 screenshot、旧视频或其他 fallback。
 - 验证：定向 127/127、type-check、feature registry 102/102；Finder 正向探针 `trackSeen=true`、1347x679、ScreenCaptureKit 5 FPS、正常 stopped；无效 ID `99999` 直接 exit 4，stderr 为 fresh `SCShareableContent` target-not-found；health PID 94375 ready，installed daemon SHA `882d01404cb33fe1ec1eaa0a4abe68cb61857f83d14202f9209c0b3a93a3ae54`。
 - Review/交付：AGY task `agy-daemon-screenshot-no-fallback-20260825` PASS、findings=[]；精确 change set commit `94e35a89`，已 push，origin/main 与本地 HEAD 一致。其他 dirty 文件未暂存。
+## 2026-08-25 Composite frame validation closeout
+
+- Commit ce9996a4 merged to main and pushed. Worktree/branch cleaned.
+- New daemon binary c5d0696e installed at /Users/fanzhang/.zterm/bin/zterm-daemon; PID 59452 healthy.
+- Live probe: composite out-of-display correctly rejected with exit 6 / typed stderr; stale window still exit 4.
+- AGY Review PASS findings=[] for commit 68a895c3 (worktree) = ce9996a4 (main).
+- Emulator socket=missing for remote-window transport is unrelated to this fix (emulator NAT'd, daemon not reachable via 127.0.0.1); owned by mux/route worktree.
+## 2026-08-25 UDP/relay red-test 评估（pending decision）
+
+- AndroidConnectionService 当前是 native 物理 transport owner，但 `buildCandidates()` 永远只生成 Tailscale/IPv6/IPv4 WebSocket URL；`startAttempt()` 对 `RTC_DIRECT/RTC_RELAY` 显式 `webrtc-not-supported`。
+- build.gradle 没有 WebRTC 类库（只有 OkHttp + Capacitor + AndroidX）。
+- `TraversalSocket` 完整保留 WebRTC/UDP/relay 竞速实现，但仅被 `tmux-sessions.ts` 管理面与 web 平台调用；Android native 路径在 `session-context-infra-facade-runtime.ts:513` 强制走 native service。
+- resource-map / function-map / mainline-call-map 已显式声明 native WebRTC/Relay media ownership 是"separate slice"，目前未实现。
+- 待 Jason 拍板：方案 A native WebRTC（worktree + libwebrtc/wrtc-android + native signaling slice）vs 方案 B 保留 native service owner、扩展其 relay 通道。
+- 在 Jason 决策前不动代码、不开 worktree。

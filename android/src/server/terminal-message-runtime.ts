@@ -156,6 +156,13 @@ export function createTerminalMessageRuntime(
     });
   }
 
+  function sendRemoteWindowMessage(
+    connection: TerminalTransportConnection,
+    message: ServerMessage,
+  ) {
+    deps.sendTransportMessage(connection.transport, message);
+  }
+
   function handleSessionOpen(connection: TerminalTransportConnection, payload: HostConfigMessage) {
     return controlGateway.handleSessionOpen(connection, payload);
   }
@@ -216,6 +223,10 @@ export function createTerminalMessageRuntime(
     if (connection.muxVersion) {
       const messageType = (message as { type?: unknown }).type;
       if (typeof messageType === 'string' && classifyTerminalMuxClientMessage(message) === 'channel') {
+        // remote-window-* are channel-lane business messages that ride the
+        // same mux channel. The channel subscriber wrapper removes mux
+        // metadata before this switch and owns the original channel envelope;
+        // a physical mux connection must never guess a channel.
         sendMuxFrame(connection, buildTerminalMuxUnwrappedSessionMessageError(messageType));
         return;
       }
@@ -474,11 +485,11 @@ export function createTerminalMessageRuntime(
         break;
       case 'remote-window-targets-request':
         void deps.remoteWindowStreamRuntime.listTargets(message.payload).then((payload) => {
-          deps.sendTransportMessage(connection.transport, 'targets' in payload
+          sendRemoteWindowMessage(connection, 'targets' in payload
             ? { type: 'remote-window-targets-response', payload }
             : { type: 'remote-window-error', payload });
         }).catch((error: unknown) => {
-          deps.sendTransportMessage(connection.transport, {
+          sendRemoteWindowMessage(connection, {
             type: 'remote-window-error',
             payload: {
               requestId: message.payload.requestId || '',
@@ -502,29 +513,29 @@ export function createTerminalMessageRuntime(
         }
         void deps.remoteWindowStreamRuntime.startStream(message.payload, {
           sendIceCandidate: (payload) => {
-            deps.sendTransportMessage(connection.transport, {
+            sendRemoteWindowMessage(connection, {
               type: 'remote-window-stream-ice-candidate',
               payload,
             });
           },
           sendStatus: (payload) => {
-            deps.sendTransportMessage(connection.transport, {
+            sendRemoteWindowMessage(connection, {
               type: 'remote-window-stream-status',
               payload,
             });
           },
           sendFocusResult: (payload) => {
-            deps.sendTransportMessage(connection.transport, {
+            sendRemoteWindowMessage(connection, {
               type: 'remote-window-stream-focus-result',
               payload,
             });
           },
         }).then((payload) => {
-          deps.sendTransportMessage(connection.transport, 'answer' in payload
+          sendRemoteWindowMessage(connection, 'answer' in payload
             ? { type: 'remote-window-stream-started', payload }
             : { type: 'remote-window-error', payload });
         }).catch((error: unknown) => {
-          deps.sendTransportMessage(connection.transport, {
+          sendRemoteWindowMessage(connection, {
             type: 'remote-window-error',
             payload: {
               requestId: message.payload.requestId || '',
@@ -537,7 +548,7 @@ export function createTerminalMessageRuntime(
         break;
       case 'remote-window-stream-ice-candidate':
         void deps.remoteWindowStreamRuntime.addIceCandidate(message.payload).catch((error: unknown) => {
-          deps.sendTransportMessage(connection.transport, {
+          sendRemoteWindowMessage(connection, {
             type: 'remote-window-error',
             payload: {
               requestId: message.payload.requestId || '',
@@ -552,11 +563,11 @@ export function createTerminalMessageRuntime(
         break;
       case 'remote-window-stream-update-focus':
         void deps.remoteWindowStreamRuntime.updateFocus(message.payload).then((payload) => {
-          deps.sendTransportMessage(connection.transport, 'phase' in payload
+          sendRemoteWindowMessage(connection, 'phase' in payload
             ? { type: 'remote-window-stream-focus-result', payload }
             : { type: 'remote-window-error', payload });
         }).catch((error: unknown) => {
-          deps.sendTransportMessage(connection.transport, {
+          sendRemoteWindowMessage(connection, {
             type: 'remote-window-error',
             payload: {
               requestId: message.payload.requestId || '',
@@ -580,11 +591,11 @@ export function createTerminalMessageRuntime(
                 }
               }
             }
-            deps.sendTransportMessage(connection.transport, 'phase' in payload
+            sendRemoteWindowMessage(connection, 'phase' in payload
               ? { type: 'remote-window-stream-status', payload }
               : { type: 'remote-window-error', payload });
           }).catch((error: unknown) => {
-          deps.sendTransportMessage(connection.transport, {
+          sendRemoteWindowMessage(connection, {
             type: 'remote-window-error',
             payload: {
               requestId: message.payload.requestId || '',
@@ -598,11 +609,11 @@ export function createTerminalMessageRuntime(
         break;
       case 'remote-window-stream-quality-request':
         void deps.remoteWindowStreamRuntime.updateStreamQuality(message.payload).then((payload) => {
-          deps.sendTransportMessage(connection.transport, 'status' in payload
+          sendRemoteWindowMessage(connection, 'status' in payload
             ? { type: 'remote-window-stream-quality-result', payload }
             : { type: 'remote-window-error', payload });
         }).catch((error: unknown) => {
-          deps.sendTransportMessage(connection.transport, {
+          sendRemoteWindowMessage(connection, {
             type: 'remote-window-error',
             payload: {
               requestId: message.payload.requestId || '',
@@ -615,11 +626,11 @@ export function createTerminalMessageRuntime(
         break;
       case 'remote-window-input':
         void deps.remoteWindowStreamRuntime.injectInput(message.payload).then((payload) => {
-          deps.sendTransportMessage(connection.transport, 'accepted' in payload
+          sendRemoteWindowMessage(connection, 'accepted' in payload
             ? { type: 'remote-window-input-result', payload }
             : { type: 'remote-window-error', payload });
         }).catch((error: unknown) => {
-          deps.sendTransportMessage(connection.transport, {
+          sendRemoteWindowMessage(connection, {
             type: 'remote-window-error',
             payload: {
               requestId: message.payload.requestId || '',

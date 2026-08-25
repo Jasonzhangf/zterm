@@ -41,6 +41,7 @@ const windowRemoveSpy = vi.spyOn(window, 'removeEventListener');
 vi.mock('@capacitor/core', () => ({
   Capacitor: {
     getPlatform: () => 'android',
+    isNativePlatform: () => true,
   },
   registerPlugin: () => ({
     readText: vi.fn(async () => ({ value: '' })),

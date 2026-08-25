@@ -71,7 +71,6 @@ describe('remote window architecture boundary truth', () => {
     expect(controller).toContain('<RemoteWindowDeveloperDiagnostics');
     expect(controller).not.toContain('data-testid="remote-window-locked-toolbar"');
     expect(controller).not.toContain('data-testid="remote-window-developer-diagnostics"');
-    expect(controller).toContain('useRemoteWindowThumbnails');
     expect(controller).toContain('<RemoteWindowTargetPicker');
     expect(controller).toContain('<RemoteWindowAppSwitch');
     expect(controller).toContain('<RemoteWindowMorePanel');

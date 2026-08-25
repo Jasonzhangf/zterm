@@ -1288,6 +1288,9 @@ public final class AndroidConnectionServiceTransportTest {
 
             assertEquals(1, events.stream().filter(event ->
                 event.kind == AndroidConnectionServiceEventEnvelope.Kind.PHYSICAL_ERROR).count());
+            assertEquals("target-a", events.stream()
+                .filter(event -> event.kind == AndroidConnectionServiceEventEnvelope.Kind.PHYSICAL_ERROR)
+                .findFirst().get().targetKey);
         } finally {
             AndroidConnectionService.resetForTests();
         }
@@ -1313,6 +1316,73 @@ public final class AndroidConnectionServiceTransportTest {
 
             assertTrue(events.stream().noneMatch(event ->
                 event.kind == AndroidConnectionServiceEventEnvelope.Kind.PHYSICAL_ERROR));
+        } finally {
+            AndroidConnectionService.resetForTests();
+        }
+    }
+
+    @Test
+    public void channelOpenAckDrainsPendingFramesForEachChannel() throws Exception {
+        AndroidConnectionService.resetForTests();
+        AndroidConnectionService.registerListenerForTests(new AndroidConnectionServiceListener() {
+            @Override public void onSnapshot(AndroidConnectionServiceSnapshot snapshot) { }
+            @Override public void onEvent(AndroidConnectionServiceEventEnvelope event) { }
+        });
+        try {
+            AndroidConnectionService service = new AndroidConnectionService();
+            useImmediateScheduler(service);
+            Object runtime = newRuntime(service);
+            setField(service, "workerHandler", new Handler(Looper.getMainLooper()));
+            setField(runtime, "stateMachine", readyStateMachine());
+            setField(runtime, "generation", "gen-1");
+            setField(runtime, "transportNetworkGeneration", 0L);
+            setField(service, "networkGeneration", 0L);
+            setDesiredChannel(runtime, "channel-a", "shell");
+            setDesiredChannel(runtime, "channel-b", "shell");
+            List<String> sent = new ArrayList<>();
+            setField(runtime, "socket", fakeSocket(sent, true));
+
+            Method sendOrQueue = runtime.getClass().getDeclaredMethod(
+                "sendOrQueue", JSONObject.class, String.class,
+                AndroidConnectionCommand.class, boolean.class);
+            sendOrQueue.setAccessible(true);
+            Method pendingCount = runtime.getClass().getDeclaredMethod(
+                "pendingFrameCountForTests");
+            pendingCount.setAccessible(true);
+            Method replay = runtime.getClass().getDeclaredMethod("replayDesiredChannels");
+            replay.setAccessible(true);
+            Method channelOpened = runtime.getClass().getDeclaredMethod(
+                "handleChannelOpened", JSONObject.class);
+            channelOpened.setAccessible(true);
+
+            sendOrQueue.invoke(runtime,
+                new JSONObject().put("type", "mux-channel-message").put("seq", 1),
+                "channel-a",
+                AndroidConnectionCommand.channelMessage("target", "channel-a", new JSONObject()),
+                true);
+            sendOrQueue.invoke(runtime,
+                new JSONObject().put("type", "mux-channel-message").put("seq", 2),
+                "channel-b",
+                AndroidConnectionCommand.channelMessage("target", "channel-b", new JSONObject()),
+                true);
+
+            assertEquals("both frames must be queued before drain", 2, pendingCount.invoke(runtime));
+
+            replay.invoke(runtime);
+            assertEquals("replay must send channel opens but wait for their ACKs",
+                2, pendingCount.invoke(runtime));
+            assertEquals(2, sent.size());
+
+            channelOpened.invoke(runtime, new JSONObject().put("channelId", "channel-a"));
+            channelOpened.invoke(runtime, new JSONObject().put("channelId", "channel-b"));
+
+            assertEquals("all queued frames must drain after channel-opened ACKs",
+                0, pendingCount.invoke(runtime));
+            assertEquals(4, sent.size());
+            assertEquals("mux-channel-open", new JSONObject(sent.get(0)).getString("type"));
+            assertEquals("mux-channel-open", new JSONObject(sent.get(1)).getString("type"));
+            assertEquals("mux-channel-message", new JSONObject(sent.get(2)).getString("type"));
+            assertEquals("mux-channel-message", new JSONObject(sent.get(3)).getString("type"));
         } finally {
             AndroidConnectionService.resetForTests();
         }

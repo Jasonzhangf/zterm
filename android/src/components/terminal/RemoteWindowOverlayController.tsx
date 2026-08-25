@@ -160,11 +160,8 @@ export type {
   RemoteWindowLiveDiagnostics,
   RemoteWindowVideoDebugSnapshot,
 } from './useRemoteWindowPlayback';
-import {
-  useRemoteWindowThumbnails,
-  type RemoteWindowScreenshotSaveResult,
-} from './useRemoteWindowThumbnails';
 import { useRemoteWindowScreenshot } from './useRemoteWindowScreenshot';
+import type { RemoteWindowScreenshotSaveResult } from './useRemoteWindowScreenshot';
 export interface RemoteWindowOverlayProps {
   activeSessionId?: string | null;
   appForegroundActive?: boolean;
@@ -287,6 +284,9 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   });
   const compositeOverviewCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const compositeThumbCanvasRefs = useRef<Map<string, HTMLCanvasElement | null>>(new Map());
+  const clearCompositeThumbCanvases = useCallback(() => {
+    compositeThumbCanvasRefs.current.clear();
+  }, []);
   // 未收到当前 revision 的 focus-result 时显式结束 crop 状态，避免无限期隐藏主视频。
   useEffect(() => {
     if (dualStreamSwitch.phase !== 'overview-crop-visible') {
@@ -536,13 +536,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       .find((item) => item.groupId === groupId) || null;
     return group && group.targets.length > 1 ? group : null;
   }, [state]);
-  const { windowThumbnails, resetWindowThumbnails } = useRemoteWindowThumbnails({
-    activeSessionId,
-    activeTargetId: currentLockedTarget?.streamTargetId || null,
-    lockedAppWindowGroup,
-    requestScreenshot,
-  });
-
   const sendRemoteWindowInputEventsForTarget = useCallback((
     input: {
       sessionId: string | null;
@@ -885,7 +878,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     setReceiverStartupTelemetry(null);
     setStreamCapability(null);
     setCanvasLayout(null);
-    resetWindowThumbnails();
+    clearCompositeThumbCanvases();
     collectStreamStatsRef.current = null;
     setFloatingOffset({ x: 0, y: 0 });
     setFloatingOverlayWidthPx(null);
@@ -913,7 +906,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     setFullscreenDisplayMode,
     state,
     stopStream,
-    resetWindowThumbnails,
+    clearCompositeThumbCanvases,
     resetQualityApplyState,
   ]);
 
@@ -2853,34 +2846,22 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
             windowId: target.videoTarget.windowId,
           });
         },
-      node: active ? lockedVideoSurfaceNode : (() => {
-          const thumbnail = windowThumbnails[target.streamTargetId];
+        node: active ? lockedVideoSurfaceNode : (() => {
           return (
             <div
               data-remote-window-child-tile="true"
               style={styles.videoWindowGroupTile}
             >
               <div style={styles.videoWindowGroupThumb}>
-                {thumbnail?.phase === 'ready' ? (
-                  <img
-                    data-testid={`remote-window-video-window-thumbnail-${target.streamTargetId}`}
-                    src={thumbnail.dataUrl}
-                    alt=""
-                    style={styles.videoWindowGroupThumbImage}
-                  />
-                ) : (
-                  <span
-                    data-testid={`remote-window-video-window-thumbnail-status-${target.streamTargetId}`}
-                    data-phase={thumbnail?.phase || 'idle'}
-                    style={styles.videoWindowGroupThumbTitle}
-                  >
-                    {thumbnail?.phase === 'loading'
-                      ? '截图中'
-                      : thumbnail?.phase === 'failed'
-                        ? '截图失败'
-                        : title}
-                  </span>
-                )}
+                <canvas
+                  ref={(node) => {
+                    compositeThumbCanvasRefs.current.set(target.streamTargetId, node);
+                  }}
+                  data-testid={`remote-window-video-window-thumbnail-${target.streamTargetId}`}
+                  width={160}
+                  height={120}
+                  style={styles.videoWindowGroupThumbImage}
+                />
               </div>
             </div>
           );

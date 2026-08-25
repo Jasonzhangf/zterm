@@ -42,6 +42,7 @@ function bumpTerminalViewRender(sessionId: string) {
 vi.mock('@capacitor/core', () => ({
   Capacitor: {
     getPlatform: () => 'web',
+    isNativePlatform: () => false,
   },
   registerPlugin: () => ({
     readText: vi.fn(async () => ({ value: '' })),

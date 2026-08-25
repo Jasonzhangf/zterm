@@ -69,6 +69,7 @@ vi.mock('../contexts/SessionContext', () => ({
 vi.mock('@capacitor/core', () => ({
   Capacitor: {
     getPlatform: () => 'web',
+    isNativePlatform: () => false,
   },
   registerPlugin: () => ({
     readText: vi.fn(async () => ({ value: '' })),
@@ -929,9 +930,7 @@ describe('TerminalPage remote window overlay', () => {
     expect(onSendRemoteWindowInput).not.toHaveBeenCalled();
   });
 
-  it('loads same-app child thumbnails from remote screenshots without persisting them', async () => {
-    vi.mocked(Filesystem.writeFile).mockClear();
-    vi.mocked(Filesystem.mkdir).mockClear();
+  it('projects same-app child thumbnails from the live composite canvas', async () => {
     const session = makeSession('s1');
     const mainTarget = makeTarget();
     const childTarget: RemoteWindowStreamTargetManifest = {
@@ -950,13 +949,6 @@ describe('TerminalPage remote window overlay', () => {
       targets: [childTarget, mainTarget],
       errors: [],
     }));
-    const onRequestRemoteScreenshot = vi.fn(async () => ({
-      fileName: 'remote-window-child.png',
-      mimeType: 'image/png' as const,
-      dataBase64: 'dGh1bWI=',
-      totalBytes: 5,
-    }));
-
     render(
       <TerminalPage
         sessions={[session]}
@@ -973,7 +965,6 @@ describe('TerminalPage remote window overlay', () => {
         renderDebugConsole={renderDebugConsole}
         renderRemoteWindow={renderRemoteWindow}
         renderQuickBar={renderQuickBar}
-        onRequestRemoteScreenshot={onRequestRemoteScreenshot}
         onRequestRemoteWindowTargets={onRequestRemoteWindowTargets}
         quickActions={[]}
         shortcutActions={[]}
@@ -985,15 +976,10 @@ describe('TerminalPage remote window overlay', () => {
     await screen.findByTestId('remote-window-app-group-com-apple-TextEdit-123');
     fireEvent.click(screen.getByTestId('remote-window-app-group-com-apple-TextEdit-123'));
 
-    await waitFor(() => {
-      expect(onRequestRemoteScreenshot).toHaveBeenCalledWith('s1', undefined, {
-        target: {
-          kind: 'remote-window',
-          target: expect.objectContaining({ streamTargetId: 'app-child' }),
-        },
-      });
-      expect(screen.getByTestId('remote-window-video-window-thumbnail-app-child')).toBeTruthy();
-    });
+    const thumbnail = await screen.findByTestId('remote-window-video-window-thumbnail-app-child');
+    expect(thumbnail.tagName).toBe('CANVAS');
+    expect(thumbnail.getAttribute('width')).toBe('160');
+    expect(thumbnail.getAttribute('height')).toBe('120');
     expect(Filesystem.writeFile).not.toHaveBeenCalled();
   });
 

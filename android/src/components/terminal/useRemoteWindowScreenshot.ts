@@ -1,6 +1,11 @@
 import { useCallback, useMemo, useState } from 'react';
-import type { RemoteWindowScreenshotSaveResult } from './useRemoteWindowThumbnails';
 import type { RemoteWindowStreamTargetManifest } from '../../lib/types';
+
+export interface RemoteWindowScreenshotSaveResult {
+  fileName: string;
+  savedPath: string;
+  dataUrl?: string;
+}
 
 export type RemoteWindowScreenshotStatus =
   | { phase: 'idle' }

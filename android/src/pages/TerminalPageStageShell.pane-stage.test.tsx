@@ -35,7 +35,7 @@ afterEach(() => {
 });
 
 vi.mock('@capacitor/core', () => ({
-  Capacitor: { getPlatform: () => 'web' },
+  Capacitor: { getPlatform: () => 'web', isNativePlatform: () => false },
   registerPlugin: () => ({
     readText: vi.fn(async () => ({ value: '' })),
     writeText: vi.fn(async () => undefined),
