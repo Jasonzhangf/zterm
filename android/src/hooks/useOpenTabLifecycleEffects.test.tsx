@@ -567,4 +567,49 @@ describe('useOpenTabLifecycleEffects', () => {
       fingerprintChanged: false,
     });
   });
+
+  it('leaves native-service transports on the service network owner during foreground resume', async () => {
+    const notifyTargetNetworkSignal = vi.fn();
+    const networkIdentity = createNetworkIdentityRuntime({
+      sampleInterfaces: async () => [],
+    });
+    capacitorNetworkHarness.getStatus.mockResolvedValue({ connected: true, connectionType: 'cellular' });
+
+    const HarnessNativeTransportOwner = () => {
+      const sessionsRef = useRef<Session[]>([baseSession]);
+      const openTabStateRef = useRef({ tabs: [{ sessionId: 's1' }], activeSessionId: 's1' });
+      const foregroundRefreshRuntimeRef = useRef(createForegroundRefreshRuntime());
+
+      useOpenTabLifecycleEffects({
+        sessionsRef,
+        openTabStateRef,
+        foregroundRefreshRuntimeRef,
+        onForegroundResume: vi.fn(),
+        auditOpenTabsAgainstRemoteSessions: vi.fn(async () => undefined),
+        notifyTargetNetworkSignal,
+        reportTargetNetworkProbeError: vi.fn(),
+        bumpFollowResetEpoch: vi.fn(),
+        networkIdentity,
+        foregroundResamplesNetworkIdentity: false,
+      });
+      return <div>mounted</div>;
+    };
+
+    render(<HarnessNativeTransportOwner />);
+    capacitorNetworkHarness.emit('networkStatusChange', { connected: true, connectionType: 'wifi' });
+
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+    capacitorAppHarness.emit('appStateChange', { isActive: false });
+    capacitorNetworkHarness.emit('networkStatusChange', { connected: true, connectionType: 'cellular' });
+
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+    capacitorAppHarness.emit('appStateChange', { isActive: true });
+    await Promise.resolve();
+
+    expect(notifyTargetNetworkSignal).toHaveBeenLastCalledWith({
+      source: 'foreground-resume',
+      networkGeneration: 1,
+      fingerprintChanged: false,
+    });
+  });
 });

@@ -1438,6 +1438,7 @@ debug overlay 现在显示 MU（菜单位置）和 CE（结束行），长按后
 ## Foreground resume target transport recovery
 - Trigger: app returns from background, immediately shows websocket error or remains disconnected until switching session.
 - Rule: foreground/online is a target-network generation signal. If the retained target transport for a daemon target is not OPEN, submit the exact target generation to the target failure owner so it retires/rebuilds the physical transport and replays recoverable mux channels.
+- Rule: on Android, `AndroidConnectionService` is the ConnectivityManager/network-generation owner. WebView foreground resume emits the same generation-only signal but must not resample local interfaces; set `foregroundResamplesNetworkIdentity=false` for native transports so one physical-owner decision cannot be duplicated by the UI runtime.
 - Anti-pattern: returning a local `not-open` probe result, waiting for the stale close/error event to replay, or fixing this in UI/session-switch code.
 - Required gate: `session-context-transport-orchestration-runtime.test.ts` must cover foreground signal with CLOSED target transport entering target failure owner, plus a negative case that OPEN transport still uses bounded probe.
 - Marker: `foreground resume non open target failure owner`

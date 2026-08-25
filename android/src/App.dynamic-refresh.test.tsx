@@ -370,6 +370,29 @@ vi.mock('@capacitor/app', () => ({
   },
 }));
 
+const capacitorCoreHarness = vi.hoisted(() => {
+  let isNativePlatform = false;
+  return {
+    get isNativePlatform() {
+      return isNativePlatform;
+    },
+    setNative(next: boolean) {
+      isNativePlatform = next;
+    },
+  };
+});
+
+vi.mock('@capacitor/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@capacitor/core')>();
+  return {
+    ...actual,
+    Capacitor: {
+      ...actual.Capacitor,
+      isNativePlatform: () => capacitorCoreHarness.isNativePlatform,
+    },
+  };
+});
+
 vi.mock('@capacitor/network', () => ({
   Network: {
     addListener: vi.fn(async () => ({ remove: vi.fn() })),
@@ -810,6 +833,7 @@ describe('App dynamic refresh matrix', () => {
     sessionHistoryHarness.reset();
     settingsPageHarness.reset();
     capacitorAppHarness.reset();
+    capacitorCoreHarness.setNative(false);
     const storageBacking = new Map<string, string>();
     const storageShim = {
       get length() {
@@ -1574,6 +1598,7 @@ describe('App dynamic refresh matrix', () => {
   });
 
   it('projects an initial native snapshot failure into the transport error chain', async () => {
+    capacitorCoreHarness.setNative(true);
     const networkIdentity = createNetworkIdentityRuntime();
 
     render(
@@ -1591,6 +1616,7 @@ describe('App dynamic refresh matrix', () => {
   });
 
   it('does not project an error when the initial native snapshot succeeds', async () => {
+    capacitorCoreHarness.setNative(true);
     const sampleInterfaces = vi.fn().mockResolvedValue([
       { name: 'wlan0', addressesSignature: 'v4:192.0.2.1', vpn: false },
     ]);
@@ -1605,6 +1631,15 @@ describe('App dynamic refresh matrix', () => {
     );
 
     await waitFor(() => expect(sampleInterfaces).toHaveBeenCalledTimes(1));
+    expect(sessionHarness.reportTargetNetworkProbeError).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'TargetNetworkProbeError04NativeSnapshot' }),
+    );
+  });
+
+  it('keeps web runtime active when the native network identity platform is absent', async () => {
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByTestId('terminal-active-session-id').textContent).toBe('s1'));
     expect(sessionHarness.reportTargetNetworkProbeError).not.toHaveBeenCalledWith(
       expect.objectContaining({ type: 'TargetNetworkProbeError04NativeSnapshot' }),
     );

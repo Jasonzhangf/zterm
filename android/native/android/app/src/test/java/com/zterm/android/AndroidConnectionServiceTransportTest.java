@@ -1288,6 +1288,9 @@ public final class AndroidConnectionServiceTransportTest {
 
             assertEquals(1, events.stream().filter(event ->
                 event.kind == AndroidConnectionServiceEventEnvelope.Kind.PHYSICAL_ERROR).count());
+            assertEquals("target-a", events.stream()
+                .filter(event -> event.kind == AndroidConnectionServiceEventEnvelope.Kind.PHYSICAL_ERROR)
+                .findFirst().get().targetKey);
         } finally {
             AndroidConnectionService.resetForTests();
         }

@@ -5,6 +5,7 @@ import {
   type AndroidConnectionServiceChannelClosedEvent,
   type AndroidConnectionServiceChannelMessage,
   type AndroidConnectionServiceChannelOpenedEvent,
+  type AndroidConnectionServiceErrorEvent,
   type AndroidConnectionServiceServerFrame,
 } from '../plugins/AndroidConnectionServicePlugin';
 import type { BridgeTransportSocket, BridgeSocketCloseLike, BridgeSocketMessageLike } from './traversal/types';
@@ -94,6 +95,17 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
           return;
         }
         this.dispatchChannelClosed(event);
+      }),
+      addAndroidConnectionServiceListener('androidConnectionError', (error: AndroidConnectionServiceErrorEvent) => {
+        if (this.disposed) {
+          return;
+        }
+        if (error.targetKey !== this.targetKey) {
+          return;
+        }
+        // Physical errors are retryable native-service facts. Snapshot
+        // backoff/reconnect owns projection retirement so a transient error
+        // cannot tear down channels while the service is still recovering.
       }),
     ]);
     this.removeListeners.push(...handles.map((handle) => () => handle.remove()));
@@ -212,6 +224,7 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
       return;
     }
     if (snapshot.state === 'backoff-reconnect') {
+      const hadReadyGeneration = Boolean(this.readyGeneration);
       if (snapshot.generation && this.readyGeneration && snapshot.generation !== this.readyGeneration) return;
       this.readyState = WebSocket.CLOSED;
       const retiredGeneration = snapshot.generation || this.readyGeneration || this.pendingGeneration;
@@ -226,6 +239,9 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
       this.readyChannelIds.clear();
       this.projectedChannelIds.clear();
       this.projectedChannelsGeneration = null;
+      if (hadReadyGeneration) {
+        this.onclose?.({ code: 1000, reason: 'service-reconnect' });
+      }
     }
   }
 

@@ -93,8 +93,10 @@ describe('AndroidConnectionServiceTransportSocket', () => {
     plugin.addListener.mockImplementation(add);
     const socket = new AndroidConnectionServiceTransportSocket(target);
     const opened = vi.fn();
+    const closed = vi.fn();
     const messages: string[] = [];
     socket.onopen = opened;
+    socket.onclose = closed;
     socket.onmessage = (event) => messages.push(String(event.data));
 
     await socket.start();
@@ -416,8 +418,10 @@ describe('AndroidConnectionServiceTransportSocket', () => {
     plugin.addListener.mockImplementation(add);
     const socket = new AndroidConnectionServiceTransportSocket(target);
     const opened = vi.fn();
+    const closed = vi.fn();
     const messages: string[] = [];
     socket.onopen = opened;
+    socket.onclose = closed;
     socket.onmessage = (event) => messages.push(String(event.data));
 
     await socket.start();
@@ -562,8 +566,10 @@ describe('AndroidConnectionServiceTransportSocket', () => {
     plugin.addListener.mockImplementation(add);
     const socket = new AndroidConnectionServiceTransportSocket(target);
     const opened = vi.fn();
+    const closed = vi.fn();
     const messages: string[] = [];
     socket.onopen = opened;
+    socket.onclose = closed;
     socket.onmessage = (event) => messages.push(String(event.data));
 
     await socket.start();
@@ -615,6 +621,8 @@ describe('AndroidConnectionServiceTransportSocket', () => {
 
     expect(socket.readyState).toBe(WebSocket.OPEN);
     expect(opened).toHaveBeenCalledTimes(2);
+    expect(closed).toHaveBeenCalledTimes(1);
+    expect(closed).toHaveBeenCalledWith({ code: 1000, reason: 'service-reconnect' });
     expect(messages.map((message) => JSON.parse(message).type)).toEqual(['mux-ready', 'mux-ready']);
   });
 
@@ -627,10 +635,35 @@ describe('AndroidConnectionServiceTransportSocket', () => {
     socket.reportFailure('terminal failure');
     await Promise.resolve();
 
-    expect([...removes.values()]).toHaveLength(5);
+    expect([...removes.values()]).toHaveLength(6);
     for (const remove of removes.values()) {
       expect(remove).toHaveBeenCalledTimes(1);
     }
+  });
+
+  it('keeps the projection attached while the native service retries a physical error', async () => {
+    const { listeners, add } = listenerMock();
+    plugin.addListener.mockImplementation(add);
+    const socket = new AndroidConnectionServiceTransportSocket(target);
+    const closed = vi.fn();
+    socket.onclose = closed;
+
+    await socket.start();
+    listeners.get('androidConnectionError')?.({
+      kind: 'physical-error',
+      targetKey: 'daemon:other',
+      errorCode: 'websocket-send',
+      errorMessage: 'other target failed',
+    });
+    expect(closed).not.toHaveBeenCalled();
+
+    listeners.get('androidConnectionError')?.({
+      kind: 'physical-error',
+      targetKey: target.targetKey,
+      errorCode: 'websocket-send',
+      errorMessage: 'target failed',
+    });
+    expect(closed).not.toHaveBeenCalled();
   });
 
   it('keeps target release explicit instead of releasing the service on UI close', async () => {
