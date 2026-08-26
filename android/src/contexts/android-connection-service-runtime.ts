@@ -9,6 +9,40 @@ export interface AndroidConnectionServiceRuntimeOptions {
   ) => () => void;
 }
 
+export interface AndroidConnectionLifecycleSignal {
+  readonly source: 'foreground-resume';
+}
+
+export interface AndroidConnectionLifecycleProjection {
+  readonly kind: 'foreground-resume';
+  readonly platform: 'android';
+  readonly snapshotGeneration: string | null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function projectLifecycleSignal(
+  signal: unknown,
+  snapshot: AndroidConnectionServiceSnapshot,
+): AndroidConnectionLifecycleProjection {
+  if (!isRecord(signal)) {
+    throw new Error('invalid Android lifecycle signal');
+  }
+  if (signal.source !== 'foreground-resume') {
+    throw new Error(`unsupported Android lifecycle signal: ${String(signal.source)}`);
+  }
+  if ('connected' in signal || 'connectionType' in signal) {
+    throw new Error('Android lifecycle projection must not fabricate connection truth');
+  }
+  return {
+    kind: 'foreground-resume',
+    platform: 'android',
+    snapshotGeneration: snapshot.generation,
+  };
+}
+
 /**
  * Projection-only runtime for AndroidConnectionService.
  *
@@ -45,6 +79,8 @@ export function createAndroidConnectionServiceRuntime(options: AndroidConnection
       return latestSnapshot;
     },
     sendCommand: (command: AndroidConnectionCommand) => sendAndroidConnectionCommand(command),
-    projectLifecycleSignal: (_signal: string) => null,
+    projectLifecycleSignal: (signal: AndroidConnectionLifecycleSignal) => (
+      projectLifecycleSignal(signal, latestSnapshot)
+    ),
   };
 }
