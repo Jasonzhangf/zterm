@@ -73,6 +73,14 @@
       "allowed_paths": ["win/electron/**", "win/src/**"],
       "forbidden_paths": ["android/**", "mac/**"],
       "required_gates": ["gate.owner.uniqueness", "gate.mainline.adjacency"]
+    },
+    {
+      "feature_id": "feature.host.ios",
+      "owner_modules": ["runtime.ios_gateway"],
+      "status": "active",
+      "allowed_paths": ["packages/ios-host/src/**"],
+      "forbidden_paths": ["android/**", "mac/**", "win/**", "packages/shared/src/**"],
+      "required_gates": ["gate.owner.uniqueness", "gate.import.edges", "gate.payload.isolation"]
     }
   ]
 }

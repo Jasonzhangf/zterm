@@ -14,6 +14,8 @@
     {"gate_id": "gate.payload.isolation", "command": "node scripts/check-zterm-v2-map-registries.mjs --only=payload", "type": "static", "required_for": ["phase0", "phase1"]},
     {"gate_id": "gate.stream.boundary", "command": "pnpm --dir packages/stream-boundary run type-check && pnpm --dir packages/stream-boundary run test", "type": "runtime", "required_for": ["phase2"], "status": "active"},
     {"gate_id": "gate.lifecycle.pairs", "command": "pnpm --dir packages/kernel run test:all", "type": "runtime", "required_for": ["phase2"], "status": "active"},
-    {"gate_id": "gate.cordis.process_local", "command": "pnpm --dir packages/kernel run test", "type": "static", "required_for": ["phase2"], "status": "active"}
+    {"gate_id": "gate.cordis.process_local", "command": "pnpm --dir packages/kernel run test", "type": "static", "required_for": ["phase2"], "status": "active"},
+    {"gate_id": "gate.ios.host.contract", "command": "pnpm --dir packages/ios-host run type-check && pnpm --dir packages/ios-host run test", "type": "runtime", "required_for": ["phase3"], "status": "active"},
+    {"gate_id": "gate.ios.package", "command": "pnpm --dir packages/ios-host run type-check && pnpm --dir packages/ios-host run test", "type": "package", "required_for": ["phase3"], "status": "active"}
   ]
 }

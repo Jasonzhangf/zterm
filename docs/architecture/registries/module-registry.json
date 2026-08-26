@@ -187,6 +187,17 @@
       "required_gates": ["gate.owner.uniqueness", "gate.import.edges"]
     },
     {
+      "module_id": "runtime.ios_gateway",
+      "status": "active",
+      "layer": "runtime-contract",
+      "owned_paths": ["packages/ios-host/src/**"],
+      "allowed_paths": ["packages/ios-host/src/**"],
+      "forbidden_paths": ["android/**", "mac/**", "win/**", "packages/shared/src/**", "packages/kernel/**"],
+      "forbidden_imports": ["react", "react-dom", "@capacitor/*", "electron", "cordis"],
+      "declared_edges": [{"to": "runtime.contracts"}],
+      "required_gates": ["gate.map.parse", "gate.owner.uniqueness", "gate.import.edges", "gate.payload.isolation"]
+    },
+    {
       "module_id": "ui.mac_renderer",
       "status": "active",
       "layer": "platform-host-ui",

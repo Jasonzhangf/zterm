@@ -169,6 +169,22 @@
       "entry_symbols": ["CordisAdapter"],
       "status": "active",
       "required_gates": ["gate.map.parse", "gate.symbol.exists", "gate.cordis.process_local"]
+    },
+    {
+      "function_id": "function.ios.host_gateway",
+      "owner_module": "runtime.ios_gateway",
+      "path": "packages/ios-host/src/ios-host-contract.ts",
+      "entry_symbols": ["IosHostGateway", "decodeIosCommand", "decodeIosEvent", "decodeIosSnapshot"],
+      "status": "active",
+      "required_gates": ["gate.map.parse", "gate.symbol.exists", "gate.payload.isolation"]
+    },
+    {
+      "function_id": "function.ios.capacitor_adapter",
+      "owner_module": "runtime.ios_gateway",
+      "path": "packages/ios-host/src/ios-capacitor-adapter.ts",
+      "entry_symbols": ["createIosCapacitorAdapter", "IosWebViewBridge"],
+      "status": "active",
+      "required_gates": ["gate.map.parse", "gate.symbol.exists", "gate.payload.isolation"]
     }
   ]
 }
