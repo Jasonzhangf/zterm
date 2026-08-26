@@ -171,6 +171,14 @@
       "required_gates": ["gate.map.parse", "gate.symbol.exists", "gate.stream.boundary"]
     },
     {
+      "function_id": "function.stream_boundary.file_media_input",
+      "owner_module": "runtime.stream_boundary",
+      "path": "packages/stream-boundary/src/file-media-input-streams.ts",
+      "entry_symbols": ["createFileMediaInputStreamRuntime", "FileMediaInputStreamRuntime"],
+      "status": "active",
+      "required_gates": ["gate.map.parse", "gate.symbol.exists", "gate.file.media.input"]
+    },
+    {
       "function_id": "function.desktop_gateway.handler",
       "owner_module": "runtime.desktop_gateway",
       "path": "packages/desktop-gateway/src/desktop-gateway-handler.ts",
