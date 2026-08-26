@@ -316,8 +316,8 @@ function TerminalViewComponent({
   const [resolvedCellWidthPx, setResolvedCellWidthPx] = useState(
     Math.max(1, fontSize * 0.62),
   );
-  const [viewportClientWidthPx, setViewportClientWidthPx] = useState(0);
   const [viewportClientHeightPx, setViewportClientHeightPx] = useState(0);
+  const [viewportClientWidthPx, setViewportClientWidthPx] = useState(0);
   const [renderBottomIndex, setRenderBottomIndex] = useState(
     effectiveBufferEndIndex,
   );
@@ -384,30 +384,21 @@ function TerminalViewComponent({
   widthModeRef.current = widthMode;
   mirrorFixedZoomPanRef.current = mirrorFixedZoomPan;
 
-  // CSS zoom 是布局级缩放：scrollTop 坐标与行号映射使用视觉行高
-  // layoutRowHeightPx = rowHeightPx * visualScale，但 grid padding 本身已经在
-  // `.term-render-scale-layer` 的 zoom 作用域内，不能再乘 visualScale；
-  // 否则 padding 会被二次缩放，滚到底时底部留空/黑屏。
+  // mirror-fixed pinch 只缩放 canvas：viewportRows 必须按视觉行高同步扩大，
+  // 但 DOM 行高与 grid padding 保持物理值，避免 canvas 被二次缩放后滚到底黑屏。
   const layoutRowHeightPx = Math.max(
     1,
     rowHeightPx * (widthMode === "mirror-fixed" ? mirrorFixedZoomPan.visualScale : 1),
   );
-  const viewportRows = (() => {
-    if (widthMode !== "mirror-fixed" || mirrorFixedZoomPan.visualScale >= 1) {
-      return measuredViewportRows;
-    }
-    const clientHeightPx = Math.max(
-      0,
-      viewportClientHeightPx || containerRef.current?.clientHeight || 0,
-    );
-    if (clientHeightPx <= 0) {
-      return measuredViewportRows;
-    }
-    return Math.max(
-      DEFAULT_ROWS,
-      Math.floor(clientHeightPx / Math.max(1, layoutRowHeightPx)),
-    );
-  })();
+  const viewportRows = widthMode === "mirror-fixed" && mirrorFixedZoomPan.visualScale < 1
+    ? Math.max(
+        DEFAULT_ROWS,
+        Math.floor(
+          Math.max(0, viewportClientHeightPx || containerRef.current?.clientHeight || 0)
+          / layoutRowHeightPx,
+        ),
+      )
+    : measuredViewportRows;
   layoutRowHeightPxRef.current = layoutRowHeightPx;
 
   const followDemandAnchorEndIndex = resolveTerminalFollowAnchorEndIndex({
@@ -816,7 +807,6 @@ function TerminalViewComponent({
     (
       nextViewport: ReturnType<typeof measureTerminalViewport>,
       nextClientHeight: number,
-      options?: { viewportRowsOverride?: number },
     ) => {
       const nextState = buildTerminalMeasuredViewportState(
         nextViewport,
@@ -844,12 +834,8 @@ function TerminalViewComponent({
           ? current
           : nextState.resolvedCellWidthPx,
       );
-      const committedViewportRows =
-        typeof options?.viewportRowsOverride === "number"
-          ? Math.max(DEFAULT_ROWS, Math.floor(options.viewportRowsOverride))
-          : nextState.viewportRows;
       setMeasuredViewportRows((current) =>
-        current === committedViewportRows ? current : committedViewportRows,
+        current === nextState.viewportRows ? current : nextState.viewportRows,
       );
     },
     [],
@@ -916,20 +902,19 @@ function TerminalViewComponent({
     if (!host || host.clientHeight <= 0) {
       return;
     }
-    const scale = widthMode === "mirror-fixed"
-      ? mirrorFixedZoomPanRef.current.visualScale
-      : 1;
-    const resolvedRowHeightPx = Math.max(
-      1,
-      parseInt(resolvedRowHeight, 10) || parseInt(rowHeight, 10) || 17,
-    );
-    const nextRows = Math.max(
-      DEFAULT_ROWS,
-      Math.floor(host.clientHeight / Math.max(1, resolvedRowHeightPx * scale)),
-    );
-    setMeasuredViewportRows((current) =>
-      current === nextRows ? current : nextRows,
-    );
+    if (mirrorFixedZoomPanRef.current.visualScale >= 1) {
+      const resolvedRowHeightPx = Math.max(
+        1,
+        parseInt(resolvedRowHeight, 10) || parseInt(rowHeight, 10) || 17,
+      );
+      const nextRows = Math.max(
+        DEFAULT_ROWS,
+        Math.floor(host.clientHeight / resolvedRowHeightPx),
+      );
+      setMeasuredViewportRows((current) =>
+        current === nextRows ? current : nextRows,
+      );
+    }
   }, [
     layoutRowHeightPx,
     resolvedRowHeight,
@@ -947,13 +932,7 @@ function TerminalViewComponent({
 
     const nextViewport = measureTerminalViewport(host, fontSize, rowHeight);
     const nextClientHeight = Math.max(0, Math.round(host.clientHeight || 0));
-    const effectiveViewportRows =
-      widthMode === "mirror-fixed" && mirrorFixedZoomPanRef.current.visualScale < 1
-        ? Math.max(
-            DEFAULT_ROWS,
-            Math.floor(nextClientHeight / Math.max(1, layoutRowHeightPx)),
-          )
-        : nextViewport.rows;
+    const effectiveViewportRows = nextViewport.rows;
     const effectiveViewport =
       effectiveViewportRows === nextViewport.rows
         ? nextViewport
@@ -969,14 +948,6 @@ function TerminalViewComponent({
     commitMeasuredViewportState(
       effectiveViewport,
       nextClientHeight,
-      widthMode === "mirror-fixed" && mirrorFixedZoomPanRef.current.visualScale < 1
-        ? {
-            viewportRowsOverride: Math.max(
-              DEFAULT_ROWS,
-              Math.floor(nextClientHeight / Math.max(1, layoutRowHeightPx)),
-            ),
-          }
-        : undefined,
     );
 
     const previousViewport = lastViewportRef.current;

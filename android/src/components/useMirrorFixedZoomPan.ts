@@ -329,6 +329,14 @@ export function useMirrorFixedZoomPan(
       wheel.debug.lastEventAt = Date.now();
       if (!wheel.active) {
         wheel.debug.lastReason = 'skip-inactive';
+        if (options.previewProjection) {
+          publishWheelDebug(wheel);
+          return;
+        }
+        if (options.copyModeActive) {
+          publishWheelDebug(wheel);
+          return;
+        }
         if (
           event.touches.length === 2 &&
           pinchRef.current &&

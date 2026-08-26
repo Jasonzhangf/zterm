@@ -1168,6 +1168,101 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
     expect(Number(scaleLayer.style.zoom)).toBeCloseTo(0.6, 5);
     expect(secondIntermediateRows).toBeGreaterThan(firstIntermediateRows);
   });
+
+  it('derives one scaled renderer window when zoom commits, without scaling DOM row height', async () => {
+    const { container } = render(
+      <div style={{ width: '200px', height: '408px' }}>
+        <TerminalView
+          sessionId="s1"
+          renderBufferSnapshot={{
+            lines: Array.from({ length: 120 }, (_, i) => [
+              { char: 65 + (i % 26), fg: 256, bg: 256, flags: 0, width: 1 },
+            ]),
+            gapRanges: [],
+            startIndex: 0,
+            endIndex: 120,
+            bufferHeadStartIndex: 0,
+            bufferTailEndIndex: 120,
+            daemonHeadRevision: 1,
+            daemonHeadEndIndex: 120,
+            cols: 160,
+            rows: 24,
+            cursorKeysApp: false,
+            cursor: null,
+            revision: 1,
+          }}
+          active
+          live
+          widthMode="mirror-fixed"
+          onInput={vi.fn()}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    const host = container.querySelector('.wterm') as HTMLElement;
+    const scaleLayer = container.querySelector('.term-render-scale-layer') as HTMLElement;
+    const grid = container.querySelector('.term-grid') as HTMLElement;
+    Object.defineProperty(host, 'scrollHeight', {
+      configurable: true,
+      get: () => 2040 * Number(scaleLayer.style.zoom || 1),
+    });
+    Object.defineProperty(host, 'clientHeight', { configurable: true, value: 408 });
+    host.scrollTop = 800;
+
+    const rowCount = () =>
+      container.querySelectorAll('[data-terminal-row="true"]').length;
+    const rowHeight = () => Number.parseFloat(
+      (container.querySelector('[data-terminal-row="true"]') as HTMLElement).style.height,
+    );
+
+    act(() => {
+      fireEvent.touchStart(host, {
+        touches: [
+          { clientX: 150, clientY: 100, identifier: 1 },
+          { clientX: 250, clientY: 100, identifier: 2 },
+        ],
+        changedTouches: [],
+      });
+    });
+    const rowsAtScaleOne = rowCount();
+    const heightAtScaleOne = rowHeight();
+
+    // First intermediate scale: zoom and the scaled renderer window must land
+    // in the same React commit, with the fixed DOM row height unchanged.
+    act(() => {
+      fireEvent.touchMove(host, {
+        touches: [
+          { clientX: 170, clientY: 100, identifier: 1 },
+          { clientX: 230, clientY: 100, identifier: 2 },
+        ],
+        changedTouches: [],
+      });
+    });
+    const zoomAfterFirst = Number(scaleLayer.style.zoom);
+    expect(zoomAfterFirst).toBeLessThan(1);
+    expect(rowCount()).toBeGreaterThan(rowsAtScaleOne);
+    expect(rowHeight()).toBe(heightAtScaleOne);
+
+    // A second smaller scale must derive a larger render window and keep the
+    // native scrollTop clamped to the real zoomed DOM range.
+    act(() => {
+      fireEvent.touchMove(host, {
+        touches: [
+          { clientX: 180, clientY: 100, identifier: 1 },
+          { clientX: 220, clientY: 100, identifier: 2 },
+        ],
+        changedTouches: [],
+      });
+    });
+    const zoomAfterSecond = Number(scaleLayer.style.zoom);
+    expect(zoomAfterSecond).toBeLessThan(zoomAfterFirst);
+    expect(rowCount()).toBeGreaterThan(rowsAtScaleOne);
+    const maxScrollTop = Math.max(0, host.scrollHeight - host.clientHeight);
+    expect(host.scrollTop).toBeLessThanOrEqual(maxScrollTop);
+    expect(host.scrollTop).toBeGreaterThanOrEqual(0);
+    expect(grid.style.transform).not.toContain('translateY');
+  });
 });
 
 describe('TerminalView two-finger wheel -> SGR adapter (renderer projection boundary)', () => {
