@@ -380,7 +380,7 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
 
     const scaleLayer = container.querySelector('.term-render-scale-layer') as HTMLElement;
     expect(scaleLayer).toBeTruthy();
-    expect(scaleLayer.style.transform).toBe('none'); // 初始不缩放
+    expect(scaleLayer.style.zoom).toBe('1'); // 初始不缩放
 
     const host = container.querySelector('.wterm') as HTMLElement;
     expect(host).toBeTruthy();
@@ -416,7 +416,7 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
     });
 
     // 终端 248px / 屏幕 200px -> minScale = 0.8065；span ratio 0.6 -> scale ~0.6，clamp 到 0.8065
-    expect(scaleLayer.style.transform).toBe('scale(0.8064516129032258)');
+    expect(scaleLayer.style.zoom).toBe('0.8064516129032258');
 
     // 双指继续缩到更小（span 40）——clamp 在 minScale
     act(() => {
@@ -428,7 +428,7 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
         changedTouches: [],
       });
     });
-    expect(scaleLayer.style.transform).toBe('scale(0.8064516129032258)');
+    expect(scaleLayer.style.zoom).toBe('0.8064516129032258');
 
     // 抬起结束
     act(() => {
@@ -483,7 +483,7 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
       });
     });
     // pinch 中：纯视觉 zoom（布局不变）+ GPU 合成层（滚动不黑屏）
-    expect(scaleLayer.style.transform).toBe('scale(0.8064516129032258)');
+    expect(scaleLayer.style.zoom).toBe('0.8064516129032258');
     expect(scaleLayer.style.willChange).toBe('transform');
     // 布局（字号/行高）完全不变
     expect(host.style.getPropertyValue('--term-font-size')).toBe(fontBefore);
@@ -493,7 +493,7 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
     act(() => {
       fireEvent.touchEnd(host, { changedTouches: [{ identifier: 1 }, { identifier: 2 }] });
     });
-    expect(scaleLayer.style.transform).toBe('scale(0.8064516129032258)');
+    expect(scaleLayer.style.zoom).toBe('0.8064516129032258');
     expect(scaleLayer.style.willChange).toBe('transform');
     expect(host.style.getPropertyValue('--term-font-size')).toBe(fontBefore);
     expect(host.style.getPropertyValue('--term-row-height')).toBe(rowHeightBefore);
@@ -547,12 +547,10 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
       fireEvent.touchEnd(host, { changedTouches: [{ identifier: 1 }, { identifier: 2 }] });
     });
 
-    expect(scaleLayer.style.transform).toBe('scale(0.8064516129032258)');
-    expect(host.style.touchAction).toBe('pan-y'); // 缩放不改变手势语义：原生滚动继续承载纵向
+    expect(scaleLayer.style.zoom).toBe('0.8064516129032258');
+    expect(host.style.touchAction).toBe('none'); // 缩放态禁原生滚动，纵向平移走合成层
 
-    // React 渲染覆盖防线：任何渲染（如 recomputeViewportRowsForZoom 的 setState）
-    // 不得把缩放态 touch-action 从 none 改回 pan-y（否则 WebView 恢复原生滚动消费
-    // 单指触摸 → zoom 位图滚动黑屏）
+    // React 渲染覆盖防线：任何渲染不得把缩放态 touch-action 从 none 改回 pan-y。
     const terminalProps = {
       sessionId: 's1',
       renderBufferSnapshot: buildRenderBufferSnapshot(),
@@ -567,8 +565,8 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
         <TerminalView {...terminalProps} />
       </div>,
     );
-    expect(host.style.touchAction).toBe('pan-y');
-    expect(scaleLayer.style.transform).toBe('scale(0.8064516129032258)');
+    expect(host.style.touchAction).toBe('none');
+    expect(scaleLayer.style.zoom).toBe('0.8064516129032258');
 
     // jsdom 无布局：mock 滚动尺寸使 maxVertical > 0
     Object.defineProperty(host, 'scrollHeight', { value: 1000, configurable: true });
@@ -587,8 +585,8 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
         changedTouches: [],
       });
     });
-    expect(host.style.touchAction).toBe('pan-y');
-    expect((container.querySelector('.term-grid') as HTMLElement).style.transform).not.toContain('translateY');
+    expect(host.style.touchAction).toBe('none');
+    expect((container.querySelector('.term-grid') as HTMLElement).style.transform).toContain('translateY');
   });
 
   it('keeps scrollTop frozen during zoom (no black screen) and pans vertically in both directions', async () => {
@@ -648,9 +646,9 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
       fireEvent.touchEnd(host, { changedTouches: [{ identifier: 1 }, { identifier: 2 }] });
     });
 
-    // 缩放后 scrollTop 仍是滚动真源；纵向手势仍由原生滚动承载，网格无 translateY。
-    expect(host.scrollTop).toBe(500);
-    expect((container.querySelector('.term-grid') as HTMLElement).style.transform).not.toContain('translateY');
+    // 缩放态 scrollTop 清零，纵向位置由 translateY 合成层平移承担。
+    expect(host.scrollTop).toBe(0);
+    expect((container.querySelector('.term-grid') as HTMLElement).style.transform).toContain('translateY');
 
     // 单指拖动（mirror-fixed 缩放态仍是原生纵向滚动）
     const pan = (fromY: number, toY: number) => {
@@ -670,11 +668,11 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
         fireEvent.touchEnd(host, { changedTouches: [{ identifier: 1 }] });
       });
     };
-    // 向下/向上拖动都保持原生滚动链路，网格不承担纵向 translate。
+    // 向下/向上拖动都走 translateY 平移，不触发原生滚动。
     pan(50, 150);
     pan(250, 50);
-    expect((container.querySelector('.term-grid') as HTMLElement).style.transform).not.toContain('translateY');
-    expect(host.style.touchAction).toBe('pan-y');
+    expect((container.querySelector('.term-grid') as HTMLElement).style.transform).toContain('translateY');
+    expect(host.style.touchAction).toBe('none');
 
     // 放大回 1（步进式，computeNextPinchScale 每次 +0.08 防跳变）：多次 move 到 1
     act(() => {
@@ -705,13 +703,13 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
     act(() => {
       fireEvent.touchEnd(host, { changedTouches: [{ identifier: 1 }, { identifier: 2 }] });
     });
-    expect(scaleLayer.style.transform).toBe('none');
+    expect(scaleLayer.style.zoom).toBe('1');
     expect((container.querySelector('.term-grid') as HTMLElement).style.transform).not.toContain('translateY');
-    // scrollTop 仍为滚动真源——放大回 1 后位置保持
+    // scrollTop 仍为滚动真源——放大回 1 后还原到 pinch 前位置 + 缩放态 pan 位移。
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 10));
     });
-    expect(host.scrollTop).toBe(500);
+    expect(host.scrollTop).toBe(600);
   });
 
   it('does not zoom when widthMode is not mirror-fixed', () => {
@@ -751,7 +749,7 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
       });
     });
 
-    expect(scaleLayer.style.transform).toBe('none'); // 非 mirror-fixed 不缩放
+    expect(scaleLayer.style.zoom).toBe('1'); // 非 mirror-fixed 不缩放
   });
 
   it('keeps buffer row indices continuous and scrollTop unchanged across visual zoom (layer separation)', async () => {
@@ -839,16 +837,27 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
       fireEvent.touchEnd(host, { changedTouches: [{ identifier: 1 }, { identifier: 2 }] });
     });
 
-    // 视觉缩放不改 buffer 窗口：行号区间、scrollTop、网格 transform 均不变
-    expect(scaleLayer.style.transform).toBe('scale(0.8064516129032258)');
-    expect(host.scrollTop).toBe(300);
-    expect(grid.style.transform).not.toContain('translateY');
+    // 视觉缩放：scrollTop 锁定 0，纵向位置走 translateY；缩小后可见行数增加。
+    expect(scaleLayer.style.zoom).toBe('0.8064516129032258');
+    expect(host.scrollTop).toBe(0);
+    expect(grid.style.transform).toContain('translateY');
     expect(grid.style.zoom).toBeFalsy();
     const after = rowIndices();
-    expect(after).toEqual(before);
+    expect(after.length).toBeGreaterThan(before.length);
     for (let i = 1; i < after.length; i += 1) {
       expect(after[i] - after[i - 1]).toBe(1);
     }
+
+    // ResizeObserver/foreground refresh 不得用未缩放的物理行高把可见行数覆盖回去。
+    const rowsAfterPinch = after.length;
+    act(() => {
+      ResizeObserverMock.triggerAll();
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    });
+    expect(scaleLayer.style.zoom).toBe('0.8064516129032258');
+    expect(rowIndices().length).toBe(rowsAfterPinch);
   });
 });
 

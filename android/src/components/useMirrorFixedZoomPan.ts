@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type TouchEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type RefObject, type TouchEvent } from 'react';
 import { TERMINAL_DRAWER_EDGE_SWIPE_START_PX } from '@zterm/shared';
 import {
   clampHorizontalOffset,
@@ -25,6 +25,7 @@ export interface MirrorFixedWheelStep {
 export interface MirrorFixedZoomPanOptions {
   widthMode: string;
   copyModeActive: boolean;
+  hostRef?: RefObject<HTMLDivElement | null>;
   previewProjection?: boolean;
   reserveRightEdgeSwipe?: boolean;
   rightEdgeReservePx?: number;
@@ -34,12 +35,15 @@ export interface MirrorFixedZoomPanOptions {
   maxHorizontalOffsetPx?: number;
   onVerticalScrollIntent?: () => void;
   onWheelStep?: (step: MirrorFixedWheelStep) => void;
+  onScaleChange?: (scale: number) => void;
 }
 
 export interface MirrorFixedZoomPan {
   scaleLayerRef: (node: HTMLDivElement | null) => void;
   visualScale: number;
   horizontalOffsetPx: number;
+  verticalOffsetPx: number;
+  setVerticalOffsetPx: (nextOffsetPx: number) => void;
   onTouchStart: (event: TouchEvent<HTMLDivElement>) => void;
   onTouchMove: (event: TouchEvent<HTMLDivElement>) => void;
   onTouchEnd: (event: TouchEvent<HTMLDivElement>) => void;
@@ -78,6 +82,7 @@ interface PanGestureState {
   startX: number;
   startY: number;
   startOffsetPx: number;
+  startVerticalOffsetPx: number;
 }
 
 function createInitialWheelState(debug: WheelDebugState): TwoFingerWheelState {
@@ -105,15 +110,21 @@ export function useMirrorFixedZoomPan(
   const maxOffsetRef = useRef(maxHorizontalOffsetPx);
   maxOffsetRef.current = maxHorizontalOffsetPx;
   const offsetRef = useRef(0);
+  const verticalOffsetRef = useRef(0);
   const [horizontalOffsetPx, setHorizontalOffsetPx] = useState(0);
+  const [verticalOffsetPx, setVerticalOffsetPx] = useState(0);
+  const [visualScale, setVisualScale] = useState(1);
   const layerRef = useRef<HTMLDivElement | null>(null);
   const pinchRef = useRef<{ startSpan: number; startScale: number } | null>(null);
+  const savedScrollTopRef = useRef<number | null>(null);
+  const verticalBaseRef = useRef(0);
   const panRef = useRef<PanGestureState>({
     active: false,
     axis: null,
     startX: 0,
     startY: 0,
     startOffsetPx: 0,
+    startVerticalOffsetPx: 0,
   });
   const restoredSessionRef = useRef<string | null>(null);
   const wheelDebugRef = useRef<WheelDebugState>({
@@ -154,14 +165,49 @@ export function useMirrorFixedZoomPan(
     const minScale = minScaleRef.current;
     const clamped = Math.min(MAX_SCALE, Math.max(minScale, next));
     scaleRef.current = clamped;
+    setVisualScale(clamped);
     const node = layerRef.current;
     if (!node) {
       return;
     }
-    node.style.transform = clamped < 1 ? `scale(${clamped})` : 'none';
-    node.style.transformOrigin = 'top left';
+    // CSS zoom 是布局级缩放：内容布局高度/宽度随缩放变化，原生 scrollTop 坐标系
+    // 与视觉坐标系保持一致；transform: scale 只缩放位图，不改布局，滚动映射会分叉。
+    const style = node.style as CSSStyleDeclaration & { zoom?: string };
+    style.zoom = clamped < 1 ? String(clamped) : '1';
     node.style.willChange = clamped < 1 ? 'transform' : '';
-  }, []);
+    const host = options.hostRef?.current;
+    if (!host) {
+      return;
+    }
+    // 缩放态禁原生滚动：zoom 位图 + 非零 scrollTop 在 Android WebView 触发黑屏。
+    // 纵向手势由 translateY 合成层平移接管；恢复时交还 pan-y。
+    host.style.touchAction = clamped < 1 ? 'none' : 'pan-y';
+    if (clamped >= 1) {
+      const vertical = verticalOffsetRef.current;
+      if (vertical !== 0) {
+        const saved = savedScrollTopRef.current ?? 0;
+        const baseV = verticalBaseRef.current;
+        const restoreValue = Math.min(
+          Math.max(0, host.scrollHeight - host.clientHeight),
+          Math.max(0, Math.round(saved + (vertical - baseV))),
+        );
+        host.scrollTop = restoreValue;
+        window.setTimeout(() => {
+          const h = options.hostRef?.current;
+          if (h && scaleRef.current >= 1) {
+            h.scrollTop = Math.min(
+              Math.max(0, h.scrollHeight - h.clientHeight),
+              restoreValue,
+            );
+          }
+        }, 0);
+      }
+      verticalOffsetRef.current = 0;
+      setVerticalOffsetPx(0);
+      savedScrollTopRef.current = null;
+      verticalBaseRef.current = 0;
+    }
+  }, [options.hostRef]);
 
   const computeNextPinchScale = useCallback((ratio: number) => {
     const current = scaleRef.current;
@@ -176,14 +222,42 @@ export function useMirrorFixedZoomPan(
     return clamped;
   }, []);
 
+  const enterZoomedVerticalPan = useCallback(() => {
+    if (options.widthMode !== 'mirror-fixed' || scaleRef.current >= 1) {
+      return;
+    }
+    if (savedScrollTopRef.current !== null) {
+      return;
+    }
+    const host = options.hostRef?.current;
+    if (!host) {
+      return;
+    }
+    const scale = scaleRef.current;
+    const saved = host.scrollTop;
+    const maxScrollTop = Math.max(0, host.scrollHeight - host.clientHeight);
+    const clampedSaved = Math.min(saved, maxScrollTop);
+    const v0 = -Math.round(clampedSaved * scale);
+    savedScrollTopRef.current = clampedSaved;
+    verticalBaseRef.current = v0;
+    verticalOffsetRef.current = v0;
+    setVerticalOffsetPx(v0);
+    host.scrollTop = 0;
+  }, [options.hostRef, options.widthMode]);
+
+  const setVerticalOffset = useCallback((nextOffsetPx: number) => {
+    verticalOffsetRef.current = nextOffsetPx;
+    setVerticalOffsetPx(nextOffsetPx);
+  }, []);
+
   const scaleLayerRef = useCallback((node: HTMLDivElement | null) => {
     layerRef.current = node;
     if (!node) {
       return;
     }
     const scale = scaleRef.current;
-    node.style.transform = scale < 1 ? `scale(${scale})` : 'none';
-    node.style.transformOrigin = 'top left';
+    const style = node.style as CSSStyleDeclaration & { zoom?: string };
+    style.zoom = scale < 1 ? String(scale) : '1';
     node.style.willChange = scale < 1 ? 'transform' : '';
   }, []);
 
@@ -439,6 +513,7 @@ export function useMirrorFixedZoomPan(
         startX,
         startY: touches[0].clientY,
         startOffsetPx,
+        startVerticalOffsetPx: verticalOffsetRef.current,
       };
       if (active && (startOffsetPx > 0 || startX > drawerEdgeSwipeStartPx)) {
         event.stopPropagation();
@@ -480,7 +555,20 @@ export function useMirrorFixedZoomPan(
         pan.axis = Math.abs(deltaX) > Math.abs(deltaY) ? 'horizontal' : 'vertical';
       }
       if (pan.axis !== 'horizontal') {
-        options.onVerticalScrollIntent?.();
+        if (scaleRef.current < 1) {
+          const nextVertical = pan.startVerticalOffsetPx - deltaY;
+          const host = options.hostRef?.current;
+          const bound = host
+            ? Math.max(0, host.scrollHeight - host.clientHeight)
+            : 0;
+          const clamped = Math.min(bound, Math.max(-bound, nextVertical));
+          verticalOffsetRef.current = clamped;
+          setVerticalOffsetPx(clamped);
+          event.preventDefault();
+          event.stopPropagation();
+        } else {
+          options.onVerticalScrollIntent?.();
+        }
         return;
       }
       const nextOffset = Math.max(0, pan.startOffsetPx - deltaX);
@@ -501,6 +589,7 @@ export function useMirrorFixedZoomPan(
       drawerEdgeSwipeStartPx,
       moveTwoFingerWheel,
       options.onVerticalScrollIntent,
+      options.hostRef,
       options.widthMode,
     ],
   );
@@ -519,14 +608,19 @@ export function useMirrorFixedZoomPan(
       }
       pinchRef.current = null;
       panRef.current.active = false;
+      if (options.widthMode === 'mirror-fixed' && scaleRef.current < 1) {
+        enterZoomedVerticalPan();
+      }
     },
-    [endTwoFingerWheel, options.sessionId, options.widthMode],
+    [endTwoFingerWheel, enterZoomedVerticalPan, options.sessionId, options.widthMode],
   );
 
   return {
     scaleLayerRef,
-    visualScale: scaleRef.current,
+    visualScale,
     horizontalOffsetPx,
+    verticalOffsetPx,
+    setVerticalOffsetPx: setVerticalOffset,
     onTouchStart,
     onTouchMove,
     onTouchEnd,

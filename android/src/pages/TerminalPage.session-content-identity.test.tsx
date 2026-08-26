@@ -550,7 +550,6 @@ describe('TerminalPage session content identity', () => {
 
     const before = rowIndices();
     assertContinuous(before);
-    const scrollTopBefore = host.scrollTop;
 
     // pinch in（span 100 -> 60）：UI shell 只写视觉层 transform
     act(() => {
@@ -575,15 +574,15 @@ describe('TerminalPage session content identity', () => {
       fireEvent.touchEnd(host, { changedTouches: [{ identifier: 1 }, { identifier: 2 }] });
     });
 
-    // fontSize=14 默认 + 80 列 → 内容宽 694px > 容器宽，pinch 后视觉 scale < 1 且
-    // renderer 窗口（行号区间 / scrollTop / grid transform）完全不变。
-    const scaleAfter = scaleLayer.style.transform;
-    expect(scaleAfter).toMatch(/^scale\(0\./);
+    // fontSize=14 默认 + 80 列 → 内容宽 694px > 容器宽，pinch 后视觉 zoom < 1；
+    // 缩放态 scrollTop 锁定 0，可见行数按布局行高增加，buffer 绝对行号仍连续。
+    const scaleAfter = scaleLayer.style.zoom;
+    expect(scaleAfter).toMatch(/^0\./);
     expect(grid.style.transform).not.toContain('translateY');    expect(grid.style.zoom).toBeFalsy();
-    expect(host.scrollTop).toBe(scrollTopBefore);
+    expect(host.scrollTop).toBe(0);
 
     const after = rowIndices();
     assertContinuous(after);
-    expect(after).toEqual(before);
+    expect(after.length).toBeGreaterThan(before.length);
   });
 });

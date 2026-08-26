@@ -293,13 +293,14 @@ export function resolveTerminalRenderDemandFromScroll(options: {
   isAtBottom: boolean;
   resolveScrollTopForRenderBottomIndex: (nextRenderBottomIndex: number) => number;
 }) : TerminalRenderDemandFromScroll {
+  const viewportRows = Math.max(1, Math.floor(options.viewportRows || 1));
   const clampedScrollTop = Math.max(0, Math.min(options.maxScrollTop, options.nextScrollTop));
   const visibleTopOffset = Math.max(0, Math.floor(clampedScrollTop / options.rowHeightPx));
-  const nextWindowBottomIndex = options.dataRowCount <= options.viewportRows
+  const nextWindowBottomIndex = options.dataRowCount <= viewportRows
     ? options.effectiveBufferEndIndex
     : Math.max(
         options.minimumRenderBottomIndex,
-        Math.min(options.bufferTailAnchorEndIndex, options.bufferStartIndex + visibleTopOffset + options.viewportRows),
+        Math.min(options.bufferTailAnchorEndIndex, options.bufferStartIndex + visibleTopOffset + viewportRows),
       );
   const nextMode: 'follow' | 'reading' = options.isAtBottom ? 'follow' : 'reading';
   const nextRenderBottomIndex = nextMode === 'follow'
