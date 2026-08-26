@@ -193,6 +193,13 @@
       "status": "active"
     },
     {
+      "gate_id": "gate.ios.native",
+      "command": "pnpm --dir ios run type-check && pnpm --dir ios run test && xcodebuild -project ios/App/App.xcodeproj -scheme App -sdk iphonesimulator -configuration Debug CODE_SIGNING_ALLOWED=NO build",
+      "type": "package",
+      "required_for": ["phase7"],
+      "status": "active"
+    },
+    {
       "gate_id": "gate.file.media.input",
       "command": "pnpm --dir packages/stream-boundary run type-check && pnpm --dir packages/stream-boundary run test",
       "type": "runtime",

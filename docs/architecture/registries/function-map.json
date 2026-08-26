@@ -249,6 +249,14 @@
       "entry_symbols": ["createIosCapacitorAdapter", "IosWebViewBridge"],
       "status": "active",
       "required_gates": ["gate.map.parse", "gate.symbol.exists", "gate.payload.isolation"]
+    },
+    {
+      "function_id": "function.ios.native_host",
+      "owner_module": "host.ios_native",
+      "path": "ios/src/ios-native-bridge.ts",
+      "entry_symbols": ["createIosNativeHost", "IosNativeHost"],
+      "status": "active",
+      "required_gates": ["gate.map.parse", "gate.symbol.exists", "gate.ios.native"]
     }
   ]
 }

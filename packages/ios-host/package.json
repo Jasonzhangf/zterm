@@ -8,7 +8,10 @@
   },
   "scripts": {
     "type-check": "tsc --noEmit",
-    "test": "node --import tsx --test src/ios-host.test.ts"
+    "test": "node --import tsx --test src/ios-host.test.ts",
+    "test:device": "node --import tsx --test src/ios-host-device.test.ts",
+    "test:negative": "node --import tsx --test src/ios-host-negative.test.ts",
+    "test:all": "node --import tsx --test src/ios-host.test.ts src/ios-host-device.test.ts src/ios-host-negative.test.ts"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

@@ -581,5 +581,17 @@
         }
       ]
     }
+  ,{
+    "mainline_id": "ios_native_mainline",
+    "entrypoint": "ios_native.host",
+    "return_path": "ios_native.gateway",
+    "nodes": [
+      {"id": "ios_native.host", "owner_module": "host.ios_native", "label": "ios/src/ios-native-bridge.ts#createIosNativeHost"},
+      {"id": "ios_native.gateway", "owner_module": "runtime.ios_gateway", "label": "packages/ios-host/src/ios-capacitor-adapter.ts#createIosCapacitorAdapter"}
+    ],
+    "edges": [
+      {"edge_id": "edge.ios_native.host_to_gateway", "from": "ios_native.host", "to": "ios_native.gateway", "caller_path": "ios/src/ios-native-bridge.ts", "callee_path": "packages/ios-host/src/ios-capacitor-adapter.ts", "relation_status": "direct", "status": "anchored"}
+    ]
+  }
   ]
 }

@@ -347,11 +347,13 @@
     {
       "feature_id": "feature.host.ios",
       "owner_modules": [
-        "runtime.ios_gateway"
+        "runtime.ios_gateway",
+        "host.ios_native"
       ],
       "status": "active",
       "allowed_paths": [
-        "packages/ios-host/src/**"
+        "packages/ios-host/src/**",
+        "ios/**"
       ],
       "forbidden_paths": [
         "android/**",
@@ -362,7 +364,8 @@
       "required_gates": [
         "gate.owner.uniqueness",
         "gate.import.edges",
-        "gate.payload.isolation"
+        "gate.payload.isolation",
+        "gate.ios.native"
       ]
     },
     {

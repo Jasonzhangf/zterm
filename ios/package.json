@@ -1,0 +1,22 @@
+{
+  "name": "@zterm/ios",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "type-check": "tsc --noEmit",
+    "test": "node --import tsx --test src/ios-native.test.ts",
+    "build": "pnpm run type-check"
+  },
+  "dependencies": {
+    "@capacitor/core": "^6.2.1",
+    "@capacitor/ios": "^6.2.1",
+    "@zterm/ios-host": "workspace:*",
+    "@zterm/runtime-contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.4.0"
+  }
+}
