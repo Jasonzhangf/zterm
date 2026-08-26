@@ -27,12 +27,12 @@
       "required_gates": ["gate.shared.core.imports", "gate.persistence.settings.replay"]
     },
     {
-      "feature_id": "feature.ui.framework_neutral_contract",
-      "owner_modules": ["ui.react_adapter", "app.kernel"],
-      "status": "pending",
-      "allowed_paths": ["packages/shared/src/**", "packages/kernel/src/**"],
-      "forbidden_paths": ["packages/shared/src/terminal/mac-terminal-view.tsx"],
-      "required_gates": ["gate.target.status"]
+      "feature_id": "feature.phase6.react_adapter",
+      "owner_modules": ["ui.react_adapter"],
+      "status": "active",
+      "allowed_paths": ["packages/ui-react/src/**", "packages/ui-react/package.json", "packages/ui-react/tsconfig.json"],
+      "forbidden_paths": ["android/**", "mac/**", "win/**", "packages/kernel/**", "packages/stream-boundary/**", "packages/shared/src/terminal/**"],
+      "required_gates": ["gate.map.parse", "gate.import.edges", "gate.ui.react.adapter"]
     },
     {
       "feature_id": "feature.kernel.composition",

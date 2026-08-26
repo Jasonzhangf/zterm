@@ -67,6 +67,14 @@
       "required_gates": ["gate.map.parse", "gate.symbol.exists"]
     },
     {
+      "function_id": "function.ui.react_surface_adapter",
+      "owner_module": "ui.react_adapter",
+      "path": "packages/ui-react/src/index.ts",
+      "entry_symbols": ["createReactSurfaceAdapter"],
+      "status": "active",
+      "required_gates": ["gate.map.parse", "gate.symbol.exists", "gate.ui.react.adapter"]
+    },
+    {
       "function_id": "function.android.client_composition_root",
       "owner_module": "client.android_renderer",
       "path": "android/src/lib/composition-root/client-composition-root.ts",

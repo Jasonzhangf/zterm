@@ -91,15 +91,17 @@
         "packages/shared/src/terminal/plugin-contract.ts",
         "packages/shared/src/terminal/plugin-ui-slot.ts",
         "packages/shared/src/terminal/plugin-ui-slot-registry.ts",
-        "packages/shared/src/terminal/plugin-capability-registry.ts"
+        "packages/shared/src/terminal/plugin-capability-registry.ts",
+        "packages/ui-react/src/**"
       ],
-      "allowed_paths": ["packages/shared/src/**"],
+      "allowed_paths": ["packages/shared/src/**", "packages/ui-react/src/**"],
       "forbidden_paths": ["android/native/**", "mac/electron/**", "win/electron/**"],
       "forbidden_imports": ["@capacitor/*", "electron", "cordis"],
       "declared_edges": [
-        {"to": "shared.domain_core"}
+        {"to": "shared.domain_core"},
+        {"to": "ui.contract"}
       ],
-      "required_gates": ["gate.module.dag", "gate.mainline.adjacency"]
+      "required_gates": ["gate.module.dag", "gate.mainline.adjacency", "gate.import.edges", "gate.ui.react.adapter"]
     },
     {
       "module_id": "runtime.android_support",

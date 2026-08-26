@@ -297,6 +297,34 @@ importers:
         specifier: ^20.0.0
         version: 20.19.39
 
+  packages/ui-react:
+    dependencies:
+      '@zterm/ui-contract':
+        specifier: workspace:*
+        version: link:../ui-contract
+      typescript:
+        specifier: ^5.4.0
+        version: 5.9.3
+    devDependencies:
+      '@types/node':
+        specifier: ^20.0.0
+        version: 20.19.39
+      '@types/react':
+        specifier: ^19.0.0
+        version: 19.2.14
+      '@types/react-dom':
+        specifier: ^19.0.0
+        version: 19.2.3(@types/react@19.2.14)
+      react:
+        specifier: ^19.0.0
+        version: 19.2.5
+      react-dom:
+        specifier: ^19.0.0
+        version: 19.2.5(react@19.2.5)
+      tsx:
+        specifier: ^4.7.0
+        version: 4.21.0
+
   win:
     dependencies:
       '@jsonstudio/wtermmod-react':

@@ -40,6 +40,9 @@ jobs:
       - name: iOS host gateway contract suite
         run: pnpm --dir packages/ios-host run type-check && pnpm --dir packages/ios-host run test
 
+      - name: React UI adapter ownership and projection suite
+        run: pnpm --dir packages/ui-react run type-check && pnpm --dir packages/ui-react run test
+
   appsdk-governance:
     name: AppSDK record graph gate
     runs-on: macos-14

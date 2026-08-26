@@ -24,6 +24,7 @@
     {"gate_id": "gate.terminal.buffer.render", "command": "pnpm --dir packages/stream-boundary run type-check && pnpm --dir packages/stream-boundary run test", "type": "runtime", "required_for": ["phase5"], "status": "active"},
     {"gate_id": "gate.ios.host.contract", "command": "pnpm --dir packages/ios-host run type-check && pnpm --dir packages/ios-host run test", "type": "runtime", "required_for": ["phase3"], "status": "active"},
     {"gate_id": "gate.ios.package", "command": "pnpm --dir packages/ios-host run type-check && pnpm --dir packages/ios-host run test", "type": "package", "required_for": ["phase3"], "status": "active"},
-    {"gate_id": "gate.file.media.input", "command": "pnpm --dir packages/stream-boundary run type-check && pnpm --dir packages/stream-boundary run test", "type": "runtime", "required_for": ["phase5"], "status": "active"}
+    {"gate_id": "gate.file.media.input", "command": "pnpm --dir packages/stream-boundary run type-check && pnpm --dir packages/stream-boundary run test", "type": "runtime", "required_for": ["phase5"], "status": "active"},
+    {"gate_id": "gate.ui.react.adapter", "command": "pnpm --dir packages/ui-react run type-check && pnpm --dir packages/ui-react run test", "type": "runtime", "required_for": ["phase6"], "status": "active"}
   ]
 }
