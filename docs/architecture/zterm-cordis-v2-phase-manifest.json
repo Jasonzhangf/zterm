@@ -266,7 +266,8 @@
       ],
       "delivered_claims": [
         "zterm.v2.phase3.android.host",
-        "zterm.v2.phase3.desktop.hosts"
+        "zterm.v2.phase3.desktop.hosts",
+        "zterm.v2.phase3.ios.host"
       ]
     },
     {
@@ -288,13 +289,14 @@
       ],
       "delivered_claims": [
         "zterm.v2.phase4.session.route",
-        "zterm.v2.phase4.persistence.settings"
+        "zterm.v2.phase4.persistence.settings",
+        "zterm.v2.phase4.control.error"
       ]
     },
     {
       "id": "phase-5-terminal-data-plane",
       "claim": "zterm.v2.phase5.terminal.data-plane",
-      "status": "blocked-on-phase-4",
+      "status": "active",
       "depends_on": [
         "phase-4-runtime-parity"
       ],
