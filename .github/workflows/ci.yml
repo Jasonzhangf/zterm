@@ -10,6 +10,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  cordis-v2-governance:
+    name: Cordis v2 manifest and offline review gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Validate v2 governance manifest and offline review
+        run: pnpm run test:cordis-v2-governance
+
+      - name: Validate v2 architecture map registries
+        run: pnpm run test:v2:map-registries
+
+      - name: Run positive and negative validator tests
+        run: pnpm run test:cordis-v2-governance:negative
+
   appsdk-governance:
     name: AppSDK record graph gate
     runs-on: macos-14

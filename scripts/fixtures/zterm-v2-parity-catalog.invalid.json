@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "catalog_id": "fixture.invalid",
+  "production_baseline": {},
+  "platforms": [{"id": "android"}],
+  "verification_profiles": {
+    "android_v1": {
+      "source_evidence": {"kind": "registry", "reference": "android/docs/feature-registry.json", "status": "verified"},
+      "gates": [{"id": "android:feature-registry", "kind": "command", "reference": "pnpm --dir android run test:feature-registry", "status": "pending"}],
+      "runtime_gap": "fixture"
+    }
+  },
+  "features": [
+    {"id": "duplicate.feature", "title": "A", "platforms": ["android"], "owner": {"registry": "unknown/registry.json", "feature": "missing"}, "entry": {"surface": "x", "paths": []}, "behavior": {}, "verification": {"profile": "android_v1", "status": "pending"}},
+    {"id": "duplicate.feature", "title": "B", "platforms": ["android"], "owner": {"registry": "android/docs/feature-registry.json", "feature": "not-a-real-feature"}, "entry": {"surface": "x", "paths": []}, "behavior": {}, "verification": {"profile": "android_v1", "status": "pending"}}
+  ]
+}

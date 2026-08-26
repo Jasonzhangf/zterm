@@ -1,0 +1,216 @@
+{
+  "schema_version": 1,
+  "registry_id": "zterm.cordis.v2.modules",
+  "source_extensions": [".ts", ".tsx", ".java", ".kt"],
+  "modules": [
+    {
+      "module_id": "shared.domain_core",
+      "status": "active",
+      "layer": "shared",
+      "owned_paths": ["packages/shared/src/**"],
+      "excluded_paths": [
+        "packages/shared/src/index.ts",
+        "packages/shared/src/react/**",
+        "packages/shared/src/terminal/mac-terminal-view.tsx",
+        "packages/shared/src/terminal/renderer/index.ts",
+        "packages/shared/src/terminal/renderer/row.ts",
+        "packages/shared/src/terminal/renderer.test.ts",
+        "packages/shared/src/terminal/mac-terminal-view.test.tsx",
+        "packages/shared/src/terminal/plugin-contract.ts",
+        "packages/shared/src/terminal/plugin-ui-slot.ts",
+        "packages/shared/src/terminal/plugin-ui-slot-registry.ts",
+        "packages/shared/src/terminal/plugin-capability-registry.ts"
+      ],
+      "allowed_paths": ["packages/shared/src/**"],
+      "forbidden_paths": [
+        "android/**", "mac/**", "win/**",
+        "packages/shared/src/react/**",
+        "packages/shared/src/terminal/mac-terminal-view.tsx"
+      ],
+      "forbidden_imports": ["react", "react-dom", "@capacitor/*", "electron", "cordis"],
+      "declared_edges": [],
+      "required_gates": ["gate.map.parse", "gate.owner.uniqueness", "gate.shared.core.imports"]
+    },
+    {
+      "module_id": "ui.react_adapter",
+      "status": "active",
+      "layer": "ui-plugin",
+      "target_module": "framework_neutral_ui_contract_plus_react_adapter",
+      "owned_paths": [
+        "packages/shared/src/index.ts",
+        "packages/shared/src/react/**",
+        "packages/shared/src/terminal/mac-terminal-view.tsx",
+        "packages/shared/src/terminal/renderer/index.ts",
+        "packages/shared/src/terminal/renderer/row.ts",
+        "packages/shared/src/terminal/renderer.test.ts",
+        "packages/shared/src/terminal/mac-terminal-view.test.tsx",
+        "packages/shared/src/terminal/plugin-contract.ts",
+        "packages/shared/src/terminal/plugin-ui-slot.ts",
+        "packages/shared/src/terminal/plugin-ui-slot-registry.ts",
+        "packages/shared/src/terminal/plugin-capability-registry.ts"
+      ],
+      "allowed_paths": ["packages/shared/src/**"],
+      "forbidden_paths": ["android/native/**", "mac/electron/**", "win/electron/**"],
+      "forbidden_imports": ["@capacitor/*", "electron", "cordis"],
+      "declared_edges": [
+        {"to": "shared.domain_core"}
+      ],
+      "required_gates": ["gate.module.dag", "gate.mainline.adjacency"]
+    },
+    {
+      "module_id": "runtime.android_support",
+      "status": "active",
+      "layer": "runtime",
+      "owned_paths": [
+        "android/src/lib/types.ts",
+        "android/src/lib/mobile-config.ts",
+        "android/src/lib/terminal-buffer.ts",
+        "android/src/lib/terminal-performance-trace.ts",
+        "android/src/lib/file-transfer-session-runtime.ts",
+        "android/src/lib/file-transfer-throughput-runtime.ts",
+        "android/src/lib/terminal-shortcut-actions.ts"
+      ],
+      "allowed_paths": [
+        "android/src/lib/types.ts",
+        "android/src/lib/mobile-config.ts",
+        "android/src/lib/terminal-buffer.ts",
+        "android/src/lib/terminal-performance-trace.ts",
+        "android/src/lib/file-transfer-session-runtime.ts",
+        "android/src/lib/file-transfer-throughput-runtime.ts",
+        "android/src/lib/terminal-shortcut-actions.ts"
+      ],
+      "forbidden_paths": ["mac/**", "win/**"],
+      "forbidden_imports": ["react", "@capacitor/*", "electron", "cordis"],
+      "declared_edges": [
+        {"to": "shared.domain_core"},
+        {"to": "ui.react_adapter"}
+      ],
+      "required_gates": ["gate.owner.uniqueness", "gate.import.edges"]
+    },
+    {
+      "module_id": "client.android_renderer",
+      "status": "active",
+      "layer": "platform-host-ui",
+      "owned_paths": [
+        "android/src/App.tsx", "android/src/main.tsx",
+        "android/src/components/**", "android/src/contexts/**",
+        "android/src/hooks/**", "android/src/lib/**",
+        "android/src/pages/**", "android/src/plugins/**"
+      ],
+      "excluded_paths": [
+        "android/src/lib/types.ts",
+        "android/src/lib/mobile-config.ts",
+        "android/src/lib/terminal-buffer.ts",
+        "android/src/lib/terminal-performance-trace.ts",
+        "android/src/lib/file-transfer-session-runtime.ts",
+        "android/src/lib/file-transfer-throughput-runtime.ts",
+        "android/src/lib/terminal-shortcut-actions.ts"
+      ],
+      "allowed_paths": ["android/src/**"],
+      "forbidden_paths": ["android/native/**", "mac/**", "win/**"],
+      "forbidden_imports": ["electron", "cordis"],
+      "declared_edges": [
+        {"to": "shared.domain_core"},
+        {"to": "ui.react_adapter"},
+        {"to": "runtime.daemon"},
+        {"to": "runtime.android_support"}
+      ],
+      "required_gates": ["gate.owner.uniqueness", "gate.import.edges"]
+    },
+    {
+      "module_id": "runtime.daemon",
+      "status": "active",
+      "layer": "runtime",
+      "owned_paths": ["android/src/server/**", "android/src/traversal-relay/**"],
+      "allowed_paths": ["android/src/server/**", "android/src/traversal-relay/**"],
+      "forbidden_paths": ["android/src/components/**", "android/src/pages/**", "mac/**", "win/**"],
+      "forbidden_imports": ["react", "react-dom", "@capacitor/*", "electron", "cordis"],
+      "declared_edges": [
+        {"to": "shared.domain_core"},
+        {"to": "runtime.android_support"}
+      ],
+      "required_gates": ["gate.owner.uniqueness", "gate.import.edges"]
+    },
+    {
+      "module_id": "host.android_native",
+      "status": "active",
+      "layer": "platform-host",
+      "owned_paths": ["android/native/android/app/src/main/**"],
+      "allowed_paths": ["android/native/android/app/src/main/**"],
+      "forbidden_paths": ["android/src/**", "mac/**", "win/**"],
+      "forbidden_imports": ["react", "react-dom", "electron", "cordis"],
+      "declared_edges": [],
+      "required_gates": ["gate.owner.uniqueness"]
+    },
+    {
+      "module_id": "host.mac_electron",
+      "status": "active",
+      "layer": "platform-host",
+      "owned_paths": ["mac/electron/**"],
+      "allowed_paths": ["mac/electron/**"],
+      "forbidden_paths": ["mac/src/**", "android/**", "win/**"],
+      "forbidden_imports": ["react", "react-dom", "@capacitor/*", "cordis"],
+      "declared_edges": [],
+      "required_gates": ["gate.owner.uniqueness", "gate.import.edges"]
+    },
+    {
+      "module_id": "ui.mac_renderer",
+      "status": "active",
+      "layer": "platform-host-ui",
+      "owned_paths": ["mac/src/**"],
+      "allowed_paths": ["mac/src/**"],
+      "forbidden_paths": ["mac/electron/**", "android/**", "win/**"],
+      "forbidden_imports": ["@capacitor/*", "cordis"],
+      "declared_edges": [
+        {"to": "shared.domain_core"}, {"to": "ui.react_adapter"}
+      ],
+      "required_gates": ["gate.owner.uniqueness", "gate.import.edges", "gate.mainline.adjacency"]
+    },
+    {
+      "module_id": "host.win_electron",
+      "status": "active",
+      "layer": "platform-host",
+      "owned_paths": ["win/electron/**"],
+      "allowed_paths": ["win/electron/**"],
+      "forbidden_paths": ["win/src/**", "android/**", "mac/**"],
+      "forbidden_imports": ["react", "react-dom", "@capacitor/*", "cordis"],
+      "declared_edges": [],
+      "required_gates": ["gate.owner.uniqueness", "gate.import.edges"]
+    },
+    {
+      "module_id": "ui.win_renderer",
+      "status": "active",
+      "layer": "platform-host-ui",
+      "owned_paths": ["win/src/**"],
+      "allowed_paths": ["win/src/**"],
+      "forbidden_paths": ["win/electron/**", "android/**", "mac/**"],
+      "forbidden_imports": ["@capacitor/*", "cordis"],
+      "declared_edges": [
+        {"to": "shared.domain_core"}, {"to": "ui.react_adapter"}, {"to": "host.win_electron"}
+      ],
+      "required_gates": ["gate.owner.uniqueness", "gate.import.edges", "gate.mainline.adjacency"]
+    },
+    {
+      "module_id": "app.kernel",
+      "status": "design",
+      "layer": "application-kernel",
+      "owned_paths": [],
+      "allowed_paths": ["packages/kernel/src/**"],
+      "forbidden_paths": ["packages/shared/src/**", "android/**", "mac/**", "win/**"],
+      "forbidden_imports": ["react", "react-dom", "@capacitor/*", "electron", "cordis"],
+      "declared_edges": [{"to": "shared.domain_core"}, {"to": "ui.react_adapter"}],
+      "required_gates": ["gate.target.status"]
+    },
+    {
+      "module_id": "app.cordis_adapter",
+      "status": "design",
+      "layer": "application-kernel",
+      "owned_paths": [],
+      "allowed_paths": ["packages/kernel/src/cordis/**"],
+      "forbidden_paths": ["packages/shared/src/**", "packages/kernel/src/domain/**", "android/**", "mac/**", "win/**"],
+      "forbidden_imports": ["react", "react-dom", "@capacitor/*", "electron"],
+      "declared_edges": [{"to": "app.kernel"}],
+      "required_gates": ["gate.target.status"]
+    }
+  ]
+}

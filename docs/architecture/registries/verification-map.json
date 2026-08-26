@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "registry_id": "zterm.cordis.v2.verifications",
+  "gates": [
+    {"gate_id": "gate.map.parse", "command": "node scripts/check-zterm-v2-map-registries.mjs", "type": "static", "required_for": ["phase0"]},
+    {"gate_id": "gate.owner.uniqueness", "command": "node scripts/check-zterm-v2-map-registries.mjs --only=ownership", "type": "static", "required_for": ["phase0"]},
+    {"gate_id": "gate.import.edges", "command": "node scripts/check-zterm-v2-map-registries.mjs --only=imports", "type": "static", "required_for": ["phase0"]},
+    {"gate_id": "gate.mainline.adjacency", "command": "node scripts/check-zterm-v2-map-registries.mjs --only=mainline", "type": "static", "required_for": ["phase0"]},
+    {"gate_id": "gate.module.dag", "command": "node scripts/check-zterm-v2-map-registries.mjs --only=dag", "type": "static", "required_for": ["phase0"]},
+    {"gate_id": "gate.target.status", "command": "node scripts/check-zterm-v2-map-registries.mjs --only=status", "type": "static", "required_for": ["phase0"]},
+    {"gate_id": "gate.symbol.exists", "command": "node scripts/check-zterm-v2-map-registries.mjs --only=symbols", "type": "static", "required_for": ["phase0"]},
+    {"gate_id": "gate.git.diff.check", "command": "git diff --check", "type": "vcs", "required_for": ["phase0"]},
+    {"gate_id": "gate.shared.core.imports", "command": "node scripts/check-zterm-v2-map-registries.mjs --only=shared", "type": "static", "required_for": ["phase0", "phase1"]},
+    {"gate_id": "gate.payload.isolation", "command": "node scripts/check-zterm-v2-map-registries.mjs --only=payload", "type": "static", "required_for": ["phase0", "phase1"]},
+    {"gate_id": "gate.lifecycle.pairs", "command": "pending: Phase 2 lifecycle positive/negative suite", "type": "runtime", "required_for": ["phase2"], "status": "pending"},
+    {"gate_id": "gate.cordis.process_local", "command": "pending: Phase 2 Cordis adapter boundary suite", "type": "static", "required_for": ["phase2"], "status": "pending"}
+  ]
+}

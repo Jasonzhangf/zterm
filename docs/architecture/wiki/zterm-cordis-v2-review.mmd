@@ -1,0 +1,9 @@
+flowchart LR
+  P0["phase-0-governance\nready"] --> P1["phase-1-shared-contracts\nblocked-on-phase-0"]
+  P1 --> P2["phase-2-kernel-cordis\nblocked-on-phase-1"]
+  P2 --> P3["phase-3-platform-hosts\nblocked-on-phase-2"]
+  P3 --> P4["phase-4-runtime-parity\nblocked-on-phase-3"]
+  P4 --> P5["phase-5-terminal-data-plane\nblocked-on-phase-4"]
+  P5 --> P6["phase-6-ui-plugins\nblocked-on-phase-5"]
+  P6 --> P7["phase-7-platform-parity\nblocked-on-phase-6"]
+  P7 --> P8["phase-8-closeout\nblocked-on-phase-7"]

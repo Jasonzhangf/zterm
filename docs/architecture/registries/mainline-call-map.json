@@ -1,0 +1,153 @@
+{
+  "schema_version": 1,
+  "registry_id": "zterm.cordis.v2.mainlines",
+  "lifecycle_id": "zterm.cordis.v2.rebuild",
+  "mainlines": [
+    {
+      "mainline_id": "android_renderer_current_mainline",
+      "entrypoint": "node.android_entry",
+      "return_path": "node.android_socket_ingress",
+      "nodes": [
+        {"id": "node.android_entry", "owner_module": "client.android_renderer", "label": "android/src/main.tsx"},
+        {"id": "node.app_bootstrap", "owner_module": "client.android_renderer", "label": "android/src/App.tsx#AppContent"},
+        {"id": "node.composition_root", "owner_module": "client.android_renderer", "label": "android/src/lib/composition-root/client-composition-root.ts#ClientCompositionRoot"},
+        {"id": "node.plugin_host", "owner_module": "client.android_renderer", "label": "android/src/lib/plugin-host/plugin-host-runtime.ts#createPluginHost"},
+        {"id": "node.session_provider", "owner_module": "client.android_renderer", "label": "android/src/contexts/SessionContext.tsx#SessionProvider"},
+        {"id": "node.provider_assemblies", "owner_module": "client.android_renderer", "label": "android/src/contexts/session-context-provider-assemblies.ts#useSessionProviderAssemblies"},
+        {"id": "node.provider_core_assemblies", "owner_module": "client.android_renderer", "label": "android/src/contexts/session-context-provider-core-assemblies.ts#useSessionProviderCoreAssemblies"},
+        {"id": "node.message_assemblies", "owner_module": "client.android_renderer", "label": "android/src/contexts/session-context-message-assemblies.ts#createSessionMessageAssemblies"},
+        {"id": "node.android_socket_ingress", "owner_module": "client.android_renderer", "label": "android/src/contexts/session-context-socket-message-runtime.ts#handleSocketServerMessageRuntime"}
+      ],
+      "edges": [
+        {
+          "edge_id": "edge.current.android_entry_to_app",
+          "from": "node.android_entry", "to": "node.app_bootstrap",
+          "caller_path": "android/src/main.tsx", "callee_path": "android/src/App.tsx",
+          "relation_status": "direct", "status": "anchored"
+        },
+        {
+          "edge_id": "edge.current.android_app_to_composition",
+          "from": "node.app_bootstrap", "to": "node.composition_root",
+          "caller_path": "android/src/App.tsx", "callee_path": "android/src/lib/composition-root/client-composition-root.ts",
+          "relation_status": "direct", "status": "anchored"
+        },
+        {
+          "edge_id": "edge.current.android_app_to_plugins",
+          "from": "node.app_bootstrap", "to": "node.plugin_host",
+          "caller_path": "android/src/App.tsx", "callee_path": "android/src/lib/plugin-host/plugin-host-runtime.ts",
+          "relation_status": "direct", "status": "anchored"
+        },
+        {
+          "edge_id": "edge.current.android_app_to_session_provider",
+          "from": "node.app_bootstrap", "to": "node.session_provider",
+          "caller_path": "android/src/App.tsx", "callee_path": "android/src/contexts/SessionContext.tsx",
+          "relation_status": "direct", "status": "anchored"
+        },
+        {
+          "edge_id": "edge.current.session_provider_to_assemblies",
+          "from": "node.session_provider", "to": "node.provider_assemblies",
+          "caller_path": "android/src/contexts/SessionContext.tsx", "callee_path": "android/src/contexts/session-context-provider-assemblies.ts",
+          "relation_status": "direct", "status": "anchored"
+        },
+        {
+          "edge_id": "edge.current.assemblies_to_messages",
+          "from": "node.provider_core_assemblies", "to": "node.message_assemblies",
+          "caller_path": "android/src/contexts/session-context-provider-core-assemblies.ts", "callee_path": "android/src/contexts/session-context-message-assemblies.ts",
+          "relation_status": "direct", "status": "anchored"
+        },
+        {
+          "edge_id": "edge.current.provider_assemblies_to_core",
+          "from": "node.provider_assemblies", "to": "node.provider_core_assemblies",
+          "caller_path": "android/src/contexts/session-context-provider-assemblies.ts", "callee_path": "android/src/contexts/session-context-provider-core-assemblies.ts",
+          "relation_status": "direct", "status": "anchored"
+        },
+        {
+          "edge_id": "edge.current.messages_to_socket_ingress",
+          "from": "node.message_assemblies", "to": "node.android_socket_ingress",
+          "caller_path": "android/src/contexts/session-context-message-assemblies.ts", "callee_path": "android/src/contexts/session-context-socket-message-runtime.ts",
+          "relation_status": "direct", "status": "anchored"
+        }
+      ]
+    },
+    {
+      "mainline_id": "android_daemon_current_mainline",
+      "entrypoint": "node.daemon_runtime",
+      "return_path": "node.shared_protocol",
+      "nodes": [
+        {"id": "node.daemon_runtime", "owner_module": "runtime.daemon", "label": "android/src/server/server.ts"},
+        {"id": "node.daemon_message", "owner_module": "runtime.daemon", "label": "android/src/server/terminal-message-runtime.ts#createTerminalMessageRuntime"},
+        {"id": "node.shared_protocol", "owner_module": "shared.domain_core", "label": "packages/shared/src/connection/protocol.ts"}
+      ],
+      "edges": [
+        {
+          "edge_id": "edge.current.daemon_runtime_to_messages",
+          "from": "node.daemon_runtime", "to": "node.daemon_message",
+          "caller_path": "android/src/server/server.ts", "callee_path": "android/src/server/terminal-message-runtime.ts",
+          "relation_status": "direct", "status": "anchored"
+        },
+        {
+          "edge_id": "edge.current.daemon_messages_to_shared_protocol",
+          "from": "node.daemon_message", "to": "node.shared_protocol",
+          "caller_path": "android/src/server/terminal-message-runtime.ts", "callee_path": "packages/shared/src/connection/protocol.ts",
+          "relation_status": "direct", "status": "anchored"
+        }
+      ]
+    },
+    {
+      "mainline_id": "mac_renderer_current_mainline",
+      "entrypoint": "node.mac_entry",
+      "return_path": "node.mac_terminal_view",
+      "nodes": [
+        {"id": "node.mac_entry", "owner_module": "ui.mac_renderer", "label": "mac/src/App.tsx"},
+        {"id": "node.mac_desktop_app", "owner_module": "ui.mac_renderer", "label": "mac/src/app/MacDesktopApp.tsx#MacDesktopApp"},
+        {"id": "node.mac_app_shell", "owner_module": "ui.mac_renderer", "label": "mac/src/app/MacAppShell.tsx#MacAppShell"},
+        {"id": "node.mac_pane_workbench", "owner_module": "ui.mac_renderer", "label": "mac/src/app/MacPaneWorkbench.tsx#MacPaneWorkbench"},
+        {"id": "node.mac_terminal_view", "owner_module": "ui.react_adapter", "label": "packages/shared/src/terminal/mac-terminal-view.tsx#MacTerminalView"}
+      ],
+      "edges": [
+        {
+          "edge_id": "edge.current.mac_entry_to_desktop",
+          "from": "node.mac_entry", "to": "node.mac_desktop_app",
+          "caller_path": "mac/src/App.tsx", "callee_path": "mac/src/app/MacDesktopApp.tsx",
+          "relation_status": "direct", "status": "anchored"
+        },
+        {
+          "edge_id": "edge.current.desktop_to_shell",
+          "from": "node.mac_desktop_app", "to": "node.mac_app_shell",
+          "caller_path": "mac/src/app/MacDesktopApp.tsx", "callee_path": "mac/src/app/MacAppShell.tsx",
+          "relation_status": "direct", "status": "anchored"
+        },
+        {
+          "edge_id": "edge.current.shell_to_workbench",
+          "from": "node.mac_app_shell", "to": "node.mac_pane_workbench",
+          "caller_path": "mac/src/app/MacAppShell.tsx", "callee_path": "mac/src/app/MacPaneWorkbench.tsx",
+          "relation_status": "direct", "status": "anchored"
+        },
+        {
+          "edge_id": "edge.current.workbench_to_terminal_view",
+          "from": "node.mac_pane_workbench", "to": "node.mac_terminal_view",
+          "caller_path": "mac/src/app/MacPaneWorkbench.tsx", "callee_path": "packages/shared/src/terminal/mac-terminal-view.tsx",
+          "relation_status": "direct", "status": "anchored"
+        }
+      ]
+    },
+    {
+      "mainline_id": "target_kernel_mainline",
+      "entrypoint": "kernel.command_in",
+      "return_path": "kernel.snapshot_out",
+      "nodes": [
+        {"id": "kernel.command_in", "owner_module": "app.kernel", "label": "RuntimeGateway.execute", "status": "design"},
+        {"id": "kernel.authorizer", "owner_module": "app.kernel", "label": "ControlCenter.authorize", "status": "design"},
+        {"id": "kernel.domain_reducer", "owner_module": "shared.domain_core", "label": "Domain reducer", "status": "design"},
+        {"id": "kernel.projection_out", "owner_module": "app.kernel", "label": "ProjectionRegistry.readSnapshot", "status": "design"},
+        {"id": "kernel.snapshot_out", "owner_module": "ui.react_adapter", "label": "UI projection read", "status": "design"}
+      ],
+      "edges": [
+        {"edge_id": "edge.target.command_to_authorize", "from": "kernel.command_in", "to": "kernel.authorizer", "caller_symbol": "execute", "callee_symbol": "authorize", "relation_status": "direct", "status": "design"},
+        {"edge_id": "edge.target.authorize_to_domain", "from": "kernel.authorizer", "to": "kernel.domain_reducer", "caller_symbol": "dispatch", "callee_symbol": "reduce", "relation_status": "direct", "status": "design"},
+        {"edge_id": "edge.target.domain_to_projection", "from": "kernel.domain_reducer", "to": "kernel.projection_out", "caller_symbol": "commit", "callee_symbol": "project", "relation_status": "direct", "status": "design"},
+        {"edge_id": "edge.target.projection_to_snapshot", "from": "kernel.projection_out", "to": "kernel.snapshot_out", "caller_symbol": "readSnapshot", "callee_symbol": "subscribe", "relation_status": "direct", "status": "design"}
+      ]
+    }
+  ]
+}

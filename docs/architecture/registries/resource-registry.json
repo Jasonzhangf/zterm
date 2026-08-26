@@ -1,0 +1,154 @@
+{
+  "schema_version": 1,
+  "registry_id": "zterm.cordis.v2.resources",
+  "lifecycle_id": "zterm.cordis.v2.rebuild",
+  "status": "design",
+  "resources": [
+    {
+      "resource_id": "resource.domain_state",
+      "resource_type": "business_truth",
+      "owner": "shared.domain_core",
+      "truth_store": "packages/shared/src/connection/**",
+      "status": "active",
+      "allowed_operations": ["read", "reduce", "project"],
+      "direct_relations": ["resource.ui_projection"],
+      "forbidden_direct_relations": [
+        "resource.platform_bridge.android_native",
+        "resource.platform_bridge.mac_electron",
+        "resource.platform_bridge.windows_electron",
+        "resource.cordis_context"
+      ],
+      "required_gates": ["gate.map.parse", "gate.shared.core.imports"],
+      "canonical_docs": [
+        "docs/design/2026-08-26-zterm-cordis-v2-cross-platform.md",
+        "docs/architecture/zterm-cordis-v2-phase-manifest.json"
+      ]
+    },
+    {
+      "resource_id": "resource.runtime_kernel",
+      "resource_type": "control_resource",
+      "owner": "app.kernel",
+      "truth_store": "pending: Phase 1 runtime contracts; Phase 2 kernel implementation",
+      "status": "design",
+      "allowed_operations": ["compose", "authorize", "start", "stop", "dispose"],
+      "direct_relations": ["resource.ui_projection", "resource.plugin_registry"],
+      "forbidden_direct_relations": ["resource.cordis_context"],
+      "required_gates": ["gate.target.status"],
+      "canonical_docs": [
+        "docs/design/2026-08-26-zterm-cordis-v2-cross-platform.md",
+        "docs/architecture/zterm-cordis-v2-phase-manifest.json"
+      ]
+    },
+    {
+      "resource_id": "resource.cordis_context",
+      "resource_type": "composition_resource",
+      "owner": "app.cordis_adapter",
+      "truth_store": "pending: Phase 2 pinned adapter evidence",
+      "status": "design",
+      "allowed_operations": ["create_process_local_context", "register_service", "start_plugin", "dispose"],
+      "direct_relations": [],
+      "forbidden_direct_relations": [
+        "resource.domain_state",
+        "resource.terminal_data_stream",
+        "resource.ui_projection"
+      ],
+      "required_gates": ["gate.target.status"],
+      "canonical_docs": [
+        "docs/design/2026-08-26-zterm-cordis-v2-cross-platform.md",
+        "docs/architecture/zterm-cordis-v2-phase-manifest.json"
+      ]
+    },
+    {
+      "resource_id": "resource.ui_projection",
+      "resource_type": "projection_resource",
+      "owner": "ui.react_adapter",
+      "truth_store": "packages/shared/src/react/** and packages/shared/src/index.ts",
+      "status": "active",
+      "allowed_operations": ["read", "render", "emit_action"],
+      "direct_relations": [],
+      "forbidden_direct_relations": ["resource.domain_state"],
+      "required_gates": ["gate.module.dag", "gate.mainline.adjacency"],
+      "canonical_docs": [
+        "docs/design/2026-08-26-zterm-cordis-v2-cross-platform.md"
+      ]
+    },
+    {
+      "resource_id": "resource.platform_bridge.android_native",
+      "resource_type": "platform_resource",
+      "owner": "host.android_native",
+      "truth_store": "android/native/android/app/src/main/java/com/zterm/android/**",
+      "status": "active",
+      "allowed_operations": ["bind_ipc", "manage_lifecycle", "manage_permissions", "send_typed_event"],
+      "direct_relations": [],
+      "forbidden_direct_relations": ["resource.domain_state", "resource.ui_projection"],
+      "required_gates": ["gate.owner.uniqueness"],
+      "canonical_docs": ["android/docs/architecture.md"]
+    },
+    {
+      "resource_id": "resource.platform_bridge.mac_electron",
+      "resource_type": "platform_resource",
+      "owner": "host.mac_electron",
+      "truth_store": "mac/electron/**",
+      "status": "active",
+      "allowed_operations": ["bind_ipc", "manage_window", "manage_local_tmux"],
+      "direct_relations": [],
+      "forbidden_direct_relations": ["resource.domain_state", "resource.ui_projection"],
+      "required_gates": ["gate.owner.uniqueness"],
+      "canonical_docs": ["mac/docs/architecture.md"]
+    },
+    {
+      "resource_id": "resource.platform_bridge.windows_electron",
+      "resource_type": "platform_resource",
+      "owner": "host.win_electron",
+      "truth_store": "win/electron/**",
+      "status": "active",
+      "allowed_operations": ["bind_ipc", "manage_window", "manage_local_file_system"],
+      "direct_relations": [],
+      "forbidden_direct_relations": ["resource.domain_state", "resource.ui_projection"],
+      "required_gates": ["gate.owner.uniqueness"],
+      "canonical_docs": ["win/docs/architecture.md"]
+    },
+    {
+      "resource_id": "resource.terminal_data_stream",
+      "resource_type": "data_plane_resource",
+      "owner": "runtime.daemon",
+      "truth_store": "android/src/server/**",
+      "status": "active",
+      "allowed_operations": ["capture", "sequence", "publish", "repair"],
+      "direct_relations": [],
+      "forbidden_direct_relations": ["resource.cordis_context", "resource.debug_snapshot_registry"],
+      "required_gates": ["gate.owner.uniqueness", "gate.module.dag"],
+      "canonical_docs": ["android/docs/decisions/2026-04-23-terminal-head-buffer-render-truth.md"]
+    },
+    {
+      "resource_id": "resource.debug_snapshot_registry",
+      "resource_type": "debug_side_channel",
+      "owner": "shared.domain_core",
+      "truth_store": "packages/shared/src/terminal/debug-contract.ts",
+      "status": "active",
+      "allowed_operations": ["register", "observe", "snapshot"],
+      "direct_relations": [],
+      "forbidden_direct_relations": [
+        "resource.domain_state",
+        "resource.terminal_data_stream",
+        "resource.ui_projection"
+      ],
+      "required_gates": ["gate.payload.isolation", "gate.shared.core.imports"],
+      "canonical_docs": ["docs/design/2026-08-26-zterm-cordis-v2-cross-platform.md"]
+    },
+    {
+      "resource_id": "resource.plugin_registry",
+      "resource_type": "control_resource",
+      "owner": "ui.react_adapter",
+      "truth_store": "pending: move plugin contracts from React ABI to framework-neutral UI contract",
+      "status": "design",
+      "allowed_operations": ["validate_manifest", "resolve_capability", "contribute_surface"],
+      "direct_relations": [],
+      "forbidden_direct_relations": ["resource.terminal_data_stream"],
+      "required_gates": ["gate.target.status"],
+      "canonical_docs": [
+        "docs/design/2026-08-26-zterm-cordis-v2-cross-platform.md"
+      ]
+    }
+  ]
+}
