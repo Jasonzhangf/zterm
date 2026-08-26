@@ -14,6 +14,7 @@
     {"gate_id": "gate.payload.isolation", "command": "node scripts/check-zterm-v2-map-registries.mjs --only=payload", "type": "static", "required_for": ["phase0", "phase1"]},
     {"gate_id": "gate.stream.boundary", "command": "pnpm --dir packages/stream-boundary run type-check && pnpm --dir packages/stream-boundary run test", "type": "runtime", "required_for": ["phase2"], "status": "active"},
     {"gate_id": "gate.lifecycle.pairs", "command": "pnpm --dir packages/kernel run test:all", "type": "runtime", "required_for": ["phase2"], "status": "active"},
-    {"gate_id": "gate.cordis.process_local", "command": "pnpm --dir packages/kernel run test", "type": "static", "required_for": ["phase2"], "status": "active"}
+    {"gate_id": "gate.cordis.process_local", "command": "pnpm --dir packages/kernel run test", "type": "static", "required_for": ["phase2"], "status": "active"},
+    {"gate_id": "gate.persistence.settings.replay", "command": "node_modules/.bin/vitest run --root packages/shared -c vitest.config.ts src/domain/persistence-settings-projection.test.ts", "type": "runtime", "required_for": ["phase4"], "status": "active"}
   ]
 }
