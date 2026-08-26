@@ -362,7 +362,11 @@
       "required_gates": [
         "gate.owner.uniqueness",
         "gate.import.edges",
-        "gate.payload.isolation"
+        "gate.payload.isolation",
+        "gate.ios.device.lifecycle",
+        "gate.ios.device.permissions",
+        "gate.ios.device.ime",
+        "gate.ios.device.negative"
       ]
     },
     {

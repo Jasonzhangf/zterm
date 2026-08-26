@@ -193,6 +193,42 @@
       "status": "active"
     },
     {
+      "gate_id": "gate.ios.device.lifecycle",
+      "command": "pnpm --dir packages/ios-host run type-check && pnpm --dir packages/ios-host run test:device",
+      "type": "runtime",
+      "required_for": [
+        "phase7"
+      ],
+      "status": "active"
+    },
+    {
+      "gate_id": "gate.ios.device.permissions",
+      "command": "pnpm --dir packages/ios-host run type-check && pnpm --dir packages/ios-host run test:device",
+      "type": "runtime",
+      "required_for": [
+        "phase7"
+      ],
+      "status": "active"
+    },
+    {
+      "gate_id": "gate.ios.device.ime",
+      "command": "pnpm --dir packages/ios-host run type-check && pnpm --dir packages/ios-host run test:device",
+      "type": "runtime",
+      "required_for": [
+        "phase7"
+      ],
+      "status": "active"
+    },
+    {
+      "gate_id": "gate.ios.device.negative",
+      "command": "pnpm --dir packages/ios-host run type-check && pnpm --dir packages/ios-host run test:negative",
+      "type": "runtime",
+      "required_for": [
+        "phase7"
+      ],
+      "status": "active"
+    },
+    {
       "gate_id": "gate.file.media.input",
       "command": "pnpm --dir packages/stream-boundary run type-check && pnpm --dir packages/stream-boundary run test",
       "type": "runtime",
