@@ -10,7 +10,7 @@ const manifest = JSON.parse(readFileSync(resolve(root, MANIFEST_PATH), 'utf8'));
 
 test('accepts the committed v2 phase manifest and source anchors', () => {
   const result = validateManifest(manifest, root);
-  assert.deepEqual(result, { phaseCount: 9, nodeCount: 9, edgeCount: 8, activeGateCount: 1 });
+  assert.deepEqual(result, { phaseCount: 9, nodeCount: 9, edgeCount: 8, activeGateCount: 3 });
 });
 
 test('rejects a review edge that bypasses a declared node', () => {
@@ -21,6 +21,6 @@ test('rejects a review edge that bypasses a declared node', () => {
 
 test('rejects a pending gate that declares an executable command', () => {
   const invalid = structuredClone(manifest);
-  invalid.review.gates[1].command = 'node missing.mjs';
+  invalid.review.gates[3].command = 'node missing.mjs';
   assert.throws(() => validateManifest(invalid, root), /must not declare command/);
 });
