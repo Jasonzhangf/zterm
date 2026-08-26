@@ -1,0 +1,21 @@
+{
+  "name": "@zterm/kernel",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./cordis": "./src/cordis/index.ts"
+  },
+  "scripts": {
+    "type-check": "tsc --noEmit",
+    "test": "node --test src/__tests__/cordis-adapter.test.ts"
+  },
+  "dependencies": {
+    "@cordisjs/core": "3.18.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.4.0"
+  }
+}
