@@ -15,6 +15,17 @@
       "required_gates": ["gate.map.parse", "gate.owner.uniqueness", "gate.shared.core.imports"]
     },
     {
+      "module_id": "ui.contract",
+      "status": "active",
+      "layer": "ui-contract",
+      "owned_paths": ["packages/ui-contract/src/**"],
+      "allowed_paths": ["packages/ui-contract/src/**"],
+      "forbidden_paths": ["android/**", "mac/**", "win/**", "packages/shared/src/**"],
+      "forbidden_imports": ["react", "react-dom", "@capacitor/*", "electron", "cordis"],
+      "declared_edges": [],
+      "required_gates": ["gate.map.parse", "gate.owner.uniqueness", "gate.shared.core.imports"]
+    },
+    {
       "module_id": "shared.domain_core",
       "status": "active",
       "layer": "shared",
