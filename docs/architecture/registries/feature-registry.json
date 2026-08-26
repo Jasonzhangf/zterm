@@ -4,39 +4,101 @@
   "features": [
     {
       "feature_id": "feature.shared.domain_contracts",
-      "owner_modules": ["shared.domain_core"],
+      "owner_modules": [
+        "shared.domain_core"
+      ],
       "status": "active",
-      "allowed_paths": ["packages/shared/src/**"],
-      "forbidden_paths": ["android/**", "mac/**", "win/**", "packages/shared/src/react/**"],
-      "required_gates": ["gate.shared.core.imports", "gate.payload.isolation"]
+      "allowed_paths": [
+        "packages/shared/src/**"
+      ],
+      "forbidden_paths": [
+        "android/**",
+        "mac/**",
+        "win/**",
+        "packages/shared/src/react/**"
+      ],
+      "required_gates": [
+        "gate.shared.core.imports",
+        "gate.payload.isolation"
+      ]
     },
     {
       "feature_id": "feature.phase4.session_route",
-      "owner_modules": ["shared.domain_core"],
+      "owner_modules": [
+        "shared.domain_core"
+      ],
       "status": "active",
-      "allowed_paths": ["packages/shared/src/domain/**", "packages/shared/src/index.ts", "packages/shared/package.json"],
-      "forbidden_paths": ["android/**", "mac/**", "win/**", "packages/kernel/**", "packages/stream-boundary/**"],
-      "required_gates": ["gate.shared.core.imports", "gate.session.route.replay"]
+      "allowed_paths": [
+        "packages/shared/src/domain/**",
+        "packages/shared/src/index.ts",
+        "packages/shared/package.json"
+      ],
+      "forbidden_paths": [
+        "android/**",
+        "mac/**",
+        "win/**",
+        "packages/kernel/**",
+        "packages/stream-boundary/**"
+      ],
+      "required_gates": [
+        "gate.shared.core.imports",
+        "gate.session.route.replay"
+      ]
     },
     {
       "feature_id": "feature.phase4.persistence.settings",
-      "owner_modules": ["shared.domain_core"],
+      "owner_modules": [
+        "shared.domain_core"
+      ],
       "status": "active",
-      "allowed_paths": ["packages/shared/src/domain/persistence-settings-projection.ts", "packages/shared/src/domain/persistence-settings-projection.test.ts", "packages/shared/src/index.ts", "packages/shared/package.json"],
-      "forbidden_paths": ["android/**", "mac/**", "win/**", "packages/kernel/**", "packages/stream-boundary/**"],
-      "required_gates": ["gate.shared.core.imports", "gate.persistence.settings.replay"]
+      "allowed_paths": [
+        "packages/shared/src/domain/persistence-settings-projection.ts",
+        "packages/shared/src/domain/persistence-settings-projection.test.ts",
+        "packages/shared/src/index.ts",
+        "packages/shared/package.json"
+      ],
+      "forbidden_paths": [
+        "android/**",
+        "mac/**",
+        "win/**",
+        "packages/kernel/**",
+        "packages/stream-boundary/**"
+      ],
+      "required_gates": [
+        "gate.shared.core.imports",
+        "gate.persistence.settings.replay"
+      ]
     },
     {
       "feature_id": "feature.phase6.react_adapter",
-      "owner_modules": ["ui.react_adapter"],
+      "owner_modules": [
+        "ui.react_adapter"
+      ],
       "status": "active",
-      "allowed_paths": ["packages/ui-react/src/**", "packages/ui-react/package.json", "packages/ui-react/tsconfig.json"],
-      "forbidden_paths": ["android/**", "mac/**", "win/**", "packages/kernel/**", "packages/stream-boundary/**", "packages/shared/src/terminal/**"],
-      "required_gates": ["gate.map.parse", "gate.import.edges", "gate.ui.react.adapter"]
+      "allowed_paths": [
+        "packages/ui-react/src/**",
+        "packages/ui-react/package.json",
+        "packages/ui-react/tsconfig.json"
+      ],
+      "forbidden_paths": [
+        "android/**",
+        "mac/**",
+        "win/**",
+        "packages/kernel/**",
+        "packages/stream-boundary/**",
+        "packages/shared/src/terminal/**"
+      ],
+      "required_gates": [
+        "gate.map.parse",
+        "gate.import.edges",
+        "gate.ui.react.adapter"
+      ]
     },
     {
       "feature_id": "feature.phase6.low_risk_plugins",
-      "owner_modules": ["client.android_renderer"],
+      "owner_modules": [
+        "client.android_renderer"
+      ],
       "status": "active",
       "allowed_paths": [
         "android/src/App.tsx",
@@ -60,36 +122,85 @@
         "docs/architecture/**",
         ".github/workflows/ci.yml"
       ],
-      "forbidden_paths": ["android/src/server/**", "mac/**", "win/**"],
-      "required_gates": ["gate.map.parse", "gate.low.risk.plugin.ui.ownership"]
+      "forbidden_paths": [
+        "android/src/server/**",
+        "mac/**",
+        "win/**"
+      ],
+      "required_gates": [
+        "gate.map.parse",
+        "gate.low.risk.plugin.ui.ownership"
+      ]
     },
     {
       "feature_id": "feature.kernel.composition",
-      "owner_modules": ["app.kernel"],
+      "owner_modules": [
+        "app.kernel"
+      ],
       "status": "active",
-      "allowed_paths": ["packages/kernel/src/**"],
-      "forbidden_paths": ["packages/shared/src/**", "android/**", "mac/**", "win/**"],
-      "required_gates": ["gate.map.parse", "gate.lifecycle.pairs"]
+      "allowed_paths": [
+        "packages/kernel/src/**"
+      ],
+      "forbidden_paths": [
+        "packages/shared/src/**",
+        "android/**",
+        "mac/**",
+        "win/**"
+      ],
+      "required_gates": [
+        "gate.map.parse",
+        "gate.lifecycle.pairs"
+      ]
     },
     {
       "feature_id": "feature.runtime.stream_boundary",
-      "owner_modules": ["runtime.stream_boundary"],
+      "owner_modules": [
+        "runtime.stream_boundary"
+      ],
       "status": "active",
-      "allowed_paths": ["packages/stream-boundary/src/**"],
-      "forbidden_paths": ["packages/kernel/src/cordis/**", "android/**", "mac/**", "win/**"],
-      "required_gates": ["gate.map.parse", "gate.stream.boundary", "gate.payload.isolation"]
+      "allowed_paths": [
+        "packages/stream-boundary/src/**"
+      ],
+      "forbidden_paths": [
+        "packages/kernel/src/cordis/**",
+        "android/**",
+        "mac/**",
+        "win/**"
+      ],
+      "required_gates": [
+        "gate.map.parse",
+        "gate.stream.boundary",
+        "gate.payload.isolation"
+      ]
     },
     {
       "feature_id": "feature.terminal.transport",
-      "owner_modules": ["runtime.stream_boundary"],
+      "owner_modules": [
+        "runtime.stream_boundary"
+      ],
       "status": "active",
-      "allowed_paths": ["packages/stream-boundary/src/terminal-transport-runtime.ts", "packages/stream-boundary/src/terminal-transport-runtime.test.ts", "packages/stream-boundary/src/index.ts", "packages/stream-boundary/package.json"],
-      "forbidden_paths": ["android/**", "mac/**", "win/**", "packages/kernel/src/cordis/**"],
-      "required_gates": ["gate.map.parse", "gate.terminal.transport.lifecycle"]
+      "allowed_paths": [
+        "packages/stream-boundary/src/terminal-transport-runtime.ts",
+        "packages/stream-boundary/src/terminal-transport-runtime.test.ts",
+        "packages/stream-boundary/src/index.ts",
+        "packages/stream-boundary/package.json"
+      ],
+      "forbidden_paths": [
+        "android/**",
+        "mac/**",
+        "win/**",
+        "packages/kernel/src/cordis/**"
+      ],
+      "required_gates": [
+        "gate.map.parse",
+        "gate.terminal.transport.lifecycle"
+      ]
     },
     {
       "feature_id": "feature.terminal.buffer_render",
-      "owner_modules": ["runtime.stream_boundary"],
+      "owner_modules": [
+        "runtime.stream_boundary"
+      ],
       "status": "active",
       "allowed_paths": [
         "packages/stream-boundary/src/terminal-buffer-render-runtime.ts",
@@ -97,68 +208,168 @@
         "packages/stream-boundary/src/index.ts",
         "packages/stream-boundary/package.json"
       ],
-      "forbidden_paths": ["packages/kernel/src/cordis/**", "android/**", "mac/**", "win/**"],
-      "required_gates": ["gate.map.parse", "gate.terminal.buffer.render", "gate.payload.isolation"]
+      "forbidden_paths": [
+        "packages/kernel/src/cordis/**",
+        "android/**",
+        "mac/**",
+        "win/**"
+      ],
+      "required_gates": [
+        "gate.map.parse",
+        "gate.terminal.buffer.render",
+        "gate.payload.isolation"
+      ]
     },
     {
       "feature_id": "feature.host.desktop",
-      "owner_modules": ["runtime.desktop_gateway", "host.mac_electron", "host.win_electron"],
+      "owner_modules": [
+        "runtime.desktop_gateway",
+        "host.mac_electron",
+        "host.win_electron"
+      ],
       "status": "active",
-      "allowed_paths": ["packages/desktop-gateway/src/**", "mac/electron/**", "win/electron/**"],
-      "forbidden_paths": ["android/**", "mac/src/**", "win/src/**"],
-      "required_gates": ["gate.host.typecheck.build", "gate.ipc.codec", "gate.stale.generation"]
+      "allowed_paths": [
+        "packages/desktop-gateway/src/**",
+        "mac/electron/**",
+        "win/electron/**"
+      ],
+      "forbidden_paths": [
+        "android/**",
+        "mac/src/**",
+        "win/src/**"
+      ],
+      "required_gates": [
+        "gate.host.typecheck.build",
+        "gate.ipc.codec",
+        "gate.stale.generation"
+      ]
     },
     {
       "feature_id": "feature.kernel.cordis_adapter",
-      "owner_modules": ["app.cordis_adapter"],
+      "owner_modules": [
+        "app.cordis_adapter"
+      ],
       "status": "active",
-      "allowed_paths": ["packages/kernel/src/cordis/**"],
-      "forbidden_paths": ["packages/shared/src/**", "packages/kernel/src/domain/**", "android/**", "mac/**", "win/**"],
-      "required_gates": ["gate.owner.uniqueness", "gate.cordis.process_local"]
+      "allowed_paths": [
+        "packages/kernel/src/cordis/**"
+      ],
+      "forbidden_paths": [
+        "packages/shared/src/**",
+        "packages/kernel/src/domain/**",
+        "android/**",
+        "mac/**",
+        "win/**"
+      ],
+      "required_gates": [
+        "gate.owner.uniqueness",
+        "gate.cordis.process_local"
+      ]
     },
     {
       "feature_id": "feature.host.android",
-      "owner_modules": ["host.android_native", "client.android_renderer"],
+      "owner_modules": [
+        "host.android_native",
+        "client.android_renderer"
+      ],
       "status": "active",
-      "allowed_paths": ["android/native/android/app/src/main/**", "android/src/**"],
-      "forbidden_paths": ["mac/**", "win/**"],
-      "required_gates": ["gate.owner.uniqueness", "gate.import.edges"]
+      "allowed_paths": [
+        "android/native/android/app/src/main/**",
+        "android/src/**"
+      ],
+      "forbidden_paths": [
+        "mac/**",
+        "win/**"
+      ],
+      "required_gates": [
+        "gate.owner.uniqueness",
+        "gate.import.edges"
+      ]
     },
     {
       "feature_id": "feature.runtime.daemon_data_plane",
-      "owner_modules": ["runtime.daemon"],
+      "owner_modules": [
+        "runtime.daemon"
+      ],
       "status": "active",
-      "allowed_paths": ["android/src/server/**", "android/src/traversal-relay/**"],
-      "forbidden_paths": ["android/src/components/**", "android/src/pages/**"],
-      "required_gates": ["gate.payload.isolation", "gate.module.dag"]
+      "allowed_paths": [
+        "android/src/server/**",
+        "android/src/traversal-relay/**"
+      ],
+      "forbidden_paths": [
+        "android/src/components/**",
+        "android/src/pages/**"
+      ],
+      "required_gates": [
+        "gate.payload.isolation",
+        "gate.module.dag"
+      ]
     },
     {
       "feature_id": "feature.host.mac",
-      "owner_modules": ["host.mac_electron", "ui.mac_renderer"],
+      "owner_modules": [
+        "host.mac_electron",
+        "ui.mac_renderer"
+      ],
       "status": "active",
-      "allowed_paths": ["mac/electron/**", "mac/src/**"],
-      "forbidden_paths": ["android/**", "win/**"],
-      "required_gates": ["gate.owner.uniqueness", "gate.mainline.adjacency"]
+      "allowed_paths": [
+        "mac/electron/**",
+        "mac/src/**"
+      ],
+      "forbidden_paths": [
+        "android/**",
+        "win/**"
+      ],
+      "required_gates": [
+        "gate.owner.uniqueness",
+        "gate.mainline.adjacency"
+      ]
     },
     {
       "feature_id": "feature.host.windows",
-      "owner_modules": ["host.win_electron", "ui.win_renderer"],
+      "owner_modules": [
+        "host.win_electron",
+        "ui.win_renderer"
+      ],
       "status": "active",
-      "allowed_paths": ["win/electron/**", "win/src/**"],
-      "forbidden_paths": ["android/**", "mac/**"],
-      "required_gates": ["gate.owner.uniqueness", "gate.mainline.adjacency"]
+      "allowed_paths": [
+        "win/electron/**",
+        "win/src/**"
+      ],
+      "forbidden_paths": [
+        "android/**",
+        "mac/**"
+      ],
+      "required_gates": [
+        "gate.owner.uniqueness",
+        "gate.mainline.adjacency"
+      ]
     },
     {
       "feature_id": "feature.host.ios",
-      "owner_modules": ["runtime.ios_gateway"],
+      "owner_modules": [
+        "runtime.ios_gateway"
+      ],
       "status": "active",
-      "allowed_paths": ["packages/ios-host/src/**"],
-      "forbidden_paths": ["android/**", "mac/**", "win/**", "packages/shared/src/**"],
-      "required_gates": ["gate.owner.uniqueness", "gate.import.edges", "gate.payload.isolation"]
+      "allowed_paths": [
+        "packages/ios-host/src/**"
+      ],
+      "forbidden_paths": [
+        "android/**",
+        "mac/**",
+        "win/**",
+        "packages/shared/src/**"
+      ],
+      "required_gates": [
+        "gate.owner.uniqueness",
+        "gate.import.edges",
+        "gate.payload.isolation"
+      ]
     },
     {
       "feature_id": "feature.terminal.file_media_input",
-      "owner_modules": ["runtime.stream_boundary"],
+      "owner_modules": [
+        "runtime.stream_boundary"
+      ],
       "status": "active",
       "allowed_paths": [
         "packages/stream-boundary/src/file-media-input-streams.ts",
@@ -166,8 +377,46 @@
         "packages/stream-boundary/src/index.ts",
         "packages/stream-boundary/package.json"
       ],
-      "forbidden_paths": ["packages/kernel/src/cordis/**", "android/**", "mac/**", "win/**"],
-      "required_gates": ["gate.map.parse", "gate.file.media.input", "gate.payload.isolation"]
+      "forbidden_paths": [
+        "packages/kernel/src/cordis/**",
+        "android/**",
+        "mac/**",
+        "win/**"
+      ],
+      "required_gates": [
+        "gate.map.parse",
+        "gate.file.media.input",
+        "gate.payload.isolation"
+      ]
+    },
+    {
+      "feature_id": "feature.phase7.desktop_parity",
+      "owner_modules": [
+        "host.mac_electron",
+        "host.win_electron",
+        "runtime.desktop_gateway",
+        "ui.mac_renderer",
+        "ui.win_renderer"
+      ],
+      "status": "active",
+      "allowed_paths": [
+        "mac/**",
+        "win/**",
+        "packages/desktop-gateway/src/**",
+        "packages/shared/src/workspace/**",
+        "packages/ui-react/src/**"
+      ],
+      "forbidden_paths": [
+        "android/**",
+        "packages/kernel/**",
+        "packages/stream-boundary/**"
+      ],
+      "required_gates": [
+        "gate.map.parse",
+        "gate.desktop.packaged",
+        "gate.mainline.adjacency",
+        "gate.payload.isolation"
+      ]
     }
   ]
 }
