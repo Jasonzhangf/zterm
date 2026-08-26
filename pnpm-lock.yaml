@@ -213,6 +213,16 @@ importers:
         specifier: ^19.0.0
         version: 19.2.14
 
+  packages/ui-contract:
+    dependencies:
+      typescript:
+        specifier: ^5.4.0
+        version: 5.9.3
+    devDependencies:
+      '@types/node':
+        specifier: ^20.0.0
+        version: 20.19.39
+
   win:
     dependencies:
       '@jsonstudio/wtermmod-react':

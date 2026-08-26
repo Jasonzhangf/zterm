@@ -149,6 +149,18 @@
       "canonical_docs": [
         "docs/design/2026-08-26-zterm-cordis-v2-cross-platform.md"
       ]
+    },
+    {
+      "resource_id": "resource.ui_contract",
+      "resource_type": "projection_resource",
+      "owner": "ui.contract",
+      "truth_store": "packages/ui-contract/src/**",
+      "status": "active",
+      "allowed_operations": ["validate_manifest", "validate_view_model", "contribute_surface"],
+      "direct_relations": [],
+      "forbidden_direct_relations": ["resource.terminal_data_stream", "resource.cordis_context"],
+      "required_gates": ["gate.owner.uniqueness", "gate.payload.isolation"],
+      "canonical_docs": ["docs/design/2026-08-26-zterm-cordis-v2-cross-platform.md"]
     }
   ]
 }
