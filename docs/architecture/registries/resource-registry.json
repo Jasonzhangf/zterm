@@ -138,6 +138,7 @@
     },
     {
       "resource_id": "resource.plugin_registry",
+      "resource_id_alias": null,
       "resource_type": "control_resource",
       "owner": "ui.react_adapter",
       "truth_store": "pending: move plugin contracts from React ABI to framework-neutral UI contract",
