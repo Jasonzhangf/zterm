@@ -43,6 +43,18 @@ jobs:
       - name: React UI adapter ownership and projection suite
         run: pnpm --dir packages/ui-react run type-check && pnpm --dir packages/ui-react run test
 
+      - name: Desktop gateway codec and stale generation suite
+        run: pnpm --dir packages/desktop-gateway run test
+
+      - name: Shared session route and persistence replay suite
+        run: pnpm exec vitest run --root packages/shared src/domain/session-route-projection.test.ts src/domain/session-domain.test.ts && node_modules/.bin/vitest run --root packages/shared -c vitest.config.ts src/domain/persistence-settings-projection.test.ts
+
+      - name: Terminal transport, buffer render, and file media suite
+        run: pnpm --dir packages/stream-boundary run type-check && pnpm --dir packages/stream-boundary run test
+
+      - name: Android low-risk plugin UI ownership suite
+        run: pnpm --dir android run test:low-risk-plugin-ui
+
   appsdk-governance:
     name: AppSDK record graph gate
     runs-on: macos-14
