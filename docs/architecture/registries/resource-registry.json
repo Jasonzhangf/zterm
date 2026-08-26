@@ -28,12 +28,12 @@
       "resource_id": "resource.runtime_kernel",
       "resource_type": "control_resource",
       "owner": "app.kernel",
-      "truth_store": "pending: Phase 1 runtime contracts; Phase 2 kernel implementation",
-      "status": "design",
+      "truth_store": "packages/kernel/src/**",
+      "status": "active",
       "allowed_operations": ["compose", "authorize", "start", "stop", "dispose"],
       "direct_relations": ["resource.ui_projection", "resource.plugin_registry"],
       "forbidden_direct_relations": ["resource.cordis_context"],
-      "required_gates": ["gate.target.status"],
+      "required_gates": ["gate.map.parse", "gate.lifecycle.pairs"],
       "canonical_docs": [
         "docs/design/2026-08-26-zterm-cordis-v2-cross-platform.md",
         "docs/architecture/zterm-cordis-v2-phase-manifest.json"

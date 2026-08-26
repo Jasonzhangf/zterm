@@ -12,7 +12,7 @@
     {"gate_id": "gate.git.diff.check", "command": "git diff --check", "type": "vcs", "required_for": ["phase0"]},
     {"gate_id": "gate.shared.core.imports", "command": "node scripts/check-zterm-v2-map-registries.mjs --only=shared", "type": "static", "required_for": ["phase0", "phase1"]},
     {"gate_id": "gate.payload.isolation", "command": "node scripts/check-zterm-v2-map-registries.mjs --only=payload", "type": "static", "required_for": ["phase0", "phase1"]},
-    {"gate_id": "gate.lifecycle.pairs", "command": "pending: Phase 2 lifecycle positive/negative suite", "type": "runtime", "required_for": ["phase2"], "status": "pending"},
+    {"gate_id": "gate.lifecycle.pairs", "command": "pnpm --dir packages/kernel test", "type": "runtime", "required_for": ["phase2"], "status": "active"},
     {"gate_id": "gate.cordis.process_local", "command": "pending: Phase 2 Cordis adapter boundary suite", "type": "static", "required_for": ["phase2"], "status": "pending"}
   ]
 }

@@ -31,6 +31,9 @@ jobs:
       - name: Run positive and negative validator tests
         run: pnpm run test:cordis-v2-governance:negative
 
+      - name: Kernel lifecycle positive and negative suite
+        run: pnpm run test:kernel-lifecycle
+
   appsdk-governance:
     name: AppSDK record graph gate
     runs-on: macos-14

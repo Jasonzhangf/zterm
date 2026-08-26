@@ -214,14 +214,14 @@
     },
     {
       "module_id": "app.kernel",
-      "status": "design",
+      "status": "active",
       "layer": "application-kernel",
-      "owned_paths": [],
+      "owned_paths": ["packages/kernel/src/**"],
       "allowed_paths": ["packages/kernel/src/**"],
       "forbidden_paths": ["packages/shared/src/**", "android/**", "mac/**", "win/**"],
       "forbidden_imports": ["react", "react-dom", "@capacitor/*", "electron", "cordis"],
       "declared_edges": [{"to": "shared.domain_core"}, {"to": "ui.react_adapter"}],
-      "required_gates": ["gate.target.status"]
+      "required_gates": ["gate.map.parse", "gate.owner.uniqueness", "gate.import.edges", "gate.module.dag"]
     },
     {
       "module_id": "app.cordis_adapter",
