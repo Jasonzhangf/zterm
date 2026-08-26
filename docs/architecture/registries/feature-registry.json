@@ -29,10 +29,10 @@
     {
       "feature_id": "feature.kernel.cordis_adapter",
       "owner_modules": ["app.cordis_adapter"],
-      "status": "design",
+      "status": "active",
       "allowed_paths": ["packages/kernel/src/cordis/**"],
       "forbidden_paths": ["packages/shared/src/**", "packages/kernel/src/domain/**", "android/**", "mac/**", "win/**"],
-      "required_gates": ["gate.target.status", "gate.cordis.process_local"]
+      "required_gates": ["gate.owner.uniqueness", "gate.cordis.process_local"]
     },
     {
       "feature_id": "feature.host.android",

@@ -157,10 +157,10 @@
     {
       "function_id": "function.kernel.cordis_adapter",
       "owner_module": "app.cordis_adapter",
-      "path": "packages/kernel/src/cordis/cordis-adapter.ts",
+      "path": "packages/kernel/src/cordis/index.ts",
       "entry_symbols": ["CordisAdapter"],
-      "status": "design",
-      "required_gates": ["gate.target.status", "gate.cordis.process_local"]
+      "status": "active",
+      "required_gates": ["gate.map.parse", "gate.symbol.exists", "gate.cordis.process_local"]
     }
   ]
 }

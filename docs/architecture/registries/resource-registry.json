@@ -43,8 +43,8 @@
       "resource_id": "resource.cordis_context",
       "resource_type": "composition_resource",
       "owner": "app.cordis_adapter",
-      "truth_store": "pending: Phase 2 pinned adapter evidence",
-      "status": "design",
+      "truth_store": "packages/kernel/src/cordis/**",
+      "status": "active",
       "allowed_operations": ["create_process_local_context", "register_service", "start_plugin", "dispose"],
       "direct_relations": [],
       "forbidden_direct_relations": [
@@ -52,7 +52,7 @@
         "resource.terminal_data_stream",
         "resource.ui_projection"
       ],
-      "required_gates": ["gate.target.status"],
+      "required_gates": ["gate.owner.uniqueness", "gate.cordis.process_local"],
       "canonical_docs": [
         "docs/design/2026-08-26-zterm-cordis-v2-cross-platform.md",
         "docs/architecture/zterm-cordis-v2-phase-manifest.json"
