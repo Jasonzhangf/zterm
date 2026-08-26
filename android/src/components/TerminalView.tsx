@@ -903,16 +903,25 @@ function TerminalViewComponent({
     if (!host || host.clientHeight <= 0) {
       return;
     }
+    const scale = widthMode === "mirror-fixed"
+      ? mirrorFixedZoomPanRef.current.visualScale
+      : 1;
+    const resolvedRowHeightPx = Math.max(
+      1,
+      parseInt(resolvedRowHeight, 10) || parseInt(rowHeight, 10) || 17,
+    );
     const nextRows = Math.max(
       DEFAULT_ROWS,
-      Math.floor(host.clientHeight / Math.max(1, layoutRowHeightPx)),
+      Math.floor(host.clientHeight / Math.max(1, resolvedRowHeightPx * scale)),
     );
     setViewportRows((current) =>
       current === nextRows ? current : nextRows,
     );
   }, [
     layoutRowHeightPx,
+    resolvedRowHeight,
     refreshActive,
+    rowHeight,
     sessionId,
     widthMode,
   ]);
@@ -1622,7 +1631,16 @@ function TerminalViewComponent({
     if (!host) {
       return;
     }
-    runViewportRefreshRef.current();
+    // ResizeObserver 只负责物理容器尺寸变化。mirror-fixed pinch 是 renderer
+    // projection 的 scale 变化，不能在这里用旧 layoutRowHeightPx 再测量一次
+    // 覆盖掉缩放后的 viewportRows；该值由 useMirrorFixedZoomPan -> layoutRowHeightPx
+    // 的同步 effect 更新。
+    if (
+      widthMode !== "mirror-fixed"
+      || mirrorFixedZoomPanRef.current.visualScale >= 1
+    ) {
+      runViewportRefreshRef.current();
+    }
     const scheduleResizeRefresh = () => {
       if (resizeRafTokenRef.current !== null || resizeThrottleTimerRef.current !== null) {
         return;

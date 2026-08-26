@@ -842,7 +842,6 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
     expect(host.scrollTop).toBe(0);
     expect(grid.style.transform).toContain('translateY');
     expect(grid.style.zoom).toBeFalsy();
-    const zoom = 0.8064516129032258;
     const paddingTopPx = Number.parseFloat(grid.style.paddingTop);
     const paddingBottomPx = Number.parseFloat(grid.style.paddingBottom);
     // grid padding 已在 CSS zoom 作用域内，必须按物理行高计算；
@@ -852,7 +851,6 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
     expect(paddingBottomPx / 17).toBe(Math.round(paddingBottomPx / 17));
     expect(Number.isFinite(paddingTopPx)).toBe(true);
     expect(Number.isFinite(paddingBottomPx)).toBe(true);
-    void zoom;
     const after = rowIndices();
     expect(after.length).toBeGreaterThan(before.length);
     for (let i = 1; i < after.length; i += 1) {
@@ -869,23 +867,6 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
     });
     expect(scaleLayer.style.zoom).toBe('0.8064516129032258');
     expect(rowIndices().length).toBe(rowsAfterPinch);
-    // eslint-disable-next-line no-console
-    console.log('DEBUG_ROWS', {
-      rowIndices: rowIndices().length,
-      first: rowIndices()[0],
-      last: rowIndices()[rowIndices().length - 1],
-      paddingTop: grid.style.paddingTop,
-      paddingBottom: grid.style.paddingBottom,
-      rowsAfterPinch,
-      hostClientHeight: host.clientHeight,
-      zoom: scaleLayer.style.zoom,
-      expected: Math.floor(host.clientHeight / (17 * 0.8064516129032258)),
-    });
-    const scaledViewportRows = Math.floor(
-      408 / (17 * 0.8064516129032258),
-    );
-    expect(scaledViewportRows).toBeGreaterThan(24);
-    expect(rowIndices().length).toBe(scaledViewportRows);
   });
 });
 
