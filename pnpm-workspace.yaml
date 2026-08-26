@@ -1,5 +1,6 @@
 packages:
   - android
+  - ios
   - mac
   - packages/*
   - packages/desktop-gateway

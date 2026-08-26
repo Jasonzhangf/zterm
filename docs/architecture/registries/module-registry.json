@@ -211,6 +211,17 @@
       "required_gates": ["gate.map.parse", "gate.owner.uniqueness", "gate.import.edges", "gate.payload.isolation"]
     },
     {
+      "module_id": "host.ios_native",
+      "status": "active",
+      "layer": "platform-host",
+      "owned_paths": ["ios/**"],
+      "allowed_paths": ["ios/**"],
+      "forbidden_paths": ["android/**", "mac/**", "win/**", "packages/shared/src/**"],
+      "forbidden_imports": ["react", "react-dom", "electron", "cordis"],
+      "declared_edges": [{"to": "runtime.ios_gateway"}],
+      "required_gates": ["gate.map.parse", "gate.owner.uniqueness", "gate.import.edges", "gate.ios.native"]
+    },
+    {
       "module_id": "ui.mac_renderer",
       "status": "active",
       "layer": "platform-host-ui",
