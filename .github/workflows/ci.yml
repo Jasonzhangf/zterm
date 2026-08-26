@@ -37,6 +37,9 @@ jobs:
       - name: Data stream boundary positive and negative suite
         run: pnpm run test:stream-boundary
 
+      - name: iOS host gateway contract suite
+        run: pnpm --dir packages/ios-host run type-check && pnpm --dir packages/ios-host run test
+
   appsdk-governance:
     name: AppSDK record graph gate
     runs-on: macos-14
