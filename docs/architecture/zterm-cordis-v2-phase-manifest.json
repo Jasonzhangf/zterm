@@ -320,7 +320,7 @@
     {
       "id": "phase-6-ui-plugins",
       "claim": "zterm.v2.phase6.ui.plugins",
-      "status": "blocked-on-phase-5",
+      "status": "active",
       "depends_on": [
         "phase-5-terminal-data-plane"
       ],
@@ -334,6 +334,9 @@
         "render-source-dom",
         "ime-gesture",
         "package-smoke"
+      ],
+      "delivered_claims": [
+        "zterm.v2.phase6.low-risk.plugins"
       ]
     },
     {

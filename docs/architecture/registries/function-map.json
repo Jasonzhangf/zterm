@@ -99,6 +99,14 @@
       "required_gates": ["gate.map.parse", "gate.symbol.exists"]
     },
     {
+      "function_id": "function.android.low_risk_plugin_host",
+      "owner_module": "client.android_renderer",
+      "path": "android/src/App.tsx",
+      "entry_symbols": ["createAppPluginHost"],
+      "status": "active",
+      "required_gates": ["gate.map.parse", "gate.symbol.exists", "gate.low.risk.plugin.ui.ownership"]
+    },
+    {
       "function_id": "function.android.native_connection_service",
       "owner_module": "host.android_native",
       "path": "android/native/android/app/src/main/java/com/zterm/android/AndroidConnectionService.java",

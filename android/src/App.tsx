@@ -1341,7 +1341,7 @@ export default function App() {
   );
 }
 
-function createAppPluginHost(): PluginHost {
+export function createAppPluginHost(): PluginHost {
   const host = createPluginHost();
   host.provideCapability('network:native-snapshot', readNativeNetworkIdentitySnapshot);
   host.install(

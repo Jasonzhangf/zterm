@@ -35,6 +35,35 @@
       "required_gates": ["gate.map.parse", "gate.import.edges", "gate.ui.react.adapter"]
     },
     {
+      "feature_id": "feature.phase6.low_risk_plugins",
+      "owner_modules": ["client.android_renderer"],
+      "status": "active",
+      "allowed_paths": [
+        "android/src/App.tsx",
+        "android/src/components/settings/AppUpdateSection.tsx",
+        "android/src/components/terminal/FileTransferSheet.tsx",
+        "android/src/components/terminal/TerminalSessionDrawer.tsx",
+        "android/src/components/terminal/terminal-session-drawer-helpers.ts",
+        "android/src/lib/plugin-debug-console/**",
+        "android/src/lib/plugin-file-browser/**",
+        "android/src/lib/plugin-host/debug-console-ui-plugin.tsx",
+        "android/src/lib/plugin-host/file-browser-ui-plugin.tsx",
+        "android/src/lib/plugin-host/low-risk-plugin-ownership.test.ts",
+        "android/src/lib/plugin-host/session-drawer-ui-plugin.tsx",
+        "android/src/lib/plugin-host/settings-update-ui-plugin.tsx",
+        "android/src/lib/plugin-session-drawer/**",
+        "android/src/lib/plugin-settings-update/**",
+        "android/src/pages/SettingsPage.tsx",
+        "android/src/pages/TerminalPage.tsx",
+        "android/src/pages/terminal-page-helpers.ts",
+        "android/package.json",
+        "docs/architecture/**",
+        ".github/workflows/ci.yml"
+      ],
+      "forbidden_paths": ["android/src/server/**", "mac/**", "win/**"],
+      "required_gates": ["gate.map.parse", "gate.low.risk.plugin.ui.ownership"]
+    },
+    {
       "feature_id": "feature.kernel.composition",
       "owner_modules": ["app.kernel"],
       "status": "active",

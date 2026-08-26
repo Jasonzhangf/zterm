@@ -3,7 +3,7 @@
  */
 import type { TerminalSessionGroupSlotName } from '../../lib/session-group-viewport';
 import type { TerminalSessionGroupLayoutAxis } from '../../lib/terminal-layout-profile';
-import type { TerminalSessionDrawerItem } from './TerminalSessionDrawer';
+import type { TerminalSessionDrawerItem } from '../../lib/plugin-session-drawer/session-drawer-contract';
 
 export const DRAWER_WIDTH = '48vw';
 export const DRAWER_MAX_WIDTH = '187px';

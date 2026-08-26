@@ -30,8 +30,11 @@ import {
   resolveTerminalQuickBarCapabilityProjection,
   TERMINAL_PORTRAIT_STAGE_TOP_OFFSET_PX,
 } from './terminal-page-status-helpers';
-import type { TerminalSessionDrawerHost, TerminalSessionDrawerItem } from '../components/terminal/TerminalSessionDrawer';
-import type { TerminalSessionDrawerSlot } from '../lib/plugin-session-drawer/session-drawer-contract';
+import type {
+  TerminalSessionDrawerHost,
+  TerminalSessionDrawerItem,
+  TerminalSessionDrawerSlot,
+} from '../lib/plugin-session-drawer/session-drawer-contract';
 import type { TerminalFileBrowserSlot } from '../lib/plugin-file-browser/file-browser-contract';
 import type {
   RemoteWindowInputContext,

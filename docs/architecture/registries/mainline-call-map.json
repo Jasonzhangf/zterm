@@ -130,6 +130,104 @@
       ]
     },
     {
+      "mainline_id": "android_low_risk_plugin_mainline",
+      "entrypoint": "low_risk_plugin.app_entry",
+      "return_path": "low_risk_plugin.page_slot",
+      "nodes": [
+        {
+          "id": "low_risk_plugin.app_entry",
+          "owner_module": "client.android_renderer",
+          "label": "android/src/App.tsx#AppContent"
+        },
+        {
+          "id": "low_risk_plugin.app_composition",
+          "owner_module": "client.android_renderer",
+          "label": "android/src/App.tsx#createAppPluginHost"
+        },
+        {
+          "id": "low_risk_plugin.debug_console",
+          "owner_module": "client.android_renderer",
+          "label": "android/src/lib/plugin-host/debug-console-ui-plugin.tsx#DebugConsoleUiPlugin"
+        },
+        {
+          "id": "low_risk_plugin.session_drawer",
+          "owner_module": "client.android_renderer",
+          "label": "android/src/lib/plugin-host/session-drawer-ui-plugin.tsx#SessionDrawerUiPlugin"
+        },
+        {
+          "id": "low_risk_plugin.file_browser",
+          "owner_module": "client.android_renderer",
+          "label": "android/src/lib/plugin-host/file-browser-ui-plugin.tsx#FileBrowserUiPlugin"
+        },
+        {
+          "id": "low_risk_plugin.settings_update",
+          "owner_module": "client.android_renderer",
+          "label": "android/src/lib/plugin-host/settings-update-ui-plugin.tsx#SettingsUpdateUiPlugin"
+        },
+        {
+          "id": "low_risk_plugin.page_slot",
+          "owner_module": "client.android_renderer",
+          "label": "android/src/pages/TerminalPage.tsx#TerminalPage"
+        }
+      ],
+      "edges": [
+        {
+          "edge_id": "edge.low_risk.app_entry_to_composition",
+          "from": "low_risk_plugin.app_entry",
+          "to": "low_risk_plugin.app_composition",
+          "caller_path": "android/src/App.tsx",
+          "callee_path": "android/src/App.tsx",
+          "relation_status": "direct",
+          "status": "anchored"
+        },
+        {
+          "edge_id": "edge.low_risk.app_to_debug_console",
+          "from": "low_risk_plugin.app_composition",
+          "to": "low_risk_plugin.debug_console",
+          "caller_path": "android/src/App.tsx",
+          "callee_path": "android/src/lib/plugin-host/debug-console-ui-plugin.tsx",
+          "relation_status": "direct",
+          "status": "anchored"
+        },
+        {
+          "edge_id": "edge.low_risk.app_to_session_drawer",
+          "from": "low_risk_plugin.app_composition",
+          "to": "low_risk_plugin.session_drawer",
+          "caller_path": "android/src/App.tsx",
+          "callee_path": "android/src/lib/plugin-host/session-drawer-ui-plugin.tsx",
+          "relation_status": "direct",
+          "status": "anchored"
+        },
+        {
+          "edge_id": "edge.low_risk.app_to_file_browser",
+          "from": "low_risk_plugin.app_composition",
+          "to": "low_risk_plugin.file_browser",
+          "caller_path": "android/src/App.tsx",
+          "callee_path": "android/src/lib/plugin-host/file-browser-ui-plugin.tsx",
+          "relation_status": "direct",
+          "status": "anchored"
+        },
+        {
+          "edge_id": "edge.low_risk.app_to_settings_update",
+          "from": "low_risk_plugin.app_composition",
+          "to": "low_risk_plugin.settings_update",
+          "caller_path": "android/src/App.tsx",
+          "callee_path": "android/src/lib/plugin-host/settings-update-ui-plugin.tsx",
+          "relation_status": "direct",
+          "status": "anchored"
+        },
+        {
+          "edge_id": "edge.low_risk.plugins_to_page_slot",
+          "from": "low_risk_plugin.debug_console",
+          "to": "low_risk_plugin.page_slot",
+          "caller_path": "android/src/lib/plugin-host/debug-console-ui-plugin.tsx",
+          "callee_path": "android/src/pages/TerminalPage.tsx",
+          "relation_status": "direct",
+          "status": "anchored"
+        }
+      ]
+    },
+    {
       "mainline_id": "android_daemon_current_mainline",
       "entrypoint": "node.daemon_runtime",
       "return_path": "node.shared_protocol",
