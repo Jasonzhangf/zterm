@@ -1,0 +1,33 @@
+{
+  "handoff_id": "zterm.v2.phase4.session.route",
+  "run_id": "20260826T184217Z-Macstudio-57114-session-route",
+  "worker_id": "pane-552",
+  "claim": "zterm.v2.phase4.session.route",
+  "base_commit": "da708faa840d096a923367ee4bc1e15edf2b377a",
+  "worktree_path": "/Volumes/extension/code/zterm/playground/zterm.v2.phase4.session.route-20260826T181500Z-Macstudio-pane551",
+  "branch": "codex/zterm.v2.phase4.session.route",
+  "status": "verified",
+  "change_set": [
+    "packages/shared/src/domain/session-route-projection.ts",
+    "packages/shared/src/domain/session-route-projection.test.ts",
+    "packages/shared/src/index.ts",
+    "packages/shared/package.json",
+    "docs/architecture/registries/feature-registry.json",
+    "docs/architecture/registries/function-map.json",
+    "docs/architecture/registries/verification-map.json",
+    ".agent-collab/handoff/zterm.v2.phase4.session.route.json"
+  ],
+  "verification": [
+    "targeted TypeScript check for session-route-projection.ts and test: PASS",
+    "vitest session-domain + session-route-projection: 19/19 PASS",
+    "pnpm run test:v2:map-registries: PASS",
+    "pnpm run test:repo-layout: PASS",
+    "pnpm run test:cordis-v2-governance: PASS",
+    "pnpm run test:v2-parity-catalog: PASS",
+    "pnpm run test:v2-parity-catalog:negative: PASS",
+    "git diff --check: PASS",
+    "AGY review agy-zterm-v2-phase4-session-route-20260826T180900Z-pane552: PASS; findings=[]"
+  ],
+  "remaining_risk": "Full packages/shared tsconfig currently reports unrelated pre-existing React/harness/protocol test errors in the declared base; this slice has an isolated strict TypeScript pass. Runtime platform integration remains for later host/UI phases.",
+  "next": "master review, exact merge, main-tree affected verification, then close task"
+}

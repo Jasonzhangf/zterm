@@ -17,6 +17,7 @@
     {"gate_id": "gate.cordis.process_local", "command": "pnpm --dir packages/kernel run test", "type": "static", "required_for": ["phase2"], "status": "active"},
     {"gate_id": "gate.host.typecheck.build", "command": "pnpm --dir mac run type-check && pnpm --dir win run type-check && pnpm --dir packages/desktop-gateway run type-check", "type": "runtime", "required_for": ["phase3"], "status": "active"},
     {"gate_id": "gate.ipc.codec", "command": "pnpm --dir packages/desktop-gateway run test", "type": "runtime", "required_for": ["phase3"], "status": "active"},
-    {"gate_id": "gate.stale.generation", "command": "pnpm --dir packages/desktop-gateway run test", "type": "runtime", "required_for": ["phase3"], "status": "active"}
+    {"gate_id": "gate.stale.generation", "command": "pnpm --dir packages/desktop-gateway run test", "type": "runtime", "required_for": ["phase3"], "status": "active"},
+    {"gate_id": "gate.session.route.replay", "command": "pnpm exec vitest run --root packages/shared src/domain/session-route-projection.test.ts src/domain/session-domain.test.ts", "type": "runtime", "required_for": ["phase4"], "status": "active"}
   ]
 }

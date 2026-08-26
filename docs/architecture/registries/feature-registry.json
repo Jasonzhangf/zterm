@@ -11,6 +11,14 @@
       "required_gates": ["gate.shared.core.imports", "gate.payload.isolation"]
     },
     {
+      "feature_id": "feature.phase4.session_route",
+      "owner_modules": ["shared.domain_core"],
+      "status": "active",
+      "allowed_paths": ["packages/shared/src/domain/**", "packages/shared/src/index.ts", "packages/shared/package.json"],
+      "forbidden_paths": ["android/**", "mac/**", "win/**", "packages/kernel/**", "packages/stream-boundary/**"],
+      "required_gates": ["gate.shared.core.imports", "gate.session.route.replay"]
+    },
+    {
       "feature_id": "feature.ui.framework_neutral_contract",
       "owner_modules": ["ui.react_adapter", "app.kernel"],
       "status": "pending",
