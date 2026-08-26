@@ -247,6 +247,25 @@ function checkMainlines(mainlineMap) {
     if (!nodes.has(mainline.return_path)) fail(`${mainline.mainline_id} return path missing`);
     const indegree = new Map([...nodes.keys()].map((id) => [id, 0]));
     const outdegree = new Map([...nodes.keys()].map((id) => [id, 0]));
+    for (const node of mainline.nodes) {
+      if (node.status === 'design') continue;
+      const [path, symbol] = String(node.label).split('#');
+      if (!existsSync(join(repoRoot, path))) {
+        fail(`${mainline.mainline_id} node ${node.id} path missing: ${path}`);
+        continue;
+      }
+      if (!symbol) continue;
+      const source = readFileSync(join(repoRoot, path), 'utf8');
+      const exists = [
+        `export function ${symbol}`,
+        `export async function ${symbol}`,
+        `export class ${symbol}`,
+        `export const ${symbol}`,
+        `export interface ${symbol}`,
+        `export type ${symbol}`,
+      ].some((pattern) => source.includes(pattern));
+      if (!exists) fail(`${mainline.mainline_id} node ${node.id} symbol missing: ${symbol}`);
+    }
     for (const edge of mainline.edges) {
       if (!nodes.has(edge.from) || !nodes.has(edge.to)) {
         fail(`${mainline.mainline_id} edge ${edge.edge_id} references unknown node`);

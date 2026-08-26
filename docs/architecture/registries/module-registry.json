@@ -198,7 +198,7 @@
       "allowed_paths": ["packages/kernel/src/**"],
       "forbidden_paths": ["packages/shared/src/**", "android/**", "mac/**", "win/**"],
       "forbidden_imports": ["react", "react-dom", "@capacitor/*", "electron", "cordis"],
-      "declared_edges": [{"to": "shared.domain_core"}],
+      "declared_edges": [{"to": "shared.domain_core"}, {"to": "ui.react_adapter"}],
       "required_gates": ["gate.target.status"]
     },
     {
