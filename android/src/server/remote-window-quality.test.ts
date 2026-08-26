@@ -146,4 +146,33 @@ describe('remote window stream-group quality owner', () => {
       focusCaptureSource: { width: 1, height: 1, frameRate: 30, updateFrameRate: vi.fn(), stop: vi.fn() },
     })).rejects.toThrow(/InvalidStateError/);
   });
+
+  it('does not rollback a sender when setParameters failed before committing it', async () => {
+    const invalidStateError = Object.assign(new Error(''), { name: 'InvalidStateError', code: 11 });
+    const getParameters = vi.fn(() => ({
+      encodings: [{ maxBitrate: 9_000_000, maxFramerate: 30 }],
+    }) as RTCRtpSendParameters);
+    const setParameters = vi.fn(async () => {
+      throw invalidStateError;
+    });
+    const captureCadence = vi.fn(async () => undefined);
+
+    await expect(applyRemoteWindowStreamGroupQuality({
+      requested,
+      focusSender: {
+        getParameters,
+        setParameters,
+      } as unknown as RTCRtpSender,
+      focusCaptureSource: {
+        width: 1,
+        height: 1,
+        frameRate: 30,
+        updateFrameRate: captureCadence,
+        stop: vi.fn(),
+      },
+    })).rejects.toThrow(/^InvalidStateError$/);
+    expect(getParameters).toHaveBeenCalledTimes(1);
+    expect(setParameters).toHaveBeenCalledTimes(1);
+    expect(captureCadence).not.toHaveBeenCalled();
+  });
 });
