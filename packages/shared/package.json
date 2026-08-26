@@ -34,7 +34,8 @@
     "./terminal/node-contract": "./src/terminal/node-contract.ts",
     "./terminal/debug-contract": "./src/terminal/debug-contract.ts",
     "./domain/session-domain": "./src/domain/session-domain.ts",
-    "./domain/session-route-projection": "./src/domain/session-route-projection.ts"
+    "./domain/session-route-projection": "./src/domain/session-route-projection.ts",
+    "./domain/persistence-settings-projection": "./src/domain/persistence-settings-projection.ts"
   },
   "peerDependencies": {
     "react": "^19.0.0"

@@ -35,6 +35,14 @@
       "required_gates": ["gate.map.parse", "gate.symbol.exists", "gate.shared.core.imports", "gate.session.route.replay"]
     },
     {
+      "function_id": "function.shared.persistence_settings_projection",
+      "owner_module": "shared.domain_core",
+      "path": "packages/shared/src/domain/persistence-settings-projection.ts",
+      "entry_symbols": ["createPersistenceProjection", "applyPersistenceMutation", "replayPersistenceEvents", "serializePersistenceProjection", "parsePersistenceProjection"],
+      "status": "active",
+      "required_gates": ["gate.map.parse", "gate.symbol.exists", "gate.shared.core.imports", "gate.persistence.settings.replay"]
+    },
+    {
       "function_id": "function.ui.pane_profile",
       "owner_module": "ui.react_adapter",
       "path": "packages/shared/src/react/pane-profile.ts",

@@ -19,6 +19,14 @@
       "required_gates": ["gate.shared.core.imports", "gate.session.route.replay"]
     },
     {
+      "feature_id": "feature.phase4.persistence.settings",
+      "owner_modules": ["shared.domain_core"],
+      "status": "active",
+      "allowed_paths": ["packages/shared/src/domain/persistence-settings-projection.ts", "packages/shared/src/domain/persistence-settings-projection.test.ts", "packages/shared/src/index.ts", "packages/shared/package.json"],
+      "forbidden_paths": ["android/**", "mac/**", "win/**", "packages/kernel/**", "packages/stream-boundary/**"],
+      "required_gates": ["gate.shared.core.imports", "gate.persistence.settings.replay"]
+    },
+    {
       "feature_id": "feature.ui.framework_neutral_contract",
       "owner_modules": ["ui.react_adapter", "app.kernel"],
       "status": "pending",
