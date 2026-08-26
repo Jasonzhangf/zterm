@@ -52,6 +52,8 @@ interface PreparedRemoteWindowQualityLane extends RemoteWindowQualityLane {
   currentParameters: RTCRtpSendParameters;
   previousEncodingParameters: Array<Pick<RTCRtpEncodingParameters, 'maxBitrate' | 'maxFramerate'>>;
   previousFrameRate: number;
+  senderParametersApplied: boolean;
+  captureFrameRateApplied: boolean;
 }
 
 function prepareLane(lane: RemoteWindowQualityLane): PreparedRemoteWindowQualityLane {
@@ -82,6 +84,8 @@ function prepareLane(lane: RemoteWindowQualityLane): PreparedRemoteWindowQuality
     currentParameters,
     previousEncodingParameters,
     previousFrameRate: lane.captureSource.frameRate,
+    senderParametersApplied: false,
+    captureFrameRateApplied: false,
   };
 }
 
@@ -116,6 +120,8 @@ export async function applyRemoteWindowStreamGroupQuality(options: {
       // capture updates restores this partially-applied lane too.
       applied.push(lane);
       await lane.sender!.setParameters(lane.currentParameters);
+      lane.senderParametersApplied = true;
+      lane.captureFrameRateApplied = true;
       await lane.captureSource!.updateFrameRate!(lane.budget.maxFrameRateFps);
     }
     return budget;
@@ -123,17 +129,21 @@ export async function applyRemoteWindowStreamGroupQuality(options: {
     const rollbackErrors: string[] = [];
     for (const lane of applied.reverse()) {
       try {
-        // @roamhq/wrtc consumes a transaction on successful setParameters().
-        // A rollback must request the sender's next transaction instead of
-        // reusing the object that already applied the degraded values.
-        const rollbackParameters = lane.sender!.getParameters();
-        rollbackParameters.encodings?.forEach((encoding, index) => {
-          const previous = lane.previousEncodingParameters[index];
-          encoding.maxBitrate = previous?.maxBitrate;
-          encoding.maxFramerate = previous?.maxFramerate;
-        });
-        await lane.sender!.setParameters(rollbackParameters);
-        await lane.captureSource!.updateFrameRate!(lane.previousFrameRate);
+        if (lane.captureFrameRateApplied) {
+          await lane.captureSource!.updateFrameRate!(lane.previousFrameRate);
+        }
+        if (lane.senderParametersApplied) {
+          // @roamhq/wrtc consumes a transaction on successful setParameters().
+          // A rollback must request the sender's next transaction instead of
+          // reusing the object that already applied the degraded values.
+          const rollbackParameters = lane.sender!.getParameters();
+          rollbackParameters.encodings?.forEach((encoding, index) => {
+            const previous = lane.previousEncodingParameters[index];
+            encoding.maxBitrate = previous?.maxBitrate;
+            encoding.maxFramerate = previous?.maxFramerate;
+          });
+          await lane.sender!.setParameters(rollbackParameters);
+        }
       } catch (rollbackError) {
         rollbackErrors.push(formatRemoteWindowVideoBitrateError(rollbackError));
       }
