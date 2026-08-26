@@ -61,4 +61,13 @@ describe('terminal shell UI plugin ownership gate', () => {
       existsSync(join(root, 'src/lib/plugin-terminal-shell/terminal-shell-ui-test-provider.tsx')),
     ).toBe(false);
   });
+
+  it('keeps the plugin projection free of runtime and session owners', () => {
+    const plugin = readFileSync(
+      join(root, 'src/lib/plugin-host/terminal-shell-ui-plugin.tsx'),
+      'utf8',
+    );
+    expect(plugin).not.toMatch(/SessionContext|session-context|transport|WebSocket|terminal-message-runtime/);
+    expect(plugin).not.toMatch(/from ['"][^'"]*\/server\//);
+  });
 });

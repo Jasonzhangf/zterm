@@ -33,4 +33,13 @@ describe('quickbar UI plugin ownership gate', () => {
     );
     expect(plugin).toContain('provideUiSlot');
   });
+
+  it('keeps the plugin projection free of runtime and session owners', () => {
+    const plugin = readFileSync(
+      join(root, 'src/lib/plugin-host/quickbar-ui-plugin.tsx'),
+      'utf8',
+    );
+    expect(plugin).not.toMatch(/SessionContext|session-context|transport|WebSocket|terminal-message-runtime/);
+    expect(plugin).not.toMatch(/from ['"][^'"]*\/server\//);
+  });
 });
