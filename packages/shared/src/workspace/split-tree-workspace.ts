@@ -242,7 +242,6 @@ export function buildSplitTreeFromPanes<TTab extends SplitTreeTab>(
   panes: TTab[],
   paneIds: string[],
   activeTabIdForPane: (index: number) => string,
-  // @ts-expect-error legacy param, never referenced in body but callers supply it
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   createEmptyTab: () => TTab,
 ): SplitTreeWorkspace<TTab> | null {

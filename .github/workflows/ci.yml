@@ -276,6 +276,8 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Mac desktop split tests
         run: pnpm --dir mac exec vitest run src/app/MacPaneWorkbench.split.test.tsx --reporter dot
+      - name: Desktop packaged parity gate
+        run: pnpm --dir mac run type-check && pnpm --dir win run type-check && pnpm --dir packages/desktop-gateway run type-check && pnpm --dir packages/desktop-gateway run test && pnpm --dir packages/ui-react run type-check && pnpm --dir packages/ui-react run test
 
   win-desktop-split:
     name: Windows desktop split gate
