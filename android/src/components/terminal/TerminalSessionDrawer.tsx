@@ -10,65 +10,17 @@ import {
   resolveSessionGroupSlotTone,
 } from './terminal-session-drawer-helpers';
 import { getServerIdentityTone } from '../../lib/server-identity';
-
-export type TerminalSessionGroupSlotName = 'top' | 'center' | 'bottom';
-export type TerminalSessionGroupLayoutAxis = 'vertical' | 'horizontal';
-
-export interface TerminalSessionDrawerItem {
-  id: string;
-  /**
-   * 稳定渲染键：React key 只用它，绝不随 liveSession 连接状态（id 的 local/remote
-   * 切换）变化——否则亚秒级状态抖动会触发整列表 DOM 重建（抽屉狂闪）。
-   */
-  stableKey: string;
-  title: string;
-  subtitle: string;
-  status: 'connected' | 'connecting' | 'disconnected' | 'closed' | 'error' | 'idle';
-  remoteMissing?: boolean;
-  paneLabel?: string | null;
-  sessionGroupSlot?: TerminalSessionGroupSlotName | null;
-  active?: boolean;
-  /**
-   * 唯一 host 真源键（由 TerminalPage 在投递 drawer items 时显式传入），
-   * 不得由 drawer 内部隐式从 session/bridge 字段派生。
-   * 多机场景下用于 host rail 分组；单机场景可省略。
-   */
-  hostKey?: string;
-  /**
-   * host 展示名（machineName / alias），由 TerminalPage 注入。
-   * 未传入时回退到 hostKey；不允许 drawer 内部自行拼装。
-   */
-  hostLabel?: string;
-  terminalBackend?: 'tmux' | 'herdr';
-}
-
-export interface TerminalSessionDrawerHost {
-  hostKey: string;
-  hostLabel: string;
-  connected?: boolean;
-}
-
-export interface TerminalSessionDrawerProps {
-  open: boolean;
-  topInsetPx?: number;
-  bottomInsetPx?: number;
-  sessions: TerminalSessionDrawerItem[];
-  hosts?: TerminalSessionDrawerHost[];
-  onClose: () => void;
-  onSelectSession: (sessionId: string) => void;
-  onCloseSession: (sessionId: string) => void;
-  onAssignSessionGroupSlot?: (sessionId: string, slot: TerminalSessionGroupSlotName) => void;
-  sessionGroupLayoutAxis?: TerminalSessionGroupLayoutAxis;
-  onOpenQuickTabPicker: (hostKey?: string, createOptions?: { sessionName?: string; cwd?: string; terminalBackend?: 'tmux' | 'herdr' }) => void;
-  onDebugAddEvent?: (eventName: string) => void;
-  previewSelectionMode?: boolean;
-  previewSelectedSessionIds?: string[];
-  previewSelectionError?: string | null;
-  onPreviewSelectionModeChange?: (active: boolean) => void;
-  onTogglePreviewSession?: (sessionId: string) => void;
-  onClearPreviewSelection?: () => void;
-  terminalShellSkin?: 'light' | 'blue' | 'black';
-}
+import type {
+  TerminalSessionDrawerItem,
+  TerminalSessionDrawerProps,
+} from '../../lib/plugin-session-drawer/session-drawer-contract';
+export type {
+  TerminalSessionDrawerHost,
+  TerminalSessionDrawerItem,
+  TerminalSessionDrawerProps,
+  TerminalSessionGroupLayoutAxis,
+  TerminalSessionGroupSlotName,
+} from '../../lib/plugin-session-drawer/session-drawer-contract';
 
 function TerminalSessionDrawerComponent({
   open,

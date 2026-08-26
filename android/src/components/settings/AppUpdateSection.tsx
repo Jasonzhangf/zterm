@@ -1,49 +1,13 @@
 import { mobileTheme } from '../../lib/mobile-ui';
-import type {
-  AppUpdateManifest,
-  AppUpdateManifestSource,
-  AppUpdatePreferences,
-  AppUpdateRollbackBackup,
-  AppUpdateRollbackEntry,
-} from '../../lib/app-update';
+import type { SettingsUpdateUiProps } from '../../lib/plugin-settings-update/settings-update-contract';
+export type {
+  AppUpdateManifestCandidate,
+  SettingsUpdateUiProps as AppUpdateSectionProps,
+} from '../../lib/plugin-settings-update/settings-update-contract';
 import { SettingsSectionTitle, settingsInputStyle, settingsSectionStyle } from './SettingsSection';
-
-export interface AppUpdateManifestCandidate {
-  id: string;
-  label: string;
-  manifestUrl: string;
-  manifestSource: AppUpdateManifestSource;
-}
 
 function formatManifestCandidateButtonLabel(label: string) {
   return label === '当前 daemon 地址' ? '使用当前 daemon 地址' : `使用 ${label}`;
-}
-
-export interface AppUpdateSectionProps {
-  currentVersionName: string;
-  currentVersionCode: number;
-  updateDraft: AppUpdatePreferences;
-  latestManifest: AppUpdateManifest | null;
-  updateChecking: boolean;
-  updateInstalling: boolean;
-  updateError: string | null;
-  hasNewVersion: boolean;
-  hasUpdateIgnorePolicy: boolean;
-  suggestedManifestUrl: string;
-  manifestCandidates?: AppUpdateManifestCandidate[];
-  onUpdateDraftChange: (updater: (current: AppUpdatePreferences) => AppUpdatePreferences) => void;
-  onCheckForUpdate: () => void;
-  onInstallUpdate: () => void;
-  onResetUpdateIgnorePolicy: () => void;
-  onExportConfig?: () => void;
-  onImportConfig?: () => void;
-  configExporting?: boolean;
-  configImporting?: boolean;
-  rollbackBackup?: AppUpdateRollbackBackup | null;
-  isRollingBack?: boolean;
-  onRollback?: () => void;
-  rollbackToPreviousEntry?: AppUpdateRollbackEntry | null;
-  onRollbackToPrevious?: () => void;
 }
 
 export function AppUpdateSection({
@@ -71,7 +35,7 @@ export function AppUpdateSection({
   onRollback,
   rollbackToPreviousEntry,
   onRollbackToPrevious,
-}: AppUpdateSectionProps) {
+}: SettingsUpdateUiProps) {
   const routeCandidates = manifestCandidates?.length
     ? manifestCandidates
     : suggestedManifestUrl

@@ -46,6 +46,8 @@ import type {
   FileListRequestPayload,
   TransferProgress,
 } from "../../lib/types";
+import type { FileTransferSheetProps } from "../../lib/plugin-file-browser/file-browser-contract";
+export type { FileTransferSheetProps } from "../../lib/plugin-file-browser/file-browser-contract";
 
 const FILE_CHUNK_SIZE = FILE_TRANSFER_WIRE_CHUNK_BYTES; // must match daemon wire chunk
 const SHEET_TEXT = "var(--zterm-panel-text)";
@@ -54,18 +56,6 @@ const SHEET_BORDER = "var(--zterm-panel-border)";
 const SHEET_SURFACE = "var(--zterm-panel-surface)";
 const SHEET_ACCENT = "var(--zterm-panel-accent)";
 const SHEET_DANGER = "var(--zterm-panel-danger)";
-
-export interface FileTransferSheetProps {
-  open: boolean;
-  remoteCwd: string;
-  onClose: () => void;
-  sendJson?: (msg: unknown) => void;
-  onFileTransferMessage?: (handler: (msg: any) => void) => () => void;
-  avoidSide?: "left" | "right" | null;
-  mode?: "browser" | "sync";
-  daemonFileScopeId?: string;
-  terminalShellSkin?: "light" | "blue" | "black";
-}
 
 interface RemoteFileEntry extends FileEntry {}
 interface LocalFileEntry {

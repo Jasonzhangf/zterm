@@ -142,6 +142,9 @@ jobs:
       - name: Settings update UI production gate
         run: pnpm --dir android run test:settings-update-ui
 
+      - name: Low-risk UI plugin ownership gate
+        run: pnpm --dir android run test:low-risk-plugin-ui
+
       - name: Settings connection config UI gate
         run: pnpm --dir android run test:settings-connection-config
 

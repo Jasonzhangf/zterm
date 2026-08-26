@@ -4,7 +4,7 @@
  */
 import type { Session, TraversalRelayDeviceSnapshot } from '../lib/types';
 import type { ServerIdentityInput } from '../lib/server-identity';
-import type { TerminalSessionDrawerItem } from '../components/terminal/TerminalSessionDrawer';
+import type { TerminalSessionDrawerItem } from '../lib/plugin-session-drawer/session-drawer-contract';
 import {
   resolveTerminalSessionGroupSlotReplacement,
   type TerminalSessionGroupSlotIds,
