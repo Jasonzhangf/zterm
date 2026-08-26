@@ -397,9 +397,10 @@ function TerminalViewComponent({
     viewportRows,
   });
 
-  // CSS zoom 是布局级缩放，行的实际布局高度 = rowHeightPx * visualScale。
-  // renderer 可见行数、scrollTop 映射、viewport demand 都必须用同一布局行高，
-  // 否则缩放后滚动位置和可见窗口会分叉。
+  // CSS zoom 是布局级缩放：scrollTop 坐标与行号映射使用视觉行高
+  // layoutRowHeightPx = rowHeightPx * visualScale，但 grid padding 本身已经在
+  // `.term-render-scale-layer` 的 zoom 作用域内，不能再乘 visualScale；
+  // 否则 padding 会被二次缩放，滚到底时底部留空/黑屏。
   const layoutRowHeightPx = Math.max(
     1,
     rowHeightPx * (widthMode === "mirror-fixed" ? mirrorFixedZoomPan.visualScale : 1),
@@ -595,10 +596,10 @@ function TerminalViewComponent({
     () =>
       buildTerminalGridPadding({
         renderRows,
-        rowHeightPx: layoutRowHeightPx,
+        rowHeightPx,
         totalRows,
       }),
-    [renderRows, layoutRowHeightPx, totalRows],
+    [renderRows, rowHeightPx, totalRows],
   );
   const renderGeometryRevision = useMemo(
     () =>
@@ -608,7 +609,7 @@ function TerminalViewComponent({
         effectiveBufferEndIndex,
         followVisualBottomIndex,
         viewportRows,
-        rowHeightPx: layoutRowHeightPx,
+        rowHeightPx,
         renderRowsLength: renderRows.length,
         termGridPaddingTopPx,
         termGridPaddingBottomPx,
@@ -619,7 +620,6 @@ function TerminalViewComponent({
       renderBuffer.revision,
       renderBuffer.startIndex,
       renderRows.length,
-      rowHeightPx,
       layoutRowHeightPx,
       termGridPaddingBottomPx,
       termGridPaddingTopPx,
@@ -803,6 +803,7 @@ function TerminalViewComponent({
     (
       nextViewport: ReturnType<typeof measureTerminalViewport>,
       nextClientHeight: number,
+      options?: { viewportRowsOverride?: number },
     ) => {
       const nextState = buildTerminalMeasuredViewportState(
         nextViewport,
@@ -830,8 +831,12 @@ function TerminalViewComponent({
           ? current
           : nextState.resolvedCellWidthPx,
       );
+      const committedViewportRows =
+        typeof options?.viewportRowsOverride === "number"
+          ? Math.max(DEFAULT_ROWS, Math.floor(options.viewportRowsOverride))
+          : nextState.viewportRows;
       setViewportRows((current) =>
-        current === nextState.viewportRows ? current : nextState.viewportRows,
+        current === committedViewportRows ? current : committedViewportRows,
       );
     },
     [],
@@ -939,7 +944,18 @@ function TerminalViewComponent({
     });
 
     markFollowViewportRealignOnLayoutDrift(viewportLayoutChanged);
-    commitMeasuredViewportState(effectiveViewport, nextClientHeight);
+    commitMeasuredViewportState(
+      effectiveViewport,
+      nextClientHeight,
+      widthMode === "mirror-fixed" && mirrorFixedZoomPanRef.current.visualScale < 1
+        ? {
+            viewportRowsOverride: Math.max(
+              DEFAULT_ROWS,
+              Math.floor(nextClientHeight / Math.max(1, layoutRowHeightPx)),
+            ),
+          }
+        : undefined,
+    );
 
     const previousViewport = lastViewportRef.current;
     emitWidthModeSignalIfNeeded(nextViewport);
