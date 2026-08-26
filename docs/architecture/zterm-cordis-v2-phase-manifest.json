@@ -308,6 +308,10 @@
         "source-to-dom",
         "input-file-media",
         "weak-network-reconnect"
+      ],
+      "delivered_claims": [
+        "zterm.v2.phase5.terminal.transport",
+        "zterm.v2.phase5.terminal.buffer-render"
       ]
     },
     {
