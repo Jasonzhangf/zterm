@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "registry_id": "zterm.cordis.v2.mainlines",
+  "lifecycle_id": "zterm.cordis.v2.rebuild",
+  "mainlines": [
+    {
+      "mainline_id": "cross_platform_current_mainline",
+      "entrypoint": "node.platform_entry",
+      "return_path": "node.renderer_shell",
+      "nodes": [
+        {"id": "node.platform_entry", "owner_module": "client.android_renderer", "label": "android/src/main.tsx"},
+        {"id": "node.app_bootstrap", "owner_module": "client.android_renderer", "label": "android/src/App.tsx#AppContent"},
+        {"id": "node.composition_root", "owner_module": "client.android_renderer", "label": "android/src/lib/composition-root/client-composition-root.ts#ClientCompositionRoot"},
+        {"id": "node.plugin_host", "owner_module": "client.android_renderer", "label": "android/src/lib/plugin-host/plugin-host-runtime.ts#createPluginHost"},
+        {"id": "node.session_context", "owner_module": "client.android_renderer", "label": "android/src/contexts/session-context-core.ts#SessionContextValue"},
+        {"id": "node.daemon_message", "owner_module": "runtime.daemon", "label": "android/src/server/terminal-message-runtime.ts"},
+        {"id": "node.shared_contract", "owner_module": "shared.domain_core", "label": "packages/shared/src/connection/protocol.ts"},
+        {"id": "node.renderer_adapter", "owner_module": "ui.react_adapter", "label": "packages/shared/src/terminal/mac-terminal-view.tsx#MacTerminalView"},
+        {"id": "node.renderer_shell", "owner_module": "ui.mac_renderer", "label": "mac/src/app/MacAppShell.tsx#MacAppShell"}
+      ],
+      "edges": [
+        {
+          "edge_id": "edge.current.entry_to_app",
+          "from": "node.platform_entry", "to": "node.app_bootstrap",
+          "caller_path": "android/src/main.tsx", "callee_path": "android/src/App.tsx",
+          "relation_status": "direct", "status": "anchored"
+        },
+        {
+          "edge_id": "edge.current.app_to_composition",
+          "from": "node.app_bootstrap", "to": "node.composition_root",
+          "caller_path": "android/src/App.tsx", "callee_path": "android/src/lib/composition-root/client-composition-root.ts",
+          "relation_status": "direct", "status": "anchored"
+        },
+        {
+          "edge_id": "edge.current.composition_to_plugins",
+          "from": "node.composition_root", "to": "node.plugin_host",
+          "caller_path": "android/src/App.tsx", "callee_path": "android/src/lib/plugin-host/plugin-host-runtime.ts",
+          "relation_status": "direct", "status": "anchored"
+        },
+        {
+          "edge_id": "edge.current.plugins_to_session",
+          "from": "node.plugin_host", "to": "node.session_context",
+          "caller_path": "android/src/App.tsx", "callee_path": "android/src/contexts/session-context-core.ts",
+          "relation_status": "observer", "status": "anchored"
+        },
+        {
+          "edge_id": "edge.current.session_to_daemon_messages",
+          "from": "node.session_context", "to": "node.daemon_message",
+          "caller_path": "android/src/contexts/session-context-socket-message-runtime.ts", "callee_path": "android/src/server/terminal-message-runtime.ts",
+          "relation_status": "ipc", "status": "anchored"
+        },
+        {
+          "edge_id": "edge.current.daemon_to_shared_contract",
+          "from": "node.daemon_message", "to": "node.shared_contract",
+          "caller_path": "android/src/server/terminal-message-runtime.ts", "callee_path": "packages/shared/src/connection/protocol.ts",
+          "relation_status": "direct", "status": "anchored"
+        },
+        {
+          "edge_id": "edge.current.shared_contract_to_renderer",
+          "from": "node.shared_contract", "to": "node.renderer_adapter",
+          "caller_path": "mac/src/lib/terminal-runtime.ts", "callee_path": "packages/shared/src/terminal/mac-terminal-view.tsx",
+          "relation_status": "observer", "status": "anchored"
+        },
+        {
+          "edge_id": "edge.current.renderer_to_shell",
+          "from": "node.renderer_adapter", "to": "node.renderer_shell",
+          "caller_path": "mac/src/app/MacPaneWorkbench.tsx", "callee_path": "mac/src/app/MacAppShell.tsx",
+          "relation_status": "observer", "status": "binding-pending"
+        }
+      ]
+    },
+    {
+      "mainline_id": "target_kernel_mainline",
+      "entrypoint": "kernel.command_in",
+      "return_path": "kernel.snapshot_out",
+      "nodes": [
+        {"id": "kernel.command_in", "owner_module": "app.kernel", "label": "RuntimeGateway.execute"},
+        {"id": "kernel.authorizer", "owner_module": "app.kernel", "label": "ControlCenter.authorize"},
+        {"id": "kernel.domain_reducer", "owner_module": "shared.domain_core", "label": "Domain reducer"},
+        {"id": "kernel.projection_out", "owner_module": "app.kernel", "label": "ProjectionRegistry.readSnapshot"},
+        {"id": "kernel.snapshot_out", "owner_module": "ui.react_adapter", "label": "UI projection read"}
+      ],
+      "edges": [
+        {"edge_id": "edge.target.command_to_authorize", "from": "kernel.command_in", "to": "kernel.authorizer", "caller_symbol": "execute", "callee_symbol": "authorize", "relation_status": "direct", "status": "design"},
+        {"edge_id": "edge.target.authorize_to_domain", "from": "kernel.authorizer", "to": "kernel.domain_reducer", "caller_symbol": "dispatch", "callee_symbol": "reduce", "relation_status": "direct", "status": "design"},
+        {"edge_id": "edge.target.domain_to_projection", "from": "kernel.domain_reducer", "to": "kernel.projection_out", "caller_symbol": "commit", "callee_symbol": "project", "relation_status": "direct", "status": "design"},
+        {"edge_id": "edge.target.projection_to_snapshot", "from": "kernel.projection_out", "to": "kernel.snapshot_out", "caller_symbol": "readSnapshot", "callee_symbol": "subscribe", "relation_status": "direct", "status": "design"}
+      ]
+    }
+  ]
+}

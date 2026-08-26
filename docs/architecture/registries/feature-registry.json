@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "registry_id": "zterm.cordis.v2.features",
+  "features": [
+    {
+      "feature_id": "feature.shared.domain_contracts",
+      "owner_modules": ["shared.domain_core"],
+      "status": "active",
+      "allowed_paths": ["packages/shared/src/**"],
+      "forbidden_paths": ["android/**", "mac/**", "win/**", "packages/shared/src/react/**"],
+      "required_gates": ["gate.shared.core.imports", "gate.payload.isolation"]
+    },
+    {
+      "feature_id": "feature.ui.framework_neutral_contract",
+      "owner_modules": ["ui.react_adapter", "app.kernel"],
+      "status": "pending",
+      "allowed_paths": ["packages/shared/src/**", "packages/kernel/src/**"],
+      "forbidden_paths": ["packages/shared/src/terminal/mac-terminal-view.tsx"],
+      "required_gates": ["gate.target.status"]
+    },
+    {
+      "feature_id": "feature.kernel.composition",
+      "owner_modules": ["app.kernel"],
+      "status": "design",
+      "allowed_paths": ["packages/kernel/src/**"],
+      "forbidden_paths": ["packages/shared/src/**", "android/**", "mac/**", "win/**"],
+      "required_gates": ["gate.target.status", "gate.lifecycle.pairs"]
+    },
+    {
+      "feature_id": "feature.kernel.cordis_adapter",
+      "owner_modules": ["app.cordis_adapter"],
+      "status": "design",
+      "allowed_paths": ["packages/kernel/src/cordis/**"],
+      "forbidden_paths": ["packages/shared/src/**", "packages/kernel/src/domain/**", "android/**", "mac/**", "win/**"],
+      "required_gates": ["gate.target.status", "gate.cordis.process_local"]
+    },
+    {
+      "feature_id": "feature.host.android",
+      "owner_modules": ["host.android_native", "client.android_renderer"],
+      "status": "active",
+      "allowed_paths": ["android/native/android/app/src/main/**", "android/src/**"],
+      "forbidden_paths": ["mac/**", "win/**"],
+      "required_gates": ["gate.owner.uniqueness", "gate.import.edges"]
+    },
+    {
+      "feature_id": "feature.runtime.daemon_data_plane",
+      "owner_modules": ["runtime.daemon"],
+      "status": "active",
+      "allowed_paths": ["android/src/server/**", "android/src/traversal-relay/**"],
+      "forbidden_paths": ["android/src/components/**", "android/src/pages/**"],
+      "required_gates": ["gate.payload.isolation", "gate.module.dag"]
+    },
+    {
+      "feature_id": "feature.host.mac",
+      "owner_modules": ["host.mac_electron", "ui.mac_renderer"],
+      "status": "active",
+      "allowed_paths": ["mac/electron/**", "mac/src/**"],
+      "forbidden_paths": ["android/**", "win/**"],
+      "required_gates": ["gate.owner.uniqueness", "gate.mainline.adjacency"]
+    },
+    {
+      "feature_id": "feature.host.windows",
+      "owner_modules": ["host.win_electron", "ui.win_renderer"],
+      "status": "active",
+      "allowed_paths": ["win/electron/**", "win/src/**"],
+      "forbidden_paths": ["android/**", "mac/**"],
+      "required_gates": ["gate.owner.uniqueness", "gate.mainline.adjacency"]
+    }
+  ]
+}

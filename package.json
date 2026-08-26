@@ -6,6 +6,7 @@
     "test:repo-layout": "node ./scripts/check-repo-layout.mjs",
     "test:cordis-v2-governance": "node ./scripts/verify-cordis-v2-governance.mjs",
     "test:cordis-v2-governance:negative": "node --test ./scripts/verify-cordis-v2-governance.test.mjs",
+    "test:v2:map-registries": "node ./scripts/check-zterm-v2-map-registries.mjs",
     "dev": "pnpm --filter @zterm/android dev",
     "build": "pnpm --filter @zterm/android build",
     "type-check": "pnpm --filter @zterm/android type-check",

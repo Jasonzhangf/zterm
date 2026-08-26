@@ -25,6 +25,9 @@ jobs:
       - name: Validate v2 governance manifest and offline review
         run: pnpm run test:cordis-v2-governance
 
+      - name: Validate v2 architecture map registries
+        run: pnpm run test:v2:map-registries
+
       - name: Run positive and negative validator tests
         run: pnpm run test:cordis-v2-governance:negative
 

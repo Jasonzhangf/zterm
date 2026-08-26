@@ -1,0 +1,166 @@
+{
+  "schema_version": 1,
+  "registry_id": "zterm.cordis.v2.functions",
+  "functions": [
+    {
+      "function_id": "function.shared.control_contract",
+      "owner_module": "shared.domain_core",
+      "path": "packages/shared/src/terminal/control-contract.ts",
+      "entry_symbols": ["ControlCommand", "createControlCommand", "ControlOutcome", "okControlOutcome", "errorControlOutcome"],
+      "status": "active",
+      "required_gates": ["gate.map.parse", "gate.symbol.exists"]
+    },
+    {
+      "function_id": "function.shared.node_contract",
+      "owner_module": "shared.domain_core",
+      "path": "packages/shared/src/terminal/node-contract.ts",
+      "entry_symbols": ["DataEnvelope", "createDataEnvelope", "SubscriptionSet", "NodeLifecycleState"],
+      "status": "active",
+      "required_gates": ["gate.map.parse", "gate.symbol.exists"]
+    },
+    {
+      "function_id": "function.shared.debug_registry",
+      "owner_module": "shared.domain_core",
+      "path": "packages/shared/src/terminal/debug-contract.ts",
+      "entry_symbols": ["DebugRegistry", "DebugHub", "SnapshotCoordinator", "BoundedDebugEventStore"],
+      "status": "active",
+      "required_gates": ["gate.map.parse", "gate.symbol.exists", "gate.payload.isolation"]
+    },
+    {
+      "function_id": "function.ui.pane_profile",
+      "owner_module": "ui.react_adapter",
+      "path": "packages/shared/src/react/pane-profile.ts",
+      "entry_symbols": ["resolvePaneProfile"],
+      "status": "active",
+      "required_gates": ["gate.map.parse", "gate.symbol.exists"]
+    },
+    {
+      "function_id": "function.ui.pane_stage",
+      "owner_module": "ui.react_adapter",
+      "path": "packages/shared/src/react/pane-stage.tsx",
+      "entry_symbols": ["PaneStage"],
+      "status": "active",
+      "required_gates": ["gate.map.parse", "gate.symbol.exists"]
+    },
+    {
+      "function_id": "function.ui.terminal_renderer",
+      "owner_module": "ui.react_adapter",
+      "path": "packages/shared/src/terminal/mac-terminal-view.tsx",
+      "entry_symbols": ["MacTerminalView"],
+      "status": "active",
+      "required_gates": ["gate.map.parse", "gate.symbol.exists"]
+    },
+    {
+      "function_id": "function.android.client_composition_root",
+      "owner_module": "client.android_renderer",
+      "path": "android/src/lib/composition-root/client-composition-root.ts",
+      "entry_symbols": ["ClientCompositionRoot"],
+      "status": "active",
+      "required_gates": ["gate.map.parse", "gate.symbol.exists"]
+    },
+    {
+      "function_id": "function.android.client_control_center",
+      "owner_module": "client.android_renderer",
+      "path": "android/src/lib/control-center/client-control-center.ts",
+      "entry_symbols": ["ClientControlCenter"],
+      "status": "active",
+      "required_gates": ["gate.map.parse", "gate.symbol.exists"]
+    },
+    {
+      "function_id": "function.android.plugin_host_runtime",
+      "owner_module": "client.android_renderer",
+      "path": "android/src/lib/plugin-host/plugin-host-runtime.ts",
+      "entry_symbols": ["createPluginHost"],
+      "status": "active",
+      "required_gates": ["gate.map.parse", "gate.symbol.exists"]
+    },
+    {
+      "function_id": "function.android.native_connection_service",
+      "owner_module": "host.android_native",
+      "path": "android/native/android/app/src/main/java/com/zterm/android/AndroidConnectionService.java",
+      "entry_symbols": ["AndroidConnectionService"],
+      "status": "active",
+      "required_gates": ["gate.map.parse", "gate.symbol.exists"]
+    },
+    {
+      "function_id": "function.android.native_ime_anchor",
+      "owner_module": "host.android_native",
+      "path": "android/native/android/app/src/main/java/com/zterm/android/ImeAnchorPlugin.java",
+      "entry_symbols": ["ImeAnchorPlugin"],
+      "status": "active",
+      "required_gates": ["gate.map.parse", "gate.symbol.exists"]
+    },
+    {
+      "function_id": "function.mac.window_manager",
+      "owner_module": "host.mac_electron",
+      "path": "mac/electron/window-manager.ts",
+      "entry_symbols": ["createMacWindowManager"],
+      "status": "active",
+      "required_gates": ["gate.map.parse", "gate.symbol.exists"]
+    },
+    {
+      "function_id": "function.mac.local_tmux_manager",
+      "owner_module": "host.mac_electron",
+      "path": "mac/electron/local-tmux.ts",
+      "entry_symbols": ["LocalTmuxManager"],
+      "status": "active",
+      "required_gates": ["gate.map.parse", "gate.symbol.exists"]
+    },
+    {
+      "function_id": "function.mac.desktop_shell",
+      "owner_module": "ui.mac_renderer",
+      "path": "mac/src/app/MacAppShell.tsx",
+      "entry_symbols": ["MacAppShell"],
+      "status": "active",
+      "required_gates": ["gate.map.parse", "gate.symbol.exists", "gate.mainline.adjacency"]
+    },
+    {
+      "function_id": "function.mac.runtime_registry",
+      "owner_module": "ui.mac_renderer",
+      "path": "mac/src/app/runtime/MacRuntimeRegistry.ts",
+      "entry_symbols": ["MacRuntimeRegistry"],
+      "status": "active",
+      "required_gates": ["gate.map.parse", "gate.symbol.exists"]
+    },
+    {
+      "function_id": "function.windows.local_file_system",
+      "owner_module": "host.win_electron",
+      "path": "win/electron/windows-file-system.ts",
+      "entry_symbols": ["createWindowsLocalFileSystemService", "registerWindowsFileSystemIpcHandlers"],
+      "status": "active",
+      "required_gates": ["gate.map.parse", "gate.symbol.exists"]
+    },
+    {
+      "function_id": "function.windows.desktop_shell",
+      "owner_module": "ui.win_renderer",
+      "path": "win/src/WindowsDesktopApp.tsx",
+      "entry_symbols": ["WindowsDesktopApp", "WindowsWorkspaceStage"],
+      "status": "active",
+      "required_gates": ["gate.map.parse", "gate.symbol.exists", "gate.mainline.adjacency"]
+    },
+    {
+      "function_id": "function.kernel.composition_root",
+      "owner_module": "app.kernel",
+      "path": "packages/kernel/src/composition-root.ts",
+      "entry_symbols": ["CompositionRoot"],
+      "status": "design",
+      "required_gates": ["gate.target.status", "gate.lifecycle.pairs"]
+    },
+    {
+      "function_id": "function.kernel.capability_registry",
+      "owner_module": "app.kernel",
+      "path": "packages/kernel/src/capability-registry.ts",
+      "entry_symbols": ["CapabilityRegistry"],
+      "status": "design",
+      "required_gates": ["gate.target.status", "gate.lifecycle.pairs"]
+    },
+    {
+      "function_id": "function.kernel.cordis_adapter",
+      "owner_module": "app.cordis_adapter",
+      "path": "packages/kernel/src/cordis/cordis-adapter.ts",
+      "entry_symbols": ["CordisAdapter"],
+      "status": "design",
+      "required_gates": ["gate.target.status", "gate.cordis.process_local"]
+    }
+  ]
+}
