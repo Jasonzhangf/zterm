@@ -160,6 +160,21 @@
       ]
     },
     {
+      "resource_id": "resource.file_media_input_stream",
+      "resource_type": "data_plane_resource",
+      "owner": "runtime.stream_boundary",
+      "truth_store": "packages/stream-boundary/src/file-media-input-streams.ts",
+      "status": "active",
+      "allowed_operations": ["open", "write", "acknowledge", "close", "advance_generation"],
+      "direct_relations": ["resource.stream_boundary"],
+      "forbidden_direct_relations": ["resource.cordis_context", "resource.debug_snapshot_registry"],
+      "required_gates": ["gate.owner.uniqueness", "gate.payload.isolation", "gate.file.media.input"],
+      "canonical_docs": [
+        "docs/goals/zterm-cordis-v2-rebuild-plan.md",
+        "docs/design/2026-08-26-zterm-cordis-v2-cross-platform.md"
+      ]
+    },
+    {
       "resource_id": "resource.debug_snapshot_registry",
       "resource_type": "debug_side_channel",
       "owner": "shared.domain_core",

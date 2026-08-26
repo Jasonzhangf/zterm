@@ -126,6 +126,19 @@
       "allowed_paths": ["packages/ios-host/src/**"],
       "forbidden_paths": ["android/**", "mac/**", "win/**", "packages/shared/src/**"],
       "required_gates": ["gate.owner.uniqueness", "gate.import.edges", "gate.payload.isolation"]
+    },
+    {
+      "feature_id": "feature.terminal.file_media_input",
+      "owner_modules": ["runtime.stream_boundary"],
+      "status": "active",
+      "allowed_paths": [
+        "packages/stream-boundary/src/file-media-input-streams.ts",
+        "packages/stream-boundary/src/file-media-input-streams.test.ts",
+        "packages/stream-boundary/src/index.ts",
+        "packages/stream-boundary/package.json"
+      ],
+      "forbidden_paths": ["packages/kernel/src/cordis/**", "android/**", "mac/**", "win/**"],
+      "required_gates": ["gate.map.parse", "gate.file.media.input", "gate.payload.isolation"]
     }
   ]
 }

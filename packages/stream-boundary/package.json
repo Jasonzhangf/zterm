@@ -8,7 +8,7 @@
   },
   "scripts": {
     "type-check": "tsc --noEmit",
-    "test": "node --test src/stream-boundary.test.ts src/terminal-transport-runtime.test.ts src/terminal-buffer-render-runtime.test.ts"
+    "test": "node --test src/stream-boundary.test.ts src/terminal-transport-runtime.test.ts src/terminal-buffer-render-runtime.test.ts src/file-media-input-streams.test.ts"
   },
   "devDependencies": {
     "@types/node": "^20.0.0"

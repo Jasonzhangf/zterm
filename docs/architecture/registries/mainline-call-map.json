@@ -389,6 +389,48 @@
       ]
     },
     {
+      "mainline_id": "file_media_input_stream_mainline",
+      "entrypoint": "file_media.input_open",
+      "return_path": "file_media.input_close",
+      "nodes": [
+        {
+          "id": "file_media.input_open",
+          "owner_module": "runtime.stream_boundary",
+          "label": "packages/stream-boundary/src/file-media-input-streams.ts#createFileMediaInputStreamRuntime"
+        },
+        {
+          "id": "file_media.input_write",
+          "owner_module": "runtime.stream_boundary",
+          "label": "packages/stream-boundary/src/file-media-input-streams.ts#DedicatedStreamHandle"
+        },
+        {
+          "id": "file_media.input_close",
+          "owner_module": "runtime.stream_boundary",
+          "label": "packages/stream-boundary/src/file-media-input-streams.ts#FileMediaInputStreamRuntime"
+        }
+      ],
+      "edges": [
+        {
+          "edge_id": "edge.file_media.open_to_write",
+          "from": "file_media.input_open",
+          "to": "file_media.input_write",
+          "caller_path": "packages/stream-boundary/src/file-media-input-streams.ts",
+          "callee_path": "packages/stream-boundary/src/file-media-input-streams.ts",
+          "relation_status": "direct",
+          "status": "anchored"
+        },
+        {
+          "edge_id": "edge.file_media.write_to_close",
+          "from": "file_media.input_write",
+          "to": "file_media.input_close",
+          "caller_path": "packages/stream-boundary/src/file-media-input-streams.ts",
+          "callee_path": "packages/stream-boundary/src/file-media-input-streams.ts",
+          "relation_status": "direct",
+          "status": "anchored"
+        }
+      ]
+    },
+    {
       "mainline_id": "desktop_host_gateway_mainline",
       "entrypoint": "desktop_host.gateway_in",
       "return_path": "desktop_host.gateway_out",
