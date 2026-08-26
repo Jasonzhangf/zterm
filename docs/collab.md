@@ -2,7 +2,7 @@
 
 This project uses the local `collab` daemon for multi-agent coordination. The
 source binary lives in `~/code/collab`; the installed command is
-`~/.local/bin/collab`.
+`~/.cargo/bin/collab`.
 
 ## Truth sources
 
