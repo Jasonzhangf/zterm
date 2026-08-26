@@ -347,6 +347,48 @@
       ]
     },
     {
+      "mainline_id": "terminal_buffer_render_mainline",
+      "entrypoint": "terminal_buffer.frame_ingress",
+      "return_path": "terminal_buffer.render_projection",
+      "nodes": [
+        {
+          "id": "terminal_buffer.frame_ingress",
+          "owner_module": "runtime.stream_boundary",
+          "label": "packages/stream-boundary/src/terminal-buffer-render-runtime.ts#TerminalBufferFrameChunk"
+        },
+        {
+          "id": "terminal_buffer.assembly",
+          "owner_module": "runtime.stream_boundary",
+          "label": "packages/stream-boundary/src/terminal-buffer-render-runtime.ts#createTerminalBufferRenderRuntime"
+        },
+        {
+          "id": "terminal_buffer.render_projection",
+          "owner_module": "runtime.stream_boundary",
+          "label": "packages/stream-boundary/src/terminal-buffer-render-runtime.ts#TerminalRenderWindow"
+        }
+      ],
+      "edges": [
+        {
+          "edge_id": "edge.terminal_buffer.frame_to_assembly",
+          "from": "terminal_buffer.frame_ingress",
+          "to": "terminal_buffer.assembly",
+          "caller_path": "packages/stream-boundary/src/terminal-buffer-render-runtime.ts",
+          "callee_path": "packages/stream-boundary/src/terminal-buffer-render-runtime.ts",
+          "relation_status": "direct",
+          "status": "anchored"
+        },
+        {
+          "edge_id": "edge.terminal_buffer.assembly_to_render",
+          "from": "terminal_buffer.assembly",
+          "to": "terminal_buffer.render_projection",
+          "caller_path": "packages/stream-boundary/src/terminal-buffer-render-runtime.ts",
+          "callee_path": "packages/stream-boundary/src/terminal-buffer-render-runtime.ts",
+          "relation_status": "direct",
+          "status": "anchored"
+        }
+      ]
+    },
+    {
       "mainline_id": "desktop_host_gateway_mainline",
       "entrypoint": "desktop_host.gateway_in",
       "return_path": "desktop_host.gateway_out",

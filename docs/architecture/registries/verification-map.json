@@ -19,6 +19,7 @@
     {"gate_id": "gate.ipc.codec", "command": "pnpm --dir packages/desktop-gateway run test", "type": "runtime", "required_for": ["phase3"], "status": "active"},
     {"gate_id": "gate.stale.generation", "command": "pnpm --dir packages/desktop-gateway run test", "type": "runtime", "required_for": ["phase3"], "status": "active"},
     {"gate_id": "gate.session.route.replay", "command": "pnpm exec vitest run --root packages/shared src/domain/session-route-projection.test.ts src/domain/session-domain.test.ts", "type": "runtime", "required_for": ["phase4"], "status": "active"},
-    {"gate_id": "gate.persistence.settings.replay", "command": "node_modules/.bin/vitest run --root packages/shared -c vitest.config.ts src/domain/persistence-settings-projection.test.ts", "type": "runtime", "required_for": ["phase4"], "status": "active"}
+    {"gate_id": "gate.persistence.settings.replay", "command": "node_modules/.bin/vitest run --root packages/shared -c vitest.config.ts src/domain/persistence-settings-projection.test.ts", "type": "runtime", "required_for": ["phase4"], "status": "active"},
+    {"gate_id": "gate.terminal.buffer.render", "command": "pnpm --dir packages/stream-boundary run type-check && pnpm --dir packages/stream-boundary run test", "type": "runtime", "required_for": ["phase5"], "status": "active"}
   ]
 }

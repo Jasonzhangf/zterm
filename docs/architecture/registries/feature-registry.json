@@ -51,6 +51,19 @@
       "required_gates": ["gate.map.parse", "gate.stream.boundary", "gate.payload.isolation"]
     },
     {
+      "feature_id": "feature.terminal.buffer_render",
+      "owner_modules": ["runtime.stream_boundary"],
+      "status": "active",
+      "allowed_paths": [
+        "packages/stream-boundary/src/terminal-buffer-render-runtime.ts",
+        "packages/stream-boundary/src/terminal-buffer-render-runtime.test.ts",
+        "packages/stream-boundary/src/index.ts",
+        "packages/stream-boundary/package.json"
+      ],
+      "forbidden_paths": ["packages/kernel/src/cordis/**", "android/**", "mac/**", "win/**"],
+      "required_gates": ["gate.map.parse", "gate.terminal.buffer.render", "gate.payload.isolation"]
+    },
+    {
       "feature_id": "feature.host.desktop",
       "owner_modules": ["runtime.desktop_gateway", "host.mac_electron", "host.win_electron"],
       "status": "active",

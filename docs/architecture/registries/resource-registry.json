@@ -133,6 +133,21 @@
       "canonical_docs": ["docs/design/2026-08-26-zterm-cordis-v2-cross-platform.md"]
     },
     {
+      "resource_id": "resource.terminal_buffer_render",
+      "resource_type": "data_plane_resource",
+      "owner": "runtime.stream_boundary",
+      "truth_store": "packages/stream-boundary/src/terminal-buffer-render-runtime.ts",
+      "status": "active",
+      "allowed_operations": ["assemble", "apply_complete_frame", "project_render_window"],
+      "direct_relations": ["resource.stream_boundary"],
+      "forbidden_direct_relations": ["resource.cordis_context", "resource.debug_snapshot_registry"],
+      "required_gates": ["gate.owner.uniqueness", "gate.payload.isolation", "gate.terminal.buffer.render"],
+      "canonical_docs": [
+        "docs/goals/zterm-cordis-v2-rebuild-plan.md",
+        "docs/design/2026-08-26-zterm-cordis-v2-cross-platform.md"
+      ]
+    },
+    {
       "resource_id": "resource.debug_snapshot_registry",
       "resource_type": "debug_side_channel",
       "owner": "shared.domain_core",
