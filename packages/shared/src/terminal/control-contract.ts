@@ -49,6 +49,14 @@ export type ControlAuditResult =
   | 'duplicate'
   | 'unknown';
 
+export interface ControlErrorFrame {
+  readonly code: string;
+  readonly message: string;
+  readonly source?: string;
+}
+
+export type ControlErrorChain = readonly ControlErrorFrame[];
+
 export interface ControlAuditEntry {
   readonly commandId: string;
   readonly correlationId: string;
@@ -59,8 +67,8 @@ export interface ControlAuditEntry {
   readonly durationMs: number;
 }
 
-export type ControlCenterError =
-  | {
+export type ControlCenterError = (
+  {
       readonly code: 'unknown_command';
       readonly commandType: string;
     }
@@ -80,10 +88,38 @@ export type ControlCenterError =
       readonly message: string;
     }
   | {
+      readonly code: 'invalid_deadline';
+      readonly commandType: string;
+      readonly message: string;
+    }
+  | {
       readonly code: 'handler_failed';
       readonly commandType: string;
       readonly message: string;
-    };
+    }
+) & {
+  readonly chain?: ControlErrorChain;
+};
+
+export function createControlErrorChain(
+  code: string,
+  message: string,
+  source?: string,
+): ControlErrorChain {
+  return [{ code, message, ...(source ? { source } : {}) }];
+}
+
+export function appendControlErrorChain(
+  chain: ControlErrorChain,
+  code: string,
+  message: string,
+  source?: string,
+): ControlErrorChain {
+  return [
+    ...chain,
+    { code, message, ...(source ? { source } : {}) },
+  ];
+}
 
 export type ControlOutcome<R, E> =
   | { readonly ok: true; readonly value: R }

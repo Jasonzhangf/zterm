@@ -145,9 +145,71 @@ describe('client control center', () => {
         code: 'deadline_exceeded',
         commandType: 'test.slow',
         deadlineMs: 5,
+        chain: [{
+          code: 'deadline_exceeded',
+          message: 'control deadline exceeded: test.slow',
+          source: 'client.control_center',
+        }],
       },
     });
     expect(center.getAuditEntries()[0]?.result).toBe('timeout');
+  });
+
+  it('projects owner throws into the explicit error chain', async () => {
+    const center = new ClientControlCenter();
+    center.register('test.throw', {
+      ownerId: 'throw-owner',
+      async execute() {
+        throw new Error('owner exploded');
+      },
+    });
+
+    await expect(center.execute(request('test.throw', {}))).resolves.toEqual({
+      ok: false,
+      error: {
+        code: 'handler_failed',
+        commandType: 'test.throw',
+        message: 'owner exploded',
+        chain: [{
+          code: 'handler_failed',
+          message: 'owner exploded',
+          source: 'client.control_center',
+        }],
+      },
+    });
+  });
+
+  it('coalesces concurrent idempotent commands and preserves one lifecycle execution', async () => {
+    const center = new ClientControlCenter();
+    let resolveOwner!: (outcome: ControlOutcome<unknown, unknown>) => void;
+    const owner = new RecordingOwner(
+      () => new Promise((resolve) => { resolveOwner = resolve; }),
+    );
+    center.register('test.concurrent', owner);
+    const first = center.execute(request('test.concurrent', {}, [], 'same-key'));
+    const second = center.execute(request('test.concurrent', { changed: true }, [], 'same-key'));
+    expect(owner.executions).toHaveLength(1);
+    resolveOwner({ ok: true, value: { committed: true } });
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      { ok: true, value: { committed: true } },
+      { ok: true, value: { committed: true } },
+    ]);
+  });
+
+  it('rejects invalid deadlines before owner lifecycle starts', async () => {
+    const center = new ClientControlCenter();
+    const owner = new RecordingOwner(() => ({ ok: true, value: true }));
+    center.register('test.deadline', owner);
+    const result = await center.execute({
+      ...request('test.deadline', {}),
+      deadlineMs: -1,
+    });
+    expect(result.ok).toBe(false);
+    expect(owner.executions).toHaveLength(0);
+    if (!result.ok) {
+      expect((result.error as { chain?: readonly { code: string }[] }).chain?.[0]?.code)
+        .toBe('invalid_deadline');
+    }
   });
 
   it('rejects malformed control identity before routing', async () => {
