@@ -71,8 +71,12 @@
   - tab swipe / pane activate / shell gesture 不属于 renderer；renderer 只声明 viewport demand，不持有 tab navigation 手势状态机
 - Client Render Width Mode：`adaptive-phone | mirror-fixed`
 - Client Render Width 不变量：
-  - `mirror-fixed` 下只允许裁切已有列 truth + 横向平移 renderer window
-  - `mirror-fixed` 下 viewport / IME / safe-area / shell 宽度变化不得回写 daemon mirror / tmux 宽度
+- `mirror-fixed` 下只允许裁切已有列 truth + 横向平移 renderer window
+- `mirror-fixed` pinch 缩放是 `client.dom_renderer` 的视觉投影：CSS `zoom`
+  只作用于 `.term-render-scale-layer`，renderer 必须在同一 React commit 内
+  按 `clientHeight / (physicalRowHeight * visualScale)` 重派生 `viewportRows`；
+  纵向滚动继续使用宿主原生 `scrollTop`，禁止引入第二套 `translateY` 滚动语义。
+- `mirror-fixed` 下 viewport / IME / safe-area / shell 宽度变化不得回写 daemon mirror / tmux 宽度
 - `mirror-fixed` 下左右滑切 tab 仍由 shell interaction owner 负责；当前 mobile 端若没有独立 horizontal pan 手势链占用，swipe 必须保持可用，不得出现无交互出口的禁用态
 - Android Shell：Capacitor、通知、后台服务
 - Server：本地 Mac/PC 上的 tmux → WebSocket 桥接；只维护 tmux canonical buffer / mirror / transport connection / daemon 自身文件与调度真源，不持有任何客户端状态机

@@ -166,10 +166,11 @@ export function buildTerminalRenderFrame(options: {
   readingMode: boolean;
   overscanRows: number;
 }) : TerminalRenderFrame {
+  const viewportRows = Math.max(1, Math.floor(options.viewportRows || 1));
   const dataRowCount = Math.max(0, options.effectiveBufferEndIndex - options.bufferStartIndex);
-  const minimumRenderBottomIndex = dataRowCount <= options.viewportRows
+  const minimumRenderBottomIndex = dataRowCount <= viewportRows
     ? options.effectiveBufferEndIndex
-    : options.bufferStartIndex + options.viewportRows;
+    : options.bufferStartIndex + viewportRows;
   const followVisualBottomIndex = Math.max(
     minimumRenderBottomIndex,
     Math.min(
@@ -185,20 +186,20 @@ export function buildTerminalRenderFrame(options: {
   const totalRows = Math.max(
     options.bufferLinesLength,
     options.effectiveBufferEndIndex - options.bufferStartIndex,
-    options.viewportRows,
+    Math.max(1, Math.floor(options.viewportRows)),
   );
-  const maxScrollTop = Math.max(0, (totalRows - options.viewportRows) * options.rowHeightPx);
+  const maxScrollTop = Math.max(0, (totalRows - viewportRows) * options.rowHeightPx);
   const effectiveRenderBottomIndex = options.readingMode ? clampedRenderBottomIndex : followVisualBottomIndex;
-  const visibleWindowStartIndex = Math.max(options.bufferStartIndex, effectiveRenderBottomIndex - options.viewportRows);
+  const visibleWindowStartIndex = Math.max(options.bufferStartIndex, effectiveRenderBottomIndex - viewportRows);
   const visibleWindowEndIndex = Math.min(
     options.effectiveBufferEndIndex,
     Math.max(visibleWindowStartIndex, effectiveRenderBottomIndex),
   );
   const visibleDataRows = Math.max(0, visibleWindowEndIndex - visibleWindowStartIndex);
-  const leadingBlankRows = Math.max(0, options.viewportRows - visibleDataRows);
+  const leadingBlankRows = Math.max(0, viewportRows - visibleDataRows);
   const visibleStartOffset = Math.max(0, visibleWindowStartIndex - options.bufferStartIndex);
   const renderStartOffset = Math.max(0, visibleStartOffset - options.overscanRows);
-  const renderEndOffset = Math.min(totalRows, visibleStartOffset + options.viewportRows + options.overscanRows);
+  const renderEndOffset = Math.min(totalRows, visibleStartOffset + viewportRows + options.overscanRows);
 
   return {
     dataRowCount,
@@ -268,11 +269,12 @@ export function resolveScrollTopForRenderBottomIndex(options: {
   rowHeightPx: number;
   maxScrollTop: number;
 }) {
+  const viewportRows = Math.max(1, Math.floor(options.viewportRows));
   const topOffset = Math.max(
     0,
     Math.min(
-      options.totalRows - options.viewportRows,
-      Math.max(0, Math.floor(options.nextRenderBottomIndex) - options.bufferStartIndex - options.viewportRows),
+      options.totalRows - viewportRows,
+      Math.max(0, Math.floor(options.nextRenderBottomIndex) - options.bufferStartIndex - viewportRows),
     ),
   );
   return Math.max(0, Math.min(options.maxScrollTop, topOffset * options.rowHeightPx));
@@ -300,7 +302,10 @@ export function resolveTerminalRenderDemandFromScroll(options: {
     ? options.effectiveBufferEndIndex
     : Math.max(
         options.minimumRenderBottomIndex,
-        Math.min(options.bufferTailAnchorEndIndex, options.bufferStartIndex + visibleTopOffset + viewportRows),
+        Math.min(
+          options.bufferTailAnchorEndIndex,
+          options.bufferStartIndex + visibleTopOffset + viewportRows,
+        ),
       );
   const nextMode: 'follow' | 'reading' = options.isAtBottom ? 'follow' : 'reading';
   const nextRenderBottomIndex = nextMode === 'follow'

@@ -516,6 +516,16 @@ terminal 宽度语义固定为两种模式：
 - 若双宽 glyph 的浏览器像素宽度大于 `2 * latinProbeWidth`，renderer 必须提升 `measuredCellWidthPx`，而不是继续信任 `ch`
 - 该规则只影响 renderer 布局，不影响 daemon mirror / client buffer 的绝对列 truth
 
+### 3.6.2 mirror-fixed pinch 投影规则
+
+- pinch 缩小只允许缩放 `.term-render-scale-layer` 的 CSS `zoom`，不得把
+  `zoom` 写进 `.term-grid`，也不得改写 daemon mirror / tmux rows / cols。
+- CSS `zoom` 会同步改变宿主原生 `scrollHeight`；renderer 必须在同一 React
+  commit 内按 `clientHeight / (physicalRowHeight * visualScale)` 重派生
+  `viewportRows`，禁止等普通 effect 晚一帧同步行数。
+- 缩放态纵向滚动继续使用宿主原生 `scrollTop`，每次 scale 变化后按真实
+  `scrollHeight - clientHeight` clamp；禁止引入第二套 `translateY` 平移语义。
+
 ### 3.7 横向平移与 tab 手势边界
 
 `mirror-fixed` 下当前规则：

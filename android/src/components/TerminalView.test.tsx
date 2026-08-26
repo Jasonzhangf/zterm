@@ -514,7 +514,7 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
     expect(host.style.getPropertyValue('--term-row-height')).toBe(rowHeightBefore);
   });
 
-  it('pans zoomed content vertically via translateY instead of native scroll (no black screen)', async () => {
+  it('keeps native vertical scrolling available while zoomed', async () => {
     const { container, rerender } = render(
       <div style={{ width: '200px', height: '408px' }}>
         <TerminalView
@@ -563,9 +563,9 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
     });
 
     expect(scaleLayer.style.zoom).toBe('0.8064516129032258');
-    expect(host.style.touchAction).toBe('none'); // 缩放态禁原生滚动，纵向平移走合成层
+    expect(host.style.touchAction).toBe('pan-y');
 
-    // React 渲染覆盖防线：任何渲染不得把缩放态 touch-action 从 none 改回 pan-y。
+    // React 渲染不能关闭缩放态的原生纵向滚动。
     const terminalProps = {
       sessionId: 's1',
       renderBufferSnapshot: buildRenderBufferSnapshot(),
@@ -580,14 +580,14 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
         <TerminalView {...terminalProps} />
       </div>,
     );
-    expect(host.style.touchAction).toBe('none');
+    expect(host.style.touchAction).toBe('pan-y');
     expect(scaleLayer.style.zoom).toBe('0.8064516129032258');
 
     // jsdom 无布局：mock 滚动尺寸使 maxVertical > 0
     Object.defineProperty(host, 'scrollHeight', { value: 1000, configurable: true });
     Object.defineProperty(host, 'clientHeight', { value: 400, configurable: true });
 
-    // 单指向上拖动 50px（看下面内容）→ translateY 合成层平移（不触发原生 scrollTop）
+    // 单指纵向手势交给原生滚动，不由 grid transform 接管。
     act(() => {
       fireEvent.touchStart(host, {
         touches: [{ clientX: 100, clientY: 100, identifier: 1 }],
@@ -600,13 +600,12 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
         changedTouches: [],
       });
     });
-    expect(host.style.touchAction).toBe('none');
+    expect(host.style.touchAction).toBe('pan-y');
     const zoomTransform = (container.querySelector('.term-grid') as HTMLElement).style.transform;
-    const zoomTranslateY = /translateY\((-?\d+(?:\.\d+)?)px\)/.exec(zoomTransform)?.[1];
-    expect(zoomTranslateY === undefined || Number(zoomTranslateY) <= 0).toBe(true);
+    expect(zoomTransform).not.toContain('translateY');
   });
 
-  it('keeps scrollTop frozen during zoom (no black screen) and pans vertically in both directions', async () => {
+  it('preserves the native scroll position across zoom and restores full scale', async () => {
     const { container } = render(
       <div style={{ width: '200px', height: '408px' }}>
         <TerminalView
@@ -663,9 +662,8 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
       fireEvent.touchEnd(host, { changedTouches: [{ identifier: 1 }, { identifier: 2 }] });
     });
 
-    // 缩放态 scrollTop 清零，纵向位置由 translateY 合成层平移承担。
-    expect(host.scrollTop).toBe(0);
-    expect((container.querySelector('.term-grid') as HTMLElement).style.transform).toContain('translateY');
+    // 缩放后仍使用原生滚动坐标，且位置被限制在新的 DOM scroll range 内。
+    expect(host.scrollTop).toBe(500);
 
     // 单指拖动（mirror-fixed 缩放态仍是原生纵向滚动）
     const pan = (fromY: number, toY: number) => {
@@ -685,14 +683,13 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
         fireEvent.touchEnd(host, { changedTouches: [{ identifier: 1 }] });
       });
     };
-    // 向下/向上拖动都走 translateY 平移，不触发原生滚动。
+    // 向下/向上拖动不会生成纵向 grid transform。
     pan(50, 150);
     pan(250, 50);
-    expect((container.querySelector('.term-grid') as HTMLElement).style.transform).toContain('translateY');
-    expect(host.style.touchAction).toBe('none');
+    expect((container.querySelector('.term-grid') as HTMLElement).style.transform).not.toContain('translateY');
+    expect(host.style.touchAction).toBe('pan-y');
     const pannedTransform = (container.querySelector('.term-grid') as HTMLElement).style.transform;
-    const pannedTranslateY = Number(/translateY\((-?\d+(?:\.\d+)?)px\)/.exec(pannedTransform)?.[1] ?? Number.NaN);
-    expect(pannedTranslateY).toBeLessThanOrEqual(0);
+    expect(pannedTransform).not.toContain('translateY');
 
     // 放大回 1（步进式，computeNextPinchScale 每次 +0.08 防跳变）：多次 move 到 1
     act(() => {
@@ -729,10 +726,10 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 10));
     });
-    expect(host.scrollTop).toBe(600);
+    expect(host.scrollTop).toBe(500);
   });
 
-  it('clears native scrollTop immediately while pinch is still active to avoid WebView blackout', async () => {
+  it('clamps native scrollTop immediately while pinch is still active', async () => {
     const { container } = render(
       <div style={{ width: '200px', height: '408px' }}>
         <TerminalView
@@ -781,10 +778,64 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
       });
     });
 
-    // 黑屏根因是 applyScale 设置 zoom 后 scrollHeight 立即缩小，但原生 scrollTop
-    // 仍保留旧值。必须在 pinch move 阶段（touchEnd 前）就把 scrollTop 清零并交给
-    // translateY 合成层，否则 WebView 会渲染越界区域。
-    expect(host.scrollTop).toBe(0);
+    // zoom 可能立即缩小 scrollHeight；原生位置必须在 paint 前落入新范围。
+    expect(host.scrollTop).toBeLessThanOrEqual(600);
+    expect(host.scrollTop).toBeGreaterThanOrEqual(0);
+  });
+
+  it('does not add a vertical transform when saved scrollTop is large', async () => {
+    const { container } = render(
+      <div style={{ width: '200px', height: '408px' }}>
+        <TerminalView
+          sessionId="s1"
+          renderBufferSnapshot={buildRenderBufferSnapshot()}
+          active
+          live
+          widthMode="mirror-fixed"
+          onInput={vi.fn()}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    const host = container.querySelector('.wterm') as HTMLElement;
+
+    act(() => {
+      ResizeObserverMock.triggerAll();
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    });
+
+    Object.defineProperty(host, 'scrollHeight', { value: 1000, configurable: true });
+    Object.defineProperty(host, 'clientHeight', { value: 400, configurable: true });
+    act(() => {
+      host.scrollTop = 500;
+    });
+
+    act(() => {
+      fireEvent.touchStart(host, {
+        touches: [
+          { clientX: 150, clientY: 100, identifier: 1 },
+          { clientX: 250, clientY: 100, identifier: 2 },
+        ],
+        changedTouches: [],
+      });
+    });
+    act(() => {
+      fireEvent.touchMove(host, {
+        touches: [
+          { clientX: 160, clientY: 100, identifier: 1 },
+          { clientX: 220, clientY: 100, identifier: 2 },
+        ],
+        changedTouches: [],
+      });
+    });
+
+    const transform = (container.querySelector('.term-grid') as HTMLElement).style.transform;
+    expect(transform).not.toContain('translateY');
+    expect(host.scrollTop).toBeLessThanOrEqual(600);
+    expect(host.scrollTop).toBeGreaterThanOrEqual(0);
   });
 
   it('does not zoom when widthMode is not mirror-fixed', () => {
@@ -912,14 +963,10 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
       fireEvent.touchEnd(host, { changedTouches: [{ identifier: 1 }, { identifier: 2 }] });
     });
 
-    // 视觉缩放：scrollTop 锁定 0，纵向位置走 translateY；缩小后可见行数增加。
+    // 视觉缩放只改变 canvas；scrollTop 保持原生坐标，渲染窗口增加可见行数。
     expect(scaleLayer.style.zoom).toBe('0.8064516129032258');
-    expect(host.scrollTop).toBe(0);
-    expect(grid.style.transform).toContain('translateY');
-    const continuousZoomTranslateY = Number(
-      /translateY\((-?\d+(?:\.\d+)?)px\)/.exec(grid.style.transform)?.[1] ?? Number.NaN,
-    );
-    expect(continuousZoomTranslateY).toBeLessThanOrEqual(0);
+    expect(host.scrollTop).toBe(300);
+    expect(grid.style.transform).not.toContain('translateY');
     expect(grid.style.zoom).toBeFalsy();
     const paddingTopPx = Number.parseFloat(grid.style.paddingTop);
     const paddingBottomPx = Number.parseFloat(grid.style.paddingBottom);
@@ -948,6 +995,178 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
     });
     expect(scaleLayer.style.zoom).toBe('0.8064516129032258');
     expect(rowIndices().length).toBe(rowsAfterPinch);
+  });
+
+  it('derives a larger render window from pinch scale without scaling row height', async () => {
+    const { container } = render(
+      <div style={{ width: '200px', height: '408px' }}>
+        <TerminalView
+          sessionId="s1"
+          renderBufferSnapshot={{
+            lines: Array.from({ length: 80 }, (_, i) => [
+              { char: 65 + (i % 26), fg: 256, bg: 256, flags: 0, width: 1 },
+            ]),
+            gapRanges: [],
+            startIndex: 0,
+            endIndex: 80,
+            bufferHeadStartIndex: 0,
+            bufferTailEndIndex: 80,
+            daemonHeadRevision: 1,
+            daemonHeadEndIndex: 80,
+            cols: 80,
+            rows: 24,
+            cursorKeysApp: false,
+            cursor: null,
+            revision: 1,
+          }}
+          active
+          live
+          widthMode="mirror-fixed"
+          onInput={vi.fn()}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    const host = container.querySelector('.wterm') as HTMLElement;
+    const scaleLayer = container.querySelector('.term-render-scale-layer') as HTMLElement;
+
+    act(() => {
+      ResizeObserverMock.triggerAll();
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    });
+
+    const beforeRows = container.querySelectorAll('[data-terminal-row="true"]').length;
+    const beforeRowHeight = Number.parseFloat(
+      (container.querySelector('[data-terminal-row="true"]') as HTMLElement).style.height,
+    );
+
+    Object.defineProperty(host, 'scrollHeight', { value: 1360, configurable: true });
+    Object.defineProperty(host, 'clientHeight', { value: 408, configurable: true });
+    act(() => {
+      host.scrollTop = 816;
+    });
+
+    act(() => {
+      fireEvent.touchStart(host, {
+        touches: [
+          { clientX: 150, clientY: 100, identifier: 1 },
+          { clientX: 250, clientY: 100, identifier: 2 },
+        ],
+        changedTouches: [],
+      });
+    });
+    act(() => {
+      fireEvent.touchMove(host, {
+        touches: [
+          { clientX: 160, clientY: 100, identifier: 1 },
+          { clientX: 220, clientY: 100, identifier: 2 },
+        ],
+        changedTouches: [],
+      });
+    });
+    act(() => {
+      fireEvent.touchEnd(host, { changedTouches: [{ identifier: 1 }, { identifier: 2 }] });
+    });
+
+    expect(scaleLayer.style.zoom).toBe('0.8064516129032258');
+    const afterRows = container.querySelectorAll('[data-terminal-row="true"]').length;
+    const afterRowHeight = Number.parseFloat(
+      (container.querySelector('[data-terminal-row="true"]') as HTMLElement).style.height,
+    );
+
+    // Pinch shrinks only the canvas; the renderer must draw a taller buffer
+    // window into the same fixed 17px row height instead of shrinking rows.
+    expect(afterRows).toBeGreaterThan(beforeRows);
+    expect(afterRowHeight).toBe(beforeRowHeight);
+    expect(afterRowHeight).toBe(17);
+  });
+
+  it('keeps each intermediate pinch scale aligned with the native scroll range', async () => {
+    const { container } = render(
+      <div style={{ width: '200px', height: '408px' }}>
+        <TerminalView
+          sessionId="s1"
+          renderBufferSnapshot={{
+            lines: Array.from({ length: 100 }, (_, i) => [
+              { char: 65 + (i % 26), fg: 256, bg: 256, flags: 0, width: 1 },
+            ]),
+            gapRanges: [],
+            startIndex: 0,
+            endIndex: 100,
+            bufferHeadStartIndex: 0,
+            bufferTailEndIndex: 100,
+            daemonHeadRevision: 1,
+            daemonHeadEndIndex: 100,
+            cols: 160,
+            rows: 24,
+            cursorKeysApp: false,
+            cursor: null,
+            revision: 1,
+          }}
+          active
+          live
+          widthMode="mirror-fixed"
+          onInput={vi.fn()}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    const host = container.querySelector('.wterm') as HTMLElement;
+    const scaleLayer = container.querySelector('.term-render-scale-layer') as HTMLElement;
+    const grid = container.querySelector('.term-grid') as HTMLElement;
+    Object.defineProperty(host, 'scrollHeight', {
+      configurable: true,
+      get: () => 1700 * Number(scaleLayer.style.zoom || 1),
+    });
+    Object.defineProperty(host, 'clientHeight', { configurable: true, value: 408 });
+    host.scrollTop = 800;
+
+    const rowIndices = () => Array.from(
+      container.querySelectorAll<HTMLElement>('[data-terminal-row="true"]'),
+    ).map((row) => Number(row.dataset.terminalIndex));
+    const rowHeight = () => Number.parseFloat(
+      (container.querySelector('[data-terminal-row="true"]') as HTMLElement).style.height,
+    );
+    const pinchMove = (left: number, right: number) => {
+      act(() => {
+        fireEvent.touchMove(host, {
+          touches: [
+            { clientX: left, clientY: 100, identifier: 1 },
+            { clientX: right, clientY: 100, identifier: 2 },
+          ],
+          changedTouches: [],
+        });
+      });
+      const maxScrollTop = Math.max(0, host.scrollHeight - host.clientHeight);
+      expect(host.scrollTop).toBeLessThanOrEqual(maxScrollTop);
+      expect(host.scrollTop).toBeGreaterThanOrEqual(0);
+      const indices = rowIndices();
+      for (let i = 1; i < indices.length; i += 1) {
+        expect(indices[i] - indices[i - 1]).toBe(1);
+      }
+      expect(rowHeight()).toBe(17);
+      expect(grid.style.transform).not.toContain('translateY');
+      return indices.length;
+    };
+
+    act(() => {
+      fireEvent.touchStart(host, {
+        touches: [
+          { clientX: 150, clientY: 100, identifier: 1 },
+          { clientX: 250, clientY: 100, identifier: 2 },
+        ],
+        changedTouches: [],
+      });
+    });
+    const firstIntermediateRows = pinchMove(160, 240);
+    const secondIntermediateRows = pinchMove(170, 230);
+
+    expect(Number(scaleLayer.style.zoom)).toBeCloseTo(0.6, 5);
+    expect(secondIntermediateRows).toBeGreaterThan(firstIntermediateRows);
   });
 });
 

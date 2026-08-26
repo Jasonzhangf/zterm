@@ -25,6 +25,7 @@ import {
   renderGapMarker,
   renderRowCells,
   resolveCursorOverlay,
+  resolveScrollTopForRenderBottomIndex,
 } from './renderer/index';
 
 describe('shared terminal renderer pure helpers', () => {
@@ -68,6 +69,54 @@ describe('shared terminal renderer pure helpers', () => {
     expect(frame.visibleWindowEndIndex).toBe(140);
     expect(frame.renderStartOffset).toBe(26);
     expect(frame.renderEndOffset).toBe(40);
+  });
+
+  it('uses the visual viewport for both render and scroll geometry', () => {
+    const frame = buildTerminalRenderFrame({
+      bufferStartIndex: 0,
+      effectiveBufferEndIndex: 80,
+      bufferLinesLength: 80,
+      viewportRows: 29,
+      rowHeightPx: 17,
+      renderBottomIndex: 80,
+      followDemandAnchorEndIndex: 80,
+      readingMode: false,
+      overscanRows: 4,
+    });
+
+    // Pinch shrink is a renderer projection: the visual viewport is the only
+    // scroll viewport, so both render rows and scroll range grow together.
+    expect(frame.visibleWindowStartIndex).toBe(51);
+    expect(frame.maxScrollTop).toBe((80 - 29) * 17);
+  });
+
+  it('keeps scroll geometry in the scaled visual rows when pinch shrinks the canvas', () => {
+    const frame = buildTerminalRenderFrame({
+      bufferStartIndex: 0,
+      effectiveBufferEndIndex: 1000,
+      bufferLinesLength: 1000,
+      viewportRows: 29,
+      rowHeightPx: 17,
+      renderBottomIndex: 24,
+      followDemandAnchorEndIndex: 24,
+      readingMode: true,
+      overscanRows: 4,
+    });
+
+    // CSS zoom shrinks the layout canvas, so scrollTop maps through the same
+    // visual row count and row height used by the rendered viewport.
+    expect(frame.totalRows).toBe(1000);
+    expect(frame.maxScrollTop).toBe((1000 - 29) * 17);
+
+    const scrollTop = resolveScrollTopForRenderBottomIndex({
+      nextRenderBottomIndex: 197,
+      totalRows: frame.totalRows,
+      viewportRows: 29,
+      bufferStartIndex: 0,
+      rowHeightPx: 17,
+      maxScrollTop: frame.maxScrollTop,
+    });
+    expect(scrollTop).toBe(168 * 17);
   });
 
   it('anchors follow to the visible cursor when the buffer tail is a blank lower pane', () => {
