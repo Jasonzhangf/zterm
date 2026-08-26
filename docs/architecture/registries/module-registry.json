@@ -225,14 +225,14 @@
     },
     {
       "module_id": "app.cordis_adapter",
-      "status": "design",
+      "status": "active",
       "layer": "application-kernel",
-      "owned_paths": [],
+      "owned_paths": ["packages/kernel/src/cordis/**"],
       "allowed_paths": ["packages/kernel/src/cordis/**"],
       "forbidden_paths": ["packages/shared/src/**", "packages/kernel/src/domain/**", "android/**", "mac/**", "win/**"],
       "forbidden_imports": ["react", "react-dom", "@capacitor/*", "electron"],
       "declared_edges": [{"to": "app.kernel"}],
-      "required_gates": ["gate.target.status"]
+      "required_gates": ["gate.owner.uniqueness", "gate.import.edges", "gate.cordis.process_local"]
     }
   ]
 }

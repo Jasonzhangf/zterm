@@ -52,7 +52,10 @@
       {"id":"source-owner-baseline","status":"active","command":"node scripts/check-zterm-v2-map-registries.mjs","owner":"zterm.v2.phase0.map.registry"},
       {"id":"v1-parity-catalog","status":"active","command":"node scripts/validate-zterm-v2-parity-catalog.mjs","owner":"zterm.v2.phase0.parity.catalog"},
       {"id":"payload-isolation","status":"pending","owner":"zterm.v2.phase1.runtime.contracts"},
-      {"id":"module-dag","status":"pending","owner":"zterm.v2.phase1.runtime.contracts"}
+      {"id":"module-dag","status":"pending","owner":"zterm.v2.phase1.runtime.contracts"},
+      {"id":"cordis-version-pin","status":"active","command":"node scripts/verify-cordis-v2-phase2-cordis-adapter.mjs","owner":"zterm.v2.phase2.cordis.adapter"},
+      {"id":"lifecycle-cleanup","status":"active","command":"node scripts/verify-cordis-v2-phase2-cordis-adapter.mjs","owner":"zterm.v2.phase2.cordis.adapter"},
+      {"id":"hot-path-non-interception","status":"active","command":"node scripts/verify-cordis-v2-phase2-cordis-adapter.mjs","owner":"zterm.v2.phase2.cordis.adapter"}
     ]
   },
   "global_invariants": [
