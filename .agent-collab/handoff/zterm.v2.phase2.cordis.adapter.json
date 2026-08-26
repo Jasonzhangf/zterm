@@ -7,7 +7,7 @@
   "worktree_path": "/Volumes/extension/code/zterm/playground/zterm.v2.phase2.cordis.adapter-20260826T145744Z-Macstudio-75853-2fb86208",
   "branch": "codex/zterm.v2.phase2.cordis.adapter",
   "status": "delivered",
-  "commit": "46b4f3e76ce86a713638b073ed78f83b36a6591a",
+  "commit": "45f49940",
   "change_set": [
     "packages/kernel/package.json",
     "packages/kernel/src/__tests__/cordis-adapter.test.ts",
