@@ -36,7 +36,6 @@ const RENDERER_FORBIDDEN = [
 
 const SHELL_FORBIDDEN = [
   'renderBottomIndex',
-  'scrollTop',
   'viewportRows',
   'setViewportRows',
   'rowHeightPx',
@@ -58,6 +57,10 @@ describe('TerminalView renderer / UI shell layer separation', () => {
     expect(leaks,
       `UI shell leaked renderer truth symbols:\n${leaks.join('\n')}`,
     ).toEqual([]);
+    // The hook owns only canvas zoom and native-scroll handoff. Row mapping and
+    // visible-row demand stay in TerminalView.
+    expect(source).toContain('scaleLayerRef');
+    expect(source).toContain('style.zoom');
   });
 
   it('makes the visual gesture hook the single gesture owner (wheel + offset truth)', () => {

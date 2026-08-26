@@ -162,6 +162,7 @@ export function useMirrorFixedZoomPan(
 
   const applyScale = useCallback((next: number) => {
     const minScale = minScaleRef.current;
+    const previousScale = scaleRef.current;
     const clamped = Math.min(MAX_SCALE, Math.max(minScale, next));
     scaleRef.current = clamped;
     setVisualScale(clamped);
@@ -191,6 +192,14 @@ export function useMirrorFixedZoomPan(
       verticalOffsetRef.current = v0;
       setVerticalOffsetPx(v0);
       host.scrollTop = 0;
+    } else if (clamped < 1 && previousScale > 0 && previousScale !== clamped) {
+      // Keep the same logical row anchor while the canvas zoom changes. Reusing
+      // the old pixel offset would translate the layer out of bounds and expose
+      // a black region on Android WebView.
+      const ratio = clamped / previousScale;
+      verticalBaseRef.current *= ratio;
+      verticalOffsetRef.current *= ratio;
+      setVerticalOffsetPx(Math.round(verticalOffsetRef.current));
     }
     if (clamped >= 1) {
       const vertical = verticalOffsetRef.current;
@@ -571,9 +580,9 @@ export function useMirrorFixedZoomPan(
           const bound = host
             ? Math.max(0, host.scrollHeight - host.clientHeight)
             : 0;
-          const clamped = Math.min(bound, Math.max(-bound, nextVertical));
-          verticalOffsetRef.current = clamped;
-          setVerticalOffsetPx(clamped);
+          const bounded = Math.max(-bound, Math.min(0, nextVertical));
+          verticalOffsetRef.current = bounded;
+          setVerticalOffsetPx(bounded);
           event.preventDefault();
           event.stopPropagation();
         } else {

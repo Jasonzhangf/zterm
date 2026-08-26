@@ -601,7 +601,9 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
       });
     });
     expect(host.style.touchAction).toBe('none');
-    expect((container.querySelector('.term-grid') as HTMLElement).style.transform).toContain('translateY');
+    const zoomTransform = (container.querySelector('.term-grid') as HTMLElement).style.transform;
+    const zoomTranslateY = /translateY\((-?\d+(?:\.\d+)?)px\)/.exec(zoomTransform)?.[1];
+    expect(zoomTranslateY === undefined || Number(zoomTranslateY) <= 0).toBe(true);
   });
 
   it('keeps scrollTop frozen during zoom (no black screen) and pans vertically in both directions', async () => {
@@ -688,6 +690,9 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
     pan(250, 50);
     expect((container.querySelector('.term-grid') as HTMLElement).style.transform).toContain('translateY');
     expect(host.style.touchAction).toBe('none');
+    const pannedTransform = (container.querySelector('.term-grid') as HTMLElement).style.transform;
+    const pannedTranslateY = Number(/translateY\((-?\d+(?:\.\d+)?)px\)/.exec(pannedTransform)?.[1] ?? Number.NaN);
+    expect(pannedTranslateY).toBeLessThanOrEqual(0);
 
     // 放大回 1（步进式，computeNextPinchScale 每次 +0.08 防跳变）：多次 move 到 1
     act(() => {
@@ -911,6 +916,10 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
     expect(scaleLayer.style.zoom).toBe('0.8064516129032258');
     expect(host.scrollTop).toBe(0);
     expect(grid.style.transform).toContain('translateY');
+    const continuousZoomTranslateY = Number(
+      /translateY\((-?\d+(?:\.\d+)?)px\)/.exec(grid.style.transform)?.[1] ?? Number.NaN,
+    );
+    expect(continuousZoomTranslateY).toBeLessThanOrEqual(0);
     expect(grid.style.zoom).toBeFalsy();
     const paddingTopPx = Number.parseFloat(grid.style.paddingTop);
     const paddingBottomPx = Number.parseFloat(grid.style.paddingBottom);
@@ -922,7 +931,9 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
     expect(Number.isFinite(paddingTopPx)).toBe(true);
     expect(Number.isFinite(paddingBottomPx)).toBe(true);
     const after = rowIndices();
-    expect(after.length).toBeGreaterThan(before.length);
+    // The reading window is clamped to the 40-row snapshot: 29 scaled viewport
+    // rows plus overscan still cannot extend past the available buffer.
+    expect(after.length).toBe(33);
     for (let i = 1; i < after.length; i += 1) {
       expect(after[i] - after[i - 1]).toBe(1);
     }

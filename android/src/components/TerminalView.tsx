@@ -742,7 +742,7 @@ function TerminalViewComponent({
             // 缩放态 scrollTop 锁定 0，follow 目标转成 translateY 平移：
             // zoom 位图 + 非零 scrollTop 在 Android WebView 触发黑屏。
             if (widthModeRef.current === "mirror-fixed" && mirrorFixedZoomPanRef.current.visualScale < 1) {
-              mirrorFixedZoomPanRef.current.setVerticalOffsetPx(Math.round(effect.scrollTop));
+              mirrorFixedZoomPanRef.current.setVerticalOffsetPx(-Math.round(effect.scrollTop));
             } else {
               host.scrollTop = effect.scrollTop;
             }
@@ -892,10 +892,10 @@ function TerminalViewComponent({
     [onResize, sessionId, widthMode],
   );
 
-  // CSS zoom 改变行的布局高度；缩放变化后必须同步 renderer 可见行数。
+  // CSS zoom 改变行的布局高度；缩放变化后必须在 paint 前同步 renderer 可见行数。
   // 只改 viewportRows，不改 tmux/daemon geometry——这是 renderer projection，
   // 不是 terminal resize。
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (widthMode !== "mirror-fixed" || !refreshActive || !sessionId) {
       return;
     }
