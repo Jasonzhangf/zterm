@@ -154,7 +154,15 @@
       "status": "active",
       "allowed_paths": ["packages/ios-host/src/**"],
       "forbidden_paths": ["android/**", "mac/**", "win/**", "packages/shared/src/**"],
-      "required_gates": ["gate.owner.uniqueness", "gate.import.edges", "gate.payload.isolation"]
+      "required_gates": [
+        "gate.owner.uniqueness",
+        "gate.import.edges",
+        "gate.payload.isolation",
+        "gate.ios.device.lifecycle",
+        "gate.ios.device.permissions",
+        "gate.ios.device.ime",
+        "gate.ios.device.negative"
+      ]
     },
     {
       "feature_id": "feature.terminal.file_media_input",
