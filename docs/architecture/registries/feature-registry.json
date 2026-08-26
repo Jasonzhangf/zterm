@@ -21,10 +21,10 @@
     {
       "feature_id": "feature.kernel.composition",
       "owner_modules": ["app.kernel"],
-      "status": "design",
+      "status": "active",
       "allowed_paths": ["packages/kernel/src/**"],
       "forbidden_paths": ["packages/shared/src/**", "android/**", "mac/**", "win/**"],
-      "required_gates": ["gate.target.status", "gate.lifecycle.pairs"]
+      "required_gates": ["gate.map.parse", "gate.lifecycle.pairs"]
     },
     {
       "feature_id": "feature.kernel.cordis_adapter",

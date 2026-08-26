@@ -214,14 +214,15 @@
     },
     {
       "module_id": "app.kernel",
-      "status": "design",
+      "status": "active",
       "layer": "application-kernel",
-      "owned_paths": [],
+      "owned_paths": ["packages/kernel/src/**"],
       "allowed_paths": ["packages/kernel/src/**"],
+      "excluded_paths": ["packages/kernel/src/cordis/**"],
       "forbidden_paths": ["packages/shared/src/**", "android/**", "mac/**", "win/**"],
       "forbidden_imports": ["react", "react-dom", "@capacitor/*", "electron", "cordis"],
       "declared_edges": [{"to": "shared.domain_core"}, {"to": "ui.react_adapter"}],
-      "required_gates": ["gate.target.status"]
+      "required_gates": ["gate.map.parse", "gate.owner.uniqueness", "gate.import.edges", "gate.module.dag"]
     },
     {
       "module_id": "app.cordis_adapter",
@@ -231,7 +232,7 @@
       "allowed_paths": ["packages/kernel/src/cordis/**"],
       "forbidden_paths": ["packages/shared/src/**", "packages/kernel/src/domain/**", "android/**", "mac/**", "win/**"],
       "forbidden_imports": ["react", "react-dom", "@capacitor/*", "electron"],
-      "declared_edges": [{"to": "app.kernel"}],
+      "declared_edges": [],
       "required_gates": ["gate.owner.uniqueness", "gate.import.edges", "gate.cordis.process_local"]
     }
   ]

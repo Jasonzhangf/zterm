@@ -9,10 +9,13 @@
   },
   "scripts": {
     "type-check": "tsc --noEmit",
-    "test": "node --test src/__tests__/cordis-adapter.test.ts"
+    "test": "node --test src/cordis/cordis-adapter.test.ts",
+    "test:kernel": "node --test src/kernel.test.ts",
+    "test:all": "node --test src/cordis/cordis-adapter.test.ts && node --test src/kernel.test.ts"
   },
   "dependencies": {
-    "@cordisjs/core": "3.18.1"
+    "@cordisjs/core": "3.18.1",
+    "@zterm/runtime-contracts": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

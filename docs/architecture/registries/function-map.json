@@ -143,16 +143,16 @@
       "owner_module": "app.kernel",
       "path": "packages/kernel/src/composition-root.ts",
       "entry_symbols": ["CompositionRoot"],
-      "status": "design",
-      "required_gates": ["gate.target.status", "gate.lifecycle.pairs"]
+      "status": "active",
+      "required_gates": ["gate.map.parse", "gate.symbol.exists", "gate.lifecycle.pairs"]
     },
     {
       "function_id": "function.kernel.capability_registry",
       "owner_module": "app.kernel",
       "path": "packages/kernel/src/capability-registry.ts",
       "entry_symbols": ["CapabilityRegistry"],
-      "status": "design",
-      "required_gates": ["gate.target.status", "gate.lifecycle.pairs"]
+      "status": "active",
+      "required_gates": ["gate.map.parse", "gate.symbol.exists", "gate.lifecycle.pairs"]
     },
     {
       "function_id": "function.kernel.cordis_adapter",
