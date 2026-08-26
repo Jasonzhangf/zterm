@@ -29,6 +29,7 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.0",
+    "@zterm/desktop-gateway": "workspace:^",
     "concurrently": "^9.0.1",
     "cross-env": "^7.0.3",
     "electron": "^31.7.7",
@@ -42,8 +43,14 @@
   "build": {
     "appId": "com.zterm.windows",
     "productName": "ZTerm",
-    "directories": { "output": "out" },
-    "files": ["dist/**/*", "dist-electron/**/*", "package.json"],
+    "directories": {
+      "output": "out"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
     "artifactName": "ZTerm-${version}-${arch}.${ext}",
     "publish": [
       {
@@ -53,8 +60,18 @@
     ],
     "win": {
       "target": [
-        { "target": "dir", "arch": ["x64"] },
-        { "target": "nsis", "arch": ["x64"] }
+        {
+          "target": "dir",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "icon": "build/icon.ico",
       "forceCodeSigning": false,

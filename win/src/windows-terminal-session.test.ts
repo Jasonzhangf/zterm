@@ -74,7 +74,7 @@ describe('windows session control owner', () => {
     const createPromise = control.create(target, 'logs');
     const createSocket = MockWebSocket.latest();
     createSocket.open();
-    expect(createSocket.sent).toEqual([JSON.stringify({ type: 'tmux-create-session', payload: { sessionName: 'logs' } })]);
+    expect(createSocket.sent).toEqual([JSON.stringify({ type: 'tmux-create-session', payload: { sessionName: 'logs', terminalBackend: 'tmux' } })]);
     createSocket.sessions(['logs', 'default']);
     await expect(createPromise).resolves.toEqual(['default', 'logs']);
 

@@ -1,5 +1,7 @@
 /// <reference types="vite/client" />
 
+import type { DesktopGatewayPreloadApi } from '@zterm/desktop-gateway';
+
 declare global {
   interface Window {
     ztermMac: {
@@ -32,6 +34,7 @@ declare global {
           }) => void,
         ) => () => void;
       };
+      runtimeGateway: DesktopGatewayPreloadApi;
     };
   }
 }

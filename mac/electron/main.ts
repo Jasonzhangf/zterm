@@ -8,6 +8,11 @@ import {
   resolveDefaultMacDownloadDir,
 } from './file-system.js';
 import {
+  DESKTOP_GATEWAY_COMMAND_CHANNEL,
+  DesktopCommandHandler,
+  DesktopGatewayError,
+} from '@zterm/desktop-gateway';
+import {
   createMacWindowManager,
   createMacWindowMenuTemplate,
   createFileMacWindowRecordStore,
@@ -27,6 +32,16 @@ const __dirname = path.dirname(__filename);
 type LocalBufferSyncRequestPayload = { knownRevision: number; localStartIndex: number; localEndIndex: number; requestStartIndex: number; requestEndIndex: number; missingRanges?: Array<{ startIndex: number; endIndex: number }> };
 
 const localTmuxManager = new LocalTmuxManager();
+const localFileSystem = createMacLocalFileSystemService({
+  defaultDownloadDir: resolveDefaultMacDownloadDir(),
+});
+let desktopGatewayGeneration = 0;
+const desktopCommandHandler = new DesktopCommandHandler({
+  getGeneration: () => desktopGatewayGeneration,
+  setGeneration: (generation) => {
+    desktopGatewayGeneration = generation;
+  },
+});
 const alphaSmokeMode = process.argv.includes('--zterm-alpha-smoke');
 const screenshotHelperOnlyMode = process.argv.includes('--screenshot-helper');
 let screenshotHelperServer: ScreenshotHelperServerController | null = null;
@@ -46,6 +61,48 @@ function getDevServerUrl() {
     return null;
   }
   return value;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function isPositiveInt(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) > 0;
+}
+
+function isClientParams(value: unknown): value is { clientId: string } {
+  return isRecord(value) && typeof value.clientId === 'string' && value.clientId.trim().length > 0;
+}
+
+function isTmuxConnectParams(value: unknown): value is {
+  clientId: string;
+  sessionName: string;
+  cols: number;
+  rows: number;
+} {
+  if (!isRecord(value)) return false;
+  if (typeof value.clientId !== 'string' || value.clientId.trim().length === 0) return false;
+  if (typeof value.sessionName !== 'string' || value.sessionName.trim().length === 0) return false;
+  if (!isPositiveInt(value.cols)) return false;
+  if (!isPositiveInt(value.rows)) return false;
+  return true;
+}
+
+function isResizeParams(value: unknown): value is { clientId: string; cols: number; rows: number } {
+  if (!isRecord(value)) return false;
+  if (typeof value.clientId !== 'string' || value.clientId.trim().length === 0) return false;
+  if (!isPositiveInt(value.cols)) return false;
+  if (!isPositiveInt(value.rows)) return false;
+  return true;
+}
+
+function isDirParams(value: unknown): value is { dirPath: string } {
+  return isRecord(value) && typeof value.dirPath === 'string' && value.dirPath.trim().length > 0;
+}
+
+function isFileParams(value: unknown): value is { filePath: string } {
+  return isRecord(value) && typeof value.filePath === 'string' && value.filePath.trim().length > 0;
 }
 
 function installHelperOnlyAppMenu() {
@@ -174,10 +231,52 @@ app.whenReady().then(async () => {
       : { ok: false, error: 'MacWindowManager is not initialized' };
   });
 
+
+  desktopCommandHandler.register('desktop.listSessions', async () => ({
+    sessions: await localTmuxManager.listSessions(),
+  }));
+  desktopCommandHandler.register('desktop.tmuxConnect', async (params) => {
+    if (!isTmuxConnectParams(params)) {
+      throw new DesktopGatewayError('INVALID_PARAMS', 'clientId, sessionName, cols, rows required');
+    }
+    await localTmuxManager.connect(params.clientId, params.sessionName, params.cols, params.rows);
+    return { clientId: params.clientId };
+  });
+  desktopCommandHandler.register('desktop.tmuxDisconnect', async (params) => {
+    if (!isClientParams(params)) throw new DesktopGatewayError('INVALID_PARAMS', 'clientId required');
+    await localTmuxManager.disconnect(params.clientId);
+    return { clientId: params.clientId };
+  });
+  desktopCommandHandler.register('desktop.tmuxResize', async (params) => {
+    if (!isResizeParams(params)) {
+      throw new DesktopGatewayError('INVALID_PARAMS', 'clientId, cols, rows required');
+    }
+    await localTmuxManager.resize(params.clientId, params.cols, params.rows);
+    return { clientId: params.clientId };
+  });
+  desktopCommandHandler.register('desktop.listDir', async (params) => {
+    if (!isDirParams(params)) throw new DesktopGatewayError('INVALID_PARAMS', 'dirPath required');
+    const result = await localFileSystem.readdir(params.dirPath);
+    if (!result.ok) throw new DesktopGatewayError('PLATFORM_CAPABILITY_UNAVAILABLE', result.error ?? 'directory read failed');
+    return { path: result.path, entries: result.entries };
+  });
+  desktopCommandHandler.register('desktop.createWindow', () => {
+    if (screenshotHelperOnlyMode) {
+      throw new DesktopGatewayError('PLATFORM_CAPABILITY_UNAVAILABLE', 'Window creation is unavailable in screenshot-helper mode');
+    }
+    const created = macWindowManager?.createWindow();
+    if (!created) throw new DesktopGatewayError('PLATFORM_CAPABILITY_UNAVAILABLE', 'MacWindowManager is not initialized');
+    return { windowId: created.windowId };
+  });
+  desktopCommandHandler.register('desktop.readFile', async (params) => {
+    if (!isFileParams(params)) throw new DesktopGatewayError('INVALID_PARAMS', 'filePath required');
+    const result = await localFileSystem.readFile(params.filePath);
+    if (!result.ok) throw new DesktopGatewayError('PLATFORM_CAPABILITY_UNAVAILABLE', result.error ?? 'file read failed');
+    return { dataBase64: result.dataBase64, size: result.size };
+  });
+  ipcMain.handle(DESKTOP_GATEWAY_COMMAND_CHANNEL, (_event, wire) => desktopCommandHandler.execute(wire));
   registerMacFileSystemIpcHandlers(ipcMain, {
-    service: createMacLocalFileSystemService({
-      defaultDownloadDir: resolveDefaultMacDownloadDir(),
-    }),
+    service: localFileSystem,
     showOpenDialog: (options) => dialog.showOpenDialog(options),
   });
 

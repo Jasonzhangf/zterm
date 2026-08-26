@@ -368,7 +368,7 @@ if ([resourceRegistry, moduleRegistry, featureRegistry, functionMap, mainlineMap
 
   const refs = assertReferences(data, verificationMap);
   const extensions = moduleRegistry.source_extensions;
-  const roots = ['android/native/android/app/src/main', 'android/src', 'mac/electron', 'mac/src', 'win/electron', 'win/src', 'packages/shared/src', 'packages/runtime-contracts/src', 'packages/ui-contract/src', 'packages/kernel/src', 'packages/stream-boundary/src'];
+  const roots = ['android/native/android/app/src/main', 'android/src', 'mac/electron', 'mac/src', 'win/electron', 'win/src', 'packages/shared/src', 'packages/runtime-contracts/src', 'packages/ui-contract/src', 'packages/kernel/src', 'packages/stream-boundary/src', 'packages/desktop-gateway/src'];
   const files = roots.flatMap((root) => walk(join(repoRoot, root), extensions));
   const filesByRelativePath = new Map(files.map((file) => [relative(repoRoot, file), file]));
 
