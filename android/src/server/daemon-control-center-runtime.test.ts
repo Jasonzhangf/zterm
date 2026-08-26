@@ -155,10 +155,71 @@ describe('DaemonControlCenter', () => {
         code: 'deadline_exceeded',
         commandType: 'test:command',
         deadlineMs: 100,
+        chain: [{
+          code: 'deadline_exceeded',
+          message: 'control deadline exceeded: test:command',
+          source: 'daemon.control_center',
+        }],
       },
     });
     expect(center.getAuditEntries()[0]?.result).toBe('timeout');
     vi.useRealTimers();
+  });
+
+  it('projects owner throws into the daemon error chain', async () => {
+    const center = new DaemonControlCenter();
+    center.register('test:throw', {
+      ownerId: 'throw-owner',
+      async execute() {
+        throw new Error('daemon owner exploded');
+      },
+    });
+
+    await expect(center.execute(request(command('test:throw')))).resolves.toEqual({
+      ok: false,
+      error: {
+        code: 'handler_failed',
+        commandType: 'test:throw',
+        message: 'daemon owner exploded',
+        chain: [{
+          code: 'handler_failed',
+          message: 'daemon owner exploded',
+          source: 'daemon.control_center',
+        }],
+      },
+    });
+  });
+
+  it('coalesces concurrent idempotent commands before owner execution', async () => {
+    const center = new DaemonControlCenter();
+    let resolveOwner!: (outcome: ControlOutcome<unknown, unknown>) => void;
+    const execute = vi.fn(() => new Promise<ControlOutcome<unknown, unknown>>((resolve) => {
+      resolveOwner = resolve;
+    }));
+    center.register('test:concurrent', { ownerId: 'owner', execute });
+    const first = center.execute(request(command('test:concurrent'), { idempotencyKey: 'same-key' }));
+    const second = center.execute(request(command('test:concurrent'), { idempotencyKey: 'same-key' }));
+    expect(execute).toHaveBeenCalledOnce();
+    resolveOwner({ ok: true, value: 'committed' });
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      { ok: true, value: 'committed' },
+      { ok: true, value: 'committed' },
+    ]);
+  });
+
+  it('rejects invalid deadlines without invoking owner', async () => {
+    const center = new DaemonControlCenter();
+    const execute = vi.fn(async () => ({ ok: true as const, value: null }));
+    center.register('test:deadline', { ownerId: 'owner', execute });
+    const result = await center.execute(
+      request(command('test:deadline'), { deadlineMs: -1 }),
+    );
+    expect(result.ok).toBe(false);
+    expect(execute).not.toHaveBeenCalled();
+    if (!result.ok) {
+      expect((result.error as { chain?: readonly { code: string }[] }).chain?.[0]?.code)
+        .toBe('invalid_deadline');
+    }
   });
 
   it('rejects malformed command identity before owner execution', async () => {

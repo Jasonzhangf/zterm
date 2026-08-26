@@ -1,5 +1,6 @@
 import {
   errorControlOutcome,
+  createControlErrorChain,
   type ControlAuditEntry,
   type ControlCapabilityId,
   type ControlCenterError,
@@ -50,7 +51,7 @@ export class DaemonControlCenter {
   private readonly audit: ControlAuditEntry[] = [];
   private readonly idempotentOutcomes = new Map<
     string,
-    ControlOutcome<unknown, unknown>
+    Promise<ControlOutcome<unknown, unknown>>
   >();
   private readonly now: () => number;
   private readonly defaultDeadlineMs: number;
@@ -131,12 +132,51 @@ export class DaemonControlCenter {
 
     if (idempotencyKey && this.idempotentOutcomes.has(idempotencyKey)) {
       this.recordAudit(command, subject, 'duplicate', startedAtMs);
-      return this.idempotentOutcomes.get(
+      return (await this.idempotentOutcomes.get(
         idempotencyKey,
-      ) as unknown as ControlOutcome<R, E | ControlCenterError>;
+      )) as ControlOutcome<R, E | ControlCenterError>;
     }
 
     const timeoutMs = deadlineMs ?? this.defaultDeadlineMs;
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 0) {
+      this.recordAudit(command, subject, 'error', startedAtMs);
+      return errorControlOutcome({
+        code: 'invalid_deadline',
+        commandType,
+        message: 'deadlineMs must be a non-negative safe integer',
+        chain: createControlErrorChain(
+          'invalid_deadline',
+          'deadlineMs must be a non-negative safe integer',
+          'daemon.control_center',
+        ),
+      });
+    }
+    const execution = this.executeOwner(
+      owner,
+      command,
+      context,
+      commandType,
+      timeoutMs,
+      startedAtMs,
+      subject,
+      idempotencyKey,
+    );
+    if (idempotencyKey) {
+      this.idempotentOutcomes.set(idempotencyKey, execution);
+    }
+    return execution as unknown as Promise<ControlOutcome<R, E | ControlCenterError>>;
+  }
+
+  private async executeOwner(
+    owner: DaemonControlCommandOwner,
+    command: Readonly<ControlCommand<unknown>>,
+    context: Readonly<unknown>,
+    commandType: string,
+    timeoutMs: number,
+    startedAtMs: number,
+    subject: string,
+    idempotencyKey?: string,
+  ): Promise<ControlOutcome<unknown, unknown>> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const result = await Promise.race([
@@ -147,27 +187,40 @@ export class DaemonControlCenter {
           }, timeoutMs);
         }),
       ]);
-      if (idempotencyKey) {
-        this.idempotentOutcomes.set(idempotencyKey, result);
-      }
       this.recordAudit(
         command,
         subject,
         result.ok ? 'ok' : 'error',
         startedAtMs,
       );
-      return result as unknown as ControlOutcome<R, E | ControlCenterError>;
+      return result as unknown as ControlOutcome<unknown, unknown>;
     } catch (error) {
       if (error instanceof DaemonControlDeadlineError) {
+        if (idempotencyKey) this.idempotentOutcomes.delete(idempotencyKey);
         this.recordAudit(command, subject, 'timeout', startedAtMs);
         return errorControlOutcome({
           code: 'deadline_exceeded',
           commandType,
           deadlineMs: timeoutMs,
+          chain: createControlErrorChain(
+            'deadline_exceeded',
+            `control deadline exceeded: ${commandType}`,
+            'daemon.control_center',
+          ),
         });
       }
       this.recordAudit(command, subject, 'error', startedAtMs);
-      throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      return errorControlOutcome({
+        code: 'handler_failed',
+        commandType,
+        message,
+        chain: createControlErrorChain(
+          'handler_failed',
+          message,
+          'daemon.control_center',
+        ),
+      });
     } finally {
       if (timer !== undefined) {
         clearTimeout(timer);
