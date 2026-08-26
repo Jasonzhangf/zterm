@@ -343,6 +343,21 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
       },
     });
     HTMLElement.prototype.getBoundingClientRect = function getBoundingClientRect() {
+      if (this.textContent === 'W' || this.textContent === '你') {
+        return {
+          x: 0,
+          y: 0,
+          top: 0,
+          left: 0,
+          right: 200,
+          bottom: 17,
+          width: 200,
+          height: 17,
+          toJSON() {
+            return {};
+          },
+        } as DOMRect;
+      }
       return {
         x: 0, y: 0, top: 0, left: 0, right: 200, bottom: 408,
         width: 200, height: 408,
@@ -710,6 +725,61 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
       await new Promise((resolve) => setTimeout(resolve, 10));
     });
     expect(host.scrollTop).toBe(600);
+  });
+
+  it('clears native scrollTop immediately while pinch is still active to avoid WebView blackout', async () => {
+    const { container } = render(
+      <div style={{ width: '200px', height: '408px' }}>
+        <TerminalView
+          sessionId="s1"
+          renderBufferSnapshot={buildRenderBufferSnapshot()}
+          active
+          live
+          widthMode="mirror-fixed"
+          onInput={vi.fn()}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    const host = container.querySelector('.wterm') as HTMLElement;
+
+    act(() => {
+      ResizeObserverMock.triggerAll();
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    });
+
+    Object.defineProperty(host, 'scrollHeight', { value: 1000, configurable: true });
+    Object.defineProperty(host, 'clientHeight', { value: 400, configurable: true });
+    act(() => {
+      host.scrollTop = 500;
+    });
+
+    act(() => {
+      fireEvent.touchStart(host, {
+        touches: [
+          { clientX: 150, clientY: 100, identifier: 1 },
+          { clientX: 250, clientY: 100, identifier: 2 },
+        ],
+        changedTouches: [],
+      });
+    });
+    act(() => {
+      fireEvent.touchMove(host, {
+        touches: [
+          { clientX: 160, clientY: 100, identifier: 1 },
+          { clientX: 220, clientY: 100, identifier: 2 },
+        ],
+        changedTouches: [],
+      });
+    });
+
+    // 黑屏根因是 applyScale 设置 zoom 后 scrollHeight 立即缩小，但原生 scrollTop
+    // 仍保留旧值。必须在 pinch move 阶段（touchEnd 前）就把 scrollTop 清零并交给
+    // translateY 合成层，否则 WebView 会渲染越界区域。
+    expect(host.scrollTop).toBe(0);
   });
 
   it('does not zoom when widthMode is not mirror-fixed', () => {

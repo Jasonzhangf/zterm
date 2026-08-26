@@ -35,7 +35,6 @@ export interface MirrorFixedZoomPanOptions {
   maxHorizontalOffsetPx?: number;
   onVerticalScrollIntent?: () => void;
   onWheelStep?: (step: MirrorFixedWheelStep) => void;
-  onScaleChange?: (scale: number) => void;
 }
 
 export interface MirrorFixedZoomPan {
@@ -182,6 +181,17 @@ export function useMirrorFixedZoomPan(
     // 缩放态禁原生滚动：zoom 位图 + 非零 scrollTop 在 Android WebView 触发黑屏。
     // 纵向手势由 translateY 合成层平移接管；恢复时交还 pan-y。
     host.style.touchAction = clamped < 1 ? 'none' : 'pan-y';
+    if (clamped < 1 && savedScrollTopRef.current === null) {
+      const saved = host.scrollTop;
+      const maxScrollTop = Math.max(0, host.scrollHeight - host.clientHeight);
+      const clampedSaved = Math.min(saved, maxScrollTop);
+      const v0 = -Math.round(clampedSaved * scaleRef.current);
+      savedScrollTopRef.current = clampedSaved;
+      verticalBaseRef.current = v0;
+      verticalOffsetRef.current = v0;
+      setVerticalOffsetPx(v0);
+      host.scrollTop = 0;
+    }
     if (clamped >= 1) {
       const vertical = verticalOffsetRef.current;
       if (vertical !== 0) {
