@@ -62,12 +62,12 @@
       "resource_id": "resource.ui_projection",
       "resource_type": "projection_resource",
       "owner": "ui.react_adapter",
-      "truth_store": "packages/shared/src/react/** and packages/shared/src/index.ts",
+      "truth_store": "packages/shared/src/react/** and packages/shared/src/index.ts and packages/ui-react/src/**",
       "status": "active",
       "allowed_operations": ["read", "render", "emit_action"],
       "direct_relations": [],
       "forbidden_direct_relations": ["resource.domain_state"],
-      "required_gates": ["gate.module.dag", "gate.mainline.adjacency"],
+      "required_gates": ["gate.module.dag", "gate.mainline.adjacency", "gate.ui.react.adapter"],
       "canonical_docs": [
         "docs/design/2026-08-26-zterm-cordis-v2-cross-platform.md"
       ]
