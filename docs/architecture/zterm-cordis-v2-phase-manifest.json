@@ -296,7 +296,7 @@
     {
       "id": "phase-5-terminal-data-plane",
       "claim": "zterm.v2.phase5.terminal.data-plane",
-      "status": "active",
+      "status": "complete",
       "depends_on": [
         "phase-4-runtime-parity"
       ],
@@ -320,7 +320,7 @@
     {
       "id": "phase-6-ui-plugins",
       "claim": "zterm.v2.phase6.ui.plugins",
-      "status": "active",
+      "status": "complete",
       "depends_on": [
         "phase-5-terminal-data-plane"
       ],
@@ -336,7 +336,9 @@
         "package-smoke"
       ],
       "delivered_claims": [
-        "zterm.v2.phase6.low-risk.plugins"
+        "zterm.v2.phase6.react.adapter",
+        "zterm.v2.phase6.low-risk.plugins",
+        "zterm.v2.phase6.terminal.plugins"
       ]
     },
     {
