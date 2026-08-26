@@ -360,9 +360,8 @@
         "four-platform-parity"
       ],
       "delivered_claims": [
-        "zterm.v2.phase7.ios.device",
-        "zterm.v2.phase7.windows.live",
-        "zterm.v2.phase7.desktop.parity"
+        "zterm.v2.phase7.desktop.parity",
+        "zterm.v2.phase7.ios.device"
       ]
     },
     {
