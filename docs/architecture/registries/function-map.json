@@ -27,6 +27,14 @@
       "required_gates": ["gate.map.parse", "gate.symbol.exists", "gate.payload.isolation"]
     },
     {
+      "function_id": "function.shared.session_route_projection",
+      "owner_module": "shared.domain_core",
+      "path": "packages/shared/src/domain/session-route-projection.ts",
+      "entry_symbols": ["buildRoutePlanFromHost", "buildRoutePlanFromBridgeTarget", "projectSessionConnection", "replaySessionConnection", "replaySessionEvents"],
+      "status": "active",
+      "required_gates": ["gate.map.parse", "gate.symbol.exists", "gate.shared.core.imports", "gate.session.route.replay"]
+    },
+    {
       "function_id": "function.ui.pane_profile",
       "owner_module": "ui.react_adapter",
       "path": "packages/shared/src/react/pane-profile.ts",

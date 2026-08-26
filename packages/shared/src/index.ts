@@ -16,6 +16,8 @@ export * from './connection/tmux-sessions';
 export * from './connection/protocol';
 export * from './connection/relay-directory';
 export * from './connection/bridge-connection';
+export * from './domain/session-domain';
+export * from './domain/session-route-projection';
 export * from './react/use-host-storage';
 export * from './react/use-bridge-settings-storage';
 export * from './connection/terminal-buffer';
