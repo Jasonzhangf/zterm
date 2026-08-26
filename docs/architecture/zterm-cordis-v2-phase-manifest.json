@@ -194,7 +194,7 @@
     {
       "id": "phase-0-governance",
       "claim": "zterm.v2.phase0.governance",
-      "status": "ready",
+      "status": "complete",
       "depends_on": [],
       "parallel_claims": [
         "zterm.v2.phase0.parity.catalog",
@@ -211,7 +211,7 @@
     {
       "id": "phase-1-shared-contracts",
       "claim": "zterm.v2.phase1.shared.contracts",
-      "status": "blocked-on-phase-0",
+      "status": "complete",
       "depends_on": [
         "phase-0-governance"
       ],
@@ -230,7 +230,7 @@
     {
       "id": "phase-2-kernel-cordis",
       "claim": "zterm.v2.phase2.kernel.cordis.adapter",
-      "status": "blocked-on-phase-1",
+      "status": "complete",
       "depends_on": [
         "phase-1-shared-contracts"
       ],
@@ -265,13 +265,14 @@
         "packaged-smoke"
       ],
       "delivered_claims": [
+        "zterm.v2.phase3.android.host",
         "zterm.v2.phase3.desktop.hosts"
       ]
     },
     {
       "id": "phase-4-runtime-parity",
       "claim": "zterm.v2.phase4.runtime.parity",
-      "status": "blocked-on-phase-3",
+      "status": "active",
       "depends_on": [
         "phase-3-platform-hosts"
       ],
@@ -284,6 +285,10 @@
         "exact-replay",
         "lifecycle-pairs",
         "package-build"
+      ],
+      "delivered_claims": [
+        "zterm.v2.phase4.session.route",
+        "zterm.v2.phase4.persistence.settings"
       ]
     },
     {
