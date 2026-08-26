@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ZTerm Cordis v2 Architecture Review</title>
+  <style>
+    :root { color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    body { margin: 0; color: #17202a; background: #f4f6f8; }
+    main { max-width: 1120px; margin: 0 auto; padding: 32px; }
+    section { background: #fff; border: 1px solid #d9e0e7; border-radius: 12px; padding: 20px; margin: 16px 0; }
+    h1 { margin-top: 0; }
+    a { color: #075985; }
+    .status { display: inline-block; border-radius: 999px; padding: 4px 10px; background: #fff7ed; color: #9a3412; font-size: 13px; }
+    .flow { display: flex; gap: 8px; align-items: center; overflow-x: auto; padding: 12px 0; }
+    .node { min-width: 132px; padding: 12px; border: 1px solid #93c5fd; border-radius: 8px; background: #eff6ff; font-size: 13px; }
+    .arrow { color: #64748b; font-size: 20px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; vertical-align: top; padding: 9px; border-bottom: 1px solid #e5e7eb; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.92em; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>ZTerm Cordis v2 Architecture Review</h1>
+    <p><span class="status">design / Phase 0 governance admission</span></p>
+    <section>
+      <h2>Canonical sources</h2>
+      <ul>
+        <li><a href="../zterm-cordis-v2-phase-manifest.json">Machine phase manifest</a></li>
+        <li><a href="../../design/2026-08-26-zterm-cordis-v2-cross-platform.md">Cross-platform design</a></li>
+        <li><a href="../../goals/zterm-cordis-v2-rebuild-plan.md">Execution plan</a></li>
+        <li><a href="zterm-cordis-v2-review.md">Markdown review surface</a></li>
+        <li><a href="zterm-cordis-v2-review.mmd">Mermaid source</a></li>
+      </ul>
+    </section>
+    <section>
+      <h2>Lifecycle</h2>
+      <div class="flow">
+        <div class="node"><code>phase-0-governance</code><br>ready</div><div class="arrow">→</div>
+        <div class="node"><code>phase-1-shared-contracts</code><br>blocked</div><div class="arrow">→</div>
+        <div class="node"><code>phase-2-kernel-cordis</code><br>blocked</div><div class="arrow">→</div>
+        <div class="node"><code>phase-3-platform-hosts</code><br>blocked</div><div class="arrow">→</div>
+        <div class="node"><code>phase-4-runtime-parity</code><br>blocked</div>
+      </div>
+      <div class="flow">
+        <div class="node"><code>phase-5-terminal-data-plane</code><br>blocked</div><div class="arrow">→</div>
+        <div class="node"><code>phase-6-ui-plugins</code><br>blocked</div><div class="arrow">→</div>
+        <div class="node"><code>phase-7-platform-parity</code><br>blocked</div><div class="arrow">→</div>
+        <div class="node"><code>phase-8-closeout</code><br>blocked</div>
+      </div>
+    </section>
+    <section>
+      <h2>Boundary gates</h2>
+      <table>
+        <thead><tr><th>Gate</th><th>Status</th><th>Owner</th></tr></thead>
+        <tbody>
+          <tr><td><code>phase-manifest-structure</code></td><td>active</td><td><code>phase-0-governance</code></td></tr>
+          <tr><td><code>source-owner-baseline</code></td><td>pending</td><td><code>zterm.v2.phase0.map.registry</code></td></tr>
+          <tr><td><code>v1-parity-catalog</code></td><td>pending</td><td><code>zterm.v2.phase0.parity.catalog</code></td></tr>
+          <tr><td><code>payload-isolation</code></td><td>pending</td><td><code>zterm.v2.phase1.runtime.contracts</code></td></tr>
+          <tr><td><code>module-dag</code></td><td>pending</td><td><code>zterm.v2.phase1.runtime.contracts</code></td></tr>
+        </tbody>
+      </table>
+    </section>
+    <section>
+      <h2>Non-negotiable boundaries</h2>
+      <ul>
+        <li>Cordis remains process-local composition infrastructure.</li>
+        <li>Shared domain contracts remain platform, UI, React, and Cordis independent.</li>
+        <li>UI plugins read projections and dispatch actions only.</li>
+        <li>Terminal, file, media, buffer, and reliable-input bodies use dedicated data streams.</li>
+        <li>Control/debug/routing/retry/health semantics stay outside business payloads.</li>
+        <li>No fallback, shadow route, second owner, or copied runtime source.</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>
