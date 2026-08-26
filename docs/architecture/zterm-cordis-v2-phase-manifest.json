@@ -249,7 +249,7 @@
     {
       "id": "phase-3-platform-hosts",
       "claim": "zterm.v2.phase3.platform.hosts",
-      "status": "active",
+      "status": "complete",
       "depends_on": [
         "phase-2-kernel-cordis"
       ],
@@ -273,7 +273,7 @@
     {
       "id": "phase-4-runtime-parity",
       "claim": "zterm.v2.phase4.runtime.parity",
-      "status": "active",
+      "status": "complete",
       "depends_on": [
         "phase-3-platform-hosts"
       ],
@@ -344,7 +344,7 @@
     {
       "id": "phase-7-platform-parity",
       "claim": "zterm.v2.phase7.platform.parity",
-      "status": "blocked-on-phase-6",
+      "status": "active",
       "depends_on": [
         "phase-6-ui-plugins"
       ],
@@ -358,6 +358,11 @@
         "windows-conpty",
         "desktop-packaged",
         "four-platform-parity"
+      ],
+      "delivered_claims": [
+        "zterm.v2.phase7.ios.device",
+        "zterm.v2.phase7.windows.live",
+        "zterm.v2.phase7.desktop.parity"
       ]
     },
     {
@@ -377,7 +382,8 @@
         "agy-review-pass",
         "staged-scope",
         "push-head-equality"
-      ]
+      ],
+      "delivered_claims": []
     }
   ]
 }
