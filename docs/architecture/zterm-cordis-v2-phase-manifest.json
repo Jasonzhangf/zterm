@@ -1,0 +1,29 @@
+{
+  "lifecycle_id": "zterm.cordis.v2.rebuild",
+  "status": "design",
+  "production_baseline": "d0f17b709873a7b4571b00f2ce32f428aae1b6ae",
+  "design_doc": "docs/design/2026-08-26-zterm-cordis-v2-cross-platform.md",
+  "plan_doc": "docs/goals/zterm-cordis-v2-rebuild-plan.md",
+  "entrypoint": "phase-0-governance",
+  "return_path": "phase-8-closeout",
+  "global_invariants": [
+    "one-resource-one-writer",
+    "one-feature-one-owner",
+    "shared-core-no-platform-ui-cordis-imports",
+    "cordis-process-local-only",
+    "data-control-debug-error-plane-separation",
+    "no-fallback-no-shadow-route",
+    "v1-business-payload-parity"
+  ],
+  "phases": [
+    {"id":"phase-0-governance","claim":"zterm.v2.phase0.governance","status":"ready","depends_on":[],"parallel_claims":["zterm.v2.phase0.parity.catalog","zterm.v2.phase0.map.registry","zterm.v2.phase0.wiki.ci"],"gates":["maps-parse","source-owner-baseline","v1-parity-catalog","root-gate-runnable"]},
+    {"id":"phase-1-shared-contracts","claim":"zterm.v2.phase1.shared.contracts","status":"blocked-on-phase-0","depends_on":["phase-0-governance"],"parallel_claims":["zterm.v2.phase1.domain.core","zterm.v2.phase1.runtime.contracts","zterm.v2.phase1.ui.contract"],"gates":["shared-typecheck","schema-positive-negative","payload-isolation","module-dag"]},
+    {"id":"phase-2-kernel-cordis","claim":"zterm.v2.phase2.kernel.cordis.adapter","status":"blocked-on-phase-1","depends_on":["phase-1-shared-contracts"],"parallel_claims":["zterm.v2.phase2.kernel.lifecycle","zterm.v2.phase2.cordis.adapter","zterm.v2.phase2.stream.boundary"],"gates":["playground-evidence","cordis-version-pin","lifecycle-cleanup","hot-path-non-interception"]},
+    {"id":"phase-3-platform-hosts","claim":"zterm.v2.phase3.platform.hosts","status":"blocked-on-phase-2","depends_on":["phase-2-kernel-cordis"],"parallel_claims":["zterm.v2.phase3.android.host","zterm.v2.phase3.desktop.hosts","zterm.v2.phase3.ios.host"],"gates":["host-typecheck-build","ipc-codec","stale-generation","packaged-smoke"]},
+    {"id":"phase-4-runtime-parity","claim":"zterm.v2.phase4.runtime.parity","status":"blocked-on-phase-3","depends_on":["phase-3-platform-hosts"],"parallel_claims":["zterm.v2.phase4.session.route","zterm.v2.phase4.control.error","zterm.v2.phase4.persistence.settings"],"gates":["exact-replay","lifecycle-pairs","package-build"]},
+    {"id":"phase-5-terminal-data-plane","claim":"zterm.v2.phase5.terminal.data-plane","status":"blocked-on-phase-4","depends_on":["phase-4-runtime-parity"],"parallel_claims":["zterm.v2.phase5.terminal.transport","zterm.v2.phase5.terminal.buffer-render","zterm.v2.phase5.file-media-input"],"gates":["daemon-close-loop","source-to-dom","input-file-media","weak-network-reconnect"]},
+    {"id":"phase-6-ui-plugins","claim":"zterm.v2.phase6.ui.plugins","status":"blocked-on-phase-5","depends_on":["phase-5-terminal-data-plane"],"parallel_claims":["zterm.v2.phase6.react.adapter","zterm.v2.phase6.low-risk.plugins","zterm.v2.phase6.terminal.plugins"],"gates":["ui-ownership-red-tests","render-source-dom","ime-gesture","package-smoke"]},
+    {"id":"phase-7-platform-parity","claim":"zterm.v2.phase7.platform.parity","status":"blocked-on-phase-6","depends_on":["phase-6-ui-plugins"],"parallel_claims":["zterm.v2.phase7.ios.device","zterm.v2.phase7.windows.live","zterm.v2.phase7.desktop.parity"],"gates":["ios-device","windows-conpty","desktop-packaged","four-platform-parity"]},
+    {"id":"phase-8-closeout","claim":"zterm.v2.phase8.closeout","status":"blocked-on-phase-7","depends_on":["phase-7-platform-parity"],"parallel_claims":["zterm.v2.phase8.architecture.audit","zterm.v2.phase8.runtime.replay","zterm.v2.phase8.release.audit"],"gates":["main-tree-verify","agy-review-pass","staged-scope","push-head-equality"]}
+  ]
+}

@@ -758,3 +758,11 @@ UI 有样式/字段不等于功能已接通；必须追踪真源→投影完整�
 - evidence: TerminalView.tsx:followDemandAnchorEndIndex = bufferTailAnchorEndIndex; buildTerminalRenderFrame: visibleWindowEndIndex = min(effectiveBufferEndIndex, followVisualBottomIndex); bufferTailEndIndex 在 applyBufferSyncToSessionBuffer 中由 payload.availableEndIndex 决定
 
 bottom lines 不刷新可能有两种根因：1.bufferTailEndIndex 不更新导致 followVisualBottomIndex 卡住 2.projectRenderBuffer dedup 逻辑误判 rowsEqual 导致旧行被复用
+# 2026-08-26 ZTerm Cordis v2 cross-platform rebuild
+
+- 基线：独立 worktree 从 `origin/main` / `d0f17b70` 创建；主 tree 原有 dirty 改动未触碰。
+- 审计确认：Cordis 只能作为每进程 composition/lifecycle adapter；不能跨 IPC 传递 context/service/plugin，也不能承载 terminal/file/video/input 数据面。
+- 架构决策：shared domain core + application kernel + platform host + framework-neutral UI contract + React UI adapter；平台宿主保留 native lifecycle/transport/permission owner。
+- 阶段计划：Phase 0 governance → Phase 1 shared contracts → Phase 2 Cordis Playground → Phase 3 hosts → Phase 4 parity kernel → Phase 5 data plane → Phase 6 UI plugins → Phase 7 platform parity → Phase 8 closeout。
+- 并发协议：阶段 owner claim 通过后，按 manifest 发放互不重叠的 semantic claims；worker 必须在 clean worktree 交 evidence/handoff，主 tree 合并后重新验证。
+- 设计文档：`docs/design/2026-08-26-zterm-cordis-v2-cross-platform.md`；执行计划：`docs/goals/zterm-cordis-v2-rebuild-plan.md`；机器 manifest：`docs/architecture/zterm-cordis-v2-phase-manifest.json`。
