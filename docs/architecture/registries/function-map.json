@@ -155,6 +155,14 @@
       "required_gates": ["gate.map.parse", "gate.symbol.exists", "gate.stream.boundary"]
     },
     {
+      "function_id": "function.desktop_gateway.handler",
+      "owner_module": "runtime.desktop_gateway",
+      "path": "packages/desktop-gateway/src/desktop-gateway-handler.ts",
+      "entry_symbols": ["DesktopCommandHandler"],
+      "status": "active",
+      "required_gates": ["gate.map.parse", "gate.symbol.exists", "gate.ipc.codec", "gate.stale.generation"]
+    },
+    {
       "function_id": "function.kernel.capability_registry",
       "owner_module": "app.kernel",
       "path": "packages/kernel/src/capability-registry.ts",

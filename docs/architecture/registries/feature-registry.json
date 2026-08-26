@@ -35,6 +35,14 @@
       "required_gates": ["gate.map.parse", "gate.stream.boundary", "gate.payload.isolation"]
     },
     {
+      "feature_id": "feature.host.desktop",
+      "owner_modules": ["runtime.desktop_gateway", "host.mac_electron", "host.win_electron"],
+      "status": "active",
+      "allowed_paths": ["packages/desktop-gateway/src/**", "mac/electron/**", "win/electron/**"],
+      "forbidden_paths": ["android/**", "mac/src/**", "win/src/**"],
+      "required_gates": ["gate.host.typecheck.build", "gate.ipc.codec", "gate.stale.generation"]
+    },
+    {
       "feature_id": "feature.kernel.cordis_adapter",
       "owner_modules": ["app.cordis_adapter"],
       "status": "active",

@@ -37,6 +37,17 @@
       "required_gates": ["gate.map.parse", "gate.owner.uniqueness", "gate.shared.core.imports"]
     },
     {
+      "module_id": "runtime.desktop_gateway",
+      "status": "active",
+      "layer": "runtime-contract",
+      "owned_paths": ["packages/desktop-gateway/src/**"],
+      "allowed_paths": ["packages/desktop-gateway/src/**"],
+      "forbidden_paths": ["android/**", "mac/**", "win/**", "packages/shared/src/**", "packages/kernel/**"],
+      "forbidden_imports": ["react", "react-dom", "@capacitor/*", "electron", "cordis"],
+      "declared_edges": [{"to": "runtime.contracts"}],
+      "required_gates": ["gate.map.parse", "gate.owner.uniqueness", "gate.import.edges"]
+    },
+    {
       "module_id": "shared.domain_core",
       "status": "active",
       "layer": "shared",
@@ -183,7 +194,7 @@
       "allowed_paths": ["mac/electron/**"],
       "forbidden_paths": ["mac/src/**", "android/**", "win/**"],
       "forbidden_imports": ["react", "react-dom", "@capacitor/*", "cordis"],
-      "declared_edges": [],
+      "declared_edges": [{"to": "runtime.desktop_gateway"}],
       "required_gates": ["gate.owner.uniqueness", "gate.import.edges"]
     },
     {
@@ -207,7 +218,7 @@
       "allowed_paths": ["win/electron/**"],
       "forbidden_paths": ["win/src/**", "android/**", "mac/**"],
       "forbidden_imports": ["react", "react-dom", "@capacitor/*", "cordis"],
-      "declared_edges": [],
+      "declared_edges": [{"to": "runtime.desktop_gateway"}],
       "required_gates": ["gate.owner.uniqueness", "gate.import.edges"]
     },
     {

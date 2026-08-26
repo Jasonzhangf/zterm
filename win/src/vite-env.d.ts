@@ -1,6 +1,9 @@
 /// <reference types="vite/client" />
 
-interface Window {
+import type { DesktopGatewayPreloadApi } from '@zterm/desktop-gateway';
+
+declare global {
+  interface Window {
   ztermWindows?: {
     platform: 'windows';
     versions: { electron: string; chrome: string; node: string };
@@ -9,5 +12,9 @@ interface Window {
       readFile: (filePath: string) => Promise<{ ok: boolean; dataBase64: string; size: number; error?: string }>;
       selectDirectory: () => Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }>;
     };
+    runtimeGateway: DesktopGatewayPreloadApi;
   };
+  }
 }
+
+export {};

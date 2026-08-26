@@ -1,4 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import {
+  createDesktopGatewayPreloadApi,
+} from '@zterm/desktop-gateway';
 
 contextBridge.exposeInMainWorld('ztermWindows', {
   platform: 'windows',
@@ -12,4 +15,9 @@ contextBridge.exposeInMainWorld('ztermWindows', {
     readFile: (filePath: string) => ipcRenderer.invoke('zterm:windows:fs:read-file', { filePath }),
     selectDirectory: () => ipcRenderer.invoke('zterm:windows:fs:select-directory'),
   },
+  runtimeGateway: createDesktopGatewayPreloadApi(
+    (channel, wire) => ipcRenderer.invoke(channel, wire),
+    (channel, listener) => ipcRenderer.on(channel, listener),
+    (channel, listener) => ipcRenderer.removeListener(channel, listener),
+  ),
 });

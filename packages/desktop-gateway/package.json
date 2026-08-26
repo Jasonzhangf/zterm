@@ -1,0 +1,21 @@
+{
+  "name": "@zterm/desktop-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "type-check": "tsc --noEmit",
+    "test": "node --import tsx --test src/desktop-gateway.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsx": "^4.7.0"
+  },
+  "dependencies": {
+    "@zterm/runtime-contracts": "workspace:*",
+    "typescript": "^5.4.0"
+  }
+}

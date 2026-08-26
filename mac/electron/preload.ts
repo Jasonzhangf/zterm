@@ -1,5 +1,10 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { LOCAL_TMUX_EVENT } from './local-tmux.js';
+import {
+  createDesktopGatewayPreloadApi,
+  DESKTOP_GATEWAY_COMMAND_CHANNEL,
+  DESKTOP_GATEWAY_EVENT_CHANNEL,
+} from '@zterm/desktop-gateway';
 
 type LocalBufferSyncRequestPayload = { knownRevision: number; localStartIndex: number; localEndIndex: number; requestStartIndex: number; requestEndIndex: number; missingRanges?: Array<{ startIndex: number; endIndex: number }> };
 type LocalTerminalBufferPayload = { revision: number; startIndex: number; endIndex: number; availableStartIndex?: number; availableEndIndex?: number; cols: number; rows: number; cursorKeysApp: boolean; lines: Array<{ index: number; cells: Array<{ char: number; fg: number; bg: number; flags: number; width: number }> }> };
@@ -57,4 +62,9 @@ contextBridge.exposeInMainWorld('ztermMac', {
       };
     },
   },
+  runtimeGateway: createDesktopGatewayPreloadApi(
+    (channel, wire) => ipcRenderer.invoke(channel, wire),
+    (channel, listener) => ipcRenderer.on(channel, listener),
+    (channel, listener) => ipcRenderer.removeListener(channel, listener),
+  ),
 });
