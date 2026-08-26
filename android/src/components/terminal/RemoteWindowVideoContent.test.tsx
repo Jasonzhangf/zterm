@@ -30,6 +30,7 @@ const target: RemoteWindowStreamTargetManifest = {
 
 const refs = {
   overviewCanvasRef: { current: null },
+  focusDisplayCanvasRef: { current: null },
   videoElementRef: { current: null },
   overviewVideoElementRef: { current: null },
 };
@@ -44,7 +45,7 @@ describe('RemoteWindowVideoContent view owner', () => {
       receiverAttached
       overviewCropVisible
       videoHasPlayed={false}
-      dualStreamPhase="overview-crop-visible"
+      
       focusedVideoStyle={null}
       {...refs}
       onVideoLifecycle={onVideoLifecycle}
@@ -54,6 +55,26 @@ describe('RemoteWindowVideoContent view owner', () => {
     expect(onVideoLifecycle).toHaveBeenNthCalledWith(1, 'loadedmetadata');
     expect(onVideoLifecycle).toHaveBeenNthCalledWith(2, 'canplay');
     expect(screen.getByTestId('remote-window-overview-crop')).toBeTruthy();
+    expect(screen.queryByTestId('remote-window-focus-display-canvas')).toBeNull();
+  });
+
+  it('renders focus display canvas instead of visible video when no overview crop', () => {
+    render(<RemoteWindowVideoContent
+      streamStarted
+      streamStatus="streaming"
+      target={target}
+      receiverAttached
+      overviewCropVisible={false}
+      videoHasPlayed={false}
+      
+      focusedVideoStyle={null}
+      {...refs}
+      onVideoLifecycle={vi.fn()}
+    />);
+    const canvas = screen.getByTestId('remote-window-focus-display-canvas');
+    expect(canvas).toBeTruthy();
+    const video = screen.getByTestId('remote-window-video');
+    expect(video.style.opacity).toBe('0');
   });
 
   it('renders explicit starting, error, and waiting truth', () => {
@@ -62,7 +83,7 @@ describe('RemoteWindowVideoContent view owner', () => {
       receiverAttached: false,
       overviewCropVisible: false,
       videoHasPlayed: false,
-      dualStreamPhase: 'idle',
+      
       focusedVideoStyle: null,
       ...refs,
       onVideoLifecycle: vi.fn(),

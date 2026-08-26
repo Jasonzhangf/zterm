@@ -22,6 +22,7 @@ export interface UseRemoteWindowCompositeCanvasOptions {
   videoElementRef: RefObject<HTMLVideoElement | null>;
   overviewVideoElementRef: RefObject<HTMLVideoElement | null>;
   overviewCanvasRef: RefObject<HTMLCanvasElement | null>;
+  focusDisplayCanvasRef?: RefObject<HTMLCanvasElement | null>;
   thumbnailCanvasRefs: RefObject<Map<string, HTMLCanvasElement | null>>;
 }
 
@@ -33,8 +34,35 @@ export function useRemoteWindowCompositeCanvas({
   videoElementRef,
   overviewVideoElementRef,
   overviewCanvasRef,
+  focusDisplayCanvasRef,
   thumbnailCanvasRefs,
 }: UseRemoteWindowCompositeCanvasOptions) {
+  // Android WebView hardware compositor does not render WebRTC MediaStream
+  // <video> to the screen (readyState=4 + play() resolved still shows black).
+  // This rAF loop copies decoded video frames to a visible canvas instead.
+  useEffect(() => {
+    if (!receiverMediaStream || !focusDisplayCanvasRef) {
+      return;
+    }
+    let animationFrame = 0;
+    const drawFocus = () => {
+      animationFrame = window.requestAnimationFrame(drawFocus);
+      const video = videoElementRef.current;
+      const canvas = focusDisplayCanvasRef.current;
+      if (!video || !canvas || video.readyState < 2 || video.videoWidth <= 0) {
+        return;
+      }
+      if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+      }
+      const context = canvas.getContext('2d');
+      context?.drawImage(video, 0, 0, canvas.width, canvas.height);
+    };
+    animationFrame = window.requestAnimationFrame(drawFocus);
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [focusDisplayCanvasRef, receiverMediaStream, videoElementRef]);
+
   useEffect(() => {
     if (!layout || !receiverMediaStream) {
       return;

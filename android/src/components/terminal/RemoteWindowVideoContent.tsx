@@ -12,11 +12,11 @@ export interface RemoteWindowVideoContentProps {
   receiverAttached: boolean;
   overviewCropVisible: boolean;
   videoHasPlayed: boolean;
-  dualStreamPhase: string;
   focusedVideoStyle: CSSProperties | null;
   overviewCanvasRef: RefObject<HTMLCanvasElement | null>;
   videoElementRef: RefObject<HTMLVideoElement | null>;
   overviewVideoElementRef: RefObject<HTMLVideoElement | null>;
+  focusDisplayCanvasRef?: RefObject<HTMLCanvasElement | null>;
   onVideoLifecycle: (event: 'loadedmetadata' | 'loadeddata' | 'canplay') => void;
 }
 
@@ -28,11 +28,11 @@ export function RemoteWindowVideoContent({
   receiverAttached,
   overviewCropVisible,
   videoHasPlayed,
-  dualStreamPhase,
   focusedVideoStyle,
   overviewCanvasRef,
   videoElementRef,
   overviewVideoElementRef,
+  focusDisplayCanvasRef,
   onVideoLifecycle,
 }: RemoteWindowVideoContentProps) {
   const wallpaper = (
@@ -70,6 +70,23 @@ export function RemoteWindowVideoContent({
               opacity: 1,
             }}
           />
+        ) : focusDisplayCanvasRef ? (
+          <canvas
+            ref={focusDisplayCanvasRef}
+            data-testid="remote-window-focus-display-canvas"
+            width={1920}
+            height={1080}
+            style={{
+              ...styles.videoElement,
+              position: 'absolute',
+              inset: 0,
+              width: '100%',
+              height: '100%',
+              objectFit: 'contain',
+              zIndex: 2,
+              opacity: 1,
+            }}
+          />
         ) : null}
         <video
           data-testid="remote-window-video"
@@ -87,7 +104,12 @@ export function RemoteWindowVideoContent({
           style={{
             ...styles.videoElement,
             ...focusedVideoStyle,
-            opacity: videoHasPlayed || dualStreamPhase === 'overview-crop-visible' ? 1 : 0,
+            // Android WebView hardware compositor does not render WebRTC
+            // MediaStream <video> to the screen even when readyState=4 and
+            // play() resolves. The focus display canvas draws the same frames
+            // via drawImage, so the source video is kept at opacity 0 as the
+            // decode surface only.
+            opacity: 0,
             visibility: 'visible',
           }}
         />

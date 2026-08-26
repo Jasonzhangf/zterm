@@ -283,6 +283,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     error: null,
   });
   const compositeOverviewCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const focusDisplayCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const compositeThumbCanvasRefs = useRef<Map<string, HTMLCanvasElement | null>>(new Map());
   const clearCompositeThumbCanvases = useCallback(() => {
     compositeThumbCanvasRefs.current.clear();
@@ -1245,6 +1246,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     videoElementRef,
     overviewVideoElementRef,
     overviewCanvasRef: compositeOverviewCanvasRef,
+    focusDisplayCanvasRef,
     thumbnailCanvasRefs: compositeThumbCanvasRefs,
   });
 
@@ -2576,11 +2578,11 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       receiverAttached={Boolean(receiverMediaStream)}
       overviewCropVisible={overviewCropVisible}
       videoHasPlayed={videoHasPlayed}
-      dualStreamPhase={dualStreamSwitch.phase}
       focusedVideoStyle={focusedVideoStyle}
       overviewCanvasRef={compositeOverviewCanvasRef}
       videoElementRef={videoElementRef}
       overviewVideoElementRef={overviewVideoElementRef}
+      focusDisplayCanvasRef={focusDisplayCanvasRef}
       onVideoLifecycle={(event) => {
         publishVideoDebugSnapshot(event);
         requestBoundVideoPlayback();
