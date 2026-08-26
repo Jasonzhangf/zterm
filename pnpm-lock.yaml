@@ -205,6 +205,9 @@ importers:
       '@cordisjs/core':
         specifier: 3.18.1
         version: 3.18.1
+      '@zterm/runtime-contracts':
+        specifier: workspace:*
+        version: link:../runtime-contracts
     devDependencies:
       '@types/node':
         specifier: ^20.0.0
@@ -235,6 +238,19 @@ importers:
       '@types/react':
         specifier: ^19.0.0
         version: 19.2.14
+
+  packages/stream-boundary:
+    dependencies:
+      '@zterm/runtime-contracts':
+        specifier: workspace:*
+        version: link:../runtime-contracts
+      typescript:
+        specifier: ^5.4.0
+        version: 5.9.3
+    devDependencies:
+      '@types/node':
+        specifier: ^20.0.0
+        version: 20.19.39
 
   packages/ui-contract:
     dependencies:

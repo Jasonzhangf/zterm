@@ -21,7 +21,8 @@
     "daemon:stop": "pnpm --filter @zterm/android daemon:stop",
     "test:v2-parity-catalog": "node ./scripts/validate-zterm-v2-parity-catalog.mjs",
     "test:v2-parity-catalog:negative": "node --test ./scripts/validate-zterm-v2-parity-catalog.test.mjs",
-    "test:kernel-lifecycle": "pnpm --dir packages/kernel test"
+    "test:kernel-lifecycle": "pnpm --dir packages/kernel test",
+    "test:stream-boundary": "pnpm --dir packages/stream-boundary run type-check && pnpm --dir packages/stream-boundary run test"
   },
   "packageManager": "pnpm@9.15.9",
   "devDependencies": {

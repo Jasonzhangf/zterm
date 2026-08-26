@@ -27,6 +27,14 @@
       "required_gates": ["gate.map.parse", "gate.lifecycle.pairs"]
     },
     {
+      "feature_id": "feature.runtime.stream_boundary",
+      "owner_modules": ["runtime.stream_boundary"],
+      "status": "active",
+      "allowed_paths": ["packages/stream-boundary/src/**"],
+      "forbidden_paths": ["packages/kernel/src/cordis/**", "android/**", "mac/**", "win/**"],
+      "required_gates": ["gate.map.parse", "gate.stream.boundary", "gate.payload.isolation"]
+    },
+    {
       "feature_id": "feature.kernel.cordis_adapter",
       "owner_modules": ["app.cordis_adapter"],
       "status": "active",

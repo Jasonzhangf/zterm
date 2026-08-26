@@ -147,6 +147,14 @@
       "required_gates": ["gate.map.parse", "gate.symbol.exists", "gate.lifecycle.pairs"]
     },
     {
+      "function_id": "function.stream_boundary.gateway",
+      "owner_module": "runtime.stream_boundary",
+      "path": "packages/stream-boundary/src/stream-gateway.ts",
+      "entry_symbols": ["DataStreamGateway"],
+      "status": "active",
+      "required_gates": ["gate.map.parse", "gate.symbol.exists", "gate.stream.boundary"]
+    },
+    {
       "function_id": "function.kernel.capability_registry",
       "owner_module": "app.kernel",
       "path": "packages/kernel/src/capability-registry.ts",

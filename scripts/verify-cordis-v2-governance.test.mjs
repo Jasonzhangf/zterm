@@ -10,7 +10,7 @@ const manifest = JSON.parse(readFileSync(resolve(root, MANIFEST_PATH), 'utf8'));
 
 test('accepts the committed v2 phase manifest and source anchors', () => {
   const result = validateManifest(manifest, root);
-  assert.deepEqual(result, { phaseCount: 9, nodeCount: 9, edgeCount: 8, activeGateCount: 3 });
+  assert.deepEqual(result, { phaseCount: 9, nodeCount: 9, edgeCount: 8, activeGateCount: 6 });
 });
 
 test('rejects a review edge that bypasses a declared node', () => {

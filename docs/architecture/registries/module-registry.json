@@ -15,6 +15,17 @@
       "required_gates": ["gate.map.parse", "gate.owner.uniqueness", "gate.shared.core.imports"]
     },
     {
+      "module_id": "runtime.stream_boundary",
+      "status": "active",
+      "layer": "runtime-contract",
+      "owned_paths": ["packages/stream-boundary/src/**"],
+      "allowed_paths": ["packages/stream-boundary/src/**"],
+      "forbidden_paths": ["android/**", "mac/**", "win/**", "packages/kernel/src/cordis/**"],
+      "forbidden_imports": ["react", "react-dom", "@capacitor/*", "electron", "cordis"],
+      "declared_edges": [{"to": "runtime.contracts"}],
+      "required_gates": ["gate.map.parse", "gate.owner.uniqueness", "gate.import.edges", "gate.payload.isolation"]
+    },
+    {
       "module_id": "ui.contract",
       "status": "active",
       "layer": "ui-contract",

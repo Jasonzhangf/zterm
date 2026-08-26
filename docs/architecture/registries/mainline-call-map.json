@@ -148,6 +148,28 @@
         {"edge_id": "edge.target.domain_to_projection", "from": "kernel.domain_reducer", "to": "kernel.projection_out", "caller_symbol": "commit", "callee_symbol": "project", "relation_status": "direct", "status": "design"},
         {"edge_id": "edge.target.projection_to_snapshot", "from": "kernel.projection_out", "to": "kernel.snapshot_out", "caller_symbol": "readSnapshot", "callee_symbol": "subscribe", "relation_status": "direct", "status": "design"}
       ]
+    },
+    {
+      "mainline_id": "stream_boundary_mainline",
+      "entrypoint": "stream.gateway",
+      "return_path": "stream.data_contract",
+      "nodes": [
+        {"id": "stream.gateway", "owner_module": "runtime.stream_boundary", "label": "packages/stream-boundary/src/stream-gateway.ts#DataStreamGateway"},
+        {"id": "stream.data_contract", "owner_module": "runtime.contracts", "label": "packages/runtime-contracts/src/index.ts#createDataEnvelope"}
+      ],
+      "edges": [
+        {
+          "edge_id": "edge.stream.gateway_to_data_contract",
+          "from": "stream.gateway",
+          "to": "stream.data_contract",
+          "caller_path": "packages/stream-boundary/src/stream-gateway.ts",
+          "callee_path": "packages/runtime-contracts/src/index.ts",
+          "caller_symbol": "publish",
+          "callee_symbol": "createDataEnvelope",
+          "relation_status": "direct",
+          "status": "anchored"
+        }
+      ]
     }
   ]
 }

@@ -34,6 +34,9 @@ jobs:
       - name: Kernel lifecycle positive and negative suite
         run: pnpm run test:kernel-lifecycle
 
+      - name: Data stream boundary positive and negative suite
+        run: pnpm run test:stream-boundary
+
   appsdk-governance:
     name: AppSDK record graph gate
     runs-on: macos-14

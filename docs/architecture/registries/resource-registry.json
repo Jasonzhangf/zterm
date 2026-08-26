@@ -121,6 +121,18 @@
       "canonical_docs": ["android/docs/decisions/2026-04-23-terminal-head-buffer-render-truth.md"]
     },
     {
+      "resource_id": "resource.stream_boundary",
+      "resource_type": "data_plane_resource",
+      "owner": "runtime.stream_boundary",
+      "truth_store": "packages/stream-boundary/src/**",
+      "status": "active",
+      "allowed_operations": ["open", "send", "dispose"],
+      "direct_relations": ["resource.terminal_data_stream"],
+      "forbidden_direct_relations": ["resource.cordis_context", "resource.debug_snapshot_registry"],
+      "required_gates": ["gate.owner.uniqueness", "gate.payload.isolation", "gate.stream.boundary"],
+      "canonical_docs": ["docs/design/2026-08-26-zterm-cordis-v2-cross-platform.md"]
+    },
+    {
       "resource_id": "resource.debug_snapshot_registry",
       "resource_type": "debug_side_channel",
       "owner": "shared.domain_core",
