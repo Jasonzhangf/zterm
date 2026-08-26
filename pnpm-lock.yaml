@@ -200,6 +200,16 @@ importers:
         specifier: ^8.20.0
         version: 8.20.0
 
+  packages/runtime-contracts:
+    dependencies:
+      typescript:
+        specifier: ^5.4.0
+        version: 5.9.3
+    devDependencies:
+      '@types/node':
+        specifier: ^20.0.0
+        version: 20.19.39
+
   packages/shared:
     dependencies:
       '@jsonstudio/wtermmod-react':

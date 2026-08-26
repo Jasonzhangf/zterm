@@ -1,0 +1,19 @@
+{
+  "name": "@zterm/runtime-contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "type-check": "tsc --noEmit",
+    "test": "node --test src/contracts.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0"
+  },
+  "dependencies": {
+    "typescript": "^5.4.0"
+  }
+}
