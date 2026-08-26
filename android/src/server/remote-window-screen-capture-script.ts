@@ -94,8 +94,14 @@ func makeStreamConfiguration(
     streamConfiguration.pixelFormat = kCVPixelFormatType_32BGRA
     streamConfiguration.queueDepth = max(3, min(3, queueDepth))
     streamConfiguration.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(max(1, frameRate)))
-    streamConfiguration.width = max(1, Int(entry.cropRect.width.rounded()))
-    streamConfiguration.height = max(1, Int(entry.cropRect.height.rounded()))
+    // SCStream natively scales the captured window to width x height. Use
+    // outputWidth/outputHeight (the canvas slot size from the layout planner)
+    // so each frame already matches its composite slot; otherwise the blit
+    // would crop only the top-left corner of a larger native frame.
+    let outputW = entry.outputWidth ?? Int(entry.cropRect.width.rounded())
+    let outputH = entry.outputHeight ?? Int(entry.cropRect.height.rounded())
+    streamConfiguration.width = max(1, outputW)
+    streamConfiguration.height = max(1, outputH)
     streamConfiguration.sourceRect = CGRect(
         x: max(0, entry.cropRect.x - entry.windowBounds.x),
         y: max(0, entry.cropRect.y - entry.windowBounds.y),
