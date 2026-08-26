@@ -149,8 +149,8 @@ final class CompositeCanvas {
         lock.lock()
         defer { lock.unlock() }
         let slot = offsets[index]
-        let copyWidth = min(slot.width, frameWidth)
-        let copyHeight = min(slot.height, frameHeight)
+        let copyWidth = min(slot.width, frameWidth, max(0, width - slot.x))
+        let copyHeight = min(slot.height, frameHeight, max(0, height - slot.y))
         for y in 0..<copyHeight {
             let srcRow = y * frameWidth * 4
             let dstRow = ((slot.y + y) * width + slot.x) * 4
@@ -211,10 +211,15 @@ final class FrameOutput: NSObject, SCStreamOutput {
             }
         }
 
-        if let canvas = canvas {
-            canvas.blit(index: canvasIndex, rgba: rgba, frameWidth: width, frameHeight: height)
-        } else {
-            writeFrame(rgba: rgba, width: width, height: height)
+        do {
+            if let canvas = canvas {
+                canvas.blit(index: canvasIndex, rgba: rgba, frameWidth: width, frameHeight: height)
+            } else {
+                writeFrame(rgba: rgba, width: width, height: height)
+            }
+        } catch {
+            stderrLine("remote window capture frame blit failed: " + error.localizedDescription)
+            return
         }
         emitted += 1
     }
