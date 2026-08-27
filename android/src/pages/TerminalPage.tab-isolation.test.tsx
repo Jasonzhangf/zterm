@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ComponentProps } from 'react';
 import { STORAGE_KEYS, type Session, TerminalResizeHandler, TerminalViewportChangeHandler } from '../lib/types';
@@ -44,11 +44,27 @@ vi.mock('@capacitor/keyboard', () => ({
 
 vi.mock('../components/terminal/TerminalHeader', () => ({
   TerminalHeader: ({
+    paneGroups,
     onOpenQuickTabPicker,
   }: {
+    paneGroups?: Array<{
+      paneId: string;
+      sessions: Array<{ id: string }>;
+      activeSessionId: string | null;
+      isActivePane: boolean;
+    }>;
     onOpenQuickTabPicker?: (paneId?: string) => void;
   }) => (
     <div data-testid="terminal-header">
+      <div data-testid="terminal-header-pane-groups">
+        {(paneGroups || []).map((group) => (
+          <div key={group.paneId} data-testid={`terminal-header-pane-group-${group.paneId}`}>
+            {group.sessions.map((session) => (
+              <span key={session.id} data-testid={`terminal-header-tab-${session.id}`}>{session.id}</span>
+            ))}
+          </div>
+        ))}
+      </div>
       <button type="button" onClick={() => onOpenQuickTabPicker?.('pane-2')}>
         open-quick-picker-pane-2
       </button>
@@ -436,6 +452,55 @@ describe('TerminalPage tab isolation', () => {
     const panes = Array.from(document.querySelectorAll('[data-testid="terminal-pane-shell"]'));
     const pane2 = panes.find((node) => node.getAttribute('data-pane-id') === 'pane-2') as HTMLElement | undefined;
     expect(pane2?.querySelector('[data-testid="terminal-view-s3"]')).toBeTruthy();
+  });
+
+  it('passes per-pane session groups to the header when split is visible', () => {
+    const sessions = [makeSession('s1'), makeSession('s2'), makeSession('s3')];
+    localStorage.setItem(STORAGE_KEYS.TERMINAL_LAYOUT, JSON.stringify({
+      panes: [
+        {
+          id: 'pane-1',
+          size: 0.5,
+          activeTabId: 'tab-s1',
+          tabs: [{ id: 'tab-s1', sessionId: 's1' }, { id: 'tab-s3', sessionId: 's3' }],
+        },
+        {
+          id: 'pane-2',
+          size: 0.5,
+          activeTabId: 'tab-s2',
+          tabs: [{ id: 'tab-s2', sessionId: 's2' }],
+        },
+      ],
+      activePaneId: 'pane-1',
+    }));
+
+    render(
+      <TerminalPage
+        sessions={sessions}
+        activeSession={sessions[0]}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    const pane1 = screen.getByTestId('terminal-header-pane-group-pane-1');
+    const pane2 = screen.getByTestId('terminal-header-pane-group-pane-2');
+    expect(within(pane1).getByTestId('terminal-header-tab-s1')).toBeTruthy();
+    expect(within(pane1).getByTestId('terminal-header-tab-s3')).toBeTruthy();
+    expect(within(pane1).queryByTestId('terminal-header-tab-s2')).toBeNull();
+    expect(within(pane2).getByTestId('terminal-header-tab-s2')).toBeTruthy();
+    expect(within(pane2).queryByTestId('terminal-header-tab-s1')).toBeNull();
+    expect(within(pane2).queryByTestId('terminal-header-tab-s3')).toBeNull();
   });
 
   it('uses the active pane session as the single UI owner in split mode even before runtime active catches up', () => {

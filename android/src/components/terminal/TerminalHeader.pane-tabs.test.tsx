@@ -129,6 +129,42 @@ describe('TerminalHeader shared PaneTabs integration (red baseline)', () => {
     expect(secondPane?.style.borderRight).toBe('');
   });
 
+  it('isolates each pane tab strip to sessions owned by that pane', () => {
+    const props = makeProps({
+      sessions: [makeSession('s1'), makeSession('s2'), makeSession('s3')],
+      activeSession: makeSession('s1'),
+      splitVisible: true,
+      paneGroups: [
+        {
+          paneId: 'p1',
+          size: 1,
+          sessions: [makeSession('s1'), makeSession('s2')],
+          activeSessionId: 's1',
+          isActivePane: true,
+        },
+        {
+          paneId: 'p2',
+          size: 1,
+          sessions: [makeSession('s3')],
+          activeSessionId: 's3',
+          isActivePane: false,
+        },
+      ],
+    });
+    const { container } = render(<TerminalHeader {...props} />);
+    const firstPane = container.querySelector('[data-testid="terminal-header-pane-group-p1"]') as HTMLElement | null;
+    const secondPane = container.querySelector('[data-testid="terminal-header-pane-group-p2"]') as HTMLElement | null;
+
+    expect(firstPane).toBeTruthy();
+    expect(secondPane).toBeTruthy();
+    expect(firstPane?.querySelector('[data-tab-id="s1"]')).toBeTruthy();
+    expect(firstPane?.querySelector('[data-tab-id="s2"]')).toBeTruthy();
+    expect(firstPane?.querySelector('[data-tab-id="s3"]')).toBeNull();
+    expect(secondPane?.querySelector('[data-tab-id="s3"]')).toBeTruthy();
+    expect(secondPane?.querySelector('[data-tab-id="s1"]')).toBeNull();
+    expect(secondPane?.querySelector('[data-tab-id="s2"]')).toBeNull();
+  });
+
   it('uses split-landscape profile when splitVisible=true and landscape=true', () => {
     const props = makeProps({
       splitVisible: true,
