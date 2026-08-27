@@ -13,7 +13,7 @@
  * - large-reading: large output scrollback stays in reading, then returns to follow
  */
 
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { WebSocket } from 'ws';
@@ -323,16 +323,15 @@ async function startPackagedApp() {
   assertNoExistingCdpOwner(options.port);
   const userDataDir = join(options.evidenceDir, 'user-data');
   mkdirSync(userDataDir, { recursive: true });
-  const result = spawnSync('open', [
-    '-n',
-    options.appPath,
-    '--args',
+  const executable = join(options.appPath, 'Contents', 'MacOS', 'ZTerm');
+  const child = spawn(executable, [
     `--remote-debugging-port=${options.port}`,
     `--user-data-dir=${userDataDir}`,
-  ], { cwd: ROOT, encoding: 'utf8' });
-  if (result.status !== 0) {
-    throw new Error(result.stderr || result.stdout || 'open packaged app failed');
-  }
+  ], {
+    cwd: MAC_ROOT,
+    env: { ...process.env, ZTERM_MAC_SMOKE: 'terminal-buffer-blackbox' },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
   const version = await waitForCdp(options.port);
   writeFileSync(join(options.evidenceDir, 'cdp-version.json'), JSON.stringify(version, null, 2));
   await sleep(700);
