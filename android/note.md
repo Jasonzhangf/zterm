@@ -203,14 +203,48 @@
 - Live probe: composite out-of-display correctly rejected with exit 6 / typed stderr; stale window still exit 4.
 - AGY Review PASS findings=[] for commit 68a895c3 (worktree) = ce9996a4 (main).
 - Emulator socket=missing for remote-window transport is unrelated to this fix (emulator NAT'd, daemon not reachable via 127.0.0.1); owned by mux/route worktree.
-## 2026-08-25 UDP/relay red-test 评估（pending decision）
+## 2026-08-25 UDP/relay red-test 评估（decision recorded 2026-08-27）
 
-- AndroidConnectionService 当前是 native 物理 transport owner，但 `buildCandidates()` 永远只生成 Tailscale/IPv6/IPv4 WebSocket URL；`startAttempt()` 对 `RTC_DIRECT/RTC_RELAY` 显式 `webrtc-not-supported`。
-- build.gradle 没有 WebRTC 类库（只有 OkHttp + Capacitor + AndroidX）。
-- `TraversalSocket` 完整保留 WebRTC/UDP/relay 竞速实现，但仅被 `tmux-sessions.ts` 管理面与 web 平台调用；Android native 路径在 `session-context-infra-facade-runtime.ts:513` 强制走 native service。
-- resource-map / function-map / mainline-call-map 已显式声明 native WebRTC/Relay media ownership 是"separate slice"，目前未实现。
-- 待 Jason 拍板：方案 A native WebRTC（worktree + libwebrtc/wrtc-android + native signaling slice）vs 方案 B 保留 native service owner、扩展其 relay 通道。
-- 在 Jason 决策前不动代码、不开 worktree。
+### 现状与根因
+
+- `AndroidConnectionService` 是 native 物理 transport owner，但 `buildCandidates()` 目前只生成 Tailscale/IPv6/IPv4 WebSocket URL；`startAttempt()` 对 `RTC_DIRECT` / `RTC_RELAY` 显式返回 `webrtc-not-supported`。
+- `android/native/android/app/build.gradle` 没有 WebRTC 依赖（只有 OkHttp、Capacitor、AndroidX），因此 native service 当前没有 `RTCPeerConnection`、ICE 或 DataChannel 实现。
+- WebView 的 `TraversalSocket` 已实现 signal WebSocket、`RTCPeerConnection`、ordered DataChannel、ICE direct/relay、断线重启、route diagnostics；`buildTraversalPlan()` 也已统一生成 `rtc-direct` / `rtc-relay` candidate、`relayHostId`、STUN/TURN 与 `iceTransportPolicy`。
+- Android native 路径在 `session-context-infra-facade-runtime.ts` 的 `openDaemonTargetTransportSocket()` 分支强制进入 `openAndroidConnectionServiceTransportSocket()`，不会消费 WebView `TraversalSocket`。这解释了“WebView relay 可用、native Android relay 明确拒绝”的差异。
+- 资源、模块、function map 与 mainline call map 已将 native WebRTC/Relay media 标为 separate slice；`resource.android_connection_service` 仍只声明 target physical transport、mux/channel、heartbeat、network-generation、reconnect/backoff 与 route policy owner。
+
+### 决策
+
+选择方案 B 作为架构方案：保留 `AndroidConnectionService` 的 target transport/channel/mux/heartbeat/reconnect 唯一 owner，在其下接入一个 native WebRTC `TransportBackend`，而不是新增第二个 native service 或独立 session/lifecycle owner。
+
+这里的“B”描述 ownership 与生命周期边界；实现该 backend 时可以采用方案 A 所列的 libwebrtc/wrtc-android（或等价 Android WebRTC binding）作为底层引擎。底层库不是新的业务真相，也不拥有 route policy、target generation、mux/channel、heartbeat、重连或 UI 状态。
+
+### 方案对比
+
+| 方案 | Owner / 允许路径 | 禁止路径 | Gate 计划 | 回滚与成本 |
+| --- | --- | --- | --- | --- |
+| A. full native WebRTC + native signaling slice | 新增 native WebRTC/signaling owner；Android service 仅作为调用方；可在 native 层重建 signal、ICE、peer、DataChannel 与 relay lifecycle | 不得复制 `buildTraversalPlan()` / route health / `relayHostId` 真相；不得让 signaling slice 持有 target/session/channel/mux/heartbeat；不得绕过既有 typed command/event 与 mux wire | 先补 resource/module/edge/function/mainline/test-design；再做依赖/ABI/NDK preflight；native direct+relay 正反测试；signal/ICE ordering、generation fence、DataChannel binary/text、reconnect/cleanup；Android compile/unit；真实 ADB relay smoke；安装版本与 runtime SHA 对齐 | 可删除 native slice 回到现有显式 `webrtc-not-supported`，但会产生第二套 signaling/route/lifecycle 真相；依赖、ABI、NDK、包体与维护成本最高 |
+| B. service owner + WebRTC backend（选中） | `AndroidConnectionService` 继续拥有 target、generation、route selection、mux/channel、heartbeat、retry/backoff；仅将 candidate-specific peer/ICE/DataChannel 通过 typed backend adapter 接入；复用共享 traversal candidate semantics | backend 不得直接改 UI、SessionContext、mirror/buffer/renderer；不得自行重连、切 route、创建第二个 mux/channel registry；不得把 control/debug/provider 字段写入业务 payload；不得把 native media library暴露为新业务 owner | 先锁 `Backend`/candidate adapter contract；依赖/ABI preflight；native WebRTC unit tests（direct/relay、ICE、ordered channel、failure/close）；service lifecycle tests（generation、retry、mux、heartbeat、route health）；TS/native protocol parity；type-check、feature/resource/module/edge gates；Android compile；真实 ADB direct+TURN relay、断网恢复、旧 generation rejection、cleanup 计数归零 | 逐 candidate 可显式失败并继续既有 WebSocket candidate；若 backend 不可用，保留 `webrtc-not-supported` typed error，不做静默降级。改动集中在 service adapter + native backend，能按 slice 删除，避免重写既有 service |
+
+### Owner、allowed / forbidden paths
+
+- 唯一 owner：`client.android_connection_service`（native service）继续拥有 physical target transport 与 lifecycle；新增的 native WebRTC backend 只能是该 owner 的实现子片，不注册为第二个 session/transport owner。
+- Allowed：`route_policy -> shared traversal candidate adapter -> native WebRTC backend -> typed physical transport events -> AndroidConnectionService generation/mux/channel -> existing SessionContext projection`。
+- Allowed：复用 `TraversalPlanCandidate` 的 `signalUrl`、`relayHostId`、`iceServers`、`iceTransportPolicy` 与 route diagnostics 语义；native 侧只做显式类型转换，不重新决定候选顺序。
+- Forbidden：native backend 读取或写入 renderer、buffer、mirror、active tab、foreground/background、viewport；service 之外执行 `resize-window` 或改写 daemon truth；任何 UI 组件直接创建/关闭 peer；在 metadata、SDP、channel body 或 terminal payload 中混入 retry/provider/health/debug/control 语义。
+- Forbidden：新增独立 signaling daemon、第二套 `relayHostId`/TURN credential 真相、backend 自己的 reconnect/backoff、跨 generation 复用 peer/channel，或用 screenshot/WebSocket fallback 把 WebRTC 失败投影成成功。
+
+### 交付顺序与验证门
+
+1. 先补机器映射：`resource.android_connection_service`、`client.android_connection_service` 的 owned paths、edge、function map、mainline call map 与 test design，明确 backend 作为同一 owner 的子片。
+2. 做依赖与平台 preflight：固定 Android WebRTC artifact、ABI/NDK/minSdk、ProGuard/packaging、ICE API 与 DataChannel binary 支持；未通过则保持显式 unsupported，不提交半接线依赖。
+3. 先写正反红测，再实现：candidate identity/route ordering、signal init/offer/answer、early ICE ordering、direct/relay policy、DataChannel text/binary、generation fence、retry/backoff、close/cleanup、already-terminal/non-terminal。
+4. 跑 `test:android-connection-service`、transport/mux/route gates、`test:feature-registry`、type-check、Android unit/compile；之后才做在线 ADB direct + TURN relay、断网恢复与资源清理，确认安装 runtime 与源码 commit 一致。
+5. 任何 backend 或协议代码变更都会使旧安装、在线样本与 review 证据失效；必须从定向测试、构建、安装/重启、真实样本重新闭环，最后才允许 AGY Review。
+
+### 结论
+
+方案 B 达成“native Android 可用 WebRTC/Relay”而不破坏现有唯一 owner：service 继续控制物理 target 生命周期，backend 只提供 candidate-specific WebRTC transport。方案 A 的 native library 仍可能被采用，但不能以独立 signaling/session/lifecycle slice 落地。当前仅记录决策，不改实现；在依赖与 machine-map gate 落地前，不得把 `RTC_DIRECT` / `RTC_RELAY` 从显式 unsupported 改为可用。
 
 ## 2026-08-27 Mac blackbox CDP root cause analysis
 
