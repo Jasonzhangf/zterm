@@ -272,6 +272,15 @@
         "phase7"
       ],
       "status": "active"
+    },
+    {
+      "gate_id": "gate.four.platform.parity",
+      "command": "node scripts/check-phase7-four-platform-parity.mjs",
+      "type": "static",
+      "required_for": [
+        "phase7"
+      ],
+      "status": "active"
     }
   ]
 }

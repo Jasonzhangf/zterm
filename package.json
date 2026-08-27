@@ -22,7 +22,9 @@
     "test:v2-parity-catalog": "node ./scripts/validate-zterm-v2-parity-catalog.mjs",
     "test:v2-parity-catalog:negative": "node --test ./scripts/validate-zterm-v2-parity-catalog.test.mjs",
     "test:kernel-lifecycle": "pnpm --dir packages/kernel test",
-    "test:stream-boundary": "pnpm --dir packages/stream-boundary run type-check && pnpm --dir packages/stream-boundary run test"
+    "test:stream-boundary": "pnpm --dir packages/stream-boundary run type-check && pnpm --dir packages/stream-boundary run test",
+    "test:phase7-four-platform-parity": "node ./scripts/check-phase7-four-platform-parity.mjs",
+    "test:phase7-four-platform-parity:negative": "node ./scripts/check-phase7-four-platform-parity.test.mjs"
   },
   "packageManager": "pnpm@9.15.9",
   "devDependencies": {

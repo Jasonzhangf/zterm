@@ -55,6 +55,12 @@ jobs:
       - name: Android low-risk plugin UI ownership suite
         run: pnpm --dir android run test:low-risk-plugin-ui
 
+      - name: Phase 7 four-platform parity gate
+        run: pnpm run test:phase7-four-platform-parity
+
+      - name: Phase 7 four-platform parity negative suite
+        run: pnpm run test:phase7-four-platform-parity:negative
+
   appsdk-governance:
     name: AppSDK record graph gate
     runs-on: macos-14
