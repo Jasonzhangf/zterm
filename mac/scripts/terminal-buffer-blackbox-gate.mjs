@@ -320,6 +320,18 @@ async function startPackagedApp() {
   if (!existsSync(options.appPath)) {
     throw new Error(`Packaged app missing: ${options.appPath}. Run pnpm --dir mac run package first.`);
   }
+  const signature = spawnSync('codesign', ['--force', '--deep', '--sign', '-', options.appPath], {
+    cwd: MAC_ROOT,
+    encoding: 'utf8',
+  });
+  writeFileSync(join(options.evidenceDir, 'launch-signature.txt'), [
+    `status=${signature.status}`,
+    signature.stdout || '',
+    signature.stderr || '',
+  ].join('\n'));
+  if (signature.status !== 0) {
+    throw new Error(`ad-hoc signing failed for packaged app: ${signature.stderr || signature.stdout}`);
+  }
   writeFileSync(join(options.evidenceDir, 'launch-bundle-exists.txt'), `${options.appPath}\n`);
   assertNoExistingCdpOwner(options.port);
   const userDataDir = join(options.evidenceDir, 'user-data');
@@ -426,10 +438,15 @@ async function connectSocket(wsUrl) {
 }
 
 async function connectPage() {
-  const targets = await fetchJson(`http://127.0.0.1:${options.port}/json/list`);
-  const page = targets.find((target) => target.type === 'page' && /ZTerm Mac/u.test(target.title || ''));
+  let page = null;
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const targets = await fetchJson(`http://127.0.0.1:${options.port}/json/list`).catch(() => []);
+    page = targets.find((target) => target.type === 'page' && /ZTerm Mac/u.test(target.title || ''));
+    if (page?.webSocketDebuggerUrl) break;
+    await sleep(250);
+  }
   if (!page?.webSocketDebuggerUrl) {
-    throw new Error('No ZTerm Mac page target found');
+    throw new Error(`No ZTerm Mac page target found after ${12 * 250}ms`);
   }
   const socket = await connectSocket(page.webSocketDebuggerUrl);
   await socket.call('Runtime.enable');
@@ -921,6 +938,7 @@ async function main() {
     results: [],
   };
   let tuiFixture = null;
+  let freshSocket = null;
   try {
     if (options.caseName === 'sequence' || options.caseName === 'all') {
       createSequenceSession(sequenceSession, options.evidenceDir);
@@ -935,7 +953,7 @@ async function main() {
     const pageSocket = await connectPage();
     await resetWorkspace(pageSocket.call);
     pageSocket.ws.close();
-    const freshSocket = await connectPage();
+    freshSocket = await connectPage();
     if (options.caseName === 'sequence' || options.caseName === 'all') {
       summary.results.push(await runSequenceCase(freshSocket.call, sequenceSession));
       await captureScreenshot(freshSocket.call, 'sequence.png');
@@ -945,11 +963,16 @@ async function main() {
       await captureScreenshot(freshSocket.call, 'tui.png');
     }
     if (options.caseName === 'large-reading' || options.caseName === 'all') {
+      freshSocket.ws.close();
+      await closePackagedApp();
+      await startPackagedApp();
+      freshSocket = await connectPage();
+      await resetWorkspace(freshSocket.call);
       summary.results.push(await runLargeReadingCase(freshSocket.call, largeReadingSession));
       await captureScreenshot(freshSocket.call, 'large-reading.png');
     }
     captureResourceSample('resource-before-close');
-    freshSocket.ws.close();
+    if (freshSocket) freshSocket.ws.close();
     summary.ok = true;
     writeFileSync(join(options.evidenceDir, 'summary.json'), JSON.stringify(summary, null, 2));
     console.log(JSON.stringify(summary, null, 2));
