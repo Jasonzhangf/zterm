@@ -316,7 +316,6 @@ function buildPaneTreeRoot(
     panes.map((pane) => pane.tabs[0]!).filter((tab): tab is MacTabRecord => Boolean(tab)),
     fallbackPaneIds,
     (index) => panes[index]?.activeTabId ?? panes[index]?.tabs[0]?.id ?? '',
-    () => createEmptyMacTab(),
   );
   if (built) {
     return materializeTree(built.tree, panes);
