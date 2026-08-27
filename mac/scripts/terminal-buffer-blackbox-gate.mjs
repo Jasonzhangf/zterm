@@ -249,7 +249,7 @@ function startPipe(sessionName, logPath) {
 }
 
 function stopPipe(sessionName) {
-  runTmux(['pipe-pane', '-t', sessionName], { allowFailure: true });
+  runTmux(['pipe-pane', '-t', `${sessionName}:0.0`], { allowFailure: true });
 }
 
 function killDedicatedSession(sessionName, caseName) {
@@ -320,10 +320,13 @@ async function startPackagedApp() {
   if (!existsSync(options.appPath)) {
     throw new Error(`Packaged app missing: ${options.appPath}. Run pnpm --dir mac run package first.`);
   }
+  writeFileSync(join(options.evidenceDir, 'launch-bundle-exists.txt'), `${options.appPath}\n`);
   assertNoExistingCdpOwner(options.port);
   const userDataDir = join(options.evidenceDir, 'user-data');
   mkdirSync(userDataDir, { recursive: true });
   const executable = join(options.appPath, 'Contents', 'MacOS', 'ZTerm');
+  const childStdout = [];
+  const childStderr = [];
   const child = spawn(executable, [
     `--remote-debugging-port=${options.port}`,
     `--user-data-dir=${userDataDir}`,
@@ -332,7 +335,23 @@ async function startPackagedApp() {
     env: { ...process.env, ZTERM_MAC_SMOKE: 'terminal-buffer-blackbox' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  const version = await waitForCdp(options.port);
+  child.stdout?.setEncoding('utf8');
+  child.stderr?.setEncoding('utf8');
+  child.stdout?.on('data', (chunk) => childStdout.push(chunk));
+  child.stderr?.on('data', (chunk) => childStderr.push(chunk));
+  child.on('error', (error) => {
+    childStderr.push(`child error: ${error.stack || error.message}\n`);
+  });
+  child.on('exit', (code, signal) => {
+    writeFileSync(join(options.evidenceDir, 'launch-child-exit.txt'), `code=${code} signal=${signal}\n`);
+  });
+  let version;
+  try {
+    version = await waitForCdp(options.port);
+  } finally {
+    writeFileSync(join(options.evidenceDir, 'launch-stdout.txt'), childStdout.join(''));
+    writeFileSync(join(options.evidenceDir, 'launch-stderr.txt'), childStderr.join(''));
+  }
   writeFileSync(join(options.evidenceDir, 'cdp-version.json'), JSON.stringify(version, null, 2));
   await sleep(700);
   writeFileSync(join(options.evidenceDir, 'process-after-open.txt'), psForPort(options.port) || '');
