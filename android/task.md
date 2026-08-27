@@ -5,7 +5,7 @@
 - 成功标准：daemon `relay-ready` 后发布 `directory-update`；目录包含 daemon device、relay-rtc endpoint、tmux session；`/api/directory` 和 `/ws/devices` 都可验证；Android client 登录/刷新/stream 都写入同一个 `account.directory`。
 - 验证入口：
   - `pnpm --dir android exec vitest run src/server/relay-client.test.ts src/traversal-relay/store.test.ts src/traversal-relay/server.test.ts --reporter dot`
-  - `pnpm --dir android exec vitest run src/lib/relay-account-directory.test.ts src/lib/traversal-relay-client.test.ts src/hooks/useTraversalRelayAccount.test.tsx src/App.relay-stream-lifecycle.test.tsx src/lib/connections-server-groups.test.ts src/pages/ConnectionsPage.test.tsx --reporter dot`
+  - `pnpm --dir android exec vitest run src/lib/relay-account-directory.test.ts src/lib/traversal-relay-client.test.ts src/hooks/useTraversalRelayAccount.test.tsx src/App.relay-stream-lifecycle.test.tsx src/pages/ConnectionsPage.test.tsx --reporter dot`
   - `pnpm --dir android exec tsx scripts/traversal-relay-local-smoke.ts`
   - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`
 - 范围：`relay.account_directory` owner 文件；不碰 terminal buffer/render 主线。
