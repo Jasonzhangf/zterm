@@ -87,17 +87,20 @@ vi.mock('../components/TerminalView', () => ({
     sessionId,
     active,
     live,
+    copyModeActive,
     onViewportChange,
   }: {
     sessionId: string;
     active?: boolean;
     live?: boolean;
+    copyModeActive?: boolean;
     onViewportChange?: TerminalViewportChangeHandler;
   }) => (
     <div
       data-testid={`terminal-view-${sessionId}`}
       data-active={active ? 'true' : 'false'}
       data-live={live ? 'true' : 'false'}
+      data-copy-mode-active={copyModeActive ? 'true' : 'false'}
     >
       <button
         type="button"
@@ -343,5 +346,38 @@ describe('TerminalPage real quickbar split integration', () => {
       expect(onImagePaste).toHaveBeenCalledWith('s1', expect.any(File));
       expect(onFileAttach).toHaveBeenCalledWith('s1', expect.any(File));
     });
+  });
+
+  it('routes the copy button through the real quickbar and toggles copy mode on the active terminal view', async () => {
+    setViewport(390, 844);
+    const sessions = [makeSession('s1')];
+
+    render(
+      <TerminalPage
+        sessions={sessions}
+        activeSession={sessions[0]}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    const terminalView = screen.getByTestId('terminal-view-s1');
+    expect(terminalView.getAttribute('data-copy-mode-active')).toBe('false');
+
+    fireEvent.click(screen.getByRole('button', { name: '拷贝' }));
+    expect(terminalView.getAttribute('data-copy-mode-active')).toBe('true');
+
+    fireEvent.click(screen.getByRole('button', { name: '拷贝' }));
+    expect(terminalView.getAttribute('data-copy-mode-active')).toBe('false');
   });
 });
