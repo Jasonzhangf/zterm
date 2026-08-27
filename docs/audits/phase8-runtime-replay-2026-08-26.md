@@ -67,3 +67,14 @@ not independently prove an iOS runtime replay.
    resulting CI job.
 4. Rerun this audit against the resulting `origin/main`, then run AGY review
    only after all live evidence is available.
+
+## T5 Reconciliation Checkpoint (2026-08-27)
+
+T1/T3 provide current Mac evidence on the merged baseline: split-tree arity,
+type-check, packaged terminal sequence/TUI/large-reading replay, signature,
+launch exit, and cleanup passed; T3 AGY review returned PASS with no findings.
+T2 provides current Android package/OTA/emulator evidence, with the worktree APK
+2758 distinguished from the installed emulator 2760. T4 confirms Android/Mac CI
+gate wiring. These results supersede the historical Mac packaged and Android/Mac
+CI portions above; the global verdict remains `BLOCKED` because Windows and iOS
+live parity are deferred/incomplete.

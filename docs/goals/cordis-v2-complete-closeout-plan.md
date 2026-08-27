@@ -131,6 +131,19 @@ scope、push-head equality，再执行 AGY Review 准备/最终 review（仅在�
 - commit/push 范围锁通过，远端 HEAD 与本地 HEAD 一致；
 - remaining risks 仅为 Windows/iOS 第二阶段与明确不在本次 DoD 的 Public Relay 发布授权项。
 
+## T5 完成状态
+
+本轮仅包含 Android + Mac 第一阶段。T5 文档对账已完成：
+
+- Phase manifest (`zterm-cordis-v2-phase-manifest.json`)：`status` 更新为 `active`；`production_baseline` 更新为 `e7ca090b`（含 T1+T3 合并）；Phase 0-6 保持 `complete`；Phase 7 `active`（Android+Mac 已验证）；Phase 8 保持 `blocked-on-phase-7`。
+- Parity catalog (`zterm-v2-parity-catalog.json`)：`status` 更新为 `verified`；`production_baseline.commit` 更新为 `e7ca090b`；`android_v1` gates: typecheck/feature-registry/build verified, apk-smoke pending（无重跑）；`macos_v1` gates: typecheck/build/package/terminal-buffer-blackbox verified, alpha-smoke pending（无重跑）；`cross_platform_workspace_v1` Android+Mac workspace 部分标注 verified；individual feature 行保持 `pending`（本轮不对每个 feature 单独重跑）。
+- Parity catalog markdown：status rule 章节替换为 T1-T4 实际证据。
+- Wiki review：`Status: active / Phase 7 Android+Mac first-stage verified`；Phase checklist 更新为 Phase 0-6 complete、Phase 7 active、Phase 8 blocked；Gate table pending -> active；Lifecycle flowchart 更新状态。
+- Audit 文档：历史审计结论保持不变，T4 supersedes T1/T2/T3 部分按真实 T4 结果更新。
+
+Windows + iOS 明确 deferred/incomplete，不在本轮 scope。
+Public Relay 未发布（版本 2747，2760 返回 404）。
+
 ## 第二阶段（延期）
 
 - Windows packaged/ConPTY/transport/input live gate。
