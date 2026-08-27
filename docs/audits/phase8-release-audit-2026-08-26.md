@@ -95,3 +95,17 @@
 - G3: Phase 7 ios.native still working; required native iOS simulator/device live evidence pending.
 - G4: Phase 8 runtime.replay working but correctly blocked until ios.native live evidence; AGY not run yet by worker.
 - G5: Phase 8 release.audit itself remains available; this document is the master-side draft audit.
+
+## T5 Reconciliation Checkpoint (2026-08-27)
+
+- Baseline for the Android/Mac first-stage reconciliation: `e7ca090b` (T1/T3
+  merged; T2/T4 evidence reviewed).
+- Android: type-check, feature-registry (102/102), Gradle build, emulator 2760,
+  OTA manifest/hash, and daemon health evidence are recorded. Public Relay was
+  not changed; 2760 remains unavailable there by design.
+- Mac: T1 split-tree fix and T3 packaged/live gate evidence are recorded,
+  including 23 files/167 tests, sequence/TUI/large-reading, signature, exit,
+  cleanup, and AGY PASS.
+- Phase 7 remains `active`; Phase 8 remains `blocked-on-phase-7`. Windows and
+  iOS remain deferred/incomplete. Final T6 main-tree closeout and AGY review are
+  still required before any global completion claim.

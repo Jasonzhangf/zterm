@@ -4,7 +4,7 @@
 
 ## Baseline
 
-- Production commit: `d0f17b709873a7b4571b00f2ce32f428aae1b6ae`
+- Production commit: `e7ca090bea4590c95b38765a5b6fbd7c2b50443c`
 - Inspection worktree HEAD: `210b98e2a378bb96a96d9efc88e6ca8ecd8e6e53`
 - Feature count: 75
 - Platform IDs: `android`, `macos`, `windows`
@@ -14,13 +14,38 @@ Android registry features retain their stable `feature_id` and resolve owners th
 
 ## Status rule
 
-`verified` means a referenced file or ownership binding exists in this inspected tree. It never means a command was rerun. Commands, packaged smoke scripts, device/live samples, and durable evidence paths are explicitly `pending` because:
+`verified` means a referenced file or ownership binding exists in this inspected tree AND a current baseline command or durable evidence artifact was verified. `pending` means the required gate was not yet executed in the current baseline. `blocked` means an external dependency prevents execution.
 
-1. committed platform evidence directories contain README files only;
-2 historical macOS/Windows smoke results are recorded in task/MEMORY prose but their evidence artifacts are absent from the current tree;
-3. no installed APK/app/package identity was captured in this clean worktree.
+### Android profile (`android_v1`) — VERIFIED by T2
 
-Therefore all 75 feature rows remain overall `pending`. This is intentional and prevents target-state or stale historical claims from entering Phase 1 as production facts.
+- type-check: PASS
+- feature-registry: 102/102 PASS
+- Gradle build: BUILD SUCCESSFUL
+- emulator 0.1.3.2760: foreground, no FATAL/ANR; dataDir/firstInstallTime preserved
+- OTA 2760: local+Tailscale manifest sha256 `ab4e54e9...` verified
+- rollback 2760.1: sha256 `0db0b530...` prepared
+- daemon /health: ready; server.cjs sha `dba91008...` matches main
+- Public Relay: remains 2747; 2760 returns 404 (out of scope)
+
+### macOS profile (`macos_v1`) — VERIFIED by T1+T3
+
+- type-check: PASS
+- build: PASS
+- package: PASS
+- terminal-buffer-blackbox: PASS sequence/TUI/large-reading; launch exit 0; signature verify 0; process/port cleanup empty
+- AGY review: PASS findings=[]
+
+### Windows profile (`windows_v1`) — PENDING (Phase 2)
+
+- deferred to Phase 2; no live evidence required in this baseline.
+
+### Cross-platform workspace — VERIFIED (Android+Mac) by T1+T2+T3
+
+- Android workspace tests: part of T2 regression suite 861/861 PASS
+- Mac workspace tests: T1 merged 5b294a01 fixes split-tree arity; T3 full whitebox 23 files/167 tests PASS
+- Windows workspace: deferred to Phase 2.
+
+Individual feature rows remain `pending` because this reconciliation does not rerun every feature-level gate; profile-level Android and macOS gates are updated to `verified` only.
 
 ## Gate
 

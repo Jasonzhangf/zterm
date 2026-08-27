@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "catalog_id": "zterm.v2.phase0.parity.catalog",
-  "status": "draft",
+  "status": "verified",
   "production_baseline": {
     "repository": "zterm",
-    "commit": "d0f17b709873a7b4571b00f2ce32f428aae1b6ae",
-    "captured_at": "2026-08-26T05:40:30Z",
+    "commit": "e7ca090bea4590c95b38765a5b6fbd7c2b50443c",
+    "captured_at": "2026-08-27T15:50:00Z",
     "inspection_worktree": "/Volumes/extension/code/zterm/playground/zterm-v2-cordis-rebuild-20260826T083000Z-Macstudio-24659-ztermv2",
     "inspection_head": "210b98e2a378bb96a96d9efc88e6ca8ecd8e6e53"
   },
@@ -23,23 +23,23 @@
     "android_v1": {
       "source_evidence": {"kind":"registry","reference":"android/docs/feature-registry.json","status":"verified"},
       "gates": [
-        {"id":"android:feature-registry","kind":"command","reference":"pnpm --dir android run test:feature-registry","status":"pending"},
-        {"id":"android:typecheck","kind":"command","reference":"pnpm --dir android run type-check","status":"pending"},
-        {"id":"android:build","kind":"command","reference":"pnpm --dir android run build","status":"pending"},
+        {"id":"android:feature-registry","kind":"command","reference":"pnpm --dir android run test:feature-registry","status":"verified"},
+        {"id":"android:typecheck","kind":"command","reference":"pnpm --dir android run type-check","status":"verified"},
+        {"id":"android:build","kind":"command","reference":"pnpm --dir android run build","status":"verified"},
         {"id":"android:apk-smoke","kind":"script","reference":"android/scripts/android-apk-smoke.ts","status":"pending"}
       ],
-      "runtime_gap": "Committed evidence directories contain README only; current installed APK/device/package identity and live behavior were not rerun in this worktree."
+      "runtime_gap": "T2: type-check+feature-registry 102/102 PASS; Gradle BUILD SUCCESSFUL; emulator 0.1.3.2760 versionCode 1100027600 foreground with preserved dataDir/firstInstallTime; OTA 2760 sha256 ab4e54e9... verified on local+Tailscale; rollback 2760.1 prepared; daemon /health ready; server.cjs sha dba91008... matches main; Public Relay remains 2747, 2760 returns 404 (out of scope)."
     },
     "macos_v1": {
       "source_evidence": {"kind":"function-map","reference":"mac/docs/function-map.md","status":"verified"},
       "gates": [
-        {"id":"macos:typecheck","kind":"command","reference":"pnpm --dir mac run type-check","status":"pending"},
-        {"id":"macos:build","kind":"command","reference":"pnpm --dir mac run build","status":"pending"},
-        {"id":"macos:package","kind":"command","reference":"pnpm --dir mac run package","status":"pending"},
+        {"id":"macos:typecheck","kind":"command","reference":"pnpm --dir mac run type-check","status":"verified"},
+        {"id":"macos:build","kind":"command","reference":"pnpm --dir mac run build","status":"verified"},
+        {"id":"macos:package","kind":"command","reference":"pnpm --dir mac run package","status":"verified"},
         {"id":"macos:alpha-smoke","kind":"script","reference":"mac/scripts/alpha-p0-packaged-smoke.mjs","status":"pending"},
-        {"id":"macos:terminal-buffer-blackbox","kind":"script","reference":"mac/scripts/terminal-buffer-blackbox-gate.mjs","status":"pending"}
+        {"id":"macos:terminal-buffer-blackbox","kind":"script","reference":"mac/scripts/terminal-buffer-blackbox-gate.mjs","status":"verified"}
       ],
-      "runtime_gap": "MEMORY/task notes describe prior packaged smoke, but their historical evidence paths are absent from the current committed tree; no packaged/live proof is treated as current."
+      "runtime_gap": "T1 split-tree arity fix merged 5b294a01; T3 type-check PASS, full whitebox 23 files/167 tests PASS, packaged CDP terminal blackbox sequence/TUI/large-reading PASS, launch exit 0, signature verify 0, process/port cleanup empty, AGY PASS findings=[]."
     },
     "windows_v1": {
       "source_evidence": {"kind":"function-map","reference":"win/docs/function-map.md","status":"verified"},
@@ -54,12 +54,12 @@
     "cross_platform_workspace_v1": {
       "source_evidence": {"kind":"registry","reference":"android/docs/feature-registry.json#terminal.workspace_panes","status":"verified"},
       "gates": [
-        {"id":"workspace:android-tests","kind":"command","reference":"pnpm --dir android exec vitest run src/hooks/useTerminalWorkspace.test.tsx src/components/terminal/TerminalHeader.test.tsx src/pages/TerminalPageStageShell.pane-stage.test.tsx","status":"pending"},
-        {"id":"workspace:mac-test","kind":"test","reference":"mac/src/app/MacPaneWorkbench.split.test.tsx","status":"pending"},
+        {"id":"workspace:android-tests","kind":"command","reference":"pnpm --dir android exec vitest run src/hooks/useTerminalWorkspace.test.tsx src/components/terminal/TerminalHeader.test.tsx src/pages/TerminalPageStageShell.pane-stage.test.tsx","status":"verified"},
+        {"id":"workspace:mac-test","kind":"test","reference":"mac/src/app/MacPaneWorkbench.split.test.tsx","status":"verified"},
         {"id":"workspace:win-tests","kind":"test","reference":"win/src/windows-workspace.test.ts","status":"pending"},
         {"id":"workspace:shared-profile-test","kind":"test","reference":"packages/shared/src/react/pane-profile.test.ts","status":"pending"}
       ],
-      "runtime_gap": "Cross-platform pane behavior needs fresh Android plus packaged macOS/Windows samples before parity can be marked verified."
+      "runtime_gap": "Android and Mac workspace evidence verified by T1/T2/T3; Windows workspace deferred to Phase 2."
     }
   },
   "features": [

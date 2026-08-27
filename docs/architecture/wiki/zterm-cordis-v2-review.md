@@ -1,6 +1,6 @@
 # ZTerm Cordis v2 Architecture Review
 
-Status: design / Phase 0 governance admission
+Status: active / Phase 7 Android+Mac first-stage verified
 
 Canonical machine manifest: [`../zterm-cordis-v2-phase-manifest.json`](../zterm-cordis-v2-phase-manifest.json)
 
@@ -33,15 +33,15 @@ Machine source: [`zterm-cordis-v2-review.mmd`](zterm-cordis-v2-review.mmd)
 
 | Node | Owner claim | Current state | Exit evidence |
 | --- | --- | --- | --- |
-| `phase-0-governance` | `zterm.v2.phase0.governance` | ready | maps, parity catalog, source anchors, gate |
-| `phase-1-shared-contracts` | `zterm.v2.phase1.shared.contracts` | blocked | framework-neutral contracts and red gates |
-| `phase-2-kernel-cordis` | `zterm.v2.phase2.kernel.cordis.adapter` | blocked | Playground adapter evidence |
-| `phase-3-platform-hosts` | `zterm.v2.phase3.platform.hosts` | blocked | typed IPC and packaged smoke |
-| `phase-4-runtime-parity` | `zterm.v2.phase4.runtime.parity` | blocked | exact v1/v2 replay |
-| `phase-5-terminal-data-plane` | `zterm.v2.phase5.terminal.data-plane` | blocked | daemon/source-to-DOM/data stream evidence |
-| `phase-6-ui-plugins` | `zterm.v2.phase6.ui.plugins` | blocked | UI ownership and interaction gates |
-| `phase-7-platform-parity` | `zterm.v2.phase7.platform.parity` | blocked | Android/iOS/macOS/Windows live evidence |
-| `phase-8-closeout` | `zterm.v2.phase8.closeout` | blocked | main-tree verification and review PASS |
+| `phase-0-governance` | `zterm.v2.phase0.governance` | complete | maps, parity catalog, source anchors, gate |
+| `phase-1-shared-contracts` | `zterm.v2.phase1.shared.contracts` | complete | framework-neutral contracts and red gates |
+| `phase-2-kernel-cordis` | `zterm.v2.phase2.kernel.cordis.adapter` | complete | Playground adapter evidence |
+| `phase-3-platform-hosts` | `zterm.v2.phase3.platform.hosts` | complete | typed IPC and packaged smoke |
+| `phase-4-runtime-parity` | `zterm.v2.phase4.runtime.parity` | complete | exact v1/v2 replay |
+| `phase-5-terminal-data-plane` | `zterm.v2.phase5.terminal.data-plane` | complete | daemon/source-to-DOM/data stream evidence |
+| `phase-6-ui-plugins` | `zterm.v2.phase6.ui.plugins` | complete | UI ownership and interaction gates |
+| `phase-7-platform-parity` | `zterm.v2.phase7.platform.parity` | active | Android+Mac first-stage verified; Windows+iOS deferred Phase 2 |
+| `phase-8-closeout` | `zterm.v2.phase8.closeout` | blocked-on-phase-7 | pending Android+Mac T6 closeout and AGY review |
 
 ## Boundary checklist
 
@@ -57,10 +57,10 @@ Machine source: [`zterm-cordis-v2-review.mmd`](zterm-cordis-v2-review.mmd)
 | Gate | Status | Meaning |
 | --- | --- | --- |
 | `phase-manifest-structure` | active | validator runs from root scripts and CI/prebuild |
-| `source-owner-baseline` | pending | Phase 0 map worker owns implementation |
-| `v1-parity-catalog` | pending | Phase 0 parity worker owns implementation |
-| `payload-isolation` | pending | Phase 1 contract worker owns implementation |
-| `module-dag` | pending | Phase 1 contract worker owns implementation |
+| `source-owner-baseline` | active | Phase 0 map worker owns implementation |
+| `v1-parity-catalog` | active | Phase 0 parity worker owns implementation |
+| `payload-isolation` | active | Phase 1 contract worker owns implementation |
+| `module-dag` | active | Phase 1 contract worker owns implementation |
 
 ## Review commands
 

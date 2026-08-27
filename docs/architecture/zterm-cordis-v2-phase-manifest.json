@@ -1,7 +1,7 @@
 {
   "lifecycle_id": "zterm.cordis.v2.rebuild",
-  "status": "design",
-  "production_baseline": "d0f17b709873a7b4571b00f2ce32f428aae1b6ae",
+  "status": "active",
+  "production_baseline": "e7ca090bea4590c95b38765a5b6fbd7c2b50443c",
   "design_doc": "docs/design/2026-08-26-zterm-cordis-v2-cross-platform.md",
   "plan_doc": "docs/goals/zterm-cordis-v2-rebuild-plan.md",
   "entrypoint": "phase-0-governance",

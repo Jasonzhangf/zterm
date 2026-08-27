@@ -124,3 +124,12 @@ node scripts/check-zterm-v2-map-registries.mjs --only=mainline    # PASS
 ```
 
 Runtime gate commands are defined but not executed in CI for G1 gates.
+
+## T5 Reconciliation Checkpoint (2026-08-27)
+
+T4 rechecked the current `e7ca090b` baseline and supersedes the Android/Mac portion
+of G1: Android required runtime gates execute through the Android prebuild/CI job;
+Mac split, type-check, and parity gates execute through `mac-desktop-split`. The
+historical nine-gate finding remains applicable only where a gate is still absent
+from the current workflow, and is not evidence that Android/Mac wiring is missing.
+Windows and iOS remain deferred/incomplete for this first-stage closeout.
