@@ -354,7 +354,7 @@ async function closePackagedApp() {
   await sleep(1200);
   const pid = firstPidForPort(options.port);
   if (pid) {
-    process.kill(pid, 'TERM');
+    process.kill(pid, 'SIGTERM');
     await sleep(800);
   }
   writeFileSync(join(options.evidenceDir, 'process-after-close.txt'), psForPort(options.port) || '');

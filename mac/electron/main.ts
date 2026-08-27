@@ -44,6 +44,11 @@ const desktopCommandHandler = new DesktopCommandHandler({
 });
 const alphaSmokeMode = process.argv.includes('--zterm-alpha-smoke');
 const screenshotHelperOnlyMode = process.argv.includes('--screenshot-helper');
+const remoteDebugArg = process.argv.find((arg) => arg.startsWith('--remote-debugging-port='));
+if (remoteDebugArg) {
+  const port = remoteDebugArg.split('=')[1];
+  if (port) app.commandLine.appendSwitch('remote-debugging-port', port);
+}
 let screenshotHelperServer: ScreenshotHelperServerController | null = null;
 let screenshotHelperWindow: BrowserWindow | null = null;
 let macWindowManager: MacWindowManager | null = null;

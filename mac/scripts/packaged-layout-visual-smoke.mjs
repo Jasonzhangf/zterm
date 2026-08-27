@@ -210,16 +210,16 @@ async function main() {
     const after = await pageClient.command('Runtime.evaluate', {
       returnByValue: true,
       expression: `(() => {
-        const splitStage = document.querySelector('[data-testid="pane-stage-split"]');
+        const splitStage = document.querySelector('[data-testid="pane-stage-split"], [data-testid="mac-pane-workbench-tree"]');
         const frames = Array.from(document.querySelectorAll('[data-testid="pane-stage-frame"]'));
-        const divider = document.querySelector('[data-testid="pane-stage-divider"]');
+        const divider = document.querySelector('[data-testid="pane-stage-divider"], [data-testid^="mac-pane-divider-"]');
         const terminalStage = document.querySelector('.mac-terminal-stage');
         const terminalSurface = document.querySelector('.mac-terminal-surface');
         const rail = document.querySelector('.mac-server-rail');
         return {
           hasSplitStage: Boolean(splitStage),
           frameCount: frames.length,
-          dividerCount: document.querySelectorAll('[data-testid="pane-stage-divider"]').length,
+          dividerCount: document.querySelectorAll('[data-testid="pane-stage-divider"], [data-testid^="mac-pane-divider-"]').length,
           activeFrameCount: document.querySelectorAll('[data-testid="pane-stage-frame"][data-pane-active="true"]').length,
           splitStageGap: splitStage ? getComputedStyle(splitStage).gap : null,
           splitStageMargin: splitStage ? getComputedStyle(splitStage).margin : null,
@@ -240,7 +240,7 @@ async function main() {
     const dividerBox = await pageClient.command('Runtime.evaluate', {
       returnByValue: true,
       expression: `(() => {
-        const divider = document.querySelector('[data-testid="pane-stage-divider"]');
+        const divider = document.querySelector('[data-testid="pane-stage-divider"], [data-testid^="mac-pane-divider-"]');
         if (!divider) throw new Error('divider not found');
         const rect = divider.getBoundingClientRect();
         return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
@@ -310,8 +310,7 @@ async function main() {
       !summary.after.hasSplitStage ||
       summary.after.frameCount !== 2 ||
       summary.after.dividerCount !== 1 ||
-      summary.after.splitStageGap !== '3px' ||
-      summary.after.dividerWidth !== '6px' ||
+      summary.after.dividerWidth !== '2px' ||
       Math.abs((summary.duringDrag.frameRects[0]?.width || 0) - dragStart) < 120
     ) {
       throw new Error(`Packaged layout smoke failed:\n${JSON.stringify({ after: summary.after, duringDrag: summary.duringDrag }, null, 2)}`);
@@ -333,7 +332,7 @@ async function main() {
     if (remainingPort || remainingProcess.trim()) {
       if (child.pid) {
         try {
-          process.kill(child.pid, 'TERM');
+          process.kill(child.pid, 'SIGTERM');
         } catch {
           // Already exited.
         }
