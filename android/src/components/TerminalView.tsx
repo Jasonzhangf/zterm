@@ -1156,9 +1156,6 @@ function TerminalViewComponent({
       if (isTerminalFollowScrollReading(state)) {
         return false;
       }
-      if (widthModeRef.current === "mirror-fixed" && mirrorFixedZoomPanRef.current.visualScale < 1) {
-        return true;
-      }
 
       if (hasTerminalFollowRecentViewportLayoutChange(state)) {
         applyFollowScrollTransition(clearTerminalViewportLayoutDriftRuntime(state));

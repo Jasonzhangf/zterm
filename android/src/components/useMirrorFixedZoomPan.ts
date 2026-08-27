@@ -224,6 +224,15 @@ export function useMirrorFixedZoomPan(
         window.clearTimeout(restoreScrollTopTimerRef.current);
       }
       restoreScrollTopTimerRef.current = window.setTimeout(restoreScrollTop, 0);
+      return;
+    }
+
+    if (visualScale < 1) {
+      const maxScrollTop = Math.max(0, host.scrollHeight - host.clientHeight);
+      const clampedScrollTop = Math.min(maxScrollTop, Math.max(0, host.scrollTop));
+      if (Math.abs(host.scrollTop - clampedScrollTop) > 1) {
+        host.scrollTop = clampedScrollTop;
+      }
     }
   }, [options.hostRef, visualScale]);
 
