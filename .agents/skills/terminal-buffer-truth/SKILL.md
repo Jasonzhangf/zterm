@@ -451,11 +451,13 @@ renderer 还必须显式区分两种宽度模式：
      - 维护自己的 horizontal render window
    - **cell 宽度真相必须来自客户端实测的像素宽度**，不能再把 `1ch / 2ch` 当终端列宽真相
    - 双宽 cell 只能按 `2 * measuredCellWidthPx` 渲染；浏览器 fallback 字体的 `ch` 不是 tmux 列宽真相
-   - pinch 缩小只缩放独立 canvas 视觉层；Android WebView 冻结实现是 CSS `zoom`
+  - pinch 缩小只缩放独立 canvas 视觉层；Android WebView 冻结实现是 CSS `zoom`
      加 renderer 在 paint 前重派生可见行数。禁止把 zoom 直接写进 `.term-grid`，
      禁止改写 tmux/daemon rows/cols，禁止等普通 effect 晚一帧同步行数。
-   - 缩放态纵向平移必须保持非正 `translateY` 并夹在 canvas 可滚动范围内；
-     正 renderer scrollTop 只能映射为负 translation。恢复 scale=1 后才交还原生 scrollTop。
+   - 缩放态仍使用原生 `scrollTop`；`.term-grid` 保持物理行高与普通 padding，
+     不得用 `translateY` 模拟纵向滚动。renderer 的 `viewportRows` 必须按
+     `clientHeight / (physicalRowHeight * visualScale)` 向上取整，visible demand
+     与 repair range 随之扩大；follow/bottom sync 在 `visualScale < 1` 时不得被抑制。
    - 若 buffer 行宽大于 viewport：
      - 默认显示左侧窗口
      - 用户横向平移 renderer window 看右侧
@@ -944,6 +946,14 @@ tmux truth
 - `adaptive-phone` 也不是 client 本地排版：正确链路只能是 client 上报 measured cols -> daemon adaptive lease owner 请求 tmux reflow -> tmux capture/readback 更新 mirror truth -> client 固定行高渲染。
 - 反模式：把 `viewportCols` / `widthMode` 放进 render geometry revision key、无 tmux truth 时补 80 cols、修改 shared renderer row/cell/theme 背景来掩盖旧 buffer 或空 buffer、用 UI border/scrollbar/IME 变化触发 terminal content geometry refresh。
 - 红测要求：session enter / drawer switch / explicit resume 必须证明 first `buffer-head-request` 到达当前 active resource，head 后按 tmux `availableStartIndex/latestEndIndex/rows` 拉 `buffer-sync`；renderer 测试只证明消费 fixed mirror truth，不证明或制造排版。
+
+## 2026-08-27 Mac packaged app 启动协议
+
+- Unsigned 本地 Mac package 必须先 ad-hoc 重签再启动：`codesign --force --deep --sign - <ZTerm.app>`；缺少这一步或使用 `open -n` 启动 unsigned package，会被 Launch Services 在后续启动时重新走 Gatekeeper 并把 bundle 标成“恶意软件/移到废纸篓”。
+- 禁止 `open -n` unsigned package。正确启动是直接执行 `"<ZTerm.app>/Contents/MacOS/ZTerm" --remote-debugging-port=<port> --user-data-dir=<evidence>/user-data --no-sandbox`，并把 stdout/stderr、exit code 落到 evidence。
+- 每次打包后必须验证 bundle 存在：`test -d mac/out/mac-arm64/ZTerm.app`；缺失时先 `pnpm --dir mac run package`，禁止继续跑 blackbox gate。
+- `spctl --assess rejected` 不等于 unsigned internal alpha 启动失败。真实判定必须看进程路径 + CDP `/json/version` + `/json/list` 是否返回 ZTerm Mac page target。
+- 启动前必须清理旧 CDP owner：`ps -axo pid,ppid,comm,args | egrep 'ZTerm|--remote-debugging-port=<port>'`，再按明确 PID 关闭；禁止多实例叠在同一个 port 上。
 
 ## 2026-08-18 terminal container shrink boundary
 

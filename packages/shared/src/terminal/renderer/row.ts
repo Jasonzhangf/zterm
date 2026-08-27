@@ -161,6 +161,7 @@ export function buildTerminalRenderFrame(options: {
   bufferLinesLength: number;
   viewportRows: number;
   rowHeightPx: number;
+  viewportClientHeightPx?: number;
   renderBottomIndex: number;
   followDemandAnchorEndIndex: number;
   readingMode: boolean;
@@ -187,7 +188,12 @@ export function buildTerminalRenderFrame(options: {
     options.effectiveBufferEndIndex - options.bufferStartIndex,
     options.viewportRows,
   );
-  const maxScrollTop = Math.max(0, (totalRows - options.viewportRows) * options.rowHeightPx);
+  const maxScrollTop = Math.max(
+    0,
+    Number.isFinite(options.viewportClientHeightPx) && (options.viewportClientHeightPx || 0) > 0
+      ? totalRows * options.rowHeightPx - options.viewportClientHeightPx!
+      : (totalRows - options.viewportRows) * options.rowHeightPx,
+  );
   const effectiveRenderBottomIndex = options.readingMode ? clampedRenderBottomIndex : followVisualBottomIndex;
   const visibleWindowStartIndex = Math.max(options.bufferStartIndex, effectiveRenderBottomIndex - options.viewportRows);
   const visibleWindowEndIndex = Math.min(
@@ -275,6 +281,9 @@ export function resolveScrollTopForRenderBottomIndex(options: {
       Math.max(0, Math.floor(options.nextRenderBottomIndex) - options.bufferStartIndex - options.viewportRows),
     ),
   );
+  if (Math.floor(options.nextRenderBottomIndex) >= options.bufferStartIndex + options.totalRows) {
+    return options.maxScrollTop;
+  }
   return Math.max(0, Math.min(options.maxScrollTop, topOffset * options.rowHeightPx));
 }
 

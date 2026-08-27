@@ -57,10 +57,13 @@ describe('TerminalView renderer / UI shell layer separation', () => {
     expect(leaks,
       `UI shell leaked renderer truth symbols:\n${leaks.join('\n')}`,
     ).toEqual([]);
-    // The hook owns only canvas zoom and native-scroll handoff. Row mapping and
-    // visible-row demand stay in TerminalView.
+    // The hook owns the gesture/scale state and native-scroll handoff. The
+    // canvas zoom itself is projected declaratively by TerminalView's
+    // `.term-render-scale-layer`; row mapping and visible-row demand stay in
+    // TerminalView.
     expect(source).toContain('scaleLayerRef');
-    expect(source).toContain('style.zoom');
+    expect(source).toContain('visualScale');
+    expect(source).toContain('restoreScrollTop');
   });
 
   it('makes the visual gesture hook the single gesture owner (wheel + offset truth)', () => {

@@ -136,6 +136,7 @@ pnpm --filter @zterm/mac package
   - 必跑 gate：`pnpm --dir mac run blackbox:terminal-buffer -- --case=all`
   - 必须包含持续刷新底部 TUI case；只看到 `connected`、底部几何对齐或静态截图不算 terminal 数据闭环
   - blackbox gate 必须复用固定专用 tmux session：`zterm_mac_gate_sequence` / `zterm_mac_gate_tui` / `zterm_mac_gate_large`，并用 tmux option marker 验证 owner/case 后才允许 respawn / clear-history / cleanup；禁止 timestamp 新建一串 session，禁止碰无 marker 的用户 session
+  - packaged app 启动必须先 ad-hoc 重签 bundle，再带显式 `--user-data-dir` 直接启动二进制；禁止 `open -n` unsigned package（Launch Services 会在第二次或之后把 unsigned bundle 重新走 Gatekeeper，常见“恶意软件/移到废纸篓”回归）。正确顺序见 §3.6 Packaged App 启动协议。
   - blackbox gate 默认保留这三个固定 session 作为复用池；只有显式 `--cleanup-sessions` 才能在 marker 验证通过后精确关闭它们。运行结束必须复核 `tmux list-sessions`，确认没有遗留新的 `zterm_mac_*` 临时 session
   - TUI fixture 每次 run 前必须重置内容和清 history；持续刷新只比较当前可见 screen 与 app rendered rows，历史/overscan 只能作为 raw evidence，不能进入 lag 判定
   - large-reading fixture 必须证明真实 scroll 容器进入 reading：`scroll.atBottom=false`、append 后 reading rows 不变、scroll-to-bottom 后 app tail 与 tmux tail 一致；若 `clientHeight === scrollHeight`，先修父容器高度约束，不准把 DOM 全量内容当作 reading 通过
@@ -205,6 +206,35 @@ Jason，已完成本轮自闭环：
 - 本机安装 unsigned package 前，先对 `.app` 做 ad-hoc 重签：`codesign --force --deep --sign - <ZTerm.app>`，再复制到实际目标路径并对目标再签一次。目标路径必须从运行中进程或 Jason 实际点击入口确认，优先检查 `/Applications/ZTerm.app`、`$HOME/Applications/ZTerm.app`、`~/Downloads`、`~/Desktop`、`~/.Trash`；不要只修 `/Applications` 后宣称完成。
 - 不要使用 `xattr -cr` 处理 `.app` bundle；它可能生成 `._*` AppleDouble 文件并破坏 sealed resources。若误生成，只能在该 `.app` 内精确删除 `._*` 后重新签名。可精确删除 `com.apple.quarantine`；不要把 `spctl --assess rejected` 当作 unsigned internal alpha 的启动失败证据，真实判定必须用 Finder/open 启动和进程路径。
 - 若 Finder 提示“恶意软件并移到废纸篓”，先查实际入口包的 `codesign --verify --deep --strict` 与 `spctl --assess --type execute --verbose=4`。若输出 `notarization indicates this code has been revoked`，根因是旧 revoked 包仍在实际路径，必须退出该路径的运行中明确 PID、把旧包改名备份、安装当前构建、重签、再从同一路径启动验证；`osascript tell application "ZTerm" to quit` 可能被 revoked app 挂住，卡住时只结束该明确 `osascript` PID，再用旧 ZTerm 明确 PID 关闭。
+
+### 3.6 Packaged App 启动协议（2026-08-27 冻结）
+
+Unsigned 本地 package 启动必须严格按下列顺序，禁止改换步骤顺序。
+
+1. **断言 bundle 存在**：`<workspace>/mac/out/mac-arm64/ZTerm.app/Contents/MacOS/ZTerm` 必须存在；缺失则直接失败并提示先跑 `pnpm --dir mac run package`。
+2. **ad-hoc 重签 bundle 一次**（每次启动前都重签，避免上次遗留 attribute 被 Launch Services 缓存）：
+   ```bash
+   codesign --force --deep --sign - "$APP_PATH"
+   ```
+3. **删除 quarantine xattr**（仅作用于本 bundle，绝不 `xattr -cr`）：
+   ```bash
+   xattr -d com.apple.quarantine "$APP_PATH"
+   ```
+4. **用 `--user-data-dir` 直接执行二进制**，绝对不要 `open -n` unsigned package：
+   ```bash
+   "$APP_PATH/Contents/MacOS/ZTerm" \
+     --remote-debugging-port=<port> \
+     --user-data-dir="$EVIDENCE/user-data" \
+     --no-sandbox \
+     > "$EVIDENCE/launch-stdout.txt" 2> "$EVIDENCE/launch-stderr.txt" &
+   ```
+5. **必须捕获子进程 exit/stderr/stdout** 写入 evidence。gate 启动后立刻 `tail -f` stderr 不能阻挡主循环；用 `child.on('exit', ...)` / `child.on('error', ...)` + `spawn`（不是 `spawnSync`），把 exit code、stderr 写到 `${EVIDENCE}/launch-exit.json` / `launch-stderr.txt`。
+6. **强规则**：
+   - 禁止 `open -n <unsigned.app>` 启动 unsigned package；这是 Launch Services 重走 Gatekeeper 的常见触发。
+   - 禁止 `xattr -cr <unsigned.app>`；会生成 `._*` AppleDouble 破坏 sealed resources。
+   - 禁止把 `spctl --assess rejected` 当作 unsigned internal alpha 的启动失败证据。真实判定必须看 Finder/open 启动 + 进程路径 + CDP `/json/version` + `/json/list` 返回目标 page target。
+   - 重签后必须 `codesign --verify --deep --strict` 立即确认 `valid on disk`。
+7. **重复启动前必须清理旧进程**：先 `ps -axo pid,comm,args | egrep 'ZTerm|remote-debugging-port=<port>'`，再按 PID kill；禁止叠多个 instance 污染端口和 evidence。
 
 ### 3.5 状态 / Alpha 汇报对账门禁
 - 触发：Jason 问“今天完成了什么”“Mac 版本状态”“离 alpha 多远”“能不能手测/alpha 测试”，或上下文压缩/恢复后需要汇报 Mac 进度。

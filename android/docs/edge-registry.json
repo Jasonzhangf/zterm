@@ -3937,6 +3937,11 @@
     },
     {
       "from_module": "client.session_drawer_preview",
+      "to_module": "client.session_drawer_ui",
+      "status": "active"
+    },
+    {
+      "from_module": "client.session_drawer_preview",
       "to_module": "client.runtime",
       "status": "active"
     },
@@ -4474,11 +4479,6 @@
     },
     {
       "from_module": "client.plugin_host",
-      "to_module": "client.session_drawer_preview",
-      "status": "active"
-    },
-    {
-      "from_module": "client.session_drawer_ui",
       "to_module": "client.session_drawer_preview",
       "status": "active"
     },

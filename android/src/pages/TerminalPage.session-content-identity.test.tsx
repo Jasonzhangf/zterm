@@ -537,6 +537,15 @@ describe('TerminalPage session content identity', () => {
     expect(grid).toBeTruthy();
     expect(scaleLayer).toBeTruthy();
 
+    // jsdom 无布局：mock 滚动尺寸并滚到中部，验证 pinch 不把 native scrollTop
+    // 交给 translateY 或清零。
+    Object.defineProperty(host, 'scrollHeight', { value: 1000, configurable: true });
+    Object.defineProperty(host, 'clientHeight', { value: 400, configurable: true });
+    act(() => {
+      host.scrollTop = 300;
+      fireEvent.scroll(host);
+    });
+
     const rowIndices = () =>
       Array.from(view.container.querySelectorAll('[data-terminal-row="true"]'))
         .map((node) => Number(node.getAttribute('data-terminal-index')));
@@ -575,11 +584,12 @@ describe('TerminalPage session content identity', () => {
     });
 
     // fontSize=14 默认 + 80 列 → 内容宽 694px > 容器宽，pinch 后视觉 zoom < 1；
-    // 缩放态 scrollTop 锁定 0，可见行数按布局行高增加，buffer 绝对行号仍连续。
+    // native scrollTop 始终是纵向滚动真源，可见行数按视觉行高增加，
+    // buffer 绝对行号仍连续。
     const scaleAfter = scaleLayer.style.zoom;
     expect(scaleAfter).toMatch(/^0\./);
     expect(grid.style.transform).not.toContain('translateY');    expect(grid.style.zoom).toBeFalsy();
-    expect(host.scrollTop).toBe(0);
+    expect(host.scrollTop).toBeGreaterThan(0);
 
     const after = rowIndices();
     assertContinuous(after);

@@ -432,7 +432,6 @@ export function splitActivePaneRight(state: MacWorkbenchState): MacWorkbenchStat
       state.workspace.panes.map((p) => p.tabs[0]!),
       state.workspace.panes.map((p) => p.id),
       (i) => state.workspace.panes[i]?.activeTabId ?? '',
-      createEmptyTab,
     )?.tree;
     if (!paneTreeRoot) return state;
   }
@@ -465,7 +464,6 @@ export function splitActivePaneDown(state: MacWorkbenchState): MacWorkbenchState
       state.workspace.panes.map((p) => p.tabs[0]!),
       state.workspace.panes.map((p) => p.id),
       (i) => state.workspace.panes[i]?.activeTabId ?? '',
-      createEmptyTab,
     )?.tree;
     if (!paneTreeRoot) return state;
   }

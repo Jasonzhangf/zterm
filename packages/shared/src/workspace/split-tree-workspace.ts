@@ -242,8 +242,6 @@ export function buildSplitTreeFromPanes<TTab extends SplitTreeTab>(
   panes: TTab[],
   paneIds: string[],
   activeTabIdForPane: (index: number) => string,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  createEmptyTab: () => TTab,
 ): SplitTreeWorkspace<TTab> | null {
   if (panes.length === 0 || paneIds.length === 0) return null;
   const leafLookup = new Map<string, SplitTreeLeafNode<TTab>>();

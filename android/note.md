@@ -211,3 +211,30 @@
 - resource-map / function-map / mainline-call-map 已显式声明 native WebRTC/Relay media ownership 是"separate slice"，目前未实现。
 - 待 Jason 拍板：方案 A native WebRTC（worktree + libwebrtc/wrtc-android + native signaling slice）vs 方案 B 保留 native service owner、扩展其 relay 通道。
 - 在 Jason 决策前不动代码、不开 worktree。
+
+## 2026-08-27 Mac blackbox CDP root cause analysis
+
+### 发现
+- `zterm.v2.phase7.desktop.live.gate` 两次 blackbox 重跑（blackbox-final-pass、blackbox-rework-final）均失败：`CDP did not start on 9362: fetch failed`
+- 同时 `lsof` 证明 ZTerm 进程在 9362 监听，但 DevTools HTTP endpoint 不可达
+- `layout-final-pass` CDP 成功是因为它在 app.asar 打包**之前**运行（直接用未打包的 main process）
+- `blackbox-final-4` 也失败，same error
+
+### 根因
+Packaged Electron app.asar 内 DevTools 默认被禁用。`--remote-debugging-port` 启动参数让 Electron 监听端口，但不自动暴露 DevTools HTTP endpoint。需要在启动参数加 `--disable-devtools` 或配置 Electron security settings。
+
+### 当前状态
+- pane-552 rework 仍在执行（PID 59210 黑盒脚本 + PID 59360 ZTerm 仍在运行）
+- pane-552 会在发现根因后报告 blocker
+- master 不注入、不重启、不催促，等 blocker 报告
+
+### 待解决
+- Mac packaged app 如何在黑盒 smoke 中暴露 CDP DevTools endpoint
+- 可能方案：启动参数加 `--no-sandbox --disable-devtools=false` 或 Electron BrowserWindow 默认 webSecurity=false
+
+### 根本原因：open -n --args 不传参数
+- blackbox-gate.mjs 使用 `open -n <app> --args --remote-debugging-port=N` 启动
+- layout 脚本使用 `spawn(<binary>)` 直接启动
+- `open -n --args` 在 macOS 上不能可靠传递参数给 packaged Electron app 内的 launcher
+- 修复在测试脚本，不在代码本身
+- layout-final-pass 成功因为用 spawn()；blackbox 失败因为用 open -n

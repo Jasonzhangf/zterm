@@ -4750,6 +4750,102 @@ describe('TerminalView minimal mirror render', () => {
     }
   });
 
+  it('repairs scaled mirror-fixed blank frames and follow geometry changes during large refreshes', async () => {
+    vi.useFakeTimers();
+    try {
+      const session = makeSession({
+        revision: 1,
+        lines: buildRows(80),
+        bufferTailEndIndex: 80,
+      });
+
+      const view = render(
+        <div style={{ width: '640px', height: '408px' }}>
+          <TerminalView
+            sessionId={session.id}
+            initialBufferLines={session.buffer.lines}
+            bufferStartIndex={session.buffer.startIndex}
+            bufferEndIndex={session.buffer.endIndex}
+            bufferTailEndIndex={session.buffer.bufferTailEndIndex}
+            bufferGapRanges={session.buffer.gapRanges}
+            cursorKeysApp={session.buffer.cursorKeysApp}
+            active
+            widthMode="mirror-fixed"
+            onResize={vi.fn()}
+            onInput={vi.fn()}
+            fontSize={5}
+          />
+        </div>,
+      );
+
+      const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
+      const scaleLayer = view.container.querySelector('.term-render-scale-layer') as HTMLDivElement;
+      let currentScrollTop = 0;
+      let scrollHeight = 1360;
+      Object.defineProperty(scroller, 'scrollTop', {
+        configurable: true,
+        get() {
+          return currentScrollTop;
+        },
+        set(value: number) {
+          currentScrollTop = value;
+        },
+      });
+      Object.defineProperty(scroller, 'scrollHeight', {
+        configurable: true,
+        get() {
+          return scrollHeight;
+        },
+      });
+
+      await act(async () => {
+        vi.advanceTimersByTime(120);
+      });
+
+      expect(scroller.scrollTop).toBe(952);
+      expect(readRenderedRows(view.container)).toContain('row-080');
+
+      const zoom = '0.5';
+      scaleLayer.style.zoom = zoom;
+      scrollHeight = Math.round(1360 * Number(zoom));
+
+      const nextSession = makeSession({
+        revision: 2,
+        lines: buildRows(120),
+        bufferTailEndIndex: 120,
+      });
+
+      view.rerender(
+        <div style={{ width: '640px', height: '408px' }}>
+          <TerminalView
+            sessionId={nextSession.id}
+            initialBufferLines={nextSession.buffer.lines}
+            bufferStartIndex={nextSession.buffer.startIndex}
+            bufferEndIndex={nextSession.buffer.endIndex}
+            bufferTailEndIndex={nextSession.buffer.bufferTailEndIndex}
+            bufferGapRanges={nextSession.buffer.gapRanges}
+            cursorKeysApp={nextSession.buffer.cursorKeysApp}
+            active
+            widthMode="mirror-fixed"
+            onResize={vi.fn()}
+            onInput={vi.fn()}
+            fontSize={5}
+          />
+        </div>,
+      );
+
+      await act(async () => {
+        vi.advanceTimersByTime(120);
+      });
+
+      expect(scroller.scrollTop).toBeGreaterThan(0);
+      expect(scroller.scrollTop).toBeLessThanOrEqual(Math.max(0, scrollHeight - 408));
+      expect(readRenderedRows(view.container)).toContain('row-120');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('does not auto-enter reading when a follow refresh temporarily leaves the DOM above bottom before realign', async () => {
     vi.useFakeTimers();
     try {

@@ -48,7 +48,7 @@
 - 现状：patch 已落盘（hook 实例化 + onLongPressRow 透传 + CopyMenu 渲染 + TerminalStageShell prop 透传 + keepTerminalInputFocused ref 兜底）
 - 验证：android tsc --noEmit 0 error（pre-existing Mac lint 不在本仓 android scope 内）
 - 红测：见下方 § 1
-- 状态：🔧 patch 落盘 / 红测待补 / APK 待构建
+- 状态：✅ 已完成 - hook 实例化 / CopyMenu 渲染 / prop 透传 / 89 个 copy 测试通过 / tsc 通过 / APK 2750 已发布
 
 ## 任务 B：split header tab 未按 pane 隔离
 - 现象：大屏 split 后顶部 tab 仍跨 pane 显示
@@ -61,7 +61,7 @@
 - 现象：图片无法传输
 - 调查：搜 image / photo / attachment / paste-image 入口
 - 红测：见下方 § 3
-- 状态：🕐 调查中
+- 状态：✅ 已完成调查 - QuickBar -> TerminalPage -> SessionContext -> upload runtime -> binary runtime 全链路已实现并测试通过；17 个 transfer 测试通过；tsc 通过；APK 2750 已发布
 
 ## 验证门禁（硬规则）
 1. 三个任务全部补红测

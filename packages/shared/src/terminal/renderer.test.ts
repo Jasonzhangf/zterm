@@ -14,6 +14,7 @@ import {
   markTerminalFollowViewportRealignOnLayoutDrift,
   reconcileTerminalViewportAfterBufferShift,
   queueTerminalFollowScrollSync,
+  resolveScrollTopForRenderBottomIndex,
   resolveTerminalResizeCommitPlan,
   resolveTerminalWidthModeSignal,
   resolveTerminalFollowAnchorEndIndex,
@@ -68,6 +69,31 @@ describe('shared terminal renderer pure helpers', () => {
     expect(frame.visibleWindowEndIndex).toBe(140);
     expect(frame.renderStartOffset).toBe(26);
     expect(frame.renderEndOffset).toBe(40);
+  });
+
+  it('uses the real client height for scroll range so a non-row-multiple container cannot leave a bottom blank', () => {
+    const frame = buildTerminalRenderFrame({
+      bufferStartIndex: 0,
+      effectiveBufferEndIndex: 40,
+      bufferLinesLength: 40,
+      viewportRows: 25,
+      rowHeightPx: 17,
+      viewportClientHeightPx: 408,
+      renderBottomIndex: 40,
+      followDemandAnchorEndIndex: 40,
+      readingMode: false,
+      overscanRows: 0,
+    });
+
+    expect(frame.maxScrollTop).toBe(40 * 17 - 408);
+    expect(resolveScrollTopForRenderBottomIndex({
+      nextRenderBottomIndex: 40,
+      totalRows: 40,
+      viewportRows: 25,
+      bufferStartIndex: 0,
+      rowHeightPx: 17,
+      maxScrollTop: frame.maxScrollTop,
+    })).toBe(frame.maxScrollTop);
   });
 
   it('anchors follow to the visible cursor when the buffer tail is a blank lower pane', () => {
