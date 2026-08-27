@@ -320,6 +320,10 @@ async function startPackagedApp() {
   if (!existsSync(options.appPath)) {
     throw new Error(`Packaged app missing: ${options.appPath}. Run pnpm --dir mac run package first.`);
   }
+  const executable = join(options.appPath, 'Contents', 'MacOS', 'ZTerm');
+  if (!existsSync(executable)) {
+    throw new Error(`Packaged app executable missing: ${executable}. Run pnpm --dir mac run package first.`);
+  }
   const signature = spawnSync('codesign', ['--force', '--deep', '--sign', '-', options.appPath], {
     cwd: MAC_ROOT,
     encoding: 'utf8',
@@ -332,16 +336,44 @@ async function startPackagedApp() {
   if (signature.status !== 0) {
     throw new Error(`ad-hoc signing failed for packaged app: ${signature.stderr || signature.stdout}`);
   }
+  const quarantine = spawnSync('xattr', ['-d', 'com.apple.quarantine', options.appPath], {
+    cwd: MAC_ROOT,
+    encoding: 'utf8',
+  });
+  writeFileSync(join(options.evidenceDir, 'launch-quarantine-remove.txt'), [
+    `status=${quarantine.status}`,
+    quarantine.stdout || '',
+    quarantine.stderr || '',
+  ].join('\n'));
+  if (quarantine.status !== 0 && !String(quarantine.stderr || '').includes('No such xattr')) {
+    throw new Error(`quarantine removal failed for packaged app: ${quarantine.stderr || quarantine.stdout}`);
+  }
+  const verified = spawnSync('codesign', ['--verify', '--deep', '--strict', options.appPath], {
+    cwd: MAC_ROOT,
+    encoding: 'utf8',
+  });
+  writeFileSync(join(options.evidenceDir, 'launch-signature-verify.txt'), [
+    `status=${verified.status}`,
+    verified.stdout || '',
+    verified.stderr || '',
+  ].join('\n'));
+  if (verified.status !== 0) {
+    throw new Error(`strict signature verification failed for packaged app: ${verified.stderr || verified.stdout}`);
+  }
   writeFileSync(join(options.evidenceDir, 'launch-bundle-exists.txt'), `${options.appPath}\n`);
   assertNoExistingCdpOwner(options.port);
   const userDataDir = join(options.evidenceDir, 'user-data');
   mkdirSync(userDataDir, { recursive: true });
-  const executable = join(options.appPath, 'Contents', 'MacOS', 'ZTerm');
   const childStdout = [];
   const childStderr = [];
+  const writeLaunchOutput = () => {
+    writeFileSync(join(options.evidenceDir, 'launch-stdout.txt'), childStdout.join(''));
+    writeFileSync(join(options.evidenceDir, 'launch-stderr.txt'), childStderr.join(''));
+  };
   const child = spawn(executable, [
     `--remote-debugging-port=${options.port}`,
     `--user-data-dir=${userDataDir}`,
+    '--no-sandbox',
   ], {
     cwd: MAC_ROOT,
     env: { ...process.env, ZTERM_MAC_SMOKE: 'terminal-buffer-blackbox' },
@@ -353,16 +385,17 @@ async function startPackagedApp() {
   child.stderr?.on('data', (chunk) => childStderr.push(chunk));
   child.on('error', (error) => {
     childStderr.push(`child error: ${error.stack || error.message}\n`);
+    writeLaunchOutput();
   });
   child.on('exit', (code, signal) => {
-    writeFileSync(join(options.evidenceDir, 'launch-child-exit.txt'), `code=${code} signal=${signal}\n`);
+    writeFileSync(join(options.evidenceDir, 'launch-exit.json'), JSON.stringify({ code, signal }, null, 2));
+    writeLaunchOutput();
   });
   let version;
   try {
     version = await waitForCdp(options.port);
   } finally {
-    writeFileSync(join(options.evidenceDir, 'launch-stdout.txt'), childStdout.join(''));
-    writeFileSync(join(options.evidenceDir, 'launch-stderr.txt'), childStderr.join(''));
+    writeLaunchOutput();
   }
   writeFileSync(join(options.evidenceDir, 'cdp-version.json'), JSON.stringify(version, null, 2));
   await sleep(700);
@@ -482,15 +515,21 @@ async function openLocalTmuxFromLauncher(call, sessionName) {
     const openButton = [...document.querySelectorAll('button')].find((button) => (button.textContent || '').includes('Open connection'));
     if (!openButton) return resolve({ ok: false, reason: 'open connection button missing' });
     openButton.click();
-    setTimeout(() => {
+    const startedAt = Date.now();
+    const findSessionCard = () => {
       const cards = [...document.querySelectorAll('.mac-saved-card')];
       const card = cards.find((item) => (item.textContent || '').includes(${JSON.stringify(sessionName)}) && (item.textContent || '').includes('Local tmux session'));
+      if (!card && Date.now() - startedAt < 5000) {
+        setTimeout(findSessionCard, 100);
+        return;
+      }
       if (!card) return resolve({ ok: false, reason: 'session card missing', cards: cards.map((item) => item.textContent) });
       const button = card.querySelector('.mac-saved-open');
       if (!button) return resolve({ ok: false, reason: 'session open button missing' });
       button.click();
       resolve({ ok: true, sessionName: ${JSON.stringify(sessionName)} });
-    }, 450);
+    };
+    findSessionCard();
   }))()`);
   if (!result.ok) {
     throw new Error(`Failed to open local tmux session ${sessionName}: ${JSON.stringify(result)}`);
@@ -516,7 +555,11 @@ async function key(call, ch) {
     return;
   }
   const vk = ch === ' ' ? 32 : ch.toUpperCase().charCodeAt(0);
-  const code = ch === ' ' ? 'Space' : `Key${ch.toUpperCase()}`;
+  const code = ch === ' '
+    ? 'Space'
+    : /^\d$/u.test(ch)
+      ? `Digit${ch}`
+      : `Key${ch.toUpperCase()}`;
   await call('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: ch, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk });
   await call('Input.dispatchKeyEvent', { type: 'char', text: ch, unmodifiedText: ch, key: ch, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk });
   await call('Input.dispatchKeyEvent', { type: 'keyUp', key: ch, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk });
@@ -525,7 +568,7 @@ async function key(call, ch) {
 async function typeText(call, text) {
   for (const ch of text) {
     await key(call, ch);
-    await sleep(2);
+    await sleep(20);
   }
 }
 
@@ -630,19 +673,30 @@ async function readAlphaSmoke(call) {
   })()`);
 }
 
-async function scrollTerminal(call, scrollTop) {
-  return evalPage(call, `(() => {
+async function wheelTerminal(call, deltaY) {
+  const target = await evalPage(call, `(() => {
     const node = document.querySelector('[data-mac-terminal-scroll="true"]');
     if (!node) return null;
-    node.scrollTop = ${JSON.stringify(scrollTop)};
-    node.dispatchEvent(new Event('scroll', { bubbles: true }));
     return {
-      top: node.scrollTop,
-      height: node.scrollHeight,
-      client: node.clientHeight,
-      atBottom: node.scrollTop >= node.scrollHeight - node.clientHeight - 2,
+      x: node.getBoundingClientRect().left + node.clientWidth / 2,
+      y: node.getBoundingClientRect().top + node.clientHeight / 2,
     };
   })()`);
+  if (!target) {
+    throw new Error('Terminal scroll viewport missing');
+  }
+  await call('Input.dispatchMouseEvent', {
+    type: 'mouseMoved',
+    x: target.x,
+    y: target.y,
+  });
+  await call('Input.dispatchMouseEvent', {
+    type: 'mouseWheel',
+    x: target.x,
+    y: target.y,
+    deltaX: 0,
+    deltaY,
+  });
 }
 
 async function runLargeReadingCase(call, sessionName) {
@@ -673,11 +727,20 @@ async function runLargeReadingCase(call, sessionName) {
     }
 
     const beforeScroll = readyApp.scroll;
-    const readingTop = Math.max(0, Math.floor((beforeScroll?.height || 0) * 0.45));
-    await scrollTerminal(call, readingTop);
-    await sleep(500);
-    const readingApp = await readAppTerminal(call);
+    let readingApp = readyApp;
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      await wheelTerminal(call, -Math.max(1200, Math.floor((beforeScroll?.client || 0) * 2)));
+      await sleep(250);
+      readingApp = await readAppTerminal(call);
+      if (readingApp.scroll?.atBottom === false) {
+        break;
+      }
+    }
+    if (readingApp.scroll?.atBottom !== false) {
+      throw new Error(`Large reading fixture did not enter reading after bounded wheel input: ${JSON.stringify(readingApp.scroll)}`);
+    }
     const readingRowsAfterScroll = readingApp.rows.map((row) => row.text).filter(Boolean);
+    const readingAnchorsAfterScroll = readingApp.rows.slice(-20);
 
     const appendPrefix = `ZTERMLARGEAPPEND${Date.now()}`;
     runTmux(['send-keys', '-t', sessionName, '-l', appendPrefix]);
@@ -685,11 +748,12 @@ async function runLargeReadingCase(call, sessionName) {
     await sleep(1800);
     const afterAppendApp = await readAppTerminal(call);
     const readingRowsAfterAppend = afterAppendApp.rows.map((row) => row.text).filter(Boolean);
+    const readingAnchorsAfterAppend = afterAppendApp.rows.slice(-20);
     const afterAppendText = [afterAppendApp.stageText, ...readingRowsAfterAppend].join('\n');
     const tmux = capturePlain(sessionName, 220);
     const tmuxLines = normalizeLines(tmux);
 
-    await scrollTerminal(call, 10_000_000);
+    await wheelTerminal(call, 10_000_000);
     await sleep(1200);
     const afterFollowApp = await readAppTerminal(call);
     const appLinesAfterFollow = [
@@ -706,7 +770,9 @@ async function runLargeReadingCase(call, sessionName) {
       appendPrefix,
       appConnectedToSession: afterFollowApp.meta.some((line) => line.includes(sessionName) && line.includes('connected')),
       enteredReading: readingApp.scroll ? readingApp.scroll.atBottom === false : false,
-      readingStableAfterAppend: JSON.stringify(readingRowsAfterScroll) === JSON.stringify(readingRowsAfterAppend),
+      readingStableAfterAppend: Math.abs((readingApp.scroll?.top || 0) - (afterAppendApp.scroll?.top || 0)) <= 1
+        && JSON.stringify(readingAnchorsAfterScroll) === JSON.stringify(readingAnchorsAfterAppend)
+        && !afterAppendText.includes(appendPrefix),
       tmuxHasAppendTail: appExpectedTail.every((line) => tmuxLines.some((tmuxLine) => tmuxLine.trim() === line)),
       returnToFollow: afterFollowApp.scroll ? afterFollowApp.scroll.atBottom === true : false,
       appContainsAppendTailAfterFollow: appExpectedTail.every((line) => appTextAfterFollow.includes(line)),
@@ -717,6 +783,8 @@ async function runLargeReadingCase(call, sessionName) {
       afterFollowScroll: afterFollowApp.scroll,
       readingRowsAfterScroll,
       readingRowsAfterAppend,
+      readingAnchorsAfterScroll,
+      readingAnchorsAfterAppend,
       appLinesAfterFollow,
       tmuxLines,
       smoke,
