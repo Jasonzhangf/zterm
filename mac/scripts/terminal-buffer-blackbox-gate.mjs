@@ -13,7 +13,7 @@
  * - large-reading: large output scrollback stays in reading, then returns to follow
  */
 
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { WebSocket } from 'ws';
@@ -249,7 +249,7 @@ function startPipe(sessionName, logPath) {
 }
 
 function stopPipe(sessionName) {
-  runTmux(['pipe-pane', '-t', sessionName], { allowFailure: true });
+  runTmux(['pipe-pane', '-t', `${sessionName}:0.0`], { allowFailure: true });
 }
 
 function killDedicatedSession(sessionName, caseName) {
@@ -320,20 +320,50 @@ async function startPackagedApp() {
   if (!existsSync(options.appPath)) {
     throw new Error(`Packaged app missing: ${options.appPath}. Run pnpm --dir mac run package first.`);
   }
+  const signature = spawnSync('codesign', ['--force', '--deep', '--sign', '-', options.appPath], {
+    cwd: MAC_ROOT,
+    encoding: 'utf8',
+  });
+  writeFileSync(join(options.evidenceDir, 'launch-signature.txt'), [
+    `status=${signature.status}`,
+    signature.stdout || '',
+    signature.stderr || '',
+  ].join('\n'));
+  if (signature.status !== 0) {
+    throw new Error(`ad-hoc signing failed for packaged app: ${signature.stderr || signature.stdout}`);
+  }
+  writeFileSync(join(options.evidenceDir, 'launch-bundle-exists.txt'), `${options.appPath}\n`);
   assertNoExistingCdpOwner(options.port);
   const userDataDir = join(options.evidenceDir, 'user-data');
   mkdirSync(userDataDir, { recursive: true });
-  const result = spawnSync('open', [
-    '-n',
-    options.appPath,
-    '--args',
+  const executable = join(options.appPath, 'Contents', 'MacOS', 'ZTerm');
+  const childStdout = [];
+  const childStderr = [];
+  const child = spawn(executable, [
     `--remote-debugging-port=${options.port}`,
     `--user-data-dir=${userDataDir}`,
-  ], { cwd: ROOT, encoding: 'utf8' });
-  if (result.status !== 0) {
-    throw new Error(result.stderr || result.stdout || 'open packaged app failed');
+  ], {
+    cwd: MAC_ROOT,
+    env: { ...process.env, ZTERM_MAC_SMOKE: 'terminal-buffer-blackbox' },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  child.stdout?.setEncoding('utf8');
+  child.stderr?.setEncoding('utf8');
+  child.stdout?.on('data', (chunk) => childStdout.push(chunk));
+  child.stderr?.on('data', (chunk) => childStderr.push(chunk));
+  child.on('error', (error) => {
+    childStderr.push(`child error: ${error.stack || error.message}\n`);
+  });
+  child.on('exit', (code, signal) => {
+    writeFileSync(join(options.evidenceDir, 'launch-child-exit.txt'), `code=${code} signal=${signal}\n`);
+  });
+  let version;
+  try {
+    version = await waitForCdp(options.port);
+  } finally {
+    writeFileSync(join(options.evidenceDir, 'launch-stdout.txt'), childStdout.join(''));
+    writeFileSync(join(options.evidenceDir, 'launch-stderr.txt'), childStderr.join(''));
   }
-  const version = await waitForCdp(options.port);
   writeFileSync(join(options.evidenceDir, 'cdp-version.json'), JSON.stringify(version, null, 2));
   await sleep(700);
   writeFileSync(join(options.evidenceDir, 'process-after-open.txt'), psForPort(options.port) || '');
@@ -354,7 +384,7 @@ async function closePackagedApp() {
   await sleep(1200);
   const pid = firstPidForPort(options.port);
   if (pid) {
-    process.kill(pid, 'TERM');
+    process.kill(pid, 'SIGTERM');
     await sleep(800);
   }
   writeFileSync(join(options.evidenceDir, 'process-after-close.txt'), psForPort(options.port) || '');
@@ -408,10 +438,15 @@ async function connectSocket(wsUrl) {
 }
 
 async function connectPage() {
-  const targets = await fetchJson(`http://127.0.0.1:${options.port}/json/list`);
-  const page = targets.find((target) => target.type === 'page' && /ZTerm Mac/u.test(target.title || ''));
+  let page = null;
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const targets = await fetchJson(`http://127.0.0.1:${options.port}/json/list`).catch(() => []);
+    page = targets.find((target) => target.type === 'page' && /ZTerm Mac/u.test(target.title || ''));
+    if (page?.webSocketDebuggerUrl) break;
+    await sleep(250);
+  }
   if (!page?.webSocketDebuggerUrl) {
-    throw new Error('No ZTerm Mac page target found');
+    throw new Error(`No ZTerm Mac page target found after ${12 * 250}ms`);
   }
   const socket = await connectSocket(page.webSocketDebuggerUrl);
   await socket.call('Runtime.enable');
@@ -903,6 +938,7 @@ async function main() {
     results: [],
   };
   let tuiFixture = null;
+  let freshSocket = null;
   try {
     if (options.caseName === 'sequence' || options.caseName === 'all') {
       createSequenceSession(sequenceSession, options.evidenceDir);
@@ -917,7 +953,7 @@ async function main() {
     const pageSocket = await connectPage();
     await resetWorkspace(pageSocket.call);
     pageSocket.ws.close();
-    const freshSocket = await connectPage();
+    freshSocket = await connectPage();
     if (options.caseName === 'sequence' || options.caseName === 'all') {
       summary.results.push(await runSequenceCase(freshSocket.call, sequenceSession));
       await captureScreenshot(freshSocket.call, 'sequence.png');
@@ -927,11 +963,16 @@ async function main() {
       await captureScreenshot(freshSocket.call, 'tui.png');
     }
     if (options.caseName === 'large-reading' || options.caseName === 'all') {
+      freshSocket.ws.close();
+      await closePackagedApp();
+      await startPackagedApp();
+      freshSocket = await connectPage();
+      await resetWorkspace(freshSocket.call);
       summary.results.push(await runLargeReadingCase(freshSocket.call, largeReadingSession));
       await captureScreenshot(freshSocket.call, 'large-reading.png');
     }
     captureResourceSample('resource-before-close');
-    freshSocket.ws.close();
+    if (freshSocket) freshSocket.ws.close();
     summary.ok = true;
     writeFileSync(join(options.evidenceDir, 'summary.json'), JSON.stringify(summary, null, 2));
     console.log(JSON.stringify(summary, null, 2));

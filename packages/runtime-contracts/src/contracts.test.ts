@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createControlCommand, createDataEnvelope, okOutcome, errorOutcome } from './index.ts';
+import { createControlCommand, createDataEnvelope, okOutcome, errorOutcome } from './index.js';
 
 test('accepts valid control command and outcome', () => {
   const cmd = createControlCommand('open-session', 'c1', 'corr1', { sessionId: 's1' });
