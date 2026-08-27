@@ -25,6 +25,7 @@ import {
   renderGapMarker,
   renderRowCells,
   resolveCursorOverlay,
+  resolveScrollTopForRenderBottomIndex,
 } from './renderer/index';
 
 describe('shared terminal renderer pure helpers', () => {
@@ -68,6 +69,31 @@ describe('shared terminal renderer pure helpers', () => {
     expect(frame.visibleWindowEndIndex).toBe(140);
     expect(frame.renderStartOffset).toBe(26);
     expect(frame.renderEndOffset).toBe(40);
+  });
+
+  it('uses visual row height and client height for scaled native scroll range', () => {
+    const frame = buildTerminalRenderFrame({
+      bufferStartIndex: 0,
+      effectiveBufferEndIndex: 1000,
+      bufferLinesLength: 1000,
+      viewportRows: 59,
+      rowHeightPx: 13.6,
+      viewportClientHeightPx: 652,
+      renderBottomIndex: 1000,
+      followDemandAnchorEndIndex: 1000,
+      readingMode: false,
+      overscanRows: 4,
+    });
+
+    expect(frame.maxScrollTop).toBeCloseTo(1000 * 13.6 - 652);
+    expect(resolveScrollTopForRenderBottomIndex({
+      nextRenderBottomIndex: 1000,
+      totalRows: frame.totalRows,
+      viewportRows: frame.viewportRows,
+      bufferStartIndex: 0,
+      rowHeightPx: 13.6,
+      maxScrollTop: frame.maxScrollTop,
+    })).toBeCloseTo(frame.maxScrollTop);
   });
 
   it('anchors follow to the visible cursor when the buffer tail is a blank lower pane', () => {

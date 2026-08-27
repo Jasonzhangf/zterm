@@ -159,14 +159,14 @@ Android WebView 的 L5 复测证明：mirror-fixed 缩小若用 `transform: scal
 原生滚动坐标系、布局高度与可见 buffer 行数分叉，仍会画出越界黑区。现行冻结方案改为：
 
 - `useMirrorFixedZoomPan` 是独立 canvas 视觉层的唯一 owner：pinch 只写
-  `.term-render-scale-layer` 的 CSS `zoom`，并在进入/退出缩放态时做原生
-  `scrollTop` handoff；它不持有 buffer 行号、`viewportRows` 或 follow 真相。
+  `.term-render-scale-layer` 的 CSS `zoom`；它不持有 buffer 行号、
+  `viewportRows` 或 follow 真相，也不持有或改写 native `scrollTop`。
 - `TerminalView` 是缩放后 renderer 投影的唯一 owner：在 paint 前按
-  `clientHeight / (rowHeightPx * visualScale)` 派生 `viewportRows`，用同一
-  visual row height 计算 render frame 和 padding。该投影不改 tmux/daemon geometry。
-- 缩放态纵向位置使用非正 `translateY`；renderer 的正 `scrollTop` 映射为负
-  translation，单指平移不得越过顶部或底部边界。恢复 scale=1 时由 hook 还原
-  原生 `scrollTop`。
+  `clientHeight / (rowHeightPx * visualScale)` 派生 `viewportRows`，用视觉行高
+  计算 scroll range，用物理行高计算 CSS zoom 层内的 grid/padding。该投影不改
+  tmux/daemon geometry。
+- native `scrollTop` 始终是纵向滚动真源；禁止 `translateY`、scrollTop 清零或
+  保存 scrollTop 后虚拟平移。
 
 因此 §4.1/§8 中“hook 禁止触碰 scrollTop / 禁止 CSS zoom”的规则被本节取代；
 “hook 不持有 viewportRows / renderBottomIndex / rowHeightPx / buffer truth”仍然生效。

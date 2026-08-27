@@ -452,10 +452,12 @@ renderer 还必须显式区分两种宽度模式：
    - **cell 宽度真相必须来自客户端实测的像素宽度**，不能再把 `1ch / 2ch` 当终端列宽真相
    - 双宽 cell 只能按 `2 * measuredCellWidthPx` 渲染；浏览器 fallback 字体的 `ch` 不是 tmux 列宽真相
    - pinch 缩小只缩放独立 canvas 视觉层；Android WebView 冻结实现是 CSS `zoom`
-     加 renderer 在 paint 前重派生可见行数。禁止把 zoom 直接写进 `.term-grid`，
-     禁止改写 tmux/daemon rows/cols，禁止等普通 effect 晚一帧同步行数。
-   - 缩放态纵向平移必须保持非正 `translateY` 并夹在 canvas 可滚动范围内；
-     正 renderer scrollTop 只能映射为负 translation。恢复 scale=1 后才交还原生 scrollTop。
+     加 renderer 在 paint 前按视觉行高重派生可见行数。禁止把 zoom 直接写进
+     `.term-grid`，禁止改写 tmux/daemon rows/cols，禁止等普通 effect 晚一帧同步行数。
+   - 纵向滚动真源始终是 native `scrollTop`。缩放后 `scrollTop` 的范围必须按
+     `totalRows * (physicalRowHeight * visualScale) - clientHeight` 计算；grid 的
+     padding 和 DOM 行高仍使用物理行高，因为它们位于 CSS zoom 层内。禁止
+     `translateY`、scrollTop 清零、保存 scrollTop 后虚拟平移或以合成层接管纵向滚动。
    - 若 buffer 行宽大于 viewport：
      - 默认显示左侧窗口
      - 用户横向平移 renderer window 看右侧

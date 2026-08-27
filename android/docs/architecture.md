@@ -379,6 +379,9 @@ Android floating entry
   - 本地重排旧 buffer 作为真相
   - 因 IME 动画持续修改 tmux 高度
   - 在 `mirror-fixed` 下因手机 viewport 变窄而把 daemon mirror / tmux 改成更窄宽度
+- `mirror-fixed` pinch 缩小只改变 renderer canvas 的视觉 `zoom`；native `scrollTop`
+  始终是纵向滚动真源。renderer 必须按视觉行高增加可视行数，并按物理行高生成
+  zoom 层内的 grid/padding；禁止用 `translateY` 或清零 `scrollTop` 模拟纵向滚动。
 
 ## Terminal horizontal pan 边界
 

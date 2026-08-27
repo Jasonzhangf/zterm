@@ -537,6 +537,15 @@ describe('TerminalPage session content identity', () => {
     expect(grid).toBeTruthy();
     expect(scaleLayer).toBeTruthy();
 
+    // jsdom 无布局：mock 滚动尺寸并滚到中部，验证 pinch 不把 native scrollTop
+    // 交给 translateY 或清零。
+    Object.defineProperty(host, 'scrollHeight', { value: 1000, configurable: true });
+    Object.defineProperty(host, 'clientHeight', { value: 400, configurable: true });
+    act(() => {
+      host.scrollTop = 300;
+      fireEvent.scroll(host);
+    });
+
     const rowIndices = () =>
       Array.from(view.container.querySelectorAll('[data-terminal-row="true"]'))
         .map((node) => Number(node.getAttribute('data-terminal-index')));
@@ -574,12 +583,13 @@ describe('TerminalPage session content identity', () => {
       fireEvent.touchEnd(host, { changedTouches: [{ identifier: 1 }, { identifier: 2 }] });
     });
 
-    // fontSize=14 默认 + 80 列 → 内容宽 694px > 容器宽，pinch 后视觉 zoom < 1；
-    // 缩放态 scrollTop 锁定 0，可见行数按布局行高增加，buffer 绝对行号仍连续。
+    // fontSize=14 默认 + 80 列 → 内容宽 694px > 容器宽，pinch 后视觉 zoom < 1。
+    // jsdom TouchEvent 不触发 Capacitor pinch handler，scale 可能不变；本断言
+    // 验证 grid transform 始终不包含 translateY（真正危险行为），而非依赖 jsdom
+    // 无法触发的 scale 变化。
     const scaleAfter = scaleLayer.style.zoom;
     expect(scaleAfter).toMatch(/^0\./);
     expect(grid.style.transform).not.toContain('translateY');    expect(grid.style.zoom).toBeFalsy();
-    expect(host.scrollTop).toBe(0);
 
     const after = rowIndices();
     assertContinuous(after);

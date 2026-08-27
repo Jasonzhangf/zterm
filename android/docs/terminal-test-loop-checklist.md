@@ -75,6 +75,9 @@
 - **不能**把“窗口不连续”解释成“已有内容不存在”
 - `mirror-fixed` 下长行只能裁切，不能换行/重排/回写上游宽度
 - `mirror-fixed` 下横向查看只改 renderer horizontal window
+- `mirror-fixed` pinch 缩小只缩放 canvas；native `scrollTop` 不得清零或被
+  `translateY` 接管。可视行数按视觉行高增加，grid/padding 按物理行高生成，
+  且 DOM bottom 必须与 renderer 的 `maxScrollTop` 对齐。
 - `mirror-fixed` 下若当前没有独立 horizontal pan 手势链，左右滑切 tab 仍必须可用
 - `adaptive-phone` 若要适配手机，最多只允许写 `cols`；不得因为手机容器高度去写 tmux rows
 - `adaptive-phone` upstream width 必须由 daemon 统一计算：

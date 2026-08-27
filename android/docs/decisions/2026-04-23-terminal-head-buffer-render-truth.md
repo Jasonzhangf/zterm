@@ -505,6 +505,10 @@ terminal 宽度语义固定为两种模式：
 - 可以通过字体缩放让同一 viewport 容纳更多列
 - renderer 的**列宽真相**必须来自客户端实测的像素宽度；不能再把浏览器 `1ch / 2ch` 当终端列宽真相
 - 双宽 cell 只能按 `2 * measuredCellWidthPx` 渲染；如果浏览器 fallback 字体导致 CJK glyph 宽度偏移，也必须由 renderer 的像素度量吸收，不能回写 daemon / buffer truth
+- `mirror-fixed` pinch 缩小只缩放独立 canvas 视觉层。native `scrollTop` 始终保持纵向
+  滚动真源；可视行数按 `physicalRowHeight * visualScale` 增加，grid/padding 在 zoom
+  层内部继续使用物理行高。禁止以 `translateY`、scrollTop 清零或保存位置后虚拟
+  平移替代 native scroll range。
 - **不允许**因为手机变窄而重排旧行、重新 wrap mirror、或回写 daemon/tmux 宽度
 
 ### 3.6.1 renderer 列宽度量规则

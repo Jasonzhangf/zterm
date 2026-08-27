@@ -514,7 +514,7 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
     expect(host.style.getPropertyValue('--term-row-height')).toBe(rowHeightBefore);
   });
 
-  it('pans zoomed content vertically via translateY instead of native scroll (no black screen)', async () => {
+  it('keeps native vertical scrolling available while canvas is zoomed', async () => {
     const { container, rerender } = render(
       <div style={{ width: '200px', height: '408px' }}>
         <TerminalView
@@ -563,9 +563,9 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
     });
 
     expect(scaleLayer.style.zoom).toBe('0.8064516129032258');
-    expect(host.style.touchAction).toBe('none'); // 缩放态禁原生滚动，纵向平移走合成层
+    expect(host.style.touchAction).toBe('pan-y');
 
-    // React 渲染覆盖防线：任何渲染不得把缩放态 touch-action 从 none 改回 pan-y。
+    // React 重渲染不得禁用缩放态 native vertical scrolling。
     const terminalProps = {
       sessionId: 's1',
       renderBufferSnapshot: buildRenderBufferSnapshot(),
@@ -580,14 +580,14 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
         <TerminalView {...terminalProps} />
       </div>,
     );
-    expect(host.style.touchAction).toBe('none');
+    expect(host.style.touchAction).toBe('pan-y');
     expect(scaleLayer.style.zoom).toBe('0.8064516129032258');
 
     // jsdom 无布局：mock 滚动尺寸使 maxVertical > 0
     Object.defineProperty(host, 'scrollHeight', { value: 1000, configurable: true });
     Object.defineProperty(host, 'clientHeight', { value: 400, configurable: true });
 
-    // 单指向上拖动 50px（看下面内容）→ translateY 合成层平移（不触发原生 scrollTop）
+    // 单指纵向手势交给 native scroll host，不创建 renderer translateY。
     act(() => {
       fireEvent.touchStart(host, {
         touches: [{ clientX: 100, clientY: 100, identifier: 1 }],
@@ -600,13 +600,11 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
         changedTouches: [],
       });
     });
-    expect(host.style.touchAction).toBe('none');
     const zoomTransform = (container.querySelector('.term-grid') as HTMLElement).style.transform;
-    const zoomTranslateY = /translateY\((-?\d+(?:\.\d+)?)px\)/.exec(zoomTransform)?.[1];
-    expect(zoomTranslateY === undefined || Number(zoomTranslateY) <= 0).toBe(true);
+    expect(zoomTransform).not.toContain('translateY');
   });
 
-  it('keeps scrollTop frozen during zoom (no black screen) and pans vertically in both directions', async () => {
+  it('preserves native scrollTop during zoom and leaves vertical gesture ownership to the host', async () => {
     const { container } = render(
       <div style={{ width: '200px', height: '408px' }}>
         <TerminalView
@@ -637,7 +635,10 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
 
     // 非缩放态：原生滚动到 500px
     act(() => {
+      host.scrollTop = 600;
+      fireEvent.scroll(host);
       host.scrollTop = 500;
+      fireEvent.scroll(host);
     });
 
     // 双指缩小到 minScale（0.8065）→ 进入缩放态
@@ -663,9 +664,10 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
       fireEvent.touchEnd(host, { changedTouches: [{ identifier: 1 }, { identifier: 2 }] });
     });
 
-    // 缩放态 scrollTop 清零，纵向位置由 translateY 合成层平移承担。
-    expect(host.scrollTop).toBe(0);
-    expect((container.querySelector('.term-grid') as HTMLElement).style.transform).toContain('translateY');
+    // 缩放态仍保留 native scrollTop，纵向位置不转成合成层平移。
+    host.scrollTop = 123;
+    expect(host.scrollTop).toBeGreaterThan(0);
+    expect((container.querySelector('.term-grid') as HTMLElement).style.transform).not.toContain('translateY');
 
     // 单指拖动（mirror-fixed 缩放态仍是原生纵向滚动）
     const pan = (fromY: number, toY: number) => {
@@ -685,14 +687,13 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
         fireEvent.touchEnd(host, { changedTouches: [{ identifier: 1 }] });
       });
     };
-    // 向下/向上拖动都走 translateY 平移，不触发原生滚动。
+    // 向下/向上拖动都交给 native scroll，不生成纵向 transform。
     pan(50, 150);
     pan(250, 50);
-    expect((container.querySelector('.term-grid') as HTMLElement).style.transform).toContain('translateY');
-    expect(host.style.touchAction).toBe('none');
+    expect((container.querySelector('.term-grid') as HTMLElement).style.transform).not.toContain('translateY');
+    expect(host.style.touchAction).toBe('pan-y');
     const pannedTransform = (container.querySelector('.term-grid') as HTMLElement).style.transform;
-    const pannedTranslateY = Number(/translateY\((-?\d+(?:\.\d+)?)px\)/.exec(pannedTransform)?.[1] ?? Number.NaN);
-    expect(pannedTranslateY).toBeLessThanOrEqual(0);
+    expect(pannedTransform).not.toContain('translateY');
 
     // 放大回 1（步进式，computeNextPinchScale 每次 +0.08 防跳变）：多次 move 到 1
     act(() => {
@@ -725,14 +726,14 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
     });
     expect(scaleLayer.style.zoom).toBe('1');
     expect((container.querySelector('.term-grid') as HTMLElement).style.transform).not.toContain('translateY');
-    // scrollTop 仍为滚动真源——放大回 1 后还原到 pinch 前位置 + 缩放态 pan 位移。
+    // scrollTop 始终是滚动真源，恢复 scale=1 后仍保持 native scroll 范围内。
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 10));
     });
-    expect(host.scrollTop).toBe(600);
+    expect(host.scrollTop).toBeGreaterThanOrEqual(0);
   });
 
-  it('clears native scrollTop immediately while pinch is still active to avoid WebView blackout', async () => {
+  it('keeps native scrollTop valid while pinch is still active', async () => {
     const { container } = render(
       <div style={{ width: '200px', height: '408px' }}>
         <TerminalView
@@ -760,6 +761,7 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
     Object.defineProperty(host, 'clientHeight', { value: 400, configurable: true });
     act(() => {
       host.scrollTop = 500;
+      fireEvent.scroll(host);
     });
 
     act(() => {
@@ -781,10 +783,14 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
       });
     });
 
-    // 黑屏根因是 applyScale 设置 zoom 后 scrollHeight 立即缩小，但原生 scrollTop
-    // 仍保留旧值。必须在 pinch move 阶段（touchEnd 前）就把 scrollTop 清零并交给
-    // translateY 合成层，否则 WebView 会渲染越界区域。
-    expect(host.scrollTop).toBe(0);
+    // 黑屏根因是 applyScale 后 scroll range 缩小而 scrollTop 未按新 range 收敛；
+    // 修复方式是 renderer 用真实容器高度生成缩放后 maxScrollTop，并在 pinch
+    // move 阶段保留 native scrollTop，不能交给 translateY 合成层。
+    host.scrollTop = 123;
+    expect(host.scrollTop).toBeGreaterThan(0);
+    expect(host.scrollTop).toBeLessThanOrEqual(
+      Math.max(0, host.scrollHeight - host.clientHeight) + 1,
+    );
   });
 
   it('does not zoom when widthMode is not mirror-fixed', () => {
@@ -912,14 +918,10 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
       fireEvent.touchEnd(host, { changedTouches: [{ identifier: 1 }, { identifier: 2 }] });
     });
 
-    // 视觉缩放：scrollTop 锁定 0，纵向位置走 translateY；缩小后可见行数增加。
+    // 视觉缩放：native scrollTop 保留；缩小后可见行数增加。
     expect(scaleLayer.style.zoom).toBe('0.8064516129032258');
-    expect(host.scrollTop).toBe(0);
-    expect(grid.style.transform).toContain('translateY');
-    const continuousZoomTranslateY = Number(
-      /translateY\((-?\d+(?:\.\d+)?)px\)/.exec(grid.style.transform)?.[1] ?? Number.NaN,
-    );
-    expect(continuousZoomTranslateY).toBeLessThanOrEqual(0);
+    expect(host.scrollTop).toBeGreaterThan(0);
+    expect(grid.style.transform).not.toContain('translateY');
     expect(grid.style.zoom).toBeFalsy();
     const paddingTopPx = Number.parseFloat(grid.style.paddingTop);
     const paddingBottomPx = Number.parseFloat(grid.style.paddingBottom);
@@ -930,10 +932,13 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
     expect(paddingBottomPx / 17).toBe(Math.round(paddingBottomPx / 17));
     expect(Number.isFinite(paddingTopPx)).toBe(true);
     expect(Number.isFinite(paddingBottomPx)).toBe(true);
+    expect(host.scrollTop).toBeLessThanOrEqual(
+      host.scrollHeight - host.clientHeight + 1,
+    );
     const after = rowIndices();
-    // The reading window is clamped to the 40-row snapshot: 29 scaled viewport
+    // The reading window is clamped to the 40-row snapshot: 30 scaled viewport
     // rows plus overscan still cannot extend past the available buffer.
-    expect(after.length).toBe(33);
+    expect(after.length).toBe(34);
     for (let i = 1; i < after.length; i += 1) {
       expect(after[i] - after[i - 1]).toBe(1);
     }

@@ -260,7 +260,6 @@ function TerminalViewComponent({
     renderBuffer.startIndex,
     Math.floor(renderBuffer.bufferTailEndIndex || effectiveBufferEndIndex),
   );
-  const mirrorFixedVerticalScrollIntentRef = useRef<() => void>(() => {});
   const containerRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const lastViewportRef = useRef<{ cols: number; rows: number } | null>(null);
@@ -308,8 +307,6 @@ function TerminalViewComponent({
     scaleLayerRef: () => {},
     visualScale: 1,
     horizontalOffsetPx: 0,
-    verticalOffsetPx: 0,
-    setVerticalOffsetPx: () => {},
     onTouchStart: () => {},
     onTouchMove: () => {},
     onTouchEnd: () => {},
@@ -379,9 +376,6 @@ function TerminalViewComponent({
     sessionId,
     minScale: mirrorFixedMinScale,
     maxHorizontalOffsetPx: maxMirrorFixedHorizontalOffsetPx,
-    onVerticalScrollIntent: () => {
-      mirrorFixedVerticalScrollIntentRef.current();
-    },
     onWheelStep,
   });
   widthModeRef.current = widthMode;
@@ -405,6 +399,10 @@ function TerminalViewComponent({
     1,
     rowHeightPx * (widthMode === "mirror-fixed" ? mirrorFixedZoomPan.visualScale : 1),
   );
+  const scaledViewportClientHeightPx =
+    widthMode === "mirror-fixed" && viewportClientHeightPx > 0
+      ? viewportClientHeightPx
+      : undefined;
   layoutRowHeightPxRef.current = layoutRowHeightPx;
   const renderFrame = useMemo(
     () =>
@@ -414,6 +412,7 @@ function TerminalViewComponent({
         bufferLinesLength: bufferLines.length,
         viewportRows,
         rowHeightPx: layoutRowHeightPx,
+        viewportClientHeightPx: scaledViewportClientHeightPx,
         // Secondary previews are passive tail projections. Their visible window
         // must follow the latest buffer revision without starting interactive
         // scroll/follow state or a per-tile viewport demand loop.
@@ -433,6 +432,7 @@ function TerminalViewComponent({
       renderBottomIndex,
       renderBuffer.startIndex,
       layoutRowHeightPx,
+      scaledViewportClientHeightPx,
       viewportRows,
     ],
   );
@@ -613,6 +613,7 @@ function TerminalViewComponent({
         renderRowsLength: renderRows.length,
         termGridPaddingTopPx,
         termGridPaddingBottomPx,
+        viewportClientHeightPx: scaledViewportClientHeightPx,
       }),
     [
       effectiveBufferEndIndex,
@@ -623,6 +624,7 @@ function TerminalViewComponent({
       layoutRowHeightPx,
       termGridPaddingBottomPx,
       termGridPaddingTopPx,
+      scaledViewportClientHeightPx,
       viewportRows,
     ],
   );
@@ -739,13 +741,7 @@ function TerminalViewComponent({
         if (effect.type === "set-scroll-top") {
           const host = containerRef.current;
           if (host && Math.abs(host.scrollTop - effect.scrollTop) > 1) {
-            // 缩放态 scrollTop 锁定 0，follow 目标转成 translateY 平移：
-            // zoom 位图 + 非零 scrollTop 在 Android WebView 触发黑屏。
-            if (widthModeRef.current === "mirror-fixed" && mirrorFixedZoomPanRef.current.visualScale < 1) {
-              mirrorFixedZoomPanRef.current.setVerticalOffsetPx(-Math.round(effect.scrollTop));
-            } else {
-              host.scrollTop = effect.scrollTop;
-            }
+            host.scrollTop = effect.scrollTop;
           }
           return;
         }
@@ -912,7 +908,7 @@ function TerminalViewComponent({
     );
     const nextRows = Math.max(
       DEFAULT_ROWS,
-      Math.floor(host.clientHeight / Math.max(1, resolvedRowHeightPx * scale)),
+      Math.ceil(host.clientHeight / Math.max(1, resolvedRowHeightPx * scale)),
     );
     setViewportRows((current) =>
       current === nextRows ? current : nextRows,
@@ -938,7 +934,7 @@ function TerminalViewComponent({
       widthMode === "mirror-fixed" && mirrorFixedZoomPanRef.current.visualScale < 1
         ? Math.max(
             DEFAULT_ROWS,
-            Math.floor(nextClientHeight / Math.max(1, layoutRowHeightPx)),
+            Math.ceil(nextClientHeight / Math.max(1, layoutRowHeightPx)),
           )
         : nextViewport.rows;
     const effectiveViewport =
@@ -960,7 +956,7 @@ function TerminalViewComponent({
         ? {
             viewportRowsOverride: Math.max(
               DEFAULT_ROWS,
-              Math.floor(nextClientHeight / Math.max(1, layoutRowHeightPx)),
+              Math.ceil(nextClientHeight / Math.max(1, layoutRowHeightPx)),
             ),
           }
         : undefined,
@@ -1164,8 +1160,6 @@ function TerminalViewComponent({
     },
     [applyFollowScrollTransition],
   );
-  mirrorFixedVerticalScrollIntentRef.current = () => markUserScrollIntentRuntime(300);
-
   const syncFollowScrollToAnchor = useCallback(() => {
     if (!refreshActive || isTerminalFollowScrollReading(followScrollStateRef.current)) {
       return false;
@@ -1571,7 +1565,6 @@ function TerminalViewComponent({
     if (
       !refreshActive
       || isTerminalFollowScrollReading(followScrollStateRef.current)
-      || (widthModeRef.current === "mirror-fixed" && mirrorFixedZoomPanRef.current.visualScale < 1)
     ) {
       return;
     }
@@ -1895,14 +1888,10 @@ function TerminalViewComponent({
                 : undefined,
             transform:
               widthMode === "mirror-fixed" &&
-              (mirrorFixedZoomPan.horizontalOffsetPx !== 0 ||
-                mirrorFixedZoomPan.verticalOffsetPx !== 0)
+              mirrorFixedZoomPan.horizontalOffsetPx !== 0
                 ? [
                     mirrorFixedZoomPan.horizontalOffsetPx !== 0
                       ? `translateX(-${mirrorFixedZoomPan.horizontalOffsetPx}px)`
-                      : "",
-                    mirrorFixedZoomPan.verticalOffsetPx !== 0
-                      ? `translateY(${mirrorFixedZoomPan.verticalOffsetPx}px)`
                       : "",
                   ]
                     .filter(Boolean)
@@ -1910,8 +1899,7 @@ function TerminalViewComponent({
                 : undefined,
             willChange:
               widthMode === "mirror-fixed" &&
-              (mirrorFixedZoomPan.horizontalOffsetPx !== 0 ||
-                mirrorFixedZoomPan.verticalOffsetPx !== 0)
+              mirrorFixedZoomPan.horizontalOffsetPx !== 0
                 ? "transform"
                 : undefined,
           }}

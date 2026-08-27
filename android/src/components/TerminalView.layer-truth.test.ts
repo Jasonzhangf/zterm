@@ -2,8 +2,8 @@
  * Layer-separation truth gate (red test):
  * TerminalView (renderer) must NOT hold gesture state machines, pinch shims,
  * or persistence. useMirrorFixedZoomPan (DOM renderer visual gesture layer,
- * client.dom_renderer) is the
- * single owner of wheel/pan/pinch gesture state and the horizontal offset truth.
+ * client.dom_renderer) is the single owner of wheel/pinch gesture state and
+ * horizontal offset truth; native scrollTop remains vertical scroll truth.
  *
  * Gate doc: docs/audits/2026-08-13-terminal-render-layer-decoupling.md §8.3
  */
@@ -57,8 +57,8 @@ describe('TerminalView renderer / UI shell layer separation', () => {
     expect(leaks,
       `UI shell leaked renderer truth symbols:\n${leaks.join('\n')}`,
     ).toEqual([]);
-    // The hook owns only canvas zoom and native-scroll handoff. Row mapping and
-    // visible-row demand stay in TerminalView.
+    // The hook owns only canvas zoom and horizontal gesture projection. Native
+    // scroll mapping and visible-row demand stay in TerminalView.
     expect(source).toContain('scaleLayerRef');
     expect(source).toContain('style.zoom');
   });
