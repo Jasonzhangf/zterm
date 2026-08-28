@@ -160,7 +160,7 @@ describe('terminal-message-control-runtime tmux kill truth', () => {
     expect(deps.renameTmuxSession).toHaveBeenCalledWith('original', 'renamed', 'tmux');
   });
 
-  it('projects unsupported Herdr rename as the generic tmux rename error', () => {
+  it('projects unsupported Herdr rename as the typed herdr_rename_unsupported error', () => {
     const deps = makeDeps({
       resolveTerminalSessionBackend: vi.fn(),
       renameTmuxSession: vi.fn(() => {
@@ -177,23 +177,59 @@ describe('terminal-message-control-runtime tmux kill truth', () => {
       },
     });
 
+    // Capability pre-check rejects Herdr before renameTmuxSession is called.
+    expect(deps.renameTmuxSession).not.toHaveBeenCalled();
     expect(deps.resolveTerminalSessionBackend).not.toHaveBeenCalled();
-    expect(deps.renameTmuxSession).toHaveBeenCalledWith(
-      'herdr-original',
-      'herdr-renamed',
-      'herdr',
-    );
     expect(result).toEqual({
       ok: false,
-      code: 'tmux_rename_failed',
-      message: 'Failed to rename tmux session: selected terminal backend does not support session rename',
+      code: 'herdr_rename_unsupported',
+      message: 'Herdr single-session backend does not support session rename',
     });
     expect(deps.sendTransportMessage).toHaveBeenCalledWith(null, {
       type: 'error',
       payload: {
-        code: 'tmux_rename_failed',
-        message: 'Failed to rename tmux session: selected terminal backend does not support session rename',
+        code: 'herdr_rename_unsupported',
+        message: 'Failed to rename tmux session: Herdr single-session backend does not support session rename',
       },
+    });
+  });
+
+  it('keeps tmux rename success unchanged when backend is tmux', () => {
+    const deps = makeDeps({
+      resolveTerminalSessionBackend: vi.fn(() => 'tmux'),
+      renameTmuxSession: vi.fn(() => 'tmux-1-renamed'),
+      listTerminalSessionCatalog: vi.fn(() => [
+        { name: 'tmux-1-renamed', backend: 'tmux' },
+      ]),
+    });
+
+    const result = handleTmuxControlMessageRuntime(deps, connection, {
+      type: 'tmux-rename-session',
+      payload: { sessionName: 'tmux-1', nextSessionName: 'tmux-1-renamed' },
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(deps.renameTmuxSession).toHaveBeenCalledWith('tmux-1', 'tmux-1-renamed', 'tmux');
+  });
+
+  it('keeps tmux rename binary failure on the generic tmux_rename_failed code', () => {
+    const deps = makeDeps({
+      resolveTerminalSessionBackend: vi.fn(() => 'tmux'),
+      renameTmuxSession: vi.fn(() => {
+        throw new Error('tmux: rename-session permission denied');
+      }),
+      listTerminalSessionCatalog: vi.fn(() => []),
+    });
+
+    const result = handleTmuxControlMessageRuntime(deps, connection, {
+      type: 'tmux-rename-session',
+      payload: { sessionName: 'tmux-1', nextSessionName: 'tmux-1-renamed' },
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      code: 'tmux_rename_failed',
+      message: 'Failed to rename tmux session: tmux: rename-session permission denied',
     });
   });
 
