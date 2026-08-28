@@ -55,6 +55,17 @@ const HERDR_HISTORY_REFRESH_MS = 1000;
 const HERDR_HISTORY_LIMIT = 1000;
 const HERDR_HISTORY_READ_MAX_ATTEMPTS = 3;
 
+export class HerdrSessionLifecycleError extends Error {
+  constructor(
+    public readonly operation: 'create' | 'close',
+    public readonly sessionName: string,
+    message: string,
+  ) {
+    super(`herdr session lifecycle (${operation} ${sessionName}): ${message}`);
+    this.name = 'HerdrSessionLifecycleError';
+  }
+}
+
 export function advanceHerdrHistoryLiveTailWindow(
   history: HerdrHistorySnapshot,
   live: HerdrCanonicalSnapshot,
@@ -431,8 +442,16 @@ export function createHerdrBackendRuntime(options: HerdrBackendRuntimeOptions): 
 
   function createSession(input?: { sessionName?: string; cwd?: string; command?: string[] }) {
     const sessionName = (input?.sessionName || 'cmd').trim();
-    if (!sessionName) throw new Error('Herdr sessionName is required');
-    if (sessions.has(sessionName)) throw new Error(`Herdr session already exists: ${sessionName}`);
+    if (!sessionName) {
+      throw new HerdrSessionLifecycleError('create', sessionName, 'sessionName is required');
+    }
+    if (sessions.has(sessionName)) {
+      throw new HerdrSessionLifecycleError(
+        'create',
+        sessionName,
+        'session already exists in the zterm Herdr backend runtime',
+      );
+    }
     const herdrSessionName = sessionName;
     const serverProcess = startServer(herdrSessionName);
     let root: ReturnType<typeof parseWorkspaceCreate>;
@@ -455,7 +474,11 @@ export function createHerdrBackendRuntime(options: HerdrBackendRuntimeOptions): 
       } catch {
         // Preserve the original workspace-create failure.
       }
-      throw error;
+      throw new HerdrSessionLifecycleError(
+        'create',
+        sessionName,
+        `workspace-create or pane-geometry failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
     const managed: ManagedHerdrSession = {
       sessionName,
@@ -609,16 +632,29 @@ export function createHerdrBackendRuntime(options: HerdrBackendRuntimeOptions): 
   }
 
   function closeSession(sessionName: string) {
-    const session = resolve(sessionName);
+    const session = sessions.get(sessionName);
+    if (!session) {
+      throw new HerdrSessionLifecycleError(
+        'close',
+        sessionName,
+        'session is not tracked by the zterm Herdr backend runtime',
+      );
+    }
+    sessions.delete(sessionName);
     if (session.historyRefreshTimer) {
       clearTimeout(session.historyRefreshTimer);
       session.historyRefreshTimer = null;
     }
     session.historyRefreshPromise = null;
+    session.adapterPromise = null;
     let closeError: unknown = null;
     try {
-      if (session.adapterBundle) session.adapterBundle.adapter.release();
-      session.adapterBundle?.transport.dispose();
+      const bundle = session.adapterBundle;
+      session.adapterBundle = null;
+      if (bundle) {
+        bundle.adapter.release();
+        bundle.transport.dispose();
+      }
     } catch (error) {
       closeError = error;
     }
@@ -654,7 +690,6 @@ export function createHerdrBackendRuntime(options: HerdrBackendRuntimeOptions): 
       }
     }
     if (!cliStopSucceeded && (!session.serverProcess || !serverProcessStopped)) closeError ||= cliStopError;
-    sessions.delete(sessionName);
     if (closeError) throw closeError;
   }
 
