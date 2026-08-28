@@ -308,6 +308,107 @@ describe('TraversalSocket reconnect', () => {
     expect(MockWebSocket.instances.some((ws) => ws.url.includes('100.66.1.82'))).toBe(true);
   });
 
+  it('moves from an unreachable LAN endpoint to Tailscale in the same transport generation', async () => {
+    const routeHealthCache = new TraversalRouteHealthCache();
+    const socket = new TraversalSocket({
+      bridgeHost: '',
+      bridgePort: 3333,
+      authToken: 'token',
+      transportMode: 'websocket',
+      relayEndpointCandidates: [
+        {
+          id: 'lan:192.168.50.20:3333',
+          kind: 'lan',
+          host: '192.168.50.20',
+          port: 3333,
+          authRequired: true,
+          lastSeenAt: '2026-08-28T00:00:00.000Z',
+        },
+        {
+          id: 'direct:tailscale:daemon-a',
+          kind: 'tailscale',
+          host: '100.66.1.82',
+          port: 3333,
+          authRequired: true,
+          lastSeenAt: '2026-08-28T00:00:00.000Z',
+        },
+      ],
+    }, settings, {
+      routeHealthCache,
+      routeHealthScope: { accountId: 'user-1', daemonHostId: 'daemon-a' },
+    });
+    await flushMicrotasks();
+
+    const lanWs = MockWebSocket.instances.find((ws) => ws.url.includes('192.168.50.20'));
+    const tailscaleWs = MockWebSocket.instances.find((ws) => ws.url.includes('100.66.1.82'));
+    expect(lanWs).toBeDefined();
+    expect(tailscaleWs).toBeDefined();
+
+    lanWs?.triggerClose(1006, 'LAN endpoint unreachable');
+    expect(routeHealthCache.get(
+      { accountId: 'user-1', daemonHostId: 'daemon-a' },
+      {
+        id: 'lan:192.168.50.20:3333',
+        path: 'ipv4',
+        endpoint: '192.168.50.20:3333',
+      },
+    )).toMatchObject({
+      status: 'failure',
+      error: 'LAN endpoint unreachable',
+    });
+
+    tailscaleWs?.triggerOpen();
+    expect(socket.getDiagnostics()).toMatchObject({
+      stage: 'open',
+      resolvedPath: 'tailscale',
+      resolvedEndpoint: '100.66.1.82:3333',
+    });
+    expect(socket.getDiagnostics().attempts.map((item) => item.path)).toEqual(
+      expect.arrayContaining(['ipv4', 'tailscale']),
+    );
+    expect(socket.getDiagnostics().attempts).toHaveLength(2);
+
+    socket.close();
+  });
+
+  it('does not switch away from a reachable LAN endpoint', async () => {
+    const socket = new TraversalSocket({
+      bridgeHost: '',
+      bridgePort: 3333,
+      authToken: 'token',
+      transportMode: 'websocket',
+      relayEndpointCandidates: [{
+        id: 'lan:192.168.50.20:3333',
+        kind: 'lan',
+        host: '192.168.50.20',
+        port: 3333,
+        authRequired: true,
+        lastSeenAt: '2026-08-28T00:00:00.000Z',
+      }, {
+        id: 'direct:tailscale:daemon-a',
+        kind: 'tailscale',
+        host: '100.66.1.82',
+        port: 3333,
+        authRequired: true,
+        lastSeenAt: '2026-08-28T00:00:00.000Z',
+      }],
+    }, settings);
+    await flushMicrotasks();
+
+    const lanWs = MockWebSocket.instances.find((ws) => ws.url.includes('192.168.50.20'));
+    const tailscaleWs = MockWebSocket.instances.find((ws) => ws.url.includes('100.66.1.82'));
+    lanWs?.triggerOpen();
+
+    expect(socket.getDiagnostics()).toMatchObject({
+      stage: 'open',
+      resolvedPath: 'ipv4',
+      resolvedEndpoint: '192.168.50.20:3333',
+    });
+    expect(tailscaleWs?.readyState).toBe(MockWebSocket.CLOSED);
+
+    socket.close();
+  });
+
   it('reconnects quickly after an opened traversal backend closes', async () => {
     const socket = createSocket({}, { autoReconnect: true });
     await flushMicrotasks();
