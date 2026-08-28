@@ -72,6 +72,27 @@ describe('selectBestTraversalRoute', () => {
     expect(selection.diagnostics.find((item) => item.candidateId === 'direct:lan')?.reasons).toContain('ipv4:private-lan');
   });
 
+  it('selects Tailscale after the LAN candidate records an ordinary reachability failure', () => {
+    const cache = new TraversalRouteHealthCache();
+    const scope = { accountId: 'u1', daemonHostId: 'daemon-a' };
+    cache.recordFailure(scope, candidates[0], 'LAN endpoint unreachable');
+
+    const selection = selectBestTraversalRoute({
+      candidates: [candidates[0], candidates[2]],
+      healthCache: cache,
+      scope,
+    });
+
+    expect(selection.selected).toMatchObject({ id: 'direct:tailscale', path: 'tailscale' });
+    expect(selection.diagnostics.find((item) => item.candidateId === 'direct:lan')).toMatchObject({
+      selectable: false,
+      health: { status: 'failure', error: 'LAN endpoint unreachable' },
+    });
+    expect(selection.diagnostics.find((item) => item.candidateId === 'direct:tailscale')).toMatchObject({
+      selectable: true,
+    });
+  });
+
   it('selects Tailscale before WebRTC direct, public IPv4, and Relay by default', () => {
     const selection = selectBestTraversalRoute({
       candidates: candidates.filter((candidate) => candidate.id !== 'direct:lan'),
