@@ -500,7 +500,7 @@ describe('TerminalPage portrait session drawer', () => {
     expect(screen.getByTestId('terminal-connection-status-downlink').textContent).toBe('↓ 2.0 KB/s');
   });
 
-  it('renames the remote tmux session when the portrait status title is clicked without opening the route menu', async () => {
+  it('renames the remote tmux session only after a long press, not a click', async () => {
     const sessions = [makeSession('s1')];
     const onRenameRemoteSession = vi.fn(async () => undefined);
 
@@ -524,7 +524,12 @@ describe('TerminalPage portrait session drawer', () => {
       />,
     );
 
-    fireEvent.click(screen.getByTestId('terminal-connection-status-session'));
+    const title = screen.getByTestId('terminal-connection-status-session');
+    fireEvent.click(title);
+    expect(screen.queryByRole('textbox', { name: '新的 session 名称' })).toBeNull();
+    fireEvent.pointerDown(title, { button: 0, pointerId: 1 });
+    await new Promise((resolve) => window.setTimeout(resolve, 550));
+    fireEvent.pointerUp(title, { button: 0, pointerId: 1 });
     fireEvent.change(screen.getByRole('textbox', { name: '新的 session 名称' }), {
       target: { value: 'renamed-session' },
     });
@@ -558,7 +563,10 @@ describe('TerminalPage portrait session drawer', () => {
       />,
     );
 
-    fireEvent.click(screen.getByTestId('terminal-connection-status-session'));
+    const title = screen.getByTestId('terminal-connection-status-session');
+    fireEvent.pointerDown(title, { button: 0, pointerId: 1 });
+    await new Promise((resolve) => window.setTimeout(resolve, 550));
+    fireEvent.pointerUp(title, { button: 0, pointerId: 1 });
     fireEvent.change(screen.getByRole('textbox', { name: '新的 session 名称' }), {
       target: { value: 'renamed-session' },
     });
