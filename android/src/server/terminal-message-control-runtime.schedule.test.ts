@@ -142,6 +142,61 @@ describe('terminal-message-control-runtime tmux kill truth', () => {
     });
   });
 
+  it('routes tmux rename through the resolved tmux backend', () => {
+    const deps = makeDeps({
+      resolveTerminalSessionBackend: vi.fn(() => 'tmux'),
+      renameTmuxSession: vi.fn(() => 'renamed'),
+      listTerminalSessionCatalog: vi.fn(() => [
+        { name: 'renamed', backend: 'tmux' },
+      ]),
+    });
+
+    const result = handleTmuxControlMessageRuntime(deps, connection, {
+      type: 'tmux-rename-session',
+      payload: { sessionName: 'original', nextSessionName: 'renamed' },
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(deps.renameTmuxSession).toHaveBeenCalledWith('original', 'renamed', 'tmux');
+  });
+
+  it('projects unsupported Herdr rename as the generic tmux rename error', () => {
+    const deps = makeDeps({
+      resolveTerminalSessionBackend: vi.fn(),
+      renameTmuxSession: vi.fn(() => {
+        throw new Error('selected terminal backend does not support session rename');
+      }),
+    });
+
+    const result = handleTmuxControlMessageRuntime(deps, connection, {
+      type: 'tmux-rename-session',
+      payload: {
+        sessionName: 'herdr-original',
+        nextSessionName: 'herdr-renamed',
+        terminalBackend: 'herdr',
+      },
+    });
+
+    expect(deps.resolveTerminalSessionBackend).not.toHaveBeenCalled();
+    expect(deps.renameTmuxSession).toHaveBeenCalledWith(
+      'herdr-original',
+      'herdr-renamed',
+      'herdr',
+    );
+    expect(result).toEqual({
+      ok: false,
+      code: 'tmux_rename_failed',
+      message: 'Failed to rename tmux session: selected terminal backend does not support session rename',
+    });
+    expect(deps.sendTransportMessage).toHaveBeenCalledWith(null, {
+      type: 'error',
+      payload: {
+        code: 'tmux_rename_failed',
+        message: 'Failed to rename tmux session: selected terminal backend does not support session rename',
+      },
+    });
+  });
+
   it('treats an already absent tmux session as idempotently closed and republishes the current list', () => {
     const deps = makeDeps({
       closeDetachedTerminalSession: vi.fn(() => {
