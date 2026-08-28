@@ -1,0 +1,35 @@
+{
+  "sessionName": "zterm-cordis-v2-herdr-lifecycle-1787909436667",
+  "steps": [
+    {
+      "name": "pre-create: target session not in running catalog",
+      "ok": true,
+      "detail": "list-size=0"
+    },
+    {
+      "name": "create: typed session created with exact identity",
+      "ok": true,
+      "detail": "cols=80 rows=24"
+    },
+    {
+      "name": "post-create: exact session appears in running catalog",
+      "ok": true,
+      "detail": "list-size=1"
+    },
+    {
+      "name": "close: typed session closed without error",
+      "ok": true,
+      "detail": "closed"
+    },
+    {
+      "name": "post-close: second close rejected as typed lifecycle error",
+      "ok": true,
+      "detail": "HerdrSessionLifecycleError thrown on double close"
+    },
+    {
+      "name": "post-close: exact session no longer in running catalog",
+      "ok": true,
+      "detail": "list-size=0"
+    }
+  ]
+}

@@ -1949,6 +1949,7 @@
       "required_gates": [
         "src/server/herdr-frame-canonicalizer.test.ts",
         "src/server/herdr-backend-runtime.test.ts",
+        "src/server/herdr-session-lifecycle.test.ts",
         "src/server/herdr-process-transport.test.ts",
         "src/server/herdr-side-channel-truth.test.ts",
         "src/server/terminal-backend-selection.test.ts",
