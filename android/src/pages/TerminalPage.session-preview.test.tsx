@@ -482,6 +482,7 @@ describe('TerminalPage session preview integration', () => {
         relayHostId: 'daemon-a',
         authToken: 'token-a',
         sessionNames: ['tmux-s1', 'remote-beta'],
+        terminalBackend: 'tmux',
       },
       'remote-beta',
       { activate: false, navigate: false },
