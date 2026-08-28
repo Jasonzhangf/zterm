@@ -351,6 +351,41 @@ export function handleTmuxControlMessageRuntime(
         };
       }
     case 'tmux-rename-session':
+      {
+        // Capability pre-check: Herdr is a single-session backend and never supports
+        // session rename. Reject early with a typed error so clients can branch on
+        // the specific cause instead of the generic tmux_rename_failed projection.
+        const renameBackend = message.payload.terminalBackend
+          || deps.resolveTerminalSessionBackend?.(message.payload.sessionName);
+        if (!renameBackend) {
+          deps.sendTransportMessage(connection.transport, {
+            type: 'error',
+            payload: {
+              message: `Failed to rename tmux session: terminal session backend resolver unavailable for ${message.payload.sessionName}`,
+              code: 'tmux_rename_failed',
+            },
+          });
+          return {
+            ok: false,
+            code: 'tmux_rename_failed',
+            message: `Failed to rename tmux session: terminal session backend resolver unavailable for ${message.payload.sessionName}`,
+          };
+        }
+        if (renameBackend === 'herdr') {
+          deps.sendTransportMessage(connection.transport, {
+            type: 'error',
+            payload: {
+              message: 'Failed to rename tmux session: Herdr single-session backend does not support session rename',
+              code: 'herdr_rename_unsupported',
+            },
+          });
+          return {
+            ok: false,
+            code: 'herdr_rename_unsupported',
+            message: 'Herdr single-session backend does not support session rename',
+          };
+        }
+      }
       try {
         const currentName = deps.sanitizeSessionName(message.payload.sessionName);
         const backend = message.payload.terminalBackend
