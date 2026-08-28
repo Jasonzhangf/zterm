@@ -1250,3 +1250,131 @@ describe('TerminalSessionDrawer', () => {
     expect(dialogStyle).not.toMatch(/rgba?\(\s*\d+\s*,\s*\d+\s*,\s*\d+/);
   });
 });
+
+describe('TerminalSessionDrawer availability retry surface', () => {
+  const baseSessions = [
+    {
+      id: 'tmux-usable',
+      stableKey: 'tmux-usable',
+      title: 'tmux-usable',
+      subtitle: 'Mac Studio · tmux-usable',
+      status: 'connected' as const,
+      active: true,
+      hostKey: 'daemon-a',
+      hostLabel: 'Mac Studio',
+      terminalBackend: 'tmux' as const,
+    },
+    {
+      id: 'herdr-missing',
+      stableKey: 'herdr-missing',
+      title: 'herdr-missing',
+      subtitle: 'Mac Studio · herdr-missing',
+      status: 'connected' as const,
+      active: false,
+      hostKey: 'daemon-a',
+      hostLabel: 'Mac Studio',
+      terminalBackend: 'herdr' as const,
+      remoteMissing: true,
+    },
+    {
+      id: 'tmux-closed',
+      stableKey: 'tmux-closed',
+      title: 'tmux-closed',
+      subtitle: 'Mac Studio · tmux-closed',
+      status: 'closed' as const,
+      active: false,
+      hostKey: 'daemon-a',
+      hostLabel: 'Mac Studio',
+      terminalBackend: 'tmux' as const,
+    },
+  ];
+
+  it('does not render a retry button for usable tmux sessions', () => {
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={baseSessions}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onRetrySessionAvailability={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId('terminal-session-drawer-retry-tmux-usable')).toBeNull();
+    expect(screen.queryByTestId('terminal-session-drawer-retry-herdr-missing')).toBeTruthy();
+    expect(screen.queryByTestId('terminal-session-drawer-retry-tmux-closed')).toBeTruthy();
+  });
+
+  it('triggers onRetrySessionAvailability for an unavailable Herdr row but not for usable tmux rows', () => {
+    const onRetrySessionAvailability = vi.fn();
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={baseSessions}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onRetrySessionAvailability={onRetrySessionAvailability}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-retry-herdr-missing'));
+    expect(onRetrySessionAvailability).toHaveBeenCalledWith('herdr-missing');
+    expect(onRetrySessionAvailability).toHaveBeenCalledTimes(1);
+  });
+
+  it('disables the retry button while the row is reported as retrying and shows 重试中 label', () => {
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={baseSessions}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onRetrySessionAvailability={vi.fn()}
+        retryingSessionIds={['herdr-missing']}
+      />,
+    );
+    const button = screen.getByTestId('terminal-session-drawer-retry-herdr-missing') as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.textContent).toBe('重试中');
+  });
+
+  it('keeps retry callback optional: drawer remains available without an explicit retry callback', () => {
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={baseSessions}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId('terminal-session-drawer-retry-herdr-missing')).toBeNull();
+  });
+
+  it('does not mix tmux host identity with a Herdr row: missing row keeps the typed backend', () => {
+    const onSelectSession = vi.fn();
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={baseSessions}
+        onClose={vi.fn()}
+        onSelectSession={onSelectSession}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+    const herdrRow = screen.getByTestId('terminal-session-drawer-row-herdr-missing');
+    expect(herdrRow.getAttribute('data-terminal-backend')).toBe('herdr');
+    expect(herdrRow.getAttribute('data-availability')).toBe('remote-missing');
+    const tmuxRow = screen.getByTestId('terminal-session-drawer-row-tmux-usable');
+    expect(tmuxRow.getAttribute('data-terminal-backend')).toBe('tmux');
+    expect(tmuxRow.getAttribute('data-availability')).toBe('available');
+    const closedRow = screen.getByTestId('terminal-session-drawer-row-tmux-closed');
+    expect(closedRow.getAttribute('data-availability')).toBe('closed');
+  });
+});
