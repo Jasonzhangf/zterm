@@ -90,7 +90,8 @@ export function createTerminalHttpRuntime(deps: TerminalHttpRuntimeDeps): Termin
 
   function buildConnectedPayload(sessionId: string, requestOrigin?: string) {
     const latestManifest = readLatestUpdateManifest();
-    const manifestUrl = `${requestOrigin || `http://${deps.host}:${deps.port}`}/updates/latest.json`;
+    const manifestUrl = deps.appUpdateManifestUrl
+      || `${requestOrigin || `http://${deps.host}:${deps.port}`}/updates/latest.json`;
     return {
       sessionId,
       daemonHostId: deps.daemonHostId?.trim() || undefined,

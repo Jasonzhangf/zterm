@@ -1,3 +1,5 @@
+import { mkdtempSync, writeFileSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
 import { describe, expect, it, vi } from 'vitest';
 import type { IncomingMessage, ServerResponse } from 'http';
 import { createTerminalPerformanceTraceStore } from '../lib/terminal-performance-trace';
@@ -24,6 +26,41 @@ function createResponseRecorder() {
 }
 
 describe('terminal http runtime performance trace summary', () => {
+  it('keeps the configured reachable update manifest when the request arrived through LAN', () => {
+    const updatesDir = mkdtempSync(`${tmpdir()}/zterm-update-manifest-`);
+    writeFileSync(`${updatesDir}/latest.json`, JSON.stringify({ versionCode: 1, versionName: '0.1.0' }));
+    try {
+      const runtime = createTerminalHttpRuntime({
+        host: '0.0.0.0',
+        port: 3333,
+        requiredAuthToken: '',
+        updatesDir,
+        appUpdateVersionCode: 0,
+        appUpdateVersionName: '',
+        appUpdateManifestUrl: 'http://100.66.1.82:3333/updates/latest.json',
+        sessions: new Map(),
+        mirrors: new Map(),
+        clientRuntimeDebugStore: createRuntimeDebugStore(),
+        daemonRuntimeDebugStore: createRuntimeDebugStore(),
+        performanceTraceStore: createTerminalPerformanceTraceStore({ limit: 20 }),
+        resolveDebugRouteLimit: () => 200,
+        broadcastRuntimeDebugControl: () => undefined,
+        setDaemonRuntimeDebugEnabled: () => undefined,
+        setDaemonRuntimeDebugLease: () => undefined,
+        handleClientDebugLog: () => undefined,
+        handleClientDebugSnapshot: () => undefined,
+        logTimePrefix: () => '2026-07-28 08:00:00.000 +00:00',
+        connections: new Map(),
+        sendTransportMessage: vi.fn(),
+      });
+
+      const connected = runtime.buildConnectedPayload('session-1', 'http://192.168.50.20:3333');
+      expect(connected.appUpdate?.manifestUrl).toBe('http://100.66.1.82:3333/updates/latest.json');
+    } finally {
+      rmSync(updatesDir, { recursive: true, force: true });
+    }
+  });
+
   it('exposes bounded daemon/client metadata trace summary on /debug/runtime', () => {
     const performanceTraceStore = createTerminalPerformanceTraceStore({ limit: 20 });
     performanceTraceStore.record({

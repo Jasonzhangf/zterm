@@ -1,12 +1,30 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildDaemonConnectionEndpointCandidates,
+  resolveDaemonTailscaleUpdateManifestUrl,
   type DaemonNetworkInterfaceMap,
 } from './daemon-connection-endpoint-runtime';
 
 const now = '2026-07-28T07:00:00.000Z';
 
 describe('daemon connection endpoint runtime', () => {
+  it('derives upgrade manifest from the Tailscale address, never a LAN address', () => {
+    expect(resolveDaemonTailscaleUpdateManifestUrl({
+      bridgePort: 3333,
+      interfaces: {
+        en0: [{ address: '192.168.50.20', family: 'IPv4', internal: false }],
+        utun7: [{ address: '100.66.1.82', family: 'IPv4', internal: false }],
+      },
+    })).toBe('http://100.66.1.82:3333/updates/latest.json');
+  });
+
+  it('returns no remote upgrade manifest when no Tailscale address exists', () => {
+    expect(resolveDaemonTailscaleUpdateManifestUrl({
+      bridgePort: 3333,
+      interfaces: { en0: [{ address: '192.168.50.20', family: 'IPv4', internal: false }] },
+    })).toBe('');
+  });
+
   it('publishes deterministic LAN, Tailscale, RTC-direct, and Relay candidates', () => {
     const interfaces: DaemonNetworkInterfaceMap = {
       en0: [

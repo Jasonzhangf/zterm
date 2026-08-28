@@ -22,7 +22,10 @@ import {
   WTERM_CONFIG_DISPLAY_PATH,
 } from '@zterm/shared/mobile-config';
 import { getWtermHomeDir, getWtermUpdatesDir, resolveDaemonRuntimeConfig } from './daemon-config';
-import { buildDaemonConnectionEndpointCandidates } from './daemon-connection-endpoint-runtime';
+import {
+  buildDaemonConnectionEndpointCandidates,
+  resolveDaemonTailscaleUpdateManifestUrl,
+} from './daemon-connection-endpoint-runtime';
 import { createTraversalRelayHostClient } from './relay-client';
 import { findChangedIndexedRanges } from './canonical-buffer';
 import { buildBufferHeadPayload, buildChangedRangesBufferSyncPayload } from './buffer-sync-contract';
@@ -127,6 +130,7 @@ const ATTACHMENTS_DIR = join(WTERM_HOME_DIR, 'attachments');
 const APP_UPDATE_VERSION_CODE = Number.parseInt(process.env.ZTERM_APP_UPDATE_VERSION_CODE || '', 10);
 const APP_UPDATE_VERSION_NAME = (process.env.ZTERM_APP_UPDATE_VERSION_NAME || '').trim();
 const APP_UPDATE_MANIFEST_URL = (process.env.ZTERM_APP_UPDATE_MANIFEST_URL || '').trim();
+const DAEMON_TAILSCALE_UPDATE_MANIFEST_URL = resolveDaemonTailscaleUpdateManifestUrl({ bridgePort: PORT });
 const WS_HEARTBEAT_INTERVAL_MS = 2000;
 const STARTUP_PORT_CONFLICT_EXIT_CODE = 78;
 const DAEMON_RUNTIME_DEBUG = process.env.ZTERM_DAEMON_DEBUG_LOG === '1';
@@ -439,7 +443,7 @@ const terminalHttpRuntime = createTerminalHttpRuntime({
   updatesDir: UPDATES_DIR,
   appUpdateVersionCode: APP_UPDATE_VERSION_CODE,
   appUpdateVersionName: APP_UPDATE_VERSION_NAME,
-  appUpdateManifestUrl: APP_UPDATE_MANIFEST_URL,
+  appUpdateManifestUrl: APP_UPDATE_MANIFEST_URL || DAEMON_TAILSCALE_UPDATE_MANIFEST_URL,
   sessions,
   mirrors,
   clientRuntimeDebugStore,
