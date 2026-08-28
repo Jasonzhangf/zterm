@@ -15,6 +15,7 @@ import {
 } from './terminal-page-status-helpers';
 
 const CONNECTION_STATUS_DEBOUNCE_MS = 2000;
+const SESSION_RENAME_LONG_PRESS_MS = 500;
 
 const connectionRouteOptionStyle = {
   minHeight: '34px',
@@ -49,6 +50,7 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
   const [routeMenuOpen, setRouteMenuOpen] = useState(false);
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
   const [renameErrorMessage, setRenameErrorMessage] = useState<string | null>(null);
+  const renameLongPressTimerRef = useRef<number | null>(null);
   const stableStatusRef = useRef<'connected' | 'unstable' | 'error'>('unstable');
   const unstableSinceRef = useRef<number>(0);
   const debouncedStatusRef = useRef<string>('waiting');
@@ -62,6 +64,12 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
     }, 500);
     return () => window.clearInterval(timer);
   }, [session]);
+
+  useEffect(() => () => {
+    if (renameLongPressTimerRef.current !== null) {
+      window.clearTimeout(renameLongPressTimerRef.current);
+    }
+  }, []);
 
   void tick;
 
@@ -184,18 +192,44 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
           {visibleRouteLabel}
         </span>
       </span>
-      <button
-        type="button"
+      <span
         data-testid='terminal-connection-status-session'
         aria-label={`重命名 session ${session.sessionName}`}
-        onClick={(event) => {
-          event.stopPropagation();
-          setRouteMenuOpen(false);
-          if (!onRenameRemoteSession) {
+        onPointerDown={(event) => {
+          if (!onRenameRemoteSession || event.button !== 0) {
             return;
           }
-          setRenameErrorMessage(null);
-          setRenameDialogOpen(true);
+          if (renameLongPressTimerRef.current !== null) {
+            window.clearTimeout(renameLongPressTimerRef.current);
+          }
+          renameLongPressTimerRef.current = window.setTimeout(() => {
+            setRouteMenuOpen(false);
+            setRenameErrorMessage(null);
+            setRenameDialogOpen(true);
+            renameLongPressTimerRef.current = null;
+          }, SESSION_RENAME_LONG_PRESS_MS);
+        }}
+        onPointerUp={() => {
+          if (renameLongPressTimerRef.current !== null) {
+            window.clearTimeout(renameLongPressTimerRef.current);
+            renameLongPressTimerRef.current = null;
+          }
+        }}
+        onPointerCancel={() => {
+          if (renameLongPressTimerRef.current !== null) {
+            window.clearTimeout(renameLongPressTimerRef.current);
+            renameLongPressTimerRef.current = null;
+          }
+        }}
+        onPointerLeave={() => {
+          if (renameLongPressTimerRef.current !== null) {
+            window.clearTimeout(renameLongPressTimerRef.current);
+            renameLongPressTimerRef.current = null;
+          }
+        }}
+        onContextMenu={(event) => event.preventDefault()}
+        onClick={(event) => {
+          event.stopPropagation();
         }}
         style={{
           flex: '1 1 auto',
@@ -210,11 +244,12 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
           fontWeight: 800,
           textAlign: 'left',
           whiteSpace: 'nowrap',
-          cursor: onRenameRemoteSession ? 'text' : 'default',
+          cursor: onRenameRemoteSession ? 'pointer' : 'default',
+          userSelect: 'none',
         }}
       >
         {session.sessionName}
-      </button>
+      </span>
       <span
         data-testid='terminal-connection-status-backend'
         aria-label={`当前终端后端 ${terminalBackend}`}
