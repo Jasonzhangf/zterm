@@ -39,7 +39,11 @@ export function resolveDrawerSessionAvailability(
 }
 
 export function isDrawerSessionUnavailable(reason: DrawerSessionAvailabilityReason | undefined): boolean {
-  return reason === 'remote-missing' || reason === 'closed';
+  return reason === 'remote-missing';
+}
+
+export function isDrawerSessionRetryable(reason: DrawerSessionAvailabilityReason | undefined): boolean {
+  return reason === 'closed';
 }
 
 export function resolveDrawerSessionAvailabilityForItem(
