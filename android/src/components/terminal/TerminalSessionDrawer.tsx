@@ -200,11 +200,14 @@ function TerminalSessionDrawerComponent({
   }, [open]);
 
   const openNewSessionDialog = () => {
+    // Derive default backend from the current host group's first session.
+    // Falls back to tmux when the host has no session signal yet.
+    const hostBackend = currentHostGroup?.sessions.find((s) => s.terminalBackend)?.terminalBackend;
     setNewSessionDraft({
       hostKey: currentHostGroup?.hostKey,
       sessionName: buildDefaultSessionName(),
       cwd: '~/',
-      terminalBackend: 'tmux',
+      terminalBackend: hostBackend ?? 'tmux',
     });
   };
 

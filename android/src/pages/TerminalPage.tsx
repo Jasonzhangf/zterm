@@ -654,6 +654,13 @@ function TerminalPageComponent({
     target: DrawerRemoteSessionTarget;
     busy: boolean;
   } | null>(null);
+  // Render-side projection only; the source of truth for the actual backend is
+  // `drawerCloseDialog.target.terminalBackend`. We keep a derived label here so
+  // the confirm-close dialog can surface the right backend to the user without
+  // the drawer needing to know the catalog target's backend.
+  const drawerCloseDialogBackendLabel = drawerCloseDialog?.target.terminalBackend === 'herdr'
+    ? 'Herdr'
+    : 'tmux';
   const [terminalDialog, setTerminalDialog] = useState<{
     tone: 'info' | 'success' | 'warning' | 'error';
     title: string;
@@ -1294,12 +1301,12 @@ function TerminalPageComponent({
           name: group.name,
           bridgeHost: targetBridgeHost,
           bridgePort: targetBridgePort,
+          terminalBackend: groupBackend,
           ...(canonicalDaemonHostId ? { daemonHostId: canonicalDaemonHostId, relayHostId: canonicalDaemonHostId } : {}),
           authToken: group.authToken,
           ...(relayEndpointCandidates?.length ? { relayEndpointCandidates } : {}),
           ...(useRelayRouteTarget ? { transportMode: 'auto' as const } : {}),
           sessionNames: group.sessionNames,
-          ...(groupBackend === 'herdr' ? { terminalBackend: 'herdr' as const } : {}),
         };
         const canonicalSessionRowKey = `${serverIdentity.key}${backendSuffix}::session:${sessionName}`;
         const stableKey = `catalog:${group.bridgeHost}:${group.bridgePort}${backendSuffix}::session:${sessionName}`;
@@ -3658,7 +3665,7 @@ function TerminalPageComponent({
         tone="warning"
         title={drawerCloseDialog ? `关闭 ${drawerCloseDialog.title}` : '关闭 session'}
         message={drawerCloseDialog
-          ? `将先断开当前连接，再终止 tmux session "${drawerCloseDialog.sessionName}"。`
+          ? `将先断开当前连接，再终止 ${drawerCloseDialogBackendLabel} session "${drawerCloseDialog.sessionName}"。`
           : ''}
         showCancel
         busy={Boolean(drawerCloseDialog?.busy)}

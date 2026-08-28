@@ -1093,4 +1093,160 @@ describe('TerminalSessionDrawer', () => {
     expect(closeTarget.style.height).toBe('32px');
     expect(closeTarget.style.color).toBe('var(--zterm-panel-danger)');
   });
+
+  it('defaults new session backend to the current host terminal backend (herdr)', () => {
+    const onOpenQuickTabPicker = vi.fn();
+    const herdrSessions = [
+      {
+        id: 'h1',
+        stableKey: 'stable-h1',
+        title: 'hd-codex',
+        subtitle: 'Mac Studio · hd-codex · Herdr',
+        status: 'connected' as const,
+        active: true,
+        terminalBackend: 'herdr' as const,
+      },
+    ];
+
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={herdrSessions}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={onOpenQuickTabPicker}
+      />,
+    );
+
+    fireEvent.touchEnd(screen.getByTestId('terminal-session-drawer-add'), {
+      changedTouches: [{ clientX: 180, clientY: 560 }],
+    });
+
+    expect(screen.getByTestId('terminal-session-drawer-new-session-dialog')).toBeTruthy();
+    const herdrToggle = screen.getByRole('button', { name: 'Herdr' });
+    expect(herdrToggle.getAttribute('aria-pressed')).toBe('true');
+
+    fireEvent.change(screen.getByLabelText('新 session 名称'), {
+      target: { value: 'herdr-fresh' },
+    });
+    fireEvent.change(screen.getByLabelText('新 session 启动路径'), {
+      target: { value: '~/work' },
+    });
+    fireEvent.click(screen.getByText('创建'));
+
+    expect(onOpenQuickTabPicker).toHaveBeenCalledWith(undefined, {
+      sessionName: 'herdr-fresh',
+      cwd: '~/work',
+      terminalBackend: 'herdr',
+    });
+  });
+
+  it('keeps new session backend as tmux when the host only has tmux sessions', () => {
+    const onOpenQuickTabPicker = vi.fn();
+    const tmuxOnly = [
+      {
+        id: 't1',
+        stableKey: 'stable-t1',
+        title: 'work',
+        subtitle: 'Mac Studio · work',
+        status: 'connected' as const,
+        active: true,
+        terminalBackend: 'tmux' as const,
+      },
+    ];
+
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={tmuxOnly}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={onOpenQuickTabPicker}
+      />,
+    );
+
+    fireEvent.touchEnd(screen.getByTestId('terminal-session-drawer-add'), {
+      changedTouches: [{ clientX: 180, clientY: 560 }],
+    });
+
+    const tmuxToggle = screen.getByRole('button', { name: 'tmux' });
+    expect(tmuxToggle.getAttribute('aria-pressed')).toBe('true');
+
+    fireEvent.click(screen.getByText('创建'));
+
+    expect(onOpenQuickTabPicker).toHaveBeenCalledWith(undefined, {
+      sessionName: expect.stringMatching(/^zterm-\d{8}-\d{6}$/),
+      cwd: '~/',
+      terminalBackend: 'tmux',
+    });
+  });
+
+  it('lets the user override the new-session backend to a different backend than the host', () => {
+    const onOpenQuickTabPicker = vi.fn();
+    const tmuxOnly = [
+      {
+        id: 't1',
+        stableKey: 'stable-t1',
+        title: 'work',
+        subtitle: 'Mac Studio · work',
+        status: 'connected' as const,
+        active: true,
+        terminalBackend: 'tmux' as const,
+      },
+    ];
+
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={tmuxOnly}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={onOpenQuickTabPicker}
+      />,
+    );
+
+    fireEvent.touchEnd(screen.getByTestId('terminal-session-drawer-add'), {
+      changedTouches: [{ clientX: 180, clientY: 560 }],
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Herdr' }));
+    fireEvent.change(screen.getByLabelText('新 session 名称'), {
+      target: { value: 'override-herdr' },
+    });
+    fireEvent.click(screen.getByText('创建'));
+
+    expect(onOpenQuickTabPicker).toHaveBeenCalledWith(undefined, {
+      sessionName: 'override-herdr',
+      cwd: '~/',
+      terminalBackend: 'herdr',
+    });
+  });
+
+  it('keeps the new-session dialog styled with the existing --zterm-panel-* tokens (no bespoke colors)', () => {
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={sessions}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+
+    fireEvent.touchEnd(screen.getByTestId('terminal-session-drawer-add'), {
+      changedTouches: [{ clientX: 180, clientY: 560 }],
+    });
+
+    const dialog = screen.getByTestId('terminal-session-drawer-new-session-dialog');
+    const dialogStyle = dialog.getAttribute('style') || '';
+    expect(dialogStyle).toContain('var(--zterm-panel-border)');
+    expect(dialogStyle).toContain('var(--zterm-panel-bg)');
+    expect(dialogStyle).toContain('var(--zterm-panel-shadow)');
+    expect(dialogStyle).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+    expect(dialogStyle).not.toMatch(/rgba?\(\s*\d+\s*,\s*\d+\s*,\s*\d+/);
+  });
 });
