@@ -14,6 +14,7 @@ import type {
   TerminalSessionDrawerItem,
   TerminalSessionDrawerProps,
 } from '../../lib/plugin-session-drawer/session-drawer-contract';
+import { isDrawerSessionUnavailable, resolveDrawerSessionAvailabilityForItem } from '../../lib/terminal-drawer-session-availability';
 export type {
   TerminalSessionDrawerHost,
   TerminalSessionDrawerItem,
@@ -41,6 +42,8 @@ function TerminalSessionDrawerComponent({
   onPreviewSelectionModeChange,
   onTogglePreviewSession,
   onClearPreviewSelection,
+  onRetrySessionAvailability,
+  retryingSessionIds = [],
   terminalShellSkin = 'light',
 }: TerminalSessionDrawerProps) {
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -480,8 +483,11 @@ function TerminalSessionDrawerComponent({
           }}
         >
           {visibleSessions.map((session) => {
-            const unavailable = Boolean(session.remoteMissing);
+            const availabilityReason = session.availabilityReason
+              ?? resolveDrawerSessionAvailabilityForItem(session);
+            const unavailable = isDrawerSessionUnavailable(availabilityReason);
             const previewUnavailable = unavailable || session.status === 'closed';
+            const isRetrying = retryingSessionIds.includes(session.id);
             const previewSelectionIndex = previewSelectedSessionIds.indexOf(session.id);
             const slotTone = resolveSessionGroupSlotTone(session.sessionGroupSlot, sessionGroupLayoutAxis);
             return (
@@ -489,6 +495,8 @@ function TerminalSessionDrawerComponent({
               key={session.stableKey}
               data-active={session.active ? 'true' : 'false'}
               data-testid={`terminal-session-drawer-row-${session.id}`}
+              data-terminal-backend={session.terminalBackend ?? 'tmux'}
+              data-availability={availabilityReason}
               onContextMenu={(event) => {
                 event.preventDefault();
                 openSlotMenu(session, event.clientX, event.clientY);
@@ -770,7 +778,36 @@ function TerminalSessionDrawerComponent({
                   }}
                 >
                   ×
-                </button>
+{unavailable && onRetrySessionAvailability ? (
+                  <button
+                    type="button"
+                    data-testid={`terminal-session-drawer-retry-${session.id}`}
+                    aria-label={`重试可用性 ${session.title}`}
+                    disabled={isRetrying}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onTouchStart={(event) => event.stopPropagation()}
+                    onTouchEnd={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      if (!isRetrying) onRetrySessionAvailability(session.id);
+                    }}
+                    style={{
+                      padding: '0 8px',
+                      height: '26px',
+                      borderRadius: '6px',
+                      border: '1px solid var(--zterm-panel-border)',
+                      background: 'var(--zterm-panel-surface)',
+                      color: 'var(--zterm-panel-accent)',
+                      fontWeight: 800,
+                      fontSize: '11px',
+                      letterSpacing: '0.02em',
+                    }}
+                  >
+                    {isRetrying ? '重试中' : '重试'}
+                  </button>
+                ) : null}
+                                </button>
               </div>
             </div>
             );

@@ -2317,6 +2317,7 @@
         "src/components/terminal/TerminalTabSwipeSurface.tsx",
         "src/lib/session-preview-selection.ts",
         "src/lib/terminal-drawer-remote-missing.ts",
+        "src/lib/terminal-drawer-session-availability.ts",
         "src/lib/terminal-tab-swipe-gesture.ts",
         "src/components/terminal/terminal-session-drawer-helpers.ts"
       ]
