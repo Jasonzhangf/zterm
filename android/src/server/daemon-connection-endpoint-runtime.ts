@@ -162,3 +162,15 @@ export function buildDaemonConnectionEndpointCandidates(options: {
 
   return candidates;
 }
+
+export function resolveDaemonTailscaleUpdateManifestUrl(options: {
+  bridgePort: number;
+  interfaces?: DaemonNetworkInterfaceMap;
+}) {
+  const bridgePort = normalizePort(options.bridgePort);
+  const addresses = listInterfaceAddresses(
+    options.interfaces || networkInterfaces() as DaemonNetworkInterfaceMap,
+  );
+  const tailscaleHost = addresses.find(isTailscaleIpv4);
+  return tailscaleHost ? `http://${tailscaleHost}:${bridgePort}/updates/latest.json` : '';
+}
