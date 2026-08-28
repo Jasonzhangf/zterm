@@ -26,6 +26,12 @@ function makeSession(overrides: Partial<Session> = {}): Session {
   } as Session;
 }
 
+async function longPress(element: HTMLElement) {
+  fireEvent.pointerDown(element, { button: 0, pointerId: 1 });
+  await new Promise((resolve) => window.setTimeout(resolve, 550));
+  fireEvent.pointerUp(element, { button: 0, pointerId: 1 });
+}
+
 describe('TerminalConnectionStatusStrip', () => {
   it('renders the connection route and session name projection', () => {
     render(
@@ -91,7 +97,7 @@ describe('TerminalConnectionStatusStrip', () => {
         onRenameRemoteSession={onRenameRemoteSession}
       />,
     );
-    fireEvent.click(screen.getByTestId('terminal-connection-status-session'));
+    await longPress(screen.getByTestId('terminal-connection-status-session'));
     const input = await screen.findByTestId('rename-dialog-input');
     fireEvent.change(input, { target: { value: 'renamed' } });
     fireEvent.click(screen.getByRole('button', { name: '确认重命名' }));
@@ -108,7 +114,7 @@ describe('TerminalConnectionStatusStrip', () => {
         onRenameRemoteSession={onRenameRemoteSession}
       />,
     );
-    fireEvent.click(screen.getByTestId('terminal-connection-status-session'));
+    await longPress(screen.getByTestId('terminal-connection-status-session'));
     const input = await screen.findByTestId('rename-dialog-input');
     fireEvent.change(input, { target: { value: 'renamed' } });
     fireEvent.click(screen.getByRole('button', { name: '确认重命名' }));
