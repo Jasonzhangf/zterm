@@ -2,6 +2,7 @@
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { resetClientDebugSnapshotForTests } from '../lib/client-debug-snapshot';
 import type { ComponentProps } from 'react';
 import type { Session } from '../lib/types';
 import type { TerminalQuickBarProps } from '../components/terminal/TerminalQuickBar';
@@ -2613,3 +2614,139 @@ describe('resolveTerminalSessionGroupSlotReplacement', () => {
     });
   });
 });
+
+describe('Herdr drawer create-close-theme', () => {
+  beforeEach(() => {
+    resetClientDebugSnapshotForTests();
+  });
+  afterEach(() => {
+    cleanup();
+    localStorage.clear();
+    resetClientDebugSnapshotForTests();
+  });
+
+it('routes a Herdr remote drawer close through the typed backend target', async () => {
+  const sessions = [makeSession('s1')];
+  sessions[0]!.daemonHostId = 'daemon-a';
+  sessions[0]!.terminalBackend = 'herdr';
+  const onCloseDrawerRemoteSession = vi.fn();
+
+  render(
+    <TerminalPage
+      sessions={sessions}
+      sessionGroups={[{
+        id: 'daemon:daemon-a::backend:herdr',
+        name: 'Daemon A',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        authToken: 'token-a',
+        sessionNames: ['herdr-only'],
+        lastOpenedAt: 1,
+        terminalBackend: 'herdr',
+      }]}
+      activeSession={sessions[0]}
+      onSwitchSession={vi.fn()}
+      onMoveSession={vi.fn()}
+      onRenameSession={vi.fn()}
+      onCloseSession={vi.fn()}
+      onOpenConnections={vi.fn()}
+      onOpenQuickTabPicker={vi.fn()}
+      onOpenDrawerRemoteSession={vi.fn()}
+      onCloseDrawerRemoteSession={onCloseDrawerRemoteSession}
+      onResize={vi.fn()}
+      onTerminalInput={vi.fn()}
+      onTerminalViewportChange={vi.fn()}
+      quickActions={[]}
+      shortcutActions={[]}
+      sessionDraft=""
+    />,
+  );
+
+  const swipeSurface = document.querySelector('[data-testid^="terminal-swipe-surface-"][data-swipe-enabled="true"]') as HTMLElement | null;
+  expect(swipeSurface).toBeTruthy();
+  const surface = swipeSurface!;
+  fireEvent.touchStart(surface, { touches: [{ clientX: 56, clientY: 200 }] });
+  fireEvent.touchMove(surface, {
+    touches: [{ clientX: 236, clientY: 206 }],
+    cancelable: true,
+  });
+  fireEvent.touchEnd(surface, { changedTouches: [{ clientX: 236, clientY: 206 }] });
+
+  const herdrRow = await screen.findByTestId('terminal-session-drawer-row-remote:daemon:daemon-a::backend:herdr::session:herdr-only');
+  await waitFor(() => expect(within(herdrRow).getByText('herdr-only')).toBeTruthy());
+  fireEvent.click(screen.getByTestId('terminal-session-drawer-close-remote:daemon:daemon-a::backend:herdr::session:herdr-only'));
+  fireEvent.click(await screen.findByTestId('zterm-dialog-confirm'));
+
+  expect(onCloseDrawerRemoteSession).toHaveBeenCalledWith(
+    expect.objectContaining({
+      name: 'Daemon A',
+      bridgeHost: '100.127.23.27',
+      bridgePort: 3333,
+      daemonHostId: 'daemon-a',
+      terminalBackend: 'herdr',
+    }),
+    'herdr-only',
+  );
+});
+
+it('surfaces the Herdr backend label in the close dialog and keeps the dialog on the shared theme tokens', async () => {
+  const sessions = [makeSession('s1')];
+  sessions[0]!.daemonHostId = 'daemon-a';
+  sessions[0]!.terminalBackend = 'herdr';
+
+  render(
+    <TerminalPage
+      sessions={sessions}
+      sessionGroups={[{
+        id: 'daemon:daemon-a::backend:herdr',
+        name: 'Daemon A',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        authToken: 'token-a',
+        sessionNames: ['herdr-only'],
+        lastOpenedAt: 1,
+        terminalBackend: 'herdr',
+      }]}
+      activeSession={sessions[0]}
+      onSwitchSession={vi.fn()}
+      onMoveSession={vi.fn()}
+      onRenameSession={vi.fn()}
+      onCloseSession={vi.fn()}
+      onOpenConnections={vi.fn()}
+      onOpenQuickTabPicker={vi.fn()}
+      onOpenDrawerRemoteSession={vi.fn()}
+      onCloseDrawerRemoteSession={vi.fn()}
+      onResize={vi.fn()}
+      onTerminalInput={vi.fn()}
+      onTerminalViewportChange={vi.fn()}
+      quickActions={[]}
+      shortcutActions={[]}
+      sessionDraft=""
+    />,
+  );
+
+  const swipeSurface = document.querySelector('[data-testid^="terminal-swipe-surface-"][data-swipe-enabled="true"]') as HTMLElement | null;
+  expect(swipeSurface).toBeTruthy();
+  const surface = swipeSurface!;
+  fireEvent.touchStart(surface, { touches: [{ clientX: 56, clientY: 200 }] });
+  fireEvent.touchMove(surface, {
+    touches: [{ clientX: 236, clientY: 206 }],
+    cancelable: true,
+  });
+  fireEvent.touchEnd(surface, { changedTouches: [{ clientX: 236, clientY: 206 }] });
+
+  fireEvent.click(screen.getByTestId('terminal-session-drawer-close-remote:daemon:daemon-a::backend:herdr::session:herdr-only'));
+
+  const dialog = await screen.findByTestId('zterm-dialog');
+  const dialogMessage = screen.getByTestId('zterm-dialog-message').textContent || '';
+  expect(dialogMessage).toContain('Herdr');
+  expect(dialogMessage).toContain('herdr-only');
+  expect(dialogMessage).not.toMatch(/tmux session/);
+  // Theme tokens are used (not bespoke hex / raw rgba).
+  const dialogStyle = dialog.getAttribute('style') || '';
+  expect(dialogStyle).toContain('var(--zterm-');
+})
+});
+;
