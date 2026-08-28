@@ -778,6 +778,7 @@ function TerminalSessionDrawerComponent({
                   }}
                 >
                   ×
+                </button>
 {unavailable && onRetrySessionAvailability ? (
                   <button
                     type="button"
@@ -807,7 +808,6 @@ function TerminalSessionDrawerComponent({
                     {isRetrying ? '重试中' : '重试'}
                   </button>
                 ) : null}
-                                </button>
               </div>
             </div>
             );
