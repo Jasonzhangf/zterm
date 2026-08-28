@@ -15,6 +15,7 @@ import type {
   TerminalSessionDrawerProps,
 } from '../../lib/plugin-session-drawer/session-drawer-contract';
 import { isDrawerSessionUnavailable, resolveDrawerSessionAvailabilityForItem } from '../../lib/terminal-drawer-session-availability';
+import { isDrawerSessionRetryable } from '../../lib/terminal-drawer-session-availability';
 export type {
   TerminalSessionDrawerHost,
   TerminalSessionDrawerItem,
@@ -486,7 +487,8 @@ function TerminalSessionDrawerComponent({
             const availabilityReason = session.availabilityReason
               ?? resolveDrawerSessionAvailabilityForItem(session);
             const unavailable = isDrawerSessionUnavailable(availabilityReason);
-            const previewUnavailable = unavailable || session.status === 'closed';
+            const retryable = isDrawerSessionRetryable(availabilityReason);
+            const previewUnavailable = unavailable;
             const isRetrying = retryingSessionIds.includes(session.id);
             const previewSelectionIndex = previewSelectedSessionIds.indexOf(session.id);
             const slotTone = resolveSessionGroupSlotTone(session.sessionGroupSlot, sessionGroupLayoutAxis);
@@ -778,10 +780,12 @@ function TerminalSessionDrawerComponent({
                   }}
                 >
                   ×
-{unavailable && onRetrySessionAvailability ? (
+                </button>
+                {(unavailable || retryable) && onRetrySessionAvailability ? (
                   <button
                     type="button"
                     data-testid={`terminal-session-drawer-retry-${session.id}`}
+                    data-retryable={retryable ? 'true' : 'false'}
                     aria-label={`重试可用性 ${session.title}`}
                     disabled={isRetrying}
                     onMouseDown={(event) => event.stopPropagation()}
@@ -807,7 +811,6 @@ function TerminalSessionDrawerComponent({
                     {isRetrying ? '重试中' : '重试'}
                   </button>
                 ) : null}
-                                </button>
               </div>
             </div>
             );
