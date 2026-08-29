@@ -77,10 +77,6 @@ function normalizeBridgeTarget(input: unknown): BridgeTarget {
   if (typeof bridgePort !== 'number' || !Number.isSafeInteger(bridgePort) || bridgePort <= 0) {
     throw new DomainContractError('target_bridge_port_invalid', 'bridgePort must be a positive integer');
   }
-  const backend = candidate.terminalBackend;
-  if (backend !== undefined && backend !== 'tmux' && backend !== 'herdr') {
-    throw new DomainContractError('target_backend_invalid', 'terminalBackend must be tmux or herdr');
-  }
   const authToken = candidate.authToken;
   if (authToken !== undefined && typeof authToken !== 'string') {
     throw new DomainContractError('target_auth_invalid', 'authToken must be a string');
@@ -89,7 +85,6 @@ function normalizeBridgeTarget(input: unknown): BridgeTarget {
     bridgeHost,
     bridgePort,
     ...(authToken ? { authToken } : {}),
-    ...(backend ? { terminalBackend: backend } : {}),
   };
 }
 

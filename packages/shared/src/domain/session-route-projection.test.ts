@@ -54,7 +54,6 @@ const host: Host = {
 const bridgeTarget: BridgeTarget = {
   bridgeHost: 'bridge.local',
   bridgePort: 4444,
-  terminalBackend: 'herdr',
   authToken: 'token-1',
 };
 
@@ -108,14 +107,13 @@ describe('session route projection', () => {
     const plan = buildRoutePlanFromBridgeTarget(bridgeTarget, 'shell', 'daemon-2');
 
     expect(plan.target).toEqual({
-      backend: 'herdr',
+      backend: 'tmux',
       daemonId: 'daemon-2',
       sessionName: 'shell',
     });
     expect(toBridgeTarget(plan)).toEqual({
       bridgeHost: 'bridge.local',
       bridgePort: 4444,
-      terminalBackend: 'herdr',
     });
   });
 
