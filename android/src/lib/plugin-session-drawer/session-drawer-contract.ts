@@ -11,7 +11,6 @@ export interface TerminalSessionDrawerItem {
   title: string;
   subtitle: string;
   status: 'connected' | 'connecting' | 'disconnected' | 'closed' | 'error' | 'idle';
-  remoteMissing?: boolean;
   paneLabel?: string | null;
   sessionGroupSlot?: TerminalSessionGroupSlotName | null;
   active?: boolean;

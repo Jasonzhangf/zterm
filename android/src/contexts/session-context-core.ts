@@ -76,7 +76,6 @@ export type SessionAction =
   | { type: 'SET_LIVE_SESSIONS'; ids: string[] }
   | { type: 'SET_SESSION_STATE'; id: string; state: SessionState }
   | { type: 'SET_SESSION_TITLE'; id: string; title: string }
-  | { type: 'SET_SESSION_REMOTE_MISSING'; id: string; remoteMissing: boolean }
   | { type: 'INCREMENT_CONNECTED' }
   | { type: 'DECREMENT_CONNECTED' };
 
@@ -198,17 +197,6 @@ export function reduceSessionAction(state: SessionManagerState, action: SessionA
         }
         changed = true;
         return { ...session, title: action.title };
-      });
-      return changed ? { ...state, sessions: nextSessions } : state;
-    }
-    case 'SET_SESSION_REMOTE_MISSING': {
-      let changed = false;
-      const nextSessions = state.sessions.map((session) => {
-        if (session.id !== action.id || session.remoteMissing === action.remoteMissing) {
-          return session;
-        }
-        changed = true;
-        return { ...session, remoteMissing: action.remoteMissing };
       });
       return changed ? { ...state, sessions: nextSessions } : state;
     }

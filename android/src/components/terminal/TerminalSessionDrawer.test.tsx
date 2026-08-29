@@ -1196,7 +1196,6 @@ describe('TerminalSessionDrawer catalog availability', () => {
       hostKey: 'daemon-a',
       hostLabel: 'Mac Studio',
       terminalBackend: 'herdr' as const,
-      remoteMissing: true,
     },
     {
       id: 'tmux-closed',
