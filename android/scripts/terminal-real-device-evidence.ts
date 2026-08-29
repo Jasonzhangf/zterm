@@ -1,8 +1,9 @@
 #!/usr/bin/env tsx
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { homedir } from 'node:os';
 import { WebSocket } from 'ws';
 import { extractApkSmokeBridgeDebugTargetFromLocalStorageSnapshot } from '../src/lib/android-apk-smoke-device-bridge-target';
 import {
@@ -133,6 +134,22 @@ function adbText(serial: string, args: string[]) {
 
 function sleep(ms: number) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function resolveDaemonAuthToken() {
+  const fromEnvironment = process.env.ZTERM_DAEMON_AUTH_TOKEN?.trim();
+  if (fromEnvironment) {
+    return fromEnvironment;
+  }
+  try {
+    const config = JSON.parse(readFileSync(resolve(homedir(), '.zterm/config.json'), 'utf8')) as {
+      mobile?: { daemon?: { authToken?: unknown } };
+    };
+    const fromConfig = config.mobile?.daemon?.authToken;
+    return typeof fromConfig === 'string' ? fromConfig.trim() : '';
+  } catch {
+    return '';
+  }
 }
 
 function timestamp() {
@@ -441,7 +458,10 @@ async function ensureWebViewTerminalPage(serial: string, sessionName?: string, b
     try {
       const connectionClick = bridgeHost && !connectionRequested
         ? `const ariaLabel = 'Open ' + ${JSON.stringify(bridgeHost)};
-           const connection = buttons.find((candidate) => candidate.getAttribute('aria-label') === ariaLabel);
+           const connection = buttons.find((candidate) => (
+             candidate.getAttribute('aria-label') === ariaLabel
+             || candidate.getAttribute('data-testid') === 'saved-connection-open'
+           ));
            if (connection) {
              connection.click();
              return { terminalPage: false, resumed: false, connectionRequested: true, button: ariaLabel };
@@ -488,6 +508,36 @@ async function ensureWebViewTerminalPage(serial: string, sessionName?: string, b
     sleep(250);
   }
   fail('Resume/connection button did not open the Terminal page before the bounded verifier deadline');
+}
+
+async function establishAuthenticatedBridgeSettings(serial: string) {
+  const authToken = resolveDaemonAuthToken();
+  if (!authToken) {
+    fail('live-gate fixture could not resolve the daemon auth token from ZTERM_DAEMON_AUTH_TOKEN or ~/.zterm/config.json');
+  }
+  const value = await evaluateWebViewExpression(
+    serial,
+    `(() => {
+      const key = 'zterm:bridge-settings';
+      const settings = JSON.parse(localStorage.getItem(key) || '{}');
+      const authToken = ${JSON.stringify(authToken)};
+      settings.targetHost = '127.0.0.1';
+      settings.targetPort = 3333;
+      settings.targetAuthToken = authToken;
+      settings.servers = (Array.isArray(settings.servers) ? settings.servers : []).map((server) => (
+        server.id === '127.0.0.1:3333'
+          ? { ...server, targetHost: '127.0.0.1', targetPort: 3333, authToken }
+          : server
+      ));
+      localStorage.setItem(key, JSON.stringify(settings));
+      return { configured: true, serverCount: settings.servers.length };
+    })()`,
+  );
+  if (!value || typeof value !== 'object' || (value as Record<string, unknown>).configured !== true) {
+    fail(`live-gate fixture could not establish authenticated bridge settings: ${JSON.stringify(value)}`);
+  }
+  await evaluateWebViewExpression(serial, 'location.reload(); true');
+  sleep(1_000);
 }
 
 async function ensureWebViewTerminalImeFocus(serial: string) {
@@ -773,6 +823,7 @@ async function main() {
   ensureInteractiveDevice(serial);
   adbText(serial, ['shell', 'cmd', 'statusbar', 'collapse']);
   const activityDump = waitForForeground(serial, 10_000);
+  await establishAuthenticatedBridgeSettings(serial);
   const launchPng = capturePng(serial);
   const beforeImeUi = captureUiDump(serial);
   const beforeImeInputMethod = captureInputMethodDump(serial);
