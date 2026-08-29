@@ -409,7 +409,7 @@ describe('SettingsPage terminal theme selection', () => {
     expect(screen.queryByPlaceholderText('https://your-relay.example.com/relay/')).toBeNull();
   });
 
-  it('offers relay public update manifest as a route candidate alongside direct daemon addresses', () => {
+  it('offers only the relay public update manifest, never a direct daemon address', () => {
     const onUpdatePreferencesChange = vi.fn();
 
     render(
@@ -472,7 +472,7 @@ describe('SettingsPage terminal theme selection', () => {
     );
 
     expect(screen.getByRole('button', { name: '使用 Relay 公网' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: '使用 Mac Studio' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '使用 Mac Studio' })).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: '使用 Relay 公网' }));
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -533,8 +533,7 @@ describe('SettingsPage terminal theme selection', () => {
     );
 
     const view = render(renderPage());
-    fireEvent.click(screen.getByRole('button', { name: '使用当前 daemon 地址' }));
-    expect(screen.getByDisplayValue('http://192.168.0.3:3333/updates/latest.json')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '使用当前 daemon 地址' })).toBeNull();
 
     updatePreferences.manifestUrl = 'https://relay.codewhisper.cc:18443/relay/updates/latest.json';
     updatePreferences.manifestSource = 'relay-injected';

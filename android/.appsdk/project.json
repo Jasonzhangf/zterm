@@ -88,7 +88,7 @@
       "build": {
         "args": [
           "-lc",
-          "ZTERM_BUILD_NUMBER=2652 pnpm run build && rm -f generated/modules/zterm-runtime-v2/lib/zterm-runtime-v2.web.tgz && mkdir -p generated/modules/zterm-runtime-v2/lib && find dist -type d -exec chmod 0755 {} + && find dist -type f -exec chmod 0644 {} + && find dist -exec touch -h -t 200001010000 {} + && (cd dist && find . -print0 | LC_ALL=C sort -z | COPYFILE_DISABLE=1 tar --null --no-recursion --format ustar --uid 0 --gid 0 --uname root --gname root -cf - -T -) | gzip -n > generated/modules/zterm-runtime-v2/lib/zterm-runtime-v2.web.tgz"
+          "ZTERM_BUILD_NUMBER=2652 pnpm run build:canonical && rm -f generated/modules/zterm-runtime-v2/lib/zterm-runtime-v2.web.tgz && mkdir -p generated/modules/zterm-runtime-v2/lib && find dist -type d -exec chmod 0755 {} + && find dist -type f -exec chmod 0644 {} + && find dist -exec touch -h -t 200001010000 {} + && (cd dist && find . -print0 | LC_ALL=C sort -z | COPYFILE_DISABLE=1 tar --null --no-recursion --format ustar --uid 0 --gid 0 --uname root --gname root -cf - -T -) | gzip -n > generated/modules/zterm-runtime-v2/lib/zterm-runtime-v2.web.tgz"
         ],
         "program": "bash",
         "working_directory": "."
@@ -105,7 +105,6 @@
       ],
       "module_id": "zterm-runtime-v2",
       "owned_paths": [
-        "playground/experiments/zterm-runtime-architecture-v2/**",
         "src/**",
         "native/android/app/src/main/**",
         "docs/**",
@@ -136,7 +135,6 @@
           "working_directory": "."
         },
         "input_paths": [
-          "playground/experiments/zterm-runtime-architecture-v2/**",
           "src/**"
         ],
         "minimum_test_count": 1,
