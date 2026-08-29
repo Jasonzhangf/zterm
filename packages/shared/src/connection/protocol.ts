@@ -834,6 +834,16 @@ export interface SessionActivity {
 export interface TerminalSessionCatalogEntry {
   name: string;
   backend: TerminalBackendKind;
+  observation?: TerminalSessionObservation;
+}
+
+export interface TerminalSessionObservation {
+  observedAt: number;
+  foregroundProcess?: string;
+  processGroupAlive: boolean;
+  recentOutput: boolean;
+  oscTitleSeen: boolean;
+  oscProgressSeen: boolean;
 }
 
 export interface TerminalSessionCatalog {

@@ -44,6 +44,7 @@ export interface TerminalMessageControlRuntimeDeps {
   listTmuxSessions: (backend?: 'tmux' | 'herdr') => string[];
   listTerminalSessions?: () => string[];
   listTerminalSessionCatalog?: () => TerminalSessionCatalogEntry[];
+  readTmuxSessionObservation?: (sessionName: string, nowMs: number) => TerminalSessionCatalogEntry['observation'];
   resolveTerminalSessionBackend?: (sessionName: string) => 'tmux' | 'herdr';
   createDetachedTmuxSession: (sessionName?: string, cwd?: string, backend?: 'tmux' | 'herdr') => string;
   closeDetachedTerminalSession: (sessionName: string, backend?: 'tmux' | 'herdr') => void;

@@ -2,8 +2,6 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   buildSessionsCatalogPayload,
   handleListSessionsMessageRuntime,
-  probeDaemonSessionAgentStatus,
-  SESSION_AGENT_OPTIONS,
   type DaemonSessionCatalogRuntimeDeps,
 } from './daemon-session-catalog-runtime';
 import type { TerminalTransportConnection } from './terminal-runtime-types';
@@ -20,49 +18,30 @@ function makeDeps(
 }
 
 describe('daemon session catalog runtime', () => {
-  it('accepts only a fresh explicit running/idle registration on the exact session', () => {
-    const values = new Map<string, string>([
-      [SESSION_AGENT_OPTIONS.name, 'agent-a'],
-      [SESSION_AGENT_OPTIONS.state, 'running'],
-      [SESSION_AGENT_OPTIONS.heartbeatMs, '9700'],
+  it('runs the passive observation reader only for catalog sessions', () => {
+    const observation = {
+      observedAt: 1000,
+      foregroundProcess: 'codex',
+      processGroupAlive: true,
+      recentOutput: true,
+      oscTitleSeen: false,
+      oscProgressSeen: true,
+    } as const;
+    const readTmuxSessionObservation = vi.fn(() => observation);
+    const payload = buildSessionsCatalogPayload({
+      listTerminalSessionCatalog: () => [
+        { name: 'agent-a', backend: 'tmux' },
+        { name: 'external-a', backend: 'herdr' },
+      ],
+      listTmuxSessions: () => [],
+      readTmuxSessionObservation,
+    });
+    expect(payload.sessionCatalog).toEqual([
+      { name: 'agent-a', backend: 'tmux', observation },
+      { name: 'external-a', backend: 'herdr' },
     ]);
-    const readOption = vi.fn((option: string) => values.get(option) || null);
-    expect(probeDaemonSessionAgentStatus({
-      sessionName: 'session-a', nowMs: 10_000, sessionExists: true, readOption,
-    })).toEqual({ kind: 'running', agentName: 'agent-a', reason: 'fresh_agent_registration' });
-    values.set(SESSION_AGENT_OPTIONS.state, 'idle');
-    expect(probeDaemonSessionAgentStatus({
-      sessionName: 'session-a', nowMs: 10_000, sessionExists: true, readOption,
-    }).kind).toBe('idle');
-    expect(readOption).toHaveBeenCalledWith(SESSION_AGENT_OPTIONS.name);
-  });
-
-  it('returns unknown for absent, disappeared, and stale registrations', () => {
-    expect(probeDaemonSessionAgentStatus({ sessionName: 'missing', nowMs: 10_000, sessionExists: true }))
-      .toEqual({ kind: 'unknown', reason: 'agent_registration_absent' });
-    expect(probeDaemonSessionAgentStatus({ sessionName: 'gone', nowMs: 10_000, sessionExists: false }))
-      .toEqual({ kind: 'unknown', reason: 'session_disappeared' });
-    const readOption = (option: string) => ({
-      [SESSION_AGENT_OPTIONS.name]: 'agent-a',
-      [SESSION_AGENT_OPTIONS.state]: 'idle',
-      [SESSION_AGENT_OPTIONS.heartbeatMs]: '1',
-    }[option] || null);
-    expect(probeDaemonSessionAgentStatus({ sessionName: 'stale', nowMs: 40_000, sessionExists: true, readOption }))
-      .toEqual({ kind: 'unknown', agentName: 'agent-a', reason: 'stale_heartbeat' });
-  });
-
-  it('returns explicit errors for invalid registration or tmux read failure', () => {
-    const invalid = (state: string, heartbeat: string) => (option: string) => ({
-      [SESSION_AGENT_OPTIONS.name]: 'agent-a', [SESSION_AGENT_OPTIONS.state]: state,
-      [SESSION_AGENT_OPTIONS.heartbeatMs]: heartbeat,
-    }[option] || null);
-    expect(probeDaemonSessionAgentStatus({ sessionName: 'bad', nowMs: 10_000, sessionExists: true, readOption: invalid('blocked', '9000') }))
-      .toMatchObject({ kind: 'error', reason: 'agent_registration_state_invalid' });
-    expect(probeDaemonSessionAgentStatus({ sessionName: 'bad', nowMs: 10_000, sessionExists: true, readOption: invalid('idle', 'NaN') }))
-      .toMatchObject({ kind: 'error', reason: 'agent_registration_heartbeat_invalid' });
-    expect(probeDaemonSessionAgentStatus({
-      sessionName: 'error', nowMs: 10_000, sessionExists: true, readOption: () => { throw new Error('tmux unavailable'); },
-    })).toEqual({ kind: 'error', reason: 'agent_registration_read_failed: tmux unavailable' });
+    expect(readTmuxSessionObservation).toHaveBeenCalledWith('agent-a', expect.any(Number));
+    expect(readTmuxSessionObservation).toHaveBeenCalledTimes(1);
   });
 
   it('builds a backend-qualified catalog for backend-opaque list-sessions', () => {

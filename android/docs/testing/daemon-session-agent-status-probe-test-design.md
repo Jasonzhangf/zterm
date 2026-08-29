@@ -2,18 +2,16 @@
 
 Owner: `daemon.session_catalog`.
 
-White-box contract tests cover the exact tmux option names, session target,
-state validation, heartbeat age, stale classification, and explicit error
-handling. Positive cases use fresh explicit `running` and `idle` registrations.
-Negative cases cover absent options (`unknown`), malformed/conflicting values
-(`error`), stale heartbeat (`unknown` with `stale_heartbeat`), vanished session
-(`unknown`), and tmux command failure (`error`).
+White-box contract tests cover exact session-targeted passive observation:
+foreground process, process-group presence, captured output, and OSC signals.
+The tests explicitly reject semantic inference of agent `running`/`idle`.
+Negative cases cover vanished sessions and tmux command failure as explicit
+observation gaps/errors.
 
 Black-box fixture tests use an isolated tmux server/session and prove that the
-catalog enumerates only actual sessions and that pane title, cwd, process
-name, terminal body, and unrelated sessions cannot create agent identity or
-status. No drawer/client test is added because the drawer is intentionally a
-non-consumer in this slice; the ownership gate asserts that boundary.
+catalog enumerates only actual sessions and that pane title, cwd, root, Codex
+task, Herdr identity, and unrelated sessions cannot create agent identity or
+status. The drawer remains presence-only.
 
 Required gates: `daemon-session-catalog-runtime.test.ts`,
 `daemon-session-catalog-ownership.test.ts`, module/import/edge registry gates,
