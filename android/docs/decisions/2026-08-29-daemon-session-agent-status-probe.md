@@ -34,11 +34,11 @@ An otherwise valid registration whose heartbeat exceeds 30 seconds is
 `unknown` with reason `stale_heartbeat`; the daemon never converts stale into
 idle or running. A tmux read failure is `error` and is not cached as success.
 
-There is no wire field in this slice: no current drawer consumer contract
-requires it, and adding a shared payload field would broaden the control
-surface without an owner. The fact remains daemon-owned and testable at the
-probe boundary; a future wire projection must be a separately mapped control
-contract.
+The result is carried only as the typed `sessionAgent` field of the daemon's
+backend-qualified `sessions` control projection. It is not terminal body,
+metadata, mirror, or client state. The drawer remains a non-consumer in this
+slice; any future UI use must consume this daemon projection rather than
+reimplementing detection.
 
 ## Verification
 

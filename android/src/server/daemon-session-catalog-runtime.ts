@@ -81,15 +81,28 @@ export function buildSessionsCatalogPayload(
   deps: DaemonSessionCatalogDeps,
   backend?: 'tmux' | 'herdr',
 ) {
+  const addAgentStatus = (entries: TerminalSessionCatalogEntry[]) => entries.map((entry) => ({
+    ...entry,
+    ...(deps.readTmuxSessionAgentOption ? {
+      sessionAgent: probeDaemonSessionAgentStatus({
+        sessionName: entry.name,
+        nowMs: Date.now(),
+        sessionExists: true,
+        readOption: (option) => entry.backend === 'tmux'
+          ? deps.readTmuxSessionAgentOption!(entry.name, option)
+          : null,
+      }),
+    } : {}),
+  }));
   if (backend) {
     const sessions = deps.listTmuxSessions(backend);
     return {
       sessions,
-      sessionCatalog: sessions.map((name) => ({ name, backend })),
+      sessionCatalog: addAgentStatus(sessions.map((name) => ({ name, backend }))),
     };
   }
   if (deps.listTerminalSessionCatalog) {
-    const sessionCatalog = deps.listTerminalSessionCatalog();
+    const sessionCatalog = addAgentStatus(deps.listTerminalSessionCatalog());
     return {
       sessions: sessionCatalog.map((entry) => entry.name),
       sessionCatalog,
@@ -98,7 +111,7 @@ export function buildSessionsCatalogPayload(
   const sessions = deps.listTerminalSessions ? deps.listTerminalSessions() : deps.listTmuxSessions();
   return {
     sessions,
-    sessionCatalog: sessions.map((name) => ({ name, backend: 'tmux' as const })),
+    sessionCatalog: addAgentStatus(sessions.map((name) => ({ name, backend: 'tmux' as const }))),
   };
 }
 
