@@ -1,19 +1,19 @@
 {
-  "artifact_hash": "sha256:97a480a13656e258f5097792ecdc9d3b6797fe95c4658c6fe3ff23cc2f869d8e",
+  "artifact_hash": "sha256:08a252927cbd4a209bcd53427367851b417bf5397440b810234c2130bee224fd",
   "artifact_paths": [
     "zterm-runtime-v2.web.tgz"
   ],
   "artifact_schema": 1,
   "artifacts": [
     {
-      "hash": "sha256:caf672e5100cc2d9b033db18d5ec2821cd2e4cbef6b4c50e98b84b327f8950cb",
+      "hash": "sha256:b8fcdcf086a00123bc313bb7b8886c62167c5a6858c094e6f2380027c130cdc5",
       "path": "zterm-runtime-v2.web.tgz"
     }
   ],
   "build": {
     "args": [
       "-lc",
-      "ZTERM_BUILD_NUMBER=2652 pnpm run build && rm -f generated/modules/zterm-runtime-v2/lib/zterm-runtime-v2.web.tgz && mkdir -p generated/modules/zterm-runtime-v2/lib && find dist -type d -exec chmod 0755 {} + && find dist -type f -exec chmod 0644 {} + && find dist -exec touch -h -t 200001010000 {} + && (cd dist && find . -print0 | LC_ALL=C sort -z | COPYFILE_DISABLE=1 tar --null --no-recursion --format ustar --uid 0 --gid 0 --uname root --gname root -cf - -T -) | gzip -n > generated/modules/zterm-runtime-v2/lib/zterm-runtime-v2.web.tgz"
+      "ZTERM_BUILD_NUMBER=2652 pnpm run build:canonical && rm -f generated/modules/zterm-runtime-v2/lib/zterm-runtime-v2.web.tgz && mkdir -p generated/modules/zterm-runtime-v2/lib && find dist -type d -exec chmod 0755 {} + && find dist -type f -exec chmod 0644 {} + && find dist -exec touch -h -t 200001010000 {} + && (cd dist && find . -print0 | LC_ALL=C sort -z | COPYFILE_DISABLE=1 tar --null --no-recursion --format ustar --uid 0 --gid 0 --uname root --gname root -cf - -T -) | gzip -n > generated/modules/zterm-runtime-v2/lib/zterm-runtime-v2.web.tgz"
     ],
     "program": "bash",
     "working_directory": "."
@@ -21,7 +21,7 @@
   "contract_hash": "sha256:3b3b7d606a88472a8baf4362270f0ec08744c90bf04fdac717344073c8a91507",
   "dependency_hashes": [],
   "module_id": "zterm-runtime-v2",
-  "public_api_hash": "sha256:e71592c03950065d2e2f96efce1cfd430e5f15a0d852234bb77572c4cbb6cc4d",
-  "source_hash": "sha256:b8d8b28f867f6974f638da72444ce05cac8e22229e5d5d71ff543fe7cd3f92b4",
+  "public_api_hash": "sha256:8e0cad562de4955d1fcbdb3640de5a742cf3d8a43b40d8e6165813194b264177",
+  "source_hash": "sha256:a929cca05e851bb108505b9ba4afd18f905f2ddb0f840dc90ef1732405e8d8de",
   "stage": "controlled_verified"
 }

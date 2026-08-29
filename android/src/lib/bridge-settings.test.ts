@@ -107,6 +107,68 @@ describe('bridge-settings helpers', () => {
     ]);
   });
 
+  it('reuses one daemon entity when its endpoint changes and repairs an endpoint-only name', () => {
+    const first = upsertBridgeServer(baseSettings, {
+      name: '192.168.0.3',
+      targetHost: '192.168.0.3',
+      targetPort: DEFAULT_BRIDGE_PORT,
+      authToken: 'token-a',
+      relayHostId: 'mac-studio',
+      relayDeviceId: 'device-a',
+      relayDeviceName: 'Mac Studio',
+    });
+    const second = upsertBridgeServer(first, {
+      name: '100.64.0.10',
+      targetHost: '100.64.0.10',
+      targetPort: DEFAULT_BRIDGE_PORT,
+      authToken: 'token-a',
+      relayHostId: 'mac-studio',
+      relayDeviceId: 'device-a',
+      relayDeviceName: 'Mac Studio',
+    });
+
+    expect(second.servers).toHaveLength(1);
+    expect(second.servers[0]).toMatchObject({
+      id: first.servers[0]!.id,
+      name: 'Mac Studio',
+      targetHost: '100.64.0.10',
+      relayHostId: 'mac-studio',
+      relayDeviceId: 'device-a',
+    });
+  });
+
+  it('canonicalizes legacy endpoint-split presets into one daemon entity', () => {
+    const canonical = buildBridgeServerPresetIdentityId('100.64.0.10', 3333, 'mac-studio');
+    const settings = normalizeBridgeSettings({
+      ...baseSettings,
+      servers: [
+        {
+          id: buildBridgeServerPresetIdentityId('192.168.0.3', 3333, 'mac-studio'),
+          name: '192.168.0.3',
+          targetHost: '192.168.0.3',
+          targetPort: 3333,
+          authToken: 'token-a',
+          relayHostId: 'mac-studio',
+          relayDeviceId: 'device-a',
+          relayDeviceName: 'Mac Studio',
+        },
+        {
+          id: canonical,
+          name: 'Mac Studio',
+          targetHost: '100.64.0.10',
+          targetPort: 3333,
+          authToken: 'token-a',
+          relayHostId: 'mac-studio',
+          relayDeviceId: 'device-a',
+          relayDeviceName: 'Mac Studio',
+        },
+      ],
+    });
+
+    expect(settings.servers).toHaveLength(1);
+    expect(settings.servers[0]).toMatchObject({ id: canonical, name: 'Mac Studio' });
+  });
+
   it('removing the default entry point re-points default to the next preset', () => {
     const settings = upsertBridgeServer(
       upsertBridgeServer(baseSettings, {

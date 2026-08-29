@@ -2,10 +2,6 @@ import {
   DEFAULT_TRAVERSAL_PATH_PRIORITY,
   normalizeTraversalPathPriority,
 } from '../bridge-settings';
-import {
-  isPrivateLanIpv4Host,
-  parseEndpointHost,
-} from '../network-target';
 import type {
   TraversalPlanCandidate,
   TraversalResolvedPath,
@@ -29,7 +25,6 @@ const FAILURE_ROUTE_PENALTY = 500;
 const AUTH_FAILURE_ROUTE_PENALTY = 900;
 const SUCCESS_ROUTE_LEASE_BONUS = -1000;
 const ROUTE_TIER_SPAN = 100;
-const LAN_ROUTE_COST = -ROUTE_TIER_SPAN;
 
 function priorityCost(path: TraversalResolvedPath, priority: TraversalResolvedPath[]) {
   const index = priority.indexOf(path);
@@ -39,18 +34,8 @@ function priorityCost(path: TraversalResolvedPath, priority: TraversalResolvedPa
 function pathCost(
   candidate: TraversalPlanCandidate,
   priority: TraversalResolvedPath[],
-  reasons: string[],
 ) {
   const tierCost = priorityCost(candidate.path, priority);
-  if (candidate.path !== 'ipv4') {
-    return tierCost;
-  }
-  const host = parseEndpointHost(candidate.endpoint);
-  if (isPrivateLanIpv4Host(host)) {
-    reasons.push('ipv4:private-lan');
-    return LAN_ROUTE_COST;
-  }
-  reasons.push('ipv4:non-lan');
   return tierCost;
 }
 
@@ -84,7 +69,7 @@ export function selectBestTraversalRoute(options: SelectTraversalRouteOptions): 
   const diagnostics: TraversalRouteSelectionDiagnostic[] = options.candidates.map((candidate) => {
     const reasons: string[] = [];
     const health = options.healthCache?.get(scope, candidate) || null;
-    const basePathCost = pathCost(candidate, priority, reasons);
+    const basePathCost = pathCost(candidate, priority);
     const score = basePathCost
       + healthScore(health, reasons);
     const selectable = !health || health.status === 'success';

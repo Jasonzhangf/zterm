@@ -72,30 +72,6 @@ interface SettingsPageProps {
   onBack: () => void;
 }
 
-interface DaemonUpdateRouteInput {
-  id: string;
-  name: string;
-  targetHost: string;
-  targetPort: number;
-}
-
-function deriveDaemonUpdateManifestUrl(targetHost: string, targetPort: number) {
-  const rawHost = targetHost.trim();
-  if (!rawHost) {
-    return '';
-  }
-
-  try {
-    const parsed = rawHost.includes('://') ? new URL(rawHost) : new URL(`ws://${rawHost}`);
-    const protocol = parsed.protocol === 'wss:' ? 'https:' : 'http:';
-    const port = parsed.port || String(targetPort || 3333);
-    return `${protocol}//${parsed.hostname}:${port}/updates/latest.json`;
-  } catch (error) {
-    console.warn('[SettingsPage] Failed to derive daemon update manifest URL:', error);
-    return '';
-  }
-}
-
 function addManifestCandidate(
   candidates: AppUpdateManifestCandidate[],
   seenUrls: Set<string>,
@@ -125,30 +101,6 @@ function buildAppUpdateManifestCandidates(settings: BridgeSettings): AppUpdateMa
     } catch (error) {
       console.warn('[SettingsPage] Failed to derive relay update manifest URL:', error);
     }
-  }
-
-  const defaultServer = getDefaultBridgeServer(settings);
-  const directInputs: Array<DaemonUpdateRouteInput | null | undefined> = [
-    defaultServer,
-    ...settings.servers.filter((server) => server.id !== defaultServer?.id),
-    settings.targetHost.trim()
-      ? {
-          id: 'current-target',
-          name: '当前 daemon 地址',
-          targetHost: settings.targetHost,
-          targetPort: settings.targetPort,
-        }
-      : null,
-  ];
-
-  for (const server of directInputs.filter((item): item is DaemonUpdateRouteInput => Boolean(item))) {
-    const manifestUrl = deriveDaemonUpdateManifestUrl(server.targetHost, server.targetPort);
-    addManifestCandidate(candidates, seenUrls, {
-      id: `daemon-${server.id || `${server.targetHost}:${server.targetPort}`}`,
-      label: server.name?.trim() || '当前 daemon 地址',
-      manifestUrl,
-      manifestSource: 'server-connected',
-    });
   }
 
   return candidates;
@@ -240,7 +192,7 @@ export function SettingsPage({
   const defaultServer = useMemo(() => getDefaultBridgeServer(draft), [draft]);
   const manifestCandidates = useMemo(() => buildAppUpdateManifestCandidates(draft), [draft]);
   const suggestedManifestUrl = useMemo(
-    () => manifestCandidates.find((candidate) => candidate.manifestSource === 'server-connected')?.manifestUrl || '',
+    () => manifestCandidates.find((candidate) => candidate.manifestSource === 'relay-injected')?.manifestUrl || '',
     [manifestCandidates],
   );
   useEffect(() => {
@@ -251,9 +203,16 @@ export function SettingsPage({
       ) {
         return current;
       }
-      return updatePreferences;
+      const relayManifest = manifestCandidates.find((candidate) => candidate.manifestSource === 'relay-injected');
+      return relayManifest
+        ? {
+            ...updatePreferences,
+            manifestUrl: relayManifest.manifestUrl,
+            manifestSource: 'relay-injected',
+          }
+        : updatePreferences;
     });
-  }, [updatePreferences.manifestUrl, updatePreferences.manifestSource]);
+  }, [manifestCandidates, updatePreferences]);
 
   useEffect(() => {
     const livePreviewPatch = livePreviewPatchRef.current;

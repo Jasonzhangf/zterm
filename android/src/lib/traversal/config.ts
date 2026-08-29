@@ -250,9 +250,12 @@ export function buildTraversalPlan(
         continue;
       }
       for (const endpoint of target.relayEndpointCandidates || []) {
+        // Keep LAN in directory truth, but never auto-select it remotely.
+        if (endpoint.kind === 'lan') {
+          continue;
+        }
         if (
           endpoint.kind === path
-          || (endpoint.kind === 'lan' && inferDirectPath(endpoint.host) === path)
         ) {
           addDirectoryDirectCandidate(wsCandidates, seenWsUrls, directoryEndpointLocations, endpoint, target);
         }

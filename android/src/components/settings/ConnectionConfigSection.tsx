@@ -164,7 +164,6 @@ export function ConnectionConfigSection({
       syncedDeviceIdsRef.current.add(device.deviceId);
       const endpoints = device.daemon.endpoints || [];
       const preferred = endpoints.find((e) => e.kind === 'tailscale')
-        || endpoints.find((e) => e.kind === 'lan')
         || endpoints.find((e) => e.kind === 'ipv4' && e.host)
         || endpoints.find((e) => e.host);
       if (!preferred?.host || !preferred.port) {
@@ -217,7 +216,9 @@ export function ConnectionConfigSection({
   const defaultServer = canonicalizedSettings.servers.find((server) => server.id === effectiveDefaultServerId) || null;
   const connectionSummary = [
     loggedIn ? `${accountName} 已登录` : 'Relay 未登录',
-    defaultServer ? `默认 ${defaultServer.name || defaultServer.targetHost}` : '无默认直连',
+    defaultServer
+      ? `默认 ${defaultServer.relayDeviceName || defaultServer.name || defaultServer.relayHostId || 'Server'}`
+      : '无默认直连',
     `${entries.length} 个连接`,
   ].join(' · ');
   const handleAddServer = () => {
@@ -623,7 +624,10 @@ export function ConnectionConfigSection({
                   </div>
                   {entry.boundBridgePreset ? (
                     <div style={{ fontSize: '11px', opacity: 0.74, marginTop: '3px' }}>
-                      {entry.boundBridgePreset.targetHost}:{entry.boundBridgePreset.targetPort}
+                      {entry.boundBridgePreset.relayDeviceName
+                        || entry.boundBridgePreset.name
+                        || entry.boundBridgePreset.relayHostId
+                        || 'Server'}
                     </div>
                   ) : null}
                 </div>

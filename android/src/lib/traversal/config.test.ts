@@ -603,13 +603,7 @@ describe('buildTraversalPlan', () => {
       },
     );
 
-    expect(plan.candidates).toContainEqual(expect.objectContaining({
-      id: 'lan:192.168.50.20:3333',
-      kind: 'ws',
-      path: 'ipv4',
-      endpoint: '192.168.50.20:3333',
-      url: 'ws://192.168.50.20:3333/?token=token-a',
-    }));
+    expect(plan.candidates.some((candidate) => candidate.endpoint === '192.168.50.20:3333')).toBe(false);
     expect(plan.candidates).toContainEqual(expect.objectContaining({
       id: 'direct:tailscale:daemon-host-a',
       kind: 'ws',
