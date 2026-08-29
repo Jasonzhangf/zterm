@@ -5,11 +5,6 @@ export const SESSION_DRAWER_UI_SLOT_ID = 'terminal.session-drawer' as const;
 export type TerminalSessionGroupSlotName = 'top' | 'center' | 'bottom';
 export type TerminalSessionGroupLayoutAxis = 'vertical' | 'horizontal';
 
-export type TerminalSessionDrawerAvailabilityReason =
-  | 'available'
-  | 'remote-missing'
-  | 'closed';
-
 export interface TerminalSessionDrawerItem {
   id: string;
   stableKey: string;
@@ -17,7 +12,6 @@ export interface TerminalSessionDrawerItem {
   subtitle: string;
   status: 'connected' | 'connecting' | 'disconnected' | 'closed' | 'error' | 'idle';
   remoteMissing?: boolean;
-  availabilityReason?: TerminalSessionDrawerAvailabilityReason;
   paneLabel?: string | null;
   sessionGroupSlot?: TerminalSessionGroupSlotName | null;
   active?: boolean;
@@ -55,8 +49,6 @@ export interface TerminalSessionDrawerProps {
   onPreviewSelectionModeChange?: (active: boolean) => void;
   onTogglePreviewSession?: (sessionId: string) => void;
   onClearPreviewSelection?: () => void;
-  onRetrySessionAvailability?: (sessionId: string) => void;
-  retryingSessionIds?: readonly string[];
   terminalShellSkin?: 'light' | 'blue' | 'black';
 }
 

@@ -160,7 +160,6 @@ import {
   type TraversalRelayDeviceSnapshot,
 } from '../lib/types';
 import type { RemoteWindowReceiverStartResult } from '../lib/remote-window-receiver-runtime';
-import { resolveDrawerSessionAvailability } from '../lib/terminal-drawer-session-availability';
 import type { RemoteWindowControlMessage } from '../lib/remote-window-message-runtime';
 
 type DrawerRemoteSessionTarget = {
@@ -655,7 +654,6 @@ function TerminalPageComponent({
     target: DrawerRemoteSessionTarget;
     busy: boolean;
   } | null>(null);
-  const [retryingSessionIds, setRetryingSessionIds] = useState<string[]>([]);
   // Render-side projection only; the source of truth for the actual backend is
   // `drawerCloseDialog.target.terminalBackend`. We keep a derived label here so
   // the confirm-close dialog can surface the right backend to the user without
@@ -1443,7 +1441,6 @@ function TerminalPageComponent({
         subtitle: `${item.hostLabel || item.hostKey || 'unknown server'} · ${liveSession.sessionName}${formatTerminalBackendSuffix(liveSession.terminalBackend || item.terminalBackend)}`,
         status: normalizeDrawerStatus(liveSession.state),
         remoteMissing: resolveSessionRemoteMissing(liveSession, sessionGroups),
-        availabilityReason: resolveDrawerSessionAvailability(liveSession, sessionGroups),
         paneLabel: undefined,
         sessionGroupSlot: resolveSessionGroupSlot(liveSession.id),
         active: activeSessionIds.has(liveSession.id),
@@ -3122,28 +3119,6 @@ function TerminalPageComponent({
     })();
   }, [drawerCloseDialog, onCloseDrawerRemoteSession]);
 
-  const handleRetryDrawerSessionAvailability = useCallback((sessionId: string) => {
-    if (!onRefreshRemoteSessions) {
-      return;
-    }
-    const targetItem = drawerRemoteSessions.items.find((item) => item.id === sessionId);
-    const hostKey = targetItem?.hostKey?.trim()
-      || drawerSessions.find((item) => item.id === sessionId)?.hostKey?.trim();
-    if (!hostKey) {
-      console.warn('[TerminalPage] Cannot retry drawer session availability without hostKey:', sessionId);
-      return;
-    }
-    setRetryingSessionIds((current) => current.includes(sessionId) ? current : [...current, sessionId]);
-    Promise.resolve()
-      .then(() => onRefreshRemoteSessions(hostKey))
-      .catch((error) => {
-        console.warn('[TerminalPage] Drawer session availability retry failed:', error);
-      })
-      .finally(() => {
-        setRetryingSessionIds((current) => current.filter((id) => id !== sessionId));
-      });
-  }, [drawerRemoteSessions.items, drawerSessions, onRefreshRemoteSessions]);
-
   const handleOpenQuickTabPickerForPane = useCallback((paneId?: string, hostKey?: string, createOptions?: { sessionName?: string; cwd?: string; terminalBackend?: 'tmux' | 'herdr' }) => {
     if (paneId) {
       activatePaneAndSession(paneId);
@@ -3509,8 +3484,6 @@ function TerminalPageComponent({
                 onPreviewSelectionModeChange: handleSessionPreviewSelectionModeChange,
                 onTogglePreviewSession: handleToggleSessionPreviewSelection,
                 onClearPreviewSelection: handleClearDrawerPreviewSelection,
-                onRetrySessionAvailability: handleRetryDrawerSessionAvailability,
-                retryingSessionIds,
                 terminalShellSkin: effectiveTerminalShellSkin,
               }) : null}
             </>

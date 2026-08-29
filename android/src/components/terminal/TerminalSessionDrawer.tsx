@@ -14,11 +14,6 @@ import type {
   TerminalSessionDrawerItem,
   TerminalSessionDrawerProps,
 } from '../../lib/plugin-session-drawer/session-drawer-contract';
-import {
-  isDrawerSessionRetryable,
-  isDrawerSessionUnavailable,
-  resolveDrawerSessionAvailabilityForItem,
-} from '../../lib/terminal-drawer-session-availability';
 export type {
   TerminalSessionDrawerHost,
   TerminalSessionDrawerItem,
@@ -46,8 +41,6 @@ function TerminalSessionDrawerComponent({
   onPreviewSelectionModeChange,
   onTogglePreviewSession,
   onClearPreviewSelection,
-  onRetrySessionAvailability,
-  retryingSessionIds = [],
   terminalShellSkin = 'light',
 }: TerminalSessionDrawerProps) {
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -487,12 +480,6 @@ function TerminalSessionDrawerComponent({
           }}
         >
           {visibleSessions.map((session) => {
-            const availabilityReason = session.availabilityReason
-              ?? resolveDrawerSessionAvailabilityForItem(session);
-            const unavailable = isDrawerSessionUnavailable(availabilityReason);
-            const retryable = isDrawerSessionRetryable(availabilityReason);
-            const previewUnavailable = unavailable;
-            const isRetrying = retryingSessionIds.includes(session.id);
             const previewSelectionIndex = previewSelectedSessionIds.indexOf(session.id);
             const slotTone = resolveSessionGroupSlotTone(session.sessionGroupSlot, sessionGroupLayoutAxis);
             return (
@@ -501,7 +488,6 @@ function TerminalSessionDrawerComponent({
               data-active={session.active ? 'true' : 'false'}
               data-testid={`terminal-session-drawer-row-${session.id}`}
               data-terminal-backend={session.terminalBackend ?? 'tmux'}
-              data-availability={availabilityReason}
               onContextMenu={(event) => {
                 event.preventDefault();
                 openSlotMenu(session, event.clientX, event.clientY);
@@ -539,8 +525,8 @@ function TerminalSessionDrawerComponent({
                 gridTemplateColumns: '1fr auto',
                 gap: '8px',
                 alignItems: 'center',
-                color: unavailable ? 'var(--zterm-panel-muted)' : 'var(--zterm-panel-text)',
-                opacity: unavailable ? 0.4 : 1,
+                color: 'var(--zterm-panel-text)',
+                opacity: 1,
                 overflow: 'hidden',
               }}
             >
@@ -598,10 +584,10 @@ function TerminalSessionDrawerComponent({
                       return;
                     }
                     if (previewSelectionMode) {
-                      if (!previewUnavailable) onTogglePreviewSession?.(session.id);
+                      onTogglePreviewSession?.(session.id);
                       return;
                     }
-                    if (!unavailable) onSelectSession(session.id);
+                    onSelectSession(session.id);
                   }}
                   style={{
                   height: '100%',
@@ -658,7 +644,7 @@ function TerminalSessionDrawerComponent({
                       background: resolveStatusTone(session.status),
                     }}
                   />
-                  <span>{unavailable ? 'unavailable' : session.status}</span>
+                  <span>{session.status}</span>
                 </div>
               </div>
               </button>
@@ -676,7 +662,6 @@ function TerminalSessionDrawerComponent({
                     type="button"
                     data-testid={`terminal-session-drawer-preview-check-${session.id}`}
                     aria-label={previewSelectionIndex >= 0 ? `预览顺序 ${previewSelectionIndex + 1}` : '选择预览'}
-                    disabled={previewUnavailable}
                     onMouseDown={(event) => event.stopPropagation()}
                     onTouchStart={(event) => {
                       event.stopPropagation();
@@ -686,7 +671,7 @@ function TerminalSessionDrawerComponent({
                     onClick={(event) => {
                       event.preventDefault();
                       event.stopPropagation();
-                      if (!previewUnavailable) onTogglePreviewSession?.(session.id);
+                      onTogglePreviewSession?.(session.id);
                     }}
                     style={{
                       padding: 0,
@@ -695,7 +680,7 @@ function TerminalSessionDrawerComponent({
                       border: previewSelectionIndex >= 0 ? '1px solid var(--zterm-panel-accent)' : '1px solid var(--zterm-panel-border)',
                       background: previewSelectionIndex >= 0 ? 'rgba(139,213,255,0.18)' : 'transparent',
                       color: previewSelectionIndex >= 0 ? 'var(--zterm-panel-accent)' : 'var(--zterm-panel-muted)',
-                      opacity: previewUnavailable ? 0.45 : 1,
+                      opacity: 1,
                       fontSize: '11px', fontWeight: 900,
                     }}
                   >
@@ -784,36 +769,6 @@ function TerminalSessionDrawerComponent({
                 >
                   ×
                 </button>
-                {(unavailable || retryable) && onRetrySessionAvailability ? (
-                  <button
-                    type="button"
-                    data-testid={`terminal-session-drawer-retry-${session.id}`}
-                    data-retryable={retryable ? 'true' : 'false'}
-                    aria-label={`重试可用性 ${session.title}`}
-                    disabled={isRetrying}
-                    onMouseDown={(event) => event.stopPropagation()}
-                    onTouchStart={(event) => event.stopPropagation()}
-                    onTouchEnd={(event) => event.stopPropagation()}
-                    onClick={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      if (!isRetrying) onRetrySessionAvailability(session.id);
-                    }}
-                    style={{
-                      padding: '0 8px',
-                      height: '26px',
-                      borderRadius: '6px',
-                      border: '1px solid var(--zterm-panel-border)',
-                      background: 'var(--zterm-panel-surface)',
-                      color: 'var(--zterm-panel-accent)',
-                      fontWeight: 800,
-                      fontSize: '11px',
-                      letterSpacing: '0.02em',
-                    }}
-                  >
-                    {isRetrying ? '重试中' : '重试'}
-                  </button>
-                ) : null}
               </div>
             </div>
             );
