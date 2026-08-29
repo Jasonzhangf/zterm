@@ -1378,11 +1378,16 @@ function TerminalPageComponent({
     for (const item of drawerRemoteSessions.items) {
       const hostKey = item.hostKey?.trim();
       if (!hostKey || hosts.has(hostKey)) {
+        if (hostKey && hosts.has(hostKey)) {
+          const existing = hosts.get(hostKey)!;
+          hosts.set(hostKey, { ...existing, connected: true });
+        }
         continue;
       }
       hosts.set(hostKey, {
         hostKey,
         hostLabel: item.hostLabel?.trim() || hostKey,
+        connected: true,
       });
     }
     return [...hosts.values()];
