@@ -1526,6 +1526,7 @@ describe('TerminalPage portrait session drawer', () => {
             deviceName: 'Mac Studio',
             hostId: 'mac-studio',
             includeDirectEndpoint: false,
+            daemonConnected: false,
             sessions: ['rcc', 'zterm'],
           }),
           makeRelayDevice({
@@ -1558,6 +1559,7 @@ describe('TerminalPage portrait session drawer', () => {
     fireEvent.touchEnd(swipeSurface!, { changedTouches: [{ clientX: 236, clientY: 206 }] });
 
     expect((await screen.findByTestId('terminal-session-drawer-host-mac-studio')).textContent).toContain('1');
+    expect(screen.getByTestId('terminal-session-drawer-host-mac-studio').querySelector('span')?.style.background).toBe('rgb(68, 226, 160)');
     expect(screen.queryByTestId('terminal-session-drawer-host-rtc-verify-1784267569532')).toBeNull();
     expect(screen.queryByText('rtc-device-1784267569532')).toBeNull();
   });
@@ -1955,7 +1957,7 @@ describe('TerminalPage portrait session drawer', () => {
     );
   });
 
-  it('renders and opens an independently projected Herdr catalog row beside tmux rows', async () => {
+  it('merges a legacy Herdr catalog row into the tmux row for one daemon/session', async () => {
     const sessions = [makeSession('s1')];
     sessions[0]!.daemonHostId = 'daemon-a';
     const onOpenDrawerRemoteSession = vi.fn();
@@ -2010,12 +2012,12 @@ describe('TerminalPage portrait session drawer', () => {
 
     expect(drawer.getAttribute('aria-hidden')).toBe('false');
     expect(screen.getByTestId('terminal-session-drawer-select-remote:daemon:daemon-a::session:shared')).toBeTruthy();
-    const row = await screen.findByTestId('terminal-session-drawer-select-remote:daemon:daemon-a::backend:herdr::session:shared');
+    const row = await screen.findByTestId('terminal-session-drawer-select-remote:daemon:daemon-a::session:shared');
     fireEvent.click(row);
 
     expect(onOpenDrawerRemoteSession).toHaveBeenCalledWith(
       expect.objectContaining({
-        terminalBackend: 'herdr',
+        terminalBackend: 'tmux',
         daemonHostId: 'daemon-a',
       }),
       'shared',
@@ -2681,9 +2683,9 @@ it('routes a Herdr remote drawer close through the typed backend target', async 
   });
   fireEvent.touchEnd(surface, { changedTouches: [{ clientX: 236, clientY: 206 }] });
 
-  const herdrRow = await screen.findByTestId('terminal-session-drawer-row-remote:daemon:daemon-a::backend:herdr::session:herdr-only');
+  const herdrRow = await screen.findByTestId('terminal-session-drawer-row-remote:daemon:daemon-a::session:herdr-only');
   await waitFor(() => expect(within(herdrRow).getByText('herdr-only')).toBeTruthy());
-  fireEvent.click(screen.getByTestId('terminal-session-drawer-close-remote:daemon:daemon-a::backend:herdr::session:herdr-only'));
+  fireEvent.click(screen.getByTestId('terminal-session-drawer-close-remote:daemon:daemon-a::session:herdr-only'));
   fireEvent.click(await screen.findByTestId('zterm-dialog-confirm'));
 
   expect(onCloseDrawerRemoteSession).toHaveBeenCalledWith(
@@ -2692,7 +2694,7 @@ it('routes a Herdr remote drawer close through the typed backend target', async 
       bridgeHost: '100.127.23.27',
       bridgePort: 3333,
       daemonHostId: 'daemon-a',
-      terminalBackend: 'herdr',
+      terminalBackend: 'tmux',
     }),
     'herdr-only',
   );
@@ -2745,13 +2747,13 @@ it('surfaces the Herdr backend label in the close dialog and keeps the dialog on
   });
   fireEvent.touchEnd(surface, { changedTouches: [{ clientX: 236, clientY: 206 }] });
 
-  fireEvent.click(screen.getByTestId('terminal-session-drawer-close-remote:daemon:daemon-a::backend:herdr::session:herdr-only'));
+  fireEvent.click(screen.getByTestId('terminal-session-drawer-close-remote:daemon:daemon-a::session:herdr-only'));
 
   const dialog = await screen.findByTestId('zterm-dialog');
   const dialogMessage = screen.getByTestId('zterm-dialog-message').textContent || '';
-  expect(dialogMessage).toContain('Herdr');
+  expect(dialogMessage).not.toContain('Herdr');
   expect(dialogMessage).toContain('herdr-only');
-  expect(dialogMessage).not.toMatch(/tmux session/);
+  expect(dialogMessage).toMatch(/tmux session/);
   // Theme tokens are used (not bespoke hex / raw rgba).
   const dialogStyle = dialog.getAttribute('style') || '';
   expect(dialogStyle).toContain('var(--zterm-');

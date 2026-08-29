@@ -35,19 +35,14 @@ function toServerGroupKey(entry: Pick<SessionGroupHistory, 'daemonHostId' | 'bri
     bridgeHost: entry.bridgeHost,
     bridgePort: entry.bridgePort,
   });
-  return entry.terminalBackend === 'herdr'
-    ? `${ownerKey}::backend:herdr`
-    : ownerKey;
+  return ownerKey;
 }
 
 function sessionGroupOwnersMatch(
   left: Pick<SessionGroupHistory, 'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'terminalBackend'>,
   right: Pick<SessionGroupHistory, 'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'terminalBackend'>,
 ) {
-  return (
-    (left.terminalBackend || 'tmux') === (right.terminalBackend || 'tmux')
-    && sessionSemanticOwnersMatch(left, right)
-  );
+  return sessionSemanticOwnersMatch(left, right);
 }
 
 function canonicalizeSessionGroupOwner<T extends {
@@ -83,7 +78,7 @@ function normalizeGroupEntry(
   const daemonHostId = typeof candidate.daemonHostId === 'string' && candidate.daemonHostId.trim()
     ? candidate.daemonHostId.trim()
     : undefined;
-  const terminalBackend = candidate.terminalBackend === 'herdr' ? 'herdr' : 'tmux';
+  const terminalBackend = 'tmux' as const;
   const sessionNames = Array.isArray(candidate.sessionNames)
     ? candidate.sessionNames.map((item) => (typeof item === 'string' ? item.trim() : '')).filter(Boolean)
     : [];
@@ -379,23 +374,20 @@ export function useSessionHistoryStorage(
         if (!sessionGroupOwnersMatch(item, canonicalTarget)) {
           return [item];
         }
-        if (normalizedRemoteSessionNames.size === 0) {
-          changed = true;
-          return [];
-        }
-        const nextSessionNames = [...normalizedRemoteSessionNames].sort((a, b) => a.localeCompare(b));
+        const nextMissingSessionNames = item.sessionNames
+          .filter((sessionName) => !normalizedRemoteSessionNames.has(sessionName))
+          .sort((a, b) => a.localeCompare(b));
         const nextLastOpenedSessionName = item.lastOpenedSessionName && normalizedRemoteSessionNames.has(item.lastOpenedSessionName)
           ? item.lastOpenedSessionName
           : undefined;
-        if (item.sessionNames.join('\u0000') === nextSessionNames.join('\u0000')
+        if ((item.missingSessionNames || []).join('\u0000') === nextMissingSessionNames.join('\u0000')
           && item.lastOpenedSessionName === nextLastOpenedSessionName) {
           return [item];
         }
         changed = true;
         return [{
           ...item,
-          sessionNames: nextSessionNames,
-          missingSessionNames: [],
+          missingSessionNames: nextMissingSessionNames,
           lastOpenedSessionName: nextLastOpenedSessionName,
         }];
       });

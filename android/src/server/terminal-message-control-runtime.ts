@@ -44,11 +44,13 @@ export interface TerminalMessageControlRuntimeDeps {
   listTmuxSessions: (backend?: 'tmux' | 'herdr') => string[];
   listTerminalSessions?: () => string[];
   listTerminalSessionCatalog?: () => TerminalSessionCatalogEntry[];
+  runTmux: (args: string[]) => { ok: true; stdout: string } | { ok: false; error: string };
+  observationHistory?: Map<string, import('./daemon-session-agent-status-runtime').DaemonSessionObservationHistoryEntry>;
+  readProcessGroup?: (pid: string) => { groupId: string; alive: boolean } | undefined;
   resolveTerminalSessionBackend?: (sessionName: string) => 'tmux' | 'herdr';
   createDetachedTmuxSession: (sessionName?: string, cwd?: string, backend?: 'tmux' | 'herdr') => string;
   closeDetachedTerminalSession: (sessionName: string, backend?: 'tmux' | 'herdr') => void;
   renameTmuxSession: (currentName?: string, nextName?: string, backend?: 'tmux' | 'herdr') => string;
-  runTmux: (args: string[]) => { ok: true; stdout: string };
   sanitizeSessionName: (input?: string) => string;
   createTransportSubscriber: (connection: TerminalTransportConnection) => TerminalTransportSubscriber;
   bindConnectionToSubscriber: (

@@ -28,7 +28,7 @@
 15. A Relay directory or saved/Home alias update must invalidate the memoized TerminalPage identity projection so the open drawer re-canonicalizes without a page restart.
 16. If direct/Tailscale history and Relay history both resolve to the same canonical daemon, the drawer must enumerate each tmux session name exactly once. Route candidates and close/open intent metadata may merge, but duplicate history sources must not create duplicate rows.
 17. Short session catalogs size the list to its rows and place the footer directly after the list. Long catalogs may shrink the list and scroll inside it, but the list must not use growing flex space that creates a large blank band above the footer.
-18. Tmux and Herdr catalogs for the same daemon are independent drawer projections. Equal session names must produce two rows, and selecting the Herdr row must retain `terminalBackend: 'herdr'` through the drawer remote-open owner.
+18. The drawer is a tmux-only projection. Legacy persisted Herdr groups normalize to tmux and merge with the same canonical daemon/session identity; equal session names produce one row, while remote catalog target identity (`daemonHostId`/session name) remains unchanged.
 19. While the drawer is open it is the only terminal chrome interaction layer: portrait status/back/settings controls, debug overlays, copy menus, and the fixed quickbar must not render above it. The drawer backdrop and panel must sit above the normal terminal chrome stack, while transient toast/progress feedback may remain above the drawer.
 19. The narrow drawer header must remain one compact control row. It may expose the preview-selection command and count, but must not stack tutorial/help copy over terminal or session content.
 

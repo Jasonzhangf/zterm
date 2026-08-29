@@ -1253,8 +1253,7 @@ function TerminalPageComponent({
     const rowIdByStableSessionKey = new Map<string, string>();
     const items: TerminalSessionDrawerItem[] = [];
     for (const group of sessionGroups) {
-      const groupBackend = group.terminalBackend || 'tmux';
-      const backendSuffix = groupBackend === 'herdr' ? '::backend:herdr' : '';
+      const groupBackend = 'tmux' as const;
       const explicitDaemonHostId = group.daemonHostId?.trim() || '';
       const serverIdentity = resolveDrawerIdentity(group);
       const resolvedDaemonHostId = relayDeviceByDaemonHostId.has(serverIdentity.key)
@@ -1279,7 +1278,7 @@ function TerminalPageComponent({
         const liveSession = liveSessionByReuseKey.get(reuseKey) || null;
         // 业务 id 保持原语义（本地已打开 → local id，未打开 → remote key）；
         // React key 稳定性改由 stableKey 承担，避免亚秒级连接状态抖动触发整列表重建。
-        const id = liveSession?.id || `remote:${ownerKey}${backendSuffix}::session:${sessionName}`;
+        const id = liveSession?.id || `remote:${ownerKey}::session:${sessionName}`;
         const relayDevice = resolvedDaemonHostId ? relayDeviceByDaemonHostId.get(resolvedDaemonHostId) || null : null;
         const relayRtcCandidates = getRelayRtcEndpointCandidates(relayDevice?.daemon.endpoints || []);
         const useRelayRouteTarget = Boolean(relayDevice && relayRtcCandidates.length > 0);
@@ -1304,8 +1303,8 @@ function TerminalPageComponent({
           ...(useRelayRouteTarget ? { transportMode: 'auto' as const } : {}),
           sessionNames: group.sessionNames,
         };
-        const canonicalSessionRowKey = `${serverIdentity.key}${backendSuffix}::session:${sessionName}`;
-        const stableKey = `catalog:${group.bridgeHost}:${group.bridgePort}${backendSuffix}::session:${sessionName}`;
+        const canonicalSessionRowKey = `${serverIdentity.key}::session:${sessionName}`;
+        const stableKey = `catalog:${group.bridgeHost}:${group.bridgePort}::session:${sessionName}`;
         const existingRowId = rowIdByCanonicalSessionKey.get(canonicalSessionRowKey)
           || rowIdByStableSessionKey.get(stableKey);
         if (existingRowId) {
@@ -1378,11 +1377,16 @@ function TerminalPageComponent({
     for (const item of drawerRemoteSessions.items) {
       const hostKey = item.hostKey?.trim();
       if (!hostKey || hosts.has(hostKey)) {
+        if (hostKey && hosts.has(hostKey)) {
+          const existing = hosts.get(hostKey)!;
+          hosts.set(hostKey, { ...existing, connected: true });
+        }
         continue;
       }
       hosts.set(hostKey, {
         hostKey,
         hostLabel: item.hostLabel?.trim() || hostKey,
+        connected: true,
       });
     }
     return [...hosts.values()];
@@ -1433,11 +1437,11 @@ function TerminalPageComponent({
       return {
         ...item,
         title: liveSession.customName || liveSession.title || liveSession.sessionName,
-        subtitle: `${item.hostLabel || item.hostKey || 'unknown server'} · ${liveSession.sessionName}${formatTerminalBackendSuffix(liveSession.terminalBackend || item.terminalBackend)}`,
+        subtitle: `${item.hostLabel || item.hostKey || 'unknown server'} · ${liveSession.sessionName}`,
         paneLabel: undefined,
         sessionGroupSlot: resolveSessionGroupSlot(liveSession.id),
         active: activeSessionIds.has(liveSession.id),
-        terminalBackend: liveSession.terminalBackend || item.terminalBackend,
+        terminalBackend: 'tmux' as const,
       };
     });
 

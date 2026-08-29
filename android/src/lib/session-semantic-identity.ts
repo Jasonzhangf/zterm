@@ -41,9 +41,7 @@ export function buildSessionSemanticOwnerKey(input: SessionSemanticOwnerInput) {
 
 export function buildSessionSemanticReuseKey(input: SessionSemanticIdentityInput) {
   const ownerKey = buildSessionSemanticOwnerKey(input);
-  return input.terminalBackend === 'herdr'
-    ? `${ownerKey}::backend:herdr::session:${asTrimmedString(input.sessionName)}`
-    : `${ownerKey}::session:${asTrimmedString(input.sessionName)}`;
+  return `${ownerKey}::session:${asTrimmedString(input.sessionName)}`;
 }
 
 export function buildSessionSemanticOwnerKeyVariants(input: SessionSemanticOwnerInput) {
@@ -64,9 +62,8 @@ export function buildSessionSemanticOwnerKeyVariants(input: SessionSemanticOwner
 
 export function buildSessionSemanticReuseKeyVariants(input: SessionSemanticIdentityInput) {
   const sessionName = asTrimmedString(input.sessionName);
-  const backendSuffix = input.terminalBackend === 'herdr' ? '::backend:herdr' : '';
   return buildSessionSemanticOwnerKeyVariants(input)
-    .map((ownerKey) => `${ownerKey}${backendSuffix}::session:${sessionName}`);
+    .map((ownerKey) => `${ownerKey}::session:${sessionName}`);
 }
 
 export function sessionSemanticOwnersMatch(
@@ -91,7 +88,6 @@ export function sessionSemanticReuseMatch(
 ) {
   return (
     asTrimmedString(left.sessionName) === asTrimmedString(right.sessionName)
-    && (left.terminalBackend || 'tmux') === (right.terminalBackend || 'tmux')
     && sessionSemanticOwnersMatch(left, right)
   );
 }

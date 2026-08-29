@@ -834,6 +834,26 @@ export interface SessionActivity {
 export interface TerminalSessionCatalogEntry {
   name: string;
   backend: TerminalBackendKind;
+  observation?: TerminalSessionObservation;
+}
+
+export type TerminalSessionAgentStatus = 'running' | 'idle' | 'unknown' | 'error';
+
+export type TerminalSessionObservationStatusReason =
+  | 'evidence-confirmed'
+  | 'insufficient-evidence'
+  | 'observation-error';
+
+export interface TerminalSessionObservation {
+  observedAt: number;
+  foregroundProcess?: string;
+  processGroupAlive?: boolean;
+  recentOutput: boolean;
+  oscTitleSeen: boolean;
+  oscProgressSeen: boolean;
+  status: TerminalSessionAgentStatus;
+  statusReason: TerminalSessionObservationStatusReason;
+  stableRefreshDue?: boolean;
 }
 
 export interface TerminalSessionCatalog {

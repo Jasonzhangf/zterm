@@ -9,6 +9,7 @@
 
 import { WebSocketServer } from 'ws';
 import { createServer } from 'http';
+import { spawnSync } from 'child_process';
 import { join } from 'path';
 import { homedir } from 'os';
 import type {
@@ -138,6 +139,22 @@ const MAX_CLIENT_DEBUG_BATCH_LOG_ENTRIES = 8;
 const MAX_CLIENT_DEBUG_LOG_PAYLOAD_CHARS = 900;
 const daemonDebugPermissionService = new DebugPermissionService();
 const MEMORY_GUARD_INTERVAL_MS = 30_000;
+const daemonSessionObservationHistory = new Map<string, {
+  processName?: string;
+  processId?: string;
+  processGroupId: string;
+  firstSeenAt: number;
+  lastFingerprint: string;
+  candidateStatus: import('@zterm/shared/protocol').TerminalSessionAgentStatus;
+  candidateSince: number;
+  idleConfirmations: number;
+  lastPublishedAt?: number;
+}>();
+const readDaemonProcessGroup = (pid: string) => {
+  const result = spawnSync('ps', ['-o', 'pgid=,stat=', '-p', pid], { encoding: 'utf8' });
+  const [groupId, state] = result.stdout.trim().split(/\s+/u);
+  return groupId && state ? { groupId, alive: !state.includes('Z') } : undefined;
+};
 const MEMORY_GUARD_MAX_RSS_BYTES = 2.5 * 1024 * 1024 * 1024;
 const MEMORY_GUARD_MAX_HEAP_USED_BYTES = 1.5 * 1024 * 1024 * 1024;
 
@@ -489,11 +506,13 @@ const terminalMessageRuntime = createTerminalMessageRuntime({
     listTmuxSessions,
     listTerminalSessions,
     listTerminalSessionCatalog,
+    runTmux,
+    observationHistory: daemonSessionObservationHistory,
+    readProcessGroup: readDaemonProcessGroup,
     resolveTerminalSessionBackend,
     createDetachedTmuxSession,
     closeDetachedTerminalSession,
     renameTmuxSession,
-    runTmux,
     sanitizeSessionName,
     createTransportSubscriber: (connection) =>
       terminalRuntime.createTransportSubscriber(connection as DaemonTransportConnection),

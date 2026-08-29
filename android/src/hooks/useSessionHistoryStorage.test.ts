@@ -131,7 +131,7 @@ describe('useSessionHistoryStorage daemon-first truth', () => {
     ]);
   });
 
-  it('keeps tmux and Herdr groups separate for the same daemon and endpoint', () => {
+  it('normalizes legacy Herdr groups into one tmux group for the same daemon and endpoint', () => {
     const { result } = renderHook(() => useSessionHistoryStorage());
 
     act(() => {
@@ -153,42 +153,11 @@ describe('useSessionHistoryStorage daemon-first truth', () => {
       });
     });
 
-    expect(result.current.sessionGroups).toHaveLength(2);
-    expect(result.current.sessionGroups).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        terminalBackend: 'tmux',
-        sessionNames: ['shared'],
-      }),
-      expect.objectContaining({
-        terminalBackend: 'herdr',
-        sessionNames: ['shared'],
-      }),
-    ]));
-
-    act(() => {
-      result.current.pruneSessionGroupSelectionToRemoteTruth(
-        {
-          bridgeHost: '100.64.0.10',
-          bridgePort: 3333,
-          daemonHostId: 'daemon-host-a',
-          terminalBackend: 'herdr',
-        },
-        [],
-      );
-    });
-
-    expect(result.current.sessionGroups).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        terminalBackend: 'tmux',
-        sessionNames: ['shared'],
-        missingSessionNames: [],
-      }),
-      expect.objectContaining({
-        terminalBackend: 'herdr',
-        sessionNames: ['shared'],
-        missingSessionNames: ['shared'],
-      }),
-    ]));
+    expect(result.current.sessionGroups).toHaveLength(1);
+    expect(result.current.sessionGroups[0]).toEqual(expect.objectContaining({
+      terminalBackend: 'tmux',
+      sessionNames: ['shared'],
+    }));
   });
 
   it('collapses old bridge-only group and later daemon-owned group for the same endpoint into one server truth', () => {
@@ -541,6 +510,33 @@ describe('useSessionHistoryStorage daemon-first truth', () => {
       sessionNames: ['logs', 'main'],
       missingSessionNames: ['logs'],
       lastOpenedSessionName: undefined,
+    }));
+  });
+
+  it('clears missing markers when a later catalog confirms the sessions again', () => {
+    const { result } = renderHook(() => useSessionHistoryStorage());
+
+    act(() => {
+      result.current.setSessionGroupSelection({
+        name: 'Daemon A',
+        bridgeHost: '100.64.0.10',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-host-a',
+        sessionNames: ['main', 'logs'],
+      });
+      result.current.pruneSessionGroupSelectionToRemoteTruth(
+        { bridgeHost: '100.64.0.10', bridgePort: 3333, daemonHostId: 'daemon-host-a' },
+        [],
+      );
+      result.current.pruneSessionGroupSelectionToRemoteTruth(
+        { bridgeHost: '100.64.0.10', bridgePort: 3333, daemonHostId: 'daemon-host-a' },
+        ['main', 'logs'],
+      );
+    });
+
+    expect(result.current.sessionGroups[0]).toEqual(expect.objectContaining({
+      sessionNames: ['logs', 'main'],
+      missingSessionNames: [],
     }));
   });
 

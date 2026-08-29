@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SettingsPage } from './SettingsPage';
 import { AppUpdateSection } from '../components/settings/AppUpdateSection';
 import type { BridgeSettings } from '../lib/bridge-settings';
+import type { AppUpdatePreferences } from '../lib/app-update';
 import { DEFAULT_TERMINAL_CACHE_LINES } from '../lib/mobile-config';
 import { RUNTIME_DEBUG_STORAGE_KEY } from '../lib/runtime-debug';
 
@@ -479,6 +480,192 @@ describe('SettingsPage terminal theme selection', () => {
     expect(onUpdatePreferencesChange).toHaveBeenCalledWith(expect.objectContaining({
       manifestUrl: 'https://relay.codewhisper.cc:18443/relay/updates/latest.json',
       manifestSource: 'relay-injected',
+    }));
+  });
+
+  it('resyncs an in-place Relay preference update instead of saving a stale LAN draft', () => {
+    const onUpdatePreferencesChange = vi.fn();
+    const updatePreferences: AppUpdatePreferences = {
+      manifestUrl: 'http://192.168.0.3:3333/updates/latest.json',
+      manifestSource: 'server-connected' as const,
+      autoCheckOnLaunch: false,
+      skippedVersionCode: undefined,
+      ignoreUntilManualCheck: false,
+      lastCheckedAt: undefined,
+      lastSeenVersionCode: undefined,
+    };
+    const relaySettings = {
+      relayBaseUrl: 'https://relay.codewhisper.cc:18443/relay/',
+      accessToken: 'token',
+      userId: 'u1',
+      username: 'jason',
+      deviceId: 'tablet-1',
+      deviceName: 'Jason Tablet',
+      platform: 'android' as const,
+      wsDevicesUrl: 'wss://relay.codewhisper.cc:18443/relay/ws/devices',
+      wsHostUrl: 'wss://relay.codewhisper.cc:18443/relay/ws/host',
+      wsClientUrl: 'wss://relay.codewhisper.cc:18443/relay/ws/client',
+      turnUrl: '',
+      turnUsername: '',
+      turnCredential: '',
+      updatedAt: 1,
+    };
+    const renderPage = () => (
+      <SettingsPage
+        settings={{ ...baseSettings, targetHost: '192.168.0.3', traversalRelay: relaySettings }}
+        currentVersionName="0.1.1.1590"
+        currentVersionCode={1011590}
+        updatePreferences={updatePreferences}
+        latestManifest={null}
+        updateChecking={false}
+        updateInstalling={false}
+        updateError={null}
+        hasNewVersion={false}
+        hasUpdateIgnorePolicy={false}
+        onSave={vi.fn()}
+        onUpdatePreferencesChange={onUpdatePreferencesChange}
+        onCheckForUpdate={vi.fn()}
+        onInstallUpdate={vi.fn()}
+        onResetUpdateIgnorePolicy={vi.fn()}
+        onBack={vi.fn()}
+        renderSettingsUpdate={(props) => <AppUpdateSection {...props} />}
+      />
+    );
+
+    const view = render(renderPage());
+    fireEvent.click(screen.getByRole('button', { name: '使用当前 daemon 地址' }));
+    expect(screen.getByDisplayValue('http://192.168.0.3:3333/updates/latest.json')).toBeTruthy();
+
+    updatePreferences.manifestUrl = 'https://relay.codewhisper.cc:18443/relay/updates/latest.json';
+    updatePreferences.manifestSource = 'relay-injected';
+    view.rerender(renderPage());
+
+    expect(screen.getByDisplayValue('https://relay.codewhisper.cc:18443/relay/updates/latest.json')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(onUpdatePreferencesChange).toHaveBeenCalledWith(expect.objectContaining({
+      manifestUrl: 'https://relay.codewhisper.cc:18443/relay/updates/latest.json',
+      manifestSource: 'relay-injected',
+    }));
+  });
+
+  it('keeps a manually saved manifest when Relay preferences refresh', () => {
+    const onUpdatePreferencesChange = vi.fn();
+    const updatePreferences: AppUpdatePreferences = {
+      manifestUrl: 'https://relay.codewhisper.cc:18443/relay/updates/latest.json',
+      manifestSource: 'relay-injected' as const,
+      autoCheckOnLaunch: false,
+      skippedVersionCode: undefined,
+      ignoreUntilManualCheck: false,
+      lastCheckedAt: undefined,
+      lastSeenVersionCode: undefined,
+    };
+    const relaySettings = {
+      relayBaseUrl: 'https://relay.codewhisper.cc:18443/relay/',
+      accessToken: 'token',
+      userId: 'u1',
+      username: 'jason',
+      deviceId: 'tablet-1',
+      deviceName: 'Jason Tablet',
+      platform: 'android' as const,
+      wsDevicesUrl: 'wss://relay.codewhisper.cc:18443/relay/ws/devices',
+      wsHostUrl: 'wss://relay.codewhisper.cc:18443/relay/ws/host',
+      wsClientUrl: 'wss://relay.codewhisper.cc:18443/relay/ws/client',
+      turnUrl: '',
+      turnUsername: '',
+      turnCredential: '',
+      updatedAt: 1,
+    };
+    const view = render(
+      <SettingsPage
+        settings={{ ...baseSettings, traversalRelay: relaySettings }}
+        currentVersionName="0.1.1.1590"
+        currentVersionCode={1011590}
+        updatePreferences={updatePreferences}
+        latestManifest={null}
+        updateChecking={false}
+        updateInstalling={false}
+        updateError={null}
+        hasNewVersion={false}
+        hasUpdateIgnorePolicy={false}
+        onSave={vi.fn()}
+        onUpdatePreferencesChange={onUpdatePreferencesChange}
+        onCheckForUpdate={vi.fn()}
+        onInstallUpdate={vi.fn()}
+        onResetUpdateIgnorePolicy={vi.fn()}
+        onBack={vi.fn()}
+        renderSettingsUpdate={(props) => <AppUpdateSection {...props} />}
+      />,
+    );
+
+    fireEvent.change(screen.getByDisplayValue(updatePreferences.manifestUrl), {
+      target: { value: 'https://updates.example.com/latest.json' },
+    });
+    updatePreferences.manifestUrl = 'https://relay.codewhisper.cc:19443/relay/updates/latest.json';
+    updatePreferences.manifestSource = 'relay-injected';
+    view.rerender(
+      <SettingsPage
+        settings={{ ...baseSettings, traversalRelay: { ...relaySettings, updatedAt: 2 } }}
+        currentVersionName="0.1.1.1590"
+        currentVersionCode={1011590}
+        updatePreferences={updatePreferences}
+        latestManifest={null}
+        updateChecking={false}
+        updateInstalling={false}
+        updateError={null}
+        hasNewVersion={false}
+        hasUpdateIgnorePolicy={false}
+        onSave={vi.fn()}
+        onUpdatePreferencesChange={onUpdatePreferencesChange}
+        onCheckForUpdate={vi.fn()}
+        onInstallUpdate={vi.fn()}
+        onResetUpdateIgnorePolicy={vi.fn()}
+        onBack={vi.fn()}
+        renderSettingsUpdate={(props) => <AppUpdateSection {...props} />}
+      />,
+    );
+
+    expect(screen.getByDisplayValue('https://updates.example.com/latest.json')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(onUpdatePreferencesChange).toHaveBeenCalledWith(expect.objectContaining({
+      manifestUrl: 'https://updates.example.com/latest.json',
+      manifestSource: 'user-saved',
+    }));
+  });
+
+  it('keeps the explicit LAN route when no Relay source exists', () => {
+    const onUpdatePreferencesChange = vi.fn();
+
+    render(
+      <SettingsPage
+        settings={{ ...baseSettings, targetHost: '192.168.0.3' }}
+        currentVersionName="0.1.1.1590"
+        currentVersionCode={1011590}
+        updatePreferences={{
+          manifestUrl: 'http://192.168.0.3:3333/updates/latest.json',
+          manifestSource: 'server-connected',
+          autoCheckOnLaunch: false,
+          ignoreUntilManualCheck: false,
+        }}
+        latestManifest={null}
+        updateChecking={false}
+        updateInstalling={false}
+        updateError={null}
+        hasNewVersion={false}
+        hasUpdateIgnorePolicy={false}
+        onSave={vi.fn()}
+        onUpdatePreferencesChange={onUpdatePreferencesChange}
+        onCheckForUpdate={vi.fn()}
+        onInstallUpdate={vi.fn()}
+        onResetUpdateIgnorePolicy={vi.fn()}
+        onBack={vi.fn()}
+        renderSettingsUpdate={(props) => <AppUpdateSection {...props} />}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(onUpdatePreferencesChange).toHaveBeenCalledWith(expect.objectContaining({
+      manifestUrl: 'http://192.168.0.3:3333/updates/latest.json',
+      manifestSource: 'server-connected',
     }));
   });
 });
