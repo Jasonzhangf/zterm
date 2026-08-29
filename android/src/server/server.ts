@@ -61,6 +61,7 @@ import {
   createWezTermCommandRunner,
 } from './wezterm-backend';
 import { createHerdrBackendRuntime } from './herdr-backend-runtime';
+import { probeHerdrSessionAgentStatus } from './daemon-session-catalog-runtime';
 import {
   isHerdrExecutableAvailable,
   resolveTerminalBackendKind,
@@ -343,6 +344,7 @@ const {
   listTmuxSessions,
   listTerminalSessions,
   listTerminalSessionCatalog,
+  runCommand,
   resolveTerminalSessionBackend,
   createDetachedTmuxSession,
   closeDetachedTerminalSession,
@@ -489,6 +491,11 @@ const terminalMessageRuntime = createTerminalMessageRuntime({
     listTmuxSessions,
     listTerminalSessions,
     listTerminalSessionCatalog,
+    probeSessionAgentStatus: (entry) => probeHerdrSessionAgentStatus({
+      entry,
+      runCommand,
+      executable: resolveHerdrExecutable(),
+    }),
     resolveTerminalSessionBackend,
     createDetachedTmuxSession,
     closeDetachedTerminalSession,

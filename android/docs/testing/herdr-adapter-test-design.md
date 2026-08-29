@@ -123,3 +123,16 @@ tmux/WezTerm mirror readback. Required gates:
   backend must fail instead of defaulting to tmux.
 - Mirror runtime consumes only `readSnapshot()`; no mirror-store path may call
   tmux or WezTerm CLI directly for a Herdr-backed session.
+
+## Daemon agent status probe
+
+`daemon.session_catalog` is the sole owner of the Herdr agent projection. The
+probe reads only the authoritative `herdr api snapshot` control result and
+publishes it on the backend-qualified session catalog; it never inspects
+terminal bytes, mirror state, or client state.
+
+Positive tests lock `working -> running` and `idle/done -> idle`, preserving
+the Herdr agent name and session identity. Negative tests lock unresolved
+identity -> `unknown`, unavailable/malformed API -> explicit `error`, and
+tmux sessions -> `unknown` without invoking Herdr. The client/drawer has no
+status resolver and must consume this daemon projection if it is later shown.

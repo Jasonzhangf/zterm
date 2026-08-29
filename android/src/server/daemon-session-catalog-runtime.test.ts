@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   buildSessionsCatalogPayload,
   handleListSessionsMessageRuntime,
+  probeHerdrSessionAgentStatus,
   type DaemonSessionCatalogRuntimeDeps,
 } from './daemon-session-catalog-runtime';
 import type { TerminalTransportConnection } from './terminal-runtime-types';
@@ -18,6 +19,69 @@ function makeDeps(
 }
 
 describe('daemon session catalog runtime', () => {
+  it('projects Herdr authoritative working and idle states without reading terminal output', () => {
+    const runCommand = vi.fn(() => ({
+      stdout: JSON.stringify({
+        snapshot: {
+          workspaces: [{ tabs: [{ panes: [{
+            pane_id: 'pane-1',
+            agent: 'codex',
+            agent_session: 'agentpi',
+            agent_status: 'working',
+          }] }] }],
+        },
+      }),
+    }));
+
+    expect(probeHerdrSessionAgentStatus({
+      entry: { name: 'agentpi', backend: 'herdr' },
+      runCommand,
+      executable: 'herdr',
+    })).toEqual({ kind: 'running', name: 'codex', session: 'agentpi' });
+    expect(runCommand).toHaveBeenCalledWith('herdr', ['api', 'snapshot']);
+  });
+
+  it('maps Herdr idle/done and refuses to guess unresolved identities', () => {
+    const snapshot = (status: string) => ({ stdout: JSON.stringify({
+      snapshot: { panes: [{ pane_id: 'pane-1', agent: 'codex', agent_session: 'agentpi', agent_status: status }] },
+    }) });
+    expect(probeHerdrSessionAgentStatus({
+      entry: { name: 'agentpi', backend: 'herdr' }, runCommand: () => snapshot('done'), executable: 'herdr',
+    })).toMatchObject({ kind: 'idle', name: 'codex' });
+    expect(probeHerdrSessionAgentStatus({
+      entry: { name: 'other', backend: 'herdr' }, runCommand: () => snapshot('working'), executable: 'herdr',
+    })).toEqual({ kind: 'unknown', reason: 'herdr_agent_identity_unresolved' });
+  });
+
+  it('reports probe failure explicitly and never turns it into idle/running', () => {
+    expect(probeHerdrSessionAgentStatus({
+      entry: { name: 'agentpi', backend: 'herdr' },
+      runCommand: () => { throw new Error('server_not_running'); },
+      executable: 'herdr',
+    })).toEqual({ kind: 'error', reason: 'herdr_agent_status_probe_failed: server_not_running' });
+    expect(probeHerdrSessionAgentStatus({
+      entry: { name: 'agentpi', backend: 'herdr' },
+      runCommand: () => ({ stdout: JSON.stringify({ error: { code: 'server_not_running' } }) }),
+      executable: 'herdr',
+    })).toEqual({ kind: 'error', reason: 'herdr_agent_status_probe_failed: server_not_running' });
+    expect(probeHerdrSessionAgentStatus({
+      entry: { name: 'zterm', backend: 'tmux' }, runCommand: vi.fn(), executable: 'herdr',
+    })).toEqual({ kind: 'unknown', reason: 'agent_status_not_available_for_backend' });
+  });
+
+  it('keeps agent projection daemon-owned in the backend-qualified catalog', () => {
+    const probeSessionAgentStatus = vi.fn(() => ({ kind: 'unknown' as const, reason: 'unresolved' }));
+    expect(buildSessionsCatalogPayload({
+      listTmuxSessions: () => [],
+      listTerminalSessionCatalog: () => [{ name: 'agentpi', backend: 'herdr' }],
+      probeSessionAgentStatus,
+    })).toEqual({
+      sessions: ['agentpi'],
+      sessionCatalog: [{ name: 'agentpi', backend: 'herdr', agent: { kind: 'unknown', reason: 'unresolved' } }],
+    });
+    expect(probeSessionAgentStatus).toHaveBeenCalledWith({ name: 'agentpi', backend: 'herdr' });
+  });
+
   it('builds a backend-qualified catalog for backend-opaque list-sessions', () => {
     const deps = makeDeps({
       listTerminalSessionCatalog: vi.fn(() => [
