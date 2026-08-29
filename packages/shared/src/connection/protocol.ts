@@ -837,13 +837,23 @@ export interface TerminalSessionCatalogEntry {
   observation?: TerminalSessionObservation;
 }
 
+export type TerminalSessionAgentStatus = 'running' | 'idle' | 'unknown' | 'error';
+
+export type TerminalSessionObservationStatusReason =
+  | 'evidence-confirmed'
+  | 'insufficient-evidence'
+  | 'observation-error';
+
 export interface TerminalSessionObservation {
   observedAt: number;
   foregroundProcess?: string;
-  processGroupAlive: boolean;
+  processGroupAlive?: boolean;
   recentOutput: boolean;
   oscTitleSeen: boolean;
   oscProgressSeen: boolean;
+  status: TerminalSessionAgentStatus;
+  statusReason: TerminalSessionObservationStatusReason;
+  stableRefreshDue?: boolean;
 }
 
 export interface TerminalSessionCatalog {

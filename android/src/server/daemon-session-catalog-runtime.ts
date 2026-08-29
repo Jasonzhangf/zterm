@@ -14,7 +14,9 @@ export interface DaemonSessionCatalogDeps {
   listTmuxSessions: (backend?: 'tmux' | 'herdr') => string[];
   listTerminalSessions?: () => string[];
   listTerminalSessionCatalog?: () => TerminalSessionCatalogEntry[];
-  runTmux?: (args: string[]) => { ok: true; stdout: string };
+  runTmux?: (args: string[]) => { ok: true; stdout: string } | { ok: false; error: string };
+  readProcessGroup?: (pid: string) => { groupId: string; alive: boolean } | undefined;
+  observationHistory?: Map<string, import('./daemon-session-agent-status-runtime').DaemonSessionObservationHistoryEntry>;
 }
 
 export interface DaemonSessionCatalogRuntimeDeps extends DaemonSessionCatalogDeps {
@@ -32,7 +34,7 @@ export function buildSessionsCatalogPayload(
   const observe = (entries: TerminalSessionCatalogEntry[]) => entries.map((entry) => ({
     ...entry,
     ...(deps.runTmux && entry.backend === 'tmux'
-      ? { observation: readDaemonSessionObservation({ runTmux: deps.runTmux! }, entry.name, Date.now()) }
+      ? { observation: readDaemonSessionObservation({ runTmux: deps.runTmux!, history: deps.observationHistory, readProcessGroup: deps.readProcessGroup }, entry.name, Date.now()) }
       : {}),
   }));
   if (backend) {

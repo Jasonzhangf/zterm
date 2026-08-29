@@ -26,6 +26,8 @@ describe('daemon session catalog runtime', () => {
       recentOutput: true,
       oscTitleSeen: false,
       oscProgressSeen: true,
+      status: 'unknown',
+      statusReason: 'insufficient-evidence',
     } as const;
     const runTmux = vi.fn((args: string[]) => ({
       ok: true as const,
@@ -38,6 +40,7 @@ describe('daemon session catalog runtime', () => {
       ],
       listTmuxSessions: () => [],
       runTmux,
+      readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
     });
     expect(payload.sessionCatalog[0]).toMatchObject({
       name: 'agent-a', backend: 'tmux', observation: { ...observation, observedAt: expect.any(Number) },
@@ -112,6 +115,29 @@ describe('daemon session catalog runtime', () => {
     expect(sendTransportMessage).toHaveBeenCalledWith(null, {
       type: 'session-activity',
       payload: { activities: [] },
+    });
+  });
+
+  it('publishes daemon status in the real sessions control frame', () => {
+    const connection = { transport: null } as unknown as TerminalTransportConnection;
+    const sendTransportMessage = vi.fn();
+    const history = new Map();
+    const deps = makeDeps({
+      listTerminalSessionCatalog: () => [{ name: 'agent-a', backend: 'tmux' }],
+      runTmux: (args: string[]) => ({
+        ok: true as const,
+        stdout: args[0] === 'list-panes' ? '42\tcodex' : 'thinking',
+      }),
+      readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
+      observationHistory: history,
+      sendTransportMessage,
+    });
+
+    handleListSessionsMessageRuntime(deps, connection, { type: 'list-sessions' });
+    const sessionsFrame = sendTransportMessage.mock.calls.find(([_, message]) => message.type === 'sessions')?.[1];
+    expect(sessionsFrame).toMatchObject({
+      type: 'sessions',
+      payload: { sessionCatalog: [{ name: 'agent-a', backend: 'tmux', observation: { status: 'unknown', statusReason: 'insufficient-evidence' } }] },
     });
   });
 

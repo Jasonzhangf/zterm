@@ -2716,3 +2716,16 @@ Tags: #remote-window-stream #stale-target #target-validation #explicit-failure #
 
 Tags: #remote-window-stream #composite-window-frame #out-of-display-validation #target-validation #no-fallback
 - [2026-08-25] TraversalSocket mux-ready settlement: raw candidate `onopen` is only a physical-open signal. For daemon transports (`requireMuxReadyConfirmation`) the first opened backend stays provisional, opened runner-ups remain connected as fallbacks, non-provisional protocol frames are dropped, and `recordSuccess`/runner-up close wait for `confirmTransportReady()` after real `mux-ready`. Confirmation timeout fails the provisional attempt and promotes an already-open fallback; never defer the upper-layer `onopen` itself or mux-hello cannot start. Marker: `mux ready confirmation provisional winner opened fallback`.
+# 2026-08-29 daemon passive status correction
+
+- Jason corrected the task contract: the daemon must own evidence-backed
+  `running`/`idle`/`unknown`/`error` classification from process/job/group,
+  daemon-owned known-agent manifest rules, screen/ANSI/OSC evidence, and
+  lifecycle stabilization. The prior “facts only; never produce running/idle”
+  wording was an analysis error and must not be reused.
+- Black-box constraints remain: no agent registration, heartbeat,
+  `@zterm_agent_*`, Herdr runtime/API, pane-title/cwd/root/Codex-task/legacy
+  Herdr-identity inference, or output-only/no-output-only heuristic.
+- Phase 1 publishes typed daemon status online while the client/drawer has zero
+  consumers. Phase 2 may display the daemon result only; the client never
+  verifies, reclassifies, maintains, or uses it for availability gating.
