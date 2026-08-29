@@ -8,12 +8,13 @@ import type {
   TerminalTransportConnection,
 } from './terminal-runtime-types';
 import { publishSessionActivitiesRuntime } from './terminal-session-activity-runtime';
+import { readDaemonSessionObservation } from './daemon-session-agent-status-runtime';
 
 export interface DaemonSessionCatalogDeps {
   listTmuxSessions: (backend?: 'tmux' | 'herdr') => string[];
   listTerminalSessions?: () => string[];
   listTerminalSessionCatalog?: () => TerminalSessionCatalogEntry[];
-  readTmuxSessionObservation?: (sessionName: string, nowMs: number) => TerminalSessionCatalogEntry['observation'];
+  runTmux?: (args: string[]) => { ok: true; stdout: string };
 }
 
 export interface DaemonSessionCatalogRuntimeDeps extends DaemonSessionCatalogDeps {
@@ -30,8 +31,8 @@ export function buildSessionsCatalogPayload(
 ) {
   const observe = (entries: TerminalSessionCatalogEntry[]) => entries.map((entry) => ({
     ...entry,
-    ...(deps.readTmuxSessionObservation && entry.backend === 'tmux'
-      ? { observation: deps.readTmuxSessionObservation(entry.name, Date.now()) }
+    ...(deps.runTmux && entry.backend === 'tmux'
+      ? { observation: readDaemonSessionObservation({ runTmux: deps.runTmux! }, entry.name, Date.now()) }
       : {}),
   }));
   if (backend) {

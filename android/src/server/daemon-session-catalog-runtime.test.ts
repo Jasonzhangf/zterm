@@ -27,21 +27,25 @@ describe('daemon session catalog runtime', () => {
       oscTitleSeen: false,
       oscProgressSeen: true,
     } as const;
-    const readTmuxSessionObservation = vi.fn(() => observation);
+    const runTmux = vi.fn((args: string[]) => ({
+      ok: true as const,
+      stdout: args[0] === 'list-panes' ? '1234\tcodex' : '\u001b]133;A\u0007output',
+    }));
     const payload = buildSessionsCatalogPayload({
       listTerminalSessionCatalog: () => [
         { name: 'agent-a', backend: 'tmux' },
         { name: 'external-a', backend: 'herdr' },
       ],
       listTmuxSessions: () => [],
-      readTmuxSessionObservation,
+      runTmux,
     });
-    expect(payload.sessionCatalog).toEqual([
-      { name: 'agent-a', backend: 'tmux', observation },
-      { name: 'external-a', backend: 'herdr' },
-    ]);
-    expect(readTmuxSessionObservation).toHaveBeenCalledWith('agent-a', expect.any(Number));
-    expect(readTmuxSessionObservation).toHaveBeenCalledTimes(1);
+    expect(payload.sessionCatalog[0]).toMatchObject({
+      name: 'agent-a', backend: 'tmux', observation: { ...observation, observedAt: expect.any(Number) },
+    });
+    expect(payload.sessionCatalog[1]).toEqual({ name: 'external-a', backend: 'herdr' });
+    expect(payload.sessionCatalog[0]?.observation).toMatchObject({ foregroundProcess: 'codex', recentOutput: true, oscProgressSeen: true });
+    expect(runTmux).toHaveBeenCalledWith(['list-panes', '-t', 'agent-a', '-F', '#{pane_pid}\t#{pane_current_command}']);
+    expect(runTmux).toHaveBeenCalledWith(['capture-pane', '-p', '-e', '-t', 'agent-a', '-S', '-20']);
   });
 
   it('builds a backend-qualified catalog for backend-opaque list-sessions', () => {

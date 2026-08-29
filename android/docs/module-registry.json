@@ -916,6 +916,7 @@
       ],
       "status": "active",
       "owned_paths": [
+        "src/server/daemon-session-agent-status-runtime.ts",
         "src/server/daemon-session-catalog-runtime.ts"
       ]
     },

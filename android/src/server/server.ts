@@ -489,24 +489,11 @@ const terminalMessageRuntime = createTerminalMessageRuntime({
     listTmuxSessions,
     listTerminalSessions,
     listTerminalSessionCatalog,
-    readTmuxSessionObservation: (sessionName, nowMs) => {
-      const pane = runTmux(['list-panes', '-t', sessionName, '-F', '#{pane_pid}\t#{pane_current_command}']).stdout.trim().split('\t');
-      const output = runTmux(['capture-pane', '-p', '-e', '-t', sessionName, '-S', '-20']).stdout;
-      const foregroundProcess = pane[1]?.trim() || undefined;
-      return {
-        observedAt: nowMs,
-        ...(foregroundProcess ? { foregroundProcess } : {}),
-        processGroupAlive: Boolean(pane[0]?.trim()),
-        recentOutput: output.trim().length > 0,
-        oscTitleSeen: /\x1b\]0;|\x1b\]2;/u.test(output),
-        oscProgressSeen: /\x1b\]9;|\x1b\]133;/u.test(output),
-      };
-    },
+    runTmux,
     resolveTerminalSessionBackend,
     createDetachedTmuxSession,
     closeDetachedTerminalSession,
     renameTmuxSession,
-    runTmux,
     sanitizeSessionName,
     createTransportSubscriber: (connection) =>
       terminalRuntime.createTransportSubscriber(connection as DaemonTransportConnection),
