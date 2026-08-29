@@ -37,23 +37,6 @@ describe('daemon session catalog runtime', () => {
     expect(readOption).toHaveBeenCalledWith(SESSION_AGENT_OPTIONS.name);
   });
 
-  it('invokes the daemon tmux option reader from catalog construction', () => {
-    const values: Record<string, string> = {
-      'agent-a:@zterm_agent_name': 'agent-a',
-      'agent-a:@zterm_agent_state': 'running',
-      'agent-a:@zterm_agent_heartbeat_ms': String(Date.now()),
-    };
-    const readOption = vi.fn((sessionName: string, option: string) => values[`${sessionName}:${option}`] || null);
-    const payload = buildSessionsCatalogPayload({
-      listTmuxSessions: () => ['agent-a'],
-      readTmuxSessionAgentOption: readOption,
-    });
-    expect(payload.sessionCatalog[0]?.sessionAgent).toMatchObject({
-      kind: 'running', agentName: 'agent-a', reason: 'fresh_agent_registration',
-    });
-    expect(readOption).toHaveBeenCalledWith('agent-a', SESSION_AGENT_OPTIONS.name);
-  });
-
   it('returns unknown for absent, disappeared, and stale registrations', () => {
     expect(probeDaemonSessionAgentStatus({ sessionName: 'missing', nowMs: 10_000, sessionExists: true }))
       .toEqual({ kind: 'unknown', reason: 'agent_registration_absent' });

@@ -834,13 +834,6 @@ export interface SessionActivity {
 export interface TerminalSessionCatalogEntry {
   name: string;
   backend: TerminalBackendKind;
-  sessionAgent?: TerminalSessionAgentProjection;
-}
-
-export interface TerminalSessionAgentProjection {
-  kind: 'running' | 'idle' | 'unknown' | 'error';
-  agentName?: string;
-  reason: string;
 }
 
 export interface TerminalSessionCatalog {

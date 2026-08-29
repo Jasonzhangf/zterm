@@ -489,8 +489,6 @@ const terminalMessageRuntime = createTerminalMessageRuntime({
     listTmuxSessions,
     listTerminalSessions,
     listTerminalSessionCatalog,
-    readTmuxSessionAgentOption: (sessionName, option) =>
-      runTmux(['show-options', '-qv', '-t', sessionName, option]).stdout.trim() || null,
     resolveTerminalSessionBackend,
     createDetachedTmuxSession,
     closeDetachedTerminalSession,
