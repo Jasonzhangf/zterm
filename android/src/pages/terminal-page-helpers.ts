@@ -4,7 +4,6 @@
  */
 import type { Session, TraversalRelayDeviceSnapshot } from '../lib/types';
 import type { ServerIdentityInput } from '../lib/server-identity';
-import type { TerminalSessionDrawerItem } from '../lib/plugin-session-drawer/session-drawer-contract';
 import {
   resolveTerminalSessionGroupSlotReplacement,
   type TerminalSessionGroupSlotIds,
@@ -19,24 +18,6 @@ export interface TerminalTabChromeItem {
   customName?: string;
   resolvedPath?: Session['resolvedPath'];
   resolvedRelayTransport?: Session['resolvedRelayTransport'];
-}
-
-export function normalizeDrawerStatus(state: Session['state'] | undefined): TerminalSessionDrawerItem['status'] {
-  switch (state) {
-    case 'connected':
-      return 'connected';
-    case 'connecting':
-    case 'reconnecting':
-      return 'connecting';
-    case 'disconnected':
-      return 'disconnected';
-    case 'closed':
-      return 'closed';
-    case 'error':
-      return 'error';
-    default:
-      return 'idle';
-  }
 }
 
 export function terminalPageHeaderSessionUiKey(session: Session | null | undefined) {

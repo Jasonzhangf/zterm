@@ -76,14 +76,13 @@ export interface TerminalQuickBarCapabilityProjection {
 }
 
 export function resolveTerminalQuickBarCapabilityProjection(
-  backend: Session['terminalBackend'] | undefined,
-  remoteWindowInputActive: boolean,
+  _backend: Session['terminalBackend'] | undefined,
+  _remoteWindowInputActive: boolean,
 ): TerminalQuickBarCapabilityProjection {
-  const nonHerdr = backend !== 'herdr';
   return {
-    fileTransferSupported: nonHerdr,
-    imagePasteSupported: nonHerdr || remoteWindowInputActive,
-    remoteScreenshotSupported: nonHerdr,
+    fileTransferSupported: true,
+    imagePasteSupported: true,
+    remoteScreenshotSupported: true,
   };
 }
 

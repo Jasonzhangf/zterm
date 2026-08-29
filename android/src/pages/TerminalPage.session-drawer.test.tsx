@@ -352,7 +352,7 @@ describe('TerminalPage portrait session drawer', () => {
     expect(Number.parseInt(stage.style.top, 10)).toBeGreaterThan(Number.parseInt(status.style.top, 10) + 34);
   });
 
-  it('projects Herdr file-transfer capability as unsupported', () => {
+  it('keeps file-transfer capability enabled for a session', () => {
     const session = makeSession('s1');
     session.terminalBackend = 'herdr';
     render(
@@ -375,7 +375,7 @@ describe('TerminalPage portrait session drawer', () => {
       />,
     );
 
-    expect(screen.getByTestId('terminal-quickbar').getAttribute('data-file-transfer-supported')).toBe('false');
+    expect(screen.getByTestId('terminal-quickbar').getAttribute('data-file-transfer-supported')).toBe('true');
     expect(screen.getByTestId('terminal-connection-status-backend').textContent).toBe('herdr');
   });
 

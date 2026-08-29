@@ -3,7 +3,6 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  normalizeDrawerStatus,
   resolveSessionInputEpoch,
   resolveTerminalSessionGroupActiveSessionProjection,
   resolveTerminalSessionGroupSlotIds,
@@ -12,13 +11,6 @@ import {
 } from './terminal-page-helpers';
 
 describe('terminal-page-helpers', () => {
-  it('normalizes drawer status from session state', () => {
-    expect(normalizeDrawerStatus('connected')).toBe('connected');
-    expect(normalizeDrawerStatus('reconnecting')).toBe('connecting');
-    expect(normalizeDrawerStatus('error')).toBe('error');
-    expect(normalizeDrawerStatus(undefined)).toBe('idle');
-  });
-
   it('derives stable header ui keys', () => {
     const session = { id: 's1', bridgeHost: 'h', bridgePort: 3333, sessionName: 'sh' } as never;
     const key = terminalPageHeaderSessionUiKey(session as never);

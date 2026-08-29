@@ -10,7 +10,6 @@ export interface TerminalSessionDrawerItem {
   stableKey: string;
   title: string;
   subtitle: string;
-  status: 'connected' | 'connecting' | 'disconnected' | 'closed' | 'error' | 'idle';
   paneLabel?: string | null;
   sessionGroupSlot?: TerminalSessionGroupSlotName | null;
   active?: boolean;

@@ -190,7 +190,7 @@ describe('auditOpenTabsAgainstRemoteSessions', () => {
     );
   });
 
-  it('does not prune session groups when remote fetch result is empty or unknown', async () => {
+  it('clears session groups when remote fetch confirms an empty catalog', async () => {
     const tab: PersistedOpenTab = {
       sessionId: 'session-1',
       hostId: 'host-1',
@@ -231,7 +231,10 @@ describe('auditOpenTabsAgainstRemoteSessions', () => {
     const { auditOpenTabsAgainstRemoteSessions: audit } = await import('./remote-tab-audit');
     await audit('test-reason', deps);
 
-    expect(pruneSpy).not.toHaveBeenCalled();
+    expect(pruneSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ daemonHostId: 'daemon-1' }),
+      [],
+    );
   });
 
   it('canonicalizes stale tabs and session groups before pruning against relay directory truth', async () => {

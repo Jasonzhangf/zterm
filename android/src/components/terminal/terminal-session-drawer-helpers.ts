@@ -3,7 +3,6 @@
  */
 import type { TerminalSessionGroupSlotName } from '../../lib/session-group-viewport';
 import type { TerminalSessionGroupLayoutAxis } from '../../lib/terminal-layout-profile';
-import type { TerminalSessionDrawerItem } from '../../lib/plugin-session-drawer/session-drawer-contract';
 
 export const DRAWER_WIDTH = '48vw';
 export const DRAWER_MAX_WIDTH = '187px';
@@ -11,21 +10,6 @@ export const SWIPE_CLOSE_THRESHOLD_PX = 48;
 export const SWIPE_CLOSE_VERTICAL_TOLERANCE_PX = 44;
 export const UNSCOPED_HOST_GROUP_KEY = '__unscoped__';
 export const UNSCOPED_HOST_GROUP_LABEL = '未绑定主机';
-
-export function resolveStatusTone(status: TerminalSessionDrawerItem['status']) {
-  switch (status) {
-    case 'connected':
-      return '#44e2a0';
-    case 'connecting':
-      return '#f5b659';
-    case 'disconnected':
-    case 'closed':
-    case 'error':
-      return '#ff727d';
-    default:
-      return 'var(--zterm-panel-muted)';
-  }
-}
 
 export function resolveSessionGroupSlotTone(
   slot: TerminalSessionGroupSlotName | null | undefined,
