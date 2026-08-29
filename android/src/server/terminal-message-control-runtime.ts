@@ -326,33 +326,14 @@ export function handleTmuxControlMessageRuntime(
   deps: TerminalMessageControlRuntimeDeps,
   connection: TerminalTransportConnection,
   message:
-    | { type: 'tmux-create-session'; payload: { sessionName: string; cwd?: string; terminalBackend?: 'tmux' | 'herdr' } }
-    | { type: 'tmux-rename-session'; payload: { sessionName: string; nextSessionName: string; terminalBackend?: 'tmux' | 'herdr' } }
-    | { type: 'tmux-kill-session'; payload: { sessionName: string; terminalBackend?: 'tmux' | 'herdr' } },
+    | { type: 'tmux-create-session'; payload: { sessionName: string; cwd?: string } }
+    | { type: 'tmux-rename-session'; payload: { sessionName: string; nextSessionName: string } }
+    | { type: 'tmux-kill-session'; payload: { sessionName: string } },
 ): DaemonControlHandlerResult {
   switch (message.type) {
-      case 'tmux-create-session':
-      {
-        // tmux-only architecture: a Herdr single-session backend cannot satisfy an
-        // explicit create intent. Reject early with a typed error so the client can
-        // branch on the cause instead of a generic tmux_create_failed projection.
-        if (message.payload.terminalBackend === 'herdr') {
-          deps.sendTransportMessage(connection.transport, {
-            type: 'error',
-            payload: {
-              message: 'Failed to create tmux session: Herdr single-session backend does not support session create',
-              code: 'herdr_session_action_unsupported',
-            },
-          });
-          return {
-            ok: false,
-            code: 'herdr_session_action_unsupported',
-            message: 'Herdr single-session backend does not support session create',
-          };
-        }
-      }
+    case 'tmux-create-session':
       try {
-        const backend = message.payload.terminalBackend || 'tmux';
+        const backend = 'tmux' as const;
         deps.createDetachedTmuxSession(message.payload.sessionName, message.payload.cwd, backend);
         deps.sendTransportMessage(connection.transport, {
           type: 'sessions',
@@ -372,48 +353,9 @@ export function handleTmuxControlMessageRuntime(
         };
       }
     case 'tmux-rename-session':
-      {
-        // Capability pre-check: Herdr is a single-session backend and never supports
-        // session rename. Reject early with a typed error so clients can branch on
-        // the specific cause instead of the generic tmux_rename_failed projection.
-        const renameBackend = message.payload.terminalBackend
-          || deps.resolveTerminalSessionBackend?.(message.payload.sessionName);
-        if (!renameBackend) {
-          deps.sendTransportMessage(connection.transport, {
-            type: 'error',
-            payload: {
-              message: `Failed to rename tmux session: terminal session backend resolver unavailable for ${message.payload.sessionName}`,
-              code: 'tmux_rename_failed',
-            },
-          });
-          return {
-            ok: false,
-            code: 'tmux_rename_failed',
-            message: `Failed to rename tmux session: terminal session backend resolver unavailable for ${message.payload.sessionName}`,
-          };
-        }
-        if (renameBackend === 'herdr') {
-          deps.sendTransportMessage(connection.transport, {
-            type: 'error',
-            payload: {
-              message: 'Failed to rename tmux session: Herdr single-session backend does not support session rename',
-              code: 'herdr_rename_unsupported',
-            },
-          });
-          return {
-            ok: false,
-            code: 'herdr_rename_unsupported',
-            message: 'Herdr single-session backend does not support session rename',
-          };
-        }
-      }
       try {
         const currentName = deps.sanitizeSessionName(message.payload.sessionName);
-        const backend = message.payload.terminalBackend
-          || deps.resolveTerminalSessionBackend?.(message.payload.sessionName);
-        if (!backend) {
-          throw new Error(`terminal session backend resolver unavailable for ${message.payload.sessionName}`);
-        }
+        const backend = 'tmux' as const;
         const nextName = deps.renameTmuxSession(message.payload.sessionName, message.payload.nextSessionName, backend);
         const currentKey = deps.getMirrorKey(currentName, backend);
         const nextKey = deps.getMirrorKey(nextName, backend);
@@ -452,32 +394,9 @@ export function handleTmuxControlMessageRuntime(
         };
       }
     case 'tmux-kill-session':
-      {
-        // tmux-only architecture: a Herdr single-session backend cannot satisfy an
-        // explicit kill intent. Reject early with a typed error so the client can
-        // branch on the cause instead of attempting an implicit Herdr cleanup.
-        if (message.payload.terminalBackend === 'herdr') {
-          deps.sendTransportMessage(connection.transport, {
-            type: 'error',
-            payload: {
-              message: 'Failed to kill tmux session: Herdr single-session backend does not support session kill',
-              code: 'herdr_session_action_unsupported',
-            },
-          });
-          return {
-            ok: false,
-            code: 'herdr_session_action_unsupported',
-            message: 'Herdr single-session backend does not support session kill',
-          };
-        }
-      }
       try {
         const sessionName = deps.sanitizeSessionName(message.payload.sessionName);
-        const killBackend = message.payload.terminalBackend
-          || deps.resolveTerminalSessionBackend?.(sessionName);
-        if (!killBackend) {
-          throw new Error(`terminal session backend resolver unavailable for ${sessionName}`);
-        }
+        const killBackend = 'tmux' as const;
         deps.closeDetachedTerminalSession(sessionName, killBackend);
         deps.scheduleEngine.markSessionMissing(sessionName, 'session killed', killBackend);
         const mirror = deps.mirrors.get(deps.getMirrorKey(sessionName, killBackend));
@@ -496,19 +415,7 @@ export function handleTmuxControlMessageRuntime(
         const err = error instanceof Error ? error.message : String(error);
         if (/can't find session|no server running|session not found/i.test(err)) {
           const sessionName = deps.sanitizeSessionName(message.payload.sessionName);
-          const killBackend = message.payload.terminalBackend
-            || deps.resolveTerminalSessionBackend?.(sessionName);
-          if (!killBackend) {
-            deps.sendTransportMessage(connection.transport, {
-              type: 'error',
-              payload: { message: err, code: 'tmux_kill_failed' },
-            });
-            return {
-              ok: false,
-              code: 'tmux_kill_failed',
-              message: err,
-            };
-          }
+          const killBackend = 'tmux' as const;
           // Killing an already absent session is an idempotent terminal state.
           // Publish the current daemon list so drawer projections remove stale rows.
           deps.scheduleEngine.markSessionMissing(sessionName, 'session already absent', killBackend);

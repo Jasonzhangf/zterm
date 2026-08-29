@@ -707,9 +707,9 @@ export type BridgeClientMessage =
   | { type: 'schedule-delete'; payload: { jobId: string } }
   | { type: 'schedule-toggle'; payload: { jobId: string; enabled: boolean } }
   | { type: 'schedule-run-now'; payload: { jobId: string } }
-  | { type: 'tmux-create-session'; payload: { sessionName: string; cwd?: string; terminalBackend?: TerminalBackendKind } }
-  | { type: 'tmux-rename-session'; payload: { sessionName: string; nextSessionName: string; terminalBackend?: TerminalBackendKind } }
-  | { type: 'tmux-kill-session'; payload: { sessionName: string; terminalBackend?: TerminalBackendKind } }
+  | { type: 'tmux-create-session'; payload: { sessionName: string; cwd?: string } }
+  | { type: 'tmux-rename-session'; payload: { sessionName: string; nextSessionName: string } }
+  | { type: 'tmux-kill-session'; payload: { sessionName: string } }
   | { type: 'input'; payload: string | TerminalReliableInputPayload }
   | { type: 'paste-image-start'; payload: PasteImageStartPayload }
   | { type: 'paste-image'; payload: PasteImagePayload }

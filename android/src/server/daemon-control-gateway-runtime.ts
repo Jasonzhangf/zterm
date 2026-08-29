@@ -37,15 +37,15 @@ export type DaemonScheduleControlMessage =
 export type DaemonTmuxControlMessage =
   | {
       readonly type: 'tmux-create-session';
-      readonly payload: { readonly sessionName: string; readonly cwd?: string; readonly terminalBackend?: 'tmux' | 'herdr' };
+      readonly payload: { readonly sessionName: string; readonly cwd?: string };
     }
   | {
       readonly type: 'tmux-rename-session';
-      readonly payload: { readonly sessionName: string; readonly nextSessionName: string; readonly terminalBackend?: 'tmux' | 'herdr' };
+      readonly payload: { readonly sessionName: string; readonly nextSessionName: string };
     }
   | {
       readonly type: 'tmux-kill-session';
-      readonly payload: { readonly sessionName: string; readonly terminalBackend?: 'tmux' | 'herdr' };
+      readonly payload: { readonly sessionName: string };
     };
 
 export type DaemonControlGatewayDeps = TerminalMessageControlRuntimeDeps;

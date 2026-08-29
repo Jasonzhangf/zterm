@@ -194,7 +194,7 @@ export function buildRoutePlanFromBridgeTarget(
   const normalizedTarget = normalizeBridgeTarget(target);
   return createRoutePlan(
     createSessionTargetIdentity({
-      backend: normalizedTarget.terminalBackend ?? 'tmux',
+      backend: 'tmux',
       daemonId: daemonId?.trim() || normalizedTarget.bridgeHost,
       sessionName,
     }),
@@ -227,7 +227,6 @@ export function toBridgeTarget(plan: RoutePlan): BridgeTarget {
   return {
     bridgeHost,
     bridgePort,
-    terminalBackend: plan.target.backend,
   };
 }
 

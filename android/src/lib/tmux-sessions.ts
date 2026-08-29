@@ -445,11 +445,8 @@ export function createTmuxSession(
 ) {
   const overrideUrl = typeof options === 'string' ? options : options?.overrideUrl;
   const cwd = typeof options === 'string' ? undefined : options?.cwd?.trim();
-  const payload: { sessionName: string; cwd?: string; terminalBackend?: 'tmux' | 'herdr' } = {
-    sessionName,
-  };
+  const payload: { sessionName: string; cwd?: string } = { sessionName };
   if (cwd) payload.cwd = cwd;
-  if (target.terminalBackend === 'herdr') payload.terminalBackend = 'herdr';
   const result = sendTmuxRequest(
     target,
     traversalSettings,

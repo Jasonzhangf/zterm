@@ -115,39 +115,23 @@ describe('terminal-message-control-runtime schedule errors', () => {
 describe('terminal-message-control-runtime tmux kill truth', () => {
   const connection = { transport: null } as unknown as TerminalTransportConnection;
 
-  it('republishes the selected backend catalog after creating a Herdr session', () => {
-    // tmux-only architecture: a Herdr single-session backend cannot satisfy an
-    // explicit create intent. The owner must reject early with a typed error
-    // and never reach the underlying tmux-binary executor.
+  it('creates a tmux session and republishes the catalog', () => {
     const deps = makeDeps({
       listTerminalSessionCatalog: vi.fn(() => [
         { name: 'tmux-default', backend: 'tmux' },
-        { name: 'hd-codex', backend: 'herdr' },
+        { name: 'tmux-new', backend: 'tmux' },
       ]),
       createDetachedTmuxSession: vi.fn(),
     });
 
     const result = handleTmuxControlMessageRuntime(deps, connection, {
       type: 'tmux-create-session',
-      payload: { sessionName: 'hd-codex', terminalBackend: 'herdr' },
+      payload: { sessionName: 'tmux-new' },
     });
 
-    expect(deps.createDetachedTmuxSession).not.toHaveBeenCalled();
-    expect(result).toEqual({
-      ok: false,
-      code: 'herdr_session_action_unsupported',
-      message: 'Herdr single-session backend does not support session create',
-    });
-    expect(deps.sendTransportMessage).toHaveBeenCalledWith(null, {
-      type: 'error',
-      payload: {
-        sessions: ['tmux-default', 'hd-codex'],
-        sessionCatalog: [
-          expect.objectContaining({ name: 'tmux-default', backend: 'tmux', observation: expect.objectContaining({ status: 'unknown' }) }),
-          { name: 'hd-codex', backend: 'herdr' },
-        ],
-      },
-    });
+    expect(deps.createDetachedTmuxSession).toHaveBeenCalledWith('tmux-new', undefined, 'tmux');
+    expect(result).toEqual({ ok: true });
+    expect(deps.sendTransportMessage).toHaveBeenCalledWith(null, expect.objectContaining({ type: 'sessions' }));
   });
 
   it('routes tmux rename through the resolved tmux backend', () => {
@@ -168,36 +152,33 @@ describe('terminal-message-control-runtime tmux kill truth', () => {
     expect(deps.renameTmuxSession).toHaveBeenCalledWith('original', 'renamed', 'tmux');
   });
 
-  it('projects unsupported Herdr rename as the typed herdr_rename_unsupported error', () => {
+  it('projects tmux-only rename failure with the typed tmux_rename_failed code', () => {
     const deps = makeDeps({
       resolveTerminalSessionBackend: vi.fn(),
       renameTmuxSession: vi.fn(() => {
-        throw new Error('selected terminal backend does not support session rename');
+        throw new Error('tmux rename-session permission denied');
       }),
     });
 
     const result = handleTmuxControlMessageRuntime(deps, connection, {
       type: 'tmux-rename-session',
       payload: {
-        sessionName: 'herdr-original',
-        nextSessionName: 'herdr-renamed',
-        terminalBackend: 'herdr',
+        sessionName: 'tmux-original',
+        nextSessionName: 'tmux-renamed',
       },
     });
 
-    // Capability pre-check rejects Herdr before renameTmuxSession is called.
-    expect(deps.renameTmuxSession).not.toHaveBeenCalled();
-    expect(deps.resolveTerminalSessionBackend).not.toHaveBeenCalled();
+    expect(deps.renameTmuxSession).toHaveBeenCalledWith('tmux-original', 'tmux-renamed', 'tmux');
     expect(result).toEqual({
       ok: false,
-      code: 'herdr_rename_unsupported',
-      message: 'Herdr single-session backend does not support session rename',
+      code: 'tmux_rename_failed',
+      message: 'Failed to rename tmux session: tmux rename-session permission denied',
     });
     expect(deps.sendTransportMessage).toHaveBeenCalledWith(null, {
       type: 'error',
       payload: {
-        code: 'herdr_rename_unsupported',
-        message: 'Failed to rename tmux session: Herdr single-session backend does not support session rename',
+        code: 'tmux_rename_failed',
+        message: 'Failed to rename tmux session: tmux rename-session permission denied',
       },
     });
   });
@@ -295,41 +276,30 @@ describe('terminal-message-control-runtime tmux kill truth', () => {
     });
   });
 
-  it('republishes the selected Herdr catalog when an already absent Herdr session is killed', () => {
-    // tmux-only architecture: a Herdr single-session backend cannot satisfy an
-    // explicit kill intent. The owner must reject early with a typed error
-    // and never reach closeDetachedTerminalSession or scheduleEngine.
+  it('treats an already absent tmux session as idempotently closed and republishes the catalog', () => {
     const deps = makeDeps({
       closeDetachedTerminalSession: vi.fn(() => {
-        throw new Error('herdr session not found: stale');
+        throw new Error("can't find session: stale");
       }),
       listTerminalSessionCatalog: vi.fn(() => [
         { name: 'tmux-live', backend: 'tmux' },
-        { name: 'herdr-live', backend: 'herdr' },
+        { name: 'tmux-stale', backend: 'tmux' },
       ]),
+      runTmux: vi.fn((args: string[]) => ({
+        ok: true as const,
+        stdout: args[0] === 'list-panes' ? '99\tcodex' : '',
+      })),
+      readProcessGroup: vi.fn(() => ({ groupId: 'pg-1', alive: true })),
     });
 
     const result = handleTmuxControlMessageRuntime(deps, connection, {
       type: 'tmux-kill-session',
-      payload: { sessionName: 'stale', terminalBackend: 'herdr' },
+      payload: { sessionName: 'stale' },
     });
 
-    expect(deps.closeDetachedTerminalSession).not.toHaveBeenCalled();
-    expect(deps.scheduleEngine.markSessionMissing).not.toHaveBeenCalled();
-    expect(result).toEqual({
-      ok: false,
-      code: 'herdr_session_action_unsupported',
-      message: 'Herdr single-session backend does not support session kill',
-    });
-    expect(deps.sendTransportMessage).toHaveBeenCalledWith(null, {
-      type: 'error',
-      payload: {
-        sessions: ['tmux-live', 'herdr-live'],
-        sessionCatalog: [
-          expect.objectContaining({ name: 'tmux-live', backend: 'tmux', observation: expect.objectContaining({ status: 'unknown' }) }),
-          { name: 'herdr-live', backend: 'herdr' },
-        ],
-      },
-    });
+    expect(deps.closeDetachedTerminalSession).toHaveBeenCalledWith('stale', 'tmux');
+    expect(deps.scheduleEngine.markSessionMissing).toHaveBeenCalledWith('stale', 'session already absent', 'tmux');
+    expect(result).toEqual({ ok: true });
+    expect(deps.sendTransportMessage).toHaveBeenCalledWith(null, expect.objectContaining({ type: 'sessions' }));
   });
 });
