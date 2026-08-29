@@ -244,8 +244,16 @@ export function SettingsPage({
     [manifestCandidates],
   );
   useEffect(() => {
-    setUpdateDraft(updatePreferences);
-  }, [updatePreferences]);
+    setUpdateDraft((current) => {
+      if (
+        current.manifestUrl.trim()
+        && current.manifestSource === 'user-saved'
+      ) {
+        return current;
+      }
+      return updatePreferences;
+    });
+  }, [updatePreferences.manifestUrl, updatePreferences.manifestSource]);
 
   useEffect(() => {
     const livePreviewPatch = livePreviewPatchRef.current;
