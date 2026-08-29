@@ -35,19 +35,14 @@ function toServerGroupKey(entry: Pick<SessionGroupHistory, 'daemonHostId' | 'bri
     bridgeHost: entry.bridgeHost,
     bridgePort: entry.bridgePort,
   });
-  return entry.terminalBackend === 'herdr'
-    ? `${ownerKey}::backend:herdr`
-    : ownerKey;
+  return ownerKey;
 }
 
 function sessionGroupOwnersMatch(
   left: Pick<SessionGroupHistory, 'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'terminalBackend'>,
   right: Pick<SessionGroupHistory, 'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'terminalBackend'>,
 ) {
-  return (
-    (left.terminalBackend || 'tmux') === (right.terminalBackend || 'tmux')
-    && sessionSemanticOwnersMatch(left, right)
-  );
+  return sessionSemanticOwnersMatch(left, right);
 }
 
 function canonicalizeSessionGroupOwner<T extends {
@@ -83,7 +78,7 @@ function normalizeGroupEntry(
   const daemonHostId = typeof candidate.daemonHostId === 'string' && candidate.daemonHostId.trim()
     ? candidate.daemonHostId.trim()
     : undefined;
-  const terminalBackend = candidate.terminalBackend === 'herdr' ? 'herdr' : 'tmux';
+  const terminalBackend = 'tmux' as const;
   const sessionNames = Array.isArray(candidate.sessionNames)
     ? candidate.sessionNames.map((item) => (typeof item === 'string' ? item.trim() : '')).filter(Boolean)
     : [];
