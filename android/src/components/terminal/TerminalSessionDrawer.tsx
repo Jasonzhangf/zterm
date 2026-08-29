@@ -90,7 +90,7 @@ function TerminalSessionDrawerComponent({
   };
 
   const openSlotMenu = (session: TerminalSessionDrawerItem, x: number, y: number) => {
-    if (!onAssignSessionGroupSlot || session.remoteMissing) {
+    if (!onAssignSessionGroupSlot) {
       return;
     }
     suppressNextClickRef.current = true;
@@ -1160,7 +1160,6 @@ function terminalSessionDrawerPropsEqual(
     if ((p.hostLabel ?? '') !== (n.hostLabel ?? '')) mismatchFields.push(`sessions[${i}].hostLabel`);
     if ((p.terminalBackend ?? '') !== (n.terminalBackend ?? '')) mismatchFields.push(`sessions[${i}].terminalBackend`);
     if ((p.sessionGroupSlot ?? '') !== (n.sessionGroupSlot ?? '')) mismatchFields.push(`sessions[${i}].sessionGroupSlot`);
-    if (Boolean(p.remoteMissing) !== Boolean(n.remoteMissing)) mismatchFields.push(`sessions[${i}].remoteMissing`);
     if (Boolean(p.active) !== Boolean(n.active)) mismatchFields.push(`sessions[${i}].active`);
   }
   const prevHosts = prev.hosts ?? [];

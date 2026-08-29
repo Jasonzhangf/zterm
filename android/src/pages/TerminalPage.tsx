@@ -75,7 +75,6 @@ import {
 import { getRelayRtcEndpointCandidates } from '../lib/session-picker';
 import { buildSessionSemanticOwnerKey, buildSessionSemanticReuseKey } from '../lib/session-semantic-identity';
 import { listOnlineTraversalRelayDaemonDevices } from '../lib/traversal-relay-devices';
-import { resolveSessionRemoteMissing } from '../lib/terminal-drawer-remote-missing';
 import { ImeAnchor } from '../plugins/ImeAnchorPlugin';
 import { registerClientDebugSnapshotSource } from '../lib/client-debug-snapshot';
 import { runtimeDebug } from '../lib/runtime-debug';
@@ -1129,7 +1128,6 @@ function TerminalPageComponent({
     const selectedIds = new Set(sessionPreviewSessions.map((session) => session.id));
     return sessions.filter((session) =>
       !selectedIds.has(session.id)
-      && !session.remoteMissing
       && session.state !== 'closed',
     );
   }, [sessionPreviewSessions, sessions]);
@@ -1256,7 +1254,6 @@ function TerminalPageComponent({
     const rowIdByStableSessionKey = new Map<string, string>();
     const items: TerminalSessionDrawerItem[] = [];
     for (const group of sessionGroups) {
-      const missing = new Set(group.missingSessionNames || []);
       const groupBackend = group.terminalBackend || 'tmux';
       const backendSuffix = groupBackend === 'herdr' ? '::backend:herdr' : '';
       const explicitDaemonHostId = group.daemonHostId?.trim() || '';
@@ -1270,7 +1267,7 @@ function TerminalPageComponent({
       };
       const ownerKey = buildSessionSemanticOwnerKey(canonicalGroup);
       for (const sessionName of group.sessionNames) {
-        if (!sessionName || missing.has(sessionName)) {
+        if (!sessionName) {
           continue;
         }
         const reuseKey = buildSessionSemanticReuseKey({
@@ -1440,7 +1437,6 @@ function TerminalPageComponent({
         title: liveSession.customName || liveSession.title || liveSession.sessionName,
         subtitle: `${item.hostLabel || item.hostKey || 'unknown server'} · ${liveSession.sessionName}${formatTerminalBackendSuffix(liveSession.terminalBackend || item.terminalBackend)}`,
         status: normalizeDrawerStatus(liveSession.state),
-        remoteMissing: resolveSessionRemoteMissing(liveSession, sessionGroups),
         paneLabel: undefined,
         sessionGroupSlot: resolveSessionGroupSlot(liveSession.id),
         active: activeSessionIds.has(liveSession.id),
@@ -1449,7 +1445,7 @@ function TerminalPageComponent({
     });
 
     return catalogItems;
-  }, [drawerRemoteSessions.items, renderedPaneSessions, resolveSessionGroupSlot, sessionGroups, sessions]);
+  }, [drawerRemoteSessions.items, renderedPaneSessions, resolveSessionGroupSlot, sessions]);
   useEffect(() => {
     if (!portraitSessionDrawerEnabled || sessionDrawerOpen || sessions.length > 0 || drawerHosts.length === 0) {
       return;
@@ -2824,7 +2820,6 @@ function TerminalPageComponent({
   const resolveSessionPreviewTargetFromDrawerSelection = useCallback((sessionId: string): SessionPreviewTarget | null => {
     const openSession = sessions.find((candidate) =>
       candidate.id === sessionId
-      && !candidate.remoteMissing
       && candidate.state !== 'closed',
     );
     if (openSession) {
@@ -2855,7 +2850,6 @@ function TerminalPageComponent({
 
     const materializedSession = sessions.find((candidate) =>
       candidate.id === materializedSessionId
-      && !candidate.remoteMissing
       && candidate.state !== 'closed',
     );
     if (materializedSession) {
@@ -2923,7 +2917,7 @@ function TerminalPageComponent({
 
   const handleAddSessionPreview = useCallback((sessionId: string) => {
     const session = sessions.find((item) =>
-      item.id === sessionId && !item.remoteMissing && item.state !== 'closed',
+      item.id === sessionId && item.state !== 'closed',
     );
     if (!session) {
       setSessionPreviewError('只能添加当前仍打开的 session。');

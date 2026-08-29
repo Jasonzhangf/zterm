@@ -152,50 +152,6 @@ describe('auditOpenTabsAgainstRemoteSessions', () => {
     );
   });
 
-  it('clears stale remoteMissing when a confirmed catalog contains the tab again', async () => {
-    const tab: PersistedOpenTab = {
-      sessionId: 'session-1', hostId: 'host-1', connectionName: 'test-host',
-      bridgeHost: '192.168.1.100', bridgePort: 8080, daemonHostId: 'daemon-1',
-      sessionName: 'my-session', authToken: 'token', createdAt: Date.now(),
-    };
-    const markSessionRemoteMissing = vi.fn();
-    deps.openTabStateRef.current.tabs = [tab];
-    deps.markSessionRemoteMissing = markSessionRemoteMissing;
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Map([['daemon:daemon-1', ['my-session', 'other-session']]]),
-    );
-
-    vi.resetModules();
-    vi.doMock('./open-tab-restore', () => ({ fetchRemoteTmuxSessionNamesByOwner: fetchMock }));
-    vi.doMock('./runtime-debug', () => ({ runtimeDebug: vi.fn() }));
-
-    const { auditOpenTabsAgainstRemoteSessions: audit } = await import('./remote-tab-audit');
-    await audit('session-picker-refresh', deps);
-
-    expect(markSessionRemoteMissing).toHaveBeenCalledWith('session-1', false);
-  });
-
-  it('preserves stale remoteMissing when the catalog is empty or unknown', async () => {
-    const tab: PersistedOpenTab = {
-      sessionId: 'session-1', hostId: 'host-1', connectionName: 'test-host',
-      bridgeHost: '192.168.1.100', bridgePort: 8080, daemonHostId: 'daemon-1',
-      sessionName: 'my-session', authToken: 'token', createdAt: Date.now(),
-    };
-    const markSessionRemoteMissing = vi.fn();
-    deps.openTabStateRef.current.tabs = [tab];
-    deps.markSessionRemoteMissing = markSessionRemoteMissing;
-    const fetchMock = vi.fn().mockResolvedValue(new Map([['daemon:daemon-1', []]]));
-
-    vi.resetModules();
-    vi.doMock('./open-tab-restore', () => ({ fetchRemoteTmuxSessionNamesByOwner: fetchMock }));
-    vi.doMock('./runtime-debug', () => ({ runtimeDebug: vi.fn() }));
-
-    const { auditOpenTabsAgainstRemoteSessions: audit } = await import('./remote-tab-audit');
-    await audit('session-picker-refresh', deps);
-
-    expect(markSessionRemoteMissing).not.toHaveBeenCalled();
-  });
-
   it('does not flag tabs as missing when no entry exists for that owner in the result map', async () => {
     const tab: PersistedOpenTab = {
       sessionId: 'session-1',

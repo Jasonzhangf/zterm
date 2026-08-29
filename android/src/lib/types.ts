@@ -238,7 +238,6 @@ export interface Session {
   customName?: string;       // 用户重命名的名称
   reconnectAttempt?: number;
   lastError?: string;
-  remoteMissing?: boolean;  // daemon confirms this tmux session no longer exists
   createdAt: number;         // 创建时间戳
 }
 
