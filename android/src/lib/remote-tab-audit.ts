@@ -119,22 +119,26 @@ export async function auditOpenTabsAgainstRemoteSessions(
     // Only flag as missing if we have a non-empty confirmed session list AND our tab is not in it
     return !new Set(remoteSessionNames).has(tab.sessionName.trim());
   });
-  if (missingTabs.length === 0) {
-    return;
+  if (missingTabs.length > 0) {
+    runtimeDebug('app.open-tabs.remote-session-missing', {
+      reason,
+      sessionIds: missingTabs.map((tab) => tab.sessionId),
+      targets: missingTabs.map((tab) => `${tab.bridgeHost}:${tab.bridgePort}:${tab.sessionName}`),
+    });
   }
-
-  runtimeDebug('app.open-tabs.remote-session-missing', {
-    reason,
-    sessionIds: missingTabs.map((tab) => tab.sessionId),
-    targets: missingTabs.map((tab) => `${tab.bridgeHost}:${tab.bridgePort}:${tab.sessionName}`),
-  });
 
   // Write remoteMissing back to session context so the drawer can grey out these sessions
   if (deps.markSessionRemoteMissing) {
-    const missingSessionIds = new Set(missingTabs.map((tab) => tab.sessionId));
-    const allTabSessionIds = new Set(currentTabs.map((tab) => tab.sessionId));
-    for (const sessionId of allTabSessionIds) {
-      deps.markSessionRemoteMissing(sessionId, missingSessionIds.has(sessionId));
+    for (const tab of currentTabs) {
+      const canonicalTab = canonicalizeAuditTarget(tab, deps.relayDevices || []);
+      const remoteSessionNames = sessionNamesByTarget.get(buildAuditOwnerKey(canonicalTab));
+      if (!remoteSessionNames || remoteSessionNames.length === 0) {
+        continue;
+      }
+      deps.markSessionRemoteMissing(
+        tab.sessionId,
+        !new Set(remoteSessionNames).has(tab.sessionName.trim()),
+      );
     }
   }
 }
