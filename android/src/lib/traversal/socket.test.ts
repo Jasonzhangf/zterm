@@ -308,7 +308,7 @@ describe('TraversalSocket reconnect', () => {
     expect(MockWebSocket.instances.some((ws) => ws.url.includes('100.66.1.82'))).toBe(true);
   });
 
-  it('moves from an unreachable LAN endpoint to Tailscale in the same transport generation', async () => {
+  it('does not open a LAN endpoint and uses Tailscale for remote websocket connection', async () => {
     const routeHealthCache = new TraversalRouteHealthCache();
     const socket = new TraversalSocket({
       bridgeHost: '',
@@ -339,23 +339,9 @@ describe('TraversalSocket reconnect', () => {
     });
     await flushMicrotasks();
 
-    const lanWs = MockWebSocket.instances.find((ws) => ws.url.includes('192.168.50.20'));
     const tailscaleWs = MockWebSocket.instances.find((ws) => ws.url.includes('100.66.1.82'));
-    expect(lanWs).toBeDefined();
+    expect(MockWebSocket.instances.some((ws) => ws.url.includes('192.168.50.20'))).toBe(false);
     expect(tailscaleWs).toBeDefined();
-
-    lanWs?.triggerClose(1006, 'LAN endpoint unreachable');
-    expect(routeHealthCache.get(
-      { accountId: 'user-1', daemonHostId: 'daemon-a' },
-      {
-        id: 'lan:192.168.50.20:3333',
-        path: 'ipv4',
-        endpoint: '192.168.50.20:3333',
-      },
-    )).toMatchObject({
-      status: 'failure',
-      error: 'LAN endpoint unreachable',
-    });
 
     tailscaleWs?.triggerOpen();
     expect(socket.getDiagnostics()).toMatchObject({
@@ -363,15 +349,12 @@ describe('TraversalSocket reconnect', () => {
       resolvedPath: 'tailscale',
       resolvedEndpoint: '100.66.1.82:3333',
     });
-    expect(socket.getDiagnostics().attempts.map((item) => item.path)).toEqual(
-      expect.arrayContaining(['ipv4', 'tailscale']),
-    );
-    expect(socket.getDiagnostics().attempts).toHaveLength(2);
+    expect(socket.getDiagnostics().attempts.map((item) => item.path)).toEqual(['tailscale']);
 
     socket.close();
   });
 
-  it('does not switch away from a reachable LAN endpoint', async () => {
+  it('does not treat a reachable LAN endpoint as a remote connection route', async () => {
     const socket = new TraversalSocket({
       bridgeHost: '',
       bridgePort: 3333,
@@ -395,16 +378,15 @@ describe('TraversalSocket reconnect', () => {
     }, settings);
     await flushMicrotasks();
 
-    const lanWs = MockWebSocket.instances.find((ws) => ws.url.includes('192.168.50.20'));
     const tailscaleWs = MockWebSocket.instances.find((ws) => ws.url.includes('100.66.1.82'));
-    lanWs?.triggerOpen();
+    tailscaleWs?.triggerOpen();
 
     expect(socket.getDiagnostics()).toMatchObject({
       stage: 'open',
-      resolvedPath: 'ipv4',
-      resolvedEndpoint: '192.168.50.20:3333',
+      resolvedPath: 'tailscale',
+      resolvedEndpoint: '100.66.1.82:3333',
     });
-    expect(tailscaleWs?.readyState).toBe(MockWebSocket.CLOSED);
+    expect(MockWebSocket.instances.some((ws) => ws.url.includes('192.168.50.20'))).toBe(false);
 
     socket.close();
   });

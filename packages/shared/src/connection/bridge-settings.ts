@@ -166,8 +166,21 @@ export function describeBridgePresetIdentity(server: Pick<BridgeServerPreset, 't
   };
 }
 
-function normalizeServerName(name: string, targetHost: string) {
-  return name.trim() || targetHost.trim() || 'Server';
+function normalizeServerName(name: string, targetHost: string, daemonName?: string) {
+  const explicitName = name.trim();
+  const stableName = daemonName?.trim() || '';
+  if (stableName && (!explicitName || isEndpointLikeServerName(explicitName, targetHost))) {
+    return stableName;
+  }
+  return explicitName || stableName || targetHost.trim() || 'Server';
+}
+
+function isEndpointLikeServerName(name: string, targetHost: string) {
+  const normalizedName = name.trim().toLowerCase();
+  const normalizedHost = targetHost.trim().toLowerCase();
+  return normalizedName === normalizedHost
+    || normalizedName === normalizedHost.replace(/^\[|\]$/g, '')
+    || /^\[?[0-9a-f:.]+\]?(:\d+)?$/i.test(normalizedName);
 }
 
 function asString(value: unknown) {
@@ -292,7 +305,11 @@ function canonicalBridgeServerAliases(servers: BridgeServerPreset[]) {
 function bridgeServerCanonicalityScore(server: BridgeServerPreset) {
   const relayDeviceId = server.relayDeviceId?.trim() || '';
   const relayHostId = resolveBridgePresetDaemonHostId(server);
-  return (relayDeviceId ? 1 : 0) + (relayDeviceId && relayHostId === relayDeviceId ? 2 : 0);
+  const stableName = server.relayDeviceName?.trim() || '';
+  const named = stableName && server.name.trim() === stableName ? 1 : 0;
+  return (relayDeviceId ? 1 : 0)
+    + (relayDeviceId && relayHostId === relayDeviceId ? 2 : 0)
+    + named;
 }
 
 export function canonicalizeBridgeServerPresets(servers: BridgeServerPreset[]): CanonicalizedBridgeServers {
@@ -340,18 +357,21 @@ export function canonicalizeBridgeServerPresets(servers: BridgeServerPreset[]): 
         }
       : server;
     const canonicalityScore = bridgeServerCanonicalityScore(server);
-    idAliases.set(server.id, canonicalized.id);
-
-    const existing = nextById.get(canonicalized.id);
+    const entityKey = canonicalHostId
+      ? `daemon:${canonicalHostId}`
+      : canonicalized.id;
+    const existing = nextById.get(entityKey);
     if (!existing) {
-      nextById.set(canonicalized.id, canonicalized);
-      scoreById.set(canonicalized.id, canonicalityScore);
+      nextById.set(entityKey, canonicalized);
+      scoreById.set(entityKey, canonicalityScore);
+      idAliases.set(server.id, canonicalized.id);
       continue;
     }
-    if (canonicalityScore > (scoreById.get(canonicalized.id) || 0)) {
-      nextById.set(canonicalized.id, canonicalized);
-      scoreById.set(canonicalized.id, canonicalityScore);
+    if (canonicalityScore > (scoreById.get(entityKey) || 0)) {
+      nextById.set(entityKey, canonicalized);
+      scoreById.set(entityKey, canonicalityScore);
     }
+    idAliases.set(server.id, nextById.get(entityKey)!.id);
   }
 
   for (const entry of aliasEntries) {
@@ -404,19 +424,27 @@ export function upsertBridgeServer(
   }
 
   const relayHostId = input.relayHostId?.trim() || undefined;
-  const id = buildBridgeServerPresetIdentityId(targetHost, targetPort, relayHostId);
+  const relayDeviceId = input.relayDeviceId?.trim() || undefined;
+  const existing = settings.servers.find((server) => (
+    (relayHostId && server.relayHostId?.trim() === relayHostId)
+    || (relayDeviceId && server.relayDeviceId?.trim() === relayDeviceId)
+  ));
+  const id = existing?.id || buildBridgeServerPresetIdentityId(targetHost, targetPort, relayHostId);
   const preset: BridgeServerPreset = {
     id,
-    name: normalizeServerName(input.name || '', targetHost),
+    name: normalizeServerName(
+      input.name || existing?.name || '',
+      targetHost,
+      input.relayDeviceName || existing?.relayDeviceName,
+    ),
     targetHost,
     targetPort,
     authToken,
     relayHostId,
-    relayDeviceId: input.relayDeviceId?.trim() || undefined,
+    relayDeviceId,
     relayDeviceName: input.relayDeviceName?.trim() || undefined,
   };
 
-  const existing = settings.servers.find((server) => server.id === id);
   const canonicalized = canonicalizeBridgeServerPresets(
     existing
       ? settings.servers.map((server) => (server.id === id ? { ...server, ...preset } : server))

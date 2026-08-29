@@ -63,13 +63,13 @@ describe('selectBestTraversalRoute', () => {
     ]);
   });
 
-  it('selects private LAN before WebRTC direct, Tailscale, and Relay when no route has recent health', () => {
+  it('does not give private LAN a priority bonus over remote routes', () => {
     const selection = selectBestTraversalRoute({
       candidates,
     });
 
-    expect(selection.selected).toMatchObject({ id: 'direct:lan', path: 'ipv4' });
-    expect(selection.diagnostics.find((item) => item.candidateId === 'direct:lan')?.reasons).toContain('ipv4:private-lan');
+    expect(selection.selected).toMatchObject({ id: 'direct:tailscale', path: 'tailscale' });
+    expect(selection.diagnostics.find((item) => item.candidateId === 'direct:lan')?.reasons).not.toContain('ipv4:private-lan');
   });
 
   it('selects Tailscale after the LAN candidate records an ordinary reachability failure', () => {
@@ -99,7 +99,7 @@ describe('selectBestTraversalRoute', () => {
     });
 
     expect(selection.selected).toMatchObject({ id: 'direct:tailscale', path: 'tailscale' });
-    expect(selection.diagnostics.find((item) => item.candidateId === 'direct:ipv4')?.reasons).toContain('ipv4:non-lan');
+    expect(selection.diagnostics.find((item) => item.candidateId === 'direct:ipv4')?.reasons).toContain('health:unknown');
   });
 
   it('uses a recent successful route lease before probing unknown higher-tier routes', () => {
