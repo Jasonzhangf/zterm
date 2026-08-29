@@ -332,6 +332,25 @@ export function handleTmuxControlMessageRuntime(
 ): DaemonControlHandlerResult {
   switch (message.type) {
       case 'tmux-create-session':
+      {
+        // tmux-only architecture: a Herdr single-session backend cannot satisfy an
+        // explicit create intent. Reject early with a typed error so the client can
+        // branch on the cause instead of a generic tmux_create_failed projection.
+        if (message.payload.terminalBackend === 'herdr') {
+          deps.sendTransportMessage(connection.transport, {
+            type: 'error',
+            payload: {
+              message: 'Failed to create tmux session: Herdr single-session backend does not support session create',
+              code: 'herdr_session_action_unsupported',
+            },
+          });
+          return {
+            ok: false,
+            code: 'herdr_session_action_unsupported',
+            message: 'Herdr single-session backend does not support session create',
+          };
+        }
+      }
       try {
         const backend = message.payload.terminalBackend || 'tmux';
         deps.createDetachedTmuxSession(message.payload.sessionName, message.payload.cwd, backend);
@@ -433,6 +452,25 @@ export function handleTmuxControlMessageRuntime(
         };
       }
     case 'tmux-kill-session':
+      {
+        // tmux-only architecture: a Herdr single-session backend cannot satisfy an
+        // explicit kill intent. Reject early with a typed error so the client can
+        // branch on the cause instead of attempting an implicit Herdr cleanup.
+        if (message.payload.terminalBackend === 'herdr') {
+          deps.sendTransportMessage(connection.transport, {
+            type: 'error',
+            payload: {
+              message: 'Failed to kill tmux session: Herdr single-session backend does not support session kill',
+              code: 'herdr_session_action_unsupported',
+            },
+          });
+          return {
+            ok: false,
+            code: 'herdr_session_action_unsupported',
+            message: 'Herdr single-session backend does not support session kill',
+          };
+        }
+      }
       try {
         const sessionName = deps.sanitizeSessionName(message.payload.sessionName);
         const killBackend = message.payload.terminalBackend

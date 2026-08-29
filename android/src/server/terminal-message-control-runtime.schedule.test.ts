@@ -116,6 +116,9 @@ describe('terminal-message-control-runtime tmux kill truth', () => {
   const connection = { transport: null } as unknown as TerminalTransportConnection;
 
   it('republishes the selected backend catalog after creating a Herdr session', () => {
+    // tmux-only architecture: a Herdr single-session backend cannot satisfy an
+    // explicit create intent. The owner must reject early with a typed error
+    // and never reach the underlying tmux-binary executor.
     const deps = makeDeps({
       listTerminalSessionCatalog: vi.fn(() => [
         { name: 'tmux-default', backend: 'tmux' },
@@ -124,14 +127,19 @@ describe('terminal-message-control-runtime tmux kill truth', () => {
       createDetachedTmuxSession: vi.fn(),
     });
 
-    handleTmuxControlMessageRuntime(deps, connection, {
+    const result = handleTmuxControlMessageRuntime(deps, connection, {
       type: 'tmux-create-session',
       payload: { sessionName: 'hd-codex', terminalBackend: 'herdr' },
     });
 
-    expect(deps.createDetachedTmuxSession).toHaveBeenCalledWith('hd-codex', undefined, 'herdr');
+    expect(deps.createDetachedTmuxSession).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      ok: false,
+      code: 'herdr_session_action_unsupported',
+      message: 'Herdr single-session backend does not support session create',
+    });
     expect(deps.sendTransportMessage).toHaveBeenCalledWith(null, {
-      type: 'sessions',
+      type: 'error',
       payload: {
         sessions: ['tmux-default', 'hd-codex'],
         sessionCatalog: [
@@ -241,6 +249,12 @@ describe('terminal-message-control-runtime tmux kill truth', () => {
       listTerminalSessionCatalog: vi.fn(() => [
         { name: 'live', backend: 'tmux' },
       ]),
+      resolveTerminalSessionBackend: vi.fn(() => 'tmux'),
+      runTmux: vi.fn((args: string[]) => ({
+        ok: true as const,
+        stdout: args[0] === 'list-panes' ? '99\tcodex' : '',
+      })),
+      readProcessGroup: vi.fn(() => ({ groupId: 'pg-1', alive: true })),
     });
 
     handleTmuxControlMessageRuntime(deps, connection, {
@@ -282,6 +296,9 @@ describe('terminal-message-control-runtime tmux kill truth', () => {
   });
 
   it('republishes the selected Herdr catalog when an already absent Herdr session is killed', () => {
+    // tmux-only architecture: a Herdr single-session backend cannot satisfy an
+    // explicit kill intent. The owner must reject early with a typed error
+    // and never reach closeDetachedTerminalSession or scheduleEngine.
     const deps = makeDeps({
       closeDetachedTerminalSession: vi.fn(() => {
         throw new Error('herdr session not found: stale');
@@ -292,14 +309,20 @@ describe('terminal-message-control-runtime tmux kill truth', () => {
       ]),
     });
 
-    handleTmuxControlMessageRuntime(deps, connection, {
+    const result = handleTmuxControlMessageRuntime(deps, connection, {
       type: 'tmux-kill-session',
       payload: { sessionName: 'stale', terminalBackend: 'herdr' },
     });
 
-    expect(deps.closeDetachedTerminalSession).toHaveBeenCalledWith('stale', 'herdr');
+    expect(deps.closeDetachedTerminalSession).not.toHaveBeenCalled();
+    expect(deps.scheduleEngine.markSessionMissing).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      ok: false,
+      code: 'herdr_session_action_unsupported',
+      message: 'Herdr single-session backend does not support session kill',
+    });
     expect(deps.sendTransportMessage).toHaveBeenCalledWith(null, {
-      type: 'sessions',
+      type: 'error',
       payload: {
         sessions: ['tmux-live', 'herdr-live'],
         sessionCatalog: [
