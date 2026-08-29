@@ -6,7 +6,6 @@ import {
   SWIPE_CLOSE_VERTICAL_TOLERANCE_PX,
   UNSCOPED_HOST_GROUP_KEY,
   UNSCOPED_HOST_GROUP_LABEL,
-  resolveStatusTone,
   resolveSessionGroupSlotTone,
 } from './terminal-session-drawer-helpers';
 import { getServerIdentityTone } from '../../lib/server-identity';
@@ -624,27 +623,6 @@ function TerminalSessionDrawerComponent({
                   }}
                 >
                   {session.subtitle}
-                </div>
-                <div
-                  style={{
-                    marginTop: '7px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    fontSize: '11px',
-                    color: 'var(--zterm-panel-text)',
-                  }}
-                >
-                  <span
-                    style={{
-                      width: '7px',
-                      height: '7px',
-                      borderRadius: '999px',
-                      flexShrink: 0,
-                      background: resolveStatusTone(session.status),
-                    }}
-                  />
-                  <span>{session.status}</span>
                 </div>
               </div>
               </button>

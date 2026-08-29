@@ -94,7 +94,7 @@ export async function auditOpenTabsAgainstRemoteSessions(
     }
     prunedOwnerKeys.add(ownerKey);
     const remoteSessionNames = sessionNamesByTarget.get(ownerKey);
-    if (!remoteSessionNames || remoteSessionNames.length === 0) {
+    if (!remoteSessionNames) {
       continue;
     }
     deps.pruneSessionGroupSelectionToRemoteTruth({

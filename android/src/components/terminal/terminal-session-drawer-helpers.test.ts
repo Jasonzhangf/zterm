@@ -6,7 +6,6 @@ import {
   DRAWER_MAX_WIDTH,
   DRAWER_WIDTH,
   resolveSessionGroupSlotTone,
-  resolveStatusTone,
   UNSCOPED_HOST_GROUP_KEY,
   UNSCOPED_HOST_GROUP_LABEL,
 } from './terminal-session-drawer-helpers';
@@ -17,12 +16,6 @@ describe('terminal-session-drawer-helpers', () => {
     expect(DRAWER_MAX_WIDTH).toBe('187px');
     expect(UNSCOPED_HOST_GROUP_KEY).toBe('__unscoped__');
     expect(UNSCOPED_HOST_GROUP_LABEL).toBe('未绑定主机');
-  });
-
-  it('resolves status tones', () => {
-    expect(resolveStatusTone('connected')).toBe('#44e2a0');
-    expect(resolveStatusTone('error')).toBe('#ff727d');
-    expect(resolveStatusTone('idle')).toContain('--zterm-panel-muted');
   });
 
   it('resolves session group slot tones with axis labels', () => {

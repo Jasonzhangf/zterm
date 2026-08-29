@@ -12,7 +12,6 @@ import { AttachmentDrawer } from '../components/terminal/AttachmentDrawer';
 import { RemoteScreenshotSheet } from '../components/terminal/RemoteScreenshotSheet';
 import { TerminalHeader } from '../components/terminal/TerminalHeader';
 import {
-  normalizeDrawerStatus,
   resolveSessionInputEpoch,
   resolveTerminalSessionGroupActiveSessionProjection,
   resolveTerminalSessionGroupSlotIds,
@@ -1351,7 +1350,6 @@ function TerminalPageComponent({
           // 用物理端点（bridgeHost:bridgePort）+ sessionName 作为纯稳定键。
           stableKey,
           title: liveSession?.customName || liveSession?.title || sessionName,
-          status: liveSession ? normalizeDrawerStatus(liveSession.state) : 'idle',
           paneLabel: undefined,
           sessionGroupSlot: null,
           active: false,
@@ -1436,7 +1434,6 @@ function TerminalPageComponent({
         ...item,
         title: liveSession.customName || liveSession.title || liveSession.sessionName,
         subtitle: `${item.hostLabel || item.hostKey || 'unknown server'} · ${liveSession.sessionName}${formatTerminalBackendSuffix(liveSession.terminalBackend || item.terminalBackend)}`,
-        status: normalizeDrawerStatus(liveSession.state),
         paneLabel: undefined,
         sessionGroupSlot: resolveSessionGroupSlot(liveSession.id),
         active: activeSessionIds.has(liveSession.id),

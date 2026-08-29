@@ -379,19 +379,23 @@ export function useSessionHistoryStorage(
         if (!sessionGroupOwnersMatch(item, canonicalTarget)) {
           return [item];
         }
-        const nextMissingSessionNames = item.sessionNames.filter((sessionName) => !normalizedRemoteSessionNames.has(sessionName));
-        const currentMissingKey = (item.missingSessionNames || []).join('\u0000');
-        const nextMissingKey = nextMissingSessionNames.join('\u0000');
+        if (normalizedRemoteSessionNames.size === 0) {
+          changed = true;
+          return [];
+        }
+        const nextSessionNames = [...normalizedRemoteSessionNames].sort((a, b) => a.localeCompare(b));
         const nextLastOpenedSessionName = item.lastOpenedSessionName && normalizedRemoteSessionNames.has(item.lastOpenedSessionName)
           ? item.lastOpenedSessionName
           : undefined;
-        if (currentMissingKey === nextMissingKey && item.lastOpenedSessionName === nextLastOpenedSessionName) {
+        if (item.sessionNames.join('\u0000') === nextSessionNames.join('\u0000')
+          && item.lastOpenedSessionName === nextLastOpenedSessionName) {
           return [item];
         }
         changed = true;
         return [{
           ...item,
-          missingSessionNames: nextMissingSessionNames,
+          sessionNames: nextSessionNames,
+          missingSessionNames: [],
           lastOpenedSessionName: nextLastOpenedSessionName,
         }];
       });

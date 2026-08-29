@@ -10,19 +10,19 @@ describe('resolveTerminalQuickBarCapabilityProjection', () => {
     });
   });
 
-  it('keeps Herdr file transfer and remote screenshot disabled without remote-window input', () => {
+  it('keeps file, image, and remote screenshot actions enabled for every session', () => {
     expect(resolveTerminalQuickBarCapabilityProjection('herdr', false)).toEqual({
-      fileTransferSupported: false,
-      imagePasteSupported: false,
-      remoteScreenshotSupported: false,
+      fileTransferSupported: true,
+      imagePasteSupported: true,
+      remoteScreenshotSupported: true,
     });
   });
 
-  it('enables Herdr image paste only while remote-window input is active', () => {
+  it('does not gate image actions on backend or remote-window input', () => {
     expect(resolveTerminalQuickBarCapabilityProjection('herdr', true)).toEqual({
-      fileTransferSupported: false,
+      fileTransferSupported: true,
       imagePasteSupported: true,
-      remoteScreenshotSupported: false,
+      remoteScreenshotSupported: true,
     });
   });
 });
