@@ -513,6 +513,33 @@ describe('useSessionHistoryStorage daemon-first truth', () => {
     }));
   });
 
+  it('clears missing markers when a later catalog confirms the sessions again', () => {
+    const { result } = renderHook(() => useSessionHistoryStorage());
+
+    act(() => {
+      result.current.setSessionGroupSelection({
+        name: 'Daemon A',
+        bridgeHost: '100.64.0.10',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-host-a',
+        sessionNames: ['main', 'logs'],
+      });
+      result.current.pruneSessionGroupSelectionToRemoteTruth(
+        { bridgeHost: '100.64.0.10', bridgePort: 3333, daemonHostId: 'daemon-host-a' },
+        [],
+      );
+      result.current.pruneSessionGroupSelectionToRemoteTruth(
+        { bridgeHost: '100.64.0.10', bridgePort: 3333, daemonHostId: 'daemon-host-a' },
+        ['main', 'logs'],
+      );
+    });
+
+    expect(result.current.sessionGroups[0]).toEqual(expect.objectContaining({
+      sessionNames: ['logs', 'main'],
+      missingSessionNames: [],
+    }));
+  });
+
   it('deletes a stored server group explicitly and persists the removal', () => {
     const { result } = renderHook(() => useSessionHistoryStorage());
 

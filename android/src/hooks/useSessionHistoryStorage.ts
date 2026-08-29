@@ -374,23 +374,20 @@ export function useSessionHistoryStorage(
         if (!sessionGroupOwnersMatch(item, canonicalTarget)) {
           return [item];
         }
-        if (normalizedRemoteSessionNames.size === 0) {
-          changed = true;
-          return [];
-        }
-        const nextSessionNames = [...normalizedRemoteSessionNames].sort((a, b) => a.localeCompare(b));
+        const nextMissingSessionNames = item.sessionNames
+          .filter((sessionName) => !normalizedRemoteSessionNames.has(sessionName))
+          .sort((a, b) => a.localeCompare(b));
         const nextLastOpenedSessionName = item.lastOpenedSessionName && normalizedRemoteSessionNames.has(item.lastOpenedSessionName)
           ? item.lastOpenedSessionName
           : undefined;
-        if (item.sessionNames.join('\u0000') === nextSessionNames.join('\u0000')
+        if ((item.missingSessionNames || []).join('\u0000') === nextMissingSessionNames.join('\u0000')
           && item.lastOpenedSessionName === nextLastOpenedSessionName) {
           return [item];
         }
         changed = true;
         return [{
           ...item,
-          sessionNames: nextSessionNames,
-          missingSessionNames: [],
+          missingSessionNames: nextMissingSessionNames,
           lastOpenedSessionName: nextLastOpenedSessionName,
         }];
       });
