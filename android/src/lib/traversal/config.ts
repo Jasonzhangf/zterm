@@ -1,7 +1,7 @@
 import { DEFAULT_TRAVERSAL_PATH_PRIORITY, normalizeTraversalPathPriority, type BridgeSettings } from '../bridge-settings';
 import { resolveBridgeEndpoint } from '@zterm/shared';
 import { buildBridgeUrlFromTarget } from '../bridge-url';
-import { isLikelyTailscaleHost } from '../network-target';
+import { isLikelyTailscaleHost, isPrivateLanIpv4Host, parseEndpointHost } from '../network-target';
 import type { Host } from '../types';
 import type {
   RtcTraversalCandidate,
@@ -263,7 +263,12 @@ export function buildTraversalPlan(
       addDirectCandidate(wsCandidates, seenWsUrls, directoryEndpointLocations, path, directCandidates[path], target.bridgePort, target.authToken);
     }
     const legacyPath = inferDirectPath(target.bridgeHost);
-    if (legacyPath) {
+    const legacyIsRemoteLan = Boolean(
+      target.relayHostId?.trim()
+      && legacyPath === 'ipv4'
+      && isPrivateLanIpv4Host(parseEndpointHost(target.bridgeHost)),
+    );
+    if (legacyPath && !legacyIsRemoteLan) {
       addDirectCandidate(wsCandidates, seenWsUrls, directoryEndpointLocations, legacyPath, target.bridgeHost, target.bridgePort, target.authToken);
     }
   }

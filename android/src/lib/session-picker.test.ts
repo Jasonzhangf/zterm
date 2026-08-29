@@ -273,6 +273,51 @@ describe('session-picker relay truth', () => {
     );
   });
 
+  it('does not select a LAN endpoint when a relay directory has remote candidates', () => {
+    const device: TraversalRelayDeviceSnapshot = {
+      deviceId: 'daemon-device-lan',
+      deviceName: 'LAN and Tailscale Daemon',
+      platform: 'darwin',
+      appVersion: '0.1.0',
+      client: { connected: true, lastSeenAt: '2026-06-28T00:00:00.000Z' },
+      daemon: {
+        hostId: 'daemon-host-lan',
+        connected: true,
+        lastSeenAt: '2026-06-28T00:00:00.000Z',
+        version: '0.1.0',
+        endpoints: [
+          {
+            id: 'lan:192.168.50.20:3333',
+            kind: 'lan',
+            host: '192.168.50.20',
+            port: 3333,
+            authRequired: true,
+            lastSeenAt: '2026-06-28T00:00:00.000Z',
+          },
+          {
+            id: 'tailscale:100.66.1.82:3333',
+            kind: 'tailscale',
+            host: '100.66.1.82',
+            port: 3333,
+            authRequired: true,
+            lastSeenAt: '2026-06-28T00:00:00.000Z',
+          },
+        ],
+        sessions: [],
+      },
+      updatedAt: '2026-06-28T00:00:00.000Z',
+    };
+
+    expect(resolveRelayDeviceBridgeTarget([], device)).toEqual(expect.objectContaining({
+      bridgeHost: '100.66.1.82',
+      bridgePort: 3333,
+      relayEndpointCandidates: expect.arrayContaining([
+        expect.objectContaining({ kind: 'lan', host: '192.168.50.20' }),
+        expect.objectContaining({ kind: 'tailscale', host: '100.66.1.82' }),
+      ]),
+    }));
+  });
+
   it('resolves a relay directory Home host row to its direct endpoint candidate before opening', () => {
     const target = buildBridgeTargetFromHost({
       id: 'relay-device:daemon-device-c:daemon-host-c',
