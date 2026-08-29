@@ -256,26 +256,6 @@ describe('TerminalSessionDrawer', () => {
     expect(onSelectSession).not.toHaveBeenCalled();
   });
 
-  it('keeps unavailable preview checkbox controls disabled', () => {
-    const onTogglePreviewSession = vi.fn();
-    render(
-      <TerminalSessionDrawer
-        open
-        sessions={[{ ...sessions[0], remoteMissing: true }]}
-        previewSelectionMode
-        onClose={vi.fn()}
-        onSelectSession={vi.fn()}
-        onCloseSession={vi.fn()}
-        onOpenQuickTabPicker={vi.fn()}
-        onTogglePreviewSession={onTogglePreviewSession}
-      />,
-    );
-
-    const checkbox = screen.getByTestId('terminal-session-drawer-preview-check-s1');
-    expect(checkbox.hasAttribute('disabled')).toBe(true);
-    fireEvent.click(checkbox);
-    expect(onTogglePreviewSession).not.toHaveBeenCalled();
-  });
 
   it('does not turn the drawer-opening gesture release into a session selection', () => {
     const onSelectSession = vi.fn();
@@ -330,35 +310,6 @@ describe('TerminalSessionDrawer', () => {
     expect(onSelectSession).not.toHaveBeenCalled();
   });
 
-  it('keeps an unavailable row non-selectable after a matching press', () => {
-    const onSelectSession = vi.fn();
-    const unavailableSessions = [{
-      ...sessions[0],
-      remoteMissing: true,
-    }];
-
-    render(
-      <TerminalSessionDrawer
-        open
-        sessions={unavailableSessions}
-        onClose={vi.fn()}
-        onSelectSession={onSelectSession}
-        onCloseSession={vi.fn()}
-        onOpenQuickTabPicker={vi.fn()}
-      />,
-    );
-
-    const target = screen.getByTestId('terminal-session-drawer-select-s1');
-    fireEvent.touchStart(target, {
-      touches: [{ clientX: 120, clientY: 100 }],
-    });
-    fireEvent.touchEnd(target, {
-      changedTouches: [{ clientX: 120, clientY: 100 }],
-    });
-    fireEvent.click(target, { detail: 1 });
-
-    expect(onSelectSession).not.toHaveBeenCalled();
-  });
 
   it('routes row close button to close only without selecting the session', () => {
     const onSelectSession = vi.fn();
@@ -810,35 +761,6 @@ describe('TerminalSessionDrawer', () => {
     expect(aNode.compareDocumentPosition(zNode) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('greys remote-missing sessions and blocks selection', () => {
-    const onSelectSession = vi.fn();
-    render(
-      <TerminalSessionDrawer
-        open
-        sessions={[
-          {
-            id: 'ghost',
-      stableKey: `stable-ghost`,
-            title: 'ghost',
-            subtitle: '100.127.23.27:3333 · ghost',
-            status: 'connected',
-            remoteMissing: true,
-            active: false,
-            hostKey: '100.127.23.27:3333',
-          },
-        ]}
-        onClose={vi.fn()}
-        onSelectSession={onSelectSession}
-        onCloseSession={vi.fn()}
-        onOpenQuickTabPicker={vi.fn()}
-      />,
-    );
-
-    const row = screen.getByTestId('terminal-session-drawer-row-ghost');
-    expect(row.textContent).toContain('unavailable');
-    fireEvent.click(screen.getByTestId('terminal-session-drawer-select-ghost'));
-    expect(onSelectSession).not.toHaveBeenCalled();
-  });
 
   it('shows explicit session-group slot labels and opens the slot menu on long press without selecting the row', async () => {
     vi.useFakeTimers();
@@ -1251,7 +1173,7 @@ describe('TerminalSessionDrawer', () => {
   });
 });
 
-describe('TerminalSessionDrawer availability retry surface', () => {
+describe('TerminalSessionDrawer catalog availability', () => {
   const baseSessions = [
     {
       id: 'tmux-usable',
@@ -1289,74 +1211,7 @@ describe('TerminalSessionDrawer availability retry surface', () => {
     },
   ];
 
-  it('does not render a retry button for usable tmux sessions', () => {
-    render(
-      <TerminalSessionDrawer
-        open
-        sessions={baseSessions}
-        onClose={vi.fn()}
-        onSelectSession={vi.fn()}
-        onCloseSession={vi.fn()}
-        onOpenQuickTabPicker={vi.fn()}
-        onRetrySessionAvailability={vi.fn()}
-      />,
-    );
-    expect(screen.queryByTestId('terminal-session-drawer-retry-tmux-usable')).toBeNull();
-    expect(screen.queryByTestId('terminal-session-drawer-retry-herdr-missing')).toBeTruthy();
-    expect(screen.queryByTestId('terminal-session-drawer-retry-tmux-closed')).toBeTruthy();
-  });
-
-  it('triggers onRetrySessionAvailability for an unavailable Herdr row but not for usable tmux rows', () => {
-    const onRetrySessionAvailability = vi.fn();
-    render(
-      <TerminalSessionDrawer
-        open
-        sessions={baseSessions}
-        onClose={vi.fn()}
-        onSelectSession={vi.fn()}
-        onCloseSession={vi.fn()}
-        onOpenQuickTabPicker={vi.fn()}
-        onRetrySessionAvailability={onRetrySessionAvailability}
-      />,
-    );
-    fireEvent.click(screen.getByTestId('terminal-session-drawer-retry-herdr-missing'));
-    expect(onRetrySessionAvailability).toHaveBeenCalledWith('herdr-missing');
-    expect(onRetrySessionAvailability).toHaveBeenCalledTimes(1);
-  });
-
-  it('disables the retry button while the row is reported as retrying and shows 重试中 label', () => {
-    render(
-      <TerminalSessionDrawer
-        open
-        sessions={baseSessions}
-        onClose={vi.fn()}
-        onSelectSession={vi.fn()}
-        onCloseSession={vi.fn()}
-        onOpenQuickTabPicker={vi.fn()}
-        onRetrySessionAvailability={vi.fn()}
-        retryingSessionIds={['herdr-missing']}
-      />,
-    );
-    const button = screen.getByTestId('terminal-session-drawer-retry-herdr-missing') as HTMLButtonElement;
-    expect(button.disabled).toBe(true);
-    expect(button.textContent).toBe('重试中');
-  });
-
-  it('keeps retry callback optional: drawer remains available without an explicit retry callback', () => {
-    render(
-      <TerminalSessionDrawer
-        open
-        sessions={baseSessions}
-        onClose={vi.fn()}
-        onSelectSession={vi.fn()}
-        onCloseSession={vi.fn()}
-        onOpenQuickTabPicker={vi.fn()}
-      />,
-    );
-    expect(screen.queryByTestId('terminal-session-drawer-retry-herdr-missing')).toBeNull();
-  });
-
-  it('does not mix tmux host identity with a Herdr row: missing row keeps the typed backend', () => {
+  it('keeps catalog rows selectable regardless of runtime status', () => {
     const onSelectSession = vi.fn();
     render(
       <TerminalSessionDrawer
@@ -1368,142 +1223,15 @@ describe('TerminalSessionDrawer availability retry surface', () => {
         onOpenQuickTabPicker={vi.fn()}
       />,
     );
-    const herdrRow = screen.getByTestId('terminal-session-drawer-row-herdr-missing');
-    expect(herdrRow.getAttribute('data-terminal-backend')).toBe('herdr');
-    expect(herdrRow.getAttribute('data-availability')).toBe('remote-missing');
-    const tmuxRow = screen.getByTestId('terminal-session-drawer-row-tmux-usable');
-    expect(tmuxRow.getAttribute('data-terminal-backend')).toBe('tmux');
-    expect(tmuxRow.getAttribute('data-availability')).toBe('available');
-    const closedRow = screen.getByTestId('terminal-session-drawer-row-tmux-closed');
-    expect(closedRow.getAttribute('data-availability')).toBe('closed');
-  });
-});
-
-describe('TerminalSessionDrawer availability layering', () => {
-  const baseSessions = [
-    {
-      id: 'tmux-usable',
-      stableKey: 'tmux-usable',
-      title: 'tmux-usable',
-      subtitle: 'Mac Studio · tmux-usable',
-      status: 'connected' as const,
-      active: true,
-      hostKey: 'daemon-a',
-      hostLabel: 'Mac Studio',
-      terminalBackend: 'tmux' as const,
-    },
-    {
-      id: 'tmux-closed',
-      stableKey: 'tmux-closed',
-      title: 'tmux-closed',
-      subtitle: 'Mac Studio · tmux-closed',
-      status: 'closed' as const,
-      active: false,
-      hostKey: 'daemon-a',
-      hostLabel: 'Mac Studio',
-      terminalBackend: 'tmux' as const,
-    },
-    {
-      id: 'herdr-closed',
-      stableKey: 'herdr-closed',
-      title: 'herdr-closed',
-      subtitle: 'Mac Studio · herdr-closed',
-      status: 'closed' as const,
-      active: false,
-      hostKey: 'daemon-a',
-      hostLabel: 'Mac Studio',
-      terminalBackend: 'herdr' as const,
-    },
-    {
-      id: 'herdr-missing',
-      stableKey: 'herdr-missing',
-      title: 'herdr-missing',
-      subtitle: 'Mac Studio · herdr-missing',
-      status: 'connected' as const,
-      active: false,
-      hostKey: 'daemon-a',
-      hostLabel: 'Mac Studio',
-      terminalBackend: 'herdr' as const,
-      remoteMissing: true,
-    },
-  ];
-
-  it('keeps backend identity separate from the truthful closed availability state', () => {
-    render(
-      <TerminalSessionDrawer
-        open
-        sessions={baseSessions}
-        onClose={vi.fn()}
-        onSelectSession={vi.fn()}
-        onCloseSession={vi.fn()}
-        onOpenQuickTabPicker={vi.fn()}
-        onRetrySessionAvailability={vi.fn()}
-      />,
-    );
-    const tmuxRow = screen.getByTestId('terminal-session-drawer-row-tmux-closed');
-    const herdrRow = screen.getByTestId('terminal-session-drawer-row-herdr-closed');
-    expect(tmuxRow.getAttribute('data-terminal-backend')).toBe('tmux');
-    expect(herdrRow.getAttribute('data-terminal-backend')).toBe('herdr');
-    expect(tmuxRow.getAttribute('data-availability')).toBe('closed');
-    expect(herdrRow.getAttribute('data-availability')).toBe('closed');
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-select-herdr-missing'));
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-select-tmux-closed'));
+    expect(onSelectSession).toHaveBeenNthCalledWith(1, 'herdr-missing');
+    expect(onSelectSession).toHaveBeenNthCalledWith(2, 'tmux-closed');
   });
 
-  it('keeps closed rows visible (not greyed out)', () => {
-    render(
-      <TerminalSessionDrawer
-        open
-        sessions={baseSessions}
-        onClose={vi.fn()}
-        onSelectSession={vi.fn()}
-        onCloseSession={vi.fn()}
-        onOpenQuickTabPicker={vi.fn()}
-        onRetrySessionAvailability={vi.fn()}
-      />,
-    );
-    const tmuxRow = screen.getByTestId('terminal-session-drawer-row-tmux-closed') as HTMLDivElement;
-    const herdrRow = screen.getByTestId('terminal-session-drawer-row-herdr-closed') as HTMLDivElement;
-    expect(tmuxRow.style.opacity).not.toBe('0.4');
-    expect(herdrRow.style.opacity).not.toBe('0.4');
-  });
-
-  it('still greys remote-missing rows but exposes the retry affordance', () => {
-    render(
-      <TerminalSessionDrawer
-        open
-        sessions={baseSessions}
-        onClose={vi.fn()}
-        onSelectSession={vi.fn()}
-        onCloseSession={vi.fn()}
-        onOpenQuickTabPicker={vi.fn()}
-        onRetrySessionAvailability={vi.fn()}
-      />,
-    );
-    const missing = screen.getByTestId('terminal-session-drawer-row-herdr-missing') as HTMLDivElement;
-    expect(missing.style.opacity).toBe('0.4');
-    const retry = screen.getByTestId('terminal-session-drawer-retry-herdr-missing');
-    expect(retry.getAttribute('data-retryable')).toBe('false');
-  });
-
-  it('surfaces the retry button for closed rows with data-retryable=true', () => {
-    const onRetrySessionAvailability = vi.fn();
-    render(
-      <TerminalSessionDrawer
-        open
-        sessions={baseSessions}
-        onClose={vi.fn()}
-        onSelectSession={vi.fn()}
-        onCloseSession={vi.fn()}
-        onOpenQuickTabPicker={vi.fn()}
-        onRetrySessionAvailability={onRetrySessionAvailability}
-      />,
-    );
-    const tmuxRetry = screen.getByTestId('terminal-session-drawer-retry-tmux-closed');
-    expect(tmuxRetry.getAttribute('data-retryable')).toBe('true');
-    const herdrRetry = screen.getByTestId('terminal-session-drawer-retry-herdr-closed');
-    expect(herdrRetry.getAttribute('data-retryable')).toBe('true');
-    fireEvent.click(tmuxRetry);
-    fireEvent.click(herdrRetry);
-    expect(onRetrySessionAvailability).toHaveBeenCalledWith('tmux-closed');
-    expect(onRetrySessionAvailability).toHaveBeenCalledWith('herdr-closed');
+  it('renders catalog status without using it for availability', () => {
+    render(<TerminalSessionDrawer open sessions={baseSessions} onClose={vi.fn()} onSelectSession={vi.fn()} onCloseSession={vi.fn()} onOpenQuickTabPicker={vi.fn()} />);
+    expect(screen.getByTestId('terminal-session-drawer-row-herdr-missing').style.opacity).toBe('1');
+    expect(screen.queryByTestId('terminal-session-drawer-retry-herdr-missing')).toBeNull();
   });
 });
