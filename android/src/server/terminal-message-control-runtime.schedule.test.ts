@@ -135,7 +135,7 @@ describe('terminal-message-control-runtime tmux kill truth', () => {
       payload: {
         sessions: ['tmux-default', 'hd-codex'],
         sessionCatalog: [
-          { name: 'tmux-default', backend: 'tmux' },
+          expect.objectContaining({ name: 'tmux-default', backend: 'tmux', observation: expect.objectContaining({ status: 'unknown' }) }),
           { name: 'hd-codex', backend: 'herdr' },
         ],
       },
@@ -253,7 +253,7 @@ describe('terminal-message-control-runtime tmux kill truth', () => {
       type: 'sessions',
       payload: {
         sessions: ['live'],
-        sessionCatalog: [{ name: 'live', backend: 'tmux' }],
+        sessionCatalog: [expect.objectContaining({ name: 'live', backend: 'tmux', observation: expect.objectContaining({ status: 'unknown' }) })],
       },
     });
     expect(deps.sendTransportMessage).not.toHaveBeenCalledWith(null, expect.objectContaining({ type: 'error' }));
@@ -303,7 +303,7 @@ describe('terminal-message-control-runtime tmux kill truth', () => {
       payload: {
         sessions: ['tmux-live', 'herdr-live'],
         sessionCatalog: [
-          { name: 'tmux-live', backend: 'tmux' },
+          expect.objectContaining({ name: 'tmux-live', backend: 'tmux', observation: expect.objectContaining({ status: 'unknown' }) }),
           { name: 'herdr-live', backend: 'herdr' },
         ],
       },
