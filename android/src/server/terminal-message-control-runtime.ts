@@ -5,7 +5,6 @@ import type { ScheduleJob } from '../../../packages/shared/src/schedule/types.ts
 import type {
   BridgeServerMessage as ServerMessage,
   HostConfigMessage,
-  TerminalSessionAgentStatus,
   TerminalSessionCatalogEntry,
   TerminalTransportServerFrame,
 } from '@zterm/shared/protocol';
@@ -45,7 +44,6 @@ export interface TerminalMessageControlRuntimeDeps {
   listTmuxSessions: (backend?: 'tmux' | 'herdr') => string[];
   listTerminalSessions?: () => string[];
   listTerminalSessionCatalog?: () => TerminalSessionCatalogEntry[];
-  probeSessionAgentStatus?: (entry: TerminalSessionCatalogEntry) => TerminalSessionAgentStatus;
   resolveTerminalSessionBackend?: (sessionName: string) => 'tmux' | 'herdr';
   createDetachedTmuxSession: (sessionName?: string, cwd?: string, backend?: 'tmux' | 'herdr') => string;
   closeDetachedTerminalSession: (sessionName: string, backend?: 'tmux' | 'herdr') => void;

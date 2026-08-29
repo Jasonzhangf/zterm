@@ -4554,11 +4554,6 @@
     },
     {
       "from_module": "daemon.runtime_entry",
-      "to_module": "daemon.session_catalog",
-      "status": "active"
-    },
-    {
-      "from_module": "daemon.runtime_entry",
       "to_module": "shared.debug_contract",
       "status": "active"
     }

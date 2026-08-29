@@ -834,17 +834,6 @@ export interface SessionActivity {
 export interface TerminalSessionCatalogEntry {
   name: string;
   backend: TerminalBackendKind;
-  agent?: TerminalSessionAgentStatus;
-}
-
-export type TerminalSessionAgentStatusKind = 'running' | 'idle' | 'unknown' | 'error';
-
-/** Daemon-owned Herdr agent projection; clients must not infer this from terminal bytes. */
-export interface TerminalSessionAgentStatus {
-  kind: TerminalSessionAgentStatusKind;
-  name?: string;
-  session?: string;
-  reason?: string;
 }
 
 export interface TerminalSessionCatalog {
