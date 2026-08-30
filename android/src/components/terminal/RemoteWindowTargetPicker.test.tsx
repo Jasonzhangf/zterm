@@ -45,6 +45,29 @@ describe('RemoteWindowTargetPicker view owner', () => {
       onClose={vi.fn()}
     />);
     expect(screen.getByTestId('remote-window-picker-loading')).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: '远程窗口' }).getAttribute('aria-busy')).toBe('true');
+    expect(screen.getByRole('dialog', { name: '远程窗口' }).getAttribute('aria-modal')).toBe('true');
+    expect(screen.getByRole('button', { name: '刷新远程窗口列表' }).getAttribute('aria-busy')).toBe('true');
+    expect(screen.getByRole('button', { name: '刷新远程窗口列表' }).textContent).toBe('');
+    expect(Number.parseFloat(screen.getByRole('button', { name: '刷新远程窗口列表' }).style.minHeight)).toBe(48);
+  });
+
+  it('offers an explicit recovery action when the catalog is empty', () => {
+    const onRefresh = vi.fn();
+    render(<RemoteWindowTargetPicker
+      phase="pickerOpen"
+      targets={[]}
+      errors={[]}
+      errorMessage={null}
+      catalogRefreshing={false}
+      itermPaneTargetsExpanded={false}
+      onToggleItermPaneTargets={vi.fn()}
+      onSelectTarget={vi.fn()}
+      onRefresh={onRefresh}
+      onClose={vi.fn()}
+    />);
+    fireEvent.click(screen.getByRole('button', { name: '重新加载远程窗口列表' }));
+    expect(onRefresh).toHaveBeenCalledTimes(1);
   });
 
   it('uses sibling buttons and emits selection, refresh, close, and pane-toggle intents', () => {

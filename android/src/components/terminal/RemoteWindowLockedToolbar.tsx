@@ -7,7 +7,6 @@ export interface RemoteWindowLockedToolbarProps {
   appSwitchContent: ReactNode;
   appSwitchOpen: boolean;
   dragHandleProps: HTMLAttributes<HTMLDivElement>;
-  gestureGuide: string;
   inputMode: 'touch' | 'mouse';
   inputSupported: boolean;
   mode: 'floating' | 'fullscreen';
@@ -31,7 +30,6 @@ export const RemoteWindowLockedToolbar = forwardRef<HTMLDivElement, RemoteWindow
   appSwitchContent,
   appSwitchOpen,
   dragHandleProps,
-  gestureGuide,
   inputMode,
   inputSupported,
   mode,
@@ -50,24 +48,29 @@ export const RemoteWindowLockedToolbar = forwardRef<HTMLDivElement, RemoteWindow
   onToggleMore,
 }, ref) {
   return (
-    <div ref={ref} data-testid="remote-window-locked-toolbar" style={styles.lockedToolbar}>
+    <div
+      ref={ref}
+      role="toolbar"
+      aria-label="远程窗口控制"
+      data-testid="remote-window-locked-toolbar"
+      style={styles.lockedToolbar}
+    >
       <div {...dragHandleProps} data-testid="remote-window-drag-handle">
         <div style={styles.lockedTitle}>
           <span style={styles.targetKind}>{targetKindLabel}</span>
-          <span data-testid="remote-window-input-mode" style={styles.inputModeBadge}>
-            {inputSupported ? '可操作' : '只读'}
-          </span>
           <span style={styles.activeAppSwitch}>
             <button
               type="button"
               data-testid="remote-window-active-app-switch-button"
               data-no-drag="true"
+              aria-label={`切换远程窗口，当前 ${activeTitle}`}
               aria-haspopup="listbox"
               aria-expanded={appSwitchOpen ? 'true' : 'false'}
               onClick={onToggleAppSwitch}
               style={styles.activeAppSwitchButton}
             >
-              {activeTitle}
+              <span style={styles.activeAppSwitchTitle}>{activeTitle}</span>
+              <RemoteWindowIcon name="chevronDown" />
             </button>
             {appSwitchOpen ? appSwitchContent : null}
           </span>
@@ -82,7 +85,7 @@ export const RemoteWindowLockedToolbar = forwardRef<HTMLDivElement, RemoteWindow
               <RemoteWindowIcon name="fullscreen" />
             </button>
           )}
-          <button type="button" aria-label="关闭远程窗口" onClick={onClose} style={styles.headerIconButton}>
+          <button type="button" aria-label="关闭远程窗口" onClick={onClose} style={styles.headerCloseButton}>
             <RemoteWindowIcon name="close" />
           </button>
         </div>
@@ -96,7 +99,10 @@ export const RemoteWindowLockedToolbar = forwardRef<HTMLDivElement, RemoteWindow
           onClick={onToggleInputMode}
           style={inputMode === 'touch' ? styles.headerModeButtonActive : styles.headerModeButton}
         >
-          {inputMode === 'touch' ? '触控' : '鼠标'}
+          <span>{inputMode === 'touch' ? '触控' : '鼠标'}</span>
+          <span data-testid="remote-window-input-mode" style={styles.inputModeStatus}>
+            {inputSupported ? '可操作' : '只读'}
+          </span>
         </button>
         <button
           type="button"
@@ -125,13 +131,14 @@ export const RemoteWindowLockedToolbar = forwardRef<HTMLDivElement, RemoteWindow
           aria-label="更多远程窗口控制"
           aria-expanded={moreOpen ? 'true' : 'false'}
           onClick={onToggleMore}
-          style={moreOpen ? styles.headerIconButtonBusy : styles.headerIconButton}
+          style={moreOpen
+            ? { ...styles.headerIconButton, ...styles.headerIconButtonBusy }
+            : styles.headerIconButton}
         >
           <RemoteWindowIcon name="more" />
         </button>
       </div>
-      <div data-testid="remote-window-gesture-guide" style={styles.gestureGuide}>{gestureGuide}</div>
-      {moreOpen ? moreContent : null}
+      {moreContent}
     </div>
   );
 });

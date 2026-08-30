@@ -2902,8 +2902,10 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
 
   const lockedMoreContent = state.phase === 'targetLocked' ? (
     <RemoteWindowMorePanel
+      open={streamStatusOpen}
       fullscreen={state.mode === 'fullscreen'}
       bitratePreset={bitratePreset}
+      gestureGuide={inputMode === 'touch' ? '触控：拖动滚动，双指滚动或缩放' : '鼠标：移动指针，按住拖拽'}
       streamStatusText={`串流：${state.streamStatus === 'streaming' ? '已连接' : state.streamStatus} · 画质：${qualityApplyState.phase === 'applied' ? `${qualityApplyState.applied.maxBitrateBps / 1_000_000} Mbps` : qualityApplyState.phase === 'requested' ? '正在应用' : qualityApplyState.phase === 'rejected' ? `失败：${qualityApplyState.message}` : adaptiveBitratePreset || '-'}`}
       networkStatusText={`网络：${networkQuality?.effectiveType || '未知'}${networkQuality?.rttMs ? ` · RTT ${networkQuality.rttMs}ms` : ''}`}
       onToggleFullscreenDisplayMode={handleToggleFullscreenDisplayMode}
@@ -2962,7 +2964,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
               userSelect: 'none',
             },
           }}
-          gestureGuide={inputMode === 'touch' ? '触控：拖动滚动，双指滚动或缩放' : '鼠标：移动指针，按住拖拽'}
           inputMode={inputMode}
           inputSupported={isRemoteWindowInputSupported(state.target)}
           mode={state.mode}

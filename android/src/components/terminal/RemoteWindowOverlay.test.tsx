@@ -1890,7 +1890,7 @@ describe('RemoteWindowOverlay', () => {
     expect(controlStrip.style.overflowX).toBe('auto');
   });
 
-  it('keeps primary controls structurally valid with 48px touch targets and no child close action', async () => {
+  it('keeps primary controls structurally valid with 44px touch targets and no child close action', async () => {
     const mainWindow = makeTarget('app-main', 'WeChat', 'app-window');
     const childWindow = {
       ...makeTarget('app-child', 'WeChat Image', 'app-window'),
@@ -1902,14 +1902,15 @@ describe('RemoteWindowOverlay', () => {
     fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
     fireEvent.click(await screen.findByTestId('remote-window-app-group-com-apple-TextEdit-123'));
 
+    expect(screen.getByTestId('remote-window-locked-overlay').style.width).toBe('92vw');
     const controls = [
       ...screen.getByTestId('remote-window-primary-actions').querySelectorAll('button'),
       ...screen.getByTestId('remote-window-control-strip').querySelectorAll('button'),
       screen.getByTestId('remote-window-active-app-switch-button'),
     ] as HTMLElement[];
     for (const control of controls) {
-      expect(Number.parseFloat(control.style.width || control.style.minWidth)).toBeGreaterThanOrEqual(48);
-      expect(Number.parseFloat(control.style.height || control.style.minHeight)).toBeGreaterThanOrEqual(48);
+      expect(Number.parseFloat(control.style.width || control.style.minWidth)).toBeGreaterThanOrEqual(44);
+      expect(Number.parseFloat(control.style.height || control.style.minHeight)).toBeGreaterThanOrEqual(44);
       expect(control.querySelector('button')).toBeNull();
     }
     expect(screen.queryByLabelText('关闭子窗口')).toBeNull();

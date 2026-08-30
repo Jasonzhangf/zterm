@@ -2,6 +2,14 @@
   box-sizing: border-box;
 }
 
+:root {
+  --panel-open-dur: 400ms;
+  --panel-close-dur: 350ms;
+  --panel-translate-y: 100px;
+  --panel-blur: 2px;
+  --panel-ease: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
 html, body, #root {
   margin: 0;
   padding: 0;
@@ -93,6 +101,32 @@ label:focus-visible {
   outline-offset: 2px;
 }
 
+.t-panel-slide {
+  transform: translateY(var(--panel-translate-y));
+  opacity: 0;
+  filter: blur(var(--panel-blur));
+  pointer-events: none;
+  transition:
+    transform var(--panel-close-dur) var(--panel-ease),
+    opacity   var(--panel-close-dur) var(--panel-ease),
+    filter    var(--panel-close-dur) var(--panel-ease);
+  will-change: transform, opacity, filter;
+}
+.t-panel-slide[data-open="true"] {
+  transform: translateY(0);
+  opacity: 1;
+  filter: blur(0);
+  pointer-events: auto;
+  transition:
+    transform var(--panel-open-dur) var(--panel-ease),
+    opacity   var(--panel-open-dur) var(--panel-ease),
+    filter    var(--panel-open-dur) var(--panel-ease);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .t-panel-slide { transition: none !important; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -139,7 +173,6 @@ label:focus-visible {
 
 .zterm-settings-group[open] > summary { border-bottom: none; }
 .zterm-settings-group[open] > summary .zterm-settings-chevron { transform: rotate(90deg); }
-}
 
 /* Shared tactile surface treatment for terminal chrome. Keep the terminal canvas
  * untouched so renderer colors and selection behavior remain authoritative. */

@@ -8,6 +8,7 @@ import {
   clampFullscreenViewport,
   formatTargetKind,
   resolveAspectRect,
+  resolveFloatingOverlaySizing,
   safeRemoteWindowGroupId,
 } from './remote-window-overlay-helpers';
 
@@ -28,6 +29,21 @@ describe('remote-window-overlay-helpers', () => {
     expect(rect.height).toBe(50);
     expect(rect.left).toBe(0);
     expect(rect.top).toBe(25);
+  });
+
+  it('uses the available phone width for floating remote windows', () => {
+    expect(resolveFloatingOverlaySizing({ width: 800, height: 600 })).toEqual({
+      width: '92vw',
+      maxWidth: '420px',
+    });
+    expect(resolveFloatingOverlaySizing({ width: 1600, height: 600 })).toEqual({
+      width: '92vw',
+      maxWidth: '480px',
+    });
+    expect(resolveFloatingOverlaySizing({ width: 600, height: 1000 })).toEqual({
+      width: '76vw',
+      maxWidth: '264px',
+    });
   });
 
   it('keeps fullscreen viewports clamped to the surface', () => {

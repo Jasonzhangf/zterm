@@ -270,13 +270,13 @@ export function resolveAnchoredFullscreenViewportScale(options: {
 export function resolveFloatingOverlaySizing(source: { width: number; height: number }): Pick<CSSProperties, 'width' | 'maxWidth'> {
   const aspectRatio = Math.max(0.2, Math.min(5, source.width / Math.max(1, source.height)));
   if (aspectRatio < 0.85) {
-    const maxWidthPx = Math.round(clampNumber(aspectRatio * 420, 220, 320));
-    return { width: '64vw', maxWidth: `${maxWidthPx}px` };
+    const maxWidthPx = Math.round(clampNumber(aspectRatio * 440, 260, 340));
+    return { width: '76vw', maxWidth: `${maxWidthPx}px` };
   }
   if (aspectRatio > 1.55) {
-    return { width: '84vw', maxWidth: '420px' };
+    return { width: '92vw', maxWidth: '480px' };
   }
-  return { width: '74vw', maxWidth: '360px' };
+  return { width: '92vw', maxWidth: '420px' };
 }
 
 export function resolveStartedCaptureFrameSize(started?: RemoteWindowStreamStartedPayload | null): SurfaceSize | null {
@@ -549,4 +549,3 @@ export function buildRemoteWindowAppTargetGroups(
 export function safeRemoteWindowGroupId(groupId: string) {
   return groupId.replace(/[^a-zA-Z0-9_-]+/g, '-');
 }
-
