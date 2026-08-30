@@ -6,6 +6,7 @@
  */
 
 export type AndroidConnectionServiceRoutePath =
+  | 'lan'
   | 'tailscale'
   | 'ipv4'
   | 'ipv6'
@@ -29,6 +30,7 @@ export interface AndroidConnectionServiceTarget {
   targetKey: string;
   bridgeHost: string;
   bridgePort: number;
+  lanHost?: string;
   authToken?: string;
   daemonHostId?: string;
   relayHostId?: string;
@@ -111,7 +113,8 @@ function parseRoutePolicy(value: unknown): AndroidConnectionServiceRoutePolicy {
   if (value.mode === 'manual') {
     const path = value.path;
     if (
-      path === 'tailscale'
+      path === 'lan'
+      || path === 'tailscale'
       || path === 'ipv4'
       || path === 'ipv6'
       || path === 'rtc-direct'
@@ -138,6 +141,7 @@ function parseTarget(value: unknown): AndroidConnectionServiceTarget {
     targetKey: value.targetKey.trim(),
     bridgeHost: value.bridgeHost.trim(),
     bridgePort,
+    ...(optionalString(value.lanHost) ? { lanHost: optionalString(value.lanHost) } : {}),
     ...(optionalString(value.authToken) ? { authToken: optionalString(value.authToken) } : {}),
     ...(optionalString(value.daemonHostId) ? { daemonHostId: optionalString(value.daemonHostId) } : {}),
     ...(optionalString(value.relayHostId) ? { relayHostId: optionalString(value.relayHostId) } : {}),

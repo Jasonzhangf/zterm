@@ -46,6 +46,8 @@ export function resolveEffectiveConnectionStatus(
 }
 export function formatConnectionRouteLabel(session: Session) {
   switch (session.resolvedPath) {
+    case 'lan':
+      return '局域网';
     case 'rtc-direct':
       return 'UDP';
     case 'tailscale':

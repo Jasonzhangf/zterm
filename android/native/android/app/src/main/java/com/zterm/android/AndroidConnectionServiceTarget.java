@@ -26,6 +26,7 @@ public final class AndroidConnectionServiceTarget {
     public final String targetKey;
     public final String bridgeHost;
     public final int bridgePort;
+    public final String lanHost;
     public final String authToken;
     public final String daemonHostId;
     public final String relayHostId;
@@ -38,6 +39,7 @@ public final class AndroidConnectionServiceTarget {
         this.targetKey = b.targetKey;
         this.bridgeHost = b.bridgeHost;
         this.bridgePort = b.bridgePort;
+        this.lanHost = b.lanHost;
         this.authToken = b.authToken;
         this.daemonHostId = b.daemonHostId;
         this.relayHostId = b.relayHostId;
@@ -52,6 +54,7 @@ public final class AndroidConnectionServiceTarget {
         json.put("targetKey", targetKey);
         json.put("bridgeHost", bridgeHost);
         json.put("bridgePort", bridgePort);
+        if (lanHost != null) json.put("lanHost", lanHost);
         if (authToken != null) json.put("authToken", authToken);
         if (daemonHostId != null) json.put("daemonHostId", daemonHostId);
         if (relayHostId != null) json.put("relayHostId", relayHostId);
@@ -78,6 +81,7 @@ public final class AndroidConnectionServiceTarget {
             .targetKey(targetKey.trim())
             .bridgeHost(bridgeHost.trim())
             .bridgePort(bridgePort)
+            .lanHost(optTrim(json, "lanHost"))
             .authToken(optTrim(json, "authToken"))
             .daemonHostId(optTrim(json, "daemonHostId"))
             .relayHostId(optTrim(json, "relayHostId"))
@@ -101,6 +105,7 @@ public final class AndroidConnectionServiceTarget {
         return Objects.equals(targetKey, that.targetKey)
             && Objects.equals(bridgeHost, that.bridgeHost)
             && bridgePort == that.bridgePort
+            && Objects.equals(lanHost, that.lanHost)
             && Objects.equals(authToken, that.authToken)
             && Objects.equals(daemonHostId, that.daemonHostId)
             && Objects.equals(relayHostId, that.relayHostId)
@@ -112,7 +117,7 @@ public final class AndroidConnectionServiceTarget {
 
     @Override
     public int hashCode() {
-        return Objects.hash(targetKey, bridgeHost, bridgePort, authToken, daemonHostId,
+        return Objects.hash(targetKey, bridgeHost, bridgePort, lanHost, authToken, daemonHostId,
             relayHostId, tailscaleHost, ipv6Host, ipv4Host, signalUrl);
     }
 
@@ -120,6 +125,7 @@ public final class AndroidConnectionServiceTarget {
         private String targetKey;
         private String bridgeHost;
         private int bridgePort;
+        private String lanHost;
         private String authToken;
         private String daemonHostId;
         private String relayHostId;
@@ -131,6 +137,7 @@ public final class AndroidConnectionServiceTarget {
         public Builder targetKey(String v) { this.targetKey = v; return this; }
         public Builder bridgeHost(String v) { this.bridgeHost = v; return this; }
         public Builder bridgePort(int v) { this.bridgePort = v; return this; }
+        public Builder lanHost(String v) { this.lanHost = v; return this; }
         public Builder authToken(String v) { this.authToken = v; return this; }
         public Builder daemonHostId(String v) { this.daemonHostId = v; return this; }
         public Builder relayHostId(String v) { this.relayHostId = v; return this; }

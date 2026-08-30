@@ -3307,7 +3307,11 @@
         "resource.client_connection_service_ipc",
         "resource.client_service_snapshot"
       ],
-      "consumed_resources": [],
+      "consumed_resources": [
+        "resource.transport_target",
+        "resource.route_policy",
+        "resource.relay_peer_lease"
+      ],
       "pending_resources": [],
       "public_interfaces": [
         "docs/goals/connection-service-owner-migration-plan.md",

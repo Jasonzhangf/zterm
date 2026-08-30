@@ -7,7 +7,7 @@ const candidates = [
   {
     id: 'direct:lan',
     kind: 'ws',
-    path: 'ipv4',
+    path: 'lan',
     endpoint: '192.168.1.20:3333',
     url: 'ws://192.168.1.20:3333',
   },
@@ -63,13 +63,12 @@ describe('selectBestTraversalRoute', () => {
     ]);
   });
 
-  it('does not give private LAN a priority bonus over remote routes', () => {
+  it('prioritizes a LAN candidate over remote routes', () => {
     const selection = selectBestTraversalRoute({
       candidates,
     });
 
-    expect(selection.selected).toMatchObject({ id: 'direct:tailscale', path: 'tailscale' });
-    expect(selection.diagnostics.find((item) => item.candidateId === 'direct:lan')?.reasons).not.toContain('ipv4:private-lan');
+    expect(selection.selected).toMatchObject({ id: 'direct:lan', path: 'lan' });
   });
 
   it('selects Tailscale after the LAN candidate records an ordinary reachability failure', () => {

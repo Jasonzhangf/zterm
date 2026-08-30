@@ -206,7 +206,7 @@ export interface Session {
   title: string;             // 动态标题（来自 tmux / 远端 terminal）
   ws: WebSocket | null;
   reliableInputSupported?: boolean;
-  resolvedPath?: 'rtc-direct' | 'tailscale' | 'ipv6' | 'ipv4' | 'rtc-relay';
+  resolvedPath?: 'lan' | 'rtc-direct' | 'tailscale' | 'ipv6' | 'ipv4' | 'rtc-relay';
   resolvedRelayTransport?: 'direct' | 'turn';
   resolvedEndpoint?: string;
   selectedIcePair?: {

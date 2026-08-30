@@ -9,6 +9,7 @@ import org.json.JSONObject;
  */
 public final class AndroidConnectionServiceRoutePolicy {
     public enum Path {
+        LAN,
         TAILSCALE,
         IPV4,
         IPV6,
@@ -17,6 +18,7 @@ public final class AndroidConnectionServiceRoutePolicy {
 
         public String wireName() {
             switch (this) {
+                case LAN: return "lan";
                 case TAILSCALE: return "tailscale";
                 case IPV4: return "ipv4";
                 case IPV6: return "ipv6";
@@ -28,6 +30,7 @@ public final class AndroidConnectionServiceRoutePolicy {
 
         public static Path fromWireName(String name) {
             switch (name) {
+                case "lan": return LAN;
                 case "tailscale": return TAILSCALE;
                 case "ipv4": return IPV4;
                 case "ipv6": return IPV6;
