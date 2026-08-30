@@ -38,6 +38,19 @@ export type AppUpdateManifestSource =
   | 'manual-override'
   | 'none';
 
+export interface AppUpdateManifestCandidate {
+  id: string;
+  label: string;
+  manifestUrl: string;
+  manifestSource: AppUpdateManifestSource;
+}
+
+export interface AppUpdateRouteSnapshot {
+  resolvedPath?: 'rtc-direct' | 'tailscale' | 'ipv6' | 'ipv4' | 'rtc-relay' | null;
+  resolvedRelayTransport?: 'direct' | 'turn' | null;
+  resolvedEndpoint?: string | null;
+}
+
 export interface AppUpdateInstallContext {
   manifestUrl: string;
   apkUrl: string;

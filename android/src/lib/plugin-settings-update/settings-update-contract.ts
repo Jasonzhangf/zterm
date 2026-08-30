@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import type {
   AppUpdateManifest,
-  AppUpdateManifestSource,
+  AppUpdateManifestCandidate,
   AppUpdatePreferences,
   AppUpdateRollbackBackup,
   AppUpdateRollbackEntry,
@@ -9,12 +9,7 @@ import type {
 
 export const SETTINGS_UPDATE_UI_SLOT_ID = 'settings.update' as const;
 
-export interface AppUpdateManifestCandidate {
-  id: string;
-  label: string;
-  manifestUrl: string;
-  manifestSource: AppUpdateManifestSource;
-}
+export type { AppUpdateManifestCandidate };
 
 export interface SettingsUpdateUiProps {
   currentVersionName: string;
@@ -26,7 +21,6 @@ export interface SettingsUpdateUiProps {
   updateError: string | null;
   hasNewVersion: boolean;
   hasUpdateIgnorePolicy: boolean;
-  suggestedManifestUrl: string;
   manifestCandidates?: AppUpdateManifestCandidate[];
   onUpdateDraftChange: (updater: (current: AppUpdatePreferences) => AppUpdatePreferences) => void;
   onCheckForUpdate: () => void;

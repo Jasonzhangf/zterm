@@ -3,13 +3,16 @@ import { APP_PACKAGE_NAME, APP_VERSION_CODE } from '../lib/app-version';
 import { getBrowserStorage } from '../lib/browser-storage';
 import {
   type AppUpdateCheckResult,
+  type AppUpdateManifestCandidate,
   type AppUpdateManifest,
   type AppUpdatePreferences,
+  type AppUpdateRouteSnapshot,
 } from '../lib/app-update';
 import {
   createAppUpdateRuntime,
   type AppUpdateRuntimeSnapshot,
   type AppUpdateStage,
+  type AppUpdateCheckOptions,
 } from '../lib/app-update-runtime';
 import { deriveAppUpdateProjection } from '@zterm/shared';
 import { AppUpdatePlugin, isNativeAppUpdateSupported } from '../plugins/AppUpdatePlugin';
@@ -28,7 +31,12 @@ function useAppUpdateSnapshot(
 
 export { type AppUpdateStage };
 
-export function useAppUpdate() {
+export interface UseAppUpdateOptions {
+  getActiveSessionRoute?: () => AppUpdateRouteSnapshot | undefined;
+  getManifestCandidates?: () => AppUpdateManifestCandidate[];
+}
+
+export function useAppUpdate(options: UseAppUpdateOptions = {}) {
   const runtimeRef = useRef(createAppUpdateRuntime({
     storage: getBrowserStorage(),
     fetchFn: (...args) => globalThis.fetch(...args),
@@ -72,11 +80,15 @@ export function useAppUpdate() {
     syncSnapshot();
   }, [syncSnapshot]);
 
-  const checkForUpdates = useCallback(async (options?: { manual?: boolean; manifestUrlOverride?: string }): Promise<AppUpdateCheckResult> => {
-    const result = await runtimeRef.current.checkForUpdates(options);
+  const checkForUpdates = useCallback(async (checkOptions?: AppUpdateCheckOptions): Promise<AppUpdateCheckResult> => {
+    const result = await runtimeRef.current.checkForUpdates({
+      ...checkOptions,
+      activeSessionRoute: checkOptions?.activeSessionRoute || options.getActiveSessionRoute?.(),
+      manifestCandidates: checkOptions?.manifestCandidates || options.getManifestCandidates?.(),
+    });
     syncSnapshot();
     return result;
-  }, [syncSnapshot]);
+  }, [options, syncSnapshot]);
 
   const dismissAvailableManifest = useCallback(() => {
     runtimeRef.current.dismissAvailableManifest();

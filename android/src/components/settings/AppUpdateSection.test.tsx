@@ -30,7 +30,6 @@ describe('AppUpdateSection', () => {
         updateError={null}
         hasNewVersion
         hasUpdateIgnorePolicy={false}
-        suggestedManifestUrl=""
         onUpdateDraftChange={vi.fn()}
         onCheckForUpdate={vi.fn()}
         onInstallUpdate={vi.fn()}
@@ -45,9 +44,7 @@ describe('AppUpdateSection', () => {
     expect(screen.getByText('最新版本 0.1.1.1591 · versionCode 1011591')).toBeTruthy();
   });
 
-  it('fills manifest url from current daemon shortcut', () => {
-    const onUpdateDraftChange = vi.fn();
-
+  it('does not synthesize a current daemon shortcut without projected candidates', () => {
     render(
       <AppUpdateSection
         currentVersionName="0.1.1.1590"
@@ -66,8 +63,7 @@ describe('AppUpdateSection', () => {
         updateError={null}
         hasNewVersion={false}
         hasUpdateIgnorePolicy={false}
-        suggestedManifestUrl="http://100.66.1.82:3333/updates/latest.json"
-        onUpdateDraftChange={onUpdateDraftChange}
+        onUpdateDraftChange={vi.fn()}
         onCheckForUpdate={vi.fn()}
         onInstallUpdate={vi.fn()}
         onResetUpdateIgnorePolicy={vi.fn()}
@@ -77,17 +73,7 @@ describe('AppUpdateSection', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '使用当前 daemon 地址' }));
-    expect(onUpdateDraftChange).toHaveBeenCalledTimes(1);
-    expect(onUpdateDraftChange.mock.calls[0][0]({
-      manifestUrl: '',
-      manifestSource: 'none',
-      autoCheckOnLaunch: false,
-      ignoreUntilManualCheck: false,
-    })).toMatchObject({
-      manifestUrl: 'http://100.66.1.82:3333/updates/latest.json',
-      manifestSource: 'server-connected',
-    });
+    expect(screen.queryByRole('button', { name: '使用当前 daemon 地址' })).toBeNull();
   });
 
   it('fills manifest url from an explicit relay update route candidate', () => {
@@ -111,7 +97,6 @@ describe('AppUpdateSection', () => {
         updateError={null}
         hasNewVersion={false}
         hasUpdateIgnorePolicy={false}
-        suggestedManifestUrl=""
         manifestCandidates={[
           {
             id: 'relay-public',
@@ -171,7 +156,6 @@ describe('AppUpdateSection', () => {
         updateError={null}
         hasNewVersion={false}
         hasUpdateIgnorePolicy={false}
-        suggestedManifestUrl=""
         onUpdateDraftChange={vi.fn()}
         onCheckForUpdate={vi.fn()}
         onInstallUpdate={vi.fn()}

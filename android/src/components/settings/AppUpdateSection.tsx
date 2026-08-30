@@ -20,7 +20,6 @@ export function AppUpdateSection({
   updateError,
   hasNewVersion,
   hasUpdateIgnorePolicy,
-  suggestedManifestUrl,
   manifestCandidates,
   onUpdateDraftChange,
   onCheckForUpdate,
@@ -36,16 +35,7 @@ export function AppUpdateSection({
   rollbackToPreviousEntry,
   onRollbackToPrevious,
 }: SettingsUpdateUiProps) {
-  const routeCandidates = manifestCandidates?.length
-    ? manifestCandidates
-    : suggestedManifestUrl
-      ? [{
-          id: 'current-daemon',
-          label: '当前 daemon 地址',
-          manifestUrl: suggestedManifestUrl,
-          manifestSource: 'server-connected' as const,
-        }]
-      : [];
+  const routeCandidates = manifestCandidates || [];
 
   return (
     <div data-testid="settings-update-section" style={settingsSectionStyle()}>
