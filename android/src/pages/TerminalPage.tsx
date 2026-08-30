@@ -1210,6 +1210,48 @@ function TerminalPageComponent({
       }
       return resolveServerIdentity(input, drawerServerIdentityAliases);
     };
+    const relayHostIds = new Set(
+      onlineRelayDaemonDevices.map((device) => device.daemon.hostId.trim()).filter(Boolean),
+    );
+    const relayCatalogGroups: SessionGroupHistory[] = onlineRelayDaemonDevices.flatMap((device) => {
+      const daemonHostId = device.daemon.hostId.trim();
+      const sessionNames = [...new Set(
+        (device.daemon.sessions || []).map((session) => session.name.trim()).filter(Boolean),
+      )].sort((left, right) => left.localeCompare(right));
+      if (!daemonHostId || sessionNames.length === 0) {
+        return [];
+      }
+      const existingGroup = sessionGroups.find((group) => (
+        group.daemonHostId?.trim() === daemonHostId
+        || resolveDrawerIdentity(group).key === daemonHostId
+      ));
+      const directEndpoint = (device.daemon.endpoints || []).find((endpoint) => (
+        endpoint.kind === 'tailscale' && endpoint.host?.trim() && endpoint.port
+      )) || (device.daemon.endpoints || []).find((endpoint) => endpoint.host?.trim() && endpoint.port);
+      const lastOpenedSessionName = existingGroup?.lastOpenedSessionName?.trim();
+      return [{
+        id: `daemon:${daemonHostId}`,
+        name: device.deviceName.trim() || daemonHostId,
+        bridgeHost: existingGroup?.bridgeHost?.trim() || directEndpoint?.host?.trim() || '',
+        bridgePort: existingGroup?.bridgePort || directEndpoint?.port || 3333,
+        daemonHostId,
+        terminalBackend: 'tmux',
+        authToken: existingGroup?.authToken || directEndpoint?.authToken,
+        relayEndpointCandidates: device.daemon.endpoints,
+        sessionNames,
+        missingSessionNames: [],
+        lastOpenedSessionName: lastOpenedSessionName && sessionNames.includes(lastOpenedSessionName)
+          ? lastOpenedSessionName
+          : undefined,
+        lastOpenedAt: existingGroup?.lastOpenedAt || 0,
+      }];
+    });
+    const manualHistoryGroups = sessionGroups.filter((group) => {
+      const explicitHostId = group.daemonHostId?.trim() || '';
+      const resolvedHostId = resolveDrawerIdentity(group).key;
+      return !relayHostIds.has(explicitHostId) && !relayHostIds.has(resolvedHostId);
+    });
+    const catalogGroups = [...relayCatalogGroups, ...manualHistoryGroups];
     const liveSessionByReuseKey = new Map<string, Session>();
     for (const session of sessions) {
       liveSessionByReuseKey.set(
@@ -1252,7 +1294,7 @@ function TerminalPageComponent({
     // canonical key 会因 alias 解析不同而分叉；stable key 做第二层防重。
     const rowIdByStableSessionKey = new Map<string, string>();
     const items: TerminalSessionDrawerItem[] = [];
-    for (const group of sessionGroups) {
+    for (const group of catalogGroups) {
       const groupBackend = 'tmux' as const;
       const explicitDaemonHostId = group.daemonHostId?.trim() || '';
       const serverIdentity = resolveDrawerIdentity(group);
@@ -1304,7 +1346,7 @@ function TerminalPageComponent({
           sessionNames: group.sessionNames,
         };
         const canonicalSessionRowKey = `${serverIdentity.key}::session:${sessionName}`;
-        const stableKey = `catalog:${group.bridgeHost}:${group.bridgePort}::session:${sessionName}`;
+        const stableKey = `catalog:${canonicalDaemonHostId || `${group.bridgeHost}:${group.bridgePort}`}::session:${sessionName}`;
         const existingRowId = rowIdByCanonicalSessionKey.get(canonicalSessionRowKey)
           || rowIdByStableSessionKey.get(stableKey);
         if (existingRowId) {
@@ -1360,7 +1402,7 @@ function TerminalPageComponent({
       }
     }
     return { items, targets, closeTargets, catalogLiveSessionIds };
-  }, [drawerServerIdentityAliases, onlineDrawerServerIdentityAliases, relayDeviceByDaemonHostId, sessionGroups, sessions]);
+  }, [drawerServerIdentityAliases, onlineDrawerServerIdentityAliases, onlineRelayDaemonDevices, relayDeviceByDaemonHostId, sessionGroups, sessions]);
   const drawerHosts = useMemo<TerminalSessionDrawerHost[]>(() => {
     const hosts = new Map<string, TerminalSessionDrawerHost>();
     for (const device of onlineRelayDaemonDevices) {

@@ -799,6 +799,7 @@ export function AppContent({
         {pageState.kind === 'settings' && (
           <SettingsPage
             settings={bridgeSettings}
+            relayDevices={relayDevices}
             currentVersionName={APP_VERSION}
             currentVersionCode={APP_VERSION_CODE}
             updatePreferences={appUpdatePreferences}

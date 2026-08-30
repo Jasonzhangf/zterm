@@ -21,6 +21,29 @@ daemon tmux truth
   -> TraversalSocket opens selected route and reports selected diagnostics
 ```
 
+### Canonical replacement and client projection invariants
+
+- Relay server identity is `(accountId, daemon.hostId)`. A daemon reconnecting
+  with a different `deviceId` updates that same entity; the newest validated
+  `directory-update` replaces the previous daemon `endpoints` and `sessions`
+  snapshot atomically. Historical snapshots must never be unioned into current
+  daemon truth.
+- Android owns one confirmed Relay directory generation. `/api/auth/me` refresh
+  and `directory-snapshot` replace the complete remote projection; Settings,
+  Home, Session Picker, and Drawer consume that same projection instead of
+  opening independent account readers.
+- Persisted `Host`, bridge preset, and session history are local user/history
+  resources. They may contribute explicit user labels or manual targets, but
+  they must not recreate a missing Relay daemon/session, overwrite a confirmed
+  directory endpoint, or be presented as account directory truth.
+- Remote rows are ephemeral projections. Code must not auto-write Relay device
+  endpoints into local bridge presets. A confirmed directory generation removes
+  remote rows absent from that generation without deleting unrelated explicit
+  manual hosts.
+- Drawer catalog rows come only from current daemon tmux session names plus
+  already-open client tabs. Local history never creates a remote row and no
+  `available`, `unavailable`, `idle`, or inferred agent state disables a row.
+
 ## White-Box Plan
 
 - `src/traversal-relay/store.test.ts`
@@ -103,6 +126,19 @@ daemon tmux truth
 
 - Positive: two independent logins for one account issue two distinct access tokens; both tokens remain valid concurrently for `/api/auth/me`, `/api/directory`, and separate `/ws/devices` connections keyed by their concrete `deviceId`.
 - Negative: logging in from device B must not revoke, replace, disconnect, or overwrite device A's account token or device-presence identity.
+- Positive: a daemon reconnects under a new `deviceId` with sessions `new-a` and
+  endpoints `tailscale:new`, `relay:new`; every logged-in client receives exactly
+  that one `hostId` entity and the same options.
+- Negative: sessions/endpoints present only in the old registration must not
+  survive the replacement snapshot and must not reappear from any client's
+  local hosts, bridge presets, or session history.
+- Positive: two clients with deliberately different local caches render the
+  same Relay account daemon/session rows after one confirmed directory refresh.
+- Negative: opening Settings must not copy a Relay endpoint into a local bridge
+  preset, and reopening the app must not make account options device-specific.
+- Positive: an explicit manual non-Relay host remains manageable locally.
+- Negative: that manual host must not be merged into or labeled as a Relay
+  account daemon unless a stable identity match is confirmed by the directory.
 - Positive: one account may publish multiple daemon devices and each daemon remains independently addressable by stable `deviceId` plus `hostId`.
 - Negative: an unknown or explicitly revoked token is unauthorized and cannot read another account's directory; cached directory data must not be projected as live control truth after that rejection.
 - Positive: valid daemon update appears in directory.

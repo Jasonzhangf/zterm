@@ -65,6 +65,7 @@ function renderSettings(overrides: Partial<ComponentProps<typeof SettingsPage>> 
   return render(
     <SettingsPage
       settings={baseSettings}
+      relayDevices={[]}
       currentVersionName="0.1.3"
       currentVersionCode={1030000}
       updatePreferences={{
@@ -201,6 +202,7 @@ describe('SettingsPage Relay account configuration', () => {
         ...baseSettings,
         traversalRelay: relaySettings,
       },
+      relayDevices: vi.mocked(useTraversalRelayAccount)().relayDevices,
     });
 
     openConnectionConfig();
@@ -290,6 +292,7 @@ describe('SettingsPage Relay account configuration', () => {
       logoutRelay,
     });
 
+    const relayDevices = vi.mocked(useTraversalRelayAccount)().relayDevices;
     renderSettings({
       settings: {
         ...baseSettings,
@@ -305,12 +308,79 @@ describe('SettingsPage Relay account configuration', () => {
           },
         ],
       },
+      relayDevices,
     });
 
     openConnectionConfig();
     expect(screen.getByTestId('settings-relay-online-entry')).toBeTruthy();
     expect(screen.getByRole('button', { name: '移除默认服务器' })).toBeTruthy();
     expect(screen.getByTestId('settings-connection-config-summary').textContent).toContain('默认 Mac Studio');
+  });
+
+  it('renders the app confirmed directory generation and never writes relay endpoints into local presets', () => {
+    const now = new Date().toISOString();
+    const staleLanDevice = {
+      deviceId: 'stale-device',
+      deviceName: 'Stale LAN Mac',
+      platform: 'darwin',
+      appVersion: '0.1.2',
+      client: { connected: true, lastSeenAt: now },
+      daemon: {
+        connected: true,
+        lastSeenAt: now,
+        hostId: 'mac-studio',
+        version: '0.1.2',
+        endpoints: [{
+          id: 'ipv4:mac-studio',
+          kind: 'ipv4' as const,
+          host: '192.168.0.3',
+          port: 3333,
+          authRequired: true,
+          lastSeenAt: now,
+        }],
+        sessions: [],
+      },
+      updatedAt: now,
+    };
+    const confirmedDevice = {
+      ...staleLanDevice,
+      deviceId: 'confirmed-device',
+      deviceName: 'Confirmed Mac Studio',
+      appVersion: '0.1.3',
+      daemon: {
+        ...staleLanDevice.daemon,
+        version: '0.1.3',
+        endpoints: [{
+          id: 'tailscale:mac-studio',
+          kind: 'tailscale' as const,
+          host: '100.66.1.82',
+          port: 3333,
+          authRequired: true,
+          lastSeenAt: now,
+        }],
+      },
+    };
+    vi.mocked(useTraversalRelayAccount).mockReturnValue({
+      account: null,
+      relayDevices: [staleLanDevice],
+      relayStatus: '',
+      relayBusy: null,
+      refreshLocalAccount: vi.fn(),
+      syncRelay,
+      logoutRelay,
+    });
+    const onSave = vi.fn();
+
+    renderSettings({ relayDevices: [confirmedDevice], onSave });
+    openConnectionConfig();
+
+    expect(screen.getByText('Confirmed Mac Studio')).toBeTruthy();
+    expect(screen.queryByText('Stale LAN Mac')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      servers: [],
+      targetHost: '',
+    }));
   });
 
   it('adds a direct server inside Settings so Home can project it as a server row', () => {
