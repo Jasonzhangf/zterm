@@ -1350,7 +1350,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
         }
         return;
       }
-      if (msg.type !== 'remote-window-input-result' || msg.payload.accepted !== true) {
+      if (msg.type !== 'remote-window-input-ack' || msg.control.accepted !== true) {
         return;
       }
       if (msg.payload.streamId !== activeStreamIdRef.current) {

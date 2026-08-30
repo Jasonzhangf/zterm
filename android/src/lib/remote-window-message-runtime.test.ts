@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   createRemoteWindowMessageRuntime,
   isRemoteWindowControlMessage,
+  REMOTE_WINDOW_INPUT_QUALITY_FLUSH_INTERVAL_MS,
+  REMOTE_WINDOW_INPUT_RELIABLE_ACK_TIMEOUT_MS,
   REMOTE_WINDOW_STREAM_START_REQUEST_TIMEOUT_MS,
   REMOTE_WINDOW_TARGETS_REQUEST_TIMEOUT_MS,
 } from './remote-window-message-runtime';
@@ -233,12 +235,18 @@ describe('remote window message runtime', () => {
       },
     } as ServerMessage)).toBe(true);
     expect(isRemoteWindowControlMessage({
-      type: 'remote-window-input-result',
+      type: 'remote-window-input-ack',
+      control: {
+        version: 1,
+        sequence: 'rw-input-1',
+        accepted: true,
+        retryable: false,
+        duplicate: false,
+        receivedAtMs: 1,
+      },
       payload: {
-        requestId: 'rw-input-1',
         streamId: 'stream-1',
         targetId: 'target-1',
-        accepted: true,
       },
     } as ServerMessage)).toBe(true);
     expect(isRemoteWindowControlMessage({
@@ -527,7 +535,7 @@ describe('remote window message runtime', () => {
     await expect(request).resolves.toEqual(exact);
   });
 
-  it('sends remote input events with a generated request id', () => {
+  it('sends reliable remote input with delivery control outside the business payload', () => {
     const sendSocketPayload = vi.fn();
     const runtime = createRemoteWindowMessageRuntime({ now: () => 48 });
     const ws = makeSocket();
@@ -554,9 +562,14 @@ describe('remote window message runtime', () => {
 
     expect(JSON.parse(sendSocketPayload.mock.calls[0][2] as string)).toMatchObject({
       type: 'remote-window-input',
+      control: {
+        version: 1,
+        sequence: expect.stringMatching(/^rw-input-48-/),
+        lane: 'reliable',
+        attempt: 1,
+        sentAtMs: 48,
+      },
       payload: {
-        requestId: expect.stringMatching(/^rw-input-48-/),
-        clientSentAt: 48,
         streamId: 'stream-5',
         targetId: 'target-5',
         event: {
@@ -567,6 +580,9 @@ describe('remote window message runtime', () => {
         },
       },
     });
+    const sent = JSON.parse(sendSocketPayload.mock.calls[0][2] as string);
+    expect(sent.payload).not.toHaveProperty('requestId');
+    expect(sent.payload).not.toHaveProperty('clientSentAt');
   });
 
   it('dispatches stream candidates and status to the receiver listener without treating them as catalog responses', () => {
@@ -605,7 +621,7 @@ describe('remote window message runtime', () => {
     expect(runtime.getPendingCount()).toBe(0);
   });
 
-  it('dispatches input results and unmatched input errors to subscribers', () => {
+  it('dispatches unmatched input ACK and NACK control to subscribers', () => {
     const runtime = createRemoteWindowMessageRuntime();
     const listener = vi.fn();
     const unsubscribe = runtime.subscribe(listener);
@@ -614,12 +630,18 @@ describe('remote window message runtime', () => {
     resizedTarget.videoTarget.cropRectTopLeftPx = { x: 0, y: 80, width: 1000, height: 1800 };
 
     expect(runtime.dispatch({
-      type: 'remote-window-input-result',
+      type: 'remote-window-input-ack',
+      control: {
+        version: 1,
+        sequence: 'rw-input-1',
+        accepted: true,
+        retryable: false,
+        duplicate: false,
+        receivedAtMs: 1,
+      },
       payload: {
-        requestId: 'rw-input-1',
         streamId: 'stream-1',
         targetId: 'target-1',
-        accepted: true,
         target: resizedTarget,
         capture: {
           source: 'ScreenCaptureKit',
@@ -631,22 +653,38 @@ describe('remote window message runtime', () => {
       },
     })).toBe(true);
     expect(runtime.dispatch({
-      type: 'remote-window-error',
+      type: 'remote-window-input-ack',
+      control: {
+        version: 1,
+        sequence: 'rw-input-2',
+        accepted: false,
+        retryable: false,
+        duplicate: false,
+        receivedAtMs: 2,
+        error: {
+          code: 'remote_window_input_failed',
+          message: 'remote window input stale',
+        },
+      },
       payload: {
-        requestId: 'rw-input-2',
         streamId: 'stream-1',
-        code: 'remote_window_input_failed',
-        message: 'remote window input stale',
+        targetId: 'target-1',
       },
     })).toBe(true);
 
     expect(listener).toHaveBeenNthCalledWith(1, {
-      type: 'remote-window-input-result',
+      type: 'remote-window-input-ack',
+      control: {
+        version: 1,
+        sequence: 'rw-input-1',
+        accepted: true,
+        retryable: false,
+        duplicate: false,
+        receivedAtMs: 1,
+      },
       payload: {
-        requestId: 'rw-input-1',
         streamId: 'stream-1',
         targetId: 'target-1',
-        accepted: true,
         target: resizedTarget,
         capture: {
           source: 'ScreenCaptureKit',
@@ -658,25 +696,382 @@ describe('remote window message runtime', () => {
       },
     });
     expect(listener).toHaveBeenNthCalledWith(2, {
-      type: 'remote-window-error',
+      type: 'remote-window-input-ack',
+      control: {
+        version: 1,
+        sequence: 'rw-input-2',
+        accepted: false,
+        retryable: false,
+        duplicate: false,
+        receivedAtMs: 2,
+        error: {
+          code: 'remote_window_input_failed',
+          message: 'remote window input stale',
+        },
+      },
       payload: {
-        requestId: 'rw-input-2',
         streamId: 'stream-1',
-        code: 'remote_window_input_failed',
-        message: 'remote window input stale',
+        targetId: 'target-1',
       },
     });
 
     unsubscribe();
     expect(runtime.dispatch({
-      type: 'remote-window-input-result',
+      type: 'remote-window-input-ack',
+      control: {
+        version: 1,
+        sequence: 'rw-input-3',
+        accepted: true,
+        retryable: false,
+        duplicate: false,
+        receivedAtMs: 3,
+      },
       payload: {
-        requestId: 'rw-input-3',
         streamId: 'stream-1',
         targetId: 'target-1',
-        accepted: true,
       },
     })).toBe(false);
     expect(listener).toHaveBeenCalledTimes(2);
+  });
+
+  it('coalesces 120Hz continuous scroll into one smooth-profile delivery frame', () => {
+    const sendSocketPayload = vi.fn();
+    const timers: Array<{ callback: () => void; delay: number }> = [];
+    const runtime = createRemoteWindowMessageRuntime({
+      now: () => 100,
+      setTimeoutFn: vi.fn((callback: () => void, delay: number) => {
+        timers.push({ callback, delay });
+        return timers.length;
+      }) as any,
+      clearTimeoutFn: vi.fn() as any,
+    });
+    const options = {
+      ws: makeSocket(),
+      payload: {
+        streamId: 'stream-scroll',
+        targetId: 'target-scroll',
+        event: {
+          kind: 'scroll' as const,
+          unit: 'pixel' as const,
+          deltaX: 0,
+          deltaY: 1,
+          x: 100,
+          y: 120,
+          normalizedX: 0.5,
+          normalizedY: 0.5,
+          moveCursor: false,
+        },
+      },
+      sendSocketPayload,
+    };
+
+    for (let index = 0; index < 120; index += 1) {
+      runtime.sendInputEvent('session-1', options);
+    }
+
+    expect(sendSocketPayload).not.toHaveBeenCalled();
+    expect(timers).toHaveLength(1);
+    expect(timers[0]!.delay).toBeGreaterThanOrEqual(22);
+    timers[0]!.callback();
+    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
+    const sent = JSON.parse(sendSocketPayload.mock.calls[0]![2] as string);
+    expect(sent).toEqual({
+      type: 'remote-window-input',
+      control: {
+        version: 1,
+        sequence: expect.any(String),
+        lane: 'continuous',
+        attempt: 1,
+        sentAtMs: 100,
+      },
+      payload: {
+        ...options.payload,
+        event: {
+          ...options.payload.event,
+          deltaY: 120,
+        },
+      },
+    });
+    expect(sent.payload).not.toHaveProperty('requestId');
+    expect(sent.payload).not.toHaveProperty('clientSentAt');
+  });
+
+  it('keeps one reliable input in flight and retries only a retryable NACK with the same sequence', () => {
+    const sendSocketPayload = vi.fn();
+    const runtime = createRemoteWindowMessageRuntime({ now: () => 200 });
+    const base = {
+      ws: makeSocket(),
+      sendSocketPayload,
+    };
+    runtime.sendInputEvent('session-1', {
+      ...base,
+      payload: {
+        streamId: 'stream-drag',
+        targetId: 'target-drag',
+        event: {
+          kind: 'pointer',
+          phase: 'down',
+          pointerId: 7,
+          button: 'left',
+          buttons: 1,
+          x: 10,
+          y: 20,
+          normalizedX: 0.1,
+          normalizedY: 0.2,
+        },
+      },
+    });
+    runtime.sendInputEvent('session-1', {
+      ...base,
+      payload: {
+        streamId: 'stream-drag',
+        targetId: 'target-drag',
+        event: {
+          kind: 'pointer',
+          phase: 'up',
+          pointerId: 7,
+          button: 'left',
+          buttons: 0,
+          x: 30,
+          y: 40,
+          normalizedX: 0.3,
+          normalizedY: 0.4,
+        },
+      },
+    });
+
+    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
+    const first = JSON.parse(sendSocketPayload.mock.calls[0]![2] as string);
+    expect(first.control).toMatchObject({ lane: 'reliable', attempt: 1 });
+    expect(first.payload.event).toMatchObject({ phase: 'down' });
+
+    expect(runtime.dispatch({
+      type: 'remote-window-input-ack',
+      control: {
+        version: 1,
+        sequence: first.control.sequence,
+        accepted: false,
+        retryable: true,
+        duplicate: false,
+        receivedAtMs: 201,
+        error: { code: 'remote_window_input_busy', message: 'busy' },
+      },
+      payload: { streamId: 'stream-drag', targetId: 'target-drag' },
+    } as any)).toBe(true);
+    expect(sendSocketPayload).toHaveBeenCalledTimes(2);
+    const retry = JSON.parse(sendSocketPayload.mock.calls[1]![2] as string);
+    expect(retry.control).toMatchObject({
+      sequence: first.control.sequence,
+      lane: 'reliable',
+      attempt: 2,
+    });
+
+    runtime.dispatch({
+      type: 'remote-window-input-ack',
+      control: {
+        version: 1,
+        sequence: first.control.sequence,
+        accepted: true,
+        retryable: false,
+        duplicate: false,
+        receivedAtMs: 202,
+      },
+      payload: { streamId: 'stream-drag', targetId: 'target-drag' },
+    } as any);
+    expect(sendSocketPayload).toHaveBeenCalledTimes(3);
+    const release = JSON.parse(sendSocketPayload.mock.calls[2]![2] as string);
+    expect(release.payload.event).toMatchObject({ phase: 'up' });
+    expect(release.control.sequence).not.toBe(first.control.sequence);
+  });
+
+  it('retries a reliable ACK timeout once with the same sequence before advancing the barrier', () => {
+    const sendSocketPayload = vi.fn();
+    const timers: Array<{ callback: () => void; delay: number }> = [];
+    const listener = vi.fn();
+    const runtime = createRemoteWindowMessageRuntime({
+      now: () => 250,
+      setTimeoutFn: vi.fn((callback: () => void, delay: number) => {
+        timers.push({ callback, delay });
+        return timers.length;
+      }) as any,
+      clearTimeoutFn: vi.fn() as any,
+    });
+    runtime.subscribe(listener);
+    const shared = { ws: makeSocket(), sendSocketPayload };
+    runtime.sendInputEvent('session-1', {
+      ...shared,
+      payload: {
+        streamId: 'stream-timeout',
+        targetId: 'target-timeout',
+        event: {
+          kind: 'click',
+          pointerId: 1,
+          button: 'left',
+          clickCount: 1,
+          x: 10,
+          y: 20,
+          normalizedX: 0.1,
+          normalizedY: 0.2,
+        },
+      },
+    });
+    runtime.sendInputEvent('session-1', {
+      ...shared,
+      payload: {
+        streamId: 'stream-timeout',
+        targetId: 'target-timeout',
+        event: { kind: 'close-window' },
+      },
+    });
+
+    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
+    expect(timers[0]?.delay).toBe(REMOTE_WINDOW_INPUT_RELIABLE_ACK_TIMEOUT_MS);
+    const first = JSON.parse(sendSocketPayload.mock.calls[0]![2] as string);
+    timers[0]!.callback();
+    expect(sendSocketPayload).toHaveBeenCalledTimes(2);
+    const retry = JSON.parse(sendSocketPayload.mock.calls[1]![2] as string);
+    expect(retry.control).toMatchObject({ sequence: first.control.sequence, attempt: 2 });
+
+    expect(timers[1]?.delay).toBe(REMOTE_WINDOW_INPUT_RELIABLE_ACK_TIMEOUT_MS);
+    timers[1]!.callback();
+    expect(listener).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'remote-window-input-ack',
+      control: expect.objectContaining({
+        sequence: first.control.sequence,
+        accepted: false,
+        retryable: false,
+        error: expect.objectContaining({ code: 'remote_window_input_ack_timeout' }),
+      }),
+    }));
+    expect(sendSocketPayload).toHaveBeenCalledTimes(3);
+    const barrier = JSON.parse(sendSocketPayload.mock.calls[2]![2] as string);
+    expect(barrier.payload.event.kind).toBe('close-window');
+    expect(barrier.control.sequence).not.toBe(first.control.sequence);
+  });
+
+  it('keeps only the latest pointer move and uses the quality cadence', () => {
+    const sendSocketPayload = vi.fn();
+    const timers: Array<{ callback: () => void; delay: number }> = [];
+    const runtime = createRemoteWindowMessageRuntime({
+      now: () => 275,
+      setTimeoutFn: vi.fn((callback: () => void, delay: number) => {
+        timers.push({ callback, delay });
+        return timers.length;
+      }) as any,
+      clearTimeoutFn: vi.fn() as any,
+    });
+    void runtime.requestStreamStart('session-1', {
+      ws: makeSocket(),
+      streamId: 'stream-quality-move',
+      mediaPlan: 'single-focus',
+      mediaPlanVersion: 1,
+      target: makeTarget(),
+      offer: { type: 'offer', sdp: 'offer-sdp' },
+      videoProfile: qualityVideoProfile,
+      sendSocketPayload,
+    });
+    sendSocketPayload.mockClear();
+    const shared = { ws: makeSocket(), sendSocketPayload };
+    for (let index = 1; index <= 10; index += 1) {
+      runtime.sendInputEvent('session-1', {
+        ...shared,
+        payload: {
+          streamId: 'stream-quality-move',
+          targetId: 'target-quality-move',
+          event: {
+            kind: 'pointer',
+            phase: 'move',
+            pointerId: 1,
+            button: 'left',
+            buttons: 1,
+            x: index,
+            y: index * 2,
+            normalizedX: index / 100,
+            normalizedY: index / 50,
+          },
+        },
+      });
+    }
+
+    const flushTimer = timers.find((timer) => timer.delay === REMOTE_WINDOW_INPUT_QUALITY_FLUSH_INTERVAL_MS);
+    expect(flushTimer).toBeDefined();
+    flushTimer!.callback();
+    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
+    const sent = JSON.parse(sendSocketPayload.mock.calls[0]![2] as string);
+    expect(sent.control.lane).toBe('continuous');
+    expect(sent.payload.event).toMatchObject({ kind: 'pointer', phase: 'move', x: 10, y: 20 });
+  });
+
+  it('discards pending input on stream stop and ignores stale timeout callbacks', () => {
+    const sendSocketPayload = vi.fn();
+    const timers: Array<() => void> = [];
+    const runtime = createRemoteWindowMessageRuntime({
+      now: () => 290,
+      setTimeoutFn: vi.fn((callback: () => void) => {
+        timers.push(callback);
+        return timers.length;
+      }) as any,
+      clearTimeoutFn: vi.fn() as any,
+    });
+    const shared = { ws: makeSocket(), sendSocketPayload };
+    runtime.sendInputEvent('session-1', {
+      ...shared,
+      payload: {
+        streamId: 'stream-discard',
+        targetId: 'target-discard',
+        event: { kind: 'focus' },
+      },
+    });
+    runtime.sendInputEvent('session-1', {
+      ...shared,
+      payload: {
+        streamId: 'stream-discard',
+        targetId: 'target-discard',
+        event: { kind: 'close-window' },
+      },
+    });
+    runtime.dispose();
+    timers.forEach((callback) => callback());
+    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
+  });
+
+  it('flushes preceding continuous input before a reliable barrier', () => {
+    const sendSocketPayload = vi.fn();
+    const runtime = createRemoteWindowMessageRuntime({
+      now: () => 300,
+      setTimeoutFn: vi.fn(() => 1) as any,
+      clearTimeoutFn: vi.fn() as any,
+    });
+    const shared = { ws: makeSocket(), sendSocketPayload };
+    runtime.sendInputEvent('session-1', {
+      ...shared,
+      payload: {
+        streamId: 'stream-barrier',
+        targetId: 'target-barrier',
+        event: {
+          kind: 'scroll',
+          unit: 'pixel',
+          deltaX: 0,
+          deltaY: 12,
+          x: 10,
+          y: 20,
+          normalizedX: 0.1,
+          normalizedY: 0.2,
+        },
+      },
+    });
+    runtime.sendInputEvent('session-1', {
+      ...shared,
+      payload: {
+        streamId: 'stream-barrier',
+        targetId: 'target-barrier',
+        event: { kind: 'close-window' },
+      },
+    });
+
+    expect(sendSocketPayload).toHaveBeenCalledTimes(2);
+    const messages = sendSocketPayload.mock.calls.map((call) => JSON.parse(call[2] as string));
+    expect(messages.map((message) => message.control.lane)).toEqual(['continuous', 'reliable']);
+    expect(messages.map((message) => message.payload.event.kind)).toEqual(['scroll', 'close-window']);
   });
 });

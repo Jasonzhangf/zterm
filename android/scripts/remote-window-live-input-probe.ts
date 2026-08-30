@@ -7,6 +7,7 @@ import { WebSocket } from 'ws';
 import wrtc from '@roamhq/wrtc';
 import type {
   ClientMessage,
+  RemoteWindowInputDeliveryControl,
   RemoteWindowInputEventPayload,
   RemoteWindowStreamTargetManifest,
   ServerMessage,
@@ -489,22 +490,26 @@ function targetCenter(target: RemoteWindowStreamTargetManifest) {
   };
 }
 
-function clientSentAt() {
-  return Date.now() + CLIENT_CLOCK_OFFSET_MS;
-}
-
 function buildInputPayload(
   streamId: string,
   target: RemoteWindowStreamTargetManifest,
   suffix: string,
   event: RemoteWindowInputEventPayload['event'],
-): RemoteWindowInputEventPayload {
+): { payload: RemoteWindowInputEventPayload; control: RemoteWindowInputDeliveryControl } {
+  const continuous = event.kind === 'scroll' || (event.kind === 'pointer' && event.phase === 'move');
   return {
-    requestId: requestId(suffix),
-    streamId,
-    targetId: target.streamTargetId,
-    clientSentAt: clientSentAt(),
-    event,
+    payload: {
+      streamId,
+      targetId: target.streamTargetId,
+      event,
+    },
+    control: {
+      version: 1,
+      sequence: requestId(suffix),
+      lane: continuous ? 'continuous' : 'reliable',
+      attempt: 1,
+      sentAtMs: Date.now() + CLIENT_CLOCK_OFFSET_MS,
+    },
   };
 }
 
@@ -524,18 +529,17 @@ async function sendActionEventAndRequireFocus(
 
 async function waitForInputAccepted(
   messages: ServerMessage[],
-  payload: RemoteWindowInputEventPayload,
+  input: { payload: RemoteWindowInputEventPayload; control: RemoteWindowInputDeliveryControl },
 ) {
   const response = await waitForServerMessage(
     messages,
     (message) => (
-      (message.type === 'remote-window-input-result' || message.type === 'remote-window-error')
-      && 'requestId' in message.payload
-      && message.payload.requestId === payload.requestId
+      message.type === 'remote-window-input-ack'
+      && message.control.sequence === input.control.sequence
     ),
-    payload.requestId,
+    input.control.sequence,
   );
-  if (response.type !== 'remote-window-input-result' || response.payload.accepted !== true) {
+  if (response.type !== 'remote-window-input-ack' || response.control.accepted !== true) {
     throw new Error(`remote input rejected: ${JSON.stringify(response)}`);
   }
   return response.payload;
@@ -544,10 +548,13 @@ async function waitForInputAccepted(
 async function sendInputAndRequireAccepted(
   ws: WebSocket,
   messages: ServerMessage[],
-  payload: RemoteWindowInputEventPayload,
+  input: { payload: RemoteWindowInputEventPayload; control: RemoteWindowInputDeliveryControl },
 ) {
-  send(ws, { type: 'remote-window-input', payload });
-  return waitForInputAccepted(messages, payload);
+  send(ws, { type: 'remote-window-input', control: input.control, payload: input.payload });
+  if (input.control.lane === 'continuous') {
+    return input.payload;
+  }
+  return waitForInputAccepted(messages, input);
 }
 
 async function main() {
@@ -967,8 +974,12 @@ async function main() {
 
     if (BURST_INPUT) {
       const payloads = inputActions.map((action) => buildInputPayload(streamId, target, action.suffix, action.event));
-      payloads.forEach((payload) => send(ws, { type: 'remote-window-input', payload }));
-      await Promise.all(payloads.map((payload) => waitForInputAccepted(messages, payload)));
+      payloads.forEach((input) => send(ws, { type: 'remote-window-input', control: input.control, payload: input.payload }));
+      await Promise.all(payloads.map((input) => (
+        input.control.lane === 'continuous'
+          ? Promise.resolve(input.payload)
+          : waitForInputAccepted(messages, input)
+      )));
       await waitForFrontmostPid(targetPid, 'burst actions accepted');
     } else {
       await sendActionEventAndRequireFocus(ws, messages, streamId, target, targetPid, 'click', inputActions[0]!.event);

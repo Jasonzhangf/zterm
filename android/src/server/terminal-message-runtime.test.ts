@@ -232,10 +232,15 @@ function createRuntime(options?: {
       phase: 'accepted' as const,
     })),
     injectInput: vi.fn(async (): Promise<RemoteWindowInputResult> => ({
-      requestId: 'remote-window-input-default',
-      streamId: 'stream-default',
-      targetId: 'target-default',
-      accepted: true,
+      control: {
+        version: 1,
+        sequence: 'remote-window-input-default',
+        accepted: true,
+        retryable: false,
+        duplicate: false,
+        receivedAtMs: 1,
+      },
+      payload: { streamId: 'stream-default', targetId: 'target-default' },
     })),
     dispose: vi.fn(),
   };
@@ -1663,18 +1668,29 @@ describe('terminal message runtime explicit error truth', () => {
   it('routes remote window input to the daemon stream owner and returns explicit acceptance', async () => {
     const { runtime, sendTransportMessage, remoteWindowStreamRuntime } = createRuntime();
     const connection = createConnection(null);
-    const inputPayload = {
-      requestId: 'rw-input-1',
-      streamId: 'stream-1',
-      targetId: 'target-1',
-      accepted: true,
+    const inputResult = {
+      control: {
+        version: 1 as const,
+        sequence: 'rw-input-1',
+        accepted: true,
+        retryable: false,
+        duplicate: false,
+        receivedAtMs: 1,
+      },
+      payload: { streamId: 'stream-1', targetId: 'target-1' },
     };
-    remoteWindowStreamRuntime.injectInput.mockResolvedValueOnce(inputPayload);
+    remoteWindowStreamRuntime.injectInput.mockResolvedValueOnce(inputResult);
 
     await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
       type: 'remote-window-input',
+      control: {
+        version: 1,
+        sequence: 'rw-input-1',
+        lane: 'reliable',
+        attempt: 1,
+        sentAtMs: 1,
+      },
       payload: {
-        requestId: 'rw-input-1',
         streamId: 'stream-1',
         targetId: 'target-1',
         event: {
@@ -1692,36 +1708,51 @@ describe('terminal message runtime explicit error truth', () => {
     })));
     await flushAsyncHandlers();
 
-    expect(remoteWindowStreamRuntime.injectInput).toHaveBeenCalledWith({
-      requestId: 'rw-input-1',
-      streamId: 'stream-1',
-      targetId: 'target-1',
-      event: expect.objectContaining({
-        kind: 'pointer',
-        phase: 'down',
-      }),
-    });
+    expect(remoteWindowStreamRuntime.injectInput).toHaveBeenCalledWith(
+      {
+        streamId: 'stream-1',
+        targetId: 'target-1',
+        event: expect.objectContaining({ kind: 'pointer', phase: 'down' }),
+      },
+      expect.objectContaining({ sequence: 'rw-input-1', lane: 'reliable' }),
+    );
     expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
-      type: 'remote-window-input-result',
-      payload: inputPayload,
+      type: 'remote-window-input-ack',
+      control: inputResult.control,
+      payload: inputResult.payload,
     });
   });
 
   it('surfaces remote window input policy errors explicitly', async () => {
     const { runtime, sendTransportMessage, remoteWindowStreamRuntime } = createRuntime();
     const connection = createConnection(null);
-    const errorPayload = {
-      requestId: 'rw-input-fail',
-      streamId: 'stream-1',
-      code: 'remote_window_input_failed',
-      message: 'remote window OS input requires bring-to-focus policy',
+    const inputResult = {
+      control: {
+        version: 1 as const,
+        sequence: 'rw-input-fail',
+        accepted: false,
+        retryable: false,
+        duplicate: false,
+        receivedAtMs: 2,
+        error: {
+          code: 'remote_window_input_failed',
+          message: 'remote window OS input requires bring-to-focus policy',
+        },
+      },
+      payload: { streamId: 'stream-1', targetId: 'target-1' },
     };
-    remoteWindowStreamRuntime.injectInput.mockResolvedValueOnce(errorPayload);
+    remoteWindowStreamRuntime.injectInput.mockResolvedValueOnce(inputResult);
 
     await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
       type: 'remote-window-input',
+      control: {
+        version: 1,
+        sequence: 'rw-input-fail',
+        lane: 'reliable',
+        attempt: 1,
+        sentAtMs: 2,
+      },
       payload: {
-        requestId: 'rw-input-fail',
         streamId: 'stream-1',
         targetId: 'target-1',
         event: {
@@ -1736,8 +1767,9 @@ describe('terminal message runtime explicit error truth', () => {
     await flushAsyncHandlers();
 
     expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
-      type: 'remote-window-error',
-      payload: errorPayload,
+      type: 'remote-window-input-ack',
+      control: inputResult.control,
+      payload: inputResult.payload,
     });
   });
 

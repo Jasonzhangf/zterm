@@ -85,6 +85,8 @@ export type {
   TerminalInputAckPayload,
   TerminalReliableInputPayload,
   TerminalSessionCapabilitiesPayload,
+  RemoteWindowInputAckControl,
+  RemoteWindowInputDeliveryControl,
   RemoteWindowInputEventPayload,
   RemoteWindowInputResultPayload,
   RemoteWindowCanvasLayoutV1,

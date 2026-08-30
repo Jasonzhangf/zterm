@@ -314,7 +314,17 @@ describe('TerminalPage remote window overlay', () => {
         streamTargetId: 'app-1',
       }), expect.stringMatching(/^rw-stream-/), expect.objectContaining({
         purpose: 'focus',
-        videoBitrate: { preset: '2mbps', bitrateMbps: 2, maxBitrateBps: 2_000_000, maxFrameRateFps: 30 },
+        videoProfile: {
+          preference: 'smooth',
+          maxBitrateBps: 6_000_000,
+          maxFrameRateFps: 30,
+          maxCaptureWidth: 1440,
+          maxCaptureHeight: 900,
+          maxFrameAgeMs: 100,
+          interactionActive: false,
+          overviewMaxBitrateBps: 250_000,
+          overviewMaxFrameRateFps: 2,
+        },
       }));
       expect(screen.getByTestId('remote-window-video')).toBeTruthy();
       expect(screen.queryByTestId('terminal-view-s1')).toBeTruthy();
@@ -562,12 +572,18 @@ describe('TerminalPage remote window overlay', () => {
     const firstPayload = remoteWindowPayloads(onSendRemoteWindowInput)[0];
     act(() => {
       remoteWindowMessageHandler?.({
-        type: 'remote-window-input-result',
+        type: 'remote-window-input-ack',
+        control: {
+          version: 1,
+          sequence: 'rw-input-accepted-1',
+          accepted: true,
+          retryable: false,
+          duplicate: false,
+          receivedAtMs: 1,
+        },
         payload: {
-          requestId: 'rw-input-accepted-1',
           streamId: firstPayload.streamId,
           targetId: firstPayload.targetId,
-          accepted: true,
         },
       });
     });
@@ -579,18 +595,28 @@ describe('TerminalPage remote window overlay', () => {
 
     act(() => {
       remoteWindowMessageHandler?.({
-        type: 'remote-window-error',
+        type: 'remote-window-input-ack',
+        control: {
+          version: 1,
+          sequence: 'rw-input-error-1',
+          accepted: false,
+          retryable: false,
+          duplicate: false,
+          receivedAtMs: 2,
+          error: {
+            code: 'remote_window_input_failed',
+            message: 'remote window input stale',
+          },
+        },
         payload: {
-          requestId: 'rw-input-error-1',
           streamId: firstPayload.streamId,
-          code: 'remote_window_input_failed',
-          message: 'remote window input stale',
+          targetId: firstPayload.targetId,
         },
       });
     });
 
     await waitFor(() => {
-      expect(screen.getByTestId('terminal-debug-remote-window-result').textContent).toContain('ERR remote_window_input_failed');
+      expect(screen.getByTestId('terminal-debug-remote-window-result').textContent).toContain('NAK rw-input-error-1 remote_window_input_failed');
       expect(screen.getByTestId('terminal-debug-remote-window-counts').textContent).toContain('A 1 · E 1');
     });
 
@@ -611,7 +637,7 @@ describe('TerminalPage remote window overlay', () => {
       button: 0,
       buttons: 1,
     });
-    // Direct Touch single-finger drag = release-time gesture/swipe
+    // Direct Touch single-finger drag publishes incremental scroll before release.
     fireEvent.pointerUp(surface, {
       pointerId: 32,
       pointerType: 'touch',
@@ -625,13 +651,11 @@ describe('TerminalPage remote window overlay', () => {
     });
     expectNoRemoteWindowInputFocus(onSendRemoteWindowInput);
     expect(onSendRemoteWindowInput.mock.calls.map((call) => call[1].event.kind)).toEqual([
-      'gesture',
+      'scroll',
     ]);
     expect(remoteWindowPayloads(onSendRemoteWindowInput).map((payload) => payload.event)).toEqual([
       expect.objectContaining({
-        kind: 'gesture',
-        gesture: 'swipe',
-        phase: 'end',
+        kind: 'scroll',
         unit: 'pixel',
       }),
     ]);
@@ -647,7 +671,7 @@ describe('TerminalPage remote window overlay', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByTestId('terminal-debug-remote-window-event').textContent).toContain('gesture:swipe');
+      expect(screen.getByTestId('terminal-debug-remote-window-event').textContent).toContain('scroll');
     });
   });
 
@@ -736,12 +760,22 @@ describe('TerminalPage remote window overlay', () => {
 
     act(() => {
       remoteWindowMessageHandler?.({
-        type: 'remote-window-error',
+        type: 'remote-window-input-ack',
+        control: {
+          version: 1,
+          sequence: 'rw-input-stale-stream',
+          accepted: false,
+          retryable: false,
+          duplicate: false,
+          receivedAtMs: 1,
+          error: {
+            code: 'remote_window_input_stream_missing',
+            message: 'remote window stream is not active',
+          },
+        },
         payload: {
-          requestId: 'rw-input-stale-stream',
           streamId,
-          code: 'remote_window_input_stream_missing',
-          message: 'remote window stream is not active',
+          targetId: 'app-1',
         },
       });
     });

@@ -26,8 +26,8 @@ export function validateRemoteWindowInputPayload(
   payload: RemoteWindowInputEventPayload,
   context: RemoteWindowInputValidationContext,
 ) {
-  if (!payload.requestId || !payload.streamId || !payload.targetId) {
-    throw new Error('remote window input requires requestId, streamId, and targetId');
+  if (!payload.streamId || !payload.targetId) {
+    throw new Error('remote window input requires streamId and targetId');
   }
   if (payload.targetId !== context.targetId) {
     throw new Error(`remote window input target mismatch: ${payload.targetId}`);

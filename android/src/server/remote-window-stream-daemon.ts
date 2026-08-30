@@ -10,6 +10,8 @@ import {
 import type {
   RemoteWindowStreamIceCandidatePayload,
   RemoteWindowInputEventPayload,
+  RemoteWindowInputAckControl,
+  RemoteWindowInputDeliveryControl,
   RemoteWindowInputResultPayload,
   RemoteWindowCanvasLayoutV1,
   RemoteWindowStreamErrorPayload,
@@ -150,7 +152,8 @@ export interface RemoteWindowStreamDaemonRuntime {
   ) => Promise<RemoteWindowStreamFocusResultPayload | RemoteWindowStreamErrorPayload>;
   injectInput: (
     payload: RemoteWindowInputEventPayload,
-  ) => Promise<RemoteWindowInputResultPayload | RemoteWindowStreamErrorPayload>;
+    control: RemoteWindowInputDeliveryControl,
+  ) => Promise<RemoteWindowInputAckMessage | null>;
   dispose: (reason?: string) => void;
 }
 
@@ -200,6 +203,27 @@ interface ActiveRemoteWindowStream extends Omit<RemoteWindowStreamSessionResourc
   focusCaptureStartedReported: boolean;
   overviewCaptureStartedReported: boolean;
   cleanupDone: boolean;
+  reliableInputTail: Promise<void>;
+  reliableInputInFlightBySequence: Map<string, Promise<RemoteWindowInputAckMessage>>;
+  reliableInputCompletedBySequence: Map<string, RemoteWindowInputAckMessage>;
+  pendingContinuousMove: PendingRemoteWindowContinuousInput | null;
+  pendingContinuousScroll: PendingRemoteWindowContinuousInput | null;
+  continuousInputDrainScheduled: boolean;
+  continuousInputDrainActive: boolean;
+}
+
+interface RemoteWindowInputAckMessage {
+  control: RemoteWindowInputAckControl;
+  payload: RemoteWindowInputResultPayload;
+}
+
+interface PendingRemoteWindowContinuousInput {
+  payload: RemoteWindowInputEventPayload;
+  daemonReceivedAtMs: number;
+  waiters: Array<{
+    control: RemoteWindowInputDeliveryControl;
+    resolve: (message: RemoteWindowInputAckMessage | null) => void;
+  }>;
 }
 
 interface RemoteWindowPendingMediaFrame {
@@ -357,7 +381,7 @@ export function createRemoteWindowStreamDaemonRuntime(
     return getRemoteWindowInputHelper().send(buildRemoteWindowInputConfig(payload, target, {
       daemonReceivedAtMs: options.daemonReceivedAtMs,
       skipFocus,
-    }));
+    }), options.delivery);
   });
   const now = deps.now || (() => new Date().toISOString());
   const captureSourceFactory = deps.captureSourceFactory || startScreenCaptureKitFrameSource;
@@ -430,6 +454,12 @@ export function createRemoteWindowStreamDaemonRuntime(
     markStreamClosed(entry.streamId);
     entry.pendingFocusFrame = null;
     entry.pendingOverviewFrame = null;
+    entry.pendingContinuousMove?.waiters.forEach((waiter) => waiter.resolve(null));
+    entry.pendingContinuousScroll?.waiters.forEach((waiter) => waiter.resolve(null));
+    entry.pendingContinuousMove = null;
+    entry.pendingContinuousScroll = null;
+    entry.reliableInputInFlightBySequence.clear();
+    entry.reliableInputCompletedBySequence.clear();
     releaseRemoteWindowStreamSessionResources({
       ...entry,
       sendStatus: entry.handlers.sendStatus,
@@ -694,6 +724,13 @@ export function createRemoteWindowStreamDaemonRuntime(
         focusCaptureStartedReported: false,
         overviewCaptureStartedReported: false,
         cleanupDone: false,
+        reliableInputTail: Promise.resolve(),
+        reliableInputInFlightBySequence: new Map(),
+        reliableInputCompletedBySequence: new Map(),
+        pendingContinuousMove: null,
+        pendingContinuousScroll: null,
+        continuousInputDrainScheduled: false,
+        continuousInputDrainActive: false,
       };
       pendingIceCandidatesByStream.delete(payload.streamId);
       entry = streamEntry;
@@ -1282,56 +1319,265 @@ export function createRemoteWindowStreamDaemonRuntime(
     };
   }
 
-  async function injectInput(
+  const buildInputAck = (
+    control: RemoteWindowInputDeliveryControl,
     payload: RemoteWindowInputEventPayload,
-  ): Promise<RemoteWindowInputResultPayload | RemoteWindowStreamErrorPayload> {
-    const entry = activeStreams.get(payload.streamId);
-    if (!entry || entry.cleanupDone) {
-      return buildStreamError(payload, 'remote_window_input_stream_missing', `remote window stream is not active: ${payload.streamId || 'missing'}`);
+    options: {
+      accepted: boolean;
+      duplicate?: boolean;
+      error?: { code: string; message: string; retryable?: boolean };
+      result?: Omit<RemoteWindowInputResultPayload, 'streamId' | 'targetId'>;
+    },
+  ): RemoteWindowInputAckMessage => ({
+    control: {
+      version: 1,
+      sequence: control.sequence,
+      accepted: options.accepted,
+      retryable: options.error?.retryable === true,
+      duplicate: options.duplicate === true,
+      receivedAtMs: nowMs(),
+      ...(options.error ? {
+        error: {
+          code: options.error.code,
+          message: truncateRemoteWindowErrorMessage(options.error.message),
+        },
+      } : {}),
+    },
+    payload: {
+      streamId: payload.streamId,
+      targetId: payload.targetId,
+      ...options.result,
+    },
+  });
+
+  const validateInputDeliveryControl = (
+    payload: RemoteWindowInputEventPayload,
+    control: RemoteWindowInputDeliveryControl,
+  ) => {
+    if (
+      control.version !== 1
+      || !control.sequence.trim()
+      || !Number.isInteger(control.attempt)
+      || control.attempt < 1
+      || !Number.isFinite(control.sentAtMs)
+    ) {
+      throw new Error('remote window input delivery control is invalid');
     }
-    const daemonReceivedAtMs = nowMs();
-    try {
-      validateRemoteWindowInputPayload(payload, {
-        targetId: entry.targetId,
-        target: entry.target,
-        canvasLayout: entry.canvasLayout,
-      });
-      const mappedPayload: RemoteWindowInputEventPayload = {
-        ...payload,
-        event: buildRemoteWindowInputConfig(payload, entry.target, {
-          daemonReceivedAtMs,
-          canvasLayout: entry.canvasLayout,
-        }).event,
-      };
-      await runRemoteWindowInputEvent(mappedPayload, entry.target, {
-        swiftBinary,
-        runTmux: deps.runTmux,
+    const continuous = payload.event.kind === 'scroll'
+      || (payload.event.kind === 'pointer' && payload.event.phase === 'move');
+    const expectedLane = continuous ? 'continuous' : 'reliable';
+    if (control.lane !== expectedLane) {
+      throw new Error(`remote window input delivery lane mismatch: expected ${expectedLane}`);
+    }
+  };
+
+  const executeInput = async (
+    entry: ActiveRemoteWindowStream,
+    payload: RemoteWindowInputEventPayload,
+    control: RemoteWindowInputDeliveryControl,
+    daemonReceivedAtMs: number,
+  ): Promise<RemoteWindowInputResultPayload> => {
+    validateRemoteWindowInputPayload(payload, {
+      targetId: entry.targetId,
+      target: entry.target,
+      canvasLayout: entry.canvasLayout,
+    });
+    const mappedPayload: RemoteWindowInputEventPayload = {
+      ...payload,
+      event: buildRemoteWindowInputConfig(payload, entry.target, {
         daemonReceivedAtMs,
-      });
-      if (payload.event.kind === 'window-resize') {
-        const resized = await applyRemoteWindowTargetResize(entry, payload.event, now());
-        return {
-          requestId: payload.requestId,
-          streamId: payload.streamId,
-          targetId: payload.targetId,
-          accepted: true,
-          target: resized.target,
-          capture: resized.capture,
-        };
-      }
+        canvasLayout: entry.canvasLayout,
+      }).event,
+    };
+    await runRemoteWindowInputEvent(mappedPayload, entry.target, {
+      swiftBinary,
+      runTmux: deps.runTmux,
+      daemonReceivedAtMs,
+      delivery: {
+        lane: control.lane,
+        ...(control.lane === 'continuous' ? { maxAgeMs: entry.maxFrameAgeMs } : {}),
+      },
+    });
+    if (payload.event.kind === 'window-resize') {
+      const resized = await applyRemoteWindowTargetResize(entry, payload.event, now());
       return {
-        requestId: payload.requestId,
         streamId: payload.streamId,
         targetId: payload.targetId,
-        accepted: true,
+        target: resized.target,
+        capture: resized.capture,
       };
-    } catch (error) {
-      return buildStreamError(
-        payload,
-        'remote_window_input_failed',
-        error instanceof Error ? error.message : 'remote window input failed',
-      );
     }
+    return {
+      streamId: payload.streamId,
+      targetId: payload.targetId,
+    };
+  };
+
+  const rememberCompletedReliableInput = (
+    entry: ActiveRemoteWindowStream,
+    sequence: string,
+    message: RemoteWindowInputAckMessage,
+  ) => {
+    entry.reliableInputCompletedBySequence.set(sequence, message);
+    if (entry.reliableInputCompletedBySequence.size > 256) {
+      const oldest = entry.reliableInputCompletedBySequence.keys().next().value;
+      if (typeof oldest === 'string') {
+        entry.reliableInputCompletedBySequence.delete(oldest);
+      }
+    }
+  };
+
+  const drainContinuousInput = async (entry: ActiveRemoteWindowStream) => {
+    if (entry.continuousInputDrainActive || !isCurrentStream(entry)) {
+      return;
+    }
+    entry.continuousInputDrainScheduled = false;
+    entry.continuousInputDrainActive = true;
+    const pending = [entry.pendingContinuousMove, entry.pendingContinuousScroll].filter(
+      (item): item is PendingRemoteWindowContinuousInput => item !== null,
+    );
+    entry.pendingContinuousMove = null;
+    entry.pendingContinuousScroll = null;
+    for (const item of pending) {
+      if (!isCurrentStream(entry) || nowMs() - item.daemonReceivedAtMs > entry.maxFrameAgeMs) {
+        item.waiters.forEach((waiter) => waiter.resolve(null));
+        continue;
+      }
+      try {
+        await executeInput(entry, item.payload, item.waiters[item.waiters.length - 1]!.control, item.daemonReceivedAtMs);
+        item.waiters.forEach((waiter) => waiter.resolve(null));
+      } catch (error) {
+        item.waiters.forEach((waiter) => waiter.resolve(buildInputAck(waiter.control, item.payload, {
+          accepted: false,
+          error: {
+            code: 'remote_window_input_failed',
+            message: error instanceof Error ? error.message : 'remote window input failed',
+          },
+        })));
+      }
+    }
+    entry.continuousInputDrainActive = false;
+    if (isCurrentStream(entry) && (entry.pendingContinuousMove || entry.pendingContinuousScroll)) {
+      scheduleContinuousInputDrain(entry);
+    }
+  };
+
+  const scheduleContinuousInputDrain = (entry: ActiveRemoteWindowStream) => {
+    if (entry.continuousInputDrainScheduled || entry.continuousInputDrainActive) {
+      return;
+    }
+    entry.continuousInputDrainScheduled = true;
+    setImmediate(() => {
+      void drainContinuousInput(entry);
+    });
+  };
+
+  async function injectInput(
+    payload: RemoteWindowInputEventPayload,
+    control: RemoteWindowInputDeliveryControl,
+  ): Promise<RemoteWindowInputAckMessage | null> {
+    try {
+      validateInputDeliveryControl(payload, control);
+    } catch (error) {
+      return buildInputAck(control, payload, {
+        accepted: false,
+        error: {
+          code: 'remote_window_input_delivery_invalid',
+          message: error instanceof Error ? error.message : 'remote window input delivery control is invalid',
+        },
+      });
+    }
+    const entry = activeStreams.get(payload.streamId);
+    if (!entry || entry.cleanupDone) {
+      return buildInputAck(control, payload, {
+        accepted: false,
+        error: {
+          code: 'remote_window_input_stream_missing',
+          message: `remote window stream is not active: ${payload.streamId || 'missing'}`,
+        },
+      });
+    }
+    const daemonReceivedAtMs = nowMs();
+    if (control.lane === 'continuous') {
+      return new Promise<RemoteWindowInputAckMessage | null>((resolve) => {
+        const waiter = { control, resolve };
+        if (payload.event.kind === 'scroll') {
+          const current = entry.pendingContinuousScroll;
+          entry.pendingContinuousScroll = current && current.payload.event.kind === 'scroll'
+            ? {
+                payload: {
+                  ...payload,
+                  event: {
+                    ...payload.event,
+                    deltaX: current.payload.event.deltaX + payload.event.deltaX,
+                    deltaY: current.payload.event.deltaY + payload.event.deltaY,
+                  },
+                },
+                daemonReceivedAtMs: current.daemonReceivedAtMs,
+                waiters: [...current.waiters, waiter],
+              }
+            : { payload, daemonReceivedAtMs, waiters: [waiter] };
+        } else {
+          entry.pendingContinuousMove?.waiters.forEach((pendingWaiter) => pendingWaiter.resolve(null));
+          entry.pendingContinuousMove = { payload, daemonReceivedAtMs, waiters: [waiter] };
+        }
+        scheduleContinuousInputDrain(entry);
+      });
+    }
+    const completed = entry.reliableInputCompletedBySequence.get(control.sequence);
+    if (completed) {
+      return {
+        ...completed,
+        control: { ...completed.control, duplicate: true, receivedAtMs: nowMs() },
+      };
+    }
+    const active = entry.reliableInputInFlightBySequence.get(control.sequence);
+    if (active) {
+      const result = await active;
+      return {
+        ...result,
+        control: { ...result.control, duplicate: true, receivedAtMs: nowMs() },
+      };
+    }
+    const task = entry.reliableInputTail.then(async () => {
+      if (!isCurrentStream(entry)) {
+        return buildInputAck(control, payload, {
+          accepted: false,
+          error: {
+            code: 'remote_window_input_stream_missing',
+            message: `remote window stream is not active: ${payload.streamId || 'missing'}`,
+          },
+        });
+      }
+      try {
+        const result = await executeInput(entry, payload, control, daemonReceivedAtMs);
+        return buildInputAck(control, payload, {
+          accepted: true,
+          result: {
+            ...(result.target ? { target: result.target } : {}),
+            ...(result.capture ? { capture: result.capture } : {}),
+          },
+        });
+      } catch (error) {
+        return buildInputAck(control, payload, {
+          accepted: false,
+          error: {
+            code: 'remote_window_input_failed',
+            message: error instanceof Error ? error.message : 'remote window input failed',
+          },
+        });
+      }
+    });
+    entry.reliableInputTail = task.then(() => undefined, () => undefined);
+    entry.reliableInputInFlightBySequence.set(control.sequence, task);
+    const result = await task;
+    if (entry.reliableInputInFlightBySequence.get(control.sequence) === task) {
+      entry.reliableInputInFlightBySequence.delete(control.sequence);
+    }
+    if (isCurrentStream(entry)) {
+      rememberCompletedReliableInput(entry, control.sequence, result);
+    }
+    return result;
   }
 
   function dispose(reason = 'remote window daemon runtime disposed') {

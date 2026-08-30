@@ -484,12 +484,10 @@ export interface RemoteWindowStreamQualityResultPayload {
 }
 
 export interface RemoteWindowInputEventPayload {
-  requestId: string;
   streamId: string;
   targetId: string;
   /** Required for composite-canvas input; daemon rejects stale/missing generations. */
   layoutGeneration?: number;
-  clientSentAt?: number;
   event:
     | {
         kind: 'focus';
@@ -570,11 +568,30 @@ export interface RemoteWindowInputEventPayload {
       };
 }
 
+export interface RemoteWindowInputDeliveryControl {
+  version: 1;
+  sequence: string;
+  lane: 'reliable' | 'continuous';
+  attempt: number;
+  sentAtMs: number;
+}
+
+export interface RemoteWindowInputAckControl {
+  version: 1;
+  sequence: string;
+  accepted: boolean;
+  retryable: boolean;
+  duplicate: boolean;
+  receivedAtMs: number;
+  error?: {
+    code: string;
+    message: string;
+  };
+}
+
 export interface RemoteWindowInputResultPayload {
-  requestId: string;
   streamId: string;
   targetId: string;
-  accepted: boolean;
   target?: RemoteWindowStreamTargetManifest;
   capture?: {
     source: 'ScreenCaptureKit';
@@ -728,7 +745,11 @@ export type BridgeClientMessage =
   | { type: 'remote-window-stream-ice-candidate'; payload: RemoteWindowStreamIceCandidatePayload }
   | { type: 'remote-window-stream-stop-request'; payload: RemoteWindowStreamStopRequestPayload }
   | { type: 'remote-window-stream-quality-request'; payload: RemoteWindowStreamQualityRequestPayload }
-  | { type: 'remote-window-input'; payload: RemoteWindowInputEventPayload }
+  | {
+      type: 'remote-window-input';
+      control: RemoteWindowInputDeliveryControl;
+      payload: RemoteWindowInputEventPayload;
+    }
   | { type: 'file-list-request'; payload: FileListRequestPayload }
   | { type: 'file-create-directory-request'; payload: FileCreateDirectoryRequestPayload }
   | { type: 'file-download-request'; payload: FileDownloadRequestPayload }
@@ -803,7 +824,11 @@ export type BridgeServerControlMessage =
   | { type: 'remote-window-stream-status'; payload: RemoteWindowStreamStatusPayload }
   | { type: 'remote-window-stream-focus-result'; payload: RemoteWindowStreamFocusResultPayload }
   | { type: 'remote-window-stream-quality-result'; payload: RemoteWindowStreamQualityResultPayload }
-  | { type: 'remote-window-input-result'; payload: RemoteWindowInputResultPayload }
+  | {
+      type: 'remote-window-input-ack';
+      control: RemoteWindowInputAckControl;
+      payload: RemoteWindowInputResultPayload;
+    }
   | { type: 'input-ack'; payload: TerminalInputAckPayload }
   | { type: 'remote-window-error'; payload: RemoteWindowStreamErrorPayload }
   | { type: 'file-download-chunk'; payload: FileDownloadChunkPayload }

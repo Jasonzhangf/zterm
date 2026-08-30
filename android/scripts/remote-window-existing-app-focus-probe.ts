@@ -4,6 +4,7 @@ import { spawnSync } from 'child_process';
 import { setTimeout as delay } from 'timers/promises';
 import type {
   ClientMessage,
+  RemoteWindowInputDeliveryControl,
   RemoteWindowInputEventPayload,
   RemoteWindowStreamTargetManifest,
   ServerMessage,
@@ -172,18 +173,17 @@ function pickTarget(targets: RemoteWindowStreamTargetManifest[]) {
 
 async function waitForInputAccepted(
   messages: ServerMessage[],
-  payload: RemoteWindowInputEventPayload,
+  sequence: string,
 ) {
   const response = await waitForServerMessage(
     messages,
     (message) => (
-      (message.type === 'remote-window-input-result' || message.type === 'remote-window-error')
-      && 'requestId' in message.payload
-      && message.payload.requestId === payload.requestId
+      message.type === 'remote-window-input-ack'
+      && message.control.sequence === sequence
     ),
-    payload.requestId,
+    sequence,
   );
-  if (response.type !== 'remote-window-input-result' || response.payload.accepted !== true) {
+  if (response.type !== 'remote-window-input-ack' || response.control.accepted !== true) {
     fail(`remote input rejected: ${JSON.stringify(response)}`);
   }
   return response.payload;
@@ -425,14 +425,19 @@ async function main() {
   }
 
   const focusPayload: RemoteWindowInputEventPayload = {
-    requestId: requestId('focus'),
     streamId,
     targetId: target.streamTargetId,
-    clientSentAt: Date.now(),
     event: { kind: 'focus' },
   };
-  send(ws, { type: 'remote-window-input', payload: focusPayload });
-  await waitForInputAccepted(messages, focusPayload);
+  const focusControl: RemoteWindowInputDeliveryControl = {
+    version: 1,
+    sequence: requestId('focus'),
+    lane: 'reliable',
+    attempt: 1,
+    sentAtMs: Date.now(),
+  };
+  send(ws, { type: 'remote-window-input', control: focusControl, payload: focusPayload });
+  await waitForInputAccepted(messages, focusControl.sequence);
   await waitForFrontmostBundleId(TARGET_BUNDLE_ID, 'remote focus accepted');
 
   send(ws, {

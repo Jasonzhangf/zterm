@@ -2688,12 +2688,18 @@ describe('RemoteWindowOverlay', () => {
     };
     act(() => {
       remoteWindowMessageHandler?.({
-        type: 'remote-window-input-result',
+        type: 'remote-window-input-ack',
+        control: {
+          version: 1,
+          sequence: 'rw-resize-ack',
+          accepted: true,
+          retryable: false,
+          duplicate: false,
+          receivedAtMs: 1,
+        },
         payload: {
-          requestId: 'rw-resize-ack',
           streamId: resizePayload.streamId,
           targetId: 'app-1',
-          accepted: true,
           target: resizedTarget,
           capture: {
             source: 'ScreenCaptureKit',
@@ -2764,12 +2770,18 @@ describe('RemoteWindowOverlay', () => {
 
     act(() => {
       remoteWindowMessageHandler?.({
-        type: 'remote-window-input-result',
+        type: 'remote-window-input-ack',
+        control: {
+          version: 1,
+          sequence: 'rw-resize-ack',
+          accepted: true,
+          retryable: false,
+          duplicate: false,
+          receivedAtMs: 1,
+        },
         payload: {
-          requestId: 'rw-resize-ack',
           streamId,
           targetId: 'app-1',
-          accepted: true,
           target: resizedTarget,
           capture: {
             source: 'ScreenCaptureKit',
