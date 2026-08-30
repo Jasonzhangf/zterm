@@ -102,9 +102,12 @@ func makeStreamConfiguration(
     let outputH = entry.outputHeight ?? Int(entry.cropRect.height.rounded())
     streamConfiguration.width = max(1, outputW)
     streamConfiguration.height = max(1, outputH)
+    // sourceRect uses the display's logical coordinate system, even for a
+    // display filter that includes an independent window. The catalog
+    // rectangles are already in that coordinate space.
     streamConfiguration.sourceRect = CGRect(
-        x: max(0, entry.cropRect.x - entry.windowBounds.x),
-        y: max(0, entry.cropRect.y - entry.windowBounds.y),
+        x: max(0, entry.cropRect.x),
+        y: max(0, entry.cropRect.y),
         width: max(1, entry.cropRect.width),
         height: max(1, entry.cropRect.height)
     )

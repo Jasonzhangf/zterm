@@ -1675,6 +1675,10 @@ sleep 2
     });
     expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('streamConfiguration.queueDepth = max(3, min(3, queueDepth))');
     expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('streamConfiguration.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(max(1, frameRate)))');
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('x: max(0, entry.cropRect.x)');
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('y: max(0, entry.cropRect.y)');
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).not.toContain('entry.cropRect.x - entry.windowBounds.x');
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).not.toContain('entry.cropRect.y - entry.windowBounds.y');
     expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).not.toContain('SCScreenshotManager');
     expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('DispatchQueue.global(qos: .userInitiated).async');
     expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('Task {');
