@@ -2369,6 +2369,167 @@ setInterval(() => {}, 1000);
     ]);
   });
 
+  it('keeps one latest focus frame, drops over-age work, and applies the active age budget', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    const fakeTrack = makeFakeMediaStreamTrack();
+    const fakeVideoSource = {
+      createTrack: vi.fn(() => fakeTrack),
+      onFrame: vi.fn(),
+    };
+    let clockMs = 1_000;
+    let pushFrame: (frame: {
+      width: number;
+      height: number;
+      rgba: Uint8Array;
+      capturedAtMs?: number;
+    }) => void = () => undefined;
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      nowMs: () => clockMs,
+      captureSourceFactory: vi.fn(async (_target, options) => {
+        pushFrame = options.onFrame;
+        return makeControllableCaptureSource(options);
+      }),
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => fakeVideoSource as any),
+      rgbaToI420: vi.fn((rgba, i420) => {
+        i420.data.fill(rgba.data[0] ?? 0);
+      }),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    await runtime.startStream({
+      requestId: 'rw-latest-focus',
+      streamId: 'stream-latest-focus',
+      mediaPlan: 'single-focus',
+      mediaPlanVersion: 1,
+      target: makeStreamTarget(),
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+      videoProfile: smoothVideoProfile,
+    });
+
+    pushFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(1), capturedAtMs: clockMs });
+    pushFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(2), capturedAtMs: clockMs });
+    pushFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(3), capturedAtMs: clockMs });
+    await flushPromiseQueue();
+    expect(fakeVideoSource.onFrame).toHaveBeenCalledTimes(1);
+    expect(fakeVideoSource.onFrame).toHaveBeenLastCalledWith({
+      width: 2,
+      height: 2,
+      data: new Uint8Array(6).fill(3),
+    });
+
+    clockMs = 1_120;
+    pushFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(4), capturedAtMs: 1_000 });
+    await flushPromiseQueue();
+    expect(fakeVideoSource.onFrame).toHaveBeenCalledTimes(1);
+
+    await runtime.updateStreamQuality({
+      requestId: 'rw-latest-focus-quality',
+      streamId: 'stream-latest-focus',
+      streamGroupId: 'stream-latest-focus',
+      mediaPlan: 'single-focus',
+      mediaPlanVersion: 1,
+      revision: 1,
+      targetId: makeStreamTarget().streamTargetId,
+      videoProfile: qualityVideoProfile,
+    });
+    pushFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(5), capturedAtMs: 1_000 });
+    await flushPromiseQueue();
+    expect(fakeVideoSource.onFrame).toHaveBeenCalledTimes(2);
+    expect(fakeVideoSource.onFrame).toHaveBeenLastCalledWith({
+      width: 2,
+      height: 2,
+      data: new Uint8Array(6).fill(5),
+    });
+
+    await runtime.stopStream({
+      requestId: 'rw-latest-focus-stop',
+      streamId: 'stream-latest-focus',
+    });
+    pushFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(6), capturedAtMs: clockMs });
+    await flushPromiseQueue();
+    expect(fakeVideoSource.onFrame).toHaveBeenCalledTimes(2);
+  });
+
+  it('drains focus and overview through independent latest-frame slots', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    const focusVideoSource = {
+      createTrack: vi.fn(() => makeFakeMediaStreamTrack()),
+      onFrame: vi.fn(),
+    };
+    const overviewVideoSource = {
+      createTrack: vi.fn(() => makeFakeMediaStreamTrack()),
+      onFrame: vi.fn(),
+    };
+    const videoSources = [focusVideoSource, overviewVideoSource];
+    let videoSourceIndex = 0;
+    let focusFrame: Parameters<RemoteWindowCaptureSourceFactory>[1]['onFrame'] = () => undefined;
+    let overviewFrame: Parameters<RemoteWindowCaptureSourceFactory>[1]['onFrame'] = () => undefined;
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      nowMs: () => 2_000,
+      captureSourceFactory: vi.fn(async (target, options) => {
+        if (target.compositeWindows?.length) {
+          overviewFrame = options.onFrame;
+        } else {
+          focusFrame = options.onFrame;
+        }
+        return makeControllableCaptureSource(options);
+      }),
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => videoSources[videoSourceIndex++] as any),
+      rgbaToI420: vi.fn((rgba, i420) => {
+        i420.data.fill(rgba.data[0] ?? 0);
+      }),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+    const compositeTarget = {
+      ...makeStreamTarget(),
+      videoTarget: {
+        ...makeStreamTarget().videoTarget,
+        kind: 'app-window' as const,
+        appBundleId: 'com.google.Chrome',
+        windowId: 'app-window:487:64',
+      },
+      compositeWindows: [{
+        windowId: 'app-window:487:65',
+        title: 'Second window',
+        windowBoundsTopLeftPx: { x: 0, y: 0, width: 800, height: 600 },
+        cropRectTopLeftPx: { x: 0, y: 0, width: 800, height: 600 },
+      }],
+    };
+
+    await runtime.startStream({
+      requestId: 'rw-independent-lanes',
+      streamId: 'stream-independent-lanes',
+      mediaPlan: 'overview-plus-focus',
+      mediaPlanVersion: 1,
+      target: compositeTarget,
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+    });
+
+    focusFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(1), capturedAtMs: 2_000 });
+    focusFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(2), capturedAtMs: 2_000 });
+    overviewFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(9), capturedAtMs: 2_000 });
+    await flushPromiseQueue();
+
+    expect(focusVideoSource.onFrame).toHaveBeenCalledTimes(1);
+    expect(focusVideoSource.onFrame).toHaveBeenCalledWith({
+      width: 2,
+      height: 2,
+      data: new Uint8Array(6).fill(2),
+    });
+    expect(overviewVideoSource.onFrame).toHaveBeenCalledTimes(1);
+    expect(overviewVideoSource.onFrame).toHaveBeenCalledWith({
+      width: 2,
+      height: 2,
+      data: new Uint8Array(6).fill(9),
+    });
+  });
+
   it('does not replay frames after the stream is stopped', async () => {
     const fakePeer = new FakeRemoteWindowPeerConnection();
     fakePeer.connectionState = 'new';
