@@ -403,7 +403,7 @@ describe('useSessionHistoryStorage daemon-first truth', () => {
     ]);
   });
 
-  it('marks missing stored session names against remote tmux truth for the matching server only', () => {
+  it('physically prunes stored session names missing from confirmed remote tmux truth', () => {
     const { result } = renderHook(() => useSessionHistoryStorage());
 
     act(() => {
@@ -439,14 +439,14 @@ describe('useSessionHistoryStorage daemon-first truth', () => {
     expect(result.current.sessionGroups).toEqual(expect.arrayContaining([
       expect.objectContaining({
         daemonHostId: 'daemon-host-a',
-        sessionNames: ['logs', 'main', 'stale'],
-        missingSessionNames: ['stale'],
+        sessionNames: ['logs', 'main'],
+        missingSessionNames: [],
       }),
       expect.objectContaining({ daemonHostId: 'daemon-host-b', sessionNames: ['other'] }),
     ]));
   });
 
-  it('marks all stored session names missing when remote tmux truth no longer contains any selected session', () => {
+  it('removes a remote-owned stored group when confirmed tmux truth is empty', () => {
     const { result } = renderHook(() => useSessionHistoryStorage());
 
     act(() => {
@@ -471,13 +471,7 @@ describe('useSessionHistoryStorage daemon-first truth', () => {
       );
     });
 
-    expect(result.current.sessionGroups).toEqual([
-      expect.objectContaining({
-        daemonHostId: 'daemon-host-a',
-        sessionNames: ['stale'],
-        missingSessionNames: ['stale'],
-      }),
-    ]);
+    expect(result.current.sessionGroups).toEqual([]);
   });
 
   it('clears last entered session when remote tmux truth no longer contains it', () => {
@@ -507,8 +501,8 @@ describe('useSessionHistoryStorage daemon-first truth', () => {
     });
 
     expect(result.current.sessionGroups[0]).toEqual(expect.objectContaining({
-      sessionNames: ['logs', 'main'],
-      missingSessionNames: ['logs'],
+      sessionNames: ['main'],
+      missingSessionNames: [],
       lastOpenedSessionName: undefined,
     }));
   });
@@ -528,6 +522,13 @@ describe('useSessionHistoryStorage daemon-first truth', () => {
         { bridgeHost: '100.64.0.10', bridgePort: 3333, daemonHostId: 'daemon-host-a' },
         [],
       );
+      result.current.setSessionGroupSelection({
+        name: 'Daemon A',
+        bridgeHost: '100.64.0.10',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-host-a',
+        sessionNames: ['main', 'logs'],
+      });
       result.current.pruneSessionGroupSelectionToRemoteTruth(
         { bridgeHost: '100.64.0.10', bridgePort: 3333, daemonHostId: 'daemon-host-a' },
         ['main', 'logs'],

@@ -76,12 +76,8 @@ export function mergeRelayPresenceWithDirectoryTruth(
       daemon: {
         ...directoryDevice.daemon,
         ...device.daemon,
-        endpoints: device.daemon.endpoints?.length
-          ? device.daemon.endpoints
-          : directoryDevice.daemon.endpoints,
-        sessions: device.daemon.sessions?.length
-          ? device.daemon.sessions
-          : directoryDevice.daemon.sessions,
+        endpoints: directoryDevice.daemon.endpoints,
+        sessions: directoryDevice.daemon.sessions,
       },
     };
   });

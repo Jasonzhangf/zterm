@@ -366,7 +366,8 @@ export function useSessionHistoryStorage(
     target: Pick<SessionGroupHistory, 'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'terminalBackend'>,
     remoteSessionNames: string[],
   ) => {
-    const normalizedRemoteSessionNames = new Set(normalizeRemoteTmuxSessionNames(remoteSessionNames));
+    const normalizedRemoteSessionNames = normalizeRemoteTmuxSessionNames(remoteSessionNames);
+    const remoteSessionNameSet = new Set(normalizedRemoteSessionNames);
     setSessionGroups((current) => {
       const canonicalTarget = canonicalizeSessionGroupOwner(target, relayDevicesRef.current);
       let changed = false;
@@ -374,20 +375,23 @@ export function useSessionHistoryStorage(
         if (!sessionGroupOwnersMatch(item, canonicalTarget)) {
           return [item];
         }
-        const nextMissingSessionNames = item.sessionNames
-          .filter((sessionName) => !normalizedRemoteSessionNames.has(sessionName))
-          .sort((a, b) => a.localeCompare(b));
-        const nextLastOpenedSessionName = item.lastOpenedSessionName && normalizedRemoteSessionNames.has(item.lastOpenedSessionName)
+        if (normalizedRemoteSessionNames.length === 0) {
+          changed = true;
+          return [];
+        }
+        const nextLastOpenedSessionName = item.lastOpenedSessionName && remoteSessionNameSet.has(item.lastOpenedSessionName)
           ? item.lastOpenedSessionName
           : undefined;
-        if ((item.missingSessionNames || []).join('\u0000') === nextMissingSessionNames.join('\u0000')
+        if (item.sessionNames.join('\u0000') === normalizedRemoteSessionNames.join('\u0000')
+          && (item.missingSessionNames || []).length === 0
           && item.lastOpenedSessionName === nextLastOpenedSessionName) {
           return [item];
         }
         changed = true;
         return [{
           ...item,
-          missingSessionNames: nextMissingSessionNames,
+          sessionNames: normalizedRemoteSessionNames,
+          missingSessionNames: [],
           lastOpenedSessionName: nextLastOpenedSessionName,
         }];
       });

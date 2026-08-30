@@ -230,6 +230,77 @@ describe('relay account directory runtime', () => {
     });
   });
 
+  it('uses the latest complete daemon snapshot instead of unioning stale endpoints and sessions', () => {
+    const directory = normalizeRelayAccountDirectory({
+      ...directoryPayload,
+      devices: [
+        {
+          ...directoryPayload.devices[0],
+          deviceId: 'old-registration',
+          daemon: {
+            ...directoryPayload.devices[0].daemon,
+            presence: {
+              connected: true,
+              lastSeenAt: '2026-06-28T10:01:00.000Z',
+            },
+            endpoints: [
+              ...directoryPayload.devices[0].daemon!.endpoints,
+              {
+                id: 'ipv4:daemon-host',
+                kind: 'ipv4',
+                host: '192.168.0.3',
+                port: 3333,
+                authRequired: true,
+                lastSeenAt: '2026-06-28T10:01:00.000Z',
+              },
+            ],
+            sessions: [
+              ...directoryPayload.devices[0].daemon!.sessions,
+              {
+                name: 'deleted-session',
+                updatedAt: '2026-06-28T10:01:00.000Z',
+              },
+            ],
+          },
+        },
+        {
+          ...directoryPayload.devices[0],
+          deviceId: 'current-registration',
+          daemon: {
+            ...directoryPayload.devices[0].daemon,
+            presence: {
+              connected: true,
+              lastSeenAt: '2026-06-28T10:03:00.000Z',
+            },
+            endpoints: [{
+              id: 'tailscale:daemon-host',
+              kind: 'tailscale',
+              host: '100.66.1.82',
+              port: 3333,
+              authRequired: true,
+              lastSeenAt: '2026-06-28T10:03:00.000Z',
+            }],
+            sessions: [{
+              name: 'main',
+              updatedAt: '2026-06-28T10:03:00.000Z',
+            }],
+          },
+        },
+      ],
+    });
+
+    const snapshots = projectRelayDirectoryDeviceSnapshots(directory);
+
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots[0]).toMatchObject({
+      deviceId: 'current-registration',
+      daemon: {
+        endpoints: [{ id: 'tailscale:daemon-host' }],
+        sessions: [{ name: 'main' }],
+      },
+    });
+  });
+
   it('keeps different daemon hosts as separate machine rows', () => {
     const directory = normalizeRelayAccountDirectory({
       ...directoryPayload,

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { useTraversalRelayAccount } from '../../hooks/useTraversalRelayAccount';
 import {
   canonicalizeBridgeServerPresets,
@@ -21,6 +21,7 @@ import { SettingsSectionTitle, settingsInputStyle, settingsSectionStyle } from '
 
 interface ConnectionConfigSectionProps {
   settings: BridgeSettings;
+  relayDevices: TraversalRelayDeviceSnapshot[];
   onSettingsChange: (updater: (current: BridgeSettings) => BridgeSettings) => void;
   onRemoveDefaultServer: () => void;
   onRelaySettingsChange: (settings: TraversalRelayClientSettings | undefined) => void;
@@ -139,13 +140,13 @@ export function buildConnectionConfigEntries(
 
 export function ConnectionConfigSection({
   settings,
+  relayDevices,
   onSettingsChange,
   onRemoveDefaultServer,
   onRelaySettingsChange,
 }: ConnectionConfigSectionProps) {
   const {
     account,
-    relayDevices,
     relayStatus,
     relayBusy,
     syncRelay,
@@ -153,33 +154,6 @@ export function ConnectionConfigSection({
   } = useTraversalRelayAccount(settings.traversalRelay);
 
   const loggedIn = Boolean(account?.accessToken || settings.traversalRelay?.accessToken);
-  // Auto-sync relay daemon devices into the bridge server list whenever the
-  // device set changes (login, refresh, app upgrade with stored session).
-  const syncedDeviceIdsRef = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    for (const device of relayDevices) {
-      if (syncedDeviceIdsRef.current.has(device.deviceId)) {
-        continue;
-      }
-      syncedDeviceIdsRef.current.add(device.deviceId);
-      const endpoints = device.daemon.endpoints || [];
-      const preferred = endpoints.find((e) => e.kind === 'tailscale')
-        || endpoints.find((e) => e.kind === 'ipv4' && e.host)
-        || endpoints.find((e) => e.host);
-      if (!preferred?.host || !preferred.port) {
-        continue;
-      }
-      onSettingsChange((current) => upsertBridgeServer(current, {
-        name: device.deviceName,
-        targetHost: preferred.host!,
-        targetPort: preferred.port!,
-        authToken: preferred.authToken,
-        relayHostId: device.daemon.hostId,
-        relayDeviceId: device.deviceId,
-        relayDeviceName: device.deviceName,
-      }));
-    }
-  }, [relayDevices, onSettingsChange]);
   const relayHost = new URL(getDefaultTraversalRelayBaseUrl()).hostname;
   const accountName = account?.user?.username || account?.username || settings.traversalRelay?.username || 'Unknown';
   const deviceCount = relayDevices.length;
