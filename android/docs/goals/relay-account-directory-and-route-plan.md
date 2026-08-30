@@ -41,6 +41,13 @@ Out of Scope：
 - 唯一真源：relay server 拥有账号目录与 presence；daemon 拥有 tmux/session truth；client 拥有 route selection 与 UI projection。
 - 不越界：daemon 不持有客户端 UI 状态；UI 不补上游业务真相；route resolver 不改 payload 语义。
 - 目录优先：Connections/Session Picker 消费 account directory，不再把 local bridge preset 当远端机器可连接的前置条件。
+- 同账号一致：Settings、Connections、Home、Session Picker、Drawer 必须消费
+  App 级同一份 confirmed directory generation；禁止组件各自读取账号缓存，
+  禁止把远端 endpoint 自动写入本地 preset 后再作为下一次目录输入。
+- 快照替换：同一稳定 `hostId` 的最新 daemon directory-update 是完整快照，
+  必须原子替换旧 endpoints/sessions；禁止并集旧 registration 产生僵尸项。
+- 本地与远端分层：显式手工 Host/preset 是客户端本地资源；Relay daemon 与
+  tmux session 行是远端临时投影。历史缓存不能创建远端行，也不能覆盖目录。
 - 显式候选：每条线路都是明确 candidate，不存在隐藏 fallback。
 - 可观测：每次 route 选择必须能解释候选、评分、最终路径、失败原因。
 - 先 map/test，后实现：新增 feature_id、function map、test design，再改行为代码。

@@ -37,11 +37,12 @@ import {
   writeRemoteWindowVideoBitrateGlobalDefault,
   buildRemoteWindowVideoBitrateConfig,
 } from '../lib/remote-window-video-quality';
-import type { RemoteWindowVideoBitratePreset } from '../lib/types';
+import type { RemoteWindowVideoBitratePreset, TraversalRelayDeviceSnapshot } from '../lib/types';
 import { buildAppUpdateManifestCandidates } from '../lib/app-update-relay-manifest';
 
 interface SettingsPageProps {
   settings: BridgeSettings;
+  relayDevices?: TraversalRelayDeviceSnapshot[];
   currentVersionName: string;
   currentVersionCode: number;
   updatePreferences: AppUpdatePreferences;
@@ -114,6 +115,7 @@ function SettingsGroup({
 
 export function SettingsPage({
   settings,
+  relayDevices = [],
   currentVersionName,
   currentVersionCode,
   updatePreferences,
@@ -304,6 +306,7 @@ export function SettingsPage({
 
           <ConnectionConfigSection
             settings={draft}
+            relayDevices={relayDevices}
             onSettingsChange={(updater) => setDraft((current) => updater(current))}
             onRemoveDefaultServer={() =>
               setDraft((current) => removeBridgeServer(current, defaultServer?.id || current.defaultServerId || ''))

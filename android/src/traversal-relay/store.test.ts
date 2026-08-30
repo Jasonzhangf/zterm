@@ -353,11 +353,7 @@ describe('TraversalRelayStore', () => {
     expect(store.getAccountDirectory(user.id).devices).toEqual(expect.arrayContaining([
       expect.objectContaining({
         deviceId: 'old-device',
-        daemon: expect.objectContaining({
-          hostId: 'daemon-macbook-air',
-          presence: expect.objectContaining({ connected: false }),
-          endpoints: [],
-        }),
+        daemon: null,
       }),
       expect.objectContaining({
         deviceId: 'new-device',

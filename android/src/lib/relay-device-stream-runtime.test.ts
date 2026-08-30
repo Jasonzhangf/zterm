@@ -57,6 +57,58 @@ describe('relay device stream runtime', () => {
     expect(computeRelayDeviceStreamReconnectDelay(10)).toBe(5000);
   });
 
+  it('keeps confirmed directory endpoints and sessions when legacy presence carries stale non-empty arrays', () => {
+    const now = new Date().toISOString();
+    const directory = [makeDevice({
+      deviceId: 'directory-device',
+      updatedAt: now,
+      daemon: {
+        connected: true,
+        lastSeenAt: now,
+        hostId: 'mac-studio',
+        version: '0.1.3',
+        endpoints: [{
+          id: 'tailscale:mac-studio',
+          kind: 'tailscale',
+          host: '100.66.1.82',
+          port: 3333,
+          authRequired: true,
+          lastSeenAt: now,
+        }],
+        sessions: [{ name: 'current', updatedAt: now }],
+      },
+    })];
+    const stalePresence = [makeDevice({
+      deviceId: 'legacy-device',
+      updatedAt: now,
+      daemon: {
+        connected: true,
+        lastSeenAt: now,
+        hostId: 'mac-studio',
+        version: '0.1.2',
+        endpoints: [{
+          id: 'ipv4:mac-studio',
+          kind: 'ipv4',
+          host: '192.168.0.3',
+          port: 3333,
+          authRequired: true,
+          lastSeenAt: now,
+        }],
+        sessions: [{ name: 'zombie', updatedAt: now }],
+      },
+    })];
+
+    const merged = mergeRelayPresenceWithDirectoryTruth(stalePresence, directory);
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({
+      daemon: {
+        endpoints: [{ id: 'tailscale:mac-studio' }],
+        sessions: [{ name: 'current' }],
+      },
+    });
+  });
+
   it('sends typed control heartbeat every thirty seconds and keeps the stream on control pong', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);

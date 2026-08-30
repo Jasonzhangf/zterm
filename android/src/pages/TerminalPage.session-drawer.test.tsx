@@ -877,7 +877,7 @@ describe('TerminalPage portrait session drawer', () => {
           lastOpenedAt: 1,
         }]}
         relayDevices={[
-          makeRelayDevice(),
+          makeRelayDevice({ sessions: ['rcc'] }),
           makeRelayDevice({
             deviceId: 'device-windows',
             deviceName: 'Windows PC',
@@ -1071,7 +1071,7 @@ describe('TerminalPage portrait session drawer', () => {
           lastOpenedAt: 1,
         }]}
         relayDevices={[
-          makeRelayDevice({ includeDirectEndpoint: false }),
+          makeRelayDevice({ includeDirectEndpoint: false, sessions: ['rcc'] }),
           makeRelayDevice({
             deviceId: 'device-windows',
             deviceName: 'Windows PC',
@@ -1172,7 +1172,7 @@ describe('TerminalPage portrait session drawer', () => {
     fireEvent.touchEnd(swipeSurface!, { changedTouches: [{ clientX: 236, clientY: 206 }] });
 
     expect((await screen.findByTestId('terminal-session-drawer-host-100.66.1.82:3333')).textContent).toContain('2');
-    expect(screen.getByTestId('terminal-session-drawer-host-mac-studio').textContent).toContain('0');
+    expect(screen.getByTestId('terminal-session-drawer-host-mac-studio').textContent).toContain('3');
   });
 
   it('does not render an empty direct runtime host rail when the Relay catalog owns the drawer group', async () => {
@@ -1487,8 +1487,57 @@ describe('TerminalPage portrait session drawer', () => {
     fireEvent.touchMove(swipeSurface!, { touches: [{ clientX: 236, clientY: 206 }], cancelable: true });
     fireEvent.touchEnd(swipeSurface!, { changedTouches: [{ clientX: 236, clientY: 206 }] });
 
-    expect((await screen.findByTestId('terminal-session-drawer-host-mac-studio')).textContent).toContain('2');
+    expect((await screen.findByTestId('terminal-session-drawer-host-mac-studio')).textContent).toContain('3');
     expect(screen.queryByTestId('terminal-session-drawer-host-100.66.1.82:3333')).toBeNull();
+  });
+
+  it('projects only the confirmed Relay session catalog and ignores zombie local history', async () => {
+    const anchor = makeSession('anchor');
+    anchor.daemonHostId = 'mac-studio';
+    anchor.bridgeHost = '100.66.1.82';
+    anchor.sessionName = 'current';
+    anchor.title = 'current';
+
+    render(
+      <TerminalPage
+        sessions={[anchor]}
+        activeSession={anchor}
+        sessionGroups={[{
+          id: 'daemon:mac-studio',
+          name: 'Mac Studio',
+          bridgeHost: '100.66.1.82',
+          bridgePort: 3333,
+          daemonHostId: 'mac-studio',
+          terminalBackend: 'tmux',
+          sessionNames: ['current', 'dsh-tui', 'routecodex-5'],
+          missingSessionNames: ['dsh-tui', 'routecodex-5'],
+          lastOpenedAt: 1,
+        }]}
+        relayDevices={[makeRelayDevice({ sessions: ['current'] })]}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    const swipeSurface = document.querySelector('[data-testid^="terminal-swipe-surface-"][data-swipe-enabled="true"]') as HTMLElement | null;
+    expect(swipeSurface).toBeTruthy();
+    fireEvent.touchStart(swipeSurface!, { touches: [{ clientX: 56, clientY: 200 }] });
+    fireEvent.touchMove(swipeSurface!, { touches: [{ clientX: 236, clientY: 206 }], cancelable: true });
+    fireEvent.touchEnd(swipeSurface!, { changedTouches: [{ clientX: 236, clientY: 206 }] });
+
+    expect(await screen.findByText('current')).toBeTruthy();
+    expect(screen.queryByText('dsh-tui')).toBeNull();
+    expect(screen.queryByText('routecodex-5')).toBeNull();
   });
 
   it('does not enumerate disconnected stale relay daemon devices as empty drawer hosts', async () => {
@@ -1684,8 +1733,8 @@ describe('TerminalPage portrait session drawer', () => {
     fireEvent.touchEnd(swipeSurface!, { changedTouches: [{ clientX: 236, clientY: 206 }] });
 
     expect(await screen.findByTestId('terminal-session-drawer-host-100.66.1.82:3333')).toBeTruthy();
-    expect(screen.getByTestId('terminal-session-drawer-host-mac-studio').textContent).toContain('0');
-    expect(screen.getByTestId('terminal-session-drawer-host-windows-pc').textContent).toContain('0');
+    expect(screen.getByTestId('terminal-session-drawer-host-mac-studio').textContent).toContain('1');
+    expect(screen.getByTestId('terminal-session-drawer-host-windows-pc').textContent).toContain('1');
   });
 
   it('updates drawer identity when relay devices change under the memoized TerminalPage', async () => {
@@ -1745,7 +1794,7 @@ describe('TerminalPage portrait session drawer', () => {
       <TerminalPage
         {...baseProps}
         relayDevices={[
-          makeRelayDevice(),
+          makeRelayDevice({ sessions: ['rcc'] }),
           makeRelayDevice({
             deviceId: 'device-windows',
             deviceName: 'Windows PC',
@@ -1843,7 +1892,7 @@ describe('TerminalPage portrait session drawer', () => {
 
     const staleHost = await screen.findByTestId('terminal-session-drawer-host-daemon-ambiguous-old');
     expect(staleHost).toBeTruthy();
-    expect(screen.getByTestId('terminal-session-drawer-host-mac-studio').textContent).toContain('0');
+    expect(screen.getByTestId('terminal-session-drawer-host-mac-studio').textContent).toContain('1');
     fireEvent.click(staleHost);
     expect(screen.getByTestId('terminal-session-drawer-row-remote:daemon:daemon-ambiguous-old::session:rcc')).toBeTruthy();
   });

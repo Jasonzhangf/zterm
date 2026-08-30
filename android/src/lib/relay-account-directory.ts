@@ -184,50 +184,35 @@ export function resolveRelayDaemonCanonicalHostId(
   return null;
 }
 
-function snapshotTruthScore(device: TraversalRelayDeviceSnapshot) {
-  return (device.daemon.connected ? 1_000_000 : 0)
-    + (device.daemon.sessions?.length || 0) * 1_000
-    + (device.daemon.endpoints?.length || 0) * 100
-    + (device.deviceName.trim() ? 10 : 0);
+function snapshotTruthTimestamp(device: TraversalRelayDeviceSnapshot) {
+  return device.daemon.lastSeenAt > device.updatedAt
+    ? device.daemon.lastSeenAt
+    : device.updatedAt;
 }
 
-function mergeRelayDirectorySnapshotTruth(
-  primary: TraversalRelayDeviceSnapshot,
-  supplement: TraversalRelayDeviceSnapshot,
+function isNewerDaemonSnapshot(
+  candidate: TraversalRelayDeviceSnapshot,
+  current: TraversalRelayDeviceSnapshot,
 ) {
-  const endpoints = new Map((primary.daemon.endpoints || []).map((endpoint) => [endpoint.id, endpoint]));
-  for (const endpoint of supplement.daemon.endpoints || []) {
-    const current = endpoints.get(endpoint.id);
-    if (!current || endpoint.lastSeenAt > current.lastSeenAt) {
-      endpoints.set(endpoint.id, endpoint);
-    }
+  if (candidate.daemon.connected !== current.daemon.connected) {
+    return candidate.daemon.connected;
   }
-  const sessions = new Map((primary.daemon.sessions || []).map((session) => [session.name, session]));
-  for (const session of supplement.daemon.sessions || []) {
-    const current = sessions.get(session.name);
-    if (!current || session.updatedAt > current.updatedAt) {
-      sessions.set(session.name, session);
-    }
-  }
+  return snapshotTruthTimestamp(candidate) >= snapshotTruthTimestamp(current);
+}
+
+function mergeRelayDevicePresence(
+  authoritative: TraversalRelayDeviceSnapshot,
+  other: TraversalRelayDeviceSnapshot,
+) {
   return {
-    ...primary,
+    ...authoritative,
     client: {
-      connected: primary.client.connected || supplement.client.connected,
-      lastSeenAt: primary.client.lastSeenAt > supplement.client.lastSeenAt
-        ? primary.client.lastSeenAt
-        : supplement.client.lastSeenAt,
+      connected: authoritative.client.connected || other.client.connected,
+      lastSeenAt: authoritative.client.lastSeenAt > other.client.lastSeenAt
+        ? authoritative.client.lastSeenAt
+        : other.client.lastSeenAt,
     },
-    updatedAt: primary.updatedAt > supplement.updatedAt ? primary.updatedAt : supplement.updatedAt,
-    daemon: {
-      ...primary.daemon,
-      connected: primary.daemon.connected || supplement.daemon.connected,
-      lastSeenAt: primary.daemon.lastSeenAt > supplement.daemon.lastSeenAt
-        ? primary.daemon.lastSeenAt
-        : supplement.daemon.lastSeenAt,
-      version: primary.daemon.version || supplement.daemon.version,
-      endpoints: [...endpoints.values()],
-      sessions: [...sessions.values()],
-    },
+    updatedAt: authoritative.updatedAt > other.updatedAt ? authoritative.updatedAt : other.updatedAt,
   };
 }
 
@@ -248,8 +233,8 @@ export function dedupeRelayDaemonDeviceSnapshots(
       result.push(device);
       continue;
     }
-    const primary = snapshotTruthScore(device) > snapshotTruthScore(existing) ? device : existing;
-    const merged = mergeRelayDirectorySnapshotTruth(primary, primary === existing ? device : existing);
+    const primary = isNewerDaemonSnapshot(device, existing) ? device : existing;
+    const merged = mergeRelayDevicePresence(primary, primary === existing ? device : existing);
     byHostId.set(hostId, merged);
     const index = result.indexOf(existing);
     if (index >= 0) {
