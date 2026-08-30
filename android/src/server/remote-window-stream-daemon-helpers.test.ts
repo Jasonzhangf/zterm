@@ -9,7 +9,7 @@ import {
   normalizeIceCandidate,
   normalizeRemoteWindowVideoProfile,
 } from './remote-window-stream-daemon-helpers';
-import { buildRemoteWindowVideoProfile } from '../lib/remote-window-video-quality';
+import { makeRemoteWindowVideoProfileFixture } from './remote-window-video-profile-test-fixture';
 
 describe('remote-window-stream-daemon-helpers', () => {
   it('builds catalog cache keys from include flags', () => {
@@ -25,7 +25,7 @@ describe('remote-window-stream-daemon-helpers', () => {
   });
 
   it('normalizes complete video profiles and rejects invalid lane budgets', () => {
-    const profile = buildRemoteWindowVideoProfile('smooth');
+    const profile = makeRemoteWindowVideoProfileFixture('smooth');
     expect(normalizeRemoteWindowVideoProfile(profile)).toEqual(profile);
     expect(() => normalizeRemoteWindowVideoProfile({
       ...profile,

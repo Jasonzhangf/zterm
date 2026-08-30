@@ -13,10 +13,10 @@ import type {
 } from './terminal-runtime-types';
 import type { TerminalFileTransferMessageRuntime } from './terminal-file-transfer-message-runtime';
 import type { RemoteWindowStreamDaemonRuntime } from './remote-window-stream-daemon';
-import { buildRemoteWindowVideoProfile } from '../lib/remote-window-video-quality';
+import { makeRemoteWindowVideoProfileFixture } from './remote-window-video-profile-test-fixture';
 
-const smoothVideoProfile = buildRemoteWindowVideoProfile('smooth');
-const qualityVideoProfile = buildRemoteWindowVideoProfile('quality');
+const smoothVideoProfile = makeRemoteWindowVideoProfileFixture('smooth');
+const qualityVideoProfile = makeRemoteWindowVideoProfileFixture('quality');
 
 function createTransport(): TerminalSessionTransport {
   return {

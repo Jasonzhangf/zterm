@@ -83,10 +83,10 @@ import {
   type MacosAppWindowCatalog,
   type RemoteWindowInputEventRunner,
 } from './remote-window-stream-daemon';
-import { buildRemoteWindowVideoProfile } from '../lib/remote-window-video-quality';
+import { makeRemoteWindowVideoProfileFixture } from './remote-window-video-profile-test-fixture';
 
-const smoothVideoProfile = buildRemoteWindowVideoProfile('smooth');
-const qualityVideoProfile = buildRemoteWindowVideoProfile('quality');
+const smoothVideoProfile = makeRemoteWindowVideoProfileFixture('smooth');
+const qualityVideoProfile = makeRemoteWindowVideoProfileFixture('quality');
 
 function reliableInputControl(sequence: string) {
   return {
@@ -197,7 +197,7 @@ function createRemoteWindowStreamDaemonRuntime(
       handlers?: Parameters<typeof runtime.startStream>[1],
     ) => runtime.startStream({
       ...payload,
-      videoProfile: payload.videoProfile ?? buildRemoteWindowVideoProfile('smooth'),
+      videoProfile: payload.videoProfile ?? makeRemoteWindowVideoProfileFixture('smooth'),
     }, handlers),
   };
 }
@@ -2928,7 +2928,7 @@ setInterval(() => {}, 1000);
       mediaPlanVersion: 1 as const,
       revision: 2,
       targetId: 'iterm2-pane:window-1:tab-1:left',
-      videoProfile: buildRemoteWindowVideoProfile('quality', { interactionActive: true }),
+      videoProfile: makeRemoteWindowVideoProfileFixture('quality', true),
     });
     expect(concurrent).toMatchObject({
       status: 'rejected',

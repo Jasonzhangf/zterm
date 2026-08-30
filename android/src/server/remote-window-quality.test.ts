@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { RemoteWindowVideoProfile } from '@zterm/shared/protocol';
-import { buildRemoteWindowVideoProfile } from '../lib/remote-window-video-quality';
 import type { RemoteWindowCaptureFrameSource } from './remote-window-capture';
 import { applyRemoteWindowStreamGroupQuality, resolveRemoteWindowStreamGroupBudget } from './remote-window-quality';
+import { makeRemoteWindowVideoProfileFixture } from './remote-window-video-profile-test-fixture';
 
-const requested = buildRemoteWindowVideoProfile('smooth');
+const requested = makeRemoteWindowVideoProfileFixture('smooth');
 
 function makeCapture(
   profile: Pick<RemoteWindowVideoProfile, 'maxFrameRateFps' | 'maxCaptureWidth' | 'maxCaptureHeight'>,
