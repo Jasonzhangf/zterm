@@ -310,7 +310,7 @@ export function useSessionContextLifecycle(options: {
       source: 'explicit-resume',
       forceHead: true,
       markResumeTail: true,
-      allowReconnectIfUnavailable: true,
+      allowReconnectIfUnavailable: false,
     });
   }, [options.appForegroundActive, options.foregroundResumeEpoch]);
 

@@ -52,7 +52,8 @@ interface UseOpenTabLifecycleEffectsOptions {
    *  transport owner can retire stale physical transports immediately. */
   networkIdentity?: NetworkIdentityRuntime;
   /** AndroidConnectionService owns ConnectivityManager-driven replacement on
-   *  Android; WebView foreground resampling must not duplicate that decision. */
+   *  Android; WebView foreground lifecycle must not emit a transport network
+   *  signal or duplicate the service-owned resample decision. */
   foregroundResamplesNetworkIdentity?: boolean;
 }
 
@@ -191,15 +192,17 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
   }, []);
   const maybeProjectForegroundResume = useCallback((reason: ForegroundResumeSignalReason) => {
     const now = Date.now();
-    const runtime = callbacksRef.current.networkIdentity;
-    callbacksRef.current.notifyTargetNetworkSignal({
-      source: 'foreground-resume',
-      ...(runtime ? {
-        networkGeneration: runtime.readGeneration(),
-        fingerprintChanged: false,
-      } : {}),
-    });
-    void refreshNetworkIdentityForForeground();
+    if (callbacksRef.current.foregroundResamplesNetworkIdentity !== false) {
+      const runtime = callbacksRef.current.networkIdentity;
+      callbacksRef.current.notifyTargetNetworkSignal({
+        source: 'foreground-resume',
+        ...(runtime ? {
+          networkGeneration: runtime.readGeneration(),
+          fingerprintChanged: false,
+        } : {}),
+      });
+      void refreshNetworkIdentityForForeground();
+    }
     const hasSessions = sessionsRef.current.length > 0;
     const hasActiveSession = Boolean(openTabStateRef.current.activeSessionId);
     const wasHiddenForDecision = (

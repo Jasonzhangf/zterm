@@ -308,7 +308,7 @@ describe('session-context-lifecycle', () => {
       source: 'explicit-resume',
       forceHead: true,
       markResumeTail: true,
-      allowReconnectIfUnavailable: true,
+      allowReconnectIfUnavailable: false,
     });
 
     view.rerender(<Harness appForegroundActive />);
@@ -387,7 +387,7 @@ describe('session-context-lifecycle', () => {
       source: 'explicit-resume',
       forceHead: true,
       markResumeTail: true,
-      allowReconnectIfUnavailable: true,
+      allowReconnectIfUnavailable: false,
     });
 
     view.rerender(<Harness foregroundResumeEpoch={1} />);
