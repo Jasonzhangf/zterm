@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ComponentProps } from 'react';
 import { Keyboard } from '@capacitor/keyboard';
 import { Filesystem } from '@capacitor/filesystem';
@@ -214,10 +214,25 @@ function remoteWindowPayloads(sendInput: ReturnType<typeof vi.fn>) {
 }
 
 describe('TerminalPage remote window overlay', () => {
+  beforeEach(() => {
+    Object.defineProperties(HTMLVideoElement.prototype, {
+      requestVideoFrameCallback: {
+        configurable: true,
+        value: vi.fn(() => 1),
+      },
+      cancelVideoFrameCallback: {
+        configurable: true,
+        value: vi.fn(),
+      },
+    });
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
     cleanup();
     vi.unstubAllGlobals();
+    Reflect.deleteProperty(HTMLVideoElement.prototype, 'requestVideoFrameCallback');
+    Reflect.deleteProperty(HTMLVideoElement.prototype, 'cancelVideoFrameCallback');
   });
 
   it('opens the picker through the active session and routes fullscreen quickbar input to the remote window', async () => {

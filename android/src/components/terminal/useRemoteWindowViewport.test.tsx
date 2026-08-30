@@ -100,4 +100,45 @@ describe('useRemoteWindowViewport geometry owner', () => {
     }));
     await waitFor(() => expect(result.current.fullscreenViewport.panY).toBeLessThanOrEqual(0));
   });
+
+  it('coalesces hot-path viewport writes into one display-frame commit', async () => {
+    const surface = document.createElement('div');
+    surface.getBoundingClientRect = vi.fn(() => ({
+      x: 0, y: 0, left: 0, top: 0, right: 400, bottom: 800, width: 400, height: 800, toJSON: () => ({}),
+    }));
+    let frameCallback: FrameRequestCallback | null = null;
+    const requestAnimationFrame = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      frameCallback = callback;
+      return 41;
+    });
+    const state = lockedState(true);
+    const focusedWindowSlotRef = { current: null };
+    const videoSurfaceRef = { current: surface };
+    const floatingOverlayRef = { current: null };
+    const receiverFrameSize = { width: 800, height: 600 };
+    const onResetGestures = vi.fn();
+    const { result } = renderHook(() => useRemoteWindowViewport({
+      state,
+      receiverFrameSize,
+      focusedWindowSlotRef,
+      videoSurfaceRef,
+      floatingOverlayRef,
+      bottomInsetPx: 0,
+      bottomChromeInsetPx: 0,
+      onResetGestures,
+    }));
+    await waitFor(() => expect(result.current.surfaceSize).toEqual({ width: 400, height: 800 }));
+    requestAnimationFrame.mockClear();
+
+    act(() => {
+      result.current.setFullscreenViewport({ scale: 2, panX: 10, panY: 20 });
+      result.current.setFullscreenViewport({ scale: 2, panX: 30, panY: 40 });
+    });
+    expect(requestAnimationFrame).toHaveBeenCalledTimes(1);
+    expect(result.current.fullscreenViewport.scale).toBe(1);
+    expect(result.current.fullscreenViewportRef.current).toMatchObject({ scale: 2, panX: 30 });
+
+    act(() => frameCallback?.(0));
+    expect(result.current.fullscreenViewport).toMatchObject({ scale: 2, panX: 30 });
+  });
 });

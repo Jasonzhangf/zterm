@@ -493,10 +493,6 @@ export function createRemoteWindowStreamDaemonRuntime(
       return;
     }
     entry.framesSent += 1;
-    if (entry.framesSent === 1 || entry.framesSent % 30 === 0) {
-      // eslint-disable-next-line no-console
-      console.log(`[remote-window] framesSent=${entry.framesSent} size=${captureFrame.width}x${captureFrame.height} streamId=${entry.streamId.slice(0, 8)}`);
-    }
     if (entry.framesSent === 1) {
       entry.handlers.sendStatus?.({
         requestId: entry.requestId,

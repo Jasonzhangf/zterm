@@ -459,6 +459,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     surfacePinchStartRef.current = null;
   }, []);
   const {
+    commitFullscreenViewport,
     fullscreenDisplayMode,
     fullscreenDisplayModeRef,
     fullscreenViewport,
@@ -606,19 +607,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     }
     if (events.length > 0) {
       markQualityInteractionActive();
-    }
-    const scrollCount = events.filter((e) => e.kind === 'scroll').length;
-    if (scrollCount > 0) {
-      // eslint-disable-next-line no-console
-      const video = videoElementRef.current;
-      console.log(`[remote-window-scroll] sent=${scrollCount} ` +
-        `viewport=${JSON.stringify(fullscreenViewportRef.current)} ` +
-        `receiverStream=${receiverMediaStream ? 'ok' : 'NULL'} ` +
-        `overviewStream=${overviewMediaStream ? 'ok' : 'NULL'} ` +
-        `videoHasPlayed=${videoHasPlayedRef.current} ` +
-        `videoReady=${video?.readyState ?? 'NULL'} ` +
-        `currentTime=${video?.currentTime?.toFixed(2) ?? 'NULL'} ` +
-        `surfaceRect=${videoSurfaceRef.current ? JSON.stringify(videoSurfaceRef.current.getBoundingClientRect()) : 'NULL'}`);
     }
     return sendRemoteWindowInputEventsForTarget({
       sessionId: activeSessionId,
@@ -1246,6 +1234,44 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     updateFloatingResizeFromPointer,
   ]);
 
+  const handleCanvasProjectionError = useCallback((message: string) => {
+    const streamId = activeStreamIdRef.current;
+    if (!streamId) {
+      return;
+    }
+    activeStreamIdRef.current = null;
+    activeCanvasStreamIdRef.current = null;
+    activeFocusStreamIdRef.current = null;
+    pendingFocusStreamIdRef.current = null;
+    collectStreamStatsRef.current = null;
+    resetQualityApplyState();
+    setReceiverMediaStream(null);
+    setOverviewMediaStream(null);
+    setReceiverFrameSize(null);
+    setReceiverStartupTelemetry(null);
+    setStreamCapability(null);
+    setCanvasLayout(null);
+    updateReceiverVideoVisibility(false);
+    setState((current) => failRemoteWindowStream(current, streamId, new Error(message)));
+    const targetSessionId = activeSessionId?.trim() || '';
+    if (!targetSessionId || !stopStream) {
+      return;
+    }
+    void Promise.resolve(stopStream(targetSessionId, streamId)).catch((error) => {
+      const cleanupMessage = error instanceof Error ? error.message : String(error);
+      setState((current) => failRemoteWindowStream(
+        current,
+        streamId,
+        new Error(`${message}; stream cleanup failed: ${cleanupMessage}`),
+      ));
+    });
+  }, [
+    activeSessionId,
+    resetQualityApplyState,
+    stopStream,
+    updateReceiverVideoVisibility,
+  ]);
+
   useEffect(() => {
     if (lastReportedQuickBarSuppressionRef.current === quickBarSuppressed) {
       return;
@@ -1259,11 +1285,13 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     focusedWindow: focusedWindowSlot,
     overviewCropVisible: dualStreamSwitch.phase === 'overview-crop-visible',
     receiverMediaStream,
+    overviewMediaStream,
     videoElementRef,
     overviewVideoElementRef,
     overviewCanvasRef: compositeOverviewCanvasRef,
     focusDisplayCanvasRef,
     thumbnailCanvasRefs: compositeThumbCanvasRefs,
+    onProjectionError: handleCanvasProjectionError,
   });
 
   useEffect(() => {
@@ -1535,8 +1563,8 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
           return;
         }
         const { focusResult } = dualResult;
-        const committedStreamId = focusResult?.streamId ?? '';
         const committedResult = focusResult;
+        const committedStreamId = focusResult?.streamId ?? '';
         if (pendingFocusStreamIdRef.current === focusStreamId) {
           pendingFocusStreamIdRef.current = null;
         }
@@ -1588,11 +1616,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
         if (activeStreamIdRef.current === committedStreamId) {
           // 同一批次同步隐藏 video：srcObject 切换瞬间 video 内容会清空，
           // 不等 useEffect 再隐藏（否则有一帧 video 空白露出来 = 黑屏闪一下）
-          // eslint-disable-next-line no-console
-          console.log(`[remote-window-stream-start] committed=${committedStreamId} ` +
-            `focusTracks=${committedResult.mediaStream?.getTracks?.().length ?? 0} ` +
-            `overviewTracks=${committedResult.overviewMediaStream?.getTracks?.().length ?? 0} ` +
-            `compositeWindows=${target.compositeWindows?.length ?? 0}`);
           updateReceiverVideoVisibility(false);
           setReceiverMediaStream(committedResult.mediaStream || null);
           setOverviewMediaStream(committedResult.overviewMediaStream || null);
@@ -1817,6 +1840,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     }
     if (effect.kind === 'local-pan-end') {
       surfaceLocalPanStartRef.current = null;
+      commitFullscreenViewport();
       return;
     }
     if (effect.kind === 'pinch-start') {
@@ -1829,8 +1853,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     if (effect.kind === 'pinch-move') {
       // 保护：只有真正双指在场时才应用缩放；单指滑动（残留手势/指针误判）不得改变 scale
       if (surfacePointersRef.current.size < 2) {
-        // eslint-disable-next-line no-console
-        console.log(`[remote-window-pinch] ABORT size<2 pointerId=${effect.pointerId}`);
         surfacePinchStartRef.current = null;
         return;
       }
@@ -1844,14 +1866,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
         REMOTE_WINDOW_FULLSCREEN_MIN_SCALE,
         REMOTE_WINDOW_FULLSCREEN_MAX_SCALE,
       );
-      // eslint-disable-next-line no-console
-      console.log(`[remote-window-pinch] commit=${effect.commit} ratio=${effect.scaleRatio.toFixed(3)} ` +
-        `start=${start.startScale.toFixed(2)} -> ${nextScale.toFixed(2)} ` +
-        `receiverStream=${receiverMediaStream ? 'ok' : 'NULL'} ` +
-        `overviewStream=${overviewMediaStream ? 'ok' : 'NULL'} ` +
-        `videoHasPlayed=${videoHasPlayedRef.current} ` +
-        `videoReady=${videoElementRef.current?.readyState ?? 'NULL'} ` +
-        `currentTime=${videoElementRef.current?.currentTime?.toFixed(2) ?? 'NULL'}`);
       const surfaceRect = videoSurfaceRef.current?.getBoundingClientRect();
       if (
         state.phase === 'targetLocked'
@@ -1883,8 +1897,16 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     }
     if (effect.kind === 'pinch-end') {
       surfacePinchStartRef.current = null;
+      commitFullscreenViewport();
     }
-  }, [bottomInsetPx, markQualityInteractionActive, receiverFrameSize, setFullscreenViewport, state]);
+  }, [
+    bottomInsetPx,
+    commitFullscreenViewport,
+    markQualityInteractionActive,
+    receiverFrameSize,
+    setFullscreenViewport,
+    state,
+  ]);
 
   const applyRemoteWindowTouchPointerResult = useCallback((
     result: {
@@ -1939,17 +1961,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     if (state.phase !== 'targetLocked') {
       return;
     }
-    // P4 探针：pointerdown 触发状态
-    const probeVideo = videoElementRef.current;
-    // eslint-disable-next-line no-console
-    console.log(
-      `[remote-window-pointerdown] mode=${state.mode} phase=${state.phase} ` +
-      `streamId=${state.streamId || '-'} streamStarted=${state.streamStarted} ` +
-      `streamStatus=${state.streamStatus} ` +
-      `surfaceSize=${JSON.stringify(surfaceSize)} ` +
-      `receiverFrameSize=${JSON.stringify(receiverFrameSize)} ` +
-      `video=${probeVideo ? `${probeVideo.videoWidth}x${probeVideo.videoHeight} paused=${probeVideo.paused} readyState=${probeVideo.readyState} currentTime=${probeVideo.currentTime.toFixed(3)}` : 'null'}`,
-    );
     requestBoundVideoPlayback();
     if (event.pointerType === 'mouse' && event.button > 2) {
       return;
@@ -2073,8 +2084,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
         if (currentGesture && currentGesture.mode === 'localPan') {
           const first = surfacePointersRef.current.get(currentGesture.pointerId);
           if (first) {
-            console.log('[rw-gesture] second-finger upgrade: pendingDelta='
-              + pendingDelta.toFixed(1), 'zoomScale=', fullscreenViewportRef.current.scale.toFixed(2));
             const pairResult = resolveRemoteWindowTouchPairPointerDownRuntime({
               firstPointer: {
                 pointerId: currentGesture.pointerId,
@@ -2150,10 +2159,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
         panEnabled: state.mode === 'fullscreen'
           && fullscreenViewportRef.current.scale > REMOTE_WINDOW_FULLSCREEN_MIN_SCALE,
       });
-      if (pairResult.nextState.mode !== runtimeGesture.mode) {
-        console.log('[rw-gesture] pair move transition:', runtimeGesture.mode, '->', pairResult.nextState.mode,
-          'remoteEvents=', pairResult.remoteEvents.map((e) => e.kind).join(','));
-      }
       surfaceGestureRef.current = pairResult.nextState;
       if (pairResult.remoteEvents.length > 0) {
         dispatchRemoteWindowInputEvents(pairResult.remoteEvents);
@@ -2320,6 +2325,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
           emitRemoteWindowActionInput(clickPayload);
         }
       }
+      commitFullscreenViewport();
       surfaceGestureRef.current = null;
       surfacePointersRef.current.delete(event.pointerId);
       event.preventDefault();
@@ -2404,6 +2410,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     }
   }, [
     applyRemoteWindowTouchPointerResult,
+    commitFullscreenViewport,
     emitRemoteWindowActionInput,
     resolveSurfaceInputGeometry,
     state,

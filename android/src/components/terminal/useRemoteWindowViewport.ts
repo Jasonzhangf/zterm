@@ -49,6 +49,8 @@ export function useRemoteWindowViewport({
   const fullscreenViewportRef = useRef(fullscreenViewport);
   const fullscreenDisplayModeRef = useRef<FullscreenDisplayMode>(fullscreenDisplayMode);
   const lastAutoImePanRef = useRef<{ key: string; panY: number } | null>(null);
+  const pendingViewportRef = useRef<FullscreenViewportState | null>(null);
+  const pendingViewportFrameRef = useRef<number | null>(null);
 
   const readSurfaceSize = useCallback((): SurfaceSize | null => {
     const rect = videoSurfaceRef.current?.getBoundingClientRect();
@@ -71,27 +73,52 @@ export function useRemoteWindowViewport({
           : measuredSurfaceSize
       ));
     }
-    setFullscreenViewportState((current) => {
-      const raw = typeof next === 'function' ? next(current) : next;
-      const displaySourceSize = state.phase === 'targetLocked'
-        ? resolveRemoteWindowDisplaySourceSize(state.target, receiverFrameSize, focusedWindowSlotRef.current)
-        : null;
-      const displayMode = state.phase === 'targetLocked' && state.mode === 'fullscreen'
-        ? fullscreenDisplayModeRef.current
-        : 'fit';
-      const clamped = clampFullscreenViewport(
-        raw,
-        measuredSurfaceSize,
-        displaySourceSize,
-        displayMode,
-        bottomInsetPx,
-      );
-      fullscreenViewportRef.current = clamped;
-      return clamped;
-    });
+    const raw = typeof next === 'function' ? next(fullscreenViewportRef.current) : next;
+    const displaySourceSize = state.phase === 'targetLocked'
+      ? resolveRemoteWindowDisplaySourceSize(state.target, receiverFrameSize, focusedWindowSlotRef.current)
+      : null;
+    const displayMode = state.phase === 'targetLocked' && state.mode === 'fullscreen'
+      ? fullscreenDisplayModeRef.current
+      : 'fit';
+    const clamped = clampFullscreenViewport(
+      raw,
+      measuredSurfaceSize,
+      displaySourceSize,
+      displayMode,
+      bottomInsetPx,
+    );
+    fullscreenViewportRef.current = clamped;
+    pendingViewportRef.current = clamped;
+    if (pendingViewportFrameRef.current === null) {
+      pendingViewportFrameRef.current = window.requestAnimationFrame(() => {
+        pendingViewportFrameRef.current = null;
+        const pending = pendingViewportRef.current;
+        pendingViewportRef.current = null;
+        if (pending) {
+          setFullscreenViewportState(pending);
+        }
+      });
+    }
   }, [bottomInsetPx, focusedWindowSlotRef, readSurfaceSize, receiverFrameSize, state]);
 
+  const commitFullscreenViewport = useCallback(() => {
+    if (pendingViewportFrameRef.current !== null) {
+      window.cancelAnimationFrame(pendingViewportFrameRef.current);
+      pendingViewportFrameRef.current = null;
+    }
+    const pending = pendingViewportRef.current;
+    pendingViewportRef.current = null;
+    if (pending) {
+      setFullscreenViewportState(pending);
+    }
+  }, []);
+
   const resetFullscreenViewport = useCallback(() => {
+    if (pendingViewportFrameRef.current !== null) {
+      window.cancelAnimationFrame(pendingViewportFrameRef.current);
+      pendingViewportFrameRef.current = null;
+    }
+    pendingViewportRef.current = null;
     fullscreenViewportRef.current = initialFullscreenViewport;
     setFullscreenViewportState(initialFullscreenViewport);
     lastAutoImePanRef.current = null;
@@ -114,7 +141,8 @@ export function useRemoteWindowViewport({
         panY: clientY - (clientY - current.panY) * ratio,
       };
     });
-  }, [readSurfaceSize, setFullscreenViewport]);
+    commitFullscreenViewport();
+  }, [commitFullscreenViewport, readSurfaceSize, setFullscreenViewport]);
 
   const setFullscreenDisplayMode = useCallback((next: FullscreenDisplayMode) => {
     fullscreenDisplayModeRef.current = next;
@@ -159,11 +187,15 @@ export function useRemoteWindowViewport({
         focusedWindowSlotRef.current,
       );
       const displayMode = state.mode === 'fullscreen' ? fullscreenDisplayMode : 'fit';
-      setFullscreenViewportState((current) => {
-        const clamped = clampFullscreenViewport(current, next, displaySourceSize, displayMode, bottomInsetPx);
-        fullscreenViewportRef.current = clamped;
-        return clamped;
-      });
+      const clamped = clampFullscreenViewport(
+        fullscreenViewportRef.current,
+        next,
+        displaySourceSize,
+        displayMode,
+        bottomInsetPx,
+      );
+      fullscreenViewportRef.current = clamped;
+      setFullscreenViewportState(clamped);
     };
     update('layout');
     let repaintFrame = 0;
@@ -194,6 +226,14 @@ export function useRemoteWindowViewport({
     };
   }, [bottomInsetPx, floatingOverlayRef, focusedWindowSlotRef, fullscreenDisplayMode, receiverFrameSize, state, videoSurfaceRef]);
 
+  useEffect(() => () => {
+    if (pendingViewportFrameRef.current !== null) {
+      window.cancelAnimationFrame(pendingViewportFrameRef.current);
+    }
+    pendingViewportFrameRef.current = null;
+    pendingViewportRef.current = null;
+  }, []);
+
   useEffect(() => {
     if (state.phase !== 'targetLocked' || state.mode !== 'fullscreen' || !surfaceSize) {
       lastAutoImePanRef.current = null;
@@ -222,28 +262,28 @@ export function useRemoteWindowViewport({
       safeChromeInsetPx,
     ].join('|');
     const requestedPanY = -safeChromeInsetPx;
-    setFullscreenViewportState((current) => {
-      const lastAutoPan = lastAutoImePanRef.current;
-      const manualPanActive = lastAutoPan
-        ? Math.abs(current.panY - lastAutoPan.panY) > 1
-        : Math.abs(current.panY) > 1;
-      if (manualPanActive) {
-        return current;
-      }
-      const clamped = clampFullscreenViewport(
-        { ...current, panY: requestedPanY },
-        surfaceSize,
-        displaySourceSize,
-        fullscreenDisplayMode,
-        safeBottomInsetPx,
-      );
-      lastAutoImePanRef.current = { key: autoKey, panY: clamped.panY };
-      fullscreenViewportRef.current = clamped;
-      return clamped;
-    });
+    const current = fullscreenViewportRef.current;
+    const lastAutoPan = lastAutoImePanRef.current;
+    const manualPanActive = lastAutoPan
+      ? Math.abs(current.panY - lastAutoPan.panY) > 1
+      : Math.abs(current.panY) > 1;
+    if (manualPanActive) {
+      return;
+    }
+    const clamped = clampFullscreenViewport(
+      { ...current, panY: requestedPanY },
+      surfaceSize,
+      displaySourceSize,
+      fullscreenDisplayMode,
+      safeBottomInsetPx,
+    );
+    lastAutoImePanRef.current = { key: autoKey, panY: clamped.panY };
+    fullscreenViewportRef.current = clamped;
+    setFullscreenViewportState(clamped);
   }, [bottomChromeInsetPx, bottomInsetPx, focusedWindowSlotRef, fullscreenDisplayMode, receiverFrameSize, state, surfaceSize]);
 
   return {
+    commitFullscreenViewport,
     fullscreenDisplayMode,
     fullscreenDisplayModeRef,
     fullscreenViewport,

@@ -61,6 +61,19 @@ describe('remote window architecture boundary truth', () => {
     expect(activeSource).not.toContain('resource.remote_window_canvas_encode');
   });
 
+  it('keeps pointer, decoded-frame, and capture-frame hot paths free of console logging', () => {
+    for (const path of [
+      'src/components/terminal/RemoteWindowOverlayController.tsx',
+      'src/components/terminal/useRemoteWindowPlayback.ts',
+      'src/components/terminal/useRemoteWindowCompositeCanvas.ts',
+      'src/server/remote-window-stream-daemon.ts',
+    ]) {
+      expect(read(path)).not.toContain('console.log');
+    }
+    expect(read('src/components/terminal/useRemoteWindowCompositeCanvas.ts'))
+      .not.toContain('requestAnimationFrame');
+  });
+
   it('keeps locked controls and developer diagnostics outside the overlay controller body', () => {
     const facade = read('src/components/terminal/RemoteWindowOverlay.tsx');
     const controller = read('src/components/terminal/RemoteWindowOverlayController.tsx');
