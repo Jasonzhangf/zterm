@@ -329,6 +329,10 @@ Android floating entry
 
 - `resource.remote_window_overlay` 只拥有 Android picker / floating overlay / fullscreen overlay / Back 缩小 / close intent 投影。
 - `resource.remote_window_stream` 是 daemon/native 侧唯一真源，拥有 app/window 枚举、iTerm2 pane 枚举、坐标归一化、tmux 反查、capture、encoder/WebRTC sender、input target lease。
+- `resource.remote_window_quality_control`、`resource.remote_window_input_delivery_client`、`resource.remote_window_input_delivery_daemon`、`resource.remote_window_frame_projection`、`resource.remote_window_capture_backpressure` 在 2026-08-30 amendment 的 Phase 0 中是 design 资源；只有对应 runtime、owned paths、相邻 mainline/import edges 与正反 gate 同时通过后才可转 active。
+- 质量控制与媒体 payload 物理隔离：`smooth`（默认）/`quality` profile、revision、single-flight/latest-wins、cause facts、cooldown 走 typed control；bitrate-only 不触碰 capture，cadence/dimensions/filter 只原位更新现有 `SCStream`，quality update 禁止 stop/start capture。
+- 输入 action 与 delivery control 物理隔离：Direct Touch 在 1x/zoomed 的单指移动都是 realtime remote pixel scroll，hold-drag/cancel release 属可靠 lane，zoomed 双指同向移动才是本地 pan；连续 move/scroll 可合并且有 depth/age/rate 上限，可靠 click/down/up/key/barrier 不可丢。
+- decoded frame 是 Android canvas 绘制时钟，一张 frame 最多 draw 一次；focus/overview capture/convert 各最多一个 pending latest frame，过最大 frame age 即丢。若 bounded raw path 达不到两种 profile 的 live gate，只允许一个 native media path并物理删除 production RGBA stdout，禁止双 production path。
 - 安装态 Screen Recording 权限主体唯一是已安装的 `zterm-daemon`：preflight 只执行 `zterm-daemon --permission-probe`；远程窗口 capture 只能从同一二进制的 `remote-window-capture` 子命令启动。禁止 Remote Capture bundle、独立 raw helper、Node 运行时编译或 `screencapture` fallback。
 - Android 不计算 macOS 坐标，不读取 iTerm2 split tree，不把 terminal buffer/render 当视频真源。
 - fullscreen Back 只从 fullscreen 缩小为 floating；只有 close 才释放 capture / encoder / WebRTC sender / target lease。

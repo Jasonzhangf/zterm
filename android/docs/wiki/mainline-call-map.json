@@ -427,6 +427,18 @@
           "label": "src/lib/remote-window-quality-controller.ts#beginRemoteWindowQualityRequest + acceptRemoteWindowQualityResult + rejectRemoteWindowQualityRequest"
         },
         {
+          "id": "RemoteWindowQualityControl",
+          "label": "src/lib/remote-window-quality-controller.ts + src/components/terminal/useRemoteWindowQuality.ts#single-flight/latest-wins quality control (binding pending)"
+        },
+        {
+          "id": "RemoteWindowInputDeliveryClient",
+          "label": "src/lib/remote-window-message-runtime.ts + src/contexts/session-context-remote-window-runtime.ts#reliable/continuous delivery control (binding pending)"
+        },
+        {
+          "id": "RemoteWindowFrameProjection",
+          "label": "src/components/terminal/useRemoteWindowCompositeCanvas.ts#decoded-frame draw-once projection (binding pending)"
+        },
+        {
           "id": "RemoteWindowInputRuntime",
           "label": "src/contexts/session-context-remote-window-runtime.ts#sendRemoteWindowInputRuntime"
         },
@@ -1911,7 +1923,7 @@
           "to": "RemoteWindowOverlay",
           "owner_feature": "desktop.remote_window_stream",
           "semantic_input": "active session id plus remote-window catalog/start/stop/input/screenshot callbacks",
-          "semantic_output": "picker, stream setup, floating/fullscreen video overlay, collapsed same-app picker rows plus in-video primary-plus-children sibling window switcher inside the same locked video container, three-child top rail above primary video with horizontal scrolling for additional children, TerminalPage-measured QuickBar plus IME bottom chrome avoidance, source-aspect pre-start and daemon-frame-aspect post-start projection, floating resize, fullscreen button, screenshot button, aspect-fit drawing plus default remote target window-resize fill request on fullscreen entry, IME bottom-inset fullscreen padding plus auto lift, Back/minimize projection, zoom/pan projection without minimap and without shrink below fit where local single-finger pan is only enabled after fullscreen zoom, unzoomed remote tap, release-time drag gesture, target-locked two-finger scroll, and wheel input context, separate QuickBar/body suppression state, active remote-window input context, and close intent",
+          "semantic_output": "picker, stream setup, floating/fullscreen video overlay, decoded-frame projection, source-aspect input transform, smooth/quality preference, realtime 1x/zoomed single-finger remote scroll, held remote drag, zoomed two-finger local pan, pinch zoom, Mouse Emulation pointer/wheel, reliable cancel release, and close intent",
           "status": "anchored",
           "edge_id": "android_mainline:TerminalPage->RemoteWindowOverlay",
           "resource_from": "resource.ui_projection",
@@ -2018,6 +2030,34 @@
           "relation_status": "observer"
         },
         {
+          "from": "RemoteWindowOverlay",
+          "to": "RemoteWindowQualityControl",
+          "owner_feature": "desktop.remote_window_stream",
+          "semantic_input": "smooth/quality preference, interaction activity, and cause-separated stats facts",
+          "semantic_output": "one desired profile projected through single-flight/latest-wins revision control",
+          "status": "partial",
+          "edge_id": "android_mainline:RemoteWindowOverlay->RemoteWindowQualityControl",
+          "resource_from": "resource.remote_window_overlay",
+          "resource_to": "resource.remote_window_quality_control",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "RemoteWindowQualityControl",
+          "to": "RemoteWindowStreamQualityRuntime",
+          "owner_feature": "desktop.remote_window_stream",
+          "semantic_input": "versioned quality control envelope with one in-flight revision and latest desired profile",
+          "semantic_output": "matching applied/no-op/rejected result without concurrent quality requests",
+          "status": "partial",
+          "edge_id": "android_mainline:RemoteWindowQualityControl->RemoteWindowStreamQualityRuntime",
+          "resource_from": "resource.remote_window_quality_control",
+          "resource_to": "resource.session_transport",
+          "via_resources": [
+            "resource.active_session"
+          ],
+          "relation_status": "via"
+        },
+        {
           "from": "RemoteWindowQualityController",
           "to": "RemoteWindowStreamQualityRuntime",
           "owner_feature": "desktop.remote_window_stream",
@@ -2062,12 +2102,53 @@
           "from": "RemoteWindowOverlay",
           "to": "RemoteWindowTouchAction",
           "owner_feature": "desktop.remote_window_stream",
-          "semantic_input": "aspect-fit drawing, default/fullscreen window-resize fill request, unzoomed touch tap/drag, wheel scroll, zoomed local-pan, or target-locked two-finger scroll video-surface event plus selected stream target and scroll tuning",
-          "semantic_output": "touch/action dispatch record with supported-context validation and metadata-only sent/unsent debug; tap becomes one click action, drag becomes one absolute visible-source pixel release-time gesture/swipe action without raw move streaming, two-finger vertical movement becomes one release-time gesture/swipe action from midpoint movement with optional direction inversion, mouse/trackpad wheel remains one pixel scroll action, real input leaves Android without a client focus prelude, fill emits window-resize, and stream setup/fullscreen entry/IME lift/pinch/zoomed fullscreen pan emit no remote action",
+          "semantic_input": "aspect-fit source transform, Direct Touch or Mouse Emulation pointer sequence, selected stream target, scale, timing, and scroll tuning",
+          "semantic_output": "one latched gesture decision: click, realtime bounded 1x/zoomed scroll, reliable held drag/right-click/cancel release, 1x two-finger remote scroll, zoomed two-finger local pan, local pinch, or Mouse Emulation pointer/wheel; letterbox maps to null and delivery control stays outside action metadata",
           "status": "anchored",
           "edge_id": "android_mainline:RemoteWindowOverlay->RemoteWindowTouchAction",
           "resource_from": "resource.remote_window_overlay",
           "resource_to": "resource.remote_window_touch_action",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "RemoteWindowTouchAction",
+          "to": "RemoteWindowInputDeliveryClient",
+          "owner_feature": "desktop.remote_window_stream",
+          "semantic_input": "latched Direct Touch or Mouse Emulation business action",
+          "semantic_output": "reliable ordered admission or bounded continuous latest/merge admission",
+          "status": "partial",
+          "edge_id": "android_mainline:RemoteWindowTouchAction->RemoteWindowInputDeliveryClient",
+          "resource_from": "resource.remote_window_touch_action",
+          "resource_to": "resource.remote_window_input_delivery_client",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "RemoteWindowInputDeliveryClient",
+          "to": "RemoteWindowInputRuntime",
+          "owner_feature": "desktop.remote_window_stream",
+          "semantic_input": "stable reliable sequence or profile-capped continuous batch plus typed delivery control",
+          "semantic_output": "remote-window input frame and matched ACK/NACK without delivery control in action metadata",
+          "status": "partial",
+          "edge_id": "android_mainline:RemoteWindowInputDeliveryClient->RemoteWindowInputRuntime",
+          "resource_from": "resource.remote_window_input_delivery_client",
+          "resource_to": "resource.session_transport",
+          "via_resources": [
+            "resource.active_session"
+          ],
+          "relation_status": "via"
+        },
+        {
+          "from": "RemoteWindowOverlay",
+          "to": "RemoteWindowFrameProjection",
+          "owner_feature": "desktop.remote_window_stream",
+          "semantic_input": "focus/overview decoded frame callback, frame id, and profile cadence",
+          "semantic_output": "at most one focus draw per decoded frame plus bounded overview projection and paint facts",
+          "status": "partial",
+          "edge_id": "android_mainline:RemoteWindowOverlay->RemoteWindowFrameProjection",
+          "resource_from": "resource.remote_window_overlay",
+          "resource_to": "resource.remote_window_frame_projection",
           "via_resources": [],
           "relation_status": "direct"
         },
@@ -3980,6 +4061,14 @@
           "label": "src/server/remote-window-input-policy.ts#validateRemoteWindowInputPayload + src/server/remote-window-input-helper.ts#buildRemoteWindowInputConfig + createDefaultRemoteWindowInputHelper"
         },
         {
+          "id": "RemoteWindowInputDelivery",
+          "label": "src/server/remote-window-input-helper.ts + src/server/remote-window-stream-daemon.ts#reliable dedupe/ACK and bounded continuous admission (binding pending)"
+        },
+        {
+          "id": "RemoteWindowCaptureBackpressure",
+          "label": "src/server/remote-window-stream-daemon.ts + src/server/remote-window-capture.ts#per-lane bounded latest frame control (binding pending)"
+        },
+        {
           "id": "RemoteWindowCleanup",
           "label": "src/server/remote-window-stream-daemon.ts#stopStream + src/server/remote-window-stream-session.ts#releaseRemoteWindowStreamSessionResources"
         },
@@ -4655,6 +4744,19 @@
           "relation_status": "direct"
         },
         {
+          "from": "RemoteWindowInputDelivery",
+          "to": "RemoteWindowInput",
+          "owner_feature": "desktop.remote_window_stream",
+          "semantic_input": "deduped reliable action or non-stale bounded continuous action",
+          "semantic_output": "one persistent-helper OS injection attempt and exact action result",
+          "status": "partial",
+          "edge_id": "daemon_mainline:RemoteWindowInputDelivery->RemoteWindowInput",
+          "resource_from": "resource.remote_window_input_delivery_daemon",
+          "resource_to": "resource.remote_window_stream",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
           "from": "RemoteWindowStream",
           "to": "RemoteWindowCapture",
           "owner_feature": "desktop.remote_window_stream",
@@ -4664,6 +4766,19 @@
           "edge_id": "daemon_mainline:RemoteWindowStream->RemoteWindowCapture",
           "resource_from": "resource.remote_window_stream",
           "resource_to": "resource.daemon_process",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "RemoteWindowStream",
+          "to": "RemoteWindowCaptureBackpressure",
+          "owner_feature": "desktop.remote_window_stream",
+          "semantic_input": "captured focus/overview frame with monotonic capture timestamp and active max-frame-age",
+          "semantic_output": "one current frame or replacement/drop fact with pending depth at most one per lane",
+          "status": "partial",
+          "edge_id": "daemon_mainline:RemoteWindowStream->RemoteWindowCaptureBackpressure",
+          "resource_from": "resource.remote_window_stream",
+          "resource_to": "resource.remote_window_capture_backpressure",
           "via_resources": [],
           "relation_status": "direct"
         },

@@ -6,25 +6,25 @@ import { RemoteWindowMorePanel } from './RemoteWindowMorePanel';
 afterEach(cleanup);
 
 describe('RemoteWindowMorePanel view owner', () => {
-  it('keeps low-frequency fullscreen and bitrate intents in More', () => {
+  it('keeps low-frequency fullscreen and video preference intents in More', () => {
     const onToggleFullscreenDisplayMode = vi.fn();
-    const onBitratePresetChange = vi.fn();
+    const onVideoPreferenceChange = vi.fn();
     render(<RemoteWindowMorePanel
       open
       fullscreen
-      bitratePreset="5mbps"
       gestureGuide="触控说明"
-      streamStatusText="串流：已连接 · 画质：5 Mbps"
+      videoPreference="smooth"
+      streamStatusText="串流：已连接 · 流畅优先"
       networkStatusText="网络：4g · RTT 20ms"
       developerDiagnostics={<div data-testid="diagnostics-slot" />}
       onToggleFullscreenDisplayMode={onToggleFullscreenDisplayMode}
-      onBitratePresetChange={onBitratePresetChange}
+      onVideoPreferenceChange={onVideoPreferenceChange}
     />);
 
     fireEvent.click(screen.getByTestId('remote-window-fullscreen-display-toggle'));
-    fireEvent.change(screen.getByLabelText('远程窗口画质上限'), { target: { value: '10mbps' } });
+    fireEvent.change(screen.getByLabelText('远程窗口串流偏好'), { target: { value: 'quality' } });
     expect(onToggleFullscreenDisplayMode).toHaveBeenCalledTimes(1);
-    expect(onBitratePresetChange).toHaveBeenCalledWith('10mbps');
+    expect(onVideoPreferenceChange).toHaveBeenCalledWith('quality');
     expect(screen.getByRole('heading', { name: '显示' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: '画质' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: '状态' })).toBeTruthy();
@@ -33,7 +33,7 @@ describe('RemoteWindowMorePanel view owner', () => {
     expect(panel.getAttribute('data-open')).toBe('true');
     expect(panel.classList.contains('t-panel-slide')).toBe(true);
     expect(screen.getByTestId('remote-window-gesture-guide').textContent).toBe('触控说明');
-    expect(Number.parseFloat(screen.getByLabelText('远程窗口画质上限').style.minHeight)).toBe(48);
+    expect(Number.parseFloat(screen.getByLabelText('远程窗口串流偏好').style.minHeight)).toBe(48);
     expect(screen.getByTestId('remote-window-user-stream-status').textContent).toContain('已连接');
     expect(screen.getByTestId('diagnostics-slot')).toBeTruthy();
   });
@@ -42,13 +42,13 @@ describe('RemoteWindowMorePanel view owner', () => {
     render(<RemoteWindowMorePanel
       open={false}
       fullscreen={false}
-      bitratePreset="2mbps"
       gestureGuide="鼠标说明"
+      videoPreference="smooth"
       streamStatusText="串流：starting"
       networkStatusText="网络：未知"
       developerDiagnostics={null}
       onToggleFullscreenDisplayMode={vi.fn()}
-      onBitratePresetChange={vi.fn()}
+      onVideoPreferenceChange={vi.fn()}
     />);
     expect(screen.queryByTestId('remote-window-fullscreen-display-toggle')).toBeNull();
     expect(screen.queryByRole('heading', { name: '显示' })).toBeNull();

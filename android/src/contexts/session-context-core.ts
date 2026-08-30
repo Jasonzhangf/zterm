@@ -14,7 +14,7 @@ import type {
   RemoteWindowStreamPurpose,
   RemoteWindowStreamTargetManifest,
   RemoteWindowStreamTargetsResponsePayload,
-  RemoteWindowVideoBitrateConfig,
+  RemoteWindowVideoProfile,
   ScheduleJobDraft,
   Session,
   SessionBufferState,
@@ -256,7 +256,7 @@ export interface SessionContextValue {
     sessionId: string,
     target: RemoteWindowStreamTargetManifest,
     streamId: string,
-    options?: { videoBitrate?: RemoteWindowVideoBitrateConfig; purpose?: RemoteWindowStreamPurpose },
+    options: { videoProfile: RemoteWindowVideoProfile; purpose?: RemoteWindowStreamPurpose },
   ) => Promise<RemoteWindowReceiverStartResult>;
   updateRemoteWindowStreamQuality: (
     sessionId: string,

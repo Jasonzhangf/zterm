@@ -8,7 +8,7 @@ import type {
   RemoteWindowStreamRequestPayload,
   RemoteWindowStreamRtcDescription,
   RemoteWindowStreamTargetsResponsePayload,
-  RemoteWindowVideoBitrateConfig,
+  RemoteWindowVideoProfile,
 } from '../lib/types';
 import type { RemoteWindowCaptureFrame } from './remote-window-capture';
 
@@ -81,55 +81,49 @@ export function normalizeIceCandidate(candidate: RTCIceCandidate): RemoteWindowS
   };
 }
 
-export function normalizeRemoteWindowVideoBitrateConfig(
-  input: RemoteWindowVideoBitrateConfig | undefined,
-): RemoteWindowVideoBitrateConfig | null {
+export function normalizeRemoteWindowVideoProfile(
+  input: RemoteWindowVideoProfile | undefined,
+): RemoteWindowVideoProfile | null {
   if (!input) {
     return null;
   }
-  const defaults = (() => {
-    switch (input.preset) {
-      case '2mbps':
-        return { bitrateMbps: 2 as const, maxFrameRateFps: 30 as const };
-      case '5mbps':
-        return { bitrateMbps: 5 as const, maxFrameRateFps: 30 as const };
-      case '10mbps':
-        return { bitrateMbps: 10 as const, maxFrameRateFps: 30 as const };
-      case '20mbps':
-        return { bitrateMbps: 20 as const, maxFrameRateFps: 30 as const };
-      case 'fullscreen':
-        return { bitrateMbps: 20 as const, maxFrameRateFps: 60 as const };
-      default:
-        throw new Error(`remote window video bitrate preset is invalid: ${String(input.preset)}`);
-    }
-  })();
-  const bitrateMbps = defaults.bitrateMbps;
-  const maxBitrateBps = bitrateMbps * 1_000_000;
-  if (
-    input.bitrateMbps !== bitrateMbps
-    || !Number.isFinite(input.maxBitrateBps)
-    || input.maxBitrateBps <= 0
-    || input.maxBitrateBps > maxBitrateBps
-  ) {
-    throw new Error('remote window video bitrate config does not match its preset');
+  if (input.preference !== 'smooth' && input.preference !== 'quality') {
+    throw new Error(`remote window video preference is invalid: ${String(input.preference)}`);
   }
-  const maxFrameRateFps = input.maxFrameRateFps ?? defaults.maxFrameRateFps;
-  if (
-    !Number.isFinite(maxFrameRateFps)
-    || maxFrameRateFps < 5
-    || maxFrameRateFps > defaults.maxFrameRateFps
-  ) {
-    throw new Error('remote window video frame-rate config does not match its preset');
+  const fields: Array<[string, number, number, number]> = [
+    ['maxBitrateBps', input.maxBitrateBps, 500_000, 25_000_000],
+    ['maxFrameRateFps', input.maxFrameRateFps, 1, 60],
+    ['maxCaptureWidth', input.maxCaptureWidth, 320, 3840],
+    ['maxCaptureHeight', input.maxCaptureHeight, 240, 2400],
+    ['maxFrameAgeMs', input.maxFrameAgeMs, 40, 1_000],
+    ['overviewMaxBitrateBps', input.overviewMaxBitrateBps, 0, 2_000_000],
+    ['overviewMaxFrameRateFps', input.overviewMaxFrameRateFps, 0, 8],
+  ];
+  for (const [name, value, minimum, maximum] of fields) {
+    if (!Number.isFinite(value) || value < minimum || value > maximum) {
+      throw new Error(`remote window video profile ${name} is out of range`);
+    }
+  }
+  if (input.overviewMaxBitrateBps >= input.maxBitrateBps) {
+    throw new Error('remote window overview bitrate must remain below the total bitrate');
+  }
+  if (input.overviewMaxFrameRateFps > input.maxFrameRateFps) {
+    throw new Error('remote window overview frame rate must not exceed focus frame rate');
   }
   return {
-    preset: input.preset,
-    bitrateMbps,
+    preference: input.preference,
     maxBitrateBps: Math.floor(input.maxBitrateBps),
-    maxFrameRateFps,
+    maxFrameRateFps: Math.floor(input.maxFrameRateFps),
+    maxCaptureWidth: Math.floor(input.maxCaptureWidth),
+    maxCaptureHeight: Math.floor(input.maxCaptureHeight),
+    maxFrameAgeMs: Math.floor(input.maxFrameAgeMs),
+    interactionActive: input.interactionActive === true,
+    overviewMaxBitrateBps: Math.floor(input.overviewMaxBitrateBps),
+    overviewMaxFrameRateFps: Math.floor(input.overviewMaxFrameRateFps),
   };
 }
 
-export function formatRemoteWindowVideoBitrateError(error: unknown) {
+export function formatRemoteWindowVideoProfileError(error: unknown) {
   if (error instanceof Error) {
     return error.message || error.name || 'remote window video bitrate could not be applied';
   }

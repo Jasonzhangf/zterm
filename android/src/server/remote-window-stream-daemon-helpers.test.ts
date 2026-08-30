@@ -5,10 +5,11 @@ import { describe, expect, it } from 'vitest';
 import {
   buildRemoteWindowTargetCatalogCacheKey,
   convertRgbaToI420Frame,
-  formatRemoteWindowVideoBitrateError,
+  formatRemoteWindowVideoProfileError,
   normalizeIceCandidate,
-  normalizeRemoteWindowVideoBitrateConfig,
+  normalizeRemoteWindowVideoProfile,
 } from './remote-window-stream-daemon-helpers';
+import { makeRemoteWindowVideoProfileFixture } from './remote-window-video-profile-test-fixture';
 
 describe('remote-window-stream-daemon-helpers', () => {
   it('builds catalog cache keys from include flags', () => {
@@ -23,16 +24,19 @@ describe('remote-window-stream-daemon-helpers', () => {
     expect(normalized.sdpMLineIndex).toBe(1);
   });
 
-  it('normalizes video bitrate configs and rejects mismatches', () => {
-    const config = normalizeRemoteWindowVideoBitrateConfig({ preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000, maxFrameRateFps: 30 });
-    expect(config?.bitrateMbps).toBe(5);
-    expect(() => normalizeRemoteWindowVideoBitrateConfig({ preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 6_000_000 })).toThrow();
-    expect(normalizeRemoteWindowVideoBitrateConfig(undefined)).toBeNull();
+  it('normalizes complete video profiles and rejects invalid lane budgets', () => {
+    const profile = makeRemoteWindowVideoProfileFixture('smooth');
+    expect(normalizeRemoteWindowVideoProfile(profile)).toEqual(profile);
+    expect(() => normalizeRemoteWindowVideoProfile({
+      ...profile,
+      overviewMaxBitrateBps: profile.maxBitrateBps,
+    })).toThrow('overviewMaxBitrateBps is out of range');
+    expect(normalizeRemoteWindowVideoProfile(undefined)).toBeNull();
   });
 
-  it('formats bitrate errors with fallbacks', () => {
-    expect(formatRemoteWindowVideoBitrateError(new Error('boom'))).toBe('boom');
-    expect(formatRemoteWindowVideoBitrateError('')).toContain('could not be applied');
+  it('formats profile errors with fallbacks', () => {
+    expect(formatRemoteWindowVideoProfileError(new Error('boom'))).toBe('boom');
+    expect(formatRemoteWindowVideoProfileError('')).toContain('could not be applied');
   });
 
   it('converts rgba frames to i420 with chroma sizing', () => {

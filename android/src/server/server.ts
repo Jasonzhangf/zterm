@@ -329,10 +329,17 @@ const terminalFileTransferRuntime = createTerminalFileTransferRuntime({
       streamId: target.streamId,
       targetId: target.targetId,
     });
-    for (const payload of payloads) {
-      const result = await remoteWindowStreamRuntime.injectInput(payload);
-      if (!('accepted' in result) || !result.accepted) {
-        throw new Error('message' in result ? result.message : 'remote window image paste rejected');
+    for (let index = 0; index < payloads.length; index += 1) {
+      const payload = payloads[index]!;
+      const result = await remoteWindowStreamRuntime.injectInput(payload, {
+        version: 1,
+        sequence: `${requestPrefix}-${index}`,
+        lane: 'reliable',
+        attempt: 1,
+        sentAtMs: Date.now(),
+      });
+      if (!result?.control.accepted) {
+        throw new Error(result?.control.error?.message || 'remote window image paste rejected');
       }
     }
   },

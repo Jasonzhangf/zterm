@@ -32,7 +32,7 @@ import type {
   RemoteWindowStreamStatusPayload,
   RemoteWindowStreamTargetsResponsePayload,
   RemoteWindowStreamTargetManifest,
-  RemoteWindowVideoBitrateConfig,
+  RemoteWindowVideoProfile,
   Session,
 } from '../lib/types';
 import type { RemoteWindowReceiverStartResult } from '../lib/remote-window-receiver-runtime';
@@ -208,14 +208,14 @@ export function createSessionInteractionRuntime(options: {
     sessionId: string,
     target: RemoteWindowStreamTargetManifest,
     streamId: string,
-    startOptions?: { videoBitrate?: RemoteWindowVideoBitrateConfig; purpose?: RemoteWindowStreamPurpose },
+    startOptions: { videoProfile: RemoteWindowVideoProfile; purpose?: RemoteWindowStreamPurpose },
   ) => {
     return requestRemoteWindowStreamStartRuntime({
       sessionId,
       streamId,
-      purpose: startOptions?.purpose,
+      purpose: startOptions.purpose,
       target,
-      videoBitrate: startOptions?.videoBitrate,
+      videoProfile: startOptions.videoProfile,
       bridgeSettings: options.bridgeSettings,
       sessions: options.refs.stateRef.current.sessions,
       daemonConnection,

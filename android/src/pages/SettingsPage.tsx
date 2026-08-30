@@ -32,12 +32,11 @@ import {
 } from '../components/settings/SettingsSection';
 import { TerminalThemeSection } from '../components/settings/TerminalThemeSection';
 import {
-  REMOTE_WINDOW_VIDEO_BITRATE_PRESETS,
-  readRemoteWindowVideoBitrateGlobalDefault,
-  writeRemoteWindowVideoBitrateGlobalDefault,
-  buildRemoteWindowVideoBitrateConfig,
+  REMOTE_WINDOW_VIDEO_PREFERENCES,
+  readRemoteWindowVideoPreferenceGlobalDefault,
+  writeRemoteWindowVideoPreferenceGlobalDefault,
 } from '../lib/remote-window-video-quality';
-import type { RemoteWindowVideoBitratePreset, TraversalRelayDeviceSnapshot } from '../lib/types';
+import type { RemoteWindowVideoPreference, TraversalRelayDeviceSnapshot } from '../lib/types';
 import { buildAppUpdateManifestCandidates } from '../lib/app-update-relay-manifest';
 
 interface SettingsPageProps {
@@ -148,8 +147,8 @@ export function SettingsPage({
   const [draft, setDraft] = useState({ ...settings, servers: sortBridgeServers(settings.servers) });
   const [updateDraft, setUpdateDraft] = useState(updatePreferences);
   const [runtimeDebugEnabled, setRuntimeDebugEnabledState] = useState(() => isRuntimeDebugEnabled());
-  const [remoteWindowBitrate, setRemoteWindowBitrate] = useState<RemoteWindowVideoBitratePreset>(() => (
-    readRemoteWindowVideoBitrateGlobalDefault() || '5mbps'
+  const [remoteWindowVideoPreference, setRemoteWindowVideoPreference] = useState<RemoteWindowVideoPreference>(() => (
+    readRemoteWindowVideoPreferenceGlobalDefault() || 'smooth'
   ));
   const [remoteScrollFraction, setRemoteScrollFraction] = useState<number>(() => {
     const raw = typeof window === 'undefined' ? null : window.localStorage.getItem('zterm:remote-window:touch-scroll-fraction-v1');
@@ -484,20 +483,20 @@ export function SettingsPage({
           <div style={{ fontSize: '13px', lineHeight: 1.6, color: mobileTheme.colors.lightMuted }}>
             串流画质与触控滚动偏好，作用于后续远程窗口会话。
           </div>
-          <div style={{ marginTop: '12px', marginBottom: '8px', fontSize: '14px', fontWeight: 700 }}>默认码率</div>
+          <div style={{ marginTop: '12px', marginBottom: '8px', fontSize: '14px', fontWeight: 700 }}>默认串流偏好</div>
           <select
             aria-label="远程窗口默认码率"
-            value={remoteWindowBitrate}
+            value={remoteWindowVideoPreference}
             onChange={(event) => {
-              const next = event.currentTarget.value as RemoteWindowVideoBitratePreset;
-              setRemoteWindowBitrate(next);
-              writeRemoteWindowVideoBitrateGlobalDefault(next);
+              const next = event.currentTarget.value as RemoteWindowVideoPreference;
+              setRemoteWindowVideoPreference(next);
+              writeRemoteWindowVideoPreferenceGlobalDefault(next);
             }}
             style={settingsInputStyle()}
           >
-            {REMOTE_WINDOW_VIDEO_BITRATE_PRESETS.map((preset) => (
-              <option key={preset} value={preset}>
-                {buildRemoteWindowVideoBitrateConfig(preset).bitrateMbps} Mbps
+            {REMOTE_WINDOW_VIDEO_PREFERENCES.map((preference) => (
+              <option key={preference} value={preference}>
+                {preference === 'smooth' ? '流畅优先' : '清晰优先'}
               </option>
             ))}
           </select>

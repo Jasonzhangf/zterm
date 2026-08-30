@@ -625,18 +625,33 @@ export function createTerminalMessageRuntime(
         });
         break;
       case 'remote-window-input':
-        void deps.remoteWindowStreamRuntime.injectInput(message.payload).then((payload) => {
-          sendRemoteWindowMessage(connection, 'accepted' in payload
-            ? { type: 'remote-window-input-result', payload }
-            : { type: 'remote-window-error', payload });
+        void deps.remoteWindowStreamRuntime.injectInput(message.payload, message.control).then((result) => {
+          if (!result) {
+            return;
+          }
+          sendRemoteWindowMessage(connection, {
+            type: 'remote-window-input-ack',
+            control: result.control,
+            payload: result.payload,
+          });
         }).catch((error: unknown) => {
           sendRemoteWindowMessage(connection, {
-            type: 'remote-window-error',
+            type: 'remote-window-input-ack',
+            control: {
+              version: 1,
+              sequence: message.control.sequence,
+              accepted: false,
+              retryable: false,
+              duplicate: false,
+              receivedAtMs: Date.now(),
+              error: {
+                code: 'remote_window_input_failed',
+                message: error instanceof Error ? error.message : 'remote window input failed',
+              },
+            },
             payload: {
-              requestId: message.payload.requestId || '',
-              streamId: message.payload.streamId || '',
-              code: 'remote_window_input_failed',
-              message: error instanceof Error ? error.message : 'remote window input failed',
+              streamId: message.payload.streamId,
+              targetId: message.payload.targetId,
             },
           });
         });

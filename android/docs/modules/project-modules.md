@@ -83,7 +83,7 @@ The v2 client DAG baseline physically separates composition from transport primi
 | `daemon.attachment_delivery` | `resource.attachment_store`, `resource.attachment_delivery` | daemon process | client active/session, mirror, UI projection |
 | `daemon.schedule_runtime` | `resource.schedule_job` | backend session | UI/renderer timers |
 | `daemon.file_transfer` | `resource.file_transfer`, `resource.remote_screenshot` | backend session, transport subscriber | UI guesses, client window state |
-| `daemon.remote_window_stream` | `resource.remote_window_stream`; pending resources: canvas raw/layout/encode/focus | daemon process, transport target, tmux reverse lookup | terminal mirror/buffer/render truth |
+| `daemon.remote_window_stream` | `resource.remote_window_stream`, `resource.remote_window_canvas_layout`, `resource.remote_window_focus_stream`, `resource.remote_window_overview_stream`; pending resources (design): `resource.remote_window_canvas_raw`, `resource.remote_window_canvas_encode`, `resource.remote_window_capture_backpressure`, `resource.remote_window_input_delivery_daemon` | daemon process, transport target, tmux reverse lookup | terminal mirror/buffer/render/UI truth |
 
 Daemon hard boundary:
 
@@ -122,7 +122,7 @@ Daemon hard boundary:
 | `client.terminal_shell` | Android terminal shell projection | platform terminal surface, UI projection, renderer window, active session | daemon/backend mutation, sparse/render truth |
 | `client.input_runtime` | `resource.platform_input_channel` | session transport, remote-window overlay | backend/tmux direct write |
 | `client.session_drawer_preview` | `resource.session_preview_selection`, `resource.session_preview_mode` | UI, open tabs, active session, renderer | transport/backend/mirror ownership |
-| `client.remote_window_overlay` | `resource.remote_window_overlay`, `resource.remote_window_touch_action`; pending resources: canvas layout/encode/focus | UI, remote-window stream, transport target | terminal mirror/buffer/tmux truth |
+| `client.remote_window_overlay` | `resource.remote_window_overlay`, `resource.remote_window_touch_action`; pending resources (design): `resource.remote_window_quality_control`, `resource.remote_window_input_delivery_client`, `resource.remote_window_frame_projection`, `resource.remote_window_canvas_encode` | UI, remote-window stream, transport target | terminal mirror/buffer/tmux/daemon capture truth |
 | `client.file_browser` | `resource.client_file_browser`, `resource.file_browser_ui_contract` | target mux request, native file store, file transfer, UI | tmux/mirror, new physical transport |
 | `client.settings_update` | `resource.client_settings_update`, `resource.settings_update_ui_contract` | release artifact, runtime home, UI | open-tab/session/tmux truth |
 | `client.remote_window_ui` | `resource.remote_window_ui_contract` | remote-window overlay projection types | transport/session/mirror/sparse/renderer/UI projection/remote-window media/capture truth |
