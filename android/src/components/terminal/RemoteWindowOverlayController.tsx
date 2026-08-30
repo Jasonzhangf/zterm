@@ -2100,7 +2100,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     }
 
     const runtimeGesture = toRemoteWindowTouchGestureState(gesture);
-    if (runtimeGesture.mode === 'twoFingerCandidate' || runtimeGesture.mode === 'twoFingerScroll' || runtimeGesture.mode === 'pinch') {
+    if (runtimeGesture.mode === 'twoFingerCandidate' || runtimeGesture.mode === 'twoFingerScroll' || runtimeGesture.mode === 'twoFingerPan' || runtimeGesture.mode === 'pinch') {
       const first = surfacePointersRef.current.get(runtimeGesture.firstPointerId);
       const second = surfacePointersRef.current.get(runtimeGesture.secondPointerId);
       if (!first || !second) {
@@ -2134,7 +2134,9 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
         scrollFraction: touchScrollFractionRef.current,
         invertGestureDirection: touchScrollInvertedRef.current,
         pinchEnabled: state.mode === 'fullscreen',
-        scrollEnabled: true,
+        scrollEnabled: fullscreenViewportRef.current.scale <= REMOTE_WINDOW_FULLSCREEN_MIN_SCALE,
+        panEnabled: state.mode === 'fullscreen'
+          && fullscreenViewportRef.current.scale > REMOTE_WINDOW_FULLSCREEN_MIN_SCALE,
       });
       if (pairResult.nextState.mode !== runtimeGesture.mode) {
         console.log('[rw-gesture] pair move transition:', runtimeGesture.mode, '->', pairResult.nextState.mode,
@@ -2312,7 +2314,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       event.stopPropagation();
       return;
     }
-    if (runtimeGesture.mode === 'twoFingerCandidate' || runtimeGesture.mode === 'twoFingerScroll' || runtimeGesture.mode === 'pinch') {
+    if (runtimeGesture.mode === 'twoFingerCandidate' || runtimeGesture.mode === 'twoFingerScroll' || runtimeGesture.mode === 'twoFingerPan' || runtimeGesture.mode === 'pinch') {
       const first = surfacePointersRef.current.get(runtimeGesture.firstPointerId);
       const second = surfacePointersRef.current.get(runtimeGesture.secondPointerId);
       if (!first || !second) {
@@ -2362,12 +2364,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
         timeMs: event.timeStamp,
         scrollFraction: touchScrollFractionRef.current,
         invertGestureDirection: touchScrollInvertedRef.current,
-        remainingPointerMode: inputModeRef.current === 'touch'
-          && state.phase === 'targetLocked'
-          && state.mode === 'fullscreen'
-          && fullscreenViewportRef.current.scale > REMOTE_WINDOW_FULLSCREEN_MIN_SCALE
-          ? 'local-pan'
-          : 'remote-action',
+        remainingPointerMode: 'remote-action',
       });
       if (pairResult.nextState.mode === 'localPan') {
         surfaceLocalPanStartRef.current = {
@@ -2409,10 +2406,10 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       gesture
       && (
         ('pointerId' in gesture && gesture.pointerId === event.pointerId)
-        || (runtimeGesture.mode === 'twoFingerCandidate' || runtimeGesture.mode === 'twoFingerScroll' || runtimeGesture.mode === 'pinch')
+        || (runtimeGesture.mode === 'twoFingerCandidate' || runtimeGesture.mode === 'twoFingerScroll' || runtimeGesture.mode === 'twoFingerPan' || runtimeGesture.mode === 'pinch')
       )
     ) {
-      if (runtimeGesture.mode !== 'idle' && runtimeGesture.mode !== 'twoFingerCandidate' && runtimeGesture.mode !== 'twoFingerScroll' && runtimeGesture.mode !== 'pinch') {
+      if (runtimeGesture.mode !== 'idle' && runtimeGesture.mode !== 'twoFingerCandidate' && runtimeGesture.mode !== 'twoFingerScroll' && runtimeGesture.mode !== 'twoFingerPan' && runtimeGesture.mode !== 'pinch') {
         const geometry = resolveSurfaceInputGeometry();
         if (geometry) {
           const result = resolveRemoteWindowTouchPointerCancelRuntime({

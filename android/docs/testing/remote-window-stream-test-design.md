@@ -297,6 +297,121 @@ Required files: `src/server/remote-window-canvas-layout.test.ts`, `src/server/re
 - Daemon candidate admission is explicit: duplicate candidates reject with `remote_window_stream_candidate_duplicate`, closed-stream candidates reject with `remote_window_stream_candidate_closed`, and a full bounded queue rejects with `remote_window_stream_candidate_queue_full`. The terminal message owner preserves these typed codes on `remote-window-error`; it must not silently coerce rejection to `false` or discard overflow.
 - Typed status telemetry reports `capture-started` separately for `focus` and `overview`. Receiver startup telemetry reports capture confirmation, answer application, and each required track attachment separately; playback telemetry independently records track binding, decoded first frame, and playing evidence.
 - Native WebRTC is split from deterministic daemon unit tests: `remote-window-stream-daemon.test.ts` mocks the addon and injects all media owners, while `pnpm --dir android run test:remote-window-webrtc-loopback` runs the real addon in a dedicated process, negotiates one track for `single-focus` and focus+overview for `overview-plus-focus`, queues ICE until the corresponding remote description and proves application order, receives at least three real sink frames per required lane, stops every sink/track, closes both peers, and must exit zero without SIGSEGV.
+
+## 2026-08-30 quality/gesture/input/frame-control amendment gates
+
+Lifecycle under test:
+
+```text
+preference/stats/interaction
+  -> desired profile
+  -> one in-flight quality revision + latest queued desired
+  -> daemon exact group diff
+  -> sender-only or existing-SCStream in-place mutation or full no-op
+  -> matching applied/rejected result + cooldown
+
+surface pointer sequence
+  -> one latched gesture decision
+  -> reliable ordered or continuous coalesced delivery control
+  -> daemon dedupe/age/depth admission
+  -> persistent helper OS injection
+  -> ACK/NACK/action result
+
+decoded/captured frame
+  -> decoded-frame draw clock or per-lane latest admission
+  -> one current draw/conversion
+  -> bounded paint/frame-age/drop fact
+```
+
+### White-box paired quality cases
+
+- Positive: bitrate-only changes existing sender encodings and returns applied;
+  negative: capture configuration/filter/start/stop are not called.
+- Positive: cadence and dimensions use the existing `SCStream` configuration;
+  negative: `startCapture`, `stopCapture`, peer, receiver, and transport remain
+  untouched.
+- Positive: an identical profile advances/acknowledges the matching revision as
+  an applied no-op; negative: sender and capture mutation counts are zero.
+- Positive: group failure restores every already-applied lane to its exact old
+  values; negative: partial applied truth is never returned. Rollback failure
+  becomes terminal stream error and exactly-once cleanup.
+- Positive: while one request is in flight, changed desired profiles overwrite
+  one queued latest value and the final latest value is applied once; negative:
+  no concurrent daemon busy storm and no stale result overwrites applied truth.
+- Positive: rejected, busy, and timeout all leave requested state and preserve
+  a valid latest desired retry decision; negative: no permanent `requested`.
+- Positive: two post-apply samples are skipped and later real constrained
+  samples still adjust; negative: transition noise cannot immediately trigger
+  a second degradation.
+- Positive: network, host CPU/capture, Android decode/render, and latency-only
+  inputs select their documented first adjustment; negative: non-network facts
+  do not become network weak and cumulative counters are not used as deltas.
+
+### White-box paired gesture and delivery cases
+
+- Positive: 1x and zoomed one-finger movement emits bounded pixel scroll during
+  pointer-move; negative: pointer-up emits no release-time swipe and zoomed
+  pointer-down does not enter local pan.
+- Positive: movement after the 250 ms hold emits reliable down, bounded moves,
+  and one up after five seconds; negative: ordinary scroll emits no down and
+  gesture duration never drops release.
+- Positive: stationary 500 ms hold emits one right click; negative: release
+  emits no left click or second right click.
+- Positive: zoomed coherent two-finger movement changes only local pan; 1x
+  coherent movement sends only remote scroll; anti-parallel movement changes
+  only local scale; negative: committed modes never oscillate or dual-dispatch.
+- Positive: pointer-cancel after remote down produces a reliable release;
+  negative: no stuck remote button and no stale policy can discard release.
+- Positive: surface points inside 1x/2x/max-pan geometry map within two source
+  pixels or 0.5%; negative: letterbox points return null rather than clamp.
+- Positive: a 120 Hz replay produces no more than 45 continuous frames/second
+  in smooth or 30 in quality, scroll deltas sum, and move keeps latest position;
+  negative: reliable barriers are never merged, reordered, or dropped.
+- Positive: ACK timeout or route-generation change retries the same sequence at
+  most the bounded count; negative: retry creates no new sequence or duplicate
+  text/click. Daemon duplicate sequence returns the previous ACK/result without
+  reinjection.
+- Positive: daemon continuous depth is at most two and old scroll expires from
+  its original receive timestamp; negative: successful focus/action never
+  refreshes later continuous age and no post-stop scroll tail replays.
+
+### White-box paired render/capture cases
+
+- Positive: each distinct decoded frame id causes at most one focus
+  `drawImage`; negative: display rAF ticks without a new decoded frame draw
+  nothing and no production rAF fallback is retained.
+- Positive: overview/thumbnail draws only on decoded callbacks within profile
+  cadence and interaction can reduce it to 0-1 FPS; negative: overview cannot
+  consume a fixed minimum budget while focus is active.
+- Positive: focus and overview conversion each retain at most one pending latest
+  frame and replace an older pending frame; negative: no FIFO of historical
+  frames and queue depth cannot be increased to pass.
+- Positive: capture timestamps older than active maximum frame age are dropped
+  before conversion/media; negative: no over-age frame is presented after user
+  input stops.
+- Positive: invalid dimensions, callback unavailability, conversion failure,
+  stream stop, capture exit, and transport failure produce explicit error or
+  exactly-once cleanup as specified; negative: no screenshot/terminal/old-video
+  success substitution and no retained second production media path.
+
+### Module black-box and project black-box
+
+- Raw and mux AppKit probes prove pointer-move-phase scrolling, five-second
+  drag/cancel release, sequence dedupe, 120 Hz coalescing, zero quality capture
+  restart, frame-age, and exact cleanup against the installed daemon.
+- Installed Android proves 1x/2x/max-pan input, smooth/quality selection,
+  decoded-frame draw cadence, foreground resume, active route identity, and
+  real visible marker video. Mock canvas, ontrack alone, capture-started alone,
+  or route metadata alone is insufficient.
+- Controlled direct/LAN A/B target is smooth 1280-long-edge@45 with p95
+  presented frame age <=100 ms and quality 1920-long-edge@30 with p95 <=180 ms.
+  If either fails after bounded latest-frame work, the only completion path is
+  one native media path plus physical removal of production RGBA stdout.
+
+Known gap at Phase 0: every new resource and mainline edge is `design` or
+`binding pending`; runtime tests must initially fail. They become active only
+after the corresponding symbols, paired gates, installed/live evidence, and
+registry bindings pass together.
 - Before peer/capture allocation, the daemon rejects unsupported Darwin ABI or missing native wrtc constructors/video conversion capability, then publishes one typed `capability-verified` status with the accepted media plan, exact maximum video-lane count, and a preflight matrix. The matrix must mark Screen Recording permission, capture, and sender negotiation as `pending` until their real lifecycle stages prove them; it is not rendered-frame proof and not a VideoToolbox/ROI claim.
 - Every rejected startup carries a typed `failureStage` owned by the daemon lifecycle (`request-validation`, `platform-capability`, `stream-lifecycle`, `media-plan-validation`, offer/capture/input-helper/answer stages). The message runtime must preserve that field on the rejected Error and the overlay may only project it; timeout or error-string parsing must not synthesize a stage.
 - Positive tests cover one-lane and two-lane capability facts plus focus/overview `capture-started`; negative tests cover request validation, media-plan mismatch, offer application, and focus capture failure stages. Status/error facts stay on the control side-channel and never enter SDP, track metadata, or media frames.

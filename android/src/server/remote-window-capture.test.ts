@@ -43,16 +43,10 @@ describe('remote-window capture config', () => {
     const frames: Array<{ width: number }> = [];
     const directory = mkdtempSync(join(tmpdir(), 'rw-capture-validate-'));
     const captureBinary = join(directory, 'capture');
-    writeFileSync(captureBinary, `#!/usr/bin/env node
-if (process.argv[2] === 'remote-window-validate') process.exit(0);
-const rgba = Buffer.alloc(16, 12);
-const header = Buffer.alloc(16);
-header.write('ZRW1', 0, 'ascii');
-header.writeUInt32LE(2, 4);
-header.writeUInt32LE(2, 8);
-header.writeUInt32LE(rgba.length, 12);
-process.stdout.write(Buffer.concat([header, rgba]));
-setInterval(() => {}, 1000);
+    writeFileSync(captureBinary, `#!/bin/sh
+if [ "$1" = "remote-window-validate" ]; then exit 0; fi
+printf '\\132\\122\\127\\061\\002\\000\\000\\000\\002\\000\\000\\000\\020\\000\\000\\000\\014\\014\\014\\014\\014\\014\\014\\014\\014\\014\\014\\014\\014\\014\\014\\014'
+/bin/sleep 5
 `);
     chmodSync(captureBinary, 0o755);
     try {
@@ -65,7 +59,7 @@ setInterval(() => {}, 1000);
         }],
       }), {
         frameRate: 30,
-        startupTimeoutMs: 1_000,
+        startupTimeoutMs: 3_000,
         swiftBinary: '/bin/echo',
         captureBinary,
         validateTargets: async (config) => {
@@ -210,6 +204,14 @@ setInterval(() => {}, 1000);
     expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).not.toContain('SCScreenshotManager');
     expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).not.toContain('compositeFrameLoop');
     expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).not.toContain('captureFrameDelayMilliseconds');
+  });
+
+  it('updates the existing SCStream configuration and filter without stop/start', () => {
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('func updateCapture(config: CaptureConfig) async throws');
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('updateContentFilter(filter)');
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('updateConfiguration(streamConfiguration)');
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('try await updateCapture(config: nextConfig)');
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).not.toContain('try await startCapture(config: nextConfig)');
   });
 
   it('fails before capture startup when Screen Recording permission is not granted', () => {

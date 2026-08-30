@@ -67,6 +67,21 @@ export function useRemoteWindowQuality({
   );
   const qualityApplyStateRef = useRef(qualityApplyState);
   const adaptiveStateRef = useRef<RemoteWindowVideoAdaptiveState | null>(null);
+  const queuedLatestQualityRef = useRef<{
+    sessionId: string;
+    streamId: string;
+    targetId: string;
+    qualityKey: string;
+    videoBitrate: RemoteWindowVideoBitrateConfig;
+  } | null>(null);
+  const cooldownSamplesRemainingRef = useRef(0);
+  const requestQualityRef = useRef<((options: {
+    sessionId: string;
+    streamId: string;
+    targetId: string;
+    qualityKey: string;
+    videoBitrate: RemoteWindowVideoBitrateConfig;
+  }) => void) | null>(null);
   qualityApplyStateRef.current = qualityApplyState;
 
   const effectiveBitratePreset = mode
@@ -93,7 +108,17 @@ export function useRemoteWindowQuality({
     qualityKey: string;
     videoBitrate: RemoteWindowVideoBitrateConfig;
   }) => {
-    if (!updateStreamQuality || !mediaPlan || hasRemoteWindowQualityKey(qualityApplyStateRef.current, options.qualityKey)) {
+    if (!updateStreamQuality || !mediaPlan) {
+      return;
+    }
+    const current = qualityApplyStateRef.current;
+    if (current.phase === 'requested') {
+      if (current.qualityKey !== options.qualityKey) {
+        queuedLatestQualityRef.current = options;
+      }
+      return;
+    }
+    if (hasRemoteWindowQualityKey(current, options.qualityKey)) {
       return;
     }
     const pending = beginRemoteWindowQualityRequest({
@@ -115,6 +140,14 @@ export function useRemoteWindowQuality({
       const next = acceptRemoteWindowQualityResult(qualityApplyStateRef.current, result);
       qualityApplyStateRef.current = next;
       setQualityApplyState(next);
+      if (next.phase === 'applied') {
+        cooldownSamplesRemainingRef.current = 2;
+      }
+      const queued = queuedLatestQualityRef.current;
+      queuedLatestQualityRef.current = null;
+      if (queued && (next.phase !== 'applied' || next.qualityKey !== queued.qualityKey)) {
+        queueMicrotask(() => requestQualityRef.current?.(queued));
+      }
     }).catch((error) => {
       const next = rejectRemoteWindowQualityRequest({
         state: qualityApplyStateRef.current,
@@ -123,11 +156,19 @@ export function useRemoteWindowQuality({
       });
       qualityApplyStateRef.current = next;
       setQualityApplyState(next);
+      const queued = queuedLatestQualityRef.current;
+      queuedLatestQualityRef.current = null;
+      if (queued) {
+        queueMicrotask(() => requestQualityRef.current?.(queued));
+      }
     });
   }, [mediaPlan, updateStreamQuality]);
+  requestQualityRef.current = requestAcknowledgedQuality;
 
   const resetQualityState = useCallback(() => {
     adaptiveStateRef.current = null;
+    queuedLatestQualityRef.current = null;
+    cooldownSamplesRemainingRef.current = 0;
     const next = createRemoteWindowQualityApplyState();
     qualityApplyStateRef.current = next;
     setQualityApplyState(next);
@@ -167,6 +208,10 @@ export function useRemoteWindowQuality({
       try {
         const sample = await collectStats();
         if (stopped || !sample) {
+          return;
+        }
+        if (cooldownSamplesRemainingRef.current > 0) {
+          cooldownSamplesRemainingRef.current -= 1;
           return;
         }
         const decision = resolveRemoteWindowVideoAdaptiveDecision({

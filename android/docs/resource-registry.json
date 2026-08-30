@@ -2206,6 +2206,98 @@
       ]
     },
     {
+      "resource_id": "resource.remote_window_capture_backpressure",
+      "status": "design",
+      "resource_type": "daemon_control_resource",
+      "identity": "Daemon-owned per-lane bounded latest capture/conversion state, capture timestamp, maximum frame age, queue depth, and drop accounting",
+      "owner_feature": "desktop.remote_window_stream",
+      "truth_store": "src/server/remote-window-stream-daemon.ts + src/server/remote-window-capture.ts",
+      "allowed_operations": [
+        "offer_captured_frame",
+        "replace_pending_latest_frame",
+        "drop_over_age_frame",
+        "drain_latest_frame",
+        "publish_bounded_backpressure_telemetry",
+        "cleanup_pending_frame"
+      ],
+      "direct_relations": [
+        "resource.remote_window_stream",
+        "resource.remote_window_focus_stream",
+        "resource.remote_window_overview_stream"
+      ],
+      "indirect_relations": [
+        "resource.transport_target"
+      ],
+      "via_resources": [
+        "resource.remote_window_stream"
+      ],
+      "forbidden_direct_relations": [
+        "resource.ui_projection",
+        "resource.remote_window_overlay",
+        "resource.mirror_store",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/server/remote-window-capture.test.ts",
+        "src/server/remote-window-stream-daemon.test.ts",
+        "docs/testing/remote-window-stream-test-design.md"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/function-map.md",
+        "docs/decisions/2026-08-30-remote-window-quality-gesture-control-amendment.md"
+      ]
+    },
+    {
+      "resource_id": "resource.remote_window_input_delivery_daemon",
+      "status": "design",
+      "resource_type": "daemon_control_resource",
+      "identity": "Daemon-owned reliable sequence dedupe and ACK/NACK plus bounded continuous latest/merge admission before the persistent macOS input helper",
+      "owner_feature": "desktop.remote_window_stream",
+      "truth_store": "src/server/remote-window-input-helper.ts + src/server/remote-window-stream-daemon.ts",
+      "allowed_operations": [
+        "admit_reliable_action",
+        "dedupe_reliable_sequence",
+        "acknowledge_reliable_sequence",
+        "merge_continuous_scroll",
+        "replace_continuous_pointer_move",
+        "drop_stale_continuous_action",
+        "preserve_reliable_barrier_order",
+        "cleanup_input_delivery_state"
+      ],
+      "direct_relations": [
+        "resource.remote_window_stream"
+      ],
+      "indirect_relations": [
+        "resource.remote_window_input_delivery_client",
+        "resource.transport_target"
+      ],
+      "via_resources": [
+        "resource.session_transport",
+        "resource.daemon_target_transport"
+      ],
+      "forbidden_direct_relations": [
+        "resource.remote_window_overlay",
+        "resource.ui_projection",
+        "resource.mirror_store",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/server/remote-window-input-policy.test.ts",
+        "src/server/remote-window-stream-daemon.test.ts",
+        "docs/testing/remote-window-stream-test-design.md"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/function-map.md",
+        "docs/decisions/2026-08-30-remote-window-quality-gesture-control-amendment.md"
+      ]
+    },
+    {
       "resource_id": "resource.remote_window_stream",
       "status": "active",
       "resource_type": "daemon_backend_truth",
@@ -2234,7 +2326,9 @@
         "resource.transport_target",
         "resource.remote_window_canvas_layout",
         "resource.remote_window_overview_stream",
-        "resource.remote_window_focus_stream"
+        "resource.remote_window_focus_stream",
+        "resource.remote_window_capture_backpressure",
+        "resource.remote_window_input_delivery_daemon"
       ],
       "indirect_relations": [
         "resource.tmux_session",
@@ -2259,7 +2353,8 @@
         "docs/resource-map.md",
         "docs/function-map.md",
         "docs/decisions/2026-07-19-remote-window-stream-truth.md",
-        "docs/decisions/2026-07-29-remote-window-canvas-pipeline.md"
+        "docs/decisions/2026-07-29-remote-window-canvas-pipeline.md",
+        "docs/decisions/2026-08-30-remote-window-quality-gesture-control-amendment.md"
       ]
     },
     {
@@ -2604,6 +2699,153 @@
       ]
     },
     {
+      "resource_id": "resource.remote_window_frame_projection",
+      "status": "design",
+      "resource_type": "projection_resource",
+      "identity": "Client-owned decoded-video-frame callback clock, draw-once frame identity, overview cadence, and bounded paint/frame-age diagnostics for visible remote-window canvases",
+      "owner_feature": "desktop.remote_window_stream",
+      "truth_store": "src/components/terminal/useRemoteWindowCompositeCanvas.ts",
+      "allowed_operations": [
+        "observe_decoded_frame",
+        "draw_focus_frame_once",
+        "throttle_overview_frame",
+        "cache_canvas_context",
+        "record_paint_duration",
+        "record_presented_frame_age",
+        "cleanup_frame_callbacks"
+      ],
+      "direct_relations": [
+        "resource.remote_window_overlay"
+      ],
+      "indirect_relations": [
+        "resource.remote_window_focus_stream",
+        "resource.remote_window_overview_stream"
+      ],
+      "via_resources": [
+        "resource.remote_window_overlay"
+      ],
+      "forbidden_direct_relations": [
+        "resource.daemon_process",
+        "resource.remote_window_stream",
+        "resource.mirror_store",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/components/terminal/useRemoteWindowCompositeCanvas.test.tsx",
+        "src/components/terminal/useRemoteWindowPlayback.test.tsx",
+        "docs/testing/remote-window-stream-test-design.md"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/function-map.md",
+        "docs/decisions/2026-08-30-remote-window-quality-gesture-control-amendment.md"
+      ]
+    },
+    {
+      "resource_id": "resource.remote_window_input_delivery_client",
+      "status": "design",
+      "resource_type": "client_control_resource",
+      "identity": "Client-owned remote-window reliable sequence/in-flight retry control and continuous pointer/scroll coalescing state, physically separate from user action payloads",
+      "owner_feature": "desktop.remote_window_stream",
+      "truth_store": "src/lib/remote-window-message-runtime.ts + src/contexts/session-context-remote-window-runtime.ts",
+      "allowed_operations": [
+        "classify_delivery_lane",
+        "retain_latest_pointer_move",
+        "accumulate_scroll_delta",
+        "flush_continuous_actions",
+        "sequence_reliable_action",
+        "await_reliable_ack",
+        "retry_same_sequence",
+        "flush_before_reliable_barrier",
+        "cleanup_input_delivery_state"
+      ],
+      "direct_relations": [
+        "resource.remote_window_touch_action"
+      ],
+      "indirect_relations": [
+        "resource.remote_window_input_delivery_daemon",
+        "resource.remote_window_stream",
+        "resource.transport_target"
+      ],
+      "via_resources": [
+        "resource.active_session",
+        "resource.session_transport",
+        "resource.daemon_target_transport"
+      ],
+      "forbidden_direct_relations": [
+        "resource.daemon_process",
+        "resource.tmux_session",
+        "resource.mirror_store",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/remote-window-message-runtime.test.ts",
+        "src/contexts/session-context-remote-window-runtime.test.ts",
+        "docs/testing/remote-window-stream-test-design.md"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/function-map.md",
+        "docs/decisions/2026-08-30-remote-window-quality-gesture-control-amendment.md"
+      ]
+    },
+    {
+      "resource_id": "resource.remote_window_quality_control",
+      "status": "design",
+      "resource_type": "client_control_resource",
+      "identity": "Client-owned remote-window quality preference, desired/applied/in-flight/queued-latest revision state, interaction burst, cause-specific ABR facts, and stats cooldown",
+      "owner_feature": "desktop.remote_window_stream",
+      "truth_store": "src/lib/remote-window-quality-controller.ts + src/components/terminal/useRemoteWindowQuality.ts",
+      "allowed_operations": [
+        "select_quality_preference",
+        "derive_stream_profile",
+        "classify_constraint_cause",
+        "begin_interaction_burst",
+        "queue_latest_profile",
+        "apply_matching_revision",
+        "reject_matching_revision",
+        "skip_cooldown_sample",
+        "restore_one_profile_level"
+      ],
+      "direct_relations": [
+        "resource.remote_window_overlay"
+      ],
+      "indirect_relations": [
+        "resource.remote_window_focus_stream",
+        "resource.remote_window_overview_stream",
+        "resource.remote_window_stream",
+        "resource.transport_target"
+      ],
+      "via_resources": [
+        "resource.active_session",
+        "resource.session_transport",
+        "resource.daemon_target_transport"
+      ],
+      "forbidden_direct_relations": [
+        "resource.daemon_process",
+        "resource.tmux_session",
+        "resource.mirror_store",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/remote-window-quality-controller.test.ts",
+        "src/lib/remote-window-video-quality.test.ts",
+        "src/components/terminal/useRemoteWindowQuality.test.tsx",
+        "docs/testing/remote-window-stream-test-design.md"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/function-map.md",
+        "docs/decisions/2026-08-30-remote-window-quality-gesture-control-amendment.md"
+      ]
+    },
+    {
       "resource_id": "resource.remote_window_overlay",
       "status": "active",
       "resource_type": "projection_resource",
@@ -2622,6 +2864,8 @@
         "pan_keyboard_open_fullscreen",
         "select_effective_video_quality",
         "configure_touch_scroll_tuning",
+        "select_quality_preference",
+        "project_decoded_video_frame",
         "shrink_to_floating",
         "emit_screenshot_intent",
         "emit_close_intent",
@@ -2629,7 +2873,10 @@
       ],
       "direct_relations": [
         "resource.remote_window_touch_action",
-        "resource.remote_window_dual_stream_switch"
+        "resource.remote_window_dual_stream_switch",
+        "resource.remote_window_quality_control",
+        "resource.remote_window_input_delivery_client",
+        "resource.remote_window_frame_projection"
       ],
       "indirect_relations": [
         "resource.transport_target",
@@ -2655,7 +2902,8 @@
       "canonical_docs": [
         "docs/resource-map.md",
         "docs/function-map.md",
-        "docs/decisions/2026-07-19-remote-window-stream-truth.md"
+        "docs/decisions/2026-07-19-remote-window-stream-truth.md",
+        "docs/decisions/2026-08-30-remote-window-quality-gesture-control-amendment.md"
       ]
     },
     {
@@ -2668,15 +2916,21 @@
       "allowed_operations": [
         "classify_surface_touch",
         "classify_two_finger_scroll",
+        "classify_zoomed_two_finger_pan",
+        "classify_hold_drag",
+        "classify_cancel_release",
         "apply_scroll_tuning",
         "validate_input_context",
         "dispatch_supported_action",
         "emit_input_debug"
       ],
       "direct_relations": [
+        "resource.remote_window_input_delivery_client",
         "resource.remote_window_stream"
       ],
       "indirect_relations": [
+        "resource.remote_window_input_delivery_daemon",
+        "resource.remote_window_stream",
         "resource.transport_target"
       ],
       "via_resources": [
@@ -2699,7 +2953,8 @@
       "canonical_docs": [
         "docs/resource-map.md",
         "docs/function-map.md",
-        "docs/decisions/2026-07-19-remote-window-stream-truth.md"
+        "docs/decisions/2026-07-19-remote-window-stream-truth.md",
+        "docs/decisions/2026-08-30-remote-window-quality-gesture-control-amendment.md"
       ]
     },
     {

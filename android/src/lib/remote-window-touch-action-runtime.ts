@@ -66,15 +66,6 @@ export type RemoteWindowTouchPointerState =
       startAtMs: number;
     }
   | {
-      mode: 'touchGestureDrag';
-      pointerId: number;
-      startClientX: number;
-      startClientY: number;
-      lastClientX: number;
-      lastClientY: number;
-      startAtMs: number;
-    }
-  | {
       mode: 'actionLongPress';
       pointerId: number;
       startClientX: number;
@@ -108,6 +99,20 @@ export type RemoteWindowTouchPointerState =
     }
   | {
       mode: 'twoFingerScroll';
+      firstPointerId: number;
+      secondPointerId: number;
+      firstStart: { clientX: number; clientY: number };
+      secondStart: { clientX: number; clientY: number };
+      startDistance: number;
+      startMidX: number;
+      startMidY: number;
+      lastMidX: number;
+      lastMidY: number;
+      startedAtMs: number;
+      committed: true;
+    }
+  | {
+      mode: 'twoFingerPan';
       firstPointerId: number;
       secondPointerId: number;
       firstStart: { clientX: number; clientY: number };
@@ -222,6 +227,7 @@ export interface RemoteWindowTouchPairRuntimeOptions {
   invertGestureDirection?: boolean;
   pinchEnabled: boolean;
   scrollEnabled: boolean;
+  panEnabled?: boolean;
 }
 
 export interface RemoteWindowTouchPairRuntimeResult {
@@ -240,7 +246,7 @@ export interface RemoteWindowTouchPointerRuntimeResult {
 
 const REMOTE_WINDOW_TOUCH_DRAG_THRESHOLD_PX = 8;
 const REMOTE_WINDOW_LOCAL_PAN_TAP_THRESHOLD_PX = 8;
-const REMOTE_WINDOW_INPUT_STALE_MS = 1_000;
+export const REMOTE_WINDOW_TOUCH_DRAG_HOLD_MS = 250;
 const REMOTE_WINDOW_TWO_FINGER_SCROLL_DEADZONE_PX = 4;
 export const REMOTE_WINDOW_TOUCH_SCROLL_DEFAULT_FRACTION = 0.25;
 export const REMOTE_WINDOW_TOUCH_SCROLL_MIN_FRACTION = 0.125;
@@ -428,16 +434,11 @@ export function resolveRemoteWindowTouchSurfacePointRuntime(
   ) {
     return null;
   }
-  const normalizedX = clampNumber(
-    (clientX - surfaceRect.left - contentRect.left) / Math.max(1, contentRect.width),
-    0,
-    1,
-  );
-  const normalizedY = clampNumber(
-    (clientY - surfaceRect.top - contentRect.top) / Math.max(1, contentRect.height),
-    0,
-    1,
-  );
+  const normalizedX = (clientX - surfaceRect.left - contentRect.left) / Math.max(1, contentRect.width);
+  const normalizedY = (clientY - surfaceRect.top - contentRect.top) / Math.max(1, contentRect.height);
+  if (normalizedX < 0 || normalizedX > 1 || normalizedY < 0 || normalizedY > 1) {
+    return null;
+  }
   return {
     x: sourceRect.x + normalizedX * sourceRect.width,
     y: sourceRect.y + normalizedY * sourceRect.height,
@@ -598,23 +599,7 @@ export function resolveRemoteWindowTouchPointerDownRuntime(options: {
   if (button === 'none') {
     return emptyResult(options.state, false);
   }
-  if (options.zoomedProjection && pointer.pointerType === 'touch') {
-    return withLocalEffect(
-      {
-        mode: 'localPan',
-        pointerId: pointer.pointerId,
-        startClientX: pointer.clientX,
-        startClientY: pointer.clientY,
-        moved: false,
-      },
-      {
-        kind: 'local-pan-start',
-        pointerId: pointer.pointerId,
-        clientX: pointer.clientX,
-        clientY: pointer.clientY,
-      },
-    );
-  }
+  void options.zoomedProjection;
   return emptyResult({
     mode: 'actionPending',
     pointerId: pointer.pointerId,
@@ -647,17 +632,65 @@ export function resolveRemoteWindowTouchPointerMoveRuntime(options: {
       }, true);
     }
     if (options.touchMode && pointer.pointerType === 'touch') {
-      // Direct Touch single-finger drag tracks silently and emits one
-      // release-time gesture/swipe on pointer up (no realtime scroll).
-      return emptyResult({
-        mode: 'touchGestureDrag',
+      if (pointer.timeMs - state.startAtMs >= REMOTE_WINDOW_TOUCH_DRAG_HOLD_MS) {
+        const downEvent = buildRemoteWindowPointerInputEventRuntime({
+          pointer: {
+            ...pointer,
+            clientX: state.startClientX,
+            clientY: state.startClientY,
+            buttons: 1,
+          },
+          geometry: options.geometry,
+          phase: 'down',
+          button: 'left',
+          buttons: 1,
+        });
+        const moveEvent = buildRemoteWindowPointerInputEventRuntime({
+          pointer: { ...pointer, buttons: 1 },
+          geometry: options.geometry,
+          phase: 'move',
+          button: 'none',
+          buttons: 1,
+        });
+        return withRemoteEvents({
+          mode: 'actionDrag',
+          pointerId: state.pointerId,
+          button: 'left',
+          startClientX: state.startClientX,
+          startClientY: state.startClientY,
+          lastClientX: pointer.clientX,
+          lastClientY: pointer.clientY,
+          startAtMs: state.startAtMs,
+        }, [downEvent, moveEvent].filter((event): event is RemoteWindowInputEventPayload['event'] => Boolean(event)));
+      }
+      const rawDeltaX = pointer.clientX - state.lastClientX;
+      const rawDeltaY = pointer.clientY - state.lastClientY;
+      const { deltaX, deltaY } = resolveRemoteWindowPairScrollDeltaRuntime({
+        rawDeltaX,
+        rawDeltaY,
+        surfaceRect: options.geometry.surfaceRect,
+        sourceRect: options.geometry.sourceRect,
+        scrollFraction: options.scrollFraction ?? REMOTE_WINDOW_TOUCH_SCROLL_DEFAULT_FRACTION,
+        inverted: options.invertGestureDirection ?? false,
+      });
+      const nextState: RemoteWindowTouchPointerState = {
+        mode: 'actionScroll',
         pointerId: state.pointerId,
         startClientX: state.startClientX,
         startClientY: state.startClientY,
         lastClientX: pointer.clientX,
         lastClientY: pointer.clientY,
         startAtMs: state.startAtMs,
-      }, true);
+      };
+      const point = resolveRemoteWindowTouchSurfacePointRuntime(options.geometry, pointer.clientX, pointer.clientY);
+      return withRemoteEvents(nextState, point && (deltaX !== 0 || deltaY !== 0) ? [{
+        kind: 'scroll',
+        unit: 'pixel',
+        deltaX,
+        deltaY,
+        ...point,
+        moveCursor: false,
+      }] : []);
     }
     const downEvent = buildRemoteWindowPointerInputEventRuntime({
       pointer: {
@@ -806,9 +839,6 @@ export function resolveRemoteWindowTouchPointerUpRuntime(options: {
     if (state.suppressTap) {
       return emptyResult(idle, true);
     }
-    if (pointer.timeMs - state.startAtMs > REMOTE_WINDOW_INPUT_STALE_MS) {
-      return emptyResult(idle, true);
-    }
     return withRemoteEvents(
       idle,
       buildClickAtPointEvents({
@@ -831,27 +861,7 @@ export function resolveRemoteWindowTouchPointerUpRuntime(options: {
     return emptyResult(idle, true);
   }
 
-  if (state.mode === 'touchGestureDrag' && state.pointerId === pointer.pointerId) {
-    if (pointer.timeMs - state.startAtMs > REMOTE_WINDOW_INPUT_STALE_MS) {
-      return emptyResult(idle, true);
-    }
-    const swipeEvent = buildRemoteWindowTouchGestureSwipeEventRuntime({
-      pointerId: state.pointerId,
-      startClientX: state.startClientX,
-      startClientY: state.startClientY,
-      endClientX: pointer.clientX,
-      endClientY: pointer.clientY,
-      startTimeMs: state.startAtMs,
-      endTimeMs: pointer.timeMs,
-      geometry,
-    });
-    return withRemoteEvents(idle, swipeEvent ? [swipeEvent] : []);
-  }
-
   if (state.mode === 'actionDrag' && state.pointerId === pointer.pointerId) {
-    if (pointer.timeMs - state.startAtMs > REMOTE_WINDOW_INPUT_STALE_MS) {
-      return emptyResult(idle, true);
-    }
     const event = buildRemoteWindowPointerInputEventRuntime({
       pointer: { ...pointer, buttons: 0 },
       geometry,
@@ -1103,6 +1113,7 @@ export function resolveRemoteWindowTouchPairPointerMoveRuntime(options: RemoteWi
   if (
     state.mode !== 'twoFingerCandidate'
     && state.mode !== 'twoFingerScroll'
+    && state.mode !== 'twoFingerPan'
     && state.mode !== 'pinch'
   ) {
     return {
@@ -1211,6 +1222,21 @@ export function resolveRemoteWindowTouchPairPointerMoveRuntime(options: RemoteWi
     };
   }
 
+  if (state.mode === 'twoFingerPan') {
+    return {
+      nextState: { ...state, lastMidX: midpoint.clientX, lastMidY: midpoint.clientY },
+      remoteEvents: [],
+      localEffect: {
+        kind: 'local-pan-move',
+        pointerId: state.firstPointerId,
+        deltaX: midpoint.clientX - state.startMidX,
+        deltaY: midpoint.clientY - state.startMidY,
+        moved: true,
+      },
+      consumed: true,
+    };
+  }
+
   if (state.mode === 'pinch') {
     const pinchMoveEffect: RemoteWindowTouchLocalEffect = {
       kind: 'pinch-move',
@@ -1273,7 +1299,7 @@ export function resolveRemoteWindowTouchPairPointerMoveRuntime(options: RemoteWi
   }
 
   if (
-    options.scrollEnabled
+    (options.scrollEnabled || options.panEnabled)
     && midpointShift >= REMOTE_WINDOW_TWO_FINGER_SCROLL_MIN_MIDPOINT_PX
     && hasCoherentTwoFingerScrollIntent({
       firstStart: state.firstStart,
@@ -1282,7 +1308,7 @@ export function resolveRemoteWindowTouchPairPointerMoveRuntime(options: RemoteWi
       secondCurrent,
     })
   ) {
-    const events = buildRemoteWindowTwoFingerScrollEventsRuntime({
+    const events = options.panEnabled ? [] : buildRemoteWindowTwoFingerScrollEventsRuntime({
       geometry,
       midClientX: midpoint.clientX,
       midClientY: midpoint.clientY,
@@ -1291,6 +1317,32 @@ export function resolveRemoteWindowTouchPairPointerMoveRuntime(options: RemoteWi
       scrollFraction: scrollFraction ?? REMOTE_WINDOW_TOUCH_SCROLL_DEFAULT_FRACTION,
       inverted: invertGestureDirection ?? false,
     });
+    if (options.panEnabled) {
+      return {
+        nextState: {
+          mode: 'twoFingerPan',
+          firstPointerId: state.firstPointerId,
+          secondPointerId: state.secondPointerId,
+          firstStart: state.firstStart,
+          secondStart: state.secondStart,
+          startDistance: state.startDistance,
+          startMidX: state.startMidX,
+          startMidY: state.startMidY,
+          lastMidX: midpoint.clientX,
+          lastMidY: midpoint.clientY,
+          startedAtMs: state.startedAtMs,
+          committed: true,
+        },
+        remoteEvents: [],
+        localEffect: {
+          kind: 'local-pan-start',
+          pointerId: state.firstPointerId,
+          clientX: midpoint.clientX,
+          clientY: midpoint.clientY,
+        },
+        consumed: true,
+      };
+    }
     return {
       nextState: {
         mode: 'twoFingerScroll',
@@ -1355,6 +1407,7 @@ export function resolveRemoteWindowTouchPairPointerUpRuntime(options: {
   if (
     state.mode !== 'twoFingerCandidate'
     && state.mode !== 'twoFingerScroll'
+    && state.mode !== 'twoFingerPan'
     && state.mode !== 'pinch'
   ) {
     return {
@@ -1388,6 +1441,12 @@ export function resolveRemoteWindowTouchPairPointerUpRuntime(options: {
         deltaX: events[0]?.kind === 'scroll' ? events[0].deltaX : 0,
         deltaY: events[0]?.kind === 'scroll' ? events[0].deltaY : 0,
       }
+    : state.mode === 'twoFingerPan'
+      ? {
+          kind: 'local-pan-end',
+          pointerId: state.firstPointerId,
+          moved: true,
+        }
     : state.mode === 'pinch'
       ? {
           kind: 'pinch-end',
@@ -1442,7 +1501,14 @@ export function resolveRemoteWindowTouchPointerCancelRuntime(options: {
   const idle = createRemoteWindowTouchPointerState();
   const statePointerId = 'pointerId' in state ? (state as any).pointerId : undefined;
   if (state.mode === 'actionDrag' && statePointerId === pointer.pointerId) {
-    return emptyResult(idle, true);
+    const event = buildRemoteWindowPointerInputEventRuntime({
+      pointer: { ...pointer, buttons: 0 },
+      geometry: options.geometry,
+      phase: 'up',
+      button: state.button,
+      buttons: 0,
+    });
+    return withRemoteEvents(idle, event ? [event] : []);
   }
   if (
     state.mode !== 'idle'

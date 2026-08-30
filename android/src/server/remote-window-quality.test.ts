@@ -50,7 +50,37 @@ describe('remote window stream-group quality owner', () => {
       encodings: [{ rid: 'o', maxBitrate: 1_000_000, maxFramerate: 8 }],
     }));
     expect(focusCadence).toHaveBeenCalledWith(12);
-    expect(overviewCadence).toHaveBeenCalledWith(8);
+    expect(overviewCadence).not.toHaveBeenCalled();
+  });
+
+  it('applies bitrate-only changes without touching capture cadence', async () => {
+    const setParameters = vi.fn(async () => undefined);
+    const updateFrameRate = vi.fn(async () => undefined);
+    await applyRemoteWindowStreamGroupQuality({
+      requested,
+      focusSender: {
+        getParameters: () => ({ encodings: [{ maxBitrate: 3_000_000, maxFramerate: 12 }] }),
+        setParameters,
+      } as unknown as RTCRtpSender,
+      focusCaptureSource: { width: 1, height: 1, frameRate: 12, updateFrameRate, stop: vi.fn() },
+    });
+    expect(setParameters).toHaveBeenCalledTimes(1);
+    expect(updateFrameRate).not.toHaveBeenCalled();
+  });
+
+  it('returns a full no-op when sender and capture already match', async () => {
+    const setParameters = vi.fn(async () => undefined);
+    const updateFrameRate = vi.fn(async () => undefined);
+    await applyRemoteWindowStreamGroupQuality({
+      requested,
+      focusSender: {
+        getParameters: () => ({ encodings: [{ maxBitrate: 5_000_000, maxFramerate: 12 }] }),
+        setParameters,
+      } as unknown as RTCRtpSender,
+      focusCaptureSource: { width: 1, height: 1, frameRate: 12, updateFrameRate, stop: vi.fn() },
+    });
+    expect(setParameters).not.toHaveBeenCalled();
+    expect(updateFrameRate).not.toHaveBeenCalled();
   });
 
   it('rejects before mutation when any active lane cannot be controlled', async () => {
@@ -89,12 +119,13 @@ describe('remote window stream-group quality owner', () => {
         getParameters: () => ({ encodings: [{ rid: 'o', maxBitrate: 2_000_000 }] }),
         setParameters: overviewSet,
       } as unknown as RTCRtpSender,
-      overviewCaptureSource: { width: 1, height: 1, frameRate: 8, updateFrameRate: overviewCadence, stop: vi.fn() },
+      overviewCaptureSource: { width: 1, height: 1, frameRate: 30, updateFrameRate: overviewCadence, stop: vi.fn() },
     })).rejects.toThrow('overview cadence rejected');
     expect(focusSet).toHaveBeenLastCalledWith({ encodings: [{ rid: 'f', maxBitrate: 9_000_000 }] });
     expect(focusCadence).toHaveBeenLastCalledWith(30);
     expect(overviewSet).toHaveBeenLastCalledWith({ encodings: [{ rid: 'o', maxBitrate: 2_000_000 }] });
-    expect(overviewCadence).toHaveBeenLastCalledWith(8);
+    expect(overviewCadence).toHaveBeenCalledTimes(1);
+    expect(overviewCadence).toHaveBeenCalledWith(8);
   });
 
   it('requests a fresh native sender transaction before rolling back a partial lane', async () => {

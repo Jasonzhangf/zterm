@@ -437,6 +437,9 @@ export async function startScreenCaptureKitFrameSource(
       throw new Error('ScreenCaptureKit capture command channel is closed');
     }
     const nextConfig = buildScreenCaptureKitConfig(nextTarget, nextFrameRate);
+    if (JSON.stringify(nextConfig) === JSON.stringify(captureConfig)) {
+      return;
+    }
     const seq = captureUpdateSeq + 1;
     captureUpdateSeq = seq;
     const command = {
@@ -495,7 +498,11 @@ export async function startScreenCaptureKitFrameSource(
     if (!Number.isFinite(nextFrameRate) || nextFrameRate <= 0) {
       throw new Error('ScreenCaptureKit capture frame rate must be positive');
     }
-    await updateCaptureConfiguration(currentTarget, Math.floor(nextFrameRate));
+    const normalizedFrameRate = Math.floor(nextFrameRate);
+    if (normalizedFrameRate === frameSource.frameRate) {
+      return;
+    }
+    await updateCaptureConfiguration(currentTarget, normalizedFrameRate);
   };
 
   let resolveStart: (source: RemoteWindowCaptureFrameSource) => void = () => undefined;

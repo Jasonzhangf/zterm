@@ -53,11 +53,27 @@ export function acceptRemoteWindowQualityResult(
 ): RemoteWindowQualityApplyState {
   if (
     state.phase !== 'requested'
-    || result.status !== 'applied'
     || result.revision !== state.revision
-    || !result.appliedVideoBitrate
   ) {
     return state;
+  }
+  if (result.status === 'rejected') {
+    return {
+      phase: 'rejected',
+      revision: state.revision,
+      qualityKey: state.qualityKey,
+      requested: state.requested,
+      message: result.error?.message || 'remote window quality request rejected',
+    };
+  }
+  if (!result.appliedVideoBitrate) {
+    return {
+      phase: 'rejected',
+      revision: state.revision,
+      qualityKey: state.qualityKey,
+      requested: state.requested,
+      message: 'remote window quality result omitted applied profile',
+    };
   }
   return {
     phase: 'applied',
@@ -89,5 +105,6 @@ export function hasRemoteWindowQualityKey(
   state: RemoteWindowQualityApplyState,
   qualityKey: string,
 ) {
-  return state.phase !== 'idle' && state.qualityKey === qualityKey;
+  return (state.phase === 'requested' || state.phase === 'applied')
+    && state.qualityKey === qualityKey;
 }

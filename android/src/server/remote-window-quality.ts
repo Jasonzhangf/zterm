@@ -52,6 +52,8 @@ interface PreparedRemoteWindowQualityLane extends RemoteWindowQualityLane {
   currentParameters: RTCRtpSendParameters;
   previousEncodingParameters: Array<Pick<RTCRtpEncodingParameters, 'maxBitrate' | 'maxFramerate'>>;
   previousFrameRate: number;
+  senderParametersChanged: boolean;
+  captureFrameRateChanged: boolean;
   senderParametersApplied: boolean;
   captureFrameRateApplied: boolean;
 }
@@ -72,6 +74,10 @@ function prepareLane(lane: RemoteWindowQualityLane): PreparedRemoteWindowQuality
     maxBitrate: encoding.maxBitrate,
     maxFramerate: encoding.maxFramerate,
   }));
+  const senderParametersChanged = encodings.some(
+    (encoding) => encoding.maxBitrate !== lane.budget.maxBitrateBps
+      || encoding.maxFramerate !== lane.budget.maxFrameRateFps,
+  );
   for (const encoding of encodings) {
     // @roamhq/wrtc validates setParameters() by transaction id. Mutate the
     // exact object returned by getParameters(); cloned parameters are a new
@@ -84,6 +90,8 @@ function prepareLane(lane: RemoteWindowQualityLane): PreparedRemoteWindowQuality
     currentParameters,
     previousEncodingParameters,
     previousFrameRate: lane.captureSource.frameRate,
+    senderParametersChanged,
+    captureFrameRateChanged: lane.captureSource.frameRate !== lane.budget.maxFrameRateFps,
     senderParametersApplied: false,
     captureFrameRateApplied: false,
   };
@@ -119,10 +127,14 @@ export async function applyRemoteWindowStreamGroupQuality(options: {
       // Register before the first mutation so a failure between sender and
       // capture updates restores this partially-applied lane too.
       applied.push(lane);
-      await lane.sender!.setParameters(lane.currentParameters);
-      lane.senderParametersApplied = true;
-      lane.captureFrameRateApplied = true;
-      await lane.captureSource!.updateFrameRate!(lane.budget.maxFrameRateFps);
+      if (lane.senderParametersChanged) {
+        await lane.sender!.setParameters(lane.currentParameters);
+        lane.senderParametersApplied = true;
+      }
+      if (lane.captureFrameRateChanged) {
+        await lane.captureSource!.updateFrameRate!(lane.budget.maxFrameRateFps);
+        lane.captureFrameRateApplied = true;
+      }
     }
     return budget;
   } catch (error) {

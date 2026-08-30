@@ -458,10 +458,10 @@ export function toRemoteWindowTouchGestureState(
     gesture.mode === 'actionPending'
     || gesture.mode === 'actionDrag'
     || gesture.mode === 'actionScroll'
-    || gesture.mode === 'touchGestureDrag'
     || gesture.mode === 'actionLongPress'
     || gesture.mode === 'twoFingerCandidate'
     || gesture.mode === 'twoFingerScroll'
+    || gesture.mode === 'twoFingerPan'
     || gesture.mode === 'pinch'
   ) {
     return gesture;
@@ -549,4 +549,3 @@ export function buildRemoteWindowAppTargetGroups(
 export function safeRemoteWindowGroupId(groupId: string) {
   return groupId.replace(/[^a-zA-Z0-9_-]+/g, '-');
 }
-
