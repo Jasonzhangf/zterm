@@ -1,6 +1,6 @@
 import type {
   RemoteWindowStreamQualityResultPayload,
-  RemoteWindowVideoBitrateConfig,
+  RemoteWindowVideoProfile,
 } from './types';
 
 export type RemoteWindowQualityApplyState =
@@ -9,20 +9,20 @@ export type RemoteWindowQualityApplyState =
       phase: 'requested';
       revision: number;
       qualityKey: string;
-      requested: RemoteWindowVideoBitrateConfig;
+      requested: RemoteWindowVideoProfile;
     }
   | {
       phase: 'applied';
       revision: number;
       qualityKey: string;
-      applied: RemoteWindowVideoBitrateConfig;
+      applied: RemoteWindowVideoProfile;
       result: RemoteWindowStreamQualityResultPayload;
     }
   | {
       phase: 'rejected';
       revision: number;
       qualityKey: string;
-      requested: RemoteWindowVideoBitrateConfig;
+      requested: RemoteWindowVideoProfile;
       message: string;
     };
 
@@ -33,7 +33,7 @@ export function createRemoteWindowQualityApplyState(): RemoteWindowQualityApplyS
 export function beginRemoteWindowQualityRequest(options: {
   state: RemoteWindowQualityApplyState;
   qualityKey: string;
-  requested: RemoteWindowVideoBitrateConfig;
+  requested: RemoteWindowVideoProfile;
 }) {
   const revision = options.state.revision + 1;
   return {
@@ -66,7 +66,7 @@ export function acceptRemoteWindowQualityResult(
       message: result.error?.message || 'remote window quality request rejected',
     };
   }
-  if (!result.appliedVideoBitrate) {
+  if (!result.appliedVideoProfile) {
     return {
       phase: 'rejected',
       revision: state.revision,
@@ -79,7 +79,7 @@ export function acceptRemoteWindowQualityResult(
     phase: 'applied',
     revision: state.revision,
     qualityKey: state.qualityKey,
-    applied: result.appliedVideoBitrate,
+    applied: result.appliedVideoProfile,
     result,
   };
 }

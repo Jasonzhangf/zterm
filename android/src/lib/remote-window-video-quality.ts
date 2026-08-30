@@ -1,19 +1,14 @@
 import type {
   RemoteWindowStreamTargetManifest,
-  RemoteWindowVideoBitrateConfig,
-  RemoteWindowVideoBitratePreset,
+  RemoteWindowVideoPreference,
+  RemoteWindowVideoProfile,
 } from './types';
 
+export const REMOTE_WINDOW_VIDEO_PREFERENCE_STORAGE_KEY = 'zterm:remote-window-video-preference-v2';
+export const REMOTE_WINDOW_VIDEO_PREFERENCE_GLOBAL_STORAGE_KEY = 'zterm:remote-window-video-preference-global-v2';
 export const REMOTE_WINDOW_VIDEO_BITRATE_STORAGE_KEY = 'zterm:remote-window-video-bitrate';
 export const REMOTE_WINDOW_VIDEO_BITRATE_GLOBAL_STORAGE_KEY = 'zterm:remote-window-video-bitrate-global';
-
-export const REMOTE_WINDOW_VIDEO_BITRATE_PRESETS: RemoteWindowVideoBitratePreset[] = [
-  '2mbps',
-  '5mbps',
-  '10mbps',
-  '20mbps',
-  'fullscreen',
-];
+export const REMOTE_WINDOW_VIDEO_PREFERENCES: readonly RemoteWindowVideoPreference[] = ['smooth', 'quality'];
 
 export interface RemoteWindowNetworkQualityInput {
   effectiveType?: string | null;
@@ -34,25 +29,28 @@ export interface RemoteWindowVideoStatsSample {
   qualityLimitationReason?: string | null;
 }
 
+export type RemoteWindowVideoPressureCause = 'none' | 'network' | 'host' | 'render' | 'latency';
+
 export interface RemoteWindowVideoAdaptiveState {
-  mode: 'normal' | 'degraded';
-  /** 0 is baseline; 1..3 are bounded degradation steps. */
-  level: 0 | 1 | 2 | 3;
-  degradedAtMs: number | null;
+  pressureCause: RemoteWindowVideoPressureCause;
+  level: 0 | 1 | 2;
+  consecutivePressureSamples: number;
   stableSinceMs: number | null;
-  weakSampleCount: number;
+  lastAdjustmentAtMs: number | null;
+  lastSample: RemoteWindowVideoStatsSample | null;
 }
 
 export interface RemoteWindowVideoAdaptiveDecision {
   state: RemoteWindowVideoAdaptiveState;
-  config: RemoteWindowVideoBitrateConfig;
+  profile: RemoteWindowVideoProfile;
   reason: 'baseline' | 'downgrade' | 'hold' | 'restore';
+  cause: RemoteWindowVideoPressureCause;
 }
 
-type RemoteWindowVideoBitrateStorage = {
-  version: 1;
-  byTarget: Record<string, RemoteWindowVideoBitratePreset>;
-  byResolution: Record<string, RemoteWindowVideoBitratePreset>;
+type RemoteWindowVideoPreferenceStorage = {
+  version: 2;
+  byTarget: Record<string, RemoteWindowVideoPreference>;
+  byResolution: Record<string, RemoteWindowVideoPreference>;
 };
 
 interface BrowserStorageLike {
@@ -60,43 +58,88 @@ interface BrowserStorageLike {
   setItem(key: string, value: string): void;
 }
 
-function isRemoteWindowVideoBitratePreset(value: unknown): value is RemoteWindowVideoBitratePreset {
-  return typeof value === 'string'
-    && (REMOTE_WINDOW_VIDEO_BITRATE_PRESETS as string[]).includes(value);
+function isRemoteWindowVideoPreference(value: unknown): value is RemoteWindowVideoPreference {
+  return value === 'smooth' || value === 'quality';
 }
 
-function readStorage(storage: BrowserStorageLike | null | undefined): RemoteWindowVideoBitrateStorage {
+function migrateLegacyBitratePreset(value: unknown): RemoteWindowVideoPreference | null {
+  if (value === '2mbps' || value === '5mbps') {
+    return 'smooth';
+  }
+  if (value === '10mbps' || value === '20mbps' || value === 'fullscreen') {
+    return 'quality';
+  }
+  return null;
+}
+
+function emptyPreferenceStorage(): RemoteWindowVideoPreferenceStorage {
+  return { version: 2, byTarget: {}, byResolution: {} };
+}
+
+function readPreferenceStorage(
+  storage: BrowserStorageLike | null | undefined,
+): RemoteWindowVideoPreferenceStorage {
   if (!storage) {
-    return { version: 1, byTarget: {}, byResolution: {} };
+    return emptyPreferenceStorage();
+  }
+  try {
+    const raw = storage.getItem(REMOTE_WINDOW_VIDEO_PREFERENCE_STORAGE_KEY);
+    if (!raw) {
+      return emptyPreferenceStorage();
+    }
+    const parsed = JSON.parse(raw) as Partial<RemoteWindowVideoPreferenceStorage>;
+    return {
+      version: 2,
+      byTarget: Object.fromEntries(
+        Object.entries(parsed.byTarget || {}).filter(([, value]) => isRemoteWindowVideoPreference(value)),
+      ),
+      byResolution: Object.fromEntries(
+        Object.entries(parsed.byResolution || {}).filter(([, value]) => isRemoteWindowVideoPreference(value)),
+      ),
+    };
+  } catch {
+    return emptyPreferenceStorage();
+  }
+}
+
+function readLegacyPreferenceStorage(
+  storage: BrowserStorageLike | null | undefined,
+): Pick<RemoteWindowVideoPreferenceStorage, 'byTarget' | 'byResolution'> {
+  if (!storage) {
+    return { byTarget: {}, byResolution: {} };
   }
   try {
     const raw = storage.getItem(REMOTE_WINDOW_VIDEO_BITRATE_STORAGE_KEY);
     if (!raw) {
-      return { version: 1, byTarget: {}, byResolution: {} };
+      return { byTarget: {}, byResolution: {} };
     }
-    const parsed = JSON.parse(raw) as Partial<RemoteWindowVideoBitrateStorage>;
+    const parsed = JSON.parse(raw) as {
+      byTarget?: Record<string, unknown>;
+      byResolution?: Record<string, unknown>;
+    };
+    const migrateEntries = (entries: Record<string, unknown> | undefined) => Object.fromEntries(
+      Object.entries(entries || {}).flatMap(([key, value]) => {
+        const migrated = migrateLegacyBitratePreset(value);
+        return migrated ? [[key, migrated]] : [];
+      }),
+    );
     return {
-      version: 1,
-      byTarget: Object.fromEntries(
-        Object.entries(parsed.byTarget || {}).filter(([, value]) => isRemoteWindowVideoBitratePreset(value)),
-      ),
-      byResolution: Object.fromEntries(
-        Object.entries(parsed.byResolution || {}).filter(([, value]) => isRemoteWindowVideoBitratePreset(value)),
-      ),
+      byTarget: migrateEntries(parsed.byTarget),
+      byResolution: migrateEntries(parsed.byResolution),
     };
   } catch {
-    return { version: 1, byTarget: {}, byResolution: {} };
+    return { byTarget: {}, byResolution: {} };
   }
 }
 
-function writeStorage(
+function writePreferenceStorage(
   storage: BrowserStorageLike | null | undefined,
-  value: RemoteWindowVideoBitrateStorage,
+  value: RemoteWindowVideoPreferenceStorage,
 ) {
   if (!storage) {
     return false;
   }
-  storage.setItem(REMOTE_WINDOW_VIDEO_BITRATE_STORAGE_KEY, JSON.stringify(value));
+  storage.setItem(REMOTE_WINDOW_VIDEO_PREFERENCE_STORAGE_KEY, JSON.stringify(value));
   return true;
 }
 
@@ -105,9 +148,7 @@ export function getRemoteWindowSourceRect(target: RemoteWindowStreamTargetManife
 }
 
 function getRectArea(rect: { width: number; height: number }) {
-  const width = Math.max(1, rect.width);
-  const height = Math.max(1, rect.height);
-  return width * height;
+  return Math.max(1, rect.width) * Math.max(1, rect.height);
 }
 
 export function resolveRemoteWindowDesktopCoverageRatio(
@@ -118,11 +159,8 @@ export function resolveRemoteWindowDesktopCoverageRatio(
     return null;
   }
   const displayArea = getRectArea(displayRect);
-  if (!Number.isFinite(displayArea) || displayArea <= 0) {
-    return null;
-  }
   const sourceArea = getRectArea(getRemoteWindowSourceRect(target));
-  if (!Number.isFinite(sourceArea) || sourceArea <= 0) {
+  if (!Number.isFinite(displayArea) || displayArea <= 0 || !Number.isFinite(sourceArea) || sourceArea <= 0) {
     return null;
   }
   return Math.max(0, Math.min(1, sourceArea / displayArea));
@@ -130,9 +168,7 @@ export function resolveRemoteWindowDesktopCoverageRatio(
 
 export function resolveRemoteWindowVideoResolutionKey(target: RemoteWindowStreamTargetManifest) {
   const rect = getRemoteWindowSourceRect(target);
-  const width = Math.max(1, Math.round(rect.width));
-  const height = Math.max(1, Math.round(rect.height));
-  return `${target.videoTarget.kind}:${width}x${height}`;
+  return `${target.videoTarget.kind}:${Math.max(1, Math.round(rect.width))}x${Math.max(1, Math.round(rect.height))}`;
 }
 
 export function resolveRemoteWindowVideoTargetKey(target: RemoteWindowStreamTargetManifest) {
@@ -144,302 +180,359 @@ export function resolveRemoteWindowVideoTargetKey(target: RemoteWindowStreamTarg
   ].join('|');
 }
 
-export function resolveDefaultRemoteWindowVideoBitratePreset(
+export function resolveDefaultRemoteWindowVideoPreference(
   _target: RemoteWindowStreamTargetManifest,
-): RemoteWindowVideoBitratePreset {
-  return '2mbps';
+): RemoteWindowVideoPreference {
+  return 'smooth';
 }
 
-export function buildRemoteWindowVideoBitrateConfig(
-  preset: RemoteWindowVideoBitratePreset,
-): RemoteWindowVideoBitrateConfig {
-  const bitrateMbps = preset === '2mbps'
-    ? 2
-    : preset === '5mbps'
-      ? 5
-      : preset === '10mbps'
-        ? 10
-        : 20;
-  const maxFrameRateFps = preset === 'fullscreen'
-    ? 60
-    : 30;
+export function buildRemoteWindowVideoProfile(
+  preference: RemoteWindowVideoPreference,
+  options: {
+    interactionActive?: boolean;
+    cause?: RemoteWindowVideoPressureCause;
+    level?: 0 | 1 | 2;
+  } = {},
+): RemoteWindowVideoProfile {
+  const interactionActive = options.interactionActive === true;
+  const cause = options.cause ?? 'none';
+  const level = options.level ?? 0;
+  const base: RemoteWindowVideoProfile = preference === 'smooth'
+    ? {
+        preference,
+        maxBitrateBps: interactionActive ? 8_000_000 : 6_000_000,
+        maxFrameRateFps: interactionActive ? 45 : 30,
+        maxCaptureWidth: interactionActive ? 1280 : 1440,
+        maxCaptureHeight: interactionActive ? 800 : 900,
+        maxFrameAgeMs: interactionActive ? 80 : 100,
+        interactionActive,
+        overviewMaxBitrateBps: interactionActive ? 150_000 : 250_000,
+        overviewMaxFrameRateFps: interactionActive ? 1 : 2,
+      }
+    : {
+        preference,
+        maxBitrateBps: interactionActive ? 18_000_000 : 16_000_000,
+        maxFrameRateFps: 30,
+        maxCaptureWidth: 1920,
+        maxCaptureHeight: 1200,
+        maxFrameAgeMs: interactionActive ? 120 : 150,
+        interactionActive,
+        overviewMaxBitrateBps: interactionActive ? 150_000 : 300_000,
+        overviewMaxFrameRateFps: interactionActive ? 1 : 2,
+      };
+  if (level === 0 || cause === 'none') {
+    return base;
+  }
+  if (cause === 'latency') {
+    return {
+      ...base,
+      maxFrameAgeMs: preference === 'smooth' ? 80 : 120,
+      overviewMaxBitrateBps: Math.min(base.overviewMaxBitrateBps, 150_000),
+      overviewMaxFrameRateFps: 1,
+    };
+  }
+  if (preference === 'smooth') {
+    if (level === 2) {
+      return {
+        ...base,
+        maxBitrateBps: cause === 'network' ? 2_000_000 : 3_000_000,
+        maxFrameRateFps: 30,
+        maxCaptureWidth: 960,
+        maxCaptureHeight: 600,
+        maxFrameAgeMs: cause === 'network' ? 120 : 100,
+        overviewMaxBitrateBps: 100_000,
+        overviewMaxFrameRateFps: 1,
+      };
+    }
+    return {
+      ...base,
+      maxBitrateBps: cause === 'network' ? 4_000_000 : 5_000_000,
+      maxFrameRateFps: cause === 'network' && interactionActive ? 45 : 30,
+      maxCaptureWidth: 1280,
+      maxCaptureHeight: 800,
+      maxFrameAgeMs: cause === 'network' ? 100 : 90,
+      overviewMaxBitrateBps: 150_000,
+      overviewMaxFrameRateFps: 1,
+    };
+  }
+  if (level === 2) {
+    return {
+      ...base,
+      maxBitrateBps: cause === 'network' ? 6_000_000 : 10_000_000,
+      maxFrameRateFps: 24,
+      maxCaptureWidth: 1280,
+      maxCaptureHeight: 800,
+      maxFrameAgeMs: 180,
+      overviewMaxBitrateBps: 150_000,
+      overviewMaxFrameRateFps: 1,
+    };
+  }
   return {
-    preset,
-    bitrateMbps,
-    maxBitrateBps: bitrateMbps * 1_000_000,
-    maxFrameRateFps,
+    ...base,
+    maxBitrateBps: cause === 'network' ? 10_000_000 : 14_000_000,
+    maxFrameRateFps: 30,
+    maxCaptureWidth: 1600,
+    maxCaptureHeight: 1000,
+    maxFrameAgeMs: 150,
+    overviewMaxBitrateBps: 200_000,
+    overviewMaxFrameRateFps: 2,
   };
 }
 
-export function buildDegradedRemoteWindowVideoBitrateConfig(
-  config: RemoteWindowVideoBitrateConfig,
-  level: 1 | 2 | 3 = 1,
-): RemoteWindowVideoBitrateConfig {
-  const divisor = 4 ** level;
-  const frameRateDivisor = 2 ** level;
-  const maxFrameRateFps = Math.max(5, Math.floor((config.maxFrameRateFps ?? 30) / frameRateDivisor)) as RemoteWindowVideoBitrateConfig['maxFrameRateFps'];
-  return {
-    ...config,
-    bitrateMbps: config.bitrateMbps,
-    maxBitrateBps: Math.max(500_000, Math.floor(config.maxBitrateBps / divisor)),
-    maxFrameRateFps,
-  };
+function finiteNumber(value: number | null | undefined) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
-function videoStatsIndicateWeakNetwork(sample: RemoteWindowVideoStatsSample, baseline: RemoteWindowVideoBitrateConfig) {
-  const targetBitrate = Math.max(1, Math.floor(baseline.maxBitrateBps || 1));
-  const availableBitrate = typeof sample.availableIncomingBitrateBps === 'number' && Number.isFinite(sample.availableIncomingBitrateBps)
-    ? sample.availableIncomingBitrateBps
-    : typeof sample.availableOutgoingBitrateBps === 'number' && Number.isFinite(sample.availableOutgoingBitrateBps)
-      ? sample.availableOutgoingBitrateBps
-      : null;
-  const rttMs = typeof sample.rttMs === 'number' && Number.isFinite(sample.rttMs)
-    ? sample.rttMs
-    : null;
-  const fps = typeof sample.framesPerSecond === 'number' && Number.isFinite(sample.framesPerSecond)
-    ? sample.framesPerSecond
-    : null;
-  const dropped = typeof sample.framesDropped === 'number' && Number.isFinite(sample.framesDropped)
-    ? sample.framesDropped
-    : 0;
-  const freezeCount = typeof sample.freezeCount === 'number' && Number.isFinite(sample.freezeCount)
-    ? sample.freezeCount
-    : 0;
-  const jitterDelayMs = typeof sample.jitterBufferDelayMs === 'number' && Number.isFinite(sample.jitterBufferDelayMs)
-    ? sample.jitterBufferDelayMs
-    : 0;
-  const reason = `${sample.qualityLimitationReason || ''}`.toLowerCase();
+function counterDelta(current: number | null | undefined, previous: number | null | undefined) {
+  const currentValue = finiteNumber(current);
+  const previousValue = finiteNumber(previous);
+  if (currentValue === null || previousValue === null || currentValue < previousValue) {
+    return 0;
+  }
+  return currentValue - previousValue;
+}
 
-  return Boolean(
-    (availableBitrate !== null && availableBitrate < targetBitrate * 0.65)
-    || (rttMs !== null && rttMs >= 350)
-    || (fps !== null && fps < Math.max(5, (baseline.maxFrameRateFps ?? 30) * 0.6))
-    || dropped >= 8
-    || freezeCount > 0
-    || jitterDelayMs >= 250
-    || (reason && reason !== 'none'),
-  );
+function classifyRemoteWindowVideoPressure(options: {
+  profile: RemoteWindowVideoProfile;
+  sample: RemoteWindowVideoStatsSample;
+  previousSample: RemoteWindowVideoStatsSample | null;
+}) {
+  const { profile, sample, previousSample } = options;
+  const availableBitrate = finiteNumber(sample.availableIncomingBitrateBps)
+    ?? finiteNumber(sample.availableOutgoingBitrateBps);
+  const rttMs = finiteNumber(sample.rttMs);
+  const fps = finiteNumber(sample.framesPerSecond);
+  const droppedDelta = counterDelta(sample.framesDropped, previousSample?.framesDropped);
+  const freezeDelta = counterDelta(sample.freezeCount, previousSample?.freezeCount);
+  const jitterDelayMs = finiteNumber(sample.jitterBufferDelayMs) ?? 0;
+  const limitation = `${sample.qualityLimitationReason || ''}`.toLowerCase();
+  const severeNetwork = availableBitrate !== null && availableBitrate < profile.maxBitrateBps * 0.35;
+  if (limitation === 'bandwidth' || (availableBitrate !== null && availableBitrate < profile.maxBitrateBps * 0.7)) {
+    return { cause: 'network' as const, severe: severeNetwork };
+  }
+  if (limitation === 'cpu') {
+    return { cause: 'host' as const, severe: false };
+  }
+  if (droppedDelta >= 3 || freezeDelta > 0 || (fps !== null && fps < profile.maxFrameRateFps * 0.65)) {
+    return { cause: 'render' as const, severe: droppedDelta >= 20 || freezeDelta >= 2 };
+  }
+  if ((rttMs !== null && rttMs >= 350) || jitterDelayMs >= 250) {
+    return { cause: 'latency' as const, severe: false };
+  }
+  return { cause: 'none' as const, severe: false };
+}
+
+function createAdaptiveState(): RemoteWindowVideoAdaptiveState {
+  return {
+    pressureCause: 'none',
+    level: 0,
+    consecutivePressureSamples: 0,
+    stableSinceMs: null,
+    lastAdjustmentAtMs: null,
+    lastSample: null,
+  };
 }
 
 export function resolveRemoteWindowVideoAdaptiveDecision(options: {
-  baseline: RemoteWindowVideoBitrateConfig;
+  preference: RemoteWindowVideoPreference;
+  interactionActive?: boolean;
   previous?: RemoteWindowVideoAdaptiveState | null;
   sample?: RemoteWindowVideoStatsSample | null;
-  weakSamplesBeforeDowngrade?: number;
+  pressureSamplesBeforeDowngrade?: number;
   restoreStableMs?: number;
+  minimumAdjustmentIntervalMs?: number;
 }): RemoteWindowVideoAdaptiveDecision {
-  const previous = options.previous || {
-    mode: 'normal' as const,
-    level: 0 as const,
-    degradedAtMs: null,
-    stableSinceMs: null,
-    weakSampleCount: 0,
-  };
-  const sample = options.sample || null;
+  const previous = options.previous ?? createAdaptiveState();
+  const sample = options.sample ?? null;
+  const interactionActive = options.interactionActive === true;
   if (!sample) {
     return {
       state: previous,
-      config: previous.mode === 'degraded'
-        ? buildDegradedRemoteWindowVideoBitrateConfig(options.baseline, Math.max(1, previous.level) as 1 | 2 | 3)
-        : options.baseline,
-      reason: previous.mode === 'degraded' ? 'hold' : 'baseline',
+      profile: buildRemoteWindowVideoProfile(options.preference, {
+        interactionActive,
+        cause: previous.pressureCause,
+        level: previous.level,
+      }),
+      reason: previous.level > 0 ? 'hold' : 'baseline',
+      cause: previous.pressureCause,
     };
   }
-  const weak = videoStatsIndicateWeakNetwork(sample, options.baseline);
-  if (weak) {
-    const weakSampleCount = previous.weakSampleCount + 1;
-    const weakSamplesBeforeDowngrade = Math.max(1, Math.floor(options.weakSamplesBeforeDowngrade ?? 2));
-    if (previous.mode !== 'degraded' && weakSampleCount < weakSamplesBeforeDowngrade) {
-      return {
-        state: {
-          mode: 'normal',
-          level: 0,
-          degradedAtMs: null,
-          stableSinceMs: null,
-          weakSampleCount,
-        },
-        config: options.baseline,
-        reason: 'baseline',
-      };
-    }
-    if (previous.mode === 'degraded' && weakSampleCount < weakSamplesBeforeDowngrade) {
-      return {
-        state: { ...previous, stableSinceMs: null, weakSampleCount },
-        config: buildDegradedRemoteWindowVideoBitrateConfig(options.baseline, Math.max(1, previous.level) as 1 | 2 | 3),
-        reason: 'hold',
-      };
-    }
-    const level = Math.min(3, previous.level + 1) as 1 | 2 | 3;
+  const currentProfile = buildRemoteWindowVideoProfile(options.preference, {
+    interactionActive,
+    cause: previous.pressureCause,
+    level: previous.level,
+  });
+  const pressure = classifyRemoteWindowVideoPressure({
+    profile: currentProfile,
+    sample,
+    previousSample: previous.lastSample,
+  });
+  if (pressure.cause !== 'none') {
+    const sameCause = pressure.cause === previous.pressureCause;
+    const consecutivePressureSamples = sameCause ? previous.consecutivePressureSamples + 1 : 1;
+    const requiredSamples = Math.max(1, Math.floor(options.pressureSamplesBeforeDowngrade ?? 2));
+    const minimumAdjustmentIntervalMs = Math.max(1, Math.floor(options.minimumAdjustmentIntervalMs ?? 4_000));
+    const intervalReady = previous.lastAdjustmentAtMs === null
+      || sample.sampledAtMs - previous.lastAdjustmentAtMs >= minimumAdjustmentIntervalMs;
+    const shouldDowngrade = intervalReady && (pressure.severe || consecutivePressureSamples >= requiredSamples);
+    const level = shouldDowngrade ? Math.min(2, Math.max(1, previous.level + 1)) as 1 | 2 : previous.level;
+    const state: RemoteWindowVideoAdaptiveState = {
+      pressureCause: pressure.cause,
+      level,
+      consecutivePressureSamples: shouldDowngrade ? 0 : consecutivePressureSamples,
+      stableSinceMs: null,
+      lastAdjustmentAtMs: shouldDowngrade ? sample.sampledAtMs : previous.lastAdjustmentAtMs,
+      lastSample: sample,
+    };
     return {
-      state: {
-        mode: 'degraded',
-        level,
-        degradedAtMs: previous.degradedAtMs ?? sample.sampledAtMs,
-        stableSinceMs: null,
-        weakSampleCount: 0,
-      },
-      config: buildDegradedRemoteWindowVideoBitrateConfig(options.baseline, level),
-      reason: previous.mode === 'degraded' ? 'hold' : 'downgrade',
+      state,
+      profile: buildRemoteWindowVideoProfile(options.preference, {
+        interactionActive,
+        cause: state.pressureCause,
+        level: state.level,
+      }),
+      reason: shouldDowngrade ? 'downgrade' : state.level > 0 ? 'hold' : 'baseline',
+      cause: state.pressureCause,
     };
   }
-  if (previous.mode !== 'degraded') {
+  if (previous.level === 0) {
+    const state = { ...createAdaptiveState(), lastSample: sample };
     return {
-      state: { mode: 'normal', level: 0, degradedAtMs: null, stableSinceMs: null, weakSampleCount: 0 },
-      config: options.baseline,
+      state,
+      profile: buildRemoteWindowVideoProfile(options.preference, { interactionActive }),
       reason: 'baseline',
+      cause: 'none',
     };
   }
   const stableSinceMs = previous.stableSinceMs ?? sample.sampledAtMs;
   const restoreStableMs = Math.max(1, Math.floor(options.restoreStableMs ?? 12_000));
   if (sample.sampledAtMs - stableSinceMs >= restoreStableMs) {
-    const level = Math.max(0, previous.level - 1) as 0 | 1 | 2;
+    const level = Math.max(0, previous.level - 1) as 0 | 1;
+    const state: RemoteWindowVideoAdaptiveState = {
+      pressureCause: level === 0 ? 'none' : previous.pressureCause,
+      level,
+      consecutivePressureSamples: 0,
+      stableSinceMs: level === 0 ? null : sample.sampledAtMs,
+      lastAdjustmentAtMs: sample.sampledAtMs,
+      lastSample: sample,
+    };
     return {
-      state: level === 0
-        ? { mode: 'normal', level: 0, degradedAtMs: null, stableSinceMs: null, weakSampleCount: 0 }
-        : { mode: 'degraded', level, degradedAtMs: previous.degradedAtMs, stableSinceMs: sample.sampledAtMs, weakSampleCount: 0 },
-      config: level === 0
-        ? options.baseline
-        : buildDegradedRemoteWindowVideoBitrateConfig(options.baseline, level),
+      state,
+      profile: buildRemoteWindowVideoProfile(options.preference, {
+        interactionActive,
+        cause: state.pressureCause,
+        level: state.level,
+      }),
       reason: 'restore',
+      cause: state.pressureCause,
     };
   }
+  const state = {
+    ...previous,
+    consecutivePressureSamples: 0,
+    stableSinceMs,
+    lastSample: sample,
+  };
   return {
-    state: { ...previous, stableSinceMs, weakSampleCount: 0 },
-    config: buildDegradedRemoteWindowVideoBitrateConfig(options.baseline, Math.max(1, previous.level) as 1 | 2 | 3),
+    state,
+    profile: buildRemoteWindowVideoProfile(options.preference, {
+      interactionActive,
+      cause: state.pressureCause,
+      level: state.level,
+    }),
     reason: 'hold',
+    cause: state.pressureCause,
   };
 }
 
-export function resolveEffectiveRemoteWindowVideoBitratePreset(
-  selectedPreset: RemoteWindowVideoBitratePreset,
-  projection: { mode: 'floating' | 'fullscreen'; fullscreenScale?: number },
-): RemoteWindowVideoBitratePreset {
-  if (projection.mode === 'floating') {
-    return '2mbps';
-  }
-  return selectedPreset;
-}
-
-function bitrateRank(preset: RemoteWindowVideoBitratePreset) {
-  switch (preset) {
-    case '2mbps':
-      return 0;
-    case '5mbps':
-      return 1;
-    case '10mbps':
-      return 2;
-    case '20mbps':
-      return 3;
-    case 'fullscreen':
-      return 4;
-    default:
-      return 0;
-  }
-}
-
-function minBitratePreset(
-  selectedPreset: RemoteWindowVideoBitratePreset,
-  capPreset: RemoteWindowVideoBitratePreset,
-) {
-  return bitrateRank(selectedPreset) <= bitrateRank(capPreset)
-    ? selectedPreset
-    : capPreset;
-}
-
-export function resolveAdaptiveRemoteWindowVideoBitratePreset(
-  selectedPreset: RemoteWindowVideoBitratePreset,
+export function resolveInitialRemoteWindowVideoProfile(
+  preference: RemoteWindowVideoPreference,
   network: RemoteWindowNetworkQualityInput | null | undefined,
-): RemoteWindowVideoBitratePreset {
+  interactionActive = false,
+) {
   if (!network) {
-    return selectedPreset;
+    return buildRemoteWindowVideoProfile(preference, { interactionActive });
   }
   const effectiveType = `${network.effectiveType || ''}`.toLowerCase();
-  const downlinkMbps = typeof network.downlinkMbps === 'number' && Number.isFinite(network.downlinkMbps)
-    ? network.downlinkMbps
-    : null;
-  const rttMs = typeof network.rttMs === 'number' && Number.isFinite(network.rttMs)
-    ? network.rttMs
-    : null;
-
-  if (
-    network.saveData
-    || effectiveType === 'slow-2g'
-    || effectiveType === '2g'
-    || (downlinkMbps !== null && downlinkMbps < 0.8)
-    || (rttMs !== null && rttMs >= 800)
-  ) {
-    return minBitratePreset(selectedPreset, '2mbps');
+  const downlinkMbps = finiteNumber(network.downlinkMbps);
+  if (network.saveData || effectiveType === 'slow-2g' || effectiveType === '2g' || (downlinkMbps !== null && downlinkMbps < 2)) {
+    return buildRemoteWindowVideoProfile(preference, { interactionActive, cause: 'network', level: 2 });
   }
-
-  if (
-    effectiveType === '3g'
-    || (downlinkMbps !== null && downlinkMbps < 2)
-    || (rttMs !== null && rttMs >= 500)
-  ) {
-    return minBitratePreset(selectedPreset, '5mbps');
+  if (effectiveType === '3g' || (downlinkMbps !== null && downlinkMbps < 5)) {
+    return buildRemoteWindowVideoProfile(preference, { interactionActive, cause: 'network', level: 1 });
   }
-
-  if (
-    (downlinkMbps !== null && downlinkMbps < 5)
-    || (rttMs !== null && rttMs >= 250)
-  ) {
-    return minBitratePreset(selectedPreset, '10mbps');
+  if ((finiteNumber(network.rttMs) ?? 0) >= 500) {
+    return buildRemoteWindowVideoProfile(preference, { interactionActive, cause: 'latency', level: 1 });
   }
-
-  return selectedPreset;
+  return buildRemoteWindowVideoProfile(preference, { interactionActive });
 }
 
-export function readRemoteWindowVideoBitratePreset(
+export function readRemoteWindowVideoPreference(
   target: RemoteWindowStreamTargetManifest,
   storage: BrowserStorageLike | null | undefined = typeof window === 'undefined' ? null : window.localStorage,
-): RemoteWindowVideoBitratePreset {
-  const snapshot = readStorage(storage);
+): RemoteWindowVideoPreference {
   const targetKey = resolveRemoteWindowVideoTargetKey(target);
   const resolutionKey = resolveRemoteWindowVideoResolutionKey(target);
-  return snapshot.byTarget[targetKey]
+  const snapshot = readPreferenceStorage(storage);
+  const current = snapshot.byTarget[targetKey]
     || snapshot.byResolution[resolutionKey]
-    || readRemoteWindowVideoBitrateGlobalDefault(storage)
-    || resolveDefaultRemoteWindowVideoBitratePreset(target);
+    || readRemoteWindowVideoPreferenceGlobalDefault(storage);
+  if (current) {
+    return current;
+  }
+  const legacy = readLegacyPreferenceStorage(storage);
+  const migrated = legacy.byTarget[targetKey]
+    || legacy.byResolution[resolutionKey]
+    || migrateLegacyBitratePreset(storage?.getItem(REMOTE_WINDOW_VIDEO_BITRATE_GLOBAL_STORAGE_KEY));
+  if (migrated) {
+    writeRemoteWindowVideoPreference(target, migrated, storage);
+    return migrated;
+  }
+  return resolveDefaultRemoteWindowVideoPreference(target);
 }
 
-export function readRemoteWindowVideoBitrateGlobalDefault(
+export function readRemoteWindowVideoPreferenceGlobalDefault(
   storage: BrowserStorageLike | null | undefined = typeof window === 'undefined' ? null : window.localStorage,
-): RemoteWindowVideoBitratePreset | null {
+): RemoteWindowVideoPreference | null {
   if (!storage) {
     return null;
   }
   try {
-    const raw = storage.getItem(REMOTE_WINDOW_VIDEO_BITRATE_GLOBAL_STORAGE_KEY);
-    return isRemoteWindowVideoBitratePreset(raw) ? raw : null;
+    const current = storage.getItem(REMOTE_WINDOW_VIDEO_PREFERENCE_GLOBAL_STORAGE_KEY);
+    if (isRemoteWindowVideoPreference(current)) {
+      return current;
+    }
+    const migrated = migrateLegacyBitratePreset(storage.getItem(REMOTE_WINDOW_VIDEO_BITRATE_GLOBAL_STORAGE_KEY));
+    if (migrated) {
+      storage.setItem(REMOTE_WINDOW_VIDEO_PREFERENCE_GLOBAL_STORAGE_KEY, migrated);
+    }
+    return migrated;
   } catch {
     return null;
   }
 }
 
-export function writeRemoteWindowVideoBitrateGlobalDefault(
-  preset: RemoteWindowVideoBitratePreset,
+export function writeRemoteWindowVideoPreferenceGlobalDefault(
+  preference: RemoteWindowVideoPreference,
   storage: BrowserStorageLike | null | undefined = typeof window === 'undefined' ? null : window.localStorage,
 ) {
-  if (!isRemoteWindowVideoBitratePreset(preset)) {
+  if (!storage || !isRemoteWindowVideoPreference(preference)) {
     return false;
   }
-  if (!storage) {
-    return false;
-  }
-  storage.setItem(REMOTE_WINDOW_VIDEO_BITRATE_GLOBAL_STORAGE_KEY, preset);
+  storage.setItem(REMOTE_WINDOW_VIDEO_PREFERENCE_GLOBAL_STORAGE_KEY, preference);
   return true;
 }
 
-export function writeRemoteWindowVideoBitratePreset(
+export function writeRemoteWindowVideoPreference(
   target: RemoteWindowStreamTargetManifest,
-  preset: RemoteWindowVideoBitratePreset,
+  preference: RemoteWindowVideoPreference,
   storage: BrowserStorageLike | null | undefined = typeof window === 'undefined' ? null : window.localStorage,
 ) {
-  if (!isRemoteWindowVideoBitratePreset(preset)) {
+  if (!isRemoteWindowVideoPreference(preference)) {
     return false;
   }
-  const snapshot = readStorage(storage);
-  snapshot.byTarget[resolveRemoteWindowVideoTargetKey(target)] = preset;
-  snapshot.byResolution[resolveRemoteWindowVideoResolutionKey(target)] = preset;
-  return writeStorage(storage, snapshot);
+  const snapshot = readPreferenceStorage(storage);
+  snapshot.byTarget[resolveRemoteWindowVideoTargetKey(target)] = preference;
+  snapshot.byResolution[resolveRemoteWindowVideoResolutionKey(target)] = preference;
+  return writePreferenceStorage(storage, snapshot);
 }

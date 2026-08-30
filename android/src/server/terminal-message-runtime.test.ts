@@ -13,6 +13,10 @@ import type {
 } from './terminal-runtime-types';
 import type { TerminalFileTransferMessageRuntime } from './terminal-file-transfer-message-runtime';
 import type { RemoteWindowStreamDaemonRuntime } from './remote-window-stream-daemon';
+import { buildRemoteWindowVideoProfile } from '../lib/remote-window-video-quality';
+
+const smoothVideoProfile = buildRemoteWindowVideoProfile('smooth');
+const qualityVideoProfile = buildRemoteWindowVideoProfile('quality');
 
 function createTransport(): TerminalSessionTransport {
   return {
@@ -217,8 +221,8 @@ function createRuntime(options?: {
       revision: 1,
       targetId: 'target-default',
       status: 'applied',
-      requestedVideoBitrate: { preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
-      appliedVideoBitrate: { preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
+      requestedVideoProfile: smoothVideoProfile,
+      appliedVideoProfile: smoothVideoProfile,
     })),
     updateFocus: vi.fn(async () => ({
       requestId: 'remote-window-focus-default',
@@ -1588,8 +1592,8 @@ describe('terminal message runtime explicit error truth', () => {
       revision: 1,
       targetId: 'target-1',
       status: 'applied' as const,
-      requestedVideoBitrate: { preset: '10mbps' as const, bitrateMbps: 10 as const, maxBitrateBps: 10_000_000 },
-      appliedVideoBitrate: { preset: '10mbps' as const, bitrateMbps: 10 as const, maxBitrateBps: 10_000_000 },
+      requestedVideoProfile: qualityVideoProfile,
+      appliedVideoProfile: qualityVideoProfile,
     };
     remoteWindowStreamRuntime.updateStreamQuality.mockResolvedValueOnce(qualityPayload);
 
@@ -1603,7 +1607,7 @@ describe('terminal message runtime explicit error truth', () => {
         mediaPlanVersion: 1 as const,
         revision: 1,
         targetId: 'target-1',
-        videoBitrate: { preset: '10mbps', bitrateMbps: 10, maxBitrateBps: 10_000_000 },
+        videoProfile: qualityVideoProfile,
       },
     })));
     await flushAsyncHandlers();
@@ -1616,7 +1620,7 @@ describe('terminal message runtime explicit error truth', () => {
       mediaPlanVersion: 1 as const,
       revision: 1,
       targetId: 'target-1',
-      videoBitrate: { preset: '10mbps', bitrateMbps: 10, maxBitrateBps: 10_000_000 },
+      videoProfile: qualityVideoProfile,
     });
     expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
       type: 'remote-window-stream-quality-result',
@@ -1631,7 +1635,7 @@ describe('terminal message runtime explicit error truth', () => {
       requestId: 'rw-quality-fail',
       streamId: 'stream-1',
       code: 'remote_window_stream_quality_failed',
-      message: 'remote window video bitrate config does not match its preset',
+      message: 'remote window video preference is invalid: invalid',
     };
     remoteWindowStreamRuntime.updateStreamQuality.mockResolvedValueOnce(errorPayload);
 
@@ -1645,7 +1649,7 @@ describe('terminal message runtime explicit error truth', () => {
         mediaPlanVersion: 1 as const,
         revision: 1,
         targetId: 'target-1',
-        videoBitrate: { preset: '10mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
+        videoProfile: { ...qualityVideoProfile, preference: 'invalid' },
       },
     })));
     await flushAsyncHandlers();

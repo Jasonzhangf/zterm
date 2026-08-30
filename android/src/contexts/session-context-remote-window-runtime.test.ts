@@ -11,10 +11,14 @@ import {
 import type {
   RemoteWindowStreamPurpose,
   RemoteWindowStreamTargetManifest,
-  RemoteWindowVideoBitrateConfig,
+  RemoteWindowVideoProfile,
 } from '../lib/types';
+import { buildRemoteWindowVideoProfile } from '../lib/remote-window-video-quality';
 import { DEFAULT_BRIDGE_SETTINGS } from '../lib/bridge-settings';
 import type { ClientDaemonConnection } from '../lib/client-daemon-connection';
+
+const smoothVideoProfile = buildRemoteWindowVideoProfile('smooth');
+const qualityVideoProfile = buildRemoteWindowVideoProfile('quality');
 
 function makeSocket() {
   return {
@@ -380,7 +384,7 @@ describe('session context remote window runtime', () => {
       streamId: 'stream-1',
       purpose: 'focus',
       target,
-      videoBitrate: { preset: '20mbps', bitrateMbps: 20, maxBitrateBps: 20_000_000 },
+      videoProfile: qualityVideoProfile,
       sessions: [baseSession],
       daemonConnection: makeDaemonConnection(ws),
       remoteWindowMessageRuntime: {
@@ -426,7 +430,7 @@ describe('session context remote window runtime', () => {
       target,
       offer: { type: 'offer', sdp: 'offer-sdp' },
       iceServers: undefined,
-      videoBitrate: { preset: '20mbps', bitrateMbps: 20, maxBitrateBps: 20_000_000 },
+      videoProfile: qualityVideoProfile,
       sendSocketPayload,
     });
   });
@@ -440,7 +444,7 @@ describe('session context remote window runtime', () => {
       purpose?: RemoteWindowStreamPurpose;
       mediaPlan: 'single-focus' | 'overview-plus-focus';
       mediaPlanVersion: 1,
-      videoBitrate?: RemoteWindowVideoBitrateConfig;
+      videoProfile: RemoteWindowVideoProfile;
     }) => ({
       requestId: `rw-start-${options.streamId}`,
       streamId: options.streamId,
@@ -490,7 +494,7 @@ describe('session context remote window runtime', () => {
       streamId: 'canvas-stream',
       purpose: 'preview',
       target,
-      videoBitrate: { preset: '2mbps', bitrateMbps: 2, maxBitrateBps: 2_000_000 },
+      videoProfile: smoothVideoProfile,
       sessions: [baseSession],
       daemonConnection: makeDaemonConnection(ws),
       remoteWindowMessageRuntime,
@@ -502,7 +506,7 @@ describe('session context remote window runtime', () => {
       streamId: 'focus-stream',
       purpose: 'focus',
       target,
-      videoBitrate: { preset: '20mbps', bitrateMbps: 20, maxBitrateBps: 20_000_000 },
+      videoProfile: qualityVideoProfile,
       sessions: [baseSession],
       daemonConnection: makeDaemonConnection(ws),
       remoteWindowMessageRuntime,
@@ -521,10 +525,10 @@ describe('session context remote window runtime', () => {
       streamId: options.streamId,
       purpose: options.purpose,
       mediaPlan: options.mediaPlan,
-      bitrate: options.videoBitrate!.maxBitrateBps,
+      bitrate: options.videoProfile.maxBitrateBps,
     }))).toEqual([
-      { streamId: 'canvas-stream', purpose: 'preview', mediaPlan: 'single-focus' as const, bitrate: 2_000_000 },
-      { streamId: 'focus-stream', purpose: 'focus', mediaPlan: 'single-focus' as const, bitrate: 20_000_000 },
+      { streamId: 'canvas-stream', purpose: 'preview', mediaPlan: 'single-focus' as const, bitrate: 6_000_000 },
+      { streamId: 'focus-stream', purpose: 'focus', mediaPlan: 'single-focus' as const, bitrate: 16_000_000 },
     ]);
   });
 
@@ -610,6 +614,7 @@ describe('session context remote window runtime', () => {
       sessionId: 'session-1',
       streamId: 'stream-1',
       target,
+      videoProfile: smoothVideoProfile,
       bridgeSettings,
       sessions: [session],
       daemonConnection: makeDaemonConnection(ws),
@@ -649,6 +654,7 @@ describe('session context remote window runtime', () => {
       sessionId: 'session-1',
       streamId: 'stream-1',
       target: makeTarget(),
+      videoProfile: smoothVideoProfile,
       sessions: [{ ...baseSession, state: 'connecting' }],
       daemonConnection: makeDaemonConnection({ ...makeSocket(), readyState: 3 }),
       remoteWindowMessageRuntime: {
@@ -751,8 +757,8 @@ describe('session context remote window runtime', () => {
       revision: 1,
       targetId: 'target-1',
       status: 'applied' as const,
-      requestedVideoBitrate: { preset: '10mbps' as const, bitrateMbps: 10 as const, maxBitrateBps: 10_000_000 },
-      appliedVideoBitrate: { preset: '10mbps' as const, bitrateMbps: 10 as const, maxBitrateBps: 10_000_000 },
+      requestedVideoProfile: qualityVideoProfile,
+      appliedVideoProfile: qualityVideoProfile,
     }));
     const sendSocketPayload = vi.fn();
 
@@ -765,7 +771,7 @@ describe('session context remote window runtime', () => {
         mediaPlanVersion: 1 as const,
         revision: 1,
         targetId: 'target-1',
-        videoBitrate: { preset: '10mbps', bitrateMbps: 10, maxBitrateBps: 10_000_000 },
+        videoProfile: qualityVideoProfile,
       },
       sessions: [baseSession],
       daemonConnection: makeDaemonConnection(ws),
@@ -790,7 +796,7 @@ describe('session context remote window runtime', () => {
         mediaPlanVersion: 1 as const,
         revision: 1,
         targetId: 'target-1',
-        videoBitrate: { preset: '10mbps', bitrateMbps: 10, maxBitrateBps: 10_000_000 },
+        videoProfile: qualityVideoProfile,
       },
       sendSocketPayload,
     });

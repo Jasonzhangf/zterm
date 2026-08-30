@@ -1,25 +1,25 @@
 import type { ReactNode } from 'react';
-import type { RemoteWindowVideoBitratePreset } from '../../lib/types';
+import type { RemoteWindowVideoPreference } from '../../lib/types';
 import { styles } from './remote-window-overlay-styles';
 
 export interface RemoteWindowMorePanelProps {
   fullscreen: boolean;
-  bitratePreset: RemoteWindowVideoBitratePreset;
+  videoPreference: RemoteWindowVideoPreference;
   streamStatusText: string;
   networkStatusText: string;
   developerDiagnostics: ReactNode;
   onToggleFullscreenDisplayMode: () => void;
-  onBitratePresetChange: (preset: RemoteWindowVideoBitratePreset) => void;
+  onVideoPreferenceChange: (preference: RemoteWindowVideoPreference) => void;
 }
 
 export function RemoteWindowMorePanel({
   fullscreen,
-  bitratePreset,
+  videoPreference,
   streamStatusText,
   networkStatusText,
   developerDiagnostics,
   onToggleFullscreenDisplayMode,
-  onBitratePresetChange,
+  onVideoPreferenceChange,
 }: RemoteWindowMorePanelProps) {
   return (
     <div data-testid="remote-window-stream-status-panel" data-no-drag="true" style={styles.streamStatusPanel}>
@@ -34,18 +34,16 @@ export function RemoteWindowMorePanel({
         </button>
       ) : null}
       <label style={styles.moreField}>
-        <span>画质上限</span>
+        <span>串流偏好</span>
         <select
-          aria-label="远程窗口画质上限"
-          value={bitratePreset}
-          onChange={(event) => onBitratePresetChange(event.currentTarget.value as RemoteWindowVideoBitratePreset)}
+          aria-label="远程窗口串流偏好"
+          data-testid="remote-window-video-preference-select"
+          value={videoPreference}
+          onChange={(event) => onVideoPreferenceChange(event.currentTarget.value as RemoteWindowVideoPreference)}
           style={styles.bitrateSelect}
         >
-          <option value="2mbps">省流 2 Mbps</option>
-          <option value="5mbps">均衡 5 Mbps</option>
-          <option value="10mbps">清晰 10 Mbps</option>
-          <option value="20mbps">高清 20 Mbps</option>
-          <option value="fullscreen">桌面全屏</option>
+          <option value="smooth">流畅优先</option>
+          <option value="quality">清晰优先</option>
         </select>
       </label>
       <div data-testid="remote-window-user-stream-status">{streamStatusText}</div>

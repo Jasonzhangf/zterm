@@ -8,6 +8,7 @@ import type {
   RemoteWindowStreamTargetManifest,
   ServerMessage,
 } from '../src/lib/types';
+import { buildRemoteWindowVideoProfile } from '../src/lib/remote-window-video-quality';
 
 const { RTCPeerConnection, RTCSessionDescription, RTCIceCandidate } = wrtc as unknown as {
   RTCPeerConnection: typeof globalThis.RTCPeerConnection;
@@ -341,12 +342,10 @@ async function main() {
         type: 'offer',
         sdp: offer.sdp || '',
       },
-      videoBitrate: {
-        preset: '2mbps',
-        bitrateMbps: 2,
-        maxBitrateBps: 2_000_000,
-        maxFrameRateFps: 5,
-      },
+      videoProfile: buildRemoteWindowVideoProfile('smooth', {
+        cause: 'network',
+        level: 2,
+      }),
     },
   });
   const started = await waitForServerMessage(

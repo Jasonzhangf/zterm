@@ -14,7 +14,7 @@ import type {
   RemoteWindowStreamQualityResultPayload,
   RemoteWindowStreamPurpose,
   RemoteWindowStreamTargetsResponsePayload,
-  RemoteWindowVideoBitrateConfig,
+  RemoteWindowVideoProfile,
   ServerMessage,
 } from './types';
 import type { BridgeTransportSocket } from './traversal/types';
@@ -284,7 +284,7 @@ export function createRemoteWindowMessageRuntime(input?: {
       mediaPlanVersion: RemoteWindowStreamStartRequestPayload['mediaPlanVersion'];
       offer: RemoteWindowStreamRtcDescription;
       iceServers?: Array<Record<string, unknown>>;
-      videoBitrate?: RemoteWindowVideoBitrateConfig;
+      videoProfile: RemoteWindowVideoProfile;
       sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
     }) {
       const targetSessionId = sessionId.trim();
@@ -319,7 +319,7 @@ export function createRemoteWindowMessageRuntime(input?: {
               target: options.target,
               offer: options.offer,
               ...(options.iceServers ? { iceServers: options.iceServers } : {}),
-              ...(options.videoBitrate ? { videoBitrate: options.videoBitrate } : {}),
+              videoProfile: options.videoProfile,
             },
           });
         } catch (error) {

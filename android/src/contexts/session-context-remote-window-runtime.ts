@@ -8,7 +8,7 @@ import type {
   RemoteWindowStreamStartRequestPayload,
   RemoteWindowStreamPurpose,
   RemoteWindowStreamTargetManifest,
-  RemoteWindowVideoBitrateConfig,
+  RemoteWindowVideoProfile,
   Session,
   RemoteWindowStreamTargetsResponsePayload,
 } from '../lib/types';
@@ -41,7 +41,7 @@ interface RemoteWindowStreamMessageRuntimeLike extends RemoteWindowCatalogMessag
       target: RemoteWindowStreamTargetManifest;
       offer: { type: 'offer'; sdp: string };
       iceServers?: Array<Record<string, unknown>>;
-      videoBitrate?: RemoteWindowVideoBitrateConfig;
+      videoProfile: RemoteWindowVideoProfile;
       sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
     },
   ) => Promise<RemoteWindowStreamStartedPayload>;
@@ -279,7 +279,7 @@ export async function requestRemoteWindowStreamStartRuntime(options: {
   streamId: string;
   purpose?: RemoteWindowStreamPurpose;
   target: RemoteWindowStreamTargetManifest;
-  videoBitrate?: RemoteWindowVideoBitrateConfig;
+  videoProfile: RemoteWindowVideoProfile;
   iceServers?: RTCIceServer[];
   bridgeSettings?: BridgeSettings | null;
   sessions: Session[];
@@ -332,7 +332,7 @@ export async function requestRemoteWindowStreamStartRuntime(options: {
       target: options.target,
       offer,
       iceServers: iceServers?.map((server) => ({ ...server })) as Array<Record<string, unknown>> | undefined,
-      videoBitrate: options.videoBitrate,
+      videoProfile: options.videoProfile,
       sendSocketPayload: options.sendSocketPayload,
     }),
   });

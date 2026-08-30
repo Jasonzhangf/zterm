@@ -107,8 +107,8 @@ export type {
   RemoteWindowStreamStopRequestPayload,
   RemoteWindowStreamTargetManifest,
   RemoteWindowStreamTargetsResponsePayload,
-  RemoteWindowVideoBitrateConfig,
-  RemoteWindowVideoBitratePreset,
+  RemoteWindowVideoPreference,
+  RemoteWindowVideoProfile,
 } from '@zterm/shared/protocol';
 export type {
   BufferHeadPayload,

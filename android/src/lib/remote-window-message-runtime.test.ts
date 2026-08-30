@@ -7,6 +7,10 @@ import {
 } from './remote-window-message-runtime';
 import type { ServerMessage } from './types';
 import type { RemoteWindowStreamTargetManifest } from './types';
+import { buildRemoteWindowVideoProfile } from './remote-window-video-quality';
+
+const smoothVideoProfile = buildRemoteWindowVideoProfile('smooth');
+const qualityVideoProfile = buildRemoteWindowVideoProfile('quality');
 
 function makeSocket() {
   return {
@@ -192,6 +196,7 @@ describe('remote window message runtime', () => {
       mediaPlanVersion: 1 as const,
       target: makeTarget(),
       offer: { type: 'offer', sdp: 'offer-sdp' },
+      videoProfile: smoothVideoProfile,
       sendSocketPayload: vi.fn(),
     });
 
@@ -259,7 +264,7 @@ describe('remote window message runtime', () => {
       target: makeTarget(),
       offer: { type: 'offer', sdp: 'offer-sdp' },
       iceServers: [{ urls: 'stun:relay.codewhisper.cc:3478' }],
-      videoBitrate: { preset: '20mbps', bitrateMbps: 20, maxBitrateBps: 20_000_000 },
+      videoProfile: qualityVideoProfile,
       sendSocketPayload,
     });
 
@@ -274,7 +279,7 @@ describe('remote window message runtime', () => {
         mediaPlanVersion: 1 as const,
         target: { streamTargetId: 'pane-1' },
         offer: { type: 'offer', sdp: 'offer-sdp' },
-        videoBitrate: { preset: '20mbps', bitrateMbps: 20, maxBitrateBps: 20_000_000 },
+        videoProfile: qualityVideoProfile,
       },
     });
 
@@ -321,6 +326,7 @@ describe('remote window message runtime', () => {
       mediaPlanVersion: 1 as const,
       target: makeTarget('pane-2'),
       offer: { type: 'offer', sdp: 'offer-sdp' },
+      videoProfile: smoothVideoProfile,
       sendSocketPayload: vi.fn(),
     });
 
@@ -448,7 +454,7 @@ describe('remote window message runtime', () => {
         revision: 4,
         purpose: 'focus',
         targetId: 'target-3',
-        videoBitrate: { preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
+        videoProfile: smoothVideoProfile,
       },
       sendSocketPayload,
     });
@@ -464,7 +470,7 @@ describe('remote window message runtime', () => {
         revision: 4,
         purpose: 'focus',
         targetId: 'target-3',
-        videoBitrate: { preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
+        videoProfile: smoothVideoProfile,
       },
     });
     expect(isRemoteWindowControlMessage({
@@ -479,8 +485,8 @@ describe('remote window message runtime', () => {
         purpose: 'focus',
         targetId: 'target-3',
         status: 'applied',
-        requestedVideoBitrate: { preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
-        appliedVideoBitrate: { preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
+        requestedVideoProfile: smoothVideoProfile,
+        appliedVideoProfile: smoothVideoProfile,
       },
     } as ServerMessage)).toBe(true);
   });
@@ -497,7 +503,7 @@ describe('remote window message runtime', () => {
         mediaPlanVersion: 1 as const,
         revision: 5,
         targetId: 'target-3',
-        videoBitrate: { preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
+        videoProfile: smoothVideoProfile,
       },
       sendSocketPayload,
     });
@@ -511,8 +517,8 @@ describe('remote window message runtime', () => {
       revision: 5,
       targetId: 'target-3',
       status: 'applied' as const,
-      requestedVideoBitrate: { preset: '5mbps' as const, bitrateMbps: 5 as const, maxBitrateBps: 5_000_000 },
-      appliedVideoBitrate: { preset: '5mbps' as const, bitrateMbps: 5 as const, maxBitrateBps: 5_000_000 },
+      requestedVideoProfile: smoothVideoProfile,
+      appliedVideoProfile: smoothVideoProfile,
     };
     expect(runtime.dispatch({ type: 'remote-window-stream-quality-result', payload: result })).toBe(false);
     expect(runtime.getPendingCount()).toBe(1);

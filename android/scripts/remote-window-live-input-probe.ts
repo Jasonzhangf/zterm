@@ -11,6 +11,7 @@ import type {
   RemoteWindowStreamTargetManifest,
   ServerMessage,
 } from '../src/lib/types';
+import { buildRemoteWindowVideoProfile } from '../src/lib/remote-window-video-quality';
 
 const { RTCPeerConnection, RTCSessionDescription, RTCIceCandidate } = wrtc as unknown as {
   RTCPeerConnection: typeof globalThis.RTCPeerConnection;
@@ -212,7 +213,7 @@ function summarizeQualityUpdate(message: ServerMessage) {
   if (message.type === 'remote-window-stream-quality-result') {
     return {
       accepted: message.payload.status === 'applied',
-      videoBitrate: message.payload.appliedVideoBitrate,
+      videoProfile: message.payload.appliedVideoProfile,
       groupBudget: message.payload.appliedGroupBudget,
       error: message.payload.error,
     };
@@ -803,12 +804,7 @@ async function main() {
           type: offer.type,
           sdp: offer.sdp || '',
         },
-        videoBitrate: {
-          preset: '2mbps',
-          bitrateMbps: 2,
-          maxBitrateBps: 2_000_000,
-          maxFrameRateFps: 30,
-        },
+        videoProfile: buildRemoteWindowVideoProfile('smooth'),
       },
     });
     const started = await waitForServerMessage(
@@ -849,12 +845,10 @@ async function main() {
         mediaPlanVersion: 1 as const,
         revision: 1,
         targetId: target.streamTargetId,
-        videoBitrate: {
-          preset: '2mbps',
-          bitrateMbps: 2,
-          maxBitrateBps: 500_000,
-          maxFrameRateFps: 15,
-        },
+        videoProfile: buildRemoteWindowVideoProfile('smooth', {
+          cause: 'network',
+          level: 2,
+        }),
       },
     });
     const degradedQuality = await waitForServerMessage(
@@ -879,12 +873,7 @@ async function main() {
         mediaPlanVersion: 1 as const,
         revision: 2,
         targetId: target.streamTargetId,
-        videoBitrate: {
-          preset: '2mbps',
-          bitrateMbps: 2,
-          maxBitrateBps: 2_000_000,
-          maxFrameRateFps: 30,
-        },
+        videoProfile: buildRemoteWindowVideoProfile('smooth'),
       },
     });
     const restoredQuality = await waitForServerMessage(

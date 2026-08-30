@@ -22,8 +22,8 @@ import type {
   RemoteWindowStreamPurpose,
   RemoteWindowStreamTargetManifest,
   RemoteWindowStreamTargetsResponsePayload,
-  RemoteWindowVideoBitrateConfig,
-  RemoteWindowVideoBitratePreset,
+  RemoteWindowVideoPreference,
+  RemoteWindowVideoProfile,
 } from '../../lib/types';
 import type { RemoteWindowControlMessage } from '../../lib/remote-window-message-runtime';
 import type { RemoteWindowReceiverStartupTelemetry } from '../../lib/remote-window-receiver-runtime';
@@ -54,12 +54,10 @@ import {
   type RemoteWindowOverlayState,
 } from '../../lib/remote-window-overlay-runtime';
 import {
-  buildRemoteWindowVideoBitrateConfig,
   getRemoteWindowSourceRect,
-  readRemoteWindowVideoBitratePreset,
-  resolveAdaptiveRemoteWindowVideoBitratePreset,
-  resolveEffectiveRemoteWindowVideoBitratePreset,
-  writeRemoteWindowVideoBitratePreset,
+  readRemoteWindowVideoPreference,
+  resolveInitialRemoteWindowVideoProfile,
+  writeRemoteWindowVideoPreference,
   type RemoteWindowVideoStatsSample,
 } from '../../lib/remote-window-video-quality';
 import {
@@ -178,7 +176,7 @@ export interface RemoteWindowOverlayProps {
     sessionId: string,
     target: RemoteWindowStreamTargetManifest,
     streamId: string,
-    options?: { videoBitrate?: RemoteWindowVideoBitrateConfig; purpose?: RemoteWindowStreamPurpose },
+    options: { videoProfile: RemoteWindowVideoProfile; purpose?: RemoteWindowStreamPurpose },
   ) => Promise<RemoteWindowStreamStartResult>;
   updateStreamQuality?: (
     sessionId: string,
@@ -266,7 +264,24 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   const [state, setState] = useState<RemoteWindowOverlayState>(initialRemoteWindowOverlayState);
   const [floatingOffset, setFloatingOffsetState] = useState<FloatingOverlayOffset>({ x: 0, y: 0 });
   const [floatingOverlayWidthPx, setFloatingOverlayWidthPxState] = useState<number | null>(null);
-  const [bitratePreset, setBitratePreset] = useState<RemoteWindowVideoBitratePreset>('5mbps');
+  const [videoPreference, setVideoPreference] = useState<RemoteWindowVideoPreference>('smooth');
+  const [qualityInteractionActive, setQualityInteractionActive] = useState(false);
+  const qualityInteractionTimerRef = useRef<number | null>(null);
+  const markQualityInteractionActive = useCallback(() => {
+    setQualityInteractionActive(true);
+    if (qualityInteractionTimerRef.current !== null) {
+      window.clearTimeout(qualityInteractionTimerRef.current);
+    }
+    qualityInteractionTimerRef.current = window.setTimeout(() => {
+      qualityInteractionTimerRef.current = null;
+      setQualityInteractionActive(false);
+    }, 600);
+  }, []);
+  useEffect(() => () => {
+    if (qualityInteractionTimerRef.current !== null) {
+      window.clearTimeout(qualityInteractionTimerRef.current);
+    }
+  }, []);
   const [touchScrollFraction] = useState<RemoteWindowTouchScrollFraction>(() => readRemoteWindowTouchScrollFraction());
   const [touchScrollInverted] = useState(() => readRemoteWindowTouchScrollInverted());
   const [inputMode, setInputMode] = useState<RemoteWindowInputMode>(() => readRemoteWindowInputMode());
@@ -438,7 +453,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   const lastReportedQuickBarSuppressionRef = useRef<boolean | null>(null);
   const lastReportedBodySuppressionRef = useRef<boolean | null>(null);
   const lastReportedInputContextKeyRef = useRef<string | null>(null);
-  const bitratePresetTouchedRef = useRef(false);
   const resetSurfaceGestures = useCallback(() => {
     surfacePointersRef.current.clear();
     surfaceGestureRef.current = null;
@@ -466,7 +480,8 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     onResetGestures: resetSurfaceGestures,
   });
   const {
-    adaptiveBitratePreset,
+    activeProfile,
+    adaptiveCause,
     networkQuality,
     qualityApplyState,
     resetQualityState: resetQualityApplyState,
@@ -477,9 +492,8 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     mediaPlan: streamCapability?.mediaPlan ?? null,
     streamReady: state.phase === 'targetLocked' && Boolean(state.streamStarted),
     focusStreamActive: Boolean(qualityStreamId && activeFocusStreamIdRef.current === qualityStreamId),
-    mode: state.phase === 'targetLocked' ? state.mode : null,
-    fullscreenScale: fullscreenViewport.scale,
-    bitratePreset,
+    videoPreference,
+    interactionActive: qualityInteractionActive,
     updateStreamQuality,
     collectStatsRef: collectStreamStatsRef,
   });
@@ -590,6 +604,9 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     ) {
       return false;
     }
+    if (events.length > 0) {
+      markQualityInteractionActive();
+    }
     const scrollCount = events.filter((e) => e.kind === 'scroll').length;
     if (scrollCount > 0) {
       // eslint-disable-next-line no-console
@@ -609,7 +626,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       target: currentLockedTarget,
       events,
     });
-  }, [activeSessionId, currentLockedStreamId, currentLockedTarget, sendRemoteWindowInputEventsForTarget, state.phase]);
+  }, [activeSessionId, currentLockedStreamId, currentLockedTarget, markQualityInteractionActive, sendRemoteWindowInputEventsForTarget, state.phase]);
 
   const setFloatingOffset = useCallback((next: FloatingOverlayOffset) => {
     floatingOffsetRef.current = next;
@@ -842,7 +859,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     surfacePointersRef.current.clear();
     surfaceGestureRef.current = null;
     surfacePinchStartRef.current = null;
-    bitratePresetTouchedRef.current = false;
     screenshotController.reset();
     activeHandoffRef.current = null;
     handoffVideoVisibilityRef.current = null;
@@ -1393,7 +1409,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       setFloatingOffset({ x: 0, y: 0 });
       setFloatingOverlayWidthPx(null);
       resetQualityApplyState();
-      bitratePresetTouchedRef.current = false;
       screenshotController.reset();
       resetFullscreenViewport();
       setFullscreenDisplayMode(initialFullscreenDisplayMode);
@@ -1406,16 +1421,11 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     // Every target change starts a new receiver lifecycle. Keep the browser's
     // native video placeholder hidden until this receiver has a real frame.
     updateReceiverVideoVisibility(false);
-    const selectedBitratePreset = readRemoteWindowVideoBitratePreset(target);
+    const selectedVideoPreference = readRemoteWindowVideoPreference(target);
     if (!previousHadStream) {
-      setBitratePreset(selectedBitratePreset);
+      setVideoPreference(selectedVideoPreference);
     }
-    const effectiveStartBitratePreset = resolveEffectiveRemoteWindowVideoBitratePreset(selectedBitratePreset, {
-      mode: 'floating',
-      fullscreenScale: 1,
-    });
-    const adaptiveStartBitratePreset = resolveAdaptiveRemoteWindowVideoBitratePreset(effectiveStartBitratePreset, networkQuality);
-    const videoBitrate = buildRemoteWindowVideoBitrateConfig(adaptiveStartBitratePreset);
+    const videoProfile = resolveInitialRemoteWindowVideoProfile(selectedVideoPreference, networkQuality);
 
     if (!startStream) {
       setState((current) => {
@@ -1514,7 +1524,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     // daemon 看到 composite target 会同步开 overview capture。overviewMediaStream 用于
     // 缩略图 drawImage + 切换瞬间主画面低清占位（同连接双流不进 canvas 预览流饿死 focus 路径）。
     void startStream(targetSessionId, effectiveTarget, focusStreamId, {
-      videoBitrate,
+      videoProfile,
       purpose: 'focus',
     })
       .then((focusResult) => {
@@ -1547,11 +1557,10 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
           activeFocusStreamIdRef.current = focusResult?.streamId || null;
           lastDefaultFullscreenFillKeyRef.current = null;
           resetQualityApplyState();
-          bitratePresetTouchedRef.current = false;
           screenshotController.reset();
           resetFullscreenViewport();
           setFullscreenDisplayMode(initialFullscreenDisplayMode);
-          setBitratePreset(selectedBitratePreset);
+          setVideoPreference(selectedVideoPreference);
           setState((current) => commitRemoteWindowStreamHandoff(current, handoff, committedStreamId));
         } else {
           if (
@@ -1767,6 +1776,9 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   }, [dispatchRemoteWindowInputEvents]);
 
   const applyRemoteWindowTouchLocalEffect = useCallback((effect: RemoteWindowTouchLocalEffect) => {
+    if (effect.kind !== 'none') {
+      markQualityInteractionActive();
+    }
     if (effect.kind === 'local-pan-start') {
       surfaceLocalPanStartRef.current = {
         pointerId: effect.pointerId,
@@ -1872,7 +1884,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     if (effect.kind === 'pinch-end') {
       surfacePinchStartRef.current = null;
     }
-  }, [bottomInsetPx, receiverFrameSize, setFullscreenViewport, state]);
+  }, [bottomInsetPx, markQualityInteractionActive, receiverFrameSize, setFullscreenViewport, state]);
 
   const applyRemoteWindowTouchPointerResult = useCallback((
     result: {
@@ -2900,14 +2912,13 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   const lockedMoreContent = state.phase === 'targetLocked' ? (
     <RemoteWindowMorePanel
       fullscreen={state.mode === 'fullscreen'}
-      bitratePreset={bitratePreset}
-      streamStatusText={`串流：${state.streamStatus === 'streaming' ? '已连接' : state.streamStatus} · 画质：${qualityApplyState.phase === 'applied' ? `${qualityApplyState.applied.maxBitrateBps / 1_000_000} Mbps` : qualityApplyState.phase === 'requested' ? '正在应用' : qualityApplyState.phase === 'rejected' ? `失败：${qualityApplyState.message}` : adaptiveBitratePreset || '-'}`}
-      networkStatusText={`网络：${networkQuality?.effectiveType || '未知'}${networkQuality?.rttMs ? ` · RTT ${networkQuality.rttMs}ms` : ''}`}
+      videoPreference={videoPreference}
+      streamStatusText={`串流：${state.streamStatus === 'streaming' ? '已连接' : state.streamStatus} · ${activeProfile.maxBitrateBps / 1_000_000} Mbps / ${activeProfile.maxFrameRateFps} FPS${qualityApplyState.phase === 'requested' ? ' · 正在应用' : qualityApplyState.phase === 'rejected' ? ` · 失败：${qualityApplyState.message}` : ''}`}
+      networkStatusText={`压力：${adaptiveCause === 'none' ? '无' : adaptiveCause} · 网络：${networkQuality?.effectiveType || '未知'}${networkQuality?.rttMs ? ` · RTT ${networkQuality.rttMs}ms` : ''}`}
       onToggleFullscreenDisplayMode={handleToggleFullscreenDisplayMode}
-      onBitratePresetChange={(preset) => {
-        bitratePresetTouchedRef.current = true;
-        setBitratePreset(preset);
-        writeRemoteWindowVideoBitratePreset(state.target, preset);
+      onVideoPreferenceChange={(preference) => {
+        setVideoPreference(preference);
+        writeRemoteWindowVideoPreference(state.target, preference);
         resetQualityApplyState();
       }}
       developerDiagnostics={<RemoteWindowDeveloperDiagnostics

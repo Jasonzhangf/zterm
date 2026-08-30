@@ -4,7 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
-import type { RemoteWindowStreamStatusPayload } from '@zterm/shared/protocol';
+import type {
+  RemoteWindowStreamStartRequestPayload,
+  RemoteWindowStreamStatusPayload,
+} from '@zterm/shared/protocol';
 
 // Unit/protocol coverage injects every media primitive it exercises. Keep the
 // native addon out of this process so its global teardown cannot turn a green
@@ -48,7 +51,10 @@ vi.mock('@roamhq/wrtc', () => ({
     },
   },
 }));
-import type { RemoteWindowCaptureSourceFactory } from './remote-window-capture';
+import type {
+  RemoteWindowCaptureFrameSource,
+  RemoteWindowCaptureSourceFactory,
+} from './remote-window-capture';
 import {
   RemoteWindowCaptureTargetOutOfDisplayError,
   RemoteWindowCaptureTargetUnavailableError,
@@ -61,7 +67,7 @@ import {
   buildMacosAppWindowTargets,
   buildRemoteWindowStreamTargets,
   createDefaultRemoteWindowInputHelper,
-  createRemoteWindowStreamDaemonRuntime,
+  createRemoteWindowStreamDaemonRuntime as createRemoteWindowStreamDaemonRuntimeSource,
   flattenIterm2SplitTree,
   isRemoteWindowInputConfigStale,
   MACOS_REMOTE_WINDOW_INPUT_SWIFT,
@@ -78,6 +84,104 @@ import {
   type Iterm2RawNode,
   type MacosAppWindowCatalog,
 } from './remote-window-stream-daemon';
+import { buildRemoteWindowVideoProfile } from '../lib/remote-window-video-quality';
+
+const smoothVideoProfile = buildRemoteWindowVideoProfile('smooth');
+const qualityVideoProfile = buildRemoteWindowVideoProfile('quality');
+
+function makeControllableCaptureSource(
+  options: Parameters<RemoteWindowCaptureSourceFactory>[1],
+  stop = vi.fn(),
+) {
+  let frameRate = options.frameRate;
+  let maxCaptureWidth = options.maxCaptureWidth ?? smoothVideoProfile.maxCaptureWidth;
+  let maxCaptureHeight = options.maxCaptureHeight ?? smoothVideoProfile.maxCaptureHeight;
+  return {
+    width: 2,
+    height: 2,
+    get frameRate() {
+      return frameRate;
+    },
+    get maxCaptureWidth() {
+      return maxCaptureWidth;
+    },
+    get maxCaptureHeight() {
+      return maxCaptureHeight;
+    },
+    updateVideoProfile: vi.fn(async (profile: {
+      maxFrameRateFps: number;
+      maxCaptureWidth: number;
+      maxCaptureHeight: number;
+    }) => {
+      frameRate = profile.maxFrameRateFps;
+      maxCaptureWidth = profile.maxCaptureWidth;
+      maxCaptureHeight = profile.maxCaptureHeight;
+    }),
+    stop,
+  };
+}
+
+function createRemoteWindowStreamDaemonRuntime(
+  deps: Parameters<typeof createRemoteWindowStreamDaemonRuntimeSource>[0],
+) {
+  const captureSourceFactory = deps.captureSourceFactory
+    ? async (
+        target: Parameters<RemoteWindowCaptureSourceFactory>[0],
+        options: Parameters<RemoteWindowCaptureSourceFactory>[1],
+      ): Promise<RemoteWindowCaptureFrameSource> => {
+        const source = await deps.captureSourceFactory!(target, options);
+        if (
+          source.updateVideoProfile
+          && Number.isFinite(source.maxCaptureWidth)
+          && Number.isFinite(source.maxCaptureHeight)
+        ) {
+          return source;
+        }
+        let frameRate = source.frameRate;
+        let maxCaptureWidth = options.maxCaptureWidth ?? smoothVideoProfile.maxCaptureWidth;
+        let maxCaptureHeight = options.maxCaptureHeight ?? smoothVideoProfile.maxCaptureHeight;
+        return {
+          ...source,
+          get width() {
+            return source.width;
+          },
+          get height() {
+            return source.height;
+          },
+          get frameRate() {
+            return frameRate;
+          },
+          get maxCaptureWidth() {
+            return maxCaptureWidth;
+          },
+          get maxCaptureHeight() {
+            return maxCaptureHeight;
+          },
+          updateVideoProfile: vi.fn(async (profile) => {
+            frameRate = profile.maxFrameRateFps;
+            maxCaptureWidth = profile.maxCaptureWidth;
+            maxCaptureHeight = profile.maxCaptureHeight;
+          }),
+        };
+      }
+    : undefined;
+  const runtime = createRemoteWindowStreamDaemonRuntimeSource({
+    ...deps,
+    ...(captureSourceFactory ? { captureSourceFactory } : {}),
+  });
+  return {
+    ...runtime,
+    startStream: (
+      payload: Omit<RemoteWindowStreamStartRequestPayload, 'videoProfile'> & {
+        videoProfile?: RemoteWindowStreamStartRequestPayload['videoProfile'];
+      },
+      handlers?: Parameters<typeof runtime.startStream>[1],
+    ) => runtime.startStream({
+      ...payload,
+      videoProfile: payload.videoProfile ?? buildRemoteWindowVideoProfile('smooth'),
+    }, handlers),
+  };
+}
 
 async function flushPromiseQueue() {
   await new Promise<void>((resolve) => {
@@ -150,7 +254,7 @@ class FakeRemoteWindowPeerConnection {
 
   public remoteDescription: RTCSessionDescriptionInit | null = null;
 
-  public addTrack = vi.fn();
+  public addTrack = vi.fn(() => makeFakeRtpSender());
 
   public addTransceiver = vi.fn();
 
@@ -1817,6 +1921,7 @@ setInterval(() => {}, 1000);
       sendIceCandidate: (payload) => candidates.push(payload),
       sendStatus: (payload) => statuses.push(payload),
     });
+    await flushPromiseQueue();
 
     expect('answer' in result ? result : null).toMatchObject({
       requestId: 'rw-start',
@@ -2134,13 +2239,7 @@ setInterval(() => {}, 1000);
       });
       const index = captureIndex;
       captureIndex += 1;
-      return {
-        width: 2,
-        height: 2,
-        frameRate: options.frameRate,
-        updateFrameRate: vi.fn(async () => undefined),
-        stop: captureStops[index]!,
-      };
+      return makeControllableCaptureSource(options, captureStops[index]!);
     });
     const runtime = createRemoteWindowStreamDaemonRuntime({
       platform: 'darwin',
@@ -2162,11 +2261,11 @@ setInterval(() => {}, 1000);
       mediaPlanVersion: 1 as const,
       target: makeStreamTarget(),
       offer: { type: 'offer', sdp: 'canvas-offer' },
-      videoBitrate: { preset: '2mbps', bitrateMbps: 2, maxBitrateBps: 2_000_000 },
+      videoProfile: smoothVideoProfile,
     })).resolves.toMatchObject({
       streamId: 'canvas-stream',
       purpose: 'preview',
-      capture: { maxBitrateBps: 2_000_000 },
+      capture: { maxBitrateBps: 6_000_000 },
     });
     await expect(runtime.startStream({
       requestId: 'rw-focus',
@@ -2176,11 +2275,11 @@ setInterval(() => {}, 1000);
       mediaPlanVersion: 1 as const,
       target: makeStreamTarget(),
       offer: { type: 'offer', sdp: 'focus-offer' },
-      videoBitrate: { preset: '20mbps', bitrateMbps: 20, maxBitrateBps: 20_000_000 },
+      videoProfile: qualityVideoProfile,
     })).resolves.toMatchObject({
       streamId: 'focus-stream',
       purpose: 'focus',
-      capture: { maxBitrateBps: 20_000_000 },
+      capture: { maxBitrateBps: 16_000_000 },
     });
 
     await expect(runtime.stopStream({
@@ -2246,6 +2345,7 @@ setInterval(() => {}, 1000);
     }, {
       sendStatus: (payload) => statuses.push(payload),
     });
+    await flushPromiseQueue();
 
     expect('answer' in result).toBe(true);
     expect(fakePeer.connectionState).toBe('new');
@@ -2260,6 +2360,7 @@ setInterval(() => {}, 1000);
       height: 2,
       rgba: new Uint8Array(16).fill(13),
     });
+    await flushPromiseQueue();
     expect(fakeVideoSource.onFrame).toHaveBeenCalledTimes(2);
     expect(statuses).toEqual([
       {
@@ -2284,7 +2385,7 @@ setInterval(() => {}, 1000);
     ]);
   });
 
-  it('does not replay pending frames after the stream is stopped', async () => {
+  it('does not replay frames after the stream is stopped', async () => {
     const fakePeer = new FakeRemoteWindowPeerConnection();
     fakePeer.connectionState = 'new';
     const fakeTrack = makeFakeMediaStreamTrack();
@@ -2328,6 +2429,7 @@ setInterval(() => {}, 1000);
     }, {
       sendStatus: (payload) => statuses.push(payload),
     });
+    await flushPromiseQueue();
 
     expect('answer' in result).toBe(true);
     expect(fakeVideoSource.onFrame).toHaveBeenCalledTimes(1);
@@ -2395,13 +2497,7 @@ setInterval(() => {}, 1000);
           height: 2,
           rgba: new Uint8Array(16).fill(12),
         });
-        return {
-          width: 2,
-          height: 2,
-          frameRate: 12,
-          updateFrameRate: vi.fn(async () => undefined),
-          stop: vi.fn(),
-        };
+        return makeControllableCaptureSource(options);
       }),
       peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
       rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
@@ -2419,14 +2515,14 @@ setInterval(() => {}, 1000);
       mediaPlanVersion: 1 as const,
       target: makeStreamTarget(),
       offer: { type: 'offer', sdp: 'android-offer-sdp' },
-      videoBitrate: { preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
+      videoProfile: smoothVideoProfile,
     });
 
-    expect('answer' in started ? started.capture.maxBitrateBps : null).toBe(5_000_000);
+    expect('answer' in started ? started.capture.maxBitrateBps : null).toBe(6_000_000);
     expect(fakePeer.addTrack).toHaveBeenCalledWith(fakeTrack);
     expect(fakePeer.addTransceiver).not.toHaveBeenCalled();
     expect(fakeSender.setParameters).toHaveBeenCalledWith(expect.objectContaining({
-      encodings: [expect.objectContaining({ maxBitrate: 5_000_000, maxFramerate: 30 })],
+      encodings: [expect.objectContaining({ maxBitrate: 6_000_000, maxFramerate: 30 })],
     }));
     expect(fakePeer.setLocalDescription.mock.invocationCallOrder[0]).toBeLessThan(
       fakeSender.setParameters.mock.invocationCallOrder[0]!,
@@ -2440,7 +2536,7 @@ setInterval(() => {}, 1000);
       mediaPlanVersion: 1 as const,
       revision: 1,
       targetId: 'iterm2-pane:window-1:tab-1:left',
-      videoBitrate: { preset: 'fullscreen', bitrateMbps: 20, maxBitrateBps: 20_000_000 },
+      videoProfile: qualityVideoProfile,
     });
 
     expect(updated).toEqual({
@@ -2453,15 +2549,21 @@ setInterval(() => {}, 1000);
       purpose: 'focus',
       targetId: 'iterm2-pane:window-1:tab-1:left',
       status: 'applied',
-      requestedVideoBitrate: { preset: 'fullscreen', bitrateMbps: 20, maxBitrateBps: 20_000_000 },
-      appliedVideoBitrate: { preset: 'fullscreen', bitrateMbps: 20, maxBitrateBps: 20_000_000, maxFrameRateFps: 60 },
+      requestedVideoProfile: qualityVideoProfile,
+      appliedVideoProfile: qualityVideoProfile,
       appliedGroupBudget: {
-        totalMaxBitrateBps: 20_000_000,
-        focus: { maxBitrateBps: 20_000_000, maxFrameRateFps: 60 },
+        totalMaxBitrateBps: 16_000_000,
+        focus: {
+          maxBitrateBps: 16_000_000,
+          maxFrameRateFps: 30,
+          maxCaptureWidth: 1920,
+          maxCaptureHeight: 1200,
+          maxFrameAgeMs: 150,
+        },
       },
     });
     expect(fakeSender.setParameters).toHaveBeenLastCalledWith(expect.objectContaining({
-      encodings: [expect.objectContaining({ maxBitrate: 20_000_000, maxFramerate: 60 })],
+      encodings: [expect.objectContaining({ maxBitrate: 16_000_000, maxFramerate: 30 })],
     }));
   });
 
@@ -2476,7 +2578,7 @@ setInterval(() => {}, 1000);
       platform: 'darwin',
       captureSourceFactory: vi.fn(async (_target, options) => {
         options.onFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(12) });
-        return { width: 2, height: 2, frameRate: 12, updateFrameRate: vi.fn(async () => undefined), stop: vi.fn() };
+        return makeControllableCaptureSource(options);
       }),
       peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
       rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
@@ -2497,7 +2599,7 @@ setInterval(() => {}, 1000);
       mediaPlanVersion: 1 as const,
       target: makeStreamTarget(),
       offer: { type: 'offer', sdp: 'android-offer-sdp' },
-      videoBitrate: { preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
+      videoProfile: smoothVideoProfile,
     }, {
       sendStatus: (status) => {
         statuses.push(status);
@@ -2514,7 +2616,7 @@ setInterval(() => {}, 1000);
       streamId: 'stream-bitrate-empty',
       purpose: 'focus',
       phase: 'starting',
-      message: 'video bitrate not applied: remote window quality sender has no encodings to update',
+      message: 'video profile not applied: remote window quality sender has no encodings to update',
     });
 
     const updated = await runtime.updateStreamQuality({
@@ -2525,7 +2627,7 @@ setInterval(() => {}, 1000);
       mediaPlanVersion: 1 as const,
       revision: 1,
       targetId: 'iterm2-pane:window-1:tab-1:left',
-      videoBitrate: { preset: '10mbps', bitrateMbps: 10, maxBitrateBps: 10_000_000 },
+      videoProfile: qualityVideoProfile,
     });
 
     expect(updated).toEqual({
@@ -2538,7 +2640,7 @@ setInterval(() => {}, 1000);
       purpose: 'focus',
       targetId: 'iterm2-pane:window-1:tab-1:left',
       status: 'rejected',
-      requestedVideoBitrate: { preset: '10mbps', bitrateMbps: 10, maxBitrateBps: 10_000_000 },
+      requestedVideoProfile: qualityVideoProfile,
       error: {
         code: 'remote_window_stream_quality_failed',
         message: 'remote window quality sender has no encodings to update',
@@ -2554,7 +2656,7 @@ setInterval(() => {}, 1000);
       mediaPlanVersion: 1,
       revision: 1,
       targetId: makeStreamTarget().streamTargetId,
-      videoBitrate: { preset: '10mbps', bitrateMbps: 10, maxBitrateBps: 10_000_000 },
+      videoProfile: qualityVideoProfile,
     });
     expect(planMismatch).toMatchObject({
       status: 'rejected',
@@ -2575,7 +2677,7 @@ setInterval(() => {}, 1000);
       platform: 'darwin',
       captureSourceFactory: vi.fn(async (_target, options) => {
         options.onFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(12) });
-        return { width: 2, height: 2, frameRate: 12, updateFrameRate: vi.fn(async () => undefined), stop: vi.fn() };
+        return makeControllableCaptureSource(options);
       }),
       peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
       rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
@@ -2596,7 +2698,7 @@ setInterval(() => {}, 1000);
       mediaPlanVersion: 1 as const,
       target: makeStreamTarget(),
       offer: { type: 'offer', sdp: 'android-offer-sdp' },
-      videoBitrate: { preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
+      videoProfile: smoothVideoProfile,
     });
     fakeSender.setParameters.mockClear();
 
@@ -2608,7 +2710,7 @@ setInterval(() => {}, 1000);
       mediaPlanVersion: 1 as const,
       revision: 1,
       targetId: 'wrong-target',
-      videoBitrate: { preset: '10mbps', bitrateMbps: 10, maxBitrateBps: 10_000_000 },
+      videoProfile: qualityVideoProfile,
     });
 
     expect(updated).toEqual({
@@ -2621,7 +2723,7 @@ setInterval(() => {}, 1000);
       purpose: 'focus',
       targetId: 'wrong-target',
       status: 'rejected',
-      requestedVideoBitrate: { preset: '10mbps', bitrateMbps: 10, maxBitrateBps: 10_000_000 },
+      requestedVideoProfile: qualityVideoProfile,
       error: {
         code: 'remote_window_stream_quality_target_mismatch',
         message: 'remote window stream quality target mismatch: wrong-target',
@@ -2634,20 +2736,11 @@ setInterval(() => {}, 1000);
     const fakePeer = new FakeRemoteWindowPeerConnection();
     const fakeSender = makeFakeRtpSender();
     let releaseApply: () => void = () => undefined;
-    fakeSender.setParameters.mockImplementationOnce(() => new Promise<void>((resolve) => {
-      releaseApply = resolve;
-    }));
     fakePeer.addTrack.mockReturnValue(fakeSender);
     const fakeTrack = makeFakeMediaStreamTrack();
     const runtime = createRemoteWindowStreamDaemonRuntime({
       platform: 'darwin',
-      captureSourceFactory: vi.fn(async () => ({
-        width: 2,
-        height: 2,
-        frameRate: 12,
-        updateFrameRate: vi.fn(async () => undefined),
-        stop: vi.fn(),
-      })),
+      captureSourceFactory: vi.fn(async (_target, options) => makeControllableCaptureSource(options)),
       peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
       rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
       videoSourceFactory: vi.fn(() => ({
@@ -2667,6 +2760,9 @@ setInterval(() => {}, 1000);
       target: makeStreamTarget(),
       offer: { type: 'offer', sdp: 'android-offer-sdp' },
     });
+    fakeSender.setParameters.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      releaseApply = resolve;
+    }));
     const first = runtime.updateStreamQuality({
       requestId: 'rw-quality-busy-1',
       streamId: 'stream-quality-busy',
@@ -2675,7 +2771,7 @@ setInterval(() => {}, 1000);
       mediaPlanVersion: 1 as const,
       revision: 1,
       targetId: 'iterm2-pane:window-1:tab-1:left',
-      videoBitrate: { preset: '10mbps', bitrateMbps: 10, maxBitrateBps: 10_000_000 },
+      videoProfile: qualityVideoProfile,
     });
     await Promise.resolve();
 
@@ -2687,7 +2783,7 @@ setInterval(() => {}, 1000);
       mediaPlanVersion: 1 as const,
       revision: 2,
       targetId: 'iterm2-pane:window-1:tab-1:left',
-      videoBitrate: { preset: '20mbps', bitrateMbps: 20, maxBitrateBps: 20_000_000 },
+      videoProfile: buildRemoteWindowVideoProfile('quality', { interactionActive: true }),
     });
     expect(concurrent).toMatchObject({
       status: 'rejected',
@@ -2742,6 +2838,7 @@ setInterval(() => {}, 1000);
       target,
       offer: { type: 'offer', sdp: 'android-offer-sdp' },
     });
+    await flushPromiseQueue();
 
     expect('answer' in result).toBe(true);
     expect(rgbaToI420).toHaveBeenCalledWith(
@@ -2802,10 +2899,12 @@ setInterval(() => {}, 1000);
     }, {
       sendStatus: (payload) => statuses.push(payload),
     });
+    await flushPromiseQueue();
     expect('answer' in result).toBe(true);
     expect(() => {
       pushFrame({ width: 3, height: 3, rgba: new Uint8Array(36).fill(2) });
     }).not.toThrow();
+    await flushPromiseQueue();
     expect(captureStop).toHaveBeenCalledTimes(1);
     expect(fakeTrack.stop).toHaveBeenCalledTimes(1);
     expect(fakePeer.close).toHaveBeenCalledTimes(1);
@@ -2973,6 +3072,7 @@ setInterval(() => {}, 1000);
     }, {
       sendStatus: (payload) => statuses.push(payload),
     });
+    await flushPromiseQueue();
     expect(fakePeer.addIceCandidate).toHaveBeenCalledWith({
       candidate: 'candidate:early',
       sdpMid: '0',
@@ -4068,13 +4168,7 @@ describe('remote window single-window overview gate', () => {
     const runRemoteWindowInputEvent = vi.fn(async () => undefined);
     const runtime = createRemoteWindowStreamDaemonRuntime({
       platform: 'darwin',
-      captureSourceFactory: vi.fn(async () => ({
-        width: 800,
-        height: 600,
-        frameRate: 30,
-        updateFrameRate: vi.fn(async () => undefined),
-        stop: vi.fn(),
-      })),
+      captureSourceFactory: vi.fn(async (_target, options) => makeControllableCaptureSource(options)),
       peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
       rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
       videoSourceFactory: vi.fn(() => ({

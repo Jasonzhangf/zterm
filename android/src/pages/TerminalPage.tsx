@@ -145,7 +145,7 @@ import {
   type RemoteWindowStreamPurpose,
   type RemoteWindowStreamTargetManifest,
   type RemoteWindowStreamTargetsResponsePayload,
-  type RemoteWindowVideoBitrateConfig,
+  type RemoteWindowVideoProfile,
   type Session,
   type SessionDebugOverlayMetrics,
   type SessionGroupHistory,
@@ -464,7 +464,7 @@ interface TerminalPageProps {
     sessionId: string,
     target: RemoteWindowStreamTargetManifest,
     streamId: string,
-    options?: { videoBitrate?: RemoteWindowVideoBitrateConfig; purpose?: RemoteWindowStreamPurpose },
+    options: { videoProfile: RemoteWindowVideoProfile; purpose?: RemoteWindowStreamPurpose },
   ) => Promise<RemoteWindowReceiverStartResult>;
   onUpdateRemoteWindowStreamQuality?: (
     sessionId: string,

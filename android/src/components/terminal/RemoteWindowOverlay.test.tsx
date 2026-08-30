@@ -3,7 +3,11 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RemoteWindowOverlay } from './RemoteWindowOverlay';
-import type { RemoteWindowStreamTargetManifest, RemoteWindowStreamTargetsResponsePayload } from '../../lib/types';
+import type {
+  RemoteWindowStreamQualityRequestPayload,
+  RemoteWindowStreamTargetManifest,
+  RemoteWindowStreamTargetsResponsePayload,
+} from '../../lib/types';
 import { REMOTE_WINDOW_VIDEO_BITRATE_STORAGE_KEY } from '../../lib/remote-window-video-quality';
 
 const backListeners: Array<() => void> = [];
@@ -149,15 +153,7 @@ async function waitForActionRemoteInputCount(sendInput: ReturnType<typeof vi.fn>
 }
 
 function createAppliedQualityMock() {
-  return vi.fn(async (_sessionId: string, payload: {
-    streamId: string;
-    streamGroupId: string;
-    mediaPlan: 'single-focus' | 'overview-plus-focus';
-    mediaPlanVersion: 1;
-    revision: number;
-    targetId: string;
-    videoBitrate: any;
-  }) => ({
+  return vi.fn(async (_sessionId: string, payload: Omit<RemoteWindowStreamQualityRequestPayload, 'requestId'>) => ({
     requestId: `quality-${payload.revision}`,
     streamId: payload.streamId,
     streamGroupId: payload.streamGroupId,
@@ -166,8 +162,8 @@ function createAppliedQualityMock() {
     revision: payload.revision,
     targetId: payload.targetId,
     status: 'applied' as const,
-    requestedVideoBitrate: payload.videoBitrate,
-    appliedVideoBitrate: payload.videoBitrate,
+    requestedVideoProfile: payload.videoProfile,
+    appliedVideoProfile: payload.videoProfile,
   }));
 }
 
@@ -1123,11 +1119,16 @@ describe('RemoteWindowOverlay', () => {
       streamTargetId: 'app-1',
     }), expect.stringMatching(/^rw-stream-/), {
       purpose: 'focus',
-      videoBitrate: {
-        preset: '2mbps',
-        bitrateMbps: 2,
+      videoProfile: {
+        preference: 'smooth',
         maxBitrateBps: 2_000_000,
         maxFrameRateFps: 30,
+        maxCaptureWidth: 960,
+        maxCaptureHeight: 600,
+        maxFrameAgeMs: 120,
+        interactionActive: false,
+        overviewMaxBitrateBps: 100_000,
+        overviewMaxFrameRateFps: 1,
       },
     });
 
@@ -1213,10 +1214,11 @@ describe('RemoteWindowOverlay', () => {
 
     await waitFor(() => {
       expect(updateStreamQuality).toHaveBeenCalledWith('session-1', expect.objectContaining({
-        videoBitrate: expect.objectContaining({
-          preset: '2mbps',
-          maxBitrateBps: 500_000,
-          maxFrameRateFps: 15,
+        videoProfile: expect.objectContaining({
+          preference: 'smooth',
+          maxBitrateBps: 4_000_000,
+          maxFrameRateFps: 30,
+          maxCaptureWidth: 1280,
         }),
       }));
     }, { timeout: 5500 });

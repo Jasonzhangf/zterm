@@ -338,18 +338,18 @@ export interface RemoteWindowStreamCapabilityTelemetry {
   };
 }
 
-export type RemoteWindowVideoBitratePreset =
-  | '2mbps'
-  | '5mbps'
-  | '10mbps'
-  | '20mbps'
-  | 'fullscreen';
+export type RemoteWindowVideoPreference = 'smooth' | 'quality';
 
-export interface RemoteWindowVideoBitrateConfig {
-  preset: RemoteWindowVideoBitratePreset;
-  bitrateMbps: 2 | 5 | 10 | 20;
+export interface RemoteWindowVideoProfile {
+  preference: RemoteWindowVideoPreference;
   maxBitrateBps: number;
-  maxFrameRateFps?: 5 | 8 | 10 | 12 | 15 | 30 | 60;
+  maxFrameRateFps: number;
+  maxCaptureWidth: number;
+  maxCaptureHeight: number;
+  maxFrameAgeMs: number;
+  interactionActive: boolean;
+  overviewMaxBitrateBps: number;
+  overviewMaxFrameRateFps: number;
 }
 
 export interface RemoteWindowStreamGroupBudget {
@@ -357,10 +357,16 @@ export interface RemoteWindowStreamGroupBudget {
   focus: {
     maxBitrateBps: number;
     maxFrameRateFps: number;
+    maxCaptureWidth: number;
+    maxCaptureHeight: number;
+    maxFrameAgeMs: number;
   };
   overview?: {
     maxBitrateBps: number;
     maxFrameRateFps: number;
+    maxCaptureWidth: number;
+    maxCaptureHeight: number;
+    maxFrameAgeMs: number;
   };
 }
 
@@ -373,7 +379,7 @@ export interface RemoteWindowStreamStartRequestPayload {
   target: RemoteWindowStreamTargetManifest;
   offer: RemoteWindowStreamRtcDescription;
   iceServers?: Array<Record<string, unknown>>;
-  videoBitrate?: RemoteWindowVideoBitrateConfig;
+  videoProfile: RemoteWindowVideoProfile;
 }
 
 // 双流：切换高码率主窗口（focus）流的捕获目标；低码率总览（overview）流保持不变
@@ -455,7 +461,7 @@ export interface RemoteWindowStreamQualityRequestPayload {
   revision: number;
   purpose?: RemoteWindowStreamPurpose;
   targetId: string;
-  videoBitrate: RemoteWindowVideoBitrateConfig;
+  videoProfile: RemoteWindowVideoProfile;
 }
 
 export interface RemoteWindowStreamQualityResultPayload {
@@ -468,8 +474,8 @@ export interface RemoteWindowStreamQualityResultPayload {
   purpose?: RemoteWindowStreamPurpose;
   targetId: string;
   status: 'applied' | 'rejected';
-  requestedVideoBitrate: RemoteWindowVideoBitrateConfig;
-  appliedVideoBitrate?: RemoteWindowVideoBitrateConfig;
+  requestedVideoProfile: RemoteWindowVideoProfile;
+  appliedVideoProfile?: RemoteWindowVideoProfile;
   appliedGroupBudget?: RemoteWindowStreamGroupBudget;
   error?: {
     code: string;

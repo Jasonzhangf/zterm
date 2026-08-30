@@ -2,15 +2,15 @@ import { describe, expect, it } from 'vitest';
 import type { RemoteWindowStreamTargetManifest } from './types';
 import {
   REMOTE_WINDOW_VIDEO_BITRATE_STORAGE_KEY,
-  buildRemoteWindowVideoBitrateConfig,
-  resolveRemoteWindowVideoAdaptiveDecision,
-  readRemoteWindowVideoBitratePreset,
-  resolveAdaptiveRemoteWindowVideoBitratePreset,
+  REMOTE_WINDOW_VIDEO_PREFERENCE_STORAGE_KEY,
+  buildRemoteWindowVideoProfile,
+  readRemoteWindowVideoPreference,
+  resolveDefaultRemoteWindowVideoPreference,
+  resolveInitialRemoteWindowVideoProfile,
   resolveRemoteWindowDesktopCoverageRatio,
-  resolveEffectiveRemoteWindowVideoBitratePreset,
-  resolveDefaultRemoteWindowVideoBitratePreset,
+  resolveRemoteWindowVideoAdaptiveDecision,
   resolveRemoteWindowVideoResolutionKey,
-  writeRemoteWindowVideoBitratePreset,
+  writeRemoteWindowVideoPreference,
 } from './remote-window-video-quality';
 
 function makeTarget(
@@ -51,219 +51,162 @@ function makeStorage() {
   const data = new Map<string, string>();
   return {
     getItem: (key: string) => data.get(key) ?? null,
-    setItem: (key: string, value: string) => {
-      data.set(key, value);
-    },
+    setItem: (key: string, value: string) => data.set(key, value),
   };
 }
 
 describe('remote-window-video-quality', () => {
-  it('keeps untouched default bitrate conservative at 2mbps while preserving coverage telemetry', () => {
-    expect(resolveDefaultRemoteWindowVideoBitratePreset(makeTarget(320, 240))).toBe('2mbps');
-    expect(resolveDefaultRemoteWindowVideoBitratePreset(makeTarget(640, 360))).toBe('2mbps');
-    expect(resolveDefaultRemoteWindowVideoBitratePreset(makeTarget(960, 540))).toBe('2mbps');
-    expect(resolveDefaultRemoteWindowVideoBitratePreset(makeTarget(1200, 780))).toBe('2mbps');
-    expect(resolveDefaultRemoteWindowVideoBitratePreset(makeTarget(1800, 980))).toBe('2mbps');
-    expect(resolveDefaultRemoteWindowVideoBitratePreset(makeTarget(1920, 1080))).toBe('2mbps');
-    expect(resolveRemoteWindowDesktopCoverageRatio(makeTarget(960, 540))).toBe(0.25);
-    expect(buildRemoteWindowVideoBitrateConfig('fullscreen')).toEqual({
-      preset: 'fullscreen',
-      bitrateMbps: 20,
-      maxBitrateBps: 20_000_000,
-      maxFrameRateFps: 60,
-    });
-    expect(buildRemoteWindowVideoBitrateConfig('2mbps')).toMatchObject({
-      maxBitrateBps: 2_000_000,
+  it('defaults to the bounded smooth profile and keeps coverage telemetry independent', () => {
+    expect(resolveDefaultRemoteWindowVideoPreference(makeTarget(1920, 1080))).toBe('smooth');
+    expect(buildRemoteWindowVideoProfile('smooth')).toEqual({
+      preference: 'smooth',
+      maxBitrateBps: 6_000_000,
       maxFrameRateFps: 30,
+      maxCaptureWidth: 1440,
+      maxCaptureHeight: 900,
+      maxFrameAgeMs: 100,
+      interactionActive: false,
+      overviewMaxBitrateBps: 250_000,
+      overviewMaxFrameRateFps: 2,
     });
+    expect(buildRemoteWindowVideoProfile('quality')).toMatchObject({
+      maxBitrateBps: 16_000_000,
+      maxFrameRateFps: 30,
+      maxCaptureWidth: 1920,
+      maxCaptureHeight: 1200,
+      maxFrameAgeMs: 150,
+    });
+    expect(resolveRemoteWindowDesktopCoverageRatio(makeTarget(960, 540))).toBe(0.25);
   });
 
-  it('keeps missing desktop display-area truth conservative instead of treating Android fullscreen as desktop fullscreen', () => {
-    expect(resolveDefaultRemoteWindowVideoBitratePreset(
-      makeTarget(1920, 1080, {}, { displayBoundsTopLeftPx: undefined, displayId: undefined }),
-    )).toBe('2mbps');
-  });
-
-  it('remembers bitrate per window and also seeds the same-resolution default', () => {
+  it('migrates the legacy stored preset once and writes only the v2 preference truth', () => {
     const storage = makeStorage();
-    const firstWindow = makeTarget(640, 360, { windowId: 'window-a', title: 'Window A' });
-    const secondWindowSameResolution = makeTarget(640, 360, { windowId: 'window-b', title: 'Window B' });
-
-    expect(readRemoteWindowVideoBitratePreset(firstWindow, storage)).toBe('2mbps');
-    expect(writeRemoteWindowVideoBitratePreset(firstWindow, '20mbps', storage)).toBe(true);
-    expect(readRemoteWindowVideoBitratePreset(firstWindow, storage)).toBe('20mbps');
-    expect(readRemoteWindowVideoBitratePreset(secondWindowSameResolution, storage)).toBe('20mbps');
-
-    const raw = JSON.parse(storage.getItem(REMOTE_WINDOW_VIDEO_BITRATE_STORAGE_KEY) || '{}');
-    expect(raw.byResolution[resolveRemoteWindowVideoResolutionKey(firstWindow)]).toBe('20mbps');
+    const target = makeTarget(640, 360, { windowId: 'window-a', title: 'Window A' });
+    storage.setItem(REMOTE_WINDOW_VIDEO_BITRATE_STORAGE_KEY, JSON.stringify({
+      version: 1,
+      byTarget: {
+        'app-window|com.apple.TextEdit|window-a|Window A': '20mbps',
+      },
+      byResolution: {},
+    }));
+    expect(readRemoteWindowVideoPreference(target, storage)).toBe('quality');
+    expect(JSON.parse(storage.getItem(REMOTE_WINDOW_VIDEO_PREFERENCE_STORAGE_KEY) || '{}').byTarget)
+      .toMatchObject({ 'app-window|com.apple.TextEdit|window-a|Window A': 'quality' });
   });
 
-  it('keeps the same window bitrate memory when the source rectangle is resized', () => {
+  it('remembers preference per target and seeds the same-resolution preference', () => {
     const storage = makeStorage();
-    const initialWindow = makeTarget(640, 360, { windowId: 'window-a', title: 'Window A' });
-    const resizedWindow = makeTarget(1280, 720, { windowId: 'window-a', title: 'Window A' });
-    const otherWindowSameNewResolution = makeTarget(1280, 720, { windowId: 'window-b', title: 'Window B' });
-
-    expect(writeRemoteWindowVideoBitratePreset(initialWindow, '5mbps', storage)).toBe(true);
-
-    expect(readRemoteWindowVideoBitratePreset(resizedWindow, storage)).toBe('5mbps');
-    expect(readRemoteWindowVideoBitratePreset(otherWindowSameNewResolution, storage)).toBe('2mbps');
+    const first = makeTarget(640, 360, { windowId: 'window-a', title: 'Window A' });
+    const sameResolution = makeTarget(640, 360, { windowId: 'window-b', title: 'Window B' });
+    expect(writeRemoteWindowVideoPreference(first, 'quality', storage)).toBe(true);
+    expect(readRemoteWindowVideoPreference(first, storage)).toBe('quality');
+    expect(readRemoteWindowVideoPreference(sameResolution, storage)).toBe('quality');
+    const raw = JSON.parse(storage.getItem(REMOTE_WINDOW_VIDEO_PREFERENCE_STORAGE_KEY) || '{}');
+    expect(raw.byResolution[resolveRemoteWindowVideoResolutionKey(first)]).toBe('quality');
   });
 
-  it('uses floating preview bitrate separately from the fullscreen selected preset', () => {
-    expect(resolveEffectiveRemoteWindowVideoBitratePreset('fullscreen', {
-      mode: 'floating',
-      fullscreenScale: 1,
-    })).toBe('2mbps');
-    expect(resolveEffectiveRemoteWindowVideoBitratePreset('20mbps', {
-      mode: 'fullscreen',
-      fullscreenScale: 1,
-    })).toBe('20mbps');
-    expect(resolveEffectiveRemoteWindowVideoBitratePreset('10mbps', {
-      mode: 'fullscreen',
-      fullscreenScale: 1,
-    })).toBe('10mbps');
-    expect(resolveEffectiveRemoteWindowVideoBitratePreset('2mbps', {
-      mode: 'fullscreen',
-      fullscreenScale: 1,
-    })).toBe('2mbps');
-    expect(resolveEffectiveRemoteWindowVideoBitratePreset('fullscreen', {
-      mode: 'fullscreen',
-      fullscreenScale: 1.4,
-    })).toBe('fullscreen');
+  it('uses interaction burst for frame cadence and age without enabling 1080p60', () => {
+    expect(buildRemoteWindowVideoProfile('smooth', { interactionActive: true })).toMatchObject({
+      maxBitrateBps: 8_000_000,
+      maxFrameRateFps: 45,
+      maxCaptureWidth: 1280,
+      maxFrameAgeMs: 80,
+      overviewMaxFrameRateFps: 1,
+    });
+    expect(buildRemoteWindowVideoProfile('quality', { interactionActive: true })).toMatchObject({
+      maxBitrateBps: 18_000_000,
+      maxFrameRateFps: 30,
+      maxCaptureWidth: 1920,
+      maxFrameAgeMs: 120,
+    });
   });
 
-  it('caps selected quality by network grade without upgrading a lower user preset', () => {
-    expect(resolveAdaptiveRemoteWindowVideoBitratePreset('fullscreen', {
+  it('keeps latency-only pressure spatially clear and maps CPU pressure to host, not network', () => {
+    const latency = resolveInitialRemoteWindowVideoProfile('quality', {
       effectiveType: '4g',
-      downlinkMbps: 1.4,
-      rttMs: 120,
-    })).toBe('5mbps');
-    expect(resolveAdaptiveRemoteWindowVideoBitratePreset('20mbps', {
-      effectiveType: '4g',
-      downlinkMbps: 0.5,
-      rttMs: 900,
-    })).toBe('2mbps');
-    expect(resolveAdaptiveRemoteWindowVideoBitratePreset('2mbps', {
-      effectiveType: '4g',
-      downlinkMbps: 20,
-      rttMs: 30,
-    })).toBe('2mbps');
-    expect(resolveAdaptiveRemoteWindowVideoBitratePreset('fullscreen', {
-      effectiveType: '4g',
-      downlinkMbps: 20,
-      rttMs: 30,
-    })).toBe('fullscreen');
-  });
-
-  it('downgrades on weak WebRTC stats and restores only after a stable window', () => {
-    const baseline = buildRemoteWindowVideoBitrateConfig('20mbps');
-    const firstWeak = resolveRemoteWindowVideoAdaptiveDecision({
-      baseline,
-      sample: {
-        sampledAtMs: 1_000,
-        availableOutgoingBitrateBps: 2_000_000,
-        rttMs: 420,
-        framesPerSecond: 9,
-        framesDropped: 12,
-        qualityLimitationReason: 'bandwidth',
-      },
-    });
-
-    expect(firstWeak.reason).toBe('baseline');
-    expect(firstWeak.state).toEqual({
-      mode: 'normal',
-      level: 0,
-      degradedAtMs: null,
-      stableSinceMs: null,
-      weakSampleCount: 1,
-    });
-
-    const weak = resolveRemoteWindowVideoAdaptiveDecision({
-      baseline,
-      previous: firstWeak.state,
-      sample: {
-        sampledAtMs: 3_000,
-        availableIncomingBitrateBps: 2_000_000,
-        rttMs: 420,
-        framesPerSecond: 9,
-        framesDropped: 12,
-        qualityLimitationReason: 'bandwidth',
-      },
-    });
-
-    expect(weak.reason).toBe('downgrade');
-    expect(weak.state).toEqual({ mode: 'degraded', level: 1, degradedAtMs: 3_000, stableSinceMs: null, weakSampleCount: 0 });
-    expect(weak.config).toMatchObject({
-      preset: '20mbps',
-      bitrateMbps: 20,
-      maxBitrateBps: 5_000_000,
-      maxFrameRateFps: 15,
-    });
-
-    const hold = resolveRemoteWindowVideoAdaptiveDecision({
-      baseline,
-      previous: weak.state,
-      sample: {
-        sampledAtMs: 4_000,
-        availableOutgoingBitrateBps: 30_000_000,
-        rttMs: 45,
-        framesPerSecond: 30,
-        framesDropped: 0,
-        qualityLimitationReason: 'none',
-      },
-    });
-    expect(hold.reason).toBe('hold');
-    expect(hold.state).toEqual({ mode: 'degraded', level: 1, degradedAtMs: 3_000, stableSinceMs: 4_000, weakSampleCount: 0 });
-    expect(hold.config.maxBitrateBps).toBe(5_000_000);
-
-    const restored = resolveRemoteWindowVideoAdaptiveDecision({
-      baseline,
-      previous: hold.state,
-      sample: {
-        sampledAtMs: 16_000,
-        availableOutgoingBitrateBps: 30_000_000,
-        rttMs: 45,
-        framesPerSecond: 30,
-        framesDropped: 0,
-        qualityLimitationReason: 'none',
-      },
-    });
-    expect(restored.reason).toBe('restore');
-    expect(restored.state).toEqual({ mode: 'normal', level: 0, degradedAtMs: null, stableSinceMs: null, weakSampleCount: 0 });
-    expect(restored.config).toEqual(baseline);
-  });
-
-  it('bounds repeated fast downshifts and restores only one ladder step per stable window', () => {
-    const baseline = buildRemoteWindowVideoBitrateConfig('20mbps');
-    const weakSample = (sampledAtMs: number) => ({
-      sampledAtMs,
-      availableOutgoingBitrateBps: 200_000,
+      downlinkMbps: 30,
       rttMs: 600,
-      framesPerSecond: 4,
-      framesDropped: 9,
-      freezeCount: 1,
+    });
+    expect(latency).toMatchObject({
+      maxBitrateBps: 16_000_000,
+      maxCaptureWidth: 1920,
+      maxFrameAgeMs: 120,
+    });
+    const firstCpu = resolveRemoteWindowVideoAdaptiveDecision({
+      preference: 'quality',
+      sample: { sampledAtMs: 1_000, qualityLimitationReason: 'cpu' },
+    });
+    const secondCpu = resolveRemoteWindowVideoAdaptiveDecision({
+      preference: 'quality',
+      previous: firstCpu.state,
+      sample: { sampledAtMs: 3_000, qualityLimitationReason: 'cpu' },
+    });
+    expect(secondCpu).toMatchObject({ cause: 'host', reason: 'downgrade' });
+    expect(secondCpu.profile).toMatchObject({ maxCaptureWidth: 1600, maxBitrateBps: 14_000_000 });
+  });
+
+  it('uses counter deltas so old cumulative drops do not fabricate render pressure', () => {
+    const first = resolveRemoteWindowVideoAdaptiveDecision({
+      preference: 'smooth',
+      sample: { sampledAtMs: 1_000, framesDropped: 100, freezeCount: 10, framesPerSecond: 30 },
+    });
+    const second = resolveRemoteWindowVideoAdaptiveDecision({
+      preference: 'smooth',
+      previous: first.state,
+      sample: { sampledAtMs: 3_000, framesDropped: 101, freezeCount: 10, framesPerSecond: 30 },
+    });
+    expect(first.cause).toBe('none');
+    expect(second.cause).toBe('none');
+    expect(second.state.level).toBe(0);
+  });
+
+  it('downgrades one small step after two samples, rate-limits the next step, and restores one step', () => {
+    const weak = (sampledAtMs: number) => ({
+      sampledAtMs,
+      availableOutgoingBitrateBps: 8_000_000,
       qualityLimitationReason: 'bandwidth',
     });
-    let state = resolveRemoteWindowVideoAdaptiveDecision({ baseline, sample: weakSample(1_000) }).state;
-    state = resolveRemoteWindowVideoAdaptiveDecision({ baseline, previous: state, sample: weakSample(2_000) }).state;
-    state = resolveRemoteWindowVideoAdaptiveDecision({ baseline, previous: state, sample: weakSample(3_000) }).state;
-    const deepest = resolveRemoteWindowVideoAdaptiveDecision({ baseline, previous: state, sample: weakSample(4_000) });
-    expect(deepest.state.level).toBe(2);
-    expect(deepest.config.maxBitrateBps).toBe(1_250_000);
+    const first = resolveRemoteWindowVideoAdaptiveDecision({ preference: 'quality', sample: weak(1_000) });
+    expect(first.reason).toBe('baseline');
+    const degraded = resolveRemoteWindowVideoAdaptiveDecision({
+      preference: 'quality',
+      previous: first.state,
+      sample: weak(3_000),
+    });
+    expect(degraded).toMatchObject({ reason: 'downgrade', cause: 'network' });
+    expect(degraded.state.level).toBe(1);
+    expect(degraded.profile.maxBitrateBps).toBe(10_000_000);
+
+    const tooSoon1 = resolveRemoteWindowVideoAdaptiveDecision({
+      preference: 'quality',
+      previous: degraded.state,
+      sample: weak(4_000),
+    });
+    const tooSoon2 = resolveRemoteWindowVideoAdaptiveDecision({
+      preference: 'quality',
+      previous: tooSoon1.state,
+      sample: weak(5_000),
+    });
+    expect(tooSoon2.state.level).toBe(1);
+    const secondStep = resolveRemoteWindowVideoAdaptiveDecision({
+      preference: 'quality',
+      previous: tooSoon2.state,
+      sample: weak(7_000),
+    });
+    expect(secondStep.state.level).toBe(2);
+    expect(secondStep.profile.maxBitrateBps).toBe(6_000_000);
 
     const stable = resolveRemoteWindowVideoAdaptiveDecision({
-      baseline,
-      previous: deepest.state,
-      sample: { sampledAtMs: 5_000, availableOutgoingBitrateBps: 30_000_000, rttMs: 30, framesPerSecond: 60 },
+      preference: 'quality',
+      previous: secondStep.state,
+      sample: { sampledAtMs: 8_000, availableOutgoingBitrateBps: 30_000_000, framesPerSecond: 30 },
     });
-    const oneStep = resolveRemoteWindowVideoAdaptiveDecision({
-      baseline,
+    const restored = resolveRemoteWindowVideoAdaptiveDecision({
+      preference: 'quality',
       previous: stable.state,
-      sample: { sampledAtMs: 17_000, availableOutgoingBitrateBps: 30_000_000, rttMs: 30, framesPerSecond: 60 },
+      sample: { sampledAtMs: 20_000, availableOutgoingBitrateBps: 30_000_000, framesPerSecond: 30 },
     });
-    expect(oneStep.reason).toBe('restore');
-    expect(oneStep.state).toMatchObject({ mode: 'degraded', level: 1 });
-    expect(oneStep.config.maxBitrateBps).toBe(5_000_000);
+    expect(restored.reason).toBe('restore');
+    expect(restored.state.level).toBe(1);
   });
 });
