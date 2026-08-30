@@ -232,6 +232,8 @@ export function SettingsPage({
         }}
       >
         <button
+          type="button"
+          aria-label="返回连接列表"
           onClick={onBack}
           style={{
             width: '56px',
@@ -251,6 +253,8 @@ export function SettingsPage({
           <div style={{ fontSize: '20px', fontWeight: 800 }}>Settings</div>
         </div>
         <button
+          type="button"
+          aria-label="保存设置"
           onClick={() => {
             onSave(draft);
             onUpdatePreferencesChange(updateDraft);
@@ -319,6 +323,7 @@ export function SettingsPage({
           <div>
             <div style={{ marginBottom: '8px', fontSize: '14px', fontWeight: 700 }}>Terminal Cache Lines</div>
             <input
+              aria-label="Terminal Cache Lines"
               type="number"
               min={200}
               max={DEFAULT_TERMINAL_CACHE_LINES}
@@ -349,6 +354,7 @@ export function SettingsPage({
                 <button
                   key={option.id}
                   type="button"
+                  aria-pressed={active}
                   onClick={() => setDraft((current) => updateBridgeSettingsTerminalWidthMode(current, option.id))}
                   style={{
                     flex: 1,
@@ -381,6 +387,7 @@ export function SettingsPage({
                   key={option.id}
                   type="button"
                   title={option.description}
+                  aria-pressed={active}
                   onClick={() => setDraft((current) => ({
                     ...current,
                     terminalSessionGroupLayoutMode: option.id,
@@ -476,6 +483,7 @@ export function SettingsPage({
           </div>
           <div style={{ marginTop: '12px', marginBottom: '8px', fontSize: '14px', fontWeight: 700 }}>默认码率</div>
           <select
+            aria-label="远程窗口默认码率"
             value={remoteWindowBitrate}
             onChange={(event) => {
               const next = event.currentTarget.value as RemoteWindowVideoBitratePreset;
@@ -492,6 +500,7 @@ export function SettingsPage({
           </select>
           <div style={{ marginTop: '12px', marginBottom: '8px', fontSize: '14px', fontWeight: 700 }}>滚动幅度</div>
           <select
+            aria-label="远程窗口滚动幅度"
             value={String(remoteScrollFraction)}
             onChange={(event) => {
               const next = Number(event.currentTarget.value);

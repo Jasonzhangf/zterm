@@ -3158,6 +3158,15 @@ function TerminalPageComponent({
     }));
   }, [debugOverlayVisible]);
 
+  const handleOpenSessionDrawer = useCallback(() => {
+    setSessionDrawerDebug((current) => ({
+      ...current,
+      lastEvent: 'page:drawer-button-open',
+      eventSeq: current.eventSeq + 1,
+    }));
+    setSessionDrawerOpen(true);
+  }, []);
+
   const handleCloseSessionDrawer = useCallback(() => {
     setSessionDrawerOpen(false);
   }, []);
@@ -3395,6 +3404,7 @@ function TerminalPageComponent({
                 onUseAutoSession,
                 onUseWebSocketSession,
                 onRenameRemoteSession,
+                onOpenSessionDrawer: handleOpenSessionDrawer,
               }
             : null,
           controls: portraitSessionDrawerEnabled ? (

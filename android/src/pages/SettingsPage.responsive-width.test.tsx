@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SettingsPage } from './SettingsPage';
 import { AppUpdateSection } from '../components/settings/AppUpdateSection';
@@ -112,5 +112,19 @@ describe('SettingsPage responsive width', () => {
     expect(settingsSectionStyle().padding).toBe(settingsCardPadding);
     expect(settingsSectionStyle().minWidth).toBe(0);
     expect(settingsInputStyle().padding).toContain('clamp(');
+  });
+
+  it('names primary controls and exposes selected terminal modes', () => {
+    renderSettings();
+
+    expect(screen.getByRole('button', { name: '返回连接列表' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '保存设置' })).toBeTruthy();
+    expect(screen.getByLabelText('Terminal Cache Lines')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Mirror Fixed' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('button', { name: 'Adaptive Phone' }).getAttribute('aria-pressed')).toBe('false');
+
+    fireEvent.click(screen.getAllByText('远程窗口')[0]!);
+    expect(screen.getByLabelText('远程窗口默认码率')).toBeTruthy();
+    expect(screen.getByLabelText('远程窗口滚动幅度')).toBeTruthy();
   });
 });

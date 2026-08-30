@@ -365,18 +365,46 @@ export function ConnectionsPage({
             <div
               data-testid="connections-empty-state"
               style={{
-                minHeight: '86px',
+                minHeight: '148px',
                 border: `1px dashed ${mobileTheme.colors.lightBorder}`,
                 borderRadius: '20px',
                 backgroundColor: 'rgba(255,255,255,0.72)',
                 color: mobileTheme.colors.lightMuted,
                 fontSize: '13px',
                 fontWeight: 750,
-                display: 'grid',
-                placeItems: 'center',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+                padding: '20px',
+                textAlign: 'center',
               }}
             >
-              No configured servers
+              <div style={{ color: mobileTheme.colors.lightText, fontSize: '16px', fontWeight: 900 }}>
+                还没有服务器
+              </div>
+              <div style={{ maxWidth: '280px', lineHeight: 1.55 }}>
+                添加服务器后即可连接并打开终端会话。
+              </div>
+              <button
+                type="button"
+                onClick={onOpenSettings}
+                style={{
+                  minHeight: '40px',
+                  marginTop: '4px',
+                  padding: '0 16px',
+                  border: 'none',
+                  borderRadius: '13px',
+                  backgroundColor: mobileTheme.colors.shell,
+                  color: '#ffffff',
+                  fontSize: '13px',
+                  fontWeight: 900,
+                  boxShadow: mobileTheme.shadow.soft,
+                }}
+              >
+                添加服务器
+              </button>
             </div>
           ) : (
             <div data-testid="saved-connection-list" style={{ display: 'grid', gap: '10px' }}>

@@ -109,6 +109,7 @@ label:focus-visible {
 @keyframes ztermDialogSpin { to { transform: rotate(360deg); } }
 @keyframes ztermDialogExit { from { opacity: 1; } to { opacity: 0; } }
 @keyframes ztermDialogPanelExit { from { opacity: 1; transform: scale(1); } to { opacity: 0; transform: scale(0.96); } }
+@keyframes ztermDrawerPanelReveal { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 
 .zterm-settings-group {
   display: grid;
@@ -322,6 +323,32 @@ label:focus-visible {
 
 .zterm-neo-drawer button:active {
   background: var(--zterm-neo-pressed) !important;
+}
+
+.zterm-connection-status-session-trigger {
+  transition: color 140ms ease, transform 140ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.zterm-connection-status-session-trigger:active {
+  color: var(--zterm-panel-accent) !important;
+  transform: scale(0.97);
+}
+
+.zterm-drawer-new-session-panel {
+  animation: ztermDrawerPanelReveal 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.zterm-neo-drawer .zterm-drawer-new-session-trigger:active {
+  background: transparent !important;
+}
+
+.zterm-drawer-new-session-trigger > div {
+  transition: transform 140ms cubic-bezier(0.22, 1, 0.36, 1), background-color 140ms ease;
+}
+
+.zterm-drawer-new-session-trigger:active > div {
+  background: var(--zterm-neo-pressed) !important;
+  transform: scale(0.98);
 }
 
 .zterm-connection-status-strip {

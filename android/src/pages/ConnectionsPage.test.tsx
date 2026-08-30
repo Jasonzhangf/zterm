@@ -162,8 +162,9 @@ describe('ConnectionsPage server home', () => {
     const onOpenSettings = vi.fn();
     render(<ConnectionsPage onOpenSettings={onOpenSettings} />);
 
-    expect(screen.getByText('No configured servers')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: '设置和升级' }));
+    expect(screen.getByText('还没有服务器')).toBeTruthy();
+    expect(screen.getByText('添加服务器后即可连接并打开终端会话。')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '添加服务器' }));
     expect(onOpenSettings).toHaveBeenCalledTimes(1);
   });
 });

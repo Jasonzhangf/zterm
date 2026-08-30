@@ -578,6 +578,37 @@ describe('useSessionOpenActions explicit-open truth', () => {
     expect(result.current.pickerMode).toBeNull();
   });
 
+  it('keeps the exact saved-server failure while adding server context and recovery guidance', async () => {
+    const harness = createOptions();
+    fetchTmuxSessionsMock.mockRejectedValueOnce(new Error('ws closed'));
+    const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
+    const savedServer = {
+      id: 'bridge-preset:mac-studio',
+      createdAt: 1,
+      name: 'Mac Studio',
+      bridgeHost: '100.66.1.82',
+      bridgePort: 3333,
+      daemonHostId: 'mac-studio',
+      relayHostId: 'mac-studio',
+      sessionName: '',
+      authToken: 'token-a',
+      relayEndpointCandidates: [],
+      authType: 'password' as const,
+      tags: ['bridge-server'],
+      pinned: false,
+    };
+
+    await act(async () => {
+      result.current.handleOpenSavedConnection(savedServer);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(harness.spies.onError).toHaveBeenCalledWith(
+      '无法连接“Mac Studio”。\nws closed\n请检查服务器地址、网络和认证设置后重试。',
+    );
+  });
+
   it('opens the last entered session for a Home server row before the first remote session', async () => {
     const harness = createOptions({
       sessionGroups: [{

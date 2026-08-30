@@ -37,6 +37,7 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
   onUseAutoSession,
   onUseWebSocketSession,
   onRenameRemoteSession,
+  onOpenSessionDrawer,
 }: {
   session: Session | null;
   getSessionDebugMetrics?: (sessionId: string) => SessionDebugOverlayMetrics | null;
@@ -45,12 +46,14 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
   onUseAutoSession?: (id: string) => void;
   onUseWebSocketSession?: (id: string) => void;
   onRenameRemoteSession?: (sessionId: string, nextSessionName: string) => void | Promise<void>;
+  onOpenSessionDrawer?: () => void;
 }) {
   const [tick, setTick] = useState(0);
   const [routeMenuOpen, setRouteMenuOpen] = useState(false);
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
   const [renameErrorMessage, setRenameErrorMessage] = useState<string | null>(null);
   const renameLongPressTimerRef = useRef<number | null>(null);
+  const suppressSessionClickRef = useRef(false);
   const stableStatusRef = useRef<'connected' | 'unstable' | 'error'>('unstable');
   const unstableSinceRef = useRef<number>(0);
   const debouncedStatusRef = useRef<string>('waiting');
@@ -132,8 +135,7 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
       data-testid='terminal-connection-status-strip'
       className='zterm-connection-status-strip'
       aria-label={`连接状态 ${visibleRouteLabel} session ${session.sessionName} 后端 ${terminalBackend} 上行 ${formatDebugRate(uplinkBps)} 下行 ${formatDebugRate(downlinkBps)}`}
-      role='button'
-      tabIndex={0}
+      role='group'
       onClick={() => setRouteMenuOpen((current) => !current)}
       style={{
         position: 'absolute',
@@ -159,14 +161,21 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
         cursor: 'pointer',
       }}
     >
-      <span
+      <button
+        type="button"
         data-testid='terminal-connection-status-route'
+        aria-label={`选择连接线路，当前 ${visibleRouteLabel}`}
+        aria-expanded={routeMenuOpen}
+        aria-controls="terminal-connection-route-menu"
         style={{
           display: 'inline-flex',
           alignItems: 'center',
           gap: '4px',
           minWidth: 0,
           flex: '0 1 auto',
+          padding: 0,
+          border: 0,
+          background: 'transparent',
           color: statusTone,
           fontSize: '11px',
           fontWeight: 900,
@@ -191,11 +200,15 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
         >
           {visibleRouteLabel}
         </span>
-      </span>
-      <span
+      </button>
+      <button
+        type="button"
         data-testid='terminal-connection-status-session'
-        aria-label={`重命名 session ${session.sessionName}`}
+        className="zterm-connection-status-session-trigger"
+        aria-label={`打开 session 抽屉 ${session.sessionName}`}
+        title={onRenameRemoteSession ? '点击打开 Sessions，长按重命名' : '点击打开 Sessions'}
         onPointerDown={(event) => {
+          suppressSessionClickRef.current = false;
           if (!onRenameRemoteSession || event.button !== 0) {
             return;
           }
@@ -206,6 +219,7 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
             setRouteMenuOpen(false);
             setRenameErrorMessage(null);
             setRenameDialogOpen(true);
+            suppressSessionClickRef.current = true;
             renameLongPressTimerRef.current = null;
           }, SESSION_RENAME_LONG_PRESS_MS);
         }}
@@ -230,6 +244,11 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
         onContextMenu={(event) => event.preventDefault()}
         onClick={(event) => {
           event.stopPropagation();
+          if (suppressSessionClickRef.current) {
+            suppressSessionClickRef.current = false;
+            return;
+          }
+          onOpenSessionDrawer?.();
         }}
         style={{
           flex: '1 1 auto',
@@ -244,12 +263,12 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
           fontWeight: 800,
           textAlign: 'left',
           whiteSpace: 'nowrap',
-          cursor: onRenameRemoteSession ? 'pointer' : 'default',
+          cursor: onOpenSessionDrawer ? 'pointer' : 'default',
           userSelect: 'none',
         }}
       >
         {session.sessionName}
-      </span>
+      </button>
       <span
         data-testid='terminal-connection-status-backend'
         aria-label={`当前终端后端 ${terminalBackend}`}
@@ -286,6 +305,7 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
       </span>
       {routeMenuOpen ? (
         <div
+          id="terminal-connection-route-menu"
           data-testid='terminal-connection-route-menu'
           className='zterm-connection-route-menu'
           style={{

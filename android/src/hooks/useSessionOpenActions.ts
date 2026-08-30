@@ -183,6 +183,16 @@ export interface SessionOpenActionsResult {
   closePicker: () => void;
 }
 
+function formatSavedConnectionOpenError(host: Host, error: unknown) {
+  const connectionName = host.name.trim()
+    || host.bridgeHost.trim()
+    || host.daemonHostId?.trim()
+    || host.relayHostId?.trim()
+    || host.id;
+  const reason = error instanceof Error ? error.message : String(error);
+  return `无法连接“${connectionName}”。\n${reason}\n请检查服务器地址、网络和认证设置后重试。`;
+}
+
 export function useSessionOpenActions(options: UseSessionOpenActionsOptions): SessionOpenActionsResult {
   const {
     bridgeSettings,
@@ -964,7 +974,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
           const draft = buildDraftFromTmuxSession(hosts, bridgeSettingsRef.current.servers, target, existingSessionName);
           handleQuickConnectDraft(draft, host.name || target.bridgeHost || target.daemonHostId || target.relayHostId);
         } catch (error) {
-          onError?.(error instanceof Error ? error.message : String(error));
+          onError?.(formatSavedConnectionOpenError(host, error));
         }
       })();
       return;
@@ -1000,7 +1010,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
         const draft = buildDraftFromTmuxSession(hosts, bridgeSettingsRef.current.servers, target, sessionName);
         handleQuickConnectDraft(draft, host.name || target.bridgeHost || target.daemonHostId || target.relayHostId);
       } catch (error) {
-        onError?.(error instanceof Error ? error.message : String(error));
+        onError?.(formatSavedConnectionOpenError(host, error));
       }
     })();
   }, [applyOpenTabState, bridgeSettingsRef, closedOpenTabReuseKeysRef, closedOpenTabSessionIdsRef, createSession, ensureTerminalPageVisible, handleQuickConnectDraft, handleRemoteSessionsRefreshed, hosts, manageTmuxSessionsForTarget, markSessionGroupEntered, openTabStateRef, pendingMaterializedOpenTabSessionIdsRef, runtimeActiveSessionId, sessionsRef, terminalActiveSessionIdRef]);

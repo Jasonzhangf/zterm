@@ -854,6 +854,10 @@ function TerminalSessionDrawerComponent({
 
         {newSessionDraft ? (
           <div
+            id="terminal-session-drawer-new-session-panel"
+            role="region"
+            aria-labelledby="terminal-session-drawer-new-session-title"
+            className="zterm-drawer-new-session-panel"
             data-testid="terminal-session-drawer-new-session-dialog"
             style={{
               margin: '8px 10px',
@@ -868,6 +872,7 @@ function TerminalSessionDrawerComponent({
             }}
           >
             <div
+              id="terminal-session-drawer-new-session-title"
               style={{
                 color: 'var(--zterm-panel-text)',
                 fontSize: '13px',
@@ -1024,11 +1029,13 @@ function TerminalSessionDrawerComponent({
             </button>
           </div>
         ) : (
-        <div
+        <button
+          type="button"
+          className="zterm-drawer-new-session-trigger"
           data-testid="terminal-session-drawer-add"
-          role="button"
           aria-label="新建 session"
-          tabIndex={-1}
+          aria-expanded={Boolean(newSessionDraft)}
+          aria-controls="terminal-session-drawer-new-session-panel"
           onTouchStartCapture={(event) => {
             onDebugAddEvent?.(`add:capstart:${describeEventTarget(event.target)}`);
           }}
@@ -1058,8 +1065,12 @@ function TerminalSessionDrawerComponent({
             }
           }}
           style={{
+            width: '100%',
             padding: `10px 12px ${Math.max(12, Math.round(bottomInsetPx) + 12)}px`,
+            border: 'none',
             borderTop: '1px solid var(--zterm-panel-border)',
+            background: 'transparent',
+            color: 'inherit',
             flexShrink: 0,
           }}
         >
@@ -1097,7 +1108,7 @@ function TerminalSessionDrawerComponent({
             </span>
             <span>New Session</span>
           </div>
-        </div>
+        </button>
         )}
       </aside>
     </>

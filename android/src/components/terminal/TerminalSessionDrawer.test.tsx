@@ -115,10 +115,15 @@ describe('TerminalSessionDrawer', () => {
     expect(onSelectSession).toHaveBeenCalledWith('s2');
     expect(onSelectSession).toHaveBeenCalledTimes(1);
 
-    fireEvent.touchEnd(screen.getByTestId('terminal-session-drawer-add'), {
+    const addButton = screen.getByRole('button', { name: '新建 session' });
+    expect(addButton.tagName).toBe('BUTTON');
+    expect(addButton.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.touchEnd(addButton, {
       changedTouches: [{ clientX: 180, clientY: 560 }],
     });
-    expect(screen.getByTestId('terminal-session-drawer-new-session-dialog')).toBeTruthy();
+    const newSessionPanel = screen.getByRole('region', { name: '新建 Session' });
+    expect(newSessionPanel).toBeTruthy();
+    expect(addButton.getAttribute('aria-expanded')).toBe('true');
     expect(onOpenQuickTabPicker).not.toHaveBeenCalled();
   });
 
