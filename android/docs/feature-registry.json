@@ -359,7 +359,8 @@
       "src/server/remote-window-capture.test.ts",
       "src/server/remote-window-screen-capture-script.ts",
       "src/server/remote-window-input-script.ts",
-      "src/server/remote-window-input-helper.ts"
+      "src/server/remote-window-input-helper.ts",
+      "scripts/remote-window-live-input-probe.ts"
       ],
       "forbidden_paths": [
         "src/components/TerminalView.tsx",
@@ -409,7 +410,8 @@
         "src/lib/remote-window-dual-stream-runtime.test.ts",
         "docs/testing/remote-window-stream-test-design.md",
         "docs/testing/remote-window-canvas-pipeline-test-design.md",
-        "docs/testing/remote-window-dual-stream-test-design.md"
+        "docs/testing/remote-window-dual-stream-test-design.md",
+        "scripts/remote-window-live-input-probe.ts"
       ],
     "truth_sources": [
       "docs/architecture.md",

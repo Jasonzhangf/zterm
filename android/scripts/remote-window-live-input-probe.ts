@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from 'child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
-import { tmpdir } from 'os';
+import { homedir, tmpdir } from 'os';
 import { join } from 'path';
 import { setTimeout as delay } from 'timers/promises';
 import { WebSocket } from 'ws';
@@ -13,6 +13,7 @@ import type {
   ServerMessage,
 } from '../src/lib/types';
 import { buildRemoteWindowVideoProfile } from '../src/lib/remote-window-video-quality';
+import { resolveDaemonRuntimeConfig } from '../src/server/daemon-config';
 
 const { RTCPeerConnection, RTCSessionDescription, RTCIceCandidate } = wrtc as unknown as {
   RTCPeerConnection: typeof globalThis.RTCPeerConnection;
@@ -20,7 +21,9 @@ const { RTCPeerConnection, RTCSessionDescription, RTCIceCandidate } = wrtc as un
   RTCIceCandidate: typeof globalThis.RTCIceCandidate;
 };
 
-const DAEMON_WS_URL = process.env.ZTERM_REMOTE_WINDOW_PROBE_WS_URL || 'ws://127.0.0.1:3333';
+const DAEMON_WS_URL = resolveDaemonWebSocketUrl(
+  process.env.ZTERM_REMOTE_WINDOW_PROBE_WS_URL || 'ws://127.0.0.1:3333',
+);
 const USE_MUX = process.env.ZTERM_REMOTE_WINDOW_PROBE_MUX === '1';
 const BURST_INPUT = process.env.ZTERM_REMOTE_WINDOW_PROBE_BURST === '1';
 const PROBE_MUX_SESSION = process.env.ZTERM_REMOTE_WINDOW_PROBE_SESSION || 'zterm';
@@ -37,6 +40,30 @@ const REQUEST_PREFIX = `rw-live-input-${PROBE_RUN_ID}`;
 const KEEP_TEMP = process.env.ZTERM_REMOTE_WINDOW_PROBE_KEEP_TMP === '1';
 const REMOTE_WINDOW_LIVE_CATALOG_TIMEOUT_MS = 30_000;
 const REMOTE_WINDOW_LIVE_STREAM_TIMEOUT_MS = 40_000;
+
+function resolveDaemonWebSocketUrl(rawUrl: string) {
+  const url = new URL(rawUrl);
+  if (url.searchParams.has('token')) {
+    return url.toString();
+  }
+  const hostname = url.hostname.toLowerCase();
+  const loopback = hostname === '127.0.0.1' || hostname === 'localhost' || hostname === '::1';
+  const explicitToken = process.env.ZTERM_REMOTE_WINDOW_PROBE_AUTH_TOKEN?.trim();
+  const token = explicitToken || (loopback ? resolveDaemonRuntimeConfig({ homeDir: homedir() }).authToken : '');
+  if (!token) {
+    throw new Error('remote-window live probe requires ZTERM_REMOTE_WINDOW_PROBE_AUTH_TOKEN for a non-loopback daemon URL');
+  }
+  url.searchParams.set('token', token);
+  return url.toString();
+}
+
+function redactDaemonWebSocketUrl(rawUrl: string) {
+  const url = new URL(rawUrl);
+  if (url.searchParams.has('token')) {
+    url.searchParams.set('token', '<redacted>');
+  }
+  return url.toString();
+}
 const tempRoot = mkdtempSync(join(tmpdir(), 'zterm-remote-window-live-input-'));
 const probeSourcePath = join(tempRoot, 'RemoteWindowInputProbe.m');
 const probeLogPath = join(tempRoot, 'probe-events.log');
@@ -1029,7 +1056,7 @@ async function main() {
 
     console.log(JSON.stringify({
       ok: true,
-      daemonWsUrl: DAEMON_WS_URL,
+      daemonWsUrl: redactDaemonWebSocketUrl(DAEMON_WS_URL),
       controlTransport: USE_MUX ? 'mux-channel' : 'raw-ws',
       burstInput: BURST_INPUT,
       clientClockOffsetMs: CLIENT_CLOCK_OFFSET_MS,
