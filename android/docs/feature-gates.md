@@ -12,10 +12,10 @@
 
 ## Remote-window quality/gesture amendment gate
 
-The active `2026-08-30-remote-window-quality-gesture-control-amendment.md`
-supersedes older release-time single-finger swipe and zoomed single-finger
-local-pan clauses elsewhere in this file. Until the old clauses are physically
-removed with the runtime migration, this section is the authoritative gate:
+The active `2026-08-30-remote-window-quality-gesture-control-amendment.md` is
+the canonical contract. Release-time single-finger swipe, zoomed single-finger
+local pan, one-second gesture expiry, and queued continuous receive-time refresh
+are physically absent from the current runtime and executable gate text:
 
 - default preference is `smooth`; `quality` is selectable; quality is one
   profile containing bitrate, capture dimensions, frame rate, maximum frame
