@@ -143,6 +143,215 @@ describe('app-update-runtime', () => {
     expect(runtime.getSnapshot().preferences.lastCheckedAt).toBe(123456789);
   });
 
+  it('uses the confirmed Relay route instead of a persisted LAN manifest', async () => {
+    const runtime = createRuntime(createStorage({
+      'zterm:app-update-settings': JSON.stringify({
+        manifestUrl: 'http://192.168.0.3:3333/updates/latest.json',
+        manifestSource: 'server-connected',
+        autoCheckOnLaunch: false,
+      }),
+    }));
+    runtime.restorePreferences();
+
+    fetchFn.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        versionName: '0.1.1.1493',
+        versionCode: 1011493,
+        apkUrl: 'zterm-0.1.1.1493.apk',
+        sha256: 'relay-sha',
+        notes: [],
+      }),
+    });
+
+    await runtime.checkForUpdates({
+      activeSessionRoute: {
+        resolvedPath: 'rtc-relay',
+        resolvedRelayTransport: 'turn',
+        resolvedEndpoint: 'relay:daemon-a',
+      },
+      manifestCandidates: [
+        {
+          id: 'relay-public',
+          label: 'Relay 公网',
+          manifestUrl: 'https://relay.codewhisper.cc:18443/relay/updates/latest.json',
+          manifestSource: 'relay-injected',
+        },
+        {
+          id: 'daemon-lan',
+          label: 'LAN',
+          manifestUrl: 'http://192.168.0.3:3333/updates/latest.json',
+          manifestSource: 'server-connected',
+        },
+      ],
+    });
+
+    expect(fetchFn).toHaveBeenCalledWith(
+      'https://relay.codewhisper.cc:18443/relay/updates/latest.json',
+      expect.any(Object),
+    );
+  });
+
+  it('honors an explicit manual candidate selection over the active route', async () => {
+    const runtime = createRuntime(createStorage({
+      'zterm:app-update-settings': JSON.stringify({
+        manifestUrl: 'http://192.168.0.3:3333/updates/latest.json',
+        manifestSource: 'server-connected',
+        autoCheckOnLaunch: false,
+      }),
+    }));
+    runtime.restorePreferences();
+
+    fetchFn.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        versionName: '0.1.1.1493',
+        versionCode: 1011493,
+        apkUrl: 'zterm-0.1.1.1493.apk',
+        sha256: 'lan-sha',
+        notes: [],
+      }),
+    });
+
+    await runtime.checkForUpdates({
+      manual: true,
+      manifestUrlOverride: 'http://192.168.0.3:3333/updates/latest.json',
+      activeSessionRoute: {
+        resolvedPath: 'rtc-relay',
+        resolvedRelayTransport: 'turn',
+        resolvedEndpoint: 'relay:daemon-a',
+      },
+      manifestCandidates: [
+        {
+          id: 'relay-public',
+          label: 'Relay 公网',
+          manifestUrl: 'https://relay.codewhisper.cc:18443/relay/updates/latest.json',
+          manifestSource: 'relay-injected',
+        },
+        {
+          id: 'daemon-lan',
+          label: 'LAN',
+          manifestUrl: 'http://192.168.0.3:3333/updates/latest.json',
+          manifestSource: 'server-connected',
+        },
+      ],
+    });
+
+    expect(fetchFn).toHaveBeenCalledWith(
+      'http://192.168.0.3:3333/updates/latest.json',
+      expect.any(Object),
+    );
+  });
+
+  it('does not auto-select LAN for a remote confirmed route', async () => {
+    const runtime = createRuntime(createStorage({
+      'zterm:app-update-settings': JSON.stringify({
+        manifestUrl: 'http://192.168.0.3:3333/updates/latest.json',
+        manifestSource: 'server-connected',
+        autoCheckOnLaunch: false,
+      }),
+    }));
+    runtime.restorePreferences();
+
+    await runtime.checkForUpdates({
+      activeSessionRoute: {
+        resolvedPath: 'tailscale',
+        resolvedEndpoint: '100.66.1.82:3333',
+      },
+      manifestCandidates: [
+        {
+          id: 'daemon-lan',
+          label: 'LAN',
+          manifestUrl: 'http://192.168.0.3:3333/updates/latest.json',
+          manifestSource: 'server-connected',
+        },
+        {
+          id: 'daemon-tailscale',
+          label: 'Tailscale',
+          manifestUrl: 'http://100.66.1.82:3333/updates/latest.json',
+          manifestSource: 'server-connected',
+        },
+      ],
+    });
+
+    expect(fetchFn).not.toHaveBeenCalledWith(
+      'http://192.168.0.3:3333/updates/latest.json',
+      expect.any(Object),
+    );
+  });
+
+  it('selects the LAN manifest for a confirmed same-network ipv4 route', async () => {
+    const runtime = createRuntime(createStorage({
+      'zterm:app-update-settings': JSON.stringify({
+        manifestUrl: 'https://relay.codewhisper.cc:18443/relay/updates/latest.json',
+        manifestSource: 'relay-injected',
+        autoCheckOnLaunch: false,
+      }),
+    }));
+    runtime.restorePreferences();
+
+    fetchFn.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        versionName: '0.1.1.1493',
+        versionCode: 1011493,
+        apkUrl: 'zterm-0.1.1.1493.apk',
+        sha256: 'lan-sha',
+        notes: [],
+      }),
+    });
+
+    await runtime.checkForUpdates({
+      activeSessionRoute: {
+        resolvedPath: 'ipv4',
+        resolvedEndpoint: '192.168.0.3:3333',
+      },
+      manifestCandidates: [
+        {
+          id: 'relay-public',
+          label: 'Relay 公网',
+          manifestUrl: 'https://relay.codewhisper.cc:18443/relay/updates/latest.json',
+          manifestSource: 'relay-injected',
+        },
+        {
+          id: 'daemon-lan',
+          label: 'LAN',
+          manifestUrl: 'http://192.168.0.3:3333/updates/latest.json',
+          manifestSource: 'server-connected',
+        },
+      ],
+    });
+
+    expect(fetchFn).toHaveBeenCalledWith(
+      'http://192.168.0.3:3333/updates/latest.json',
+      expect.any(Object),
+    );
+  });
+
+  it('fails explicitly when a confirmed route has no matching manifest candidate', async () => {
+    const runtime = createRuntime(createStorage({
+      'zterm:app-update-settings': JSON.stringify({
+        manifestUrl: 'http://192.168.0.3:3333/updates/latest.json',
+        manifestSource: 'server-connected',
+        autoCheckOnLaunch: false,
+      }),
+    }));
+    runtime.restorePreferences();
+
+    const result = await runtime.checkForUpdates({
+      activeSessionRoute: {
+        resolvedPath: 'rtc-relay',
+        resolvedRelayTransport: 'turn',
+        resolvedEndpoint: 'relay:daemon-a',
+      },
+      manifestCandidates: [],
+    });
+
+    expect(result.manifest).toBeNull();
+    expect(fetchFn).not.toHaveBeenCalled();
+    expect(runtime.getSnapshot().lastError).toBe('未配置升级 manifest URL');
+  });
+
   it('tracks explicit install stage transitions and completes inside the runtime block', async () => {
     const runtime = createRuntime();
     withManifestUrl(runtime);

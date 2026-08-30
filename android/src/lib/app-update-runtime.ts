@@ -7,9 +7,11 @@ import {
   normalizeAppUpdatePreferences,
   shouldSuppressUpdatePrompt,
   type AppUpdateCheckResult,
+  type AppUpdateManifestCandidate,
   type AppUpdateInstallContext,
   type AppUpdateManifest,
   type AppUpdatePreferences,
+  type AppUpdateRouteSnapshot,
   type AppUpdateRollbackBackup,
   type AppUpdateRollbackEntry,
 } from './app-update';
@@ -42,6 +44,7 @@ export interface AppUpdateRuntimeSnapshot {
   isBackingUp: boolean;
   isRollingBack: boolean;
   lastInstallContext: AppUpdateInstallContext | null;
+  activeManifestUrl: string;
 }
 
 export interface AppUpdateRuntimeDeps {
@@ -68,6 +71,13 @@ export interface AppUpdateRuntimeDeps {
   onError?: (phase: 'restore-preferences' | 'persist-preferences', error: unknown) => void;
 }
 
+export interface AppUpdateCheckOptions {
+  manual?: boolean;
+  manifestUrlOverride?: string;
+  activeSessionRoute?: AppUpdateRouteSnapshot;
+  manifestCandidates?: AppUpdateManifestCandidate[];
+}
+
 function createDefaultSnapshot(runtimeVersionCode: number): AppUpdateRuntimeSnapshot {
   return {
     preferences: DEFAULT_APP_UPDATE_PREFERENCES,
@@ -83,6 +93,7 @@ function createDefaultSnapshot(runtimeVersionCode: number): AppUpdateRuntimeSnap
     isBackingUp: false,
     isRollingBack: false,
     lastInstallContext: null,
+    activeManifestUrl: '',
   };
 }
 
@@ -99,6 +110,82 @@ function persistPreferences(
   } catch (error) {
     onError?.('persist-preferences', error);
   }
+}
+
+function routeEndpointKey(endpoint: string) {
+  const raw = endpoint.trim();
+  if (!raw || raw.startsWith('relay:') || raw.startsWith('rtc-')) {
+    return '';
+  }
+  try {
+    const parsed = raw.includes('://') ? new URL(raw) : new URL(`ws://${raw}`);
+    return `${parsed.hostname.toLowerCase()}:${parsed.port || '3333'}`;
+  } catch {
+    return raw.toLowerCase();
+  }
+}
+
+function manifestEndpointKey(manifestUrl: string) {
+  try {
+    const parsed = new URL(manifestUrl);
+    return `${parsed.hostname.toLowerCase()}:${parsed.port || (parsed.protocol === 'https:' ? '443' : '80')}`;
+  } catch {
+    return '';
+  }
+}
+
+function isTailscaleHost(hostname: string) {
+  const host = hostname.trim().toLowerCase();
+  if (host.endsWith('.ts.net') || host.includes('tailnet')) {
+    return true;
+  }
+  const parts = host.split('.').map((part) => Number.parseInt(part, 10));
+  return parts.length === 4
+    && parts.every((part) => Number.isFinite(part) && part >= 0 && part <= 255)
+    && parts[0] === 100
+    && parts[1] >= 64
+    && parts[1] <= 127;
+}
+
+function resolveRouteAwareManifestUrl(
+  preferences: AppUpdatePreferences,
+  route: AppUpdateRouteSnapshot | undefined,
+  candidates: AppUpdateManifestCandidate[] | undefined,
+) {
+  const persistedUrl = preferences.manifestUrl.trim();
+  if (
+    persistedUrl
+    && (preferences.manifestSource === 'user-saved' || preferences.manifestSource === 'manual-override')
+  ) {
+    return persistedUrl;
+  }
+  if (!route || !candidates?.length) {
+    return route ? '' : persistedUrl;
+  }
+
+  if (route.resolvedPath === 'rtc-relay') {
+    return candidates.find((candidate) => candidate.manifestSource === 'relay-injected')?.manifestUrl.trim() || '';
+  }
+
+  const endpointKey = routeEndpointKey(route.resolvedEndpoint || '');
+  if (endpointKey) {
+    const exact = candidates.find((candidate) => manifestEndpointKey(candidate.manifestUrl) === endpointKey);
+    if (exact) {
+      return exact.manifestUrl.trim();
+    }
+  }
+
+  if (route.resolvedPath === 'tailscale') {
+    return candidates.find((candidate) => {
+      try {
+        return isTailscaleHost(new URL(candidate.manifestUrl).hostname);
+      } catch {
+        return false;
+      }
+    })?.manifestUrl.trim() || '';
+  }
+
+  return '';
 }
 
 export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
@@ -171,8 +258,15 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
       return snapshot;
     },
 
-    async checkForUpdates(options?: { manual?: boolean; manifestUrlOverride?: string }): Promise<AppUpdateCheckResult> {
-      const manifestUrl = (options?.manifestUrlOverride || snapshot.preferences.manifestUrl).trim();
+    async checkForUpdates(options?: AppUpdateCheckOptions): Promise<AppUpdateCheckResult> {
+      const manifestUrl = (
+        options?.manifestUrlOverride?.trim()
+        || resolveRouteAwareManifestUrl(
+          snapshot.preferences,
+          options?.activeSessionRoute,
+          options?.manifestCandidates,
+        )
+      ).trim();
       if (!manifestUrl) {
         setSnapshot((current) => ({
           ...current,
@@ -229,6 +323,7 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
         setSnapshot((current) => ({
           ...current,
           preferences: nextPreferences,
+          activeManifestUrl: manifestUrl,
           latestManifest: resolvedManifest,
           availableManifest:
             updateAvailable && suppressedReason === 'none'
@@ -327,7 +422,7 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
       }));
 
       try {
-        const apkUrl = new URL(entry.apkUrl, snapshot.preferences.manifestUrl || entry.apkUrl).toString();
+        const apkUrl = new URL(entry.apkUrl, snapshot.activeManifestUrl || snapshot.preferences.manifestUrl || entry.apkUrl).toString();
         const result = await deps.downloadRollbackApk({
           url: apkUrl,
           sha256: entry.sha256,
@@ -350,7 +445,7 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
           lastError: error instanceof Error ? error.message : '回退到上一版本失败',
           updateStage: 'failed',
           lastInstallContext: {
-            manifestUrl: snapshot.preferences.manifestUrl,
+          manifestUrl: snapshot.activeManifestUrl || snapshot.preferences.manifestUrl,
             apkUrl: entry.apkUrl,
             versionCode: entry.versionCode,
             versionName: entry.versionName,
@@ -408,7 +503,7 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
           lastError: error instanceof Error ? error.message : '回滚失败',
           updateStage: 'failed',
           lastInstallContext: {
-            manifestUrl: snapshot.preferences.manifestUrl,
+          manifestUrl: snapshot.activeManifestUrl || snapshot.preferences.manifestUrl,
             apkUrl: backup.filePath,
             capturedAt: deps.now(),
             reason: error instanceof Error ? error.message : '回滚失败',
@@ -436,17 +531,18 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
       }
 
       let installTarget: AppUpdateManifest;
+      const activeManifestUrl = snapshot.activeManifestUrl || snapshot.preferences.manifestUrl;
       if (manifest) {
         installTarget = {
           ...manifest,
-          apkUrl: new URL(manifest.apkUrl, snapshot.preferences.manifestUrl || manifest.apkUrl).toString(),
+          apkUrl: new URL(manifest.apkUrl, snapshot.activeManifestUrl || snapshot.preferences.manifestUrl || manifest.apkUrl).toString(),
         };
         setSnapshot((current) => ({
           ...current,
           latestManifest: installTarget,
           availableManifest: installTarget,
           lastInstallContext: {
-            manifestUrl: snapshot.preferences.manifestUrl,
+            manifestUrl: snapshot.activeManifestUrl || snapshot.preferences.manifestUrl,
             apkUrl: installTarget.apkUrl,
             versionCode: installTarget.versionCode,
             versionName: installTarget.versionName,
@@ -455,7 +551,7 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
           },
         }));
       } else {
-        if (!snapshot.preferences.manifestUrl.trim()) {
+        if (!activeManifestUrl.trim()) {
           setSnapshot((current) => ({
             ...current,
             lastError: '未配置升级 manifest URL',
@@ -471,7 +567,7 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
         }));
 
         try {
-          const response = await deps.fetchFn(snapshot.preferences.manifestUrl, {
+          const response = await deps.fetchFn(activeManifestUrl, {
             cache: 'no-store',
             headers: { Accept: 'application/json' },
           });
@@ -486,7 +582,7 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
 
           installTarget = {
             ...payload,
-            apkUrl: new URL(payload.apkUrl, snapshot.preferences.manifestUrl).toString(),
+            apkUrl: new URL(payload.apkUrl, activeManifestUrl).toString(),
           };
           if (
             installTarget.versionCode !== target.versionCode
@@ -500,7 +596,7 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
             latestManifest: installTarget,
             availableManifest: installTarget,
             lastInstallContext: {
-              manifestUrl: snapshot.preferences.manifestUrl,
+              manifestUrl: activeManifestUrl,
               apkUrl: installTarget.apkUrl,
               versionCode: installTarget.versionCode,
               versionName: installTarget.versionName,
@@ -514,7 +610,7 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
             lastError: error instanceof Error ? error.message : '升级清单复核失败',
             updateStage: 'failed',
             lastInstallContext: {
-              manifestUrl: snapshot.preferences.manifestUrl,
+            manifestUrl: snapshot.activeManifestUrl || snapshot.preferences.manifestUrl,
               apkUrl: target.apkUrl,
               versionCode: target.versionCode,
               versionName: target.versionName,
@@ -537,7 +633,7 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
           lastError: '当前环境不支持应用内安装',
           updateStage: 'failed',
           lastInstallContext: {
-            manifestUrl: snapshot.preferences.manifestUrl,
+            manifestUrl: activeManifestUrl,
             apkUrl: target.apkUrl,
             versionCode: target.versionCode,
             versionName: target.versionName,
@@ -620,7 +716,7 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
           lastError: error instanceof Error ? error.message : '下载或安装升级包失败',
           updateStage: 'failed',
           lastInstallContext: {
-            manifestUrl: snapshot.preferences.manifestUrl,
+            manifestUrl: activeManifestUrl,
             apkUrl: installTarget?.apkUrl || target.apkUrl,
             versionCode: installTarget?.versionCode || target.versionCode,
             versionName: installTarget?.versionName || target.versionName,

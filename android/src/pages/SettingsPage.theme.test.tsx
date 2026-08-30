@@ -409,14 +409,14 @@ describe('SettingsPage terminal theme selection', () => {
     expect(screen.queryByPlaceholderText('https://your-relay.example.com/relay/')).toBeNull();
   });
 
-  it('offers only the relay public update manifest, never a direct daemon address', () => {
+  it('preserves Relay, Tailscale, and LAN update manifest candidates', () => {
     const onUpdatePreferencesChange = vi.fn();
 
     render(
       <SettingsPage
         settings={{
           ...baseSettings,
-          targetHost: '100.66.1.82',
+          targetHost: '192.168.0.3',
           targetPort: 3333,
           servers: [{
             id: 'mac-studio-direct',
@@ -472,7 +472,8 @@ describe('SettingsPage terminal theme selection', () => {
     );
 
     expect(screen.getByRole('button', { name: '使用 Relay 公网' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: '使用 Mac Studio' })).toBeNull();
+    expect(screen.getByRole('button', { name: '使用 Mac Studio' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '使用当前 daemon 地址' })).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: '使用 Relay 公网' }));
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -481,6 +482,51 @@ describe('SettingsPage terminal theme selection', () => {
       manifestUrl: 'https://relay.codewhisper.cc:18443/relay/updates/latest.json',
       manifestSource: 'relay-injected',
     }));
+  });
+
+  it('keeps a Tailscale and LAN candidate selectable without Relay', () => {
+    render(
+      <SettingsPage
+        settings={{
+          ...baseSettings,
+          targetHost: '192.168.0.3',
+          targetPort: 3333,
+          servers: [
+            {
+              id: 'tailscale',
+              name: 'Tailscale daemon',
+              targetHost: '100.66.1.82',
+              targetPort: 3333,
+              authToken: 'token',
+            },
+          ],
+        }}
+        currentVersionName="0.1.1.1590"
+        currentVersionCode={1011590}
+        updatePreferences={{
+          manifestUrl: '',
+          manifestSource: 'none',
+          autoCheckOnLaunch: false,
+          ignoreUntilManualCheck: false,
+        }}
+        latestManifest={null}
+        updateChecking={false}
+        updateInstalling={false}
+        updateError={null}
+        hasNewVersion={false}
+        hasUpdateIgnorePolicy={false}
+        onSave={vi.fn()}
+        onUpdatePreferencesChange={vi.fn()}
+        onCheckForUpdate={vi.fn()}
+        onInstallUpdate={vi.fn()}
+        onResetUpdateIgnorePolicy={vi.fn()}
+        onBack={vi.fn()}
+        renderSettingsUpdate={(props) => <AppUpdateSection {...props} />}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: '使用 Tailscale daemon' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '使用当前 daemon 地址' })).toBeTruthy();
   });
 
   it('resyncs an in-place Relay preference update instead of saving a stale LAN draft', () => {
@@ -533,7 +579,7 @@ describe('SettingsPage terminal theme selection', () => {
     );
 
     const view = render(renderPage());
-    expect(screen.queryByRole('button', { name: '使用当前 daemon 地址' })).toBeNull();
+    expect(screen.getByRole('button', { name: '使用当前 daemon 地址' })).toBeTruthy();
 
     updatePreferences.manifestUrl = 'https://relay.codewhisper.cc:18443/relay/updates/latest.json';
     updatePreferences.manifestSource = 'relay-injected';
@@ -544,6 +590,77 @@ describe('SettingsPage terminal theme selection', () => {
     expect(onUpdatePreferencesChange).toHaveBeenCalledWith(expect.objectContaining({
       manifestUrl: 'https://relay.codewhisper.cc:18443/relay/updates/latest.json',
       manifestSource: 'relay-injected',
+    }));
+  });
+
+  it('preserves an explicitly selected direct candidate across Relay refresh', () => {
+    const onUpdatePreferencesChange = vi.fn();
+    const relaySettings = {
+      relayBaseUrl: 'https://relay.codewhisper.cc:18443/relay/',
+      accessToken: 'token',
+      userId: 'u1',
+      username: 'jason',
+      deviceId: 'tablet-1',
+      deviceName: 'Jason Tablet',
+      platform: 'android' as const,
+      wsDevicesUrl: 'wss://relay.codewhisper.cc:18443/relay/ws/devices',
+      wsHostUrl: 'wss://relay.codewhisper.cc:18443/relay/ws/host',
+      wsClientUrl: 'wss://relay.codewhisper.cc:18443/relay/ws/client',
+      turnUrl: '',
+      turnUsername: '',
+      turnCredential: '',
+      updatedAt: 1,
+    };
+    const updatePreferences: AppUpdatePreferences = {
+      manifestUrl: '',
+      manifestSource: 'none',
+      autoCheckOnLaunch: false,
+      ignoreUntilManualCheck: false,
+    };
+    const renderPage = (nextRelay = relaySettings) => (
+      <SettingsPage
+        settings={{
+          ...baseSettings,
+          targetHost: '192.168.0.3',
+          servers: [{
+            id: 'tailscale',
+            name: 'Tailscale daemon',
+            targetHost: '100.66.1.82',
+            targetPort: 3333,
+            authToken: 'token',
+          }],
+          traversalRelay: nextRelay,
+        }}
+        currentVersionName="0.1.1.1590"
+        currentVersionCode={1011590}
+        updatePreferences={updatePreferences}
+        latestManifest={null}
+        updateChecking={false}
+        updateInstalling={false}
+        updateError={null}
+        hasNewVersion={false}
+        hasUpdateIgnorePolicy={false}
+        onSave={vi.fn()}
+        onUpdatePreferencesChange={onUpdatePreferencesChange}
+        onCheckForUpdate={vi.fn()}
+        onInstallUpdate={vi.fn()}
+        onResetUpdateIgnorePolicy={vi.fn()}
+        onBack={vi.fn()}
+        renderSettingsUpdate={(props) => <AppUpdateSection {...props} />}
+      />
+    );
+
+    const view = render(renderPage());
+    fireEvent.click(screen.getByRole('button', { name: '使用 Tailscale daemon' }));
+    expect(screen.getByDisplayValue('http://100.66.1.82:3333/updates/latest.json')).toBeTruthy();
+
+    view.rerender(renderPage({ ...relaySettings, updatedAt: 2 }));
+
+    expect(screen.getByDisplayValue('http://100.66.1.82:3333/updates/latest.json')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(onUpdatePreferencesChange).toHaveBeenCalledWith(expect.objectContaining({
+      manifestUrl: 'http://100.66.1.82:3333/updates/latest.json',
+      manifestSource: 'server-connected',
     }));
   });
 

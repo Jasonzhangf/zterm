@@ -38,7 +38,7 @@ import {
   buildRemoteWindowVideoBitrateConfig,
 } from '../lib/remote-window-video-quality';
 import type { RemoteWindowVideoBitratePreset } from '../lib/types';
-import { deriveRelayUpdateManifestUrl } from '../lib/app-update-relay-manifest';
+import { buildAppUpdateManifestCandidates } from '../lib/app-update-relay-manifest';
 
 interface SettingsPageProps {
   settings: BridgeSettings;
@@ -54,7 +54,10 @@ interface SettingsPageProps {
   onSave: (settings: BridgeSettings) => void;
   onRelaySettingsChange?: (settings: BridgeSettings['traversalRelay']) => void;
   onUpdatePreferencesChange: (next: AppUpdatePreferences) => void;
-  onCheckForUpdate: (next: AppUpdatePreferences) => void;
+  onCheckForUpdate: (
+    next: AppUpdatePreferences,
+    manifestCandidates: AppUpdateManifestCandidate[],
+  ) => void;
   onInstallUpdate: () => void;
   onResetUpdateIgnorePolicy: () => void;
   rollbackBackup?: AppUpdateRollbackBackup | null;
@@ -70,40 +73,6 @@ interface SettingsPageProps {
   onTerminalShellSkinChange?: (skin: BridgeSettings['terminalShellSkin']) => void;
   renderSettingsUpdate?: SettingsUpdateUiSlot['render'];
   onBack: () => void;
-}
-
-function addManifestCandidate(
-  candidates: AppUpdateManifestCandidate[],
-  seenUrls: Set<string>,
-  candidate: AppUpdateManifestCandidate,
-) {
-  const url = candidate.manifestUrl.trim();
-  if (!url || seenUrls.has(url)) {
-    return;
-  }
-  seenUrls.add(url);
-  candidates.push({ ...candidate, manifestUrl: url });
-}
-
-function buildAppUpdateManifestCandidates(settings: BridgeSettings): AppUpdateManifestCandidate[] {
-  const candidates: AppUpdateManifestCandidate[] = [];
-  const seenUrls = new Set<string>();
-  const relayWsHostUrl = settings.traversalRelay?.wsHostUrl?.trim() || '';
-
-  if (relayWsHostUrl) {
-    try {
-      addManifestCandidate(candidates, seenUrls, {
-        id: 'relay-public',
-        label: 'Relay 公网',
-        manifestUrl: deriveRelayUpdateManifestUrl(relayWsHostUrl),
-        manifestSource: 'relay-injected',
-      });
-    } catch (error) {
-      console.warn('[SettingsPage] Failed to derive relay update manifest URL:', error);
-    }
-  }
-
-  return candidates;
 }
 
 function ToggleGlyph({ checked }: { checked: boolean }) {
@@ -189,14 +158,14 @@ export function SettingsPage({
     typeof window !== 'undefined' && window.localStorage.getItem('zterm:remote-window:touch-scroll-inverted-v1') === 'true'
   ));
   const livePreviewPatchRef = useRef<Partial<Pick<BridgeSettings, 'terminalThemeId' | 'terminalShellSkin'>> | null>(null);
+  const updateDraftEditedRef = useRef(false);
   const defaultServer = useMemo(() => getDefaultBridgeServer(draft), [draft]);
   const manifestCandidates = useMemo(() => buildAppUpdateManifestCandidates(draft), [draft]);
-  const suggestedManifestUrl = useMemo(
-    () => manifestCandidates.find((candidate) => candidate.manifestSource === 'relay-injected')?.manifestUrl || '',
-    [manifestCandidates],
-  );
   useEffect(() => {
     setUpdateDraft((current) => {
+      if (updateDraftEditedRef.current) {
+        return current;
+      }
       if (
         current.manifestUrl.trim()
         && current.manifestSource === 'user-saved'
@@ -314,10 +283,12 @@ export function SettingsPage({
             updateError,
             hasNewVersion,
             hasUpdateIgnorePolicy,
-            suggestedManifestUrl,
             manifestCandidates,
-            onUpdateDraftChange: (updater) => setUpdateDraft((current) => updater(current)),
-            onCheckForUpdate: () => onCheckForUpdate(updateDraft),
+            onUpdateDraftChange: (updater) => {
+              updateDraftEditedRef.current = true;
+              setUpdateDraft((current) => updater(current));
+            },
+            onCheckForUpdate: () => onCheckForUpdate(updateDraft, manifestCandidates),
             onInstallUpdate,
             onResetUpdateIgnorePolicy,
             onExportConfig,

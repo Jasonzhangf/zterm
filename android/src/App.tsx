@@ -32,6 +32,8 @@ import { updateBridgeSettingsTerminalWidthMode } from './lib/terminal-width-mode
 import { upsertBridgeServer } from './lib/bridge-settings';
 import { applyTraversalRelaySettings } from './lib/traversal-relay-client';
 import { APP_VERSION, APP_VERSION_CODE } from './lib/app-version';
+import { buildAppUpdateManifestCandidates } from './lib/app-update-relay-manifest';
+import type { AppUpdateManifestCandidate, AppUpdateRouteSnapshot } from './lib/app-update';
 import { registerClientDebugSnapshotSource } from './lib/client-debug-snapshot';
 import { openConnectionsPage, openTerminalPage } from './lib/page-state';
 import { ConnectionsPage } from './pages/ConnectionsPage';
@@ -132,6 +134,8 @@ export function AppContent({
   renderTerminalShell,
 }: AppContentProps) {
   const [pendingPaneAttachIntent, setPendingPaneAttachIntent] = useState<{ sessionIds: string[]; paneId: string; nonce: number } | null>(null);
+  const appUpdateRouteRef = useRef<AppUpdateRouteSnapshot | undefined>(undefined);
+  const appUpdateManifestCandidatesRef = useRef<AppUpdateManifestCandidate[]>([]);
   const [appDialog, setAppDialog] = useState<{
     tone: 'info' | 'success' | 'warning' | 'error';
     title: string;
@@ -168,7 +172,10 @@ export function AppContent({
     isRollingBack,
     rollbackToPreviousVersion,
     rollbackToPreviousEntry,
-  } = useAppUpdate();
+  } = useAppUpdate({
+    getActiveSessionRoute: () => appUpdateRouteRef.current,
+    getManifestCandidates: () => appUpdateManifestCandidatesRef.current,
+  });
 
   const {
     exporting: configExporting,
@@ -519,6 +526,15 @@ export function AppContent({
     ),
   });
 
+  appUpdateRouteRef.current = terminalActiveSession
+    ? {
+        resolvedPath: terminalActiveSession.resolvedPath || null,
+        resolvedRelayTransport: terminalActiveSession.resolvedRelayTransport || null,
+        resolvedEndpoint: terminalActiveSession.resolvedEndpoint || null,
+      }
+    : undefined;
+  appUpdateManifestCandidatesRef.current = buildAppUpdateManifestCandidates(bridgeSettings);
+
   const markRuntimeSessionEntered = useCallback((sessionId: string) => {
     const session = runtimeRefs.sessionsRef.current.find((candidate) => candidate.id === sessionId) || null;
     if (!session || session.state === 'closed' || !session.sessionName.trim()) {
@@ -807,9 +823,14 @@ export function AppContent({
               setBridgeSettings((current) => applyTraversalRelaySettings(current, relaySettings));
             }}
             onUpdatePreferencesChange={setAppUpdatePreferences}
-            onCheckForUpdate={(nextPreferences) => {
+            onCheckForUpdate={(nextPreferences, manifestCandidates) => {
               setAppUpdatePreferences(nextPreferences);
-              void checkForUpdates({ manual: true, manifestUrlOverride: nextPreferences.manifestUrl });
+              void checkForUpdates({
+                manual: true,
+                manifestUrlOverride: nextPreferences.manifestUrl,
+                activeSessionRoute: appUpdateRouteRef.current,
+                manifestCandidates,
+              });
             }}
             onInstallUpdate={() => {
               void startUpdate();

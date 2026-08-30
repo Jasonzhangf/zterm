@@ -337,7 +337,6 @@ describe('plugin host runtime', () => {
       updateError: null,
       hasNewVersion: false,
       hasUpdateIgnorePolicy: false,
-      suggestedManifestUrl: '',
       onUpdateDraftChange: () => undefined,
       onCheckForUpdate: () => undefined,
       onInstallUpdate: () => undefined,
