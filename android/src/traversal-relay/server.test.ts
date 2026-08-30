@@ -93,6 +93,25 @@ describe('traversal relay server directory contract', () => {
     );
   });
 
+  it('replaces the authenticated stable host generation without letting the old socket retire the new host', () => {
+    const source = readServerSource();
+    const closeHostStart = source.indexOf('function closeHost');
+    const registerHostStart = source.indexOf('function registerHost');
+    const registerHostEnd = source.indexOf('function registerClient');
+    const closeHostSource = source.slice(closeHostStart, registerHostStart);
+    const hostSource = source.slice(registerHostStart, registerHostEnd);
+
+    expect(hostSource).not.toContain('host ${hostId} already connected');
+    expect(hostSource).toContain('const replacedHost = hosts.get(key)');
+    expect(hostSource).toContain("replacedHost.socket.close(1012, 'host relay replaced')");
+    expect(hostSource.indexOf('hosts.set(key, host)')).toBeLessThan(
+      hostSource.indexOf("replacedHost.socket.close(1012, 'host relay replaced')"),
+    );
+    expect(hostSource).toContain('if (hosts.get(key) !== host)');
+    expect(closeHostSource).toContain('if (hosts.get(key) !== host)');
+    expect(closeHostSource).toContain('closeHostPeers(host.userId, host.hostId, reason)');
+  });
+
   it('keeps client relay peers idle for 30 minutes after signaling close before notifying the daemon', () => {
     const source = readServerSource();
 
@@ -126,7 +145,7 @@ describe('traversal relay server directory contract', () => {
     expect(source).toContain('function bindClientPeerSocket');
     expect(source).toContain("previousSocket.close(1000, 'relay client socket replaced')");
     expect(source).toContain('if (client.socket !== ws || !clients.has(client.peerId))');
-    expect(source).toContain('clearIdleClientPeersForHost(host.userId, host.hostId, reason)');
+    expect(source).toContain('clearIdleClientPeersForHost(userId, hostId, reason)');
   });
 
   it('lets relay resume renegotiate the same peer id instead of ignoring a second rtc-init', () => {

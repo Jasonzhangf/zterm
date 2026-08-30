@@ -969,9 +969,10 @@ function clearIdleClientPeersForHost(userId: string, hostId: string, reason: str
 
 function closeHost(host: RelayHostConnection, reason: string) {
   const key = hostKey(host.userId, host.hostId);
-  if (hosts.get(key)?.socket === host.socket) {
-    hosts.delete(key);
+  if (hosts.get(key) !== host) {
+    return;
   }
+  hosts.delete(key);
   const hasOtherDaemon = removeLivePresence(liveDaemonDevices, key, host.userId, host.deviceId);
   store.setDaemonConnected({
     userId: host.userId,
@@ -981,12 +982,16 @@ function closeHost(host: RelayHostConnection, reason: string) {
     connected: hasOtherDaemon,
   });
   broadcastDevices(host.userId);
+  closeHostPeers(host.userId, host.hostId, reason);
+}
+
+function closeHostPeers(userId: string, hostId: string, reason: string) {
   for (const client of [...clients.values()]) {
-    if (client.userId === host.userId && client.hostId === host.hostId) {
+    if (client.userId === userId && client.hostId === hostId) {
       closeClientPeer(client.peerId, reason);
     }
   }
-  clearIdleClientPeersForHost(host.userId, host.hostId, reason);
+  clearIdleClientPeersForHost(userId, hostId, reason);
 }
 
 function registerHost(ws: WebSocket, request: IncomingMessage, url: URL) {
@@ -1005,11 +1010,7 @@ function registerHost(ws: WebSocket, request: IncomingMessage, url: URL) {
   }
 
   const key = hostKey(user.id, hostId);
-  if (hosts.has(key)) {
-    ws.send(JSON.stringify({ type: 'relay-error', reason: `host ${hostId} already connected` }));
-    ws.close(4009, 'host already connected');
-    return;
-  }
+  const replacedHost = hosts.get(key);
 
   // A daemon restart can generate a new device id while the old persisted
   // device row still says the same host is online. Host identity is the
@@ -1030,6 +1031,13 @@ function registerHost(ws: WebSocket, request: IncomingMessage, url: URL) {
     daemonVersion,
   };
   hosts.set(key, host);
+  if (replacedHost) {
+    removeLivePresence(liveDaemonDevices, key, replacedHost.userId, replacedHost.deviceId);
+    closeHostPeers(replacedHost.userId, replacedHost.hostId, 'host relay replaced');
+    if (replacedHost.socket.readyState < WebSocket.CLOSING) {
+      replacedHost.socket.close(1012, 'host relay replaced');
+    }
+  }
   addLivePresence(liveDaemonDevices, key, user.id, deviceId);
   store.setDaemonConnected({
     userId: user.id,
@@ -1046,6 +1054,9 @@ function registerHost(ws: WebSocket, request: IncomingMessage, url: URL) {
 
   ws.on('message', (raw) => {
     try {
+      if (hosts.get(key) !== host) {
+        return;
+      }
       const envelope = JSON.parse(String(raw)) as RelayHostEnvelope;
       if (envelope.type === 'directory-update') {
         validateRelayDirectoryUpdatePayload(envelope.directory);

@@ -387,6 +387,101 @@ async function connectDeviceStream(accessToken: string) {
   });
 }
 
+async function connectReplacementHost(accessToken: string, hostId: string, deviceId: string) {
+  return await new Promise<WebSocket>((resolve, reject) => {
+    const socket = new WebSocket(
+      `ws://127.0.0.1:${relayPort}/ws/host?token=${encodeURIComponent(accessToken)}&hostId=${encodeURIComponent(hostId)}&deviceId=${encodeURIComponent(deviceId)}&deviceName=${encodeURIComponent(deviceId)}&platform=smoke&appVersion=smoke&daemonVersion=smoke`,
+    );
+    const timeout = setTimeout(() => reject(new Error(`replacement host ${deviceId} ready timeout`)), 10_000);
+    timeout.unref?.();
+    socket.on('message', (raw) => {
+      const envelope = JSON.parse(String(raw)) as { type?: string; reason?: string };
+      if (envelope.type === 'relay-error') {
+        clearTimeout(timeout);
+        reject(new Error(envelope.reason || 'replacement host relay error'));
+        return;
+      }
+      if (envelope.type === 'relay-ready') {
+        clearTimeout(timeout);
+        resolve(socket);
+      }
+    });
+    socket.on('error', () => {
+      clearTimeout(timeout);
+      reject(new Error(`replacement host ${deviceId} websocket error`));
+    });
+  });
+}
+
+async function waitForReplacementDirectory(
+  accessToken: string,
+  hostId: string,
+  deviceId: string,
+  sessionName: string,
+  timeoutMs = 10_000,
+) {
+  const deadline = Date.now() + timeoutMs;
+  let lastDirectory: any = null;
+  while (Date.now() < deadline) {
+    const response = await fetch(`${relayUrl}/api/directory`, {
+      headers: { authorization: `Bearer ${accessToken}` },
+    });
+    const payload = await response.json() as { directory?: any };
+    lastDirectory = payload.directory;
+    const matching = Array.isArray(payload.directory?.devices)
+      ? payload.directory.devices.filter((device: any) => device?.daemon?.hostId === hostId)
+      : [];
+    if (
+      matching.length === 1
+      && matching[0]?.deviceId === deviceId
+      && matching[0]?.daemon?.presence?.connected === true
+      && matching[0]?.daemon?.sessions?.length === 1
+      && matching[0]?.daemon?.sessions?.[0]?.name === sessionName
+    ) {
+      return matching[0];
+    }
+    await delay(100);
+  }
+  throw new Error(`replacement directory timeout: ${JSON.stringify(lastDirectory)}`);
+}
+
+async function hostReplacementSmoke(accessToken: string) {
+  const hostId = `${relayHostId}-replace`;
+  const oldDeviceId = `${relayDeviceId}-old`;
+  const newDeviceId = `${relayDeviceId}-new`;
+  const oldSession = `${tmuxSession}-old`;
+  const newSession = `${tmuxSession}-new`;
+  const oldSocket = await connectReplacementHost(accessToken, hostId, oldDeviceId);
+  const oldPublishedAt = new Date().toISOString();
+  oldSocket.send(JSON.stringify({
+    type: 'directory-update',
+    directory: { endpoints: [], sessions: [{ name: oldSession, updatedAt: oldPublishedAt }], publishedAt: oldPublishedAt },
+  }));
+  await waitForReplacementDirectory(accessToken, hostId, oldDeviceId, oldSession);
+
+  const oldClosed = new Promise<{ code: number; reason: string }>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('replaced host close timeout')), 10_000);
+    timeout.unref?.();
+    oldSocket.once('close', (code, reason) => {
+      clearTimeout(timeout);
+      resolve({ code, reason: String(reason) });
+    });
+  });
+  const newSocket = await connectReplacementHost(accessToken, hostId, newDeviceId);
+  const oldClose = await oldClosed;
+  if (oldClose.code !== 1012 || oldClose.reason !== 'host relay replaced') {
+    throw new Error(`unexpected replaced host close: ${JSON.stringify(oldClose)}`);
+  }
+  const newPublishedAt = new Date().toISOString();
+  newSocket.send(JSON.stringify({
+    type: 'directory-update',
+    directory: { endpoints: [], sessions: [{ name: newSession, updatedAt: newPublishedAt }], publishedAt: newPublishedAt },
+  }));
+  const directoryDevice = await waitForReplacementDirectory(accessToken, hostId, newDeviceId, newSession);
+  closeResource('replacement host socket', () => newSocket.close());
+  return { hostId, oldDeviceId, newDeviceId, oldClose, directoryDevice };
+}
+
 async function rtcClientSmoke(accessToken: string) {
   return await new Promise<Record<string, unknown>>((resolve, reject) => {
     const signalSocket = new WebSocket(
@@ -544,6 +639,7 @@ async function main() {
 
     const accessToken = await registerAndLogin();
     globalAccessToken = accessToken;
+    const hostReplacement = await hostReplacementSmoke(accessToken);
     const deviceStream = await connectDeviceStream(accessToken);
     const daemonRegistration = await waitForDaemonRelayRegistration();
     const accountDirectory = await waitForAccountDirectory();
@@ -560,6 +656,7 @@ async function main() {
       relayClientDeviceId,
       relayUsername,
       tmuxSession,
+      hostReplacement,
       daemonRegistration,
       accountDirectory,
       deviceStreamSnapshot: deviceStream.firstSnapshot,

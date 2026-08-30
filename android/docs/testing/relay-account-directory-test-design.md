@@ -28,6 +28,10 @@ daemon tmux truth
   `directory-update` replaces the previous daemon `endpoints` and `sessions`
   snapshot atomically. Historical snapshots must never be unioned into current
   daemon truth.
+- One account may contain multiple independent daemon entities, and each daemon
+  independently owns its own tmux session catalog. Replacement of one exact
+  `(accountId, hostId)` generation must not alter another daemon, another
+  daemon's sessions, or any client transport attached to that other daemon.
 - Android owns one confirmed Relay directory generation. `/api/auth/me` refresh
   and `directory-snapshot` replace the complete remote projection; Settings,
   Home, Session Picker, and Drawer consume that same projection instead of
@@ -54,6 +58,12 @@ daemon tmux truth
 - `src/traversal-relay/server.test.ts`
   - `GET /api/directory` requires auth and isolates users.
   - `/ws/host` accepts `directory-update` only from authenticated daemon.
+  - a newer authenticated `/ws/host` socket for the same account + stable
+    `hostId` atomically replaces the old socket, retires old peer leases, and
+    keeps the new daemon online when the old socket's delayed close arrives.
+  - replaced host generations cannot publish late directory updates or close
+    peers owned by the current host generation; different accounts and
+    different `hostId` values remain independent.
   - device stream emits `directory-snapshot` after update.
   - invalid directory payload emits relay-error, not success-shaped empty directory.
   - `/updates/latest.json` and `/updates/<apk>` are served from the relay updates directory, preserving manifest `apkUrl` semantics and returning explicit 404 for missing assets.
@@ -132,6 +142,16 @@ daemon tmux truth
 - Negative: sessions/endpoints present only in the old registration must not
   survive the replacement snapshot and must not reappear from any client's
   local hosts, bridge presets, or session history.
+- Positive: a fresh authenticated host control socket for the same account and
+  stable `hostId` receives `relay-ready`, replaces the prior socket, and may
+  publish the next complete directory generation.
+- Negative: the replaced socket's queued message, error, or close callback must
+  not overwrite the new directory generation, mark the replacement offline,
+  remove it from the host registry, or close peers created after replacement.
+- Positive: two different `hostId` values under the same account stay online
+  concurrently and each publishes/connects its own independent session list.
+- Negative: replacing, closing, or publishing one daemon must not disable,
+  merge, idle, or remove the other daemon or any of its sessions.
 - Positive: two clients with deliberately different local caches render the
   same Relay account daemon/session rows after one confirmed directory refresh.
 - Negative: opening Settings must not copy a Relay endpoint into a local bridge
