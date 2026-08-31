@@ -8,13 +8,11 @@ import type {
   RemoteWindowStreamStartedPayload,
   RemoteWindowStreamStartedOfferV2Payload,
   RemoteWindowStreamAnswerV2Payload,
-  RemoteWindowStreamStartRequestPayload,
   RemoteWindowStreamStartRequestV2Payload,
   RemoteWindowStreamStatusPayload,
   RemoteWindowStreamTargetManifest,
   RemoteWindowStreamErrorPayload,
   RemoteWindowStreamRequestPayload,
-  RemoteWindowStreamRtcDescription,
   RemoteWindowStreamQualityRequestPayload,
   RemoteWindowStreamQualityResultPayload,
   RemoteWindowStreamPurpose,
@@ -515,9 +513,8 @@ export function createRemoteWindowMessageRuntime(input?: {
       revision?: number;
       target: RemoteWindowStreamTargetManifest;
       purpose?: RemoteWindowStreamPurpose;
-      mediaPlan: RemoteWindowStreamStartRequestPayload['mediaPlan'];
-      mediaPlanVersion: 1 | 2;
-      offer?: RemoteWindowStreamRtcDescription;
+      mediaPlan: RemoteWindowStreamStartRequestV2Payload['mediaPlan'];
+      mediaPlanVersion: 2;
       iceServers?: Array<Record<string, unknown>>;
       videoProfile: RemoteWindowVideoProfile;
       sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
@@ -544,37 +541,18 @@ export function createRemoteWindowMessageRuntime(input?: {
         armPendingStreamTimeout(requestId);
 
         try {
-          const isV2 = options.mediaPlanVersion === 2;
-          if (!isV2 && !options.offer) {
-            throw new Error('Remote window v1 stream start requires an offer');
-          }
-          sendClientMessage(targetSessionId, options.ws, options.sendSocketPayload, isV2
-            ? {
-              type: 'remote-window-stream-start-v2-request',
-              payload: {
-                requestId,
-                streamId,
-                ...(options.purpose ? { purpose: options.purpose } : {}),
-                mediaPlan: options.mediaPlan,
-                mediaPlanVersion: 2,
-                target: options.target,
-                ...(options.iceServers ? { iceServers: options.iceServers } : {}),
-                videoProfile: options.videoProfile,
-              } satisfies RemoteWindowStreamStartRequestV2Payload,
-            }
-            : {
-            type: 'remote-window-stream-start-request',
+          sendClientMessage(targetSessionId, options.ws, options.sendSocketPayload, {
+            type: 'remote-window-stream-start-v2-request',
             payload: {
               requestId,
               streamId,
               ...(options.purpose ? { purpose: options.purpose } : {}),
               mediaPlan: options.mediaPlan,
-              mediaPlanVersion: 1,
+              mediaPlanVersion: 2,
               target: options.target,
-              offer: options.offer!,
               ...(options.iceServers ? { iceServers: options.iceServers } : {}),
               videoProfile: options.videoProfile,
-            },
+            } satisfies RemoteWindowStreamStartRequestV2Payload,
           });
         } catch (error) {
           pendingStreamStarts.delete(requestId);
