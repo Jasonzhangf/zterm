@@ -429,6 +429,9 @@ export function createRemoteWindowStreamDaemonRuntime(
   });
 
   const answerKey = (streamId: string, requestId: string) => `${streamId}\u0000${requestId}`;
+  const iceGenerationKey = (streamId: string, requestId?: string) => requestId
+    ? answerKey(streamId, requestId)
+    : streamId;
 
   function waitForRemoteWindowAnswer(streamId: string, requestId: string) {
     const key = answerKey(streamId, requestId);
@@ -464,8 +467,12 @@ export function createRemoteWindowStreamDaemonRuntime(
         closedStreamIds.delete(oldestStreamId);
       }
     }
-    pendingIceCandidatesByStream.delete(streamId);
-    iceCandidateFingerprintsByStream.delete(streamId);
+    for (const key of pendingIceCandidatesByStream.keys()) {
+      if (key === streamId || key.startsWith(`${streamId}\u0000`)) pendingIceCandidatesByStream.delete(key);
+    }
+    for (const key of iceCandidateFingerprintsByStream.keys()) {
+      if (key === streamId || key.startsWith(`${streamId}\u0000`)) iceCandidateFingerprintsByStream.delete(key);
+    }
   }
 
   function cleanupStream(entry: ActiveRemoteWindowStream, reason: string) {
@@ -720,6 +727,9 @@ export function createRemoteWindowStreamDaemonRuntime(
       let videoProfile: RemoteWindowVideoProfile | null = null;
       let videoProfileWarning: string | null = null;
 
+      const initialPendingIceCandidates = [...pendingIceCandidatesByStream.entries()]
+        .filter(([key]) => key === payload.streamId || key.startsWith(`${payload.streamId}\u0000`))
+        .flatMap(([, candidates]) => candidates);
       const streamEntry: ActiveRemoteWindowStream = {
         streamId: payload.streamId,
         purpose,
@@ -752,7 +762,7 @@ export function createRemoteWindowStreamDaemonRuntime(
         focusFrameDrainScheduled: false,
         overviewFrameDrainScheduled: false,
         remoteDescriptionApplied: false,
-        pendingIceCandidates: pendingIceCandidatesByStream.get(payload.streamId) ?? [],
+        pendingIceCandidates: initialPendingIceCandidates,
         focusCaptureStartedReported: false,
         overviewCaptureStartedReported: false,
         cleanupDone: false,
@@ -764,7 +774,11 @@ export function createRemoteWindowStreamDaemonRuntime(
         continuousInputDrainScheduled: false,
         continuousInputDrainActive: false,
       };
+      pendingIceCandidatesByStream.delete(iceGenerationKey(payload.streamId, payload.requestId));
       pendingIceCandidatesByStream.delete(payload.streamId);
+      for (const key of pendingIceCandidatesByStream.keys()) {
+        if (key.startsWith(`${payload.streamId}\u0000`)) pendingIceCandidatesByStream.delete(key);
+      }
       entry = streamEntry;
       activeStreams.set(payload.streamId, streamEntry);
 
@@ -1149,23 +1163,26 @@ export function createRemoteWindowStreamDaemonRuntime(
     if (closedStreamIds.has(payload.streamId)) {
       throw candidateError('remote_window_stream_candidate_closed', `remote window ICE candidate targets a closed stream: ${payload.streamId}`);
     }
-    const fingerprints = iceCandidateFingerprintsByStream.get(payload.streamId) ?? new Set<string>();
-    if (fingerprints.has(candidateFingerprint)) {
+    const generationKey = iceGenerationKey(payload.streamId, payload.requestId);
+    const fingerprints = iceCandidateFingerprintsByStream.get(generationKey) ?? new Set<string>();
+    const streamFingerprints = iceCandidateFingerprintsByStream.get(payload.streamId);
+    if (fingerprints.has(candidateFingerprint) || streamFingerprints?.has(candidateFingerprint)) {
       throw candidateError('remote_window_stream_candidate_duplicate', `remote window ICE candidate was already received: ${payload.streamId}`);
     }
     const entry = activeStreams.get(payload.streamId);
     if (!entry || entry.cleanupDone) {
-      if (!pendingIceCandidatesByStream.has(payload.streamId) && pendingIceCandidatesByStream.size >= 32) {
+      if (!pendingIceCandidatesByStream.has(generationKey) && pendingIceCandidatesByStream.size >= 32) {
         throw candidateError('remote_window_stream_candidate_queue_full', 'remote window ICE candidate stream queue is full');
       }
-      const pending = pendingIceCandidatesByStream.get(payload.streamId) ?? [];
+      const pending = pendingIceCandidatesByStream.get(generationKey) ?? [];
       if (pending.length >= 32) {
         throw candidateError('remote_window_stream_candidate_queue_full', `remote window ICE candidate queue is full: ${payload.streamId}`);
       }
       pending.push(candidate);
-      pendingIceCandidatesByStream.set(payload.streamId, pending);
+      pendingIceCandidatesByStream.set(generationKey, pending);
       fingerprints.add(candidateFingerprint);
-      iceCandidateFingerprintsByStream.set(payload.streamId, fingerprints);
+      iceCandidateFingerprintsByStream.set(generationKey, fingerprints);
+      if (generationKey !== payload.streamId) iceCandidateFingerprintsByStream.set(payload.streamId, new Set(fingerprints));
       return true;
     }
     if (!entry.remoteDescriptionApplied) {
@@ -1174,12 +1191,14 @@ export function createRemoteWindowStreamDaemonRuntime(
       }
       entry.pendingIceCandidates.push(candidate);
       fingerprints.add(candidateFingerprint);
-      iceCandidateFingerprintsByStream.set(payload.streamId, fingerprints);
+      iceCandidateFingerprintsByStream.set(generationKey, fingerprints);
+      if (generationKey !== payload.streamId) iceCandidateFingerprintsByStream.set(payload.streamId, new Set(fingerprints));
       return true;
     }
     await entry.peerConnection.addIceCandidate(createRtcIceCandidate(candidate));
     fingerprints.add(candidateFingerprint);
-    iceCandidateFingerprintsByStream.set(payload.streamId, fingerprints);
+    iceCandidateFingerprintsByStream.set(generationKey, fingerprints);
+    if (generationKey !== payload.streamId) iceCandidateFingerprintsByStream.set(payload.streamId, new Set(fingerprints));
     flushPendingRemoteWindowVideoFrame(entry);
     return true;
   }
