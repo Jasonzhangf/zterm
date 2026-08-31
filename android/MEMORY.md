@@ -2725,3 +2725,12 @@ Tags: #remote-window-stream #composite-window-frame #out-of-display-validation #
 - Android OTA 完成标准必须绑定 installed artifact identity：在线验证所安装 APK 的 SHA-256 必须等于 canonical APK、`update-dist`、daemon update store 和 public Relay 实际下载 APK；local、Tailscale、public Relay 三通道分别执行 manifest GET、APK HEAD/GET、size/hash 校验。已验证发布 `0.1.3.2790` / `1100027900`，APK SHA-256 `a8a1cfaa4f4fba1c4682e3cbe3e5c21f7b2ac133be79840443c5646c89e87427`；单字符 observed/paint `97.6/111.8ms`，18-byte 输入 `95.8/109.7ms`，QuickBar Up/Down 清 stale focus `1.6/0.2ms`，AGY Review 无 finding。
 
 Tags: #terminal-input #mirror-scheduler #lost-wakeup #quickbar-focus #android-ime #ota-artifact-identity #real-device-evidence
+
+## 2026-08-31 Android UI/UX and motion audit
+
+- Client UI projection scope only: Connections home, Settings, tmux picker, and existing dialog motion hooks. Daemon, transport, mirror, sparse buffer, renderer truth, payloads, and runtime ownership were untouched.
+- Connections empty state now provides a clear first-server CTA and uses an SVG add icon. Settings exposes labelled back navigation, save completion feedback, and addressable group-content state. Tmux picker retains its DOM through the 280 ms exit transition. Dialog exposes its existing open/closing state. Motion remains bounded to transform/opacity and preserves the existing reduced-motion path.
+- Verification: focused UI tests 9 files / 63 tests; canonical `pnpm run build` passed with pinned AppSDK 0.1.4 after generating the missing `schedule-fire` replay evidence; detector returned `[]`; `git diff --check` passed; live Vite entry rendered updated DOM and after screenshots, with save feedback observed.
+- AGY Review task `agy-ui-ux-motion-audit-20260831` passed with zero findings. AppSDK-generated module artifacts were intentionally excluded from the UI change set.
+
+Tags: #android-ui #accessibility #motion #connections-home #settings #tmux-picker #agy-review
