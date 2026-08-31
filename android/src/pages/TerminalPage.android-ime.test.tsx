@@ -999,6 +999,110 @@ describe("TerminalPage Android IME bridge", () => {
     expect(vi.mocked(ImeAnchor.show)).toHaveBeenCalledTimes(1);
   });
 
+  it("clears stale WebView focus before handing native focus to ImeAnchor", async () => {
+    const session = makeSession("s1");
+
+    render(
+      <>
+        <div
+          data-testid="terminal-connection-status-strip"
+          role="button"
+          tabIndex={0}
+        />
+        <TerminalPage
+          sessions={[session]}
+          activeSession={session}
+          onSwitchSession={vi.fn()}
+          onMoveSession={vi.fn()}
+          onRenameSession={vi.fn()}
+          onCloseSession={vi.fn()}
+          onOpenConnections={vi.fn()}
+          onOpenQuickTabPicker={vi.fn()}
+          onResize={vi.fn()}
+          onTerminalInput={vi.fn()}
+          onTerminalViewportChange={vi.fn()}
+          quickActions={[]}
+          shortcutActions={[]}
+          sessionDraft=""
+        />
+      </>,
+    );
+
+    const statusStrip = screen.getByTestId("terminal-connection-status-strip");
+    statusStrip.focus();
+    expect(document.activeElement).toBe(statusStrip);
+
+    const focusOrder: string[] = [];
+    const nativeBlur = statusStrip.blur.bind(statusStrip);
+    vi.spyOn(statusStrip, "blur").mockImplementation(() => {
+      focusOrder.push("blur");
+      nativeBlur();
+    });
+    vi.mocked(ImeAnchor.show).mockImplementationOnce(async () => {
+      focusOrder.push(document.activeElement === statusStrip ? "show-focused" : "show-blurred");
+      return {};
+    });
+
+    fireEvent.click(screen.getByText("toggle-keyboard"));
+    await flushAndroidImeFocusTimer();
+
+    expect(focusOrder).toEqual(["blur", "show-blurred"]);
+    expect(document.activeElement).not.toBe(statusStrip);
+  });
+
+  it("preserves QuickBar editor focus when it wins a pending native handoff race", async () => {
+    const session = makeSession("s1");
+    let resolveImeState: ((state: { keyboardVisible: boolean; keyboardHeight: number }) => void) | null = null;
+    vi.mocked(ImeAnchor.getState).mockImplementationOnce(() => new Promise((resolve) => {
+      resolveImeState = resolve;
+    }));
+    const editorQuickBar = (props: TerminalQuickBarProps) => (
+      <div>
+        <input
+          aria-label="quickbar-editor"
+          onFocus={() => props.onEditorDomFocusChange?.(true)}
+          onBlur={() => props.onEditorDomFocusChange?.(false)}
+        />
+        <button onClick={() => props.onToggleKeyboard?.()}>toggle-keyboard</button>
+      </div>
+    );
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        renderQuickBar={editorQuickBar}
+      />,
+    );
+
+    vi.mocked(ImeAnchor.show).mockClear();
+    fireEvent.click(screen.getByText("toggle-keyboard"));
+    const editor = screen.getByRole("textbox", { name: "quickbar-editor" });
+    editor.focus();
+    expect(document.activeElement).toBe(editor);
+
+    await act(async () => {
+      resolveImeState?.({ keyboardVisible: false, keyboardHeight: 0 });
+      await Promise.resolve();
+    });
+    await flushAndroidImeFocusTimer();
+
+    expect(vi.mocked(ImeAnchor.show)).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(editor);
+  });
+
   it("realigns follow again after Android IME becomes visible from keyboard toggle", async () => {
     const session = makeSession("s1");
 

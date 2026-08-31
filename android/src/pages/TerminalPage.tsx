@@ -1718,6 +1718,12 @@ function TerminalPageComponent({
       if (quickBarEditorFocusedRef.current) {
         return;
       }
+      if (typeof document !== 'undefined') {
+        const activeElement = document.activeElement;
+        if (activeElement instanceof HTMLElement) {
+          activeElement.blur();
+        }
+      }
       void ImeAnchor.show().catch((error) => {
         console.warn('[TerminalPage] ImeAnchor.show() failed:', error);
       });

@@ -40,6 +40,10 @@ Owner feature: `terminal.keyboard_ime`.
 - `ImeAnchorInputLogicTest` proves native voice-style CJK/emoji/symbol commits emit one ordered text event and keep explicit Enter on the `performEditorAction` / key path.
 - `TerminalQuickBar.test.tsx` proves QuickBar reports its real chrome height while IME lift is applied outside the component.
 - Negative path: `TerminalQuickBar` must not subtract `keyboardInsetPx` from measured chrome height, because `TerminalQuickBarShell.bottom` already consumes that lift.
+- Android WebView focus handoff positive path: before `ImeAnchor.show()` moves native focus to the hidden editor, `TerminalPage` clears any stale WebView `document.activeElement`; a later QuickBar ↑/↓ touch therefore cannot resurrect the top connection strip as transient `:focus-visible`.
+- Android WebView focus handoff negative path: when the QuickBar editor owns DOM focus, the native handoff guard preserves that editor focus and does not call `ImeAnchor.show()`.
+- Accessibility negative path: the connection status strip remains keyboard-focusable during ordinary WebView navigation; the fix must not remove its `tabIndex`, global `:focus-visible`, or keyboard outline.
+- QuickBar regression path: ↑ and ↓ remain non-tab-stop pointer actions and continue emitting `\x1b[A` and `\x1b[B`; focus cleanup belongs to the page-level native handoff, not the arrow buttons or renderer.
 
 ## Module Black-Box Plan
 
