@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BUILD_VERSION_ARGS=()
+RESUME_BUILD_NUMBER=""
 if [[ "$#" -eq 2 && "$1" == "--resume-build" ]]; then
-  BUILD_VERSION_ARGS=(--resume "$2")
+  RESUME_BUILD_NUMBER="$2"
 elif [[ "$#" -ne 0 ]]; then
   echo "usage: $0 [--resume-build <expected-build-number>]" >&2
   exit 2
@@ -34,7 +34,11 @@ source "$SCRIPT_DIR/setup-android-java.sh"
 cd "$ROOT_DIR"
 "$SCRIPT_DIR/ensure-pnpm-install.sh"
 pnpm run deps:check-wterm-published
-node ./scripts/bump-build-version.mjs "${BUILD_VERSION_ARGS[@]}"
+if [[ -n "$RESUME_BUILD_NUMBER" ]]; then
+  node ./scripts/bump-build-version.mjs --resume "$RESUME_BUILD_NUMBER"
+else
+  node ./scripts/bump-build-version.mjs
+fi
 BUILD_NUMBER="$(node -p "JSON.parse(require('fs').readFileSync('./.build-meta.json', 'utf8')).buildNumber")"
 pnpm run daemon:prepare-release
 pnpm build

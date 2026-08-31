@@ -97,3 +97,14 @@ test('prepares the daemon release before package prebuild contracts consume it',
   assert.ok(prepareIndex < packageBuildIndex);
   assert.equal(source.match(/pnpm run daemon:prepare-release/g)?.length, 1);
 });
+
+test('keeps normal and resume allocation safe under macOS Bash nounset mode', () => {
+  const source = readFileSync(buildScript, 'utf8');
+
+  assert.doesNotMatch(source, /BUILD_VERSION_ARGS/);
+  assert.match(source, /RESUME_BUILD_NUMBER=""/);
+  assert.match(
+    source,
+    /if \[\[ -n "\$RESUME_BUILD_NUMBER" \]\]; then\s+node \.\/scripts\/bump-build-version\.mjs --resume "\$RESUME_BUILD_NUMBER"\s+else\s+node \.\/scripts\/bump-build-version\.mjs\s+fi/,
+  );
+});
