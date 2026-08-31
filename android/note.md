@@ -297,3 +297,10 @@ Packaged Electron app.asar 内 DevTools 默认被禁用。`--remote-debugging-po
 - commit `9986c1ca` 已合并为主线 `a5e4d032`；audit 11/11、session drawer UI 189/189、feature registry 102/102、type-check、diff-check 和 AGY review 通过。
 - 重新构建/发布 2772：`0.1.3.2772` / versionCode `1100027720`，APK SHA256 `29127a74be413d5c0698e7a4721fab9a4d7ed6cb4a2f6235077f87f9c3d41082`；本机、Tailscale、公网 manifest/APK 均一致，bundle verifier 全绿。
 - 当前 adb 无在线设备，2772 真机安装/抽屉回归仍是明确缺口；task 保持 delivered，待 master 完成 L5 后再 close。
+
+# 2026-08-31 session rename reconnect race fix
+
+- Root cause: `resolveMuxChannelClosedWithControlStatusRuntime` captured the rename-time `sessionName` in its async control query; renaming race left the post-query session-present check comparing the old name, so a renamed session was treated as missing and entered the slow reconnect backoff.
+- Fix: the unique owner `terminal.transport_lifecycle.channel_closed_control_status` now re-reads the still-closed channel's `sessionName` after `queryTargetSessions()` resolves before deciding presence; it also surfaces the resolved name in the runtime-debug event.
+- Tests: `session-context-transport-orchestration-runtime.test.ts` adds a red-then-green rename-race case (24/24), plus regression for the positive and negative control paths; `session-context-session-runtime.test.ts` + `terminal-channel-mux-runtime.test.ts` still 38 + 7 = 45 PASS; `tsc --noEmit` PASS; `git diff --check` clean; canonical build blocked at `COMPILED_STAGE_REQUIRES_ARTIFACT` because this worktree does not carry the frozen AppSDK compiled tree (not a code defect).
+- Device L5 still pending: emulator install + adb-driven rename→reconnect replay is the user-visible acceptance gate; commit will be deferred until that gate is exercised or Jason releases the L5 evidence.
