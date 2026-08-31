@@ -173,7 +173,7 @@ export function useRemoteWindowQuality({
       streamId: options.streamId,
       streamGroupId: options.streamId,
       mediaPlan,
-      mediaPlanVersion: 1,
+      mediaPlanVersion: 2,
       revision: pending.revision,
       targetId: options.targetId,
       videoProfile: options.videoProfile,

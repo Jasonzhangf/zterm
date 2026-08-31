@@ -526,7 +526,7 @@ export interface RemoteWindowStreamQualityRequestPayload {
   streamId: string;
   streamGroupId: string;
   mediaPlan: RemoteWindowStreamMediaPlan;
-  mediaPlanVersion: 1;
+  mediaPlanVersion: 1 | 2;
   revision: number;
   purpose?: RemoteWindowStreamPurpose;
   targetId: string;
@@ -538,7 +538,7 @@ export interface RemoteWindowStreamQualityResultPayload {
   streamId: string;
   streamGroupId: string;
   mediaPlan: RemoteWindowStreamMediaPlan;
-  mediaPlanVersion: 1;
+  mediaPlanVersion: 1 | 2;
   revision: number;
   purpose?: RemoteWindowStreamPurpose;
   targetId: string;

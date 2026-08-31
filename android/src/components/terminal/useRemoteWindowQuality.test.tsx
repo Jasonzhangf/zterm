@@ -78,6 +78,7 @@ describe('useRemoteWindowQuality owner', () => {
     await waitFor(() => expect(updateStreamQuality).toHaveBeenCalledTimes(1));
     expect(result.current.qualityApplyState.phase).toBe('requested');
     const payload = updateStreamQuality.mock.calls[0][1];
+    expect(payload.mediaPlanVersion).toBe(2);
     await act(async () => resolveResult(appliedResult(payload)));
     expect(result.current.qualityApplyState).toMatchObject({
       phase: 'applied',
