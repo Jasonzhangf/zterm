@@ -150,6 +150,11 @@ not calculate macOS global coordinates or mutate capture truth.
 
 ## Standard WebRTC boundary (2026-08-31)
 
+The offer-owner and sender-encoding contract below is superseded by
+`2026-08-31-remote-window-sender-offer-contract.md`. The older `addTrack()`
+answerer observations remain historical evidence only and must not be used as
+the implementation target.
+
 The daemon uses the standard WebRTC object model (`RTCPeerConnection`,
 `RTCVideoSource`, `RTCRtpSender`) through the installed Node native binding
 `@roamhq/wrtc@0.10.0`. “Use standard WebRTC directly” is therefore already the
