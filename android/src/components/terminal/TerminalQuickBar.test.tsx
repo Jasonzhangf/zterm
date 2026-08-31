@@ -330,6 +330,55 @@ describe("TerminalQuickBar", () => {
     });
   });
 
+  it("clears restored non-editor shell focus at QuickBar press start", () => {
+    const onSendSequence = vi.fn();
+    renderQuickBar({ onSendSequence });
+    const statusButton = document.createElement("button");
+    statusButton.setAttribute("aria-label", "connection status");
+    document.body.prepend(statusButton);
+    statusButton.focus();
+    expect(document.activeElement).toBe(statusButton);
+
+    const upButton = screen.getByRole("button", { name: "↑" });
+    fireEvent.pointerDown(upButton, { pointerId: 1, pointerType: "touch" });
+
+    expect(document.activeElement).toBe(document.body);
+    fireEvent.pointerUp(upButton, { pointerId: 1, pointerType: "touch" });
+    fireEvent.click(upButton);
+    expect(onSendSequence).toHaveBeenCalledWith("\x1b[A");
+    statusButton.remove();
+  });
+
+  it("preserves editor focus when a QuickBar pointer action starts", () => {
+    renderQuickBar();
+    const contentEditable = document.createElement("div");
+    contentEditable.contentEditable = "true";
+    contentEditable.tabIndex = 0;
+    Object.defineProperty(contentEditable, "isContentEditable", {
+      configurable: true,
+      value: true,
+    });
+
+    const editors = [
+      document.createElement("input"),
+      document.createElement("textarea"),
+      contentEditable,
+    ];
+    for (const editor of editors) {
+      document.body.prepend(editor);
+      editor.focus();
+      expect(document.activeElement).toBe(editor);
+
+      fireEvent.pointerDown(screen.getByRole("button", { name: "↓" }), {
+        pointerId: 1,
+        pointerType: "touch",
+      });
+
+      expect(document.activeElement).toBe(editor);
+      editor.remove();
+    }
+  });
+
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();

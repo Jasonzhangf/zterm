@@ -274,6 +274,14 @@ export function moveShortcutActionWithinRow(
 }
 
 export function blurCurrentTarget(target: EventTarget | null) {
+  const activeElement = document.activeElement;
+  const editorHasFocus = activeElement instanceof HTMLInputElement
+    || activeElement instanceof HTMLTextAreaElement
+    || (activeElement instanceof HTMLElement && activeElement.isContentEditable);
+
+  if (!editorHasFocus && activeElement instanceof HTMLElement) {
+    activeElement.blur();
+  }
   if (target instanceof HTMLButtonElement) {
     target.blur();
   }
