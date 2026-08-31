@@ -500,6 +500,17 @@ export function createTerminalMessageRuntime(
         });
         break;
       case 'remote-window-stream-start-request':
+        sendRemoteWindowMessage(connection, {
+          type: 'remote-window-error',
+          payload: {
+            requestId: message.payload.requestId || '',
+            streamId: message.payload.streamId || '',
+            code: 'remote_window_stream_protocol_unsupported',
+            message: 'remote window stream start v1 is unsupported; use mediaPlanVersion 2',
+          },
+        });
+        break;
+      case 'remote-window-stream-start-v2-request':
         {
           const streamId = message.payload.streamId || '';
           if (streamId) {
@@ -512,36 +523,46 @@ export function createTerminalMessageRuntime(
           }
         }
         void deps.remoteWindowStreamRuntime.startStream(message.payload, {
+          sendOffer: (payload) => {
+            sendRemoteWindowMessage(connection, { type: 'remote-window-stream-offer-v2', payload });
+          },
           sendIceCandidate: (payload) => {
-            sendRemoteWindowMessage(connection, {
-              type: 'remote-window-stream-ice-candidate',
-              payload,
-            });
+            sendRemoteWindowMessage(connection, { type: 'remote-window-stream-ice-candidate', payload });
           },
           sendStatus: (payload) => {
-            sendRemoteWindowMessage(connection, {
-              type: 'remote-window-stream-status',
-              payload,
-            });
+            sendRemoteWindowMessage(connection, { type: 'remote-window-stream-status', payload });
           },
           sendFocusResult: (payload) => {
-            sendRemoteWindowMessage(connection, {
-              type: 'remote-window-stream-focus-result',
-              payload,
-            });
+            sendRemoteWindowMessage(connection, { type: 'remote-window-stream-focus-result', payload });
           },
         }).then((payload) => {
-          sendRemoteWindowMessage(connection, 'answer' in payload
-            ? { type: 'remote-window-stream-started', payload }
-            : { type: 'remote-window-error', payload });
+          if ('code' in payload) {
+            sendRemoteWindowMessage(connection, { type: 'remote-window-error', payload });
+          }
         }).catch((error: unknown) => {
           sendRemoteWindowMessage(connection, {
             type: 'remote-window-error',
             payload: {
-              requestId: message.payload.requestId || '',
-              streamId: message.payload.streamId || '',
+              requestId: message.payload.requestId,
+              streamId: message.payload.streamId,
               code: 'remote_window_stream_start_failed',
               message: error instanceof Error ? error.message : 'remote window stream start failed',
+            },
+          });
+        });
+        break;
+      case 'remote-window-stream-answer-v2':
+        if (!deps.remoteWindowStreamRuntime.acceptAnswer) {
+          throw new Error('remote window v2 answer owner is unavailable');
+        }
+        void deps.remoteWindowStreamRuntime.acceptAnswer(message.payload).catch((error: unknown) => {
+          sendRemoteWindowMessage(connection, {
+            type: 'remote-window-error',
+            payload: {
+              requestId: message.payload.requestId,
+              streamId: message.payload.streamId,
+              code: 'remote_window_stream_answer_failed',
+              message: error instanceof Error ? error.message : 'remote window stream answer failed',
             },
           });
         });

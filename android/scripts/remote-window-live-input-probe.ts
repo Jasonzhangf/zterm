@@ -821,40 +821,45 @@ async function main() {
       });
     };
 
-    const offer = await peerConnection.createOffer();
-    if (offer.type !== 'offer') {
-      fail(`unexpected remote-window live probe offer type: ${offer.type}`);
-    }
-    await peerConnection.setLocalDescription(offer);
     send(ws, {
-      type: 'remote-window-stream-start-request',
+      type: 'remote-window-stream-start-v2-request',
       payload: {
         requestId: requestId('start'),
         streamId,
         mediaPlan: 'single-focus',
-        mediaPlanVersion: 1,
+        mediaPlanVersion: 2,
         target,
-        offer: {
-          type: offer.type,
-          sdp: offer.sdp || '',
-        },
         videoProfile: buildRemoteWindowVideoProfile('smooth'),
       },
     });
     const started = await waitForServerMessage(
       messages,
       (message) => (
-        (message.type === 'remote-window-stream-started' || message.type === 'remote-window-error')
+        (message.type === 'remote-window-stream-offer-v2' || message.type === 'remote-window-error')
         && 'requestId' in message.payload
         && message.payload.requestId === requestId('start')
       ),
       'remote window stream start',
       REMOTE_WINDOW_LIVE_STREAM_TIMEOUT_MS,
     );
-    if (started.type !== 'remote-window-stream-started') {
+    if (started.type !== 'remote-window-stream-offer-v2') {
       fail(`stream start failed: ${JSON.stringify(started)}`);
     }
-    await peerConnection.setRemoteDescription(new RTCSessionDescription(started.payload.answer));
+    await peerConnection.setRemoteDescription(new RTCSessionDescription(started.payload.offer));
+    const answer = await peerConnection.createAnswer();
+    await peerConnection.setLocalDescription(answer);
+    send(ws, {
+      type: 'remote-window-stream-answer-v2',
+      payload: {
+        requestId: started.payload.requestId,
+        streamId: started.payload.streamId,
+        mediaPlanVersion: 2,
+        answer: {
+          type: 'answer',
+          sdp: peerConnection.localDescription?.sdp || answer.sdp || '',
+        },
+      },
+    });
     await waitForReceiverTrack(peerConnection, messages, streamId, () => trackSeen, REMOTE_WINDOW_LIVE_STREAM_TIMEOUT_MS);
     trackSeen = true;
     await waitForServerMessage(
@@ -876,7 +881,7 @@ async function main() {
         streamId,
         streamGroupId: streamId,
         mediaPlan: 'single-focus',
-        mediaPlanVersion: 1 as const,
+        mediaPlanVersion: 2 as const,
         revision: 1,
         targetId: target.streamTargetId,
         videoProfile: buildRemoteWindowVideoProfile('smooth', {
@@ -904,7 +909,7 @@ async function main() {
         streamId,
         streamGroupId: streamId,
         mediaPlan: 'single-focus',
-        mediaPlanVersion: 1 as const,
+        mediaPlanVersion: 2 as const,
         revision: 2,
         targetId: target.streamTargetId,
         videoProfile: buildRemoteWindowVideoProfile('smooth'),

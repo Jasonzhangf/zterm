@@ -1,5 +1,13 @@
 # 2026-08-19 升级链路 + Logo 替换
 
+# 2026-08-31 Android UI/UX + motion audit
+
+- Scope: client UI projection only; Connections home, Settings, tmux picker, and existing dialog motion hooks. Daemon, transport, mirror, sparse buffer, renderer truth, payloads, and runtime ownership were untouched.
+- Changes: Connections empty state now gives a clear first-server path and uses an SVG add icon; Settings adds labelled back navigation, save status feedback, and state-addressable group content; tmux picker retains its mounted DOM during the 280ms exit transition; dialog exposes its existing open/closing state; CSS adds bounded transform/opacity transitions while retaining the existing reduced-motion media query.
+- Tests: focused UI stack passed 9 files / 63 tests; canonical build passed after generating the missing `schedule-fire` daemon-mirror evidence case with the pinned AppSDK 0.1.4 binary; detector returned `[]`; `git diff --check` passed.
+- Live evidence: Vite user entry `https://android.zterm.localhost:1355` rendered the updated Connections and Settings DOM and screenshots under `android/evidence/ui-ux-motion-audit-20260831/after/`; save feedback was observed. Browser click automation had one viewport-control failure, so that failure is not treated as product evidence.
+- Review: AGY Review task `agy-ui-ux-motion-audit-20260831` passed with zero findings. AppSDK-generated module artifacts remain uncommitted and unrelated to this UI change set.
+
 ## 当前 HEAD / 状态
 - HEAD: `3942ede1`
 - 工作区有 dirty：AndroidConnectionService 大迁移（staged）、logo/splash 资源改动（部分 staged）。

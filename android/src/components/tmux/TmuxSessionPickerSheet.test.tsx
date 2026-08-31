@@ -630,6 +630,42 @@ describe('TmuxSessionPickerSheet relay directory projection', () => {
     }));
   });
 
+  it('keeps the overlay mounted briefly after open=false so the exit transition can play', async () => {
+    tmuxSessionsMock.fetchTmuxSessions.mockResolvedValue(['win-main']);
+
+    const baseProps = {
+      mode: 'quick-tab' as const,
+      servers: [],
+      bridgeSettings: {
+        signalUrl: '',
+        turnServerUrl: '',
+        turnUsername: '',
+        turnCredential: '',
+        transportMode: 'auto' as const,
+        traversalRelay: undefined,
+      },
+      initialTarget: { bridgeHost: '100.64.0.10', bridgePort: 3333, authToken: 'token-a' },
+      onClose: vi.fn(),
+      onOpenTmuxSession: vi.fn(),
+      onOpenMultipleTmuxSessions: vi.fn(),
+      onKillTmuxSession: vi.fn(),
+      onSelectCleanSession: vi.fn(),
+    };
+
+    const { rerender } = render(<TmuxSessionPickerSheet {...baseProps} open />);
+    await screen.findByText('Quick New Tab');
+
+    rerender(<TmuxSessionPickerSheet {...baseProps} open={false} />);
+
+    const overlay = document.querySelector('[data-tmux-picker-overlay]');
+    expect(overlay).not.toBeNull();
+    expect(overlay?.getAttribute('data-state')).toBe('closing');
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-tmux-picker-overlay]')).toBeNull();
+    }, { timeout: 400 });
+  });
+
   it('imports a pasted connection share link in the real new-connection sheet', () => {
     const onImportConnectionLink = vi.fn(() => ({ ok: true as const, name: 'Imported Mac' }));
 

@@ -286,6 +286,12 @@ export interface RemoteWindowStreamMediaPlanContract {
   lanes: readonly RemoteWindowStreamMediaLaneContract[];
 }
 
+export interface RemoteWindowStreamMediaPlanV2Contract {
+  id: RemoteWindowStreamMediaPlan;
+  version: 2;
+  lanes: readonly RemoteWindowStreamMediaLaneContract[];
+}
+
 const REMOTE_WINDOW_MEDIA_PLAN_CONTRACTS: Record<RemoteWindowStreamMediaPlan, RemoteWindowStreamMediaPlanContract> = {
   'single-focus': {
     id: 'single-focus',
@@ -307,6 +313,13 @@ export function getRemoteWindowMediaPlanContract(
 ): RemoteWindowStreamMediaPlanContract {
   return REMOTE_WINDOW_MEDIA_PLAN_CONTRACTS[id];
 }
+
+export function getRemoteWindowMediaPlanV2Contract(
+  id: RemoteWindowStreamMediaPlan,
+): RemoteWindowStreamMediaPlanV2Contract {
+  const base = getRemoteWindowMediaPlanContract(id);
+  return { ...base, version: 2 };
+}
 export type RemoteWindowStreamFailureStage =
   | 'request-validation'
   | 'platform-capability'
@@ -323,7 +336,7 @@ export type RemoteWindowStreamFailureStage =
 
 export interface RemoteWindowStreamCapabilityTelemetry {
   mediaPlan: RemoteWindowStreamMediaPlan;
-  mediaPlanVersion: 1;
+  mediaPlanVersion: 1 | 2;
   lanes: readonly RemoteWindowStreamMediaLaneContract[];
   maxVideoLanes: 1 | 2;
   screenCaptureKit: true;
@@ -382,6 +395,33 @@ export interface RemoteWindowStreamStartRequestPayload {
   videoProfile: RemoteWindowVideoProfile;
 }
 
+export interface RemoteWindowStreamStartRequestV2Payload {
+  requestId: string;
+  streamId: string;
+  purpose?: RemoteWindowStreamPurpose;
+  mediaPlan: RemoteWindowStreamMediaPlan;
+  mediaPlanVersion: 2;
+  target: RemoteWindowStreamTargetManifest;
+  iceServers?: Array<Record<string, unknown>>;
+  videoProfile: RemoteWindowVideoProfile;
+}
+
+export function isRemoteWindowStreamStartRequestV2(
+  value: unknown,
+): value is RemoteWindowStreamStartRequestV2Payload {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const payload = value as Partial<RemoteWindowStreamStartRequestV2Payload> & { offer?: unknown };
+  return typeof payload.requestId === 'string'
+    && payload.requestId.length > 0
+    && typeof payload.streamId === 'string'
+    && payload.streamId.length > 0
+    && (payload.mediaPlan === 'single-focus' || payload.mediaPlan === 'overview-plus-focus')
+    && payload.mediaPlanVersion === 2
+    && !Object.prototype.hasOwnProperty.call(payload, 'offer');
+}
+
 // 双流：切换高码率主窗口（focus）流的捕获目标；低码率总览（overview）流保持不变
 export interface RemoteWindowStreamUpdateFocusRequestPayload {
   requestId: string;
@@ -406,7 +446,7 @@ export interface RemoteWindowStreamStartedPayload {
   streamId: string;
   purpose?: RemoteWindowStreamPurpose;
   mediaPlan: RemoteWindowStreamMediaPlan;
-  mediaPlanVersion: 1;
+  mediaPlanVersion: 1 | 2;
   targetId: string;
   answer: RemoteWindowStreamRtcDescription;
   capture: {
@@ -422,6 +462,35 @@ export interface RemoteWindowStreamStartedPayload {
     kind: 'webrtc-video';
     selectedRoute?: string;
   };
+}
+
+export interface RemoteWindowStreamStartedOfferV2Payload {
+  requestId: string;
+  streamId: string;
+  purpose?: RemoteWindowStreamPurpose;
+  mediaPlan: RemoteWindowStreamMediaPlan;
+  mediaPlanVersion: 2;
+  targetId: string;
+  offer: RemoteWindowStreamRtcDescription;
+  capture: {
+    source: 'ScreenCaptureKit';
+    frameWidth: number;
+    frameHeight: number;
+    frameRate: number;
+    targetKind: 'app-window' | 'iterm2-pane';
+  };
+  canvasLayout?: RemoteWindowCanvasLayoutV1;
+  transport: {
+    kind: 'webrtc-video';
+    selectedRoute?: string;
+  };
+}
+
+export interface RemoteWindowStreamAnswerV2Payload {
+  requestId: string;
+  streamId: string;
+  mediaPlanVersion: 2;
+  answer: RemoteWindowStreamRtcDescription;
 }
 
 export interface RemoteWindowStreamIceCandidatePayload {
@@ -457,7 +526,7 @@ export interface RemoteWindowStreamQualityRequestPayload {
   streamId: string;
   streamGroupId: string;
   mediaPlan: RemoteWindowStreamMediaPlan;
-  mediaPlanVersion: 1;
+  mediaPlanVersion: 1 | 2;
   revision: number;
   purpose?: RemoteWindowStreamPurpose;
   targetId: string;
@@ -469,7 +538,7 @@ export interface RemoteWindowStreamQualityResultPayload {
   streamId: string;
   streamGroupId: string;
   mediaPlan: RemoteWindowStreamMediaPlan;
-  mediaPlanVersion: 1;
+  mediaPlanVersion: 1 | 2;
   revision: number;
   purpose?: RemoteWindowStreamPurpose;
   targetId: string;
@@ -741,6 +810,8 @@ export type BridgeClientMessage =
   | { type: 'remote-screenshot-request'; payload: RemoteScreenshotRequestPayload }
   | { type: 'remote-window-targets-request'; payload: RemoteWindowStreamRequestPayload }
   | { type: 'remote-window-stream-start-request'; payload: RemoteWindowStreamStartRequestPayload }
+  | { type: 'remote-window-stream-start-v2-request'; payload: RemoteWindowStreamStartRequestV2Payload }
+  | { type: 'remote-window-stream-answer-v2'; payload: RemoteWindowStreamAnswerV2Payload }
   | { type: 'remote-window-stream-update-focus'; payload: RemoteWindowStreamUpdateFocusRequestPayload }
   | { type: 'remote-window-stream-ice-candidate'; payload: RemoteWindowStreamIceCandidatePayload }
   | { type: 'remote-window-stream-stop-request'; payload: RemoteWindowStreamStopRequestPayload }
@@ -820,6 +891,7 @@ export type BridgeServerControlMessage =
   | { type: 'remote-screenshot-status'; payload: RemoteScreenshotStatusPayload }
   | { type: 'remote-window-targets-response'; payload: RemoteWindowStreamTargetsResponsePayload }
   | { type: 'remote-window-stream-started'; payload: RemoteWindowStreamStartedPayload }
+  | { type: 'remote-window-stream-offer-v2'; payload: RemoteWindowStreamStartedOfferV2Payload }
   | { type: 'remote-window-stream-ice-candidate'; payload: RemoteWindowStreamIceCandidatePayload }
   | { type: 'remote-window-stream-status'; payload: RemoteWindowStreamStatusPayload }
   | { type: 'remote-window-stream-focus-result'; payload: RemoteWindowStreamFocusResultPayload }

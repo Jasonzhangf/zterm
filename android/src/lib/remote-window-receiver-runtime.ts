@@ -3,9 +3,11 @@ import type {
   RemoteWindowStreamPurpose,
   RemoteWindowStreamRtcDescription,
   RemoteWindowStreamStartedPayload,
+  RemoteWindowStreamStartedOfferV2Payload,
+  RemoteWindowStreamAnswerV2Payload,
   RemoteWindowStreamTargetManifest,
 } from './types';
-import { getRemoteWindowMediaPlanContract } from '@zterm/shared/protocol';
+import { getRemoteWindowMediaPlanContract, getRemoteWindowMediaPlanV2Contract } from '@zterm/shared/protocol';
 import type { RemoteWindowVideoStatsSample } from './remote-window-video-quality';
 
 export interface RemoteWindowReceiverStartResult {
@@ -13,7 +15,7 @@ export interface RemoteWindowReceiverStartResult {
   purpose?: RemoteWindowStreamPurpose;
   mediaStream: MediaStream;
   overviewMediaStream?: MediaStream;
-  started: RemoteWindowStreamStartedPayload;
+  started: RemoteWindowStreamStartedPayload | RemoteWindowStreamStartedOfferV2Payload;
   startupTelemetry?: RemoteWindowReceiverStartupTelemetry;
   collectStats?: () => Promise<RemoteWindowVideoStatsSample | null>;
 }
@@ -41,6 +43,7 @@ interface ActiveRemoteWindowReceiverStream {
   remoteDescriptionApplied: boolean;
   pendingIceCandidates: RTCIceCandidateInit[];
   remoteStartDispatched: boolean;
+  remoteRequestId: string | null;
   pendingLocalIceCandidates: RemoteWindowStreamIceCandidatePayload['candidate'][];
   captureStartedAt: number | null;
   answerAppliedAt: number | null;
@@ -269,8 +272,10 @@ export function createRemoteWindowReceiverRuntime(input?: {
       purpose?: RemoteWindowStreamPurpose;
       target: RemoteWindowStreamTargetManifest;
       iceServers?: RTCIceServer[];
-      sendIceCandidate: (candidate: RemoteWindowStreamIceCandidatePayload['candidate']) => void;
-      startRemote: (offer: RemoteWindowStreamRtcDescription) => Promise<RemoteWindowStreamStartedPayload>;
+      sendIceCandidate: (candidate: RemoteWindowStreamIceCandidatePayload['candidate'], requestId?: string) => void;
+      startRemote: (offer: RemoteWindowStreamRtcDescription) => Promise<RemoteWindowStreamStartedPayload | RemoteWindowStreamStartedOfferV2Payload>;
+      protocolVersion?: 1 | 2;
+      sendAnswer?: (answer: RemoteWindowStreamAnswerV2Payload) => void | Promise<void>;
     }): Promise<RemoteWindowReceiverStartResult> {
       const streamId = options.streamId.trim();
       if (!streamId) {
@@ -284,7 +289,9 @@ export function createRemoteWindowReceiverRuntime(input?: {
       const mediaPlan = (options.target.compositeWindows ?? []).length > 0
         ? 'overview-plus-focus' as const
         : 'single-focus' as const;
-      const mediaPlanContract = getRemoteWindowMediaPlanContract(mediaPlan);
+      const mediaPlanContract = options.protocolVersion === 2
+        ? getRemoteWindowMediaPlanV2Contract(mediaPlan)
+        : getRemoteWindowMediaPlanContract(mediaPlan);
       const needsOverview = mediaPlanContract.lanes.some((lane) => lane.role === 'overview');
       const entry: ActiveRemoteWindowReceiverStream = {
         streamId,
@@ -300,6 +307,7 @@ export function createRemoteWindowReceiverRuntime(input?: {
         remoteDescriptionApplied: false,
         pendingIceCandidates: [],
         remoteStartDispatched: false,
+        remoteRequestId: null,
         pendingLocalIceCandidates: [],
         captureStartedAt: null,
         answerAppliedAt: null,
@@ -326,26 +334,29 @@ export function createRemoteWindowReceiverRuntime(input?: {
             return;
           }
           const candidate = normalizeLocalCandidate(event.candidate);
-          if (!entry.remoteStartDispatched) {
+          if (!entry.remoteStartDispatched || !entry.remoteRequestId) {
             entry.pendingLocalIceCandidates.push(candidate);
             return;
           }
-          options.sendIceCandidate(candidate);
+          options.sendIceCandidate(candidate, entry.remoteRequestId);
         };
         peerConnection.ontrack = (event) => attachTrack(entry, event);
         const trackPromise = waitForRequiredTracks(entry, needsOverview);
         trackPromise.catch(() => undefined);
-        const offer = await peerConnection.createOffer();
-        await peerConnection.setLocalDescription(offer);
-        assertCurrent(entry);
-        const localOffer = normalizeRtcDescription(peerConnection.localDescription || offer, 'offer');
-        const startedPromise = options.startRemote(localOffer);
-        entry.remoteStartDispatched = true;
-        for (const candidate of entry.pendingLocalIceCandidates.splice(0)) {
-          options.sendIceCandidate(candidate);
+        let startedPromise: Promise<RemoteWindowStreamStartedPayload | RemoteWindowStreamStartedOfferV2Payload>;
+        if (options.protocolVersion === 2) {
+          startedPromise = options.startRemote(undefined as unknown as RemoteWindowStreamRtcDescription);
+        } else {
+          const offer = await peerConnection.createOffer();
+          await peerConnection.setLocalDescription(offer);
+          assertCurrent(entry);
+          const localOffer = normalizeRtcDescription(peerConnection.localDescription || offer, 'offer');
+          startedPromise = options.startRemote(localOffer);
         }
+        entry.remoteStartDispatched = true;
         const started = await startedPromise;
         assertCurrent(entry);
+        entry.remoteRequestId = started.requestId;
         entry.captureStartedAt = Date.now();
         if (started.streamId !== streamId) {
           throw new Error(`Remote window stream id mismatch: expected ${streamId}, got ${started.streamId}`);
@@ -353,14 +364,34 @@ export function createRemoteWindowReceiverRuntime(input?: {
         if (started.targetId !== options.target.streamTargetId) {
           throw new Error(`Remote window target mismatch: expected ${options.target.streamTargetId}, got ${started.targetId}`);
         }
+        for (const candidate of entry.pendingLocalIceCandidates.splice(0)) {
+          options.sendIceCandidate(candidate, started.requestId);
+        }
         if (started.mediaPlan !== mediaPlan) {
           throw new Error(`Remote window media plan mismatch: expected ${mediaPlan}, got ${started.mediaPlan}`);
         }
         if (started.mediaPlanVersion !== mediaPlanContract.version) {
           throw new Error(`Remote window media plan version mismatch: expected ${mediaPlanContract.version}, got ${String(started.mediaPlanVersion)}`);
         }
-        const answer = normalizeRtcDescription(started.answer, 'answer');
-        await peerConnection.setRemoteDescription(answer);
+        if (options.protocolVersion === 2) {
+          const offer = normalizeRtcDescription((started as unknown as RemoteWindowStreamStartedOfferV2Payload).offer, 'offer');
+          await peerConnection.setRemoteDescription(offer);
+          const answer = await peerConnection.createAnswer();
+          await peerConnection.setLocalDescription(answer);
+          const normalizedAnswer = normalizeRtcDescription(peerConnection.localDescription || answer, 'answer');
+          if (!options.sendAnswer) {
+            throw new Error('Remote window v2 receiver requires an answer sender');
+          }
+          await options.sendAnswer({
+            requestId: started.requestId,
+            streamId: started.streamId,
+            mediaPlanVersion: 2,
+            answer: normalizedAnswer,
+          });
+        } else {
+          const answer = normalizeRtcDescription((started as RemoteWindowStreamStartedPayload).answer, 'answer');
+          await peerConnection.setRemoteDescription(answer);
+        }
         entry.answerAppliedAt = Date.now();
         entry.remoteDescriptionApplied = true;
         for (const candidate of entry.pendingIceCandidates.splice(0)) {

@@ -195,9 +195,8 @@ describe('remote window message runtime', () => {
       ws: makeSocket(),
       streamId: 'stream-1',
       mediaPlan: 'single-focus' as const,
-      mediaPlanVersion: 1 as const,
+      mediaPlanVersion: 2 as const,
       target: makeTarget(),
-      offer: { type: 'offer', sdp: 'offer-sdp' },
       videoProfile: smoothVideoProfile,
       sendSocketPayload: vi.fn(),
     });
@@ -268,9 +267,8 @@ describe('remote window message runtime', () => {
       streamId: 'stream-1',
       purpose: 'preview',
       mediaPlan: 'single-focus' as const,
-      mediaPlanVersion: 1 as const,
+      mediaPlanVersion: 2 as const,
       target: makeTarget(),
-      offer: { type: 'offer', sdp: 'offer-sdp' },
       iceServers: [{ urls: 'stun:relay.codewhisper.cc:3478' }],
       videoProfile: qualityVideoProfile,
       sendSocketPayload,
@@ -278,27 +276,26 @@ describe('remote window message runtime', () => {
 
     const sent = JSON.parse(sendSocketPayload.mock.calls[0][2] as string);
     expect(sent).toMatchObject({
-      type: 'remote-window-stream-start-request',
+      type: 'remote-window-stream-start-v2-request',
       payload: {
         requestId: expect.stringMatching(/^rw-start-45-/),
         streamId: 'stream-1',
         purpose: 'preview',
         mediaPlan: 'single-focus' as const,
-        mediaPlanVersion: 1 as const,
+        mediaPlanVersion: 2 as const,
         target: { streamTargetId: 'pane-1' },
-        offer: { type: 'offer', sdp: 'offer-sdp' },
         videoProfile: qualityVideoProfile,
       },
     });
 
-    runtime.handleStreamStarted({
+    runtime.handleStreamOfferV2({
       requestId: sent.payload.requestId,
       streamId: 'stream-1',
       purpose: 'preview',
       targetId: 'pane-1',
       mediaPlan: 'single-focus' as const,
-      mediaPlanVersion: 1 as const,
-      answer: { type: 'answer', sdp: 'answer-sdp' },
+      mediaPlanVersion: 2 as const,
+      offer: { type: 'offer', sdp: 'daemon-offer-sdp' },
       capture: {
         source: 'ScreenCaptureKit',
         frameWidth: 640,
@@ -313,8 +310,8 @@ describe('remote window message runtime', () => {
       streamId: 'stream-1',
       targetId: 'pane-1',
       mediaPlan: 'single-focus' as const,
-      mediaPlanVersion: 1 as const,
-      answer: { type: 'answer', sdp: 'answer-sdp' },
+      mediaPlanVersion: 2 as const,
+      offer: { type: 'offer', sdp: 'daemon-offer-sdp' },
       capture: { source: 'ScreenCaptureKit', frameWidth: 640 },
     });
     expect(runtime.getPendingCount()).toBe(0);
@@ -331,9 +328,8 @@ describe('remote window message runtime', () => {
       ws: makeSocket(),
       streamId: 'stream-2',
       mediaPlan: 'single-focus' as const,
-      mediaPlanVersion: 1 as const,
+      mediaPlanVersion: 2 as const,
       target: makeTarget('pane-2'),
-      offer: { type: 'offer', sdp: 'offer-sdp' },
       videoProfile: smoothVideoProfile,
       sendSocketPayload: vi.fn(),
     });
@@ -964,9 +960,8 @@ describe('remote window message runtime', () => {
       ws: makeSocket(),
       streamId: 'stream-quality-move',
       mediaPlan: 'single-focus',
-      mediaPlanVersion: 1,
+      mediaPlanVersion: 2,
       target: makeTarget(),
-      offer: { type: 'offer', sdp: 'offer-sdp' },
       videoProfile: qualityVideoProfile,
       sendSocketPayload,
     });

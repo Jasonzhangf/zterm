@@ -208,6 +208,7 @@ export function ZtermDialog({
     <div
         data-testid="zterm-dialog"
         data-tone={tone}
+        data-state={closing ? 'closing' : 'open'}
         role="presentation"
         style={{
           position: 'fixed',

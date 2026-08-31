@@ -556,12 +556,34 @@ export function TmuxSessionPickerSheet({
     })();
   };
 
-  if (!open) {
+  const [rendered, setRendered] = useState(open);
+  const [closing, setClosing] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setClosing(false);
+      setRendered(true);
+      return;
+    }
+    if (!rendered) {
+      return;
+    }
+    setClosing(true);
+    const handle = window.setTimeout(() => {
+      setRendered(false);
+      setClosing(false);
+    }, 280);
+    return () => window.clearTimeout(handle);
+  }, [open, rendered]);
+
+  if (!rendered) {
     return null;
   }
 
   return (
     <div
+      data-tmux-picker-overlay
+      data-state={closing ? 'closing' : 'open'}
       style={{
         position: 'fixed',
         inset: 0,
@@ -573,6 +595,8 @@ export function TmuxSessionPickerSheet({
       onClick={onClose}
     >
       <div
+        data-tmux-picker-panel
+        data-state={closing ? 'closing' : 'open'}
         onClick={(event) => event.stopPropagation()}
         style={{
           width: '100%',

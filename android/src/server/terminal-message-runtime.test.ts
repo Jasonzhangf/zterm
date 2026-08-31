@@ -1463,39 +1463,9 @@ describe('terminal message runtime explicit error truth', () => {
     });
   });
 
-  it('routes remote window stream start and daemon candidates through the same control transport', async () => {
+  it('rejects the removed v1 remote window stream start path', async () => {
     const { runtime, sendTransportMessage, remoteWindowStreamRuntime, fileTransferMessageRuntime } = createRuntime();
     const connection = createConnection(null);
-    const startedPayload = {
-      requestId: 'rw-start-1',
-      streamId: 'stream-1',
-      targetId: 'iterm2-pane:window:tab:pane',
-      mediaPlan: 'single-focus' as const,
-      mediaPlanVersion: 1 as const,
-      answer: { type: 'answer' as const, sdp: 'daemon-answer' },
-      capture: {
-        source: 'ScreenCaptureKit' as const,
-        frameWidth: 800,
-        frameHeight: 300,
-        frameRate: 12,
-        targetKind: 'iterm2-pane' as const,
-      },
-      transport: { kind: 'webrtc-video' as const },
-    };
-    (remoteWindowStreamRuntime.startStream as any).mockImplementationOnce(async (_payload: unknown, handlers: any) => {
-      handlers?.sendIceCandidate?.({
-        requestId: 'rw-start-1',
-        streamId: 'stream-1',
-        candidate: { candidate: 'candidate:daemon', sdpMid: '0', sdpMLineIndex: 0 },
-      });
-      handlers?.sendStatus?.({
-        requestId: 'rw-start-1',
-        streamId: 'stream-1',
-        phase: 'streaming',
-        framesSent: 1,
-      });
-      return startedPayload;
-    });
 
     await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
       type: 'remote-window-stream-start-request',
@@ -1510,34 +1480,16 @@ describe('terminal message runtime explicit error truth', () => {
     })));
     await flushAsyncHandlers();
 
-    expect(remoteWindowStreamRuntime.startStream).toHaveBeenCalledWith(
-      expect.objectContaining({ requestId: 'rw-start-1', streamId: 'stream-1' }),
-      expect.objectContaining({
-        sendIceCandidate: expect.any(Function),
-        sendStatus: expect.any(Function),
-      }),
-    );
+    expect(remoteWindowStreamRuntime.startStream).not.toHaveBeenCalled();
     expect(fileTransferMessageRuntime.handleMessage).not.toHaveBeenCalled();
     expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
-      type: 'remote-window-stream-ice-candidate',
+      type: 'remote-window-error',
       payload: {
         requestId: 'rw-start-1',
         streamId: 'stream-1',
-        candidate: { candidate: 'candidate:daemon', sdpMid: '0', sdpMLineIndex: 0 },
+        code: 'remote_window_stream_protocol_unsupported',
+        message: 'remote window stream start v1 is unsupported; use mediaPlanVersion 2',
       },
-    });
-    expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
-      type: 'remote-window-stream-status',
-      payload: {
-        requestId: 'rw-start-1',
-        streamId: 'stream-1',
-        phase: 'streaming',
-        framesSent: 1,
-      },
-    });
-    expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
-      type: 'remote-window-stream-started',
-      payload: startedPayload,
     });
   });
 
@@ -1801,7 +1753,12 @@ describe('terminal message runtime explicit error truth', () => {
     expect(remoteWindowStreamRuntime.listTargets).not.toHaveBeenCalled();
     expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
       type: 'remote-window-error',
-      payload: errorPayload,
+      payload: {
+        requestId: 'rw-start-fail',
+        streamId: 'stream-fail',
+        code: 'remote_window_stream_protocol_unsupported',
+        message: 'remote window stream start v1 is unsupported; use mediaPlanVersion 2',
+      },
     });
   });
   describe('remote-window mux channel envelope', () => {
@@ -1864,8 +1821,13 @@ describe('terminal message runtime explicit error truth', () => {
       await flushAsyncHandlers();
 
       expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
-        type: 'remote-window-stream-started',
-        payload: startedPayload,
+        type: 'remote-window-error',
+        payload: {
+          requestId: 'rw-start-raw',
+          streamId: 'stream-raw',
+          code: 'remote_window_stream_protocol_unsupported',
+          message: 'remote window stream start v1 is unsupported; use mediaPlanVersion 2',
+        },
       });
     });
   });
@@ -1929,8 +1891,8 @@ describe('terminal message runtime explicit error truth', () => {
           payload: {
             requestId: 'rw-mux-start',
             streamId: 'rw-mux-stream',
-            code: 'remote_window_stream_start_failed',
-            message: 'ScreenCaptureKit capture process exited code=4',
+            code: 'remote_window_stream_protocol_unsupported',
+            message: 'remote window stream start v1 is unsupported; use mediaPlanVersion 2',
           },
         },
       },
