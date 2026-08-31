@@ -22,7 +22,6 @@ import type {
   RemoteWindowStreamStartedPayload,
   RemoteWindowStreamStartedOfferV2Payload,
   RemoteWindowStreamAnswerV2Payload,
-  RemoteWindowStreamStartRequestPayload,
   RemoteWindowStreamStartRequestV2Payload,
   RemoteWindowStreamStatusPayload,
   RemoteWindowStreamStopRequestPayload,
@@ -33,7 +32,7 @@ import type {
   RemoteWindowStreamFailureStage,
   RemoteWindowVideoProfile,
 } from '@zterm/shared/protocol';
-import { getRemoteWindowMediaPlanContract, getRemoteWindowMediaPlanV2Contract } from '@zterm/shared/protocol';
+import { getRemoteWindowMediaPlanV2Contract } from '@zterm/shared/protocol';
 import { buildRemoteWindowCanvasLayoutV1 } from './remote-window-canvas-layout';
 import { applyRemoteWindowStreamGroupQuality } from './remote-window-quality';
 import {
@@ -140,7 +139,7 @@ export interface RemoteWindowStreamDaemonRuntime {
     payload: RemoteWindowStreamRequestPayload,
   ) => Promise<RemoteWindowStreamTargetsResponsePayload | RemoteWindowStreamErrorPayload>;
   startStream: (
-    payload: RemoteWindowStreamStartRequestPayload | RemoteWindowStreamStartRequestV2Payload,
+    payload: RemoteWindowStreamStartRequestV2Payload,
     handlers?: RemoteWindowStreamDaemonHandlers,
   ) => Promise<RemoteWindowStreamStartedPayload | RemoteWindowStreamStartedOfferV2Payload | RemoteWindowStreamErrorPayload>;
   acceptAnswer?: (payload: RemoteWindowStreamAnswerV2Payload) => Promise<boolean>;
@@ -179,8 +178,8 @@ interface ActiveRemoteWindowStream extends Omit<RemoteWindowStreamSessionResourc
   qualityRevision: number;
   pendingQualityRevision: number | null;
   streamGroupId: string;
-  mediaPlan: RemoteWindowStreamStartRequestPayload['mediaPlan'];
-  mediaPlanVersion: 1 | 2;
+  mediaPlan: RemoteWindowStreamStartRequestV2Payload['mediaPlan'];
+  mediaPlanVersion: 2;
   overviewTarget: RemoteWindowStreamTargetManifest | null;
   // overview 画布主窗口固定为流的初始 target：focus 切换只改 entry.target，
   // 不漂移 overview 画布（client 的 state.target 也不随 focus 切换更新，
@@ -309,18 +308,6 @@ function takeRemoteWindowLatestFrame(
   const pending = entry.pendingFocusFrame;
   entry.pendingFocusFrame = null;
   return pending;
-}
-
-function addRemoteWindowVideoTrack(
-  peerConnection: RTCPeerConnection,
-  videoTrack: MediaStreamTrack,
-  streamId?: string,
-) {
-  if (streamId && typeof wrtc.MediaStream === 'function') {
-    const stream = new (wrtc.MediaStream as unknown as new (init: { id: string }) => MediaStream)({ id: streamId });
-    return peerConnection.addTrack(videoTrack, stream);
-  }
-  return peerConnection.addTrack(videoTrack);
 }
 
 async function applyRemoteWindowTargetResize(
@@ -606,7 +593,7 @@ export function createRemoteWindowStreamDaemonRuntime(
   }
 
   async function startStream(
-    payload: RemoteWindowStreamStartRequestPayload | RemoteWindowStreamStartRequestV2Payload,
+    payload: RemoteWindowStreamStartRequestV2Payload,
     handlers: RemoteWindowStreamDaemonHandlers = {},
   ): Promise<RemoteWindowStreamStartedPayload | RemoteWindowStreamStartedOfferV2Payload | RemoteWindowStreamErrorPayload> {
     if (!payload.requestId || !payload.streamId) {
@@ -653,10 +640,7 @@ export function createRemoteWindowStreamDaemonRuntime(
       failureStage = 'media-plan-validation';
       const hasCompositeWindows = (payload.target.compositeWindows ?? []).length > 0;
       const expectedMediaPlan = hasCompositeWindows ? 'overview-plus-focus' : 'single-focus';
-      const isV2 = payload.mediaPlanVersion === 2 && !('offer' in payload);
-      const mediaPlanContract = isV2
-        ? getRemoteWindowMediaPlanV2Contract(expectedMediaPlan)
-        : getRemoteWindowMediaPlanContract(expectedMediaPlan);
+      const mediaPlanContract = getRemoteWindowMediaPlanV2Contract(expectedMediaPlan);
       const hasOverviewLane = mediaPlanContract.lanes.some((lane) => lane.role === 'overview');
       if (payload.mediaPlan !== expectedMediaPlan) {
         markStreamClosed(payload.streamId);
@@ -716,12 +700,10 @@ export function createRemoteWindowStreamDaemonRuntime(
         maxBitrate: requestedVideoProfile.maxBitrateBps,
         maxFramerate: requestedVideoProfile.maxFrameRateFps,
       };
-      const videoSender = isV2
-        ? peerConnection.addTransceiver(videoTrack, {
-          direction: 'sendonly',
-          sendEncodings: [initialEncoding],
-        }).sender
-        : addRemoteWindowVideoTrack(peerConnection, videoTrack) as RTCRtpSender | undefined;
+      const videoSender = peerConnection.addTransceiver(videoTrack, {
+        direction: 'sendonly',
+        sendEncodings: [initialEncoding],
+      }).sender;
       const streamFrameRate = requestedVideoProfile.maxFrameRateFps;
       const overviewFrameRate = requestedVideoProfile.overviewMaxFrameRateFps;
       let videoProfile: RemoteWindowVideoProfile | null = null;
@@ -819,12 +801,11 @@ export function createRemoteWindowStreamDaemonRuntime(
           : {}),
       });
 
-      failureStage = isV2 ? 'offer-apply' : 'offer-apply';
-      if (isV2) {
-        const offer = await peerConnection.createOffer();
-        await peerConnection.setLocalDescription(offer);
-        const answerPromise = waitForRemoteWindowAnswer(payload.streamId, payload.requestId);
-        handlers.sendOffer?.({
+      failureStage = 'offer-apply';
+      const offer = await peerConnection.createOffer();
+      await peerConnection.setLocalDescription(offer);
+      const answerPromise = waitForRemoteWindowAnswer(payload.streamId, payload.requestId);
+      handlers.sendOffer?.({
           requestId: payload.requestId,
           streamId: payload.streamId,
           purpose,
@@ -841,15 +822,9 @@ export function createRemoteWindowStreamDaemonRuntime(
           },
           ...(streamEntry.canvasLayout ? { canvasLayout: streamEntry.canvasLayout } : {}),
           transport: { kind: 'webrtc-video' },
-        });
-        const answer = await answerPromise;
-        await peerConnection.setRemoteDescription(createRtcSessionDescription(answer));
-      } else {
-        await peerConnection.setRemoteDescription(createRtcSessionDescription({
-          type: payload.offer.type,
-          sdp: payload.offer.sdp,
-        }));
-      }
+      });
+      const answer = await answerPromise;
+      await peerConnection.setRemoteDescription(createRtcSessionDescription(answer));
       streamEntry.remoteDescriptionApplied = true;
       for (const candidate of streamEntry.pendingIceCandidates.splice(0)) {
         await peerConnection.addIceCandidate(createRtcIceCandidate(candidate));
@@ -919,15 +894,13 @@ export function createRemoteWindowStreamDaemonRuntime(
       if (hasOverviewLane) {
         const overviewVideoSource = createVideoSource();
         const overviewVideoTrack = overviewVideoSource.createTrack();
-        const overviewVideoSender = isV2
-          ? peerConnection.addTransceiver(overviewVideoTrack, {
+        const overviewVideoSender = peerConnection.addTransceiver(overviewVideoTrack, {
             direction: 'sendonly',
             sendEncodings: [{
               maxBitrate: requestedVideoProfile.overviewMaxBitrateBps,
               maxFramerate: requestedVideoProfile.overviewMaxFrameRateFps,
             }],
-          }).sender
-          : addRemoteWindowVideoTrack(peerConnection, overviewVideoTrack, 'overview') as RTCRtpSender | undefined;
+          }).sender;
         failureStage = 'overview-capture-start';
         const overviewCaptureSource = await captureSourceFactory(payload.target, {
           frameRate: overviewFrameRate,
@@ -1053,13 +1026,6 @@ export function createRemoteWindowStreamDaemonRuntime(
         }, 3_000);
       }
 
-      let answer: RTCSessionDescriptionInit | null = null;
-      if (!isV2) {
-        failureStage = 'answer-create';
-        answer = await peerConnection.createAnswer();
-        failureStage = 'answer-apply';
-        await peerConnection.setLocalDescription(answer);
-      }
       if (!isCurrentStream(streamEntry)) {
         throw new Error('remote window stream was closed before media negotiation completed');
       }
@@ -1087,8 +1053,7 @@ export function createRemoteWindowStreamDaemonRuntime(
         });
       }
 
-      if (isV2) {
-        return {
+      return {
           requestId: payload.requestId,
           streamId: payload.streamId,
           purpose,
@@ -1105,28 +1070,6 @@ export function createRemoteWindowStreamDaemonRuntime(
           },
           ...(streamEntry.canvasLayout ? { canvasLayout: streamEntry.canvasLayout } : {}),
           transport: { kind: 'webrtc-video' },
-        };
-      }
-      return {
-        requestId: payload.requestId,
-        streamId: payload.streamId,
-        purpose,
-        mediaPlan: expectedMediaPlan,
-        mediaPlanVersion: 1,
-        targetId: payload.target.streamTargetId,
-        answer: normalizeRtcDescription(peerConnection.localDescription || answer, 'answer'),
-        capture: {
-          source: 'ScreenCaptureKit',
-          frameWidth: captureSource.width,
-          frameHeight: captureSource.height,
-          frameRate: captureSource.frameRate,
-          ...(streamEntry.videoProfile ? { maxBitrateBps: streamEntry.videoProfile.maxBitrateBps } : {}),
-          targetKind: payload.target.videoTarget.kind,
-        },
-        ...(streamEntry.canvasLayout ? { canvasLayout: streamEntry.canvasLayout } : {}),
-        transport: {
-          kind: 'webrtc-video',
-        },
       };
     } catch (error) {
       const targetUnavailable = error instanceof RemoteWindowCaptureTargetUnavailableError;
