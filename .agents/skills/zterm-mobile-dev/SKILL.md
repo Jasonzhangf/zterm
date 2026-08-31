@@ -57,6 +57,8 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
   - 说明：`android/evidence/` 是本地证据仓，默认不进 Git 主线；Git 中只保留目录说明文件
 
 ### 2.2.1 Android 交付包硬门禁
+- 治理问题属于开发交付的一部分：架构边界、资源/功能 map、构建链、验证门禁、发布链和协作状态出现问题时，必须像代码缺陷一样定位唯一 owner、修复、验证并记录；不得以“代码本身没问题”停工或只提交报告。
+- 工程质量优先于局部代码完成度：治理链阻断开发、构建、验证、发布或协作闭环时，先修治理根因，再继续产品实现；禁止绕过 gate、伪造证据或用手工操作替代可重复工程流程。
 - 每次 Android 功能修复 / bug 修复 / renderer / daemon-client 协议 / UI 行为改动，只要需要 Jason 复测或会影响真机行为，完成前必须构建可升级 APK 包。
 - 例外：`desktop.remote_window_stream` 的视频主链尚未完成时，不为中间态 catalog / overlay shell / debug 诊断改动反复构建 APK；先完成真实远程视频（ScreenCaptureKit/WebRTC frame stream 可见）并通过对应 gates，再构建 APK 给 Jason 测。除非 Jason 明确要求止血包或升级恢复包，否则不要在远程视频完成前编包。
 - 默认命令：`pnpm --dir android run build:android`。
@@ -69,7 +71,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - Android 交付闭环必须同时覆盖 **Tailscale daemon update route** 和 **public Relay update route**：构建后不仅要有本地文件，还必须验证 `http://127.0.0.1:3333/updates/latest.json`、`http://$(tailscale ip -4):3333/updates/latest.json`、`https://relay.codewhisper.cc:18443/relay/updates/latest.json` 都返回新版本；三个通道的 APK 下载 sha256 必须等于 manifest `sha256`。如果 127/Tailscale `/health` 或 `/updates/latest.json` 超时，先做 service-scoped `zterm-daemon restart` 后重测，禁止只说文件已复制。
 - 汇报时必须给出 `versionName`、`versionCode`、APK 路径和 sha256；不能只说测试通过。
 - Android 回退发布必须使用同一正常构建号的子版本槽：正常版 `0.1.3.N`，回退版 `0.1.3.N.1`，下一正常版 `0.1.3.N+1`；APK 内必须同时满足 `versionCode(N) < versionCode(N.1) < versionCode(N+1)`。禁止用 bit 30、固定高位或任何会让后续正常版永久低于回退版的 namespace。发布前必须用 `apkanalyzer` 读取实际 APK 的 `versionName`/`versionCode`，并在不带 `adb install -d` 的真实设备上验证 normal N -> rollback N.1 -> normal N+1 可依次覆盖安装；manifest 文件名或 JSON 声明不能代替 APK 内 manifest 证据。
-- 若本机有在线 ADB 设备，构建后继续安装 / 启动 / 真机 smoke；若没有在线设备，必须明确写出 “APK 已构建发布，但 L5 真机复测缺口是无 online ADB 设备”。
+- 构建后必须继续做 Android 运行态 smoke：优先使用在线 ADB 真机；若无在线真机，立即启动并使用可用 Android Emulator 完成安装、启动、重启和真实 UI/网络路径验证。只有在本机既无在线真机也无可启动 Emulator 时，才允许把 L5 记为环境阻塞；不得仅因 `adb devices` 为空就停止。
 - 禁止把源码修复、单测、typecheck、daemon close-loop 当成可供 Jason 复测的交付物；没有升级 APK，就不算移动端交付闭环。
 - Relay 场景下升级地址必须跟随当前 Relay 公网路由：`App` 只能把 `traversalRelay.wsHostUrl` 交给 `app-update-runtime`，由唯一 owner 派生 `/relay/updates/latest.json`。显式 `user-saved` manifest 不覆盖；旧私网/Tailscale `server-connected` 或旧 `relay-injected` URL 可被当前 Relay URL 替换。Relay server 必须通过 `ZTERM_TRAVERSAL_UPDATES_DIR` / `ZTERM_RELAY_UPDATES_DIR` 服务 `/relay/updates/latest.json` 和 `/relay/updates/<apk>`，且 public GET/HEAD + APK sha256 都验证通过；只在客户端改 URL 而生产 Relay 不服务更新包不算闭环。
 - 发布 public Relay update assets 时，生产机访问使用 `ssh/scp -i ~/.ssh/claw.pem -o IdentitiesOnly=yes root@159.75.134.56`，目标目录是 `/var/lib/zterm-traversal-relay/updates`；只上传 `latest.json` 与对应版本 APK，通常不需要重启 `zterm-traversal-relay.service`。完成后必须从公网重新 `GET/HEAD https://relay.codewhisper.cc:18443/relay/updates/latest.json` 与版本 APK，并下载 APK 比对 sha256；服务器本机文件存在不等于公网升级通道闭环。
