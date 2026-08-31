@@ -1482,8 +1482,23 @@ function TerminalPageComponent({
       };
     });
 
-    return catalogItems;
-  }, [drawerRemoteSessions.items, renderedPaneSessions, resolveSessionGroupSlot, sessions]);
+    const projectedItems = new Map(catalogItems.map((item) => [item.id, item]));
+    if (catalogItems.length === 0 && activeSession && activeSession.state !== 'closed') {
+      projectedItems.set(activeSession.id, {
+        id: activeSession.id,
+        stableKey: activeSession.id,
+        title: activeSession.customName || activeSession.title || activeSession.sessionName,
+        subtitle: `${activeSession.connectionName || activeSession.hostId || 'unknown server'} · ${activeSession.sessionName}`,
+        sessionGroupSlot: resolveSessionGroupSlot(activeSession.id),
+        active: activeSessionIds.has(activeSession.id),
+        hostKey: activeSession.hostId,
+        hostLabel: activeSession.connectionName || activeSession.hostId,
+        terminalBackend: 'tmux',
+      });
+    }
+
+    return [...projectedItems.values()];
+  }, [activeSession, drawerRemoteSessions.items, renderedPaneSessions, resolveSessionGroupSlot, sessions]);
   useEffect(() => {
     if (!portraitSessionDrawerEnabled || sessionDrawerOpen || sessions.length > 0 || drawerHosts.length === 0) {
       return;
