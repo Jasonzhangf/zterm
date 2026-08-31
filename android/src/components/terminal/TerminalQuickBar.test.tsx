@@ -407,6 +407,33 @@ describe("TerminalQuickBar", () => {
     );
   }
 
+  it("sends goal paste as one ordered payload without splitting characters", async () => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { readText: vi.fn().mockResolvedValue("  /goal 修复输入延迟") },
+    });
+    const onSendSequence = vi.fn();
+    renderQuickBar({
+      onSendSequence,
+      shortcutActions: [
+        {
+          id: "preset-bottom-scroll-paste",
+          label: "Paste",
+          sequence: "\x16",
+          row: "bottom-scroll",
+          order: 0,
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Paste" }));
+
+    await waitFor(() => {
+      expect(onSendSequence).toHaveBeenCalledTimes(1);
+      expect(onSendSequence).toHaveBeenCalledWith("/goal 修复输入延迟\r");
+    });
+  });
+
 
 
 
