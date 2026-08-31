@@ -254,19 +254,19 @@ describe('buildTraversalPlan', () => {
 
     expect(plan.candidates.map((candidate) => candidate.path)).toEqual([
       'tailscale',
+      'ipv4',
+      'ipv6',
       'rtc-direct',
       'rtc-relay',
-      'ipv6',
-      'ipv4',
     ]);
-    expect(plan.candidates[1]).toMatchObject({
+    expect(plan.candidates[3]).toMatchObject({
       kind: 'rtc',
       path: 'rtc-direct',
       endpoint: 'rtc-direct:daemon-host-a',
       iceTransportPolicy: 'all',
       iceServers: [{ urls: 'stun:turn.example.com:3478' }],
     });
-    expect(JSON.stringify(plan.candidates[1])).not.toContain('secret');
+    expect(JSON.stringify(plan.candidates[3])).not.toContain('secret');
   });
 
   it('ignores stale saved traversal priority in auto mode', () => {
@@ -310,10 +310,10 @@ describe('buildTraversalPlan', () => {
 
     expect(plan.candidates.map((candidate) => candidate.path)).toEqual([
       'tailscale',
+      'ipv4',
+      'ipv6',
       'rtc-direct',
       'rtc-relay',
-      'ipv6',
-      'ipv4',
     ]);
   });
 
@@ -410,7 +410,7 @@ describe('buildTraversalPlan', () => {
     expect(plan.candidates).toEqual([
       expect.objectContaining({
         kind: 'ws',
-        path: 'ipv4',
+        path: 'lan',
         endpoint: '192.168.1.20:40807',
         url: 'ws://192.168.1.20:40807/?token=token',
       }),
@@ -603,7 +603,7 @@ describe('buildTraversalPlan', () => {
       },
     );
 
-    expect(plan.candidates.some((candidate) => candidate.endpoint === '192.168.50.20:3333')).toBe(false);
+    expect(plan.candidates.some((candidate) => candidate.endpoint === '192.168.50.20:3333')).toBe(true);
     expect(plan.candidates).toContainEqual(expect.objectContaining({
       id: 'direct:tailscale:daemon-host-a',
       kind: 'ws',

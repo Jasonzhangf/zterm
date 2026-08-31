@@ -4117,7 +4117,7 @@
           "to": "DaemonEndpointDirectory",
           "owner_feature": "relay.account_directory",
           "semantic_input": "relay-ready publication request plus current daemon network truth",
-          "semantic_output": "ordered LAN, honest RTC-direct, Tailscale, and TURN candidate set with account-scoped daemon auth token",
+          "semantic_output": "ordered LAN, Tailscale, verified public-direct, and TURN candidate set with account-scoped daemon auth token",
           "status": "anchored",
           "edge_id": "daemon_mainline:RelayHostControl->DaemonEndpointDirectory",
           "resource_from": "resource.relay_control_connection",

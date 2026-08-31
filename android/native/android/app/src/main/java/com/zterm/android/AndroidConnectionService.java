@@ -24,6 +24,10 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.net.URI;
+import java.net.Inet4Address;
+import java.net.InetAddress;
+import java.net.InterfaceAddress;
+import java.net.NetworkInterface;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -977,6 +981,9 @@ public class AndroidConnectionService extends Service {
                 addCandidate(candidates, routePolicy.path);
                 return candidates;
             }
+            if (isLocalLanHost(target.lanHost)) {
+                addCandidate(candidates, AndroidConnectionServiceRoutePolicy.Path.LAN);
+            }
             addCandidate(candidates, AndroidConnectionServiceRoutePolicy.Path.TAILSCALE);
             addCandidate(candidates, AndroidConnectionServiceRoutePolicy.Path.IPV6);
             addCandidate(candidates, AndroidConnectionServiceRoutePolicy.Path.IPV4);
@@ -997,6 +1004,8 @@ public class AndroidConnectionService extends Service {
 
         private String hostFor(AndroidConnectionServiceRoutePolicy.Path path) {
             switch (path) {
+                case LAN:
+                    return target.lanHost;
                 case TAILSCALE:
                     if (nonEmpty(target.tailscaleHost)) return target.tailscaleHost;
                     if (isLikelyTailscale(target.bridgeHost)) return target.bridgeHost;
@@ -1014,6 +1023,33 @@ public class AndroidConnectionService extends Service {
                 default:
                     return null;
             }
+        }
+
+        private boolean isLocalLanHost(String host) {
+            if (host == null || host.trim().isEmpty()) return false;
+            try {
+                InetAddress remote = InetAddress.getByName(host.trim());
+                if (!(remote instanceof Inet4Address)) return false;
+                java.util.Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
+                while (interfaces != null && interfaces.hasMoreElements()) {
+                    for (InterfaceAddress local : interfaces.nextElement().getInterfaceAddresses()) {
+                        if (!(local.getAddress() instanceof Inet4Address)) continue;
+                        short prefix = local.getNetworkPrefixLength();
+                        if (prefix < 0 || prefix > 32) continue;
+                        byte[] localBytes = local.getAddress().getAddress();
+                        byte[] remoteBytes = remote.getAddress();
+                        int mask = prefix == 0 ? 0 : (int) (0xffffffffL << (32 - prefix));
+                        int localValue = ((localBytes[0] & 0xff) << 24) | ((localBytes[1] & 0xff) << 16)
+                            | ((localBytes[2] & 0xff) << 8) | (localBytes[3] & 0xff);
+                        int remoteValue = ((remoteBytes[0] & 0xff) << 24) | ((remoteBytes[1] & 0xff) << 16)
+                            | ((remoteBytes[2] & 0xff) << 8) | (remoteBytes[3] & 0xff);
+                        if ((localValue & mask) == (remoteValue & mask)) return true;
+                    }
+                }
+            } catch (Exception error) {
+                Log.d(TAG, "LAN eligibility probe failed", error);
+            }
+            return false;
         }
 
         private String buildWebSocketUrl(String host, int port, String authToken) {

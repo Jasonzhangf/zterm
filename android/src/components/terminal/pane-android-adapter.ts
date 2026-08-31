@@ -29,7 +29,7 @@ export interface AndroidPaneSessionInput {
   sessionName: string;
   title?: string;
   customName?: string;
-  resolvedPath?: 'rtc-direct' | 'tailscale' | 'ipv6' | 'ipv4' | 'rtc-relay';
+  resolvedPath?: 'lan' | 'rtc-direct' | 'tailscale' | 'ipv6' | 'ipv4' | 'rtc-relay';
   active?: boolean;
 }
 

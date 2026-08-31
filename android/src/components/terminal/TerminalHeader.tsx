@@ -13,7 +13,7 @@ export interface TerminalHeaderSessionItem {
   bridgePort: number;
   sessionName: string;
   customName?: string;
-  resolvedPath?: 'rtc-direct' | 'tailscale' | 'ipv6' | 'ipv4' | 'rtc-relay';
+  resolvedPath?: 'lan' | 'rtc-direct' | 'tailscale' | 'ipv6' | 'ipv4' | 'rtc-relay';
   resolvedRelayTransport?: 'direct' | 'turn';
 }
 
@@ -59,6 +59,8 @@ function formatResolvedPath(
   relayTransport?: TerminalHeaderSessionItem['resolvedRelayTransport'],
 ) {
   switch (path) {
+    case 'lan':
+      return '局域网';
     case 'rtc-direct':
       return 'RTC';
     case 'tailscale':

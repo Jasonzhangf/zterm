@@ -37,16 +37,16 @@ export {
   canonicalizeBridgeServerPresets,
 };
 export type { BridgeServerPreset, BridgeSettings, TerminalShellSkin, TerminalSessionGroupLayoutMode, TraversalRelayClientSettings };
-export type TraversalPath = 'rtc-direct' | 'tailscale' | 'ipv6' | 'ipv4' | 'rtc-relay';
+export type TraversalPath = 'lan' | 'tailscale' | 'ipv4' | 'ipv6' | 'rtc-direct' | 'rtc-relay';
 
-export const DEFAULT_TRAVERSAL_PATH_PRIORITY: TraversalPath[] = ['tailscale', 'rtc-direct', 'rtc-relay', 'ipv6', 'ipv4'];
+export const DEFAULT_TRAVERSAL_PATH_PRIORITY: TraversalPath[] = ['lan', 'tailscale', 'ipv4', 'ipv6', 'rtc-direct', 'rtc-relay'];
 
 export function normalizeTraversalPathPriority(input: unknown): TraversalPath[] {
   const seen = new Set<TraversalPath>();
   const next: TraversalPath[] = [];
   if (Array.isArray(input)) {
     for (const item of input) {
-      if (item === 'rtc-direct' || item === 'tailscale' || item === 'ipv6' || item === 'ipv4' || item === 'rtc-relay') {
+      if (item === 'lan' || item === 'tailscale' || item === 'ipv4' || item === 'ipv6' || item === 'rtc-direct' || item === 'rtc-relay') {
         if (!seen.has(item)) {
           seen.add(item);
           next.push(item);
