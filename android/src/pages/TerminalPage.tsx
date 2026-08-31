@@ -1206,7 +1206,7 @@ function TerminalPageComponent({
       const sessionNames = [...new Set(
         (device.daemon.sessions || []).map((session) => session.name.trim()).filter(Boolean),
       )].sort((left, right) => left.localeCompare(right));
-      const sessionCwByName = Object.fromEntries(
+      const sessionCwdByName = Object.fromEntries(
         (device.daemon.sessions || [])
           .filter((session) => session.name.trim() && session.cwd?.trim())
           .map((session) => [session.name.trim(), session.cwd!.trim()]),
@@ -1232,7 +1232,7 @@ function TerminalPageComponent({
         authToken: existingGroup?.authToken || directEndpoint?.authToken,
         relayEndpointCandidates: device.daemon.endpoints,
         sessionNames,
-        ...(Object.keys(sessionCwByName).length > 0 ? { sessionCwByName } : {}),
+        ...(Object.keys(sessionCwdByName).length > 0 ? { sessionCwdByName } : {}),
         missingSessionNames: [],
         lastOpenedSessionName: lastOpenedSessionName && sessionNames.includes(lastOpenedSessionName)
           ? lastOpenedSessionName
@@ -1391,7 +1391,7 @@ function TerminalPageComponent({
           hostKey: serverIdentity.key,
           hostLabel: serverIdentity.label,
           terminalBackend: groupBackend,
-          cwd: group.sessionCwByName?.[sessionName],
+          cwd: group.sessionCwdByName?.[sessionName],
           subtitle: `${serverIdentity.label} · ${sessionName}${formatTerminalBackendSuffix(groupBackend)}`,
         });
       }
