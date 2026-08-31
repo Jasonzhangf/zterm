@@ -38,10 +38,15 @@ export function buildSessionsCatalogPayload(
       : {}),
   }));
   if (backend) {
-    const sessions = deps.listTmuxSessions(backend);
+    if (!deps.listTerminalSessionCatalog) {
+      throw new Error('backend session catalog requires daemon-owned terminal session catalog');
+    }
+    const sessionCatalog = observe(
+      deps.listTerminalSessionCatalog().filter((entry) => entry.backend === backend),
+    );
     return {
-      sessions,
-      sessionCatalog: observe(sessions.map((name) => ({ name, backend }))),
+      sessions: sessionCatalog.map((entry) => entry.name),
+      sessionCatalog,
     };
   }
   if (deps.listTerminalSessionCatalog) {

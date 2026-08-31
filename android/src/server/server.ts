@@ -631,7 +631,7 @@ const relayHostClient = createTraversalRelayHostClient({
     authToken: REQUIRED_AUTH_TOKEN,
     now,
   }),
-  listTmuxSessions,
+  listTerminalSessionCatalog,
 });
 wss.on('connection', handleWebSocketConnection);
 startHeartbeatLoop();

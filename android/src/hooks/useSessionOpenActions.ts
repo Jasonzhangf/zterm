@@ -30,9 +30,9 @@ import { sanitizeTmuxSessionName } from '@zterm/shared/tmux-session-name';
 import {
   createTmuxSession,
   fetchTmuxSessions,
-  fetchTmuxSessionCatalog,
   killTmuxSession,
   renameTmuxSession,
+  refreshTmuxSessionCatalog,
 } from '../lib/tmux-sessions';
 import type { TerminalSessionCatalog } from '@zterm/shared/protocol';
 import type { Host, PersistedOpenTab, Session, SessionGroupHistory, TraversalRelayDeviceSnapshot } from '../lib/types';
@@ -44,7 +44,7 @@ import {
   resolveReusableOpenSessionForTarget,
   resolveSessionGroupForTarget,
 } from '../lib/session-open-helpers';
-import { sessionSemanticReuseMatch } from '../lib/session-semantic-identity';
+import { buildSessionSemanticOwnerKey, sessionSemanticReuseMatch } from '../lib/session-semantic-identity';
 import { listOnlineTraversalRelayDaemonDevices } from '../lib/traversal-relay-devices';
 
 type PickerMode = 'new-connection' | 'quick-tab' | 'edit-group' | null;
@@ -555,6 +555,15 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     catalog?: TerminalSessionCatalog,
   ) => {
     const normalizedSessionNames = normalizeRemoteTmuxSessionNames(sessionNames);
+    const existingTmuxGroup = resolveSessionGroupForTarget(
+      sessionGroupsRef.current,
+      { ...target, terminalBackend: 'tmux' },
+      relayDevicesRef.current,
+    );
+    const preservedTmuxCwdByName = Object.fromEntries(
+      Object.entries(existingTmuxGroup?.sessionCwdByName || {})
+        .filter(([name, cwd]) => normalizedSessionNames.includes(name) && cwd?.trim()),
+    );
     const baseGroup = {
       name: target.daemonHostId || target.relayHostId || target.bridgeHost,
       bridgeHost: target.bridgeHost,
@@ -584,11 +593,17 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
             ...baseGroup,
             terminalBackend: backend,
             sessionNames: backendNames,
-            sessionCwdByName: Object.fromEntries(
-              (entriesByBackend.get(backend) || [])
-                .filter((entry) => entry.cwd?.trim())
-                .map((entry) => [entry.name.trim(), entry.cwd!.trim()]),
-            ),
+            ...(() => {
+              const sessionCwdByName = Object.fromEntries(
+                [
+                  ...(backend === 'tmux' ? Object.entries(preservedTmuxCwdByName).map(([name, cwd]) => ({ name, cwd })) : []),
+                  ...(entriesByBackend.get(backend) || []),
+                ]
+                  .filter((entry) => entry.cwd?.trim())
+                  .map((entry) => [entry.name.trim(), entry.cwd!.trim()]),
+              );
+              return Object.keys(sessionCwdByName).length > 0 ? { sessionCwdByName } : {};
+            })(),
           });
         }
         pruneSessionGroupSelectionToRemoteTruth({
@@ -604,6 +619,9 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
           ...baseGroup,
           ...(target.terminalBackend === 'herdr' ? { terminalBackend: 'herdr' as const } : {}),
           sessionNames: normalizedSessionNames,
+          ...(target.terminalBackend !== 'herdr' && Object.keys(preservedTmuxCwdByName).length > 0
+            ? { sessionCwdByName: preservedTmuxCwdByName }
+            : {}),
         });
       }
       pruneSessionGroupSelectionToRemoteTruth({
@@ -616,7 +634,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     void auditOpenTabsAgainstRemoteSessions('session-picker-refresh').catch((error) => {
       console.error('[App] Failed to audit remote session truth after session picker refresh:', error);
     });
-  }, [auditOpenTabsAgainstRemoteSessions, pruneSessionGroupSelectionToRemoteTruth, setSessionGroupSelection]);
+  }, [auditOpenTabsAgainstRemoteSessions, pruneSessionGroupSelectionToRemoteTruth, relayDevicesRef, sessionGroupsRef, setSessionGroupSelection]);
 
   const manageTmuxSessionsForTarget = useCallback(async (
     target: BridgeTarget,
@@ -692,7 +710,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
       }
       return catalog;
     }
-    return fetchTmuxSessionCatalog(target, bridgeSettingsRef.current);
+    return refreshTmuxSessionCatalog(target, bridgeSettingsRef.current);
   }, [
     bridgeSettingsRef,
     queryTerminalSessionCatalogOnOpenTransport,
@@ -1042,6 +1060,10 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
       device.daemon.hostId.trim() === normalizedHostKey
       || device.deviceId.trim() === normalizedHostKey
       || device.deviceName.trim() === normalizedHostKey
+      || (device.daemon.endpoints || []).some((endpoint) => (
+        endpoint.host?.trim() === normalizedHostKey
+        || `${endpoint.host?.trim() || ''}:${endpoint.port || 0}` === normalizedHostKey
+      ))
     ));
     if (matchedDevice) {
       return enrichTargetFromSavedHosts(
@@ -1055,6 +1077,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
         || host.name.trim() === normalizedHostKey
         || host.daemonHostId?.trim() === normalizedHostKey
         || host.relayHostId?.trim() === normalizedHostKey
+        || buildSessionSemanticOwnerKey(host) === normalizedHostKey
         || host.bridgeHost.trim() === normalizedHostKey
         || `${host.bridgeHost.trim()}:${host.bridgePort}` === normalizedHostKey
       ))
@@ -1068,6 +1091,12 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
       || server.targetHost.trim() === normalizedHostKey
       || `${server.targetHost.trim()}:${server.targetPort}` === normalizedHostKey
       || server.relayHostId?.trim() === normalizedHostKey
+      || buildSessionSemanticOwnerKey({
+        daemonHostId: server.relayHostId,
+        relayHostId: server.relayHostId,
+        bridgeHost: server.targetHost,
+        bridgePort: server.targetPort,
+      }) === normalizedHostKey
     ));
     if (matchedPreset) {
       return normalizeBridgeTarget({
@@ -1081,6 +1110,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     const matchedSession = sessionsRef.current.find((session) => (
       session.daemonHostId?.trim() === normalizedHostKey
       || session.connectionName?.trim() === normalizedHostKey
+      || buildSessionSemanticOwnerKey(session) === normalizedHostKey
       || session.bridgeHost.trim() === normalizedHostKey
       || `${session.bridgeHost.trim()}:${session.bridgePort}` === normalizedHostKey
     ));

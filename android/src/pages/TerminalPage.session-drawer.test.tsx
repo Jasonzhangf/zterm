@@ -119,6 +119,7 @@ function makeRelayDevice(overrides: Partial<{
   endpointHost: string;
   includeDirectEndpoint: boolean;
   sessions: string[];
+  sessionCwds: Record<string, string | undefined>;
   daemonConnected: boolean;
 }> = {}) {
   const deviceId = overrides.deviceId || 'device-mac-studio';
@@ -159,7 +160,9 @@ function makeRelayDevice(overrides: Partial<{
       ],
       sessions: (overrides.sessions || []).map((name) => ({
         name,
-        cwd: '/Users/jason',
+        ...(Object.prototype.hasOwnProperty.call(overrides.sessionCwds || {}, name)
+          ? (overrides.sessionCwds?.[name] ? { cwd: overrides.sessionCwds[name] } : {})
+          : { cwd: '/Users/jason' }),
         title: name,
         updatedAt: now,
       })),
@@ -2432,6 +2435,57 @@ describe('TerminalPage portrait session drawer', () => {
 
     fireEvent.click(screen.getByText('live tab'));
     expect(onSwitchSession).toHaveBeenCalledWith('live');
+  });
+
+  it('keeps daemon-catalog cwd when relay directory refresh has names without cwd', async () => {
+    const sessions = [makeSession('known')];
+    sessions[0]!.daemonHostId = 'daemon-a';
+    sessions[0]!.sessionName = 'known-main';
+    render(
+      <TerminalPage
+        sessions={sessions}
+        sessionGroups={[{
+          id: 'daemon:daemon-a',
+          name: 'Daemon A',
+          bridgeHost: '100.66.1.82',
+          bridgePort: 3333,
+          daemonHostId: 'daemon-a',
+          terminalBackend: 'tmux',
+          sessionNames: ['known-main'],
+          sessionCwdByName: { 'known-main': '/Volumes/extension/code/zterm' },
+          lastOpenedAt: 1,
+        }]}
+        relayDevices={[makeRelayDevice({
+          hostId: 'daemon-a',
+          sessions: ['known-main'],
+          sessionCwds: { 'known-main': undefined },
+        })]}
+        activeSession={sessions[0]}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    const swipeSurface = document.querySelector('[data-testid^="terminal-swipe-surface-"][data-swipe-enabled="true"]') as HTMLElement;
+    fireEvent.touchStart(swipeSurface, { touches: [{ clientX: 56, clientY: 200 }] });
+    fireEvent.touchMove(swipeSurface, {
+      touches: [{ clientX: 236, clientY: 206 }],
+      cancelable: true,
+    });
+    fireEvent.touchEnd(swipeSurface, { changedTouches: [{ clientX: 236, clientY: 206 }] });
+
+    await waitFor(() => expect(screen.getByText('/Volumes/extension/code/zterm')).toBeTruthy());
+    expect(screen.queryByText('cwd 未知')).toBeNull();
   });
 
   it('does not select a session from the synthetic click after edge-opening the drawer', async () => {

@@ -72,14 +72,17 @@ describe('daemon session catalog runtime', () => {
 
   it('keeps explicit backend list requests backend-qualified', () => {
     const deps = makeDeps({
-      listTmuxSessions: vi.fn(() => ['alpha']),
+      listTerminalSessionCatalog: vi.fn(() => [
+        { name: 'alpha', backend: 'tmux', cwd: '/tmp/alpha' },
+        { name: 'external', backend: 'herdr', cwd: '/tmp/external' },
+      ]),
     });
 
     expect(buildSessionsCatalogPayload(deps, 'tmux')).toEqual({
       sessions: ['alpha'],
-      sessionCatalog: [{ name: 'alpha', backend: 'tmux' }],
+      sessionCatalog: [{ name: 'alpha', backend: 'tmux', cwd: '/tmp/alpha' }],
     });
-    expect(deps.listTmuxSessions).toHaveBeenCalledWith('tmux');
+    expect(deps.listTerminalSessionCatalog).toHaveBeenCalledTimes(1);
   });
 
   it('falls back to terminal session names only when no catalog is available', () => {

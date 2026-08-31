@@ -8,6 +8,9 @@ import {
   UNSCOPED_HOST_GROUP_LABEL,
   resolveSessionGroupSlotTone,
 } from './terminal-session-drawer-helpers';
+import { TerminalSessionDrawerFolderMenu } from './TerminalSessionDrawerFolderMenu';
+import { TerminalSessionDrawerNewSessionDialog } from './TerminalSessionDrawerNewSessionDialog';
+import { TerminalSessionDrawerSlotMenu } from './TerminalSessionDrawerSlotMenu';
 import { getServerIdentityTone } from '../../lib/server-identity';
 import type {
   TerminalSessionDrawerItem,
@@ -20,7 +23,6 @@ export type {
   TerminalSessionGroupLayoutAxis,
   TerminalSessionGroupSlotName,
 } from '../../lib/plugin-session-drawer/session-drawer-contract';
-
 function TerminalSessionDrawerComponent({
   open,
   topInsetPx = 0,
@@ -62,13 +64,11 @@ function TerminalSessionDrawerComponent({
     terminalBackend: 'tmux' | 'herdr';
   } | null>(null);
   const [folderMenu, setFolderMenu] = useState<{ cwd: string; x: number; y: number } | null>(null);
-
   useEffect(() => {
     if (open) {
       closeButtonRef.current?.focus({ preventScroll: true });
     }
   }, [open]);
-
   const buildDefaultSessionName = () => {
     const stamp = new Date()
       .toISOString()
@@ -77,19 +77,16 @@ function TerminalSessionDrawerComponent({
       .replace('T', '-');
     return `zterm-${stamp}`;
   };
-
   const clearLongPressTimer = () => {
     if (longPressTimerRef.current !== null) {
       window.clearTimeout(longPressTimerRef.current);
       longPressTimerRef.current = null;
     }
   };
-
   const activateCloseSession = (sessionId: string) => {
     clearLongPressTimer();
     onCloseSession(sessionId);
   };
-
   const openSlotMenu = (session: TerminalSessionDrawerItem, x: number, y: number) => {
     if (!onAssignSessionGroupSlot) {
       return;
@@ -102,7 +99,6 @@ function TerminalSessionDrawerComponent({
       y,
     });
   };
-
   const describeEventTarget = (target: EventTarget | null) => {
     if (!(target instanceof HTMLElement)) {
       return 'unknown';
@@ -116,7 +112,6 @@ function TerminalSessionDrawerComponent({
     }
     return target.tagName.toLowerCase();
   };
-
   const hostGroups = useMemo(() => {
     const groups = new Map<
       string,
@@ -160,11 +155,9 @@ function TerminalSessionDrawerComponent({
     }
     return Array.from(groups.values());
   }, [hosts, sessions]);
-
   const showHostRail = hostGroups.length > 0;
   const multiHost = hostGroups.length > 1;
   const [selectedHostKey, setSelectedHostKey] = useState<string | null>(null);
-
   const effectiveHostKey = useMemo(() => {
     if (selectedHostKey && hostGroups.some((g) => g.groupKey === selectedHostKey)) {
       return selectedHostKey;
@@ -182,7 +175,6 @@ function TerminalSessionDrawerComponent({
     const activeGroup = hostGroups.find((g) => g.sessions.some((s) => s.active));
     return activeGroup?.groupKey || hostGroups[0]?.groupKey || null;
   }, [hostGroups, selectedHostKey]);
-
   const visibleSessions = useMemo(() => {
     if (!effectiveHostKey) {
       return sessions;
@@ -211,8 +203,6 @@ function TerminalSessionDrawerComponent({
   }, [open]);
 
   const openNewSessionDialog = () => {
-    // Derive default backend from the current host group's first session.
-    // Falls back to tmux when the host has no session signal yet.
     const hostBackend = currentHostGroup?.sessions.find((s) => s.terminalBackend)?.terminalBackend;
     setNewSessionDraft({
       hostKey: currentHostGroup?.hostKey,
@@ -816,255 +806,36 @@ function TerminalSessionDrawerComponent({
           )}
         </div>
         {folderMenu ? (
-          <div
-            role="menu"
-            data-testid="terminal-session-drawer-folder-menu"
-            style={{
-              position: 'fixed', left: folderMenu.x, top: folderMenu.y, zIndex: 170,
-              display: 'flex', flexDirection: 'column', gap: '4px', padding: '6px',
-              borderRadius: '10px', border: '1px solid var(--zterm-panel-border)',
-              background: 'var(--zterm-panel-bg)', boxShadow: '0 12px 30px rgba(0,0,0,.35)',
-            }}
-          >
-            <button type="button" role="menuitem" onClick={() => { onPreviewFolder?.(folderMenu.cwd); setFolderMenu(null); }}
-              style={{ minHeight: '34px', padding: '0 10px', border: 0, borderRadius: '7px', background: 'var(--zterm-panel-active)', color: 'var(--zterm-panel-text)', fontWeight: 800 }}>
-              进入文件夹预览
-            </button>
-            <button type="button" role="menuitem" onClick={() => setFolderMenu(null)}
-              style={{ minHeight: '30px', padding: '0 10px', border: 0, borderRadius: '7px', background: 'transparent', color: 'var(--zterm-panel-muted)' }}>
-              取消
-            </button>
-          </div>
+          <TerminalSessionDrawerFolderMenu
+            cwd={folderMenu.cwd}
+            x={folderMenu.x}
+            y={folderMenu.y}
+            onPreview={(cwd) => onPreviewFolder?.(cwd)}
+            onClose={() => setFolderMenu(null)}
+          />
         ) : null}
-
         {slotMenu && onAssignSessionGroupSlot ? (
-          <div
-            data-testid="terminal-session-drawer-slot-menu"
-            style={{
-              position: 'absolute',
-              left: `${Math.min(Math.max(12, slotMenu.x), 190)}px`,
-              top: `${Math.max(72, slotMenu.y - 18)}px`,
-              zIndex: 2,
-              width: '160px',
-              padding: '8px',
-              borderRadius: '14px',
-              border: '1px solid var(--zterm-panel-border)',
-              background: 'var(--zterm-panel-bg)',
-              boxShadow: '0 14px 30px var(--zterm-panel-shadow)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '6px',
+          <TerminalSessionDrawerSlotMenu
+            sessionId={slotMenu.sessionId}
+            title={slotMenu.title}
+            x={slotMenu.x}
+            y={slotMenu.y}
+            axis={sessionGroupLayoutAxis}
+            onAssign={(sessionId, slot) => {
+              onAssignSessionGroupSlot(sessionId, slot);
+              suppressNextClickRef.current = true;
             }}
-          >
-            <div
-              style={{
-                padding: '2px 4px 5px',
-                color: 'var(--zterm-panel-muted)',
-                fontSize: '11px',
-                lineHeight: 1.3,
-              }}
-            >
-              设置 {slotMenu.title} 的位置
-            </div>
-            {([
-              ['top', sessionGroupLayoutAxis === 'horizontal' ? '放到左侧' : '放到上方'],
-              ['center', '放到中间'],
-              ['bottom', sessionGroupLayoutAxis === 'horizontal' ? '放到右侧' : '放到下方'],
-            ] as const).map(([slot, label]) => {
-              const tone = resolveSessionGroupSlotTone(slot, sessionGroupLayoutAxis);
-              return (
-                <button
-                  key={slot}
-                  type="button"
-                  data-testid={`terminal-session-drawer-slot-menu-${slot}`}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onAssignSessionGroupSlot(slotMenu.sessionId, slot);
-                    suppressNextClickRef.current = true;
-                    setSlotMenu(null);
-                  }}
-                  style={{
-                    height: '34px',
-                    borderRadius: '10px',
-                    border: `1px solid ${tone?.border || 'var(--zterm-panel-border)'}`,
-                    background: tone?.background || 'var(--zterm-panel-surface)',
-                    color: tone?.color || 'var(--zterm-panel-text)',
-                    fontSize: '13px',
-                    fontWeight: 800,
-                  }}
-                >
-                  {label}
-                </button>
-              );
-            })}
-            <button
-              type="button"
-              data-testid="terminal-session-drawer-slot-menu-cancel"
-              onClick={(event) => {
-                event.stopPropagation();
-                suppressNextClickRef.current = true;
-                setSlotMenu(null);
-              }}
-              style={{
-                height: '32px',
-                borderRadius: '10px',
-                border: '1px solid var(--zterm-panel-border)',
-                background: 'var(--zterm-panel-surface)',
-                color: 'var(--zterm-panel-muted)',
-                fontSize: '12px',
-                fontWeight: 750,
-              }}
-            >
-              取消
-            </button>
-          </div>
+            onClose={() => setSlotMenu(null)}
+          />
         ) : null}
 
         {newSessionDraft ? (
-          <div
-            data-testid="terminal-session-drawer-new-session-dialog"
-            style={{
-              margin: '8px 10px',
-              padding: '12px',
-              borderRadius: '16px',
-              border: '1px solid var(--zterm-panel-border)',
-              background: 'var(--zterm-panel-bg)',
-              boxShadow: '0 14px 30px var(--zterm-panel-shadow)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '10px',
-            }}
-          >
-            <div
-              style={{
-                color: 'var(--zterm-panel-text)',
-                fontSize: '13px',
-                fontWeight: 850,
-              }}
-            >
-              新建 Session
-            </div>
-            <label
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '5px',
-                color: 'var(--zterm-panel-muted)',
-                fontSize: '11px',
-                fontWeight: 800,
-              }}
-            >
-              名称
-              <input
-                aria-label="新 session 名称"
-                value={newSessionDraft.sessionName}
-                onChange={(event) => setNewSessionDraft((current) => (
-                  current ? { ...current, sessionName: event.target.value } : current
-                ))}
-                style={{
-                  height: '34px',
-                  borderRadius: '10px',
-                  border: '1px solid var(--zterm-panel-border)',
-                  background: 'var(--zterm-panel-surface)',
-                  color: 'var(--zterm-panel-text)',
-                  padding: '0 10px',
-                  fontSize: '13px',
-                }}
-              />
-            </label>
-            <label
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '5px',
-                color: 'var(--zterm-panel-muted)',
-                fontSize: '11px',
-                fontWeight: 800,
-              }}
-            >
-              启动路径
-              <input
-                aria-label="新 session 启动路径"
-                value={newSessionDraft.cwd}
-                placeholder="~/"
-                onChange={(event) => setNewSessionDraft((current) => (
-                  current ? { ...current, cwd: event.target.value } : current
-                ))}
-                style={{
-                  height: '34px',
-                  borderRadius: '10px',
-                  border: '1px solid var(--zterm-panel-border)',
-                  background: 'var(--zterm-panel-surface)',
-                  color: 'var(--zterm-panel-text)',
-                  padding: '0 10px',
-                  fontSize: '13px',
-                }}
-              />
-            </label>
-            <div
-              aria-label="新 session backend"
-              style={{ display: 'flex', gap: '6px' }}
-            >
-              {(['tmux', 'herdr'] as const).map((backend) => (
-                <button
-                  key={backend}
-                  type="button"
-                  aria-pressed={newSessionDraft.terminalBackend === backend}
-                  onClick={() => setNewSessionDraft((current) => (
-                    current ? { ...current, terminalBackend: backend } : current
-                  ))}
-                  style={{
-                    flex: 1,
-                    height: '34px',
-                    borderRadius: '10px',
-                    border: '1px solid var(--zterm-panel-border)',
-                    background: newSessionDraft.terminalBackend === backend
-                      ? 'var(--zterm-panel-active)'
-                      : 'var(--zterm-panel-surface)',
-                    color: newSessionDraft.terminalBackend === backend
-                      ? 'var(--zterm-panel-accent)'
-                      : 'var(--zterm-panel-muted)',
-                    fontWeight: 850,
-                  }}
-                >
-                  {backend === 'tmux' ? 'tmux' : 'Herdr'}
-                </button>
-              ))}
-            </div>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <button
-                type="button"
-                onClick={() => setNewSessionDraft(null)}
-                style={{
-                  flex: 1,
-                  height: '34px',
-                  borderRadius: '10px',
-                  border: '1px solid var(--zterm-panel-border)',
-                  background: 'var(--zterm-panel-surface)',
-                  color: 'var(--zterm-panel-muted)',
-                  fontWeight: 800,
-                }}
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                disabled={!newSessionDraft.sessionName.trim()}
-                onClick={confirmNewSession}
-                style={{
-                  flex: 1,
-                  height: '34px',
-                  borderRadius: '10px',
-                  border: '1px solid var(--zterm-panel-border)',
-                  background: newSessionDraft.sessionName.trim() ? 'var(--zterm-panel-active)' : 'var(--zterm-panel-surface)',
-                  color: newSessionDraft.sessionName.trim() ? 'var(--zterm-panel-accent)' : 'var(--zterm-panel-muted)',
-                  fontWeight: 900,
-                }}
-              >
-                创建
-              </button>
-            </div>
-          </div>
+          <TerminalSessionDrawerNewSessionDialog
+            draft={newSessionDraft}
+            setDraft={setNewSessionDraft}
+            onCancel={() => setNewSessionDraft(null)}
+            onConfirm={confirmNewSession}
+          />
         ) : null}
 
         {previewSelectionMode ? (
@@ -1171,7 +942,6 @@ function TerminalSessionDrawerComponent({
     </>
   );
 }
-
 function terminalSessionDrawerPropsEqual(
   prev: TerminalSessionDrawerProps,
   next: TerminalSessionDrawerProps,

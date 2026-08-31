@@ -11,6 +11,7 @@ const resolveRemoteRestorableOpenTabStateMock = vi.fn();
 const createTmuxSessionMock = vi.fn();
 const fetchTmuxSessionsMock = vi.fn();
 const fetchTmuxSessionCatalogMock = vi.fn();
+const refreshTmuxSessionCatalogMock = vi.fn();
 const killTmuxSessionMock = vi.fn();
 
 vi.mock('../lib/open-tab-restore', () => ({
@@ -21,6 +22,7 @@ vi.mock('../lib/tmux-sessions', () => ({
   createTmuxSession: (...args: unknown[]) => createTmuxSessionMock(...args),
   fetchTmuxSessions: (...args: unknown[]) => fetchTmuxSessionsMock(...args),
   fetchTmuxSessionCatalog: (...args: unknown[]) => fetchTmuxSessionCatalogMock(...args),
+  refreshTmuxSessionCatalog: (...args: unknown[]) => refreshTmuxSessionCatalogMock(...args),
   killTmuxSession: (...args: unknown[]) => killTmuxSessionMock(...args),
 }));
 
@@ -173,6 +175,8 @@ describe('useSessionOpenActions explicit-open truth', () => {
     fetchTmuxSessionsMock.mockResolvedValue([]);
     fetchTmuxSessionCatalogMock.mockReset();
     fetchTmuxSessionCatalogMock.mockResolvedValue({ sessionNames: [], sessionCatalog: [] });
+    refreshTmuxSessionCatalogMock.mockReset();
+    refreshTmuxSessionCatalogMock.mockImplementation((...args: unknown[]) => fetchTmuxSessionCatalogMock(...args));
     killTmuxSessionMock.mockReset();
     killTmuxSessionMock.mockResolvedValue([]);
     resolveRemoteRestorableOpenTabStateMock.mockReset();
@@ -1357,6 +1361,56 @@ describe('useSessionOpenActions explicit-open truth', () => {
     expect(harness.spies.switchSession).not.toHaveBeenCalled();
   });
 
+  it('resolves a bridge semantic drawer host key and persists catalog cwd', async () => {
+    const harness = createOptions({
+      bridgeSettings: {
+        servers: [{
+          id: 'local-daemon',
+          name: 'Local',
+          targetHost: '127.0.0.1',
+          targetPort: 3333,
+          authToken: 'token-local',
+        }],
+        targetHost: '127.0.0.1',
+        targetPort: 3333,
+        targetAuthToken: 'token-local',
+      },
+    });
+    fetchTmuxSessionCatalogMock.mockResolvedValueOnce({
+      sessionNames: ['zterm'],
+      sessionCatalog: [{ name: 'zterm', backend: 'tmux', cwd: '/Volumes/extension/code/zterm' }],
+    });
+    const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
+
+    await act(async () => {
+      await result.current.handleRefreshDrawerHostSessions('bridge:127.0.0.1::3333');
+    });
+
+    expect(fetchTmuxSessionCatalogMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+      }),
+      expect.any(Object),
+    );
+    expect(harness.spies.setSessionGroupSelection).toHaveBeenCalledWith(expect.objectContaining({
+      sessionNames: ['zterm'],
+      sessionCwdByName: { zterm: '/Volumes/extension/code/zterm' },
+    }));
+  });
+
+  it('does not resolve an unrelated bridge semantic drawer host key', async () => {
+    const harness = createOptions();
+    const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
+
+    await act(async () => {
+      await result.current.handleRefreshDrawerHostSessions('bridge:127.0.0.2::3333');
+    });
+
+    expect(fetchTmuxSessionCatalogMock).not.toHaveBeenCalled();
+    expect(harness.spies.setSessionGroupSelection).not.toHaveBeenCalled();
+  });
+
   it('refreshes the unified daemon catalog so running Herdr sessions enter the drawer history', async () => {
     const auditOpenTabsAgainstRemoteSessions = vi.fn(async () => undefined);
     const harness = createOptions();
@@ -1462,6 +1516,66 @@ describe('useSessionOpenActions explicit-open truth', () => {
         sessionNames: ['alpha', 'beta'],
       }),
     );
+  });
+
+  it('persists cwd from the existing mux catalog into the drawer group', async () => {
+    const queryTerminalSessionCatalogOnOpenTransport = vi.fn(async () => ({
+      sessionNames: ['alpha'],
+      sessionCatalog: [{
+        name: 'alpha',
+        backend: 'tmux' as const,
+        cwd: '/Volumes/extension/code/collab',
+      }],
+    }));
+    const harness = createOptions({
+      runtimeActiveSessionId: 'active-alpha',
+      queryTerminalSessionCatalogOnOpenTransport,
+      sessions: [{
+        id: 'active-alpha',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        sessionName: 'alpha',
+        state: 'connected',
+        createdAt: 10,
+      }],
+    });
+    const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
+
+    await act(async () => {
+      await result.current.handleRefreshDrawerHostSessions('daemon-a');
+    });
+
+    expect(harness.spies.setSessionGroupSelection).toHaveBeenCalledWith(expect.objectContaining({
+      sessionNames: ['alpha'],
+      sessionCwdByName: { alpha: '/Volumes/extension/code/collab' },
+    }));
+  });
+
+  it('does not clear confirmed cwd when a later name-only refresh arrives', async () => {
+    const harness = createOptions({
+      sessionGroups: [{
+        id: 'bridge:127.0.0.1::3333',
+        name: 'Local',
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        sessionNames: ['alpha'],
+        sessionCwdByName: { alpha: '/Volumes/extension/code/collab' },
+      }],
+    });
+    const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
+
+    await act(async () => {
+      result.current.handleRemoteSessionsRefreshed({
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+      } as any, ['alpha']);
+    });
+
+    expect(harness.spies.setSessionGroupSelection).toHaveBeenCalledWith(expect.objectContaining({
+      sessionNames: ['alpha'],
+      sessionCwdByName: { alpha: '/Volumes/extension/code/collab' },
+    }));
   });
 
   it('does not fallback to a second tmux management socket when existing mux target management fails', async () => {

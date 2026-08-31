@@ -41,7 +41,12 @@ describe('traversal relay daemon directory publisher', () => {
     ];
     const envelope = buildRelayDirectoryUpdateEnvelope({
       endpoints,
-      sessionNames: ['main', 'work', 'main', '  '],
+      sessionCatalog: [
+        { name: 'main', cwd: '/tmp/main' },
+        { name: 'work', cwd: '/tmp/work' },
+        { name: 'main', cwd: '/tmp/duplicate' },
+        { name: '  ' },
+      ],
       now: '2026-06-28T10:00:00.000Z',
     });
 
@@ -50,8 +55,8 @@ describe('traversal relay daemon directory publisher', () => {
       directory: {
         endpoints,
         sessions: [
-          { name: 'main', updatedAt: '2026-06-28T10:00:00.000Z' },
-          { name: 'work', updatedAt: '2026-06-28T10:00:00.000Z' },
+          { name: 'main', cwd: '/tmp/main', updatedAt: '2026-06-28T10:00:00.000Z' },
+          { name: 'work', cwd: '/tmp/work', updatedAt: '2026-06-28T10:00:00.000Z' },
         ],
         publishedAt: '2026-06-28T10:00:00.000Z',
       },
@@ -69,7 +74,7 @@ describe('traversal relay daemon directory publisher', () => {
         authRequired: true,
         lastSeenAt: '2026-06-28T10:01:00.000Z',
       }],
-      listTmuxSessions: () => ['main'],
+      listTerminalSessionCatalog: () => [{ name: 'main', cwd: '/tmp/main' }],
       now: () => '2026-06-28T10:01:00.000Z',
     });
 
@@ -95,7 +100,7 @@ describe('traversal relay daemon directory publisher', () => {
         authRequired: true,
         lastSeenAt: '2026-06-28T10:02:00.000Z',
       }],
-      listTmuxSessions: () => {
+      listTerminalSessionCatalog: () => {
         throw new Error('tmux unavailable');
       },
       now: () => '2026-06-28T10:02:00.000Z',
@@ -116,7 +121,7 @@ describe('traversal relay daemon directory publisher', () => {
       listEndpointCandidates: () => {
         throw new Error('network endpoint discovery failed');
       },
-      listTmuxSessions: () => ['main'],
+      listTerminalSessionCatalog: () => [{ name: 'main' }],
       now: () => '2026-06-28T10:03:00.000Z',
     });
 

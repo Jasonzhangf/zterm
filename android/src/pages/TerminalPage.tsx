@@ -1206,21 +1206,23 @@ function TerminalPageComponent({
       const sessionNames = [...new Set(
         (device.daemon.sessions || []).map((session) => session.name.trim()).filter(Boolean),
       )].sort((left, right) => left.localeCompare(right));
-      const sessionCwdByName = Object.fromEntries(
-        (device.daemon.sessions || [])
-          .filter((session) => session.name.trim() && session.cwd?.trim())
-          .map((session) => [session.name.trim(), session.cwd!.trim()]),
-      );
       if (!daemonHostId || sessionNames.length === 0) {
         return [];
       }
-      const existingGroup = sessionGroups.find((group) => (
-        group.daemonHostId?.trim() === daemonHostId
-        || resolveDrawerIdentity(group).key === daemonHostId
-      ));
       const directEndpoint = (device.daemon.endpoints || []).find((endpoint) => (
         endpoint.kind === 'tailscale' && endpoint.host?.trim() && endpoint.port
       )) || (device.daemon.endpoints || []).find((endpoint) => endpoint.host?.trim() && endpoint.port);
+      const existingGroup = sessionGroups.find((group) => (
+        group.daemonHostId?.trim() === daemonHostId
+        || resolveDrawerIdentity(group).key === daemonHostId
+        || (directEndpoint?.host?.trim() === group.bridgeHost.trim() && directEndpoint.port === group.bridgePort)
+      ));
+      const sessionCwdByName = Object.fromEntries([
+        ...Object.entries(existingGroup?.sessionCwdByName || {}),
+        ...(device.daemon.sessions || [])
+          .filter((session) => session.name.trim() && session.cwd?.trim())
+          .map((session) => [session.name.trim(), session.cwd!.trim()] as const),
+      ].filter(([name]) => sessionNames.includes(name)));
       const lastOpenedSessionName = existingGroup?.lastOpenedSessionName?.trim();
       return [{
         id: `daemon:${daemonHostId}`,
@@ -1440,16 +1442,19 @@ function TerminalPageComponent({
     if (drawerOpenDiscoveryFiredRef.current) {
       return;
     }
-    drawerOpenDiscoveryFiredRef.current = true;
+    const hostKeys = Array.from(new Set(
+      drawerHosts
+        .map((host) => host.hostKey?.trim())
+        .filter((hostKey): hostKey is string => Boolean(hostKey)),
+    ));
+    if (hostKeys.length === 0) {
+      return;
+    }
     if (onAuditOpenTabsAgainstRemoteSessions) {
       void onAuditOpenTabsAgainstRemoteSessions('drawer-open');
     }
     if (onRefreshRemoteSessions) {
-      const hostKeys = Array.from(new Set(
-        drawerHosts
-          .map((host) => host.hostKey?.trim())
-          .filter((hostKey): hostKey is string => Boolean(hostKey)),
-      ));
+      drawerOpenDiscoveryFiredRef.current = true;
       void Promise.allSettled(
         hostKeys.map((hostKey) => (
           Promise.resolve().then(() => onRefreshRemoteSessions(hostKey))
@@ -1461,7 +1466,9 @@ function TerminalPageComponent({
           }
         });
       });
+      return;
     }
+    drawerOpenDiscoveryFiredRef.current = true;
   }, [drawerHosts, onAuditOpenTabsAgainstRemoteSessions, onRefreshRemoteSessions, sessionDrawerOpen]);
   const drawerSessions = useMemo(() => {
     const activeSessionIds = new Set(renderedPaneSessions.map((session) => session.id));
