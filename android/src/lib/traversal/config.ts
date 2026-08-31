@@ -45,13 +45,16 @@ function isLikelyIpv6Host(host?: string | null) {
   return value.includes(':') && !value.includes('.');
 }
 
-function inferDirectPath(host?: string | null): 'tailscale' | 'ipv6' | 'ipv4' | null {
+function inferDirectPath(host?: string | null): 'lan' | 'tailscale' | 'ipv6' | 'ipv4' | null {
   const value = host?.trim() || '';
   if (!value) {
     return null;
   }
   if (isLikelyTailscaleHost(value)) {
     return 'tailscale';
+  }
+  if (isPrivateLanIpv4Host(parseEndpointHost(value))) {
+    return 'lan';
   }
   if (isLikelyIpv6Host(value)) {
     return 'ipv6';
@@ -130,7 +133,7 @@ function addDirectCandidate(
   isDirectoryCandidate = false,
 ) {
   const rawHost = bridgeHost.trim();
-  if (!rawHost || (path !== 'tailscale' && path !== 'ipv6' && path !== 'ipv4')) {
+  if (!rawHost || (path !== 'lan' && path !== 'tailscale' && path !== 'ipv6' && path !== 'ipv4')) {
     return;
   }
   const resolved = resolveBridgeEndpoint({ bridgeHost: rawHost, bridgePort });
@@ -171,16 +174,19 @@ function addDirectoryDirectCandidate(
   endpoint: RelayEndpointCandidate,
   target: TraversalTargetSource,
 ) {
-  if (endpoint.kind !== 'lan' && endpoint.kind !== 'tailscale' && endpoint.kind !== 'ipv6' && endpoint.kind !== 'ipv4') {
+  // Directory LAN eligibility belongs to the platform transport owner, which
+  // has current interface-prefix truth. The generic socket must not guess it.
+  if (endpoint.kind === 'lan') {
+    return;
+  }
+  if (endpoint.kind !== 'tailscale' && endpoint.kind !== 'ipv6' && endpoint.kind !== 'ipv4') {
     return;
   }
   const host = endpoint.host?.trim()
     || (endpoint.wsUrl ? resolveWsUrlHost(endpoint.wsUrl) : '')
     || '';
   const port = endpoint.port || target.bridgePort;
-  const path = endpoint.kind === 'lan'
-    ? inferDirectPath(host)
-    : endpoint.kind;
+  const path = endpoint.kind;
   if (!path) {
     return;
   }
@@ -240,7 +246,8 @@ export function buildTraversalPlan(
   const directoryEndpointLocations = new Set<string>();
 
   if (mode !== 'webrtc') {
-    const directCandidates = {
+    const directCandidates: Record<'lan' | 'tailscale' | 'ipv6' | 'ipv4', string> = {
+      lan: '',
       tailscale: target.tailscaleHost || '',
       ipv6: target.ipv6Host || '',
       ipv4: target.ipv4Host || '',
@@ -250,25 +257,16 @@ export function buildTraversalPlan(
         continue;
       }
       for (const endpoint of target.relayEndpointCandidates || []) {
-        // Keep LAN in directory truth, but never auto-select it remotely.
-        if (endpoint.kind === 'lan') {
-          continue;
-        }
         if (
           endpoint.kind === path
         ) {
           addDirectoryDirectCandidate(wsCandidates, seenWsUrls, directoryEndpointLocations, endpoint, target);
         }
       }
-      addDirectCandidate(wsCandidates, seenWsUrls, directoryEndpointLocations, path, directCandidates[path], target.bridgePort, target.authToken);
+      addDirectCandidate(wsCandidates, seenWsUrls, directoryEndpointLocations, path, directCandidates[path as keyof typeof directCandidates] || '', target.bridgePort, target.authToken);
     }
     const legacyPath = inferDirectPath(target.bridgeHost);
-    const legacyIsRemoteLan = Boolean(
-      target.relayHostId?.trim()
-      && legacyPath === 'ipv4'
-      && isPrivateLanIpv4Host(parseEndpointHost(target.bridgeHost)),
-    );
-    if (legacyPath && !legacyIsRemoteLan) {
+    if (legacyPath) {
       addDirectCandidate(wsCandidates, seenWsUrls, directoryEndpointLocations, legacyPath, target.bridgeHost, target.bridgePort, target.authToken);
     }
   }

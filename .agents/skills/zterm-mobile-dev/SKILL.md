@@ -57,6 +57,8 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
   - 说明：`android/evidence/` 是本地证据仓，默认不进 Git 主线；Git 中只保留目录说明文件
 
 ### 2.2.1 Android 交付包硬门禁
+- 治理问题属于开发交付的一部分：架构边界、资源/功能 map、构建链、验证门禁、发布链和协作状态出现问题时，必须像代码缺陷一样定位唯一 owner、修复、验证并记录；不得以“代码本身没问题”停工或只提交报告。
+- 工程质量优先于局部代码完成度：治理链阻断开发、构建、验证、发布或协作闭环时，先修治理根因，再继续产品实现；禁止绕过 gate、伪造证据或用手工操作替代可重复工程流程。
 - 每次 Android 功能修复 / bug 修复 / renderer / daemon-client 协议 / UI 行为改动，只要需要 Jason 复测或会影响真机行为，完成前必须构建可升级 APK 包。
 - 例外：`desktop.remote_window_stream` 的视频主链尚未完成时，不为中间态 catalog / overlay shell / debug 诊断改动反复构建 APK；先完成真实远程视频（ScreenCaptureKit/WebRTC frame stream 可见）并通过对应 gates，再构建 APK 给 Jason 测。除非 Jason 明确要求止血包或升级恢复包，否则不要在远程视频完成前编包。
 - 默认命令：`pnpm --dir android run build:android`。
@@ -69,7 +71,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - Android 交付闭环必须同时覆盖 **Tailscale daemon update route** 和 **public Relay update route**：构建后不仅要有本地文件，还必须验证 `http://127.0.0.1:3333/updates/latest.json`、`http://$(tailscale ip -4):3333/updates/latest.json`、`https://relay.codewhisper.cc:18443/relay/updates/latest.json` 都返回新版本；三个通道的 APK 下载 sha256 必须等于 manifest `sha256`。如果 127/Tailscale `/health` 或 `/updates/latest.json` 超时，先做 service-scoped `zterm-daemon restart` 后重测，禁止只说文件已复制。
 - 汇报时必须给出 `versionName`、`versionCode`、APK 路径和 sha256；不能只说测试通过。
 - Android 回退发布必须使用同一正常构建号的子版本槽：正常版 `0.1.3.N`，回退版 `0.1.3.N.1`，下一正常版 `0.1.3.N+1`；APK 内必须同时满足 `versionCode(N) < versionCode(N.1) < versionCode(N+1)`。禁止用 bit 30、固定高位或任何会让后续正常版永久低于回退版的 namespace。发布前必须用 `apkanalyzer` 读取实际 APK 的 `versionName`/`versionCode`，并在不带 `adb install -d` 的真实设备上验证 normal N -> rollback N.1 -> normal N+1 可依次覆盖安装；manifest 文件名或 JSON 声明不能代替 APK 内 manifest 证据。
-- 若本机有在线 ADB 设备，构建后继续安装 / 启动 / 真机 smoke；若没有在线设备，必须明确写出 “APK 已构建发布，但 L5 真机复测缺口是无 online ADB 设备”。
+- 构建后必须继续做 Android 运行态 smoke：优先使用在线 ADB 真机；若无在线真机，立即启动并使用可用 Android Emulator 完成安装、启动、重启和真实 UI/网络路径验证。只有在本机既无在线真机也无可启动 Emulator 时，才允许把 L5 记为环境阻塞；不得仅因 `adb devices` 为空就停止。
 - 禁止把源码修复、单测、typecheck、daemon close-loop 当成可供 Jason 复测的交付物；没有升级 APK，就不算移动端交付闭环。
 - Relay 场景下升级地址必须跟随当前 Relay 公网路由：`App` 只能把 `traversalRelay.wsHostUrl` 交给 `app-update-runtime`，由唯一 owner 派生 `/relay/updates/latest.json`。显式 `user-saved` manifest 不覆盖；旧私网/Tailscale `server-connected` 或旧 `relay-injected` URL 可被当前 Relay URL 替换。Relay server 必须通过 `ZTERM_TRAVERSAL_UPDATES_DIR` / `ZTERM_RELAY_UPDATES_DIR` 服务 `/relay/updates/latest.json` 和 `/relay/updates/<apk>`，且 public GET/HEAD + APK sha256 都验证通过；只在客户端改 URL 而生产 Relay 不服务更新包不算闭环。
 - 发布 public Relay update assets 时，生产机访问使用 `ssh/scp -i ~/.ssh/claw.pem -o IdentitiesOnly=yes root@159.75.134.56`，目标目录是 `/var/lib/zterm-traversal-relay/updates`；只上传 `latest.json` 与对应版本 APK，通常不需要重启 `zterm-traversal-relay.service`。完成后必须从公网重新 `GET/HEAD https://relay.codewhisper.cc:18443/relay/updates/latest.json` 与版本 APK，并下载 APK 比对 sha256；服务器本机文件存在不等于公网升级通道闭环。
@@ -289,7 +291,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - `rtc data channel error` / `terminal mux transport closed` 是 physical target failure，不是某个 tmux session 的 channel error。Android 必须在 `terminal.transport_lifecycle` owner 中清 target mux socket/ready 和 target heartbeat，把同 target 下所有 recoverable logical channel 统一从当前状态转成 `opening` replay demand，只选择一个 anchor session 触发 immediate/reset target rebuild；pending open intent 只清 timer/intent，不能再各自 fanout reconnect。`mux-ready` 后由 opening channel flush 统一重发 channel-open。禁止只让创建 physical socket 的 anchor session fail，也禁止每个 sibling session 各自创建/调度物理重连，否则会出现“同一条连接里有些 session 好、有些 session data channel error/空屏”的分裂投影。
 - daemon 初始 buffer sync 不能发送无限全量大帧。若第一次 live sync 超过有界阈值，必须按 absolute row 连续切成同 revision 多个 `buffer-sync`，覆盖完整源 span，让 renderer 按帧组装拿到完整尾窗；禁止裁成 live tail 丢弃源 rows。这属于 daemon mirror reader 输出有界化，不允许改 tmux truth、client renderer 或 route fallback 补偿。
 - 若 Android 端启用新的 terminal mux 协议，Mac daemon release artifact 也必须同步包含 `mux-hello` / `mux-ready` / `mux-channel-open`。只跑 `build:android` 但没有重新 `daemon:prepare-release` 会导致 APK 新、daemon 旧，现场表现为 `terminal mux channel open timeout`。修复顺序：`daemon:prepare-release` -> install-global -> service-scoped restart -> `/health` 新 PID/uptime -> live mux smoke。
-- Auto route selection 不再消费旧的 saved `traversalPathPriority`。默认顺序是 `private LAN IPv4 -> Tailscale/direct websocket -> WebRTC UDP direct -> TURN/Relay`；用户只在状态条里做显式 manual override，manual override 不改全局 Auto order，也不让 session 拥有 route truth。
+- Auto route selection 不再消费旧的 saved `traversalPathPriority`。默认顺序是 `同网段且真实握手成功的 private LAN -> Tailscale -> 已验证公网直连（WebSocket / UDP direct）-> TURN Relay`；同网段只决定 LAN candidate eligibility，不能冒充连接成功，Android/WebView 不假设 ICMP 可用。Relay 控制心跳/目录刷新只更新未来 generation 的 endpoint truth，不得重建健康业务 transport；foreground/background 只刷新目录与遗漏正文。用户只在状态条里做显式 manual override，manual override 不改全局 Auto order，也不让 session 拥有 route truth。
 - 若 daemon 代码已更新但 `~/.wterm/daemon-runtime/server.cjs` 仍残留旧符号（如 `scheduleMirrorFlush`、旧 planner/active-push 逻辑）或 `/debug/runtime` 仍 404，先判定为 **staged runtime 未切新**；必要时本地执行 `prepare-global-daemon-release.sh`，覆盖 `~/.wterm/daemon-runtime/` 后只对 `com.zterm.android.zterm-daemon` 做单服务 `launchctl bootstrap/kickstart`
 - buffer manager 不允许直接把 renderer 切回 follow；它只能更新本地 buffer/head 并通知 renderer。renderer 只允许因 **重新进入 / 下滚到底 / 用户输入** 退出 reading
 - Android renderer 新冻结：唯一状态是 `renderBottomIndex`；`renderTopIndex` 只能派生，reading/follow 都只改 bottom pointer，renderer 不得参与 buffer 生产或把 producer bottom 写回 source

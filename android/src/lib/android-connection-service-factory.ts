@@ -12,6 +12,9 @@ export function buildAndroidConnectionServiceTarget(host: Host): AndroidConnecti
     targetKey: buildTransportTargetKey(host),
     bridgeHost: host.bridgeHost,
     bridgePort: host.bridgePort,
+    ...(host.relayEndpointCandidates?.find((candidate) => candidate.kind === 'lan' && candidate.host)?.host
+      ? { lanHost: host.relayEndpointCandidates.find((candidate) => candidate.kind === 'lan' && candidate.host)?.host }
+      : {}),
     ...(host.authToken ? { authToken: host.authToken } : {}),
     ...(host.daemonHostId ? { daemonHostId: host.daemonHostId } : {}),
     ...(host.relayHostId ? { relayHostId: host.relayHostId } : {}),

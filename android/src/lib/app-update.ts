@@ -46,7 +46,7 @@ export interface AppUpdateManifestCandidate {
 }
 
 export interface AppUpdateRouteSnapshot {
-  resolvedPath?: 'rtc-direct' | 'tailscale' | 'ipv6' | 'ipv4' | 'rtc-relay' | null;
+  resolvedPath?: 'lan' | 'rtc-direct' | 'tailscale' | 'ipv6' | 'ipv4' | 'rtc-relay' | null;
   resolvedRelayTransport?: 'direct' | 'turn' | null;
   resolvedEndpoint?: string | null;
 }

@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+RESUME_BUILD_NUMBER=""
+if [[ "$#" -eq 2 && "$1" == "--resume-build" ]]; then
+  RESUME_BUILD_NUMBER="$2"
+elif [[ "$#" -ne 0 ]]; then
+  echo "usage: $0 [--resume-build <expected-build-number>]" >&2
+  exit 2
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 APK_PATH="$ROOT_DIR/native/android/app/build/outputs/apk/debug/app-debug.apk"
@@ -26,11 +34,15 @@ source "$SCRIPT_DIR/setup-android-java.sh"
 cd "$ROOT_DIR"
 "$SCRIPT_DIR/ensure-pnpm-install.sh"
 pnpm run deps:check-wterm-published
-node ./scripts/bump-build-version.mjs
+if [[ -n "$RESUME_BUILD_NUMBER" ]]; then
+  node ./scripts/bump-build-version.mjs --resume "$RESUME_BUILD_NUMBER"
+else
+  node ./scripts/bump-build-version.mjs
+fi
 BUILD_NUMBER="$(node -p "JSON.parse(require('fs').readFileSync('./.build-meta.json', 'utf8')).buildNumber")"
+pnpm run daemon:prepare-release
 pnpm build
 node ./scripts/verify-web-assets-version.mjs dist "$BUILD_NUMBER"
-pnpm run daemon:prepare-release
 rm -rf "$ROOT_DIR/native/android/app/src/main/assets/public/assets"
 npx cap sync android
 node ./scripts/verify-web-assets-version.mjs native/android/app/src/main/assets/public "$BUILD_NUMBER"
@@ -69,7 +81,8 @@ if [[ "$PUBLISH_RELAY" == "true" ]]; then
     "$ROOT_DIR/update-dist/latest.json" \
     "${RELAY_APK_NAMES[@]/#/$ROOT_DIR/update-dist/}" \
     "$RELAY_SSH_USER@$RELAY_SSH_HOST:$RELAY_UPDATES_DIR/"
-  curl -fsS "$RELAY_MANIFEST_URL" | grep -q "\"versionCode\": $NORMAL_VERSION_CODE"
+  curl -fsS "$RELAY_MANIFEST_URL" \
+    | node "$SCRIPT_DIR/verify-update-manifest-version.mjs" "$NORMAL_VERSION_CODE"
   curl -fsSI "${RELAY_MANIFEST_URL%/latest.json}/$NORMAL_APK_NAME" >/dev/null
   echo "[build-android-debug] Relay update channel published"
 else

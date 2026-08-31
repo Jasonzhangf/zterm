@@ -529,6 +529,59 @@ describe('terminal mirror runtime lifecycle truth', () => {
     }
   });
 
+  it('runs one immediate post-flush capture when input lands during an older in-flight capture', async () => {
+    vi.useFakeTimers();
+    try {
+      let releaseFirstCapture = () => {};
+      let captureCount = 0;
+      const {
+        runtime,
+        sessions,
+        mirrors,
+        captureMirrorAuthoritativeBufferFromTmux,
+      } = createRuntime({
+        captureMirrorAuthoritativeBufferFromTmux: async () => {
+          captureCount += 1;
+          if (captureCount === 1) {
+            await new Promise<void>((resolve) => {
+              releaseFirstCapture = resolve;
+            });
+          }
+          return true;
+        },
+      });
+      const session = createSession();
+      sessions.set(session.id, session);
+      const mirror = runtime.createMirror('demo');
+      mirror.lifecycle = 'ready';
+      mirror.subscribers.add(session.id);
+      session.mirrorKey = mirror.key;
+
+      const oldCapture = runtime.syncMirrorCanonicalBuffer(mirror);
+      await vi.waitFor(() => {
+        expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(1);
+      });
+
+      await expect(runtime.handleInput(session, 'a')).resolves.toBe(true);
+      await expect(runtime.handleInput(session, 'b')).resolves.toBe(true);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(1);
+
+      releaseFirstCapture();
+      await oldCapture;
+      await vi.advanceTimersByTimeAsync(0);
+      expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(2);
+
+      await vi.advanceTimersByTimeAsync(119);
+      expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(3);
+      expect(mirrors.get('demo')).toBe(mirror);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('returns to the active 33ms cadence as soon as a flush reports content changes', async () => {
     vi.useFakeTimers();
     try {

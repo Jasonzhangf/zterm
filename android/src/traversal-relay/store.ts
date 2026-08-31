@@ -473,7 +473,12 @@ export class TraversalRelayStore {
         continue;
       }
       device.daemonConnected = false;
-      device.daemonLastSeenAt = now;
+      device.daemonLastSeenAt = '';
+      device.daemonHostId = '';
+      device.daemonVersion = '';
+      device.daemonDirectoryPublishedAt = '';
+      device.daemonEndpoints = [];
+      device.daemonSessions = [];
       device.updatedAt = now;
       device.lastSeenAt = now;
       changed = true;

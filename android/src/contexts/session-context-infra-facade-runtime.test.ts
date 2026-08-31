@@ -61,8 +61,17 @@ describe('Android connection service platform wiring', () => {
   it('routes Android daemon target sockets through the native service projection factory', () => {
     const source = readFileSync(resolve(import.meta.dirname, 'session-context-infra-facade-runtime.ts'), 'utf8');
 
-    expect(source).toContain("Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android'");
+    expect(source).toContain('Capacitor.isNativePlatform()');
+    expect(source).toContain("Capacitor.getPlatform() === 'android'");
     expect(source).toContain('openAndroidConnectionServiceTransportSocket(host)');
+  });
+
+  it('routes an explicit Android Relay target through the traversal transport', () => {
+    const source = readFileSync(resolve(import.meta.dirname, 'session-context-infra-facade-runtime.ts'), 'utf8');
+
+    expect(source).toContain("host.transportMode !== 'webrtc'");
+    expect(source).toContain("transportRole: 'session'");
+    expect(source).toContain('buildTraversalSocketForHostRuntime({');
   });
 });
 

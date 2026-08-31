@@ -272,3 +272,20 @@ Packaged Electron app.asar 内 DevTools 默认被禁用。`--remote-debugging-po
 - `open -n --args` 在 macOS 上不能可靠传递参数给 packaged Electron app 内的 launcher
 - 修复在测试脚本，不在代码本身
 - layout-final-pass 成功因为用 spawn()；blackbox 失败因为用 open -n
+### 2026-08-28 session drawer rename closeout
+
+- 长按重命名交付先因 AGY P0 测试缺口被退回；pane-5 补齐 `pointerDown(button=0)` + 550ms + `pointerUp` 测试后重新交付。
+- 主线合并 commit `ed000290`；定向测试 60/60、feature/architecture registry 102/102、type-check 通过；2771 OTA 公网 manifest/APK、checksum、bundle verifier 全绿。
+- 真机 `100.104.163.65:5555` 安装并重启 2771；普通点击标题不弹重命名，长按 700ms 弹出“重命名 session”。
+- 新 AGY review `session-drawer-rename-gesture-20260828-review-2` PASS；Collab task 已 merged/closed。整体项目 goal 仍未完成，不能以单 task 结论替代总验收。
+### 2026-08-28 session drawer unavailable regression
+
+- 真机截图显示已连接/已枚举 session 被错误投影为灰色 `unavailable`，普通连接入口被禁用，只剩“重试”；这是当前 P0，不能用 UI 放开按钮掩盖 catalog/availability truth 错误。
+- Collab task `session-drawer-availability-reconnect-20260828` 已由 pane-6 claim，owner worktree 为 `./playground/session-drawer-availability-reconnect-20260828`，base `ed000290`；master 不在主树并行改动。
+- 初步代码边界：`TerminalPage` 负责 session/catalog projection，`terminal-drawer-session-availability.ts` 负责 availability reason，`TerminalSessionDrawer` 只消费 reason；需验证 `resolveSessionRemoteMissing()` 是否把已连接 session 的 stale history/catalog 状态误判为 remote-missing。
+### 2026-08-29 session drawer availability reconnect delivery
+
+- pane-6 证实首次偏离：`remote-tab-audit.ts` 在 `missingTabs.length === 0` 时提前 return，确认远端重新出现的 tab 不会清除旧 `remoteMissing=true`；修复为仅对非空确认 catalog 按 tab 写入 true/false，空/未知结果保持旧 truth。
+- commit `9986c1ca` 已合并为主线 `a5e4d032`；audit 11/11、session drawer UI 189/189、feature registry 102/102、type-check、diff-check 和 AGY review 通过。
+- 重新构建/发布 2772：`0.1.3.2772` / versionCode `1100027720`，APK SHA256 `29127a74be413d5c0698e7a4721fab9a4d7ed6cb4a2f6235077f87f9c3d41082`；本机、Tailscale、公网 manifest/APK 均一致，bundle verifier 全绿。
+- 当前 adb 无在线设备，2772 真机安装/抽屉回归仍是明确缺口；task 保持 delivered，待 master 完成 L5 后再 close。

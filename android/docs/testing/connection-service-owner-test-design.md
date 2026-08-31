@@ -2,13 +2,13 @@
 
 Date: 2026-08-18
 Feature: `client.android_connection_service`
-Owner module: `client.connection_service` (status: `design`; native WebSocket slice implemented, desired-state journal and native WebRTC/Relay slices pending)
+Owner module: `client.connection_service` (status: `active`; native WebSocket slice implemented, native WebRTC/Relay backend is part of this route-policy task)
 
 ## Scope
 
 The migration must make `AndroidConnectionService` the sole owner of the physical WebSocket, route/auth, mux/channel, heartbeat, network-generation, reconnect/backoff, and connection-generation truth. Activity, WebView, and React may only consume snapshots/events and send explicit typed commands.
 
-WebRTC native ownership is out of scope. A WebRTC-only route must fail explicitly until a separate slice lands.
+WebRTC remains inside the same `AndroidConnectionService` physical-target lifecycle owner. A native WebRTC backend may own only signaling/ICE/DataChannel mechanics for one candidate attempt; it must not own route ranking, target generation, mux/channel registry, heartbeat, reconnect/backoff, UI state, or Relay directory truth.
 
 The service projection carries the exact `mux-ready` payload and target generation. A late WebView listener replays the current healthy projection without opening a second physical transport or sending a JS mux hello.
 
@@ -37,6 +37,8 @@ The service projection carries the exact `mux-ready` payload and target generati
 - Terminal failure releases the target explicitly.
 - Late frames from an old generation are rejected and cannot update the current snapshot.
 - Repeated identical bind/policy commands are idempotent.
+- Auto candidate order is eligible same-subnet LAN, Tailscale, verified public direct, then TURN Relay.
+- A fresh confirmed Relay directory may update a future target generation without replacing a healthy current generation.
 
 ### Typed control/projection boundary
 
@@ -61,6 +63,8 @@ The service projection carries the exact `mux-ready` payload and target generati
 ### Native tests
 
 `AndroidConnectionServiceTest.java`, `AndroidConnectionServiceTransportTest.java`, and `AndroidConnectionServicePluginTest.java` must use fake clock/handler and fake socket seams to cover heartbeat survival across Activity detach, three-miss retirement, auth stop, backoff scheduling, stale generation rejection, manual route command validation, mux-hello retry before mux-ready, and atomic pending-frame consumption with FIFO continuation.
+
+The native WebRTC backend gate must additionally cover offer/answer, early ICE ordering, direct versus relay ICE policy, ordered reliable DataChannel text/binary frames, exact generation fencing, close/error cleanup, and the negative guarantee that the backend cannot schedule route retry or create mux/channel state itself.
 
 ### Existing regression gates
 

@@ -3479,6 +3479,46 @@
       "status": "active"
     },
     {
+      "edge_id": "edge.client.transport_target_to_connection_service",
+      "from_module": "client.daemon_connection",
+      "to_module": "client.connection_service",
+      "resource_from": "resource.transport_target",
+      "resource_to": "resource.client_connection_service_ipc",
+      "via_resources": [
+        "resource.route_policy",
+        "resource.android_connection_service"
+      ],
+      "relation_status": "via",
+      "owner_feature": "client.android_connection_service",
+      "allowed_callers": [
+        "src/lib/android-connection-service-factory.ts",
+        "src/plugins/AndroidConnectionServicePlugin.ts"
+      ],
+      "forbidden_callers": [
+        "src/pages/**",
+        "src/components/**"
+      ],
+      "request_chain": [
+        "AndroidConnectionServiceIn02BindTarget",
+        "AndroidConnectionServiceIn02IpcDispatch"
+      ],
+      "response_chain": [
+        "AndroidConnectionServiceOut01Snapshot"
+      ],
+      "error_chain": [
+        "AndroidConnectionServiceError01CommandRejected"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:AndroidConnectionServiceIn02BindTarget->AndroidConnectionServicePlugin",
+        "android_mainline:AndroidConnectionServicePlugin->AndroidConnectionService"
+      ],
+      "required_gates": [
+        "docs/testing/connection-service-owner-test-design.md",
+        "src/lib/edge-registry-truth.test.ts"
+      ],
+      "status": "active"
+    },
+    {
       "edge_id": "edge.client.manual_route_policy_to_connection_service_ipc",
       "from_module": "client.app_shell",
       "to_module": "client.connection_service",

@@ -154,9 +154,16 @@ export function buildTransportTargetKey(host: TransportTargetKeyHost) {
   const normalizedHost = host.bridgeHost.trim();
   const stableDaemonId = normalizeKeyText(host.daemonHostId || host.relayHostId);
   if (stableDaemonId) {
-    return [
+    const parts = [
       `daemon=${encodeKeyPart(stableDaemonId)}`,
-    ].join('|');
+    ];
+    // A native Android service target cannot be reused by an explicit WebRTC
+    // target. Keep auto/direct daemon identity stable, but isolate the
+    // transport runtime when the caller has selected Relay/WebRTC.
+    if (host.transportMode === 'webrtc') {
+      parts.push('mode=webrtc');
+    }
+    return parts.join('|');
   }
   return [
     `host=${encodeKeyPart(normalizedHost)}`,

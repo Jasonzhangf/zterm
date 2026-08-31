@@ -2716,3 +2716,12 @@ Tags: #remote-window-stream #stale-target #target-validation #explicit-failure #
 
 Tags: #remote-window-stream #composite-window-frame #out-of-display-validation #target-validation #no-fallback
 - [2026-08-25] TraversalSocket mux-ready settlement: raw candidate `onopen` is only a physical-open signal. For daemon transports (`requireMuxReadyConfirmation`) the first opened backend stays provisional, opened runner-ups remain connected as fallbacks, non-provisional protocol frames are dropped, and `recordSuccess`/runner-up close wait for `confirmTransportReady()` after real `mux-ready`. Confirmation timeout fails the provisional attempt and promotes an already-open fallback; never defer the upper-layer `onopen` itself or mux-hello cannot start. Marker: `mux ready confirmation provisional winner opened fallback`.
+- [2026-08-28] Session drawer rename 的交互真源是 press-owned long press：普通 click 只阻止冒泡，不打开编辑；pointer up/cancel/leave 与 unmount 必须清理 timer。2771 公网 OTA 和真实 Android 设备已验证普通点击/700ms 长按结果；AGY review PASS。单个 feature 关闭不等于整体 goal 完成。
+
+## 2026-08-31 Android input latency, QuickBar focus, and OTA identity
+
+- Terminal 输入呈现“单字符和整句延迟近似固定”时，先审 `daemon.mirror_store` 的 scheduler lost wakeup：input-triggered immediate demand 若落在旧 in-flight capture 上，旧 capture 可能早于 tmux write 取样，随后 quiet backoff 才再次 capture。唯一修复是 scheduler 在 in-flight capture 后保留并合并一次 post-flush immediate demand；禁止 local echo、payload 改写、reconnect 或 client/UI 补偿。红测必须锁住 capture A 执行中收到 demand 后立即运行 capture B，并反向证明同 burst 只合并一次且随后恢复正常 quiet cadence。
+- Android native IME 把焦点还给 WebView 后，旧 shell/status `activeElement` 可能重新进入 `:focus-visible`；QuickBar press-start 只能清除非编辑器 shell focus，同时保留 `input`、`textarea`、`contenteditable` 和正常键盘 Tab 无障碍入口。禁止删除全局 `:focus-visible`、移除 status 的键盘可达性，或到 renderer/daemon/terminal payload 修 UI focus 投影。
+- Android OTA 完成标准必须绑定 installed artifact identity：在线验证所安装 APK 的 SHA-256 必须等于 canonical APK、`update-dist`、daemon update store 和 public Relay 实际下载 APK；local、Tailscale、public Relay 三通道分别执行 manifest GET、APK HEAD/GET、size/hash 校验。已验证发布 `0.1.3.2790` / `1100027900`，APK SHA-256 `a8a1cfaa4f4fba1c4682e3cbe3e5c21f7b2ac133be79840443c5646c89e87427`；单字符 observed/paint `97.6/111.8ms`，18-byte 输入 `95.8/109.7ms`，QuickBar Up/Down 清 stale focus `1.6/0.2ms`，AGY Review 无 finding。
+
+Tags: #terminal-input #mirror-scheduler #lost-wakeup #quickbar-focus #android-ime #ota-artifact-identity #real-device-evidence
