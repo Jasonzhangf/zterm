@@ -23,14 +23,21 @@ export interface RemoteWindowCaptureFrame {
   width: number;
   height: number;
   rgba: Uint8Array;
+  capturedAtMs?: number;
 }
 
 export interface RemoteWindowCaptureFrameSource {
   width: number;
   height: number;
   frameRate: number;
+  maxCaptureWidth?: number;
+  maxCaptureHeight?: number;
   updateTarget?: (target: RemoteWindowStreamTargetManifest) => Promise<void>;
-  updateFrameRate?: (frameRate: number) => Promise<void>;
+  updateVideoProfile?: (profile: {
+    maxFrameRateFps: number;
+    maxCaptureWidth: number;
+    maxCaptureHeight: number;
+  }) => Promise<void>;
   stop: () => void;
 }
 
@@ -38,6 +45,8 @@ export type RemoteWindowCaptureSourceFactory = (
   target: RemoteWindowStreamTargetManifest,
   options: {
     frameRate: number;
+    maxCaptureWidth?: number;
+    maxCaptureHeight?: number;
     startupTimeoutMs: number;
     swiftBinary: string;
     captureBinary: string;
@@ -196,13 +205,17 @@ export function buildResizedRemoteWindowTarget(
   return nextTarget;
 }
 
-export function buildScreenCaptureKitConfig(target: RemoteWindowStreamTargetManifest, frameRate: number) {
+export function buildScreenCaptureKitConfig(
+  target: RemoteWindowStreamTargetManifest,
+  frameRate: number,
+  limits?: { maxCaptureWidth: number; maxCaptureHeight: number },
+) {
   const { windowBounds, cropRect } = validateStreamTargetForCapture(target);
   const compositeLayout = buildRemoteWindowCanvasLayoutV1(target, 1);
   const compositeWindowsById = new Map(
     (target.compositeWindows ?? []).map((window) => [window.windowId, window]),
   );
-  return {
+  const config = {
     windowId: target.videoTarget.windowId,
     appBundleId: target.videoTarget.appBundleId,
     title: target.videoTarget.title,
@@ -231,6 +244,33 @@ export function buildScreenCaptureKitConfig(target: RemoteWindowStreamTargetMani
     mainOffsetY: compositeLayout?.windows[0]?.canvasRectPx.y,
     outputWidth: compositeLayout?.windows[0]?.canvasRectPx.width,
     outputHeight: compositeLayout?.windows[0]?.canvasRectPx.height,
+  };
+  const naturalWidth = config.canvasWidth ?? config.outputWidth ?? Math.round(cropRect.width);
+  const naturalHeight = config.canvasHeight ?? config.outputHeight ?? Math.round(cropRect.height);
+  const scale = limits
+    ? Math.min(1, limits.maxCaptureWidth / Math.max(1, naturalWidth), limits.maxCaptureHeight / Math.max(1, naturalHeight))
+    : 1;
+  if (scale >= 1) {
+    return config;
+  }
+  const scaleValue = (value: number | undefined, minimum = 0) => value === undefined
+    ? undefined
+    : Math.max(minimum, Math.round(value * scale));
+  return {
+    ...config,
+    canvasWidth: scaleValue(config.canvasWidth, 1),
+    canvasHeight: scaleValue(config.canvasHeight, 1),
+    mainOffsetX: scaleValue(config.mainOffsetX),
+    mainOffsetY: scaleValue(config.mainOffsetY),
+    outputWidth: scaleValue(config.outputWidth ?? Math.round(cropRect.width), 1),
+    outputHeight: scaleValue(config.outputHeight ?? Math.round(cropRect.height), 1),
+    compositeWindows: config.compositeWindows?.map((window) => ({
+      ...window,
+      offsetX: scaleValue(window.offsetX) ?? 0,
+      offsetY: scaleValue(window.offsetY) ?? 0,
+      outputWidth: scaleValue(window.outputWidth, 1) ?? 1,
+      outputHeight: scaleValue(window.outputHeight, 1) ?? 1,
+    })),
   };
 }
 
@@ -357,6 +397,8 @@ export async function startScreenCaptureKitFrameSource(
   target: RemoteWindowStreamTargetManifest,
   options: {
     frameRate: number;
+    maxCaptureWidth?: number;
+    maxCaptureHeight?: number;
     startupTimeoutMs: number;
     swiftBinary: string;
     captureBinary: string;
@@ -365,7 +407,12 @@ export async function startScreenCaptureKitFrameSource(
     onError: (error: Error) => void;
   },
 ): Promise<RemoteWindowCaptureFrameSource> {
-  let captureConfig = buildScreenCaptureKitConfig(target, options.frameRate);
+  let maxCaptureWidth = Math.max(1, Math.floor(options.maxCaptureWidth ?? Number.MAX_SAFE_INTEGER));
+  let maxCaptureHeight = Math.max(1, Math.floor(options.maxCaptureHeight ?? Number.MAX_SAFE_INTEGER));
+  let captureConfig = buildScreenCaptureKitConfig(target, options.frameRate, {
+    maxCaptureWidth,
+    maxCaptureHeight,
+  });
   if (!options.captureBinary?.trim()) {
     throw new Error('installed ScreenCaptureKit capture binary is required');
   }
@@ -415,6 +462,12 @@ export async function startScreenCaptureKitFrameSource(
       return frameHeight;
     },
     frameRate: Math.max(1, Math.floor(options.frameRate)),
+    get maxCaptureWidth() {
+      return maxCaptureWidth;
+    },
+    get maxCaptureHeight() {
+      return maxCaptureHeight;
+    },
     stop() {
       if (stopped) {
         return;
@@ -429,6 +482,8 @@ export async function startScreenCaptureKitFrameSource(
   const updateCaptureConfiguration = async (
     nextTarget: RemoteWindowStreamTargetManifest,
     nextFrameRate: number,
+    nextMaxCaptureWidth: number,
+    nextMaxCaptureHeight: number,
   ) => {
     if (stopped) {
       throw new Error('ScreenCaptureKit capture source is stopped');
@@ -436,23 +491,16 @@ export async function startScreenCaptureKitFrameSource(
     if (!child.stdin.writable || child.stdin.destroyed) {
       throw new Error('ScreenCaptureKit capture command channel is closed');
     }
-    const nextConfig = buildScreenCaptureKitConfig(nextTarget, nextFrameRate);
+    const nextConfig = buildScreenCaptureKitConfig(nextTarget, nextFrameRate, {
+      maxCaptureWidth: nextMaxCaptureWidth,
+      maxCaptureHeight: nextMaxCaptureHeight,
+    });
+    if (JSON.stringify(nextConfig) === JSON.stringify(captureConfig)) {
+      return;
+    }
     const seq = captureUpdateSeq + 1;
     captureUpdateSeq = seq;
-    const command = {
-      kind: 'update-config',
-      seq,
-      windowId: nextConfig.windowId,
-      windowBounds: nextConfig.windowBounds,
-      cropRect: nextConfig.cropRect,
-      frameRate: nextConfig.frameRate,
-      queueDepth: nextConfig.queueDepth,
-      compositeWindows: nextConfig.compositeWindows,
-      canvasWidth: nextConfig.canvasWidth,
-      canvasHeight: nextConfig.canvasHeight,
-      outputWidth: nextConfig.outputWidth,
-      outputHeight: nextConfig.outputHeight,
-    };
+    const command = buildRemoteWindowCaptureUpdateCommand(nextConfig, seq);
     const ack = await new Promise<RemoteWindowCaptureUpdateAck>((resolve, reject) => {
       const timer = setTimeout(() => {
         pendingCaptureUpdates.delete(seq);
@@ -483,19 +531,43 @@ export async function startScreenCaptureKitFrameSource(
     captureConfig = nextConfig;
     currentTarget = nextTarget;
     frameSource.frameRate = nextConfig.frameRate;
+    maxCaptureWidth = nextMaxCaptureWidth;
+    maxCaptureHeight = nextMaxCaptureHeight;
     frameWidth = Math.max(1, Math.floor(ack.width ?? nextConfig.cropRect.width));
     frameHeight = Math.max(1, Math.floor(ack.height ?? nextConfig.cropRect.height));
   };
 
   frameSource.updateTarget = async (nextTarget) => {
-    await updateCaptureConfiguration(nextTarget, frameSource.frameRate);
+    await updateCaptureConfiguration(nextTarget, frameSource.frameRate, maxCaptureWidth, maxCaptureHeight);
   };
 
-  frameSource.updateFrameRate = async (nextFrameRate) => {
-    if (!Number.isFinite(nextFrameRate) || nextFrameRate <= 0) {
-      throw new Error('ScreenCaptureKit capture frame rate must be positive');
+  frameSource.updateVideoProfile = async (profile) => {
+    if (
+      !Number.isFinite(profile.maxFrameRateFps)
+      || profile.maxFrameRateFps <= 0
+      || !Number.isFinite(profile.maxCaptureWidth)
+      || profile.maxCaptureWidth <= 0
+      || !Number.isFinite(profile.maxCaptureHeight)
+      || profile.maxCaptureHeight <= 0
+    ) {
+      throw new Error('ScreenCaptureKit capture profile values must be positive');
     }
-    await updateCaptureConfiguration(currentTarget, Math.floor(nextFrameRate));
+    const normalizedFrameRate = Math.floor(profile.maxFrameRateFps);
+    const normalizedMaxCaptureWidth = Math.floor(profile.maxCaptureWidth);
+    const normalizedMaxCaptureHeight = Math.floor(profile.maxCaptureHeight);
+    if (
+      normalizedFrameRate === frameSource.frameRate
+      && normalizedMaxCaptureWidth === maxCaptureWidth
+      && normalizedMaxCaptureHeight === maxCaptureHeight
+    ) {
+      return;
+    }
+    await updateCaptureConfiguration(
+      currentTarget,
+      normalizedFrameRate,
+      normalizedMaxCaptureWidth,
+      normalizedMaxCaptureHeight,
+    );
   };
 
   let resolveStart: (source: RemoteWindowCaptureFrameSource) => void = () => undefined;
@@ -534,6 +606,7 @@ export async function startScreenCaptureKitFrameSource(
       width,
       height,
       rgba: new Uint8Array(rgba.buffer, rgba.byteOffset, rgba.byteLength),
+      capturedAtMs: Date.now(),
     };
     options.onFrame(frame);
     if (!firstFrameResolved) {

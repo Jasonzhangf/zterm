@@ -19,11 +19,13 @@ export interface UseRemoteWindowCompositeCanvasOptions {
   focusedWindow: RemoteWindowCompositeCanvasSlot | null;
   overviewCropVisible: boolean;
   receiverMediaStream: MediaStream | null;
+  overviewMediaStream: MediaStream | null;
   videoElementRef: RefObject<HTMLVideoElement | null>;
   overviewVideoElementRef: RefObject<HTMLVideoElement | null>;
   overviewCanvasRef: RefObject<HTMLCanvasElement | null>;
   focusDisplayCanvasRef?: RefObject<HTMLCanvasElement | null>;
   thumbnailCanvasRefs: RefObject<Map<string, HTMLCanvasElement | null>>;
+  onProjectionError?: (message: string) => void;
 }
 
 export function useRemoteWindowCompositeCanvas({
@@ -31,125 +33,194 @@ export function useRemoteWindowCompositeCanvas({
   focusedWindow,
   overviewCropVisible,
   receiverMediaStream,
+  overviewMediaStream,
   videoElementRef,
   overviewVideoElementRef,
   overviewCanvasRef,
   focusDisplayCanvasRef,
   thumbnailCanvasRefs,
+  onProjectionError,
 }: UseRemoteWindowCompositeCanvasOptions) {
-  // Android WebView hardware compositor does not render WebRTC MediaStream
-  // <video> to the screen (readyState=4 + play() resolved still shows black).
-  // This rAF loop copies decoded video frames to a visible canvas instead.
   useEffect(() => {
     if (!receiverMediaStream || !focusDisplayCanvasRef) {
       return;
     }
-    let animationFrame = 0;
-    const drawFocus = () => {
-      animationFrame = window.requestAnimationFrame(drawFocus);
-      const video = videoElementRef.current;
+    const video = videoElementRef.current;
+    if (!video) {
+      return;
+    }
+    if (typeof video.requestVideoFrameCallback !== 'function') {
+      onProjectionError?.('remote window decoded-frame callback is unavailable');
+      return;
+    }
+    let cancelled = false;
+    let callbackId: number | null = null;
+    let lastPresentedFrames: number | null = null;
+    let cachedCanvas: HTMLCanvasElement | null = null;
+    let cachedContext: CanvasRenderingContext2D | null = null;
+    const requestFrame = video.requestVideoFrameCallback.bind(video);
+    const drawFocus = (_now: number, metadata: { presentedFrames?: number }) => {
+      if (cancelled) {
+        return;
+      }
+      const presentedFrames = Number.isFinite(metadata?.presentedFrames)
+        ? Number(metadata.presentedFrames)
+        : null;
+      if (presentedFrames !== null && presentedFrames === lastPresentedFrames) {
+        callbackId = requestFrame(drawFocus);
+        return;
+      }
       const canvas = focusDisplayCanvasRef.current;
-      if (!video || !canvas || video.readyState < 2 || video.videoWidth <= 0) {
+      if (!canvas || video.readyState < 2 || video.videoWidth <= 0 || video.videoHeight <= 0) {
+        callbackId = requestFrame(drawFocus);
         return;
       }
       if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
       }
-      const context = canvas.getContext('2d');
-      context?.drawImage(video, 0, 0, canvas.width, canvas.height);
-    };
-    animationFrame = window.requestAnimationFrame(drawFocus);
-    return () => window.cancelAnimationFrame(animationFrame);
-  }, [focusDisplayCanvasRef, receiverMediaStream, videoElementRef]);
-
-  useEffect(() => {
-    if (!layout || !receiverMediaStream) {
-      return;
-    }
-    let animationFrame = 0;
-    const draw = () => {
-      animationFrame = window.requestAnimationFrame(draw);
-      const overviewVideo = overviewVideoElementRef.current;
-      const video = overviewVideo && overviewVideo.readyState >= 2
-        ? overviewVideo
-        : videoElementRef.current;
-      if (!video || video.readyState < 2 || video.videoWidth <= 0) {
+      if (cachedCanvas !== canvas) {
+        cachedCanvas = canvas;
+        cachedContext = canvas.getContext('2d');
+      }
+      if (!cachedContext) {
+        onProjectionError?.('remote window focus canvas 2D context is unavailable');
         return;
       }
-      const overview = overviewCanvasRef.current;
-      if (overview) {
-        const context = overview.getContext('2d');
-        if (context && overview.width > 0 && overview.height > 0) {
-          context.drawImage(
-            video,
-            0,
-            0,
-            layout.canvasWidth,
-            layout.canvasHeight,
-            0,
-            0,
-            overview.width,
-            overview.height,
-          );
-        }
+      try {
+        cachedContext.drawImage(video, 0, 0, canvas.width, canvas.height);
+        lastPresentedFrames = presentedFrames;
+      } catch (error) {
+        onProjectionError?.(error instanceof Error ? error.message : 'remote window focus canvas draw failed');
+        return;
       }
-      if (overview && focusedWindow && overviewCropVisible) {
-        const context = overview.getContext('2d');
-        if (context && overview.width > 0 && overview.height > 0) {
-          context.clearRect(0, 0, overview.width, overview.height);
-          context.drawImage(
-            video,
-            focusedWindow.offsetX,
-            focusedWindow.offsetY,
-            focusedWindow.width,
-            focusedWindow.height,
-            0,
-            0,
-            overview.width,
-            overview.height,
-          );
-        }
-      }
-      for (const windowSlot of layout.windows) {
-        const thumbnail = thumbnailCanvasRefs.current.get(windowSlot.windowId);
-        if (!thumbnail || thumbnail.width <= 0 || thumbnail.height <= 0) {
-          continue;
-        }
-        const context = thumbnail.getContext('2d');
-        if (!context) {
-          continue;
-        }
-        context.clearRect(0, 0, thumbnail.width, thumbnail.height);
-        const scale = Math.min(
-          thumbnail.width / Math.max(1, windowSlot.width),
-          thumbnail.height / Math.max(1, windowSlot.height),
-        );
-        const drawWidth = windowSlot.width * scale;
-        const drawHeight = windowSlot.height * scale;
-        context.drawImage(
-          video,
-          windowSlot.offsetX,
-          windowSlot.offsetY,
-          windowSlot.width,
-          windowSlot.height,
-          (thumbnail.width - drawWidth) / 2,
-          (thumbnail.height - drawHeight) / 2,
-          drawWidth,
-          drawHeight,
-        );
+      callbackId = requestFrame(drawFocus);
+    };
+    callbackId = requestFrame(drawFocus);
+    return () => {
+      cancelled = true;
+      if (callbackId !== null) {
+        video.cancelVideoFrameCallback?.(callbackId);
       }
     };
-    animationFrame = window.requestAnimationFrame(draw);
-    return () => window.cancelAnimationFrame(animationFrame);
+  }, [focusDisplayCanvasRef, onProjectionError, receiverMediaStream, videoElementRef]);
+
+  useEffect(() => {
+    if (!layout || !receiverMediaStream || !overviewMediaStream) {
+      return;
+    }
+    const video = overviewVideoElementRef.current;
+    if (!video) {
+      return;
+    }
+    if (typeof video.requestVideoFrameCallback !== 'function') {
+      onProjectionError?.('remote window overview decoded-frame callback is unavailable');
+      return;
+    }
+    let cancelled = false;
+    let callbackId: number | null = null;
+    let lastPresentedFrames: number | null = null;
+    let overviewContext: CanvasRenderingContext2D | null = null;
+    let overviewContextCanvas: HTMLCanvasElement | null = null;
+    const thumbnailContexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>();
+    const requestFrame = video.requestVideoFrameCallback.bind(video);
+    const draw = (_now: number, metadata: { presentedFrames?: number }) => {
+      if (cancelled) {
+        return;
+      }
+      const presentedFrames = Number.isFinite(metadata?.presentedFrames)
+        ? Number(metadata.presentedFrames)
+        : null;
+      if (presentedFrames !== null && presentedFrames === lastPresentedFrames) {
+        callbackId = requestFrame(draw);
+        return;
+      }
+      if (video.readyState < 2 || video.videoWidth <= 0 || video.videoHeight <= 0) {
+        callbackId = requestFrame(draw);
+        return;
+      }
+      try {
+        const overview = overviewCanvasRef.current;
+        if (overview) {
+          if (overviewContextCanvas !== overview) {
+            overviewContextCanvas = overview;
+            overviewContext = overview.getContext('2d');
+          }
+          if (!overviewContext) {
+            onProjectionError?.('remote window overview canvas 2D context is unavailable');
+            return;
+          }
+          if (overview.width > 0 && overview.height > 0) {
+            overviewContext.clearRect(0, 0, overview.width, overview.height);
+            const source = focusedWindow && overviewCropVisible
+              ? focusedWindow
+              : { offsetX: 0, offsetY: 0, width: layout.canvasWidth, height: layout.canvasHeight };
+            overviewContext.drawImage(
+              video,
+              source.offsetX,
+              source.offsetY,
+              source.width,
+              source.height,
+              0,
+              0,
+              overview.width,
+              overview.height,
+            );
+          }
+        }
+        for (const windowSlot of layout.windows) {
+          const thumbnail = thumbnailCanvasRefs.current.get(windowSlot.windowId);
+          if (!thumbnail || thumbnail.width <= 0 || thumbnail.height <= 0) {
+            continue;
+          }
+          const context = thumbnailContexts.get(thumbnail) ?? thumbnail.getContext('2d');
+          if (!context) {
+            onProjectionError?.('remote window thumbnail canvas 2D context is unavailable');
+            return;
+          }
+          thumbnailContexts.set(thumbnail, context);
+          context.clearRect(0, 0, thumbnail.width, thumbnail.height);
+          const scale = Math.min(
+            thumbnail.width / Math.max(1, windowSlot.width),
+            thumbnail.height / Math.max(1, windowSlot.height),
+          );
+          const drawWidth = windowSlot.width * scale;
+          const drawHeight = windowSlot.height * scale;
+          context.drawImage(
+            video,
+            windowSlot.offsetX,
+            windowSlot.offsetY,
+            windowSlot.width,
+            windowSlot.height,
+            (thumbnail.width - drawWidth) / 2,
+            (thumbnail.height - drawHeight) / 2,
+            drawWidth,
+            drawHeight,
+          );
+        }
+      } catch (error) {
+        onProjectionError?.(error instanceof Error ? error.message : 'remote window overview canvas draw failed');
+        return;
+      }
+      lastPresentedFrames = presentedFrames;
+      callbackId = requestFrame(draw);
+    };
+    callbackId = requestFrame(draw);
+    return () => {
+      cancelled = true;
+      if (callbackId !== null) {
+        video.cancelVideoFrameCallback?.(callbackId);
+      }
+    };
   }, [
     focusedWindow,
     layout,
+    onProjectionError,
     overviewCanvasRef,
     overviewCropVisible,
+    overviewMediaStream,
     overviewVideoElementRef,
     receiverMediaStream,
     thumbnailCanvasRefs,
-    videoElementRef,
   ]);
 }

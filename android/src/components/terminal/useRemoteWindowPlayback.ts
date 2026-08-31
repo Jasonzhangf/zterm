@@ -56,7 +56,7 @@ export function useRemoteWindowPlayback({
   const videoHasPlayedRef = useRef(false);
   const [liveDiagnostics, setLiveDiagnostics] = useState<RemoteWindowLiveDiagnostics | null>(null);
   const [videoDebugSnapshot, setVideoDebugSnapshot] = useState<RemoteWindowVideoDebugSnapshot | null>(null);
-  const frameCallbackRef = useRef<((now: number) => void) | null>(null);
+  const frameCallbackRef = useRef<{ video: HTMLVideoElement; callbackId: number } | null>(null);
   const playbackEpochRef = useRef(0);
   const playbackBindingRef = useRef<{ epoch: number; stream: MediaStream } | null>(null);
   const playbackStatsRef = useRef({
@@ -105,12 +105,6 @@ export function useRemoteWindowPlayback({
 
   const reveal = useCallback((video: HTMLVideoElement, stream: MediaStream, epoch: number, lastEvent = 'playing') => {
     const binding = playbackBindingRef.current;
-    console.log(
-      `[remote-window-reveal] lastEvent=${lastEvent} epoch_in=${epoch} epoch_cur=${playbackEpochRef.current} ` +
-      `epoch_match=${playbackEpochRef.current === epoch} binding_epoch=${binding?.epoch ?? '-'} ` +
-      `binding_match=${binding?.epoch === epoch} binding_stream_match=${binding?.stream === stream} ` +
-      `video_ref_match=${videoElementRef.current === video} srcObject_match=${video.srcObject === stream}`,
-    );
     if (
       playbackEpochRef.current !== epoch
       || binding?.epoch !== epoch
@@ -136,6 +130,14 @@ export function useRemoteWindowPlayback({
     return true;
   }, [reveal]);
 
+  const cancelPlaybackFrameCallback = useCallback(() => {
+    const scheduled = frameCallbackRef.current;
+    frameCallbackRef.current = null;
+    if (scheduled) {
+      scheduled.video.cancelVideoFrameCallback?.(scheduled.callbackId);
+    }
+  }, []);
+
   const requestPlayback = useCallback((stream: MediaStream, epoch: number) => {
     const video = videoElementRef.current;
     if (!video) {
@@ -155,32 +157,41 @@ export function useRemoteWindowPlayback({
     }).requestVideoFrameCallback;
     if (typeof requestFrame === 'function' && !frameCallbackRef.current) {
       const onVideoFrame = () => {
+        const binding = playbackBindingRef.current;
+        if (
+          playbackEpochRef.current !== epoch
+          || binding?.epoch !== epoch
+          || binding.stream !== stream
+          || videoElementRef.current !== video
+          || video.srcObject !== stream
+        ) {
+          return;
+        }
         playbackStatsRef.current.framesReceived += 1;
         playbackStatsRef.current.decodedFirstFrameAt ??= Date.now();
         const received = playbackStatsRef.current.framesReceived;
         if (received === 1 || received % 60 === 0) {
-          console.log(
-            `[remote-window] client framesReceived=${received} video=${video.videoWidth}x${video.videoHeight} ` +
-            `paused=${video.paused} readyState=${video.readyState} seeking=${video.seeking} ` +
-            `currentTime=${video.currentTime.toFixed(3)}`,
-          );
           publishDebugSnapshot('frame-callback');
         }
         const nextRequestFrame = (video as HTMLVideoElement & {
           requestVideoFrameCallback?: (callback: (now: number) => void) => number;
         }).requestVideoFrameCallback;
-        nextRequestFrame?.call(video, onVideoFrame);
+        if (typeof nextRequestFrame === 'function') {
+          frameCallbackRef.current = {
+            video,
+            callbackId: nextRequestFrame.call(video, onVideoFrame),
+          };
+        } else {
+          frameCallbackRef.current = null;
+        }
       };
-      frameCallbackRef.current = onVideoFrame;
-      requestFrame.call(video, onVideoFrame);
+      frameCallbackRef.current = {
+        video,
+        callbackId: requestFrame.call(video, onVideoFrame),
+      };
     }
     scheduleFrameReveal(video, stream, epoch);
     playbackStatsRef.current.playAttempts += 1;
-    console.log(
-      `[remote-window-playback] enter play_attempt=${playbackStatsRef.current.playAttempts} ` +
-      `srcObject_equal=${video.srcObject === stream} paused=${video.paused} readyState=${video.readyState} ` +
-      `seeking=${video.seeking} currentTime=${video.currentTime.toFixed(3)} epoch=${epoch}`,
-    );
     publishDebugSnapshot('play-request');
     const playResult = typeof video.play === 'function' ? video.play() : null;
     if (playResult && typeof playResult.then === 'function') {
@@ -218,7 +229,8 @@ export function useRemoteWindowPlayback({
 
   const invalidatePlayback = useCallback(() => {
     playbackEpochRef.current += 1;
-  }, []);
+    cancelPlaybackFrameCallback();
+  }, [cancelPlaybackFrameCallback]);
 
   useEffect(() => {
     const video = videoElementRef.current;
@@ -226,6 +238,7 @@ export function useRemoteWindowPlayback({
       return;
     }
     const epoch = ++playbackEpochRef.current;
+    cancelPlaybackFrameCallback();
     updateVisibility(false);
     playbackStatsRef.current = {
       playAttempts: 0,
@@ -242,12 +255,6 @@ export function useRemoteWindowPlayback({
       return;
     }
     playbackBindingRef.current = { epoch, stream: receiverMediaStream };
-    const tracks = typeof receiverMediaStream.getTracks === 'function' ? receiverMediaStream.getTracks() : [];
-    console.log(
-      `[remote-window-tracks] epoch=${epoch} tracks=${tracks.length} ` +
-      `kinds=${tracks.map((track) => `${track.kind}:${track.readyState}:${track.muted ? 'muted' : 'live'}`).join(',') || 'no-tracks-api'}`,
-    );
-    frameCallbackRef.current = null;
     requestPlayback(receiverMediaStream, epoch);
     const pollTimer = window.setInterval(() => {
       if (videoElementRef.current?.srcObject === receiverMediaStream) {
@@ -256,10 +263,11 @@ export function useRemoteWindowPlayback({
     }, 350);
     const stopTimer = window.setTimeout(() => window.clearInterval(pollTimer), 5000);
     return () => {
+      cancelPlaybackFrameCallback();
       window.clearInterval(pollTimer);
       window.clearTimeout(stopTimer);
     };
-  }, [publishDebugSnapshot, receiverMediaStream, requestPlayback, updateVisibility, videoElementRef]);
+  }, [cancelPlaybackFrameCallback, publishDebugSnapshot, receiverMediaStream, requestPlayback, updateVisibility, videoElementRef]);
 
   useEffect(() => {
     const overviewVideo = overviewVideoElementRef.current;
@@ -297,7 +305,6 @@ export function useRemoteWindowPlayback({
         streamId,
       };
       setLiveDiagnostics(next);
-      console.log(`[remote-window-live] ${JSON.stringify(next)}`);
     }, 1000);
     return () => window.clearInterval(timer);
   }, [receiverMediaStream, streamId, streamStatus, videoElementRef]);

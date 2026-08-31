@@ -3,13 +3,15 @@ import wrtc from '@roamhq/wrtc';
 import {
   normalizeRtcDescription,
   normalizeIceCandidate,
-  normalizeRemoteWindowVideoBitrateConfig,
-  formatRemoteWindowVideoBitrateError,
+  normalizeRemoteWindowVideoProfile,
+  formatRemoteWindowVideoProfileError,
   convertRgbaToI420Frame,
 } from './remote-window-stream-daemon-helpers';
 import type {
   RemoteWindowStreamIceCandidatePayload,
   RemoteWindowInputEventPayload,
+  RemoteWindowInputAckControl,
+  RemoteWindowInputDeliveryControl,
   RemoteWindowInputResultPayload,
   RemoteWindowCanvasLayoutV1,
   RemoteWindowStreamErrorPayload,
@@ -26,7 +28,7 @@ import type {
   RemoteWindowStreamUpdateFocusRequestPayload,
   RemoteWindowStreamFocusResultPayload,
   RemoteWindowStreamFailureStage,
-  RemoteWindowVideoBitrateConfig,
+  RemoteWindowVideoProfile,
 } from '@zterm/shared/protocol';
 import { getRemoteWindowMediaPlanContract } from '@zterm/shared/protocol';
 import { buildRemoteWindowCanvasLayoutV1 } from './remote-window-canvas-layout';
@@ -69,10 +71,7 @@ export * from './remote-window-catalog';
 export * from './remote-window-input-helper';
 export * from './remote-window-capture';
 
-const DEFAULT_REMOTE_WINDOW_FRAME_RATE = 30;
 const DEFAULT_REMOTE_WINDOW_TARGET_CATALOG_CACHE_TTL_MS = 60_000;
-// 双流：总览（overview）流固定低码率 + 低帧率（组合画布整体预览/即时切换占位）
-const OVERVIEW_FRAME_RATE_FPS = 8;
 /** 远程窗口输入 bring-to-focus 防抖：该窗口内只每 3s 最多执行一次 focus 切换 */
 const REMOTE_WINDOW_FOCUS_DEBOUNCE_MS = 15_000;
 
@@ -153,7 +152,8 @@ export interface RemoteWindowStreamDaemonRuntime {
   ) => Promise<RemoteWindowStreamFocusResultPayload | RemoteWindowStreamErrorPayload>;
   injectInput: (
     payload: RemoteWindowInputEventPayload,
-  ) => Promise<RemoteWindowInputResultPayload | RemoteWindowStreamErrorPayload>;
+    control: RemoteWindowInputDeliveryControl,
+  ) => Promise<RemoteWindowInputAckMessage | null>;
   dispose: (reason?: string) => void;
 }
 
@@ -184,7 +184,8 @@ interface ActiveRemoteWindowStream extends Omit<RemoteWindowStreamSessionResourc
   // focus（高码率主窗口）流：主 track
   videoSender: RTCRtpSender | null;
   videoSource: RtcVideoSourceLike;
-  videoBitrate: RemoteWindowVideoBitrateConfig | null;
+  videoProfile: RemoteWindowVideoProfile | null;
+  maxFrameAgeMs: number;
   // overview（低码率总览）流：组合 target 时启用
   overviewVideoSender?: RTCRtpSender | null;
   overviewVideoSource?: RtcVideoSourceLike;
@@ -195,15 +196,39 @@ interface ActiveRemoteWindowStream extends Omit<RemoteWindowStreamSessionResourc
   pendingFocusReady: RemoteWindowStreamFocusResultPayload | null;
   pendingFocusFrame: RemoteWindowPendingMediaFrame | null;
   pendingOverviewFrame?: RemoteWindowPendingMediaFrame | null;
+  focusFrameDrainScheduled: boolean;
+  overviewFrameDrainScheduled: boolean;
   remoteDescriptionApplied: boolean;
   pendingIceCandidates: RTCIceCandidateInit[];
   focusCaptureStartedReported: boolean;
   overviewCaptureStartedReported: boolean;
   cleanupDone: boolean;
+  reliableInputTail: Promise<void>;
+  reliableInputInFlightBySequence: Map<string, Promise<RemoteWindowInputAckMessage>>;
+  reliableInputCompletedBySequence: Map<string, RemoteWindowInputAckMessage>;
+  pendingContinuousMove: PendingRemoteWindowContinuousInput | null;
+  pendingContinuousScroll: PendingRemoteWindowContinuousInput | null;
+  continuousInputDrainScheduled: boolean;
+  continuousInputDrainActive: boolean;
+}
+
+interface RemoteWindowInputAckMessage {
+  control: RemoteWindowInputAckControl;
+  payload: RemoteWindowInputResultPayload;
+}
+
+interface PendingRemoteWindowContinuousInput {
+  payload: RemoteWindowInputEventPayload;
+  daemonReceivedAtMs: number;
+  waiters: Array<{
+    control: RemoteWindowInputDeliveryControl;
+    resolve: (message: RemoteWindowInputAckMessage | null) => void;
+  }>;
 }
 
 interface RemoteWindowPendingMediaFrame {
   frame: RemoteWindowCaptureFrame;
+  capturedAtMs: number;
 }
 
 
@@ -248,7 +273,10 @@ function enqueueRemoteWindowLatestFrame(
   lane: 'focus' | 'overview',
   frame: RemoteWindowCaptureFrame,
 ) {
-  const pending: RemoteWindowPendingMediaFrame = { frame };
+  const pending: RemoteWindowPendingMediaFrame = {
+    frame,
+    capturedAtMs: frame.capturedAtMs ?? Date.now(),
+  };
   if (lane === 'overview') {
     entry.pendingOverviewFrame = pending;
     return;
@@ -319,7 +347,6 @@ export function createRemoteWindowStreamDaemonRuntime(
   const iterm2PythonTimeoutMs = deps.iterm2PythonTimeoutMs || DEFAULT_ITERM2_PYTHON_TIMEOUT_MS;
   const appWindowCatalogTimeoutMs = deps.appWindowCatalogTimeoutMs || DEFAULT_MACOS_APP_WINDOW_CATALOG_TIMEOUT_MS;
   const captureStartupTimeoutMs = deps.captureStartupTimeoutMs || DEFAULT_SCREEN_CAPTURE_KIT_STARTUP_TIMEOUT_MS;
-  const defaultFrameRate = deps.frameRate || DEFAULT_REMOTE_WINDOW_FRAME_RATE;
   const runIterm2Python = deps.runIterm2Python || runDefaultIterm2Python;
   const runMacosAppWindowCatalog = deps.runMacosAppWindowCatalog || runDefaultMacosAppWindowCatalog;
   let remoteWindowInputHelper: RemoteWindowInputHelper | null = null;
@@ -354,7 +381,7 @@ export function createRemoteWindowStreamDaemonRuntime(
     return getRemoteWindowInputHelper().send(buildRemoteWindowInputConfig(payload, target, {
       daemonReceivedAtMs: options.daemonReceivedAtMs,
       skipFocus,
-    }));
+    }), options.delivery);
   });
   const now = deps.now || (() => new Date().toISOString());
   const captureSourceFactory = deps.captureSourceFactory || startScreenCaptureKitFrameSource;
@@ -427,6 +454,12 @@ export function createRemoteWindowStreamDaemonRuntime(
     markStreamClosed(entry.streamId);
     entry.pendingFocusFrame = null;
     entry.pendingOverviewFrame = null;
+    entry.pendingContinuousMove?.waiters.forEach((waiter) => waiter.resolve(null));
+    entry.pendingContinuousScroll?.waiters.forEach((waiter) => waiter.resolve(null));
+    entry.pendingContinuousMove = null;
+    entry.pendingContinuousScroll = null;
+    entry.reliableInputInFlightBySequence.clear();
+    entry.reliableInputCompletedBySequence.clear();
     releaseRemoteWindowStreamSessionResources({
       ...entry,
       sendStatus: entry.handlers.sendStatus,
@@ -460,10 +493,6 @@ export function createRemoteWindowStreamDaemonRuntime(
       return;
     }
     entry.framesSent += 1;
-    if (entry.framesSent === 1 || entry.framesSent % 30 === 0) {
-      // eslint-disable-next-line no-console
-      console.log(`[remote-window] framesSent=${entry.framesSent} size=${captureFrame.width}x${captureFrame.height} streamId=${entry.streamId.slice(0, 8)}`);
-    }
     if (entry.framesSent === 1) {
       entry.handlers.sendStatus?.({
         requestId: entry.requestId,
@@ -485,19 +514,47 @@ export function createRemoteWindowStreamDaemonRuntime(
     }
   }
 
-  function flushPendingRemoteWindowVideoFrame(entry: ActiveRemoteWindowStream) {
-    const pending = takeRemoteWindowLatestFrame(entry, 'focus');
-    if (!pending || !isCurrentStream(entry) || !isRemoteWindowPeerMediaReady(entry)) {
+  function scheduleRemoteWindowFrameDrain(
+    entry: ActiveRemoteWindowStream,
+    lane: 'focus' | 'overview',
+  ) {
+    const scheduledKey = lane === 'overview' ? 'overviewFrameDrainScheduled' : 'focusFrameDrainScheduled';
+    if (entry[scheduledKey]) {
       return;
     }
-    try {
-      sendRemoteWindowVideoFrame(entry, pending.frame, 'focus');
-    } catch (error) {
-      cleanupStream(
-        entry,
-        `remote window frame conversion failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
+    entry[scheduledKey] = true;
+    setImmediate(() => {
+      entry[scheduledKey] = false;
+      if (!isCurrentStream(entry) || !isRemoteWindowPeerMediaReady(entry)) {
+        return;
+      }
+      const pending = takeRemoteWindowLatestFrame(entry, lane);
+      if (!pending) {
+        return;
+      }
+      if (nowMs() - pending.capturedAtMs > entry.maxFrameAgeMs) {
+        if (lane === 'overview' ? entry.pendingOverviewFrame : entry.pendingFocusFrame) {
+          scheduleRemoteWindowFrameDrain(entry, lane);
+        }
+        return;
+      }
+      try {
+        sendRemoteWindowVideoFrame(entry, pending.frame, lane);
+      } catch (error) {
+        cleanupStream(
+          entry,
+          `remote window frame conversion failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return;
+      }
+      if (lane === 'overview' ? entry.pendingOverviewFrame : entry.pendingFocusFrame) {
+        scheduleRemoteWindowFrameDrain(entry, lane);
+      }
+    });
+  }
+
+  function flushPendingRemoteWindowVideoFrame(entry: ActiveRemoteWindowStream) {
+    scheduleRemoteWindowFrameDrain(entry, 'focus');
   }
 
   function handleRemoteWindowCaptureFrame(
@@ -508,17 +565,9 @@ export function createRemoteWindowStreamDaemonRuntime(
     if (!isCurrentStream(entry)) {
       return;
     }
-    if (!isRemoteWindowPeerMediaReady(entry)) {
-      enqueueRemoteWindowLatestFrame(entry, lane, captureFrame);
-      return;
-    }
-    try {
-      sendRemoteWindowVideoFrame(entry, captureFrame, lane);
-    } catch (error) {
-      cleanupStream(
-        entry,
-        `remote window frame conversion failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
+    enqueueRemoteWindowLatestFrame(entry, lane, captureFrame);
+    if (isRemoteWindowPeerMediaReady(entry)) {
+      scheduleRemoteWindowFrameDrain(entry, lane);
     }
   }
 
@@ -622,15 +671,18 @@ export function createRemoteWindowStreamDaemonRuntime(
       });
       const videoSource = createVideoSource();
       const videoTrack = videoSource.createTrack();
-      const requestedVideoBitrate = normalizeRemoteWindowVideoBitrateConfig(payload.videoBitrate);
+      const requestedVideoProfile = normalizeRemoteWindowVideoProfile(payload.videoProfile);
+      if (!requestedVideoProfile) {
+        throw new Error('remote window stream start requires videoProfile');
+      }
       const videoSender = addRemoteWindowVideoTrack(
         peerConnection,
         videoTrack,
       ) as RTCRtpSender | undefined;
-      const streamFrameRate = requestedVideoBitrate?.maxFrameRateFps ?? defaultFrameRate;
-      const overviewFrameRate = Math.min(streamFrameRate, OVERVIEW_FRAME_RATE_FPS);
-      let videoBitrate: RemoteWindowVideoBitrateConfig | null = null;
-      let videoBitrateWarning: string | null = null;
+      const streamFrameRate = requestedVideoProfile.maxFrameRateFps;
+      const overviewFrameRate = requestedVideoProfile.overviewMaxFrameRateFps;
+      let videoProfile: RemoteWindowVideoProfile | null = null;
+      let videoProfileWarning: string | null = null;
 
       const streamEntry: ActiveRemoteWindowStream = {
         streamId: payload.streamId,
@@ -651,7 +703,8 @@ export function createRemoteWindowStreamDaemonRuntime(
         videoSender: videoSender || null,
         videoSource,
         videoTrack,
-        videoBitrate,
+        videoProfile,
+        maxFrameAgeMs: requestedVideoProfile.maxFrameAgeMs,
         captureSource: null,
         compositePollTimer: null,
         handlers,
@@ -660,11 +713,20 @@ export function createRemoteWindowStreamDaemonRuntime(
         pendingFocusReady: null,
         pendingFocusFrame: null,
         pendingOverviewFrame: hasOverviewLane ? null : undefined,
+        focusFrameDrainScheduled: false,
+        overviewFrameDrainScheduled: false,
         remoteDescriptionApplied: false,
         pendingIceCandidates: pendingIceCandidatesByStream.get(payload.streamId) ?? [],
         focusCaptureStartedReported: false,
         overviewCaptureStartedReported: false,
         cleanupDone: false,
+        reliableInputTail: Promise.resolve(),
+        reliableInputInFlightBySequence: new Map(),
+        reliableInputCompletedBySequence: new Map(),
+        pendingContinuousMove: null,
+        pendingContinuousScroll: null,
+        continuousInputDrainScheduled: false,
+        continuousInputDrainActive: false,
       };
       pendingIceCandidatesByStream.delete(payload.streamId);
       entry = streamEntry;
@@ -689,10 +751,7 @@ export function createRemoteWindowStreamDaemonRuntime(
         if (state === 'connected') {
           flushPendingRemoteWindowVideoFrame(streamEntry);
           if (streamEntry.pendingOverviewFrame !== undefined && streamEntry.overviewVideoSource) {
-            const pendingOverview = takeRemoteWindowLatestFrame(streamEntry, 'overview');
-            if (pendingOverview) {
-              sendRemoteWindowVideoFrame(streamEntry, pendingOverview.frame, 'overview');
-            }
+            scheduleRemoteWindowFrameDrain(streamEntry, 'overview');
           }
         }
         if (state === 'failed' || state === 'closed') {
@@ -705,8 +764,8 @@ export function createRemoteWindowStreamDaemonRuntime(
         streamId: payload.streamId,
         purpose,
         phase: 'starting',
-        ...(videoBitrateWarning
-          ? { message: `video bitrate not applied: ${videoBitrateWarning}` }
+        ...(videoProfileWarning
+          ? { message: `video profile not applied: ${videoProfileWarning}` }
           : {}),
       });
 
@@ -729,6 +788,8 @@ export function createRemoteWindowStreamDaemonRuntime(
       failureStage = 'focus-capture-start';
       const captureSource = await captureSourceFactory(focusTarget, {
         frameRate: streamFrameRate,
+        maxCaptureWidth: requestedVideoProfile.maxCaptureWidth,
+        maxCaptureHeight: requestedVideoProfile.maxCaptureHeight,
         startupTimeoutMs: captureStartupTimeoutMs,
         swiftBinary,
         captureBinary,
@@ -790,6 +851,8 @@ export function createRemoteWindowStreamDaemonRuntime(
         failureStage = 'overview-capture-start';
         const overviewCaptureSource = await captureSourceFactory(payload.target, {
           frameRate: overviewFrameRate,
+          maxCaptureWidth: Math.min(960, requestedVideoProfile.maxCaptureWidth),
+          maxCaptureHeight: Math.min(600, requestedVideoProfile.maxCaptureHeight),
           startupTimeoutMs: captureStartupTimeoutMs,
           swiftBinary,
           captureBinary,
@@ -918,29 +981,27 @@ export function createRemoteWindowStreamDaemonRuntime(
         throw new Error('remote window stream was closed before media negotiation completed');
       }
       flushPendingRemoteWindowVideoFrame(streamEntry);
-      if (requestedVideoBitrate) {
-        try {
-          await applyRemoteWindowStreamGroupQuality({
-            requested: requestedVideoBitrate,
-            focusSender: videoSender || null,
+      try {
+        await applyRemoteWindowStreamGroupQuality({
+          requested: requestedVideoProfile,
+          focusSender: videoSender || null,
           focusCaptureSource: streamEntry.captureSource,
           overviewSender: streamEntry.overviewVideoSender,
           overviewCaptureSource: streamEntry.overviewCaptureSource,
-          });
-          videoBitrate = requestedVideoBitrate;
-          streamEntry.videoBitrate = videoBitrate;
-        } catch (error) {
-          videoBitrateWarning = formatRemoteWindowVideoBitrateError(error);
-        }
-        if (videoBitrateWarning) {
-          handlers.sendStatus?.({
-            requestId: payload.requestId,
-            streamId: payload.streamId,
-            purpose,
-            phase: 'starting',
-            message: `video bitrate not applied: ${videoBitrateWarning}`,
-          });
-        }
+        });
+        videoProfile = requestedVideoProfile;
+        streamEntry.videoProfile = videoProfile;
+      } catch (error) {
+        videoProfileWarning = formatRemoteWindowVideoProfileError(error);
+      }
+      if (videoProfileWarning) {
+        handlers.sendStatus?.({
+          requestId: payload.requestId,
+          streamId: payload.streamId,
+          purpose,
+          phase: 'starting',
+          message: `video profile not applied: ${videoProfileWarning}`,
+        });
       }
 
       return {
@@ -956,7 +1017,7 @@ export function createRemoteWindowStreamDaemonRuntime(
           frameWidth: captureSource.width,
           frameHeight: captureSource.height,
           frameRate: captureSource.frameRate,
-        ...(streamEntry.videoBitrate ? { maxBitrateBps: streamEntry.videoBitrate.maxBitrateBps } : {}),
+          ...(streamEntry.videoProfile ? { maxBitrateBps: streamEntry.videoProfile.maxBitrateBps } : {}),
           targetKind: payload.target.videoTarget.kind,
         },
         ...(streamEntry.canvasLayout ? { canvasLayout: streamEntry.canvasLayout } : {}),
@@ -1085,7 +1146,7 @@ export function createRemoteWindowStreamDaemonRuntime(
         purpose: entry.purpose,
         targetId: payload.targetId,
         status: 'rejected',
-        requestedVideoBitrate: payload.videoBitrate,
+        requestedVideoProfile: payload.videoProfile,
         error: {
           code: 'remote_window_stream_quality_target_mismatch',
           message: `remote window stream quality target mismatch: ${payload.targetId}`,
@@ -1103,7 +1164,7 @@ export function createRemoteWindowStreamDaemonRuntime(
         purpose: entry.purpose,
         targetId: payload.targetId,
         status: 'rejected',
-        requestedVideoBitrate: payload.videoBitrate,
+        requestedVideoProfile: payload.videoProfile,
         error: {
           code: 'remote_window_stream_quality_media_plan_mismatch',
           message: `remote window stream quality media plan mismatch: expected ${entry.mediaPlan}@${entry.mediaPlanVersion}, got ${payload.mediaPlan}@${payload.mediaPlanVersion}`,
@@ -1121,7 +1182,7 @@ export function createRemoteWindowStreamDaemonRuntime(
         purpose: entry.purpose,
         targetId: payload.targetId,
         status: 'rejected',
-        requestedVideoBitrate: payload.videoBitrate,
+        requestedVideoProfile: payload.videoProfile,
         error: {
           code: 'remote_window_stream_quality_stale',
           message: `remote window stream quality revision is stale: ${payload.revision}`,
@@ -1139,7 +1200,7 @@ export function createRemoteWindowStreamDaemonRuntime(
         purpose: entry.purpose,
         targetId: payload.targetId,
         status: 'rejected',
-        requestedVideoBitrate: payload.videoBitrate,
+        requestedVideoProfile: payload.videoProfile,
         error: {
           code: 'remote_window_stream_quality_busy',
           message: `remote window stream quality revision ${entry.pendingQualityRevision} is still applying`,
@@ -1148,18 +1209,19 @@ export function createRemoteWindowStreamDaemonRuntime(
     }
     entry.pendingQualityRevision = payload.revision;
     try {
-      const videoBitrate = normalizeRemoteWindowVideoBitrateConfig(payload.videoBitrate);
-      if (!videoBitrate) {
-        throw new Error('remote window stream quality requires videoBitrate');
+      const videoProfile = normalizeRemoteWindowVideoProfile(payload.videoProfile);
+      if (!videoProfile) {
+        throw new Error('remote window stream quality requires videoProfile');
       }
       const appliedGroupBudget = await applyRemoteWindowStreamGroupQuality({
-        requested: videoBitrate,
+        requested: videoProfile,
         focusSender: entry.videoSender,
         focusCaptureSource: entry.captureSource,
         overviewSender: entry.overviewVideoSender,
         overviewCaptureSource: entry.overviewCaptureSource,
       });
-      entry.videoBitrate = videoBitrate;
+      entry.videoProfile = videoProfile;
+      entry.maxFrameAgeMs = videoProfile.maxFrameAgeMs;
       entry.qualityRevision = payload.revision;
       return {
         requestId: payload.requestId,
@@ -1171,8 +1233,8 @@ export function createRemoteWindowStreamDaemonRuntime(
         purpose: entry.purpose,
         targetId: payload.targetId,
         status: 'applied',
-        requestedVideoBitrate: payload.videoBitrate,
-        appliedVideoBitrate: videoBitrate,
+        requestedVideoProfile: payload.videoProfile,
+        appliedVideoProfile: videoProfile,
         appliedGroupBudget,
       };
     } catch (error) {
@@ -1186,10 +1248,10 @@ export function createRemoteWindowStreamDaemonRuntime(
         purpose: entry.purpose,
         targetId: payload.targetId,
         status: 'rejected',
-        requestedVideoBitrate: payload.videoBitrate,
+        requestedVideoProfile: payload.videoProfile,
         error: {
           code: 'remote_window_stream_quality_failed',
-          message: formatRemoteWindowVideoBitrateError(error),
+          message: formatRemoteWindowVideoProfileError(error),
         },
       };
     } finally {
@@ -1253,56 +1315,265 @@ export function createRemoteWindowStreamDaemonRuntime(
     };
   }
 
-  async function injectInput(
+  const buildInputAck = (
+    control: RemoteWindowInputDeliveryControl,
     payload: RemoteWindowInputEventPayload,
-  ): Promise<RemoteWindowInputResultPayload | RemoteWindowStreamErrorPayload> {
-    const entry = activeStreams.get(payload.streamId);
-    if (!entry || entry.cleanupDone) {
-      return buildStreamError(payload, 'remote_window_input_stream_missing', `remote window stream is not active: ${payload.streamId || 'missing'}`);
+    options: {
+      accepted: boolean;
+      duplicate?: boolean;
+      error?: { code: string; message: string; retryable?: boolean };
+      result?: Omit<RemoteWindowInputResultPayload, 'streamId' | 'targetId'>;
+    },
+  ): RemoteWindowInputAckMessage => ({
+    control: {
+      version: 1,
+      sequence: control.sequence,
+      accepted: options.accepted,
+      retryable: options.error?.retryable === true,
+      duplicate: options.duplicate === true,
+      receivedAtMs: nowMs(),
+      ...(options.error ? {
+        error: {
+          code: options.error.code,
+          message: truncateRemoteWindowErrorMessage(options.error.message),
+        },
+      } : {}),
+    },
+    payload: {
+      streamId: payload.streamId,
+      targetId: payload.targetId,
+      ...options.result,
+    },
+  });
+
+  const validateInputDeliveryControl = (
+    payload: RemoteWindowInputEventPayload,
+    control: RemoteWindowInputDeliveryControl,
+  ) => {
+    if (
+      control.version !== 1
+      || !control.sequence.trim()
+      || !Number.isInteger(control.attempt)
+      || control.attempt < 1
+      || !Number.isFinite(control.sentAtMs)
+    ) {
+      throw new Error('remote window input delivery control is invalid');
     }
-    const daemonReceivedAtMs = nowMs();
-    try {
-      validateRemoteWindowInputPayload(payload, {
-        targetId: entry.targetId,
-        target: entry.target,
-        canvasLayout: entry.canvasLayout,
-      });
-      const mappedPayload: RemoteWindowInputEventPayload = {
-        ...payload,
-        event: buildRemoteWindowInputConfig(payload, entry.target, {
-          daemonReceivedAtMs,
-          canvasLayout: entry.canvasLayout,
-        }).event,
-      };
-      await runRemoteWindowInputEvent(mappedPayload, entry.target, {
-        swiftBinary,
-        runTmux: deps.runTmux,
+    const continuous = payload.event.kind === 'scroll'
+      || (payload.event.kind === 'pointer' && payload.event.phase === 'move');
+    const expectedLane = continuous ? 'continuous' : 'reliable';
+    if (control.lane !== expectedLane) {
+      throw new Error(`remote window input delivery lane mismatch: expected ${expectedLane}`);
+    }
+  };
+
+  const executeInput = async (
+    entry: ActiveRemoteWindowStream,
+    payload: RemoteWindowInputEventPayload,
+    control: RemoteWindowInputDeliveryControl,
+    daemonReceivedAtMs: number,
+  ): Promise<RemoteWindowInputResultPayload> => {
+    validateRemoteWindowInputPayload(payload, {
+      targetId: entry.targetId,
+      target: entry.target,
+      canvasLayout: entry.canvasLayout,
+    });
+    const mappedPayload: RemoteWindowInputEventPayload = {
+      ...payload,
+      event: buildRemoteWindowInputConfig(payload, entry.target, {
         daemonReceivedAtMs,
-      });
-      if (payload.event.kind === 'window-resize') {
-        const resized = await applyRemoteWindowTargetResize(entry, payload.event, now());
-        return {
-          requestId: payload.requestId,
-          streamId: payload.streamId,
-          targetId: payload.targetId,
-          accepted: true,
-          target: resized.target,
-          capture: resized.capture,
-        };
-      }
+        canvasLayout: entry.canvasLayout,
+      }).event,
+    };
+    await runRemoteWindowInputEvent(mappedPayload, entry.target, {
+      swiftBinary,
+      runTmux: deps.runTmux,
+      daemonReceivedAtMs,
+      delivery: {
+        lane: control.lane,
+        ...(control.lane === 'continuous' ? { maxAgeMs: entry.maxFrameAgeMs } : {}),
+      },
+    });
+    if (payload.event.kind === 'window-resize') {
+      const resized = await applyRemoteWindowTargetResize(entry, payload.event, now());
       return {
-        requestId: payload.requestId,
         streamId: payload.streamId,
         targetId: payload.targetId,
-        accepted: true,
+        target: resized.target,
+        capture: resized.capture,
       };
-    } catch (error) {
-      return buildStreamError(
-        payload,
-        'remote_window_input_failed',
-        error instanceof Error ? error.message : 'remote window input failed',
-      );
     }
+    return {
+      streamId: payload.streamId,
+      targetId: payload.targetId,
+    };
+  };
+
+  const rememberCompletedReliableInput = (
+    entry: ActiveRemoteWindowStream,
+    sequence: string,
+    message: RemoteWindowInputAckMessage,
+  ) => {
+    entry.reliableInputCompletedBySequence.set(sequence, message);
+    if (entry.reliableInputCompletedBySequence.size > 256) {
+      const oldest = entry.reliableInputCompletedBySequence.keys().next().value;
+      if (typeof oldest === 'string') {
+        entry.reliableInputCompletedBySequence.delete(oldest);
+      }
+    }
+  };
+
+  const drainContinuousInput = async (entry: ActiveRemoteWindowStream) => {
+    if (entry.continuousInputDrainActive || !isCurrentStream(entry)) {
+      return;
+    }
+    entry.continuousInputDrainScheduled = false;
+    entry.continuousInputDrainActive = true;
+    const pending = [entry.pendingContinuousMove, entry.pendingContinuousScroll].filter(
+      (item): item is PendingRemoteWindowContinuousInput => item !== null,
+    );
+    entry.pendingContinuousMove = null;
+    entry.pendingContinuousScroll = null;
+    for (const item of pending) {
+      if (!isCurrentStream(entry) || nowMs() - item.daemonReceivedAtMs > entry.maxFrameAgeMs) {
+        item.waiters.forEach((waiter) => waiter.resolve(null));
+        continue;
+      }
+      try {
+        await executeInput(entry, item.payload, item.waiters[item.waiters.length - 1]!.control, item.daemonReceivedAtMs);
+        item.waiters.forEach((waiter) => waiter.resolve(null));
+      } catch (error) {
+        item.waiters.forEach((waiter) => waiter.resolve(buildInputAck(waiter.control, item.payload, {
+          accepted: false,
+          error: {
+            code: 'remote_window_input_failed',
+            message: error instanceof Error ? error.message : 'remote window input failed',
+          },
+        })));
+      }
+    }
+    entry.continuousInputDrainActive = false;
+    if (isCurrentStream(entry) && (entry.pendingContinuousMove || entry.pendingContinuousScroll)) {
+      scheduleContinuousInputDrain(entry);
+    }
+  };
+
+  const scheduleContinuousInputDrain = (entry: ActiveRemoteWindowStream) => {
+    if (entry.continuousInputDrainScheduled || entry.continuousInputDrainActive) {
+      return;
+    }
+    entry.continuousInputDrainScheduled = true;
+    setImmediate(() => {
+      void drainContinuousInput(entry);
+    });
+  };
+
+  async function injectInput(
+    payload: RemoteWindowInputEventPayload,
+    control: RemoteWindowInputDeliveryControl,
+  ): Promise<RemoteWindowInputAckMessage | null> {
+    try {
+      validateInputDeliveryControl(payload, control);
+    } catch (error) {
+      return buildInputAck(control, payload, {
+        accepted: false,
+        error: {
+          code: 'remote_window_input_delivery_invalid',
+          message: error instanceof Error ? error.message : 'remote window input delivery control is invalid',
+        },
+      });
+    }
+    const entry = activeStreams.get(payload.streamId);
+    if (!entry || entry.cleanupDone) {
+      return buildInputAck(control, payload, {
+        accepted: false,
+        error: {
+          code: 'remote_window_input_stream_missing',
+          message: `remote window stream is not active: ${payload.streamId || 'missing'}`,
+        },
+      });
+    }
+    const daemonReceivedAtMs = nowMs();
+    if (control.lane === 'continuous') {
+      return new Promise<RemoteWindowInputAckMessage | null>((resolve) => {
+        const waiter = { control, resolve };
+        if (payload.event.kind === 'scroll') {
+          const current = entry.pendingContinuousScroll;
+          entry.pendingContinuousScroll = current && current.payload.event.kind === 'scroll'
+            ? {
+                payload: {
+                  ...payload,
+                  event: {
+                    ...payload.event,
+                    deltaX: current.payload.event.deltaX + payload.event.deltaX,
+                    deltaY: current.payload.event.deltaY + payload.event.deltaY,
+                  },
+                },
+                daemonReceivedAtMs: current.daemonReceivedAtMs,
+                waiters: [...current.waiters, waiter],
+              }
+            : { payload, daemonReceivedAtMs, waiters: [waiter] };
+        } else {
+          entry.pendingContinuousMove?.waiters.forEach((pendingWaiter) => pendingWaiter.resolve(null));
+          entry.pendingContinuousMove = { payload, daemonReceivedAtMs, waiters: [waiter] };
+        }
+        scheduleContinuousInputDrain(entry);
+      });
+    }
+    const completed = entry.reliableInputCompletedBySequence.get(control.sequence);
+    if (completed) {
+      return {
+        ...completed,
+        control: { ...completed.control, duplicate: true, receivedAtMs: nowMs() },
+      };
+    }
+    const active = entry.reliableInputInFlightBySequence.get(control.sequence);
+    if (active) {
+      const result = await active;
+      return {
+        ...result,
+        control: { ...result.control, duplicate: true, receivedAtMs: nowMs() },
+      };
+    }
+    const task = entry.reliableInputTail.then(async () => {
+      if (!isCurrentStream(entry)) {
+        return buildInputAck(control, payload, {
+          accepted: false,
+          error: {
+            code: 'remote_window_input_stream_missing',
+            message: `remote window stream is not active: ${payload.streamId || 'missing'}`,
+          },
+        });
+      }
+      try {
+        const result = await executeInput(entry, payload, control, daemonReceivedAtMs);
+        return buildInputAck(control, payload, {
+          accepted: true,
+          result: {
+            ...(result.target ? { target: result.target } : {}),
+            ...(result.capture ? { capture: result.capture } : {}),
+          },
+        });
+      } catch (error) {
+        return buildInputAck(control, payload, {
+          accepted: false,
+          error: {
+            code: 'remote_window_input_failed',
+            message: error instanceof Error ? error.message : 'remote window input failed',
+          },
+        });
+      }
+    });
+    entry.reliableInputTail = task.then(() => undefined, () => undefined);
+    entry.reliableInputInFlightBySequence.set(control.sequence, task);
+    const result = await task;
+    if (entry.reliableInputInFlightBySequence.get(control.sequence) === task) {
+      entry.reliableInputInFlightBySequence.delete(control.sequence);
+    }
+    if (isCurrentStream(entry)) {
+      rememberCompletedReliableInput(entry, control.sequence, result);
+    }
+    return result;
   }
 
   function dispose(reason = 'remote window daemon runtime disposed') {

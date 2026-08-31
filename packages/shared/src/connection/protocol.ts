@@ -338,18 +338,18 @@ export interface RemoteWindowStreamCapabilityTelemetry {
   };
 }
 
-export type RemoteWindowVideoBitratePreset =
-  | '2mbps'
-  | '5mbps'
-  | '10mbps'
-  | '20mbps'
-  | 'fullscreen';
+export type RemoteWindowVideoPreference = 'smooth' | 'quality';
 
-export interface RemoteWindowVideoBitrateConfig {
-  preset: RemoteWindowVideoBitratePreset;
-  bitrateMbps: 2 | 5 | 10 | 20;
+export interface RemoteWindowVideoProfile {
+  preference: RemoteWindowVideoPreference;
   maxBitrateBps: number;
-  maxFrameRateFps?: 5 | 8 | 10 | 12 | 15 | 30 | 60;
+  maxFrameRateFps: number;
+  maxCaptureWidth: number;
+  maxCaptureHeight: number;
+  maxFrameAgeMs: number;
+  interactionActive: boolean;
+  overviewMaxBitrateBps: number;
+  overviewMaxFrameRateFps: number;
 }
 
 export interface RemoteWindowStreamGroupBudget {
@@ -357,10 +357,16 @@ export interface RemoteWindowStreamGroupBudget {
   focus: {
     maxBitrateBps: number;
     maxFrameRateFps: number;
+    maxCaptureWidth: number;
+    maxCaptureHeight: number;
+    maxFrameAgeMs: number;
   };
   overview?: {
     maxBitrateBps: number;
     maxFrameRateFps: number;
+    maxCaptureWidth: number;
+    maxCaptureHeight: number;
+    maxFrameAgeMs: number;
   };
 }
 
@@ -373,7 +379,7 @@ export interface RemoteWindowStreamStartRequestPayload {
   target: RemoteWindowStreamTargetManifest;
   offer: RemoteWindowStreamRtcDescription;
   iceServers?: Array<Record<string, unknown>>;
-  videoBitrate?: RemoteWindowVideoBitrateConfig;
+  videoProfile: RemoteWindowVideoProfile;
 }
 
 // 双流：切换高码率主窗口（focus）流的捕获目标；低码率总览（overview）流保持不变
@@ -455,7 +461,7 @@ export interface RemoteWindowStreamQualityRequestPayload {
   revision: number;
   purpose?: RemoteWindowStreamPurpose;
   targetId: string;
-  videoBitrate: RemoteWindowVideoBitrateConfig;
+  videoProfile: RemoteWindowVideoProfile;
 }
 
 export interface RemoteWindowStreamQualityResultPayload {
@@ -468,8 +474,8 @@ export interface RemoteWindowStreamQualityResultPayload {
   purpose?: RemoteWindowStreamPurpose;
   targetId: string;
   status: 'applied' | 'rejected';
-  requestedVideoBitrate: RemoteWindowVideoBitrateConfig;
-  appliedVideoBitrate?: RemoteWindowVideoBitrateConfig;
+  requestedVideoProfile: RemoteWindowVideoProfile;
+  appliedVideoProfile?: RemoteWindowVideoProfile;
   appliedGroupBudget?: RemoteWindowStreamGroupBudget;
   error?: {
     code: string;
@@ -478,12 +484,10 @@ export interface RemoteWindowStreamQualityResultPayload {
 }
 
 export interface RemoteWindowInputEventPayload {
-  requestId: string;
   streamId: string;
   targetId: string;
   /** Required for composite-canvas input; daemon rejects stale/missing generations. */
   layoutGeneration?: number;
-  clientSentAt?: number;
   event:
     | {
         kind: 'focus';
@@ -564,11 +568,30 @@ export interface RemoteWindowInputEventPayload {
       };
 }
 
+export interface RemoteWindowInputDeliveryControl {
+  version: 1;
+  sequence: string;
+  lane: 'reliable' | 'continuous';
+  attempt: number;
+  sentAtMs: number;
+}
+
+export interface RemoteWindowInputAckControl {
+  version: 1;
+  sequence: string;
+  accepted: boolean;
+  retryable: boolean;
+  duplicate: boolean;
+  receivedAtMs: number;
+  error?: {
+    code: string;
+    message: string;
+  };
+}
+
 export interface RemoteWindowInputResultPayload {
-  requestId: string;
   streamId: string;
   targetId: string;
-  accepted: boolean;
   target?: RemoteWindowStreamTargetManifest;
   capture?: {
     source: 'ScreenCaptureKit';
@@ -722,7 +745,11 @@ export type BridgeClientMessage =
   | { type: 'remote-window-stream-ice-candidate'; payload: RemoteWindowStreamIceCandidatePayload }
   | { type: 'remote-window-stream-stop-request'; payload: RemoteWindowStreamStopRequestPayload }
   | { type: 'remote-window-stream-quality-request'; payload: RemoteWindowStreamQualityRequestPayload }
-  | { type: 'remote-window-input'; payload: RemoteWindowInputEventPayload }
+  | {
+      type: 'remote-window-input';
+      control: RemoteWindowInputDeliveryControl;
+      payload: RemoteWindowInputEventPayload;
+    }
   | { type: 'file-list-request'; payload: FileListRequestPayload }
   | { type: 'file-create-directory-request'; payload: FileCreateDirectoryRequestPayload }
   | { type: 'file-download-request'; payload: FileDownloadRequestPayload }
@@ -797,7 +824,11 @@ export type BridgeServerControlMessage =
   | { type: 'remote-window-stream-status'; payload: RemoteWindowStreamStatusPayload }
   | { type: 'remote-window-stream-focus-result'; payload: RemoteWindowStreamFocusResultPayload }
   | { type: 'remote-window-stream-quality-result'; payload: RemoteWindowStreamQualityResultPayload }
-  | { type: 'remote-window-input-result'; payload: RemoteWindowInputResultPayload }
+  | {
+      type: 'remote-window-input-ack';
+      control: RemoteWindowInputAckControl;
+      payload: RemoteWindowInputResultPayload;
+    }
   | { type: 'input-ack'; payload: TerminalInputAckPayload }
   | { type: 'remote-window-error'; payload: RemoteWindowStreamErrorPayload }
   | { type: 'file-download-chunk'; payload: FileDownloadChunkPayload }

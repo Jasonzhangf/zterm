@@ -1,7 +1,7 @@
 # 2026-08-23 Remote-Window Touch Gesture Arena ADR Amendment
 
 Date: 2026-08-23
-Status: Active
+Status: Superseded by `2026-08-30-remote-window-quality-gesture-control-amendment.md`
 Supersedes: 2026-08-08 single-finger drag = realtime scroll in Direct Touch
 
 ## Resolution

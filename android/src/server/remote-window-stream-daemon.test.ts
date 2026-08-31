@@ -4,7 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
-import type { RemoteWindowStreamStatusPayload } from '@zterm/shared/protocol';
+import type {
+  RemoteWindowStreamStartRequestPayload,
+  RemoteWindowStreamStatusPayload,
+} from '@zterm/shared/protocol';
 
 // Unit/protocol coverage injects every media primitive it exercises. Keep the
 // native addon out of this process so its global teardown cannot turn a green
@@ -48,7 +51,10 @@ vi.mock('@roamhq/wrtc', () => ({
     },
   },
 }));
-import type { RemoteWindowCaptureSourceFactory } from './remote-window-capture';
+import type {
+  RemoteWindowCaptureFrameSource,
+  RemoteWindowCaptureSourceFactory,
+} from './remote-window-capture';
 import {
   RemoteWindowCaptureTargetOutOfDisplayError,
   RemoteWindowCaptureTargetUnavailableError,
@@ -61,7 +67,7 @@ import {
   buildMacosAppWindowTargets,
   buildRemoteWindowStreamTargets,
   createDefaultRemoteWindowInputHelper,
-  createRemoteWindowStreamDaemonRuntime,
+  createRemoteWindowStreamDaemonRuntime as createRemoteWindowStreamDaemonRuntimeSource,
   flattenIterm2SplitTree,
   isRemoteWindowInputConfigStale,
   MACOS_REMOTE_WINDOW_INPUT_SWIFT,
@@ -70,14 +76,131 @@ import {
   resolveRemoteWindowInputConfigStaleMs,
   resolveRemoteWindowInputHelperTimeoutMs,
   shouldCoalesceRemoteWindowQueuedFocusBeforeInput,
-  shouldRefreshRemoteWindowQueuedInputAfterFocus,
-  shouldRefreshRemoteWindowQueuedInputAfterRealInput,
   startScreenCaptureKitFrameSource,
   summarizeRemoteWindowCatalogError,
   type Iterm2RawCatalog,
   type Iterm2RawNode,
   type MacosAppWindowCatalog,
+  type RemoteWindowInputEventRunner,
 } from './remote-window-stream-daemon';
+import { makeRemoteWindowVideoProfileFixture } from './remote-window-video-profile-test-fixture';
+
+const smoothVideoProfile = makeRemoteWindowVideoProfileFixture('smooth');
+const qualityVideoProfile = makeRemoteWindowVideoProfileFixture('quality');
+
+function reliableInputControl(sequence: string) {
+  return {
+    version: 1 as const,
+    sequence,
+    lane: 'reliable' as const,
+    attempt: 1,
+    sentAtMs: Date.now(),
+  };
+}
+
+function continuousInputControl(sequence: string) {
+  return {
+    version: 1 as const,
+    sequence,
+    lane: 'continuous' as const,
+    attempt: 1,
+    sentAtMs: Date.now(),
+  };
+}
+
+function makeControllableCaptureSource(
+  options: Parameters<RemoteWindowCaptureSourceFactory>[1],
+  stop = vi.fn(),
+) {
+  let frameRate = options.frameRate;
+  let maxCaptureWidth = options.maxCaptureWidth ?? smoothVideoProfile.maxCaptureWidth;
+  let maxCaptureHeight = options.maxCaptureHeight ?? smoothVideoProfile.maxCaptureHeight;
+  return {
+    width: 2,
+    height: 2,
+    get frameRate() {
+      return frameRate;
+    },
+    get maxCaptureWidth() {
+      return maxCaptureWidth;
+    },
+    get maxCaptureHeight() {
+      return maxCaptureHeight;
+    },
+    updateVideoProfile: vi.fn(async (profile: {
+      maxFrameRateFps: number;
+      maxCaptureWidth: number;
+      maxCaptureHeight: number;
+    }) => {
+      frameRate = profile.maxFrameRateFps;
+      maxCaptureWidth = profile.maxCaptureWidth;
+      maxCaptureHeight = profile.maxCaptureHeight;
+    }),
+    stop,
+  };
+}
+
+function createRemoteWindowStreamDaemonRuntime(
+  deps: Parameters<typeof createRemoteWindowStreamDaemonRuntimeSource>[0],
+) {
+  const captureSourceFactory = deps.captureSourceFactory
+    ? async (
+        target: Parameters<RemoteWindowCaptureSourceFactory>[0],
+        options: Parameters<RemoteWindowCaptureSourceFactory>[1],
+      ): Promise<RemoteWindowCaptureFrameSource> => {
+        const source = await deps.captureSourceFactory!(target, options);
+        if (
+          source.updateVideoProfile
+          && Number.isFinite(source.maxCaptureWidth)
+          && Number.isFinite(source.maxCaptureHeight)
+        ) {
+          return source;
+        }
+        let frameRate = source.frameRate;
+        let maxCaptureWidth = options.maxCaptureWidth ?? smoothVideoProfile.maxCaptureWidth;
+        let maxCaptureHeight = options.maxCaptureHeight ?? smoothVideoProfile.maxCaptureHeight;
+        return {
+          ...source,
+          get width() {
+            return source.width;
+          },
+          get height() {
+            return source.height;
+          },
+          get frameRate() {
+            return frameRate;
+          },
+          get maxCaptureWidth() {
+            return maxCaptureWidth;
+          },
+          get maxCaptureHeight() {
+            return maxCaptureHeight;
+          },
+          updateVideoProfile: vi.fn(async (profile) => {
+            frameRate = profile.maxFrameRateFps;
+            maxCaptureWidth = profile.maxCaptureWidth;
+            maxCaptureHeight = profile.maxCaptureHeight;
+          }),
+        };
+      }
+    : undefined;
+  const runtime = createRemoteWindowStreamDaemonRuntimeSource({
+    ...deps,
+    ...(captureSourceFactory ? { captureSourceFactory } : {}),
+  });
+  return {
+    ...runtime,
+    startStream: (
+      payload: Omit<RemoteWindowStreamStartRequestPayload, 'videoProfile'> & {
+        videoProfile?: RemoteWindowStreamStartRequestPayload['videoProfile'];
+      },
+      handlers?: Parameters<typeof runtime.startStream>[1],
+    ) => runtime.startStream({
+      ...payload,
+      videoProfile: payload.videoProfile ?? makeRemoteWindowVideoProfileFixture('smooth'),
+    }, handlers),
+  };
+}
 
 async function flushPromiseQueue() {
   await new Promise<void>((resolve) => {
@@ -150,7 +273,7 @@ class FakeRemoteWindowPeerConnection {
 
   public remoteDescription: RTCSessionDescriptionInit | null = null;
 
-  public addTrack = vi.fn();
+  public addTrack = vi.fn(() => makeFakeRtpSender());
 
   public addTransceiver = vi.fn();
 
@@ -402,10 +525,8 @@ describe('remote window stream daemon owner', () => {
   it('builds remote input config with target window focus metadata', () => {
     const target = makeAppStreamTarget();
     const config = buildRemoteWindowInputConfig({
-      requestId: 'rw-input-config',
       streamId: 'stream-input-config',
       targetId: target.streamTargetId,
-      clientSentAt: Date.now(),
       event: {
         kind: 'scroll',
         unit: 'pixel',
@@ -420,7 +541,6 @@ describe('remote window stream daemon owner', () => {
 
     expect(config).toEqual({
       daemonReceivedAtMs: 7_777,
-      clientSentAt: expect.any(Number),
       pid: 123,
       appBundleId: 'com.apple.TextEdit',
       focusPolicy: 'bring-to-focus',
@@ -449,7 +569,6 @@ describe('remote window stream daemon owner', () => {
       }],
     };
     const config = buildRemoteWindowInputConfig({
-      requestId: 'rw-input-composite',
       streamId: 'stream-input-composite',
       targetId: target.streamTargetId,
       layoutGeneration: 7,
@@ -491,7 +610,6 @@ describe('remote window stream daemon owner', () => {
       }],
     };
     expect(() => buildRemoteWindowInputConfig({
-      requestId: 'rw-input-outside',
       streamId: 'stream-input-outside',
       targetId: target.streamTargetId,
       layoutGeneration: 7,
@@ -535,17 +653,13 @@ describe('remote window stream daemon owner', () => {
   it('keeps action execution bounded while real input keeps the one-second queued realtime budget', () => {
     const target = makeAppStreamTarget();
     const focusConfig = buildRemoteWindowInputConfig({
-      requestId: 'rw-focus-timeout-policy',
       streamId: 'stream-timeout-policy',
       targetId: target.streamTargetId,
-      clientSentAt: 1_000,
       event: { kind: 'focus' },
     }, target, { daemonReceivedAtMs: 20_000 });
     const pointerConfig = buildRemoteWindowInputConfig({
-      requestId: 'rw-pointer-timeout-policy',
       streamId: 'stream-timeout-policy',
       targetId: target.streamTargetId,
-      clientSentAt: 1_000,
       event: {
         kind: 'pointer',
         phase: 'down',
@@ -579,18 +693,12 @@ describe('remote window stream daemon owner', () => {
       21_001,
       resolveRemoteWindowInputConfigStaleMs(pointerConfig),
     )).toBe(true);
-    expect(shouldRefreshRemoteWindowQueuedInputAfterFocus(focusConfig, pointerConfig)).toBe(true);
-    expect(shouldRefreshRemoteWindowQueuedInputAfterFocus(focusConfig, otherWindowPointerConfig)).toBe(false);
-    expect(shouldRefreshRemoteWindowQueuedInputAfterFocus(pointerConfig, focusConfig)).toBe(false);
     expect(shouldCoalesceRemoteWindowQueuedFocusBeforeInput(focusConfig, pointerConfig)).toBe(true);
     expect(shouldCoalesceRemoteWindowQueuedFocusBeforeInput(focusConfig, otherWindowPointerConfig)).toBe(false);
     expect(shouldCoalesceRemoteWindowQueuedFocusBeforeInput(pointerConfig, focusConfig)).toBe(false);
-    expect(shouldRefreshRemoteWindowQueuedInputAfterRealInput(pointerConfig, pointerConfig)).toBe(true);
-    expect(shouldRefreshRemoteWindowQueuedInputAfterRealInput(pointerConfig, otherWindowPointerConfig)).toBe(false);
-    expect(shouldRefreshRemoteWindowQueuedInputAfterRealInput(focusConfig, pointerConfig)).toBe(false);
   });
 
-  it('keeps an explicit standalone focus while refreshing a later same-target input after success', async () => {
+  it('keeps reliable input independent from queued age after an explicit standalone focus', async () => {
     const stdin = new PassThrough();
     const stdout = new PassThrough();
     const stderr = new PassThrough();
@@ -641,17 +749,13 @@ describe('remote window stream daemon owner', () => {
       await helper.warm();
       const daemonReceivedAtMs = Date.now();
       const focusConfig = buildRemoteWindowInputConfig({
-        requestId: 'rw-slow-focus',
         streamId: 'stream-slow-focus',
         targetId: target.streamTargetId,
-        clientSentAt: daemonReceivedAtMs,
         event: { kind: 'focus' },
       }, target, { daemonReceivedAtMs });
       const pointerConfig = buildRemoteWindowInputConfig({
-        requestId: 'rw-slow-focus-pointer',
         streamId: 'stream-slow-focus',
         targetId: target.streamTargetId,
-        clientSentAt: daemonReceivedAtMs,
         event: {
           kind: 'pointer',
           phase: 'down',
@@ -664,11 +768,11 @@ describe('remote window stream daemon owner', () => {
           normalizedY: 0.5,
         },
       }, target, { daemonReceivedAtMs });
-      const focusPromise = helper.send(focusConfig);
+      const focusPromise = helper.send(focusConfig, { lane: 'reliable' });
       await new Promise((resolve) => {
         setTimeout(resolve, 40);
       });
-      const pointerPromise = helper.send(pointerConfig);
+      const pointerPromise = helper.send(pointerConfig, { lane: 'reliable' });
       await expect(Promise.all([focusPromise, pointerPromise])).resolves.toEqual([undefined, undefined]);
       expect(writtenKinds).toEqual(['focus', 'pointer']);
     } finally {
@@ -726,10 +830,8 @@ describe('remote window stream daemon owner', () => {
       await helper.warm();
       const daemonReceivedAtMs = Date.now();
       const clickConfig = buildRemoteWindowInputConfig({
-        requestId: 'rw-click-focus-budget',
         streamId: 'stream-click-focus-budget',
         targetId: target.streamTargetId,
-        clientSentAt: daemonReceivedAtMs,
         event: {
           kind: 'click',
           pointerId: 1,
@@ -802,17 +904,13 @@ describe('remote window stream daemon owner', () => {
     const makeConfigPair = (index: number) => {
       const daemonReceivedAtMs = Date.now();
       const focusConfig = buildRemoteWindowInputConfig({
-        requestId: `rw-burst-focus-${index}`,
         streamId: 'stream-burst-focus',
         targetId: target.streamTargetId,
-        clientSentAt: daemonReceivedAtMs,
         event: { kind: 'focus' },
       }, target, { daemonReceivedAtMs });
       const pointerConfig = buildRemoteWindowInputConfig({
-        requestId: `rw-burst-pointer-${index}`,
         streamId: 'stream-burst-focus',
         targetId: target.streamTargetId,
-        clientSentAt: daemonReceivedAtMs,
         event: {
           kind: 'pointer',
           phase: 'down',
@@ -839,7 +937,7 @@ describe('remote window stream daemon owner', () => {
     }
   }, 10_000);
 
-  it('keeps same-target action-only bursts fresh behind inline focus work', async () => {
+  it('does not refresh continuous age while reliable actions continue in order', async () => {
     const stdin = new PassThrough();
     const stdout = new PassThrough();
     const stderr = new PassThrough();
@@ -894,10 +992,8 @@ describe('remote window stream daemon owner', () => {
       const daemonReceivedAtMs = Date.now();
       const configs = [
         buildRemoteWindowInputConfig({
-          requestId: 'rw-action-burst-click',
           streamId: 'stream-action-burst',
           targetId: target.streamTargetId,
-          clientSentAt: daemonReceivedAtMs,
           event: {
             kind: 'click',
             pointerId: 1,
@@ -910,10 +1006,8 @@ describe('remote window stream daemon owner', () => {
           },
         }, target, { daemonReceivedAtMs }),
         buildRemoteWindowInputConfig({
-          requestId: 'rw-action-burst-gesture',
           streamId: 'stream-action-burst',
           targetId: target.streamTargetId,
-          clientSentAt: daemonReceivedAtMs,
           event: {
             kind: 'gesture',
             gesture: 'swipe',
@@ -936,10 +1030,8 @@ describe('remote window stream daemon owner', () => {
           },
         }, target, { daemonReceivedAtMs }),
         buildRemoteWindowInputConfig({
-          requestId: 'rw-action-burst-scroll',
           streamId: 'stream-action-burst',
           targetId: target.streamTargetId,
-          clientSentAt: daemonReceivedAtMs,
           event: {
             kind: 'scroll',
             unit: 'pixel',
@@ -952,10 +1044,8 @@ describe('remote window stream daemon owner', () => {
           },
         }, target, { daemonReceivedAtMs }),
         buildRemoteWindowInputConfig({
-          requestId: 'rw-action-burst-key-down',
           streamId: 'stream-action-burst',
           targetId: target.streamTargetId,
-          clientSentAt: daemonReceivedAtMs,
           event: {
             kind: 'key',
             phase: 'down',
@@ -965,10 +1055,8 @@ describe('remote window stream daemon owner', () => {
           },
         }, target, { daemonReceivedAtMs }),
         buildRemoteWindowInputConfig({
-          requestId: 'rw-action-burst-key-up',
           streamId: 'stream-action-burst',
           targetId: target.streamTargetId,
-          clientSentAt: daemonReceivedAtMs,
           event: {
             kind: 'key',
             phase: 'up',
@@ -979,9 +1067,22 @@ describe('remote window stream daemon owner', () => {
         }, target, { daemonReceivedAtMs }),
       ];
 
-      const settled = await Promise.allSettled(configs.map((config) => helper.send(config)));
-      expect(settled).toEqual(configs.map(() => ({ status: 'fulfilled', value: undefined })));
-      expect(writtenKinds).toEqual(['click', 'gesture', 'scroll', 'key:down', 'key:up']);
+      const settled = await Promise.allSettled(configs.map((config, index) => helper.send(
+        config,
+        index === 2 ? { lane: 'continuous', maxAgeMs: 1_000 } : { lane: 'reliable' },
+      )));
+      expect(settled.map((result) => result.status)).toEqual([
+        'fulfilled',
+        'fulfilled',
+        'rejected',
+        'fulfilled',
+        'fulfilled',
+      ]);
+      expect(settled[2]).toMatchObject({
+        status: 'rejected',
+        reason: expect.objectContaining({ message: 'remote window input stale' }),
+      });
+      expect(writtenKinds).toEqual(['click', 'gesture', 'key:down', 'key:up']);
     } finally {
       helper.dispose();
     }
@@ -1046,10 +1147,8 @@ describe('remote window stream daemon owner', () => {
       await helper.warm();
       const daemonReceivedAtMs = Date.now();
       const clickConfig = buildRemoteWindowInputConfig({
-        requestId: 'rw-stale-other-click',
         streamId: 'stream-stale-other',
         targetId: target.streamTargetId,
-        clientSentAt: daemonReceivedAtMs,
         event: {
           kind: 'click',
           pointerId: 1,
@@ -1062,10 +1161,8 @@ describe('remote window stream daemon owner', () => {
         },
       }, target, { daemonReceivedAtMs });
       const otherScrollConfig = buildRemoteWindowInputConfig({
-        requestId: 'rw-stale-other-scroll',
         streamId: 'stream-stale-other',
         targetId: otherTarget.streamTargetId,
-        clientSentAt: daemonReceivedAtMs,
         event: {
           kind: 'scroll',
           unit: 'pixel',
@@ -1079,8 +1176,8 @@ describe('remote window stream daemon owner', () => {
       }, otherTarget, { daemonReceivedAtMs });
 
       await expect(Promise.all([
-        helper.send(clickConfig),
-        helper.send(otherScrollConfig),
+        helper.send(clickConfig, { lane: 'reliable' }),
+        helper.send(otherScrollConfig, { lane: 'continuous', maxAgeMs: 1_000 }),
       ])).rejects.toThrow('remote window input stale');
       expect(writtenKinds).toEqual(['click']);
     } finally {
@@ -1169,24 +1266,17 @@ describe('remote window stream daemon owner', () => {
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('"KeyV": 9');
   });
 
-  it('builds remote-window image paste Command+V input with fresh client timestamps', () => {
-    let now = 1_725_000_000_000;
+  it('builds remote-window image paste Command+V as action-only payloads', () => {
     const payloads = buildRemoteWindowImagePasteInputPayloads({
       requestPrefix: 'paste-image-rw',
       streamId: 'stream-paste',
       targetId: 'app-window:123:456',
-      now: () => {
-        now += 7;
-        return now;
-      },
     });
 
     expect(payloads).toEqual([
       {
-        requestId: 'paste-image-rw-0',
         streamId: 'stream-paste',
         targetId: 'app-window:123:456',
-        clientSentAt: 1_725_000_000_007,
         event: {
           kind: 'key',
           phase: 'down',
@@ -1196,10 +1286,8 @@ describe('remote window stream daemon owner', () => {
         },
       },
       {
-        requestId: 'paste-image-rw-1',
         streamId: 'stream-paste',
         targetId: 'app-window:123:456',
-        clientSentAt: 1_725_000_000_014,
         event: {
           kind: 'key',
           phase: 'up',
@@ -1817,6 +1905,7 @@ setInterval(() => {}, 1000);
       sendIceCandidate: (payload) => candidates.push(payload),
       sendStatus: (payload) => statuses.push(payload),
     });
+    await flushPromiseQueue();
 
     expect('answer' in result ? result : null).toMatchObject({
       requestId: 'rw-start',
@@ -2134,13 +2223,7 @@ setInterval(() => {}, 1000);
       });
       const index = captureIndex;
       captureIndex += 1;
-      return {
-        width: 2,
-        height: 2,
-        frameRate: options.frameRate,
-        updateFrameRate: vi.fn(async () => undefined),
-        stop: captureStops[index]!,
-      };
+      return makeControllableCaptureSource(options, captureStops[index]!);
     });
     const runtime = createRemoteWindowStreamDaemonRuntime({
       platform: 'darwin',
@@ -2162,11 +2245,11 @@ setInterval(() => {}, 1000);
       mediaPlanVersion: 1 as const,
       target: makeStreamTarget(),
       offer: { type: 'offer', sdp: 'canvas-offer' },
-      videoBitrate: { preset: '2mbps', bitrateMbps: 2, maxBitrateBps: 2_000_000 },
+      videoProfile: smoothVideoProfile,
     })).resolves.toMatchObject({
       streamId: 'canvas-stream',
       purpose: 'preview',
-      capture: { maxBitrateBps: 2_000_000 },
+      capture: { maxBitrateBps: 6_000_000 },
     });
     await expect(runtime.startStream({
       requestId: 'rw-focus',
@@ -2176,11 +2259,11 @@ setInterval(() => {}, 1000);
       mediaPlanVersion: 1 as const,
       target: makeStreamTarget(),
       offer: { type: 'offer', sdp: 'focus-offer' },
-      videoBitrate: { preset: '20mbps', bitrateMbps: 20, maxBitrateBps: 20_000_000 },
+      videoProfile: qualityVideoProfile,
     })).resolves.toMatchObject({
       streamId: 'focus-stream',
       purpose: 'focus',
-      capture: { maxBitrateBps: 20_000_000 },
+      capture: { maxBitrateBps: 16_000_000 },
     });
 
     await expect(runtime.stopStream({
@@ -2246,6 +2329,7 @@ setInterval(() => {}, 1000);
     }, {
       sendStatus: (payload) => statuses.push(payload),
     });
+    await flushPromiseQueue();
 
     expect('answer' in result).toBe(true);
     expect(fakePeer.connectionState).toBe('new');
@@ -2260,6 +2344,7 @@ setInterval(() => {}, 1000);
       height: 2,
       rgba: new Uint8Array(16).fill(13),
     });
+    await flushPromiseQueue();
     expect(fakeVideoSource.onFrame).toHaveBeenCalledTimes(2);
     expect(statuses).toEqual([
       {
@@ -2284,7 +2369,168 @@ setInterval(() => {}, 1000);
     ]);
   });
 
-  it('does not replay pending frames after the stream is stopped', async () => {
+  it('keeps one latest focus frame, drops over-age work, and applies the active age budget', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    const fakeTrack = makeFakeMediaStreamTrack();
+    const fakeVideoSource = {
+      createTrack: vi.fn(() => fakeTrack),
+      onFrame: vi.fn(),
+    };
+    let clockMs = 1_000;
+    let pushFrame: (frame: {
+      width: number;
+      height: number;
+      rgba: Uint8Array;
+      capturedAtMs?: number;
+    }) => void = () => undefined;
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      nowMs: () => clockMs,
+      captureSourceFactory: vi.fn(async (_target, options) => {
+        pushFrame = options.onFrame;
+        return makeControllableCaptureSource(options);
+      }),
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => fakeVideoSource as any),
+      rgbaToI420: vi.fn((rgba, i420) => {
+        i420.data.fill(rgba.data[0] ?? 0);
+      }),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    await runtime.startStream({
+      requestId: 'rw-latest-focus',
+      streamId: 'stream-latest-focus',
+      mediaPlan: 'single-focus',
+      mediaPlanVersion: 1,
+      target: makeStreamTarget(),
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+      videoProfile: smoothVideoProfile,
+    });
+
+    pushFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(1), capturedAtMs: clockMs });
+    pushFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(2), capturedAtMs: clockMs });
+    pushFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(3), capturedAtMs: clockMs });
+    await flushPromiseQueue();
+    expect(fakeVideoSource.onFrame).toHaveBeenCalledTimes(1);
+    expect(fakeVideoSource.onFrame).toHaveBeenLastCalledWith({
+      width: 2,
+      height: 2,
+      data: new Uint8Array(6).fill(3),
+    });
+
+    clockMs = 1_120;
+    pushFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(4), capturedAtMs: 1_000 });
+    await flushPromiseQueue();
+    expect(fakeVideoSource.onFrame).toHaveBeenCalledTimes(1);
+
+    await runtime.updateStreamQuality({
+      requestId: 'rw-latest-focus-quality',
+      streamId: 'stream-latest-focus',
+      streamGroupId: 'stream-latest-focus',
+      mediaPlan: 'single-focus',
+      mediaPlanVersion: 1,
+      revision: 1,
+      targetId: makeStreamTarget().streamTargetId,
+      videoProfile: qualityVideoProfile,
+    });
+    pushFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(5), capturedAtMs: 1_000 });
+    await flushPromiseQueue();
+    expect(fakeVideoSource.onFrame).toHaveBeenCalledTimes(2);
+    expect(fakeVideoSource.onFrame).toHaveBeenLastCalledWith({
+      width: 2,
+      height: 2,
+      data: new Uint8Array(6).fill(5),
+    });
+
+    await runtime.stopStream({
+      requestId: 'rw-latest-focus-stop',
+      streamId: 'stream-latest-focus',
+    });
+    pushFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(6), capturedAtMs: clockMs });
+    await flushPromiseQueue();
+    expect(fakeVideoSource.onFrame).toHaveBeenCalledTimes(2);
+  });
+
+  it('drains focus and overview through independent latest-frame slots', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    const focusVideoSource = {
+      createTrack: vi.fn(() => makeFakeMediaStreamTrack()),
+      onFrame: vi.fn(),
+    };
+    const overviewVideoSource = {
+      createTrack: vi.fn(() => makeFakeMediaStreamTrack()),
+      onFrame: vi.fn(),
+    };
+    const videoSources = [focusVideoSource, overviewVideoSource];
+    let videoSourceIndex = 0;
+    let focusFrame: Parameters<RemoteWindowCaptureSourceFactory>[1]['onFrame'] = () => undefined;
+    let overviewFrame: Parameters<RemoteWindowCaptureSourceFactory>[1]['onFrame'] = () => undefined;
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      nowMs: () => 2_000,
+      captureSourceFactory: vi.fn(async (target, options) => {
+        if (target.compositeWindows?.length) {
+          overviewFrame = options.onFrame;
+        } else {
+          focusFrame = options.onFrame;
+        }
+        return makeControllableCaptureSource(options);
+      }),
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => videoSources[videoSourceIndex++] as any),
+      rgbaToI420: vi.fn((rgba, i420) => {
+        i420.data.fill(rgba.data[0] ?? 0);
+      }),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+    const compositeTarget = {
+      ...makeStreamTarget(),
+      videoTarget: {
+        ...makeStreamTarget().videoTarget,
+        kind: 'app-window' as const,
+        appBundleId: 'com.google.Chrome',
+        windowId: 'app-window:487:64',
+      },
+      compositeWindows: [{
+        windowId: 'app-window:487:65',
+        title: 'Second window',
+        windowBoundsTopLeftPx: { x: 0, y: 0, width: 800, height: 600 },
+        cropRectTopLeftPx: { x: 0, y: 0, width: 800, height: 600 },
+      }],
+    };
+
+    await runtime.startStream({
+      requestId: 'rw-independent-lanes',
+      streamId: 'stream-independent-lanes',
+      mediaPlan: 'overview-plus-focus',
+      mediaPlanVersion: 1,
+      target: compositeTarget,
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+    });
+
+    focusFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(1), capturedAtMs: 2_000 });
+    focusFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(2), capturedAtMs: 2_000 });
+    overviewFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(9), capturedAtMs: 2_000 });
+    await flushPromiseQueue();
+
+    expect(focusVideoSource.onFrame).toHaveBeenCalledTimes(1);
+    expect(focusVideoSource.onFrame).toHaveBeenCalledWith({
+      width: 2,
+      height: 2,
+      data: new Uint8Array(6).fill(2),
+    });
+    expect(overviewVideoSource.onFrame).toHaveBeenCalledTimes(1);
+    expect(overviewVideoSource.onFrame).toHaveBeenCalledWith({
+      width: 2,
+      height: 2,
+      data: new Uint8Array(6).fill(9),
+    });
+  });
+
+  it('does not replay frames after the stream is stopped', async () => {
     const fakePeer = new FakeRemoteWindowPeerConnection();
     fakePeer.connectionState = 'new';
     const fakeTrack = makeFakeMediaStreamTrack();
@@ -2328,6 +2574,7 @@ setInterval(() => {}, 1000);
     }, {
       sendStatus: (payload) => statuses.push(payload),
     });
+    await flushPromiseQueue();
 
     expect('answer' in result).toBe(true);
     expect(fakeVideoSource.onFrame).toHaveBeenCalledTimes(1);
@@ -2395,13 +2642,7 @@ setInterval(() => {}, 1000);
           height: 2,
           rgba: new Uint8Array(16).fill(12),
         });
-        return {
-          width: 2,
-          height: 2,
-          frameRate: 12,
-          updateFrameRate: vi.fn(async () => undefined),
-          stop: vi.fn(),
-        };
+        return makeControllableCaptureSource(options);
       }),
       peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
       rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
@@ -2419,14 +2660,14 @@ setInterval(() => {}, 1000);
       mediaPlanVersion: 1 as const,
       target: makeStreamTarget(),
       offer: { type: 'offer', sdp: 'android-offer-sdp' },
-      videoBitrate: { preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
+      videoProfile: smoothVideoProfile,
     });
 
-    expect('answer' in started ? started.capture.maxBitrateBps : null).toBe(5_000_000);
+    expect('answer' in started ? started.capture.maxBitrateBps : null).toBe(6_000_000);
     expect(fakePeer.addTrack).toHaveBeenCalledWith(fakeTrack);
     expect(fakePeer.addTransceiver).not.toHaveBeenCalled();
     expect(fakeSender.setParameters).toHaveBeenCalledWith(expect.objectContaining({
-      encodings: [expect.objectContaining({ maxBitrate: 5_000_000, maxFramerate: 30 })],
+      encodings: [expect.objectContaining({ maxBitrate: 6_000_000, maxFramerate: 30 })],
     }));
     expect(fakePeer.setLocalDescription.mock.invocationCallOrder[0]).toBeLessThan(
       fakeSender.setParameters.mock.invocationCallOrder[0]!,
@@ -2440,7 +2681,7 @@ setInterval(() => {}, 1000);
       mediaPlanVersion: 1 as const,
       revision: 1,
       targetId: 'iterm2-pane:window-1:tab-1:left',
-      videoBitrate: { preset: 'fullscreen', bitrateMbps: 20, maxBitrateBps: 20_000_000 },
+      videoProfile: qualityVideoProfile,
     });
 
     expect(updated).toEqual({
@@ -2453,15 +2694,21 @@ setInterval(() => {}, 1000);
       purpose: 'focus',
       targetId: 'iterm2-pane:window-1:tab-1:left',
       status: 'applied',
-      requestedVideoBitrate: { preset: 'fullscreen', bitrateMbps: 20, maxBitrateBps: 20_000_000 },
-      appliedVideoBitrate: { preset: 'fullscreen', bitrateMbps: 20, maxBitrateBps: 20_000_000, maxFrameRateFps: 60 },
+      requestedVideoProfile: qualityVideoProfile,
+      appliedVideoProfile: qualityVideoProfile,
       appliedGroupBudget: {
-        totalMaxBitrateBps: 20_000_000,
-        focus: { maxBitrateBps: 20_000_000, maxFrameRateFps: 60 },
+        totalMaxBitrateBps: 16_000_000,
+        focus: {
+          maxBitrateBps: 16_000_000,
+          maxFrameRateFps: 30,
+          maxCaptureWidth: 1920,
+          maxCaptureHeight: 1200,
+          maxFrameAgeMs: 150,
+        },
       },
     });
     expect(fakeSender.setParameters).toHaveBeenLastCalledWith(expect.objectContaining({
-      encodings: [expect.objectContaining({ maxBitrate: 20_000_000, maxFramerate: 60 })],
+      encodings: [expect.objectContaining({ maxBitrate: 16_000_000, maxFramerate: 30 })],
     }));
   });
 
@@ -2476,7 +2723,7 @@ setInterval(() => {}, 1000);
       platform: 'darwin',
       captureSourceFactory: vi.fn(async (_target, options) => {
         options.onFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(12) });
-        return { width: 2, height: 2, frameRate: 12, updateFrameRate: vi.fn(async () => undefined), stop: vi.fn() };
+        return makeControllableCaptureSource(options);
       }),
       peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
       rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
@@ -2497,7 +2744,7 @@ setInterval(() => {}, 1000);
       mediaPlanVersion: 1 as const,
       target: makeStreamTarget(),
       offer: { type: 'offer', sdp: 'android-offer-sdp' },
-      videoBitrate: { preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
+      videoProfile: smoothVideoProfile,
     }, {
       sendStatus: (status) => {
         statuses.push(status);
@@ -2514,7 +2761,7 @@ setInterval(() => {}, 1000);
       streamId: 'stream-bitrate-empty',
       purpose: 'focus',
       phase: 'starting',
-      message: 'video bitrate not applied: remote window quality sender has no encodings to update',
+      message: 'video profile not applied: remote window quality sender has no encodings to update',
     });
 
     const updated = await runtime.updateStreamQuality({
@@ -2525,7 +2772,7 @@ setInterval(() => {}, 1000);
       mediaPlanVersion: 1 as const,
       revision: 1,
       targetId: 'iterm2-pane:window-1:tab-1:left',
-      videoBitrate: { preset: '10mbps', bitrateMbps: 10, maxBitrateBps: 10_000_000 },
+      videoProfile: qualityVideoProfile,
     });
 
     expect(updated).toEqual({
@@ -2538,7 +2785,7 @@ setInterval(() => {}, 1000);
       purpose: 'focus',
       targetId: 'iterm2-pane:window-1:tab-1:left',
       status: 'rejected',
-      requestedVideoBitrate: { preset: '10mbps', bitrateMbps: 10, maxBitrateBps: 10_000_000 },
+      requestedVideoProfile: qualityVideoProfile,
       error: {
         code: 'remote_window_stream_quality_failed',
         message: 'remote window quality sender has no encodings to update',
@@ -2554,7 +2801,7 @@ setInterval(() => {}, 1000);
       mediaPlanVersion: 1,
       revision: 1,
       targetId: makeStreamTarget().streamTargetId,
-      videoBitrate: { preset: '10mbps', bitrateMbps: 10, maxBitrateBps: 10_000_000 },
+      videoProfile: qualityVideoProfile,
     });
     expect(planMismatch).toMatchObject({
       status: 'rejected',
@@ -2575,7 +2822,7 @@ setInterval(() => {}, 1000);
       platform: 'darwin',
       captureSourceFactory: vi.fn(async (_target, options) => {
         options.onFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(12) });
-        return { width: 2, height: 2, frameRate: 12, updateFrameRate: vi.fn(async () => undefined), stop: vi.fn() };
+        return makeControllableCaptureSource(options);
       }),
       peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
       rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
@@ -2596,7 +2843,7 @@ setInterval(() => {}, 1000);
       mediaPlanVersion: 1 as const,
       target: makeStreamTarget(),
       offer: { type: 'offer', sdp: 'android-offer-sdp' },
-      videoBitrate: { preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
+      videoProfile: smoothVideoProfile,
     });
     fakeSender.setParameters.mockClear();
 
@@ -2608,7 +2855,7 @@ setInterval(() => {}, 1000);
       mediaPlanVersion: 1 as const,
       revision: 1,
       targetId: 'wrong-target',
-      videoBitrate: { preset: '10mbps', bitrateMbps: 10, maxBitrateBps: 10_000_000 },
+      videoProfile: qualityVideoProfile,
     });
 
     expect(updated).toEqual({
@@ -2621,7 +2868,7 @@ setInterval(() => {}, 1000);
       purpose: 'focus',
       targetId: 'wrong-target',
       status: 'rejected',
-      requestedVideoBitrate: { preset: '10mbps', bitrateMbps: 10, maxBitrateBps: 10_000_000 },
+      requestedVideoProfile: qualityVideoProfile,
       error: {
         code: 'remote_window_stream_quality_target_mismatch',
         message: 'remote window stream quality target mismatch: wrong-target',
@@ -2634,20 +2881,11 @@ setInterval(() => {}, 1000);
     const fakePeer = new FakeRemoteWindowPeerConnection();
     const fakeSender = makeFakeRtpSender();
     let releaseApply: () => void = () => undefined;
-    fakeSender.setParameters.mockImplementationOnce(() => new Promise<void>((resolve) => {
-      releaseApply = resolve;
-    }));
     fakePeer.addTrack.mockReturnValue(fakeSender);
     const fakeTrack = makeFakeMediaStreamTrack();
     const runtime = createRemoteWindowStreamDaemonRuntime({
       platform: 'darwin',
-      captureSourceFactory: vi.fn(async () => ({
-        width: 2,
-        height: 2,
-        frameRate: 12,
-        updateFrameRate: vi.fn(async () => undefined),
-        stop: vi.fn(),
-      })),
+      captureSourceFactory: vi.fn(async (_target, options) => makeControllableCaptureSource(options)),
       peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
       rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
       videoSourceFactory: vi.fn(() => ({
@@ -2667,6 +2905,9 @@ setInterval(() => {}, 1000);
       target: makeStreamTarget(),
       offer: { type: 'offer', sdp: 'android-offer-sdp' },
     });
+    fakeSender.setParameters.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      releaseApply = resolve;
+    }));
     const first = runtime.updateStreamQuality({
       requestId: 'rw-quality-busy-1',
       streamId: 'stream-quality-busy',
@@ -2675,7 +2916,7 @@ setInterval(() => {}, 1000);
       mediaPlanVersion: 1 as const,
       revision: 1,
       targetId: 'iterm2-pane:window-1:tab-1:left',
-      videoBitrate: { preset: '10mbps', bitrateMbps: 10, maxBitrateBps: 10_000_000 },
+      videoProfile: qualityVideoProfile,
     });
     await Promise.resolve();
 
@@ -2687,7 +2928,7 @@ setInterval(() => {}, 1000);
       mediaPlanVersion: 1 as const,
       revision: 2,
       targetId: 'iterm2-pane:window-1:tab-1:left',
-      videoBitrate: { preset: '20mbps', bitrateMbps: 20, maxBitrateBps: 20_000_000 },
+      videoProfile: makeRemoteWindowVideoProfileFixture('quality', true),
     });
     expect(concurrent).toMatchObject({
       status: 'rejected',
@@ -2742,6 +2983,7 @@ setInterval(() => {}, 1000);
       target,
       offer: { type: 'offer', sdp: 'android-offer-sdp' },
     });
+    await flushPromiseQueue();
 
     expect('answer' in result).toBe(true);
     expect(rgbaToI420).toHaveBeenCalledWith(
@@ -2802,10 +3044,12 @@ setInterval(() => {}, 1000);
     }, {
       sendStatus: (payload) => statuses.push(payload),
     });
+    await flushPromiseQueue();
     expect('answer' in result).toBe(true);
     expect(() => {
       pushFrame({ width: 3, height: 3, rgba: new Uint8Array(36).fill(2) });
     }).not.toThrow();
+    await flushPromiseQueue();
     expect(captureStop).toHaveBeenCalledTimes(1);
     expect(fakeTrack.stop).toHaveBeenCalledTimes(1);
     expect(fakePeer.close).toHaveBeenCalledTimes(1);
@@ -2973,6 +3217,7 @@ setInterval(() => {}, 1000);
     }, {
       sendStatus: (payload) => statuses.push(payload),
     });
+    await flushPromiseQueue();
     expect(fakePeer.addIceCandidate).toHaveBeenCalledWith({
       candidate: 'candidate:early',
       sdpMid: '0',
@@ -3060,24 +3305,19 @@ setInterval(() => {}, 1000);
     });
 
     const focusResult = await runtime.injectInput({
-      requestId: 'rw-input-focus',
       streamId: 'stream-input',
       targetId: 'app-window:123:456',
-      clientSentAt: Date.now(),
       event: {
         kind: 'focus',
       },
-    });
+    }, reliableInputControl('rw-input-focus'));
 
-    expect(focusResult).toEqual({
-      requestId: 'rw-input-focus',
-      streamId: 'stream-input',
-      targetId: 'app-window:123:456',
-      accepted: true,
+    expect(focusResult).toMatchObject({
+      control: { sequence: 'rw-input-focus', accepted: true, duplicate: false },
+      payload: { streamId: 'stream-input', targetId: 'app-window:123:456' },
     });
     expect(runRemoteWindowInputEvent).toHaveBeenCalledWith(
       expect.objectContaining({
-        requestId: 'rw-input-focus',
         event: { kind: 'focus' },
       }),
       target,
@@ -3086,10 +3326,8 @@ setInterval(() => {}, 1000);
     runRemoteWindowInputEvent.mockClear();
 
     const result = await runtime.injectInput({
-      requestId: 'rw-input',
       streamId: 'stream-input',
       targetId: 'app-window:123:456',
-      clientSentAt: Date.now(),
       event: {
         kind: 'pointer',
         phase: 'down',
@@ -3101,17 +3339,14 @@ setInterval(() => {}, 1000);
         normalizedX: 0.5,
         normalizedY: 0.6,
       },
-    });
+    }, reliableInputControl('rw-input'));
 
-    expect(result).toEqual({
-      requestId: 'rw-input',
-      streamId: 'stream-input',
-      targetId: 'app-window:123:456',
-      accepted: true,
+    expect(result).toMatchObject({
+      control: { sequence: 'rw-input', accepted: true },
+      payload: { streamId: 'stream-input', targetId: 'app-window:123:456' },
     });
     expect(runRemoteWindowInputEvent).toHaveBeenCalledWith(
       expect.objectContaining({
-        requestId: 'rw-input',
         event: expect.objectContaining({ kind: 'pointer', x: 100 }),
       }),
       target,
@@ -3120,10 +3355,8 @@ setInterval(() => {}, 1000);
 
     runRemoteWindowInputEvent.mockClear();
     const scrollResult = await runtime.injectInput({
-      requestId: 'rw-input-scroll',
       streamId: 'stream-input',
       targetId: 'app-window:123:456',
-      clientSentAt: Date.now(),
       event: {
         kind: 'scroll',
         unit: 'pixel',
@@ -3134,16 +3367,10 @@ setInterval(() => {}, 1000);
         normalizedX: 0.5,
         normalizedY: 0.6,
       },
-    });
-    expect(scrollResult).toEqual({
-      requestId: 'rw-input-scroll',
-      streamId: 'stream-input',
-      targetId: 'app-window:123:456',
-      accepted: true,
-    });
+    }, continuousInputControl('rw-input-scroll'));
+    expect(scrollResult).toBeNull();
 	    expect(runRemoteWindowInputEvent).toHaveBeenCalledWith(
 	      expect.objectContaining({
-	        requestId: 'rw-input-scroll',
 	        event: expect.objectContaining({ kind: 'scroll', deltaY: 48 }),
 	      }),
 	      target,
@@ -3152,10 +3379,8 @@ setInterval(() => {}, 1000);
 
 	    runRemoteWindowInputEvent.mockClear();
 	    const gestureResult = await runtime.injectInput({
-	      requestId: 'rw-input-gesture',
 	      streamId: 'stream-input',
 	      targetId: 'app-window:123:456',
-	      clientSentAt: Date.now(),
 	      event: {
 	        kind: 'gesture',
 	        gesture: 'swipe',
@@ -3176,22 +3401,253 @@ setInterval(() => {}, 1000);
 	        velocityX: 0,
 	        velocityY: 416.67,
 	      },
-	    });
-	    expect(gestureResult).toEqual({
-	      requestId: 'rw-input-gesture',
-	      streamId: 'stream-input',
-	      targetId: 'app-window:123:456',
-	      accepted: true,
+	    }, reliableInputControl('rw-input-gesture'));
+	    expect(gestureResult).toMatchObject({
+	      control: { sequence: 'rw-input-gesture', accepted: true },
+	      payload: { streamId: 'stream-input', targetId: 'app-window:123:456' },
 	    });
 	    expect(runRemoteWindowInputEvent).toHaveBeenCalledWith(
 	      expect.objectContaining({
-	        requestId: 'rw-input-gesture',
 	        event: expect.objectContaining({ kind: 'gesture', gesture: 'swipe', deltaY: 50 }),
 	      }),
 	      target,
 	      expect.objectContaining({ swiftBinary: 'swift' }),
 	    );
 	  });
+
+  it('deduplicates and serializes reliable input by delivery sequence', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    const fakeTrack = makeFakeMediaStreamTrack();
+    const target = makeAppStreamTarget();
+    const inputResolvers: Array<() => void> = [];
+    const runRemoteWindowInputEvent = vi.fn<
+      Parameters<RemoteWindowInputEventRunner>,
+      ReturnType<RemoteWindowInputEventRunner>
+    >(() => new Promise<void>((resolve) => {
+      inputResolvers.push(resolve);
+    }));
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      captureSourceFactory: vi.fn(async (_target, options) => {
+        options.onFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(1) });
+        return { width: 2, height: 2, frameRate: 12, stop: vi.fn() };
+      }),
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => ({
+        createTrack: vi.fn(() => fakeTrack),
+        onFrame: vi.fn(),
+      } as any)),
+      rgbaToI420: vi.fn((_rgba, i420) => {
+        i420.data.fill(9);
+      }),
+      runRemoteWindowInputEvent,
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+    await runtime.startStream({
+      requestId: 'rw-input-order-start',
+      streamId: 'stream-input-order',
+      mediaPlan: 'single-focus',
+      mediaPlanVersion: 1,
+      target,
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+    });
+    const clickPayload = {
+      streamId: 'stream-input-order',
+      targetId: target.streamTargetId,
+      event: {
+        kind: 'click' as const,
+        pointerId: 1,
+        button: 'left' as const,
+        clickCount: 1,
+        x: 100,
+        y: 120,
+        normalizedX: 0.5,
+        normalizedY: 0.6,
+      },
+    };
+
+    const first = runtime.injectInput(clickPayload, reliableInputControl('rw-input-dedupe'));
+    const duplicateInFlight = runtime.injectInput(clickPayload, reliableInputControl('rw-input-dedupe'));
+    await flushPromiseQueue();
+    expect(runRemoteWindowInputEvent).toHaveBeenCalledTimes(1);
+    inputResolvers.shift()!();
+    await expect(first).resolves.toMatchObject({ control: { accepted: true, duplicate: false } });
+    await expect(duplicateInFlight).resolves.toMatchObject({ control: { accepted: true, duplicate: true } });
+    await expect(runtime.injectInput(clickPayload, reliableInputControl('rw-input-dedupe')))
+      .resolves.toMatchObject({ control: { accepted: true, duplicate: true } });
+    expect(runRemoteWindowInputEvent).toHaveBeenCalledTimes(1);
+
+    const down = runtime.injectInput({
+      ...clickPayload,
+      event: {
+        kind: 'pointer',
+        phase: 'down',
+        pointerId: 2,
+        button: 'left',
+        buttons: 1,
+        x: 100,
+        y: 120,
+        normalizedX: 0.5,
+        normalizedY: 0.6,
+      },
+    }, reliableInputControl('rw-input-down-order'));
+    const up = runtime.injectInput({
+      ...clickPayload,
+      event: {
+        kind: 'pointer',
+        phase: 'up',
+        pointerId: 2,
+        button: 'left',
+        buttons: 0,
+        x: 120,
+        y: 140,
+        normalizedX: 0.6,
+        normalizedY: 0.7,
+      },
+    }, reliableInputControl('rw-input-up-order'));
+    await flushPromiseQueue();
+    expect(runRemoteWindowInputEvent).toHaveBeenCalledTimes(2);
+    expect(runRemoteWindowInputEvent.mock.calls[1]?.[0].event).toMatchObject({ phase: 'down' });
+    inputResolvers.shift()!();
+    await down;
+    await flushPromiseQueue();
+    expect(runRemoteWindowInputEvent).toHaveBeenCalledTimes(3);
+    expect(runRemoteWindowInputEvent.mock.calls[2]?.[0].event).toMatchObject({ phase: 'up' });
+    inputResolvers.shift()!();
+    await up;
+  });
+
+  it('bounds continuous input to latest move plus merged scroll and drops stale or stopped tails', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    const fakeTrack = makeFakeMediaStreamTrack();
+    const target = makeAppStreamTarget();
+    let admissionNowMs = 10_000;
+    const runRemoteWindowInputEvent = vi.fn<
+      Parameters<RemoteWindowInputEventRunner>,
+      ReturnType<RemoteWindowInputEventRunner>
+    >(async () => undefined);
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      nowMs: () => admissionNowMs,
+      captureSourceFactory: vi.fn(async (_target, options) => {
+        options.onFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(1) });
+        return { width: 2, height: 2, frameRate: 12, stop: vi.fn() };
+      }),
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => ({
+        createTrack: vi.fn(() => fakeTrack),
+        onFrame: vi.fn(),
+      } as any)),
+      rgbaToI420: vi.fn((_rgba, i420) => {
+        i420.data.fill(9);
+      }),
+      runRemoteWindowInputEvent,
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+    await runtime.startStream({
+      requestId: 'rw-input-continuous-start',
+      streamId: 'stream-input-continuous',
+      mediaPlan: 'single-focus',
+      mediaPlanVersion: 1,
+      target,
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+    });
+    const move = (sequence: string, x: number) => runtime.injectInput({
+      streamId: 'stream-input-continuous',
+      targetId: target.streamTargetId,
+      event: {
+        kind: 'pointer',
+        phase: 'move',
+        pointerId: 1,
+        button: 'left',
+        buttons: 1,
+        x,
+        y: 120,
+        normalizedX: x / 200,
+        normalizedY: 0.6,
+      },
+    }, continuousInputControl(sequence));
+    const scroll = (sequence: string, deltaY: number) => runtime.injectInput({
+      streamId: 'stream-input-continuous',
+      targetId: target.streamTargetId,
+      event: {
+        kind: 'scroll',
+        unit: 'pixel',
+        deltaX: 0,
+        deltaY,
+        x: 100,
+        y: 120,
+        normalizedX: 0.5,
+        normalizedY: 0.6,
+      },
+    }, continuousInputControl(sequence));
+
+    await Promise.all([
+      move('rw-move-1', 90),
+      move('rw-move-2', 100),
+      scroll('rw-scroll-1', 12),
+      scroll('rw-scroll-2', 18),
+    ]);
+    expect(runRemoteWindowInputEvent).toHaveBeenCalledTimes(2);
+    expect(runRemoteWindowInputEvent.mock.calls[0]?.[0].event).toMatchObject({ kind: 'pointer', x: 100 });
+    expect(runRemoteWindowInputEvent.mock.calls[1]?.[0].event).toMatchObject({ kind: 'scroll', deltaY: 30 });
+
+    runRemoteWindowInputEvent.mockClear();
+    const staleScroll = scroll('rw-scroll-stale', 20);
+    admissionNowMs += 101;
+    await expect(staleScroll).resolves.toBeNull();
+    expect(runRemoteWindowInputEvent).not.toHaveBeenCalled();
+
+    const stoppedScroll = scroll('rw-scroll-stopped', 20);
+    await runtime.stopStream({ requestId: 'rw-stop-continuous', streamId: 'stream-input-continuous' });
+    await expect(stoppedScroll).resolves.toBeNull();
+    await flushPromiseQueue();
+    expect(runRemoteWindowInputEvent).not.toHaveBeenCalled();
+  });
+
+  it('rejects delivery lane mismatch without injecting the user action', async () => {
+    const target = makeAppStreamTarget();
+    const runRemoteWindowInputEvent = vi.fn(async () => undefined);
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      captureSourceFactory: vi.fn(async (_target, options) => {
+        options.onFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(1) });
+        return { width: 2, height: 2, frameRate: 12, stop: vi.fn() };
+      }),
+      peerConnectionFactory: vi.fn(() => new FakeRemoteWindowPeerConnection() as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => ({ createTrack: vi.fn(() => makeFakeMediaStreamTrack()), onFrame: vi.fn() } as any)),
+      rgbaToI420: vi.fn(),
+      runRemoteWindowInputEvent,
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+    await runtime.startStream({
+      requestId: 'rw-input-lane-start',
+      streamId: 'stream-input-lane',
+      mediaPlan: 'single-focus',
+      mediaPlanVersion: 1,
+      target,
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+    });
+
+    const result = await runtime.injectInput({
+      streamId: 'stream-input-lane',
+      targetId: target.streamTargetId,
+      event: { kind: 'focus' },
+    }, continuousInputControl('rw-input-lane-mismatch'));
+    expect(result).toMatchObject({
+      control: {
+        accepted: false,
+        error: {
+          code: 'remote_window_input_delivery_invalid',
+          message: 'remote window input delivery lane mismatch: expected reliable',
+        },
+      },
+    });
+    expect(runRemoteWindowInputEvent).not.toHaveBeenCalled();
+  });
 
   it('applies app-window resize to the active capture source and returns target/capture truth', async () => {
     const fakePeer = new FakeRemoteWindowPeerConnection();
@@ -3243,16 +3699,14 @@ setInterval(() => {}, 1000);
     });
 
     const result = await runtime.injectInput({
-      requestId: 'rw-resize',
       streamId: 'stream-resize',
       targetId: target.streamTargetId,
-      clientSentAt: Date.now(),
       event: {
         kind: 'window-resize',
         width: 800,
         height: 1477,
       },
-    });
+    }, reliableInputControl('rw-resize'));
 
     expect(updateTarget).toHaveBeenCalledWith(expect.objectContaining({
       streamTargetId: target.streamTargetId,
@@ -3262,22 +3716,23 @@ setInterval(() => {}, 1000);
       }),
     }));
     expect(result).toEqual({
-      requestId: 'rw-resize',
-      streamId: 'stream-resize',
-      targetId: target.streamTargetId,
-      accepted: true,
-      target: expect.objectContaining({
+      control: expect.objectContaining({ sequence: 'rw-resize', accepted: true }),
+      payload: {
+        streamId: 'stream-resize',
+        targetId: target.streamTargetId,
+        target: expect.objectContaining({
         videoTarget: expect.objectContaining({
           windowBoundsTopLeftPx: { x: 10, y: 20, width: 800, height: 1477 },
           cropRectTopLeftPx: { x: 10, y: 20, width: 800, height: 1477 },
         }),
-      }),
-      capture: {
-        source: 'ScreenCaptureKit',
-        frameWidth: 800,
-        frameHeight: 1477,
-        frameRate: 30,
-        targetKind: 'app-window',
+        }),
+        capture: {
+          source: 'ScreenCaptureKit',
+          frameWidth: 800,
+          frameHeight: 1477,
+          frameRate: 30,
+          targetKind: 'app-window',
+        },
       },
     });
   });
@@ -3315,33 +3770,34 @@ setInterval(() => {}, 1000);
     });
 
     const result = await runtime.injectInput({
-      requestId: 'rw-resize-missing',
       streamId: 'stream-resize-missing',
       targetId: target.streamTargetId,
-      clientSentAt: Date.now(),
       event: {
         kind: 'window-resize',
         width: 800,
         height: 1477,
       },
-    });
+    }, reliableInputControl('rw-resize-missing'));
 
-    expect(result).toEqual({
-      requestId: 'rw-resize-missing',
-      streamId: 'stream-resize-missing',
-      code: 'remote_window_input_failed',
-      message: 'remote window active capture source cannot update target resize',
+    expect(result).toMatchObject({
+      control: {
+        sequence: 'rw-resize-missing',
+        accepted: false,
+        error: {
+          code: 'remote_window_input_failed',
+          message: 'remote window active capture source cannot update target resize',
+        },
+      },
+      payload: { streamId: 'stream-resize-missing', targetId: target.streamTargetId },
     });
   });
 
-  it('accepts remote-window input without trusting Android client wall-clock timestamps', async () => {
+  it('uses daemon admission time without reconstructing it from delivery sentAtMs', async () => {
     const fakePeer = new FakeRemoteWindowPeerConnection();
     const fakeTrack = makeFakeMediaStreamTrack();
     const target = makeAppStreamTarget();
     const runRemoteWindowInputEvent = vi.fn(async () => undefined);
-    const nowMs = vi.fn()
-      .mockReturnValueOnce(50_000)
-      .mockReturnValueOnce(50_100);
+    const nowMs = vi.fn(() => 50_000);
     const runtime = createRemoteWindowStreamDaemonRuntime({
       platform: 'darwin',
       nowMs,
@@ -3372,7 +3828,6 @@ setInterval(() => {}, 1000);
     });
 
     const missingTimestampResult = await runtime.injectInput({
-      requestId: 'rw-input-missing-sent-at',
       streamId: 'stream-input-clock-skew',
       targetId: target.streamTargetId,
       event: {
@@ -3382,25 +3837,21 @@ setInterval(() => {}, 1000);
         code: 'KeyV',
         metaKey: true,
       },
-    });
+    }, reliableInputControl('rw-input-missing-sent-at'));
 
-    expect(missingTimestampResult).toEqual({
-      requestId: 'rw-input-missing-sent-at',
-      streamId: 'stream-input-clock-skew',
-      targetId: target.streamTargetId,
-      accepted: true,
+    expect(missingTimestampResult).toMatchObject({
+      control: { sequence: 'rw-input-missing-sent-at', accepted: true },
+      payload: { streamId: 'stream-input-clock-skew', targetId: target.streamTargetId },
     });
     expect(runRemoteWindowInputEvent).toHaveBeenLastCalledWith(
-      expect.objectContaining({ requestId: 'rw-input-missing-sent-at' }),
+      expect.objectContaining({ event: expect.objectContaining({ kind: 'key', phase: 'down' }) }),
       target,
       expect.objectContaining({ daemonReceivedAtMs: 50_000 }),
     );
 
     const staleLookingClientClockResult = await runtime.injectInput({
-      requestId: 'rw-input-client-clock-old',
       streamId: 'stream-input-clock-skew',
       targetId: target.streamTargetId,
-      clientSentAt: 1,
       event: {
         kind: 'key',
         phase: 'up',
@@ -3408,18 +3859,19 @@ setInterval(() => {}, 1000);
         code: 'KeyV',
         metaKey: true,
       },
+    }, {
+      ...reliableInputControl('rw-input-client-clock-old'),
+      sentAtMs: 1,
     });
 
-    expect(staleLookingClientClockResult).toEqual({
-      requestId: 'rw-input-client-clock-old',
-      streamId: 'stream-input-clock-skew',
-      targetId: target.streamTargetId,
-      accepted: true,
+    expect(staleLookingClientClockResult).toMatchObject({
+      control: { sequence: 'rw-input-client-clock-old', accepted: true },
+      payload: { streamId: 'stream-input-clock-skew', targetId: target.streamTargetId },
     });
     expect(runRemoteWindowInputEvent).toHaveBeenLastCalledWith(
-      expect.objectContaining({ requestId: 'rw-input-client-clock-old', clientSentAt: 1 }),
+      expect.objectContaining({ event: expect.objectContaining({ kind: 'key', phase: 'up' }) }),
       target,
-      expect.objectContaining({ daemonReceivedAtMs: 50_100 }),
+      expect.objectContaining({ daemonReceivedAtMs: 50_000 }),
     );
   });
 
@@ -3464,10 +3916,8 @@ setInterval(() => {}, 1000);
     });
 
     await runtime.injectInput({
-      requestId: 'rw-input-helper-click',
       streamId: 'stream-input-helper',
       targetId: target.streamTargetId,
-      clientSentAt: Date.now(),
       event: {
         kind: 'click',
         pointerId: 1,
@@ -3478,12 +3928,10 @@ setInterval(() => {}, 1000);
         normalizedX: 0.5,
         normalizedY: 0.6,
       },
-    });
+    }, reliableInputControl('rw-input-helper-click'));
 	    await runtime.injectInput({
-	      requestId: 'rw-input-helper-scroll',
 	      streamId: 'stream-input-helper',
       targetId: target.streamTargetId,
-      clientSentAt: Date.now(),
       event: {
         kind: 'scroll',
         unit: 'pixel',
@@ -3494,12 +3942,10 @@ setInterval(() => {}, 1000);
         normalizedX: 0.5,
 	        normalizedY: 0.6,
 	      },
-	    });
+	    }, continuousInputControl('rw-input-helper-scroll'));
 	    await runtime.injectInput({
-	      requestId: 'rw-input-helper-gesture',
 	      streamId: 'stream-input-helper',
 	      targetId: target.streamTargetId,
-	      clientSentAt: Date.now(),
 	      event: {
 	        kind: 'gesture',
 	        gesture: 'swipe',
@@ -3520,12 +3966,10 @@ setInterval(() => {}, 1000);
 	        velocityX: 0,
 	        velocityY: 416.67,
 	      },
-	    });
+	    }, reliableInputControl('rw-input-helper-gesture'));
 	    await runtime.injectInput({
-	      requestId: 'rw-input-helper-key',
       streamId: 'stream-input-helper',
       targetId: target.streamTargetId,
-      clientSentAt: Date.now(),
       event: {
         kind: 'key',
         phase: 'down',
@@ -3533,7 +3977,7 @@ setInterval(() => {}, 1000);
         code: 'KeyZ',
 	        text: 'Z',
 	      },
-	    });
+	    }, reliableInputControl('rw-input-helper-key'));
 
     expect(remoteWindowInputHelperFactory).toHaveBeenCalledTimes(1);
     expect(inputHelper.warm).toHaveBeenCalledTimes(1);
@@ -3542,16 +3986,16 @@ setInterval(() => {}, 1000);
       daemonReceivedAtMs: 88_000,
       event: expect.objectContaining({ kind: 'click' }),
       window: expect.objectContaining({ bounds: target.videoTarget.windowBoundsTopLeftPx }),
-    }));
+    }), { lane: 'reliable' });
     expect(inputHelper.send).toHaveBeenNthCalledWith(2, expect.objectContaining({
       event: expect.objectContaining({ kind: 'scroll', deltaY: 48 }),
-    }));
+    }), { lane: 'continuous', maxAgeMs: 100 });
     expect(inputHelper.send).toHaveBeenNthCalledWith(3, expect.objectContaining({
       event: expect.objectContaining({ kind: 'gesture', gesture: 'swipe', deltaY: 50 }),
-    }));
+    }), { lane: 'reliable' });
     expect(inputHelper.send).toHaveBeenNthCalledWith(4, expect.objectContaining({
       event: expect.objectContaining({ kind: 'key', text: 'Z' }),
-    }));
+    }), { lane: 'reliable' });
 
     runtime.dispose('helper lifecycle test complete');
     expect(inputHelper.dispose).toHaveBeenCalledTimes(1);
@@ -3689,10 +4133,8 @@ setInterval(() => {}, 1000);
     });
 
     const mismatch = await runtime.injectInput({
-      requestId: 'rw-input-mismatch',
       streamId: 'stream-input-negative',
       targetId: 'other-target',
-      clientSentAt: Date.now(),
       event: {
         kind: 'key',
         phase: 'down',
@@ -3700,12 +4142,16 @@ setInterval(() => {}, 1000);
         code: 'KeyA',
         text: 'a',
       },
-    });
+    }, reliableInputControl('rw-input-mismatch'));
     expect(mismatch).toMatchObject({
-      requestId: 'rw-input-mismatch',
-      streamId: 'stream-input-negative',
-      code: 'remote_window_input_failed',
-      message: 'remote window input target mismatch: other-target',
+      control: {
+        sequence: 'rw-input-mismatch',
+        accepted: false,
+        error: {
+          code: 'remote_window_input_failed',
+          message: 'remote window input target mismatch: other-target',
+        },
+      },
     });
 
     const noFocusTarget = { ...target, focusPolicy: 'no-focus-steal' as const };
@@ -3718,10 +4164,8 @@ setInterval(() => {}, 1000);
       offer: { type: 'offer', sdp: 'android-offer-sdp' },
     });
     const noFocus = await runtime.injectInput({
-      requestId: 'rw-input-no-focus',
       streamId: 'stream-input-no-focus',
       targetId: noFocusTarget.streamTargetId,
-      clientSentAt: Date.now(),
       event: {
         kind: 'pointer',
         phase: 'down',
@@ -3733,17 +4177,20 @@ setInterval(() => {}, 1000);
         normalizedX: 0.5,
         normalizedY: 0.5,
       },
-    });
+    }, reliableInputControl('rw-input-no-focus'));
     expect(noFocus).toMatchObject({
-      code: 'remote_window_input_failed',
-      message: 'remote window OS input requires bring-to-focus policy',
+      control: {
+        accepted: false,
+        error: {
+          code: 'remote_window_input_failed',
+          message: 'remote window OS input requires bring-to-focus policy',
+        },
+      },
     });
 
     const invalidScroll = await runtime.injectInput({
-      requestId: 'rw-input-invalid-scroll',
       streamId: 'stream-input-negative',
       targetId: target.streamTargetId,
-      clientSentAt: Date.now(),
       event: {
         kind: 'scroll',
         unit: 'pixel',
@@ -3754,17 +4201,20 @@ setInterval(() => {}, 1000);
         normalizedX: 0.5,
         normalizedY: 0.5,
       },
-    });
+    }, continuousInputControl('rw-input-invalid-scroll'));
 	    expect(invalidScroll).toMatchObject({
-	      code: 'remote_window_input_failed',
-	      message: 'remote window scroll input coordinates or delta are invalid',
+	      control: {
+	        accepted: false,
+	        error: {
+	          code: 'remote_window_input_failed',
+	          message: 'remote window scroll input coordinates or delta are invalid',
+	        },
+	      },
 	    });
 
 	    const invalidGesture = await runtime.injectInput({
-	      requestId: 'rw-input-invalid-gesture',
 	      streamId: 'stream-input-negative',
 	      targetId: target.streamTargetId,
-	      clientSentAt: Date.now(),
 	      event: {
 	        kind: 'gesture',
 	        gesture: 'swipe',
@@ -3785,18 +4235,21 @@ setInterval(() => {}, 1000);
 	        velocityX: 0,
 	        velocityY: 416.67,
 	      },
-	    });
+	    }, reliableInputControl('rw-input-invalid-gesture'));
 	    expect(invalidGesture).toMatchObject({
-	      code: 'remote_window_input_failed',
-	      message: 'remote window gesture input normalized coordinates are out of range',
+	      control: {
+	        accepted: false,
+	        error: {
+	          code: 'remote_window_input_failed',
+	          message: 'remote window gesture input normalized coordinates are out of range',
+	        },
+	      },
 	    });
 
     await runtime.stopStream({ requestId: 'rw-stop-input', streamId: 'stream-input-negative' });
     const stopped = await runtime.injectInput({
-      requestId: 'rw-input-stopped',
       streamId: 'stream-input-negative',
       targetId: target.streamTargetId,
-      clientSentAt: Date.now(),
       event: {
         kind: 'key',
         phase: 'down',
@@ -3804,11 +4257,14 @@ setInterval(() => {}, 1000);
         code: 'KeyA',
         text: 'a',
       },
-    });
+    }, reliableInputControl('rw-input-stopped'));
     expect(stopped).toMatchObject({
-      requestId: 'rw-input-stopped',
-      streamId: 'stream-input-negative',
-      code: 'remote_window_input_stream_missing',
+      control: {
+        sequence: 'rw-input-stopped',
+        accepted: false,
+        error: { code: 'remote_window_input_stream_missing' },
+      },
+      payload: { streamId: 'stream-input-negative' },
     });
     expect(runRemoteWindowInputEvent).not.toHaveBeenCalled();
   });
@@ -4068,13 +4524,7 @@ describe('remote window single-window overview gate', () => {
     const runRemoteWindowInputEvent = vi.fn(async () => undefined);
     const runtime = createRemoteWindowStreamDaemonRuntime({
       platform: 'darwin',
-      captureSourceFactory: vi.fn(async () => ({
-        width: 800,
-        height: 600,
-        frameRate: 30,
-        updateFrameRate: vi.fn(async () => undefined),
-        stop: vi.fn(),
-      })),
+      captureSourceFactory: vi.fn(async (_target, options) => makeControllableCaptureSource(options)),
       peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
       rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
       videoSourceFactory: vi.fn(() => ({
@@ -4122,26 +4572,29 @@ describe('remote window single-window overview gate', () => {
     };
 
     const stale = await runtime.injectInput({
-      requestId: 'rw-layout-generation-stale',
       streamId: 'stream-layout-generation',
       targetId: compositeTarget.streamTargetId,
       layoutGeneration: started.canvasLayout.layoutGeneration - 1,
       event: clickEvent,
-    });
+    }, reliableInputControl('rw-layout-generation-stale'));
     expect(stale).toMatchObject({
-      code: 'remote_window_input_failed',
-      message: expect.stringContaining('layout generation mismatch'),
+      control: {
+        accepted: false,
+        error: {
+          code: 'remote_window_input_failed',
+          message: expect.stringContaining('layout generation mismatch'),
+        },
+      },
     });
     expect(runRemoteWindowInputEvent).not.toHaveBeenCalled();
 
     const accepted = await runtime.injectInput({
-      requestId: 'rw-layout-generation-current',
       streamId: 'stream-layout-generation',
       targetId: compositeTarget.streamTargetId,
       layoutGeneration: started.canvasLayout.layoutGeneration,
       event: clickEvent,
-    });
-    expect(accepted).toMatchObject({ accepted: true });
+    }, reliableInputControl('rw-layout-generation-current'));
+    expect(accepted).toMatchObject({ control: { accepted: true } });
     expect(runRemoteWindowInputEvent).toHaveBeenCalledTimes(1);
   });
 });

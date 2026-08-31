@@ -85,6 +85,8 @@ export type {
   TerminalInputAckPayload,
   TerminalReliableInputPayload,
   TerminalSessionCapabilitiesPayload,
+  RemoteWindowInputAckControl,
+  RemoteWindowInputDeliveryControl,
   RemoteWindowInputEventPayload,
   RemoteWindowInputResultPayload,
   RemoteWindowCanvasLayoutV1,
@@ -107,8 +109,8 @@ export type {
   RemoteWindowStreamStopRequestPayload,
   RemoteWindowStreamTargetManifest,
   RemoteWindowStreamTargetsResponsePayload,
-  RemoteWindowVideoBitrateConfig,
-  RemoteWindowVideoBitratePreset,
+  RemoteWindowVideoPreference,
+  RemoteWindowVideoProfile,
 } from '@zterm/shared/protocol';
 export type {
   BufferHeadPayload,

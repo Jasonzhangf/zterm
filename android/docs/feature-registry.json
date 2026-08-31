@@ -218,8 +218,9 @@
       "feature_id": "desktop.remote_window_stream",
       "title": "Remote app/window and iTerm2 pane video stream",
       "domain": "remote-desktop",
-      "owners": [
-        "docs/decisions/2026-07-19-remote-window-stream-truth.md",
+    "owners": [
+      "docs/decisions/2026-08-30-remote-window-quality-gesture-control-amendment.md",
+      "docs/decisions/2026-07-19-remote-window-stream-truth.md",
         "src/server/remote-window-stream-daemon.ts",
         "src/server/remote-window-catalog-runtime.ts",
         "src/server/remote-window-canvas-layout.ts",
@@ -246,7 +247,10 @@
         "src/lib/remote-window-receiver-runtime.ts",
         "src/contexts/session-context-remote-window-runtime.ts"
       ],
-      "allowed_paths": [
+    "allowed_paths": [
+      "docs/decisions/2026-08-30-remote-window-quality-gesture-control-amendment.md",
+      "docs/goals/remote-window-quality-gesture-remediation-plan.md",
+      "docs/goals/remote-window-quality-gesture-remediation.goal.md",
         "docs/decisions/2026-07-19-remote-window-stream-truth.md",
         "docs/decisions/2026-07-29-remote-window-canvas-pipeline.md",
         "docs/decisions/2026-08-09-remote-window-dual-stream-design.md",
@@ -353,7 +357,11 @@
         "src/server/remote-window-input-policy.test.ts",
         "src/server/remote-window-capture.ts",
         "src/server/remote-window-capture.test.ts",
-        "src/server/remote-window-input-helper.ts"
+        "src/server/remote-window-screen-capture-script.ts",
+        "src/server/remote-window-input-script.ts",
+        "src/server/remote-window-input-helper.ts",
+        "scripts/remote-window-live-input-probe.ts",
+        "scripts/remote-window-webrtc-loopback-gate.mjs"
       ],
       "forbidden_paths": [
         "src/components/TerminalView.tsx",
@@ -401,14 +409,17 @@
         "src/server/remote-window-capture.test.ts",
         "src/server/terminal-message-runtime.test.ts",
         "src/lib/remote-window-dual-stream-runtime.test.ts",
+        "scripts/remote-window-webrtc-loopback-gate.mjs",
         "docs/testing/remote-window-stream-test-design.md",
         "docs/testing/remote-window-canvas-pipeline-test-design.md",
-        "docs/testing/remote-window-dual-stream-test-design.md"
+        "docs/testing/remote-window-dual-stream-test-design.md",
+        "scripts/remote-window-live-input-probe.ts"
       ],
-      "truth_sources": [
-        "docs/architecture.md",
-        "docs/dev-workflow.md",
-        "docs/decisions/2026-07-19-remote-window-stream-truth.md",
+    "truth_sources": [
+      "docs/architecture.md",
+      "docs/dev-workflow.md",
+      "docs/decisions/2026-08-30-remote-window-quality-gesture-control-amendment.md",
+      "docs/decisions/2026-07-19-remote-window-stream-truth.md",
         "docs/decisions/2026-07-29-remote-window-canvas-pipeline.md",
         "docs/decisions/2026-08-09-remote-window-dual-stream-design.md"
       ]

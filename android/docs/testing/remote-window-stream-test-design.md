@@ -25,7 +25,7 @@ The current real-video implementation slice now additionally binds:
 5. Mac local live proof for a generic app-window marker: temporary native AppKit window -> catalog target -> ScreenCaptureKit capture -> WebRTC receiver -> pixel oracle. This does not replace the required Android rendered-pixel gate.
 6. Android overlay maps video-surface input/key/scroll events through separate deterministic Direct Touch and Mouse Emulation sequences. Touch tap emits one click; single-finger touch movement emits realtime scroll with `moveCursor=false`; two-finger scroll/pinch locks after commit; Mouse Emulation emits real pointer down/move/up. The overlay is the only long-press timer owner. Composite coordinate events carry the daemon layout generation; daemon rejects missing/stale generations and points outside the published layout, then maps through the same source/canvas rectangles used by capture. Keyboard/text/paste remain layout-independent. Screenshot is separate and emits no focus/input.
 7. Remote-window QuickBar input is projection-only: terminal/tmux/iTerm-specific actions such as tmux copy are disabled/grey while generic key, text, paste, arrows, image paste, and keyboard invocation remain available. Android IME committed text and native key/backspace events route to the active remote-window stream while the context is active. QuickBar image paste uses `pasteTarget.kind=remote-window` only while the active focus context is the remote window; terminal surface focus clears that context and returns the same image action to the terminal Ctrl+V paste path.
-8. Video bitrate is one stream-group transaction. The user preset is a ceiling; receiver stats use RTT/available bitrate/FPS plus per-sample dropped/freeze/jitter deltas; consecutive weak samples step down a bounded four-level bitrate/cadence ladder; a 12-second stable window restores one step. Updates are `requested -> applied | rejected`, matched by request id, stream group, and revision. Daemon reserves overview inside one total budget, protects focus first, preserves sender encoding structure, updates capture cadence in place, and rolls every mutated lane back on failure. No ACK means no applied UI truth; no update rebuilds stream, receiver, capture, transport, or layout.
+8. Video quality is one stream-group profile transaction. `smooth` is the default preference and `quality` is selectable; one typed profile carries bitrate, capture dimensions, cadence, maximum frame age, interaction state, and overview budget. Receiver/host telemetry classifies network, host capture/encode, Android decode/render, and latency-only pressure separately; two matching samples step down one level, severe pressure may step down one level immediately, and a 12-second stable window restores one level. Updates are single-flight/latest-wins `desired -> inFlight -> applied | rejected`, matched by request id, stream group, and revision. Daemon reserves overview inside one total budget, protects focus first, preserves sender encoding structure, updates the existing `SCStream` in place, and rolls every mutated lane back on failure. No ACK means no applied UI truth; no update rebuilds stream, receiver, capture, transport, or layout.
 
 Still pending for feature completion:
 
@@ -92,9 +92,9 @@ Current executable gates:
    - Current slice: the floating preview shell derives its initial video aspect ratio from the selected `windowBoundsTopLeftPx` / `cropRectTopLeftPx`, not from a fixed 16:10 preview frame; after `remote-window-stream-started`, the receiver projection uses daemon `capture.frameWidth/frameHeight` as the display aspect while preserving manifest crop coordinates for input.
    - Current slice: a floating preview can be resized from its bottom-left and bottom-right corners; the resized video surface keeps the selected source aspect ratio, left/right anchoring follows the grabbed corner, resize caps growth before the toolbar crosses the top viewport margin, and the overlay remains movable through the toolbar after resizing.
    - Current slice: a target-locked floating preview consumes TerminalPage-measured `bottomInsetPx` that includes QuickBar chrome and IME lift; an IME inset of `320` lifts the preview from its `118` base to `438px`, and a visible QuickBar also contributes to that bottom avoidance. Same-app child windows remain inside the same lifted video container, not in a bottom overlay strip. Fullscreen remains governed by safe-area layout plus overlay padding instead of changing page layout height.
-   - Current slice: target-locked fullscreen consumes `bottomInsetPx` as overlay padding, not page layout height. While the keyboard is open, `bottomChromeInsetPx` auto-pans the local projection upward by the measured QuickBar chrome so the initial state is not covered. Unzoomed one-finger fullscreen drag still belongs to the remote app and emits one release-time gesture action; only zoomed fullscreen (`scale > 1`) one-finger drag pans the local projection. Exact-fill surfaces must keep the projection stable at scale one and must not use the IME inset as a reason to steal remote input.
+   - Current slice: target-locked fullscreen consumes `bottomInsetPx` as overlay padding, not page layout height. While the keyboard is open, `bottomChromeInsetPx` may auto-lift the projection by the measured QuickBar chrome so the initial state is not covered. At both 1x and zoomed scale, one-finger movement belongs to realtime remote scroll unless the 250 ms hold has committed reliable remote drag. Zoomed local pan requires coherent two-finger same-direction movement. Exact-fill surfaces must keep the projection stable at scale one and must not use the IME inset as a reason to steal remote input.
    - Current slice: fullscreen entry defaults to one remote target `window-resize` fill request that keeps the current desktop target width and computes target height from the phone surface aspect ratio. Local drawing and input mapping remain aspect-fit; the control must not restart capture, rebuild transport, or fake a local cover/crop as "fill".
-   - Current slice: pinch zoom can only enlarge above fit; zoomed fullscreen single-finger drag pans the projected viewport without restarting the stream, and there is no minimap/viewport overlay.
+   - Current slice: pinch zoom can only enlarge above fit; zoomed fullscreen coherent two-finger movement pans the projected viewport without restarting the stream, one-finger movement remains remote input, and there is no minimap/viewport overlay.
    - Current slice: QuickBar sequences map to remote-window key/text events for the active stream and do not call terminal input while a supported remote-window input context exists.
    - Current slice: unsupported iTerm2 pane `tmux-input` / `iterm2-api` targets are selectable for video but read-only for input; they do not publish `RemoteWindowInputContext`, do not send pointer/scroll/key payloads, and leave QuickBar routing on the terminal path.
    - Current slice: ImeAnchor input/backspace/key events route to remote-window input context while active; committed CJK, special symbols, and newlines are preserved exactly and do not leak into the terminal session under the video overlay.
@@ -123,21 +123,21 @@ Current executable gates:
 
 8. Input return policy
    - Android input/key events are sent only as explicit `remote-window-input` over an existing stream transport.
-   - Client touch/input must pass through `remote-window-touch-action-runtime`: the overlay may classify hit-test coordinates and emit an action, but only the touch/action dispatch boundary may report whether the action was sent. `RW事件 SEND Y` is not sufficient E2E evidence unless the same test also observes the physical `WebSocket.send` / `RTCDataChannel.send` frame or the downstream `remote-window-input-result` / `remote-window-error`.
+   - Client touch/input must pass through `remote-window-touch-action-runtime`: the overlay may classify hit-test coordinates and emit an action, but only the input-delivery boundary may report whether the action was admitted. `RW事件 SEND Y` is not sufficient E2E evidence unless the same test also observes the physical `WebSocket.send` / `RTCDataChannel.send` frame or the downstream typed ACK/NACK / `remote-window-error`.
    - Operation-scoped focus is daemon-owned: selecting a target, stream start, receiver attach, fullscreen entry, IME lift, pinch zoom, and local zoom-pan must not send focus intents. Every actual remote click/gesture/wheel/key/QuickBar/IME event must cause the daemon helper to check whether the selected app/window is already frontmost/focused; if not, it brings that app/window frontmost before injection. Client `focus` messages are accepted only as explicit/compatibility bring-front intents and must not be required for real input correctness; Android action paths must not prefix real input with focus.
    - Screenshot is a non-input operation: floating/fullscreen screenshot button must send no `focus`, must call the existing remote screenshot request owner with `target.kind=remote-window`, must save the returned original-resolution PNG on Android, and daemon must reject invalid target rect/window ids instead of falling back to full-screen capture.
    - Screenshot feedback is part of the black-box gate: click must immediately show a non-layout-changing overlay animation/progress state, completion must show an original-screenshot saved prompt, and tests must prove no local video/canvas screenshot path is used.
    - Same-app sibling window switching is a transactional stream handoff: the currently visible stream and complete projection must remain alive while the next concrete target stream starts, and only after the new receiver attaches may the old stream be stopped. The overlay state must carry pending handoff epoch plus previous/pending stream ids; stale start results must be stopped, handoff failure must show an explicit handoff error while preserving the current stream, and old-stream cleanup failure must show a separate cleanup error. The same-app window group and thumbnails must refresh periodically from catalog/screenshot truth, but these refreshes are lightweight projection work: active catalog sync uses a seconds-class cadence, thumbnail screenshot refresh is single in-flight globally, missing thumbnails load before ready thumbnails are refreshed, and effect rebuilds must not duplicate in-flight screenshots or drop resolved thumbnail results. Floating/fullscreen default bounds plus secondary tile close controls must keep close affordances reachable. Thumbnail/screenshot failures remain explicit thumbnail status and must not clear stream truth.
    - Android video-surface pointer coordinates must resolve to daemon manifest global macOS top-left coordinates (`crop/window x + normalized * width`); DOM-relative or app-local coordinates are not accepted as a pass. After a fill request, normalization still uses the actual aspect-fit projected content rect until the daemon returns updated capture/manifest truth for the resized target.
-   - Page-level phone logic gate: render real `TerminalPage`, open the remote-window picker, select an interactive app-window, replay touch pointer tap and unzoomed touch drag on `remote-window-video-surface`, and assert the events leave the page through `onSendRemoteWindowInput` as one `click` action for tap and one `gesture/swipe` action for drag, with no sends during move and no focus prelude. The same gate must assert terminal input is not called, so QuickBar/terminal focus routing cannot hide a swallowed video-surface touch path.
+   - Page-level phone logic gate: render real `TerminalPage`, open the remote-window picker, select an interactive app-window, replay touch pointer tap plus 1x and zoomed touch movement on `remote-window-video-surface`, and assert one `click` for tap plus bounded `scroll` actions during pointer move, with no release-time swipe and no focus prelude. A separate 250 ms hold-drag gate asserts reliable pointer `down -> move* -> up`. The same gate must assert terminal input is not called, so QuickBar/terminal focus routing cannot hide a swallowed video-surface touch path.
    - Installed-phone L5 gate: when WebView DevTools is available, hook `WebSocket.prototype.send` and `RTCDataChannel.prototype.send` before the touch replay and assert at least one outgoing `mux-channel-message` contains `message.type === "remote-window-input"` for each action. If no frame appears, the failure is in client touch/action dispatch, not daemon AX/Quartz injection.
-   - Touch tap must not be represented as pointer down/up; at release it emits one Android app-window `kind=click` action with mapped coordinates. Unzoomed one-finger touch drag emits one release-time `gesture/swipe`; zoomed one-finger drag pans locally. A committed two-finger scroll emits bounded realtime `kind=scroll` actions on pointer move with `moveCursor=false` from the first event and emits no release-time remote action. A committed pinch remains local and cannot switch to scroll; a committed scroll cannot switch to pinch. After one finger lifts, zoomed projection becomes local pan while unzoomed projection becomes tap-suppressed continuation. Mouse Emulation drag emits pointer `down -> move* -> up`. Negative gates prove no raw touch pointer stream, no scroll cursor movement, no gesture-mode switch after commit, no half-pinch stray scroll/click, and no duplicated long-press recognition.
-   - Daemon gesture injection must replay that single Android `gesture/swipe` action as a bounded sequence of macOS scroll wheel events, capped by max step size/count, instead of posting one unbounded giant wheel delta. The replay must not reintroduce raw Android move streaming or long delayed queues.
+   - Touch tap must not be represented as pointer down/up; at release it emits one Android app-window `kind=click` action with mapped coordinates. One-finger movement at 1x and zoomed scale emits bounded realtime `kind=scroll` actions on pointer move and no release action. Movement after a 250 ms hold emits reliable pointer `down -> move* -> up`; a stationary 500 ms hold emits one right click. At 1x, committed coherent two-finger motion emits remote scroll; while zoomed it emits local pan. A committed pinch remains local and cannot switch to scroll/pan, and a committed scroll/pan cannot switch to pinch. Pointer cancel after a remote down emits a reliable release. Mouse Emulation drag emits pointer `down -> move* -> up`. Negative gates prove no release-time swipe, no zoomed one-finger local pan, no scroll cursor movement, no gesture-mode switch after commit, no half-pinch stray scroll/click, and no duplicated long-press recognition.
+   - Daemon-only legacy `gesture/swipe` compatibility may remain decodable for old clients, but it is not emitted by the current Direct Touch mainline and cannot satisfy realtime-scroll, reliable-drag, coalescing, or live-phone gates.
    - DOM positive-down/right scroll deltas remain the wire contract. The daemon must negate them exactly once when constructing macOS `CGEvent` wheel values.
    - The daemon macOS input schema must match the protocol union: legacy pointer/key events require `phase`; click and scroll events do not carry `phase` and must still decode and inject.
-   - The daemon owns a persistent Swift input helper for a selected stream/runtime. Interactive app-window stream start must warm and readiness-check the helper without emitting focus/input, so helper cold start is not charged to the first realtime user operation. Click, legacy pointer, scroll, gesture, and key sequences must not compile a fresh `swift -e` process per event. Each real input action must first check live frontmost PID plus matched AX focused window and only focus/raise when needed. Explicit `focus` remains a separate compatibility operation, but Android real input must not enqueue focus before click/key/gesture. Queued real input older than one second must still be dropped before helper injection, except a same-target action-only burst may refresh the next queued action after the preceding same-target action succeeds; different-target queued actions must still stale.
-   - Cross-device `clientSentAt` is debug metadata only. Daemon input stale/drop decisions must use daemon-local receive/enqueue time, not Android/Mac wall-clock comparison. Red/green must prove missing, old, and future `clientSentAt` payloads can still be accepted when daemon receive time is fresh, while a daemon-local queued request older than one second is rejected before helper injection.
-   - Local action loopback is the required bridge before Android real-device proof: the live probe launches a temporary AppKit `.app`, starts a real app-window stream, maps local actions `click`, `gesture/swipe`, `scroll`, and `key` into remote-window input payloads, and asserts AppKit stdout sees mouse down/up for click plus scroll and key markers. The same probe must run raw WebSocket and mux-channel paths with `ZTERM_REMOTE_WINDOW_PROBE_CLIENT_CLOCK_OFFSET_MS=-60000` so phone/Mac clock skew cannot be hidden by same-host tests, and with `ZTERM_REMOTE_WINDOW_PROBE_BURST=1` so phone/WebView behavior that sends action records back-to-back cannot be hidden by a serial ACK-after-each-event probe. A serial live probe proves only protocol reachability; it is not a phone-parity gate for remote-window input stale bugs.
+   - The daemon owns one persistent Swift input helper for a selected stream/runtime. Interactive app-window stream start must warm and readiness-check the helper without emitting focus/input, so helper cold start is not charged to the first realtime user operation. Click, pointer, scroll, daemon-only legacy gesture, and key sequences must not compile a fresh `swift -e` process per event. Each real input action first checks live frontmost PID plus matched AX focused window and only focuses/raises when needed. Explicit `focus` remains a separate compatibility operation, but Android real input must not enqueue focus before click/pointer/scroll/key. Continuous move/scroll older than the active profile's daemon-local age budget is dropped using its original receive time; reliable click/down/up/key/barrier is never discarded by that continuous stale policy.
+   - Cross-device `clientSentAt` is debug metadata only. Daemon continuous stale/drop decisions use daemon-local receive/enqueue time, not Android/Mac wall-clock comparison. Red/green must prove missing, old, and future `clientSentAt` payloads can still be accepted when daemon receive time is fresh, an over-age continuous action is rejected before helper injection, and a five-second reliable drag still delivers its release.
+   - Local action loopback is the required bridge before Android real-device proof: the live probe launches a temporary AppKit `.app`, starts a real app-window stream, maps local actions `click`, realtime `scroll`, reliable pointer `down/move/up`, and `key` into remote-window input payloads, and asserts AppKit stdout sees mouse down/up plus scroll and key markers. The same probe must run raw WebSocket and mux-channel paths with `ZTERM_REMOTE_WINDOW_PROBE_CLIENT_CLOCK_OFFSET_MS=-60000` so phone/Mac clock skew cannot be hidden by same-host tests, and with a 120 Hz continuous burst plus reliable barriers so phone/WebView coalescing, stable-sequence ACK, and ordering cannot be hidden by a serial probe.
    - Remote-window image paste must use the same paste-image upload owner but with an explicit remote-window target, causing daemon clipboard write plus Command+V injection for the selected stream. Terminal focus must remove that target and keep the existing terminal Ctrl+V path.
    - QuickBar key/text/IME input must use the same active stream id and target id as the visible overlay; stale stream ids after close/shrink/reselect are a failure.
    - The real `<video>` receiver is pointer-transparent; fullscreen and floating hit tests belong to the overlay video surface so user taps are not swallowed by media playback.
@@ -227,7 +227,7 @@ Current executable gates:
    - Verify Android sends no remote `focus` input intent when a supported app-window stream is selected, started, attached, expanded fullscreen, shrunk, closed, or screenshotted. Video-surface click, gesture, wheel, key, QuickBar, and IME paths must send only the user action record; any preceding `focus` intent is a failure. Read-only iTerm pane targets must emit none of these intents.
    - Post pixel scroll through `CGEvent.post(tap: .cghidEventTap)` using the `CGWindowList` top-left target point directly; no AppKit bottom-left conversion is allowed for daemon manifest coordinates.
    - Use a flipped document view so increasing content `y` has unambiguous down-scroll semantics.
-   - Through the live daemon WebSocket protocol, start a real app-window stream against a marked AppKit probe window, send click, gesture/swipe, pixel scroll, and key down/up over `remote-window-input`, and assert both protocol `accepted=true` and probe stdout events are observed. Use `pnpm --dir android exec tsx scripts/remote-window-live-input-probe.ts`; the probe must launch a temporary `.app` bundle so the daemon tests normal macOS app focus semantics rather than an unbundled Swift script. The Android app-window touch gate must assert drag emits exactly one gesture payload and no raw pointer move stream.
+   - Through the live daemon WebSocket protocol, start a real app-window stream against a marked AppKit probe window, send click, realtime pixel scroll, reliable pointer down/move/up, and key down/up over the typed remote-window input-delivery envelope, and assert both ACK/result truth and probe stdout events are observed. Use `pnpm --dir android exec tsx scripts/remote-window-live-input-probe.ts`; the probe must launch a temporary `.app` bundle so the daemon tests normal macOS app focus semantics rather than an unbundled Swift script. The Android touch gate must assert pointer-move-phase scroll, five-second drag release, cancel release, 120 Hz coalescing, and no release-time swipe.
    - For WeChat or another ordinary app, first activate a different app, then send a harmless click or explicit focus intent over the live daemon stream and assert `System Events` frontmost app changes to the selected target app. This is the black-box guard for AX window matching + `AXRaise`.
    - Assert negative macOS `wheel1` moves content down and positive `wheel1` moves it back up. This locks the one-time DOM-to-CGEvent sign conversion.
    - Close the marked window and leave no test process or temporary file.
@@ -254,10 +254,10 @@ The picker and target-locked overlay shell are covered now. Gates that require a
    - Double tap enters fullscreen with aspect-fit letterbox as the default.
    - Explicit fullscreen button enters fullscreen.
    - The fullscreen fill control sends one remote target `window-resize` request for the current phone surface and leaves local drawing/input mapping in aspect-fit until the daemon reports updated target/capture truth.
-   - Pinch zoom enlarges the fullscreen video, one-finger drag pans while zoomed, fullscreen never shrinks below fit, and no minimap/viewport overlay is rendered.
+   - Pinch zoom enlarges the fullscreen video, coherent two-finger movement pans while zoomed, one-finger movement remains realtime remote scroll, fullscreen never shrinks below fit, and no minimap/viewport overlay is rendered.
    - Fullscreen overlay top chrome must respect Android safe-area/status-bar inset and must not overlap system status icons.
    - Opening the IME while the floating stream is target-locked moves the preview above the QuickBar/keyboard rather than leaving it under the keyboard.
-   - Opening the IME in fullscreen keeps local pan available even when the selected source exactly fills the video surface; upward pan must reduce bottom padding instead of resizing the page shell or sending remote scroll.
+   - Opening the IME in fullscreen keeps zoomed two-finger local pan available even when the selected source exactly fills the video surface; one-finger movement remains remote input and the IME lift must not resize the page shell or steal the gesture owner.
    - Current minimal slice: Back/minimize shrinks to the same target-locked floating shell.
    - Full stream slice: Back/minimize keeps the same stream id.
    - Current minimal slice: close removes the overlay and invalidates outstanding catalog response epochs.
@@ -265,7 +265,7 @@ The picker and target-locked overlay shell are covered now. Gates that require a
 
 4. Input
    - Android overlay maps pointer coordinates from the actual aspect-fit or zoomed content rect to the selected target crop.
-   - A single-finger drag on an unzoomed floating/fullscreen video is recognized locally and sends one release-time gesture/swipe action to the selected target; raw pointer moves are not sent or queued.
+   - A single-finger movement on 1x or zoomed floating/fullscreen video emits bounded realtime pixel scroll during pointer move; pointer up emits no swipe. A 250 ms hold followed by movement emits reliable remote drag, and zoomed local pan requires two fingers.
    - Android IME CJK/special-character/newline committed text reaches the selected app unchanged and does not enter the terminal session.
    - With `bring-to-focus`, a click/key event raises/focuses the selected target window and reaches it even when another window previously covered the target point.
    - With `no-focus-steal`, generic app OS input returns an explicit policy error.
@@ -277,11 +277,11 @@ This feature is not closed by static docs, one-shot screenshots, terminal buffer
 
 ## 2026-08-19 remediation gates
 
-Positive gates prove one daemon layout generation drives Android projection and proportional macOS input mapping; exact quality ACK commits; focus/overview allocations sum to one total; bitrate and capture cadence change together; weak samples downshift quickly and stable samples restore one step; touch scroll does not move cursor; Mouse Emulation emits down/move/up; primary controls are at least 48x48 CSS pixels.
+Positive gates prove one daemon layout generation drives Android projection and proportional macOS input mapping; exact quality ACK commits; focus/overview allocations sum to one total; bitrate-only changes sender only while cadence/dimensions update the existing `SCStream`; cause-specific pressure moves one level and stable samples restore one level; touch scroll does not move cursor; Mouse Emulation emits down/move/up; primary controls are at least 48x48 CSS pixels.
 
-Negative gates prove invalid SDP is not rewritten; stale/missing layout generation and outside-layout input reject; stale/wrong-group/rejected/timeout quality never commits; partial quality mutation rolls back; committed gestures cannot switch mode; pair-to-single does not emit an accidental tap; nested interactive controls and child-tile close actions are absent; developer diagnostics remain collapsed behind user status.
+Negative gates prove invalid SDP is not rewritten; stale/missing layout generation and outside-layout input reject; stale/wrong-group/rejected/timeout quality never commits; partial quality mutation rolls back; quality changes never stop/restart capture; committed gestures cannot switch mode; zoomed one-finger input cannot become local pan; pair-to-single does not emit an accidental tap; nested interactive controls and child-tile close actions are absent; developer diagnostics remain collapsed behind user status.
 
-Required files: `src/server/remote-window-canvas-layout.test.ts`, `src/server/remote-window-quality.test.ts`, `src/lib/remote-window-quality-controller.test.ts`, `src/lib/remote-window-message-runtime.test.ts`, `src/lib/remote-window-video-quality.test.ts`, `src/lib/remote-window-touch-action-runtime.test.ts`, `src/components/terminal/RemoteWindowOverlay.test.tsx`, `src/server/remote-window-stream-daemon.test.ts`, plus resource/module/edge/function/mainline/import gates, typecheck, Android build, installed daemon/APK identity, live Android/AppKit input, controlled weak-network trace, exact cleanup, and DSH Review.
+Required files: `src/server/remote-window-canvas-layout.test.ts`, `src/server/remote-window-quality.test.ts`, `src/lib/remote-window-quality-controller.test.ts`, `src/lib/remote-window-message-runtime.test.ts`, `src/lib/remote-window-video-quality.test.ts`, `src/lib/remote-window-touch-action-runtime.test.ts`, `src/components/terminal/RemoteWindowOverlay.test.tsx`, `src/server/remote-window-stream-daemon.test.ts`, plus resource/module/edge/function/mainline/import gates, typecheck, Android build, installed daemon/APK identity, live Android/AppKit input, controlled cause-specific pressure traces, exact cleanup, and AGY Review.
 
 ## 2026-08-22 startup-contract remediation gates
 
@@ -297,6 +297,121 @@ Required files: `src/server/remote-window-canvas-layout.test.ts`, `src/server/re
 - Daemon candidate admission is explicit: duplicate candidates reject with `remote_window_stream_candidate_duplicate`, closed-stream candidates reject with `remote_window_stream_candidate_closed`, and a full bounded queue rejects with `remote_window_stream_candidate_queue_full`. The terminal message owner preserves these typed codes on `remote-window-error`; it must not silently coerce rejection to `false` or discard overflow.
 - Typed status telemetry reports `capture-started` separately for `focus` and `overview`. Receiver startup telemetry reports capture confirmation, answer application, and each required track attachment separately; playback telemetry independently records track binding, decoded first frame, and playing evidence.
 - Native WebRTC is split from deterministic daemon unit tests: `remote-window-stream-daemon.test.ts` mocks the addon and injects all media owners, while `pnpm --dir android run test:remote-window-webrtc-loopback` runs the real addon in a dedicated process, negotiates one track for `single-focus` and focus+overview for `overview-plus-focus`, queues ICE until the corresponding remote description and proves application order, receives at least three real sink frames per required lane, stops every sink/track, closes both peers, and must exit zero without SIGSEGV.
+
+## 2026-08-30 quality/gesture/input/frame-control amendment gates
+
+Lifecycle under test:
+
+```text
+preference/stats/interaction
+  -> desired profile
+  -> one in-flight quality revision + latest queued desired
+  -> daemon exact group diff
+  -> sender-only or existing-SCStream in-place mutation or full no-op
+  -> matching applied/rejected result + cooldown
+
+surface pointer sequence
+  -> one latched gesture decision
+  -> reliable ordered or continuous coalesced delivery control
+  -> daemon dedupe/age/depth admission
+  -> persistent helper OS injection
+  -> ACK/NACK/action result
+
+decoded/captured frame
+  -> decoded-frame draw clock or per-lane latest admission
+  -> one current draw/conversion
+  -> bounded paint/frame-age/drop fact
+```
+
+### White-box paired quality cases
+
+- Positive: bitrate-only changes existing sender encodings and returns applied;
+  negative: capture configuration/filter/start/stop are not called.
+- Positive: cadence and dimensions use the existing `SCStream` configuration;
+  negative: `startCapture`, `stopCapture`, peer, receiver, and transport remain
+  untouched.
+- Positive: an identical profile advances/acknowledges the matching revision as
+  an applied no-op; negative: sender and capture mutation counts are zero.
+- Positive: group failure restores every already-applied lane to its exact old
+  values; negative: partial applied truth is never returned. Rollback failure
+  becomes terminal stream error and exactly-once cleanup.
+- Positive: while one request is in flight, changed desired profiles overwrite
+  one queued latest value and the final latest value is applied once; negative:
+  no concurrent daemon busy storm and no stale result overwrites applied truth.
+- Positive: rejected, busy, and timeout all leave requested state and preserve
+  a valid latest desired retry decision; negative: no permanent `requested`.
+- Positive: two post-apply samples are skipped and later real constrained
+  samples still adjust; negative: transition noise cannot immediately trigger
+  a second degradation.
+- Positive: network, host CPU/capture, Android decode/render, and latency-only
+  inputs select their documented first adjustment; negative: non-network facts
+  do not become network weak and cumulative counters are not used as deltas.
+
+### White-box paired gesture and delivery cases
+
+- Positive: 1x and zoomed one-finger movement emits bounded pixel scroll during
+  pointer-move; negative: pointer-up emits no release-time swipe and zoomed
+  pointer-down does not enter local pan.
+- Positive: movement after the 250 ms hold emits reliable down, bounded moves,
+  and one up after five seconds; negative: ordinary scroll emits no down and
+  gesture duration never drops release.
+- Positive: stationary 500 ms hold emits one right click; negative: release
+  emits no left click or second right click.
+- Positive: zoomed coherent two-finger movement changes only local pan; 1x
+  coherent movement sends only remote scroll; anti-parallel movement changes
+  only local scale; negative: committed modes never oscillate or dual-dispatch.
+- Positive: pointer-cancel after remote down produces a reliable release;
+  negative: no stuck remote button and no stale policy can discard release.
+- Positive: surface points inside 1x/2x/max-pan geometry map within two source
+  pixels or 0.5%; negative: letterbox points return null rather than clamp.
+- Positive: a 120 Hz replay produces no more than 45 continuous frames/second
+  in smooth or 30 in quality, scroll deltas sum, and move keeps latest position;
+  negative: reliable barriers are never merged, reordered, or dropped.
+- Positive: ACK timeout or route-generation change retries the same sequence at
+  most the bounded count; negative: retry creates no new sequence or duplicate
+  text/click. Daemon duplicate sequence returns the previous ACK/result without
+  reinjection.
+- Positive: daemon continuous depth is at most two and old scroll expires from
+  its original receive timestamp; negative: successful focus/action never
+  refreshes later continuous age and no post-stop scroll tail replays.
+
+### White-box paired render/capture cases
+
+- Positive: each distinct decoded frame id causes at most one focus
+  `drawImage`; negative: display rAF ticks without a new decoded frame draw
+  nothing and no production rAF fallback is retained.
+- Positive: overview/thumbnail draws only on decoded callbacks within profile
+  cadence and interaction can reduce it to 0-1 FPS; negative: overview cannot
+  consume a fixed minimum budget while focus is active.
+- Positive: focus and overview conversion each retain at most one pending latest
+  frame and replace an older pending frame; negative: no FIFO of historical
+  frames and queue depth cannot be increased to pass.
+- Positive: capture timestamps older than active maximum frame age are dropped
+  before conversion/media; negative: no over-age frame is presented after user
+  input stops.
+- Positive: invalid dimensions, callback unavailability, conversion failure,
+  stream stop, capture exit, and transport failure produce explicit error or
+  exactly-once cleanup as specified; negative: no screenshot/terminal/old-video
+  success substitution and no retained second production media path.
+
+### Module black-box and project black-box
+
+- Raw and mux AppKit probes prove pointer-move-phase scrolling, five-second
+  drag/cancel release, sequence dedupe, 120 Hz coalescing, zero quality capture
+  restart, frame-age, and exact cleanup against the installed daemon.
+- Installed Android proves 1x/2x/max-pan input, smooth/quality selection,
+  decoded-frame draw cadence, foreground resume, active route identity, and
+  real visible marker video. Mock canvas, ontrack alone, capture-started alone,
+  or route metadata alone is insufficient.
+- Controlled direct/LAN A/B target is smooth 1280-long-edge@45 with p95
+  presented frame age <=100 ms and quality 1920-long-edge@30 with p95 <=180 ms.
+  If either fails after bounded latest-frame work, the only completion path is
+  one native media path plus physical removal of production RGBA stdout.
+
+Known gap at Phase 0: every new resource and mainline edge is `design` or
+`binding pending`; runtime tests must initially fail. They become active only
+after the corresponding symbols, paired gates, installed/live evidence, and
+registry bindings pass together.
 - Before peer/capture allocation, the daemon rejects unsupported Darwin ABI or missing native wrtc constructors/video conversion capability, then publishes one typed `capability-verified` status with the accepted media plan, exact maximum video-lane count, and a preflight matrix. The matrix must mark Screen Recording permission, capture, and sender negotiation as `pending` until their real lifecycle stages prove them; it is not rendered-frame proof and not a VideoToolbox/ROI claim.
 - Every rejected startup carries a typed `failureStage` owned by the daemon lifecycle (`request-validation`, `platform-capability`, `stream-lifecycle`, `media-plan-validation`, offer/capture/input-helper/answer stages). The message runtime must preserve that field on the rejected Error and the overlay may only project it; timeout or error-string parsing must not synthesize a stage.
 - Positive tests cover one-lane and two-lane capability facts plus focus/overview `capture-started`; negative tests cover request validation, media-plan mismatch, offer application, and focus capture failure stages. Status/error facts stay on the control side-channel and never enter SDP, track metadata, or media frames.

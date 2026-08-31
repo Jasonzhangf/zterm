@@ -247,7 +247,7 @@ func startRemoteWindowCaptureProcess() {
         exit(2)
     }
 
-    let config: CaptureConfig
+    var config: CaptureConfig
     do {
         config = try JSONDecoder().decode(CaptureConfig.self, from: configData)
     } catch {
@@ -348,6 +348,57 @@ func startRemoteWindowCaptureProcess() {
     stderrLine("zterm remote window capture started (SCStream): \(allWindows.count) windows")
 }
 
+@Sendable func updateCapture(config: CaptureConfig) async throws {
+    let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+    let mainWindow = CompositeWindow(
+        windowId: config.windowId,
+        windowBounds: config.windowBounds,
+        cropRect: config.cropRect,
+        offsetX: config.mainOffsetX ?? 0,
+        offsetY: config.mainOffsetY ?? 0,
+        outputWidth: config.outputWidth,
+        outputHeight: config.outputHeight
+    )
+    let allWindows = [mainWindow] + (config.compositeWindows ?? [])
+    guard allWindows.count == activeStreams.count else {
+        throw NSError(
+            domain: "RemoteWindowCapture",
+            code: 3,
+            userInfo: [NSLocalizedDescriptionKey: "in-place capture update cannot change stream lane count"]
+        )
+    }
+    for (index, entry) in allWindows.enumerated() {
+        guard let window = findScWindow(
+            windowId: entry.windowId,
+            appBundleId: index == 0 ? config.appBundleId : "",
+            windowBounds: entry.windowBounds,
+            content: content
+        ) else {
+            throw NSError(
+                domain: "RemoteWindowCapture",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "remote window capture target not found in SCShareableContent: \(entry.windowId)"]
+            )
+        }
+        guard let display = content.displays.first(where: { $0.frame.contains(window.frame) }) else {
+            throw NSError(
+                domain: "RemoteWindowCapture",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "remote window capture display not found for frame: \(NSStringFromRect(window.frame))"]
+            )
+        }
+        let filter = SCContentFilter(display: display, including: [window])
+        let streamConfiguration = makeStreamConfiguration(
+            entry: entry,
+            frameRate: config.frameRate,
+            queueDepth: config.queueDepth
+        )
+        try await activeStreams[index].updateContentFilter(filter)
+        try await activeStreams[index].updateConfiguration(streamConfiguration)
+    }
+    stderrLine("zterm remote window capture updated in place (SCStream): \(allWindows.count) windows")
+}
+
     // SCStream setup must not depend on the AppKit main run loop. This process
     // only calls dispatchMain(), so a bare Task would never be scheduled.
     DispatchQueue.global(qos: .userInitiated).async {
@@ -395,7 +446,8 @@ func startRemoteWindowCaptureProcess() {
                             outputWidth: command.outputWidth,
                             outputHeight: command.outputHeight
                         )
-                        try await startCapture(config: nextConfig)
+                        try await updateCapture(config: nextConfig)
+                        config = nextConfig
                         writeCaptureUpdate(
                             seq: command.seq,
                             ok: true,
