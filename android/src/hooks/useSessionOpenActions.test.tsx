@@ -1340,6 +1340,7 @@ describe('useSessionOpenActions explicit-open truth', () => {
       terminalBackend: 'tmux',
       authToken: 'token-a',
       sessionNames: ['alpha', 'beta'],
+      sessionCwByName: {},
     });
     expect(harness.spies.pruneSessionGroupSelectionToRemoteTruth).toHaveBeenCalledWith(
       {
