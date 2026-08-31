@@ -1217,6 +1217,119 @@
       "status": "active"
     },
     {
+      "edge_id": "edge.client_remote_window_overlay_to_quality_control",
+      "from_module": "client.remote_window_overlay",
+      "to_module": "client.remote_window_overlay",
+      "resource_from": "resource.remote_window_overlay",
+      "resource_to": "resource.remote_window_quality_control",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "desktop.remote_window_stream",
+      "allowed_callers": [
+        "src/components/terminal/useRemoteWindowQuality.ts",
+        "src/lib/remote-window-quality-controller.ts"
+      ],
+      "forbidden_callers": [
+        "src/server/**"
+      ],
+      "request_chain": [
+        "RemoteWindowQualityControlIn01DesiredProfile",
+        "RemoteWindowQualityControlIn02SingleFlightDecision"
+      ],
+      "response_chain": [
+        "RemoteWindowQualityControlOut01RevisionIntent"
+      ],
+      "error_chain": [
+        "RemoteWindowQualityControlError01RejectedOrTimeout"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:RemoteWindowOverlay->RemoteWindowQualityControl"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/remote-window-quality-controller.test.ts",
+        "src/components/terminal/useRemoteWindowQuality.test.tsx"
+      ],
+      "status": "design"
+    },
+    {
+      "edge_id": "edge.client_quality_control_to_daemon_remote_window_stream",
+      "from_module": "client.remote_window_overlay",
+      "to_module": "daemon.remote_window_stream",
+      "resource_from": "resource.remote_window_quality_control",
+      "resource_to": "resource.remote_window_stream",
+      "via_resources": [
+        "resource.active_session",
+        "resource.session_transport",
+        "resource.daemon_target_transport"
+      ],
+      "relation_status": "indirect",
+      "owner_feature": "desktop.remote_window_stream",
+      "allowed_callers": [
+        "src/lib/remote-window-quality-controller.ts",
+        "src/contexts/session-context-remote-window-runtime.ts",
+        "src/server/remote-window-stream-daemon.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/terminal/RemoteWindowOverlay.tsx"
+      ],
+      "request_chain": [
+        "RemoteWindowQualityControlIn03ControlEnvelope",
+        "RemoteWindowQualityControlIn04DaemonGroupDiff"
+      ],
+      "response_chain": [
+        "RemoteWindowQualityControlOut02AppliedOrNoop"
+      ],
+      "error_chain": [
+        "RemoteWindowQualityControlError02TransactionFailure"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:RemoteWindowQualityControl->RemoteWindowStreamQualityRuntime"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/contexts/session-context-remote-window-runtime.test.ts",
+        "src/server/remote-window-quality.test.ts"
+      ],
+      "status": "design"
+    },
+    {
+      "edge_id": "edge.client_remote_window_overlay_to_frame_projection",
+      "from_module": "client.remote_window_overlay",
+      "to_module": "client.remote_window_overlay",
+      "resource_from": "resource.remote_window_overlay",
+      "resource_to": "resource.remote_window_frame_projection",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "desktop.remote_window_stream",
+      "allowed_callers": [
+        "src/components/terminal/RemoteWindowVideoContent.tsx",
+        "src/components/terminal/useRemoteWindowCompositeCanvas.ts"
+      ],
+      "forbidden_callers": [
+        "src/server/**"
+      ],
+      "request_chain": [
+        "RemoteWindowFrameProjectionIn01DecodedFrame",
+        "RemoteWindowFrameProjectionIn02DrawOnce"
+      ],
+      "response_chain": [
+        "RemoteWindowFrameProjectionOut01PresentedFrame"
+      ],
+      "error_chain": [
+        "RemoteWindowFrameProjectionError01UnsupportedFrameCallback"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:RemoteWindowOverlay->RemoteWindowFrameProjection"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/components/terminal/useRemoteWindowCompositeCanvas.test.tsx",
+        "src/components/terminal/useRemoteWindowPlayback.test.tsx"
+      ],
+      "status": "design"
+    },
+    {
       "edge_id": "edge.client_remote_window_overlay_to_touch_action",
       "from_module": "client.remote_window_overlay",
       "to_module": "client.remote_window_overlay",
@@ -1254,6 +1367,83 @@
       "forbidden_caller_notes": [
         "src/server/** direct UI event"
       ]
+    },
+    {
+      "edge_id": "edge.client_touch_action_to_input_delivery",
+      "from_module": "client.remote_window_overlay",
+      "to_module": "client.remote_window_overlay",
+      "resource_from": "resource.remote_window_touch_action",
+      "resource_to": "resource.remote_window_input_delivery_client",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "desktop.remote_window_stream",
+      "allowed_callers": [
+        "src/lib/remote-window-touch-action-runtime.ts",
+        "src/lib/remote-window-message-runtime.ts"
+      ],
+      "forbidden_callers": [
+        "src/server/**"
+      ],
+      "request_chain": [
+        "RemoteWindowInputDeliveryIn01ClassifiedAction",
+        "RemoteWindowInputDeliveryIn02ReliableOrContinuousAdmission"
+      ],
+      "response_chain": [
+        "RemoteWindowInputDeliveryOut01FlushIntent"
+      ],
+      "error_chain": [
+        "RemoteWindowInputDeliveryError01UnsupportedLane"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:RemoteWindowTouchAction->RemoteWindowInputDeliveryClient"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/remote-window-touch-action-runtime.test.ts",
+        "src/lib/remote-window-message-runtime.test.ts"
+      ],
+      "status": "design"
+    },
+    {
+      "edge_id": "edge.client_input_delivery_to_daemon_input_delivery",
+      "from_module": "client.remote_window_overlay",
+      "to_module": "daemon.remote_window_stream",
+      "resource_from": "resource.remote_window_input_delivery_client",
+      "resource_to": "resource.remote_window_input_delivery_daemon",
+      "via_resources": [
+        "resource.active_session",
+        "resource.session_transport",
+        "resource.daemon_target_transport"
+      ],
+      "relation_status": "indirect",
+      "owner_feature": "desktop.remote_window_stream",
+      "allowed_callers": [
+        "src/lib/remote-window-message-runtime.ts",
+        "src/contexts/session-context-remote-window-runtime.ts",
+        "src/server/remote-window-stream-daemon.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/terminal/RemoteWindowOverlay.tsx"
+      ],
+      "request_chain": [
+        "RemoteWindowInputDeliveryIn03ControlEnvelope",
+        "RemoteWindowInputDeliveryIn04DaemonAdmission"
+      ],
+      "response_chain": [
+        "RemoteWindowInputDeliveryOut02AckOrNack"
+      ],
+      "error_chain": [
+        "RemoteWindowInputDeliveryError02SequenceOrQueueRejected"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:RemoteWindowInputDeliveryClient->RemoteWindowInputRuntime"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/contexts/session-context-remote-window-runtime.test.ts",
+        "src/server/remote-window-input-policy.test.ts"
+      ],
+      "status": "design"
     },
     {
       "edge_id": "edge.client_touch_action_to_daemon_remote_window_stream",
@@ -3528,6 +3718,80 @@
         "src/lib/edge-registry-truth.test.ts"
       ],
       "status": "active"
+    },
+    {
+      "edge_id": "edge.daemon_remote_window_stream_to_capture_backpressure",
+      "from_module": "daemon.remote_window_stream",
+      "to_module": "daemon.remote_window_stream",
+      "resource_from": "resource.remote_window_stream",
+      "resource_to": "resource.remote_window_capture_backpressure",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "desktop.remote_window_stream",
+      "allowed_callers": [
+        "src/server/remote-window-stream-daemon.ts",
+        "src/server/remote-window-capture.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**"
+      ],
+      "request_chain": [
+        "RemoteWindowCaptureBackpressureIn01CapturedFrame",
+        "RemoteWindowCaptureBackpressureIn02LatestAdmission"
+      ],
+      "response_chain": [
+        "RemoteWindowCaptureBackpressureOut01CurrentFrame"
+      ],
+      "error_chain": [
+        "RemoteWindowCaptureBackpressureError01OverAgeOrConversionFailure"
+      ],
+      "mainline_call_ids": [
+        "daemon_mainline:RemoteWindowStream->RemoteWindowCaptureBackpressure"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/server/remote-window-capture.test.ts",
+        "src/server/remote-window-stream-daemon.test.ts"
+      ],
+      "status": "design"
+    },
+    {
+      "edge_id": "edge.daemon_input_delivery_to_remote_window_stream",
+      "from_module": "daemon.remote_window_stream",
+      "to_module": "daemon.remote_window_stream",
+      "resource_from": "resource.remote_window_input_delivery_daemon",
+      "resource_to": "resource.remote_window_stream",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "desktop.remote_window_stream",
+      "allowed_callers": [
+        "src/server/remote-window-stream-daemon.ts",
+        "src/server/remote-window-input-helper.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**"
+      ],
+      "request_chain": [
+        "RemoteWindowInputDeliveryIn05AdmittedAction",
+        "RemoteWindowInputDeliveryIn06OsInjection"
+      ],
+      "response_chain": [
+        "RemoteWindowInputDeliveryOut03ActionResult"
+      ],
+      "error_chain": [
+        "RemoteWindowInputDeliveryError03InjectionFailure"
+      ],
+      "mainline_call_ids": [
+        "daemon_mainline:RemoteWindowInputDelivery->RemoteWindowInput"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/server/remote-window-input-policy.test.ts",
+        "src/server/remote-window-stream-daemon.test.ts"
+      ],
+      "status": "design"
     },
     {
       "edge_id": "edge.daemon_remote_window_stream_to_canvas_layout",

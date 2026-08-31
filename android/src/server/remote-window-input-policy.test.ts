@@ -44,11 +44,9 @@ const layout: RemoteWindowCanvasLayoutV1 = {
 
 function clickPayload(overrides: Partial<RemoteWindowInputEventPayload> = {}): RemoteWindowInputEventPayload {
   return {
-    requestId: 'request-1',
     streamId: 'stream-1',
     targetId: target.streamTargetId,
     layoutGeneration: layout.layoutGeneration,
-    clientSentAt: 1,
     event: {
       kind: 'click',
       pointerId: 1,

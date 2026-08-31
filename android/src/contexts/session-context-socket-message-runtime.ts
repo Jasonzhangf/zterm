@@ -260,7 +260,7 @@ export function handleSocketServerMessageRuntime(options: {
     case 'remote-window-stream-ice-candidate':
     case 'remote-window-stream-status':
     case 'remote-window-stream-focus-result':
-    case 'remote-window-input-result':
+    case 'remote-window-input-ack':
     case 'remote-window-error':
       if (options.remoteWindowMessageRuntime && isRemoteWindowControlMessage(msg)) {
         options.remoteWindowMessageRuntime.dispatch(msg);

@@ -1,6 +1,6 @@
 import type {
   RemoteWindowStreamQualityResultPayload,
-  RemoteWindowVideoBitrateConfig,
+  RemoteWindowVideoProfile,
 } from './types';
 
 export type RemoteWindowQualityApplyState =
@@ -9,20 +9,20 @@ export type RemoteWindowQualityApplyState =
       phase: 'requested';
       revision: number;
       qualityKey: string;
-      requested: RemoteWindowVideoBitrateConfig;
+      requested: RemoteWindowVideoProfile;
     }
   | {
       phase: 'applied';
       revision: number;
       qualityKey: string;
-      applied: RemoteWindowVideoBitrateConfig;
+      applied: RemoteWindowVideoProfile;
       result: RemoteWindowStreamQualityResultPayload;
     }
   | {
       phase: 'rejected';
       revision: number;
       qualityKey: string;
-      requested: RemoteWindowVideoBitrateConfig;
+      requested: RemoteWindowVideoProfile;
       message: string;
     };
 
@@ -33,7 +33,7 @@ export function createRemoteWindowQualityApplyState(): RemoteWindowQualityApplyS
 export function beginRemoteWindowQualityRequest(options: {
   state: RemoteWindowQualityApplyState;
   qualityKey: string;
-  requested: RemoteWindowVideoBitrateConfig;
+  requested: RemoteWindowVideoProfile;
 }) {
   const revision = options.state.revision + 1;
   return {
@@ -53,17 +53,33 @@ export function acceptRemoteWindowQualityResult(
 ): RemoteWindowQualityApplyState {
   if (
     state.phase !== 'requested'
-    || result.status !== 'applied'
     || result.revision !== state.revision
-    || !result.appliedVideoBitrate
   ) {
     return state;
+  }
+  if (result.status === 'rejected') {
+    return {
+      phase: 'rejected',
+      revision: state.revision,
+      qualityKey: state.qualityKey,
+      requested: state.requested,
+      message: result.error?.message || 'remote window quality request rejected',
+    };
+  }
+  if (!result.appliedVideoProfile) {
+    return {
+      phase: 'rejected',
+      revision: state.revision,
+      qualityKey: state.qualityKey,
+      requested: state.requested,
+      message: 'remote window quality result omitted applied profile',
+    };
   }
   return {
     phase: 'applied',
     revision: state.revision,
     qualityKey: state.qualityKey,
-    applied: result.appliedVideoBitrate,
+    applied: result.appliedVideoProfile,
     result,
   };
 }
@@ -89,5 +105,6 @@ export function hasRemoteWindowQualityKey(
   state: RemoteWindowQualityApplyState,
   qualityKey: string,
 ) {
-  return state.phase !== 'idle' && state.qualityKey === qualityKey;
+  return (state.phase === 'requested' || state.phase === 'applied')
+    && state.qualityKey === qualityKey;
 }

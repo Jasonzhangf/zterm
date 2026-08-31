@@ -145,7 +145,7 @@ import {
   type RemoteWindowStreamPurpose,
   type RemoteWindowStreamTargetManifest,
   type RemoteWindowStreamTargetsResponsePayload,
-  type RemoteWindowVideoBitrateConfig,
+  type RemoteWindowVideoProfile,
   type Session,
   type SessionDebugOverlayMetrics,
   type SessionGroupHistory,
@@ -464,7 +464,7 @@ interface TerminalPageProps {
     sessionId: string,
     target: RemoteWindowStreamTargetManifest,
     streamId: string,
-    options?: { videoBitrate?: RemoteWindowVideoBitrateConfig; purpose?: RemoteWindowStreamPurpose },
+    options: { videoProfile: RemoteWindowVideoProfile; purpose?: RemoteWindowStreamPurpose },
   ) => Promise<RemoteWindowReceiverStartResult>;
   onUpdateRemoteWindowStreamQuality?: (
     sessionId: string,
@@ -802,27 +802,12 @@ function TerminalPageComponent({
   const recordRemoteWindowInputResultDebug = useCallback((msg: RemoteWindowControlMessage) => {
     const context = remoteWindowInputContextRef.current;
     const currentCounts = remoteWindowInputDebugRef.current.counts;
-    if (msg.type === 'remote-window-input-result') {
-      remoteWindowInputDebugRef.current = {
-        ...remoteWindowInputDebugRef.current,
-        ...projectRemoteWindowInputDebugContext(context),
-        streamId: abbreviateRemoteWindowDebugId(msg.payload.streamId || context?.streamId || null),
-        targetId: abbreviateRemoteWindowDebugId(msg.payload.targetId || context?.targetId || null),
-        lastResult: `${msg.payload.accepted ? 'ACK' : 'NAK'} ${abbreviateRemoteWindowDebugId(msg.payload.requestId)}`,
-        lastResultAt: Date.now(),
-        counts: {
-          ...currentCounts,
-          accepted: currentCounts.accepted + (msg.payload.accepted ? 1 : 0),
-          error: currentCounts.error + (msg.payload.accepted ? 0 : 1),
-        },
-      };
-      return;
-    }
-    if (msg.type === 'remote-window-error' && msg.payload.code.startsWith('remote_window_input')) {
-      if (msg.payload.code === 'remote_window_input_stream_missing' && msg.payload.streamId) {
+    if (msg.type === 'remote-window-input-ack') {
+      const error = msg.control.error;
+      if (error?.code === 'remote_window_input_stream_missing' && msg.payload.streamId) {
         setRemoteWindowStreamInvalidation({
           streamId: msg.payload.streamId,
-          message: msg.payload.message,
+          message: error.message,
           nonce: Date.now(),
         });
       }
@@ -830,13 +815,16 @@ function TerminalPageComponent({
         ...remoteWindowInputDebugRef.current,
         ...projectRemoteWindowInputDebugContext(context),
         streamId: abbreviateRemoteWindowDebugId(msg.payload.streamId || context?.streamId || null),
-        lastResult: `ERR ${msg.payload.code} ${truncateRemoteWindowInputResult(msg.payload.message)}`,
+        targetId: abbreviateRemoteWindowDebugId(msg.payload.targetId || context?.targetId || null),
+        lastResult: `${msg.control.accepted ? 'ACK' : 'NAK'} ${abbreviateRemoteWindowDebugId(msg.control.sequence)}${error ? ` ${error.code} ${truncateRemoteWindowInputResult(error.message)}` : ''}`,
         lastResultAt: Date.now(),
         counts: {
           ...currentCounts,
-          error: currentCounts.error + 1,
+          accepted: currentCounts.accepted + (msg.control.accepted ? 1 : 0),
+          error: currentCounts.error + (msg.control.accepted ? 0 : 1),
         },
       };
+      return;
     }
   }, []);
 

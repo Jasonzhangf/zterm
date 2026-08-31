@@ -1191,7 +1191,10 @@
         "resource.transport_target",
         "resource.tmux_session"
       ],
-      "pending_resources": [],
+      "pending_resources": [
+        "resource.remote_window_capture_backpressure",
+        "resource.remote_window_input_delivery_daemon"
+      ],
       "public_interfaces": [
         "src/server/remote-window-stream-daemon.ts"
       ],
@@ -1205,12 +1208,15 @@
         "docs/modules/project-modules.md",
         "docs/decisions/2026-07-19-remote-window-stream-truth.md",
         "docs/decisions/2026-07-29-remote-window-canvas-pipeline.md",
+        "docs/decisions/2026-08-30-remote-window-quality-gesture-control-amendment.md",
         "docs/testing/remote-window-stream-test-design.md",
         "docs/testing/remote-window-canvas-pipeline-test-design.md"
       ],
       "required_gates": [
         "src/lib/module-registry-truth.test.ts",
-        "src/server/remote-window-stream-daemon.test.ts"
+        "src/server/remote-window-stream-daemon.test.ts",
+        "src/server/remote-window-capture.test.ts",
+        "src/server/remote-window-input-policy.test.ts"
       ],
       "status": "active",
       "owned_paths": [
@@ -1231,6 +1237,7 @@
         "src/server/remote-window-stream-session.ts",
         "src/server/remote-window-stream-session.test.ts",
         "src/server/remote-window-stream-daemon-helpers.ts",
+        "src/server/remote-window-video-profile-test-fixture.ts",
         "src/server/remote-window-app-window-catalog-script.ts",
         "src/server/remote-window-iterm2-catalog-script.ts",
         "src/server/remote-window-input-script.ts",
@@ -2338,7 +2345,10 @@
         "resource.transport_target"
       ],
       "pending_resources": [
-        "resource.remote_window_canvas_encode"
+        "resource.remote_window_canvas_encode",
+        "resource.remote_window_quality_control",
+        "resource.remote_window_input_delivery_client",
+        "resource.remote_window_frame_projection"
       ],
       "public_interfaces": [
         "src/components/terminal/RemoteWindowOverlay.tsx",
@@ -2355,13 +2365,17 @@
         "docs/modules/project-modules.md",
         "docs/decisions/2026-07-19-remote-window-stream-truth.md",
         "docs/decisions/2026-07-29-remote-window-canvas-pipeline.md",
+        "docs/decisions/2026-08-30-remote-window-quality-gesture-control-amendment.md",
         "docs/testing/remote-window-stream-test-design.md",
         "docs/testing/remote-window-canvas-pipeline-test-design.md"
       ],
       "required_gates": [
         "src/lib/module-registry-truth.test.ts",
         "src/lib/remote-window-overlay-runtime.test.ts",
-        "src/lib/remote-window-touch-action-runtime.test.ts"
+        "src/lib/remote-window-touch-action-runtime.test.ts",
+        "src/lib/remote-window-message-runtime.test.ts",
+        "src/lib/remote-window-quality-controller.test.ts",
+        "src/components/terminal/useRemoteWindowCompositeCanvas.test.tsx"
       ],
       "status": "active",
       "owned_paths": [

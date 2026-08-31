@@ -313,6 +313,16 @@ async function flushAndroidImeFocusTimer() {
 
 beforeEach(() => {
   resetClientDebugSnapshotForTests();
+  Object.defineProperties(HTMLVideoElement.prototype, {
+    requestVideoFrameCallback: {
+      configurable: true,
+      value: vi.fn(() => 1),
+    },
+    cancelVideoFrameCallback: {
+      configurable: true,
+      value: vi.fn(),
+    },
+  });
   vi.mocked(ImeAnchor.show).mockClear();
   vi.mocked(ImeAnchor.hide).mockClear();
   vi.mocked(ImeAnchor.getState).mockClear();
@@ -350,6 +360,8 @@ afterEach(() => {
   imeListeners.clear();
   debugInputListeners.clear();
   keyboardListeners.clear();
+  Reflect.deleteProperty(HTMLVideoElement.prototype, "requestVideoFrameCallback");
+  Reflect.deleteProperty(HTMLVideoElement.prototype, "cancelVideoFrameCallback");
 });
 
 describe("TerminalPage Android IME bridge", () => {
@@ -457,6 +469,12 @@ describe("TerminalPage Android IME bridge", () => {
     await waitFor(() => {
       expect(onRequestRemoteWindowStreamStart).toHaveBeenCalled();
     });
+    fireEvent.click(await screen.findByRole("button", {
+      name: "调起远程窗口键盘",
+    }));
+    expect(imeListeners.has("input")).toBe(true);
+    expect(imeListeners.has("backspace")).toBe(true);
+    expect(imeListeners.has("key")).toBe(true);
     expect(onSendRemoteWindowInput).not.toHaveBeenCalled();
 
     act(() => {

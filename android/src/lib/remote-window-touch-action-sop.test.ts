@@ -14,20 +14,25 @@ describe('remote window touch action sop truth', () => {
     const featureGates = read('docs/feature-gates.md');
     const functionMap = read('docs/function-map.md');
     const resourceMap = read('docs/resource-map.md');
-    const decision = read('docs/decisions/2026-07-19-remote-window-stream-truth.md');
+    const decision = read('docs/decisions/2026-08-30-remote-window-quality-gesture-control-amendment.md');
 
     expect(sop).toContain('Feature: `desktop.remote_window_stream`');
-    expect(sop).toContain('Tap/click emits one `click` action at release.');
-    expect(sop).toContain('Pinch zoom is fullscreen-only, may only enlarge above fit, and must not create a minimap.');
-    expect(sop).toContain('Each non-active child shows a screenshot thumbnail.');
-    expect(sop).toContain('Stale queued real input older than 1 second must be dropped.');
+    expect(sop).toContain('Tap emits one remote left click at release at both 1x and zoomed scale.');
+    expect(sop).toContain('pixel scroll at both 1x and zoomed scale; pointer-up emits no swipe replay.');
+    expect(sop).toContain('A five-second gesture remains valid. Reliable pointer-up and cancel-release');
+    expect(sop).toContain('Anti-parallel distance change is local pinch zoom.');
+    expect(sop).toContain('The remote window never shrinks below fit and no');
 
     expect(featureGates).toContain('The fullscreen video surface must never advertise a minimap/viewport overlay or allow shrinking below fit once the remote target is fullscreen.');
-    expect(functionMap).toContain('screenshot thumbnail');
-    expect(functionMap).toContain('fullscreen aspect-fit drawing with default remote target resize fill request on fullscreen entry');
+    expect(featureGates).toContain('single-finger movement is realtime remote scroll at both 1x and zoomed scale');
+    expect(functionMap).toContain('remote-window-gesture-arena');
     expect(resourceMap).toContain('fullscreen zoom/pan state');
     expect(resourceMap).toContain('screenshot intent');
+    expect(resourceMap).toContain('realtime bounded pixel scroll at both 1x and zoomed scale');
     expect(decision).not.toContain('top-right minimap projects the current viewport');
-    expect(decision).toContain('there is no minimap/viewport overlay');
+    expect(decision).toContain('Zoomed pointer-down does not pre-commit local pan.');
+    expect(decision).toContain('pointer-up and pointer-cancel both');
+    expect(featureGates).not.toContain('zoomed fullscreen one-finger drag remains local pan');
+    expect(resourceMap).not.toContain('actual user operations still obey the one-second stale/drop rule');
   });
 });

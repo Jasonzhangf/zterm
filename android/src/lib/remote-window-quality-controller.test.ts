@@ -5,19 +5,15 @@ import {
   createRemoteWindowQualityApplyState,
   rejectRemoteWindowQualityRequest,
 } from './remote-window-quality-controller';
+import { buildRemoteWindowVideoProfile } from './remote-window-video-quality';
 
-const config = {
-  preset: '5mbps' as const,
-  bitrateMbps: 5 as const,
-  maxBitrateBps: 5_000_000,
-  maxFrameRateFps: 12 as const,
-};
+const config = buildRemoteWindowVideoProfile('smooth');
 
 describe('remote window acknowledged quality state', () => {
   it('changes applied truth only after the matching applied result', () => {
     const pending = beginRemoteWindowQualityRequest({
       state: createRemoteWindowQualityApplyState(),
-      qualityKey: 'stream|5mbps',
+      qualityKey: 'stream|smooth',
       requested: config,
     });
     expect(pending.state.phase).toBe('requested');
@@ -30,8 +26,8 @@ describe('remote window acknowledged quality state', () => {
       revision: pending.revision,
       targetId: 'target',
       status: 'applied',
-      requestedVideoBitrate: config,
-      appliedVideoBitrate: config,
+      requestedVideoProfile: config,
+      appliedVideoProfile: config,
     });
     expect(applied).toMatchObject({ phase: 'applied', revision: 1, applied: config });
   });
@@ -56,8 +52,8 @@ describe('remote window acknowledged quality state', () => {
       revision: 1,
       targetId: 'target',
       status: 'applied',
-      requestedVideoBitrate: config,
-      appliedVideoBitrate: config,
+      requestedVideoProfile: config,
+      appliedVideoProfile: config,
     });
     expect(stale).toBe(second.state);
     expect(rejectRemoteWindowQualityRequest({

@@ -68,6 +68,22 @@ Rules:
 - Forbidden paths are hard boundaries. Do not patch behavior there to make a feature pass indirectly.
 - Required gates are the minimum verification stack, not a replacement for broader regression when the change has wider impact.
 
+## Remote-window quality/gesture target bindings
+
+These bindings are `design` until the named symbols, tests, resource statuses,
+and mainline edges are active together. They do not describe current runtime
+success.
+
+| function_id | unique owner surface | adjacent mainline edge | semantic contract | status |
+| --- | --- | --- | --- | --- |
+| `remote-window-quality-control` | `src/lib/remote-window-quality-controller.ts`; `src/components/terminal/useRemoteWindowQuality.ts`; `src/lib/remote-window-video-quality.ts` | `RemoteWindowOverlay -> RemoteWindowQualityControl -> RemoteWindowStreamQualityRuntime` | smooth/quality profile, cause facts, interaction burst, applied/desired/inFlight/queuedLatest, exact revision result, cooldown | design |
+| `remote-window-capture-config-diff` | `src/server/remote-window-quality.ts`; `src/server/remote-window-capture.ts`; `src/server/remote-window-screen-capture-script.ts` | `RemoteWindowStream -> RemoteWindowQuality`; `RemoteWindowStream -> RemoteWindowCapture` | sender-only bitrate diff, existing-SCStream configuration/filter update, full no-op, no quality stop/start | design |
+| `remote-window-gesture-arena` | `src/lib/remote-window-touch-action-runtime.ts`; `src/components/terminal/RemoteWindowOverlayController.tsx`; `src/components/terminal/useRemoteWindowViewport.ts` | `RemoteWindowOverlay -> RemoteWindowTouchAction` | one latched Direct Touch/Mouse Emulation decision; realtime 1x/zoom scroll, hold-drag, right-click, pair pan/pinch/scroll, reliable cancel release, letterbox null | design |
+| `remote-window-input-delivery-client` | `src/lib/remote-window-message-runtime.ts`; `src/contexts/session-context-remote-window-runtime.ts` | `RemoteWindowTouchAction -> RemoteWindowInputDeliveryClient -> RemoteWindowInputRuntime` | client reliable sequence/ACK/retry and continuous latest/merge/30-or-45-Hz flush control, separate from action payload | design |
+| `remote-window-input-delivery-daemon` | `src/server/remote-window-stream-daemon.ts`; `src/server/remote-window-input-policy.ts`; `src/server/remote-window-input-helper.ts` | `RemoteWindowInputDelivery -> RemoteWindowInput` | reliable dedupe/ACK/NACK/barrier and continuous depth/age/merge before persistent OS helper | design |
+| `remote-window-frame-projection` | `src/components/terminal/useRemoteWindowCompositeCanvas.ts`; `src/components/terminal/useRemoteWindowPlayback.ts`; `src/components/terminal/RemoteWindowVideoContent.tsx` | `RemoteWindowOverlay -> RemoteWindowFrameProjection` | decoded-frame callback is draw clock; focus frame id draws once; overview cadence and paint/frame-age facts stay bounded | design |
+| `remote-window-capture-backpressure` | `src/server/remote-window-stream-daemon.ts`; `src/server/remote-window-capture.ts` | `RemoteWindowStream -> RemoteWindowCaptureBackpressure` | one pending latest captured frame per lane, maximum-frame-age drop, bounded telemetry, exact cleanup | design |
+
 ## File Transfer Mainline Bindings
 
 | function_id | owner symbol | mainline call id | semantic contract |

@@ -870,12 +870,18 @@ describe('session-context-socket-message-runtime remote window messages', () => 
         },
       },
       {
-        type: 'remote-window-input-result',
+        type: 'remote-window-input-ack',
+        control: {
+          version: 1,
+          sequence: 'rw-input-1',
+          accepted: true,
+          retryable: false,
+          duplicate: false,
+          receivedAtMs: 1,
+        },
         payload: {
-          requestId: 'rw-input-1',
           streamId: 'stream-1',
           targetId: 'pane-1',
-          accepted: true,
         },
       },
     ] satisfies ServerMessage[]) {
@@ -891,7 +897,7 @@ describe('session-context-socket-message-runtime remote window messages', () => 
       'remote-window-stream-ice-candidate',
       'remote-window-stream-status',
       'remote-window-stream-focus-result',
-      'remote-window-input-result',
+      'remote-window-input-ack',
     ]);
     expect(fileTransferDispatch).not.toHaveBeenCalled();
   });

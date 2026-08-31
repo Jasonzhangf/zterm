@@ -9,8 +9,6 @@ import { MACOS_REMOTE_WINDOW_INPUT_SWIFT } from './remote-window-scripts';
 import { REMOTE_WINDOW_ERROR_MESSAGE_MAX_CHARS } from './remote-window-support';
 
 const REMOTE_WINDOW_INPUT_STALE_MS = 1_000;
-/** 输入事件队列上限：超过时丢弃最旧的非控制事件，防止高频 move 流积压导致输入滞后 */
-const REMOTE_WINDOW_INPUT_QUEUE_LIMIT = 24;
 const REMOTE_WINDOW_INPUT_FOCUS_TIMEOUT_MS = 3_000;
 const REMOTE_WINDOW_INPUT_FOCUS_PAIR_GRACE_MS = 25;
 const REMOTE_WINDOW_INPUT_HELPER_READY_TIMEOUT_MS = 15_000;
@@ -21,13 +19,10 @@ export function buildRemoteWindowImagePasteInputPayloads(options: {
   targetId: string;
   now?: () => number;
 }): RemoteWindowInputEventPayload[] {
-  const now = options.now ?? Date.now;
   return [
     {
-      requestId: `${options.requestPrefix}-0`,
       streamId: options.streamId,
       targetId: options.targetId,
-      clientSentAt: now(),
       event: {
         kind: 'key',
         phase: 'down',
@@ -37,10 +32,8 @@ export function buildRemoteWindowImagePasteInputPayloads(options: {
       },
     },
     {
-      requestId: `${options.requestPrefix}-1`,
       streamId: options.streamId,
       targetId: options.targetId,
-      clientSentAt: now(),
       event: {
         kind: 'key',
         phase: 'up',
@@ -59,12 +52,12 @@ export type RemoteWindowInputEventRunner = (
     swiftBinary: string;
     runTmux: (args: string[]) => { ok: true; stdout: string };
     daemonReceivedAtMs: number;
+    delivery?: { lane: 'reliable' | 'continuous'; maxAgeMs?: number };
   },
 ) => Promise<void>;
 
 export interface RemoteWindowInputConfig {
   daemonReceivedAtMs: number;
-  clientSentAt?: number;
   /** daemon 侧 focus 防抖：3s 内已执行过 focus（且当前非显式 focus 事件）时跳过 swift 的 bring-to-focus */
   skipFocus?: boolean;
   pid: number;
@@ -80,7 +73,10 @@ export interface RemoteWindowInputConfig {
 
 export interface RemoteWindowInputHelper {
   warm: () => Promise<void>;
-  send: (config: RemoteWindowInputConfig) => Promise<void>;
+  send: (
+    config: RemoteWindowInputConfig,
+    delivery?: { lane: 'reliable' | 'continuous'; maxAgeMs?: number },
+  ) => Promise<void>;
   dispose: () => void;
 }
 
@@ -91,13 +87,12 @@ type RemoteWindowInputHelperChildProcess = ChildProcessWithoutNullStreams & {
 
 interface PendingRemoteWindowInputHelperRequest {
   config: RemoteWindowInputConfig;
+  delivery: { lane: 'reliable' | 'continuous'; maxAgeMs?: number };
   resolve: () => void;
   reject: (error: Error) => void;
   timeout: ReturnType<typeof setTimeout> | null;
   pairGraceTimer: ReturnType<typeof setTimeout> | null;
   pairGraceExpired: boolean;
-  refreshReceivedAtAfterFocusConfig: RemoteWindowInputConfig | null;
-  refreshReceivedAtAfterRealInputConfig: RemoteWindowInputConfig | null;
 }
 
 interface PendingRemoteWindowInputHelperWarm {
@@ -108,10 +103,6 @@ interface PendingRemoteWindowInputHelperWarm {
 
 export function isRemoteWindowFocusInputConfig(config: Pick<RemoteWindowInputConfig, 'event'>) {
   return config.event.kind === 'focus';
-}
-
-function isRemoteWindowControlInputConfig(config: Pick<RemoteWindowInputConfig, 'event'>) {
-  return config.event.kind === 'focus' || config.event.kind === 'window-resize';
 }
 
 function isRemoteWindowRealInputConfig(config: Pick<RemoteWindowInputConfig, 'event'>) {
@@ -141,15 +132,6 @@ function remoteWindowInputConfigsShareTarget(
     && lhs.window.windowId === rhs.window.windowId;
 }
 
-export function shouldRefreshRemoteWindowQueuedInputAfterFocus(
-  focusConfig: RemoteWindowInputConfig,
-  queuedConfig: RemoteWindowInputConfig,
-) {
-  return isRemoteWindowFocusInputConfig(focusConfig)
-    && !isRemoteWindowFocusInputConfig(queuedConfig)
-    && remoteWindowInputConfigsShareTarget(focusConfig, queuedConfig);
-}
-
 export function shouldCoalesceRemoteWindowQueuedFocusBeforeInput(
   focusConfig: RemoteWindowInputConfig,
   queuedConfig: RemoteWindowInputConfig,
@@ -157,15 +139,6 @@ export function shouldCoalesceRemoteWindowQueuedFocusBeforeInput(
   return isRemoteWindowFocusInputConfig(focusConfig)
     && (isRemoteWindowFocusInputConfig(queuedConfig) || isRemoteWindowRealInputConfig(queuedConfig))
     && remoteWindowInputConfigsShareTarget(focusConfig, queuedConfig);
-}
-
-export function shouldRefreshRemoteWindowQueuedInputAfterRealInput(
-  completedConfig: RemoteWindowInputConfig,
-  queuedConfig: RemoteWindowInputConfig,
-) {
-  return isRemoteWindowRealInputConfig(completedConfig)
-    && isRemoteWindowRealInputConfig(queuedConfig)
-    && remoteWindowInputConfigsShareTarget(completedConfig, queuedConfig);
 }
 
 type RemoteWindowInputHelperProcessFactory = (
@@ -213,10 +186,13 @@ export function createDefaultRemoteWindowInputHelper(options: {
   };
 
   const rejectIfStale = (request: PendingRemoteWindowInputHelperRequest) => {
+    if (request.delivery.lane !== 'continuous') {
+      return false;
+    }
     if (isRemoteWindowInputConfigStale(
       request.config,
       Date.now(),
-      resolveRemoteWindowInputConfigStaleMs(request.config),
+      request.delivery.maxAgeMs ?? resolveRemoteWindowInputConfigStaleMs(request.config),
     )) {
       rejectRequest(request, new Error('remote window input stale'));
       return true;
@@ -256,38 +232,6 @@ export function createDefaultRemoteWindowInputHelper(options: {
     active = null;
     while (queue.length > 0) {
       rejectRequest(queue.shift() || null, error);
-    }
-  };
-
-  const refreshQueueAfterSuccessfulFocus = (focusConfig: RemoteWindowInputConfig) => {
-    if (!isRemoteWindowFocusInputConfig(focusConfig)) {
-      return;
-    }
-    const receivedAtMs = Date.now();
-    for (const request of queue) {
-      if (
-        request.refreshReceivedAtAfterFocusConfig === focusConfig
-        && shouldRefreshRemoteWindowQueuedInputAfterFocus(focusConfig, request.config)
-      ) {
-        request.config.daemonReceivedAtMs = receivedAtMs;
-        request.refreshReceivedAtAfterFocusConfig = null;
-      }
-    }
-  };
-
-  const refreshQueueAfterSuccessfulRealInput = (completedConfig: RemoteWindowInputConfig) => {
-    if (!isRemoteWindowRealInputConfig(completedConfig)) {
-      return;
-    }
-    const receivedAtMs = Date.now();
-    for (const request of queue) {
-      if (
-        request.refreshReceivedAtAfterRealInputConfig === completedConfig
-        && shouldRefreshRemoteWindowQueuedInputAfterRealInput(completedConfig, request.config)
-      ) {
-        request.config.daemonReceivedAtMs = receivedAtMs;
-        request.refreshReceivedAtAfterRealInputConfig = null;
-      }
     }
   };
 
@@ -332,8 +276,6 @@ export function createDefaultRemoteWindowInputHelper(options: {
                 request.timeout = null;
               }
               if (response.ok === true) {
-                refreshQueueAfterSuccessfulFocus(request.config);
-                refreshQueueAfterSuccessfulRealInput(request.config);
                 resolveRequest(request);
               } else {
                 request.reject(new Error(String(response.error || 'remote window input event failed')));
@@ -451,10 +393,6 @@ export function createDefaultRemoteWindowInputHelper(options: {
         && shouldCoalesceRemoteWindowQueuedFocusBeforeInput(nextRequest.config, followingRequest.config)
       ) {
         queue.shift();
-        if (shouldRefreshRemoteWindowQueuedInputAfterFocus(nextRequest.config, followingRequest.config)) {
-          followingRequest.config.daemonReceivedAtMs = Date.now();
-          followingRequest.refreshReceivedAtAfterFocusConfig = null;
-        }
         resolveRequest(nextRequest);
         pump();
         return;
@@ -510,72 +448,23 @@ export function createDefaultRemoteWindowInputHelper(options: {
     });
   };
 
-  const findFocusConfigForQueuedInput = (config: RemoteWindowInputConfig) => {
-    if (active && shouldRefreshRemoteWindowQueuedInputAfterFocus(active.config, config)) {
-      return active.config;
-    }
-    for (let index = queue.length - 1; index >= 0; index -= 1) {
-      const queuedConfig = queue[index]!.config;
-      if (!remoteWindowInputConfigsShareTarget(queuedConfig, config)) {
-        continue;
-      }
-      return shouldRefreshRemoteWindowQueuedInputAfterFocus(queuedConfig, config)
-        ? queuedConfig
-        : null;
-    }
-    return null;
-  };
-
-  const findRealInputConfigForQueuedInput = (config: RemoteWindowInputConfig) => {
-    if (!isRemoteWindowRealInputConfig(config)) {
-      return null;
-    }
-    for (let index = queue.length - 1; index >= 0; index -= 1) {
-      const queuedConfig = queue[index]!.config;
-      if (!remoteWindowInputConfigsShareTarget(queuedConfig, config)) {
-        continue;
-      }
-      return shouldRefreshRemoteWindowQueuedInputAfterRealInput(queuedConfig, config)
-        ? queuedConfig
-        : null;
-    }
-    if (active && shouldRefreshRemoteWindowQueuedInputAfterRealInput(active.config, config)) {
-      return active.config;
-    }
-    return null;
-  };
-
   return {
     warm() {
       return waitUntilReady();
     },
-    send(config) {
+    send(config, delivery = { lane: 'reliable' }) {
       if (disposed) {
         return Promise.reject(new Error('remote window input helper is disposed'));
       }
       return new Promise<void>((resolve, reject) => {
-        // 输入事件积压保护：队列超过上限时丢弃最旧的非 focus 事件（高频 move 流时避免
-        // swift 串行处理滞后导致"画面停止"感）；focus/window-resize 等控制事件不丢
-        while (
-          queue.length >= REMOTE_WINDOW_INPUT_QUEUE_LIMIT
-          && queue.some((item) => !isRemoteWindowControlInputConfig(item.config))
-        ) {
-          const droppedIndex = queue.findIndex((item) => !isRemoteWindowControlInputConfig(item.config));
-          if (droppedIndex < 0) {
-            break;
-          }
-          const dropped = queue.splice(droppedIndex, 1)[0];
-          dropped.reject(new Error('remote window input dropped: queue overflow'));
-        }
         queue.push({
           config,
+          delivery,
           resolve,
           reject,
           timeout: null,
           pairGraceTimer: null,
           pairGraceExpired: false,
-          refreshReceivedAtAfterFocusConfig: findFocusConfigForQueuedInput(config),
-          refreshReceivedAtAfterRealInputConfig: findRealInputConfigForQueuedInput(config),
         });
         pump();
       });
@@ -667,7 +556,6 @@ export function buildRemoteWindowInputConfig(
       title: target.videoTarget.title,
       bounds: target.videoTarget.windowBoundsTopLeftPx,
     },
-    clientSentAt: payload.clientSentAt,
     event: mapRemoteWindowInputToCompositeTarget(payload.event, target, options.canvasLayout ?? null),
   };
 }

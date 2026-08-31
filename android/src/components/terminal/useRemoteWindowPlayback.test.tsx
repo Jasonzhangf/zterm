@@ -19,6 +19,7 @@ describe('useRemoteWindowPlayback owner', () => {
       frameCallbacks.push(callback);
       return frameCallbacks.length;
     });
+    video.cancelVideoFrameCallback = vi.fn();
     let resolvePlay!: () => void;
     video.play = vi.fn(() => new Promise<void>((resolve) => {
       resolvePlay = resolve;
@@ -58,6 +59,7 @@ describe('useRemoteWindowPlayback owner', () => {
       frameCallbacks.push(callback);
       return frameCallbacks.length;
     });
+    video.cancelVideoFrameCallback = vi.fn();
     video.play = vi.fn(() => new Promise<void>(() => {}));
     const first = stream('first');
     const second = stream('second');
@@ -79,6 +81,7 @@ describe('useRemoteWindowPlayback owner', () => {
     const staleReveal = frameCallbacks[1];
     rerender({ receiverMediaStream: second });
     await waitFor(() => expect(video.srcObject).toBe(second));
+    expect(video.cancelVideoFrameCallback).toHaveBeenCalledWith(1);
     const currentReveal = frameCallbacks[frameCallbacks.length - 1];
     act(() => staleReveal());
     expect(result.current.videoHasPlayed).toBe(false);
