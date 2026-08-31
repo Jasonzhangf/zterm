@@ -321,14 +321,13 @@ export async function requestRemoteWindowStreamStartRuntime(options: {
         sendSocketPayload: options.sendSocketPayload,
       });
     },
-    startRemote: (offer) => options.remoteWindowMessageRuntime.requestStreamStart(targetSessionId, {
+    startRemote: () => options.remoteWindowMessageRuntime.requestStreamStart(targetSessionId, {
       ws,
       streamId,
       purpose: options.purpose,
       mediaPlan,
       mediaPlanVersion: 2,
       target: options.target,
-      offer,
       iceServers: iceServers?.map((server) => ({ ...server })) as Array<Record<string, unknown>> | undefined,
       videoProfile: options.videoProfile,
       sendSocketPayload: options.sendSocketPayload,
