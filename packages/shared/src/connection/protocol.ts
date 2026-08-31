@@ -406,6 +406,22 @@ export interface RemoteWindowStreamStartRequestV2Payload {
   videoProfile: RemoteWindowVideoProfile;
 }
 
+export function isRemoteWindowStreamStartRequestV2(
+  value: unknown,
+): value is RemoteWindowStreamStartRequestV2Payload {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const payload = value as Partial<RemoteWindowStreamStartRequestV2Payload> & { offer?: unknown };
+  return typeof payload.requestId === 'string'
+    && payload.requestId.length > 0
+    && typeof payload.streamId === 'string'
+    && payload.streamId.length > 0
+    && (payload.mediaPlan === 'single-focus' || payload.mediaPlan === 'overview-plus-focus')
+    && payload.mediaPlanVersion === 2
+    && !Object.prototype.hasOwnProperty.call(payload, 'offer');
+}
+
 // 双流：切换高码率主窗口（focus）流的捕获目标；低码率总览（overview）流保持不变
 export interface RemoteWindowStreamUpdateFocusRequestPayload {
   requestId: string;

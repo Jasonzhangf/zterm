@@ -23,6 +23,7 @@ import {
   FILE_TRANSFER_WIRE_FRAME_MAX_CHARS,
   getRemoteWindowMediaPlanContract,
   getRemoteWindowMediaPlanV2Contract,
+  isRemoteWindowStreamStartRequestV2,
 } from './protocol';
 
 describe('remote-window media plan contract', () => {
@@ -90,6 +91,10 @@ describe('remote-window media plan contract', () => {
       answer: { type: 'answer', sdp: 'v=0' },
     };
     expect(answer.mediaPlanVersion).toBe(2);
+    expect(isRemoteWindowStreamStartRequestV2(request)).toBe(true);
+    expect(isRemoteWindowStreamStartRequestV2({ ...request, mediaPlanVersion: 1 })).toBe(false);
+    expect(isRemoteWindowStreamStartRequestV2({ ...request, offer: { type: 'offer', sdp: 'v=0' } })).toBe(false);
+    expect(isRemoteWindowStreamStartRequestV2({ ...request, streamId: '' })).toBe(false);
   });
 
   it('exposes the same lane topology under media plan version 2', () => {
