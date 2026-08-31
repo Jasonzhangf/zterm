@@ -39,9 +39,9 @@ export function resolveTerminalLiveSyncDelay(
     ? Math.max(0, Math.floor(input.requestedDelayMs || 0))
     : activeDelayMs;
   if (hasExplicitRequestedDelay && requestedDelayMs === 0) {
-    // R9: explicit-immediate returns 0; flushInFlight path already guards against
-    // re-triggering mid-capture with a minimum 16ms floor. Removing the 8ms floor
-    // here restores the contract for attach/input paths that call schedule(0).
+    // R9: explicit-immediate returns 0. The mirror runtime coalesces an
+    // in-flight request into one post-flush capture, so this path cannot start
+    // a parallel capture or a zero-delay hot loop.
     return { delayMs: 0, lane: 'fast', reason: 'explicit-immediate' };
   }
   if (requestedDelayMs > activeDelayMs) {

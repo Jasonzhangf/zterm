@@ -98,7 +98,10 @@ export interface TerminalMirrorRuntime {
     | 'send-error'
     | 'stale-transport';
   refreshMirrorHeadForSession: (session: TerminalSession, mirror: SessionMirror) => Promise<boolean>;
-  syncMirrorCanonicalBuffer: (mirror: SessionMirror, options?: { forceRevision?: boolean }) => Promise<boolean>;
+  syncMirrorCanonicalBuffer: (mirror: SessionMirror, options?: {
+    forceRevision?: boolean;
+    requestPostFlushIfBusy?: boolean;
+  }) => Promise<boolean>;
   scheduleMirrorLiveSync: (mirror: SessionMirror, delayMs?: number) => void;
   startMirror: (mirror: SessionMirror, options?: { cols?: number; rows?: number; autoCommand?: string }) => Promise<void>;
   attachTmux: (session: TerminalSession, payload: TerminalAttachPayload) => Promise<void>;
@@ -124,6 +127,7 @@ const ADAPTIVE_WIDTH_LEASE_TTL_MS = 65000;
 export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): TerminalMirrorRuntime {
   const sessions = deps.sessions;
   const mirrors = deps.mirrors;
+  const pendingPostFlushImmediateSyncMirrors = new WeakSet<SessionMirror>();
 
   function isTmuxSessionUnavailableError(error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
@@ -279,6 +283,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     mirror.lastScrollbackCount = -1;
     mirror.flushInFlight = false;
     mirror.flushPromise = null;
+    pendingPostFlushImmediateSyncMirrors.delete(mirror);
     mirror.pendingStableCaptureSnapshot = null;
     mirror.pendingPerformanceTraceCapture = null;
     if (mirror.adaptiveWidthLeaseTimer) {
@@ -339,12 +344,15 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
 
   async function syncMirrorCanonicalBuffer(
     mirror: SessionMirror,
-    options?: { forceRevision?: boolean },
+    options?: { forceRevision?: boolean; requestPostFlushIfBusy?: boolean },
   ) {
     if (mirror.lifecycle !== 'ready') {
       return false;
     }
     if (mirror.flushPromise) {
+      if (options?.requestPostFlushIfBusy) {
+        pendingPostFlushImmediateSyncMirrors.add(mirror);
+      }
       return mirror.flushPromise;
     }
 
@@ -491,6 +499,9 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
         mirror.lastFlushCompletedAt = Date.now();
         mirror.flushInFlight = false;
         mirror.flushPromise = null;
+        if (pendingPostFlushImmediateSyncMirrors.delete(mirror)) {
+          scheduleMirrorLiveSync(mirror, 0);
+        }
       });
 
     mirror.flushPromise = capturePromise;
@@ -527,7 +538,9 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       if (mirror.lifecycle !== 'ready' || countReadyBodySubscribedSubscribers(mirror) === 0) {
         return;
       }
-      void syncMirrorCanonicalBuffer(mirror).finally(() => {
+      void syncMirrorCanonicalBuffer(mirror, {
+        requestPostFlushIfBusy: delayMs === 0,
+      }).finally(() => {
         if (
           mirror.lifecycle !== 'ready'
           || mirror.liveSyncTimer

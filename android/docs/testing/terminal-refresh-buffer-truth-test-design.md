@@ -259,3 +259,12 @@ Negative:
 - Positive: a changed projected snapshot publishes once and preserves row identity for reused rows.
 - Negative: a stale/lower revision remains rejected; a mutable caller snapshot remains cloned/isolated unless the explicit immutable handoff option is used.
 - `resource.debug_channel` performance trace storage must use bounded O(1) append/eviction behavior. Positive: newest records survive at the limit; negative: old records are evicted and metadata-only validation remains enforced.
+
+# 2026-08-31 input-triggered mirror wake
+
+An input write that completes while an older mirror capture is still in flight must leave one explicit post-flush immediate-sync demand in `daemon.mirror_store`. That demand is scheduler control truth only; it must never enter terminal input or buffer payloads.
+
+- Positive: when capture A started before the tmux write and an input-triggered immediate sync arrives before A completes, capture B starts immediately after A settles so the written input cannot wait for quiet polling.
+- Positive coalescing: multiple immediate demands during the same in-flight capture produce exactly one post-flush capture.
+- Negative: without a pending immediate demand, a no-change capture retains the existing quiet backoff.
+- Negative hot-loop guard: after the single post-flush capture consumes the demand, no further immediate capture runs unless a new demand arrives; ordinary no-change polling resumes at the quiet cadence.
