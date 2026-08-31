@@ -30,6 +30,7 @@ async function runPlan(mediaPlan) {
   const sender = new RTCPeerConnection({ iceServers: [] });
   const sources = [];
   const tracks = [];
+  const sendersByRole = [];
   const receivedRoles = [];
   const receivedFramesByRole = new Map();
   const sinks = [];
@@ -82,7 +83,7 @@ async function runPlan(mediaPlan) {
     const focusTrack = focusSource.createTrack();
     sources.push(focusSource);
     tracks.push(focusTrack);
-    sender.addTrack(focusTrack);
+    sendersByRole.push({ role: 'focus', sender: sender.addTrack(focusTrack) });
 
     if (needsOverview) {
       const overviewSource = new RTCVideoSource({ isScreencast: true });
@@ -90,7 +91,7 @@ async function runPlan(mediaPlan) {
       const overviewStream = new MediaStream({ id: 'overview' });
       sources.push(overviewSource);
       tracks.push(overviewTrack);
-      sender.addTrack(overviewTrack, overviewStream);
+      sendersByRole.push({ role: 'overview', sender: sender.addTrack(overviewTrack, overviewStream) });
     }
 
     const offer = await receiver.createOffer();
@@ -111,28 +112,65 @@ async function runPlan(mediaPlan) {
       `${mediaPlan} ICE connection`,
     );
 
-    for (let frameIndex = 0; frameIndex < 6; frameIndex += 1) {
-      sources.forEach((source, laneIndex) => {
-        const width = 320;
-        const height = 240;
-        const ySize = width * height;
-        const uvSize = (width / 2) * (height / 2);
-        const data = Buffer.alloc(ySize + uvSize * 2);
-        data.fill((laneIndex * 40 + frameIndex + 16) % 256, 0, ySize);
-        data.fill(128, ySize);
-        source.onFrame({
-          width,
-          height,
-          data,
-        });
-      });
-      await new Promise((resolve) => setTimeout(resolve, 40));
-    }
     const expectedRoles = needsOverview ? ['focus', 'overview'] : ['focus'];
     await waitFor(() => expectedRoles.every((role) => receivedRoles.includes(role)), `${mediaPlan} tracks`);
+    const emitFrames = async (firstFrameIndex) => {
+      for (let frameOffset = 0; frameOffset < 4; frameOffset += 1) {
+        sources.forEach((source, laneIndex) => {
+          const width = 320;
+          const height = 240;
+          const ySize = width * height;
+          const uvSize = (width / 2) * (height / 2);
+          const data = Buffer.alloc(ySize + uvSize * 2);
+          data.fill((laneIndex * 40 + firstFrameIndex + frameOffset + 16) % 256, 0, ySize);
+          data.fill(128, ySize);
+          source.onFrame({
+            width,
+            height,
+            data,
+          });
+        });
+        await new Promise((resolve) => setTimeout(resolve, 40));
+      }
+    };
+
+    await emitFrames(0);
     await waitFor(
       () => expectedRoles.every((role) => (receivedFramesByRole.get(role) ?? 0) >= 3),
-      `${mediaPlan} continuous frames`,
+      `${mediaPlan} frames before sender parameter update`,
+    );
+    const framesBeforeUpdate = new Map(receivedFramesByRole);
+
+    for (const { role, sender: rtpSender } of sendersByRole) {
+      const unchanged = rtpSender.getParameters();
+      if (unchanged.encodings?.length !== 1) {
+        throw new Error(`${mediaPlan} ${role} sender exposed ${unchanged.encodings?.length ?? 0} encodings; expected one`);
+      }
+      await rtpSender.setParameters(unchanged);
+
+      const bitrateUpdate = rtpSender.getParameters();
+      bitrateUpdate.encodings[0].maxBitrate = 4_000_000;
+      await rtpSender.setParameters(bitrateUpdate);
+      const bitrateApplied = rtpSender.getParameters();
+      if (bitrateApplied.encodings[0].maxBitrate !== 4_000_000) {
+        throw new Error(`${mediaPlan} ${role} sender did not preserve maxBitrate after setParameters`);
+      }
+
+      const frameRateUpdate = rtpSender.getParameters();
+      frameRateUpdate.encodings[0].maxFramerate = 30;
+      await rtpSender.setParameters(frameRateUpdate);
+      const frameRateApplied = rtpSender.getParameters();
+      if (frameRateApplied.encodings[0].maxFramerate !== 30) {
+        throw new Error(`${mediaPlan} ${role} sender did not preserve maxFramerate after setParameters`);
+      }
+    }
+
+    await emitFrames(4);
+    await waitFor(
+      () => expectedRoles.every((role) => (
+        (receivedFramesByRole.get(role) ?? 0) >= (framesBeforeUpdate.get(role) ?? 0) + 3
+      )),
+      `${mediaPlan} frames after sender parameter update`,
     );
     await waitFor(
       () => receiver.iceGatheringState === 'complete' && sender.iceGatheringState === 'complete',
@@ -161,6 +199,7 @@ async function runPlan(mediaPlan) {
       mediaPlan,
       receivedRoles: receivedRoles.slice().sort(),
       framesByRole: Object.fromEntries(receivedFramesByRole),
+      senderParametersApplied: sendersByRole.map(({ role }) => role).sort(),
       iceOrderPreserved: true,
     };
   } finally {

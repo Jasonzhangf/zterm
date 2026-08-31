@@ -597,3 +597,38 @@ Daemon quality/input/capture：
 6. 受控 Mac target、installed daemon、真实 Android APK、当前 active direct/Tailscale/Relay 路径完成视频、输入、foreground resume 和 cleanup 证据。
 7. AGY Review controller PASS；review 后无未复验代码改动。
 8. 定向 change set commit/push，未夹带主 tree dirty 文件；未获授权时不发布 OTA stable/public Relay assets。
+
+## 19. Standard WebRTC feasibility decision (2026-08-31)
+
+The media protocol remains standard WebRTC. The daemon is Node-based, so the
+standard browser API is supplied by the installed native `@roamhq/wrtc` addon;
+there is no browser-native WebRTC implementation available inside this daemon
+process.
+
+The stock addon was tested without changing its source:
+
+| Probe | Result | Meaning |
+| --- | --- | --- |
+| `addTrack()` + recvonly offer/answer | video negotiates through the existing sender path | startup media path is usable |
+| unchanged `sender.setParameters(sender.getParameters())` | `InvalidStateError` | negotiated codec parameters are not round-trippable in stock binding |
+| `addTransceiver(track, {sendEncodings})` | answer direction is `inactive`; `maxFramerate` is not exposed | pre-negotiation encodings cannot replace the sender path |
+| pre-negotiation `addTrack()` encoding mutation | sender has no encoding entry before negotiation | cannot set a complete startup profile through this API |
+
+Therefore the implementation decision is explicit:
+
+1. Keep the standard WebRTC API and existing `@roamhq/wrtc` dependency.
+2. Do not create a fork, publish a replacement binary, or modify WebRTC
+   source as part of the zterm application change set.
+3. Keep `addTrack()` as the only startup sender attach path.
+4. Treat runtime `setParameters()` as a capability gate. If the installed
+   binding rejects a parameter transaction, return the typed quality failure;
+   do not retry into success, silently downgrade, or substitute another media
+   path.
+5. Until a separately authorized native-binding update is installed, quality
+   preference is applied at stream creation/capture configuration and the
+   application must not claim live bitrate/FPS adaptation as complete.
+
+This preserves standard WebRTC interoperability and fixes the application-side
+causes of gesture, queue, capture-restart, and render latency. The remaining
+native-binding limitation is a release prerequisite for the full dynamic
+quality DoD, not a reason to invent a private WebRTC protocol.

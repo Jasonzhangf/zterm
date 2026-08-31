@@ -147,3 +147,28 @@ not calculate macOS global coordinates or mutate capture truth.
   maximum-frame-age, conversion failure, and exactly-once cleanup tests;
 - registry/import/function/mainline gates, canonical builds, installed daemon
   and Android identity, real AppKit/Android route A/B, and AGY Review PASS.
+
+## Standard WebRTC boundary (2026-08-31)
+
+The daemon uses the standard WebRTC object model (`RTCPeerConnection`,
+`RTCVideoSource`, `RTCRtpSender`) through the installed Node native binding
+`@roamhq/wrtc@0.10.0`. “Use standard WebRTC directly” is therefore already the
+current protocol and API choice; replacing it with browser WebRTC is not a
+local daemon substitution because Node has no browser WebRTC runtime.
+
+Stock-binding probes are recorded in the run evidence:
+
+- the existing `addTrack()` sender path negotiates video;
+- an unchanged `getParameters()` → `setParameters()` round-trip fails with
+  `InvalidStateError`;
+- `addTransceiver(track, { sendEncodings })` yields an `inactive` answer in the
+  recvonly offer shape and does not expose `maxFramerate`;
+- an `addTrack()` sender has no encoding entry before negotiation, so a complete
+  startup encoding profile cannot be installed before negotiation.
+
+Decision: retain standard WebRTC and `addTrack()`, do not add a fork or modify
+native WebRTC in this application change set. The daemon must expose a typed
+quality-capability result when stock `setParameters()` rejects. It may apply
+the selected profile at stream creation/capture setup, but must not claim
+runtime bitrate/FPS adaptation until an explicitly authorized compatible native
+binding is installed. No fallback media path or silent downgrade is allowed.
