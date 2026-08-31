@@ -5,8 +5,6 @@ import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import type {
-  RemoteWindowStreamStartRequestPayload,
-  RemoteWindowStreamStartRequestV2Payload,
   RemoteWindowStreamStatusPayload,
 } from '@zterm/shared/protocol';
 
@@ -192,9 +190,7 @@ function createRemoteWindowStreamDaemonRuntime(
   return {
     ...runtime,
     startStream: (
-      payload: Omit<RemoteWindowStreamStartRequestPayload | RemoteWindowStreamStartRequestV2Payload, 'videoProfile'> & {
-        videoProfile?: RemoteWindowStreamStartRequestPayload['videoProfile'];
-      },
+      payload: any,
       handlers?: Parameters<typeof runtime.startStream>[1],
     ) => runtime.startStream({
       ...payload,
