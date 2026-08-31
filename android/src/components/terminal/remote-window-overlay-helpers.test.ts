@@ -8,6 +8,7 @@ import {
   clampFullscreenViewport,
   formatTargetKind,
   resolveAspectRect,
+  resolveFloatingOverlayBounds,
   resolveFloatingOverlaySizing,
   safeRemoteWindowGroupId,
 } from './remote-window-overlay-helpers';
@@ -44,6 +45,24 @@ describe('remote-window-overlay-helpers', () => {
       width: '76vw',
       maxWidth: '264px',
     });
+  });
+
+  it('clamps floating overlays to the visible stage without weakening the viewport safe top', () => {
+    expect(resolveFloatingOverlayBounds({
+      viewport: { left: 0, top: 0, right: 1280, bottom: 800 },
+      container: { left: 0, top: 79, right: 1280, bottom: 800 },
+      overlay: { width: 420, height: 522 },
+      margin: 8,
+      topSafeMargin: 48,
+    })).toEqual({ minLeft: 8, maxLeft: 852, minTop: 87, maxTop: 270 });
+
+    expect(resolveFloatingOverlayBounds({
+      viewport: { left: 0, top: 0, right: 1280, bottom: 800 },
+      container: { left: 0, top: 0, right: 1280, bottom: 800 },
+      overlay: { width: 420, height: 300 },
+      margin: 8,
+      topSafeMargin: 48,
+    }).minTop).toBe(48);
   });
 
   it('keeps fullscreen viewports clamped to the surface', () => {

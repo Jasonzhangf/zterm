@@ -7,7 +7,7 @@ import { styles } from './remote-window-overlay-styles';
 afterEach(cleanup);
 
 describe('RemoteWindowLockedToolbar view owner', () => {
-  it('keeps 48dp frequent controls stable while More opens above the video', () => {
+  it('keeps 48dp controls stable while toolbar overlays remain visible above the video', () => {
     const onToggleMore = vi.fn();
     const { rerender } = render(<RemoteWindowLockedToolbar
       activeTitle="A very long remote application window title"
@@ -45,8 +45,8 @@ describe('RemoteWindowLockedToolbar view owner', () => {
 
     rerender(<RemoteWindowLockedToolbar
       activeTitle="A very long remote application window title"
-      appSwitchContent={null}
-      appSwitchOpen={false}
+      appSwitchContent={<div data-testid="app-switch-content" />}
+      appSwitchOpen
       dragHandleProps={{ style: styles.lockedTopBar }}
       inputMode="touch"
       inputSupported
@@ -66,6 +66,9 @@ describe('RemoteWindowLockedToolbar view owner', () => {
       onToggleMore={onToggleMore}
     />);
     expect(screen.getByTestId('more-content')).toBeTruthy();
+    const appSwitch = screen.getByTestId('app-switch-content');
+    expect(appSwitch.parentElement?.parentElement?.style.overflow).not.toBe('hidden');
+    expect((screen.getByTestId('remote-window-active-app-switch-button').firstElementChild as HTMLElement).style.overflow).toBe('hidden');
     expect(screen.queryByTestId('remote-window-gesture-guide')).toBeNull();
   });
 });

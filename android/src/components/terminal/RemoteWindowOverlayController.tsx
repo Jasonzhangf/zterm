@@ -123,6 +123,7 @@ import {
   clampFullscreenViewport,
   resolveZoomedContentRect,
   resolveAnchoredFullscreenViewportScale,
+  resolveFloatingOverlayBounds,
   resolveFloatingOverlaySizing,
   resolveStartedCaptureFrameSize,
   resolveRemoteWindowDisplaySourceSize,
@@ -650,18 +651,30 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     },
     clampPosition: (x, y, width, height) => {
       const initial = floatingDragInitialRef.current;
-      if (!initial) {
+      const container = floatingOverlayRef.current?.parentElement?.getBoundingClientRect();
+      if (!initial || !container) {
         return { x: floatingOffsetRef.current.x, y: floatingOffsetRef.current.y };
       }
-      const viewportWidth = Math.round(window.visualViewport?.width || window.innerWidth || 0);
-      const viewportHeight = Math.round(window.visualViewport?.height || window.innerHeight || 0);
-      const minX = FLOATING_OVERLAY_VIEWPORT_MARGIN_PX;
-      const maxX = Math.max(minX, viewportWidth - width - FLOATING_OVERLAY_VIEWPORT_MARGIN_PX);
-      const minY = FLOATING_OVERLAY_TOP_SAFE_MARGIN_PX;
-      const maxY = Math.max(minY, viewportHeight - height - FLOATING_OVERLAY_VIEWPORT_MARGIN_PX);
+      const viewport = window.visualViewport;
+      const viewportLeft = viewport?.offsetLeft || 0;
+      const viewportTop = viewport?.offsetTop || 0;
+      const viewportWidth = Math.round(viewport?.width || window.innerWidth || 0);
+      const viewportHeight = Math.round(viewport?.height || window.innerHeight || 0);
+      const bounds = resolveFloatingOverlayBounds({
+        viewport: {
+          left: viewportLeft,
+          top: viewportTop,
+          right: viewportLeft + viewportWidth,
+          bottom: viewportTop + viewportHeight,
+        },
+        container,
+        overlay: { width, height },
+        margin: FLOATING_OVERLAY_VIEWPORT_MARGIN_PX,
+        topSafeMargin: FLOATING_OVERLAY_TOP_SAFE_MARGIN_PX,
+      });
       return {
-        x: clampFloatingOffset(x, minX, maxX) - initial.left,
-        y: clampFloatingOffset(y, minY, maxY) - initial.top,
+        x: clampFloatingOffset(x, bounds.minLeft, bounds.maxLeft) - initial.left,
+        y: clampFloatingOffset(y, bounds.minTop, bounds.maxTop) - initial.top,
       };
     },
     onPositionChange: (position) => setFloatingOffset(position),
@@ -810,12 +823,24 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     const viewportTop = viewport?.offsetTop || 0;
     const viewportWidth = Math.round(viewport?.width || window.innerWidth || rect.width);
     const viewportHeight = Math.round(viewport?.height || window.innerHeight || rect.height);
-    const minLeft = viewportLeft + FLOATING_OVERLAY_VIEWPORT_MARGIN_PX;
-    const minTop = viewportTop + FLOATING_OVERLAY_TOP_SAFE_MARGIN_PX;
-    const maxLeft = viewportLeft + viewportWidth - FLOATING_OVERLAY_VIEWPORT_MARGIN_PX - rect.width;
-    const maxTop = viewportTop + viewportHeight - FLOATING_OVERLAY_VIEWPORT_MARGIN_PX - rect.height;
-    const clampedLeft = clampFloatingOffset(rect.left, minLeft, Math.max(minLeft, maxLeft));
-    const clampedTop = clampFloatingOffset(rect.top, minTop, Math.max(minTop, maxTop));
+    const container = overlay.parentElement?.getBoundingClientRect();
+    if (!container) {
+      return;
+    }
+    const bounds = resolveFloatingOverlayBounds({
+      viewport: {
+        left: viewportLeft,
+        top: viewportTop,
+        right: viewportLeft + viewportWidth,
+        bottom: viewportTop + viewportHeight,
+      },
+      container,
+      overlay: { width: rect.width, height: rect.height },
+      margin: FLOATING_OVERLAY_VIEWPORT_MARGIN_PX,
+      topSafeMargin: FLOATING_OVERLAY_TOP_SAFE_MARGIN_PX,
+    });
+    const clampedLeft = clampFloatingOffset(rect.left, bounds.minLeft, bounds.maxLeft);
+    const clampedTop = clampFloatingOffset(rect.top, bounds.minTop, bounds.maxTop);
     if (Math.abs(clampedLeft - rect.left) < 0.5 && Math.abs(clampedTop - rect.top) < 0.5) {
       return;
     }

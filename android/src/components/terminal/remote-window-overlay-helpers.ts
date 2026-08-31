@@ -41,6 +41,13 @@ export interface SurfaceRect {
   height: number;
 }
 
+export interface FloatingOverlayClampRect {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
 export interface FullscreenViewportState {
   scale: number;
   panX: number;
@@ -115,6 +122,32 @@ export function clampFloatingOffset(value: number, min: number, max: number) {
 
 export function clampNumber(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
+}
+
+export function resolveFloatingOverlayBounds(options: {
+  viewport: FloatingOverlayClampRect;
+  container: FloatingOverlayClampRect;
+  overlay: SurfaceSize;
+  margin: number;
+  topSafeMargin: number;
+}) {
+  const minLeft = Math.max(options.viewport.left, options.container.left) + options.margin;
+  const minTop = Math.max(
+    options.viewport.top + options.topSafeMargin,
+    options.container.top + options.margin,
+  );
+  return {
+    minLeft,
+    maxLeft: Math.max(
+      minLeft,
+      Math.min(options.viewport.right, options.container.right) - options.margin - options.overlay.width,
+    ),
+    minTop,
+    maxTop: Math.max(
+      minTop,
+      Math.min(options.viewport.bottom, options.container.bottom) - options.margin - options.overlay.height,
+    ),
+  };
 }
 
 export function resolveAspectRect(
