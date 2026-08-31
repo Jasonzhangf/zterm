@@ -1354,7 +1354,7 @@ describe('useSessionOpenActions explicit-open truth', () => {
       },
       ['alpha', 'beta'],
     );
-    expect(auditOpenTabsAgainstRemoteSessions).toHaveBeenCalledWith('session-picker-refresh');
+    expect(auditOpenTabsAgainstRemoteSessions).toHaveBeenCalledWith('drawer-open');
     expect(harness.refs.openTabStateRef.current.activeSessionId).toBe('active-zterm');
     expect(harness.spies.applyOpenTabState).not.toHaveBeenCalled();
     expect(harness.spies.createSession).not.toHaveBeenCalled();
@@ -1473,6 +1473,11 @@ describe('useSessionOpenActions explicit-open truth', () => {
       terminalBackend: 'tmux',
       sessionNames: ['tmux-main'],
     }));
+    expect(harness.spies.pruneSessionGroupSelectionToRemoteTruth).toHaveBeenCalledTimes(1);
+    expect(harness.spies.pruneSessionGroupSelectionToRemoteTruth).not.toHaveBeenCalledWith(
+      expect.objectContaining({ terminalBackend: 'herdr' }),
+      [],
+    );
   });
 
   it('refreshes drawer host sessions through an existing open mux target transport when available', async () => {

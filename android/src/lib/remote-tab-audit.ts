@@ -51,7 +51,12 @@ function shouldAuditSessionGroups(reason: string) {
   return reason !== 'visibilitychange'
     && reason !== 'resume'
     && reason !== 'appStateChange'
-    && reason !== 'online';
+    && reason !== 'online'
+    // Drawer/session-picker refresh already has an authoritative catalog
+    // response and updates the group through its catalog owner. Re-running a
+    // name-only audit here creates a race that can prune the freshly refreshed
+    // group when that parallel request is still unknown.
+    && reason !== 'drawer-open';
 }
 
 export async function auditOpenTabsAgainstRemoteSessions(
@@ -88,6 +93,9 @@ export async function auditOpenTabsAgainstRemoteSessions(
 
   const prunedOwnerKeys = new Set<string>();
   for (const target of canonicalAuditTargets) {
+    if (!includeSessionGroups) {
+      continue;
+    }
     const ownerKey = buildAuditOwnerKey(target);
     if (prunedOwnerKeys.has(ownerKey)) {
       continue;

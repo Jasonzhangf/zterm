@@ -176,7 +176,7 @@ export interface SessionOpenActionsResult {
     daemonHostId?: string;
   }) => void;
   handleSelectCleanSession: (target: BridgeTarget) => void;
-  handleRemoteSessionsRefreshed: (target: BridgeTarget, sessionNames: string[], catalog?: TerminalSessionCatalog) => void;
+  handleRemoteSessionsRefreshed: (target: BridgeTarget, sessionNames: string[], catalog?: TerminalSessionCatalog, auditReason?: OpenTabAuditReason) => void;
   handleRefreshDrawerHostSessions: (hostKey?: string) => Promise<void>;
   handleForceRelaySession: (sessionId: string) => void;
   handleUseAutoSession: (sessionId: string) => void;
@@ -553,6 +553,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     target: BridgeTarget,
     sessionNames: string[],
     catalog?: TerminalSessionCatalog,
+    auditReason: OpenTabAuditReason = 'session-picker-refresh',
   ) => {
     const normalizedSessionNames = normalizeRemoteTmuxSessionNames(sessionNames);
     const existingTmuxGroup = resolveSessionGroupForTarget(
@@ -606,12 +607,14 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
             })(),
           });
         }
-        pruneSessionGroupSelectionToRemoteTruth({
-          bridgeHost: target.bridgeHost,
-          bridgePort: target.bridgePort,
-          daemonHostId: target.daemonHostId || target.relayHostId,
-          terminalBackend: backend,
-        }, backendNames);
+        if (backendNames.length > 0) {
+          pruneSessionGroupSelectionToRemoteTruth({
+            bridgeHost: target.bridgeHost,
+            bridgePort: target.bridgePort,
+            daemonHostId: target.daemonHostId || target.relayHostId,
+            terminalBackend: backend,
+          }, backendNames);
+        }
       }
     } else {
       if (normalizedSessionNames.length > 0) {
@@ -631,7 +634,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
         ...(target.terminalBackend === 'herdr' ? { terminalBackend: 'herdr' as const } : {}),
       }, normalizedSessionNames);
     }
-    void auditOpenTabsAgainstRemoteSessions('session-picker-refresh').catch((error) => {
+    void auditOpenTabsAgainstRemoteSessions(auditReason).catch((error) => {
       console.error('[App] Failed to audit remote session truth after session picker refresh:', error);
     });
   }, [auditOpenTabsAgainstRemoteSessions, pruneSessionGroupSelectionToRemoteTruth, relayDevicesRef, sessionGroupsRef, setSessionGroupSelection]);
@@ -1187,7 +1190,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     }
     const discoveryTarget = normalizeBridgeTarget({ ...target, terminalBackend: undefined });
     const catalog = await queryRemoteSessionCatalogForTarget(discoveryTarget);
-    handleRemoteSessionsRefreshed(discoveryTarget, catalog?.sessionNames ?? [], catalog ?? undefined);
+    handleRemoteSessionsRefreshed(discoveryTarget, catalog?.sessionNames ?? [], catalog ?? undefined, 'drawer-open');
   }, [
     handleRemoteSessionsRefreshed,
     queryRemoteSessionCatalogForTarget,
