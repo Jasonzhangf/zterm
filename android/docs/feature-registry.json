@@ -3390,6 +3390,8 @@
         "src/lib/android-connection-service-snapshot.ts",
         "src/plugins/AndroidConnectionServicePlugin.ts",
         "src/contexts/android-connection-service-runtime.ts",
+        "native/android/app/src/main/java/com/zterm/android/AndroidConnectionServiceRoutePolicy.java",
+        "native/android/app/src/main/java/com/zterm/android/AndroidConnectionServiceTarget.java",
         "docs/goals/connection-service-owner-migration-plan.md",
         "docs/testing/connection-service-owner-test-design.md"
       ],
@@ -3407,6 +3409,8 @@
         "src/contexts/android-connection-service-runtime.test.ts",
         "native/android/app/src/main/java/com/zterm/android/AndroidConnectionService.java",
         "native/android/app/src/main/java/com/zterm/android/AndroidConnectionServicePlugin.java",
+        "native/android/app/src/main/java/com/zterm/android/AndroidConnectionServiceRoutePolicy.java",
+        "native/android/app/src/main/java/com/zterm/android/AndroidConnectionServiceTarget.java",
         "native/android/app/src/test/java/com/zterm/android/AndroidConnectionServiceTransportTest.java",
         "docs/goals/connection-service-owner-migration-plan.md",
         "docs/testing/connection-service-owner-test-design.md",

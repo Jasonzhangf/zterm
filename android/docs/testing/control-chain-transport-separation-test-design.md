@@ -37,10 +37,12 @@ The control WebSocket never carries terminal/session/buffer payloads. A director
   - reports endpoint/session discovery failures explicitly.
 - `src/lib/traversal/route-selector.test.ts`
   - proves exact Auto tier order;
-  - proves a LAN candidate is eligible only when one current client IPv4 address shares its explicit prefix;
   - proves a same-subnet candidate whose authenticated handshake fails does not become healthy;
   - proves transient/auth failures do not silently become success;
   - proves recent persisted success cannot override a healthy higher route tier.
+- `src/lib/traversal/socket.test.ts`
+  - proves the generic transport does not consume Relay-directory LAN candidates because it has no local-interface truth;
+  - proves explicitly saved private `bridgeHost` targets remain connectable rather than being silently discarded.
 - `src/lib/traversal/route-health-cache.test.ts`
   - proves successful route truth survives a new cache instance through the storage adapter;
   - proves expired and malformed stored records are removed rather than selected.
@@ -58,6 +60,7 @@ The control WebSocket never carries terminal/session/buffer payloads. A director
   - proves a saved direct target with only daemon identity bypasses the Relay gate and opens immediately.
 - `native/android/app/src/test/java/com/zterm/android/AndroidConnectionServiceTransportTest.java`
   - proves native Auto order `LAN > Tailscale > public direct > TURN` from one typed daemon target;
+  - proves LAN enters that order only when the current Android interface prefix contains the endpoint;
   - proves unsupported/unavailable candidates fail explicitly and advance once without creating a second lifecycle owner;
   - proves foreground/control-directory refresh leaves a healthy socket generation and channel map unchanged.
 - `src/pages/TerminalPage.session-drawer.test.tsx`

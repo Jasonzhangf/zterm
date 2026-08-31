@@ -174,7 +174,12 @@ function addDirectoryDirectCandidate(
   endpoint: RelayEndpointCandidate,
   target: TraversalTargetSource,
 ) {
-  if (endpoint.kind !== 'lan' && endpoint.kind !== 'tailscale' && endpoint.kind !== 'ipv6' && endpoint.kind !== 'ipv4') {
+  // Directory LAN eligibility belongs to the platform transport owner, which
+  // has current interface-prefix truth. The generic socket must not guess it.
+  if (endpoint.kind === 'lan') {
+    return;
+  }
+  if (endpoint.kind !== 'tailscale' && endpoint.kind !== 'ipv6' && endpoint.kind !== 'ipv4') {
     return;
   }
   const host = endpoint.host?.trim()

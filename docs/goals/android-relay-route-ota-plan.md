@@ -66,7 +66,7 @@ Out of scope：
 - `android/src/lib/traversal/route-selector.test.ts`
 - `android/src/lib/traversal/config.test.ts`
 
-只允许在确认唯一 owner 后修改必要的 transport source/test 文件。Web 层负责把 directory endpoint 原样分类为 `lan` / `tailscale` / `ipv4` / `ipv6`；Android Connection Service 是 native LAN eligibility 的唯一 owner，按本机 interface prefix 决定 LAN 是否进入候选，再复用既有 candidate failure lifecycle。不得新建第二套 resolver，也不得在 picker 覆盖 route truth。
+只允许在确认唯一 owner 后修改必要的 transport source/test 文件。Relay directory 保留 endpoint 的 `lan` / `tailscale` / `ipv4` / `ipv6` 类型，Android target factory 把 directory LAN 交给 Android Connection Service；该 native service 是 LAN eligibility 的唯一 owner，按本机 interface prefix 决定 LAN 是否进入候选，再复用既有 candidate failure lifecycle。没有本地 interface truth 的 generic `TraversalSocket` 不消费 directory LAN，但仍保留显式 saved private `bridgeHost`。不得新建第二套 resolver，也不得在 picker 覆盖 route truth。
 
 ## 风险与规避
 
@@ -83,7 +83,7 @@ Out of scope：
 
 | 层级 | 必须证明 |
 |---|---|
-| route config | directory LAN 保持独立 `lan` 类型；canonical 顺序为 LAN → Tailscale → public IPv4/IPv6 → RTC direct → TURN |
+| route config | directory LAN 保持独立 `lan` 类型并只进入 native target；generic socket 不猜 LAN eligibility；canonical 顺序为 LAN → Tailscale → public IPv6/IPv4 → RTC direct → TURN |
 | native lifecycle | 同网段才纳入 LAN；非同网段从 Tailscale 开始；候选失败后同一 generation 继续下一项 |
 | boundary | saved Host/picker/preset 不改写；无 payload 控制语义泄漏；module/edge/function map 通过 |
 | project gates | 定向 Vitest、feature registry、type-check、`git diff --check`、canonical `build:android` |

@@ -449,6 +449,42 @@ public final class AndroidConnectionServiceTransportTest {
         }
     }
 
+    @Test
+    public void autoCandidatesPutSameSubnetLanBeforeTailscaleAndPublicDirect()
+        throws Exception {
+        AndroidConnectionService service = new AndroidConnectionService();
+        AndroidConnectionServiceTarget target = new AndroidConnectionServiceTarget.Builder()
+            .targetKey("target-lan")
+            .bridgeHost("100.64.0.2")
+            .bridgePort(3333)
+            .lanHost("127.0.0.2")
+            .tailscaleHost("100.64.0.2")
+            .ipv4Host("203.0.113.10")
+            .build();
+
+        assertEquals(
+            java.util.Arrays.asList("lan", "tailscale", "ipv4"),
+            candidatePaths(newRuntime(service, target)));
+    }
+
+    @Test
+    public void autoCandidatesSkipDirectoryLanOutsideCurrentInterfacePrefix()
+        throws Exception {
+        AndroidConnectionService service = new AndroidConnectionService();
+        AndroidConnectionServiceTarget target = new AndroidConnectionServiceTarget.Builder()
+            .targetKey("target-remote")
+            .bridgeHost("100.64.0.2")
+            .bridgePort(3333)
+            .lanHost("192.0.2.10")
+            .tailscaleHost("100.64.0.2")
+            .ipv4Host("203.0.113.10")
+            .build();
+
+        assertEquals(
+            java.util.Arrays.asList("tailscale", "ipv4"),
+            candidatePaths(newRuntime(service, target)));
+    }
+
     private static void setDesiredChannelOpened(Object runtime, String channelId, boolean opened)
         throws Exception {
         Field desiredChannelsField = runtime.getClass().getDeclaredField("desiredChannels");
@@ -499,6 +535,13 @@ public final class AndroidConnectionServiceTransportTest {
     }
 
     private static Object newRuntime(AndroidConnectionService service) throws Exception {
+        return newRuntime(service, target());
+    }
+
+    private static Object newRuntime(
+        AndroidConnectionService service,
+        AndroidConnectionServiceTarget target
+    ) throws Exception {
         Class<?> runtimeClass = Class.forName(
             "com.zterm.android.AndroidConnectionService$TargetRuntime");
         Constructor<?> constructor = runtimeClass.getDeclaredConstructor(
@@ -506,7 +549,20 @@ public final class AndroidConnectionServiceTransportTest {
             AndroidConnectionServiceTarget.class,
             AndroidConnectionServiceRoutePolicy.class);
         constructor.setAccessible(true);
-        return constructor.newInstance(service, target(), AndroidConnectionServiceRoutePolicy.auto());
+        return constructor.newInstance(service, target, AndroidConnectionServiceRoutePolicy.auto());
+    }
+
+    private static List<String> candidatePaths(Object runtime) throws Exception {
+        Method buildCandidates = runtime.getClass().getDeclaredMethod("buildCandidates");
+        buildCandidates.setAccessible(true);
+        List<?> candidates = (List<?>) buildCandidates.invoke(runtime);
+        List<String> paths = new ArrayList<>();
+        for (Object candidate : candidates) {
+            Field path = candidate.getClass().getDeclaredField("path");
+            path.setAccessible(true);
+            paths.add((String) path.get(candidate));
+        }
+        return paths;
     }
 
     private static AndroidConnectionServiceTarget target() {

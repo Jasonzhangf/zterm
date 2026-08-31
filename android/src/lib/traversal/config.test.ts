@@ -218,7 +218,7 @@ describe('buildTraversalPlan', () => {
       .not.toContain('ws://100.66.1.82:3333/?token=stale-saved-token');
   });
 
-  it('orders logged-in auto candidates as Tailscale -> UDP direct -> TURN Relay -> direct IPv6 -> non-LAN IPv4', () => {
+  it('orders logged-in auto candidates as Tailscale -> public direct -> RTC direct -> TURN Relay', () => {
     const plan = buildTraversalPlan(
       {
         bridgeHost: '203.0.113.10',
@@ -254,8 +254,8 @@ describe('buildTraversalPlan', () => {
 
     expect(plan.candidates.map((candidate) => candidate.path)).toEqual([
       'tailscale',
-      'ipv4',
       'ipv6',
+      'ipv4',
       'rtc-direct',
       'rtc-relay',
     ]);
@@ -310,8 +310,8 @@ describe('buildTraversalPlan', () => {
 
     expect(plan.candidates.map((candidate) => candidate.path)).toEqual([
       'tailscale',
-      'ipv4',
       'ipv6',
+      'ipv4',
       'rtc-direct',
       'rtc-relay',
     ]);
@@ -603,7 +603,7 @@ describe('buildTraversalPlan', () => {
       },
     );
 
-    expect(plan.candidates.some((candidate) => candidate.endpoint === '192.168.50.20:3333')).toBe(true);
+    expect(plan.candidates.some((candidate) => candidate.endpoint === '192.168.50.20:3333')).toBe(false);
     expect(plan.candidates).toContainEqual(expect.objectContaining({
       id: 'direct:tailscale:daemon-host-a',
       kind: 'ws',

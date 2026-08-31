@@ -13,6 +13,8 @@ Automatic route selection is daemon-target scoped and does not ask the user to c
 
 Same-subnet comparison only makes a LAN endpoint eligible; it never marks the route healthy. ICMP availability is not assumed on Android/WebView. Only the actual authenticated transport handshake records route success. A Relay control socket's observed TCP source port is not a reusable daemon listener and must never be published as public direct truth.
 
+`AndroidConnectionService` is the only owner that can compare a directory LAN endpoint with Android's current interface prefixes. The generic `TraversalSocket` has no local-interface truth and therefore must not admit Relay-directory LAN endpoints; it may still open an explicitly saved private `bridgeHost`. This keeps directory discovery separate from platform reachability without discarding an explicit user target.
+
 Manual route selection is still allowed from the terminal status strip as an explicit override intent. Manual override changes the next open/reconnect target mode; it does not rewrite the global Auto order and does not create a per-session transport model.
 
 Terminal session isolation is application-layer mux channel truth:
