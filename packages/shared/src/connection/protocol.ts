@@ -336,7 +336,7 @@ export type RemoteWindowStreamFailureStage =
 
 export interface RemoteWindowStreamCapabilityTelemetry {
   mediaPlan: RemoteWindowStreamMediaPlan;
-  mediaPlanVersion: 1;
+  mediaPlanVersion: 1 | 2;
   lanes: readonly RemoteWindowStreamMediaLaneContract[];
   maxVideoLanes: 1 | 2;
   screenCaptureKit: true;
@@ -446,7 +446,7 @@ export interface RemoteWindowStreamStartedPayload {
   streamId: string;
   purpose?: RemoteWindowStreamPurpose;
   mediaPlan: RemoteWindowStreamMediaPlan;
-  mediaPlanVersion: 1;
+  mediaPlanVersion: 1 | 2;
   targetId: string;
   answer: RemoteWindowStreamRtcDescription;
   capture: {

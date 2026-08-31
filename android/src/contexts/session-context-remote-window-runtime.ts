@@ -5,7 +5,8 @@ import type {
   RemoteWindowStreamQualityRequestPayload,
   RemoteWindowStreamQualityResultPayload,
   RemoteWindowStreamStartedPayload,
-  RemoteWindowStreamStartRequestPayload,
+  RemoteWindowStreamStartedOfferV2Payload,
+  RemoteWindowStreamAnswerV2Payload,
   RemoteWindowStreamPurpose,
   RemoteWindowStreamTargetManifest,
   RemoteWindowVideoProfile,
@@ -30,21 +31,15 @@ interface RemoteWindowCatalogMessageRuntimeLike {
 }
 
 interface RemoteWindowStreamMessageRuntimeLike extends RemoteWindowCatalogMessageRuntimeLike {
-  requestStreamStart: (
+  requestStreamStart: (...args: any[]) => Promise<RemoteWindowStreamStartedPayload | RemoteWindowStreamStartedOfferV2Payload>;
+  sendStreamAnswerV2?: (
     sessionId: string,
     options: {
       ws: BridgeTransportSocket;
-      streamId: string;
-      purpose?: RemoteWindowStreamPurpose;
-      mediaPlan: RemoteWindowStreamStartRequestPayload['mediaPlan'];
-      mediaPlanVersion: RemoteWindowStreamStartRequestPayload['mediaPlanVersion'];
-      target: RemoteWindowStreamTargetManifest;
-      offer: { type: 'offer'; sdp: string };
-      iceServers?: Array<Record<string, unknown>>;
-      videoProfile: RemoteWindowVideoProfile;
+      payload: RemoteWindowStreamAnswerV2Payload;
       sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
     },
-  ) => Promise<RemoteWindowStreamStartedPayload>;
+  ) => void;
   sendStreamQuality: (
     sessionId: string,
     options: {
@@ -107,7 +102,9 @@ interface RemoteWindowReceiverRuntimeLike {
     target: RemoteWindowStreamTargetManifest;
     iceServers?: RTCIceServer[];
     sendIceCandidate: (candidate: RemoteWindowStreamIceCandidate) => void;
-    startRemote: (offer: { type: 'offer'; sdp: string }) => Promise<RemoteWindowStreamStartedPayload>;
+    startRemote: (offer: { type: 'offer'; sdp: string }) => Promise<RemoteWindowStreamStartedPayload | RemoteWindowStreamStartedOfferV2Payload>;
+    protocolVersion?: 1 | 2;
+    sendAnswer?: (answer: RemoteWindowStreamAnswerV2Payload) => void | Promise<void>;
   }) => Promise<RemoteWindowReceiverStartResult>;
   stopStream: (streamId: string) => boolean;
 }
@@ -314,6 +311,7 @@ export async function requestRemoteWindowStreamStartRuntime(options: {
     purpose: options.purpose,
     target: options.target,
     iceServers,
+    protocolVersion: 2,
     sendIceCandidate: (candidate) => {
       options.remoteWindowMessageRuntime.sendStreamIceCandidate(targetSessionId, {
         ws,
@@ -328,13 +326,23 @@ export async function requestRemoteWindowStreamStartRuntime(options: {
       streamId,
       purpose: options.purpose,
       mediaPlan,
-      mediaPlanVersion: 1,
+      mediaPlanVersion: 2,
       target: options.target,
       offer,
       iceServers: iceServers?.map((server) => ({ ...server })) as Array<Record<string, unknown>> | undefined,
       videoProfile: options.videoProfile,
       sendSocketPayload: options.sendSocketPayload,
     }),
+    sendAnswer: (answer) => {
+      if (!options.remoteWindowMessageRuntime.sendStreamAnswerV2) {
+        throw new Error('Remote window v2 answer sender is unavailable');
+      }
+      options.remoteWindowMessageRuntime.sendStreamAnswerV2(targetSessionId, {
+        ws,
+        payload: answer,
+        sendSocketPayload: options.sendSocketPayload,
+      });
+    },
   });
 }
 

@@ -20,7 +20,10 @@ import type {
   RemoteWindowStreamQualityResultPayload,
   RemoteWindowStreamPurpose,
   RemoteWindowStreamStartedPayload,
+  RemoteWindowStreamStartedOfferV2Payload,
+  RemoteWindowStreamAnswerV2Payload,
   RemoteWindowStreamStartRequestPayload,
+  RemoteWindowStreamStartRequestV2Payload,
   RemoteWindowStreamStatusPayload,
   RemoteWindowStreamStopRequestPayload,
   RemoteWindowStreamTargetManifest,
@@ -30,7 +33,7 @@ import type {
   RemoteWindowStreamFailureStage,
   RemoteWindowVideoProfile,
 } from '@zterm/shared/protocol';
-import { getRemoteWindowMediaPlanContract } from '@zterm/shared/protocol';
+import { getRemoteWindowMediaPlanContract, getRemoteWindowMediaPlanV2Contract } from '@zterm/shared/protocol';
 import { buildRemoteWindowCanvasLayoutV1 } from './remote-window-canvas-layout';
 import { applyRemoteWindowStreamGroupQuality } from './remote-window-quality';
 import {
@@ -137,9 +140,10 @@ export interface RemoteWindowStreamDaemonRuntime {
     payload: RemoteWindowStreamRequestPayload,
   ) => Promise<RemoteWindowStreamTargetsResponsePayload | RemoteWindowStreamErrorPayload>;
   startStream: (
-    payload: RemoteWindowStreamStartRequestPayload,
+    payload: RemoteWindowStreamStartRequestPayload | RemoteWindowStreamStartRequestV2Payload,
     handlers?: RemoteWindowStreamDaemonHandlers,
-  ) => Promise<RemoteWindowStreamStartedPayload | RemoteWindowStreamErrorPayload>;
+  ) => Promise<RemoteWindowStreamStartedPayload | RemoteWindowStreamStartedOfferV2Payload | RemoteWindowStreamErrorPayload>;
+  acceptAnswer?: (payload: RemoteWindowStreamAnswerV2Payload) => Promise<boolean>;
   addIceCandidate: (payload: RemoteWindowStreamIceCandidatePayload) => Promise<boolean>;
   stopStream: (
     payload: RemoteWindowStreamStopRequestPayload,
@@ -161,6 +165,7 @@ export interface RemoteWindowStreamDaemonHandlers {
   sendIceCandidate?: (payload: RemoteWindowStreamIceCandidatePayload) => void;
   sendStatus?: (payload: RemoteWindowStreamStatusPayload) => void;
   sendFocusResult?: (payload: RemoteWindowStreamFocusResultPayload) => void;
+  sendOffer?: (payload: RemoteWindowStreamStartedOfferV2Payload) => void;
 }
 
 interface ActiveRemoteWindowStream extends Omit<RemoteWindowStreamSessionResources, 'sendStatus'> {
@@ -175,7 +180,7 @@ interface ActiveRemoteWindowStream extends Omit<RemoteWindowStreamSessionResourc
   pendingQualityRevision: number | null;
   streamGroupId: string;
   mediaPlan: RemoteWindowStreamStartRequestPayload['mediaPlan'];
-  mediaPlanVersion: RemoteWindowStreamStartRequestPayload['mediaPlanVersion'];
+  mediaPlanVersion: 1 | 2;
   overviewTarget: RemoteWindowStreamTargetManifest | null;
   // overview 画布主窗口固定为流的初始 target：focus 切换只改 entry.target，
   // 不漂移 overview 画布（client 的 state.target 也不随 focus 切换更新，
@@ -229,6 +234,14 @@ interface PendingRemoteWindowContinuousInput {
 interface RemoteWindowPendingMediaFrame {
   frame: RemoteWindowCaptureFrame;
   capturedAtMs: number;
+}
+
+interface PendingRemoteWindowAnswer {
+  streamId: string;
+  requestId: string;
+  resolve: (answer: RTCSessionDescriptionInit) => void;
+  reject: (error: Error) => void;
+  timeoutId: ReturnType<typeof setTimeout>;
 }
 
 
@@ -391,6 +404,7 @@ export function createRemoteWindowStreamDaemonRuntime(
   const createVideoSource = deps.videoSourceFactory || (() => new nonstandard.RTCVideoSource({ isScreencast: true }));
   const rgbaToI420 = deps.rgbaToI420 || nonstandard.rgbaToI420;
   const activeStreams = new Map<string, ActiveRemoteWindowStream>();
+  const pendingAnswers = new Map<string, PendingRemoteWindowAnswer>();
   const pendingIceCandidatesByStream = new Map<string, RTCIceCandidateInit[]>();
   const iceCandidateFingerprintsByStream = new Map<string, Set<string>>();
   const closedStreamIds = new Set<string>();
@@ -413,6 +427,19 @@ export function createRemoteWindowStreamDaemonRuntime(
     runMacosAppWindowCatalog,
     runTmux: deps.runTmux,
   });
+
+  const answerKey = (streamId: string, requestId: string) => `${streamId}\u0000${requestId}`;
+
+  function waitForRemoteWindowAnswer(streamId: string, requestId: string) {
+    const key = answerKey(streamId, requestId);
+    return new Promise<RTCSessionDescriptionInit>((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        pendingAnswers.delete(key);
+        reject(new Error('remote window stream answer timed out'));
+      }, 25_000);
+      pendingAnswers.set(key, { streamId, requestId, resolve, reject, timeoutId });
+    });
+  }
 
   function buildStreamError(
     payload: { requestId?: string; streamId?: string },
@@ -572,9 +599,9 @@ export function createRemoteWindowStreamDaemonRuntime(
   }
 
   async function startStream(
-    payload: RemoteWindowStreamStartRequestPayload,
+    payload: RemoteWindowStreamStartRequestPayload | RemoteWindowStreamStartRequestV2Payload,
     handlers: RemoteWindowStreamDaemonHandlers = {},
-  ): Promise<RemoteWindowStreamStartedPayload | RemoteWindowStreamErrorPayload> {
+  ): Promise<RemoteWindowStreamStartedPayload | RemoteWindowStreamStartedOfferV2Payload | RemoteWindowStreamErrorPayload> {
     if (!payload.requestId || !payload.streamId) {
       return buildStreamError(payload, 'remote_window_stream_request_invalid', 'remote window stream start requires requestId and streamId', 'request-validation');
     }
@@ -619,7 +646,10 @@ export function createRemoteWindowStreamDaemonRuntime(
       failureStage = 'media-plan-validation';
       const hasCompositeWindows = (payload.target.compositeWindows ?? []).length > 0;
       const expectedMediaPlan = hasCompositeWindows ? 'overview-plus-focus' : 'single-focus';
-      const mediaPlanContract = getRemoteWindowMediaPlanContract(expectedMediaPlan);
+      const isV2 = payload.mediaPlanVersion === 2 && !('offer' in payload);
+      const mediaPlanContract = isV2
+        ? getRemoteWindowMediaPlanV2Contract(expectedMediaPlan)
+        : getRemoteWindowMediaPlanContract(expectedMediaPlan);
       const hasOverviewLane = mediaPlanContract.lanes.some((lane) => lane.role === 'overview');
       if (payload.mediaPlan !== expectedMediaPlan) {
         markStreamClosed(payload.streamId);
@@ -675,10 +705,16 @@ export function createRemoteWindowStreamDaemonRuntime(
       if (!requestedVideoProfile) {
         throw new Error('remote window stream start requires videoProfile');
       }
-      const videoSender = addRemoteWindowVideoTrack(
-        peerConnection,
-        videoTrack,
-      ) as RTCRtpSender | undefined;
+      const initialEncoding = {
+        maxBitrate: requestedVideoProfile.maxBitrateBps,
+        maxFramerate: requestedVideoProfile.maxFrameRateFps,
+      };
+      const videoSender = isV2
+        ? peerConnection.addTransceiver(videoTrack, {
+          direction: 'sendonly',
+          sendEncodings: [initialEncoding],
+        }).sender
+        : addRemoteWindowVideoTrack(peerConnection, videoTrack) as RTCRtpSender | undefined;
       const streamFrameRate = requestedVideoProfile.maxFrameRateFps;
       const overviewFrameRate = requestedVideoProfile.overviewMaxFrameRateFps;
       let videoProfile: RemoteWindowVideoProfile | null = null;
@@ -769,11 +805,37 @@ export function createRemoteWindowStreamDaemonRuntime(
           : {}),
       });
 
-      failureStage = 'offer-apply';
-      await peerConnection.setRemoteDescription(createRtcSessionDescription({
-        type: payload.offer.type,
-        sdp: payload.offer.sdp,
-      }));
+      failureStage = isV2 ? 'offer-apply' : 'offer-apply';
+      if (isV2) {
+        const offer = await peerConnection.createOffer();
+        await peerConnection.setLocalDescription(offer);
+        const answerPromise = waitForRemoteWindowAnswer(payload.streamId, payload.requestId);
+        handlers.sendOffer?.({
+          requestId: payload.requestId,
+          streamId: payload.streamId,
+          purpose,
+          mediaPlan: expectedMediaPlan,
+          mediaPlanVersion: 2,
+          targetId: payload.target.streamTargetId,
+          offer: normalizeRtcDescription(peerConnection.localDescription || offer, 'offer'),
+          capture: {
+            source: 'ScreenCaptureKit',
+            frameWidth: 1,
+            frameHeight: 1,
+            frameRate: streamFrameRate,
+            targetKind: payload.target.videoTarget.kind,
+          },
+          ...(streamEntry.canvasLayout ? { canvasLayout: streamEntry.canvasLayout } : {}),
+          transport: { kind: 'webrtc-video' },
+        });
+        const answer = await answerPromise;
+        await peerConnection.setRemoteDescription(createRtcSessionDescription(answer));
+      } else {
+        await peerConnection.setRemoteDescription(createRtcSessionDescription({
+          type: payload.offer.type,
+          sdp: payload.offer.sdp,
+        }));
+      }
       streamEntry.remoteDescriptionApplied = true;
       for (const candidate of streamEntry.pendingIceCandidates.splice(0)) {
         await peerConnection.addIceCandidate(createRtcIceCandidate(candidate));
@@ -843,11 +905,15 @@ export function createRemoteWindowStreamDaemonRuntime(
       if (hasOverviewLane) {
         const overviewVideoSource = createVideoSource();
         const overviewVideoTrack = overviewVideoSource.createTrack();
-        const overviewVideoSender = addRemoteWindowVideoTrack(
-          peerConnection,
-          overviewVideoTrack,
-          'overview',
-        ) as RTCRtpSender | undefined;
+        const overviewVideoSender = isV2
+          ? peerConnection.addTransceiver(overviewVideoTrack, {
+            direction: 'sendonly',
+            sendEncodings: [{
+              maxBitrate: requestedVideoProfile.overviewMaxBitrateBps,
+              maxFramerate: requestedVideoProfile.overviewMaxFrameRateFps,
+            }],
+          }).sender
+          : addRemoteWindowVideoTrack(peerConnection, overviewVideoTrack, 'overview') as RTCRtpSender | undefined;
         failureStage = 'overview-capture-start';
         const overviewCaptureSource = await captureSourceFactory(payload.target, {
           frameRate: overviewFrameRate,
@@ -973,10 +1039,13 @@ export function createRemoteWindowStreamDaemonRuntime(
         }, 3_000);
       }
 
-      failureStage = 'answer-create';
-      const answer = await peerConnection.createAnswer();
-      failureStage = 'answer-apply';
-      await peerConnection.setLocalDescription(answer);
+      let answer: RTCSessionDescriptionInit | null = null;
+      if (!isV2) {
+        failureStage = 'answer-create';
+        answer = await peerConnection.createAnswer();
+        failureStage = 'answer-apply';
+        await peerConnection.setLocalDescription(answer);
+      }
       if (!isCurrentStream(streamEntry)) {
         throw new Error('remote window stream was closed before media negotiation completed');
       }
@@ -1004,12 +1073,32 @@ export function createRemoteWindowStreamDaemonRuntime(
         });
       }
 
+      if (isV2) {
+        return {
+          requestId: payload.requestId,
+          streamId: payload.streamId,
+          purpose,
+          mediaPlan: expectedMediaPlan,
+          mediaPlanVersion: 2,
+          targetId: payload.target.streamTargetId,
+          offer: normalizeRtcDescription(peerConnection.localDescription, 'offer'),
+          capture: {
+            source: 'ScreenCaptureKit',
+            frameWidth: captureSource.width,
+            frameHeight: captureSource.height,
+            frameRate: captureSource.frameRate,
+            targetKind: payload.target.videoTarget.kind,
+          },
+          ...(streamEntry.canvasLayout ? { canvasLayout: streamEntry.canvasLayout } : {}),
+          transport: { kind: 'webrtc-video' },
+        };
+      }
       return {
         requestId: payload.requestId,
         streamId: payload.streamId,
         purpose,
         mediaPlan: expectedMediaPlan,
-        mediaPlanVersion: mediaPlanContract.version,
+        mediaPlanVersion: 1,
         targetId: payload.target.streamTargetId,
         answer: normalizeRtcDescription(peerConnection.localDescription || answer, 'answer'),
         capture: {
@@ -1092,6 +1181,21 @@ export function createRemoteWindowStreamDaemonRuntime(
     fingerprints.add(candidateFingerprint);
     iceCandidateFingerprintsByStream.set(payload.streamId, fingerprints);
     flushPendingRemoteWindowVideoFrame(entry);
+    return true;
+  }
+
+  async function acceptAnswer(payload: RemoteWindowStreamAnswerV2Payload) {
+    if (payload.mediaPlanVersion !== 2 || payload.answer.type !== 'answer') {
+      throw new Error('remote window v2 answer contract is invalid');
+    }
+    const key = answerKey(payload.streamId, payload.requestId);
+    const pending = pendingAnswers.get(key);
+    if (!pending) {
+      throw new Error(`remote window v2 answer has no pending offer: ${payload.streamId}/${payload.requestId}`);
+    }
+    pendingAnswers.delete(key);
+    clearTimeout(pending.timeoutId);
+    pending.resolve({ type: 'answer', sdp: payload.answer.sdp });
     return true;
   }
 
@@ -1595,6 +1699,7 @@ export function createRemoteWindowStreamDaemonRuntime(
   return {
     listTargets: catalogRuntime.listTargets,
     startStream,
+    acceptAnswer,
     addIceCandidate,
     stopStream,
     updateStreamQuality,

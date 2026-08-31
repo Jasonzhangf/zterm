@@ -6,7 +6,10 @@ import type {
   RemoteWindowInputDeliveryControl,
   RemoteWindowInputEventPayload,
   RemoteWindowStreamStartedPayload,
+  RemoteWindowStreamStartedOfferV2Payload,
+  RemoteWindowStreamAnswerV2Payload,
   RemoteWindowStreamStartRequestPayload,
+  RemoteWindowStreamStartRequestV2Payload,
   RemoteWindowStreamStatusPayload,
   RemoteWindowStreamTargetManifest,
   RemoteWindowStreamErrorPayload,
@@ -25,6 +28,7 @@ export type RemoteWindowControlMessage = Extract<
   ServerMessage,
   | { type: 'remote-window-targets-response' }
   | { type: 'remote-window-stream-started' }
+  | { type: 'remote-window-stream-offer-v2' }
   | { type: 'remote-window-stream-ice-candidate' }
   | { type: 'remote-window-stream-status' }
   | { type: 'remote-window-stream-focus-result' }
@@ -59,7 +63,7 @@ interface PendingRemoteWindowStreamStartRequest {
   kind: 'stream-start';
   streamId: string;
   timeoutId: number | null;
-  resolve: (payload: RemoteWindowStreamStartedPayload) => void;
+  resolve: (payload: RemoteWindowStreamStartedPayload | RemoteWindowStreamStartedOfferV2Payload) => void;
   reject: (error: Error) => void;
 }
 
@@ -100,6 +104,7 @@ export const REMOTE_WINDOW_INPUT_QUALITY_FLUSH_INTERVAL_MS = Math.ceil(1_000 / 3
 export function isRemoteWindowControlMessage(msg: ServerMessage): msg is RemoteWindowControlMessage {
   return msg.type === 'remote-window-targets-response'
     || msg.type === 'remote-window-stream-started'
+    || msg.type === 'remote-window-stream-offer-v2'
     || msg.type === 'remote-window-stream-ice-candidate'
     || msg.type === 'remote-window-stream-status'
     || msg.type === 'remote-window-stream-focus-result'
@@ -511,8 +516,8 @@ export function createRemoteWindowMessageRuntime(input?: {
       target: RemoteWindowStreamTargetManifest;
       purpose?: RemoteWindowStreamPurpose;
       mediaPlan: RemoteWindowStreamStartRequestPayload['mediaPlan'];
-      mediaPlanVersion: RemoteWindowStreamStartRequestPayload['mediaPlanVersion'];
-      offer: RemoteWindowStreamRtcDescription;
+      mediaPlanVersion: 1 | 2;
+      offer?: RemoteWindowStreamRtcDescription;
       iceServers?: Array<Record<string, unknown>>;
       videoProfile: RemoteWindowVideoProfile;
       sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
@@ -527,7 +532,7 @@ export function createRemoteWindowMessageRuntime(input?: {
       }
       const requestId = `rw-start-${now()}-${Math.random().toString(36).slice(2, 8)}`;
       streamInputPreferences.set(streamId, options.videoProfile.preference);
-      return new Promise<RemoteWindowStreamStartedPayload>((resolve, reject) => {
+      return new Promise<RemoteWindowStreamStartedPayload | RemoteWindowStreamStartedOfferV2Payload>((resolve, reject) => {
         const pending: PendingRemoteWindowStreamStartRequest = {
           kind: 'stream-start',
           streamId,
@@ -539,16 +544,34 @@ export function createRemoteWindowMessageRuntime(input?: {
         armPendingStreamTimeout(requestId);
 
         try {
-          sendClientMessage(targetSessionId, options.ws, options.sendSocketPayload, {
+          const isV2 = options.mediaPlanVersion === 2;
+          if (!isV2 && !options.offer) {
+            throw new Error('Remote window v1 stream start requires an offer');
+          }
+          sendClientMessage(targetSessionId, options.ws, options.sendSocketPayload, isV2
+            ? {
+              type: 'remote-window-stream-start-v2-request',
+              payload: {
+                requestId,
+                streamId,
+                ...(options.purpose ? { purpose: options.purpose } : {}),
+                mediaPlan: options.mediaPlan,
+                mediaPlanVersion: 2,
+                target: options.target,
+                ...(options.iceServers ? { iceServers: options.iceServers } : {}),
+                videoProfile: options.videoProfile,
+              } satisfies RemoteWindowStreamStartRequestV2Payload,
+            }
+            : {
             type: 'remote-window-stream-start-request',
             payload: {
               requestId,
               streamId,
               ...(options.purpose ? { purpose: options.purpose } : {}),
               mediaPlan: options.mediaPlan,
-              mediaPlanVersion: options.mediaPlanVersion ?? 1,
+              mediaPlanVersion: 1,
               target: options.target,
-              offer: options.offer,
+              offer: options.offer!,
               ...(options.iceServers ? { iceServers: options.iceServers } : {}),
               videoProfile: options.videoProfile,
             },
@@ -559,6 +582,21 @@ export function createRemoteWindowMessageRuntime(input?: {
           streamInputPreferences.delete(streamId);
           reject(error instanceof Error ? error : new Error(String(error)));
         }
+      });
+    },
+
+    sendStreamAnswerV2(sessionId: string, options: {
+      ws: BridgeTransportSocket;
+      payload: RemoteWindowStreamAnswerV2Payload;
+      sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
+    }) {
+      const targetSessionId = sessionId.trim();
+      if (!targetSessionId || !options.payload.streamId || !options.payload.requestId) {
+        throw new Error('Remote window v2 answer requires sessionId, streamId, and requestId');
+      }
+      sendClientMessage(targetSessionId, options.ws, options.sendSocketPayload, {
+        type: 'remote-window-stream-answer-v2',
+        payload: options.payload,
       });
     },
 
@@ -762,6 +800,17 @@ export function createRemoteWindowMessageRuntime(input?: {
       return true;
     },
 
+    handleStreamOfferV2(payload: RemoteWindowStreamStartedOfferV2Payload) {
+      const pending = pendingStreamStarts.get(payload.requestId);
+      if (!pending || pending.streamId !== payload.streamId) {
+        return false;
+      }
+      pendingStreamStarts.delete(payload.requestId);
+      clearPendingTimeout(pending);
+      pending.resolve(payload);
+      return true;
+    },
+
     handleError(payload: RemoteWindowStreamErrorPayload) {
       const pending = pendingRequests.get(payload.requestId);
       if (pending) {
@@ -800,6 +849,9 @@ export function createRemoteWindowMessageRuntime(input?: {
       }
       if (msg.type === 'remote-window-stream-started') {
         return runtime.handleStreamStarted(msg.payload);
+      }
+      if (msg.type === 'remote-window-stream-offer-v2') {
+        return runtime.handleStreamOfferV2(msg.payload);
       }
       if (msg.type === 'remote-window-stream-ice-candidate') {
         return dispatchListener('ice-candidate', input?.onStreamIceCandidate, msg.payload);

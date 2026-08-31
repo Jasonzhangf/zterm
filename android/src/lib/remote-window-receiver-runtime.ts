@@ -3,6 +3,8 @@ import type {
   RemoteWindowStreamPurpose,
   RemoteWindowStreamRtcDescription,
   RemoteWindowStreamStartedPayload,
+  RemoteWindowStreamStartedOfferV2Payload,
+  RemoteWindowStreamAnswerV2Payload,
   RemoteWindowStreamTargetManifest,
 } from './types';
 import { getRemoteWindowMediaPlanContract } from '@zterm/shared/protocol';
@@ -270,7 +272,9 @@ export function createRemoteWindowReceiverRuntime(input?: {
       target: RemoteWindowStreamTargetManifest;
       iceServers?: RTCIceServer[];
       sendIceCandidate: (candidate: RemoteWindowStreamIceCandidatePayload['candidate']) => void;
-      startRemote: (offer: RemoteWindowStreamRtcDescription) => Promise<RemoteWindowStreamStartedPayload>;
+      startRemote: (offer: RemoteWindowStreamRtcDescription) => Promise<RemoteWindowStreamStartedPayload | RemoteWindowStreamStartedOfferV2Payload>;
+      protocolVersion?: 1 | 2;
+      sendAnswer?: (answer: RemoteWindowStreamAnswerV2Payload) => void | Promise<void>;
     }): Promise<RemoteWindowReceiverStartResult> {
       const streamId = options.streamId.trim();
       if (!streamId) {
@@ -335,11 +339,16 @@ export function createRemoteWindowReceiverRuntime(input?: {
         peerConnection.ontrack = (event) => attachTrack(entry, event);
         const trackPromise = waitForRequiredTracks(entry, needsOverview);
         trackPromise.catch(() => undefined);
-        const offer = await peerConnection.createOffer();
-        await peerConnection.setLocalDescription(offer);
-        assertCurrent(entry);
-        const localOffer = normalizeRtcDescription(peerConnection.localDescription || offer, 'offer');
-        const startedPromise = options.startRemote(localOffer);
+        let startedPromise: Promise<RemoteWindowStreamStartedPayload | RemoteWindowStreamStartedOfferV2Payload>;
+        if (options.protocolVersion === 2) {
+          startedPromise = options.startRemote(undefined as unknown as RemoteWindowStreamRtcDescription);
+        } else {
+          const offer = await peerConnection.createOffer();
+          await peerConnection.setLocalDescription(offer);
+          assertCurrent(entry);
+          const localOffer = normalizeRtcDescription(peerConnection.localDescription || offer, 'offer');
+          startedPromise = options.startRemote(localOffer);
+        }
         entry.remoteStartDispatched = true;
         for (const candidate of entry.pendingLocalIceCandidates.splice(0)) {
           options.sendIceCandidate(candidate);
@@ -359,8 +368,25 @@ export function createRemoteWindowReceiverRuntime(input?: {
         if (started.mediaPlanVersion !== mediaPlanContract.version) {
           throw new Error(`Remote window media plan version mismatch: expected ${mediaPlanContract.version}, got ${String(started.mediaPlanVersion)}`);
         }
-        const answer = normalizeRtcDescription(started.answer, 'answer');
-        await peerConnection.setRemoteDescription(answer);
+        if (options.protocolVersion === 2) {
+          const offer = normalizeRtcDescription((started as unknown as RemoteWindowStreamStartedOfferV2Payload).offer, 'offer');
+          await peerConnection.setRemoteDescription(offer);
+          const answer = await peerConnection.createAnswer();
+          await peerConnection.setLocalDescription(answer);
+          const normalizedAnswer = normalizeRtcDescription(peerConnection.localDescription || answer, 'answer');
+          if (!options.sendAnswer) {
+            throw new Error('Remote window v2 receiver requires an answer sender');
+          }
+          await options.sendAnswer({
+            requestId: started.requestId,
+            streamId: started.streamId,
+            mediaPlanVersion: 2,
+            answer: normalizedAnswer,
+          });
+        } else {
+          const answer = normalizeRtcDescription((started as RemoteWindowStreamStartedPayload).answer, 'answer');
+          await peerConnection.setRemoteDescription(answer);
+        }
         entry.answerAppliedAt = Date.now();
         entry.remoteDescriptionApplied = true;
         for (const candidate of entry.pendingIceCandidates.splice(0)) {
