@@ -382,6 +382,17 @@ export interface RemoteWindowStreamStartRequestPayload {
   videoProfile: RemoteWindowVideoProfile;
 }
 
+export interface RemoteWindowStreamStartRequestV2Payload {
+  requestId: string;
+  streamId: string;
+  purpose?: RemoteWindowStreamPurpose;
+  mediaPlan: RemoteWindowStreamMediaPlan;
+  mediaPlanVersion: 2;
+  target: RemoteWindowStreamTargetManifest;
+  iceServers?: Array<Record<string, unknown>>;
+  videoProfile: RemoteWindowVideoProfile;
+}
+
 // 双流：切换高码率主窗口（focus）流的捕获目标；低码率总览（overview）流保持不变
 export interface RemoteWindowStreamUpdateFocusRequestPayload {
   requestId: string;
@@ -422,6 +433,35 @@ export interface RemoteWindowStreamStartedPayload {
     kind: 'webrtc-video';
     selectedRoute?: string;
   };
+}
+
+export interface RemoteWindowStreamStartedOfferV2Payload {
+  requestId: string;
+  streamId: string;
+  purpose?: RemoteWindowStreamPurpose;
+  mediaPlan: RemoteWindowStreamMediaPlan;
+  mediaPlanVersion: 2;
+  targetId: string;
+  offer: RemoteWindowStreamRtcDescription;
+  capture: {
+    source: 'ScreenCaptureKit';
+    frameWidth: number;
+    frameHeight: number;
+    frameRate: number;
+    targetKind: 'app-window' | 'iterm2-pane';
+  };
+  canvasLayout?: RemoteWindowCanvasLayoutV1;
+  transport: {
+    kind: 'webrtc-video';
+    selectedRoute?: string;
+  };
+}
+
+export interface RemoteWindowStreamAnswerV2Payload {
+  requestId: string;
+  streamId: string;
+  mediaPlanVersion: 2;
+  answer: RemoteWindowStreamRtcDescription;
 }
 
 export interface RemoteWindowStreamIceCandidatePayload {
@@ -741,6 +781,8 @@ export type BridgeClientMessage =
   | { type: 'remote-screenshot-request'; payload: RemoteScreenshotRequestPayload }
   | { type: 'remote-window-targets-request'; payload: RemoteWindowStreamRequestPayload }
   | { type: 'remote-window-stream-start-request'; payload: RemoteWindowStreamStartRequestPayload }
+  | { type: 'remote-window-stream-start-v2-request'; payload: RemoteWindowStreamStartRequestV2Payload }
+  | { type: 'remote-window-stream-answer-v2'; payload: RemoteWindowStreamAnswerV2Payload }
   | { type: 'remote-window-stream-update-focus'; payload: RemoteWindowStreamUpdateFocusRequestPayload }
   | { type: 'remote-window-stream-ice-candidate'; payload: RemoteWindowStreamIceCandidatePayload }
   | { type: 'remote-window-stream-stop-request'; payload: RemoteWindowStreamStopRequestPayload }
@@ -820,6 +862,7 @@ export type BridgeServerControlMessage =
   | { type: 'remote-screenshot-status'; payload: RemoteScreenshotStatusPayload }
   | { type: 'remote-window-targets-response'; payload: RemoteWindowStreamTargetsResponsePayload }
   | { type: 'remote-window-stream-started'; payload: RemoteWindowStreamStartedPayload }
+  | { type: 'remote-window-stream-offer-v2'; payload: RemoteWindowStreamStartedOfferV2Payload }
   | { type: 'remote-window-stream-ice-candidate'; payload: RemoteWindowStreamIceCandidatePayload }
   | { type: 'remote-window-stream-status'; payload: RemoteWindowStreamStatusPayload }
   | { type: 'remote-window-stream-focus-result'; payload: RemoteWindowStreamFocusResultPayload }

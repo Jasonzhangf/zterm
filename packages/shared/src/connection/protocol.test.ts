@@ -40,6 +40,56 @@ describe('remote-window media plan contract', () => {
       ],
     });
   });
+
+  it('locks sender-owned v2 start and answer messages without a client offer', () => {
+    const request: import('./protocol').RemoteWindowStreamStartRequestV2Payload = {
+      requestId: 'start-v2-1',
+      streamId: 'stream-v2-1',
+      mediaPlan: 'single-focus',
+      mediaPlanVersion: 2,
+      target: {
+        streamTargetId: 'target-v2-1',
+        videoTarget: {
+          kind: 'app-window',
+          appBundleId: 'com.example.Terminal',
+          pid: 1,
+          windowId: 'window-1',
+          title: 'Terminal',
+          windowBoundsTopLeftPx: { x: 0, y: 0, width: 640, height: 480 },
+          cropRectTopLeftPx: { x: 0, y: 0, width: 640, height: 480 },
+        },
+        inputTarget: { kind: 'app-window' },
+        streamMode: 'interactive',
+        focusPolicy: 'bring-to-focus',
+        inputRoute: 'os-event',
+        capture: {
+          source: 'ScreenCaptureKit',
+          coordinateSpace: 'macos-top-left-px',
+          scale: 1,
+          createdAt: '2026-08-31T00:00:00.000Z',
+        },
+      },
+      videoProfile: {
+        preference: 'smooth',
+        maxBitrateBps: 4_000_000,
+        maxFrameRateFps: 30,
+        maxCaptureWidth: 1280,
+        maxCaptureHeight: 720,
+        maxFrameAgeMs: 100,
+        interactionActive: false,
+        overviewMaxBitrateBps: 0,
+        overviewMaxFrameRateFps: 0,
+      },
+    };
+    expect(request).not.toHaveProperty('offer');
+    const answer: import('./protocol').RemoteWindowStreamAnswerV2Payload = {
+      requestId: request.requestId,
+      streamId: request.streamId,
+      mediaPlanVersion: 2,
+      answer: { type: 'answer', sdp: 'v=0' },
+    };
+    expect(answer.mediaPlanVersion).toBe(2);
+  });
 });
 
 describe('terminal mux protocol contract', () => {
