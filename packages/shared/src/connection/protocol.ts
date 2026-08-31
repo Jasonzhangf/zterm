@@ -286,6 +286,12 @@ export interface RemoteWindowStreamMediaPlanContract {
   lanes: readonly RemoteWindowStreamMediaLaneContract[];
 }
 
+export interface RemoteWindowStreamMediaPlanV2Contract {
+  id: RemoteWindowStreamMediaPlan;
+  version: 2;
+  lanes: readonly RemoteWindowStreamMediaLaneContract[];
+}
+
 const REMOTE_WINDOW_MEDIA_PLAN_CONTRACTS: Record<RemoteWindowStreamMediaPlan, RemoteWindowStreamMediaPlanContract> = {
   'single-focus': {
     id: 'single-focus',
@@ -306,6 +312,13 @@ export function getRemoteWindowMediaPlanContract(
   id: RemoteWindowStreamMediaPlan,
 ): RemoteWindowStreamMediaPlanContract {
   return REMOTE_WINDOW_MEDIA_PLAN_CONTRACTS[id];
+}
+
+export function getRemoteWindowMediaPlanV2Contract(
+  id: RemoteWindowStreamMediaPlan,
+): RemoteWindowStreamMediaPlanV2Contract {
+  const base = getRemoteWindowMediaPlanContract(id);
+  return { ...base, version: 2 };
 }
 export type RemoteWindowStreamFailureStage =
   | 'request-validation'

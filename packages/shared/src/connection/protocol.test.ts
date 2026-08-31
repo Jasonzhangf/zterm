@@ -22,6 +22,7 @@ import {
   FILE_TRANSFER_WIRE_CHUNK_BYTES,
   FILE_TRANSFER_WIRE_FRAME_MAX_CHARS,
   getRemoteWindowMediaPlanContract,
+  getRemoteWindowMediaPlanV2Contract,
 } from './protocol';
 
 describe('remote-window media plan contract', () => {
@@ -89,6 +90,17 @@ describe('remote-window media plan contract', () => {
       answer: { type: 'answer', sdp: 'v=0' },
     };
     expect(answer.mediaPlanVersion).toBe(2);
+  });
+
+  it('exposes the same lane topology under media plan version 2', () => {
+    expect(getRemoteWindowMediaPlanV2Contract('overview-plus-focus')).toEqual({
+      id: 'overview-plus-focus',
+      version: 2,
+      lanes: [
+        { role: 'focus', requiredForStart: true },
+        { role: 'overview', requiredForStart: true },
+      ],
+    });
   });
 });
 
