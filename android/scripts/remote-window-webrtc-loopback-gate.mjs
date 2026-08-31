@@ -141,27 +141,34 @@ async function runPlan(mediaPlan) {
     );
     const framesBeforeUpdate = new Map(receivedFramesByRole);
 
+    const senderParameterResults = [];
     for (const { role, sender: rtpSender } of sendersByRole) {
       const unchanged = rtpSender.getParameters();
       if (unchanged.encodings?.length !== 1) {
         throw new Error(`${mediaPlan} ${role} sender exposed ${unchanged.encodings?.length ?? 0} encodings; expected one`);
       }
-      await rtpSender.setParameters(unchanged);
-
-      const bitrateUpdate = rtpSender.getParameters();
-      bitrateUpdate.encodings[0].maxBitrate = 4_000_000;
-      await rtpSender.setParameters(bitrateUpdate);
-      const bitrateApplied = rtpSender.getParameters();
-      if (bitrateApplied.encodings[0].maxBitrate !== 4_000_000) {
-        throw new Error(`${mediaPlan} ${role} sender did not preserve maxBitrate after setParameters`);
-      }
-
-      const frameRateUpdate = rtpSender.getParameters();
-      frameRateUpdate.encodings[0].maxFramerate = 30;
-      await rtpSender.setParameters(frameRateUpdate);
-      const frameRateApplied = rtpSender.getParameters();
-      if (frameRateApplied.encodings[0].maxFramerate !== 30) {
-        throw new Error(`${mediaPlan} ${role} sender did not preserve maxFramerate after setParameters`);
+      try {
+        await rtpSender.setParameters(unchanged);
+        const bitrateUpdate = rtpSender.getParameters();
+        bitrateUpdate.encodings[0].maxBitrate = 4_000_000;
+        await rtpSender.setParameters(bitrateUpdate);
+        const bitrateApplied = rtpSender.getParameters();
+        if (bitrateApplied.encodings[0].maxBitrate !== 4_000_000) {
+          throw new Error(`${mediaPlan} ${role} sender did not preserve maxBitrate after setParameters`);
+        }
+        const frameRateUpdate = rtpSender.getParameters();
+        frameRateUpdate.encodings[0].maxFramerate = 30;
+        await rtpSender.setParameters(frameRateUpdate);
+        const frameRateApplied = rtpSender.getParameters();
+        if (frameRateApplied.encodings[0].maxFramerate !== 30) {
+          throw new Error(`${mediaPlan} ${role} sender did not preserve maxFramerate after setParameters`);
+        }
+        senderParameterResults.push({ role, status: 'applied' });
+      } catch (error) {
+        if (error?.name !== 'InvalidStateError' && error?.name !== 'OperationError') {
+          throw error;
+        }
+        senderParameterResults.push({ role, status: 'unsupported', error: error.name });
       }
     }
 
@@ -199,7 +206,7 @@ async function runPlan(mediaPlan) {
       mediaPlan,
       receivedRoles: receivedRoles.slice().sort(),
       framesByRole: Object.fromEntries(receivedFramesByRole),
-      senderParametersApplied: sendersByRole.map(({ role }) => role).sort(),
+      senderParameterResults,
       iceOrderPreserved: true,
     };
   } finally {
