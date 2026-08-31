@@ -114,6 +114,19 @@ describe('session transport runtime store', () => {
     expect(buildTransportRouteCandidateKey(relayAware)).not.toBe(buildTransportRouteCandidateKey(directOnly));
   });
 
+  it('does not reuse a direct target runtime for an explicit WebRTC session', () => {
+    const directTarget = makeHost({
+      daemonHostId: 'mac-studio',
+      transportMode: 'websocket',
+    });
+    const relayTarget = makeHost({
+      daemonHostId: 'mac-studio',
+      transportMode: 'webrtc',
+    });
+
+    expect(buildTransportTargetKey(relayTarget)).not.toBe(buildTransportTargetKey(directTarget));
+  });
+
   it('does not churn target keys when only relay directory lastSeenAt changes', () => {
     const base = makeHost({
       transportMode: 'auto',

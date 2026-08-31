@@ -1348,7 +1348,7 @@ function TerminalPageComponent({
           ...(canonicalDaemonHostId ? { daemonHostId: canonicalDaemonHostId, relayHostId: canonicalDaemonHostId } : {}),
           authToken: group.authToken,
           ...(relayEndpointCandidates?.length ? { relayEndpointCandidates } : {}),
-          ...(useRelayRouteTarget ? { transportMode: 'auto' as const } : {}),
+          ...(useRelayRouteTarget ? { transportMode: 'webrtc' as const } : {}),
           sessionNames: group.sessionNames,
         };
         const canonicalSessionRowKey = `${serverIdentity.key}::session:${sessionName}`;
