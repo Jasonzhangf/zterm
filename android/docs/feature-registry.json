@@ -1411,7 +1411,9 @@
         "scripts/setup-android-java.sh",
         "scripts/ensure-pnpm-install.sh",
         "scripts/app-version.mjs",
+        "scripts/bump-build-version.mjs",
         "scripts/build-android-debug.sh",
+        "scripts/verify-update-manifest-version.mjs",
         "scripts/verify-web-assets-version.mjs",
         "scripts/prepare-update-bundle.mjs",
         "scripts/verify-update-bundle.mjs"
@@ -1422,7 +1424,11 @@
         "scripts/app-version.d.mts",
         "scripts/app-version.mjs",
         "scripts/app-version.test.ts",
+        "scripts/bump-build-version.mjs",
+        "scripts/bump-build-version.test.mjs",
         "scripts/build-android-debug.sh",
+        "scripts/verify-update-manifest-version.mjs",
+        "scripts/verify-update-manifest-version.test.mjs",
         "scripts/verify-web-assets-version.mjs",
         "scripts/verify-web-assets-version.test.mjs",
         "scripts/setup-android-java.sh",
@@ -1433,11 +1439,14 @@
         "scripts/verify-release-assets.mjs",
         "scripts/verify-relay-server-package.mjs",
         "scripts/check-wterm-runtime-published.mjs",
-        "scripts/check-no-source-js-pollution.mjs"
+        "scripts/check-no-source-js-pollution.mjs",
+        "package.json"
       ],
       "forbidden_paths": [],
       "required_gates": [
         "scripts/app-version.test.ts",
+        "scripts/bump-build-version.test.mjs",
+        "scripts/verify-update-manifest-version.test.mjs",
         "scripts/verify-web-assets-version.test.mjs",
         "scripts/verify-update-bundle.mjs",
         "src/lib/function-wiki-truth.test.ts",
