@@ -228,3 +228,4 @@ results.push(await runPlan('single-focus'));
 results.push(await runPlan('overview-plus-focus'));
 await new Promise((resolve) => setTimeout(resolve, 250));
 process.stdout.write(`${JSON.stringify({ ok: true, results })}\n`);
+process.exit(0);
