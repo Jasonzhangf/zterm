@@ -368,6 +368,8 @@ export interface SessionGroupHistory {
   authToken?: string;
   relayEndpointCandidates?: RelayEndpointCandidate[];
   sessionNames: string[];
+  /** daemon-owned cwd projection keyed by backend-qualified session name */
+  sessionCwByName?: Record<string, string>;
   missingSessionNames?: string[];
   lastOpenedSessionName?: string;
   lastOpenedAt: number;

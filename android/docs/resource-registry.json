@@ -1977,11 +1977,12 @@
     {
       "resource_id": "resource.daemon_session_catalog",
       "resource_type": "daemon_backend_truth",
-      "identity": "Daemon backend session catalog projection from backend session enumeration and backend-qualified session rows",
+      "identity": "Daemon backend session catalog projection from backend session enumeration, backend-qualified rows, and daemon-owned cwd truth",
       "owner_feature": "daemon.session_catalog",
       "truth_store": "src/server/daemon-session-catalog-runtime.ts",
       "allowed_operations": [
         "list_backend_sessions",
+        "publish_session_cwd",
         "build_catalog",
         "publish_catalog",
         "publish_list_idle_facts"

@@ -20,6 +20,7 @@ export type TerminalControlBackendKind = TerminalSourceKind;
 export interface TerminalSessionCatalogEntry {
   name: string;
   backend: 'tmux' | 'herdr';
+  cwd?: string;
 }
 
 export interface TerminalControlRuntimeDeps {
@@ -344,14 +345,27 @@ export function createTerminalControlRuntime(
 
   function listTerminalSessionCatalog() {
     const entries: TerminalSessionCatalogEntry[] = [];
-    if (deps.defaultBackend !== 'herdr') {
+    const selectedBackend = deps.defaultBackend || (deps.wezTermBackend ? 'wezterm' : 'tmux');
+    if (selectedBackend === 'tmux' || selectedBackend === 'wezterm') {
+      const paneResult = selectedBackend === 'tmux'
+        ? runTmux(['list-panes', '-a', '-F', '#{session_name}\t#{pane_current_path}'])
+        : { stdout: '' };
+      const cwdBySession = new Map<string, string>();
+      for (const line of paneResult.stdout.split('\n')) {
+        const [sessionName, cwd] = line.split('\t');
+        if (sessionName?.trim() && cwd?.trim() && !cwdBySession.has(sessionName.trim())) {
+          cwdBySession.set(sessionName.trim(), cwd.trim());
+        }
+      }
       for (const sessionName of listTmuxSessions('tmux')) {
-        entries.push({ name: sessionName, backend: 'tmux' });
+        const cwd = cwdBySession.get(sessionName);
+        entries.push({ name: sessionName, backend: 'tmux', ...(cwd ? { cwd } : {}) });
       }
     }
     if (deps.backendRuntimes?.herdr || deps.defaultBackend === 'herdr') {
       for (const sessionName of listTmuxSessions('herdr')) {
-        entries.push({ name: sessionName, backend: 'herdr' });
+        const session = deps.backendRuntimes?.herdr?.listSessions().find((item) => item.sessionName === sessionName);
+        entries.push({ name: sessionName, backend: 'herdr', ...(session?.cwd ? { cwd: session.cwd } : {}) });
       }
     }
     return entries.sort((left, right) => {

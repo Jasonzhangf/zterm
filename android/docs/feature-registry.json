@@ -1656,7 +1656,7 @@
     },
     {
       "feature_id": "terminal.session_drawer",
-      "title": "Session drawer (left reveal, host rail, multi-host grouping, opened-first ordering)",
+      "title": "Session drawer (left reveal, daemon device/cwd/session tree, opened-first ordering)",
       "domain": "terminal-ui",
       "owners": [
         "src/components/terminal/TerminalSessionDrawer.tsx"
@@ -1777,7 +1777,7 @@
     },
     {
       "feature_id": "terminal.session_preview",
-      "title": "Maximum-six real-time terminal session preview grid",
+      "title": "Maximum-six terminal preview grid with folder quick-peek sheet",
       "domain": "terminal-ui",
       "owners": [
         "src/lib/session-preview-selection.ts",

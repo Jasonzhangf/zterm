@@ -101,3 +101,10 @@ Cases: unique static markers, concurrent tail append, large multi-line replaceme
 - `TerminalPreviewGrid.render-truth.test.tsx` automatically compares six independent immutable render-store snapshots with the corresponding preview DOM before and after a concurrent refresh.
 - Real tmux source -> daemon mirror -> client sparse buffer -> preview DOM replay remains a required L2/L3 gate; the component test does not substitute for it.
 - `pnpm run terminal:preview:source-dom-gate` owns the local automatic L2/L3 chain. It uses six explicitly named gate sessions, reuses them when already present, removes only sessions created by that invocation, asserts exactly six physical subscribers while open, and asserts the daemon subscriber count returns exactly to baseline after close.
+# Folder preview interaction additions
+
+- `daemon.session_catalog` publishes tmux `pane_current_path` as `sessionCatalog[].cwd`; the client must render this value and must not derive cwd from session names or subtitles.
+- The left drawer groups rows by daemon/device then cwd. In folder preview mode only cwd rows remain visible; child session rows are not expanded.
+- A folder long press opens an explicit enter/cancel menu. Entering a folder selects at most six sessions from that daemon-owned folder projection.
+- A preview tile tap is the only event that reveals the bottom quick-peek sheet. The sheet has half/full states, swipe-up full-screen, swipe-down close, and does not remove the independently owned Quick Bar.
+- Queue affordances are touch-revealed absolute overlays at the preview edge; they do not reserve terminal width. Center terminal scrolling remains owned by the terminal render surface.

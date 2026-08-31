@@ -88,6 +88,7 @@ interface UseSessionOpenActionsOptions {
     authToken?: string;
     relayEndpointCandidates?: RelayEndpointCandidate[];
     sessionNames: string[];
+    sessionCwByName?: Record<string, string>;
     lastOpenedSessionName?: string;
   }) => void;
   markSessionGroupEntered: (group: {
@@ -583,6 +584,11 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
             ...baseGroup,
             terminalBackend: backend,
             sessionNames: backendNames,
+            sessionCwByName: Object.fromEntries(
+              (entriesByBackend.get(backend) || [])
+                .filter((entry) => entry.cwd?.trim())
+                .map((entry) => [entry.name.trim(), entry.cwd!.trim()]),
+            ),
           });
         }
         pruneSessionGroupSelectionToRemoteTruth({

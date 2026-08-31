@@ -1218,6 +1218,11 @@ function TerminalPageComponent({
       const sessionNames = [...new Set(
         (device.daemon.sessions || []).map((session) => session.name.trim()).filter(Boolean),
       )].sort((left, right) => left.localeCompare(right));
+      const sessionCwByName = Object.fromEntries(
+        (device.daemon.sessions || [])
+          .filter((session) => session.name.trim() && session.cwd?.trim())
+          .map((session) => [session.name.trim(), session.cwd!.trim()]),
+      );
       if (!daemonHostId || sessionNames.length === 0) {
         return [];
       }
@@ -1239,6 +1244,7 @@ function TerminalPageComponent({
         authToken: existingGroup?.authToken || directEndpoint?.authToken,
         relayEndpointCandidates: device.daemon.endpoints,
         sessionNames,
+        ...(Object.keys(sessionCwByName).length > 0 ? { sessionCwByName } : {}),
         missingSessionNames: [],
         lastOpenedSessionName: lastOpenedSessionName && sessionNames.includes(lastOpenedSessionName)
           ? lastOpenedSessionName
@@ -1397,6 +1403,7 @@ function TerminalPageComponent({
           hostKey: serverIdentity.key,
           hostLabel: serverIdentity.label,
           terminalBackend: groupBackend,
+          cwd: group.sessionCwByName?.[sessionName],
           subtitle: `${serverIdentity.label} · ${sessionName}${formatTerminalBackendSuffix(groupBackend)}`,
         });
       }
@@ -2940,6 +2947,25 @@ function TerminalPageComponent({
     if (!active) setSessionDrawerOpen(false);
   }, []);
 
+  const handlePreviewFolder = useCallback((cwd: string) => {
+    const folderItems = drawerRemoteSessions.items.filter((item) => (item.cwd?.trim() || 'cwd 未知') === cwd);
+    const orderedTargets: SessionPreviewTarget[] = [];
+    for (const item of folderItems) {
+      const target = resolveSessionPreviewTargetFromDrawerSelection(item.id);
+      if (target && !orderedTargets.some((candidate) => candidate.sessionId === target.sessionId)) {
+        orderedTargets.push(target);
+      }
+      if (orderedTargets.length === 6) break;
+    }
+    if (orderedTargets.length === 0) {
+      setSessionPreviewError('该 cwd 没有可预览的 session。');
+      return;
+    }
+    setSessionPreviewSelectionMode(true);
+    setSessionPreviewError(orderedTargets.length < folderItems.length ? '预览最多显示 6 个 session。' : null);
+    persistSessionPreviewSelection({ version: 1, orderedTargets });
+  }, [drawerRemoteSessions.items, persistSessionPreviewSelection, resolveSessionPreviewTargetFromDrawerSelection]);
+
   const handleReplaceSessionPreview = useCallback((sourceSessionId: string, replacementSessionId: string) => {
     const replacementSession = sessions.find((session) => session.id === replacementSessionId);
     if (!replacementSession) {
@@ -3526,6 +3552,7 @@ function TerminalPageComponent({
                 previewSelectionError: sessionPreviewError,
                 onPreviewSelectionModeChange: handleSessionPreviewSelectionModeChange,
                 onTogglePreviewSession: handleToggleSessionPreviewSelection,
+                onPreviewFolder: handlePreviewFolder,
                 onClearPreviewSelection: handleClearDrawerPreviewSelection,
                 terminalShellSkin: effectiveTerminalShellSkin,
               }) : null}

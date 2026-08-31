@@ -16,6 +16,7 @@ export interface TerminalSessionDrawerItem {
   hostKey?: string;
   hostLabel?: string;
   terminalBackend?: 'tmux' | 'herdr';
+  cwd?: string;
 }
 
 export interface TerminalSessionDrawerHost {
@@ -47,6 +48,7 @@ export interface TerminalSessionDrawerProps {
   onPreviewSelectionModeChange?: (active: boolean) => void;
   onTogglePreviewSession?: (sessionId: string) => void;
   onClearPreviewSelection?: () => void;
+  onPreviewFolder?: (cwd: string) => void;
   terminalShellSkin?: 'light' | 'blue' | 'black';
 }
 

@@ -216,7 +216,23 @@ describe('terminal control runtime input queue', () => {
     expect(runtime.listTerminalSessions()).toEqual(['herdr-demo']);
     expect(runtime.listTmuxSessions('herdr')).toEqual(['herdr-demo']);
     expect(runtime.listTerminalSessionCatalog()).toEqual([
-      { name: 'herdr-demo', backend: 'herdr' },
+      { name: 'herdr-demo', backend: 'herdr', cwd: '/tmp' },
+    ]);
+  });
+
+  it('publishes tmux pane cwd in the daemon-owned session catalog', () => {
+    spawnSyncMock.mockImplementation((_binary: string, args: string[]) => ({
+      status: 0,
+      stdout: args[0] === 'list-panes'
+        ? 'demo\t/Users/jason/project\nother\t/Users/jason/project'
+        : 'demo\nother\n',
+      stderr: '',
+    }));
+    const { runtime } = createRuntime();
+
+    expect(runtime.listTerminalSessionCatalog()).toEqual([
+      { name: 'demo', backend: 'tmux', cwd: '/Users/jason/project' },
+      { name: 'other', backend: 'tmux', cwd: '/Users/jason/project' },
     ]);
   });
 
@@ -225,7 +241,7 @@ describe('terminal control runtime input queue', () => {
 
     expect(runtime.listTerminalSessions()).toEqual(['herdr-demo']);
     expect(runtime.resolveTerminalSessionBackend('herdr-demo')).toBe('herdr');
-    expect(herdrBackend.listSessions).toHaveBeenCalledTimes(2);
+    expect(herdrBackend.listSessions).toHaveBeenCalledTimes(3);
     expect(spawnSyncMock).not.toHaveBeenCalled();
   });
 
@@ -239,8 +255,8 @@ describe('terminal control runtime input queue', () => {
     expect(runtime.listTmuxSessions('herdr')).toContain('herdr-demo');
     expect(runtime.listTerminalSessions()).toEqual(['herdr-demo', 'shared']);
     expect(runtime.listTerminalSessionCatalog()).toEqual([
-      { name: 'herdr-demo', backend: 'herdr' },
-      { name: 'shared', backend: 'herdr' },
+      { name: 'herdr-demo', backend: 'herdr', cwd: '/tmp' },
+      { name: 'shared', backend: 'herdr', cwd: '/tmp' },
     ]);
     expect(runtime.resolveTerminalSessionBackend('shared')).toBe('herdr');
     expect(spawnSyncMock).not.toHaveBeenCalled();

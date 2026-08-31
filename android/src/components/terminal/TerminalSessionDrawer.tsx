@@ -40,6 +40,7 @@ function TerminalSessionDrawerComponent({
   onPreviewSelectionModeChange,
   onTogglePreviewSession,
   onClearPreviewSelection,
+  onPreviewFolder,
   terminalShellSkin = 'light',
 }: TerminalSessionDrawerProps) {
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -60,6 +61,7 @@ function TerminalSessionDrawerComponent({
     cwd: string;
     terminalBackend: 'tmux' | 'herdr';
   } | null>(null);
+  const [folderMenu, setFolderMenu] = useState<{ cwd: string; x: number; y: number } | null>(null);
 
   useEffect(() => {
     if (open) {
@@ -188,6 +190,16 @@ function TerminalSessionDrawerComponent({
     const group = hostGroups.find((g) => g.groupKey === effectiveHostKey);
     return group?.sessions || [];
   }, [effectiveHostKey, hostGroups, sessions]);
+  const cwdGroups = useMemo(() => {
+    const groups = new Map<string, TerminalSessionDrawerItem[]>();
+    for (const session of visibleSessions) {
+      const cwd = session.cwd?.trim() || 'cwd 未知';
+      const items = groups.get(cwd) || [];
+      items.push(session);
+      groups.set(cwd, items);
+    }
+    return Array.from(groups, ([cwd, items]) => ({ cwd, items }));
+  }, [visibleSessions]);
   const currentHostGroup = useMemo(() => {
     if (!multiHost) {
       return hostGroups[0] || null;
@@ -478,7 +490,40 @@ function TerminalSessionDrawerComponent({
             gap: '8px',
           }}
         >
-          {visibleSessions.map((session) => {
+          {cwdGroups.map((folder) => (
+            <div key={folder.cwd} data-testid={`terminal-session-drawer-folder-${folder.cwd}`}>
+              <button
+                type="button"
+                data-testid={`terminal-session-drawer-folder-button-${folder.cwd}`}
+                aria-label={`预览文件夹 ${folder.cwd}`}
+                onClick={() => previewSelectionMode ? onPreviewFolder?.(folder.cwd) : undefined}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  setFolderMenu({ cwd: folder.cwd, x: event.clientX, y: event.clientY });
+                }}
+                onTouchStart={(event) => {
+                  const touch = event.touches[0];
+                  if (!touch) return;
+                  clearLongPressTimer();
+                  longPressTimerRef.current = window.setTimeout(() => {
+                    longPressTimerRef.current = null;
+                    setFolderMenu({ cwd: folder.cwd, x: touch.clientX, y: touch.clientY });
+                  }, 420);
+                }}
+                onTouchEnd={clearLongPressTimer}
+                onTouchMove={clearLongPressTimer}
+                style={{
+                  width: '100%', minHeight: '38px', padding: '0 10px', borderRadius: '10px',
+                  border: '1px solid var(--zterm-panel-border)', background: 'var(--zterm-panel-surface)',
+                  color: 'var(--zterm-panel-text)', display: 'flex', alignItems: 'center', gap: '8px',
+                  textAlign: 'left', fontSize: '12px', fontWeight: 800,
+                }}
+              >
+                <span aria-hidden="true">{previewSelectionMode ? '◉' : '▾'}</span>
+                <span style={{ minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{folder.cwd}</span>
+                <span style={{ color: 'var(--zterm-panel-muted)', fontSize: '10px' }}>{folder.items.length}</span>
+              </button>
+              {(!previewSelectionMode || folder.cwd === 'cwd 未知') ? folder.items.map((session) => {
             const previewSelectionIndex = previewSelectedSessionIds.indexOf(session.id);
             const slotTone = resolveSessionGroupSlotTone(session.sessionGroupSlot, sessionGroupLayoutAxis);
             return (
@@ -750,7 +795,9 @@ function TerminalSessionDrawerComponent({
               </div>
             </div>
             );
-          })}
+              }) : null}
+            </div>
+          ))}
           {visibleSessions.length === 0 && (
             <div
               data-testid="terminal-session-drawer-empty-host"
@@ -768,6 +815,27 @@ function TerminalSessionDrawerComponent({
             </div>
           )}
         </div>
+        {folderMenu ? (
+          <div
+            role="menu"
+            data-testid="terminal-session-drawer-folder-menu"
+            style={{
+              position: 'fixed', left: folderMenu.x, top: folderMenu.y, zIndex: 170,
+              display: 'flex', flexDirection: 'column', gap: '4px', padding: '6px',
+              borderRadius: '10px', border: '1px solid var(--zterm-panel-border)',
+              background: 'var(--zterm-panel-bg)', boxShadow: '0 12px 30px rgba(0,0,0,.35)',
+            }}
+          >
+            <button type="button" role="menuitem" onClick={() => { onPreviewFolder?.(folderMenu.cwd); setFolderMenu(null); }}
+              style={{ minHeight: '34px', padding: '0 10px', border: 0, borderRadius: '7px', background: 'var(--zterm-panel-active)', color: 'var(--zterm-panel-text)', fontWeight: 800 }}>
+              进入文件夹预览
+            </button>
+            <button type="button" role="menuitem" onClick={() => setFolderMenu(null)}
+              style={{ minHeight: '30px', padding: '0 10px', border: 0, borderRadius: '7px', background: 'transparent', color: 'var(--zterm-panel-muted)' }}>
+              取消
+            </button>
+          </div>
+        ) : null}
 
         {slotMenu && onAssignSessionGroupSlot ? (
           <div

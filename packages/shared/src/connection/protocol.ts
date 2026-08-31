@@ -834,6 +834,8 @@ export interface SessionActivity {
 export interface TerminalSessionCatalogEntry {
   name: string;
   backend: TerminalBackendKind;
+  /** daemon-owned pane working directory; UI must render, never infer */
+  cwd?: string;
   observation?: TerminalSessionObservation;
 }
 

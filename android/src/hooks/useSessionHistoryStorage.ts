@@ -82,6 +82,11 @@ function normalizeGroupEntry(
   const sessionNames = Array.isArray(candidate.sessionNames)
     ? candidate.sessionNames.map((item) => (typeof item === 'string' ? item.trim() : '')).filter(Boolean)
     : [];
+  const sessionCwByName = candidate.sessionCwByName && typeof candidate.sessionCwByName === 'object'
+    ? Object.fromEntries(Object.entries(candidate.sessionCwByName).filter(([name, cwd]) => (
+      sessionNames.includes(name) && typeof cwd === 'string' && cwd.trim()
+    )).map(([name, cwd]) => [name, (cwd as string).trim()]))
+    : {};
   const missingSessionNames = Array.isArray(candidate.missingSessionNames)
     ? candidate.missingSessionNames.map((item) => (typeof item === 'string' ? item.trim() : '')).filter(Boolean)
     : [];
@@ -141,6 +146,7 @@ function normalizeGroupEntry(
     authToken: typeof candidate.authToken === 'string' ? candidate.authToken : undefined,
     ...(relayEndpointCandidates.length > 0 ? { relayEndpointCandidates } : {}),
     sessionNames: sortedSessionNames,
+    ...(Object.keys(sessionCwByName).length > 0 ? { sessionCwByName } : {}),
     missingSessionNames: sortedMissingSessionNames,
     lastOpenedSessionName:
       lastOpenedSessionName
@@ -168,6 +174,7 @@ function mergeSessionGroupEntries(
 ) {
   const sessionNames = [...new Set([...primary.sessionNames, ...supplement.sessionNames])]
     .sort((a, b) => a.localeCompare(b));
+  const sessionCwByName = { ...(primary.sessionCwByName || {}), ...(supplement.sessionCwByName || {}) };
   const missingSessionNames = [...new Set([
     ...(primary.missingSessionNames || []),
     ...(supplement.missingSessionNames || []),
@@ -189,6 +196,7 @@ function mergeSessionGroupEntries(
     id: toServerGroupKey(primary),
     relayEndpointCandidates: relayEndpointCandidates.length > 0 ? relayEndpointCandidates : undefined,
     sessionNames,
+    ...(Object.keys(sessionCwByName).length > 0 ? { sessionCwByName } : {}),
     missingSessionNames,
     ...(lastOpenedSessionName ? { lastOpenedSessionName } : { lastOpenedSessionName: undefined }),
     lastOpenedAt: Math.max(primary.lastOpenedAt, supplement.lastOpenedAt),
@@ -289,6 +297,7 @@ export function useSessionHistoryStorage(
           canonicalGroup.relayEndpointCandidates,
         ),
         sessionNames: mergedSessionNames,
+        sessionCwByName: { ...(existing?.sessionCwByName || {}), ...(canonicalGroup.sessionCwByName || {}) },
         missingSessionNames: (existing?.missingSessionNames || []).filter((sessionName) => (
           mergedSessionNames.includes(sessionName)
         )),
@@ -391,6 +400,9 @@ export function useSessionHistoryStorage(
         return [{
           ...item,
           sessionNames: normalizedRemoteSessionNames,
+          sessionCwByName: Object.fromEntries(
+            Object.entries(item.sessionCwByName || {}).filter(([name]) => remoteSessionNameSet.has(name)),
+          ),
           missingSessionNames: [],
           lastOpenedSessionName: nextLastOpenedSessionName,
         }];
