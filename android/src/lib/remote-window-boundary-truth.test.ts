@@ -49,10 +49,10 @@ describe('remote window architecture boundary truth', () => {
     expect(gateway).not.toContain('listTargetsLive');
   });
 
-  it('forbids SDP rewrite and local-offer negotiation in the daemon', () => {
+  it('forbids SDP rewrite while allowing standard sender-owned offer negotiation', () => {
     const gateway = read('src/server/remote-window-stream-daemon.ts');
     expect(gateway).toContain('peerConnection.setRemoteDescription');
-    expect(gateway).not.toMatch(/offer\.sdp\.(?:replace|split)|rewrite.*sdp|fallbackOffer|createOffer\s*\(/i);
+    expect(gateway).not.toMatch(/offer\.sdp\.(?:replace|split)|rewrite.*sdp|fallbackOffer/i);
   });
 
   it('keeps active runtime free of design-only raw/encode resources', () => {

@@ -390,6 +390,7 @@ describe('session context remote window runtime', () => {
       remoteWindowMessageRuntime: {
         requestTargets: vi.fn(),
         requestStreamStart,
+        sendStreamAnswerV2: vi.fn(),
         sendStreamQuality: vi.fn(),
     sendStreamUpdateFocus: vi.fn(),
         sendStreamIceCandidate,
@@ -426,9 +427,8 @@ describe('session context remote window runtime', () => {
       streamId: 'stream-1',
       purpose: 'focus',
       mediaPlan: 'single-focus' as const,
-      mediaPlanVersion: 1 as const,
+      mediaPlanVersion: 2 as const,
       target,
-      offer: { type: 'offer', sdp: 'offer-sdp' },
       iceServers: undefined,
       videoProfile: qualityVideoProfile,
       sendSocketPayload,

@@ -632,3 +632,106 @@ This preserves standard WebRTC interoperability and fixes the application-side
 causes of gesture, queue, capture-restart, and render latency. The remaining
 native-binding limitation is a release prerequisite for the full dynamic
 quality DoD, not a reason to invent a private WebRTC protocol.
+
+## 20. Contract-locked implementation plan (2026-08-31)
+
+The preceding feasibility note is historical evidence for the old
+receiver-offer path. The implementation target is now the sender-owned v2
+contract in
+`docs/decisions/2026-08-31-remote-window-sender-offer-contract.md`.
+
+### Goal and acceptance
+
+- Daemon creates the sender transceivers and initial `sendEncodings` using the
+  standard WebRTC API.
+- Android receives the daemon offer, creates matching recvonly transceivers,
+  and returns a typed answer.
+- Single-focus and overview-plus-focus streams deliver every required lane on
+  direct and relay routes.
+- Runtime `setParameters()` is reported as applied only when a fresh
+  transaction succeeds and reads back identically; otherwise the exact typed
+  unsupported error is projected.
+- No v1 offer path, SDP rewriting, private WebRTC fork, fallback media path,
+  or silent quality downgrade remains in production.
+
+### Scope and boundaries
+
+In scope: `packages/shared/src/connection/protocol.ts`,
+`android/src/lib/remote-window-receiver-runtime.ts`,
+`android/src/lib/remote-window-message-runtime.ts`,
+`android/src/server/remote-window-stream-daemon.ts`, related remote-window
+tests, registries, function/mainline maps, and verification gates.
+
+Out of scope: terminal mirror/buffer/renderer, screenshot transport, tmux
+width, Android UI redesign, WebRTC native source changes, and public Relay
+asset publication without separate authorization.
+
+`daemon.remote_window_stream` owns offer/transceiver/answer/ICE generation and
+capture lifecycle. `client.remote_window_overlay` owns receiver lifecycle,
+canvas projection, and user quality intent. Shared protocol owns only the
+versioned wire contract; control state, retry, health, and diagnostics remain
+side-channel resources.
+
+### Technical design
+
+1. Add `mediaPlanVersion=2` request/offer/answer types. Start request carries
+   no SDP offer. Started-offer carries the daemon SDP offer. A dedicated typed
+   answer message returns the Android SDP answer.
+2. Daemon validates target/media plan, creates one sendonly transceiver per
+   lane with the requested initial `sendEncodings`, then creates and publishes
+   its offer. It accepts exactly one answer per `(streamId, requestId)`.
+3. Android creates matching recvonly transceivers before applying the offer,
+   waits for the typed offer, creates an answer, and publishes it through the
+   existing physical transport without touching terminal payloads.
+4. ICE candidates are buffered, deduplicated, and applied only after the
+   corresponding remote description. `streamId + requestId` is the generation
+   fence; stale/duplicate/conflicting messages are explicit errors.
+5. Stream success is ordered: offer created -> answer accepted -> descriptions
+   applied -> ICE connected -> required tracks attached -> capture ready.
+   Every partial state has exactly-once cleanup.
+6. Quality updates first run the binding capability gate. Supported senders
+   use a fresh `getParameters()` transaction; unsupported updates return a
+   typed failure. Capture FPS/dimensions/latest-frame remain independent and
+   must not renegotiate the peer.
+
+### Risks and controls
+
+- Existing clients speak v1: bump the media-plan version and reject v1 in the
+  v2 route; do not maintain a dual production path.
+- ICE arrives early or twice: bounded per-generation queue plus canonical
+  fingerprint dedupe.
+- One lane fails: group error and exactly-once cleanup for all lanes.
+- Binding rejects runtime parameters: explicit unsupported result; never retry,
+  fallback, or mark applied.
+- Offer/answer timeout: terminal typed timeout for that request; no v1 retry.
+
+### Verification matrix
+
+- Shared contract parser/type tests and positive/negative message routing.
+- Single-focus and overview-plus-focus offer/answer tests.
+- Direct, relay, early, duplicate, stale, and conflicting ICE tests.
+- Initial `sendEncodings` presence and post-start `setParameters` positive /
+  unsupported tests.
+- Track delivery, media-plan mismatch, malformed SDP, answer timeout, stale
+  generation, duplicate answer, partial-lane cleanup, and exactly-once close.
+- Feature/resource/module/edge/function/mainline registry gates.
+- Canonical web build, Android build, installed daemon restart, live Mac route,
+  Android emulator/real-device route, and AGY Review only after all prior gates
+  pass.
+
+### Ordered execution
+
+1. Add contract types and red tests.
+2. Add daemon offer/answer registry and sender transceivers.
+3. Change Android receiver startup and ICE generation handling.
+4. Remove v1 offer handling after v2 gates pass.
+5. Run focused tests, full prebuild, canonical and Android builds.
+6. Install exact daemon/APK, restart, run real route probes, and record evidence.
+7. Run AGY Review, then commit/push only the reviewed change set.
+
+### Definition of done
+
+The task is complete only when the v2 contract is implemented, all paired
+tests/builds/live gates pass, installed runtime hashes match the reviewed
+commit, daemon restart and APK identity are verified, AGY Review is PASS, and
+no known v1 or silent fallback path remains.

@@ -5,7 +5,6 @@ import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import type {
-  RemoteWindowStreamStartRequestPayload,
   RemoteWindowStreamStatusPayload,
 } from '@zterm/shared/protocol';
 
@@ -191,9 +190,7 @@ function createRemoteWindowStreamDaemonRuntime(
   return {
     ...runtime,
     startStream: (
-      payload: Omit<RemoteWindowStreamStartRequestPayload, 'videoProfile'> & {
-        videoProfile?: RemoteWindowStreamStartRequestPayload['videoProfile'];
-      },
+      payload: any,
       handlers?: Parameters<typeof runtime.startStream>[1],
     ) => runtime.startStream({
       ...payload,
@@ -275,7 +272,7 @@ class FakeRemoteWindowPeerConnection {
 
   public addTrack = vi.fn(() => makeFakeRtpSender());
 
-  public addTransceiver = vi.fn();
+  public addTransceiver = vi.fn(() => ({ sender: makeFakeRtpSender() }));
 
   public close = vi.fn(() => {
     this.connectionState = 'closed';
@@ -290,6 +287,11 @@ class FakeRemoteWindowPeerConnection {
   public createAnswer = vi.fn(async () => ({
     type: 'answer' as const,
     sdp: 'daemon-answer-sdp',
+  }));
+
+  public createOffer = vi.fn(async () => ({
+    type: 'offer' as const,
+    sdp: 'daemon-offer-sdp',
   }));
 
   public setLocalDescription = vi.fn(async (description: RTCSessionDescriptionInit) => {
@@ -596,6 +598,63 @@ describe('remote window stream daemon owner', () => {
       },
     });
     expect(config.event).toMatchObject({ kind: 'click', x: 1_200, y: 650 });
+  });
+
+  it('negotiates v2 as sender-owned offerer with initial encodings', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    const videoSource = {
+      createTrack: vi.fn(() => makeFakeMediaStreamTrack()),
+      onFrame: vi.fn(),
+    };
+    const captureSource = makeControllableCaptureSource({
+      frameRate: smoothVideoProfile.maxFrameRateFps,
+      maxCaptureWidth: smoothVideoProfile.maxCaptureWidth,
+      maxCaptureHeight: smoothVideoProfile.maxCaptureHeight,
+      startupTimeoutMs: 100,
+      swiftBinary: 'swift',
+      captureBinary: '/tmp/capture',
+      onFrame: () => undefined,
+      onError: () => undefined,
+    });
+    let offerSeen: any;
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      arch: 'arm64',
+      captureBinary: '/tmp/capture',
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      videoSourceFactory: vi.fn(() => videoSource),
+      captureSourceFactory: vi.fn(async () => captureSource),
+      runTmux: () => ({ ok: true, stdout: '' }),
+    });
+    const resultPromise = runtime.startStream({
+      requestId: 'v2-request',
+      streamId: 'v2-stream',
+      mediaPlan: 'single-focus',
+      mediaPlanVersion: 2,
+      target: makeStreamTarget(),
+      videoProfile: smoothVideoProfile,
+    } as never, {
+      sendOffer: (offer) => {
+        offerSeen = offer;
+        void runtime.acceptAnswer?.({
+          requestId: offer.requestId,
+          streamId: offer.streamId,
+          mediaPlanVersion: 2,
+          answer: { type: 'answer', sdp: 'client-answer-sdp' },
+        });
+      },
+    });
+    const result = await resultPromise;
+    expect(offerSeen).toMatchObject({ mediaPlanVersion: 2, offer: { type: 'offer', sdp: 'daemon-offer-sdp' } });
+    expect(fakePeer.addTransceiver).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      direction: 'sendonly',
+      sendEncodings: [{
+        maxBitrate: smoothVideoProfile.maxBitrateBps,
+        maxFramerate: smoothVideoProfile.maxFrameRateFps,
+      }],
+    }));
+    expect(fakePeer.remoteDescription).toEqual({ type: 'answer', sdp: 'client-answer-sdp' });
+    expect(result).toMatchObject({ mediaPlanVersion: 2 });
   });
 
   it('fails composite input outside the published layout instead of selecting a fallback window', () => {

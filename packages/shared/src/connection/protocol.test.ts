@@ -22,6 +22,8 @@ import {
   FILE_TRANSFER_WIRE_CHUNK_BYTES,
   FILE_TRANSFER_WIRE_FRAME_MAX_CHARS,
   getRemoteWindowMediaPlanContract,
+  getRemoteWindowMediaPlanV2Contract,
+  isRemoteWindowStreamStartRequestV2,
 } from './protocol';
 
 describe('remote-window media plan contract', () => {
@@ -34,6 +36,71 @@ describe('remote-window media plan contract', () => {
     expect(getRemoteWindowMediaPlanContract('overview-plus-focus')).toEqual({
       id: 'overview-plus-focus',
       version: 1,
+      lanes: [
+        { role: 'focus', requiredForStart: true },
+        { role: 'overview', requiredForStart: true },
+      ],
+    });
+  });
+
+  it('locks sender-owned v2 start and answer messages without a client offer', () => {
+    const request: import('./protocol').RemoteWindowStreamStartRequestV2Payload = {
+      requestId: 'start-v2-1',
+      streamId: 'stream-v2-1',
+      mediaPlan: 'single-focus',
+      mediaPlanVersion: 2,
+      target: {
+        streamTargetId: 'target-v2-1',
+        videoTarget: {
+          kind: 'app-window',
+          appBundleId: 'com.example.Terminal',
+          pid: 1,
+          windowId: 'window-1',
+          title: 'Terminal',
+          windowBoundsTopLeftPx: { x: 0, y: 0, width: 640, height: 480 },
+          cropRectTopLeftPx: { x: 0, y: 0, width: 640, height: 480 },
+        },
+        inputTarget: { kind: 'app-window' },
+        streamMode: 'interactive',
+        focusPolicy: 'bring-to-focus',
+        inputRoute: 'os-event',
+        capture: {
+          source: 'ScreenCaptureKit',
+          coordinateSpace: 'macos-top-left-px',
+          scale: 1,
+          createdAt: '2026-08-31T00:00:00.000Z',
+        },
+      },
+      videoProfile: {
+        preference: 'smooth',
+        maxBitrateBps: 4_000_000,
+        maxFrameRateFps: 30,
+        maxCaptureWidth: 1280,
+        maxCaptureHeight: 720,
+        maxFrameAgeMs: 100,
+        interactionActive: false,
+        overviewMaxBitrateBps: 0,
+        overviewMaxFrameRateFps: 0,
+      },
+    };
+    expect(request).not.toHaveProperty('offer');
+    const answer: import('./protocol').RemoteWindowStreamAnswerV2Payload = {
+      requestId: request.requestId,
+      streamId: request.streamId,
+      mediaPlanVersion: 2,
+      answer: { type: 'answer', sdp: 'v=0' },
+    };
+    expect(answer.mediaPlanVersion).toBe(2);
+    expect(isRemoteWindowStreamStartRequestV2(request)).toBe(true);
+    expect(isRemoteWindowStreamStartRequestV2({ ...request, mediaPlanVersion: 1 })).toBe(false);
+    expect(isRemoteWindowStreamStartRequestV2({ ...request, offer: { type: 'offer', sdp: 'v=0' } })).toBe(false);
+    expect(isRemoteWindowStreamStartRequestV2({ ...request, streamId: '' })).toBe(false);
+  });
+
+  it('exposes the same lane topology under media plan version 2', () => {
+    expect(getRemoteWindowMediaPlanV2Contract('overview-plus-focus')).toEqual({
+      id: 'overview-plus-focus',
+      version: 2,
       lanes: [
         { role: 'focus', requiredForStart: true },
         { role: 'overview', requiredForStart: true },

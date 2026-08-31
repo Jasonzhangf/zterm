@@ -5,7 +5,8 @@ import type {
   RemoteWindowStreamQualityRequestPayload,
   RemoteWindowStreamQualityResultPayload,
   RemoteWindowStreamStartedPayload,
-  RemoteWindowStreamStartRequestPayload,
+  RemoteWindowStreamStartedOfferV2Payload,
+  RemoteWindowStreamAnswerV2Payload,
   RemoteWindowStreamPurpose,
   RemoteWindowStreamTargetManifest,
   RemoteWindowVideoProfile,
@@ -30,21 +31,15 @@ interface RemoteWindowCatalogMessageRuntimeLike {
 }
 
 interface RemoteWindowStreamMessageRuntimeLike extends RemoteWindowCatalogMessageRuntimeLike {
-  requestStreamStart: (
+  requestStreamStart: (...args: any[]) => Promise<RemoteWindowStreamStartedPayload | RemoteWindowStreamStartedOfferV2Payload>;
+  sendStreamAnswerV2?: (
     sessionId: string,
     options: {
       ws: BridgeTransportSocket;
-      streamId: string;
-      purpose?: RemoteWindowStreamPurpose;
-      mediaPlan: RemoteWindowStreamStartRequestPayload['mediaPlan'];
-      mediaPlanVersion: RemoteWindowStreamStartRequestPayload['mediaPlanVersion'];
-      target: RemoteWindowStreamTargetManifest;
-      offer: { type: 'offer'; sdp: string };
-      iceServers?: Array<Record<string, unknown>>;
-      videoProfile: RemoteWindowVideoProfile;
+      payload: RemoteWindowStreamAnswerV2Payload;
       sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
     },
-  ) => Promise<RemoteWindowStreamStartedPayload>;
+  ) => void;
   sendStreamQuality: (
     sessionId: string,
     options: {
@@ -68,6 +63,7 @@ interface RemoteWindowStreamMessageRuntimeLike extends RemoteWindowCatalogMessag
     options: {
       ws: BridgeTransportSocket;
       streamId: string;
+      requestId?: string;
       purpose?: RemoteWindowStreamPurpose;
       candidate: RemoteWindowStreamIceCandidate;
       sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
@@ -106,8 +102,10 @@ interface RemoteWindowReceiverRuntimeLike {
     purpose?: RemoteWindowStreamPurpose;
     target: RemoteWindowStreamTargetManifest;
     iceServers?: RTCIceServer[];
-    sendIceCandidate: (candidate: RemoteWindowStreamIceCandidate) => void;
-    startRemote: (offer: { type: 'offer'; sdp: string }) => Promise<RemoteWindowStreamStartedPayload>;
+    sendIceCandidate: (candidate: RemoteWindowStreamIceCandidate, requestId?: string) => void;
+    startRemote: (offer: { type: 'offer'; sdp: string }) => Promise<RemoteWindowStreamStartedPayload | RemoteWindowStreamStartedOfferV2Payload>;
+    protocolVersion?: 1 | 2;
+    sendAnswer?: (answer: RemoteWindowStreamAnswerV2Payload) => void | Promise<void>;
   }) => Promise<RemoteWindowReceiverStartResult>;
   stopStream: (streamId: string) => boolean;
 }
@@ -314,27 +312,38 @@ export async function requestRemoteWindowStreamStartRuntime(options: {
     purpose: options.purpose,
     target: options.target,
     iceServers,
-    sendIceCandidate: (candidate) => {
+    protocolVersion: 2,
+    sendIceCandidate: (candidate, requestId) => {
       options.remoteWindowMessageRuntime.sendStreamIceCandidate(targetSessionId, {
         ws,
         streamId,
         purpose: options.purpose,
+        requestId,
         candidate,
         sendSocketPayload: options.sendSocketPayload,
       });
     },
-    startRemote: (offer) => options.remoteWindowMessageRuntime.requestStreamStart(targetSessionId, {
+    startRemote: () => options.remoteWindowMessageRuntime.requestStreamStart(targetSessionId, {
       ws,
       streamId,
       purpose: options.purpose,
       mediaPlan,
-      mediaPlanVersion: 1,
+      mediaPlanVersion: 2,
       target: options.target,
-      offer,
       iceServers: iceServers?.map((server) => ({ ...server })) as Array<Record<string, unknown>> | undefined,
       videoProfile: options.videoProfile,
       sendSocketPayload: options.sendSocketPayload,
     }),
+    sendAnswer: (answer) => {
+      if (!options.remoteWindowMessageRuntime.sendStreamAnswerV2) {
+        throw new Error('Remote window v2 answer sender is unavailable');
+      }
+      options.remoteWindowMessageRuntime.sendStreamAnswerV2(targetSessionId, {
+        ws,
+        payload: answer,
+        sendSocketPayload: options.sendSocketPayload,
+      });
+    },
   });
 }
 

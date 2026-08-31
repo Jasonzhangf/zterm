@@ -257,6 +257,7 @@ export function handleSocketServerMessageRuntime(options: {
       break;
     case 'remote-window-targets-response':
     case 'remote-window-stream-started':
+    case 'remote-window-stream-offer-v2':
     case 'remote-window-stream-ice-candidate':
     case 'remote-window-stream-status':
     case 'remote-window-stream-focus-result':
