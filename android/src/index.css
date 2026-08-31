@@ -138,7 +138,6 @@ label:focus-visible {
 
 .zterm-settings-group[open] > summary { border-bottom: none; }
 .zterm-settings-group[open] > summary .zterm-settings-chevron { transform: rotate(90deg); }
-}
 
 /* Shared tactile surface treatment for terminal chrome. Keep the terminal canvas
  * untouched so renderer colors and selection behavior remain authoritative. */
@@ -507,3 +506,42 @@ label:focus-visible {
     0 0 0 2px var(--zterm-neo-focus),
     0 0 0 5px rgba(31, 214, 122, 0.12) !important;
 }
+
+/* Settings group content reveal. */
+.zterm-settings-group > [data-settings-group-content] {
+  display: grid;
+  gap: 16px;
+  width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
+  padding: 0 clamp(16px, 4vw, 36px);
+  transform: translateY(-4px);
+  opacity: 0;
+  transition:
+    transform 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.zterm-settings-group[open] > [data-settings-group-content] {
+  padding: clamp(16px, 4vw, 36px);
+  transform: translateY(0);
+  opacity: 1;
+}
+
+[data-tmux-picker-overlay] {
+  opacity: 0;
+  transition: opacity 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+[data-tmux-picker-overlay][data-state="open"] { opacity: 1; }
+[data-tmux-picker-overlay][data-state="closing"] { opacity: 0; }
+[data-tmux-picker-panel] {
+  transform: translateY(12%);
+  opacity: 0;
+  transition:
+    transform 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+[data-tmux-picker-panel][data-state="open"] { transform: translateY(0); opacity: 1; }
+[data-tmux-picker-panel][data-state="closing"] { transform: translateY(12%); opacity: 0; }
+
+[data-settings-save-status][data-state="saved"] { color: #1f9d5d; font-weight: 700; }
+[data-settings-save-status][data-state="saving"] { color: #6e7781; font-weight: 700; }

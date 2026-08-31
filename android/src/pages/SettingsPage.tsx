@@ -24,7 +24,6 @@ import type {
 } from '../lib/plugin-settings-update/settings-update-contract';
 import { ConnectionConfigSection } from '../components/settings/ConnectionConfigSection';
 import {
-  settingsCardPadding,
   settingsViewportPadding,
   SettingsSectionTitle,
   settingsInputStyle,
@@ -98,6 +97,7 @@ function SettingsGroup({
     <details
       className="zterm-settings-group"
       data-testid="settings-group"
+      data-state={open ? 'open' : 'closed'}
       open={open}
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
@@ -107,7 +107,7 @@ function SettingsGroup({
           <path d="m9 6 6 6-6 6" />
         </svg>
       </summary>
-      <div style={{ display: 'grid', gap: '16px', padding: settingsCardPadding, width: '100%', boxSizing: 'border-box', minWidth: 0 }}>{children}</div>
+      <div data-settings-group-content>{children}</div>
     </details>
   );
 }
@@ -160,6 +160,20 @@ export function SettingsPage({
   ));
   const livePreviewPatchRef = useRef<Partial<Pick<BridgeSettings, 'terminalThemeId' | 'terminalShellSkin'>> | null>(null);
   const updateDraftEditedRef = useRef(false);
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const saveResetTimerRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (saveState !== 'saved') {
+      return;
+    }
+    saveResetTimerRef.current = window.setTimeout(() => setSaveState('idle'), 3000);
+    return () => {
+      if (saveResetTimerRef.current !== null) {
+        window.clearTimeout(saveResetTimerRef.current);
+        saveResetTimerRef.current = null;
+      }
+    };
+  }, [saveState]);
   const defaultServer = useMemo(() => getDefaultBridgeServer(draft), [draft]);
   const manifestCandidates = useMemo(() => buildAppUpdateManifestCandidates(draft), [draft]);
   useEffect(() => {
@@ -206,6 +220,13 @@ export function SettingsPage({
     onRelaySettingsChange?.(nextRelay);
   }, [onRelaySettingsChange]);
 
+  const handleSave = () => {
+    setSaveState('saving');
+    onSave(draft);
+    onUpdatePreferencesChange(updateDraft);
+    setSaveState('saved');
+  };
+
   return (
     <div
       data-testid="settings-scroll"
@@ -233,6 +254,9 @@ export function SettingsPage({
         }}
       >
         <button
+          type="button"
+          aria-label="Back to connections"
+          title="Back"
           onClick={onBack}
           style={{
             width: '56px',
@@ -251,11 +275,21 @@ export function SettingsPage({
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: '20px', fontWeight: 800 }}>Settings</div>
         </div>
+        <span
+          data-settings-save-status
+          data-state={saveState}
+          role="status"
+          aria-live="polite"
+          style={{ fontSize: '13px', minWidth: 0, marginRight: '6px' }}
+        >
+          {saveState === 'saved' ? 'Saved' : ''}
+        </span>
         <button
-          onClick={() => {
-            onSave(draft);
-            onUpdatePreferencesChange(updateDraft);
-          }}
+          type="button"
+          aria-label="Save"
+          title="Save settings"
+          onClick={handleSave}
+          disabled={saveState === 'saving'}
           style={{
             minWidth: 'clamp(84px, 22vw, 112px)',
             height: '56px',
@@ -266,9 +300,10 @@ export function SettingsPage({
             fontWeight: 800,
             boxShadow: mobileTheme.shadow.soft,
             cursor: 'pointer',
+            opacity: saveState === 'saving' ? 0.72 : 1,
           }}
         >
-          Save
+          {saveState === 'saved' ? 'Saved' : 'Save'}
         </button>
       </div>
 
