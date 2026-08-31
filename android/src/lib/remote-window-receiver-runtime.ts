@@ -7,7 +7,7 @@ import type {
   RemoteWindowStreamAnswerV2Payload,
   RemoteWindowStreamTargetManifest,
 } from './types';
-import { getRemoteWindowMediaPlanContract } from '@zterm/shared/protocol';
+import { getRemoteWindowMediaPlanContract, getRemoteWindowMediaPlanV2Contract } from '@zterm/shared/protocol';
 import type { RemoteWindowVideoStatsSample } from './remote-window-video-quality';
 
 export interface RemoteWindowReceiverStartResult {
@@ -15,7 +15,7 @@ export interface RemoteWindowReceiverStartResult {
   purpose?: RemoteWindowStreamPurpose;
   mediaStream: MediaStream;
   overviewMediaStream?: MediaStream;
-  started: RemoteWindowStreamStartedPayload;
+  started: RemoteWindowStreamStartedPayload | RemoteWindowStreamStartedOfferV2Payload;
   startupTelemetry?: RemoteWindowReceiverStartupTelemetry;
   collectStats?: () => Promise<RemoteWindowVideoStatsSample | null>;
 }
@@ -289,7 +289,9 @@ export function createRemoteWindowReceiverRuntime(input?: {
       const mediaPlan = (options.target.compositeWindows ?? []).length > 0
         ? 'overview-plus-focus' as const
         : 'single-focus' as const;
-      const mediaPlanContract = getRemoteWindowMediaPlanContract(mediaPlan);
+      const mediaPlanContract = options.protocolVersion === 2
+        ? getRemoteWindowMediaPlanV2Contract(mediaPlan)
+        : getRemoteWindowMediaPlanContract(mediaPlan);
       const needsOverview = mediaPlanContract.lanes.some((lane) => lane.role === 'overview');
       const entry: ActiveRemoteWindowReceiverStream = {
         streamId,
