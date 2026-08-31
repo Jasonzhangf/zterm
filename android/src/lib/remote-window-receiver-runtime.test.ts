@@ -392,7 +392,7 @@ describe('remote window receiver runtime', () => {
       sdpMid: '0',
       sdpMLineIndex: 0,
       usernameFragment: 'ufrag-local',
-    });
+    }, 'rw-start-1');
     await expect(runtime.addIceCandidate({
       streamId: 'stream-1',
       candidate: { candidate: 'candidate:remote', sdpMid: '0', sdpMLineIndex: 0 },

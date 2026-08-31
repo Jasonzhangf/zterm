@@ -669,6 +669,7 @@ export function createRemoteWindowMessageRuntime(input?: {
     sendStreamIceCandidate(sessionId: string, options: {
       ws: BridgeTransportSocket;
       streamId: string;
+      requestId?: string;
       purpose?: RemoteWindowStreamPurpose;
       candidate: RemoteWindowStreamIceCandidate;
       sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
@@ -682,6 +683,7 @@ export function createRemoteWindowMessageRuntime(input?: {
         type: 'remote-window-stream-ice-candidate',
         payload: {
           streamId,
+          ...(options.requestId ? { requestId: options.requestId } : {}),
           ...(options.purpose ? { purpose: options.purpose } : {}),
           candidate: options.candidate,
         },

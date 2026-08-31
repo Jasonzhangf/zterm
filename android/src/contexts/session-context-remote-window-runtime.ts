@@ -63,6 +63,7 @@ interface RemoteWindowStreamMessageRuntimeLike extends RemoteWindowCatalogMessag
     options: {
       ws: BridgeTransportSocket;
       streamId: string;
+      requestId?: string;
       purpose?: RemoteWindowStreamPurpose;
       candidate: RemoteWindowStreamIceCandidate;
       sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
@@ -101,7 +102,7 @@ interface RemoteWindowReceiverRuntimeLike {
     purpose?: RemoteWindowStreamPurpose;
     target: RemoteWindowStreamTargetManifest;
     iceServers?: RTCIceServer[];
-    sendIceCandidate: (candidate: RemoteWindowStreamIceCandidate) => void;
+    sendIceCandidate: (candidate: RemoteWindowStreamIceCandidate, requestId?: string) => void;
     startRemote: (offer: { type: 'offer'; sdp: string }) => Promise<RemoteWindowStreamStartedPayload | RemoteWindowStreamStartedOfferV2Payload>;
     protocolVersion?: 1 | 2;
     sendAnswer?: (answer: RemoteWindowStreamAnswerV2Payload) => void | Promise<void>;
@@ -312,11 +313,12 @@ export async function requestRemoteWindowStreamStartRuntime(options: {
     target: options.target,
     iceServers,
     protocolVersion: 2,
-    sendIceCandidate: (candidate) => {
+    sendIceCandidate: (candidate, requestId) => {
       options.remoteWindowMessageRuntime.sendStreamIceCandidate(targetSessionId, {
         ws,
         streamId,
         purpose: options.purpose,
+        requestId,
         candidate,
         sendSocketPayload: options.sendSocketPayload,
       });

@@ -43,6 +43,7 @@ interface ActiveRemoteWindowReceiverStream {
   remoteDescriptionApplied: boolean;
   pendingIceCandidates: RTCIceCandidateInit[];
   remoteStartDispatched: boolean;
+  remoteRequestId: string | null;
   pendingLocalIceCandidates: RemoteWindowStreamIceCandidatePayload['candidate'][];
   captureStartedAt: number | null;
   answerAppliedAt: number | null;
@@ -271,7 +272,7 @@ export function createRemoteWindowReceiverRuntime(input?: {
       purpose?: RemoteWindowStreamPurpose;
       target: RemoteWindowStreamTargetManifest;
       iceServers?: RTCIceServer[];
-      sendIceCandidate: (candidate: RemoteWindowStreamIceCandidatePayload['candidate']) => void;
+      sendIceCandidate: (candidate: RemoteWindowStreamIceCandidatePayload['candidate'], requestId?: string) => void;
       startRemote: (offer: RemoteWindowStreamRtcDescription) => Promise<RemoteWindowStreamStartedPayload | RemoteWindowStreamStartedOfferV2Payload>;
       protocolVersion?: 1 | 2;
       sendAnswer?: (answer: RemoteWindowStreamAnswerV2Payload) => void | Promise<void>;
@@ -304,6 +305,7 @@ export function createRemoteWindowReceiverRuntime(input?: {
         remoteDescriptionApplied: false,
         pendingIceCandidates: [],
         remoteStartDispatched: false,
+        remoteRequestId: null,
         pendingLocalIceCandidates: [],
         captureStartedAt: null,
         answerAppliedAt: null,
@@ -330,11 +332,11 @@ export function createRemoteWindowReceiverRuntime(input?: {
             return;
           }
           const candidate = normalizeLocalCandidate(event.candidate);
-          if (!entry.remoteStartDispatched) {
+          if (!entry.remoteStartDispatched || !entry.remoteRequestId) {
             entry.pendingLocalIceCandidates.push(candidate);
             return;
           }
-          options.sendIceCandidate(candidate);
+          options.sendIceCandidate(candidate, entry.remoteRequestId);
         };
         peerConnection.ontrack = (event) => attachTrack(entry, event);
         const trackPromise = waitForRequiredTracks(entry, needsOverview);
@@ -350,17 +352,18 @@ export function createRemoteWindowReceiverRuntime(input?: {
           startedPromise = options.startRemote(localOffer);
         }
         entry.remoteStartDispatched = true;
-        for (const candidate of entry.pendingLocalIceCandidates.splice(0)) {
-          options.sendIceCandidate(candidate);
-        }
         const started = await startedPromise;
         assertCurrent(entry);
+        entry.remoteRequestId = started.requestId;
         entry.captureStartedAt = Date.now();
         if (started.streamId !== streamId) {
           throw new Error(`Remote window stream id mismatch: expected ${streamId}, got ${started.streamId}`);
         }
         if (started.targetId !== options.target.streamTargetId) {
           throw new Error(`Remote window target mismatch: expected ${options.target.streamTargetId}, got ${started.targetId}`);
+        }
+        for (const candidate of entry.pendingLocalIceCandidates.splice(0)) {
+          options.sendIceCandidate(candidate, started.requestId);
         }
         if (started.mediaPlan !== mediaPlan) {
           throw new Error(`Remote window media plan mismatch: expected ${mediaPlan}, got ${started.mediaPlan}`);
