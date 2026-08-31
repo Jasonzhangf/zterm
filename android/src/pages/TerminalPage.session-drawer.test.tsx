@@ -1310,7 +1310,7 @@ describe('TerminalPage portrait session drawer', () => {
         bridgePort: 3333,
         daemonHostId: 'mac-studio',
         relayHostId: 'mac-studio',
-        transportMode: 'auto',
+        transportMode: 'webrtc',
         relayEndpointCandidates: [expect.objectContaining({
           kind: 'relay-rtc',
           relayHostId: 'mac-studio',

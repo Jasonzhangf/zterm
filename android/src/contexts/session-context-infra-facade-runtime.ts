@@ -521,7 +521,11 @@ export function createSessionInfraFacadeRuntime(options: {
   };
 
   const openDaemonTargetTransportSocket = (host: Host) => {
-    if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
+    if (
+      Capacitor.isNativePlatform()
+      && Capacitor.getPlatform() === 'android'
+      && host.transportMode !== 'webrtc'
+    ) {
       return openAndroidConnectionServiceTransportSocket(host);
     }
     return buildTraversalSocketForHostRuntime({
