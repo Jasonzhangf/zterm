@@ -348,7 +348,7 @@ export function ConnectionsPage({
         <section aria-labelledby="saved-connections-title" style={{ display: 'grid', gap: '10px' }}>
           <div style={sectionHeaderStyle}>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', minWidth: 0 }}>
-              <h2 id="saved-connections-title" style={sectionTitleStyle}>Servers</h2>
+              <h2 id="saved-connections-title" style={sectionTitleStyle}>服务器</h2>
               <span style={{ color: mobileTheme.colors.lightMuted, fontSize: '12px', fontWeight: 800 }}>
                 {orderedSavedConnections.length}
               </span>
