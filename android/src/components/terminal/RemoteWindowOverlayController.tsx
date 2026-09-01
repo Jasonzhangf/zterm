@@ -1367,6 +1367,39 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
         if (msg.payload.streamId !== activeStreamIdRef.current) {
           return;
         }
+        if (msg.payload.phase === 'stopped') {
+          const stoppedStreamId = activeStreamIdRef.current;
+          if (!stoppedStreamId) {
+            return;
+          }
+          activeStreamIdRef.current = null;
+          if (stoppedStreamId === activeCanvasStreamIdRef.current) {
+            activeCanvasStreamIdRef.current = null;
+          }
+          if (stoppedStreamId === activeFocusStreamIdRef.current) {
+            activeFocusStreamIdRef.current = null;
+          }
+          if (stoppedStreamId === pendingFocusStreamIdRef.current) {
+            pendingFocusStreamIdRef.current = null;
+          }
+          collectStreamStatsRef.current = null;
+          resetQualityApplyState();
+          surfacePointersRef.current.clear();
+          surfaceGestureRef.current = null;
+          surfacePinchStartRef.current = null;
+          setReceiverMediaStream(null);
+          setOverviewMediaStream(null);
+          setReceiverFrameSize(null);
+          setReceiverStartupTelemetry(null);
+          setStreamCapability(null);
+          setCanvasLayout(null);
+          setState((current) => failRemoteWindowStream(
+            current,
+            stoppedStreamId,
+            new Error(msg.payload.message || 'remote window stream stopped'),
+          ));
+          return;
+        }
         if (msg.payload.stage === 'capability-verified' && msg.payload.capability) {
           setStreamCapability(msg.payload.capability);
         }
