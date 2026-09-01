@@ -103,8 +103,11 @@ func makeStreamConfiguration(
     streamConfiguration.width = max(1, outputW)
     streamConfiguration.height = max(1, outputH)
     streamConfiguration.sourceRect = CGRect(
-        x: max(0, entry.cropRect.x - entry.windowBounds.x),
-        y: max(0, entry.cropRect.y - entry.windowBounds.y),
+        // ScreenCaptureKit sourceRect is expressed in display coordinates,
+        // not coordinates local to the filtered window. Keeping the absolute
+        // crop rect is required when the window is offset from display origin.
+        x: entry.cropRect.x,
+        y: entry.cropRect.y,
         width: max(1, entry.cropRect.width),
         height: max(1, entry.cropRect.height)
     )
