@@ -83,7 +83,7 @@ describe('useAttachmentNotifications', () => {
 
     expect(scheduleNotification).toHaveBeenCalledWith({
       notifications: [expect.objectContaining({
-        title: '📎 proof.png',
+        title: '附件：proof.png',
         extra: { kind: 'attachment', attachmentId: 'att-test' },
       })],
     });
