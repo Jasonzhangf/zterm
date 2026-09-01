@@ -556,7 +556,7 @@ function TerminalSessionDrawerComponent({
                     longPressTimerRef.current = null;
                     suppressNextClickRef.current = true;
                     setSlotMenu(null);
-                    setFolderMenu({ cwd: folder.cwd, x: touch.clientX, y: touch.clientY });
+                    onPreviewFolder?.(folder.cwd);
                   }, 420);
                 }}
                 onTouchEnd={clearLongPressTimer}
