@@ -280,6 +280,49 @@ describe('app-update-runtime', () => {
     );
   });
 
+  it('replaces a persisted LAN manifest with the available Tailscale route when no route snapshot exists', async () => {
+    const runtime = createRuntime(createStorage({
+      'zterm:app-update-settings': JSON.stringify({
+        manifestUrl: 'http://192.168.0.3:3333/updates/latest.json',
+        manifestSource: 'server-connected',
+        autoCheckOnLaunch: false,
+      }),
+    }));
+    runtime.restorePreferences();
+    fetchFn.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        versionName: '0.1.1.1493',
+        versionCode: 1011493,
+        apkUrl: 'zterm-0.1.1.1493.apk',
+        sha256: 'tailscale-sha',
+        notes: [],
+      }),
+    });
+
+    await runtime.checkForUpdates({
+      manifestCandidates: [
+        {
+          id: 'daemon-tailscale',
+          label: 'Tailscale',
+          manifestUrl: 'http://100.66.1.82:3333/updates/latest.json',
+          manifestSource: 'server-connected',
+        },
+        {
+          id: 'daemon-lan',
+          label: 'LAN',
+          manifestUrl: 'http://192.168.0.3:3333/updates/latest.json',
+          manifestSource: 'server-connected',
+        },
+      ],
+    });
+
+    expect(fetchFn).toHaveBeenCalledWith(
+      'http://100.66.1.82:3333/updates/latest.json',
+      expect.any(Object),
+    );
+  });
+
   it('selects the LAN manifest for a confirmed same-network ipv4 route', async () => {
     const runtime = createRuntime(createStorage({
       'zterm:app-update-settings': JSON.stringify({

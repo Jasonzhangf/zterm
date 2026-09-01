@@ -15,7 +15,7 @@ import {
   type AppUpdateRollbackBackup,
   type AppUpdateRollbackEntry,
 } from './app-update';
-import { buildRelayInjectedAppUpdatePreferences } from './app-update-relay-manifest';
+import { buildRelayInjectedAppUpdatePreferences, isTailscaleManifestCandidate } from './app-update-relay-manifest';
 import type { DownloadAndInstallOptions } from '../plugins/AppUpdatePlugin';
 
 export type AppUpdateStage =
@@ -134,19 +134,6 @@ function manifestEndpointKey(manifestUrl: string) {
   }
 }
 
-function isTailscaleHost(hostname: string) {
-  const host = hostname.trim().toLowerCase();
-  if (host.endsWith('.ts.net') || host.includes('tailnet')) {
-    return true;
-  }
-  const parts = host.split('.').map((part) => Number.parseInt(part, 10));
-  return parts.length === 4
-    && parts.every((part) => Number.isFinite(part) && part >= 0 && part <= 255)
-    && parts[0] === 100
-    && parts[1] >= 64
-    && parts[1] <= 127;
-}
-
 function resolveRouteAwareManifestUrl(
   preferences: AppUpdatePreferences,
   route: AppUpdateRouteSnapshot | undefined,
@@ -158,6 +145,10 @@ function resolveRouteAwareManifestUrl(
     && (preferences.manifestSource === 'user-saved' || preferences.manifestSource === 'manual-override')
   ) {
     return persistedUrl;
+  }
+  const tailscaleCandidate = candidates?.find(isTailscaleManifestCandidate)?.manifestUrl.trim() || '';
+  if (!route && preferences.manifestSource === 'server-connected' && tailscaleCandidate) {
+    return tailscaleCandidate;
   }
   if (!route || !candidates?.length) {
     return route ? '' : persistedUrl;
@@ -176,13 +167,7 @@ function resolveRouteAwareManifestUrl(
   }
 
   if (route.resolvedPath === 'tailscale') {
-    return candidates.find((candidate) => {
-      try {
-        return isTailscaleHost(new URL(candidate.manifestUrl).hostname);
-      } catch {
-        return false;
-      }
-    })?.manifestUrl.trim() || '';
+    return tailscaleCandidate;
   }
 
   return '';

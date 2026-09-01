@@ -49,6 +49,27 @@ function deriveDaemonUpdateManifestUrl(targetHost: string, targetPort: number) {
   }
 }
 
+function isTailscaleHost(hostname: string) {
+  const host = hostname.trim().toLowerCase();
+  if (host.endsWith('.ts.net') || host.includes('tailnet')) {
+    return true;
+  }
+  const parts = host.split('.').map((part) => Number.parseInt(part, 10));
+  return parts.length === 4
+    && parts.every((part) => Number.isFinite(part) && part >= 0 && part <= 255)
+    && parts[0] === 100
+    && parts[1] >= 64
+    && parts[1] <= 127;
+}
+
+export function isTailscaleManifestCandidate(candidate: AppUpdateManifestCandidate) {
+  try {
+    return isTailscaleHost(new URL(candidate.manifestUrl).hostname);
+  } catch {
+    return false;
+  }
+}
+
 function addManifestCandidate(
   candidates: AppUpdateManifestCandidate[],
   seenUrls: Set<string>,

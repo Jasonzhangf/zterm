@@ -529,6 +529,50 @@ describe('SettingsPage terminal theme selection', () => {
     expect(screen.getByRole('button', { name: '使用当前 daemon 地址' })).toBeTruthy();
   });
 
+  it('defaults a stale server-connected LAN draft to Tailscale when both routes exist', () => {
+    const onUpdatePreferencesChange = vi.fn();
+
+    render(
+      <SettingsPage
+        settings={{
+          ...baseSettings,
+          targetHost: '192.168.0.3',
+          servers: [{
+            id: 'tailscale',
+            name: 'Tailscale daemon',
+            targetHost: '100.66.1.82',
+            targetPort: 3333,
+            authToken: 'token',
+          }],
+        }}
+        currentVersionName="0.1.1.1590"
+        currentVersionCode={1011590}
+        updatePreferences={{
+          manifestUrl: 'http://192.168.0.3:3333/updates/latest.json',
+          manifestSource: 'server-connected',
+          autoCheckOnLaunch: false,
+          ignoreUntilManualCheck: false,
+        }}
+        latestManifest={null}
+        updateChecking={false}
+        updateInstalling={false}
+        updateError={null}
+        hasNewVersion={false}
+        hasUpdateIgnorePolicy={false}
+        onSave={vi.fn()}
+        onUpdatePreferencesChange={onUpdatePreferencesChange}
+        onCheckForUpdate={vi.fn()}
+        onInstallUpdate={vi.fn()}
+        onResetUpdateIgnorePolicy={vi.fn()}
+        onBack={vi.fn()}
+        renderSettingsUpdate={(props) => <AppUpdateSection {...props} />}
+      />,
+    );
+
+    expect(screen.getByDisplayValue('http://100.66.1.82:3333/updates/latest.json')).toBeTruthy();
+    expect(screen.queryByDisplayValue('http://192.168.0.3:3333/updates/latest.json')).toBeNull();
+  });
+
   it('resyncs an in-place Relay preference update instead of saving a stale LAN draft', () => {
     const onUpdatePreferencesChange = vi.fn();
     const updatePreferences: AppUpdatePreferences = {

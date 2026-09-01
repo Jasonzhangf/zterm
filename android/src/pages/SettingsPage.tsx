@@ -36,7 +36,7 @@ import {
   writeRemoteWindowVideoPreferenceGlobalDefault,
 } from '../lib/remote-window-video-quality';
 import type { RemoteWindowVideoPreference, TraversalRelayDeviceSnapshot } from '../lib/types';
-import { buildAppUpdateManifestCandidates } from '../lib/app-update-relay-manifest';
+import { buildAppUpdateManifestCandidates, isTailscaleManifestCandidate } from '../lib/app-update-relay-manifest';
 
 interface SettingsPageProps {
   settings: BridgeSettings;
@@ -187,12 +187,14 @@ export function SettingsPage({
       ) {
         return current;
       }
+      const tailscaleManifest = manifestCandidates.find(isTailscaleManifestCandidate);
       const relayManifest = manifestCandidates.find((candidate) => candidate.manifestSource === 'relay-injected');
-      return relayManifest
+      const preferredManifest = tailscaleManifest || relayManifest;
+      return preferredManifest
         ? {
             ...updatePreferences,
-            manifestUrl: relayManifest.manifestUrl,
-            manifestSource: 'relay-injected',
+            manifestUrl: preferredManifest.manifestUrl,
+            manifestSource: preferredManifest.manifestSource,
           }
         : updatePreferences;
     });
