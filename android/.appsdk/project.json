@@ -7,10 +7,7 @@
     ]
   },
   "development_scenarios": {
-    "enabled": [
-      "multi_worker_collaboration",
-      "multi_worktree_merge_queue"
-    ],
+    "enabled": ["multi_worker_collaboration", "multi_worktree_merge_queue"],
     "manifest": ".appsdk/contracts/development-scenarios.manifest.json"
   },
   "governance": {
@@ -52,6 +49,7 @@
       "contracts/records/goal-clarification-record.schema.json",
       "contracts/records/review-record.schema.json",
       "contracts/records/effectiveness-record.schema.json",
+      "contracts/records/pre-review-validation-record.schema.json",
       "contracts/records/collaboration-record.schema.json",
       "contracts/records/collaboration-index.schema.json",
       "contracts/records/merge-queue-record.schema.json",
@@ -71,7 +69,7 @@
     "zone_transition_contract": "contracts/transitions/zone-transition-manifest.json"
   },
   "lifecycle": {
-    "stage": "controlled_verified"
+    "stage": "contract_bound"
   },
   "lifecycles": {
     "artifact": "generated",
@@ -88,9 +86,9 @@
       "build": {
         "args": [
           "-lc",
-          "ZTERM_BUILD_NUMBER=2652 pnpm run build:canonical && rm -f generated/modules/zterm-runtime-v2/lib/zterm-runtime-v2.web.tgz && mkdir -p generated/modules/zterm-runtime-v2/lib && find dist -type d -exec chmod 0755 {} + && find dist -type f -exec chmod 0644 {} + && find dist -exec touch -h -t 200001010000 {} + && (cd dist && find . -print0 | LC_ALL=C sort -z | COPYFILE_DISABLE=1 tar --null --no-recursion --format ustar --uid 0 --gid 0 --uname root --gname root -cf - -T -) | gzip -n > generated/modules/zterm-runtime-v2/lib/zterm-runtime-v2.web.tgz"
+          "ZTERM_BUILD_NUMBER=2652 pnpm run build:canonical && mkdir -p generated/modules/zterm-runtime-v2/lib && find dist -type d -exec chmod 0755 {} + && find dist -type f -exec chmod 0644 {} + && find dist -exec touch -h -t 200001010000 {} + && (cd dist && find . -print0 | LC_ALL=C sort -z | COPYFILE_DISABLE=1 tar --null --no-recursion --format ustar --uid 0 --gid 0 --uname root --gname root -cf - -T -) | gzip -n > generated/modules/zterm-runtime-v2/lib/zterm-runtime-v2.web.tgz"
         ],
-        "program": "bash",
+        "program": "sh",
         "working_directory": "."
       },
       "contract_paths": [
@@ -117,20 +115,7 @@
       "regression": {
         "allow_skipped": false,
         "command": {
-          "args": [
-            "exec",
-            "vitest",
-            "run",
-            "src/server/terminal-message-runtime.test.ts",
-            "src/server/terminal-mirror-runtime.test.ts",
-            "src/server/daemon-buffer-publisher-runtime.test.ts",
-            "src/lib/runtime-architecture-v2.test.ts",
-            "src/lib/plugin-host/plugin-host-runtime.test.ts",
-            "src/pages/TerminalPage.render-isolation.test.tsx",
-            "src/App.dynamic-refresh.test.tsx",
-            "src/contexts/SessionContext.ws-refresh.test.tsx",
-            "--reporter=dot"
-          ],
+          "args": ["exec", "vitest", "run", "src/server/terminal-message-runtime.test.ts", "src/server/terminal-mirror-runtime.test.ts", "src/server/daemon-buffer-publisher-runtime.test.ts", "src/lib/runtime-architecture-v2.test.ts", "src/lib/plugin-host/plugin-host-runtime.test.ts", "src/pages/TerminalPage.render-isolation.test.tsx", "src/App.dynamic-refresh.test.tsx", "src/contexts/SessionContext.ws-refresh.test.tsx", "--reporter=dot"],
           "program": "pnpm",
           "working_directory": "."
         },
@@ -150,13 +135,7 @@
         "suite_id": "zterm-runtime-v2-regression"
       },
       "source_owner": "zterm-runtime-v2",
-      "stage": "controlled_verified",
-      "version_base": {
-        "base_artifact_hash": "sha256:a021a660aab1dc2d4a35a7c3ef0ab453428d70111bb3f71da5de7c21c94c2c18",
-        "base_source_commit": "86076987a70345d88b90070f0014e8b2f243ca01",
-        "new_active_version": "active-v5",
-        "previous_active_version": "active-v4"
-      }
+      "stage": "source_implemented"
     }
   ],
   "project_id": "zterm-runtime-architecture-v2",
@@ -165,6 +144,6 @@
     "bundle_manifest": ".appsdk/contracts/sdk-bundle.manifest.json",
     "name": "appsdk",
     "resource_record": ".appsdk/sdk-resources.json",
-    "version": "0.1.4"
+    "version": "0.1.6"
   }
 }
