@@ -1,5 +1,8 @@
 import type { PluginContext, PluginInstance } from '@zterm/shared/terminal/plugin-contract';
-import { TerminalQuickBar } from '../../components/terminal/TerminalQuickBar';
+import {
+  RemoteWindowQuickBar,
+  TerminalQuickBar,
+} from '../../components/terminal/TerminalQuickBar';
 import {
   QUICKBAR_UI_SLOT_ID,
   type QuickBarUiProps,
@@ -9,7 +12,9 @@ export class QuickBarUiPlugin implements PluginInstance {
   async start(context: PluginContext): Promise<void> {
     context.provideUiSlot<QuickBarUiProps>(
       QUICKBAR_UI_SLOT_ID,
-      (props) => <TerminalQuickBar {...props} />,
+      (props) => props.remoteWindowMode
+        ? <RemoteWindowQuickBar {...props} />
+        : <TerminalQuickBar {...props} />,
     );
   }
 

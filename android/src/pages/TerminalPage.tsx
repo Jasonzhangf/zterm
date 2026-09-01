@@ -1959,6 +1959,17 @@ function TerminalPageComponent({
     }
   }, [emitRemoteWindowInputEvents, keepTerminalInputFocused, onQuickActionInput, terminalActionSessionId, terminalKeyboardRequested]);
 
+  const handleQuickBarRemoteKeyboardInput = useCallback((input: {
+    key: string;
+    code: string;
+    metaKey?: boolean;
+    ctrlKey?: boolean;
+    altKey?: boolean;
+    shiftKey?: boolean;
+  }) => {
+    emitRemoteWindowInputEvents(buildRemoteWindowKeyboardInputEvents(input), 'quickbar-sequence');
+  }, [emitRemoteWindowInputEvents]);
+
   const handleQuickBarSessionDraftChange = useCallback((value: string) => {
     onSessionDraftChange?.(value, terminalActionSessionId || undefined);
   }, [onSessionDraftChange, terminalActionSessionId]);
@@ -3310,6 +3321,8 @@ function TerminalPageComponent({
       Boolean(remoteWindowInputContext),
     );
     return renderQuickBar({
+      remoteWindowMode: Boolean(remoteWindowInputContext),
+      onSendRemoteKeyboardInput: handleQuickBarRemoteKeyboardInput,
       activeSessionId: terminalActionSessionId,
       quickActions,
       shortcutActions,
@@ -3370,6 +3383,7 @@ function TerminalPageComponent({
     handleQuickBarOpenScheduleComposer,
     handleQuickBarRequestRemoteScreenshot,
     handleQuickBarSendSequence,
+    handleQuickBarRemoteKeyboardInput,
     handleQuickBarSessionDraftChange,
     handleQuickBarSessionDraftSend,
     handleQuickBarToggleAbsoluteLineNumbers,

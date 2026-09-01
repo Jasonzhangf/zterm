@@ -73,10 +73,20 @@ import { buildTerminalShortcutSequence } from "../../../../packages/shared/src/s
 import { resolveTerminalOrientation } from "../../lib/terminal-viewport-metrics";
 
 export interface TerminalQuickBarProps {
+  /** Selects the isolated toolbar projection used by the fullscreen remote window. */
+  remoteWindowMode?: boolean;
   activeSessionId?: string | null;
   quickActions: QuickAction[];
   shortcutActions: TerminalShortcutAction[];
   onSendSequence?: (sequence: string) => void;
+  onSendRemoteKeyboardInput?: (input: {
+    key: string;
+    code: string;
+    metaKey?: boolean;
+    ctrlKey?: boolean;
+    altKey?: boolean;
+    shiftKey?: boolean;
+  }) => void;
   onImagePaste?: (sessionId: string, file: File) => Promise<void> | void;
   onFileAttach?: (sessionId: string, file: File) => Promise<void> | void;
   fileTransferSupported?: boolean;
@@ -4140,3 +4150,102 @@ function TerminalQuickBarComponent({
 
 export const TerminalQuickBar = memo(TerminalQuickBarComponent);
 TerminalQuickBar.displayName = "TerminalQuickBar";
+
+type RemoteWindowQuickBarProps = Pick<
+  TerminalQuickBarProps,
+  | 'onMeasuredHeightChange'
+  | 'onSendSequence'
+  | 'onSessionDraftSend'
+  | 'onToggleKeyboard'
+  | 'keyboardVisible'
+  | 'keyboardInsetPx'
+  | 'onSendRemoteKeyboardInput'
+>;
+
+const REMOTE_WINDOW_ACTIONS = [
+  { id: 'remote-copy', label: '复制', sequence: '\u0003' },
+  { id: 'remote-paste', label: '粘贴', sequence: '\u0016' },
+  { id: 'remote-arrow-up', label: '↑', sequence: '\u001b[A' },
+  { id: 'remote-arrow-down', label: '↓', sequence: '\u001b[B' },
+  { id: 'remote-arrow-left', label: '←', sequence: '\u001b[D' },
+  { id: 'remote-arrow-right', label: '→', sequence: '\u001b[C' },
+  { id: 'remote-escape', label: 'Esc', sequence: '\u001b' },
+  { id: 'remote-tab', label: 'Tab', sequence: '\t' },
+  { id: 'remote-enter', label: 'Enter', sequence: '\r' },
+] as const;
+
+const REMOTE_WINDOW_BUTTON_STYLE = {
+  minWidth: 42,
+  height: 36,
+  padding: '0 11px',
+  border: '1px solid rgba(255,255,255,0.16)',
+  borderRadius: 10,
+  background: 'rgba(255,255,255,0.08)',
+  color: 'var(--zterm-panel-text, #f5f7fa)',
+  fontSize: 13,
+  fontWeight: 750,
+  touchAction: 'manipulation' as const,
+};
+
+export function RemoteWindowQuickBar({
+  onMeasuredHeightChange,
+  onSendSequence,
+  onSendRemoteKeyboardInput,
+  onSessionDraftSend,
+  onToggleKeyboard,
+  keyboardVisible = false,
+  keyboardInsetPx = 0,
+}: RemoteWindowQuickBarProps) {
+  const [collapsed, setCollapsed] = useState(false);
+  const [draft, setDraft] = useState('');
+
+  const submitDraft = useCallback(() => {
+    if (!draft) return;
+    onSessionDraftSend?.(draft);
+    setDraft('');
+  }, [draft, onSessionDraftSend]);
+
+  if (collapsed) {
+    return (
+      <button
+        type="button"
+        data-testid="remote-window-quickbar-collapsed"
+        aria-label="展开串流快捷栏"
+        onClick={() => setCollapsed(false)}
+        style={{ ...REMOTE_WINDOW_BUTTON_STYLE, minWidth: 48, borderRadius: 999, background: 'rgba(18,22,30,0.94)' }}
+      >
+        ⌨
+      </button>
+    );
+  }
+
+  return (
+    <div
+      data-testid="remote-window-quickbar"
+      ref={(node) => {
+        if (node) onMeasuredHeightChange?.(node.getBoundingClientRect().height);
+      }}
+      style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: 10, border: '1px solid rgba(255,255,255,0.14)', borderRadius: 16, background: 'rgba(18,22,30,0.94)', boxShadow: '0 10px 28px rgba(0,0,0,0.32)', backdropFilter: 'blur(14px)', color: 'var(--zterm-panel-text, #f5f7fa)' }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ flex: 1, fontSize: 12, fontWeight: 800, opacity: 0.72 }}>串流窗口</span>
+        <button type="button" aria-label="收起串流快捷栏" onClick={() => setCollapsed(true)} style={{ ...REMOTE_WINDOW_BUTTON_STYLE, minWidth: 34, width: 34, padding: 0, height: 30 }}>−</button>
+      </div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <button type="button" aria-label="复制" onClick={() => onSendRemoteKeyboardInput?.({ key: 'c', code: 'KeyC', metaKey: true })} style={REMOTE_WINDOW_BUTTON_STYLE}>复制</button>
+        <button type="button" aria-label="粘贴" onClick={() => onSendRemoteKeyboardInput?.({ key: 'v', code: 'KeyV', metaKey: true })} style={REMOTE_WINDOW_BUTTON_STYLE}>粘贴</button>
+        {REMOTE_WINDOW_ACTIONS.filter((action) => action.id !== 'remote-copy' && action.id !== 'remote-paste').map((action) => (
+          <button key={action.id} type="button" aria-label={action.label} onClick={() => onSendSequence?.(action.sequence)} style={REMOTE_WINDOW_BUTTON_STYLE}>
+            {action.label}
+          </button>
+        ))}
+        <button type="button" aria-label={keyboardVisible ? '隐藏键盘' : '显示键盘'} aria-pressed={keyboardVisible} onClick={() => onToggleKeyboard?.()} style={{ ...REMOTE_WINDOW_BUTTON_STYLE, background: keyboardVisible ? 'rgba(84,150,255,0.34)' : REMOTE_WINDOW_BUTTON_STYLE.background }}>键盘</button>
+      </div>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <input aria-label="发送到串流窗口" value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); submitDraft(); } }} placeholder="输入并发送到远程窗口" style={{ flex: 1, minWidth: 0, height: 36, padding: '0 11px', border: '1px solid rgba(255,255,255,0.16)', borderRadius: 10, background: 'rgba(0,0,0,0.2)', color: 'inherit', outline: 'none' }} />
+        <button type="button" aria-label="发送文本" onClick={submitDraft} style={{ ...REMOTE_WINDOW_BUTTON_STYLE, background: 'rgba(84,150,255,0.34)' }}>发送</button>
+      </div>
+      <span style={{ fontSize: 10, opacity: 0.5, textAlign: 'right' }}>快捷栏与 Shell 独立 · inset {Math.round(keyboardInsetPx)}px</span>
+    </div>
+  );
+}
