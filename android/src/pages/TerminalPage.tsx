@@ -3543,13 +3543,36 @@ function TerminalPageComponent({
                 <>
                   <button
                     type="button"
+                    aria-label="打开会话抽屉"
+                    data-testid="terminal-portrait-session-drawer-button"
+                    onClick={() => setSessionDrawerOpen(true)}
+                    style={{
+                      position: 'absolute',
+                      top: `${Math.max(8, headerTopInsetPx + 8)}px`,
+                      left: '10px',
+                      zIndex: 15,
+                      width: '34px',
+                      height: '34px',
+                      borderRadius: '12px',
+                      border: '1px solid var(--zterm-panel-border)',
+                      background: 'var(--zterm-panel-surface)',
+                      color: 'var(--zterm-panel-text)',
+                      fontSize: '17px',
+                      lineHeight: 1,
+                      boxShadow: '0 8px 18px rgba(0,0,0,0.18)',
+                    }}
+                  >
+                    ☰
+                  </button>
+                  <button
+                    type="button"
                     aria-label="返回连接列表"
                     data-testid="terminal-portrait-back-button"
                     onClick={onOpenConnections}
                     style={{
                       position: 'absolute',
                       top: `${Math.max(8, headerTopInsetPx + 8)}px`,
-                      left: '10px',
+                      left: '52px',
                       zIndex: 15,
                       width: '34px',
                       height: '34px',
