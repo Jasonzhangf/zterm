@@ -25,9 +25,14 @@ export interface BridgeTarget {
 export type HostDraft = Omit<Host, 'id' | 'createdAt'>;
 
 function resolvePreferredRelayDirectEndpoint(candidates: RelayEndpointCandidate[]) {
-  return candidates.find((endpoint) =>
+  const remoteEndpoint = candidates.find((endpoint) =>
     (endpoint.kind === 'tailscale' || endpoint.kind === 'ipv6' || endpoint.kind === 'ipv4')
     && (endpoint.host?.trim() || endpoint.wsUrl?.trim())) || null;
+  if (remoteEndpoint) {
+    return remoteEndpoint;
+  }
+  return candidates.find((endpoint) =>
+    endpoint.kind === 'lan' && (endpoint.host?.trim() || endpoint.wsUrl?.trim())) || null;
 }
 
 export function getRelayRtcEndpointCandidates(candidates: RelayEndpointCandidate[] | undefined) {

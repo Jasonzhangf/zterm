@@ -318,6 +318,42 @@ describe('session-picker relay truth', () => {
     }));
   });
 
+  it('keeps a LAN-only relay directory target addressable without Tailscale', () => {
+    const target = buildBridgeTargetFromHost({
+      id: 'relay-device:daemon-device-lan-only:daemon-host-lan-only',
+      createdAt: 1,
+      name: 'LAN-only Daemon',
+      bridgeHost: '',
+      bridgePort: 3333,
+      daemonHostId: 'daemon-host-lan-only',
+      relayHostId: 'daemon-host-lan-only',
+      relayDeviceId: 'daemon-device-lan-only',
+      sessionName: '',
+      authType: 'password',
+      tags: ['relay-directory'],
+      pinned: false,
+      relayEndpointCandidates: [{
+        id: 'lan:192.168.3.10:3333',
+        kind: 'lan',
+        host: '192.168.3.10',
+        port: 3333,
+        authToken: 'lan-token',
+        authRequired: true,
+        lastSeenAt: '2026-06-28T00:00:00.000Z',
+      }],
+    });
+
+    expect(target).toEqual(expect.objectContaining({
+      bridgeHost: '192.168.3.10',
+      bridgePort: 3333,
+      authToken: 'lan-token',
+      ipv4Host: '192.168.3.10',
+      relayEndpointCandidates: expect.arrayContaining([
+        expect.objectContaining({ kind: 'lan', host: '192.168.3.10' }),
+      ]),
+    }));
+  });
+
   it('resolves a relay directory Home host row to its direct endpoint candidate before opening', () => {
     const target = buildBridgeTargetFromHost({
       id: 'relay-device:daemon-device-c:daemon-host-c',
