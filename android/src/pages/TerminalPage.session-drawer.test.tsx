@@ -258,7 +258,7 @@ describe('TerminalPage portrait session drawer', () => {
     expect(screen.getByTestId('terminal-portrait-back-button')).toBeTruthy();
     expect(screen.getByTestId('terminal-portrait-settings-button')).toBeTruthy();
     expect(screen.getByTestId('terminal-quickbar')).toBeTruthy();
-    expect(screen.queryByTestId('terminal-portrait-session-drawer-button')).toBeNull();
+    expect(screen.getByTestId('terminal-portrait-session-drawer-button')).toBeTruthy();
 
     expect(screen.getByTestId('terminal-session-drawer').getAttribute('aria-hidden')).toBe('true');
 
@@ -321,7 +321,7 @@ describe('TerminalPage portrait session drawer', () => {
     expect(screen.getByTestId('plugin-session-drawer-slot')).toBeTruthy();
   });
 
-  it('keeps one portrait status row above the terminal stage without a Sessions button', () => {
+  it('keeps one portrait status row above the terminal stage with a Sessions button', () => {
     const session = makeSession('s1');
     session.daemonHostId = 'daemon-a';
     render(
@@ -349,7 +349,7 @@ describe('TerminalPage portrait session drawer', () => {
     const backButton = screen.getByTestId('terminal-portrait-back-button');
     const settingsButton = screen.getByTestId('terminal-portrait-settings-button');
     const stage = screen.getByTestId('terminal-stage-shell');
-    expect(screen.queryByTestId('terminal-portrait-session-drawer-button')).toBeNull();
+    expect(screen.getByTestId('terminal-portrait-session-drawer-button')).toBeTruthy();
     expect(status.style.top).toBe(backButton.style.top);
     expect(status.style.top).toBe(settingsButton.style.top);
     expect(Number.parseInt(stage.style.top, 10)).toBeGreaterThan(Number.parseInt(status.style.top, 10) + 34);
@@ -411,7 +411,7 @@ describe('TerminalPage portrait session drawer', () => {
       />,
     );
 
-    expect(screen.queryByTestId('terminal-portrait-session-drawer-button')).toBeNull();
+    expect(screen.getByTestId('terminal-portrait-session-drawer-button')).toBeTruthy();
     expect(screen.getByTestId('terminal-session-drawer').getAttribute('aria-hidden')).toBe('true');
     const swipeSurface = document.querySelector(
       '[data-testid^="terminal-swipe-surface-"][data-swipe-enabled="true"]',
