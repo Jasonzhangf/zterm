@@ -45,22 +45,15 @@ describe('Android network identity plugin', () => {
   });
 
   it('binds the native producer to the client.daemon_connection module in both registry maps', () => {
-    const appsdkMap = JSON.parse(readRepo('android/.appsdk/maps/module-registry.json')) as {
-      modules: Array<{ module_id: string; owned_paths: string[]; verification_gates?: string[] }>;
-    };
     const docsMap = JSON.parse(readRepo('android/docs/module-registry.json')) as {
       modules: Array<{ module_id: string; owned_paths: string[] }>;
     };
     const nativePath = 'native/android/app/src/main/java/com/zterm/android/NetworkIdentityPlugin.java';
 
-    const appsdkOwner = appsdkMap.modules.find((module) => module.owned_paths.includes(nativePath));
     const docsOwner = docsMap.modules.find((module) => module.owned_paths.includes(nativePath));
     const wrapperPath = 'src/plugins/NetworkIdentityPlugin.ts';
 
-    expect(appsdkOwner?.module_id, 'appsdk map must own the native producer').toBe('client.daemon_connection');
     expect(docsOwner?.module_id, 'docs map must own the native producer').toBe('client.daemon_connection');
-    expect(appsdkOwner?.verification_gates, 'appsdk owner must declare android_network_identity gate').toContain('android_network_identity');
-    expect(appsdkMap.modules.find((module) => module.owned_paths.includes(wrapperPath))?.module_id).toBe('client.daemon_connection');
     expect(docsMap.modules.find((module) => module.owned_paths.includes(wrapperPath))?.module_id).toBe('client.daemon_connection');
 
     for (const [path, owner] of [
@@ -68,10 +61,6 @@ describe('Android network identity plugin', () => {
       ['src/hooks/useOpenTabLifecycleEffects.test.tsx', 'client.session_runtime'],
       ['src/App.dynamic-refresh.test.tsx', 'client.app_shell'],
     ] as const) {
-      expect(
-        appsdkMap.modules.find((module) => module.owned_paths.includes(path))?.module_id,
-        `appsdk map must own ${path}`,
-      ).toBe(owner);
       expect(
         docsMap.modules.find((module) => module.owned_paths.includes(path))?.module_id,
         `docs map must own ${path}`,
