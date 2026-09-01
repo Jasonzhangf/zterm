@@ -42,7 +42,7 @@ export function AppUpdateSection({
       <SettingsSectionTitle>版本与升级</SettingsSectionTitle>
 
       <div>
-        <div style={{ marginBottom: '8px', fontSize: '14px', fontWeight: 700 }}>Manifest URL</div>
+        <div style={{ marginBottom: '8px', fontSize: '14px', fontWeight: 700 }}>更新清单地址</div>
         <input
           type="url"
           value={updateDraft.manifestUrl}
