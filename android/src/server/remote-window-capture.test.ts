@@ -207,6 +207,13 @@ printf '\\132\\122\\127\\061\\002\\000\\000\\000\\002\\000\\000\\000\\020\\000\\
     expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('offsetY: config.mainOffsetY ?? 0');
   });
 
+  it('uses absolute display coordinates for ScreenCaptureKit sourceRect', () => {
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('x: entry.cropRect.x');
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('y: entry.cropRect.y');
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).not.toContain('entry.cropRect.x - entry.windowBounds.x');
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).not.toContain('entry.cropRect.y - entry.windowBounds.y');
+  });
+
   it('streams ScreenCaptureKit frames without a screenshot-loop fallback', () => {
     expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('SCStream(filter: filter, configuration: streamConfiguration, delegate: nil)');
     expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('try await stream.startCapture()');

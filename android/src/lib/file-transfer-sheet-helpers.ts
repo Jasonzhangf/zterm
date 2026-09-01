@@ -26,6 +26,15 @@ export function truncateName(name: string, max: number): string {
   return name.slice(0, max - 2) + "…";
 }
 
+export function shortenDisplayPath(path: string): string {
+  const trimmed = path.trim();
+  if (!trimmed) return trimmed;
+  const normalized = trimmed.replace(/\/+$/, "");
+  if (!normalized) return "/";
+  if (normalized === "~") return normalized;
+  return normalized.split("/").filter(Boolean).pop() || "/";
+}
+
 export function isMarkdownFileName(name: string) {
   return /\.(md|markdown|mdown|mkdn)$/i.test(name.trim());
 }
@@ -185,4 +194,3 @@ export function compareFileEntries(
       : a.name.localeCompare(b.name);
   return sortDirection === "asc" ? value : -value;
 }
-

@@ -72,6 +72,7 @@
 - `mirror-fixed` 下，client viewport / IME / 容器宽度变化**不得**改写 daemon mirror / tmux 宽度；renderer 只能裁切和横向平移
 - `mirror-fixed` 下自动关闭左右滑切 tab，避免和横向平移抢同一手势语义
 - 不提交大批 evidence / 构建物 / node_modules
+- MemPalace / 本地搜索只允许代码、文档、项目记忆、local skill 等源文件；`wing=zterm` 必须通过 `scripts/mempalace-mine-zterm.sh` 生成安全语料后再 mine，禁止直接索引仓库根目录；生成物、构建物、release/update 包、evidence、缓存目录、依赖目录不得进入搜索语料或本地搜索结果
 
 ## Build Defaults
 - 根目录命令应代理到 `android/`
