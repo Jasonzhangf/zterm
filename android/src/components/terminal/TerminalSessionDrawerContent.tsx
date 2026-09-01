@@ -973,6 +973,12 @@ function TerminalSessionDrawerComponent({
           style={{
             padding: `10px 12px ${Math.max(12, Math.round(bottomInsetPx) + 12)}px`,
             borderTop: '1px solid var(--zterm-panel-border)',
+            borderLeft: 'none',
+            borderRight: 'none',
+            borderBottom: 'none',
+            background: 'var(--zterm-panel-bg)',
+            color: 'var(--zterm-panel-text)',
+            appearance: 'none',
             flexShrink: 0,
           }}
         >

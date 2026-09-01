@@ -469,6 +469,7 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
         background: mobileTheme.colors.shell,
         padding: '8px',
         boxSizing: 'border-box',
+        overflowY: landscape ? 'hidden' : 'auto',
       }}
     >
       <header
@@ -481,9 +482,6 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
           padding: '0 2px 6px 6px',
         }}
       >
-            <span style={{ color: mobileTheme.colors.textPrimary, fontSize: '13px', fontWeight: 800 }}>
-              预览
-            </span>
         <button
           type="button"
           aria-label="退出终端预览"
@@ -518,9 +516,9 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
         primaryItemId={resolvedPrimaryPreviewSessionId}
         onPrimaryItemChange={setPrimaryPreviewSessionId}
         landscape={landscape}
-        secondaryWrap="nowrap"
-        secondaryItemFlex={landscape ? '1 1 0' : '0 0 min(30vw, 160px)'}
-        secondaryOverflowX={landscape ? undefined : 'auto'}
+        secondaryWrap={landscape ? 'nowrap' : 'wrap'}
+        secondaryItemFlex={landscape ? '1 1 0' : '0 0 100%'}
+        secondaryOverflowX={landscape ? undefined : 'hidden'}
         style={{ flex: 1, minHeight: 0 }}
       />
       <div
