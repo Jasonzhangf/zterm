@@ -241,8 +241,8 @@ export function ConnectionConfigSection({
           border: `1px solid ${mobileTheme.colors.lightBorder}`,
           borderRadius: '18px',
           padding: '14px 16px',
-          backgroundColor: '#ffffff',
-          color: mobileTheme.colors.lightText,
+          backgroundColor: 'var(--zterm-settings-surface, #ffffff)',
+          color: 'var(--zterm-settings-text, #171b2d)',
           boxShadow: mobileTheme.shadow.soft,
           cursor: 'pointer',
           display: 'flex',
@@ -275,7 +275,7 @@ export function ConnectionConfigSection({
         style={{
           border: `1px solid ${mobileTheme.colors.lightBorder}`,
           borderRadius: '8px',
-          backgroundColor: '#fff',
+          backgroundColor: 'var(--zterm-settings-surface, #ffffff)',
           overflow: 'hidden',
         }}
       >
@@ -323,7 +323,7 @@ export function ConnectionConfigSection({
               <div style={{ fontSize: '11px', fontWeight: 850, color: '#087a46', textTransform: 'uppercase' }}>
                 已登录
               </div>
-              <div style={{ fontSize: '15px', fontWeight: 850, color: mobileTheme.colors.lightText }}>
+              <div style={{ fontSize: '15px', fontWeight: 850, color: 'var(--zterm-settings-text, #171b2d)' }}>
                 {accountName}
               </div>
               <div style={{ fontSize: '12px', color: mobileTheme.colors.lightMuted }}>
@@ -339,7 +339,7 @@ export function ConnectionConfigSection({
                 minHeight: '44px',
                 borderRadius: '7px',
                 border: `1px solid ${mobileTheme.colors.lightBorder}`,
-                backgroundColor: '#fff',
+                backgroundColor: 'var(--zterm-settings-surface, #ffffff)',
                 color: '#a22c3f',
                 fontWeight: 800,
                 fontSize: '14px',
@@ -408,7 +408,7 @@ export function ConnectionConfigSection({
                 border: 'none',
                 borderRadius: '7px',
                 backgroundColor: '#111820',
-                color: '#fff',
+                color: 'var(--zterm-settings-accent-text, #ffffff)',
                 fontSize: '14px',
                 fontWeight: 800,
                 opacity: busy || !loginUsername.trim() || !loginPassword ? 0.55 : 1,
@@ -497,8 +497,8 @@ export function ConnectionConfigSection({
               minHeight: '48px',
               borderRadius: '16px',
               border: 'none',
-              backgroundColor: canAddServer ? mobileTheme.colors.shell : '#d9e1ea',
-              color: canAddServer ? '#ffffff' : mobileTheme.colors.lightMuted,
+              backgroundColor: canAddServer ? 'var(--zterm-settings-accent, #128354)' : 'var(--zterm-settings-field, #d9e1ea)',
+              color: canAddServer ? 'var(--zterm-settings-accent-text, #ffffff)' : 'var(--zterm-settings-muted, #7b8aa1)',
               fontWeight: 800,
               cursor: canAddServer ? 'pointer' : 'not-allowed',
             }}
@@ -527,8 +527,8 @@ export function ConnectionConfigSection({
                     borderRadius: '20px',
                     padding: '14px 16px',
                     textAlign: 'left',
-                    backgroundColor: active ? mobileTheme.colors.shell : '#ffffff',
-                    color: active ? '#ffffff' : mobileTheme.colors.lightText,
+                    backgroundColor: active ? 'var(--zterm-settings-accent, #128354)' : 'var(--zterm-settings-surface, #ffffff)',
+                    color: active ? 'var(--zterm-settings-accent-text, #ffffff)' : 'var(--zterm-settings-text, #171b2d)',
                     boxShadow: mobileTheme.shadow.soft,
                     cursor: 'pointer',
                     display: 'flex',
@@ -565,8 +565,8 @@ export function ConnectionConfigSection({
                   borderRadius: '20px',
                   padding: '14px 16px',
                   textAlign: 'left',
-                  backgroundColor: '#ffffff',
-                  color: mobileTheme.colors.lightText,
+                  backgroundColor: 'var(--zterm-settings-surface, #ffffff)',
+                  color: 'var(--zterm-settings-text, #171b2d)',
                   boxShadow: mobileTheme.shadow.soft,
                   display: 'flex',
                   justifyContent: 'space-between',

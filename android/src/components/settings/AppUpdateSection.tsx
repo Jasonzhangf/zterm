@@ -75,7 +75,7 @@ export function AppUpdateSection({
                   borderRadius: '14px',
                   border: 'none',
                   backgroundColor: updateDraft.manifestUrl === candidate.manifestUrl ? mobileTheme.colors.shell : '#eef2f8',
-                  color: updateDraft.manifestUrl === candidate.manifestUrl ? '#fff' : mobileTheme.colors.lightText,
+                  color: updateDraft.manifestUrl === candidate.manifestUrl ? 'var(--zterm-settings-accent-text, #ffffff)' : 'var(--zterm-settings-text, #171b2d)',
                   fontWeight: 700,
                   cursor: 'pointer',
                 }}
@@ -134,7 +134,7 @@ export function AppUpdateSection({
             borderRadius: '14px',
             border: 'none',
             backgroundColor: mobileTheme.colors.shell,
-            color: '#fff',
+            color: 'var(--zterm-settings-accent-text, #ffffff)',
             fontWeight: 800,
             cursor: updateChecking ? 'wait' : 'pointer',
             opacity: updateChecking ? 0.72 : 1,
@@ -241,8 +241,8 @@ export function AppUpdateSection({
               padding: '0 16px',
               borderRadius: '14px',
               border: 'none',
-              backgroundColor: '#eef2f8',
-              color: mobileTheme.colors.lightText,
+              backgroundColor: 'var(--zterm-settings-field, #eef2f8)',
+              color: 'var(--zterm-settings-text, #171b2d)',
               fontWeight: 700,
               cursor: 'pointer',
             }}
