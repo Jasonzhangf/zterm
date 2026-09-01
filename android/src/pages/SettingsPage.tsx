@@ -3,6 +3,7 @@ import {
   getDefaultBridgeServer,
   removeBridgeServer,
   sortBridgeServers,
+  TERMINAL_FONT_SIZE_OPTIONS,
   TERMINAL_SHELL_SKIN_OPTIONS,
   type BridgeSettings,
 } from '../lib/bridge-settings';
@@ -586,6 +587,27 @@ export function SettingsPage({
             onTerminalThemeChange?.(themeId);
           }}
         />
+
+        <div style={settingsSectionStyle()}>
+          <SettingsSectionTitle>终端字号</SettingsSectionTitle>
+          <div style={{ fontSize: '13px', lineHeight: 1.6, color: mobileTheme.colors.lightMuted }}>
+            选择终端正文显示字号，当前默认字号为最小。
+          </div>
+          <select
+            aria-label="终端字号"
+            data-testid="settings-terminal-font-size"
+            value={draft.terminalFontSize}
+            onChange={(event) => setDraft((current) => ({
+              ...current,
+              terminalFontSize: event.currentTarget.value as BridgeSettings['terminalFontSize'],
+            }))}
+            style={settingsInputStyle()}
+          >
+            {TERMINAL_FONT_SIZE_OPTIONS.map((option) => (
+              <option key={option.id} value={option.id}>{option.label}</option>
+            ))}
+          </select>
+        </div>
 
         <div style={settingsSectionStyle()}>
           <SettingsSectionTitle>Shell Skin</SettingsSectionTitle>

@@ -981,6 +981,7 @@ export function AppContent({
             onRunScheduleJobNow={runScheduleJobNow}
             terminalThemeId={bridgeSettings.terminalThemeId}
             terminalShellSkin={bridgeSettings.terminalShellSkin}
+            terminalFontSize={bridgeSettings.terminalFontSize}
             terminalWidthMode={bridgeSettings.terminalWidthMode}
             terminalSessionGroupLayoutMode={bridgeSettings.terminalSessionGroupLayoutMode}
             onSendMessage={sendMessageRaw}

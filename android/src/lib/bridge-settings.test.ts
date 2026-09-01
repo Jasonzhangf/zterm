@@ -6,6 +6,7 @@ import {
   describeBridgePresetIdentity,
   formatBridgeTarget,
   normalizeBridgeSettings,
+  resolveTerminalFontSizePx,
   removeBridgeServer,
   setDefaultBridgeServer,
   upsertBridgeServer,
@@ -23,6 +24,7 @@ const baseSettings = {
   terminalCacheLines: DEFAULT_TERMINAL_CACHE_LINES,
   terminalThemeId: 'classic-dark' as const,
   terminalShellSkin: 'light' as const,
+  terminalFontSize: 'minimum' as const,
   terminalWidthMode: 'mirror-fixed' as const,
   terminalSessionGroupLayoutMode: 'auto' as const,
   shortcutSmartSort: true,
@@ -39,6 +41,16 @@ describe('bridge-settings helpers', () => {
 
   it('formats target summary', () => {
     expect(formatBridgeTarget({ ...baseSettings, targetHost: '100.127.23.27', targetPort: 37283 })).toBe('100.127.23.27:37283');
+  });
+
+  it('normalizes and resolves terminal font sizes', () => {
+    expect(normalizeBridgeSettings({ ...baseSettings }).terminalFontSize).toBe('minimum');
+    expect(normalizeBridgeSettings({ ...baseSettings, terminalFontSize: 'large' }).terminalFontSize).toBe('large');
+    expect(normalizeBridgeSettings({ ...baseSettings, terminalFontSize: 'invalid' }).terminalFontSize).toBe('minimum');
+    expect(resolveTerminalFontSizePx('minimum')).toBe(10);
+    expect(resolveTerminalFontSizePx('small')).toBe(12);
+    expect(resolveTerminalFontSizePx('medium')).toBe(14);
+    expect(resolveTerminalFontSizePx('large')).toBe(16);
   });
 
   it('keeps explicit websocket host as the endpoint truth', () => {

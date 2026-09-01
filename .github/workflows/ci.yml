@@ -72,7 +72,7 @@ jobs:
       - name: Install pinned AppSDK binary
         env:
           APPSDK_URL: https://github.com/Jasonzhangf/appsdk/releases/download/v0.1.4/appsdk-0.1.4-macos-arm64
-          APPSDK_SHA256: c26e500e34c129b331543925943a0a07bcf2c3320bb40eaf4ef184dc8df6d560
+          APPSDK_SHA256: 4e7c88a13b82509cb75d838decc3b4008d612b83689e0430b5f4bda7e973f732
         run: |
           mkdir -p "$RUNNER_TEMP/appsdk"
           curl -fsSL "$APPSDK_URL" -o "$RUNNER_TEMP/appsdk/appsdk"

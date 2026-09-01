@@ -20,6 +20,7 @@ const baseSettings: BridgeSettings = {
   transportMode: 'auto',
   terminalCacheLines: DEFAULT_TERMINAL_CACHE_LINES,
   terminalThemeId: 'classic-dark',
+  terminalFontSize: 'minimum',
   terminalWidthMode: 'mirror-fixed',
   terminalSessionGroupLayoutMode: 'auto',
   shortcutSmartSort: true,
@@ -176,6 +177,37 @@ describe('SettingsPage terminal theme selection', () => {
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
       terminalWidthMode: 'adaptive-phone',
     }));
+  });
+
+  it('persists terminal font size through settings save', () => {
+    const onSave = vi.fn();
+    render(
+      <SettingsPage
+        settings={baseSettings}
+        currentVersionName="0.1.1.1590"
+        currentVersionCode={1011590}
+        updatePreferences={{
+          manifestUrl: '', autoCheckOnLaunch: false, skippedVersionCode: undefined,
+          ignoreUntilManualCheck: false, lastCheckedAt: undefined, lastSeenVersionCode: undefined,
+        }}
+        latestManifest={null}
+        updateChecking={false}
+        updateInstalling={false}
+        updateError={null}
+        hasNewVersion={false}
+        hasUpdateIgnorePolicy={false}
+        onSave={onSave}
+        onUpdatePreferencesChange={vi.fn()}
+        onCheckForUpdate={vi.fn()}
+        onInstallUpdate={vi.fn()}
+        onResetUpdateIgnorePolicy={vi.fn()}
+        onBack={vi.fn()}
+      />,
+    );
+
+    fireEvent.change(screen.getByTestId('settings-terminal-font-size'), { target: { value: 'large' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ terminalFontSize: 'large' }));
   });
 
   it('persists terminal shell skin through settings save', () => {

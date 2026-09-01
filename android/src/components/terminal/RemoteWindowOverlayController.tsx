@@ -111,7 +111,6 @@ import {
   type FloatingEntryPosition,
   type RemoteWindowTouchScrollFraction,
 } from './remote-window-overlay-storage';
-
 import {
   SurfaceSize,
   SurfacePointerPosition,
@@ -731,7 +730,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       }, SHARED_DRAG_SUPPRESS_CLICK_MS);
     },
   });
-
 
   // 与文件 bubble 一致：viewport 变化时纠正浮钮位置，避免拖动后的固定 left/top 越界
   useEffect(() => {

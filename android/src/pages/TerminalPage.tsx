@@ -60,7 +60,7 @@ import {
 } from '../lib/plugin-debug-console/debug-console-contract';
 import { useTerminalPageCopyRuntime } from './useTerminalPageCopyRuntime';
 import { getBrowserStorage } from '../lib/browser-storage';
-import type { TerminalShellSkin } from '../lib/bridge-settings';
+import { resolveTerminalFontSizePx, type TerminalFontSize, type TerminalShellSkin } from '../lib/bridge-settings';
 import {
   resolveEffectiveTerminalShellSkin,
   resolveNextTerminalShellBoundaryDelayMs,
@@ -509,6 +509,7 @@ interface TerminalPageProps {
   onRunScheduleJobNow?: (sessionId: string, jobId: string) => void;
   terminalThemeId?: string;
   terminalShellSkin?: TerminalShellSkin;
+  terminalFontSize?: TerminalFontSize;
   terminalWidthMode?: TerminalWidthMode;
   terminalSessionGroupLayoutMode?: TerminalSessionGroupLayoutMode;
   onTerminalWidthModeChange?: (sessionId: string, mode: TerminalWidthMode, cols?: number | null) => void;
@@ -598,6 +599,7 @@ function TerminalPageComponent({
   onRunScheduleJobNow,
   terminalThemeId,
   terminalShellSkin = 'auto',
+  terminalFontSize: terminalFontSizeSetting = 'minimum',
   terminalWidthMode = 'adaptive-phone',
   terminalSessionGroupLayoutMode = 'auto',
   onTerminalWidthModeChange,
@@ -636,7 +638,7 @@ function TerminalPageComponent({
   }, [terminalShellSkin]);
   const [focusNonce, setFocusNonce] = useState(0);
   const [inputIntentFollowResetEpoch, setInputIntentFollowResetEpoch] = useState(0);
-  const terminalFontSize = 10;
+  const terminalFontSize = resolveTerminalFontSizePx(terminalFontSizeSetting);
   const [terminalKeyboardRequested, setTerminalKeyboardRequested] = useState(false);
   const terminalKeyboardRequestedRef = useRef(false);
   const [androidImeVisible, setAndroidImeVisible] = useState(false);
@@ -3887,6 +3889,7 @@ function terminalPagePropsEqual(
     && prev.onRunScheduleJobNow === next.onRunScheduleJobNow
     && prev.terminalThemeId === next.terminalThemeId
     && prev.terminalShellSkin === next.terminalShellSkin
+    && prev.terminalFontSize === next.terminalFontSize
     && prev.terminalWidthMode === next.terminalWidthMode
     && prev.terminalSessionGroupLayoutMode === next.terminalSessionGroupLayoutMode
     && prev.onTerminalWidthModeChange === next.onTerminalWidthModeChange
