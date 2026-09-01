@@ -1214,13 +1214,14 @@ function TerminalPageComponent({
       if (!daemonHostId || sessionNames.length === 0) {
         return [];
       }
-      const existingGroup = sessionGroups.find((group) => (
-        group.daemonHostId?.trim() === daemonHostId
-        || resolveDrawerIdentity(group).key === daemonHostId
-      ));
       const directEndpoint = (device.daemon.endpoints || []).find((endpoint) => (
         endpoint.kind === 'tailscale' && endpoint.host?.trim() && endpoint.port
       )) || (device.daemon.endpoints || []).find((endpoint) => endpoint.host?.trim() && endpoint.port);
+      const existingGroup = sessionGroups.find((group) => (
+        group.daemonHostId?.trim() === daemonHostId
+        || resolveDrawerIdentity(group).key === daemonHostId
+        || (directEndpoint?.host?.trim() === group.bridgeHost.trim() && directEndpoint.port === group.bridgePort)
+      ));
       const lastOpenedSessionName = existingGroup?.lastOpenedSessionName?.trim();
       return [{
         id: `daemon:${daemonHostId}`,
@@ -1396,8 +1397,31 @@ function TerminalPageComponent({
         });
       }
     }
+
+    // An open client session is authoritative for the current process. A
+    // transiently empty remote catalog must not hide its drawer row (or the
+    // rename/close actions attached to that row).
+    const remoteCatalogIsEmpty = items.length === 0;
+    if (remoteCatalogIsEmpty && activeSession && !catalogLiveSessionIds.has(activeSession.id)) {
+      const serverIdentity = resolveDrawerIdentity(activeSession);
+      const sessionName = activeSession.sessionName.trim();
+      if (sessionName && activeSession.state !== 'closed') {
+        items.push({
+          id: activeSession.id,
+          stableKey: `local:${activeSession.id}::session:${sessionName}`,
+          title: activeSession.customName || activeSession.title || sessionName,
+          subtitle: `${serverIdentity.label} · ${sessionName}${formatTerminalBackendSuffix(activeSession.terminalBackend || 'tmux')}`,
+          paneLabel: undefined,
+          sessionGroupSlot: resolveSessionGroupSlot(activeSession.id),
+          active: renderedPaneSessions.some((session) => session.id === activeSession.id),
+          hostKey: serverIdentity.key,
+          hostLabel: serverIdentity.label,
+          terminalBackend: activeSession.terminalBackend || 'tmux',
+        });
+      }
+    }
     return { items, targets, closeTargets, catalogLiveSessionIds };
-  }, [drawerServerIdentityAliases, onlineDrawerServerIdentityAliases, onlineRelayDaemonDevices, relayDeviceByDaemonHostId, sessionGroups, sessions]);
+  }, [activeSession, drawerServerIdentityAliases, onlineDrawerServerIdentityAliases, onlineRelayDaemonDevices, relayDeviceByDaemonHostId, renderedPaneSessions, resolveSessionGroupSlot, sessionGroups, sessions]);
   const drawerHosts = useMemo<TerminalSessionDrawerHost[]>(() => {
     const hosts = new Map<string, TerminalSessionDrawerHost>();
     for (const device of onlineRelayDaemonDevices) {

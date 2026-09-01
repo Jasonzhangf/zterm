@@ -28,7 +28,7 @@ description: zterm Windows Electron 客户端与 WezTerm daemon 开发闭环，�
 - Session discovery/create/close UI must call shared daemon control helpers. Do not fork control wire semantics in Windows UI; verify UI list and daemon final list agree after close.
 - Desktop pane/tab composition must use shared `PaneStage`, `PaneTabs`, and workspace-model operations. Keep one stable runtime per tab id; focus switches must not reconnect. Packaged proof records daemon attached/ready counts before and after focus switch, isolated markers in each pane, then closes one tab and proves the sibling still receives a new marker.
 - Windows file browser must keep provider IO in `win/electron/windows-file-system.ts`, UI projection in `win/src/WindowsFileBrowserPanel.tsx`, and preview/path policy in shared `FileBrowserCore`. Packaged proof opens a real Windows fixture, compares Markdown source-to-DOM, proves binary disabled, and confirms daemon session counts stay unchanged.
-- 生成物 `win/dist/`、`win/dist-electron/`、`win/out/`、evidence 不进 git/MemPalace。
+- 生成物 `win/dist/`、`win/dist-electron/`、`win/out/`、evidence 不进 git。
 
 ## 最小验证
 
