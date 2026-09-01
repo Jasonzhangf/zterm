@@ -134,6 +134,34 @@ function manifestEndpointKey(manifestUrl: string) {
   }
 }
 
+function classifyManifestCandidate(candidate: AppUpdateManifestCandidate) {
+  try {
+    const hostname = new URL(candidate.manifestUrl).hostname.toLowerCase();
+    if (isTailscaleHost(hostname)) {
+      return 1;
+    }
+    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.startsWith('192.168.') || hostname.startsWith('10.') || hostname.startsWith('172.')) {
+      return 0;
+    }
+  } catch {
+    return 3;
+  }
+  return candidate.manifestSource === 'relay-injected' ? 2 : 3;
+}
+
+function isTailscaleHost(hostname: string) {
+  const host = hostname.trim().toLowerCase();
+  if (host.endsWith('.ts.net') || host.includes('tailnet')) {
+    return true;
+  }
+  const parts = host.split('.').map((part) => Number.parseInt(part, 10));
+  return parts.length === 4
+    && parts.every((part) => Number.isFinite(part) && part >= 0 && part <= 255)
+    && parts[0] === 100
+    && parts[1] >= 64
+    && parts[1] <= 127;
+}
+
 function resolveRouteAwareManifestUrl(
   preferences: AppUpdatePreferences,
   route: AppUpdateRouteSnapshot | undefined,
@@ -244,7 +272,7 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
     },
 
     async checkForUpdates(options?: AppUpdateCheckOptions): Promise<AppUpdateCheckResult> {
-      const manifestUrl = (
+      let manifestUrl = (
         options?.manifestUrlOverride?.trim()
         || resolveRouteAwareManifestUrl(
           snapshot.preferences,
@@ -271,10 +299,35 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
       }));
 
       try {
-        const response = await deps.fetchFn(manifestUrl, {
-          cache: 'no-store',
-          headers: { Accept: 'application/json' },
-        });
+        let response: Response | null = null;
+        if (!options?.manifestUrlOverride && !options?.activeSessionRoute && options?.manifestCandidates?.length) {
+          const candidates = [...options.manifestCandidates].sort((left, right) => (
+            classifyManifestCandidate(left) - classifyManifestCandidate(right)
+          ));
+          for (const candidate of candidates) {
+            try {
+              const candidateResponse = await deps.fetchFn(candidate.manifestUrl.trim(), {
+                cache: 'no-store',
+                headers: { Accept: 'application/json' },
+              });
+              if (candidateResponse.ok) {
+                manifestUrl = candidate.manifestUrl.trim();
+                response = candidateResponse;
+                break;
+              }
+            } catch {
+              // An unavailable route is only a probe failure; the next route is authoritative.
+            }
+          }
+          if (!response) {
+            throw new Error('LAN 与 Tailscale 升级路径均不可达');
+          }
+        } else {
+          response = await deps.fetchFn(manifestUrl, {
+            cache: 'no-store',
+            headers: { Accept: 'application/json' },
+          });
+        }
         if (!response.ok) {
           throw new Error(`升级清单请求失败：HTTP ${response.status}`);
         }

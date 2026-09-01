@@ -318,7 +318,7 @@ describe('app-update-runtime', () => {
     });
 
     expect(fetchFn).toHaveBeenCalledWith(
-      'http://100.66.1.82:3333/updates/latest.json',
+      'http://192.168.0.3:3333/updates/latest.json',
       expect.any(Object),
     );
   });
