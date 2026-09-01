@@ -48,6 +48,7 @@ function TerminalSessionDrawerComponent({
 }: TerminalSessionDrawerProps) {
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
   const longPressTimerRef = useRef<number | null>(null);
+  const folderPointerGestureRef = useRef(false);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const suppressNextClickRef = useRef(false);
   const selectionPressRef = useRef<{ sessionId: string; x: number; y: number } | null>(null);
@@ -549,6 +550,9 @@ function TerminalSessionDrawerComponent({
                   setFolderMenu({ cwd: folder.cwd, x: event.clientX, y: event.clientY });
                 }}
                 onTouchStart={(event) => {
+                  if (folderPointerGestureRef.current) {
+                    return;
+                  }
                   const touch = event.touches[0];
                   if (!touch) return;
                   clearLongPressTimer();
@@ -559,8 +563,36 @@ function TerminalSessionDrawerComponent({
                     onPreviewFolder?.(folder.cwd);
                   }, 420);
                 }}
-                onTouchEnd={clearLongPressTimer}
-                onTouchMove={clearLongPressTimer}
+                onTouchEnd={() => {
+                  folderPointerGestureRef.current = false;
+                  clearLongPressTimer();
+                }}
+                onTouchMove={() => {
+                  folderPointerGestureRef.current = false;
+                  clearLongPressTimer();
+                }}
+                onPointerDown={() => {
+                  folderPointerGestureRef.current = true;
+                  clearLongPressTimer();
+                  longPressTimerRef.current = window.setTimeout(() => {
+                    longPressTimerRef.current = null;
+                    suppressNextClickRef.current = true;
+                    setSlotMenu(null);
+                    onPreviewFolder?.(folder.cwd);
+                  }, 420);
+                }}
+                onPointerUp={() => {
+                  folderPointerGestureRef.current = false;
+                  clearLongPressTimer();
+                }}
+                onPointerCancel={() => {
+                  folderPointerGestureRef.current = false;
+                  clearLongPressTimer();
+                }}
+                onPointerMove={() => {
+                  folderPointerGestureRef.current = false;
+                  clearLongPressTimer();
+                }}
                 style={{
                   width: '100%', minHeight: '36px', padding: '0 8px', borderRadius: '4px',
                   border: 'none', background: 'transparent',

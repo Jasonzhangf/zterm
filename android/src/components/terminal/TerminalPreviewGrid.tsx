@@ -31,7 +31,7 @@ const PREVIEW_CHAR_WIDTH_RATIO = 0.55;
 
 // Compute terminal row/col from click position in preview body
 // titlebarHeight: non-compact=24px, compact=22px
-// previewFontSize: non-compact=5-7, compact=3
+// previewFontSize: non-compact=5-7, compact=7
 // previewRows: estimated ~10 for non-compact, ~30 for compact
 function computePreviewClickPosition(
   clientX: number,
@@ -198,10 +198,10 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
     const title = session.customName || session.title || session.sessionName || session.id;
     const compact = variant === 'secondary';
     const previewFontSize = compact
-      ? 3
+      ? 7
       : Math.max(5, Math.min(7, fontSize - 3));
     const previewRowHeight = compact
-      ? '4px'
+      ? '8px'
       : `${Math.max(7, Math.min(10, fontSize))}px`;
     const handlePreviewClick = (event: MouseEvent<HTMLElement>) => {
       if (consumeSuppressedActivationClick(session.id)) {

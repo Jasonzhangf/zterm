@@ -222,8 +222,8 @@ describe('TerminalPreviewGrid', () => {
     const terminalProps = terminalViewSpy.mock.calls.map(([props]) => props as Record<string, unknown>);
     expect(terminalProps.map((props) => [props.sessionId, props.fontSize, props.rowHeight])).toEqual([
       ['s1', 7, '10px'],
-      ['s2', 3, '4px'],
-      ['s3', 3, '4px'],
+      ['s2', 7, '8px'],
+      ['s3', 7, '8px'],
     ]);
     for (const props of terminalProps) {
       expect(props.widthMode).toBe('mirror-fixed');
