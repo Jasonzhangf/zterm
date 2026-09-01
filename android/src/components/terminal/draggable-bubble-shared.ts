@@ -7,8 +7,8 @@
  * - 拖拽激活时通过 onDragActive 抑制点击（防拖动后误触）；
  * - 位置 = 起点 rect 左上角 + 本次位移，经 clamp 钳制在视口内（left/top 绝对定位语义）。
  */
-import { useCallback, useRef } from 'react';
-import type { PointerEvent as ReactPointerEvent, TouchEvent as ReactTouchEvent } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { PointerEvent as ReactPointerEvent, RefObject, TouchEvent as ReactTouchEvent } from 'react';
 
 export const SHARED_DRAG_THRESHOLD_PX = 8;
 export const SHARED_DRAG_SUPPRESS_CLICK_MS = 180;
@@ -50,6 +50,33 @@ export interface SharedDragHandlers {
   onTouchMove: (event: ReactTouchEvent<HTMLElement>) => void;
   onTouchEnd: () => void;
   onTouchCancel: () => void;
+}
+
+export function useIndependentFloatingEntryDrag(
+  buttonRef: RefObject<HTMLButtonElement | null>,
+  onPositionChange: (position: { x: number; y: number }) => void,
+  onDragActive?: () => void,
+  onDragFinished?: () => void,
+): SharedDragHandlers {
+  return useSharedDraggableDrag({
+    getRect: () => {
+      const button = buttonRef.current;
+      if (!button) return null;
+      const rect = button.getBoundingClientRect();
+      return { left: rect.left, top: rect.top, width: rect.width || 44, height: rect.height || 44 };
+    },
+    clampPosition: (x, y, width, height) => {
+      const viewportWidth = Math.max(width + 16, Math.round(window.visualViewport?.width || window.innerWidth || 0));
+      const viewportHeight = Math.max(height + 16, Math.round(window.visualViewport?.height || window.innerHeight || 0));
+      return {
+        x: Math.max(8, Math.min(x, viewportWidth - width - 8)),
+        y: Math.max(24, Math.min(y, viewportHeight - height - 8)),
+      };
+    },
+    onPositionChange,
+    onDragActive: onDragActive ?? (() => {}),
+    onDragFinished: onDragFinished ?? (() => {}),
+  });
 }
 
 export function useSharedDraggableDrag(options: {
@@ -233,4 +260,43 @@ export function useSharedDraggableDrag(options: {
     onTouchEnd: handleTouchEnd,
     onTouchCancel: handleTouchCancel,
   };
+}
+
+export function useIndependentFloatingEntryPosition(
+  initialPosition: { x: number | null; y: number | null },
+  persistPosition: (position: { x: number | null; y: number | null }) => void,
+  onDragActive?: () => void,
+  onDragFinished?: () => void,
+) {
+  const [position, setPosition] = useState(initialPosition);
+  const positionRef = useRef(position);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const setStoredPosition = useCallback((next: { x: number; y: number }) => {
+    positionRef.current = next;
+    setPosition(next);
+    persistPosition(next);
+  }, [persistPosition]);
+  const handlers = useIndependentFloatingEntryDrag(buttonRef, setStoredPosition, onDragActive, onDragFinished);
+  useEffect(() => {
+    const rescue = () => {
+      const current = positionRef.current;
+      if (current.x === null || current.y === null) return;
+      const width = 44;
+      const height = 44;
+      const viewportWidth = Math.max(width + 16, Math.round(window.visualViewport?.width || window.innerWidth || 0));
+      const viewportHeight = Math.max(height + 16, Math.round(window.visualViewport?.height || window.innerHeight || 0));
+      const next = {
+        x: Math.max(8, Math.min(current.x, viewportWidth - width - 8)),
+        y: Math.max(24, Math.min(current.y, viewportHeight - height - 8)),
+      };
+      if (next.x !== current.x || next.y !== current.y) setStoredPosition(next);
+    };
+    window.addEventListener('resize', rescue);
+    window.visualViewport?.addEventListener('resize', rescue);
+    return () => {
+      window.removeEventListener('resize', rescue);
+      window.visualViewport?.removeEventListener('resize', rescue);
+    };
+  }, [setStoredPosition]);
+  return { position, buttonRef, handlers };
 }

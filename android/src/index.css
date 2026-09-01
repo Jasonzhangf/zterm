@@ -379,7 +379,6 @@ label:focus-visible {
   box-shadow:
     inset 1px 1px 0 var(--neo-highlight),
     inset 0 -3px 5px var(--zterm-neo-inset),
-    0 0 0 1px var(--zterm-neo-focus),
     4px 5px 10px var(--neo-shadow) !important;
 }
 
@@ -502,9 +501,17 @@ label:focus-visible {
 .zterm-neo-header button:focus-visible,
 .zterm-neo-quickbar > button:focus-visible,
 .zterm-neo-quickbar [data-quickbar-shell-row="true"] button:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+/* Pointer/touch activation must not leave a persistent keyboard focus ring. */
+.zterm-neo-header button:focus:not(:focus-visible) {
+  outline: none;
   box-shadow:
-    0 0 0 2px var(--zterm-neo-focus),
-    0 0 0 5px rgba(31, 214, 122, 0.12) !important;
+    inset 1px 1px 0 var(--neo-highlight),
+    inset -2px -3px 5px var(--zterm-neo-inset),
+    4px 5px 8px var(--neo-shadow) !important;
 }
 
 /* Settings group content reveal. */

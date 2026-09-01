@@ -11,7 +11,7 @@ import {
   type WheelEvent as ReactWheelEvent,
 } from 'react';
 import { App as CapacitorApp } from '@capacitor/app';
-import { useSharedDraggableDrag, SHARED_DRAG_SUPPRESS_CLICK_MS } from './draggable-bubble-shared';
+import { useIndependentFloatingEntryPosition, useSharedDraggableDrag, SHARED_DRAG_SUPPRESS_CLICK_MS } from './draggable-bubble-shared';
 import type {
   RemoteWindowCanvasLayoutV1,
   RemoteWindowStreamCapabilityTelemetry,
@@ -105,8 +105,10 @@ import {
   readRemoteWindowInputMode,
   readRemoteWindowTouchScrollFraction,
   readRemoteWindowTouchScrollInverted,
+  readStoredBrowserEntryPosition,
   readStoredEntryPosition,
   writeRemoteWindowInputMode,
+  writeStoredBrowserEntryPosition,
   writeStoredEntryPosition,
   type FloatingEntryPosition,
   type RemoteWindowTouchScrollFraction,
@@ -391,6 +393,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   const touchScrollInvertedRef = useRef(touchScrollInverted);
   const entryOffsetRef = useRef(entryOffset);
   const suppressEntryClickRef = useRef(false);
+  const suppressBrowserEntryClickRef = useRef(false);
   const entryButtonRef = useRef<HTMLButtonElement | null>(null);
   const floatingOverlayRef = useRef<HTMLDivElement | null>(null);
   const lockedToolbarRef = useRef<HTMLDivElement | null>(null);
@@ -649,6 +652,9 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     setEntryOffsetState(next);
     writeStoredEntryPosition(next);
   }, []);
+
+  const browserEntry = useIndependentFloatingEntryPosition(readStoredBrowserEntryPosition(), writeStoredBrowserEntryPosition, () => { suppressBrowserEntryClickRef.current = true; }, () => { suppressBrowserEntryClickRef.current = true; window.setTimeout(() => { suppressBrowserEntryClickRef.current = false; }, SHARED_DRAG_SUPPRESS_CLICK_MS); });
+  const browserEntryOffset = browserEntry.position, browserEntryButtonRef = browserEntry.buttonRef, browserEntryDragHandlers = browserEntry.handlers;
 
   // 浮层手柄拖拽：与文件 bubble / 浮钮同一套共享拖拽逻辑（pointer+touch 双套）
   const floatingDragInitialRef = useRef<{ left: number; top: number } | null>(null);
@@ -3146,10 +3152,13 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       ) : null}
       {browserEntryEnabled && (state.phase === 'closed' || state.phase === 'targetEnumerating' || state.phase === 'pickerOpen') ? (
         <button
-          type="button"
-          data-testid="browser-window-entry"
-          aria-label="打开浏览器窗口"
+          ref={browserEntryButtonRef} type="button" data-testid="browser-window-entry" aria-label="打开浏览器窗口"
+          onPointerDown={browserEntryDragHandlers.onPointerDown} onPointerMove={browserEntryDragHandlers.onPointerMove} onPointerUp={browserEntryDragHandlers.onPointerUp} onPointerCancel={browserEntryDragHandlers.onPointerCancel}
+          onTouchStart={browserEntryDragHandlers.onTouchStart} onTouchMove={browserEntryDragHandlers.onTouchMove} onTouchEnd={browserEntryDragHandlers.onTouchEnd} onTouchCancel={browserEntryDragHandlers.onTouchCancel}
           onClick={() => {
+            if (suppressBrowserEntryClickRef.current) {
+              return;
+            }
             if (state.phase === 'closed') {
               handleOpenBrowserPicker();
             } else {
@@ -3159,9 +3168,8 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
           style={{
             ...styles.entryButton,
             ...styles.browserEntryButton,
-            right: entryOffset.x === null ? 70 : 'auto',
-            bottom: entryOffset.y === null ? `${92 + Math.max(0, bottomInsetPx)}px` : 'auto',
-            left: entryOffset.x === null ? 'auto' : `${entryOffset.x + 56}px`,
+            right: browserEntryOffset.x === null ? 70 : 'auto', bottom: browserEntryOffset.y === null ? `${92 + Math.max(0, bottomInsetPx)}px` : 'auto',
+            left: browserEntryOffset.x === null ? 'auto' : `${browserEntryOffset.x}px`, top: browserEntryOffset.y === null ? 'auto' : `${browserEntryOffset.y}px`,
           }}
         >
           Web
