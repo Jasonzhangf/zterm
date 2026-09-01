@@ -2798,7 +2798,7 @@ describe('RemoteWindowOverlay', () => {
     expect(event.y).toBeCloseTo(40, 1);
   });
 
-  it('supports fullscreen pinch zoom, zoomed two-finger local pan, and never shrinks below fit', async () => {
+  it('supports fullscreen pinch zoom, zoomed single-finger pan, and two-finger scroll', async () => {
     const mediaStream = { id: 'media-stream-1' } as MediaStream;
     const sendInput = vi.fn();
     const requestTargets = vi.fn(async () => ({
@@ -2859,10 +2859,10 @@ describe('RemoteWindowOverlay', () => {
 
     fireEvent.pointerUp(surface, { pointerId: 1, pointerType: 'touch', clientX: 70, clientY: 100, button: 0, buttons: 0 });
     fireEvent.pointerMove(surface, { pointerId: 2, pointerType: 'touch', clientX: 230, clientY: 120, button: 0, buttons: 1 });
-    await waitForActionRemoteInputCount(sendInput, 1);
-    expect(Number.parseFloat(content.style.left || '0')).toBe(leftAfterPinch);
+    await waitFor(() => {
+      expect(Number.parseFloat(content.style.left || '0')).not.toBe(leftAfterPinch);
+    });
     sendInput.mockClear();
-    const leftAfterContinuedPan = Number.parseFloat(content.style.left || '0');
     fireEvent.pointerUp(surface, { pointerId: 2, pointerType: 'touch', clientX: 260, clientY: 100, button: 0, buttons: 0 });
     fireEvent.pointerDown(surface, { pointerId: 5, pointerType: 'touch', clientX: 150, clientY: 100, button: 0, buttons: 1 });
     fireEvent.pointerUp(surface, { pointerId: 5, pointerType: 'touch', clientX: 150, clientY: 100, button: 0, buttons: 0 });
@@ -2882,11 +2882,10 @@ describe('RemoteWindowOverlay', () => {
     fireEvent.pointerMove(surface, { pointerId: 4, pointerType: 'touch', clientX: 185, clientY: 125, button: 0, buttons: 1 });
 
     await waitFor(() => {
-      expect(Number.parseFloat(content.style.left || '0')).not.toBe(leftAfterContinuedPan);
       expect(Number.parseFloat(content.style.width || '0')).toBeGreaterThanOrEqual(fitWidth);
     });
     expect(screen.queryByTestId('remote-window-minimap')).toBeNull();
-    expect(sendInput).not.toHaveBeenCalled();
+    expect(actionRemoteInputPayloads(sendInput).some((payload) => payload.event.kind === 'scroll')).toBe(true);
   });
 
   it('routes floating two-finger vertical movement to realtime remote scroll actions without entering fullscreen', async () => {
@@ -3226,7 +3225,7 @@ describe('RemoteWindowOverlay', () => {
     expect(sendInput).not.toHaveBeenCalled();
   });
 
-  it('routes zoomed fullscreen two-finger vertical movement to local pan without remote scroll', async () => {
+  it('routes zoomed fullscreen two-finger vertical movement to remote scroll', async () => {
     const mediaStream = { id: 'media-stream-1' } as MediaStream;
     const sendInput = vi.fn();
     const requestTargets = vi.fn(async () => ({
@@ -3278,8 +3277,6 @@ describe('RemoteWindowOverlay', () => {
     fireEvent.pointerUp(surface, { pointerId: 61, pointerType: 'touch', clientX: 70, clientY: 100, button: 0, buttons: 0 });
     fireEvent.pointerUp(surface, { pointerId: 62, pointerType: 'touch', clientX: 260, clientY: 100, button: 0, buttons: 0 });
 
-    const content = screen.getByTestId('remote-window-video-content');
-    const topBeforeScroll = Number.parseFloat(content.style.top || '0');
     sendInput.mockClear();
 
     fireEvent.pointerDown(surface, { pointerId: 63, pointerType: 'touch', clientX: 110, clientY: 130, button: 0, buttons: 1 });
@@ -3289,13 +3286,13 @@ describe('RemoteWindowOverlay', () => {
     fireEvent.pointerMove(surface, { pointerId: 64, pointerType: 'touch', clientX: 190, clientY: 90, button: 0, buttons: 1 });
     fireEvent.pointerMove(surface, { pointerId: 63, pointerType: 'touch', clientX: 110, clientY: 70, button: 0, buttons: 1 });
     fireEvent.pointerMove(surface, { pointerId: 64, pointerType: 'touch', clientX: 190, clientY: 70, button: 0, buttons: 1 });
-    await waitFor(() => {
-      expect(Number.parseFloat(content.style.top || '0')).not.toBe(topBeforeScroll);
-    });
+    fireEvent.pointerMove(surface, { pointerId: 63, pointerType: 'touch', clientX: 110, clientY: 50, button: 0, buttons: 1 });
+    fireEvent.pointerMove(surface, { pointerId: 64, pointerType: 'touch', clientX: 190, clientY: 50, button: 0, buttons: 1 });
+    await waitFor(() => expect(sendInput).toHaveBeenCalled());
     fireEvent.pointerUp(surface, { pointerId: 63, pointerType: 'touch', clientX: 110, clientY: 90, button: 0, buttons: 0 });
     fireEvent.pointerUp(surface, { pointerId: 64, pointerType: 'touch', clientX: 190, clientY: 90, button: 0, buttons: 0 });
 
-    expect(actionRemoteInputPayloads(sendInput)).toEqual([]);
+    expect(actionRemoteInputPayloads(sendInput).some((payload) => payload.event.kind === 'scroll')).toBe(true);
   });
 
   it('lifts the fullscreen display container above IME without stealing unzoomed remote scroll control', async () => {

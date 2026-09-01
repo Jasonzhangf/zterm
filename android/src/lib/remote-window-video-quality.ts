@@ -10,6 +10,17 @@ export const REMOTE_WINDOW_VIDEO_BITRATE_STORAGE_KEY = 'zterm:remote-window-vide
 export const REMOTE_WINDOW_VIDEO_BITRATE_GLOBAL_STORAGE_KEY = 'zterm:remote-window-video-bitrate-global';
 export const REMOTE_WINDOW_VIDEO_PREFERENCES: readonly RemoteWindowVideoPreference[] = ['smooth', 'quality'];
 
+// Internal ABR guardrails. These are deliberately kept out of the wire
+// profile: the daemon receives the resolved max bitrate, while the client
+// owns the policy limits used to prevent text quality collapsing under load.
+export const REMOTE_WINDOW_VIDEO_BITRATE_BOUNDS: Readonly<Record<RemoteWindowVideoPreference, {
+  minBps: number;
+  maxBps: number;
+}>> = Object.freeze({
+  smooth: Object.freeze({ minBps: 2_000_000, maxBps: 8_000_000 }),
+  quality: Object.freeze({ minBps: 6_000_000, maxBps: 18_000_000 }),
+});
+
 export interface RemoteWindowNetworkQualityInput {
   effectiveType?: string | null;
   downlinkMbps?: number | null;
@@ -197,10 +208,11 @@ export function buildRemoteWindowVideoProfile(
   const interactionActive = options.interactionActive === true;
   const cause = options.cause ?? 'none';
   const level = options.level ?? 0;
+  const bitrateBounds = REMOTE_WINDOW_VIDEO_BITRATE_BOUNDS[preference];
   const base: RemoteWindowVideoProfile = preference === 'smooth'
     ? {
         preference,
-        maxBitrateBps: interactionActive ? 8_000_000 : 6_000_000,
+        maxBitrateBps: interactionActive ? bitrateBounds.maxBps : 6_000_000,
         maxFrameRateFps: interactionActive ? 45 : 30,
         maxCaptureWidth: interactionActive ? 1280 : 1440,
         maxCaptureHeight: interactionActive ? 800 : 900,
@@ -211,7 +223,7 @@ export function buildRemoteWindowVideoProfile(
       }
     : {
         preference,
-        maxBitrateBps: interactionActive ? 18_000_000 : 16_000_000,
+        maxBitrateBps: interactionActive ? bitrateBounds.maxBps : 16_000_000,
         maxFrameRateFps: 30,
         maxCaptureWidth: 1920,
         maxCaptureHeight: 1200,

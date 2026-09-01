@@ -4,6 +4,7 @@ import {
   REMOTE_WINDOW_VIDEO_BITRATE_STORAGE_KEY,
   REMOTE_WINDOW_VIDEO_PREFERENCE_STORAGE_KEY,
   buildRemoteWindowVideoProfile,
+  REMOTE_WINDOW_VIDEO_BITRATE_BOUNDS,
   readRemoteWindowVideoPreference,
   resolveDefaultRemoteWindowVideoPreference,
   resolveInitialRemoteWindowVideoProfile,
@@ -56,6 +57,15 @@ function makeStorage() {
 }
 
 describe('remote-window-video-quality', () => {
+  it('exposes internal bitrate guardrails for policy tuning without widening the wire contract', () => {
+    expect(REMOTE_WINDOW_VIDEO_BITRATE_BOUNDS.smooth).toEqual({ minBps: 2_000_000, maxBps: 8_000_000 });
+    expect(REMOTE_WINDOW_VIDEO_BITRATE_BOUNDS.quality).toEqual({ minBps: 6_000_000, maxBps: 18_000_000 });
+    expect(buildRemoteWindowVideoProfile('smooth', { cause: 'network', level: 2 }).maxBitrateBps)
+      .toBeGreaterThanOrEqual(REMOTE_WINDOW_VIDEO_BITRATE_BOUNDS.smooth.minBps);
+    expect(buildRemoteWindowVideoProfile('quality', { cause: 'network', level: 2 }).maxBitrateBps)
+      .toBeGreaterThanOrEqual(REMOTE_WINDOW_VIDEO_BITRATE_BOUNDS.quality.minBps);
+  });
+
   it('defaults to the bounded smooth profile and keeps coverage telemetry independent', () => {
     expect(resolveDefaultRemoteWindowVideoPreference(makeTarget(1920, 1080))).toBe('smooth');
     expect(buildRemoteWindowVideoProfile('smooth')).toEqual({

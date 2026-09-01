@@ -412,15 +412,15 @@ describe('remote-window-touch-action-runtime', () => {
     ]);
   });
 
-  it('keeps zoomed fullscreen single-finger movement as realtime remote scroll', () => {
+  it('keeps zoomed fullscreen single-finger movement as local pan', () => {
     const down = resolveRemoteWindowTouchPointerDownRuntime({
       state: createRemoteWindowTouchPointerState(),
       pointer: pointer({ pointerId: 9, clientX: 90, clientY: 50 }),
       geometry,
       zoomedProjection: true,
     });
-    expect(down.nextState.mode).toBe('actionPending');
-    expect(down.localEffect).toEqual({ kind: 'none' });
+    expect(down.nextState.mode).toBe('localPan');
+    expect(down.localEffect).toEqual(expect.objectContaining({ kind: 'local-pan-start' }));
     expect(down.remoteEvents).toEqual([]);
 
     const move = resolveRemoteWindowTouchPointerMoveRuntime({
@@ -429,9 +429,9 @@ describe('remote-window-touch-action-runtime', () => {
       geometry,
       touchMode: true,
     });
-    expect(move.nextState.mode).toBe('actionScroll');
-    expect(move.localEffect).toEqual({ kind: 'none' });
-    expect(move.remoteEvents).toEqual([expect.objectContaining({ kind: 'scroll' })]);
+    expect(move.nextState.mode).toBe('localPan');
+    expect(move.localEffect).toEqual(expect.objectContaining({ kind: 'local-pan-move', moved: true }));
+    expect(move.remoteEvents).toEqual([]);
 
     const upAfterMove = resolveRemoteWindowTouchPointerUpRuntime({
       state: move.nextState,
@@ -439,7 +439,7 @@ describe('remote-window-touch-action-runtime', () => {
       geometry,
     });
     expect(upAfterMove.remoteEvents).toEqual([]);
-    expect(upAfterMove.localEffect).toEqual({ kind: 'none' });
+    expect(upAfterMove.localEffect).toEqual(expect.objectContaining({ kind: 'local-pan-end', moved: true }));
 
     const tapDown = resolveRemoteWindowTouchPointerDownRuntime({
       state: createRemoteWindowTouchPointerState(),
@@ -669,7 +669,7 @@ describe('remote-window-touch-action-runtime', () => {
       expect(move.remoteEvents[0].kind).toBe('scroll');
     });
 
-    it('commits same-direction two-finger motion to local pan while zoomed', () => {
+    it('commits same-direction two-finger motion to remote scroll while zoomed', () => {
       const candidate = pairDown({ clientX: 100, clientY: 60 }, { clientX: 120, clientY: 60 });
       const observe = resolveRemoteWindowTouchPairPointerMoveRuntime({
         state: candidate.nextState,
@@ -680,8 +680,7 @@ describe('remote-window-touch-action-runtime', () => {
         geometry,
         timeMs: 1_050,
         pinchEnabled: true,
-        scrollEnabled: false,
-        panEnabled: true,
+        scrollEnabled: true,
       });
       const commit = resolveRemoteWindowTouchPairPointerMoveRuntime({
         state: observe.nextState,
@@ -692,12 +691,11 @@ describe('remote-window-touch-action-runtime', () => {
         geometry,
         timeMs: 1_200,
         pinchEnabled: true,
-        scrollEnabled: false,
-        panEnabled: true,
+        scrollEnabled: true,
       });
-      expect(commit.nextState.mode).toBe('twoFingerPan');
-      expect(commit.remoteEvents).toEqual([]);
-      expect(commit.localEffect).toEqual(expect.objectContaining({ kind: 'local-pan-start' }));
+      expect(commit.nextState.mode).toBe('twoFingerScroll');
+      expect(commit.remoteEvents[0]?.kind).toBe('scroll');
+      expect(commit.localEffect).toEqual(expect.objectContaining({ kind: 'two-finger-scroll-start' }));
     });
 
     it('commits opposite-direction two-finger motion to pinch after the observe window', () => {
@@ -738,6 +736,23 @@ describe('remote-window-touch-action-runtime', () => {
       });
       expect(move.nextState.mode).toBe('pinch');
       expect(move.localEffect.kind).toBe('pinch-move');
+    });
+
+    it('keeps dominant vertical movement as scroll when finger spacing only jitters', () => {
+      const candidate = pairDown({ clientX: 100, clientY: 60 }, { clientX: 120, clientY: 60 });
+      const move = resolveRemoteWindowTouchPairPointerMoveRuntime({
+        state: candidate.nextState,
+        pair: {
+          first: { pointerId: 1, pointerType: 'touch', clientX: 99, clientY: 120, timeMs: 1_200 },
+          second: { pointerId: 2, pointerType: 'touch', clientX: 121, clientY: 120, timeMs: 1_200 },
+        },
+        geometry,
+        timeMs: 1_200,
+        pinchEnabled: true,
+        scrollEnabled: true,
+      });
+      expect(move.nextState.mode).toBe('twoFingerScroll');
+      expect(move.remoteEvents[0]?.kind).toBe('scroll');
     });
 
     it('does not commit a one-finger-only pinch (a stationary finger must not trigger pinch)', () => {

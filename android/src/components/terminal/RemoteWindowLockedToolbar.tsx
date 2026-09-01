@@ -51,9 +51,9 @@ export const RemoteWindowLockedToolbar = forwardRef<HTMLDivElement, RemoteWindow
 }, ref) {
   return (
     <div ref={ref} data-testid="remote-window-locked-toolbar" style={styles.lockedToolbar}>
-      <div {...dragHandleProps} data-testid="remote-window-drag-handle">
+      <div {...dragHandleProps} data-testid="remote-window-drag-handle" style={styles.lockedTopBar}>
         <div style={styles.lockedTitle}>
-          <span style={styles.targetKind}>{targetKindLabel}</span>
+            <span style={styles.targetKind}>{targetKindLabel}</span>
           <span data-testid="remote-window-input-mode" style={styles.inputModeBadge}>
             {inputSupported ? '可操作' : '只读'}
           </span>
@@ -82,23 +82,24 @@ export const RemoteWindowLockedToolbar = forwardRef<HTMLDivElement, RemoteWindow
               <RemoteWindowIcon name="fullscreen" />
             </button>
           )}
-          <button type="button" aria-label="关闭远程窗口" onClick={onClose} style={styles.headerIconButton}>
+          <button type="button" aria-label="关闭远程窗口" title="关闭" onClick={onClose} style={styles.headerIconButton}>
             <RemoteWindowIcon name="close" />
           </button>
         </div>
       </div>
       <div data-testid="remote-window-control-strip" data-no-drag="true" style={styles.lockedControlStrip}>
-        <button
+          <button
           type="button"
           data-testid="remote-window-input-mode-toggle"
           data-no-drag="true"
           aria-label={inputMode === 'touch' ? '切换为鼠标模式' : '切换为触控模式'}
           onClick={onToggleInputMode}
           style={inputMode === 'touch' ? styles.headerModeButtonActive : styles.headerModeButton}
-        >
+            title={inputMode === 'touch' ? '切换为鼠标模式' : '切换为触控模式'}
+          >
           {inputMode === 'touch' ? '触控' : '鼠标'}
         </button>
-        <button
+          <button
           type="button"
           data-no-drag="true"
           aria-label="截屏远程窗口"
@@ -106,19 +107,21 @@ export const RemoteWindowLockedToolbar = forwardRef<HTMLDivElement, RemoteWindow
           disabled={screenshotBusy}
           onClick={onScreenshot}
           style={screenshotButtonStyle}
-        >
+            title="截取当前窗口"
+          >
           <RemoteWindowIcon name="screenshot" />
         </button>
-        <button
+          <button
           type="button"
           data-no-drag="true"
           aria-label="调起远程窗口键盘"
           onClick={onRequestKeyboard}
           style={styles.headerIconButton}
-        >
+            title="打开键盘"
+          >
           <RemoteWindowIcon name="keyboard" />
         </button>
-        <button
+          <button
           type="button"
           data-no-drag="true"
           data-testid="remote-window-more-toggle"
@@ -126,7 +129,8 @@ export const RemoteWindowLockedToolbar = forwardRef<HTMLDivElement, RemoteWindow
           aria-expanded={moreOpen ? 'true' : 'false'}
           onClick={onToggleMore}
           style={moreOpen ? styles.headerIconButtonBusy : styles.headerIconButton}
-        >
+            title="更多串流设置"
+          >
           <RemoteWindowIcon name="more" />
         </button>
       </div>

@@ -599,7 +599,20 @@ export function resolveRemoteWindowTouchPointerDownRuntime(options: {
   if (button === 'none') {
     return emptyResult(options.state, false);
   }
-  void options.zoomedProjection;
+  if (options.zoomedProjection && pointer.pointerType === 'touch') {
+    return withLocalEffect({
+      mode: 'localPan',
+      pointerId: pointer.pointerId,
+      startClientX: pointer.clientX,
+      startClientY: pointer.clientY,
+      moved: false,
+    }, {
+      kind: 'local-pan-start',
+      pointerId: pointer.pointerId,
+      clientX: pointer.clientX,
+      clientY: pointer.clientY,
+    });
+  }
   return emptyResult({
     mode: 'actionPending',
     pointerId: pointer.pointerId,
@@ -1038,6 +1051,19 @@ function isPinchIntentPair(options: {
   return Math.sign(firstProjection) !== Math.sign(secondProjection);
 }
 
+function isDominantVerticalScrollIntent(options: {
+  midpointShiftY: number;
+  distanceDelta: number;
+  firstStart: { clientX: number; clientY: number };
+  firstCurrent: { clientX: number; clientY: number };
+  secondStart: { clientX: number; clientY: number };
+  secondCurrent: { clientX: number; clientY: number };
+}) {
+  return options.midpointShiftY >= REMOTE_WINDOW_TWO_FINGER_SCROLL_MIN_MIDPOINT_PX
+    && options.midpointShiftY >= Math.max(8, options.distanceDelta * 1.5 + 4)
+    && hasCoherentTwoFingerScrollIntent(options);
+}
+
 function hasCoherentTwoFingerScrollIntent(options: {
   firstStart: { clientX: number; clientY: number };
   firstCurrent: { clientX: number; clientY: number };
@@ -1259,6 +1285,14 @@ export function resolveRemoteWindowTouchPairPointerMoveRuntime(options: RemoteWi
 
   if (
     options.pinchEnabled
+    && !isDominantVerticalScrollIntent({
+      midpointShiftY: Math.abs(midpoint.clientY - state.startMidY),
+      distanceDelta: Math.abs(distance - state.startDistance),
+      firstStart: state.firstStart,
+      firstCurrent,
+      secondStart: state.secondStart,
+      secondCurrent,
+    })
     && isPinchIntentPair({
       firstStart: state.firstStart,
       firstCurrent,
