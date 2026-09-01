@@ -440,7 +440,7 @@ export function ConnectionConfigSection({
           <label style={{ display: 'grid', gap: '5px', fontSize: '13px', fontWeight: 700 }}>
             名称
             <input
-              aria-label="Server name"
+              aria-label="服务器名称"
               value={draft.name}
               onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
               placeholder="Mac Studio"
@@ -451,7 +451,7 @@ export function ConnectionConfigSection({
             <label style={{ display: 'grid', gap: '5px', fontSize: '13px', fontWeight: 700 }}>
               主机
               <input
-                aria-label="Server host"
+                aria-label="服务器地址"
                 value={draft.targetHost}
                 onChange={(event) => setDraft((current) => ({ ...current, targetHost: event.target.value }))}
                 placeholder="100.66.1.82"
@@ -472,7 +472,7 @@ export function ConnectionConfigSection({
           <label style={{ display: 'grid', gap: '5px', fontSize: '13px', fontWeight: 700 }}>
             认证 Token
             <input
-              aria-label="Server auth token"
+              aria-label="服务器认证令牌"
               value={draft.authToken}
               onChange={(event) => setDraft((current) => ({ ...current, authToken: event.target.value }))}
               placeholder="wterm-..."
