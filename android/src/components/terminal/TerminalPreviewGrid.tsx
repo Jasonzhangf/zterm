@@ -198,11 +198,11 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
     const title = session.customName || session.title || session.sessionName || session.id;
     const compact = variant === 'secondary';
     const previewFontSize = compact
-      ? 7
-      : Math.max(5, Math.min(7, fontSize - 3));
+      ? 9
+      : Math.max(8, Math.min(12, fontSize - 2));
     const previewRowHeight = compact
-      ? '8px'
-      : `${Math.max(7, Math.min(10, fontSize))}px`;
+      ? '10px'
+      : `${Math.max(10, Math.min(14, fontSize))}px`;
     const handlePreviewClick = (event: MouseEvent<HTMLElement>) => {
       if (consumeSuppressedActivationClick(session.id)) {
         event.preventDefault();
@@ -518,7 +518,9 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
         primaryItemId={resolvedPrimaryPreviewSessionId}
         onPrimaryItemChange={setPrimaryPreviewSessionId}
         landscape={landscape}
-        secondaryItemFlex="1 1 0"
+        secondaryWrap="nowrap"
+        secondaryItemFlex={landscape ? '1 1 0' : '0 0 min(30vw, 160px)'}
+        secondaryOverflowX={landscape ? undefined : 'auto'}
         style={{ flex: 1, minHeight: 0 }}
       />
       <div
