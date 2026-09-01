@@ -15,6 +15,8 @@ import type {
   RemoteWindowStreamRequestPayload,
   RemoteWindowStreamQualityRequestPayload,
   RemoteWindowStreamQualityResultPayload,
+  RemoteWindowBrowserUserAgent,
+  RemoteWindowBrowserUserAgentResultPayload,
   RemoteWindowStreamPurpose,
   RemoteWindowStreamTargetsResponsePayload,
   RemoteWindowVideoProfile,
@@ -33,6 +35,7 @@ export type RemoteWindowControlMessage = Extract<
   | { type: 'remote-window-stream-quality-result' }
   | { type: 'remote-window-input-ack' }
   | { type: 'remote-window-error' }
+  | { type: 'remote-window-browser-user-agent-result' }
 >;
 
 type RemoteWindowInputClientMessage = Extract<ClientMessage, { type: 'remote-window-input' }>;
@@ -83,6 +86,12 @@ interface PendingRemoteWindowStreamQualityRequest {
   reject: (error: Error) => void;
 }
 
+interface PendingRemoteWindowBrowserUserAgentRequest {
+  timeoutId: number | null;
+  resolve: (payload: RemoteWindowBrowserUserAgentResultPayload) => void;
+  reject: (error: Error) => void;
+}
+
 type PendingRemoteWindowRequest =
   | PendingRemoteWindowTargetsRequest
   | PendingRemoteWindowStreamStartRequest
@@ -108,7 +117,8 @@ export function isRemoteWindowControlMessage(msg: ServerMessage): msg is RemoteW
     || msg.type === 'remote-window-stream-focus-result'
     || msg.type === 'remote-window-stream-quality-result'
     || msg.type === 'remote-window-input-ack'
-    || msg.type === 'remote-window-error';
+  || msg.type === 'remote-window-error'
+  || msg.type === 'remote-window-browser-user-agent-result';
 }
 
 function buildRemoteWindowError(payload: RemoteWindowStreamErrorPayload) {
@@ -136,6 +146,7 @@ export function createRemoteWindowMessageRuntime(input?: {
   const pendingStreamStarts = new Map<string, PendingRemoteWindowStreamStartRequest>();
   const pendingStreamStops = new Map<string, PendingRemoteWindowStreamStopRequest>();
   const pendingStreamQuality = new Map<string, PendingRemoteWindowStreamQualityRequest>();
+  const pendingBrowserUserAgent = new Map<string, PendingRemoteWindowBrowserUserAgentRequest>();
   const streamInputPreferences = new Map<string, RemoteWindowVideoProfile['preference']>();
   const pendingContinuousInput = new Map<string, PendingRemoteWindowContinuousInput>();
   const reliableInputQueue: PendingRemoteWindowReliableInput[] = [];
@@ -619,6 +630,36 @@ export function createRemoteWindowMessageRuntime(input?: {
       });
     },
 
+    sendBrowserUserAgent(sessionId: string, options: {
+      ws: BridgeTransportSocket;
+      target: RemoteWindowStreamTargetManifest;
+      userAgent: RemoteWindowBrowserUserAgent;
+      sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
+    }) {
+      const targetSessionId = sessionId.trim();
+      if (!targetSessionId || !options.target.streamTargetId) {
+        throw new Error('Browser user-agent requires sessionId and target');
+      }
+      const requestId = `rw-browser-ua-${now()}-${Math.random().toString(36).slice(2, 8)}`;
+      return new Promise<RemoteWindowBrowserUserAgentResultPayload>((resolve, reject) => {
+        const timeoutId = setTimeoutFn(() => {
+          pendingBrowserUserAgent.delete(requestId);
+          reject(new Error('Browser user-agent request timed out'));
+        }, streamQualityTimeoutMs) as unknown as number;
+        pendingBrowserUserAgent.set(requestId, { timeoutId, resolve, reject });
+        try {
+          sendClientMessage(targetSessionId, options.ws, options.sendSocketPayload, {
+            type: 'remote-window-browser-user-agent-request',
+            payload: { requestId, target: options.target, userAgent: options.userAgent },
+          });
+        } catch (error) {
+          pendingBrowserUserAgent.delete(requestId);
+          clearTimeoutFn(timeoutId);
+          reject(error instanceof Error ? error : new Error(String(error)));
+        }
+      });
+    },
+
     sendStreamUpdateFocus(sessionId: string, options: {
       ws: BridgeTransportSocket;
       streamId: string;
@@ -878,6 +919,20 @@ export function createRemoteWindowMessageRuntime(input?: {
       if (msg.type === 'remote-window-input-ack') {
         return acceptRemoteWindowInputAck(msg.control, msg);
       }
+      if (msg.type === 'remote-window-browser-user-agent-result') {
+        const pending = pendingBrowserUserAgent.get(msg.payload.requestId);
+        if (pending) {
+          pendingBrowserUserAgent.delete(msg.payload.requestId);
+          if (pending.timeoutId !== null) clearTimeoutFn(pending.timeoutId);
+          if (msg.payload.status === 'applied') pending.resolve(msg.payload);
+          else {
+            const error = new Error(msg.payload.error?.message || 'Browser user-agent rejected');
+            error.name = msg.payload.error?.code || 'remote_window_browser_cdp_failed';
+            pending.reject(error);
+          }
+        }
+        return notifySubscribers(msg) || Boolean(pending);
+      }
       const handled = runtime.handleError(msg.payload);
       const observed = notifySubscribers(msg);
       return handled || observed;
@@ -911,6 +966,11 @@ export function createRemoteWindowMessageRuntime(input?: {
         pending.reject(new Error(reason));
       }
       pendingStreamQuality.clear();
+      for (const pending of pendingBrowserUserAgent.values()) {
+        if (pending.timeoutId !== null) clearTimeoutFn(pending.timeoutId);
+        pending.reject(new Error(reason));
+      }
+      pendingBrowserUserAgent.clear();
       clearReliableInputAckTimer();
       clearContinuousFlushTimer();
       pendingContinuousInput.clear();
@@ -921,11 +981,11 @@ export function createRemoteWindowMessageRuntime(input?: {
     },
 
     getPendingCount() {
-      return pendingRequests.size + pendingStreamStarts.size + pendingStreamStops.size + pendingStreamQuality.size;
+      return pendingRequests.size + pendingStreamStarts.size + pendingStreamStops.size + pendingStreamQuality.size + pendingBrowserUserAgent.size;
     },
 
     getPendingRequestIds() {
-      return [...pendingRequests.keys(), ...pendingStreamStarts.keys(), ...pendingStreamStops.keys(), ...pendingStreamQuality.keys()];
+      return [...pendingRequests.keys(), ...pendingStreamStarts.keys(), ...pendingStreamStops.keys(), ...pendingStreamQuality.keys(), ...pendingBrowserUserAgent.keys()];
     },
   };
 

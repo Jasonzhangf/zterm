@@ -75,6 +75,10 @@ export const styles: Record<string, CSSProperties> = {
     WebkitUserSelect: 'none',
     cursor: 'grab',
   },
+  browserEntryButton: {
+    color: '#8fd3ff',
+    fontSize: 12,
+  },
   pickerPanel: {
     position: 'absolute',
     left: 12,

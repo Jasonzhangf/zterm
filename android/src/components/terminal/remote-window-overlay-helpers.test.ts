@@ -7,11 +7,28 @@ import {
   clampFloatingOffset,
   clampFullscreenViewport,
   formatTargetKind,
+  isRemoteWindowChromeTarget,
   resolveAspectRect,
   safeRemoteWindowGroupId,
 } from './remote-window-overlay-helpers';
+import type { RemoteWindowStreamTargetManifest } from '../../lib/types';
+
+function appTarget(appBundleId: string): RemoteWindowStreamTargetManifest {
+  return {
+    streamTargetId: `app:${appBundleId}`,
+    videoTarget: { kind: 'app-window', appBundleId, pid: 1, windowId: '1', title: 'Chrome', windowBoundsTopLeftPx: { x: 0, y: 0, width: 800, height: 600 } },
+    inputTarget: { kind: 'app-window' }, streamMode: 'interactive', focusPolicy: 'bring-to-focus', inputRoute: 'os-event',
+    capture: { source: 'ScreenCaptureKit', coordinateSpace: 'macos-top-left-px', scale: 1, createdAt: 'now' },
+  };
+}
 
 describe('remote-window-overlay-helpers', () => {
+  it('classifies Chrome targets for browser mode', () => {
+    expect(isRemoteWindowChromeTarget(appTarget('com.google.Chrome'))).toBe(true);
+    expect(isRemoteWindowChromeTarget(appTarget('com.google.Chrome.canary'))).toBe(true);
+    expect(isRemoteWindowChromeTarget(appTarget('com.apple.Safari'))).toBe(false);
+  });
+
   it('clamps offsets and numbers to bounds', () => {
     expect(clampFloatingOffset(150, 10, 100)).toBe(100);
     expect(clampFloatingOffset(5, 10, 100)).toBe(10);

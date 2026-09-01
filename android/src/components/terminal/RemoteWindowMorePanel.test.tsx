@@ -39,4 +39,33 @@ describe('RemoteWindowMorePanel view owner', () => {
     />);
     expect(screen.queryByTestId('remote-window-fullscreen-display-toggle')).toBeNull();
   });
+
+  it('shows browser UA control only for a browser target', () => {
+    const onBrowserUserAgentChange = vi.fn();
+    const view = render(<RemoteWindowMorePanel
+      fullscreen
+      videoPreference="smooth"
+      streamStatusText="串流：已连接"
+      networkStatusText="网络：4g"
+      developerDiagnostics={null}
+      onToggleFullscreenDisplayMode={vi.fn()}
+      onVideoPreferenceChange={vi.fn()}
+      browserMode
+      browserUserAgent="desktop"
+      browserUserAgentStatus="idle"
+      onBrowserUserAgentChange={onBrowserUserAgentChange}
+    />);
+    fireEvent.change(screen.getByTestId('remote-window-browser-user-agent-select'), { target: { value: 'mobile' } });
+    expect(onBrowserUserAgentChange).toHaveBeenCalledWith('mobile');
+    view.rerender(<RemoteWindowMorePanel
+      fullscreen
+      videoPreference="smooth"
+      streamStatusText="串流：已连接"
+      networkStatusText="网络：4g"
+      developerDiagnostics={null}
+      onToggleFullscreenDisplayMode={vi.fn()}
+      onVideoPreferenceChange={vi.fn()}
+    />);
+    expect(screen.queryByTestId('remote-window-browser-user-agent-select')).toBeNull();
+  });
 });

@@ -218,6 +218,7 @@ export function AppContent({
     requestRemoteWindowTargets,
     requestRemoteWindowStreamStart,
     updateRemoteWindowStreamQuality,
+    setRemoteWindowBrowserUserAgent,
     updateRemoteWindowFocus,
     stopRemoteWindowStream,
     sendRemoteWindowInput,
@@ -951,6 +952,7 @@ export function AppContent({
             onRequestRemoteWindowTargets={requestRemoteWindowTargets}
             onRequestRemoteWindowStreamStart={requestRemoteWindowStreamStart}
             onUpdateRemoteWindowStreamQuality={updateRemoteWindowStreamQuality}
+            onSetRemoteWindowBrowserUserAgent={setRemoteWindowBrowserUserAgent}
             onUpdateRemoteWindowFocus={updateRemoteWindowFocus}
             onStopRemoteWindowStream={stopRemoteWindowStream}
             onSendRemoteWindowInput={sendRemoteWindowInput}

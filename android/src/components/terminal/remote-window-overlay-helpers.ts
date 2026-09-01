@@ -362,6 +362,18 @@ export function formatTargetKind(target: RemoteWindowStreamTargetManifest) {
   return target.videoTarget.kind === 'iterm2-pane' ? 'iTerm2 Pane' : 'App Window';
 }
 
+const CHROME_APP_BUNDLE_IDS = new Set([
+  'com.google.Chrome',
+  'com.google.Chrome.beta',
+  'com.google.Chrome.canary',
+  'com.google.Chrome.dev',
+]);
+
+export function isRemoteWindowChromeTarget(target: RemoteWindowStreamTargetManifest) {
+  return target.videoTarget.kind === 'app-window'
+    && CHROME_APP_BUNDLE_IDS.has(target.videoTarget.appBundleId);
+}
+
 export function formatInputRoute(target: RemoteWindowStreamTargetManifest) {
   switch (target.inputRoute) {
     case 'tmux-input':

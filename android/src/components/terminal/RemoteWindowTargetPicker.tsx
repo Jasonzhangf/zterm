@@ -6,6 +6,7 @@ import {
   buildRemoteWindowAppTargetGroups,
   formatTargetKind,
   formatTargetSubtitle,
+  isRemoteWindowChromeTarget,
   safeRemoteWindowGroupId,
 } from './remote-window-overlay-helpers';
 import { styles } from './remote-window-overlay-styles';
@@ -21,6 +22,7 @@ export interface RemoteWindowTargetPickerProps {
   onSelectTarget: (target: RemoteWindowStreamTargetManifest) => void;
   onRefresh: () => void;
   onClose: () => void;
+  browserOnly?: boolean;
 }
 
 function RemoteWindowPickerErrors({ errors }: { errors: RemoteWindowStreamErrorPayload[] }) {
@@ -49,20 +51,22 @@ export function RemoteWindowTargetPicker({
   onSelectTarget,
   onRefresh,
   onClose,
+  browserOnly = false,
 }: RemoteWindowTargetPickerProps) {
-  const appGroups = phase === 'pickerOpen' ? buildRemoteWindowAppTargetGroups(targets) : [];
+  const visibleTargets = browserOnly ? targets.filter(isRemoteWindowChromeTarget) : targets;
+  const appGroups = phase === 'pickerOpen' ? buildRemoteWindowAppTargetGroups(visibleTargets) : [];
   const itermPaneTargets = phase === 'pickerOpen'
-    ? targets.filter((target) => target.videoTarget.kind === 'iterm2-pane')
+    ? visibleTargets.filter((target) => target.videoTarget.kind === 'iterm2-pane')
     : [];
   return (
     <div data-testid="remote-window-picker" style={styles.pickerPanel}>
       <div style={styles.panelHeader}>
         <div>
-          <div style={styles.panelTitle}>远程窗口</div>
+          <div style={styles.panelTitle}>{browserOnly ? '浏览器窗口' : '远程窗口'}</div>
           <div style={styles.panelSubtitle}>
             {phase === 'targetEnumerating'
               ? '正在读取窗口列表'
-              : `${targets.length} 个目标${catalogRefreshing ? ' · 更新中' : ''}`}
+              : `${visibleTargets.length} 个目标${catalogRefreshing ? ' · 更新中' : ''}`}
           </div>
         </div>
         <div style={styles.panelActions}>
@@ -82,12 +86,12 @@ export function RemoteWindowTargetPicker({
       {phase === 'pickerOpen' && errorMessage ? (
         <div data-testid="remote-window-picker-error" style={styles.errorBox}>{errorMessage}</div>
       ) : null}
-      {phase === 'pickerOpen' && targets.length === 0 ? <RemoteWindowPickerErrors errors={errors} /> : null}
+      {phase === 'pickerOpen' && visibleTargets.length === 0 ? <RemoteWindowPickerErrors errors={errors} /> : null}
       <div style={styles.targetList}>
         {phase === 'targetEnumerating' ? (
           <div data-testid="remote-window-picker-loading" style={styles.emptyState}>读取中</div>
-        ) : targets.length === 0 ? (
-          <div data-testid="remote-window-picker-empty" style={styles.emptyState}>没有可选窗口</div>
+        ) : visibleTargets.length === 0 ? (
+          <div data-testid="remote-window-picker-empty" style={styles.emptyState}>{browserOnly ? '没有可用的 Chrome 窗口' : '没有可选窗口'}</div>
         ) : (
           <>
             {appGroups.map((group) => {

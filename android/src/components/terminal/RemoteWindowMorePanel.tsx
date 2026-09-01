@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import type { RemoteWindowVideoPreference } from '../../lib/types';
+import type { RemoteWindowBrowserUserAgent, RemoteWindowVideoPreference } from '../../lib/types';
 import { styles } from './remote-window-overlay-styles';
 
 export interface RemoteWindowMorePanelProps {
@@ -10,6 +10,11 @@ export interface RemoteWindowMorePanelProps {
   developerDiagnostics: ReactNode;
   onToggleFullscreenDisplayMode: () => void;
   onVideoPreferenceChange: (preference: RemoteWindowVideoPreference) => void;
+  browserMode?: boolean;
+  browserUserAgent?: RemoteWindowBrowserUserAgent;
+  browserUserAgentStatus?: 'idle' | 'pending' | 'applied' | 'rejected';
+  browserUserAgentError?: string | null;
+  onBrowserUserAgentChange?: (userAgent: RemoteWindowBrowserUserAgent) => void;
 }
 
 export function RemoteWindowMorePanel({
@@ -20,6 +25,11 @@ export function RemoteWindowMorePanel({
   developerDiagnostics,
   onToggleFullscreenDisplayMode,
   onVideoPreferenceChange,
+  browserMode = false,
+  browserUserAgent = 'desktop',
+  browserUserAgentStatus = 'idle',
+  browserUserAgentError = null,
+  onBrowserUserAgentChange,
 }: RemoteWindowMorePanelProps) {
   return (
     <div data-testid="remote-window-stream-status-panel" data-no-drag="true" style={styles.streamStatusPanel}>
@@ -46,6 +56,25 @@ export function RemoteWindowMorePanel({
           <option value="quality">清晰优先</option>
         </select>
       </label>
+      {browserMode && onBrowserUserAgentChange ? (
+        <label style={styles.moreField}>
+          <span>浏览器排版</span>
+          <select
+            aria-label="浏览器移动 UA"
+            data-testid="remote-window-browser-user-agent-select"
+            value={browserUserAgent}
+            disabled={browserUserAgentStatus === 'pending'}
+            onChange={(event) => onBrowserUserAgentChange(event.currentTarget.value as RemoteWindowBrowserUserAgent)}
+            style={styles.bitrateSelect}
+          >
+            <option value="desktop">桌面版</option>
+            <option value="mobile">移动版</option>
+          </select>
+          <span data-testid="remote-window-browser-user-agent-status">
+            {browserUserAgentStatus === 'pending' ? '正在切换…' : browserUserAgentStatus === 'rejected' ? `失败：${browserUserAgentError || 'CDP 未接受'}` : browserUserAgentStatus === 'applied' ? '已应用' : ''}
+          </span>
+        </label>
+      ) : null}
       <div data-testid="remote-window-user-stream-status">{streamStatusText}</div>
       <div data-testid="remote-window-user-network-status">{networkStatusText}</div>
       {developerDiagnostics}

@@ -304,6 +304,13 @@ Packaged Electron app.asar 内 DevTools 默认被禁用。`--remote-debugging-po
 - commit `9986c1ca` 已合并为主线 `a5e4d032`；audit 11/11、session drawer UI 189/189、feature registry 102/102、type-check、diff-check 和 AGY review 通过。
 - 重新构建/发布 2772：`0.1.3.2772` / versionCode `1100027720`，APK SHA256 `29127a74be413d5c0698e7a4721fab9a4d7ed6cb4a2f6235077f87f9c3d41082`；本机、Tailscale、公网 manifest/APK 均一致，bundle verifier 全绿。
 - 当前 adb 无在线设备，2772 真机安装/抽屉回归仍是明确缺口；task 保持 delivered，待 master 完成 L5 后再 close。
+# 2026-09-01 browser remote-window mode
+
+- 目标锚定：现有 Chrome 窗口经现有 remote-window 链路全屏投影；不启动实例、不改 native window；缩放只改 Android projection；CDP UA/target 控制暂未接入。
+- 唯一 owner：catalog/capture/WebRTC 仍归 `daemon.remote_window_stream`；Chrome 过滤、browser entry 和 fullscreen projection 归 `client.remote_window_overlay`。
+- 已实现：`Web` 浮动入口、Chrome bundle 过滤、选中后直接 fullscreen；普通 `窗` 入口保持 floating。
+- 验证：remote-window runtime/helper/picker 定向测试 22/22（修正 picker test 后待重跑）；`pnpm --dir android run type-check` 通过（依赖通过现有 workspace node_modules 映射）。
+- 剩余：CDP target mapping 与 UA typed control、真实 Chrome ScreenCaptureKit/WebRTC 在线样本、APK/模拟器验证未完成；当前不可宣称完整浏览器功能完成。
 
 ### 2026-09-01 browser remote-window CDP UA slice
 

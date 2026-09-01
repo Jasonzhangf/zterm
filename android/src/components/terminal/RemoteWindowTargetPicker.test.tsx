@@ -6,12 +6,12 @@ import { RemoteWindowTargetPicker } from './RemoteWindowTargetPicker';
 
 afterEach(cleanup);
 
-function target(id: string, kind: 'app-window' | 'iterm2-pane' = 'app-window'): RemoteWindowStreamTargetManifest {
+function target(id: string, kind: 'app-window' | 'iterm2-pane' = 'app-window', appBundleId?: string): RemoteWindowStreamTargetManifest {
   return {
     streamTargetId: id,
     videoTarget: {
       kind,
-      appBundleId: kind === 'app-window' ? 'com.example.app' : 'com.googlecode.iterm2',
+      appBundleId: appBundleId || (kind === 'app-window' ? 'com.example.app' : 'com.googlecode.iterm2'),
       pid: 42,
       windowId: id,
       title: id,
@@ -75,5 +75,29 @@ describe('RemoteWindowTargetPicker view owner', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(onToggleItermPaneTargets).toHaveBeenCalledTimes(1);
     expect(document.querySelector('button button')).toBeNull();
+  });
+
+  it('browser mode only exposes Chrome windows', () => {
+    const onSelectTarget = vi.fn();
+    const chromeTarget = target('chrome-1', 'app-window', 'com.google.Chrome');
+    render(<RemoteWindowTargetPicker
+      phase="pickerOpen"
+      targets={[chromeTarget, target('safari-1', 'app-window', 'com.apple.Safari')]}
+      errors={[]}
+      errorMessage={null}
+      catalogRefreshing={false}
+      itermPaneTargetsExpanded={false}
+      onToggleItermPaneTargets={vi.fn()}
+      onSelectTarget={onSelectTarget}
+      onRefresh={vi.fn()}
+      onClose={vi.fn()}
+      browserOnly
+    />);
+
+    expect(screen.getByText('浏览器窗口')).toBeTruthy();
+    expect(screen.getByTestId('remote-window-app-group-com-google-Chrome-42')).toBeTruthy();
+    expect(screen.queryByText('safari-1')).toBeNull();
+    fireEvent.click(screen.getByTestId('remote-window-app-group-com-google-Chrome-42'));
+    expect(onSelectTarget).toHaveBeenCalledWith(chromeTarget);
   });
 });

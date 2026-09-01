@@ -70,6 +70,9 @@ describe('remote window overlay runtime', () => {
       streamStarted: false,
       target,
     });
+
+    const browser = selectRemoteWindowTarget(next, 'app-1', 'fullscreen');
+    expect(browser).toMatchObject({ phase: 'targetLocked', mode: 'fullscreen', target });
   });
 
   it('drops stale catalog responses by request epoch', () => {

@@ -499,6 +499,20 @@ export function createTerminalMessageRuntime(
           });
         });
         break;
+      case 'remote-window-browser-user-agent-request':
+        void deps.remoteWindowStreamRuntime.setBrowserUserAgent(message.payload).then((payload) => {
+          sendRemoteWindowMessage(connection, { type: 'remote-window-browser-user-agent-result', payload });
+        }).catch((error: unknown) => {
+          sendRemoteWindowMessage(connection, {
+            type: 'remote-window-error',
+            payload: {
+              requestId: message.payload.requestId,
+              code: 'remote_window_browser_cdp_failed',
+              message: error instanceof Error ? error.message : 'Chrome CDP UA control failed',
+            },
+          });
+        });
+        break;
       case 'remote-window-stream-start-request':
         sendRemoteWindowMessage(connection, {
           type: 'remote-window-error',

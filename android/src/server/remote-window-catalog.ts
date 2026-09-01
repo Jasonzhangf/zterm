@@ -1,7 +1,9 @@
 import { spawn, type ChildProcess } from 'child_process';
+import { WebSocket, type RawData } from 'ws';
 import type {
   RemoteWindowStreamRect,
   RemoteWindowStreamTargetManifest,
+  RemoteWindowBrowserUserAgent,
 } from '@zterm/shared/protocol';
 import {
   formatInlineScriptExecFailure,
@@ -11,9 +13,16 @@ import {
 
 export const DEFAULT_ITERM2_PYTHON_TIMEOUT_MS = 5000;
 export const DEFAULT_MACOS_APP_WINDOW_CATALOG_TIMEOUT_MS = 15000;
+export const DEFAULT_CHROME_CDP_PORT = 9222;
 
 const ITERM2_APP_BUNDLE_ID = 'com.googlecode.iterm2';
 const ITERM2_PANE_GAP_PX = 1;
+const CHROME_APP_BUNDLE_IDS = new Set([
+  'com.google.Chrome',
+  'com.google.Chrome.beta',
+  'com.google.Chrome.canary',
+  'com.google.Chrome.dev',
+]);
 
 function terminateProcessTree(child: ChildProcess) {
   if (!child.pid) {
@@ -103,6 +112,75 @@ export interface MacosAppWindow {
   contentFrame?: RemoteWindowStreamRect;
   displayId?: string;
   displayBoundsTopLeftPx?: RemoteWindowStreamRect;
+}
+
+export async function setChromeWindowUserAgent(
+  target: RemoteWindowStreamTargetManifest,
+  userAgent: RemoteWindowBrowserUserAgent,
+  options: { cdpPort?: number; timeoutMs?: number } = {},
+): Promise<{ cdpTargetId: string }> {
+  if (target.videoTarget.kind !== 'app-window' || !CHROME_APP_BUNDLE_IDS.has(target.videoTarget.appBundleId)) {
+    throw new Error('selected target is not a supported Chrome window');
+  }
+  const timeoutMs = options.timeoutMs ?? 5000;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  let targets: Array<{ id: string; type: string; title?: string; webSocketDebuggerUrl?: string }>;
+  try {
+    const response = await fetch(`http://127.0.0.1:${options.cdpPort ?? DEFAULT_CHROME_CDP_PORT}/json/list`, { signal: controller.signal });
+    if (!response.ok) throw new Error(`Chrome CDP returned HTTP ${response.status}`);
+    targets = await response.json() as typeof targets;
+  } catch (error) {
+    throw new Error(`Chrome CDP unavailable: ${error instanceof Error ? error.message : String(error)}`);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+  const candidates = targets.filter((item) => item.type === 'page' && item.webSocketDebuggerUrl && item.title === target.videoTarget.title);
+  if (candidates.length !== 1) {
+    throw new Error(candidates.length === 0
+      ? 'Chrome CDP page target did not match the selected window title'
+      : 'Chrome CDP page target match is ambiguous');
+  }
+  const webSocketDebuggerUrl = candidates[0].webSocketDebuggerUrl;
+  if (!webSocketDebuggerUrl) {
+    throw new Error('Chrome CDP page target has no websocket endpoint');
+  }
+  const socket = new WebSocket(webSocketDebuggerUrl);
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Chrome CDP websocket timed out')), timeoutMs);
+    socket.once('open', () => { clearTimeout(timer); resolve(); });
+    socket.once('error', (error) => { clearTimeout(timer); reject(error); });
+  });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const commandId = Date.now();
+      const timer = setTimeout(() => reject(new Error('Chrome CDP UA command timed out')), timeoutMs);
+      const onMessage = (data: RawData) => {
+        let message: { id?: number; error?: { message?: string } };
+        try { message = JSON.parse(data.toString()) as typeof message; } catch { return; }
+        if (message.id !== commandId) return;
+        clearTimeout(timer);
+        socket.off('message', onMessage);
+        if (message.error) reject(new Error(message.error.message || 'Chrome CDP UA command failed'));
+        else resolve();
+      };
+      socket.on('message', onMessage);
+      socket.send(JSON.stringify({
+        id: commandId,
+        method: 'Emulation.setUserAgentOverride',
+        params: {
+          userAgent: userAgent === 'mobile'
+            ? 'Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 Chrome/128.0.0.0 Mobile Safari/537.36'
+            : 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/128.0.0.0 Safari/537.36',
+        },
+      }), (error) => {
+        if (error) { clearTimeout(timer); socket.off('message', onMessage); reject(error); }
+      });
+    });
+    return { cdpTargetId: candidates[0].id };
+  } finally {
+    socket.close();
+  }
 }
 
 export interface Iterm2RawCatalog {

@@ -12,6 +12,8 @@ import type {
   RemoteWindowVideoProfile,
   Session,
   RemoteWindowStreamTargetsResponsePayload,
+  RemoteWindowBrowserUserAgent,
+  RemoteWindowBrowserUserAgentResultPayload,
 } from '../lib/types';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
 import type { BridgeSettings } from '../lib/bridge-settings';
@@ -86,6 +88,15 @@ interface RemoteWindowStreamMessageRuntimeLike extends RemoteWindowCatalogMessag
       sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
     },
   ) => void;
+  sendBrowserUserAgent?: (
+    sessionId: string,
+    options: {
+      ws: BridgeTransportSocket;
+      target: RemoteWindowStreamTargetManifest;
+      userAgent: RemoteWindowBrowserUserAgent;
+      sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
+    },
+  ) => Promise<RemoteWindowBrowserUserAgentResultPayload>;
   sendWindowResizeEvent?: (
     sessionId: string,
     options: {
@@ -450,6 +461,33 @@ export function sendRemoteWindowInputRuntime(options: {
   options.remoteWindowMessageRuntime.sendInputEvent(targetSessionId, {
     ws,
     payload: options.payload,
+    sendSocketPayload: options.sendSocketPayload,
+  });
+}
+
+export function setRemoteWindowBrowserUserAgentRuntime(options: {
+  sessionId: string;
+  target: RemoteWindowStreamTargetManifest;
+  userAgent: RemoteWindowBrowserUserAgent;
+  sessions: Session[];
+  daemonConnection: ClientDaemonConnection;
+  remoteWindowMessageRuntime: RemoteWindowStreamMessageRuntimeLike;
+  sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
+}) {
+  const targetSessionId = options.sessionId.trim();
+  if (!targetSessionId) throw new Error('Browser user-agent requires sessionId');
+  const ws = resolveRemoteWindowStreamTransport({
+    sessionId: targetSessionId,
+    sessions: options.sessions,
+    daemonConnection: options.daemonConnection,
+  });
+  if (!options.remoteWindowMessageRuntime.sendBrowserUserAgent) {
+    throw new Error('Browser user-agent control is unavailable');
+  }
+  return options.remoteWindowMessageRuntime.sendBrowserUserAgent(targetSessionId, {
+    ws,
+    target: options.target,
+    userAgent: options.userAgent,
     sendSocketPayload: options.sendSocketPayload,
   });
 }

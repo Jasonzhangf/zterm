@@ -31,6 +31,8 @@ import type {
   RemoteWindowStreamFocusResultPayload,
   RemoteWindowStreamFailureStage,
   RemoteWindowVideoProfile,
+  RemoteWindowBrowserUserAgentRequestPayload,
+  RemoteWindowBrowserUserAgentResultPayload,
 } from '@zterm/shared/protocol';
 import { getRemoteWindowMediaPlanV2Contract } from '@zterm/shared/protocol';
 import { buildRemoteWindowCanvasLayoutV1 } from './remote-window-canvas-layout';
@@ -47,6 +49,7 @@ import {
   DEFAULT_MACOS_APP_WINDOW_CATALOG_TIMEOUT_MS,
   runDefaultIterm2Python,
   runDefaultMacosAppWindowCatalog,
+  setChromeWindowUserAgent,
 } from './remote-window-catalog';
 import { createRemoteWindowCatalogRuntime } from './remote-window-catalog-runtime';
 import {
@@ -157,6 +160,9 @@ export interface RemoteWindowStreamDaemonRuntime {
     payload: RemoteWindowInputEventPayload,
     control: RemoteWindowInputDeliveryControl,
   ) => Promise<RemoteWindowInputAckMessage | null>;
+  setBrowserUserAgent: (
+    payload: RemoteWindowBrowserUserAgentRequestPayload,
+  ) => Promise<RemoteWindowBrowserUserAgentResultPayload>;
   dispose: (reason?: string) => void;
 }
 
@@ -444,6 +450,32 @@ export function createRemoteWindowStreamDaemonRuntime(
       message: truncateRemoteWindowErrorMessage(message || code),
       ...(failureStage ? { failureStage } : {}),
     };
+  }
+
+  async function setBrowserUserAgent(
+    payload: RemoteWindowBrowserUserAgentRequestPayload,
+  ): Promise<RemoteWindowBrowserUserAgentResultPayload> {
+    try {
+      const result = await setChromeWindowUserAgent(payload.target, payload.userAgent);
+      return {
+        requestId: payload.requestId,
+        targetId: payload.target.streamTargetId,
+        userAgent: payload.userAgent,
+        status: 'applied',
+        cdpTargetId: result.cdpTargetId,
+      };
+    } catch (error) {
+      return {
+        requestId: payload.requestId,
+        targetId: payload.target.streamTargetId,
+        userAgent: payload.userAgent,
+        status: 'rejected',
+        error: {
+          code: 'remote_window_browser_cdp_failed',
+          message: error instanceof Error ? error.message : String(error),
+        },
+      };
+    }
   }
 
   function markStreamClosed(streamId: string) {
@@ -1667,6 +1699,7 @@ export function createRemoteWindowStreamDaemonRuntime(
     updateStreamQuality,
     updateFocus,
     injectInput,
+    setBrowserUserAgent,
     dispose,
   };
 }
