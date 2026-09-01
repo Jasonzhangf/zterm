@@ -73,7 +73,7 @@ export function useAttachmentNotifications({
             }
             await LocalNotifications.schedule({
               notifications: [{
-                title: `📎 ${snapshot.fileName}`,
+                title: `附件：${snapshot.fileName}`,
                 body: buildAttachmentNotificationBody(snapshot),
                 id: nextNotificationId(),
                 ...(iconUri ? { largeIcon: iconUri } : {}),
