@@ -75,7 +75,7 @@ describe('TerminalPreviewGrid', () => {
     const terminalProps = terminalViewSpy.mock.calls.map(([props]) => props as Record<string, unknown>);
     expect(terminalProps[0]).toMatchObject({ active: false, live: true, projectionMode: 'preview-primary', splitVisible: true });
     for (const props of terminalProps.slice(1)) {
-      expect(props).toMatchObject({ active: false, live: false, projectionMode: 'preview-secondary', splitVisible: true });
+      expect(props).toMatchObject({ active: false, live: true, projectionMode: 'preview-secondary', splitVisible: true });
       expect((props as Record<string, unknown>).onInput).toBeUndefined();
       expect((props as Record<string, unknown>).onResize).toBeUndefined();
       expect((props as Record<string, unknown>).onViewportChange).toBeUndefined();
@@ -99,6 +99,7 @@ describe('TerminalPreviewGrid', () => {
       />,
     );
     expect(screen.getByTestId('terminal-preview-grid').dataset.windowGroupPrimaryAxis).toBe('row');
+    expect(screen.getByTestId('terminal-preview-secondary-s2').getAttribute('style') || '').toContain('flex');
     fireEvent.click(screen.getByLabelText('退出终端预览'));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
@@ -120,6 +121,25 @@ describe('TerminalPreviewGrid', () => {
     fireEvent.click(screen.getByTestId('terminal-preview-secondary-s2'));
     expect(onActivateSession).not.toHaveBeenCalled();
     expect(screen.getByTestId('terminal-preview-tile-s2').dataset.previewVariant).toBe('primary');
+  });
+
+  it('keeps one layout and no quick peek when selecting a child', () => {
+    render(
+      <TerminalPreviewGrid
+        sessions={sessions.slice(0, 3)}
+        sessionBufferStore={null}
+        landscape={false}
+        fontSize={10}
+        onActivateSession={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('terminal-preview-body-s2'));
+
+    expect(screen.getAllByTestId('terminal-preview-grid')).toHaveLength(1);
+    expect(screen.queryByTestId('terminal-preview-quick-peek')).toBeNull();
+    expect(screen.getAllByTestId(/terminal-preview-tile-/)).toHaveLength(3);
   });
 
   it('clicking inside a child preview body promotes it without activating', () => {

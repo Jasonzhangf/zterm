@@ -239,7 +239,8 @@ function TerminalViewComponent({
   const theme = getTerminalThemePreset(themeId);
   const previewProjection = projectionMode !== "terminal";
   const passivePreviewProjection = projectionMode === "preview-secondary";
-  const refreshActive = passivePreviewProjection ? false : (live ?? active);
+  // Secondary previews are read-only, but their render-store snapshots stay live.
+  const refreshActive = live ?? active;
   const sessionBufferSnapshot = useSessionRenderBufferSnapshot(
     sessionBufferStore,
     sessionBufferStore ? sessionId : null,

@@ -123,7 +123,7 @@ label:focus-visible {
   min-height: 64px;
   padding: 6px 4px;
   cursor: pointer;
-  color: #172033;
+  color: var(--zterm-settings-text, #172033);
   font-size: 20px;
   font-weight: 800;
   list-style: none;

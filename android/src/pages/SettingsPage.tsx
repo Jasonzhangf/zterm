@@ -10,7 +10,7 @@ import {
 import { type AppUpdateManifest, type AppUpdatePreferences, type AppUpdateRollbackBackup } from '../lib/app-update';
 import { DEFAULT_TERMINAL_CACHE_LINES } from '../lib/mobile-config';
 import { isRuntimeDebugEnabled, setRuntimeDebugEnabled } from '../lib/runtime-debug';
-import { mobileTheme } from '../lib/mobile-ui';
+import { mobileTheme, resolveSettingsTheme } from '../lib/mobile-ui';
 import {
   TERMINAL_WIDTH_MODE_OPTIONS,
   updateBridgeSettingsTerminalWidthMode,
@@ -162,6 +162,7 @@ export function SettingsPage({
   const livePreviewPatchRef = useRef<Partial<Pick<BridgeSettings, 'terminalThemeId' | 'terminalShellSkin'>> | null>(null);
   const updateDraftEditedRef = useRef(false);
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const settingsTheme = useMemo(() => resolveSettingsTheme(draft.terminalShellSkin), [draft.terminalShellSkin]);
   const saveResetTimerRef = useRef<number | null>(null);
   useEffect(() => {
     if (saveState !== 'saved') {
@@ -238,8 +239,17 @@ export function SettingsPage({
         maxHeight: '100dvh',
         overflowY: 'auto',
         WebkitOverflowScrolling: 'touch',
-        backgroundColor: mobileTheme.colors.lightBg,
-        color: mobileTheme.colors.lightText,
+        backgroundColor: settingsTheme.background,
+        color: settingsTheme.text,
+        ['--zterm-settings-background' as string]: settingsTheme.background,
+        ['--zterm-settings-surface' as string]: settingsTheme.surface,
+        ['--zterm-settings-field' as string]: settingsTheme.field,
+        ['--zterm-settings-text' as string]: settingsTheme.text,
+        ['--zterm-settings-muted' as string]: settingsTheme.muted,
+        ['--zterm-settings-border' as string]: settingsTheme.border,
+        ['--zterm-settings-accent' as string]: settingsTheme.accent,
+        ['--zterm-settings-accent-text' as string]: settingsTheme.accentText,
+        ['--zterm-settings-shadow' as string]: settingsTheme.shadow,
       }}
     >
       <div
@@ -248,12 +258,12 @@ export function SettingsPage({
           top: 0,
           zIndex: 10,
           padding: `${mobileTheme.safeArea.top} ${settingsViewportPadding} 18px`,
-          backgroundColor: 'rgba(237, 242, 246, 0.94)',
+          backgroundColor: `color-mix(in srgb, ${settingsTheme.background} 94%, transparent)`,
           backdropFilter: 'blur(14px)',
           display: 'flex',
           alignItems: 'center',
           gap: '12px',
-          borderBottom: `1px solid ${mobileTheme.colors.lightBorder}`,
+          borderBottom: `1px solid ${settingsTheme.border}`,
         }}
       >
         <button
@@ -266,8 +276,8 @@ export function SettingsPage({
             height: '56px',
             borderRadius: '20px',
             border: 'none',
-            backgroundColor: '#ffffff',
-            color: mobileTheme.colors.lightText,
+            backgroundColor: settingsTheme.surface,
+            color: settingsTheme.text,
             fontSize: '26px',
             boxShadow: mobileTheme.shadow.soft,
             cursor: 'pointer',
@@ -298,8 +308,8 @@ export function SettingsPage({
             height: '56px',
             borderRadius: '20px',
             border: 'none',
-            backgroundColor: mobileTheme.colors.shell,
-            color: '#ffffff',
+            backgroundColor: settingsTheme.accent,
+            color: settingsTheme.accentText,
             fontWeight: 800,
             boxShadow: mobileTheme.shadow.soft,
             cursor: 'pointer',
@@ -379,7 +389,7 @@ export function SettingsPage({
 
         <div style={settingsSectionStyle()}>
           <SettingsSectionTitle>Terminal Width Mode</SettingsSectionTitle>
-          <div style={{ fontSize: '13px', lineHeight: 1.6, color: mobileTheme.colors.lightMuted }}>
+          <div style={{ fontSize: '13px', lineHeight: 1.6, color: settingsTheme.muted }}>
             `mirror-fixed` 保持 tmux / daemon 镜像宽度不变，只做本地裁切；`adaptive-phone` 会按手机屏宽请求 tmux 重新排版，只调整 cols，不改 rows。
           </div>
           <div style={{ display: 'flex', gap: '10px' }}>
@@ -395,8 +405,8 @@ export function SettingsPage({
                     minHeight: '48px',
                     borderRadius: '16px',
                     border: 'none',
-                    backgroundColor: active ? mobileTheme.colors.shell : '#eef3f8',
-                    color: active ? '#ffffff' : mobileTheme.colors.lightText,
+                    backgroundColor: active ? settingsTheme.accent : settingsTheme.field,
+                    color: active ? settingsTheme.accentText : settingsTheme.text,
                     fontWeight: 800,
                     cursor: 'pointer',
                   }}
@@ -410,7 +420,7 @@ export function SettingsPage({
 
         <div style={settingsSectionStyle()}>
           <SettingsSectionTitle>Session Group Layout</SettingsSectionTitle>
-          <div style={{ fontSize: '13px', lineHeight: 1.6, color: mobileTheme.colors.lightMuted }}>
+          <div style={{ fontSize: '13px', lineHeight: 1.6, color: settingsTheme.muted }}>
             默认按宽高比决定：手机窄屏保持上下滚动；宽竖屏默认左右滚动。横屏始终左右滚动。
           </div>
           <div style={{ display: 'flex', gap: '10px' }}>
@@ -430,8 +440,8 @@ export function SettingsPage({
                     minHeight: '48px',
                     borderRadius: '16px',
                     border: 'none',
-                    backgroundColor: active ? mobileTheme.colors.shell : '#eef3f8',
-                    color: active ? '#ffffff' : mobileTheme.colors.lightText,
+                    backgroundColor: active ? settingsTheme.accent : settingsTheme.field,
+                    color: active ? settingsTheme.accentText : settingsTheme.text,
                     fontWeight: 800,
                     cursor: 'pointer',
                   }}
@@ -448,7 +458,7 @@ export function SettingsPage({
 
         <div style={settingsSectionStyle()}>
           <SettingsSectionTitle>Daemon Debug</SettingsSectionTitle>
-          <div style={{ fontSize: '13px', lineHeight: 1.6, color: mobileTheme.colors.lightMuted }}>
+          <div style={{ fontSize: '13px', lineHeight: 1.6, color: settingsTheme.muted }}>
             打开后，客户端会临时通过当前已连接的会话 WebSocket 上送 runtime debug 日志到 daemon，默认 10 分钟后自动停止。关闭后立即停止上送。
           </div>
           <button
@@ -462,8 +472,8 @@ export function SettingsPage({
               minHeight: '48px',
               borderRadius: '16px',
               border: 'none',
-              backgroundColor: runtimeDebugEnabled ? mobileTheme.colors.shell : '#eef3f8',
-              color: runtimeDebugEnabled ? '#ffffff' : mobileTheme.colors.lightText,
+              backgroundColor: runtimeDebugEnabled ? settingsTheme.accent : settingsTheme.field,
+              color: runtimeDebugEnabled ? settingsTheme.accentText : settingsTheme.text,
               fontWeight: 800,
               fontSize: '16px',
               cursor: 'pointer',
@@ -480,7 +490,7 @@ export function SettingsPage({
 
         <div style={settingsSectionStyle()}>
           <SettingsSectionTitle>快捷键智能排序</SettingsSectionTitle>
-          <div style={{ fontSize: '13px', lineHeight: 1.6, color: mobileTheme.colors.lightMuted }}>
+          <div style={{ fontSize: '13px', lineHeight: 1.6, color: settingsTheme.muted }}>
             开启后，高频使用的快捷键会自动排到前面（历史使用占 80%，最近 10 分钟占 20%），减少滚动查找。
           </div>
           <button
@@ -490,8 +500,8 @@ export function SettingsPage({
               minHeight: '48px',
               borderRadius: '16px',
               border: 'none',
-              backgroundColor: draft.shortcutSmartSort ? mobileTheme.colors.shell : '#eef3f8',
-              color: draft.shortcutSmartSort ? '#ffffff' : mobileTheme.colors.lightText,
+              backgroundColor: draft.shortcutSmartSort ? settingsTheme.accent : settingsTheme.field,
+              color: draft.shortcutSmartSort ? settingsTheme.accentText : settingsTheme.text,
               fontWeight: 800,
               fontSize: '16px',
               cursor: 'pointer',
@@ -511,7 +521,7 @@ export function SettingsPage({
 
         <div style={settingsSectionStyle()}>
           <SettingsSectionTitle>远程窗口</SettingsSectionTitle>
-          <div style={{ fontSize: '13px', lineHeight: 1.6, color: mobileTheme.colors.lightMuted }}>
+          <div style={{ fontSize: '13px', lineHeight: 1.6, color: settingsTheme.muted }}>
             串流画质与触控滚动偏好，作用于后续远程窗口会话。
           </div>
           <div style={{ marginTop: '12px', marginBottom: '8px', fontSize: '14px', fontWeight: 700 }}>默认串流偏好</div>
@@ -563,8 +573,8 @@ export function SettingsPage({
               width: '100%',
               borderRadius: '16px',
               border: 'none',
-              backgroundColor: remoteScrollInverted ? mobileTheme.colors.shell : '#eef3f8',
-              color: remoteScrollInverted ? '#ffffff' : mobileTheme.colors.lightText,
+              backgroundColor: remoteScrollInverted ? settingsTheme.accent : settingsTheme.field,
+              color: remoteScrollInverted ? settingsTheme.accentText : settingsTheme.text,
               fontWeight: 800,
               fontSize: '16px',
               cursor: 'pointer',
@@ -590,7 +600,7 @@ export function SettingsPage({
 
         <div style={settingsSectionStyle()}>
           <SettingsSectionTitle>终端字号</SettingsSectionTitle>
-          <div style={{ fontSize: '13px', lineHeight: 1.6, color: mobileTheme.colors.lightMuted }}>
+          <div style={{ fontSize: '13px', lineHeight: 1.6, color: settingsTheme.muted }}>
             选择终端正文显示字号，当前默认字号为最小。
           </div>
           <select
@@ -611,7 +621,7 @@ export function SettingsPage({
 
         <div style={settingsSectionStyle()}>
           <SettingsSectionTitle>Shell Skin</SettingsSectionTitle>
-          <div style={{ fontSize: '13px', lineHeight: 1.6, color: mobileTheme.colors.lightMuted }}>
+          <div style={{ fontSize: '13px', lineHeight: 1.6, color: settingsTheme.muted }}>
             这里单独控制顶部栏、快捷栏和终端外壳，不改变终端 ANSI 颜色。默认跟主页保持白灰配色。
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(118px, 100%), 1fr))', gap: '10px' }}>
@@ -631,9 +641,9 @@ export function SettingsPage({
                   style={{
                     minHeight: '76px',
                     borderRadius: '18px',
-                    border: active ? `2px solid ${mobileTheme.colors.accent}` : `1px solid ${mobileTheme.colors.lightBorder}`,
-                    backgroundColor: active ? '#ffffff' : '#f7f9fc',
-                    color: mobileTheme.colors.lightText,
+                    border: active ? `2px solid ${settingsTheme.accent}` : `1px solid ${settingsTheme.border}`,
+                    backgroundColor: active ? settingsTheme.surface : settingsTheme.field,
+                    color: settingsTheme.text,
                     boxShadow: active ? '0 12px 26px rgba(31,214,122,0.14)' : 'none',
                     cursor: 'pointer',
                     textAlign: 'left',
@@ -641,7 +651,7 @@ export function SettingsPage({
                   }}
                 >
                   <div style={{ fontSize: '15px', fontWeight: 850 }}>{option.label}</div>
-                  <div style={{ marginTop: '5px', fontSize: '11px', lineHeight: 1.35, color: mobileTheme.colors.lightMuted }}>
+                  <div style={{ marginTop: '5px', fontSize: '11px', lineHeight: 1.35, color: settingsTheme.muted }}>
                     {option.description}
                   </div>
                 </button>

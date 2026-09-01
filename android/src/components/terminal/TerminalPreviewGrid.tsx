@@ -82,7 +82,6 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
   const [replacementSourceSessionId, setReplacementSourceSessionId] = useState<string | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [moveSourceSessionId, setMoveSourceSessionId] = useState<string | null>(null);
-  const [quickPeek, setQuickPeek] = useState<{ sessionId: string; state: 'half' | 'full' } | null>(null);
   const [edgeQueueVisible, setEdgeQueueVisible] = useState(false);
   const [primaryPreviewSessionId, setPrimaryPreviewSessionId] = useState<string | null>(() => sessions[0]?.id || null);
   const resolvedPrimaryPreviewSessionId = sessions.some((session) => session.id === primaryPreviewSessionId)
@@ -214,7 +213,6 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
       event.stopPropagation();
       if (compact) {
         setPrimaryPreviewSessionId(session.id);
-        setQuickPeek({ sessionId: session.id, state: 'half' });
         return;
       }
       onActivateSession(session.id);
@@ -395,7 +393,7 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
               sessionId={session.id}
               sessionBufferStore={sessionBufferStore}
               active={false}
-              live={!compact}
+              live
               projectionMode={compact ? 'preview-secondary' : 'preview-primary'}
               allowDomFocus={false}
               domInputOffscreen
@@ -520,6 +518,7 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
         primaryItemId={resolvedPrimaryPreviewSessionId}
         onPrimaryItemChange={setPrimaryPreviewSessionId}
         landscape={landscape}
+        secondaryItemFlex="1 1 0"
         style={{ flex: 1, minHeight: 0 }}
       />
       <div
@@ -540,52 +539,6 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
           return sessions[(index + 1) % sessions.length]?.id || current;
         })} style={{ position: 'absolute', bottom: 4, right: 4, width: 34, height: 44, border: 0, borderRadius: 10, background: 'rgba(10,15,22,.72)', color: '#dce8ff' }}>↓</button>
       </div>
-      {quickPeek ? (() => {
-        const peekSession = sessions.find((session) => session.id === quickPeek.sessionId);
-        if (!peekSession) return null;
-        const peekTitle = peekSession.customName || peekSession.title || peekSession.sessionName || peekSession.id;
-        return (
-          <aside
-            data-testid="terminal-preview-quick-peek"
-            data-sheet-state={quickPeek.state}
-            style={{
-              position: 'absolute', left: 8, right: 8, bottom: 8,
-              height: quickPeek.state === 'full' ? 'calc(100% - 48px)' : '42%',
-              zIndex: 20, borderRadius: '14px 14px 8px 8px',
-              border: `1px solid ${mobileTheme.colors.cardBorder}`, background: mobileTheme.colors.canvas,
-              boxShadow: '0 -14px 38px rgba(0,0,0,.42)', display: 'flex', flexDirection: 'column',
-              padding: '10px', boxSizing: 'border-box', transition: 'height 180ms ease',
-            }}
-            onTouchMove={(event) => {
-              const touch = event.touches[0];
-              if (!touch) return;
-              const start = (event.currentTarget as HTMLElement).dataset.sheetTouchStart;
-              if (!start) (event.currentTarget as HTMLElement).dataset.sheetTouchStart = String(touch.clientY);
-            }}
-            onTouchEnd={(event) => {
-              const node = event.currentTarget as HTMLElement;
-              const start = Number(node.dataset.sheetTouchStart);
-              delete node.dataset.sheetTouchStart;
-              const end = event.changedTouches[0]?.clientY;
-              if (!Number.isFinite(start) || end === undefined) return;
-              if (start - end > 32) setQuickPeek({ sessionId: peekSession.id, state: 'full' });
-              if (end - start > 32) setQuickPeek(null);
-            }}
-          >
-            <div style={{ width: 38, height: 4, borderRadius: 99, background: mobileTheme.colors.cardBorder, alignSelf: 'center', marginBottom: 8 }} />
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-              <strong style={{ color: mobileTheme.colors.textPrimary, fontSize: 12 }}>{peekTitle}</strong>
-              <div style={{ display: 'flex', gap: 5 }}>
-                {quickPeek.state === 'half' ? <button type="button" onClick={() => setQuickPeek({ sessionId: peekSession.id, state: 'full' })} style={{ minHeight: 28, border: `1px solid ${mobileTheme.colors.cardBorder}`, borderRadius: 6, background: mobileTheme.colors.shell, color: mobileTheme.colors.textPrimary }}>全屏</button> : null}
-                <button type="button" onClick={() => setQuickPeek(null)} style={{ minHeight: 28, border: `1px solid ${mobileTheme.colors.cardBorder}`, borderRadius: 6, background: mobileTheme.colors.shell, color: mobileTheme.colors.textPrimary }}>关闭</button>
-              </div>
-            </div>
-            <div style={{ flex: 1, minHeight: 0, marginTop: 8, borderRadius: 8, overflow: 'hidden', maxHeight: 'calc(2 * 100vh)' }}>
-              <TerminalView sessionId={peekSession.id} sessionBufferStore={sessionBufferStore} active={false} live={false} projectionMode="preview-secondary" allowDomFocus={false} domInputOffscreen focusNonce={0} fontSize={3} rowHeight="4px" themeId={themeId || 'default'} widthMode="mirror-fixed" showAbsoluteLineNumbers={false} copyModeActive={false} splitVisible />
-            </div>
-          </aside>
-        );
-      })() : null}
       {canAddSession ? (
         <button
           type="button"
