@@ -91,7 +91,7 @@ describe('TerminalSessionDrawer', () => {
     );
 
     expect(screen.getByTestId('terminal-session-drawer-header').style.display).toBe('flex');
-    expect(screen.getByText('Sessions')).toBeTruthy();
+    expect(screen.getByText('会话')).toBeTruthy();
     expect(screen.queryByText('快速切换')).toBeNull();
     expect(screen.queryByText('左滑收起，点击进入，上下滑动浏览。')).toBeNull();
   });

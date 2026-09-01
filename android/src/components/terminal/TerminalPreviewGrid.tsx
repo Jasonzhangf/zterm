@@ -482,7 +482,7 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
         }}
       >
             <span style={{ color: mobileTheme.colors.textPrimary, fontSize: '13px', fontWeight: 800 }}>
-              终端预览 · {sessions.length}/6
+              预览
             </span>
         <button
           type="button"

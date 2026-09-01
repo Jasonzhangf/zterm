@@ -355,7 +355,7 @@ function TerminalSessionDrawerComponent({
           }}
         >
           <span style={{ minWidth: 0, fontSize: '16px', fontWeight: 800, color: 'var(--zterm-panel-text)' }}>
-            Sessions
+            会话
           </span>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: '0 0 auto' }}>
             {previewSelectionMode ? (
