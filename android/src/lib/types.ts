@@ -112,6 +112,9 @@ export type {
   RemoteWindowStreamStopRequestPayload,
   RemoteWindowStreamTargetManifest,
   RemoteWindowStreamTargetsResponsePayload,
+  RemoteWindowBrowserUserAgent,
+  RemoteWindowBrowserUserAgentRequestPayload,
+  RemoteWindowBrowserUserAgentResultPayload,
   RemoteWindowVideoPreference,
   RemoteWindowVideoProfile,
 } from '@zterm/shared/protocol';

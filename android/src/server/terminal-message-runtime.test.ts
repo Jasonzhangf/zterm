@@ -242,6 +242,7 @@ function createRuntime(options?: {
       },
       payload: { streamId: 'stream-default', targetId: 'target-default' },
     })),
+    setBrowserUserAgent: vi.fn(),
     dispose: vi.fn(),
   };
 

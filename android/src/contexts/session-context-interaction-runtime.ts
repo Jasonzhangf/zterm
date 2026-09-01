@@ -10,6 +10,7 @@ import {
   type RemoteWindowTargetCatalogCacheStore,
   requestRemoteWindowStreamStartRuntime,
   requestRemoteWindowTargetsRuntime,
+  setRemoteWindowBrowserUserAgentRuntime,
   resizeRemoteWindowTargetRuntime,
   sendRemoteWindowInputRuntime,
   stopRemoteWindowStreamRuntime,
@@ -32,6 +33,8 @@ import type {
   RemoteWindowStreamStatusPayload,
   RemoteWindowStreamTargetsResponsePayload,
   RemoteWindowStreamTargetManifest,
+  RemoteWindowBrowserUserAgent,
+  RemoteWindowBrowserUserAgentResultPayload,
   RemoteWindowVideoProfile,
   Session,
 } from '../lib/types';
@@ -68,6 +71,7 @@ interface RemoteWindowMessageRuntimeLike {
   requestStreamStart: (...args: any[]) => Promise<any>;
   sendStreamQuality: (...args: any[]) => Promise<RemoteWindowStreamQualityResultPayload>;
   sendStreamUpdateFocus: (...args: any[]) => void;
+  sendBrowserUserAgent: (...args: any[]) => Promise<RemoteWindowBrowserUserAgentResultPayload>;
   sendStreamIceCandidate: (...args: any[]) => void;
   stopStream: (...args: any[]) => Promise<RemoteWindowStreamStatusPayload>;
   sendInputEvent: (...args: any[]) => void;
@@ -257,6 +261,20 @@ export function createSessionInteractionRuntime(options: {
     });
   };
 
+  const setRemoteWindowBrowserUserAgent = (
+    sessionId: string,
+    target: RemoteWindowStreamTargetManifest,
+    userAgent: RemoteWindowBrowserUserAgent,
+  ) => setRemoteWindowBrowserUserAgentRuntime({
+    sessionId,
+    target,
+    userAgent,
+    sessions: options.refs.stateRef.current.sessions,
+    daemonConnection,
+    remoteWindowMessageRuntime: options.refs.remoteWindowMessageRuntimeRef.current,
+    sendSocketPayload: options.sendSocketPayload,
+  });
+
   const stopRemoteWindowStream = (sessionId: string, streamId: string) => {
     return stopRemoteWindowStreamRuntime({
       sessionId,
@@ -306,6 +324,7 @@ export function createSessionInteractionRuntime(options: {
     requestRemoteWindowTargets,
     requestRemoteWindowStreamStart,
     updateRemoteWindowFocus,
+    setRemoteWindowBrowserUserAgent,
     updateRemoteWindowStreamQuality,
     stopRemoteWindowStream,
     sendRemoteWindowInput,

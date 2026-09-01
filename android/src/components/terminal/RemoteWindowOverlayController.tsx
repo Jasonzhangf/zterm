@@ -23,6 +23,7 @@ import type {
   RemoteWindowStreamPurpose,
   RemoteWindowStreamTargetManifest,
   RemoteWindowStreamTargetsResponsePayload,
+  RemoteWindowBrowserUserAgent,
   RemoteWindowVideoPreference,
   RemoteWindowVideoProfile,
 } from '../../lib/types';
@@ -135,6 +136,7 @@ import {
   toRemoteWindowTouchGestureState,
   getRemoteWindowAppGroupId,
   buildRemoteWindowAppTargetGroups,
+  isRemoteWindowChromeTarget,
 } from './remote-window-overlay-helpers';
 import { styles } from './remote-window-overlay-styles';
 import { RemoteWindowDeveloperDiagnostics } from './RemoteWindowDeveloperDiagnostics';
@@ -162,6 +164,7 @@ export type {
 import { useRemoteWindowScreenshot } from './useRemoteWindowScreenshot';
 import type { RemoteWindowScreenshotSaveResult } from './useRemoteWindowScreenshot';
 export interface RemoteWindowOverlayProps {
+  browserEntryEnabled?: boolean;
   activeSessionId?: string | null;
   appForegroundActive?: boolean;
   streamInvalidation?: {
@@ -183,6 +186,11 @@ export interface RemoteWindowOverlayProps {
     sessionId: string,
     payload: Omit<RemoteWindowStreamQualityRequestPayload, 'requestId'>,
   ) => Promise<RemoteWindowStreamQualityResultPayload>;
+  setBrowserUserAgentRequest?: (
+    sessionId: string,
+    target: RemoteWindowStreamTargetManifest,
+    userAgent: RemoteWindowBrowserUserAgent,
+  ) => Promise<unknown>;
   updateFocus?: (
     sessionId: string,
     streamId: string,
@@ -247,6 +255,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   requestTargets,
   startStream,
   updateStreamQuality,
+  setBrowserUserAgentRequest,
   updateFocus,
   stopStream,
   requestScreenshot,
@@ -261,6 +270,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   onRequestKeyboard,
   onVideoDebug,
   onRemoteWindowMessage,
+  browserEntryEnabled = true,
 }: RemoteWindowOverlayProps) {
   const [state, setState] = useState<RemoteWindowOverlayState>(initialRemoteWindowOverlayState);
   const [floatingOffset, setFloatingOffsetState] = useState<FloatingOverlayOffset>({ x: 0, y: 0 });
@@ -364,6 +374,10 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   const [receiverStartupTelemetry, setReceiverStartupTelemetry] = useState<RemoteWindowReceiverStartupTelemetry | null>(null);
   const [streamCapability, setStreamCapability] = useState<RemoteWindowStreamCapabilityTelemetry | null>(null);
   const [itermPaneTargetsExpanded, setItermPaneTargetsExpanded] = useState(false);
+  const [browserPickerOpen, setBrowserPickerOpen] = useState(false);
+  const [browserUserAgent, setBrowserUserAgent] = useState<RemoteWindowBrowserUserAgent>('desktop');
+  const [browserUserAgentStatus, setBrowserUserAgentStatus] = useState<'idle' | 'pending' | 'applied' | 'rejected'>('idle');
+  const [browserUserAgentError, setBrowserUserAgentError] = useState<string | null>(null);
   const [appSwitchOpen, setAppSwitchOpen] = useState(false);
   const [streamStatusOpen, setStreamStatusOpen] = useState(false);
   const screenshotController = useRemoteWindowScreenshot({
@@ -439,6 +453,10 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       setStreamCapability(null);
     },
   });
+  const handleOpenBrowserPicker = useCallback(() => {
+    setBrowserPickerOpen(true);
+    handleOpenPicker();
+  }, [handleOpenPicker]);
   const surfacePointersRef = useRef<Map<number, SurfacePointerPosition>>(new Map());
   const surfaceGestureRef = useRef<SurfacePointerGesture | null>(null);
   const surfaceLocalPanStartRef = useRef<{
@@ -840,6 +858,10 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   ]);
 
   const handleClose = useCallback(() => {
+    setBrowserPickerOpen(false);
+    setBrowserUserAgent('desktop');
+    setBrowserUserAgentStatus('idle');
+    setBrowserUserAgentError(null);
     resetCatalog();
     setItermPaneTargetsExpanded(false);
     setAppSwitchOpen(false);
@@ -1419,7 +1441,29 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     onInputContextChange?.(null);
   }, [onBodySubscriptionSuppressedChange, onInputContextChange, onOpenStateChange]);
 
+  const handleBrowserUserAgentChange = useCallback((next: RemoteWindowBrowserUserAgent) => {
+    if (!activeSessionId || state.phase !== 'targetLocked' || !isRemoteWindowChromeTarget(state.target)) {
+      return;
+    }
+    if (!setBrowserUserAgentRequest) {
+      setBrowserUserAgentStatus('rejected');
+      setBrowserUserAgentError('当前连接不支持浏览器 UA 控制');
+      return;
+    }
+    const target = state.target;
+    setBrowserUserAgent(next);
+    setBrowserUserAgentStatus('pending');
+    setBrowserUserAgentError(null);
+    void setBrowserUserAgentRequest(activeSessionId, target, next).then(() => {
+      setBrowserUserAgentStatus('applied');
+    }).catch((error: unknown) => {
+      setBrowserUserAgentStatus('rejected');
+      setBrowserUserAgentError(error instanceof Error ? error.message : String(error));
+    });
+  }, [activeSessionId, setBrowserUserAgentRequest, state]);
+
   const handleSelectTarget = useCallback((target: RemoteWindowStreamTargetManifest) => {
+    const browserMode = browserPickerOpen && isRemoteWindowChromeTarget(target);
     const catalogTargets = 'targets' in state ? state.targets : [];
     const effectiveTarget = updateFocus
       ? attachSameAppCompositeWindows(target, catalogTargets)
@@ -1458,7 +1502,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
 
     if (!startStream) {
       setState((current) => {
-        const selected = selectRemoteWindowTarget(current, target.streamTargetId);
+        const selected = selectRemoteWindowTarget(current, target.streamTargetId, browserMode ? 'fullscreen' : 'floating');
         return selected.phase === 'targetLocked' ? { ...selected, target: effectiveTarget } : selected;
       });
       return;
@@ -1472,7 +1516,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     const previousCanvasStreamId = activeCanvasStreamIdRef.current;
     const previousFocusStreamId = activeFocusStreamIdRef.current;
     const selectEffectiveTarget = (current: RemoteWindowOverlayState): RemoteWindowOverlayState => {
-      const selected = selectRemoteWindowTarget(current, target.streamTargetId);
+      const selected = selectRemoteWindowTarget(current, target.streamTargetId, browserMode ? 'fullscreen' : 'floating');
       if (selected.phase !== 'targetLocked') {
         return selected;
       }
@@ -1669,6 +1713,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       });
   }, [
     activeSessionId,
+    browserPickerOpen,
     invalidatePlayback,
     networkQuality,
     resetCatalog,
@@ -2529,6 +2574,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       onSelectTarget={handleSelectTarget}
       onRefresh={() => handleOpenPicker({ forceRefresh: true })}
       onClose={handleClose}
+      browserOnly={browserPickerOpen}
     />
   ) : null;
 
@@ -2923,6 +2969,11 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       videoPreference={videoPreference}
       streamStatusText={`串流：${state.streamStatus === 'streaming' ? '已连接' : state.streamStatus} · ${activeProfile.maxBitrateBps / 1_000_000} Mbps / ${activeProfile.maxFrameRateFps} FPS${qualityApplyState.phase === 'requested' ? ' · 正在应用' : qualityApplyState.phase === 'rejected' ? ` · 失败：${qualityApplyState.message}` : ''}`}
       networkStatusText={`压力：${adaptiveCause === 'none' ? '无' : adaptiveCause} · 网络：${networkQuality?.effectiveType || '未知'}${networkQuality?.rttMs ? ` · RTT ${networkQuality.rttMs}ms` : ''}`}
+      browserMode={state.phase === 'targetLocked' && isRemoteWindowChromeTarget(state.target)}
+      browserUserAgent={browserUserAgent}
+      browserUserAgentStatus={browserUserAgentStatus}
+      browserUserAgentError={browserUserAgentError}
+      onBrowserUserAgentChange={handleBrowserUserAgentChange}
       onToggleFullscreenDisplayMode={handleToggleFullscreenDisplayMode}
       onVideoPreferenceChange={(preference) => {
         setVideoPreference(preference);
@@ -3058,6 +3109,29 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
           }}
         >
           窗
+        </button>
+      ) : null}
+      {browserEntryEnabled && (state.phase === 'closed' || state.phase === 'targetEnumerating' || state.phase === 'pickerOpen') ? (
+        <button
+          type="button"
+          data-testid="browser-window-entry"
+          aria-label="打开浏览器窗口"
+          onClick={() => {
+            if (state.phase === 'closed') {
+              handleOpenBrowserPicker();
+            } else {
+              handleClose();
+            }
+          }}
+          style={{
+            ...styles.entryButton,
+            ...styles.browserEntryButton,
+            right: entryOffset.x === null ? 70 : 'auto',
+            bottom: entryOffset.y === null ? `${92 + Math.max(0, bottomInsetPx)}px` : 'auto',
+            left: entryOffset.x === null ? 'auto' : `${entryOffset.x + 56}px`,
+          }}
+        >
+          Web
         </button>
       ) : null}
       {pickerContent}

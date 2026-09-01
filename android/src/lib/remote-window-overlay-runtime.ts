@@ -168,6 +168,7 @@ export function failRemoteWindowTargetCatalog(
 export function selectRemoteWindowTarget(
   state: RemoteWindowOverlayState,
   targetId: string,
+  mode: RemoteWindowOverlayMode = 'floating',
 ): RemoteWindowOverlayState {
   if (state.phase !== 'pickerOpen' && state.phase !== 'targetLocked') {
     return state;
@@ -204,7 +205,7 @@ export function selectRemoteWindowTarget(
     requestEpoch: state.requestEpoch,
     target: compositeTarget,
     targets: state.targets,
-    mode: 'floating',
+    mode,
     streamStarted: false,
     streamStatus: 'idle',
     errors: state.errors,

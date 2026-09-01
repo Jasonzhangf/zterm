@@ -5,6 +5,8 @@ import type {
   RemoteScreenshotRequestPayload,
   RemoteScreenshotStatusPayload,
   RemoteWindowInputEventPayload,
+  RemoteWindowBrowserUserAgent,
+  RemoteWindowBrowserUserAgentResultPayload,
   RemoteWindowStreamQualityRequestPayload,
   RemoteWindowStreamQualityResultPayload,
   RemoteWindowStreamPurpose,
@@ -403,6 +405,11 @@ export function buildSessionContextValueRuntime(options: {
     sessionId: string,
     payload: Omit<RemoteWindowStreamQualityRequestPayload, 'requestId'>,
   ) => Promise<RemoteWindowStreamQualityResultPayload>;
+  setRemoteWindowBrowserUserAgent: (
+    sessionId: string,
+    target: RemoteWindowStreamTargetManifest,
+    userAgent: RemoteWindowBrowserUserAgent,
+  ) => Promise<RemoteWindowBrowserUserAgentResultPayload>;
   updateRemoteWindowFocus: (
     sessionId: string,
     streamId: string,
@@ -475,6 +482,7 @@ export function buildSessionContextValueRuntime(options: {
     requestRemoteWindowTargets: options.requestRemoteWindowTargets,
     requestRemoteWindowStreamStart: options.requestRemoteWindowStreamStart,
     updateRemoteWindowStreamQuality: options.updateRemoteWindowStreamQuality,
+    setRemoteWindowBrowserUserAgent: options.setRemoteWindowBrowserUserAgent,
     updateRemoteWindowFocus: options.updateRemoteWindowFocus,
     stopRemoteWindowStream: options.stopRemoteWindowStream,
     sendRemoteWindowInput: options.sendRemoteWindowInput,

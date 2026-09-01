@@ -144,6 +144,7 @@ import {
   type RemoteWindowStreamQualityResultPayload,
   type RemoteWindowStreamPurpose,
   type RemoteWindowStreamTargetManifest,
+  type RemoteWindowBrowserUserAgent,
   type RemoteWindowStreamTargetsResponsePayload,
   type RemoteWindowVideoProfile,
   type Session,
@@ -470,6 +471,11 @@ interface TerminalPageProps {
     sessionId: string,
     payload: Omit<RemoteWindowStreamQualityRequestPayload, 'requestId'>,
   ) => Promise<RemoteWindowStreamQualityResultPayload>;
+  onSetRemoteWindowBrowserUserAgent?: (
+    sessionId: string,
+    target: RemoteWindowStreamTargetManifest,
+    userAgent: RemoteWindowBrowserUserAgent,
+  ) => Promise<unknown>;
   onUpdateRemoteWindowFocus?: (
     sessionId: string,
     streamId: string,
@@ -568,6 +574,7 @@ function TerminalPageComponent({
   onRequestRemoteWindowTargets,
   onRequestRemoteWindowStreamStart,
   onUpdateRemoteWindowStreamQuality,
+  onSetRemoteWindowBrowserUserAgent,
   onUpdateRemoteWindowFocus,
   onStopRemoteWindowStream,
   onSendRemoteWindowInput,
@@ -3624,6 +3631,7 @@ function TerminalPageComponent({
               requestTargets: onRequestRemoteWindowTargets,
               startStream: onRequestRemoteWindowStreamStart,
               updateStreamQuality: onUpdateRemoteWindowStreamQuality,
+              setBrowserUserAgentRequest: onSetRemoteWindowBrowserUserAgent,
               updateFocus: onUpdateRemoteWindowFocus,
               stopStream: onStopRemoteWindowStream,
               requestScreenshot: handleRequestRemoteWindowScreenshot,
@@ -3793,6 +3801,7 @@ function terminalPagePropsEqual(
     && prev.onRequestRemoteWindowTargets === next.onRequestRemoteWindowTargets
     && prev.onRequestRemoteWindowStreamStart === next.onRequestRemoteWindowStreamStart
     && prev.onUpdateRemoteWindowStreamQuality === next.onUpdateRemoteWindowStreamQuality
+    && prev.onSetRemoteWindowBrowserUserAgent === next.onSetRemoteWindowBrowserUserAgent
     && prev.onUpdateRemoteWindowFocus === next.onUpdateRemoteWindowFocus
     && prev.onStopRemoteWindowStream === next.onStopRemoteWindowStream
     && prev.onSendRemoteWindowInput === next.onSendRemoteWindowInput

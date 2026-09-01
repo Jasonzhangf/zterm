@@ -177,6 +177,23 @@ export interface RemoteWindowStreamRequestPayload {
   forceRefresh?: boolean;
 }
 
+export type RemoteWindowBrowserUserAgent = 'desktop' | 'mobile';
+
+export interface RemoteWindowBrowserUserAgentRequestPayload {
+  requestId: string;
+  target: RemoteWindowStreamTargetManifest;
+  userAgent: RemoteWindowBrowserUserAgent;
+}
+
+export interface RemoteWindowBrowserUserAgentResultPayload {
+  requestId: string;
+  targetId: string;
+  userAgent: RemoteWindowBrowserUserAgent;
+  status: 'applied' | 'rejected';
+  cdpTargetId?: string;
+  error?: { code: string; message: string };
+}
+
 export interface RemoteWindowStreamRect {
   x: number;
   y: number;
@@ -809,6 +826,7 @@ export type BridgeClientMessage =
   | { type: 'attach-file-start'; payload: AttachFileStartPayload }
   | { type: 'remote-screenshot-request'; payload: RemoteScreenshotRequestPayload }
   | { type: 'remote-window-targets-request'; payload: RemoteWindowStreamRequestPayload }
+  | { type: 'remote-window-browser-user-agent-request'; payload: RemoteWindowBrowserUserAgentRequestPayload }
   | { type: 'remote-window-stream-start-request'; payload: RemoteWindowStreamStartRequestPayload }
   | { type: 'remote-window-stream-start-v2-request'; payload: RemoteWindowStreamStartRequestV2Payload }
   | { type: 'remote-window-stream-answer-v2'; payload: RemoteWindowStreamAnswerV2Payload }
@@ -890,6 +908,7 @@ export type BridgeServerControlMessage =
   | { type: 'file-create-directory-error'; payload: { requestId: string; error: string } }
   | { type: 'remote-screenshot-status'; payload: RemoteScreenshotStatusPayload }
   | { type: 'remote-window-targets-response'; payload: RemoteWindowStreamTargetsResponsePayload }
+  | { type: 'remote-window-browser-user-agent-result'; payload: RemoteWindowBrowserUserAgentResultPayload }
   | { type: 'remote-window-stream-started'; payload: RemoteWindowStreamStartedPayload }
   | { type: 'remote-window-stream-offer-v2'; payload: RemoteWindowStreamStartedOfferV2Payload }
   | { type: 'remote-window-stream-ice-candidate'; payload: RemoteWindowStreamIceCandidatePayload }

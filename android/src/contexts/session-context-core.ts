@@ -9,6 +9,8 @@ import type {
   RemoteScreenshotRequestPayload,
   RemoteScreenshotStatusPayload,
   RemoteWindowInputEventPayload,
+  RemoteWindowBrowserUserAgent,
+  RemoteWindowBrowserUserAgentResultPayload,
   RemoteWindowStreamQualityRequestPayload,
   RemoteWindowStreamQualityResultPayload,
   RemoteWindowStreamPurpose,
@@ -262,6 +264,11 @@ export interface SessionContextValue {
     sessionId: string,
     payload: Omit<RemoteWindowStreamQualityRequestPayload, 'requestId'>,
   ) => Promise<RemoteWindowStreamQualityResultPayload>;
+  setRemoteWindowBrowserUserAgent: (
+    sessionId: string,
+    target: RemoteWindowStreamTargetManifest,
+    userAgent: RemoteWindowBrowserUserAgent,
+  ) => Promise<RemoteWindowBrowserUserAgentResultPayload>;
   updateRemoteWindowFocus: (
     sessionId: string,
     streamId: string,
