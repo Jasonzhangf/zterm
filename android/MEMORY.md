@@ -2735,3 +2735,10 @@ Tags: #terminal-input #mirror-scheduler #lost-wakeup #quickbar-focus #android-im
 
 Tags: #android-ui #accessibility #motion #connections-home #settings #tmux-picker #agy-review
 - [2026-08-31] Session drawer cwd-group release closeout: the installed Android APK `0.1.3.2816` / versionCode `1100028160` rendered one daemon/device with 17 catalog sessions in eight daemon-provided cwd folders. Root cause of disappearing drawer groups was audit pruning on `drawer-open` and empty backend pruning against a tmux-only catalog; the unique fix owner is `remote-tab-audit.ts` / `useSessionOpenActions.ts`, where drawer-open skips group prune and backend prune requires an actually populated backend catalog. Focused drawer/audit/preview tests 116/116, feature/architecture gates 103/103, build/sync/Gradle and OTA verifier passed; AGY Review passed with no P0/P1. Emulator CDP/ADB proof covered folder long-press menu, three zterm preview tiles, quick-peek hidden-before-click -> half -> full -> close, Quick Bar continuity, and edge queue default-hidden/edge-revealed projection. Release APK SHA-256: `af8033c983fd2ac37aa7563a75882487213c3ce0845662fa0f87e682ab1d141d`; local/Tailscale/public Relay manifests and downloadable APK matched this hash. Marker: `drawer cwd catalog empty-backend prune 2816 ota`
+
+## 2026-09-01 Remote window stream identity
+
+- `RemoteWindowOverlayController` must use the one actually-started focus stream ID as the active stream truth. Removing a stale canvas ID also requires removing the old dual-result promise wrapper; otherwise UI status/quality/error paths can address a nonexistent stream or retain dead two-lane structure.
+- Verified on emulator with APK `0.1.3.2847` / versionCode `1100028470`: `adb install -r`, live WebView CDP Chrome flow, video `readyState=4`, `currentTime=14.715`, `443x600`, `paused=false`, `srcObject=true`, and non-black focus canvas. Remote-window tests 103/103, feature registry 103/103, loopback passed; AGY review r3 PASS. Relay OTA manifest/download SHA matched `369196a3fef492884c391627106202d88916109ba60aa02a6793c39df50dd7aa`.
+
+Tags: #remote-window #stream-identity #webrtc #android-emulator #ota
