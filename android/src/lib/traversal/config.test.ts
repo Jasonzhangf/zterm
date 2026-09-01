@@ -42,11 +42,11 @@ describe('buildTraversalPlan', () => {
     );
 
     expect(plan.candidates.map((candidate) => candidate.path)).toEqual([
-      'tailscale',
       'rtc-direct',
+      'tailscale',
       'rtc-relay',
     ]);
-    expect(plan.candidates[0]).toMatchObject({
+    expect(plan.candidates.find((candidate) => candidate.path === 'tailscale')).toMatchObject({
       kind: 'ws',
       path: 'tailscale',
       endpoint: '100.66.1.82:3333',
@@ -104,15 +104,15 @@ describe('buildTraversalPlan', () => {
       },
     );
 
-    expect(plan.candidates[0]).toMatchObject({
+    expect(plan.candidates.find((candidate) => candidate.path === 'tailscale')).toMatchObject({
       id: 'tailscale:100.66.1.82:3333',
       kind: 'ws',
       path: 'tailscale',
       url: 'ws://100.66.1.82:3333/?token=daemon-token',
     });
     expect(plan.candidates.map((candidate) => candidate.path)).toEqual([
-      'tailscale',
       'rtc-direct',
+      'tailscale',
       'rtc-relay',
     ]);
   });
@@ -207,7 +207,7 @@ describe('buildTraversalPlan', () => {
       },
     );
 
-    expect(plan.candidates[0]).toMatchObject({
+    expect(plan.candidates.find((candidate) => candidate.path === 'tailscale')).toMatchObject({
       id: 'tailscale:100.66.1.82:3333',
       kind: 'ws',
       path: 'tailscale',
@@ -253,20 +253,20 @@ describe('buildTraversalPlan', () => {
     );
 
     expect(plan.candidates.map((candidate) => candidate.path)).toEqual([
+      'rtc-direct',
       'tailscale',
       'ipv6',
       'ipv4',
-      'rtc-direct',
       'rtc-relay',
     ]);
-    expect(plan.candidates[3]).toMatchObject({
+    expect(plan.candidates.find((candidate) => candidate.path === 'rtc-direct')).toMatchObject({
       kind: 'rtc',
       path: 'rtc-direct',
       endpoint: 'rtc-direct:daemon-host-a',
       iceTransportPolicy: 'all',
       iceServers: [{ urls: 'stun:turn.example.com:3478' }],
     });
-    expect(JSON.stringify(plan.candidates[3])).not.toContain('secret');
+    expect(JSON.stringify(plan.candidates.find((candidate) => candidate.path === 'rtc-direct'))).not.toContain('secret');
   });
 
   it('ignores stale saved traversal priority in auto mode', () => {
@@ -309,10 +309,10 @@ describe('buildTraversalPlan', () => {
     );
 
     expect(plan.candidates.map((candidate) => candidate.path)).toEqual([
+      'rtc-direct',
       'tailscale',
       'ipv6',
       'ipv4',
-      'rtc-direct',
       'rtc-relay',
     ]);
   });

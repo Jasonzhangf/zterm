@@ -46,7 +46,7 @@ const candidates = [
 ] satisfies TraversalPlanCandidate[];
 
 describe('selectBestTraversalRoute', () => {
-  it('defaults Auto selection to Tailscale before UDP direct and Relay when no LAN route exists', () => {
+  it('defaults Auto selection to UDP direct before Tailscale and Relay when no LAN route exists', () => {
     const selection = selectBestTraversalRoute({
       candidates: [
         candidates[4]!,
@@ -55,7 +55,7 @@ describe('selectBestTraversalRoute', () => {
       ],
     });
 
-    expect(selection.selected).toMatchObject({ id: 'direct:tailscale', path: 'tailscale' });
+    expect(selection.selected).toMatchObject({ id: 'rtc-direct:daemon-a', path: 'rtc-direct' });
     expect(selection.diagnostics.map((item) => item.path)).toEqual([
       'rtc-relay',
       'rtc-direct',
@@ -92,12 +92,12 @@ describe('selectBestTraversalRoute', () => {
     });
   });
 
-  it('selects Tailscale before WebRTC direct, public IPv4, and Relay by default', () => {
+  it('selects UDP direct before Tailscale, public IPv4, and Relay by default', () => {
     const selection = selectBestTraversalRoute({
       candidates: candidates.filter((candidate) => candidate.id !== 'direct:lan'),
     });
 
-    expect(selection.selected).toMatchObject({ id: 'direct:tailscale', path: 'tailscale' });
+    expect(selection.selected).toMatchObject({ id: 'rtc-direct:daemon-a', path: 'rtc-direct' });
     expect(selection.diagnostics.find((item) => item.candidateId === 'direct:ipv4')?.reasons).toContain('health:unknown');
   });
 
@@ -156,7 +156,7 @@ describe('selectBestTraversalRoute', () => {
       scope: { accountId: 'u1', daemonHostId: 'daemon-a' },
     });
 
-    expect(selection.selected).toMatchObject({ id: 'direct:tailscale', path: 'tailscale' });
+    expect(selection.selected).toMatchObject({ id: 'rtc-direct:daemon-a', path: 'rtc-direct' });
     expect(selection.diagnostics.find((item) => item.candidateId === 'direct:tailscale')?.reasons).toContain('health:unknown');
   });
 
@@ -232,12 +232,12 @@ describe('selectBestTraversalRoute', () => {
     });
   });
 
-  it('keeps Tailscale ahead of UDP direct when neither route has a reusable lease', () => {
+  it('keeps UDP direct ahead of Tailscale when neither route has a reusable lease', () => {
     const selection = selectBestTraversalRoute({
       candidates: candidates.filter((candidate) => candidate.id !== 'direct:lan'),
     });
 
-    expect(selection.selected).toMatchObject({ id: 'direct:tailscale', path: 'tailscale' });
+    expect(selection.selected).toMatchObject({ id: 'rtc-direct:daemon-a', path: 'rtc-direct' });
   });
 
   it('uses a recent UDP direct lease before probing Tailscale again', () => {
