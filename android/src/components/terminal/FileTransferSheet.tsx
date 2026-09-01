@@ -9,7 +9,7 @@ import {
 
 import {
   formatBytes,
-  truncateName,
+  shortenDisplayPath,
   isMarkdownFileName,
   isTextPreviewFileName,
   encodeBytesToBase64,
@@ -1270,7 +1270,7 @@ export function FileTransferSheet({
 
         <>
           <div style={sectionLabelStyle}>
-            <span>🖥 远程: {truncateName(remotePath, 40)}</span>
+            <span>🖥 远程: {shortenDisplayPath(remotePath)}</span>
             {renderSortControls(
               remoteSortField,
               setRemoteSortField,
@@ -1294,7 +1294,7 @@ export function FileTransferSheet({
               ← 上级
             </button>
             <span style={{ color: SHEET_MUTED }}>
-              {remotePath}
+              {shortenDisplayPath(remotePath)}
             </span>
           </div>
           <div
@@ -1720,7 +1720,7 @@ export function FileTransferSheet({
 
             {/* Local panel */}
             <div style={sectionLabelStyle}>
-              <span>📱 本地: {truncateName(localPath, 40)}</span>
+              <span>📱 本地: {shortenDisplayPath(localPath)}</span>
               {renderSortControls(
                 localSortField,
                 setLocalSortField,
@@ -1745,7 +1745,7 @@ export function FileTransferSheet({
                 ← 上级
               </button>
               <span style={{ color: SHEET_MUTED }}>
-                {localPath}
+                {shortenDisplayPath(localPath)}
               </span>
             </div>
             <div

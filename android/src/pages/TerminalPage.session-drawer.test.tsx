@@ -2006,6 +2006,94 @@ describe('TerminalPage portrait session drawer', () => {
     );
   });
 
+  it('opens a folder preview from the drawer menu and closes the drawer', async () => {
+    const sessions = [makeSession('s1'), makeSession('s2')];
+    sessions[0]!.daemonHostId = 'daemon-a';
+    sessions[1]!.daemonHostId = 'daemon-a';
+    const sessionGroups = [{
+      id: 'daemon:daemon-a',
+      name: 'Daemon A',
+      bridgeHost: '100.127.23.27',
+      bridgePort: 3333,
+      daemonHostId: 'daemon-a',
+      authToken: 'token-a',
+      sessionNames: ['tmux-s1', 'tmux-s2'],
+      sessionCwByName: {
+        'tmux-s1': '/Users/jason/projects/zterm',
+        'tmux-s2': '/Users/jason/projects/zterm',
+      },
+      lastOpenedAt: 1,
+    }];
+
+    render(
+      <TerminalPage
+        sessions={sessions}
+        sessionGroups={sessionGroups}
+        activeSession={sessions[0]}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    const swipeSurface = document.querySelector('[data-testid^="terminal-swipe-surface-"][data-swipe-enabled="true"]') as HTMLElement;
+    fireEvent.touchStart(swipeSurface, { touches: [{ clientX: 56, clientY: 200 }] });
+    fireEvent.touchMove(swipeSurface, { touches: [{ clientX: 236, clientY: 206 }], cancelable: true });
+    fireEvent.touchEnd(swipeSurface, { changedTouches: [{ clientX: 236, clientY: 206 }] });
+
+    const folder = await screen.findByTestId('terminal-session-drawer-folder-button-/Users/jason/projects/zterm');
+    fireEvent.contextMenu(folder, { clientX: 80, clientY: 160 });
+    fireEvent.click(screen.getByRole('menuitem', { name: '预览' }));
+
+    expect(await screen.findByTestId('terminal-preview-grid')).toBeTruthy();
+    expect(screen.getByTestId('terminal-session-drawer').getAttribute('aria-hidden')).toBe('true');
+  });
+
+  it('opens a folder preview from the current open session when the remote catalog has no cwd row', async () => {
+    const sessions = [makeSession('s1')];
+
+    render(
+      <TerminalPage
+        sessions={sessions}
+        sessionGroups={[]}
+        activeSession={sessions[0]}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    const swipeSurface = document.querySelector('[data-testid^="terminal-swipe-surface-"][data-swipe-enabled="true"]') as HTMLElement;
+    fireEvent.touchStart(swipeSurface, { touches: [{ clientX: 56, clientY: 200 }] });
+    fireEvent.touchMove(swipeSurface, { touches: [{ clientX: 236, clientY: 206 }], cancelable: true });
+    fireEvent.touchEnd(swipeSurface, { changedTouches: [{ clientX: 236, clientY: 206 }] });
+
+    const folder = await screen.findByTestId('terminal-session-drawer-folder-button-cwd 未知');
+    fireEvent.contextMenu(folder, { clientX: 80, clientY: 160 });
+    fireEvent.click(screen.getByRole('menuitem', { name: '预览' }));
+
+    expect(await screen.findByTestId('terminal-preview-grid')).toBeTruthy();
+    expect(screen.getByTestId('terminal-session-drawer').getAttribute('aria-hidden')).toBe('true');
+  });
+
   it('merges a legacy Herdr catalog row into the tmux row for one daemon/session', async () => {
     const sessions = [makeSession('s1')];
     sessions[0]!.daemonHostId = 'daemon-a';

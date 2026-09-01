@@ -43,3 +43,16 @@ export function resolveSessionGroupSlotTone(
       return null;
   }
 }
+
+export function shortenFolderLabel(cwd: string): string {
+  const trimmed = cwd.trim();
+  if (!trimmed || trimmed === 'cwd 未知') {
+    return trimmed === 'cwd 未知' ? '未知目录' : trimmed;
+  }
+  const normalized = trimmed.replace(/\/+$/, '');
+  const lastSegment = normalized.split('/').filter(Boolean).pop();
+  if (!lastSegment) {
+    return normalized || '未知目录';
+  }
+  return lastSegment;
+}

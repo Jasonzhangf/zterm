@@ -2951,7 +2951,7 @@ function TerminalPageComponent({
   }, []);
 
   const handlePreviewFolder = useCallback((cwd: string) => {
-    const folderItems = drawerRemoteSessions.items.filter((item) => (item.cwd?.trim() || 'cwd 未知') === cwd);
+    const folderItems = drawerSessions.filter((item) => (item.cwd?.trim() || 'cwd 未知') === cwd);
     const orderedTargets: SessionPreviewTarget[] = [];
     for (const item of folderItems) {
       const target = resolveSessionPreviewTargetFromDrawerSelection(item.id);
@@ -2964,10 +2964,20 @@ function TerminalPageComponent({
       setSessionPreviewError('该 cwd 没有可预览的 session。');
       return;
     }
-    setSessionPreviewSelectionMode(true);
+    const nextSelection = { version: 1 as const, orderedTargets };
+    const previewSessions = resolveSessionPreviewTargets(nextSelection, sessions);
+    persistSessionPreviewSelection(nextSelection);
+    setSessionPreviewSelectionMode(false);
     setSessionPreviewError(orderedTargets.length < folderItems.length ? '预览最多显示 6 个 session。' : null);
-    persistSessionPreviewSelection({ version: 1, orderedTargets });
-  }, [drawerRemoteSessions.items, persistSessionPreviewSelection, resolveSessionPreviewTargetFromDrawerSelection]);
+    sessionPreviewEntryRef.current = {
+      activeSessionId: activeSession?.id || null,
+      slotIds: { ...effectiveSessionGroupSlotIds },
+      focusSlot: sessionGroupFocusSlot,
+    };
+    setSessionPreviewInputSessionId(previewSessions[0]?.id || null);
+    setSessionPreviewOpen(true);
+    setSessionDrawerOpen(false);
+  }, [activeSession?.id, drawerSessions, effectiveSessionGroupSlotIds, persistSessionPreviewSelection, resolveSessionPreviewTargetFromDrawerSelection, sessionGroupFocusSlot, sessions]);
 
   const handleReplaceSessionPreview = useCallback((sourceSessionId: string, replacementSessionId: string) => {
     const replacementSession = sessions.find((session) => session.id === replacementSessionId);

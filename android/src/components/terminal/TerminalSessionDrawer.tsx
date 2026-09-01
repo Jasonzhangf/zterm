@@ -7,6 +7,7 @@ import {
   UNSCOPED_HOST_GROUP_KEY,
   UNSCOPED_HOST_GROUP_LABEL,
   resolveSessionGroupSlotTone,
+  shortenFolderLabel,
 } from './terminal-session-drawer-helpers';
 import { getServerIdentityTone } from '../../lib/server-identity';
 import type {
@@ -62,7 +63,6 @@ function TerminalSessionDrawerComponent({
     terminalBackend: 'tmux' | 'herdr';
   } | null>(null);
   const [folderMenu, setFolderMenu] = useState<{ cwd: string; x: number; y: number } | null>(null);
-
   useEffect(() => {
     if (open) {
       closeButtonRef.current?.focus({ preventScroll: true });
@@ -200,6 +200,18 @@ function TerminalSessionDrawerComponent({
     }
     return Array.from(groups, ([cwd, items]) => ({ cwd, items }));
   }, [visibleSessions]);
+  const activeFolderCwd = cwdGroups.find((group) => group.items.some((session) => session.active))?.cwd
+    || cwdGroups[0]?.cwd
+    || null;
+  const [expandedFolderCwd, setExpandedFolderCwd] = useState<string | null>(activeFolderCwd);
+
+  useEffect(() => {
+    setExpandedFolderCwd((current) => (
+      current && cwdGroups.some((group) => group.cwd === current)
+        ? current
+        : activeFolderCwd
+    ));
+  }, [activeFolderCwd, cwdGroups]);
   const currentHostGroup = useMemo(() => {
     if (!multiHost) {
       return hostGroups[0] || null;
@@ -209,6 +221,18 @@ function TerminalSessionDrawerComponent({
   useEffect(() => {
     selectionPressRef.current = null;
   }, [open]);
+
+  useEffect(() => {
+    if (!folderMenu && !slotMenu) return undefined;
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setFolderMenu(null);
+        setSlotMenu(null);
+      }
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [folderMenu, slotMenu]);
 
   const openNewSessionDialog = () => {
     // Derive default backend from the current host group's first session.
@@ -406,99 +430,131 @@ function TerminalSessionDrawerComponent({
           </div>
         ) : null}
 
-        {showHostRail ? (
-          <div
-            data-testid="terminal-session-drawer-host-rail"
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '8px',
-              padding: '10px',
-              borderBottom: '1px solid var(--zterm-panel-border)',
-              overflowY: 'auto',
-              overflowX: 'hidden',
-              flexShrink: 0,
-            }}
-          >
-            {hostGroups.map((group) => {
-              const isActive = group.groupKey === effectiveHostKey;
-              const tone = group.hostKey
-                ? getServerIdentityTone({ daemonHostId: group.hostKey, connectionName: group.hostLabel })
-                : {
-                    accent: 'rgba(220, 232, 255, 0.26)',
-                    accentSoft: 'rgba(220, 232, 255, 0.08)',
-                    lightCardBorder: 'rgba(255,255,255,0.08)',
-                    tabActiveBackground: 'rgba(255,255,255,0.06)',
-                    previewText: '#dce8ff',
-                  };
-              const statusColor = group.connected === false ? '#ff727d' : group.connected ? '#44e2a0' : 'var(--zterm-panel-muted)';
-              return (
-                <button
-                  key={group.groupKey}
-                  type="button"
-                  aria-selected={isActive}
-                  data-testid={`terminal-session-drawer-host-${group.groupKey}`}
-                  onClick={() => setSelectedHostKey(group.groupKey)}
-                  style={{
-                    width: '100%',
-                    flexShrink: 0,
-                    padding: '10px 12px',
-                    borderRadius: '14px',
-                    border: isActive
-                      ? `1px solid ${tone.accent}`
-                      : `1px solid ${tone.lightCardBorder}`,
-                    background: isActive ? 'var(--zterm-panel-active)' : 'var(--zterm-panel-surface)',
-                    color: isActive ? 'var(--zterm-panel-active-text)' : 'var(--zterm-panel-text)',
-                    fontSize: '12px',
-                    fontWeight: 700,
-                    textAlign: 'left',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-                    <span
-                      style={{
-                        width: '8px',
-                        height: '8px',
-                        borderRadius: '999px',
-                        background: statusColor,
-                        boxShadow: `0 0 0 2px ${tone.accentSoft}`,
-                        flexShrink: 0,
-                      }}
-                    />
-                    <span style={{ minWidth: 0, flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {group.hostLabel}
-                    </span>
-                    <span style={{ flexShrink: 0, color: 'var(--zterm-panel-muted)', fontSize: '10px' }}>
-                      {group.sessions.length}
-                    </span>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        ) : null}
-
         <div
-          data-testid="terminal-session-drawer-list"
+          data-testid="terminal-session-drawer-tree"
+          role="tree"
           style={{
             flex: '0 1 auto',
             minHeight: 0,
             overflowY: 'auto',
-            padding: '10px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '8px',
+            padding: '6px 10px 10px',
           }}
         >
+          {showHostRail ? (
+            <div
+              data-testid="terminal-session-drawer-host-rail"
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '2px',
+                padding: '2px 0 6px',
+                borderBottom: '1px solid var(--zterm-panel-border)',
+                flexShrink: 0,
+              }}
+            >
+              {hostGroups.map((group) => {
+                const isActive = group.groupKey === effectiveHostKey;
+                const tone = group.hostKey
+                  ? getServerIdentityTone({ daemonHostId: group.hostKey, connectionName: group.hostLabel })
+                  : {
+                      accent: 'rgba(220, 232, 255, 0.26)',
+                      accentSoft: 'rgba(220, 232, 255, 0.08)',
+                      lightCardBorder: 'rgba(255,255,255,0.08)',
+                      tabActiveBackground: 'rgba(255,255,255,0.06)',
+                      previewText: '#dce8ff',
+                    };
+                const statusColor = group.connected === false ? '#ff727d' : group.connected ? '#44e2a0' : 'var(--zterm-panel-muted)';
+                return (
+                  <button
+                    key={group.groupKey}
+                    type="button"
+                    role="treeitem"
+                    aria-level={1}
+                    aria-selected={isActive}
+                    data-tree-level="1"
+                    data-testid={`terminal-session-drawer-host-${group.groupKey}`}
+                    onClick={() => setSelectedHostKey(group.groupKey)}
+                    style={{
+                      width: '100%',
+                      minHeight: '40px',
+                      flexShrink: 0,
+                      padding: '0 8px',
+                      border: 0,
+                      borderRadius: '4px',
+                      background: isActive ? 'var(--zterm-panel-active)' : 'transparent',
+                      color: isActive ? 'var(--zterm-panel-active-text)' : 'var(--zterm-panel-text)',
+                      fontSize: '12px',
+                      fontWeight: 800,
+                      textAlign: 'left',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                      <span
+                        aria-hidden="true"
+                        style={{
+                          width: '7px',
+                          height: '7px',
+                          borderRadius: '2px',
+                          background: statusColor,
+                          boxShadow: `0 0 0 2px ${tone.accentSoft}`,
+                          flexShrink: 0,
+                        }}
+                      />
+                      <span style={{ minWidth: 0, flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {group.hostLabel}
+                      </span>
+                      <span style={{ flexShrink: 0, color: 'var(--zterm-panel-muted)', fontSize: '10px', fontVariantNumeric: 'tabular-nums' }}>
+                        {group.sessions.length}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+
+          <div
+            data-testid="terminal-session-drawer-list"
+            style={{
+              paddingTop: '6px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '4px',
+            }}
+          >
           {cwdGroups.map((folder) => (
-            <div key={folder.cwd} data-testid={`terminal-session-drawer-folder-${folder.cwd}`}>
+            <div
+              key={folder.cwd}
+              data-testid={`terminal-session-drawer-folder-${folder.cwd}`}
+              role="group"
+              style={{
+                marginLeft: '12px',
+                paddingLeft: '12px',
+                borderLeft: '1px solid var(--zterm-panel-border)',
+              }}
+            >
               <button
                 type="button"
+                role="treeitem"
+                aria-level={2}
+                data-tree-level="2"
                 data-testid={`terminal-session-drawer-folder-button-${folder.cwd}`}
-                aria-label={`预览文件夹 ${folder.cwd}`}
-                onClick={() => previewSelectionMode ? onPreviewFolder?.(folder.cwd) : undefined}
+                aria-label={`${expandedFolderCwd === folder.cwd ? '折叠' : '展开'}目录 ${shortenFolderLabel(folder.cwd)}`}
+                onClick={(event) => {
+                  if (suppressNextClickRef.current) {
+                    event.preventDefault();
+                    suppressNextClickRef.current = false;
+                    return;
+                  }
+                  if (previewSelectionMode) {
+                    onPreviewFolder?.(folder.cwd);
+                    return;
+                  }
+                  setExpandedFolderCwd((current) => current === folder.cwd ? null : folder.cwd);
+                }}
                 onContextMenu={(event) => {
                   event.preventDefault();
+                  setSlotMenu(null);
                   setFolderMenu({ cwd: folder.cwd, x: event.clientX, y: event.clientY });
                 }}
                 onTouchStart={(event) => {
@@ -507,33 +563,39 @@ function TerminalSessionDrawerComponent({
                   clearLongPressTimer();
                   longPressTimerRef.current = window.setTimeout(() => {
                     longPressTimerRef.current = null;
+                    suppressNextClickRef.current = true;
+                    setSlotMenu(null);
                     setFolderMenu({ cwd: folder.cwd, x: touch.clientX, y: touch.clientY });
                   }, 420);
                 }}
                 onTouchEnd={clearLongPressTimer}
                 onTouchMove={clearLongPressTimer}
                 style={{
-                  width: '100%', minHeight: '38px', padding: '0 10px', borderRadius: '10px',
-                  border: '1px solid var(--zterm-panel-border)', background: 'var(--zterm-panel-surface)',
+                  width: '100%', minHeight: '36px', padding: '0 8px', borderRadius: '4px',
+                  border: 'none', background: 'transparent',
                   color: 'var(--zterm-panel-text)', display: 'flex', alignItems: 'center', gap: '8px',
                   textAlign: 'left', fontSize: '12px', fontWeight: 800,
                 }}
               >
-                <span aria-hidden="true">{previewSelectionMode ? '◉' : '▾'}</span>
-                <span style={{ minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{folder.cwd}</span>
+                <span aria-hidden="true">{expandedFolderCwd === folder.cwd ? '▾' : '▸'}</span>
+                <span style={{ minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shortenFolderLabel(folder.cwd)}</span>
                 <span style={{ color: 'var(--zterm-panel-muted)', fontSize: '10px' }}>{folder.items.length}</span>
               </button>
-              {(!previewSelectionMode || folder.cwd === 'cwd 未知') ? folder.items.map((session) => {
+              {expandedFolderCwd === folder.cwd && (!previewSelectionMode || folder.cwd === 'cwd 未知') ? folder.items.map((session) => {
             const previewSelectionIndex = previewSelectedSessionIds.indexOf(session.id);
             const slotTone = resolveSessionGroupSlotTone(session.sessionGroupSlot, sessionGroupLayoutAxis);
             return (
-            <div
-              key={session.stableKey}
+                <div
+                  key={session.stableKey}
+              role="treeitem"
+              aria-level={3}
+              data-tree-level="3"
               data-active={session.active ? 'true' : 'false'}
               data-testid={`terminal-session-drawer-row-${session.id}`}
               data-terminal-backend={session.terminalBackend ?? 'tmux'}
               onContextMenu={(event) => {
                 event.preventDefault();
+                setFolderMenu(null);
                 openSlotMenu(session, event.clientX, event.clientY);
               }}
               onTouchStart={(event) => {
@@ -544,24 +606,26 @@ function TerminalSessionDrawerComponent({
                 clearLongPressTimer();
                 longPressTimerRef.current = window.setTimeout(() => {
                   longPressTimerRef.current = null;
+                  setFolderMenu(null);
                   openSlotMenu(session, touch.clientX, touch.clientY);
                 }, 420);
               }}
               onTouchMove={clearLongPressTimer}
               onTouchEnd={clearLongPressTimer}
               onTouchCancel={clearLongPressTimer}
-              style={{
-                minHeight: '72px',
-                width: '100%',
-                padding: 0,
-                borderRadius: '12px',
+                  style={{
+                    minHeight: '72px',
+                    marginLeft: '12px',
+                    width: 'calc(100% - 12px)',
+                    padding: 0,
+                borderRadius: '6px',
                 border: slotTone
                   ? `1px solid ${slotTone.border}`
                   : session.active
                   ? '1px solid rgba(106, 167, 255, 0.9)'
                   : '1px solid var(--zterm-panel-border)',
                 background: slotTone
-                  ? `linear-gradient(90deg, ${slotTone.background}, rgba(255,255,255,0.04))`
+                  ? slotTone.background
                   : session.active
                   ? 'var(--zterm-panel-active)'
                   : 'var(--zterm-panel-surface)',
@@ -798,7 +862,7 @@ function TerminalSessionDrawerComponent({
               }) : null}
             </div>
           ))}
-          {visibleSessions.length === 0 && (
+            {visibleSessions.length === 0 && (
             <div
               data-testid="terminal-session-drawer-empty-host"
               style={{
@@ -813,13 +877,23 @@ function TerminalSessionDrawerComponent({
             >
               当前机器没有活跃 session。点击底部 New Session 会在这台机器上创建一个空白 session。
             </div>
-          )}
+            )}
+          </div>
         </div>
         {folderMenu ? (
+          <>
           <div
-            role="menu"
-            data-testid="terminal-session-drawer-folder-menu"
+            data-testid="terminal-session-drawer-folder-menu-scrim"
+            onClick={() => setFolderMenu(null)}
             style={{
+              position: 'fixed', inset: 0, zIndex: 169,
+              background: 'transparent',
+            }}
+          />
+         <div
+           role="menu"
+           data-testid="terminal-session-drawer-folder-menu"
+           style={{
               position: 'fixed', left: folderMenu.x, top: folderMenu.y, zIndex: 170,
               display: 'flex', flexDirection: 'column', gap: '4px', padding: '6px',
               borderRadius: '10px', border: '1px solid var(--zterm-panel-border)',
@@ -828,16 +902,26 @@ function TerminalSessionDrawerComponent({
           >
             <button type="button" role="menuitem" onClick={() => { onPreviewFolder?.(folderMenu.cwd); setFolderMenu(null); }}
               style={{ minHeight: '34px', padding: '0 10px', border: 0, borderRadius: '7px', background: 'var(--zterm-panel-active)', color: 'var(--zterm-panel-text)', fontWeight: 800 }}>
-              进入文件夹预览
+              预览
             </button>
             <button type="button" role="menuitem" onClick={() => setFolderMenu(null)}
               style={{ minHeight: '30px', padding: '0 10px', border: 0, borderRadius: '7px', background: 'transparent', color: 'var(--zterm-panel-muted)' }}>
-              取消
+            取消
             </button>
           </div>
+          </>
         ) : null}
 
         {slotMenu && onAssignSessionGroupSlot ? (
+          <>
+          <div
+            data-testid="terminal-session-drawer-slot-menu-scrim"
+            onClick={() => setSlotMenu(null)}
+            style={{
+              position: 'absolute', inset: 0, zIndex: 1,
+              background: 'transparent',
+            }}
+          />
           <div
             data-testid="terminal-session-drawer-slot-menu"
             style={{
@@ -918,6 +1002,7 @@ function TerminalSessionDrawerComponent({
               取消
             </button>
           </div>
+          </>
         ) : null}
 
         {newSessionDraft ? (
