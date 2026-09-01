@@ -31,7 +31,33 @@ export type ShortcutEditorTab = 'keyboard' | 'common';
 
 export type ShortcutEditorMode = 'list' | 'form';
 
+function QuickBarGlyph({ kind }: { kind: 'folder' | 'paperclip' }) {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      width="18"
+      height="18"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ display: 'block' }}
+    >
+      {kind === 'folder' ? (
+        <path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h5l2 2h8A1.5 1.5 0 0 1 21 8.5v8A1.5 1.5 0 0 1 19.5 18h-15A1.5 1.5 0 0 1 3 16.5z" />
+      ) : (
+        <path d="m8.5 12.5 5.7-5.7a3 3 0 0 1 4.2 4.2l-7.1 7.1a4.5 4.5 0 0 1-6.4-6.4L12 4.6" />
+      )}
+    </svg>
+  );
+}
+
 export function renderShortcutVisualNode(label: string, variant: 'button' | 'list' | 'token' = 'button') {
+  if (label === '📎') {
+    return <QuickBarGlyph kind="paperclip" />;
+  }
   if (!shouldRenderShortcutKeycap(label)) {
     return resolveShortcutVisualLabel(label);
   }
