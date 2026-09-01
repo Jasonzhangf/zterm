@@ -2299,6 +2299,7 @@
       "pending_resources": [],
       "public_interfaces": [
         "src/components/terminal/TerminalSessionDrawer.tsx",
+        "src/components/terminal/TerminalSessionDrawerContent.tsx",
         "src/components/terminal/TerminalPreviewGrid.tsx",
         "src/lib/session-preview-selection.ts"
       ],
@@ -2322,6 +2323,10 @@
         "src/components/terminal/TabManagerSheet.tsx",
         "src/components/terminal/TerminalPreviewGrid.tsx",
         "src/components/terminal/TerminalSessionDrawer.tsx",
+        "src/components/terminal/TerminalSessionDrawerContent.tsx",
+        "src/components/terminal/TerminalSessionDrawerFolderMenu.tsx",
+        "src/components/terminal/TerminalSessionDrawerNewSessionDialog.tsx",
+        "src/components/terminal/TerminalSessionDrawerSlotMenu.tsx",
         "src/components/terminal/TerminalTabSwipeSurface.tsx",
         "src/lib/session-preview-selection.ts",
         "src/lib/terminal-tab-swipe-gesture.ts",

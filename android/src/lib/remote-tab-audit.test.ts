@@ -71,6 +71,73 @@ describe('auditOpenTabsAgainstRemoteSessions', () => {
     expect(missingLogs).toHaveLength(0);
   });
 
+  it('does not prune session groups during drawer-open because the catalog owner already refreshed them', async () => {
+      deps.sessionGroups = [{
+        id: 'group-1',
+        name: 'group',
+        bridgeHost: '192.168.1.100',
+        bridgePort: 8080,
+        daemonHostId: 'daemon-1',
+        authToken: 'token',
+        sessionNames: ['my-session'],
+        lastOpenedAt: Date.now(),
+        missingSessionNames: [],
+      }];
+      const fetchMock = vi.fn().mockResolvedValue(new Map([['daemon:daemon-1', []]]));
+
+      vi.resetModules();
+      vi.doMock('./open-tab-restore', () => ({
+        fetchRemoteTmuxSessionNamesByOwner: fetchMock,
+      }));
+      vi.doMock('./runtime-debug', () => ({
+        runtimeDebug: vi.fn(),
+      }));
+
+      const { auditOpenTabsAgainstRemoteSessions: audit } = await import('./remote-tab-audit');
+      await audit('drawer-open', deps);
+
+      expect(pruneSessionGroupSelectionToRemoteTruth).not.toHaveBeenCalled();
+  });
+
+  it('does not let drawer-open tab auditing prune the catalog-owned session group', async () => {
+      deps.openTabStateRef.current.tabs = [{
+        sessionId: 'session-1',
+        hostId: 'host-1',
+        connectionName: 'test-host',
+        bridgeHost: '192.168.1.100',
+        bridgePort: 8080,
+        daemonHostId: 'daemon-1',
+        sessionName: 'my-session',
+        authToken: 'token',
+        createdAt: Date.now(),
+      }];
+      deps.sessionGroups = [{
+        id: 'group-1',
+        name: 'group',
+        bridgeHost: '192.168.1.100',
+        bridgePort: 8080,
+        daemonHostId: 'daemon-1',
+        authToken: 'token',
+        sessionNames: ['my-session'],
+        lastOpenedAt: Date.now(),
+        missingSessionNames: [],
+      }];
+      const fetchMock = vi.fn().mockResolvedValue(new Map([['daemon:daemon-1', []]]));
+
+      vi.resetModules();
+      vi.doMock('./open-tab-restore', () => ({
+        fetchRemoteTmuxSessionNamesByOwner: fetchMock,
+      }));
+      vi.doMock('./runtime-debug', () => ({
+        runtimeDebug: vi.fn(),
+      }));
+
+      const { auditOpenTabsAgainstRemoteSessions: audit } = await import('./remote-tab-audit');
+      await audit('drawer-open', deps);
+
+      expect(pruneSessionGroupSelectionToRemoteTruth).not.toHaveBeenCalled();
+  });
+
   // ── FORWARD TEST: closes tabs only when session is positively confirmed missing ──
   it('flags tab as missing when remote confirms session does not exist', async () => {
     const tab: PersistedOpenTab = {

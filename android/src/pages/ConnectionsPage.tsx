@@ -37,7 +37,7 @@ const pageStyle: CSSProperties = {
 };
 
 const contentStyle: CSSProperties = {
-  width: 'min(100%, 720px)',
+  width: 'min(100%, clamp(560px, 70vw, 880px))',
   margin: '0 auto',
   padding: `${mobileTheme.safeArea.top} 16px ${mobileTheme.safeArea.bottom}`,
   boxSizing: 'border-box',
@@ -125,6 +125,15 @@ function HomeBadge({ children }: { children: string }) {
   );
 }
 
+function PlusGlyph() {
+  return (
+    <svg aria-hidden="true" fill="none" height="20" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" width="20">
+      <path d="M12 5v14" />
+      <path d="M5 12h14" />
+    </svg>
+  );
+}
+
 function SettingsGlyph() {
   return (
     <svg aria-hidden="true" fill="none" height="20" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" width="20">
@@ -182,7 +191,11 @@ export function ConnectionsPage({
   }), [savedConnections]);
 
   return (
-    <main data-testid="connections-home" style={pageStyle}>
+    <main
+      data-testid="connections-home"
+      className="connections-home-shell"
+      style={pageStyle}
+    >
       <div style={contentStyle}>
         <header
           data-testid="connections-home-header"
@@ -346,37 +359,75 @@ export function ConnectionsPage({
               title="Configure servers"
               onClick={onOpenSettings}
               style={{
-                width: '42px',
-                height: '42px',
+                width: '44px',
+                height: '44px',
                 borderRadius: '14px',
                 border: 'none',
                 backgroundColor: mobileTheme.colors.shell,
                 color: '#ffffff',
-                fontSize: '24px',
                 lineHeight: 1,
                 boxShadow: mobileTheme.shadow.soft,
                 flex: '0 0 auto',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
               }}
             >
-              +
+              <PlusGlyph />
             </button>
           </div>
           {orderedSavedConnections.length === 0 ? (
             <div
               data-testid="connections-empty-state"
+              role="region"
+              aria-label="No configured servers yet"
               style={{
-                minHeight: '86px',
+                minHeight: '160px',
+                padding: '20px 18px',
                 border: `1px dashed ${mobileTheme.colors.lightBorder}`,
-                borderRadius: '20px',
-                backgroundColor: 'rgba(255,255,255,0.72)',
-                color: mobileTheme.colors.lightMuted,
-                fontSize: '13px',
-                fontWeight: 750,
+                borderRadius: '22px',
+                backgroundColor: 'rgba(255,255,255,0.78)',
+                color: mobileTheme.colors.lightText,
                 display: 'grid',
-                placeItems: 'center',
+                gap: '10px',
+                justifyItems: 'center',
+                alignContent: 'center',
+                textAlign: 'center',
               }}
             >
-              No configured servers
+              <div style={{ fontSize: '15px', fontWeight: 850 }}>
+                <span>No configured servers</span>
+                <span aria-hidden="true"> · </span>
+                Configure your first server to start a terminal session
+              </div>
+              <div style={{ fontSize: '13px', color: mobileTheme.colors.lightMuted, lineHeight: 1.5, maxWidth: '28em' }}>
+                Add a Tailscale IP, a bridge host, or a Relay device so you can open or rejoin sessions from any device.
+              </div>
+              <button
+                type="button"
+                aria-label="Add the first server"
+                title="Add server"
+                onClick={onOpenSettings}
+                style={{
+                  marginTop: '6px',
+                  minHeight: '44px',
+                  padding: '0 18px',
+                  borderRadius: '16px',
+                  border: 'none',
+                  backgroundColor: mobileTheme.colors.shell,
+                  color: '#ffffff',
+                  fontSize: '14px',
+                  fontWeight: 800,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  boxShadow: mobileTheme.shadow.soft,
+                  cursor: 'pointer',
+                }}
+              >
+                <PlusGlyph />
+                Add server
+              </button>
             </div>
           ) : (
             <div data-testid="saved-connection-list" style={{ display: 'grid', gap: '10px' }}>

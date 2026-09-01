@@ -5,6 +5,7 @@
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
 import type {
   RemoteWindowStreamStartedPayload,
+  RemoteWindowStreamStartedOfferV2Payload,
   RemoteWindowStreamTargetManifest,
   RemoteWindowStreamTargetsResponsePayload,
 } from '../../lib/types';
@@ -279,7 +280,7 @@ export function resolveFloatingOverlaySizing(source: { width: number; height: nu
   return { width: '74vw', maxWidth: '360px' };
 }
 
-export function resolveStartedCaptureFrameSize(started?: RemoteWindowStreamStartedPayload | null): SurfaceSize | null {
+export function resolveStartedCaptureFrameSize(started?: RemoteWindowStreamStartedPayload | RemoteWindowStreamStartedOfferV2Payload | null): SurfaceSize | null {
   const width = started?.capture?.frameWidth;
   const height = started?.capture?.frameHeight;
   if (

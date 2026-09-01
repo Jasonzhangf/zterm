@@ -19,7 +19,7 @@ interface CreateTraversalRelayHostClientOptions {
   handleRelaySignal: (peerId: string, message: SignalMessage, emitSignal: (message: SignalMessage) => void) => Promise<void>;
   closeRelayPeer: (peerId: string, reason: string) => void;
   listEndpointCandidates: (now: string) => RelayEndpointCandidate[];
-  listTmuxSessions: () => string[];
+  listTerminalSessionCatalog: () => Array<Pick<RelayTmuxSessionSnapshot, 'name' | 'cwd'>>;
   now?: () => string;
 }
 
@@ -127,19 +127,20 @@ function buildWsUrl(base: string, relativePath: string) {
 }
 
 export function buildRelayTmuxSessionSnapshots(
-  sessionNames: string[],
+  sessionCatalog: Array<Pick<RelayTmuxSessionSnapshot, 'name' | 'cwd'>>,
   now: string,
 ): RelayTmuxSessionSnapshot[] {
   const seen = new Set<string>();
   const sessions: RelayTmuxSessionSnapshot[] = [];
-  for (const rawName of sessionNames) {
-    const name = typeof rawName === 'string' ? rawName.trim() : '';
+  for (const entry of sessionCatalog) {
+    const name = typeof entry?.name === 'string' ? entry.name.trim() : '';
     if (!name || seen.has(name)) {
       continue;
     }
     seen.add(name);
     sessions.push({
       name,
+      ...(typeof entry.cwd === 'string' && entry.cwd.trim() ? { cwd: entry.cwd.trim() } : {}),
       updatedAt: now,
     });
   }
@@ -148,14 +149,14 @@ export function buildRelayTmuxSessionSnapshots(
 
 export function buildRelayDirectoryUpdateEnvelope(options: {
   endpoints: RelayEndpointCandidate[];
-  sessionNames: string[];
+  sessionCatalog: Array<Pick<RelayTmuxSessionSnapshot, 'name' | 'cwd'>>;
   now: string;
 }): RelayHostEnvelope {
   return {
     type: 'directory-update',
     directory: {
       endpoints: options.endpoints,
-      sessions: buildRelayTmuxSessionSnapshots(options.sessionNames, options.now),
+      sessions: buildRelayTmuxSessionSnapshots(options.sessionCatalog, options.now),
       publishedAt: options.now,
     },
   };
@@ -164,14 +165,14 @@ export function buildRelayDirectoryUpdateEnvelope(options: {
 export function publishRelayDirectoryUpdate(options: {
   socket: RelayDirectoryPublisherSocket;
   listEndpointCandidates: (now: string) => RelayEndpointCandidate[];
-  listTmuxSessions: () => string[];
+  listTerminalSessionCatalog: () => Array<Pick<RelayTmuxSessionSnapshot, 'name' | 'cwd'>>;
   now: () => string;
 }) {
   try {
     const now = options.now();
     const envelope = buildRelayDirectoryUpdateEnvelope({
       endpoints: options.listEndpointCandidates(now),
-      sessionNames: options.listTmuxSessions(),
+      sessionCatalog: options.listTerminalSessionCatalog(),
       now,
     });
     if (options.socket.readyState === WebSocket.OPEN) {
@@ -271,7 +272,7 @@ export function createTraversalRelayHostClient(options: CreateTraversalRelayHost
           const publishResult = publishRelayDirectoryUpdate({
             socket: nextSocket,
             listEndpointCandidates: options.listEndpointCandidates,
-            listTmuxSessions: options.listTmuxSessions,
+            listTerminalSessionCatalog: options.listTerminalSessionCatalog,
             now: options.now || (() => new Date().toISOString()),
           });
           if (!publishResult.ok) {
@@ -299,7 +300,7 @@ export function createTraversalRelayHostClient(options: CreateTraversalRelayHost
             const publishResult = publishRelayDirectoryUpdate({
               socket: nextSocket,
               listEndpointCandidates: options.listEndpointCandidates,
-              listTmuxSessions: options.listTmuxSessions,
+              listTerminalSessionCatalog: options.listTerminalSessionCatalog,
               now: options.now || (() => new Date().toISOString()),
             });
             if (publishResult.ok) {

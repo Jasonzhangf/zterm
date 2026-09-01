@@ -500,52 +500,14 @@ export function createTerminalMessageRuntime(
         });
         break;
       case 'remote-window-stream-start-request':
-        {
-          const streamId = message.payload.streamId || '';
-          if (streamId) {
-            let streamIds = connectionRwStreams.get(connection.transportId);
-            if (!streamIds) {
-              streamIds = new Set<string>();
-              connectionRwStreams.set(connection.transportId, streamIds);
-            }
-            streamIds.add(streamId);
-          }
-        }
-        void deps.remoteWindowStreamRuntime.startStream(message.payload, {
-          sendIceCandidate: (payload) => {
-            sendRemoteWindowMessage(connection, {
-              type: 'remote-window-stream-ice-candidate',
-              payload,
-            });
+        sendRemoteWindowMessage(connection, {
+          type: 'remote-window-error',
+          payload: {
+            requestId: message.payload.requestId || '',
+            streamId: message.payload.streamId || '',
+            code: 'remote_window_stream_protocol_unsupported',
+            message: 'remote window stream start v1 is unsupported; use mediaPlanVersion 2',
           },
-          sendStatus: (payload) => {
-            sendRemoteWindowMessage(connection, {
-              type: 'remote-window-stream-status',
-              payload,
-            });
-          },
-          sendFocusResult: (payload) => {
-            sendRemoteWindowMessage(connection, {
-              type: 'remote-window-stream-focus-result',
-              payload,
-            });
-          },
-        }).then((payload) => {
-          if ('answer' in payload) {
-            sendRemoteWindowMessage(connection, { type: 'remote-window-stream-started', payload });
-          } else if ('code' in payload) {
-            sendRemoteWindowMessage(connection, { type: 'remote-window-error', payload });
-          }
-        }).catch((error: unknown) => {
-          sendRemoteWindowMessage(connection, {
-            type: 'remote-window-error',
-            payload: {
-              requestId: message.payload.requestId || '',
-              streamId: message.payload.streamId || '',
-              code: 'remote_window_stream_start_failed',
-              message: error instanceof Error ? error.message : 'remote window stream start failed',
-            },
-          });
         });
         break;
       case 'remote-window-stream-start-v2-request':

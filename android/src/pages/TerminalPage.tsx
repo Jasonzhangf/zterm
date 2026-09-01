@@ -1206,11 +1206,6 @@ function TerminalPageComponent({
       const sessionNames = [...new Set(
         (device.daemon.sessions || []).map((session) => session.name.trim()).filter(Boolean),
       )].sort((left, right) => left.localeCompare(right));
-      const sessionCwByName = Object.fromEntries(
-        (device.daemon.sessions || [])
-          .filter((session) => session.name.trim() && session.cwd?.trim())
-          .map((session) => [session.name.trim(), session.cwd!.trim()]),
-      );
       if (!daemonHostId || sessionNames.length === 0) {
         return [];
       }
@@ -1222,6 +1217,12 @@ function TerminalPageComponent({
         || resolveDrawerIdentity(group).key === daemonHostId
         || (directEndpoint?.host?.trim() === group.bridgeHost.trim() && directEndpoint.port === group.bridgePort)
       ));
+      const sessionCwdByName = Object.fromEntries([
+        ...Object.entries(existingGroup?.sessionCwdByName || {}),
+        ...(device.daemon.sessions || [])
+          .filter((session) => session.name.trim() && session.cwd?.trim())
+          .map((session) => [session.name.trim(), session.cwd!.trim()] as const),
+      ].filter(([name]) => sessionNames.includes(name)));
       const lastOpenedSessionName = existingGroup?.lastOpenedSessionName?.trim();
       return [{
         id: `daemon:${daemonHostId}`,
@@ -1233,7 +1234,7 @@ function TerminalPageComponent({
         authToken: existingGroup?.authToken || directEndpoint?.authToken,
         relayEndpointCandidates: device.daemon.endpoints,
         sessionNames,
-        ...(Object.keys(sessionCwByName).length > 0 ? { sessionCwByName } : {}),
+        ...(Object.keys(sessionCwdByName).length > 0 ? { sessionCwdByName } : {}),
         missingSessionNames: [],
         lastOpenedSessionName: lastOpenedSessionName && sessionNames.includes(lastOpenedSessionName)
           ? lastOpenedSessionName
@@ -1392,7 +1393,7 @@ function TerminalPageComponent({
           hostKey: serverIdentity.key,
           hostLabel: serverIdentity.label,
           terminalBackend: groupBackend,
-          cwd: group.sessionCwByName?.[sessionName],
+          cwd: group.sessionCwdByName?.[sessionName],
           subtitle: `${serverIdentity.label} · ${sessionName}${formatTerminalBackendSuffix(groupBackend)}`,
         });
       }
@@ -1464,16 +1465,19 @@ function TerminalPageComponent({
     if (drawerOpenDiscoveryFiredRef.current) {
       return;
     }
-    drawerOpenDiscoveryFiredRef.current = true;
+    const hostKeys = Array.from(new Set(
+      drawerHosts
+        .map((host) => host.hostKey?.trim())
+        .filter((hostKey): hostKey is string => Boolean(hostKey)),
+    ));
+    if (hostKeys.length === 0) {
+      return;
+    }
     if (onAuditOpenTabsAgainstRemoteSessions) {
       void onAuditOpenTabsAgainstRemoteSessions('drawer-open');
     }
     if (onRefreshRemoteSessions) {
-      const hostKeys = Array.from(new Set(
-        drawerHosts
-          .map((host) => host.hostKey?.trim())
-          .filter((hostKey): hostKey is string => Boolean(hostKey)),
-      ));
+      drawerOpenDiscoveryFiredRef.current = true;
       void Promise.allSettled(
         hostKeys.map((hostKey) => (
           Promise.resolve().then(() => onRefreshRemoteSessions(hostKey))
@@ -1485,7 +1489,9 @@ function TerminalPageComponent({
           }
         });
       });
+      return;
     }
+    drawerOpenDiscoveryFiredRef.current = true;
   }, [drawerHosts, onAuditOpenTabsAgainstRemoteSessions, onRefreshRemoteSessions, sessionDrawerOpen]);
   const drawerSessions = useMemo(() => {
     const activeSessionIds = new Set(renderedPaneSessions.map((session) => session.id));

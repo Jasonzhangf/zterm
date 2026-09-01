@@ -433,6 +433,15 @@ export function fetchTmuxSessionCatalog(
   });
 }
 
+export function refreshTmuxSessionCatalog(
+  target: BridgeTarget,
+  traversalSettings: Pick<BridgeSettings, 'signalUrl' | 'turnServerUrl' | 'turnUsername' | 'turnCredential' | 'transportMode' | 'traversalRelay'>,
+  overrideUrl?: string,
+) {
+  invalidateTmuxSessionListCache(target, traversalSettings, overrideUrl);
+  return fetchTmuxSessionCatalog(target, traversalSettings, overrideUrl);
+}
+
 function invalidateTmuxSessionListCache(target: BridgeTarget, traversalSettings: TmuxSessionTraversalSettings, overrideUrl?: string) {
   tmuxSessionListCache.delete(buildTmuxSessionListCacheKey(target, traversalSettings, overrideUrl));
 }

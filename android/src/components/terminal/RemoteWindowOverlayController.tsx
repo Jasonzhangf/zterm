@@ -19,6 +19,7 @@ import type {
   RemoteWindowStreamQualityRequestPayload,
   RemoteWindowStreamQualityResultPayload,
   RemoteWindowStreamStartedPayload,
+  RemoteWindowStreamStartedOfferV2Payload,
   RemoteWindowStreamPurpose,
   RemoteWindowStreamTargetManifest,
   RemoteWindowStreamTargetsResponsePayload,
@@ -218,7 +219,7 @@ interface RemoteWindowStreamStartResult {
   purpose?: RemoteWindowStreamPurpose;
   mediaStream?: MediaStream | null;
   overviewMediaStream?: MediaStream | null;
-  started?: RemoteWindowStreamStartedPayload;
+  started?: RemoteWindowStreamStartedPayload | RemoteWindowStreamStartedOfferV2Payload;
   startupTelemetry?: RemoteWindowReceiverStartupTelemetry;
   collectStats?: () => Promise<RemoteWindowVideoStatsSample | null>;
 }

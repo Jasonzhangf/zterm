@@ -374,7 +374,7 @@ export interface SessionGroupHistory {
   relayEndpointCandidates?: RelayEndpointCandidate[];
   sessionNames: string[];
   /** daemon-owned cwd projection keyed by backend-qualified session name */
-  sessionCwByName?: Record<string, string>;
+  sessionCwdByName?: Record<string, string>;
   missingSessionNames?: string[];
   lastOpenedSessionName?: string;
   lastOpenedAt: number;

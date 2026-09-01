@@ -112,7 +112,7 @@ describe('architecture boundary truth gate', () => {
   });
 
   it('keeps TerminalSessionDrawer from inventing host identity fallbacks', () => {
-    const source = read('src/components/terminal/TerminalSessionDrawer.tsx');
+    const source = read('src/components/terminal/TerminalSessionDrawerContent.tsx');
 
     expect(source).not.toContain("fallbackKey = 'default'");
     expect(source).not.toContain("hostKey: 'default'");

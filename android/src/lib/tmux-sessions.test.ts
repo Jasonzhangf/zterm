@@ -63,7 +63,7 @@ const traversalHarness = vi.hoisted(() => {
 
     triggerSessionsWithCatalog(
       sessions: string[],
-      sessionCatalog: Array<{ name: string; backend: 'tmux' | 'herdr' }>,
+      sessionCatalog: Array<{ name: string; backend: 'tmux' | 'herdr'; cwd?: string }>,
       requestId = this.latestRequestId(),
     ) {
       this.onmessage?.({
@@ -207,6 +207,32 @@ describe('tmux-sessions transport contract', () => {
     const cachedNames = fetchTmuxSessions(target, bridgeSettings);
     await expect(cachedNames).resolves.toEqual(['zterm', 'hd-codex']);
     expect(socket.sent.filter((item) => item.includes('list-sessions'))).toHaveLength(1);
+  });
+
+  it('forces a fresh catalog when drawer refresh follows a name-only cached response', async () => {
+    const { fetchTmuxSessionCatalog, refreshTmuxSessionCatalog } = await loadTmuxSessionsModule();
+    const initial = fetchTmuxSessionCatalog(target, bridgeSettings);
+    const firstSocket = traversalHarness.MockTraversalSocket.latest();
+    firstSocket.triggerOpen();
+    firstSocket.triggerMuxReady();
+    firstSocket.triggerSessionsWithCatalog(['zterm'], [{ name: 'zterm', backend: 'tmux' }]);
+    await expect(initial).resolves.toEqual({
+      sessionNames: ['zterm'],
+      sessionCatalog: [{ name: 'zterm', backend: 'tmux' }],
+    });
+
+    const refreshed = refreshTmuxSessionCatalog(target, bridgeSettings);
+    const secondSocket = traversalHarness.MockTraversalSocket.latest();
+    expect(secondSocket).toBe(firstSocket);
+    secondSocket.triggerSessionsWithCatalog(
+      ['zterm'],
+      [{ name: 'zterm', backend: 'tmux', cwd: '/Volumes/extension/code/zterm' }],
+    );
+
+    await expect(refreshed).resolves.toEqual({
+      sessionNames: ['zterm'],
+      sessionCatalog: [{ name: 'zterm', backend: 'tmux', cwd: '/Volumes/extension/code/zterm' }],
+    });
   });
 
   it('sends create / rename / kill tmux operations with the exact request payloads', async () => {
