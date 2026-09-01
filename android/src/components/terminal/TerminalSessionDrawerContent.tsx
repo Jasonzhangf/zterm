@@ -928,11 +928,10 @@ function TerminalSessionDrawerComponent({
             </button>
           </div>
         ) : (
-        <div
+        <button
           data-testid="terminal-session-drawer-add"
-          role="button"
           aria-label="新建 session"
-          tabIndex={-1}
+          type="button"
           onTouchStartCapture={(event) => {
             onDebugAddEvent?.(`add:capstart:${describeEventTarget(event.target)}`);
           }}
@@ -1001,7 +1000,7 @@ function TerminalSessionDrawerComponent({
             </span>
             <span>New Session</span>
           </div>
-        </div>
+        </button>
         )}
       </aside>
     </>
