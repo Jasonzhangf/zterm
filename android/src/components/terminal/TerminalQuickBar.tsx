@@ -3785,7 +3785,9 @@ function TerminalQuickBarComponent({
             aria-label="文件浏览"
             aria-disabled={!fileTransferSupported}
           >
-            📁
+            <svg aria-hidden="true" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h5l2 2h8A1.5 1.5 0 0 1 21 8.5v8A1.5 1.5 0 0 1 19.5 18h-15A1.5 1.5 0 0 1 3 16.5z" />
+            </svg>
           </button>
         </>
       )}
