@@ -84,10 +84,13 @@ describe('server control runtime truth gates', () => {
     expect(source).toContain('function buildExactTmuxPaneTarget(sessionName: string)');
     expect(source).toContain(":.{top-left}");
     expect(source).toContain('const target = buildExactTmuxPaneTarget(sessionName)');
-    expect(tmuxLiteralChunkBlock).toContain("runTmux(['send-keys', '-t', target, '-l', '--', chunks[index]!])");
+    expect(tmuxLiteralChunkBlock).toContain("const segments = chunks[index]!.split('\\x04');");
+    expect(tmuxLiteralChunkBlock).toContain("runTmux(['send-keys', '-t', target, '-l', '--', segments[segmentIndex]!])");
+    expect(tmuxLiteralChunkBlock).toContain("runTmux(['send-keys', '-H', '-t', target, '04'])");
     expect(mirrorWriteBlock).toContain('writeTmuxLiteralChunksSync(payload, target)');
     expect(mirrorWriteBlock).not.toContain("runTmux(['send-keys', '-t', sessionName, '-l', '--', payload])");
-    expect(backendWriteBlock).toContain('await runTmuxAsync([\'send-keys\', \'-t\', target, \'-l\', \'--\', payload])');
+    expect(backendWriteBlock).toContain("const segments = payload.split('\\x04');");
+    expect(backendWriteBlock).toContain("await runTmuxAsync(['send-keys', '-t', target, '-l', '--', segments[index]!])");
     expect(source).not.toContain('const liveMirrorInputBatches = new Map<string, {');
     expect(source).not.toContain('function buildLiveMirrorInputGroups(');
     expect(source).not.toContain('function enqueueLiveMirrorInput(');
