@@ -3,8 +3,6 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 import './index.css';
 
-const IS_DEV = (import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV === true;
-
 class RootErrorBoundary extends React.Component<
   { children: React.ReactNode },
   { error: Error | null; info: string | null }
@@ -20,39 +18,35 @@ class RootErrorBoundary extends React.Component<
   }
   render() {
     if (this.state.error) {
-      // Production: keep the painted app surface; never replace it with a red
-      // error pre. The error is already logged to logcat via the console bridge
-      // and will surface through normal app recovery flows.
-      if (!IS_DEV) {
-        return (
-          <div
-            style={{
-              position: 'fixed',
-              inset: 0,
-              background: '#0b1220',
-              color: 'transparent',
-            }}
-            aria-hidden="true"
-          />
-        );
-      }
       return React.createElement(
-        'pre',
+        'main',
         {
           style: {
             position: 'fixed',
             inset: 0,
             padding: '16px',
             margin: 0,
-            backgroundColor: '#fff5f5',
-            color: '#7f1d1d',
-            fontSize: '12px',
-            whiteSpace: 'pre-wrap',
-            overflow: 'auto',
-            fontFamily: 'monospace',
+            display: 'grid',
+            placeItems: 'center',
+            backgroundColor: '#0b1220',
+            color: '#f5f7fb',
           },
         },
-        `[zterm:render-error] ${this.state.error.message}\n\n${this.state.error.stack ?? ''}\n\n${this.state.info ?? ''}`,
+        React.createElement(
+          'section',
+          { style: { width: 'min(100%, 420px)', display: 'grid', gap: '12px' } },
+          React.createElement('h1', { style: { margin: 0, fontSize: '20px' } }, '页面加载失败'),
+          React.createElement('p', { style: { margin: 0, lineHeight: 1.5, color: '#c7d0df' } }, '请重新加载应用。错误详情已记录。'),
+          React.createElement(
+            'button',
+            {
+              type: 'button',
+              onClick: () => window.location.reload(),
+              style: { minHeight: '44px', border: 0, borderRadius: '8px', background: '#8bd5ff', color: '#0b1220', fontWeight: 700 },
+            },
+            '重新加载',
+          ),
+        ),
       );
     }
     return this.props.children;
