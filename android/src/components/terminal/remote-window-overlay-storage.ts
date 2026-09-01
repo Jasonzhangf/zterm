@@ -8,6 +8,8 @@ import type { RemoteWindowInputMode } from './remote-window-overlay-constants';
 
 export const REMOTE_WINDOW_ENTRY_POSITION_STORAGE_KEY =
   'zterm:remote-window:entry-position-v1';
+export const REMOTE_WINDOW_BROWSER_ENTRY_POSITION_STORAGE_KEY =
+  'zterm:remote-window:browser-entry-position-v1';
 export const REMOTE_WINDOW_TOUCH_SCROLL_FRACTION_STORAGE_KEY =
   'zterm:remote-window:touch-scroll-fraction-v1';
 export const REMOTE_WINDOW_TOUCH_SCROLL_INVERTED_STORAGE_KEY =
@@ -65,6 +67,40 @@ export function writeStoredEntryPosition(position: FloatingEntryPosition) {
     );
   } catch (error) {
     console.warn('[RemoteWindowOverlay] Failed to store entry position:', error);
+  }
+}
+
+export function readStoredBrowserEntryPosition(): FloatingEntryPosition {
+  if (typeof window === 'undefined') {
+    return { x: null, y: null };
+  }
+  try {
+    const raw = localStorage.getItem(REMOTE_WINDOW_BROWSER_ENTRY_POSITION_STORAGE_KEY);
+    if (!raw) {
+      return { x: null, y: null };
+    }
+    const parsed = JSON.parse(raw) as Partial<{ x: number; y: number }>;
+    return {
+      x: typeof parsed.x === 'number' && Number.isFinite(parsed.x) ? parsed.x : null,
+      y: typeof parsed.y === 'number' && Number.isFinite(parsed.y) ? parsed.y : null,
+    };
+  } catch (error) {
+    console.warn('[RemoteWindowOverlay] Failed to read stored browser entry position:', error);
+    return { x: null, y: null };
+  }
+}
+
+export function writeStoredBrowserEntryPosition(position: FloatingEntryPosition) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  try {
+    localStorage.setItem(
+      REMOTE_WINDOW_BROWSER_ENTRY_POSITION_STORAGE_KEY,
+      JSON.stringify(position),
+    );
+  } catch (error) {
+    console.warn('[RemoteWindowOverlay] Failed to store browser entry position:', error);
   }
 }
 

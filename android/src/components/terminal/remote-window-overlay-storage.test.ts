@@ -6,6 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   REMOTE_WINDOW_ENTRY_POSITION_STORAGE_KEY,
+  REMOTE_WINDOW_BROWSER_ENTRY_POSITION_STORAGE_KEY,
   REMOTE_WINDOW_INPUT_MODE_STORAGE_KEY,
   REMOTE_WINDOW_TOUCH_SCROLL_FRACTION_STORAGE_KEY,
   REMOTE_WINDOW_TOUCH_SCROLL_INVERTED_STORAGE_KEY,
@@ -13,9 +14,11 @@ import {
   readRemoteWindowTouchScrollFraction,
   readRemoteWindowTouchScrollInverted,
   readStoredEntryPosition,
+  readStoredBrowserEntryPosition,
   resolveTouchScrollFractionPreset,
   writeRemoteWindowInputMode,
   writeStoredEntryPosition,
+  writeStoredBrowserEntryPosition,
 } from './remote-window-overlay-storage';
 
 describe('remote-window-overlay-storage', () => {
@@ -41,6 +44,14 @@ describe('remote-window-overlay-storage', () => {
       JSON.stringify({ x: 'abc', y: 5 }),
     );
     expect(readStoredEntryPosition()).toEqual({ x: null, y: 5 });
+  });
+
+  it('keeps browser entry position independent from remote entry position', () => {
+    writeStoredEntryPosition({ x: 12, y: 34 });
+    writeStoredBrowserEntryPosition({ x: 56, y: 78 });
+    expect(readStoredEntryPosition()).toEqual({ x: 12, y: 34 });
+    expect(readStoredBrowserEntryPosition()).toEqual({ x: 56, y: 78 });
+    expect(window.localStorage.getItem(REMOTE_WINDOW_BROWSER_ENTRY_POSITION_STORAGE_KEY)).toContain('56');
   });
 
   it('resolves touch scroll fraction presets with fallback to default', () => {
