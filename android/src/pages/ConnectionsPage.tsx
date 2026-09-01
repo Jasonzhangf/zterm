@@ -239,7 +239,7 @@ export function ConnectionsPage({
               </h1>
               <div style={{ marginTop: '5px', display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
                 <HomeBadge>{`${orderedSavedConnections.length} 台服务器`}</HomeBadge>
-                {orderedActiveSessions.length > 0 ? <HomeBadge>{`${orderedActiveSessions.length} live`}</HomeBadge> : null}
+                {orderedActiveSessions.length > 0 ? <HomeBadge>{`${orderedActiveSessions.length} 个活跃会话`}</HomeBadge> : null}
               </div>
             </div>
           </div>
@@ -274,7 +274,7 @@ export function ConnectionsPage({
         {orderedActiveSessions.length > 0 ? (
           <section aria-labelledby="active-connections-title" style={{ display: 'grid', gap: '10px' }}>
             <div style={sectionHeaderStyle}>
-              <h2 id="active-connections-title" style={sectionTitleStyle}>Active</h2>
+              <h2 id="active-connections-title" style={sectionTitleStyle}>活跃会话</h2>
               <span style={{ color: mobileTheme.colors.lightMuted, fontSize: '12px', fontWeight: 800 }}>
                 {orderedActiveSessions.length}
               </span>
