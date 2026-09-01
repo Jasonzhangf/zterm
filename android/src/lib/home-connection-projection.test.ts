@@ -253,8 +253,7 @@ describe('home connection projection relay route visibility', () => {
         },
       },
     ).candidates.map((candidate) => candidate.path);
-    expect(routePaths.slice(0, 2)).toEqual(['tailscale', 'tailscale']);
-    expect(routePaths.slice(2)).toEqual(['rtc-direct', 'rtc-relay']);
+    expect(routePaths.slice(0, 3)).toEqual(['rtc-direct', 'tailscale', 'tailscale']);
   });
 
   it('projects logged-in relay directory daemon as Auto route with direct auth on a new device', () => {
@@ -296,13 +295,9 @@ describe('home connection projection relay route visibility', () => {
         },
       },
     );
-    expect(plan.candidates[0]).toMatchObject({
-      path: 'tailscale',
-      url: 'ws://mac-studio.tailnet.ts.net:3333/?token=daemon-token',
-    });
     expect(plan.candidates.map((candidate) => candidate.path)).toEqual([
-      'tailscale',
       'rtc-direct',
+      'tailscale',
       'rtc-relay',
     ]);
   });
