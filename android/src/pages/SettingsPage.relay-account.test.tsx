@@ -388,9 +388,9 @@ describe('SettingsPage Relay account configuration', () => {
     renderSettings({ onSave });
 
     openConnectionConfig();
-    fireEvent.change(screen.getByLabelText('Server name'), { target: { value: 'Mac Studio' } });
-    fireEvent.change(screen.getByLabelText('Server host'), { target: { value: '100.66.1.82' } });
-    fireEvent.change(screen.getByLabelText('Server auth token'), { target: { value: 'wterm-4123456' } });
+    fireEvent.change(screen.getByLabelText('服务器名称'), { target: { value: 'Mac Studio' } });
+    fireEvent.change(screen.getByLabelText('服务器地址'), { target: { value: '100.66.1.82' } });
+    fireEvent.change(screen.getByLabelText('服务器认证令牌'), { target: { value: 'wterm-4123456' } });
     fireEvent.change(screen.getByLabelText('Daemon ID'), { target: { value: 'mac-studio' } });
     fireEvent.click(screen.getByRole('button', { name: '添加服务器' }));
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -416,10 +416,10 @@ describe('SettingsPage Relay account configuration', () => {
     renderSettings({ onCheckForUpdate });
 
     expect(screen.getByTestId('settings-connection-config-summary')).toBeTruthy();
-    expect(screen.queryByLabelText('Server name')).toBeNull();
+    expect(screen.queryByLabelText('服务器名称')).toBeNull();
     openConnectionConfig();
     const updateSection = screen.getByTestId('settings-update-section');
-    const serverNameInput = screen.getByLabelText('Server name');
+    const serverNameInput = screen.getByLabelText('服务器名称');
     expect(updateSection.compareDocumentPosition(serverNameInput) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
     expect(screen.getByText('版本与升级')).toBeTruthy();
     expect(screen.getByRole('button', { name: '下载并安装' })).toBeTruthy();

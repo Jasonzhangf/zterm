@@ -73,7 +73,7 @@ describe('ConnectionsPage server home', () => {
     expect(screen.getByTestId('saved-connection-row')).toBeTruthy();
     expect(screen.getByTestId('active-session-row')).toBeTruthy();
     expect(screen.getByRole('button', { name: '设置和升级' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Configure servers' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '配置服务器' })).toBeTruthy();
     expect(screen.queryByLabelText('Relay account')).toBeNull();
     expect(screen.queryByLabelText('Relay password')).toBeNull();
     expect(screen.queryByTestId('relay-fixed-host')).toBeNull();
@@ -85,7 +85,7 @@ describe('ConnectionsPage server home', () => {
     expect(onResumeSession).toHaveBeenCalledWith(activeSession.id);
     fireEvent.click(screen.getByRole('button', { name: 'Open Mac Studio Tailscale' }));
     expect(onOpenSavedConnection).toHaveBeenCalledWith(savedHost);
-    fireEvent.click(screen.getByRole('button', { name: 'Configure servers' }));
+    fireEvent.click(screen.getByRole('button', { name: '配置服务器' }));
     expect(onOpenSettings).toHaveBeenCalledTimes(1);
   });
 
@@ -162,7 +162,7 @@ describe('ConnectionsPage server home', () => {
     const onOpenSettings = vi.fn();
     render(<ConnectionsPage onOpenSettings={onOpenSettings} />);
 
-    expect(screen.getByText('No configured servers')).toBeTruthy();
+    expect(screen.getByText('暂无已配置服务器')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '设置和升级' }));
     expect(onOpenSettings).toHaveBeenCalledTimes(1);
   });
