@@ -47,6 +47,22 @@ describe('remote-window-overlay-helpers', () => {
     expect(rect.top).toBe(25);
   });
 
+  it('keeps local geometry aspect-fit while fill is implemented by remote resize', () => {
+    const rect = resolveAspectRect(
+      { width: 100, height: 100 },
+      { width: 200, height: 100 },
+      'fill',
+    );
+    expect(rect).toMatchObject({ width: 100, height: 50, left: 0, top: 25 });
+    const clamped = clampFullscreenViewport(
+      { scale: 2, panX: 0, panY: 0 },
+      { width: 100, height: 100 },
+      { width: 200, height: 100 },
+      'fill',
+    );
+    expect(clamped.scale).toBe(2);
+  });
+
   it('keeps fullscreen viewports clamped to the surface', () => {
     const clamped = clampFullscreenViewport(
       { scale: 8, panX: 9999, panY: -9999 },

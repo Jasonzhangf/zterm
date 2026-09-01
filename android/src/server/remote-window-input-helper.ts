@@ -457,7 +457,7 @@ export function createDefaultRemoteWindowInputHelper(options: {
         return Promise.reject(new Error('remote window input helper is disposed'));
       }
       return new Promise<void>((resolve, reject) => {
-        queue.push({
+        const request = {
           config,
           delivery,
           resolve,
@@ -465,7 +465,32 @@ export function createDefaultRemoteWindowInputHelper(options: {
           timeout: null,
           pairGraceTimer: null,
           pairGraceExpired: false,
-        });
+        } satisfies PendingRemoteWindowInputHelperRequest;
+        if (delivery.lane === 'continuous') {
+          // Continuous motion is latest-wins: never let stale gesture samples
+          // accumulate behind the helper process or a reliable release.
+          for (let index = queue.length - 1; index >= 0; index -= 1) {
+            const queued = queue[index];
+            if (
+              queued?.delivery.lane === 'continuous'
+              && remoteWindowInputConfigsShareTarget(queued.config, config)
+              && queued.config.event.kind === config.event.kind
+            ) {
+              queue.splice(index, 1);
+              resolveRequest(queued);
+            }
+          }
+          queue.push(request);
+        } else {
+          // Reliable down/up/cancel must pass queued motion so release cannot
+          // be delayed by a stale continuous sample.
+          const firstContinuousIndex = queue.findIndex((queued) => queued.delivery.lane === 'continuous');
+          if (firstContinuousIndex >= 0) {
+            queue.splice(firstContinuousIndex, 0, request);
+          } else {
+            queue.push(request);
+          }
+        }
         pump();
       });
     },

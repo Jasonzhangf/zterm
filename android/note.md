@@ -1,5 +1,12 @@
 # 2026-08-19 升级链路 + Logo 替换
 
+# 2026-08-31 session rename reconnect race fix
+
+- Root cause: `resolveMuxChannelClosedWithControlStatusRuntime` captured the rename-time `sessionName` in its async control query; renaming race left the post-query session-present check comparing the old name, so a renamed session was treated as missing and entered the slow reconnect backoff.
+- Fix: the unique owner `terminal.transport_lifecycle.channel_closed_control_status` now re-reads the still-closed channel's `sessionName` after `queryTargetSessions()` resolves before deciding presence; it also surfaces the resolved name in the runtime-debug event.
+- Tests: `session-context-transport-orchestration-runtime.test.ts` adds a red-then-green rename-race case (24/24), plus regression for the positive and negative control paths; `session-context-session-runtime.test.ts` + `terminal-channel-mux-runtime.test.ts` still 38 + 7 = 45 PASS; `tsc --noEmit` PASS; `git diff --check` clean; canonical build blocked at `COMPILED_STAGE_REQUIRES_ARTIFACT` because this worktree does not carry the frozen AppSDK compiled tree (not a code defect).
+- Device L5 still pending: emulator install + adb-driven rename→reconnect replay is the user-visible acceptance gate; commit will be deferred until that gate is exercised or Jason releases the L5 evidence.
+
 # 2026-08-31 Android UI/UX + motion audit
 
 - Scope: client UI projection only; Connections home, Settings, tmux picker, and existing dialog motion hooks. Daemon, transport, mirror, sparse buffer, renderer truth, payloads, and runtime ownership were untouched.
@@ -304,3 +311,19 @@ Packaged Electron app.asar 内 DevTools 默认被禁用。`--remote-debugging-po
 - 已实现：`Web` 浮动入口、Chrome bundle 过滤、选中后直接 fullscreen；普通 `窗` 入口保持 floating。
 - 验证：remote-window runtime/helper/picker 定向测试 22/22（修正 picker test 后待重跑）；`pnpm --dir android run type-check` 通过（依赖通过现有 workspace node_modules 映射）。
 - 剩余：CDP target mapping 与 UA typed control、真实 Chrome ScreenCaptureKit/WebRTC 在线样本、APK/模拟器验证未完成；当前不可宣称完整浏览器功能完成。
+
+### 2026-09-01 browser remote-window CDP UA slice
+
+- 浏览器特别版继续复用 `client.remote_window_ui` 与 `daemon.remote_window_stream`：Chrome picker 只允许四个 Chrome bundle，选中后 fullscreen；UA 控制只走 shared typed control side-channel，不进入媒体帧或 daemon 客户端状态。
+- Android More 面板仅对 Chrome target 显示桌面版/移动版 UA 切换；切换状态显式投影 pending/applied/rejected。关闭 overlay 只停止 stream，并清理本地 UA 投影，不关闭 Chrome。
+- daemon CDP helper 只访问现有 `127.0.0.1:9222/json/list`，按 page + 精确 title 唯一匹配；0 个或多个匹配均显式失败，不启动 Chrome、不 resize native window、不做 screenshot/CDP screencast fallback。
+- 证据：`pnpm --dir android run type-check` PASS；定向 4 files / 71 tests PASS；feature registry 13 files / 103 tests PASS；`git diff --check` PASS。真实已安装 Android + Chrome CDP/WebRTC loopback 尚未完成。
+- canonical `pnpm --dir android run build` 被现有 AppSDK pin gate 阻断：当前实际二进制 SHA `c015a7ab…` 与项目锁定 SHA `c26e500e…` 不一致；未改 lock、未绕过 gate。
+- 2026-09-01 已将浏览器 worktree 快进到最新 `origin/main` `b238e20a`（build 2820），并按版本真源分配 build 2821；类型/定向测试/feature registry 仍通过，但 canonical build 继续被同一 AppSDK digest gate 阻断，因此尚未进入最终 commit、主 tree merge 或 OTA。
+
+# 2026-08-31 session rename reconnect race fix
+
+- Root cause: `resolveMuxChannelClosedWithControlStatusRuntime` captured the rename-time `sessionName` in its async control query; renaming race left the post-query session-present check comparing the old name, so a renamed session was treated as missing and entered the slow reconnect backoff.
+- Fix: the unique owner `terminal.transport_lifecycle.channel_closed_control_status` now re-reads the still-closed channel's `sessionName` after `queryTargetSessions()` resolves before deciding presence; it also surfaces the resolved name in the runtime-debug event.
+- Tests: `session-context-transport-orchestration-runtime.test.ts` adds a red-then-green rename-race case (24/24), plus regression for the positive and negative control paths; `session-context-session-runtime.test.ts` + `terminal-channel-mux-runtime.test.ts` still 38 + 7 = 45 PASS; `tsc --noEmit` PASS; `git diff --check` clean; canonical build blocked at `COMPILED_STAGE_REQUIRES_ARTIFACT` because this worktree does not carry the frozen AppSDK compiled tree (not a code defect).
+- Device L5 still pending: emulator install + adb-driven rename→reconnect replay is the user-visible acceptance gate; commit will be deferred until that gate is exercised or Jason releases the L5 evidence.

@@ -107,6 +107,7 @@ export function resolveMuxChannelClosedWithControlStatusRuntime(options: {
   routeTargetControlUnavailable?: (sessionId: string, message: string) => void;
   readSessionTerminalChannel: (sessionId: string) => {
     channelId: string;
+    sessionName: string;
     state: 'opening' | 'open' | 'closing' | 'closed';
   } | null;
   scheduleReconnect: (sessionId: string, message: string, retryable?: boolean) => void;
@@ -151,12 +152,13 @@ export function resolveMuxChannelClosedWithControlStatusRuntime(options: {
         return;
       }
 
-      if (sessionNames && !sessionNames.includes(options.sessionName)) {
+      const currentSessionName = readCurrentClosedChannel()?.sessionName || options.sessionName;
+      if (sessionNames && !sessionNames.includes(currentSessionName)) {
         options.updateSessionSync(options.sessionId, buildSessionClosedUpdates(options.reason));
         options.emitSessionStatus(options.sessionId, 'closed', options.reason);
         options.runtimeDebug('session.mux.channel-closed.control-status.session-missing', {
           sessionId: options.sessionId,
-          sessionName: options.sessionName,
+          sessionName: currentSessionName,
         });
         return;
       }

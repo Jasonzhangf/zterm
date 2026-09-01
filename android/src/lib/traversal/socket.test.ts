@@ -105,6 +105,7 @@ class MockRTCPeerConnection {
     currentRoundTripTime?: number;
   } | null = null;
   readonly channel = new MockRTCDataChannel();
+  readonly addedIceCandidates: RTCIceCandidateInit[] = [];
   localDescription: RTCSessionDescriptionInit | null = null;
   remoteDescription: RTCSessionDescriptionInit | null = null;
   onicecandidate: ((event: RTCPeerConnectionIceEvent) => void) | null = null;
@@ -131,7 +132,13 @@ class MockRTCPeerConnection {
     this.remoteDescription = description;
   }
 
-  async addIceCandidate() {
+  async addIceCandidate(candidate?: RTCIceCandidateInit) {
+    if (!this.remoteDescription) {
+      throw new Error('remote description required before ICE candidate');
+    }
+    if (candidate) {
+      this.addedIceCandidates.push(candidate);
+    }
     return undefined;
   }
 
@@ -686,6 +693,35 @@ describe('TraversalSocket reconnect', () => {
         iceTransportPolicy: 'all',
       },
     });
+
+    socket.close();
+  });
+
+  it('buffers remote ICE candidates until the answer is applied', async () => {
+    const socket = createRelayRtcSocket();
+    await flushMicrotasks();
+    const signalSocket = MockWebSocket.instances[0];
+    signalSocket.triggerOpen();
+    await flushMicrotasks();
+    const peer = MockRTCPeerConnection.instances[0];
+
+    signalSocket.onmessage?.({
+      data: JSON.stringify({
+        type: 'rtc-candidate',
+        payload: { candidate: 'candidate:early typ host', sdpMid: '0', sdpMLineIndex: 0 },
+      }),
+    } as MessageEvent);
+    await flushMicrotasks();
+    expect(peer.addedIceCandidates).toHaveLength(0);
+
+    signalSocket.onmessage?.({
+      data: JSON.stringify({
+        type: 'rtc-answer',
+        payload: { type: 'answer', sdp: 'mock-answer' },
+      }),
+    } as MessageEvent);
+    await flushMicrotasks();
+    expect(peer.addedIceCandidates).toHaveLength(1);
 
     socket.close();
   });

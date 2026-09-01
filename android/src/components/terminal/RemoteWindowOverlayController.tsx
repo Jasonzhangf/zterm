@@ -1389,6 +1389,39 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
         if (msg.payload.streamId !== activeStreamIdRef.current) {
           return;
         }
+        if (msg.payload.phase === 'stopped') {
+          const stoppedStreamId = activeStreamIdRef.current;
+          if (!stoppedStreamId) {
+            return;
+          }
+          activeStreamIdRef.current = null;
+          if (stoppedStreamId === activeCanvasStreamIdRef.current) {
+            activeCanvasStreamIdRef.current = null;
+          }
+          if (stoppedStreamId === activeFocusStreamIdRef.current) {
+            activeFocusStreamIdRef.current = null;
+          }
+          if (stoppedStreamId === pendingFocusStreamIdRef.current) {
+            pendingFocusStreamIdRef.current = null;
+          }
+          collectStreamStatsRef.current = null;
+          resetQualityApplyState();
+          surfacePointersRef.current.clear();
+          surfaceGestureRef.current = null;
+          surfacePinchStartRef.current = null;
+          setReceiverMediaStream(null);
+          setOverviewMediaStream(null);
+          setReceiverFrameSize(null);
+          setReceiverStartupTelemetry(null);
+          setStreamCapability(null);
+          setCanvasLayout(null);
+          setState((current) => failRemoteWindowStream(
+            current,
+            stoppedStreamId,
+            new Error(msg.payload.message || 'remote window stream stopped'),
+          ));
+          return;
+        }
         if (msg.payload.stage === 'capability-verified' && msg.payload.capability) {
           setStreamCapability(msg.payload.capability);
         }
@@ -1412,7 +1445,10 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
           width: msg.payload.capture.frameWidth,
           height: msg.payload.capture.frameHeight,
         });
-        resetFullscreenViewport();
+        // A remote window resize changes source geometry, not the user's
+        // local zoom intent. The viewport owner clamps the existing scale
+        // against the new frame on the next layout pass; resetting here
+        // snaps an active zoom gesture back to fill.
       }
       if (msg.payload.target) {
         const targetSessionId = activeSessionId?.trim() || '';
@@ -1430,7 +1466,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
         ));
       }
     });
-  }, [activeSessionId, onRemoteWindowMessage, rememberRemoteWindowCatalogTarget, resetFullscreenViewport]);
+  }, [activeSessionId, onRemoteWindowMessage, rememberRemoteWindowCatalogTarget]);
 
   useEffect(() => () => {
     lastReportedQuickBarSuppressionRef.current = false;
@@ -2201,9 +2237,13 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
         scrollFraction: touchScrollFractionRef.current,
         invertGestureDirection: touchScrollInvertedRef.current,
         pinchEnabled: state.mode === 'fullscreen',
-        scrollEnabled: fullscreenViewportRef.current.scale <= REMOTE_WINDOW_FULLSCREEN_MIN_SCALE,
-        panEnabled: state.mode === 'fullscreen'
-          && fullscreenViewportRef.current.scale > REMOTE_WINDOW_FULLSCREEN_MIN_SCALE,
+        // Two-finger vertical motion is remote scroll at every zoom level;
+        // zoom only changes the one-finger owner to local pan.
+        scrollEnabled: true,
+        // Zoomed one-finger movement owns local pan. Two fingers remain an
+        // explicit remote-scroll/pinch arena; never reinterpret vertical
+        // two-finger scrolling as local pan.
+        panEnabled: false,
       });
       surfaceGestureRef.current = pairResult.nextState;
       if (pairResult.remoteEvents.length > 0) {
@@ -2428,7 +2468,10 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
         timeMs: event.timeStamp,
         scrollFraction: touchScrollFractionRef.current,
         invertGestureDirection: touchScrollInvertedRef.current,
-        remainingPointerMode: 'remote-action',
+        remainingPointerMode: state.phase === 'targetLocked' && state.mode === 'fullscreen'
+          && fullscreenViewportRef.current.scale > REMOTE_WINDOW_FULLSCREEN_MIN_SCALE
+          ? 'local-pan'
+          : 'remote-action',
       });
       if (pairResult.nextState.mode === 'localPan') {
         surfaceLocalPanStartRef.current = {

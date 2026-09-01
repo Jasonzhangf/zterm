@@ -122,6 +122,88 @@ describe('TerminalSessionDrawer', () => {
     expect(onOpenQuickTabPicker).not.toHaveBeenCalled();
   });
 
+  it('renders sessions under an active folder and lets other folders expand on demand', () => {
+    const folderSessions = [
+      { ...sessions[0], cwd: '/Users/jason/projects/active' },
+      { ...sessions[1], cwd: '/Users/jason/projects/other' },
+    ];
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={folderSessions}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('terminal-session-drawer-folder-button-/Users/jason/projects/active').textContent)
+      .toContain('active');
+    expect(screen.getByTestId('terminal-session-drawer-tree').getAttribute('role')).toBe('tree');
+    expect(screen.getByTestId('terminal-session-drawer-folder-button-/Users/jason/projects/active').getAttribute('data-tree-level')).toBe('2');
+    expect(screen.getByTestId('terminal-session-drawer-row-s1').getAttribute('data-tree-level')).toBe('3');
+    expect(screen.getByTestId('terminal-session-drawer-row-s1')).toBeTruthy();
+    expect(screen.queryByTestId('terminal-session-drawer-row-s2')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-folder-button-/Users/jason/projects/other'));
+    expect(screen.getByTestId('terminal-session-drawer-row-s2')).toBeTruthy();
+    expect(screen.queryByTestId('terminal-session-drawer-row-s1')).toBeNull();
+  });
+
+  it('closes the folder menu from the scrim or Escape and routes its preview action', () => {
+    const onPreviewFolder = vi.fn();
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={[{ ...sessions[0], cwd: '/Users/jason/projects/zterm' }]}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onPreviewFolder={onPreviewFolder}
+      />,
+    );
+
+    const folderButton = screen.getByTestId('terminal-session-drawer-folder-button-/Users/jason/projects/zterm');
+    fireEvent.contextMenu(folderButton, { clientX: 80, clientY: 160 });
+    expect(screen.getByTestId('terminal-session-drawer-folder-menu')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-folder-menu-scrim'));
+    expect(screen.queryByTestId('terminal-session-drawer-folder-menu')).toBeNull();
+
+    fireEvent.contextMenu(folderButton, { clientX: 80, clientY: 160 });
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByTestId('terminal-session-drawer-folder-menu')).toBeNull();
+
+    fireEvent.contextMenu(folderButton, { clientX: 80, clientY: 160 });
+    fireEvent.click(screen.getByRole('menuitem', { name: '预览' }));
+    expect(onPreviewFolder).toHaveBeenCalledWith('/Users/jason/projects/zterm');
+    expect(screen.queryByTestId('terminal-session-drawer-folder-menu')).toBeNull();
+  });
+
+  it('closes the session slot menu from the scrim or Escape', () => {
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={sessions}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onAssignSessionGroupSlot={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+
+    const row = screen.getByTestId('terminal-session-drawer-row-s2');
+    fireEvent.contextMenu(row, { clientX: 120, clientY: 220 });
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-slot-menu-scrim'));
+    expect(screen.queryByTestId('terminal-session-drawer-slot-menu')).toBeNull();
+
+    fireEvent.contextMenu(row, { clientX: 120, clientY: 220 });
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByTestId('terminal-session-drawer-slot-menu')).toBeNull();
+  });
+
   it('keeps the session list content-sized so the drawer does not leave a large blank gap above the footer', () => {
     render(
       <TerminalSessionDrawer
@@ -134,9 +216,9 @@ describe('TerminalSessionDrawer', () => {
       />,
     );
 
-    const list = screen.getByTestId('terminal-session-drawer-list');
-    expect(list.style.flex).toBe('0 1 auto');
-    expect(list.style.minHeight).toBe('0px');
+    const tree = screen.getByTestId('terminal-session-drawer-tree');
+    expect(tree.style.flex).toBe('0 1 auto');
+    expect(tree.style.minHeight).toBe('0px');
     expect(screen.getByTestId('terminal-session-drawer-add')).toBeTruthy();
   });
 
@@ -576,6 +658,7 @@ describe('TerminalSessionDrawer', () => {
     expect(screen.getByTestId('terminal-session-drawer-host-rail').style.flexDirection).toBe('column');
     expect(screen.getByTestId('terminal-session-drawer-host-100.127.23.27:3333')).toBeTruthy();
     expect(screen.getByTestId('terminal-session-drawer-host-100.66.1.82:3333')).toBeTruthy();
+    expect(screen.getByTestId('terminal-session-drawer-host-100.127.23.27:3333').getAttribute('data-tree-level')).toBe('1');
 
     // 默认选中 active session 所在 host，显示 s1、s2，不显示 s3
     expect(screen.getByTestId('terminal-session-drawer-row-s1')).toBeTruthy();

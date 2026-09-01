@@ -134,6 +134,8 @@ class WebSocketBackend implements Backend {
 }
 
 class WebRtcBackend implements Backend {
+  private static readonly MAX_PENDING_REMOTE_ICE_CANDIDATES = 64;
+
   private signalSocket: WebSocket | null = null;
 
   private peerConnection: RTCPeerConnection | null = null;
@@ -147,6 +149,8 @@ class WebRtcBackend implements Backend {
   private openPublished = false;
 
   private disposed = false;
+
+  private pendingRemoteIceCandidates: RTCIceCandidateInit[] = [];
 
   private currentResolvedPath: TraversalResolvedPath;
   private currentResolvedRelayTransport: TraversalResolvedRelayTransport | undefined;
@@ -269,6 +273,16 @@ class WebRtcBackend implements Backend {
     }
   }
 
+  private async flushPendingRemoteIceCandidates() {
+    if (!this.peerConnection || !this.peerConnection.remoteDescription) {
+      return;
+    }
+    const pending = this.pendingRemoteIceCandidates.splice(0);
+    for (const candidate of pending) {
+      await this.peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+    }
+  }
+
   private clearDisconnectedTimer() {
     if (this.disconnectedTimer === null) {
       return;
@@ -293,6 +307,7 @@ class WebRtcBackend implements Backend {
     this.clearDisconnectedTimer();
     this.clearOpenStabilityTimer();
     this.openPublished = false;
+    this.pendingRemoteIceCandidates = [];
 
     const channel = this.dataChannel;
     const peerConnection = this.peerConnection;
@@ -516,10 +531,19 @@ class WebRtcBackend implements Backend {
             type: 'answer',
             sdp: typeof message.payload?.sdp === 'string' ? message.payload.sdp : '',
           }));
+          await this.flushPendingRemoteIceCandidates();
           return;
         }
         if (message.type === 'rtc-candidate' && this.peerConnection && message.payload?.candidate) {
-          await this.peerConnection.addIceCandidate(new RTCIceCandidate(message.payload as RTCIceCandidateInit));
+          const candidate = message.payload as RTCIceCandidateInit;
+          if (!this.peerConnection.remoteDescription) {
+            if (this.pendingRemoteIceCandidates.length >= WebRtcBackend.MAX_PENDING_REMOTE_ICE_CANDIDATES) {
+              throw new Error('rtc remote ICE candidate queue full before answer');
+            }
+            this.pendingRemoteIceCandidates.push(candidate);
+            return;
+          }
+          await this.peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
         }
       } catch (error) {
         handlers.onerror(error instanceof Error ? error.message : 'rtc signaling parse error');
