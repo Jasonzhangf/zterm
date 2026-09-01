@@ -15,7 +15,7 @@ import {
 import { DEFAULT_TERMINAL_CACHE_LINES } from '../src/lib/mobile-config';
 import { replayBufferSyncHistory } from '../src/lib/terminal-buffer-replay';
 
-const LAB_SESSION_NAME = 'zterm_mirror_lab';
+const LAB_SESSION_NAME = process.env.ZTERM_MIRROR_LAB_SESSION?.trim() || `zterm_mirror_lab_${process.pid}`;
 const LAB_COLS = 80;
 const LAB_ROWS = 24;
 const WAIT_TIMEOUT_MS = 8000;

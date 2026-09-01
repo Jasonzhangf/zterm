@@ -216,7 +216,16 @@ export function createTerminalControlRuntime(
       TERMINAL_INPUT_TMUX_WRITE_CHUNK_BYTES,
     );
     for (let index = 0; index < chunks.length; index += 1) {
-      runTmux(['send-keys', '-t', target, '-l', '--', chunks[index]!]);
+      const segments = chunks[index]!.split('\x04');
+      for (let segmentIndex = 0; segmentIndex < segments.length; segmentIndex += 1) {
+        if (segments[segmentIndex]) {
+          runTmux(['send-keys', '-t', target, '-l', '--', segments[segmentIndex]!]);
+        }
+        if (segmentIndex < segments.length - 1) {
+          runTmux(['send-keys', '-H', '-t', target, '04']);
+          sleepTmuxWriteSettleSync();
+        }
+      }
       if (index < chunks.length - 1) {
         sleepTmuxWriteSettleSync();
       }
@@ -318,7 +327,18 @@ export function createTerminalControlRuntime(
     }
     const target = buildExactTmuxPaneTarget(sessionName);
     if (payload) {
-      await runTmuxAsync(['send-keys', '-t', target, '-l', '--', payload]);
+      const segments = payload.split('\x04');
+      for (let index = 0; index < segments.length; index += 1) {
+        if (segments[index]) {
+          await runTmuxAsync(['send-keys', '-t', target, '-l', '--', segments[index]!]);
+        }
+        if (index < segments.length - 1) {
+          await runTmuxAsync(['send-keys', '-H', '-t', target, '04']);
+          await new Promise<void>((resolve) => {
+            setTimeout(resolve, TERMINAL_INPUT_TMUX_WRITE_SETTLE_MS);
+          });
+        }
+      }
     }
     if (appendEnter) {
       await runTmuxAsync(['send-keys', '-t', target, 'Enter']);
