@@ -23,6 +23,19 @@ export interface BridgeServerPreset {
 export type TerminalWidthMode = 'adaptive-phone' | 'mirror-fixed';
 export type TerminalSessionGroupLayoutMode = 'auto' | 'horizontal' | 'vertical';
 export type TerminalShellSkin = 'auto' | 'light' | 'blue' | 'black';
+export type TerminalFontSize = 'minimum' | 'small' | 'medium' | 'large';
+
+export const TERMINAL_FONT_SIZE_OPTIONS = [
+  { id: 'minimum', label: '最小', pixels: 10 },
+  { id: 'small', label: '小', pixels: 12 },
+  { id: 'medium', label: '中', pixels: 14 },
+  { id: 'large', label: '大', pixels: 16 },
+] as const;
+
+export function resolveTerminalFontSizePx(size: TerminalFontSize | undefined) {
+  return TERMINAL_FONT_SIZE_OPTIONS.find((option) => option.id === size)?.pixels
+    || TERMINAL_FONT_SIZE_OPTIONS[0].pixels;
+}
 
 export const TERMINAL_SHELL_SKIN_OPTIONS: Array<{
   id: TerminalShellSkin;
@@ -80,6 +93,7 @@ export interface BridgeSettings {
   terminalCacheLines: number;
   terminalThemeId: TerminalThemeId;
   terminalShellSkin?: TerminalShellSkin;
+  terminalFontSize?: TerminalFontSize;
   terminalWidthMode: TerminalWidthMode;
   terminalSessionGroupLayoutMode?: TerminalSessionGroupLayoutMode;
   /** Working directory for new tmux sessions. Defaults to $HOME on the daemon. */
@@ -106,6 +120,7 @@ export const DEFAULT_BRIDGE_SETTINGS: BridgeSettings = {
   terminalCacheLines: DEFAULT_TERMINAL_CACHE_LINES,
   terminalThemeId: DEFAULT_TERMINAL_THEME_ID,
   terminalShellSkin: 'auto',
+  terminalFontSize: 'minimum',
   terminalWidthMode: 'adaptive-phone',
   terminalSessionGroupLayoutMode: 'auto',
   cwd: undefined,
@@ -585,6 +600,13 @@ export function normalizeBridgeSettings(input: unknown): BridgeSettings {
       || candidate.terminalShellSkin === 'black'
       ? candidate.terminalShellSkin
       : 'auto';
+  const terminalFontSize: TerminalFontSize =
+    candidate.terminalFontSize === 'small'
+      || candidate.terminalFontSize === 'medium'
+      || candidate.terminalFontSize === 'large'
+      || candidate.terminalFontSize === 'minimum'
+      ? candidate.terminalFontSize as TerminalFontSize
+      : DEFAULT_BRIDGE_SETTINGS.terminalFontSize || 'minimum';
   const terminalWidthMode: TerminalWidthMode =
     candidate.terminalWidthMode === 'mirror-fixed' ? 'mirror-fixed' : 'adaptive-phone';
   const terminalSessionGroupLayoutMode: TerminalSessionGroupLayoutMode =
@@ -646,6 +668,7 @@ export function normalizeBridgeSettings(input: unknown): BridgeSettings {
     terminalCacheLines,
     terminalThemeId,
     terminalShellSkin,
+    terminalFontSize,
     terminalWidthMode,
     terminalSessionGroupLayoutMode,
     shortcutSmartSort: typeof (candidate as any).shortcutSmartSort === 'boolean' ? (candidate as any).shortcutSmartSort : DEFAULT_BRIDGE_SETTINGS.shortcutSmartSort,

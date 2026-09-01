@@ -1,6 +1,7 @@
 import {
   buildBridgeServerPresetIdentityId,
   DEFAULT_BRIDGE_SETTINGS,
+  TERMINAL_FONT_SIZE_OPTIONS,
   TERMINAL_SHELL_SKIN_OPTIONS,
   buildDaemonStartCommand,
   buildServerPresetId,
@@ -9,12 +10,14 @@ import {
   formatBridgeTarget,
   getDefaultBridgeServer,
   normalizeBridgeSettings,
+  resolveTerminalFontSizePx,
   resolveBridgePresetDaemonHostId,
   setDefaultBridgeServer,
   sortBridgeServers,
   upsertBridgeServer,
   type BridgeServerPreset,
   type BridgeSettings,
+  type TerminalFontSize,
   type TerminalShellSkin,
   type TerminalSessionGroupLayoutMode,
   type TraversalRelayClientSettings,
@@ -22,6 +25,7 @@ import {
 
 export {
   DEFAULT_BRIDGE_SETTINGS,
+  TERMINAL_FONT_SIZE_OPTIONS,
   TERMINAL_SHELL_SKIN_OPTIONS,
   buildBridgeServerPresetIdentityId,
   buildDaemonStartCommand,
@@ -30,13 +34,14 @@ export {
   formatBridgeTarget,
   getDefaultBridgeServer,
   normalizeBridgeSettings,
+  resolveTerminalFontSizePx,
   resolveBridgePresetDaemonHostId,
   setDefaultBridgeServer,
   sortBridgeServers,
   upsertBridgeServer,
   canonicalizeBridgeServerPresets,
 };
-export type { BridgeServerPreset, BridgeSettings, TerminalShellSkin, TerminalSessionGroupLayoutMode, TraversalRelayClientSettings };
+export type { BridgeServerPreset, BridgeSettings, TerminalFontSize, TerminalShellSkin, TerminalSessionGroupLayoutMode, TraversalRelayClientSettings };
 export type TraversalPath = 'lan' | 'tailscale' | 'ipv4' | 'ipv6' | 'rtc-direct' | 'rtc-relay';
 
 export const DEFAULT_TRAVERSAL_PATH_PRIORITY: TraversalPath[] = ['lan', 'tailscale', 'ipv6', 'ipv4', 'rtc-direct', 'rtc-relay'];
