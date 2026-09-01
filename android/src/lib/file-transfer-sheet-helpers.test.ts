@@ -12,6 +12,7 @@ import {
   joinLocalDisplayPath,
   normalizeLocalDisplayPath,
   resolveTextMimeType,
+  shortenDisplayPath,
   truncateName,
 } from './file-transfer-sheet-helpers';
 
@@ -24,6 +25,13 @@ describe('file-transfer-sheet-helpers', () => {
   it('truncates names at the boundary', () => {
     expect(truncateName('abcdef', 3)).toBe('a…');
     expect(truncateName('ab', 3)).toBe('ab');
+  });
+
+  it('shows only the final directory for display paths', () => {
+    expect(shortenDisplayPath('/storage/emulated/0/Download/zterm')).toBe('zterm');
+    expect(shortenDisplayPath('/remote/home/')).toBe('home');
+    expect(shortenDisplayPath('/')).toBe('/');
+    expect(shortenDisplayPath('~/')).toBe('~');
   });
 
   it('detects markdown and text preview files', () => {

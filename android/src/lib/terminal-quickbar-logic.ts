@@ -27,11 +27,38 @@ export interface DraftQuickAction extends QuickAction {
 
 export interface DraftShortcutAction extends TerminalShortcutAction {}
 
+export interface GoalPastePlan {
+  typedPrefix: '/goal ';
+  pastedText: string;
+  submit: '\r';
+}
+
 export interface ShortcutPreset extends ShortcutToken {
   row?: 'top-scroll' | 'bottom-scroll';
 }
 
 export const SHORTCUT_ROW_ORDER: ShortcutRow[] = ['top-scroll', 'bottom-scroll'];
+
+export function resolveGoalPastePlan(value: string): GoalPastePlan | null {
+  const trimmed = value.trimStart();
+  let remainder: string | null = null;
+
+  if (trimmed.startsWith('/goal') && (trimmed.length === 5 || /\s/u.test(trimmed[5] || ''))) {
+    remainder = trimmed.slice(5).trimStart();
+  } else if (trimmed.startsWith('目标')) {
+    remainder = trimmed.slice(2);
+  }
+
+  if (remainder === null) {
+    return null;
+  }
+
+  return {
+    typedPrefix: '/goal ',
+    pastedText: remainder,
+    submit: '\r',
+  };
+}
 
 export const SHORTCUT_ROW_META: Record<
   ShortcutRow,

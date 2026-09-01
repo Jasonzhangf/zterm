@@ -37,7 +37,7 @@ const pageStyle: CSSProperties = {
 };
 
 const contentStyle: CSSProperties = {
-  width: 'min(100%, clamp(560px, 70vw, 880px))',
+  width: 'min(100%, clamp(320px, 70vw, 880px))',
   margin: '0 auto',
   padding: `${mobileTheme.safeArea.top} 16px ${mobileTheme.safeArea.bottom}`,
   boxSizing: 'border-box',

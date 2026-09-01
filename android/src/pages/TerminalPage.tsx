@@ -1398,8 +1398,31 @@ function TerminalPageComponent({
         });
       }
     }
+
+    // An open client session is authoritative for the current process. A
+    // transiently empty remote catalog must not hide its drawer row (or the
+    // rename/close actions attached to that row).
+    const remoteCatalogIsEmpty = items.length === 0;
+    if (remoteCatalogIsEmpty && activeSession && !catalogLiveSessionIds.has(activeSession.id)) {
+      const serverIdentity = resolveDrawerIdentity(activeSession);
+      const sessionName = activeSession.sessionName.trim();
+      if (sessionName && activeSession.state !== 'closed') {
+        items.push({
+          id: activeSession.id,
+          stableKey: `local:${activeSession.id}::session:${sessionName}`,
+          title: activeSession.customName || activeSession.title || sessionName,
+          subtitle: `${serverIdentity.label} · ${sessionName}${formatTerminalBackendSuffix(activeSession.terminalBackend || 'tmux')}`,
+          paneLabel: undefined,
+          sessionGroupSlot: resolveSessionGroupSlot(activeSession.id),
+          active: renderedPaneSessions.some((session) => session.id === activeSession.id),
+          hostKey: serverIdentity.key,
+          hostLabel: serverIdentity.label,
+          terminalBackend: activeSession.terminalBackend || 'tmux',
+        });
+      }
+    }
     return { items, targets, closeTargets, catalogLiveSessionIds };
-  }, [drawerServerIdentityAliases, onlineDrawerServerIdentityAliases, onlineRelayDaemonDevices, relayDeviceByDaemonHostId, sessionGroups, sessions]);
+  }, [activeSession, drawerServerIdentityAliases, onlineDrawerServerIdentityAliases, onlineRelayDaemonDevices, relayDeviceByDaemonHostId, renderedPaneSessions, resolveSessionGroupSlot, sessionGroups, sessions]);
   const drawerHosts = useMemo<TerminalSessionDrawerHost[]>(() => {
     const hosts = new Map<string, TerminalSessionDrawerHost>();
     for (const device of onlineRelayDaemonDevices) {
@@ -1489,8 +1512,23 @@ function TerminalPageComponent({
       };
     });
 
-    return catalogItems;
-  }, [drawerRemoteSessions.items, renderedPaneSessions, resolveSessionGroupSlot, sessions]);
+    const projectedItems = new Map(catalogItems.map((item) => [item.id, item]));
+    if (catalogItems.length === 0 && activeSession && activeSession.state !== 'closed') {
+      projectedItems.set(activeSession.id, {
+        id: activeSession.id,
+        stableKey: activeSession.id,
+        title: activeSession.customName || activeSession.title || activeSession.sessionName,
+        subtitle: `${activeSession.connectionName || activeSession.hostId || 'unknown server'} · ${activeSession.sessionName}`,
+        sessionGroupSlot: resolveSessionGroupSlot(activeSession.id),
+        active: activeSessionIds.has(activeSession.id),
+        hostKey: activeSession.hostId,
+        hostLabel: activeSession.connectionName || activeSession.hostId,
+        terminalBackend: 'tmux',
+      });
+    }
+
+    return [...projectedItems.values()];
+  }, [activeSession, drawerRemoteSessions.items, renderedPaneSessions, resolveSessionGroupSlot, sessions]);
   useEffect(() => {
     if (!portraitSessionDrawerEnabled || sessionDrawerOpen || sessions.length > 0 || drawerHosts.length === 0) {
       return;
@@ -2943,7 +2981,7 @@ function TerminalPageComponent({
   }, []);
 
   const handlePreviewFolder = useCallback((cwd: string) => {
-    const folderItems = drawerRemoteSessions.items.filter((item) => (item.cwd?.trim() || 'cwd 未知') === cwd);
+    const folderItems = drawerSessions.filter((item) => (item.cwd?.trim() || 'cwd 未知') === cwd);
     const orderedTargets: SessionPreviewTarget[] = [];
     for (const item of folderItems) {
       const target = resolveSessionPreviewTargetFromDrawerSelection(item.id);
@@ -2956,10 +2994,20 @@ function TerminalPageComponent({
       setSessionPreviewError('该 cwd 没有可预览的 session。');
       return;
     }
-    setSessionPreviewSelectionMode(true);
+    const nextSelection = { version: 1 as const, orderedTargets };
+    const previewSessions = resolveSessionPreviewTargets(nextSelection, sessions);
+    persistSessionPreviewSelection(nextSelection);
+    setSessionPreviewSelectionMode(false);
     setSessionPreviewError(orderedTargets.length < folderItems.length ? '预览最多显示 6 个 session。' : null);
-    persistSessionPreviewSelection({ version: 1, orderedTargets });
-  }, [drawerRemoteSessions.items, persistSessionPreviewSelection, resolveSessionPreviewTargetFromDrawerSelection]);
+    sessionPreviewEntryRef.current = {
+      activeSessionId: activeSession?.id || null,
+      slotIds: { ...effectiveSessionGroupSlotIds },
+      focusSlot: sessionGroupFocusSlot,
+    };
+    setSessionPreviewInputSessionId(previewSessions[0]?.id || null);
+    setSessionPreviewOpen(true);
+    setSessionDrawerOpen(false);
+  }, [activeSession?.id, drawerSessions, effectiveSessionGroupSlotIds, persistSessionPreviewSelection, resolveSessionPreviewTargetFromDrawerSelection, sessionGroupFocusSlot, sessions]);
 
   const handleReplaceSessionPreview = useCallback((sourceSessionId: string, replacementSessionId: string) => {
     const replacementSession = sessions.find((session) => session.id === replacementSessionId);

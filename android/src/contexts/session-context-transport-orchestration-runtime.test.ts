@@ -554,6 +554,37 @@ describe('handleTargetMuxTransportFailureRuntime', () => {
 });
 
 describe('resolveMuxChannelClosedWithControlStatusRuntime', () => {
+  it('uses the current channel name when rename races with the closed-channel control query', async () => {
+    let resolveQuery!: (names: string[]) => void;
+    let channel = makeClosedChannel('old-name');
+    const queryTargetSessions = vi.fn(() => new Promise<string[]>((resolve) => {
+      resolveQuery = resolve;
+    }));
+    const scheduleReconnect = vi.fn();
+    const updateSessionSync = vi.fn();
+
+    resolveMuxChannelClosedWithControlStatusRuntime({
+      sessionId: 'session-1',
+      sessionName: 'old-name',
+      channelId: 'channel-1',
+      reason: 'mux data channel closed',
+      shouldReconnectNow: true,
+      queryTargetSessions,
+      readSessionTerminalChannel: () => channel,
+      scheduleReconnect,
+      updateSessionSync,
+      emitSessionStatus: vi.fn(),
+      runtimeDebug: vi.fn(),
+    });
+
+    channel = { ...channel, sessionName: 'new-name' };
+    resolveQuery(['new-name']);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(scheduleReconnect).toHaveBeenCalledWith('session-1', 'mux data channel closed', true);
+    expect(updateSessionSync).not.toHaveBeenCalled();
+  });
+
   it('queries target control status before reopening a closed data channel when tmux session still exists', async () => {
     const queryTargetSessions = vi.fn(async () => ['demo', 'other']);
     const scheduleReconnect = vi.fn();

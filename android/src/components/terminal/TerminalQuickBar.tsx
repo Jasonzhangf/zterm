@@ -48,6 +48,7 @@ import {
   readStoredBubblePosition,
   readStoredClipboardHistory,
   renderShortcutVisualNode,
+  resolveGoalPastePlan,
   resolveOverlayViewportMetrics,
   resolvePresetShortcutTokens,
   resolveShortcutComposerLabelFromSequence,
@@ -1303,6 +1304,11 @@ function TerminalQuickBarComponent({
         return;
       }
       persistClipboardHistory([text, ...clipboardHistory]);
+      const goalPastePlan = resolveGoalPastePlan(text);
+      if (goalPastePlan) {
+        onSendSequence?.(`${goalPastePlan.typedPrefix}${goalPastePlan.pastedText}${goalPastePlan.submit}`);
+        return;
+      }
       onSendSequence?.(text);
     } catch (error) {
       setClipboardError(
