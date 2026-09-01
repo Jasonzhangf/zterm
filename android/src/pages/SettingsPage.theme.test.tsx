@@ -172,7 +172,7 @@ describe('SettingsPage terminal theme selection', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Adaptive Phone' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
 
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
       terminalWidthMode: 'adaptive-phone',
@@ -206,7 +206,7 @@ describe('SettingsPage terminal theme selection', () => {
     );
 
     fireEvent.change(screen.getByTestId('settings-terminal-font-size'), { target: { value: 'large' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ terminalFontSize: 'large' }));
   });
 
@@ -256,7 +256,7 @@ describe('SettingsPage terminal theme selection', () => {
       terminalShellSkin: 'black',
     }));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
       terminalWidthMode: 'adaptive-phone',
       terminalShellSkin: 'black',
@@ -296,7 +296,7 @@ describe('SettingsPage terminal theme selection', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Vertical' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
 
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
       terminalSessionGroupLayoutMode: 'vertical',
@@ -508,7 +508,7 @@ describe('SettingsPage terminal theme selection', () => {
     expect(screen.getByRole('button', { name: '使用当前 daemon 地址' })).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: '使用 Relay 公网' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
 
     expect(onUpdatePreferencesChange).toHaveBeenCalledWith(expect.objectContaining({
       manifestUrl: 'https://relay.codewhisper.cc:18443/relay/updates/latest.json',
@@ -662,7 +662,7 @@ describe('SettingsPage terminal theme selection', () => {
     view.rerender(renderPage());
 
     expect(screen.getByDisplayValue('https://relay.codewhisper.cc:18443/relay/updates/latest.json')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
     expect(onUpdatePreferencesChange).toHaveBeenCalledWith(expect.objectContaining({
       manifestUrl: 'https://relay.codewhisper.cc:18443/relay/updates/latest.json',
       manifestSource: 'relay-injected',
@@ -733,7 +733,7 @@ describe('SettingsPage terminal theme selection', () => {
     view.rerender(renderPage({ ...relaySettings, updatedAt: 2 }));
 
     expect(screen.getByDisplayValue('http://100.66.1.82:3333/updates/latest.json')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
     expect(onUpdatePreferencesChange).toHaveBeenCalledWith(expect.objectContaining({
       manifestUrl: 'http://100.66.1.82:3333/updates/latest.json',
       manifestSource: 'server-connected',
@@ -817,7 +817,7 @@ describe('SettingsPage terminal theme selection', () => {
     );
 
     expect(screen.getByDisplayValue('https://updates.example.com/latest.json')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
     expect(onUpdatePreferencesChange).toHaveBeenCalledWith(expect.objectContaining({
       manifestUrl: 'https://updates.example.com/latest.json',
       manifestSource: 'user-saved',
@@ -854,7 +854,7 @@ describe('SettingsPage terminal theme selection', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
     expect(onUpdatePreferencesChange).toHaveBeenCalledWith(expect.objectContaining({
       manifestUrl: 'http://192.168.0.3:3333/updates/latest.json',
       manifestSource: 'server-connected',

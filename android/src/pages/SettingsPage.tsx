@@ -268,8 +268,8 @@ export function SettingsPage({
       >
         <button
           type="button"
-          aria-label="Back to connections"
-          title="Back"
+          aria-label="返回连接列表"
+          title="返回"
           onClick={onBack}
           style={{
             width: '56px',
@@ -286,7 +286,7 @@ export function SettingsPage({
           ‹
         </button>
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: '20px', fontWeight: 800 }}>Settings</div>
+          <div style={{ fontSize: '20px', fontWeight: 800 }}>设置</div>
         </div>
         <span
           data-settings-save-status
@@ -295,12 +295,12 @@ export function SettingsPage({
           aria-live="polite"
           style={{ fontSize: '13px', minWidth: 0, marginRight: '6px' }}
         >
-          {saveState === 'saved' ? 'Saved' : ''}
+          {saveState === 'saved' ? '已保存' : ''}
         </span>
         <button
           type="button"
-          aria-label="Save"
-          title="Save settings"
+          aria-label="保存"
+          title="保存设置"
           onClick={handleSave}
           disabled={saveState === 'saving'}
           style={{
@@ -316,7 +316,7 @@ export function SettingsPage({
             opacity: saveState === 'saving' ? 0.72 : 1,
           }}
         >
-          {saveState === 'saved' ? 'Saved' : 'Save'}
+          {saveState === 'saved' ? '已保存' : '保存'}
         </button>
       </div>
 
@@ -365,9 +365,9 @@ export function SettingsPage({
         <SettingsGroup title="终端" defaultOpen>
 
         <div style={settingsSectionStyle()}>
-          <SettingsSectionTitle>Terminal Cache</SettingsSectionTitle>
+          <SettingsSectionTitle>终端缓存</SettingsSectionTitle>
           <div>
-            <div style={{ marginBottom: '8px', fontSize: '14px', fontWeight: 700 }}>Terminal Cache Lines</div>
+            <div style={{ marginBottom: '8px', fontSize: '14px', fontWeight: 700 }}>缓存行数</div>
             <input
               type="number"
               min={200}
@@ -388,7 +388,7 @@ export function SettingsPage({
         </div>
 
         <div style={settingsSectionStyle()}>
-          <SettingsSectionTitle>Terminal Width Mode</SettingsSectionTitle>
+          <SettingsSectionTitle>终端宽度模式</SettingsSectionTitle>
           <div style={{ fontSize: '13px', lineHeight: 1.6, color: settingsTheme.muted }}>
             `mirror-fixed` 保持 tmux / daemon 镜像宽度不变，只做本地裁切；`adaptive-phone` 会按手机屏宽请求 tmux 重新排版，只调整 cols，不改 rows。
           </div>
@@ -419,7 +419,7 @@ export function SettingsPage({
         </div>
 
         <div style={settingsSectionStyle()}>
-          <SettingsSectionTitle>Session Group Layout</SettingsSectionTitle>
+          <SettingsSectionTitle>会话组布局</SettingsSectionTitle>
           <div style={{ fontSize: '13px', lineHeight: 1.6, color: settingsTheme.muted }}>
             默认按宽高比决定：手机窄屏保持上下滚动；宽竖屏默认左右滚动。横屏始终左右滚动。
           </div>

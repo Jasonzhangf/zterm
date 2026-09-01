@@ -152,7 +152,7 @@ describe('SettingsPage Relay account configuration', () => {
     }, undefined));
     expect(onRelaySettingsChange).toHaveBeenCalledWith(relaySettings);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
       traversalRelay: relaySettings,
     }));
@@ -376,7 +376,7 @@ describe('SettingsPage Relay account configuration', () => {
 
     expect(screen.getByText('Confirmed Mac Studio')).toBeTruthy();
     expect(screen.queryByText('Stale LAN Mac')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
       servers: [],
       targetHost: '',
@@ -393,7 +393,7 @@ describe('SettingsPage Relay account configuration', () => {
     fireEvent.change(screen.getByLabelText('服务器认证令牌'), { target: { value: 'wterm-4123456' } });
     fireEvent.change(screen.getByLabelText('Daemon ID'), { target: { value: 'mac-studio' } });
     fireEvent.click(screen.getByRole('button', { name: '添加服务器' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
 
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
       servers: [
