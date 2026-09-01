@@ -1423,7 +1423,10 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
           width: msg.payload.capture.frameWidth,
           height: msg.payload.capture.frameHeight,
         });
-        resetFullscreenViewport();
+        // A remote window resize changes source geometry, not the user's
+        // local zoom intent. The viewport owner clamps the existing scale
+        // against the new frame on the next layout pass; resetting here
+        // snaps an active zoom gesture back to fill.
       }
       if (msg.payload.target) {
         const targetSessionId = activeSessionId?.trim() || '';
@@ -1441,7 +1444,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
         ));
       }
     });
-  }, [activeSessionId, onRemoteWindowMessage, rememberRemoteWindowCatalogTarget, resetFullscreenViewport]);
+  }, [activeSessionId, onRemoteWindowMessage, rememberRemoteWindowCatalogTarget]);
 
   useEffect(() => () => {
     lastReportedQuickBarSuppressionRef.current = false;

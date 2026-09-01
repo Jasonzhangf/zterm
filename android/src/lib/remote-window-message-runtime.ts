@@ -332,8 +332,8 @@ export function createRemoteWindowMessageRuntime(input?: {
     }
   };
 
-  const flushContinuousInput = (force = false) => {
-    if (!force && reliableInputInFlight) {
+  const flushContinuousInput = () => {
+    if (pendingContinuousInput.size === 0) {
       return false;
     }
     clearContinuousFlushTimer();
@@ -349,10 +349,8 @@ export function createRemoteWindowMessageRuntime(input?: {
     }
     const next = reliableInputQueue.shift();
     if (!next) {
-      flushContinuousInput();
       return;
     }
-    flushContinuousInput(true);
     reliableInputInFlight = next;
     sendRemoteWindowInputMessage(next);
     armReliableInputAckTimeout(next);
@@ -365,7 +363,7 @@ export function createRemoteWindowMessageRuntime(input?: {
   );
 
   const scheduleContinuousInputFlush = (streamId: string) => {
-    if (continuousFlushTimer !== null || reliableInputInFlight || reliableInputQueue.length > 0) {
+    if (continuousFlushTimer !== null) {
       return;
     }
     continuousFlushTimer = setTimeoutFn(() => {

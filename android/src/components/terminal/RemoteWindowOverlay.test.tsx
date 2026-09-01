@@ -1170,8 +1170,8 @@ describe('RemoteWindowOverlay', () => {
       purpose: 'focus',
       videoProfile: {
         preference: 'smooth',
-        maxBitrateBps: 2_000_000,
-        maxFrameRateFps: 30,
+        maxBitrateBps: 1_000_000,
+        maxFrameRateFps: 15,
         maxCaptureWidth: 960,
         maxCaptureHeight: 600,
         maxFrameAgeMs: 120,
@@ -1228,9 +1228,9 @@ describe('RemoteWindowOverlay', () => {
       expect(updateStreamQuality).toHaveBeenCalledWith('session-1', expect.objectContaining({
         videoProfile: expect.objectContaining({
           preference: 'smooth',
-          maxBitrateBps: 4_000_000,
+          maxBitrateBps: 2_000_000,
           maxFrameRateFps: 30,
-          maxCaptureWidth: 1280,
+          maxCaptureWidth: 960,
         }),
       }));
     }, { timeout: 5500 });
