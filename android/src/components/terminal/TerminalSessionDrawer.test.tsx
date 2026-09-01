@@ -181,6 +181,59 @@ describe('TerminalSessionDrawer', () => {
     expect(screen.queryByTestId('terminal-session-drawer-folder-menu')).toBeNull();
   });
 
+  it('opens folder preview from the pointer long press without a second touch timer', async () => {
+    vi.useFakeTimers();
+    const onPreviewFolder = vi.fn();
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={[{ ...sessions[0], cwd: '/Users/jason/projects/zterm' }]}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onPreviewFolder={onPreviewFolder}
+      />,
+    );
+
+    const folderButton = screen.getByTestId('terminal-session-drawer-folder-button-/Users/jason/projects/zterm');
+    fireEvent.pointerDown(folderButton, { pointerId: 1, pointerType: 'touch' });
+    await act(async () => {
+      vi.advanceTimersByTime(420);
+    });
+
+    expect(onPreviewFolder).toHaveBeenCalledOnce();
+    expect(onPreviewFolder).toHaveBeenCalledWith('/Users/jason/projects/zterm');
+    fireEvent.pointerUp(folderButton, { pointerId: 1, pointerType: 'touch' });
+    vi.useRealTimers();
+  });
+
+  it('cancels folder preview when the pointer moves before the long-press threshold', async () => {
+    vi.useFakeTimers();
+    const onPreviewFolder = vi.fn();
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={[{ ...sessions[0], cwd: '/Users/jason/projects/zterm' }]}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onPreviewFolder={onPreviewFolder}
+      />,
+    );
+
+    const folderButton = screen.getByTestId('terminal-session-drawer-folder-button-/Users/jason/projects/zterm');
+    fireEvent.pointerDown(folderButton, { pointerId: 1, pointerType: 'touch' });
+    fireEvent.pointerMove(folderButton, { pointerId: 1, pointerType: 'touch' });
+    await act(async () => {
+      vi.advanceTimersByTime(420);
+    });
+
+    expect(onPreviewFolder).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
   it('closes the session slot menu from the scrim or Escape', () => {
     render(
       <TerminalSessionDrawer

@@ -549,28 +549,6 @@ function TerminalSessionDrawerComponent({
                   setSlotMenu(null);
                   setFolderMenu({ cwd: folder.cwd, x: event.clientX, y: event.clientY });
                 }}
-                onTouchStart={(event) => {
-                  if (folderPointerGestureRef.current) {
-                    return;
-                  }
-                  const touch = event.touches[0];
-                  if (!touch) return;
-                  clearLongPressTimer();
-                  longPressTimerRef.current = window.setTimeout(() => {
-                    longPressTimerRef.current = null;
-                    suppressNextClickRef.current = true;
-                    setSlotMenu(null);
-                    onPreviewFolder?.(folder.cwd);
-                  }, 420);
-                }}
-                onTouchEnd={() => {
-                  folderPointerGestureRef.current = false;
-                  clearLongPressTimer();
-                }}
-                onTouchMove={() => {
-                  folderPointerGestureRef.current = false;
-                  clearLongPressTimer();
-                }}
                 onPointerDown={() => {
                   folderPointerGestureRef.current = true;
                   clearLongPressTimer();
