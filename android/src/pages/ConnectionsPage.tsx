@@ -238,7 +238,7 @@ export function ConnectionsPage({
                 zterm
               </h1>
               <div style={{ marginTop: '5px', display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
-                <HomeBadge>{`${orderedSavedConnections.length} servers`}</HomeBadge>
+                <HomeBadge>{`${orderedSavedConnections.length} 台服务器`}</HomeBadge>
                 {orderedActiveSessions.length > 0 ? <HomeBadge>{`${orderedActiveSessions.length} live`}</HomeBadge> : null}
               </div>
             </div>
@@ -355,8 +355,8 @@ export function ConnectionsPage({
             </div>
             <button
               type="button"
-              aria-label="Configure servers"
-              title="Configure servers"
+              aria-label="配置服务器"
+              title="配置服务器"
               onClick={onOpenSettings}
               style={{
                 width: '44px',
@@ -380,7 +380,7 @@ export function ConnectionsPage({
             <div
               data-testid="connections-empty-state"
               role="region"
-              aria-label="No configured servers yet"
+              aria-label="暂无已配置服务器"
               style={{
                 minHeight: '160px',
                 padding: '20px 18px',
@@ -396,17 +396,17 @@ export function ConnectionsPage({
               }}
             >
               <div style={{ fontSize: '15px', fontWeight: 850 }}>
-                <span>No configured servers</span>
+                <span>暂无已配置服务器</span>
                 <span aria-hidden="true"> · </span>
-                Configure your first server to start a terminal session
+                配置第一台服务器以开始终端会话
               </div>
               <div style={{ fontSize: '13px', color: mobileTheme.colors.lightMuted, lineHeight: 1.5, maxWidth: '28em' }}>
-                Add a Tailscale IP, a bridge host, or a Relay device so you can open or rejoin sessions from any device.
+                添加 Tailscale IP、桥接地址或 Relay 设备，即可从任意设备打开或重新加入 session。
               </div>
               <button
                 type="button"
-                aria-label="Add the first server"
-                title="Add server"
+                aria-label="添加第一台服务器"
+                title="添加服务器"
                 onClick={onOpenSettings}
                 style={{
                   marginTop: '6px',
@@ -426,7 +426,7 @@ export function ConnectionsPage({
                 }}
               >
                 <PlusGlyph />
-                Add server
+                添加服务器
               </button>
             </div>
           ) : (
