@@ -1544,7 +1544,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
 
     const targetSessionId = activeSessionId?.trim() || '';
     const requestSuffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const canvasStreamId = `rw-stream-canvas-${requestSuffix}`;
     const focusStreamId = `rw-stream-focus-${requestSuffix}`;
     pendingFocusStreamIdRef.current = focusStreamId;
     const previousCanvasStreamId = activeCanvasStreamIdRef.current;
@@ -1558,7 +1557,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     };
     const startingState = (current: RemoteWindowOverlayState) => beginRemoteWindowStreamSetup(
       selectEffectiveTarget(current),
-      canvasStreamId,
+      focusStreamId,
     );
     const stopStaleStream = (streamIdToStop: string, replacementStreamId: string) => {
       if (!stopStream || streamIdToStop === replacementStreamId) {
@@ -1587,7 +1586,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
           epoch: ++handoffEpochRef.current,
           previousStreamId,
           pendingStreamId: focusStreamId,
-          acceptedStreamIds: [canvasStreamId, focusStreamId],
+          acceptedStreamIds: [focusStreamId],
           targetId: target.streamTargetId,
           status: 'starting',
         };
@@ -1599,8 +1598,8 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
         restoreRetainedReceiverPlayback(previousVideoWasVisible);
         handoffVideoVisibilityRef.current = null;
       } else {
-        activeStreamIdRef.current = canvasStreamId;
-        setState((current) => failRemoteWindowStream(startingState(current), canvasStreamId, error));
+        activeStreamIdRef.current = focusStreamId;
+        setState((current) => failRemoteWindowStream(startingState(current), focusStreamId, error));
       }
       return;
     }
@@ -1610,7 +1609,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
           epoch: ++handoffEpochRef.current,
           previousStreamId,
           pendingStreamId: focusStreamId,
-          acceptedStreamIds: [canvasStreamId, focusStreamId],
+          acceptedStreamIds: [focusStreamId],
           targetId: target.streamTargetId,
           status: 'starting' as const,
         }
@@ -1620,8 +1619,8 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       activeHandoffRef.current = handoff;
       setState((current) => beginRemoteWindowStreamHandoff(current, handoff));
     } else {
-      activeStreamIdRef.current = canvasStreamId;
-      activeCanvasStreamIdRef.current = canvasStreamId;
+      activeStreamIdRef.current = focusStreamId;
+      activeCanvasStreamIdRef.current = null;
       activeFocusStreamIdRef.current = null;
       resetQualityApplyState();
       setState(startingState);
@@ -1635,13 +1634,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       purpose: 'focus',
     })
       .then((focusResult) => {
-        return { canvasResult: null, focusResult, focusError: null };
-      })
-      .then((dualResult) => {
-        if (!dualResult) {
-          return;
-        }
-        const { focusResult } = dualResult;
         const committedResult = focusResult;
         const committedStreamId = focusResult?.streamId ?? '';
         if (pendingFocusStreamIdRef.current === focusStreamId) {
@@ -1743,7 +1735,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
         if (pendingFocusStreamIdRef.current === focusStreamId) {
           pendingFocusStreamIdRef.current = null;
         }
-        setState((current) => failRemoteWindowStream(startingState(current), canvasStreamId, error));
+        setState((current) => failRemoteWindowStream(startingState(current), focusStreamId, error));
       });
   }, [
     activeSessionId,
