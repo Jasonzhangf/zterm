@@ -71,6 +71,19 @@ type PreviewSource =
   | { kind: "remote"; sourceIdentity: string; truncated: false }
   | { kind: "local"; sourcePath: string; sourceIdentity: string; truncated: boolean };
 
+function FileEntryGlyph({ type }: { type: FileEntry["type"] | LocalFileEntry["type"] }) {
+  const directory = type === "directory";
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ display: "block", flexShrink: 0 }}>
+      {directory ? (
+        <path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h5l2 2h8A1.5 1.5 0 0 1 21 8.5v8A1.5 1.5 0 0 1 19.5 18h-15A1.5 1.5 0 0 1 3 16.5z" />
+      ) : (
+        <path d="M6 3.5h8l4 4v13H6zM14 3.5v4h4" />
+      )}
+    </svg>
+  );
+}
+
 
 type FileSortField = "name" | "modified";
 type FileSortDirection = "asc" | "desc";
@@ -1383,9 +1396,7 @@ export function FileTransferSheet({
                       {selectedRemote.has(entry.name) ? "✓" : ""}
                     </button>
                   ) : null}
-                  <span style={{ fontSize: "16px", flexShrink: 0 }}>
-                    {entry.type === "directory" ? "📁" : "📄"}
-                  </span>
+                  <FileEntryGlyph type={entry.type} />
                   <span
                     style={{
                       flex: 1,
@@ -1820,9 +1831,7 @@ export function FileTransferSheet({
                 >
                   {selectedLocal.has(entry.name) ? "✓" : ""}
                 </button>
-                <span style={{ fontSize: "16px", flexShrink: 0 }}>
-                  {entry.type === "directory" ? "📁" : "📄"}
-                </span>
+                <FileEntryGlyph type={entry.type} />
                 <span
                   style={{
                     flex: 1,
