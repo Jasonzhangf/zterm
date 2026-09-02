@@ -3046,7 +3046,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
         ? fullscreenOverlayStyle
         : embedded ? embeddedOverlayStyle : floatingOverlayStyle}
     >
-      <RemoteWindowLockedToolbar
+      {(!embedded || state.mode === 'fullscreen') ? <RemoteWindowLockedToolbar
           ref={lockedToolbarRef}
           activeTitle={state.target.videoTarget.title || state.target.videoTarget.appBundleId}
           appSwitchContent={lockedAppSwitchContent}
@@ -3085,7 +3085,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
           onToggleAppSwitch={() => setAppSwitchOpen((current) => !current)}
           onToggleInputMode={handleToggleInputMode}
           onToggleMore={() => setStreamStatusOpen((current) => !current)}
-        />
+        /> : null}
       {lockedVideoGroupContent}
       {state.mode === 'floating' ? (
         <>
