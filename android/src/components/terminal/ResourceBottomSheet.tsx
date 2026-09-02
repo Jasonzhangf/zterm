@@ -153,11 +153,11 @@ export function ResourceBottomSheet({
         <div style={{ display: 'flex', justifyContent: 'center', padding: '10px 0 4px' }}>
           <span aria-hidden="true" style={{ width: 38, height: 4, borderRadius: 99, background: 'var(--zterm-panel-border)' }} />
         </div>
-        <header style={{ display: 'grid', gridTemplateColumns: '44px 1fr 96px', alignItems: 'center', gap: 8, padding: '8px 16px 14px', borderBottom: '1px solid var(--zterm-panel-border)' }}>
+        {tab !== 'stream' ? <header style={{ display: 'grid', gridTemplateColumns: '44px 1fr 96px', alignItems: 'center', gap: 8, padding: '8px 16px 14px', borderBottom: '1px solid var(--zterm-panel-border)' }}>
           <button type="button" aria-label="关闭资源抽屉" style={{ ...buttonStyle, width: 44, padding: 0, border: 0, borderRadius: 22, fontSize: 13 }} onClick={onClose}>收起</button>
           <div style={{ textAlign: 'center', fontSize: 22, fontWeight: 800, letterSpacing: '-0.02em' }}>预览</div>
           <button type="button" aria-label="下载当前资源" disabled={!onDownload} onClick={onDownload} style={{ ...buttonStyle, border: 0, background: 'var(--zterm-panel-surface)', fontSize: 16, opacity: onDownload ? 1 : 0.5 }}>下载</button>
-        </header>
+        </header> : null}
         <nav aria-label="资源类型" style={{ display: 'flex', gap: 6, padding: '10px 16px 8px' }}>
           {(['files', 'stream', 'web'] as const).map((item) => (
             <button

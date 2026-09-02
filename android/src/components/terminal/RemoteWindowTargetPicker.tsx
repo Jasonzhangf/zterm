@@ -69,7 +69,7 @@ export function RemoteWindowTargetPicker({
         boxShadow: 'none', backdropFilter: 'none',
       } : {}),
     }}>
-      <div style={styles.panelHeader}>
+      {!embedded ? <div style={styles.panelHeader}>
         <div>
           <div style={styles.panelTitle}>{browserOnly ? '浏览器窗口' : '远程窗口'}</div>
           <div style={styles.panelSubtitle}>
@@ -91,7 +91,7 @@ export function RemoteWindowTargetPicker({
             x
           </button>
         </div>
-      </div>
+      </div> : null}
       {phase === 'pickerOpen' && errorMessage ? (
         <div data-testid="remote-window-picker-error" style={styles.errorBox}>{errorMessage}</div>
       ) : null}
