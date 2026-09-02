@@ -19,6 +19,15 @@ describe('ResourceBottomSheet', () => {
     expect(renderFileBrowser).toHaveBeenLastCalledWith(false);
   });
 
+  it('hosts remote window streaming as the third resource surface', () => {
+    const renderRemoteWindow = vi.fn((open: boolean) => open ? <div data-testid="remote-stream">stream</div> : null);
+    render(<ResourceBottomSheet open renderFileBrowser={() => null} renderRemoteWindow={renderRemoteWindow} onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '窗口串流' }));
+    expect(screen.getByTestId('resource-stream-pane')).toBeTruthy();
+    expect(screen.getByTestId('remote-stream')).toBeTruthy();
+    expect(renderRemoteWindow).toHaveBeenLastCalledWith(true);
+  });
+
   it('accepts only http(s) URLs and renders the submitted page in a sandbox', () => {
     const onWebUrlChange = vi.fn();
     render(<ResourceBottomSheet open renderFileBrowser={() => null} onWebUrlChange={onWebUrlChange} onClose={vi.fn()} />);

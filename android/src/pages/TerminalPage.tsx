@@ -3710,10 +3710,10 @@ function TerminalPageComponent({
               onClose: handleCloseCopyMenu,
             }
           : null,
-        bottomProjection: (
+          bottomProjection: (
           <>
             {!sessionDrawerOpen && renderDebugConsole ? renderDebugConsole(debugOverlayProps) : null}
-            {renderRemoteWindow ? renderRemoteWindow({
+            {!fileTransferOpen && renderRemoteWindow ? renderRemoteWindow({
               activeSessionId: uiSessionId,
               appForegroundActive,
               streamInvalidation: remoteWindowStreamInvalidation,
@@ -3799,6 +3799,29 @@ function TerminalPageComponent({
           webUrl={resourceWebUrl}
           onWebUrlChange={setResourceWebUrl}
           onClose={() => setFileTransferOpen(false)}
+          renderRemoteWindow={(open) => open && renderRemoteWindow ? renderRemoteWindow({
+            activeSessionId: uiSessionId,
+            appForegroundActive,
+            streamInvalidation: remoteWindowStreamInvalidation,
+            requestTargets: onRequestRemoteWindowTargets,
+            startStream: onRequestRemoteWindowStreamStart,
+            updateStreamQuality: onUpdateRemoteWindowStreamQuality,
+            setBrowserUserAgentRequest: onSetRemoteWindowBrowserUserAgent,
+            updateFocus: onUpdateRemoteWindowFocus,
+            stopStream: onStopRemoteWindowStream,
+            requestScreenshot: handleRequestRemoteWindowScreenshot,
+            sendInput: onSendRemoteWindowInput,
+            resizeTargetWindow: onResizeRemoteWindowTarget,
+            onInputDebug: recordRemoteWindowInputDebug,
+            bottomInsetPx: terminalChromeBottomPx + terminalImeLiftPx,
+            bottomChromeInsetPx: terminalChromeBottomPx,
+            onOpenStateChange: handleRemoteWindowOverlayOpenStateChange,
+            onBodySubscriptionSuppressedChange: handleRemoteWindowBodySubscriptionSuppressedChange,
+            onInputContextChange: handleRemoteWindowInputContextChange,
+            onRequestKeyboard: handleRemoteWindowRequestKeyboard,
+            onVideoDebug: recordRemoteWindowVideoDebug,
+            onRemoteWindowMessage,
+          }) : null}
           renderFileBrowser={(open) => renderFileBrowser({
             open,
             remoteCwd: '',

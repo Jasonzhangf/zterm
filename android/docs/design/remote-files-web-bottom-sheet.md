@@ -2,9 +2,10 @@
 
 ## Goal
 
-Provide one bottom-up resource surface in the terminal page that hosts the
-existing remote file browser and a web-rendering pane without creating another
-transport or file-transfer implementation.
+Provide one responsive resource surface in the terminal page that hosts remote
+files, web rendering, and remote-window streaming without creating another
+transport or file-transfer implementation. Phones use a bottom drawer; tablets
+and desktop use a right-side drawer.
 
 ## Ownership and boundaries
 
@@ -18,12 +19,18 @@ transport or file-transfer implementation.
   issue terminal or file commands through the drawer.
 - The drawer is mounted by `TerminalPage`, above the terminal shell, and uses
   existing theme variables and bottom-sheet geometry tokens.
+- Remote-window streaming is rendered through the same resource surface. The
+  stream tab is the phone multi-window preview surface; on tablet/desktop the
+  right-side drawer can show the grouped stream layout and focus a selected
+  window. Existing stream transport and controller state remain authoritative.
 
 ## Interaction contract
 
 - Opening the file action opens the drawer on the Files tab.
-- Files and Web are sibling tabs; changing tabs does not recreate the terminal
+- Files, Stream, and Web are sibling tabs; changing tabs does not recreate the terminal
   session or transport.
+- Closing the drawer always returns to the exact terminal layout shown before
+  opening it; reopening starts from the resource tab selected by the entry.
 - Web URL navigation is explicit (submit/Go), rejects non-http(s) schemes, and
   preserves the last valid URL while showing an inline error for invalid input.
 - Backdrop, close button, and downward swipe close the drawer. Content scroll is

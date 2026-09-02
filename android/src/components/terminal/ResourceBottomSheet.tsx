@@ -1,14 +1,17 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode, type TouchEvent } from 'react';
 
-type ResourceTab = 'files' | 'web';
+type ResourceTab = 'files' | 'web' | 'stream';
+type ResourcePlacement = 'bottom' | 'end';
 
 export interface ResourceBottomSheetProps {
   open: boolean;
   renderFileBrowser: (open: boolean) => ReactNode;
+  renderRemoteWindow?: (open: boolean) => ReactNode;
   webUrl?: string;
   onWebUrlChange?: (url: string) => void;
   onClose: () => void;
   initialTab?: ResourceTab;
+  placement?: ResourcePlacement;
 }
 
 const SHEET_OVERLAY: React.CSSProperties = {
@@ -48,21 +51,38 @@ const buttonStyle: React.CSSProperties = {
 export function ResourceBottomSheet({
   open,
   renderFileBrowser,
+  renderRemoteWindow,
   webUrl = '',
   onWebUrlChange,
   onClose,
   initialTab = 'files',
+  placement,
 }: ResourceBottomSheetProps) {
   const [tab, setTab] = useState<ResourceTab>(initialTab);
   const [draftUrl, setDraftUrl] = useState(webUrl);
   const [submittedUrl, setSubmittedUrl] = useState(webUrl);
   const [urlError, setUrlError] = useState<string | null>(null);
+  const [responsivePlacement, setResponsivePlacement] = useState<ResourcePlacement>(() => (
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(min-width: 768px)').matches ? 'end' : 'bottom'
+  ));
   const touchStartY = useRef<number | null>(null);
 
   useEffect(() => {
     setDraftUrl(webUrl);
     setSubmittedUrl(webUrl);
   }, [webUrl]);
+
+  useEffect(() => {
+    if (placement) return;
+    if (typeof window.matchMedia !== 'function') return;
+    const media = window.matchMedia('(min-width: 768px)');
+    const update = () => setResponsivePlacement(media.matches ? 'end' : 'bottom');
+    update();
+    media.addEventListener?.('change', update);
+    return () => media.removeEventListener?.('change', update);
+  }, [placement]);
+
+  const resolvedPlacement = placement || responsivePlacement;
 
   const submitWebUrl = useCallback(() => {
     const value = draftUrl.trim();
@@ -92,6 +112,7 @@ export function ResourceBottomSheet({
   };
 
   const fileBrowserNode = renderFileBrowser(open && tab === 'files');
+  const remoteWindowNode = renderRemoteWindow?.(open && tab === 'stream');
 
   if (!open) {
     return (
@@ -104,7 +125,8 @@ export function ResourceBottomSheet({
   return (
     <div
       data-testid="resource-bottom-sheet-overlay"
-      style={SHEET_OVERLAY}
+      data-placement={resolvedPlacement}
+      style={{ ...SHEET_OVERLAY, alignItems: resolvedPlacement === 'end' ? 'stretch' : 'flex-end', justifyContent: resolvedPlacement === 'end' ? 'flex-end' : 'stretch' }}
       onClick={onClose}
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
@@ -114,7 +136,7 @@ export function ResourceBottomSheet({
         role="dialog"
         aria-modal="true"
         aria-label="资源"
-        style={SHEET}
+        style={{ ...SHEET, width: resolvedPlacement === 'end' ? 'min(560px, 94vw)' : '100%', height: resolvedPlacement === 'end' ? '100%' : SHEET.height, borderRadius: resolvedPlacement === 'end' ? '22px 0 0 22px' : SHEET.borderRadius, borderBottom: resolvedPlacement === 'end' ? '1px solid var(--zterm-panel-border)' : 0, borderRight: 0 }}
         onClick={(event) => event.stopPropagation()}
       >
         <div style={{ display: 'flex', justifyContent: 'center', padding: '10px 0 2px' }}>
@@ -125,7 +147,7 @@ export function ResourceBottomSheet({
           <button type="button" aria-label="关闭资源抽屉" style={buttonStyle} onClick={onClose}>关闭</button>
         </header>
         <nav aria-label="资源类型" style={{ display: 'flex', gap: 8, padding: '0 14px 10px' }}>
-          {(['files', 'web'] as const).map((item) => (
+          {(['files', 'stream', 'web'] as const).map((item) => (
             <button
               key={item}
               type="button"
@@ -138,13 +160,18 @@ export function ResourceBottomSheet({
               }}
               onClick={() => setTab(item)}
             >
-              {item === 'files' ? '远程文件' : '网页'}
+              {item === 'files' ? '远程文件' : item === 'stream' ? '窗口串流' : '网页'}
             </button>
           ))}
         </nav>
         <div style={{ minHeight: 0, flex: 1, display: tab === 'files' ? 'block' : 'none' }}>
           {fileBrowserNode}
         </div>
+        {tab === 'stream' ? (
+          <div data-testid="resource-stream-pane" style={{ minHeight: 0, flex: 1, position: 'relative', overflow: 'hidden' }}>
+            {remoteWindowNode || <div style={{ display: 'grid', placeItems: 'center', height: '100%', color: 'var(--zterm-panel-muted)' }}>窗口串流不可用</div>}
+          </div>
+        ) : null}
         {tab === 'web' ? (
           <div data-testid="resource-web-pane" style={{ minHeight: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 10, padding: '0 14px 14px' }}>
             <form onSubmit={(event) => { event.preventDefault(); submitWebUrl(); }} style={{ display: 'flex', gap: 8 }}>
