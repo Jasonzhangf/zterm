@@ -127,8 +127,9 @@ export function resolveAspectRect(
   const surfaceHeight = Math.max(1, surface.height);
   const sourceWidth = Math.max(1, source.width);
   const sourceHeight = Math.max(1, source.height);
-  void displayMode;
-  const scale = Math.min(surfaceWidth / sourceWidth, surfaceHeight / sourceHeight);
+  const scale = displayMode === 'fill'
+    ? Math.max(surfaceWidth / sourceWidth, surfaceHeight / sourceHeight)
+    : Math.min(surfaceWidth / sourceWidth, surfaceHeight / sourceHeight);
   const width = sourceWidth * scale;
   const height = sourceHeight * scale;
   return {
