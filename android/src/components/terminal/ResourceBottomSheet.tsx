@@ -18,7 +18,8 @@ export interface ResourceBottomSheetProps {
 const SHEET_OVERLAY: React.CSSProperties = {
   position: 'fixed',
   inset: 0,
-  zIndex: 94,
+  // Keep the stream controller's own media layer above the drawer chrome.
+  zIndex: 40,
   display: 'flex',
   alignItems: 'flex-end',
   background: 'var(--zterm-sheet-overlay)',
@@ -171,7 +172,7 @@ export function ResourceBottomSheet({
           {fileBrowserNode}
         </div>
         {tab === 'stream' ? (
-          <div data-testid="resource-stream-pane" style={{ minHeight: 0, flex: 1, position: 'relative', overflow: 'hidden' }}>
+          <div data-testid="resource-stream-pane" style={{ minHeight: 0, flex: 1, position: 'relative', overflow: 'visible' }}>
             {remoteWindowNode || <div style={{ display: 'grid', placeItems: 'center', height: '100%', color: 'var(--zterm-panel-muted)' }}>窗口串流不可用</div>}
           </div>
         ) : null}

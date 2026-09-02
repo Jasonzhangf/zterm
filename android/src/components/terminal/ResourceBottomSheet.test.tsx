@@ -25,6 +25,7 @@ describe('ResourceBottomSheet', () => {
     fireEvent.click(screen.getByRole('button', { name: '窗口串流' }));
     expect(screen.getByTestId('resource-stream-pane')).toBeTruthy();
     expect(screen.getByTestId('remote-stream')).toBeTruthy();
+    expect((screen.getByTestId('resource-bottom-sheet-overlay') as HTMLElement).style.zIndex).toBe('40');
     expect(renderRemoteWindow).toHaveBeenLastCalledWith(true);
   });
 
