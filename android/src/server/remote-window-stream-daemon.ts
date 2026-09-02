@@ -216,24 +216,12 @@ interface ActiveRemoteWindowStream extends Omit<RemoteWindowStreamSessionResourc
   reliableInputTail: Promise<void>;
   reliableInputInFlightBySequence: Map<string, Promise<RemoteWindowInputAckMessage>>;
   reliableInputCompletedBySequence: Map<string, RemoteWindowInputAckMessage>;
-  pendingContinuousMove: PendingRemoteWindowContinuousInput | null;
-  pendingContinuousScroll: PendingRemoteWindowContinuousInput | null;
-  continuousInputDrainScheduled: boolean;
-  continuousInputDrainActive: boolean;
+  continuousGestureState: Map<string, { lastSampledAtMs: number; ended: boolean }>;
 }
 
 interface RemoteWindowInputAckMessage {
   control: RemoteWindowInputAckControl;
   payload: RemoteWindowInputResultPayload;
-}
-
-interface PendingRemoteWindowContinuousInput {
-  payload: RemoteWindowInputEventPayload;
-  daemonReceivedAtMs: number;
-  waiters: Array<{
-    control: RemoteWindowInputDeliveryControl;
-    resolve: (message: RemoteWindowInputAckMessage | null) => void;
-  }>;
 }
 
 interface RemoteWindowPendingMediaFrame {
@@ -507,12 +495,9 @@ export function createRemoteWindowStreamDaemonRuntime(
     markStreamClosed(entry.streamId);
     entry.pendingFocusFrame = null;
     entry.pendingOverviewFrame = null;
-    entry.pendingContinuousMove?.waiters.forEach((waiter) => waiter.resolve(null));
-    entry.pendingContinuousScroll?.waiters.forEach((waiter) => waiter.resolve(null));
-    entry.pendingContinuousMove = null;
-    entry.pendingContinuousScroll = null;
     entry.reliableInputInFlightBySequence.clear();
     entry.reliableInputCompletedBySequence.clear();
+    entry.continuousGestureState.clear();
     releaseRemoteWindowStreamSessionResources({
       ...entry,
       sendStatus: entry.handlers.sendStatus,
@@ -783,10 +768,7 @@ export function createRemoteWindowStreamDaemonRuntime(
         reliableInputTail: Promise.resolve(),
         reliableInputInFlightBySequence: new Map(),
         reliableInputCompletedBySequence: new Map(),
-        pendingContinuousMove: null,
-        pendingContinuousScroll: null,
-        continuousInputDrainScheduled: false,
-        continuousInputDrainActive: false,
+        continuousGestureState: new Map(),
       };
       pendingIceCandidatesByStream.delete(iceGenerationKey(payload.streamId, payload.requestId));
       pendingIceCandidatesByStream.delete(payload.streamId);
@@ -1460,6 +1442,9 @@ export function createRemoteWindowStreamDaemonRuntime(
     const continuous = payload.event.kind === 'scroll'
       || (payload.event.kind === 'pointer' && payload.event.phase === 'move');
     const expectedLane = continuous ? 'continuous' : 'reliable';
+    if (payload.deliveryKind !== undefined && payload.deliveryKind !== (continuous ? 'sample' : 'action')) {
+      throw new Error(`remote window input delivery kind mismatch: expected ${continuous ? 'sample' : 'action'}`);
+    }
     if (control.lane !== expectedLane) {
       throw new Error(`remote window input delivery lane mismatch: expected ${expectedLane}`);
     }
@@ -1521,51 +1506,6 @@ export function createRemoteWindowStreamDaemonRuntime(
     }
   };
 
-  const drainContinuousInput = async (entry: ActiveRemoteWindowStream) => {
-    if (entry.continuousInputDrainActive || !isCurrentStream(entry)) {
-      return;
-    }
-    entry.continuousInputDrainScheduled = false;
-    entry.continuousInputDrainActive = true;
-    const pending = [entry.pendingContinuousMove, entry.pendingContinuousScroll].filter(
-      (item): item is PendingRemoteWindowContinuousInput => item !== null,
-    );
-    entry.pendingContinuousMove = null;
-    entry.pendingContinuousScroll = null;
-    for (const item of pending) {
-      if (!isCurrentStream(entry) || nowMs() - item.daemonReceivedAtMs > entry.maxFrameAgeMs) {
-        item.waiters.forEach((waiter) => waiter.resolve(null));
-        continue;
-      }
-      try {
-        await executeInput(entry, item.payload, item.waiters[item.waiters.length - 1]!.control, item.daemonReceivedAtMs);
-        item.waiters.forEach((waiter) => waiter.resolve(null));
-      } catch (error) {
-        item.waiters.forEach((waiter) => waiter.resolve(buildInputAck(waiter.control, item.payload, {
-          accepted: false,
-          error: {
-            code: 'remote_window_input_failed',
-            message: error instanceof Error ? error.message : 'remote window input failed',
-          },
-        })));
-      }
-    }
-    entry.continuousInputDrainActive = false;
-    if (isCurrentStream(entry) && (entry.pendingContinuousMove || entry.pendingContinuousScroll)) {
-      scheduleContinuousInputDrain(entry);
-    }
-  };
-
-  const scheduleContinuousInputDrain = (entry: ActiveRemoteWindowStream) => {
-    if (entry.continuousInputDrainScheduled || entry.continuousInputDrainActive) {
-      return;
-    }
-    entry.continuousInputDrainScheduled = true;
-    setImmediate(() => {
-      void drainContinuousInput(entry);
-    });
-  };
-
   async function injectInput(
     payload: RemoteWindowInputEventPayload,
     control: RemoteWindowInputDeliveryControl,
@@ -1592,31 +1532,55 @@ export function createRemoteWindowStreamDaemonRuntime(
       });
     }
     const daemonReceivedAtMs = nowMs();
-    if (control.lane === 'continuous') {
-      return new Promise<RemoteWindowInputAckMessage | null>((resolve) => {
-        const waiter = { control, resolve };
-        if (payload.event.kind === 'scroll') {
-          const current = entry.pendingContinuousScroll;
-          entry.pendingContinuousScroll = current && current.payload.event.kind === 'scroll'
-            ? {
-                payload: {
-                  ...payload,
-                  event: {
-                    ...payload.event,
-                    deltaX: current.payload.event.deltaX + payload.event.deltaX,
-                    deltaY: current.payload.event.deltaY + payload.event.deltaY,
-                  },
-                },
-                daemonReceivedAtMs: current.daemonReceivedAtMs,
-                waiters: [...current.waiters, waiter],
-              }
-            : { payload, daemonReceivedAtMs, waiters: [waiter] };
-        } else {
-          entry.pendingContinuousMove?.waiters.forEach((pendingWaiter) => pendingWaiter.resolve(null));
-          entry.pendingContinuousMove = { payload, daemonReceivedAtMs, waiters: [waiter] };
-        }
-        scheduleContinuousInputDrain(entry);
+    if (
+      payload.deliveryKind === 'action'
+      && Number.isFinite(payload.deadlineMs)
+      && daemonReceivedAtMs > Number(payload.deadlineMs)
+    ) {
+      return buildInputAck(control, payload, {
+        accepted: false,
+        error: {
+          code: 'remote_window_input_action_expired',
+          message: 'Remote window input action expired before admission',
+        },
       });
+    }
+    if (control.lane === 'continuous') {
+      if (payload.event.kind === 'scroll' && payload.event.gestureId && Number.isFinite(payload.sampledAtMs)) {
+        const phase = payload.event.phase;
+        const previous = entry.continuousGestureState.get(payload.event.gestureId);
+        if (previous && (previous.ended || Number(payload.sampledAtMs) < previous.lastSampledAtMs)) {
+          return null;
+        }
+        if (phase === 'start' && previous) {
+          return null;
+        }
+        if (phase === 'update' && previous?.ended) {
+          return null;
+        }
+        entry.continuousGestureState.set(payload.event.gestureId, {
+          lastSampledAtMs: Math.max(previous?.lastSampledAtMs ?? Number(payload.sampledAtMs), Number(payload.sampledAtMs)),
+          ended: phase === 'end',
+        });
+      }
+      try {
+        const result = await executeInput(entry, payload, control, daemonReceivedAtMs);
+        return buildInputAck(control, payload, {
+          accepted: true,
+          result: {
+            ...(result.target ? { target: result.target } : {}),
+            ...(result.capture ? { capture: result.capture } : {}),
+          },
+        });
+      } catch (error) {
+        return buildInputAck(control, payload, {
+          accepted: false,
+          error: {
+            code: 'remote_window_input_failed',
+            message: error instanceof Error ? error.message : 'remote window input failed',
+          },
+        });
+      }
     }
     const completed = entry.reliableInputCompletedBySequence.get(control.sequence);
     if (completed) {

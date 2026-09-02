@@ -61,6 +61,37 @@ function clickPayload(overrides: Partial<RemoteWindowInputEventPayload> = {}): R
 }
 
 describe('remote window input policy owner', () => {
+  it('accepts explicit sample metadata and rejects sample/action mixing', () => {
+    expect(() => validateRemoteWindowInputPayload({
+      ...clickPayload(),
+      deliveryKind: 'sample',
+      sampledAtMs: 100,
+      event: {
+        kind: 'pointer',
+        phase: 'move',
+        pointerId: 1,
+        button: 'none',
+        buttons: 0,
+        x: 100,
+        y: 100,
+        normalizedX: 0.5,
+        normalizedY: 0.5,
+      },
+    }, { targetId: target.streamTargetId, target, canvasLayout: layout })).not.toThrow();
+    expect(() => validateRemoteWindowInputPayload({
+      ...clickPayload(),
+      deliveryKind: 'sample',
+      sampledAtMs: 100,
+      deadlineMs: 200,
+    }, { targetId: target.streamTargetId, target, canvasLayout: layout })).toThrow('cannot carry');
+    expect(() => validateRemoteWindowInputPayload({
+      ...clickPayload(),
+      deliveryKind: 'action',
+      sampledAtMs: 200,
+      deadlineMs: 100,
+    }, { targetId: target.streamTargetId, target, canvasLayout: layout })).toThrow('precedes');
+  });
+
   it('accepts current-generation coordinate input and generation-independent key input', () => {
     expect(() => validateRemoteWindowInputPayload(clickPayload(), {
       targetId: target.streamTargetId,

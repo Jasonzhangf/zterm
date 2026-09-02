@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   createRemoteWindowMessageRuntime,
   isRemoteWindowControlMessage,
-  REMOTE_WINDOW_INPUT_QUALITY_FLUSH_INTERVAL_MS,
   REMOTE_WINDOW_INPUT_RELIABLE_ACK_TIMEOUT_MS,
   REMOTE_WINDOW_STREAM_START_REQUEST_TIMEOUT_MS,
   REMOTE_WINDOW_TARGETS_REQUEST_TIMEOUT_MS,
@@ -730,7 +729,7 @@ describe('remote window message runtime', () => {
     expect(listener).toHaveBeenCalledTimes(2);
   });
 
-  it('coalesces 120Hz continuous scroll into one smooth-profile delivery frame', () => {
+  it('admits every continuous scroll sample immediately without caching', () => {
     const sendSocketPayload = vi.fn();
     const timers: Array<{ callback: () => void; delay: number }> = [];
     const runtime = createRemoteWindowMessageRuntime({
@@ -765,13 +764,10 @@ describe('remote window message runtime', () => {
       runtime.sendInputEvent('session-1', options);
     }
 
-    expect(sendSocketPayload).not.toHaveBeenCalled();
-    expect(timers).toHaveLength(1);
-    expect(timers[0]!.delay).toBeGreaterThanOrEqual(22);
-    timers[0]!.callback();
-    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
+    expect(sendSocketPayload).toHaveBeenCalledTimes(120);
+    expect(timers).toHaveLength(0);
     const sent = JSON.parse(sendSocketPayload.mock.calls[0]![2] as string);
-    expect(sent).toEqual({
+    expect(sent).toMatchObject({
       type: 'remote-window-input',
       control: {
         version: 1,
@@ -784,8 +780,9 @@ describe('remote window message runtime', () => {
         ...options.payload,
         event: {
           ...options.payload.event,
-          deltaY: 120,
         },
+        deliveryKind: 'sample',
+        sampledAtMs: 100,
       },
     });
     expect(sent.payload).not.toHaveProperty('requestId');
@@ -880,7 +877,7 @@ describe('remote window message runtime', () => {
     expect(release.control.sequence).not.toBe(first.control.sequence);
   });
 
-  it('flushes continuous gestures independently while a reliable barrier is awaiting ACK', () => {
+  it('sends continuous gestures independently while a reliable barrier is awaiting ACK', () => {
     const sendSocketPayload = vi.fn();
     const timers: Array<{ callback: () => void; delay: number }> = [];
     const runtime = createRemoteWindowMessageRuntime({
@@ -929,8 +926,7 @@ describe('remote window message runtime', () => {
       },
     });
 
-    expect(timers).toHaveLength(2);
-    timers.find((timer) => timer.delay < REMOTE_WINDOW_INPUT_RELIABLE_ACK_TIMEOUT_MS)!.callback();
+    expect(timers).toHaveLength(1);
     expect(sendSocketPayload).toHaveBeenCalledTimes(2);
     const continuous = JSON.parse(sendSocketPayload.mock.calls[1]![2] as string);
     expect(continuous.control.lane).toBe('continuous');
@@ -1002,7 +998,7 @@ describe('remote window message runtime', () => {
     expect(barrier.control.sequence).not.toBe(first.control.sequence);
   });
 
-  it('keeps only the latest pointer move and uses the quality cadence', () => {
+  it('sends pointer samples immediately at the independent input cadence', () => {
     const sendSocketPayload = vi.fn();
     const timers: Array<{ callback: () => void; delay: number }> = [];
     const runtime = createRemoteWindowMessageRuntime({
@@ -1045,11 +1041,9 @@ describe('remote window message runtime', () => {
       });
     }
 
-    const flushTimer = timers.find((timer) => timer.delay === REMOTE_WINDOW_INPUT_QUALITY_FLUSH_INTERVAL_MS);
-    expect(flushTimer).toBeDefined();
-    flushTimer!.callback();
-    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
-    const sent = JSON.parse(sendSocketPayload.mock.calls[0]![2] as string);
+    expect(timers).toHaveLength(1);
+    expect(sendSocketPayload).toHaveBeenCalledTimes(10);
+    const sent = JSON.parse(sendSocketPayload.mock.calls[9]![2] as string);
     expect(sent.control.lane).toBe('continuous');
     expect(sent.payload.event).toMatchObject({ kind: 'pointer', phase: 'move', x: 10, y: 20 });
   });
@@ -1121,8 +1115,8 @@ describe('remote window message runtime', () => {
       },
     });
 
-    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
-    const reliable = JSON.parse(sendSocketPayload.mock.calls[0]![2] as string);
+    expect(sendSocketPayload).toHaveBeenCalledTimes(2);
+    const reliable = JSON.parse(sendSocketPayload.mock.calls[1]![2] as string);
     expect(reliable.control.lane).toBe('reliable');
     expect(reliable.payload.event.kind).toBe('close-window');
   });

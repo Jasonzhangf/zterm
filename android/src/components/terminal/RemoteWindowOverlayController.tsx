@@ -73,6 +73,7 @@ import {
   resolveRemoteWindowTouchPointerDownRuntime,
   resolveRemoteWindowTouchPointerMoveRuntime,
   resolveRemoteWindowTouchPointerUpRuntime,
+  resolveRemoteWindowTouchLongPressRuntime,
   resolveRemoteWindowTouchSurfacePointRuntime,
   REMOTE_WINDOW_LONG_PRESS_MS,
   type RemoteWindowTouchInputDebugEvent,
@@ -1984,7 +1985,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     setFullscreenViewport,
     state,
   ]);
-
   const applyRemoteWindowTouchPointerResult = useCallback((
     result: {
       nextState: RemoteWindowTouchPointerState;
@@ -2002,7 +2002,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       dispatchRemoteWindowInputEvents(result.remoteEvents);
     }
   }, [applyRemoteWindowTouchLocalEffect, dispatchRemoteWindowInputEvents]);
-
   const handleLongPressTimer = useCallback(() => {
     longPressTimerRef.current = null;
     const gesture = surfaceGestureRef.current;
@@ -2020,20 +2019,19 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
           geometry,
           button: 'right',
         });
-        if (rightClick) {
-          dispatchRemoteWindowInputEvents([rightClick]);
-        }
-        surfaceGestureRef.current = {
-          mode: 'actionLongPress',
-          pointerId: gesture.pointerId,
-          startClientX: gesture.startClientX,
-          startClientY: gesture.startClientY,
-          startAtMs: gesture.startAtMs,
-        };
+        if (rightClick) dispatchRemoteWindowInputEvents([rightClick]);
+        surfaceGestureRef.current = { mode: 'actionLongPress', pointerId: gesture.pointerId, startClientX: gesture.startClientX, startClientY: gesture.startClientY, startAtMs: gesture.startAtMs };
       }
+    } else if (gesture.mode === 'pan') {
+      const runtimeGesture = toRemoteWindowTouchGestureState(gesture);
+      if (runtimeGesture.mode !== 'localPan') return;
+      const geometry = resolveSurfaceInputGeometry();
+      if (!geometry) return;
+      const result = resolveRemoteWindowTouchLongPressRuntime({ state: runtimeGesture, geometry });
+      surfaceGestureRef.current = toOverlayTouchGesture(result.nextState, fullscreenViewportRef.current, surfaceLocalPanStartRef.current);
+      if (result.remoteEvents.length > 0) dispatchRemoteWindowInputEvents(result.remoteEvents);
     }
   }, [dispatchRemoteWindowInputEvents, resolveSurfaceInputGeometry]);
-
   const handleVideoSurfacePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (state.phase !== 'targetLocked') {
       return;
@@ -2263,7 +2261,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
           invertGestureDirection: touchScrollInvertedRef.current,
         });
         // 拖动已转移（滚动/拖拽）→ 取消长按
-        if (result.nextState.mode !== 'actionPending' && result.nextState.mode !== 'idle') {
+        if (result.nextState.mode !== 'actionPending' && result.nextState.mode !== 'idle' && result.nextState.mode !== 'localPan') {
           clearLongPressTimer();
         }
         applyRemoteWindowTouchPointerResult(result);

@@ -14,7 +14,7 @@ This is the canonical touch/action gate for the Android remote-window overlay.
    pixel scroll at both 1x and zoomed scale; pointer-up emits no swipe replay.
 4. Movement after a 250 ms hold commits to reliable remote drag
    (`down -> move* -> up`) at both 1x and zoomed scale.
-5. A stationary 500 ms hold emits one right click; release emits no duplicate.
+5. Unzoomed stationary 500 ms hold emits one right click; release emits no duplicate. Zoomed stationary 500 ms single-finger hold promotes to one reliable left-button drag; zoomed tap/movement remains local-only.
 6. Two-finger same-direction motion is realtime remote scroll at 1x and local
    canvas pan while zoomed. Anti-parallel distance change is local pinch zoom.
 7. Zoomed pointer-down does not pre-commit local pan. Gesture modes latch once

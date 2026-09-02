@@ -572,6 +572,11 @@ export interface RemoteWindowStreamQualityResultPayload {
 export interface RemoteWindowInputEventPayload {
   streamId: string;
   targetId: string;
+  /** Business input class. Sample timestamps are client monotonic time, not send time. */
+  deliveryKind?: 'action' | 'sample';
+  sampledAtMs?: number;
+  /** Action expiry deadline in the client's monotonic clock domain. */
+  deadlineMs?: number;
   /** Required for composite-canvas input; daemon rejects stale/missing generations. */
   layoutGeneration?: number;
   event:
@@ -602,6 +607,8 @@ export interface RemoteWindowInputEventPayload {
       }
     | {
         kind: 'scroll';
+        phase?: 'start' | 'update' | 'end';
+        gestureId?: string;
         unit: 'pixel';
         deltaX: number;
         deltaY: number;
@@ -653,6 +660,28 @@ export interface RemoteWindowInputEventPayload {
         metaKey?: boolean;
       };
 }
+
+export type RemoteWindowTimedGestureActionPayload = Omit<
+  RemoteWindowInputEventPayload,
+  'deliveryKind' | 'sampledAtMs' | 'deadlineMs'
+> & {
+  deliveryKind: 'action';
+  sampledAtMs: number;
+  deadlineMs: number;
+};
+
+export type RemoteWindowContinuousSamplePayload = Omit<
+  RemoteWindowInputEventPayload,
+  'deliveryKind' | 'sampledAtMs' | 'deadlineMs'
+> & {
+  deliveryKind: 'sample';
+  sampledAtMs: number;
+  deadlineMs?: never;
+};
+
+export type RemoteWindowInputDeliveryPayload =
+  | RemoteWindowTimedGestureActionPayload
+  | RemoteWindowContinuousSamplePayload;
 
 export interface RemoteWindowInputDeliveryControl {
   version: 1;

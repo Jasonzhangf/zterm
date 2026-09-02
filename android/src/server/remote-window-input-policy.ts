@@ -57,6 +57,28 @@ export function validateRemoteWindowInputPayload(
   }
 
   const event = payload.event;
+  if (payload.deliveryKind === 'sample') {
+    if (!Number.isFinite(payload.sampledAtMs)) {
+      throw new Error('remote window input sample timestamp is invalid');
+    }
+    if (payload.deadlineMs !== undefined) {
+      throw new Error('remote window input sample cannot carry an action deadline');
+    }
+    if (event.kind !== 'scroll' && !(event.kind === 'pointer' && event.phase === 'move')) {
+      throw new Error('remote window input sample event kind is invalid');
+    }
+    if (event.kind === 'scroll' && (!event.phase || !event.gestureId?.trim())) {
+      throw new Error('remote window scroll sample lifecycle is invalid');
+    }
+  }
+  if (payload.deliveryKind === 'action') {
+    if (!Number.isFinite(payload.sampledAtMs) || !Number.isFinite(payload.deadlineMs)) {
+      throw new Error('remote window input action timestamp or deadline is invalid');
+    }
+    if (Number(payload.deadlineMs) < Number(payload.sampledAtMs)) {
+      throw new Error('remote window input action deadline precedes sample timestamp');
+    }
+  }
   if (event.kind === 'focus') {
     return;
   }

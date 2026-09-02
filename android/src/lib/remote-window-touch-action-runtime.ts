@@ -64,6 +64,7 @@ export type RemoteWindowTouchPointerState =
       lastClientX: number;
       lastClientY: number;
       startAtMs: number;
+      scrollGestureId?: string;
     }
   | {
       mode: 'actionLongPress';
@@ -109,6 +110,7 @@ export type RemoteWindowTouchPointerState =
       lastMidX: number;
       lastMidY: number;
       startedAtMs: number;
+      scrollGestureId?: string;
       committed: true;
     }
   | {
@@ -145,6 +147,9 @@ export type RemoteWindowTouchPointerState =
       pointerId: number;
       startClientX: number;
       startClientY: number;
+      startAtMs: number;
+      lastClientX: number;
+      lastClientY: number;
       moved: boolean;
     };
 
@@ -605,6 +610,9 @@ export function resolveRemoteWindowTouchPointerDownRuntime(options: {
       pointerId: pointer.pointerId,
       startClientX: pointer.clientX,
       startClientY: pointer.clientY,
+      startAtMs: pointer.timeMs,
+      lastClientX: pointer.clientX,
+      lastClientY: pointer.clientY,
       moved: false,
     }, {
       kind: 'local-pan-start',
@@ -694,10 +702,13 @@ export function resolveRemoteWindowTouchPointerMoveRuntime(options: {
         lastClientX: pointer.clientX,
         lastClientY: pointer.clientY,
         startAtMs: state.startAtMs,
+        scrollGestureId: `scroll-${state.pointerId}-${state.startAtMs}`,
       };
       const point = resolveRemoteWindowTouchSurfacePointRuntime(options.geometry, pointer.clientX, pointer.clientY);
       return withRemoteEvents(nextState, point && (deltaX !== 0 || deltaY !== 0) ? [{
         kind: 'scroll',
+        phase: 'start',
+        gestureId: nextState.scrollGestureId,
         unit: 'pixel',
         deltaX,
         deltaY,
@@ -779,6 +790,8 @@ export function resolveRemoteWindowTouchPointerMoveRuntime(options: {
       nextState,
       [{
         kind: 'scroll',
+        phase: 'update',
+        ...(state.scrollGestureId ? { gestureId: state.scrollGestureId } : {}),
         unit: 'pixel',
         deltaX,
         deltaY,
@@ -823,6 +836,8 @@ export function resolveRemoteWindowTouchPointerMoveRuntime(options: {
     return withLocalEffect(
       {
         ...state,
+        lastClientX: pointer.clientX,
+        lastClientY: pointer.clientY,
         moved,
       },
       {
@@ -836,6 +851,41 @@ export function resolveRemoteWindowTouchPointerMoveRuntime(options: {
   }
 
   return emptyResult(state, false);
+}
+
+export function resolveRemoteWindowTouchLongPressRuntime(options: {
+  state: RemoteWindowTouchPointerState;
+  geometry: RemoteWindowTouchSurfaceGeometry;
+}): RemoteWindowTouchPointerRuntimeResult {
+  if (options.state.mode !== 'localPan' || options.state.moved) {
+    return emptyResult(options.state, true);
+  }
+  const state = options.state;
+  const downEvent = buildRemoteWindowPointerInputEventRuntime({
+    pointer: {
+      pointerId: state.pointerId,
+      pointerType: 'touch',
+      clientX: state.startClientX,
+      clientY: state.startClientY,
+      button: 0,
+      buttons: 1,
+      timeMs: state.startAtMs,
+    },
+    geometry: options.geometry,
+    phase: 'down',
+    button: 'left',
+    buttons: 1,
+  });
+  return withRemoteEvents({
+    mode: 'actionDrag',
+    pointerId: state.pointerId,
+    button: 'left',
+    startClientX: state.startClientX,
+    startClientY: state.startClientY,
+    lastClientX: state.lastClientX,
+    lastClientY: state.lastClientY,
+    startAtMs: state.startAtMs,
+  }, downEvent ? [downEvent] : []);
 }
 
 export function resolveRemoteWindowTouchPointerUpRuntime(options: {
@@ -870,8 +920,20 @@ export function resolveRemoteWindowTouchPointerUpRuntime(options: {
   }
 
   if (state.mode === 'actionScroll' && state.pointerId === pointer.pointerId) {
-    // 单指滚动已增量注入，抬起收尾
-    return emptyResult(idle, true);
+    const point = resolveRemoteWindowTouchSurfacePointRuntime(geometry, pointer.clientX, pointer.clientY);
+    return withRemoteEvents(
+      idle,
+      point ? [{
+        kind: 'scroll',
+        phase: 'end',
+        ...(state.scrollGestureId ? { gestureId: state.scrollGestureId } : {}),
+        unit: 'pixel',
+        deltaX: 0,
+        deltaY: 0,
+        ...point,
+        moveCursor: false,
+      }] : [],
+    );
   }
 
   if (state.mode === 'actionDrag' && state.pointerId === pointer.pointerId) {
@@ -889,29 +951,12 @@ export function resolveRemoteWindowTouchPointerUpRuntime(options: {
   }
 
   if (state.mode === 'localPan' && state.pointerId === pointer.pointerId) {
-    if (!state.moved) {
-      return {
-        nextState: idle,
-        remoteEvents: buildClickAtPointEvents({
-          pointerId: state.pointerId,
-          clientX: pointer.clientX,
-          clientY: pointer.clientY,
-          geometry,
-        }),
-        localEffect: {
-          kind: 'local-pan-end',
-          pointerId: state.pointerId,
-          moved: false,
-        },
-        consumed: true,
-      };
-    }
     return withLocalEffect(
       idle,
       {
         kind: 'local-pan-end',
         pointerId: state.pointerId,
-        moved: true,
+        moved: state.moved,
       },
     );
   }
@@ -969,6 +1014,8 @@ function buildRemoteWindowTwoFingerScrollEventsRuntime(options: {
   rawDeltaY: number;
   scrollFraction: number;
   inverted: boolean;
+  phase?: 'start' | 'update' | 'end';
+  gestureId?: string;
 }): Array<RemoteWindowInputEventPayload['event']> {
   const { deltaX, deltaY } = resolveRemoteWindowPairScrollDeltaRuntime({
     rawDeltaX: options.rawDeltaX,
@@ -997,6 +1044,8 @@ function buildRemoteWindowTwoFingerScrollEventsRuntime(options: {
   }
   return [{
     kind: 'scroll',
+    ...(options.phase ? { phase: options.phase } : {}),
+    ...(options.gestureId ? { gestureId: options.gestureId } : {}),
     unit: 'pixel',
     deltaX,
     deltaY,
@@ -1229,6 +1278,8 @@ export function resolveRemoteWindowTouchPairPointerMoveRuntime(options: RemoteWi
       rawDeltaY: midpointDeltaY,
       scrollFraction: scrollFraction ?? REMOTE_WINDOW_TOUCH_SCROLL_DEFAULT_FRACTION,
       inverted: invertGestureDirection ?? false,
+      phase: 'update',
+      gestureId: state.scrollGestureId,
     });
     const scrollEffect: RemoteWindowTouchLocalEffect = events.length > 0
       ? {
@@ -1350,6 +1401,8 @@ export function resolveRemoteWindowTouchPairPointerMoveRuntime(options: RemoteWi
       rawDeltaY: midpointDeltaY,
       scrollFraction: scrollFraction ?? REMOTE_WINDOW_TOUCH_SCROLL_DEFAULT_FRACTION,
       inverted: invertGestureDirection ?? false,
+      phase: 'start',
+      gestureId: `scroll-${state.firstPointerId}-${state.startedAtMs}`,
     });
     if (options.panEnabled) {
       return {
@@ -1390,6 +1443,7 @@ export function resolveRemoteWindowTouchPairPointerMoveRuntime(options: RemoteWi
         lastMidX: midpoint.clientX,
         lastMidY: midpoint.clientY,
         startedAtMs: state.startedAtMs,
+        scrollGestureId: `scroll-${state.firstPointerId}-${state.startedAtMs}`,
         committed: true,
       },
       remoteEvents: events,
@@ -1464,10 +1518,28 @@ export function resolveRemoteWindowTouchPairPointerUpRuntime(options: {
       consumed: true,
     };
   }
-  void geometry;
   void scrollFraction;
   void invertGestureDirection;
-  const events: Array<RemoteWindowInputEventPayload['event']> = [];
+  const scrollGestureId = state.mode === 'twoFingerScroll' ? state.scrollGestureId : undefined;
+  const endPoint = state.mode === 'twoFingerScroll'
+    ? resolveRemoteWindowPairPointerGeometry({
+        geometry,
+        clientX: state.lastMidX,
+        clientY: state.lastMidY,
+      })
+    : null;
+  const events: Array<RemoteWindowInputEventPayload['event']> = endPoint
+    ? [{
+        kind: 'scroll',
+        phase: 'end',
+        ...(scrollGestureId ? { gestureId: scrollGestureId } : {}),
+        unit: 'pixel',
+        deltaX: 0,
+        deltaY: 0,
+        ...endPoint,
+        moveCursor: false,
+      }]
+    : [];
   const localEffect: RemoteWindowTouchLocalEffect = state.mode === 'twoFingerScroll'
     ? {
         kind: 'two-finger-scroll-end',
@@ -1496,6 +1568,9 @@ export function resolveRemoteWindowTouchPairPointerUpRuntime(options: {
           pointerId: remainingPointer.pointerId,
           startClientX: remainingPointer.clientX,
           startClientY: remainingPointer.clientY,
+          startAtMs: options.timeMs,
+          lastClientX: remainingPointer.clientX,
+          lastClientY: remainingPointer.clientY,
           moved: true,
         }
       : remainingPointer.pointerType === 'touch'

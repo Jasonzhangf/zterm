@@ -70,6 +70,9 @@ export type SurfacePointerGesture =
       pointerId: number;
       startClientX: number;
       startClientY: number;
+      startAtMs: number;
+      lastClientX: number;
+      lastClientY: number;
       startPanX: number;
       startPanY: number;
       moved: boolean;
@@ -445,6 +448,9 @@ export function toOverlayTouchGesture(
       pointerId: gesture.pointerId,
       startClientX: gesture.startClientX,
       startClientY: gesture.startClientY,
+      startAtMs: gesture.startAtMs,
+      lastClientX: gesture.lastClientX,
+      lastClientY: gesture.lastClientY,
       startPanX: start.startPanX,
       startPanY: start.startPanY,
       moved: gesture.moved,
@@ -465,6 +471,9 @@ export function toRemoteWindowTouchGestureState(
       pointerId: gesture.pointerId,
       startClientX: gesture.startClientX,
       startClientY: gesture.startClientY,
+      startAtMs: gesture.startAtMs,
+      lastClientX: gesture.lastClientX,
+      lastClientY: gesture.lastClientY,
       moved: gesture.moved,
     };
   }

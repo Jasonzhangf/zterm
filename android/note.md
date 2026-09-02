@@ -327,3 +327,9 @@ Packaged Electron app.asar 内 DevTools 默认被禁用。`--remote-debugging-po
 - Fix: the unique owner `terminal.transport_lifecycle.channel_closed_control_status` now re-reads the still-closed channel's `sessionName` after `queryTargetSessions()` resolves before deciding presence; it also surfaces the resolved name in the runtime-debug event.
 - Tests: `session-context-transport-orchestration-runtime.test.ts` adds a red-then-green rename-race case (24/24), plus regression for the positive and negative control paths; `session-context-session-runtime.test.ts` + `terminal-channel-mux-runtime.test.ts` still 38 + 7 = 45 PASS; `tsc --noEmit` PASS; `git diff --check` clean; canonical build blocked at `COMPILED_STAGE_REQUIRES_ARTIFACT` because this worktree does not carry the frozen AppSDK compiled tree (not a code defect).
 - Device L5 still pending: emulator install + adb-driven rename→reconnect replay is the user-visible acceptance gate; commit will be deferred until that gate is exercised or Jason releases the L5 evidence.
+# 2026-09-02 remote-window input Action/Sample first slice
+
+- 根因确认：客户端 `pendingContinuousInput` + flush timer、daemon `pendingContinuousMove/Scroll` + drain 会把手势采样变成缓存轨迹，造成延迟和旧样本追赶；这与设计文档的即时 admission 规则冲突。
+- 修复：shared payload 增加 `deliveryKind` / `sampledAtMs` / `deadlineMs`；Action 进入有界 reliable queue，sample/scroll 直接发送；daemon continuous 路径直接执行，不合并、不重放；Action 入队前检查 deadline；policy 校验 metadata 不混用。
+- 验证：message/policy/daemon 定向测试 26/26；type-check PASS；source-pollution PASS；diff-check PASS。
+- 边界：尚未完成独立 `gesture-action` / `scroll-action start/update/end` union、接收端 per-gesture sequence/lifecycle state、真实 emulator/安装版验证；不得宣称完整协议完成。

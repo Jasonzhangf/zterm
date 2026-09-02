@@ -652,7 +652,7 @@ describe('TerminalPage remote window overlay', () => {
       button: 0,
       buttons: 1,
     });
-    // Direct Touch single-finger drag publishes incremental scroll before release.
+    // Direct Touch single-finger drag publishes scroll start and explicit end.
     fireEvent.pointerUp(surface, {
       pointerId: 32,
       pointerType: 'touch',
@@ -662,15 +662,21 @@ describe('TerminalPage remote window overlay', () => {
       buttons: 0,
     });
     await waitFor(() => {
-      expect(remoteWindowPayloads(onSendRemoteWindowInput)).toHaveLength(1);
+      expect(remoteWindowPayloads(onSendRemoteWindowInput)).toHaveLength(2);
     });
     expectNoRemoteWindowInputFocus(onSendRemoteWindowInput);
     expect(onSendRemoteWindowInput.mock.calls.map((call) => call[1].event.kind)).toEqual([
+      'scroll',
       'scroll',
     ]);
     expect(remoteWindowPayloads(onSendRemoteWindowInput).map((payload) => payload.event)).toEqual([
       expect.objectContaining({
         kind: 'scroll',
+        unit: 'pixel',
+      }),
+      expect.objectContaining({
+        kind: 'scroll',
+        phase: 'end',
         unit: 'pixel',
       }),
     ]);
