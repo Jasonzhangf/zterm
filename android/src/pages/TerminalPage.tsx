@@ -9,6 +9,7 @@ import type { SessionRenderBufferStore } from '../lib/session-render-buffer-stor
 import { createSessionViewportModeStore } from '../lib/session-viewport-mode-store';
 import { SessionScheduleSheet } from '../components/terminal/SessionScheduleSheet';
 import { AttachmentDrawer } from '../components/terminal/AttachmentDrawer';
+import { ResourceBottomSheet } from '../components/terminal/ResourceBottomSheet';
 import { RemoteScreenshotSheet } from '../components/terminal/RemoteScreenshotSheet';
 import { TerminalHeader } from '../components/terminal/TerminalHeader';
 import {
@@ -713,6 +714,7 @@ function TerminalPageComponent({
   const [scheduleComposerTarget, setScheduleComposerTarget] = useState<ScheduleComposerTarget | null>(null);
   const [fileTransferOpen, setFileTransferOpen] = useState(false);
   const [fileTransferMode, setFileTransferMode] = useState<"browser" | "sync">("browser");
+  const [resourceWebUrl, setResourceWebUrl] = useState('');
   const [remoteScreenshotPreview, setRemoteScreenshotPreview] = useState<RemoteScreenshotPreviewState | null>(null);
   const [viewportWidth, setViewportWidth] = useState(() => resolveWindowWidth());
   const [currentLayoutViewportHeight, setCurrentLayoutViewportHeight] = useState(
@@ -3791,18 +3793,27 @@ function TerminalPageComponent({
           onRunNow={(jobId) => onRunScheduleJobNow?.(scheduleComposerTarget.sessionId, jobId)}
         />
       ) : null}
-      {terminalActionSession && onSendMessage && onFileTransferMessage && renderFileBrowser ? renderFileBrowser({
-        open: fileTransferOpen,
-        remoteCwd: '',
-        mode: fileTransferMode,
-        daemonFileScopeId: terminalActionSession.daemonHostId
-          ? `daemon:${terminalActionSession.daemonHostId}`
-          : `endpoint:${terminalActionSession.bridgeHost}:${terminalActionSession.bridgePort}`,
-        terminalShellSkin: effectiveTerminalShellSkin,
-        onClose: () => setFileTransferOpen(false),
-        sendJson: sendFileTransferMessage,
-        onFileTransferMessage,
-      }) : null}
+      {terminalActionSession && onSendMessage && onFileTransferMessage && renderFileBrowser ? (
+        <ResourceBottomSheet
+          open={fileTransferOpen}
+          webUrl={resourceWebUrl}
+          onWebUrlChange={setResourceWebUrl}
+          onClose={() => setFileTransferOpen(false)}
+          renderFileBrowser={(open) => renderFileBrowser({
+            open,
+            remoteCwd: '',
+            mode: fileTransferMode,
+            embedded: true,
+            daemonFileScopeId: terminalActionSession.daemonHostId
+              ? `daemon:${terminalActionSession.daemonHostId}`
+              : `endpoint:${terminalActionSession.bridgeHost}:${terminalActionSession.bridgePort}`,
+            terminalShellSkin: effectiveTerminalShellSkin,
+            onClose: () => setFileTransferOpen(false),
+            sendJson: sendFileTransferMessage,
+            onFileTransferMessage,
+          })}
+        />
+      ) : null}
       <AttachmentDrawer
         open={attachmentDrawerOpen}
         topInsetPx={headerTopInsetPx}

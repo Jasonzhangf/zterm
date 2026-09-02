@@ -2314,6 +2314,43 @@
       ]
     },
     {
+      "feature_id": "client.resource_bottom_sheet",
+      "title": "Remote files and web resource bottom sheet",
+      "domain": "client-runtime",
+      "owners": [
+        "src/components/terminal/ResourceBottomSheet.tsx",
+        "src/pages/TerminalPage.tsx"
+      ],
+      "allowed_paths": [
+        "src/components/terminal/ResourceBottomSheet.tsx",
+        "src/components/terminal/ResourceBottomSheet.test.tsx",
+        "src/pages/TerminalPage.tsx",
+        "src/pages/TerminalPage.render-isolation.test.tsx",
+        "src/components/terminal/FileTransferSheet.tsx",
+        "src/lib/plugin-file-browser/file-browser-contract.ts",
+        "docs/design/remote-files-web-bottom-sheet.md",
+        "docs/module-registry.json",
+        "docs/feature-registry.json"
+      ],
+      "forbidden_paths": [
+        "src/server/",
+        "packages/shared/src/connection/"
+      ],
+      "required_gates": [
+        "src/components/terminal/ResourceBottomSheet.test.tsx",
+        "src/pages/TerminalPage.render-isolation.test.tsx",
+        "src/components/terminal/FileTransferSheet.test.tsx",
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/module-import-graph-truth.test.ts",
+        "src/lib/feature-registry-truth.test.ts"
+      ],
+      "truth_sources": [
+        "docs/design/remote-files-web-bottom-sheet.md",
+        "docs/architecture.md",
+        "docs/modules/project-modules.md"
+      ]
+    },
+    {
       "feature_id": "client.file_browser_ui",
       "title": "Client typed file browser UI plugin slot",
       "domain": "client-runtime",

@@ -12,6 +12,7 @@ export interface FileBrowserUiProps {
   mode?: 'browser' | 'sync';
   daemonFileScopeId?: string;
   terminalShellSkin?: 'light' | 'blue' | 'black';
+  embedded?: boolean;
 }
 
 export interface TerminalFileBrowserSlot {

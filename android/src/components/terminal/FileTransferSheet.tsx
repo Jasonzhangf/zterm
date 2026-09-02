@@ -256,6 +256,7 @@ export function FileTransferSheet({
   mode = "sync",
   daemonFileScopeId = "",
   terminalShellSkin = "light",
+  embedded = false,
 }: FileTransferSheetProps) {
   const browserMode = mode === "browser";
   const sendJsonRef = useRef(sendJson);
@@ -1229,7 +1230,9 @@ export function FileTransferSheet({
       data-testid="file-transfer-overlay"
       data-avoid-side={avoidSide || undefined}
       data-terminal-shell-skin={terminalShellSkin}
-      style={buildTransferSheetOverlayStyle(avoidSide)}
+      style={embedded
+        ? { position: "static", inset: "auto", zIndex: "auto", background: "transparent", display: "flex", alignItems: "stretch", justifyContent: "stretch", height: "100%" }
+        : buildTransferSheetOverlayStyle(avoidSide)}
       onClick={onClose}
     >
       <div
@@ -1237,7 +1240,9 @@ export function FileTransferSheet({
         data-testid="file-transfer-sheet"
         data-layout={avoidSide ? "side" : "bottom"}
         data-preview-open={previewOpen ? "true" : undefined}
-        style={buildTransferSheetContainerStyle(avoidSide, mode)}
+        style={embedded
+          ? { ...buildTransferSheetContainerStyle(null, mode), width: "100%", height: "100%", maxHeight: "none", border: 0, borderRadius: 0, boxShadow: "none" }
+          : buildTransferSheetContainerStyle(avoidSide, mode)}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}

@@ -2184,6 +2184,8 @@
         "src/pages/terminal-keyboard-lift.ts",
         "src/pages/TerminalPageQuickBarAssembly.tsx",
         "src/pages/TerminalPageCopyMenu.tsx",
+        "src/components/terminal/ResourceBottomSheet.tsx",
+        "src/components/terminal/ResourceBottomSheet.test.tsx",
         "src/lib/terminal-shell-skin.ts"
       ]
     },
