@@ -3822,7 +3822,7 @@ function TerminalPageComponent({
       />
       <ZtermDialog
         open={Boolean(drawerCloseDialog)}
-        tone="warning"
+        tone="info"
         title={drawerCloseDialog ? `关闭 ${drawerCloseDialog.title}` : '关闭 session'}
         message={drawerCloseDialog
           ? `将先断开当前连接，再终止 ${drawerCloseDialogBackendLabel} session "${drawerCloseDialog.sessionName}"。`

@@ -26,7 +26,7 @@ export function settingsInputStyle(): CSSProperties {
     borderRadius: '20px',
     border: '1px solid var(--zterm-settings-border, #d5dde6)',
     backgroundColor: 'var(--zterm-settings-field, #ffffff)',
-    color: 'var(--zterm-settings-text, #171b2d)',
+    color: 'var(--zterm-settings-text)',
     fontSize: '18px',
     padding: settingsInputPadding,
     boxSizing: 'border-box',

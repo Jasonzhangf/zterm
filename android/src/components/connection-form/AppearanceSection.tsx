@@ -18,8 +18,8 @@ export function AppearanceSection({ pinned, onPinnedChange }: AppearanceSectionP
           padding: '0 16px',
           borderRadius: '20px',
           border: `1px solid ${mobileTheme.colors.lightBorder}`,
-          backgroundColor: pinned ? mobileTheme.colors.shell : '#f8fbfd',
-          color: pinned ? mobileTheme.colors.textPrimary : mobileTheme.colors.lightText,
+          backgroundColor: pinned ? 'var(--zterm-settings-accent)' : 'var(--zterm-settings-field)',
+          color: pinned ? 'var(--zterm-settings-accent-text)' : 'var(--zterm-settings-text)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
@@ -35,8 +35,8 @@ export function AppearanceSection({ pinned, onPinnedChange }: AppearanceSectionP
         style={{
           borderRadius: '20px',
           padding: '14px 16px',
-          backgroundColor: '#f8fbfd',
-          color: mobileTheme.colors.lightMuted,
+          backgroundColor: 'var(--zterm-settings-field)',
+          color: 'var(--zterm-settings-muted)',
           fontSize: '13px',
           lineHeight: 1.5,
         }}

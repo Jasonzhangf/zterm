@@ -14,7 +14,7 @@ export function ConnectionSection({
     <section
       style={{
         borderRadius: '28px',
-        backgroundColor: mobileTheme.colors.lightCard,
+        backgroundColor: 'var(--zterm-settings-surface)',
         border: `1px solid ${mobileTheme.colors.lightBorder}`,
         padding: '20px',
         display: 'flex',
@@ -24,9 +24,9 @@ export function ConnectionSection({
       }}
     >
       <div>
-        <div style={{ fontSize: '18px', fontWeight: 800, color: mobileTheme.colors.lightText }}>{title}</div>
+        <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--zterm-settings-text)' }}>{title}</div>
         {description && (
-          <div style={{ marginTop: '6px', fontSize: '13px', color: mobileTheme.colors.lightMuted }}>{description}</div>
+          <div style={{ marginTop: '6px', fontSize: '13px', color: 'var(--zterm-settings-muted)' }}>{description}</div>
         )}
       </div>
       {children}
@@ -42,7 +42,7 @@ export function FieldLabel({ children }: { children: ReactNode }) {
         marginBottom: '8px',
         fontSize: '13px',
         fontWeight: 700,
-        color: mobileTheme.colors.lightText,
+        color: 'var(--zterm-settings-text)',
       }}
     >
       {children}
@@ -57,8 +57,8 @@ export function inputStyle(extra?: CSSProperties): CSSProperties {
     padding: '14px 16px',
     borderRadius: '18px',
     border: `1px solid ${mobileTheme.colors.lightBorder}`,
-    backgroundColor: '#f8fbfd',
-    color: mobileTheme.colors.lightText,
+    backgroundColor: 'var(--zterm-settings-field)',
+    color: 'var(--zterm-settings-text)',
     fontSize: '15px',
     outline: 'none',
     ...extra,
@@ -71,8 +71,8 @@ export function segmentedButtonStyle(active: boolean): CSSProperties {
     minHeight: '48px',
     borderRadius: '16px',
     border: 'none',
-    backgroundColor: active ? mobileTheme.colors.shell : '#eef3f8',
-    color: active ? mobileTheme.colors.textPrimary : mobileTheme.colors.lightMuted,
+    backgroundColor: active ? 'var(--zterm-settings-accent)' : 'var(--zterm-settings-field)',
+    color: active ? 'var(--zterm-settings-accent-text)' : 'var(--zterm-settings-muted)',
     fontWeight: 700,
     cursor: 'pointer',
   };
@@ -80,7 +80,7 @@ export function segmentedButtonStyle(active: boolean): CSSProperties {
 
 export function TagList({ tags, onRemove }: { tags: string[]; onRemove: (tag: string) => void }) {
   if (tags.length === 0) {
-    return <div style={{ fontSize: '13px', color: mobileTheme.colors.lightMuted }}>No tags yet</div>;
+    return <div style={{ fontSize: '13px', color: 'var(--zterm-settings-muted)' }}>No tags yet</div>;
   }
 
   return (
@@ -94,8 +94,8 @@ export function TagList({ tags, onRemove }: { tags: string[]; onRemove: (tag: st
             border: 'none',
             borderRadius: '999px',
             padding: '8px 12px',
-            backgroundColor: mobileTheme.colors.lightAccent,
-            color: mobileTheme.colors.lightText,
+            backgroundColor: 'var(--zterm-settings-field)',
+            color: 'var(--zterm-settings-text)',
             fontWeight: 700,
             cursor: 'pointer',
           }}
