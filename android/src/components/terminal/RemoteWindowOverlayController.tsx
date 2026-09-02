@@ -222,7 +222,6 @@ export interface RemoteWindowOverlayProps {
   onVideoDebug?: (snapshot: RemoteWindowVideoDebugSnapshot) => void;
   onRemoteWindowMessage?: (handler: (msg: RemoteWindowControlMessage) => void) => () => void;
 }
-
 interface RemoteWindowStreamStartResult {
   streamId: string;
   purpose?: RemoteWindowStreamPurpose;
@@ -1004,21 +1003,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     setDualStreamSwitch((current) => resetRemoteWindowDualStreamSwitch(current));
     setState((current) => shrinkRemoteWindowOverlay(current));
   }, [resetFullscreenViewport, setDualStreamSwitch]);
-
-  const handleRemoteClose = useCallback(() => {
-    if (state.phase !== 'targetLocked' || !currentLockedTarget) {
-      return;
-    }
-    if (sendRemoteWindowInputEventsForTarget({
-      sessionId: activeSessionId || null,
-      streamId: currentLockedStreamId,
-      target: currentLockedTarget,
-      events: [{ kind: 'close-window' }],
-    })) {
-      handleClose();
-    }
-  }, [activeSessionId, currentLockedStreamId, currentLockedTarget, handleClose, sendRemoteWindowInputEventsForTarget, state.phase]);
-
+  const handleRemoteClose = useCallback(() => state.phase === 'targetLocked' && Boolean(currentLockedTarget) && sendRemoteWindowInputEventsForTarget({ sessionId: activeSessionId || null, streamId: currentLockedStreamId, target: currentLockedTarget!, events: [{ kind: 'close-window' }] }) && handleClose(), [activeSessionId, currentLockedStreamId, currentLockedTarget, handleClose, sendRemoteWindowInputEventsForTarget, state.phase]);
   const handleFullscreen = useCallback(() => {
     publishRemoteWindowInputContext();
     lastDefaultFullscreenFillKeyRef.current = null;
