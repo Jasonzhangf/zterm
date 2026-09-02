@@ -10,6 +10,7 @@ export interface ResourceBottomSheetProps {
   webUrl?: string;
   onWebUrlChange?: (url: string) => void;
   onClose: () => void;
+  onExpand?: () => void;
   onDownload?: () => void;
   initialTab?: ResourceTab;
   placement?: ResourcePlacement;
@@ -57,11 +58,13 @@ export function ResourceBottomSheet({
   webUrl = '',
   onWebUrlChange,
   onClose,
+  onExpand,
   onDownload,
   initialTab = 'files',
   placement,
 }: ResourceBottomSheetProps) {
   const [tab, setTab] = useState<ResourceTab>(initialTab);
+  const [expanded, setExpanded] = useState(false);
   const [draftUrl, setDraftUrl] = useState(webUrl);
   const [submittedUrl, setSubmittedUrl] = useState(webUrl);
   const [urlError, setUrlError] = useState<string | null>(null);
@@ -77,6 +80,7 @@ export function ResourceBottomSheet({
   }, [webUrl]);
 
   useEffect(() => {
+    if (!open) setExpanded(false);
     if (open && !previousOpenRef.current) {
       setTab(initialTab);
     }
@@ -118,8 +122,13 @@ export function ResourceBottomSheet({
     const start = touchStartY.current;
     touchStartY.current = null;
     const end = event.changedTouches[0]?.clientY;
-    if (start !== null && end !== undefined && end - start > 64) {
-      onClose();
+    if (start !== null && end !== undefined) {
+      const delta = end - start;
+      if (delta > 64) onClose();
+      if (delta < -64) {
+        setExpanded(true);
+        onExpand?.();
+      }
     }
   };
 
@@ -152,7 +161,7 @@ export function ResourceBottomSheet({
         role="dialog"
         aria-modal="true"
         aria-label="资源"
-        style={{ ...SHEET, width: resolvedPlacement === 'end' ? 'min(560px, 94vw)' : '100%', height: resolvedPlacement === 'end' ? '100%' : SHEET.height, borderRadius: resolvedPlacement === 'end' ? '22px 0 0 22px' : SHEET.borderRadius, borderBottom: resolvedPlacement === 'end' ? '1px solid var(--zterm-panel-border)' : 0, borderRight: 0 }}
+          style={{ ...SHEET, width: resolvedPlacement === 'end' ? 'min(560px, 94vw)' : '100%', height: expanded || resolvedPlacement === 'end' ? '100%' : SHEET.height, borderRadius: resolvedPlacement === 'end' || expanded ? 0 : SHEET.borderRadius, borderBottom: resolvedPlacement === 'end' || expanded ? '1px solid var(--zterm-panel-border)' : 0, borderRight: 0 }}
       onClick={(event) => event.stopPropagation()}
       >
         <div
