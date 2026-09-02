@@ -530,11 +530,8 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     setFocusedWindowId,
     updateFocus,
   });
-  const quickBarSuppressed = state.phase === 'targetEnumerating'
-    || state.phase === 'pickerOpen';
-  const bodySubscriptionSuppressed = state.phase === 'targetEnumerating'
-    || state.phase === 'pickerOpen'
-    || (state.phase === 'targetLocked' && state.mode === 'fullscreen');
+  const quickBarSuppressed = embedded || state.phase === 'targetEnumerating' || state.phase === 'pickerOpen';
+  const bodySubscriptionSuppressed = state.phase === 'targetEnumerating' || state.phase === 'pickerOpen' || (state.phase === 'targetLocked' && state.mode === 'fullscreen');
   const inputContext = state.phase === 'targetLocked'
     && state.streamId
     && state.streamStatus !== 'error'
@@ -2735,7 +2732,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     ...styles.fullscreenOverlay,
     paddingBottom: `${fullscreenBottomPaddingPx}px`,
   };
-  const videoSurfaceStyle = state.phase === 'targetLocked' && state.mode === 'floating' && lockedDisplaySourceSize
+  const videoSurfaceStyle = state.phase === 'targetLocked' && state.mode === 'floating' && !embedded && lockedDisplaySourceSize
     ? {
         ...styles.videoPlaceholder,
         flex: '1 1 auto',
@@ -2744,7 +2741,9 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
           ? { height: `${floatingVideoHeightPx}px` }
           : { maxHeight: 'min(52vh, 420px)' }),
       }
-    : styles.videoPlaceholder;
+    : state.phase === 'targetLocked' && embedded
+      ? { ...styles.videoPlaceholder, width: '100%', height: '100%', minHeight: 0, flex: '1 1 auto' }
+      : styles.videoPlaceholder;
   const screenshotFeedback = (() => {
     switch (screenshotStatus.phase) {
       case 'capturing':
