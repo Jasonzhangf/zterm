@@ -1172,8 +1172,8 @@ describe('RemoteWindowOverlay', () => {
         preference: 'smooth',
         maxBitrateBps: 1_000_000,
         maxFrameRateFps: 15,
-        maxCaptureWidth: 960,
-        maxCaptureHeight: 600,
+        maxCaptureWidth: 720,
+        maxCaptureHeight: 720,
         maxFrameAgeMs: 120,
         interactionActive: false,
         overviewMaxBitrateBps: 100_000,
@@ -1230,7 +1230,7 @@ describe('RemoteWindowOverlay', () => {
           preference: 'smooth',
           maxBitrateBps: 2_000_000,
           maxFrameRateFps: 30,
-          maxCaptureWidth: 960,
+          maxCaptureWidth: 720,
         }),
       }));
     }, { timeout: 5500 });

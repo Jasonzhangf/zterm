@@ -287,6 +287,23 @@ printf '\\132\\122\\127\\061\\002\\000\\000\\000\\002\\000\\000\\000\\020\\000\\
     expect(config.frameRate).toBe(45);
   });
 
+  it('caps a portrait source by its long edge instead of allowing an oversized height', () => {
+    const target = makeTarget({
+      videoTarget: {
+        ...makeTarget().videoTarget,
+        windowBoundsTopLeftPx: { x: 10, y: 20, width: 1480, height: 3761 },
+        cropRectTopLeftPx: { x: 10, y: 20, width: 1480, height: 3761 },
+      },
+    });
+    const config = buildScreenCaptureKitConfig(target, 30, {
+      maxCaptureWidth: 720,
+      maxCaptureHeight: 720,
+    });
+    expect(config.outputHeight).toBe(720);
+    expect(config.outputWidth).toBe(283);
+    expect(config.cropRect).toEqual({ x: 10, y: 20, width: 1480, height: 3761 });
+  });
+
   it('scales every composite canvas projection field by one common ratio', () => {
     const target = makeTarget({
       compositeWindows: [{
