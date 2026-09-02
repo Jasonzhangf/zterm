@@ -17,6 +17,7 @@ export interface RemoteWindowLockedToolbarProps {
   screenshotButtonStyle: CSSProperties;
   targetKindLabel: string;
   onClose: () => void;
+  onRemoteClose: () => void;
   onFullscreen: () => void;
   onRequestKeyboard: () => void;
   onScreenshot: () => void;
@@ -41,6 +42,7 @@ export const RemoteWindowLockedToolbar = forwardRef<HTMLDivElement, RemoteWindow
   screenshotButtonStyle,
   targetKindLabel,
   onClose,
+  onRemoteClose,
   onFullscreen,
   onRequestKeyboard,
   onScreenshot,
@@ -82,6 +84,9 @@ export const RemoteWindowLockedToolbar = forwardRef<HTMLDivElement, RemoteWindow
               <RemoteWindowIcon name="fullscreen" />
             </button>
           )}
+          <button type="button" data-testid="remote-window-remote-close" aria-label="远程关闭当前窗口" title="远程关闭当前窗口" onClick={onRemoteClose} style={styles.headerIconButtonDanger}>
+            <RemoteWindowIcon name="close-window" />
+          </button>
           <button type="button" aria-label="关闭远程窗口" title="关闭" onClick={onClose} style={styles.headerIconButton}>
             <RemoteWindowIcon name="close" />
           </button>

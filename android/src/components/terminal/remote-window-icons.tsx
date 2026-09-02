@@ -11,6 +11,7 @@ export type RemoteWindowIconName =
   | 'minimize'
   | 'fullscreen'
   | 'close'
+  | 'close-window'
   | 'screenshot'
   | 'keyboard'
   | 'more';
@@ -22,6 +23,8 @@ export function RemoteWindowIcon({ name }: { name: RemoteWindowIconName }) {
       ? <path d="M8 4H4v4m12-4h4v4M8 20H4v-4m12 4h4v-4" />
       : name === 'close'
         ? <path d="m6 6 12 12M18 6 6 18" />
+        : name === 'close-window'
+          ? <><rect x="3.5" y="4" width="17" height="16" rx="2" /><path d="m9 10 6 6m0-6-6 6" /></>
         : name === 'screenshot'
           ? <><path d="M4 8h3l2-3h6l2 3h3v11H4Z" /><circle cx="12" cy="13" r="3" /></>
           : name === 'keyboard'

@@ -1833,6 +1833,42 @@ describe('RemoteWindowOverlay', () => {
     expect(screen.queryByLabelText('关闭子窗口')).toBeNull();
   });
 
+  it('remotely closes the locked host window without using the local overlay close action', async () => {
+    const sendInput = vi.fn();
+    const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string) => ({
+      streamId,
+      mediaStream: { id: 'remote-close-stream' } as MediaStream,
+    }));
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-remote-close',
+      targets: [makeTarget('app-remote-close', 'TextEdit', 'app-window')],
+    }));
+
+    render(
+      <RemoteWindowOverlay
+        activeSessionId="session-remote-close"
+        requestTargets={requestTargets}
+        startStream={startStream}
+        sendInput={sendInput}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    await screen.findByTestId('remote-window-target-app-remote-close');
+    fireEvent.click(screen.getByTestId('remote-window-target-app-remote-close'));
+    await screen.findByTestId('remote-window-video');
+
+    fireEvent.click(screen.getByTestId('remote-window-remote-close'));
+
+    await waitForActionRemoteInputCount(sendInput, 1);
+    expect(actionRemoteInputPayloads(sendInput)[0]).toMatchObject({
+      streamId: expect.stringMatching(/^rw-stream-/),
+      targetId: 'app-remote-close',
+      event: { kind: 'close-window' },
+    });
+    expect(screen.queryByTestId('remote-window-locked-overlay')).toBeNull();
+  });
+
   it('resizes the floating overlay from the edge while preserving the source aspect ratio', async () => {
     const requestTargets = vi.fn(async () => ({
       requestId: 'rw-1',
@@ -2478,7 +2514,7 @@ describe('RemoteWindowOverlay', () => {
     });
   });
 
-  it('defaults fullscreen to remote fill resize while keeping drawing in complete fit', async () => {
+  it('defaults fullscreen to remote fill resize and keeps drawing aligned to the fill rect', async () => {
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
     Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 });
     Object.defineProperty(window, 'visualViewport', {
@@ -2576,10 +2612,10 @@ describe('RemoteWindowOverlay', () => {
     const content = screen.getByTestId('remote-window-video-content');
     await waitFor(() => {
       expect(overlay.getAttribute('data-display-mode')).toBe('fill');
-      expect(Number.parseFloat(content.style.left)).toBeCloseTo(16.67, 1);
-      expect(Number.parseFloat(content.style.top)).toBeCloseTo(0, 1);
-      expect(Number.parseFloat(content.style.width)).toBeCloseTo(266.67, 1);
-      expect(Number.parseFloat(content.style.height)).toBeCloseTo(200, 1);
+      expect(Number.parseFloat(content.style.left)).toBeCloseTo(0, 1);
+      expect(Number.parseFloat(content.style.top)).toBeCloseTo(-12.5, 1);
+      expect(Number.parseFloat(content.style.width)).toBeCloseTo(300, 1);
+      expect(Number.parseFloat(content.style.height)).toBeCloseTo(225, 1);
     });
 
     await waitFor(() => {
@@ -2628,10 +2664,10 @@ describe('RemoteWindowOverlay', () => {
       });
     });
     await waitFor(() => {
-      expect(Number.parseFloat(content.style.left)).toBeCloseTo(93.6, 1);
-      expect(Number.parseFloat(content.style.top)).toBeCloseTo(0, 1);
-      expect(Number.parseFloat(content.style.width)).toBeCloseTo(112.8, 1);
-      expect(Number.parseFloat(content.style.height)).toBeCloseTo(200, 1);
+      expect(Number.parseFloat(content.style.left)).toBeCloseTo(0, 1);
+      expect(Number.parseFloat(content.style.top)).toBeCloseTo(-166.06, 1);
+      expect(Number.parseFloat(content.style.width)).toBeCloseTo(300, 1);
+      expect(Number.parseFloat(content.style.height)).toBeCloseTo(532.1, 1);
     });
     expect(overlay.getAttribute('data-display-mode')).toBe('fill');
     fireEvent.click(screen.getByTestId('remote-window-more-toggle'));
@@ -2721,7 +2757,7 @@ describe('RemoteWindowOverlay', () => {
     expect(screen.getByTestId('remote-window-target-app-1').textContent).toContain('800x1000');
   });
 
-  it('maps fullscreen input through the same fitted content rect after a target resize request', async () => {
+  it('maps fullscreen input through the same fill content rect after a target resize request', async () => {
     const target = makeTarget('app-1', 'TextEdit', 'app-window');
     target.videoTarget.cropRectTopLeftPx = { x: 10, y: 40, width: 800, height: 600 };
     const mediaStream = { id: 'media-stream-1' } as MediaStream;
@@ -2793,9 +2829,9 @@ describe('RemoteWindowOverlay', () => {
       throw new Error('expected click payload');
     }
     expect(event.normalizedX).toBeCloseTo(0.5, 3);
-    expect(event.normalizedY).toBeCloseTo(0, 3);
+    expect(event.normalizedY).toBeCloseTo(1 / 18, 3);
     expect(event.x).toBeCloseTo(410, 3);
-    expect(event.y).toBeCloseTo(40, 1);
+    expect(event.y).toBeCloseTo(73.33, 1);
   });
 
   it('supports fullscreen pinch zoom, zoomed single-finger pan, and two-finger scroll', async () => {

@@ -1005,6 +1005,20 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     setState((current) => shrinkRemoteWindowOverlay(current));
   }, [resetFullscreenViewport, setDualStreamSwitch]);
 
+  const handleRemoteClose = useCallback(() => {
+    if (state.phase !== 'targetLocked' || !currentLockedTarget) {
+      return;
+    }
+    if (sendRemoteWindowInputEventsForTarget({
+      sessionId: activeSessionId || null,
+      streamId: currentLockedStreamId,
+      target: currentLockedTarget,
+      events: [{ kind: 'close-window' }],
+    })) {
+      handleClose();
+    }
+  }, [activeSessionId, currentLockedStreamId, currentLockedTarget, handleClose, sendRemoteWindowInputEventsForTarget, state.phase]);
+
   const handleFullscreen = useCallback(() => {
     publishRemoteWindowInputContext();
     lastDefaultFullscreenFillKeyRef.current = null;
@@ -3078,6 +3092,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
           screenshotButtonStyle={screenshotButtonStyle}
           targetKindLabel={formatTargetKind(state.target)}
           onClose={handleClose}
+          onRemoteClose={handleRemoteClose}
           onFullscreen={handleFullscreen}
           onRequestKeyboard={handleRequestKeyboard}
           onScreenshot={handleRemoteWindowScreenshot}
