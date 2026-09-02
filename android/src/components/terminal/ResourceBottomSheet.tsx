@@ -111,6 +111,7 @@ export function ResourceBottomSheet({
   }, [draftUrl, onWebUrlChange]);
 
   const handleTouchStart = (event: TouchEvent<HTMLDivElement>) => {
+    if (event.target !== event.currentTarget) return;
     touchStartY.current = event.touches[0]?.clientY ?? null;
   };
   const handleTouchEnd = (event: TouchEvent<HTMLDivElement>) => {
@@ -152,9 +153,13 @@ export function ResourceBottomSheet({
         aria-modal="true"
         aria-label="资源"
         style={{ ...SHEET, width: resolvedPlacement === 'end' ? 'min(560px, 94vw)' : '100%', height: resolvedPlacement === 'end' ? '100%' : SHEET.height, borderRadius: resolvedPlacement === 'end' ? '22px 0 0 22px' : SHEET.borderRadius, borderBottom: resolvedPlacement === 'end' ? '1px solid var(--zterm-panel-border)' : 0, borderRight: 0 }}
-        onClick={(event) => event.stopPropagation()}
+      onClick={(event) => event.stopPropagation()}
       >
-        <div style={{ display: 'flex', justifyContent: 'center', padding: '10px 0 4px' }}>
+        <div
+          style={{ display: 'flex', justifyContent: 'center', padding: '10px 0 4px' }}
+          onTouchStart={handleTouchStart}
+          onTouchEnd={handleTouchEnd}
+        >
           <span aria-hidden="true" style={{ width: 38, height: 4, borderRadius: 99, background: 'var(--zterm-panel-border)' }} />
         </div>
         {tab !== 'stream' ? <header style={{ display: 'grid', gridTemplateColumns: '44px 1fr 96px', alignItems: 'center', gap: 8, padding: '8px 16px 14px', borderBottom: '1px solid var(--zterm-panel-border)' }}>

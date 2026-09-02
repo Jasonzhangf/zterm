@@ -530,7 +530,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     setFocusedWindowId,
     updateFocus,
   });
-  const quickBarSuppressed = embedded || state.phase === 'targetEnumerating' || state.phase === 'pickerOpen';
+  const quickBarSuppressed = embedded;
   const bodySubscriptionSuppressed = state.phase === 'targetEnumerating' || state.phase === 'pickerOpen' || (state.phase === 'targetLocked' && state.mode === 'fullscreen');
   const inputContext = state.phase === 'targetLocked'
     && state.streamId

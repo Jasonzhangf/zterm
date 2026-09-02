@@ -718,6 +718,7 @@ function TerminalPageComponent({
   const [resourceInitialTab, setResourceInitialTab] = useState<'files' | 'web' | 'stream'>('files');
   const [fileTransferMode, setFileTransferMode] = useState<"browser" | "sync">("browser");
   const [resourceWebUrl, setResourceWebUrl] = useState('');
+  const [remoteWindowQuickBarSuppressed, setRemoteWindowQuickBarSuppressed] = useState(false);
   const [remoteScreenshotPreview, setRemoteScreenshotPreview] = useState<RemoteScreenshotPreviewState | null>(null);
   const [viewportWidth, setViewportWidth] = useState(() => resolveWindowWidth());
   const [currentLayoutViewportHeight, setCurrentLayoutViewportHeight] = useState(
@@ -2258,8 +2259,7 @@ function TerminalPageComponent({
   }, [clearPendingAndroidImeFocus, clearTerminalFocusRetries, isAndroid, setAndroidEditorActive, uiSessionId, updateAndroidImeVisible, updateKeyboardInset, updateTerminalKeyboardRequested]);
 
   const handleRemoteWindowOverlayOpenStateChange = useCallback((open: boolean) => {
-    // 串流入口与文件按键一致：QuickBar 始终保留，不因 picker/串流隐藏；
-    // 这里只负责打开时收起 IME。
+    setRemoteWindowQuickBarSuppressed(open);
     if (open) {
       hideTerminalInputForRemoteWindow();
     }
@@ -3751,7 +3751,7 @@ function TerminalPageComponent({
           </>
         ),
         quickBarShell: {
-          visible: !sessionDrawerOpen && Boolean(quickBarNode),
+          visible: !sessionDrawerOpen && !remoteWindowQuickBarSuppressed && Boolean(quickBarNode),
           bottomPx:
             quickBarShellKeyboardLiftPx
             + layoutProfile.quickBar.touchSafeOffsetPx
