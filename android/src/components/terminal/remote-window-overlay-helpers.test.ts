@@ -47,13 +47,13 @@ describe('remote-window-overlay-helpers', () => {
     expect(rect.top).toBe(25);
   });
 
-  it('keeps local geometry aspect-fit while fill is implemented by remote resize', () => {
+  it('fills fullscreen geometry while preserving fit geometry', () => {
     const rect = resolveAspectRect(
       { width: 100, height: 100 },
       { width: 200, height: 100 },
       'fill',
     );
-    expect(rect).toMatchObject({ width: 100, height: 50, left: 0, top: 25 });
+    expect(rect).toMatchObject({ width: 200, height: 100, left: -50, top: 0 });
     const clamped = clampFullscreenViewport(
       { scale: 2, panX: 0, panY: 0 },
       { width: 100, height: 100 },
