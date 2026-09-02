@@ -6,7 +6,7 @@ type ResourcePlacement = 'bottom' | 'end';
 export interface ResourceBottomSheetProps {
   open: boolean;
   renderFileBrowser: (open: boolean) => ReactNode;
-  renderRemoteWindow?: (open: boolean) => ReactNode;
+  renderRemoteWindow?: (open: boolean, tab?: 'stream' | 'web') => ReactNode;
   webUrl?: string;
   onWebUrlChange?: (url: string) => void;
   onClose: () => void;
@@ -123,7 +123,11 @@ export function ResourceBottomSheet({
   };
 
   const fileBrowserNode = renderFileBrowser(open && tab === 'files');
-  const remoteWindowNode = renderRemoteWindow?.(open && tab === 'stream');
+  const remoteWindowNode = renderRemoteWindow
+    ? tab === 'web'
+      ? renderRemoteWindow(open, 'web')
+      : renderRemoteWindow(open && tab === 'stream')
+    : null;
 
   if (!open) {
     return (
@@ -186,7 +190,7 @@ export function ResourceBottomSheet({
         ) : null}
         {tab === 'web' ? (
           <div data-testid="resource-web-pane" style={{ minHeight: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 10, padding: '0 14px 14px' }}>
-            <form onSubmit={(event) => { event.preventDefault(); submitWebUrl(); }} style={{ display: 'flex', gap: 8 }}>
+            {remoteWindowNode ? remoteWindowNode : <form onSubmit={(event) => { event.preventDefault(); submitWebUrl(); }} style={{ display: 'flex', gap: 8 }}>
               <input
                 aria-label="网页地址"
                 value={draftUrl}
@@ -196,9 +200,9 @@ export function ResourceBottomSheet({
                 style={{ flex: 1, minWidth: 0, minHeight: 40, borderRadius: 12, border: '1px solid var(--zterm-panel-border)', background: 'var(--zterm-panel-surface)', color: 'var(--zterm-panel-text)', padding: '0 12px', fontSize: 14 }}
               />
               <button type="submit" style={buttonStyle}>打开</button>
-            </form>
-            {urlError ? <div role="alert" style={{ color: 'var(--zterm-panel-danger)', fontSize: 13 }}>{urlError}</div> : null}
-            {submittedUrl ? (
+            </form>}
+            {!remoteWindowNode && urlError ? <div role="alert" style={{ color: 'var(--zterm-panel-danger)', fontSize: 13 }}>{urlError}</div> : null}
+            {!remoteWindowNode && submittedUrl ? (
               <iframe
                 title="网页渲染"
                 src={submittedUrl}
@@ -206,9 +210,9 @@ export function ResourceBottomSheet({
                 referrerPolicy="no-referrer"
                 style={{ flex: 1, minHeight: 0, width: '100%', border: '1px solid var(--zterm-panel-border)', borderRadius: 14, background: 'var(--zterm-panel-surface)' }}
               />
-            ) : (
+            ) : !remoteWindowNode ? (
               <div style={{ flex: 1, display: 'grid', placeItems: 'center', color: 'var(--zterm-panel-muted)', fontSize: 14 }}>输入网址后在这里渲染网页</div>
-            )}
+            ) : null}
           </div>
         ) : null}
       </section>

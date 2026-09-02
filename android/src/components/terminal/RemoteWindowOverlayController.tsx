@@ -166,7 +166,7 @@ export type {
 import { useRemoteWindowScreenshot } from './useRemoteWindowScreenshot';
 import type { RemoteWindowScreenshotSaveResult } from './useRemoteWindowScreenshot';
 export interface RemoteWindowOverlayProps {
-  browserEntryEnabled?: boolean;
+  browserOnly?: boolean; browserEntryEnabled?: boolean;
   activeSessionId?: string | null;
   appForegroundActive?: boolean;
   streamInvalidation?: {
@@ -272,7 +272,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   onRequestKeyboard,
   onVideoDebug,
   onRemoteWindowMessage,
-  browserEntryEnabled = true,
+  browserEntryEnabled = true, browserOnly = false,
 }: RemoteWindowOverlayProps) {
   const [state, setState] = useState<RemoteWindowOverlayState>(initialRemoteWindowOverlayState);
   const [floatingOffset, setFloatingOffsetState] = useState<FloatingOverlayOffset>({ x: 0, y: 0 });
@@ -460,7 +460,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     handleOpenPicker();
   }, [handleOpenPicker]);
   const handleResourceEntry = useCallback((tab: 'web' | 'stream', fallback: () => void) => onOpenResourceDrawer ? onOpenResourceDrawer(tab) : fallback(), [onOpenResourceDrawer]);
-  useEffect(() => { if (embedded && state.phase === 'closed') handleOpenPicker(); }, [embedded, handleOpenPicker, state.phase]);
+  useEffect(() => { if (embedded && state.phase === 'closed') { setBrowserPickerOpen(browserOnly); handleOpenPicker(); } }, [browserOnly, embedded, handleOpenPicker, state.phase]);
   const surfacePointersRef = useRef<Map<number, SurfacePointerPosition>>(new Map());
   const surfaceGestureRef = useRef<SurfacePointerGesture | null>(null);
   const surfaceLocalPanStartRef = useRef<{
@@ -2723,6 +2723,8 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
         bottom: REMOTE_WINDOW_FLOATING_BOTTOM_BASE_PX + Math.max(0, bottomInsetPx),
         transform: `translate(${floatingOffset.x}px, ${floatingOffset.y}px)`,
       };
+  const embeddedOverlayStyle = { ...styles.floatingOverlay,
+    position: 'relative' as const, inset: 'auto', right: 'auto', bottom: 'auto', width: '100%', maxWidth: 'none', maxHeight: 'none', height: '100%', flex: '1 1 auto', border: 0, borderRadius: 0, boxShadow: 'none', zIndex: 'auto' };
   const fullscreenBottomPaddingPx = state.phase === 'targetLocked' && state.mode === 'fullscreen'
     ? Math.max(
         0,
@@ -3043,7 +3045,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       data-display-mode={state.mode === 'fullscreen' ? fullscreenDisplayMode : initialFullscreenDisplayMode}
       style={state.mode === 'fullscreen'
         ? fullscreenOverlayStyle
-        : floatingOverlayStyle}
+        : embedded ? embeddedOverlayStyle : floatingOverlayStyle}
     >
       <RemoteWindowLockedToolbar
           ref={lockedToolbarRef}
@@ -3113,7 +3115,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
 
   return (
     <>
-      {state.phase === 'closed' || state.phase === 'targetEnumerating' || state.phase === 'pickerOpen' ? (
+      {!embedded && (state.phase === 'closed' || state.phase === 'targetEnumerating' || state.phase === 'pickerOpen') ? (
         <button
           ref={entryButtonRef}
           type="button"
@@ -3148,7 +3150,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
           窗
         </button>
       ) : null}
-      {browserEntryEnabled && (state.phase === 'closed' || state.phase === 'targetEnumerating' || state.phase === 'pickerOpen') ? (
+      {!embedded && browserEntryEnabled && (state.phase === 'closed' || state.phase === 'targetEnumerating' || state.phase === 'pickerOpen') ? (
         <button
           ref={browserEntryButtonRef} type="button" data-testid="browser-window-entry" aria-label="打开浏览器窗口"
           onPointerDown={browserEntryDragHandlers.onPointerDown} onPointerMove={browserEntryDragHandlers.onPointerMove} onPointerUp={browserEntryDragHandlers.onPointerUp} onPointerCancel={browserEntryDragHandlers.onPointerCancel}

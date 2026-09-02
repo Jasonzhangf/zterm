@@ -3812,7 +3812,7 @@ function TerminalPageComponent({
           webUrl={resourceWebUrl}
           onWebUrlChange={setResourceWebUrl}
           onClose={() => setFileTransferOpen(false)}
-          renderRemoteWindow={(open) => open && renderRemoteWindow ? renderRemoteWindow({
+          renderRemoteWindow={(open, resourceTab) => open && renderRemoteWindow ? renderRemoteWindow({
             activeSessionId: uiSessionId,
             appForegroundActive,
             streamInvalidation: remoteWindowStreamInvalidation,
@@ -3829,6 +3829,8 @@ function TerminalPageComponent({
             bottomInsetPx: terminalChromeBottomPx + terminalImeLiftPx,
             bottomChromeInsetPx: terminalChromeBottomPx,
             embedded: true,
+            browserOnly: resourceTab === 'web',
+            browserEntryEnabled: false,
             onOpenStateChange: handleRemoteWindowOverlayOpenStateChange,
             onBodySubscriptionSuppressedChange: handleRemoteWindowBodySubscriptionSuppressedChange,
             onInputContextChange: handleRemoteWindowInputContextChange,
