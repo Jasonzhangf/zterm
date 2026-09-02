@@ -2748,18 +2748,18 @@
       "resource_id": "resource.remote_window_input_delivery_client",
       "status": "design",
       "resource_type": "client_control_resource",
-      "identity": "Client-owned remote-window reliable sequence/in-flight retry control and continuous pointer/scroll coalescing state, physically separate from user action payloads",
+      "identity": "Client-owned remote-window deadline-bound gesture Action delivery and immediate no-cache continuous scroll admission, physically separate from user action payloads and terminal buffer publication",
       "owner_feature": "desktop.remote_window_stream",
       "truth_store": "src/lib/remote-window-message-runtime.ts + src/contexts/session-context-remote-window-runtime.ts",
       "allowed_operations": [
         "classify_delivery_lane",
-        "retain_latest_pointer_move",
-        "accumulate_scroll_delta",
-        "flush_continuous_actions",
+        "admit_deadline_bound_gesture_action",
+        "send_gesture_lifecycle_without_stale_replay",
+        "admit_immediate_scroll_action",
+        "drop_expired_scroll_update",
         "sequence_reliable_action",
-        "await_reliable_ack",
-        "retry_same_sequence",
-        "flush_before_reliable_barrier",
+        "await_reliable_ack_with_deadline",
+        "retry_only_within_deadline",
         "cleanup_input_delivery_state"
       ],
       "direct_relations": [
@@ -2791,7 +2791,9 @@
       "canonical_docs": [
         "docs/resource-map.md",
         "docs/function-map.md",
-        "docs/decisions/2026-08-30-remote-window-quality-gesture-control-amendment.md"
+        "docs/decisions/2026-08-30-remote-window-quality-gesture-control-amendment.md",
+        "docs/decisions/2026-09-02-remote-window-input-action-sample-contract.md",
+        "docs/testing/remote-window-input-action-sample-test-design.md"
       ]
     },
     {
@@ -2904,7 +2906,9 @@
         "docs/resource-map.md",
         "docs/function-map.md",
         "docs/decisions/2026-07-19-remote-window-stream-truth.md",
-        "docs/decisions/2026-08-30-remote-window-quality-gesture-control-amendment.md"
+        "docs/decisions/2026-08-30-remote-window-quality-gesture-control-amendment.md",
+        "docs/decisions/2026-09-02-remote-window-input-action-sample-contract.md",
+        "docs/testing/remote-window-input-action-sample-test-design.md"
       ]
     },
     {
@@ -2922,6 +2926,8 @@
         "classify_cancel_release",
         "apply_scroll_tuning",
         "validate_input_context",
+        "classify_gesture_action_or_scroll_sample",
+        "stamp_monotonic_sample_time",
         "dispatch_supported_action",
         "emit_input_debug"
       ],

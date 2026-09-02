@@ -332,7 +332,7 @@ describe('remote-window-touch-action-runtime', () => {
     expect(secondMove.remoteEvents).toEqual([
       expect.objectContaining({ kind: 'scroll', moveCursor: false }),
     ]);
-    expect(up.remoteEvents).toEqual([]);
+    expect(up.remoteEvents).toEqual([expect.objectContaining({ kind: 'scroll', phase: 'end' })]);
   });
 
   it('uses absolute visible-source coordinates for mouse pointer drag', () => {
@@ -452,7 +452,55 @@ describe('remote-window-touch-action-runtime', () => {
       pointer: pointer({ pointerId: 10, clientX: 110, clientY: 70, buttons: 0 }),
       geometry,
     });
-    expect(tapUp.remoteEvents.map((event) => event.kind)).toEqual(['click']);
+    expect(tapUp.remoteEvents).toEqual([]);
+    expect(tapUp.localEffect).toEqual(expect.objectContaining({ kind: 'local-pan-end', moved: false }));
+  });
+
+  it('keeps a zoomed single-finger hold local until the overlay promotes it to a left drag', () => {
+    const down = resolveRemoteWindowTouchPointerDownRuntime({
+      state: createRemoteWindowTouchPointerState(),
+      pointer: pointer({ pointerId: 13, timeMs: 2_000 }),
+      geometry,
+      zoomedProjection: true,
+      touchMode: true,
+    });
+    const hold = resolveRemoteWindowTouchPointerMoveRuntime({
+      state: down.nextState,
+      pointer: pointer({ pointerId: 13, timeMs: 2_500 }),
+      geometry,
+      touchMode: true,
+    });
+    expect(hold.nextState.mode).toBe('localPan');
+    expect(hold.remoteEvents).toEqual([]);
+    expect(hold.nextState).toEqual(expect.objectContaining({ startAtMs: 2_000 }));
+
+    const promoted = resolveRemoteWindowTouchPointerMoveRuntime({
+      state: {
+        mode: 'actionDrag',
+        pointerId: 13,
+        button: 'left',
+        startClientX: 110,
+        startClientY: 70,
+        lastClientX: 110,
+        lastClientY: 70,
+        startAtMs: 2_000,
+      },
+      pointer: pointer({ pointerId: 13, clientX: 120, clientY: 70, timeMs: 2_520 }),
+      geometry,
+      touchMode: true,
+    });
+    expect(promoted.remoteEvents).toEqual([
+      expect.objectContaining({ kind: 'pointer', phase: 'move', pointerId: 13 }),
+    ]);
+    const release = resolveRemoteWindowTouchPointerUpRuntime({
+      state: promoted.nextState,
+      pointer: pointer({ pointerId: 13, clientX: 120, clientY: 70, buttons: 0, timeMs: 2_530 }),
+      geometry,
+      touchMode: true,
+    });
+    expect(release.remoteEvents).toEqual([
+      expect.objectContaining({ kind: 'pointer', phase: 'up', pointerId: 13 }),
+    ]);
   });
 
   it('releases a remote drag on cancel', () => {
@@ -536,7 +584,7 @@ describe('remote-window-touch-action-runtime', () => {
         touchMode: true,
       });
       expect(up.nextState.mode).toBe('idle');
-      expect(up.remoteEvents).toEqual([]);
+      expect(up.remoteEvents).toEqual([expect.objectContaining({ kind: 'scroll', phase: 'end' })]);
     });
 
     it('leaves long-press timing to the single overlay arena timer owner', () => {
