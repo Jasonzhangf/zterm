@@ -58,7 +58,7 @@ export function TerminalThemeSection({
                     borderRadius: '20px',
                     border: active ? `2px solid ${mobileTheme.colors.accent}` : `1px solid ${mobileTheme.colors.lightBorder}`,
                     backgroundColor: 'var(--zterm-settings-surface, #ffffff)',
-                    color: 'var(--zterm-settings-text, #171b2d)',
+                    color: 'var(--zterm-settings-text)',
                     padding: '14px',
                     cursor: 'pointer',
                     boxShadow: active ? '0 12px 26px rgba(31,214,122,0.14)' : mobileTheme.shadow.soft,

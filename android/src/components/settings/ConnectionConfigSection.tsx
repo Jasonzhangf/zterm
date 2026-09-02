@@ -238,12 +238,12 @@ export function ConnectionConfigSection({
         onClick={() => setExpanded((current) => !current)}
         style={{
           width: '100%',
-          border: `1px solid ${mobileTheme.colors.lightBorder}`,
+          border: '1px solid var(--zterm-settings-border)',
           borderRadius: '18px',
           padding: '14px 16px',
-          backgroundColor: 'var(--zterm-settings-surface, #ffffff)',
-          color: 'var(--zterm-settings-text, #171b2d)',
-          boxShadow: mobileTheme.shadow.soft,
+          backgroundColor: 'var(--zterm-settings-surface)',
+          color: 'var(--zterm-settings-text)',
+          boxShadow: 'var(--zterm-settings-shadow)',
           cursor: 'pointer',
           display: 'flex',
           alignItems: 'center',
@@ -261,7 +261,7 @@ export function ConnectionConfigSection({
             {connectionSummary}
           </div>
         </div>
-        <span style={{ flex: '0 0 auto', fontSize: '12px', fontWeight: 800, color: mobileTheme.colors.shell }}>
+        <span style={{ flex: '0 0 auto', fontSize: '12px', fontWeight: 800, color: 'var(--zterm-settings-accent)' }}>
           {expanded ? '收起' : '展开'}
         </span>
       </button>
@@ -275,7 +275,7 @@ export function ConnectionConfigSection({
         style={{
           border: `1px solid ${mobileTheme.colors.lightBorder}`,
           borderRadius: '8px',
-          backgroundColor: 'var(--zterm-settings-surface, #ffffff)',
+          backgroundColor: 'var(--zterm-settings-surface)',
           overflow: 'hidden',
         }}
       >
@@ -286,7 +286,7 @@ export function ConnectionConfigSection({
             alignItems: 'center',
             justifyContent: 'space-between',
             gap: '12px',
-            borderBottom: `1px solid ${mobileTheme.colors.lightBorder}`,
+            borderBottom: '1px solid var(--zterm-settings-border)',
           }}
         >
           <div>
@@ -295,7 +295,7 @@ export function ConnectionConfigSection({
               {relayHost}
             </div>
           </div>
-          <div style={{ fontSize: '11px', fontWeight: 800, color: loggedIn ? '#087a46' : mobileTheme.colors.lightMuted }}>
+          <div style={{ fontSize: '11px', fontWeight: 800, color: loggedIn ? 'var(--zterm-settings-accent)' : 'var(--zterm-settings-muted)' }}>
             {loggedIn ? 'SIGNED IN' : 'OPTIONAL'}
           </div>
         </div>
@@ -314,16 +314,16 @@ export function ConnectionConfigSection({
               style={{
                 padding: '10px 12px',
                 borderRadius: '8px',
-                backgroundColor: 'rgba(8, 122, 70, 0.08)',
-                border: '1px solid rgba(8, 122, 70, 0.24)',
+                backgroundColor: 'color-mix(in srgb, var(--zterm-settings-accent) 12%, transparent)',
+                border: '1px solid color-mix(in srgb, var(--zterm-settings-accent) 32%, transparent)',
                 display: 'grid',
                 gap: '4px',
               }}
             >
-              <div style={{ fontSize: '11px', fontWeight: 850, color: '#087a46', textTransform: 'uppercase' }}>
+              <div style={{ fontSize: '11px', fontWeight: 850, color: 'var(--zterm-settings-accent)', textTransform: 'uppercase' }}>
                 已登录
               </div>
-              <div style={{ fontSize: '15px', fontWeight: 850, color: 'var(--zterm-settings-text, #171b2d)' }}>
+              <div style={{ fontSize: '15px', fontWeight: 850, color: 'var(--zterm-settings-text)' }}>
                 {accountName}
               </div>
               <div style={{ fontSize: '12px', color: mobileTheme.colors.lightMuted }}>
@@ -338,9 +338,9 @@ export function ConnectionConfigSection({
               style={{
                 minHeight: '44px',
                 borderRadius: '7px',
-                border: `1px solid ${mobileTheme.colors.lightBorder}`,
-                backgroundColor: 'var(--zterm-settings-surface, #ffffff)',
-                color: '#a22c3f',
+                border: '1px solid var(--zterm-settings-border)',
+                backgroundColor: 'var(--zterm-settings-surface)',
+                color: 'var(--zterm-settings-danger, #a22c3f)',
                 fontWeight: 800,
                 fontSize: '14px',
                 cursor: 'pointer',
@@ -407,8 +407,8 @@ export function ConnectionConfigSection({
                 minHeight: '44px',
                 border: 'none',
                 borderRadius: '7px',
-                backgroundColor: '#111820',
-                color: 'var(--zterm-settings-accent-text, #ffffff)',
+                backgroundColor: 'var(--zterm-settings-accent)',
+                color: 'var(--zterm-settings-accent-text)',
                 fontSize: '14px',
                 fontWeight: 800,
                 opacity: busy || !loginUsername.trim() || !loginPassword ? 0.55 : 1,
@@ -424,7 +424,7 @@ export function ConnectionConfigSection({
                 minHeight: '20px',
                 fontSize: '12px',
                 lineHeight: 1.5,
-                color: relayStatusIsError ? '#a22c3f' : mobileTheme.colors.lightMuted,
+                color: relayStatusIsError ? 'var(--zterm-settings-danger, #a22c3f)' : 'var(--zterm-settings-muted)',
               }}
             >
               {relayStatus && !relayStatus.includes('已登录') ? relayStatus : '凭据仅发送到固定 Relay 服务'}
@@ -498,7 +498,7 @@ export function ConnectionConfigSection({
               borderRadius: '16px',
               border: 'none',
               backgroundColor: canAddServer ? 'var(--zterm-settings-accent, #128354)' : 'var(--zterm-settings-field, #d9e1ea)',
-              color: canAddServer ? 'var(--zterm-settings-accent-text, #ffffff)' : 'var(--zterm-settings-muted, #7b8aa1)',
+              color: canAddServer ? 'var(--zterm-settings-accent-text)' : 'var(--zterm-settings-muted)',
               fontWeight: 800,
               cursor: canAddServer ? 'pointer' : 'not-allowed',
             }}
@@ -527,8 +527,8 @@ export function ConnectionConfigSection({
                     borderRadius: '20px',
                     padding: '14px 16px',
                     textAlign: 'left',
-                    backgroundColor: active ? 'var(--zterm-settings-accent, #128354)' : 'var(--zterm-settings-surface, #ffffff)',
-                    color: active ? 'var(--zterm-settings-accent-text, #ffffff)' : 'var(--zterm-settings-text, #171b2d)',
+                    backgroundColor: active ? 'var(--zterm-settings-accent)' : 'var(--zterm-settings-surface)',
+                    color: active ? 'var(--zterm-settings-accent-text)' : 'var(--zterm-settings-text)',
                     boxShadow: mobileTheme.shadow.soft,
                     cursor: 'pointer',
                     display: 'flex',
@@ -561,12 +561,12 @@ export function ConnectionConfigSection({
                 key={`relay:${device.deviceId}:${entry.canonicalHostId}`}
                 data-testid="settings-relay-online-entry"
                 style={{
-                  border: '1px solid rgba(8,122,70,0.30)',
+                  border: '1px solid color-mix(in srgb, var(--zterm-settings-accent) 42%, transparent)',
                   borderRadius: '20px',
                   padding: '14px 16px',
                   textAlign: 'left',
-                  backgroundColor: 'var(--zterm-settings-surface, #ffffff)',
-                  color: 'var(--zterm-settings-text, #171b2d)',
+                backgroundColor: 'var(--zterm-settings-surface)',
+                color: 'var(--zterm-settings-text)',
                   boxShadow: mobileTheme.shadow.soft,
                   display: 'flex',
                   justifyContent: 'space-between',
@@ -581,13 +581,13 @@ export function ConnectionConfigSection({
                       fontWeight: 800,
                       padding: '2px 7px',
                       borderRadius: '999px',
-                      backgroundColor: 'rgba(8,122,70,0.12)',
-                      color: '#087a46',
+                      backgroundColor: 'color-mix(in srgb, var(--zterm-settings-accent) 18%, transparent)',
+                      color: 'var(--zterm-settings-accent)',
                     }}>
                       在线
                     </span>
                     {entry.boundBridgePreset ? (
-                      <span style={{ fontSize: '11px', color: '#087a46' }}>已绑定</span>
+                      <span style={{ fontSize: '11px', color: 'var(--zterm-settings-accent)' }}>已绑定</span>
                     ) : (
                       <span style={{ fontSize: '11px', color: mobileTheme.colors.lightMuted }}>未绑定</span>
                     )}
@@ -621,7 +621,7 @@ export function ConnectionConfigSection({
             height: '52px',
             borderRadius: '18px',
             border: 'none',
-            backgroundColor: 'rgba(255,124,146,0.16)',
+            backgroundColor: 'color-mix(in srgb, var(--zterm-settings-danger, #a22c3f) 16%, transparent)',
             color: mobileTheme.colors.danger,
             fontWeight: 800,
             cursor: 'pointer',

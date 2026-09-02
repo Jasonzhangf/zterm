@@ -605,7 +605,7 @@ export function TmuxSessionPickerSheet({
           WebkitOverflowScrolling: 'touch',
           borderTopLeftRadius: '28px',
           borderTopRightRadius: '28px',
-          backgroundColor: mobileTheme.colors.lightBg,
+          backgroundColor: 'var(--zterm-settings-background)',
           padding: `${mobileTheme.safeArea.top} 16px ${mobileTheme.safeArea.bottom}`,
           boxShadow: mobileTheme.shadow.strong,
           display: 'flex',
@@ -633,8 +633,8 @@ export function TmuxSessionPickerSheet({
               height: '42px',
               borderRadius: '14px',
               border: 'none',
-              backgroundColor: '#ffffff',
-              color: mobileTheme.colors.lightText,
+            backgroundColor: 'var(--zterm-settings-surface)',
+              color: 'var(--zterm-settings-text)',
               fontSize: '20px',
               boxShadow: mobileTheme.shadow.soft,
             }}
@@ -648,7 +648,7 @@ export function TmuxSessionPickerSheet({
             style={{
               borderRadius: '22px',
               padding: '16px',
-              backgroundColor: '#ffffff',
+              backgroundColor: 'var(--zterm-settings-surface)',
               boxShadow: mobileTheme.shadow.soft,
               display: 'flex',
               flexDirection: 'column',
@@ -683,7 +683,7 @@ export function TmuxSessionPickerSheet({
             style={{
               borderRadius: '22px',
               padding: '16px',
-              backgroundColor: '#ffffff',
+              backgroundColor: 'var(--zterm-settings-surface)',
               boxShadow: mobileTheme.shadow.soft,
               display: 'flex',
               flexDirection: 'column',
@@ -703,8 +703,8 @@ export function TmuxSessionPickerSheet({
                   padding: '0 14px',
                   borderRadius: '14px',
                   border: 'none',
-                  backgroundColor: mobileTheme.colors.shell,
-                  color: '#ffffff',
+                  backgroundColor: 'var(--zterm-settings-accent)',
+                  color: 'var(--zterm-settings-accent-text)',
                   fontWeight: 800,
                 }}
               >
@@ -718,8 +718,8 @@ export function TmuxSessionPickerSheet({
                   padding: '0 14px',
                   borderRadius: '14px',
                   border: 'none',
-                  backgroundColor: 'rgba(14,165,233,0.16)',
-                  color: '#0369a1',
+                  backgroundColor: 'var(--zterm-settings-field)',
+                  color: 'var(--zterm-settings-text)',
                   fontWeight: 800,
                 }}
               >
@@ -749,8 +749,8 @@ export function TmuxSessionPickerSheet({
                 border: `1px solid ${mobileTheme.colors.lightBorder}`,
                 borderRadius: '18px',
                 padding: '12px 14px',
-                backgroundColor: '#f6f8fb',
-                color: mobileTheme.colors.lightText,
+                backgroundColor: 'var(--zterm-settings-field)',
+                color: 'var(--zterm-settings-text)',
                 boxSizing: 'border-box',
                 resize: 'vertical',
               }}
@@ -786,7 +786,7 @@ export function TmuxSessionPickerSheet({
                     width: '216px',
                     minHeight: '216px',
                     borderRadius: '24px',
-                    backgroundColor: '#ffffff',
+                    backgroundColor: 'var(--zterm-settings-surface)',
                     boxShadow: mobileTheme.shadow.soft,
                     border: `1px solid ${mobileTheme.colors.lightBorder}`,
                     display: 'grid',
@@ -806,8 +806,8 @@ export function TmuxSessionPickerSheet({
                     border: `1px solid ${mobileTheme.colors.lightBorder}`,
                     borderRadius: '18px',
                     padding: '12px 14px',
-                    backgroundColor: '#ffffff',
-                    color: mobileTheme.colors.lightText,
+                    backgroundColor: 'var(--zterm-settings-field)',
+                    color: 'var(--zterm-settings-text)',
                     fontSize: '12px',
                     lineHeight: 1.5,
                     resize: 'vertical',
@@ -824,8 +824,8 @@ export function TmuxSessionPickerSheet({
                         padding: '0 14px',
                         borderRadius: '14px',
                         border: `1px solid ${mobileTheme.colors.lightBorder}`,
-                        backgroundColor: '#ffffff',
-                        color: mobileTheme.colors.lightText,
+                        backgroundColor: 'var(--zterm-settings-field)',
+                        color: 'var(--zterm-settings-text)',
                         fontWeight: 800,
                       }}
                     >
@@ -840,8 +840,8 @@ export function TmuxSessionPickerSheet({
                       padding: '0 14px',
                       borderRadius: '14px',
                       border: 'none',
-                      backgroundColor: mobileTheme.colors.shell,
-                      color: '#ffffff',
+                      backgroundColor: 'var(--zterm-settings-accent)',
+                      color: 'var(--zterm-settings-accent-text)',
                       fontWeight: 800,
                     }}
                   >
@@ -873,10 +873,10 @@ export function TmuxSessionPickerSheet({
                         setSelectedShareHostId(host.id);
                       }}
                       style={{
-                        border: active ? `2px solid ${mobileTheme.colors.shell}` : 'none',
+                        border: active ? '2px solid var(--zterm-settings-accent)' : 'none',
                         borderRadius: '16px',
                         padding: active ? '8px 10px' : '10px 12px',
-                        backgroundColor: active ? 'rgba(16,18,24,0.06)' : '#ffffff',
+                        backgroundColor: active ? 'color-mix(in srgb, var(--zterm-settings-accent) 10%, transparent)' : 'var(--zterm-settings-field)',
                         color: mobileTheme.colors.lightText,
                         boxShadow: mobileTheme.shadow.soft,
                         textAlign: 'left',
@@ -901,7 +901,7 @@ export function TmuxSessionPickerSheet({
             style={{
               borderRadius: '22px',
               padding: '16px',
-              backgroundColor: '#ffffff',
+              backgroundColor: 'var(--zterm-settings-surface)',
               boxShadow: mobileTheme.shadow.soft,
               display: 'flex',
               flexDirection: 'column',
@@ -942,7 +942,7 @@ export function TmuxSessionPickerSheet({
           style={{
             borderRadius: '22px',
             padding: '16px',
-            backgroundColor: '#ffffff',
+            backgroundColor: 'var(--zterm-settings-surface)',
             boxShadow: mobileTheme.shadow.soft,
             display: 'flex',
             flexDirection: 'column',
@@ -985,7 +985,7 @@ export function TmuxSessionPickerSheet({
                     minHeight: '42px',
                     borderRadius: '14px',
                     border: `1px solid ${newSessionBackend === backend ? mobileTheme.colors.accent : mobileTheme.colors.lightBorder}`,
-                    backgroundColor: newSessionBackend === backend ? mobileTheme.colors.accentSoft : '#ffffff',
+                    backgroundColor: newSessionBackend === backend ? 'color-mix(in srgb, var(--zterm-settings-accent) 18%, transparent)' : 'var(--zterm-settings-field)',
                     color: mobileTheme.colors.lightText,
                     fontWeight: 800,
                     padding: '0 10px',
@@ -1035,7 +1035,7 @@ export function TmuxSessionPickerSheet({
           style={{
               borderRadius: '16px',
               padding: '12px 14px',
-              backgroundColor: '#f6f8fb',
+              backgroundColor: 'var(--zterm-settings-field)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
@@ -1077,8 +1077,8 @@ export function TmuxSessionPickerSheet({
                   height: '38px',
                   border: 'none',
                   borderRadius: '12px',
-                  backgroundColor: mobileTheme.colors.shell,
-                  color: '#ffffff',
+                  backgroundColor: 'var(--zterm-settings-accent)',
+                  color: 'var(--zterm-settings-accent-text)',
                   fontWeight: 800,
                   boxShadow: mobileTheme.shadow.soft,
                 }}
@@ -1093,7 +1093,7 @@ export function TmuxSessionPickerSheet({
                     height: '38px',
                     border: 'none',
                     borderRadius: '12px',
-                    backgroundColor: '#ffffff',
+                    backgroundColor: 'var(--zterm-settings-surface)',
                     color: mobileTheme.colors.lightText,
                     fontWeight: 700,
                     boxShadow: mobileTheme.shadow.soft,
@@ -1125,8 +1125,8 @@ export function TmuxSessionPickerSheet({
                     border: 'none',
                     borderRadius: '16px',
                     padding: '10px 12px',
-                    backgroundColor: active ? mobileTheme.colors.shell : '#ffffff',
-                    color: active ? '#ffffff' : mobileTheme.colors.lightText,
+                    backgroundColor: active ? 'var(--zterm-settings-accent)' : 'var(--zterm-settings-field)',
+                    color: active ? 'var(--zterm-settings-accent-text)' : 'var(--zterm-settings-text)',
                     boxShadow: mobileTheme.shadow.soft,
                     textAlign: 'left',
                   }}
@@ -1191,7 +1191,7 @@ export function TmuxSessionPickerSheet({
           style={{
             borderRadius: '22px',
             padding: '16px',
-            backgroundColor: '#ffffff',
+            backgroundColor: 'var(--zterm-settings-surface)',
             boxShadow: mobileTheme.shadow.soft,
             display: 'flex',
             flexDirection: 'column',
@@ -1245,7 +1245,7 @@ export function TmuxSessionPickerSheet({
                       height: '38px',
                       borderRadius: '12px',
                       border: selected ? `2px solid ${mobileTheme.colors.accent}` : `1px solid ${mobileTheme.colors.lightBorder}`,
-                      backgroundColor: selected ? mobileTheme.colors.accentSoft : '#ffffff',
+                      backgroundColor: selected ? 'color-mix(in srgb, var(--zterm-settings-accent) 18%, transparent)' : 'var(--zterm-settings-field)',
                       color: selected ? mobileTheme.colors.accent : mobileTheme.colors.lightMuted,
                       fontWeight: 900,
                       flexShrink: 0,
@@ -1335,8 +1335,8 @@ export function TmuxSessionPickerSheet({
                     height: '44px',
                     border: 'none',
                     borderRadius: '14px',
-                    backgroundColor: mobileTheme.colors.shellMuted,
-                    color: '#ffffff',
+                    backgroundColor: 'var(--zterm-settings-field)',
+                    color: 'var(--zterm-settings-text)',
                   }}
                 >
                     ✎
@@ -1382,8 +1382,8 @@ export function TmuxSessionPickerSheet({
                 minHeight: '48px',
                 border: 'none',
                 borderRadius: '16px',
-                backgroundColor: mobileTheme.colors.shell,
-                color: '#ffffff',
+                backgroundColor: 'var(--zterm-settings-accent)',
+                color: 'var(--zterm-settings-accent-text)',
                 fontWeight: 800,
               }}
             >
@@ -1416,8 +1416,8 @@ export function TmuxSessionPickerSheet({
                 minWidth: '88px',
                 border: 'none',
                 borderRadius: '16px',
-                backgroundColor: mobileTheme.colors.shell,
-                color: '#ffffff',
+                backgroundColor: 'var(--zterm-settings-accent)',
+                color: 'var(--zterm-settings-accent-text)',
                 fontWeight: 800,
               }}
             >
@@ -1431,7 +1431,7 @@ export function TmuxSessionPickerSheet({
             style={{
               borderRadius: '22px',
               padding: '16px',
-              backgroundColor: '#ffffff',
+              backgroundColor: 'var(--zterm-settings-surface)',
               boxShadow: mobileTheme.shadow.soft,
               display: 'flex',
               flexDirection: 'column',
@@ -1477,7 +1477,7 @@ export function TmuxSessionPickerSheet({
             backgroundColor: 'rgba(15, 23, 42, 0.42)',
           }}
         >
-          <div style={{ width: 'min(420px, 100%)', borderRadius: '24px', padding: '20px', backgroundColor: '#ffffff', boxShadow: mobileTheme.shadow.soft }}>
+          <div style={{ width: 'min(420px, 100%)', borderRadius: '24px', padding: '20px', backgroundColor: 'var(--zterm-settings-surface)', boxShadow: mobileTheme.shadow.soft }}>
             <SectionTitle title="选择新 session backend" subtitle="只创建单一 terminal surface；Herdr 不映射 pane、tab 或 workspace。" />
             <div style={{ display: 'grid', gap: '10px', marginTop: '16px' }}>
               {(['tmux', 'herdr'] as const).map((backend) => (
@@ -1489,12 +1489,12 @@ export function TmuxSessionPickerSheet({
                     setBackendChoiceOpen(false);
                     void handleCreateSession(backend);
                   }}
-                  style={{ border: 'none', borderRadius: '16px', padding: '14px', backgroundColor: backend === 'herdr' ? mobileTheme.colors.accentSoft : mobileTheme.colors.shell, color: backend === 'herdr' ? mobileTheme.colors.lightText : '#ffffff', fontWeight: 800, textAlign: 'left' }}
+                  style={{ border: 'none', borderRadius: '16px', padding: '14px', backgroundColor: backend === 'herdr' ? 'var(--zterm-settings-field)' : 'var(--zterm-settings-accent)', color: backend === 'herdr' ? 'var(--zterm-settings-text)' : 'var(--zterm-settings-accent-text)', fontWeight: 800, textAlign: 'left' }}
                 >
                   {backend === 'tmux' ? 'tmux — existing tmux backend' : 'Herdr — official single-session backend'}
                 </button>
               ))}
-              <button type="button" onClick={() => setBackendChoiceOpen(false)} style={{ border: `1px solid ${mobileTheme.colors.lightBorder}`, borderRadius: '16px', padding: '12px', backgroundColor: '#ffffff', color: mobileTheme.colors.lightText }}>取消</button>
+              <button type="button" onClick={() => setBackendChoiceOpen(false)} style={{ border: '1px solid var(--zterm-settings-border)', borderRadius: '16px', padding: '12px', backgroundColor: 'var(--zterm-settings-field)', color: 'var(--zterm-settings-text)' }}>取消</button>
             </div>
           </div>
         </div>

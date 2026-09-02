@@ -38,15 +38,15 @@ export function RelayDevicePicker({
         <div
           style={{
             borderRadius: '18px',
-            backgroundColor: '#f6f8fb',
+            backgroundColor: 'var(--zterm-settings-field)',
             padding: '14px 16px',
             display: 'grid',
             gap: '6px',
             fontSize: '12px',
-            color: mobileTheme.colors.lightMuted,
+            color: 'var(--zterm-settings-muted)',
           }}
         >
-          <div style={{ fontSize: '14px', fontWeight: 800, color: mobileTheme.colors.lightText }}>
+          <div style={{ fontSize: '14px', fontWeight: 800, color: 'var(--zterm-settings-text)' }}>
             当前绑定：{selectedDevice.deviceName || selectedDevice.deviceId}
           </div>
           <div>deviceId: {selectedDevice.deviceId}</div>
@@ -61,8 +61,8 @@ export function RelayDevicePicker({
               padding: '0 14px',
               borderRadius: '14px',
               border: 'none',
-              backgroundColor: '#eef2f8',
-              color: mobileTheme.colors.lightText,
+              backgroundColor: 'var(--zterm-settings-field)',
+              color: 'var(--zterm-settings-text)',
               fontWeight: 700,
               cursor: 'pointer',
               justifySelf: 'start',
@@ -74,7 +74,7 @@ export function RelayDevicePicker({
       ) : null}
 
       {devices.length === 0 ? (
-        <div style={{ fontSize: '13px', color: mobileTheme.colors.lightMuted, lineHeight: 1.6 }}>
+        <div style={{ fontSize: '13px', color: 'var(--zterm-settings-muted)', lineHeight: 1.6 }}>
           {relayEnabled ? '当前账号下还没有在线 daemon 设备。' : '未登录 relay，因此这里不显示 daemon 列表。'}
         </div>
       ) : (
@@ -91,7 +91,7 @@ export function RelayDevicePicker({
                     ? `2px solid ${mobileTheme.colors.accent}`
                     : `1px solid ${mobileTheme.colors.lightBorder}`,
                   borderRadius: '18px',
-                  backgroundColor: '#ffffff',
+                  backgroundColor: 'var(--zterm-settings-surface)',
                   padding: '14px 16px',
                   textAlign: 'left',
                   cursor: 'pointer',
@@ -99,20 +99,20 @@ export function RelayDevicePicker({
                 }}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center' }}>
-                  <div style={{ fontSize: '15px', fontWeight: 800, color: mobileTheme.colors.lightText }}>
+                  <div style={{ fontSize: '15px', fontWeight: 800, color: 'var(--zterm-settings-text)' }}>
                     {device.deviceName || device.deviceId}
                   </div>
-                  <div style={{ fontSize: '11px', color: mobileTheme.colors.accent, fontWeight: 800 }}>
+                  <div style={{ fontSize: '11px', color: 'var(--zterm-settings-accent)', fontWeight: 800 }}>
                     {active ? '已选中' : '在线'}
                   </div>
                 </div>
-                <div style={{ marginTop: '6px', fontSize: '12px', color: mobileTheme.colors.lightMuted }}>
+                <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--zterm-settings-muted)' }}>
                   deviceId: {device.deviceId}
                 </div>
-                <div style={{ marginTop: '4px', fontSize: '12px', color: mobileTheme.colors.lightMuted }}>
+                <div style={{ marginTop: '4px', fontSize: '12px', color: 'var(--zterm-settings-muted)' }}>
                   hostId: {device.daemon.hostId}
                 </div>
-                <div style={{ marginTop: '4px', fontSize: '12px', color: mobileTheme.colors.lightMuted }}>
+                <div style={{ marginTop: '4px', fontSize: '12px', color: 'var(--zterm-settings-muted)' }}>
                   platform: {device.platform || '-'} · daemon version: {device.daemon.version || '-'}
                 </div>
               </button>

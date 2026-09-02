@@ -33,6 +33,7 @@ import { upsertBridgeServer } from './lib/bridge-settings';
 import { applyTraversalRelaySettings } from './lib/traversal-relay-client';
 import { APP_VERSION, APP_VERSION_CODE } from './lib/app-version';
 import { buildAppUpdateManifestCandidates } from './lib/app-update-relay-manifest';
+import { resolveSettingsTheme } from './lib/mobile-ui';
 import type { AppUpdateManifestCandidate, AppUpdateRouteSnapshot } from './lib/app-update';
 import { registerClientDebugSnapshotSource } from './lib/client-debug-snapshot';
 import { openConnectionsPage, openTerminalPage } from './lib/page-state';
@@ -759,12 +760,24 @@ export function AppContent({
     ensureTerminalPageVisible();
   }, [ensureTerminalPageVisible, handleSwitchSessionWithHistory]);
 
+  const appTheme = useMemo(() => resolveSettingsTheme(bridgeSettings.terminalShellSkin), [bridgeSettings.terminalShellSkin]);
+
   return (
     <div
       style={{
         position: 'fixed',
         inset: 0,
-        backgroundColor: '#edf2f6',
+        backgroundColor: appTheme.background,
+        color: appTheme.text,
+        ['--zterm-settings-background' as string]: appTheme.background,
+        ['--zterm-settings-surface' as string]: appTheme.surface,
+        ['--zterm-settings-field' as string]: appTheme.field,
+        ['--zterm-settings-text' as string]: appTheme.text,
+        ['--zterm-settings-muted' as string]: appTheme.muted,
+        ['--zterm-settings-border' as string]: appTheme.border,
+        ['--zterm-settings-accent' as string]: appTheme.accent,
+        ['--zterm-settings-accent-text' as string]: appTheme.accentText,
+        ['--zterm-settings-shadow' as string]: appTheme.shadow,
         display: 'flex',
         justifyContent: 'center',
         overflow: 'hidden',
