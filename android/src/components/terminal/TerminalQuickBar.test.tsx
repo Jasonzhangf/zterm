@@ -434,6 +434,34 @@ describe("TerminalQuickBar", () => {
     });
   });
 
+  it("sends the complete multiline goal prompt without trimming its body", async () => {
+    const body = '\n  第二行缩进\n```\nconst value = "完整内容";\n```\n末尾';
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { readText: vi.fn().mockResolvedValue(`/goal ${body}`) },
+    });
+    const onSendSequence = vi.fn();
+    renderQuickBar({
+      onSendSequence,
+      shortcutActions: [
+        {
+          id: "preset-bottom-scroll-paste",
+          label: "Paste",
+          sequence: "\x16",
+          row: "bottom-scroll",
+          order: 0,
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Paste" }));
+
+    await waitFor(() => {
+      expect(onSendSequence).toHaveBeenCalledTimes(1);
+      expect(onSendSequence).toHaveBeenCalledWith(`/goal ${body}\r`);
+    });
+  });
+
 
 
 

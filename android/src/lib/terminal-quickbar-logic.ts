@@ -44,7 +44,9 @@ export function resolveGoalPastePlan(value: string): GoalPastePlan | null {
   let remainder: string | null = null;
 
   if (trimmed.startsWith('/goal') && (trimmed.length === 5 || /\s/u.test(trimmed[5] || ''))) {
-    remainder = trimmed.slice(5).trimStart();
+    // Remove only the command separator. The rest of the prompt is payload:
+    // indentation, blank lines, and code blocks must reach the terminal intact.
+    remainder = trimmed.slice(5).replace(/^[ \t]/u, '');
   } else if (trimmed.startsWith('目标')) {
     remainder = trimmed.slice(2);
   }

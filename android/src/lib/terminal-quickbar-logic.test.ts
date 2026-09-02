@@ -9,6 +9,7 @@ import {
   moveShortcutActionWithinRow,
   normalizeSequenceForImmediateSend,
   resolveOverlayViewportMetrics,
+  resolveGoalPastePlan,
   sortShortcutActions,
   validateShortcutTokensForRow,
   type DraftShortcutAction,
@@ -39,6 +40,20 @@ describe('terminal-quickbar-logic', () => {
     expect(normalizeSequenceForImmediateSend('ls')).toBe('ls\r');
     expect(normalizeSequenceForImmediateSend('a\nb')).toBe('a\rb\r');
     expect(normalizeSequenceForImmediateSend('  ')).toBe('');
+  });
+
+  it('preserves the complete multiline goal payload after the command separator', () => {
+    const body = '\n  需求：保持首行缩进\n```json\n{"输入":"值"}\n```\n末行';
+    const plan = resolveGoalPastePlan(`/goal ${body}`);
+    expect(plan).toEqual({
+      typedPrefix: '/goal ',
+      pastedText: body,
+      submit: '\r',
+    });
+  });
+
+  it('removes only one inline separator and keeps additional spacing', () => {
+    expect(resolveGoalPastePlan('/goal    保留缩进')?.pastedText).toBe('   保留缩进');
   });
 
   it('builds visible row actions with sequence dedupe', () => {
