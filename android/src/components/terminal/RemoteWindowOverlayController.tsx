@@ -2321,7 +2321,9 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
         clientY: event.clientY,
       });
     }
-    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
 
     if (!gesture) {
       surfacePointersRef.current.delete(event.pointerId);
@@ -2498,7 +2500,9 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   const handleVideoSurfacePointerCancel = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     const gesture = surfaceGestureRef.current;
     surfacePointersRef.current.delete(event.pointerId);
-    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
     const runtimeGesture = gesture ? toRemoteWindowTouchGestureState(gesture) : createRemoteWindowTouchPointerState();
     if (
       gesture
