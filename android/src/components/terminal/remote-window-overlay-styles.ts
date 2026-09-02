@@ -59,7 +59,7 @@ export const styles: Record<string, CSSProperties> = {
   entryButton: {
     position: 'fixed',
     right: 14,
-    zIndex: 44,
+    zIndex: 30,
     width: 48,
     height: 48,
     borderRadius: 14,

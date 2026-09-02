@@ -636,7 +636,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       events,
     });
   }, [activeSessionId, currentLockedStreamId, currentLockedTarget, markQualityInteractionActive, sendRemoteWindowInputEventsForTarget, state.phase]);
-
   const setFloatingOffset = useCallback((next: FloatingOverlayOffset) => {
     floatingOffsetRef.current = next;
     setFloatingOffsetState(next);
@@ -2614,6 +2613,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       onRefresh={() => handleOpenPicker({ forceRefresh: true })}
       onClose={handleClose}
       browserOnly={browserPickerOpen}
+      embedded={embedded}
     />
   ) : null;
 

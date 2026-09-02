@@ -23,6 +23,7 @@ export interface RemoteWindowTargetPickerProps {
   onRefresh: () => void;
   onClose: () => void;
   browserOnly?: boolean;
+  embedded?: boolean;
 }
 
 function RemoteWindowPickerErrors({ errors }: { errors: RemoteWindowStreamErrorPayload[] }) {
@@ -52,6 +53,7 @@ export function RemoteWindowTargetPicker({
   onRefresh,
   onClose,
   browserOnly = false,
+  embedded = false,
 }: RemoteWindowTargetPickerProps) {
   const visibleTargets = browserOnly ? targets.filter(isRemoteWindowChromeTarget) : targets;
   const appGroups = phase === 'pickerOpen' ? buildRemoteWindowAppTargetGroups(visibleTargets) : [];
@@ -59,7 +61,14 @@ export function RemoteWindowTargetPicker({
     ? visibleTargets.filter((target) => target.videoTarget.kind === 'iterm2-pane')
     : [];
   return (
-    <div data-testid="remote-window-picker" style={styles.pickerPanel}>
+    <div data-testid="remote-window-picker" style={{
+      ...styles.pickerPanel,
+      ...(embedded ? {
+        position: 'relative', left: 'auto', right: 'auto', top: 'auto',
+        maxHeight: 'none', height: '100%', border: 0, borderRadius: 0,
+        boxShadow: 'none', backdropFilter: 'none',
+      } : {}),
+    }}>
       <div style={styles.panelHeader}>
         <div>
           <div style={styles.panelTitle}>{browserOnly ? '浏览器窗口' : '远程窗口'}</div>
@@ -87,7 +96,7 @@ export function RemoteWindowTargetPicker({
         <div data-testid="remote-window-picker-error" style={styles.errorBox}>{errorMessage}</div>
       ) : null}
       {phase === 'pickerOpen' && visibleTargets.length === 0 ? <RemoteWindowPickerErrors errors={errors} /> : null}
-      <div style={styles.targetList}>
+      <div style={{ ...styles.targetList, ...(embedded ? { flex: 1, maxHeight: 'none' } : {}) }}>
         {phase === 'targetEnumerating' ? (
           <div data-testid="remote-window-picker-loading" style={styles.emptyState}>读取中</div>
         ) : visibleTargets.length === 0 ? (
