@@ -10,6 +10,7 @@ export interface ResourceBottomSheetProps {
   webUrl?: string;
   onWebUrlChange?: (url: string) => void;
   onClose: () => void;
+  onDownload?: () => void;
   initialTab?: ResourceTab;
   placement?: ResourcePlacement;
 }
@@ -25,7 +26,7 @@ const SHEET_OVERLAY: React.CSSProperties = {
 
 const SHEET: React.CSSProperties = {
   width: '100%',
-  height: 'min(86vh, 760px)',
+  height: 'min(52vh, 560px)',
   display: 'flex',
   flexDirection: 'column',
   overflow: 'hidden',
@@ -33,8 +34,8 @@ const SHEET: React.CSSProperties = {
   color: 'var(--zterm-panel-text)',
   border: '1px solid var(--zterm-panel-border)',
   borderBottom: 0,
-  borderRadius: '22px 22px 0 0',
-  boxShadow: '0 -18px 48px var(--zterm-panel-shadow)',
+  borderRadius: '24px 24px 0 0',
+  boxShadow: '0 -12px 36px var(--zterm-panel-shadow)',
 };
 
 const buttonStyle: React.CSSProperties = {
@@ -55,6 +56,7 @@ export function ResourceBottomSheet({
   webUrl = '',
   onWebUrlChange,
   onClose,
+  onDownload,
   initialTab = 'files',
   placement,
 }: ResourceBottomSheetProps) {
@@ -139,14 +141,15 @@ export function ResourceBottomSheet({
         style={{ ...SHEET, width: resolvedPlacement === 'end' ? 'min(560px, 94vw)' : '100%', height: resolvedPlacement === 'end' ? '100%' : SHEET.height, borderRadius: resolvedPlacement === 'end' ? '22px 0 0 22px' : SHEET.borderRadius, borderBottom: resolvedPlacement === 'end' ? '1px solid var(--zterm-panel-border)' : 0, borderRight: 0 }}
         onClick={(event) => event.stopPropagation()}
       >
-        <div style={{ display: 'flex', justifyContent: 'center', padding: '10px 0 2px' }}>
-          <span aria-hidden="true" style={{ width: 42, height: 4, borderRadius: 99, background: 'var(--zterm-panel-border)' }} />
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '10px 0 4px' }}>
+          <span aria-hidden="true" style={{ width: 38, height: 4, borderRadius: 99, background: 'var(--zterm-panel-border)' }} />
         </div>
-        <header style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px 12px' }}>
-          <div style={{ flex: 1, fontSize: 18, fontWeight: 800 }}>资源</div>
-          <button type="button" aria-label="关闭资源抽屉" style={buttonStyle} onClick={onClose}>关闭</button>
+        <header style={{ display: 'grid', gridTemplateColumns: '44px 1fr 96px', alignItems: 'center', gap: 8, padding: '8px 16px 14px', borderBottom: '1px solid var(--zterm-panel-border)' }}>
+          <button type="button" aria-label="关闭资源抽屉" style={{ ...buttonStyle, width: 44, padding: 0, border: 0, borderRadius: 22, fontSize: 13 }} onClick={onClose}>收起</button>
+          <div style={{ textAlign: 'center', fontSize: 22, fontWeight: 800, letterSpacing: '-0.02em' }}>预览</div>
+          <button type="button" aria-label="下载当前资源" disabled={!onDownload} onClick={onDownload} style={{ ...buttonStyle, border: 0, background: 'var(--zterm-panel-surface)', fontSize: 16, opacity: onDownload ? 1 : 0.5 }}>下载</button>
         </header>
-        <nav aria-label="资源类型" style={{ display: 'flex', gap: 8, padding: '0 14px 10px' }}>
+        <nav aria-label="资源类型" style={{ display: 'flex', gap: 6, padding: '10px 16px 8px' }}>
           {(['files', 'stream', 'web'] as const).map((item) => (
             <button
               key={item}
