@@ -17,8 +17,8 @@ export const REMOTE_WINDOW_VIDEO_BITRATE_BOUNDS: Readonly<Record<RemoteWindowVid
   minBps: number;
   maxBps: number;
 }>> = Object.freeze({
-  smooth: Object.freeze({ minBps: 1_000_000, maxBps: 8_000_000 }),
-  quality: Object.freeze({ minBps: 6_000_000, maxBps: 18_000_000 }),
+  smooth: Object.freeze({ minBps: 750_000, maxBps: 4_000_000 }),
+  quality: Object.freeze({ minBps: 3_000_000, maxBps: 10_000_000 }),
 });
 
 export interface RemoteWindowNetworkQualityInput {
@@ -214,10 +214,10 @@ export function buildRemoteWindowVideoProfile(
         preference,
         // Smooth mode keeps a phone-sized half-resolution capture and a
         // stable 30fps cadence; interaction changes frame age, not cadence.
-        maxBitrateBps: 4_000_000,
+        maxBitrateBps: 2_000_000,
         maxFrameRateFps: 30,
-        maxCaptureWidth: 960,
-        maxCaptureHeight: 600,
+        maxCaptureWidth: 720,
+        maxCaptureHeight: 720,
         maxFrameAgeMs: interactionActive ? 80 : 100,
         interactionActive,
         overviewMaxBitrateBps: interactionActive ? 150_000 : 250_000,
@@ -225,10 +225,10 @@ export function buildRemoteWindowVideoProfile(
       }
     : {
         preference,
-        maxBitrateBps: interactionActive ? bitrateBounds.maxBps : 16_000_000,
+        maxBitrateBps: interactionActive ? bitrateBounds.maxBps : 8_000_000,
         maxFrameRateFps: 30,
         maxCaptureWidth: 1920,
-        maxCaptureHeight: 1200,
+        maxCaptureHeight: 1920,
         maxFrameAgeMs: interactionActive ? 120 : 150,
         interactionActive,
         overviewMaxBitrateBps: interactionActive ? 150_000 : 300_000,
@@ -251,8 +251,8 @@ export function buildRemoteWindowVideoProfile(
         ...base,
         maxBitrateBps: cause === 'network' ? 1_000_000 : 1_500_000,
         maxFrameRateFps: 15,
-        maxCaptureWidth: 960,
-        maxCaptureHeight: 600,
+        maxCaptureWidth: 720,
+        maxCaptureHeight: 720,
         maxFrameAgeMs: cause === 'network' ? 120 : 100,
         overviewMaxBitrateBps: 100_000,
         overviewMaxFrameRateFps: 1,
@@ -262,8 +262,8 @@ export function buildRemoteWindowVideoProfile(
       ...base,
       maxBitrateBps: cause === 'network' ? 2_000_000 : 2_500_000,
       maxFrameRateFps: 30,
-      maxCaptureWidth: 960,
-      maxCaptureHeight: 600,
+      maxCaptureWidth: 720,
+      maxCaptureHeight: 720,
       maxFrameAgeMs: cause === 'network' ? 100 : 90,
       overviewMaxBitrateBps: 150_000,
       overviewMaxFrameRateFps: 1,
@@ -272,10 +272,10 @@ export function buildRemoteWindowVideoProfile(
   if (level === 2) {
     return {
       ...base,
-      maxBitrateBps: cause === 'network' ? 8_000_000 : 9_000_000,
+      maxBitrateBps: cause === 'network' ? 4_000_000 : 5_000_000,
       maxFrameRateFps: 15,
       maxCaptureWidth: 1920,
-      maxCaptureHeight: 1200,
+      maxCaptureHeight: 1920,
       maxFrameAgeMs: 180,
       overviewMaxBitrateBps: 150_000,
       overviewMaxFrameRateFps: 1,
@@ -283,10 +283,10 @@ export function buildRemoteWindowVideoProfile(
   }
   return {
     ...base,
-    maxBitrateBps: cause === 'network' ? 12_000_000 : 14_000_000,
+    maxBitrateBps: cause === 'network' ? 6_000_000 : 7_000_000,
     maxFrameRateFps: 24,
     maxCaptureWidth: 1920,
-    maxCaptureHeight: 1200,
+    maxCaptureHeight: 1920,
     maxFrameAgeMs: 150,
     overviewMaxBitrateBps: 200_000,
     overviewMaxFrameRateFps: 2,

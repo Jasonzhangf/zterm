@@ -58,8 +58,8 @@ function makeStorage() {
 
 describe('remote-window-video-quality', () => {
   it('exposes internal bitrate guardrails for policy tuning without widening the wire contract', () => {
-    expect(REMOTE_WINDOW_VIDEO_BITRATE_BOUNDS.smooth).toEqual({ minBps: 1_000_000, maxBps: 8_000_000 });
-    expect(REMOTE_WINDOW_VIDEO_BITRATE_BOUNDS.quality).toEqual({ minBps: 6_000_000, maxBps: 18_000_000 });
+    expect(REMOTE_WINDOW_VIDEO_BITRATE_BOUNDS.smooth).toEqual({ minBps: 750_000, maxBps: 4_000_000 });
+    expect(REMOTE_WINDOW_VIDEO_BITRATE_BOUNDS.quality).toEqual({ minBps: 3_000_000, maxBps: 10_000_000 });
     expect(buildRemoteWindowVideoProfile('smooth', { cause: 'network', level: 2 }).maxBitrateBps)
       .toBeGreaterThanOrEqual(REMOTE_WINDOW_VIDEO_BITRATE_BOUNDS.smooth.minBps);
     expect(buildRemoteWindowVideoProfile('quality', { cause: 'network', level: 2 }).maxBitrateBps)
@@ -70,20 +70,20 @@ describe('remote-window-video-quality', () => {
     expect(resolveDefaultRemoteWindowVideoPreference(makeTarget(1920, 1080))).toBe('smooth');
     expect(buildRemoteWindowVideoProfile('smooth')).toEqual({
       preference: 'smooth',
-      maxBitrateBps: 4_000_000,
+      maxBitrateBps: 2_000_000,
       maxFrameRateFps: 30,
-      maxCaptureWidth: 960,
-      maxCaptureHeight: 600,
+      maxCaptureWidth: 720,
+      maxCaptureHeight: 720,
       maxFrameAgeMs: 100,
       interactionActive: false,
       overviewMaxBitrateBps: 250_000,
       overviewMaxFrameRateFps: 2,
     });
     expect(buildRemoteWindowVideoProfile('quality')).toMatchObject({
-      maxBitrateBps: 16_000_000,
+      maxBitrateBps: 8_000_000,
       maxFrameRateFps: 30,
       maxCaptureWidth: 1920,
-      maxCaptureHeight: 1200,
+      maxCaptureHeight: 1920,
       maxFrameAgeMs: 150,
     });
     expect(resolveRemoteWindowDesktopCoverageRatio(makeTarget(960, 540))).toBe(0.25);
@@ -117,14 +117,14 @@ describe('remote-window-video-quality', () => {
 
   it('keeps smooth interaction at 30fps and uses a half-resolution capture', () => {
     expect(buildRemoteWindowVideoProfile('smooth', { interactionActive: true })).toMatchObject({
-      maxBitrateBps: 4_000_000,
+      maxBitrateBps: 2_000_000,
       maxFrameRateFps: 30,
-      maxCaptureWidth: 960,
+      maxCaptureWidth: 720,
       maxFrameAgeMs: 80,
       overviewMaxFrameRateFps: 1,
     });
     expect(buildRemoteWindowVideoProfile('quality', { interactionActive: true })).toMatchObject({
-      maxBitrateBps: 18_000_000,
+      maxBitrateBps: 10_000_000,
       maxFrameRateFps: 30,
       maxCaptureWidth: 1920,
       maxFrameAgeMs: 120,
@@ -143,8 +143,8 @@ describe('remote-window-video-quality', () => {
   it('steps quality mode by reducing frame rate while retaining full capture resolution', () => {
     const first = buildRemoteWindowVideoProfile('quality', { cause: 'network', level: 1 });
     const second = buildRemoteWindowVideoProfile('quality', { cause: 'network', level: 2 });
-    expect(first).toMatchObject({ maxBitrateBps: 12_000_000, maxFrameRateFps: 24, maxCaptureWidth: 1920 });
-    expect(second).toMatchObject({ maxBitrateBps: 8_000_000, maxFrameRateFps: 15, maxCaptureWidth: 1920 });
+    expect(first).toMatchObject({ maxBitrateBps: 6_000_000, maxFrameRateFps: 24, maxCaptureWidth: 1920 });
+    expect(second).toMatchObject({ maxBitrateBps: 4_000_000, maxFrameRateFps: 15, maxCaptureWidth: 1920 });
   });
 
   it('keeps latency-only pressure spatially clear and maps CPU pressure to host, not network', () => {
@@ -154,7 +154,7 @@ describe('remote-window-video-quality', () => {
       rttMs: 600,
     });
     expect(latency).toMatchObject({
-      maxBitrateBps: 16_000_000,
+      maxBitrateBps: 8_000_000,
       maxCaptureWidth: 1920,
       maxFrameAgeMs: 120,
     });
@@ -168,7 +168,7 @@ describe('remote-window-video-quality', () => {
       sample: { sampledAtMs: 3_000, qualityLimitationReason: 'cpu' },
     });
     expect(secondCpu).toMatchObject({ cause: 'host', reason: 'downgrade' });
-    expect(secondCpu.profile).toMatchObject({ maxCaptureWidth: 1920, maxBitrateBps: 14_000_000 });
+    expect(secondCpu.profile).toMatchObject({ maxCaptureWidth: 1920, maxBitrateBps: 7_000_000 });
   });
 
   it('uses counter deltas so old cumulative drops do not fabricate render pressure', () => {
@@ -201,7 +201,7 @@ describe('remote-window-video-quality', () => {
     });
     expect(degraded).toMatchObject({ reason: 'downgrade', cause: 'network' });
     expect(degraded.state.level).toBe(1);
-    expect(degraded.profile.maxBitrateBps).toBe(12_000_000);
+    expect(degraded.profile.maxBitrateBps).toBe(6_000_000);
 
     const tooSoon1 = resolveRemoteWindowVideoAdaptiveDecision({
       preference: 'quality',
@@ -220,7 +220,7 @@ describe('remote-window-video-quality', () => {
       sample: weak(7_000),
     });
     expect(secondStep.state.level).toBe(2);
-    expect(secondStep.profile.maxBitrateBps).toBe(8_000_000);
+    expect(secondStep.profile.maxBitrateBps).toBe(4_000_000);
 
     const stable = resolveRemoteWindowVideoAdaptiveDecision({
       preference: 'quality',

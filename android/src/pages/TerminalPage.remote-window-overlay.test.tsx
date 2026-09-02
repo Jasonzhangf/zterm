@@ -331,10 +331,10 @@ describe('TerminalPage remote window overlay', () => {
         purpose: 'focus',
         videoProfile: {
           preference: 'smooth',
-          maxBitrateBps: 4_000_000,
+          maxBitrateBps: 2_000_000,
           maxFrameRateFps: 30,
-          maxCaptureWidth: 960,
-          maxCaptureHeight: 600,
+          maxCaptureWidth: 720,
+          maxCaptureHeight: 720,
           maxFrameAgeMs: 100,
           interactionActive: false,
           overviewMaxBitrateBps: 250_000,
