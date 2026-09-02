@@ -1915,7 +1915,7 @@ function TerminalViewComponent({
             minWidth:
               widthMode === "mirror-fixed"
                 ? `${Math.max(
-                    viewportClientWidthPx,
+                    1,
                     Math.round((renderBuffer.cols || 0) * resolvedCellWidthPx),
                   )}px`
                 : undefined,
