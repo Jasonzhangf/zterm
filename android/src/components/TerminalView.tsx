@@ -330,22 +330,32 @@ function TerminalViewComponent({
     parseInt(resolvedRowHeight, 10) || parseInt(rowHeight, 10) || 17,
   );
   const layoutRowHeightPxRef = useRef(rowHeightPx);
-  const maxMirrorFixedHorizontalOffsetPx = Math.max(
+  const mirrorFixedLogicalWidthPx = Math.max(
     0,
-    Math.round((renderBuffer.cols || 0) * resolvedCellWidthPx - viewportClientWidthPx),
+    Math.round((renderBuffer.cols || 0) * resolvedCellWidthPx),
   );
-  const mirrorFixedMinScale = (() => {
+  const mirrorFixedAutoFitScale = (() => {
     if (widthMode !== "mirror-fixed") {
       return 1;
     }
-    const terminalLogicalWidthPx = Math.max(
-      viewportClientWidthPx,
-      Math.round((renderBuffer.cols || 0) * resolvedCellWidthPx),
-    );
-    return viewportClientWidthPx > 0 && terminalLogicalWidthPx > viewportClientWidthPx
-      ? viewportClientWidthPx / terminalLogicalWidthPx
-      : 1;
+    if (viewportClientWidthPx <= 0 || mirrorFixedLogicalWidthPx <= 0) {
+      return 1;
+    }
+    // Renderer-only fit for a surface wider than fixed geometry. A wide grid
+    // is still clamped by the existing gesture hook's minScale path.
+    return Math.min(2, Math.max(1, viewportClientWidthPx / mirrorFixedLogicalWidthPx));
   })();
+  const mirrorFixedMinScale = (() => {
+    if (widthMode !== "mirror-fixed" || viewportClientWidthPx <= 0 || mirrorFixedLogicalWidthPx <= 0) {
+      return 1;
+    }
+    const ratio = viewportClientWidthPx / mirrorFixedLogicalWidthPx;
+    return ratio < 1 ? ratio : 0.4 / mirrorFixedAutoFitScale;
+  })();
+  const maxMirrorFixedHorizontalOffsetPx = Math.max(
+    0,
+    Math.round(mirrorFixedLogicalWidthPx - viewportClientWidthPx / Math.max(0.01, mirrorFixedAutoFitScale)),
+  );
   sessionIdRef.current = sessionId;
   onInputRef.current = onInput;
 
@@ -357,7 +367,7 @@ function TerminalViewComponent({
     const rect = host.getBoundingClientRect();
     const col = Math.max(
       1,
-      Math.floor((step.clientX - rect.left) / Math.max(1, resolvedCellWidthPx)) + 1,
+      Math.floor((step.clientX - rect.left) / Math.max(1, resolvedCellWidthPx * mirrorFixedAutoFitScale * mirrorFixedZoomPanRef.current.visualScale)) + 1,
     );
     const row = Math.max(
       1,
@@ -365,7 +375,7 @@ function TerminalViewComponent({
     );
     const sequence = encodeTerminalSgrMouseWheel(step.direction, col, row);
     onInputRef.current?.(sessionIdRef.current, sequence);
-  }, [resolvedCellWidthPx]);
+  }, [mirrorFixedAutoFitScale, resolvedCellWidthPx]);
 
   const mirrorFixedZoomPan = useMirrorFixedZoomPan({
     widthMode,
@@ -385,14 +395,17 @@ function TerminalViewComponent({
   });
   widthModeRef.current = widthMode;
   mirrorFixedZoomPanRef.current = mirrorFixedZoomPan;
+  const mirrorFixedVisualScale = widthMode === "mirror-fixed"
+    ? mirrorFixedAutoFitScale * mirrorFixedZoomPan.visualScale
+    : 1;
 
   // mirror-fixed pinch 只缩放 canvas：viewportRows 必须按视觉行高同步扩大，
   // 但 DOM 行高与 grid padding 保持物理值，避免 canvas 被二次缩放后滚到底黑屏。
   const layoutRowHeightPx = Math.max(
     1,
-    rowHeightPx * (widthMode === "mirror-fixed" ? mirrorFixedZoomPan.visualScale : 1),
+    rowHeightPx * (widthMode === "mirror-fixed" ? mirrorFixedVisualScale : 1),
   );
-  const viewportRows = widthMode === "mirror-fixed" && mirrorFixedZoomPan.visualScale < 1
+  const viewportRows = widthMode === "mirror-fixed" && Math.abs(mirrorFixedVisualScale - 1) > 0.001
     ? Math.max(
         DEFAULT_ROWS,
         Math.ceil(
@@ -1878,11 +1891,11 @@ function TerminalViewComponent({
         ref={mirrorFixedZoomPan.scaleLayerRef}
         style={{
           zoom:
-            widthMode === "mirror-fixed" && mirrorFixedZoomPan.visualScale < 1
-              ? String(mirrorFixedZoomPan.visualScale)
+            widthMode === "mirror-fixed" && Math.abs(mirrorFixedVisualScale - 1) > 0.001
+              ? String(mirrorFixedVisualScale)
               : "1",
           willChange:
-            widthMode === "mirror-fixed" && mirrorFixedZoomPan.visualScale < 1
+            widthMode === "mirror-fixed" && Math.abs(mirrorFixedVisualScale - 1) > 0.001
               ? "transform"
               : undefined,
         }}
