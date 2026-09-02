@@ -69,11 +69,19 @@ export function ResourceBottomSheet({
     typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(min-width: 768px)').matches ? 'end' : 'bottom'
   ));
   const touchStartY = useRef<number | null>(null);
+  const previousOpenRef = useRef(open);
 
   useEffect(() => {
     setDraftUrl(webUrl);
     setSubmittedUrl(webUrl);
   }, [webUrl]);
+
+  useEffect(() => {
+    if (open && !previousOpenRef.current) {
+      setTab(initialTab);
+    }
+    previousOpenRef.current = open;
+  }, [initialTab, open]);
 
   useEffect(() => {
     if (placement) return;

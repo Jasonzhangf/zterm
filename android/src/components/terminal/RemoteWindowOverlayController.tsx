@@ -215,6 +215,8 @@ export interface RemoteWindowOverlayProps {
   onInputDebug?: (event: RemoteWindowTouchInputDebugEvent) => void;
   bottomInsetPx?: number;
   bottomChromeInsetPx?: number;
+  embedded?: boolean;
+  onOpenResourceDrawer?: (tab: 'web' | 'stream') => void;
   onOpenStateChange?: (open: boolean) => void;
   onBodySubscriptionSuppressedChange?: (suppressed: boolean) => void;
   onInputContextChange?: (context: RemoteWindowInputContext | null) => void;
@@ -231,13 +233,11 @@ interface RemoteWindowStreamStartResult {
   startupTelemetry?: RemoteWindowReceiverStartupTelemetry;
   collectStats?: () => Promise<RemoteWindowVideoStatsSample | null>;
 }
-
 type RemoteWindowScreenshotStatus =
   | { phase: 'idle' }
   | { phase: 'capturing' }
   | { phase: 'saved'; fileName: string; savedPath: string }
   | { phase: 'failed'; message: string };
-
 export interface RemoteWindowInputContext {
   sessionId: string;
   streamId: string;
@@ -247,7 +247,6 @@ export interface RemoteWindowInputContext {
   focusPolicy: RemoteWindowStreamTargetManifest['focusPolicy'];
   inputRoute: RemoteWindowStreamTargetManifest['inputRoute'];
 }
-
 export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayController({
   activeSessionId,
   appForegroundActive = true,
@@ -264,6 +263,8 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   onInputDebug,
   bottomInsetPx = 0,
   bottomChromeInsetPx = 0,
+  embedded = false,
+  onOpenResourceDrawer,
   onOpenStateChange,
   onBodySubscriptionSuppressedChange,
   onInputContextChange,
@@ -361,7 +362,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     clientY: number;
   } | null>(null);
   const longPressTimerRef = useRef<number | null>(null);
-
   const clearLongPressTimer = useCallback(() => {
     if (longPressTimerRef.current !== null) {
       clearTimeout(longPressTimerRef.current);
@@ -458,6 +458,8 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     setBrowserPickerOpen(true);
     handleOpenPicker();
   }, [handleOpenPicker]);
+  const handleResourceEntry = useCallback((tab: 'web' | 'stream', fallback: () => void) => onOpenResourceDrawer ? onOpenResourceDrawer(tab) : fallback(), [onOpenResourceDrawer]);
+  useEffect(() => { if (embedded && state.phase === 'closed') handleOpenPicker(); }, [embedded, handleOpenPicker, state.phase]);
   const surfacePointersRef = useRef<Map<number, SurfacePointerPosition>>(new Map());
   const surfaceGestureRef = useRef<SurfacePointerGesture | null>(null);
   const surfaceLocalPanStartRef = useRef<{
@@ -613,7 +615,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       return false;
     }
   }, [canvasLayout?.layoutGeneration, onInputDebug, sendInput]);
-
   const dispatchRemoteWindowInputEvents = useCallback((
     events: Array<RemoteWindowInputEventPayload['event']>,
   ) => {
@@ -3132,12 +3133,11 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
             if (suppressEntryClickRef.current) {
               return;
             }
-            // 与文件按键一致的直接开/关语义：closed 打开 picker，picker 打开时再点关闭
             if (state.phase === 'closed') {
-              handleOpenPicker();
-            } else {
-              handleClose();
+              handleResourceEntry('stream', handleOpenPicker);
+              return;
             }
+            handleClose();
           }}
           style={{
             ...styles.entryButton,
@@ -3160,10 +3160,10 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
               return;
             }
             if (state.phase === 'closed') {
-              handleOpenBrowserPicker();
-            } else {
-              handleClose();
+              handleResourceEntry('web', handleOpenBrowserPicker);
+              return;
             }
+            handleClose();
           }}
           style={{
             ...styles.entryButton,

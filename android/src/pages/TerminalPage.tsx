@@ -427,6 +427,7 @@ interface TerminalPageProps {
   renderSessionDrawer?: TerminalSessionDrawerSlot['render'];
   renderFileBrowser?: TerminalFileBrowserSlot['render'];
   renderRemoteWindow?: TerminalRemoteWindowSlot['render'];
+  openRemoteWindowInResourceDrawer?: boolean;
   renderQuickBar?: TerminalQuickBarSlot['render'];
   renderTerminalShell?: TerminalShellUiSlot['render'];
   onOpenConnections: () => void;
@@ -551,6 +552,7 @@ function TerminalPageComponent({
   renderSessionDrawer,
   renderFileBrowser,
   renderRemoteWindow,
+  openRemoteWindowInResourceDrawer = false,
   renderQuickBar,
   renderTerminalShell,
   onOpenConnections,
@@ -713,6 +715,7 @@ function TerminalPageComponent({
   const [tabManagerScopePaneId, setTabManagerScopePaneId] = useState<string | null>(null);
   const [scheduleComposerTarget, setScheduleComposerTarget] = useState<ScheduleComposerTarget | null>(null);
   const [fileTransferOpen, setFileTransferOpen] = useState(false);
+  const [resourceInitialTab, setResourceInitialTab] = useState<'files' | 'web' | 'stream'>('files');
   const [fileTransferMode, setFileTransferMode] = useState<"browser" | "sync">("browser");
   const [resourceWebUrl, setResourceWebUrl] = useState('');
   const [remoteScreenshotPreview, setRemoteScreenshotPreview] = useState<RemoteScreenshotPreviewState | null>(null);
@@ -2017,9 +2020,15 @@ function TerminalPageComponent({
   }, [onRequestScheduleList, terminalActionSessionId]);
 
   const handleQuickBarOpenFileTransfer = useCallback((mode: "browser" | "sync" = "browser") => {
+    setResourceInitialTab('files');
     setFileTransferMode(mode);
     setFileTransferOpen((current) => (current && fileTransferMode === mode ? false : true));
   }, [fileTransferMode]);
+
+  const handleOpenResourceDrawer = useCallback((tab: 'web' | 'stream') => {
+    setResourceInitialTab(tab);
+    setFileTransferOpen(true);
+  }, []);
 
   const handleQuickBarToggleDebugOverlay = useCallback(() => {
     setDebugOverlayVisible((v) => !v);
@@ -3729,6 +3738,9 @@ function TerminalPageComponent({
               onInputDebug: recordRemoteWindowInputDebug,
               bottomInsetPx: terminalChromeBottomPx + terminalImeLiftPx,
               bottomChromeInsetPx: terminalChromeBottomPx,
+              onOpenResourceDrawer: openRemoteWindowInResourceDrawer && Boolean(onSendMessage && onFileTransferMessage && renderFileBrowser)
+                ? handleOpenResourceDrawer
+                : undefined,
               onOpenStateChange: handleRemoteWindowOverlayOpenStateChange,
               onBodySubscriptionSuppressedChange: handleRemoteWindowBodySubscriptionSuppressedChange,
               onInputContextChange: handleRemoteWindowInputContextChange,
@@ -3796,6 +3808,7 @@ function TerminalPageComponent({
       {terminalActionSession && onSendMessage && onFileTransferMessage && renderFileBrowser ? (
         <ResourceBottomSheet
           open={fileTransferOpen}
+          initialTab={resourceInitialTab}
           webUrl={resourceWebUrl}
           onWebUrlChange={setResourceWebUrl}
           onClose={() => setFileTransferOpen(false)}
@@ -3815,6 +3828,7 @@ function TerminalPageComponent({
             onInputDebug: recordRemoteWindowInputDebug,
             bottomInsetPx: terminalChromeBottomPx + terminalImeLiftPx,
             bottomChromeInsetPx: terminalChromeBottomPx,
+            embedded: true,
             onOpenStateChange: handleRemoteWindowOverlayOpenStateChange,
             onBodySubscriptionSuppressedChange: handleRemoteWindowBodySubscriptionSuppressedChange,
             onInputContextChange: handleRemoteWindowInputContextChange,

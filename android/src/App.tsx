@@ -979,6 +979,7 @@ export function AppContent({
             renderSessionDrawer={renderSessionDrawer}
             renderFileBrowser={renderFileBrowser}
             renderRemoteWindow={renderRemoteWindow}
+            openRemoteWindowInResourceDrawer
             renderQuickBar={renderQuickBar}
             renderTerminalShell={renderTerminalShell}
             sessionDraft={terminalActiveSession ? (sessionDrafts[terminalActiveSession.id] || '') : ''}
