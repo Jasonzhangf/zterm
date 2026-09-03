@@ -2669,6 +2669,7 @@ describe('RemoteWindowOverlay', () => {
       expect(Number.parseFloat(content.style.width)).toBeCloseTo(300, 1);
       expect(Number.parseFloat(content.style.height)).toBeCloseTo(532.1, 1);
     });
+    expect(resizeTargetWindow).toHaveBeenCalledTimes(1);
     expect(overlay.getAttribute('data-display-mode')).toBe('fill');
     fireEvent.click(screen.getByTestId('remote-window-more-toggle'));
     expect(screen.getByTestId('remote-window-fullscreen-display-toggle')).toBeTruthy();
