@@ -9,6 +9,7 @@ import {
   formatTargetKind,
   isRemoteWindowChromeTarget,
   resolveAspectRect,
+  resolveZoomedContentRect,
   safeRemoteWindowGroupId,
 } from './remote-window-overlay-helpers';
 import type { RemoteWindowStreamTargetManifest } from '../../lib/types';
@@ -61,6 +62,20 @@ describe('remote-window-overlay-helpers', () => {
       'fill',
     );
     expect(clamped.scale).toBe(2);
+  });
+
+  it('keeps tablet fill bottom reachable when the source is taller than the surface', () => {
+    const surface = { width: 1180, height: 820 };
+    const source = { width: 400, height: 800 };
+    const clamped = clampFullscreenViewport(
+      { scale: 2, panX: 0, panY: -99999 },
+      surface,
+      source,
+      'fill',
+    );
+    const rect = resolveZoomedContentRect(surface, source, clamped, 'fill');
+    expect(clamped.panY).toBeLessThan(0);
+    expect(rect.content.top + rect.content.height).toBeCloseTo(surface.height, 1);
   });
 
   it('keeps fullscreen viewports clamped to the surface', () => {
