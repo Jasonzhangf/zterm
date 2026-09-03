@@ -173,29 +173,6 @@ func focusedWindowMatchesTarget(_ appElement: AXUIElement, _ bounds: Rect) -> Bo
     return axWindowMatchesBounds(focusedElement, bounds)
 }
 
-var lastVerifiedFocusPid: Int32? = nil
-var lastVerifiedFocusWindowId: String? = nil
-var lastVerifiedFocusAt: TimeInterval = 0
-let remoteWindowContinuousFocusCacheSeconds: TimeInterval = 2.0
-
-func canReuseVerifiedFocus(_ config: InputConfig) -> Bool {
-    guard config.event.kind == "scroll" || (config.event.kind == "pointer" && config.event.phase == "move") else {
-        return false
-    }
-    let now = Date().timeIntervalSinceReferenceDate
-    guard lastVerifiedFocusPid == config.pid
-        && lastVerifiedFocusWindowId == config.window.windowId
-        && now - lastVerifiedFocusAt <= remoteWindowContinuousFocusCacheSeconds
-    else {
-        return false
-    }
-    // Continuous samples extend the verified-focus lease. An uninterrupted
-    // scroll/drag therefore never performs an accessibility check mid-gesture;
-    // the next sample after an idle gap revalidates atomically.
-    lastVerifiedFocusAt = now
-    return true
-}
-
 func activateTargetApplication(_ config: InputConfig, _ app: NSRunningApplication) {
     app.unhide()
     let process = Process()
@@ -212,9 +189,6 @@ func focusTargetWindow(_ config: InputConfig) throws {
     guard config.focusPolicy == "bring-to-focus" else {
         return
     }
-    if canReuseVerifiedFocus(config) {
-        return
-    }
     guard AXIsProcessTrusted() else {
         throw NSError(domain: "RemoteWindowInput", code: 2, userInfo: [NSLocalizedDescriptionKey: "macOS Accessibility permission is required for remote window input"])
     }
@@ -224,9 +198,6 @@ func focusTargetWindow(_ config: InputConfig) throws {
     let appElement = AXUIElementCreateApplication(config.pid)
     // 同一应用可有多个窗口；前台 PID 不等于目标窗口已聚焦。
     if frontmostPidMatches(config.pid) && focusedWindowMatchesTarget(appElement, config.window.bounds) {
-        lastVerifiedFocusPid = config.pid
-        lastVerifiedFocusWindowId = config.window.windowId
-        lastVerifiedFocusAt = Date().timeIntervalSinceReferenceDate
         return
     }
     let windows = copyAttribute(appElement, kAXWindowsAttribute) as? [AXUIElement] ?? []
@@ -262,9 +233,6 @@ func focusTargetWindow(_ config: InputConfig) throws {
         isFrontmost = frontmostPidMatches(config.pid)
         isFocused = focusedWindowMatchesTarget(appElement, config.window.bounds)
         if isFrontmost && isFocused {
-            lastVerifiedFocusPid = config.pid
-            lastVerifiedFocusWindowId = config.window.windowId
-            lastVerifiedFocusAt = Date().timeIntervalSinceReferenceDate
             return
         }
     }
@@ -485,7 +453,16 @@ func handleConfig(_ config: InputConfig) throws {
         try resizeTargetWindow(config)
         return
     }
-    try focusTargetWindow(config)
+    // Continuous motion is intentionally delivered without Accessibility/System
+    // Events focus checks. Those checks are multi-hundred-millisecond operations
+    // and serializing them into scroll/pointer-move turns a live gesture into a
+    // stop-and-go queue. Reliable actions (click, key, pointer down/up, focus)
+    // still verify the target immediately before injection.
+    let isContinuousMotion = config.event.kind == "scroll"
+        || (config.event.kind == "pointer" && config.event.phase == "move")
+    if !isContinuousMotion {
+        try focusTargetWindow(config)
+    }
 
     if config.event.kind == "focus" {
         return
