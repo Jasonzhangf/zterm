@@ -1910,8 +1910,11 @@ function TerminalViewComponent({
           }
           onContextMenu={suppressNativeCopyMenu}
           style={{
-            paddingTop: `${termGridPaddingTopPx}px`,
-            paddingBottom: `${termGridPaddingBottomPx}px`,
+            // CSS zoom scales the whole grid, while the scroll host keeps its
+            // native scrollTop. Keep virtual blank rows in that same space so
+            // the latest rows remain aligned with the viewport at fixed width.
+            paddingTop: `${termGridPaddingTopPx / Math.max(1, mirrorFixedVisualScale)}px`,
+            paddingBottom: `${termGridPaddingBottomPx / Math.max(1, mirrorFixedVisualScale)}px`,
             minWidth:
               widthMode === "mirror-fixed"
                 ? `${Math.max(
