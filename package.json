@@ -3,6 +3,8 @@
   "private": true,
   "license": "Apache-2.0",
   "scripts": {
+    "verify:local": "pnpm run test:repo-layout",
+    "verify:ci": "pnpm run test:repo-layout && pnpm --dir android run test:feature-registry",
     "test:repo-layout": "node ./scripts/check-repo-layout.mjs",
     "test:cordis-v2-governance": "node ./scripts/verify-cordis-v2-governance.mjs",
     "test:cordis-v2-governance:negative": "node --test ./scripts/verify-cordis-v2-governance.test.mjs",
