@@ -176,15 +176,24 @@ func focusedWindowMatchesTarget(_ appElement: AXUIElement, _ bounds: Rect) -> Bo
 var lastVerifiedFocusPid: Int32? = nil
 var lastVerifiedFocusWindowId: String? = nil
 var lastVerifiedFocusAt: TimeInterval = 0
+let remoteWindowContinuousFocusCacheSeconds: TimeInterval = 2.0
 
 func canReuseVerifiedFocus(_ config: InputConfig) -> Bool {
     guard config.event.kind == "scroll" || (config.event.kind == "pointer" && config.event.phase == "move") else {
         return false
     }
     let now = Date().timeIntervalSinceReferenceDate
-    return lastVerifiedFocusPid == config.pid
+    guard lastVerifiedFocusPid == config.pid
         && lastVerifiedFocusWindowId == config.window.windowId
-        && now - lastVerifiedFocusAt <= 0.25
+        && now - lastVerifiedFocusAt <= remoteWindowContinuousFocusCacheSeconds
+    else {
+        return false
+    }
+    // Continuous samples extend the verified-focus lease. An uninterrupted
+    // scroll/drag therefore never performs an accessibility check mid-gesture;
+    // the next sample after an idle gap revalidates atomically.
+    lastVerifiedFocusAt = now
+    return true
 }
 
 func activateTargetApplication(_ config: InputConfig, _ app: NSRunningApplication) {
