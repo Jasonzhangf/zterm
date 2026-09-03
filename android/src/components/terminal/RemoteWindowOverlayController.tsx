@@ -411,6 +411,30 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   const handoffVideoVisibilityRef = useRef<boolean | null>(null);
   const lastDefaultFullscreenFillKeyRef = useRef<string | null>(null);
   const collectStreamStatsRef = useRef<(() => Promise<RemoteWindowVideoStatsSample | null>) | null>(null);
+  const activeSessionIdRef = useRef(activeSessionId);
+  const stopStreamRef = useRef(stopStream);
+  activeSessionIdRef.current = activeSessionId;
+  stopStreamRef.current = stopStream;
+  useEffect(() => () => {
+    const sessionId = activeSessionIdRef.current?.trim() || '';
+    const stop = stopStreamRef.current;
+    if (!sessionId || !stop) return;
+    const streamIds = new Set<string>([
+      activeStreamIdRef.current,
+      activeCanvasStreamIdRef.current,
+      activeFocusStreamIdRef.current,
+      pendingFocusStreamIdRef.current,
+    ].filter((value): value is string => Boolean(value)));
+    streamIds.forEach((streamId) => {
+      void Promise.resolve(stop(sessionId, streamId)).catch((error) => {
+        console.error('[RemoteWindowOverlay] unmount stream stop failed:', error);
+      });
+    });
+    activeStreamIdRef.current = null;
+    activeCanvasStreamIdRef.current = null;
+    activeFocusStreamIdRef.current = null;
+    pendingFocusStreamIdRef.current = null;
+  }, []);
   const qualityStreamId = state.phase === 'targetLocked' ? state.streamId ?? null : null;
   const qualityTargetId = state.phase === 'targetLocked' ? state.target.streamTargetId : null;
   const {
@@ -2039,7 +2063,11 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     }
     publishRemoteWindowInputContext();
     event.currentTarget.focus();
-    event.currentTarget.setPointerCapture?.(event.pointerId);
+    try {
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+    } catch (error) {
+      console.warn('[RemoteWindowOverlay] pointer capture unavailable:', error);
+    }
     surfacePointersRef.current.set(event.pointerId, {
       clientX: event.clientX,
       clientY: event.clientY,
@@ -2321,7 +2349,11 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
         clientY: event.clientY,
       });
     }
-    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    try {
+      if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch (error) {
+      console.warn('[RemoteWindowOverlay] pointer release unavailable:', error);
+    }
 
     if (!gesture) {
       surfacePointersRef.current.delete(event.pointerId);
@@ -2498,7 +2530,11 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   const handleVideoSurfacePointerCancel = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     const gesture = surfaceGestureRef.current;
     surfacePointersRef.current.delete(event.pointerId);
-    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    try {
+      if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch (error) {
+      console.warn('[RemoteWindowOverlay] pointer release unavailable:', error);
+    }
     const runtimeGesture = gesture ? toRemoteWindowTouchGestureState(gesture) : createRemoteWindowTouchPointerState();
     if (
       gesture
