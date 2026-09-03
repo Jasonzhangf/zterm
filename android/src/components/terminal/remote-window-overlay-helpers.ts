@@ -322,6 +322,9 @@ export function resolveRemoteWindowDisplaySourceSize(
   };
 }
 
+export type RemoteWindowOrientationPolicy = 'portrait' | 'landscape' | 'follow-device';
+export type RemoteWindowResizePolicy = 'resize-remote' | 'preserve-remote';
+
 export function resolveRemoteWindowQualityStreamSize(options: {
   source: SurfaceSize;
   quality: 'smooth-720' | 'quality-1080' | 'ultra-2160';
@@ -330,10 +333,26 @@ export function resolveRemoteWindowQualityStreamSize(options: {
   const sourceShortEdge = Math.min(options.source.width, options.source.height);
   const targetShortEdge = options.quality === 'smooth-720' ? 720 : options.quality === 'quality-1080' ? 1080 : 2160;
   const shortEdge = Math.max(1, Math.min(sourceShortEdge, targetShortEdge));
-  const ratio = Number.isFinite(options.aspectRatio) && options.aspectRatio > 0 ? options.aspectRatio : options.source.width / Math.max(1, options.source.height);
+  const ratio = Number.isFinite(options.aspectRatio) && options.aspectRatio > 0
+    ? options.aspectRatio
+    : options.source.width / Math.max(1, options.source.height);
   const width = ratio >= 1 ? Math.round(shortEdge * ratio) : shortEdge;
   const height = ratio >= 1 ? shortEdge : Math.round(shortEdge / ratio);
   return { width: Math.max(1, width & ~1), height: Math.max(1, height & ~1) };
+}
+
+export function resolveRemoteWindowTargetAspectRatio(options: {
+  viewport: SurfaceSize;
+  orientation: RemoteWindowOrientationPolicy;
+}): number {
+  const portrait = options.viewport.height >= options.viewport.width;
+  if (options.orientation === 'portrait') {
+    return portrait ? options.viewport.width / Math.max(1, options.viewport.height) : options.viewport.height / Math.max(1, options.viewport.width);
+  }
+  if (options.orientation === 'landscape') {
+    return portrait ? options.viewport.height / Math.max(1, options.viewport.width) : options.viewport.width / Math.max(1, options.viewport.height);
+  }
+  return options.viewport.width / Math.max(1, options.viewport.height);
 }
 
 export function parseCssPx(value: string | null | undefined) {
