@@ -8,6 +8,7 @@ import type { BridgeSettings } from '../lib/bridge-settings';
 import type { AppUpdatePreferences } from '../lib/app-update';
 import { DEFAULT_TERMINAL_CACHE_LINES } from '../lib/mobile-config';
 import { RUNTIME_DEBUG_STORAGE_KEY } from '../lib/runtime-debug';
+import { resolveSettingsTheme } from '../lib/mobile-ui';
 
 const baseSettings: BridgeSettings = {
   targetHost: '',
@@ -51,6 +52,11 @@ describe('SettingsPage terminal theme selection', () => {
 
   afterEach(() => {
     cleanup();
+  });
+
+  it('keeps the shared app accent green across dark shell skins', () => {
+    expect(resolveSettingsTheme('black').accent).toBe('#1fd67a');
+    expect(resolveSettingsTheme('blue').accent).toBe('#1fd67a');
   });
 
   it('renders the expanded built-in theme catalog', () => {

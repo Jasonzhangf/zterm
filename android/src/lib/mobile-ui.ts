@@ -56,7 +56,7 @@ export function resolveSettingsTheme(shellSkin: string | undefined): SettingsThe
       text: '#f1f5fb',
       muted: shellSkin === 'black' ? '#a4a8b2' : '#97a2ba',
       border: shellSkin === 'black' ? 'rgba(255,255,255,.14)' : 'rgba(190,212,244,.16)',
-      accent: shellSkin === 'black' ? '#7dd3fc' : '#7ddfff',
+      accent: '#1fd67a',
       accentText: '#081018',
       shadow: '0 18px 40px rgba(0,0,0,.28)',
     };

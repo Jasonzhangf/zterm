@@ -38,6 +38,7 @@ public class ImeAnchorPlugin extends Plugin {
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private boolean suppressTextChange = false;
     private boolean suppressFrameworkEditableDispatch = false;
+    private boolean pasteInProgress = false;
     private boolean pendingShowRequest = false;
     private boolean lastKeyboardVisible = false;
     private int lastKeyboardHeight = 0;
@@ -751,7 +752,7 @@ public class ImeAnchorPlugin extends Plugin {
                 @Override
                 public boolean commitText(CharSequence text, int newCursorPosition) {
                     if (plugin != null) {
-                        if (plugin.isLineBreakOnly(text)) {
+                        if (!plugin.pasteInProgress && plugin.isLineBreakOnly(text)) {
                             plugin.emitImeShiftEnterKey("commitText");
                             plugin.clearImeEditText();
                             return true;
@@ -776,7 +777,7 @@ public class ImeAnchorPlugin extends Plugin {
                 public boolean finishComposingText() {
                     if (plugin != null) {
                         Editable editable = getText();
-                        if (plugin.isLineBreakOnly(editable)) {
+                        if (!plugin.pasteInProgress && plugin.isLineBreakOnly(editable)) {
                             plugin.emitImeShiftEnterKey("finishComposingText");
                             plugin.clearImeEditText();
                             return true;
@@ -818,6 +819,19 @@ public class ImeAnchorPlugin extends Plugin {
                 }
 
             };
+        }
+
+        @Override
+        public boolean onTextContextMenuItem(int id) {
+            if (plugin == null || (id != android.R.id.paste && id != android.R.id.pasteAsPlainText)) {
+                return super.onTextContextMenuItem(id);
+            }
+            plugin.pasteInProgress = true;
+            try {
+                return super.onTextContextMenuItem(id);
+            } finally {
+                plugin.pasteInProgress = false;
+            }
         }
 
         @Override
