@@ -134,15 +134,14 @@ export function ResourceBottomSheet({
   const fileBrowserNode = renderFileBrowser(open && tab === 'files');
   const remoteWindowNode = renderRemoteWindow
     ? tab === 'web'
-      ? renderRemoteWindow(open || tab === 'web', 'web')
-      : renderRemoteWindow(open || tab === 'stream')
+      ? renderRemoteWindow(open, 'web')
+      : renderRemoteWindow(open && tab === 'stream')
     : null;
 
   if (!open) {
     return (
       <div aria-hidden="true" style={{ display: 'none' }}>
         {renderFileBrowser(false)}
-        {renderRemoteWindow?.(true, 'stream')}
       </div>
     );
   }
