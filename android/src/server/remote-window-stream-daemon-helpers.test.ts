@@ -56,7 +56,8 @@ describe('remote-window-stream-daemon-helpers', () => {
     );
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('try focusTargetWindow(config)');
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).not.toContain('skipFocus');
-    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('remoteWindowContinuousFocusCacheSeconds: TimeInterval = 2.0');
-    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('lastVerifiedFocusAt = now');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('let isContinuousMotion = config.event.kind == "scroll"');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('if !isContinuousMotion {');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).not.toContain('lastVerifiedFocusAt');
   });
 });
