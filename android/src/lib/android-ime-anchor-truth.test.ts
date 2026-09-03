@@ -29,6 +29,14 @@ describe('Android IME anchor truth', () => {
     expect(pluginSource).toContain('emitImeEnterKey("performEditorAction")');
   });
 
+  it('keeps system paste line breaks as paste payload instead of turning them into Enter', () => {
+    expect(pluginSource).toContain('private boolean pasteInProgress = false;');
+    expect(pluginSource).toContain('public boolean onTextContextMenuItem(int id)');
+    expect(pluginSource).toContain('android.R.id.pasteAsPlainText');
+    expect(pluginSource).toContain('if (!plugin.pasteInProgress && plugin.isLineBreakOnly(text))');
+    expect(pluginSource).toContain('if (!plugin.pasteInProgress && plugin.isLineBreakOnly(editable))');
+  });
+
   it('keeps the serviceable native anchor cursor invisible so it cannot render as a terminal cursor', () => {
     expect(pluginSource).toContain('imeEditText.setCursorVisible(false)');
     expect(pluginSource).not.toContain('imeEditText.setCursorVisible(true)');
