@@ -9,6 +9,13 @@ export const REMOTE_WINDOW_VIDEO_PREFERENCE_GLOBAL_STORAGE_KEY = 'zterm:remote-w
 export const REMOTE_WINDOW_VIDEO_BITRATE_STORAGE_KEY = 'zterm:remote-window-video-bitrate';
 export const REMOTE_WINDOW_VIDEO_BITRATE_GLOBAL_STORAGE_KEY = 'zterm:remote-window-video-bitrate-global';
 export const REMOTE_WINDOW_VIDEO_PREFERENCES: readonly RemoteWindowVideoPreference[] = ['smooth', 'quality'];
+export type RemoteWindowVideoQualityTier = 'smooth-720' | 'quality-1080' | 'ultra-2160';
+export const REMOTE_WINDOW_VIDEO_QUALITY_TIERS = Object.freeze({
+  'smooth-720': { shortEdge: 720, baseBitrateBps: 1_000_000 },
+  'quality-1080': { shortEdge: 1080, baseBitrateBps: 2_000_000 },
+  'ultra-2160': { shortEdge: 2160, baseBitrateBps: 8_000_000 },
+} as const);
+export const REMOTE_WINDOW_VIDEO_BUDGET_MULTIPLIERS = [1, 2, 4] as const;
 
 // Internal ABR guardrails. These are deliberately kept out of the wire
 // profile: the daemon receives the resolved max bitrate, while the client
