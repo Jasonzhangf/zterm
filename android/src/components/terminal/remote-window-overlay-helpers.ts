@@ -151,6 +151,22 @@ export function resolveFullscreenViewportRect(
   return resolveAspectRect(surface, source, displayMode);
 }
 
+function resolveVisibleFullscreenViewportRect(
+  surface: SurfaceSize,
+  source: { width: number; height: number },
+  displayMode: FullscreenDisplayMode,
+): SurfaceRect {
+  if (displayMode === 'fill') {
+    return {
+      left: 0,
+      top: 0,
+      width: Math.max(1, surface.width),
+      height: Math.max(1, surface.height),
+    };
+  }
+  return resolveFullscreenViewportRect(surface, source, displayMode);
+}
+
 export function clampFullscreenViewport(
   viewport: FullscreenViewportState,
   surface: SurfaceSize | null,
@@ -168,7 +184,7 @@ export function clampFullscreenViewport(
   }
   const base = resolveAspectRect(surface, source, displayMode);
   const allowKeyboardPan = keyboardPanAllowancePx > 0;
-  const viewportRect = allowKeyboardPan
+  const viewportRect = allowKeyboardPan || displayMode === 'fill'
     ? {
         left: 0,
         top: 0,
@@ -195,7 +211,7 @@ export function resolveZoomedContentRect(
   displayMode: FullscreenDisplayMode = initialFullscreenDisplayMode,
 ): { viewport: SurfaceRect; content: SurfaceRect } {
   const base = resolveAspectRect(surface, source, displayMode);
-  const viewportRect = resolveFullscreenViewportRect(surface, source, displayMode);
+  const viewportRect = resolveVisibleFullscreenViewportRect(surface, source, displayMode);
   const scale = Math.max(1, viewport.scale);
   const width = base.width * scale;
   const height = base.height * scale;
