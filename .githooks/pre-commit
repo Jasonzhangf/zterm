@@ -1,0 +1,12 @@
+#!/bin/sh
+set -eu
+
+branch=$(git symbolic-ref --quiet --short HEAD || true)
+case "$branch" in
+  main|master)
+    echo "拒绝在 $branch 提交：请使用 clean owner worktree。" >&2
+    exit 1
+    ;;
+esac
+
+pnpm run verify:local

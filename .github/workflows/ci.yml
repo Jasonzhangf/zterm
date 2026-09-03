@@ -102,6 +102,9 @@ jobs:
       - name: Repo layout gate
         run: pnpm run test:repo-layout
 
+      - name: Git main protection verification profile
+        run: pnpm run verify:ci
+
   android:
     name: Android typecheck and regression
     needs: repo-layout
