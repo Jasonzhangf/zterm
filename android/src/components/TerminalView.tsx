@@ -405,6 +405,10 @@ function TerminalViewComponent({
     1,
     rowHeightPx * (widthMode === "mirror-fixed" ? mirrorFixedVisualScale : 1),
   );
+  const renderGeometryRowHeightPx =
+    widthMode === "mirror-fixed" && mirrorFixedVisualScale > 1
+      ? layoutRowHeightPx
+      : rowHeightPx;
   const viewportRows = widthMode === "mirror-fixed" && Math.abs(mirrorFixedVisualScale - 1) > 0.001
     ? Math.max(
         DEFAULT_ROWS,
@@ -432,7 +436,7 @@ function TerminalViewComponent({
         effectiveBufferEndIndex,
         bufferLinesLength: bufferLines.length,
         viewportRows,
-        rowHeightPx,
+        rowHeightPx: renderGeometryRowHeightPx,
         // Secondary previews are passive tail projections. Their visible window
         // must follow the latest buffer revision without starting interactive
         // scroll/follow state or a per-tile viewport demand loop.
@@ -451,7 +455,7 @@ function TerminalViewComponent({
       readingMode,
       renderBottomIndex,
       renderBuffer.startIndex,
-      rowHeightPx,
+      renderGeometryRowHeightPx,
       viewportRows,
     ],
   );
@@ -628,7 +632,7 @@ function TerminalViewComponent({
         effectiveBufferEndIndex,
         followVisualBottomIndex,
         viewportRows,
-        rowHeightPx,
+        rowHeightPx: renderGeometryRowHeightPx,
         renderRowsLength: renderRows.length,
         termGridPaddingTopPx,
         termGridPaddingBottomPx,
@@ -639,7 +643,7 @@ function TerminalViewComponent({
       renderBuffer.revision,
       renderBuffer.startIndex,
       renderRows.length,
-      layoutRowHeightPx,
+      renderGeometryRowHeightPx,
       termGridPaddingBottomPx,
       termGridPaddingTopPx,
       viewportRows,
@@ -678,14 +682,14 @@ function TerminalViewComponent({
         totalRows,
         viewportRows,
         bufferStartIndex: renderBuffer.startIndex,
-        rowHeightPx,
+        rowHeightPx: renderGeometryRowHeightPx,
         maxScrollTop,
       });
     },
     [
       maxScrollTop,
       renderBuffer.startIndex,
-      rowHeightPx,
+      renderGeometryRowHeightPx,
       totalRows,
       viewportRows,
     ],
@@ -704,7 +708,7 @@ function TerminalViewComponent({
       return resolveTerminalRenderDemandFromScroll({
         nextScrollTop,
         maxScrollTop,
-        rowHeightPx,
+        rowHeightPx: renderGeometryRowHeightPx,
         dataRowCount,
         viewportRows,
         effectiveBufferEndIndex,
@@ -729,7 +733,7 @@ function TerminalViewComponent({
       maxScrollTop,
       minimumRenderBottomIndex,
       resolveScrollTopForRenderBottomIndex,
-      rowHeightPx,
+      renderGeometryRowHeightPx,
       viewportRows,
     ],
   );
@@ -1059,11 +1063,15 @@ function TerminalViewComponent({
         return;
       }
 
-      const nextTarget = resolveFollowScrollSyncTarget(
-        host,
-        nextRenderBottomIndex,
-        resolveScrollTopForRenderBottomIndex,
-      );
+      const nextTarget =
+        widthModeRef.current === "mirror-fixed" &&
+        mirrorFixedZoomPanRef.current.visualScale > 1
+          ? Math.max(0, host.scrollHeight - host.clientHeight)
+          : resolveFollowScrollSyncTarget(
+              host,
+              nextRenderBottomIndex,
+              resolveScrollTopForRenderBottomIndex,
+            );
       applyFollowScrollTransition(
         commitProgrammaticTerminalScrollRuntime(
           followScrollStateRef.current,
