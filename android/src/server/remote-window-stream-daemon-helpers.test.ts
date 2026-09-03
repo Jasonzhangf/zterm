@@ -9,6 +9,7 @@ import {
   normalizeIceCandidate,
   normalizeRemoteWindowVideoProfile,
 } from './remote-window-stream-daemon-helpers';
+import { MACOS_REMOTE_WINDOW_INPUT_SWIFT } from './remote-window-scripts';
 import { makeRemoteWindowVideoProfileFixture } from './remote-window-video-profile-test-fixture';
 
 describe('remote-window-stream-daemon-helpers', () => {
@@ -47,5 +48,13 @@ describe('remote-window-stream-daemon-helpers', () => {
     expect(converted.width).toBe(4);
     expect(converted.height).toBe(4);
     expect(converted.data.length).toBe(4 * 4 + 2 * 2 * 2);
+  });
+
+  it('requires the daemon input owner to verify the focused target window atomically', () => {
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain(
+      'frontmostPidMatches(config.pid) && focusedWindowMatchesTarget(appElement, config.window.bounds)',
+    );
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('try focusTargetWindow(config)');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).not.toContain('skipFocus');
   });
 });

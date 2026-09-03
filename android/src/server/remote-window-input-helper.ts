@@ -58,8 +58,6 @@ export type RemoteWindowInputEventRunner = (
 
 export interface RemoteWindowInputConfig {
   daemonReceivedAtMs: number;
-  /** daemon 侧 focus 防抖：3s 内已执行过 focus（且当前非显式 focus 事件）时跳过 swift 的 bring-to-focus */
-  skipFocus?: boolean;
   pid: number;
   appBundleId: string;
   focusPolicy: RemoteWindowStreamTargetManifest['focusPolicy'];
@@ -566,13 +564,12 @@ export function mapRemoteWindowInputToCompositeTarget(
 export function buildRemoteWindowInputConfig(
   payload: RemoteWindowInputEventPayload,
   target: RemoteWindowStreamTargetManifest,
-  options: { daemonReceivedAtMs?: number; skipFocus?: boolean; canvasLayout?: RemoteWindowCanvasLayoutV1 | null } = {},
+  options: { daemonReceivedAtMs?: number; canvasLayout?: RemoteWindowCanvasLayoutV1 | null } = {},
 ): RemoteWindowInputConfig {
   return {
     daemonReceivedAtMs: Number.isFinite(options.daemonReceivedAtMs)
       ? Number(options.daemonReceivedAtMs)
       : Date.now(),
-    skipFocus: options.skipFocus,
     pid: target.videoTarget.pid,
     appBundleId: target.videoTarget.appBundleId,
     focusPolicy: target.focusPolicy,
