@@ -2616,6 +2616,109 @@ describe('RemoteWindowOverlay', () => {
     expect(screen.getByTestId('remote-window-fullscreen-display-toggle')).toBeTruthy();
   });
 
+  it('requests a remote window resize to the fullscreen surface on entry and on fill', async () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 });
+    Object.defineProperty(window, 'visualViewport', {
+      configurable: true,
+      value: { width: 390, height: 844, addEventListener: vi.fn(), removeEventListener: vi.fn() },
+    });
+    const target = makeTarget('app-1', 'TextEdit', 'app-window');
+    target.videoTarget.cropRectTopLeftPx = { x: 10, y: 40, width: 800, height: 600 };
+    const mediaStream = { id: 'media-stream-1' } as MediaStream;
+    const resizeTargetWindow = vi.fn();
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-1',
+      targets: [target],
+    }));
+    const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string) => ({
+      streamId,
+      mediaStream,
+    }));
+
+    render(
+      <RemoteWindowOverlay
+        activeSessionId="session-1"
+        requestTargets={requestTargets}
+        startStream={startStream}
+        resizeTargetWindow={resizeTargetWindow}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    await screen.findByTestId('remote-window-target-app-1');
+    fireEvent.click(screen.getByTestId('remote-window-target-app-1'));
+    await screen.findByTestId('remote-window-video');
+    fireEvent.click(screen.getByRole('button', { name: '全屏远程窗口' }));
+
+    const overlay = screen.getByTestId('remote-window-locked-overlay');
+    const toolbar = screen.getByTestId('remote-window-locked-toolbar');
+    const surface = screen.getByTestId('remote-window-video-surface');
+    Object.defineProperty(overlay, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({
+        x: 0,
+        y: 0,
+        left: 0,
+        top: 0,
+        right: 390,
+        bottom: 844,
+        width: 390,
+        height: 844,
+        toJSON: () => ({}),
+      }),
+    });
+    Object.defineProperty(toolbar, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({
+        x: 0,
+        y: 16,
+        left: 0,
+        top: 16,
+        right: 390,
+        bottom: 124,
+        width: 390,
+        height: 108,
+        toJSON: () => ({}),
+      }),
+    });
+    Object.defineProperty(surface, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({
+        x: 0,
+        y: 0,
+        left: 0,
+        top: 0,
+        right: 300,
+        bottom: 200,
+        width: 300,
+        height: 200,
+        toJSON: () => ({}),
+      }),
+    });
+    await flushRemoteWindowSurfaceLayout();
+
+    await waitFor(() => {
+      expect(resizeTargetWindow).toHaveBeenCalledTimes(1);
+    });
+    const first = resizeTargetWindow.mock.calls[0]?.[1];
+    expect(first).toMatchObject({
+      streamId: expect.any(String),
+      targetId: 'app-1',
+      event: {
+        kind: 'window-resize',
+        width: 390,
+        height: 692,
+      },
+    });
+
+    fireEvent.click(screen.getByTestId('remote-window-more-toggle'));
+    fireEvent.click(screen.getByTestId('remote-window-fullscreen-display-toggle'));
+    await waitFor(() => {
+      expect(resizeTargetWindow).toHaveBeenCalledTimes(2);
+    });
+  });
+
   it('keeps a resize ACK target in the cached picker catalog after the stream closes', async () => {
     const mediaStream = { id: 'media-stream-1' } as MediaStream;
     const target = makeTarget('app-1', 'TextEdit', 'app-window');

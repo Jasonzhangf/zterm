@@ -130,6 +130,7 @@ import {
   resolveFloatingOverlaySizing,
   resolveStartedCaptureFrameSize,
   resolveRemoteWindowDisplaySourceSize,
+  resolveRemoteWindowFullscreenFillReferenceSize,
   formatTargetKind,
   isRemoteWindowInputSupported,
   pointerSampleFromReactEvent,
@@ -256,6 +257,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   stopStream,
   requestScreenshot,
   sendInput,
+  resizeTargetWindow,
   onInputDebug,
   bottomInsetPx = 0,
   bottomChromeInsetPx = 0,
@@ -357,6 +359,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     clientX: number;
     clientY: number;
   } | null>(null);
+  const lastRemoteFillResizeRef = useRef<{ targetId: string; width: number; height: number } | null>(null);
   const longPressTimerRef = useRef<number | null>(null);
   const clearLongPressTimer = useCallback(() => {
     if (longPressTimerRef.current !== null) {
@@ -1001,12 +1004,71 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     setState((current) => shrinkRemoteWindowOverlay(current));
   }, [resetFullscreenViewport, setDualStreamSwitch]);
   const handleRemoteClose = useCallback(() => state.phase === 'targetLocked' && Boolean(currentLockedTarget) && sendRemoteWindowInputEventsForTarget({ sessionId: activeSessionId || null, streamId: currentLockedStreamId, target: currentLockedTarget!, events: [{ kind: 'close-window' }] }) && handleClose(), [activeSessionId, currentLockedStreamId, currentLockedTarget, handleClose, sendRemoteWindowInputEventsForTarget, state.phase]);
+  const requestRemoteTargetFillResize = useCallback((
+    force = false,
+  ) => {
+    if (
+      state.phase !== 'targetLocked'
+      || state.mode !== 'fullscreen'
+      || !activeSessionId
+      || !currentLockedStreamId
+      || !currentLockedTarget
+      || !resizeTargetWindow
+    ) {
+      return false;
+    }
+    const reference = resolveRemoteWindowFullscreenFillReferenceSize({
+      overlay: floatingOverlayRef.current,
+      toolbar: lockedToolbarRef.current,
+      surface: videoSurfaceRef.current,
+      fallbackSurfaceSize: surfaceSize,
+    });
+    if (!reference) {
+      return false;
+    }
+    const width = Math.max(120, Math.round(reference.width));
+    const height = Math.max(120, Math.round(reference.height));
+    const last = lastRemoteFillResizeRef.current;
+    if (
+      !force
+      && last
+      && last.targetId === currentLockedTarget.streamTargetId
+      && last.width === width
+      && last.height === height
+    ) {
+      return false;
+    }
+    lastRemoteFillResizeRef.current = {
+      targetId: currentLockedTarget.streamTargetId,
+      width,
+      height,
+    };
+    resizeTargetWindow(activeSessionId, {
+      streamId: currentLockedStreamId,
+      targetId: currentLockedTarget.streamTargetId,
+      event: {
+        kind: 'window-resize',
+        width,
+        height,
+      },
+    });
+    return true;
+  }, [activeSessionId, currentLockedStreamId, currentLockedTarget, resizeTargetWindow, state, surfaceSize]);
   const handleFullscreen = useCallback(() => {
     publishRemoteWindowInputContext();
     resetFullscreenViewport();
     setState((current) => enterRemoteWindowFullscreen(current));
   }, [publishRemoteWindowInputContext, resetFullscreenViewport]);
   const embeddedFullscreenRef = useRef(false); useEffect(() => { const entered = embeddedFullscreen && !embeddedFullscreenRef.current; embeddedFullscreenRef.current = embeddedFullscreen; if (entered && state.phase === 'targetLocked' && state.mode === 'floating') handleFullscreen(); }, [embeddedFullscreen, handleFullscreen, state]);
+  useEffect(() => {
+    if (state.phase !== 'targetLocked' || state.mode !== 'fullscreen') {
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      requestRemoteTargetFillResize();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [requestRemoteTargetFillResize, state]);
 
   const handleRequestKeyboard = useCallback(() => {
     publishRemoteWindowInputContext();
@@ -1016,7 +1078,9 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   const handleToggleFullscreenDisplayMode = useCallback(() => {
     resetFullscreenViewport();
     setFullscreenDisplayMode(initialFullscreenDisplayMode);
+    requestRemoteTargetFillResize(true);
   }, [
+    requestRemoteTargetFillResize,
     resetFullscreenViewport,
     setFullscreenDisplayMode,
   ]);
