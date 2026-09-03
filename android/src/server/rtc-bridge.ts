@@ -70,6 +70,8 @@ class RtcPeerTransport implements RtcServerTransport {
 
   private handlers: TransportHandlers | null = null;
 
+  private closed = false;
+
   public constructor(
     id: string,
     public readonly requestOrigin: string,
@@ -95,6 +97,7 @@ class RtcPeerTransport implements RtcServerTransport {
   }
 
   public attach(peerConnection: RTCPeerConnection, channel: RTCDataChannel, handlers: TransportHandlers) {
+    this.closed = false;
     this.peerConnection = peerConnection;
     this.channel = channel;
     this.handlers = handlers;
@@ -128,17 +131,32 @@ class RtcPeerTransport implements RtcServerTransport {
   }
 
   public close(reason = 'rtc close') {
+    if (this.closed) {
+      return;
+    }
+    this.closed = true;
+    const channel = this.channel;
+    const peerConnection = this.peerConnection;
+    const handlers = this.handlers;
+    this.channel = null;
+    this.peerConnection = null;
+    this.handlers = null;
+    if (channel) {
+      channel.onmessage = null;
+      channel.onclose = null;
+      channel.onerror = null;
+    }
     try {
-      this.channel?.close();
+      channel?.close();
     } catch (error) {
       console.warn('[rtc-bridge] Failed to close RTC data channel:', error);
     }
     try {
-      this.peerConnection?.close();
+      peerConnection?.close();
     } catch (error) {
       console.warn('[rtc-bridge] Failed to close RTC peer connection:', error);
     }
-    this.handlers?.onClose(this.id, reason);
+    handlers?.onClose(this.id, reason);
   }
 }
 
@@ -206,6 +224,7 @@ export function createRtcBridgeServer(options: CreateRtcBridgeServerOptions) {
       return;
     }
     clearPeerStale(peer);
+    peer.transport.close(reason);
     try {
       peer.peerConnection?.close();
     } catch (error) {
