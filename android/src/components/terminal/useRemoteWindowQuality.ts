@@ -16,9 +16,7 @@ import {
 } from '../../lib/remote-window-quality-controller';
 import {
   resolveInitialRemoteWindowVideoProfile,
-  resolveRemoteWindowVideoAdaptiveDecision,
   type RemoteWindowNetworkQualityInput,
-  type RemoteWindowVideoAdaptiveState,
   type RemoteWindowVideoPressureCause,
   type RemoteWindowVideoStatsSample,
 } from '../../lib/remote-window-video-quality';
@@ -93,9 +91,7 @@ export function useRemoteWindowQuality({
   const [adaptiveCause, setAdaptiveCause] = useState<RemoteWindowVideoPressureCause>('none');
   const [lastStatsSample, setLastStatsSample] = useState<RemoteWindowVideoStatsSample | null>(null);
   const qualityApplyStateRef = useRef(qualityApplyState);
-  const adaptiveStateRef = useRef<RemoteWindowVideoAdaptiveState | null>(null);
   const queuedLatestQualityRef = useRef<RemoteWindowQueuedQuality | null>(null);
-  const cooldownSamplesRemainingRef = useRef(0);
   const requestQualityRef = useRef<((options: RemoteWindowQueuedQuality) => void) | null>(null);
   const requestGenerationRef = useRef(0);
   const activeRequestRef = useRef<RemoteWindowActiveQualityRequest | null>(null);
@@ -103,10 +99,10 @@ export function useRemoteWindowQuality({
 
   const desiredProfile = useMemo(() => resolveInitialRemoteWindowVideoProfile(
     videoPreference,
-    networkQuality,
-    interactionActive,
+    null,
+    false,
     target ? { target } : undefined,
-  ), [interactionActive, networkQuality, target, videoPreference]);
+  ), [target, videoPreference]);
 
   useEffect(() => {
     const connection = getRemoteWindowNetworkConnection();
@@ -192,9 +188,6 @@ export function useRemoteWindowQuality({
       const next = acceptRemoteWindowQualityResult(qualityApplyStateRef.current, result);
       qualityApplyStateRef.current = next;
       setQualityApplyState(next);
-      if (next.phase === 'applied') {
-        cooldownSamplesRemainingRef.current = 2;
-      }
       const queued = queuedLatestQualityRef.current;
       if (queued && next.phase === 'applied' && next.qualityKey === queued.qualityKey) {
         queuedLatestQualityRef.current = null;
@@ -226,9 +219,7 @@ export function useRemoteWindowQuality({
       window.clearTimeout(activeRequestRef.current.timeoutId);
       activeRequestRef.current = null;
     }
-    adaptiveStateRef.current = null;
     queuedLatestQualityRef.current = null;
-    cooldownSamplesRemainingRef.current = 0;
     setAdaptiveCause('none');
     const next = createRemoteWindowQualityApplyState();
     qualityApplyStateRef.current = next;
@@ -272,31 +263,10 @@ export function useRemoteWindowQuality({
           return;
         }
         setLastStatsSample(sample);
-        if (cooldownSamplesRemainingRef.current > 0) {
-          cooldownSamplesRemainingRef.current -= 1;
-          return;
-        }
-        const decision = resolveRemoteWindowVideoAdaptiveDecision({
-          preference: videoPreference,
-          target,
-          interactionActive,
-          previous: adaptiveStateRef.current,
-          sample,
-        });
-        adaptiveStateRef.current = decision.state;
-        setAdaptiveCause(decision.cause);
-        requestAcknowledgedQuality({
-          sessionId: activeSessionId,
-          streamId,
-          targetId,
-          qualityKey: buildQualityKey({
-            sessionId: activeSessionId,
-            streamId,
-            targetId,
-            videoProfile: decision.profile,
-          }),
-          videoProfile: decision.profile,
-        });
+        // Stats remain observable for diagnostics only. They must not alter
+        // bitrate, frame rate, capture size, or input cadence until a measured
+        // bandwidth/pressure experiment establishes a trustworthy signal.
+        setAdaptiveCause('none');
       } catch (error) {
         console.warn('[useRemoteWindowQuality] remote window stats quality update failed:', error);
       }
@@ -307,7 +277,7 @@ export function useRemoteWindowQuality({
       stopped = true;
       window.clearInterval(timer);
     };
-  }, [activeSessionId, collectStatsRef, focusStreamActive, interactionActive, requestAcknowledgedQuality, streamId, streamReady, target, targetId, videoPreference]);
+  }, [activeSessionId, collectStatsRef, focusStreamActive, streamId, streamReady, targetId]);
 
   return {
     activeProfile: qualityApplyState.phase === 'applied' ? qualityApplyState.applied : desiredProfile,
