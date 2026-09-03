@@ -78,7 +78,6 @@ export function useRemoteWindowQuality({
   focusStreamActive,
   videoPreference,
   target,
-  interactionActive,
   updateStreamQuality,
   collectStatsRef,
 }: UseRemoteWindowQualityOptions) {
