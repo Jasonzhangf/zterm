@@ -420,7 +420,7 @@ describe('zterm daemon service script truth gates', () => {
     expect(sourceScript).not.toContain('zterm-remote-window-capture');
     expect(releaseScript).not.toContain('zterm-remote-window-capture');
     expect(sourceStageBody).toContain('swiftc -swift-version 5 "$NATIVE_DAEMON_SOURCE" "$REMOTE_WINDOW_CAPTURE_SWIFT" -o "$NATIVE_DAEMON_BIN"');
-    expect(releaseStageBody).toContain('swiftc -swift-version 5 "${NATIVE_DAEMON_SOURCE}" "${REMOTE_WINDOW_CAPTURE_SWIFT}" -o "${NATIVE_DAEMON_BIN}"');
+    expect(releaseStageBody).toContain('swiftc -swift-version 5 -strict-concurrency=minimal "${NATIVE_DAEMON_SOURCE}" "${REMOTE_WINDOW_CAPTURE_SWIFT}" -o "${NATIVE_DAEMON_BIN}"');
     expect(releaseNormalizeBody).toContain('"${release_tree}/support/zterm-daemon"');
     expect(releaseNormalizeBody).not.toContain('Remote Capture');
     for (const body of [

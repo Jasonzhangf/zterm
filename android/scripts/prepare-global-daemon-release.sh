@@ -119,7 +119,7 @@ stage_native_daemon_binary() {
     return 0
   fi
   "${NODE_BIN}" "${REMOTE_WINDOW_CAPTURE_EXTRACTOR}" "${REMOTE_WINDOW_CAPTURE_SOURCE}" "${REMOTE_WINDOW_CAPTURE_SWIFT}"
-  swiftc -swift-version 5 "${NATIVE_DAEMON_SOURCE}" "${REMOTE_WINDOW_CAPTURE_SWIFT}" -o "${NATIVE_DAEMON_BIN}"
+  swiftc -swift-version 5 -strict-concurrency=minimal "${NATIVE_DAEMON_SOURCE}" "${REMOTE_WINDOW_CAPTURE_SWIFT}" -o "${NATIVE_DAEMON_BIN}"
   chmod +x "${NATIVE_DAEMON_BIN}"
 }
 
