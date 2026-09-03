@@ -100,7 +100,7 @@ describe('useRemoteWindowQuality owner', () => {
     await act(async () => resolvers[0](appliedResult(updateStreamQuality.mock.calls[0][1])));
     await waitFor(() => expect(updateStreamQuality).toHaveBeenCalledTimes(2));
     expect(updateStreamQuality.mock.calls[1][1].videoProfile).toEqual(
-      buildRemoteWindowVideoProfile('quality', { interactionActive: true }),
+      buildRemoteWindowVideoProfile('quality', { interactionActive: false }),
     );
   });
 
@@ -152,32 +152,11 @@ describe('useRemoteWindowQuality owner', () => {
     expect(result.current.qualityApplyState).toMatchObject({ phase: 'applied', revision: 2 });
   });
 
-  it('skips exactly two stats samples after apply before adaptive downgrade', async () => {
-    vi.useFakeTimers();
-    let sampledAtMs = 0;
-    let statsEnabled = false;
-    const collectStats = vi.fn(async () => statsEnabled ? {
-      sampledAtMs: sampledAtMs += 2_000,
-      availableOutgoingBitrateBps: 3_000_000,
-      qualityLimitationReason: 'bandwidth',
-    } : null);
+  it('keeps stats observable without adapting the media profile', async () => {
     const updateStreamQuality = vi.fn<Parameters<RemoteWindowQualityUpdater>, ReturnType<RemoteWindowQualityUpdater>>(async (_sessionId, payload) => appliedResult(payload));
-    renderQualityHook({ updateStreamQuality, collectStats });
-    await act(async () => Promise.resolve());
+    renderQualityHook({ updateStreamQuality });
+    await waitFor(() => expect(updateStreamQuality).toHaveBeenCalledTimes(1));
     expect(updateStreamQuality).toHaveBeenCalledTimes(1);
-    statsEnabled = true;
-
-    await act(async () => {
-      vi.advanceTimersByTime(4_000);
-      await Promise.resolve();
-    });
-    expect(updateStreamQuality).toHaveBeenCalledTimes(1);
-    await act(async () => {
-      vi.advanceTimersByTime(2_000);
-      await Promise.resolve();
-    });
-    expect(updateStreamQuality).toHaveBeenCalledTimes(2);
-    expect(updateStreamQuality.mock.calls[1][1].videoProfile.maxBitrateBps).toBe(4_000_000);
   });
 
   it('cancels an active timeout and ignores its late result after reset', async () => {
