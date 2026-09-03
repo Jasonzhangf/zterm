@@ -525,6 +525,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     streamReady: state.phase === 'targetLocked' && Boolean(state.streamStarted),
     focusStreamActive: Boolean(qualityStreamId && activeFocusStreamIdRef.current === qualityStreamId),
     videoPreference,
+    target: state.phase === 'targetLocked' ? state.target : null,
     interactionActive: qualityInteractionActive,
     updateStreamQuality,
     collectStatsRef: collectStreamStatsRef,
@@ -1544,7 +1545,9 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     if (!previousHadStream) {
       setVideoPreference(selectedVideoPreference);
     }
-    const videoProfile = resolveInitialRemoteWindowVideoProfile(selectedVideoPreference, networkQuality);
+    const videoProfile = resolveInitialRemoteWindowVideoProfile(selectedVideoPreference, networkQuality, false, {
+      target: effectiveTarget,
+    });
 
     if (!startStream) {
       setState((current) => {

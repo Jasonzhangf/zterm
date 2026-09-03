@@ -10,6 +10,7 @@ import {
   resolveInitialRemoteWindowVideoProfile,
   resolveRemoteWindowDesktopCoverageRatio,
   resolveRemoteWindowVideoAdaptiveDecision,
+  resolveRemoteWindowQualityStreamSize,
   resolveRemoteWindowVideoResolutionKey,
   writeRemoteWindowVideoPreference,
 } from './remote-window-video-quality';
@@ -57,6 +58,21 @@ function makeStorage() {
 }
 
 describe('remote-window-video-quality', () => {
+  it('scales by the source short edge without upsampling or changing aspect ratio', () => {
+    expect(resolveRemoteWindowQualityStreamSize({ width: 2560, height: 1440 }, 'smooth-720'))
+      .toEqual({ width: 1280, height: 720 });
+    expect(resolveRemoteWindowQualityStreamSize({ width: 800, height: 600 }, 'quality-1080'))
+      .toEqual({ width: 800, height: 600 });
+    expect(resolveRemoteWindowQualityStreamSize({ width: 2160, height: 3840 }, 'ultra-2160'))
+      .toEqual({ width: 2160, height: 3840 });
+  });
+
+  it('uses target dimensions for portrait and landscape profiles', () => {
+    expect(buildRemoteWindowVideoProfile('smooth', { target: makeTarget(1920, 1080) }))
+      .toMatchObject({ maxCaptureWidth: 1280, maxCaptureHeight: 720, maxBitrateBps: 2_000_000 });
+    expect(buildRemoteWindowVideoProfile('quality', { target: makeTarget(1440, 2560) }))
+      .toMatchObject({ maxCaptureWidth: 1080, maxCaptureHeight: 1920, maxBitrateBps: 8_000_000 });
+  });
   it('exposes internal bitrate guardrails for policy tuning without widening the wire contract', () => {
     expect(REMOTE_WINDOW_VIDEO_BITRATE_BOUNDS.smooth).toEqual({ minBps: 750_000, maxBps: 4_000_000 });
     expect(REMOTE_WINDOW_VIDEO_BITRATE_BOUNDS.quality).toEqual({ minBps: 3_000_000, maxBps: 10_000_000 });
