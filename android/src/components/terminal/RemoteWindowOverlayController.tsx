@@ -130,7 +130,6 @@ import {
   resolveFloatingOverlaySizing,
   resolveStartedCaptureFrameSize,
   resolveRemoteWindowDisplaySourceSize,
-  resolveRemoteWindowFullscreenFillReferenceSize,
   formatTargetKind,
   isRemoteWindowInputSupported,
   pointerSampleFromReactEvent,
@@ -257,7 +256,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   stopStream,
   requestScreenshot,
   sendInput,
-  resizeTargetWindow,
   onInputDebug,
   bottomInsetPx = 0,
   bottomChromeInsetPx = 0,
@@ -406,7 +404,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   const handoffEpochRef = useRef(0);
   const activeHandoffRef = useRef<RemoteWindowStreamHandoffState | null>(null);
   const handoffVideoVisibilityRef = useRef<boolean | null>(null);
-  const lastDefaultFullscreenFillKeyRef = useRef<string | null>(null);
   const collectStreamStatsRef = useRef<(() => Promise<RemoteWindowVideoStatsSample | null>) | null>(null);
   const activeSessionIdRef = useRef(activeSessionId); const stopStreamRef = useRef(stopStream);
   activeSessionIdRef.current = activeSessionId; stopStreamRef.current = stopStream;
@@ -870,7 +867,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     resetCatalog();
     setItermPaneTargetsExpanded(false);
     setAppSwitchOpen(false);
-    lastDefaultFullscreenFillKeyRef.current = null;
     floatingResizeRef.current = null;
     surfacePointersRef.current.clear();
     surfaceGestureRef.current = null;
@@ -998,7 +994,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   }, [inputContext, inputContextKey, onInputContextChange]);
 
   const handleShrink = useCallback(() => {
-    lastDefaultFullscreenFillKeyRef.current = null;
     resetFullscreenViewport();
     // 缩回浮窗时强制退出进行中的双流切流（overview-crop-visible 等），
     // 防止浮窗残留「video 隐藏 + canvas 无内容」的黑屏状态。
@@ -1008,7 +1003,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   const handleRemoteClose = useCallback(() => state.phase === 'targetLocked' && Boolean(currentLockedTarget) && sendRemoteWindowInputEventsForTarget({ sessionId: activeSessionId || null, streamId: currentLockedStreamId, target: currentLockedTarget!, events: [{ kind: 'close-window' }] }) && handleClose(), [activeSessionId, currentLockedStreamId, currentLockedTarget, handleClose, sendRemoteWindowInputEventsForTarget, state.phase]);
   const handleFullscreen = useCallback(() => {
     publishRemoteWindowInputContext();
-    lastDefaultFullscreenFillKeyRef.current = null;
     resetFullscreenViewport();
     setState((current) => enterRemoteWindowFullscreen(current));
   }, [publishRemoteWindowInputContext, resetFullscreenViewport]);
@@ -1019,119 +1013,12 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     onRequestKeyboard?.();
   }, [onRequestKeyboard, publishRemoteWindowInputContext]);
 
-  const requestFullscreenFillResize = useCallback(() => {
-    if (
-      state.phase === 'targetLocked'
-      && state.streamId
-      && activeSessionId
-    ) {
-      const fillReferenceSize = resolveRemoteWindowFullscreenFillReferenceSize({
-        overlay: floatingOverlayRef.current,
-        toolbar: lockedToolbarRef.current,
-        surface: videoSurfaceRef.current,
-        fallbackSurfaceSize: surfaceSize,
-      });
-      if (fillReferenceSize && fillReferenceSize.width > 0 && fillReferenceSize.height > 0) {
-        const currentWindowWidth = state.target.videoTarget.windowBoundsTopLeftPx.width
-          || getRemoteWindowSourceRect(state.target).width;
-        const requestedWidth = Math.round(Math.max(120, currentWindowWidth));
-        const requestedHeight = Math.round(Math.max(
-          120,
-          requestedWidth * (fillReferenceSize.height / fillReferenceSize.width),
-        ));
-        const currentWindowHeight = state.target.videoTarget.windowBoundsTopLeftPx.height
-          || getRemoteWindowSourceRect(state.target).height;
-        if (
-          Math.abs(currentWindowWidth - requestedWidth) <= 1
-          && Math.abs(currentWindowHeight - requestedHeight) <= 1
-        ) {
-          onInputDebug?.({
-            source: 'overlay',
-            sent: false,
-            sessionId: activeSessionId,
-            streamId: state.streamId,
-            targetId: state.target.streamTargetId,
-            targetTitle: state.target.videoTarget.title || state.target.videoTarget.appBundleId || null,
-            event: {
-              kind: 'window-resize',
-              width: requestedWidth,
-              height: requestedHeight,
-            },
-          });
-          return true;
-        }
-        const eventPayload: RemoteWindowInputEventPayload['event'] = {
-          kind: 'window-resize',
-          width: requestedWidth,
-          height: requestedHeight,
-        };
-        resizeTargetWindow?.(activeSessionId, {
-          streamId: state.streamId,
-          targetId: state.target.streamTargetId,
-          event: eventPayload,
-        });
-        onInputDebug?.({
-          source: 'overlay',
-          sent: Boolean(resizeTargetWindow),
-          sessionId: activeSessionId,
-          streamId: state.streamId,
-          targetId: state.target.streamTargetId,
-          targetTitle: state.target.videoTarget.title || state.target.videoTarget.appBundleId || null,
-          event: eventPayload,
-        });
-        return true;
-      }
-    }
-    return false;
-  }, [
-    activeSessionId,
-    onInputDebug,
-    resizeTargetWindow,
-    state,
-    surfaceSize,
-  ]);
-
   const handleToggleFullscreenDisplayMode = useCallback(() => {
-    requestFullscreenFillResize();
     resetFullscreenViewport();
     setFullscreenDisplayMode(initialFullscreenDisplayMode);
   }, [
-    requestFullscreenFillResize,
     resetFullscreenViewport,
     setFullscreenDisplayMode,
-  ]);
-
-  useEffect(() => {
-    if (
-      state.phase !== 'targetLocked'
-      || state.mode !== 'fullscreen'
-      || !state.streamId
-      || !activeSessionId
-      || !surfaceSize
-      || fullscreenDisplayMode !== 'fill'
-    ) {
-      return;
-    }
-    const key = [
-      state.streamId,
-      state.target.streamTargetId,
-      Math.round(surfaceSize.width),
-      Math.round(surfaceSize.height),
-      Math.round(state.target.videoTarget.windowBoundsTopLeftPx.width || getRemoteWindowSourceRect(state.target).width),
-      Math.round(state.target.videoTarget.windowBoundsTopLeftPx.height || getRemoteWindowSourceRect(state.target).height),
-    ].join('|');
-    if (lastDefaultFullscreenFillKeyRef.current === key) {
-      return;
-    }
-    if (requestFullscreenFillResize()) {
-      lastDefaultFullscreenFillKeyRef.current = key;
-    }
-  }, [
-    activeSessionId,
-    fullscreenDisplayMode,
-    requestFullscreenFillResize,
-    state,
-    surfaceSize,
   ]);
 
   const handleToggleInputMode = useCallback(() => {
@@ -1520,7 +1407,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     setAppSwitchOpen(false);
     resetCatalog();
     if (!previousHadStream) {
-      lastDefaultFullscreenFillKeyRef.current = null;
       setFloatingOffset({ x: 0, y: 0 });
       setFloatingOverlayWidthPx(null);
       resetQualityApplyState();
@@ -1664,7 +1550,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
           activeStreamIdRef.current = committedStreamId;
           activeCanvasStreamIdRef.current = null;
           activeFocusStreamIdRef.current = focusResult?.streamId || null;
-          lastDefaultFullscreenFillKeyRef.current = null;
           resetQualityApplyState();
           screenshotController.reset();
           resetFullscreenViewport();
@@ -2181,9 +2066,9 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
             surfaceGestureRef.current = pairResult.nextState;
             surfaceLocalPanStartRef.current = null;
             secondPointerPendingRef.current = null;
-            event.preventDefault();
-            event.stopPropagation();
-            return;
+            // Continue through the pair move path for this same sample. The
+            // first post-upgrade motion must not be discarded, otherwise a
+            // short two-finger vertical swipe produces no remote scroll.
           }
         }
         secondPointerPendingRef.current = null;
@@ -2200,6 +2085,9 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       const first = surfacePointersRef.current.get(runtimeGesture.firstPointerId);
       const second = surfacePointersRef.current.get(runtimeGesture.secondPointerId);
       if (!first || !second) {
+        surfaceGestureRef.current = null;
+        surfacePinchStartRef.current = null;
+        surfaceLocalPanStartRef.current = null;
         return;
       }
       const geometry = resolveSurfaceInputGeometry();
@@ -2410,6 +2298,9 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       const first = surfacePointersRef.current.get(runtimeGesture.firstPointerId);
       const second = surfacePointersRef.current.get(runtimeGesture.secondPointerId);
       if (!first || !second) {
+        surfaceGestureRef.current = null;
+        surfacePinchStartRef.current = null;
+        surfaceLocalPanStartRef.current = null;
         surfacePointersRef.current.delete(event.pointerId);
         event.preventDefault();
         event.stopPropagation();

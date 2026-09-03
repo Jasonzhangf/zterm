@@ -2514,7 +2514,7 @@ describe('RemoteWindowOverlay', () => {
     });
   });
 
-  it('defaults fullscreen to remote fill resize and keeps drawing aligned to the fill rect', async () => {
+  it('keeps fullscreen display geometry local to the projection surface', async () => {
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
     Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 });
     Object.defineProperty(window, 'visualViewport', {
@@ -2532,24 +2532,11 @@ describe('RemoteWindowOverlay', () => {
       streamId,
       mediaStream,
     }));
-    const resizeTargetWindow = vi.fn();
-    let remoteWindowMessageHandler: ((msg: any) => void) | null = null;
-    const onRemoteWindowMessage = vi.fn((handler: (msg: any) => void) => {
-      remoteWindowMessageHandler = handler;
-      return () => {
-        if (remoteWindowMessageHandler === handler) {
-          remoteWindowMessageHandler = null;
-        }
-      };
-    });
-
     render(
       <RemoteWindowOverlay
         activeSessionId="session-1"
         requestTargets={requestTargets}
         startStream={startStream}
-        resizeTargetWindow={resizeTargetWindow}
-        onRemoteWindowMessage={onRemoteWindowMessage}
       />,
     );
 
@@ -2619,55 +2606,10 @@ describe('RemoteWindowOverlay', () => {
     });
 
     await waitFor(() => {
-      expect(resizeTargetWindow).toHaveBeenCalledWith('session-1', expect.objectContaining({
-        streamId: expect.stringMatching(/^rw-stream-/),
-        targetId: 'app-1',
-        event: {
-          kind: 'window-resize',
-          width: 800,
-          height: 1419,
-        },
-      }));
-    });
-    const resizePayload = resizeTargetWindow.mock.calls[0]?.[1];
-    const resizedTarget = {
-      ...target,
-      videoTarget: {
-        ...target.videoTarget,
-        windowBoundsTopLeftPx: { x: 10, y: 20, width: 800, height: 1419 },
-        cropRectTopLeftPx: { x: 10, y: 20, width: 800, height: 1419 },
-      },
-    };
-    act(() => {
-      remoteWindowMessageHandler?.({
-        type: 'remote-window-input-ack',
-        control: {
-          version: 1,
-          sequence: 'rw-resize-ack',
-          accepted: true,
-          retryable: false,
-          duplicate: false,
-          receivedAtMs: 1,
-        },
-        payload: {
-          streamId: resizePayload.streamId,
-          targetId: 'app-1',
-          target: resizedTarget,
-          capture: {
-            source: 'ScreenCaptureKit',
-            frameWidth: 800,
-            frameHeight: 1419,
-            frameRate: 30,
-            targetKind: 'app-window',
-          },
-        },
-      });
-    });
-    await waitFor(() => {
       expect(Number.parseFloat(content.style.left)).toBeCloseTo(0, 1);
-      expect(Number.parseFloat(content.style.top)).toBeCloseTo(-166.06, 1);
+      expect(Number.parseFloat(content.style.top)).toBeCloseTo(-12.5, 1);
       expect(Number.parseFloat(content.style.width)).toBeCloseTo(300, 1);
-      expect(Number.parseFloat(content.style.height)).toBeCloseTo(532.1, 1);
+      expect(Number.parseFloat(content.style.height)).toBeCloseTo(225, 1);
     });
     expect(overlay.getAttribute('data-display-mode')).toBe('fill');
     fireEvent.click(screen.getByTestId('remote-window-more-toggle'));
