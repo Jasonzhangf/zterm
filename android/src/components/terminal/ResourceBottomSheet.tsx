@@ -142,7 +142,7 @@ export function ResourceBottomSheet({
     return (
       <div aria-hidden="true" style={{ display: 'none' }}>
         {renderFileBrowser(false)}
-        {remoteWindowNode}
+        {renderRemoteWindow?.(true, 'stream')}
       </div>
     );
   }
