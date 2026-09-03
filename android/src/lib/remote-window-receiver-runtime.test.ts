@@ -543,8 +543,6 @@ describe('remote window receiver runtime', () => {
       framesDropped: 9,
       freezeCount: 1,
       jitterBufferDelayMs: 320,
-      availableIncomingBitrateBps: 5_000_000,
-      availableOutgoingBitrateBps: 4_000_000,
       rttMs: 210,
     });
 
