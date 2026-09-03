@@ -57,6 +57,7 @@ export interface RemoteWindowNetworkQualityInput {
 
 export interface RemoteWindowVideoStatsSample {
   sampledAtMs: number;
+  receivedBitrateBps?: number | null;
   rttMs?: number | null;
   availableIncomingBitrateBps?: number | null;
   availableOutgoingBitrateBps?: number | null;
@@ -348,17 +349,14 @@ function classifyRemoteWindowVideoPressure(options: {
   previousSample: RemoteWindowVideoStatsSample | null;
 }) {
   const { profile, sample, previousSample } = options;
-  const availableBitrate = finiteNumber(sample.availableIncomingBitrateBps)
-    ?? finiteNumber(sample.availableOutgoingBitrateBps);
   const rttMs = finiteNumber(sample.rttMs);
   const fps = finiteNumber(sample.framesPerSecond);
   const droppedDelta = counterDelta(sample.framesDropped, previousSample?.framesDropped);
   const freezeDelta = counterDelta(sample.freezeCount, previousSample?.freezeCount);
   const jitterDelayMs = finiteNumber(sample.jitterBufferDelayMs) ?? 0;
   const limitation = `${sample.qualityLimitationReason || ''}`.toLowerCase();
-  const severeNetwork = availableBitrate !== null && availableBitrate < profile.maxBitrateBps * 0.35;
-  if (limitation === 'bandwidth' || (availableBitrate !== null && availableBitrate < profile.maxBitrateBps * 0.7)) {
-    return { cause: 'network' as const, severe: severeNetwork };
+  if (limitation === 'bandwidth') {
+    return { cause: 'network' as const, severe: false };
   }
   if (limitation === 'cpu') {
     return { cause: 'host' as const, severe: false };
