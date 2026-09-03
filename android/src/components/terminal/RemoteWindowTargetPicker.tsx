@@ -69,7 +69,9 @@ export function RemoteWindowTargetPicker({
         boxShadow: 'none', backdropFilter: 'none',
       } : {}),
     }}>
-      {!embedded ? <div style={styles.panelHeader}>
+      {embedded ? <div data-testid="remote-window-embedded-picker-header" style={{ ...styles.panelHeader, justifyContent: 'flex-end', paddingTop: 'calc(env(safe-area-inset-top, 0px) + 10px)' }}>
+        <button type="button" aria-label="关闭远程窗口选择" onClick={onClose} style={styles.headerIconButton}>×</button>
+      </div> : <div style={styles.panelHeader}>
         <div>
           <div style={styles.panelTitle}>{browserOnly ? '浏览器窗口' : '远程窗口'}</div>
           <div style={styles.panelSubtitle}>
@@ -91,7 +93,7 @@ export function RemoteWindowTargetPicker({
             x
           </button>
         </div>
-      </div> : null}
+      </div>}
       {phase === 'pickerOpen' && errorMessage ? (
         <div data-testid="remote-window-picker-error" style={styles.errorBox}>{errorMessage}</div>
       ) : null}
