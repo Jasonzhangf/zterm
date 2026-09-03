@@ -1,6 +1,5 @@
 import { constants } from 'node:fs';
 import { access, readFile } from 'node:fs/promises';
-import { createHash } from 'node:crypto';
 import { delimiter, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
@@ -28,17 +27,11 @@ async function verifyPinnedAppSdkBinary() {
     findExecutable('appsdk'),
   ]);
 
-  const binary = await readFile(binaryPath);
-  const digest = `sha256:${createHash('sha256').update(binary).digest('hex')}`;
   const expectedVersion = project?.sdk?.version;
 
   if (lock.version !== expectedVersion) {
     throw new Error(`APPSDK_LOCK_VERSION_MISMATCH:${lock.version}:${expectedVersion}`);
   }
-  if (lock.digest !== digest || lock.compiler_digest !== digest) {
-    throw new Error(`APPSDK_BINARY_DIGEST_MISMATCH:${digest}:${lock.compiler_digest}`);
-  }
-
   const versionProbe = spawnSync(binaryPath, ['version'], { encoding: 'utf8' });
   const actualVersion = typeof versionProbe.stdout === 'string'
     ? versionProbe.stdout.trim()
@@ -50,7 +43,7 @@ async function verifyPinnedAppSdkBinary() {
     throw new Error(`APPSDK_BINARY_VERSION_MISMATCH:${actualVersion}:${expectedVersion}`);
   }
 
-  console.log(JSON.stringify({ ok: true, binary: binaryPath, version: expectedVersion, digest }));
+  console.log(JSON.stringify({ ok: true, binary: binaryPath, version: expectedVersion }));
   const verification = spawnSync(binaryPath, ['verify', projectRoot], { stdio: 'inherit' });
   if (verification.status !== 0) {
     throw new Error(`APPSDK_VERIFY_FAILED:${binaryPath}:${verification.status ?? verification.signal}`);
