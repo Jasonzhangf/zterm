@@ -6,7 +6,7 @@ type ResourcePlacement = 'bottom' | 'end';
 export interface ResourceBottomSheetProps {
   open: boolean;
   renderFileBrowser: (open: boolean) => ReactNode;
-  renderRemoteWindow?: (open: boolean, tab?: 'stream' | 'web') => ReactNode;
+  renderRemoteWindow?: (open: boolean, tab?: 'stream' | 'web', expanded?: boolean) => ReactNode;
   webUrl?: string;
   onWebUrlChange?: (url: string) => void;
   onClose: () => void;
@@ -134,8 +134,8 @@ export function ResourceBottomSheet({
   const fileBrowserNode = renderFileBrowser(open && tab === 'files');
   const remoteWindowNode = renderRemoteWindow
     ? tab === 'web'
-      ? renderRemoteWindow(open, 'web')
-      : renderRemoteWindow(open && tab === 'stream')
+      ? renderRemoteWindow(open, 'web', expanded)
+      : renderRemoteWindow(open && tab === 'stream', 'stream', expanded)
     : null;
 
   if (!open) {

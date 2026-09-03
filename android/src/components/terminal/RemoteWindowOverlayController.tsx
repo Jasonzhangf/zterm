@@ -218,7 +218,7 @@ export interface RemoteWindowOverlayProps {
   onInputDebug?: (event: RemoteWindowTouchInputDebugEvent) => void;
   bottomInsetPx?: number;
   bottomChromeInsetPx?: number;
-  embedded?: boolean;
+  embedded?: boolean; embeddedFullscreen?: boolean;
   onOpenResourceDrawer?: (tab: 'web' | 'stream') => void;
   onOpenStateChange?: (open: boolean) => void;
   onBodySubscriptionSuppressedChange?: (suppressed: boolean) => void;
@@ -266,7 +266,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   onInputDebug,
   bottomInsetPx = 0,
   bottomChromeInsetPx = 0,
-  embedded = false,
+  embedded = false, embeddedFullscreen = false,
   onOpenResourceDrawer,
   onOpenStateChange,
   onBodySubscriptionSuppressedChange,
@@ -516,8 +516,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   const {
     activeProfile, adaptiveCause,
     networkQuality,
-    qualityApplyState, lastStatsSample,
-    resetQualityState: resetQualityApplyState,
+    qualityApplyState, lastStatsSample, resetQualityState: resetQualityApplyState,
   } = useRemoteWindowQuality({
     activeSessionId,
     streamId: qualityStreamId,
@@ -1017,6 +1016,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     resetFullscreenViewport();
     setState((current) => enterRemoteWindowFullscreen(current));
   }, [publishRemoteWindowInputContext, resetFullscreenViewport]);
+  const embeddedFullscreenRef = useRef(false); useEffect(() => { const entered = embeddedFullscreen && !embeddedFullscreenRef.current; embeddedFullscreenRef.current = embeddedFullscreen; if (entered && state.phase === 'targetLocked' && state.mode === 'floating') handleFullscreen(); }, [embeddedFullscreen, handleFullscreen, state]);
 
   const handleRequestKeyboard = useCallback(() => {
     publishRemoteWindowInputContext();
@@ -3063,7 +3063,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
             style: {
               ...styles.lockedTopBar,
               cursor: state.mode === 'floating' ? 'move' : 'default',
-              touchAction: state.mode === 'floating' ? 'none' : 'auto',
+              touchAction: 'none',
               userSelect: 'none',
             },
           }}

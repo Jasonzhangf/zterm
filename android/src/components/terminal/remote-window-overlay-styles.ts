@@ -424,6 +424,8 @@ export const styles: Record<string, CSSProperties> = {
     background: 'var(--zterm-panel-bg)',
     borderBottom: '1px solid var(--zterm-panel-border)',
     boxShadow: '0 8px 22px rgba(0,0,0,0.22)',
+    position: 'relative',
+    zIndex: 100,
   },
   fullscreenStreamDebug: {
     display: 'flex',
