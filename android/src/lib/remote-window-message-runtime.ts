@@ -48,6 +48,10 @@ interface PendingRemoteWindowReliableInput {
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
 }
 
+interface PendingRemoteWindowContinuousInput extends PendingRemoteWindowReliableInput {
+  control: RemoteWindowInputDeliveryControl & { lane: 'continuous' };
+}
+
 interface PendingRemoteWindowTargetsRequest {
   kind: 'targets';
   streamId?: undefined;
@@ -101,6 +105,7 @@ export const REMOTE_WINDOW_STREAM_STOP_REQUEST_TIMEOUT_MS = 15_000;
 export const REMOTE_WINDOW_STREAM_QUALITY_REQUEST_TIMEOUT_MS = 10_000;
 export const REMOTE_WINDOW_INPUT_RELIABLE_MAX_ATTEMPTS = 2;
 export const REMOTE_WINDOW_INPUT_RELIABLE_ACK_TIMEOUT_MS = 4_000;
+export const REMOTE_WINDOW_INPUT_SMOOTH_FLUSH_INTERVAL_MS = Math.ceil(1_000 / 45);
 
 export function isRemoteWindowControlMessage(msg: ServerMessage): msg is RemoteWindowControlMessage {
   return msg.type === 'remote-window-targets-response'
@@ -141,10 +146,11 @@ export function createRemoteWindowMessageRuntime(input?: {
   const pendingStreamStops = new Map<string, PendingRemoteWindowStreamStopRequest>();
   const pendingStreamQuality = new Map<string, PendingRemoteWindowStreamQualityRequest>();
   const pendingBrowserUserAgent = new Map<string, PendingRemoteWindowBrowserUserAgentRequest>();
-  const streamInputPreferences = new Map<string, RemoteWindowVideoProfile['preference']>();
+  const pendingContinuousInput = new Map<string, PendingRemoteWindowContinuousInput>();
   const reliableInputQueue: PendingRemoteWindowReliableInput[] = [];
   let reliableInputInFlight: PendingRemoteWindowReliableInput | null = null;
   let reliableInputAckTimer: number | null = null;
+  let continuousFlushTimer: number | null = null;
   let nextInputSequence = 1;
   const subscribers = new Set<RemoteWindowMessageSubscriber>();
   const targetsTimeoutMs = input?.timeoutMs ?? REMOTE_WINDOW_TARGETS_REQUEST_TIMEOUT_MS;
@@ -328,6 +334,24 @@ export function createRemoteWindowMessageRuntime(input?: {
     }, REMOTE_WINDOW_INPUT_RELIABLE_ACK_TIMEOUT_MS) as unknown as number;
   };
 
+  const clearContinuousFlushTimer = () => {
+    if (continuousFlushTimer !== null) {
+      clearTimeoutFn(continuousFlushTimer);
+      continuousFlushTimer = null;
+    }
+  };
+
+  const flushContinuousInput = (force = false) => {
+    if (!force && reliableInputInFlight) {
+      return false;
+    }
+    clearContinuousFlushTimer();
+    const pending = [...pendingContinuousInput.values()];
+    pendingContinuousInput.clear();
+    pending.forEach(sendRemoteWindowInputMessage);
+    return pending.length > 0;
+  };
+
   const pumpReliableInput = () => {
     if (reliableInputInFlight) {
       return;
@@ -356,11 +380,23 @@ export function createRemoteWindowMessageRuntime(input?: {
       next = reliableInputQueue.shift();
     }
     if (!next) {
+      flushContinuousInput();
       return;
     }
+    flushContinuousInput(true);
     reliableInputInFlight = next;
     sendRemoteWindowInputMessage(next);
     armReliableInputAckTimeout(next);
+  };
+
+  const scheduleContinuousInputFlush = () => {
+    if (continuousFlushTimer !== null || reliableInputInFlight || reliableInputQueue.length > 0) {
+      return;
+    }
+    continuousFlushTimer = setTimeoutFn(() => {
+      continuousFlushTimer = null;
+      flushContinuousInput();
+    }, REMOTE_WINDOW_INPUT_SMOOTH_FLUSH_INTERVAL_MS) as unknown as number;
   };
 
   const buildInputSequence = () => `rw-input-${now()}-${nextInputSequence++}`;
@@ -389,13 +425,30 @@ export function createRemoteWindowMessageRuntime(input?: {
       pumpReliableInput();
       return control.sequence;
     }
-    // Sample/scroll admission is immediate. There is deliberately no cache,
-    // coalescing, flush timer, or replay path for continuous input.
-    sendRemoteWindowInputMessage({
+    const key = [
+      pending.sessionId,
+      pending.payload.streamId,
+      pending.payload.targetId,
+      pending.payload.layoutGeneration ?? '',
+      event.kind,
+    ].join('|');
+    const existing = pendingContinuousInput.get(key);
+    const mergedPayload = existing && event.kind === 'scroll' && existing.payload.event.kind === 'scroll'
+      ? {
+          ...payload,
+          event: {
+            ...event,
+            deltaX: (existing.payload.event.deltaX ?? 0) + (event.deltaX ?? 0),
+            deltaY: (existing.payload.event.deltaY ?? 0) + (event.deltaY ?? 0),
+          },
+        }
+      : payload;
+    pendingContinuousInput.set(key, {
       ...pending,
-      payload,
+      payload: mergedPayload,
       control: { ...control, lane: 'continuous' },
     });
+    scheduleContinuousInputFlush();
     return control.sequence;
   };
 
@@ -438,7 +491,6 @@ export function createRemoteWindowMessageRuntime(input?: {
       clearReliableInputAckTimer();
       reliableInputInFlight = null;
     }
-    streamInputPreferences.delete(streamId);
     pumpReliableInput();
   };
 
@@ -503,7 +555,6 @@ export function createRemoteWindowMessageRuntime(input?: {
         throw new Error('Remote window stream start requires streamId');
       }
       const requestId = `rw-start-${now()}-${Math.random().toString(36).slice(2, 8)}`;
-      streamInputPreferences.set(streamId, options.videoProfile.preference);
       return new Promise<RemoteWindowStreamStartedPayload | RemoteWindowStreamStartedOfferV2Payload>((resolve, reject) => {
         const pending: PendingRemoteWindowStreamStartRequest = {
           kind: 'stream-start',
@@ -532,7 +583,6 @@ export function createRemoteWindowMessageRuntime(input?: {
         } catch (error) {
           pendingStreamStarts.delete(requestId);
           clearPendingTimeout(pending);
-          streamInputPreferences.delete(streamId);
           reject(error instanceof Error ? error : new Error(String(error)));
         }
       });
@@ -565,7 +615,6 @@ export function createRemoteWindowMessageRuntime(input?: {
         throw new Error('Remote window stream quality requires sessionId, streamId, and targetId');
       }
       const requestId = `rw-quality-${now()}-${Math.random().toString(36).slice(2, 8)}`;
-      streamInputPreferences.set(streamId, options.payload.videoProfile.preference);
       return new Promise<RemoteWindowStreamQualityResultPayload>((resolve, reject) => {
         const pending: PendingRemoteWindowStreamQualityRequest = {
           kind: 'stream-quality',
@@ -940,7 +989,6 @@ export function createRemoteWindowMessageRuntime(input?: {
       clearReliableInputAckTimer();
       reliableInputQueue.splice(0);
       reliableInputInFlight = null;
-      streamInputPreferences.clear();
       subscribers.clear();
     },
 

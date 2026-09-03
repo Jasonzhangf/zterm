@@ -333,8 +333,10 @@ describe('TerminalPage remote window overlay', () => {
           preference: 'smooth',
           maxBitrateBps: 2_000_000,
           maxFrameRateFps: 30,
-          maxCaptureWidth: 720,
-          maxCaptureHeight: 720,
+          // Source crop is 800x560; smooth mode must not upscale a smaller
+          // source to the 720p target tier.
+          maxCaptureWidth: 800,
+          maxCaptureHeight: 560,
           maxFrameAgeMs: 100,
           interactionActive: false,
           overviewMaxBitrateBps: 250_000,

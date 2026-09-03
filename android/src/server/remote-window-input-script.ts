@@ -453,7 +453,16 @@ func handleConfig(_ config: InputConfig) throws {
         try resizeTargetWindow(config)
         return
     }
-    try focusTargetWindow(config)
+    // Continuous motion is intentionally delivered without Accessibility/System
+    // Events focus checks. Those checks are multi-hundred-millisecond operations
+    // and serializing them into scroll/pointer-move turns a live gesture into a
+    // stop-and-go queue. Reliable actions (click, key, pointer down/up, focus)
+    // still verify the target immediately before injection.
+    let isContinuousMotion = config.event.kind == "scroll"
+        || (config.event.kind == "pointer" && config.event.phase == "move")
+    if !isContinuousMotion {
+        try focusTargetWindow(config)
+    }
 
     if config.event.kind == "focus" {
         return

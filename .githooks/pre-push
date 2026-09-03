@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+
+while IFS= read -r line; do
+  [ -n "$line" ] || continue
+  set -- $line
+  case "${3:-}" in
+    refs/heads/main|refs/heads/master)
+      echo "拒绝推送到 ${3:-}：请通过受保护的集成流程。" >&2
+      exit 1
+      ;;
+  esac
+done
+
+pnpm run verify:ci

@@ -729,7 +729,7 @@ describe('remote window message runtime', () => {
     expect(listener).toHaveBeenCalledTimes(2);
   });
 
-  it('admits every continuous scroll sample immediately without caching', () => {
+  it('coalesces continuous scroll samples at the smooth cadence', () => {
     const sendSocketPayload = vi.fn();
     const timers: Array<{ callback: () => void; delay: number }> = [];
     const runtime = createRemoteWindowMessageRuntime({
@@ -764,8 +764,10 @@ describe('remote window message runtime', () => {
       runtime.sendInputEvent('session-1', options);
     }
 
-    expect(sendSocketPayload).toHaveBeenCalledTimes(120);
-    expect(timers).toHaveLength(0);
+    expect(sendSocketPayload).toHaveBeenCalledTimes(0);
+    expect(timers).toHaveLength(1);
+    timers[0]!.callback();
+    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
     const sent = JSON.parse(sendSocketPayload.mock.calls[0]![2] as string);
     expect(sent).toMatchObject({
       type: 'remote-window-input',
@@ -780,6 +782,7 @@ describe('remote window message runtime', () => {
         ...options.payload,
         event: {
           ...options.payload.event,
+          deltaY: 120,
         },
         deliveryKind: 'sample',
         sampledAtMs: 100,
@@ -877,7 +880,7 @@ describe('remote window message runtime', () => {
     expect(release.control.sequence).not.toBe(first.control.sequence);
   });
 
-  it('sends continuous gestures independently while a reliable barrier is awaiting ACK', () => {
+  it('holds continuous gestures behind a reliable barrier', () => {
     const sendSocketPayload = vi.fn();
     const timers: Array<{ callback: () => void; delay: number }> = [];
     const runtime = createRemoteWindowMessageRuntime({
@@ -927,10 +930,7 @@ describe('remote window message runtime', () => {
     });
 
     expect(timers).toHaveLength(1);
-    expect(sendSocketPayload).toHaveBeenCalledTimes(2);
-    const continuous = JSON.parse(sendSocketPayload.mock.calls[1]![2] as string);
-    expect(continuous.control.lane).toBe('continuous');
-    expect(continuous.payload.event.deltaY).toBe(12);
+    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
   });
 
   it('retries a reliable ACK timeout once with the same sequence before advancing the barrier', () => {
@@ -998,7 +998,7 @@ describe('remote window message runtime', () => {
     expect(barrier.control.sequence).not.toBe(first.control.sequence);
   });
 
-  it('sends pointer samples immediately at the independent input cadence', () => {
+  it('coalesces pointer samples at the quality cadence', () => {
     const sendSocketPayload = vi.fn();
     const timers: Array<{ callback: () => void; delay: number }> = [];
     const runtime = createRemoteWindowMessageRuntime({
@@ -1041,9 +1041,11 @@ describe('remote window message runtime', () => {
       });
     }
 
-    expect(timers).toHaveLength(1);
-    expect(sendSocketPayload).toHaveBeenCalledTimes(10);
-    const sent = JSON.parse(sendSocketPayload.mock.calls[9]![2] as string);
+    expect(timers).toHaveLength(2);
+    expect(sendSocketPayload).toHaveBeenCalledTimes(0);
+    timers.filter((timer) => timer.delay < 1_000).forEach((timer) => timer.callback());
+    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
+    const sent = JSON.parse(sendSocketPayload.mock.calls[0]![2] as string);
     expect(sent.control.lane).toBe('continuous');
     expect(sent.payload.event).toMatchObject({ kind: 'pointer', phase: 'move', x: 10, y: 20 });
   });

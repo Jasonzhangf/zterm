@@ -149,16 +149,11 @@ import { RemoteWindowTargetPicker } from './RemoteWindowTargetPicker';
 import { RemoteWindowAppSwitch } from './RemoteWindowAppSwitch';
 import { RemoteWindowMorePanel } from './RemoteWindowMorePanel';
 import { useRemoteWindowQuality } from './useRemoteWindowQuality';
-import {
-  useRemoteWindowPlayback,
-  type RemoteWindowVideoDebugSnapshot,
-} from './useRemoteWindowPlayback';
+import { useRemoteWindowPlayback, type RemoteWindowVideoDebugSnapshot } from './useRemoteWindowPlayback';
 import { useRemoteWindowCompositeCanvas } from './useRemoteWindowCompositeCanvas';
 import { RemoteWindowVideoContent } from './RemoteWindowVideoContent';
 import { useRemoteWindowCatalog } from './useRemoteWindowCatalog';
-import {
-  useRemoteWindowViewport,
-} from './useRemoteWindowViewport';
+import { useRemoteWindowViewport } from './useRemoteWindowViewport';
 import { useRemoteWindowFocusSwitch } from './useRemoteWindowFocusSwitch';
 export type { RemoteWindowViewportDebugSnapshot } from './useRemoteWindowViewport';
 export type {
@@ -525,6 +520,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     streamReady: state.phase === 'targetLocked' && Boolean(state.streamStarted),
     focusStreamActive: Boolean(qualityStreamId && activeFocusStreamIdRef.current === qualityStreamId),
     videoPreference,
+    target: state.phase === 'targetLocked' ? state.target : null,
     interactionActive: qualityInteractionActive,
     updateStreamQuality,
     collectStatsRef: collectStreamStatsRef,
@@ -1544,7 +1540,9 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     if (!previousHadStream) {
       setVideoPreference(selectedVideoPreference);
     }
-    const videoProfile = resolveInitialRemoteWindowVideoProfile(selectedVideoPreference, networkQuality);
+    const videoProfile = resolveInitialRemoteWindowVideoProfile(selectedVideoPreference, networkQuality, false, {
+      target: effectiveTarget,
+    });
 
     if (!startStream) {
       setState((current) => {
@@ -3085,7 +3083,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
           onToggleAppSwitch={() => setAppSwitchOpen((current) => !current)}
           onToggleInputMode={handleToggleInputMode}
           onToggleMore={() => setStreamStatusOpen((current) => !current)}
-          streamDebugInfo={state.mode === 'fullscreen' ? { frameSize: receiverFrameSize, videoSize: liveDiag && liveDiag.videoWidth > 0 && liveDiag.videoHeight > 0 ? { width: liveDiag.videoWidth, height: liveDiag.videoHeight } : null, fps: lastStatsSample?.framesPerSecond ?? null, uplinkBps: lastStatsSample?.availableOutgoingBitrateBps ?? null, downlinkBps: lastStatsSample?.availableIncomingBitrateBps ?? null, targetBps: activeProfile.maxBitrateBps, sample: lastStatsSample } : null}
+          streamDebugInfo={state.mode === 'fullscreen' ? { frameSize: receiverFrameSize, videoSize: liveDiag && liveDiag.videoWidth > 0 && liveDiag.videoHeight > 0 ? { width: liveDiag.videoWidth, height: liveDiag.videoHeight } : null, fps: lastStatsSample?.framesPerSecond ?? null, uplinkBps: null, downlinkBps: lastStatsSample?.receivedBitrateBps ?? null, targetBps: activeProfile.maxBitrateBps, sample: lastStatsSample } : null}
         /> : null}
       {lockedVideoGroupContent}
       {state.mode === 'floating' ? (
