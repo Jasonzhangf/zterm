@@ -840,6 +840,23 @@ describe('remote-window-touch-action-runtime', () => {
       expect(move.nextState.mode).not.toBe('pinch');
     });
 
+    it('does not commit pinch when the two-finger center travels with the gesture', () => {
+      const candidate = pairDown({ clientX: 100, clientY: 60 }, { clientX: 140, clientY: 60 });
+      const move = resolveRemoteWindowTouchPairPointerMoveRuntime({
+        state: candidate.nextState,
+        pair: {
+          first: { pointerId: 1, pointerType: 'touch', clientX: 70, clientY: 130, timeMs: 1_200 },
+          second: { pointerId: 2, pointerType: 'touch', clientX: 130, clientY: 130, timeMs: 1_200 },
+        },
+        geometry,
+        timeMs: 1_200,
+        pinchEnabled: true,
+        scrollEnabled: true,
+      });
+      expect(move.nextState.mode).toBe('twoFingerScroll');
+      expect(move.localEffect.kind).toBe('two-finger-scroll-start');
+    });
+
     it('locks committed two-finger scroll and cannot switch to pinch mid-sequence', () => {
       const state = {
         mode: 'twoFingerScroll' as const,

@@ -1115,10 +1115,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     const key = [
       state.streamId,
       state.target.streamTargetId,
-      Math.round(surfaceSize.width),
-      Math.round(surfaceSize.height),
-      Math.round(state.target.videoTarget.windowBoundsTopLeftPx.width || getRemoteWindowSourceRect(state.target).width),
-      Math.round(state.target.videoTarget.windowBoundsTopLeftPx.height || getRemoteWindowSourceRect(state.target).height),
     ].join('|');
     if (lastDefaultFullscreenFillKeyRef.current === key) {
       return;
@@ -2200,6 +2196,9 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       const first = surfacePointersRef.current.get(runtimeGesture.firstPointerId);
       const second = surfacePointersRef.current.get(runtimeGesture.secondPointerId);
       if (!first || !second) {
+        surfaceGestureRef.current = null;
+        surfacePinchStartRef.current = null;
+        surfaceLocalPanStartRef.current = null;
         return;
       }
       const geometry = resolveSurfaceInputGeometry();
@@ -2410,6 +2409,9 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       const first = surfacePointersRef.current.get(runtimeGesture.firstPointerId);
       const second = surfacePointersRef.current.get(runtimeGesture.secondPointerId);
       if (!first || !second) {
+        surfaceGestureRef.current = null;
+        surfacePinchStartRef.current = null;
+        surfaceLocalPanStartRef.current = null;
         surfacePointersRef.current.delete(event.pointerId);
         event.preventDefault();
         event.stopPropagation();
