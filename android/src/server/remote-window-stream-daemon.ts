@@ -77,8 +77,6 @@ export * from './remote-window-input-helper';
 export * from './remote-window-capture';
 
 const DEFAULT_REMOTE_WINDOW_TARGET_CATALOG_CACHE_TTL_MS = 60_000;
-/** 远程窗口输入 bring-to-focus 防抖：该窗口内只每 3s 最多执行一次 focus 切换 */
-const REMOTE_WINDOW_FOCUS_DEBOUNCE_MS = 15_000;
 
 type RtcPeerConnectionCtor = typeof globalThis.RTCPeerConnection;
 type RtcSessionDescriptionCtor = typeof globalThis.RTCSessionDescription;
@@ -364,17 +362,10 @@ export function createRemoteWindowStreamDaemonRuntime(
     await getRemoteWindowInputHelper().warm();
   };
   const runRemoteWindowInputEvent = deps.runRemoteWindowInputEvent || ((payload, target, options) => {
-    // focus 防抖：3s 内已执行过 focus（且当前不是显式 focus 事件）时跳过 swift 的 bring-to-focus，
-    // 避免每次手势都切焦点导致系统窗口抖动
-    const nowMs = Date.now();
-    const isFocusEvent = payload.event.kind === 'focus';
-    const skipFocus = !isFocusEvent && nowMs - lastRemoteWindowFocusAtMs < REMOTE_WINDOW_FOCUS_DEBOUNCE_MS;
-    if (!skipFocus) {
-      lastRemoteWindowFocusAtMs = nowMs;
-    }
+    // 每个业务输入都在同一持久 helper 队列内完成前台/窗口校验后再注入。
+    // 禁止时间防抖跳过校验：用户可在任意时刻把另一窗口置前。
     return getRemoteWindowInputHelper().send(buildRemoteWindowInputConfig(payload, target, {
       daemonReceivedAtMs: options.daemonReceivedAtMs,
-      skipFocus,
     }), options.delivery);
   });
   const now = deps.now || (() => new Date().toISOString());
@@ -389,7 +380,6 @@ export function createRemoteWindowStreamDaemonRuntime(
   const pendingIceCandidatesByStream = new Map<string, RTCIceCandidateInit[]>();
   const iceCandidateFingerprintsByStream = new Map<string, Set<string>>();
   const closedStreamIds = new Set<string>();
-  let lastRemoteWindowFocusAtMs = 0;
   const targetCatalogCacheTtlMs = Math.max(
     0,
     Math.floor(deps.targetCatalogCacheTtlMs ?? DEFAULT_REMOTE_WINDOW_TARGET_CATALOG_CACHE_TTL_MS),
