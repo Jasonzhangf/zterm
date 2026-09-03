@@ -88,6 +88,7 @@ export function useRemoteWindowQuality({
     () => createRemoteWindowQualityApplyState(),
   );
   const [adaptiveCause, setAdaptiveCause] = useState<RemoteWindowVideoPressureCause>('none');
+  const [lastStatsSample, setLastStatsSample] = useState<RemoteWindowVideoStatsSample | null>(null);
   const qualityApplyStateRef = useRef(qualityApplyState);
   const adaptiveStateRef = useRef<RemoteWindowVideoAdaptiveState | null>(null);
   const queuedLatestQualityRef = useRef<RemoteWindowQueuedQuality | null>(null);
@@ -266,6 +267,7 @@ export function useRemoteWindowQuality({
         if (stopped || !sample) {
           return;
         }
+        setLastStatsSample(sample);
         if (cooldownSamplesRemainingRef.current > 0) {
           cooldownSamplesRemainingRef.current -= 1;
           return;
@@ -307,6 +309,7 @@ export function useRemoteWindowQuality({
     adaptiveCause,
     networkQuality,
     qualityApplyState,
+    lastStatsSample,
     resetQualityState,
   };
 }

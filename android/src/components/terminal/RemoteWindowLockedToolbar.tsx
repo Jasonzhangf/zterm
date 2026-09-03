@@ -1,6 +1,16 @@
 import { forwardRef, type CSSProperties, type HTMLAttributes, type ReactNode } from 'react';
 import { RemoteWindowIcon } from './remote-window-icons';
 import { styles } from './remote-window-overlay-styles';
+import type { RemoteWindowVideoStatsSample } from '../../lib/remote-window-video-quality';
+
+export interface RemoteWindowStreamDebugInfo {
+  frameSize: { width: number; height: number } | null;
+  videoSize: { width: number; height: number } | null;
+  fps: number | null;
+  uplinkBps: number | null;
+  downlinkBps: number | null;
+  sample: RemoteWindowVideoStatsSample | null;
+}
 
 export interface RemoteWindowLockedToolbarProps {
   activeTitle: string;
@@ -25,6 +35,7 @@ export interface RemoteWindowLockedToolbarProps {
   onToggleAppSwitch: () => void;
   onToggleInputMode: () => void;
   onToggleMore: () => void;
+  streamDebugInfo?: RemoteWindowStreamDebugInfo | null;
 }
 
 export const RemoteWindowLockedToolbar = forwardRef<HTMLDivElement, RemoteWindowLockedToolbarProps>(function RemoteWindowLockedToolbar({
@@ -50,7 +61,12 @@ export const RemoteWindowLockedToolbar = forwardRef<HTMLDivElement, RemoteWindow
   onToggleAppSwitch,
   onToggleInputMode,
   onToggleMore,
+  streamDebugInfo,
 }, ref) {
+  const formatRate = (bps: number | null) => bps == null || !Number.isFinite(bps)
+    ? '-'
+    : `${(bps / 1_000_000).toFixed(1)} Mbps`;
+  const debug = mode === 'fullscreen' && streamDebugInfo ? streamDebugInfo : null;
   return (
     <div ref={ref} data-testid="remote-window-locked-toolbar" style={styles.lockedToolbar}>
       <div {...dragHandleProps} data-testid="remote-window-drag-handle" style={styles.lockedTopBar}>
@@ -92,6 +108,15 @@ export const RemoteWindowLockedToolbar = forwardRef<HTMLDivElement, RemoteWindow
           </button>
         </div>
       </div>
+      {debug ? (
+        <div data-testid="remote-window-fullscreen-stream-debug" style={styles.fullscreenStreamDebug}>
+          <span>画面 {debug.videoSize?.width || debug.frameSize?.width || 0}×{debug.videoSize?.height || debug.frameSize?.height || 0}</span>
+          <span>帧率 {debug.fps == null ? '-' : `${debug.fps.toFixed(1)} FPS`}</span>
+          <span>上行 {formatRate(debug.uplinkBps)}</span>
+          <span>下行 {formatRate(debug.downlinkBps)}</span>
+          <span>RTT {debug.sample?.rttMs == null ? '-' : `${Math.round(debug.sample.rttMs)} ms`}</span>
+        </div>
+      ) : null}
       <div data-testid="remote-window-control-strip" data-no-drag="true" style={styles.lockedControlStrip}>
           <button
           type="button"
