@@ -24,6 +24,19 @@ function createMemoryStorage(): Storage {
 }
 
 const memoryStorage = createMemoryStorage();
+
+if (typeof globalThis.WebSocket === 'undefined') {
+  Object.defineProperty(globalThis, 'WebSocket', {
+    configurable: true,
+    value: class WebSocketTestStub {
+      static readonly CONNECTING = 0;
+      static readonly OPEN = 1;
+      static readonly CLOSING = 2;
+      static readonly CLOSED = 3;
+    },
+  });
+}
+
 Object.defineProperty(globalThis, 'localStorage', {
   configurable: true,
   value: memoryStorage,

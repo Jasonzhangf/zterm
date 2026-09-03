@@ -49,6 +49,16 @@ struct CaptureCommand: Decodable {
     let outputHeight: Int?
 }
 
+final class CaptureState: @unchecked Sendable {
+    var config: CaptureConfig
+    var activeStreams: [SCStream] = []
+    var activeOutputs: [SCStreamOutput] = []
+
+    init(config: CaptureConfig) {
+        self.config = config
+    }
+}
+
 struct Rect: Decodable {
     let x: Double
     let y: Double
@@ -250,22 +260,20 @@ func startRemoteWindowCaptureProcess() {
         exit(2)
     }
 
-    var config: CaptureConfig
+    let initialConfig: CaptureConfig
     do {
-        config = try JSONDecoder().decode(CaptureConfig.self, from: configData)
+        initialConfig = try JSONDecoder().decode(CaptureConfig.self, from: configData)
     } catch {
         stderrLine("invalid capture config: " + String(describing: error))
         exit(2)
     }
+    let captureState = CaptureState(config: initialConfig)
 
     guard hasScreenCapturePermission() else {
         stderrLine("Screen Recording permission is required; grant zterm-daemon in macOS Privacy settings")
         exit(5)
     }
     let sampleQueue = DispatchQueue(label: "zterm.remote-window.capture.sample")
-    var activeStreams: [SCStream] = []
-    var activeOutputs: [SCStreamOutput] = []
-
 @Sendable func findScWindow(windowId: String, appBundleId: String, windowBounds: Rect, content: SCShareableContent) -> SCWindow? {
     let numericWindowId = UInt32(windowId)
     return content.windows.first { candidate in
@@ -280,11 +288,11 @@ func startRemoteWindowCaptureProcess() {
 }
 
 @Sendable func startCapture(config: CaptureConfig) async throws {
-    for stream in activeStreams {
+    for stream in captureState.activeStreams {
         try? await stream.stopCapture()
     }
-    activeStreams.removeAll()
-    activeOutputs.removeAll()
+    captureState.activeStreams.removeAll()
+    captureState.activeOutputs.removeAll()
 
     let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
     let mainWindow = CompositeWindow(
@@ -344,8 +352,8 @@ func startRemoteWindowCaptureProcess() {
         let stream = SCStream(filter: filter, configuration: streamConfiguration, delegate: nil)
         try stream.addStreamOutput(output, type: .screen, sampleHandlerQueue: sampleQueue)
         try await stream.startCapture()
-        activeStreams.append(stream)
-        activeOutputs.append(output)
+        captureState.activeStreams.append(stream)
+        captureState.activeOutputs.append(output)
     }
 
     stderrLine("zterm remote window capture started (SCStream): \(allWindows.count) windows")
@@ -363,7 +371,7 @@ func startRemoteWindowCaptureProcess() {
         outputHeight: config.outputHeight
     )
     let allWindows = [mainWindow] + (config.compositeWindows ?? [])
-    guard allWindows.count == activeStreams.count else {
+    guard allWindows.count == captureState.activeStreams.count else {
         throw NSError(
             domain: "RemoteWindowCapture",
             code: 3,
@@ -396,8 +404,8 @@ func startRemoteWindowCaptureProcess() {
             frameRate: config.frameRate,
             queueDepth: config.queueDepth
         )
-        try await activeStreams[index].updateContentFilter(filter)
-        try await activeStreams[index].updateConfiguration(streamConfiguration)
+        try await captureState.activeStreams[index].updateContentFilter(filter)
+        try await captureState.activeStreams[index].updateConfiguration(streamConfiguration)
     }
     stderrLine("zterm remote window capture updated in place (SCStream): \(allWindows.count) windows")
 }
@@ -407,7 +415,7 @@ func startRemoteWindowCaptureProcess() {
     DispatchQueue.global(qos: .userInitiated).async {
         Task {
         do {
-            try await startCapture(config: config)
+            try await startCapture(config: captureState.config)
         } catch {
             stderrLine("ScreenCaptureKit capture start failed: " + String(describing: error))
             exit(4)
@@ -435,8 +443,8 @@ func startRemoteWindowCaptureProcess() {
                     do {
                         let nextConfig = CaptureConfig(
                             windowId: command.windowId,
-                            appBundleId: config.appBundleId,
-                            title: config.title,
+                            appBundleId: captureState.config.appBundleId,
+                            title: captureState.config.title,
                             windowBounds: command.windowBounds,
                             cropRect: command.cropRect,
                             frameRate: command.frameRate,
@@ -450,7 +458,7 @@ func startRemoteWindowCaptureProcess() {
                             outputHeight: command.outputHeight
                         )
                         try await updateCapture(config: nextConfig)
-                        config = nextConfig
+                        captureState.config = nextConfig
                         writeCaptureUpdate(
                             seq: command.seq,
                             ok: true,

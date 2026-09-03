@@ -9,9 +9,9 @@
   },
   "scripts": {
     "type-check": "tsc --noEmit",
-    "test": "node --test src/cordis/cordis-adapter.test.ts",
-    "test:kernel": "node --test src/kernel.test.ts",
-    "test:all": "node --test src/cordis/cordis-adapter.test.ts && node --test src/kernel.test.ts"
+    "test": "node --import tsx --test src/cordis/cordis-adapter.test.ts",
+    "test:kernel": "node --import tsx --test src/kernel.test.ts",
+    "test:all": "node --import tsx --test src/cordis/cordis-adapter.test.ts && node --import tsx --test src/kernel.test.ts"
   },
   "dependencies": {
     "@cordisjs/core": "3.18.1",
@@ -19,6 +19,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
+    "tsx": "^4.7.0",
     "typescript": "^5.4.0"
   }
 }

@@ -374,7 +374,6 @@ Relay design rules:
 | `release.update_artifact` | build outputs and release verifiers | APK/update/daemon release artifacts | release artifact source | direct daemon start |
 | `release.daemon_artifact` | verified staged daemon bundle | deterministic runtime artifact consumed by process start | executable artifact truth | authoring source execution |
 | `observability.debug_channel` | bounded metadata, trace, logs, diagnostics, HTTP observability ingestion | debug snapshot, trace summary, evidence metadata, accepted observability response | observe-only diagnostics; dedicated HTTP channel is default-deny and POST-only for mutation | business payload truth, terminal text ownership, terminal mux/session transport dependency |
-| `observability.appsdk_governance` | package prebuild, CI, and release gate intent | exact locked AppSDK record-graph verification result | `resource.appsdk_compiler_identity` project-side preflight | product runtime truth, second compiler path, Active/Protected mutation |
 
 Release / observability design rules:
 

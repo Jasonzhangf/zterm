@@ -3316,36 +3316,23 @@
       ]
     },
     {
-      "feature_id": "appsdk.binary_gate",
-      "title": "Pinned AppSDK compiler identity and record-graph verification gate",
+      "feature_id": "git.main_protection",
+      "title": "Git main protection hook verification gate",
       "domain": "governance",
       "owners": [
-        "scripts/verify-appsdk-binary.mjs"
+        "../.githooks/pre-commit",
+        "../.githooks/pre-push",
+        "../scripts/setup/enable-local-protection.sh"
       ],
       "allowed_paths": [
-        "scripts/verify-appsdk-binary.mjs",
-        "scripts/verify-appsdk-binary.test.mjs",
-        "package.json",
+        "../.githooks/pre-commit",
+        "../.githooks/pre-push",
+        "../scripts/setup/enable-local-protection.sh",
         ".github/workflows/ci.yml",
-        ".github/workflows/android-release.yml",
         "docs/feature-registry.json",
-        "docs/module-registry.json",
-        "docs/resource-registry.json",
         "docs/function-map.md",
         "docs/feature-gates.md",
-        "docs/resource-map.md",
-        "docs/modules/project-modules.md",
-        "docs/wiki/mainline-call-map.json",
-        "docs/wiki/mainline-source.md",
-        "docs/wiki/generated/mainline-source.html",
-        "docs/testing/appsdk-binary-gate-test-design.md",
-        ".appsdk/maps/function-map.json",
-        ".appsdk/maps/mainline-call-map.json",
-        ".appsdk/maps/module-registry.json",
-        ".appsdk/maps/resource-map.json",
-        ".appsdk/maps/verification-map.json",
-        "generated/modules/zterm-runtime-v2/lib/zterm-runtime-v2.web.tgz",
-        "generated/modules/zterm-runtime-v2/module.compiled.json"
+        "docs/testing/git-main-protection-test-design.md"
       ],
       "forbidden_paths": [
         "src/",
@@ -3354,16 +3341,14 @@
         "protected/"
       ],
       "required_gates": [
-        "scripts/verify-appsdk-binary.test.mjs",
+        "../scripts/setup/enable-local-protection.sh",
         "src/lib/feature-registry-truth.test.ts",
-        "src/lib/module-registry-truth.test.ts",
-        "src/lib/resource-registry-truth.test.ts",
         "src/lib/function-wiki-truth.test.ts"
       ],
       "truth_sources": [
-        "docs/testing/appsdk-binary-gate-test-design.md",
-        "docs/debug/2026-08-16-appsdk013-final-gate-fix-design.md",
-        "docs/goals/appsdk-0.1.3-active-v4-plan.md"
+        "docs/testing/git-main-protection-test-design.md",
+        "docs/dev-workflow.md",
+        "docs/architecture.md"
       ]
     },
     {
