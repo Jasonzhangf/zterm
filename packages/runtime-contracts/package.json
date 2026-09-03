@@ -13,10 +13,11 @@
   "scripts": {
     "build": "tsc",
     "type-check": "tsc --noEmit",
-    "test": "node --test src/contracts.test.ts"
+    "test": "node --import tsx --test src/contracts.test.ts"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0"
+    "@types/node": "^20.0.0",
+    "tsx": "^4.7.0"
   },
   "dependencies": {
     "typescript": "^5.4.0"

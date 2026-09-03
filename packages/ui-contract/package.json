@@ -8,11 +8,12 @@
   },
   "scripts": {
     "type-check": "tsc --noEmit",
-    "test": "node --test src/schema.test.ts",
-    "test:negative": "node --test --test-name-pattern '^rejects' src/schema.test.ts"
+    "test": "node --import tsx --test src/schema.test.ts",
+    "test:negative": "node --import tsx --test --test-name-pattern '^rejects' src/schema.test.ts"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0"
+    "@types/node": "^20.0.0",
+    "tsx": "^4.7.0"
   },
   "dependencies": {
     "typescript": "^5.4.0"
