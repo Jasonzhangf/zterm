@@ -50,7 +50,7 @@ Experiment: `playground/experiments/zterm-runtime-architecture-v2`
 | `payload_control_separation` | `pnpm run test:feature-registry` | `architecture-boundary-truth.test.ts` static control/debug/business payload contract scan |
 | `adjacent_data_edges` | `pnpm run test:feature-registry` | `edge-registry-truth.test.ts` direct adjacent terminal data-plane chain lock |
 | `appsdk verify` | `/Users/fanzhang/.local/bin/appsdk verify android` | governance contracts |
-| `record_graph` | `pnpm run test:appsdk-verify` | AppSDK lifecycle record graph in prebuild and CI |
+| `record_graph` | `appsdk verify <project>` | AppSDK lifecycle record graph when explicitly running governance lifecycle checks |
 
 ## Known Gaps
 

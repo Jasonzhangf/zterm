@@ -225,5 +225,5 @@ Rules:
 - All project gates, full build, native tests, daemon/runtime replay, and online device checks pass.
 - DSH returns an unambiguous architecture PASS on the final unchanged candidate.
 - New AppSDK Active/Protected version binds the exact final mainline commit, maps, artifact, public API, regression evidence, and freeze record.
-- `appsdk verify android` and `pnpm --dir android run test:appsdk-verify` both pass.
+- Each clean owner worktree passes `appsdk verify-git-main-protection .` after installing the tracked Git hooks.
 - Final report lists changes, root causes, owner alignment, positive/negative evidence, remaining authorization-gated actions, and exact hashes.
