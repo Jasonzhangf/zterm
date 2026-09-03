@@ -3452,8 +3452,8 @@ describe('RemoteWindowOverlay', () => {
 
     const content = screen.getByTestId('remote-window-video-content');
     await waitFor(() => {
-      expect(Number.parseFloat(content.style.top || '0')).toBeCloseTo(-80, 1);
-      expect(overlay.style.paddingBottom).toBe('200px');
+      expect(Number.parseFloat(content.style.top || '0')).toBeCloseTo(-200, 1);
+      expect(overlay.style.paddingBottom).toBe('280px');
     });
     expect(sendInput).not.toHaveBeenCalled();
   });

@@ -2723,10 +2723,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   const embeddedOverlayStyle = { ...styles.floatingOverlay,
     position: 'relative' as const, inset: 'auto', right: 'auto', bottom: 'auto', width: '100%', maxWidth: 'none', maxHeight: 'none', height: '100%', flex: '1 1 auto', border: 0, borderRadius: 0, boxShadow: 'none', zIndex: 'auto' };
   const fullscreenBottomPaddingPx = state.phase === 'targetLocked' && state.mode === 'fullscreen'
-    ? Math.max(
-        0,
-        Math.round(Math.max(0, bottomInsetPx) - Math.min(Math.max(0, bottomInsetPx), Math.max(0, -fullscreenViewport.panY))),
-      )
+    ? Math.max(0, Math.round(bottomInsetPx))
     : Math.max(0, bottomInsetPx);
   const fullscreenOverlayStyle = {
     ...styles.fullscreenOverlay,
