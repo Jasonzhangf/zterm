@@ -115,7 +115,6 @@ export function ResourceBottomSheet({
   }, [draftUrl, onWebUrlChange]);
 
   const handleTouchStart = (event: TouchEvent<HTMLDivElement>) => {
-    if (event.target !== event.currentTarget) return;
     touchStartY.current = event.touches[0]?.clientY ?? null;
   };
   const handleTouchEnd = (event: TouchEvent<HTMLDivElement>) => {
@@ -135,14 +134,15 @@ export function ResourceBottomSheet({
   const fileBrowserNode = renderFileBrowser(open && tab === 'files');
   const remoteWindowNode = renderRemoteWindow
     ? tab === 'web'
-      ? renderRemoteWindow(open, 'web')
-      : renderRemoteWindow(open && tab === 'stream')
+      ? renderRemoteWindow(open || tab === 'web', 'web')
+      : renderRemoteWindow(open || tab === 'stream')
     : null;
 
   if (!open) {
     return (
       <div aria-hidden="true" style={{ display: 'none' }}>
         {renderFileBrowser(false)}
+        {remoteWindowNode}
       </div>
     );
   }
@@ -176,7 +176,7 @@ export function ResourceBottomSheet({
           <div style={{ textAlign: 'center', fontSize: 22, fontWeight: 800, letterSpacing: '-0.02em' }}>预览</div>
           <button type="button" aria-label="下载当前资源" disabled={!onDownload} onClick={onDownload} style={{ ...buttonStyle, border: 0, background: 'var(--zterm-panel-surface)', fontSize: 16, opacity: onDownload ? 1 : 0.5 }}>下载</button>
         </header> : null}
-        <nav aria-label="资源类型" style={{ display: 'flex', gap: 6, padding: '10px 16px 8px' }}>
+        <nav aria-label="资源类型" style={{ display: 'flex', gap: 6, padding: '10px 16px 8px' }} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
           {(['files', 'stream', 'web'] as const).map((item) => (
             <button
               key={item}
