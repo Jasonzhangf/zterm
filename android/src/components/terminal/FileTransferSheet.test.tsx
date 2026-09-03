@@ -1221,7 +1221,7 @@ describe("FileTransferSheet", () => {
     expect(screen.queryByText("⬆ 上传到远程")).toBeNull();
     expect(screen.queryByText(/本地:/)).toBeNull();
     await waitFor(() => expect(screen.getByText("app.ts")).toBeTruthy());
-    expect(screen.queryByRole("button", { name: "选择远程 app.ts" })).toBeNull();
+    expect(screen.getByRole("button", { name: "选择远程 app.ts" })).toBeTruthy();
     expect(StoragePermissionPlugin.readdir).not.toHaveBeenCalled();
     expect(screen.getByTestId("file-transfer-sheet").style.height).toBe("auto");
   });
