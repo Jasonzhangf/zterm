@@ -148,8 +148,7 @@ export function resolveFullscreenViewportRect(
   source: { width: number; height: number },
   displayMode: FullscreenDisplayMode,
 ): SurfaceRect {
-  void displayMode;
-  return resolveAspectRect(surface, source, 'fit');
+  return resolveAspectRect(surface, source, displayMode);
 }
 
 export function clampFullscreenViewport(

@@ -249,8 +249,8 @@ export function buildRemoteWindowVideoProfile(
     if (level === 2) {
       return {
         ...base,
-        maxBitrateBps: cause === 'network' ? 1_000_000 : 1_500_000,
-        maxFrameRateFps: 15,
+        maxBitrateBps: cause === 'network' ? 1_500_000 : 2_000_000,
+        maxFrameRateFps: 10,
         maxCaptureWidth: 720,
         maxCaptureHeight: 720,
         maxFrameAgeMs: cause === 'network' ? 120 : 100,
@@ -261,7 +261,7 @@ export function buildRemoteWindowVideoProfile(
     return {
       ...base,
       maxBitrateBps: cause === 'network' ? 2_000_000 : 2_500_000,
-      maxFrameRateFps: 30,
+      maxFrameRateFps: 15,
       maxCaptureWidth: 720,
       maxCaptureHeight: 720,
       maxFrameAgeMs: cause === 'network' ? 100 : 90,

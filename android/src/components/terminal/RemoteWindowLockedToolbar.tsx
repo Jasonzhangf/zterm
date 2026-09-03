@@ -9,6 +9,7 @@ export interface RemoteWindowStreamDebugInfo {
   fps: number | null;
   uplinkBps: number | null;
   downlinkBps: number | null;
+  targetBps: number;
   sample: RemoteWindowVideoStatsSample | null;
 }
 
@@ -112,8 +113,9 @@ export const RemoteWindowLockedToolbar = forwardRef<HTMLDivElement, RemoteWindow
         <div data-testid="remote-window-fullscreen-stream-debug" style={styles.fullscreenStreamDebug}>
           <span>画面 {debug.videoSize?.width || debug.frameSize?.width || 0}×{debug.videoSize?.height || debug.frameSize?.height || 0}</span>
           <span>帧率 {debug.fps == null ? '-' : `${debug.fps.toFixed(1)} FPS`}</span>
-          <span>上行 {formatRate(debug.uplinkBps)}</span>
-          <span>下行 {formatRate(debug.downlinkBps)}</span>
+          <span>目标 {formatRate(debug.targetBps)}</span>
+          <span>上行可用 {formatRate(debug.uplinkBps)}</span>
+          <span>下行可用 {formatRate(debug.downlinkBps)}</span>
           <span>RTT {debug.sample?.rttMs == null ? '-' : `${Math.round(debug.sample.rttMs)} ms`}</span>
         </div>
       ) : null}

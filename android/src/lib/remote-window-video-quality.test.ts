@@ -134,10 +134,10 @@ describe('remote-window-video-quality', () => {
   it('steps smooth mode by halving bitrate before lowering cadence, then holds 15fps', () => {
     const first = buildRemoteWindowVideoProfile('smooth', { cause: 'network', level: 1 });
     const second = buildRemoteWindowVideoProfile('smooth', { cause: 'network', level: 2 });
-    expect(first).toMatchObject({ maxBitrateBps: 2_000_000, maxFrameRateFps: 30 });
-    expect(second).toMatchObject({ maxBitrateBps: 1_000_000, maxFrameRateFps: 15 });
+    expect(first).toMatchObject({ maxBitrateBps: 2_000_000, maxFrameRateFps: 15 });
+    expect(second).toMatchObject({ maxBitrateBps: 1_500_000, maxFrameRateFps: 10 });
     expect(buildRemoteWindowVideoProfile('smooth', { cause: 'network', level: 2 }).maxFrameRateFps)
-      .toBe(15);
+      .toBe(10);
   });
 
   it('steps quality mode by reducing frame rate while retaining full capture resolution', () => {

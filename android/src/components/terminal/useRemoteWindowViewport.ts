@@ -261,7 +261,7 @@ export function useRemoteWindowViewport({
       safeBottomInsetPx,
       safeChromeInsetPx,
     ].join('|');
-    const requestedPanY = -safeChromeInsetPx;
+    const requestedPanY = -keyboardLiftPx;
     const current = fullscreenViewportRef.current;
     const lastAutoPan = lastAutoImePanRef.current;
     const manualPanActive = lastAutoPan
