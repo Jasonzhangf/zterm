@@ -1388,7 +1388,7 @@ export function FileTransferSheet({
                     }
                   }}
                 >
-                  {!browserMode ? (
+                  {entry.type === "file" ? (
                     <button
                       type="button"
                       aria-label={`选择远程 ${entry.name}`}
@@ -1400,7 +1400,7 @@ export function FileTransferSheet({
                     >
                       {selectedRemote.has(entry.name) ? "✓" : ""}
                     </button>
-                  ) : null}
+                  ) : <span style={{ width: "18px", flexShrink: 0 }} />}
                   <FileEntryGlyph type={entry.type} />
                   <span
                     style={{
@@ -1429,6 +1429,13 @@ export function FileTransferSheet({
               ))
             )}
           </div>
+          {browserMode ? (
+            <div style={{ display: "flex", gap: "8px", padding: "8px 10px", flexShrink: 0 }}>
+              <button type="button" disabled={selectedRemote.size === 0} onClick={() => { setDirection("download"); void startTransfer(); }} style={actionButtonStyle("rgba(31,214,122,0.22)", selectedRemote.size ? SHEET_ACCENT : SHEET_MUTED)}>
+                下载选中 ({selectedRemote.size})
+              </button>
+            </div>
+          ) : null}
         </>
 
         {preview.fileName ? (
