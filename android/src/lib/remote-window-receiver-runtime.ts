@@ -54,6 +54,8 @@ interface ActiveRemoteWindowReceiverStream {
   resolveTrack: ((result: { mediaStream: MediaStream; overviewMediaStream: MediaStream | null }) => void) | null;
   rejectTrack: ((error: Error) => void) | null;
   statsBaseline: {
+    bytesReceived?: number;
+    sampledAtMs: number;
     framesDropped: number;
     freezeCount: number;
     jitterBufferDelay: number;
@@ -477,6 +479,9 @@ export function createRemoteWindowReceiverRuntime(input?: {
             ? item.jitterBufferEmittedCount
             : 0;
           const previous = entry.statsBaseline;
+          if (typeof item.bytesReceived === 'number' && previous?.bytesReceived != null && previous.sampledAtMs < sample.sampledAtMs) {
+            sample.receivedBitrateBps = Math.max(0, (item.bytesReceived - previous.bytesReceived) * 8 * 1000 / (sample.sampledAtMs - previous.sampledAtMs));
+          }
           sample.framesDropped = Math.max(0, framesDropped - (previous?.framesDropped ?? 0));
           sample.freezeCount = Math.max(0, freezeCount - (previous?.freezeCount ?? 0));
           const jitterDelayDelta = Math.max(0, jitterBufferDelay - (previous?.jitterBufferDelay ?? 0));
@@ -488,6 +493,8 @@ export function createRemoteWindowReceiverRuntime(input?: {
             sample.qualityLimitationReason = item.qualityLimitationReason;
           }
           entry.statsBaseline = {
+            bytesReceived: typeof item.bytesReceived === 'number' ? item.bytesReceived : previous?.bytesReceived,
+            sampledAtMs: sample.sampledAtMs,
             framesDropped,
             freezeCount,
             jitterBufferDelay,
@@ -496,12 +503,6 @@ export function createRemoteWindowReceiverRuntime(input?: {
         }
         if (item.type === 'candidate-pair' && (item.state === 'succeeded' || item.nominated === true)) {
           if (typeof item.currentRoundTripTime === 'number') sample.rttMs = item.currentRoundTripTime * 1000;
-          if (typeof item.availableIncomingBitrate === 'number') {
-            sample.availableIncomingBitrateBps = item.availableIncomingBitrate;
-          }
-          if (typeof item.availableOutgoingBitrate === 'number') {
-            sample.availableOutgoingBitrateBps = item.availableOutgoingBitrate;
-          }
         }
         if (item.type === 'remote-inbound-rtp' && item.kind === 'video') {
           if (typeof item.roundTripTime === 'number') sample.rttMs = item.roundTripTime * 1000;

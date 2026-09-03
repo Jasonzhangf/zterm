@@ -9,6 +9,33 @@ export const REMOTE_WINDOW_VIDEO_PREFERENCE_GLOBAL_STORAGE_KEY = 'zterm:remote-w
 export const REMOTE_WINDOW_VIDEO_BITRATE_STORAGE_KEY = 'zterm:remote-window-video-bitrate';
 export const REMOTE_WINDOW_VIDEO_BITRATE_GLOBAL_STORAGE_KEY = 'zterm:remote-window-video-bitrate-global';
 export const REMOTE_WINDOW_VIDEO_PREFERENCES: readonly RemoteWindowVideoPreference[] = ['smooth', 'quality'];
+export type RemoteWindowVideoQualityTier = 'smooth-720' | 'quality-1080' | 'ultra-2160';
+export const REMOTE_WINDOW_VIDEO_QUALITY_TIERS = Object.freeze({
+  'smooth-720': { shortEdge: 720, baseBitrateBps: 1_000_000 },
+  'quality-1080': { shortEdge: 1080, baseBitrateBps: 2_000_000 },
+  'ultra-2160': { shortEdge: 2160, baseBitrateBps: 8_000_000 },
+} as const);
+export const REMOTE_WINDOW_VIDEO_BUDGET_MULTIPLIERS = [1, 2, 4] as const;
+
+export type RemoteWindowVideoBudgetMultiplier = typeof REMOTE_WINDOW_VIDEO_BUDGET_MULTIPLIERS[number];
+
+export function resolveRemoteWindowQualityStreamSize(
+  source: { width: number; height: number },
+  tier: RemoteWindowVideoQualityTier,
+) {
+  const width = Math.max(1, Math.floor(source.width));
+  const height = Math.max(1, Math.floor(source.height));
+  const shortEdge = Math.min(width, height);
+  const targetShortEdge = REMOTE_WINDOW_VIDEO_QUALITY_TIERS[tier].shortEdge;
+  if (shortEdge <= targetShortEdge) {
+    return { width, height };
+  }
+  const scale = targetShortEdge / shortEdge;
+  return {
+    width: Math.max(1, Math.floor(width * scale)),
+    height: Math.max(1, Math.floor(height * scale)),
+  };
+}
 
 // Internal ABR guardrails. These are deliberately kept out of the wire
 // profile: the daemon receives the resolved max bitrate, while the client
@@ -30,6 +57,7 @@ export interface RemoteWindowNetworkQualityInput {
 
 export interface RemoteWindowVideoStatsSample {
   sampledAtMs: number;
+  receivedBitrateBps?: number | null;
   rttMs?: number | null;
   availableIncomingBitrateBps?: number | null;
   availableOutgoingBitrateBps?: number | null;
@@ -203,21 +231,30 @@ export function buildRemoteWindowVideoProfile(
     interactionActive?: boolean;
     cause?: RemoteWindowVideoPressureCause;
     level?: 0 | 1 | 2;
+    target?: RemoteWindowStreamTargetManifest;
+    qualityTier?: RemoteWindowVideoQualityTier;
+    budgetMultiplier?: RemoteWindowVideoBudgetMultiplier;
   } = {},
 ): RemoteWindowVideoProfile {
   const interactionActive = options.interactionActive === true;
   const cause = options.cause ?? 'none';
   const level = options.level ?? 0;
   const bitrateBounds = REMOTE_WINDOW_VIDEO_BITRATE_BOUNDS[preference];
+  const qualityTier = options.qualityTier ?? (preference === 'smooth' ? 'smooth-720' : 'quality-1080');
+  const budgetMultiplier = options.budgetMultiplier ?? (preference === 'smooth' ? 2 : 4);
+  const targetSize = options.target
+    ? resolveRemoteWindowQualityStreamSize(getRemoteWindowSourceRect(options.target), qualityTier)
+    : null;
+  const tierBitrate = REMOTE_WINDOW_VIDEO_QUALITY_TIERS[qualityTier].baseBitrateBps * budgetMultiplier;
   const base: RemoteWindowVideoProfile = preference === 'smooth'
     ? {
         preference,
         // Smooth mode keeps a phone-sized half-resolution capture and a
         // stable 30fps cadence; interaction changes frame age, not cadence.
-        maxBitrateBps: 2_000_000,
+        maxBitrateBps: tierBitrate,
         maxFrameRateFps: 30,
-        maxCaptureWidth: 720,
-        maxCaptureHeight: 720,
+        maxCaptureWidth: targetSize?.width ?? 720,
+        maxCaptureHeight: targetSize?.height ?? 720,
         maxFrameAgeMs: interactionActive ? 80 : 100,
         interactionActive,
         overviewMaxBitrateBps: interactionActive ? 150_000 : 250_000,
@@ -225,10 +262,10 @@ export function buildRemoteWindowVideoProfile(
       }
     : {
         preference,
-        maxBitrateBps: interactionActive ? bitrateBounds.maxBps : 8_000_000,
+        maxBitrateBps: interactionActive ? bitrateBounds.maxBps : tierBitrate,
         maxFrameRateFps: 30,
-        maxCaptureWidth: 1920,
-        maxCaptureHeight: 1920,
+        maxCaptureWidth: targetSize?.width ?? 1920,
+        maxCaptureHeight: targetSize?.height ?? 1920,
         maxFrameAgeMs: interactionActive ? 120 : 150,
         interactionActive,
         overviewMaxBitrateBps: interactionActive ? 150_000 : 300_000,
@@ -251,8 +288,8 @@ export function buildRemoteWindowVideoProfile(
         ...base,
         maxBitrateBps: cause === 'network' ? 1_500_000 : 2_000_000,
         maxFrameRateFps: 10,
-        maxCaptureWidth: 720,
-        maxCaptureHeight: 720,
+        maxCaptureWidth: base.maxCaptureWidth,
+        maxCaptureHeight: base.maxCaptureHeight,
         maxFrameAgeMs: cause === 'network' ? 120 : 100,
         overviewMaxBitrateBps: 100_000,
         overviewMaxFrameRateFps: 1,
@@ -262,8 +299,8 @@ export function buildRemoteWindowVideoProfile(
       ...base,
       maxBitrateBps: cause === 'network' ? 2_000_000 : 2_500_000,
       maxFrameRateFps: 15,
-      maxCaptureWidth: 720,
-      maxCaptureHeight: 720,
+      maxCaptureWidth: base.maxCaptureWidth,
+      maxCaptureHeight: base.maxCaptureHeight,
       maxFrameAgeMs: cause === 'network' ? 100 : 90,
       overviewMaxBitrateBps: 150_000,
       overviewMaxFrameRateFps: 1,
@@ -274,8 +311,8 @@ export function buildRemoteWindowVideoProfile(
       ...base,
       maxBitrateBps: cause === 'network' ? 4_000_000 : 5_000_000,
       maxFrameRateFps: 15,
-      maxCaptureWidth: 1920,
-      maxCaptureHeight: 1920,
+      maxCaptureWidth: base.maxCaptureWidth,
+      maxCaptureHeight: base.maxCaptureHeight,
       maxFrameAgeMs: 180,
       overviewMaxBitrateBps: 150_000,
       overviewMaxFrameRateFps: 1,
@@ -285,8 +322,8 @@ export function buildRemoteWindowVideoProfile(
     ...base,
     maxBitrateBps: cause === 'network' ? 6_000_000 : 7_000_000,
     maxFrameRateFps: 24,
-    maxCaptureWidth: 1920,
-    maxCaptureHeight: 1920,
+    maxCaptureWidth: base.maxCaptureWidth,
+    maxCaptureHeight: base.maxCaptureHeight,
     maxFrameAgeMs: 150,
     overviewMaxBitrateBps: 200_000,
     overviewMaxFrameRateFps: 2,
@@ -312,17 +349,14 @@ function classifyRemoteWindowVideoPressure(options: {
   previousSample: RemoteWindowVideoStatsSample | null;
 }) {
   const { profile, sample, previousSample } = options;
-  const availableBitrate = finiteNumber(sample.availableIncomingBitrateBps)
-    ?? finiteNumber(sample.availableOutgoingBitrateBps);
   const rttMs = finiteNumber(sample.rttMs);
   const fps = finiteNumber(sample.framesPerSecond);
   const droppedDelta = counterDelta(sample.framesDropped, previousSample?.framesDropped);
   const freezeDelta = counterDelta(sample.freezeCount, previousSample?.freezeCount);
   const jitterDelayMs = finiteNumber(sample.jitterBufferDelayMs) ?? 0;
   const limitation = `${sample.qualityLimitationReason || ''}`.toLowerCase();
-  const severeNetwork = availableBitrate !== null && availableBitrate < profile.maxBitrateBps * 0.35;
-  if (limitation === 'bandwidth' || (availableBitrate !== null && availableBitrate < profile.maxBitrateBps * 0.7)) {
-    return { cause: 'network' as const, severe: severeNetwork };
+  if (limitation === 'bandwidth') {
+    return { cause: 'network' as const, severe: false };
   }
   if (limitation === 'cpu') {
     return { cause: 'host' as const, severe: false };
@@ -349,6 +383,9 @@ function createAdaptiveState(): RemoteWindowVideoAdaptiveState {
 
 export function resolveRemoteWindowVideoAdaptiveDecision(options: {
   preference: RemoteWindowVideoPreference;
+  target?: RemoteWindowStreamTargetManifest | null;
+  qualityTier?: RemoteWindowVideoQualityTier;
+  budgetMultiplier?: RemoteWindowVideoBudgetMultiplier;
   interactionActive?: boolean;
   previous?: RemoteWindowVideoAdaptiveState | null;
   sample?: RemoteWindowVideoStatsSample | null;
@@ -366,6 +403,9 @@ export function resolveRemoteWindowVideoAdaptiveDecision(options: {
         interactionActive,
         cause: previous.pressureCause,
         level: previous.level,
+        target: options.target ?? undefined,
+        qualityTier: options.qualityTier,
+        budgetMultiplier: options.budgetMultiplier,
       }),
       reason: previous.level > 0 ? 'hold' : 'baseline',
       cause: previous.pressureCause,
@@ -375,6 +415,9 @@ export function resolveRemoteWindowVideoAdaptiveDecision(options: {
     interactionActive,
     cause: previous.pressureCause,
     level: previous.level,
+    target: options.target ?? undefined,
+    qualityTier: options.qualityTier,
+    budgetMultiplier: options.budgetMultiplier,
   });
   const pressure = classifyRemoteWindowVideoPressure({
     profile: currentProfile,
@@ -404,6 +447,9 @@ export function resolveRemoteWindowVideoAdaptiveDecision(options: {
         interactionActive,
         cause: state.pressureCause,
         level: state.level,
+        target: options.target ?? undefined,
+        qualityTier: options.qualityTier,
+        budgetMultiplier: options.budgetMultiplier,
       }),
       reason: shouldDowngrade ? 'downgrade' : state.level > 0 ? 'hold' : 'baseline',
       cause: state.pressureCause,
@@ -413,7 +459,12 @@ export function resolveRemoteWindowVideoAdaptiveDecision(options: {
     const state = { ...createAdaptiveState(), lastSample: sample };
     return {
       state,
-      profile: buildRemoteWindowVideoProfile(options.preference, { interactionActive }),
+      profile: buildRemoteWindowVideoProfile(options.preference, {
+        interactionActive,
+        target: options.target ?? undefined,
+        qualityTier: options.qualityTier,
+        budgetMultiplier: options.budgetMultiplier,
+      }),
       reason: 'baseline',
       cause: 'none',
     };
@@ -436,6 +487,9 @@ export function resolveRemoteWindowVideoAdaptiveDecision(options: {
         interactionActive,
         cause: state.pressureCause,
         level: state.level,
+        target: options.target ?? undefined,
+        qualityTier: options.qualityTier,
+        budgetMultiplier: options.budgetMultiplier,
       }),
       reason: 'restore',
       cause: state.pressureCause,
@@ -453,6 +507,9 @@ export function resolveRemoteWindowVideoAdaptiveDecision(options: {
       interactionActive,
       cause: state.pressureCause,
       level: state.level,
+      target: options.target ?? undefined,
+      qualityTier: options.qualityTier,
+      budgetMultiplier: options.budgetMultiplier,
     }),
     reason: 'hold',
     cause: state.pressureCause,
@@ -463,22 +520,27 @@ export function resolveInitialRemoteWindowVideoProfile(
   preference: RemoteWindowVideoPreference,
   network: RemoteWindowNetworkQualityInput | null | undefined,
   interactionActive = false,
+  profileOptions: {
+    target?: RemoteWindowStreamTargetManifest;
+    qualityTier?: RemoteWindowVideoQualityTier;
+    budgetMultiplier?: RemoteWindowVideoBudgetMultiplier;
+  } = {},
 ) {
   if (!network) {
-    return buildRemoteWindowVideoProfile(preference, { interactionActive });
+    return buildRemoteWindowVideoProfile(preference, { interactionActive, ...profileOptions });
   }
   const effectiveType = `${network.effectiveType || ''}`.toLowerCase();
   const downlinkMbps = finiteNumber(network.downlinkMbps);
   if (network.saveData || effectiveType === 'slow-2g' || effectiveType === '2g' || (downlinkMbps !== null && downlinkMbps < 2)) {
-    return buildRemoteWindowVideoProfile(preference, { interactionActive, cause: 'network', level: 2 });
+    return buildRemoteWindowVideoProfile(preference, { interactionActive, cause: 'network', level: 2, ...profileOptions });
   }
   if (effectiveType === '3g' || (downlinkMbps !== null && downlinkMbps < 5)) {
-    return buildRemoteWindowVideoProfile(preference, { interactionActive, cause: 'network', level: 1 });
+    return buildRemoteWindowVideoProfile(preference, { interactionActive, cause: 'network', level: 1, ...profileOptions });
   }
   if ((finiteNumber(network.rttMs) ?? 0) >= 500) {
-    return buildRemoteWindowVideoProfile(preference, { interactionActive, cause: 'latency', level: 1 });
+    return buildRemoteWindowVideoProfile(preference, { interactionActive, cause: 'latency', level: 1, ...profileOptions });
   }
-  return buildRemoteWindowVideoProfile(preference, { interactionActive });
+  return buildRemoteWindowVideoProfile(preference, { interactionActive, ...profileOptions });
 }
 
 export function readRemoteWindowVideoPreference(

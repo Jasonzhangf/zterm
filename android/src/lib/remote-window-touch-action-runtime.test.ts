@@ -746,6 +746,26 @@ describe('remote-window-touch-action-runtime', () => {
       expect(commit.localEffect).toEqual(expect.objectContaining({ kind: 'two-finger-scroll-start' }));
     });
 
+    it('keeps zoomed vertical two-finger motion as remote scroll even when local pan is enabled', () => {
+      const candidate = pairDown({ clientX: 100, clientY: 60 }, { clientX: 140, clientY: 60 });
+      const moved = resolveRemoteWindowTouchPairPointerMoveRuntime({
+        state: candidate.nextState,
+        pair: {
+          first: { pointerId: 1, pointerType: 'touch', clientX: 100, clientY: 100, timeMs: 1_200 },
+          second: { pointerId: 2, pointerType: 'touch', clientX: 140, clientY: 100, timeMs: 1_200 },
+        },
+        geometry,
+        timeMs: 1_200,
+        pinchEnabled: true,
+        scrollEnabled: true,
+        panEnabled: true,
+        scrollFraction: 1,
+      });
+      expect(moved.nextState.mode).toBe('twoFingerScroll');
+      expect(moved.remoteEvents.some((event) => event.kind === 'scroll')).toBe(true);
+      expect(moved.localEffect.kind).toBe('two-finger-scroll-start');
+    });
+
     it('commits opposite-direction two-finger motion to pinch after the observe window', () => {
       const candidate = pairDown({ clientX: 100, clientY: 60 }, { clientX: 120, clientY: 60 });
       // 观察期 2 个 move

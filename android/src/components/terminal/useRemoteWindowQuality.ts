@@ -4,6 +4,7 @@ import type {
   RemoteWindowStreamQualityResultPayload,
   RemoteWindowVideoPreference,
   RemoteWindowVideoProfile,
+  RemoteWindowStreamTargetManifest,
 } from '../../lib/types';
 import {
   acceptRemoteWindowQualityResult,
@@ -41,6 +42,7 @@ export interface UseRemoteWindowQualityOptions {
   streamReady: boolean;
   focusStreamActive: boolean;
   videoPreference: RemoteWindowVideoPreference;
+  target?: RemoteWindowStreamTargetManifest | null;
   interactionActive: boolean;
   updateStreamQuality?: RemoteWindowQualityUpdater;
   collectStatsRef: RefObject<(() => Promise<RemoteWindowVideoStatsSample | null>) | null>;
@@ -77,6 +79,7 @@ export function useRemoteWindowQuality({
   streamReady,
   focusStreamActive,
   videoPreference,
+  target,
   interactionActive,
   updateStreamQuality,
   collectStatsRef,
@@ -102,7 +105,8 @@ export function useRemoteWindowQuality({
     videoPreference,
     networkQuality,
     interactionActive,
-  ), [interactionActive, networkQuality, videoPreference]);
+    target ? { target } : undefined,
+  ), [interactionActive, networkQuality, target, videoPreference]);
 
   useEffect(() => {
     const connection = getRemoteWindowNetworkConnection();
@@ -274,6 +278,7 @@ export function useRemoteWindowQuality({
         }
         const decision = resolveRemoteWindowVideoAdaptiveDecision({
           preference: videoPreference,
+          target,
           interactionActive,
           previous: adaptiveStateRef.current,
           sample,
@@ -302,7 +307,7 @@ export function useRemoteWindowQuality({
       stopped = true;
       window.clearInterval(timer);
     };
-  }, [activeSessionId, collectStatsRef, focusStreamActive, interactionActive, requestAcknowledgedQuality, streamId, streamReady, targetId, videoPreference]);
+  }, [activeSessionId, collectStatsRef, focusStreamActive, interactionActive, requestAcknowledgedQuality, streamId, streamReady, target, targetId, videoPreference]);
 
   return {
     activeProfile: qualityApplyState.phase === 'applied' ? qualityApplyState.applied : desiredProfile,

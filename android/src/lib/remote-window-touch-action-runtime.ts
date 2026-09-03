@@ -1224,6 +1224,10 @@ export function resolveRemoteWindowTouchPairPointerMoveRuntime(options: RemoteWi
   const midpointDeltaX = midpoint.clientX - state.lastMidX;
   const midpointDeltaY = midpoint.clientY - state.lastMidY;
   const midpointShift = Math.hypot(midpointDeltaX, midpointDeltaY);
+  // Zoomed two-finger vertical motion is remote scrolling; only predominantly
+  // horizontal coherent motion may pan the local viewport. This keeps a
+  // vertical scroll from being consumed by the local-pan owner.
+  const verticalScrollIntent = Math.abs(midpointDeltaY) > Math.max(6, Math.abs(midpointDeltaX) * 1.5);
 
   if (
     state.mode === 'twoFingerCandidate'
@@ -1393,7 +1397,8 @@ export function resolveRemoteWindowTouchPairPointerMoveRuntime(options: RemoteWi
       secondCurrent,
     })
   ) {
-    const events = options.panEnabled ? [] : buildRemoteWindowTwoFingerScrollEventsRuntime({
+    const useLocalPan = options.panEnabled && !verticalScrollIntent;
+    const events = useLocalPan ? [] : buildRemoteWindowTwoFingerScrollEventsRuntime({
       geometry,
       midClientX: midpoint.clientX,
       midClientY: midpoint.clientY,
@@ -1404,7 +1409,7 @@ export function resolveRemoteWindowTouchPairPointerMoveRuntime(options: RemoteWi
       phase: 'start',
       gestureId: `scroll-${state.firstPointerId}-${state.startedAtMs}`,
     });
-    if (options.panEnabled) {
+    if (useLocalPan) {
       return {
         nextState: {
           mode: 'twoFingerPan',
