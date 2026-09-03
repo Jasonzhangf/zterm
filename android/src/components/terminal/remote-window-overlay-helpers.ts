@@ -429,6 +429,18 @@ export function pointerSampleFromReactEvent(
   };
 }
 
+export function releasePointerCaptureSafely(element: HTMLElement, pointerId: number) {
+  try {
+    if (element.hasPointerCapture?.(pointerId)) element.releasePointerCapture(pointerId);
+  } catch (error) {
+    console.warn('[RemoteWindowOverlay] pointer capture release unavailable:', error);
+  }
+}
+
+export function setPointerCaptureSafely(element: HTMLElement, pointerId: number) {
+  try { element.setPointerCapture?.(pointerId); } catch (error) { console.warn('[RemoteWindowOverlay] pointer capture unavailable:', error); }
+}
+
 export function toOverlayTouchGesture(
   gesture: RemoteWindowTouchPointerState,
   currentViewport: FullscreenViewportState,

@@ -139,6 +139,8 @@ import {
   getRemoteWindowAppGroupId,
   buildRemoteWindowAppTargetGroups,
   isRemoteWindowChromeTarget,
+  releasePointerCaptureSafely,
+  setPointerCaptureSafely,
 } from './remote-window-overlay-helpers';
 import { styles } from './remote-window-overlay-styles';
 import { RemoteWindowDeveloperDiagnostics } from './RemoteWindowDeveloperDiagnostics';
@@ -411,29 +413,13 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   const handoffVideoVisibilityRef = useRef<boolean | null>(null);
   const lastDefaultFullscreenFillKeyRef = useRef<string | null>(null);
   const collectStreamStatsRef = useRef<(() => Promise<RemoteWindowVideoStatsSample | null>) | null>(null);
-  const activeSessionIdRef = useRef(activeSessionId);
-  const stopStreamRef = useRef(stopStream);
-  activeSessionIdRef.current = activeSessionId;
-  stopStreamRef.current = stopStream;
+  const activeSessionIdRef = useRef(activeSessionId); const stopStreamRef = useRef(stopStream);
+  activeSessionIdRef.current = activeSessionId; stopStreamRef.current = stopStream;
   useEffect(() => () => {
-    const sessionId = activeSessionIdRef.current?.trim() || '';
-    const stop = stopStreamRef.current;
+    const sessionId = activeSessionIdRef.current?.trim() || ''; const stop = stopStreamRef.current;
     if (!sessionId || !stop) return;
-    const streamIds = new Set<string>([
-      activeStreamIdRef.current,
-      activeCanvasStreamIdRef.current,
-      activeFocusStreamIdRef.current,
-      pendingFocusStreamIdRef.current,
-    ].filter((value): value is string => Boolean(value)));
-    streamIds.forEach((streamId) => {
-      void Promise.resolve(stop(sessionId, streamId)).catch((error) => {
-        console.error('[RemoteWindowOverlay] unmount stream stop failed:', error);
-      });
-    });
-    activeStreamIdRef.current = null;
-    activeCanvasStreamIdRef.current = null;
-    activeFocusStreamIdRef.current = null;
-    pendingFocusStreamIdRef.current = null;
+    new Set<string>([activeStreamIdRef.current, activeCanvasStreamIdRef.current, activeFocusStreamIdRef.current, pendingFocusStreamIdRef.current].filter((value): value is string => Boolean(value))).forEach((streamId) => void Promise.resolve(stop(sessionId, streamId)).catch((error) => console.error('[RemoteWindowOverlay] unmount stream stop failed:', error)));
+    activeStreamIdRef.current = null; activeCanvasStreamIdRef.current = null; activeFocusStreamIdRef.current = null; pendingFocusStreamIdRef.current = null;
   }, []);
   const qualityStreamId = state.phase === 'targetLocked' ? state.streamId ?? null : null;
   const qualityTargetId = state.phase === 'targetLocked' ? state.target.streamTargetId : null;
@@ -2063,22 +2049,15 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     }
     publishRemoteWindowInputContext();
     event.currentTarget.focus();
-    try {
-      event.currentTarget.setPointerCapture?.(event.pointerId);
-    } catch (error) {
-      console.warn('[RemoteWindowOverlay] pointer capture unavailable:', error);
-    }
+    setPointerCaptureSafely(event.currentTarget, event.pointerId);
     surfacePointersRef.current.set(event.pointerId, {
       clientX: event.clientX,
       clientY: event.clientY,
     });
-
     const pointers = Array.from(surfacePointersRef.current.entries());
     if (pointers.length >= 2 && event.pointerType === 'touch') {
       const currentGesture = surfaceGestureRef.current;
       if (currentGesture && currentGesture.mode === 'localPan') {
-        // 第一指平移画布中：第二指按下只记"待定"，独立位移 ≥8px 才升级双指手势，
-        // 防止"单指移动被识别为 pinch 缩小"误判（放大态单指 localPan 场景）
         secondPointerPendingRef.current = {
           pointerId: event.pointerId,
           clientX: event.clientX,
@@ -2172,7 +2151,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       clientY: event.clientY,
     });
 
-    // 第二指待定升级：独立位移 ≥8px 才升级为双指手势（localPan 期间第二指轻触不抢手势）
     const pendingSecond = secondPointerPendingRef.current;
     if (pendingSecond && pendingSecond.pointerId === event.pointerId) {
       const pendingDelta = Math.hypot(
@@ -2255,12 +2233,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
         scrollFraction: touchScrollFractionRef.current,
         invertGestureDirection: touchScrollInvertedRef.current,
         pinchEnabled: state.mode === 'fullscreen',
-        // Two-finger vertical motion is remote scroll at every zoom level;
-        // zoom only changes the one-finger owner to local pan.
         scrollEnabled: true,
-        // Zoomed one-finger movement owns local pan. Two fingers remain an
-        // explicit remote-scroll/pinch arena; never reinterpret vertical
-        // two-finger scrolling as local pan.
         panEnabled: false,
       });
       surfaceGestureRef.current = pairResult.nextState;
@@ -2349,11 +2322,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
         clientY: event.clientY,
       });
     }
-    try {
-      if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-    } catch (error) {
-      console.warn('[RemoteWindowOverlay] pointer release unavailable:', error);
-    }
+    releasePointerCaptureSafely(event.currentTarget, event.pointerId);
 
     if (!gesture) {
       surfacePointersRef.current.delete(event.pointerId);
@@ -2530,11 +2499,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   const handleVideoSurfacePointerCancel = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     const gesture = surfaceGestureRef.current;
     surfacePointersRef.current.delete(event.pointerId);
-    try {
-      if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-    } catch (error) {
-      console.warn('[RemoteWindowOverlay] pointer release unavailable:', error);
-    }
+    releasePointerCaptureSafely(event.currentTarget, event.pointerId);
     const runtimeGesture = gesture ? toRemoteWindowTouchGestureState(gesture) : createRemoteWindowTouchPointerState();
     if (
       gesture

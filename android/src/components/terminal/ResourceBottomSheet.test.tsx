@@ -56,4 +56,14 @@ describe('ResourceBottomSheet', () => {
     fireEvent.touchEnd(overlay, { changedTouches: [{ clientY: 180 }] });
     expect(onClose).toHaveBeenCalledTimes(2);
   });
+
+  it('keeps stream gestures inside the stream pane', () => {
+    const onClose = vi.fn();
+    render(<ResourceBottomSheet open initialTab="stream" renderFileBrowser={() => null} renderRemoteWindow={() => <div data-testid="stream-surface" />} onClose={onClose} />);
+    const pane = screen.getByTestId('resource-stream-pane');
+    fireEvent.touchStart(pane, { touches: [{ clientY: 200 }] });
+    fireEvent.touchMove(pane, { touches: [{ clientY: 80 }] });
+    fireEvent.touchEnd(pane, { changedTouches: [{ clientY: 80 }] });
+    expect(onClose).not.toHaveBeenCalled();
+  });
 });

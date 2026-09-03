@@ -197,7 +197,14 @@ export function ResourceBottomSheet({
           {fileBrowserNode}
         </div>
         {tab === 'stream' ? (
-          <div data-testid="resource-stream-pane" style={{ minHeight: 0, flex: 1, position: 'relative', overflow: 'visible' }}>
+          <div
+            data-testid="resource-stream-pane"
+            style={{ minHeight: 0, flex: 1, position: 'relative', overflow: 'visible' }}
+            onTouchStart={(event) => event.stopPropagation()}
+            onTouchMove={(event) => event.stopPropagation()}
+            onTouchEnd={(event) => event.stopPropagation()}
+            onTouchCancel={(event) => event.stopPropagation()}
+          >
             {remoteWindowNode || <div style={{ display: 'grid', placeItems: 'center', height: '100%', color: 'var(--zterm-panel-muted)' }}>窗口串流不可用</div>}
           </div>
         ) : null}
