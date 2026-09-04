@@ -371,6 +371,24 @@ export function resolveRemoteWindowTargetAspectRatio(options: {
   return options.viewport.width / Math.max(1, options.viewport.height);
 }
 
+export function resolveRemoteWindowTargetResizeSize(options: {
+  viewport: SurfaceSize;
+  orientation?: RemoteWindowOrientationPolicy;
+  shortEdge?: number;
+}): SurfaceSize {
+  const ratio = resolveRemoteWindowTargetAspectRatio({
+    viewport: options.viewport,
+    orientation: options.orientation ?? 'follow-device',
+  });
+  const shortEdge = Math.max(120, Math.round(options.shortEdge ?? 1080));
+  const width = ratio >= 1 ? Math.round(shortEdge * ratio) : shortEdge;
+  const height = ratio >= 1 ? shortEdge : Math.round(shortEdge / ratio);
+  return {
+    width: Math.max(120, width),
+    height: Math.max(120, height),
+  };
+}
+
 export function parseCssPx(value: string | null | undefined) {
   const match = String(value || '').match(/-?\d+(?:\.\d+)?/u);
   const parsed = match ? Number.parseFloat(match[0]) : Number.NaN;
