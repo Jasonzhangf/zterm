@@ -1762,4 +1762,161 @@ describe('TerminalView two-finger wheel -> SGR adapter (renderer projection boun
     });
     expect(onInput).not.toHaveBeenCalled();
   });
+
+  it('locks a two-finger gesture before motion can be emitted as both scroll and pinch', async () => {
+    const onInput = vi.fn();
+    const { container } = render(
+      <div style={{ width: '200px', height: '408px' }}>
+        <TerminalView
+          sessionId='s1'
+          renderBufferSnapshot={buildRenderBufferSnapshot()}
+          active
+          live
+          widthMode='mirror-fixed'
+          onInput={onInput}
+          fontSize={5}
+        />
+      </div>,
+    );
+    const host = container.querySelector('.wterm') as HTMLElement;
+    act(() => {
+      ResizeObserverMock.triggerAll();
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    });
+
+    act(() => {
+      fireEvent.touchStart(host, {
+        touches: [
+          { clientX: 150, clientY: 100, identifier: 1 },
+          { clientX: 250, clientY: 100, identifier: 2 },
+        ],
+        changedTouches: [],
+      });
+    });
+    // The midpoint crosses the old wheel notch threshold while the span only
+    // drifts modestly; the gesture must remain undecided until the first
+    // gesture class is actually established.
+    act(() => {
+      fireEvent.touchMove(host, {
+        touches: [
+          { clientX: 160, clientY: 130, identifier: 1 },
+          { clientX: 230, clientY: 130, identifier: 2 },
+        ],
+        changedTouches: [],
+      });
+    });
+    // Pinch is selected on the next move; no earlier wheel may have escaped.
+    act(() => {
+      fireEvent.touchMove(host, {
+        touches: [
+          { clientX: 160, clientY: 180, identifier: 1 },
+          { clientX: 220, clientY: 180, identifier: 2 },
+        ],
+        changedTouches: [],
+      });
+    });
+    act(() => {
+      fireEvent.touchEnd(host, { changedTouches: [{ identifier: 1 }, { identifier: 2 }] });
+    });
+
+    expect(onInput).not.toHaveBeenCalled();
+  });
+
+  it('keeps a scroll-locked two-finger gesture from becoming pinch later', async () => {
+    const onInput = vi.fn();
+    const { container } = render(
+      <div style={{ width: '200px', height: '408px' }}>
+        <TerminalView
+          sessionId='s1'
+          renderBufferSnapshot={buildRenderBufferSnapshot()}
+          active
+          live
+          widthMode='mirror-fixed'
+          onInput={onInput}
+          fontSize={5}
+        />
+      </div>,
+    );
+    const host = container.querySelector('.wterm') as HTMLElement;
+    const scaleLayer = container.querySelector('.term-render-scale-layer') as HTMLElement;
+    act(() => {
+      ResizeObserverMock.triggerAll();
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    });
+
+    act(() => {
+      fireEvent.touchStart(host, {
+        touches: [
+          { clientX: 150, clientY: 100, identifier: 1 },
+          { clientX: 250, clientY: 100, identifier: 2 },
+        ],
+        changedTouches: [],
+      });
+      fireEvent.touchMove(host, {
+        touches: [
+          { clientX: 150, clientY: 130, identifier: 1 },
+          { clientX: 250, clientY: 130, identifier: 2 },
+        ],
+        changedTouches: [],
+      });
+    });
+    const inputCountAfterLock = onInput.mock.calls.length;
+    expect(inputCountAfterLock).toBeGreaterThan(0);
+
+    // A later large span change belongs to the already locked scroll gesture.
+    act(() => {
+      fireEvent.touchMove(host, {
+        touches: [
+          { clientX: 170, clientY: 160, identifier: 1 },
+          { clientX: 210, clientY: 160, identifier: 2 },
+        ],
+        changedTouches: [],
+      });
+      fireEvent.touchEnd(host, { changedTouches: [{ identifier: 1 }, { identifier: 2 }] });
+    });
+
+    expect(scaleLayer.style.zoom).toBe('1');
+    expect(onInput.mock.calls.length).toBeGreaterThan(inputCountAfterLock);
+  });
+
+  it('filters sub-threshold two-finger drift before either gesture is locked', async () => {
+    const onInput = vi.fn();
+    const { container } = render(
+      <div style={{ width: '200px', height: '408px' }}>
+        <TerminalView
+          sessionId='s1'
+          renderBufferSnapshot={buildRenderBufferSnapshot()}
+          active
+          live
+          widthMode='mirror-fixed'
+          onInput={onInput}
+          fontSize={5}
+        />
+      </div>,
+    );
+    const host = container.querySelector('.wterm') as HTMLElement;
+    act(() => {
+      fireEvent.touchStart(host, {
+        touches: [
+          { clientX: 150, clientY: 100, identifier: 1 },
+          { clientX: 250, clientY: 100, identifier: 2 },
+        ],
+        changedTouches: [],
+      });
+      fireEvent.touchMove(host, {
+        touches: [
+          { clientX: 150, clientY: 106, identifier: 1 },
+          { clientX: 250, clientY: 106, identifier: 2 },
+        ],
+        changedTouches: [],
+      });
+      fireEvent.touchEnd(host, { changedTouches: [{ identifier: 1 }, { identifier: 2 }] });
+    });
+
+    expect(onInput).not.toHaveBeenCalled();
+  });
 });
