@@ -297,4 +297,35 @@ describe('terminal bridge runtime message scheduling', () => {
     expect(connection.muxChannels.size).toBe(0);
     wss.close();
   });
+
+  it('does not run a queued attach after the physical websocket closes', async () => {
+    const events: string[] = [];
+    let releaseHead: (() => void) | undefined;
+    const { connection, runtime, wss } = createRuntime(async (_connection, rawData) => {
+      const message = JSON.parse(Buffer.from(rawData as ArrayBuffer).toString('utf8')) as { type: string };
+      if (message.type === 'buffer-head-request') {
+        await new Promise<void>((resolve) => {
+          releaseHead = resolve;
+        });
+        events.push('head');
+        return;
+      }
+      events.push(message.type);
+    });
+    const ws = new FakeWebSocket();
+
+    runtime.handleWebSocketConnection(ws as never, createRequest());
+    ws.emit('message', Buffer.from(JSON.stringify({ type: 'buffer-head-request', payload: {} })), false);
+    await flushMicrotasks();
+    ws.emit('message', Buffer.from(JSON.stringify({ type: 'session-open', payload: { sessionName: 'demo' } })), false);
+    ws.emit('close', 1006, Buffer.from('network gone'));
+
+    releaseHead?.();
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    expect(connection.closed).toBe(true);
+    expect(events).toEqual(['head']);
+    wss.close();
+  });
 });

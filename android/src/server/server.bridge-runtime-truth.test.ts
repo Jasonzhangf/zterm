@@ -57,7 +57,8 @@ describe('server bridge runtime truth gates', () => {
     expect(laneBlock).toContain("parsed.type === 'session-open' || parsed.type === 'connect' || parsed.type === 'close'");
     expect(queueBlock).toContain("lane === 'attach'");
     expect(queueBlock).toContain("lane === 'input'");
-    expect(queueBlock).toContain('.then(() => deps.handleMessage(connection, rawData, isBinary))');
+    expect(queueBlock).toContain('.then(() => {');
+    expect(queueBlock).toContain('return deps.handleMessage(connection, rawData, isBinary);');
     expect(wsBlock).toContain("ws.on('close', (code, rawReason) => {");
     expect(wsBlock).toContain("detachConnectionSubscribers(connection, 'websocket closed')");
     expect(wsBlock).toContain('enqueueConnectionMessage(connection, rawData, isBinary)');
