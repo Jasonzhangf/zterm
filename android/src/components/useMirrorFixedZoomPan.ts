@@ -83,6 +83,7 @@ interface PanGestureState {
   axis: 'horizontal' | 'vertical' | null;
   startX: number;
   startY: number;
+  lastY: number;
   startOffsetPx: number;
 }
 
@@ -126,6 +127,7 @@ export function useMirrorFixedZoomPan(
     axis: null,
     startX: 0,
     startY: 0,
+    lastY: 0,
     startOffsetPx: 0,
   });
   const restoredSessionRef = useRef<string | null>(null);
@@ -208,7 +210,14 @@ export function useMirrorFixedZoomPan(
       return;
     }
 
-    host.style.touchAction = 'pan-y';
+    // Android WebView can let `pan-y` win the gesture arena after the first
+    // finger, which prevents the second finger's move stream from reaching
+    // this owner. Single-finger vertical scrolling is handled explicitly in
+    // onTouchMove; two-finger input remains in its exclusive state machine.
+    host.style.touchAction =
+      options.widthMode === 'mirror-fixed' && !options.copyModeActive
+        ? 'none'
+        : 'pan-y';
 
     if (visualScale >= 1 && restoreScrollTopRef.current) {
       // Only restore saved scroll on zoom-out (exiting scaled mode).
@@ -400,8 +409,6 @@ export function useMirrorFixedZoomPan(
         return;
       }
 
-      wheel.lastSpanPx = spanPx;
-
       const decision = decideTwoFingerWheel(
         {
           active: wheel.active,
@@ -420,6 +427,7 @@ export function useMirrorFixedZoomPan(
       wheel.accumulatedPinchDeltaPx += Math.abs(
         spanPx - wheel.lastSpanPx,
       );
+      wheel.lastSpanPx = spanPx;
 
       if (decision.direction === null || decision.steps < 1) {
         wheel.debug.lastReason = 'no-step';
@@ -509,6 +517,7 @@ export function useMirrorFixedZoomPan(
         axis: null,
         startX,
         startY: touches[0].clientY,
+        lastY: touches[0].clientY,
         startOffsetPx,
       };
       if (active && (startOffsetPx > 0 || startX > drawerEdgeSwipeStartPx)) {
@@ -552,6 +561,16 @@ export function useMirrorFixedZoomPan(
       }
       if (pan.axis !== 'horizontal') {
         options.onVerticalScrollIntent?.();
+        const deltaY = touches[0].clientY - pan.lastY;
+        pan.lastY = touches[0].clientY;
+        if (deltaY !== 0) {
+          const host = options.hostRef?.current;
+          if (host) {
+            host.scrollTop -= deltaY;
+          }
+        }
+        event.preventDefault();
+        event.stopPropagation();
         return;
       }
       const nextOffset = Math.max(0, pan.startOffsetPx - deltaX);
