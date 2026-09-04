@@ -1877,7 +1877,7 @@ function TerminalViewComponent({
         overscrollBehavior: "contain",
         touchAction:
           widthMode === "mirror-fixed" && !copyModeActive
-            ? "pan-y"
+            ? "none"
             : copyModeActive
               ? "pan-y"
               : "auto",

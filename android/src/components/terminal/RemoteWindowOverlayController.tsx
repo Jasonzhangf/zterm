@@ -1083,6 +1083,26 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     setFullscreenDisplayMode,
   ]);
 
+  useEffect(() => {
+    if (
+      state.phase !== 'targetLocked'
+      || state.mode !== 'fullscreen'
+      || !state.streamId
+      || !activeSessionId
+      || !surfaceSize
+      || fullscreenDisplayMode !== 'fill'
+    ) {
+      return;
+    }
+    requestRemoteTargetFillResize();
+  }, [
+    activeSessionId,
+    fullscreenDisplayMode,
+    requestRemoteTargetFillResize,
+    state,
+    surfaceSize,
+  ]);
+
   const handleToggleInputMode = useCallback(() => {
     setInputMode((current) => {
       const next: RemoteWindowInputMode = current === 'touch' ? 'mouse' : 'touch';

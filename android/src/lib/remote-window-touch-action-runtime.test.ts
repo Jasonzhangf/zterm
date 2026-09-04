@@ -840,7 +840,7 @@ describe('remote-window-touch-action-runtime', () => {
       expect(move.nextState.mode).not.toBe('pinch');
     });
 
-    it('keeps a moving two-finger center as scroll instead of pinch', () => {
+    it('does not commit pinch when the two-finger center travels with the gesture', () => {
       const candidate = pairDown({ clientX: 100, clientY: 60 }, { clientX: 140, clientY: 60 });
       const move = resolveRemoteWindowTouchPairPointerMoveRuntime({
         state: candidate.nextState,

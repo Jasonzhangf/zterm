@@ -563,9 +563,9 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
     });
 
     expect(scaleLayer.style.zoom).toBe('0.8064516129032258');
-    expect(host.style.touchAction).toBe('pan-y');
+    expect(host.style.touchAction).toBe('none');
 
-    // React 渲染不能关闭缩放态的原生纵向滚动。
+    // 双指仲裁关闭 WebView 原生手势；单指滚动由 owner 显式提交。
     const terminalProps = {
       sessionId: 's1',
       renderBufferSnapshot: buildRenderBufferSnapshot(),
@@ -580,7 +580,7 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
         <TerminalView {...terminalProps} />
       </div>,
     );
-    expect(host.style.touchAction).toBe('pan-y');
+    expect(host.style.touchAction).toBe('none');
     expect(scaleLayer.style.zoom).toBe('0.8064516129032258');
 
     // jsdom 无布局：mock 滚动尺寸使 maxVertical > 0
@@ -600,7 +600,7 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
         changedTouches: [],
       });
     });
-    expect(host.style.touchAction).toBe('pan-y');
+    expect(host.style.touchAction).toBe('none');
     const zoomTransform = (container.querySelector('.term-grid') as HTMLElement).style.transform;
     expect(zoomTransform).not.toContain('translateY');
   });
@@ -687,7 +687,7 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
     pan(50, 150);
     pan(250, 50);
     expect((container.querySelector('.term-grid') as HTMLElement).style.transform).not.toContain('translateY');
-    expect(host.style.touchAction).toBe('pan-y');
+    expect(host.style.touchAction).toBe('none');
     const pannedTransform = (container.querySelector('.term-grid') as HTMLElement).style.transform;
     expect(pannedTransform).not.toContain('translateY');
 
