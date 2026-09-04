@@ -1094,20 +1094,11 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     ) {
       return;
     }
-    const key = [
-      state.streamId,
-      state.target.streamTargetId,
-    ].join('|');
-    if (lastDefaultFullscreenFillKeyRef.current === key) {
-      return;
-    }
-    if (requestFullscreenFillResize()) {
-      lastDefaultFullscreenFillKeyRef.current = key;
-    }
+    requestRemoteTargetFillResize();
   }, [
     activeSessionId,
     fullscreenDisplayMode,
-    requestFullscreenFillResize,
+    requestRemoteTargetFillResize,
     state,
     surfaceSize,
   ]);
