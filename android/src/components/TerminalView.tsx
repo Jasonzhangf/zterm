@@ -437,6 +437,10 @@ function TerminalViewComponent({
         gapRanges: renderBuffer.gapRanges,
         physicalRowHeightPx: rowHeightPx,
         visualScale,
+        renderRowHeightPx:
+          widthMode === "mirror-fixed" && mirrorFixedVisualScale > 1
+            ? layoutRowHeightPx
+            : rowHeightPx,
         clientHeightPx,
         measuredViewportRows,
         minViewportRows: DEFAULT_ROWS,
