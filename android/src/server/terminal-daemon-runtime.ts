@@ -136,6 +136,7 @@ export function createTerminalDaemonRuntime(
           const staleForMs = lastInboundAt > 0 ? now - lastInboundAt : Number.POSITIVE_INFINITY;
           if (staleForMs > TERMINAL_TRANSPORT_STALE_INBOUND_MS) {
             const reason = 'transport heartbeat stale';
+            connection.closed = true;
             console.warn(
               `[${deps.logTimePrefix()}] transport ${connection.id} stale inbound heartbeat kind=${connection.transport.kind} staleForMs=${Math.floor(staleForMs)}`,
             );

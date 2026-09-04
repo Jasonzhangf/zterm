@@ -28,6 +28,7 @@ export interface TerminalTransportConnection {
   transportId: string;
   transport: TerminalSessionTransport;
   closeTransport: (reason: string) => void;
+  closed?: boolean;
   requestOrigin: string;
   role: 'pending' | 'control' | 'session';
   boundSubscriberId: string | null;
