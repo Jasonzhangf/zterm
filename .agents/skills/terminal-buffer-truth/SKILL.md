@@ -458,6 +458,10 @@ renderer 还必须显式区分两种宽度模式：
      不得用 `translateY` 模拟纵向滚动。renderer 的 `viewportRows` 必须按
      `clientHeight / (physicalRowHeight * visualScale)` 向上取整，visible demand
      与 repair range 随之扩大；follow/bottom sync 在 `visualScale < 1` 时不得被抑制。
+   - buffer window、visual row height、viewportRows、scroll range、render frame
+     与 virtual padding 必须由 shared renderer 的唯一动态 geometry entry 同次派生。
+     padding 位于 zoom layer 内时保留物理行高，交由 CSS zoom 统一缩放；禁止在
+     DOM projection 层再次除以 visualScale，禁止 TerminalView 维护第二套几何公式。
    - 若 buffer 行宽大于 viewport：
      - 默认显示左侧窗口
      - 用户横向平移 renderer window 看右侧
