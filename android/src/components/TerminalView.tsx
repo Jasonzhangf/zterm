@@ -1042,6 +1042,26 @@ function TerminalViewComponent({
     [applyFollowScrollTransition, resolveRenderDemandFromScroll],
   );
 
+  const resolveFollowScrollTarget = useCallback(
+    (host: HTMLDivElement, nextRenderBottomIndex: number) => {
+      // CSS zoom changes the native DOM scroll range. During a quickbar
+      // resize, render state can still carry the previous client height; the
+      // live DOM bottom is the only authoritative follow target in zoom mode.
+      if (
+        widthModeRef.current === "mirror-fixed" &&
+        mirrorFixedVisualScale > 1
+      ) {
+        return Math.max(0, host.scrollHeight - host.clientHeight);
+      }
+      return resolveFollowScrollSyncTarget(
+        host,
+        nextRenderBottomIndex,
+        resolveScrollTopForRenderBottomIndex,
+      );
+    },
+    [mirrorFixedVisualScale, resolveScrollTopForRenderBottomIndex],
+  );
+
   const syncScrollHostToRenderBottom = useCallback(
     (nextRenderBottomIndex: number) => {
       const host = containerRef.current;
@@ -1052,15 +1072,7 @@ function TerminalViewComponent({
         return;
       }
 
-      const nextTarget =
-        widthModeRef.current === "mirror-fixed" &&
-        mirrorFixedZoomPanRef.current.visualScale > 1
-          ? Math.max(0, host.scrollHeight - host.clientHeight)
-          : resolveFollowScrollSyncTarget(
-              host,
-              nextRenderBottomIndex,
-              resolveScrollTopForRenderBottomIndex,
-            );
+      const nextTarget = resolveFollowScrollTarget(host, nextRenderBottomIndex);
       applyFollowScrollTransition(
         commitProgrammaticTerminalScrollRuntime(
           followScrollStateRef.current,
@@ -1068,7 +1080,7 @@ function TerminalViewComponent({
         ),
       );
     },
-    [applyFollowScrollTransition, resolveScrollTopForRenderBottomIndex],
+    [applyFollowScrollTransition, resolveFollowScrollTarget],
   );
   syncScrollHostToRenderBottomRef.current = syncScrollHostToRenderBottom;
 
@@ -1124,11 +1136,7 @@ function TerminalViewComponent({
           if (!host) {
             return resolveScrollTopForRenderBottomIndex(nextRenderBottomIndex);
           }
-          return resolveFollowScrollSyncTarget(
-            host,
-            nextRenderBottomIndex,
-            resolveScrollTopForRenderBottomIndex,
-          );
+          return resolveFollowScrollTarget(host, nextRenderBottomIndex);
         },
       },
     );
@@ -1138,7 +1146,7 @@ function TerminalViewComponent({
     applyFollowScrollTransition,
     followVisualBottomIndex,
     refreshActive,
-    resolveScrollTopForRenderBottomIndex,
+    resolveFollowScrollTarget,
   ]);
   flushPendingFollowScrollSyncRef.current = flushPendingFollowScrollSync;
 
