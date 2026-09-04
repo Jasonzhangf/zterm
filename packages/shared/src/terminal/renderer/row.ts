@@ -308,6 +308,7 @@ export function buildTerminalDynamicGeometry(options: {
   gapRanges?: TerminalGapRange[];
   physicalRowHeightPx: number;
   visualScale: number;
+  renderRowHeightPx?: number;
   clientHeightPx: number;
   measuredViewportRows: number;
   minViewportRows?: number;
@@ -333,7 +334,9 @@ export function buildTerminalDynamicGeometry(options: {
     effectiveBufferEndIndex: options.effectiveBufferEndIndex,
     bufferLinesLength: options.bufferLines.length,
     viewportRows,
-    rowHeightPx: options.physicalRowHeightPx,
+    rowHeightPx: Number.isFinite(options.renderRowHeightPx)
+      ? Math.max(1, options.renderRowHeightPx!)
+      : options.physicalRowHeightPx,
     scrollRowHeightPx,
     viewportClientHeightPx: options.clientHeightPx,
     renderBottomIndex: options.renderBottomIndex,
