@@ -1736,9 +1736,10 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     const viewport = state.mode === 'fullscreen'
       ? fullscreenViewportRef.current
       : initialFullscreenViewport;
+    // 预览与全屏统一按“面积最大化”投影：填满所在表面，保留透视语义相同。
     const displayMode = state.mode === 'fullscreen'
       ? fullscreenDisplayModeRef.current
-      : 'fit';
+      : 'fill';
     const { content } = resolveZoomedContentRect(
       { width: surfaceRect.width, height: surfaceRect.height },
       displaySourceSize,
@@ -2272,6 +2273,28 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       surfacePointersRef.current.delete(event.pointerId);
       return;
     }
+    if (gesture.mode === 'pan' && gesture.pointerId === event.pointerId) {
+      if (!gesture.moved) {
+        const geometry = resolveSurfaceInputGeometry();
+        const clickPayload = geometry
+          ? buildRemoteWindowClickInputEventRuntime({
+              pointerId: gesture.pointerId,
+              clientX: gesture.startClientX,
+              clientY: gesture.startClientY,
+              geometry,
+            })
+          : null;
+        if (clickPayload) {
+          emitRemoteWindowActionInput(clickPayload);
+        }
+      }
+      commitFullscreenViewport();
+      surfaceGestureRef.current = null;
+      surfacePointersRef.current.delete(event.pointerId);
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     const runtimeGesture = toRemoteWindowTouchGestureState(gesture);
     if (runtimeGesture.mode !== 'idle') {
       const geometry = resolveSurfaceInputGeometry();
@@ -2330,28 +2353,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
           return;
         }
       }
-    }
-    if (gesture.mode === 'pan' && gesture.pointerId === event.pointerId) {
-      if (!gesture.moved) {
-        const geometry = resolveSurfaceInputGeometry();
-        const clickPayload = geometry
-          ? buildRemoteWindowClickInputEventRuntime({
-              pointerId: gesture.pointerId,
-              clientX: gesture.startClientX,
-              clientY: gesture.startClientY,
-              geometry,
-            })
-          : null;
-        if (clickPayload) {
-          emitRemoteWindowActionInput(clickPayload);
-        }
-      }
-      commitFullscreenViewport();
-      surfaceGestureRef.current = null;
-      surfacePointersRef.current.delete(event.pointerId);
-      event.preventDefault();
-      event.stopPropagation();
-      return;
     }
     if (runtimeGesture.mode === 'twoFingerCandidate' || runtimeGesture.mode === 'twoFingerScroll' || runtimeGesture.mode === 'twoFingerPan' || runtimeGesture.mode === 'pinch') {
       const first = surfacePointersRef.current.get(runtimeGesture.firstPointerId);
@@ -2570,9 +2571,10 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
 	      compositeLayout ? focusedWindowSlot : null,
 	    );
 	    const viewport = state.mode === 'fullscreen' ? fullscreenViewport : initialFullscreenViewport;
+	    // 预览抽屉同样按面积最大化填满，避免远端窗口在预览容器里被压缩到很小。
 	    const displayMode = state.mode === 'fullscreen'
 	      ? fullscreenDisplayMode
-	      : 'fit';
+	      : 'fill';
 	    return resolveZoomedContentRect(surfaceSize, displaySourceSize, viewport, displayMode);
 	  }, [compositeLayout, focusedWindowSlot, fullscreenDisplayMode, fullscreenViewport, receiverFrameSize, state, surfaceSize]);
 

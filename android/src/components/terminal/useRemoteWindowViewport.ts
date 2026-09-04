@@ -79,7 +79,7 @@ export function useRemoteWindowViewport({
       : null;
     const displayMode = state.phase === 'targetLocked' && state.mode === 'fullscreen'
       ? fullscreenDisplayModeRef.current
-      : 'fit';
+      : 'fill';
     const clamped = clampFullscreenViewport(
       raw,
       measuredSurfaceSize,
@@ -186,7 +186,7 @@ export function useRemoteWindowViewport({
         receiverFrameSize,
         focusedWindowSlotRef.current,
       );
-      const displayMode = state.mode === 'fullscreen' ? fullscreenDisplayMode : 'fit';
+      const displayMode = state.mode === 'fullscreen' ? fullscreenDisplayMode : 'fill';
       const clamped = clampFullscreenViewport(
         fullscreenViewportRef.current,
         next,
