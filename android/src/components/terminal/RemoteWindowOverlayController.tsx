@@ -943,13 +943,25 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   ]);
 
   useEffect(() => {
-    if (appForegroundActive !== false || state.phase === 'closed') {
+    if (state.phase !== 'targetLocked') {
       return;
     }
-    lastReportedBodySuppressionRef.current = false;
-    onBodySubscriptionSuppressedChange?.(false);
-    handleClose();
-  }, [appForegroundActive, handleClose, onBodySubscriptionSuppressedChange, state.phase]);
+    if (appForegroundActive !== false) {
+      requestBoundVideoPlayback();
+      lastReportedBodySuppressionRef.current = false;
+      onBodySubscriptionSuppressedChange?.(false);
+      return;
+    }
+    lastReportedBodySuppressionRef.current = true;
+    onBodySubscriptionSuppressedChange?.(true);
+    updateReceiverVideoVisibility(false);
+  }, [
+    appForegroundActive,
+    onBodySubscriptionSuppressedChange,
+    requestBoundVideoPlayback,
+    state.phase,
+    updateReceiverVideoVisibility,
+  ]);
 
   useEffect(() => {
     if (
@@ -1017,9 +1029,29 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     ) {
       return false;
     }
-    const viewport = typeof window !== 'undefined' && window.innerWidth > 0 && window.innerHeight > 0
-      ? { width: window.innerWidth, height: window.innerHeight }
-      : surfaceSize;
+    const surfaceRect = videoSurfaceRef.current?.getBoundingClientRect();
+    const overlayRect = floatingOverlayRef.current?.getBoundingClientRect();
+    const viewport = (
+      surfaceRect
+      && surfaceRect.width > 0
+      && surfaceRect.height > 0
+      && surfaceRect.width !== window.innerWidth
+      && surfaceRect.height !== window.innerHeight
+    )
+      ? { width: surfaceRect.width, height: surfaceRect.height }
+      : (
+          overlayRect
+          && overlayRect.width > 0
+          && overlayRect.height > 0
+          && overlayRect.width !== window.innerWidth
+          && overlayRect.height !== window.innerHeight
+        )
+        ? { width: overlayRect.width, height: overlayRect.height }
+        : (
+            typeof window !== 'undefined' && window.innerWidth > 0 && window.innerHeight > 0
+              ? { width: window.innerWidth, height: window.innerHeight }
+              : surfaceSize
+          );
     if (!viewport) {
       return false;
     }
@@ -1051,7 +1083,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       },
     });
     return true;
-  }, [activeSessionId, currentLockedStreamId, currentLockedTarget, embedded, resizeTargetWindow, state, surfaceSize]);
+  }, [activeSessionId, currentLockedStreamId, currentLockedTarget, embedded, floatingOverlayRef, resizeTargetWindow, state, surfaceSize, videoSurfaceRef]);
   const handleFullscreen = useCallback(() => {
     publishRemoteWindowInputContext();
     resetFullscreenViewport();
@@ -2270,6 +2302,28 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
 
     if (!gesture) {
       surfacePointersRef.current.delete(event.pointerId);
+      return;
+    }
+    if (gesture.mode === 'pan' && gesture.pointerId === event.pointerId) {
+      if (!gesture.moved) {
+        const geometry = resolveSurfaceInputGeometry();
+        const clickPayload = geometry
+          ? buildRemoteWindowClickInputEventRuntime({
+              pointerId: gesture.pointerId,
+              clientX: gesture.startClientX,
+              clientY: gesture.startClientY,
+              geometry,
+            })
+          : null;
+        if (clickPayload) {
+          emitRemoteWindowActionInput(clickPayload);
+        }
+      }
+      commitFullscreenViewport();
+      surfaceGestureRef.current = null;
+      surfacePointersRef.current.delete(event.pointerId);
+      event.preventDefault();
+      event.stopPropagation();
       return;
     }
     const runtimeGesture = toRemoteWindowTouchGestureState(gesture);

@@ -2707,8 +2707,8 @@ describe('RemoteWindowOverlay', () => {
       targetId: 'app-1',
       event: {
         kind: 'window-resize',
-        width: 1080,
-        height: 2337,
+        width: 1620,
+        height: 1080,
       },
     });
 
@@ -2776,8 +2776,8 @@ describe('RemoteWindowOverlay', () => {
       expect.objectContaining({
         event: {
           kind: 'window-resize',
-          width: 1080,
-          height: 2337,
+          width: 1620,
+          height: 1080,
         },
       }),
     );
