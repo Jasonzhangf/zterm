@@ -2707,8 +2707,8 @@ describe('RemoteWindowOverlay', () => {
       targetId: 'app-1',
       event: {
         kind: 'window-resize',
-        width: 1620,
-        height: 1080,
+        width: 1080,
+        height: 2337,
       },
     });
 
@@ -2776,11 +2776,67 @@ describe('RemoteWindowOverlay', () => {
       expect.objectContaining({
         event: {
           kind: 'window-resize',
-          width: 1620,
-          height: 1080,
+          width: 1080,
+          height: 2337,
         },
       }),
     );
+  });
+
+  it('fills the embedded preview surface with the largest projected content rect', async () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 });
+    Object.defineProperty(window, 'visualViewport', {
+      configurable: true,
+      value: { width: 390, height: 844, addEventListener: vi.fn(), removeEventListener: vi.fn() },
+    });
+    const mediaStream = { id: 'media-stream-1' } as MediaStream;
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-1',
+      targets: [makeTarget('app-1', 'TextEdit', 'app-window')],
+    }));
+    const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string) => ({
+      streamId,
+      mediaStream,
+    }));
+
+    render(
+      <RemoteWindowOverlay
+        activeSessionId="session-1"
+        embedded
+        requestTargets={requestTargets}
+        startStream={startStream}
+      />,
+    );
+
+    await screen.findByTestId('remote-window-target-app-1');
+    fireEvent.click(screen.getByTestId('remote-window-target-app-1'));
+    await screen.findByTestId('remote-window-video');
+
+    const surface = screen.getByTestId('remote-window-video-surface');
+    Object.defineProperty(surface, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({
+        x: 0,
+        y: 0,
+        left: 0,
+        top: 0,
+        right: 300,
+        bottom: 200,
+        width: 300,
+        height: 200,
+        toJSON: () => ({}),
+      }),
+    });
+    await flushRemoteWindowSurfaceLayout();
+
+    const content = screen.getByTestId('remote-window-video-content');
+    await waitFor(() => {
+      expect(Number.parseFloat(content.style.left)).toBeCloseTo(0, 1);
+      expect(Number.parseFloat(content.style.width)).toBeCloseTo(300, 1);
+      expect(Number.parseFloat(content.style.top)).toBeCloseTo(-5, 1);
+      expect(Number.parseFloat(content.style.height)).toBeCloseTo(210, 1);
+    });
   });
 
   it('keeps a resize ACK target in the cached picker catalog after the stream closes', async () => {

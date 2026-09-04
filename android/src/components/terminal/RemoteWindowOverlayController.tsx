@@ -1017,29 +1017,9 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     ) {
       return false;
     }
-    const surfaceRect = videoSurfaceRef.current?.getBoundingClientRect();
-    const overlayRect = floatingOverlayRef.current?.getBoundingClientRect();
-    const viewport = (
-      surfaceRect
-      && surfaceRect.width > 0
-      && surfaceRect.height > 0
-      && surfaceRect.width !== window.innerWidth
-      && surfaceRect.height !== window.innerHeight
-    )
-      ? { width: surfaceRect.width, height: surfaceRect.height }
-      : (
-          overlayRect
-          && overlayRect.width > 0
-          && overlayRect.height > 0
-          && overlayRect.width !== window.innerWidth
-          && overlayRect.height !== window.innerHeight
-        )
-        ? { width: overlayRect.width, height: overlayRect.height }
-        : (
-            typeof window !== 'undefined' && window.innerWidth > 0 && window.innerHeight > 0
-              ? { width: window.innerWidth, height: window.innerHeight }
-              : surfaceSize
-          );
+    const viewport = typeof window !== 'undefined' && window.innerWidth > 0 && window.innerHeight > 0
+      ? { width: window.innerWidth, height: window.innerHeight }
+      : surfaceSize;
     if (!viewport) {
       return false;
     }
@@ -1071,7 +1051,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       },
     });
     return true;
-  }, [activeSessionId, currentLockedStreamId, currentLockedTarget, embedded, floatingOverlayRef, resizeTargetWindow, state, surfaceSize, videoSurfaceRef]);
+  }, [activeSessionId, currentLockedStreamId, currentLockedTarget, embedded, resizeTargetWindow, state, surfaceSize]);
   const handleFullscreen = useCallback(() => {
     publishRemoteWindowInputContext();
     resetFullscreenViewport();
@@ -1756,9 +1736,10 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     const viewport = state.mode === 'fullscreen'
       ? fullscreenViewportRef.current
       : initialFullscreenViewport;
+    // 预览与全屏统一按“面积最大化”投影：填满所在表面，保留透视语义相同。
     const displayMode = state.mode === 'fullscreen'
       ? fullscreenDisplayModeRef.current
-      : 'fit';
+      : 'fill';
     const { content } = resolveZoomedContentRect(
       { width: surfaceRect.width, height: surfaceRect.height },
       displaySourceSize,
@@ -2590,9 +2571,10 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
 	      compositeLayout ? focusedWindowSlot : null,
 	    );
 	    const viewport = state.mode === 'fullscreen' ? fullscreenViewport : initialFullscreenViewport;
+	    // 预览抽屉同样按面积最大化填满，避免远端窗口在预览容器里被压缩到很小。
 	    const displayMode = state.mode === 'fullscreen'
 	      ? fullscreenDisplayMode
-	      : 'fit';
+	      : 'fill';
 	    return resolveZoomedContentRect(surfaceSize, displaySourceSize, viewport, displayMode);
 	  }, [compositeLayout, focusedWindowSlot, fullscreenDisplayMode, fullscreenViewport, receiverFrameSize, state, surfaceSize]);
 
