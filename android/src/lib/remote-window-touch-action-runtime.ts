@@ -1113,7 +1113,12 @@ function isDominantVerticalScrollIntent(options: {
     && hasCoherentTwoFingerScrollIntent(options);
 }
 
-function hasStablePinchCenter(options: { midpointShift: number; distanceDelta: number }) {
+function hasStablePinchCenter(options: {
+  midpointShift: number;
+  distanceDelta: number;
+}) {
+  // Pinch is a two-finger distance gesture. A moving midpoint is allowed only
+  // as small tracking jitter; coherent vertical travel must remain scroll.
   return options.midpointShift <= Math.max(12, options.distanceDelta * 0.5);
 }
 
@@ -1353,7 +1358,10 @@ export function resolveRemoteWindowTouchPairPointerMoveRuntime(options: RemoteWi
       secondCurrent,
     })
     && hasStablePinchCenter({
-      midpointShift: Math.hypot(midpoint.clientX - state.startMidX, midpoint.clientY - state.startMidY),
+      midpointShift: Math.hypot(
+        midpoint.clientX - state.startMidX,
+        midpoint.clientY - state.startMidY,
+      ),
       distanceDelta: Math.abs(distance - state.startDistance),
     })
     && isPinchIntentPair({
