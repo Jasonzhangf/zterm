@@ -163,6 +163,7 @@ function toRenderBufferSnapshot(options: {
   cursorKeysApp?: boolean;
   cursor?: SessionRenderBufferSnapshot['cursor'];
   revision?: number;
+  cols?: number;
 }): SessionRenderBufferSnapshot {
   const lines = options.initialBufferLines || [];
   const startIndex = Math.max(0, Math.floor(options.bufferStartIndex || 0));
@@ -185,7 +186,7 @@ function toRenderBufferSnapshot(options: {
     daemonHeadEndIndex: typeof options.daemonHeadEndIndex === 'number' && Number.isFinite(options.daemonHeadEndIndex)
       ? Math.max(startIndex, Math.floor(options.daemonHeadEndIndex))
       : bufferTailEndIndex,
-    cols: 80,
+    cols: options.cols || 80,
     rows: 24,
     cursorKeysApp: Boolean(options.cursorKeysApp),
     cursor: options.cursor || null,
@@ -3182,6 +3183,103 @@ describe('TerminalView minimal mirror render', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('keeps zoom follow pinned to the live DOM bottom when quickbar shrinks the stage in the same batch as a tail refresh', async () => {
+    const initialRows = buildRows(80);
+    const initialSnapshot = toRenderBufferSnapshot({
+      initialBufferLines: initialRows.map((line) => Array.from(line).map((char) => cell(char))),
+      bufferStartIndex: 0,
+      bufferEndIndex: initialRows.length,
+      bufferTailEndIndex: initialRows.length,
+      cols: 20,
+      revision: 1,
+    });
+    const nextRows = [...buildRows(79), 'quickbar-live-bottom'];
+    const nextSnapshot = toRenderBufferSnapshot({
+      initialBufferLines: nextRows.map((line) => Array.from(line).map((char) => cell(char))),
+      bufferStartIndex: 0,
+      bufferEndIndex: nextRows.length,
+      bufferTailEndIndex: nextRows.length,
+      cols: 20,
+      revision: 2,
+    });
+
+    const view = render(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId="s-quickbar-zoom"
+          renderBufferSnapshot={initialSnapshot}
+          active
+          live
+          widthMode="mirror-fixed"
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
+    const scaleLayer = view.container.querySelector('.term-render-scale-layer') as HTMLElement;
+
+    let currentScrollTop = 0;
+    Object.defineProperty(scroller, 'scrollTop', {
+      configurable: true,
+      get() {
+        return currentScrollTop;
+      },
+      set(value: number) {
+        currentScrollTop = value;
+      },
+    });
+    const zoomedContentHeight = 80 * 17 * 2; // 80 rows * physical 17px * visualScale 2
+    Object.defineProperty(scroller, 'scrollHeight', {
+      configurable: true,
+      get() {
+        return zoomedContentHeight;
+      },
+    });
+    Object.defineProperty(scroller, 'clientHeight', {
+      configurable: true,
+      get() {
+        return mockClientHeight;
+      },
+    });
+
+    await act(async () => {
+      ResizeObserverMock.triggerAll();
+      await new Promise((resolve) => {
+        window.setTimeout(resolve, 25);
+      });
+    });
+    expect(scaleLayer.style.zoom).toBe('2');
+    expect(currentScrollTop).toBe(zoomedContentHeight - mockClientHeight);
+    expect(readRenderedRows(view.container)).toContain('row-080');
+
+    // Quickbar appears: the real DOM height shrinks, but the renderer state
+    // still holds the previous clientHeight until ResizeObserver commits.
+    mockClientHeight = 306;
+    view.rerender(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId="s-quickbar-zoom"
+          renderBufferSnapshot={nextSnapshot}
+          active
+          live
+          widthMode="mirror-fixed"
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(currentScrollTop).toBe(zoomedContentHeight - mockClientHeight);
+    expect(readRenderedRows(view.container)).toContain('quickbar-live-bottom');
   });
 
 

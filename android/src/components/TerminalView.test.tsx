@@ -1085,6 +1085,123 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
     expect(afterRowHeight).toBe(17);
   });
 
+  it('maps wide-tablet scroll-back with visual row height so history does not sit in blank padding', async () => {
+    const originalClientWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
+    const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+      configurable: true,
+      get() {
+        return 640;
+      },
+    });
+    HTMLElement.prototype.getBoundingClientRect = function getBoundingClientRect() {
+      if (this.textContent === 'W' || this.textContent === '你') {
+        return {
+          x: 0,
+          y: 0,
+          top: 0,
+          left: 0,
+          right: 3.1,
+          bottom: 17,
+          width: 3.1,
+          height: 17,
+          toJSON() {
+            return {};
+          },
+        } as DOMRect;
+      }
+      return {
+        x: 0,
+        y: 0,
+        top: 0,
+        left: 0,
+        right: 640,
+        bottom: 408,
+        width: 640,
+        height: 408,
+        toJSON() {
+          return {};
+        },
+      } as DOMRect;
+    };
+
+    try {
+      const { container } = render(
+        <div style={{ width: '640px', height: '408px' }}>
+          <TerminalView
+            sessionId="s1"
+            renderBufferSnapshot={{
+              lines: Array.from({ length: 120 }, (_, i) => [
+                { char: 65 + (i % 26), fg: 256, bg: 256, flags: 0, width: 1 },
+              ]),
+              gapRanges: [],
+              startIndex: 0,
+              endIndex: 120,
+              bufferHeadStartIndex: 0,
+              bufferTailEndIndex: 120,
+              daemonHeadRevision: 1,
+              daemonHeadEndIndex: 120,
+              cols: 80,
+              rows: 24,
+              cursorKeysApp: false,
+              cursor: null,
+              revision: 1,
+            }}
+            active
+            live
+            widthMode="mirror-fixed"
+            onInput={vi.fn()}
+            fontSize={5}
+          />
+        </div>,
+      );
+
+      const host = container.querySelector('.wterm') as HTMLElement;
+      const grid = container.querySelector('.term-grid') as HTMLElement;
+      const scaleLayer = container.querySelector('.term-render-scale-layer') as HTMLElement;
+
+      act(() => {
+        ResizeObserverMock.triggerAll();
+      });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      });
+
+      expect(scaleLayer.style.zoom).toBe('2');
+      Object.defineProperty(host, 'scrollHeight', { value: 4080, configurable: true });
+      Object.defineProperty(host, 'clientHeight', { value: 408, configurable: true });
+      act(() => {
+        host.scrollTop = 3672;
+        fireEvent.scroll(host);
+      });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+      act(() => {
+        host.scrollTop = 2000;
+        fireEvent.scroll(host);
+      });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+
+      const rows = Array.from(container.querySelectorAll('[data-terminal-row="true"]'))
+        .map((el) => Number(el.getAttribute('data-terminal-index')));
+      expect(rows.length).toBeGreaterThan(0);
+      expect(rows.some((index) => index >= 50 && index <= 80)).toBe(true);
+      const paddingTopPx = Number.parseFloat(grid.style.paddingTop);
+      expect(Number.isFinite(paddingTopPx)).toBe(true);
+      expect(paddingTopPx % 17).toBe(0);
+    } finally {
+      if (originalClientWidth) {
+        Object.defineProperty(HTMLElement.prototype, 'clientWidth', originalClientWidth);
+      }
+      if (originalGetBoundingClientRect) {
+        HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+      }
+    }
+  });
+
   it('keeps each intermediate pinch scale aligned with the native scroll range', async () => {
     const { container } = render(
       <div style={{ width: '200px', height: '408px' }}>

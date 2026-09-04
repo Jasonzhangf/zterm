@@ -13,9 +13,7 @@ import type { TerminalCell, TerminalRenderBufferProjection } from '../connection
 import { getTerminalThemePreset } from './theme';
 import { DEFAULT_ROWS, measureTerminalViewport, NORMAL_CURSOR_KEYS, TERMINAL_FONT_STACK } from './renderer';
 import {
-  buildTerminalGridPadding,
-  buildTerminalRenderFrame,
-  buildTerminalRenderRows,
+  buildTerminalDynamicGeometry,
   buildTerminalViewportDemandWithRepair,
   buildTerminalVisibleRowViewModel,
   hasDiscontinuousNeighbor,
@@ -105,32 +103,27 @@ export function MacTerminalView(props: MacTerminalViewProps) {
   const renderGeometry = useMemo(() => {
     const startIndex = projection?.startIndex ?? 0;
     const endIndex = projection?.endIndex ?? 0;
-    const frame = buildTerminalRenderFrame({
+    const geometry = buildTerminalDynamicGeometry({
       bufferStartIndex: startIndex,
       effectiveBufferEndIndex: endIndex,
-      bufferLinesLength: projection?.lines.length ?? 0,
-      viewportRows,
-      rowHeightPx,
+      bufferLines: projection?.lines ?? [],
+      gapRanges: projection?.gapRanges,
+      physicalRowHeightPx: rowHeightPx,
+      visualScale: 1,
+      clientHeightPx: viewportHeightPx,
+      measuredViewportRows: viewportRows,
+      minViewportRows: DEFAULT_ROWS,
       renderBottomIndex,
       followDemandAnchorEndIndex: endIndex,
       readingMode,
       overscanRows: 4,
     });
-    const rowsToRender = projection
-      ? buildTerminalRenderRows({
-          bufferLines: projection.lines,
-          gapRanges: projection.gapRanges,
-          startIndex,
-          leadingBlankRows: frame.leadingBlankRows,
-          renderStartOffset: frame.renderStartOffset,
-          renderEndOffset: frame.renderEndOffset,
-        })
-      : [];
-    const padding = buildTerminalGridPadding({
-      renderRows: rowsToRender,
-      rowHeightPx,
-      totalRows: frame.totalRows,
-    });
+    const frame = geometry.frame;
+    const rowsToRender = geometry.renderRows;
+    const padding = {
+      termGridPaddingTopPx: geometry.termGridPaddingTopPx,
+      termGridPaddingBottomPx: geometry.termGridPaddingBottomPx,
+    };
     const shortBufferBottomResidualPx = frame.totalRows <= viewportRows
       ? Math.max(0, viewportHeightPx - viewportRows * rowHeightPx)
       : 0;
