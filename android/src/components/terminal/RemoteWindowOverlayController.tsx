@@ -943,25 +943,13 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   ]);
 
   useEffect(() => {
-    if (state.phase !== 'targetLocked') {
+    if (appForegroundActive !== false || state.phase === 'closed') {
       return;
     }
-    if (appForegroundActive !== false) {
-      requestBoundVideoPlayback();
-      lastReportedBodySuppressionRef.current = false;
-      onBodySubscriptionSuppressedChange?.(false);
-      return;
-    }
-    lastReportedBodySuppressionRef.current = true;
-    onBodySubscriptionSuppressedChange?.(true);
-    updateReceiverVideoVisibility(false);
-  }, [
-    appForegroundActive,
-    onBodySubscriptionSuppressedChange,
-    requestBoundVideoPlayback,
-    state.phase,
-    updateReceiverVideoVisibility,
-  ]);
+    lastReportedBodySuppressionRef.current = false;
+    onBodySubscriptionSuppressedChange?.(false);
+    handleClose();
+  }, [appForegroundActive, handleClose, onBodySubscriptionSuppressedChange, state.phase]);
 
   useEffect(() => {
     if (
@@ -2384,28 +2372,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
           return;
         }
       }
-    }
-    if (gesture.mode === 'pan' && gesture.pointerId === event.pointerId) {
-      if (!gesture.moved) {
-        const geometry = resolveSurfaceInputGeometry();
-        const clickPayload = geometry
-          ? buildRemoteWindowClickInputEventRuntime({
-              pointerId: gesture.pointerId,
-              clientX: gesture.startClientX,
-              clientY: gesture.startClientY,
-              geometry,
-            })
-          : null;
-        if (clickPayload) {
-          emitRemoteWindowActionInput(clickPayload);
-        }
-      }
-      commitFullscreenViewport();
-      surfaceGestureRef.current = null;
-      surfacePointersRef.current.delete(event.pointerId);
-      event.preventDefault();
-      event.stopPropagation();
-      return;
     }
     if (runtimeGesture.mode === 'twoFingerCandidate' || runtimeGesture.mode === 'twoFingerScroll' || runtimeGesture.mode === 'twoFingerPan' || runtimeGesture.mode === 'pinch') {
       const first = surfacePointersRef.current.get(runtimeGesture.firstPointerId);
