@@ -161,12 +161,17 @@ export function buildTerminalRenderFrame(options: {
   bufferLinesLength: number;
   viewportRows: number;
   rowHeightPx: number;
+  scrollRowHeightPx?: number;
   viewportClientHeightPx?: number;
   renderBottomIndex: number;
   followDemandAnchorEndIndex: number;
   readingMode: boolean;
   overscanRows: number;
 }) : TerminalRenderFrame {
+  const scrollRowHeightPx = Math.max(
+    1,
+    options.scrollRowHeightPx ?? options.rowHeightPx,
+  );
   const dataRowCount = Math.max(0, options.effectiveBufferEndIndex - options.bufferStartIndex);
   const minimumRenderBottomIndex = dataRowCount <= options.viewportRows
     ? options.effectiveBufferEndIndex
@@ -191,8 +196,8 @@ export function buildTerminalRenderFrame(options: {
   const maxScrollTop = Math.max(
     0,
     Number.isFinite(options.viewportClientHeightPx) && (options.viewportClientHeightPx || 0) > 0
-      ? totalRows * options.rowHeightPx - options.viewportClientHeightPx!
-      : (totalRows - options.viewportRows) * options.rowHeightPx,
+      ? totalRows * scrollRowHeightPx - options.viewportClientHeightPx!
+      : (totalRows - options.viewportRows) * scrollRowHeightPx,
   );
   const effectiveRenderBottomIndex = options.readingMode ? clampedRenderBottomIndex : followVisualBottomIndex;
   const visibleWindowStartIndex = Math.max(options.bufferStartIndex, effectiveRenderBottomIndex - options.viewportRows);

@@ -405,6 +405,12 @@ function TerminalViewComponent({
     1,
     rowHeightPx * (widthMode === "mirror-fixed" ? mirrorFixedVisualScale : 1),
   );
+  // Scroll coordinates are host pixels produced by CSS zoom, so row -> pixel
+  // mapping must use the visual scaled row height. Grid padding stays physical
+  // because it is already inside the scaled layer.
+  const scrollRowHeightPx = widthMode === "mirror-fixed" && Math.abs(mirrorFixedVisualScale - 1) > 0.001
+    ? layoutRowHeightPx
+    : rowHeightPx;
   const viewportRows = widthMode === "mirror-fixed" && Math.abs(mirrorFixedVisualScale - 1) > 0.001
     ? Math.max(
         DEFAULT_ROWS,
@@ -433,6 +439,9 @@ function TerminalViewComponent({
         bufferLinesLength: bufferLines.length,
         viewportRows,
         rowHeightPx,
+        scrollRowHeightPx,
+        viewportClientHeightPx:
+          viewportClientHeightPx || containerRef.current?.clientHeight || undefined,
         // Secondary previews are passive tail projections. Their visible window
         // must follow the latest buffer revision without starting interactive
         // scroll/follow state or a per-tile viewport demand loop.
@@ -452,7 +461,9 @@ function TerminalViewComponent({
       renderBottomIndex,
       renderBuffer.startIndex,
       rowHeightPx,
+      scrollRowHeightPx,
       viewportRows,
+      viewportClientHeightPx,
     ],
   );
   const {
@@ -678,14 +689,14 @@ function TerminalViewComponent({
         totalRows,
         viewportRows,
         bufferStartIndex: renderBuffer.startIndex,
-        rowHeightPx,
+        rowHeightPx: scrollRowHeightPx,
         maxScrollTop,
       });
     },
     [
       maxScrollTop,
       renderBuffer.startIndex,
-      rowHeightPx,
+      scrollRowHeightPx,
       totalRows,
       viewportRows,
     ],
@@ -704,7 +715,7 @@ function TerminalViewComponent({
       return resolveTerminalRenderDemandFromScroll({
         nextScrollTop,
         maxScrollTop,
-        rowHeightPx,
+        rowHeightPx: scrollRowHeightPx,
         dataRowCount,
         viewportRows,
         effectiveBufferEndIndex,
@@ -729,7 +740,7 @@ function TerminalViewComponent({
       maxScrollTop,
       minimumRenderBottomIndex,
       resolveScrollTopForRenderBottomIndex,
-      rowHeightPx,
+      scrollRowHeightPx,
       viewportRows,
     ],
   );
