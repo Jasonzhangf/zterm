@@ -633,7 +633,14 @@ UI shell 只负责：
 
 ---
 
-## 6. 真回环验收
+## 6. 触摸仲裁边界
+
+`mirror-fixed` 非 copy 模式的终端 surface 使用 `touch-action: none`。
+单指垂直滚动由 client DOM renderer owner 按增量提交；双指序列由双指
+状态机独占，避免 Android WebView 的原生 `pan-y` 在第二指加入前抢占
+触摸序列。scroll 与 pinch 仍在首次有效采样后互斥锁定。
+
+## 7. 真回环验收
 
 必须同时看：
 
