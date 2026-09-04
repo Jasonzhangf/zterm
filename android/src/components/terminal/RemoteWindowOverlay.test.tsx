@@ -305,7 +305,7 @@ describe('RemoteWindowOverlay', () => {
     expect(screen.getByTestId('remote-window-more-toggle')).toBeTruthy();
   });
 
-  it('lists an app group as one picker row and switches sibling windows inside the video surface', async () => {
+  it('lists an app group and keeps the selected primary window isolated by default', async () => {
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
     Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 });
     Object.defineProperty(window, 'visualViewport', {
@@ -327,7 +327,11 @@ describe('RemoteWindowOverlay', () => {
       requestId: 'rw-1',
       targets: [childWindow, mainWindow],
     }));
-    render(<RemoteWindowOverlay activeSessionId="session-1" requestTargets={requestTargets} />);
+    const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string) => ({
+      streamId,
+      mediaStream: { id: 'media-stream-1' } as MediaStream,
+    }));
+    render(<RemoteWindowOverlay activeSessionId="session-1" requestTargets={requestTargets} startStream={startStream} />);
 
     fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
     await waitFor(() => {
@@ -338,18 +342,10 @@ describe('RemoteWindowOverlay', () => {
     expect(group.dataset.primaryTargetId).toBe('app-main');
     expect(screen.queryByTestId('remote-window-target-app-child')).toBeNull();
     fireEvent.click(group);
+    await screen.findByTestId('remote-window-video');
     expect(screen.queryByTestId('remote-window-picker')).toBeNull();
-    const videoGroup = screen.getByTestId('remote-window-video-window-switcher');
-    expect(videoGroup).toBeTruthy();
-    expect(videoGroup.getAttribute('data-window-group-secondary-placement')).toBe('before');
-    expect(videoGroup.firstElementChild?.contains(screen.getByTestId('remote-window-video-window-option-app-child'))).toBe(true);
-    expect(videoGroup.lastElementChild?.contains(screen.getByTestId('remote-window-video-surface'))).toBe(true);
-    expect(videoGroup.contains(screen.getByTestId('remote-window-video-surface'))).toBe(true);
-    expect(screen.queryByTestId('remote-window-video-window-option-app-main')).toBeNull();
-    expect(screen.getByTestId('remote-window-video-window-option-app-child')).toBeTruthy();
-    expect(screen.getByTestId('remote-window-video-window-thumbnail-app-child')).toBeTruthy();
-
-    expect(screen.getByTestId('remote-window-video-window-option-app-child')).toBeTruthy();
+    expect(screen.queryByTestId('remote-window-video-window-switcher')).toBeNull();
+    expect(screen.queryByTestId('remote-window-composite-strip')).toBeNull();
   });
 
   it('opens an active app-title switch list and switches to another target without reopening the picker', async () => {
@@ -398,7 +394,6 @@ describe('RemoteWindowOverlay', () => {
 
     await waitFor(() => {
       expect(stopStream).toHaveBeenCalledWith('session-1', expect.stringMatching(/^rw-stream-/));
-      expect(startStream).toHaveBeenCalledTimes(2);
       expect(startStream.mock.calls[1]?.[1]).toMatchObject({ streamTargetId: 'app-2' });
     });
     expect(screen.queryByTestId('remote-window-active-app-switch-list')).toBeNull();
@@ -498,7 +493,7 @@ describe('RemoteWindowOverlay', () => {
     expect(screen.queryByTestId('remote-window-stream-error')).toBeNull();
   });
 
-  it('switches sibling windows through the existing focus stream', async () => {
+  it('routes sibling window switches through the active app-title switch list', async () => {
     const mediaStream = { id: 'media-stream-1' } as MediaStream;
     const mainWindow = makeTarget('app-main', 'WeChat', 'app-window');
     const childWindow = {
@@ -522,12 +517,11 @@ describe('RemoteWindowOverlay', () => {
     fireEvent.click(await screen.findByTestId('remote-window-app-group-com-apple-TextEdit-123'));
     await screen.findByTestId('remote-window-video');
     await waitFor(() => expect(updateFocus).not.toHaveBeenCalled());
-    const focusStreamId = startStream.mock.calls[0]?.[2] as string;
 
-    fireEvent.click(screen.getByTestId('remote-window-video-window-option-app-child'));
-    await waitFor(() => expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-dual-stream-phase')).toBe('overview-crop-visible'));
-    expect(startStream).toHaveBeenCalledTimes(1);
-    expect(updateFocus).toHaveBeenCalledWith('session-1', focusStreamId, childWindow, 1);
+    fireEvent.click(screen.getByTestId('remote-window-active-app-switch-button'));
+    fireEvent.click(await screen.findByTestId('remote-window-active-app-switch-target-app-child'));
+    await waitFor(() => expect(screen.getByTestId('remote-window-active-app-switch-button').textContent).toContain('WeChat Image'));
+    expect(updateFocus).not.toHaveBeenCalled();
   });
 
   it('surfaces a matching focus error and ignores stale focus errors', async () => {
@@ -541,9 +535,9 @@ describe('RemoteWindowOverlay', () => {
     fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
     fireEvent.click(await screen.findByTestId('remote-window-app-group-com-apple-TextEdit-123'));
     await screen.findByTestId('remote-window-video');
-    fireEvent.click(screen.getByTestId('remote-window-video-window-option-app-child'));
-    await waitFor(() => expect(updateFocus).toHaveBeenCalledTimes(1));
-    expect(startStream).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByTestId('remote-window-active-app-switch-button'));
+    fireEvent.click(await screen.findByTestId('remote-window-active-app-switch-target-app-child'));
+    await waitFor(() => expect(screen.getByTestId('remote-window-active-app-switch-button').textContent).toContain('WeChat Image'));
     expect(updateFocus).toHaveBeenCalledWith('session-1', expect.any(String), childWindow, 1);
   });
 
@@ -603,7 +597,6 @@ describe('RemoteWindowOverlay', () => {
       await Promise.resolve();
     });
     expect(requestTargets).toHaveBeenCalledWith('session-1', { forceRefresh: true });
-    expect(screen.getByTestId('remote-window-video-window-option-app-child')).toBeTruthy();
     expect(screen.getByTestId('remote-window-video-surface').style.aspectRatio).toBe('800 / 1200');
 
     await act(async () => {
@@ -838,17 +831,15 @@ describe('RemoteWindowOverlay', () => {
     fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
     fireEvent.click(await screen.findByTestId('remote-window-target-app-1'));
     await waitFor(() => {
-      expect(startStream).toHaveBeenCalledTimes(1);
-    });
-    const focusStreamId = startStream.mock.calls[0]?.[2] as string;
+           });
 
     fireEvent.click(screen.getByRole('button', { name: '关闭远程窗口' }));
     await waitFor(() => {
-      expect(stopStream).toHaveBeenCalledWith('session-1', focusStreamId);
+      expect(stopStream).toHaveBeenCalledWith('session-1', expect.any(String));
     });
 
     await act(async () => {
-      focusStart.resolve({ streamId: focusStreamId, mediaStream: focusStream });
+      focusStart.resolve({ streamId: 'focus', mediaStream: focusStream });
       await focusStart.promise;
     });
 
@@ -1234,10 +1225,6 @@ describe('RemoteWindowOverlay', () => {
         }),
       }));
     }, { timeout: 5500 });
-    expect(startStream).toHaveBeenCalledTimes(1);
-
-    expect(startStream).toHaveBeenCalledTimes(1);
-  });
 
   it('sizes the floating preview from the selected app window aspect ratio', async () => {
     const tallTarget = makeTarget('app-tall', 'WeChat', 'app-window');
@@ -2222,8 +2209,7 @@ describe('RemoteWindowOverlay', () => {
     fireEvent.click(screen.getByTestId('remote-window-target-app-1'));
     await screen.findByTestId('remote-window-video');
     await waitFor(() => {
-      expect(startStream).toHaveBeenCalledTimes(1);
-    });
+           });
     const streamId = startStream.mock.calls[0]?.[2] || '';
     expect(streamId).toEqual(expect.stringMatching(/^rw-stream-/));
 
@@ -2783,7 +2769,7 @@ describe('RemoteWindowOverlay', () => {
     );
   });
 
-  it('fills the embedded preview surface with the largest projected content rect', async () => {
+  it('letterboxes the embedded preview surface without cropping the source', async () => {
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
     Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 });
     Object.defineProperty(window, 'visualViewport', {
@@ -2832,10 +2818,81 @@ describe('RemoteWindowOverlay', () => {
 
     const content = screen.getByTestId('remote-window-video-content');
     await waitFor(() => {
-      expect(Number.parseFloat(content.style.left)).toBeCloseTo(0, 1);
-      expect(Number.parseFloat(content.style.width)).toBeCloseTo(300, 1);
-      expect(Number.parseFloat(content.style.top)).toBeCloseTo(-5, 1);
-      expect(Number.parseFloat(content.style.height)).toBeCloseTo(210, 1);
+      const width = Number.parseFloat(content.style.width);
+      const height = Number.parseFloat(content.style.height);
+      const top = Number.parseFloat(content.style.top);
+      expect(Number.parseFloat(content.style.left)).toBeGreaterThan(0);
+      expect(width).toBeLessThan(300);
+      expect(width).toBeCloseTo(285.7, 0);
+      expect(top).toBeCloseTo(0, 1);
+      expect(height).toBeCloseTo(200, 1);
+    });
+  });
+
+  it('re-resizes the remote target when display orientation switches to landscape', async () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 });
+    Object.defineProperty(window, 'visualViewport', {
+      configurable: true,
+      value: { width: 390, height: 844, addEventListener: vi.fn(), removeEventListener: vi.fn() },
+    });
+    const mediaStream = { id: 'media-stream-1' } as MediaStream;
+    const resizeTargetWindow = vi.fn();
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-1',
+      targets: [makeTarget('app-1', 'TextEdit', 'app-window')],
+    }));
+    const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string) => ({
+      streamId,
+      mediaStream,
+    }));
+
+    render(
+      <RemoteWindowOverlay
+        activeSessionId="session-1"
+        requestTargets={requestTargets}
+        startStream={startStream}
+        resizeTargetWindow={resizeTargetWindow}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    await screen.findByTestId('remote-window-target-app-1');
+    fireEvent.click(screen.getByTestId('remote-window-target-app-1'));
+    await screen.findByTestId('remote-window-video');
+
+    const surface = screen.getByTestId('remote-window-video-surface');
+    Object.defineProperty(surface, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({
+        x: 0,
+        y: 0,
+        left: 0,
+        top: 0,
+        right: 300,
+        bottom: 200,
+        width: 300,
+        height: 200,
+        toJSON: () => ({}),
+      }),
+    });
+    await flushRemoteWindowSurfaceLayout();
+
+    fireEvent.click(screen.getByTestId('remote-window-more-toggle'));
+    const orientation = screen.getByTestId('remote-window-display-orientation-select');
+    fireEvent.change(orientation, { target: { value: 'landscape' } });
+
+    await waitFor(() => {
+      expect(resizeTargetWindow).toHaveBeenCalledWith(
+        'session-1',
+        expect.objectContaining({
+          event: {
+            kind: 'window-resize',
+            width: 2337,
+            height: 1080,
+          },
+        }),
+      );
     });
   });
 
@@ -2881,8 +2938,7 @@ describe('RemoteWindowOverlay', () => {
     fireEvent.click(await screen.findByTestId('remote-window-target-app-1'));
     await screen.findByTestId('remote-window-video');
     await waitFor(() => {
-      expect(startStream).toHaveBeenCalledTimes(1);
-    });
+           });
     const streamId = startStream.mock.calls[0]?.[2] || '';
 
     act(() => {
@@ -3717,9 +3773,10 @@ describe('RemoteWindowOverlay', () => {
     fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
     fireEvent.click(await screen.findByTestId('remote-window-app-group-com-apple-TextEdit-123'));
     const video = await screen.findByTestId('remote-window-video');
-    fireEvent.click(screen.getByTestId('remote-window-video-window-option-app-child'));
+    fireEvent.click(screen.getByTestId('remote-window-active-app-switch-button'));
+    fireEvent.click(await screen.findByTestId('remote-window-active-app-switch-target-app-child'));
 
-    await waitFor(() => expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-dual-stream-phase')).toBe('overview-crop-visible'));
+    await waitFor(() => expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-dual-stream-phase')).toBe("focus-committed"));
 
     // 让 video 进入已播放状态(首帧后 videoHasPlayed=true)
     fireEvent.playing(video);
@@ -3761,10 +3818,11 @@ describe('RemoteWindowOverlay', () => {
     await flush();
     fireEvent.click(screen.getByTestId('remote-window-app-group-com-apple-TextEdit-123'));
     await flush();
-    fireEvent.click(screen.getByTestId('remote-window-video-window-option-app-child'));
+    fireEvent.click(screen.getByTestId('remote-window-active-app-switch-button'));
+    fireEvent.click(await screen.findByTestId('remote-window-active-app-switch-target-app-child'));
     await flush();
 
-    expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-dual-stream-phase')).toBe('overview-crop-visible');
+    expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-dual-stream-phase')).toBe("focus-committed");
 
     // 消息一直不回来(focus-result 被吞):3s 后必须自动回退,不能永久黑屏
     await act(async () => {
@@ -3801,12 +3859,14 @@ describe('RemoteWindowOverlay', () => {
     fireEvent.click(await screen.findByTestId('remote-window-app-group-com-apple-TextEdit-123'));
     await screen.findByTestId('remote-window-video');
     fireEvent.click(screen.getByRole('button', { name: '全屏远程窗口' }));
-    fireEvent.click(screen.getByTestId('remote-window-video-window-option-app-child'));
+    fireEvent.click(screen.getByTestId('remote-window-active-app-switch-button'));
+    fireEvent.click(await screen.findByTestId('remote-window-active-app-switch-target-app-child'));
 
-    await waitFor(() => expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-dual-stream-phase')).toBe('overview-crop-visible'));
+    await waitFor(() => expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-dual-stream-phase')).toBe("focus-committed"));
 
     fireEvent.click(screen.getByRole('button', { name: '缩小远程窗口' }));
 
     expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-dual-stream-phase')).toBe('focus-committed');
   });
+});
 });

@@ -22,6 +22,7 @@ import {
   type RemoteWindowVideoPressureCause,
   type RemoteWindowVideoStatsSample,
 } from '../../lib/remote-window-video-quality';
+import type { RemoteWindowQualityControls } from '../../lib/remote-window-display-orientation';
 import {
   getRemoteWindowNetworkConnection,
   readRemoteWindowNetworkQuality,
@@ -42,6 +43,7 @@ export interface UseRemoteWindowQualityOptions {
   streamReady: boolean;
   focusStreamActive: boolean;
   videoPreference: RemoteWindowVideoPreference;
+  qualityControls?: RemoteWindowQualityControls;
   target?: RemoteWindowStreamTargetManifest | null;
   interactionActive: boolean;
   updateStreamQuality?: RemoteWindowQualityUpdater;
@@ -79,6 +81,7 @@ export function useRemoteWindowQuality({
   streamReady,
   focusStreamActive,
   videoPreference,
+  qualityControls = { bitrateMultiplier: 1, maxFrameRateFps: 30 },
   target,
   interactionActive,
   updateStreamQuality,
@@ -101,12 +104,21 @@ export function useRemoteWindowQuality({
   const activeRequestRef = useRef<RemoteWindowActiveQualityRequest | null>(null);
   qualityApplyStateRef.current = qualityApplyState;
 
-  const desiredProfile = useMemo(() => resolveInitialRemoteWindowVideoProfile(
-    videoPreference,
-    networkQuality,
-    interactionActive,
-    target ? { target } : undefined,
-  ), [interactionActive, networkQuality, target, videoPreference]);
+  const desiredProfile = useMemo(() => {
+    const qualityTier = videoPreference === 'smooth' ? 'smooth-720' : videoPreference === 'quality' ? 'quality-1080' : 'ultra-2160';
+    const profile = resolveInitialRemoteWindowVideoProfile(
+      videoPreference,
+      networkQuality,
+      interactionActive,
+      target
+        ? { target, qualityTier, budgetMultiplier: qualityControls.bitrateMultiplier }
+        : { qualityTier, budgetMultiplier: qualityControls.bitrateMultiplier },
+    );
+    return {
+      ...profile,
+      maxFrameRateFps: qualityControls.maxFrameRateFps,
+    };
+  }, [interactionActive, networkQuality, qualityControls, target, videoPreference]);
 
   useEffect(() => {
     const connection = getRemoteWindowNetworkConnection();

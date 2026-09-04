@@ -9,6 +9,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type WheelEvent as ReactWheelEvent,
+  type ReactNode,
 } from 'react';
 import { App as CapacitorApp } from '@capacitor/app';
 import { useIndependentFloatingEntryPosition, useSharedDraggableDrag, SHARED_DRAG_SUPPRESS_CLICK_MS } from './draggable-bubble-shared';
@@ -39,7 +40,6 @@ import {
 } from '../../lib/remote-window-dual-stream-runtime';
 import {
   applyRemoteWindowInputResultTarget,
-  attachSameAppCompositeWindows,
   attachRemoteWindowStreamReceiver,
   beginRemoteWindowStreamHandoff,
   beginRemoteWindowStreamSetup,
@@ -63,6 +63,17 @@ import {
   type RemoteWindowVideoStatsSample,
 } from '../../lib/remote-window-video-quality';
 import {
+  readRemoteWindowDisplayOrientation,
+  readRemoteWindowQualityControls,
+  resolveRemoteWindowContainerViewport,
+  writeRemoteWindowDisplayOrientation,
+  writeRemoteWindowQualityControls,
+  type RemoteWindowDisplayOrientation,
+  type RemoteWindowQualityControls,
+  type RemoteWindowQualityMaxFrameRate,
+  type RemoteWindowVideoBudgetMultiplier,
+} from '../../lib/remote-window-display-orientation';
+import {
   buildRemoteWindowClickInputEventRuntime,
   createRemoteWindowTouchPointerState,
   dispatchRemoteWindowTouchInputActionsRuntime,
@@ -82,7 +93,6 @@ import {
   type RemoteWindowTouchPointerState,
   type RemoteWindowTouchSurfaceGeometry,
 } from '../../lib/remote-window-touch-action-runtime';
-import { WindowGroupLayout } from './WindowGroupLayout';
 import {
   FLOATING_ENTRY_TOP_MARGIN_PX,
   FLOATING_ENTRY_VIEWPORT_MARGIN_PX,
@@ -136,8 +146,6 @@ import {
   pointerSampleFromReactEvent,
   toOverlayTouchGesture,
   toRemoteWindowTouchGestureState,
-  getRemoteWindowAppGroupId,
-  buildRemoteWindowAppTargetGroups,
   isRemoteWindowChromeTarget,
   releasePointerCaptureSafely,
   setPointerCaptureSafely,
@@ -275,6 +283,26 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   const [floatingOffset, setFloatingOffsetState] = useState<FloatingOverlayOffset>({ x: 0, y: 0 });
   const [floatingOverlayWidthPx, setFloatingOverlayWidthPxState] = useState<number | null>(null);
   const [videoPreference, setVideoPreference] = useState<RemoteWindowVideoPreference>('smooth');
+  const [displayOrientation, setDisplayOrientationState] = useState<RemoteWindowDisplayOrientation>(() => readRemoteWindowDisplayOrientation());
+  const displayOrientationRef = useRef(displayOrientation);
+  useEffect(() => {
+    displayOrientationRef.current = displayOrientation;
+  }, [displayOrientation]);
+  const [qualityControls, setQualityControls] = useState<RemoteWindowQualityControls>(() => readRemoteWindowQualityControls());
+  const setQualityBitrateMultiplier = useCallback((bitrateMultiplier: RemoteWindowVideoBudgetMultiplier) => {
+    setQualityControls((current) => {
+      const next = { ...current, bitrateMultiplier };
+      writeRemoteWindowQualityControls(next);
+      return next;
+    });
+  }, []);
+  const setQualityMaxFrameRate = useCallback((maxFrameRateFps: RemoteWindowQualityMaxFrameRate) => {
+    setQualityControls((current) => {
+      const next = { ...current, maxFrameRateFps };
+      writeRemoteWindowQualityControls(next);
+      return next;
+    });
+  }, []);
   const [qualityInteractionActive, setQualityInteractionActive] = useState(false);
   const qualityInteractionTimerRef = useRef<number | null>(null);
   const markQualityInteractionActive = useCallback(() => {
@@ -520,6 +548,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     streamReady: state.phase === 'targetLocked' && Boolean(state.streamStarted),
     focusStreamActive: Boolean(qualityStreamId && activeFocusStreamIdRef.current === qualityStreamId),
     videoPreference,
+    qualityControls,
     target: state.phase === 'targetLocked' ? state.target : null,
     interactionActive: qualityInteractionActive,
     updateStreamQuality,
@@ -564,18 +593,9 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     : '';
   const currentLockedStreamId = state.phase === 'targetLocked' ? state.streamId || null : null;
   const currentLockedTarget = state.phase === 'targetLocked' ? state.target : null;
-  const lockedAppWindowGroup = useMemo(() => {
-    if (state.phase !== 'targetLocked') {
-      return null;
-    }
-    const groupId = getRemoteWindowAppGroupId(state.target);
-    if (!groupId) {
-      return null;
-    }
-    const group = buildRemoteWindowAppTargetGroups(state.targets)
-      .find((item) => item.groupId === groupId) || null;
-    return group && group.targets.length > 1 ? group : null;
-  }, [state]);
+  // 单窗口锁定：不再在视频表面里自动画兄弟窗口缩略条。兄弟窗口只能通过
+  // 锁定工具栏的“切换窗口”弹层显式选中，避免把用户已选窗口错误替换为
+  // composite canvas 视图（导致预览里出现侧边缩略条 + 主体黑区）。
   const sendRemoteWindowInputEventsForTarget = useCallback((
     input: {
       sessionId: string | null;
@@ -642,12 +662,10 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     floatingOffsetRef.current = next;
     setFloatingOffsetState(next);
   }, []);
-
   const setFloatingOverlayWidthPx = useCallback((next: number | null) => {
     floatingOverlayWidthPxRef.current = next;
     setFloatingOverlayWidthPxState(next);
   }, []);
-
   const setEntryOffset = useCallback((next: FloatingEntryPosition) => {
     entryOffsetRef.current = next;
     setEntryOffsetState(next);
@@ -656,7 +674,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
 
   const browserEntry = useIndependentFloatingEntryPosition(readStoredBrowserEntryPosition(), writeStoredBrowserEntryPosition, () => { suppressBrowserEntryClickRef.current = true; }, () => { suppressBrowserEntryClickRef.current = true; window.setTimeout(() => { suppressBrowserEntryClickRef.current = false; }, SHARED_DRAG_SUPPRESS_CLICK_MS); });
   const browserEntryOffset = browserEntry.position, browserEntryButtonRef = browserEntry.buttonRef, browserEntryDragHandlers = browserEntry.handlers;
-
   // 浮层手柄拖拽：与文件 bubble / 浮钮同一套共享拖拽逻辑（pointer+touch 双套）
   const floatingDragInitialRef = useRef<{ left: number; top: number } | null>(null);
   const floatingDragHandlers = useSharedDraggableDrag({
@@ -693,7 +710,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     onDragActive: () => {},
     onDragFinished: () => {},
   });
-
   // 浮钮拖拽：同一套共享逻辑
   const entryDragHandlers = useSharedDraggableDrag({
     getRect: () => {
@@ -737,7 +753,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       }, SHARED_DRAG_SUPPRESS_CLICK_MS);
     },
   });
-
   // 与文件 bubble 一致：viewport 变化时纠正浮钮位置，避免拖动后的固定 left/top 越界
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -781,7 +796,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       window.removeEventListener('orientationchange', rescueEntryPosition);
     };
   }, [setEntryOffset]);
-
   const resolveFloatingOverlayResizeBounds = useCallback((
     rect: { left: number; right: number; bottom: number; width: number },
     source: { width: number; height: number },
@@ -819,7 +833,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       maxWidth,
     };
   }, [bottomInsetPx]);
-
   const clampFloatingOverlayOffsetToViewport = useCallback(() => {
     const overlay = floatingOverlayRef.current;
     if (!overlay) {
@@ -1009,7 +1022,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   ) => {
     if (
       state.phase !== 'targetLocked'
-      || (!embedded && state.mode !== 'fullscreen')
       || !activeSessionId
       || !currentLockedStreamId
       || !currentLockedTarget
@@ -1017,13 +1029,22 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     ) {
       return false;
     }
-    const viewport = typeof window !== 'undefined' && window.innerWidth > 0 && window.innerHeight > 0
-      ? { width: window.innerWidth, height: window.innerHeight }
-      : surfaceSize;
+    if (currentLockedTarget.videoTarget.kind !== 'app-window') {
+      return false;
+    }
+    const deviceWidth = typeof window !== 'undefined' ? Math.max(1, window.innerWidth || 0) : 1;
+    const deviceHeight = typeof window !== 'undefined' ? Math.max(1, window.innerHeight || 0) : 1;
+    const visual = typeof window !== 'undefined' && window.visualViewport
+      ? { width: Math.max(1, window.visualViewport.width), height: Math.max(1, window.visualViewport.height) }
+      : null;
+    const viewport = resolveRemoteWindowContainerViewport(displayOrientationRef.current, { width: deviceWidth, height: deviceHeight }, visual);
     if (!viewport) {
       return false;
     }
-    const reference = resolveRemoteWindowTargetResizeSize({ viewport });
+    const reference = resolveRemoteWindowTargetResizeSize({
+      viewport,
+      orientation: displayOrientationRef.current,
+    });
     const width = reference.width;
     const height = reference.height;
     const last = lastRemoteFillResizeRef.current;
@@ -1051,13 +1072,26 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       },
     });
     return true;
-  }, [activeSessionId, currentLockedStreamId, currentLockedTarget, embedded, resizeTargetWindow, state, surfaceSize]);
+  }, [activeSessionId, currentLockedStreamId, currentLockedTarget, embedded, resizeTargetWindow, state]);
+  const setDisplayOrientation = useCallback((orientation: RemoteWindowDisplayOrientation) => {
+    displayOrientationRef.current = orientation;
+    setDisplayOrientationState(orientation);
+    writeRemoteWindowDisplayOrientation(orientation);
+    requestRemoteTargetFillResize(true);
+  }, [requestRemoteTargetFillResize]);
   const handleFullscreen = useCallback(() => {
     publishRemoteWindowInputContext();
     resetFullscreenViewport();
     setState((current) => enterRemoteWindowFullscreen(current));
   }, [publishRemoteWindowInputContext, resetFullscreenViewport]);
-  const embeddedFullscreenRef = useRef(false); useEffect(() => { const entered = embeddedFullscreen && !embeddedFullscreenRef.current; embeddedFullscreenRef.current = embeddedFullscreen; if (entered && state.phase === 'targetLocked' && state.mode === 'floating') handleFullscreen(); }, [embeddedFullscreen, handleFullscreen, state]);
+  const embeddedFullscreenRef = useRef(false);
+  useEffect(() => {
+    const entered = embeddedFullscreen && !embeddedFullscreenRef.current;
+    embeddedFullscreenRef.current = embeddedFullscreen;
+    if (entered && state.phase === 'targetLocked' && state.mode === 'floating') {
+      handleFullscreen();
+    }
+  }, [embeddedFullscreen, handleFullscreen, state]);
   useEffect(() => {
     if (state.phase !== 'targetLocked' || (!embedded && state.mode !== 'fullscreen')) {
       return;
@@ -1455,10 +1489,10 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
 
   const handleSelectTarget = useCallback((target: RemoteWindowStreamTargetManifest) => {
     const browserMode = browserPickerOpen && isRemoteWindowChromeTarget(target);
-    const catalogTargets = 'targets' in state ? state.targets : [];
-    const effectiveTarget = updateFocus
-      ? attachSameAppCompositeWindows(target, catalogTargets)
-      : target;
+    // 首次选择只锁定用户点击的 primary window。把同一进程的兄弟窗口
+    // 自动拼成 composite canvas 会改变 source aspect，并在预览里产生
+    // 侧边缩略条/主体黑区；兄弟窗口只能通过显式窗口切换进入。
+    const effectiveTarget = target;
     const streamRequestEpoch = ++streamRequestEpochRef.current;
     invalidatePlayback();
     const previousStreamId = state.phase === 'targetLocked' && state.streamStarted ? state.streamId || null : null;
@@ -1499,7 +1533,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       });
       return;
     }
-
     const targetSessionId = activeSessionId?.trim() || '';
     const requestSuffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const focusStreamId = `rw-stream-focus-${requestSuffix}`;
@@ -1737,9 +1770,9 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       ? fullscreenViewportRef.current
       : initialFullscreenViewport;
     // 预览与全屏统一按“面积最大化”投影：填满所在表面，保留透视语义相同。
-    const displayMode = state.mode === 'fullscreen'
-      ? fullscreenDisplayModeRef.current
-      : 'fill';
+    // 本地永远 letterbox，不裁切源画面；容器比例与远端 resize 解耦后
+    // AppWindow 可 resize 时目标比例与容器一致，fit == fill。
+    const displayMode = 'fit';
     const { content } = resolveZoomedContentRect(
       { width: surfaceRect.width, height: surfaceRect.height },
       displaySourceSize,
@@ -2572,9 +2605,9 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
 	    );
 	    const viewport = state.mode === 'fullscreen' ? fullscreenViewport : initialFullscreenViewport;
 	    // 预览抽屉同样按面积最大化填满，避免远端窗口在预览容器里被压缩到很小。
-	    const displayMode = state.mode === 'fullscreen'
-	      ? fullscreenDisplayMode
-	      : 'fill';
+	    // 本地投影固定 fit/contain；remote window resize 负责把可 resize 目标
+	    // 缩放到与容器一致的比例。
+	    const displayMode = 'fit';
 	    return resolveZoomedContentRect(surfaceSize, displaySourceSize, viewport, displayMode);
 	  }, [compositeLayout, focusedWindowSlot, fullscreenDisplayMode, fullscreenViewport, receiverFrameSize, state, surfaceSize]);
 
@@ -2881,66 +2914,9 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       ) : null}
     </div>
   ) : null;
-  const lockedVideoGroupContent = state.phase === 'targetLocked' && lockedVideoSurfaceNode ? (() => {
-    if (!lockedAppWindowGroup) {
-      return lockedVideoSurfaceNode;
-    }
-    const items = lockedAppWindowGroup.targets.map((target) => {
-      const active = target.streamTargetId === state.target.streamTargetId;
-      const title = target.videoTarget.title || target.videoTarget.windowId || target.streamTargetId;
-      return {
-        id: target.streamTargetId,
-        testId: `remote-window-video-window-option-${target.streamTargetId}`,
-        roleLabel: `切换远程窗口 ${title}`,
-        onPress: active ? undefined : () => {
-          switchRemoteWindowFocus({
-            target,
-            targetId: target.streamTargetId,
-            windowId: target.videoTarget.windowId,
-          });
-        },
-        node: active ? lockedVideoSurfaceNode : (() => {
-          return (
-            <div
-              data-remote-window-child-tile="true"
-              style={styles.videoWindowGroupTile}
-            >
-              <div style={styles.videoWindowGroupThumb}>
-                <canvas
-                  ref={(node) => {
-                    compositeThumbCanvasRefs.current.set(target.streamTargetId, node);
-                  }}
-                  data-testid={`remote-window-video-window-thumbnail-${target.streamTargetId}`}
-                  width={160}
-                  height={120}
-                  style={styles.videoWindowGroupThumbImage}
-                />
-              </div>
-            </div>
-          );
-        })(),
-      };
-    });
-    const groupStyle = state.mode === 'fullscreen'
-      ? styles.videoWindowGroupFullscreen
-      : {
-          ...styles.videoWindowGroupFloating,
-          ...(floatingVideoHeightPx ? { height: `${floatingVideoHeightPx}px` } : {}),
-        };
-    return (
-      <WindowGroupLayout
-        items={items}
-        landscape={false}
-        primaryItemId={state.target.streamTargetId}
-        secondaryPlacement="before"
-        secondaryWrap="nowrap"
-        secondaryItemFlex="0 0 min(30%, 160px)"
-        secondaryOverflowX="auto"
-        testId="remote-window-video-window-switcher"
-        style={groupStyle}
-      />
-    );
-  })() : null;
+  // 单窗口锁定：lockedAppWindowGroup 始终为 null，兄弟窗口切换只能走
+  // RemoteWindowAppSwitch 弹层，不在视频表面里画缩略条，避免错误覆盖主画面。
+  const lockedVideoGroupContent: ReactNode = state.phase === 'targetLocked' ? lockedVideoSurfaceNode : null;
   const lockedAppSwitchContent = state.phase === 'targetLocked' ? (
     <RemoteWindowAppSwitch
       targets={lockedSwitchTargets}
@@ -2950,11 +2926,16 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       onDismiss={() => setAppSwitchOpen(false)}
     />
   ) : null;
-
   const lockedMoreContent = state.phase === 'targetLocked' ? (
     <RemoteWindowMorePanel
       fullscreen={state.mode === 'fullscreen'}
       videoPreference={videoPreference}
+      displayOrientation={displayOrientation}
+      onDisplayOrientationChange={setDisplayOrientation}
+      bitrateMultiplier={qualityControls.bitrateMultiplier}
+      onBitrateMultiplierChange={setQualityBitrateMultiplier}
+      maxFrameRateFps={qualityControls.maxFrameRateFps}
+      onMaxFrameRateChange={setQualityMaxFrameRate}
       streamStatusText={`串流：${state.streamStatus === 'streaming' ? '已连接' : state.streamStatus} · ${activeProfile.maxBitrateBps / 1_000_000} Mbps / ${activeProfile.maxFrameRateFps} FPS${qualityApplyState.phase === 'requested' ? ' · 正在应用' : qualityApplyState.phase === 'rejected' ? ` · 失败：${qualityApplyState.message}` : ''}`}
       networkStatusText={`压力：${adaptiveCause === 'none' ? '无' : adaptiveCause} · 网络：${networkQuality?.effectiveType || '未知'}${networkQuality?.rttMs ? ` · RTT ${networkQuality.rttMs}ms` : ''}`}
       browserMode={state.phase === 'targetLocked' && isRemoteWindowChromeTarget(state.target)}

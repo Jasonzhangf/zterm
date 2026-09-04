@@ -120,7 +120,8 @@
         "src/components/terminal/attachment-drawer-helpers.ts",
         "src/components/terminal/terminal-copy-gesture.ts",
         "src/lib/terminal-mouse-wheel-sgr.ts",
-        "src/lib/terminal-viewport-metrics.ts"
+        "src/lib/terminal-viewport-metrics.ts",
+        "src/lib/remote-window-display-orientation.ts"
       ]
     },
     {
