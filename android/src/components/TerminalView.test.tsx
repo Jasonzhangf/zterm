@@ -1763,7 +1763,7 @@ describe('TerminalView two-finger wheel -> SGR adapter (renderer projection boun
     expect(onInput).not.toHaveBeenCalled();
   });
 
-  it('locks a two-finger gesture before motion can be emitted as both scroll and pinch', async () => {
+  it('locks significant two-finger center movement as scroll', async () => {
     const onInput = vi.fn();
     const { container } = render(
       <div style={{ width: '200px', height: '408px' }}>
@@ -1779,6 +1779,7 @@ describe('TerminalView two-finger wheel -> SGR adapter (renderer projection boun
       </div>,
     );
     const host = container.querySelector('.wterm') as HTMLElement;
+    const scaleLayer = container.querySelector('.term-render-scale-layer') as HTMLElement;
     act(() => {
       ResizeObserverMock.triggerAll();
     });
@@ -1795,9 +1796,8 @@ describe('TerminalView two-finger wheel -> SGR adapter (renderer projection boun
         changedTouches: [],
       });
     });
-    // The midpoint crosses the old wheel notch threshold while the span only
-    // drifts modestly; the gesture must remain undecided until the first
-    // gesture class is actually established.
+    // The midpoint moves significantly. This is scroll even though the span
+    // also drifts enough to have triggered the old pinch path.
     act(() => {
       fireEvent.touchMove(host, {
         touches: [
@@ -1807,7 +1807,10 @@ describe('TerminalView two-finger wheel -> SGR adapter (renderer projection boun
         changedTouches: [],
       });
     });
-    // Pinch is selected on the next move; no earlier wheel may have escaped.
+    const inputCountAfterLock = onInput.mock.calls.length;
+    expect(inputCountAfterLock).toBeGreaterThan(0);
+
+    // Once scroll is selected, later span changes must not switch to pinch.
     act(() => {
       fireEvent.touchMove(host, {
         touches: [
@@ -1821,7 +1824,8 @@ describe('TerminalView two-finger wheel -> SGR adapter (renderer projection boun
       fireEvent.touchEnd(host, { changedTouches: [{ identifier: 1 }, { identifier: 2 }] });
     });
 
-    expect(onInput).not.toHaveBeenCalled();
+    expect(scaleLayer.style.zoom).toBe('1');
+    expect(onInput.mock.calls.length).toBeGreaterThan(inputCountAfterLock);
   });
 
   it('keeps a scroll-locked two-finger gesture from becoming pinch later', async () => {
