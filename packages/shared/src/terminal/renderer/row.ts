@@ -46,6 +46,16 @@ export interface TerminalViewportDemandWithRepair extends TerminalViewportDemand
   missingRanges?: TerminalGapRange[];
 }
 
+export interface TerminalDynamicGeometry {
+  visualRowHeightPx: number;
+  scrollRowHeightPx: number;
+  viewportRows: number;
+  frame: TerminalRenderFrame;
+  renderRows: TerminalRenderRowModel[];
+  termGridPaddingTopPx: number;
+  termGridPaddingBottomPx: number;
+}
+
 export function isTerminalGapIndex(gapRanges: TerminalGapRange[], absoluteIndex: number) {
   return gapRanges.some((range) => absoluteIndex >= range.startIndex && absoluteIndex < range.endIndex);
 }
@@ -247,6 +257,114 @@ export function buildTerminalGridPadding(options: {
   };
 }
 
+export function resolveTerminalVisualRowHeightPx(
+  physicalRowHeightPx: number,
+  visualScale: number,
+) {
+  const safeScale = Number.isFinite(visualScale) ? Math.max(0.001, visualScale) : 1;
+  return Math.max(1, physicalRowHeightPx * safeScale);
+}
+
+export function resolveTerminalZoomViewportRows(options: {
+  visualRowHeightPx: number;
+  clientHeightPx: number;
+  minViewportRows: number;
+}) {
+  if (!Number.isFinite(options.clientHeightPx) || options.clientHeightPx <= 0) {
+    return options.minViewportRows;
+  }
+  return Math.max(
+    options.minViewportRows,
+    Math.ceil(options.clientHeightPx / Math.max(1, options.visualRowHeightPx)),
+  );
+}
+
+export function resolveTerminalDynamicViewportRows(options: {
+  physicalRowHeightPx: number;
+  visualScale: number;
+  clientHeightPx: number;
+  measuredViewportRows: number;
+  minViewportRows?: number;
+}) {
+  const minViewportRows = Math.max(1, options.minViewportRows ?? 1);
+  if (Math.abs(options.visualScale - 1) > 0.001) {
+    const visualRowHeightPx = resolveTerminalVisualRowHeightPx(
+      options.physicalRowHeightPx,
+      options.visualScale,
+    );
+    return resolveTerminalZoomViewportRows({
+      visualRowHeightPx,
+      clientHeightPx: options.clientHeightPx,
+      minViewportRows,
+    });
+  }
+  return Math.max(1, Math.floor(options.measuredViewportRows || minViewportRows));
+}
+
+export function buildTerminalDynamicGeometry(options: {
+  bufferStartIndex: number;
+  effectiveBufferEndIndex: number;
+  bufferLines: TerminalCell[][];
+  gapRanges?: TerminalGapRange[];
+  physicalRowHeightPx: number;
+  visualScale: number;
+  clientHeightPx: number;
+  measuredViewportRows: number;
+  minViewportRows?: number;
+  renderBottomIndex: number;
+  followDemandAnchorEndIndex: number;
+  readingMode: boolean;
+  overscanRows: number;
+}): TerminalDynamicGeometry {
+  const visualRowHeightPx = resolveTerminalVisualRowHeightPx(
+    options.physicalRowHeightPx,
+    options.visualScale,
+  );
+  const viewportRows = resolveTerminalDynamicViewportRows({
+    physicalRowHeightPx: options.physicalRowHeightPx,
+    visualScale: options.visualScale,
+    clientHeightPx: options.clientHeightPx,
+    measuredViewportRows: options.measuredViewportRows,
+    minViewportRows: options.minViewportRows,
+  });
+  const scrollRowHeightPx = visualRowHeightPx;
+  const frame = buildTerminalRenderFrame({
+    bufferStartIndex: options.bufferStartIndex,
+    effectiveBufferEndIndex: options.effectiveBufferEndIndex,
+    bufferLinesLength: options.bufferLines.length,
+    viewportRows,
+    rowHeightPx: options.physicalRowHeightPx,
+    scrollRowHeightPx,
+    viewportClientHeightPx: options.clientHeightPx,
+    renderBottomIndex: options.renderBottomIndex,
+    followDemandAnchorEndIndex: options.followDemandAnchorEndIndex,
+    readingMode: options.readingMode,
+    overscanRows: options.overscanRows,
+  });
+  const renderRows = buildTerminalRenderRows({
+    bufferLines: options.bufferLines,
+    gapRanges: options.gapRanges,
+    startIndex: options.bufferStartIndex,
+    leadingBlankRows: frame.leadingBlankRows,
+    renderStartOffset: frame.renderStartOffset,
+    renderEndOffset: frame.renderEndOffset,
+  });
+  const padding = buildTerminalGridPadding({
+    renderRows,
+    rowHeightPx: options.physicalRowHeightPx,
+    totalRows: frame.totalRows,
+  });
+  return {
+    visualRowHeightPx,
+    scrollRowHeightPx,
+    viewportRows,
+    frame,
+    renderRows,
+    termGridPaddingTopPx: padding.termGridPaddingTopPx,
+    termGridPaddingBottomPx: padding.termGridPaddingBottomPx,
+  };
+}
+
 export function buildTerminalRenderGeometryRevision(options: {
   revision: number;
   startIndex: number;
@@ -254,6 +372,8 @@ export function buildTerminalRenderGeometryRevision(options: {
   followVisualBottomIndex: number;
   viewportRows: number;
   rowHeightPx: number;
+  scrollRowHeightPx?: number;
+  clientHeightPx?: number;
   renderRowsLength: number;
   termGridPaddingTopPx: number;
   termGridPaddingBottomPx: number;
@@ -265,6 +385,8 @@ export function buildTerminalRenderGeometryRevision(options: {
     options.followVisualBottomIndex,
     options.viewportRows,
     options.rowHeightPx,
+    options.scrollRowHeightPx ?? options.rowHeightPx,
+    Number.isFinite(options.clientHeightPx) ? options.clientHeightPx : 0,
     options.renderRowsLength,
     options.termGridPaddingTopPx,
     options.termGridPaddingBottomPx,

@@ -20,13 +20,13 @@ import {
   OVERSCAN_ROWS,
   TERMINAL_FONT_STACK,
   measureTerminalViewport,
-  buildTerminalRenderRows,
-  buildTerminalRenderFrame,
-  buildTerminalGridPadding,
+  buildTerminalDynamicGeometry,
   buildTerminalRenderGeometryRevision,
   buildTerminalViewportDemandWithRepair,
   buildTerminalViewportDemandKey,
   alignTerminalRenderBottomToFollow,
+  resolveTerminalDynamicViewportRows,
+  resolveTerminalVisualRowHeightPx,
   resolveTerminalFollowAnchorEndIndex,
   computeFollowRealignAfterBufferShift,
   computeTerminalReadingRealignAfterBufferShift,
@@ -401,25 +401,22 @@ function TerminalViewComponent({
 
   // mirror-fixed pinch 只缩放 canvas：viewportRows 必须按视觉行高同步扩大，
   // 但 DOM 行高与 grid padding 保持物理值，避免 canvas 被二次缩放后滚到底黑屏。
-  const layoutRowHeightPx = Math.max(
-    1,
-    rowHeightPx * (widthMode === "mirror-fixed" ? mirrorFixedVisualScale : 1),
+  const visualScale = widthMode === "mirror-fixed" ? mirrorFixedVisualScale : 1;
+  const clientHeightPx = Math.max(
+    0,
+    viewportClientHeightPx || containerRef.current?.clientHeight || 0,
   );
-  // Scroll coordinates are host pixels produced by CSS zoom, so row -> pixel
-  // mapping must use the visual scaled row height. Grid padding stays physical
-  // because it is already inside the scaled layer.
-  const scrollRowHeightPx = widthMode === "mirror-fixed" && Math.abs(mirrorFixedVisualScale - 1) > 0.001
-    ? layoutRowHeightPx
-    : rowHeightPx;
-  const viewportRows = widthMode === "mirror-fixed" && Math.abs(mirrorFixedVisualScale - 1) > 0.001
-    ? Math.max(
-        DEFAULT_ROWS,
-        Math.ceil(
-          Math.max(0, viewportClientHeightPx || containerRef.current?.clientHeight || 0)
-          / layoutRowHeightPx,
-        ),
-      )
-    : measuredViewportRows;
+  const viewportRows = resolveTerminalDynamicViewportRows({
+    physicalRowHeightPx: rowHeightPx,
+    visualScale,
+    clientHeightPx,
+    measuredViewportRows,
+    minViewportRows: DEFAULT_ROWS,
+  });
+  const layoutRowHeightPx = resolveTerminalVisualRowHeightPx(
+    rowHeightPx,
+    visualScale,
+  );
   layoutRowHeightPxRef.current = layoutRowHeightPx;
 
   const followDemandAnchorEndIndex = resolveTerminalFollowAnchorEndIndex({
@@ -431,17 +428,18 @@ function TerminalViewComponent({
     cursorVisible: renderBuffer.cursor?.visible,
     viewportRows,
   });
-  const renderFrame = useMemo(
+  const dynamicGeometry = useMemo(
     () =>
-      buildTerminalRenderFrame({
+      buildTerminalDynamicGeometry({
         bufferStartIndex: renderBuffer.startIndex,
         effectiveBufferEndIndex,
-        bufferLinesLength: bufferLines.length,
-        viewportRows,
-        rowHeightPx,
-        scrollRowHeightPx,
-        viewportClientHeightPx:
-          viewportClientHeightPx || containerRef.current?.clientHeight || undefined,
+        bufferLines,
+        gapRanges: renderBuffer.gapRanges,
+        physicalRowHeightPx: rowHeightPx,
+        visualScale,
+        clientHeightPx,
+        measuredViewportRows,
+        minViewportRows: DEFAULT_ROWS,
         // Secondary previews are passive tail projections. Their visible window
         // must follow the latest buffer revision without starting interactive
         // scroll/follow state or a per-tile viewport demand loop.
@@ -453,19 +451,29 @@ function TerminalViewComponent({
         overscanRows: OVERSCAN_ROWS,
       }),
     [
+      bufferLines,
       bufferLines.length,
+      clientHeightPx,
       effectiveBufferEndIndex,
       followDemandAnchorEndIndex,
+      measuredViewportRows,
       passivePreviewProjection,
       readingMode,
-      renderBottomIndex,
+      renderBuffer.gapRanges,
+      renderBuffer.revision,
       renderBuffer.startIndex,
+      renderBottomIndex,
       rowHeightPx,
-      scrollRowHeightPx,
-      viewportRows,
-      viewportClientHeightPx,
+      visualScale,
     ],
   );
+  const {
+    frame: renderFrame,
+    renderRows,
+    scrollRowHeightPx,
+    termGridPaddingTopPx,
+    termGridPaddingBottomPx,
+  } = dynamicGeometry;
   const {
     dataRowCount,
     minimumRenderBottomIndex,
@@ -474,30 +482,9 @@ function TerminalViewComponent({
     totalRows,
     maxScrollTop,
     effectiveRenderBottomIndex,
-    leadingBlankRows,
-    renderStartOffset,
-    renderEndOffset,
   } = renderFrame;
   const latestFollowVisualBottomIndexRef = useRef(followVisualBottomIndex);
   latestFollowVisualBottomIndexRef.current = followVisualBottomIndex;
-  const renderRows = useMemo(() => {
-    return buildTerminalRenderRows({
-      bufferLines,
-      gapRanges: renderBuffer.gapRanges,
-      startIndex: renderBuffer.startIndex,
-      leadingBlankRows,
-      renderStartOffset,
-      renderEndOffset,
-    });
-  }, [
-    bufferLines,
-    leadingBlankRows,
-    renderEndOffset,
-    renderStartOffset,
-    renderBuffer.gapRanges,
-    renderBuffer.revision,
-    renderBuffer.startIndex,
-  ]);
   const renderRowsWithSignatures = useMemo(
     () => renderRows.map((renderRow) => ({
       ...renderRow,
@@ -622,15 +609,6 @@ function TerminalViewComponent({
     event.preventDefault();
     event.stopPropagation();
   }, [copyModeActive]);
-  const { termGridPaddingTopPx, termGridPaddingBottomPx } = useMemo(
-    () =>
-      buildTerminalGridPadding({
-        renderRows,
-        rowHeightPx,
-        totalRows,
-      }),
-    [renderRows, rowHeightPx, totalRows],
-  );
   const renderGeometryRevision = useMemo(
     () =>
       buildTerminalRenderGeometryRevision({
@@ -640,6 +618,8 @@ function TerminalViewComponent({
         followVisualBottomIndex,
         viewportRows,
         rowHeightPx,
+        scrollRowHeightPx,
+        clientHeightPx,
         renderRowsLength: renderRows.length,
         termGridPaddingTopPx,
         termGridPaddingBottomPx,
@@ -651,6 +631,8 @@ function TerminalViewComponent({
       renderBuffer.startIndex,
       renderRows.length,
       rowHeightPx,
+      scrollRowHeightPx,
+      clientHeightPx,
       termGridPaddingBottomPx,
       termGridPaddingTopPx,
       viewportRows,
@@ -1926,10 +1908,11 @@ function TerminalViewComponent({
           onContextMenu={suppressNativeCopyMenu}
           style={{
             // CSS zoom scales the whole grid, while the scroll host keeps its
-            // native scrollTop. Keep virtual blank rows in that same space so
-            // the latest rows remain aligned with the viewport at fixed width.
-            paddingTop: `${termGridPaddingTopPx / Math.max(1, mirrorFixedVisualScale)}px`,
-            paddingBottom: `${termGridPaddingBottomPx / Math.max(1, mirrorFixedVisualScale)}px`,
+            // native scrollTop. Virtual blank rows live inside the zoom layer,
+            // so padding stays physical and gets scaled by zoom together with
+            // the rows; dividing it back here made history land in blank px.
+            paddingTop: `${termGridPaddingTopPx}px`,
+            paddingBottom: `${termGridPaddingBottomPx}px`,
             minWidth:
               widthMode === "mirror-fixed"
                 ? `${Math.max(

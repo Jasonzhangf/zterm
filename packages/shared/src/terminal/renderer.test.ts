@@ -3,6 +3,7 @@ import { getTerminalThemePreset } from './theme';
 import {
   alignTerminalRenderBottomToFollow,
   buildTerminalRenderFrame,
+  buildTerminalDynamicGeometry,
   buildTerminalMeasuredViewportState,
   buildTerminalRenderRows,
   buildTerminalViewportDemand,
@@ -120,6 +121,33 @@ describe('shared terminal renderer pure helpers', () => {
       rowHeightPx: 34,
       maxScrollTop: frame.maxScrollTop,
     })).toBe((36 - 12) * 34);
+  });
+
+  it('binds zoomed render height, scroll range, and virtual padding to one geometry result', () => {
+    const geometry = buildTerminalDynamicGeometry({
+      bufferStartIndex: 0,
+      effectiveBufferEndIndex: 120,
+      bufferLines: Array.from({ length: 120 }, () => []),
+      gapRanges: [],
+      physicalRowHeightPx: 17,
+      visualScale: 2,
+      clientHeightPx: 408,
+      measuredViewportRows: 24,
+      minViewportRows: 24,
+      renderBottomIndex: 80,
+      followDemandAnchorEndIndex: 120,
+      readingMode: true,
+      overscanRows: 0,
+    });
+
+    expect(geometry.visualRowHeightPx).toBe(34);
+    expect(geometry.scrollRowHeightPx).toBe(34);
+    expect(geometry.viewportRows).toBe(24);
+    expect(geometry.frame.maxScrollTop).toBe(120 * 34 - 408);
+
+    const firstRenderedOffset = geometry.renderRows[0]?.viewportOffset ?? 0;
+    expect(geometry.termGridPaddingTopPx).toBe(firstRenderedOffset * 17);
+    expect(geometry.termGridPaddingTopPx * 2).toBe(firstRenderedOffset * 34);
   });
 
   it('anchors follow to the visible cursor when the buffer tail is a blank lower pane', () => {
