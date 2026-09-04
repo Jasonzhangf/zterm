@@ -56,7 +56,7 @@ describe('server daemon runtime truth gates', () => {
   it('keeps daemon service helper implementations inside dedicated runtime', () => {
     const source = readDaemonRuntimeSource();
     const authBlock = extractBlock(source, 'function extractAuthToken(');
-    const heartbeatBlock = extractBlock(source, 'function startHeartbeatLoop(');
+    const heartbeatBlock = extractBlock(source, 'function startHeartbeatLoop(', 3000);
     const shutdownBlock = extractBlock(source, 'function shutdownDaemon(', 3200);
 
     expect(source).toContain('export function resolveTmuxBinary()');

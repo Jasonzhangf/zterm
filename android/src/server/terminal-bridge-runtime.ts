@@ -115,7 +115,12 @@ export function createTerminalBridgeRuntime(
         : Promise.all([attachPrevious, messagePrevious]).then(() => undefined);
     const next = previous
       .catch(() => undefined)
-      .then(() => deps.handleMessage(connection, rawData, isBinary))
+      .then(() => {
+        if (connection.closed) {
+          return;
+        }
+        return deps.handleMessage(connection, rawData, isBinary);
+      })
       .catch((error) => {
         console.error(
           `[${deps.logTimePrefix()}] transport ${connection.id} message handling failed: ${
@@ -156,6 +161,10 @@ export function createTerminalBridgeRuntime(
   }
 
   function detachConnectionSubscribers(connection: DaemonTransportConnection, reason: string) {
+    if (connection.closed) {
+      return;
+    }
+    connection.closed = true;
     const subscriberIds = new Set<string>();
     if (connection.boundSubscriberId) {
       subscriberIds.add(connection.boundSubscriberId);

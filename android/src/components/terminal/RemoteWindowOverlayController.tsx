@@ -130,7 +130,7 @@ import {
   resolveFloatingOverlaySizing,
   resolveStartedCaptureFrameSize,
   resolveRemoteWindowDisplaySourceSize,
-  resolveRemoteWindowFullscreenFillReferenceSize,
+  resolveRemoteWindowTargetResizeSize,
   formatTargetKind,
   isRemoteWindowInputSupported,
   pointerSampleFromReactEvent,
@@ -1009,7 +1009,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   ) => {
     if (
       state.phase !== 'targetLocked'
-      || state.mode !== 'fullscreen'
+      || (!embedded && state.mode !== 'fullscreen')
       || !activeSessionId
       || !currentLockedStreamId
       || !currentLockedTarget
@@ -1017,17 +1017,15 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     ) {
       return false;
     }
-    const reference = resolveRemoteWindowFullscreenFillReferenceSize({
-      overlay: floatingOverlayRef.current,
-      toolbar: lockedToolbarRef.current,
-      surface: videoSurfaceRef.current,
-      fallbackSurfaceSize: surfaceSize,
-    });
-    if (!reference) {
+    const viewport = typeof window !== 'undefined' && window.innerWidth > 0 && window.innerHeight > 0
+      ? { width: window.innerWidth, height: window.innerHeight }
+      : surfaceSize;
+    if (!viewport) {
       return false;
     }
-    const width = Math.max(120, Math.round(reference.width));
-    const height = Math.max(120, Math.round(reference.height));
+    const reference = resolveRemoteWindowTargetResizeSize({ viewport });
+    const width = reference.width;
+    const height = reference.height;
     const last = lastRemoteFillResizeRef.current;
     if (
       !force
@@ -1053,7 +1051,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       },
     });
     return true;
-  }, [activeSessionId, currentLockedStreamId, currentLockedTarget, resizeTargetWindow, state, surfaceSize]);
+  }, [activeSessionId, currentLockedStreamId, currentLockedTarget, embedded, resizeTargetWindow, state, surfaceSize]);
   const handleFullscreen = useCallback(() => {
     publishRemoteWindowInputContext();
     resetFullscreenViewport();
@@ -1061,14 +1059,14 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   }, [publishRemoteWindowInputContext, resetFullscreenViewport]);
   const embeddedFullscreenRef = useRef(false); useEffect(() => { const entered = embeddedFullscreen && !embeddedFullscreenRef.current; embeddedFullscreenRef.current = embeddedFullscreen; if (entered && state.phase === 'targetLocked' && state.mode === 'floating') handleFullscreen(); }, [embeddedFullscreen, handleFullscreen, state]);
   useEffect(() => {
-    if (state.phase !== 'targetLocked' || state.mode !== 'fullscreen') {
+    if (state.phase !== 'targetLocked' || (!embedded && state.mode !== 'fullscreen')) {
       return;
     }
     const frame = window.requestAnimationFrame(() => {
       requestRemoteTargetFillResize();
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [requestRemoteTargetFillResize, state]);
+  }, [embedded, requestRemoteTargetFillResize, state]);
 
   const handleRequestKeyboard = useCallback(() => {
     publishRemoteWindowInputContext();
@@ -2003,7 +2001,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     const pointers = Array.from(surfacePointersRef.current.entries());
     if (pointers.length >= 2 && event.pointerType === 'touch') {
       const currentGesture = surfaceGestureRef.current;
-      if (currentGesture && currentGesture.mode === 'localPan') {
+      if (currentGesture && (currentGesture.mode === 'localPan' || currentGesture.mode === 'pan')) {
         secondPointerPendingRef.current = {
           pointerId: event.pointerId,
           clientX: event.clientX,
@@ -2105,35 +2103,32 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       );
       if (pendingDelta >= REMOTE_WINDOW_SECOND_FINGER_UPGRADE_PX) {
         const currentGesture = surfaceGestureRef.current;
-        if (currentGesture && currentGesture.mode === 'localPan') {
-          const first = surfacePointersRef.current.get(currentGesture.pointerId);
-          if (first) {
-            const pairResult = resolveRemoteWindowTouchPairPointerDownRuntime({
-              firstPointer: {
-                pointerId: currentGesture.pointerId,
-                pointerType: 'touch',
-                clientX: first.clientX,
-                clientY: first.clientY,
-                timeMs: event.timeStamp,
-              },
-              secondPointer: {
-                pointerId: pendingSecond.pointerId,
-                pointerType: 'touch',
-                clientX: event.clientX,
-                clientY: event.clientY,
-                timeMs: event.timeStamp,
-              },
-              timeMs: event.timeStamp,
-              pinchEnabled: state.mode === 'fullscreen',
-              scrollEnabled: true,
-            });
-            surfaceGestureRef.current = pairResult.nextState;
-            surfaceLocalPanStartRef.current = null;
-            secondPointerPendingRef.current = null;
-            // Continue through the pair move path for this same sample. The
-            // first post-upgrade motion must not be discarded, otherwise a
-            // short two-finger vertical swipe produces no remote scroll.
-          }
+        if (currentGesture && (currentGesture.mode === 'localPan' || currentGesture.mode === 'pan')) {
+          const pairResult = resolveRemoteWindowTouchPairPointerDownRuntime({
+            firstPointer: {
+              pointerId: currentGesture.pointerId,
+              pointerType: 'touch',
+              clientX: currentGesture.startClientX,
+              clientY: currentGesture.startClientY,
+              timeMs: currentGesture.startAtMs,
+            },
+            secondPointer: {
+              pointerId: pendingSecond.pointerId,
+              pointerType: 'touch',
+              clientX: pendingSecond.clientX,
+              clientY: pendingSecond.clientY,
+              timeMs: pendingSecond.downTimeMs,
+            },
+            timeMs: event.timeStamp,
+            pinchEnabled: state.mode === 'fullscreen',
+            scrollEnabled: true,
+          });
+          surfaceGestureRef.current = pairResult.nextState;
+          surfaceLocalPanStartRef.current = null;
+          secondPointerPendingRef.current = null;
+          // Continue through the pair move path for this same sample. The
+          // first post-upgrade motion must not be discarded, otherwise a
+          // short two-finger vertical swipe produces no remote scroll.
         }
         secondPointerPendingRef.current = null;
       }
