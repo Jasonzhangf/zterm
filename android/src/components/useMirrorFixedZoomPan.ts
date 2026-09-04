@@ -49,6 +49,8 @@ export interface MirrorFixedZoomPan {
 
 const MAX_SCALE = 1;
 const MIN_SCALE = 0.4;
+const TWO_FINGER_SCROLL_LOCK_PX = 12;
+const TWO_FINGER_PINCH_LOCK_PX = 8;
 
 interface WheelDebugState {
   startCalls: number;
@@ -62,7 +64,9 @@ interface WheelDebugState {
 
 interface TwoFingerWheelState {
   active: boolean;
+  mode: 'undecided' | 'scroll' | 'pinch';
   pointerIds: [number, number] | null;
+  initialMidY: number;
   lastClientY: number;
   lastSpanPx: number;
   initialSpanPx: number;
@@ -85,7 +89,9 @@ interface PanGestureState {
 function createInitialWheelState(debug: WheelDebugState): TwoFingerWheelState {
   return {
     active: false,
+    mode: 'undecided',
     pointerIds: null,
+    initialMidY: 0,
     lastClientY: 0,
     lastSpanPx: 0,
     initialSpanPx: 0,
@@ -312,7 +318,9 @@ export function useMirrorFixedZoomPan(
       const midY = (t0.clientY + t1.clientY) / 2;
       wheelRef.current = {
         active: true,
+        mode: 'undecided',
         pointerIds: [t0.identifier, t1.identifier],
+        initialMidY: midY,
         lastClientY: midY,
         lastSpanPx: spanPx,
         initialSpanPx: spanPx,
@@ -328,6 +336,7 @@ export function useMirrorFixedZoomPan(
       };
       publishWheelDebug(wheelRef.current);
       event.preventDefault();
+      event.stopPropagation();
     },
     [options.copyModeActive, options.previewProjection, publishWheelDebug],
   );
@@ -339,31 +348,6 @@ export function useMirrorFixedZoomPan(
       wheel.debug.lastEventAt = Date.now();
       if (!wheel.active) {
         wheel.debug.lastReason = 'skip-inactive';
-        if (options.previewProjection) {
-          publishWheelDebug(wheel);
-          return;
-        }
-        if (options.copyModeActive) {
-          publishWheelDebug(wheel);
-          return;
-        }
-        if (
-          event.touches.length === 2 &&
-          pinchRef.current &&
-          options.widthMode === 'mirror-fixed'
-        ) {
-          const [t0, t1] = [event.touches[0], event.touches[1]];
-          const spanPx = Math.hypot(
-            t1.clientX - t0.clientX,
-            t1.clientY - t0.clientY,
-          );
-          if (spanPx > 0 && pinchRef.current.startSpan > 0) {
-            const ratio = spanPx / pinchRef.current.startSpan;
-            applyScale(computeNextPinchScale(ratio));
-            event.preventDefault();
-            event.stopPropagation();
-          }
-        }
         publishWheelDebug(wheel);
         return;
       }
@@ -379,7 +363,40 @@ export function useMirrorFixedZoomPan(
         t1.clientY - t0.clientY,
       );
       const midYDelta = midY - wheel.lastClientY;
+      const midYFromStart = midY - wheel.initialMidY;
+      const spanDeltaFromStart = Math.abs(spanPx - wheel.initialSpanPx);
       wheel.lastClientY = midY;
+
+      if (wheel.mode === 'undecided') {
+        const scrollProgress =
+          Math.abs(midYFromStart) / TWO_FINGER_SCROLL_LOCK_PX;
+        const pinchProgress = spanDeltaFromStart / TWO_FINGER_PINCH_LOCK_PX;
+        if (scrollProgress < 1 && pinchProgress < 1) {
+          wheel.debug.lastReason = 'awaiting-gesture-lock';
+          event.preventDefault();
+          event.stopPropagation();
+          publishWheelDebug(wheel);
+          return;
+        }
+        wheel.mode = pinchProgress > scrollProgress ? 'pinch' : 'scroll';
+        wheel.debug.lastReason = `locked-${wheel.mode}`;
+      }
+
+      if (wheel.mode === 'pinch') {
+        if (options.widthMode === 'mirror-fixed' && pinchRef.current) {
+          const ratio =
+            pinchRef.current.startSpan > 0
+              ? spanPx / pinchRef.current.startSpan
+              : 1;
+          applyScale(computeNextPinchScale(ratio));
+        }
+        wheel.lastSpanPx = spanPx;
+        event.preventDefault();
+        event.stopPropagation();
+        publishWheelDebug(wheel);
+        return;
+      }
+
       wheel.lastSpanPx = spanPx;
 
       const decision = decideTwoFingerWheel(
@@ -389,7 +406,7 @@ export function useMirrorFixedZoomPan(
           accumulatedDeltaPx: wheel.accumulatedDeltaPx,
           lockedDirection: wheel.lockedDirection,
         },
-        { midYDeltaPx: midYDelta, liveSpanPx: spanPx },
+        { midYDeltaPx: midYDelta, liveSpanPx: wheel.initialSpanPx },
         DEFAULT_TWO_FINGER_WHEEL_CONFIG,
       );
 
@@ -401,21 +418,6 @@ export function useMirrorFixedZoomPan(
         spanPx - wheel.lastSpanPx,
       );
 
-      if (decision.aborted) {
-        wheel.debug.abortedCount += 1;
-        wheel.debug.lastReason = 'aborted-pinch';
-        if (options.widthMode === 'mirror-fixed' && pinchRef.current) {
-          const ratio =
-            pinchRef.current.startSpan > 0
-              ? spanPx / pinchRef.current.startSpan
-              : 1;
-          applyScale(computeNextPinchScale(ratio));
-        }
-        event.preventDefault();
-        event.stopPropagation();
-        publishWheelDebug(wheel);
-        return;
-      }
       if (decision.direction === null || decision.steps < 1) {
         wheel.debug.lastReason = 'no-step';
         publishWheelDebug(wheel);
