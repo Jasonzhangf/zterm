@@ -10,6 +10,7 @@ import {
   isRemoteWindowChromeTarget,
   resolveAspectRect,
   resolveZoomedContentRect,
+  resolveRemoteWindowTargetResizeSize,
   safeRemoteWindowGroupId,
 } from './remote-window-overlay-helpers';
 import type { RemoteWindowStreamTargetManifest } from '../../lib/types';
@@ -46,6 +47,15 @@ describe('remote-window-overlay-helpers', () => {
     expect(rect.height).toBe(50);
     expect(rect.left).toBe(0);
     expect(rect.top).toBe(25);
+  });
+
+  it('resolves a unified 1080p short-edge remote window resize size', () => {
+    expect(resolveRemoteWindowTargetResizeSize({ viewport: { width: 390, height: 844 } }))
+      .toEqual({ width: 1080, height: 2337 });
+    expect(resolveRemoteWindowTargetResizeSize({ viewport: { width: 844, height: 390 }, orientation: 'landscape' }))
+      .toEqual({ width: 2337, height: 1080 });
+    expect(resolveRemoteWindowTargetResizeSize({ viewport: { width: 1080, height: 1080 }, shortEdge: 720 }))
+      .toEqual({ width: 720, height: 720 });
   });
 
   it('fills fullscreen geometry while preserving fit geometry', () => {
