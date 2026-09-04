@@ -49,7 +49,7 @@ export interface MirrorFixedZoomPan {
 
 const MAX_SCALE = 1;
 const MIN_SCALE = 0.4;
-const TWO_FINGER_SCROLL_LOCK_PX = 12;
+const TWO_FINGER_SCROLL_LOCK_PX = 8;
 const TWO_FINGER_PINCH_LOCK_PX = 8;
 
 interface WheelDebugState {
@@ -368,17 +368,20 @@ export function useMirrorFixedZoomPan(
       wheel.lastClientY = midY;
 
       if (wheel.mode === 'undecided') {
-        const scrollProgress =
-          Math.abs(midYFromStart) / TWO_FINGER_SCROLL_LOCK_PX;
-        const pinchProgress = spanDeltaFromStart / TWO_FINGER_PINCH_LOCK_PX;
-        if (scrollProgress < 1 && pinchProgress < 1) {
+        // The first meaningful midpoint displacement owns the gesture. A
+        // natural span drift during a vertical two-finger scroll must not
+        // steal it for pinch; pinch wins only while the midpoint is still.
+        if (Math.abs(midYFromStart) >= TWO_FINGER_SCROLL_LOCK_PX) {
+          wheel.mode = 'scroll';
+        } else if (spanDeltaFromStart >= TWO_FINGER_PINCH_LOCK_PX) {
+          wheel.mode = 'pinch';
+        } else {
           wheel.debug.lastReason = 'awaiting-gesture-lock';
           event.preventDefault();
           event.stopPropagation();
           publishWheelDebug(wheel);
           return;
         }
-        wheel.mode = pinchProgress > scrollProgress ? 'pinch' : 'scroll';
         wheel.debug.lastReason = `locked-${wheel.mode}`;
       }
 
@@ -420,6 +423,8 @@ export function useMirrorFixedZoomPan(
 
       if (decision.direction === null || decision.steps < 1) {
         wheel.debug.lastReason = 'no-step';
+        event.preventDefault();
+        event.stopPropagation();
         publishWheelDebug(wheel);
         return;
       }
