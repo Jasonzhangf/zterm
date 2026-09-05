@@ -224,7 +224,7 @@ tmux -> daemon mirror writer -> daemon mirror store -> read api -> client
   - daemon 只保存 `bodySubscribed` 这一物理事实，不保存 active/inactive/visible/foreground 原因；
   - unsubscribe 只停止 unsolicited `buffer-sync`，不得 close transport、detach mirror、禁用 input/file/schedule 或 explicit head/range read；
   - recurring capture 只由 ready 且 `bodySubscribed` 的 physical subscriber demand 驱动；unsubscribe 必须经同一个 scheduler owner 立即停旧 timer，恢复 demand 后恢复 scheduler，不得由 head/range 请求直接 capture。
-  - RTC/Relay datachannel close 可能不会可靠到达 daemon；daemon 必须按 transport inbound heartbeat sweep stale bound subscriber，并只走 `detachSubscriberTransportOnly`。禁止杀 tmux、销毁 mirror、或在 Android UI/renderer/buffer 层做退出补偿。
+  - RTC/Relay datachannel close 可能不会可靠到达 daemon；daemon 必须按 transport inbound heartbeat sweep stale bound subscriber，并走 `detachSubscriberTransportOnly`。该路径禁止杀 tmux；若 detach 后 mirror 已无任何 physical subscriber，只允许由 terminal runtime 释放 daemon-owned mirror/buffer/input/timer 资源；仍有 sibling subscriber 时必须保留 mirror。不得在 Android UI/renderer/buffer 层做退出补偿。
 - subscriber backpressure 禁止直接永久 skip 当前 revision：
   - 每个 subscriber 最多保留一个 bounded pending latest revision 和合并后的 absolute ranges；
   - pending flush 时必须从当前 mirror store 读取最新权威行，禁止保存历史 serialized payload/cells；
@@ -260,8 +260,9 @@ tmux -> daemon mirror writer -> daemon mirror store -> read api -> client
 - server 不允许在 `head/range` 请求路径里“先同步 tmux 再回复”
 - **每次回复都带当前 head**，避免客户端额外猜
 - mirror 生命周期也必须独立：
-  - client 断开 / 切 tab / 暂时没有 subscriber，不得销毁 mirror truth 再重建
-  - 否则 reconnect 后出现 `revision -> 1` / `latestEndIndex` 回退，不是 tmux 变了，而是 daemon 自己把 absolute truth 丢了
+  - `bodySubscribed=false`、tab 暂停取数不销毁 mirror；仍存在 physical subscriber 时 transport detach 只影响对应 subscriber
+  - 最后一个 physical subscriber detach/close 后，terminal runtime 必须销毁 daemon-owned mirror truth、live timer 与 mirror-scoped input batch，后续显式 attach 再创建新 mirror
+  - 该 release 不得 kill tmux；sibling subscriber 不得被清理或受影响
 - daemon 只允许持有自己的服务端真相：
   - ws/rtc transport 是 daemon 可持有的物理连接真相
   - mirror 是 daemon 可持有的 terminal 真相
@@ -592,7 +593,7 @@ UI 只负责容器位置与裁切：
 - `reconnect -> new client session semantics`
 - daemon 在 `buffer-head-request / buffer-sync-request` 路径里触发 tmux capture
 - daemon 根据 client 状态决定“要不要先刷新一下 mirror 再回复”
-- daemon 因 subscriber 归零就销毁 mirror，导致 reconnect 后 revision / absolute head 重置
+- daemon 因单个 subscriber detach 就销毁仍有 sibling 的 mirror，或把 mirror release 错误升级成 `tmux kill-session`
 - daemon 把 cursor / selection / transient visual state 直接写进 buffer cells
 - client viewport 变窄就改写 daemon mirror / tmux 宽度
 - `mirror-fixed` 下把长行本地重排成手机宽度

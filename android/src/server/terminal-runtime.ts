@@ -168,6 +168,8 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
       // tab switch / reconnect.
       if (mirror.subscribers.size > 0) {
         mirrorRuntime.scheduleMirrorLiveSync(mirror);
+      } else {
+        mirrorRuntime.destroyMirrorIfUnsubscribed(mirror, `transport detached: ${reason}`);
       }
     }
     subscriber.mirrorKey = null;
@@ -191,6 +193,8 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
       // attached, their own live sync loop will catch the new mirror state.
       if (mirror.subscribers.size > 0) {
         mirrorRuntime.scheduleMirrorLiveSync(mirror);
+      } else {
+        mirrorRuntime.destroyMirrorIfUnsubscribed(mirror, `subscriber closed: ${reason}`);
       }
     }
 

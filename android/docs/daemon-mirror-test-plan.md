@@ -204,7 +204,8 @@ tmux truth
    - same `clientSessionId` reconnect 复用 daemon logical session
    - inactive tab 只停取数，不 close session / transport
    - foreground resume 优先复用原 session transport，不 fresh recreate session
-   - daemon transport close 只 detach transport；daemon shutdown 才统一回收
+   - daemon transport close 只 detach 对应 subscriber；最后一个 physical subscriber 才回收 daemon mirror/runtime，且不 kill tmux
+   - 两个 subscriber attach 同一 tmux target 时，关闭一个不得影响另一个；关闭最后一个后 tmux target 仍存在
 
 ### 编译前门禁
 

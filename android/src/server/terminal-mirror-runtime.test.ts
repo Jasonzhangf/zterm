@@ -38,6 +38,7 @@ function createRuntime(overrides: {
   normalizeTerminalRows?: (rows?: number) => number;
   getMirrorKey?: (sessionName: string, backend?: 'tmux' | 'herdr') => string;
   mirrorBufferChanged?: (mirror: SessionMirror, previousStartIndex: number, previousLines: TerminalCell[][]) => Array<{ startIndex: number; endIndex: number }>;
+  waitMs?: (delayMs: number) => Promise<void>;
 } = {}) {
   const sessions = new Map<string, TerminalSession>();
   const mirrors = new Map<string, SessionMirror>();
@@ -98,7 +99,7 @@ function createRuntime(overrides: {
     },
     writeToTmuxSession: vi.fn(),
     autoCommandDelayMs: 0,
-    waitMs: async () => {},
+    waitMs: overrides.waitMs || (async () => {}),
     logTimePrefix: () => '2026-05-01 00:00:00',
     runTmux,
     closeTransportSubscriber: vi.fn(),
@@ -215,6 +216,52 @@ describe('terminal mirror runtime lifecycle truth', () => {
       session,
       expect.objectContaining({ type: 'buffer-sync' }),
     );
+  });
+
+  it('releases the old mirror when one subscriber moves to another tmux target', async () => {
+    const { runtime, sessions, mirrors } = createRuntime();
+    const session = createSession();
+    sessions.set(session.id, session);
+
+    await runtime.attachTmux(session, { sessionName: 'demo-a', cols: 120, rows: 40 });
+    const oldMirror = mirrors.get('demo-a');
+    expect(oldMirror?.subscribers).toEqual(new Set([session.id]));
+
+    await runtime.attachTmux(session, { sessionName: 'demo-b', cols: 120, rows: 40 });
+
+    expect(mirrors.has('demo-a')).toBe(false);
+    expect(oldMirror?.lifecycle).toBe('destroyed');
+    expect(mirrors.get('demo-b')?.subscribers).toEqual(new Set([session.id]));
+    expect(session.mirrorKey).toBe('demo-b');
+  });
+
+  it('does not resurrect a mirror when the last subscriber detaches during initial sync', async () => {
+    let releaseBoot = () => {};
+    const bootPaused = new Promise<void>((resolve) => {
+      releaseBoot = resolve;
+    });
+    const { runtime, sessions, mirrors } = createRuntime({
+      waitMs: async () => bootPaused,
+    });
+    const session = createSession();
+    sessions.set(session.id, session);
+
+    const attachPromise = runtime.attachTmux(session, { sessionName: 'boot-race', cols: 120, rows: 40 });
+    await Promise.resolve();
+
+    const mirror = mirrors.get('boot-race');
+    expect(mirror?.lifecycle).toBe('ready');
+    expect(mirror?.subscribers).toEqual(new Set([session.id]));
+
+    session.transport = null;
+    session.mirrorKey = null;
+    mirror?.subscribers.clear();
+    runtime.destroyMirrorIfUnsubscribed(mirror!, 'boot transport detached');
+    releaseBoot();
+    await attachPromise;
+
+    expect(mirrors.has('boot-race')).toBe(false);
+    expect(mirror?.lifecycle).toBe('destroyed');
   });
 
   it('splits an oversized initial live sync into contiguous same-revision frames', async () => {
@@ -1113,14 +1160,14 @@ describe('terminal mirror runtime lifecycle truth', () => {
       expect(mirror?.lifecycle).toBe('ready');
       expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(1);
 
+      mirror?.subscribers.delete(firstSession.id);
+      firstSession.mirrorKey = null;
       sessions.delete(firstSession.id);
-      if (mirror) {
-        mirror.subscribers.delete(firstSession.id);
-        runtime.scheduleMirrorLiveSync(mirror, 0);
-      }
+      runtime.destroyMirrorIfUnsubscribed(mirror!, 'last subscriber detached');
 
       await vi.advanceTimersByTimeAsync(500);
       expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(1);
+      expect(mirrors.has('demo')).toBe(false);
 
       const secondSession = createSession('session-2');
       secondSession.transportId = 'transport-2';

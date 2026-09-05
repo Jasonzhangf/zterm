@@ -115,4 +115,5 @@ flowchart TD
 - Do not add `clientSessionId` or active-tab truth to daemon internals.
 - Do not use daemon read requests to trigger upstream sync policy.
 - Do not kill tmux sessions except through explicit user-visible kill commands.
+- When the final physical terminal subscriber detaches, release only daemon mirror/runtime resources; keep the tmux session alive. A sibling subscriber keeps the shared mirror alive, and `bodySubscribed=false` does not count as detached.
 - Do not add fallback success paths; expose errors and fix the unique owner.

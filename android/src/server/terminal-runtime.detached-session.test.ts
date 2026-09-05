@@ -191,6 +191,7 @@ describe('terminal runtime detached transport cleanup', () => {
     const mirror: SessionMirror = {
       key: 'demo',
       sessionName: 'demo',
+      backend: 'tmux',
       scratchBridge: null,
       lifecycle: 'ready',
       cols: 120,
@@ -228,6 +229,66 @@ describe('terminal runtime detached transport cleanup', () => {
     expect(session.transport).toBeNull();
     expect(session.mirrorKey).toBeNull();
     expect(mirror.subscribers.has(session.id)).toBe(false);
+    expect(mirrors.has(mirror.key)).toBe(false);
+    expect(mirror.lifecycle).toBe('destroyed');
+    expect(daemonInputQueue.disposeLiveMirrorInputBatch).toHaveBeenCalledWith(
+      'demo',
+      'destroy:transport detached: websocket closed',
+      'tmux',
+    );
+  });
+
+  it('releases only the final subscriber mirror and never kills the tmux session', () => {
+    const { runtime, sessions, mirrors, daemonInputQueue, runTmux } = createDeps();
+    const firstConnection = createTransportConnection('transport-1');
+    const secondConnection = createTransportConnection('transport-2');
+    const first = runtime.createTransportSubscriber(firstConnection);
+    const second = runtime.createTransportSubscriber(secondConnection);
+    const mirror = runtime.createMirror('demo');
+    mirror.lifecycle = 'ready';
+    mirror.subscribers.add(first.id);
+    mirror.subscribers.add(second.id);
+    first.sessionName = mirror.sessionName;
+    first.mirrorKey = mirror.key;
+    second.sessionName = mirror.sessionName;
+    second.mirrorKey = mirror.key;
+
+    runtime.detachSubscriberTransportOnly(first, 'first websocket closed', firstConnection.transportId);
+
+    expect(mirrors.get(mirror.key)).toBe(mirror);
+    expect(mirror.lifecycle).toBe('ready');
+    expect(mirror.subscribers).toEqual(new Set([second.id]));
+    expect(sessions.has(second.id)).toBe(true);
+    expect(daemonInputQueue.disposeLiveMirrorInputBatch).not.toHaveBeenCalled();
+    expect(runTmux).not.toHaveBeenCalledWith(['kill-session', '-t', '=demo']);
+
+    runtime.detachSubscriberTransportOnly(second, 'second websocket closed', secondConnection.transportId);
+
+    expect(mirrors.has(mirror.key)).toBe(false);
+    expect(mirror.lifecycle).toBe('destroyed');
+    expect(daemonInputQueue.disposeLiveMirrorInputBatch).toHaveBeenCalledTimes(1);
+    expect(runTmux).not.toHaveBeenCalledWith(['kill-session', '-t', '=demo']);
+  });
+
+  it('releases a closed mux subscriber without closing an unrelated sibling', () => {
+    const { runtime, sessions, mirrors, daemonInputQueue } = createDeps();
+    const first = runtime.createTransportSubscriber(createTransportConnection('transport-1'));
+    const second = runtime.createTransportSubscriber(createTransportConnection('transport-2'));
+    const mirror = runtime.createMirror('demo');
+    mirror.lifecycle = 'ready';
+    mirror.subscribers = new Set([first.id, second.id]);
+    first.sessionName = mirror.sessionName;
+    first.mirrorKey = mirror.key;
+    second.sessionName = mirror.sessionName;
+    second.mirrorKey = mirror.key;
+
+    runtime.closeTransportSubscriber(first, 'mux channel closed');
+
+    expect(sessions.has(first.id)).toBe(false);
+    expect(sessions.has(second.id)).toBe(true);
+    expect(second.transport).not.toBeNull();
+    expect(mirrors.get(mirror.key)).toBe(mirror);
+    expect(mirror.subscribers).toEqual(new Set([second.id]));
     expect(daemonInputQueue.disposeLiveMirrorInputBatch).not.toHaveBeenCalled();
   });
 
