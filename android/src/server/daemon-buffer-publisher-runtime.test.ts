@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import type { BufferSyncRequestPayload } from '@zterm/shared/types';
 import {
   createDaemonBufferPublisherRuntime,
   type DaemonBufferPublisherDeps,
@@ -98,6 +99,7 @@ function makeDeps(overrides: Partial<DaemonBufferPublisherDeps> = {}): DaemonBuf
       rows: mirror.rows,
       cursorKeysApp: mirror.cursorKeysApp,
       cursor: mirror.cursor,
+      requestSentAt: request.requestedAt,
       lines: [],
     }),
     ...overrides,
@@ -263,6 +265,107 @@ describe('daemon buffer publisher runtime', () => {
     expect(session.bufferSyncState?.resyncReason).toBe('transport-generation');
     expect(session.bufferSyncState?.pendingChangedAbsoluteRanges).toHaveLength(1);
   });
+
+  it('publishes explicit range responses through the publisher while body subscription is disabled', () => {
+    const session = makeSession('s1');
+    session.bodySubscribed = false;
+    const sent: string[] = [];
+    const deps = makeDeps({
+      sessions: new Map([['s1', session]]),
+      sendText: (_transport, text) => sent.push(text),
+    });
+    const publisher = createDaemonBufferPublisherRuntime(deps);
+    const mirror = makeMirror(['s1'], 9);
+    const request = {
+      knownRevision: 8,
+      localStartIndex: 0,
+      localEndIndex: 0,
+      requestStartIndex: 4,
+      requestEndIndex: 6,
+      requestedAt: 101,
+      targetHeadRevision: 9,
+    } satisfies BufferSyncRequestPayload;
+
+    expect(publisher.enqueueRangeBufferSyncResponse(session, mirror, request)).toBe('queued');
+
+    expect(sent).toHaveLength(1);
+    expect(JSON.parse(sent[0]!)).toMatchObject({
+      type: 'buffer-sync',
+      payload: {
+        revision: 9,
+        startIndex: 4,
+        endIndex: 6,
+        requestSentAt: 101,
+      },
+    });
+    expect(session.bufferSyncState?.pendingRangeResponses).toHaveLength(0);
+  });
+
+  it('keeps queued range responses FIFO, split, and request-correlated under backpressure', () => {
+    const transport = makeTransport({ bufferedAmount: 200_000 });
+    const session = makeSession('s1', transport);
+    session.bodySubscribed = false;
+    const sent: string[] = [];
+    const largeLines = Array.from({ length: 20_000 }, (_, index) => ({ i: index }));
+    const deps = makeDeps({
+      sessions: new Map([['s1', session]]),
+      sendText: (_transport, text) => sent.push(text),
+      buildRequestedRangeBufferPayload: (mirror, request) => ({
+        revision: mirror.revision,
+        startIndex: request.requestStartIndex,
+        endIndex: request.requestEndIndex,
+        availableStartIndex: mirror.bufferStartIndex,
+        availableEndIndex: mirror.bufferStartIndex + mirror.bufferLines.length,
+        cols: mirror.cols,
+        rows: mirror.rows,
+        cursorKeysApp: mirror.cursorKeysApp,
+        cursor: mirror.cursor,
+        requestSentAt: request.requestedAt,
+        lines: request.requestedAt === 201 ? largeLines : [{ i: 20_000 }],
+      }) as never,
+    });
+    const publisher = createDaemonBufferPublisherRuntime(deps);
+    const mirror = makeMirror(['s1'], 12);
+    const firstRequest = {
+      knownRevision: 11,
+      localStartIndex: 0,
+      localEndIndex: 0,
+      requestStartIndex: 0,
+      requestEndIndex: 20_000,
+      requestedAt: 201,
+      targetHeadRevision: 12,
+    } satisfies BufferSyncRequestPayload;
+    const secondRequest = {
+      ...firstRequest,
+      requestStartIndex: 20_000,
+      requestEndIndex: 20_001,
+      requestedAt: 202,
+    } satisfies BufferSyncRequestPayload;
+
+    expect(publisher.enqueueRangeBufferSyncResponse(session, mirror, firstRequest)).toBe('queued');
+    expect(publisher.enqueueRangeBufferSyncResponse(session, mirror, secondRequest)).toBe('queued');
+    expect(sent).toHaveLength(0);
+
+    transport.bufferedAmount = 0;
+    transport.backpressureCount = 0;
+    for (let attempt = 0; attempt < 100 && (session.bufferSyncState?.pendingRangeResponses?.length ?? 0) > 0; attempt += 1) {
+      publisher.flushPendingBufferSyncToSubscribers(mirror);
+    }
+
+    const messages = sent.map((text) => JSON.parse(text));
+    expect(messages.length).toBeGreaterThan(1);
+    const firstRequestMessages = messages.slice(0, -1);
+    expect(firstRequestMessages.every((message) => message.payload.requestSentAt === 201)).toBe(true);
+    expect(firstRequestMessages.every((message) => message.payload.revision === 12)).toBe(true);
+    expect(firstRequestMessages.every((message) => message.payload.frameStartIndex === 0)).toBe(true);
+    expect(firstRequestMessages.every((message) => message.payload.frameEndIndex === 20_000)).toBe(true);
+    expect(messages.at(-1)?.payload).toMatchObject({
+      requestSentAt: 202,
+      startIndex: 20_000,
+      endIndex: 20_001,
+    });
+    expect(session.bufferSyncState?.pendingRangeResponses).toHaveLength(0);
+  });
 });
 
 describe('daemon buffer publisher ownership gates', () => {
@@ -275,6 +378,17 @@ describe('daemon buffer publisher ownership gates', () => {
       join(process.cwd(), 'src', 'server', 'terminal-mirror-runtime.ts'),
       'utf8',
     );
+    const messageRuntimeSource = readFileSync(
+      join(process.cwd(), 'src', 'server', 'terminal-message-runtime.ts'),
+      'utf8',
+    );
+    const edgeRegistry = JSON.parse(readFileSync(
+      join(process.cwd(), 'docs', 'edge-registry.json'),
+      'utf8',
+    )) as { edges: Array<{ edge_id: string; publication_lanes?: string[] }> };
+    const publisherTransportEdge = edgeRegistry.edges.find(
+      (edge) => edge.edge_id === 'edge.daemon.buffer_publisher_to_transport_subscriber',
+    );
 
     expect(publisherSource).not.toContain("from './terminal-mirror-runtime'");
     expect(publisherSource).not.toContain("from './server'");
@@ -283,5 +397,13 @@ describe('daemon buffer publisher ownership gates', () => {
     expect(mirrorRuntimeSource).toContain('createDaemonBufferPublisherRuntime');
     expect(mirrorRuntimeSource).not.toContain('SUBSCRIBER_PENDING_RANGE_LIMIT');
     expect(mirrorRuntimeSource).not.toContain('splitBufferSyncPayloadMessages');
+    expect(messageRuntimeSource).toContain('enqueueRangeBufferSyncResponse');
+    expect(messageRuntimeSource).not.toContain(
+      "deps.sendMessage(session, { type: 'buffer-sync', payload });",
+    );
+    expect(publisherTransportEdge?.publication_lanes).toEqual([
+      'live_pending_latest',
+      'explicit_range_fifo',
+    ]);
   });
 });

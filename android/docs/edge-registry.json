@@ -242,6 +242,10 @@
       "allowed_callers": [
         "src/server/daemon-buffer-publisher-runtime.ts"
       ],
+      "publication_lanes": [
+        "live_pending_latest",
+        "explicit_range_fifo"
+      ],
       "forbidden_callers": [
         "src/components/**",
         "src/contexts/**"

@@ -267,6 +267,7 @@ Rules:
 | command / entry | owner | allowed change surface | required gate source |
 | --- | --- | --- | --- |
 | subscriber buffer-sync pending/backpressure | `src/server/daemon-buffer-publisher-runtime.ts#createDaemonBufferPublisherRuntime` | queue latest per subscriber, merge/collapse absolute ranges, hold on transport backpressure, explicit flush statuses, stale-transport resync | `src/server/daemon-buffer-publisher-runtime.test.ts`; `src/server/terminal-mirror-runtime.test.ts`; `src/server/terminal-mirror-runtime.backpressure.test.ts` |
+| explicit range response publication | `src/server/daemon-buffer-publisher-runtime.ts#createDaemonBufferPublisherRuntime#enqueueRangeBufferSyncResponse` | keep request-scoped payloads in an independent FIFO lane, preserve requested range/revision/requestSentAt, reuse readiness/backpressure/frame split, and publish while body subscription is disabled | `src/server/daemon-buffer-publisher-runtime.test.ts`; `src/server/terminal-message-runtime.test.ts` |
 | head broadcast and frame split | `src/server/daemon-buffer-publisher-runtime.ts#createDaemonBufferPublisherRuntime` | fresh-revision head fanout cache, per-requester replies, oversized contiguous same-revision split for every body span including fresh attach | `src/server/daemon-buffer-publisher-runtime.test.ts`; `src/server/terminal-buffer-sync-wire.test.ts` |
 
 ### daemon.session_idle_detection
