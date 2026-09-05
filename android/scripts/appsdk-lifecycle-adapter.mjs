@@ -76,7 +76,7 @@ const moduleContract = JSON.parse(readFileSync(join(root, ".appsdk", "project.js
 if (!moduleContract) throw new Error(`module not found: ${moduleId}`);
 const scopeHash = sha256(JSON.stringify({ module_id: moduleId, owned_paths: moduleContract.owned_paths, contract_paths: moduleContract.contract_paths }));
 const inputHash = sha256(readFileSync(artifactPath));
-const diffHash = sha256(run("git", ["diff", "--binary", `${baseCommit}..HEAD`, "--", ...diffPaths]));
+const diffHash = sha256(run("git", ["diff", "--binary", `${baseCommit}..HEAD`, "--", ...diffPaths], { maxBuffer: 64 * 1024 * 1024 }));
 
 const startedAt = now();
 run("pnpm", ["exec", "vitest", "run", "src/server/terminal-message-runtime.test.ts", "src/server/terminal-mirror-runtime.test.ts", "src/server/daemon-buffer-publisher-runtime.test.ts", "src/lib/runtime-architecture-v2.test.ts", "src/lib/plugin-host/plugin-host-runtime.test.ts", "src/pages/TerminalPage.render-isolation.test.tsx", "src/App.dynamic-refresh.test.tsx", "src/contexts/SessionContext.ws-refresh.test.tsx", "--reporter=dot"]);
