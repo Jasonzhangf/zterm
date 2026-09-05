@@ -57,3 +57,4 @@ After remote receipt, promotion/freeze requirements, and retention record:
 3. remove only the owned merged worktree and branch;
 4. verify removal;
 5. release claim.
+
