@@ -18,7 +18,7 @@ The control WebSocket never carries terminal/session/buffer payloads. A director
 1. Daemon starts one Relay host control WebSocket, maintains heartbeat, and publishes its current LAN, Tailscale, verified public-direct, RTC-direct signaling, and TURN Relay candidates under one stable daemon host id.
 2. Android starts one Relay device control WebSocket after account authentication. Cached account data may render UI, but it cannot authorize a new terminal transport generation.
 3. Every new Relay-owned daemon-target transport carrying Relay endpoint/signaling/WebRTC route evidence waits for a fresh server-confirmed directory generation from the HTTP control refresh or device control WebSocket. A saved direct/Tailscale target with only a persisted daemon id is not Relay-owned route evidence and opens its explicit endpoint immediately, even while the account is logged in. When the control line is reconnecting, only Relay-owned terminal transports remain `CONNECTING` without starting LAN/Tailscale/RTC signaling from stale profile data.
-4. Auto selection uses the fixed product tiers `eligible same-subnet LAN > Tailscale > verified public direct > TURN Relay`; health can reject a failed candidate or order candidates inside one tier, but cannot move a lower tier ahead of a healthy higher tier. Same-subnet is eligibility only; the authenticated data-transport handshake is reachability truth.
+4. The confirmed target Auto tiers are `eligible same-subnet LAN > UDP direct > Tailscale > Relay`; IPv4 and IPv6 are address families inside UDP direct, not independent tiers. Current TypeScript and native-Service implementations have not converged on this order. Health can reject a failed candidate or order candidates inside one target tier, but cannot redefine the target tier order. Same-subnet is eligibility only; the authenticated data-transport handshake is reachability truth.
 5. The selected successful route is persisted by daemon/account/candidate identity and can seed a new transport generation without becoming a second endpoint truth.
 6. All tmux sessions for the same stable daemon id open logical mux channels on one physical terminal transport.
 7. Control reconnect or endpoint push updates future reconnect candidates only. The current healthy terminal transport remains untouched; a replacement generation created while control is unavailable waits for reconfirmation, and then atomically becomes the current target generation.
@@ -59,7 +59,7 @@ The control WebSocket never carries terminal/session/buffer payloads. A director
   - proves Relay route evidence enters the control-directory gate;
   - proves a saved direct target with only daemon identity bypasses the Relay gate and opens immediately.
 - `native/android/app/src/test/java/com/zterm/android/AndroidConnectionServiceTransportTest.java`
-  - proves native Auto order `LAN > Tailscale > public direct > TURN` from one typed daemon target;
+  - records the current native Auto order and keeps the target `LAN > UDP direct > Tailscale > Relay` migration gate pending;
   - proves LAN enters that order only when the current Android interface prefix contains the endpoint;
   - proves unsupported/unavailable candidates fail explicitly and advance once without creating a second lifecycle owner;
   - proves foreground/control-directory refresh leaves a healthy socket generation and channel map unchanged.

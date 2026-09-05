@@ -290,12 +290,16 @@ buffer manager 是客户端唯一 buffer worker。
 
 ### 2.2 本地 buffer 结构
 
-- 客户端默认/最大维护 **1000 行** sliding buffer
+- 目标客户端默认维护 **3000 行**、可配置的 rolling window；本决策不定义最大值
+- 当前生产 shared/client 默认与最大值仍是 **1000 行**，属于待迁移实现差距，不能冒充目标已完成
 - 绝对行号存储
 - 允许 sparse
 - 历史超出窗口后再滑走
 - 单次 payload 不是“重建本地 buffer”的命令
 - **已有绝对行号内容一旦进入本地 buffer truth，就不能因为窗口判断而被逻辑清空**
+- 首次连接以 daemon 当前 tail 为真相：先接收 head/tail metadata，再请求连续的最多三屏 catch；更早历史按 renderer visible demand on-demand 拉取
+- 单个 body payload / authoritative frame 必须连续无洞；本地 rolling window 可以有洞
+- `stable/live` 不是 client buffer 或 renderer 的分层。daemon 不持有 TUI reflow 真相，因此也不能锁定 stable 区域
 
 ### 2.2.1 本地 buffer 不变量
 

@@ -178,14 +178,14 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 
 ### 2.10 daemon 收敛规则
 - server 侧启动入口要收敛成单一 daemon CLI，默认监听地址/端口由统一配置真源决定（当前 `0.0.0.0:3333`）
-- relay/account 配置必须走全局发行包入口：先 `install-global.sh` 安装/升级 `~/.local/bin/zterm-daemon`，再用 `zterm-daemon configure-relay` 写 `~/.wterm/config.json -> mobile.relay`；daemon 只读取配置，不承载账号 UX，禁止把手工改散落配置当成最终交付。
+- relay/account 配置必须走全局发行包入口：目标由 `zterm-daemon configure-relay` 写入 `~/.zterm/config.toml`；现有 `~/.zterm/config.json` 必须经校验、原子写入和 read-back comparison 一次性迁移，迁移成功后不得继续作为 runtime fallback。daemon 只读取配置，不承载账号 UX，禁止硬编码 Relay URL 或把手工改散落配置当成最终交付。
 - daemon 全局安装的稳定入口必须由包内脚本自固化：npm postinstall / service runner 要自动生成 `~/.local/bin/zterm-daemon` 与 `~/.local/bin/wterm`，写入前先清旧 symlink/file，released runner 读 config 前要迁移旧 `~/.wterm -> ~/.zterm`。如果只靠手工修 PATH、手工挪目录或改已安装文件，视为未修真源。
 - relay account directory 发布必须来自 daemon truth：`relay-ready` 后由 daemon relay host client 发布 `directory-update`，session catalog 只能来自 tmux 枚举；枚举失败必须显式报错，禁止把失败伪造成空 sessions 的成功目录。
 - Relay directory direct endpoints 必须端到端保留 daemon `authToken`。若本机 daemon 日志显示 `auth=config` 且发布多条 endpoint，但生产 `/api/auth/me` 只回少量 endpoint 或 `hasAuthToken=false`，先查生产 `/usr/lib/node_modules/@jsonstudio/zterm-relay-server/runtime/server.cjs` 是否包含 `authToken`，再升级 `@jsonstudio/zterm-relay-server` 并 service-scoped restart `zterm-traversal-relay.service`。禁止先在 Android route/UI 层补第二套 token fallback。
 - Relay directory direct endpoint 与 saved host 指向同一 `path + host:port` 时，directory endpoint 的新 daemon auth token 必须先进入 traversal plan 并按 endpoint identity 去重；禁止按带 token 的完整 URL 去重，否则 stale saved token 会和 fresh directory token 并存，Auto 首连先撞 `Unauthorized bridge token`。
 - `rtc-direct` 的 data channel `open` 不是最终 route success；必须有短稳定窗口，窗口内 `close` 要作为该 candidate 失败并继续尝试 `rtc-relay`。TURN-only `rtc-relay` 可直接发布 open。禁止把 transient direct open 投给上层后中断 Auto 链路。
 - reliable input 发送后 `sentAt !== null` 表示 seq 已在途等待 ACK；禁止固定 timer 重发同 seq。只有 daemon 明确 retryable NACK 才能清 `sentAt` 并重发，否则弱网 ACK 延迟会变成用户输入重复。
-- release daemon support 脚本读取 `~/.zterm/config.json` 必须按字段合并 `zterm.android.daemon` 与 legacy `mobile.daemon`，空的新字段不能遮住旧 token。全局安装后必须验证 `auth=config`、无 token WS 拒绝、有 token WS 能 `list-sessions`。
+- 配置迁移实现前，release daemon support 脚本仍读取 `~/.zterm/config.json` 并按字段合并 `zterm.android.daemon` 与 legacy `mobile.daemon`，空的新字段不能遮住旧 token；这只是当前兼容事实。目标迁移完成后只读取 `~/.zterm/config.toml`。全局安装后必须验证 `auth=config`、无 token WS 拒绝、有 token WS 能 `list-sessions`。
 - relay smoke / 真实链路里 client device 与 daemon device 必须使用不同 `deviceId`；复用同一 id 会让 client metadata 覆盖 daemon directory identity，造成 account directory 假状态。
 - Relay WebRTC signaling peer lease 必须按 `account + hostId + concrete client deviceId` 独立维护。Android 每安装实例生成并持久化自己的 relay client `deviceId`，`/ws/client` 必须携带它；Relay server 缺 deviceId 要显式拒绝，不能把匿名客户端合并或共享。普通 signaling socket close 只让该 device peer idle 30 分钟，不立刻通知 daemon close；同 device 30 分钟内重连复用 peerId 并重新 `rtc-init` 协商，不同手机必须得到不同 peerId。超过 30 分钟、host 替换或显式 `rtc-close` 才关闭 peer。验证 gate 是 `pnpm --dir android run test:relay:peer-lease`，并且不能把 terminal channel/tmux/mirror/UI truth 放进 lease。
 - 同 account/host/client-device 的新 signaling socket 必须顶掉旧 socket：复用同一 peer lease，旧 socket 以 `relay client socket replaced` 关闭，并向 daemon 发起新的 `rtc-init`；不同 client-device 才分配不同 peerId。出现 `rtc data channel closed` 时先跑 peer-lease black-box gate确认 replacement 真相，禁止直接猜旧 generation 抢 lease。
@@ -291,7 +291,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - `rtc data channel error` / `terminal mux transport closed` 是 physical target failure，不是某个 tmux session 的 channel error。Android 必须在 `terminal.transport_lifecycle` owner 中清 target mux socket/ready 和 target heartbeat，把同 target 下所有 recoverable logical channel 统一从当前状态转成 `opening` replay demand，只选择一个 anchor session 触发 immediate/reset target rebuild；pending open intent 只清 timer/intent，不能再各自 fanout reconnect。`mux-ready` 后由 opening channel flush 统一重发 channel-open。禁止只让创建 physical socket 的 anchor session fail，也禁止每个 sibling session 各自创建/调度物理重连，否则会出现“同一条连接里有些 session 好、有些 session data channel error/空屏”的分裂投影。
 - daemon 初始 buffer sync 不能发送无限全量大帧。若第一次 live sync 超过有界阈值，必须按 absolute row 连续切成同 revision 多个 `buffer-sync`，覆盖完整源 span，让 renderer 按帧组装拿到完整尾窗；禁止裁成 live tail 丢弃源 rows。这属于 daemon mirror reader 输出有界化，不允许改 tmux truth、client renderer 或 route fallback 补偿。
 - 若 Android 端启用新的 terminal mux 协议，Mac daemon release artifact 也必须同步包含 `mux-hello` / `mux-ready` / `mux-channel-open`。只跑 `build:android` 但没有重新 `daemon:prepare-release` 会导致 APK 新、daemon 旧，现场表现为 `terminal mux channel open timeout`。修复顺序：`daemon:prepare-release` -> install-global -> service-scoped restart -> `/health` 新 PID/uptime -> live mux smoke。
-- Auto route selection 不再消费旧的 saved `traversalPathPriority`。默认顺序是 `同网段且真实握手成功的 private LAN -> Tailscale -> 已验证公网直连（WebSocket / UDP direct）-> TURN Relay`；同网段只决定 LAN candidate eligibility，不能冒充连接成功，Android/WebView 不假设 ICMP 可用。Relay 控制心跳/目录刷新只更新未来 generation 的 endpoint truth，不得重建健康业务 transport；foreground/background 只刷新目录与遗漏正文。用户只在状态条里做显式 manual override，manual override 不改全局 Auto order，也不让 session 拥有 route truth。
+- Auto route selection 不再消费旧的 saved `traversalPathPriority`。目标顺序是 `LAN -> UDP direct -> Tailscale -> Relay`；IPv4/IPv6 只是 UDP direct 的地址族，不是独立优先级。同网段只决定 LAN candidate eligibility，不能冒充连接成功，Android/WebView 不假设 ICMP 可用。当前 TypeScript/native Service 尚未完全对齐该顺序，必须按当前实现报告。Relay 控制心跳/目录刷新只更新未来 generation 的 endpoint truth，不得重建健康业务 transport；foreground/background 只刷新目录与遗漏正文。用户只在状态条里做显式 manual override，manual override 不改全局 Auto order，也不让 session 拥有 route truth。
 - 若 daemon 代码已更新但 `~/.wterm/daemon-runtime/server.cjs` 仍残留旧符号（如 `scheduleMirrorFlush`、旧 planner/active-push 逻辑）或 `/debug/runtime` 仍 404，先判定为 **staged runtime 未切新**；必要时本地执行 `prepare-global-daemon-release.sh`，覆盖 `~/.wterm/daemon-runtime/` 后只对 `com.zterm.android.zterm-daemon` 做单服务 `launchctl bootstrap/kickstart`
 - buffer manager 不允许直接把 renderer 切回 follow；它只能更新本地 buffer/head 并通知 renderer。renderer 只允许因 **重新进入 / 下滚到底 / 用户输入** 退出 reading
 - Android renderer 新冻结：唯一状态是 `renderBottomIndex`；`renderTopIndex` 只能派生，reading/follow 都只改 bottom pointer，renderer 不得参与 buffer 生产或把 producer bottom 写回 source
@@ -397,7 +397,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - 抽屉 / session picker 的远端刷新只允许更新 session catalog / audit fact，不得把 stale persisted open tab 自动推进 transport reconnect，也不得把非 active、非 live 的 `tmux_session_unavailable` 投影成全局错误 banner。`routecodex` 这类本地 OPEN_TABS 中的过期 session，若 tmux truth 已不存在，只能表现为缺失事实或 idle closed shell，不能影响当前 session。
 
 ### 2.14 Bridge Auth 规则
-- daemon / websocket bridge 必须支持共享 token 鉴权；server 真源优先为 `~/.wterm/config.json -> mobile.daemon.authToken`，`WTERM_MOBILE_AUTH_TOKEN` 只作为显式 override
+- daemon / websocket bridge 必须支持共享 token 鉴权；当前 server 真源是迁移前的 JSON 配置，目标真源是 `~/.zterm/config.toml`，`WTERM_MOBILE_AUTH_TOKEN` 只作为显式 override
 - client 的 remembered server / host / picker target 都要携带 `authToken`，并在 websocket 连接阶段透传
 - 验证时必须补一条“无 token 失败 / 正确 token 成功”的证据
 
@@ -1004,7 +1004,7 @@ android/
 - **边界条件**: 最多重试 3 次（可配置）
 
 ### 模式: transport 自动连接顺序必须固定
-- **真源**: 自动模式只允许 `private LAN IPv4 -> Tailscale/direct websocket -> rtc-direct(WebRTC hole-punch) -> rtc-relay(TURN)`
+- **真源**: 目标自动模式只允许 `LAN -> UDP direct -> Tailscale -> Relay`；IPv4/IPv6 属于 UDP direct 地址族
 - **动作**: Home / drawer / picker 只发一个 connect/open intent；route owner 按固定顺序递进检测，运行中心跳/物理失败写 route health 后让下一代 transport 换路
 - **边界**: Relay 是最后一段显式路径，不是伪 direct，不允许再把 relay 阶段标回别的 resolvedPath
 

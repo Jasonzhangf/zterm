@@ -4,14 +4,25 @@ Date: 2026-07-21
 
 ## Decision
 
-Automatic route selection is daemon-target scoped and does not ask the user to choose between LAN, Tailscale, public direct, or Relay/TURN. Relay control presence and endpoint-directory refresh are logically separate from the selected terminal data transport even when an implementation can reuse a physical network path. The canonical Auto order is:
+Automatic route selection is daemon-target scoped and does not ask the user to choose between LAN, UDP direct, Tailscale, or Relay. Relay control presence and endpoint-directory refresh are logically separate from the selected terminal data transport even when an implementation can reuse a physical network path. The canonical target Auto order, confirmed on 2026-09-05, is:
 
 1. eligible same-subnet `lan` followed by a real authenticated WebSocket handshake
-2. `tailscale`
-3. verified public direct transport (`ipv4` / `ipv6` WebSocket or `rtc-direct` UDP hole punch)
-4. `rtc-relay` TURN/Relay
+2. verified `udp-direct` hole punch
+3. `tailscale`
+4. `relay`
 
-Same-subnet comparison only makes a LAN endpoint eligible; it never marks the route healthy. ICMP availability is not assumed on Android/WebView. Only the actual authenticated transport handshake records route success. A Relay control socket's observed TCP source port is not a reusable daemon listener and must never be published as public direct truth.
+IPv4 and IPv6 are address families inside the UDP-direct tier, not independent
+priority tiers. Same-subnet comparison only makes a LAN endpoint eligible; it
+never marks the route healthy. ICMP availability is not assumed on
+Android/WebView. Only the actual authenticated transport handshake records
+route success. A Relay control socket's observed TCP source port is not a
+reusable daemon listener and must never be published as public direct truth.
+
+Current implementation is not yet uniform: the TypeScript traversal default is
+`LAN -> RTC direct -> Tailscale -> IPv6 -> IPv4 -> RTC relay`, while the native
+Android Service currently attempts `LAN -> Tailscale -> IPv6 -> IPv4` and does
+not implement native WebRTC. These are implementation gaps, not alternative
+design truth.
 
 `AndroidConnectionService` is the only owner that can compare a directory LAN endpoint with Android's current interface prefixes. The generic `TraversalSocket` has no local-interface truth and therefore must not admit Relay-directory LAN endpoints; it may still open an explicitly saved private `bridgeHost`. This keeps directory discovery separate from platform reachability without discarding an explicit user target.
 

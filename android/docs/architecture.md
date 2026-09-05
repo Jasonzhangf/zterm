@@ -7,20 +7,21 @@
 3. `docs/decisions/0001-cross-platform-layout-profile.md`：跨尺寸布局 / Mac 共享壳决策
 4. `docs/decisions/2026-04-23-terminal-head-buffer-render-truth.md`：terminal head / sparse buffer / render container 唯一真源
 5. `docs/decisions/2026-04-28-terminal-transport-session-lifecycle-truth.md`：terminal client session / transport 生命周期真源（daemon 不持有客户端逻辑）
-6. `docs/decisions/2026-04-22-session-schedule-timed-send.md`：per-session 定时发送 / heartbeat 调度真源
-7. `docs/decisions/2026-04-28-remote-screenshot-helper-truth.md`：remote screenshot daemon 唯一真源（文件名沿用历史编号）
-8. `docs/decisions/2026-07-19-remote-window-stream-truth.md`：remote window stream / iTerm2 pane coordinate / input return 真源
-9. `docs/decisions/2026-08-07-opencode-transcript-mirror-truth.md`：opencode transcript 数据导出 / daemon 只读服务 / client 历史投影真源（独立于 mirror store）
-10. `dev-workflow.md`：执行门禁
-10. `task.md`：当前任务
-11. `CACHE.md`：短期上下文
-12. `MEMORY.md`：长期经验
-13. `evidence/`：运行证据
-14. `.agents/skills/terminal-buffer-truth/SKILL.md`：terminal buffer / render / scroll 真源规则
-15. `docs/resource-registry.json` / `docs/resource-map.md`：全局资源真源与人读面
-16. `docs/module-registry.json` / `docs/modules/project-modules.md`：daemon/client/shared/relay/release/observability 模块真源
-17. `docs/edge-registry.json`：跨模块资源边真源
-18. `docs/wiki/modules.md`：模块/边 wiki review 面
+6. `docs/decisions/2026-09-05-runtime-memory-truth.md`：当前实现与已确认目标架构的分离真源
+7. `docs/decisions/2026-04-22-session-schedule-timed-send.md`：per-session 定时发送 / heartbeat 调度真源
+8. `docs/decisions/2026-04-28-remote-screenshot-helper-truth.md`：remote screenshot daemon 唯一真源（文件名沿用历史编号）
+9. `docs/decisions/2026-07-19-remote-window-stream-truth.md`：remote window stream / iTerm2 pane coordinate / input return 真源
+10. `docs/decisions/2026-08-07-opencode-transcript-mirror-truth.md`：opencode transcript 数据导出 / daemon 只读服务 / client 历史投影真源（独立于 mirror store）
+11. `dev-workflow.md`：执行门禁
+12. `task.md`：当前任务
+13. `CACHE.md`：短期上下文
+14. `MEMORY.md`：长期经验
+15. `evidence/`：运行证据
+16. `.agents/skills/terminal-buffer-truth/SKILL.md`：terminal buffer / render / scroll 真源规则
+17. `docs/resource-registry.json` / `docs/resource-map.md`：全局资源真源与人读面
+18. `docs/module-registry.json` / `docs/modules/project-modules.md`：daemon/client/shared/relay/release/observability 模块真源
+19. `docs/edge-registry.json`：跨模块资源边真源
+20. `docs/wiki/modules.md`：模块/边 wiki review 面
 
 ## 模块边界
 
@@ -83,6 +84,7 @@
 - Screenshot Helper：运行在 macOS GUI session 的独立截图执行主体；只接受 daemon 本机 IPC 请求，不承载 tmux/session 真相
 - Remote Window Stream：daemon/native side owns app/window catalog, iTerm2 pane coordinate truth, ScreenCaptureKit capture, WebRTC sender lifecycle, and remote input injection policy. Android floating/fullscreen overlay only projects picker/stream UI and emits explicit intents.
 - Client Plugin Host：`client.plugin_host` 是唯一生产插件生命周期 owner，只通过 declared capabilities 向插件注入能力；`shared.plugin_contract` 只持有 manifest/capability registry 契约。App 是唯一生产组合消费点；UI/page/hook/plugin 层不得直接 import host 或共享 plugin contract，插件也不得访问 raw socket/store/backend/UI truth。Phase 6 边界与目标态见 `docs/design/2026-08-14-zterm-runtime-architecture-v2.md`。
+- Cordis 目标态：生产编排最终由 Cordis 持有固定 `transport / session / buffer / renderer` service/node，UI 与业务能力作为 plugin；当前生产仍是 `ClientCompositionRoot + PluginHost`，`CordisAdapter` 只在 Playground，完成物理迁移和 gate 前不得声称 Cordis 已接管生产。
 - Client UI Plugin Slots：`terminal.debug-console`、`terminal.session-drawer`、`terminal.file-browser`、`settings.update`、`terminal.remote-window` 都通过 typed UI slot registry 提供；App 在 `PluginHost.startAll` 完成后读取 slot callback，TerminalPage/SettingsPage 只按 typed contract 消费 plugin-provided render，不直接 import 对应 sheet/overlay/drawer/update/remote-window 组件。
 - Client Composition Root：`client.composition_root` 只拥有 declared runtime ports 的 bind/resolve/validate；App 通过它组合 `plugin-host` 等已声明端口，重复、未绑定、缺失端口在使用前显式失败。它不得拥有 transport/session/buffer/renderer/plugin 实现或业务 truth。
 - Client Control Center：`client.control_center` 是客户端控制命令的唯一 routing/policy 边界，负责 capability/authorization、deadline、idempotency、correlation、唯一 command owner 与有界 audit；`shared.control_contract` 只持有 branded command/result/correlation/deadline/audit 契约。App 的 plugin-host dispose 必须经 control center 路由到 `PluginHostControlNode`，不得由 App 直接调用 `disposeAll`。control center 不持有 transport/session/buffer/renderer/plugin 业务 truth，也不接受 terminal/file/media body。
@@ -105,13 +107,13 @@
 - 首页承载两个独立入口：当前进程 active Sessions、已配置且可进入的 server rows（direct/Tailscale saved Host、bridge presets、online Relay directory daemon device 投影；disconnected/stale Relay daemon records 不进入可点击 server 枚举）。
 - Home 的 server row 是服务器级入口，不展示/管理 Session group、saved tab list、Relay 登录表单或单独 Relay 按钮；点击 server row 必须通过 session-open owner 直接进入 Terminal/session 主界面。
 - 无 saved `sessionName` 的 server row 进入时，session-open owner 必须按同一 server owner 选择：先进入上次真实进入过且远端仍存在的 tmux session；没有历史时 live fetch 远端 tmux truth 并进入第一项；只有远端列表为空时才创建显式生成名的 clean tmux session；不得把 server display name 当 tmux session name fallback，也不得每次进入都创建新的 `zterm-*`。
-- Settings 是配置入口：新增/修改 server preset、固定 relay 服务 `relay.codewhisper.cc` 的账号鉴权、更新/备份等设置均在 Settings 完成。
+- Settings 是配置入口：新增/修改 server preset、配置来源提供的 Relay 账号鉴权、更新/备份等设置均在 Settings 完成。
 - Relay 是连接保障和同步增强，不是进入终端的 gate；未登录、登录失败或退出登录时，已保存 direct/Tailscale connections 与当前 active Sessions 仍必须可见可用。
-- 用户只输入 relay 账号和密码；relay base URL、WS、TURN 与 signal 地址不进入用户配置面。
-- Relay 登录成功后可以同步/补充所有连接候选，包括 Tailscale/local/direct endpoint，但不得删除、替换或隐藏 saved Host truth；Auto 连接顺序固定为 private LAN IPv4、Tailscale/direct websocket、WebRTC UDP direct/hole-punch、TURN Relay，并由目标级 heartbeat / route health 周期更新下一代 transport 的线路选择。
+- Relay URL 与启动设置的目标唯一真源是 `~/.zterm/config.toml`；现有 `~/.zterm/config.json` 只作为一次性迁移输入，迁移完成后不得作为 fallback 或第二真源。
+- Relay 登录成功后可以同步/补充所有连接候选，包括 Tailscale/local/direct endpoint，但不得删除、替换或隐藏 saved Host truth；目标 Auto 顺序固定为 `LAN -> UDP direct -> Tailscale -> Relay`，IPv4/IPv6 只是 UDP direct 的地址族。当前 TypeScript 与 Android Service 顺序尚未完全迁移，见 `docs/decisions/2026-09-05-runtime-memory-truth.md`。
 - Relay 鉴权是 account-scoped、token-per-login：同一账号允许多台 client device 与多个 daemon device 同时在线，每次登录新增独立 token，不得替换或撤销其他设备 token。普通密码修改保留已有 token；只有显式“退出所有设备”安全动作才能全局撤销。
 - 首页禁止投影或管理 Session group、Session 子列表、tab 列表与 tab 保存；实时 Session 列表、切换、关闭和预览只属于 Terminal drawer / picker。
-- relay 登录密码只用于当次认证，不持久化明文；持久化真相是 token、account directory 与 relay client settings。
+- relay 登录密码不持久化明文；目标允许持久化 password-derived hash/verifier，但必须采用不可重放的行业标准认证方案。具体协议另行设计，当前 token 持久化实现不等于该目标已完成。
 
 ### Screen 1A: Session Picker
 
@@ -225,7 +227,7 @@ operation -> event -> projection
 
 输入只允许来自：
 
-- fixed relay service identity `relay.codewhisper.cc`
+- configured Relay service identity from `~/.zterm/config.toml`; no production hardcoded Relay URL
 - relay account state
 - relay account directory / online daemon devices
 - saved Host storage projection
@@ -233,7 +235,7 @@ operation -> event -> projection
 
 硬规则：
 
-- projection 负责 fixed-domain relay 登录、online daemon device 投影、saved direct/Tailscale connection entry、current-process active Session resume entry；disconnected/stale relay records 不得成为 connectable row
+- projection 负责 configured Relay 登录、online daemon device 投影、saved direct/Tailscale connection entry、current-process active Session resume entry；disconnected/stale relay records 不得成为 connectable row
 - relay logged-out / error state 不得隐藏 direct/Tailscale saved Host 或 active Session entry
 - relay account directory 只能增强 route/device candidates，不得成为 saved Host / Tailscale direct connection owner
 - projection 不得写任何 storage
@@ -426,7 +428,7 @@ daemon server
         ├─ 比较 local sparse buffer 与 daemon head
         ├─ 结合 renderer 声明的 visible range 计算 gap / diff
         ├─ 决定补 diff / 直接跳到当前 visible window / visible gap repair
-        └─ 维护本地 1000 行 sparse sliding buffer + line/range patch
+        └─ 维护 absolute-row sparse rolling window + line/range patch
                 ↓
       client sparse buffer
         └─ absolute-row immutable truth / gap ranges / visible-range repair plan
@@ -506,7 +508,7 @@ daemon server
 - 不能再把 `bridgeHost` 和 `sessionName` 混在一个字段里
 - UI 上任何“当前连接”展示都必须能恢复为 `server + session` 组合
 - Server 进程启动方式也要有唯一入口：本地后台 daemon CLI，监听端口由统一配置决定（当前 `3333`）
-- daemon 的 host / port / auth token 真源在 `~/.wterm/config.json -> mobile.daemon`
+- daemon 当前读取 `~/.zterm/config.json`；目标由一次性迁移生成 `~/.zterm/config.toml`，并以 TOML 作为 host / port / auth / Relay 的唯一配置真源
 - client 侧按服务器维度记住 `bridgeHost + bridgePort + authToken`，并在 picker / connection form / reconnect 时复用
 - 连通性探测必须显式触发；未填写 token 时禁止自动探测 / 自动重试 tmux 列表
 - websocket mux 采用物理 target 级保活观测：一个 daemon target 的物理 WebSocket/RTC transport 只有一个 app-level `mux-ping` timer，logical tmux session/channel 不得各自发 heartbeat；正常周期为低频 30 秒。合法 mux frame 更新 target activity，channel 切换、foreground resume、body-subscription 变化不得新建 heartbeat 或物理 transport。只有物理 `close/error`、send 抛错、daemon 不可达，或 target health owner 明确确认物理 transport 失效，才允许进入 target 重建；单个 channel 错误只能重开该 channel。
@@ -515,6 +517,11 @@ daemon server
 
 ## 当前实现与目标差距
 
+- 当前 client sparse buffer 默认/最大仍是 1000 行；目标默认 3000 行且可配置，最大值尚未由设计确定
+- 当前 daemon 对完整 mirror window 计算 diff，初始 `forceRevision` 可发布完整窗口；目标 ordinary live diff 只比较最后一屏，首连 head/tail 后最多 catch 三屏
+- 当前生产编排是 `ClientCompositionRoot + PluginHost`；Cordis 固定 service/node 仍是目标迁移
+- 当前 Android Service 只拥有 WebSocket/mux 物理生命周期，UDP/WebRTC 仍在 TypeScript；目标由 Service 持有全部物理连接逻辑和状态
+- 当前仍读取 JSON 配置并存在固定 Relay 默认地址；目标是迁移到 `~/.zterm/config.toml` 后删除硬编码和 JSON runtime fallback
 - 当前是“主机列表页 + 顶部按钮”，目标是“Connections 连接中心”
 - 当前缺少独立的 Connection Properties 结构页
 - 当前终端页的悬浮菜单语义必须是“文本 snippet 注入”，不能再把它和方向键 / Esc 这类快捷键组合混用
