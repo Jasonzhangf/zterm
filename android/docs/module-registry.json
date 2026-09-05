@@ -3068,6 +3068,7 @@
       "pending_resources": [],
       "public_interfaces": [
         "contracts/app-version.json",
+        "native/android/build.gradle",
         "native/android/app/build.gradle",
         "scripts/app-version.mjs",
         "scripts/build-android-debug.sh",
