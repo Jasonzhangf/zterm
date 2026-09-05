@@ -354,6 +354,9 @@ export function createDaemonBufferPublisherRuntime(
         continue;
       }
       if (session.bodySubscribed === false) {
+        if (session.bufferSyncState?.pendingRangeResponses?.length) {
+          flushRangeBufferSyncResponse(mirror, session);
+        }
         continue;
       }
       queueSubscriberPendingBufferSync(session, mirror, normalizedRanges, now);
@@ -446,6 +449,9 @@ export function createDaemonBufferPublisherRuntime(
     for (const sessionId of mirror.subscribers) {
       const session = sessions.get(sessionId);
       if (session?.bodySubscribed === false) {
+        if (session?.bufferSyncState?.pendingRangeResponses?.length) {
+          flushRangeBufferSyncResponse(mirror, session);
+        }
         continue;
       }
       flushPendingSubscriberBufferSync(mirror, sessionId);

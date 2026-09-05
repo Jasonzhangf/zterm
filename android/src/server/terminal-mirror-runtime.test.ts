@@ -272,7 +272,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
       flags: 0,
       width: 1,
     }));
-    const { runtime, sessions, sendText } = createRuntime({
+    const { runtime, sessions, mirrors, sendText } = createRuntime({
       captureMirrorAuthoritativeBufferFromTmux: async (mirror) => {
         mirror.cols = 200;
         mirror.rows = 24;
@@ -293,6 +293,11 @@ describe('terminal mirror runtime lifecycle truth', () => {
       cols: 200,
       rows: 24,
     });
+    const mirror = mirrors.get('demo');
+    expect(mirror).not.toBeNull();
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      runtime.flushPendingSubscriberBufferSync(mirror!, session.id);
+    }
 
     const syncTexts = sendText.mock.calls.map(([, text]) => String(text)).filter((text) => {
       try {

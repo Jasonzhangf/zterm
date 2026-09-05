@@ -60,7 +60,7 @@ flowchart TD
 | `daemon-session-catalog-runtime.ts` | backend session catalog construction and `list-sessions` control dispatch | `src/server/daemon-session-catalog-runtime.ts` |
 | `terminal-runtime.ts` | session lifecycle, tmux attach/detach, buffer head/range, schedule handoff | `src/server/terminal-runtime.ts` |
 | `terminal-mirror-runtime.ts` | tmux mirror truth: capture scheduling, canonicalize, changed-ranges, subscriber broadcast | `src/server/terminal-mirror-runtime.ts` |
-| `daemon-buffer-publisher-runtime.ts` | daemon buffer-sync publication: per-subscriber pending-latest, range merge/collapse, backpressure hysteresis, head cache, frame split, explicit flush statuses | `src/server/daemon-buffer-publisher-runtime.ts` |
+| `daemon-buffer-publisher-runtime.ts` | daemon buffer-sync publication: per-subscriber live pending-latest, independent FIFO request-range responses, range merge/collapse, backpressure hysteresis, head cache, frame split, explicit flush statuses | `src/server/daemon-buffer-publisher-runtime.ts` |
 | `terminal-mirror-capture.ts` | validated source capture, source-neutral canonicalization, and authoritative mirror snapshot commit writes; owned by `daemon.mirror_writer` | `src/server/terminal-mirror-capture.ts` |
 | `terminal-source-adapter.ts` | shared tmux/Herdr/WezTerm source adapter contract: kind normalization, source session/snapshot/input/resize/close/read-path boundary | `src/server/terminal-source-adapter.ts` |
 | `daemon-input-queue-runtime.ts` | daemon input receive/ack/dedupe/queue/backend write ordering; reliable seq cache in `terminal-reliable-input-ack.ts` | `src/server/daemon-input-queue-runtime.ts` |
@@ -83,9 +83,9 @@ flowchart TD
 | --- | --- | --- | --- |
 | WebSocket attach/connect | `server.ts` | `terminal-bridge-runtime.ts` | daemon must not own client active tab, foreground, pane, or UI state |
 | input | `terminal-message-runtime.ts` | `daemon-input-queue-runtime.ts` + `terminal-reliable-input-ack.ts` | payload remains string-only; stale/detached input drops before tmux write |
-| buffer head/range | `terminal-message-runtime.ts` | `terminal-mirror-runtime.ts` | read request must read mirror truth only; no client state policy |
+| buffer head/range | `terminal-message-runtime.ts` | `terminal-mirror-runtime.ts` -> `daemon-buffer-publisher-runtime.ts` | range response keeps request correlation and goes through the publisher FIFO/backpressure/frame-split lane; read request must read mirror truth only; no client state policy |
 | live mirror capture | `terminal-mirror-runtime.ts` | `daemon.mirror_writer` via `terminal-mirror-capture.ts` | snapshot commit writes stay in the mirror writer; daemon owns tmux mirror, not renderer/window/follow state |
-| live body publish | `terminal-mirror-runtime.ts` | `daemon-buffer-publisher-runtime.ts` | mirror commits truth; buffer publisher owns per-subscriber pending/backpressure/head/frame-split delivery to physical transport subscribers |
+| live or explicit body publish | `terminal-mirror-runtime.ts` / `terminal-message-runtime.ts` | `daemon-buffer-publisher-runtime.ts` | mirror commits truth; buffer publisher owns live pending and explicit range FIFO, per-subscriber backpressure, head/frame-split delivery to physical transport subscribers |
 | list sessions | `daemon-control-gateway-runtime.ts` | `daemon-session-catalog-runtime.ts` | backend session catalog owns backend-qualified `sessionCatalog` and list-time idle facts; no client active/session/UI truth |
 | schedule | `daemon-control-gateway-runtime.ts` -> `daemon-control-center-runtime.ts` -> `terminal-message-control-runtime.ts` | `schedule-engine.ts` + `schedule-store.ts` + `schedule-dispatch.ts` | daemon is schedule execution truth |
 | file transfer | `terminal-message-control-runtime.ts` | `terminal-file-transfer-runtime.ts` | transfer chunks preserve payload semantics |
