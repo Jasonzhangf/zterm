@@ -51,7 +51,6 @@ import {
   clearTerminalViewportLayoutDriftRuntime,
   commitProgrammaticTerminalScrollRuntime,
   consumeIgnoredProgrammaticScrollRuntime,
-  createTerminalFollowScrollState,
   flushTerminalFollowScrollRuntime,
   getTerminalFollowLastSettledScrollTop,
   getTerminalFollowPendingRenderBottomIndex,
@@ -66,9 +65,8 @@ import {
   queueTerminalFollowScrollRuntime,
   resetTerminalFollowScrollRuntime,
   resolveTerminalScrollObservationRuntime,
-  type TerminalFollowScrollEffect,
-  type TerminalFollowScrollTransition,
 } from "../lib/terminal-follow-scroll-runtime";
+import { useTerminalRendererWindow } from "../lib/use-terminal-renderer-window";
 import { normalizeTerminalCommittedText } from "../lib/terminal-input-normalization";
 import { encodeTerminalSgrMouseWheel } from "../lib/terminal-mouse-wheel-sgr";
 import {
@@ -270,9 +268,9 @@ function TerminalViewComponent({
   } | null>(null);
   const resizeCommitTimerRef = useRef<number | null>(null);
   const lastReportedViewportRef = useRef<string>("");
-  const followScrollSyncTimerRef = useRef<number | null>(null);
-  const recentViewportLayoutChangeTimerRef = useRef<number | null>(null);
-  const followScrollStateRef = useRef(createTerminalFollowScrollState());
+  const emitRenderDemandRef = useRef<
+    (nextMode: "follow" | "reading", nextRenderBottomIndex: number) => void
+  >(() => {});
   const resizeThrottleTimerRef = useRef<number | null>(null);
   const resizeRafTokenRef = useRef<number | null>(null);
   const syncScrollHostToRenderBottomRef = useRef<
@@ -280,9 +278,6 @@ function TerminalViewComponent({
   >(() => {});
   const flushPendingFollowScrollSyncRef = useRef<() => boolean>(() => false);
   const runViewportRefreshRef = useRef<() => void>(() => {});
-  const emitRenderDemandRef = useRef<
-    (nextMode: "follow" | "reading", nextRenderBottomIndex: number) => void
-  >(() => {});
   const queueFollowVisualRealignRef = useRef<
     (options?: {
       guardPendingFollowDrift?: boolean;
@@ -320,10 +315,20 @@ function TerminalViewComponent({
   );
   const [viewportClientHeightPx, setViewportClientHeightPx] = useState(0);
   const [viewportClientWidthPx, setViewportClientWidthPx] = useState(0);
-  const [renderBottomIndex, setRenderBottomIndex] = useState(
-    effectiveBufferEndIndex,
-  );
-  const [readingMode, setReadingMode] = useState(false);
+  const rendererWindow = useTerminalRendererWindow({
+    initialRenderBottomIndex: effectiveBufferEndIndex,
+    containerRef,
+    emitViewportDemandRef: emitRenderDemandRef,
+    flushPendingFollowScrollSyncRef,
+  });
+  const {
+    followScrollStateRef,
+    renderBottomIndex,
+    readingMode,
+    setRenderBottomIndex,
+    setFollowModeState,
+    applyFollowScrollTransition,
+  } = rendererWindow;
 
   const rowHeightPx = Math.max(
     1,
@@ -729,69 +734,6 @@ function TerminalViewComponent({
       scrollRowHeightPx,
       viewportRows,
     ],
-  );
-
-  const applyFollowScrollTransition = useCallback(
-    (transition: TerminalFollowScrollTransition) => {
-      followScrollStateRef.current = transition.state;
-      transition.effects.forEach((effect: TerminalFollowScrollEffect) => {
-        if (effect.type === "schedule-follow-flush") {
-          if (followScrollSyncTimerRef.current !== null) {
-            return;
-          }
-          followScrollSyncTimerRef.current = window.setTimeout(() => {
-            followScrollSyncTimerRef.current = null;
-            flushPendingFollowScrollSyncRef.current();
-          }, 0);
-          return;
-        }
-        if (effect.type === "cancel-follow-flush") {
-          if (followScrollSyncTimerRef.current !== null) {
-            window.clearTimeout(followScrollSyncTimerRef.current);
-            followScrollSyncTimerRef.current = null;
-          }
-          return;
-        }
-        if (effect.type === "set-scroll-top") {
-          const host = containerRef.current;
-          if (host && Math.abs(host.scrollTop - effect.scrollTop) > 1) {
-            host.scrollTop = effect.scrollTop;
-          }
-          return;
-        }
-        if (effect.type === "set-mode") {
-          setReadingMode(effect.mode === "reading");
-          return;
-        }
-        if (effect.type === "set-render-bottom-index") {
-          setRenderBottomIndex(effect.renderBottomIndex);
-          return;
-        }
-        if (effect.type === "emit-viewport-demand") {
-          emitRenderDemandRef.current(effect.mode, effect.renderBottomIndex);
-          return;
-        }
-        if (effect.type === "mark-layout-settling") {
-          if (recentViewportLayoutChangeTimerRef.current !== null) {
-            window.clearTimeout(recentViewportLayoutChangeTimerRef.current);
-          }
-          recentViewportLayoutChangeTimerRef.current = window.setTimeout(() => {
-            recentViewportLayoutChangeTimerRef.current = null;
-            followScrollStateRef.current = clearTerminalViewportLayoutDriftRuntime(
-              followScrollStateRef.current,
-            ).state;
-          }, 0);
-          return;
-        }
-        if (effect.type === "clear-layout-settling") {
-          if (recentViewportLayoutChangeTimerRef.current !== null) {
-            window.clearTimeout(recentViewportLayoutChangeTimerRef.current);
-            recentViewportLayoutChangeTimerRef.current = null;
-          }
-        }
-      });
-    },
-    [],
   );
 
   const markFollowViewportRealignOnLayoutDrift = useCallback(
@@ -1246,19 +1188,6 @@ function TerminalViewComponent({
 
   const resetFollowViewportReport = useCallback(() => {
     lastReportedViewportRef.current = "";
-  }, []);
-
-  const setFollowModeState = useCallback((nextRenderBottomIndex: number) => {
-    followScrollStateRef.current = createTerminalFollowScrollState({
-      lastSettledScrollTop: getTerminalFollowLastSettledScrollTop(
-        followScrollStateRef.current,
-      ),
-      hasSettledFollowFrame: hasTerminalFollowSettledFrame(
-        followScrollStateRef.current,
-      ),
-    });
-    setReadingMode(false);
-    setRenderBottomIndex(nextRenderBottomIndex);
   }, []);
 
   const scheduleFollowScrollRealign = useCallback(

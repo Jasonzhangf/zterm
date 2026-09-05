@@ -840,14 +840,14 @@ export type BridgeClientMessage =
   | { type: 'buffer-head-request' }
   | { type: 'buffer-sync-request'; payload: BufferSyncRequestPayload }
   | { type: 'list-sessions'; payload?: { terminalBackend?: TerminalBackendKind } }
-  | { type: 'schedule-list'; payload: { sessionName: string } }
-  | { type: 'schedule-upsert'; payload: { job: ScheduleJobDraft } }
-  | { type: 'schedule-delete'; payload: { jobId: string } }
-  | { type: 'schedule-toggle'; payload: { jobId: string; enabled: boolean } }
-  | { type: 'schedule-run-now'; payload: { jobId: string } }
-  | { type: 'tmux-create-session'; payload: { sessionName: string; cwd?: string } }
-  | { type: 'tmux-rename-session'; payload: { sessionName: string; nextSessionName: string } }
-  | { type: 'tmux-kill-session'; payload: { sessionName: string } }
+  | { type: 'schedule-list'; payload: { sessionName: string; idempotencyKey?: string } }
+  | { type: 'schedule-upsert'; payload: { job: ScheduleJobDraft; idempotencyKey?: string } }
+  | { type: 'schedule-delete'; payload: { jobId: string; idempotencyKey?: string } }
+  | { type: 'schedule-toggle'; payload: { jobId: string; enabled: boolean; idempotencyKey?: string } }
+  | { type: 'schedule-run-now'; payload: { jobId: string; idempotencyKey?: string } }
+  | { type: 'tmux-create-session'; payload: { sessionName: string; cwd?: string; idempotencyKey?: string } }
+  | { type: 'tmux-rename-session'; payload: { sessionName: string; nextSessionName: string; idempotencyKey?: string } }
+  | { type: 'tmux-kill-session'; payload: { sessionName: string; idempotencyKey?: string } }
   | { type: 'input'; payload: string | TerminalReliableInputPayload }
   | { type: 'paste-image-start'; payload: PasteImageStartPayload }
   | { type: 'paste-image'; payload: PasteImagePayload }

@@ -28,24 +28,24 @@ import type {
 } from './terminal-runtime-types';
 
 export type DaemonScheduleControlMessage =
-  | { readonly type: 'schedule-list'; readonly payload: { readonly sessionName: string } }
-  | { readonly type: 'schedule-upsert'; readonly payload: { readonly job: import('@zterm/shared/schedule-types').ScheduleJobDraft } }
-  | { readonly type: 'schedule-delete'; readonly payload: { readonly jobId: string } }
-  | { readonly type: 'schedule-toggle'; readonly payload: { readonly jobId: string; readonly enabled: boolean } }
-  | { readonly type: 'schedule-run-now'; readonly payload: { readonly jobId: string } };
+  | { readonly type: 'schedule-list'; readonly payload: { readonly sessionName: string; readonly idempotencyKey?: string } }
+  | { readonly type: 'schedule-upsert'; readonly payload: { readonly job: import('@zterm/shared/schedule-types').ScheduleJobDraft; readonly idempotencyKey?: string } }
+  | { readonly type: 'schedule-delete'; readonly payload: { readonly jobId: string; readonly idempotencyKey?: string } }
+  | { readonly type: 'schedule-toggle'; readonly payload: { readonly jobId: string; readonly enabled: boolean; readonly idempotencyKey?: string } }
+  | { readonly type: 'schedule-run-now'; readonly payload: { readonly jobId: string; readonly idempotencyKey?: string } };
 
 export type DaemonTmuxControlMessage =
   | {
       readonly type: 'tmux-create-session';
-      readonly payload: { readonly sessionName: string; readonly cwd?: string };
+      readonly payload: { readonly sessionName: string; readonly cwd?: string; readonly idempotencyKey?: string };
     }
   | {
       readonly type: 'tmux-rename-session';
-      readonly payload: { readonly sessionName: string; readonly nextSessionName: string };
+      readonly payload: { readonly sessionName: string; readonly nextSessionName: string; readonly idempotencyKey?: string };
     }
   | {
       readonly type: 'tmux-kill-session';
-      readonly payload: { readonly sessionName: string };
+      readonly payload: { readonly sessionName: string; readonly idempotencyKey?: string };
     };
 
 export type DaemonControlGatewayDeps = TerminalMessageControlRuntimeDeps;
@@ -102,6 +102,7 @@ export function createDaemonControlGateway(
     params: C,
     context: Readonly<CTX>,
     subject: string,
+    idempotencyKey?: string,
   ): Promise<ControlOutcome<R, ControlCenterError>> {
     commandSequence += 1;
     const commandId = `${commandType}:${subject}:${commandSequence}`;
@@ -111,6 +112,7 @@ export function createDaemonControlGateway(
       capabilities: [daemonControlCapability],
       context,
       deadlineMs: daemonControlDeadlineMs,
+      idempotencyKey: idempotencyKey?.trim() || undefined,
     };
     return center.execute<C, CTX, R, never>(request);
   }
@@ -174,6 +176,7 @@ export function createDaemonControlGateway(
         message,
         { session, transport },
         subject,
+        message.payload.idempotencyKey,
       );
     },
     async handleTmuxControl(connection, message) {
@@ -182,6 +185,7 @@ export function createDaemonControlGateway(
         message,
         { connection },
         connection.transportId,
+        message.payload.idempotencyKey,
       );
     },
     getAuditEntries() {

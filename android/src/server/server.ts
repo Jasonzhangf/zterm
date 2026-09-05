@@ -493,6 +493,7 @@ const terminalMessageRuntime = createTerminalMessageRuntime({
   normalizeBufferSyncRequestPayload,
   getSessionMirror: terminalRuntime.getSubscriberMirror,
   sendBufferHeadToSession: terminalRuntime.sendBufferHeadToSession,
+  enqueueRangeBufferSyncResponse: terminalRuntime.enqueueRangeBufferSyncResponse,
   scheduleMirrorLiveSync: terminalRuntime.scheduleMirrorLiveSync,
   refreshMirrorHeadForSession: terminalRuntime.refreshMirrorHeadForSession,
   daemonInputQueue: daemonInputQueueRuntime,

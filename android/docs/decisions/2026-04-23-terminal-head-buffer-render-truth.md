@@ -72,6 +72,8 @@ renderer visible range gap
 - `buffer-head-request` 只允许用于 `resume / reconnect / stale probe / health check`
 - daemon broadcast `buffer-sync` 时只允许基于 **mirror 当前真相** 广播，不得查看客户端 `active / follow / reading / visible range`
 - daemon 正文发布的 per-subscriber pending/backpressure/head cache/frame split 状态由 `daemon.buffer_publisher` 唯一 owner 管理；`terminal-mirror-runtime.ts` 只调用 publisher 接口，不得在 mirror 层重放订阅队列语义
+- `buffer-sync-request` 的 range response 也必须经过 `daemon.buffer_publisher`；使用独立 per-subscriber FIFO response lane，保留请求范围和 `requestSentAt`，不得并入 live `pending-latest` 或被其覆盖。publisher 只消费已构造的 authoritative payload，不触发 mirror capture。
+- 共享 physical transport 的正文发送预算由 physical send boundary 统一执行；publisher 每轮最多发送有限分片并按 subscriber 轮转，单 channel 的大 frame 不得连续占满 shared socket。logical channel 仍保留各自 pending/backpressure 状态，预算不下沉为 session-local 猜测。
 - `buffer-sync-request` 继续只服务 reading repair / explicit gap pull
 - 正常 push 与 reading pull 必须互不干扰；reading 不得反向驱动 daemon live capture 策略
 
@@ -448,6 +450,7 @@ buffer manager 不得自行反推 renderer 当前窗口。
 
 - `client.dom_renderer` 只把 `resource.renderer_window` 的 immutable snapshot 投影成 `TerminalView` / `VisibleRow` / `TerminalPreviewRow` / mirror-fixed zoom-pan / cell render / theme DOM。
 - 它不持有 `follow / reading / renderBottomIndex / visible range / request policy`，不得修改 sparse truth 或请求 transport。
+- `client.renderer_window` 的 window controller/hook 持有 follow/reading transitions、renderBottomIndex 和 reset；`TerminalView` 只执行 DOM 测量、事件采集、scroll effect 和 immutable render projection。
 
 ### 3.1.2 terminal shell projection
 

@@ -232,6 +232,8 @@ tmux -> daemon mirror writer -> daemon mirror store -> read api -> client
   - high/low water 必须迟滞；send error/non-open/旧 generation 不得清 pending 或推进 sent revision；
   - 一个 slow subscriber 不得降低 healthy subscriber cadence；输出停止并 drain 后必须到达 daemon latest revision。
   - 以上 subscriber 发布状态唯一 owner 是 `daemon.buffer_publisher`（`src/server/daemon-buffer-publisher-runtime.ts`）；`terminal-mirror-runtime.ts` 只调用 publisher 的 broadcast/flush 接口，不得重放 pending/backpressure/head cache/frame split 语义。
+  - `buffer-sync-request` 的 range response 必须进入 publisher 的独立 per-subscriber FIFO lane；不得复用 live `pending-latest` 合并语义，必须保留请求范围和 `requestSentAt`，并受同一 backpressure/frame-split/send-budget 边界约束。
+  - shared physical transport 的正文发送必须由 physical send boundary 统一预算并按 logical subscriber 轮转；publisher 可以维护 subscriber pending state，但不得让单 channel 连续发送全部分片而独占 shared socket。
 - mirror capture 允许的性能优化只有同一 writer 内的 authoritative hot-range patch：
   - range 至少覆盖完整 mutable pane，absolute anchor 只来自 tmux `pane identity/history_size/rows/cols/alternate/captured count`；
   - 已确认旧 history 只能作为同一 mirror store 内的 retained prefix；
