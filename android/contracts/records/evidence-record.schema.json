@@ -25,8 +25,34 @@
     "scope_hash": {"type": "string"}
   },
   "allOf": [
-    {"if": {"properties": {"phase": {"const": "development_whitebox"}}, "required": ["phase"]}, "then": {"required": ["execution_surface"], "properties": {"execution_surface": {"const": "development_whitebox"}}}},
-    {"if": {"properties": {"phase": {"const": "deployed_blackbox"}}, "required": ["phase"]}, "then": {"required": ["artifact_hash", "execution_surface", "environment_id", "entrypoint"], "properties": {"artifact_hash": {"type": "string", "minLength": 1}, "execution_surface": {"const": "deployed_blackbox"}, "environment_id": {"type": "string", "minLength": 1}, "entrypoint": {"type": "string", "minLength": 1}, "kind": {"enum": ["runtime", "sample_replay"]}}}},
-    {"if": {"properties": {"phase": {"enum": ["deployment_install", "deployment_restart"]}}, "required": ["phase"]}, "then": {"required": ["artifact_hash", "execution_surface", "environment_id", "entrypoint"], "properties": {"artifact_hash": {"type": "string", "minLength": 1}, "execution_surface": {"const": "deployed_blackbox"}, "environment_id": {"type": "string", "minLength": 1}, "entrypoint": {"type": "string", "minLength": 1}}}}
+    {
+      "if": {"properties": {"phase": {"const": "development_whitebox"}}, "required": ["phase"]},
+      "then": {"required": ["execution_surface"], "properties": {"execution_surface": {"const": "development_whitebox"}}}
+    },
+    {
+      "if": {"properties": {"phase": {"const": "deployed_blackbox"}}, "required": ["phase"]},
+      "then": {
+        "required": ["artifact_hash", "execution_surface", "environment_id", "entrypoint"],
+        "properties": {
+          "artifact_hash": {"type": "string", "minLength": 1},
+          "execution_surface": {"const": "deployed_blackbox"},
+          "environment_id": {"type": "string", "minLength": 1},
+          "entrypoint": {"type": "string", "minLength": 1},
+          "kind": {"enum": ["runtime", "sample_replay"]}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"phase": {"enum": ["deployment_install", "deployment_restart"]}}, "required": ["phase"]},
+      "then": {
+        "required": ["artifact_hash", "execution_surface", "environment_id", "entrypoint"],
+        "properties": {
+          "artifact_hash": {"type": "string", "minLength": 1},
+          "execution_surface": {"const": "deployed_blackbox"},
+          "environment_id": {"type": "string", "minLength": 1},
+          "entrypoint": {"type": "string", "minLength": 1}
+        }
+      }
+    }
   ]
 }
