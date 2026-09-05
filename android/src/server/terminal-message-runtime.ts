@@ -4,7 +4,6 @@ import {
   buildTerminalMuxUnwrappedSessionMessageError,
   classifyTerminalMuxClientMessage,
 } from '@zterm/shared/protocol';
-import { buildRequestedRangeBufferPayload } from './buffer-sync-contract';
 import type {
   BridgeClientMessage as ClientMessage,
   BridgeServerMessage as ServerMessage,
@@ -69,6 +68,11 @@ export interface TerminalMessageRuntimeDeps {
   ) => BufferSyncRequestPayload;
   getSessionMirror: (session: TerminalSession) => SessionMirror | null;
   sendBufferHeadToSession: (session: TerminalSession, mirror: SessionMirror) => void;
+  enqueueRangeBufferSyncResponse: (
+    session: TerminalSession,
+    mirror: SessionMirror,
+    request: BufferSyncRequestPayload,
+  ) => 'queued' | 'missing-subscriber' | 'transport-not-open';
   scheduleMirrorLiveSync: (mirror: SessionMirror, delayMs?: number) => void;
   refreshMirrorHeadForSession: (session: TerminalSession, mirror: SessionMirror) => Promise<boolean>;
   daemonInputQueue: DaemonInputQueueRuntime;
@@ -457,8 +461,7 @@ export function createTerminalMessageRuntime(
           });
           break;
         }
-        const payload = buildRequestedRangeBufferPayload(mirror, request);
-        deps.sendMessage(session, { type: 'buffer-sync', payload });
+        deps.enqueueRangeBufferSyncResponse(session, mirror, request);
         break;
       }
       case 'tmux-create-session':

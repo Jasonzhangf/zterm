@@ -6,6 +6,7 @@ import type {
 import type {
   TerminalCell,
   TerminalCursorState,
+  TerminalBufferPayload,
 } from '@zterm/shared/types';
 
 export interface TerminalSessionTransport {
@@ -64,6 +65,12 @@ export interface TerminalSubscriberBufferSyncState {
   highWaterEnteredAt: number;
   resyncRequired: boolean;
   resyncReason: TerminalSubscriberBufferSyncResyncReason | null;
+  pendingRangeResponses?: Array<{
+    payload: TerminalBufferPayload;
+    transportId: string;
+    nextChunkIndex?: number;
+  }>;
+  pendingLiveChunkIndex?: number;
 }
 
 export interface TerminalTransportSubscriber {

@@ -41,6 +41,11 @@ export interface TerminalRuntime {
   disposeLiveMirrorInputBatch: (sessionName: string, reason: string, backend?: 'tmux' | 'herdr') => number;
   ensureSessionReady: (subscriber: TerminalTransportSubscriber, mirror: SessionMirror) => void;
   sendBufferHeadToSession: (subscriber: TerminalTransportSubscriber, mirror: SessionMirror) => void;
+  enqueueRangeBufferSyncResponse: (
+    subscriber: TerminalTransportSubscriber,
+    mirror: SessionMirror,
+    request: import('@zterm/shared/types').BufferSyncRequestPayload,
+  ) => 'queued' | 'missing-subscriber' | 'transport-not-open';
   refreshMirrorHeadForSession: (subscriber: TerminalTransportSubscriber, mirror: SessionMirror) => Promise<boolean>;
   syncMirrorCanonicalBuffer: (mirror: SessionMirror, options?: { forceRevision?: boolean }) => Promise<boolean>;
   scheduleMirrorLiveSync: (mirror: SessionMirror, delayMs?: number) => void;
@@ -245,6 +250,7 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
       mirrorRuntime.disposeLiveMirrorInputBatch(sessionName, reason, backend),
     ensureSessionReady: mirrorRuntime.ensureSessionReady,
     sendBufferHeadToSession: mirrorRuntime.sendBufferHeadToSession,
+    enqueueRangeBufferSyncResponse: mirrorRuntime.enqueueRangeBufferSyncResponse,
     refreshMirrorHeadForSession: mirrorRuntime.refreshMirrorHeadForSession,
     syncMirrorCanonicalBuffer: mirrorRuntime.syncMirrorCanonicalBuffer,
     scheduleMirrorLiveSync: mirrorRuntime.scheduleMirrorLiveSync,

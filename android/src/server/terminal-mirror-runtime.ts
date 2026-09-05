@@ -10,6 +10,7 @@ import type {
 } from '@zterm/shared/types';
 import { summarizeIndexedLinesForDebug } from '@zterm/shared/terminal-buffer';
 import { sliceIndexedLines } from './canonical-buffer';
+import { buildRequestedRangeBufferPayload } from './buffer-sync-contract';
 import { createDaemonBufferPublisherRuntime } from './daemon-buffer-publisher-runtime';
 import { detachMirrorSubscriber, releaseMirrorSubscribers } from './mirror-lifecycle';
 import { resolveTerminalLiveSyncDelay } from './terminal-performance-scheduler';
@@ -88,6 +89,11 @@ export interface TerminalMirrorRuntime {
   destroyMirrorIfUnsubscribed: (mirror: SessionMirror, reason: string) => boolean;
   ensureSessionReady: (session: TerminalSession, mirror: SessionMirror) => void;
   sendBufferHeadToSession: (session: TerminalSession, mirror: SessionMirror) => void;
+  enqueueRangeBufferSyncResponse: (
+    session: TerminalSession,
+    mirror: SessionMirror,
+    request: import('@zterm/shared/types').BufferSyncRequestPayload,
+  ) => 'queued' | 'missing-subscriber' | 'transport-not-open';
   flushPendingSubscriberBufferSync: (
     mirror: SessionMirror,
     sessionId: string,
@@ -331,6 +337,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     buildBufferHeadPayload: deps.buildBufferHeadPayload,
     buildChangedRangesBufferSyncPayload: deps.buildChangedRangesBufferSyncPayload,
     ensureSessionReady,
+    buildRequestedRangeBufferPayload,
   });
   function announceMirrorSubscribersReady(mirror: SessionMirror) {
     for (const sessionId of mirror.subscribers) {
@@ -1051,6 +1058,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     destroyMirrorIfUnsubscribed,
     ensureSessionReady,
     sendBufferHeadToSession: bufferPublisher.sendBufferHeadToSession,
+    enqueueRangeBufferSyncResponse: bufferPublisher.enqueueRangeBufferSyncResponse,
     flushPendingSubscriberBufferSync: bufferPublisher.flushPendingSubscriberBufferSync,
     refreshMirrorHeadForSession,
     syncMirrorCanonicalBuffer,

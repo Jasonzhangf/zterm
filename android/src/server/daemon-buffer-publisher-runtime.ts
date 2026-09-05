@@ -20,11 +20,13 @@ import type {
   TerminalSubscriberBufferSyncResyncReason,
   TerminalSubscriberBufferSyncState,
 } from './terminal-runtime-types';
+import type { TerminalBufferPayload } from '@zterm/shared/types';
 
 const SUBSCRIBER_PENDING_RANGE_LIMIT = 64;
 const SUBSCRIBER_PENDING_SPAN_LINE_LIMIT = TERMINAL_BUFFER_SYNC_FRAME_MAX_SPAN_LINES;
 const SUBSCRIBER_PENDING_AGE_LIMIT_MS = 15_000;
 const SUBSCRIBER_BUFFER_SYNC_MAX_BYTES = TERMINAL_BUFFER_SYNC_MESSAGE_MAX_BYTES;
+const MAX_SYNC_CHUNKS_PER_FLUSH = 2;
 
 export interface DaemonBufferPublisherDeps {
   sessions: Map<string, TerminalSession>;
@@ -43,6 +45,10 @@ export interface DaemonBufferPublisherDeps {
     changedRanges: Array<{ startIndex: number; endIndex: number }>,
   ) => Extract<ServerMessage, { type: 'buffer-sync' }>['payload'] | null;
   ensureSessionReady: (session: TerminalSession, mirror: SessionMirror) => void;
+  buildRequestedRangeBufferPayload: (
+    mirror: SessionMirror,
+    request: import('@zterm/shared/types').BufferSyncRequestPayload,
+  ) => TerminalBufferPayload;
 }
 
 export interface DaemonBufferPublisherRuntime {
@@ -63,6 +69,11 @@ export interface DaemonBufferPublisherRuntime {
     | 'stale-transport';
   flushPendingBufferSyncToSubscribers(mirror: SessionMirror): void;
   sendBufferHeadToSession(session: TerminalSession, mirror: SessionMirror): void;
+  enqueueRangeBufferSyncResponse(
+    session: TerminalSession,
+    mirror: SessionMirror,
+    request: import('@zterm/shared/types').BufferSyncRequestPayload,
+  ): 'queued' | 'missing-subscriber' | 'transport-not-open';
 }
 
 export function createDaemonBufferPublisherRuntime(
@@ -82,6 +93,7 @@ export function createDaemonBufferPublisherRuntime(
       highWaterEnteredAt: 0,
       resyncRequired: false,
       resyncReason: null,
+      pendingRangeResponses: [],
     };
   }
 
@@ -245,6 +257,65 @@ export function createDaemonBufferPublisherRuntime(
     state.highWaterEnteredAt = 0;
     state.resyncRequired = false;
     state.resyncReason = null;
+    state.pendingLiveChunkIndex = 0;
+  }
+
+  function enqueueRangeBufferSyncResponse(
+    session: TerminalSession,
+    mirror: SessionMirror,
+    request: import('@zterm/shared/types').BufferSyncRequestPayload,
+  ): 'queued' | 'missing-subscriber' | 'transport-not-open' {
+    if (!sessions.has(session.id)) {
+      return 'missing-subscriber';
+    }
+    const state = ensureSubscriberBufferSyncState(session);
+    state.pendingRangeResponses ||= [];
+    state.pendingRangeResponses.push({
+      payload: deps.buildRequestedRangeBufferPayload(mirror, request),
+      transportId: session.transportId,
+      nextChunkIndex: 0,
+    });
+    const result = flushRangeBufferSyncResponse(mirror, session);
+    return result === 'transport-not-open' ? 'transport-not-open' : 'queued';
+  }
+
+  function flushRangeBufferSyncResponse(
+    mirror: SessionMirror,
+    session: TerminalSession,
+  ): 'sent' | 'no-pending' | 'transport-not-open' | 'backpressured' | 'send-error' {
+    const state = ensureSubscriberBufferSyncState(session);
+    const queue = state.pendingRangeResponses || [];
+    const item = queue[0];
+    if (!item) {
+      return 'no-pending';
+    }
+    if (item.transportId !== session.transportId) {
+      queue.splice(0, queue.length);
+      return 'no-pending';
+    }
+    if (!session.transport || session.transport.readyState !== 1) {
+      return 'transport-not-open';
+    }
+    if (shouldHoldPendingForBackpressure(state, session)) {
+      return 'backpressured';
+    }
+    try {
+      deps.ensureSessionReady(session, mirror);
+      const messages = splitBufferSyncPayloadMessages(item.payload, SUBSCRIBER_BUFFER_SYNC_MAX_BYTES);
+      const start = Math.max(0, item.nextChunkIndex || 0);
+      const end = Math.min(messages.length, start + MAX_SYNC_CHUNKS_PER_FLUSH);
+      for (let index = start; index < end; index += 1) {
+        deps.sendText(session.transport, messages[index]!.text);
+      }
+      item.nextChunkIndex = end;
+      if (end < messages.length) {
+        return 'sent';
+      }
+    } catch {
+      return 'send-error';
+    }
+    queue.shift();
+    return 'sent';
   }
 
   function broadcastBufferHeadToSubscribers(mirror: SessionMirror) {
@@ -306,7 +377,8 @@ export function createDaemonBufferPublisherRuntime(
     }
     const state = ensureSubscriberBufferSyncState(session);
     if (state.pendingLatestRevision === null || state.pendingChangedAbsoluteRanges.length === 0) {
-      return 'no-pending';
+      const rangeResult = flushRangeBufferSyncResponse(mirror, session);
+      return rangeResult === 'sent' ? 'sent' : 'no-pending';
     }
     if (state.pendingTransportId && state.pendingTransportId !== session.transportId) {
       markSubscriberBufferSyncResyncRequired(state, 'transport-generation', false);
@@ -336,9 +408,12 @@ export function createDaemonBufferPublisherRuntime(
       subscriberId: session.id,
       transportKind: session.transport.kind,
     };
+    const start = Math.max(0, state.pendingLiveChunkIndex || 0);
+    const end = Math.min(messages.length, start + MAX_SYNC_CHUNKS_PER_FLUSH);
     try {
       deps.ensureSessionReady(session, mirror);
-      for (const message of messages) {
+      for (let index = start; index < end; index += 1) {
+        const message = messages[index]!;
         deps.recordPerformanceTrace?.({
           ...traceBase,
           stage: 'send-start',
@@ -358,7 +433,12 @@ export function createDaemonBufferPublisherRuntime(
     } catch {
       return 'send-error';
     }
+    if (end < messages.length) {
+      state.pendingLiveChunkIndex = end;
+      return 'sent';
+    }
     clearSubscriberPendingBufferSync(state, payload.revision);
+    flushRangeBufferSyncResponse(mirror, session);
     return 'sent';
   }
 
@@ -369,6 +449,9 @@ export function createDaemonBufferPublisherRuntime(
         continue;
       }
       flushPendingSubscriberBufferSync(mirror, sessionId);
+      if (session) {
+        flushRangeBufferSyncResponse(mirror, session);
+      }
     }
   }
 
@@ -393,5 +476,6 @@ export function createDaemonBufferPublisherRuntime(
     flushPendingSubscriberBufferSync,
     flushPendingBufferSyncToSubscribers,
     sendBufferHeadToSession,
+    enqueueRangeBufferSyncResponse,
   };
 }

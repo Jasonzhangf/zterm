@@ -333,3 +333,10 @@ Packaged Electron app.asar 内 DevTools 默认被禁用。`--remote-debugging-po
 - 修复：shared payload 增加 `deliveryKind` / `sampledAtMs` / `deadlineMs`；Action 进入有界 reliable queue，sample/scroll 直接发送；daemon continuous 路径直接执行，不合并、不重放；Action 入队前检查 deadline；policy 校验 metadata 不混用。
 - 验证：message/policy/daemon 定向测试 26/26；type-check PASS；source-pollution PASS；diff-check PASS。
 - 边界：尚未完成独立 `gesture-action` / `scroll-action start/update/end` union、接收端 per-gesture sequence/lifecycle state、真实 emulator/安装版验证；不得宣称完整协议完成。
+
+# 2026-09-04 terminal architecture remediation continuation
+
+- Current dirty worktree is the remote-window branch at `0285675e`; preserve all existing dirty files.
+- Missing `android/CACHE.md` confirmed; no replacement file created.
+- Architecture mapping: range/body publication -> `daemon.buffer_publisher`; shared send budget -> physical `daemon.transport_subscriber` boundary; follow/reading/renderBottomIndex -> `client.renderer_window`; idempotency ingress -> `daemon.control_gateway` into existing `daemon.control_center`.
+- First implementation constraint: range responses need an independent FIFO lane, not live pending-latest, so request range/requestSentAt cannot be swallowed by live coalescing.

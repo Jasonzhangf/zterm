@@ -169,6 +169,9 @@ tmux truth
    - `buffer-sync-request` -> `buffer-sync`
    - 每次 reply 都带 head
    - 不允许 `buffer-sync-request` 降级成别的 ack 语义
+   - range response 经过 publisher 独立 FIFO，不被 live pending-latest 覆盖
+   - 大 range response 受同一 frame split、backpressure 和 shared-transport send budget 约束
+   - shared physical transport 上多个 channel 轮转发送，单 channel 不得独占连续分片
 
 2. **buffer manager orchestration**
    - head-first tick

@@ -166,6 +166,7 @@ function createRuntime(options?: {
   });
   const sendMessage = vi.fn();
   const sendBufferHeadToSession = vi.fn();
+  const enqueueRangeBufferSyncResponse = vi.fn();
   const scheduleMirrorLiveSync = vi.fn();
   const refreshMirrorHeadForSession = vi.fn(async () => true);
   const handleInput = vi.fn(async (_session: TerminalSession, _data: string, _shouldWrite?: () => boolean) => true);
@@ -288,6 +289,7 @@ function createRuntime(options?: {
     normalizeBufferSyncRequestPayload: (_session, request) => request,
     getSessionMirror: () => options?.mirror ?? null,
     sendBufferHeadToSession,
+    enqueueRangeBufferSyncResponse,
     scheduleMirrorLiveSync,
     refreshMirrorHeadForSession,
     daemonInputQueue,
@@ -338,6 +340,7 @@ function createRuntime(options?: {
     sendTransportMessage,
     sendMessage,
     sendBufferHeadToSession,
+    enqueueRangeBufferSyncResponse,
     scheduleMirrorLiveSync,
     refreshMirrorHeadForSession,
     handleInput,
@@ -915,7 +918,7 @@ describe('terminal message runtime explicit error truth', () => {
     });
   });
 
-  it('allows explicit buffer-sync range reads while physical body subscription is disabled', async () => {
+  it('routes explicit buffer-sync range reads through the publisher while physical body subscription is disabled', async () => {
     const mirror = createReadyMirror();
     mirror.bufferLines = [[{
       char: 97,
@@ -925,7 +928,7 @@ describe('terminal message runtime explicit error truth', () => {
       width: 1,
     }]];
     mirror.revision = 4;
-    const { runtime, sessions, sendMessage, sendBufferHeadToSession, scheduleMirrorLiveSync } = createRuntime({ mirror });
+    const { runtime, sessions, sendMessage, sendBufferHeadToSession, scheduleMirrorLiveSync, enqueueRangeBufferSyncResponse } = createRuntime({ mirror });
     const session = createSession();
     session.bodySubscribed = false;
     sessions.set(session.id, session);
@@ -944,15 +947,10 @@ describe('terminal message runtime explicit error truth', () => {
 
     expect(sendBufferHeadToSession).not.toHaveBeenCalled();
     expect(scheduleMirrorLiveSync).not.toHaveBeenCalled();
-    expect(sendMessage).toHaveBeenCalledWith(session, expect.objectContaining({
-      type: 'buffer-sync',
-      payload: expect.objectContaining({
-        revision: 4,
-        startIndex: 0,
-        endIndex: 1,
-        availableStartIndex: 0,
-        availableEndIndex: 1,
-      }),
+    expect(sendMessage).not.toHaveBeenCalledWith(session, expect.objectContaining({ type: 'buffer-sync' }));
+    expect(enqueueRangeBufferSyncResponse).toHaveBeenCalledWith(session, mirror, expect.objectContaining({
+      requestStartIndex: 0,
+      requestEndIndex: 1,
     }));
   });
 

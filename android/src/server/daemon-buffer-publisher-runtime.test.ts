@@ -88,6 +88,18 @@ function makeDeps(overrides: Partial<DaemonBufferPublisherDeps> = {}): DaemonBuf
       lines: [],
     }) as never,
     ensureSessionReady: () => undefined,
+    buildRequestedRangeBufferPayload: (mirror, request) => ({
+      revision: mirror.revision,
+      startIndex: request.requestStartIndex,
+      endIndex: request.requestEndIndex,
+      availableStartIndex: mirror.bufferStartIndex,
+      availableEndIndex: mirror.bufferStartIndex + mirror.bufferLines.length,
+      cols: mirror.cols,
+      rows: mirror.rows,
+      cursorKeysApp: mirror.cursorKeysApp,
+      cursor: mirror.cursor,
+      lines: [],
+    }),
     ...overrides,
   };
 }
@@ -197,6 +209,33 @@ describe('daemon buffer publisher runtime', () => {
     expect(messages[0].payload.startIndex).toBe(0);
     expect(messages[messages.length - 1].payload.endIndex).toBe(20_000);
     expect(session.bufferSyncState?.lastSentRevision).toBe(4);
+  });
+
+  it('bounds one subscriber flush so a sibling on the shared transport gets a send turn', () => {
+    const first = makeSession('s1');
+    const second = makeSession('s2');
+    const sent: string[] = [];
+    const deps = makeDeps({
+      sessions: new Map([['s1', first], ['s2', second]]),
+      buildChangedRangesBufferSyncPayload: (mirror, ranges) => ({
+        revision: mirror.revision,
+        startIndex: ranges[0]?.startIndex ?? 0,
+        endIndex: 20_000,
+        lines: Array.from({ length: 20_000 }, (_, index) => ({ i: index })),
+      }) as never,
+      sendText: (transport, text) => {
+        sent.push(`${transport === first.transport ? 's1' : 's2'}:${JSON.parse(text).payload.frameChunkIndex}`);
+      },
+    });
+    const publisher = createDaemonBufferPublisherRuntime(deps);
+    const mirror = makeMirror(['s1', 's2'], 9);
+
+    publisher.broadcastChangedRangesBufferSyncToSubscribers(mirror, [{ startIndex: 0, endIndex: 20_000 }]);
+
+    expect(sent.slice(0, 2).every((entry) => entry.startsWith('s1:'))).toBe(true);
+    expect(sent.some((entry) => entry.startsWith('s2:'))).toBe(true);
+    expect(sent.filter((entry) => entry.startsWith('s1:')).length).toBeLessThanOrEqual(2);
+    expect(first.bufferSyncState?.lastSentRevision).toBeGreaterThanOrEqual(0);
   });
 
   it('returns stale-transport without clearing the pending range', () => {

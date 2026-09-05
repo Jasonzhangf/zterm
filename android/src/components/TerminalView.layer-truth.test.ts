@@ -91,4 +91,19 @@ describe('TerminalView renderer / UI shell layer separation', () => {
     expect(source).not.toContain('accumulatedDeltaPx');
     expect(source).not.toContain('decideTwoFingerWheel');
   });
+
+  it('keeps renderer-window state owned by useTerminalRendererWindow', () => {
+    const viewSource = readSource('src/components/TerminalView.tsx');
+    const windowSource = readSource('src/lib/use-terminal-renderer-window.ts');
+
+    expect(viewSource).not.toMatch(
+      /useState\s*\(\s*(?:options\.)?initialRenderBottomIndex/,
+    );
+    expect(viewSource).not.toMatch(/useState\s*\(\s*false\s*\).*readingMode/);
+    expect(viewSource).not.toContain('createTerminalFollowScrollState');
+    expect(windowSource).toContain('followScrollStateRef');
+    expect(windowSource).toContain('renderBottomIndex');
+    expect(windowSource).toContain('readingMode');
+    expect(windowSource).toContain('applyFollowScrollTransition');
+  });
 });
