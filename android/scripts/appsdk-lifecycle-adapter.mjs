@@ -3,7 +3,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 
 const root = resolve(new URL("..", import.meta.url).pathname);
 const moduleId = "zterm-runtime-v2";
@@ -30,11 +30,6 @@ function git(args) {
 
 function now() {
   return new Date().toISOString();
-}
-
-function later(previous) {
-  const time = new Date(new Date(previous).getTime() + 1000);
-  return time.toISOString();
 }
 
 function writeJson(path, value) {
@@ -72,15 +67,20 @@ const candidateCommit = git(["rev-parse", "HEAD"]);
 const candidateTree = git(["rev-parse", "HEAD^{tree}"]);
 const baseCommit = git(["merge-base", "HEAD", "origin/main"]);
 const changedPaths = git(["diff", "--name-only", `${baseCommit}..HEAD`]).split("\n").filter(Boolean);
+const repositoryRoot = resolve(git(["rev-parse", "--show-toplevel"]));
+const projectPrefix = relative(repositoryRoot, root).replaceAll("\\", "/");
+const diffPaths = changedPaths
+  .filter((path) => !projectPrefix || path === projectPrefix || path.startsWith(`${projectPrefix}/`))
+  .map((path) => projectPrefix && path.startsWith(`${projectPrefix}/`) ? path.slice(projectPrefix.length + 1) : path);
 const moduleContract = JSON.parse(readFileSync(join(root, ".appsdk", "project.json"), "utf8")).modules.find((module) => module.module_id === moduleId);
 if (!moduleContract) throw new Error(`module not found: ${moduleId}`);
 const scopeHash = sha256(JSON.stringify({ module_id: moduleId, owned_paths: moduleContract.owned_paths, contract_paths: moduleContract.contract_paths }));
 const inputHash = sha256(readFileSync(artifactPath));
-const diffHash = sha256(run("git", ["diff", "--binary", `${baseCommit}..HEAD`, "--", ...changedPaths]));
+const diffHash = sha256(run("git", ["diff", "--binary", `${baseCommit}..HEAD`, "--", ...diffPaths]));
 
 const startedAt = now();
 run("pnpm", ["exec", "vitest", "run", "src/server/terminal-message-runtime.test.ts", "src/server/terminal-mirror-runtime.test.ts", "src/server/daemon-buffer-publisher-runtime.test.ts", "src/lib/runtime-architecture-v2.test.ts", "src/lib/plugin-host/plugin-host-runtime.test.ts", "src/pages/TerminalPage.render-isolation.test.tsx", "src/App.dynamic-refresh.test.tsx", "src/contexts/SessionContext.ws-refresh.test.tsx", "--reporter=dot"]);
-const whiteboxAt = later(startedAt);
+const whiteboxAt = now();
 const whiteboxId = `whitebox-${candidateCommit.slice(0, 12)}`;
 writeJson(join(evidenceRoot, `${whiteboxId}.json`), evidence({ id: whiteboxId, phase: "development_whitebox", kind: "gate", createdAt: whiteboxAt, artifactHash, surface: "development_whitebox", inputHashes: [inputHash, `git:${candidateCommit}`] }));
 
@@ -105,13 +105,12 @@ await new Promise((resolveReady, rejectReady) => {
   };
   probe();
 });
-const installAt = later(whiteboxAt);
+const installAt = now();
 const installId = `install-${candidateCommit.slice(0, 12)}`;
 writeJson(join(evidenceRoot, `${installId}.json`), evidence({ id: installId, phase: "deployment_install", kind: "install", createdAt: installAt, artifactHash, surface: "deployed_blackbox", inputHashes: [inputHash, `git:${candidateCommit}`] }));
 stopServer();
 await new Promise((resolveExit) => server.once("exit", resolveExit));
 const restarted = spawn(viteBinary, ["preview", "--host", "127.0.0.1", "--port", "4173"], { cwd: deploymentRoot, stdio: ["ignore", "pipe", "pipe"] });
-const restartAt = later(installAt);
 await new Promise((resolveReady, rejectReady) => {
   const timeout = setTimeout(() => rejectReady(new Error("restarted deployment server did not start")), 15000);
   const probe = async () => {
@@ -123,18 +122,19 @@ await new Promise((resolveReady, rejectReady) => {
   };
   probe();
 });
+const restartAt = now();
 const restartId = `restart-${candidateCommit.slice(0, 12)}`;
 writeJson(join(evidenceRoot, `${restartId}.json`), evidence({ id: restartId, phase: "deployment_restart", kind: "restart", createdAt: restartAt, artifactHash, surface: "deployed_blackbox", inputHashes: [inputHash, `git:${candidateCommit}`] }));
-const blackboxAt = later(restartAt);
 const blackboxId = `blackbox-${candidateCommit.slice(0, 12)}`;
 const blackboxResponse = await fetch(entrypoint);
 if (!blackboxResponse.ok) throw new Error(`deployed blackbox returned HTTP ${blackboxResponse.status}`);
+const blackboxAt = now();
 writeJson(join(evidenceRoot, `${blackboxId}.json`), evidence({ id: blackboxId, phase: "deployed_blackbox", kind: "runtime", createdAt: blackboxAt, artifactHash, surface: "deployed_blackbox", inputHashes: [inputHash, `git:${candidateCommit}`] }));
 restarted.kill("SIGTERM");
 await new Promise((resolveExit) => restarted.once("exit", resolveExit));
 
 const candidateId = `FIX-${candidateCommit.slice(0, 12)}`;
-const candidateCreatedAt = later(startedAt);
+const candidateCreatedAt = now();
 writeJson(join(recordsRoot, `fix-candidate-record-${moduleId}.json`), {
   "$schema": "https://appsdk.local/contracts/records/fix-candidate-record.schema.json",
   fix_candidate_id: candidateId,
@@ -153,7 +153,7 @@ writeJson(join(recordsRoot, `fix-candidate-record-${moduleId}.json`), {
   created_at: candidateCreatedAt,
 });
 
-const validationAt = later(blackboxAt);
+const validationAt = now();
 writeJson(join(recordsRoot, `pre-review-validation-record-${moduleId}.json`), {
   "$schema": "https://appsdk.local/contracts/records/pre-review-validation-record.schema.json",
   validation_id: `PRE-${candidateCommit.slice(0, 12)}`,
@@ -172,4 +172,3 @@ writeJson(join(recordsRoot, `pre-review-validation-record-${moduleId}.json`), {
   created_at: validationAt,
 });
 console.log(JSON.stringify({ ok: true, candidate_commit: candidateCommit, artifact_hash: artifactHash, validation_id: `PRE-${candidateCommit.slice(0, 12)}` }));
-
