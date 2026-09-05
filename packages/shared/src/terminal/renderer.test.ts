@@ -322,7 +322,7 @@ describe('shared terminal renderer pure helpers', () => {
       resetReportedViewport: true,
       immediateScrollSync: true,
       resetFollowViewportReport: () => calls.push(['reset', true]),
-      setFollowModeState: (next) => calls.push(['state', next]),
+      resetToFollow: (next) => calls.push(['state', next]),
       scheduleFollowScrollRealign: (next, options) => calls.push(['queue', options?.immediateScrollSync ? next : -1]),
       emitFollowViewportDemand: (next) => calls.push(['emit', next]),
     });
@@ -354,7 +354,7 @@ describe('shared terminal renderer pure helpers', () => {
         alignCalls.push(1);
         return 140;
       },
-      setRenderBottomIndex: (next) => setRenderBottomIndexCalls.push(next),
+      setRenderBottom: (next) => setRenderBottomIndexCalls.push(next),
       emitReadingRenderDemand: (next) => emitReadingDemandCalls.push(next ?? -1),
     });
 

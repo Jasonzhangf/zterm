@@ -351,7 +351,7 @@ export function applySessionSwitchRenderReset(options: {
   previousSessionIdRef: { current: string | null };
   followVisualBottomIndex: number;
   setReadingMode: (next: boolean) => void;
-  setRenderBottomIndex: (next: number) => void;
+  setRenderBottom: (next: number) => void;
   pendingImmediateFollowScrollSyncRef: { current: boolean };
   lastReportedViewportRef: { current: string };
   previousRefreshSessionIdRef: { current: string | null };
@@ -363,7 +363,7 @@ export function applySessionSwitchRenderReset(options: {
   if (options.previousSessionIdRef.current === options.sessionId) return false;
   options.previousSessionIdRef.current = options.sessionId;
   options.setReadingMode(false);
-  options.setRenderBottomIndex(options.followVisualBottomIndex);
+  options.setRenderBottom(options.followVisualBottomIndex);
   options.pendingImmediateFollowScrollSyncRef.current = true;
   options.lastReportedViewportRef.current = '';
   options.previousRefreshSessionIdRef.current = options.sessionId;

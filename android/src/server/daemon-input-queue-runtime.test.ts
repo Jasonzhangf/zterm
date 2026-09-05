@@ -71,8 +71,6 @@ function createRuntime() {
     tmuxBinary: 'tmux',
     defaultSessionName: 'demo',
     hiddenTmuxSessions: new Set(),
-    mirrors,
-    getMirrorKey: (sessionName) => sessionName,
     sanitizeSessionName: (input) => input?.trim() || 'demo',
   });
   const queue = createDaemonInputQueueRuntime({
@@ -150,6 +148,85 @@ describe('daemon input queue runtime', () => {
       '--',
       'new',
     ]);
+  });
+
+  it('serializes generic backend writes with live input through the same physical queue', async () => {
+    const children: Array<ReturnType<typeof createFakeChild>> = [];
+    spawnMock.mockImplementation(() => {
+      const child = createFakeChild();
+      children.push(child);
+      return child;
+    });
+    const { queue } = createRuntime();
+
+    const liveWrite = queue.enqueueLiveMirrorInput('demo', 'interactive', false, () => true);
+    const genericWrite = queue.enqueueBackendInput('demo', 'schedule', true);
+
+    await Promise.resolve();
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    expect(spawnMock.mock.calls[0]?.[1]).toEqual([
+      'send-keys',
+      '-t',
+      '=demo:.{top-left}',
+      '-l',
+      '--',
+      'interactive',
+    ]);
+
+    children[0]?.emit('close', 0);
+    await expect(liveWrite).resolves.toBe(true);
+    await waitForTmuxWriteSettle();
+    expect(spawnMock).toHaveBeenCalledTimes(2);
+    expect(spawnMock.mock.calls[1]?.[1]).toEqual([
+      'send-keys',
+      '-t',
+      '=demo:.{top-left}',
+      '-l',
+      '--',
+      'schedule',
+    ]);
+    children[1]?.emit('close', 0);
+    await waitForTmuxWriteSettle();
+    expect(spawnMock).toHaveBeenCalledTimes(3);
+    expect(spawnMock.mock.calls[2]?.[1]).toEqual(['send-keys', '-t', '=demo:.{top-left}', 'Enter']);
+    children[2]?.emit('close', 0);
+    await expect(genericWrite).resolves.toBe(true);
+  });
+
+  it('allows generic backend writes without a ready mirror while live writes remain rejected', async () => {
+    await runSpawnMockImmediately();
+    const { queue, mirrors } = createRuntime();
+    mirrors.get('demo')!.lifecycle = 'destroyed';
+
+    await expect(queue.enqueueLiveMirrorInput('demo', 'live', false, () => true)).resolves.toBe(false);
+    await expect(queue.enqueueBackendInput('demo', 'schedule', false)).resolves.toBe(true);
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps generic backend writes queued across live input dispose', async () => {
+    const children: Array<ReturnType<typeof createFakeChild>> = [];
+    spawnMock.mockImplementation(() => {
+      const child = createFakeChild();
+      children.push(child);
+      return child;
+    });
+    const { queue, mirrors } = createRuntime();
+
+    const liveWrite = queue.enqueueLiveMirrorInput('demo', 'interactive', false, () => true);
+    await Promise.resolve();
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+
+    const genericWrite = queue.enqueueBackendInput('demo', 'schedule', false);
+    mirrors.get('demo')!.lifecycle = 'destroyed';
+    const evicted = queue.disposeLiveMirrorInputBatch('demo', 'detach');
+
+    expect(evicted).toBe(0);
+    children[0]?.emit('close', 0);
+    await expect(liveWrite).resolves.toBe(true);
+    await waitForTmuxWriteSettle();
+    expect(spawnMock).toHaveBeenCalledTimes(2);
+    children[1]?.emit('close', 0);
+    await expect(genericWrite).resolves.toBe(true);
   });
 
   it('preserves append-enter boundaries while batching surrounding literal input', async () => {
@@ -336,8 +413,6 @@ describe('daemon input queue runtime', () => {
       tmuxBinary: 'tmux',
       defaultSessionName: 'demo',
       hiddenTmuxSessions: new Set(),
-      mirrors,
-      getMirrorKey: (sessionName) => sessionName,
       sanitizeSessionName: (input) => input?.trim() || 'demo',
       wezTermBackend,
       defaultBackend: 'wezterm',

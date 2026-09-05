@@ -209,7 +209,7 @@ export function alignTerminalRenderBottomToFollow(options: {
   queueScrollSync?: boolean;
   immediateScrollSync?: boolean;
   resetFollowViewportReport: () => void;
-  setFollowModeState: (nextRenderBottomIndex: number) => void;
+  resetToFollow: (nextRenderBottomIndex: number) => void;
   scheduleFollowScrollRealign: (
     nextRenderBottomIndex: number,
     options?: {
@@ -224,7 +224,7 @@ export function alignTerminalRenderBottomToFollow(options: {
   if (options.resetReportedViewport) {
     options.resetFollowViewportReport();
   }
-  options.setFollowModeState(nextRenderBottomIndex);
+  options.resetToFollow(nextRenderBottomIndex);
   options.scheduleFollowScrollRealign(nextRenderBottomIndex, {
     guardPendingFollowDrift: options.guardPendingFollowDrift,
     queueScrollSync: options.queueScrollSync,
@@ -249,7 +249,7 @@ export function reconcileTerminalViewportAfterBufferShift(options: {
     queueScrollSync?: boolean;
     immediateScrollSync?: boolean;
   }) => number;
-  setRenderBottomIndex: (nextRenderBottomIndex: number) => void;
+  setRenderBottom: (nextRenderBottomIndex: number) => void;
   emitReadingRenderDemand: (nextRenderBottomIndex?: number) => void;
 }) {
   if (!options.refreshActive) {
@@ -275,7 +275,7 @@ export function reconcileTerminalViewportAfterBufferShift(options: {
     return;
   }
   if (nextRenderBottomIndex !== options.effectiveRenderBottomIndex) {
-    options.setRenderBottomIndex(nextRenderBottomIndex);
+    options.setRenderBottom(nextRenderBottomIndex);
   }
   options.emitReadingRenderDemand(nextRenderBottomIndex);
 }

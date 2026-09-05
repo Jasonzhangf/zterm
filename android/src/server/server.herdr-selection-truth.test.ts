@@ -8,11 +8,10 @@ describe('Herdr daemon selection boundary', () => {
     expect(source).toContain("TERMINAL_BACKEND_KIND === 'herdr'");
     expect(source).toContain('createHerdrBackendRuntime');
     expect(source).toContain("TERMINAL_BACKEND_KIND === 'herdr'");
-    expect(source).toContain('terminalControlRuntime.writeToLiveMirror(sessionName, payload, appendEnter, backend)');
     expect(source).toContain('createDaemonInputQueueRuntime');
     expect(source).toContain('daemonInputQueueRuntime = createDaemonInputQueueRuntime({');
     expect(source).toContain('writeBackendInputGroup: (sessionName, payload, appendEnter, backendKind) =>');
-    expect(source).toContain('terminalControlRuntime.writeToTmuxSession(sessionName, payload, appendEnter, backend)');
+    expect(source).toContain('daemonInputQueueRuntimeProxy.enqueueBackendInput');
     const proxyIndex = source.indexOf('const daemonInputQueueRuntimeProxy: ReturnType<typeof createDaemonInputQueueRuntime> = {');
     const proxyUseIndex = source.indexOf('daemonInputQueue: daemonInputQueueRuntimeProxy');
     const runtimeCreateIndex = source.indexOf('daemonInputQueueRuntime = createDaemonInputQueueRuntime({');

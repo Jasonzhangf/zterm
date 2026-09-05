@@ -24,38 +24,34 @@ function makeJob(overrides: Partial<ScheduleJob> = {}): ScheduleJob {
 }
 
 describe('schedule-dispatch', () => {
-  it('writes to the live mirror first and does not hit tmux again when the live session is already attached', () => {
-    const writeToLiveMirror = vi.fn(() => true);
-    const writeToTmuxSession = vi.fn();
+  it('routes attached and unattached schedules through the same backend queue', async () => {
+    const enqueueBackendInput = vi.fn(async () => true);
 
-    const result = dispatchScheduledJob(
-      { writeToLiveMirror, writeToTmuxSession },
+    const result = await dispatchScheduledJob(
+      { enqueueBackendInput },
       makeJob({ payload: { text: 'uptime', appendEnter: true } }),
     );
 
     expect(result).toEqual({ ok: true });
-    expect(writeToLiveMirror).toHaveBeenCalledWith('main', 'uptime\r', false, undefined);
-    expect(writeToTmuxSession).not.toHaveBeenCalled();
+    expect(enqueueBackendInput).toHaveBeenCalledWith('main', 'uptime', true, 'tmux');
   });
 
-  it('falls through to tmux when the live mirror is absent and preserves appendEnter semantics', () => {
-    const writeToLiveMirror = vi.fn(() => false);
-    const writeToTmuxSession = vi.fn();
+  it('preserves appendEnter semantics for unattached schedule payloads', async () => {
+    const enqueueBackendInput = vi.fn(async () => true);
 
-    const result = dispatchScheduledJob(
-      { writeToLiveMirror, writeToTmuxSession },
+    const result = await dispatchScheduledJob(
+      { enqueueBackendInput },
       makeJob({ payload: { text: 'echo ok', appendEnter: false } }),
     );
 
     expect(result).toEqual({ ok: true });
-    expect(writeToTmuxSession).toHaveBeenCalledWith('main', 'echo ok', false, undefined);
+    expect(enqueueBackendInput).toHaveBeenCalledWith('main', 'echo ok', false, 'tmux');
   });
 
-  it('explicitly disables invalid jobs that do not have a target session', () => {
-    const result = dispatchScheduledJob(
+  it('explicitly disables invalid jobs that do not have a target session', async () => {
+    const result = await dispatchScheduledJob(
       {
-        writeToLiveMirror: vi.fn(() => false),
-        writeToTmuxSession: vi.fn(),
+        enqueueBackendInput: vi.fn(async () => true),
       },
       makeJob({ targetSessionName: '   ' }),
     );
@@ -63,12 +59,11 @@ describe('schedule-dispatch', () => {
     expect(result).toEqual({ ok: false, message: 'missing target session', disable: true });
   });
 
-  it('rejects Herdr targets before either write path so a same-name tmux session cannot receive the command', () => {
-    const writeToLiveMirror = vi.fn(() => true);
-    const writeToTmuxSession = vi.fn();
+  it('rejects Herdr targets before the queue so a same-name tmux session cannot receive the command', async () => {
+    const enqueueBackendInput = vi.fn(async () => true);
 
-    const result = dispatchScheduledJob(
-      { writeToLiveMirror, writeToTmuxSession, isHerdrSession: () => true },
+    const result = await dispatchScheduledJob(
+      { enqueueBackendInput, isHerdrSession: () => true },
       makeJob({ targetSessionName: 'hd-codex', terminalBackend: 'herdr' }),
     );
 
@@ -77,45 +72,41 @@ describe('schedule-dispatch', () => {
       message: 'Herdr single-session backend does not support schedule commands',
       disable: true,
     });
-    expect(writeToLiveMirror).not.toHaveBeenCalled();
-    expect(writeToTmuxSession).not.toHaveBeenCalled();
+    expect(enqueueBackendInput).not.toHaveBeenCalled();
   });
 
-  it('keeps a same-named tmux job on the tmux write path', () => {
-    const writeToLiveMirror = vi.fn(() => false);
-    const writeToTmuxSession = vi.fn();
+  it('keeps a same-named tmux job on the tmux backend queue', async () => {
+    const enqueueBackendInput = vi.fn(async () => true);
     const isHerdrSession = vi.fn(() => true);
 
-    const result = dispatchScheduledJob(
-      { writeToLiveMirror, writeToTmuxSession, isHerdrSession },
+    const result = await dispatchScheduledJob(
+      { enqueueBackendInput, isHerdrSession },
       makeJob({ targetSessionName: 'same-name', terminalBackend: 'tmux' }),
     );
 
     expect(result).toEqual({ ok: true });
     expect(isHerdrSession).not.toHaveBeenCalled();
-    expect(writeToTmuxSession).toHaveBeenCalledWith('same-name', 'status', true, undefined);
+    expect(enqueueBackendInput).toHaveBeenCalledWith('same-name', 'status', true, 'tmux');
   });
 
-  it('keeps ordinary tmux jobs independent from Herdr catalog availability', () => {
-    const writeToLiveMirror = vi.fn(() => false);
-    const writeToTmuxSession = vi.fn();
+  it('keeps ordinary tmux jobs independent from Herdr catalog availability', async () => {
+    const enqueueBackendInput = vi.fn(async () => true);
     const isHerdrSession = vi.fn(() => false);
 
-    const result = dispatchScheduledJob(
-      { writeToLiveMirror, writeToTmuxSession, isHerdrSession },
+    const result = await dispatchScheduledJob(
+      { enqueueBackendInput, isHerdrSession },
       makeJob({ targetSessionName: 'tmux-main' }),
     );
 
     expect(result).toEqual({ ok: true });
     expect(isHerdrSession).not.toHaveBeenCalled();
-    expect(writeToTmuxSession).toHaveBeenCalledWith('tmux-main', 'status', true, undefined);
+    expect(enqueueBackendInput).toHaveBeenCalledWith('tmux-main', 'status', true, 'tmux');
   });
 
-  it('surfaces tmux errors and only disables jobs for terminal-not-found classes of failure', () => {
-    const missingSessionResult = dispatchScheduledJob(
+  it('surfaces queue errors and only disables jobs for terminal-not-found classes of failure', async () => {
+    const missingSessionResult = await dispatchScheduledJob(
       {
-        writeToLiveMirror: vi.fn(() => false),
-        writeToTmuxSession: vi.fn(() => {
+        enqueueBackendInput: vi.fn(async () => {
           throw new Error("can't find session: main");
         }),
       },
@@ -128,10 +119,9 @@ describe('schedule-dispatch', () => {
       disable: true,
     });
 
-    const transientResult = dispatchScheduledJob(
+    const transientResult = await dispatchScheduledJob(
       {
-        writeToLiveMirror: vi.fn(() => false),
-        writeToTmuxSession: vi.fn(() => {
+        enqueueBackendInput: vi.fn(async () => {
           throw new Error('temporary write failure');
         }),
       },

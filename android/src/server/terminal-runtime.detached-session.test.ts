@@ -28,6 +28,7 @@ function createDeps() {
   const sendText = vi.fn();
   const daemonInputQueue = {
     handleInputMessage: vi.fn(async () => {}),
+    enqueueBackendInput: vi.fn(async () => true),
     enqueueLiveMirrorInput: vi.fn(async (_sessionName: string, _payload: string, _appendEnter: boolean, shouldWrite?: () => boolean) => (
       shouldWrite ? shouldWrite() : true
     )),
@@ -93,9 +94,7 @@ function createDeps() {
       captureMirrorAuthoritativeBufferFromTmux: vi.fn(async () => true),
       mirrorBufferChanged: vi.fn(() => []),
       mirrorCursorEqual: vi.fn(() => true),
-      writeToLiveMirror: vi.fn(() => true),
       daemonInputQueue,
-      writeToTmuxSession: vi.fn(),
       autoCommandDelayMs: 0,
       waitMs: async () => {},
       runTmux,

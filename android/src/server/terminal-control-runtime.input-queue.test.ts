@@ -1,9 +1,5 @@
+import { EventEmitter } from 'events';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  TERMINAL_INPUT_TMUX_WRITE_CHUNK_BYTES,
-  getTerminalInputUtf8ByteLength,
-} from '@zterm/shared/terminal/input-chunking';
-import type { SessionMirror } from './terminal-runtime-types';
 import { createTerminalControlRuntime } from './terminal-control-runtime';
 import type { TerminalSourceAdapter } from './terminal-source-adapter';
 
@@ -15,58 +11,17 @@ vi.mock('child_process', () => ({
   spawnSync: (...args: unknown[]) => spawnSyncMock(...args),
 }));
 
-function createReadyMirror(): SessionMirror {
-  return {
-    key: 'demo',
-    sessionName: 'demo',
-    lifecycle: 'ready',
-    cols: 80,
-    rows: 24,
-    baselineCols: 80,
-    baselineRows: 24,
-    cursorKeysApp: false,
-    revision: 0,
-    lastScrollbackCount: -1,
-    bufferStartIndex: 0,
-    bufferLines: [],
-    cursor: null,
-    lastFlushStartedAt: 0,
-    lastFlushCompletedAt: 0,
-    lastLiveActivityAt: 0,
-      lastHeadBroadcastAt: 0,
-    lastCaptureDurationMs: 0,
-    lastCanonicalizeDurationMs: 0,
-    flushInFlight: false,
-    flushPromise: null,
-    pendingStableCaptureSnapshot: null,
-    liveSyncTimer: null,
-    consecutiveFailures: 0,
-    subscribers: new Set(),
-      quietFlushStreak: 0,
-      lastFlushHadContentChanges: false,
-    scratchBridge: null,
-  };
-}
-
 function createRuntime() {
-  const mirrors = new Map<string, SessionMirror>([
-    ['demo', createReadyMirror()],
-  ]);
   const runtime = createTerminalControlRuntime({
     tmuxBinary: 'tmux',
     defaultSessionName: 'demo',
     hiddenTmuxSessions: new Set(),
-    mirrors,
-    getMirrorKey: (sessionName) => sessionName,
     sanitizeSessionName: (input) => input?.trim() || 'demo',
   });
-  return { runtime, mirrors };
+  return { runtime };
 }
 
 function createWezTermRuntime() {
-  const mirrors = new Map<string, SessionMirror>([
-    ['demo', createReadyMirror()],
-  ]);
   const wezTermBackend: TerminalSourceAdapter = {
     listSessions: vi.fn(() => [{ sessionName: 'demo', paneId: 9, workspace: 'zterm-demo', title: 'cmd.exe', cwd: 'D:/work', cols: 100, rows: 30 }]),
     createSession: vi.fn(({ sessionName, cwd } = {}) => ({
@@ -87,19 +42,14 @@ function createWezTermRuntime() {
     tmuxBinary: 'tmux',
     defaultSessionName: 'demo',
     hiddenTmuxSessions: new Set(),
-    mirrors,
-    getMirrorKey: (sessionName) => sessionName,
     sanitizeSessionName: (input) => input?.trim() || 'demo',
     wezTermBackend,
     defaultBackend: 'wezterm',
   });
-  return { runtime, mirrors, wezTermBackend };
+  return { runtime, wezTermBackend };
 }
 
 function createHerdrOnlyRuntime() {
-  const mirrors = new Map<string, SessionMirror>([
-    ['demo', createReadyMirror()],
-  ]);
   const herdrBackend: TerminalSourceAdapter = {
     listSessions: vi.fn(() => [{ sessionName: 'herdr-demo', paneId: 1, workspace: 'herdr-single-session', title: 'herdr', cwd: '/tmp', cols: 80, rows: 24 }]),
     createSession: vi.fn(({ sessionName } = {}) => ({
@@ -121,8 +71,6 @@ function createHerdrOnlyRuntime() {
     defaultSessionName: 'demo',
     defaultBackend: 'herdr',
     hiddenTmuxSessions: new Set(),
-    mirrors,
-    getMirrorKey: (sessionName) => sessionName,
     sanitizeSessionName: (input) => input?.trim() || 'demo',
     backendRuntimes: { herdr: herdrBackend },
   });
@@ -156,29 +104,34 @@ describe('terminal control runtime input queue', () => {
     });
     const { runtime } = createRuntime();
 
-    expect(() => runtime.writeToTmuxSession('demo', 'x', false)).toThrow(/error connecting to/);
+    expect(() => runtime.runTmux(['send-keys', '-t', '=demo:.{top-left}', '-l', '--', 'x']))
+      .toThrow(/error connecting to/);
   });
 
-  it('chunks direct tmux writes so fallback paths do not send oversized literal arguments', () => {
+  it('writes one backend input group with an explicit Enter boundary', async () => {
     const { runtime } = createRuntime();
-    const source = 'z'.repeat(TERMINAL_INPUT_TMUX_WRITE_CHUNK_BYTES + 9);
+    spawnMock.mockImplementation(() => {
+      const child = new EventEmitter() as EventEmitter & {
+        stdout: EventEmitter & { setEncoding: ReturnType<typeof vi.fn> };
+        stderr: EventEmitter & { setEncoding: ReturnType<typeof vi.fn> };
+      };
+      child.stdout = new EventEmitter() as EventEmitter & { setEncoding: ReturnType<typeof vi.fn> };
+      child.stderr = new EventEmitter() as EventEmitter & { setEncoding: ReturnType<typeof vi.fn> };
+      child.stdout.setEncoding = vi.fn();
+      child.stderr.setEncoding = vi.fn();
+      queueMicrotask(() => child.emit('close', 0));
+      return child;
+    });
 
-    runtime.writeToTmuxSession('demo', source, true);
+    await runtime.writeBackendInputGroup('demo', 'echo OK', true);
 
-    const sendKeyCalls = spawnSyncMock.mock.calls
-      .map((call) => call[1] as string[])
-      .filter((args) => args[0] === 'send-keys');
-    expect(sendKeyCalls).toHaveLength(3);
-    const payloads = sendKeyCalls
-      .filter((args) => args.includes('-l'))
-      .map((args) => args[args.length - 1] || '');
-    expect(payloads.join('')).toBe(source);
-    for (const payload of payloads) {
-      expect(getTerminalInputUtf8ByteLength(payload)).toBeLessThanOrEqual(
-        TERMINAL_INPUT_TMUX_WRITE_CHUNK_BYTES,
-      );
-    }
-    expect(sendKeyCalls[sendKeyCalls.length - 1]).toEqual(['send-keys', '-t', '=demo:.{top-left}', 'Enter']);
+    expect(spawnMock).toHaveBeenCalledTimes(2);
+    expect(spawnMock.mock.calls[0]?.[1]).toEqual([
+      'send-keys', '-t', '=demo:.{top-left}', '-l', '--', 'echo OK',
+    ]);
+    expect(spawnMock.mock.calls[1]?.[1]).toEqual([
+      'send-keys', '-t', '=demo:.{top-left}', 'Enter',
+    ]);
   });
 
   it('routes list/create/write/close through wezterm backend without invoking tmux', async () => {
@@ -187,12 +140,13 @@ describe('terminal control runtime input queue', () => {
     expect(runtime.listTmuxSessions()).toEqual(['demo']);
     expect(runtime.listTerminalSessions()).toEqual(['demo']);
     expect(runtime.createDetachedTmuxSession('new-demo', 'D:/src')).toBe('new-demo');
-    runtime.writeToTmuxSession('demo', 'echo OK', true);
+    await runtime.writeBackendInputGroup('demo', 'echo OK', true);
     runtime.closeDetachedTerminalSession('demo');
 
     expect(wezTermBackend.listSessions).toHaveBeenCalled();
     expect(wezTermBackend.createSession).toHaveBeenCalledWith({ sessionName: 'new-demo', cwd: 'D:/src' });
-    expect(wezTermBackend.writeInput).toHaveBeenCalledWith('demo', 'echo OK\r');
+    expect(wezTermBackend.writeInput).toHaveBeenNthCalledWith(1, 'demo', 'echo OK');
+    expect(wezTermBackend.writeInput).toHaveBeenNthCalledWith(2, 'demo', '\r');
     expect(wezTermBackend.closeSession).toHaveBeenCalledWith('demo');
     expect(spawnMock).not.toHaveBeenCalled();
     expect(spawnSyncMock).not.toHaveBeenCalled();

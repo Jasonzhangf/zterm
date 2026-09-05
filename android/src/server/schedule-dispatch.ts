@@ -7,19 +7,19 @@ export interface ScheduleDispatchResult {
 }
 
 export interface ScheduleDispatchContext {
-  writeToLiveMirror: (sessionName: string, payload: string, appendEnter: boolean, backend?: 'tmux' | 'herdr') => boolean;
-  writeToTmuxSession: (sessionName: string, payload: string, appendEnter: boolean, backend?: 'tmux' | 'herdr') => void;
+  enqueueBackendInput: (
+    sessionName: string,
+    payload: string,
+    appendEnter: boolean,
+    backend?: 'tmux' | 'herdr' | 'wezterm',
+  ) => Promise<boolean>;
   isHerdrSession?: (sessionName: string, backend?: 'tmux' | 'herdr') => boolean;
 }
 
-function appendEnter(payload: string, enabled: boolean) {
-  return enabled ? `${payload}\r` : payload;
-}
-
-export function dispatchScheduledJob(
+export async function dispatchScheduledJob(
   context: ScheduleDispatchContext,
   job: ScheduleJob,
-): ScheduleDispatchResult {
+): Promise<ScheduleDispatchResult> {
   const sessionName = job.targetSessionName.trim();
   const backend = job.terminalBackend || 'tmux';
   if (!sessionName) {
@@ -38,24 +38,16 @@ export function dispatchScheduledJob(
     };
   }
 
-  const payload = appendEnter(job.payload.text, job.payload.appendEnter);
-  if (context.writeToLiveMirror(
-    sessionName,
-    payload,
-    false,
-    backend === 'herdr' ? backend : undefined,
-  )) {
-    return { ok: true };
-  }
-
   try {
-    context.writeToTmuxSession(
+    const wrote = await context.enqueueBackendInput(
       sessionName,
       job.payload.text,
       job.payload.appendEnter,
-      backend === 'herdr' ? backend : undefined,
+      backend,
     );
-    return { ok: true };
+    return wrote
+      ? { ok: true }
+      : { ok: false, message: 'backend input was not accepted', disable: false };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const disable = /no server running|can't find session|can't find pane|no such file|target.*not found/i.test(message);

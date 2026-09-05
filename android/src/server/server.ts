@@ -173,6 +173,8 @@ let daemonInputQueueRuntime!: ReturnType<typeof createDaemonInputQueueRuntime>;
 const daemonInputQueueRuntimeProxy: ReturnType<typeof createDaemonInputQueueRuntime> = {
   handleInputMessage: (connection, payload) =>
     daemonInputQueueRuntime.handleInputMessage(connection, payload),
+  enqueueBackendInput: (sessionName, payload, appendEnter, backendKind) =>
+    daemonInputQueueRuntime.enqueueBackendInput(sessionName, payload, appendEnter, backendKind),
   enqueueLiveMirrorInput: (sessionName, payload, appendEnter, shouldWrite, backendKind) =>
     daemonInputQueueRuntime.enqueueLiveMirrorInput(
       sessionName,
@@ -288,11 +290,7 @@ const terminalRuntime = createTerminalRuntime({
     nextLines: mirror.bufferLines,
   }),
   mirrorCursorEqual,
-  writeToLiveMirror: (sessionName, payload, appendEnter, backend) =>
-    terminalControlRuntime.writeToLiveMirror(sessionName, payload, appendEnter, backend),
   daemonInputQueue: daemonInputQueueRuntimeProxy,
-  writeToTmuxSession: (sessionName, payload, appendEnter, backend) =>
-    terminalControlRuntime.writeToTmuxSession(sessionName, payload, appendEnter, backend),
   autoCommandDelayMs: AUTO_COMMAND_DELAY_MS,
   waitMs: (delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)),
   runTmux: (args) => terminalControlRuntime.runTmux(args),
@@ -314,10 +312,8 @@ const terminalFileTransferRuntime = createTerminalFileTransferRuntime({
   sendMessage: (session, message) => terminalTransportRuntimeSendMessage(session, message),
   getSessionMirror: terminalRuntime.getSubscriberMirror,
   scheduleMirrorLiveSync: terminalRuntime.scheduleMirrorLiveSync,
-  writeToTmuxSession: (sessionName, payload, appendEnter) =>
-    terminalControlRuntime.writeToTmuxSession(sessionName, payload, appendEnter),
-  writeToLiveMirror: (sessionName, payload, appendEnter) =>
-    terminalControlRuntime.writeToLiveMirror(sessionName, payload, appendEnter),
+  enqueueBackendInput: (sessionName, payload, appendEnter, backend) =>
+    daemonInputQueueRuntimeProxy.enqueueBackendInput(sessionName, payload, appendEnter, backend),
   readTmuxPaneCurrentPath: (sessionName, backend) => terminalMirrorCapture.readTmuxPaneCurrentPath(sessionName, backend),
   runCommand: (command, args) => {
     terminalControlRuntime.runCommand(command, args);
@@ -352,8 +348,6 @@ terminalControlRuntime = createTerminalControlRuntime({
   defaultSessionName: DEFAULT_SESSION_NAME,
   hiddenTmuxSessions: HIDDEN_TMUX_SESSIONS,
   tmuxSocketDir: join(WTERM_HOME_DIR, 'tmux'),
-  mirrors,
-  getMirrorKey,
   sanitizeSessionName,
   daemonRuntimeDebug,
   wezTermBackend: TERMINAL_BACKEND_RUNTIME,
@@ -362,8 +356,6 @@ terminalControlRuntime = createTerminalControlRuntime({
 });
 const {
   runTmux,
-  writeToTmuxSession,
-  writeToLiveMirror,
   listTmuxSessions,
   listTerminalSessions,
   listTerminalSessionCatalog,
@@ -436,8 +428,8 @@ terminalScheduleRuntime = createTerminalScheduleRuntime({
   executeJob: async (job) =>
     dispatchScheduledJob(
       {
-        writeToLiveMirror,
-        writeToTmuxSession,
+        enqueueBackendInput: (sessionName, payload, appendEnter, backend) =>
+          daemonInputQueueRuntimeProxy.enqueueBackendInput(sessionName, payload, appendEnter, backend),
         isHerdrSession: (sessionName, backend = 'tmux') => {
           if (backend !== 'herdr') {
             return false;

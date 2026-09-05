@@ -2,6 +2,8 @@ import { useCallback, useRef, useState, type RefObject } from "react";
 import {
   clearTerminalViewportLayoutDriftRuntime,
   createTerminalFollowScrollState,
+  consumeIgnoredProgrammaticScrollRuntime,
+  isTerminalFollowScrollReading,
   type TerminalFollowScrollEffect,
   type TerminalFollowScrollState,
   type TerminalFollowScrollTransition,
@@ -21,7 +23,7 @@ export function useTerminalRendererWindow(options: {
   const recentViewportLayoutChangeTimerRef = useRef<number | null>(null);
   const [renderBottomIndex, setRenderBottomIndex] = useState(options.initialRenderBottomIndex);
   const [readingMode, setReadingMode] = useState(false);
-  const setFollowModeState = useCallback((nextRenderBottomIndex: number) => {
+  const resetToFollow = useCallback((nextRenderBottomIndex: number) => {
     followScrollStateRef.current = createTerminalFollowScrollState({
       lastSettledScrollTop: followScrollStateRef.current.lastSettledScrollTop,
       hasSettledFollowFrame: followScrollStateRef.current.hasSettledFollowFrame,
@@ -30,7 +32,7 @@ export function useTerminalRendererWindow(options: {
     setRenderBottomIndex(nextRenderBottomIndex);
   }, []);
 
-  const applyFollowScrollTransition = useCallback((transition: TerminalFollowScrollTransition) => {
+  const applyTransition = useCallback((transition: TerminalFollowScrollTransition) => {
     followScrollStateRef.current = transition.state;
     transition.effects.forEach((effect: TerminalFollowScrollEffect) => {
       if (effect.type === "schedule-follow-flush") {
@@ -83,15 +85,30 @@ export function useTerminalRendererWindow(options: {
     options.flushPendingFollowScrollSyncRef,
   ]);
 
+  const readFollowScrollState = useCallback(() => followScrollStateRef.current, []);
+  const isReading = useCallback(
+    () => isTerminalFollowScrollReading(followScrollStateRef.current),
+    [],
+  );
+  const consumeIgnoredProgrammaticScroll = useCallback((scrollTop: number) => {
+    const consumed = consumeIgnoredProgrammaticScrollRuntime(
+      followScrollStateRef.current,
+      scrollTop,
+    );
+    if (consumed.consumed) {
+      followScrollStateRef.current = consumed.state;
+    }
+    return consumed.consumed;
+  }, []);
+
   return {
-    followScrollStateRef,
-    followScrollSyncTimerRef,
-    recentViewportLayoutChangeTimerRef,
-    renderBottomIndex,
-    readingMode,
-    setRenderBottomIndex,
-    setReadingMode,
-    setFollowModeState,
-    applyFollowScrollTransition,
+    renderBottom: renderBottomIndex,
+    reading: readingMode,
+    setRenderBottom: setRenderBottomIndex,
+    resetToFollow,
+    applyTransition,
+    readFollowScrollState,
+    isReading,
+    consumeIgnoredProgrammaticScroll,
   };
 }

@@ -209,11 +209,21 @@ export function createTerminalFileTransferBinaryRuntime(
         return;
       }
       const pasteSequence = payload.pasteSequence || '\x16';
-      deps.writeToLiveMirror(mirror.sessionName, pasteSequence, false);
-      deps.scheduleMirrorLiveSync(mirror, 33);
-      sendImagePasted(session, payload, bytes);
-      cleanupClipboardImageFiles(sourcePath, pngPath);
-      cleanupInput?.();
+      void deps.enqueueBackendInput(mirror.sessionName, pasteSequence, false, mirror.backend)
+        .then((wrote) => {
+          if (!wrote) {
+            throw new Error('backend input was not accepted');
+          }
+          deps.scheduleMirrorLiveSync(mirror, 33);
+          sendImagePasted(session, payload, bytes);
+          cleanupClipboardImageFiles(sourcePath, pngPath);
+          cleanupInput?.();
+        })
+        .catch((error) => {
+          cleanupClipboardImageFiles(sourcePath, pngPath);
+          cleanupInput?.();
+          sendImagePasteError(session, error instanceof Error ? error.message : String(error));
+        });
     } catch (error) {
       sendImagePasteError(session, error instanceof Error ? error.message : String(error));
     }
@@ -424,17 +434,28 @@ export function createTerminalFileTransferBinaryRuntime(
       mkdirSync(deps.downloadsDir, { recursive: true });
       const targetPath = join(deps.downloadsDir, payload.name);
       writeFileSync(targetPath, consume.complete);
-      deps.writeToTmuxSession(mirror.sessionName, targetPath, true);
-      deps.scheduleMirrorLiveSync(mirror, 33);
-
-      deps.sendMessage(session, {
-        type: 'file-attached',
-        payload: {
-          name: payload.name,
-          path: targetPath,
-          bytes: consume.complete.length,
-        },
-      });
+      void deps.enqueueBackendInput(mirror.sessionName, targetPath, true, mirror.backend)
+        .then((wrote) => {
+          if (!wrote) {
+            throw new Error('backend input was not accepted');
+          }
+          deps.scheduleMirrorLiveSync(mirror, 33);
+          deps.sendMessage(session, {
+            type: 'file-attached',
+            payload: {
+              name: payload.name,
+              path: targetPath,
+              bytes: consume.complete?.length ?? 0,
+            },
+          });
+        })
+        .catch((error) => {
+          const err = error instanceof Error ? error.message : String(error);
+          deps.sendMessage(session, {
+            type: 'error',
+            payload: { message: `Failed to attach file: ${err}`, code: 'attach_file_failed' },
+          });
+        });
     } catch (error) {
       const err = error instanceof Error ? error.message : String(error);
       deps.sendMessage(session, {
