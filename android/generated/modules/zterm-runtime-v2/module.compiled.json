@@ -1,5 +1,5 @@
 {
-  "artifact_hash": "sha256:154846a800eb2e88a91bba7ba1faecb1901b82ccfb392338e837b57d3103bb48",
+  "artifact_hash": "sha256:3397e259836b2a43ebf8dedca904ef1523406818ce1c25c2dabbfa791cefdd41",
   "artifact_paths": [
     "zterm-runtime-v2.web.tgz"
   ],
@@ -22,6 +22,6 @@
   "dependency_hashes": [],
   "module_id": "zterm-runtime-v2",
   "public_api_hash": "sha256:e4be41638afae281c2ed64c7751d39ec16ea31c6062672ff44000c01312bfff6",
-  "source_hash": "sha256:d7b2d593a6eaba096cbf14ddd924d86f042c895000ebba5cf186dbbfc9b71898",
+  "source_hash": "sha256:e09a7a5b095425e54b9f45f3850af0a6c057fbd2bcc0340d7654daee6a5e5672",
   "stage": "source_implemented"
 }
