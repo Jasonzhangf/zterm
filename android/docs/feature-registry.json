@@ -1431,6 +1431,7 @@
       ],
       "allowed_paths": [
         "contracts/app-version.json",
+        "native/android/build.gradle",
         "native/android/app/build.gradle",
         "scripts/app-version.d.mts",
         "scripts/app-version.mjs",
