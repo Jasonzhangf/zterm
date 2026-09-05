@@ -1,0 +1,30 @@
+{
+  "evidence_id": "restart-fd38de2ff2d9",
+  "issue_id": "zterm-runtime-architecture-v2",
+  "experiment_id": "zterm-runtime-architecture-v2-appsdk-lifecycle",
+  "phase": "deployment_restart",
+  "kind": "restart",
+  "source_commit": "fd38de2ff2d97fe7bd1be551e78763be1565fca3",
+  "artifact_hash": "sha256:bf4f98ba3b21abecdfcc2f867b84b15c74d5c6c8ee4d2a87aaff962f34ace013",
+  "execution_surface": "deployed_blackbox",
+  "environment_id": "local-web-80095",
+  "entrypoint": "http://127.0.0.1:4173/",
+  "scope": {
+    "module_id": "zterm-runtime-v2",
+    "entrypoint": "http://127.0.0.1:4173/"
+  },
+  "producer": {
+    "adapter": "zterm::appsdk-lifecycle-adapter",
+    "identity": "zterm-lifecycle-80095"
+  },
+  "result": "pass",
+  "confidence": 1,
+  "confidence_rationale": "Produced by the project lifecycle adapter after the bound command completed successfully.",
+  "created_at": "2026-09-05T02:44:58.819Z",
+  "expires_at": "2026-09-12T02:44:58.819Z",
+  "input_hashes": [
+    "sha256:571ef4d99dfd5bfd5c044ef8f8323c7807439240859fec3655117aafa7264d2c",
+    "git:fd38de2ff2d97fe7bd1be551e78763be1565fca3"
+  ],
+  "scope_hash": "sha256:41cf7587bc2df36770c4f8cc7218c3f6b4e543c0957a82c7368caf6c5cc430cb"
+}
