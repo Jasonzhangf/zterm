@@ -45,7 +45,7 @@ export interface TerminalRuntime {
     subscriber: TerminalTransportSubscriber,
     mirror: SessionMirror,
     request: import('@zterm/shared/types').BufferSyncRequestPayload,
-  ) => 'queued' | 'missing-subscriber' | 'transport-not-open';
+  ) => 'queued' | 'missing-subscriber' | 'transport-not-open' | 'queue-full';
   refreshMirrorHeadForSession: (subscriber: TerminalTransportSubscriber, mirror: SessionMirror) => Promise<boolean>;
   syncMirrorCanonicalBuffer: (mirror: SessionMirror, options?: { forceRevision?: boolean }) => Promise<boolean>;
   scheduleMirrorLiveSync: (mirror: SessionMirror, delayMs?: number) => void;

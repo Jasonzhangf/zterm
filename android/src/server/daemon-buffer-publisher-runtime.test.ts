@@ -26,7 +26,10 @@ function makeTransport(options: {
   } satisfies TerminalSessionTransport;
 }
 
-function makeSession(id: string, transport = makeTransport()): TerminalSession {
+function makeSession(
+  id: string,
+  transport: TerminalSessionTransport = makeTransport(),
+): TerminalSession {
   return {
     id,
     transportId: `transport-${id}`,
@@ -38,6 +41,20 @@ function makeSession(id: string, transport = makeTransport()): TerminalSession {
     pendingPasteImage: null,
     pendingAttachFile: null,
   } as TerminalSession;
+}
+
+function makeMuxChannelTransport(physicalTransport: TerminalSessionTransport): TerminalSessionTransport {
+  return {
+    kind: physicalTransport.kind,
+    get readyState() {
+      return physicalTransport.readyState;
+    },
+    get bufferedAmount() {
+      return physicalTransport.bufferedAmount;
+    },
+    sendText: (text) => physicalTransport.sendText(text),
+    close: (reason) => physicalTransport.close(reason),
+  };
 }
 
 function makeMirror(subscriberIds: string[], revision = 1): SessionMirror {
@@ -213,31 +230,65 @@ describe('daemon buffer publisher runtime', () => {
     expect(session.bufferSyncState?.lastSentRevision).toBe(4);
   });
 
-  it('bounds one subscriber flush so a sibling on the shared transport gets a send turn', () => {
-    const first = makeSession('s1');
-    const second = makeSession('s2');
-    const sent: string[] = [];
+  it('round-robins explicit range chunks across logical subscribers sharing one physical transport', () => {
+    const sharedTransport = makeTransport({ bufferedAmount: 200_000 });
+    const first = makeSession('s1', makeMuxChannelTransport(sharedTransport));
+    const second = makeSession('s2', makeMuxChannelTransport(sharedTransport));
+    const third = makeSession('s3', makeMuxChannelTransport(sharedTransport));
+    first.transportId = 'connection-1';
+    second.transportId = 'connection-1';
+    third.transportId = 'connection-1';
+    first.muxParentTransportId = 'connection-1';
+    second.muxParentTransportId = 'connection-1';
+    third.muxParentTransportId = 'connection-1';
+    first.bodySubscribed = false;
+    second.bodySubscribed = false;
+    third.bodySubscribed = false;
+    const sent: Array<{ requestSentAt: number; frameChunkIndex?: number }> = [];
+    const largeLines = Array.from({ length: 20_000 }, (_, index) => ({ i: index }));
     const deps = makeDeps({
-      sessions: new Map([['s1', first], ['s2', second]]),
-      buildChangedRangesBufferSyncPayload: (mirror, ranges) => ({
-        revision: mirror.revision,
-        startIndex: ranges[0]?.startIndex ?? 0,
-        endIndex: 20_000,
-        lines: Array.from({ length: 20_000 }, (_, index) => ({ i: index })),
-      }) as never,
-      sendText: (transport, text) => {
-        sent.push(`${transport === first.transport ? 's1' : 's2'}:${JSON.parse(text).payload.frameChunkIndex}`);
+      sessions: new Map([['s1', first], ['s2', second], ['s3', third]]),
+      sendText: (_transport, text) => {
+        const payload = JSON.parse(text).payload;
+        sent.push({ requestSentAt: payload.requestSentAt, frameChunkIndex: payload.frameChunkIndex });
       },
+      buildRequestedRangeBufferPayload: (mirror, request) => ({
+        revision: mirror.revision,
+        startIndex: 0,
+        endIndex: 20_000,
+        availableStartIndex: mirror.bufferStartIndex,
+        availableEndIndex: mirror.bufferStartIndex + mirror.bufferLines.length,
+        cols: mirror.cols,
+        rows: mirror.rows,
+        cursorKeysApp: mirror.cursorKeysApp,
+        cursor: mirror.cursor,
+        requestSentAt: request.requestedAt,
+        lines: largeLines,
+      }) as never,
     });
     const publisher = createDaemonBufferPublisherRuntime(deps);
-    const mirror = makeMirror(['s1', 's2'], 9);
+    const mirror = makeMirror(['s1', 's2', 's3'], 9);
+    const request = (requestedAt: number) => ({
+      knownRevision: 8,
+      localStartIndex: 0,
+      localEndIndex: 0,
+      requestStartIndex: 0,
+      requestEndIndex: 20_000,
+      requestedAt,
+      targetHeadRevision: 9,
+    } satisfies BufferSyncRequestPayload);
 
-    publisher.broadcastChangedRangesBufferSyncToSubscribers(mirror, [{ startIndex: 0, endIndex: 20_000 }]);
+    expect(publisher.enqueueRangeBufferSyncResponse(first, mirror, request(101))).toBe('queued');
+    expect(publisher.enqueueRangeBufferSyncResponse(second, mirror, request(202))).toBe('queued');
+    expect(publisher.enqueueRangeBufferSyncResponse(third, mirror, request(303))).toBe('queued');
 
-    expect(sent.slice(0, 2).every((entry) => entry.startsWith('s1:'))).toBe(true);
-    expect(sent.some((entry) => entry.startsWith('s2:'))).toBe(true);
-    expect(sent.filter((entry) => entry.startsWith('s1:')).length).toBeLessThanOrEqual(2);
-    expect(first.bufferSyncState?.lastSentRevision).toBeGreaterThanOrEqual(0);
+    sharedTransport.bufferedAmount = 0;
+    sharedTransport.backpressureCount = 0;
+    publisher.flushPendingBufferSyncToSubscribers(mirror);
+    publisher.flushPendingBufferSyncToSubscribers(mirror);
+
+    expect(sent.slice(0, 2).map((message) => message.requestSentAt)).toEqual([101, 202]);
+    expect(sent.slice(2, 4).map((message) => message.requestSentAt)).toEqual([303, 101]);
   });
 
   it('returns stale-transport without clearing the pending range', () => {
@@ -365,6 +416,84 @@ describe('daemon buffer publisher runtime', () => {
       endIndex: 20_001,
     });
     expect(session.bufferSyncState?.pendingRangeResponses).toHaveLength(0);
+  });
+
+  it('rejects explicit range requests when the per-subscriber queue is full', () => {
+    const transport = makeTransport({ bufferedAmount: 200_000 });
+    const session = makeSession('s1', transport);
+    session.bodySubscribed = false;
+    const deps = makeDeps({ sessions: new Map([['s1', session]]) });
+    const publisher = createDaemonBufferPublisherRuntime(deps);
+    const mirror = makeMirror(['s1'], 12);
+    const request = (requestedAt: number) => ({
+      knownRevision: 11,
+      localStartIndex: 0,
+      localEndIndex: 0,
+      requestStartIndex: 0,
+      requestEndIndex: 1,
+      requestedAt,
+      targetHeadRevision: 12,
+    } satisfies BufferSyncRequestPayload);
+
+    for (let index = 0; index < 64; index += 1) {
+      expect(publisher.enqueueRangeBufferSyncResponse(session, mirror, request(index))).toBe('queued');
+    }
+
+    expect(publisher.enqueueRangeBufferSyncResponse(session, mirror, request(64))).toBe('queue-full');
+    expect(session.bufferSyncState?.pendingRangeResponses).toHaveLength(64);
+  });
+
+  it('retains successful range chunk progress after a later chunk send fails', () => {
+    const session = makeSession('s1');
+    session.bodySubscribed = false;
+    const sent: number[] = [];
+    const largeLines = Array.from({ length: 20_000 }, (_, index) => ({ i: index }));
+    let sendAttempts = 0;
+    let failOnSecondAttempt = true;
+    const deps = makeDeps({
+      sessions: new Map([['s1', session]]),
+      sendText: (_transport, text) => {
+        sendAttempts += 1;
+        if (failOnSecondAttempt && sendAttempts === 2) {
+          throw new Error('forced second chunk failure');
+        }
+        sent.push(JSON.parse(text).payload.frameChunkIndex);
+      },
+      buildRequestedRangeBufferPayload: (mirror, request) => ({
+        revision: mirror.revision,
+        startIndex: 0,
+        endIndex: 20_000,
+        availableStartIndex: mirror.bufferStartIndex,
+        availableEndIndex: mirror.bufferStartIndex + mirror.bufferLines.length,
+        cols: mirror.cols,
+        rows: mirror.rows,
+        cursorKeysApp: mirror.cursorKeysApp,
+        cursor: mirror.cursor,
+        requestSentAt: request.requestedAt,
+        lines: largeLines,
+      }) as never,
+    });
+    const publisher = createDaemonBufferPublisherRuntime(deps);
+    const mirror = makeMirror(['s1'], 12);
+
+    expect(publisher.enqueueRangeBufferSyncResponse(session, mirror, {
+      knownRevision: 11,
+      localStartIndex: 0,
+      localEndIndex: 0,
+      requestStartIndex: 0,
+      requestEndIndex: 20_000,
+      requestedAt: 201,
+      targetHeadRevision: 12,
+    })).toBe('queued');
+    expect(sent).toEqual([0]);
+    expect(session.bufferSyncState?.pendingRangeResponses?.[0]?.nextChunkIndex).toBe(1);
+
+    failOnSecondAttempt = false;
+    publisher.flushPendingSubscriberBufferSync(mirror, session.id);
+
+    expect(sent[0]).toBe(0);
+    expect(sent[1]).toBe(1);
+    expect(new Set(sent).size).toBe(sent.length);
   });
 });
 
