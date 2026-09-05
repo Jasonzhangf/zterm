@@ -78,7 +78,7 @@ const scopeHash = sha256(JSON.stringify({ module_id: moduleId, owned_paths: modu
 const inputHash = sha256(readFileSync(artifactPath));
 const diffHash = sha256(run("git", ["diff", "--binary", `${baseCommit}..HEAD`, "--", ...diffPaths], { maxBuffer: 64 * 1024 * 1024 }));
 
-const startedAt = now();
+const candidateCreatedAt = now();
 run("pnpm", ["exec", "vitest", "run", "src/server/terminal-message-runtime.test.ts", "src/server/terminal-mirror-runtime.test.ts", "src/server/daemon-buffer-publisher-runtime.test.ts", "src/lib/runtime-architecture-v2.test.ts", "src/lib/plugin-host/plugin-host-runtime.test.ts", "src/pages/TerminalPage.render-isolation.test.tsx", "src/App.dynamic-refresh.test.tsx", "src/contexts/SessionContext.ws-refresh.test.tsx", "--reporter=dot"]);
 const whiteboxAt = now();
 const whiteboxId = `whitebox-${candidateCommit.slice(0, 12)}`;
@@ -134,7 +134,6 @@ restarted.kill("SIGTERM");
 await new Promise((resolveExit) => restarted.once("exit", resolveExit));
 
 const candidateId = `FIX-${candidateCommit.slice(0, 12)}`;
-const candidateCreatedAt = now();
 writeJson(join(recordsRoot, `fix-candidate-record-${moduleId}.json`), {
   "$schema": "https://appsdk.local/contracts/records/fix-candidate-record.schema.json",
   fix_candidate_id: candidateId,
