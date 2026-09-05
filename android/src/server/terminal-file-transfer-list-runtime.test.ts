@@ -81,8 +81,7 @@ describe('terminal-file-transfer-list-runtime remote screenshot target capture',
         sendMessage: (_session, message) => sentMessages.push(message),
         getSessionMirror: vi.fn(() => null),
         scheduleMirrorLiveSync: vi.fn(),
-        writeToTmuxSession: vi.fn(),
-        writeToLiveMirror: vi.fn(() => false),
+        enqueueBackendInput: vi.fn(async () => false),
         readTmuxPaneCurrentPath: vi.fn(() => tempDir!),
         runCommand: vi.fn(),
         captureRemoteScreenshot,
@@ -162,8 +161,7 @@ describe('terminal-file-transfer-list-runtime remote screenshot target capture',
         sendMessage: (_session, message) => sentMessages.push(message),
         getSessionMirror: vi.fn(() => null),
         scheduleMirrorLiveSync: vi.fn(),
-        writeToTmuxSession: vi.fn(),
-        writeToLiveMirror: vi.fn(() => false),
+        enqueueBackendInput: vi.fn(async () => false),
         readTmuxPaneCurrentPath: vi.fn(() => tempDir!),
         runCommand: vi.fn(),
         captureRemoteScreenshot: vi.fn(async ({ outputPath }) => ({ outputPath })),
@@ -204,8 +202,7 @@ describe('terminal-file-transfer-list-runtime remote screenshot target capture',
       sendMessage: (_session, message) => sentMessages.push(message),
       getSessionMirror: vi.fn(() => null),
       scheduleMirrorLiveSync: vi.fn(),
-      writeToTmuxSession: vi.fn(),
-      writeToLiveMirror: vi.fn(() => false),
+      enqueueBackendInput: vi.fn(async () => false),
       readTmuxPaneCurrentPath: vi.fn(() => tempDir!),
       runCommand: vi.fn(),
       captureRemoteScreenshot: vi.fn(async ({ outputPath }) => ({ outputPath })),
@@ -308,7 +305,6 @@ describe('terminal-file-transfer-list-runtime remote screenshot target capture',
   it('rejects all file-transfer operations explicitly for a Herdr terminal surface', async () => {
     const sentMessages: ServerMessage[] = [];
     tempDir = mkdtempSync(join(tmpdir(), 'zterm-herdr-file-transfer-'));
-    const writeToTmuxSession = vi.fn();
     const runtime = createTerminalFileTransferRuntime({
       uploadDir: tempDir,
       downloadsDir: tempDir,
@@ -317,8 +313,7 @@ describe('terminal-file-transfer-list-runtime remote screenshot target capture',
       sendMessage: (_session, message) => sentMessages.push(message),
       getSessionMirror: vi.fn(() => null),
       scheduleMirrorLiveSync: vi.fn(),
-      writeToTmuxSession,
-      writeToLiveMirror: vi.fn(() => false),
+      enqueueBackendInput: vi.fn(async () => false),
       readTmuxPaneCurrentPath: vi.fn(() => tempDir!),
       runCommand: vi.fn(),
       captureRemoteScreenshot: vi.fn(async ({ outputPath }) => ({ outputPath })),
@@ -335,7 +330,6 @@ describe('terminal-file-transfer-list-runtime remote screenshot target capture',
       name: 'proof.png', mimeType: 'image/png', dataBase64: 'cHJvb2Y=',
     });
 
-    expect(writeToTmuxSession).not.toHaveBeenCalled();
     expect(sentMessages).toHaveLength(3);
     expect(sentMessages.every((message) => (
       message.type === 'error'

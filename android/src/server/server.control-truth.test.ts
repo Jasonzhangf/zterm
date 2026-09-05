@@ -28,12 +28,13 @@ describe('server control runtime truth gates', () => {
     expect(source).toContain('terminalControlRuntime = createTerminalControlRuntime({');
     expect(source).toContain('const {');
     expect(source).toContain('runTmux,');
-    expect(source).toContain('writeToTmuxSession,');
-    expect(source).toContain('writeToLiveMirror,');
     expect(source).toContain('listTmuxSessions,');
     expect(source).toContain('createDetachedTmuxSession,');
     expect(source).toContain('renameTmuxSession,');
     expect(source).toContain('} = terminalControlRuntime;');
+    expect(source).toContain('daemonInputQueueRuntimeProxy.enqueueBackendInput');
+    expect(source).not.toContain('terminalControlRuntime.writeToTmuxSession');
+    expect(source).not.toContain('terminalControlRuntime.writeToLiveMirror');
   });
 
   it('does not keep tmux/shell control implementations in server.ts', () => {
@@ -70,8 +71,6 @@ describe('server control runtime truth gates', () => {
   it('keeps tmux/shell control implementations inside dedicated control runtime', () => {
     const source = readControlRuntimeSource();
     const runBlock = extractBlock(source, 'function runTmux(');
-    const tmuxLiteralChunkBlock = extractBlock(source, 'function writeTmuxLiteralChunksSync(');
-    const mirrorWriteBlock = extractBlock(source, 'function writeToLiveMirror(');
     const backendWriteBlock = extractBlock(source, 'async function writeBackendInputGroup(');
     const sessionsBlock = extractBlock(source, 'function listTmuxSessions(');
 
@@ -79,18 +78,15 @@ describe('server control runtime truth gates', () => {
     expect(runBlock).toContain('isTmuxNoServerForListSessions(stderr, args)');
     expect(source).toContain("stderr.includes('no server running on')");
     expect(source).toContain("stderr.includes('error connecting to') && stderr.includes('No such file or directory')");
-    expect(tmuxLiteralChunkBlock).toContain('splitTerminalInputUtf8Chunks(');
-    expect(tmuxLiteralChunkBlock).toContain('TERMINAL_INPUT_TMUX_WRITE_CHUNK_BYTES');
     expect(source).toContain('function buildExactTmuxPaneTarget(sessionName: string)');
     expect(source).toContain(":.{top-left}");
     expect(source).toContain('const target = buildExactTmuxPaneTarget(sessionName)');
-    expect(tmuxLiteralChunkBlock).toContain("const segments = chunks[index]!.split('\\x04');");
-    expect(tmuxLiteralChunkBlock).toContain("runTmux(['send-keys', '-t', target, '-l', '--', segments[segmentIndex]!])");
-    expect(tmuxLiteralChunkBlock).toContain("runTmux(['send-keys', '-H', '-t', target, '04'])");
-    expect(mirrorWriteBlock).toContain('writeTmuxLiteralChunksSync(payload, target)');
-    expect(mirrorWriteBlock).not.toContain("runTmux(['send-keys', '-t', sessionName, '-l', '--', payload])");
     expect(backendWriteBlock).toContain("const segments = payload.split('\\x04');");
     expect(backendWriteBlock).toContain("await runTmuxAsync(['send-keys', '-t', target, '-l', '--', segments[index]!])");
+    expect(source).not.toContain('function writeToTmuxSession(');
+    expect(source).not.toContain('function writeToLiveMirror(');
+    expect(source).not.toContain('writeToTmuxSession:');
+    expect(source).not.toContain('writeToLiveMirror:');
     expect(source).not.toContain('const liveMirrorInputBatches = new Map<string, {');
     expect(source).not.toContain('function buildLiveMirrorInputGroups(');
     expect(source).not.toContain('function enqueueLiveMirrorInput(');

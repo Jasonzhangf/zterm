@@ -152,6 +152,25 @@ function resolveDaemonAuthToken() {
   }
 }
 
+function resolveDaemonDeviceHost() {
+  const fromEnvironment = process.env.ZTERM_DAEMON_DEVICE_HOST?.trim();
+  if (fromEnvironment) {
+    return fromEnvironment;
+  }
+  try {
+    const tailscaleHosts = runText('tailscale', ['ip', '-4'])
+      .split(/\r?\n/u)
+      .map((value) => value.trim())
+      .filter(Boolean);
+    if (tailscaleHosts.length === 1) {
+      return tailscaleHosts[0]!;
+    }
+  } catch {
+    // Report the missing device-reachable host below.
+  }
+  fail('live-gate fixture could not resolve one device-reachable daemon host from ZTERM_DAEMON_DEVICE_HOST or tailscale ip -4');
+}
+
 function timestamp() {
   const now = new Date();
   const pad = (value: number) => String(value).padStart(2, '0');
@@ -460,7 +479,6 @@ async function ensureWebViewTerminalPage(serial: string, sessionName?: string, b
         ? `const ariaLabel = 'Open ' + ${JSON.stringify(bridgeHost)};
            const connection = buttons.find((candidate) => (
              candidate.getAttribute('aria-label') === ariaLabel
-             || candidate.getAttribute('data-testid') === 'saved-connection-open'
            ));
            if (connection) {
              connection.click();
@@ -515,25 +533,39 @@ async function establishAuthenticatedBridgeSettings(serial: string) {
   if (!authToken) {
     fail('live-gate fixture could not resolve the daemon auth token from ZTERM_DAEMON_AUTH_TOKEN or ~/.zterm/config.json');
   }
+  const targetHost = resolveDaemonDeviceHost();
   const value = await evaluateWebViewExpression(
     serial,
     `(() => {
       const key = 'zterm:bridge-settings';
       const settings = JSON.parse(localStorage.getItem(key) || '{}');
       const authToken = ${JSON.stringify(authToken)};
-      settings.targetHost = '127.0.0.1';
+      const targetHost = ${JSON.stringify(targetHost)};
+      settings.targetHost = targetHost;
       settings.targetPort = 3333;
       settings.targetAuthToken = authToken;
       settings.servers = (Array.isArray(settings.servers) ? settings.servers : []).map((server) => (
-        server.id === '127.0.0.1:3333'
-          ? { ...server, targetHost: '127.0.0.1', targetPort: 3333, authToken }
+        server.targetHost === targetHost && Number(server.targetPort) === 3333
+          ? { ...server, authToken }
           : server
       ));
       localStorage.setItem(key, JSON.stringify(settings));
-      return { configured: true, serverCount: settings.servers.length };
+      return {
+        configured: true,
+        targetHost,
+        serverCount: settings.servers.length,
+        targetServerCount: settings.servers.filter((server) => (
+          server.targetHost === targetHost && Number(server.targetPort) === 3333
+        )).length,
+      };
     })()`,
   );
-  if (!value || typeof value !== 'object' || (value as Record<string, unknown>).configured !== true) {
+  if (
+    !value
+    || typeof value !== 'object'
+    || (value as Record<string, unknown>).configured !== true
+    || Number((value as Record<string, unknown>).targetServerCount) < 1
+  ) {
     fail(`live-gate fixture could not establish authenticated bridge settings: ${JSON.stringify(value)}`);
   }
   await evaluateWebViewExpression(serial, 'location.reload(); true');
@@ -927,15 +959,14 @@ async function main() {
   await ensureWebViewTerminalPage(serial, bridgeTarget.sessionName, bridgeTarget.bridgeHost);
   const terminalFocusState = await ensureWebViewTerminalImeFocus(serial);
   sleep(500);
+  adbText(serial, ['shell', 'input', 'text', INPUT_SAMPLE]);
+  sleep(400);
+  adbText(serial, ['shell', 'input', 'keyevent', '66']);
   const afterImePng = capturePng(serial);
   const afterImeUi = captureUiDump(serial);
   const afterImeInputMethod = captureInputMethodDump(serial);
   const afterImeWindow = captureWindowDump(serial);
   assertAppSurfaceVisible(afterImeUi, afterImeWindow, 'after-ime');
-
-  adbText(serial, ['shell', 'input', 'text', INPUT_SAMPLE]);
-  sleep(400);
-  adbText(serial, ['shell', 'input', 'keyevent', '66']);
 
   const deadline = Date.now() + POLL_TIMEOUT_MS;
   let finalRuntime = baselineRuntime;

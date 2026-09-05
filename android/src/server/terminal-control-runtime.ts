@@ -4,9 +4,7 @@ import {
   TERMINAL_INPUT_CHUNK_BYTES,
   TERMINAL_INPUT_TMUX_WRITE_CHUNK_BYTES,
   TERMINAL_INPUT_TMUX_WRITE_SETTLE_MS,
-  splitTerminalInputUtf8Chunks,
 } from '@zterm/shared/terminal/input-chunking';
-import type { SessionMirror } from './terminal-runtime-types';
 import type {
   TerminalSourceAdapter,
   TerminalSourceKind,
@@ -27,9 +25,7 @@ export interface TerminalControlRuntimeDeps {
   tmuxBinary: string;
   defaultSessionName: string;
   hiddenTmuxSessions: Set<string>;
-  mirrors: Map<string, SessionMirror>;
   tmuxSocketDir?: string;
-  getMirrorKey: (sessionName: string, backend?: 'tmux' | 'herdr') => string;
   sanitizeSessionName: (input?: string) => string;
   daemonRuntimeDebug?: (scope: string, payload?: unknown) => void;
   wezTermBackend?: TerminalSourceAdapter | null;
@@ -41,9 +37,7 @@ export interface TerminalControlRuntime {
   runTmux: (args: string[]) => { ok: true; stdout: string };
   runTmuxAsync: (args: string[]) => Promise<{ ok: true; stdout: string }>;
   runCommand: (command: string, args: string[]) => ReturnType<typeof spawnSync>;
-  writeToTmuxSession: (sessionName: string, payload: string, appendEnter: boolean, backend?: TerminalControlBackendKind) => void;
   ensureTmuxServerRunning: () => void;
-  writeToLiveMirror: (sessionName: string, payload: string, appendEnter: boolean, backend?: TerminalControlBackendKind) => boolean;
   writeBackendInputGroup: (
     sessionName: string,
     payload: string,
@@ -198,40 +192,6 @@ export function createTerminalControlRuntime(
     });
   }
 
-  function sleepTmuxWriteSettleSync() {
-    if (TERMINAL_INPUT_TMUX_WRITE_SETTLE_MS <= 0) {
-      return;
-    }
-    Atomics.wait(
-      new Int32Array(new SharedArrayBuffer(4)),
-      0,
-      0,
-      TERMINAL_INPUT_TMUX_WRITE_SETTLE_MS,
-    );
-  }
-
-  function writeTmuxLiteralChunksSync(payload: string, target: string) {
-    const chunks = splitTerminalInputUtf8Chunks(
-      payload,
-      TERMINAL_INPUT_TMUX_WRITE_CHUNK_BYTES,
-    );
-    for (let index = 0; index < chunks.length; index += 1) {
-      const segments = chunks[index]!.split('\x04');
-      for (let segmentIndex = 0; segmentIndex < segments.length; segmentIndex += 1) {
-        if (segments[segmentIndex]) {
-          runTmux(['send-keys', '-t', target, '-l', '--', segments[segmentIndex]!]);
-        }
-        if (segmentIndex < segments.length - 1) {
-          runTmux(['send-keys', '-H', '-t', target, '04']);
-          sleepTmuxWriteSettleSync();
-        }
-      }
-      if (index < chunks.length - 1) {
-        sleepTmuxWriteSettleSync();
-      }
-    }
-  }
-
   // Daemon shares the system-default tmux socket so that sessions created by
   // the user's interactive `tmux` shell are visible to the client and vice
   // versa. Using a private socket would hide user sessions and break the
@@ -256,57 +216,6 @@ export function createTerminalControlRuntime(
         console.warn(`[terminal-control] tmux new-session: ${message}`);
       }
     }
-  }
-
-  function writeToTmuxSession(sessionName: string, payload: string, appendEnter: boolean, backendKind?: TerminalControlBackendKind) {
-    const externalBackend = resolveExternalBackend(backendKind);
-    if (externalBackend) {
-      const chunks = splitTerminalInputUtf8Chunks(payload, TERMINAL_INPUT_CHUNK_BYTES);
-      if (chunks.length <= 1) {
-        externalBackend.writeInput(sessionName, `${chunks[0] || ''}${appendEnter ? '\r' : ''}`);
-        return;
-      }
-      for (const chunk of chunks) {
-        externalBackend.writeInput(sessionName, chunk);
-      }
-      if (appendEnter) {
-        externalBackend.writeInput(sessionName, '\r');
-      }
-      return;
-    }
-    const target = buildExactTmuxPaneTarget(sessionName);
-    writeTmuxLiteralChunksSync(payload, target);
-    if (appendEnter) {
-      runTmux(['send-keys', '-t', target, 'Enter']);
-    }
-  }
-
-  function writeToLiveMirror(sessionName: string, payload: string, appendEnter: boolean, backendKind?: TerminalControlBackendKind) {
-    const mirror = deps.mirrors.get(deps.getMirrorKey(sessionName, backendKind === 'herdr' ? 'herdr' : 'tmux'));
-    if (!mirror || mirror.lifecycle !== 'ready') {
-      return false;
-    }
-    const externalBackend = resolveExternalBackend(backendKind);
-    if (externalBackend) {
-      const chunks = splitTerminalInputUtf8Chunks(payload, TERMINAL_INPUT_CHUNK_BYTES);
-      if (chunks.length <= 1) {
-        externalBackend.writeInput(sessionName, `${chunks[0] || ''}${appendEnter ? '\r' : ''}`);
-        return true;
-      }
-      for (const chunk of chunks) {
-        externalBackend.writeInput(sessionName, chunk);
-      }
-      if (appendEnter) {
-        externalBackend.writeInput(sessionName, '\r');
-      }
-      return true;
-    }
-    const target = buildExactTmuxPaneTarget(sessionName);
-    writeTmuxLiteralChunksSync(payload, target);
-    if (appendEnter) {
-      runTmux(['send-keys', '-t', target, 'Enter']);
-    }
-    return true;
   }
 
   async function writeBackendInputGroup(
@@ -474,8 +383,6 @@ export function createTerminalControlRuntime(
     ensureTmuxServerRunning,
     runTmuxAsync,
     runCommand,
-    writeToTmuxSession,
-    writeToLiveMirror,
     writeBackendInputGroup,
     resolveBackendInputMaxChunkBytes,
     listTmuxSessions,

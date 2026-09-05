@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   extractApkSmokeBridgeDebugTargetFromLocalStorageSnapshot,
@@ -5,6 +7,25 @@ import {
 } from './android-apk-smoke-device-bridge-target';
 
 describe('android apk smoke device bridge target parser', () => {
+  it('keeps the real-device verifier on the requested bridge host instead of clicking an arbitrary saved connection', () => {
+    const script = readFileSync(
+      join(process.cwd(), 'scripts', 'terminal-real-device-evidence.ts'),
+      'utf8',
+    );
+
+    expect(script).toContain("candidate.getAttribute('aria-label') === ariaLabel");
+    expect(script).not.toContain(
+      "|| candidate.getAttribute('data-testid') === 'saved-connection-open'",
+    );
+    expect(script).not.toContain("settings.targetHost = '127.0.0.1'");
+    expect(script).toContain('resolveDaemonDeviceHost()');
+    expect(script).toContain(
+      'Number((value as Record<string, unknown>).targetServerCount) < 1',
+    );
+    expect(script.indexOf("adbText(serial, ['shell', 'input', 'text', INPUT_SAMPLE])"))
+      .toBeLessThan(script.indexOf('const afterImeUi = captureUiDump(serial)'));
+  });
+
   it('prefers the active open tab target from localStorage dump truth', () => {
     const parsed = extractApkSmokeBridgeDebugTargetFromStorageDump([
       'random-prefix zterm:active-session',

@@ -50,7 +50,6 @@ import {
   cancelTerminalFollowScrollRuntime,
   clearTerminalViewportLayoutDriftRuntime,
   commitProgrammaticTerminalScrollRuntime,
-  consumeIgnoredProgrammaticScrollRuntime,
   flushTerminalFollowScrollRuntime,
   getTerminalFollowLastSettledScrollTop,
   getTerminalFollowPendingRenderBottomIndex,
@@ -58,7 +57,6 @@ import {
   hasTerminalFollowPendingViewportRealign,
   hasTerminalFollowRecentViewportLayoutChange,
   hasTerminalFollowSettledFrame,
-  isTerminalFollowScrollReading,
   markTerminalFollowImmediateSyncRuntime,
   markTerminalUserScrollIntent,
   markTerminalViewportLayoutDriftRuntime,
@@ -322,12 +320,14 @@ function TerminalViewComponent({
     flushPendingFollowScrollSyncRef,
   });
   const {
-    followScrollStateRef,
-    renderBottomIndex,
-    readingMode,
-    setRenderBottomIndex,
-    setFollowModeState,
-    applyFollowScrollTransition,
+    renderBottom: renderBottomIndex,
+    reading: readingMode,
+    setRenderBottom,
+    resetToFollow,
+    applyTransition,
+    readFollowScrollState,
+    isReading,
+    consumeIgnoredProgrammaticScroll,
   } = rendererWindow;
 
   const rowHeightPx = Math.max(
@@ -738,17 +738,15 @@ function TerminalViewComponent({
 
   const markFollowViewportRealignOnLayoutDrift = useCallback(
     (viewportLayoutChanged: boolean) => {
-      applyFollowScrollTransition(
-        markTerminalViewportLayoutDriftRuntime(followScrollStateRef.current, {
-          readingMode: isTerminalFollowScrollReading(
-            followScrollStateRef.current,
-          ),
+      applyTransition(
+        markTerminalViewportLayoutDriftRuntime(readFollowScrollState(), {
+          readingMode: isReading(),
           viewportLayoutChanged,
           viewportClientHeightPx,
         }),
       );
     },
-    [applyFollowScrollTransition, viewportClientHeightPx],
+    [applyTransition, isReading, readFollowScrollState, viewportClientHeightPx],
   );
 
   const commitMeasuredViewportState = useCallback(
@@ -973,10 +971,10 @@ function TerminalViewComponent({
         : Math.max(0, nextScrollTop);
       const upwardAwayFromSettledBottom =
         observedScrollTop < getTerminalFollowLastSettledScrollTop(
-          followScrollStateRef.current,
+          readFollowScrollState(),
         ) - 1;
-      applyFollowScrollTransition(
-        resolveTerminalScrollObservationRuntime(followScrollStateRef.current, {
+      applyTransition(
+        resolveTerminalScrollObservationRuntime(readFollowScrollState(), {
           nextMode,
           nextRenderBottomIndex,
           observedScrollTop,
@@ -985,7 +983,7 @@ function TerminalViewComponent({
         }),
       );
     },
-    [applyFollowScrollTransition, resolveRenderDemandFromScroll],
+    [applyTransition, readFollowScrollState, resolveRenderDemandFromScroll],
   );
 
   const resolveFollowScrollTarget = useCallback(
@@ -1012,21 +1010,21 @@ function TerminalViewComponent({
     (nextRenderBottomIndex: number) => {
       const host = containerRef.current;
       if (!host) {
-        applyFollowScrollTransition(
-          cancelTerminalFollowScrollRuntime(followScrollStateRef.current),
+        applyTransition(
+          cancelTerminalFollowScrollRuntime(readFollowScrollState()),
         );
         return;
       }
 
       const nextTarget = resolveFollowScrollTarget(host, nextRenderBottomIndex);
-      applyFollowScrollTransition(
+      applyTransition(
         commitProgrammaticTerminalScrollRuntime(
-          followScrollStateRef.current,
+          readFollowScrollState(),
           nextTarget,
         ),
       );
     },
-    [applyFollowScrollTransition, resolveFollowScrollTarget],
+    [applyTransition, readFollowScrollState, resolveFollowScrollTarget],
   );
   syncScrollHostToRenderBottomRef.current = syncScrollHostToRenderBottom;
 
@@ -1037,22 +1035,22 @@ function TerminalViewComponent({
         guardPendingFollowDrift?: boolean;
       },
     ) => {
-      applyFollowScrollTransition(
-        queueTerminalFollowScrollRuntime(followScrollStateRef.current, {
+      applyTransition(
+        queueTerminalFollowScrollRuntime(readFollowScrollState(), {
           renderBottomIndex: nextRenderBottomIndex,
           minimumRenderBottomIndex,
           guardPendingFollowDrift: options?.guardPendingFollowDrift,
         }),
       );
     },
-    [applyFollowScrollTransition, minimumRenderBottomIndex],
+    [applyTransition, minimumRenderBottomIndex, readFollowScrollState],
   );
 
   const cancelPendingFollowScrollSync = useCallback(() => {
-    applyFollowScrollTransition(
-      cancelTerminalFollowScrollRuntime(followScrollStateRef.current),
+    applyTransition(
+      cancelTerminalFollowScrollRuntime(readFollowScrollState()),
     );
-  }, [applyFollowScrollTransition]);
+  }, [applyTransition, readFollowScrollState]);
 
   const queueFollowVisualRealign = useCallback(
     (options?: {
@@ -1072,10 +1070,10 @@ function TerminalViewComponent({
 
   const flushPendingFollowScrollSync = useCallback(() => {
     const transition = flushTerminalFollowScrollRuntime(
-      followScrollStateRef.current,
+      readFollowScrollState(),
       {
         refreshActive,
-        readingMode: isTerminalFollowScrollReading(followScrollStateRef.current),
+        readingMode: isReading(),
         followVisualBottomIndex,
         resolveScrollTop: (nextRenderBottomIndex) => {
           const host = containerRef.current;
@@ -1086,44 +1084,46 @@ function TerminalViewComponent({
         },
       },
     );
-    applyFollowScrollTransition(transition);
+    applyTransition(transition);
     return transition.effects.some((effect) => effect.type === "set-scroll-top");
   }, [
-    applyFollowScrollTransition,
+    applyTransition,
     followVisualBottomIndex,
     refreshActive,
+    isReading,
+    readFollowScrollState,
     resolveFollowScrollTarget,
   ]);
   flushPendingFollowScrollSyncRef.current = flushPendingFollowScrollSync;
 
   const markUserScrollIntentRuntime = useCallback(
     (durationMs: number) => {
-      applyFollowScrollTransition(markTerminalUserScrollIntent(
-        followScrollStateRef.current,
+      applyTransition(markTerminalUserScrollIntent(
+        readFollowScrollState(),
         Date.now(),
         durationMs,
       ));
     },
-    [applyFollowScrollTransition],
+    [applyTransition, readFollowScrollState],
   );
 
   const syncFollowScrollToAnchor = useCallback(() => {
-    if (!refreshActive || isTerminalFollowScrollReading(followScrollStateRef.current)) {
+    if (!refreshActive || isReading()) {
       return false;
     }
     syncScrollHostToRenderBottom(followVisualBottomIndex);
     return true;
-  }, [followVisualBottomIndex, refreshActive, syncScrollHostToRenderBottom]);
+  }, [followVisualBottomIndex, isReading, refreshActive, syncScrollHostToRenderBottom]);
 
   const handleFollowModeScrollGuards = useCallback(
     (host: HTMLDivElement) => {
-      const state = followScrollStateRef.current;
-      if (isTerminalFollowScrollReading(state)) {
+      const state = readFollowScrollState();
+      if (isReading()) {
         return false;
       }
 
       if (hasTerminalFollowRecentViewportLayoutChange(state)) {
-        applyFollowScrollTransition(clearTerminalViewportLayoutDriftRuntime(state));
+        applyTransition(clearTerminalViewportLayoutDriftRuntime(state));
         queueFollowVisualRealign({ guardPendingFollowDrift: true });
         return true;
       }
@@ -1156,12 +1156,7 @@ function TerminalViewComponent({
         return false;
       }
 
-      const consumed = consumeIgnoredProgrammaticScrollRuntime(
-        state,
-        host.scrollTop,
-      );
-      if (consumed.consumed) {
-        followScrollStateRef.current = consumed.state;
+      if (consumeIgnoredProgrammaticScroll(host.scrollTop)) {
         return true;
       }
 
@@ -1179,10 +1174,13 @@ function TerminalViewComponent({
       return false;
     },
     [
-      applyFollowScrollTransition,
+      applyTransition,
       cancelPendingFollowScrollSync,
+      consumeIgnoredProgrammaticScroll,
+      isReading,
       maxScrollTop,
       queueFollowVisualRealign,
+      readFollowScrollState,
     ],
   );
 
@@ -1200,8 +1198,8 @@ function TerminalViewComponent({
       },
     ) => {
       if (options?.immediateScrollSync) {
-        applyFollowScrollTransition(
-          markTerminalFollowImmediateSyncRuntime(followScrollStateRef.current),
+        applyTransition(
+          markTerminalFollowImmediateSyncRuntime(readFollowScrollState()),
         );
       }
       if (options?.queueScrollSync === false) {
@@ -1212,7 +1210,7 @@ function TerminalViewComponent({
         guardPendingFollowDrift: options?.guardPendingFollowDrift,
       });
     },
-    [applyFollowScrollTransition, queueFollowVisualRealign],
+    [applyTransition, queueFollowVisualRealign, readFollowScrollState],
   );
 
   const emitFollowViewportDemand = useCallback(
@@ -1236,7 +1234,7 @@ function TerminalViewComponent({
         queueScrollSync: options?.queueScrollSync,
         immediateScrollSync: options?.immediateScrollSync,
         resetFollowViewportReport,
-        setFollowModeState,
+        resetToFollow,
         scheduleFollowScrollRealign,
         emitFollowViewportDemand,
       });
@@ -1246,14 +1244,12 @@ function TerminalViewComponent({
       followVisualBottomIndex,
       resetFollowViewportReport,
       scheduleFollowScrollRealign,
-      setFollowModeState,
+      resetToFollow,
     ],
   );
 
   const emitCurrentRenderDemand = useCallback(() => {
-    const nextMode: "follow" | "reading" = isTerminalFollowScrollReading(
-      followScrollStateRef.current,
-    )
+    const nextMode: "follow" | "reading" = isReading()
       ? "reading"
       : "follow";
     emitRenderDemand(
@@ -1262,7 +1258,7 @@ function TerminalViewComponent({
         ? followVisualBottomIndex
         : effectiveRenderBottomIndex,
     );
-  }, [effectiveRenderBottomIndex, emitRenderDemand, followVisualBottomIndex]);
+  }, [effectiveRenderBottomIndex, emitRenderDemand, followVisualBottomIndex, isReading]);
 
   const emitReadingRenderDemand = useCallback(
     (nextRenderBottomIndex?: number) => {
@@ -1277,17 +1273,15 @@ function TerminalViewComponent({
   const reconcileViewportAfterBufferShift = useCallback(() => {
     reconcileTerminalViewportAfterBufferShift({
       refreshActive,
-      readingMode: isTerminalFollowScrollReading(followScrollStateRef.current),
-      hasSettledFollowFrame: hasTerminalFollowSettledFrame(
-        followScrollStateRef.current,
-      ),
+      readingMode: isReading(),
+      hasSettledFollowFrame: hasTerminalFollowSettledFrame(readFollowScrollState()),
       effectiveRenderBottomIndex,
       followVisualBottomIndex,
       minimumRenderBottomIndex,
       maximumRenderBottomIndex,
       maxScrollTop,
       alignRenderBottomToFollow,
-      setRenderBottomIndex,
+      setRenderBottom,
       emitReadingRenderDemand,
     });
   }, [
@@ -1298,7 +1292,10 @@ function TerminalViewComponent({
     maxScrollTop,
     maximumRenderBottomIndex,
     minimumRenderBottomIndex,
+    isReading,
+    readFollowScrollState,
     refreshActive,
+    setRenderBottom,
   ]);
 
   const emitRenderDemandSignalsForCurrentFrame = useCallback(() => {
@@ -1339,8 +1336,8 @@ function TerminalViewComponent({
       return;
     }
     previousSessionIdRef.current = sessionId;
-    applyFollowScrollTransition(resetTerminalFollowScrollRuntime(
-      followScrollStateRef.current,
+    applyTransition(resetTerminalFollowScrollRuntime(
+      readFollowScrollState(),
       {
         followVisualBottomIndex,
         minimumRenderBottomIndex,
@@ -1353,11 +1350,12 @@ function TerminalViewComponent({
     previousFollowResetEpochRef.current = followResetEpoch;
     previousTermGridPaddingTopPxRef.current = null;
   }, [
-    applyFollowScrollTransition,
+    applyTransition,
     followResetEpoch,
     followVisualBottomIndex,
     inputResetEpoch,
     minimumRenderBottomIndex,
+    readFollowScrollState,
     sessionId,
   ]);
 
@@ -1365,8 +1363,8 @@ function TerminalViewComponent({
     if (!passivePreviewProjection || renderBottomIndex === followVisualBottomIndex) {
       return;
     }
-    setRenderBottomIndex(followVisualBottomIndex);
-  }, [followVisualBottomIndex, passivePreviewProjection, renderBottomIndex]);
+    setRenderBottom(followVisualBottomIndex);
+  }, [followVisualBottomIndex, passivePreviewProjection, renderBottomIndex, setRenderBottom]);
 
   useLayoutEffect(() => {
     if (!consumeFollowResetTrigger()) {
@@ -1423,14 +1421,14 @@ function TerminalViewComponent({
     const host = containerRef.current;
     const readingRealignAfterBufferShift = computeTerminalReadingRealignAfterBufferShift({
       refreshActive,
-      readingMode: isTerminalFollowScrollReading(followScrollStateRef.current),
+      readingMode: isReading(),
       previousPaddingTopPx: previousTermGridPaddingTopPxRef.current,
       nextPaddingTopPx: termGridPaddingTopPx,
       viewportClientHeightPx: viewportClientHeightPx || host?.clientHeight || 0,
     });
     const followRealignAfterBufferShift = computeFollowRealignAfterBufferShift({
       refreshActive,
-      readingMode: isTerminalFollowScrollReading(followScrollStateRef.current),
+      readingMode: isReading(),
       previousPaddingTopPx: previousTermGridPaddingTopPxRef.current,
       nextPaddingTopPx: termGridPaddingTopPx,
       viewportClientHeightPx: viewportClientHeightPx || host?.clientHeight || 0,
@@ -1450,9 +1448,9 @@ function TerminalViewComponent({
       followRealignAfterBufferShift.needsImmediateRealign
       && !(widthModeRef.current === "mirror-fixed" && mirrorFixedZoomPanRef.current.visualScale < 1)
     ) {
-      applyFollowScrollTransition(
+      applyTransition(
         commitProgrammaticTerminalScrollRuntime(
-          followScrollStateRef.current,
+          readFollowScrollState(),
           followRealignAfterBufferShift.targetScrollTop,
         ),
       );
@@ -1461,24 +1459,24 @@ function TerminalViewComponent({
     if (
       !didFlush
       && refreshActive
-      && !isTerminalFollowScrollReading(followScrollStateRef.current)
+      && !isReading()
       && !(widthModeRef.current === "mirror-fixed" && mirrorFixedZoomPanRef.current.visualScale < 1)
-      && !hasTerminalFollowSettledFrame(followScrollStateRef.current)
+      && !hasTerminalFollowSettledFrame(readFollowScrollState())
     ) {
       window.queueMicrotask(() => {
         if (
           !refreshActive
-          || isTerminalFollowScrollReading(followScrollStateRef.current)
+          || isReading()
           || latestFollowVisualBottomIndexRef.current !== followVisualBottomIndex
-          || getTerminalFollowPendingRenderBottomIndex(followScrollStateRef.current) !== null
-          || hasTerminalFollowPendingViewportRealign(followScrollStateRef.current)
-          || hasTerminalFollowPendingDriftGuard(followScrollStateRef.current)
+          || getTerminalFollowPendingRenderBottomIndex(readFollowScrollState()) !== null
+          || hasTerminalFollowPendingViewportRealign(readFollowScrollState())
+          || hasTerminalFollowPendingDriftGuard(readFollowScrollState())
         ) {
           return;
         }
-        applyFollowScrollTransition(
+        applyTransition(
           commitProgrammaticTerminalScrollRuntime(
-            followScrollStateRef.current,
+            readFollowScrollState(),
             maxScrollTop,
           ),
         );
@@ -1488,11 +1486,13 @@ function TerminalViewComponent({
     applyScrollState,
     effectiveBufferEndIndex,
     effectiveRenderBottomIndex,
-    applyFollowScrollTransition,
+    applyTransition,
     followVisualBottomIndex,
     flushPendingFollowScrollSync,
     maxScrollTop,
     refreshActive,
+    isReading,
+    readFollowScrollState,
     renderBuffer.revision,
     renderBuffer.startIndex,
     resolveScrollTopForRenderBottomIndex,
@@ -1505,7 +1505,7 @@ function TerminalViewComponent({
   useLayoutEffect(() => {
     if (
       !refreshActive
-      || isTerminalFollowScrollReading(followScrollStateRef.current)
+      || isReading()
       || (widthModeRef.current === "mirror-fixed" && mirrorFixedZoomPanRef.current.visualScale < 1)
     ) {
       return;
@@ -1522,7 +1522,7 @@ function TerminalViewComponent({
     );
     const overscrolledBlankFrame = observedScrollTop > domBottomScrollTop + 1;
     const pendingViewportRealign = hasTerminalFollowPendingViewportRealign(
-      followScrollStateRef.current,
+      readFollowScrollState(),
     );
 
     if (!overscrolledBlankFrame && !pendingViewportRealign) {
@@ -1551,7 +1551,7 @@ function TerminalViewComponent({
 
     if (
       !refreshActive
-      || isTerminalFollowScrollReading(followScrollStateRef.current)
+      || isReading()
       || (widthModeRef.current === "mirror-fixed" && mirrorFixedZoomPanRef.current.visualScale < 1)
     ) {
       return;
@@ -1640,7 +1640,7 @@ function TerminalViewComponent({
       lastAppliedRenderGeometryRevisionKeyRef.current = renderGeometryRevisionKey;
       if (
         !refreshActive
-        || isTerminalFollowScrollReading(followScrollStateRef.current)
+        || isReading()
       ) {
         return;
       }

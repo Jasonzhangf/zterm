@@ -101,9 +101,15 @@ describe('TerminalView renderer / UI shell layer separation', () => {
     );
     expect(viewSource).not.toMatch(/useState\s*\(\s*false\s*\).*readingMode/);
     expect(viewSource).not.toContain('createTerminalFollowScrollState');
+    expect(viewSource).not.toContain('followScrollStateRef');
+    expect(viewSource).not.toContain('setRenderBottomIndex');
+    expect(viewSource).not.toContain('setFollowModeState');
+    expect(viewSource).not.toContain('applyFollowScrollTransition');
     expect(windowSource).toContain('followScrollStateRef');
     expect(windowSource).toContain('renderBottomIndex');
     expect(windowSource).toContain('readingMode');
-    expect(windowSource).toContain('applyFollowScrollTransition');
+    expect(windowSource).toContain('applyTransition');
+    expect(windowSource).toContain('resetToFollow');
+    expect(windowSource).toContain('setRenderBottom');
   });
 });

@@ -308,11 +308,13 @@ describe('server transport/session lifecycle truth gates', () => {
   it('does not require an embedded interactive tmux pty client for daemon control truth', () => {
     const source = readServerSource();
     const controlRuntimeSource = readFileSync(join(process.cwd(), 'src', 'server', 'terminal-control-runtime.ts'), 'utf8');
+    const inputQueueSource = readFileSync(join(process.cwd(), 'src', 'server', 'daemon-input-queue-runtime.ts'), 'utf8');
     expect(source).not.toContain("import * as pty from 'node-pty'");
     expect(source).not.toContain("pty.spawn(TMUX_BINARY, ['new-session', '-A', '-s', mirror.sessionName]");
     expect(source).not.toContain('mirror.ptyProcess.write(');
     expect(source).not.toContain('mirror.ptyProcess.resize(');
-    expect(controlRuntimeSource).toContain("runTmux(['send-keys'");
+    expect(inputQueueSource).toContain('writeBackendInputGroup');
+    expect(controlRuntimeSource).not.toContain("runTmux(['send-keys'");
     expect(controlRuntimeSource).not.toContain("runTmux(['resize-window'");
   });
 

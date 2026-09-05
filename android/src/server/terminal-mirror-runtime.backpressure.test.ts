@@ -139,13 +139,12 @@ function createHarness(options?: {
       })
     ),
     mirrorCursorEqual: () => true,
-    writeToLiveMirror: () => true,
     daemonInputQueue: {
       handleInputMessage: async () => {},
+      enqueueBackendInput: async () => true,
       enqueueLiveMirrorInput: async () => true,
       disposeLiveMirrorInputBatch: () => 0,
     },
-    writeToTmuxSession: vi.fn(),
     autoCommandDelayMs: 0,
     waitMs: async () => {},
     logTimePrefix: () => '2026-07-13 16:00:00',

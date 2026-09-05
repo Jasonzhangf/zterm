@@ -67,9 +67,7 @@ export interface TerminalMirrorRuntimeDeps {
     left: TerminalCursorState | null | undefined,
     right: TerminalCursorState | null | undefined,
   ) => boolean;
-  writeToLiveMirror: (sessionName: string, payload: string, appendEnter: boolean, backend?: 'tmux' | 'herdr') => boolean;
   daemonInputQueue: DaemonInputQueueRuntime;
-  writeToTmuxSession: (sessionName: string, payload: string, appendEnter: boolean, backend?: 'tmux' | 'herdr') => void;
   autoCommandDelayMs: number;
   waitMs: (delayMs: number) => Promise<void>;
   logTimePrefix: () => string;
@@ -866,8 +864,18 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       const command = options.autoCommand.endsWith('\r') ? options.autoCommand.slice(0, -1) : options.autoCommand;
       setTimeout(() => {
         if (mirror.lifecycle === 'ready') {
-          deps.writeToTmuxSession(mirror.sessionName, command, true, mirror.backend);
-          scheduleMirrorLiveSync(mirror, 0);
+          void deps.daemonInputQueue.enqueueBackendInput(mirror.sessionName, command, true, mirror.backend)
+            .then((wrote) => {
+              if (!wrote) {
+                throw new Error('backend input was not accepted');
+              }
+              scheduleMirrorLiveSync(mirror, 0);
+            })
+            .catch((error) => {
+              console.error(
+                `[${deps.logTimePrefix()}] auto command failed for ${mirror.sessionName}: ${error instanceof Error ? error.message : String(error)}`,
+              );
+            });
         }
       }, deps.autoCommandDelayMs);
     }

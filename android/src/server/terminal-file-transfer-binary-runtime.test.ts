@@ -81,7 +81,7 @@ describe('terminal-file-transfer-binary-runtime', () => {
     const session = makeSession();
     const mirror = makeReadyMirror();
     const sentMessages: ServerMessage[] = [];
-    const writeToTmuxSession = vi.fn();
+    const enqueueBackendInput = vi.fn(async () => true);
     const scheduleMirrorLiveSync = vi.fn();
     const runtime = createTerminalFileTransferBinaryRuntime({
       uploadDir,
@@ -91,8 +91,7 @@ describe('terminal-file-transfer-binary-runtime', () => {
       sendMessage: (_session, message) => sentMessages.push(message),
       getSessionMirror: () => mirror,
       scheduleMirrorLiveSync,
-      writeToTmuxSession,
-      writeToLiveMirror: vi.fn(() => true),
+      enqueueBackendInput,
       readTmuxPaneCurrentPath: vi.fn(() => uploadDir!),
       runCommand: vi.fn(),
       captureRemoteScreenshot: vi.fn(async ({ outputPath }) => ({ outputPath })),
@@ -115,7 +114,7 @@ describe('terminal-file-transfer-binary-runtime', () => {
 
     const filePath = join(uploadDir, 'photo.png');
     expect(readFileSync(filePath, 'utf8')).toBe('image');
-    expect(writeToTmuxSession).not.toHaveBeenCalled();
+    expect(enqueueBackendInput).not.toHaveBeenCalled();
     expect(scheduleMirrorLiveSync).not.toHaveBeenCalled();
     expect(sentMessages).toContainEqual({
       type: 'file-upload-complete',
@@ -135,8 +134,7 @@ describe('terminal-file-transfer-binary-runtime', () => {
       sendMessage: (_session, message) => sentMessages.push(message),
       getSessionMirror: () => makeReadyMirror(),
       scheduleMirrorLiveSync: vi.fn(),
-      writeToTmuxSession: vi.fn(),
-      writeToLiveMirror: vi.fn(() => true),
+      enqueueBackendInput: vi.fn(async () => true),
       readTmuxPaneCurrentPath: vi.fn(() => uploadDir!),
       runCommand: vi.fn(),
       captureRemoteScreenshot: vi.fn(async ({ outputPath }) => ({ outputPath })),
@@ -243,8 +241,7 @@ describe('terminal-file-transfer-binary-runtime', () => {
       sendMessage: (_session, message) => sentMessages.push(message),
       getSessionMirror: () => makeReadyMirror(),
       scheduleMirrorLiveSync: vi.fn(),
-      writeToTmuxSession: vi.fn(),
-      writeToLiveMirror: vi.fn(() => true),
+      enqueueBackendInput: vi.fn(async () => true),
       readTmuxPaneCurrentPath: vi.fn(() => uploadDir!),
       runCommand: vi.fn(),
       captureRemoteScreenshot: vi.fn(async ({ outputPath }) => ({ outputPath })),
@@ -297,8 +294,7 @@ describe('terminal-file-transfer-binary-runtime', () => {
       sendMessage: (_session, message) => sentMessages.push(message),
       getSessionMirror: () => makeReadyMirror(),
       scheduleMirrorLiveSync: vi.fn(),
-      writeToTmuxSession: vi.fn(),
-      writeToLiveMirror: vi.fn(() => true),
+      enqueueBackendInput: vi.fn(async () => true),
       readTmuxPaneCurrentPath: vi.fn(() => uploadDir!),
       runCommand: vi.fn(),
       captureRemoteScreenshot: vi.fn(async ({ outputPath }) => ({ outputPath })),
@@ -341,8 +337,7 @@ describe('terminal-file-transfer-binary-runtime', () => {
       sendMessage: (_session, message) => sentMessages.push(message),
       getSessionMirror: () => makeReadyMirror(),
       scheduleMirrorLiveSync: vi.fn(),
-      writeToTmuxSession: vi.fn(),
-      writeToLiveMirror: vi.fn(() => true),
+      enqueueBackendInput: vi.fn(async () => true),
       readTmuxPaneCurrentPath: vi.fn(() => uploadDir!),
       runCommand: vi.fn(),
       captureRemoteScreenshot: vi.fn(async ({ outputPath }) => ({ outputPath })),
@@ -382,7 +377,7 @@ describe('terminal-file-transfer-binary-runtime', () => {
     const session = makeSession();
     const sentMessages: ServerMessage[] = [];
     const getSessionMirror = vi.fn(() => null);
-    const writeToLiveMirror = vi.fn();
+    const enqueueBackendInput = vi.fn(async () => true);
     const scheduleMirrorLiveSync = vi.fn();
     const pasteImageToRemoteWindow = vi.fn(async () => undefined);
     const runtime = createTerminalFileTransferBinaryRuntime({
@@ -393,8 +388,7 @@ describe('terminal-file-transfer-binary-runtime', () => {
       sendMessage: (_session, message) => sentMessages.push(message),
       getSessionMirror,
       scheduleMirrorLiveSync,
-      writeToTmuxSession: vi.fn(),
-      writeToLiveMirror,
+      enqueueBackendInput,
       readTmuxPaneCurrentPath: vi.fn(() => uploadDir!),
       runCommand: makeRunCommandStub(),
       pasteImageToRemoteWindow,
@@ -415,7 +409,7 @@ describe('terminal-file-transfer-binary-runtime', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(getSessionMirror).not.toHaveBeenCalled();
-    expect(writeToLiveMirror).not.toHaveBeenCalled();
+    expect(enqueueBackendInput).not.toHaveBeenCalled();
     expect(scheduleMirrorLiveSync).not.toHaveBeenCalled();
     expect(pasteImageToRemoteWindow).toHaveBeenCalledWith(
       session,
@@ -436,12 +430,12 @@ describe('terminal-file-transfer-binary-runtime', () => {
     });
   });
 
-  it('keeps terminal image paste on the live mirror Ctrl+V path', () => {
+  it('keeps terminal image paste on the backend queue Ctrl+V path', async () => {
     uploadDir = mkdtempSync(join(tmpdir(), 'zterm-paste-terminal-'));
     const session = makeSession();
     const mirror = makeReadyMirror();
     const sentMessages: ServerMessage[] = [];
-    const writeToLiveMirror = vi.fn();
+    const enqueueBackendInput = vi.fn(async () => true);
     const scheduleMirrorLiveSync = vi.fn();
     const pasteImageToRemoteWindow = vi.fn();
     const runtime = createTerminalFileTransferBinaryRuntime({
@@ -452,8 +446,7 @@ describe('terminal-file-transfer-binary-runtime', () => {
       sendMessage: (_session, message) => sentMessages.push(message),
       getSessionMirror: () => mirror,
       scheduleMirrorLiveSync,
-      writeToTmuxSession: vi.fn(),
-      writeToLiveMirror,
+      enqueueBackendInput,
       readTmuxPaneCurrentPath: vi.fn(() => uploadDir!),
       runCommand: makeRunCommandStub(),
       pasteImageToRemoteWindow,
@@ -469,11 +462,15 @@ describe('terminal-file-transfer-binary-runtime', () => {
     });
 
     expect(pasteImageToRemoteWindow).not.toHaveBeenCalled();
-    expect(writeToLiveMirror).toHaveBeenCalledWith('tmux-main', '\x16', false);
-    expect(scheduleMirrorLiveSync).toHaveBeenCalledWith(mirror, 33);
-    expect(sentMessages).toContainEqual({
-      type: 'image-pasted',
-      payload: { name: 'proof.png', mimeType: 'image/png', bytes: 5 },
+    await vi.waitFor(() => {
+      expect(enqueueBackendInput).toHaveBeenCalledWith('tmux-main', '\x16', false, undefined);
+    });
+    await vi.waitFor(() => {
+      expect(scheduleMirrorLiveSync).toHaveBeenCalledWith(mirror, 33);
+      expect(sentMessages).toContainEqual({
+        type: 'image-pasted',
+        payload: { name: 'proof.png', mimeType: 'image/png', bytes: 5 },
+      });
     });
   });
 });

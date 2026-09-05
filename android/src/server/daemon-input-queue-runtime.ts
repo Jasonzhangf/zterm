@@ -42,6 +42,12 @@ export interface DaemonInputQueueDeps {
 
 export interface DaemonInputQueueRuntime {
   handleInputMessage: (connection: TerminalTransportConnection, payload: unknown) => Promise<void>;
+  enqueueBackendInput: (
+    sessionName: string,
+    payload: string,
+    appendEnter: boolean,
+    backendKind?: DaemonInputBackendKind,
+  ) => Promise<boolean>;
   enqueueLiveMirrorInput: (
     sessionName: string,
     payload: string,
@@ -57,8 +63,11 @@ export interface DaemonInputQueueRuntime {
 }
 
 type LiveMirrorInputItem = {
+  sessionName: string;
   payload: string;
   appendEnter: boolean;
+  backendKind: DaemonInputBackendKind;
+  requiresReadyMirror: boolean;
   shouldWrite?: () => boolean;
   resolve: (value: boolean) => void;
   reject: (reason?: unknown) => void;
@@ -67,6 +76,7 @@ type LiveMirrorInputItem = {
 type LiveMirrorInputGroup = {
   payload: string;
   appendEnter: boolean;
+  backendKind: DaemonInputBackendKind;
   items: LiveMirrorInputItem[];
 };
 
@@ -312,6 +322,10 @@ export function createDaemonInputQueueRuntime(
     });
   }
 
+  function normalizeBackendKind(backendKind?: DaemonInputBackendKind): DaemonInputBackendKind {
+    return backendKind === 'herdr' || backendKind === 'wezterm' ? backendKind : 'tmux';
+  }
+
   function buildLiveMirrorInputGroups(items: LiveMirrorInputItem[]): LiveMirrorInputGroup[] {
     const maxGroupBytes = deps.resolveBackendInputMaxChunkBytes();
     const groups: LiveMirrorInputGroup[] = [];
@@ -325,6 +339,7 @@ export function createDaemonInputQueueRuntime(
       groups.push({
         payload: groupPayload,
         appendEnter,
+        backendKind: Array.from(groupItems)[0]?.backendKind || 'tmux',
         items: Array.from(groupItems),
       });
       groupPayload = '';
@@ -333,6 +348,29 @@ export function createDaemonInputQueueRuntime(
     };
 
     for (const item of items) {
+      // Generic backend intents share the same physical ordering queue but must
+      // not be coalesced with interactive live input. Coalescing would move a
+      // scheduled/file intent across a live payload or lose its write/Enter
+      // boundary. They do not require a ready mirror because schedule/file
+      // target a backend session that may be detached.
+      if (!item.requiresReadyMirror) {
+        flushGroup(false);
+        const chunks = splitTerminalInputUtf8Chunks(item.payload, maxGroupBytes);
+        if (chunks.length === 0) {
+          groupItems.add(item);
+          flushGroup(item.appendEnter);
+          continue;
+        }
+        for (let index = 0; index < chunks.length; index += 1) {
+          const chunk = chunks[index]!;
+          groupPayload = chunk;
+          groupBytes = getTerminalInputUtf8ByteLength(chunk);
+          groupItems.add(item);
+          flushGroup(item.appendEnter && index === chunks.length - 1);
+        }
+        continue;
+      }
+
       const chunks = splitTerminalInputUtf8Chunks(item.payload, maxGroupBytes);
       if (chunks.length === 0) {
         groupItems.add(item);
@@ -408,21 +446,13 @@ export function createDaemonInputQueueRuntime(
     pending.flushing = true;
     const items = pending.items.splice(0);
     const mirror = deps.mirrors.get(mirrorKey);
-    if (!mirror || mirror.lifecycle !== 'ready') {
-      for (const item of items) {
-        item.resolve(false);
-      }
-      pending.flushing = false;
-      if (pending.items.length === 0) {
-        liveMirrorInputBatches.delete(mirrorKey);
-      } else {
-        schedulePendingLiveMirrorInput(mirrorKey);
-      }
-      return;
-    }
 
     const writableItems: typeof items = [];
     for (const item of items) {
+      if (item.requiresReadyMirror && (!mirror || mirror.lifecycle !== 'ready')) {
+        item.resolve(false);
+        continue;
+      }
       if (item.shouldWrite && !item.shouldWrite()) {
         item.resolve(false);
         continue;
@@ -445,6 +475,19 @@ export function createDaemonInputQueueRuntime(
     const isGroupWritable = (group: LiveMirrorInputGroup) =>
       group.items.every((item) => !item.shouldWrite || item.shouldWrite());
 
+    if (groups.length === 0) {
+      for (const item of unresolved) {
+        item.resolve(true);
+      }
+      pending.flushing = false;
+      if (pending.items.length === 0) {
+        liveMirrorInputBatches.delete(mirrorKey);
+      } else {
+        schedulePendingLiveMirrorInput(mirrorKey);
+      }
+      return;
+    }
+
     try {
       for (let groupIndex = 0; groupIndex < groups.length; groupIndex += 1) {
         const group = groups[groupIndex]!;
@@ -453,10 +496,10 @@ export function createDaemonInputQueueRuntime(
           continue;
         }
         await deps.writeBackendInputGroup(
-          mirror.sessionName,
+          group.items[0]!.sessionName,
           group.payload,
           group.appendEnter,
-          mirror.backend ?? 'tmux',
+          group.backendKind,
         );
         settleGroup(group, true);
         if (groupIndex < groups.length - 1) {
@@ -493,7 +536,39 @@ export function createDaemonInputQueueRuntime(
     shouldWrite?: () => boolean,
     backendKind?: DaemonInputBackendKind,
   ) {
-    const mirrorKey = deps.getMirrorKey(sessionName, backendKind === 'herdr' ? 'herdr' : 'tmux');
+    const normalizedBackend = normalizeBackendKind(backendKind);
+    const mirrorKey = deps.getMirrorKey(sessionName, normalizedBackend === 'herdr' ? 'herdr' : 'tmux');
+    return enqueueInputItem(mirrorKey, {
+      sessionName,
+      payload,
+      appendEnter,
+      backendKind: normalizedBackend,
+      requiresReadyMirror: true,
+      shouldWrite,
+    });
+  }
+
+  function enqueueBackendInput(
+    sessionName: string,
+    payload: string,
+    appendEnter: boolean,
+    backendKind?: DaemonInputBackendKind,
+  ) {
+    const normalizedBackend = normalizeBackendKind(backendKind);
+    const mirrorKey = deps.getMirrorKey(sessionName, normalizedBackend === 'herdr' ? 'herdr' : 'tmux');
+    return enqueueInputItem(mirrorKey, {
+      sessionName,
+      payload,
+      appendEnter,
+      backendKind: normalizedBackend,
+      requiresReadyMirror: false,
+    });
+  }
+
+  function enqueueInputItem(
+    mirrorKey: string,
+    item: Omit<LiveMirrorInputItem, 'resolve' | 'reject'>,
+  ) {
     let pending = liveMirrorInputBatches.get(mirrorKey);
     if (!pending) {
       pending = {
@@ -504,13 +579,7 @@ export function createDaemonInputQueueRuntime(
       liveMirrorInputBatches.set(mirrorKey, pending);
     }
     const result = new Promise<boolean>((resolve, reject) => {
-      pending?.items.push({
-        payload,
-        appendEnter,
-        shouldWrite,
-        resolve,
-        reject,
-      });
+      pending?.items.push({ ...item, resolve, reject });
     });
     schedulePendingLiveMirrorInput(mirrorKey);
     return result;
@@ -533,15 +602,27 @@ export function createDaemonInputQueueRuntime(
     if (!pending.flushing) {
       const items = pending.items.splice(0);
       for (const item of items) {
-        item.resolve(false);
-        evicted += 1;
+        if (item.requiresReadyMirror) {
+          item.resolve(false);
+          evicted += 1;
+        } else {
+          pending.items.push(item);
+        }
       }
-      liveMirrorInputBatches.delete(mirrorKey);
+      if (pending.items.length === 0) {
+        liveMirrorInputBatches.delete(mirrorKey);
+      } else {
+        schedulePendingLiveMirrorInput(mirrorKey);
+      }
     } else {
       const remaining = pending.items.splice(0);
       for (const item of remaining) {
-        item.resolve(false);
-        evicted += 1;
+        if (item.requiresReadyMirror) {
+          item.resolve(false);
+          evicted += 1;
+        } else {
+          pending.items.push(item);
+        }
       }
     }
     deps.daemonRuntimeDebug?.('input-dispose', {
@@ -554,6 +635,7 @@ export function createDaemonInputQueueRuntime(
 
   return {
     handleInputMessage,
+    enqueueBackendInput,
     enqueueLiveMirrorInput,
     disposeLiveMirrorInputBatch,
   };
