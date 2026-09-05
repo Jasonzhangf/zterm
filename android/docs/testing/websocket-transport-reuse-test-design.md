@@ -194,7 +194,8 @@ Negative:
 - Positive: a bound RTC/Relay session transport with no inbound heartbeat/message for more than the server stale window is closed, removed from `connections`, and detached through `detachSubscriberTransportOnly`.
 - Positive: the detach path releases adaptive width ownership through the existing mirror owner, so `resize-window -x <baseline>` and `set-window-option -u window-size` happen only when the subscriber held a live adaptive lease.
 - Negative: a bound RTC/Relay session transport that keeps receiving client `ping`/message activity every 2 seconds is not closed or detached.
-- Negative: stale cleanup must not call `destroyMirror`, `closeTransportSubscriber`, or any tmux session kill path; it only releases the physical transport/subscriber and leaves backend session truth intact.
+- Positive: stale cleanup releases the final physical subscriber's daemon mirror/runtime when no sibling remains, without calling any tmux session kill path; a later explicit attach may create a fresh mirror.
+- Negative: stale cleanup with a sibling subscriber must not destroy that mirror or close the sibling; it only releases the stale physical subscriber and leaves backend session truth intact.
 - Negative: unbound control/pending transports are not classified as Android terminal session occupation and are not closed by the session stale cleanup rule.
 
 ## L1 Multiplex Protocol And Channel Cases
@@ -226,7 +227,8 @@ Daemon channel registry:
 - Negative: target datachannel failure must not be handled only by the anchor session that created the physical socket; no same-target logical channel may remain projected as open on a dead target transport, no same-target sibling may schedule its own physical rebuild, and no UI/renderer/buffer fallback may hide the failure.
 - Negative: a channel that has emitted only `mux-channel-opened`/`title` cannot settle terminal connected, delete the pending open intent, become UI-connected truth, or accept user-visible readiness.
 - Negative: initial inactive channel open must not rely on a later global subscription sweep to suppress body traffic; the open frame itself carries the subscription truth.
-- Negative: physical target close detaches every channel subscriber and releases adaptive leases through the existing owner, but does not kill tmux or destroy mirror truth.
+- Positive: physical target close detaches every channel subscriber and releases adaptive leases through the existing owner; if it removes the final subscriber, daemon mirror/runtime is released without killing tmux.
+- Negative: physical target close with sibling channels does not destroy their shared mirror or close their transports.
 - Negative: late mirror body for a closed channel is dropped with explicit channel-closed accounting and cannot be delivered under another channel id.
 
 Send scheduler:

@@ -13,12 +13,21 @@ function buildSession(id: string, mirrorKey = 'fin'): MirrorLifecycleSessionLike
 }
 
 describe('mirror lifecycle truth', () => {
-  it('keeps mirror truth alive even when the last subscriber detaches', () => {
+  it('marks mirror truth releasable when the last subscriber detaches', () => {
     const result = detachMirrorSubscriber(['client-1'], 'client-1');
 
     expect([...result.nextSubscribers]).toEqual([]);
     expect(result.remainingSubscribers).toBe(0);
     expect(result.shouldReconcileGeometry).toBe(false);
+    expect(result.keepMirrorAlive).toBe(false);
+  });
+
+  it('keeps mirror truth when a sibling subscriber remains', () => {
+    const result = detachMirrorSubscriber(['client-1', 'client-2'], 'client-1');
+
+    expect([...result.nextSubscribers]).toEqual(['client-2']);
+    expect(result.remainingSubscribers).toBe(1);
+    expect(result.shouldReconcileGeometry).toBe(true);
     expect(result.keepMirrorAlive).toBe(true);
   });
 
