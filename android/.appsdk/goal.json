@@ -2,9 +2,22 @@
   "goal_id": "zterm-runtime-architecture-v2",
   "raw_request": "Preserve current behavior while redesigning ZTerm client and daemon ownership, separating data/control/debug/error planes, adding debuggable foundation nodes, and pluginizing the client with a capability-scoped host boundary.",
   "understood_objective": "Deliver the existing ZTerm runtime architecture slices with unique module ownership, typed adjacent message chains, independent debug/control centers, and capability-scoped client plugins without changing product or business payload semantics.",
-  "acceptance_criteria": ["Client and daemon production source has exact module ownership and an acyclic registered dependency graph.", "Data, control, debug, and error planes use physically separate typed contracts and channels.", "Foundation nodes expose deterministic lifecycle, bounded debug subscription, and versioned immutable snapshots.", "Current terminal, session, input, file, schedule, and remote-window behavior and business payload semantics remain unchanged.", "Every implementation slice passes AppSDK evidence, review, compile, promotion, Active, Protected, regression, and freeze gates."],
-  "non_goals": ["No product or UI redesign.", "No fallback, dual production route, dual compiler, or second SDK.", "No Mac, Windows, or wterm runtime refactor."],
-  "assumptions": ["The AppSDK project root remains android because it contains the current Android client and embedded daemon mainline.", "Target-state modules remain design or pending until owned paths, source bindings, and required gates exist."],
+  "acceptance_criteria": [
+    "Client and daemon production source has exact module ownership and an acyclic registered dependency graph.",
+    "Data, control, debug, and error planes use physically separate typed contracts and channels.",
+    "Foundation nodes expose deterministic lifecycle, bounded debug subscription, and versioned immutable snapshots.",
+    "Current terminal, session, input, file, schedule, and remote-window behavior and business payload semantics remain unchanged.",
+    "Every implementation slice passes AppSDK evidence, review, compile, promotion, Active, Protected, regression, and freeze gates."
+  ],
+  "non_goals": [
+    "No product or UI redesign.",
+    "No fallback, dual production route, dual compiler, or second SDK.",
+    "No Mac, Windows, or wterm runtime refactor."
+  ],
+  "assumptions": [
+    "The AppSDK project root remains android because it contains the current Android client and embedded daemon mainline.",
+    "Target-state modules remain design or pending until owned paths, source bindings, and required gates exist."
+  ],
   "ambiguities": [],
   "questions": [],
   "status": "confirmed",
