@@ -756,7 +756,7 @@
       "level": 1,
       "parent_module_id": "daemon.runtime",
       "owner_feature": "terminal.buffer_render",
-      "responsibility": "Own per-subscriber live buffer-sync pending state, independent FIFO request-scoped range responses, range merge/collapse, backpressure hysteresis, head broadcast cache, oversized contiguous same-revision frame split, trace stages, and explicit flush statuses from daemon mirror truth to physical transport subscribers.",
+      "responsibility": "Own per-subscriber live buffer-sync pending state, a bounded independent FIFO request-scoped range lane with explicit queue-full errors, range merge/collapse, backpressure hysteresis, head broadcast cache, oversized contiguous same-revision frame split, shared physical-transport round-robin send budget, trace stages, and explicit flush statuses from daemon mirror truth to physical transport subscribers.",
       "owned_resources": [
         "resource.daemon_buffer_publisher"
       ],

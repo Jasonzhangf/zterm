@@ -25,8 +25,22 @@ import type { TerminalBufferPayload } from '@zterm/shared/types';
 const SUBSCRIBER_PENDING_RANGE_LIMIT = 64;
 const SUBSCRIBER_PENDING_SPAN_LINE_LIMIT = TERMINAL_BUFFER_SYNC_FRAME_MAX_SPAN_LINES;
 const SUBSCRIBER_PENDING_AGE_LIMIT_MS = 15_000;
+const SUBSCRIBER_PENDING_RANGE_RESPONSE_LIMIT = 64;
 const SUBSCRIBER_BUFFER_SYNC_MAX_BYTES = TERMINAL_BUFFER_SYNC_MESSAGE_MAX_BYTES;
 const MAX_SYNC_CHUNKS_PER_FLUSH = 2;
+
+type SubscriberBufferSyncFlushStatus =
+  | 'sent'
+  | 'no-pending'
+  | 'transport-not-open'
+  | 'backpressured'
+  | 'send-error'
+  | 'stale-transport';
+
+interface SubscriberBufferSyncFlushResult {
+  status: SubscriberBufferSyncFlushStatus;
+  sentChunks: number;
+}
 
 export interface DaemonBufferPublisherDeps {
   sessions: Map<string, TerminalSession>;
@@ -73,7 +87,7 @@ export interface DaemonBufferPublisherRuntime {
     session: TerminalSession,
     mirror: SessionMirror,
     request: import('@zterm/shared/types').BufferSyncRequestPayload,
-  ): 'queued' | 'missing-subscriber' | 'transport-not-open';
+  ): 'queued' | 'missing-subscriber' | 'transport-not-open' | 'queue-full';
 }
 
 export function createDaemonBufferPublisherRuntime(
@@ -81,6 +95,7 @@ export function createDaemonBufferPublisherRuntime(
 ): DaemonBufferPublisherRuntime {
   const sessions = deps.sessions;
   const mirrorHeadBroadcastCache = new WeakMap<SessionMirror, { revision: number }>();
+  const physicalTransportFlushCursors = new Map<string, number>();
 
   function createSubscriberBufferSyncState(): TerminalSubscriberBufferSyncState {
     return {
@@ -264,58 +279,69 @@ export function createDaemonBufferPublisherRuntime(
     session: TerminalSession,
     mirror: SessionMirror,
     request: import('@zterm/shared/types').BufferSyncRequestPayload,
-  ): 'queued' | 'missing-subscriber' | 'transport-not-open' {
+  ): 'queued' | 'missing-subscriber' | 'transport-not-open' | 'queue-full' {
     if (!sessions.has(session.id)) {
       return 'missing-subscriber';
     }
     const state = ensureSubscriberBufferSyncState(session);
     state.pendingRangeResponses ||= [];
+    if (state.pendingRangeResponses.length >= SUBSCRIBER_PENDING_RANGE_RESPONSE_LIMIT) {
+      flushPendingBufferSyncToSubscribers(mirror);
+      if (state.pendingRangeResponses.length >= SUBSCRIBER_PENDING_RANGE_RESPONSE_LIMIT) {
+        return 'queue-full';
+      }
+    }
     state.pendingRangeResponses.push({
       payload: deps.buildRequestedRangeBufferPayload(mirror, request),
       transportId: session.transportId,
       nextChunkIndex: 0,
     });
-    const result = flushRangeBufferSyncResponse(mirror, session);
-    return result === 'transport-not-open' ? 'transport-not-open' : 'queued';
+    flushPendingBufferSyncToSubscribers(mirror);
+    return !session.transport || session.transport.readyState !== 1
+      ? 'transport-not-open'
+      : 'queued';
   }
 
   function flushRangeBufferSyncResponse(
     mirror: SessionMirror,
     session: TerminalSession,
-  ): 'sent' | 'no-pending' | 'transport-not-open' | 'backpressured' | 'send-error' {
+    maxChunks = MAX_SYNC_CHUNKS_PER_FLUSH,
+  ): SubscriberBufferSyncFlushResult {
     const state = ensureSubscriberBufferSyncState(session);
     const queue = state.pendingRangeResponses || [];
     const item = queue[0];
     if (!item) {
-      return 'no-pending';
+      return { status: 'no-pending', sentChunks: 0 };
     }
     if (item.transportId !== session.transportId) {
       queue.splice(0, queue.length);
-      return 'no-pending';
+      return { status: 'no-pending', sentChunks: 0 };
     }
     if (!session.transport || session.transport.readyState !== 1) {
-      return 'transport-not-open';
+      return { status: 'transport-not-open', sentChunks: 0 };
     }
     if (shouldHoldPendingForBackpressure(state, session)) {
-      return 'backpressured';
+      return { status: 'backpressured', sentChunks: 0 };
     }
+    let sentChunks = 0;
     try {
       deps.ensureSessionReady(session, mirror);
       const messages = splitBufferSyncPayloadMessages(item.payload, SUBSCRIBER_BUFFER_SYNC_MAX_BYTES);
       const start = Math.max(0, item.nextChunkIndex || 0);
-      const end = Math.min(messages.length, start + MAX_SYNC_CHUNKS_PER_FLUSH);
+      const end = Math.min(messages.length, start + Math.max(1, Math.floor(maxChunks)));
       for (let index = start; index < end; index += 1) {
         deps.sendText(session.transport, messages[index]!.text);
+        item.nextChunkIndex = index + 1;
+        sentChunks += 1;
       }
-      item.nextChunkIndex = end;
       if (end < messages.length) {
-        return 'sent';
+        return { status: 'sent', sentChunks };
       }
     } catch {
-      return 'send-error';
+      return { status: 'send-error', sentChunks };
     }
     queue.shift();
-    return 'sent';
+    return { status: 'sent', sentChunks };
   }
 
   function broadcastBufferHeadToSubscribers(mirror: SessionMirror) {
@@ -354,14 +380,96 @@ export function createDaemonBufferPublisherRuntime(
         continue;
       }
       if (session.bodySubscribed === false) {
-        if (session.bufferSyncState?.pendingRangeResponses?.length) {
-          flushRangeBufferSyncResponse(mirror, session);
-        }
         continue;
       }
       queueSubscriberPendingBufferSync(session, mirror, normalizedRanges, now);
-      flushPendingSubscriberBufferSync(mirror, sessionId);
     }
+    flushPendingBufferSyncToSubscribers(mirror);
+  }
+
+  function flushPendingSubscriberBufferSyncForSession(
+    mirror: SessionMirror,
+    session: TerminalSession,
+    maxChunks = MAX_SYNC_CHUNKS_PER_FLUSH,
+  ): SubscriberBufferSyncFlushResult {
+    if (session.bodySubscribed === false) {
+      return flushRangeBufferSyncResponse(mirror, session, maxChunks);
+    }
+    const state = ensureSubscriberBufferSyncState(session);
+    if (state.pendingLatestRevision === null || state.pendingChangedAbsoluteRanges.length === 0) {
+      return flushRangeBufferSyncResponse(mirror, session, maxChunks);
+    }
+    if (state.pendingTransportId && state.pendingTransportId !== session.transportId) {
+      markSubscriberBufferSyncResyncRequired(state, 'transport-generation', false);
+      return { status: 'stale-transport', sentChunks: 0 };
+    }
+    validateSubscriberPendingBounds(state);
+    if (!session.transport || session.transport.readyState !== 1) {
+      return { status: 'transport-not-open', sentChunks: 0 };
+    }
+    if (shouldHoldPendingForBackpressure(state, session)) {
+      return { status: 'backpressured', sentChunks: 0 };
+    }
+    const payload = deps.buildChangedRangesBufferSyncPayload(
+      mirror,
+      state.pendingChangedAbsoluteRanges,
+    );
+    if (!payload) {
+      clearSubscriberPendingBufferSync(state, Math.max(state.lastSentRevision, state.pendingLatestRevision));
+      return { status: 'no-pending', sentChunks: 0 };
+    }
+    const messages = splitBufferSyncPayloadMessages(payload, SUBSCRIBER_BUFFER_SYNC_MAX_BYTES);
+    const traceId = `${session.id}:${Math.max(0, Math.floor(payload.revision || 0))}`;
+    const traceBase = {
+      sessionId: session.id,
+      traceId,
+      mirrorRevision: Math.max(0, Math.floor(payload.revision || 0)),
+      subscriberId: session.id,
+      transportKind: session.transport.kind,
+    };
+    const start = Math.max(0, state.pendingLiveChunkIndex || 0);
+    const end = Math.min(messages.length, start + Math.max(1, Math.floor(maxChunks)));
+    let sentChunks = 0;
+    try {
+      deps.ensureSessionReady(session, mirror);
+      for (let index = start; index < end; index += 1) {
+        const message = messages[index]!;
+        deps.recordPerformanceTrace?.({
+          ...traceBase,
+          stage: 'send-start',
+          at: Date.now(),
+          bytes: Buffer.byteLength(message.text, 'utf8'),
+          lineCount: Array.isArray(message.payload.lines) ? message.payload.lines.length : 0,
+        });
+        deps.sendText(session.transport, message.text);
+        state.pendingLiveChunkIndex = index + 1;
+        sentChunks += 1;
+        deps.recordPerformanceTrace?.({
+          ...traceBase,
+          stage: 'send-done',
+          at: Date.now(),
+          bytes: Buffer.byteLength(message.text, 'utf8'),
+          lineCount: Array.isArray(message.payload.lines) ? message.payload.lines.length : 0,
+        });
+      }
+    } catch {
+      return { status: 'send-error', sentChunks };
+    }
+    if (end < messages.length) {
+      return { status: 'sent', sentChunks };
+    }
+    clearSubscriberPendingBufferSync(state, payload.revision);
+    const remainingChunks = Math.max(0, Math.floor(maxChunks) - sentChunks);
+    if (remainingChunks === 0) {
+      return { status: 'sent', sentChunks };
+    }
+    const rangeResult = flushRangeBufferSyncResponse(mirror, session, remainingChunks);
+    if (rangeResult.status === 'no-pending' || rangeResult.status === 'sent') {
+      return { status: 'sent', sentChunks: sentChunks + rangeResult.sentChunks };
+    }
+    return sentChunks > 0
+      ? { status: 'sent', sentChunks }
+      : rangeResult;
   }
 
   function flushPendingSubscriberBufferSync(
@@ -378,86 +486,47 @@ export function createDaemonBufferPublisherRuntime(
     if (!session) {
       return 'missing-subscriber';
     }
-    const state = ensureSubscriberBufferSyncState(session);
-    if (state.pendingLatestRevision === null || state.pendingChangedAbsoluteRanges.length === 0) {
-      const rangeResult = flushRangeBufferSyncResponse(mirror, session);
-      return rangeResult === 'sent' ? 'sent' : 'no-pending';
-    }
-    if (state.pendingTransportId && state.pendingTransportId !== session.transportId) {
-      markSubscriberBufferSyncResyncRequired(state, 'transport-generation', false);
-      return 'stale-transport';
-    }
-    validateSubscriberPendingBounds(state);
-    if (!session.transport || session.transport.readyState !== 1) {
-      return 'transport-not-open';
-    }
-    if (shouldHoldPendingForBackpressure(state, session)) {
-      return 'backpressured';
-    }
-    const payload = deps.buildChangedRangesBufferSyncPayload(
-      mirror,
-      state.pendingChangedAbsoluteRanges,
-    );
-    if (!payload) {
-      clearSubscriberPendingBufferSync(state, Math.max(state.lastSentRevision, state.pendingLatestRevision));
-      return 'no-pending';
-    }
-    const messages = splitBufferSyncPayloadMessages(payload, SUBSCRIBER_BUFFER_SYNC_MAX_BYTES);
-    const traceId = `${session.id}:${Math.max(0, Math.floor(payload.revision || 0))}`;
-    const traceBase = {
-      sessionId: session.id,
-      traceId,
-      mirrorRevision: Math.max(0, Math.floor(payload.revision || 0)),
-      subscriberId: session.id,
-      transportKind: session.transport.kind,
-    };
-    const start = Math.max(0, state.pendingLiveChunkIndex || 0);
-    const end = Math.min(messages.length, start + MAX_SYNC_CHUNKS_PER_FLUSH);
-    try {
-      deps.ensureSessionReady(session, mirror);
-      for (let index = start; index < end; index += 1) {
-        const message = messages[index]!;
-        deps.recordPerformanceTrace?.({
-          ...traceBase,
-          stage: 'send-start',
-          at: Date.now(),
-          bytes: Buffer.byteLength(message.text, 'utf8'),
-          lineCount: Array.isArray(message.payload.lines) ? message.payload.lines.length : 0,
-        });
-        deps.sendText(session.transport, message.text);
-        deps.recordPerformanceTrace?.({
-          ...traceBase,
-          stage: 'send-done',
-          at: Date.now(),
-          bytes: Buffer.byteLength(message.text, 'utf8'),
-          lineCount: Array.isArray(message.payload.lines) ? message.payload.lines.length : 0,
-        });
-      }
-    } catch {
-      return 'send-error';
-    }
-    if (end < messages.length) {
-      state.pendingLiveChunkIndex = end;
-      return 'sent';
-    }
-    clearSubscriberPendingBufferSync(state, payload.revision);
-    flushRangeBufferSyncResponse(mirror, session);
-    return 'sent';
+    return flushPendingSubscriberBufferSyncForSession(mirror, session).status;
   }
 
   function flushPendingBufferSyncToSubscribers(mirror: SessionMirror) {
+    const sessionsByPhysicalTransport = new Map<string, TerminalSession[]>();
     for (const sessionId of mirror.subscribers) {
       const session = sessions.get(sessionId);
-      if (session?.bodySubscribed === false) {
-        if (session?.bufferSyncState?.pendingRangeResponses?.length) {
-          flushRangeBufferSyncResponse(mirror, session);
-        }
+      if (!session?.transport) {
         continue;
       }
-      flushPendingSubscriberBufferSync(mirror, sessionId);
-      if (session) {
-        flushRangeBufferSyncResponse(mirror, session);
+      if (
+        session.bodySubscribed === false
+        && !(session.bufferSyncState?.pendingRangeResponses?.length)
+      ) {
+        continue;
       }
+      const physicalTransportId = session.muxParentTransportId || session.transportId;
+      const group = sessionsByPhysicalTransport.get(physicalTransportId) || [];
+      group.push(session);
+      sessionsByPhysicalTransport.set(physicalTransportId, group);
+    }
+
+    for (const [physicalTransportId, group] of sessionsByPhysicalTransport) {
+      if (group.length === 0) {
+        continue;
+      }
+      const start = (physicalTransportFlushCursors.get(physicalTransportId) || 0) % group.length;
+      const perSessionBudget = group.length > 1 ? 1 : MAX_SYNC_CHUNKS_PER_FLUSH;
+      let sentChunks = 0;
+      let visited = 0;
+      while (visited < group.length && sentChunks < MAX_SYNC_CHUNKS_PER_FLUSH) {
+        const session = group[(start + visited) % group.length]!;
+        const result = flushPendingSubscriberBufferSyncForSession(
+          mirror,
+          session,
+          Math.min(perSessionBudget, MAX_SYNC_CHUNKS_PER_FLUSH - sentChunks),
+        );
+        sentChunks += result.sentChunks;
+        visited += 1;
+      }
+      physicalTransportFlushCursors.set(physicalTransportId, (start + visited) % group.length);
     }
   }
 
