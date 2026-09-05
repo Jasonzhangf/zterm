@@ -13,6 +13,20 @@
     ],
     "manifest": ".appsdk/contracts/development-scenarios.manifest.json"
   },
+  "guidance": {
+    "compiled_manifest": ".appsdk/guidance/compiled.json",
+    "enforcement": "advisory",
+    "rule_sources": [
+      {
+        "contract_path": ".appsdk/skills/appsdk-project-governance/appsdk-guidance.json",
+        "kind": "skill",
+        "path": ".appsdk/skills/appsdk-project-governance/SKILL.md",
+        "precedence": 200,
+        "required": true,
+        "source_id": "appsdk-governance-skill"
+      }
+    ]
+  },
   "governance": {
     "active_kind": "immutable_consumable_library",
     "active_root": "active/lib/**",
