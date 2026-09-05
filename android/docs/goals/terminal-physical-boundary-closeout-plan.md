@@ -4,12 +4,26 @@
 
 执行 worktree：`playground/tbc-closeout-0905`
 执行分支：`codex/terminal-physical-boundary-closeout-20260905`
-执行基线：`origin/main`，当前核对为 `f8f89a70edf3c33a72020126c2ad2169d3aebbe8`
+执行基线：`origin/main`，实现候选基线为 `f8f89a70edf3c33a72020126c2ad2169d3aebbe8`
 审计基线：`0285675ea3bc`
 
 ## 执行状态（2026-09-05）
 
-状态：实现与 L0-L5 验证已完成，等待 exact candidate AGY review、commit、protected PR merge 和远端 receipt。
+状态：完成。实现、L0-L5、AGY review、candidate commit、protected PR
+merge、远端 `main` push receipt 和三通道 OTA 验证均已闭环。
+
+交付 receipt：
+
+- candidate commit：
+  `afa67a7300993ac8f8d435966d6298d81a7c9da5`
+  (`refactor: close terminal physical boundaries`)；
+- protected PR：`#37`，状态 `MERGED`；
+- merge commit / 远端 `refs/heads/main`：
+  `df3c547c9a14dfa7b2d3e35ca64b3e6cd2ae3abd`；
+- candidate 是远端 `main` 的祖先；
+- PR required checks 6/6 PASS：Android typecheck/regression、App repo
+  layout、Cordis v2、daemon package、Mac desktop、Windows desktop；
+- AGY controller：`verdict=pass`、`findings=[]`、`exitCode=0`。
 
 本轮从 `f8f89a70edf3c33a72020126c2ad2169d3aebbe8` 开始。该基线已经包含
 PR #36（`fix(daemon): bound range publishing`）：
@@ -63,15 +77,22 @@ daemon control gateway 已从 typed schedule/tmux envelope 读取
   APK `android/update-dist/zterm-0.1.3.2917.apk`，SHA-256
   `58a72e058b3fd1652667cc61abd9d0ea39905311b8c9b538f57f214ddfeabad9`；
   rollback `0.1.3.2917.1` 已生成并通过 update bundle verify。
+- APK 内 manifest 已由 `apkanalyzer` 读取确认：
+  versionName `0.1.3.2917`、versionCode `1100029170`。
 - daemon candidate release 已安装并恢复为正常 LaunchAgent：
   installed/release `runtime/server.cjs` SHA-256 均为
   `178c962f1cc76875597cd1b01fd0c8f6e3dba019e2bfe3a0274dbf3fe7ba1995`；
   `/health` PASS。真机 debug 只在显式前台验证进程中临时开启，结束后已撤销。
+- OTA stable channel `0.1.3.2917` 已完成三通道验证：
+  `127.0.0.1:3333`、Tailscale `100.66.1.82:3333`、Public Relay
+  `relay.codewhisper.cc:18443/relay` 的 manifest 均返回 2917；三个通道
+  APK GET/HEAD 均成功，下载 SHA-256 均为
+  `58a72e058b3fd1652667cc61abd9d0ea39905311b8c9b538f57f214ddfeabad9`。
 
-未执行 public Relay OTA 发布：这是外部发布动作，当前没有单独授权；本地
-`update-dist`、`release-dist` 与 `~/.zterm/updates` 已验证。physical channel
-fairness 本轮复用 PR #36 的确定性回归证据，未另做真实多 channel 网络压力
-量化，因此不宣称新的外部压测结果。
+证据范围说明：physical channel fairness 复用 PR #36 的确定性回归；本轮没有
+新增真实多-channel 弱网/外部网络压力实验，因此不把 879 项 contract tests
+描述为真实多设备压力验收。未穷尽 Android/shared/daemon/Mac 主链之外的平台
+和业务模块。
 
 ## 目标与完成信号
 
@@ -96,7 +117,8 @@ backend/tmux -> mirror/store -> buffer publisher -> physical target transport
 
 In scope：Android/shared/daemon terminal 主链及其 owner/map/test/doc gate；审计指出的正文旁路、共享连接拥塞、backend write 旁路、DOM window ownership，以及审计后半段 repair/generation/trace/control ingress。
 
-Out of scope：`../wterm` runtime 源码、未被本链影响的平台业务、无明确授权的 public OTA/Relay 发布、清理其他 worktree 或主 checkout dirty。
+Out of scope：`../wterm` runtime 源码、未被本链影响的平台业务、清理其他
+worker 的 worktree 或主 checkout dirty。
 
 硬约束：不新增第二套 store/lifecycle/fallback；控制面与 terminal/file/media body 物理隔离；所有 terminal 改动先完成架构/map/owner 对齐，再红测、最小实现、正反验证；禁止 destructive Git cleanup、`pkill`、`killall`、`kill $(...)`、`xargs kill`。
 
@@ -125,8 +147,11 @@ Out of scope：`../wterm` runtime 源码、未被本链影响的平台业务、�
 5. **renderer window**：把 TerminalView 的 follow/reading/bottom/transition ref 与 setter 封装进既有 hook/controller；不新增 store；补 remount、preview、IME/layout、gap、late publish、source-to-DOM gate。
 6. **mux 与审计后半段**：验证 typed mux wire、原子 open/close；补 frame assembly、repair ledger（accepted/dispatched/fulfilled/superseded/blocked）、generation rejection、bounded metadata-only trace 和 replay 反测。
 7. **control ingress**：区分必须幂等与不承诺幂等的能力；需要重试去重的操作沿 typed control envelope 传稳定 `idempotencyKey`；控制失败显式返回，body 不进入 control center。
-8. **分层验收**：按 L0→L1→L2→L3/L4→L5 执行并保存 evidence；低层不能替代高层。Android 若涉及版本 bump，另按项目规则生成 rollback/update bundle/verify；无授权不发布 Relay。
-9. **review 与交付**：对 exact candidate HEAD 做 AGY review；PASS 后 candidate commit；用独立 protected integration worktree/branch 合并 `main`、push；核对 candidate ancestry、`git branch --contains`、本地/远端 main SHA 和主 checkout dirty 前后一致。
+8. **分层验收**：已完成。L0→L5 evidence、rollback/update bundle、三通道
+   OTA GET/HEAD/hash 均已验证。
+9. **review 与交付**：已完成。AGY PASS；candidate `afa67a73` 经 PR #37
+   合并为 `df3c547c`；远端 `main`、candidate ancestry 和 required checks
+   已复核。
 
 ## 验证矩阵
 
@@ -153,6 +178,14 @@ Out of scope：`../wterm` runtime 源码、未被本链影响的平台业务、�
 
 ## 完成定义（DoD）
 
-代码、文档、maps、tests 与 owner 一致；Phase 1-7 的适用项有正反证据；L0-L5 已跑或明确 blocker；exact HEAD review PASS；candidate 已 commit；`main` 已受保护合并并 push；远端 `main` SHA、祖先关系、review/merge receipt、证据目录和剩余风险均可复核。执行过程中只追加已验证事实，不把计划性判断改写成完成。
+代码、文档、maps、tests 与 owner 一致；Phase 1-7 的适用项有正反证据；
+L0-L5 PASS；AGY review PASS；candidate 已 commit；`main` 已受保护合并并
+push；三通道 OTA 已验证；远端 `main` SHA、祖先关系、review/merge receipt、
+设备和 daemon/tmux evidence 均可复核。
+
+剩余风险不是未完成项：真实多-channel 弱网压力数值尚未量化；本任务只证明
+共享物理预算与 logical subscriber round-robin 的确定性契约，以及真实
+daemon/tmux、Mac client、Android 真机主链。后续若要声明特定并发延迟 SLO，
+必须另开性能任务并记录网络、channel 数、payload、p50/p95/p99。
 
 本文件是本任务长程计划唯一真源；执行时不再生成新的同任务 prompt。
