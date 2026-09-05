@@ -954,6 +954,39 @@ describe('terminal message runtime explicit error truth', () => {
     }));
   });
 
+  it('projects an explicit error when the publisher rejects a full range queue', async () => {
+    const mirror = createReadyMirror();
+    const {
+      runtime,
+      sessions,
+      sendMessage,
+      enqueueRangeBufferSyncResponse,
+    } = createRuntime({ mirror });
+    const session = createSession();
+    sessions.set(session.id, session);
+    enqueueRangeBufferSyncResponse.mockReturnValueOnce('queue-full');
+    const connection = createConnection(session.id);
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'buffer-sync-request',
+      payload: {
+        knownRevision: 4,
+        localStartIndex: 0,
+        localEndIndex: 0,
+        requestStartIndex: 0,
+        requestEndIndex: 1,
+      },
+    })));
+
+    expect(sendMessage).toHaveBeenCalledWith(session, {
+      type: 'error',
+      payload: {
+        message: 'buffer-sync request queue is full',
+        code: 'buffer_sync_request_queue_full',
+      },
+    });
+  });
+
   it('uses buffer-head-request as a pure head-read probe path', async () => {
     const mirror: SessionMirror = {
       key: 'demo',

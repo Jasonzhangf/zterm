@@ -93,7 +93,7 @@ export interface TerminalMirrorRuntime {
     session: TerminalSession,
     mirror: SessionMirror,
     request: import('@zterm/shared/types').BufferSyncRequestPayload,
-  ) => 'queued' | 'missing-subscriber' | 'transport-not-open';
+  ) => 'queued' | 'missing-subscriber' | 'transport-not-open' | 'queue-full';
   flushPendingSubscriberBufferSync: (
     mirror: SessionMirror,
     sessionId: string,

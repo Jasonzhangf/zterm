@@ -72,7 +72,7 @@ export interface TerminalMessageRuntimeDeps {
     session: TerminalSession,
     mirror: SessionMirror,
     request: BufferSyncRequestPayload,
-  ) => 'queued' | 'missing-subscriber' | 'transport-not-open';
+  ) => 'queued' | 'missing-subscriber' | 'transport-not-open' | 'queue-full';
   scheduleMirrorLiveSync: (mirror: SessionMirror, delayMs?: number) => void;
   refreshMirrorHeadForSession: (session: TerminalSession, mirror: SessionMirror) => Promise<boolean>;
   daemonInputQueue: DaemonInputQueueRuntime;
@@ -461,7 +461,16 @@ export function createTerminalMessageRuntime(
           });
           break;
         }
-        deps.enqueueRangeBufferSyncResponse(session, mirror, request);
+        const enqueueResult = deps.enqueueRangeBufferSyncResponse(session, mirror, request);
+        if (enqueueResult === 'queue-full') {
+          deps.sendMessage(session, {
+            type: 'error',
+            payload: {
+              message: 'buffer-sync request queue is full',
+              code: 'buffer_sync_request_queue_full',
+            },
+          });
+        }
         break;
       }
       case 'tmux-create-session':
