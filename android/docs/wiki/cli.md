@@ -26,7 +26,7 @@ Worker-readable CLI map. Generated diagram: `docs/wiki/generated/cli.html`.
 | `service-status` | `status_service` / `Invoke-ServiceStatus` | reads launchd snapshot or Windows Scheduled Task state | service gate |
 | `install-service` | `install_service` / `Invoke-InstallService` | writes plist or registers `ZTermDaemon`, primes macOS permissions, bootstraps service | service script test |
 | `uninstall-service` | `uninstall_service` / `Invoke-UninstallService` | bootout/remove plist or unregister Windows task + legacy cleanup | service script test |
-| `configure-relay` | `configure_relay` | writes `~/.wterm/config.json -> mobile.relay` | daemon-config test |
+| `configure-relay` | `configure_relay` | current JSON configuration writer; target writes validated `~/.zterm/config.toml` after one-time migration and removes JSON runtime fallback | daemon-config test; target migration gate pending |
 
 ## Release Chain
 

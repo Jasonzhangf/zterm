@@ -322,13 +322,14 @@ buffer manager 是独立 worker，不归 daemon、不归 renderer。
 - `buffer-head` 携带 cursor / cursorKeys metadata 时，可以更新本地 metadata truth，但不得调用 `scheduleSessionRenderCommit()` 或发布 render body；否则旧 body 会在真正 `buffer-sync apply` 前被重新投影，表现为“先闪旧 buffer，再被新 buffer 覆盖”。
 
 ### 2.1 本地 buffer 真相
-- 本地维护一个 sliding buffer，客户端默认/最大保留 **1000 行**
+- 目标本地维护一个默认 **3000 行**、可配置的 rolling window；最大值由后续配置契约定义
+- 当前 production shared/client 默认与最大仍是 **1000 行**，属于已知迁移差距，不能把目标值冒充当前实现
 - 按绝对行号存储
 - 可以是 sparse，不要求永远连续
 - 历史超出窗口后滑走，但**不是单次 payload 来了就把本地历史裁掉**
 - **已有 absolute-index 内容不能因为窗口判断错误而被逻辑清空**
 - **同 revision 的迟到旧 payload 不得把本地窗口重新锚回更老的位置**
-  - 它只允许 patch 当前 1000 行窗口内的 absolute-index truth
+  - 它只允许 patch 当前已配置 rolling window 内的 absolute-index truth
   - 不允许因为晚到的 prepend / reading repair 响应，把 follow 中已经稳定的 tail window 拖回去
 - 迟到旧 payload 不得覆盖当前本地 truth：`incomingRevision < localRevision` 必须显式 drop、记录 debug、请求当前 tail；同 revision payload 若会改写当前本地已有 **non-gap absolute-index 行**，也必须显式 drop。只有同 revision 且命中本地 gap 的 payload 才能作为 gap repair 合并。禁止用“先清空 buffer/DOM 再刷新”掩盖旧 payload 污染。
 
@@ -353,7 +354,7 @@ buffer manager 是独立 worker，不归 daemon、不归 renderer。
    - 只补 diff
 
 补充冻结：
-- **visible-window body pull** 和 **1000 行本地缓存上限** 是两个独立真相，禁止再用同一个 `cacheLines` 语义混写两者；1000 行只表示本地保留上限，不是拉取目标
+- **visible-window body pull** 和 **本地 rolling retention** 是两个独立真相，禁止再用同一个 `cacheLines` 语义混写两者；retention 只表示本地保留跨度，不是拉取目标
 
 ### 2.3 reading 路径
 - reading 不改变 buffer manager 的 head-first 主循环
@@ -378,8 +379,8 @@ buffer manager 是独立 worker，不归 daemon、不归 renderer。
   - 若当前本地窗口已经贴着 authoritative tail，且迟到 payload 只覆盖更老的历史、不推进 tail
   - 那么它只能补当前窗口内已有 absolute-index 行，**不得**回拖 `startIndex/endIndex`
 - 大 payload 裁剪也必须遵守“authoritative tail 优先”：
-  - 若 incoming `buffer-sync` span 覆盖当前 authoritative tail，且 span 长度超过本地 retention（默认 1000 行）
-  - 本地窗口必须裁成 tail window（如 `[tail-1000, tail)`），不得因为 incoming `startIndex` 更老而裁成 head window
+  - 若 incoming `buffer-sync` span 覆盖当前 authoritative tail，且 span 长度超过当前配置的本地 retention
+  - 本地窗口必须裁成对应 tail window，不得因为 incoming `startIndex` 更老而裁成 head window
   - 现场信号是 `incoming.endIndex == nextTailEndIndex` 但 `nextEndIndex << nextTailEndIndex`；这会先发布旧历史窗口，再被下一帧尾部 patch 拉回，表现为旧 buffer 闪屏
   - 红测必须直接复现“大 span 覆盖 tail + lineCount > cacheLines”的日志形状，禁止只测 missingRanges 连续性
 - 近尾大 payload 也必须遵守“当前 tail window 不回拖”：

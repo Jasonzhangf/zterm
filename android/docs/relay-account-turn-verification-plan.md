@@ -46,12 +46,12 @@ export ZTERM_TURN_CREDENTIAL='<turn-secret>'
 6. 端口门禁：TURN UDP 端口必须从外网可达；TCP 探测不能替代 UDP TURN 验证。
 
 ## Global Release Daemon Flow
-真实 Mac daemon 验证必须走全局发行路径，不能把手工修改 `~/.wterm/config.json` 当成最终交付：
+真实 Mac daemon 验证必须走全局发行路径，不能把手工修改迁移前 JSON 配置当成最终交付：
 
 1. 构建发行包：`pnpm run daemon:prepare-release`。
 2. 安装或升级：运行 `release-dist/zterm-daemon-<version>-darwin-arm64/bin/install-global.sh`，由它写入 `~/.local/bin/zterm-daemon` 与 `~/.local/bin/wterm`。
 3. 配置 relay：使用 `zterm-daemon configure-relay --relay-url "$RELAY_BASE_URL" --username "$RELAY_USERNAME" --password-stdin --host-id <stable-host-id> --device-id <stable-device-id> --device-name <display-name>`；密码只能来自 local/CI secret，输出只能显示 `passwordSet=true`。
-4. 启动/重启 daemon：使用全局 `zterm-daemon start|restart|install-service`，daemon 本身只读取 `~/.wterm/config.json -> mobile.relay`，不承担账号登录 UX。
+4. 启动/重启 daemon：使用全局 `zterm-daemon start|restart|install-service`。当前实现读取迁移前的 `~/.zterm/config.json`；目标实现完成校验、原子迁移和 read-back verification 后只读取 `~/.zterm/config.toml`。daemon 不承担账号登录 UX。
 5. 发行包必须包含 RTC native 依赖：`runtime/node_modules/@roamhq/wrtc` 与当前平台 `runtime/node_modules/@roamhq/wrtc-<platform>-<arch>/wrtc.node`；源码环境可运行不能替代安装态验证。
 6. 真实双机通过标准：`/relay/health` 中 `liveDaemonDevices>=2`，且 `/api/devices` 同账号下同时出现目标 hostId，例如 `mac-studio` 与 `macbook-air`。
 
