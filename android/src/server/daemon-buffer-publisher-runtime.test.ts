@@ -359,7 +359,7 @@ describe('daemon buffer publisher runtime', () => {
     expect(firstRequestMessages.every((message) => message.payload.revision === 12)).toBe(true);
     expect(firstRequestMessages.every((message) => message.payload.frameStartIndex === 0)).toBe(true);
     expect(firstRequestMessages.every((message) => message.payload.frameEndIndex === 20_000)).toBe(true);
-    expect(messages.at(-1)?.payload).toMatchObject({
+    expect(messages[messages.length - 1]?.payload).toMatchObject({
       requestSentAt: 202,
       startIndex: 20_000,
       endIndex: 20_001,
