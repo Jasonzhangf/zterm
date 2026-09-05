@@ -164,13 +164,15 @@ describe('server transport/session lifecycle truth gates', () => {
     expect(heartbeatBlock).not.toContain('kill-session');
   });
 
-  it('keeps mirror truth alive when session transport detaches or session closes', () => {
+  it('keeps final-subscriber mirror release in the terminal owner, not bridge close glue', () => {
     const serverSource = readServerSource();
     const bridgeSource = readBridgeRuntimeSource();
+    const terminalRuntimeSource = readFileSync(join(process.cwd(), 'src', 'server', 'terminal-runtime.ts'), 'utf8');
     const wsCloseBlock = extractBlock(bridgeSource, "ws.on('close'");
     const rtcCloseBlock = extractBlock(bridgeSource, 'onClose: (_transportId, reason) =>');
 
     expect(serverSource).toContain('terminalRuntime.closeTransportSubscriber');
+    expect(terminalRuntimeSource).toContain('destroyMirrorIfUnsubscribed');
     expect(wsCloseBlock).not.toContain('destroyMirror(');
     expect(rtcCloseBlock).not.toContain('destroyMirror(');
   });
@@ -211,8 +213,9 @@ describe('server transport/session lifecycle truth gates', () => {
     expect(mirrorRuntimeSource).not.toContain('@zterm_adaptive_width_');
   });
 
-  it('only destroys mirror truth on explicit tmux kill or daemon shutdown', () => {
+  it('destroys mirror truth on explicit kill, daemon shutdown, or final subscriber release', () => {
     const source = readServerSource();
+    const terminalRuntimeSource = readFileSync(join(process.cwd(), 'src', 'server', 'terminal-runtime.ts'), 'utf8');
     const daemonRuntimeSource = readDaemonRuntimeSource();
     const controlRuntimeSource = readMessageControlRuntimeSource();
     const killBlock = extractBlock(controlRuntimeSource, "case 'tmux-kill-session':", 900);
@@ -227,6 +230,7 @@ describe('server transport/session lifecycle truth gates', () => {
     expect(shutdownBlock).toContain('closeTransportSubscribers: true');
     expect(shutdownBlock).toContain('notifyClientClose: true');
     expect(destroyBlock).toContain('terminalRuntime.destroyMirror');
+    expect(terminalRuntimeSource).toContain('destroyMirrorIfUnsubscribed');
     expect(destroyBlock).not.toContain("sendMessage(client, { type: 'closed'");
   });
 

@@ -85,6 +85,7 @@ export interface TerminalMirrorRuntime {
     reason: string,
     options?: { closeTransportSubscribers?: boolean; notifyClientClose?: boolean; releaseCode?: string },
   ) => void;
+  destroyMirrorIfUnsubscribed: (mirror: SessionMirror, reason: string) => boolean;
   ensureSessionReady: (session: TerminalSession, mirror: SessionMirror) => void;
   sendBufferHeadToSession: (session: TerminalSession, mirror: SessionMirror) => void;
   flushPendingSubscriberBufferSync: (
@@ -297,6 +298,17 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     mirrors.delete(mirror.key);
   }
 
+  function destroyMirrorIfUnsubscribed(mirror: SessionMirror, reason: string) {
+    if (mirror.subscribers.size > 0) {
+      return false;
+    }
+    destroyMirror(mirror, reason, {
+      closeTransportSubscribers: false,
+      releaseCode: 'no_subscribers',
+    });
+    return true;
+  }
+
   function ensureSessionReady(session: TerminalSession, mirror: SessionMirror) {
     session.sessionName = mirror.sessionName;
     if (!session.transport || session.connectedSent) {
@@ -368,6 +380,9 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       .then((captured) => {
         if (!captured) {
           throw new Error('tmux capture returned no canonical buffer');
+        }
+        if (mirror.lifecycle !== 'ready' || mirrors.get(mirror.key) !== mirror) {
+          return false;
         }
         writeMirrorBaselineGeometry(mirror, {
           cols: mirror.cols,
@@ -469,6 +484,9 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
         return true;
       })
       .catch((error) => {
+        if (mirror.lifecycle === 'destroyed' || mirrors.get(mirror.key) !== mirror) {
+          return false;
+        }
         mirror.consecutiveFailures += 1;
         const isInvalidTarget = isTmuxSessionUnavailableError(error);
         const failureMsg = `[${deps.logTimePrefix()}] canonical mirror refresh failed for ${mirror.sessionName} (streak=${mirror.consecutiveFailures}): ${
@@ -496,6 +514,9 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
         return false;
       })
       .finally(() => {
+        if (mirror.lifecycle === 'destroyed' || mirrors.get(mirror.key) !== mirror) {
+          return;
+        }
         mirror.lastFlushCompletedAt = Date.now();
         mirror.flushInFlight = false;
         mirror.flushPromise = null;
@@ -781,7 +802,13 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
 
     try {
       await deps.waitMs(80);
+      if (mirror.lifecycle !== 'ready' || mirrors.get(mirror.key) !== mirror || mirror.subscribers.size === 0) {
+        return;
+      }
       const captured = await syncMirrorCanonicalBuffer(mirror, { forceRevision: true });
+      if (mirror.lifecycle !== 'ready' || mirrors.get(mirror.key) !== mirror || mirror.subscribers.size === 0) {
+        return;
+      }
       if (!captured) {
         if (!mirrors.has(mirror.key)) {
           return;
@@ -902,7 +929,9 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       const detachResult = detachMirrorSubscriber(previousMirror.subscribers, session.id);
       previousMirror.subscribers = detachResult.nextSubscribers;
       if (movingBetweenMirrors) {
-        scheduleMirrorLiveSync(previousMirror, MIRROR_LIVE_SYNC_ACTIVE_MS);
+        if (!destroyMirrorIfUnsubscribed(previousMirror, `subscriber moved: ${session.id}`)) {
+          scheduleMirrorLiveSync(previousMirror, MIRROR_LIVE_SYNC_ACTIVE_MS);
+        }
       }
     }
 
@@ -1019,6 +1048,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
   return {
     createMirror,
     destroyMirror,
+    destroyMirrorIfUnsubscribed,
     ensureSessionReady,
     sendBufferHeadToSession: bufferPublisher.sendBufferHeadToSession,
     flushPendingSubscriberBufferSync: bufferPublisher.flushPendingSubscriberBufferSync,

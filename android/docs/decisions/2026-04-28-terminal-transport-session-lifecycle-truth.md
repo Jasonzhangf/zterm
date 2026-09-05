@@ -53,6 +53,8 @@
 > tab/session 焦点唯一真源只能是 `ACTIVE_SESSION`。  
 > `ACTIVE_PAGE.focusSessionId` 这类字段属于重复真源，已冻结为禁止新增/禁止恢复。
 
+> 2026-09-05 daemon mirror release amendment：transport detach/close 仍不得推导 client tab/session closed，也不得 kill tmux；但当 detach/close 移除最后一个 physical subscriber 时，daemon 必须释放该 mirror 的本地 runtime、buffer、timer 和 mirror-scoped input batch。仍有 sibling subscriber 时 mirror 必须保持；`bodySubscribed=false` 不算 detach。后续显式 attach 可重新创建 mirror，旧 mirror 的 revision 不承诺跨 zero-subscriber 生命周期保留。
+
 ## 背景
 
 当前现场问题集中在：
@@ -529,14 +531,16 @@ client 侧凡是要向 session transport 发请求的入口，例如：
 
 ### 5.3 mirror 生命周期
 
-mirror truth 与 transport / client session 也必须解耦：
+mirror truth 与 transport / client session 仍然解耦，但 daemon mirror 不是无界缓存：
 
-- transport detach 不得重置 mirror
-- transport close 不得重置 mirror
+- transport detach/close 只移除对应 physical subscriber
+- 若移除后仍有 subscriber，mirror 不得重置，其他 attach 继续使用同一 mirror
+- 若移除后已无 subscriber，terminal runtime 必须释放 mirror 本地 runtime、buffer、timer 和 mirror-scoped input batch
+- zero-subscriber release 不得调用 `tmux kill-session`；tmux session truth 只由显式 user-visible kill command 改变
 - tmux session killed / mirror unavailable 时，也**不得顺手推导 client session 被删除**
 - 这类事件只能更新 daemon 自己的 tmux/mirror 可用性语义，并进入显式 `error/unavailable` 语义
 - tab 是否关闭永远属于 client 显式动作，不属于 daemon mirror 生命周期
-- reconnect 后若看到 `revision -> 1` / `latestEndIndex` 回退，多半是 daemon 自己把 mirror 生命周期做错了
+- zero-subscriber 后显式 reconnect 重新 attach 时 revision 重新建立是允许的；sibling 尚存期间不得出现该回退
 
 ### 5.4 server message 语义冻结
 
@@ -581,7 +585,8 @@ mirror truth 与 transport / client session 也必须解耦：
 3. foreground resume 优先复用原 session transport；control transport 不承载高频流量
 4. active re-entry 只重启 head-first loop，不 fresh recreate session
 5. daemon transport close 后，same `clientSessionId` 能重新 attach 到原 tmux target / mirror truth
-6. daemon shutdown 才统一回收 daemon 本地 transport / mirror 相关资源
+6. 最后一个 physical subscriber detach/close 回收对应 daemon 本地 mirror/runtime；daemon shutdown 仍统一回收剩余资源
+7. zero-subscriber release 不 kill tmux；同 target sibling attach 不受影响
 
 ---
 

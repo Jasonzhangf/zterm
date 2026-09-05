@@ -20,7 +20,7 @@ export function detachMirrorSubscriber(
     nextSubscribers,
     remainingSubscribers: nextSubscribers.size,
     shouldReconcileGeometry: nextSubscribers.size > 0,
-    keepMirrorAlive: true,
+    keepMirrorAlive: nextSubscribers.size > 0,
   };
 }
 
