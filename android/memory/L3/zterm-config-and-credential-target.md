@@ -1,0 +1,6 @@
+<!-- project-memory:v1 {"category":"knowledge","created_at":"2026-09-05T12:49:44.991452+00:00","id":"zterm-config-and-credential-target","importance":100,"memory_level":3,"review_evidence":[],"review_status":"unreviewed","source_refs":["docs/decisions/2026-09-05-runtime-memory-truth.md","src/lib/traversal-relay-client.ts","src/server/daemon-config.ts","src/traversal-relay/store.ts"],"tags":["config","credential","migration","relay","security","toml"],"updated_at":"2026-09-05T12:49:44.991452+00:00"} -->
+
+# TOML configuration and credential boundary
+
+The confirmed target configuration truth is ~/.zterm/config.toml. Relay URL and startup settings must come from that file with no production hardcoded Relay default. Existing ~/.zterm/config.json data must be validated, atomically migrated, read back, and then retired as a runtime source; migration failure is explicit and cannot fall back to a built-in Relay. The client never persists plaintext Relay passwords. A password-derived hash/verifier may be persisted only under a fair established non-replayable industry authentication design. The concrete authentication protocol and secure-storage implementation are deferred to a separate design and are not current implementation truth.
+<!-- project-memory:end -->
