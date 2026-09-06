@@ -1808,6 +1808,68 @@ describe('RemoteWindowOverlay', () => {
     expect(releasePointerCapture).toHaveBeenCalledWith(1);
   });
 
+  it('clamps floating overlay drag to visualViewport offsetLeft and the parent container', async () => {
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-bounds',
+      targets: [makeTarget('pane-1', 'zterm pane', 'iterm2-pane')],
+    }));
+
+    render(<RemoteWindowOverlay activeSessionId="session-bounds" requestTargets={requestTargets} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    await expandItermPaneGroup();
+    fireEvent.click(screen.getByTestId('remote-window-target-pane-1'));
+
+    const overlay = screen.getByTestId('remote-window-locked-overlay');
+    const toolbar = screen.getByTestId('remote-window-drag-handle');
+    Object.defineProperty(overlay, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({
+        x: 600,
+        y: 420,
+        left: 600,
+        top: 420,
+        right: 960,
+        bottom: 645,
+        width: 360,
+        height: 225,
+        toJSON: () => ({}),
+      }),
+    });
+    Object.defineProperty(overlay.parentElement as HTMLElement, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({
+        x: 0,
+        y: 0,
+        left: 0,
+        top: 0,
+        right: 500,
+        bottom: 800,
+        width: 500,
+        height: 800,
+        toJSON: () => ({}),
+      }),
+    });
+    Object.defineProperty(window, 'visualViewport', {
+      configurable: true,
+      value: {
+        offsetLeft: 0,
+        offsetTop: 0,
+        width: 1024,
+        height: 768,
+        addEventListener() {},
+        removeEventListener() {},
+      },
+    });
+
+    fireEvent.pointerDown(toolbar, { pointerId: 41, clientX: 700, clientY: 440 });
+    fireEvent.pointerMove(toolbar, { pointerId: 41, clientX: 620, clientY: 380 });
+    fireEvent.pointerUp(toolbar, { pointerId: 41, clientX: 620, clientY: 380 });
+
+    expect(overlay.style.transform).toBe('translate(-468px, -60px)');
+    expect(overlay.getAttribute('data-mode')).toBe('floating');
+  });
+
   it('keeps primary controls structurally valid with 48px touch targets and no child close action', async () => {
     const mainWindow = makeTarget('app-main', 'WeChat', 'app-window');
     const childWindow = {

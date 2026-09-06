@@ -42,6 +42,13 @@ export interface SurfaceRect {
   height: number;
 }
 
+export interface FloatingOverlayClampRect {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
 export interface FullscreenViewportState {
   scale: number;
   panX: number;
@@ -119,6 +126,100 @@ export function clampFloatingOffset(value: number, min: number, max: number) {
 
 export function clampNumber(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
+}
+
+export function toFloatingOverlayClampRect(
+  rect: { left: number; top: number; right: number; bottom: number } | null | undefined,
+): FloatingOverlayClampRect {
+  if (!rect) {
+    return { left: 0, top: 0, right: 0, bottom: 0 };
+  }
+  return {
+    left: rect.left,
+    top: rect.top,
+    right: rect.right,
+    bottom: rect.bottom,
+  };
+}
+
+function hasPositiveClampRect(rect: FloatingOverlayClampRect) {
+  return rect.right > rect.left && rect.bottom > rect.top;
+}
+
+function isUsableFloatingOverlayContainer(
+  container: FloatingOverlayClampRect,
+  overlay: SurfaceSize,
+  margin: number,
+) {
+  if (!hasPositiveClampRect(container)) {
+    return false;
+  }
+  const width = container.right - container.left;
+  const height = container.bottom - container.top;
+  return width >= overlay.width + margin * 2 && height >= overlay.height + margin * 2;
+}
+
+export function readVisualViewportClampRect(fallback: SurfaceSize): FloatingOverlayClampRect {
+  const viewport = typeof window === 'undefined' ? null : window.visualViewport;
+  const left = viewport?.offsetLeft || 0;
+  const top = viewport?.offsetTop || 0;
+  const width = Math.round(viewport?.width || fallback.width);
+  const height = Math.round(viewport?.height || fallback.height);
+  return {
+    left,
+    top,
+    right: left + width,
+    bottom: top + height,
+  };
+}
+
+export function resolveFloatingOverlayBounds(options: {
+  viewport: FloatingOverlayClampRect;
+  container: FloatingOverlayClampRect;
+  overlay: SurfaceSize;
+  margin: number;
+  topSafeMargin: number;
+}) {
+  const viewport = options.viewport;
+  const container = isUsableFloatingOverlayContainer(
+    options.container,
+    options.overlay,
+    options.margin,
+  ) ? options.container : viewport;
+  const minLeft = Math.max(viewport.left, container.left) + options.margin;
+  const minTop = Math.max(
+    viewport.top + options.topSafeMargin,
+    container.top + options.margin,
+  );
+  return {
+    minLeft,
+    maxLeft: Math.max(
+      minLeft,
+      Math.min(viewport.right, container.right) - options.margin - options.overlay.width,
+    ),
+    minTop,
+    maxTop: Math.max(
+      minTop,
+      Math.min(viewport.bottom, container.bottom) - options.margin - options.overlay.height,
+    ),
+  };
+}
+
+export function resolveFloatingOverlayClampBounds(options: {
+  viewportFallback: SurfaceSize;
+  container?: { left: number; top: number; right: number; bottom: number } | null;
+  overlay: SurfaceSize;
+  margin: number;
+  topSafeMargin: number;
+}) {
+  const viewport = readVisualViewportClampRect(options.viewportFallback);
+  return resolveFloatingOverlayBounds({
+    viewport,
+    container: toFloatingOverlayClampRect(options.container),
+    overlay: options.overlay,
+    margin: options.margin,
+    topSafeMargin: options.topSafeMargin,
+  });
 }
 
 export function resolveAspectRect(
