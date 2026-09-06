@@ -101,6 +101,7 @@ description: "审计、开发和验证 zterm Android 客户端；按当前架构
 - 这类变更必须跑 `pnpm --dir android run test:feature-registry -- --reporter dot`，其中包含 `src/lib/module-registry-truth.test.ts` 和 `src/lib/edge-registry-truth.test.ts`。
 
 ### 2.2.1b File-transfer 吞吐与字节真相
+- 页面文件入口只消费 file-browser owner 绑定的 session port；不得在 TerminalPage 用 active-session ref 路由文件 wire。异步上传捕获一次 sender，后续 UI 切换不能改变该操作的发送目标；按 `android/docs/audits/2026-09-05-file-browser-session-port.md` 跑跨 rerender 回归。
 - 文件同步 wire frame 保持 16 KiB；上传只能由 `sendBoundedFileUploadChunks` 使用 cumulative ACK 的固定窗口推进，禁止 UI stop-and-wait、无界 burst 或 caller 自定义窗口。下载 native bridge 只能由 `writeFileTransferChunkBatches` 聚合写入，禁止恢复逐 wire chunk bridge 调用。
 - `android/contracts/file-transfer-throughput.json` 是上传窗口和 native batch 上限的唯一机器真源。TypeScript 直接导入，Android Gradle 从同一 JSON 生成 `BuildConfig`；禁止 TS/Java 分别维护数字。`pnpm --dir android run test:file-transfer:throughput` 必须同时跑 TS/module loopback 与 `StorageFileWriteLogicTest`，并真实接入 prebuild 和 CI。
 - module loopback 的 SHA-256 只证明算法与字节顺序，不是产品速度闭环。声称上下行提速前必须在真实 transport + online ADB 上复用已有 daemon/session，对同一确定性文件记录双向 bytes/duration/throughput 和两端 SHA-256；资源用完精确清理。没有 online ADB 时明确保留缺口，不重启含其他未审查 worktree 改动的生产 daemon。

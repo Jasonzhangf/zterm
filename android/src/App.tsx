@@ -32,6 +32,7 @@ import { updateBridgeSettingsTerminalWidthMode } from './lib/terminal-width-mode
 import { upsertBridgeServer } from './lib/bridge-settings';
 import { applyTraversalRelaySettings } from './lib/traversal-relay-client';
 import { APP_VERSION, APP_VERSION_CODE } from './lib/app-version';
+import { createFileBrowserSessionPort } from './lib/plugin-file-browser/file-browser-session-port';
 import { buildAppUpdateManifestCandidates } from './lib/app-update-relay-manifest';
 import { resolveSettingsTheme } from './lib/mobile-ui';
 import type { AppUpdateManifestCandidate, AppUpdateRouteSnapshot } from './lib/app-update';
@@ -528,6 +529,12 @@ export function AppContent({
     ),
   });
 
+  const resolveFileBrowserSessionPort = useCallback((sessionId: string) => createFileBrowserSessionPort({
+    session: terminalSessions.find((session) => session.id === sessionId),
+    send: sendMessageRaw,
+    subscribe: onFileTransferMessage,
+  }), [terminalSessions, sendMessageRaw, onFileTransferMessage]);
+
   appUpdateRouteRef.current = terminalActiveSession
     ? {
         resolvedPath: terminalActiveSession.resolvedPath || null,
@@ -998,8 +1005,7 @@ export function AppContent({
             terminalFontSize={bridgeSettings.terminalFontSize}
             terminalWidthMode={bridgeSettings.terminalWidthMode}
             terminalSessionGroupLayoutMode={bridgeSettings.terminalSessionGroupLayoutMode}
-            onSendMessage={sendMessageRaw}
-            onFileTransferMessage={onFileTransferMessage}
+            resolveFileBrowserSessionPort={resolveFileBrowserSessionPort}
             onRemoteWindowMessage={onRemoteWindowMessage}
             shortcutSmartSort={bridgeSettings.shortcutSmartSort}
             shortcutFrequencyMap={shortcutFrequencyMap}

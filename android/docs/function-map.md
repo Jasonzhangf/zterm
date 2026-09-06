@@ -4,6 +4,8 @@ This map is the human-readable index for `docs/feature-registry.json`.
 
 Before changing a feature, locate its `feature_id`, read its owner paths, and run its required gates. If no row exists, add the feature to the registry and gate it before touching behavior.
 
+`client.file_browser_ui` session binding: `src/lib/plugin-file-browser/file-browser-session-port.ts#createFileBrowserSessionPort` consumes App-injected send/subscription and an exact session projection. It owns immutable file send target and daemon file scope; TerminalPage consumes `FileBrowserSessionPort` only. Existing `edge.client.app_shell_to_file_browser_ui` and `edge.client_file_browser_to_target_mux_request` apply. Gates: `file-browser-session-port.test.ts`, `TerminalPage.render-isolation.test.tsx`, `FileTransferSheet.test.tsx` (in-flight sender isolation).
+
 | feature_id | owner | allowed change surface | required gate source |
 | --- | --- | --- | --- |
 | `daemon.source_adapter` | `src/server/terminal-source-adapter.ts` | shared terminal source adapter contract for tmux/Herdr/WezTerm backends and mirror capture; kind assertion, source snapshot/session/input/resize/rename/close/read-path contracts, and no mirror revision or client policy truth | `src/server/terminal-source-adapter.test.ts`; `module-import-graph-truth.test.ts`; `feature-registry-truth.test.ts`; `function-wiki-truth.test.ts` |

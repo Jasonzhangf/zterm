@@ -1953,6 +1953,7 @@
       "relation_status": "direct",
       "owner_feature": "daemon.file_transfer",
       "allowed_callers": [
+        "src/lib/plugin-file-browser/file-browser-session-port.ts",
         "src/components/terminal/FileTransferSheet.tsx",
         "src/contexts/session-context-transfer-runtime.ts",
         "src/lib/file-transfer-throughput-runtime.ts"
@@ -1977,6 +1978,7 @@
         "android_mainline:ClientFileTransferUploadOut03ChunkDispatch->ClientFileTransferUploadOut04MuxSend"
       ],
       "required_gates": [
+        "src/lib/plugin-file-browser/file-browser-session-port.test.ts",
         "scripts/run-file-transfer-throughput-gate.sh",
         "src/lib/edge-registry-truth.test.ts",
         "src/lib/file-transfer-throughput-runtime.test.ts",

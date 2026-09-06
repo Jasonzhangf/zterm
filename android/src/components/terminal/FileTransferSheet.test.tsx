@@ -1498,8 +1498,9 @@ describe("FileTransferSheet", () => {
     expect(screen.getByText("下载 1 项")).toBeTruthy();
   });
 
-  it("saves edited remote text through the bounded upload protocol", async () => {
+  it("keeps an edited remote upload bound to its initial sender across UI session changes", async () => {
     const sendJson = vi.fn();
+    const nextSessionSendJson = vi.fn();
     const handlerRef: { current: ((msg: any) => void) | null } = {
       current: null,
     };
@@ -1508,7 +1509,7 @@ describe("FileTransferSheet", () => {
       return () => {};
     });
 
-    render(
+    const { rerender } = render(
       <FileTransferSheet
         open
         remoteCwd="/remote/home"
@@ -1578,6 +1579,16 @@ describe("FileTransferSheet", () => {
       }),
     });
 
+    rerender(
+      <FileTransferSheet
+        open
+        remoteCwd="/remote/home"
+        onClose={vi.fn()}
+        sendJson={nextSessionSendJson}
+        onFileTransferMessage={onFileTransferMessage}
+      />,
+    );
+
     handlerRef.current?.({
       type: "file-upload-progress",
       payload: {
@@ -1592,6 +1603,7 @@ describe("FileTransferSheet", () => {
         sendJson.mock.calls.some((call) => call[0]?.type === "file-upload-end"),
       ).toBe(true);
     });
+    expect(nextSessionSendJson.mock.calls.some((call) => call[0]?.type.startsWith('file-upload-'))).toBe(false);
     handlerRef.current?.({
       type: "file-upload-complete",
       payload: {

@@ -2401,6 +2401,7 @@
         "src/contexts/SessionContext.tsx"
       ],
       "required_gates": [
+        "src/lib/plugin-file-browser/file-browser-session-port.test.ts",
         "src/lib/plugin-host/plugin-host-runtime.test.ts",
         "src/lib/plugin-file-browser/file-browser-ui-ownership.test.ts",
         "src/pages/TerminalPage.render-isolation.test.tsx",

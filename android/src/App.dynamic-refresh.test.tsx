@@ -89,7 +89,7 @@ const sessionHarness = vi.hoisted(() => {
     activeSessionId: 's1',
     connectedCount: 1,
   };
-  let staleActiveSession = state.sessions[0];
+  let staleActiveSession: ReturnType<typeof makeSession> | null = state.sessions[0];
   const reconnectAllSessions = vi.fn();
   const reconnectSession = vi.fn();
   const resumeActiveSessionTransport = vi.fn(() => true);
@@ -643,6 +643,7 @@ vi.mock('./pages/TerminalPage', () => ({
     renderRemoteWindow,
     renderQuickBar,
     renderTerminalShell,
+    resolveFileBrowserSessionPort,
   }: {
     activeSession: { id: string; buffer?: { revision?: number } } | null;
     sessions: Array<{ id: string }>;
@@ -662,6 +663,7 @@ vi.mock('./pages/TerminalPage', () => ({
     renderRemoteWindow?: () => React.ReactNode;
     renderQuickBar?: () => React.ReactNode;
     renderTerminalShell?: () => React.ReactNode;
+    resolveFileBrowserSessionPort?: (sessionId: string) => unknown;
   }) => {
     const activeRevision = activeSession?.buffer?.revision ?? -1;
     const activeStoreSnapshot = activeSession ? sessionBufferStore?.getSnapshot(activeSession.id)?.buffer : null;
@@ -672,6 +674,7 @@ vi.mock('./pages/TerminalPage', () => ({
       activeRevision,
       activeBodyMarker,
       serverIdentityAliasInputs,
+      resolveFileBrowserSessionPort,
     });
     return (
       <div>
@@ -2076,6 +2079,20 @@ describe('App dynamic refresh matrix', () => {
     expect(localStorage.getItem(STORAGE_KEYS.OPEN_TABS)).not.toBeNull();
     expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s1');
     expect(localStorage.getItem(STORAGE_KEYS.SAVED_TAB_LISTS)).toBeNull();
+  });
+
+  it('binds file browser ports for retained tabs after runtime sessions disappear', async () => {
+    sessionHarness.update({ sessions: [makeSession('s1', 1)], activeSessionId: 's1', connectedCount: 1 } as any, makeSession('s1', 1));
+    const settings = { servers: [] } as any;
+    const setSettings = vi.fn();
+    const view = render(<AppContent bridgeSettings={settings} setBridgeSettings={setSettings} />);
+    await waitFor(() => expect(screen.getByTestId('terminal-session-ids').textContent).toBe('s1'));
+    sessionHarness.update({ sessions: [], activeSessionId: null, connectedCount: 0 } as any, null);
+    view.rerender(<AppContent bridgeSettings={settings} setBridgeSettings={setSettings} />);
+    expect(screen.getByTestId('terminal-session-ids').textContent).toBe('s1');
+    const props = terminalPageRenderSpy.mock.calls.at(-1)?.[0];
+    expect(() => props.resolveFileBrowserSessionPort('s1')).not.toThrow();
+    expect(props.resolveFileBrowserSessionPort('s1').sendJson).toBeTypeOf('function');
   });
 
   it('switches the current-process active tab without saving tab keys', async () => {
