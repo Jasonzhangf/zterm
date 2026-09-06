@@ -35,7 +35,7 @@ import type {
   TerminalSessionDrawerItem,
   TerminalSessionDrawerSlot,
 } from '../lib/plugin-session-drawer/session-drawer-contract';
-import type { TerminalFileBrowserSlot } from '../lib/plugin-file-browser/file-browser-contract';
+import type { ResolveFileBrowserSessionPort, TerminalFileBrowserSlot } from '../lib/plugin-file-browser/file-browser-contract';
 import type {
   RemoteWindowInputContext,
   RemoteWindowVideoDebugSnapshot,
@@ -515,8 +515,7 @@ interface TerminalPageProps {
   terminalWidthMode?: TerminalWidthMode;
   terminalSessionGroupLayoutMode?: TerminalSessionGroupLayoutMode;
   onTerminalWidthModeChange?: (sessionId: string, mode: TerminalWidthMode, cols?: number | null) => void;
-  onSendMessage?: (sessionId: string, msg: any) => void;
-  onFileTransferMessage?: (handler: (msg: any) => void) => () => void;
+  resolveFileBrowserSessionPort?: ResolveFileBrowserSessionPort;
   shortcutSmartSort?: boolean;
   shortcutFrequencyMap?: Record<string, number>;
   onShortcutUse?: (shortcutId: string) => void;
@@ -606,8 +605,7 @@ function TerminalPageComponent({
   terminalWidthMode = 'adaptive-phone',
   terminalSessionGroupLayoutMode = 'auto',
   onTerminalWidthModeChange,
-  onSendMessage,
-  onFileTransferMessage,
+  resolveFileBrowserSessionPort,
   shortcutSmartSort,
   shortcutFrequencyMap,
   onShortcutUse,
@@ -774,15 +772,6 @@ function TerminalPageComponent({
       );
     }
   }, [isAndroid]);
-
-  const fileTransferMessageSessionIdRef = useRef<string | null>(null);
-  const sendFileTransferMessage = useCallback((msg: any) => {
-    const sessionId = fileTransferMessageSessionIdRef.current || activeSessionIdRef.current;
-    if (!sessionId || !onSendMessage) {
-      return;
-    }
-    onSendMessage(sessionId, msg);
-  }, [onSendMessage]);
 
   useEffect(() => {
     terminalInputHandlerRef.current = onTerminalInput;
@@ -1575,9 +1564,11 @@ function TerminalPageComponent({
       ? terminalActionSessionId
       : (interactiveSession?.id || null);
   }, [interactiveSession?.id, sessionPreviewOpen, terminalActionSessionId]);
-  useEffect(() => {
-    fileTransferMessageSessionIdRef.current = terminalActionSessionId || null;
-  }, [terminalActionSessionId]);
+  const fileBrowserSessionPort = useMemo(() => (
+    terminalActionSessionId && resolveFileBrowserSessionPort
+      ? resolveFileBrowserSessionPort(terminalActionSessionId)
+      : null
+  ), [terminalActionSessionId, resolveFileBrowserSessionPort]);
 
   useEffect(() => {
     if (!portraitSessionDrawerEnabled && sessionDrawerOpen) {
@@ -3738,7 +3729,7 @@ function TerminalPageComponent({
               onInputDebug: recordRemoteWindowInputDebug,
               bottomInsetPx: terminalChromeBottomPx + terminalImeLiftPx,
               bottomChromeInsetPx: terminalChromeBottomPx,
-              onOpenResourceDrawer: openRemoteWindowInResourceDrawer && Boolean(onSendMessage && onFileTransferMessage && renderFileBrowser)
+              onOpenResourceDrawer: openRemoteWindowInResourceDrawer && Boolean(fileBrowserSessionPort && renderFileBrowser)
                 ? handleOpenResourceDrawer
                 : undefined,
               onOpenStateChange: handleRemoteWindowOverlayOpenStateChange,
@@ -3805,7 +3796,7 @@ function TerminalPageComponent({
           onRunNow={(jobId) => onRunScheduleJobNow?.(scheduleComposerTarget.sessionId, jobId)}
         />
       ) : null}
-      {terminalActionSession && onSendMessage && onFileTransferMessage && renderFileBrowser ? (
+      {terminalActionSession && fileBrowserSessionPort && renderFileBrowser ? (
         <ResourceBottomSheet
           open={fileTransferOpen}
           initialTab={resourceInitialTab}
@@ -3844,13 +3835,11 @@ function TerminalPageComponent({
             remoteCwd: '',
             mode: fileTransferMode,
             embedded: true,
-            daemonFileScopeId: terminalActionSession.daemonHostId
-              ? `daemon:${terminalActionSession.daemonHostId}`
-              : `endpoint:${terminalActionSession.bridgeHost}:${terminalActionSession.bridgePort}`,
+            daemonFileScopeId: fileBrowserSessionPort.daemonFileScopeId,
             terminalShellSkin: effectiveTerminalShellSkin,
             onClose: () => setFileTransferOpen(false),
-            sendJson: sendFileTransferMessage,
-            onFileTransferMessage,
+            sendJson: fileBrowserSessionPort.sendJson,
+            onFileTransferMessage: fileBrowserSessionPort.onFileTransferMessage,
           })}
         />
       ) : null}
@@ -3967,8 +3956,7 @@ function terminalPagePropsEqual(
     && prev.terminalWidthMode === next.terminalWidthMode
     && prev.terminalSessionGroupLayoutMode === next.terminalSessionGroupLayoutMode
     && prev.onTerminalWidthModeChange === next.onTerminalWidthModeChange
-    && prev.onSendMessage === next.onSendMessage
-    && prev.onFileTransferMessage === next.onFileTransferMessage
+    && prev.resolveFileBrowserSessionPort === next.resolveFileBrowserSessionPort
     && prev.renderDebugConsole === next.renderDebugConsole
     && prev.renderSessionDrawer === next.renderSessionDrawer
     && prev.renderFileBrowser === next.renderFileBrowser

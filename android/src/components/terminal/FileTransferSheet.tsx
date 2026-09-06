@@ -784,7 +784,8 @@ export function FileTransferSheet({
     savingStatus: string;
     successStatus: string;
   }) => {
-    if (!sendJsonRef.current) {
+    const sendUploadMessage = sendJsonRef.current;
+    if (!sendUploadMessage) {
       setPreviewSaveStatus("保存失败：文件传输通道未就绪，请等待连接恢复后重试。");
       return false;
     }
@@ -792,13 +793,6 @@ export function FileTransferSheet({
       ReturnType<typeof createFileTransferSessionRuntime>["startUpload"]
     > | null = null;
     let endSent = false;
-    const sendUploadMessage = (message: unknown) => {
-      const sender = sendJsonRef.current;
-      if (!sender) {
-        throw new Error("文件传输通道已断开，请等待连接恢复后重试。");
-      }
-      sender(message);
-    };
     try {
       const targetDir = remotePath.trim();
       if (!targetDir) {
@@ -841,7 +835,7 @@ export function FileTransferSheet({
     } catch (error) {
       if (uploadRequest) {
         if (!endSent) {
-          sendJsonRef.current?.(uploadRequest.endMessage);
+          sendUploadMessage(uploadRequest.endMessage);
         }
         fileTransferRuntimeRef.current.markTransferError(
           uploadRequest.requestId,

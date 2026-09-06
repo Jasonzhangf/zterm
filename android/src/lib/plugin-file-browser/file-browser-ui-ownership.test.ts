@@ -17,6 +17,8 @@ describe('file browser UI plugin ownership gate', () => {
       "from '../lib/plugin-file-browser/file-browser-contract'",
     );
     expect(terminalPage).toContain('renderFileBrowser');
+    expect(terminalPage).toContain('resolveFileBrowserSessionPort');
+    expect(terminalPage).not.toMatch(/onSendMessage|sendFileTransferMessage|fileTransferMessageSessionIdRef/);
   });
 
   it('composes the file browser plugin only through App and the plugin host', () => {

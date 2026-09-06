@@ -265,6 +265,8 @@ describe('TerminalPage render isolation', () => {
 
   it('renders the file browser only through the plugin slot callback', () => {
     const session1 = makeSession('s1');
+    const port = { daemonFileScopeId: 'daemon:s1', sendJson: vi.fn(), onFileTransferMessage: vi.fn() };
+    const resolvePort = vi.fn(() => port);
     const renderFileBrowser = vi.fn((props: { open: boolean; mode?: string }) => (
       <div
         data-testid="plugin-file-browser-slot"
@@ -288,14 +290,15 @@ describe('TerminalPage render isolation', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onSendMessage={vi.fn()}
-        onFileTransferMessage={vi.fn()}
+        resolveFileBrowserSessionPort={resolvePort}
         renderFileBrowser={renderFileBrowser}
         renderQuickBar={quickBarSlotRender}
       />,
     );
 
     expect(renderFileBrowser).toHaveBeenCalled();
+    expect(resolvePort).toHaveBeenCalledWith('s1');
+    expect(renderFileBrowser.mock.calls.at(-1)?.[0]).toMatchObject(port);
     expect(screen.getByTestId('plugin-file-browser-slot').getAttribute('data-open')).toBe('false');
 
     fireEvent.click(screen.getByText('open-file-transfer'));
@@ -321,8 +324,7 @@ describe('TerminalPage render isolation', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onSendMessage={vi.fn()}
-        onFileTransferMessage={vi.fn()}
+        resolveFileBrowserSessionPort={() => ({ daemonFileScopeId: 'daemon:s1', sendJson: vi.fn(), onFileTransferMessage: vi.fn() })}
         renderQuickBar={quickBarSlotRender}
       />,
     );
