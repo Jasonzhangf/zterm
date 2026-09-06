@@ -3836,6 +3836,8 @@ function TerminalPageComponent({
             mode: fileTransferMode,
             embedded: true,
             daemonFileScopeId: fileBrowserSessionPort.daemonFileScopeId,
+            fileTransferRuntime: fileBrowserSessionPort.fileTransferRuntime,
+            onFileTransferStateChange: fileBrowserSessionPort.onFileTransferStateChange,
             terminalShellSkin: effectiveTerminalShellSkin,
             onClose: () => setFileTransferOpen(false),
             sendJson: fileBrowserSessionPort.sendJson,

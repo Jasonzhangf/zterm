@@ -2495,6 +2495,8 @@
         "src/lib/file-transfer-local-edit-copy-storage.ts",
         "src/lib/file-transfer-sheet-helpers.ts",
         "src/lib/file-transfer-sheet-constants.ts",
+        "src/lib/file-transfer-native-store-port.ts",
+        "src/lib/file-transfer-path-runtime.ts",
         "src/lib/plugin-file-browser/"
       ]
     },

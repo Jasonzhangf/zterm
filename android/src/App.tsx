@@ -32,7 +32,7 @@ import { updateBridgeSettingsTerminalWidthMode } from './lib/terminal-width-mode
 import { upsertBridgeServer } from './lib/bridge-settings';
 import { applyTraversalRelaySettings } from './lib/traversal-relay-client';
 import { APP_VERSION, APP_VERSION_CODE } from './lib/app-version';
-import { createFileBrowserSessionPort } from './lib/plugin-file-browser/file-browser-session-port';
+import { useFileBrowserSessionPortOwner } from './lib/plugin-file-browser/file-browser-session-port';
 import { buildAppUpdateManifestCandidates } from './lib/app-update-relay-manifest';
 import { resolveSettingsTheme } from './lib/mobile-ui';
 import type { AppUpdateManifestCandidate, AppUpdateRouteSnapshot } from './lib/app-update';
@@ -293,6 +293,10 @@ export function AppContent({
   const { drafts: sessionDrafts, setDraft: setSessionDraft, clearDraft: clearSessionDraft, pruneDrafts } = useSessionDraftStorage();
   const { sessionGroups, setSessionGroupSelection, markSessionGroupEntered, deleteSessionGroup, pruneSessionGroupSelectionToRemoteTruth } = useSessionHistoryStorage(relayDevices);
   const sessions = state.sessions;
+  const fileBrowserSessionPortOwner = useFileBrowserSessionPortOwner({
+    send: sendMessageRaw,
+    subscribe: onFileTransferMessage,
+  });
 
   useBackgroundLiveSessionHandoff({
     appForegroundActive,
@@ -555,11 +559,15 @@ export function AppContent({
     ),
   });
 
-  const resolveFileBrowserSessionPort = useCallback((sessionId: string) => createFileBrowserSessionPort({
-    session: terminalSessions.find((session) => session.id === sessionId),
-    send: sendMessageRaw,
-    subscribe: onFileTransferMessage,
-  }), [terminalSessions, sendMessageRaw, onFileTransferMessage]);
+  const resolveFileBrowserSessionPort = useCallback((sessionId: string) => {
+    return fileBrowserSessionPortOwner.resolve({
+      session: terminalSessions.find((session) => session.id === sessionId),
+    });
+  }, [fileBrowserSessionPortOwner, terminalSessions]);
+
+  useEffect(() => {
+    fileBrowserSessionPortOwner.reconcile(terminalSessions.map((session) => session.id));
+  }, [fileBrowserSessionPortOwner, terminalSessions]);
 
   appUpdateRouteRef.current = terminalActiveSession
     ? {

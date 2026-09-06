@@ -3301,10 +3301,13 @@
       "resource_type": "platform_client_truth",
       "identity": "Android external-storage file bytes and exact persisted file metadata",
       "owner_feature": "daemon.file_transfer",
-      "truth_store": "src/plugins/StoragePermissionPlugin.ts and native/android/app/src/main/java/com/zterm/android/StoragePermissionPlugin.java",
+      "truth_store": "src/lib/file-transfer-native-store-port.ts; src/plugins/StoragePermissionPlugin.ts and native/android/app/src/main/java/com/zterm/android/StoragePermissionPlugin.java",
       "allowed_operations": [
         "read_bounded_chunk",
         "write_bounded_chunk_batch",
+        "stage_request_unique_download",
+        "publish_atomic_download",
+        "cleanup_failed_download",
         "stat_persisted_file",
         "list_directory",
         "create_directory"
@@ -3344,7 +3347,7 @@
       "resource_type": "projection_resource",
       "identity": "Client file browser projection, preview selection, and upload/download intent boundary",
       "owner_feature": "daemon.file_transfer",
-      "truth_store": "src/lib/file-transfer-message-runtime.ts and file browser UI projection",
+      "truth_store": "src/lib/file-transfer-message-runtime.ts; src/lib/file-transfer-session-runtime.ts; src/lib/file-transfer-native-store-port.ts and file browser UI projection",
       "allowed_operations": [
         "project_file_rows",
         "select_file",

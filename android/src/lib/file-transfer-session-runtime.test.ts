@@ -4,6 +4,31 @@ import {
   FILE_TRANSFER_UPLOAD_RESUME_RETRY_DELAY_MS,
   FILE_TRANSFER_UPLOAD_RESUME_RETRY_LIMIT,
 } from './file-transfer-throughput-runtime';
+import type {
+  FileTransferDownloadPersistInput,
+  FileTransferDownloadStore,
+} from './file-transfer-native-store-port';
+
+function createDownloadStore(overrides: Partial<Pick<
+  FileTransferDownloadStore,
+  'persist' | 'complete' | 'abort'
+>> = {}): FileTransferDownloadStore {
+  return {
+    createDestination: vi.fn((input: {
+      requestId: string;
+      scopeId: string;
+      downloadDir: string;
+      fileName: string;
+    }) => ({
+      ...input,
+      targetPath: `${input.downloadDir}/${input.fileName}`,
+      stagingPath: `${input.downloadDir}/.zterm-download-${input.requestId}.part`,
+    })),
+    persist: overrides.persist ?? vi.fn(async (_input: FileTransferDownloadPersistInput) => undefined),
+    complete: overrides.complete ?? vi.fn(async () => undefined),
+    abort: overrides.abort ?? vi.fn(async () => undefined),
+  };
+}
 
 describe('file-transfer-session-runtime', () => {
   it('owns remote list request/response truth', async () => {
@@ -94,15 +119,19 @@ describe('file-transfer-session-runtime', () => {
   });
 
   it('owns download chunk -> complete transfer progression', async () => {
-    const onDownloadComplete = vi.fn();
+    const store = createDownloadStore();
     const runtime = createFileTransferSessionRuntime({
       now: () => 200,
       randomId: () => 'wxyz',
-      onDownloadComplete,
+      downloadStore: store,
     });
 
     runtime.open('/remote/home');
-    const download = runtime.startDownload({ name: 'b.txt', size: 4096 }, '/remote/home');
+    const download = runtime.startDownload(
+      { name: 'b.txt', size: 3 },
+      '/remote/home',
+      { scopeId: '', downloadDir: '/storage/emulated/0/Download' },
+    );
 
     await runtime.applyMessage({
       type: 'file-download-chunk',
@@ -110,41 +139,47 @@ describe('file-transfer-session-runtime', () => {
         requestId: download.requestId,
         fileName: 'b.txt',
         chunkIndex: 0,
-        totalChunks: 2,
+        totalChunks: 1,
         dataBase64: 'Zm9v',
       },
     });
 
-    expect(runtime.getState().transfers[0]?.transferredBytes).toBe(1);
+    expect(runtime.getState().transfers[0]?.transferredBytes).toBe(3);
 
     await runtime.applyMessage({
       type: 'file-download-complete',
       payload: {
         requestId: download.requestId,
         fileName: 'b.txt',
-        totalBytes: 4096,
+        totalBytes: 3,
       },
     });
 
-    expect(onDownloadComplete).toHaveBeenCalledWith(
-      expect.objectContaining({ requestId: download.requestId }),
-      ['Zm9v'],
-    );
+    expect(store.persist).toHaveBeenCalledWith(expect.objectContaining({
+      requestId: download.requestId,
+      chunksBase64: ['Zm9v'],
+    }));
+    expect(store.complete).toHaveBeenCalledTimes(1);
     expect(runtime.getState().transfers[0]?.status).toBe('done');
-    expect(runtime.getState().transfers[0]?.transferredBytes).toBe(4096);
+    expect(runtime.getState().transfers[0]?.transferredBytes).toBe(3);
   });
 
   it('keeps download transfer in error state when local write callback fails', async () => {
+    const store = createDownloadStore({
+      persist: vi.fn().mockRejectedValue(new Error('download size mismatch: wrote 0 bytes, expected 5')),
+    });
     const runtime = createFileTransferSessionRuntime({
       now: () => 250,
       randomId: () => 'fail',
-      onDownloadComplete: () => {
-        throw new Error('download size mismatch: wrote 0 bytes, expected 5');
-      },
+      downloadStore: store,
     });
 
     runtime.open('/remote/home');
-    const download = runtime.startDownload({ name: 'photo.png', size: 5 }, '/remote/home');
+    const download = runtime.startDownload(
+      { name: 'photo.png', size: 5 },
+      '/remote/home',
+      { scopeId: '', downloadDir: '/storage/emulated/0/Download' },
+    );
 
     await runtime.applyMessage({
       type: 'file-download-chunk',
@@ -168,6 +203,272 @@ describe('file-transfer-session-runtime', () => {
     expect(runtime.getState().transfers[0]).toMatchObject({
       status: 'error',
       error: 'download size mismatch: wrote 0 bytes, expected 5',
+    });
+    expect(store.abort).toHaveBeenCalledTimes(1);
+  });
+
+  it('delegates the native download transaction to the request-bound store', async () => {
+    const store = createDownloadStore();
+    const runtime = createFileTransferSessionRuntime({
+      now: () => 255,
+      randomId: () => 'store',
+      downloadStore: store,
+    });
+
+    runtime.open('/remote/home', 'session-a');
+    const download = runtime.startDownload(
+      { name: 'photo.png', size: 5 },
+      '/remote/home',
+      {
+        scopeId: 'session-a',
+        downloadDir: '/storage/emulated/0/Download/a',
+      },
+    );
+
+    await runtime.applyMessage({
+      type: 'file-download-chunk',
+      payload: {
+        requestId: download.requestId,
+        fileName: 'photo.png',
+        chunkIndex: 0,
+        totalChunks: 1,
+        dataBase64: 'aW1hZ2U=',
+      },
+    });
+    await runtime.applyMessage({
+      type: 'file-download-complete',
+      payload: {
+        requestId: download.requestId,
+        fileName: 'photo.png',
+        totalBytes: 5,
+      },
+    });
+
+    expect(store.persist).toHaveBeenCalledWith({
+      requestId: download.requestId,
+      fileName: 'photo.png',
+      totalBytes: 5,
+      chunksBase64: ['aW1hZ2U='],
+      destination: expect.objectContaining({
+        scopeId: 'session-a',
+        targetPath: '/storage/emulated/0/Download/a/photo.png',
+      }),
+    });
+    expect(store.complete).toHaveBeenCalledTimes(1);
+    expect(runtime.getState().transfers[0]).toMatchObject({
+      status: 'done',
+      transferredBytes: 5,
+    });
+  });
+
+  it('does not publish completion when the native store rejects final stat', async () => {
+    const runtime = createFileTransferSessionRuntime({
+      now: () => 256,
+      randomId: () => 'stat',
+      downloadStore: {
+        createDestination: createDownloadStore().createDestination,
+        persist: vi.fn().mockResolvedValue(undefined),
+        complete: vi.fn().mockRejectedValue(new Error('final stat failed')),
+        abort: vi.fn().mockResolvedValue(undefined),
+      },
+    });
+
+    runtime.open('/remote/home', 'session-stat');
+    const download = runtime.startDownload(
+      { name: 'broken.bin', size: 3 },
+      '/remote/home',
+      {
+        scopeId: 'session-stat',
+        downloadDir: '/storage/emulated/0/Download/stat',
+      },
+    );
+
+    await runtime.applyMessage({
+      type: 'file-download-chunk',
+      payload: {
+        requestId: download.requestId,
+        fileName: 'broken.bin',
+        chunkIndex: 0,
+        totalChunks: 1,
+        dataBase64: 'YWJj',
+      },
+    });
+    await runtime.applyMessage({
+      type: 'file-download-complete',
+      payload: {
+        requestId: download.requestId,
+        fileName: 'broken.bin',
+        totalBytes: 3,
+      },
+    });
+
+    expect(runtime.getState().transfers[0]).toMatchObject({
+      status: 'error',
+      error: 'final stat failed',
+    });
+  });
+
+  it('serializes duplicate completion and ignores a late completion after reopen', async () => {
+    let releasePersist: (() => void) | undefined;
+    const persist = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          releasePersist = resolve;
+        }),
+    );
+    const store = createDownloadStore({ persist });
+    const runtime = createFileTransferSessionRuntime({
+      now: () => 257,
+      randomId: () => 'race',
+      downloadStore: store,
+    });
+
+    runtime.open('/remote/home', 'session-old');
+    const oldDownload = runtime.startDownload(
+      { name: 'old.bin', size: 3 },
+      '/remote/home',
+      {
+        scopeId: 'session-old',
+        downloadDir: '/storage/emulated/0/Download/old',
+      },
+    );
+    await runtime.applyMessage({
+      type: 'file-download-chunk',
+      payload: {
+        requestId: oldDownload.requestId,
+        fileName: 'old.bin',
+        chunkIndex: 0,
+        totalChunks: 1,
+        dataBase64: 'b2xk',
+      },
+    });
+
+    const firstComplete = runtime.applyMessage({
+      type: 'file-download-complete',
+      payload: {
+        requestId: oldDownload.requestId,
+        fileName: 'old.bin',
+        totalBytes: 3,
+      },
+    });
+    const duplicateComplete = runtime.applyMessage({
+      type: 'file-download-complete',
+      payload: {
+        requestId: oldDownload.requestId,
+        fileName: 'old.bin',
+        totalBytes: 3,
+      },
+    });
+
+    const oldDone = oldDownload.waitForDone();
+    runtime.open('/remote/new', 'session-new');
+    let oldDoneSettled = false;
+    void oldDone.then(
+      () => { oldDoneSettled = true; },
+      () => { oldDoneSettled = true; },
+    );
+    await Promise.resolve();
+    expect(oldDoneSettled).toBe(false);
+    const newDownload = runtime.startDownload(
+      { name: 'new.bin', size: 3 },
+      '/remote/new',
+      {
+        scopeId: 'session-new',
+        downloadDir: '/storage/emulated/0/Download/new',
+      },
+    );
+    await runtime.applyMessage({
+      type: 'file-download-chunk',
+      payload: {
+        requestId: newDownload.requestId,
+        fileName: 'new.bin',
+        chunkIndex: 0,
+        totalChunks: 1,
+        dataBase64: 'bmV3',
+      },
+    });
+
+    releasePersist?.();
+    await Promise.all([firstComplete, duplicateComplete]);
+    await expect(oldDone).resolves.toBeUndefined();
+    expect(store.persist).toHaveBeenCalledTimes(1);
+    expect(store.persist).toHaveBeenCalledWith({
+      requestId: oldDownload.requestId,
+      fileName: 'old.bin',
+      totalBytes: 3,
+      chunksBase64: ['b2xk'],
+      destination: expect.objectContaining({ scopeId: 'session-old' }),
+    });
+    expect(runtime.getState().transfers.find((item) => item.id === newDownload.requestId)).toMatchObject({
+      status: 'transferring',
+    });
+    await expect(runtime.applyMessage({
+      type: 'file-download-chunk',
+      payload: {
+        requestId: oldDownload.requestId,
+        fileName: 'old.bin',
+        chunkIndex: 0,
+        totalChunks: 1,
+        dataBase64: 'b2xk',
+      },
+    })).resolves.toBe(false);
+    await expect(runtime.applyMessage({
+      type: 'file-download-complete',
+      payload: {
+        requestId: oldDownload.requestId,
+        fileName: 'old.bin',
+        totalBytes: 3,
+      },
+    })).resolves.toBe(false);
+  });
+
+  it('rejects duplicate chunks and keeps out-of-order chunks ordered until completion', async () => {
+    const store = createDownloadStore();
+    const runtime = createFileTransferSessionRuntime({
+      now: () => 258,
+      randomId: () => 'order',
+      downloadStore: store,
+    });
+
+    runtime.open('/remote/home', 'session-order');
+    const download = runtime.startDownload(
+      { name: 'ordered.bin', size: 6 },
+      '/remote/home',
+      {
+        scopeId: 'session-order',
+        downloadDir: '/storage/emulated/0/Download/order',
+      },
+    );
+    const chunk = (chunkIndex: number, dataBase64: string) => runtime.applyMessage({
+      type: 'file-download-chunk',
+      payload: {
+        requestId: download.requestId,
+        fileName: 'ordered.bin',
+        chunkIndex,
+        totalChunks: 2,
+        dataBase64,
+      },
+    });
+
+    await chunk(1, 'YmJi');
+    await chunk(0, 'YWFh');
+    await chunk(0, 'YWFh');
+    await runtime.applyMessage({
+      type: 'file-download-complete',
+      payload: {
+        requestId: download.requestId,
+        fileName: 'ordered.bin',
+        totalBytes: 6,
+      },
+    });
+
+    expect(store.persist).toHaveBeenCalledWith(expect.objectContaining({
+      chunksBase64: ['YWFh', 'YmJi'],
+    }));
+    expect(store.persist).toHaveBeenCalledTimes(1);
+    expect(runtime.getState().transfers[0]).toMatchObject({
+      status: 'done',
+      transferredBytes: 6,
     });
   });
 
@@ -274,11 +575,9 @@ describe('file-transfer-session-runtime', () => {
   });
 
   it('owns markdown preview download independently from normal transfer progress', async () => {
-    const onDownloadComplete = vi.fn();
     const runtime = createFileTransferSessionRuntime({
       now: () => 400,
       randomId: () => 'prev',
-      onDownloadComplete,
     });
 
     runtime.open('/remote/home');
@@ -307,7 +606,6 @@ describe('file-transfer-session-runtime', () => {
       },
     });
 
-    expect(onDownloadComplete).not.toHaveBeenCalled();
     expect(runtime.getState().preview).toMatchObject({
       fileName: 'README.md',
       loading: false,

@@ -3,13 +3,20 @@
 import {
   cleanup,
   fireEvent,
-  render,
+  render as testingRender,
   screen,
   waitFor,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { FileTransferSheet } from "./FileTransferSheet";
+import { FileTransferSheet as ProductionFileTransferSheet } from "./FileTransferSheet";
 import { StoragePermissionPlugin } from "../../plugins/StoragePermissionPlugin";
+import { createFileBrowserSessionPort } from "../../lib/plugin-file-browser/file-browser-session-port";
+import { createFileTransferSessionRuntime } from "../../lib/file-transfer-session-runtime";
+import { createFileTransferDownloadStore } from "../../lib/file-transfer-native-store-port";
+import type { FileTransferDownloadStore } from "../../lib/file-transfer-native-store-port";
+import type { ReactElement } from "react";
+
+const FileTransferSheet = ProductionFileTransferSheet as any;
 
 vi.mock("../../plugins/StoragePermissionPlugin", () => ({
   StoragePermissionPlugin: {
@@ -29,6 +36,7 @@ vi.mock("../../plugins/StoragePermissionPlugin", () => ({
     mkdir: vi.fn().mockResolvedValue(undefined),
     writeFile: vi.fn().mockResolvedValue(undefined),
     writeFileChunks: vi.fn().mockResolvedValue({ bytesWritten: 0 }),
+    publishFile: vi.fn().mockResolvedValue({ bytesPublished: 5 }),
     copyFile: vi.fn().mockResolvedValue({ bytesWritten: 0 }),
     createStableFileSnapshot: vi.fn().mockResolvedValue({
       path: "/storage/emulated/0/Download/zterm/remote-browser/snapshot",
@@ -49,6 +57,53 @@ vi.mock("../../plugins/StoragePermissionPlugin", () => ({
 const storagePermissionPluginMock = StoragePermissionPlugin as typeof StoragePermissionPlugin & {
   readFileChunk: ReturnType<typeof vi.fn>;
 };
+
+function createTestFileTransferRuntime() {
+  return createFileTransferSessionRuntime({
+    downloadStore: createFileTransferDownloadStore(StoragePermissionPlugin),
+  });
+}
+
+function render(
+  element: ReactElement<any>,
+) {
+  let defaultRuntime: ReturnType<typeof createTestFileTransferRuntime> | undefined;
+  const withRuntime = (nextElement: ReactElement<any>) => {
+    const props = nextElement.props;
+    const runtime = props.fileTransferRuntime ?? (defaultRuntime ??= createTestFileTransferRuntime());
+    const messageSubscription = props.onFileTransferMessage;
+    if (messageSubscription) {
+      messageSubscription((message: any) => {
+        void runtime.applyMessage(message).then(() => {
+          runtime.emitStateChange();
+        });
+      });
+    }
+    return (
+      <FileTransferSheet
+        {...props}
+        fileTransferRuntime={runtime}
+        onFileTransferStateChange={
+          (handler: () => void) => {
+            const unsubscribeRuntime = runtime.subscribe(handler);
+            const unsubscribeExternal = props.onFileTransferStateChange?.(handler);
+            return () => {
+              unsubscribeRuntime();
+              unsubscribeExternal?.();
+            };
+          }
+        }
+      />
+    );
+  };
+  const rendered = testingRender(withRuntime(element));
+  return {
+    ...rendered,
+    rerender(nextElement: ReactElement<any>) {
+      rendered.rerender(withRuntime(nextElement));
+    },
+  };
+}
 
 if (!HTMLElement.prototype.scrollIntoView) {
   Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
@@ -96,6 +151,10 @@ afterEach(() => {
   vi.mocked(StoragePermissionPlugin.writeFileChunks).mockClear();
   vi.mocked(StoragePermissionPlugin.writeFileChunks).mockResolvedValue({
     bytesWritten: 0,
+  } as any);
+  vi.mocked(StoragePermissionPlugin.publishFile).mockClear();
+  vi.mocked(StoragePermissionPlugin.publishFile).mockResolvedValue({
+    bytesPublished: 5,
   } as any);
   vi.mocked(StoragePermissionPlugin.copyFile).mockClear();
   vi.mocked(StoragePermissionPlugin.copyFile).mockResolvedValue({
@@ -532,15 +591,119 @@ describe("FileTransferSheet", () => {
 
     await waitFor(() => {
       expect(StoragePermissionPlugin.writeFileChunks).toHaveBeenNthCalledWith(1, {
-        path: "/storage/emulated/0/Download/zterm/photo.png",
+        path: expect.stringMatching(
+          /^\/storage\/emulated\/0\/Download\/zterm\/\.zterm-download-fdl-.+\.part$/,
+        ),
         chunks: ["aW1h", "Z2U="],
         append: false,
       });
       expect(StoragePermissionPlugin.writeFile).not.toHaveBeenCalled();
-      expect(StoragePermissionPlugin.stat).toHaveBeenCalledWith({
+      expect(StoragePermissionPlugin.publishFile).toHaveBeenCalledWith({
+        sourcePath: expect.stringMatching(
+          /^\/storage\/emulated\/0\/Download\/zterm\/\.zterm-download-fdl-.+\.part$/,
+        ),
+        targetPath: "/storage/emulated/0/Download/zterm/photo.png",
+        expectedBytes: 5,
+      });
+      expect(StoragePermissionPlugin.stat).toHaveBeenLastCalledWith({
         path: "/storage/emulated/0/Download/zterm/photo.png",
       });
     });
+  });
+
+  it("keeps an in-flight download alive across sheet unmount and remount through the stable session port", async () => {
+    let dispatch: ((message: any) => void) | undefined;
+    let releasePersist: (() => void) | undefined;
+    const sendJson = vi.fn();
+    const subscribe = vi.fn((handler: (message: any) => void) => {
+      dispatch = handler;
+      return vi.fn();
+    });
+    const store: FileTransferDownloadStore = {
+      createDestination: vi.fn((input) => ({
+        ...input,
+        targetPath: `${input.downloadDir}/${input.fileName}`,
+        stagingPath: `${input.downloadDir}/.${input.requestId}.part`,
+      })),
+      persist: vi.fn(() => new Promise<void>((resolve) => {
+        releasePersist = resolve;
+      })),
+      complete: vi.fn(async () => undefined),
+      abort: vi.fn(async () => undefined),
+    };
+    const port = createFileBrowserSessionPort({
+      session: {
+        id: "sheet-session",
+        daemonHostId: "daemon-sheet",
+        bridgeHost: "127.0.0.1",
+        bridgePort: 3333,
+      },
+      send: sendJson,
+      subscribe,
+      downloadStore: store,
+    });
+
+    const renderSheet = () => render(
+      <FileTransferSheet
+        open
+        remoteCwd="/remote/home"
+        onClose={vi.fn()}
+        sendJson={port.sendJson}
+        fileTransferRuntime={port.fileTransferRuntime}
+        onFileTransferStateChange={port.onFileTransferStateChange}
+      />,
+    );
+
+    renderSheet();
+    await waitFor(() => expect(subscribe).toHaveBeenCalledTimes(1));
+    const listRequest = sendJson.mock.calls[0]?.[1];
+    dispatch?.({
+      type: "file-list-response",
+      payload: {
+        requestId: listRequest.payload.requestId,
+        path: "/remote/home",
+        parentPath: "/remote",
+        entries: [{ name: "old.bin", type: "file", size: 3, modified: 1 }],
+      },
+    });
+    await waitFor(() => expect(screen.getByText("old.bin")).toBeTruthy());
+    fireEvent.click(screen.getByText("old.bin"));
+    fireEvent.click(screen.getByText("下载 1 项"));
+
+    const downloadRequest = sendJson.mock.calls.find(
+      (call) => call[1]?.type === "file-download-request",
+    )?.[1];
+    expect(downloadRequest).toBeTruthy();
+    cleanup();
+
+    dispatch?.({
+      type: "file-download-chunk",
+      payload: {
+        requestId: downloadRequest.payload.requestId,
+        fileName: "old.bin",
+        chunkIndex: 0,
+        totalChunks: 1,
+        dataBase64: "b2xk",
+      },
+    });
+    dispatch?.({
+      type: "file-download-complete",
+      payload: {
+        requestId: downloadRequest.payload.requestId,
+        fileName: "old.bin",
+        totalBytes: 3,
+      },
+    });
+    await Promise.resolve();
+    expect(store.persist).toHaveBeenCalledTimes(1);
+    expect(store.complete).not.toHaveBeenCalled();
+
+    releasePersist?.();
+    await waitFor(() => expect(store.complete).toHaveBeenCalledTimes(1));
+
+    renderSheet();
+    await waitFor(() => expect(subscribe).toHaveBeenCalledTimes(1));
+    await port.dispose();
   });
 
   it("uploads local files by reading native file chunks without materializing the whole file in WebView", async () => {

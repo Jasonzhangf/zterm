@@ -38,6 +38,7 @@ import {
 } from '../plugin-terminal-shell/terminal-shell-contract';
 import { createPluginHost } from './plugin-host-runtime';
 import { SessionDrawerUiPlugin } from './session-drawer-ui-plugin';
+import { createFileTransferSessionRuntime } from '../file-transfer-session-runtime';
 import { FileBrowserUiPlugin } from './file-browser-ui-plugin';
 import { SettingsUpdateUiPlugin } from './settings-update-ui-plugin';
 import { RemoteWindowUiPlugin } from './remote-window-ui-plugin';
@@ -296,6 +297,8 @@ describe('plugin host runtime', () => {
       open: false,
       remoteCwd: '',
       onClose: () => undefined,
+      fileTransferRuntime: createFileTransferSessionRuntime(),
+      onFileTransferStateChange: () => () => undefined,
     });
     expect(isValidElement(element)).toBe(true);
     expect((element as ReactElement).type).toBe(FileTransferSheet);

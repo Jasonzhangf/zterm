@@ -11,6 +11,11 @@ import type {
   FileUploadStartPayload,
   TransferProgress,
 } from './types';
+import type {
+  FileTransferDownloadDestination,
+  FileTransferDownloadIntent,
+  FileTransferDownloadStore,
+} from './file-transfer-native-store-port';
 import {
   FILE_TRANSFER_UPLOAD_RESUME_RETRY_DELAY_MS,
   FILE_TRANSFER_UPLOAD_RESUME_RETRY_LIMIT,
@@ -43,10 +48,14 @@ export type FileTransferSessionRuntimeMessage =
   | { type: 'file-upload-complete'; payload: { requestId: string; filePath?: string; bytes?: number } }
   | { type: 'file-upload-error'; payload: { requestId: string; error: string } };
 
+export interface FileTransferDownloadProbe {
+  generation: number;
+}
+
 export interface FileTransferSessionRuntimeDeps {
   now?: () => number;
   randomId?: () => string;
-  onDownloadComplete?: (payload: FileDownloadCompletePayload, orderedChunksBase64: string[]) => Promise<void> | void;
+  downloadStore?: FileTransferDownloadStore;
 }
 
 interface UploadProgressWaiter {
@@ -145,18 +154,42 @@ function updateTransfer(
 export function createFileTransferSessionRuntime(deps?: FileTransferSessionRuntimeDeps) {
   let state = createDefaultState();
   let activeListRequestId: string | null = null;
-  let activeDownloadRequestId: string | null = null;
+  let sessionGeneration = 0;
+  let sessionScopeId = '';
+  let requestSequence = 0;
+  let disposed = false;
   let activePreviewRequestId: string | null = null;
-  let downloadChunks = new Map<number, string>();
   let previewChunks = new Map<number, string>();
   let previewChunkByteLengths = new Map<number, number>();
   let previewReceivedBytes = 0;
   let previewExpectedChunks: number | null = null;
-  const waiters = new Map<string, () => void>();
+  const stateListeners = new Set<() => void>();
+  const downloadWaiters = new Map<string, {
+    resolve: () => void;
+    reject: (error: Error) => void;
+  }>();
+  const uploadWaiters = new Map<string, {
+    resolve: () => void;
+    reject: (error: Error) => void;
+  }>();
   const uploadProgressWaiters = new Map<string, Set<UploadProgressWaiter>>();
   const uploadChunkCounts = new Map<string, number>();
   const now = deps?.now ?? (() => Date.now());
   const randomId = deps?.randomId ?? (() => Math.random().toString(36).slice(2, 6));
+  const sessionDownloads = new Map<string, {
+    generation: number;
+    scopeId: string;
+    destination?: FileTransferDownloadDestination;
+    fileName: string;
+    totalBytes: number;
+    chunks: Map<number, string>;
+    expectedChunks: number | null;
+    receivedBytes: number;
+    completionStarted: boolean;
+    status: 'receiving' | 'persisting' | 'done' | 'error';
+    error?: string;
+  }>();
+  let openDownloadGeneration = 0;
 
   const clearPreviewAssembly = () => {
     activePreviewRequestId = null;
@@ -166,9 +199,48 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
     previewExpectedChunks = null;
   };
 
-  const settleWaiter = (requestId: string) => {
-    waiters.get(requestId)?.();
-    waiters.delete(requestId);
+  const settleDownloadWaiter = (requestId: string, error?: Error) => {
+    const waiter = downloadWaiters.get(requestId);
+    if (!waiter) {
+      return;
+    }
+    downloadWaiters.delete(requestId);
+    if (error) {
+      waiter.reject(error);
+    } else {
+      waiter.resolve();
+    }
+  };
+
+  const settleUploadWaiter = (requestId: string, error?: Error) => {
+    const waiter = uploadWaiters.get(requestId);
+    if (!waiter) {
+      return;
+    }
+    uploadWaiters.delete(requestId);
+    if (error) {
+      waiter.reject(error);
+    } else {
+      waiter.resolve();
+    }
+  };
+
+  const clearDownloadAssembly = (
+    requestId: string,
+    download: {
+      chunks: Map<number, string>;
+      expectedChunks: number | null;
+      receivedBytes: number;
+      completionStarted: boolean;
+      destination?: FileTransferDownloadDestination;
+    },
+  ) => {
+    download.chunks.clear();
+    download.expectedChunks = null;
+    download.receivedBytes = 0;
+    download.completionStarted = false;
+    download.destination = undefined;
+    sessionDownloads.delete(requestId);
   };
 
   const findTransfer = (requestId: string) => state.transfers.find((item) => item.id === requestId);
@@ -274,17 +346,42 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
     getResumeChunkIndex: () => readUploadResumeChunk(requestId),
   });
 
+  const emitStateChange = () => {
+    for (const listener of Array.from(stateListeners)) {
+      listener();
+    }
+  };
+
   return {
     getState() {
       return state;
     },
 
-    open(initialRemotePath: string) {
+    subscribe(listener: () => void) {
+      stateListeners.add(listener);
+      return () => {
+        stateListeners.delete(listener);
+      };
+    },
+
+    emitStateChange() {
+      emitStateChange();
+    },
+
+    getCurrentDownloadGeneration() {
+      return sessionGeneration;
+    },
+
+    open(initialRemotePath: string, scopeId = '') {
+      if (disposed) {
+        throw new Error('file transfer session runtime is disposed');
+      }
+      sessionGeneration += 1;
+      for (const requestId of uploadWaiters.keys()) {
+        settleUploadWaiter(requestId, new Error('file transfer sheet reopened'));
+      }
       activeListRequestId = null;
-      activeDownloadRequestId = null;
-      downloadChunks = new Map();
       clearPreviewAssembly();
-      waiters.clear();
       for (const [requestId] of uploadProgressWaiters) {
         clearUploadProgressWaiters(requestId, new Error('file transfer sheet reopened'));
       }
@@ -293,6 +390,9 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
         ...createDefaultState(),
         remotePath: initialRemotePath.trim(),
       };
+      sessionScopeId = scopeId;
+      openDownloadGeneration = sessionGeneration;
+      emitStateChange();
       return state;
     },
 
@@ -313,10 +413,43 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
       };
     },
 
-    startDownload(entry: Pick<FileEntry, 'name' | 'size'>, remotePath: string) {
-      const requestId = `fdl-${now()}-${randomId()}`;
-      activeDownloadRequestId = requestId;
-      downloadChunks = new Map();
+    startDownload(
+      entry: Pick<FileEntry, 'name' | 'size'>,
+      remotePath: string,
+      intent: FileTransferDownloadIntent,
+      probe?: FileTransferDownloadProbe,
+    ) {
+      if (disposed) {
+        throw new Error('file transfer session runtime is disposed');
+      }
+      const requestId = `fdl-${now()}-${randomId()}-${++requestSequence}`;
+      const sessionGenerationAtStart = sessionGeneration;
+      if (probe && (
+        probe.generation !== openDownloadGeneration
+      )) {
+        throw new Error('download generation changed');
+      }
+      if (intent.scopeId !== sessionScopeId) {
+        throw new Error('download scope changed');
+      }
+      const resolvedDestination = deps?.downloadStore?.createDestination({
+        requestId,
+        scopeId: intent.scopeId,
+        downloadDir: intent.downloadDir,
+        fileName: entry.name,
+      });
+      sessionDownloads.set(requestId, {
+        generation: sessionGeneration,
+        scopeId: resolvedDestination?.scopeId ?? intent.scopeId,
+        destination: resolvedDestination,
+        fileName: entry.name,
+        totalBytes: entry.size,
+        chunks: new Map(),
+        expectedChunks: entry.size === 0 ? 0 : null,
+        receivedBytes: 0,
+        completionStarted: false,
+        status: 'receiving',
+      });
       state = {
         ...state,
         transfers: [
@@ -342,9 +475,22 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
             totalBytes: entry.size,
           },
         },
-        waitForDone: () => new Promise<void>((resolve) => {
-          waiters.set(requestId, resolve);
+        waitForDone: () => new Promise<void>((resolve, reject) => {
+          const transfer = findTransfer(requestId);
+          if (transfer?.status === 'done') {
+            resolve();
+            return;
+          }
+          if (transfer?.status === 'error') {
+            reject(new Error(transfer.error || 'download failed'));
+            return;
+          }
+          downloadWaiters.set(requestId, { resolve, reject });
         }),
+        isCurrentSession: () => (
+          sessionGeneration === sessionGenerationAtStart
+          && sessionScopeId === intent.scopeId
+        ),
       };
     },
 
@@ -437,17 +583,18 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
             return;
           }
           const timer = setTimeout(() => {
-            waiters.delete(requestId);
+            uploadWaiters.delete(requestId);
             reject(new Error('upload complete timeout'));
           }, timeoutMs);
-          waiters.set(requestId, () => {
-            clearTimeout(timer);
-            const settled = findTransfer(requestId);
-            if (settled?.status === 'error') {
-              reject(new Error(settled.error || 'upload failed'));
-              return;
-            }
-            resolve();
+          uploadWaiters.set(requestId, {
+            resolve: () => {
+              clearTimeout(timer);
+              resolve();
+            },
+            reject: (error) => {
+              clearTimeout(timer);
+              reject(error);
+            },
           });
         }),
       };
@@ -559,15 +706,43 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
             previewChunks.set(msg.payload.chunkIndex, msg.payload.dataBase64);
             return true;
           }
-          if (activeDownloadRequestId !== msg.payload.requestId) {
+          const chunkDownload = sessionDownloads.get(msg.payload.requestId);
+          if (!chunkDownload || chunkDownload.status !== 'receiving') {
             return false;
           }
-          downloadChunks.set(msg.payload.chunkIndex, msg.payload.dataBase64);
+          if (
+            !Number.isInteger(msg.payload.chunkIndex)
+            || msg.payload.chunkIndex < 0
+            || !Number.isInteger(msg.payload.totalChunks)
+            || msg.payload.totalChunks < 1
+            || msg.payload.chunkIndex >= msg.payload.totalChunks
+          ) {
+            return false;
+          }
+          if (
+            chunkDownload.expectedChunks !== null
+            && chunkDownload.expectedChunks !== msg.payload.totalChunks
+          ) {
+            return false;
+          }
+          chunkDownload.expectedChunks = msg.payload.totalChunks;
+          const existingChunk = chunkDownload.chunks.get(msg.payload.chunkIndex);
+          if (existingChunk !== undefined) {
+            return existingChunk === msg.payload.dataBase64;
+          }
+          let chunkBytes: Uint8Array;
+          try {
+            chunkBytes = decodeBase64Bytes(msg.payload.dataBase64);
+          } catch {
+            return false;
+          }
+          chunkDownload.chunks.set(msg.payload.chunkIndex, msg.payload.dataBase64);
+          chunkDownload.receivedBytes += chunkBytes.length;
           state = {
             ...state,
             transfers: updateTransfer(state.transfers, msg.payload.requestId, (current) => ({
               ...current,
-              transferredBytes: current.transferredBytes + 1,
+              transferredBytes: chunkDownload.receivedBytes,
               status: 'transferring',
             })),
           };
@@ -605,38 +780,105 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
             clearPreviewAssembly();
             return true;
           }
-          if (activeDownloadRequestId !== msg.payload.requestId) {
+          const completeDownload = sessionDownloads.get(msg.payload.requestId);
+          if (!completeDownload || completeDownload.status !== 'receiving') {
             return false;
           }
-          activeDownloadRequestId = null;
+          if (completeDownload.completionStarted) {
+            return false;
+          }
+          completeDownload.completionStarted = true;
+          completeDownload.status = 'persisting';
+          const requestScopeId = completeDownload.scopeId;
+          const requestDestination = completeDownload.destination;
+          const expectedChunks = completeDownload.expectedChunks;
+          const orderedChunks =
+            expectedChunks === 0
+              ? []
+              : expectedChunks === null
+                ? []
+                : Array.from({ length: expectedChunks }, (_, index) => completeDownload.chunks.get(index));
+          const requestPayload = msg.payload;
+          let validationError: string | null = null;
+          if (
+            expectedChunks === null
+            || (expectedChunks > 0 && orderedChunks.some((chunk) => typeof chunk !== 'string'))
+            || (expectedChunks === 0 && requestPayload.totalBytes !== 0)
+          ) {
+            validationError = 'download completed before every chunk was received';
+          } else if (completeDownload.totalBytes !== requestPayload.totalBytes) {
+            validationError = `download source size changed: received ${requestPayload.totalBytes} bytes`;
+          } else if (completeDownload.receivedBytes !== requestPayload.totalBytes) {
+            validationError = `download payload size mismatch: received ${completeDownload.receivedBytes} bytes, expected ${requestPayload.totalBytes}`;
+          }
+          let failure: Error | null = null;
+          let completionOwnedCleanup = false;
           try {
-            await deps?.onDownloadComplete?.(
-              msg.payload,
-              Array.from({ length: downloadChunks.size }, (_, index) => downloadChunks.get(index) || '').filter(Boolean),
-            );
+            if (validationError) {
+              throw new Error(validationError);
+            }
+            if (!deps?.downloadStore) {
+              throw new Error('download persistence capability unavailable');
+            }
+            if (!requestDestination) {
+              throw new Error(`download destination missing for ${requestPayload.requestId}`);
+            }
+            if (requestDestination.scopeId !== requestScopeId) {
+              throw new Error(`download scope changed for ${requestPayload.requestId}`);
+            }
+            await deps.downloadStore.persist({
+              requestId: requestPayload.requestId,
+              fileName: requestPayload.fileName,
+              totalBytes: requestPayload.totalBytes,
+              chunksBase64: orderedChunks as string[],
+              destination: requestDestination,
+            });
+            completionOwnedCleanup = true;
+            await deps.downloadStore.complete({
+              destination: requestDestination,
+              totalBytes: requestPayload.totalBytes,
+            });
           } catch (error) {
-            downloadChunks = new Map();
+            failure = error instanceof Error ? error : new Error(String(error));
+          }
+          if (failure && !completionOwnedCleanup && requestDestination && deps?.downloadStore) {
+            try {
+              await deps.downloadStore.abort({ destination: requestDestination });
+            } catch (cleanupError) {
+              failure = new Error(
+                `${failure.message}; cleanup failed: ${
+                  cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
+                }`,
+              );
+            }
+          }
+          if (failure) {
+            completeDownload.status = 'error';
+            completeDownload.error = failure.message;
             state = {
               ...state,
-              transfers: updateTransfer(state.transfers, msg.payload.requestId, (current) => ({
+              transfers: updateTransfer(state.transfers, requestPayload.requestId, (current) => ({
                 ...current,
                 status: 'error',
-                error: error instanceof Error ? error.message : String(error),
+                error: failure?.message,
               })),
             };
-            settleWaiter(msg.payload.requestId);
-            return true;
+            settleDownloadWaiter(requestPayload.requestId, failure);
+            clearDownloadAssembly(requestPayload.requestId, completeDownload);
+          } else {
+            completeDownload.status = 'done';
+            state = {
+              ...state,
+              transfers: updateTransfer(state.transfers, requestPayload.requestId, (current) => ({
+                ...current,
+                status: 'done',
+                transferredBytes: current.totalBytes,
+              })),
+            };
+            settleDownloadWaiter(requestPayload.requestId);
+            clearDownloadAssembly(requestPayload.requestId, completeDownload);
           }
-          settleWaiter(msg.payload.requestId);
-          downloadChunks = new Map();
-          state = {
-            ...state,
-            transfers: updateTransfer(state.transfers, msg.payload.requestId, (current) => ({
-              ...current,
-              status: 'done',
-              transferredBytes: current.totalBytes,
-            })),
-          };
+          emitStateChange();
           return true;
         case 'file-download-error':
           if (activePreviewRequestId === msg.payload.requestId) {
@@ -653,8 +895,37 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
             };
             return true;
           }
-          activeDownloadRequestId = null;
-          settleWaiter(msg.payload.requestId);
+          const failedDownload = sessionDownloads.get(msg.payload.requestId);
+          if (!failedDownload || failedDownload.status !== 'receiving') {
+            return false;
+          }
+          const failedDownloadDestination = failedDownload.destination;
+          const originalError = new Error(msg.payload.error);
+          failedDownload.status = 'error';
+          failedDownload.error = originalError.message;
+          if (failedDownloadDestination && deps?.downloadStore) {
+            try {
+              await deps.downloadStore.abort({ destination: failedDownloadDestination });
+            } catch (cleanupError) {
+              const error = new Error(
+                `${originalError.message}; cleanup failed: ${
+                  cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
+                }`,
+              );
+              state = {
+                ...state,
+                transfers: updateTransfer(state.transfers, msg.payload.requestId, (current) => ({
+                  ...current,
+                  status: 'error',
+                  error: error.message,
+                })),
+              };
+              settleDownloadWaiter(msg.payload.requestId, error);
+              clearDownloadAssembly(msg.payload.requestId, failedDownload);
+              return true;
+            }
+          }
+          settleDownloadWaiter(msg.payload.requestId, originalError);
           state = {
             ...state,
             transfers: updateTransfer(state.transfers, msg.payload.requestId, (current) => ({
@@ -663,6 +934,7 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
               error: msg.payload.error,
             })),
           };
+          clearDownloadAssembly(msg.payload.requestId, failedDownload);
           return true;
         case 'file-upload-progress':
           state = {
@@ -676,7 +948,7 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
           resolveSatisfiedUploadProgressWaiters(msg.payload.requestId);
           return true;
         case 'file-upload-complete':
-          settleWaiter(msg.payload.requestId);
+          settleUploadWaiter(msg.payload.requestId);
           state = {
             ...state,
             transfers: updateTransfer(state.transfers, msg.payload.requestId, (current) => ({
@@ -688,7 +960,7 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
           clearUploadProgressWaiters(msg.payload.requestId);
           return true;
         case 'file-upload-error':
-          settleWaiter(msg.payload.requestId);
+          settleUploadWaiter(msg.payload.requestId, new Error(msg.payload.error || 'upload failed'));
           state = {
             ...state,
             transfers: updateTransfer(state.transfers, msg.payload.requestId, (current) => ({
@@ -738,7 +1010,7 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
           error,
         })),
       };
-      settleWaiter(requestId);
+      settleUploadWaiter(requestId, new Error(error));
       return state;
     },
 
@@ -780,5 +1052,34 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
       };
       return state;
     },
+
+    async dispose() {
+      if (disposed) {
+        return;
+      }
+      disposed = true;
+      const disposeError = new Error('file transfer session closed');
+      for (const [requestId, download] of sessionDownloads) {
+        if (download.status !== 'receiving') {
+          continue;
+        }
+        download.status = 'error';
+        download.error = disposeError.message;
+        if (download.destination && deps?.downloadStore) {
+          try {
+            await deps.downloadStore.abort({ destination: download.destination });
+          } catch (cleanupError) {
+            download.error = `${disposeError.message}; cleanup failed: ${
+              cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
+            }`;
+          }
+        }
+        settleDownloadWaiter(requestId, new Error(download.error));
+        clearDownloadAssembly(requestId, download);
+      }
+      stateListeners.clear();
+    },
   };
 }
+
+export type FileTransferSessionRuntime = ReturnType<typeof createFileTransferSessionRuntime>;

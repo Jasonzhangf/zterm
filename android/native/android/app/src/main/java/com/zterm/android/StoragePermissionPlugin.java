@@ -117,7 +117,7 @@ public class StoragePermissionPlugin extends Plugin {
     }
 
     private void publishTempFileAtomically(File temp, File target) throws Exception {
-        Os.rename(temp.getPath(), target.getPath());
+        StorageFilePublishLogic.publishAtomically(temp, target);
     }
 
     private long copyFileToOutput(File source, FileOutputStream output) throws IOException {
@@ -339,6 +339,28 @@ public class StoragePermissionPlugin extends Plugin {
             long bytesWritten = StorageFileWriteLogic.writeChunks(target, chunks, append);
             JSObject result = new JSObject();
             result.put("bytesWritten", bytesWritten);
+            call.resolve(result);
+        } catch (Exception error) {
+            call.reject(error.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void publishFile(PluginCall call) {
+        if (!ensureStoragePermission(call)) {
+            return;
+        }
+        try {
+            File source = resolveExternalStoragePath(call.getString("sourcePath", ""));
+            File target = resolveExternalStoragePath(call.getString("targetPath", ""));
+            long expectedBytes = readLongOption(call, "expectedBytes", -1L);
+            if (!source.exists() || !source.isFile()) {
+                call.reject("Source path is not a file: " + source.getPath());
+                return;
+            }
+            long bytesPublished = StorageFilePublishLogic.publish(source, target, expectedBytes);
+            JSObject result = new JSObject();
+            result.put("bytesPublished", bytesPublished);
             call.resolve(result);
         } catch (Exception error) {
             call.reject(error.getMessage());
