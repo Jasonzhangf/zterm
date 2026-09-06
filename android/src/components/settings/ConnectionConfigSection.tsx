@@ -73,6 +73,10 @@ function resolveBoundBridgePreset(
   }) || null;
 }
 
+function localizeTargetBadge(label: string) {
+  return label === 'Tailscale' ? 'Tailscale 线路' : '局域网直连';
+}
+
 export function buildConnectionConfigEntries(
   settings: BridgeSettings,
   relayDevices: TraversalRelayDeviceSnapshot[],
@@ -127,10 +131,12 @@ export function buildConnectionConfigEntries(
       kind: 'bridge-preset',
       server,
       daemonHostId,
-      bridgeLabel: identity.bridgeLabel,
-      daemonLabel: identity.daemonLabel,
-      targetBadge: formatTargetBadge(server.targetHost),
-      authLabel: server.authToken ? 'Auth on' : 'No token',
+      bridgeLabel: `桥接地址（bridgeHost） · ${server.targetHost}:${server.targetPort}`,
+      daemonLabel: identity.daemonLabel
+        ? `守护进程 ID（daemon） · ${daemonHostId}`
+        : '',
+      targetBadge: localizeTargetBadge(formatTargetBadge(server.targetHost)),
+      authLabel: server.authToken ? '已启用认证' : '暂无令牌',
       active,
     });
   }
@@ -155,7 +161,7 @@ export function ConnectionConfigSection({
 
   const loggedIn = Boolean(account?.accessToken || settings.traversalRelay?.accessToken);
   const relayHost = new URL(getDefaultTraversalRelayBaseUrl()).hostname;
-  const accountName = account?.user?.username || account?.username || settings.traversalRelay?.username || 'Unknown';
+  const accountName = account?.user?.username || account?.username || settings.traversalRelay?.username || '未知';
   const deviceCount = relayDevices.length;
   const busy = relayBusy !== null;
   const relayStatusIsError = Boolean(
@@ -191,7 +197,7 @@ export function ConnectionConfigSection({
   const connectionSummary = [
     loggedIn ? `${accountName} 已登录` : 'Relay 未登录',
     defaultServer
-      ? `默认 ${defaultServer.relayDeviceName || defaultServer.name || defaultServer.relayHostId || 'Server'}`
+      ? `默认 ${defaultServer.relayDeviceName || defaultServer.name || defaultServer.relayHostId || '服务器'}`
       : '无默认直连',
     `${entries.length} 个连接`,
   ].join(' · ');
@@ -296,7 +302,7 @@ export function ConnectionConfigSection({
             </div>
           </div>
           <div style={{ fontSize: '11px', fontWeight: 800, color: loggedIn ? 'var(--zterm-settings-accent)' : 'var(--zterm-settings-muted)' }}>
-            {loggedIn ? 'SIGNED IN' : 'OPTIONAL'}
+            {loggedIn ? '已登录' : '可选'}
           </div>
         </div>
 
@@ -370,7 +376,7 @@ export function ConnectionConfigSection({
               </label>
               <input
                 id="relay-account"
-                aria-label="Relay account"
+                aria-label="Relay 账号"
                 autoComplete="username"
                 value={loginUsername}
                 onChange={(event) => setLoginUsername(event.target.value)}
@@ -391,7 +397,7 @@ export function ConnectionConfigSection({
               </label>
               <input
                 id="relay-password"
-                aria-label="Relay password"
+                aria-label="Relay 密码"
                 type="password"
                 autoComplete="current-password"
                 value={loginPassword}
@@ -461,7 +467,7 @@ export function ConnectionConfigSection({
             <label style={{ display: 'grid', gap: '5px', fontSize: '13px', fontWeight: 700 }}>
               端口
               <input
-                aria-label="Server port"
+                aria-label="服务器端口"
                 inputMode="numeric"
                 value={draft.targetPort}
                 onChange={(event) => setDraft((current) => ({ ...current, targetPort: event.target.value }))}
@@ -480,9 +486,9 @@ export function ConnectionConfigSection({
             />
           </label>
           <label style={{ display: 'grid', gap: '5px', fontSize: '13px', fontWeight: 700 }}>
-            Daemon ID
+            守护进程 ID（Daemon ID）
             <input
-              aria-label="Daemon ID"
+              aria-label="守护进程 ID（Daemon ID）"
               value={draft.relayHostId}
               onChange={(event) => setDraft((current) => ({ ...current, relayHostId: event.target.value }))}
               placeholder="mac-studio"
@@ -594,14 +600,14 @@ export function ConnectionConfigSection({
                   </div>
                   <div style={{ fontWeight: 800, fontSize: '14px', marginTop: '5px' }}>{entry.displayLabel}</div>
                   <div style={{ fontSize: '11px', opacity: 0.74, marginTop: '3px' }}>
-                    hostId: {entry.canonicalHostId}
+                    守护进程 ID（hostId）: {entry.canonicalHostId}
                   </div>
                   {entry.boundBridgePreset ? (
                     <div style={{ fontSize: '11px', opacity: 0.74, marginTop: '3px' }}>
                       {entry.boundBridgePreset.relayDeviceName
                         || entry.boundBridgePreset.name
                         || entry.boundBridgePreset.relayHostId
-                        || 'Server'}
+                        || '服务器'}
                     </div>
                   ) : null}
                 </div>

@@ -90,15 +90,24 @@ function getHostBadge(host: Host) {
   const tagText = (host.tags || []).join(' ').toLowerCase();
   const endpoint = getHostEndpoint(host).toLowerCase();
   if (hasRelayRtcCandidate(host)) {
-    return 'Auto';
+    return '自动线路';
   }
   if (tagText.includes('tailscale') || endpoint.includes('100.') || endpoint.includes('.ts.net')) {
-    return 'Tailscale';
+    return 'Tailscale 线路';
   }
   if (tagText.includes('bridge-server')) {
-    return 'Preset';
+    return '服务器预设';
   }
-  return 'Direct';
+  return '直连';
+}
+
+function getSessionStateLabel(state: ConnectionsHomeActiveSession['state']) {
+  if (state === 'connected') return '已连接';
+  if (state === 'connecting') return '连接中';
+  if (state === 'reconnecting') return '重新连接中';
+  if (state === 'error') return '错误';
+  if (state === 'closed') return '已关闭';
+  return state;
 }
 
 function getServerMark(label: string) {
@@ -304,7 +313,7 @@ export function ConnectionsPage({
                     key={session.id}
                     type="button"
                     data-testid="active-session-row"
-                    aria-label={`Resume ${label}`}
+                    aria-label={`恢复 ${label}`}
                     onClick={() => onResumeSession?.(session.id)}
                     style={{
                       width: '100%',
@@ -352,7 +361,7 @@ export function ConnectionsPage({
                           backgroundColor: stateColor,
                         }}
                       />
-                      {session.id === activeSessionId ? 'current' : session.state}
+                      {session.id === activeSessionId ? '当前' : getSessionStateLabel(session.state)}
                     </span>
                   </button>
                 );
@@ -473,7 +482,7 @@ export function ConnectionsPage({
                     <button
                       type="button"
                       data-testid="saved-connection-open"
-                      aria-label={`Open ${host.name}`}
+                      aria-label={`打开 ${host.name}`}
                       onClick={() => onOpenSavedConnection?.(host)}
                       style={{
                         width: '100%',
@@ -501,7 +510,7 @@ export function ConnectionsPage({
                         <span style={{ marginTop: '8px', display: 'flex', gap: '6px', minWidth: 0, flexWrap: 'wrap' }}>
                           <HomeBadge>{hostBadge}</HomeBadge>
                           {relayAvailable ? <HomeBadge>自动线路</HomeBadge> : null}
-                          {host.pinned ? <HomeBadge>Pinned</HomeBadge> : null}
+                          {host.pinned ? <HomeBadge>置顶</HomeBadge> : null}
                         </span>
                       </span>
                       <span

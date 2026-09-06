@@ -17,6 +17,7 @@ import {
 } from '../lib/terminal-width-mode-manager';
 import {
   TERMINAL_SESSION_GROUP_LAYOUT_OPTIONS,
+  getTerminalSessionGroupLayoutLabel,
   normalizeTerminalSessionGroupLayoutMode,
 } from '../lib/terminal-layout-profile';
 import type {
@@ -402,8 +403,9 @@ export function SettingsPage({
 
         <div style={settingsSectionStyle()}>
           <SettingsSectionTitle>终端宽度模式</SettingsSectionTitle>
-          <div style={{ fontSize: '13px', lineHeight: 1.6, color: settingsTheme.muted }}>
-            `mirror-fixed` 保持 tmux / daemon 镜像宽度不变，只做本地裁切；`adaptive-phone` 会按手机屏宽请求 tmux 重新排版，只调整 cols，不改 rows。
+          <div data-testid="settings-terminal-width-details" style={{ fontSize: '13px', lineHeight: 1.6, color: settingsTheme.muted }}>
+            <div>适应手机屏宽（adaptive-phone）会请求 tmux / daemon 按手机屏宽重新排版，仅调整 cols，不调整 rows。</div>
+            <div>保持远端宽度（mirror-fixed）会保留 tmux / daemon 镜像宽度，只做本地裁切。</div>
           </div>
           <div style={{ display: 'flex', gap: '10px' }}>
             {TERMINAL_WIDTH_MODE_OPTIONS.map((option) => {
@@ -459,7 +461,7 @@ export function SettingsPage({
                     cursor: 'pointer',
                   }}
                 >
-                  {option.label}
+                  {getTerminalSessionGroupLayoutLabel(option.id)}
                 </button>
               );
             })}
@@ -470,7 +472,7 @@ export function SettingsPage({
         <SettingsGroup title="诊断与输入">
 
         <div style={settingsSectionStyle()}>
-          <SettingsSectionTitle>Daemon Debug</SettingsSectionTitle>
+          <SettingsSectionTitle>调试日志（daemon）</SettingsSectionTitle>
           <div style={{ fontSize: '13px', lineHeight: 1.6, color: settingsTheme.muted }}>
             打开后，客户端会临时通过当前已连接的会话 WebSocket 上送 runtime debug 日志到 daemon，默认 10 分钟后自动停止。关闭后立即停止上送。
           </div>
@@ -497,7 +499,7 @@ export function SettingsPage({
             }}
           >
             <ToggleGlyph checked={runtimeDebugEnabled} />
-            Daemon Debug {runtimeDebugEnabled ? '已开启' : '已关闭'}
+            调试日志（daemon）{runtimeDebugEnabled ? '已开启' : '已关闭'}
           </button>
         </div>
 
@@ -633,7 +635,7 @@ export function SettingsPage({
         </div>
 
         <div style={settingsSectionStyle()}>
-          <SettingsSectionTitle>Shell Skin</SettingsSectionTitle>
+          <SettingsSectionTitle>终端外壳外观</SettingsSectionTitle>
           <div style={{ fontSize: '13px', lineHeight: 1.6, color: settingsTheme.muted }}>
             这里单独控制顶部栏、快捷栏和终端外壳，不改变终端 ANSI 颜色。默认跟主页保持白灰配色。
           </div>

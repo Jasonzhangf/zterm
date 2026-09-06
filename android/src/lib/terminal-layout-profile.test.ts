@@ -1,10 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
+  getTerminalSessionGroupLayoutLabel,
   resolveTerminalLayoutProfile,
   resolveTerminalSessionGroupLayoutAxis,
 } from './terminal-layout-profile';
 
 describe('terminal-layout-profile', () => {
+  it('projects stable Chinese labels without changing layout mode ids', () => {
+    expect(getTerminalSessionGroupLayoutLabel('auto')).toBe('自动');
+    expect(getTerminalSessionGroupLayoutLabel('horizontal')).toBe('左右布局');
+    expect(getTerminalSessionGroupLayoutLabel('vertical')).toBe('上下布局');
+  });
+
   it('uses split-landscape profile when split panes are visible in landscape', () => {
     const profile = resolveTerminalLayoutProfile({
       splitVisible: true,
