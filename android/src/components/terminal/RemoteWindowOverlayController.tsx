@@ -130,6 +130,7 @@ import {
   clampFloatingOffset,
   clampNumber,
   clampFullscreenViewport,
+  resolveFloatingOverlayClampBounds,
   resolveZoomedContentRect,
   resolveAnchoredFullscreenViewportScale,
   resolveFloatingOverlaySizing,
@@ -693,16 +694,14 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       if (!initial) {
         return { x: floatingOffsetRef.current.x, y: floatingOffsetRef.current.y };
       }
-      const viewportWidth = Math.round(window.visualViewport?.width || window.innerWidth || 0);
-      const viewportHeight = Math.round(window.visualViewport?.height || window.innerHeight || 0);
-      const minX = FLOATING_OVERLAY_VIEWPORT_MARGIN_PX;
-      const maxX = Math.max(minX, viewportWidth - width - FLOATING_OVERLAY_VIEWPORT_MARGIN_PX);
-      const minY = FLOATING_OVERLAY_TOP_SAFE_MARGIN_PX;
-      const maxY = Math.max(minY, viewportHeight - height - FLOATING_OVERLAY_VIEWPORT_MARGIN_PX);
-      return {
-        x: clampFloatingOffset(x, minX, maxX) - initial.left,
-        y: clampFloatingOffset(y, minY, maxY) - initial.top,
-      };
+      const bounds = resolveFloatingOverlayClampBounds({
+        viewportFallback: { width: window.innerWidth || 0, height: window.innerHeight || 0 },
+        container: floatingOverlayRef.current?.parentElement?.getBoundingClientRect(),
+        overlay: { width, height },
+        margin: FLOATING_OVERLAY_VIEWPORT_MARGIN_PX,
+        topSafeMargin: FLOATING_OVERLAY_TOP_SAFE_MARGIN_PX,
+      });
+      return { x: clampFloatingOffset(x, bounds.minLeft, bounds.maxLeft) - initial.left, y: clampFloatingOffset(y, bounds.minTop, bounds.maxTop) - initial.top };
     },
     onPositionChange: (position) => setFloatingOffset(position),
     onDragActive: () => {},
@@ -844,17 +843,14 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     if (rect.width <= 0 || rect.height <= 0) {
       return;
     }
-    const viewport = window.visualViewport;
-    const viewportLeft = viewport?.offsetLeft || 0;
-    const viewportTop = viewport?.offsetTop || 0;
-    const viewportWidth = Math.round(viewport?.width || window.innerWidth || rect.width);
-    const viewportHeight = Math.round(viewport?.height || window.innerHeight || rect.height);
-    const minLeft = viewportLeft + FLOATING_OVERLAY_VIEWPORT_MARGIN_PX;
-    const minTop = viewportTop + FLOATING_OVERLAY_TOP_SAFE_MARGIN_PX;
-    const maxLeft = viewportLeft + viewportWidth - FLOATING_OVERLAY_VIEWPORT_MARGIN_PX - rect.width;
-    const maxTop = viewportTop + viewportHeight - FLOATING_OVERLAY_VIEWPORT_MARGIN_PX - rect.height;
-    const clampedLeft = clampFloatingOffset(rect.left, minLeft, Math.max(minLeft, maxLeft));
-    const clampedTop = clampFloatingOffset(rect.top, minTop, Math.max(minTop, maxTop));
+    const bounds = resolveFloatingOverlayClampBounds({
+      viewportFallback: { width: window.innerWidth || rect.width, height: window.innerHeight || rect.height },
+      overlay: { width: rect.width, height: rect.height },
+      margin: FLOATING_OVERLAY_VIEWPORT_MARGIN_PX,
+      topSafeMargin: FLOATING_OVERLAY_TOP_SAFE_MARGIN_PX,
+    });
+    const clampedLeft = clampFloatingOffset(rect.left, bounds.minLeft, bounds.maxLeft);
+    const clampedTop = clampFloatingOffset(rect.top, bounds.minTop, bounds.maxTop);
     if (Math.abs(clampedLeft - rect.left) < 0.5 && Math.abs(clampedTop - rect.top) < 0.5) {
       return;
     }

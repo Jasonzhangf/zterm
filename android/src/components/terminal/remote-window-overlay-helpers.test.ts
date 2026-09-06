@@ -6,6 +6,8 @@ import {
   buildRemoteWindowAppTargetGroups,
   clampFloatingOffset,
   clampFullscreenViewport,
+  resolveFloatingOverlayBounds,
+  toFloatingOverlayClampRect,
   formatTargetKind,
   isRemoteWindowChromeTarget,
   resolveAspectRect,
@@ -35,6 +37,52 @@ describe('remote-window-overlay-helpers', () => {
     expect(clampFloatingOffset(150, 10, 100)).toBe(100);
     expect(clampFloatingOffset(5, 10, 100)).toBe(10);
     expect(clampFloatingOffset(50, 10, 100)).toBe(50);
+  });
+
+  it('clamps floating overlays to the visible stage without weakening the viewport safe top', () => {
+    expect(resolveFloatingOverlayBounds({
+      viewport: { left: 0, top: 0, right: 1280, bottom: 800 },
+      container: { left: 0, top: 79, right: 1280, bottom: 800 },
+      overlay: { width: 420, height: 522 },
+      margin: 8,
+      topSafeMargin: 48,
+    })).toEqual({ minLeft: 8, maxLeft: 852, minTop: 87, maxTop: 270 });
+
+    expect(resolveFloatingOverlayBounds({
+      viewport: { left: 0, top: 0, right: 1280, bottom: 800 },
+      container: { left: 0, top: 0, right: 1280, bottom: 800 },
+      overlay: { width: 420, height: 300 },
+      margin: 8,
+      topSafeMargin: 48,
+    }).minTop).toBe(48);
+  });
+
+  it('uses visualViewport offsetLeft and ignores a container that cannot hold the overlay', () => {
+    expect(toFloatingOverlayClampRect(undefined)).toEqual({ left: 0, top: 0, right: 0, bottom: 0 });
+    expect(resolveFloatingOverlayBounds({
+      viewport: { left: 120, top: 16, right: 760, bottom: 736 },
+      container: { left: 0, top: 0, right: 0, bottom: 0 },
+      overlay: { width: 420, height: 300 },
+      margin: 8,
+      topSafeMargin: 48,
+    })).toEqual({
+      minLeft: 128,
+      maxLeft: 332,
+      minTop: 64,
+      maxTop: 428,
+    });
+    expect(resolveFloatingOverlayBounds({
+      viewport: { left: 0, top: 0, right: 1024, bottom: 768 },
+      container: { left: 0, top: 0, right: 360, bottom: 225 },
+      overlay: { width: 360, height: 225 },
+      margin: 8,
+      topSafeMargin: 48,
+    })).toEqual({
+      minLeft: 8,
+      maxLeft: 656,
+      minTop: 48,
+      maxTop: 535,
+    });
   });
 
   it('resolves aspect-fit rects from source to surface', () => {
