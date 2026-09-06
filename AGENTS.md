@@ -19,7 +19,8 @@
 - `android/task.md`：当前任务板
 - `android/CACHE.md`：短期上下文
 - `android/MEMORY.md`：长期经验
-- `android/note.md`：**探索过程工作台**——调试/开发/调研中的发现、线索、假设、临时结论随手记入此处；任务结束时把已验证结论提炼到 `MEMORY.md`，`note.md` 可清理
+- `android/memory/index.md`：分层记忆索引；先读相关条目，再核对其 source_refs，L3/unreviewed 不等于运行态证明
+- `android/note.md`：单 owner 项目探索与交接；并发探索使用任务独占 run notes。长期记忆与规则写入按全局授权和唯一 owner 执行
 - `android/evidence/`：截图 / 命令输出 / APK / logcat
 
 ## Workspace Layout
@@ -43,6 +44,8 @@
   - allowed paths / forbidden paths 是否匹配
   - 必跑 gate 是什么
 - 未完成上述架构映射前，不得直接改实现代码；禁止靠 grep 命中点直接补 patch。
+- 客户端目标及迁移状态以 `android/docs/decisions/2026-09-05-runtime-memory-truth.md` 为准；旧架构文档中的 implemented/active 只描述原切片，不证明新目标完成。
+- UI 解耦验收必须追踪 slot 下游实现：页面/视图只投影 snapshot 与发出 typed intent；route、session、文件 I/O、media lifecycle 由对应业务 owner 持有。单纯移除组件 import 或增加 render callback 不算业务解耦。
 - terminal 链路必须先更新 docs / AGENTS / skill，再补测试，再改代码
 - terminal 链路必须保持 `server / buffer manager / renderer / UI shell` 独立，禁止越层漂移
 - daemon / buffer manager / renderer 都必须遵守 **读写解耦**：写侧只维护本层真相，读侧只读取当前真相；**请求不得触发上游同步策略**
@@ -72,7 +75,7 @@
 - adaptive lease owner 之外不得执行 `resize-window`、读写 `window-size`、写 `@zterm_adaptive_width_*`、修改 tmux option、或根据 foreground/background/viewport/UI 状态恢复/改写 tmux geometry；最后一个 adaptive holder 消失时，lease owner 必须恢复/释放本轮 tmux width ownership
 - daemon 请求 tmux 重排后不得自写 mirror truth；`mirror.rows/cols/bufferStartIndex/bufferLines/cursor` 仍只能来自 tmux capture/readback
 - `mirror-fixed` 下，client viewport / IME / 容器宽度变化**不得**改写 daemon mirror / tmux 宽度；renderer 只能裁切和横向平移
-- `mirror-fixed` 下自动关闭左右滑切 tab，避免和横向平移抢同一手势语义
+- `mirror-fixed` 的手势归属按 terminal decision 与 `terminal-buffer-truth`：横向 pan 生效时不得与 tab swipe 争用；没有 pan 链时不得仅因模式名禁用唯一横向交互出口
 - 不提交大批 evidence / 构建物 / node_modules
 - MemPalace / 本地搜索只允许代码、文档、项目记忆、local skill 等源文件；`wing=zterm` 必须通过 `scripts/mempalace-mine-zterm.sh` 生成安全语料后再 mine，禁止直接索引仓库根目录；生成物、构建物、release/update 包、evidence、缓存目录、依赖目录不得进入搜索语料或本地搜索结果
 
@@ -80,8 +83,6 @@
 - 根目录命令应代理到 `android/`
 - Android 原生工程路径：`android/native/android`
 - npm 依赖真源：发布后的 `@jsonstudio/wtermmod-*`
-- **每次 bump 版本构建出新 APK（buildNumber 变化）后，必须同步发布 OTA 升级通道**，否则设备无法自动升级：
-  1. `node scripts/tools/patch-apk-version.py` 生成当前版本的 rollback APK（`app-rollback-debug.apk`，versionCode+1、versionName 加 `.1`）
-  2. `node scripts/prepare-update-bundle.mjs`（生成 update-dist + 写入 `~/.zterm/updates/` + `latest.json`）
-  3. `node scripts/verify-update-bundle.mjs` 验证全绿后再交付/提交
+- 新 APK 交付必须同步 OTA。构建/发布流程唯一执行入口为 `pnpm --dir android run build:android`；具体步骤、授权范围及包身份验证见 mobile skill。该入口会分配 buildNumber、构建 normal/rollback APK，并写入本地 OTA；不能把它当只读 build 检查。
+- 纯审计/文档修复不 bump、不构建 APK、不发布。已授权的新版本交付需同时证明包、安装态与适用 OTA 通道；没有发布授权时先完成可审阅变更与适用检查，再报告发布缺口，不能宣称已交付。
 - 设备端 OTA 检查的是 daemon 的 `~/.zterm/updates/latest.json`；手工 `adb install` 只影响单台设备，不替代 OTA 发布

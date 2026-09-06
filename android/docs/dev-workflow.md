@@ -5,12 +5,12 @@
 - 先冻结真源，再写代码
 - 先验证，再结论
 - 先证据，再宣称完成
-- 先沉淀规则，再继续实现
+- 先确认适用契约，再继续实现；长期记忆/规则写入遵守全局授权
 
 ## 标准流程
 
 ```text
-Review -> Freeze -> Implement -> Verify -> Evidence -> Distill
+Scope/Architecture -> Contract -> Implement -> Verify -> Review -> Authorized delivery
 ```
 
 ## 任务开始前
@@ -76,7 +76,7 @@ Review -> Freeze -> Implement -> Verify -> Evidence -> Distill
 ## 跨尺寸布局 / Mac 共享壳门禁
 
 - 任何 phone / tablet / foldable / split-screen / Mac 相关布局变更，先更新 `docs/decisions/0001-cross-platform-layout-profile.md`
-- 再同步 `architecture.md`、`ui-slices.md`、`task.md`、`CACHE.md`、`MEMORY.md`、本地 `SKILL.md`
+- 再同步受影响的 `architecture.md`、`ui-slices.md` 与门禁；执行状态写任务独占记录，长期记忆和 skill 仅在已授权且有新知识时更新，不复制同一规则
 - page component 内禁止散落 breakpoint / platform 分叉真源；统一由 layout resolver 输出 profile
 - 大屏实现优先复用**一行多列 + 垂直分屏**的 phone-sized pane 编排，不允许先做一套 desktop-only 页面再“反推兼容”
 - future Mac 的实现也必须先沿 shared app-layer / platform shell 的边界推进，不能把 Android 页面逻辑复制一份到 `mac/`
@@ -295,21 +295,22 @@ pnpm --dir android test:android:terminal-real-device
 
 ## 记忆规则
 
-- `note.md`：**探索过程工作台**——所有调试/开发/调研中的发现、线索、假设、中间状态、临时结论、踩坑记录，必须随手写入此文件，不要只存在对话上下文中。自由格式，可乱，可重复，避免同一探索循环重复探测
+- 任务独占 run notes：探索、假设、失败、证据与交接；`note.md` 只供单 owner 汇总，不作为并发事件池
 - `CACHE.md`：本轮短期上下文
 - `MEMORY.md`：可复用长期经验（只收已验证结论）
+- `memory/index.md`：分层记忆入口；条目中的目标设计与实现证据分别判定
 - `SKILL.md`：跨任务门禁和反模式
 
 ### 探索→沉淀工作流
 
-1. **探索中随手记**：任何发现、假设、踩坑立即写入 `note.md`，不要只口头讨论
-2. **避免重复探测**：`note.md` 里已记录的线索，直接复用，不重复探测
-3. **任务结束提炼**：把有价值且已验证的结论提炼到 `MEMORY.md`；`note.md` 可清理或保留作下次草稿基底
-4. **精华规则（skills 精华沉淀）**：新门禁、新反模式、可复用动作按需更新到对应 `SKILL.md`
+1. 按需在任务独占记录中保存改变判断的发现与证据引用。
+2. 复用仍有效的证据；设备、配置、代码与产物可能变化时重新核对。
+3. 有明确记忆写入授权后，先读目标和前序记录，再去重写入唯一 owner；无新知识允许零写入。
+4. 用户要求修复 skill/规则时，只修改已确认的冲突和相关执行入口。
 
 ## skill 更新触发
 
-满足任一条件就更新：
+以下是评估更新的触发条件，不自动授予持久化规则写入权限：
 
 - 出现新门禁
 - 出现新反模式

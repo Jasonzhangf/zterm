@@ -17,9 +17,9 @@
 
 ---
 
-## 当前实现真相
+## 原始切片背景（历史，非当前实现）
 
-当前代码主要集中在：
+早期代码主要集中在：
 
 - `src/App.tsx`
 - `src/components/HostList.tsx`
@@ -27,12 +27,14 @@
 - `src/components/TerminalView.tsx`
 - `src/contexts/SessionContext.tsx`
 
-当前问题：
+早期问题（不得据此判断当前实现缺失）：
 
 - `App.tsx` 同时负责页面切换、session 控制、host form 弹层、终端展示
 - `HostList` 实际是网页式主机列表，不是 `Connections / Sessions` 连接中心
 - `HostForm` 是单层长表单，还没按 `Connection Properties` section 化
 - `TerminalView` 只有终端画布，没有顶部连接栏和底部快捷栏
+
+当前入口已是 `ConnectionsPage`、`SettingsPage`、`TerminalPage` 及 typed UI slots；实际 owner 以 module registry 和源代码为准。最新目标先读 `decisions/2026-09-05-runtime-memory-truth.md`；UI slot 接入不代表下游业务状态机已从组件分离。本轮差距见 `audits/2026-09-05-android-client-gap-audit.md`。
 
 ---
 
@@ -75,7 +77,7 @@
   - 不显示 Relay 登录表单；不显示或管理 Session group、saved tab list、live Session 子列表
 
 - `src/pages/SettingsPage.tsx` / `src/components/settings/ConnectionConfigSection.tsx`
-  - 固定 relay 服务 `relay.codewhisper.cc` 的账号/密码登录、退出登录
+  - 配置的 Relay 服务账号/密码登录、退出登录；当前固定默认地址属于最新 runtime-memory-truth decision 已登记的迁移差距
   - 新 server preset / remembered bridge entry 配置入口
 
 - `src/components/terminal/TerminalSessionDrawer.tsx`
@@ -150,13 +152,13 @@
 
 ### Slice B1
 
-- 目标：Home 服务器入口 + Settings 固定 relay 鉴权
+- 目标：Home 服务器入口 + Settings 配置的 Relay 鉴权
 - 范围：
   - `ConnectionsPage`
   - `SettingsPage`
   - `ConnectionConfigSection`
   - `useTraversalRelayAccount`
-  - 默认 relay service `relay.codewhisper.cc`
+  - Relay 配置目标遵循 runtime-memory-truth decision，不在 UI slice 再定义固定地址
 - 成功标准：
   - Home 没有 group/card/FAB 管理，也没有 Relay 登录表单
   - Home 服务器行直接进入 Terminal/session 主界面

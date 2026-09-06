@@ -1,5 +1,9 @@
 # zterm Android Architecture
 
+## 当前实现与目标设计
+
+最新已确认目标见 `decisions/2026-09-05-runtime-memory-truth.md`；它分别列出 Cordis、Android Service、route、buffer 和 TOML 的当前实现与待迁移目标。本文既有 local PluginHost/UI slot 描述属于当前实现，不证明整体 UI/业务解耦或目标迁移完成。记忆从 `../memory/index.md` 进入，并核实 source_refs；不能只读旧 `MEMORY.md`。
+
 ## 真源层级
 
 1. `spec.md`：产品范围
