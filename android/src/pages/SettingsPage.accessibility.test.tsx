@@ -135,6 +135,21 @@ describe("SettingsPage accessibility baseline", () => {
     expect(document.activeElement).toBe(cacheLines);
   });
 
+  it("exposes localized width labels and technical details without changing protocol ids", () => {
+    renderSettings();
+
+    expect(screen.getByRole("button", { name: "适应手机屏宽" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "保持远端宽度" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "自动" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "左右布局" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "上下布局" })).toBeTruthy();
+    const terminalWidthDetails = screen.getAllByText(/adaptive-phone|mirror-fixed/);
+    expect(terminalWidthDetails.length).toBeGreaterThan(0);
+    const technicalDetails = screen.getByTestId("settings-terminal-width-details").textContent || "";
+    expect(technicalDetails).toContain("tmux / daemon");
+    expect(technicalDetails).toContain("cols");
+  });
+
   it("keeps a settings group content region addressable for AT when expanded", () => {
     renderSettings();
 

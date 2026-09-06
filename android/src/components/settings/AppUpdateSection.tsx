@@ -54,6 +54,7 @@ export function AppUpdateSection({
             }))
           }
           placeholder="https://server.example.com/zterm/android/stable/latest.json"
+          aria-label="更新清单地址"
           style={settingsInputStyle()}
         />
         {routeCandidates.length > 0 ? (
@@ -110,12 +111,14 @@ export function AppUpdateSection({
       </label>
 
       <div style={{ fontSize: '13px', color: mobileTheme.colors.lightMuted, lineHeight: 1.5 }}>
-        当前版本 {currentVersionName} · versionCode {currentVersionCode}
+        <div>当前版本 {currentVersionName}</div>
+        <div>内部版本号 versionCode {currentVersionCode}</div>
       </div>
 
       {latestManifest ? (
         <div style={{ fontSize: '13px', color: mobileTheme.colors.lightMuted, lineHeight: 1.5 }}>
-          最新版本 {latestManifest.versionName} · versionCode {latestManifest.versionCode}
+          <div>最新版本 {latestManifest.versionName}</div>
+          <div>最新内部版本号 versionCode {latestManifest.versionCode}</div>
           {latestManifest.publishedAt ? ` · ${latestManifest.publishedAt}` : ''}
         </div>
       ) : null}

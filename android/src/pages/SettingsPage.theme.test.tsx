@@ -198,7 +198,7 @@ describe('SettingsPage terminal theme selection', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Adaptive Phone' }));
+    fireEvent.click(screen.getByRole('button', { name: '适应手机屏宽' }));
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
 
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
@@ -272,7 +272,7 @@ describe('SettingsPage terminal theme selection', () => {
 
     const view = render(renderSettingsPage(baseSettings));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Adaptive Phone' }));
+    fireEvent.click(screen.getByRole('button', { name: '适应手机屏宽' }));
     const blackSkinButton = screen.getByText('全黑底').closest('button');
     expect(blackSkinButton).toBeTruthy();
     fireEvent.click(blackSkinButton!);
@@ -322,7 +322,7 @@ describe('SettingsPage terminal theme selection', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Vertical' }));
+    fireEvent.click(screen.getByRole('button', { name: '上下布局' }));
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
 
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
@@ -360,14 +360,14 @@ describe('SettingsPage terminal theme selection', () => {
       />,
     );
 
-    const button = screen.getByRole('button', { name: 'Daemon Debug 已关闭' });
+    const button = screen.getByRole('button', { name: '调试日志（daemon）已关闭' });
     fireEvent.click(button);
     expect(window.localStorage.getItem(RUNTIME_DEBUG_STORAGE_KEY)).toBe('1');
-    expect(screen.getByRole('button', { name: 'Daemon Debug 已开启' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '调试日志（daemon）已开启' })).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Daemon Debug 已开启' }));
+    fireEvent.click(screen.getByRole('button', { name: '调试日志（daemon）已开启' }));
     expect(window.localStorage.getItem(RUNTIME_DEBUG_STORAGE_KEY)).toBe(null);
-    expect(screen.getByRole('button', { name: 'Daemon Debug 已关闭' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '调试日志（daemon）已关闭' })).toBeTruthy();
   });
 
   it('progressively discloses advanced settings instead of stacking every card', () => {
@@ -410,7 +410,7 @@ describe('SettingsPage terminal theme selection', () => {
     fireEvent.click(within(groups[0]!).getByText('连接与升级'));
     expect(groups[0]!.hasAttribute('open')).toBe(false);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Daemon Debug 已关闭' }));
+    fireEvent.click(screen.getByRole('button', { name: '调试日志（daemon）已关闭' }));
     expect(groups[0]!.hasAttribute('open')).toBe(false);
     expect(groups[2]!.hasAttribute('open')).toBe(false);
   });

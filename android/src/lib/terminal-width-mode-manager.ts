@@ -7,8 +7,8 @@ export interface TerminalWidthModeOption {
 }
 
 export const TERMINAL_WIDTH_MODE_OPTIONS: readonly TerminalWidthModeOption[] = [
-  { id: 'adaptive-phone', label: 'Adaptive Phone' },
-  { id: 'mirror-fixed', label: 'Mirror Fixed' },
+  { id: 'adaptive-phone', label: '适应手机屏宽' },
+  { id: 'mirror-fixed', label: '保持远端宽度' },
 ] as const;
 
 export function normalizeTerminalWidthMode(mode: unknown): TerminalWidthMode {

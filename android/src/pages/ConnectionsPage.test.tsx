@@ -69,7 +69,7 @@ describe('ConnectionsPage server home', () => {
     expect(screen.getByTestId('saved-connection-list')).toBeTruthy();
     expect(screen.getByText('Mac Studio Tailscale')).toBeTruthy();
     expect(screen.getByText('100.66.1.82:3333')).toBeTruthy();
-    expect(screen.getAllByText('Tailscale').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Tailscale 线路').length).toBeGreaterThan(0);
     expect(screen.getByTestId('saved-connection-row')).toBeTruthy();
     expect(screen.getByTestId('active-session-row')).toBeTruthy();
     expect(screen.getByRole('button', { name: '设置和升级' })).toBeTruthy();
@@ -81,9 +81,9 @@ describe('ConnectionsPage server home', () => {
     expect(screen.queryByText('All servers')).toBeNull();
     expect(screen.queryByText('Open selected groups')).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Resume zterm' }));
+    fireEvent.click(screen.getByRole('button', { name: '恢复 zterm' }));
     expect(onResumeSession).toHaveBeenCalledWith(activeSession.id);
-    fireEvent.click(screen.getByRole('button', { name: 'Open Mac Studio Tailscale' }));
+    fireEvent.click(screen.getByRole('button', { name: '打开 Mac Studio Tailscale' }));
     expect(onOpenSavedConnection).toHaveBeenCalledWith(savedHost);
     fireEvent.click(screen.getByRole('button', { name: '配置服务器' }));
     expect(onOpenSettings).toHaveBeenCalledTimes(1);
@@ -120,13 +120,13 @@ describe('ConnectionsPage server home', () => {
       />,
     );
 
-    expect(screen.getByText('Auto')).toBeTruthy();
+    expect(screen.getAllByText('自动线路').length).toBeGreaterThan(0);
     expect(screen.queryByText('Relay 可用')).toBeNull();
-    expect(screen.getByText('自动线路')).toBeTruthy();
+    expect(screen.getAllByText('自动线路').length).toBeGreaterThan(0);
     expect(screen.queryByTestId('saved-connection-relay-button')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Open Mac Studio Tailscale with Relay' })).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open Mac Studio Tailscale' }));
+    fireEvent.click(screen.getByRole('button', { name: '打开 Mac Studio Tailscale' }));
     expect(onOpenSavedConnection).toHaveBeenCalledWith(savedHost);
   });
 
@@ -155,7 +155,7 @@ describe('ConnectionsPage server home', () => {
 
     expect(screen.getByText('Windows Office')).toBeTruthy();
     expect(screen.getByText('windows-office:3333')).toBeTruthy();
-    expect(screen.getByText('Auto')).toBeTruthy();
+    expect(screen.getAllByText('自动线路').length).toBeGreaterThan(0);
   });
 
   it('keeps Home useful when no server has been configured yet', () => {

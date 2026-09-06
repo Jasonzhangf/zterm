@@ -158,8 +158,8 @@ describe('SettingsPage Relay account configuration', () => {
 
     openConnectionConfig();
     expect(screen.getByTestId('settings-relay-fixed-host').textContent).toBe('relay.codewhisper.cc');
-    fireEvent.change(screen.getByLabelText('Relay account'), { target: { value: 'jason' } });
-    fireEvent.change(screen.getByLabelText('Relay password'), { target: { value: 'secret' } });
+    fireEvent.change(screen.getByLabelText('Relay 账号'), { target: { value: 'jason' } });
+    fireEvent.change(screen.getByLabelText('Relay 密码'), { target: { value: 'secret' } });
     fireEvent.click(screen.getByRole('button', { name: '登录' }));
 
     await waitFor(() => expect(syncRelay).toHaveBeenCalledWith('login', {
@@ -223,14 +223,14 @@ describe('SettingsPage Relay account configuration', () => {
     });
 
     openConnectionConfig();
-    expect(screen.getByText('SIGNED IN')).toBeTruthy();
+    expect(screen.getAllByText('已登录').length).toBeGreaterThan(0);
     const signedInPanel = screen.getByTestId('settings-relay-signed-in-panel');
     expect(signedInPanel.textContent).toContain('已登录');
     expect(signedInPanel.textContent).toContain('jason');
     expect(signedInPanel.textContent).toContain('1 设备');
     expect(screen.getByRole('button', { name: '退出登录' })).toBeTruthy();
-    expect(screen.queryByLabelText('Relay account')).toBeNull();
-    expect(screen.queryByLabelText('Relay password')).toBeNull();
+    expect(screen.queryByLabelText('Relay 账号')).toBeNull();
+    expect(screen.queryByLabelText('Relay 密码')).toBeNull();
   });
 
   it('shows relay login errors without hiding the logged-out form', () => {
@@ -247,8 +247,8 @@ describe('SettingsPage Relay account configuration', () => {
     renderSettings();
 
     openConnectionConfig();
-    expect(screen.getByLabelText('Relay account')).toBeTruthy();
-    expect(screen.getByLabelText('Relay password')).toBeTruthy();
+    expect(screen.getByLabelText('Relay 账号')).toBeTruthy();
+    expect(screen.getByLabelText('Relay 密码')).toBeTruthy();
     expect(screen.getByRole('alert').textContent).toContain('账号或密码错误');
   });
 
@@ -408,7 +408,7 @@ describe('SettingsPage Relay account configuration', () => {
     fireEvent.change(screen.getByLabelText('服务器名称'), { target: { value: 'Mac Studio' } });
     fireEvent.change(screen.getByLabelText('服务器地址'), { target: { value: '100.66.1.82' } });
     fireEvent.change(screen.getByLabelText('服务器认证令牌'), { target: { value: 'wterm-4123456' } });
-    fireEvent.change(screen.getByLabelText('Daemon ID'), { target: { value: 'mac-studio' } });
+    fireEvent.change(screen.getByLabelText('守护进程 ID（Daemon ID）'), { target: { value: 'mac-studio' } });
     fireEvent.click(screen.getByRole('button', { name: '添加服务器' }));
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
 

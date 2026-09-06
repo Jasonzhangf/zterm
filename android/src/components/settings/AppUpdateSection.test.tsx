@@ -40,8 +40,10 @@ describe('AppUpdateSection', () => {
       />,
     );
 
-    expect(screen.getByText('当前版本 0.1.1.1590 · versionCode 1011590')).toBeTruthy();
-    expect(screen.getByText('最新版本 0.1.1.1591 · versionCode 1011591')).toBeTruthy();
+    expect(screen.getByText('当前版本 0.1.1.1590')).toBeTruthy();
+    expect(screen.getByText('最新版本 0.1.1.1591')).toBeTruthy();
+    expect(screen.getByText('内部版本号 versionCode 1011590')).toBeTruthy();
+    expect(screen.getByText('最新内部版本号 versionCode 1011591')).toBeTruthy();
   });
 
   it('does not synthesize a current daemon shortcut without projected candidates', () => {
