@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConnectionsPage } from "./ConnectionsPage";
 
@@ -38,5 +38,32 @@ describe("ConnectionsPage accessibility and motion baseline", () => {
     render(<ConnectionsPage onOpenSettings={vi.fn()} />);
 
     expect(screen.getByTestId("connections-home").className).toContain("connections-home-shell");
+  });
+
+  it("focuses and consumes a one-time Settings return request on its own entry ref", () => {
+    const onFocusSettingsButtonConsumed = vi.fn();
+    const view = render(
+      <ConnectionsPage
+        onOpenSettings={vi.fn()}
+        focusSettingsButtonNonce={1}
+        onFocusSettingsButtonConsumed={onFocusSettingsButtonConsumed}
+      />,
+    );
+
+    const settingsEntry = screen.getByRole("button", { name: "设置和升级" });
+    expect(document.activeElement).toBe(settingsEntry);
+    expect(onFocusSettingsButtonConsumed).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      view.rerender(
+        <ConnectionsPage
+          onOpenSettings={vi.fn()}
+          focusSettingsButtonNonce={0}
+          onFocusSettingsButtonConsumed={onFocusSettingsButtonConsumed}
+        />,
+      );
+    });
+    expect(document.activeElement).toBe(settingsEntry);
+    expect(onFocusSettingsButtonConsumed).toHaveBeenCalledTimes(1);
   });
 });

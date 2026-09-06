@@ -25,6 +25,14 @@ const baseSettings: BridgeSettings = {
   defaultServerId: undefined,
   traversalRelay: undefined,
 };
+const baseUpdatePreferences = {
+  manifestUrl: "",
+  autoCheckOnLaunch: false,
+  skippedVersionCode: undefined,
+  ignoreUntilManualCheck: false,
+  lastCheckedAt: undefined,
+  lastSeenVersionCode: undefined,
+};
 
 function renderSettings(overrides: Partial<Parameters<typeof SettingsPage>[0]> = {}) {
   return render(
@@ -32,22 +40,15 @@ function renderSettings(overrides: Partial<Parameters<typeof SettingsPage>[0]> =
       settings={baseSettings}
       currentVersionName="0.1.3.2726"
       currentVersionCode={1100027260}
-      updatePreferences={{
-        manifestUrl: "",
-        autoCheckOnLaunch: false,
-        skippedVersionCode: undefined,
-        ignoreUntilManualCheck: false,
-        lastCheckedAt: undefined,
-        lastSeenVersionCode: undefined,
-      }}
+      updatePreferences={baseUpdatePreferences}
       latestManifest={null}
       updateChecking={false}
       updateInstalling={false}
       updateError={null}
       hasNewVersion={false}
       hasUpdateIgnorePolicy={false}
-      onSave={vi.fn()}
-      onUpdatePreferencesChange={vi.fn()}
+      onSave={vi.fn(() => ({ ok: true as const, settings: baseSettings, persistedKeys: [] }))}
+      onUpdatePreferencesChange={vi.fn(() => ({ ok: true as const, preferences: baseUpdatePreferences, persistedKeys: [] }))}
       onCheckForUpdate={vi.fn()}
       onInstallUpdate={vi.fn()}
       onResetUpdateIgnorePolicy={vi.fn()}
@@ -73,7 +74,7 @@ describe("SettingsPage accessibility baseline", () => {
   });
 
   it("reports save feedback via aria-live so users know the save completed", async () => {
-    const onSave = vi.fn();
+    const onSave = vi.fn(() => ({ ok: true as const, settings: baseSettings, persistedKeys: [] }));
     renderSettings({ onSave });
 
     const save = screen.getByRole("button", { name: "保存" });
@@ -88,6 +89,50 @@ describe("SettingsPage accessibility baseline", () => {
       expect(status.getAttribute("aria-live")).toBe("polite");
       expect(status.textContent).toContain("已保存");
     });
+  });
+
+  it("does not announce save success when persistence reports an error", async () => {
+    const onSave = vi.fn(() => ({ ok: false as const, error: new Error("persistence failed"), persistedKeys: [] }));
+    renderSettings({ onSave });
+
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("status").textContent).toContain("保存失败");
+    });
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("status").textContent).not.toContain("已保存");
+  });
+
+  it("does not swallow an unexpected save exception", () => {
+    const onSave = vi.fn(() => {
+      throw new Error("unexpected save failure");
+    });
+    renderSettings({ onSave });
+
+    const errors: Error[] = [];
+    const onWindowError = (event: ErrorEvent) => {
+      if (event.error instanceof Error) {
+        errors.push(event.error);
+      }
+      event.preventDefault();
+    };
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    window.addEventListener("error", onWindowError);
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    window.removeEventListener("error", onWindowError);
+    consoleError.mockRestore();
+
+    expect(errors.some((error) => error.message === "unexpected save failure")).toBe(true);
+    expect(onSave).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives the terminal cache size control a Chinese accessible name", () => {
+    renderSettings();
+
+    const cacheLines = screen.getByRole("spinbutton", { name: "缓存行数" });
+    cacheLines.focus();
+    expect(document.activeElement).toBe(cacheLines);
   });
 
   it("keeps a settings group content region addressable for AT when expanded", () => {

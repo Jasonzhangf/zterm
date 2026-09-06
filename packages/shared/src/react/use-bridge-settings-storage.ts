@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   DEFAULT_BRIDGE_SETTINGS,
   normalizeBridgeSettings,
@@ -29,6 +29,18 @@ function writeStoredTerminalWidthModePreference(mode: TerminalWidthMode) {
   }
   localStorage.setItem(STORAGE_KEYS.TERMINAL_WIDTH_MODE_PREFERENCE, mode);
 }
+
+export type BridgeSettingsWriteResult =
+  | {
+      ok: true;
+      settings: BridgeSettings;
+      persistedKeys: string[];
+    }
+  | {
+      ok: false;
+      error: unknown;
+      persistedKeys: string[];
+    };
 
 function resolveInitialTerminalWidthMode() {
   if (typeof window === 'undefined') {
@@ -86,24 +98,39 @@ function readStoredBridgeSettings(): BridgeSettings {
 
 export function useBridgeSettingsStorage() {
   const [settings, setSettingsState] = useState<BridgeSettings>(() => readStoredBridgeSettings());
+  const committedSettingsRef = useRef(settings);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
       return;
     }
 
-    setSettingsState(readStoredBridgeSettings());
+    const next = readStoredBridgeSettings();
+    committedSettingsRef.current = next;
+    setSettingsState(next);
   }, []);
 
-  const setSettings = useCallback((next: BridgeSettings | ((current: BridgeSettings) => BridgeSettings)) => {
-    setSettingsState((current) => {
-      const value = typeof next === 'function' ? next(current) : next;
-      if (typeof window !== 'undefined') {
+  const setSettings = useCallback((next: BridgeSettings | ((current: BridgeSettings) => BridgeSettings)): BridgeSettingsWriteResult => {
+    const value = typeof next === 'function' ? next(committedSettingsRef.current) : next;
+    const persistedKeys: string[] = [];
+    if (typeof window !== 'undefined') {
+      try {
         localStorage.setItem(STORAGE_KEYS.BRIDGE_SETTINGS, JSON.stringify(value));
-        writeStoredTerminalWidthModePreference(value.terminalWidthMode);
+        persistedKeys.push(STORAGE_KEYS.BRIDGE_SETTINGS);
+      } catch (error) {
+        return { ok: false, error, persistedKeys };
       }
-      return value;
-    });
+      try {
+        writeStoredTerminalWidthModePreference(value.terminalWidthMode);
+        persistedKeys.push(STORAGE_KEYS.TERMINAL_WIDTH_MODE_PREFERENCE);
+      } catch (error) {
+        committedSettingsRef.current = value;
+        return { ok: false, error, persistedKeys };
+      }
+    }
+    committedSettingsRef.current = value;
+    setSettingsState(value);
+    return { ok: true, settings: value, persistedKeys };
   }, []);
 
   return {

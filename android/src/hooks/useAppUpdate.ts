@@ -10,6 +10,7 @@ import {
 } from '../lib/app-update';
 import {
   createAppUpdateRuntime,
+  type AppUpdatePreferencesWriteResult,
   type AppUpdateRuntimeSnapshot,
   type AppUpdateStage,
   type AppUpdateCheckOptions,
@@ -69,8 +70,9 @@ export function useAppUpdate(options: UseAppUpdateOptions = {}) {
 
   const setPreferences = useCallback(
     (next: AppUpdatePreferences | ((current: AppUpdatePreferences) => AppUpdatePreferences)) => {
-      runtimeRef.current.setPreferences(next);
+      const result: AppUpdatePreferencesWriteResult = runtimeRef.current.setPreferences(next);
       syncSnapshot();
+      return result;
     },
     [syncSnapshot],
   );

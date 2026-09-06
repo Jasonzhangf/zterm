@@ -46,6 +46,7 @@ import {
 } from '../lib/session-open-helpers';
 import { buildSessionSemanticOwnerKey, sessionSemanticReuseMatch } from '../lib/session-semantic-identity';
 import { listOnlineTraversalRelayDaemonDevices } from '../lib/traversal-relay-devices';
+import type { BridgeSettingsWriteResult } from '@zterm/shared';
 
 type PickerMode = 'new-connection' | 'quick-tab' | 'edit-group' | null;
 
@@ -68,7 +69,9 @@ interface SessionOpenGroupTarget {
 
 interface UseSessionOpenActionsOptions {
   bridgeSettings: BridgeSettings;
-  setBridgeSettings: Dispatch<SetStateAction<BridgeSettings>>;
+  setBridgeSettings: (
+    next: BridgeSettings | ((current: BridgeSettings) => BridgeSettings),
+  ) => BridgeSettingsWriteResult;
   hosts: Host[];
   sessionGroups?: SessionGroupHistory[];
   relayDevices?: TraversalRelayDeviceSnapshot[];
@@ -238,7 +241,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
 
 
   const rememberBridgeTarget = useCallback((target: BridgeTarget, name?: string) => {
-    setBridgeSettings((current) =>
+    const result = setBridgeSettings((current) =>
       upsertBridgeServer(current, {
         name: name || target.bridgeHost,
         targetHost: target.bridgeHost,
@@ -248,7 +251,11 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
         relayDeviceId: target.relayDeviceId,
       }),
     );
-  }, [setBridgeSettings]);
+    if (!result || !result.ok) {
+      const error = result?.error || new Error('桥接设置持久化未返回结果');
+      onError?.(error instanceof Error ? error.message : String(error));
+    }
+  }, [onError, setBridgeSettings]);
 
   useEffect(() => {
     sessionGroupsRef.current = sessionGroups;

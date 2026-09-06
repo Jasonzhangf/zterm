@@ -35,7 +35,11 @@ function createOptions(overrides: Partial<any> = {}) {
   const closedOpenTabSessionIdsRef = createRef(new Set<string>());
   const closedOpenTabReuseKeysRef = createRef(new Set<string>());
   const pendingMaterializedOpenTabSessionIdsRef = createRef(new Set<string>());
-  const setBridgeSettings = vi.fn();
+  const setBridgeSettings = overrides.setBridgeSettings || vi.fn(() => ({
+    ok: true,
+    settings: overrides.bridgeSettings || {},
+    persistedKeys: ['zterm:bridge-settings'],
+  }));
   const createSession = vi.fn((host: any, options?: any) => (
     options?.sessionId || `runtime:${host.daemonHostId || host.relayHostId || host.bridgeHost}:${host.sessionName}`
   ));
@@ -1195,6 +1199,25 @@ describe('useSessionOpenActions explicit-open truth', () => {
         sessionName: 'alpha',
       }),
     ]);
+  });
+
+  it('reports a missing bridge persistence result without treating it as success', () => {
+    const harness = createOptions({
+      setBridgeSettings: vi.fn(() => undefined),
+    });
+    const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
+
+    act(() => {
+      result.current.handleOpenSingleTmuxSession({
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        authToken: 'token-a',
+      } as any, 'alpha');
+    });
+
+    expect(harness.spies.onError).toHaveBeenCalledWith('桥接设置持久化未返回结果');
+    expect(harness.refs.openTabStateRef.current.tabs).toHaveLength(1);
   });
 
   it('opens a tmux session with the current picker target transport truth instead of a stale remembered host endpoint', () => {

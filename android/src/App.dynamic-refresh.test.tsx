@@ -41,6 +41,27 @@ function makeSession(id: string, revision: number) {
   };
 }
 
+function makeBridgeSettingsWriteSuccess(settings: any = {}) {
+  return {
+    ok: true as const,
+    settings,
+    persistedKeys: ['zterm:bridge-settings'],
+  };
+}
+
+function makeBridgeSettingsSetter(settings: any = {}) {
+  return vi.fn((_next: unknown) => makeBridgeSettingsWriteSuccess(settings));
+}
+
+function readBridgeSettingsUpdater(setBridgeSettings: ReturnType<typeof makeBridgeSettingsSetter>) {
+  const call = setBridgeSettings.mock.calls.at(-1);
+  const updater = call?.[0];
+  if (typeof updater !== 'function') {
+    throw new Error('Expected a bridge settings updater function');
+  }
+  return updater as (current: any) => any;
+}
+
 const sessionHarness = vi.hoisted(() => {
   const snapshots = new Map<string, { buffer: any }>();
   const headSnapshots = new Map<string, { daemonHeadRevision: number; daemonHeadEndIndex: number }>();
@@ -376,6 +397,31 @@ const capacitorCoreHarness = vi.hoisted(() => {
   };
 });
 
+const appUpdateHarness = vi.hoisted(() => {
+  const setPreferences = vi.fn();
+  const checkForUpdates = vi.fn();
+  return {
+    setPreferences,
+    checkForUpdates,
+    reset() {
+      setPreferences.mockReset();
+      setPreferences.mockReturnValue({
+        ok: true,
+        preferences: {
+          manifestUrl: '',
+          autoCheckOnLaunch: false,
+          ignoreUntilManualCheck: false,
+          skippedVersionCode: undefined,
+          lastCheckedAt: undefined,
+          lastSeenVersionCode: undefined,
+        },
+        persistedKeys: [],
+      });
+      checkForUpdates.mockReset();
+    },
+  };
+});
+
 vi.mock('@capacitor/core', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@capacitor/core')>();
   return {
@@ -466,9 +512,9 @@ vi.mock('./hooks/useAppUpdate', () => ({
     installing: false,
     lastError: null,
     updateStage: 'idle',
-    setPreferences: vi.fn(),
+    setPreferences: appUpdateHarness.setPreferences,
     applyRelayManifestSource: vi.fn(),
-    checkForUpdates: vi.fn(),
+    checkForUpdates: appUpdateHarness.checkForUpdates,
     dismissAvailableManifest: vi.fn(),
     skipCurrentVersion: vi.fn(),
     ignoreUntilManualCheck: vi.fn(),
@@ -836,6 +882,7 @@ describe('App dynamic refresh matrix', () => {
     sessionHistoryHarness.reset();
     settingsPageHarness.reset();
     capacitorAppHarness.reset();
+    appUpdateHarness.reset();
     capacitorCoreHarness.setNative(false);
     const storageBacking = new Map<string, string>();
     const storageShim = {
@@ -1025,7 +1072,7 @@ describe('App dynamic refresh matrix', () => {
   });
 
   it('persists terminal width-mode intent back to bridge settings', async () => {
-    const setBridgeSettings = vi.fn();
+    const setBridgeSettings = makeBridgeSettingsSetter();
     const bridgeSettings = {
       servers: [],
       terminalWidthMode: 'mirror-fixed',
@@ -1037,13 +1084,54 @@ describe('App dynamic refresh matrix', () => {
 
     expect(sessionHarness.sendTerminalResize).toHaveBeenCalledWith('s1', 72, undefined, 'adaptive-phone');
     expect(setBridgeSettings).toHaveBeenCalledTimes(1);
-    const updater = setBridgeSettings.mock.calls[0]?.[0];
-    expect(typeof updater).toBe('function');
+    const updater = readBridgeSettingsUpdater(setBridgeSettings);
     expect(updater(bridgeSettings).terminalWidthMode).toBe('adaptive-phone');
+    expect(screen.queryByTestId('save-settings-adaptive-width')).toBeNull();
+    expect(screen.getByTestId('terminal-revision')).toBeTruthy();
+    expect(connectionsPageHarness.readProps()?.focusSettingsButtonNonce).toBeUndefined();
+  });
+
+  it('does not request settings focus when Terminal opens Home directly', async () => {
+    render(<AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={makeBridgeSettingsSetter()} />);
+
+    fireEvent.click(screen.getByTestId('open-connections'));
+
+    await waitFor(() => expect(connectionsPageHarness.readProps()).toBeTruthy());
+    expect(connectionsPageHarness.readProps()?.focusSettingsButtonNonce).toBe(0);
+  });
+
+  it('consumes Settings Back focus before a later Terminal-to-Home navigation', async () => {
+    render(<AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={makeBridgeSettingsSetter()} />);
+
+    fireEvent.click(screen.getByTestId('open-connections'));
+    await waitFor(() => expect(connectionsPageHarness.readProps()).toBeTruthy());
+
+    act(() => {
+      connectionsPageHarness.readProps()?.onOpenSettings?.();
+    });
+    await waitFor(() => expect(settingsPageHarness.readProps()).toBeTruthy());
+
+    act(() => {
+      settingsPageHarness.readProps()?.onBack?.();
+    });
+    await waitFor(() => expect(connectionsPageHarness.readProps()?.focusSettingsButtonNonce).toBe(1));
+
+    act(() => {
+      connectionsPageHarness.readProps()?.onFocusSettingsButtonConsumed?.();
+    });
+    await waitFor(() => expect(connectionsPageHarness.readProps()?.focusSettingsButtonNonce).toBe(0));
+
+    act(() => {
+      connectionsPageHarness.readProps()?.onResumeSession?.('s1');
+    });
+    await waitFor(() => expect(screen.getByTestId('terminal-revision')).toBeTruthy());
+
+    fireEvent.click(screen.getByTestId('open-connections'));
+    await waitFor(() => expect(connectionsPageHarness.readProps()?.focusSettingsButtonNonce).toBe(0));
   });
 
   it('persists Settings save width mode from the draft instead of stale current settings', async () => {
-    const setBridgeSettings = vi.fn();
+    const setBridgeSettings = makeBridgeSettingsSetter();
     const bridgeSettings = {
       servers: [],
       terminalWidthMode: 'mirror-fixed',
@@ -1061,8 +1149,7 @@ describe('App dynamic refresh matrix', () => {
     fireEvent.click(screen.getByTestId('save-settings-adaptive-width'));
 
     expect(setBridgeSettings).toHaveBeenCalledTimes(1);
-    const updater = setBridgeSettings.mock.calls[0]?.[0];
-    expect(typeof updater).toBe('function');
+    const updater = readBridgeSettingsUpdater(setBridgeSettings);
     expect(updater(bridgeSettings).terminalWidthMode).toBe('adaptive-phone');
   });
 
@@ -1077,7 +1164,7 @@ describe('App dynamic refresh matrix', () => {
     );
 
     const view = render(
-      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={makeBridgeSettingsSetter()} />,
     );
 
     await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('1'));
@@ -1326,7 +1413,7 @@ describe('App dynamic refresh matrix', () => {
     };
 
     render(
-      <AppContent bridgeSettings={bridgeSettings as any} setBridgeSettings={vi.fn()} />,
+      <AppContent bridgeSettings={bridgeSettings as any} setBridgeSettings={makeBridgeSettingsSetter()} />,
     );
 
     await waitFor(() => expect(connectionsPageHarness.readProps()).toBeTruthy());
@@ -1500,7 +1587,7 @@ describe('App dynamic refresh matrix', () => {
     });
 
     render(
-      <AppContent bridgeSettings={bridgeSettings as any} setBridgeSettings={vi.fn()} />,
+      <AppContent bridgeSettings={bridgeSettings as any} setBridgeSettings={makeBridgeSettingsSetter()} />,
     );
 
     await waitFor(() => expect(connectionsPageHarness.readProps()).toBeTruthy());
@@ -1987,8 +2074,13 @@ describe('App dynamic refresh matrix', () => {
   });
 
   it('imports shared quick actions and shortcut actions from connection config deep links', async () => {
+    const setBridgeSettings = vi.fn(() => ({
+      ok: true as const,
+      settings: {} as any,
+      persistedKeys: ['zterm:bridge-settings'],
+    }));
     render(
-      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={setBridgeSettings} />,
     );
 
     await waitFor(() => expect(capacitorAppHarness.eventCallCount('appUrlOpen')).toBeGreaterThan(0));
@@ -2026,6 +2118,78 @@ describe('App dynamic refresh matrix', () => {
       { id: 'sc-1', label: 'Ctrl+C', sequence: '\x03', order: 0, row: 'bottom-scroll' },
     ]);
     await waitFor(() => expect(screen.getByTestId('zterm-dialog-message').textContent).toContain('Imported Mac'));
+  });
+
+  it('does not report connection import success when bridge persistence fails', async () => {
+    const setBridgeSettings = vi.fn(() => ({
+      ok: false as const,
+      error: new Error('bridge storage unavailable'),
+      persistedKeys: [],
+    }));
+    render(
+      <AppContent
+        bridgeSettings={{ servers: [] } as any}
+        setBridgeSettings={setBridgeSettings as any}
+      />,
+    );
+
+    await waitFor(() => expect(capacitorAppHarness.eventCallCount('appUrlOpen')).toBeGreaterThan(0));
+
+    const link = buildConnectionConfigShareLink({
+      hosts: [
+        {
+          name: 'Imported Mac',
+          bridgeHost: '100.64.0.10',
+          bridgePort: 3333,
+          sessionName: 'main',
+          authToken: 'token-a',
+          authType: 'password',
+          tags: [],
+          pinned: false,
+        },
+      ],
+      quickActions: [],
+      shortcutActions: [],
+      exportedAt: 3000,
+    });
+
+    act(() => {
+      capacitorAppHarness.emitUrlOpen(link);
+    });
+
+    await waitFor(() => expect(screen.getByTestId('zterm-dialog-message').textContent).toContain('bridge storage unavailable'));
+    expect(screen.getByRole('dialog', { name: '导入失败' })).toBeTruthy();
+    expect(screen.queryByRole('dialog', { name: '导入成功' })).toBeNull();
+    expect(screen.getByTestId('zterm-dialog-message').textContent).not.toContain('已导入连接');
+    expect(setBridgeSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not check for updates when update preference persistence fails', async () => {
+    appUpdateHarness.setPreferences.mockReturnValue({
+      ok: false,
+      error: new Error('update preference storage unavailable'),
+      persistedKeys: [],
+    });
+    render(<AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />);
+
+    fireEvent.click(screen.getByTestId('open-connections'));
+    await waitFor(() => expect(connectionsPageHarness.readProps()).toBeTruthy());
+    act(() => {
+      connectionsPageHarness.readProps()?.onOpenSettings?.();
+    });
+    await waitFor(() => expect(settingsPageHarness.readProps()).toBeTruthy());
+
+    act(() => {
+      settingsPageHarness.readProps()?.onCheckForUpdate?.({
+        manifestUrl: 'https://updates.example.test/latest.json',
+        autoCheckOnLaunch: true,
+        ignoreUntilManualCheck: false,
+      }, []);
+    });
+
+    expect(appUpdateHarness.setPreferences).toHaveBeenCalledTimes(1);
+    expect(appUpdateHarness.checkForUpdates).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog', { name: '设置保存失败' })).toBeTruthy();
   });
 
   it('does not restore current-process tab keys on cold launch', async () => {

@@ -31,6 +31,23 @@ const baseSettings: BridgeSettings = {
   defaultServerId: undefined,
   traversalRelay: undefined,
 };
+const successfulBridgeSettings = () => ({
+  ok: true as const,
+  settings: baseSettings,
+  persistedKeys: [],
+});
+const successfulUpdatePreferences = () => ({
+  ok: true as const,
+  preferences: {
+    manifestUrl: '',
+    autoCheckOnLaunch: false,
+    skippedVersionCode: undefined,
+    ignoreUntilManualCheck: false,
+    lastCheckedAt: undefined,
+    lastSeenVersionCode: undefined,
+  },
+  persistedKeys: [],
+});
 
 function renderSettings() {
   return render(
@@ -52,8 +69,8 @@ function renderSettings() {
       updateError={null}
       hasNewVersion={false}
       hasUpdateIgnorePolicy={false}
-      onSave={vi.fn()}
-      onUpdatePreferencesChange={vi.fn()}
+      onSave={vi.fn(successfulBridgeSettings)}
+      onUpdatePreferencesChange={vi.fn(successfulUpdatePreferences)}
       onCheckForUpdate={vi.fn()}
       onInstallUpdate={vi.fn()}
       onResetUpdateIgnorePolicy={vi.fn()}

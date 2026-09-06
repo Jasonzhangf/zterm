@@ -23,6 +23,11 @@ import { runtimeDebug } from '../lib/runtime-debug';
 import { projectOnlineTraversalRelayDaemonDevicesFromAccount } from '../lib/traversal-relay-devices';
 import type { TraversalRelayDeviceSnapshot } from '../lib/types';
 import { defaultClientControlDirectoryRuntime } from '../lib/client-control-directory-runtime';
+import type { BridgeSettingsWriteResult } from '@zterm/shared';
+
+type SetBridgeSettings = (
+  next: BridgeSettings | ((current: BridgeSettings) => BridgeSettings),
+) => BridgeSettingsWriteResult;
 
 function projectRelayDevicesFromAccountState(account: TraversalRelayAccountState | null | undefined) {
   return projectOnlineTraversalRelayDaemonDevicesFromAccount(account);
@@ -30,20 +35,33 @@ function projectRelayDevicesFromAccountState(account: TraversalRelayAccountState
 
 export function useRelayDeviceStream(options: {
   bridgeSettings: BridgeSettings;
-  setBridgeSettings: (next: BridgeSettings | ((current: BridgeSettings) => BridgeSettings)) => void;
+  setBridgeSettings: SetBridgeSettings;
+  onPersistenceError?: (error: unknown) => void;
 }) {
   const [relayDevices, setRelayDevices] = useState<TraversalRelayDeviceSnapshot[]>(() => (
     projectRelayDevicesFromAccountState(readTraversalRelayAccountState())
   ));
   const runtimeRef = useRef<ReturnType<typeof createRelayDeviceStreamRuntime> | null>(null);
-  const setBridgeSettingsRef = useRef(options.setBridgeSettings);
+  const setBridgeSettingsRef = useRef<SetBridgeSettings>(options.setBridgeSettings);
+  const onPersistenceErrorRef = useRef(options.onPersistenceError);
   const refreshControlDirectory = useCallback((reason: string) => (
     runtimeRef.current?.refreshNow(reason) || Promise.resolve(false)
   ), []);
 
   useEffect(() => {
     setBridgeSettingsRef.current = options.setBridgeSettings;
-  }, [options.setBridgeSettings]);
+    onPersistenceErrorRef.current = options.onPersistenceError;
+  }, [options.onPersistenceError, options.setBridgeSettings]);
+
+  const persistBridgeSettings = useCallback((next: Parameters<SetBridgeSettings>[0]) => {
+    const result = setBridgeSettingsRef.current(next);
+    if (!result || !result.ok) {
+      onPersistenceErrorRef.current?.(
+        result?.error || new Error('桥接设置持久化未返回结果'),
+      );
+    }
+    return result;
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -60,7 +78,7 @@ export function useRelayDeviceStream(options: {
       if (areTraversalRelaySettingsEqual(options.bridgeSettings.traversalRelay, nextRelay)) {
         return;
       }
-      setBridgeSettingsRef.current((current) => {
+      persistBridgeSettings((current) => {
         const currentRelay = current.traversalRelay;
         if (areTraversalRelaySettingsEqual(currentRelay, nextRelay)) {
           return current;
@@ -71,7 +89,7 @@ export function useRelayDeviceStream(options: {
     handler();
     window.addEventListener('traversal-relay-account-change', handler);
     return () => window.removeEventListener('traversal-relay-account-change', handler);
-  }, [options.bridgeSettings.traversalRelay]);
+  }, [options.bridgeSettings.traversalRelay, persistBridgeSettings]);
 
   useEffect(() => {
     const runtime = createRelayDeviceStreamRuntime({
@@ -117,7 +135,7 @@ export function useRelayDeviceStream(options: {
         defaultClientControlDirectoryRuntime.markUnconfirmed();
       },
       applyRelaySettings: (settings: TraversalRelayClientSettings) => {
-        setBridgeSettingsRef.current((current) => (
+        persistBridgeSettings((current) => (
           areTraversalRelaySettingsEqual(current.traversalRelay, settings)
             ? current
             : applyTraversalRelaySettings(current, settings)
@@ -128,7 +146,7 @@ export function useRelayDeviceStream(options: {
         writeTraversalRelayAccountState(null);
         setRelayDevices([]);
         defaultClientControlDirectoryRuntime.clear();
-        setBridgeSettingsRef.current((current) => (
+        persistBridgeSettings((current) => (
           current.traversalRelay
             ? applyTraversalRelaySettings(current, undefined)
             : current
@@ -175,6 +193,7 @@ export function useRelayDeviceStream(options: {
   }, [
     options.bridgeSettings.traversalRelay?.accessToken,
     options.bridgeSettings.traversalRelay?.relayBaseUrl,
+    persistBridgeSettings,
   ]);
 
   return {
