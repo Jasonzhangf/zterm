@@ -22,6 +22,7 @@ description: "terminal buffer / render / daemon mirror 真源与门禁"
 固定顺序：
 1. 先读 `android/docs/architecture.md`
 2. 再读 `android/docs/audits/2026-07-02-architecture-boundary-remediation.md`
+   同时读 `android/docs/decisions/2026-09-05-runtime-memory-truth.md` 区分当前实现与目标；参数/初始化/路由目标不从旧经验段落重建。
 3. 再读 `android/docs/resource-registry.json` 与 `android/docs/resource-map.md`，确认 source/target resource、直接/间接关系、`via_resources`、禁止直连关系
 4. 再读本 skill 与相关 decision / feature registry / function map / mainline call map
 5. 再读代码定位 owner 与实现点

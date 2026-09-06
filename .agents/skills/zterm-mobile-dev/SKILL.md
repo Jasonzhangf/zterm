@@ -1,16 +1,19 @@
 ---
 name: zterm-mobile-dev
-description: >-
-  zterm Android 客户端开发工作流 - 基于 Capacitor + @jsonstudio/wtermmod-react，含完整开发闭环
-  L3 TOML configuration and credential boundary | knowledge | [config,credential,migration,relay,security,toml] | L3/zterm-config-and-credential-target.md
-  L3 Cordis client composition target | plan | [client,composition,cordis,lifecycle,plugin,target] | L3/zterm-cordis-client-target.md
-  L3 Separate verified implementation from confirmed target design | lesson | [architecture,evidence,function-map,implementation-truth,target-truth] | L3/zterm-current-runtime-truth-separation.md
-  L3 Relay control and physical route target | path | [android-service,control-plane,relay,route,tailscale,udp] | L3/zterm-relay-and-route-target.md
-  L3 Confirmed terminal daemon buffer and renderer contract | plan | [absolute-row,buffer,daemon,renderer,rolling-window,terminal] | L3/zterm-terminal-buffer-target-contract.md
-  L3 Terminal data owner path | path | [flow,frame-assembly,mirror,owner,sparse-buffer,terminal,ui] | L3/zterm-terminal-data-owner-path.md
+description: "审计、开发和验证 zterm Android 客户端；按当前架构、最新目标和 owner 选择门禁，区分源码、设备与 OTA 证据。"
 ---
 
 # zterm-mobile Dev Skill
+
+## 当前入口与适用范围
+
+- 仓库相对路径均以 zterm 根目录解释；从本 skill 到根目录为 `../../..`。
+- 最新架构目标：[runtime-memory-truth](../../../android/docs/decisions/2026-09-05-runtime-memory-truth.md)。记忆入口：[memory/index.md](../../../android/memory/index.md)；按条目 source_refs 核对实现。目标不是已交付状态。
+- 本 skill 的旧功能规格、状态机和经验只辅助定位；产品/协议/owner 不在此重复冻结。对应真源为 spec、architecture、shared protocol、registry 与上述最新 decision。
+- 纯审计或文档修复：只做读源、真实界面观察、文档/链接/命令校验与 review；不因此构建 APK、修改 buildNumber、安装或发布。
+- UI 解耦审计追踪 `App -> slot -> component/controller -> business owner`；检查状态归属和实际 I/O，不能用 slot wrapper 的无 import 测试证明下游纯投影。
+- UI 设计审计使用 frontend-ui-reference / impeccable：实际手机与大屏、键盘开关、长名称、加载/空/错误、触摸目标与读屏；记录 APK/viewport/截图，区分源码发现与运行态复现。
+- 完成适用验证后按全局 review 路由使用 AGY；只有 controller PASS 才算通过。review 不自动授权 commit/push/发布。独立工作树内保护其他 worker 的改动。
 
 ## 项目概要
 
@@ -31,6 +34,9 @@ description: >-
 3. coding-principals/SKILL.md       → 开发方法论
 4. android/docs/spec.md     → 项目范围与验收
 5. android/docs/architecture.md → 模块边界与数据流
+   android/docs/audits/2026-07-02-architecture-boundary-remediation.md → owner 边界
+   android/docs/decisions/2026-09-05-runtime-memory-truth.md → 当前实现与最新目标
+   android/memory/index.md → 相关最新条目与 source_refs
 6. android/docs/decisions/0001-cross-platform-layout-profile.md → 跨尺寸布局 / Mac 共享壳决策
 7. android/docs/decisions/2026-04-23-terminal-head-buffer-render-truth.md → terminal head / sparse buffer / render / UI 真源
 8. android/docs/dev-workflow.md → 执行门禁与验证
@@ -49,7 +55,7 @@ description: >-
 - 不修改 `mac/`、`win/` 下其他客户端骨架
 - 不在 app repo 内复制 runtime 源码；runtime 变更改 `../wterm`
 - skill / 文档 / AGENTS 真源以 `zterm` 命名，不再沿用 `wterm-mobile-*` 旧命名
-- 只复用，只扩展
+- 按消融原则比较删除、复用与直接实现；只保留一个语义 owner
 
 ### 2.2 真源分工
 - `spec.md`：产品范围与验收
@@ -64,8 +70,7 @@ description: >-
   - 说明：`android/evidence/` 是本地证据仓，默认不进 Git 主线；Git 中只保留目录说明文件
 
 ### 2.2.1 Android 交付包硬门禁
-- 治理问题属于开发交付的一部分：架构边界、资源/功能 map、构建链、验证门禁、发布链和协作状态出现问题时，必须像代码缺陷一样定位唯一 owner、修复、验证并记录；不得以“代码本身没问题”停工或只提交报告。
-- 工程质量优先于局部代码完成度：治理链阻断开发、构建、验证、发布或协作闭环时，先修治理根因，再继续产品实现；禁止绕过 gate、伪造证据或用手工操作替代可重复工程流程。
+- 本次适用的架构、map、构建、验证与发布门禁按代码缺陷处理；Collab/Memory/Guidance 缺失不阻断独立开发。共享写入无归属或互斥时，仅阻断受影响操作。禁止绕过必需 gate 或伪造证据。
 - 每次 Android 功能修复 / bug 修复 / renderer / daemon-client 协议 / UI 行为改动，只要需要 Jason 复测或会影响真机行为，完成前必须构建可升级 APK 包。
 - 例外：`desktop.remote_window_stream` 的视频主链尚未完成时，不为中间态 catalog / overlay shell / debug 诊断改动反复构建 APK；先完成真实远程视频（ScreenCaptureKit/WebRTC frame stream 可见）并通过对应 gates，再构建 APK 给 Jason 测。除非 Jason 明确要求止血包或升级恢复包，否则不要在远程视频完成前编包。
 - 默认命令：`pnpm --dir android run build:android`。
@@ -75,13 +80,13 @@ description: >-
 - `.build-meta.json` 是持久化版本真源，禁止手工编辑、跳号、回退或为了绕过 Android 版本检查抬高 `buildNumber`。版本分配只能由 `scripts/bump-build-version.mjs` 完成；构建前后记录 `buildNumber`、APK 内 `versionName/versionCode`、manifest 和 SHA-256，发现不一致必须停止。
 - OTA 发布是不可逆的外部状态变更：构建、bundle verify、三通道 GET/HEAD/hash 校验只能证明产物正确，不等于获得发布授权。没有 Jason 的明确发布授权，不得执行 Relay `scp`、覆盖 `latest.json`、发布 stable channel 或重启生产服务。
 - 构建结果必须进入升级通道：`android/update-dist/latest.json`、`android/update-dist/zterm-<version>.apk`、`android/update-dist/zterm-latest-debug.apk`、`~/.zterm/updates/latest.json`、`~/.zterm/updates/zterm-<version>.apk` sha/version 对齐。
-- Android 交付闭环必须同时覆盖 **Tailscale daemon update route** 和 **public Relay update route**：构建后不仅要有本地文件，还必须验证 `http://127.0.0.1:3333/updates/latest.json`、`http://$(tailscale ip -4):3333/updates/latest.json`、`https://relay.codewhisper.cc:18443/relay/updates/latest.json` 都返回新版本；三个通道的 APK 下载 sha256 必须等于 manifest `sha256`。如果 127/Tailscale `/health` 或 `/updates/latest.json` 超时，先做 service-scoped `zterm-daemon restart` 后重测，禁止只说文件已复制。
+- 获授权的 Android 发布闭环必须覆盖本机、Tailscale daemon 与配置的 public Relay update route；先读取当时端口、地址、manifest URL，再验证 GET/HEAD、版本与 APK 下载 SHA-256。超时先诊断唯一服务 owner，仅在已有重启授权时做 service-scoped restart；不得用旧地址或自动重启代替现场证据。
 - 汇报时必须给出 `versionName`、`versionCode`、APK 路径和 sha256；不能只说测试通过。
 - Android 回退发布必须使用同一正常构建号的子版本槽：正常版 `0.1.3.N`，回退版 `0.1.3.N.1`，下一正常版 `0.1.3.N+1`；APK 内必须同时满足 `versionCode(N) < versionCode(N.1) < versionCode(N+1)`。禁止用 bit 30、固定高位或任何会让后续正常版永久低于回退版的 namespace。发布前必须用 `apkanalyzer` 读取实际 APK 的 `versionName`/`versionCode`，并在不带 `adb install -d` 的真实设备上验证 normal N -> rollback N.1 -> normal N+1 可依次覆盖安装；manifest 文件名或 JSON 声明不能代替 APK 内 manifest 证据。
 - 构建后必须继续做 Android 运行态 smoke：优先使用在线 ADB 真机；若无在线真机，立即启动并使用可用 Android Emulator 完成安装、启动、重启和真实 UI/网络路径验证。只有在本机既无在线真机也无可启动 Emulator 时，才允许把 L5 记为环境阻塞；不得仅因 `adb devices` 为空就停止。
 - 禁止把源码修复、单测、typecheck、daemon close-loop 当成可供 Jason 复测的交付物；没有升级 APK，就不算移动端交付闭环。
 - Relay 场景下升级地址必须跟随当前 Relay 公网路由：`App` 只能把 `traversalRelay.wsHostUrl` 交给 `app-update-runtime`，由唯一 owner 派生 `/relay/updates/latest.json`。显式 `user-saved` manifest 不覆盖；旧私网/Tailscale `server-connected` 或旧 `relay-injected` URL 可被当前 Relay URL 替换。Relay server 必须通过 `ZTERM_TRAVERSAL_UPDATES_DIR` / `ZTERM_RELAY_UPDATES_DIR` 服务 `/relay/updates/latest.json` 和 `/relay/updates/<apk>`，且 public GET/HEAD + APK sha256 都验证通过；只在客户端改 URL 而生产 Relay 不服务更新包不算闭环。
-- 发布 public Relay update assets 时，生产机访问使用 `ssh/scp -i ~/.ssh/claw.pem -o IdentitiesOnly=yes root@159.75.134.56`，目标目录是 `/var/lib/zterm-traversal-relay/updates`；只上传 `latest.json` 与对应版本 APK，通常不需要重启 `zterm-traversal-relay.service`。完成后必须从公网重新 `GET/HEAD https://relay.codewhisper.cc:18443/relay/updates/latest.json` 与版本 APK，并下载 APK 比对 sha256；服务器本机文件存在不等于公网升级通道闭环。
+- public Relay 发布参数读取构建脚本与当前已授权部署配置，核实 SSH host/key、updates dir 和 manifest URL；不把 skill 的历史地址当运行真源。发布 normal/rollback 及 manifest 实际引用资产后，从公网 GET/HEAD 并下载比对 SHA-256；仅有服务器文件不算闭环。
 - 替换 Android App Logo 时，以仓库根 `assets/logo.png` 为源，同时生成 `ic_launcher`、`ic_launcher_round`、`ic_launcher_foreground` 的 mdpi/hdpi/xhdpi/xxhdpi/xxxhdpi 资源。Adaptive foreground 必须按 Launcher 二次蒙版预留安全区，默认前景不超过画布 80%，背景色与 Logo 外围一致；构建后既要从 APK 解包核对 legacy/adaptive hash，也要看真实 Launcher 截图，包内字节一致不能证明最终图标未被裁切。
 
 ### 2.2.1a Module / Edge 架构门禁
@@ -113,7 +118,7 @@ description: >-
 - Remote-window app catalog 是 daemon-wide cache，不是 tmux/session truth。daemon runtime 启动时必须 warm 默认 app-window+iTerm2 catalog，并以 requested source set 建立 60 秒进程内 cache：fresh 直接返回，stale 立即返回并只启动一次后台 refresh，首次无 cache 或显式 `forceRefresh` 才等待 live Swift/iTerm2 枚举。`requestRemoteWindowTargetsRuntime` 必须复用当前打开的 SessionContext WebSocket，并用 `{ daemonHostId, bridgeHost, bridgePort, authToken }` 作为客户端 projection cache key；同 daemon 切 session 在 TTL 内不得重复发送完整 app enumeration。closed transport 不能被客户端缓存伪装为可用。
 - Remote-window picker 的 Android overlay 可以持有当前 active session 的上一份 catalog projection，用于 reopen / stale refresh / force refresh 时先显示旧 rows；daemon-wide cache 真源仍只在 SessionContext catalog owner。手动刷新必须显式传 `{ forceRefresh: true }` 绕过 TTL，但不能把 picker blank 成大 loading 面板。
 - Remote-window catalog/capture timeout 必须按 owner 对齐：Android catalog watchdog 要长于 daemon app-window catalog timeout，live probe catalog wait 也要更长；stream-start request timeout 要长于 daemon ScreenCaptureKit startup timeout 加控制面/Relay 预算，让 daemon 显式 `remote-window-error` 有机会返回；receiver track timeout 只能在 `remote-window-stream-started` answer 应用后启动，不能把 daemon 首帧等待时间算进 receiver attach。修视频打不开时禁止只加 daemon timeout 而不同步 message/receiver/probe/UI timeout，否则会把 daemon capture 问题误报成客户端 timeout 或无 track。
-- Remote-window 有效码率必须区分默认、手动选择、预览投影：未手动选择时一律默认 `2mbps`；floating preview 固定请求 `2mbps`；手机 fullscreen 只是 Android 显示投影，不能自动提升到 20Mbps；只有用户手动选择 5/10/20/fullscreen 后才按 target/resolution 记忆并作为 fullscreen baseline。selector 显示/记忆和 floating preview 的低码率请求是两层语义，禁止通过重启 stream 实现码率变化。
+- Remote-window 质量参数由 stream-local typed profile 唯一决定，按本节 quality 规则与 remote-window decision 核对；不再用旧 `2mbps`/5/10/20 preset 覆盖 profile。fullscreen 是显示投影，不能隐式改变 stream 身份。
 - Remote-window picker 默认只直接列 app-window；iTerm2 panes 必须折叠到一个可展开组里，避免和普通 app 窗口混在一个长列表。daemon catalog 仍返回完整 targets，折叠只是 Android overlay projection。
 - Remote-window APP 多窗口的小窗口切换属于正在观看的视频层，不属于 picker 列表。Picker 同一 APP 只显示一个 collapsed app row；打开后在 target-locked video overlay 内显示同 APP sibling window switcher，点击 sibling 直接切换 concrete target stream。切换必须是事务式 stream handoff：新 stream start/attach 成功后才 stop 旧 stream；新 stream 失败时保留当前 video/input context 和当前 sibling UI，不把失败投成当前连接断开。普通 tmux 多 session 预览仍复用 `src/components/terminal/WindowGroupLayout.tsx` 作为 primary-plus-children 布局 owner；每个 Session 仍是自己的子容器，子 tile 点击只提升 preview 主窗口，只有主 tile 点击才激活真实 shell。禁止把 remote-window 子窗口再做成 picker 里的小窗列表，也禁止复制一套 session preview layout 到 remote-window picker。
 - Remote-window input context 只允许发布给已验证支持的 app-window `bring-to-focus + os-event` target。当前 `tmux-input` / `iterm2-api` iTerm pane 路线必须显示只读并禁止发送 click/gesture/scroll/key/QuickBar input；不要把 daemon 会拒绝的路线伪装成可操作。
@@ -164,12 +169,12 @@ description: >-
 ### 2.9 连接模型拆分规则
 - mobile 的连接真源必须显式区分 `bridgeHost / bridgePort / sessionName`；禁止再用 `host/username` 混装 server 与 tmux session 语义
 - Android Home 必须把三类入口独立投影：current-process active Sessions、saved direct/Tailscale Hosts、optional Relay account/directory。Relay 未登录、登录失败或退出登录不得隐藏、禁用或删除前两类；Relay directory 只补 route/device candidates，不得成为 saved Host/Tailscale truth owner。
-- Android Home 的 Relay 路由必须作为自动线路候选可见但不能成为独立按钮：同 daemon 的 saved direct/Tailscale row 要合并 Relay directory `relayEndpointCandidates/relayHostId/relayDeviceId`，但保留 saved row 身份和显示端点；有 `relay-rtc` 时显示“自动线路”提示，点击 server row 直接把原 route-aware Host 交给 session-open owner。默认顺序必须是 `private LAN IPv4 -> Tailscale/direct websocket -> WebRTC direct/hole-punch -> rtc-relay(TURN)`；Relay 是最终中继，不是默认首选。禁止让 Relay directory 替换 saved Host truth，也禁止把 TURN-only 成功冒充 UDP/P2P 成功。
+- Android Home 只投影 route-aware saved Host 与 online Relay directory，保留 saved row 身份并发出 session-open intent；自动路由目标与迁移差距以 runtime-memory-truth decision 为准。禁止 UI 决定 route order、让 directory 替换 saved Host truth，或把 TURN-only 成功冒充 UDP/P2P。
 - Relay directory 投影到 Home / drawer / picker target 时只允许 online daemon device：`daemon.connected=true` 且 `daemon.hostId` 非空。`rtc-device-*`、client-only、disconnected/stale daemon records 即使携带旧 endpoint/session snapshots，也只能作为 account directory fact，禁止出现在 connectable server rows、drawer host rail 或 target lookup。
 - Relay 登录态不能成为 Session Picker 的全局模式开关：即使账号下有在线 daemon，直接 Tailscale/bridge target 仍必须能输入、选择 saved server、用 `bridgeHost + authToken` live fetch sessions。只有当前 target 自身带 `relay-rtc` candidates / relay identity 时，才允许按 Relay target 处理；显式 `transportMode='webrtc'` / `relay-route` target 禁止在 `buildBridgeTargetFromHost()` 中自动解析 direct endpoint 填入 `bridgeHost`。
 - Relay directory 的 direct endpoints 也是 daemon identity alias：drawer host rail / side peek / server identity projection 必须把 `100.x:3333`、IPv4/IPv6/wsUrl direct rows canonicalize 到同一 `daemon.hostId`，否则同一 daemon 会显示成“名字 0 sessions + IP 有 sessions”。alias 只能用于 UI 分组身份，不能替代 transport route truth。
 - 生产 Relay directory 可能只发布 `relay-rtc:<hostId>`，没有 Tailscale/direct endpoint。修 drawer duplicate host 时不能只看 endpoint alias；必须同时验证 saved/Home server alias input，以及 rtc-only directory session catalog 的唯一匹配路径。只有一个 Relay daemon catalog 完整包含该 direct SessionGroup 的非 missing session 名称时才可 canonicalize；多个 daemon 都匹配时保持分离并显式暴露，禁止猜测合并。
-- Terminal drawer 里以 Relay daemon `hostKey` 触发的 refresh / quick-new / remote catalog open 必须构造显式 `transportMode='auto'` 的 route-aware target：private LAN/direct IPv4 先试，Tailscale/direct websocket 其次，`rtc-direct` 使用 relay signaling + STUN-only ICE，`rtc-relay` TURN-only 最后兜底。验证必须证明 LAN/Tailscale 先于 WebRTC/TURN 被尝试；Tailscale 断开时再证明 WebRTC direct 或 TURN/Relay `list-sessions` / session open 可通。
+- Terminal drawer 的 refresh / quick-new / catalog open 发出 route-aware target intent，路由选择交唯一 connection owner。按最新 decision 验证各层实际尝试顺序及 direct/Relay 证据；不能再按旧 Tailscale-before-UDP 规则验收目标。
 - Terminal drawer catalog 若命中已打开的旧 direct/Tailscale session，也不能直接 `switchSession` 绕过 route owner；当 online Relay catalog 唯一 owns 该 daemon 时，点击该 row 必须继续走 session-open owner，用 route-aware target 复用并升级现有 session transport truth，禁止生成第二个同 tmux open tab。
 - 如果同一个 session 因 direct/Tailscale 与 Relay route 切换而重新打开，session-open owner 必须先用当前 route-aware Host 重新 `createSession(..., { sessionId: existingId, activate: false })`，再做 explicit-resume；只切 open-tab/UI 但不重绑 transport truth 视为假修复。
 - Terminal drawer 枚举必须在 `TerminalPage` canonical projection owner 内去重：direct/Tailscale history、Relay history 只有通过精确 online endpoint 或 saved/Home endpoint-to-online-daemon alias resolve 到同一 daemon host rail 时，同一 `serverIdentity.key + sessionName` 才能合并 route/close/open target metadata。Relay Session catalog 只证明 row 存在，绝不能凭同名 Session 反推 daemon identity；常见名称在多机环境会把历史记录连到错误机器。禁止在 `TerminalSessionDrawer` 组件里靠视觉过滤，禁止让 transport/daemon 参与 UI 去重。
@@ -671,13 +676,17 @@ cd android
    - 包含 prebuild 门禁：`test:terminal:regression`
 2. `npx cap sync android`
 3. `native/android/gradlew assembleDebug`
-4. `node ./scripts/prepare-update-bundle.mjs <app-debug.apk>`
+4. Gradle `:app:assembleDebug -PztermRollbackVariant=true` 构建 rollback，恢复 normal APK
+5. `node ./scripts/prepare-update-bundle.mjs <normal.apk> <rollback.apk>`
+6. `verify-update-bundle.mjs` 与实际 APK 身份校验；Relay 上传仅在 `ZTERM_PUBLISH_RELAY=true` 且已有发布授权时执行
+
+该脚本会 bump buildNumber 并写本地 OTA，不是纯 build 命令。运行前完成源码审阅与适用验证，确认本地发布授权；已有版本交付授权无需重复询问。版本由 bump-build-version.mjs 分配，不手改；rollback 由 Gradle 生成，不用 `node patch-apk-version.py`。
 
 **发布目标目录（必须检查）：**
 
 - `android/update-dist/`
 - `android/release-dist/`
-- `~/.wterm/updates`
+- `~/.zterm/updates`（或显式 `WTERM_UPDATES_DIR`）；legacy 同步目录不是新真源
 
 **构建完成后最低验收（缺一不可）：**
 
@@ -759,13 +768,13 @@ feat: 添加 HostList 组件和 useHostStorage hook
 
 ### 3.6 Phase 5: 经验沉淀
 
-**目标**: 新约束/经验写入 Skill
+**目标**: 按需提炼已验证发现；记忆/规则写入须已获授权，不作为每轮完成门禁
 
 #### Skill 更新时机
 
 | 触发条件 | 更新内容 |
 |---------|---------|
-| 发现新的项目约束 | 写入 "禁止事项" |
+| 发现新的项目约束 | 核对唯一 owner，项目事实进入 AGENTS/decision，skill 仅引用 |
 | 发现新的验证入口 | 写入 "验证入口" |
 | 发现反模式/坑 | 写入 "常见问题" |
 | 发现可复用模式 | 写入 "最佳实践" |
@@ -1163,9 +1172,9 @@ android/
 - **反模式**: queue open intent 缺 mux opener 时继续走 legacy control/session-ticket opener；mux channel 未 ready 时用 legacy `activeSocket` 伪装成可用 transport。
 - **验证**: unit 正反成对锁住 open-channel reuse 与 closed-channel reopen，再跑 `SessionContext.ws-refresh` 黑盒证明同一 physical socket 上关闭 inactive channel 后切回会发新的 `mux-channel-open`。
 
-### 模式: reconnect / offline 通知只做顶层悬浮投影
+### 模式: 网络状态使用唯一 shell 投影
 - **触发信号**: 网络状态条出现或消失时，terminal、QuickBar、remote-window video 发生上下跳动、重新测量或 resize
-- **动作**: 状态 truth 仍由 `terminal.transport_lifecycle` owner 提供；页面只渲染 `position: fixed`、高 z-index、`pointer-events: none` 的顶层通知 overlay
+- **动作**: 状态 truth 由 connection owner 提供；普通 connecting/reconnecting/sync 进入既有顶部 `TerminalConnectionStatusStrip`，只有 offline/typed error 进入 fixed `TerminalNetworkBanner`。不得为正常恢复再增悬浮层
 - **边界**: 通知不得进入 flex/grid 正常流、不得占 margin/height、不得改变 page shell / terminal stage / remote-window container 尺寸，也不得借 UI 状态触发 reconnect
 - **反模式**: 把 banner 当普通 page row 插入布局，或在每个页面复制一套网络状态判断
 
@@ -1211,20 +1220,10 @@ android/
 - **动作**: 用 `pointer/touch move threshold` 区分 click 和 drag；超过阈值后进入拖动态并 suppress click，位置持久化到 localStorage
 - **反模式**: 只靠长按进入拖动，或拖动完成后未 suppress click，都会导致“拖不动”或“拖完又误开菜单”
 
-### 模式: Connections 账号 daemon 是父列表真源
-- **触发信号**: 用户要求同一账号下所有 daemon 设备统一显示，或页面出现 legacy daemon id / bridge endpoint 重复父卡片
-- **动作**: 父行只从 relay account devices / device stream 建立；saved host、history group、live session 只能折叠成该 daemon 的子 session，legacy daemon id 必须 canonicalize 到 account daemon hostId
-- **反模式**: 用 host/history/live session 反向生成父服务器列表，导致同一账号设备被拆成多张乱序卡片
-
-### 模式: Connections group 生命周期必须可退出
-- **触发信号**: 长按/展开 server group 后出现 `All/None/Manage/Clear/Open checked`，用户反馈不能退出或键盘遮挡操作
-- **动作**: 管理态必须有显式 `Done`；`Clear` 要同时清 selection 和 expanded state；action row 必须 wrap，避免窄屏/键盘下横向溢出
-- **反模式**: 只清 selection 不收起 expanded group，或把 Vault/占位入口静默路由回当前页让用户以为点击失效
-
-### 模式: Connections 卡片点击进入，按钮才打开
-- **触发信号**: 用户反馈“到了 group 卡片页面点击不会进入 group”或 `Open` 在 history-only/0-session 卡片上空转
-- **动作**: card body tap 只负责 enter/expand group；`Open/Enter` 按钮才负责打开/恢复 session；不可打开的 group 显示 `Details` 并展开，禁止死 `Open`
-- **反模式**: 让卡片 body 和 action button 共用一个 callback，导致点击卡片直接打开或空转而不能进入 group
+### 模式: Connections 入口按产品真源投影
+- **触发信号**: Relay 退出后 saved servers 消失，或 server row 停在旧 group 管理页。
+- **动作**: 依 architecture 的 Home 契约保留 active Sessions、saved direct/Tailscale servers 和 online directory 补充；server row 点击直接发 session-open intent。Session 分组与多选只在 Terminal drawer/picker。
+- **反模式**: account-only 父列表、Home session group 管理、凭同名 session 猜 daemon identity，或恢复旧 card-enter/group-open 双入口。
 
 ### 模式: Relay directory 不是 daemon auth 真源
 - **触发信号**: Windows / relay daemon 能在 Mac 上 list/create，但 Android picker 刷新或 drawer New Session 失败、旧 session 仍报 unavailable
@@ -1437,13 +1436,11 @@ debug overlay 现在显示 MU（菜单位置）和 CE（结束行），长按后
 - Required gate: `RemoteWindowOverlay.test.tsx` must include slow screenshot, terminal failure, and stale completion cases proving no duplicate in-flight request, no interval retry after failure, and no old-generation thumbnail write into a new overlay.
 - Marker: `remote window sibling thumbnail single in-flight light cadence`
 
-## Remote-window preview/focus startup stream
-- Trigger: ROI is unavailable and the implemented startup path uses a low-rate preview stream plus a high-quality focus stream.
-- Rule: `purpose` is stream-local protocol truth (`preview` or `focus`). Android may attach preview immediately for first paint, but once focus succeeds it must move `state.streamId`, media, stats, input context, resize ACK handling, and quality updates to the focus stream. Baseline focus bitrate set at stream start must seed `lastAppliedStreamQualityKeyRef` so the selector does not send a duplicate no-op quality request.
-- Rule: while focus start is pending, preview is a temporary display stream and must not start active catalog force-refresh cadence. After focus failure, preview may remain active explicitly and own the cadence with a visible degraded-state message.
-- Anti-pattern: calling `attachRemoteWindowStreamReceiver(current, focusId)` while `current.streamId` is still preview, accepting resize/input ACKs for the old preview after focus has become active, or letting preview and focus both start catalog/quality loops.
-- Required gate: focused remote-window tests must prove two start requests with distinct `purpose`, independent receiver/daemon lifecycles, focus-only quality updates, resize ACK applied to current focus stream, and bounded catalog refresh count.
-- Marker: `remote window preview first focus commit active stream truth`
+## Remote-window active stream identity
+- Trigger: UI reports ready but status/quality/input references a stream that was never started.
+- Rule: the actually-started focus stream ID owns receiver, status, quality, input and ACK projection. Remove stale dual-result wrappers; do not restore the old preview/focus startup pair.
+- Required gate: overlay/receiver tests prove every projected stream ID was started, late completions cannot replace current identity, and cleanup addresses the same stream; installed WebView must show decoded video frames.
+- Source: `android/MEMORY.md`, 2026-09-01 Remote window stream identity; current remote-window decision and production owner must also agree.
 
 ## Foreground resume target transport recovery
 - Trigger: app returns from background, immediately shows websocket error or remains disconnected until switching session.
