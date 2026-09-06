@@ -771,6 +771,51 @@ describe('RemoteWindowOverlay', () => {
     });
   });
 
+  it('does not invoke commitDecodedFrame as a React setState updater after stream start', async () => {
+    const mediaStream = { id: 'media-stream-commit' } as MediaStream;
+    const commitDecodedFrame = vi.fn((commit: { frameId: number }) => {
+      if (commit == null) {
+        throw new TypeError("Cannot read properties of null (reading 'frameId')");
+      }
+      return Number.isFinite(commit.frameId);
+    });
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-commit-updater',
+      targets: [makeTarget('app-commit-updater', 'TextEdit', 'app-window')],
+    }));
+    const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string) => ({
+      streamId,
+      mediaStream,
+      commitDecodedFrame,
+      bindings: [{
+        lane: 'focus' as const,
+        mediaStream,
+        streamId,
+        mediaPlanVersion: 2,
+        mediaEpoch: 0,
+        trackId: 'track-focus',
+      }],
+    }));
+
+    render(
+      <RemoteWindowOverlay
+        activeSessionId="session-1"
+        requestTargets={requestTargets}
+        startStream={startStream}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    fireEvent.click(await screen.findByTestId('remote-window-target-app-commit-updater'));
+
+    await waitFor(() => {
+      const video = screen.getByTestId('remote-window-video') as HTMLVideoElement;
+      expect(video.srcObject).toBe(mediaStream);
+    });
+    expect(screen.queryByText('页面加载失败')).toBeNull();
+    expect(commitDecodedFrame).not.toHaveBeenCalledWith(null);
+    expect(commitDecodedFrame.mock.calls.every((call) => call[0] != null)).toBe(true);
+  });
+
   it('stops the stream and reports unsupported decoded-frame projection', async () => {
     Reflect.deleteProperty(HTMLVideoElement.prototype, 'requestVideoFrameCallback');
     Reflect.deleteProperty(HTMLVideoElement.prototype, 'cancelVideoFrameCallback');
