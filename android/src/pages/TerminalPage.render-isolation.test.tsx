@@ -265,7 +265,14 @@ describe('TerminalPage render isolation', () => {
 
   it('renders the file browser only through the plugin slot callback', () => {
     const session1 = makeSession('s1');
-    const port = { daemonFileScopeId: 'daemon:s1', sendJson: vi.fn(), onFileTransferMessage: vi.fn() };
+    const port = {
+      daemonFileScopeId: 'daemon:s1',
+      sendJson: vi.fn(),
+      onFileTransferMessage: vi.fn(),
+      fileTransferRuntime: { getState: vi.fn(), open: vi.fn() },
+      onFileTransferStateChange: vi.fn(),
+      dispose: vi.fn(async () => undefined),
+    } as any;
     const resolvePort = vi.fn(() => port);
     const renderFileBrowser = vi.fn((props: { open: boolean; mode?: string }) => (
       <div
@@ -298,7 +305,12 @@ describe('TerminalPage render isolation', () => {
 
     expect(renderFileBrowser).toHaveBeenCalled();
     expect(resolvePort).toHaveBeenCalledWith('s1');
-    expect(renderFileBrowser.mock.calls.at(-1)?.[0]).toMatchObject(port);
+    expect(renderFileBrowser.mock.calls.at(-1)?.[0]).toMatchObject({
+      daemonFileScopeId: port.daemonFileScopeId,
+      sendJson: port.sendJson,
+      fileTransferRuntime: port.fileTransferRuntime,
+      onFileTransferStateChange: port.onFileTransferStateChange,
+    });
     expect(screen.getByTestId('plugin-file-browser-slot').getAttribute('data-open')).toBe('false');
 
     fireEvent.click(screen.getByText('open-file-transfer'));
@@ -324,7 +336,14 @@ describe('TerminalPage render isolation', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        resolveFileBrowserSessionPort={() => ({ daemonFileScopeId: 'daemon:s1', sendJson: vi.fn(), onFileTransferMessage: vi.fn() })}
+        resolveFileBrowserSessionPort={() => ({
+          daemonFileScopeId: 'daemon:s1',
+          sendJson: vi.fn(),
+          onFileTransferMessage: vi.fn(),
+          fileTransferRuntime: { getState: vi.fn(), open: vi.fn() },
+          onFileTransferStateChange: vi.fn(),
+          dispose: vi.fn(async () => undefined),
+        } as any)}
         renderQuickBar={quickBarSlotRender}
       />,
     );

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { createFileTransferSessionRuntime } from "../../lib/file-transfer-session-runtime";
+import type { FileTransferSessionRuntime } from "../../lib/file-transfer-session-runtime";
 
 import {
   DEFAULT_LOCAL_DOWNLOAD_DIR,
@@ -33,7 +33,6 @@ import {
 } from "../../lib/file-transfer-local-edit-copy-storage";
 import {
   sendBoundedFileUploadChunks,
-  writeFileTransferChunkBatches,
 } from "../../lib/file-transfer-throughput-runtime";
 import { StoragePermissionPlugin } from "../../plugins/StoragePermissionPlugin";
 import { FILE_TRANSFER_WIRE_CHUNK_BYTES, FILE_TRANSFER_WIRE_FRAME_MAX_CHARS } from "@zterm/shared/protocol";
@@ -252,6 +251,8 @@ export function FileTransferSheet({
   onClose,
   sendJson,
   onFileTransferMessage,
+  fileTransferRuntime,
+  onFileTransferStateChange,
   avoidSide = null,
   mode = "sync",
   daemonFileScopeId = "",
@@ -267,69 +268,8 @@ export function FileTransferSheet({
   const localPathRef = useRef(DEFAULT_LOCAL_DOWNLOAD_DIR);
 
   // Remote state
-  const fileTransferRuntimeRef = useRef(
-    createFileTransferSessionRuntime({
-      onDownloadComplete: async (payload, orderedChunksBase64) => {
-        try {
-          const downloadDir = normalizeLocalDisplayPath(
-            localPathRef.current || DEFAULT_LOCAL_DOWNLOAD_DIR,
-          );
-          const targetPath = joinLocalDisplayPath(downloadDir, payload.fileName);
-          try {
-            await StoragePermissionPlugin.mkdir({
-              path: downloadDir,
-              recursive: true,
-            });
-          } catch (mkdirError) {
-            console.warn(
-              "[FileTransferSheet] mkdir failed (may already exist):",
-              mkdirError,
-            );
-          }
-
-          if (payload.totalBytes > 0 && orderedChunksBase64.length === 0) {
-            throw new Error("download completed without file chunks");
-          }
-
-          if (orderedChunksBase64.length === 0) {
-            await StoragePermissionPlugin.writeFile({
-              path: targetPath,
-              data: "",
-            });
-          } else {
-            const writeDownloadChunkBatch = async (
-              chunks: string[],
-              append: boolean,
-            ) => {
-              await StoragePermissionPlugin.writeFileChunks({
-                path: targetPath,
-                chunks,
-                append,
-              });
-            };
-            await writeFileTransferChunkBatches({
-              chunksBase64: orderedChunksBase64,
-              writeBatch: writeDownloadChunkBatch,
-            });
-          }
-
-          const written = await StoragePermissionPlugin.stat({ path: targetPath });
-          if (written.size !== payload.totalBytes) {
-            throw new Error(
-              `download size mismatch: wrote ${written.size} bytes, expected ${payload.totalBytes}`,
-            );
-          }
-
-          loadLocalDir(downloadDir, {
-            requestPermission: false,
-          });
-        } catch (error) {
-          forceRuntimeTick((value) => value + 1);
-          throw error;
-        }
-      },
-    }),
-  );
+  const fileTransferRuntimeRef = useRef(fileTransferRuntime);
+  fileTransferRuntimeRef.current = fileTransferRuntime;
   const [, forceRuntimeTick] = useState(0);
   const runtimeState = fileTransferRuntimeRef.current.getState();
   const remotePath = runtimeState.remotePath;
@@ -452,7 +392,7 @@ export function FileTransferSheet({
     }
 
     const initialRemotePath = remoteCwd.trim();
-    fileTransferRuntimeRef.current.open(initialRemotePath);
+    fileTransferRuntimeRef.current.open(initialRemotePath, daemonFileScopeId);
     setSelectedRemote(new Set());
     setSelectedLocal(new Set());
     setPreviewEditorText("");
@@ -586,15 +526,10 @@ export function FileTransferSheet({
 
   // Listen for daemon file-transfer messages
   useEffect(() => {
-    if (!open || !onFileTransferMessage) return;
-    return onFileTransferMessage((msg: any) => {
-      void fileTransferRuntimeRef.current.applyMessage(msg).then((handled) => {
-        if (handled) {
-          forceRuntimeTick((value) => value + 1);
-        }
-      });
+    return onFileTransferStateChange(() => {
+      forceRuntimeTick((value) => value + 1);
     });
-  }, [open, onFileTransferMessage]);
+  }, [onFileTransferStateChange]);
 
   useEffect(() => {
     if (!preview.fileName || preview.loading || preview.error) {
@@ -789,9 +724,7 @@ export function FileTransferSheet({
       setPreviewSaveStatus("保存失败：文件传输通道未就绪，请等待连接恢复后重试。");
       return false;
     }
-    let uploadRequest: ReturnType<
-      ReturnType<typeof createFileTransferSessionRuntime>["startUpload"]
-    > | null = null;
+      let uploadRequest: ReturnType<FileTransferSessionRuntime["startUpload"]> | null = null;
     let endSent = false;
     try {
       const targetDir = remotePath.trim();
@@ -1095,19 +1028,39 @@ export function FileTransferSheet({
   const startTransfer = useCallback(async () => {
     if (direction === "download") {
       // Download selected remote files
+      const batchGeneration =
+        fileTransferRuntimeRef.current.getCurrentDownloadGeneration();
       for (const name of selectedRemote) {
+        if (
+          fileTransferRuntimeRef.current.getCurrentDownloadGeneration() !==
+          batchGeneration
+        ) {
+          break;
+        }
         const entry = remoteEntries.find((e) => e.name === name);
         if (!entry || entry.type !== "file") continue;
         const request = fileTransferRuntimeRef.current.startDownload(
           { name, size: entry.size },
           remotePath,
+          {
+            scopeId: daemonFileScopeId,
+            downloadDir: normalizeLocalDisplayPath(
+              localPathRef.current || DEFAULT_LOCAL_DOWNLOAD_DIR,
+            ),
+          },
+          { generation: batchGeneration },
         );
         forceRuntimeTick((value) => value + 1);
         sendJson?.(request.message);
-        await Promise.race([
-          request.waitForDone(),
-          new Promise<void>((resolve) => setTimeout(resolve, 60000)),
-        ]);
+        try {
+          await request.waitForDone();
+        } catch (error) {
+          forceRuntimeTick((value) => value + 1);
+          break;
+        }
+        if (!request.isCurrentSession()) {
+          break;
+        }
       }
       setSelectedRemote(new Set());
     } else {
@@ -1118,9 +1071,7 @@ export function FileTransferSheet({
       for (const name of selectedLocal) {
         const entry = localEntries.find((e) => e.name === name);
         if (!entry || entry.type !== "file") continue;
-        let uploadRequest: ReturnType<
-          ReturnType<typeof createFileTransferSessionRuntime>["startUpload"]
-        > | null = null;
+        let uploadRequest: ReturnType<FileTransferSessionRuntime["startUpload"]> | null = null;
         try {
           const targetDir = remotePath.trim();
           if (!targetDir) {

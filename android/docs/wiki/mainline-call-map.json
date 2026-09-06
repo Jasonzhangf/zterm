@@ -348,15 +348,15 @@
         },
         {
           "id": "ClientFileTransferDownloadIn03SheetPersistence",
-          "label": "src/components/terminal/FileTransferSheet.tsx#FileTransferSheet"
+          "label": "src/lib/file-transfer-session-runtime.ts#createFileTransferSessionRuntime"
         },
         {
           "id": "ClientFileTransferDownloadIn04NativeWriteBatch",
-          "label": "src/lib/file-transfer-throughput-runtime.ts#writeFileTransferChunkBatches"
+          "label": "src/lib/file-transfer-native-store-port.ts#createFileTransferDownloadStore"
         },
         {
           "id": "ClientFileTransferDownloadIn05NativeWriteDispatch",
-          "label": "src/components/terminal/FileTransferSheet.tsx#writeDownloadChunkBatch"
+          "label": "src/lib/file-transfer-native-store-port.ts#persist"
         },
         {
           "id": "ClientFileTransferDownloadIn06NativeStore",
@@ -368,7 +368,7 @@
         },
         {
           "id": "ClientFileTransferDownloadPersistOut02VerifiedStat",
-          "label": "src/components/terminal/FileTransferSheet.tsx#onDownloadComplete"
+          "label": "src/lib/file-transfer-native-store-port.ts#complete"
         },
         {
           "id": "ClientFileTransferUploadErrorOut01WireFrameLimit",
@@ -384,11 +384,11 @@
         },
         {
           "id": "ClientFileTransferDownloadErrorIn02NativeWriteFailure",
-          "label": "src/components/terminal/FileTransferSheet.tsx#onDownloadComplete"
+          "label": "src/lib/file-transfer-native-store-port.ts#persist"
         },
         {
           "id": "ClientFileTransferDownloadErrorIn03SizeMismatch",
-          "label": "src/components/terminal/FileTransferSheet.tsx#onDownloadComplete"
+          "label": "src/lib/file-transfer-native-store-port.ts#complete"
         },
         {
           "id": "RemoteWindowOverlay",

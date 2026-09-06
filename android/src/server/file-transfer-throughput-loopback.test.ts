@@ -4,6 +4,10 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createFileTransferSessionRuntime } from '../lib/file-transfer-session-runtime';
+import type {
+  FileTransferDownloadDestination,
+  FileTransferDownloadStore,
+} from '../lib/file-transfer-native-store-port';
 import {
   FILE_TRANSFER_UPLOAD_WINDOW_CHUNKS,
   sendBoundedFileUploadChunks,
@@ -118,21 +122,47 @@ describe('file transfer bounded-throughput loopback', () => {
     writeFileSync(remotePath, bytes);
     const persistedBatches: Buffer[] = [];
     let nativeWriteCalls = 0;
-    const client = createFileTransferSessionRuntime({
-      now: () => 2,
-      randomId: () => 'loop',
-      onDownloadComplete: async (_payload, orderedChunksBase64) => {
+    const destination: FileTransferDownloadDestination = {
+      requestId: 'fdl-2-loop',
+      scopeId: '',
+      fileName: 'download.bin',
+      downloadDir: directory,
+      targetPath: join(directory, 'download.bin'),
+      stagingPath: join(directory, '.download.part'),
+    };
+    const downloadStore: FileTransferDownloadStore = {
+      createDestination: (input) => ({
+        ...destination,
+        requestId: input.requestId,
+        scopeId: input.scopeId,
+        fileName: input.fileName,
+        downloadDir: input.downloadDir,
+        targetPath: join(input.downloadDir, input.fileName),
+        stagingPath: join(input.downloadDir, `.zterm-download-${input.requestId}.part`),
+      }),
+      persist: async ({ chunksBase64 }) => {
         await writeFileTransferChunkBatches({
-          chunksBase64: orderedChunksBase64,
-          writeBatch: async (chunksBase64) => {
+          chunksBase64,
+          writeBatch: async (batch) => {
             nativeWriteCalls += 1;
-            persistedBatches.push(...chunksBase64.map((chunk) => Buffer.from(chunk, 'base64')));
+            persistedBatches.push(...batch.map((chunk) => Buffer.from(chunk, 'base64')));
           },
         });
       },
+      complete: vi.fn().mockResolvedValue(undefined),
+      abort: vi.fn().mockResolvedValue(undefined),
+    };
+    const client = createFileTransferSessionRuntime({
+      now: () => 2,
+      randomId: () => 'loop',
+      downloadStore,
     });
     client.open(directory);
-    const download = client.startDownload({ name: 'download.bin', size: bytes.length }, directory);
+    const download = client.startDownload(
+      { name: 'download.bin', size: bytes.length },
+      directory,
+      { scopeId: '', downloadDir: directory },
+    );
     const session = makeSession();
     const deliveryPromises: Promise<unknown>[] = [];
     const deps = {

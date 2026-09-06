@@ -2034,6 +2034,8 @@
       "owner_feature": "daemon.file_transfer",
       "allowed_callers": [
         "src/components/terminal/FileTransferSheet.tsx",
+        "src/lib/file-transfer-native-store-port.ts",
+        "src/lib/file-transfer-session-runtime.ts",
         "src/lib/file-transfer-throughput-runtime.ts",
         "src/plugins/StoragePermissionPlugin.ts",
         "native/android/app/src/main/java/com/zterm/android/StoragePermissionPlugin.java"

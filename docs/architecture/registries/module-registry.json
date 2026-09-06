@@ -113,6 +113,8 @@
         "android/src/lib/terminal-buffer.ts",
         "android/src/lib/terminal-performance-trace.ts",
         "android/src/lib/file-transfer-session-runtime.ts",
+        "android/src/lib/file-transfer-native-store-port.ts",
+        "android/src/lib/file-transfer-path-runtime.ts",
         "android/src/lib/file-transfer-throughput-runtime.ts",
         "android/src/lib/terminal-shortcut-actions.ts"
       ],
@@ -122,6 +124,8 @@
         "android/src/lib/terminal-buffer.ts",
         "android/src/lib/terminal-performance-trace.ts",
         "android/src/lib/file-transfer-session-runtime.ts",
+        "android/src/lib/file-transfer-native-store-port.ts",
+        "android/src/lib/file-transfer-path-runtime.ts",
         "android/src/lib/file-transfer-throughput-runtime.ts",
         "android/src/lib/terminal-shortcut-actions.ts"
       ],
@@ -149,6 +153,8 @@
         "android/src/lib/terminal-buffer.ts",
         "android/src/lib/terminal-performance-trace.ts",
         "android/src/lib/file-transfer-session-runtime.ts",
+        "android/src/lib/file-transfer-native-store-port.ts",
+        "android/src/lib/file-transfer-path-runtime.ts",
         "android/src/lib/file-transfer-throughput-runtime.ts",
         "android/src/lib/terminal-shortcut-actions.ts"
       ],
