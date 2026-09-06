@@ -71,6 +71,18 @@ export interface AppUpdateRuntimeDeps {
   onError?: (phase: 'restore-preferences' | 'persist-preferences', error: unknown) => void;
 }
 
+export type AppUpdatePreferencesWriteResult =
+  | {
+      ok: true;
+      preferences: AppUpdatePreferences;
+      persistedKeys: string[];
+    }
+  | {
+      ok: false;
+      error: unknown;
+      persistedKeys: string[];
+    };
+
 export interface AppUpdateCheckOptions {
   manual?: boolean;
   manifestUrlOverride?: string;
@@ -101,14 +113,30 @@ function persistPreferences(
   storage: BrowserStorageLike | null,
   preferences: AppUpdatePreferences,
   onError?: (phase: 'restore-preferences' | 'persist-preferences', error: unknown) => void,
-) {
+) : AppUpdatePreferencesWriteResult {
   if (!storage) {
-    return;
+    const error = new Error('应用更新偏好持久化不可用');
+    onError?.('persist-preferences', error);
+    return {
+      ok: false,
+      error,
+      persistedKeys: [],
+    };
   }
   try {
     storage.setItem(APP_UPDATE_STORAGE_KEY, JSON.stringify(preferences));
+    return {
+      ok: true,
+      preferences,
+      persistedKeys: [APP_UPDATE_STORAGE_KEY],
+    };
   } catch (error) {
     onError?.('persist-preferences', error);
+    return {
+      ok: false,
+      error,
+      persistedKeys: [],
+    };
   }
 }
 
@@ -215,17 +243,20 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
 
   const setPreferences = (
     next: AppUpdatePreferences | ((current: AppUpdatePreferences) => AppUpdatePreferences),
-  ) => {
+  ): AppUpdatePreferencesWriteResult => {
     const resolved = normalizeAppUpdatePreferences(
       typeof next === 'function' ? next(snapshot.preferences) : next,
     );
+    const result = persistPreferences(deps.storage, resolved, deps.onError);
+    if (!result.ok) {
+      return result;
+    }
     setSnapshot((current) => ({
       ...current,
       preferences: resolved,
       rollbackBackup: resolved.rollbackBackup || null,
     }));
-    persistPreferences(deps.storage, resolved, deps.onError);
-    return snapshot;
+    return result;
   };
 
   return {
@@ -263,11 +294,19 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
       ) {
         return snapshot;
       }
+      const result = persistPreferences(deps.storage, nextPreferences, deps.onError);
+      if (!result.ok) {
+        setSnapshot((current) => ({
+          ...current,
+          lastError: result.error instanceof Error ? result.error.message : '保存升级偏好失败',
+          updateStage: 'failed',
+        }));
+        return snapshot;
+      }
       setSnapshot((current) => ({
         ...current,
         preferences: nextPreferences,
       }));
-      persistPreferences(deps.storage, nextPreferences, deps.onError);
       return snapshot;
     },
 
@@ -356,7 +395,10 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
           lastSeenVersionCode: resolvedManifest.versionCode,
         });
 
-        persistPreferences(deps.storage, nextPreferences, deps.onError);
+        const finalPersistenceResult = persistPreferences(deps.storage, nextPreferences, deps.onError);
+        if (!finalPersistenceResult.ok) {
+          throw finalPersistenceResult.error;
+        }
 
         setSnapshot((current) => ({
           ...current,
@@ -406,7 +448,14 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
         skippedVersionCode: manifest.versionCode,
         ignoreUntilManualCheck: false,
       });
-      persistPreferences(deps.storage, nextPreferences, deps.onError);
+      const result = persistPreferences(deps.storage, nextPreferences, deps.onError);
+      if (!result.ok) {
+        return setSnapshot((current) => ({
+          ...current,
+          lastError: result.error instanceof Error ? result.error.message : '保存升级偏好失败',
+          updateStage: 'failed',
+        }));
+      }
       return setSnapshot((current) => ({
         ...current,
         preferences: nextPreferences,
@@ -419,7 +468,14 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
         ...snapshot.preferences,
         ignoreUntilManualCheck: true,
       });
-      persistPreferences(deps.storage, nextPreferences, deps.onError);
+      const result = persistPreferences(deps.storage, nextPreferences, deps.onError);
+      if (!result.ok) {
+        return setSnapshot((current) => ({
+          ...current,
+          lastError: result.error instanceof Error ? result.error.message : '保存升级偏好失败',
+          updateStage: 'failed',
+        }));
+      }
       return setSnapshot((current) => ({
         ...current,
         preferences: nextPreferences,
@@ -433,7 +489,14 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
         skippedVersionCode: undefined,
         ignoreUntilManualCheck: false,
       });
-      persistPreferences(deps.storage, nextPreferences, deps.onError);
+      const result = persistPreferences(deps.storage, nextPreferences, deps.onError);
+      if (!result.ok) {
+        return setSnapshot((current) => ({
+          ...current,
+          lastError: result.error instanceof Error ? result.error.message : '保存升级偏好失败',
+          updateStage: 'failed',
+        }));
+      }
       return setSnapshot((current) => ({
         ...current,
         preferences: nextPreferences,
@@ -524,7 +587,10 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
           ...snapshot.preferences,
           rollbackBackup: null,
         });
-        persistPreferences(deps.storage, nextPreferences, deps.onError);
+        const finalPersistenceResult = persistPreferences(deps.storage, nextPreferences, deps.onError);
+        if (!finalPersistenceResult.ok) {
+          throw finalPersistenceResult.error;
+        }
 
         setSnapshot((current) => ({
           ...current,
@@ -696,7 +762,10 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
           ...snapshot.preferences,
           rollbackBackup,
         });
-        persistPreferences(deps.storage, backupPreferences, deps.onError);
+        const persistenceResult = persistPreferences(deps.storage, backupPreferences, deps.onError);
+        if (!persistenceResult.ok) {
+          throw persistenceResult.error;
+        }
         setSnapshot((current) => ({
           ...current,
           preferences: backupPreferences,
@@ -734,7 +803,10 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
           skippedVersionCode: installTarget.versionCode,
           ignoreUntilManualCheck: false,
         });
-        persistPreferences(deps.storage, nextPreferences, deps.onError);
+        const finalPersistenceResult = persistPreferences(deps.storage, nextPreferences, deps.onError);
+        if (!finalPersistenceResult.ok) {
+          throw finalPersistenceResult.error;
+        }
 
         setSnapshot((current) => ({
           ...current,

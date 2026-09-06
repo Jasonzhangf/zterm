@@ -246,4 +246,30 @@ describe('useAppUpdate', () => {
     });
   });
 
+  it('returns update preference persistence failure to the caller', async () => {
+    vi.stubGlobal('localStorage', {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error('update storage failed');
+      },
+      removeItem: () => undefined,
+    });
+    vi.stubGlobal('fetch', vi.fn() as unknown as typeof fetch);
+
+    const { useAppUpdate } = await import('./useAppUpdate');
+    const { result } = renderHook(() => useAppUpdate());
+    await waitFor(() => expect(result.current.runtimeVersionCode).toBe(1011491));
+
+    let saveResult: any;
+    await act(async () => {
+      saveResult = result.current.setPreferences((current) => ({
+        ...current,
+        manifestUrl: 'https://updates.example.test/latest.json',
+      }));
+    });
+
+    expect(saveResult).toMatchObject({ ok: false });
+    expect(result.current.preferences.manifestUrl).toBe('');
+  });
+
 });

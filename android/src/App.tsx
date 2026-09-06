@@ -135,6 +135,7 @@ export function AppContent({
   renderQuickBar,
   renderTerminalShell,
 }: AppContentProps) {
+  const [connectionsFocusNonce, setConnectionsFocusNonce] = useState(0);
   const [pendingPaneAttachIntent, setPendingPaneAttachIntent] = useState<{ sessionIds: string[]; paneId: string; nonce: number } | null>(null);
   const appUpdateRouteRef = useRef<AppUpdateRouteSnapshot | undefined>(undefined);
   const appUpdateManifestCandidatesRef = useRef<AppUpdateManifestCandidate[]>([]);
@@ -143,9 +144,27 @@ export function AppContent({
     title: string;
     message: string;
   } | null>(null);
+  const reportBridgeSettingsPersistenceFailure = useCallback((error: unknown) => {
+    console.error('[App] Failed to persist bridge settings:', error);
+    setAppDialog({
+      tone: 'error',
+      title: '设置保存失败',
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }, [setAppDialog]);
+  const persistBridgeSettings = useCallback<typeof setBridgeSettings>((next) => {
+    const result = setBridgeSettings(next);
+    if (!result || !result.ok) {
+      reportBridgeSettingsPersistenceFailure(
+        result?.error || new Error('桥接设置持久化未返回结果'),
+      );
+    }
+    return result;
+  }, [reportBridgeSettingsPersistenceFailure, setBridgeSettings]);
   const { relayDevices, refreshControlDirectory } = useRelayDeviceStream({
     bridgeSettings,
     setBridgeSettings,
+    onPersistenceError: reportBridgeSettingsPersistenceFailure,
   });
   const handleForegroundResumeAfterControlRefresh = useCallback((reason: 'visibilitychange' | 'resume' | 'appStateChange') => {
     void refreshControlDirectory('foreground-resume');
@@ -309,7 +328,7 @@ export function AppContent({
     deleteHost,
     ensureTerminalPageVisible,
     syncSavedHostToServerPreset: (hostData) => {
-      setBridgeSettings((current) => upsertBridgeServer(current, {
+      persistBridgeSettings((current) => upsertBridgeServer(current, {
         name: hostData.name,
         targetHost: hostData.bridgeHost,
         targetPort: hostData.bridgePort,
@@ -333,7 +352,7 @@ export function AppContent({
     if (parsed.shortcutActions.length > 0) {
       setShortcutActions(parsed.shortcutActions);
     }
-    setBridgeSettings((current) => importedHosts.reduce((settings, importedHost) => upsertBridgeServer(settings, {
+    const persistenceResult = persistBridgeSettings((current) => importedHosts.reduce((settings, importedHost) => upsertBridgeServer(settings, {
         name: importedHost.name,
         targetHost: importedHost.bridgeHost,
         targetPort: importedHost.bridgePort,
@@ -342,6 +361,13 @@ export function AppContent({
         relayDeviceId: importedHost.relayDeviceId,
         relayDeviceName: importedHost.name,
       }), current));
+    if (!persistenceResult || !persistenceResult.ok) {
+      const error = persistenceResult?.error || new Error('桥接设置持久化未返回结果');
+      return {
+        ok: false as const,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
     setPageState(openConnectionsPage());
     return {
       ok: true as const,
@@ -351,7 +377,7 @@ export function AppContent({
         parsed.shortcutActions.length > 0 ? `${parsed.shortcutActions.length} 个终端快捷键` : '',
       ].filter(Boolean).join('，'),
     };
-  }, [setBridgeSettings, setPageState, setQuickActions, setShortcutActions, upsertHost]);
+  }, [persistBridgeSettings, setPageState, setQuickActions, setShortcutActions, upsertHost]);
 
   useEffect(() => {
     let disposed = false;
@@ -617,6 +643,14 @@ export function AppContent({
     });
   }, [auditOpenTabsAgainstRemoteSessions, handleOpenConnectionsPage]);
 
+  const handleSettingsBackToConnections = useCallback(() => {
+    setConnectionsFocusNonce((current) => current + 1);
+    handleOpenConnectionsPageWithAudit();
+  }, [handleOpenConnectionsPageWithAudit]);
+  const handleConsumeConnectionsFocus = useCallback(() => {
+    setConnectionsFocusNonce(0);
+  }, []);
+
 
   const {
     inputResetEpochBySession,
@@ -645,9 +679,9 @@ export function AppContent({
     shortcutFrequencyStorage,
   });
   const handleTerminalWidthModeChange = useCallback((sessionId: string, mode: TerminalWidthMode, cols?: number | null) => {
-    setBridgeSettings((current) => updateBridgeSettingsTerminalWidthMode(current, mode));
+    persistBridgeSettings((current) => updateBridgeSettingsTerminalWidthMode(current, mode));
     sendTerminalWidthModeChange(sessionId, mode, cols);
-  }, [sendTerminalWidthModeChange, setBridgeSettings]);
+  }, [persistBridgeSettings, sendTerminalWidthModeChange]);
   const {
     pickerMode,
     pickerTarget,
@@ -669,7 +703,7 @@ export function AppContent({
     closePicker,
   } = useSessionOpenActions({
     bridgeSettings,
-    setBridgeSettings,
+    setBridgeSettings: persistBridgeSettings,
     hosts,
     sessionGroups,
     relayDevices,
@@ -800,6 +834,8 @@ export function AppContent({
             onResumeSession={handleResumeHomeSession}
             onOpenSavedConnection={handleOpenSavedConnection}
             onOpenSettings={handleOpenSettingsPage}
+            focusSettingsButtonNonce={connectionsFocusNonce}
+            onFocusSettingsButtonConsumed={handleConsumeConnectionsFocus}
           />
         )}
 
@@ -830,23 +866,30 @@ export function AppContent({
             updateError={updateError}
             hasNewVersion={hasNewVersion}
             hasUpdateIgnorePolicy={hasUpdateIgnorePolicy}
-            onSave={(next) => {
-              setBridgeSettings(() => ({
+            onSave={(next) => persistBridgeSettings(() => ({
                 ...applyTraversalRelaySettings(next, next.traversalRelay),
                 signalUrl: '',
                 turnServerUrl: '',
                 turnUsername: '',
                 turnCredential: '',
                 terminalWidthMode: updateBridgeSettingsTerminalWidthMode(next, next.terminalWidthMode).terminalWidthMode,
-              }));
-              handleOpenConnectionsPageWithAudit();
-            }}
+              }))}
             onRelaySettingsChange={(relaySettings) => {
-              setBridgeSettings((current) => applyTraversalRelaySettings(current, relaySettings));
+              persistBridgeSettings((current) => applyTraversalRelaySettings(current, relaySettings));
             }}
             onUpdatePreferencesChange={setAppUpdatePreferences}
             onCheckForUpdate={(nextPreferences, manifestCandidates) => {
-              setAppUpdatePreferences(nextPreferences);
+              const persistenceResult = setAppUpdatePreferences(nextPreferences);
+              if (!persistenceResult.ok) {
+                setAppDialog({
+                  tone: 'error',
+                  title: '设置保存失败',
+                  message: persistenceResult.error instanceof Error
+                    ? persistenceResult.error.message
+                    : String(persistenceResult.error),
+                });
+                return;
+              }
               void checkForUpdates({
                 manual: true,
                 manifestUrlOverride: nextPreferences.manifestUrl,
@@ -905,19 +948,19 @@ export function AppContent({
               void rollbackToPreviousVersion();
             }}
             onTerminalThemeChange={(themeId) => {
-              setBridgeSettings((current) => ({
+              persistBridgeSettings((current) => ({
                 ...current,
                 terminalThemeId: themeId,
               }));
             }}
             onTerminalShellSkinChange={(skin) => {
-              setBridgeSettings((current) => ({
+              persistBridgeSettings((current) => ({
                 ...current,
                 terminalShellSkin: skin,
               }));
             }}
             renderSettingsUpdate={renderSettingsUpdate}
-            onBack={handleOpenConnectionsPageWithAudit}
+            onBack={handleSettingsBackToConnections}
           />
         )}
 

@@ -71,6 +71,35 @@ describe('app-update-runtime', () => {
     expect(runtime.getSnapshot().preferences.autoCheckOnLaunch).toBe(false);
   });
 
+  it('returns a persistence failure without projecting unsaved preferences', () => {
+    const storage = createStorage();
+    vi.spyOn(storage, 'setItem').mockImplementation(() => {
+      throw new Error('update storage failed');
+    });
+    const runtime = createRuntime(storage);
+    const before = runtime.getSnapshot().preferences;
+
+    const result = runtime.setPreferences((current) => ({
+      ...current,
+      manifestUrl: 'https://updates.example.test/latest.json',
+    }));
+
+    expect(result).toMatchObject({ ok: false });
+    expect(runtime.getSnapshot().preferences).toEqual(before);
+    expect(runtime.getSnapshot().preferences.manifestUrl).toBe('');
+  });
+
+  it('treats missing update storage as an explicit persistence failure', () => {
+    const runtime = createRuntime(null);
+    const result = runtime.setPreferences((current) => ({
+      ...current,
+      manifestUrl: 'https://updates.example.test/latest.json',
+    }));
+
+    expect(result).toMatchObject({ ok: false, persistedKeys: [] });
+    expect(runtime.getSnapshot().preferences.manifestUrl).toBe('');
+  });
+
   it('applies relay-derived manifest through the app-update runtime owner', () => {
     const storage = createStorage({
       'zterm:app-update-settings': JSON.stringify({

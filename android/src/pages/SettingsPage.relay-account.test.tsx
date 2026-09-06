@@ -60,6 +60,23 @@ const relaySettings: TraversalRelayClientSettings = {
   turnCredential: '',
   updatedAt: 1,
 };
+const successfulBridgeSettings = () => ({
+  ok: true as const,
+  settings: baseSettings,
+  persistedKeys: [],
+});
+const successfulUpdatePreferences = () => ({
+  ok: true as const,
+  preferences: {
+    manifestUrl: '',
+    autoCheckOnLaunch: false,
+    skippedVersionCode: undefined,
+    ignoreUntilManualCheck: false,
+    lastCheckedAt: undefined,
+    lastSeenVersionCode: undefined,
+  },
+  persistedKeys: [],
+});
 
 function renderSettings(overrides: Partial<ComponentProps<typeof SettingsPage>> = {}) {
   return render(
@@ -82,9 +99,9 @@ function renderSettings(overrides: Partial<ComponentProps<typeof SettingsPage>> 
       updateError={null}
       hasNewVersion={false}
       hasUpdateIgnorePolicy={false}
-      onSave={vi.fn()}
+      onSave={vi.fn(successfulBridgeSettings)}
       onRelaySettingsChange={vi.fn()}
-      onUpdatePreferencesChange={vi.fn()}
+      onUpdatePreferencesChange={vi.fn(successfulUpdatePreferences)}
       onCheckForUpdate={vi.fn()}
       onInstallUpdate={vi.fn()}
       onResetUpdateIgnorePolicy={vi.fn()}
@@ -118,7 +135,7 @@ describe('SettingsPage Relay account configuration', () => {
 
   it('keeps Relay auth in Settings and writes returned settings to the app owner', async () => {
     const onRelaySettingsChange = vi.fn();
-    const onSave = vi.fn();
+    const onSave = vi.fn(successfulBridgeSettings);
     syncRelay.mockResolvedValueOnce({
       account: {
         username: 'jason',
@@ -369,7 +386,7 @@ describe('SettingsPage Relay account configuration', () => {
       syncRelay,
       logoutRelay,
     });
-    const onSave = vi.fn();
+    const onSave = vi.fn(successfulBridgeSettings);
 
     renderSettings({ relayDevices: [confirmedDevice], onSave });
     openConnectionConfig();
@@ -384,7 +401,7 @@ describe('SettingsPage Relay account configuration', () => {
   });
 
   it('adds a direct server inside Settings so Home can project it as a server row', () => {
-    const onSave = vi.fn();
+    const onSave = vi.fn(successfulBridgeSettings);
     renderSettings({ onSave });
 
     openConnectionConfig();

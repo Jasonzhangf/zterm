@@ -30,6 +30,27 @@ const baseSettings: BridgeSettings = {
   traversalRelay: undefined,
 };
 
+const baseUpdatePreferences: AppUpdatePreferences = {
+  manifestUrl: '',
+  autoCheckOnLaunch: false,
+  skippedVersionCode: undefined,
+  ignoreUntilManualCheck: false,
+  lastCheckedAt: undefined,
+  lastSeenVersionCode: undefined,
+};
+
+const successfulBridgeSettings = () => ({
+  ok: true as const,
+  settings: baseSettings,
+  persistedKeys: [],
+});
+
+const successfulUpdatePreferences = () => ({
+  ok: true as const,
+  preferences: baseUpdatePreferences,
+  persistedKeys: [],
+});
+
 describe('SettingsPage terminal theme selection', () => {
   beforeEach(() => {
     const storage = new Map<string, string>();
@@ -79,8 +100,8 @@ describe('SettingsPage terminal theme selection', () => {
         updateError={null}
         hasNewVersion={false}
         hasUpdateIgnorePolicy={false}
-        onSave={vi.fn()}
-        onUpdatePreferencesChange={vi.fn()}
+        onSave={() => ({ ok: true as const, settings: baseSettings, persistedKeys: [] })}
+        onUpdatePreferencesChange={vi.fn(successfulUpdatePreferences)}
         onCheckForUpdate={vi.fn()}
         onInstallUpdate={vi.fn()}
         onResetUpdateIgnorePolicy={vi.fn()}
@@ -130,8 +151,8 @@ describe('SettingsPage terminal theme selection', () => {
         updateError={null}
         hasNewVersion={false}
         hasUpdateIgnorePolicy={false}
-        onSave={vi.fn()}
-        onUpdatePreferencesChange={vi.fn()}
+        onSave={() => ({ ok: true as const, settings: baseSettings, persistedKeys: [] })}
+        onUpdatePreferencesChange={vi.fn(successfulUpdatePreferences)}
         onCheckForUpdate={vi.fn()}
         onInstallUpdate={vi.fn()}
         onResetUpdateIgnorePolicy={vi.fn()}
@@ -146,7 +167,7 @@ describe('SettingsPage terminal theme selection', () => {
   });
 
   it('persists terminal width mode through settings save', () => {
-    const onSave = vi.fn();
+    const onSave = vi.fn(successfulBridgeSettings);
 
     render(
       <SettingsPage
@@ -168,7 +189,7 @@ describe('SettingsPage terminal theme selection', () => {
         hasNewVersion={false}
         hasUpdateIgnorePolicy={false}
         onSave={onSave}
-        onUpdatePreferencesChange={vi.fn()}
+        onUpdatePreferencesChange={vi.fn(successfulUpdatePreferences)}
         onCheckForUpdate={vi.fn()}
         onInstallUpdate={vi.fn()}
         onResetUpdateIgnorePolicy={vi.fn()}
@@ -186,7 +207,7 @@ describe('SettingsPage terminal theme selection', () => {
   });
 
   it('persists terminal font size through settings save', () => {
-    const onSave = vi.fn();
+    const onSave = vi.fn(successfulBridgeSettings);
     render(
       <SettingsPage
         settings={baseSettings}
@@ -203,7 +224,7 @@ describe('SettingsPage terminal theme selection', () => {
         hasNewVersion={false}
         hasUpdateIgnorePolicy={false}
         onSave={onSave}
-        onUpdatePreferencesChange={vi.fn()}
+        onUpdatePreferencesChange={vi.fn(successfulUpdatePreferences)}
         onCheckForUpdate={vi.fn()}
         onInstallUpdate={vi.fn()}
         onResetUpdateIgnorePolicy={vi.fn()}
@@ -217,7 +238,7 @@ describe('SettingsPage terminal theme selection', () => {
   });
 
   it('persists terminal shell skin through settings save', () => {
-    const onSave = vi.fn();
+    const onSave = vi.fn(successfulBridgeSettings);
     const onTerminalShellSkinChange = vi.fn();
     const renderSettingsPage = (settings: BridgeSettings) => (
       <SettingsPage
@@ -239,7 +260,7 @@ describe('SettingsPage terminal theme selection', () => {
         hasNewVersion={false}
         hasUpdateIgnorePolicy={false}
         onSave={onSave}
-        onUpdatePreferencesChange={vi.fn()}
+        onUpdatePreferencesChange={vi.fn(successfulUpdatePreferences)}
         onCheckForUpdate={vi.fn()}
         onInstallUpdate={vi.fn()}
         onResetUpdateIgnorePolicy={vi.fn()}
@@ -270,7 +291,7 @@ describe('SettingsPage terminal theme selection', () => {
   });
 
   it('persists session group layout mode through settings save', () => {
-    const onSave = vi.fn();
+    const onSave = vi.fn(successfulBridgeSettings);
 
     render(
       <SettingsPage
@@ -292,7 +313,7 @@ describe('SettingsPage terminal theme selection', () => {
         hasNewVersion={false}
         hasUpdateIgnorePolicy={false}
         onSave={onSave}
-        onUpdatePreferencesChange={vi.fn()}
+        onUpdatePreferencesChange={vi.fn(successfulUpdatePreferences)}
         onCheckForUpdate={vi.fn()}
         onInstallUpdate={vi.fn()}
         onResetUpdateIgnorePolicy={vi.fn()}
@@ -329,8 +350,8 @@ describe('SettingsPage terminal theme selection', () => {
         updateError={null}
         hasNewVersion={false}
         hasUpdateIgnorePolicy={false}
-        onSave={vi.fn()}
-        onUpdatePreferencesChange={vi.fn()}
+        onSave={() => ({ ok: true as const, settings: baseSettings, persistedKeys: [] })}
+        onUpdatePreferencesChange={vi.fn(successfulUpdatePreferences)}
         onCheckForUpdate={vi.fn()}
         onInstallUpdate={vi.fn()}
         onResetUpdateIgnorePolicy={vi.fn()}
@@ -368,8 +389,8 @@ describe('SettingsPage terminal theme selection', () => {
         updateError={null}
         hasNewVersion={false}
         hasUpdateIgnorePolicy={false}
-        onSave={vi.fn()}
-        onUpdatePreferencesChange={vi.fn()}
+        onSave={() => ({ ok: true as const, settings: baseSettings, persistedKeys: [] })}
+        onUpdatePreferencesChange={vi.fn(successfulUpdatePreferences)}
         onCheckForUpdate={vi.fn()}
         onInstallUpdate={vi.fn()}
         onResetUpdateIgnorePolicy={vi.fn()}
@@ -432,8 +453,8 @@ describe('SettingsPage terminal theme selection', () => {
         updateError={null}
         hasNewVersion={false}
         hasUpdateIgnorePolicy={false}
-        onSave={vi.fn()}
-        onUpdatePreferencesChange={vi.fn()}
+        onSave={() => ({ ok: true as const, settings: baseSettings, persistedKeys: [] })}
+        onUpdatePreferencesChange={vi.fn(successfulUpdatePreferences)}
         onCheckForUpdate={vi.fn()}
         onInstallUpdate={vi.fn()}
         onResetUpdateIgnorePolicy={vi.fn()}
@@ -448,7 +469,7 @@ describe('SettingsPage terminal theme selection', () => {
   });
 
   it('preserves Relay, Tailscale, and LAN update manifest candidates', () => {
-    const onUpdatePreferencesChange = vi.fn();
+    const onUpdatePreferencesChange = vi.fn(successfulUpdatePreferences);
 
     render(
       <SettingsPage
@@ -498,7 +519,7 @@ describe('SettingsPage terminal theme selection', () => {
         updateError={null}
         hasNewVersion={false}
         hasUpdateIgnorePolicy={false}
-        onSave={vi.fn()}
+        onSave={() => ({ ok: true as const, settings: baseSettings, persistedKeys: [] })}
         onUpdatePreferencesChange={onUpdatePreferencesChange}
         onCheckForUpdate={vi.fn()}
         onInstallUpdate={vi.fn()}
@@ -553,8 +574,8 @@ describe('SettingsPage terminal theme selection', () => {
         updateError={null}
         hasNewVersion={false}
         hasUpdateIgnorePolicy={false}
-        onSave={vi.fn()}
-        onUpdatePreferencesChange={vi.fn()}
+        onSave={vi.fn(successfulBridgeSettings)}
+        onUpdatePreferencesChange={vi.fn(successfulUpdatePreferences)}
         onCheckForUpdate={vi.fn()}
         onInstallUpdate={vi.fn()}
         onResetUpdateIgnorePolicy={vi.fn()}
@@ -568,7 +589,7 @@ describe('SettingsPage terminal theme selection', () => {
   });
 
   it('defaults a stale server-connected LAN draft to Tailscale when both routes exist', () => {
-    const onUpdatePreferencesChange = vi.fn();
+    const onUpdatePreferencesChange = vi.fn(successfulUpdatePreferences);
 
     render(
       <SettingsPage
@@ -597,7 +618,7 @@ describe('SettingsPage terminal theme selection', () => {
         updateError={null}
         hasNewVersion={false}
         hasUpdateIgnorePolicy={false}
-        onSave={vi.fn()}
+        onSave={() => ({ ok: true as const, settings: baseSettings, persistedKeys: [] })}
         onUpdatePreferencesChange={onUpdatePreferencesChange}
         onCheckForUpdate={vi.fn()}
         onInstallUpdate={vi.fn()}
@@ -612,7 +633,7 @@ describe('SettingsPage terminal theme selection', () => {
   });
 
   it('resyncs an in-place Relay preference update instead of saving a stale LAN draft', () => {
-    const onUpdatePreferencesChange = vi.fn();
+    const onUpdatePreferencesChange = vi.fn(successfulUpdatePreferences);
     const updatePreferences: AppUpdatePreferences = {
       manifestUrl: 'http://192.168.0.3:3333/updates/latest.json',
       manifestSource: 'server-connected' as const,
@@ -650,7 +671,7 @@ describe('SettingsPage terminal theme selection', () => {
         updateError={null}
         hasNewVersion={false}
         hasUpdateIgnorePolicy={false}
-        onSave={vi.fn()}
+        onSave={() => ({ ok: true as const, settings: baseSettings, persistedKeys: [] })}
         onUpdatePreferencesChange={onUpdatePreferencesChange}
         onCheckForUpdate={vi.fn()}
         onInstallUpdate={vi.fn()}
@@ -676,7 +697,7 @@ describe('SettingsPage terminal theme selection', () => {
   });
 
   it('preserves an explicitly selected direct candidate across Relay refresh', () => {
-    const onUpdatePreferencesChange = vi.fn();
+    const onUpdatePreferencesChange = vi.fn(successfulUpdatePreferences);
     const relaySettings = {
       relayBaseUrl: 'https://relay.codewhisper.cc:18443/relay/',
       accessToken: 'token',
@@ -722,7 +743,7 @@ describe('SettingsPage terminal theme selection', () => {
         updateError={null}
         hasNewVersion={false}
         hasUpdateIgnorePolicy={false}
-        onSave={vi.fn()}
+        onSave={() => ({ ok: true as const, settings: baseSettings, persistedKeys: [] })}
         onUpdatePreferencesChange={onUpdatePreferencesChange}
         onCheckForUpdate={vi.fn()}
         onInstallUpdate={vi.fn()}
@@ -747,7 +768,7 @@ describe('SettingsPage terminal theme selection', () => {
   });
 
   it('keeps a manually saved manifest when Relay preferences refresh', () => {
-    const onUpdatePreferencesChange = vi.fn();
+    const onUpdatePreferencesChange = vi.fn(successfulUpdatePreferences);
     const updatePreferences: AppUpdatePreferences = {
       manifestUrl: 'https://relay.codewhisper.cc:18443/relay/updates/latest.json',
       manifestSource: 'relay-injected' as const,
@@ -785,7 +806,7 @@ describe('SettingsPage terminal theme selection', () => {
         updateError={null}
         hasNewVersion={false}
         hasUpdateIgnorePolicy={false}
-        onSave={vi.fn()}
+        onSave={() => ({ ok: true as const, settings: baseSettings, persistedKeys: [] })}
         onUpdatePreferencesChange={onUpdatePreferencesChange}
         onCheckForUpdate={vi.fn()}
         onInstallUpdate={vi.fn()}
@@ -812,7 +833,7 @@ describe('SettingsPage terminal theme selection', () => {
         updateError={null}
         hasNewVersion={false}
         hasUpdateIgnorePolicy={false}
-        onSave={vi.fn()}
+        onSave={() => ({ ok: true as const, settings: baseSettings, persistedKeys: [] })}
         onUpdatePreferencesChange={onUpdatePreferencesChange}
         onCheckForUpdate={vi.fn()}
         onInstallUpdate={vi.fn()}
@@ -831,7 +852,7 @@ describe('SettingsPage terminal theme selection', () => {
   });
 
   it('keeps the explicit LAN route when no Relay source exists', () => {
-    const onUpdatePreferencesChange = vi.fn();
+    const onUpdatePreferencesChange = vi.fn(successfulUpdatePreferences);
 
     render(
       <SettingsPage
@@ -850,7 +871,7 @@ describe('SettingsPage terminal theme selection', () => {
         updateError={null}
         hasNewVersion={false}
         hasUpdateIgnorePolicy={false}
-        onSave={vi.fn()}
+        onSave={() => ({ ok: true as const, settings: baseSettings, persistedKeys: [] })}
         onUpdatePreferencesChange={onUpdatePreferencesChange}
         onCheckForUpdate={vi.fn()}
         onInstallUpdate={vi.fn()}

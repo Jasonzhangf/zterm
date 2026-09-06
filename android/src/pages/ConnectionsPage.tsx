@@ -1,4 +1,4 @@
-import { type CSSProperties, useMemo } from 'react';
+import { type CSSProperties, useEffect, useMemo, useRef } from 'react';
 import { hasRelayRtcCandidate } from '../lib/home-connection-projection';
 import { mobileTheme } from '../lib/mobile-ui';
 import type { Host, Session } from '../lib/types';
@@ -25,6 +25,8 @@ interface ConnectionsPageProps {
   onResumeSession?: (sessionId: string) => void;
   onOpenSavedConnection?: (host: Host) => void;
   onOpenSettings: () => void;
+  focusSettingsButtonNonce?: number;
+  onFocusSettingsButtonConsumed?: () => void;
 }
 
 const pageStyle: CSSProperties = {
@@ -173,7 +175,19 @@ export function ConnectionsPage({
   onResumeSession,
   onOpenSavedConnection,
   onOpenSettings,
+  focusSettingsButtonNonce = 0,
+  onFocusSettingsButtonConsumed,
 }: ConnectionsPageProps) {
+  const settingsEntryRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!focusSettingsButtonNonce) {
+      return;
+    }
+    settingsEntryRef.current?.focus();
+    onFocusSettingsButtonConsumed?.();
+  }, [focusSettingsButtonNonce, onFocusSettingsButtonConsumed]);
+
   const orderedActiveSessions = useMemo(() => [...activeSessions].sort((left, right) => {
     if (left.id === activeSessionId) return -1;
     if (right.id === activeSessionId) return 1;
@@ -245,6 +259,8 @@ export function ConnectionsPage({
           </div>
           <button
             type="button"
+            data-connections-settings-entry="true"
+            ref={settingsEntryRef}
             aria-label="设置和升级"
             title="设置和升级"
             onClick={onOpenSettings}

@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { STORAGE_KEYS } from '../connection/types';
+import { DEFAULT_BRIDGE_SETTINGS } from '../connection/bridge-settings';
 import { useBridgeSettingsStorage } from './use-bridge-settings-storage';
 
 describe('useBridgeSettingsStorage', () => {
@@ -123,6 +124,142 @@ describe('useBridgeSettingsStorage', () => {
 
     expect(localStorage.getItem(STORAGE_KEYS.TERMINAL_WIDTH_MODE_PREFERENCE)).toBe('mirror-fixed');
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.BRIDGE_SETTINGS) || '{}').terminalWidthMode).toBe('mirror-fixed');
+  });
+
+  it('returns an explicit failure and keeps the committed state when bridge storage fails', () => {
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('bridge storage failed');
+    });
+    let result: any;
+
+    function Harness() {
+      const { settings, setSettings } = useBridgeSettingsStorage();
+      return (
+        <>
+          <div data-testid="cache-lines">{settings.terminalCacheLines}</div>
+          <button
+            type="button"
+            onClick={() => {
+              result = setSettings((current) => ({
+                ...current,
+                terminalCacheLines: current.terminalCacheLines + 1,
+              }));
+            }}
+          >
+            save
+          </button>
+        </>
+      );
+    }
+
+    render(<Harness />);
+    fireEvent.click(screen.getByRole('button', { name: 'save' }));
+
+    expect(setItem).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ ok: false, persistedKeys: [] });
+    expect(screen.getByTestId('cache-lines').textContent).toBe(String(DEFAULT_BRIDGE_SETTINGS.terminalCacheLines));
+  });
+
+  it('reports partial persistence when the width preference key fails', () => {
+    const originalSetItem = Storage.prototype.setItem;
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (key, value) {
+      if (key === STORAGE_KEYS.TERMINAL_WIDTH_MODE_PREFERENCE) {
+        throw new Error('width preference failed');
+      }
+      return originalSetItem.call(this, key, value);
+    });
+    let result: any;
+
+    function Harness() {
+      const { settings, setSettings } = useBridgeSettingsStorage();
+      return (
+        <button
+          type="button"
+          onClick={() => {
+            result = setSettings({
+              ...settings,
+              terminalWidthMode: 'mirror-fixed',
+            });
+          }}
+        >
+          save
+        </button>
+      );
+    }
+
+    render(<Harness />);
+    fireEvent.click(screen.getByRole('button', { name: 'save' }));
+
+    expect(result).toMatchObject({
+      ok: false,
+      persistedKeys: [STORAGE_KEYS.BRIDGE_SETTINGS],
+    });
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.BRIDGE_SETTINGS) || '{}').terminalWidthMode).toBe('mirror-fixed');
+    expect(localStorage.getItem(STORAGE_KEYS.TERMINAL_WIDTH_MODE_PREFERENCE)).toBeNull();
+    expect(setItem).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not lose a partially persisted bridge update on the next retry', () => {
+    let failWidthPreference = true;
+    const originalSetItem = Storage.prototype.setItem;
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (key, value) {
+      if (key === STORAGE_KEYS.TERMINAL_WIDTH_MODE_PREFERENCE && failWidthPreference) {
+        failWidthPreference = false;
+        throw new Error('width preference failed');
+      }
+      return originalSetItem.call(this, key, value);
+    });
+    let setSettingsRef: ReturnType<typeof useBridgeSettingsStorage>['setSettings'] | undefined;
+    let firstResult: any;
+
+    function Harness() {
+      const { settings, setSettings } = useBridgeSettingsStorage();
+      setSettingsRef = setSettings;
+      return <div data-testid="settings">{JSON.stringify(settings)}</div>;
+    }
+
+    render(<Harness />);
+    act(() => {
+      firstResult = setSettingsRef?.((current) => ({
+        ...current,
+        terminalCacheLines: current.terminalCacheLines + 1,
+        terminalWidthMode: 'mirror-fixed',
+      }));
+    });
+    expect(firstResult).toMatchObject({
+      ok: false,
+      persistedKeys: [STORAGE_KEYS.BRIDGE_SETTINGS],
+    });
+
+    act(() => {
+      setSettingsRef?.((current) => ({
+        ...current,
+        terminalThemeId: 'classic-dark',
+      }));
+    });
+
+    const stored = JSON.parse(localStorage.getItem(STORAGE_KEYS.BRIDGE_SETTINGS) || '{}');
+    expect(stored.terminalCacheLines).toBe(DEFAULT_BRIDGE_SETTINGS.terminalCacheLines + 1);
+    expect(stored.terminalWidthMode).toBe('mirror-fixed');
+    expect(stored.terminalThemeId).toBe('classic-dark');
+  });
+
+  it('resolves consecutive functional updates from the committed value', () => {
+    let setSettingsRef: ReturnType<typeof useBridgeSettingsStorage>['setSettings'] | undefined;
+
+    function Harness() {
+      const { settings, setSettings } = useBridgeSettingsStorage();
+      setSettingsRef = setSettings;
+      return <div data-testid="cache-lines">{settings.terminalCacheLines}</div>;
+    }
+
+    render(<Harness />);
+    act(() => {
+      setSettingsRef?.((current) => ({ ...current, terminalCacheLines: current.terminalCacheLines + 1 }));
+      setSettingsRef?.((current) => ({ ...current, terminalCacheLines: current.terminalCacheLines + 1 }));
+    });
+
+    expect(screen.getByTestId('cache-lines').textContent).toBe(String(DEFAULT_BRIDGE_SETTINGS.terminalCacheLines + 2));
   });
 
   it('keeps the setter identity stable across unrelated renders', () => {

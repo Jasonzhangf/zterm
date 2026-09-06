@@ -38,6 +38,8 @@ import {
 } from '../lib/remote-window-video-quality';
 import type { RemoteWindowVideoPreference, TraversalRelayDeviceSnapshot } from '../lib/types';
 import { buildAppUpdateManifestCandidates, isTailscaleManifestCandidate } from '../lib/app-update-relay-manifest';
+import type { BridgeSettingsWriteResult } from '@zterm/shared';
+import type { AppUpdatePreferencesWriteResult } from '../lib/app-update-runtime';
 
 interface SettingsPageProps {
   settings: BridgeSettings;
@@ -51,9 +53,9 @@ interface SettingsPageProps {
   updateError: string | null;
   hasNewVersion: boolean;
   hasUpdateIgnorePolicy: boolean;
-  onSave: (settings: BridgeSettings) => void;
+  onSave: (settings: BridgeSettings) => BridgeSettingsWriteResult;
   onRelaySettingsChange?: (settings: BridgeSettings['traversalRelay']) => void;
-  onUpdatePreferencesChange: (next: AppUpdatePreferences) => void;
+  onUpdatePreferencesChange: (next: AppUpdatePreferences) => AppUpdatePreferencesWriteResult;
   onCheckForUpdate: (
     next: AppUpdatePreferences,
     manifestCandidates: AppUpdateManifestCandidate[],
@@ -161,7 +163,7 @@ export function SettingsPage({
   ));
   const livePreviewPatchRef = useRef<Partial<Pick<BridgeSettings, 'terminalThemeId' | 'terminalShellSkin'>> | null>(null);
   const updateDraftEditedRef = useRef(false);
-  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const settingsTheme = useMemo(() => resolveSettingsTheme(draft.terminalShellSkin), [draft.terminalShellSkin]);
   const saveResetTimerRef = useRef<number | null>(null);
   useEffect(() => {
@@ -226,8 +228,16 @@ export function SettingsPage({
 
   const handleSave = () => {
     setSaveState('saving');
-    onSave(draft);
-    onUpdatePreferencesChange(updateDraft);
+    const bridgeResult = onSave(draft);
+    if (!bridgeResult.ok) {
+      setSaveState('error');
+      return;
+    }
+    const updateResult = onUpdatePreferencesChange(updateDraft);
+    if (!updateResult.ok) {
+      setSaveState('error');
+      return;
+    }
     setSaveState('saved');
   };
 
@@ -295,7 +305,7 @@ export function SettingsPage({
           aria-live="polite"
           style={{ fontSize: '13px', minWidth: 0, marginRight: '6px' }}
         >
-          {saveState === 'saved' ? '已保存' : ''}
+          {saveState === 'saved' ? '已保存' : saveState === 'error' ? '保存失败，请重试' : ''}
         </span>
         <button
           type="button"
@@ -316,7 +326,7 @@ export function SettingsPage({
             opacity: saveState === 'saving' ? 0.72 : 1,
           }}
         >
-          {saveState === 'saved' ? '已保存' : '保存'}
+          {saveState === 'saved' ? '已保存' : saveState === 'error' ? '重试保存' : '保存'}
         </button>
       </div>
 
@@ -367,8 +377,11 @@ export function SettingsPage({
         <div style={settingsSectionStyle()}>
           <SettingsSectionTitle>终端缓存</SettingsSectionTitle>
           <div>
-            <div style={{ marginBottom: '8px', fontSize: '14px', fontWeight: 700 }}>缓存行数</div>
+            <label htmlFor="settings-terminal-cache-lines" style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: 700 }}>
+              缓存行数
+            </label>
             <input
+              id="settings-terminal-cache-lines"
               type="number"
               min={200}
               max={DEFAULT_TERMINAL_CACHE_LINES}

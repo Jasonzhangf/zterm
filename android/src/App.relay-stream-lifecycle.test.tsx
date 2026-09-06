@@ -59,6 +59,26 @@ const collectClientDebugSnapshotMock = vi.fn(() => ({}));
 const runtimeDebugMock = vi.fn();
 const useSessionOpenActionsMock = vi.fn();
 
+function createBridgeSettingsWriteSuccess() {
+  return {
+    ok: true as const,
+    settings: {} as any,
+    persistedKeys: ['zterm:bridge-settings'],
+  };
+}
+
+function createBridgeSettingsSetter() {
+  return vi.fn((_next: unknown) => createBridgeSettingsWriteSuccess());
+}
+
+function readBridgeSettingsUpdater(setBridgeSettings: ReturnType<typeof createBridgeSettingsSetter>) {
+  const call = setBridgeSettings.mock.calls.at(-1)?.[0];
+  if (typeof call !== 'function') {
+    throw new Error('Expected a bridge settings updater function');
+  }
+  return call;
+}
+
 vi.mock('./lib/traversal-relay-client', () => ({
   connectTraversalRelayDevicesStream: (...args: any[]) => (connectRelayDevicesStreamMock as any)(...args),
   readTraversalRelayAccountState: (...args: any[]) => (readRelayAccountStateMock as any)(...args),
@@ -388,7 +408,7 @@ describe('App relay device stream reconnect lifecycle', () => {
   });
 
   it('opens a relay device stream when relay settings are enabled', { timeout: 10000 }, async () => {
-    render(<AppContent bridgeSettings={makeRelayBridgeSettings(true)} setBridgeSettings={vi.fn()} />);
+    render(<AppContent bridgeSettings={makeRelayBridgeSettings(true)} setBridgeSettings={createBridgeSettingsSetter()} />);
     await waitFor(() => expect(connectRelayDevicesStreamMock).toHaveBeenCalled(), { timeout: 10000 });
     expect(traversalRelayRefreshMeMock.mock.invocationCallOrder[0]).toBeLessThan(
       connectRelayDevicesStreamMock.mock.invocationCallOrder[0],
@@ -399,11 +419,11 @@ describe('App relay device stream reconnect lifecycle', () => {
 
   it('does not restart the relay device stream when only the settings setter identity changes', { timeout: 10000 }, async () => {
     const bridgeSettings = makeRelayBridgeSettings(true);
-    const view = render(<AppContent bridgeSettings={bridgeSettings} setBridgeSettings={vi.fn()} />);
+    const view = render(<AppContent bridgeSettings={bridgeSettings} setBridgeSettings={createBridgeSettingsSetter()} />);
     await waitFor(() => expect(connectRelayDevicesStreamMock).toHaveBeenCalled(), { timeout: 10000 });
     expect(MockRelayWebSocket.instances).toHaveLength(1);
 
-    view.rerender(<AppContent bridgeSettings={bridgeSettings} setBridgeSettings={vi.fn()} />);
+    view.rerender(<AppContent bridgeSettings={bridgeSettings} setBridgeSettings={createBridgeSettingsSetter()} />);
     await new Promise((resolve) => setTimeout(resolve, 50));
 
     expect(MockRelayWebSocket.instances).toHaveLength(1);
@@ -448,21 +468,21 @@ describe('App relay device stream reconnect lifecycle', () => {
       account: freshAccount,
       relaySettings: freshRelaySettings,
     });
-    const setBridgeSettings = vi.fn();
+    const setBridgeSettings = createBridgeSettingsSetter();
 
     render(<AppContent bridgeSettings={{ ...makeRelayBridgeSettings(true), traversalRelay: staleRelaySettings }} setBridgeSettings={setBridgeSettings} />);
 
     await waitFor(() => expect(connectRelayDevicesStreamMock).toHaveBeenCalled(), { timeout: 10000 });
     expect(connectRelayDevicesStreamMock.mock.calls[0]?.[0].account.relaySettings.turnUrl).toBe('turn:relay.codewhisper.cc:3479?transport=udp');
     expect(setBridgeSettings).toHaveBeenCalledWith(expect.any(Function));
-    const updater = setBridgeSettings.mock.calls[0]?.[0];
+    const updater = readBridgeSettingsUpdater(setBridgeSettings);
     expect(updater({ ...makeRelayBridgeSettings(true), traversalRelay: staleRelaySettings }).traversalRelay.turnUrl).toBe(
       'turn:relay.codewhisper.cc:3479?transport=udp',
     );
   });
 
   it('keeps route-bearing directory devices when legacy devices snapshots omit endpoints and sessions', { timeout: 10000 }, async () => {
-    render(<AppContent bridgeSettings={makeRelayBridgeSettings(true)} setBridgeSettings={vi.fn()} />);
+    render(<AppContent bridgeSettings={makeRelayBridgeSettings(true)} setBridgeSettings={createBridgeSettingsSetter()} />);
     await waitFor(() => expect(connectRelayDevicesStreamMock).toHaveBeenCalled(), { timeout: 10000 });
     const options = connectRelayDevicesStreamMock.mock.calls[0]?.[0];
 
@@ -564,7 +584,7 @@ describe('App relay device stream reconnect lifecycle', () => {
       account: migratedAccount,
       relaySettings: migratedRelaySettings,
     });
-    const setBridgeSettings = vi.fn();
+    const setBridgeSettings = createBridgeSettingsSetter();
     const staleBridgeSettings = {
       ...makeRelayBridgeSettings(true),
       traversalRelay: {
@@ -576,14 +596,14 @@ describe('App relay device stream reconnect lifecycle', () => {
     render(<AppContent bridgeSettings={staleBridgeSettings} setBridgeSettings={setBridgeSettings} />);
 
     await waitFor(() => expect(setBridgeSettings).toHaveBeenCalledWith(expect.any(Function)), { timeout: 10000 });
-    const updater = setBridgeSettings.mock.calls[0]?.[0];
+    const updater = readBridgeSettingsUpdater(setBridgeSettings);
     expect(updater(staleBridgeSettings).traversalRelay.deviceId).toBe('zterm-android-install-1');
   });
 
   it('does not open a relay device stream when account refresh fails', { timeout: 10000 }, async () => {
     traversalRelayRefreshMeMock.mockRejectedValueOnce(new Error('relay control unavailable'));
 
-    render(<AppContent bridgeSettings={makeRelayBridgeSettings(true)} setBridgeSettings={vi.fn()} />);
+    render(<AppContent bridgeSettings={makeRelayBridgeSettings(true)} setBridgeSettings={createBridgeSettingsSetter()} />);
 
     await waitFor(() => expect(runtimeDebugMock).toHaveBeenCalledWith(
       'relay.device-stream.account-refresh.error',
@@ -593,7 +613,7 @@ describe('App relay device stream reconnect lifecycle', () => {
   });
 
   it('reconnects with backoff after a relay device stream closes', { timeout: 10000 }, async () => {
-    render(<AppContent bridgeSettings={makeRelayBridgeSettings(true)} setBridgeSettings={vi.fn()} />);
+    render(<AppContent bridgeSettings={makeRelayBridgeSettings(true)} setBridgeSettings={createBridgeSettingsSetter()} />);
     await waitFor(() => expect(connectRelayDevicesStreamMock).toHaveBeenCalled(), { timeout: 10000 });
     const firstSocket = MockRelayWebSocket.instances[0];
     expect(firstSocket).toBeDefined();
@@ -615,7 +635,7 @@ describe('App relay device stream reconnect lifecycle', () => {
   });
 
   it('does not reconnect after the component unmounts', { timeout: 10000 }, async () => {
-    const view = render(<AppContent bridgeSettings={makeRelayBridgeSettings(true)} setBridgeSettings={vi.fn()} />);
+    const view = render(<AppContent bridgeSettings={makeRelayBridgeSettings(true)} setBridgeSettings={createBridgeSettingsSetter()} />);
     await waitFor(() => expect(connectRelayDevicesStreamMock).toHaveBeenCalled(), { timeout: 10000 });
     MockRelayWebSocket.instances[0].triggerOpen();
     view.unmount();
