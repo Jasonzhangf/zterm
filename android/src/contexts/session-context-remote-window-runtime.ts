@@ -87,7 +87,7 @@ interface RemoteWindowStreamMessageRuntimeLike extends RemoteWindowCatalogMessag
       payload: Omit<RemoteWindowInputEventPayload, 'requestId'>;
       sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
     },
-  ) => void;
+  ) => string;
   sendBrowserUserAgent?: (
     sessionId: string,
     options: {
@@ -104,7 +104,7 @@ interface RemoteWindowStreamMessageRuntimeLike extends RemoteWindowCatalogMessag
       payload: Omit<RemoteWindowInputEventPayload, 'requestId'>;
       sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
     },
-  ) => void;
+  ) => string;
 }
 
 interface RemoteWindowReceiverRuntimeLike {
@@ -448,7 +448,7 @@ export function sendRemoteWindowInputRuntime(options: {
   daemonConnection: ClientDaemonConnection;
   remoteWindowMessageRuntime: RemoteWindowStreamMessageRuntimeLike;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
-}) {
+}): string {
   const targetSessionId = options.sessionId.trim();
   if (!targetSessionId) {
     throw new Error('Remote window input requires sessionId');
@@ -458,7 +458,7 @@ export function sendRemoteWindowInputRuntime(options: {
     sessions: options.sessions,
     daemonConnection: options.daemonConnection,
   });
-  options.remoteWindowMessageRuntime.sendInputEvent(targetSessionId, {
+  return options.remoteWindowMessageRuntime.sendInputEvent(targetSessionId, {
     ws,
     payload: options.payload,
     sendSocketPayload: options.sendSocketPayload,
@@ -499,7 +499,7 @@ export function resizeRemoteWindowTargetRuntime(options: {
   daemonConnection: ClientDaemonConnection;
   remoteWindowMessageRuntime: RemoteWindowStreamMessageRuntimeLike;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
-}) {
+}): string {
   const targetSessionId = options.sessionId.trim();
   if (!targetSessionId || options.payload.event.kind !== 'window-resize') {
     throw new Error('Remote window target resize requires sessionId and window-resize event');
@@ -509,9 +509,11 @@ export function resizeRemoteWindowTargetRuntime(options: {
     sessions: options.sessions,
     daemonConnection: options.daemonConnection,
   });
-  const sendWindowResizeEvent = options.remoteWindowMessageRuntime.sendWindowResizeEvent
-    || options.remoteWindowMessageRuntime.sendInputEvent;
-  sendWindowResizeEvent(targetSessionId, {
+  const sendWindowResizeEvent = options.remoteWindowMessageRuntime.sendWindowResizeEvent;
+  if (!sendWindowResizeEvent) {
+    throw new Error('Remote window resize dispatcher is unavailable');
+  }
+  return sendWindowResizeEvent(targetSessionId, {
     ws,
     payload: options.payload,
     sendSocketPayload: options.sendSocketPayload,

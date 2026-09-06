@@ -379,7 +379,7 @@ export function SessionProvider({
     stopRemoteWindowStream: (sessionId: string, streamId: string) => (
       contextRuntimeRef.current.stopRemoteWindowStream(sessionId, streamId)
     ),
-    sendRemoteWindowInput: (...args: Parameters<typeof sendRemoteWindowInput>) => (
+    sendRemoteWindowInput: (...args: Parameters<typeof sendRemoteWindowInput>): string => (
       contextRuntimeRef.current.sendRemoteWindowInput(...args)
     ),
     resizeRemoteWindowTarget: (...args: Parameters<typeof resizeRemoteWindowTarget>) => (

@@ -608,23 +608,35 @@ export function createTerminalMessageRuntime(
           });
         });
         break;
-      case 'remote-window-stream-update-focus':
-        void deps.remoteWindowStreamRuntime.updateFocus(message.payload).then((payload) => {
-          sendRemoteWindowMessage(connection, 'phase' in payload
-            ? { type: 'remote-window-stream-focus-result', payload }
-            : { type: 'remote-window-error', payload });
-        }).catch((error: unknown) => {
+      case 'remote-window-stream-update-focus': {
+        const sendFocusError = (code: string, detail: string) => {
           sendRemoteWindowMessage(connection, {
-            type: 'remote-window-error',
+            type: 'remote-window-stream-focus-result',
             payload: {
               requestId: message.payload.requestId || '',
               streamId: message.payload.streamId || '',
-              code: 'remote_window_stream_update_focus_failed',
-              message: error instanceof Error ? error.message : 'remote window stream update focus failed',
+              revision: message.payload.revision,
+              targetId: message.payload.target?.streamTargetId || '',
+              phase: 'error',
+              code,
+              message: detail,
             },
           });
+        };
+        void deps.remoteWindowStreamRuntime.updateFocus(message.payload).then((payload) => {
+          if ('phase' in payload) {
+            sendRemoteWindowMessage(connection, { type: 'remote-window-stream-focus-result', payload });
+          } else {
+            sendFocusError(payload.code, payload.message);
+          }
+        }).catch((error: unknown) => {
+          sendFocusError(
+            'remote_window_stream_update_focus_failed',
+            error instanceof Error ? error.message : 'remote window stream update focus failed',
+          );
         });
         break;
+      }
       case 'remote-window-stream-stop-request':
         {
           const stoppedStreamId = message.payload.streamId || '';

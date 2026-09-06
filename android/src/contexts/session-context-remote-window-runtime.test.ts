@@ -375,6 +375,9 @@ describe('session context remote window runtime', () => {
       return {
         streamId: 'stream-1',
         mediaStream: { id: 'media-stream-1' } as MediaStream,
+        bindings: [],
+        commitDecodedFrame: () => false,
+        replaceLaneBinding: async () => false,
         started,
       };
     });
@@ -472,6 +475,9 @@ describe('session context remote window runtime', () => {
         streamId: receiverOptions.streamId,
         purpose: receiverOptions.purpose,
         mediaStream: { id: `media-${receiverOptions.streamId}` } as MediaStream,
+        bindings: [],
+        commitDecodedFrame: () => false,
+        replaceLaneBinding: async () => false,
         started,
       };
     });
@@ -527,8 +533,8 @@ describe('session context remote window runtime', () => {
       mediaPlan: options.mediaPlan,
       bitrate: options.videoProfile.maxBitrateBps,
     }))).toEqual([
-      { streamId: 'canvas-stream', purpose: 'preview', mediaPlan: 'single-focus' as const, bitrate: 4_000_000 },
-      { streamId: 'focus-stream', purpose: 'focus', mediaPlan: 'single-focus' as const, bitrate: 16_000_000 },
+      { streamId: 'canvas-stream', purpose: 'preview', mediaPlan: 'single-focus' as const, bitrate: 2_000_000 },
+      { streamId: 'focus-stream', purpose: 'focus', mediaPlan: 'single-focus' as const, bitrate: 8_000_000 },
     ]);
   });
 
@@ -596,6 +602,9 @@ describe('session context remote window runtime', () => {
       return {
         streamId: 'stream-1',
         mediaStream: { id: 'media-stream-1' } as MediaStream,
+        bindings: [],
+        commitDecodedFrame: () => false,
+        replaceLaneBinding: async () => false,
         started,
       };
     });

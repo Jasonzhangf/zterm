@@ -295,6 +295,12 @@ describe('remote window message runtime', () => {
       mediaPlan: 'single-focus' as const,
       mediaPlanVersion: 2 as const,
       offer: { type: 'offer', sdp: 'daemon-offer-sdp' },
+      mediaBindings: [{
+        role: 'focus' as const,
+        epoch: 0,
+        mediaStreamId: 'media-stream-1',
+        trackId: 'focus-track-1',
+      }],
       capture: {
         source: 'ScreenCaptureKit',
         frameWidth: 640,

@@ -1,4 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
+import type {
+  DecodedFrameCommit,
+  RemoteWindowPlaybackBinding,
+} from '../../lib/remote-window-receiver-runtime';
 
 export interface RemoteWindowVideoDebugSnapshot {
   attached: boolean;
@@ -41,6 +45,9 @@ export interface UseRemoteWindowPlaybackOptions {
   videoElementRef: RefObject<HTMLVideoElement | null>;
   overviewVideoElementRef: RefObject<HTMLVideoElement | null>;
   onVideoDebug?: (snapshot: RemoteWindowVideoDebugSnapshot) => void;
+  onDecodedFrameSize?: (size: { width: number; height: number }) => void;
+  playbackBinding?: RemoteWindowPlaybackBinding | null;
+  commitDecodedFrame?: (commit: DecodedFrameCommit) => boolean;
 }
 
 export function useRemoteWindowPlayback({
@@ -51,14 +58,23 @@ export function useRemoteWindowPlayback({
   videoElementRef,
   overviewVideoElementRef,
   onVideoDebug,
+  onDecodedFrameSize,
+  playbackBinding,
+  commitDecodedFrame,
 }: UseRemoteWindowPlaybackOptions) {
   const [videoHasPlayed, setVideoHasPlayed] = useState(false);
   const videoHasPlayedRef = useRef(false);
   const [liveDiagnostics, setLiveDiagnostics] = useState<RemoteWindowLiveDiagnostics | null>(null);
   const [videoDebugSnapshot, setVideoDebugSnapshot] = useState<RemoteWindowVideoDebugSnapshot | null>(null);
   const frameCallbackRef = useRef<{ video: HTMLVideoElement; callbackId: number } | null>(null);
+  const decodedFrameIdRef = useRef(0);
   const playbackEpochRef = useRef(0);
-  const playbackBindingRef = useRef<{ epoch: number; stream: MediaStream } | null>(null);
+  const playbackBindingRef = useRef<{
+    epoch: number;
+    stream: MediaStream;
+    track: MediaStreamTrack | null;
+    trackId: string | null;
+  } | null>(null);
   const playbackStatsRef = useRef({
     playAttempts: 0,
     playAccepted: 0,
@@ -103,30 +119,50 @@ export function useRemoteWindowPlayback({
     onVideoDebug?.(snapshot);
   }, [onVideoDebug, receiverMediaStream, videoElementRef]);
 
-  const reveal = useCallback((video: HTMLVideoElement, stream: MediaStream, epoch: number, lastEvent = 'playing') => {
+  const isCurrentPlayback = useCallback((
+    video: HTMLVideoElement,
+    stream: MediaStream,
+    track: MediaStreamTrack | null,
+    epoch: number,
+  ) => {
     const binding = playbackBindingRef.current;
-    if (
-      playbackEpochRef.current !== epoch
-      || binding?.epoch !== epoch
-      || binding.stream !== stream
-      || videoElementRef.current !== video
-      || video.srcObject !== stream
-    ) {
-      return;
-    }
+    return playbackEpochRef.current === epoch
+      && binding?.epoch === epoch
+      && binding.stream === stream
+      && binding.track === track
+      && (!playbackBinding
+        || (playbackBinding.mediaStream === stream
+          && playbackBinding.trackId === (track?.id || '')))
+      && videoElementRef.current === video
+      && video.srcObject === stream;
+  }, [playbackBinding, videoElementRef]);
+
+  const reveal = useCallback((
+    video: HTMLVideoElement,
+    stream: MediaStream,
+    track: MediaStreamTrack | null,
+    epoch: number,
+    lastEvent = 'playing',
+  ) => {
+    if (!isCurrentPlayback(video, stream, track, epoch)) return;
     playbackStatsRef.current.playingAt ??= Date.now();
     updateVisibility(true);
     publishDebugSnapshot(lastEvent, { visible: true });
-  }, [publishDebugSnapshot, updateVisibility, videoElementRef]);
+  }, [isCurrentPlayback, publishDebugSnapshot, updateVisibility]);
 
-  const scheduleFrameReveal = useCallback((video: HTMLVideoElement, stream: MediaStream, epoch: number) => {
+  const scheduleFrameReveal = useCallback((
+    video: HTMLVideoElement,
+    stream: MediaStream,
+    track: MediaStreamTrack | null,
+    epoch: number,
+  ) => {
     const requestFrame = (video as HTMLVideoElement & {
       requestVideoFrameCallback?: (callback: () => void) => number;
     }).requestVideoFrameCallback;
     if (typeof requestFrame !== 'function') {
       return false;
     }
-    requestFrame.call(video, () => reveal(video, stream, epoch, 'frame'));
+    requestFrame.call(video, () => reveal(video, stream, track, epoch, 'frame'));
     return true;
   }, [reveal]);
 
@@ -138,7 +174,11 @@ export function useRemoteWindowPlayback({
     }
   }, []);
 
-  const requestPlayback = useCallback((stream: MediaStream, epoch: number) => {
+  const requestPlayback = useCallback((
+    stream: MediaStream,
+    epoch: number,
+    boundTrack: MediaStreamTrack | null = null,
+  ) => {
     const video = videoElementRef.current;
     if (!video) {
       publishDebugSnapshot('play-missing-video');
@@ -152,23 +192,42 @@ export function useRemoteWindowPlayback({
     if (video.srcObject !== stream) {
       video.srcObject = stream;
     }
+    const track = boundTrack ?? (typeof stream.getVideoTracks === 'function'
+      ? stream.getVideoTracks()[0] || null
+      : null);
     const requestFrame = (video as HTMLVideoElement & {
       requestVideoFrameCallback?: (callback: (now: number, metadata: unknown) => void) => number;
-    }).requestVideoFrameCallback;
+      }).requestVideoFrameCallback;
     if (typeof requestFrame === 'function' && !frameCallbackRef.current) {
+      let lastFrameWidth = 0;
+      let lastFrameHeight = 0;
       const onVideoFrame = () => {
-        const binding = playbackBindingRef.current;
-        if (
-          playbackEpochRef.current !== epoch
-          || binding?.epoch !== epoch
-          || binding.stream !== stream
-          || videoElementRef.current !== video
-          || video.srcObject !== stream
-        ) {
-          return;
+        if (!isCurrentPlayback(video, stream, track, epoch)) return;
+        const width = video.videoWidth;
+        const height = video.videoHeight;
+        if (width > 0 && height > 0 && (width !== lastFrameWidth || height !== lastFrameHeight)) {
+          lastFrameWidth = width;
+          lastFrameHeight = height;
+          onDecodedFrameSize?.({ width, height });
+          if (playbackBinding && commitDecodedFrame) {
+            const commit: DecodedFrameCommit = {
+              streamId: playbackBinding.streamId,
+              mediaPlanVersion: playbackBinding.mediaPlanVersion,
+              lane: playbackBinding.lane,
+              mediaEpoch: playbackBinding.mediaEpoch,
+              trackId: playbackBinding.trackId,
+              frameId: ++decodedFrameIdRef.current,
+              width,
+              height,
+            };
+            commitDecodedFrame(commit);
+          }
         }
+        if (!isCurrentPlayback(video, stream, track, epoch)) return;
         playbackStatsRef.current.framesReceived += 1;
         playbackStatsRef.current.decodedFirstFrameAt ??= Date.now();
+        if (!videoHasPlayedRef.current) reveal(video, stream, track, epoch, 'frame');
+        if (!isCurrentPlayback(video, stream, track, epoch)) return;
         const received = playbackStatsRef.current.framesReceived;
         if (received === 1 || received % 60 === 0) {
           publishDebugSnapshot('frame-callback');
@@ -190,15 +249,19 @@ export function useRemoteWindowPlayback({
         callbackId: requestFrame.call(video, onVideoFrame),
       };
     }
-    scheduleFrameReveal(video, stream, epoch);
+    scheduleFrameReveal(video, stream, track, epoch);
     playbackStatsRef.current.playAttempts += 1;
     publishDebugSnapshot('play-request');
     const playResult = typeof video.play === 'function' ? video.play() : null;
     if (playResult && typeof playResult.then === 'function') {
       playResult.then(() => {
+        if (!isCurrentPlayback(video, stream, track, epoch)) return;
         playbackStatsRef.current.playAccepted += 1;
-        reveal(video, stream, epoch, 'play-resolved');
+        playbackStatsRef.current.playingAt ??= Date.now();
+        reveal(video, stream, track, epoch, 'play-resolved');
+        publishDebugSnapshot('play-resolved');
       }).catch((error) => {
+        if (!isCurrentPlayback(video, stream, track, epoch)) return;
         playbackStatsRef.current.playRejected += 1;
         publishDebugSnapshot('play-rejected', {
           error: error instanceof Error ? error.message : String(error || 'play rejected'),
@@ -207,7 +270,16 @@ export function useRemoteWindowPlayback({
       return;
     }
     publishDebugSnapshot('play-sync-pending');
-  }, [publishDebugSnapshot, reveal, scheduleFrameReveal, videoElementRef]);
+  }, [
+    isCurrentPlayback,
+    onDecodedFrameSize,
+    commitDecodedFrame,
+    playbackBinding,
+    publishDebugSnapshot,
+    scheduleFrameReveal,
+    reveal,
+    videoElementRef,
+  ]);
 
   const requestBoundPlayback = useCallback(() => {
     const binding = playbackBindingRef.current;
@@ -215,12 +287,17 @@ export function useRemoteWindowPlayback({
       publishDebugSnapshot('play-missing-binding');
       return;
     }
-    requestPlayback(binding.stream, binding.epoch);
+    requestPlayback(binding.stream, binding.epoch, binding.track);
   }, [publishDebugSnapshot, requestPlayback]);
 
   const restoreRetainedPlayback = useCallback((visible: boolean) => {
     const epoch = playbackEpochRef.current;
-    playbackBindingRef.current = receiverMediaStream ? { epoch, stream: receiverMediaStream } : null;
+    playbackBindingRef.current = receiverMediaStream ? {
+      epoch,
+      stream: receiverMediaStream,
+      track: receiverMediaStream.getVideoTracks?.()[0] || null,
+      trackId: receiverMediaStream.getVideoTracks?.()[0]?.id || null,
+    } : null;
     updateVisibility(visible);
     if (!visible && receiverMediaStream) {
       requestPlayback(receiverMediaStream, epoch);
@@ -250,12 +327,19 @@ export function useRemoteWindowPlayback({
       decodedFirstFrameAt: null,
       playingAt: null,
     };
+    decodedFrameIdRef.current = 0;
     if (!receiverMediaStream) {
       playbackBindingRef.current = null;
       return;
     }
-    playbackBindingRef.current = { epoch, stream: receiverMediaStream };
-    requestPlayback(receiverMediaStream, epoch);
+    const track = receiverMediaStream.getVideoTracks?.()[0] || null;
+    playbackBindingRef.current = {
+      epoch,
+      stream: receiverMediaStream,
+      track,
+      trackId: track?.id || null,
+    };
+    requestPlayback(receiverMediaStream, epoch, track);
     const pollTimer = window.setInterval(() => {
       if (videoElementRef.current?.srcObject === receiverMediaStream) {
         publishDebugSnapshot('play-poll');
@@ -263,6 +347,10 @@ export function useRemoteWindowPlayback({
     }, 350);
     const stopTimer = window.setTimeout(() => window.clearInterval(pollTimer), 5000);
     return () => {
+      if (playbackEpochRef.current === epoch) {
+        playbackEpochRef.current += 1;
+        playbackBindingRef.current = null;
+      }
       cancelPlaybackFrameCallback();
       window.clearInterval(pollTimer);
       window.clearTimeout(stopTimer);

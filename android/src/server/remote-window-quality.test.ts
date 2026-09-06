@@ -11,6 +11,7 @@ function makeCapture(
   updateVideoProfile = vi.fn(async () => undefined),
 ): RemoteWindowCaptureFrameSource {
   return {
+    captureEpoch: 0,
     width: 1,
     height: 1,
     frameRate: profile.maxFrameRateFps,

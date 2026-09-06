@@ -7,7 +7,11 @@ import type {
   RemoteWindowStreamAnswerV2Payload,
   RemoteWindowStreamTargetManifest,
 } from './types';
-import { getRemoteWindowMediaPlanContract, getRemoteWindowMediaPlanV2Contract } from '@zterm/shared/protocol';
+import {
+  getRemoteWindowMediaPlanContract,
+  getRemoteWindowMediaPlanV2Contract,
+  type RemoteWindowStreamMediaBinding,
+} from '@zterm/shared/protocol';
 import type { RemoteWindowVideoStatsSample } from './remote-window-video-quality';
 
 export interface RemoteWindowReceiverStartResult {
@@ -15,9 +19,36 @@ export interface RemoteWindowReceiverStartResult {
   purpose?: RemoteWindowStreamPurpose;
   mediaStream: MediaStream;
   overviewMediaStream?: MediaStream;
+  bindings: readonly RemoteWindowPlaybackBinding[];
+  commitDecodedFrame: (commit: DecodedFrameCommit) => boolean;
+  replaceLaneBinding: (
+    binding: RemoteWindowStreamMediaBinding,
+    offer: RemoteWindowStreamRtcDescription,
+    sendAnswer: (answer: RemoteWindowStreamAnswerV2Payload) => void | Promise<void>,
+  ) => Promise<boolean>;
   started: RemoteWindowStreamStartedPayload | RemoteWindowStreamStartedOfferV2Payload;
   startupTelemetry?: RemoteWindowReceiverStartupTelemetry;
   collectStats?: () => Promise<RemoteWindowVideoStatsSample | null>;
+}
+
+export interface RemoteWindowPlaybackBinding {
+  streamId: string;
+  mediaPlanVersion: number;
+  lane: 'focus' | 'overview';
+  mediaEpoch: number;
+  mediaStream: MediaStream;
+  trackId: string;
+}
+
+export interface DecodedFrameCommit {
+  streamId: string;
+  mediaPlanVersion: number;
+  lane: 'focus' | 'overview';
+  mediaEpoch: number;
+  trackId: string;
+  frameId: number;
+  width: number;
+  height: number;
 }
 
 export interface RemoteWindowReceiverStartupTelemetry {
@@ -40,6 +71,12 @@ interface ActiveRemoteWindowReceiverStream {
   trackAttached: boolean;
   overviewTrackAttached: boolean;
   requiredLaneRoles: readonly ('focus' | 'overview')[];
+  protocolVersion: 1 | 2;
+  mediaBindings: readonly RemoteWindowStreamMediaBinding[];
+  playbackBindings: Map<'focus' | 'overview', RemoteWindowPlaybackBinding>;
+  mediaTracks: Map<'focus' | 'overview', MediaStreamTrack>;
+  retiredMediaTracks: Set<MediaStreamTrack>;
+  committedFrameIds: Map<'focus' | 'overview', number>;
   remoteDescriptionApplied: boolean;
   pendingIceCandidates: RTCIceCandidateInit[];
   remoteStartDispatched: boolean;
@@ -117,6 +154,7 @@ export function createRemoteWindowReceiverRuntime(input?: {
   setTimeoutFn?: typeof globalThis.setTimeout;
   clearTimeoutFn?: typeof globalThis.clearTimeout;
   nowMs?: () => number;
+  onDecodedFrameCommit?: (commit: DecodedFrameCommit) => void;
 }) {
   const activeStreams = new Map<string, ActiveRemoteWindowReceiverStream>();
   const trackTimeoutMs = Math.max(1, Math.floor(input?.trackTimeoutMs ?? REMOTE_WINDOW_RECEIVER_TRACK_TIMEOUT_MS));
@@ -149,7 +187,11 @@ export function createRemoteWindowReceiverRuntime(input?: {
     entry.peerConnection.onicecandidate = null;
     entry.peerConnection.ontrack = null;
     entry.peerConnection.onconnectionstatechange = null;
+    entry.mediaTracks.clear();
     for (const track of entry.mediaStream.getTracks()) {
+      if (entry.retiredMediaTracks.has(track)) {
+        continue;
+      }
       try {
         track.stop();
       } catch {
@@ -158,6 +200,9 @@ export function createRemoteWindowReceiverRuntime(input?: {
     }
     if (entry.overviewMediaStream) {
       for (const track of entry.overviewMediaStream.getTracks()) {
+        if (entry.retiredMediaTracks.has(track)) {
+          continue;
+        }
         try {
           track.stop();
         } catch {
@@ -165,6 +210,7 @@ export function createRemoteWindowReceiverRuntime(input?: {
         }
       }
     }
+    entry.retiredMediaTracks.clear();
     entry.peerConnection.close();
     return true;
   };
@@ -224,7 +270,34 @@ export function createRemoteWindowReceiverRuntime(input?: {
       return;
     }
     const eventStream = Array.isArray(event.streams) ? event.streams[0] : undefined;
-    const isOverview = Boolean(eventStream && eventStream.id === 'overview');
+    const binding = entry.mediaBindings.find((item) => (
+      item.trackId === event.track.id && item.mediaStreamId === eventStream?.id
+    ));
+    if (entry.protocolVersion === 2 && !binding) {
+      let message = 'Remote window receiver received undeclared media track';
+      try {
+        event.track.stop();
+      } catch (error) {
+        message += `; track cleanup failed: ${error instanceof Error ? error.message : String(error)}`;
+      }
+      cleanupEntry(entry, message);
+      return;
+    }
+    // V1 remains an explicit legacy adapter; product V2 never infers role.
+    const isOverview = entry.protocolVersion === 2
+      ? binding!.role === 'overview'
+      : Boolean(eventStream && eventStream.id === 'overview');
+    if ((isOverview ? entry.overviewTrackAttached : entry.trackAttached)) {
+      cleanupEntry(entry, `Remote window receiver received duplicate ${isOverview ? 'overview' : 'focus'} track`);
+      return;
+    }
+    const mediaStream = eventStream
+      ?? (isOverview ? entry.overviewMediaStream : entry.mediaStream)
+      ?? (isOverview ? entry.mediaStream : entry.overviewMediaStream);
+    if (!mediaStream) {
+      cleanupEntry(entry, `Remote window receiver received ${isOverview ? 'overview' : 'focus'} track without media stream`);
+      return;
+    }
     if (isOverview) {
       if (eventStream) {
         entry.overviewMediaStream = eventStream;
@@ -245,7 +318,24 @@ export function createRemoteWindowReceiverRuntime(input?: {
       entry.trackAttached = true;
       entry.focusTrackAttachedAt ??= Date.now();
     }
-    const attachedRole = isOverview ? 'overview' : 'focus';
+    const lane = isOverview ? 'overview' : 'focus';
+    const mediaPlanVersion = entry.protocolVersion;
+    const declaredBinding = binding ?? {
+      role: lane,
+      epoch: 0,
+      mediaStreamId: mediaStream.id,
+      trackId: event.track.id,
+    };
+    entry.playbackBindings.set(lane, {
+      streamId: entry.streamId,
+      mediaPlanVersion,
+      lane,
+      mediaEpoch: declaredBinding.epoch,
+      mediaStream,
+      trackId: event.track.id,
+    });
+    entry.mediaTracks.set(lane, event.track);
+    const attachedRole = lane;
     const timeoutId = entry.trackTimeoutIds.get(attachedRole);
     if (timeoutId !== undefined) {
       clearTimeoutFn(timeoutId);
@@ -306,6 +396,12 @@ export function createRemoteWindowReceiverRuntime(input?: {
         trackAttached: false,
         overviewTrackAttached: false,
         requiredLaneRoles: mediaPlanContract.lanes.map((lane) => lane.role),
+        protocolVersion: options.protocolVersion ?? 1,
+        mediaBindings: [],
+        playbackBindings: new Map(),
+        mediaTracks: new Map(),
+        retiredMediaTracks: new Set(),
+        committedFrameIds: new Map(),
         remoteDescriptionApplied: false,
         pendingIceCandidates: [],
         remoteStartDispatched: false,
@@ -376,7 +472,26 @@ export function createRemoteWindowReceiverRuntime(input?: {
           throw new Error(`Remote window media plan version mismatch: expected ${mediaPlanContract.version}, got ${String(started.mediaPlanVersion)}`);
         }
         if (options.protocolVersion === 2) {
-          const offer = normalizeRtcDescription((started as unknown as RemoteWindowStreamStartedOfferV2Payload).offer, 'offer');
+          if (!('offer' in started) || !Array.isArray(started.mediaBindings)
+            || started.mediaBindings.length !== entry.requiredLaneRoles.length) {
+            throw new Error('Remote window media bindings do not cover the required lanes');
+          }
+          const roles = new Set<string>();
+          const streamIds = new Set<string>();
+          const trackIds = new Set<string>();
+          for (const binding of started.mediaBindings) {
+            if (!binding || !entry.requiredLaneRoles.includes(binding.role) || roles.has(binding.role)
+              || binding.epoch !== 0
+              || typeof binding.mediaStreamId !== 'string' || !binding.mediaStreamId.trim() || streamIds.has(binding.mediaStreamId)
+              || typeof binding.trackId !== 'string' || !binding.trackId.trim() || trackIds.has(binding.trackId)) {
+              throw new Error('Remote window media bindings contain invalid or duplicate identities');
+            }
+            roles.add(binding.role);
+            streamIds.add(binding.mediaStreamId);
+            trackIds.add(binding.trackId);
+          }
+          entry.mediaBindings = started.mediaBindings.map((binding) => Object.freeze({ ...binding }));
+          const offer = normalizeRtcDescription(started.offer, 'offer');
           await peerConnection.setRemoteDescription(offer);
           const answer = await peerConnection.createAnswer();
           await peerConnection.setLocalDescription(answer);
@@ -411,6 +526,91 @@ export function createRemoteWindowReceiverRuntime(input?: {
         ) {
           throw new Error('Remote window receiver startup telemetry is incomplete');
         }
+        const bindings = Object.freeze(
+          [...entry.playbackBindings.values()].map((binding) => Object.freeze({ ...binding })),
+        );
+        const commitDecodedFrame = (commit: DecodedFrameCommit) => {
+          if (!isCurrent(entry)
+            || !Number.isFinite(commit.frameId)
+            || commit.frameId < 0
+            || !Number.isFinite(commit.width)
+            || commit.width <= 0
+            || !Number.isFinite(commit.height)
+            || commit.height <= 0
+            || commit.streamId !== entry.streamId
+            || commit.mediaPlanVersion !== entry.protocolVersion) {
+            return false;
+          }
+          const binding = entry.playbackBindings.get(commit.lane);
+          if (!binding
+            || binding.mediaEpoch !== commit.mediaEpoch
+            || binding.trackId !== commit.trackId) {
+            return false;
+          }
+          const previousFrameId = entry.committedFrameIds.get(commit.lane);
+          if (previousFrameId !== undefined && commit.frameId <= previousFrameId) {
+            return false;
+          }
+          entry.committedFrameIds.set(commit.lane, commit.frameId);
+          input?.onDecodedFrameCommit?.(Object.freeze({ ...commit }));
+          return true;
+        };
+        const replaceLaneBinding = async (
+          replacement: RemoteWindowStreamMediaBinding,
+          replacementOffer: RemoteWindowStreamRtcDescription,
+          sendAnswer: (answer: RemoteWindowStreamAnswerV2Payload) => void | Promise<void>,
+        ) => {
+          if (options.protocolVersion !== 2
+            || !entry.requiredLaneRoles.includes(replacement.role)
+            || !Number.isInteger(replacement.epoch)
+            || replacement.epoch < 0
+            || !replacement.mediaStreamId.trim()
+            || !replacement.trackId.trim()) {
+            return false;
+          }
+          const current = entry.mediaBindings.find((binding) => binding.role === replacement.role);
+          if (!current || replacement.epoch <= current.epoch) {
+            return false;
+          }
+          const duplicateIdentity = entry.mediaBindings.some((binding) => binding.role !== replacement.role
+            && (binding.mediaStreamId === replacement.mediaStreamId || binding.trackId === replacement.trackId));
+          if (duplicateIdentity) {
+            return false;
+          }
+          const oldTrack = entry.mediaTracks.get(replacement.role);
+          if (oldTrack) {
+            try {
+              oldTrack.stop();
+            } catch {
+              // Retirement is exact-once even when track cleanup throws.
+            }
+            entry.retiredMediaTracks.add(oldTrack);
+            entry.mediaTracks.delete(replacement.role);
+          }
+          entry.playbackBindings.delete(replacement.role);
+          entry.committedFrameIds.delete(replacement.role);
+          if (replacement.role === 'focus') {
+            entry.trackAttached = false;
+            entry.focusTrackAttachedAt = null;
+          } else {
+            entry.overviewTrackAttached = false;
+            entry.overviewTrackAttachedAt = null;
+          }
+          entry.mediaBindings = entry.mediaBindings.map((binding) => (
+            binding.role === replacement.role ? Object.freeze({ ...replacement }) : binding
+          ));
+          await peerConnection.setRemoteDescription(normalizeRtcDescription(replacementOffer, 'offer'));
+          const answer = await peerConnection.createAnswer();
+          await peerConnection.setLocalDescription(answer);
+          const normalizedAnswer = normalizeRtcDescription(peerConnection.localDescription || answer, 'answer');
+          await sendAnswer({
+            requestId: entry.remoteRequestId ?? '',
+            streamId: entry.streamId,
+            mediaPlanVersion: 2,
+            answer: normalizedAnswer,
+          });
+          return true;
+        };
         return {
           streamId,
           ...(options.purpose ? { purpose: options.purpose } : {}),
@@ -418,6 +618,9 @@ export function createRemoteWindowReceiverRuntime(input?: {
           ...(needsOverview && attachedTracks.overviewMediaStream
             ? { overviewMediaStream: attachedTracks.overviewMediaStream }
             : {}),
+          bindings,
+          commitDecodedFrame,
+          replaceLaneBinding,
           started,
           startupTelemetry: {
             captureStartedAt: entry.captureStartedAt,

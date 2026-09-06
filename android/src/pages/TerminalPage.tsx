@@ -491,7 +491,7 @@ interface TerminalPageProps {
   onResizeRemoteWindowTarget?: (
     sessionId: string,
     payload: Omit<RemoteWindowInputEventPayload, 'requestId'>,
-  ) => void;
+  ) => string;
   onRemoteWindowMessage?: (handler: (msg: RemoteWindowControlMessage) => void) => () => void;
   quickActions: QuickAction[];
   shortcutActions: TerminalShortcutAction[];

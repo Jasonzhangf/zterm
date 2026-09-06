@@ -28,7 +28,12 @@ import type {
   RemoteWindowVideoProfile,
 } from '../../lib/types';
 import type { RemoteWindowControlMessage } from '../../lib/remote-window-message-runtime';
-import type { RemoteWindowReceiverStartupTelemetry } from '../../lib/remote-window-receiver-runtime';
+import type {
+  DecodedFrameCommit,
+  RemoteWindowPlaybackBinding,
+  RemoteWindowReceiverStartResult,
+  RemoteWindowReceiverStartupTelemetry,
+} from '../../lib/remote-window-receiver-runtime';
 import {
   acceptRemoteWindowFocusReady,
   commitRemoteWindowFocusProjection,
@@ -227,6 +232,10 @@ interface RemoteWindowStreamStartResult {
   purpose?: RemoteWindowStreamPurpose;
   mediaStream?: MediaStream | null;
   overviewMediaStream?: MediaStream | null;
+  /** Legacy test doubles may omit V2 playback methods; real receiver V2 results always provide them. */
+  bindings?: readonly RemoteWindowPlaybackBinding[];
+  commitDecodedFrame?: (commit: DecodedFrameCommit) => boolean;
+  replaceLaneBinding?: RemoteWindowReceiverStartResult['replaceLaneBinding'];
   started?: RemoteWindowStreamStartedPayload | RemoteWindowStreamStartedOfferV2Payload;
   startupTelemetry?: RemoteWindowReceiverStartupTelemetry;
   collectStats?: () => Promise<RemoteWindowVideoStatsSample | null>;
@@ -369,6 +378,8 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   }, []);
   const [receiverMediaStream, setReceiverMediaStream] = useState<MediaStream | null>(null);
   const [overviewMediaStream, setOverviewMediaStream] = useState<MediaStream | null>(null);
+  const [receiverPlaybackBinding, setReceiverPlaybackBinding] = useState<RemoteWindowPlaybackBinding | null>(null);
+  const [receiverDecodedCommit, setReceiverDecodedCommit] = useState<((commit: DecodedFrameCommit) => boolean) | null>(null);
   const [receiverFrameSize, setReceiverFrameSize] = useState<SurfaceSize | null>(null);
   const [receiverStartupTelemetry, setReceiverStartupTelemetry] = useState<RemoteWindowReceiverStartupTelemetry | null>(null);
   const [streamCapability, setStreamCapability] = useState<RemoteWindowStreamCapabilityTelemetry | null>(null);
@@ -415,6 +426,8 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     if (!sessionId || !stop) return;
     new Set<string>([activeStreamIdRef.current, activeCanvasStreamIdRef.current, activeFocusStreamIdRef.current, pendingFocusStreamIdRef.current].filter((value): value is string => Boolean(value))).forEach((streamId) => void Promise.resolve(stop(sessionId, streamId)).catch((error) => console.error('[RemoteWindowOverlay] unmount stream stop failed:', error)));
     activeStreamIdRef.current = null; activeCanvasStreamIdRef.current = null; activeFocusStreamIdRef.current = null; pendingFocusStreamIdRef.current = null;
+    setReceiverPlaybackBinding(null);
+    setReceiverDecodedCommit(null);
   }, []);
   const qualityStreamId = state.phase === 'targetLocked' ? state.streamId ?? null : null;
   const qualityTargetId = state.phase === 'targetLocked' ? state.target.streamTargetId : null;
@@ -436,6 +449,8 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     videoElementRef,
     overviewVideoElementRef,
     onVideoDebug,
+    playbackBinding: receiverPlaybackBinding,
+    commitDecodedFrame: receiverDecodedCommit ?? undefined,
   });
   const {
     activeCatalogSyncError,
@@ -1607,6 +1622,8 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     // 自动在同一 peerConnection 加第二个 video transceiver（stream id='overview'），
     // daemon 看到 composite target 会同步开 overview capture。overviewMediaStream 用于
     // 缩略图 drawImage + 切换瞬间主画面低清占位（同连接双流不进 canvas 预览流饿死 focus 路径）。
+    setReceiverPlaybackBinding(null);
+    setReceiverDecodedCommit(null);
     void startStream(targetSessionId, effectiveTarget, focusStreamId, {
       videoProfile,
       purpose: 'focus',
@@ -1667,6 +1684,19 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
           updateReceiverVideoVisibility(false);
           setReceiverMediaStream(committedResult.mediaStream || null);
           setOverviewMediaStream(committedResult.overviewMediaStream || null);
+          const playbackBindings = Array.isArray(committedResult.bindings)
+            ? committedResult.bindings
+            : [];
+          setReceiverPlaybackBinding(
+            playbackBindings.find((binding) => (
+              binding.lane === 'focus' && binding.mediaStream === committedResult.mediaStream
+            )) ?? null,
+          );
+          setReceiverDecodedCommit(
+            typeof committedResult.commitDecodedFrame === 'function'
+              ? committedResult.commitDecodedFrame
+              : null,
+          );
           setReceiverFrameSize(resolveStartedCaptureFrameSize(committedResult.started));
           setReceiverStartupTelemetry(committedResult.startupTelemetry ?? null);
           setCanvasLayout(committedResult.started?.canvasLayout ?? null);
