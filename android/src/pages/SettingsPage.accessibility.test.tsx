@@ -65,7 +65,9 @@ describe("SettingsPage accessibility baseline", () => {
     const onBack = vi.fn();
     renderSettings({ onBack });
 
-    const back = screen.getByRole("button", { name: /back to connections/i });
+    const back = screen.getByRole("button", { name: "返回连接列表" });
+    back.focus();
+    expect(document.activeElement).toBe(back);
     fireEvent.click(back);
     expect(onBack).toHaveBeenCalledTimes(1);
   });
@@ -74,12 +76,17 @@ describe("SettingsPage accessibility baseline", () => {
     const onSave = vi.fn();
     renderSettings({ onSave });
 
-    const save = screen.getByRole("button", { name: /^save$/i });
+    const save = screen.getByRole("button", { name: "保存" });
+    expect(save.hasAttribute("disabled")).toBe(false);
+    save.focus();
+    expect(document.activeElement).toBe(save);
     fireEvent.click(save);
     expect(onSave).toHaveBeenCalledTimes(1);
 
     await waitFor(() => {
-      expect(screen.getByRole("status").textContent?.toLowerCase()).toMatch(/saved/);
+      const status = screen.getByRole("status");
+      expect(status.getAttribute("aria-live")).toBe("polite");
+      expect(status.textContent).toContain("已保存");
     });
   });
 

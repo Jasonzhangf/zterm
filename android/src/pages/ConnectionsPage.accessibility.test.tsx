@@ -12,10 +12,12 @@ describe("ConnectionsPage accessibility and motion baseline", () => {
     render(<ConnectionsPage onOpenSettings={onOpenSettings} />);
 
     const emptyState = screen.getByTestId("connections-empty-state");
-    expect(emptyState.textContent).toMatch(/configure|first server/i);
+    expect(emptyState.textContent).toMatch(/配置第一台服务器/);
 
-    const cta = screen.getByRole("button", { name: /add the first server/i });
+    const cta = screen.getByRole("button", { name: "添加第一台服务器" });
     expect(cta).toBeTruthy();
+    cta.focus();
+    expect(document.activeElement).toBe(cta);
     fireEvent.click(cta);
     expect(onOpenSettings).toHaveBeenCalledTimes(1);
   });
@@ -23,7 +25,7 @@ describe("ConnectionsPage accessibility and motion baseline", () => {
   it("uses an svg icon, not a raw plus character, for the add-server entry", () => {
     render(<ConnectionsPage onOpenSettings={vi.fn()} />);
 
-    const cta = screen.getByRole("button", { name: /configure servers/i });
+    const cta = screen.getByRole("button", { name: "配置服务器" });
     expect(cta.querySelector("svg")).not.toBeNull();
   });
 
