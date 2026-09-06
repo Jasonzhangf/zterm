@@ -2,7 +2,6 @@ import type {
   ClientMessage,
   RemoteWindowStreamIceCandidate,
   RemoteWindowStreamIceCandidatePayload,
-  RemoteWindowInputAckControl,
   RemoteWindowInputDeliveryControl,
   RemoteWindowInputEventPayload,
   RemoteWindowStreamStartedPayload,
@@ -168,9 +167,13 @@ export function createRemoteWindowMessageRuntime(input?: {
     if (!handler) {
       return false;
     }
-    void Promise.resolve(handler(payload)).catch((error) => {
+    try {
+      void Promise.resolve(handler(payload)).catch((error) => {
+        input?.onListenerError?.(phase, error);
+      });
+    } catch (error) {
       input?.onListenerError?.(phase, error);
-    });
+    }
     return true;
   };
   const notifySubscribers = (msg: RemoteWindowControlMessage) => {
@@ -178,9 +181,7 @@ export function createRemoteWindowMessageRuntime(input?: {
       return false;
     }
     subscribers.forEach((handler) => {
-      void Promise.resolve(handler(msg)).catch((error) => {
-        input?.onListenerError?.('status', error);
-      });
+      dispatchListener('status', handler, msg);
     });
     return true;
   };
@@ -293,6 +294,48 @@ export function createRemoteWindowMessageRuntime(input?: {
     }
   };
 
+  const publishInputSendFailure = (pending: PendingRemoteWindowReliableInput, error: unknown) => {
+    notifySubscribers({
+      type: 'remote-window-input-ack',
+      control: {
+        version: 1,
+        sequence: pending.control.sequence,
+        accepted: false,
+        retryable: false,
+        duplicate: false,
+        receivedAtMs: now(),
+        error: {
+          code: 'remote_window_input_send_failed',
+          message: error instanceof Error ? error.message : String(error),
+        },
+      },
+      payload: {
+        streamId: pending.payload.streamId,
+        targetId: pending.payload.targetId,
+      },
+    });
+  };
+
+  const sendReliableInput = (pending: PendingRemoteWindowReliableInput, immediateSequence?: string) => {
+    try {
+      sendRemoteWindowInputMessage(pending);
+    } catch (error) {
+      if (reliableInputInFlight === pending) {
+        reliableInputInFlight = null;
+        clearReliableInputAckTimer();
+      }
+      if (pending.control.sequence === immediateSequence) {
+        throw error;
+      }
+      publishInputSendFailure(pending, error);
+      pumpReliableInput();
+      return;
+    }
+    if (reliableInputInFlight === pending) {
+      armReliableInputAckTimeout(pending);
+    }
+  };
+
   const armReliableInputAckTimeout = (pending: PendingRemoteWindowReliableInput) => {
     clearReliableInputAckTimer();
     reliableInputAckTimer = setTimeoutFn(() => {
@@ -306,8 +349,7 @@ export function createRemoteWindowMessageRuntime(input?: {
           attempt: pending.control.attempt + 1,
           sentAtMs: now(),
         };
-        sendRemoteWindowInputMessage(pending);
-        armReliableInputAckTimeout(pending);
+        sendReliableInput(pending);
         return;
       }
       notifySubscribers({
@@ -346,13 +388,21 @@ export function createRemoteWindowMessageRuntime(input?: {
       return false;
     }
     clearContinuousFlushTimer();
-    const pending = [...pendingContinuousInput.values()];
-    pendingContinuousInput.clear();
-    pending.forEach(sendRemoteWindowInputMessage);
-    return pending.length > 0;
+    const pendingKeys = [...pendingContinuousInput.keys()];
+    pendingKeys.forEach((key) => {
+      const sample = pendingContinuousInput.get(key);
+      if (!sample) return;
+      pendingContinuousInput.delete(key);
+      try {
+        sendRemoteWindowInputMessage(sample);
+      } catch (error) {
+        publishInputSendFailure(sample, error);
+      }
+    });
+    return pendingKeys.length > 0;
   };
 
-  const pumpReliableInput = () => {
+  const pumpReliableInput = (immediateSequence?: string) => {
     if (reliableInputInFlight) {
       return;
     }
@@ -383,10 +433,11 @@ export function createRemoteWindowMessageRuntime(input?: {
       flushContinuousInput();
       return;
     }
-    flushContinuousInput(true);
     reliableInputInFlight = next;
-    sendRemoteWindowInputMessage(next);
-    armReliableInputAckTimeout(next);
+    flushContinuousInput(true);
+    if (reliableInputInFlight === next) {
+      sendReliableInput(next, immediateSequence);
+    }
   };
 
   const scheduleContinuousInputFlush = () => {
@@ -422,7 +473,7 @@ export function createRemoteWindowMessageRuntime(input?: {
     };
     if (!continuous) {
       reliableInputQueue.push({ ...pending, payload, control });
-      pumpReliableInput();
+      pumpReliableInput(control.sequence);
       return control.sequence;
     }
     const key = [
@@ -453,15 +504,21 @@ export function createRemoteWindowMessageRuntime(input?: {
   };
 
   const acceptRemoteWindowInputAck = (
-    control: RemoteWindowInputAckControl,
-    message: RemoteWindowControlMessage,
+    message: Extract<RemoteWindowControlMessage, { type: 'remote-window-input-ack' }>,
   ) => {
+    const control = message.control;
     const inFlight = reliableInputInFlight;
+    const carriesGeometry = Boolean(message.payload.target || message.payload.capture);
     if (!inFlight || inFlight.control.sequence !== control.sequence) {
       return notifySubscribers(message);
     }
+    if (message.payload.streamId !== inFlight.payload.streamId
+      || message.payload.targetId !== inFlight.payload.targetId
+      || (carriesGeometry && inFlight.payload.event.kind !== 'window-resize')
+      || (message.payload.target && message.payload.target.streamTargetId !== inFlight.payload.targetId)) {
+      return false;
+    }
     clearReliableInputAckTimer();
-    notifySubscribers(message);
     if (
       !control.accepted
       && control.retryable
@@ -472,11 +529,11 @@ export function createRemoteWindowMessageRuntime(input?: {
         attempt: inFlight.control.attempt + 1,
         sentAtMs: now(),
       };
-      sendRemoteWindowInputMessage(inFlight);
-      armReliableInputAckTimeout(inFlight);
+      sendReliableInput(inFlight);
       return true;
     }
     reliableInputInFlight = null;
+    notifySubscribers(message);
     pumpReliableInput();
     return true;
   };
@@ -932,7 +989,7 @@ export function createRemoteWindowMessageRuntime(input?: {
         return notifySubscribers(msg);
       }
       if (msg.type === 'remote-window-input-ack') {
-        return acceptRemoteWindowInputAck(msg.control, msg);
+        return acceptRemoteWindowInputAck(msg);
       }
       if (msg.type === 'remote-window-browser-user-agent-result') {
         const pending = pendingBrowserUserAgent.get(msg.payload.requestId);
@@ -986,6 +1043,8 @@ export function createRemoteWindowMessageRuntime(input?: {
         pending.reject(new Error(reason));
       }
       pendingBrowserUserAgent.clear();
+      clearContinuousFlushTimer();
+      pendingContinuousInput.clear();
       clearReliableInputAckTimer();
       reliableInputQueue.splice(0);
       reliableInputInFlight = null;

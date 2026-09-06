@@ -49,7 +49,59 @@ done
   return captureBinary;
 }
 
+async function controlledCapture(options: { captureEpoch?: number; onEpochRetired?: (epoch: number) => void } = {}) {
+  const directory = mkdtempSync(join(tmpdir(), 'rw-capture-controlled-'));
+  const captureBinary = join(directory, 'capture');
+  writeFileSync(captureBinary, `#!/bin/sh
+printf '\\132\\122\\127\\061\\002\\000\\000\\000\\002\\000\\000\\000\\020\\000\\000\\000\\014\\014\\014\\014\\014\\014\\014\\014\\014\\014\\014\\014\\014\\014\\014\\014'
+while IFS= read -r command; do
+  printf '%s\\n' 'ZTERM_REMOTE_WINDOW_CAPTURE_UPDATE {"seq":1,"ok":true}' >&2
+done
+`);
+  chmodSync(captureBinary, 0o755);
+  const source = await startScreenCaptureKitFrameSource(makeTarget(), {
+    frameRate: 30,
+    startupTimeoutMs: 3_000,
+    swiftBinary: '/bin/echo',
+    captureBinary,
+    validateTargets: async () => undefined,
+    onFrame: vi.fn(),
+    onError: vi.fn(),
+    ...options,
+  });
+  return { source, ack: (_seq: number) => undefined, directory };
+}
+
 describe('remote-window capture config', () => {
+  it('declares immutable capture epoch and retirement callback ownership', () => {
+    const captureRuntime = readFileSync(join(process.cwd(), 'src/server/remote-window-capture.ts'), 'utf8');
+    expect(captureRuntime).toContain('captureEpoch');
+    expect(captureRuntime).toContain('onEpochRetired');
+  });
+
+  it('advances capture epoch and retires the previous immutable source after target ACK', async () => {
+    const retired: number[] = [];
+    const { source, ack, directory } = await controlledCapture({ captureEpoch: 7, onEpochRetired: (epoch) => retired.push(epoch) });
+    try {
+      expect(source.captureEpoch).toBe(7);
+      const target = makeTarget({
+        videoTarget: {
+          ...makeTarget().videoTarget,
+          windowId: '200',
+        },
+      });
+      const pending = source.updateTarget!(target);
+      await Promise.resolve();
+      ack(1);
+      await pending;
+      expect(source.captureEpoch).toBe(8);
+      expect(retired).toEqual([7]);
+    } finally {
+      source.stop();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('validates required windows against fresh ScreenCaptureKit truth before spawning the capture child', async () => {
     const validatedWindowIds: string[][] = [];
     const frames: Array<{ width: number }> = [];

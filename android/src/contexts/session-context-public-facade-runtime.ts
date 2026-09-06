@@ -420,11 +420,11 @@ export function buildSessionContextValueRuntime(options: {
   sendRemoteWindowInput: (
     sessionId: string,
     payload: Omit<RemoteWindowInputEventPayload, 'requestId'>,
-  ) => void;
+  ) => string;
   resizeRemoteWindowTarget: (
     sessionId: string,
     payload: Omit<RemoteWindowInputEventPayload, 'requestId'>,
-  ) => void;
+  ) => string;
   updateSessionViewport: (sessionId: string, visibleRange: TerminalVisibleRange | TerminalViewportState) => void;
   requestScheduleList: (sessionId: string) => void;
   manageTmuxSessionsOnOpenTransport: (

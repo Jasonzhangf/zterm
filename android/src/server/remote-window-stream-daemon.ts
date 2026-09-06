@@ -21,6 +21,7 @@ import type {
   RemoteWindowStreamPurpose,
   RemoteWindowStreamStartedPayload,
   RemoteWindowStreamStartedOfferV2Payload,
+  RemoteWindowStreamMediaBinding,
   RemoteWindowStreamAnswerV2Payload,
   RemoteWindowStreamStartRequestV2Payload,
   RemoteWindowStreamStatusPayload,
@@ -61,7 +62,6 @@ import {
 import { validateRemoteWindowInputPayload } from './remote-window-input-policy';
 import {
   DEFAULT_SCREEN_CAPTURE_KIT_STARTUP_TIMEOUT_MS,
-  buildResizedRemoteWindowTarget,
   RemoteWindowCaptureTargetOutOfDisplayError,
   RemoteWindowCaptureTargetUnavailableError,
   startScreenCaptureKitFrameSource,
@@ -97,11 +97,13 @@ const {
   RTCPeerConnection,
   RTCSessionDescription,
   RTCIceCandidate,
+  MediaStream,
   nonstandard,
 } = wrtc as unknown as {
   RTCPeerConnection: RtcPeerConnectionCtor;
   RTCSessionDescription: RtcSessionDescriptionCtor;
   RTCIceCandidate: RtcIceCandidateCtor;
+  MediaStream: { new (init: { id: string }): MediaStream };
   nonstandard: {
     RTCVideoSource: { new (init?: { isScreencast?: boolean; needsDenoising?: boolean }): RtcVideoSourceLike };
     rgbaToI420: (rgba: RtcVideoFrame, i420: RtcVideoFrame) => void;
@@ -266,6 +268,39 @@ interface RemoteWindowResizeApplyResult {
   };
 }
 
+function buildObservedRemoteWindowTarget(
+  target: RemoteWindowStreamTargetManifest,
+  observed: RemoteWindowStreamTargetManifest,
+  createdAt: string,
+): RemoteWindowStreamTargetManifest {
+  if (
+    target.videoTarget.kind !== 'app-window'
+    || observed.streamTargetId !== target.streamTargetId
+    || observed.videoTarget.kind !== target.videoTarget.kind
+    || observed.videoTarget.pid !== target.videoTarget.pid
+    || observed.videoTarget.windowId !== target.videoTarget.windowId
+  ) {
+    throw new Error('remote window resize readback identity mismatch');
+  }
+  validateStreamTargetForCapture(observed);
+  const nextTarget: RemoteWindowStreamTargetManifest = {
+    ...target,
+    videoTarget: {
+      ...target.videoTarget,
+      windowBoundsTopLeftPx: { ...observed.videoTarget.windowBoundsTopLeftPx },
+      cropRectTopLeftPx: observed.videoTarget.cropRectTopLeftPx
+        ? { ...observed.videoTarget.cropRectTopLeftPx }
+        : undefined,
+    },
+    capture: {
+      ...target.capture,
+      createdAt,
+    },
+  };
+  validateStreamTargetForCapture(nextTarget);
+  return nextTarget;
+}
+
 
 
 
@@ -304,15 +339,17 @@ function takeRemoteWindowLatestFrame(
 
 async function applyRemoteWindowTargetResize(
   entry: ActiveRemoteWindowStream,
-  event: Extract<RemoteWindowInputEventPayload['event'], { kind: 'window-resize' }>,
+  observed: RemoteWindowStreamTargetManifest,
   createdAt: string,
+  assertCurrentTarget: () => void,
 ): Promise<RemoteWindowResizeApplyResult> {
   const captureSource = entry.captureSource;
   if (!captureSource?.updateTarget) {
     throw new Error('remote window active capture source cannot update target resize');
   }
-  const nextTarget = buildResizedRemoteWindowTarget(entry.target, event, createdAt);
+  const nextTarget = buildObservedRemoteWindowTarget(entry.target, observed, createdAt);
   await captureSource.updateTarget(nextTarget);
+  assertCurrentTarget();
   entry.target = nextTarget;
   entry.targetId = nextTarget.streamTargetId;
   return {
@@ -709,8 +746,15 @@ export function createRemoteWindowStreamDaemonRuntime(
       };
       const videoSender = peerConnection.addTransceiver(videoTrack, {
         direction: 'sendonly',
+        streams: [new MediaStream({ id: videoTrack.id })],
         sendEncodings: [initialEncoding],
       }).sender;
+      const mediaBindings: RemoteWindowStreamMediaBinding[] = [{
+        role: 'focus',
+        epoch: 0,
+        mediaStreamId: videoTrack.id,
+        trackId: videoTrack.id,
+      }];
       const streamFrameRate = requestedVideoProfile.maxFrameRateFps;
       const overviewFrameRate = requestedVideoProfile.overviewMaxFrameRateFps;
       let videoProfile: RemoteWindowVideoProfile | null = null;
@@ -768,6 +812,25 @@ export function createRemoteWindowStreamDaemonRuntime(
       entry = streamEntry;
       activeStreams.set(payload.streamId, streamEntry);
 
+      if (hasOverviewLane) {
+        streamEntry.overviewVideoSource = createVideoSource();
+        streamEntry.overviewVideoTrack = streamEntry.overviewVideoSource.createTrack();
+        streamEntry.overviewVideoSender = peerConnection.addTransceiver(streamEntry.overviewVideoTrack, {
+          direction: 'sendonly',
+          streams: [new MediaStream({ id: 'overview' })],
+          sendEncodings: [{
+            maxBitrate: requestedVideoProfile.overviewMaxBitrateBps,
+            maxFramerate: requestedVideoProfile.overviewMaxFrameRateFps,
+          }],
+        }).sender;
+        mediaBindings.push({
+          role: 'overview',
+          epoch: 0,
+          mediaStreamId: 'overview',
+          trackId: streamEntry.overviewVideoTrack.id,
+        });
+      }
+
       peerConnection.onicecandidate = (event) => {
         if (!isCurrentStream(streamEntry) || !event.candidate) {
           return;
@@ -817,6 +880,7 @@ export function createRemoteWindowStreamDaemonRuntime(
           mediaPlanVersion: 2,
           targetId: payload.target.streamTargetId,
           offer: normalizeRtcDescription(peerConnection.localDescription || offer, 'offer'),
+          mediaBindings: Object.freeze(mediaBindings.map((binding) => Object.freeze({ ...binding }))),
           capture: {
             source: 'ScreenCaptureKit',
             frameWidth: 1,
@@ -896,15 +960,6 @@ export function createRemoteWindowStreamDaemonRuntime(
 
       // 双流：组合 target 额外启动低码率总览（overview）捕获（全部窗口平铺 canvas）
       if (hasOverviewLane) {
-        const overviewVideoSource = createVideoSource();
-        const overviewVideoTrack = overviewVideoSource.createTrack();
-        const overviewVideoSender = peerConnection.addTransceiver(overviewVideoTrack, {
-            direction: 'sendonly',
-            sendEncodings: [{
-              maxBitrate: requestedVideoProfile.overviewMaxBitrateBps,
-              maxFramerate: requestedVideoProfile.overviewMaxFrameRateFps,
-            }],
-          }).sender;
         failureStage = 'overview-capture-start';
         const overviewCaptureSource = await captureSourceFactory(payload.target, {
           frameRate: overviewFrameRate,
@@ -941,9 +996,6 @@ export function createRemoteWindowStreamDaemonRuntime(
           overviewCaptureSource.stop();
           throw new Error('remote window stream was closed before overview capture started');
         }
-        streamEntry.overviewVideoSource = overviewVideoSource;
-        streamEntry.overviewVideoTrack = overviewVideoTrack;
-        streamEntry.overviewVideoSender = overviewVideoSender || null;
         streamEntry.overviewCaptureSource = overviewCaptureSource;
         if (!streamEntry.overviewCaptureStartedReported) {
           streamEntry.overviewCaptureStartedReported = true;
@@ -1065,6 +1117,7 @@ export function createRemoteWindowStreamDaemonRuntime(
           mediaPlanVersion: 2,
           targetId: payload.target.streamTargetId,
           offer: normalizeRtcDescription(peerConnection.localDescription, 'offer'),
+          mediaBindings: Object.freeze(mediaBindings.map((binding) => Object.freeze({ ...binding }))),
           capture: {
             source: 'ScreenCaptureKit',
             frameWidth: captureSource.width,
@@ -1468,7 +1521,28 @@ export function createRemoteWindowStreamDaemonRuntime(
       },
     });
     if (payload.event.kind === 'window-resize') {
-      const resized = await applyRemoteWindowTargetResize(entry, payload.event, now());
+      const observedTarget: RemoteWindowStreamTargetManifest = {
+        ...entry.target,
+        videoTarget: {
+          ...entry.target.videoTarget,
+          windowBoundsTopLeftPx: {
+            x: entry.target.videoTarget.windowBoundsTopLeftPx.x,
+            y: entry.target.videoTarget.windowBoundsTopLeftPx.y,
+            width: payload.event.width,
+            height: payload.event.height,
+          },
+        },
+      };
+      const resized = await applyRemoteWindowTargetResize(
+        entry,
+        observedTarget,
+        now(),
+        () => {
+          if (!isCurrentStream(entry)) {
+            throw new Error('remote window stream closed during resize');
+          }
+        },
+      );
       return {
         streamId: payload.streamId,
         targetId: payload.targetId,

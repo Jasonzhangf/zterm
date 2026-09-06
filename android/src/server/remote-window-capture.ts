@@ -27,6 +27,7 @@ export interface RemoteWindowCaptureFrame {
 }
 
 export interface RemoteWindowCaptureFrameSource {
+  readonly captureEpoch: number;
   width: number;
   height: number;
   frameRate: number;
@@ -53,6 +54,8 @@ export type RemoteWindowCaptureSourceFactory = (
     validateTargets?: (config: ReturnType<typeof buildScreenCaptureKitConfig>) => Promise<void>;
     onFrame: (frame: RemoteWindowCaptureFrame) => void;
     onError: (error: Error) => void;
+    captureEpoch?: number;
+    onEpochRetired?: (epoch: number) => void;
   },
 ) => Promise<RemoteWindowCaptureFrameSource>;
 
@@ -405,6 +408,8 @@ export async function startScreenCaptureKitFrameSource(
     validateTargets?: (config: ReturnType<typeof buildScreenCaptureKitConfig>) => Promise<void>;
     onFrame: (frame: RemoteWindowCaptureFrame) => void;
     onError: (error: Error) => void;
+    captureEpoch?: number;
+    onEpochRetired?: (epoch: number) => void;
   },
 ): Promise<RemoteWindowCaptureFrameSource> {
   let maxCaptureWidth = Math.max(1, Math.floor(options.maxCaptureWidth ?? Number.MAX_SAFE_INTEGER));
@@ -435,6 +440,7 @@ export async function startScreenCaptureKitFrameSource(
   let stopped = false;
   let frameWidth = Math.max(1, Math.floor(captureConfig.cropRect.width));
   let frameHeight = Math.max(1, Math.floor(captureConfig.cropRect.height));
+  let captureEpoch = options.captureEpoch ?? 0;
   let currentTarget = target;
   let captureUpdateSeq = 0;
   const pendingCaptureUpdates = new Map<number, PendingRemoteWindowCaptureUpdate>();
@@ -455,6 +461,9 @@ export async function startScreenCaptureKitFrameSource(
   };
 
   const frameSource: RemoteWindowCaptureFrameSource = {
+    get captureEpoch() {
+      return captureEpoch;
+    },
     get width() {
       return frameWidth;
     },
@@ -484,6 +493,7 @@ export async function startScreenCaptureKitFrameSource(
     nextFrameRate: number,
     nextMaxCaptureWidth: number,
     nextMaxCaptureHeight: number,
+    advancesEpoch: boolean,
   ) => {
     if (stopped) {
       throw new Error('ScreenCaptureKit capture source is stopped');
@@ -530,6 +540,11 @@ export async function startScreenCaptureKitFrameSource(
     }
     captureConfig = nextConfig;
     currentTarget = nextTarget;
+    if (advancesEpoch) {
+      const retiredEpoch = captureEpoch;
+      captureEpoch += 1;
+      options.onEpochRetired?.(retiredEpoch);
+    }
     frameSource.frameRate = nextConfig.frameRate;
     maxCaptureWidth = nextMaxCaptureWidth;
     maxCaptureHeight = nextMaxCaptureHeight;
@@ -538,7 +553,7 @@ export async function startScreenCaptureKitFrameSource(
   };
 
   frameSource.updateTarget = async (nextTarget) => {
-    await updateCaptureConfiguration(nextTarget, frameSource.frameRate, maxCaptureWidth, maxCaptureHeight);
+    await updateCaptureConfiguration(nextTarget, frameSource.frameRate, maxCaptureWidth, maxCaptureHeight, true);
   };
 
   frameSource.updateVideoProfile = async (profile) => {
@@ -567,6 +582,7 @@ export async function startScreenCaptureKitFrameSource(
       normalizedFrameRate,
       normalizedMaxCaptureWidth,
       normalizedMaxCaptureHeight,
+      false,
     );
   };
 

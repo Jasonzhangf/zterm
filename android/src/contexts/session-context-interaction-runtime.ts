@@ -74,7 +74,7 @@ interface RemoteWindowMessageRuntimeLike {
   sendBrowserUserAgent: (...args: any[]) => Promise<RemoteWindowBrowserUserAgentResultPayload>;
   sendStreamIceCandidate: (...args: any[]) => void;
   stopStream: (...args: any[]) => Promise<RemoteWindowStreamStatusPayload>;
-  sendInputEvent: (...args: any[]) => void;
+  sendInputEvent: (...args: any[]) => string;
 }
 
 interface RemoteWindowReceiverRuntimeLike {
@@ -290,7 +290,7 @@ export function createSessionInteractionRuntime(options: {
   const sendRemoteWindowInput = (
     sessionId: string,
     payload: Omit<RemoteWindowInputEventPayload, 'requestId'>,
-  ) => {
+  ): string => {
     return sendRemoteWindowInputRuntime({
       sessionId,
       payload,
@@ -304,7 +304,7 @@ export function createSessionInteractionRuntime(options: {
   const resizeRemoteWindowTarget = (
     sessionId: string,
     payload: Omit<RemoteWindowInputEventPayload, 'requestId'>,
-  ) => {
+  ): string => {
     return resizeRemoteWindowTargetRuntime({
       sessionId,
       payload,

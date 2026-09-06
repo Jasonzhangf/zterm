@@ -219,6 +219,9 @@ export interface RemoteWindowCanvasLayoutV1 {
 
 export interface RemoteWindowStreamTargetManifest {
   streamTargetId: string;
+  // Host product policy, separate from native resize capability. Older hosts
+  // omit this field; clients must not automatically resize unknown targets.
+  geometryPolicy?: 'adapt' | 'preserve';
   videoTarget: {
     kind: 'app-window' | 'iterm2-pane';
     appBundleId: string;
@@ -253,6 +256,11 @@ export interface RemoteWindowStreamTargetManifest {
   capture: {
     source: 'ScreenCaptureKit';
     coordinateSpace: 'macos-top-left-px';
+    /** Explicit units for legacy *Px geometry fields; absent means unknown. */
+    logicalGeometry?: {
+      coordinateSpace: 'macos-global-points';
+      pointPixelScale: number;
+    };
     displayId?: string;
     displayBoundsTopLeftPx?: RemoteWindowStreamRect;
     scale: number;
@@ -455,6 +463,7 @@ export interface RemoteWindowStreamFocusResultPayload {
   revision: number;
   targetId: string;
   phase: RemoteWindowStreamFocusPhase;
+  code?: string;
   message?: string;
 }
 
@@ -489,6 +498,7 @@ export interface RemoteWindowStreamStartedOfferV2Payload {
   mediaPlanVersion: 2;
   targetId: string;
   offer: RemoteWindowStreamRtcDescription;
+  mediaBindings: readonly RemoteWindowStreamMediaBinding[];
   capture: {
     source: 'ScreenCaptureKit';
     frameWidth: number;
@@ -501,6 +511,13 @@ export interface RemoteWindowStreamStartedOfferV2Payload {
     kind: 'webrtc-video';
     selectedRoute?: string;
   };
+}
+
+export interface RemoteWindowStreamMediaBinding {
+  role: RemoteWindowStreamLaneRole;
+  epoch: number;
+  mediaStreamId: string;
+  trackId: string;
 }
 
 export interface RemoteWindowStreamAnswerV2Payload {

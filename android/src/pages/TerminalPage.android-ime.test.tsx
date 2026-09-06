@@ -413,6 +413,9 @@ describe("TerminalPage Android IME bridge", () => {
     ) => ({
       streamId,
       mediaStream,
+      bindings: [{ streamId, mediaPlanVersion: 1, lane: 'focus' as const, mediaEpoch: 0, mediaStream, trackId: 'mock-track' }],
+      commitDecodedFrame: vi.fn(() => true),
+      replaceLaneBinding: vi.fn(async () => false),
       started: {
         requestId: "rw-start-1",
         streamId,

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { releaseRemoteWindowStreamSessionResources } from './remote-window-stream-session';
 
 function makeCaptureSource(stop: () => void = vi.fn()) {
-  return { width: 2, height: 2, frameRate: 12, stop };
+  return { captureEpoch: 0, width: 2, height: 2, frameRate: 12, stop };
 }
 
 function makeSession(overrides: Record<string, unknown> = {}) {

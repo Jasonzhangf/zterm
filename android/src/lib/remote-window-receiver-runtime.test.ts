@@ -5,11 +5,14 @@ import {
 } from './remote-window-receiver-runtime';
 import type {
   RemoteWindowStreamRtcDescription,
+  RemoteWindowStreamStartedOfferV2Payload,
   RemoteWindowStreamTargetManifest,
 } from './types';
+import type { RemoteWindowStreamMediaBinding } from '@zterm/shared/protocol';
 
 class MockMediaTrack {
   kind = 'video';
+  id = '';
   stop = vi.fn();
 }
 
@@ -49,6 +52,10 @@ class MockRTCPeerConnection {
 
   async createOffer() {
     return { type: 'offer' as const, sdp: 'local-offer-sdp' };
+  }
+
+  async createAnswer() {
+    return { type: 'answer' as const, sdp: 'local-answer-sdp' };
   }
 
   async setLocalDescription(description: RTCSessionDescriptionInit) {
@@ -192,6 +199,92 @@ describe('remote window receiver runtime', () => {
         focusTrackAttachedAt: expect.any(Number),
       },
     });
+  });
+
+  it('commits decoded frames monotonically and retires the prior lane binding exactly once', async () => {
+    const runtime = createRuntime();
+    const offer: RemoteWindowStreamStartedOfferV2Payload = {
+      requestId: 'rw-v2-replace',
+      streamId: 'stream-v2-replace',
+      targetId: 'pane-1',
+      mediaPlan: 'single-focus',
+      mediaPlanVersion: 2,
+      offer: { type: 'offer', sdp: 'host-offer' },
+      mediaBindings: [{
+        role: 'focus',
+        epoch: 0,
+        mediaStreamId: 'focus-media-0',
+        trackId: 'focus-track-0',
+      }],
+      capture: {
+        source: 'ScreenCaptureKit',
+        frameWidth: 640,
+        frameHeight: 360,
+        frameRate: 30,
+        targetKind: 'iterm2-pane',
+      },
+      transport: { kind: 'webrtc-video' },
+    };
+    const sendAnswer = vi.fn();
+    const pending = runtime.startStream({
+      streamId: offer.streamId,
+      target: makeTarget(),
+      protocolVersion: 2,
+      sendIceCandidate: vi.fn(),
+      sendAnswer,
+      startRemote: vi.fn(async () => offer),
+    });
+    await flushMicrotasks(12);
+    const peer = MockRTCPeerConnection.instances[0]!;
+    const oldTrack = new MockMediaTrack();
+    oldTrack.id = 'focus-track-0';
+    const oldStream = new MockMediaStream([oldTrack]);
+    oldStream.id = 'focus-media-0';
+    peer.emitVideoTrack(oldStream);
+    const started = await pending;
+    const onCommit = vi.fn();
+    const firstCommit = {
+      streamId: offer.streamId,
+      mediaPlanVersion: 2,
+      lane: 'focus' as const,
+      mediaEpoch: 0,
+      trackId: 'focus-track-0',
+      frameId: 4,
+      width: 640,
+      height: 360,
+    };
+    expect(started.commitDecodedFrame(firstCommit)).toBe(true);
+    expect(started.commitDecodedFrame({ ...firstCommit, frameId: 4 })).toBe(false);
+    expect(started.commitDecodedFrame({ ...firstCommit, frameId: 3 })).toBe(false);
+    expect(onCommit).not.toHaveBeenCalled();
+
+    const replacement: RemoteWindowStreamMediaBinding = {
+      role: 'focus',
+      epoch: 1,
+      mediaStreamId: 'focus-media-1',
+      trackId: 'focus-track-1',
+    };
+    await expect(started.replaceLaneBinding?.(
+      replacement,
+      { type: 'offer', sdp: 'replacement-offer' },
+      sendAnswer,
+    )).resolves.toBe(true);
+    expect(oldTrack.stop).toHaveBeenCalledTimes(1);
+    expect(started.commitDecodedFrame(firstCommit)).toBe(false);
+
+    const newTrack = new MockMediaTrack();
+    newTrack.id = replacement.trackId;
+    const newStream = new MockMediaStream([newTrack]);
+    newStream.id = replacement.mediaStreamId;
+    peer.emitVideoTrack(newStream);
+    const replacementCommit = {
+      ...firstCommit,
+      mediaEpoch: 1,
+      trackId: replacement.trackId,
+      frameId: 0,
+    };
+    expect(started.commitDecodedFrame(replacementCommit)).toBe(true);
+    expect(oldTrack.stop).toHaveBeenCalledTimes(1);
   });
 
   it('negotiates focus-only for a single app window', async () => {

@@ -279,11 +279,11 @@ export interface SessionContextValue {
   sendRemoteWindowInput: (
     sessionId: string,
     payload: Omit<RemoteWindowInputEventPayload, 'requestId'>,
-  ) => void;
+  ) => string;
   resizeRemoteWindowTarget: (
     sessionId: string,
     payload: Omit<RemoteWindowInputEventPayload, 'requestId'>,
-  ) => void;
+  ) => string;
   sendTerminalResize: (sessionId: string, cols?: number | null, rows?: number | null, widthMode?: TerminalWidthMode) => boolean;
   updateSessionViewport: (sessionId: string, visibleRange: TerminalVisibleRange | TerminalViewportState) => void;
   requestScheduleList: (sessionId: string) => void;

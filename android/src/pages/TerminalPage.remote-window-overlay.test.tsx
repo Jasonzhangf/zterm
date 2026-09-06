@@ -250,6 +250,9 @@ describe('TerminalPage remote window overlay', () => {
     ) => ({
       streamId,
       mediaStream,
+      bindings: [{ streamId, mediaPlanVersion: 2, lane: 'focus' as const, mediaEpoch: 0, mediaStream, trackId: 'mock-track' }],
+      commitDecodedFrame: vi.fn(() => true),
+      replaceLaneBinding: vi.fn(async () => false),
       started: {
         requestId: 'rw-start-1',
         streamId,
@@ -459,6 +462,9 @@ describe('TerminalPage remote window overlay', () => {
     ) => ({
       streamId,
       mediaStream,
+      bindings: [{ streamId, mediaPlanVersion: 2, lane: 'focus' as const, mediaEpoch: 0, mediaStream, trackId: 'mock-track' }],
+      commitDecodedFrame: vi.fn(() => true),
+      replaceLaneBinding: vi.fn(async () => false),
       started: {
         requestId: 'rw-start-1',
         streamId,
@@ -713,6 +719,9 @@ describe('TerminalPage remote window overlay', () => {
     ) => ({
       streamId,
       mediaStream,
+      bindings: [{ streamId, mediaPlanVersion: 2, lane: 'focus' as const, mediaEpoch: 0, mediaStream, trackId: 'mock-track' }],
+      commitDecodedFrame: vi.fn(() => true),
+      replaceLaneBinding: vi.fn(async () => false),
       started: {
         requestId: 'rw-start-1',
         streamId,
@@ -824,6 +833,9 @@ describe('TerminalPage remote window overlay', () => {
     ) => ({
       streamId,
       mediaStream,
+      bindings: [{ streamId, mediaPlanVersion: 2, lane: 'focus' as const, mediaEpoch: 0, mediaStream, trackId: 'mock-track' }],
+      commitDecodedFrame: vi.fn(() => true),
+      replaceLaneBinding: vi.fn(async () => false),
       started: {
         requestId: 'rw-start-1',
         streamId,
@@ -906,6 +918,9 @@ describe('TerminalPage remote window overlay', () => {
     ) => ({
       streamId,
       mediaStream,
+      bindings: [{ streamId, mediaPlanVersion: 2, lane: 'focus' as const, mediaEpoch: 0, mediaStream, trackId: 'mock-track' }],
+      commitDecodedFrame: vi.fn(() => true),
+      replaceLaneBinding: vi.fn(async () => false),
       started: {
         requestId: 'rw-start-1',
         streamId,
@@ -1055,6 +1070,9 @@ describe('TerminalPage remote window overlay', () => {
     ) => ({
       streamId,
       mediaStream,
+      bindings: [{ streamId, mediaPlanVersion: 2, lane: 'focus' as const, mediaEpoch: 0, mediaStream, trackId: 'mock-track' }],
+      commitDecodedFrame: vi.fn(() => true),
+      replaceLaneBinding: vi.fn(async () => false),
       started: {
         requestId: 'rw-start-iterm',
         streamId,
