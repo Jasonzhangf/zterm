@@ -1,0 +1,6 @@
+<!-- project-memory:v1 {"category":"path","created_at":"2026-09-05T12:49:44.958436+00:00","id":"zterm-relay-and-route-target","importance":100,"memory_level":3,"review_evidence":[],"review_status":"unreviewed","source_refs":["docs/decisions/2026-07-21-auto-route-and-daemon-release-truth.md","docs/decisions/2026-09-05-runtime-memory-truth.md","native/android/app/src/main/java/com/zterm/android/AndroidConnectionService.java","src/lib/traversal/config.ts"],"tags":["android-service","control-plane","relay","route","tailscale","udp"],"updated_at":"2026-09-05T12:49:44.958436+00:00"} -->
+
+# Relay control and physical route target
+
+Daemon and client actively maintain configured Relay control WebSockets for endpoint, address, machine, presence, and heartbeat/control facts. Relay is control-plane directory truth, not terminal data or client session truth. The confirmed automatic physical route order is LAN, UDP direct, Tailscale, then Relay. IPv4 and IPv6 are address families inside UDP direct, not route tiers. Android Service is the target owner of physical connection state, route selection, heartbeat, and reconnect; UI only projects state/settings and emits typed reconnect or route intents, and foreground/background does not recreate a healthy connection.
+<!-- project-memory:end -->
