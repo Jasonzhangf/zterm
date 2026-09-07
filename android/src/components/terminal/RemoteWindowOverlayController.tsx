@@ -1688,11 +1688,13 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
               binding.lane === 'focus' && binding.mediaStream === committedResult.mediaStream
             )) ?? null,
           );
-          setReceiverDecodedCommit(
+          // React setState(fn) is an updater: passing commitDecodedFrame directly
+          // calls it with previous state (null) -> TypeError reading 'frameId'.
+          setReceiverDecodedCommit(() => (
             typeof committedResult.commitDecodedFrame === 'function'
               ? committedResult.commitDecodedFrame
-              : null,
-          );
+              : null
+          ));
           setReceiverFrameSize(resolveStartedCaptureFrameSize(committedResult.started));
           setReceiverStartupTelemetry(committedResult.startupTelemetry ?? null);
           setCanvasLayout(committedResult.started?.canvasLayout ?? null);
