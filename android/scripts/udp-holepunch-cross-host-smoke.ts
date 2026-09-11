@@ -129,14 +129,33 @@ function nextLine(probe: Probe, matcher: (line: string) => boolean, timeoutMs: n
 }
 
 async function main() {
-  const target = process.env.UDP_HOLEPUNCH_TARGET?.trim() || '100.86.84.63';
+  const target = process.env.UDP_HOLEPUNCH_TARGET?.trim() || 'fanzhang@100.86.84.63';
+  const sshKey = process.env.UDP_HOLEPUNCH_SSH_KEY?.trim() || '';
+  const localTarget = process.env.UDP_HOLEPUNCH_LOCAL_SSH?.trim() || '';
+  const localKey = process.env.UDP_HOLEPUNCH_LOCAL_SSH_KEY?.trim() || '';
   const localPath = join(tmpdir(), `zterm-udp-probe-${Date.now()}.py`);
   const remotePath = `/tmp/zterm-udp-probe-${Date.now()}.py`;
   writeFileSync(localPath, PROBE_SOURCE, 'utf8');
-  const copy = spawnSync('scp', ['-o', 'BatchMode=yes', localPath, `fanzhang@${target}:${remotePath}`], { encoding: 'utf8' });
+  const sshOptions = ['-o', 'BatchMode=yes'];
+  if (sshKey) {
+    sshOptions.push('-i', sshKey);
+  }
+  const copy = spawnSync('scp', [...sshOptions, localPath, `${target}:${remotePath}`], { encoding: 'utf8' });
   if (copy.status !== 0) throw new Error(`scp probe failed: ${copy.stderr || copy.stdout}`);
-  const local = createProbe('local', 'python3', ['-u', localPath]);
-  const remote = createProbe('air', 'ssh', ['-o', 'BatchMode=yes', `fanzhang@${target}`, 'python3', '-u', remotePath]);
+  let local: Probe;
+  if (localTarget) {
+    const localPathRemote = `/tmp/zterm-udp-probe-${Date.now()}.py`;
+    const localSshOptions = ['-o', 'BatchMode=yes'];
+    if (localKey) {
+      localSshOptions.push('-i', localKey);
+    }
+    const localCopy = spawnSync('scp', [...localSshOptions, localPath, `${localTarget}:${localPathRemote}`], { encoding: 'utf8' });
+    if (localCopy.status !== 0) throw new Error(`scp local probe failed: ${localCopy.stderr || localCopy.stdout}`);
+    local = createProbe('local', 'ssh', [...localSshOptions, localTarget, 'python3', '-u', localPathRemote]);
+  } else {
+    local = createProbe('local', 'python3', ['-u', localPath]);
+  }
+  const remote = createProbe('remote', 'ssh', [...sshOptions, target, 'python3', '-u', remotePath]);
   try {
     await nextLine(local, (line) => line.startsWith('SRFLX '), 20_000);
     await nextLine(remote, (line) => line.startsWith('SRFLX '), 20_000);
