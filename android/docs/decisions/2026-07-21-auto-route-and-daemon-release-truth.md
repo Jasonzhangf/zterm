@@ -18,21 +18,24 @@ Android/WebView. Only the actual authenticated transport handshake records
 route success. A Relay control socket's observed TCP source port is not a
 reusable daemon listener and must never be published as public direct truth.
 
-## 2026-09-11 Direct-Only WebRTC Lock
+## 2026-09-11 Direct-First WebRTC and Low-Priority TURN Lock
 
-`transportMode=webrtc` is the UDP-hole-punch mode. In that mode Relay/TURN must
-not be accepted as the result path:
+The connection order is:
+
+```text
+LAN -> UDP direct (rtc-direct) -> Tailscale -> IPv6/IPv4 direct families -> TURN relay fallback
+```
+
+TURN relay is allowed only after LAN, UDP direct, and Tailscale have all
+failed. It is implementation fallback, not UDP-hole-punch success:
 
 - Relay WebSockets are signaling-only for `rtc-direct` (offer/answer/ICE/error).
 - The RTC data channel carries terminal payload; the signaling WebSocket must
   not carry terminal frames.
 - ICE configuration for `rtc-direct` is STUN-only (`turn:` converted to
   `stun:` without TURN credentials) and `iceTransportPolicy=all`.
-- `buildTraversalPlan` must not add an `rtc-relay` candidate in `webrtc` mode.
-  If direct ICE cannot connect, that mode fails closed instead of silently
-  switching to TURN forwarding.
-- Auto mode may still build the explicit `rtc-relay` fallback candidate; that
-  is separate from the direct-only WebRTC contract.
+- `buildTraversalPlan` must add `rtc-relay` after the direct tiers so TURN is
+  the lowest-priority fallback.
 - A UDP-direct gate must reject a nominated ICE pair whose local or remote
   candidate type is `relay`, and must verify a payload marker over the data
   channel after the selected pair is known.

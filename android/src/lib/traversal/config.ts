@@ -314,7 +314,7 @@ export function buildTraversalPlan(
         iceTransportPolicy: 'all',
       });
     }
-    if (mode !== 'webrtc' && relayIceServers.length > 0 && signalUrl && (!relaySignalUrl || relayHostId)) {
+    if (relayIceServers.length > 0 && signalUrl && (!relaySignalUrl || relayHostId)) {
       const parsedSignalUrl = new URL(signalUrl);
       if (relaySignalUrl && relayHostId) {
         parsedSignalUrl.searchParams.set('hostId', relayHostId);
