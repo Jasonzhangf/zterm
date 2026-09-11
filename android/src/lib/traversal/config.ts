@@ -105,19 +105,29 @@ function buildIceServers(settings: TraversalSettingsSource): TraversalIceServer[
   }];
 }
 
+const PUBLIC_UDP_HOLE_PUNCH_STUN_HOSTS: readonly string[] = [
+  'stun:stun.l.google.com:19302',
+  'stun:stun1.l.google.com:19302',
+  'stun:stun2.l.google.com:19302',
+  'stun:stun.cloudflare.com:3478',
+];
+
 function buildDirectIceServers(settings: TraversalSettingsSource): TraversalIceServer[] {
+  const servers: TraversalIceServer[] = [];
   const turnUrl = settings.traversalRelay?.turnUrl?.trim() || settings.turnServerUrl?.trim() || '';
-  if (!turnUrl) {
-    return [];
+  if (turnUrl) {
+    const stunUrl = turnUrl
+      .replace(/^turns:/i, 'stuns:')
+      .replace(/^turn:/i, 'stun:')
+      .replace(/\?.*$/, '');
+    if (stunUrl !== turnUrl && /^stuns?:/i.test(stunUrl)) {
+      servers.push({ urls: stunUrl });
+    }
   }
-  const stunUrl = turnUrl
-    .replace(/^turns:/i, 'stuns:')
-    .replace(/^turn:/i, 'stun:')
-    .replace(/\?.*$/, '');
-  if (stunUrl === turnUrl || !/^stuns?:/i.test(stunUrl)) {
-    return [];
+  for (const url of PUBLIC_UDP_HOLE_PUNCH_STUN_HOSTS) {
+    servers.push({ urls: url });
   }
-  return [{ urls: stunUrl }];
+  return servers;
 }
 
 function addDirectCandidate(

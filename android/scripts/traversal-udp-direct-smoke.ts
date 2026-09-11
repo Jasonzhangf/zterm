@@ -33,10 +33,19 @@ function url(base: string, path: string) {
 }
 
 function directIceServer(turnUrl?: string) {
-  if (!turnUrl) return [];
-  const stunUrl = turnUrl.replace(/^turns:/i, 'stuns:').replace(/^turn:/i, 'stun:').replace(/\?.*$/, '');
-  if (!/^stuns?:/i.test(stunUrl)) throw new Error(`TURN URL cannot be converted to STUN: ${turnUrl}`);
-  return [{ urls: stunUrl }];
+  const servers: Array<{ urls: string }> = [];
+  if (turnUrl) {
+    const stunUrl = turnUrl.replace(/^turns:/i, 'stuns:').replace(/^turn:/i, 'stun:').replace(/\?.*$/, '');
+    if (!/^stuns?:/i.test(stunUrl)) throw new Error(`TURN URL cannot be converted to STUN: ${turnUrl}`);
+    servers.push({ urls: stunUrl });
+  }
+  servers.push(
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun.cloudflare.com:3478' },
+  );
+  return servers;
 }
 
 async function login() {
