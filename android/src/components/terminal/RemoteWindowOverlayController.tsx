@@ -2627,14 +2627,32 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
 	    return resolveZoomedContentRect(surfaceSize, displaySourceSize, viewport, displayMode);
 	  }, [compositeLayout, focusedWindowSlot, fullscreenDisplayMode, fullscreenViewport, receiverFrameSize, state, surfaceSize]);
 
-  const videoContentStyle = lockedSurfaceLayout
+  const embeddedFloatingProjection = embedded && state.phase === 'targetLocked' && state.mode === 'floating';
+  const embeddedProjectionStyle = embeddedFloatingProjection && lockedSurfaceLayout
     ? {
-        ...styles.videoContentFrame,
+        position: 'absolute' as const,
         left: lockedSurfaceLayout.content.left,
         top: lockedSurfaceLayout.content.top,
         width: lockedSurfaceLayout.content.width,
         height: lockedSurfaceLayout.content.height,
-    }
+      }
+    : null;
+  const videoContentStyle = lockedSurfaceLayout
+    ? embeddedFloatingProjection
+      ? {
+          ...styles.videoContentFrame,
+          left: 0,
+          top: 0,
+          width: '100%',
+          height: '100%',
+        }
+      : {
+          ...styles.videoContentFrame,
+          left: lockedSurfaceLayout.content.left,
+          top: lockedSurfaceLayout.content.top,
+          width: lockedSurfaceLayout.content.width,
+          height: lockedSurfaceLayout.content.height,
+        }
     : styles.videoContentFallback;
 
   // 组合推流：焦点窗口（主画面裁切放大）。双流（有 overview）时主画面直接显示
@@ -2740,8 +2758,14 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
           ? { height: `${floatingVideoHeightPx}px` }
           : { maxHeight: 'min(52vh, 420px)' }),
       }
-    : state.phase === 'targetLocked' && embedded
-      ? { ...styles.videoPlaceholder, width: '100%', height: '100%', minHeight: 0, flex: '1 1 auto' }
+    : embeddedFloatingProjection
+      ? {
+          ...styles.videoPlaceholder,
+          width: '100%',
+          height: '100%',
+          minHeight: 0,
+          flex: '1 1 auto',
+        }
       : styles.videoPlaceholder;
   const screenshotFeedback = (() => {
     switch (screenshotStatus.phase) {
@@ -2832,9 +2856,17 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       }}
       style={videoSurfaceStyle}
     >
-      <div data-testid="remote-window-video-content" style={videoContentStyle}>
-        {lockedVideoContent}
-      </div>
+      {embeddedProjectionStyle ? (
+        <div data-testid="remote-window-video-projection" style={embeddedProjectionStyle}>
+          <div data-testid="remote-window-video-content" style={videoContentStyle}>
+            {lockedVideoContent}
+          </div>
+        </div>
+      ) : (
+        <div data-testid="remote-window-video-content" style={videoContentStyle}>
+          {lockedVideoContent}
+        </div>
+      )}
       {compositeLayout ? (
         <div data-testid="remote-window-composite-strip" data-no-drag="true" style={styles.compositeStrip}>
           <div

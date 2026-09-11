@@ -2935,6 +2935,7 @@ describe('RemoteWindowOverlay', () => {
     const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string) => ({
       streamId,
       mediaStream,
+      started: makeStartedPayload(streamId, 'app-1', 1351, 720),
     }));
 
     render(
@@ -2958,21 +2959,31 @@ describe('RemoteWindowOverlay', () => {
         y: 0,
         left: 0,
         top: 0,
-        right: 300,
-        bottom: 200,
-        width: 300,
-        height: 200,
+        right: 543,
+        bottom: 543,
+        width: 543,
+        height: 543,
         toJSON: () => ({}),
       }),
     });
     await flushRemoteWindowSurfaceLayout();
 
-    const content = screen.getByTestId('remote-window-video-content');
     await waitFor(() => {
-      expect(Number.parseFloat(content.style.left)).toBeCloseTo(7.1, 1);
-      expect(Number.parseFloat(content.style.width)).toBeCloseTo(285.7, 1);
+      const projection = screen.getByTestId('remote-window-video-projection');
+      const content = screen.getByTestId('remote-window-video-content');
+      const projectionWidth = Number.parseFloat(projection.style.width);
+      const projectionHeight = Number.parseFloat(projection.style.height);
+      expect(surface.style.width).toBe('100%');
+      expect(surface.style.height).toBe('100%');
+      expect(projectionWidth / projectionHeight).toBeCloseTo(1351 / 720, 2);
+      expect(projectionWidth).toBeCloseTo(543, 1);
+      expect(projectionHeight).toBeCloseTo(289.4, 1);
+      expect(Number.parseFloat(projection.style.left)).toBeCloseTo(0, 1);
+      expect(Number.parseFloat(projection.style.top)).toBeCloseTo(126.8, 1);
+      expect(Number.parseFloat(content.style.left)).toBeCloseTo(0, 1);
+      expect(content.style.width).toBe('100%');
       expect(Number.parseFloat(content.style.top)).toBeCloseTo(0, 1);
-      expect(Number.parseFloat(content.style.height)).toBeCloseTo(200, 1);
+      expect(content.style.height).toBe('100%');
     });
   });
 
