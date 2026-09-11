@@ -264,7 +264,10 @@ describe('buildTraversalPlan', () => {
       path: 'rtc-direct',
       endpoint: 'rtc-direct:daemon-host-a',
       iceTransportPolicy: 'all',
-      iceServers: [{ urls: 'stun:turn.example.com:3478' }],
+      iceServers: expect.arrayContaining([
+        { urls: 'stun:turn.example.com:3478' },
+        { urls: 'stun:stun.l.google.com:19302' },
+      ]),
     });
     expect(JSON.stringify(plan.candidates.find((candidate) => candidate.path === 'rtc-direct'))).not.toContain('secret');
   });
@@ -477,7 +480,10 @@ describe('buildTraversalPlan', () => {
       signalUrl: 'ws://159.75.134.56/relay/ws/client?token=access-1&hostId=daemon-host-a&deviceId=tablet-1',
       endpoint: 'rtc-direct:daemon-host-a',
       iceTransportPolicy: 'all',
-      iceServers: [{ urls: 'stun:claw.codewhisper.cc:3479' }],
+      iceServers: expect.arrayContaining([
+        { urls: 'stun:claw.codewhisper.cc:3479' },
+        { urls: 'stun:stun.l.google.com:19302' },
+      ]),
     }));
     expect(plan.candidates.map((candidate) => candidate.path)).toEqual(['rtc-direct', 'rtc-relay']);
     expect(plan.candidates).toContainEqual(expect.objectContaining({

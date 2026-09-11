@@ -268,8 +268,8 @@ export function createRtcBridgeServer(options: CreateRtcBridgeServerOptions) {
         peer.transport.attach(peer.peerConnection, channel, handlers);
       };
     };
-    // ICE connection timeout: fail after 15 seconds if not connected
-    const connectionTimeoutMs = 15000;
+    // Direct UDP hole punching can need more than one STUN cycle on cross-NAT paths.
+    const connectionTimeoutMs = 30000;
     const connectionTimeout = globalThis.setTimeout(() => {
       if (!peer.ready && peer.peerConnection === peerConnection) {
         peer.emitSignal({

@@ -679,7 +679,10 @@ describe('TraversalSocket reconnect', () => {
     expect(MockRTCPeerConnection.instances).toHaveLength(1);
     expect(MockRTCPeerConnection.instances[0].config).toMatchObject({
       iceTransportPolicy: 'all',
-      iceServers: [{ urls: 'stun:relay.example.test:3478' }],
+      iceServers: expect.arrayContaining([
+        { urls: 'stun:relay.example.test:3478' },
+        { urls: 'stun:stun.l.google.com:19302' },
+      ]),
     });
     expect(JSON.stringify(MockRTCPeerConnection.instances[0].config)).not.toContain('turn-secret');
     const sentMessages = MockWebSocket.instances[0].sent.map((item) => JSON.parse(String(item)));
@@ -708,7 +711,7 @@ describe('TraversalSocket reconnect', () => {
     signalSocket.onmessage?.({
       data: JSON.stringify({
         type: 'rtc-candidate',
-        payload: { candidate: 'candidate:early typ host', sdpMid: '0', sdpMLineIndex: 0 },
+        payload: { candidate: 'candidate:early 1 udp 1 203.0.113.10 40000 typ srflx', sdpMid: '0', sdpMLineIndex: 0 },
       }),
     } as MessageEvent);
     await flushMicrotasks();

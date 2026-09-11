@@ -48,10 +48,19 @@ function resolveSerial() {
 }
 
 function directIceServer(turnUrl?: string) {
-  if (!turnUrl) return [];
-  const stunUrl = turnUrl.replace(/^turns:/i, 'stuns:').replace(/^turn:/i, 'stun:').replace(/\?.*$/, '');
-  if (!/^stuns?:/i.test(stunUrl)) throw new Error(`TURN URL cannot be converted to STUN: ${turnUrl}`);
-  return [{ urls: stunUrl }];
+  const servers: Array<{ urls: string }> = [];
+  if (turnUrl) {
+    const stunUrl = turnUrl.replace(/^turns:/i, 'stuns:').replace(/^turn:/i, 'stun:').replace(/\?.*$/, '');
+    if (!/^stuns?:/i.test(stunUrl)) throw new Error(`TURN URL cannot be converted to STUN: ${turnUrl}`);
+    servers.push({ urls: stunUrl });
+  }
+  servers.push(
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun.cloudflare.com:3478' },
+  );
+  return servers;
 }
 
 async function login() {
@@ -173,16 +182,51 @@ async function runDeviceDirectCheck(auth: any, iceServers: any[], serial: string
   signalUrl.searchParams.set('hostId', relayHostId);
   signalUrl.searchParams.set('deviceId', clientDeviceId);
   const rejectTailscaleCandidates = process.env.UDP_DIRECT_DEVICE_ALLOW_TAILSCALE !== '1';
+  const publicOnlyCandidates = process.env.UDP_DIRECT_DEVICE_PUBLIC_ONLY === '1';
   const expression = `(async () => {
     const signalUrl = new URL(${JSON.stringify(signalUrl.toString())});
     const iceServers = ${JSON.stringify(iceServers)};
     const rejectTailscaleCandidates = ${JSON.stringify(rejectTailscaleCandidates)};
+    const publicOnlyCandidates = ${JSON.stringify(publicOnlyCandidates)};
     const signalSocket = new WebSocket(signalUrl.toString());
     const peer = new RTCPeerConnection({ iceServers, iceTransportPolicy: 'all' });
     const channel = peer.createDataChannel('zterm', { ordered: true });
     const signalTypes = [];
+    const sentCandidates = [];
+    const receivedCandidates = [];
     let marker = null;
     let filteredTailscaleCandidates = 0;
+    const captureIceSnapshot = async () => {
+      const stats = await peer.getStats();
+      const candidates = [];
+      const pairs = [];
+      stats.forEach((report) => {
+        if (report.type === 'local-candidate' || report.type === 'remote-candidate') {
+          candidates.push({
+            id: report.id,
+            kind: report.type,
+            type: report.candidateType,
+            address: report.address || report.ip,
+            port: report.port,
+            protocol: report.protocol,
+          });
+        }
+        if (report.type === 'candidate-pair') {
+          pairs.push({
+            state: report.state,
+            nominated: report.nominated,
+            writable: report.writable,
+            bytesSent: report.bytesSent,
+            bytesReceived: report.bytesReceived,
+            selected: report.selected,
+            localCandidateId: report.localCandidateId,
+            remoteCandidateId: report.remoteCandidateId,
+            rttMs: typeof report.currentRoundTripTime === 'number' ? Math.round(report.currentRoundTripTime * 1000) : undefined,
+          });
+        }
+      });
+      return { candidates, pairs, sentCandidates, receivedCandidates, filteredTailscaleCandidates, marker };
+    };
     const isTailscaleAddress = (value) => {
       const address = String(value || '');
       return /^100\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\\./.test(address)
@@ -192,18 +236,30 @@ async function runDeviceDirectCheck(auth: any, iceServers: any[], serial: string
       if (candidate?.address) return candidate.address;
       const parts = String(candidate?.candidate || '').split(' ');
       const typIndex = parts.indexOf('typ');
-      return typIndex > 0 ? parts[typIndex - 1] : '';
+      return typIndex > 0 ? parts[typIndex - 2] : '';
+    };
+    const candidateType = (candidate) => {
+      const parts = String(candidate?.candidate || '').split(' ');
+      const typIndex = parts.indexOf('typ');
+      return typIndex > 0 ? parts[typIndex + 1] : '';
+    };
+    const isPublicCandidate = (candidate) => {
+      return candidateType(candidate) === 'srflx' || candidateType(candidate) === 'prflx';
     };
     const isTailscaleCandidate = (candidate) => {
       const raw = String(candidate?.candidate || candidate || '');
       return /100\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\\.|fd7a:115c:a1e0:/i.test(raw)
         || isTailscaleAddress(candidateAddress(candidate));
     };
-    const stripTailscaleCandidates = (sdp) => {
+    const shouldRejectCandidate = (candidate) => {
+      return (rejectTailscaleCandidates && isTailscaleCandidate(candidate))
+        || (publicOnlyCandidates && !isPublicCandidate(candidate));
+    };
+    const stripRejectedCandidates = (sdp) => {
       if (typeof sdp !== 'string') return sdp;
       return sdp.split(new RegExp("\\\\r?\\\\n")).filter((line) => {
         if (!line.startsWith('a=candidate:')) return true;
-        return !isTailscaleCandidate({ candidate: line.slice(2) });
+        return !shouldRejectCandidate({ candidate: line.slice(2) });
       }).join("\\r\\n");
     };
     const cleanup = () => {
@@ -247,6 +303,9 @@ async function runDeviceDirectCheck(auth: any, iceServers: any[], serial: string
         if (rejectTailscaleCandidates && (isTailscaleAddress(pair.local.address) || isTailscaleAddress(pair.remote.address))) {
           throw new Error('Tailscale ICE pair rejected: ' + JSON.stringify({ pair, candidates, signalTypes, filteredTailscaleCandidates }));
         }
+        if (publicOnlyCandidates && (!['srflx', 'prflx'].includes(pair.local.type) || !['srflx', 'prflx'].includes(pair.remote.type))) {
+          throw new Error('non-public ICE pair rejected: ' + JSON.stringify({ pair, candidates, signalTypes, filteredTailscaleCandidates }));
+        }
         settled = true;
         cleanup();
         resolve({ ok: true, signalTypes, selectedPair: pair, marker, filteredTailscaleCandidates, candidates });
@@ -255,7 +314,7 @@ async function runDeviceDirectCheck(auth: any, iceServers: any[], serial: string
         try {
           signalSocket.send(JSON.stringify({ type: 'rtc-init', payload: { iceServers, iceTransportPolicy: 'all' } }));
           const offer = await peer.createOffer();
-          offer.sdp = stripTailscaleCandidates(offer.sdp);
+          offer.sdp = stripRejectedCandidates(offer.sdp);
           await peer.setLocalDescription(offer);
           signalSocket.send(JSON.stringify({ type: 'rtc-offer', payload: { sdp: offer.sdp, type: offer.type } }));
         } catch (error) {
@@ -267,17 +326,26 @@ async function runDeviceDirectCheck(auth: any, iceServers: any[], serial: string
           const message = JSON.parse(event.data);
           signalTypes.push(message.type);
           if (message.type === 'rtc-answer') {
-            const sdp = stripTailscaleCandidates(message.payload?.sdp || '');
+            const sdp = stripRejectedCandidates(message.payload?.sdp || '');
             await peer.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp }));
           }
           if (message.type === 'rtc-candidate' && message.payload?.candidate) {
-            if (rejectTailscaleCandidates && isTailscaleCandidate(message.payload)) {
+            receivedCandidates.push({
+              type: candidateType(message.payload),
+              address: candidateAddress(message.payload),
+              port: message.payload.port,
+              protocol: message.payload.protocol,
+            });
+            if (shouldRejectCandidate(message.payload)) {
               filteredTailscaleCandidates += 1;
             } else {
               await peer.addIceCandidate(new RTCIceCandidate(message.payload));
             }
           }
-          if (message.type === 'rtc-error') throw new Error(message.payload?.message || 'rtc-error');
+          if (message.type === 'rtc-error') {
+            const snapshot = await captureIceSnapshot();
+            throw new Error('rtc-error: ' + (message.payload?.message || 'rtc-error') + ' ' + JSON.stringify(snapshot));
+          }
         } catch (error) {
           fail(error);
         }
@@ -285,7 +353,13 @@ async function runDeviceDirectCheck(auth: any, iceServers: any[], serial: string
       peer.onicecandidate = (event) => {
         if (!event.candidate) return;
         const payload = event.candidate.toJSON();
-        if (rejectTailscaleCandidates && isTailscaleCandidate(payload)) {
+        sentCandidates.push({
+          type: candidateType(payload),
+          address: candidateAddress(payload),
+          port: payload.port,
+          protocol: payload.protocol,
+        });
+        if (shouldRejectCandidate(payload)) {
           filteredTailscaleCandidates += 1;
           return;
         }
@@ -306,7 +380,7 @@ async function runDeviceDirectCheck(auth: any, iceServers: any[], serial: string
       channel.onerror = () => fail(new Error('data channel error'));
       signalSocket.onerror = () => fail(new Error('signaling websocket error'));
       signalSocket.onclose = () => { if (!settled) fail(new Error('signaling websocket closed')); };
-      setTimeout(() => fail(new Error('UDP direct device timeout')), 30000);
+      setTimeout(async () => fail(new Error('UDP direct device timeout: ' + JSON.stringify(await captureIceSnapshot()))), 30000);
     });
   })()`;
   return await cdpEval(serial, expression);
