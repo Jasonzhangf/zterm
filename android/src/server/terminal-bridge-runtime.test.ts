@@ -298,6 +298,70 @@ describe('terminal bridge runtime message scheduling', () => {
     wss.close();
   });
 
+  it('detaches mux subscribers even when connection.closed was already set by a stale heartbeat closeout', async () => {
+    const { connection, detachSubscriberTransportOnly, runtime, sessions, wss } = createRuntime(async () => {});
+    connection.boundSubscriberId = null;
+    connection.muxChannels = new Map([
+      ['channel-a', 'subscriber-a'],
+      ['channel-b', 'subscriber-b'],
+    ]);
+    const subscriberA = {
+      id: 'subscriber-a',
+      transportId: connection.transportId,
+      transport: connection.transport,
+      sessionName: 'alpha',
+      mirrorKey: 'alpha',
+      pendingPasteImage: null,
+      pendingAttachFile: null,
+    } as TerminalTransportSubscriber;
+    const subscriberB = {
+      id: 'subscriber-b',
+      transportId: connection.transportId,
+      transport: connection.transport,
+      sessionName: 'beta',
+      mirrorKey: 'beta',
+      pendingPasteImage: null,
+      pendingAttachFile: null,
+    } as TerminalTransportSubscriber;
+    sessions.set(subscriberA.id, subscriberA);
+    sessions.set(subscriberB.id, subscriberB);
+    connection.closed = true;
+    const ws = new FakeWebSocket();
+
+    runtime.handleWebSocketConnection(ws as never, createRequest());
+    ws.emit('close', 1006, Buffer.from('late network close after heartbeat stale closeout'));
+    await flushMicrotasks();
+
+    expect(detachSubscriberTransportOnly).toHaveBeenCalledWith(
+      subscriberA,
+      'websocket closed',
+      connection.transportId,
+    );
+    expect(detachSubscriberTransportOnly).toHaveBeenCalledWith(
+      subscriberB,
+      'websocket closed',
+      connection.transportId,
+    );
+    expect(connection.muxChannels.size).toBe(0);
+    wss.close();
+  });
+
+  it('does not treat websocket pong as app heartbeat or adaptive lease refresh', async () => {
+    const { connection, refreshAdaptiveWidthLeaseHeartbeat, runtime, wss } = createRuntime(async () => {});
+    connection.lastInboundAt = 1;
+    connection.wsAlive = false;
+    const ws = new FakeWebSocket();
+
+    runtime.handleWebSocketConnection(ws as never, createRequest());
+    ws.emit('pong');
+    await flushMicrotasks();
+
+    expect(connection.lastInboundAt).toBe(1);
+    expect(connection.wsAlive).toBe(true);
+    expect(refreshAdaptiveWidthLeaseHeartbeat).not.toHaveBeenCalled();
+    wss.close();
+  });
+
   it('does not run a queued attach after the physical websocket closes', async () => {
     const events: string[] = [];
     let releaseHead: (() => void) | undefined;
