@@ -131,31 +131,39 @@ function nextLine(probe: Probe, matcher: (line: string) => boolean, timeoutMs: n
 async function main() {
   const target = process.env.UDP_HOLEPUNCH_TARGET?.trim() || 'fanzhang@100.86.84.63';
   const sshKey = process.env.UDP_HOLEPUNCH_SSH_KEY?.trim() || '';
+  const password = process.env.UDP_HOLEPUNCH_SSH_PASSWORD?.trim() || '';
   const localTarget = process.env.UDP_HOLEPUNCH_LOCAL_SSH?.trim() || '';
   const localKey = process.env.UDP_HOLEPUNCH_LOCAL_SSH_KEY?.trim() || '';
+  const localPassword = process.env.UDP_HOLEPUNCH_LOCAL_SSH_PASSWORD?.trim() || '';
   const localPath = join(tmpdir(), `zterm-udp-probe-${Date.now()}.py`);
   const remotePath = `/tmp/zterm-udp-probe-${Date.now()}.py`;
   writeFileSync(localPath, PROBE_SOURCE, 'utf8');
-  const sshOptions = ['-o', 'BatchMode=yes'];
+  const sshOptions = password ? [] : ['-o', 'BatchMode=yes'];
   if (sshKey) {
     sshOptions.push('-i', sshKey);
   }
-  const copy = spawnSync('scp', [...sshOptions, localPath, `${target}:${remotePath}`], { encoding: 'utf8' });
+  const passwordArgs = password ? ['-p', password] : [];
+  const copyBase = [...sshOptions, localPath, `${target}:${remotePath}`];
+  const copy = spawnSync(password ? 'sshpass' : 'scp', password ? [...passwordArgs, 'scp', ...copyBase] : copyBase, { encoding: 'utf8' });
   if (copy.status !== 0) throw new Error(`scp probe failed: ${copy.stderr || copy.stdout}`);
   let local: Probe;
   if (localTarget) {
     const localPathRemote = `/tmp/zterm-udp-probe-${Date.now()}.py`;
-    const localSshOptions = ['-o', 'BatchMode=yes'];
+    const localSshOptions = localPassword ? [] : ['-o', 'BatchMode=yes'];
     if (localKey) {
       localSshOptions.push('-i', localKey);
     }
-    const localCopy = spawnSync('scp', [...localSshOptions, localPath, `${localTarget}:${localPathRemote}`], { encoding: 'utf8' });
+    const localPasswordArgs = localPassword ? ['-p', localPassword] : [];
+    const localCopyBase = [...localSshOptions, localPath, `${localTarget}:${localPathRemote}`];
+    const localCopy = spawnSync(localPassword ? 'sshpass' : 'scp', localPassword ? [...localPasswordArgs, 'scp', ...localCopyBase] : localCopyBase, { encoding: 'utf8' });
     if (localCopy.status !== 0) throw new Error(`scp local probe failed: ${localCopy.stderr || localCopy.stdout}`);
-    local = createProbe('local', 'ssh', [...localSshOptions, localTarget, 'python3', '-u', localPathRemote]);
+    const localRunArgs = [...localSshOptions, localTarget, 'python3', '-u', localPathRemote];
+    local = createProbe('local', localPassword ? 'sshpass' : 'ssh', localPassword ? [...localPasswordArgs, 'ssh', ...localRunArgs] : localRunArgs);
   } else {
     local = createProbe('local', 'python3', ['-u', localPath]);
   }
-  const remote = createProbe('remote', 'ssh', [...sshOptions, target, 'python3', '-u', remotePath]);
+  const remoteRunArgs = [...sshOptions, target, 'python3', '-u', remotePath];
+  const remote = createProbe('remote', password ? 'sshpass' : 'ssh', password ? [...passwordArgs, 'ssh', ...remoteRunArgs] : remoteRunArgs);
   try {
     await nextLine(local, (line) => line.startsWith('SRFLX '), 20_000);
     await nextLine(remote, (line) => line.startsWith('SRFLX '), 20_000);
@@ -165,13 +173,14 @@ async function main() {
     await delay(22_000);
     const localResult = local.stdout.find((line) => line.startsWith('RESULT '));
     const remoteResult = remote.stdout.find((line) => line.startsWith('RESULT '));
-    const received = [...local.stdout, ...remote.stdout].some((line) => line.startsWith('RECV '));
+    const localReceived = local.stdout.some((line) => line.startsWith('RECV '));
+    const remoteReceived = remote.stdout.some((line) => line.startsWith('RECV '));
     process.stdout.write(JSON.stringify({
-      ok: received,
-      local: { srflx: local.srflx, result: localResult },
-      remote: { srflx: remote.srflx, result: remoteResult },
+      ok: localReceived && remoteReceived,
+      local: { srflx: local.srflx, result: localResult, received: localReceived },
+      remote: { srflx: remote.srflx, result: remoteResult, received: remoteReceived },
     }, null, 2) + '\n');
-    if (!received) process.exitCode = 1;
+    if (!localReceived || !remoteReceived) process.exitCode = 1;
   } finally {
     local.child.kill('SIGINT');
     remote.child.kill('SIGINT');
