@@ -4,7 +4,10 @@ import { WebSocket, WebSocketServer, type RawData } from 'ws';
 import { createRtcBridgeServer, type RtcServerTransport, type SignalMessage } from './rtc-bridge';
 import type { TerminalTransportSubscriber } from './terminal-runtime';
 import type { DaemonTransportConnection } from './terminal-transport-runtime';
-import { markTransportConnectionInboundActivity } from './terminal-transport-runtime';
+import {
+  markTransportConnectionInboundActivity,
+  markTransportConnectionPong,
+} from './terminal-transport-runtime';
 
 export interface TerminalBridgeRuntimeDeps {
   requiredAuthToken: string;
@@ -161,9 +164,6 @@ export function createTerminalBridgeRuntime(
   }
 
   function detachConnectionSubscribers(connection: DaemonTransportConnection, reason: string) {
-    if (connection.closed) {
-      return;
-    }
     connection.closed = true;
     const subscriberIds = new Set<string>();
     if (connection.boundSubscriberId) {
@@ -228,8 +228,7 @@ export function createTerminalBridgeRuntime(
     );
 
     ws.on('pong', () => {
-      markTransportConnectionInboundActivity(connection);
-      refreshBoundAdaptiveLease(connection);
+      markTransportConnectionPong(connection);
     });
 
     ws.on('message', (rawData, isBinary) => {

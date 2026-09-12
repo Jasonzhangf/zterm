@@ -108,10 +108,14 @@ describe('server transport/session lifecycle truth gates', () => {
   it('detaches bound websocket transports instead of closing logical sessions on ws close/error', () => {
     const source = readBridgeRuntimeSource();
     const closeBlock = extractBlock(source, "ws.on('close'");
+    const pongBlock = extractBlock(source, "ws.on('pong'", 80);
     const errorBlock = extractBlock(source, "ws.on('error'");
     const detachBlock = extractBlock(source, 'function detachConnectionSubscribers', 900);
     expect(closeBlock).toContain("detachConnectionSubscribers(connection, 'websocket closed')");
     expect(closeBlock).not.toContain("closeTransportSubscriber(session, 'websocket closed', false)");
+    expect(pongBlock).toContain('markTransportConnectionPong(connection)');
+    expect(pongBlock).not.toContain('markTransportConnectionInboundActivity(connection)');
+    expect(pongBlock).not.toContain('refreshBoundAdaptiveLease(connection)');
     expect(errorBlock).toContain("detachConnectionSubscribers(connection, `websocket error: ${error.message}`)");
     expect(errorBlock).not.toContain("closeTransportSubscriber(session, `websocket error: ${error.message}`, false)");
     expect(detachBlock).toContain('connection.boundSubscriberId');

@@ -340,3 +340,12 @@ Packaged Electron app.asar 内 DevTools 默认被禁用。`--remote-debugging-po
 - Missing `android/CACHE.md` confirmed; no replacement file created.
 - Architecture mapping: range/body publication -> `daemon.buffer_publisher`; shared send budget -> physical `daemon.transport_subscriber` boundary; follow/reading/renderBottomIndex -> `client.renderer_window`; idempotency ingress -> `daemon.control_gateway` into existing `daemon.control_center`.
 - First implementation constraint: range responses need an independent FIFO lane, not live pending-latest, so request range/requestSentAt cannot be swallowed by live coalescing.
+
+# 2026-09-12 daemon stale transport release closeout
+
+- Symptom: Android app-level heartbeat stops, but daemon keeps physical subscriber / mirror capture / adaptive width lease alive while the WebSocket remains open.
+- First divergence: `ws.on('pong')` refreshed `lastInboundAt` and adaptive lease heartbeat. WebSocket auto-pong is transport-frame liveness only; it is not an app-level `mux-ping` / mux message.
+- Root-cause owner: `android/src/server/terminal-bridge-runtime.ts` physical WebSocket ingress; transport liveness fact is owned by `terminal-transport-runtime.ts`.
+- Fix: pong now only sets `wsAlive`; `lastInboundAt` and adaptive lease are refreshed only by actual inbound mux messages. The stale sweep continues through `detachSubscriberTransportOnly` -> mux subscriber release -> transport close, without killing tmux.
+- Closeout race: removed the `connection.closed` early return in `detachConnectionSubscribers`, so a late physical close after stale sweep still clears any remaining mux subscriber registry entries.
+- Evidence so far: targeted bridge/daemon/detached tests 47/47; prepared daemon truth 5/5; typecheck PASS; feature registry 13 files / 104 tests PASS; `git diff --check` PASS; daemon release artifact rebuilt locally.
