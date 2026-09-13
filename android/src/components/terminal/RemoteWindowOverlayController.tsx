@@ -1618,6 +1618,9 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     // 缩略图 drawImage + 切换瞬间主画面低清占位（同连接双流不进 canvas 预览流饿死 focus 路径）。
     setReceiverPlaybackBinding(null);
     setReceiverDecodedCommit(null);
+    // Selecting a covered window must make it the remote foreground target
+    // before any pointer/gesture input can be routed to the new stream.
+    updateFocus?.(targetSessionId, focusStreamId, effectiveTarget);
     void startStream(targetSessionId, effectiveTarget, focusStreamId, {
       videoProfile,
       purpose: 'focus',
