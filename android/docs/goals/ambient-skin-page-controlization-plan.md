@@ -4,7 +4,7 @@
 
 先完成 zterm Android 生产页面的**控件化**，再做 **Ambient CSS 光影效果**。
 
-控件化目标不是复制 CSS 到每个页面，而是把现在 352 个 `<button>`、60 个 `<input>`、9 个 `<select>`、16 个 `<textarea>` 收拢成有限的共享控件 owner，再让页面消费共享控件。
+控件化目标不是复制 CSS 到每个页面，而是把生产页面里散写的原生控件收拢成有限的共享控件 owner，再让页面消费共享控件。当前扫描已从初期的 352 个 `<button>` / 60 个 `<input>` / 9 个 `<select>` / 16 个 `<textarea>` 降到非 Prototype、非 server 的生产代码中 162 个 `<button>` / 32 个 `<input>` / 6 个 `<select>` / 11 个 `<textarea>`。
 
 效果目标是在共享控件层接入 Ambient CSS 的物理光影模型，而不是逐个页面调 box-shadow。
 
@@ -24,15 +24,55 @@ android/docs/goals/ambient-skin-page-controlization-plan.md
 
 ## 当前代码事实
 
-扫描结果：
+扫描结果（2026-09-13，生产 src 排除 `Prototype.tsx`、`src/traversal-relay/server.ts` 和测试文件）：
 
 ```text
-<button    352
-<input      60
-<select      9
-<textarea   16
-checkbox     5
-style={{  1171（含测试；非测试主文件仍有大量局部 style）
+<button    162
+<input      32
+<select       6
+<textarea    11
+```
+
+共享控件 owner 已存在：
+
+```text
+src/components/ambient/AmbientButton.tsx
+src/components/ambient/AmbientInput.tsx
+src/components/ambient/AmbientSelect.tsx
+src/components/ambient/AmbientTextarea.tsx
+```
+
+当前已控件化的主要面：
+
+```text
+ConnectionsPage      按钮已迁移
+ConnectionPropertiesPage 按钮已迁移；仍有 2 处 textarea
+SettingsPage         button/input/select/textarea 已迁移
+TerminalHeader       header 本地按钮已迁移
+HostForm / HostList 表单按钮 / 输入 / 多行已迁移
+app 主壳按钮        部分全局按钮已迁移
+RenameDialog / ZtermDialog / SessionDrawer 菜单 / 新建会话 Dialog 已迁移（未提交待收尾）
+```
+
+剩余主要原生控件面：
+
+```text
+TerminalQuickBar        54
+TmuxSessionPickerSheet  29
+SessionScheduleSheet    25
+FileTransferSheet       18
+AttachmentDrawer        11
+TerminalPreviewGrid     11
+TerminalSessionDrawerContent 11
+RemoteWindowLockedToolbar 9
+RemoteWindowTargetPicker 6
+TabManagerSheet         6
+ResourceBottomSheet     5
+RemoteScreenshotSheet   3
+RemoteWindowMorePanel   3
+RemoteWindowOverlayController 3
+ConnectionPropertiesPage textarea 2
+TerminalView / RemoteWindowAppSwitch 各 1
 ```
 
 Live 页面：
@@ -103,19 +143,19 @@ AmbientKeyBank
 先建组件，再接页面：
 
 ```text
-Step 0: 建立 src/components/ambient/ 目录与 owner
-Step 1: ConnectionsPage
-Step 2: ConnectionPropertiesPage
-Step 3: SettingsPage
-Step 4: TerminalHeader
-Step 5: TerminalQuickBar
-Step 6: TerminalSessionDrawer
-Step 7: TmuxSessionPickerSheet
-Step 8: SessionScheduleSheet
-Step 9: FileTransferSheet
-Step 10: AttachmentDrawer
-Step 11: RemoteWindowOverlay
-Step 12: Dialog / Menu / Overlay
+[x] Step 0: 建立 src/components/ambient/ 目录与 owner
+[x] Step 1: ConnectionsPage
+[x] Step 2: ConnectionPropertiesPage（按钮；textarea 待补）
+[x] Step 3: SettingsPage
+[x] Step 4: TerminalHeader
+[~] Step 5: TerminalQuickBar（部分全局/对话框；QuickBar 大面积待做）
+[~] Step 6: TerminalSessionDrawer（菜单 / 新建会话 / Rename / ZtermDialog 已做，Drawer content 待做）
+[ ] Step 7: TmuxSessionPickerSheet
+[ ] Step 8: SessionScheduleSheet
+[ ] Step 9: FileTransferSheet
+[ ] Step 10: AttachmentDrawer
+[ ] Step 11: RemoteWindowOverlay
+[ ] Step 12: Dialog / Menu / Overlay 剩余面
 ```
 
 ### Phase 2: Ambient 控件效果
@@ -137,33 +177,68 @@ Phase 2 在控件化完成后接入视觉。
 
 ### 主页面
 
-| 页面 | 当前控件量 | Phase 1 工作量 | Phase 2 工作量 |
-|---|---|---:|---:|
-| ConnectionsPage | 5 buttons | 0.5~1d | 0.5d |
-| ConnectionPropertiesPage | 9 buttons + textareas | 1~1.5d | 0.5d |
-| SettingsPage | 8 buttons + inputs + selects | 1~1.5d | 0.5d |
-| TerminalPage | 页面壳 + shell | 0.5d | 0.5d |
+| 页面 | 状态 | 剩余控件量 | Phase 1 剩余工作量 | Phase 2 工作量 |
+|---|---|---|---:|---:|
+| ConnectionsPage | 已控件化 | 0 | 0 | 0.5d |
+| ConnectionPropertiesPage | 按钮已迁移 | 2 textarea | 0.5d | 0.5d |
+| SettingsPage | 已控件化 | 0 | 0 | 0.5d |
+| TerminalPage / Shell | 局部 | 少量壳按钮 | 0.5d | 0.5d |
 
 ### Terminal 二级控件面
 
-| 模块 | 当前控件量 | Phase 1 工作量 | Phase 2 工作量 |
-|---|---|---:|---:|
-| TerminalQuickBar | 45 buttons + 6 inputs + 3 textareas | 2~3d | 1d |
-| TmuxSessionPickerSheet | 22 buttons + 5 inputs | 1.5~2.5d | 0.5d |
-| FileTransferSheet | 17 buttons + textarea | 1.5~2d | 0.5d |
-| TerminalSessionDrawer | 11 buttons | 1~1.5d | 0.5d |
-| SessionScheduleSheet | 8 buttons + 13 inputs + selects | 1~1.5d | 0.5d |
-| AttachmentDrawer | 11 buttons | 0.5~1d | 0.5d |
-| RemoteWindowOverlay | 9+ buttons | 1~2d | 0.5d |
-| Dialog / Menu / Overlay | 分散 | 1~2d | 0.5d |
+| 模块 | 状态 | 剩余控件量 | Phase 1 剩余工作量 | Phase 2 工作量 |
+|---|---|---|---:|---:|
+| TerminalQuickBar | 部分已迁移 | 54 | 3~4d | 1d |
+| TmuxSessionPickerSheet | 待做 | 29 | 2~3d | 0.5d |
+| SessionScheduleSheet | 待做 | 25 | 2~3d | 0.5d |
+| FileTransferSheet | 待做 | 18 | 1.5~2d | 0.5d |
+| TerminalSessionDrawerContent / menus | 部分已迁移 | 11 | 0.5~1d | 0.5d |
+| AttachmentDrawer / TerminalPreviewGrid / TabManager | 待做 | 22 | 1.5~2d | 0.5d |
+| RemoteWindow 相关 | 待做 | 22 | 1.5~2.5d | 0.5d |
+| ResourceBottomSheet / 其他 Dialog / Menu / Overlay | 待做 | 8 | 1~1.5d | 0.5d |
 
 ### 合计
 
 ```text
-Phase 1: 12~19d
+Phase 1 原始估算: 12~19d
+Phase 1 已投入: 约 1.5~2d（当前分支 4 个 commit + 待收尾 5 个文件）
+Phase 1 剩余: 约 11~17d
 Phase 2: 5~6d
-总计: 17~25d
-最小主页面 + QuickBar 范围: 5~8d
+总计剩余: 16~23d
+最小主线范围（主页面 + QuickBar + SessionDrawer）: 4~6d
+```
+
+## Goal Prompt
+
+复制到 Codex / worker 派单时使用。
+
+```text
+目标：在 /Volumes/extension/code/zterm 的独立 worktree 下，完成 zterm Android 生产页面控件化，再接入 Ambient light/black 控件效果。
+
+范围：
+- 先完成页面控件化：把 production src 中可被共享控件覆盖的 button / input / select / textarea 迁移到 src/components/ambient/ 共享 owner。
+- 再完成控件效果：把已批准的 Ambient 光影模型接入生产 CSS 与共享控件，不继续改业务逻辑。
+- 只允许在本次 worktree 覆盖 allowed paths 内写入，不改 daemon / wire / transport / buffer / renderer 行为。
+
+当前 baseline 事实：
+- worktree: /Volumes/extension/code/zterm/playground/page-controlization-ambient-0913
+- branch: codex/page-controlization-ambient-0913
+- base: origin/main
+- 已存在共享控件：AmbientButton / AmbientInput / AmbientSelect / AmbientTextarea
+- 已迁移主面：ConnectionsPage、ConnectionPropertiesPage 按钮、SettingsPage、TerminalHeader、HostForm/HostList、部分 Dialog/Menu
+- 剩余生产控件量：162 button / 32 input / 6 select / 11 textarea（排除 Prototype.tsx 与 traversal-relay/server.ts）
+
+执行方式：
+1. 先读 android/docs/goals/ambient-skin-page-controlization-plan.md、android/docs/ui-slices.md、android/docs/architecture.md。
+2. 按文件切片逐个迁移，每切片只改控件 owner 与调用点，保留 aria-label / role / test-id / text content / 事件参数 / disabled / focus 行为。
+3. 每切片先补或更新 ambient-controls-truth 类门禁，再跑定向测试；任何视觉变化放到 Phase 2。
+4. Phase 1 完成后单独提交一组合并，不开主干；Phase 2 在控件化合并后开始。
+
+完成 iff：
+- production src 不再出现共享控件可覆盖的原生控件 style 散写（允许 Prototype 和 server 例外，需在 commit 说明标明）。
+- 每类控件只有一个 owner 组件，ambient-controls-truth 门禁通过。
+- pnpm run type-check、pnpm run test:feature-registry、pnpm run test:terminal:shell-theme、pnpm run test:settings-update-ui、pnpm run test:quickbar-ui、pnpm run test:session-drawer-ui、pnpm run test:file-browser-ui、pnpm run test:remote-window-ui、pnpm run test:common-user-flows 均绿。
+- Phase 2 完成后 light / black 两套皮肤由 token 驱动，Android emulator / 真机截图落 android/evidence/，且不再出现异常绿色 focus 框。
 ```
 
 ## 唯一 owner 与文件边界
