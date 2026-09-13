@@ -192,6 +192,18 @@ export function createTerminalBridgeRuntime(
       console.log(`[${deps.logTimePrefix()}] rtc transport ${connection.id} created`);
       return {
         onMessage: (_transportId, data, isBinary) => {
+          // mux-ping proves transport liveness only. It must not refresh
+          // lastInboundAt or the stale sweep can never release subscribers/
+          // mirrors while Android's native service keeps heartbeating.
+          if (!isBinary) {
+            try {
+              if ((JSON.parse(decodeRawText(data)) as { type?: string }).type === 'mux-ping') {
+                markTransportConnectionPong(connection);
+                enqueueConnectionMessage(connection, data, isBinary);
+                return;
+              }
+            } catch {}
+          }
           markTransportConnectionInboundActivity(connection);
           refreshBoundAdaptiveLease(connection);
           enqueueConnectionMessage(connection, data, isBinary);
@@ -232,6 +244,18 @@ export function createTerminalBridgeRuntime(
     });
 
     ws.on('message', (rawData, isBinary) => {
+      // mux-ping proves transport liveness only. It must not refresh
+      // lastInboundAt or the stale sweep can never release subscribers/
+      // mirrors while Android's native service keeps heartbeating.
+      if (!isBinary) {
+        try {
+          if ((JSON.parse(decodeRawText(rawData)) as { type?: string }).type === 'mux-ping') {
+            markTransportConnectionPong(connection);
+            enqueueConnectionMessage(connection, rawData, isBinary);
+            return;
+          }
+        } catch {}
+      }
       markTransportConnectionInboundActivity(connection);
       refreshBoundAdaptiveLease(connection);
       enqueueConnectionMessage(connection, rawData, isBinary);
