@@ -1,6 +1,7 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { PaneTabs, resolvePaneProfile, type PaneTabDescriptor } from '@zterm/shared';
+import { AmbientButton } from '../ambient';
 import { getServerColorTone } from '../../lib/server-color';
 import { resolveTerminalOrientation } from '../../lib/terminal-viewport-metrics';
 import { RenameDialog } from './RenameDialog';
@@ -330,22 +331,22 @@ function TerminalHeaderComponent({
             >
               {resolvedPaneGroups.length > 0 ? (
                 <div style={{ display: 'grid', gap: '6px' }}>
-                  <button
-                    type="button"
+                  <AmbientButton
+                    variant="terminal-pane-menu"
                     onClick={() => {
                       onOpenTabManager(currentPaneId);
                       closePaneMenu();
                     }}
-                    style={paneMenuButtonStyle(false)}
                   >
                     更改 P{currentPaneIndex + 1} Session
-                  </button>
+                  </AmbientButton>
                   {resolvedPaneGroups.map((targetGroup, targetIndex) => {
                     const targetActive = targetGroup.paneId === currentPaneId;
                     return (
-                      <button
+                      <AmbientButton
                         key={targetGroup.paneId}
-                        type="button"
+                        variant="terminal-pane-menu"
+                        selected={targetActive}
                         onClick={() => {
                           if (targetActive) {
                             closePaneMenu();
@@ -354,23 +355,21 @@ function TerminalHeaderComponent({
                           onAssignSessionToPane?.(session.id, targetGroup.paneId);
                           closePaneMenu();
                         }}
-                        style={paneMenuButtonStyle(targetActive)}
                       >
                         {targetActive ? `当前在 P${targetIndex + 1}` : `移到 P${targetIndex + 1}`}
-                      </button>
+                      </AmbientButton>
                     );
                   })}
                   {active ? (
-                    <button
-                      type="button"
+                    <AmbientButton
+                      variant="terminal-pane-menu"
                       onClick={() => {
                         onMoveSessionToOtherPane?.(session.id);
                         closePaneMenu();
                       }}
-                      style={paneMenuButtonStyle(false)}
                     >
                       当前 tab 移到另一屏
-                    </button>
+                    </AmbientButton>
                   ) : null}
                 </div>
               ) : null}
@@ -411,8 +410,8 @@ function renderTabExtras(
   }
   const tone = getServerColorTone(session);
   return (
-    <button
-      type="button"
+    <AmbientButton
+      variant="terminal-route-badge"
       aria-label={session.resolvedPath === 'rtc-relay' ? '切回 Auto 重连当前 tab' : '强制 Relay 重连当前 tab'}
       tabIndex={-1}
       onFocus={(event) => event.currentTarget.blur()}
@@ -426,40 +425,14 @@ function renderTabExtras(
         onForceRelaySession?.(session.id);
       }}
       style={{
-        position: 'absolute',
-        right: '32px',
-        top: '50%',
-        transform: 'translateY(-50%)',
-        zIndex: 2,
-        minHeight: '18px',
-        padding: '2px 6px',
-        borderRadius: '999px',
         border: `1px solid ${tone.accentMuted}`,
         backgroundColor: tone.tabActiveBackground,
         color: tone.accent,
-        fontSize: '9px',
-        fontWeight: 900,
-        lineHeight: 1.2,
-        cursor: 'pointer',
       }}
     >
       {resolvedPathLabel}
-    </button>
+    </AmbientButton>
   );
-}
-
-function paneMenuButtonStyle(active: boolean) {
-  return {
-    minHeight: '34px',
-    borderRadius: '10px',
-    border: `1px solid ${active ? 'rgba(113, 164, 255, 0.28)' : 'rgba(255,255,255,0.08)'}`,
-    backgroundColor: active ? 'rgba(113, 164, 255, 0.16)' : 'rgba(31, 38, 53, 0.82)',
-    color: active ? '#8db7ff' : '#fff',
-    fontSize: '12px',
-    fontWeight: 700,
-    textAlign: 'left' as const,
-    padding: '0 12px',
-  };
 }
 
 export const TerminalHeader = memo(TerminalHeaderComponent);

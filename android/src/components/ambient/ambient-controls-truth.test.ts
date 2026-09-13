@@ -1,0 +1,76 @@
+import { existsSync, readFileSync } from 'fs';
+import { join } from 'path';
+import { describe, expect, it } from 'vitest';
+
+const root = process.cwd();
+
+function read(relativePath: string) {
+  return readFileSync(join(root, relativePath), 'utf8');
+}
+
+describe('ambient control ownership truth', () => {
+  it('keeps the shared control owner present and exported', () => {
+    expect(existsSync(join(root, 'src/components/ambient/AmbientButton.tsx'))).toBe(true);
+    expect(existsSync(join(root, 'src/components/ambient/AmbientInput.tsx'))).toBe(true);
+    expect(existsSync(join(root, 'src/components/ambient/AmbientSelect.tsx'))).toBe(true);
+    expect(existsSync(join(root, 'src/components/ambient/AmbientTextarea.tsx'))).toBe(true);
+    const barrel = read('src/components/ambient/index.ts');
+    expect(barrel).toContain('AmbientButton');
+    expect(barrel).toContain("export type { AmbientButtonProps, AmbientButtonVariant }");
+    expect(barrel).toContain('AmbientInput');
+    expect(barrel).toContain('AmbientSelect');
+    expect(barrel).toContain('AmbientTextarea');
+  });
+
+  it('keeps migrated page buttons consuming AmbientButton instead of local variant styles', () => {
+    const connectionsPage = read('src/pages/ConnectionsPage.tsx');
+    const connectionPropertiesPage = read('src/pages/ConnectionPropertiesPage.tsx');
+    expect(connectionsPage).toContain("import { AmbientButton } from '../components/ambient';");
+    expect(connectionsPage).not.toMatch(/<button\b/);
+    expect(connectionsPage).toContain('variant="settings"');
+    expect(connectionsPage).toContain('variant="accent"');
+    expect(connectionsPage).toContain('variant="accent-wide"');
+    expect(connectionsPage).toContain('variant="active-session"');
+    expect(connectionsPage).toContain('variant="saved-open"');
+    expect(connectionPropertiesPage).toContain("import { AmbientButton } from '../components/ambient';");
+    expect(connectionPropertiesPage).not.toMatch(/<button\b/);
+    expect(connectionPropertiesPage).toContain('variant="back"');
+    expect(connectionPropertiesPage).toContain('variant="save"');
+    expect(connectionPropertiesPage).toContain('variant="compact-accent"');
+    expect(connectionPropertiesPage).toContain('variant="option"');
+    expect(connectionPropertiesPage).toContain('variant="option-strong"');
+    expect(connectionPropertiesPage).toContain('variant="discover"');
+    expect(connectionPropertiesPage).toContain('variant="outline"');
+  });
+
+  it('keeps SettingsPage consuming shared controls instead of local control styles', () => {
+    const settingsPage = read('src/pages/SettingsPage.tsx');
+    expect(settingsPage).toContain(
+      "import {\n  AmbientButton,\n  AmbientInput,\n  AmbientSelect,\n  AmbientTextarea,\n} from '../components/ambient';",
+    );
+    expect(settingsPage).not.toMatch(/<(?:button|input|select|textarea)\b/);
+    expect(settingsPage).toContain('variant="settings-back"');
+    expect(settingsPage).toContain('variant="settings-save"');
+    expect(settingsPage).toContain('variant="settings-segment"');
+    expect(settingsPage).toContain('variant="settings-toggle"');
+    expect(settingsPage).toContain('variant="settings-skin-option"');
+    expect(settingsPage).toContain('<AmbientInput');
+    expect(settingsPage).toContain('<AmbientSelect');
+    expect(settingsPage).toContain('<AmbientTextarea');
+  });
+
+  it('keeps TerminalHeader consuming shared controls for its local buttons', () => {
+    const header = read('src/components/terminal/TerminalHeader.tsx');
+    expect(header).toContain("import { AmbientButton } from '../ambient';");
+    expect(header).not.toMatch(/<button\b/);
+    expect(header).toContain('variant="terminal-pane-menu"');
+    expect(header).toContain('variant="terminal-route-badge"');
+  });
+
+  it('keeps the shared owner free of business and terminal truth imports', () => {
+    const owner = read('src/components/ambient/AmbientButton.tsx');
+    expect(owner).not.toMatch(/from ['"](?:\.\.\/)+(?:contexts|server|components\/TerminalView)/);
+    expect(owner).not.toMatch(/from ['"].*(?:session|transport|mirror|renderer|buffer)/i);
+    expect(owner).toContain('mobileTheme');
+  });
+});
