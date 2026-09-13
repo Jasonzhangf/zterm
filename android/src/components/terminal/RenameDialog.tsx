@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { AmbientButton, AmbientInput } from '../ambient';
 
 export interface RenameDialogProps {
   open: boolean;
@@ -87,7 +88,7 @@ export function RenameDialog({
         }}
       >
         <div style={{ fontSize: '16px', fontWeight: 800 }}>{title}</div>
-        <input
+        <AmbientInput
           ref={inputRef}
           aria-label={inputLabel}
           data-testid="rename-dialog-input"
@@ -134,7 +135,7 @@ export function RenameDialog({
           </div>
         ) : null}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '16px' }}>
-          <button
+          <AmbientButton
             type="button"
             aria-label="取消重命名"
             onClick={onCancel}
@@ -150,8 +151,8 @@ export function RenameDialog({
             }}
           >
             取消
-          </button>
-          <button
+          </AmbientButton>
+          <AmbientButton
             type="button"
             aria-label={confirmLabel}
             disabled={!value.trim()}
@@ -169,7 +170,7 @@ export function RenameDialog({
             }}
           >
             {confirmLabel}
-          </button>
+          </AmbientButton>
         </div>
       </div>
     </div>

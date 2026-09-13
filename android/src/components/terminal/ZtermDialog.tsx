@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { AmbientButton } from '../ambient';
 
 export type ZtermDialogTone = 'info' | 'success' | 'warning' | 'error';
 
@@ -345,7 +346,7 @@ export function ZtermDialog({
           }}
         >
           {showCancel ? (
-            <button
+            <AmbientButton
               type="button"
               aria-label={cancelLabel}
               data-testid="zterm-dialog-cancel"
@@ -364,9 +365,9 @@ export function ZtermDialog({
               }}
             >
               {cancelLabel}
-            </button>
+            </AmbientButton>
           ) : null}
-          <button
+          <AmbientButton
             type="button"
             aria-label={confirmLabel}
             data-testid="zterm-dialog-confirm"
@@ -385,7 +386,7 @@ export function ZtermDialog({
             }}
           >
             {confirmLabel}
-          </button>
+          </AmbientButton>
         </div>
       </div>
     </div>
