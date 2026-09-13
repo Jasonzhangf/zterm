@@ -2724,7 +2724,7 @@ describe('RemoteWindowOverlay', () => {
     expect(screen.getByTestId('remote-window-fullscreen-display-toggle')).toBeTruthy();
   });
 
-  it('requests a unified 1080p short-edge remote window resize on entry and on fill', async () => {
+  it('requests a container-ratio remote window resize on fullscreen entry and on fill', async () => {
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
     Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 });
     Object.defineProperty(window, 'visualViewport', {
@@ -2815,8 +2815,8 @@ describe('RemoteWindowOverlay', () => {
       targetId: 'app-1',
       event: {
         kind: 'window-resize',
-        width: 1080,
-        height: 2337,
+        width: 1620,
+        height: 1080,
       },
     });
 
@@ -2856,7 +2856,7 @@ describe('RemoteWindowOverlay', () => {
     expect(resizeTargetWindow).not.toHaveBeenCalled();
   });
 
-  it('requests the same 1080p short-edge resize while embedded preview is active', async () => {
+  it('requests a point-to-point resize from the measured embedded container ratio', async () => {
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
     Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 });
     Object.defineProperty(window, 'visualViewport', {
@@ -2872,6 +2872,7 @@ describe('RemoteWindowOverlay', () => {
     const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string) => ({
       streamId,
       mediaStream,
+      started: makeStartedPayload(streamId, 'app-1', 1620, 1080),
     }));
 
     render(
@@ -2913,11 +2914,22 @@ describe('RemoteWindowOverlay', () => {
       expect.objectContaining({
         event: {
           kind: 'window-resize',
-          width: 1080,
-          height: 2337,
+          width: 1620,
+          height: 1080,
         },
       }),
     );
+
+    const projection = screen.getByTestId('remote-window-video-projection');
+    const content = screen.getByTestId('remote-window-video-content');
+    await waitFor(() => {
+      expect(Number.parseFloat(projection.style.left)).toBeCloseTo(0, 1);
+      expect(Number.parseFloat(projection.style.top)).toBeCloseTo(0, 1);
+      expect(Number.parseFloat(projection.style.width)).toBeCloseTo(300, 1);
+      expect(Number.parseFloat(projection.style.height)).toBeCloseTo(200, 1);
+      expect(content.style.width).toBe('100%');
+      expect(content.style.height).toBe('100%');
+    });
   });
 
   it('fits and centers the embedded preview surface without crop', async () => {
