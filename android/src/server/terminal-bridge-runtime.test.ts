@@ -362,6 +362,30 @@ describe('terminal bridge runtime message scheduling', () => {
     wss.close();
   });
 
+  it('does not treat mux-ping as app heartbeat or adaptive lease refresh', async () => {
+    const handled: string[] = [];
+    const { connection, refreshAdaptiveWidthLeaseHeartbeat, runtime, wss } = createRuntime(async (_connection, rawData) => {
+      const message = JSON.parse(Buffer.from(rawData as ArrayBuffer).toString('utf8')) as { type: string };
+      handled.push(message.type);
+    });
+    connection.lastInboundAt = 1;
+    connection.wsAlive = false;
+    const ws = new FakeWebSocket();
+
+    runtime.handleWebSocketConnection(ws as never, createRequest());
+    ws.emit('message', Buffer.from(JSON.stringify({
+      type: 'mux-ping',
+      payload: { sentAt: Date.now() },
+    })), false);
+    await flushMicrotasks();
+
+    expect(handled).toEqual(['mux-ping']);
+    expect(connection.lastInboundAt).toBe(1);
+    expect(connection.wsAlive).toBe(true);
+    expect(refreshAdaptiveWidthLeaseHeartbeat).not.toHaveBeenCalled();
+    wss.close();
+  });
+
   it('does not run a queued attach after the physical websocket closes', async () => {
     const events: string[] = [];
     let releaseHead: (() => void) | undefined;
