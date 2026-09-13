@@ -604,10 +604,27 @@ export function resolveRemoteWindowTouchPointerDownRuntime(options: {
   if (button === 'none') {
     return emptyResult(options.state, false);
   }
-  // Direct Touch keeps one-finger semantics identical at fit and zoomed
-  // scale. Local pan is reserved for the committed two-finger zoomed mode;
-  // a zoomed pointer-down must remain pending until movement/hold selects a
-  // remote action.
+  // Zoomed fullscreen in Direct Touch keeps a single finger local to the
+  // container: down/move/up must not create remote scroll, click, or drag.
+  // Suppressing the pending tap keeps movement from becoming remote action
+  // and prevents residual pointer up from being treated as a click.
+  if (
+    options.zoomedProjection
+    && options.touchMode
+    && pointer.pointerType === 'touch'
+  ) {
+    return emptyResult({
+      mode: 'actionPending',
+      pointerId: pointer.pointerId,
+      button,
+      startClientX: pointer.clientX,
+      startClientY: pointer.clientY,
+      lastClientX: pointer.clientX,
+      lastClientY: pointer.clientY,
+      startAtMs: pointer.timeMs,
+      suppressTap: true,
+    }, true);
+  }
   return emptyResult({
     mode: 'actionPending',
     pointerId: pointer.pointerId,
@@ -630,6 +647,13 @@ export function resolveRemoteWindowTouchPointerMoveRuntime(options: {
 }): RemoteWindowTouchPointerRuntimeResult {
   const { state, pointer } = options;
   if (state.mode === 'actionPending' && state.pointerId === pointer.pointerId) {
+    if (state.suppressTap) {
+      return emptyResult({
+        ...state,
+        lastClientX: pointer.clientX,
+        lastClientY: pointer.clientY,
+      }, true);
+    }
     const totalDeltaX = pointer.clientX - state.startClientX;
     const totalDeltaY = pointer.clientY - state.startClientY;
     if (Math.hypot(totalDeltaX, totalDeltaY) < REMOTE_WINDOW_TOUCH_DRAG_THRESHOLD_PX) {
@@ -907,20 +931,7 @@ export function resolveRemoteWindowTouchPointerUpRuntime(options: {
   }
 
   if (state.mode === 'actionScroll' && state.pointerId === pointer.pointerId) {
-    const point = resolveRemoteWindowTouchSurfacePointRuntime(geometry, pointer.clientX, pointer.clientY);
-    return withRemoteEvents(
-      idle,
-      point ? [{
-        kind: 'scroll',
-        phase: 'end',
-        ...(state.scrollGestureId ? { gestureId: state.scrollGestureId } : {}),
-        unit: 'pixel',
-        deltaX: 0,
-        deltaY: 0,
-        ...point,
-        moveCursor: false,
-      }] : [],
-    );
+    return emptyResult(idle, true);
   }
 
   if (state.mode === 'actionDrag' && state.pointerId === pointer.pointerId) {
@@ -1087,29 +1098,7 @@ function isPinchIntentPair(options: {
   return Math.sign(firstProjection) !== Math.sign(secondProjection);
 }
 
-function isDominantVerticalScrollIntent(options: {
-  midpointShiftY: number;
-  distanceDelta: number;
-  firstStart: { clientX: number; clientY: number };
-  firstCurrent: { clientX: number; clientY: number };
-  secondStart: { clientX: number; clientY: number };
-  secondCurrent: { clientX: number; clientY: number };
-}) {
-  return options.midpointShiftY >= REMOTE_WINDOW_TWO_FINGER_SCROLL_MIN_MIDPOINT_PX
-    && options.midpointShiftY >= Math.max(8, options.distanceDelta * 1.5 + 4)
-    && hasCoherentTwoFingerScrollIntent(options);
-}
-
-function hasStablePinchCenter(options: {
-  midpointShift: number;
-  distanceDelta: number;
-}) {
-  // Pinch is a two-finger distance gesture. A moving midpoint is allowed only
-  // as small tracking jitter; coherent vertical travel must remain scroll.
-  return options.midpointShift <= Math.max(12, options.distanceDelta * 0.5);
-}
-
-function hasCoherentTwoFingerScrollIntent(options: {
+function hasCoherentTwoFingerMotionIntent(options: {
   firstStart: { clientX: number; clientY: number };
   firstCurrent: { clientX: number; clientY: number };
   secondStart: { clientX: number; clientY: number };
@@ -1119,15 +1108,30 @@ function hasCoherentTwoFingerScrollIntent(options: {
   const firstDeltaY = options.firstCurrent.clientY - options.firstStart.clientY;
   const secondDeltaX = options.secondCurrent.clientX - options.secondStart.clientX;
   const secondDeltaY = options.secondCurrent.clientY - options.secondStart.clientY;
+  const firstDistance = Math.hypot(firstDeltaX, firstDeltaY);
+  const secondDistance = Math.hypot(secondDeltaX, secondDeltaY);
   if (
-    Math.abs(firstDeltaY) < REMOTE_WINDOW_TWO_FINGER_SCROLL_DEADZONE_PX
-    || Math.abs(secondDeltaY) < REMOTE_WINDOW_TWO_FINGER_SCROLL_DEADZONE_PX
+    firstDistance < REMOTE_WINDOW_TWO_FINGER_SCROLL_DEADZONE_PX
+    || secondDistance < REMOTE_WINDOW_TWO_FINGER_SCROLL_DEADZONE_PX
   ) {
     return false;
   }
-  if (Math.sign(firstDeltaY) !== Math.sign(secondDeltaY)) {
+  return firstDeltaX * secondDeltaX + firstDeltaY * secondDeltaY > 0;
+}
+
+function hasCoherentTwoFingerVerticalScrollIntent(options: {
+  firstStart: { clientX: number; clientY: number };
+  firstCurrent: { clientX: number; clientY: number };
+  secondStart: { clientX: number; clientY: number };
+  secondCurrent: { clientX: number; clientY: number };
+}) {
+  if (!hasCoherentTwoFingerMotionIntent(options)) {
     return false;
   }
+  const firstDeltaX = options.firstCurrent.clientX - options.firstStart.clientX;
+  const firstDeltaY = options.firstCurrent.clientY - options.firstStart.clientY;
+  const secondDeltaX = options.secondCurrent.clientX - options.secondStart.clientX;
+  const secondDeltaY = options.secondCurrent.clientY - options.secondStart.clientY;
   return Math.abs(firstDeltaY) >= Math.abs(firstDeltaX)
     && Math.abs(secondDeltaY) >= Math.abs(secondDeltaX);
 }
@@ -1220,11 +1224,6 @@ export function resolveRemoteWindowTouchPairPointerMoveRuntime(options: RemoteWi
   const midpointDeltaX = midpoint.clientX - state.lastMidX;
   const midpointDeltaY = midpoint.clientY - state.lastMidY;
   const midpointShift = Math.hypot(midpointDeltaX, midpointDeltaY);
-  // Zoomed two-finger vertical motion is remote scrolling; only predominantly
-  // horizontal coherent motion may pan the local viewport. This keeps a
-  // vertical scroll from being consumed by the local-pan owner.
-  const verticalScrollIntent = Math.abs(midpointDeltaY) > Math.max(6, Math.abs(midpointDeltaX) * 1.5);
-
   if (
     state.mode === 'twoFingerCandidate'
     && options.timeMs - state.startedAtMs < REMOTE_WINDOW_TWO_FINGER_OBSERVE_MS
@@ -1257,7 +1256,7 @@ export function resolveRemoteWindowTouchPairPointerMoveRuntime(options: RemoteWi
         consumed: true,
       };
     }
-    if (!hasCoherentTwoFingerScrollIntent({
+    if (!hasCoherentTwoFingerVerticalScrollIntent({
       firstStart: state.firstStart,
       firstCurrent,
       secondStart: state.secondStart,
@@ -1336,21 +1335,6 @@ export function resolveRemoteWindowTouchPairPointerMoveRuntime(options: RemoteWi
 
   if (
     options.pinchEnabled
-    && !isDominantVerticalScrollIntent({
-      midpointShiftY: Math.abs(midpoint.clientY - state.startMidY),
-      distanceDelta: Math.abs(distance - state.startDistance),
-      firstStart: state.firstStart,
-      firstCurrent,
-      secondStart: state.secondStart,
-      secondCurrent,
-    })
-    && hasStablePinchCenter({
-      midpointShift: Math.hypot(
-        midpoint.clientX - state.startMidX,
-        midpoint.clientY - state.startMidY,
-      ),
-      distanceDelta: Math.abs(distance - state.startDistance),
-    })
     && isPinchIntentPair({
       firstStart: state.firstStart,
       firstCurrent,
@@ -1390,29 +1374,24 @@ export function resolveRemoteWindowTouchPairPointerMoveRuntime(options: RemoteWi
     };
   }
 
-  if (
-    (options.scrollEnabled || options.panEnabled)
-    && midpointShift >= REMOTE_WINDOW_TWO_FINGER_SCROLL_MIN_MIDPOINT_PX
-    && hasCoherentTwoFingerScrollIntent({
+  const coherentPanIntent = options.panEnabled && hasCoherentTwoFingerMotionIntent({
+    firstStart: state.firstStart,
+    firstCurrent,
+    secondStart: state.secondStart,
+    secondCurrent,
+  });
+  const coherentScrollIntent = options.scrollEnabled
+    && !options.panEnabled
+    && hasCoherentTwoFingerVerticalScrollIntent({
       firstStart: state.firstStart,
       firstCurrent,
       secondStart: state.secondStart,
       secondCurrent,
-    })
-  ) {
-    const useLocalPan = options.panEnabled && !verticalScrollIntent;
-    const events = useLocalPan ? [] : buildRemoteWindowTwoFingerScrollEventsRuntime({
-      geometry,
-      midClientX: midpoint.clientX,
-      midClientY: midpoint.clientY,
-      rawDeltaX: midpointDeltaX,
-      rawDeltaY: midpointDeltaY,
-      scrollFraction: scrollFraction ?? REMOTE_WINDOW_TOUCH_SCROLL_DEFAULT_FRACTION,
-      inverted: invertGestureDirection ?? false,
-      phase: 'start',
-      gestureId: `scroll-${state.firstPointerId}-${state.startedAtMs}`,
     });
-    if (useLocalPan) {
+  if (midpointShift >= REMOTE_WINDOW_TWO_FINGER_SCROLL_MIN_MIDPOINT_PX
+    && (coherentPanIntent || coherentScrollIntent)
+  ) {
+    if (coherentPanIntent) {
       return {
         nextState: {
           mode: 'twoFingerPan',
@@ -1438,6 +1417,17 @@ export function resolveRemoteWindowTouchPairPointerMoveRuntime(options: RemoteWi
         consumed: true,
       };
     }
+    const events = buildRemoteWindowTwoFingerScrollEventsRuntime({
+      geometry,
+      midClientX: midpoint.clientX,
+      midClientY: midpoint.clientY,
+      rawDeltaX: midpointDeltaX,
+      rawDeltaY: midpointDeltaY,
+      scrollFraction: scrollFraction ?? REMOTE_WINDOW_TOUCH_SCROLL_DEFAULT_FRACTION,
+      inverted: invertGestureDirection ?? false,
+      phase: 'start',
+      gestureId: `scroll-${state.firstPointerId}-${state.startedAtMs}`,
+    });
     return {
       nextState: {
         mode: 'twoFingerScroll',
@@ -1498,7 +1488,7 @@ export function resolveRemoteWindowTouchPairPointerUpRuntime(options: {
   invertGestureDirection?: boolean;
   remainingPointerMode?: 'local-pan' | 'remote-action';
 }): RemoteWindowTouchPairRuntimeResult {
-  const { state, pair, geometry, remainingPointer, scrollFraction, invertGestureDirection } = options;
+  const { state, pair, remainingPointer, scrollFraction, invertGestureDirection } = options;
   const idle = createRemoteWindowTouchPointerState();
   if (
     state.mode !== 'twoFingerCandidate'
@@ -1528,26 +1518,7 @@ export function resolveRemoteWindowTouchPairPointerUpRuntime(options: {
   }
   void scrollFraction;
   void invertGestureDirection;
-  const scrollGestureId = state.mode === 'twoFingerScroll' ? state.scrollGestureId : undefined;
-  const endPoint = state.mode === 'twoFingerScroll'
-    ? resolveRemoteWindowPairPointerGeometry({
-        geometry,
-        clientX: state.lastMidX,
-        clientY: state.lastMidY,
-      })
-    : null;
-  const events: Array<RemoteWindowInputEventPayload['event']> = endPoint
-    ? [{
-        kind: 'scroll',
-        phase: 'end',
-        ...(scrollGestureId ? { gestureId: scrollGestureId } : {}),
-        unit: 'pixel',
-        deltaX: 0,
-        deltaY: 0,
-        ...endPoint,
-        moveCursor: false,
-      }]
-    : [];
+  const events: Array<RemoteWindowInputEventPayload['event']> = [];
   const localEffect: RemoteWindowTouchLocalEffect = state.mode === 'twoFingerScroll'
     ? {
         kind: 'two-finger-scroll-end',
