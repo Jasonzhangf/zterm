@@ -138,6 +138,7 @@ import {
   resolveFloatingOverlaySizing,
   resolveStartedCaptureFrameSize,
   resolveRemoteWindowDisplaySourceSize,
+  resolveRemoteWindowFullscreenFillReferenceSize,
   resolveRemoteWindowTargetResizeSize,
   formatTargetKind,
   isRemoteWindowInputSupported,
@@ -1027,10 +1028,16 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     ) {
       return false;
     }
-    if (!surfaceSize) {
+    const fillReference = resolveRemoteWindowFullscreenFillReferenceSize({
+      overlay: floatingOverlayRef.current,
+      toolbar: lockedToolbarRef.current,
+      surface: videoSurfaceRef.current,
+      fallbackSurfaceSize: surfaceSize,
+    });
+    if (!fillReference) {
       return false;
     }
-    const reference = resolveRemoteWindowTargetResizeSize({ viewport: surfaceSize });
+    const reference = resolveRemoteWindowTargetResizeSize({ viewport: fillReference });
     const width = reference.width;
     const height = reference.height;
     const last = lastRemoteFillResizeRef.current;

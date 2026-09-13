@@ -2724,7 +2724,7 @@ describe('RemoteWindowOverlay', () => {
     expect(screen.getByTestId('remote-window-fullscreen-display-toggle')).toBeTruthy();
   });
 
-  it('requests a container-ratio remote window resize on fullscreen entry and on fill', async () => {
+  it('requests fullscreen resize from the usable wide overlay bounds, not a stale portrait surface', async () => {
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
     Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 });
     Object.defineProperty(window, 'visualViewport', {
@@ -2769,10 +2769,10 @@ describe('RemoteWindowOverlay', () => {
         y: 0,
         left: 0,
         top: 0,
-        right: 390,
-        bottom: 844,
-        width: 390,
-        height: 844,
+        right: 1280,
+        bottom: 800,
+        width: 1280,
+        height: 800,
         toJSON: () => ({}),
       }),
     });
@@ -2783,10 +2783,10 @@ describe('RemoteWindowOverlay', () => {
         y: 16,
         left: 0,
         top: 16,
-        right: 390,
-        bottom: 124,
-        width: 390,
-        height: 108,
+        right: 1280,
+        bottom: 100,
+        width: 1280,
+        height: 100,
         toJSON: () => ({}),
       }),
     });
@@ -2797,10 +2797,10 @@ describe('RemoteWindowOverlay', () => {
         y: 0,
         left: 0,
         top: 0,
-        right: 300,
-        bottom: 200,
-        width: 300,
-        height: 200,
+        right: 720,
+        bottom: 1293,
+        width: 720,
+        height: 1293,
         toJSON: () => ({}),
       }),
     });
@@ -2815,7 +2815,7 @@ describe('RemoteWindowOverlay', () => {
       targetId: 'app-1',
       event: {
         kind: 'window-resize',
-        width: 1620,
+        width: 1975,
         height: 1080,
       },
     });
