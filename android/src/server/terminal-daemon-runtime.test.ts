@@ -169,7 +169,7 @@ describe('terminal daemon runtime transport liveness', () => {
   });
 
   it('detaches every mux channel subscriber when the physical target transport goes stale', () => {
-    const { connection, connections, detachSubscriberTransportOnly, runtime, sessions } = createRuntimeHarness();
+    const { connection, connections, detachSubscriberTransportOnly, runtime, sendTransportMessage, sessions } = createRuntimeHarness();
     const subscriberA = createSessionSubscriber('transport-1:channel-a');
     const subscriberB = createSessionSubscriber('transport-1:channel-b');
     subscriberA.transportId = connection.transportId;
@@ -189,6 +189,20 @@ describe('terminal daemon runtime transport liveness', () => {
     vi.advanceTimersByTime(1000);
 
     expect(connection.closeTransport).toHaveBeenCalledWith('transport heartbeat stale');
+    expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
+      type: 'mux-channel-closed',
+      payload: {
+        channelId: 'channel-a',
+        reason: 'transport heartbeat stale',
+      },
+    });
+    expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
+      type: 'mux-channel-closed',
+      payload: {
+        channelId: 'channel-b',
+        reason: 'transport heartbeat stale',
+      },
+    });
     expect(detachSubscriberTransportOnly).toHaveBeenCalledWith(
       subscriberA,
       'transport heartbeat stale',

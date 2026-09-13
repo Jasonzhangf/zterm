@@ -140,6 +140,17 @@ export function createTerminalDaemonRuntime(
             console.warn(
               `[${deps.logTimePrefix()}] transport ${connection.id} stale inbound heartbeat kind=${connection.transport.kind} staleForMs=${Math.floor(staleForMs)}`,
             );
+            if (connection.muxChannels) {
+              for (const channelId of connection.muxChannels.keys()) {
+                deps.sendTransportMessage(connection.transport, {
+                  type: 'mux-channel-closed',
+                  payload: {
+                    channelId,
+                    reason,
+                  },
+                });
+              }
+            }
             for (const subscriberId of boundSubscriberIds) {
               const subscriber = deps.sessions.get(subscriberId) || null;
               if (!subscriber) {
