@@ -1510,8 +1510,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       setReceiverStartupTelemetry(null);
       setStreamCapability(null);
     }
-    // Every target change starts a new receiver lifecycle. Keep the browser's
-    // native video placeholder hidden until this receiver has a real frame.
+    // Keep the browser video placeholder hidden until this receiver has a real frame.
     updateReceiverVideoVisibility(false);
     const selectedVideoPreference = readRemoteWindowVideoPreference(target);
     if (!previousHadStream) {
