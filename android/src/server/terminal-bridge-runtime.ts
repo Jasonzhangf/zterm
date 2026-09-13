@@ -4,7 +4,10 @@ import { WebSocket, WebSocketServer, type RawData } from 'ws';
 import { createRtcBridgeServer, type RtcServerTransport, type SignalMessage } from './rtc-bridge';
 import type { TerminalTransportSubscriber } from './terminal-runtime';
 import type { DaemonTransportConnection } from './terminal-transport-runtime';
-import { markTransportConnectionInboundActivity } from './terminal-transport-runtime';
+import {
+  markTransportConnectionInboundActivity,
+  markTransportConnectionPong,
+} from './terminal-transport-runtime';
 
 export interface TerminalBridgeRuntimeDeps {
   requiredAuthToken: string;
@@ -161,9 +164,6 @@ export function createTerminalBridgeRuntime(
   }
 
   function detachConnectionSubscribers(connection: DaemonTransportConnection, reason: string) {
-    if (connection.closed) {
-      return;
-    }
     connection.closed = true;
     const subscriberIds = new Set<string>();
     if (connection.boundSubscriberId) {
@@ -192,6 +192,18 @@ export function createTerminalBridgeRuntime(
       console.log(`[${deps.logTimePrefix()}] rtc transport ${connection.id} created`);
       return {
         onMessage: (_transportId, data, isBinary) => {
+          // mux-ping proves transport liveness only. It must not refresh
+          // lastInboundAt or the stale sweep can never release subscribers/
+          // mirrors while Android's native service keeps heartbeating.
+          if (!isBinary) {
+            try {
+              if ((JSON.parse(decodeRawText(data)) as { type?: string }).type === 'mux-ping') {
+                markTransportConnectionPong(connection);
+                enqueueConnectionMessage(connection, data, isBinary);
+                return;
+              }
+            } catch {}
+          }
           markTransportConnectionInboundActivity(connection);
           refreshBoundAdaptiveLease(connection);
           enqueueConnectionMessage(connection, data, isBinary);
@@ -228,11 +240,22 @@ export function createTerminalBridgeRuntime(
     );
 
     ws.on('pong', () => {
-      markTransportConnectionInboundActivity(connection);
-      refreshBoundAdaptiveLease(connection);
+      markTransportConnectionPong(connection);
     });
 
     ws.on('message', (rawData, isBinary) => {
+      // mux-ping proves transport liveness only. It must not refresh
+      // lastInboundAt or the stale sweep can never release subscribers/
+      // mirrors while Android's native service keeps heartbeating.
+      if (!isBinary) {
+        try {
+          if ((JSON.parse(decodeRawText(rawData)) as { type?: string }).type === 'mux-ping') {
+            markTransportConnectionPong(connection);
+            enqueueConnectionMessage(connection, rawData, isBinary);
+            return;
+          }
+        } catch {}
+      }
       markTransportConnectionInboundActivity(connection);
       refreshBoundAdaptiveLease(connection);
       enqueueConnectionMessage(connection, rawData, isBinary);

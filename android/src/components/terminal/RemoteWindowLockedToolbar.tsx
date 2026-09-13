@@ -26,6 +26,7 @@ export interface RemoteWindowLockedToolbarProps {
   moreOpen: boolean;
   screenshotBusy: boolean;
   screenshotButtonStyle: CSSProperties;
+  streamStatusText: string;
   targetKindLabel: string;
   onClose: () => void;
   onRemoteClose: () => void;
@@ -52,6 +53,7 @@ export const RemoteWindowLockedToolbar = forwardRef<HTMLDivElement, RemoteWindow
   moreOpen,
   screenshotBusy,
   screenshotButtonStyle,
+  streamStatusText,
   targetKindLabel,
   onClose,
   onRemoteClose,
@@ -73,9 +75,6 @@ export const RemoteWindowLockedToolbar = forwardRef<HTMLDivElement, RemoteWindow
       <div {...dragHandleProps} data-testid="remote-window-drag-handle" style={styles.lockedTopBar}>
         <div style={styles.lockedTitle}>
             <span style={styles.targetKind}>{targetKindLabel}</span>
-          <span data-testid="remote-window-input-mode" style={styles.inputModeBadge}>
-            {inputSupported ? '可操作' : '只读'}
-          </span>
           <span style={styles.activeAppSwitch}>
             <button
               type="button"
@@ -104,7 +103,7 @@ export const RemoteWindowLockedToolbar = forwardRef<HTMLDivElement, RemoteWindow
           <button type="button" data-testid="remote-window-remote-close" aria-label="远程关闭当前窗口" title="远程关闭当前窗口" onClick={onRemoteClose} style={styles.headerIconButtonDanger}>
             <RemoteWindowIcon name="close-window" />
           </button>
-          <button type="button" aria-label="关闭远程窗口" title="关闭" onClick={onClose} style={styles.headerIconButton}>
+          <button type="button" aria-label="关闭远程窗口" title="关闭" onClick={onClose} style={styles.headerIconButtonClose}>
             <RemoteWindowIcon name="close" />
           </button>
         </div>
@@ -120,6 +119,9 @@ export const RemoteWindowLockedToolbar = forwardRef<HTMLDivElement, RemoteWindow
         </div>
       ) : null}
       <div data-testid="remote-window-control-strip" data-no-drag="true" style={styles.lockedControlStrip}>
+        <span data-testid="remote-window-input-mode" style={styles.inputModeBadge}>
+          {inputSupported ? '可操作' : '只读'}
+        </span>
           <button
           type="button"
           data-testid="remote-window-input-mode-toggle"
@@ -166,7 +168,12 @@ export const RemoteWindowLockedToolbar = forwardRef<HTMLDivElement, RemoteWindow
           <RemoteWindowIcon name="more" />
         </button>
       </div>
-      <div data-testid="remote-window-gesture-guide" style={styles.gestureGuide}>{gestureGuide}</div>
+      {mode === 'fullscreen' ? (
+        <div data-testid="remote-window-toolbar-status" role="status" style={styles.compactStatusLine}>
+          <span>{streamStatusText}</span>
+        </div>
+      ) : null}
+      <div data-testid="remote-window-gesture-guide" data-mode={mode} style={styles.gestureGuide}>{gestureGuide}</div>
       {moreOpen ? moreContent : null}
     </div>
   );

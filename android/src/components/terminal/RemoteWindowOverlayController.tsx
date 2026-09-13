@@ -531,7 +531,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   const {
     activeProfile, adaptiveCause,
     networkQuality,
-    qualityApplyState, lastStatsSample, resetQualityState: resetQualityApplyState,
+    lastStatsSample, resetQualityState: resetQualityApplyState,
   } = useRemoteWindowQuality({
     activeSessionId,
     streamId: qualityStreamId,
@@ -1510,8 +1510,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       setReceiverStartupTelemetry(null);
       setStreamCapability(null);
     }
-    // Every target change starts a new receiver lifecycle. Keep the browser's
-    // native video placeholder hidden until this receiver has a real frame.
+    // Keep the browser video placeholder hidden until this receiver has a real frame.
     updateReceiverVideoVisibility(false);
     const selectedVideoPreference = readRemoteWindowVideoPreference(target);
     if (!previousHadStream) {
@@ -1618,6 +1617,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     // 缩略图 drawImage + 切换瞬间主画面低清占位（同连接双流不进 canvas 预览流饿死 focus 路径）。
     setReceiverPlaybackBinding(null);
     setReceiverDecodedCommit(null);
+    updateFocus?.(targetSessionId, focusStreamId, effectiveTarget);
     void startStream(targetSessionId, effectiveTarget, focusStreamId, {
       videoProfile,
       purpose: 'focus',
@@ -2627,14 +2627,16 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
 	    return resolveZoomedContentRect(surfaceSize, displaySourceSize, viewport, displayMode);
 	  }, [compositeLayout, focusedWindowSlot, fullscreenDisplayMode, fullscreenViewport, receiverFrameSize, state, surfaceSize]);
 
-  const videoContentStyle = lockedSurfaceLayout
-    ? {
+	  const embeddedFloatingProjection = embedded && state.phase === 'targetLocked' && state.mode === 'floating';
+	  const embeddedProjectionStyle = embeddedFloatingProjection && lockedSurfaceLayout ? { position: 'absolute' as const, left: lockedSurfaceLayout.content.left, top: lockedSurfaceLayout.content.top, width: lockedSurfaceLayout.content.width, height: lockedSurfaceLayout.content.height } : null;
+	  const videoContentStyle = lockedSurfaceLayout
+	    ? embeddedFloatingProjection ? { ...styles.videoContentFrame, left: 0, top: 0, width: '100%', height: '100%' } : {
         ...styles.videoContentFrame,
         left: lockedSurfaceLayout.content.left,
         top: lockedSurfaceLayout.content.top,
         width: lockedSurfaceLayout.content.width,
         height: lockedSurfaceLayout.content.height,
-    }
+      }
     : styles.videoContentFallback;
 
   // 组合推流：焦点窗口（主画面裁切放大）。双流（有 overview）时主画面直接显示
@@ -2740,8 +2742,8 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
           ? { height: `${floatingVideoHeightPx}px` }
           : { maxHeight: 'min(52vh, 420px)' }),
       }
-    : state.phase === 'targetLocked' && embedded
-      ? { ...styles.videoPlaceholder, width: '100%', height: '100%', minHeight: 0, flex: '1 1 auto' }
+	    : embeddedFloatingProjection
+	      ? { ...styles.videoPlaceholder, width: '100%', height: '100%', minHeight: 0, flex: '1 1 auto' }
       : styles.videoPlaceholder;
   const screenshotFeedback = (() => {
     switch (screenshotStatus.phase) {
@@ -2832,9 +2834,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       }}
       style={videoSurfaceStyle}
     >
-      <div data-testid="remote-window-video-content" style={videoContentStyle}>
-        {lockedVideoContent}
-      </div>
+      {embeddedProjectionStyle ? <div data-testid="remote-window-video-projection" style={embeddedProjectionStyle}><div data-testid="remote-window-video-content" style={videoContentStyle}>{lockedVideoContent}</div></div> : <div data-testid="remote-window-video-content" style={videoContentStyle}>{lockedVideoContent}</div>}
       {compositeLayout ? (
         <div data-testid="remote-window-composite-strip" data-no-drag="true" style={styles.compositeStrip}>
           <div
@@ -3004,7 +3004,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     <RemoteWindowMorePanel
       fullscreen={state.mode === 'fullscreen'}
       videoPreference={videoPreference}
-      streamStatusText={`串流：${state.streamStatus === 'streaming' ? '已连接' : state.streamStatus} · ${activeProfile.maxBitrateBps / 1_000_000} Mbps / ${activeProfile.maxFrameRateFps} FPS${qualityApplyState.phase === 'requested' ? ' · 正在应用' : qualityApplyState.phase === 'rejected' ? ` · 失败：${qualityApplyState.message}` : ''}`}
+      streamStatusText={`串流：${state.streamStatus === 'streaming' ? '已连接' : state.streamStatus} · ${activeProfile.maxBitrateBps / 1_000_000} Mbps / ${activeProfile.maxFrameRateFps} FPS`}
       networkStatusText={`压力：${adaptiveCause === 'none' ? '无' : adaptiveCause} · 网络：${networkQuality?.effectiveType || '未知'}${networkQuality?.rttMs ? ` · RTT ${networkQuality.rttMs}ms` : ''}`}
       browserMode={state.phase === 'targetLocked' && isRemoteWindowChromeTarget(state.target)}
       browserUserAgent={browserUserAgent}
@@ -3074,6 +3074,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
           moreOpen={streamStatusOpen}
           screenshotBusy={screenshotBusy}
           screenshotButtonStyle={screenshotButtonStyle}
+          streamStatusText={`串流：${state.streamStatus === 'streaming' ? '已连接' : state.streamStatus} · ${activeProfile.maxBitrateBps / 1_000_000} Mbps / ${activeProfile.maxFrameRateFps} FPS`}
           targetKindLabel={formatTargetKind(state.target)}
           onClose={handleClose}
           onRemoteClose={handleRemoteClose}

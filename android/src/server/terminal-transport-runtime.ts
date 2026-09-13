@@ -100,6 +100,14 @@ export function markTransportConnectionInboundActivity(
   connection.lastInboundAt = now;
 }
 
+export function markTransportConnectionPong(connection: DaemonTransportConnection) {
+  // A WebSocket pong is a transport-frame liveness fact, not app-level client
+  // heartbeat. It must not refresh the daemon stale transport grace period or
+  // adaptive width lease, otherwise a dead native client can keep a tmux mirror
+  // alive indefinitely by responding to ws ping frames automatically.
+  connection.wsAlive = true;
+}
+
 export function createTerminalTransportRuntime(
   deps: TerminalTransportRuntimeDeps,
 ): TerminalTransportRuntime {
