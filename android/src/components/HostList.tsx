@@ -3,6 +3,7 @@
  */
 
 import { Host } from '../lib/types';
+import { AmbientButton } from './ambient';
 
 interface HostListProps {
   hosts: Host[];
@@ -36,7 +37,7 @@ export function HostList({ hosts, onConnect, onEdit, onDelete, onAddNew }: HostL
         }}>
           主机列表
         </h2>
-        <button
+        <AmbientButton
           onClick={onAddNew}
           style={{
             backgroundColor: '#4caf50',
@@ -50,7 +51,7 @@ export function HostList({ hosts, onConnect, onEdit, onDelete, onAddNew }: HostL
           }}
         >
           + 添加主机
-        </button>
+        </AmbientButton>
       </div>
 
       {/* 空状态 */}
@@ -127,7 +128,7 @@ export function HostList({ hosts, onConnect, onEdit, onDelete, onAddNew }: HostL
                 display: 'flex',
                 gap: '8px',
               }}>
-                <button
+                <AmbientButton
                   onClick={() => onConnect(host)}
                   style={{
                     flex: 1,
@@ -142,8 +143,8 @@ export function HostList({ hosts, onConnect, onEdit, onDelete, onAddNew }: HostL
                   }}
                 >
                   连接
-                </button>
-                <button
+                </AmbientButton>
+                <AmbientButton
                   onClick={() => onEdit(host)}
                   style={{
                     backgroundColor: '#333',
@@ -156,8 +157,8 @@ export function HostList({ hosts, onConnect, onEdit, onDelete, onAddNew }: HostL
                   }}
                 >
                   编辑
-                </button>
-                <button
+                </AmbientButton>
+                <AmbientButton
                   onClick={() => onDelete(host)}
                   style={{
                     backgroundColor: '#f44336',
@@ -170,7 +171,7 @@ export function HostList({ hosts, onConnect, onEdit, onDelete, onAddNew }: HostL
                   }}
                 >
                   删除
-                </button>
+                </AmbientButton>
               </div>
             </div>
           ))}

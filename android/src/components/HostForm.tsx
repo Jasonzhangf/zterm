@@ -4,6 +4,7 @@
 
 import { useState, useEffect } from 'react';
 import { DEFAULT_BRIDGE_PORT } from '../lib/mobile-config';
+import { AmbientButton, AmbientInput, AmbientTextarea } from './ambient';
 import type { Host } from '../lib/types';
 
 interface HostFormProps {
@@ -95,7 +96,7 @@ export function HostForm({ host, onSave, onCancel }: HostFormProps) {
         alignItems: 'center',
         borderBottom: '1px solid #333',
       }}>
-        <button
+        <AmbientButton
           onClick={onCancel}
           style={{
             backgroundColor: '#333',
@@ -107,7 +108,7 @@ export function HostForm({ host, onSave, onCancel }: HostFormProps) {
           }}
         >
           取消
-        </button>
+        </AmbientButton>
         <span style={{
           flex: 1,
           textAlign: 'center',
@@ -116,7 +117,7 @@ export function HostForm({ host, onSave, onCancel }: HostFormProps) {
         }}>
           {host ? '编辑主机' : '添加主机'}
         </span>
-        <button
+        <AmbientButton
           onClick={handleSubmit}
           style={{
             backgroundColor: '#4caf50',
@@ -128,7 +129,7 @@ export function HostForm({ host, onSave, onCancel }: HostFormProps) {
           }}
         >
           保存
-        </button>
+        </AmbientButton>
       </div>
 
       {formError ? (
@@ -161,7 +162,7 @@ export function HostForm({ host, onSave, onCancel }: HostFormProps) {
           <label style={{ display: 'block', marginBottom: '8px', color: '#888' }}>
             名称 *
           </label>
-          <input
+          <AmbientInput
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -184,7 +185,7 @@ export function HostForm({ host, onSave, onCancel }: HostFormProps) {
           <label style={{ display: 'block', marginBottom: '8px', color: '#888' }}>
             主机地址 *
           </label>
-          <input
+          <AmbientInput
             type="text"
             value={hostname}
             onChange={(e) => setHostname(e.target.value)}
@@ -207,7 +208,7 @@ export function HostForm({ host, onSave, onCancel }: HostFormProps) {
           <label style={{ display: 'block', marginBottom: '8px', color: '#888' }}>
             Bridge 端口
           </label>
-          <input
+          <AmbientInput
             type="number"
             value={port}
             onChange={(e) => setPort(parseInt(e.target.value, 10) || DEFAULT_BRIDGE_PORT)}
@@ -229,7 +230,7 @@ export function HostForm({ host, onSave, onCancel }: HostFormProps) {
           <label style={{ display: 'block', marginBottom: '8px', color: '#888' }}>
             Tmux 会话名
           </label>
-          <input
+          <AmbientInput
             type="text"
             value={sessionName}
             onChange={(e) => setSessionName(e.target.value)}
@@ -253,7 +254,7 @@ export function HostForm({ host, onSave, onCancel }: HostFormProps) {
             认证方式
           </label>
           <div style={{ display: 'flex', gap: '8px' }}>
-            <button
+            <AmbientButton
               onClick={() => setAuthType('password')}
               style={{
                 flex: 1,
@@ -266,8 +267,8 @@ export function HostForm({ host, onSave, onCancel }: HostFormProps) {
               }}
             >
               密码
-            </button>
-            <button
+            </AmbientButton>
+            <AmbientButton
               onClick={() => setAuthType('key')}
               style={{
                 flex: 1,
@@ -280,7 +281,7 @@ export function HostForm({ host, onSave, onCancel }: HostFormProps) {
               }}
             >
               密钥
-            </button>
+            </AmbientButton>
           </div>
         </div>
 
@@ -290,7 +291,7 @@ export function HostForm({ host, onSave, onCancel }: HostFormProps) {
             <label style={{ display: 'block', marginBottom: '8px', color: '#888' }}>
             Bridge 密码
             </label>
-            <input
+            <AmbientInput
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
@@ -312,7 +313,7 @@ export function HostForm({ host, onSave, onCancel }: HostFormProps) {
             <label style={{ display: 'block', marginBottom: '8px', color: '#888' }}>
               Bridge 私钥
             </label>
-            <textarea
+            <AmbientTextarea
               value={privateKey}
               onChange={(e) => setPrivateKey(e.target.value)}
               placeholder="粘贴 bridge 私钥内容"
@@ -337,7 +338,7 @@ export function HostForm({ host, onSave, onCancel }: HostFormProps) {
           <label style={{ display: 'block', marginBottom: '8px', color: '#888' }}>
             连接后自动执行命令
           </label>
-          <input
+          <AmbientInput
             type="text"
             value={autoCommand}
             onChange={(e) => setAutoCommand(e.target.value)}
@@ -361,7 +362,7 @@ export function HostForm({ host, onSave, onCancel }: HostFormProps) {
             标签分组
           </label>
           <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
-            <input
+            <AmbientInput
               type="text"
               value={tagInput}
               onChange={(e) => setTagInput(e.target.value)}
@@ -376,7 +377,7 @@ export function HostForm({ host, onSave, onCancel }: HostFormProps) {
                 fontSize: '16px',
               }}
             />
-            <button
+            <AmbientButton
               onClick={handleAddTag}
               style={{
                 backgroundColor: '#333',
@@ -388,7 +389,7 @@ export function HostForm({ host, onSave, onCancel }: HostFormProps) {
               }}
             >
               添加
-            </button>
+            </AmbientButton>
           </div>
           {tags.length > 0 && (
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
@@ -415,7 +416,7 @@ export function HostForm({ host, onSave, onCancel }: HostFormProps) {
         {/* 置顶 */}
         <div style={{ marginBottom: '16px' }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <input
+            <AmbientInput
               type="checkbox"
               checked={pinned}
               onChange={(e) => setPinned(e.target.checked)}

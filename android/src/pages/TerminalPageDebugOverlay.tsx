@@ -1,6 +1,7 @@
 import { memo as ReactMemo, useEffect, useState } from "react";
 import { formatDebugHz, formatDebugRate, resolveDebugStatus } from "./terminal-page-debug-helpers";
 import type { TerminalDebugOverlayProps } from "../lib/plugin-debug-console/debug-console-contract";
+import { AmbientButton } from "../components/ambient";
 import type { Session } from "../lib/types";
 
 const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
@@ -129,7 +130,7 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px", fontWeight: 700 }}>
         <span>状态</span>
-        <button
+        <AmbientButton
           type="button"
           aria-label="关闭调试浮窗"
           onClick={onClose}
@@ -147,7 +148,7 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
           }}
         >
           ×
-        </button>
+        </AmbientButton>
       </div>
       <div
         data-testid="terminal-debug-ime-metrics"

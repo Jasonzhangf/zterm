@@ -12,6 +12,7 @@ import { AttachmentDrawer } from '../components/terminal/AttachmentDrawer';
 import { ResourceBottomSheet } from '../components/terminal/ResourceBottomSheet';
 import { RemoteScreenshotSheet } from '../components/terminal/RemoteScreenshotSheet';
 import { TerminalHeader } from '../components/terminal/TerminalHeader';
+import { AmbientButton } from '../components/ambient';
 import {
   resolveSessionInputEpoch,
   resolveTerminalSessionGroupActiveSessionProjection,
@@ -3596,7 +3597,7 @@ function TerminalPageComponent({
             <>
               {!sessionDrawerOpen ? (
                 <>
-                  <button
+                  <AmbientButton
                     type="button"
                     aria-label="打开会话抽屉"
                     data-testid="terminal-portrait-session-drawer-button"
@@ -3618,8 +3619,8 @@ function TerminalPageComponent({
                     }}
                   >
                     ☰
-                  </button>
-                  <button
+                  </AmbientButton>
+                  <AmbientButton
                     type="button"
                     aria-label="返回连接列表"
                     data-testid="terminal-portrait-back-button"
@@ -3642,9 +3643,9 @@ function TerminalPageComponent({
                     }}
                   >
                     ←
-                  </button>
+                  </AmbientButton>
                   {onOpenSettings ? (
-                    <button
+                    <AmbientButton
                       type="button"
                       aria-label="设置和升级"
                       data-testid="terminal-portrait-settings-button"
@@ -3674,7 +3675,7 @@ function TerminalPageComponent({
                     >
                       <span aria-hidden="true" style={{ fontSize: '15px', lineHeight: 1 }}>⚙</span>
                       <span>设置</span>
-                    </button>
+                    </AmbientButton>
                   ) : null}
                 </>
               ) : null}

@@ -4791,6 +4791,11 @@
     },
     {
       "from_module": "client.debug_console",
+      "to_module": "client.runtime",
+      "status": "active"
+    },
+    {
+      "from_module": "client.debug_console",
       "to_module": "client.terminal_shell",
       "status": "active"
     },

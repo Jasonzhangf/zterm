@@ -1,6 +1,7 @@
 import { memo as ReactMemo, useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import { PaneStage, type PaneSlotDefinition } from "@zterm/shared";
 import { TerminalView } from "../components/TerminalView";
+import { AmbientButton } from "../components/ambient";
 import type { SessionRenderBufferStore } from "../lib/session-render-buffer-store";
 import { TerminalTabSwipeSurface } from "../components/terminal/TerminalTabSwipeSurface";
 import { TerminalPreviewGrid } from "../components/terminal/TerminalPreviewGrid";
@@ -289,7 +290,7 @@ const TerminalStageShell = ReactMemo(
           render: () => {
             if (!session) {
               return (
-                <button
+                <AmbientButton
                   type="button"
                   data-testid={`terminal-empty-pane-${pane.id}`}
                   aria-label={`选择 Pane ${paneIndex + 1} 的 session`}
@@ -319,7 +320,7 @@ const TerminalStageShell = ReactMemo(
                 >
                   <span style={{ color: "var(--zterm-stage-text)" }}>Pane {paneIndex + 1}</span>
                   <span>选择 session</span>
-                </button>
+                </AmbientButton>
               );
             }
             return (
@@ -389,7 +390,7 @@ const TerminalStageShell = ReactMemo(
         const title = session.customName || session.title || session.sessionName || session.id;
         const detail = session.sessionName || session.title || session.id;
         return (
-        <button
+        <AmbientButton
           type="button"
           data-testid={`terminal-session-group-peek-${slot}`}
           data-server-key={serverKey}
@@ -505,7 +506,7 @@ const TerminalStageShell = ReactMemo(
           >
             {detail}
           </span>
-        </button>
+        </AmbientButton>
       );
       },
       [activateSessionGroupSlot, sessionGroupLayoutAxis],

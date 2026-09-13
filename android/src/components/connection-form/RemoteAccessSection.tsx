@@ -1,4 +1,5 @@
 import { ConnectionSection, FieldLabel, inputStyle, segmentedButtonStyle } from './ConnectionSection';
+import { AmbientButton, AmbientInput } from '../ambient';
 
 interface RemoteAccessSectionProps {
   transportMode: 'auto' | 'websocket' | 'webrtc';
@@ -29,28 +30,28 @@ export function RemoteAccessSection({
       description="自动连接顺序由 Settings 的 Auto 线路优先级决定；若已登录 relay，则协议信息自动从控制面下发，对用户透明。"
     >
       <div style={{ display: 'flex', gap: '10px' }}>
-        <button type="button" onClick={() => onTransportModeChange('auto')} style={segmentedButtonStyle(transportMode === 'auto')}>
+        <AmbientButton type="button" onClick={() => onTransportModeChange('auto')} style={segmentedButtonStyle(transportMode === 'auto')}>
           Auto
-        </button>
-        <button
+        </AmbientButton>
+        <AmbientButton
           type="button"
           onClick={() => onTransportModeChange('websocket')}
           style={segmentedButtonStyle(transportMode === 'websocket')}
         >
           WS Only
-        </button>
-        <button
+        </AmbientButton>
+        <AmbientButton
           type="button"
           onClick={() => onTransportModeChange('webrtc')}
           style={segmentedButtonStyle(transportMode === 'webrtc')}
         >
           RTC First
-        </button>
+        </AmbientButton>
       </div>
 
       <div>
         <FieldLabel>Tailscale Host</FieldLabel>
-        <input
+        <AmbientInput
           value={tailscaleHost}
           onChange={(event) => onTailscaleHostChange(event.target.value)}
           placeholder="your-host.ts.net 或 100.x.y.z"
@@ -60,7 +61,7 @@ export function RemoteAccessSection({
 
       <div>
         <FieldLabel>IPv6 Host</FieldLabel>
-        <input
+        <AmbientInput
           value={ipv6Host}
           onChange={(event) => onIpv6HostChange(event.target.value)}
           placeholder="240e:xxxx::1"
@@ -70,7 +71,7 @@ export function RemoteAccessSection({
 
       <div>
         <FieldLabel>IPv4 Host</FieldLabel>
-        <input
+        <AmbientInput
           value={ipv4Host}
           onChange={(event) => onIpv4HostChange(event.target.value)}
           placeholder="1.2.3.4"

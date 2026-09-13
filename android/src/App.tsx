@@ -40,6 +40,7 @@ import { registerClientDebugSnapshotSource } from './lib/client-debug-snapshot';
 import { openConnectionsPage, openTerminalPage } from './lib/page-state';
 import { ConnectionsPage } from './pages/ConnectionsPage';
 import { ConnectionPropertiesPage } from './pages/ConnectionPropertiesPage';
+import { AmbientButton } from './components/ambient';
 import { SettingsPage } from './pages/SettingsPage';
 import { TerminalPage } from './pages/TerminalPage';
 import { projectHomeSavedConnections } from './lib/home-connection-projection';
@@ -1071,7 +1072,7 @@ export function AppContent({
           垂直居中右侧——不覆盖顶部/底部浮动标签（quickbar 固定簇等） */}
       {screenOrientationLock.showSwitchButton &&
         screenOrientationLock.pendingTarget && (
-          <button
+          <AmbientButton
             type="button"
             data-testid="screen-orientation-switch-button"
             aria-label={`切换到${screenOrientationLock.pendingTarget === 'landscape' ? '横屏' : '竖屏'}`}
@@ -1100,7 +1101,7 @@ export function AppContent({
             }}
           >
             ↻
-          </button>
+          </AmbientButton>
         )}
 
       <TmuxSessionPickerSheet
@@ -1199,7 +1200,7 @@ export function AppContent({
             ) : null}
 
             <div style={{ display: 'grid', gap: '10px' }}>
-              <button
+              <AmbientButton
                 onClick={() => {
                   void startUpdate(availableManifest);
                 }}
@@ -1215,8 +1216,8 @@ export function AppContent({
                 }}
               >
                 {updateInstalling ? '准备安装…' : '立即升级'}
-              </button>
-              <button
+              </AmbientButton>
+              <AmbientButton
                 onClick={() => skipCurrentVersion(availableManifest)}
                 style={{
                   minHeight: '42px',
@@ -1228,8 +1229,8 @@ export function AppContent({
                 }}
               >
                 跳过当前版本
-              </button>
-              <button
+              </AmbientButton>
+              <AmbientButton
                 onClick={ignoreUntilManualCheck}
                 style={{
                   minHeight: '42px',
@@ -1241,8 +1242,8 @@ export function AppContent({
                 }}
               >
                 一直忽略，直到手动检查
-              </button>
-              <button
+              </AmbientButton>
+              <AmbientButton
                 onClick={dismissAvailableManifest}
                 style={{
                   minHeight: '40px',
@@ -1254,7 +1255,7 @@ export function AppContent({
                 }}
               >
                 先不处理
-              </button>
+              </AmbientButton>
             </div>
           </div>
         </div>

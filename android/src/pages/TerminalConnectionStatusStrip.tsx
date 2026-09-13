@@ -5,6 +5,7 @@
 import { memo as ReactMemo, useEffect, useState, type ComponentProps } from 'react';
 import { useRef } from 'react';
 import { RenameDialog } from '../components/terminal/RenameDialog';
+import { AmbientButton } from '../components/ambient';
 import { formatDebugRate } from './terminal-page-debug-helpers';
 import type { Session, SessionDebugOverlayMetrics } from '../lib/types';
 import {
@@ -304,7 +305,7 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
           }}
           onClick={(event) => event.stopPropagation()}
         >
-          <button
+          <AmbientButton
             type="button"
             data-testid='terminal-route-option-auto'
             onClick={() => {
@@ -314,8 +315,8 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
             style={connectionRouteOptionStyle}
           >
             自动选择
-          </button>
-          <button
+          </AmbientButton>
+          <AmbientButton
             type="button"
             data-testid='terminal-route-option-websocket'
             onClick={() => {
@@ -325,8 +326,8 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
             style={connectionRouteOptionStyle}
           >
             直连 / Tailscale
-          </button>
-          <button
+          </AmbientButton>
+          <AmbientButton
             type="button"
             data-testid='terminal-route-option-webrtc'
             onClick={() => {
@@ -336,7 +337,7 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
             style={connectionRouteOptionStyle}
           >
             WebRTC / Relay
-          </button>
+          </AmbientButton>
         </div>
       ) : null}
       </div>
