@@ -3035,11 +3035,14 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     />
   ) : null;
 
+  const lockedStreamStatusText = state.phase === 'targetLocked'
+    ? `串流：${state.streamStatus === 'streaming' ? '已连接' : state.streamStatus} · ${activeProfile.maxBitrateBps / 1_000_000} Mbps / ${activeProfile.maxFrameRateFps} FPS${qualityApplyState.phase === 'requested' ? ' · 正在应用' : qualityApplyState.phase === 'rejected' ? ` · 失败：${qualityApplyState.message}` : ''}`
+    : '';
   const lockedMoreContent = state.phase === 'targetLocked' ? (
     <RemoteWindowMorePanel
       fullscreen={state.mode === 'fullscreen'}
       videoPreference={videoPreference}
-      streamStatusText={`串流：${state.streamStatus === 'streaming' ? '已连接' : state.streamStatus} · ${activeProfile.maxBitrateBps / 1_000_000} Mbps / ${activeProfile.maxFrameRateFps} FPS${qualityApplyState.phase === 'requested' ? ' · 正在应用' : qualityApplyState.phase === 'rejected' ? ` · 失败：${qualityApplyState.message}` : ''}`}
+      streamStatusText={lockedStreamStatusText}
       networkStatusText={`压力：${adaptiveCause === 'none' ? '无' : adaptiveCause} · 网络：${networkQuality?.effectiveType || '未知'}${networkQuality?.rttMs ? ` · RTT ${networkQuality.rttMs}ms` : ''}`}
       browserMode={state.phase === 'targetLocked' && isRemoteWindowChromeTarget(state.target)}
       browserUserAgent={browserUserAgent}
@@ -3109,6 +3112,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
           moreOpen={streamStatusOpen}
           screenshotBusy={screenshotBusy}
           screenshotButtonStyle={screenshotButtonStyle}
+          streamStatusText={lockedStreamStatusText}
           targetKindLabel={formatTargetKind(state.target)}
           onClose={handleClose}
           onRemoteClose={handleRemoteClose}
@@ -3214,6 +3218,27 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       <style>{`
         [data-testid="remote-window-control-strip"]::-webkit-scrollbar {
           display: none;
+        }
+        [data-testid="remote-window-locked-toolbar"] [data-testid="remote-window-gesture-guide"][data-mode="fullscreen"] {
+          display: none;
+        }
+        @media (max-width: 360px) {
+          [data-testid="remote-window-drag-handle"] {
+            gap: 2px;
+            padding-left: 8px;
+            padding-right: 8px;
+          }
+          [data-testid="remote-window-primary-actions"] {
+            gap: 2px;
+          }
+          [data-testid="remote-window-control-strip"] {
+            gap: 3px;
+            padding-left: 8px;
+            padding-right: 8px;
+          }
+          [data-testid="remote-window-active-app-switch-button"] {
+            max-width: 34vw;
+          }
         }
         @keyframes zterm-remote-window-shot-spin {
           from { transform: rotate(0deg); }
