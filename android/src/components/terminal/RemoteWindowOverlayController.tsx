@@ -663,21 +663,17 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     floatingOffsetRef.current = next;
     setFloatingOffsetState(next);
   }, []);
-
   const setFloatingOverlayWidthPx = useCallback((next: number | null) => {
     floatingOverlayWidthPxRef.current = next;
     setFloatingOverlayWidthPxState(next);
   }, []);
-
   const setEntryOffset = useCallback((next: FloatingEntryPosition) => {
     entryOffsetRef.current = next;
     setEntryOffsetState(next);
     writeStoredEntryPosition(next);
   }, []);
-
   const browserEntry = useIndependentFloatingEntryPosition(readStoredBrowserEntryPosition(), writeStoredBrowserEntryPosition, () => { suppressBrowserEntryClickRef.current = true; }, () => { suppressBrowserEntryClickRef.current = true; window.setTimeout(() => { suppressBrowserEntryClickRef.current = false; }, SHARED_DRAG_SUPPRESS_CLICK_MS); });
   const browserEntryOffset = browserEntry.position, browserEntryButtonRef = browserEntry.buttonRef, browserEntryDragHandlers = browserEntry.handlers;
-
   // 浮层手柄拖拽：与文件 bubble / 浮钮同一套共享拖拽逻辑（pointer+touch 双套）
   const floatingDragInitialRef = useRef<{ left: number; top: number } | null>(null);
   const floatingDragHandlers = useSharedDraggableDrag({
@@ -1029,8 +1025,8 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       return false;
     }
     const fillReference = resolveRemoteWindowFullscreenFillReferenceSize({
-      overlay: floatingOverlayRef.current,
-      toolbar: lockedToolbarRef.current,
+      overlay: embedded ? null : floatingOverlayRef.current,
+      toolbar: embedded ? null : lockedToolbarRef.current,
       surface: videoSurfaceRef.current,
       fallbackSurfaceSize: surfaceSize,
     });
