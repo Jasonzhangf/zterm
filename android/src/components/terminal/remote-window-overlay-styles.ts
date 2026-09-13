@@ -409,7 +409,7 @@ export const styles: Record<string, CSSProperties> = {
     display: 'flex',
     flexDirection: 'column',
     boxSizing: 'border-box',
-    paddingTop: 'calc(44px + env(safe-area-inset-top, 0px))',
+    paddingTop: 'env(safe-area-inset-top, 0px)',
     paddingLeft: 'max(8px, env(safe-area-inset-left, 0px))',
     paddingRight: 'max(8px, env(safe-area-inset-right, 0px))',
     background: 'var(--zterm-stage-bg)',
