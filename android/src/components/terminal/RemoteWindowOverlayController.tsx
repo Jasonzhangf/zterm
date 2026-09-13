@@ -1027,13 +1027,10 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     ) {
       return false;
     }
-    const viewport = typeof window !== 'undefined' && window.innerWidth > 0 && window.innerHeight > 0
-      ? { width: window.innerWidth, height: window.innerHeight }
-      : surfaceSize;
-    if (!viewport) {
+    if (!surfaceSize) {
       return false;
     }
-    const reference = resolveRemoteWindowTargetResizeSize({ viewport });
+    const reference = resolveRemoteWindowTargetResizeSize({ viewport: surfaceSize });
     const width = reference.width;
     const height = reference.height;
     const last = lastRemoteFillResizeRef.current;
