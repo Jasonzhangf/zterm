@@ -224,6 +224,7 @@ tmux -> daemon mirror writer -> daemon mirror store -> read api -> client
   - attach transport 不等于永久订阅正文；
   - daemon 只保存 `bodySubscribed` 这一物理事实，不保存 active/inactive/visible/foreground 原因；
   - unsubscribe 只停止 unsolicited `buffer-sync`，不得 close transport、detach mirror、禁用 input/file/schedule 或 explicit head/range read；
+  - 当最后一个 ready body subscriber 取消订阅时，daemon 可以释放 mirror/capture/adaptive width，但只能关闭该 logical mux channel，并发送 `mux-channel-closed { code:'no_body_demand' }`；物理 target transport 必须保留。client 收到该 code 后只进入业务 idle，禁止 target control query / reconnect；后续显式 active/live demand 才允许在同一物理 transport 上重开 channel。
   - recurring capture 只由 ready 且 `bodySubscribed` 的 physical subscriber demand 驱动；unsubscribe 必须经同一个 scheduler owner 立即停旧 timer，恢复 demand 后恢复 scheduler，不得由 head/range 请求直接 capture。
   - RTC/Relay datachannel close 可能不会可靠到达 daemon；daemon 必须按 transport inbound heartbeat sweep stale bound subscriber，并走 `detachSubscriberTransportOnly`。该路径禁止杀 tmux；若 detach 后 mirror 已无任何 physical subscriber，只允许由 terminal runtime 释放 daemon-owned mirror/buffer/input/timer 资源；仍有 sibling subscriber 时必须保留 mirror。不得在 Android UI/renderer/buffer 层做退出补偿。
   - WebSocket protocol `pong` 只证明 physical transport / ws frame liveness；daemon 只能用它维护 `wsAlive`，不得刷新 `lastInboundAt` 或 adaptive width lease heartbeat。自动 pong 不是 app-level `mux-ping` / mux frame；Android service 停止应用层心跳但 socket 仍自动回 pong 时，daemon stale sweep 必须仍能释放 subscriber、mux channels、mirror capture 与 width lease。

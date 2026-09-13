@@ -130,6 +130,8 @@ export function useSessionProviderCoreAssemblies(
       : null,
   }), [sessionDebugMetricsStoreRef, transportRuntimeStoreRef]);
 
+  const reopenSessionTerminalChannelRef = useRef<(sessionId: string) => void>(() => {});
+
   const sessionInfraRuntime = useMemo(() => createSessionInfraFacadeRuntime({
     stateRef: options.stateRef,
     dispatch: options.dispatch,
@@ -144,6 +146,7 @@ export function useSessionProviderCoreAssemblies(
     sessionAttachTokensRef,
     pendingSessionTransportOpenIntentsRef,
     activeBodySubscriptionSuppressedRef,
+    reopenSessionTerminalChannelRef,
     reconnectStore: sessionReconnectStoreRef.current,
     tailRefreshStore: sessionTailRefreshStoreRef.current,
     bufferFrameAssemblyRef,
@@ -474,6 +477,13 @@ export function useSessionProviderCoreAssemblies(
     writeSessionTransportHost,
     writeSessionTransportToken,
   ]);
+
+  reopenSessionTerminalChannelRef.current = (sessionId) => {
+    const host = readSessionTransportHost(sessionId);
+    if (host) {
+      queueConnectTransportOpenIntent(sessionId, host);
+    }
+  };
 
   const sessionMessageRuntime: SessionMessageAssembliesResult = useMemo(() => createSessionMessageAssemblies({
     stateRef: options.stateRef,

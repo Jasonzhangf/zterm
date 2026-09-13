@@ -200,6 +200,7 @@ export function createSessionInfraFacadeRuntime(options: {
   sessionAttachTokensRef: { current: Map<string, string> };
   pendingSessionTransportOpenIntentsRef: { current: Map<string, unknown> };
   activeBodySubscriptionSuppressedRef: { current: boolean };
+  reopenSessionTerminalChannelRef?: { current: (sessionId: string) => void };
   reconnectStore: SessionReconnectStore;
   tailRefreshStore: SessionTailRefreshStore;
   bufferFrameAssemblyRef: { current: Map<string, BufferFrameAssemblyResourceState> };
@@ -314,6 +315,10 @@ export function createSessionInfraFacadeRuntime(options: {
       const channel = transportAccessors.readSessionTerminalChannel(session.id);
       const subscribed = liveSessionIds.has(session.id);
       setSessionChannelBodySubscribed(options.transportRuntimeStoreRef.current.terminalChannels, session.id, subscribed);
+      if (subscribed && channel?.state === 'closed') {
+        options.reopenSessionTerminalChannelRef?.current(session.id);
+        continue;
+      }
       const ws = channel
         ? (
           channel.state === 'open'

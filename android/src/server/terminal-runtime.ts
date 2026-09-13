@@ -32,12 +32,18 @@ export interface TerminalRuntime {
     subscriber: TerminalTransportSubscriber,
   ) => TerminalTransportSubscriber;
   detachSubscriberTransportOnly: (subscriber: TerminalTransportSubscriber, reason: string, transportId?: string) => void;
-  closeTransportSubscriber: (subscriber: TerminalTransportSubscriber, reason: string, notifyClient?: boolean) => void;
+  closeTransportSubscriber: (
+    subscriber: TerminalTransportSubscriber,
+    reason: string,
+    notifyClient?: boolean,
+    code?: string,
+  ) => void;
   destroyMirror: (
     mirror: SessionMirror,
     reason: string,
     options?: { closeTransportSubscribers?: boolean; notifyClientClose?: boolean; releaseCode?: string },
   ) => void;
+  releaseMirrorIfNoBodyDemand: (mirror: SessionMirror, reason: string) => boolean;
   disposeLiveMirrorInputBatch: (sessionName: string, reason: string, backend?: 'tmux' | 'herdr') => number;
   ensureSessionReady: (subscriber: TerminalTransportSubscriber, mirror: SessionMirror) => void;
   sendBufferHeadToSession: (subscriber: TerminalTransportSubscriber, mirror: SessionMirror) => void;
@@ -181,7 +187,12 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
     sessions.delete(subscriber.id);
   }
 
-  function closeTransportSubscriber(subscriber: TerminalTransportSubscriber, reason: string, notifyClient = false) {
+  function closeTransportSubscriber(
+    subscriber: TerminalTransportSubscriber,
+    reason: string,
+    notifyClient = false,
+    code?: string,
+  ) {
     const current = sessions.get(subscriber.id);
     if (!current || current !== subscriber) {
       return;
@@ -209,7 +220,7 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
 
     if (subscriber.transport && subscriber.transport.readyState < WebSocket.CLOSING) {
       try {
-        subscriber.transport.close(reason);
+        subscriber.transport.close(reason, code);
       } catch (error) {
         console.warn(
           `[${deps.logTimePrefix()}] failed to close transport subscriber ${subscriber.id}: ${
@@ -246,6 +257,7 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
     detachSubscriberTransportOnly,
     closeTransportSubscriber,
     destroyMirror: mirrorRuntime.destroyMirror,
+    releaseMirrorIfNoBodyDemand: mirrorRuntime.releaseMirrorIfNoBodyDemand,
     disposeLiveMirrorInputBatch: (sessionName, reason, backend) =>
       mirrorRuntime.disposeLiveMirrorInputBatch(sessionName, reason, backend),
     ensureSessionReady: mirrorRuntime.ensureSessionReady,

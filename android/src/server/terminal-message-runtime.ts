@@ -75,6 +75,7 @@ export interface TerminalMessageRuntimeDeps {
   ) => 'queued' | 'missing-subscriber' | 'transport-not-open' | 'queue-full';
   scheduleMirrorLiveSync: (mirror: SessionMirror, delayMs?: number) => void;
   refreshMirrorHeadForSession: (session: TerminalSession, mirror: SessionMirror) => Promise<boolean>;
+  releaseMirrorIfNoBodyDemand: (mirror: SessionMirror, reason: string) => boolean;
   daemonInputQueue: DaemonInputQueueRuntime;
   closeSession: (session: TerminalSession, reason: string, notifyClient?: boolean) => void;
   fileTransferMessageRuntime: TerminalFileTransferMessageRuntime;
@@ -407,10 +408,33 @@ export function createTerminalMessageRuntime(
         }
         session.bodySubscribed = message.payload.subscribed;
         const mirror = deps.getSessionMirror(session);
-        if (mirror?.lifecycle === 'ready') {
-          if (message.payload.subscribed) {
+        if (message.payload.subscribed) {
+          if (mirror?.lifecycle === 'ready') {
             deps.sendBufferHeadToSession(session, mirror);
+            deps.scheduleMirrorLiveSync(mirror, 0);
+          } else {
+            try {
+              await deps.controlRuntimeDeps.attachTmux(session, {
+                sessionName: session.sessionName,
+                backend: session.backend,
+              });
+              const restoredMirror = deps.getSessionMirror(session);
+              if (restoredMirror?.lifecycle === 'ready') {
+                deps.sendBufferHeadToSession(session, restoredMirror);
+                deps.scheduleMirrorLiveSync(restoredMirror, 0);
+              }
+            } catch (error) {
+              deps.sendMessage(session, {
+                type: 'error',
+                payload: {
+                  message: error instanceof Error ? error.message : 'Body subscription attach failed',
+                  code: 'body_subscription_attach_failed',
+                },
+              });
+            }
           }
+        } else if (mirror) {
+          deps.releaseMirrorIfNoBodyDemand(mirror, 'body subscription released');
           deps.scheduleMirrorLiveSync(mirror, 0);
         }
         break;

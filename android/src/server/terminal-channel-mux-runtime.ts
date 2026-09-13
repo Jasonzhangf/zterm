@@ -63,12 +63,14 @@ export function createTerminalChannelMuxRuntime(
           JSON.stringify(buildTerminalMuxServerChannelMessage(channelId, message)),
         );
       },
-      close() {
+      close(reason = 'server closed channel transport', code?: string) {
+        connection.muxChannels?.delete(channelId);
         deps.sendText(connection.transport, JSON.stringify({
           type: 'mux-channel-closed',
           payload: {
             channelId,
-            reason: 'server closed channel transport',
+            reason,
+            ...(code ? { code } : {}),
           },
         }));
       },
@@ -92,12 +94,14 @@ export function createTerminalChannelMuxRuntime(
       id: subscriberId,
       transportId: connection.transportId,
       transport: createMuxChannelTransport(connection, normalizedChannelId),
-      closeTransport: (reason: string) => {
+      closeTransport: (reason: string, code?: string) => {
+        connection.muxChannels?.delete(normalizedChannelId);
         deps.sendText(connection.transport, JSON.stringify({
           type: 'mux-channel-closed',
           payload: {
             channelId: normalizedChannelId,
             reason,
+            ...(code ? { code } : {}),
           },
         }));
       },

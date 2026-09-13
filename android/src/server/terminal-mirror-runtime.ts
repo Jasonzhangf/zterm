@@ -73,7 +73,12 @@ export interface TerminalMirrorRuntimeDeps {
   logTimePrefix: () => string;
   runTmux: (args: string[]) => { ok: true; stdout: string };
   buildExactTmuxSessionTarget: (sessionName: string) => string;
-  closeTransportSubscriber: (session: TerminalSession, reason: string, notifyClient?: boolean) => void;
+  closeTransportSubscriber: (
+    session: TerminalSession,
+    reason: string,
+    notifyClient?: boolean,
+    code?: string,
+  ) => void;
   getSessionMirror: (session: TerminalSession) => SessionMirror | null;
 }
 
@@ -82,9 +87,15 @@ export interface TerminalMirrorRuntime {
   destroyMirror: (
     mirror: SessionMirror,
     reason: string,
-    options?: { closeTransportSubscribers?: boolean; notifyClientClose?: boolean; releaseCode?: string },
+    options?: {
+      closeTransportSubscribers?: boolean;
+      notifyClientClose?: boolean;
+      notifySubscriberRelease?: boolean;
+      releaseCode?: string;
+    },
   ) => boolean;
   destroyMirrorIfUnsubscribed: (mirror: SessionMirror, reason: string) => boolean;
+  releaseMirrorIfNoBodyDemand: (mirror: SessionMirror, reason: string) => boolean;
   ensureSessionReady: (session: TerminalSession, mirror: SessionMirror) => void;
   sendBufferHeadToSession: (session: TerminalSession, mirror: SessionMirror) => void;
   enqueueRangeBufferSyncResponse: (
@@ -244,6 +255,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     mirror: SessionMirror,
     reason: string,
     code = 'tmux_session_unavailable',
+    notify = true,
   ) {
     const releasedSessionIds = releaseMirrorSubscribers(sessions, mirror.subscribers);
     for (const sessionId of releasedSessionIds) {
@@ -256,7 +268,9 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       client.adaptiveWidthHeartbeatAt = 0;
       client.pendingPasteImage = null;
       client.pendingAttachFile = null;
-      deps.sendMessage(client, { type: 'error', payload: { message: reason, code } });
+      if (notify) {
+        deps.sendMessage(client, { type: 'error', payload: { message: reason, code } });
+      }
     }
   }
 
@@ -266,6 +280,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     options?: {
       closeTransportSubscribers?: boolean;
       notifyClientClose?: boolean;
+      notifySubscriberRelease?: boolean;
       releaseCode?: string;
     },
   ): boolean {
@@ -297,10 +312,20 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
         if (!client) {
           continue;
         }
-        deps.closeTransportSubscriber(client, reason, Boolean(options.notifyClientClose));
+        deps.closeTransportSubscriber(
+          client,
+          reason,
+          Boolean(options.notifyClientClose),
+          options.releaseCode,
+        );
       }
     } else {
-      releaseMirrorForSubscribers(mirror, reason, options?.releaseCode || 'tmux_session_unavailable');
+      releaseMirrorForSubscribers(
+        mirror,
+        reason,
+        options?.releaseCode || 'tmux_session_unavailable',
+        options?.notifySubscriberRelease !== false,
+      );
     }
     mirror.subscribers.clear();
     mirror.scratchBridge = null;
@@ -339,6 +364,44 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       closeTransportSubscribers: false,
       releaseCode: 'no_subscribers',
     });
+  }
+
+  function releaseMirrorIfNoBodyDemand(mirror: SessionMirror, reason: string) {
+    if (mirror.lifecycle === 'destroyed') {
+      return false;
+    }
+    if (countReadyBodySubscribedSubscribers(mirror) > 0) {
+      return false;
+    }
+    for (const sessionId of mirror.subscribers) {
+      const session = sessions.get(sessionId);
+      if (!session) {
+        continue;
+      }
+      if (session.muxChannelId) {
+        deps.closeTransportSubscriber(session, reason, false, 'no_body_demand');
+        continue;
+      }
+      // Legacy non-mux subscribers own their physical transport directly, so
+      // mirror release must not call closeTransportSubscriber here. Detach the
+      // subscriber from mirror ownership only and keep the physical transport
+      // and logical session alive.
+      releaseAdaptiveWidthLease(session, `body-release:${reason}`);
+      const detachResult = detachMirrorSubscriber(mirror.subscribers, session.id);
+      mirror.subscribers = detachResult.nextSubscribers;
+      session.mirrorKey = null;
+    }
+    if (!mirrors.has(mirror.key)) {
+      return true;
+    }
+    if (mirror.subscribers.size > 0) {
+      return destroyMirror(mirror, reason, {
+        closeTransportSubscribers: false,
+        notifySubscriberRelease: false,
+        releaseCode: 'no_body_demand',
+      });
+    }
+    return destroyMirrorIfUnsubscribed(mirror, reason);
   }
 
   function ensureSessionReady(session: TerminalSession, mirror: SessionMirror) {
@@ -921,7 +984,10 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     reconcileAdaptiveWidthLeases(mirror, 'mirror-ready');
 
     if (countReadyBodySubscribedSubscribers(mirror) === 0) {
-      announceMirrorSubscribersReady(mirror);
+      // body-subscription=false can arrive while the mirror is still booting,
+      // before the ready check in terminal-message-runtime. Do not announce or
+      // keep a mirror that no client is asking to see.
+      releaseMirrorIfNoBodyDemand(mirror, 'body subscription released');
       return;
     }
 
@@ -1099,6 +1165,10 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     deps.sendMessage(session, { type: 'title', payload: mirror.sessionName });
 
     if (mirror.lifecycle === 'ready') {
+      if (countReadyBodySubscribedSubscribers(mirror) === 0) {
+        releaseMirrorIfNoBodyDemand(mirror, 'body subscription released');
+        return;
+      }
       ensureSessionReady(session, mirror);
       scheduleMirrorLiveSync(mirror, 0);
       return;
@@ -1196,6 +1266,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     scheduleMirrorLiveSync,
     startMirror,
     attachTmux,
+    releaseMirrorIfNoBodyDemand,
     handleAdaptiveResize,
     restorePersistedAdaptiveWidthBaselines,
     refreshAdaptiveWidthLeaseHeartbeat,

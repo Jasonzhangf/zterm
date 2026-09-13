@@ -161,6 +161,34 @@ describe('terminal runtime detached transport cleanup', () => {
     });
   });
 
+  it('releases a mux channel registry entry without closing the physical transport', () => {
+    const { channelMuxRuntime, runtime, sessions, sendText } = createDeps();
+    const connection = createTransportConnection('transport-1');
+    const subscriber = channelMuxRuntime.createMuxChannelSubscriber(connection, 'channel-a');
+
+    runtime.closeTransportSubscriber(subscriber, 'body subscription released', false, 'no_body_demand');
+
+    expect(connection.muxChannels?.has('channel-a')).toBe(false);
+    expect(connection.transport.close).not.toHaveBeenCalled();
+    expect(sessions.has(subscriber.id)).toBe(false);
+    const frame = JSON.parse(String(sendText.mock.calls.at(-1)?.[1])) as {
+      type: string;
+      payload: {
+        channelId: string;
+        reason: string;
+        code?: string;
+      };
+    };
+    expect(frame).toEqual({
+      type: 'mux-channel-closed',
+      payload: {
+        channelId: 'channel-a',
+        reason: 'body subscription released',
+        code: 'no_body_demand',
+      },
+    });
+  });
+
   it('owns channel registry initialization and per-channel/all-channel release', () => {
     const { channelMuxRuntime, sessions } = createDeps();
     const connection = createTransportConnection('transport-1');

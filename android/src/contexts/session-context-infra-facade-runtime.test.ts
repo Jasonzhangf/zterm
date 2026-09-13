@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
@@ -8,9 +8,10 @@ import {
   setTargetTerminalTransport,
   upsertSessionTransportRuntime,
 } from '../lib/session-transport-runtime';
-import { ensureSessionTerminalChannel } from '../lib/terminal-channel-mux-runtime';
+import { ensureSessionTerminalChannel, getSessionTerminalChannel } from '../lib/terminal-channel-mux-runtime';
 import type { Host } from '../lib/types';
 import {
+  createSessionInfraFacadeRuntime,
   shouldRouteAndroidHostToTraversalSocket,
   wrapSessionPayloadForTargetMuxRuntime,
 } from './session-context-infra-facade-runtime';
@@ -92,6 +93,58 @@ describe('Android connection service platform wiring', () => {
     expect(source).toContain('shouldRouteAndroidHostToTraversalSocket(host)');
     expect(source).toContain("transportRole: 'session'");
     expect(source).toContain('buildTraversalSocketForHostRuntime({');
+  });
+});
+
+describe('body demand reconciliation', () => {
+  it('reopens a closed mux channel when the session becomes body-subscribed again', () => {
+    const { store } = createMuxStore();
+    const channel = getSessionTerminalChannel(store.terminalChannels, 'session-1');
+    if (!channel) {
+      throw new Error('channel not initialized');
+    }
+    channel.state = 'closed';
+    const reopenSessionTerminalChannel = vi.fn();
+    const stateRef = {
+      current: {
+        activeSessionId: null,
+        liveSessionIds: ['session-1'],
+        sessions: [{ id: 'session-1', state: 'connected' }],
+      },
+    };
+    const runtime = createSessionInfraFacadeRuntime({
+      stateRef,
+      dispatch: vi.fn(),
+      reduceSessionAction: (state: unknown, _action: unknown) => state,
+      transportRuntimeStoreRef: { current: store },
+      sessionBufferStoreRef: { current: {} },
+      sessionRenderGateRef: { current: {} },
+      sessionHeadStoreRef: { current: {} },
+      sessionDebugMetricsStoreRef: { current: {} },
+      scheduleStatesRef: { current: {} },
+      setScheduleStates: vi.fn(),
+      sessionAttachTokensRef: { current: new Map() },
+      pendingSessionTransportOpenIntentsRef: { current: new Map() },
+      activeBodySubscriptionSuppressedRef: { current: false },
+      reopenSessionTerminalChannelRef: { current: reopenSessionTerminalChannel },
+      reconnectStore: {},
+      tailRefreshStore: {},
+      bufferFrameAssemblyRef: { current: new Map() },
+      sessionPullStateRef: { current: new Map() },
+      heartbeatStore: {},
+      handshakeTimeoutsRef: { current: new Map() },
+      sessionRevisionResetRef: { current: new Map() },
+      lastHeadRequestAtRef: { current: new Map() },
+      terminalCacheLines: 1000,
+      defaultRows: 40,
+      bridgeSettings: {},
+      staleActivityMs: 3000,
+      runtimeDebug: vi.fn(),
+    } as any);
+
+    runtime.reconcilePhysicalBodySubscriptions('live-sessions');
+
+    expect(reopenSessionTerminalChannel).toHaveBeenCalledWith('session-1');
   });
 });
 

@@ -184,7 +184,7 @@ type BufferSyncResponse = {
 - 不做 renderer 决策
 - 不做 visible range 决策
 - 不做“客户端应该拉哪段”的策略
-- 不因 client 断开 / 切 tab / subscriber 归零就销毁 mirror truth；mirror 的 `revision / latestEndIndex / absolute line window` 不能随着 client 生命周期重置
+- 不因 client 断开 / 切 tab / subscriber 归零就销毁 mirror truth；只有最后一个 ready body subscriber 通过 `body-subscription { subscribed:false }` 消失时，才允许 daemon 释放 mirror/capture/adaptive width；该释放不能关闭 physical target transport。mirror 的 `revision / latestEndIndex / absolute line window` 不能随着 client 生命周期重置，只能由 daemon 自己的 body-demand release owner 释放。
 
 server 不关心客户端行为；它只是 tmux mirror。
 
@@ -242,6 +242,14 @@ daemon transport connection
     - 当前 transport 是否存在/绑定
     - mirror 是否 `booting/ready/failed/destroyed`
 - daemon 不允许因为 active/inactive/tab/foreground/background 推导 transport 生命周期
+
+### 1.4.1 body demand release
+
+- `body-subscription { subscribed:false }` 只表示客户端不再需要 terminal body truth；daemon 不得从它推导 active/inactive/foreground/background。
+- 当 mirror 内最后一个 ready body subscriber 取消订阅时，daemon 可以释放 mirror/capture/adaptive width。
+- mux channel subscriber 释放时只关闭 logical mux channel，并发送 `mux-channel-closed { code:'no_body_demand' }`；physical target transport 必须保留。
+- legacy non-mux subscriber 释放 mirror ownership 时保留 physical transport 和 logical session；后续 `body-subscription { subscribed:true }` 必须能在该物理 transport 上重新 attach mirror。
+- client 收到 `code:'no_body_demand'` 时只能进入业务 idle，禁止 target control query 或 transport reconnect；后续显式 active/live demand 才允许重开 channel。
 
 ### 1.4 daemon 不允许持有客户端 UI/viewport 语义
 

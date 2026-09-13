@@ -81,7 +81,7 @@ export function handleSocketServerMessageRuntime(options: {
     rawFrameBytes?: number;
     onConnected: () => void;
     onFailure: (message: string, retryable: boolean) => void;
-    onClosed: (reason?: string) => void;
+    onClosed: (reason?: string, code?: string) => void;
   };
   msg: ServerMessage;
   recordRelayHostConnection?: (daemonHostId: string) => void;

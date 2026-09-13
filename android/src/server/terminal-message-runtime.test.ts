@@ -169,6 +169,7 @@ function createRuntime(options?: {
   const enqueueRangeBufferSyncResponse = vi.fn();
   const scheduleMirrorLiveSync = vi.fn();
   const refreshMirrorHeadForSession = vi.fn(async () => true);
+  const releaseMirrorIfNoBodyDemand = vi.fn(() => true);
   const handleInput = vi.fn(async (_session: TerminalSession, _data: string, _shouldWrite?: () => boolean) => true);
   const closeSession = vi.fn();
   const handleAdaptiveResize = vi.fn();
@@ -282,6 +283,12 @@ function createRuntime(options?: {
     },
   };
 
+  const attachTmux = vi.fn(async () => {
+    if (options?.failAttachTmux) {
+      throw new Error('forced attach failure');
+    }
+  });
+
   const runtime = createTerminalMessageRuntime({
     sessions,
     sendTransportMessage,
@@ -292,6 +299,7 @@ function createRuntime(options?: {
     enqueueRangeBufferSyncResponse,
     scheduleMirrorLiveSync,
     refreshMirrorHeadForSession,
+    releaseMirrorIfNoBodyDemand,
     daemonInputQueue,
     closeSession,
     fileTransferMessageRuntime,
@@ -324,11 +332,7 @@ function createRuntime(options?: {
       createTransportSubscriber: vi.fn(),
       bindConnectionToSubscriber: vi.fn(),
       getMirrorKey: vi.fn((sessionName: string) => sessionName),
-      attachTmux: vi.fn(async () => {
-        if (options?.failAttachTmux) {
-          throw new Error('forced attach failure');
-        }
-      }),
+      attachTmux,
       handleAdaptiveResize,
       destroyMirror: vi.fn(),
     },
@@ -343,6 +347,8 @@ function createRuntime(options?: {
     enqueueRangeBufferSyncResponse,
     scheduleMirrorLiveSync,
     refreshMirrorHeadForSession,
+    releaseMirrorIfNoBodyDemand,
+    attachTmux,
     handleInput,
     closeSession,
     handleAdaptiveResize,
@@ -797,9 +803,15 @@ describe('terminal message runtime explicit error truth', () => {
     });
   });
 
-  it('updates physical body subscription without closing the transport, and resubscribe sends head truth plus live demand', async () => {
+  it('updates physical body subscription without closing the transport, releases no-demand mirror, and resubscribe sends head truth plus live demand', async () => {
     const mirror = createReadyMirror();
-    const { runtime, sessions, sendBufferHeadToSession, scheduleMirrorLiveSync } = createRuntime({ mirror });
+    const {
+      runtime,
+      sessions,
+      sendBufferHeadToSession,
+      scheduleMirrorLiveSync,
+      releaseMirrorIfNoBodyDemand,
+    } = createRuntime({ mirror });
     const session = createSession();
     sessions.set(session.id, session);
     const connection = createConnection(session.id);
@@ -812,8 +824,10 @@ describe('terminal message runtime explicit error truth', () => {
     expect(session.bodySubscribed).toBe(false);
     expect(connection.transport.close).not.toHaveBeenCalled();
     expect(sendBufferHeadToSession).not.toHaveBeenCalled();
+    expect(releaseMirrorIfNoBodyDemand).toHaveBeenCalledWith(mirror, 'body subscription released');
     expect(scheduleMirrorLiveSync).toHaveBeenCalledWith(mirror, 0);
     scheduleMirrorLiveSync.mockClear();
+    releaseMirrorIfNoBodyDemand.mockClear();
 
     await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
       type: 'body-subscription',
@@ -823,7 +837,33 @@ describe('terminal message runtime explicit error truth', () => {
     expect(session.bodySubscribed).toBe(true);
     expect(connection.transport.close).not.toHaveBeenCalled();
     expect(sendBufferHeadToSession).toHaveBeenCalledWith(session, mirror);
+    expect(releaseMirrorIfNoBodyDemand).not.toHaveBeenCalled();
     expect(scheduleMirrorLiveSync).toHaveBeenCalledWith(mirror, 0);
+  });
+
+  it('reattaches a legacy session when body subscription returns without a mirror', async () => {
+    const {
+      runtime,
+      sessions,
+      sendBufferHeadToSession,
+      attachTmux,
+    } = createRuntime();
+    const session = createSession();
+    session.mirrorKey = null;
+    sessions.set(session.id, session);
+    const connection = createConnection(session.id);
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'body-subscription',
+      payload: { version: 1, subscribed: true },
+    })));
+
+    expect(session.bodySubscribed).toBe(true);
+    expect(attachTmux).toHaveBeenCalledWith(session, {
+      sessionName: 'demo',
+      backend: undefined,
+    });
+    expect(sendBufferHeadToSession).not.toHaveBeenCalled();
   });
 
   it('does not echo legacy clientSessionId in session-ticket because daemon owns no client state', async () => {

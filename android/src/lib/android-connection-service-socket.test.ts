@@ -561,6 +561,48 @@ describe('AndroidConnectionServiceTransportSocket', () => {
     expect(messages).toEqual([]);
   });
 
+  it('forwards native channel-close reason and code into the mux frame', async () => {
+    const { listeners, add } = listenerMock();
+    plugin.addListener.mockImplementation(add);
+    const socket = new AndroidConnectionServiceTransportSocket(target);
+    const messages: string[] = [];
+    socket.onmessage = (event) => messages.push(String(event.data));
+
+    await socket.start();
+    listeners.get('androidConnectionSnapshot')?.({
+      state: 'healthy',
+      generation: 'g-one',
+      target,
+      route: { mode: 'auto' },
+      channels: [],
+      lastHeartbeatAt: 15,
+      lastActivityAt: 15,
+      nextRetryAt: null,
+      error: null,
+      muxReadyPayload,
+    });
+    await Promise.resolve();
+    messages.length = 0;
+
+    listeners.get('androidConnectionChannelClosed')?.({
+      kind: 'channel-closed',
+      targetKey: target.targetKey,
+      generation: 'g-one',
+      channelId: 'channel-1',
+      reason: 'body subscription released',
+      code: 'no_body_demand',
+    });
+
+    expect(messages.map((message) => JSON.parse(message))).toEqual([{
+      type: 'mux-channel-closed',
+      payload: {
+        channelId: 'channel-1',
+        reason: 'body subscription released',
+        code: 'no_body_demand',
+      },
+    }]);
+  });
+
   it('accepts the next mux generation after native backoff reconnect', async () => {
     const { listeners, add } = listenerMock();
     plugin.addListener.mockImplementation(add);

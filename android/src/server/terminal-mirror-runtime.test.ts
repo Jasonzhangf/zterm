@@ -54,6 +54,7 @@ function createRuntime(overrides: {
   const sendMessage = vi.fn();
   const sendText = vi.fn();
   const sendScheduleStateToSession = vi.fn();
+  const closeTransportSubscriber = vi.fn();
 
   const runtime = createTerminalMirrorRuntime({
     defaultViewport: { cols: 120, rows: 40 },
@@ -101,7 +102,7 @@ function createRuntime(overrides: {
     waitMs: overrides.waitMs || (async () => {}),
     logTimePrefix: () => '2026-05-01 00:00:00',
     runTmux,
-    closeTransportSubscriber: vi.fn(),
+    closeTransportSubscriber,
     getSessionMirror: (session: TerminalSession) => (session.mirrorKey ? mirrors.get(session.mirrorKey) || null : null),
   });
 
@@ -115,6 +116,7 @@ function createRuntime(overrides: {
     sendMessage,
     sendText,
     sendScheduleStateToSession,
+    closeTransportSubscriber,
   };
 }
 
@@ -183,10 +185,41 @@ describe('terminal mirror runtime lifecycle truth', () => {
     expect(sendScheduleStateToSession).toHaveBeenCalledWith(session, 'demo');
   });
 
-  it('attaches an inactive body-suppressed channel without doing initial buffer capture', async () => {
-    const { runtime, sessions, mirrors, assertTmuxSessionExists, captureMirrorAuthoritativeBufferFromTmux, sendMessage, sendScheduleStateToSession } = createRuntime();
+  it('releases an inactive body-suppressed channel without doing initial buffer capture', async () => {
+    const { runtime, sessions, mirrors, assertTmuxSessionExists, captureMirrorAuthoritativeBufferFromTmux, closeTransportSubscriber } = createRuntime();
     const session = createSession();
     session.bodySubscribed = false;
+    session.muxChannelId = 'channel-demo';
+    sessions.set(session.id, session);
+
+    await runtime.attachTmux(session, {
+      sessionName: 'demo',
+      cols: 120,
+      rows: 40,
+    });
+
+    expect(mirrors.has('demo')).toBe(false);
+    expect(assertTmuxSessionExists).toHaveBeenCalledTimes(1);
+    expect(captureMirrorAuthoritativeBufferFromTmux).not.toHaveBeenCalled();
+    expect(closeTransportSubscriber).toHaveBeenCalledWith(
+      session,
+      'body subscription released',
+      false,
+      'no_body_demand',
+    );
+    expect(session.transport?.close).not.toHaveBeenCalled();
+  });
+
+  it('releases the mirror and mux channel when the last body subscriber unsubscribes', async () => {
+    const {
+      runtime,
+      sessions,
+      mirrors,
+      closeTransportSubscriber,
+    } = createRuntime();
+    const session = createSession();
+    session.bodySubscribed = true;
+    session.muxChannelId = 'channel-demo';
     sessions.set(session.id, session);
 
     await runtime.attachTmux(session, {
@@ -197,24 +230,114 @@ describe('terminal mirror runtime lifecycle truth', () => {
 
     const mirror = mirrors.get('demo');
     expect(mirror).toBeTruthy();
-    expect(mirror?.lifecycle).toBe('ready');
-    expect(assertTmuxSessionExists).toHaveBeenCalledTimes(1);
-    expect(captureMirrorAuthoritativeBufferFromTmux).not.toHaveBeenCalled();
-    expect(session.mirrorKey).toBe('demo');
-    expect(session.transport?.connectedSent).toBe(true);
-    expect(sendMessage).toHaveBeenCalledWith(
+    expect(mirror?.subscribers.has(session.id)).toBe(true);
+
+    session.bodySubscribed = false;
+    expect(runtime.releaseMirrorIfNoBodyDemand(mirror!, 'body subscription released')).toBe(true);
+
+    expect(mirrors.has('demo')).toBe(false);
+    expect(closeTransportSubscriber).toHaveBeenCalledWith(
       session,
-      expect.objectContaining({ type: 'connected' }),
+      'body subscription released',
+      false,
+      'no_body_demand',
     );
-    expect(sendScheduleStateToSession).toHaveBeenCalledWith(session, 'demo');
-    expect(sendMessage).not.toHaveBeenCalledWith(
+    expect(session.transport?.close).not.toHaveBeenCalled();
+  });
+
+  it('keeps the mirror while another ready body subscriber still demands it', async () => {
+    const {
+      runtime,
+      sessions,
+      mirrors,
+      closeTransportSubscriber,
+    } = createRuntime();
+    const first = createSession('session-1');
+    const second = createSession('session-2');
+    sessions.set(first.id, first);
+    sessions.set(second.id, second);
+
+    await runtime.attachTmux(first, {
+      sessionName: 'demo',
+      cols: 120,
+      rows: 40,
+    });
+    await runtime.attachTmux(second, {
+      sessionName: 'demo',
+      cols: 120,
+      rows: 40,
+    });
+
+    const mirror = mirrors.get('demo');
+    expect(mirror).toBeTruthy();
+    first.bodySubscribed = false;
+
+    expect(runtime.releaseMirrorIfNoBodyDemand(mirror!, 'body subscription released')).toBe(false);
+    expect(mirrors.has('demo')).toBe(true);
+    expect(mirror?.subscribers.has(second.id)).toBe(true);
+    expect(closeTransportSubscriber).not.toHaveBeenCalled();
+  });
+
+  it('releases a mirror if body subscription is false before async attach reaches ready', async () => {
+    const {
+      runtime,
+      sessions,
+      mirrors,
+      assertTmuxSessionExists,
+      closeTransportSubscriber,
+    } = createRuntime();
+    const session = createSession();
+    session.bodySubscribed = true;
+    session.muxChannelId = 'channel-demo';
+    sessions.set(session.id, session);
+    assertTmuxSessionExists.mockImplementation(() => {
+      session.bodySubscribed = false;
+    });
+
+    await runtime.attachTmux(session, {
+      sessionName: 'demo',
+      cols: 120,
+      rows: 40,
+    });
+
+    expect(mirrors.has('demo')).toBe(false);
+    expect(closeTransportSubscriber).toHaveBeenCalledWith(
       session,
-      expect.objectContaining({ type: 'buffer-head' }),
+      'body subscription released',
+      false,
+      'no_body_demand',
     );
-    expect(sendMessage).not.toHaveBeenCalledWith(
-      session,
-      expect.objectContaining({ type: 'buffer-sync' }),
-    );
+    expect(session.transport?.close).not.toHaveBeenCalled();
+  });
+
+  it('releases mirror ownership for a legacy non-mux subscriber while keeping its physical transport open', async () => {
+    const {
+      runtime,
+      sessions,
+      mirrors,
+      closeTransportSubscriber,
+    } = createRuntime();
+    const session = createSession();
+    session.bodySubscribed = true;
+    session.muxChannelId = null;
+    sessions.set(session.id, session);
+
+    await runtime.attachTmux(session, {
+      sessionName: 'demo',
+      cols: 120,
+      rows: 40,
+    });
+    const mirror = mirrors.get('demo');
+    expect(mirror).toBeTruthy();
+
+    session.bodySubscribed = false;
+    expect(runtime.releaseMirrorIfNoBodyDemand(mirror!, 'body subscription released')).toBe(true);
+
+    expect(mirrors.has('demo')).toBe(false);
+    expect(sessions.has(session.id)).toBe(true);
+    expect(closeTransportSubscriber).not.toHaveBeenCalled();
+    expect(session.transport?.close).not.toHaveBeenCalled();
+    expect(session.mirrorKey).toBe(null);
   });
 
   it('releases the old mirror when one subscriber moves to another tmux target', async () => {

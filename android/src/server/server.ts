@@ -490,6 +490,7 @@ const terminalMessageRuntime = createTerminalMessageRuntime({
   enqueueRangeBufferSyncResponse: terminalRuntime.enqueueRangeBufferSyncResponse,
   scheduleMirrorLiveSync: terminalRuntime.scheduleMirrorLiveSync,
   refreshMirrorHeadForSession: terminalRuntime.refreshMirrorHeadForSession,
+  releaseMirrorIfNoBodyDemand: terminalRuntime.releaseMirrorIfNoBodyDemand,
   daemonInputQueue: daemonInputQueueRuntime,
   closeSession: terminalRuntime.closeTransportSubscriber,
   fileTransferMessageRuntime,
