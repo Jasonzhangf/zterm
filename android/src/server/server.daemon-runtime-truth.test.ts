@@ -56,7 +56,7 @@ describe('server daemon runtime truth gates', () => {
   it('keeps daemon service helper implementations inside dedicated runtime', () => {
     const source = readDaemonRuntimeSource();
     const authBlock = extractBlock(source, 'function extractAuthToken(');
-    const heartbeatBlock = extractBlock(source, 'function startHeartbeatLoop(', 3000);
+    const heartbeatBlock = extractBlock(source, 'function startHeartbeatLoop(', 4200);
     const shutdownBlock = extractBlock(source, 'function shutdownDaemon(', 3200);
 
     expect(source).toContain('export function resolveTmuxBinary()');
@@ -66,6 +66,7 @@ describe('server daemon runtime truth gates', () => {
     expect(heartbeatBlock).toContain('connection.transport.ping?.()');
     expect(heartbeatBlock).toContain('TERMINAL_TRANSPORT_STALE_INBOUND_MS');
     expect(heartbeatBlock).toContain('deps.detachSubscriberTransportOnly(subscriber, reason, connection.transportId)');
+    expect(heartbeatBlock).toContain("type: 'mux-channel-closed'");
     expect(heartbeatBlock).toContain('connection.closeTransport(reason)');
     expect(shutdownBlock).toContain('deps.shutdownTerminalSessions(deps.sessions, reason)');
     expect(shutdownBlock).toContain('deps.destroyMirror(mirror, reason, {');
