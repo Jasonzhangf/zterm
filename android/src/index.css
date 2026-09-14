@@ -578,6 +578,22 @@ label:focus-visible {
 [data-settings-save-status][data-state="saved"] { color: #1f9d5d; font-weight: 700; }
 [data-settings-save-status][data-state="saving"] { color: #6e7781; font-weight: 700; }
 
+/* Ambient Phase 2 校准：把重阴影压轻，并收窄横向留白，避免控件层把可读区域撑散。 */
+.ambient-control {
+  box-shadow: 0 2px 8px rgba(10, 15, 26, 0.10), 0 1px 2px rgba(10, 15, 26, 0.06) !important;
+}
+
+.zterm-settings-group > [data-settings-group-content] {
+  padding-block: 10px;
+  padding-inline: clamp(8px, 2.4vw, 18px) !important;
+}
+
+.zterm-terminal-shell .ambient-control {
+  --amb-elevation: 0;
+  --amb-thickness: 0;
+  --amb-mat-roughness: 1;
+}
+
 .zterm-terminal-shell[data-terminal-shell-skin="black"] {
   --amb-light-x: -1;
   --amb-light-y: -1;
