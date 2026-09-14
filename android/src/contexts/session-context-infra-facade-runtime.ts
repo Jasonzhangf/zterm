@@ -33,6 +33,7 @@ import {
   type BridgeClientMessage,
   type TerminalMuxClientFrame,
 } from '@zterm/shared/protocol';
+import { buildBodySubscriptionMessage } from './session-wire-helpers';
 import {
   CLIENT_TRANSPORT_HEARTBEAT_INTERVAL_MS,
   CLIENT_TRANSPORT_HEARTBEAT_MAX_MISSES,
@@ -332,13 +333,12 @@ export function createSessionInfraFacadeRuntime(options: {
       if (!ws || ws.readyState !== WebSocket.OPEN) {
         continue;
       }
-      sendSocketPayload(session.id, ws, JSON.stringify({
-        type: 'body-subscription',
-        payload: {
-          version: 1,
-          subscribed,
-        },
-      }));
+      sendSocketPayload(session.id, ws, JSON.stringify(buildBodySubscriptionMessage({
+        subscribed,
+        geometry: subscribed
+          ? transportAccessors.readSessionRequestedTerminalGeometry(session.id)
+          : null,
+      })));
       options.runtimeDebug('session.body-subscription.sent', {
         sessionId: session.id,
         subscribed,

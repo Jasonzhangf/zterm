@@ -426,9 +426,28 @@ export function createTerminalMessageRuntime(
             deps.scheduleMirrorLiveSync(mirror, 0);
           } else {
             try {
+              // A false->true reattach must restore the subscriber's current
+              // width intent. The client re-sends its requested geometry with
+              // the attach heartbeat, so the adaptive-phone lease owner can
+              // reflow tmux width again. Absent geometry attaches unchanged
+              // (mirror-fixed).
+              const attachWidthMode = message.payload?.widthMode === 'adaptive-phone'
+                ? 'adaptive-phone'
+                : undefined;
               await deps.controlRuntimeDeps.attachTmux(session, {
                 sessionName: session.sessionName,
                 backend: session.backend,
+                ...(attachWidthMode
+                  ? {
+                      widthMode: attachWidthMode,
+                      cols: typeof message.payload?.cols === 'number' && Number.isFinite(message.payload.cols)
+                        ? message.payload.cols
+                        : undefined,
+                      rows: typeof message.payload?.rows === 'number' && Number.isFinite(message.payload.rows)
+                        ? message.payload.rows
+                        : undefined,
+                    }
+                  : {}),
               });
               const restoredMirror = deps.getSessionMirror(session);
               if (restoredMirror?.lifecycle === 'ready') {

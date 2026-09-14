@@ -1,4 +1,5 @@
 import type { Host, HostConfigMessage, ServerMessage } from '../lib/types';
+import { buildBodySubscriptionMessage } from './session-wire-helpers';
 import type { SessionTerminalChannelRuntime } from '../lib/terminal-channel-mux-runtime';
 import {
   ensureSessionTerminalChannel,
@@ -230,6 +231,9 @@ export function handleTargetMuxServerFrameRuntime(options: {
   frame: TerminalMuxServerFrame;
   resolveSessionIdForChannel: (channelId: string) => string | null;
   readSessionTerminalChannelBodySubscribed?: (sessionId: string) => boolean | null;
+  readRequestedTerminalGeometry?: (
+    sessionId: string,
+  ) => { cols?: number | null; rows?: number | null; widthMode?: 'adaptive-phone' | 'mirror-fixed' } | null;
   updateSessionTerminalChannelState: (sessionId: string, state: 'opening' | 'open' | 'closing' | 'closed') => unknown;
   sendSocketPayload?: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
   handleSocketServerMessage: (params: {
@@ -310,13 +314,12 @@ export function handleTargetMuxServerFrameRuntime(options: {
       if (typeof bodySubscribed === 'boolean') {
         options.sendSocketPayload?.(sessionId, options.ws, JSON.stringify(buildTerminalMuxChannelMessage(
           options.frame.payload.channelId,
-          {
-            type: 'body-subscription',
-            payload: {
-              version: 1,
-              subscribed: bodySubscribed,
-            },
-          },
+          buildBodySubscriptionMessage({
+            subscribed: bodySubscribed,
+            geometry: bodySubscribed
+              ? options.readRequestedTerminalGeometry?.(sessionId) || null
+              : null,
+          }),
         )));
       }
       return;

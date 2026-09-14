@@ -866,6 +866,38 @@ describe('terminal message runtime explicit error truth', () => {
     expect(sendBufferHeadToSession).not.toHaveBeenCalled();
   });
 
+  it('restores the adaptive-phone width lease when body subscription returns with geometry', async () => {
+    const {
+      runtime,
+      sessions,
+      attachTmux,
+    } = createRuntime();
+    const session = createSession();
+    session.mirrorKey = null;
+    sessions.set(session.id, session);
+    const connection = createConnection(session.id);
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'body-subscription',
+      payload: {
+        version: 1,
+        subscribed: true,
+        cols: 72,
+        rows: 40,
+        widthMode: 'adaptive-phone',
+      },
+    })));
+
+    expect(session.bodySubscribed).toBe(true);
+    expect(attachTmux).toHaveBeenCalledWith(session, {
+      sessionName: 'demo',
+      backend: undefined,
+      widthMode: 'adaptive-phone',
+      cols: 72,
+      rows: 40,
+    });
+  });
+
   it('treats a repeated body-subscription true as an attach lease renewal, not a reattach', async () => {
     const mirror = createReadyMirror();
     const {

@@ -906,6 +906,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
           readSessionTerminalChannelBodySubscribed: (sessionId) => (
             options.readSessionTerminalChannel(sessionId)?.bodySubscribed ?? null
           ),
+          readRequestedTerminalGeometry: options.readRequestedTerminalGeometry,
           updateSessionTerminalChannelState: options.writeSessionTerminalChannelState,
           sendSocketPayload: options.sendSocketPayload,
           handleSocketServerMessage: (params, msg) => {
