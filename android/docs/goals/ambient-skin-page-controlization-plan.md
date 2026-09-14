@@ -333,3 +333,29 @@ Ambient CSS 已进入生产 CSS，不依赖 evidence 静态预览
 - 很多组件是 plugin slot 渲染，需要在 plugin host 边界内替换，不能直接穿透到业务 truth。
 - RemoteWindow 控件有自己的窗口尺寸 / 输入约束，不能随手改全局尺寸。
 - Ambient CSS 视觉效果依赖 WebView ≥ 119；当前连接设备已满足，但仍需在最低目标设备上验证。
+
+## 设备证据记录
+
+本地证据（`.gitignore` 忽略 `android/evidence/**`，不提交图片文件；提交里只保留该记录）：
+
+```text
+android/evidence/2026-09-13-skin-design/current-phone.png   1216x2640  phone 真机截图
+android/evidence/2026-09-13-skin-design/current-tablet.png  2560x1600  tablet emulator 截图
+```
+
+相关 commit：
+
+```text
+0b45e4f1 生产接入 ambient.css 与共享控件 class
+ed875ad6 ambient 生产 CSS / class 真源门禁
+1cd0e9e2 手机+平板证据状态提交
+```
+
+生成路径：
+
+```text
+./gradlew :app:assembleDebug
+adb -s <device-or-emulator> install -r -d app-debug.apk
+adb -s <device-or-emulator> shell am start -n com.zterm.android/.MainActivity
+adb -s <device-or-emulator> exec-out screencap -p > evidence/png
+```
