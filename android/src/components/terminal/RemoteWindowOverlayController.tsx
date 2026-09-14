@@ -162,6 +162,7 @@ import { useRemoteWindowPlayback, type RemoteWindowVideoDebugSnapshot } from './
 import { useRemoteWindowCompositeCanvas } from './useRemoteWindowCompositeCanvas';
 import { RemoteWindowVideoContent } from './RemoteWindowVideoContent';
 import { useRemoteWindowCatalog } from './useRemoteWindowCatalog';
+import { useRemoteWindowLockedPortal } from './useRemoteWindowLockedPortal';
 import { useRemoteWindowViewport } from './useRemoteWindowViewport';
 import { useRemoteWindowFocusSwitch } from './useRemoteWindowFocusSwitch';
 import { useRemoteWindowSelectionAdmission } from './useRemoteWindowSelectionAdmission';
@@ -500,34 +501,8 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   const lastReportedQuickBarSuppressionRef = useRef<boolean | null>(null);
   const lastReportedBodySuppressionRef = useRef<boolean | null>(null);
   const lastReportedInputContextKeyRef = useRef<string | null>(null);
-  const embeddedLockedPortalAnchorRef = useRef<HTMLDivElement | null>(null);
-  const embeddedLockedPortalHostRef = useRef<HTMLDivElement | null>(null);
-  if (embedded && typeof document !== 'undefined' && !embeddedLockedPortalHostRef.current) {
-    const host = document.createElement('div');
-    host.dataset.testid = 'remote-window-locked-portal-host';
-    host.style.width = '100%';
-    host.style.height = '100%';
-    host.style.minHeight = '0';
-    embeddedLockedPortalHostRef.current = host;
-  }
-  useLayoutEffect(() => {
-    if (!embedded || typeof document === 'undefined') {
-      return;
-    }
-    const host = embeddedLockedPortalHostRef.current;
-    const parent = state.phase === 'targetLocked' && state.mode === 'fullscreen'
-      ? document.body
-      : embeddedLockedPortalAnchorRef.current;
-    if (!host || !parent) {
-      return;
-    }
-    parent.appendChild(host);
-    return () => {
-      if (host.parentNode === parent) {
-        parent.removeChild(host);
-      }
-    };
-  }, [embedded, state.mode, state.phase]);
+  const [embeddedLockedPortalAnchorRef, embeddedLockedPortalHost] =
+    useRemoteWindowLockedPortal(embedded, state.phase === 'targetLocked', state.phase === 'targetLocked' && state.mode === 'fullscreen');
   const clearSurfacePointerState = useCallback(() => {
     clearLongPressTimer();
     surfacePointersRef.current.clear(); surfaceGestureRef.current = null; surfaceLocalPanStartRef.current = null;
@@ -2748,15 +2723,9 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   const embeddedOverlayStyle = { ...styles.floatingOverlay,
     position: 'relative' as const, inset: 'auto', right: 'auto', bottom: 'auto', width: '100%', maxWidth: 'none', maxHeight: 'none', height: '100%', flex: '1 1 auto', border: 0, borderRadius: 0, boxShadow: 'none', zIndex: 'auto' };
   const fullscreenBottomPaddingPx = state.phase === 'targetLocked' && state.mode === 'fullscreen'
-    ? Math.max(
-        0,
-        Math.round(Math.max(0, bottomInsetPx) - Math.min(Math.max(0, bottomInsetPx), Math.max(0, -fullscreenViewport.panY))),
-      )
+    ? Math.max(0, Math.round(Math.max(0, bottomInsetPx) - Math.max(0, bottomChromeInsetPx)))
     : Math.max(0, bottomInsetPx);
-  const fullscreenOverlayStyle = {
-    ...styles.fullscreenOverlay,
-    paddingBottom: `${fullscreenBottomPaddingPx}px`,
-  };
+  const fullscreenOverlayStyle = { ...styles.fullscreenOverlay, paddingBottom: `${fullscreenBottomPaddingPx}px` };
   const videoSurfaceStyle = state.phase === 'targetLocked' && state.mode === 'floating' && !embedded && lockedDisplaySourceSize
     ? {
         ...styles.videoPlaceholder,
@@ -3131,8 +3100,8 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       ) : null}
     </div>
   ) : null;
-  const lockedContentProjection = embedded && embeddedLockedPortalHostRef.current
-    ? createPortal(lockedContent, embeddedLockedPortalHostRef.current)
+  const lockedContentProjection = embedded && embeddedLockedPortalHost
+    ? createPortal(lockedContent, embeddedLockedPortalHost)
     : lockedContent;
 
   return (
