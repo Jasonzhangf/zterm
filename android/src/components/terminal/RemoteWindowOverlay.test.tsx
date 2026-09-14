@@ -2827,6 +2827,43 @@ describe('RemoteWindowOverlay', () => {
     });
   });
 
+  it('fills the fullscreen portal while preserving only the keyboard inset', async () => {
+    const mediaStream = { id: 'media-stream-fullscreen-fill' } as MediaStream;
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-fullscreen-fill',
+      targets: [makeTarget('app-fullscreen-fill', 'TextEdit', 'app-window')],
+    }));
+    const startStream = vi.fn(async (
+      _sessionId: string,
+      _target: RemoteWindowStreamTargetManifest,
+      streamId: string,
+    ) => ({ streamId, mediaStream }));
+    const renderOverlay = (bottomInsetPx: number) => (
+      <RemoteWindowOverlay
+        activeSessionId="session-fullscreen-fill"
+        embedded
+        bottomInsetPx={bottomInsetPx}
+        bottomChromeInsetPx={165}
+        requestTargets={requestTargets}
+        startStream={startStream}
+      />
+    );
+    const view = render(renderOverlay(165));
+
+    fireEvent.click(await screen.findByTestId('remote-window-target-app-fullscreen-fill'));
+    const surface = await screen.findByTestId('remote-window-video-surface');
+    fireEvent.doubleClick(surface);
+
+    const overlay = await screen.findByTestId('remote-window-locked-overlay');
+    await waitFor(() => expect(overlay.getAttribute('data-mode')).toBe('fullscreen'));
+    expect(overlay.style.paddingBottom).toBe('0px');
+    expect(overlay.style.background).toBe('var(--zterm-stage-bg, #05090f)');
+
+    view.rerender(renderOverlay(465));
+
+    await waitFor(() => expect(overlay.style.paddingBottom).toBe('300px'));
+  });
+
   it('never resizes an iTerm2 target when entering fullscreen fill', async () => {
     const target = makeTarget('iterm-app', 'iTerm2', 'app-window');
     target.videoTarget.appBundleId = 'com.googlecode.iterm2';

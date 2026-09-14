@@ -412,7 +412,7 @@ export const styles: Record<string, CSSProperties> = {
     paddingTop: 'calc(44px + env(safe-area-inset-top, 0px))',
     paddingLeft: 'max(8px, env(safe-area-inset-left, 0px))',
     paddingRight: 'max(8px, env(safe-area-inset-right, 0px))',
-    background: 'var(--zterm-stage-bg)',
+    background: 'var(--zterm-stage-bg, #05090f)',
     color: 'var(--zterm-stage-text)',
     contain: 'layout paint',
     isolation: 'isolate',
