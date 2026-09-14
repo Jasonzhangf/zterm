@@ -483,7 +483,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     handleOpenPicker();
   }, [handleOpenPicker]);
   const handleResourceEntry = useCallback((tab: 'web' | 'stream', fallback: () => void) => onOpenResourceDrawer ? onOpenResourceDrawer(tab) : fallback(), [onOpenResourceDrawer]);
-  useEffect(() => { if (embedded && state.phase === 'closed') { setBrowserPickerOpen(browserOnly); handleOpenPicker(); } }, [browserOnly, embedded, handleOpenPicker, state.phase]);
+  useEffect(() => { if (embedded && appForegroundActive !== false && state.phase === 'closed') { setBrowserPickerOpen(browserOnly); handleOpenPicker(); } }, [appForegroundActive, browserOnly, embedded, handleOpenPicker, state.phase]);
   const surfacePointersRef = useRef<Map<number, SurfacePointerPosition>>(new Map());
   const surfaceGestureRef = useRef<SurfacePointerGesture | null>(null);
   const surfaceLocalPanStartRef = useRef<{

@@ -3234,6 +3234,49 @@ describe('RemoteWindowOverlay', () => {
     );
   });
 
+  it('does not auto-open embedded catalog while app is backgrounded and reopens on foreground', async () => {
+    let catalogRequestCount = 0;
+    const requestTargets = vi.fn((_sessionId: string) => {
+      catalogRequestCount += 1;
+      if (catalogRequestCount > 2) {
+        throw new Error(`remote window catalog requested while backgrounded/looping: ${catalogRequestCount}`);
+      }
+      return Promise.resolve({
+        requestId: 'rw-catalog-loop-2972',
+        targets: [makeTarget('app-catalog-loop', 'TextEdit', 'app-window')],
+      });
+    });
+    const renderOverlay = (appForegroundActive: boolean) => (
+      <RemoteWindowOverlay
+        activeSessionId="session-catalog-loop"
+        embedded
+        appForegroundActive={appForegroundActive}
+        requestTargets={requestTargets}
+      />
+    );
+
+    const view = render(renderOverlay(false));
+
+    expect(requestTargets).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('remote-window-target-app-catalog-loop')).toBeNull();
+
+    view.rerender(renderOverlay(true));
+    await screen.findByTestId('remote-window-target-app-catalog-loop');
+    expect(requestTargets).toHaveBeenCalledTimes(1);
+
+    view.rerender(renderOverlay(false));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(requestTargets).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('remote-window-target-app-catalog-loop')).toBeNull();
+
+    view.rerender(renderOverlay(true));
+    await screen.findByTestId('remote-window-target-app-catalog-loop');
+    expect(requestTargets).toHaveBeenCalledTimes(1);
+    expect(requestTargets).toHaveBeenCalledWith('session-catalog-loop');
+  });
+
   it('reports embedded fullscreen exit when the toolbar shrinks the stream', async () => {
     const onExitEmbeddedFullscreen = vi.fn();
     const requestTargets = vi.fn(async () => ({
