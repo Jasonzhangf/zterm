@@ -3004,13 +3004,18 @@ describe('RemoteWindowOverlay', () => {
     });
     await flushRemoteWindowSurfaceLayout();
 
+    const projection = await screen.findByTestId('remote-window-video-projection');
     const content = screen.getByTestId('remote-window-video-content');
     await waitFor(() => {
-      expect(Number.parseFloat(content.style.left)).toBeCloseTo(7.1, 1);
-      expect(Number.parseFloat(content.style.width)).toBeCloseTo(285.7, 1);
-      expect(Number.parseFloat(content.style.top)).toBeCloseTo(0, 1);
-      expect(Number.parseFloat(content.style.height)).toBeCloseTo(200, 1);
+      expect(Number.parseFloat(projection.style.left)).toBeCloseTo(7.1, 1);
+      expect(Number.parseFloat(projection.style.width)).toBeCloseTo(285.7, 1);
+      expect(Number.parseFloat(projection.style.top)).toBeCloseTo(0, 1);
+      expect(Number.parseFloat(projection.style.height)).toBeCloseTo(200, 1);
     });
+    expect(content.style.left).toBe('0px');
+    expect(content.style.top).toBe('0px');
+    expect(content.style.width).toBe('100%');
+    expect(content.style.height).toBe('100%');
   });
 
   it('keeps a resize ACK target in the cached picker catalog after the stream closes', async () => {
