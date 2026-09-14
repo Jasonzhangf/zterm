@@ -186,6 +186,7 @@ export function ResourceBottomSheet({
       onClick={(event) => event.stopPropagation()}
       >
         {!streamExpanded ? <div
+          data-testid="resource-bottom-sheet-grip"
           {...{ [RESOURCE_DRAWER_GESTURE_ATTRS.handle]: 'true' }}
           style={{ display: 'flex', justifyContent: 'center', padding: '10px 0 4px' }}
           onTouchStart={(event) => { event.stopPropagation(); handleTouchStart(event); }}

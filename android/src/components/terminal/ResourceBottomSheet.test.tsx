@@ -130,4 +130,58 @@ describe('ResourceBottomSheet', () => {
     expect(onClose).not.toHaveBeenCalled();
     expect(onExpand).not.toHaveBeenCalled();
   });
+
+  it('hides duplicate drawer chrome when the stream expands to fullscreen', () => {
+    const renderRemoteWindow = vi.fn((open: boolean) => open ? <div data-testid="stream-surface" /> : null);
+    render(
+      <ResourceBottomSheet
+        open
+        initialTab="stream"
+        placement="bottom"
+        renderFileBrowser={() => null}
+        renderRemoteWindow={renderRemoteWindow}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('navigation', { name: '资源类型' })).toBeTruthy();
+    const handle = screen.getByLabelText('资源').querySelector('[data-resource-drawer-handle]') as HTMLElement;
+    fireEvent.touchStart(handle, { touches: [{ clientY: 300 }] });
+    fireEvent.touchEnd(handle, { changedTouches: [{ clientY: 180 }] });
+
+    expect(renderRemoteWindow).toHaveBeenLastCalledWith(true, 'stream', true, expect.any(Function));
+    expect(screen.queryByRole('navigation', { name: '资源类型' })).toBeNull();
+    expect(screen.queryByTestId('resource-bottom-sheet-grip')).toBeNull();
+    expect(screen.getByTestId('resource-bottom-sheet').style.height).toBe('100%');
+  });
+
+  it('restores drawer chrome when the expanded stream exits fullscreen', () => {
+    const renderRemoteWindow = vi.fn((
+      open: boolean,
+      _tab?: 'stream' | 'web',
+      _expanded?: boolean,
+      onExitFullscreen?: () => void,
+    ) => open ? <button type="button" onClick={onExitFullscreen}>退出串流全屏</button> : null);
+    render(
+      <ResourceBottomSheet
+        open
+        initialTab="stream"
+        placement="bottom"
+        renderFileBrowser={() => null}
+        renderRemoteWindow={renderRemoteWindow}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const handle = screen.getByLabelText('资源').querySelector('[data-resource-drawer-handle]') as HTMLElement;
+    fireEvent.touchStart(handle, { touches: [{ clientY: 300 }] });
+    fireEvent.touchEnd(handle, { changedTouches: [{ clientY: 180 }] });
+    expect(screen.queryByRole('navigation', { name: '资源类型' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: '退出串流全屏' }));
+
+    expect(screen.getByRole('navigation', { name: '资源类型' })).toBeTruthy();
+    expect(screen.getByTestId('resource-bottom-sheet-grip')).toBeTruthy();
+    expect(renderRemoteWindow).toHaveBeenLastCalledWith(true, 'stream', false, expect.any(Function));
+  });
 });
