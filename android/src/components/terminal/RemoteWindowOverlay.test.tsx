@@ -3340,6 +3340,53 @@ describe('RemoteWindowOverlay', () => {
     expect(stopStream).not.toHaveBeenCalled();
   });
 
+  it('moves an embedded fullscreen overlay outside its clipping drawer without replacing the video', async () => {
+    const mediaStream = { id: 'media-stream-clipping-drawer' } as MediaStream;
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-clipping-drawer',
+      targets: [makeTarget('app-clipping-drawer', 'TextEdit', 'app-window')],
+    }));
+    const startStream = vi.fn(async (
+      _sessionId: string,
+      _target: RemoteWindowStreamTargetManifest,
+      streamId: string,
+    ) => ({ streamId, mediaStream }));
+    const clippingDrawer = document.createElement('section');
+    clippingDrawer.style.overflow = 'hidden';
+    document.body.appendChild(clippingDrawer);
+
+    const view = render(
+      <RemoteWindowOverlay
+        activeSessionId="session-clipping-drawer"
+        embedded
+        requestTargets={requestTargets}
+        startStream={startStream}
+      />,
+      { container: clippingDrawer },
+    );
+
+    fireEvent.click(await screen.findByTestId('remote-window-target-app-clipping-drawer'));
+    const surface = await screen.findByTestId('remote-window-video-surface');
+    const embeddedVideo = await screen.findByTestId('remote-window-video') as HTMLVideoElement;
+    await waitFor(() => expect(embeddedVideo.srcObject).toBe(mediaStream));
+    expect(clippingDrawer.contains(screen.getByTestId('remote-window-locked-overlay'))).toBe(true);
+
+    fireEvent.doubleClick(surface);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('fullscreen');
+    });
+    const fullscreenOverlay = screen.getByTestId('remote-window-locked-overlay');
+    const fullscreenVideo = screen.getByTestId('remote-window-video') as HTMLVideoElement;
+    expect(clippingDrawer.contains(fullscreenOverlay)).toBe(false);
+    expect(document.body.contains(fullscreenOverlay)).toBe(true);
+    expect(fullscreenVideo).toBe(embeddedVideo);
+    expect(fullscreenVideo.srcObject).toBe(mediaStream);
+
+    view.unmount();
+    clippingDrawer.remove();
+  });
+
   it('never resizes an iTerm2 target when entering fullscreen fill', async () => {
     const target = makeTarget('iterm-app', 'iTerm2', 'app-window');
     target.videoTarget.appBundleId = 'com.googlecode.iterm2';

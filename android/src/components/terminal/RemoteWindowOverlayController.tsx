@@ -10,6 +10,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type WheelEvent as ReactWheelEvent,
 } from 'react';
+import { createPortal } from 'react-dom';
 import { App as CapacitorApp } from '@capacitor/app';
 import { useIndependentFloatingEntryPosition, useSharedDraggableDrag, SHARED_DRAG_SUPPRESS_CLICK_MS } from './draggable-bubble-shared';
 import type {
@@ -499,6 +500,34 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   const lastReportedQuickBarSuppressionRef = useRef<boolean | null>(null);
   const lastReportedBodySuppressionRef = useRef<boolean | null>(null);
   const lastReportedInputContextKeyRef = useRef<string | null>(null);
+  const embeddedLockedPortalAnchorRef = useRef<HTMLDivElement | null>(null);
+  const embeddedLockedPortalHostRef = useRef<HTMLDivElement | null>(null);
+  if (embedded && typeof document !== 'undefined' && !embeddedLockedPortalHostRef.current) {
+    const host = document.createElement('div');
+    host.dataset.testid = 'remote-window-locked-portal-host';
+    host.style.width = '100%';
+    host.style.height = '100%';
+    host.style.minHeight = '0';
+    embeddedLockedPortalHostRef.current = host;
+  }
+  useLayoutEffect(() => {
+    if (!embedded || typeof document === 'undefined') {
+      return;
+    }
+    const host = embeddedLockedPortalHostRef.current;
+    const parent = state.phase === 'targetLocked' && state.mode === 'fullscreen'
+      ? document.body
+      : embeddedLockedPortalAnchorRef.current;
+    if (!host || !parent) {
+      return;
+    }
+    parent.appendChild(host);
+    return () => {
+      if (host.parentNode === parent) {
+        parent.removeChild(host);
+      }
+    };
+  }, [embedded, state.mode, state.phase]);
   const clearSurfacePointerState = useCallback(() => {
     clearLongPressTimer();
     surfacePointersRef.current.clear(); surfaceGestureRef.current = null; surfaceLocalPanStartRef.current = null;
@@ -3102,6 +3131,9 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       ) : null}
     </div>
   ) : null;
+  const lockedContentProjection = embedded && embeddedLockedPortalHostRef.current
+    ? createPortal(lockedContent, embeddedLockedPortalHostRef.current)
+    : lockedContent;
 
   return (
     <>
@@ -3166,7 +3198,14 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
         </button>
       ) : null}
       {pickerContent}
-      {lockedContent}
+      {embedded && state.phase === 'targetLocked' ? (
+        <div
+          ref={embeddedLockedPortalAnchorRef}
+          data-testid="remote-window-locked-portal-anchor"
+          style={{ width: '100%', height: '100%', minHeight: 0 }}
+        />
+      ) : null}
+      {lockedContentProjection}
       <style>{`
         [data-testid="remote-window-control-strip"]::-webkit-scrollbar {
           display: none;
