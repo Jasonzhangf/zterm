@@ -3111,6 +3111,39 @@ describe('RemoteWindowOverlay', () => {
     });
   });
 
+  it('updates embedded projection from decoded resize instead of stale square capture metadata', async () => {
+    const mediaStream = { id: 'decoded-geometry-stream' } as MediaStream;
+    const frames: Array<{ video: HTMLVideoElement; callback: VideoFrameRequestCallback }> = [];
+    vi.mocked(HTMLVideoElement.prototype.requestVideoFrameCallback).mockImplementation(function (this: HTMLVideoElement, callback) {
+      frames.push({ video: this, callback });
+      return frames.length;
+    });
+    render(<RemoteWindowOverlay activeSessionId="session-1" embedded
+      requestTargets={async () => ({ requestId: 'rw-geometry', targets: [makeTarget('app-1', 'TextEdit', 'app-window')] })}
+      startStream={async (_session, _target, streamId) => ({ streamId, mediaStream, started: makeStartedPayload(streamId, 'app-1', 720, 720) })}
+    />);
+    fireEvent.click(await screen.findByTestId('remote-window-target-app-1'));
+    const video = await screen.findByTestId('remote-window-video') as HTMLVideoElement;
+    Object.defineProperties(video, {
+      videoWidth: { configurable: true, value: 786 }, videoHeight: { configurable: true, value: 720 },
+    });
+    await waitFor(() => expect(frames.some((frame) => frame.video === video)).toBe(true));
+    await act(async () => {
+      frames.filter((frame) => frame.video === video).forEach((frame) => frame.callback(0, { presentedFrames: 1 } as VideoFrameCallbackMetadata));
+    });
+    const surface = screen.getByTestId('remote-window-video-surface');
+    Object.defineProperty(surface, 'getBoundingClientRect', { configurable: true, value: () => ({
+      x: 0, y: 0, left: 0, top: 0, right: 346.571, bottom: 317.371, width: 346.571, height: 317.371,
+    }) });
+    await flushRemoteWindowSurfaceLayout();
+    await waitFor(() => {
+      const projection = screen.getByTestId('remote-window-video-projection');
+      expect(Number.parseFloat(projection.style.width)).toBeCloseTo(346.463, 1);
+      expect(Number.parseFloat(projection.style.height)).toBeCloseTo(317.371, 1);
+      expect(Number.parseFloat(projection.style.left)).toBeCloseTo(0.054, 1);
+    });
+  });
+
   it('fits and centers the embedded preview surface without crop', async () => {
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
     Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 });
