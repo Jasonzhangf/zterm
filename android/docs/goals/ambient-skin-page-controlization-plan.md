@@ -351,6 +351,7 @@ ed875ad6 ambient 生产 CSS / class 真源门禁
 1cd0e9e2 手机+平板证据状态提交
 d95935fd 设备证据绑定命令与 commit
 e92fb88c ambient shadow/margin calibration
+6bdadda0 ambient shared controls render owner DOM
 ```
 
 已做校准：`index.css` 将 `.ambient-control` 阴影收紧为轻量 2/8px，蓝色/黑色 #0a0f1a 16% 投影；settings group 内容区横向内边距收到 `clamp(8px, 2.4vw, 18px)`；terminal shell 内 ambient classes 降低 elevation/thickness/roughness，避免额外大阴影叠加。
