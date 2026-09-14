@@ -260,6 +260,96 @@ describe('RemoteWindowOverlay', () => {
     expect(screen.getByTestId('remote-window-target-pane-1')).toBeTruthy();
   });
 
+  it('refreshes a cached app target before starting and uses the unique fresh window identity', async () => {
+    const staleTarget = {
+      ...makeTarget('app-window:20594:3834', 'AgentBrowser', 'app-window'),
+      videoTarget: {
+        ...makeTarget('app-window:20594:3834', 'AgentBrowser', 'app-window').videoTarget,
+        appBundleId: 'com.agentbrowser.app',
+        pid: 20594,
+        windowId: '3834',
+      },
+    };
+    const freshTarget = {
+      ...staleTarget,
+      streamTargetId: 'app-window:20594:4001',
+      videoTarget: {
+        ...staleTarget.videoTarget,
+        windowId: '4001',
+      },
+    };
+    const requestTargets = vi.fn()
+      .mockResolvedValue({ requestId: 'rw-fresh', targets: [freshTarget] })
+      .mockResolvedValueOnce({ requestId: 'rw-stale', targets: [staleTarget] });
+    const startStream = vi.fn(async (_sessionId: string, target: RemoteWindowStreamTargetManifest, streamId: string) => ({
+      streamId,
+      started: makeStartedPayload(streamId, target.streamTargetId, 1180, 792),
+    }));
+
+    render(
+      <RemoteWindowOverlay
+        activeSessionId="session-1"
+        requestTargets={requestTargets}
+        startStream={startStream}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    fireEvent.click(await screen.findByTestId('remote-window-target-app-window:20594:3834'));
+
+    await waitFor(() => {
+      expect(requestTargets).toHaveBeenLastCalledWith('session-1', { forceRefresh: true });
+      expect(startStream).toHaveBeenCalledTimes(1);
+    });
+    expect(startStream.mock.calls[0]?.[1]).toMatchObject({
+      streamTargetId: 'app-window:20594:4001',
+      videoTarget: { windowId: '4001' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭远程窗口' }));
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    expect(screen.getByTestId('remote-window-target-app-window:20594:4001')).toBeTruthy();
+    expect(requestTargets).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the picker open when a refreshed app identity has multiple window candidates', async () => {
+    const staleTarget = {
+      ...makeTarget('app-window:20594:3834', 'AgentBrowser', 'app-window'),
+      videoTarget: {
+        ...makeTarget('app-window:20594:3834', 'AgentBrowser', 'app-window').videoTarget,
+        appBundleId: 'com.agentbrowser.app',
+        pid: 20594,
+        windowId: '3834',
+      },
+    };
+    const freshTargets = ['4001', '4002'].map((windowId) => ({
+      ...staleTarget,
+      streamTargetId: `app-window:20594:${windowId}`,
+      videoTarget: { ...staleTarget.videoTarget, windowId },
+    }));
+    const requestTargets = vi.fn()
+      .mockResolvedValueOnce({ requestId: 'rw-stale', targets: [staleTarget] })
+      .mockResolvedValueOnce({ requestId: 'rw-ambiguous', targets: freshTargets });
+    const startStream = vi.fn();
+
+    render(
+      <RemoteWindowOverlay
+        activeSessionId="session-1"
+        requestTargets={requestTargets}
+        startStream={startStream}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    fireEvent.click(await screen.findByTestId('remote-window-target-app-window:20594:3834'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('remote-window-picker-error').textContent).toContain('未找到唯一匹配窗口');
+    });
+    expect(screen.getByTestId('remote-window-picker')).toBeTruthy();
+    expect(startStream).not.toHaveBeenCalled();
+  });
+
   it('exposes stream lifecycle variables from the floating status panel', async () => {
     const requestTargets = vi.fn(async () => ({
       requestId: 'rw-status-1',

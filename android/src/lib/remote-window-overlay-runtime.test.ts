@@ -14,6 +14,7 @@ import {
   failRemoteWindowStream,
   failRemoteWindowTargetCatalog,
   initialRemoteWindowOverlayState,
+  resolveFreshRemoteWindowTarget,
   selectRemoteWindowTarget,
   shrinkRemoteWindowOverlay,
   upsertRemoteWindowCatalogTarget,
@@ -60,6 +61,32 @@ describe('remote window overlay runtime', () => {
     expect(canResizeRemoteWindowTarget(itermWindow)).toBe(false);
     expect(canResizeRemoteWindowTarget(makeTarget('textedit', 'app-window'))).toBe(true);
     expect(canResizeRemoteWindowTarget(makeTarget('iterm-pane', 'iterm2-pane'))).toBe(false);
+  });
+
+  it('resolves a recreated app window only when its refreshed app identity is unique', () => {
+    const staleTarget = {
+      ...makeTarget('app-window:20594:3834', 'app-window'),
+      videoTarget: {
+        ...makeTarget('app-window:20594:3834', 'app-window').videoTarget,
+        appBundleId: 'com.agentbrowser.app',
+        pid: 20594,
+        windowId: '3834',
+      },
+    };
+    const freshTarget = {
+      ...staleTarget,
+      streamTargetId: 'app-window:20594:4001',
+      videoTarget: { ...staleTarget.videoTarget, windowId: '4001' },
+    };
+    const secondFreshTarget = {
+      ...freshTarget,
+      streamTargetId: 'app-window:20594:4002',
+      videoTarget: { ...freshTarget.videoTarget, windowId: '4002' },
+    };
+
+    expect(resolveFreshRemoteWindowTarget(staleTarget, [freshTarget])).toBe(freshTarget);
+    expect(resolveFreshRemoteWindowTarget(staleTarget, [])).toBeNull();
+    expect(resolveFreshRemoteWindowTarget(staleTarget, [freshTarget, secondFreshTarget])).toBeNull();
   });
   it('opens picker state from a daemon catalog without starting fake video', () => {
     const started = beginRemoteWindowTargetEnumeration(initialRemoteWindowOverlayState);

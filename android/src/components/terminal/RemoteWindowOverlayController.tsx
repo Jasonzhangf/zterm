@@ -56,7 +56,7 @@ import {
   failRemoteWindowStreamHandoff,
   failRemoteWindowStream,
   initialRemoteWindowOverlayState,
-  selectRemoteWindowTarget,
+  selectRemoteWindowTargetFromCatalog,
   shouldAutoCompositeRemoteWindowTarget,
   shrinkRemoteWindowOverlay,
   type RemoteWindowStreamHandoffState,
@@ -163,6 +163,7 @@ import { RemoteWindowVideoContent } from './RemoteWindowVideoContent';
 import { useRemoteWindowCatalog } from './useRemoteWindowCatalog';
 import { useRemoteWindowViewport } from './useRemoteWindowViewport';
 import { useRemoteWindowFocusSwitch } from './useRemoteWindowFocusSwitch';
+import { useRemoteWindowSelectionAdmission } from './useRemoteWindowSelectionAdmission';
 export type { RemoteWindowViewportDebugSnapshot } from './useRemoteWindowViewport';
 export type {
   RemoteWindowLiveDiagnostics,
@@ -461,6 +462,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     activeCatalogSyncError,
     catalogRefreshing,
     openPicker: handleOpenPicker,
+    requestFreshTargets,
     rememberTarget: rememberRemoteWindowCatalogTarget,
     resetCatalog,
   } = useRemoteWindowCatalog({
@@ -1481,13 +1483,11 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     });
   }, [activeSessionId, setBrowserUserAgentRequest, state]);
 
-  const handleSelectTarget = useCallback((target: RemoteWindowStreamTargetManifest) => {
+  const startSelectedTarget = useCallback((target: RemoteWindowStreamTargetManifest, catalogTargets: RemoteWindowStreamTargetManifest[], streamRequestEpoch: number) => {
     const browserMode = browserPickerOpen && isRemoteWindowChromeTarget(target);
-    const catalogTargets = 'targets' in state ? state.targets : [];
     const effectiveTarget = updateFocus && shouldAutoCompositeRemoteWindowTarget(target)
       ? attachSameAppCompositeWindows(target, catalogTargets)
       : target;
-    const streamRequestEpoch = ++streamRequestEpochRef.current;
     invalidatePlayback();
     const previousStreamId = state.phase === 'targetLocked' && state.streamStarted ? state.streamId || null : null;
     const previousHadStream = Boolean(previousStreamId);
@@ -1519,11 +1519,12 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       target: effectiveTarget,
     });
 
+    const selectEffectiveTarget = (current: RemoteWindowOverlayState) => selectRemoteWindowTargetFromCatalog(
+      current, effectiveTarget, catalogTargets, browserMode ? 'fullscreen' : 'floating',
+    );
+
     if (!startStream) {
-      setState((current) => {
-        const selected = selectRemoteWindowTarget(current, target.streamTargetId, browserMode ? 'fullscreen' : 'floating');
-        return selected.phase === 'targetLocked' ? { ...selected, target: effectiveTarget } : selected;
-      });
+      setState(selectEffectiveTarget);
       return;
     }
 
@@ -1533,13 +1534,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     pendingFocusStreamIdRef.current = focusStreamId;
     const previousCanvasStreamId = activeCanvasStreamIdRef.current;
     const previousFocusStreamId = activeFocusStreamIdRef.current;
-    const selectEffectiveTarget = (current: RemoteWindowOverlayState): RemoteWindowOverlayState => {
-      const selected = selectRemoteWindowTarget(current, target.streamTargetId, browserMode ? 'fullscreen' : 'floating');
-      if (selected.phase !== 'targetLocked') {
-        return selected;
-      }
-      return { ...selected, target: effectiveTarget };
-    };
     const startingState = (current: RemoteWindowOverlayState) => beginRemoteWindowStreamSetup(
       selectEffectiveTarget(current),
       focusStreamId,
@@ -1756,6 +1750,11 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     restoreRetainedReceiverPlayback,
     updateReceiverVideoVisibility,
   ]);
+
+  const handleSelectTarget = useRemoteWindowSelectionAdmission({
+    activeSessionId, state, setState, requestFreshTargets, streamEnabled: Boolean(startStream),
+    streamRequestEpochRef, onAdmitted: startSelectedTarget,
+  });
 
   const handleRemoteWindowScreenshot = useCallback(() => {
     if (state.phase !== 'targetLocked') {
