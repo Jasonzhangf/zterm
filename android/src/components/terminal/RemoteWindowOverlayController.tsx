@@ -373,6 +373,10 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   } | null>(null);
   const appliedRemoteFillResizeRef = useRef<{ streamId: string; targetId: string; width: number; height: number } | null>(null);
   const pendingRemoteFillResizeRef = useRef<{ sequence: string; streamId: string; targetId: string; width: number; height: number } | null>(null);
+  const clearRemoteFillResizeState = useCallback(() => {
+    appliedRemoteFillResizeRef.current = null;
+    pendingRemoteFillResizeRef.current = null;
+  }, []);
   const longPressTimerRef = useRef<number | null>(null);
   const clearLongPressTimer = useCallback(() => {
     if (longPressTimerRef.current !== null) {
@@ -914,6 +918,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     activeCanvasStreamIdRef.current = null;
     activeFocusStreamIdRef.current = null;
     pendingFocusStreamIdRef.current = null;
+    clearRemoteFillResizeState();
     collectStreamStatsRef.current = null;
     resetQualityApplyState();
     setReceiverMediaStream(null);
@@ -943,6 +948,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     setState((current) => closeRemoteWindowOverlay(current));
   }, [
     activeSessionId,
+    clearRemoteFillResizeState,
     clearSurfacePointerState,
     resetCatalog,
     resetFullscreenViewport,
@@ -974,6 +980,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       return;
     }
     activeStreamIdRef.current = null;
+    clearRemoteFillResizeState();
     if (streamInvalidation.streamId === activeCanvasStreamIdRef.current) {
       activeCanvasStreamIdRef.current = null;
     }
@@ -997,7 +1004,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       streamInvalidation.streamId,
       new Error(streamInvalidation.message || 'remote window stream is no longer active'),
     ));
-  }, [clearSurfacePointerState, currentLockedStreamId, resetQualityApplyState, state.phase, streamInvalidation]);
+  }, [clearRemoteFillResizeState, clearSurfacePointerState, currentLockedStreamId, resetQualityApplyState, state.phase, streamInvalidation]);
   const publishRemoteWindowInputContext = useCallback(() => {
     if (!inputContext) {
       return;
@@ -1043,15 +1050,23 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     const height = reference.height;
     const delivery = { streamId: currentLockedStreamId, targetId: currentLockedTarget.streamTargetId, width, height };
     if (!force && [appliedRemoteFillResizeRef.current, pendingRemoteFillResizeRef.current].some((current) => current?.streamId === delivery.streamId && current.targetId === delivery.targetId && current.width === width && current.height === height)) return false;
-    const sequence = resizeTargetWindow(activeSessionId, {
-      streamId: currentLockedStreamId,
-      targetId: currentLockedTarget.streamTargetId,
-      event: {
-        kind: 'window-resize',
-        width,
-        height,
-      },
-    });
+    let sequence: string;
+    try {
+      sequence = resizeTargetWindow(activeSessionId, {
+        streamId: currentLockedStreamId,
+        targetId: currentLockedTarget.streamTargetId,
+        event: {
+          kind: 'window-resize',
+          width,
+          height,
+        },
+      });
+    } catch {
+      // Dispatcher rejected synchronously (missing session/transport): no wire
+      // request exists, so no pending resize survives. The receiver stays.
+      pendingRemoteFillResizeRef.current = null;
+      return false;
+    }
     pendingRemoteFillResizeRef.current = { sequence, ...delivery };
     return true;
   }, [activeSessionId, currentLockedStreamId, currentLockedTarget, embedded, resizeTargetWindow, state, surfaceSize]);
@@ -1383,6 +1398,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
           if (stoppedStreamId === pendingFocusStreamIdRef.current) {
             pendingFocusStreamIdRef.current = null;
           }
+          clearRemoteFillResizeState();
           collectStreamStatsRef.current = null;
           resetQualityApplyState();
           clearSurfacePointerState();
@@ -1451,7 +1467,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
         ));
       }
     });
-  }, [activeSessionId, clearSurfacePointerState, onRemoteWindowMessage, rememberRemoteWindowCatalogTarget]);
+  }, [activeSessionId, clearRemoteFillResizeState, clearSurfacePointerState, onRemoteWindowMessage, rememberRemoteWindowCatalogTarget]);
 
   useEffect(() => () => {
     lastReportedQuickBarSuppressionRef.current = false;

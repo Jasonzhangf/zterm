@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RemoteWindowOverlay } from './RemoteWindowOverlay';
 import { styles } from './remote-window-overlay-styles';
 import type {
+  RemoteWindowInputEventPayload,
   RemoteWindowStreamQualityRequestPayload,
   RemoteWindowStreamTargetManifest,
   RemoteWindowStreamTargetsResponsePayload,
@@ -3075,6 +3076,93 @@ describe('RemoteWindowOverlay', () => {
 
     await waitFor(() => expect(resizeTargetWindow).toHaveBeenCalledTimes(3));
     expect(resizeTargetWindow.mock.calls[2]?.[1].streamId).not.toBe(firstStreamId);
+  });
+
+  it('re-requests the fullscreen fill resize after close and after stream invalidation, and keeps the receiver when dispatch fails', async () => {
+    const target = makeTarget('app-1', 'TextEdit', 'app-window');
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 });
+    const resizeTargetWindow = vi.fn((_sessionId: string, _payload: Omit<RemoteWindowInputEventPayload, 'requestId'>) => 'resize-lifecycle');
+    const requestTargets = vi.fn(async () => ({ requestId: 'rw-resize-lifecycle', targets: [target] }));
+    const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string) => ({
+      streamId,
+      mediaStream: { id: streamId } as MediaStream,
+    }));
+    const setWideFullscreenRects = () => {
+      const overlay = screen.getByTestId('remote-window-locked-overlay');
+      const toolbar = screen.getByTestId('remote-window-locked-toolbar');
+      const surface = screen.getByTestId('remote-window-video-surface');
+      Object.defineProperty(overlay, 'getBoundingClientRect', {
+        configurable: true,
+        value: () => ({ x: 0, y: 0, left: 0, top: 0, right: 1280, bottom: 800, width: 1280, height: 800, toJSON: () => ({}) }),
+      });
+      Object.defineProperty(toolbar, 'getBoundingClientRect', {
+        configurable: true,
+        value: () => ({ x: 0, y: 16, left: 0, top: 16, right: 1280, bottom: 100, width: 1280, height: 100, toJSON: () => ({}) }),
+      });
+      Object.defineProperty(surface, 'getBoundingClientRect', {
+        configurable: true,
+        value: () => ({ x: 0, y: 100, left: 0, top: 100, right: 1280, bottom: 800, width: 1280, height: 700, toJSON: () => ({}) }),
+      });
+    };
+    const enterFullscreen = async () => {
+      fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+      fireEvent.click(await screen.findByTestId('remote-window-target-app-1'));
+      await screen.findByTestId('remote-window-video');
+      fireEvent.click(screen.getByRole('button', { name: '全屏远程窗口' }));
+      setWideFullscreenRects();
+      await flushRemoteWindowSurfaceLayout();
+    };
+    const props = {
+      activeSessionId: 'session-1',
+      requestTargets,
+      startStream,
+      resizeTargetWindow,
+    };
+    const { rerender } = render(<RemoteWindowOverlay {...props} streamInvalidation={null} />);
+
+    await enterFullscreen();
+    await waitFor(() => expect(resizeTargetWindow).toHaveBeenCalledTimes(1));
+    const firstSize = resizeTargetWindow.mock.calls[0]?.[1].event;
+
+    // Close must clear the applied/pending resize ledger, so the same geometry
+    // is requested again on the next session instead of being deduped away.
+    fireEvent.click(screen.getByRole('button', { name: '关闭远程窗口' }));
+    await enterFullscreen();
+    await waitFor(() => expect(resizeTargetWindow).toHaveBeenCalledTimes(2));
+    expect(resizeTargetWindow.mock.calls[1]?.[1].event).toEqual(firstSize);
+
+    // Stream invalidation must clear the same ledger.
+    const invalidatedStreamId = resizeTargetWindow.mock.calls[1]?.[1].streamId;
+    rerender(
+      <RemoteWindowOverlay
+        {...props}
+        streamInvalidation={{
+          streamId: invalidatedStreamId,
+          message: 'remote window stream is not active',
+          nonce: 1,
+        }}
+      />,
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId('remote-window-stream-error').textContent).toContain('remote window stream is not active');
+    });
+    fireEvent.click(screen.getByRole('button', { name: '关闭远程窗口' }));
+    await enterFullscreen();
+    await waitFor(() => expect(resizeTargetWindow).toHaveBeenCalledTimes(3));
+    expect(resizeTargetWindow.mock.calls[2]?.[1].event).toEqual(firstSize);
+
+    // A synchronous dispatch failure must not leave a pending resize, but the
+    // receiver stays attached so the next layout pass can retry.
+    const beforeFailure = resizeTargetWindow.mock.calls.length;
+    resizeTargetWindow.mockImplementationOnce(() => {
+      throw new Error('Remote window target resize requires sessionId and window-resize event');
+    });
+    fireEvent.click(screen.getByTestId('remote-window-more-toggle'));
+    fireEvent.click(screen.getByTestId('remote-window-fullscreen-display-toggle'));
+    await waitFor(() => expect(resizeTargetWindow).toHaveBeenCalledTimes(beforeFailure + 1));
+    expect(screen.getByTestId('remote-window-video')).toBeTruthy();
+    expect(screen.queryByTestId('remote-window-stream-error')).toBeNull();
   });
 
   it('waits for embedded receiver startup to commit before resizing the target window', async () => {
