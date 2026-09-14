@@ -454,6 +454,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     videoElementRef,
     overviewVideoElementRef,
     onVideoDebug,
+    onDecodedFrameSize: setReceiverFrameSize,
     playbackBinding: receiverPlaybackBinding,
     commitDecodedFrame: receiverDecodedCommit ?? undefined,
   });
