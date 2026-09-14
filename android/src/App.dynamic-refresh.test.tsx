@@ -1875,7 +1875,7 @@ describe('App dynamic refresh matrix', () => {
     }
   });
 
-  it('suppresses terminal body immediately but preserves live panes until the five-minute background grace expires', async () => {
+  it('suppresses terminal body and clears live panes immediately when backgrounded', async () => {
     vi.useFakeTimers();
     sessionHarness.update({
       sessions: [makeSession('s1', 1), makeSession('s2', 2)],
@@ -1895,7 +1895,7 @@ describe('App dynamic refresh matrix', () => {
       document.dispatchEvent(new Event('visibilitychange'));
     });
     expect(screen.getByTestId('provider-foreground').textContent?.startsWith('0')).toBe(true);
-    expect(sessionHarness.setLiveSessionIds).not.toHaveBeenCalledWith([]);
+    expect(sessionHarness.setLiveSessionIds).toHaveBeenCalledWith([]);
     expect(sessionHarness.setActiveBodySubscriptionSuppressed).toHaveBeenCalledWith(true);
 
     act(() => {
@@ -1907,27 +1907,6 @@ describe('App dynamic refresh matrix', () => {
     });
     expect(screen.getByTestId('provider-foreground').textContent?.startsWith('1')).toBe(true);
     expect(sessionHarness.setActiveBodySubscriptionSuppressed).toHaveBeenCalledWith(false);
-    expect(sessionHarness.setLiveSessionIds).not.toHaveBeenCalledWith([]);
-
-    act(() => {
-      Object.defineProperty(document, 'visibilityState', {
-        configurable: true,
-        get: () => 'hidden',
-      });
-      document.dispatchEvent(new Event('visibilitychange'));
-    });
-    act(() => {
-      vi.advanceTimersByTime(5 * 60 * 1000);
-    });
-    expect(sessionHarness.setLiveSessionIds).toHaveBeenCalledWith([]);
-
-    act(() => {
-      Object.defineProperty(document, 'visibilityState', {
-        configurable: true,
-        get: () => 'visible',
-      });
-      document.dispatchEvent(new Event('visibilitychange'));
-    });
     expect(sessionHarness.setLiveSessionIds).toHaveBeenCalledWith(['s1', 's2']);
 
     view.unmount();

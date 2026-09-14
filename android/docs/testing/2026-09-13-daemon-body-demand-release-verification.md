@@ -46,11 +46,42 @@ review `commit` argument for this series.
       `session attach lease expired session=zterm-attach-lease-expiry subscriber=<id>`
     - `lease-expiry-release`: `attached=false`, `physicalOpen=true`.
 
+- L5 packaged Android device smoke (PLZ110, `100.104.163.65:5555`):
+  - `pnpm --dir android run build:android` produced
+    `android/native/android/app/build/outputs/apk/debug/app-debug.apk`,
+    `versionName=0.1.3.2967`, `versionCode=1100029670`,
+    `sha256=583e8610c7bf8318157f17bc7e0d158ef8484620222bf861337ef1f5f000759e`;
+    the update bundle was
+    published to `~/.zterm/updates/latest.json` and verified by
+    `scripts/verify-update-bundle.mjs` (all checks `true`).
+  - `adb -s 100.104.163.65:5555 install -r <apk>` -> `Success`; installed
+    package reports `versionName=0.1.3.2967`.
+  - Candidate daemon deployed through `android/scripts/zterm-daemon.sh restart`
+    (launchd `com.zterm.android.zterm-daemon`); staged
+    `~/.zterm/daemon-runtime/server.cjs` sha256
+    `1c1632a07a6f53e21ffcca965d7944e495160b347c81810b850d43d239d83936`
+    matches the release-dist bundle and contains the attach-lease code.
+  - Device attach -> background -> foreground loop observed against
+    `/debug/runtime`:
+    - foreground: device subscriber `bodySubscribed=true` (origin
+      `http://100.66.1.82:3333`), mirror `lifecycle=ready`;
+    - background (`KEYCODE_HOME`): device subscriber disappeared from
+      `transportSubscribers`; daemon logged
+      `session attach lease expired session=AAA-body-demand-gate`;
+    - foreground (`am start`): device subscriber returned with
+      `bodySubscribed=true` on the same tmux session.
+    - The device physical websocket was torn down by the client (`code=1006`,
+      client-initiated), not by daemon attach-lease release; daemon release
+      keeps the physical transport open in the daemon-only protocol loop.
+  - Evidence: `/tmp/zterm-device-attach-smoke-1789397019358/smoke.json`
+    (`ok=true`).
+
 ## Explicit gaps
 
-- No packaged APK build/install/device renderer smoke is included in this revision.
-  The live proof above is a daemon protocol loop plus client unit/integration tests;
-  an on-device background/foreground renderer smoke remains a device-loop gap.
+- The L5 device smoke proves the daemon-side attach lease and device
+  background/foreground lifecycle. It does not add a new renderer screenshot
+  assertion for the reattached frame; renderer body truth is covered by the L1
+  client integration suites above.
 - Pre-existing failures unrelated to this change (reproduced on clean `HEAD`):
   `src/contexts/session-context-infra-runtime.test.ts` (traversal candidate
   ordering) and `src/server/server.mirror-capture-truth.test.ts` (mirror geometry
