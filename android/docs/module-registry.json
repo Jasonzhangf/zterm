@@ -2405,6 +2405,7 @@
         "src/components/terminal/remote-window-overlay-storage.ts",
         "src/components/terminal/remote-window-overlay-helpers.ts",
         "src/components/terminal/remote-window-overlay-styles.ts",
+        "src/components/terminal/useRemoteWindowLockedPortal.ts",
         "src/components/terminal/remote-window-icons.tsx",
         "src/components/terminal/RemoteWindowDeveloperDiagnostics.tsx",
         "src/components/terminal/RemoteWindowLockedToolbar.tsx",
