@@ -29,6 +29,11 @@ review `commit` argument for this series.
     `terminal-daemon-runtime`, `terminal-bridge-runtime`,
     `terminal-message-runtime`, `terminal-session-attach-lease-runtime`,
     `server.transport-lifecycle-truth` — 72 tests passed.
+  - Multi-subscriber body release regression:
+    `terminal-mirror-runtime` — 57 tests passed, including
+    "releases the withdrawn subscriber channel and adaptive width while a peer
+    keeps the mirror" (withdrawn subscriber's channel and adaptive lease are
+    released, and the remaining peer's width wins).
   - Client lifecycle/handoff suite:
     `session-context-lifecycle`, `useOpenTabLifecycleEffects` — 35 tests passed.
   - Client integration suite `SessionContext.ws-refresh` — 139 tests passed.
@@ -59,8 +64,8 @@ review `commit` argument for this series.
   - Candidate daemon deployed through `android/scripts/zterm-daemon.sh restart`
     (launchd `com.zterm.android.zterm-daemon`); staged
     `~/.zterm/daemon-runtime/server.cjs` sha256
-    `1c1632a07a6f53e21ffcca965d7944e495160b347c81810b850d43d239d83936`
-    matches the release-dist bundle and contains the attach-lease code.
+    `61d15ffb9cc9c4bbe3cdad1f21ea9539afd7100c7b915e116e0bb5474e8e534b`
+    (multi-subscriber release fix) contains the attach-lease code.
   - Device attach -> background -> foreground loop observed against
     `/debug/runtime`:
     - foreground: device subscriber `bodySubscribed=true` (origin
@@ -74,7 +79,8 @@ review `commit` argument for this series.
       client-initiated), not by daemon attach-lease release; daemon release
       keeps the physical transport open in the daemon-only protocol loop.
   - Evidence: `/tmp/zterm-device-attach-smoke-1789397019358/smoke.json`
-    (`ok=true`).
+    (`ok=true`) and `/tmp/zterm-device-attach-smoke-1789399466614/smoke.json`
+    (`ok=true`, re-run after the multi-subscriber release fix).
 
 ## Explicit gaps
 

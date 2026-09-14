@@ -368,30 +368,50 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     });
   }
 
+  // Releases one subscriber's hold on a mirror without touching peers.
+  // Mux subscribers own a logical channel, so releasing means closing that
+  // channel (the physical transport stays open). Legacy subscribers own the
+  // physical transport directly, so only mirror ownership is detached.
+  function releaseSubscriberMirrorHold(
+    mirror: SessionMirror,
+    session: TerminalSession,
+    reason: string,
+  ) {
+    if (session.muxChannelId) {
+      deps.closeTransportSubscriber(session, reason, false, 'no_body_demand');
+      return;
+    }
+    releaseAdaptiveWidthLease(session, `body-release:${reason}`);
+    const detachResult = detachMirrorSubscriber(mirror.subscribers, session.id);
+    mirror.subscribers = detachResult.nextSubscribers;
+    session.mirrorKey = null;
+  }
+
   function releaseMirrorIfNoBodyDemand(mirror: SessionMirror, reason: string) {
     if (mirror.lifecycle === 'destroyed') {
       return false;
     }
-    if (countReadyBodySubscribedSubscribers(mirror) > 0) {
+    const readyBodyDemand = countReadyBodySubscribedSubscribers(mirror);
+    if (readyBodyDemand > 0) {
+      // Peers still demand the body, so the mirror stays. Every subscriber that
+      // has already withdrawn demand must still release its own logical channel
+      // and adaptive width lease; otherwise a backgrounded client keeps
+      // holding a channel and can keep tmux pinned to its narrow width.
+      for (const sessionId of [...mirror.subscribers]) {
+        const session = sessions.get(sessionId);
+        if (!session || session.bodySubscribed !== false) {
+          continue;
+        }
+        releaseSubscriberMirrorHold(mirror, session, reason);
+      }
       return false;
     }
-    for (const sessionId of mirror.subscribers) {
+    for (const sessionId of [...mirror.subscribers]) {
       const session = sessions.get(sessionId);
       if (!session) {
         continue;
       }
-      if (session.muxChannelId) {
-        deps.closeTransportSubscriber(session, reason, false, 'no_body_demand');
-        continue;
-      }
-      // Legacy non-mux subscribers own their physical transport directly, so
-      // mirror release must not call closeTransportSubscriber here. Detach the
-      // subscriber from mirror ownership only and keep the physical transport
-      // and logical session alive.
-      releaseAdaptiveWidthLease(session, `body-release:${reason}`);
-      const detachResult = detachMirrorSubscriber(mirror.subscribers, session.id);
-      mirror.subscribers = detachResult.nextSubscribers;
-      session.mirrorKey = null;
+      releaseSubscriberMirrorHold(mirror, session, reason);
     }
     if (!mirrors.has(mirror.key)) {
       return true;
@@ -678,6 +698,11 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     for (const subscriberId of mirror.subscribers) {
       const subscriber = sessions.get(subscriberId);
       if (!subscriber || !subscriber.transport || subscriber.transport.readyState !== 1) {
+        continue;
+      }
+      if (subscriber.bodySubscribed === false) {
+        // A withdrawn subscriber must never contribute to the aggregate tmux
+        // width, even if its lease release is still in flight.
         continue;
       }
       if (!subscriber.adaptiveWidthCols || subscriber.adaptiveWidthCols <= 0) {

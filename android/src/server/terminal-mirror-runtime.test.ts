@@ -45,7 +45,7 @@ function createRuntime(overrides: {
   const sessions = new Map<string, TerminalSession>();
   const mirrors = new Map<string, SessionMirror>();
   const assertTmuxSessionExists = vi.fn();
-  const runTmux = vi.fn(() => ({ ok: true as const, stdout: '' }));
+  const runTmux = vi.fn((_args: string[]) => ({ ok: true as const, stdout: '' }));
   const captureMirrorAuthoritativeBufferFromTmux = vi.fn(overrides.captureMirrorAuthoritativeBufferFromTmux || (async (mirror: SessionMirror) => {
     mirror.bufferLines = [];
     mirror.bufferStartIndex = 0;
@@ -302,6 +302,78 @@ describe('terminal mirror runtime lifecycle truth', () => {
     expect(mirrors.has('demo')).toBe(true);
     expect(mirror?.subscribers.has(second.id)).toBe(true);
     expect(closeTransportSubscriber).not.toHaveBeenCalled();
+  });
+
+  it('releases the withdrawn subscriber channel and adaptive width while a peer keeps the mirror', async () => {
+    const {
+      runtime,
+      sessions,
+      mirrors,
+      runTmux,
+      closeTransportSubscriber,
+    } = createRuntime();
+    const first = createSession('session-1');
+    const second = createSession('session-2');
+    first.muxChannelId = 'channel-first';
+    second.muxChannelId = 'channel-second';
+    sessions.set(first.id, first);
+    sessions.set(second.id, second);
+
+    await runtime.attachTmux(first, {
+      sessionName: 'demo',
+      cols: 80,
+      rows: 40,
+      widthMode: 'adaptive-phone',
+    });
+    await runtime.attachTmux(second, {
+      sessionName: 'demo',
+      cols: 120,
+      rows: 40,
+      widthMode: 'adaptive-phone',
+    });
+
+    const mirror = mirrors.get('demo');
+    expect(mirror).toBeTruthy();
+    expect(mirror?.adaptiveWidthAppliedCols).toBe(80);
+    expect(first.adaptiveWidthCols).toBe(80);
+    // The real closeTransportSubscriber releases the lease through the mirror
+    // owner and detaches the subscriber; emulate that production contract.
+    closeTransportSubscriber.mockImplementation((session: TerminalSession, reason: string) => {
+      runtime.releaseAdaptiveWidthLease(session, `close:${reason}`);
+      mirror?.subscribers.delete(session.id);
+      session.mirrorKey = null;
+    });
+    runTmux.mockClear();
+
+    first.bodySubscribed = false;
+    expect(runtime.releaseMirrorIfNoBodyDemand(mirror!, 'body subscription released')).toBe(false);
+
+    expect(mirrors.has('demo')).toBe(true);
+    expect(mirror?.subscribers.has(first.id)).toBe(false);
+    expect(mirror?.subscribers.has(second.id)).toBe(true);
+    expect(first.adaptiveWidthCols).toBeNull();
+    expect(second.adaptiveWidthCols).toBe(120);
+    expect(closeTransportSubscriber).toHaveBeenCalledTimes(1);
+    expect(closeTransportSubscriber).toHaveBeenCalledWith(
+      first,
+      'body subscription released',
+      false,
+      'no_body_demand',
+    );
+    expect(closeTransportSubscriber).not.toHaveBeenCalledWith(
+      second,
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(first.transport?.close).not.toHaveBeenCalled();
+    expect(second.transport?.close).not.toHaveBeenCalled();
+    // The remaining subscriber's 120-col lease must win once the withdrawn
+    // 80-col lease is gone.
+    const resizeCalls = runTmux.mock.calls
+      .map((call) => call[0] as string[])
+      .filter((args) => args[0] === 'resize-window');
+    expect(resizeCalls.at(-1)).toEqual(['resize-window', '-t', '=demo', '-x', '120']);
   });
 
   it('releases a mirror if body subscription is false before async attach reaches ready', async () => {
