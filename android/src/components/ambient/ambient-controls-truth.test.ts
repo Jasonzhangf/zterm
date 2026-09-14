@@ -99,4 +99,30 @@ describe('ambient control ownership truth', () => {
     expect(owner).not.toMatch(/from ['"].*(?:session|transport|mirror|renderer|buffer)/i);
     expect(owner).toContain('mobileTheme');
   });
+
+  it('keeps ambient production CSS and shared control class wiring in place', () => {
+    const indexCss = read('src/index.css');
+    expect(indexCss).toContain('@import "./ambient.css";');
+    expect(indexCss).toContain('data-terminal-shell-skin="black"');
+    expect(indexCss).toContain('data-terminal-shell-skin="light"');
+    expect(indexCss).toContain('--amb-key-light-intensity');
+    expect(indexCss).toContain('--amb-albedo');
+    expect(indexCss).toContain('--amb-elevation');
+
+    const ambientCss = read('src/ambient.css');
+    expect(ambientCss).toContain('--amb-key-light-intensity');
+    expect(ambientCss).toContain('.amb-button');
+    expect(ambientCss).toContain('.amb-chamfer');
+
+    for (const file of [
+      'src/components/ambient/AmbientButton.tsx',
+      'src/components/ambient/AmbientInput.tsx',
+      'src/components/ambient/AmbientSelect.tsx',
+      'src/components/ambient/AmbientTextarea.tsx',
+    ]) {
+      const owner = read(file);
+      expect(owner).toContain("'ambient-control'");
+      expect(owner).toContain("'amb-chamfer'");
+    }
+  });
 });
