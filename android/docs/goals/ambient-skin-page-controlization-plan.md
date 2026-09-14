@@ -149,7 +149,7 @@ AmbientKeyBank
 
 ### Phase 2: Ambient 控件效果
 
-Phase 2 在控件化完成后接入视觉。当前已接入生产 `android/src/ambient.css`，并给共享控件输出 ambient class；已抓取手机真机截图 `android/evidence/2026-09-13-skin-design/current-phone.png`。剩余项是双皮肤逐页渲染校验、阴影/留白校准和平板截图证据。
+Phase 2 在控件化完成后接入视觉。当前已接入生产 `android/src/ambient.css`，并给共享控件输出 ambient class；已抓取手机真机截图与平板模拟器截图：`android/evidence/2026-09-13-skin-design/current-phone.png`、`current-tablet.png`。剩余项是双皮肤逐页渲染校验和阴影/留白校准。
 
 步骤：
 
