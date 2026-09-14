@@ -496,7 +496,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     pointerId: number;
     startScale: number;
   } | null>(null);
-  const lastTouchEndAtRef = useRef(0);
   const lastReportedQuickBarSuppressionRef = useRef<boolean | null>(null);
   const lastReportedBodySuppressionRef = useRef<boolean | null>(null);
   const lastReportedInputContextKeyRef = useRef<string | null>(null);
@@ -2346,14 +2345,14 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
           invertGestureDirection: false,
           touchMode: inputModeRef.current === 'touch',
         });
-        // 触控模式 fullscreen 双击：本地缩放（绕触点），抑制第二次 click 注入
+        // Double-tap is derived only from recognized single-pointer taps.
+        // Raw touchend cadence also includes the two releases from a pinch.
         const isLeftClick = result.remoteEvents.some(
           (remoteEvent) => remoteEvent.kind === 'click' && remoteEvent.button === 'left',
         );
         if (
           isLeftClick
           && state.phase === 'targetLocked'
-          && state.mode === 'fullscreen'
           && inputModeRef.current === 'touch'
           && event.pointerType === 'touch'
         ) {
@@ -2366,7 +2365,11 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
           ) {
             lastTapRef.current = null;
             const filtered: typeof result.remoteEvents = [];
-            handleDoubleTapZoom(event.clientX, event.clientY);
+            if (state.mode === 'fullscreen') {
+              handleDoubleTapZoom(event.clientX, event.clientY);
+            } else {
+              handleFullscreen();
+            }
             applyRemoteWindowTouchPointerResult({ ...result, remoteEvents: filtered });
             if (result.consumed) {
               surfacePointersRef.current.delete(event.pointerId);
@@ -2476,6 +2479,8 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     applyRemoteWindowTouchPointerResult,
     commitFullscreenViewport,
     emitRemoteWindowActionInput,
+    handleDoubleTapZoom,
+    handleFullscreen,
     resolveSurfaceInputGeometry,
     state,
   ]);
@@ -2812,16 +2817,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       onWheel={handleVideoSurfaceWheel}
       onKeyDown={(event) => handleVideoSurfaceKey(event, 'down')}
       onKeyUp={(event) => handleVideoSurfaceKey(event, 'up')}
-      onTouchEnd={() => {
-        if (state.mode !== 'floating') {
-          return;
-        }
-        const now = Date.now();
-        if (now - lastTouchEndAtRef.current < 300) {
-          handleFullscreen();
-        }
-        lastTouchEndAtRef.current = now;
-      }}
       style={videoSurfaceStyle}
     >
       <div

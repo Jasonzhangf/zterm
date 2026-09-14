@@ -3861,6 +3861,94 @@ describe('RemoteWindowOverlay', () => {
     ]);
   });
 
+  it('keeps a floating pinch out of fullscreen while a single-finger double tap still enters fullscreen', async () => {
+    const mediaStream = { id: 'media-stream-floating-pinch' } as MediaStream;
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-floating-pinch',
+      targets: [makeTarget('app-floating-pinch', 'TextEdit', 'app-window')],
+    }));
+    const startStream = vi.fn(async (
+      _sessionId: string,
+      _target: RemoteWindowStreamTargetManifest,
+      streamId: string,
+    ) => ({ streamId, mediaStream }));
+
+    render(
+      <RemoteWindowOverlay
+        activeSessionId="session-floating-pinch"
+        requestTargets={requestTargets}
+        startStream={startStream}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    fireEvent.click(await screen.findByTestId('remote-window-target-app-floating-pinch'));
+    const surface = await screen.findByTestId('remote-window-video-surface');
+    Object.defineProperty(surface, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({
+        x: 0,
+        y: 0,
+        left: 0,
+        top: 0,
+        right: 300,
+        bottom: 200,
+        width: 300,
+        height: 200,
+        toJSON: () => ({}),
+      }),
+    });
+    await flushRemoteWindowSurfaceLayout();
+
+    fireEvent.touchEnd(surface, {
+      touches: [{ identifier: 2, clientX: 190, clientY: 100 }],
+      changedTouches: [{ identifier: 1, clientX: 110, clientY: 100 }],
+    });
+    fireEvent.touchEnd(surface, {
+      touches: [],
+      changedTouches: [{ identifier: 2, clientX: 190, clientY: 100 }],
+    });
+
+    expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('floating');
+
+    fireEvent.pointerDown(surface, {
+      pointerId: 3,
+      pointerType: 'touch',
+      clientX: 150,
+      clientY: 100,
+      button: 0,
+      buttons: 1,
+    });
+    fireEvent.pointerUp(surface, {
+      pointerId: 3,
+      pointerType: 'touch',
+      clientX: 150,
+      clientY: 100,
+      button: 0,
+      buttons: 0,
+    });
+    fireEvent.pointerDown(surface, {
+      pointerId: 4,
+      pointerType: 'touch',
+      clientX: 150,
+      clientY: 100,
+      button: 0,
+      buttons: 1,
+    });
+    fireEvent.pointerUp(surface, {
+      pointerId: 4,
+      pointerType: 'touch',
+      clientX: 150,
+      clientY: 100,
+      button: 0,
+      buttons: 0,
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('fullscreen');
+    });
+  });
+
   it('keeps nearly parallel two-finger vertical movement as scroll instead of pinch zoom', async () => {
     const mediaStream = { id: 'media-stream-1' } as MediaStream;
     const sendInput = vi.fn();
