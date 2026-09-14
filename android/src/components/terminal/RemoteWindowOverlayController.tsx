@@ -219,6 +219,7 @@ export interface RemoteWindowOverlayProps {
   bottomInsetPx?: number;
   bottomChromeInsetPx?: number;
   embedded?: boolean; embeddedFullscreen?: boolean;
+  onExitEmbeddedFullscreen?: () => void;
   onOpenResourceDrawer?: (tab: 'web' | 'stream') => void;
   onOpenStateChange?: (open: boolean) => void;
   onBodySubscriptionSuppressedChange?: (suppressed: boolean) => void;
@@ -271,6 +272,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   bottomInsetPx = 0,
   bottomChromeInsetPx = 0,
   embedded = false, embeddedFullscreen = false,
+  onExitEmbeddedFullscreen,
   onOpenResourceDrawer,
   onOpenStateChange,
   onBodySubscriptionSuppressedChange,
@@ -1007,7 +1009,10 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     // 防止浮窗残留「video 隐藏 + canvas 无内容」的黑屏状态。
     setDualStreamSwitch((current) => resetRemoteWindowDualStreamSwitch(current));
     setState((current) => shrinkRemoteWindowOverlay(current));
-  }, [resetFullscreenViewport, setDualStreamSwitch]);
+    if (embedded) {
+      onExitEmbeddedFullscreen?.();
+    }
+  }, [embedded, onExitEmbeddedFullscreen, resetFullscreenViewport, setDualStreamSwitch]);
   const handleRemoteClose = useCallback(() => state.phase === 'targetLocked' && Boolean(currentLockedTarget) && sendRemoteWindowInputEventsForTarget({ sessionId: activeSessionId || null, streamId: currentLockedStreamId, target: currentLockedTarget!, events: [{ kind: 'close-window' }] }) && handleClose(), [activeSessionId, currentLockedStreamId, currentLockedTarget, handleClose, sendRemoteWindowInputEventsForTarget, state.phase]);
   const requestRemoteTargetFillResize = useCallback((
     force = false,

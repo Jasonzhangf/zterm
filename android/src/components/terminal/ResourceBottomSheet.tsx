@@ -6,7 +6,12 @@ type ResourcePlacement = 'bottom' | 'end';
 export interface ResourceBottomSheetProps {
   open: boolean;
   renderFileBrowser: (open: boolean) => ReactNode;
-  renderRemoteWindow?: (open: boolean, tab?: 'stream' | 'web', expanded?: boolean) => ReactNode;
+  renderRemoteWindow?: (
+    open: boolean,
+    tab?: 'stream' | 'web',
+    expanded?: boolean,
+    onExitFullscreen?: () => void,
+  ) => ReactNode;
   webUrl?: string;
   onWebUrlChange?: (url: string) => void;
   onClose: () => void;
@@ -98,6 +103,10 @@ export function ResourceBottomSheet({
   }, [placement]);
 
   const resolvedPlacement = placement || responsivePlacement;
+  const streamExpanded = expanded && tab === 'stream';
+  const handleExitStreamFullscreen = useCallback(() => {
+    setExpanded(false);
+  }, []);
 
   const submitWebUrl = useCallback(() => {
     const value = draftUrl.trim();
@@ -135,7 +144,7 @@ export function ResourceBottomSheet({
   const remoteWindowNode = renderRemoteWindow
     ? tab === 'web'
       ? renderRemoteWindow(open, 'web', expanded)
-      : renderRemoteWindow(open && tab === 'stream', 'stream', expanded)
+      : renderRemoteWindow(open && tab === 'stream', 'stream', expanded, handleExitStreamFullscreen)
     : null;
 
   if (!open) {
@@ -163,19 +172,20 @@ export function ResourceBottomSheet({
           style={{ ...SHEET, width: resolvedPlacement === 'end' ? 'min(560px, 94vw)' : '100%', height: expanded || resolvedPlacement === 'end' ? '100%' : SHEET.height, borderRadius: resolvedPlacement === 'end' || expanded ? 0 : SHEET.borderRadius, borderBottom: resolvedPlacement === 'end' || expanded ? '1px solid var(--zterm-panel-border)' : 0, borderRight: 0 }}
       onClick={(event) => event.stopPropagation()}
       >
-        <div
+        {!streamExpanded ? <div
+          data-testid="resource-bottom-sheet-grip"
           style={{ display: 'flex', justifyContent: 'center', padding: '10px 0 4px' }}
           onTouchStart={handleTouchStart}
           onTouchEnd={handleTouchEnd}
         >
           <span aria-hidden="true" style={{ width: 38, height: 4, borderRadius: 99, background: 'var(--zterm-panel-border)' }} />
-        </div>
-        {tab !== 'stream' ? <header style={{ display: 'grid', gridTemplateColumns: '44px 1fr 96px', alignItems: 'center', gap: 8, padding: '8px 16px 14px', borderBottom: '1px solid var(--zterm-panel-border)' }}>
+        </div> : null}
+        {!streamExpanded && tab !== 'stream' ? <header style={{ display: 'grid', gridTemplateColumns: '44px 1fr 96px', alignItems: 'center', gap: 8, padding: '8px 16px 14px', borderBottom: '1px solid var(--zterm-panel-border)' }}>
           <button type="button" aria-label="关闭资源抽屉" style={{ ...buttonStyle, width: 44, padding: 0, border: 0, borderRadius: 22, fontSize: 13 }} onClick={onClose}>收起</button>
           <div style={{ textAlign: 'center', fontSize: 22, fontWeight: 800, letterSpacing: '-0.02em' }}>预览</div>
           <button type="button" aria-label="下载当前资源" disabled={!onDownload} onClick={onDownload} style={{ ...buttonStyle, border: 0, background: 'var(--zterm-panel-surface)', fontSize: 16, opacity: onDownload ? 1 : 0.5 }}>下载</button>
         </header> : null}
-        <nav aria-label="资源类型" style={{ display: 'flex', gap: 6, padding: '10px 16px 8px' }} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+        {!streamExpanded ? <nav aria-label="资源类型" style={{ display: 'flex', gap: 6, padding: '10px 16px 8px' }} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
           {(['files', 'stream', 'web'] as const).map((item) => (
             <button
               key={item}
@@ -192,7 +202,7 @@ export function ResourceBottomSheet({
               {item === 'files' ? '远程文件' : item === 'stream' ? '窗口串流' : '网页'}
             </button>
           ))}
-        </nav>
+        </nav> : null}
         <div style={{ minHeight: 0, flex: 1, display: tab === 'files' ? 'block' : 'none' }}>
           {fileBrowserNode}
         </div>

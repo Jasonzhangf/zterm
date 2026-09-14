@@ -64,12 +64,7 @@ export const RemoteWindowLockedToolbar = forwardRef<HTMLDivElement, RemoteWindow
   onToggleAppSwitch,
   onToggleInputMode,
   onToggleMore,
-  streamDebugInfo,
 }, ref) {
-  const formatRate = (bps: number | null) => bps == null || !Number.isFinite(bps)
-    ? '-'
-    : `${(bps / 1_000_000).toFixed(1)} Mbps`;
-  const debug = mode === 'fullscreen' && streamDebugInfo ? streamDebugInfo : null;
   return (
     <div ref={ref} data-testid="remote-window-locked-toolbar" style={styles.lockedToolbar}>
       <div {...dragHandleProps} data-testid="remote-window-drag-handle" style={styles.lockedTopBar}>
@@ -108,16 +103,6 @@ export const RemoteWindowLockedToolbar = forwardRef<HTMLDivElement, RemoteWindow
           </button>
         </div>
       </div>
-      {debug ? (
-        <div data-testid="remote-window-fullscreen-stream-debug" style={styles.fullscreenStreamDebug}>
-          <span>画面 {debug.videoSize?.width || debug.frameSize?.width || 0}×{debug.videoSize?.height || debug.frameSize?.height || 0}</span>
-          <span>帧率 {debug.fps == null ? '-' : `${debug.fps.toFixed(1)} FPS`}</span>
-          <span>目标 {formatRate(debug.targetBps)}</span>
-          <span>上行估算 -</span>
-          <span>下行实收 {formatRate(debug.downlinkBps)}</span>
-          <span>RTT {debug.sample?.rttMs == null ? '-' : `${Math.round(debug.sample.rttMs)} ms`}</span>
-        </div>
-      ) : null}
       <div data-testid="remote-window-control-strip" data-no-drag="true" style={styles.lockedControlStrip}>
         <span data-testid="remote-window-input-mode" style={styles.inputModeBadge}>
           {inputSupported ? '可操作' : '只读'}

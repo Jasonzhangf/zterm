@@ -3,6 +3,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RemoteWindowOverlay } from './RemoteWindowOverlay';
+import { styles } from './remote-window-overlay-styles';
 import type {
   RemoteWindowStreamQualityRequestPayload,
   RemoteWindowStreamTargetManifest,
@@ -1941,6 +1942,63 @@ describe('RemoteWindowOverlay', () => {
     expect(screen.queryByLabelText('关闭子窗口')).toBeNull();
   });
 
+  it('keeps fullscreen toolbar chrome inside one safe-area boundary ahead of the video surface', async () => {
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-toolbar-layout',
+      targets: [makeTarget('app-1', 'TextEdit', 'app-window')],
+    }));
+
+    render(<RemoteWindowOverlay activeSessionId="session-toolbar-layout" requestTargets={requestTargets} />);
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    fireEvent.click(await screen.findByTestId('remote-window-target-app-1'));
+    await waitFor(() => {
+      expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('floating');
+    });
+    fireEvent.click(screen.getByRole('button', { name: '全屏远程窗口' }));
+    await waitFor(() => {
+      expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('fullscreen');
+    });
+
+    const toolbar = screen.getByTestId('remote-window-locked-toolbar');
+    const surface = screen.getByTestId('remote-window-video-surface');
+    const topBar = screen.getByTestId('remote-window-drag-handle');
+    const controlStrip = screen.getByTestId('remote-window-control-strip');
+    const status = screen.getByTestId('remote-window-toolbar-status');
+    const primaryActions = screen.getByTestId('remote-window-primary-actions');
+
+    expect(styles.fullscreenOverlay.paddingTop).toContain('safe-area-inset-top');
+    expect(styles.fullscreenOverlay.paddingLeft).toContain('safe-area-inset-left');
+    expect(styles.fullscreenOverlay.paddingRight).toContain('safe-area-inset-right');
+    expect(topBar.getAttribute('style')).not.toContain('safe-area-inset');
+    expect(controlStrip.getAttribute('style')).not.toContain('safe-area-inset');
+    expect(status.getAttribute('style')).not.toContain('safe-area-inset');
+    expect(toolbar.style.flex).toBe('0 0 auto');
+    expect(toolbar.compareDocumentPosition(surface) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByTestId('remote-window-fullscreen-stream-debug')).toBeNull();
+
+    const buttons = [...primaryActions.querySelectorAll('button')] as HTMLElement[];
+    const buttonWidth = Number.parseFloat(buttons[0]?.style.width || '0');
+    const gap = Number.parseFloat(primaryActions.style.gap || '0');
+    const actionsWidth = buttons.length * buttonWidth + Math.max(0, buttons.length - 1) * gap;
+    const overlayWidth = 390;
+    const contentInset = 10;
+    const actionsLeft = overlayWidth - contentInset - actionsWidth;
+    expect(actionsLeft).toBeGreaterThanOrEqual(contentInset);
+    expect(actionsLeft + actionsWidth).toBeLessThanOrEqual(overlayWidth - contentInset);
+
+    Object.defineProperty(toolbar, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ top: 16, bottom: 156, left: 0, right: 390, width: 390, height: 140 }),
+    });
+    Object.defineProperty(surface, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ top: 156, bottom: 844, left: 0, right: 390, width: 390, height: 688 }),
+    });
+    const toolbarRect = toolbar.getBoundingClientRect();
+    const surfaceRect = surface.getBoundingClientRect();
+    expect(surfaceRect.top).toBeGreaterThanOrEqual(toolbarRect.bottom);
+  });
+
   it('remotely closes the locked host window without using the local overlay close action', async () => {
     const sendInput = vi.fn();
     const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string) => ({
@@ -3006,6 +3064,38 @@ describe('RemoteWindowOverlay', () => {
     );
   });
 
+  it('reports embedded fullscreen exit when the toolbar shrinks the stream', async () => {
+    const onExitEmbeddedFullscreen = vi.fn();
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-embedded-exit',
+      targets: [makeTarget('app-embedded-exit', 'TextEdit', 'app-window')],
+    }));
+    const renderOverlay = (embeddedFullscreen: boolean) => (
+      <RemoteWindowOverlay
+        activeSessionId="session-embedded-exit"
+        embedded
+        embeddedFullscreen={embeddedFullscreen}
+        requestTargets={requestTargets}
+        onExitEmbeddedFullscreen={onExitEmbeddedFullscreen}
+      />
+    );
+    const view = render(renderOverlay(false));
+
+    fireEvent.click(await screen.findByTestId('remote-window-target-app-embedded-exit'));
+    await waitFor(() => {
+      expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('floating');
+    });
+    view.rerender(renderOverlay(true));
+    await waitFor(() => {
+      expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('fullscreen');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '缩小远程窗口' }));
+
+    expect(onExitEmbeddedFullscreen).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('floating');
+  });
+
   it('never resizes an iTerm2 target when entering fullscreen fill', async () => {
     const target = makeTarget('iterm-app', 'iTerm2', 'app-window');
     target.videoTarget.appBundleId = 'com.googlecode.iterm2';
@@ -3387,9 +3477,7 @@ describe('RemoteWindowOverlay', () => {
     await screen.findByTestId('remote-window-video');
     fireEvent.click(screen.getByRole('button', { name: '全屏远程窗口' }));
 
-    const fullscreenOverlayStyle = screen.getByTestId('remote-window-locked-overlay').getAttribute('style') || '';
-    expect(fullscreenOverlayStyle).toContain('padding-top:');
-    expect(fullscreenOverlayStyle).toContain('safe-area-inset-top');
+    expect(styles.fullscreenOverlay.paddingTop).toContain('safe-area-inset-top');
 
     const surface = screen.getByTestId('remote-window-video-surface');
     Object.defineProperty(surface, 'getBoundingClientRect', {
