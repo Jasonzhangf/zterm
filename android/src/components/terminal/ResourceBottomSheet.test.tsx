@@ -131,6 +131,31 @@ describe('ResourceBottomSheet', () => {
     expect(onExpand).not.toHaveBeenCalled();
   });
 
+  it('clears a handle gesture when a nested pointer is cancelled', () => {
+    const onClose = vi.fn();
+    const onExpand = vi.fn();
+    render(
+      <ResourceBottomSheet
+        open
+        initialTab="stream"
+        renderFileBrowser={() => null}
+        renderRemoteWindow={() => <div data-testid="stream-surface" />}
+        onClose={onClose}
+        onExpand={onExpand}
+      />,
+    );
+
+    const handle = screen.getByLabelText('资源').querySelector('[data-resource-drawer-handle]') as HTMLElement;
+    const pane = screen.getByTestId('resource-stream-pane');
+    fireEvent.pointerDown(handle, { pointerId: 1, clientY: 240 });
+    fireEvent.pointerCancel(pane, { pointerId: 1, clientY: 120 });
+    fireEvent.pointerDown(handle, { pointerId: 2, clientY: 240 });
+    fireEvent.pointerUp(handle, { pointerId: 2, clientY: 120 });
+
+    expect(onExpand).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it('hides duplicate drawer chrome when the stream expands to fullscreen', () => {
     const renderRemoteWindow = vi.fn((open: boolean) => open ? <div data-testid="stream-surface" /> : null);
     render(
