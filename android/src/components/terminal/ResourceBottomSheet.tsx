@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode, type TouchEvent } from 'react';
+import { AmbientButton, AmbientInput } from '../ambient';
 
 type ResourceTab = 'files' | 'web' | 'stream';
 type ResourcePlacement = 'bottom' | 'end';
@@ -171,13 +172,13 @@ export function ResourceBottomSheet({
           <span aria-hidden="true" style={{ width: 38, height: 4, borderRadius: 99, background: 'var(--zterm-panel-border)' }} />
         </div>
         {tab !== 'stream' ? <header style={{ display: 'grid', gridTemplateColumns: '44px 1fr 96px', alignItems: 'center', gap: 8, padding: '8px 16px 14px', borderBottom: '1px solid var(--zterm-panel-border)' }}>
-          <button type="button" aria-label="关闭资源抽屉" style={{ ...buttonStyle, width: 44, padding: 0, border: 0, borderRadius: 22, fontSize: 13 }} onClick={onClose}>收起</button>
+          <AmbientButton type="button" aria-label="关闭资源抽屉" style={{ ...buttonStyle, width: 44, padding: 0, border: 0, borderRadius: 22, fontSize: 13 }} onClick={onClose}>收起</AmbientButton>
           <div style={{ textAlign: 'center', fontSize: 22, fontWeight: 800, letterSpacing: '-0.02em' }}>预览</div>
-          <button type="button" aria-label="下载当前资源" disabled={!onDownload} onClick={onDownload} style={{ ...buttonStyle, border: 0, background: 'var(--zterm-panel-surface)', fontSize: 16, opacity: onDownload ? 1 : 0.5 }}>下载</button>
+          <AmbientButton type="button" aria-label="下载当前资源" disabled={!onDownload} onClick={onDownload} style={{ ...buttonStyle, border: 0, background: 'var(--zterm-panel-surface)', fontSize: 16, opacity: onDownload ? 1 : 0.5 }}>下载</AmbientButton>
         </header> : null}
         <nav aria-label="资源类型" style={{ display: 'flex', gap: 6, padding: '10px 16px 8px' }} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
           {(['files', 'stream', 'web'] as const).map((item) => (
-            <button
+            <AmbientButton
               key={item}
               type="button"
               aria-selected={tab === item}
@@ -190,7 +191,7 @@ export function ResourceBottomSheet({
               onClick={() => setTab(item)}
             >
               {item === 'files' ? '远程文件' : item === 'stream' ? '窗口串流' : '网页'}
-            </button>
+            </AmbientButton>
           ))}
         </nav>
         <div style={{ minHeight: 0, flex: 1, display: tab === 'files' ? 'block' : 'none' }}>
@@ -211,7 +212,7 @@ export function ResourceBottomSheet({
         {tab === 'web' ? (
           <div data-testid="resource-web-pane" style={{ minHeight: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 10, padding: '0 14px 14px' }}>
             {remoteWindowNode ? remoteWindowNode : <form onSubmit={(event) => { event.preventDefault(); submitWebUrl(); }} style={{ display: 'flex', gap: 8 }}>
-              <input
+              <AmbientInput
                 aria-label="网页地址"
                 value={draftUrl}
                 onChange={(event) => setDraftUrl(event.target.value)}
@@ -219,7 +220,7 @@ export function ResourceBottomSheet({
                 inputMode="url"
                 style={{ flex: 1, minWidth: 0, minHeight: 40, borderRadius: 12, border: '1px solid var(--zterm-panel-border)', background: 'var(--zterm-panel-surface)', color: 'var(--zterm-panel-text)', padding: '0 12px', fontSize: 14 }}
               />
-              <button type="submit" style={buttonStyle}>打开</button>
+              <AmbientButton type="submit" style={buttonStyle}>打开</AmbientButton>
             </form>}
             {!remoteWindowNode && urlError ? <div role="alert" style={{ color: 'var(--zterm-panel-danger)', fontSize: 13 }}>{urlError}</div> : null}
             {!remoteWindowNode && submittedUrl ? (

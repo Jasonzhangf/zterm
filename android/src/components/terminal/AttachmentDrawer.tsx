@@ -21,6 +21,7 @@ import { LocalNotifications } from '@capacitor/local-notifications';
 import { nextNotificationId } from '../../lib/notification-helper';
 import { StoragePermissionPlugin } from '../../plugins/StoragePermissionPlugin';
 import type { AttachmentEntry } from '../../lib/session-attachment-store';
+import { AmbientButton } from '../ambient';
 
 
 const zoomButtonStyle: React.CSSProperties = {
@@ -453,7 +454,7 @@ function AttachmentDrawerComponent({
           </span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             {!selectionMode ? (
-              <button
+              <AmbientButton
                 onClick={() => setSelectionMode(true)}
                 style={{
                   background: 'none',
@@ -465,9 +466,9 @@ function AttachmentDrawerComponent({
                 }}
               >
                 选择
-              </button>
+              </AmbientButton>
             ) : (
-              <button
+              <AmbientButton
                 onClick={() => {
                   setSelectionMode(false);
                   setSelectedIds(new Set());
@@ -482,9 +483,9 @@ function AttachmentDrawerComponent({
                 }}
               >
                 取消
-              </button>
+              </AmbientButton>
             )}
-            <button
+            <AmbientButton
               onClick={onClose}
               style={{
                 background: 'none',
@@ -497,7 +498,7 @@ function AttachmentDrawerComponent({
               }}
             >
               ×
-            </button>
+            </AmbientButton>
           </div>
         </div>
         {/* 诊断面板：附件链路状态（点击历史条目后的结果直接可见） */}
@@ -620,7 +621,7 @@ function AttachmentDrawerComponent({
                     </div>
                   )}
                   {entry.status === 'complete' && entry.originalUrl && (
-                    <button
+                    <AmbientButton
                       onClick={(e) => {
                         e.stopPropagation();
                         handleDownloadOriginal(entry);
@@ -639,7 +640,7 @@ function AttachmentDrawerComponent({
                       }}
                     >
                       {downloading.has(entry.attachmentId) ? '保存中' : '保存'}
-                    </button>
+                    </AmbientButton>
                   )}
                 </div>
               ))}
@@ -763,7 +764,7 @@ function AttachmentDrawerComponent({
                       {receiveFeedback.message}
                     </span>
                   ) : (
-                    <button
+                    <AmbientButton
                       onClick={(e) => {
                         e.stopPropagation();
                         if (!fetchAttachmentAsset?.(entry.attachmentId, 'original')) {
@@ -794,7 +795,7 @@ function AttachmentDrawerComponent({
                       }}
                     >
                       接收原图
-                    </button>
+                    </AmbientButton>
                   )}
                 </div>
               ))}
@@ -823,7 +824,7 @@ function AttachmentDrawerComponent({
                 {batchMessage || `已选 ${selectedIds.size} 项`}
               </span>
               <div style={{ flex: 1 }} />
-              <button
+              <AmbientButton
                 onClick={selectAll}
                 style={{
                   background: 'none',
@@ -836,8 +837,8 @@ function AttachmentDrawerComponent({
                 }}
               >
                 全选
-              </button>
-              <button
+              </AmbientButton>
+              <AmbientButton
                 onClick={handleBatchDownload}
                 disabled={selectedIds.size === 0 || batchMessage.startsWith('下载中')}
                 style={{
@@ -853,7 +854,7 @@ function AttachmentDrawerComponent({
                 }}
               >
                 下载 ({selectedIds.size})
-              </button>
+              </AmbientButton>
             </div>
           )}
         </div>
@@ -915,7 +916,7 @@ function AttachmentDrawerComponent({
             touchAction: 'none',
           }}
         >
-          <button
+          <AmbientButton
             data-testid="attachment-preview-close"
             onClick={handlePreviewClose}
             style={{
@@ -934,7 +935,7 @@ function AttachmentDrawerComponent({
             }}
           >
             ×
-          </button>
+          </AmbientButton>
           {previewEntry.previewUrl ? (
             <PreviewScaler
               scale={scale}
@@ -947,7 +948,7 @@ function AttachmentDrawerComponent({
             <span style={{ color: '#fff', fontSize: 16 }}>预览加载中...</span>
           )}
           {previewEntry.status === 'complete' && previewEntry.originalUrl && (
-            <button
+            <AmbientButton
               onClick={(e) => {
                 e.stopPropagation();
                 handleDownloadOriginal(previewEntry);
@@ -968,7 +969,7 @@ function AttachmentDrawerComponent({
               }}
             >
               {downloading.has(previewEntry.attachmentId) ? '保存中...' : '保存到本地'}
-            </button>
+            </AmbientButton>
           )}
           {/* 缩放控制（移动端 pinch 的补充入口） */}
           <div
@@ -981,7 +982,7 @@ function AttachmentDrawerComponent({
               gap: 8,
             }}
           >
-            <button
+            <AmbientButton
               onClick={(e) => {
                 e.stopPropagation();
                 applyZoom(scale + 0.5);
@@ -989,8 +990,8 @@ function AttachmentDrawerComponent({
               style={zoomButtonStyle}
             >
               ＋
-            </button>
-            <button
+            </AmbientButton>
+            <AmbientButton
               onClick={(e) => {
                 e.stopPropagation();
                 applyZoom(scale - 0.5);
@@ -998,7 +999,7 @@ function AttachmentDrawerComponent({
               style={zoomButtonStyle}
             >
               －
-            </button>
+            </AmbientButton>
           </div>
         </div>
       )}

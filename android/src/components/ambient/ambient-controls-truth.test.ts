@@ -32,7 +32,9 @@ describe('ambient control ownership truth', () => {
     expect(connectionsPage).toContain('variant="accent-wide"');
     expect(connectionsPage).toContain('variant="active-session"');
     expect(connectionsPage).toContain('variant="saved-open"');
-    expect(connectionPropertiesPage).toContain("import { AmbientButton } from '../components/ambient';");
+    expect(connectionPropertiesPage).toContain("from '../components/ambient'");
+    expect(connectionPropertiesPage).toContain('AmbientButton');
+    expect(connectionPropertiesPage).toContain('AmbientTextarea');
     expect(connectionPropertiesPage).not.toMatch(/<button\b/);
     expect(connectionPropertiesPage).toContain('variant="back"');
     expect(connectionPropertiesPage).toContain('variant="save"');
@@ -65,6 +67,30 @@ describe('ambient control ownership truth', () => {
     expect(header).not.toMatch(/<button\b/);
     expect(header).toContain('variant="terminal-pane-menu"');
     expect(header).toContain('variant="terminal-route-badge"');
+  });
+
+  it('keeps remaining live terminal surfaces consuming shared controls', () => {
+    const files = [
+      'src/components/terminal/TerminalQuickBar.tsx',
+      'src/components/tmux/TmuxSessionPickerSheet.tsx',
+      'src/components/terminal/SessionScheduleSheet.tsx',
+      'src/components/terminal/FileTransferSheet.tsx',
+      'src/components/terminal/TerminalSessionDrawerContent.tsx',
+      'src/components/terminal/AttachmentDrawer.tsx',
+      'src/components/terminal/TerminalPreviewGrid.tsx',
+      'src/components/terminal/ResourceBottomSheet.tsx',
+      'src/components/terminal/RemoteScreenshotSheet.tsx',
+      'src/components/terminal/RemoteWindowMorePanel.tsx',
+      'src/components/terminal/RemoteWindowOverlayController.tsx',
+      'src/components/terminal/RemoteWindowTargetPicker.tsx',
+      'src/components/terminal/RemoteWindowLockedToolbar.tsx',
+      'src/components/terminal/RemoteWindowAppSwitch.tsx',
+      'src/components/terminal/TabManagerSheet.tsx',
+    ];
+    for (const file of files) {
+      const source = read(file);
+      expect(source).not.toMatch(/<(?:\/?)(?:button|input|select|textarea)\b/);
+    }
   });
 
   it('keeps the shared owner free of business and terminal truth imports', () => {

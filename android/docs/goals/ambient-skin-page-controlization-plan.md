@@ -4,7 +4,7 @@
 
 先完成 zterm Android 生产页面的**控件化**，再做 **Ambient CSS 光影效果**。
 
-控件化目标不是复制 CSS 到每个页面，而是把生产页面里散写的原生控件收拢成有限的共享控件 owner，再让页面消费共享控件。当前扫描已从初期的 352 个 `<button>` / 60 个 `<input>` / 9 个 `<select>` / 16 个 `<textarea>` 降到非 Prototype、非 server 的生产代码中 162 个 `<button>` / 32 个 `<input>` / 6 个 `<select>` / 11 个 `<textarea>`。
+控件化目标不是复制 CSS 到每个页面，而是把生产页面里散写的原生控件收拢成有限的共享控件 owner，再让页面消费共享控件。当前扫描已从初期的 352 个 `<button>` / 60 个 `<input>` / 9 个 `<select>` / 16 个 `<textarea>` 降到 live 页面 0 个可迁移原生控件；仅保留 `TerminalView.tsx` 终端隐藏输入与 `src/traversal-relay/server.ts` 非 UI 例外。
 
 效果目标是在共享控件层接入 Ambient CSS 的物理光影模型，而不是逐个页面调 box-shadow。
 
@@ -27,10 +27,10 @@ android/docs/goals/ambient-skin-page-controlization-plan.md
 扫描结果（2026-09-13，生产 src 排除 `Prototype.tsx`、`src/traversal-relay/server.ts` 和测试文件）：
 
 ```text
-<button    162
-<input      32
-<select       6
-<textarea    11
+<button      0
+<input       0
+<select      0
+<textarea    0
 ```
 
 共享控件 owner 已存在：
@@ -51,28 +51,17 @@ SettingsPage         button/input/select/textarea 已迁移
 TerminalHeader       header 本地按钮已迁移
 HostForm / HostList 表单按钮 / 输入 / 多行已迁移
 app 主壳按钮        部分全局按钮已迁移
-RenameDialog / ZtermDialog / SessionDrawer 菜单 / 新建会话 Dialog 已迁移（未提交待收尾）
+RenameDialog / ZtermDialog / SessionDrawer 菜单 / 新建会话 Dialog 已迁移
+TerminalQuickBar / TmuxSessionPickerSheet / SessionScheduleSheet / FileTransferSheet 已迁移
+TerminalSessionDrawerContent / AttachmentDrawer / TerminalPreviewGrid / ResourceBottomSheet 已迁移
+RemoteScreenshotSheet / RemoteWindow 面板 / TabManagerSheet / ConnectionPropertiesPage textarea 已迁移
 ```
 
 剩余主要原生控件面：
 
 ```text
-TerminalQuickBar        54
-TmuxSessionPickerSheet  29
-SessionScheduleSheet    25
-FileTransferSheet       18
-AttachmentDrawer        11
-TerminalPreviewGrid     11
-TerminalSessionDrawerContent 11
-RemoteWindowLockedToolbar 9
-RemoteWindowTargetPicker 6
-TabManagerSheet         6
-ResourceBottomSheet     5
-RemoteScreenshotSheet   3
-RemoteWindowMorePanel   3
-RemoteWindowOverlayController 3
-ConnectionPropertiesPage textarea 2
-TerminalView / RemoteWindowAppSwitch 各 1
+TerminalView 终端隐藏输入 1（渲染链例外，不改）
+traversal-relay/server.ts 8（非 UI，不改）
 ```
 
 Live 页面：
@@ -145,17 +134,17 @@ AmbientKeyBank
 ```text
 [x] Step 0: 建立 src/components/ambient/ 目录与 owner
 [x] Step 1: ConnectionsPage
-[x] Step 2: ConnectionPropertiesPage（按钮；textarea 待补）
+[x] Step 2: ConnectionPropertiesPage
 [x] Step 3: SettingsPage
 [x] Step 4: TerminalHeader
-[~] Step 5: TerminalQuickBar（部分全局/对话框；QuickBar 大面积待做）
-[~] Step 6: TerminalSessionDrawer（菜单 / 新建会话 / Rename / ZtermDialog 已做，Drawer content 待做）
-[ ] Step 7: TmuxSessionPickerSheet
-[ ] Step 8: SessionScheduleSheet
-[ ] Step 9: FileTransferSheet
-[ ] Step 10: AttachmentDrawer
-[ ] Step 11: RemoteWindowOverlay
-[ ] Step 12: Dialog / Menu / Overlay 剩余面
+[x] Step 5: TerminalQuickBar
+[x] Step 6: TerminalSessionDrawer
+[x] Step 7: TmuxSessionPickerSheet
+[x] Step 8: SessionScheduleSheet
+[x] Step 9: FileTransferSheet
+[x] Step 10: AttachmentDrawer
+[x] Step 11: RemoteWindowOverlay
+[x] Step 12: Dialog / Menu / Overlay 剩余面
 ```
 
 ### Phase 2: Ambient 控件效果
@@ -180,32 +169,31 @@ Phase 2 在控件化完成后接入视觉。
 | 页面 | 状态 | 剩余控件量 | Phase 1 剩余工作量 | Phase 2 工作量 |
 |---|---|---|---:|---:|
 | ConnectionsPage | 已控件化 | 0 | 0 | 0.5d |
-| ConnectionPropertiesPage | 按钮已迁移 | 2 textarea | 0.5d | 0.5d |
+| ConnectionPropertiesPage | 已控件化 | 0 | 0 | 0.5d |
 | SettingsPage | 已控件化 | 0 | 0 | 0.5d |
-| TerminalPage / Shell | 局部 | 少量壳按钮 | 0.5d | 0.5d |
+| TerminalPage / Shell | 已控件化（TerminalView 例外） | 0 | 0 | 0.5d |
 
 ### Terminal 二级控件面
 
 | 模块 | 状态 | 剩余控件量 | Phase 1 剩余工作量 | Phase 2 工作量 |
 |---|---|---|---:|---:|
-| TerminalQuickBar | 部分已迁移 | 54 | 3~4d | 1d |
-| TmuxSessionPickerSheet | 待做 | 29 | 2~3d | 0.5d |
-| SessionScheduleSheet | 待做 | 25 | 2~3d | 0.5d |
-| FileTransferSheet | 待做 | 18 | 1.5~2d | 0.5d |
-| TerminalSessionDrawerContent / menus | 部分已迁移 | 11 | 0.5~1d | 0.5d |
-| AttachmentDrawer / TerminalPreviewGrid / TabManager | 待做 | 22 | 1.5~2d | 0.5d |
-| RemoteWindow 相关 | 待做 | 22 | 1.5~2.5d | 0.5d |
-| ResourceBottomSheet / 其他 Dialog / Menu / Overlay | 待做 | 8 | 1~1.5d | 0.5d |
+| TerminalQuickBar | 已控件化 | 0 | 0 | 1d |
+| TmuxSessionPickerSheet | 已控件化 | 0 | 0 | 0.5d |
+| SessionScheduleSheet | 已控件化 | 0 | 0 | 0.5d |
+| FileTransferSheet | 已控件化 | 0 | 0 | 0.5d |
+| TerminalSessionDrawerContent / menus | 已控件化 | 0 | 0 | 0.5d |
+| AttachmentDrawer / TerminalPreviewGrid / TabManager | 已控件化 | 0 | 0 | 0.5d |
+| RemoteWindow 相关 | 已控件化 | 0 | 0 | 0.5d |
+| ResourceBottomSheet / 其他 Dialog / Menu / Overlay | 已控件化 | 0 | 0 | 0.5d |
 
 ### 合计
 
 ```text
 Phase 1 原始估算: 12~19d
-Phase 1 已投入: 约 1.5~2d（当前分支 4 个 commit + 待收尾 5 个文件）
-Phase 1 剩余: 约 11~17d
+Phase 1 已投入: 约 3~4d（当前分支多个 commit）
+Phase 1 剩余: 0d（live 页面已控件化；TerminalView/server 例外）
 Phase 2: 5~6d
-总计剩余: 16~23d
-最小主线范围（主页面 + QuickBar + SessionDrawer）: 4~6d
+总计剩余: 5~6d
 ```
 
 ## Goal Prompt
@@ -226,7 +214,7 @@ Phase 2: 5~6d
 - base: origin/main
 - 已存在共享控件：AmbientButton / AmbientInput / AmbientSelect / AmbientTextarea
 - 已迁移主面：ConnectionsPage、ConnectionPropertiesPage 按钮、SettingsPage、TerminalHeader、HostForm/HostList、部分 Dialog/Menu
-- 剩余生产控件量：162 button / 32 input / 6 select / 11 textarea（排除 Prototype.tsx 与 traversal-relay/server.ts）
+- 剩余生产控件量：live 页面可迁移控件 0；只保留 TerminalView 终端输入与 traversal-relay/server.ts 非 UI 例外
 
 执行方式：
 1. 先读 android/docs/goals/ambient-skin-page-controlization-plan.md、android/docs/ui-slices.md、android/docs/architecture.md。

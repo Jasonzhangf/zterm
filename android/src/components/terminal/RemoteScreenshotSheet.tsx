@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { mobileTheme } from '../../lib/mobile-ui';
 import type { RemoteScreenshotPreviewState } from '../../lib/remote-screenshot-preview-runtime';
+import { AmbientButton } from '../ambient';
 
 interface RemoteScreenshotSheetProps {
   state: RemoteScreenshotPreviewState | null;
@@ -216,7 +217,7 @@ export function RemoteScreenshotSheet({
             transition: lastTouchRef.current ? 'none' : 'transform 0.2s ease-out',
           }}
         />
-        <button
+        <AmbientButton
           type="button"
           onClick={() => {
             setZoomed(false);
@@ -241,7 +242,7 @@ export function RemoteScreenshotSheet({
           }}
         >
           ✕
-        </button>
+        </AmbientButton>
       </div>
     );
   }
@@ -429,7 +430,7 @@ export function RemoteScreenshotSheet({
             padding: '0 12px calc(14px + env(safe-area-inset-bottom, 0px))',
           }}
         >
-          <button
+          <AmbientButton
             type="button"
             onClick={onDiscard}
             disabled={busy}
@@ -446,8 +447,8 @@ export function RemoteScreenshotSheet({
             }}
           >
             {state.phase === 'failed' ? '关闭' : '丢弃'}
-          </button>
-          <button
+          </AmbientButton>
+          <AmbientButton
             type="button"
             onClick={onSave}
             disabled={state.phase !== 'preview-ready'}
@@ -464,7 +465,7 @@ export function RemoteScreenshotSheet({
             }}
           >
             保存到下载
-          </button>
+          </AmbientButton>
         </div>
       </div>
 

@@ -6,7 +6,7 @@ import {
   resolveNormalizedBridgeHost,
 } from '@zterm/shared';
 import { AppearanceSection } from '../components/connection-form/AppearanceSection';
-import { AmbientButton } from '../components/ambient';
+import { AmbientButton, AmbientTextarea } from '../components/ambient';
 import { AuthSection } from '../components/connection-form/AuthSection';
 import { ConnectionSection } from '../components/connection-form/ConnectionSection';
 import { ConnectionSectionFields } from '../components/connection-form/ConnectionSectionFields';
@@ -458,7 +458,7 @@ export function ConnectionPropertiesPage({
                     Import
                   </AmbientButton>
                 </div>
-                <textarea
+                <AmbientTextarea
                   aria-label="Connection share link"
                   value={connectionImportInput}
                   onChange={(event) => {
@@ -753,7 +753,7 @@ export function ConnectionPropertiesPage({
                   </span>
                 </div>
               )}
-              <textarea
+              <AmbientTextarea
                 data-testid="connection-share-link"
                 readOnly
                 value={shareLink}

@@ -151,6 +151,7 @@ import {
   setPointerCaptureSafely,
 } from './remote-window-overlay-helpers';
 import { styles } from './remote-window-overlay-styles';
+import { AmbientButton } from '../ambient';
 import { RemoteWindowDeveloperDiagnostics } from './RemoteWindowDeveloperDiagnostics';
 import { RemoteWindowLockedToolbar } from './RemoteWindowLockedToolbar';
 import { RemoteWindowTargetPicker } from './RemoteWindowTargetPicker';
@@ -2844,7 +2845,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
             onPointerMove={(event) => event.stopPropagation()}
           >
             {compositeLayout.windows.slice(1).map((slot) => (
-              <button
+              <AmbientButton
                 key={slot.windowId}
                 type="button"
                 data-testid={`remote-window-composite-thumb-${slot.windowId}`}
@@ -2875,7 +2876,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
                 <span style={styles.compositeThumbLabel}>
                   {slot.windowId === state.target.videoTarget.windowId ? '主' : '子'}
                 </span>
-              </button>
+              </AmbientButton>
             ))}
           </div>
         </div>
@@ -3115,7 +3116,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   return (
     <>
       {!embedded && (state.phase === 'closed' || state.phase === 'targetEnumerating' || state.phase === 'pickerOpen') ? (
-        <button
+        <AmbientButton
           ref={entryButtonRef}
           type="button"
           data-testid="remote-window-entry"
@@ -3147,10 +3148,10 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
           }}
         >
           窗
-        </button>
+        </AmbientButton>
       ) : null}
       {!embedded && browserEntryEnabled && (state.phase === 'closed' || state.phase === 'targetEnumerating' || state.phase === 'pickerOpen') ? (
-        <button
+        <AmbientButton
           ref={browserEntryButtonRef} type="button" data-testid="browser-window-entry" aria-label="打开浏览器窗口"
           onPointerDown={browserEntryDragHandlers.onPointerDown} onPointerMove={browserEntryDragHandlers.onPointerMove} onPointerUp={browserEntryDragHandlers.onPointerUp} onPointerCancel={browserEntryDragHandlers.onPointerCancel}
           onTouchStart={browserEntryDragHandlers.onTouchStart} onTouchMove={browserEntryDragHandlers.onTouchMove} onTouchEnd={browserEntryDragHandlers.onTouchEnd} onTouchCancel={browserEntryDragHandlers.onTouchCancel}
@@ -3172,7 +3173,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
           }}
         >
           Web
-        </button>
+        </AmbientButton>
       ) : null}
       {pickerContent}
       {lockedContent}

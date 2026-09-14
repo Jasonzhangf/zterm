@@ -11,6 +11,7 @@ import type {
   SessionScheduleState,
 } from '../../../../packages/shared/src/schedule/types';
 import { mobileTheme } from '../../lib/mobile-ui';
+import { AmbientButton, AmbientInput, AmbientSelect, AmbientTextarea } from '../ambient';
 
 interface SessionScheduleSheetProps {
   open: boolean;
@@ -236,8 +237,8 @@ export function SessionScheduleSheet({
             </div>
           </div>
           <div style={{ display: 'flex', gap: '8px' }}>
-            <button type="button" onClick={onRefresh} disabled={busy} style={ghostButtonStyle}>Refresh</button>
-            <button type="button" onClick={onClose} style={ghostButtonStyle}>Done</button>
+            <AmbientButton type="button" onClick={onRefresh} disabled={busy} style={ghostButtonStyle}>Refresh</AmbientButton>
+            <AmbientButton type="button" onClick={onClose} style={ghostButtonStyle}>Done</AmbientButton>
           </div>
         </div>
 
@@ -311,7 +312,7 @@ export function SessionScheduleSheet({
                     </div>
                   </div>
                   <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: mobileTheme.colors.textSecondary }}>
-                    <input
+                    <AmbientInput
                       type="checkbox"
                       checked={job.enabled}
                       disabled={busy}
@@ -321,9 +322,9 @@ export function SessionScheduleSheet({
                   </label>
                 </div>
                 <div style={{ display: 'flex', gap: '8px', marginTop: '10px', flexWrap: 'wrap' }}>
-                  <button type="button" onClick={() => startEditing(job)} disabled={busy} style={ghostButtonStyle}>Edit</button>
-                  <button type="button" onClick={() => onRunNow(job.id)} disabled={busy} style={ghostButtonStyle}>Run now</button>
-                  <button type="button" onClick={() => onDelete(job.id)} disabled={busy} style={dangerButtonStyle}>Delete</button>
+                  <AmbientButton type="button" onClick={() => startEditing(job)} disabled={busy} style={ghostButtonStyle}>Edit</AmbientButton>
+                  <AmbientButton type="button" onClick={() => onRunNow(job.id)} disabled={busy} style={ghostButtonStyle}>Run now</AmbientButton>
+                  <AmbientButton type="button" onClick={() => onDelete(job.id)} disabled={busy} style={dangerButtonStyle}>Delete</AmbientButton>
                 </div>
               </div>
             ))
@@ -337,7 +338,7 @@ export function SessionScheduleSheet({
 
           <label style={fieldStyle}>
             <span>Label</span>
-            <input
+            <AmbientInput
               value={draft.label || ''}
               onChange={(event) => setDraft((current) => ({ ...current, label: event.target.value }))}
               placeholder="比如：heartbeat / 每天签到"
@@ -347,7 +348,7 @@ export function SessionScheduleSheet({
 
           <label style={fieldStyle}>
             <span>发送内容</span>
-            <textarea
+            <AmbientTextarea
               value={draft.payload.text}
               onChange={(event) => setDraft((current) => ({
                 ...current,
@@ -363,7 +364,7 @@ export function SessionScheduleSheet({
           </label>
 
           <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '12px', color: mobileTheme.colors.textPrimary, fontSize: '13px' }}>
-            <input
+            <AmbientInput
               type="checkbox"
               checked={draft.payload.appendEnter}
               onChange={(event) => setDraft((current) => ({
@@ -379,7 +380,7 @@ export function SessionScheduleSheet({
 
           <label style={fieldStyle}>
             <span>规则类型</span>
-            <select
+            <AmbientSelect
               value={draft.rule.kind}
               onChange={(event) => {
                 const nextKind = event.target.value;
@@ -405,14 +406,14 @@ export function SessionScheduleSheet({
             >
               <option value="interval">周期</option>
               <option value="alarm">闹钟</option>
-            </select>
+            </AmbientSelect>
           </label>
 
           {draft.rule.kind === 'interval' ? (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '12px' }}>
               <label style={fieldStyle}>
                 <span>每隔</span>
-                <input
+                <AmbientInput
                   type="number"
                   min={1}
                   value={intervalValue}
@@ -422,7 +423,7 @@ export function SessionScheduleSheet({
               </label>
               <label style={fieldStyle}>
                 <span>单位</span>
-                <select
+                <AmbientSelect
                   value={intervalUnit}
                   onChange={(event) => setIntervalUnit(event.target.value as IntervalUnit)}
                   style={inputStyle}
@@ -430,11 +431,11 @@ export function SessionScheduleSheet({
                   <option value="seconds">秒</option>
                   <option value="minutes">分钟</option>
                   <option value="hours">小时</option>
-                </select>
+                </AmbientSelect>
               </label>
               <label style={{ ...fieldStyle, gridColumn: '1 / -1' }}>
                 <span>起始时间</span>
-                <input
+                <AmbientInput
                   type="datetime-local"
                   value={toDateTimeLocalValue(draft.rule.startAt)}
                   onChange={(event) => setDraft((current) => ({
@@ -455,7 +456,7 @@ export function SessionScheduleSheet({
                 />
               </label>
               <label style={{ display: 'flex', alignItems: 'center', gap: '8px', gridColumn: '1 / -1', color: mobileTheme.colors.textPrimary, fontSize: '13px' }}>
-                <input
+                <AmbientInput
                   type="checkbox"
                   checked={Boolean(draft.rule.fireImmediately)}
                   onChange={(event) => setDraft((current) => ({
@@ -472,7 +473,7 @@ export function SessionScheduleSheet({
               </label>
               <label style={{ ...fieldStyle, gridColumn: '1 / -1' }}>
                 <span>终止时间</span>
-                <input
+                <AmbientInput
                   type="datetime-local"
                   value={draft.execution?.endAt ? toDateTimeLocalValue(draft.execution.endAt) : ''}
                   onChange={(event) => setDraft((current) => ({
@@ -492,7 +493,7 @@ export function SessionScheduleSheet({
               </label>
               <label style={{ ...fieldStyle, gridColumn: '1 / -1' }}>
                 <span>次数上限（0 = 无限次）</span>
-                <input
+                <AmbientInput
                   type="number"
                   min={0}
                   value={draft.execution?.maxRuns ?? 3}
@@ -511,7 +512,7 @@ export function SessionScheduleSheet({
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '12px' }}>
               <label style={fieldStyle}>
                 <span>日期</span>
-                <input
+                <AmbientInput
                   type="date"
                   value={draft.rule.date}
                   onChange={(event) => setDraft((current) => ({
@@ -525,7 +526,7 @@ export function SessionScheduleSheet({
               </label>
               <label style={fieldStyle}>
                 <span>时间</span>
-                <input
+                <AmbientInput
                   type="time"
                   value={draft.rule.time}
                   onChange={(event) => setDraft((current) => ({
@@ -539,7 +540,7 @@ export function SessionScheduleSheet({
               </label>
               <label style={fieldStyle}>
                 <span>重复</span>
-                <select
+                <AmbientSelect
                   value={draft.rule.repeat}
                   onChange={(event) => setDraft((current) => ({
                     ...current,
@@ -557,11 +558,11 @@ export function SessionScheduleSheet({
                   <option value="weekdays">工作日</option>
                   <option value="weekly">每周</option>
                   <option value="custom">自定义周几</option>
-                </select>
+                </AmbientSelect>
               </label>
               <label style={fieldStyle}>
                 <span>时区</span>
-                <input
+                <AmbientInput
                   value={draft.rule.timezone}
                   onChange={(event) => setDraft((current) => ({
                     ...current,
@@ -579,7 +580,7 @@ export function SessionScheduleSheet({
                       ? draft.rule.weekdays.includes(index)
                       : false;
                     return (
-                      <button
+                      <AmbientButton
                         key={label}
                         type="button"
                         onClick={() => setDraft((current) => {
@@ -605,14 +606,14 @@ export function SessionScheduleSheet({
                         }}
                       >
                         {label}
-                      </button>
+                      </AmbientButton>
                     );
                   })}
                 </div>
               ) : null}
               <label style={{ ...fieldStyle, gridColumn: '1 / -1' }}>
                 <span>终止时间</span>
-                <input
+                <AmbientInput
                   type="datetime-local"
                   value={draft.execution?.endAt ? toDateTimeLocalValue(draft.execution.endAt) : ''}
                   onChange={(event) => setDraft((current) => ({
@@ -632,7 +633,7 @@ export function SessionScheduleSheet({
               </label>
               <label style={{ ...fieldStyle, gridColumn: '1 / -1' }}>
                 <span>次数上限（0 = 无限次）</span>
-                <input
+                <AmbientInput
                   type="number"
                   min={0}
                   value={draft.execution?.maxRuns ?? 3}
@@ -650,12 +651,12 @@ export function SessionScheduleSheet({
           )}
 
           <div style={{ display: 'flex', gap: '8px', marginTop: '16px', justifyContent: 'flex-end' }}>
-            <button type="button" onClick={() => startEditing()} disabled={busy} style={ghostButtonStyle}>
+            <AmbientButton type="button" onClick={() => startEditing()} disabled={busy} style={ghostButtonStyle}>
               Reset
-            </button>
-            <button type="button" onClick={submitDraft} disabled={busy} style={primaryButtonStyle}>
+            </AmbientButton>
+            <AmbientButton type="button" onClick={submitDraft} disabled={busy} style={primaryButtonStyle}>
               {editingJob ? 'Update' : 'Create'}
-            </button>
+            </AmbientButton>
           </div>
         </div>
       </div>

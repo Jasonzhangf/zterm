@@ -71,6 +71,7 @@ import {
 import { shouldAllowQuickBarShellPointerEvent } from "./terminal-quickbar-shell-guards";
 import { buildTerminalShortcutSequence } from "../../../../packages/shared/src/shortcuts/terminal-shortcut-composer";
 import { resolveTerminalOrientation } from "../../lib/terminal-viewport-metrics";
+import { AmbientButton, AmbientInput, AmbientTextarea } from "../ambient";
 
 export interface TerminalQuickBarProps {
   /** Selects the isolated toolbar projection used by the fullscreen remote window. */
@@ -1494,7 +1495,7 @@ function TerminalQuickBarComponent({
     const actionDisplayLabel = resolveShortcutVisualLabel(action.label);
     const actionUsesSpaceBarVisual = isSpaceShortcutLabel(action.label);
     return (
-      <button
+      <AmbientButton
         key={action.id}
         tabIndex={-1}
         disabled={disabled}
@@ -1684,7 +1685,7 @@ function TerminalQuickBarComponent({
         }}
       >
         {renderShortcutVisualNode(action.label, "button")}
-      </button>
+      </AmbientButton>
     );
   };
 
@@ -1696,7 +1697,7 @@ function TerminalQuickBarComponent({
     const actionDisplayLabel = resolveShortcutVisualLabel(action.label);
     const disabled = action.supported === false;
     return (
-      <button
+      <AmbientButton
         key={action.id}
         tabIndex={-1}
         disabled={disabled}
@@ -1743,7 +1744,7 @@ function TerminalQuickBarComponent({
         }}
       >
         {actionDisplayLabel}
-      </button>
+      </AmbientButton>
     );
   };
 
@@ -2032,7 +2033,7 @@ function TerminalQuickBarComponent({
             : "1px solid var(--zterm-neo-border)",
       }}
     >
-      <input
+      <AmbientInput
         ref={imageInputRef}
         type="file"
         disabled={!imagePasteSupported}
@@ -2055,7 +2056,7 @@ function TerminalQuickBarComponent({
         }}
         onChange={handleImageInputChange}
       />
-      <input
+      <AmbientInput
         ref={fileInputRef}
         type="file"
         disabled={!fileTransferSupported}
@@ -2140,7 +2141,7 @@ function TerminalQuickBarComponent({
               <div
                 style={{ display: "flex", alignItems: "center", gap: "12px" }}
               >
-                <button
+                <AmbientButton
                   onClick={closeEditor}
                   style={{
                     width: "34px",
@@ -2156,7 +2157,7 @@ function TerminalQuickBarComponent({
                   aria-label="Close shortcut editor"
                 >
                   ×
-                </button>
+                </AmbientButton>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: "20px", fontWeight: 800 }}>
                     快捷输入设置
@@ -2194,7 +2195,7 @@ function TerminalQuickBarComponent({
                     当前快捷输入
                   </div>
                 </div>
-                <button
+                <AmbientButton
                   onClick={() => openDraftForm()}
                   style={{
                     minHeight: "38px",
@@ -2209,7 +2210,7 @@ function TerminalQuickBarComponent({
                   }}
                 >
                   + 添加
-                </button>
+                </AmbientButton>
               </div>
 
               <div
@@ -2262,7 +2263,7 @@ function TerminalQuickBarComponent({
                           flexShrink: 0,
                         }}
                       >
-                        <button
+                        <AmbientButton
                           onClick={() =>
                             persistDraftActions(
                               moveItem(draftActions, index, index - 1),
@@ -2273,8 +2274,8 @@ function TerminalQuickBarComponent({
                           aria-label={`Move ${action.label} up`}
                         >
                           ↑
-                        </button>
-                        <button
+                        </AmbientButton>
+                        <AmbientButton
                           onClick={() =>
                             persistDraftActions(
                               moveItem(draftActions, index, index + 1),
@@ -2287,8 +2288,8 @@ function TerminalQuickBarComponent({
                           aria-label={`Move ${action.label} down`}
                         >
                           ↓
-                        </button>
-                        <button
+                        </AmbientButton>
+                        <AmbientButton
                           onClick={() => openDraftForm(action)}
                           style={overlayTextButton(
                             "#eef2f8",
@@ -2296,8 +2297,8 @@ function TerminalQuickBarComponent({
                           )}
                         >
                           编辑
-                        </button>
-                        <button
+                        </AmbientButton>
+                        <AmbientButton
                           onClick={() => {
                             persistDraftActions(
                               draftActions.filter(
@@ -2316,7 +2317,7 @@ function TerminalQuickBarComponent({
                           )}
                         >
                           删除
-                        </button>
+                        </AmbientButton>
                       </div>
                     </div>
                   ))
@@ -2341,7 +2342,7 @@ function TerminalQuickBarComponent({
                     </div>
                   </div>
 
-                  <input
+                  <AmbientInput
                     value={draftLabel}
                     onChange={(event) => {
                       const nextValue = event.target.value;
@@ -2351,7 +2352,7 @@ function TerminalQuickBarComponent({
                     placeholder="显示名称"
                     style={lightEditorInputStyle()}
                   />
-                  <textarea
+                  <AmbientTextarea
                     value={draftTextInput}
                     onChange={(event) => {
                       const nextValue = event.target.value;
@@ -2368,7 +2369,7 @@ function TerminalQuickBarComponent({
                   />
 
                   <div style={{ display: "flex", gap: "10px" }}>
-                    <button
+                    <AmbientButton
                       onClick={closeEditor}
                       style={{
                         width: "100%",
@@ -2382,7 +2383,7 @@ function TerminalQuickBarComponent({
                       }}
                     >
                       完成
-                    </button>
+                    </AmbientButton>
                   </div>
                 </div>
               )}
@@ -2443,7 +2444,7 @@ function TerminalQuickBarComponent({
                 style={{ display: "flex", alignItems: "center", gap: "12px" }}
               >
                 {shortcutEditorMode === "form" ? (
-                  <button
+                  <AmbientButton
                     onClick={backToShortcutList}
                     style={{
                       width: "34px",
@@ -2459,7 +2460,7 @@ function TerminalQuickBarComponent({
                     aria-label="返回快捷键列表"
                   >
                     ‹
-                  </button>
+                  </AmbientButton>
                 ) : (
                   <div
                     style={{ width: "34px", height: "34px", flexShrink: 0 }}
@@ -2480,7 +2481,7 @@ function TerminalQuickBarComponent({
                       : "快捷按键设置"}
                   </div>
                 </div>
-                <button
+                <AmbientButton
                   onClick={closeShortcutEditor}
                   style={{
                     width: "34px",
@@ -2496,7 +2497,7 @@ function TerminalQuickBarComponent({
                   aria-label="关闭快捷键设置"
                 >
                   ×
-                </button>
+                </AmbientButton>
               </div>
             </div>
 
@@ -2580,7 +2581,7 @@ function TerminalQuickBarComponent({
                               {rowMeta.summary}
                             </div>
                           </div>
-                          <button
+                          <AmbientButton
                             onClick={() => openShortcutForm(row)}
                             style={{
                               minHeight: "38px",
@@ -2595,7 +2596,7 @@ function TerminalQuickBarComponent({
                             }}
                           >
                             {rowMeta.addLabel}
-                          </button>
+                          </AmbientButton>
                         </div>
 
                         {rowActions.length === 0 ? (
@@ -2625,7 +2626,7 @@ function TerminalQuickBarComponent({
                                   borderTop: "1px solid rgba(23, 27, 45, 0.08)",
                                 }}
                               >
-                                <button
+                                <AmbientButton
                                   onClick={
                                     isBuiltInShortcutAction(action.id)
                                       ? undefined
@@ -2683,7 +2684,7 @@ function TerminalQuickBarComponent({
                                       {displayMeta.subtitle}
                                     </div>
                                   ) : null}
-                                </button>
+                                </AmbientButton>
                                 <div
                                   style={{
                                     display: "flex",
@@ -2695,7 +2696,7 @@ function TerminalQuickBarComponent({
                                   }}
                                 >
                                   {!isBuiltInShortcutAction(action.id) ? (
-                                    <button
+                                    <AmbientButton
                                       onClick={() =>
                                         openShortcutForm(row, action)
                                       }
@@ -2706,9 +2707,9 @@ function TerminalQuickBarComponent({
                                       aria-label={`编辑 ${action.label || "未命名快捷键"}`}
                                     >
                                       编辑
-                                    </button>
+                                    </AmbientButton>
                                   ) : null}
-                                  <button
+                                  <AmbientButton
                                     onClick={() =>
                                       persistShortcutActions(
                                         moveShortcutActionWithinRow(
@@ -2726,8 +2727,8 @@ function TerminalQuickBarComponent({
                                     aria-label={`上移 ${action.label}`}
                                   >
                                     ↑
-                                  </button>
-                                  <button
+                                  </AmbientButton>
+                                  <AmbientButton
                                     onClick={() =>
                                       persistShortcutActions(
                                         moveShortcutActionWithinRow(
@@ -2745,9 +2746,9 @@ function TerminalQuickBarComponent({
                                     aria-label={`下移 ${action.label}`}
                                   >
                                     ↓
-                                  </button>
+                                  </AmbientButton>
                                   {!isBuiltInShortcutAction(action.id) ? (
-                                    <button
+                                    <AmbientButton
                                       onClick={() =>
                                         persistShortcutActions(
                                           draftShortcutActions.filter(
@@ -2762,7 +2763,7 @@ function TerminalQuickBarComponent({
                                       aria-label={`删除 ${action.label}`}
                                     >
                                       删除
-                                    </button>
+                                    </AmbientButton>
                                   ) : null}
                                 </div>
                               </div>
@@ -2785,7 +2786,7 @@ function TerminalQuickBarComponent({
                     gap: "14px",
                   }}
                 >
-                  <input
+                  <AmbientInput
                     value={draftShortcutLabel}
                     onChange={(event) =>
                       setDraftShortcutLabel(event.target.value)
@@ -2832,7 +2833,7 @@ function TerminalQuickBarComponent({
                       padding: "6px",
                     }}
                   >
-                    <button
+                    <AmbientButton
                       onClick={() => setShortcutEditorTab("keyboard")}
                       style={{
                         minHeight: "44px",
@@ -2855,8 +2856,8 @@ function TerminalQuickBarComponent({
                       }}
                     >
                       键盘按键
-                    </button>
-                    <button
+                    </AmbientButton>
+                    <AmbientButton
                       onClick={() => setShortcutEditorTab("common")}
                       style={{
                         minHeight: "44px",
@@ -2879,9 +2880,9 @@ function TerminalQuickBarComponent({
                       }}
                     >
                       系统操作
-                    </button>
+                    </AmbientButton>
                   </div>
-                  <textarea
+                  <AmbientTextarea
                     value={draftShortcutBuild.preview || draftShortcutSequence}
                     readOnly
                     placeholder={
@@ -2915,7 +2916,7 @@ function TerminalQuickBarComponent({
                       </div>
                     ) : (
                       draftShortcutTokens.map((token, index) => (
-                        <button
+                        <AmbientButton
                           key={`${token.label}-${index}`}
                           onClick={() => removeShortcutToken(index)}
                           style={floatingPillButton(
@@ -2924,10 +2925,10 @@ function TerminalQuickBarComponent({
                           )}
                         >
                           {token.label} ×
-                        </button>
+                        </AmbientButton>
                       ))
                     )}
-                    <button
+                    <AmbientButton
                       onClick={clearShortcutTokens}
                       disabled={draftShortcutTokens.length === 0}
                       style={floatingPillButton(
@@ -2940,7 +2941,7 @@ function TerminalQuickBarComponent({
                       )}
                     >
                       清空
-                    </button>
+                    </AmbientButton>
                   </div>
 
                   {draftShortcutEffectiveError ? (
@@ -2958,7 +2959,7 @@ function TerminalQuickBarComponent({
                   {shortcutEditorTab === "keyboard" ? (
                     <>
                       <div style={{ display: "flex", gap: "8px" }}>
-                        <input
+                        <AmbientInput
                           value={draftShortcutTextInput}
                           onChange={(event) =>
                             setDraftShortcutTextInput(event.target.value)
@@ -2970,7 +2971,7 @@ function TerminalQuickBarComponent({
                             flex: 1,
                           }}
                         />
-                        <button
+                        <AmbientButton
                           onClick={appendShortcutTextInput}
                           style={{
                             minWidth: "84px",
@@ -2984,7 +2985,7 @@ function TerminalQuickBarComponent({
                           }}
                         >
                           加入
-                        </button>
+                        </AmbientButton>
                       </div>
 
                       <div
@@ -2995,7 +2996,7 @@ function TerminalQuickBarComponent({
                         }}
                       >
                         {availableKeyboardShortcutTokens.map((token) => (
-                          <button
+                          <AmbientButton
                             key={`${token.label}-${token.sequence}`}
                             onClick={() => appendShortcutToken(token)}
                             aria-label={token.label}
@@ -3018,7 +3019,7 @@ function TerminalQuickBarComponent({
                             >
                               {renderShortcutVisualNode(token.label, "token")}
                             </span>
-                          </button>
+                          </AmbientButton>
                         ))}
                       </div>
                     </>
@@ -3031,7 +3032,7 @@ function TerminalQuickBarComponent({
                       }}
                     >
                       {availableCommonShortcutTokens.map((token) => (
-                        <button
+                        <AmbientButton
                           key={`${token.label}-${token.sequence}`}
                           onClick={() => appendShortcutToken(token)}
                           style={shortcutTokenGridButton(
@@ -3044,12 +3045,12 @@ function TerminalQuickBarComponent({
                           )}
                         >
                           {token.label}
-                        </button>
+                        </AmbientButton>
                       ))}
                     </div>
                   )}
 
-                  <button
+                  <AmbientButton
                     onClick={saveShortcutForm}
                     disabled={
                       !draftShortcutBuild.sequence ||
@@ -3078,7 +3079,7 @@ function TerminalQuickBarComponent({
                     }}
                   >
                     {editingShortcutIndex >= 0 ? "保存快捷键" : "添加快捷键"}
-                  </button>
+                  </AmbientButton>
                 </div>
               )}
             </div>
@@ -3154,7 +3155,7 @@ function TerminalQuickBarComponent({
                     </div>
                   ) : null}
                 </div>
-                <button
+                <AmbientButton
                   type="button"
                   onClick={() => setFloatingMenuOpen(false)}
                   style={{
@@ -3172,7 +3173,7 @@ function TerminalQuickBarComponent({
                   aria-label="关闭快捷输入"
                 >
                   ×
-                </button>
+                </AmbientButton>
               </div>
 
               <div
@@ -3185,7 +3186,7 @@ function TerminalQuickBarComponent({
                   padding: "6px",
                 }}
               >
-                <textarea
+                <AmbientTextarea
                   ref={quickInputTextareaRef}
                   value={quickInputValue}
                   onChange={(event) =>
@@ -3216,7 +3217,7 @@ function TerminalQuickBarComponent({
               </div>
 
               <div style={{ display: "flex", gap: "8px" }}>
-                <button
+                <AmbientButton
                   onClick={() => {
                     setFloatingMenuOpen(false);
                     onOpenScheduleComposer?.(quickInputValueRef.current);
@@ -3235,8 +3236,8 @@ function TerminalQuickBarComponent({
                   }}
                 >
                   定时
-                </button>
-                <button
+                </AmbientButton>
+                <AmbientButton
                   onClick={() => {
                     sendSessionDraft();
                   }}
@@ -3251,7 +3252,7 @@ function TerminalQuickBarComponent({
                   }}
                 >
                   发送
-                </button>
+                </AmbientButton>
               </div>
             </div>
 
@@ -3277,7 +3278,7 @@ function TerminalQuickBarComponent({
                     const active = count === currentSplitCount;
                     const disabled = isRemoteWindowTerminalOnlyAction(`split-count-${count}`);
                     return (
-                      <button
+                      <AmbientButton
                         key={`split-count-${count}`}
                         type="button"
                         onClick={() => {
@@ -3308,11 +3309,11 @@ function TerminalQuickBarComponent({
                         }}
                       >
                         {count} 分屏
-                      </button>
+                      </AmbientButton>
                     );
                   })}
                   {normalizedSplitCountOptions.length === 0 ? (
-                    <button
+                    <AmbientButton
                       type="button"
                       onClick={() => {
                         if (isRemoteWindowTerminalOnlyAction("split-toggle")) {
@@ -3342,11 +3343,11 @@ function TerminalQuickBarComponent({
                       }}
                     >
                       {splitVisible ? "关闭分屏" : "开启分屏"}
-                    </button>
+                    </AmbientButton>
                   ) : null}
                 </div>
                 {splitVisible && onCycleSplitPane ? (
-                  <button
+                  <AmbientButton
                     type="button"
                     onClick={() => {
                       onCycleSplitPane();
@@ -3363,7 +3364,7 @@ function TerminalQuickBarComponent({
                     }}
                   >
                     切换副屏
-                  </button>
+                  </AmbientButton>
                 ) : null}
               </div>
             )}
@@ -3382,7 +3383,7 @@ function TerminalQuickBarComponent({
                   border: "1px solid rgba(255,255,255,0.08)",
                 }}
               >
-                <button
+                <AmbientButton
                   onClick={() => setFloatingPanelTab("quick-actions")}
                   style={floatingPillButton(
                     floatingPanelTab === "quick-actions"
@@ -3394,8 +3395,8 @@ function TerminalQuickBarComponent({
                   )}
                 >
                   快捷
-                </button>
-                <button
+                </AmbientButton>
+                <AmbientButton
                   onClick={() => setFloatingPanelTab("clipboard")}
                   style={floatingPillButton(
                     floatingPanelTab === "clipboard"
@@ -3407,7 +3408,7 @@ function TerminalQuickBarComponent({
                   )}
                 >
                   剪贴板
-                </button>
+                </AmbientButton>
               </div>
             </div>
 
@@ -3444,7 +3445,7 @@ function TerminalQuickBarComponent({
                           gap: "8px",
                         }}
                       >
-                        <button
+                        <AmbientButton
                           onClick={() => {
                             handleQuickActionDoubleTap(
                               action.id,
@@ -3487,8 +3488,8 @@ function TerminalQuickBarComponent({
                           >
                             {formatSnippetPreview(action.sequence) || "(空)"}
                           </span>
-                        </button>
-                        <button
+                        </AmbientButton>
+                        <AmbientButton
                           onClick={() => openEditor("edit", draftAction)}
                           style={{
                             width: "36px",
@@ -3504,14 +3505,14 @@ function TerminalQuickBarComponent({
                           aria-label={`Edit ${action.label || "quick action"}`}
                         >
                           ✎
-                        </button>
+                        </AmbientButton>
                       </div>
                     );
                   })
                 )
               ) : (
                 <>
-                  <button
+                  <AmbientButton
                     onClick={() => {
                       void captureSystemClipboard();
                     }}
@@ -3525,7 +3526,7 @@ function TerminalQuickBarComponent({
                     }}
                   >
                     {clipboardBusy ? "读取中…" : "读取系统剪贴板"}
-                  </button>
+                  </AmbientButton>
                   {clipboardError && (
                     <div
                       style={{
@@ -3541,7 +3542,7 @@ function TerminalQuickBarComponent({
                     <div style={{ height: "8px" }} />
                   ) : (
                     clipboardHistory.map((entry, index) => (
-                      <button
+                      <AmbientButton
                         key={`${index}-${entry.slice(0, 12)}`}
                         onClick={() => handleClipboardDoubleTap(entry, index)}
                         style={{
@@ -3574,7 +3575,7 @@ function TerminalQuickBarComponent({
                         >
                           {entry}
                         </div>
-                      </button>
+                      </AmbientButton>
                     ))
                   )}
                 </>
@@ -3586,7 +3587,7 @@ function TerminalQuickBarComponent({
 
       {!editorOpen && !shortcutEditorOpen && (
         <>
-        <button
+        <AmbientButton
           data-quickbar-allow-pointer="true"
           type="button"
           tabIndex={-1}
@@ -3788,7 +3789,7 @@ function TerminalQuickBarComponent({
             <svg aria-hidden="true" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
               <path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h5l2 2h8A1.5 1.5 0 0 1 21 8.5v8A1.5 1.5 0 0 1 19.5 18h-15A1.5 1.5 0 0 1 3 16.5z" />
             </svg>
-          </button>
+        </AmbientButton>
         </>
       )}
 
@@ -4209,7 +4210,7 @@ export function RemoteWindowQuickBar({
 
   if (collapsed) {
     return (
-      <button
+      <AmbientButton
         type="button"
         data-testid="remote-window-quickbar-collapsed"
         aria-label="展开串流快捷栏"
@@ -4217,7 +4218,7 @@ export function RemoteWindowQuickBar({
         style={{ ...REMOTE_WINDOW_BUTTON_STYLE, minWidth: 48, borderRadius: 999, background: 'rgba(18,22,30,0.94)' }}
       >
         ⌨
-      </button>
+      </AmbientButton>
     );
   }
 
@@ -4231,21 +4232,21 @@ export function RemoteWindowQuickBar({
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={{ flex: 1, fontSize: 12, fontWeight: 800, opacity: 0.72 }}>串流窗口</span>
-        <button type="button" aria-label="收起串流快捷栏" onClick={() => setCollapsed(true)} style={{ ...REMOTE_WINDOW_BUTTON_STYLE, minWidth: 34, width: 34, padding: 0, height: 30 }}>−</button>
+        <AmbientButton type="button" aria-label="收起串流快捷栏" onClick={() => setCollapsed(true)} style={{ ...REMOTE_WINDOW_BUTTON_STYLE, minWidth: 34, width: 34, padding: 0, height: 30 }}>−</AmbientButton>
       </div>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-        <button type="button" aria-label="复制" onClick={() => onSendRemoteKeyboardInput?.({ key: 'c', code: 'KeyC', metaKey: true })} style={REMOTE_WINDOW_BUTTON_STYLE}>复制</button>
-        <button type="button" aria-label="粘贴" onClick={() => onSendRemoteKeyboardInput?.({ key: 'v', code: 'KeyV', metaKey: true })} style={REMOTE_WINDOW_BUTTON_STYLE}>粘贴</button>
+        <AmbientButton type="button" aria-label="复制" onClick={() => onSendRemoteKeyboardInput?.({ key: 'c', code: 'KeyC', metaKey: true })} style={REMOTE_WINDOW_BUTTON_STYLE}>复制</AmbientButton>
+        <AmbientButton type="button" aria-label="粘贴" onClick={() => onSendRemoteKeyboardInput?.({ key: 'v', code: 'KeyV', metaKey: true })} style={REMOTE_WINDOW_BUTTON_STYLE}>粘贴</AmbientButton>
         {REMOTE_WINDOW_ACTIONS.filter((action) => action.id !== 'remote-copy' && action.id !== 'remote-paste').map((action) => (
-          <button key={action.id} type="button" aria-label={action.label} onClick={() => onSendSequence?.(action.sequence)} style={REMOTE_WINDOW_BUTTON_STYLE}>
+          <AmbientButton key={action.id} type="button" aria-label={action.label} onClick={() => onSendSequence?.(action.sequence)} style={REMOTE_WINDOW_BUTTON_STYLE}>
             {action.label}
-          </button>
+          </AmbientButton>
         ))}
-        <button type="button" aria-label={keyboardVisible ? '隐藏键盘' : '显示键盘'} aria-pressed={keyboardVisible} onClick={() => onToggleKeyboard?.()} style={{ ...REMOTE_WINDOW_BUTTON_STYLE, background: keyboardVisible ? 'rgba(84,150,255,0.34)' : REMOTE_WINDOW_BUTTON_STYLE.background }}>键盘</button>
+        <AmbientButton type="button" aria-label={keyboardVisible ? '隐藏键盘' : '显示键盘'} aria-pressed={keyboardVisible} onClick={() => onToggleKeyboard?.()} style={{ ...REMOTE_WINDOW_BUTTON_STYLE, background: keyboardVisible ? 'rgba(84,150,255,0.34)' : REMOTE_WINDOW_BUTTON_STYLE.background }}>键盘</AmbientButton>
       </div>
       <div style={{ display: 'flex', gap: 6 }}>
-        <input aria-label="发送到串流窗口" value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); submitDraft(); } }} placeholder="输入并发送到远程窗口" style={{ flex: 1, minWidth: 0, height: 36, padding: '0 11px', border: '1px solid rgba(255,255,255,0.16)', borderRadius: 10, background: 'rgba(0,0,0,0.2)', color: 'inherit', outline: 'none' }} />
-        <button type="button" aria-label="发送文本" onClick={submitDraft} style={{ ...REMOTE_WINDOW_BUTTON_STYLE, background: 'rgba(84,150,255,0.34)' }}>发送</button>
+        <AmbientInput aria-label="发送到串流窗口" value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); submitDraft(); } }} placeholder="输入并发送到远程窗口" style={{ flex: 1, minWidth: 0, height: 36, padding: '0 11px', border: '1px solid rgba(255,255,255,0.16)', borderRadius: 10, background: 'rgba(0,0,0,0.2)', color: 'inherit', outline: 'none' }} />
+        <AmbientButton type="button" aria-label="发送文本" onClick={submitDraft} style={{ ...REMOTE_WINDOW_BUTTON_STYLE, background: 'rgba(84,150,255,0.34)' }}>发送</AmbientButton>
       </div>
       <span style={{ fontSize: 10, opacity: 0.5, textAlign: 'right' }}>快捷栏与 Shell 独立 · inset {Math.round(keyboardInsetPx)}px</span>
     </div>

@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { mobileTheme } from '../../lib/mobile-ui';
 import { RenameDialog } from './RenameDialog';
+import { AmbientButton } from '../ambient';
 
 const DRAG_HANDLE_LONG_PRESS_MS = 360;
 
@@ -193,7 +194,7 @@ function TabManagerSheetComponent({
               当前 tab 只属于本次运行。长按右侧排序按钮可重排当前 tab。
             </div>
           </div>
-          <button
+          <AmbientButton
             onClick={onClose}
             style={{
               width: '42px',
@@ -207,7 +208,7 @@ function TabManagerSheetComponent({
             }}
           >
             ×
-          </button>
+          </AmbientButton>
         </div>
 
         <div
@@ -221,7 +222,7 @@ function TabManagerSheetComponent({
             gap: '10px',
           }}
         >
-          <button
+          <AmbientButton
             onClick={onOpenQuickTabPicker}
             style={{
               minHeight: '46px',
@@ -233,7 +234,7 @@ function TabManagerSheetComponent({
             }}
           >
             + New Tab
-          </button>
+          </AmbientButton>
         </div>
 
         <div
@@ -270,7 +271,7 @@ function TabManagerSheetComponent({
                     position: 'relative',
                   }}
                 >
-                  <button
+                  <AmbientButton
                     onClick={() => onSwitchSession(session.id)}
                     style={{
                       flex: 1,
@@ -291,8 +292,8 @@ function TabManagerSheetComponent({
                       {session.bridgeHost}:{session.bridgePort} · {session.sessionName}
                       {formatResolvedPath(session.resolvedPath, session.resolvedRelayTransport) ? ` · ${formatResolvedPath(session.resolvedPath, session.resolvedRelayTransport)}` : ''}
                     </div>
-                  </button>
-                  <button
+                  </AmbientButton>
+                  <AmbientButton
                     type="button"
                     aria-label={`重命名 ${session.customName || session.sessionName}`}
                     onClick={() => requestRename(session)}
@@ -306,8 +307,8 @@ function TabManagerSheetComponent({
                     }}
                   >
                     ✎
-                  </button>
-                  <button
+                  </AmbientButton>
+                  <AmbientButton
                     type="button"
                     aria-label={`关闭 ${session.customName || session.sessionName}`}
                     tabIndex={-1}
@@ -339,8 +340,8 @@ function TabManagerSheetComponent({
                     }}
                   >
                     ×
-                  </button>
-                  <button
+                  </AmbientButton>
+                  <AmbientButton
                     title="Long press to sort"
                     onPointerDown={(event) => {
                       clearDragTimer();
@@ -414,7 +415,7 @@ function TabManagerSheetComponent({
                     aria-label={`Sort ${session.customName || session.sessionName}`}
                   >
                     ≡
-                  </button>
+                  </AmbientButton>
                 </div>
               );
             })}

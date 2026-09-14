@@ -5,6 +5,7 @@ import {
   safeRemoteWindowGroupId,
 } from './remote-window-overlay-helpers';
 import { styles } from './remote-window-overlay-styles';
+import { AmbientButton } from '../ambient';
 
 export interface RemoteWindowAppSwitchProps {
   targets: RemoteWindowStreamTargetManifest[];
@@ -26,7 +27,7 @@ export function RemoteWindowAppSwitch({
   const renderTarget = (target: RemoteWindowStreamTargetManifest) => {
     const active = target.streamTargetId === activeTargetId;
     return (
-      <button
+      <AmbientButton
         key={target.streamTargetId}
         type="button"
         data-no-drag="true"
@@ -39,7 +40,7 @@ export function RemoteWindowAppSwitch({
           {target.videoTarget.title || target.videoTarget.appBundleId || target.streamTargetId}
         </span>
         <span style={styles.appSwitchTargetMeta}>{formatTargetSubtitle(target)}</span>
-      </button>
+      </AmbientButton>
     );
   };
 

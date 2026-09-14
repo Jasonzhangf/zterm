@@ -6,6 +6,7 @@ import { getServerIdentityTone, resolveServerDisplayName } from '../../lib/serve
 import { mobileTheme } from '../../lib/mobile-ui';
 import { WindowGroupLayout } from './WindowGroupLayout';
 import { encodeTerminalSgrMouseClick, TERMINAL_MOUSE_LEFT_BUTTON } from '../../lib/terminal-mouse-wheel-sgr';
+import { AmbientButton } from '../ambient';
 
 export interface TerminalPreviewGridProps {
   sessions: Session[];
@@ -408,7 +409,7 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
             />
           </span>
         </div>
-        <button
+        <AmbientButton
           type="button"
           aria-label={`从预览移除 ${title}`}
           onPointerDown={(event) => event.stopPropagation()}
@@ -425,7 +426,7 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
           }}
         >
           ×
-        </button>
+        </AmbientButton>
       </div>
     );
   };
@@ -482,7 +483,7 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
           padding: '0 2px 6px 6px',
         }}
       >
-        <button
+        <AmbientButton
           type="button"
           aria-label="退出终端预览"
           onClick={onClose}
@@ -498,7 +499,7 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
           }}
         >
           ×
-        </button>
+        </AmbientButton>
       </header>
 
       <WindowGroupLayout
@@ -530,17 +531,17 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
         }}
         onTouchStart={() => setEdgeQueueVisible(true)}
       >
-        <button type="button" aria-label="向上浏览预览队列" onClick={() => setPrimaryPreviewSessionId((current) => {
+        <AmbientButton type="button" aria-label="向上浏览预览队列" onClick={() => setPrimaryPreviewSessionId((current) => {
           const index = Math.max(0, sessions.findIndex((session) => session.id === current));
           return sessions[(index - 1 + sessions.length) % sessions.length]?.id || current;
-        })} style={{ position: 'absolute', top: 4, left: 4, width: 34, height: 44, border: 0, borderRadius: 10, background: 'rgba(10,15,22,.72)', color: '#dce8ff' }}>↑</button>
-        <button type="button" aria-label="向下浏览预览队列" onClick={() => setPrimaryPreviewSessionId((current) => {
+        })} style={{ position: 'absolute', top: 4, left: 4, width: 34, height: 44, border: 0, borderRadius: 10, background: 'rgba(10,15,22,.72)', color: '#dce8ff' }}>↑</AmbientButton>
+        <AmbientButton type="button" aria-label="向下浏览预览队列" onClick={() => setPrimaryPreviewSessionId((current) => {
           const index = Math.max(0, sessions.findIndex((session) => session.id === current));
           return sessions[(index + 1) % sessions.length]?.id || current;
-        })} style={{ position: 'absolute', bottom: 4, right: 4, width: 34, height: 44, border: 0, borderRadius: 10, background: 'rgba(10,15,22,.72)', color: '#dce8ff' }}>↓</button>
+        })} style={{ position: 'absolute', bottom: 4, right: 4, width: 34, height: 44, border: 0, borderRadius: 10, background: 'rgba(10,15,22,.72)', color: '#dce8ff' }}>↓</AmbientButton>
       </div>
       {canAddSession ? (
-        <button
+        <AmbientButton
           type="button"
           data-testid="terminal-preview-add-row"
           aria-label="增加预览窗口"
@@ -561,7 +562,7 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
         >
           <span aria-hidden="true" style={{ fontSize: '18px', lineHeight: 1 }}>+</span>
           增加窗口
-        </button>
+        </AmbientButton>
       ) : null}
       {addMenuOpen ? (
         <div
@@ -579,16 +580,16 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
         >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
             <span style={{ color: mobileTheme.colors.textPrimary, fontSize: '12px', fontWeight: 850 }}>增加窗口</span>
-            <button type="button" aria-label="关闭增加窗口菜单" onClick={() => setAddMenuOpen(false)}
+            <AmbientButton type="button" aria-label="关闭增加窗口菜单" onClick={() => setAddMenuOpen(false)}
               style={{ width: '26px', height: '26px', borderRadius: '6px', border: `1px solid ${mobileTheme.colors.cardBorder}`, background: mobileTheme.colors.shell, color: mobileTheme.colors.textPrimary }}>
               ×
-            </button>
+            </AmbientButton>
           </div>
           {replacementCandidates.map((candidate) => {
             const tone = getServerIdentityTone(candidate);
             const candidateTitle = candidate.customName || candidate.title || candidate.sessionName || candidate.id;
             return (
-              <button
+              <AmbientButton
                 key={candidate.id}
                 type="button"
                 role="menuitem"
@@ -608,7 +609,7 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
               >
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '12px', fontWeight: 800 }}>{candidateTitle}</span>
                 <span style={{ color: tone.previewText, fontSize: '10px', maxWidth: '90px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{resolveServerDisplayName(candidate)}</span>
-              </button>
+              </AmbientButton>
             );
           })}
         </div>
@@ -628,13 +629,13 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
         >
           <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
             <span style={{ color: mobileTheme.colors.textPrimary, fontSize: '12px', fontWeight: 850 }}>移动到位置</span>
-            <button type="button" aria-label="关闭移动菜单" onClick={() => setMoveSourceSessionId(null)}
+            <AmbientButton type="button" aria-label="关闭移动菜单" onClick={() => setMoveSourceSessionId(null)}
               style={{ width: '26px', height: '26px', borderRadius: '6px', border: `1px solid ${mobileTheme.colors.cardBorder}`, background: mobileTheme.colors.shell, color: mobileTheme.colors.textPrimary }}>
               ×
-            </button>
+            </AmbientButton>
           </div>
           {sessions.map((_, targetIndex) => (
-            <button
+            <AmbientButton
               key={targetIndex}
               type="button"
               role="menuitem"
@@ -651,7 +652,7 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
               }}
             >
               {targetIndex + 1}
-            </button>
+            </AmbientButton>
           ))}
         </div>
       ) : null}
@@ -681,7 +682,7 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
         >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
             <span style={{ color: mobileTheme.colors.textPrimary, fontSize: '12px', fontWeight: 850 }}>替换预览</span>
-            <button
+            <AmbientButton
               type="button"
               aria-label="关闭替换菜单"
               onClick={() => setReplacementSourceSessionId(null)}
@@ -691,13 +692,13 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
               }}
             >
               ×
-            </button>
+            </AmbientButton>
           </div>
           {replacementCandidates.length > 0 ? replacementCandidates.map((candidate) => {
             const tone = getServerIdentityTone(candidate);
             const candidateTitle = candidate.customName || candidate.title || candidate.sessionName || candidate.id;
             return (
-              <button
+              <AmbientButton
                 key={candidate.id}
                 type="button"
                 role="menuitem"
@@ -721,7 +722,7 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
                 <span style={{ color: tone.previewText, fontSize: '10px', maxWidth: '90px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {resolveServerDisplayName(candidate)}
                 </span>
-              </button>
+              </AmbientButton>
             );
           }) : (
             <div role="note" style={{ color: mobileTheme.colors.textSecondary, fontSize: '12px', padding: '4px 2px' }}>
