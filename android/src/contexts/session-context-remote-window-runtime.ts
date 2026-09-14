@@ -187,16 +187,18 @@ function isRemoteWindowCatalogTransportAwaitable(
   if (resource.socket && resource.socket.readyState === 1) {
     return false;
   }
-  // A terminal mux socket bound to the session target is the precondition
-  // for an open session socket once mux-ready completes.
-  if (!resource.terminalSocket) {
-    return false;
-  }
   const channelState = resource.channel?.state;
-  if (channelState && channelState !== 'opening') {
+  // While the channel is opening, the physical target socket may not yet be
+  // projected into the session resource. Keep polling the same authoritative
+  // channel state until mux readiness publishes the socket; do not fail early
+  // on a transient terminalSocket=null snapshot.
+  if (channelState === 'opening') {
+    return true;
+  }
+  if (channelState) {
     return false;
   }
-  return true;
+  return Boolean(resource.terminalSocket);
 }
 
 function defaultRemoteWindowCatalogSleep(ms: number): Promise<void> {

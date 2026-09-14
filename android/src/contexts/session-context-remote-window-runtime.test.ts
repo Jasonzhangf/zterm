@@ -379,6 +379,49 @@ describe('session context remote window runtime', () => {
     });
   });
 
+  it('keeps waiting when the opening channel has not projected its terminal socket yet', async () => {
+    let reads = 0;
+    const targetSocket = makeSocket();
+    const daemonConnection = makeDaemonConnection((sessionId: string) => {
+      reads += 1;
+      return {
+        sessionId,
+        socket: reads >= 3 ? targetSocket : null,
+        terminalSocket: reads >= 3 ? targetSocket : null,
+        targetKey: 'daemon=mac-studio',
+        channel: {
+          channelId: 'channel:session-1',
+          sessionId: 'session-1',
+          sessionName: 'tmux-1',
+          targetKey: 'daemon=mac-studio',
+          state: reads >= 3 ? 'open' : 'opening',
+          bodySubscribed: true,
+          openedAt: 1,
+          closedAt: null,
+        },
+      };
+    });
+    const requestTargets = vi.fn(async () => ({ requestId: 'rw-delayed-socket', targets: [], errors: [] }));
+    let now = 1_000;
+    const sleep = vi.fn(async () => { now += 50; });
+
+    await expect(requestRemoteWindowTargetsRuntime({
+      sessionId: 'session-1',
+      sessions: [{ ...baseSession, state: 'connecting', bridgeHost: '100.66.1.82', bridgePort: 3333 }],
+      daemonConnection,
+      remoteWindowMessageRuntime: { requestTargets },
+      sendSocketPayload: vi.fn(),
+      now: () => now,
+      sleep,
+      catalogOpenTimeoutMs: 2_000,
+      catalogOpenPollIntervalMs: 50,
+    })).resolves.toMatchObject({ requestId: 'rw-delayed-socket' });
+
+    expect(reads).toBe(3);
+    expect(sleep).toHaveBeenCalled();
+    expect(requestTargets).toHaveBeenCalledWith('session-1', expect.objectContaining({ ws: targetSocket }));
+  });
+
   it('sends the catalog request over an already-open target mux socket while the channel is opening', async () => {
     const targetSocket = makeSocket();
     const daemonConnection = makeDaemonConnection((sessionId: string) => ({
