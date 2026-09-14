@@ -39,16 +39,15 @@ function resolveVariantStyle(
   switch (variant) {
     case 'settings':
       return {
-        minWidth: '78px',
-        height: '48px',
-        padding: '0 12px',
-        borderRadius: '16px',
+        minWidth: '72px',
+        height: '40px',
+        padding: '0 10px',
+        borderRadius: '12px',
         border: `1px solid ${mobileTheme.colors.lightBorder}`,
         backgroundColor: 'var(--zterm-settings-surface)',
         color: mobileTheme.colors.lightText,
         fontSize: '14px',
         fontWeight: 900,
-        boxShadow: mobileTheme.shadow.soft,
         flex: '0 0 auto',
         display: 'inline-flex',
         alignItems: 'center',
@@ -57,33 +56,33 @@ function resolveVariantStyle(
       };
     case 'settings-back':
       return {
-        width: '56px',
-        height: '56px',
-        borderRadius: '20px',
+        width: '44px',
+        height: '44px',
+        borderRadius: '14px',
         border: 'none',
         backgroundColor: 'var(--zterm-settings-surface)',
         color: 'var(--zterm-settings-text)',
-        fontSize: '26px',
-        boxShadow: mobileTheme.shadow.soft,
+        fontSize: '22px',
         cursor: 'pointer',
       };
     case 'settings-save':
       return {
-        minWidth: 'clamp(84px, 22vw, 112px)',
-        height: '56px',
-        borderRadius: '20px',
+        minWidth: 'clamp(84px, 18vw, 96px)',
+        height: '44px',
+        borderRadius: '14px',
         border: 'none',
         backgroundColor: 'var(--zterm-settings-accent)',
         color: 'var(--zterm-settings-accent-text)',
         fontWeight: 800,
-        boxShadow: mobileTheme.shadow.soft,
+        fontSize: '14px',
+        padding: '0 14px',
         cursor: 'pointer',
       };
     case 'settings-segment':
       return {
         flex: 1,
-        minHeight: '48px',
-        borderRadius: '16px',
+        minHeight: '40px',
+        borderRadius: '12px',
         border: 'none',
         backgroundColor: selected ? 'var(--zterm-settings-accent)' : 'var(--zterm-settings-field)',
         color: selected ? 'var(--zterm-settings-accent-text)' : 'var(--zterm-settings-text)',
@@ -92,14 +91,14 @@ function resolveVariantStyle(
       };
     case 'settings-toggle':
       return {
-        minHeight: '48px',
+        minHeight: '40px',
         width: '100%',
-        borderRadius: '16px',
+        borderRadius: '12px',
         border: 'none',
         backgroundColor: selected ? 'var(--zterm-settings-accent)' : 'var(--zterm-settings-field)',
         color: selected ? 'var(--zterm-settings-accent-text)' : 'var(--zterm-settings-text)',
         fontWeight: 800,
-        fontSize: '16px',
+        fontSize: '15px',
         cursor: 'pointer',
         display: 'flex',
         alignItems: 'center',
@@ -108,17 +107,16 @@ function resolveVariantStyle(
       };
     case 'settings-skin-option':
       return {
-        minHeight: '76px',
-        borderRadius: '18px',
+        minHeight: '64px',
+        borderRadius: '14px',
         border: selected
           ? '2px solid var(--zterm-settings-accent)'
           : '1px solid var(--zterm-settings-border)',
         backgroundColor: selected ? 'var(--zterm-settings-surface)' : 'var(--zterm-settings-field)',
         color: 'var(--zterm-settings-text)',
-        boxShadow: selected ? '0 12px 26px rgba(31,214,122,0.14)' : 'none',
         cursor: 'pointer',
         textAlign: 'left',
-        padding: '12px',
+        padding: '10px 12px',
       };
     case 'terminal-pane-menu':
       return {
@@ -151,14 +149,13 @@ function resolveVariantStyle(
       };
     case 'accent':
       return {
-        width: '44px',
-        height: '44px',
-        borderRadius: '14px',
+        width: '40px',
+        height: '40px',
+        borderRadius: '12px',
         border: 'none',
         backgroundColor: 'var(--zterm-settings-accent)',
         color: 'var(--zterm-settings-accent-text)',
         lineHeight: 1,
-        boxShadow: mobileTheme.shadow.soft,
         flex: '0 0 auto',
         display: 'inline-flex',
         alignItems: 'center',
@@ -167,9 +164,9 @@ function resolveVariantStyle(
     case 'accent-wide':
       return {
         marginTop: '6px',
-        minHeight: '44px',
-        padding: '0 18px',
-        borderRadius: '16px',
+        minHeight: '40px',
+        padding: '0 14px',
+        borderRadius: '12px',
         border: 'none',
         backgroundColor: 'var(--zterm-settings-accent)',
         color: 'var(--zterm-settings-accent-text)',
@@ -178,18 +175,17 @@ function resolveVariantStyle(
         display: 'inline-flex',
         alignItems: 'center',
         gap: '8px',
-        boxShadow: mobileTheme.shadow.soft,
         cursor: 'pointer',
       };
     case 'active-session':
       return {
         width: '100%',
-        minHeight: '76px',
-        padding: '12px',
+        minHeight: '68px',
+        padding: '10px 12px',
         border: `1px solid ${
           selected ? 'rgba(8, 122, 70, 0.34)' : mobileTheme.colors.lightBorder
         }`,
-        borderRadius: '20px',
+        borderRadius: '16px',
         backgroundColor: 'var(--zterm-settings-surface)',
         color: mobileTheme.colors.lightText,
         display: 'grid',
@@ -197,13 +193,13 @@ function resolveVariantStyle(
         alignItems: 'center',
         gap: '12px',
         textAlign: 'left',
-        boxShadow: mobileTheme.shadow.soft,
+        minWidth: 0,
       };
     case 'saved-open':
       return {
         width: '100%',
-        minHeight: '82px',
-        padding: '13px 12px',
+        minHeight: '72px',
+        padding: '10px 12px',
         border: 'none',
         backgroundColor: 'transparent',
         color: 'inherit',
@@ -216,94 +212,92 @@ function resolveVariantStyle(
       };
     case 'back':
       return {
-        width: '56px',
-        height: '56px',
-        borderRadius: '20px',
+        width: '44px',
+        height: '44px',
+        borderRadius: '14px',
         border: 'none',
         backgroundColor: 'var(--zterm-settings-surface)',
         color: 'var(--zterm-settings-text)',
-        fontSize: '26px',
-        boxShadow: mobileTheme.shadow.soft,
+        fontSize: '22px',
         cursor: 'pointer',
       };
     case 'save':
       return {
-        minWidth: '92px',
-        height: '56px',
-        borderRadius: '20px',
+        minWidth: '84px',
+        height: '44px',
+        borderRadius: '14px',
         border: 'none',
         backgroundColor: 'var(--zterm-settings-accent)',
         color: 'var(--zterm-settings-accent-text)',
         fontWeight: 800,
-        boxShadow: mobileTheme.shadow.soft,
+        fontSize: '14px',
+        padding: '0 14px',
         cursor: 'pointer',
       };
     case 'compact-accent':
       return {
         border: 'none',
-        borderRadius: '16px',
-        minHeight: '42px',
-        padding: '0 14px',
+        borderRadius: '12px',
+        minHeight: '38px',
+        padding: '0 12px',
         backgroundColor: 'var(--zterm-settings-accent)',
         color: 'var(--zterm-settings-accent-text)',
         fontWeight: 900,
+        fontSize: '14px',
         cursor: 'pointer',
       };
     case 'compact-accent-shadow':
       return {
         border: 'none',
-        borderRadius: '14px',
-        minHeight: '42px',
-        padding: '0 16px',
+        borderRadius: '12px',
+        minHeight: '38px',
+        padding: '0 14px',
         backgroundColor: 'var(--zterm-settings-accent)',
         color: 'var(--zterm-settings-accent-text)',
         fontWeight: 800,
+        fontSize: '14px',
         cursor: 'pointer',
-        boxShadow: mobileTheme.shadow.soft,
       };
     case 'option':
       return {
         border: 'none',
-        borderRadius: '16px',
-        padding: '12px 14px',
+        borderRadius: '12px',
+        padding: '10px 12px',
         backgroundColor: selected ? 'var(--zterm-settings-accent)' : 'var(--zterm-settings-field)',
         color: selected ? 'var(--zterm-settings-accent-text)' : 'var(--zterm-settings-text)',
-        boxShadow: mobileTheme.shadow.soft,
         cursor: 'pointer',
         textAlign: 'left',
       };
     case 'option-strong':
       return {
         border: 'none',
-        borderRadius: '16px',
-        padding: '12px 14px',
+        borderRadius: '12px',
+        padding: '10px 12px',
         backgroundColor: selected ? 'var(--zterm-settings-accent)' : 'var(--zterm-settings-field)',
         color: selected ? 'var(--zterm-settings-accent-text)' : 'var(--zterm-settings-text)',
-        boxShadow: mobileTheme.shadow.soft,
         cursor: 'pointer',
         fontWeight: 700,
       };
     case 'discover':
       return {
-        minWidth: '132px',
-        minHeight: '42px',
-        borderRadius: '14px',
+        minWidth: '120px',
+        minHeight: '38px',
+        borderRadius: '12px',
         border: 'none',
         backgroundColor: 'var(--zterm-settings-accent)',
         color: 'var(--zterm-settings-accent-text)',
         fontWeight: 800,
         cursor: 'pointer',
-        boxShadow: mobileTheme.shadow.soft,
       };
     case 'outline':
       return {
-        minHeight: '42px',
-        borderRadius: '14px',
+        minHeight: '38px',
+        borderRadius: '12px',
         border: '1px solid var(--zterm-settings-border)',
         backgroundColor: 'var(--zterm-settings-field)',
         color: 'var(--zterm-settings-text)',
         fontWeight: 800,
-        padding: '0 16px',
+        padding: '0 14px',
         cursor: 'pointer',
       };
   }
@@ -314,7 +308,7 @@ export const AmbientButton = forwardRef<HTMLButtonElement, AmbientButtonProps>(
     { variant = 'settings', selected = false, style, type = 'button', disabled, className, ...props },
     ref,
   ) {
-    const ambientClass = ['ambient-control', 'amb-button', 'ambx-control', 'amb-chamfer', className].filter(Boolean).join(' ');
+    const ambientClass = ['ambient', 'ambient-control', 'amb-button', 'ambx-control', 'amb-chamfer', className].filter(Boolean).join(' ');
     return (
       <button
         ref={ref}
@@ -324,6 +318,7 @@ export const AmbientButton = forwardRef<HTMLButtonElement, AmbientButtonProps>(
         style={{
           ...commonButtonStyle,
           ...resolveVariantStyle(variant, selected),
+          boxShadow: undefined,
           ...(variant === 'settings-save' && disabled ? { opacity: 0.72 } : null),
           ...style,
         }}

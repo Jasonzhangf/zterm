@@ -519,7 +519,7 @@ label:focus-visible {
 
 /* Settings group content reveal. */
 .zterm-settings-group > [data-settings-group-content] {
-  display: grid;
+  display: none;
   gap: 16px;
   width: 100%;
   box-sizing: border-box;
@@ -532,6 +532,7 @@ label:focus-visible {
     opacity 180ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 .zterm-settings-group[open] > [data-settings-group-content] {
+  display: grid;
   padding: clamp(16px, 4vw, 36px);
   transform: translateY(0);
   opacity: 1;
@@ -578,20 +579,23 @@ label:focus-visible {
 [data-settings-save-status][data-state="saved"] { color: #1f9d5d; font-weight: 700; }
 [data-settings-save-status][data-state="saving"] { color: #6e7781; font-weight: 700; }
 
-/* Ambient Phase 2 校准：把重阴影压轻，并收窄横向留白，避免控件层把可读区域撑散。 */
+/* Ambient Phase 2 校准：让 .ambient 光影生效，同时避免控件高度/阴影抢占可读区域。 */
 .ambient-control {
-  box-shadow: 0 2px 8px rgba(10, 15, 26, 0.10), 0 1px 2px rgba(10, 15, 26, 0.06) !important;
+  --amb-elevation: .65;
+  --amb-thickness: .7;
+  --amb-sh-gain: .48;
+  isolation: isolate;
 }
 
 .zterm-settings-group > [data-settings-group-content] {
-  padding-block: 10px;
-  padding-inline: clamp(8px, 2.4vw, 18px) !important;
+  padding-block: 12px;
+  padding-inline: clamp(12px, 3.2vw, 22px) !important;
 }
 
 .zterm-terminal-shell .ambient-control {
-  --amb-elevation: 0;
-  --amb-thickness: 0;
-  --amb-mat-roughness: 1;
+  --amb-elevation: 1;
+  --amb-thickness: .65;
+  --amb-mat-roughness: .82;
 }
 
 .zterm-terminal-shell[data-terminal-shell-skin="black"] {

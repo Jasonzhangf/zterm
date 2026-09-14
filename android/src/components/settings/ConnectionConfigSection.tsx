@@ -246,11 +246,10 @@ export function ConnectionConfigSection({
         style={{
           width: '100%',
           border: '1px solid var(--zterm-settings-border)',
-          borderRadius: '18px',
-          padding: '14px 16px',
+          borderRadius: '12px',
+          padding: '10px 12px',
           backgroundColor: 'var(--zterm-settings-surface)',
           color: 'var(--zterm-settings-text)',
-          boxShadow: 'var(--zterm-settings-shadow)',
           cursor: 'pointer',
           display: 'flex',
           alignItems: 'center',

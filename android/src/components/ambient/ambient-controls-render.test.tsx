@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 
-import React from 'react';
 import { render } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import {
@@ -16,6 +15,7 @@ describe('ambient shared controls render owner DOM', () => {
     const button = container.querySelector('button');
     expect(button).not.toBeNull();
     expect(button?.getAttribute('aria-label')).toBe('ambient button');
+    expect(button?.className).toContain('ambient');
     expect(button?.className).toContain('ambient-control');
     expect(button?.className).toContain('amb-button');
     expect(button?.className).toContain('amb-chamfer');
@@ -26,6 +26,7 @@ describe('ambient shared controls render owner DOM', () => {
     const input = container.querySelector('input');
     expect(input).not.toBeNull();
     expect(input?.getAttribute('aria-label')).toBe('ambient input');
+    expect(input?.className).toContain('ambient');
     expect(input?.className).toContain('ambient-control');
     expect(input?.className).toContain('amb-chamfer');
   });
@@ -35,6 +36,7 @@ describe('ambient shared controls render owner DOM', () => {
     const select = container.querySelector('select');
     expect(select).not.toBeNull();
     expect(select?.getAttribute('aria-label')).toBe('ambient select');
+    expect(select?.className).toContain('ambient');
     expect(select?.className).toContain('ambient-control');
     expect(select?.className).toContain('amb-select');
     expect(select?.className).toContain('amb-chamfer');
@@ -45,6 +47,7 @@ describe('ambient shared controls render owner DOM', () => {
     const textarea = container.querySelector('textarea');
     expect(textarea).not.toBeNull();
     expect(textarea?.getAttribute('aria-label')).toBe('ambient textarea');
+    expect(textarea?.className).toContain('ambient');
     expect(textarea?.className).toContain('ambient-control');
     expect(textarea?.className).toContain('amb-chamfer');
   });
