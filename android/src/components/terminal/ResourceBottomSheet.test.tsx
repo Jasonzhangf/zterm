@@ -156,6 +156,180 @@ describe('ResourceBottomSheet', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  it('keeps handle drag authoritative when pointer capture retargets the shared touch sequence', () => {
+    const onClose = vi.fn();
+    const onExpand = vi.fn();
+    render(
+      <ResourceBottomSheet
+        open
+        initialTab="stream"
+        renderFileBrowser={() => null}
+        renderRemoteWindow={() => <div data-testid="stream-surface" />}
+        onClose={onClose}
+        onExpand={onExpand}
+      />,
+    );
+
+    const handle = screen.getByLabelText('资源').querySelector('[data-resource-drawer-handle]') as HTMLElement;
+    const pane = screen.getByTestId('resource-stream-pane');
+    let capturedTarget: HTMLElement | null = null;
+    const setPointerCapture = vi.fn(() => {
+      capturedTarget = handle;
+    });
+    const releasePointerCapture = vi.fn(() => {
+      capturedTarget = null;
+    });
+    Object.defineProperty(handle, 'setPointerCapture', { configurable: true, value: setPointerCapture });
+    Object.defineProperty(handle, 'releasePointerCapture', { configurable: true, value: releasePointerCapture });
+    Object.defineProperty(handle, 'hasPointerCapture', { configurable: true, value: () => capturedTarget === handle });
+
+    fireEvent.pointerDown(handle, { pointerId: 1, clientY: 240 });
+    fireEvent.touchStart(handle, {
+      touches: [{ identifier: 1, clientY: 240 }],
+      changedTouches: [{ identifier: 1, clientY: 240 }],
+    });
+    fireEvent.pointerUp(capturedTarget ?? pane, { pointerId: 1, clientY: 100 });
+    fireEvent.touchEnd(handle, { changedTouches: [{ identifier: 1, clientY: 100 }] });
+
+    expect(setPointerCapture).toHaveBeenCalledWith(1);
+    expect(releasePointerCapture).toHaveBeenCalledWith(1);
+    expect(onExpand).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('keeps the first handle touch as owner when a second handle touch ends', () => {
+    const onClose = vi.fn();
+    const onExpand = vi.fn();
+    render(
+      <ResourceBottomSheet
+        open
+        initialTab="stream"
+        renderFileBrowser={() => null}
+        renderRemoteWindow={() => <div data-testid="stream-surface" />}
+        onClose={onClose}
+        onExpand={onExpand}
+      />,
+    );
+
+    const handle = screen.getByLabelText('资源').querySelector('[data-resource-drawer-handle]') as HTMLElement;
+    fireEvent.touchStart(handle, {
+      touches: [{ identifier: 11, clientY: 240 }],
+      changedTouches: [{ identifier: 11, clientY: 240 }],
+    });
+    fireEvent.touchStart(handle, {
+      touches: [{ identifier: 11, clientY: 240 }, { identifier: 22, clientY: 100 }],
+      changedTouches: [{ identifier: 22, clientY: 100 }],
+    });
+    fireEvent.touchEnd(handle, {
+      touches: [{ identifier: 11, clientY: 240 }],
+      changedTouches: [{ identifier: 22, clientY: 340 }],
+    });
+    fireEvent.touchEnd(handle, {
+      touches: [],
+      changedTouches: [{ identifier: 11, clientY: 100 }],
+    });
+
+    expect(onExpand).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('keeps handle pointer ownership while a stream pinch runs in parallel', () => {
+    const onClose = vi.fn();
+    const onExpand = vi.fn();
+    render(
+      <ResourceBottomSheet
+        open
+        initialTab="stream"
+        renderFileBrowser={() => null}
+        renderRemoteWindow={() => <div data-testid="stream-surface" />}
+        onClose={onClose}
+        onExpand={onExpand}
+      />,
+    );
+
+    const handle = screen.getByLabelText('资源').querySelector('[data-resource-drawer-handle]') as HTMLElement;
+    const pane = screen.getByTestId('resource-stream-pane');
+    let capturedTarget: HTMLElement | null = null;
+    Object.defineProperty(handle, 'setPointerCapture', {
+      configurable: true,
+      value: () => {
+        capturedTarget = handle;
+      },
+    });
+    Object.defineProperty(handle, 'releasePointerCapture', {
+      configurable: true,
+      value: () => {
+        capturedTarget = null;
+      },
+    });
+    Object.defineProperty(handle, 'hasPointerCapture', { configurable: true, value: () => capturedTarget === handle });
+
+    fireEvent.pointerDown(handle, { pointerId: 3, clientY: 260 });
+    fireEvent.touchStart(handle, {
+      touches: [{ identifier: 3, clientY: 260 }],
+      changedTouches: [{ identifier: 3, clientY: 260 }],
+    });
+    fireEvent.touchStart(pane, {
+      touches: [{ identifier: 31, clientY: 180 }, { identifier: 32, clientY: 180 }],
+      changedTouches: [{ identifier: 31, clientY: 180 }, { identifier: 32, clientY: 180 }],
+    });
+    fireEvent.touchMove(pane, {
+      touches: [{ identifier: 31, clientY: 120 }, { identifier: 32, clientY: 240 }],
+      changedTouches: [{ identifier: 31, clientY: 120 }, { identifier: 32, clientY: 240 }],
+    });
+    fireEvent.touchEnd(pane, {
+      touches: [],
+      changedTouches: [{ identifier: 31, clientY: 120 }, { identifier: 32, clientY: 240 }],
+    });
+    fireEvent.pointerUp(capturedTarget ?? pane, { pointerId: 3, clientY: 100 });
+    fireEvent.touchEnd(handle, { changedTouches: [{ identifier: 3, clientY: 100 }] });
+
+    expect(onExpand).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('clears a captured handle pointer on pointer cancel', () => {
+    const onClose = vi.fn();
+    const onExpand = vi.fn();
+    render(
+      <ResourceBottomSheet
+        open
+        initialTab="stream"
+        renderFileBrowser={() => null}
+        renderRemoteWindow={() => <div data-testid="stream-surface" />}
+        onClose={onClose}
+        onExpand={onExpand}
+      />,
+    );
+
+    const handle = screen.getByLabelText('资源').querySelector('[data-resource-drawer-handle]') as HTMLElement;
+    let capturedTarget: HTMLElement | null = null;
+    const releasePointerCapture = vi.fn(() => {
+      capturedTarget = null;
+    });
+    Object.defineProperty(handle, 'setPointerCapture', {
+      configurable: true,
+      value: () => {
+        capturedTarget = handle;
+      },
+    });
+    Object.defineProperty(handle, 'releasePointerCapture', { configurable: true, value: releasePointerCapture });
+    Object.defineProperty(handle, 'hasPointerCapture', { configurable: true, value: () => capturedTarget === handle });
+
+    fireEvent.pointerDown(handle, { pointerId: 7, clientY: 240 });
+    fireEvent.touchStart(handle, {
+      touches: [{ identifier: 7, clientY: 240 }],
+      changedTouches: [{ identifier: 7, clientY: 240 }],
+    });
+    fireEvent.pointerCancel(handle, { pointerId: 7, clientY: 100 });
+    fireEvent.pointerUp(handle, { pointerId: 7, clientY: 100 });
+    fireEvent.touchEnd(handle, { changedTouches: [{ identifier: 7, clientY: 100 }] });
+
+    expect(releasePointerCapture).toHaveBeenCalledWith(7);
+    expect(onExpand).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it('hides duplicate drawer chrome when the stream expands to fullscreen', () => {
     const renderRemoteWindow = vi.fn((open: boolean) => open ? <div data-testid="stream-surface" /> : null);
     render(

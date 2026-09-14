@@ -58,6 +58,26 @@ const buttonStyle: React.CSSProperties = {
   padding: '0 14px',
 };
 
+function setPointerCaptureSafely(element: HTMLElement, pointerId: number) {
+  try {
+    element.setPointerCapture?.(pointerId);
+  } catch (error) {
+    console.warn('[ResourceBottomSheet] pointer capture unavailable:', error);
+  }
+}
+
+function releasePointerCaptureSafely(element: HTMLElement, pointerId: number) {
+  try {
+    if (element.hasPointerCapture?.(pointerId)) element.releasePointerCapture?.(pointerId);
+  } catch (error) {
+    console.warn('[ResourceBottomSheet] pointer capture release unavailable:', error);
+  }
+}
+
+function touchGestureKey(touch: { identifier?: number } | undefined) {
+  return `touch:${touch?.identifier ?? 'primary'}`;
+}
+
 export function ResourceBottomSheet({
   open,
   renderFileBrowser,
@@ -135,14 +155,16 @@ export function ResourceBottomSheet({
     }
   };
   const handleTouchStart = (event: TouchEvent<HTMLDivElement>) => {
-    handleGestureStart('touch', event.target, event.touches[0]?.clientY ?? 0);
+    const touch = event.changedTouches[0] ?? event.touches[0];
+    handleGestureStart(touchGestureKey(touch), event.target, touch?.clientY ?? 0);
   };
   const handleTouchEnd = (event: TouchEvent<HTMLDivElement>) => {
-    const end = event.changedTouches[0]?.clientY;
-    if (end !== undefined) handleGestureEnd('touch', end);
+    const touch = event.changedTouches[0];
+    if (touch) handleGestureEnd(touchGestureKey(touch), touch.clientY);
   };
-  const handleTouchCancel = () => {
-    gestureRuntime.current.cancel('touch');
+  const handleTouchCancel = (event: TouchEvent<HTMLDivElement>) => {
+    const touch = event.changedTouches[0] ?? event.touches[0];
+    gestureRuntime.current.cancel(touchGestureKey(touch));
   };
   const handlePointerStart = (event: PointerEvent<HTMLDivElement>) => {
     handleGestureStart(`pointer:${event.pointerId}`, event.target, event.clientY);
@@ -195,9 +217,22 @@ export function ResourceBottomSheet({
           style={{ display: 'flex', justifyContent: 'center', padding: '10px 0 4px' }}
           onTouchStart={(event) => { event.stopPropagation(); handleTouchStart(event); }}
           onTouchEnd={(event) => { event.stopPropagation(); handleTouchEnd(event); }}
-          onTouchCancel={(event) => { event.stopPropagation(); handleTouchCancel(); }}
-          onPointerDown={(event) => { event.stopPropagation(); handlePointerStart(event); }}
-          onPointerUp={(event) => { event.stopPropagation(); handlePointerEnd(event); }}
+          onTouchCancel={(event) => { event.stopPropagation(); handleTouchCancel(event); }}
+          onPointerDown={(event) => {
+            event.stopPropagation();
+            setPointerCaptureSafely(event.currentTarget, event.pointerId);
+            handlePointerStart(event);
+          }}
+          onPointerUp={(event) => {
+            event.stopPropagation();
+            releasePointerCaptureSafely(event.currentTarget, event.pointerId);
+            handlePointerEnd(event);
+          }}
+          onPointerCancel={(event) => {
+            event.stopPropagation();
+            releasePointerCaptureSafely(event.currentTarget, event.pointerId);
+            gestureRuntime.current.cancel(`pointer:${event.pointerId}`);
+          }}
         >
           <span aria-hidden="true" style={{ width: 38, height: 4, borderRadius: 99, background: 'var(--zterm-panel-border)' }} />
         </div> : null}
@@ -224,7 +259,7 @@ export function ResourceBottomSheet({
             </button>
           ))}
         </nav> : null}
-        <div data-resource-drawer-page={RESOURCE_DRAWER_GESTURE_PAGE_IDS.files} data-resource-drawer-scope={RESOURCE_DRAWER_GESTURE_SCOPE_IDS.drawerContentPage} style={{ minHeight: 0, flex: 1, display: tab === 'files' ? 'block' : 'none' }} onTouchStart={(event) => event.stopPropagation()} onTouchEnd={(event) => event.stopPropagation()} onTouchCancel={(event) => { event.stopPropagation(); handleTouchCancel(); }} onPointerDown={(event) => event.stopPropagation()} onPointerUp={(event) => event.stopPropagation()} onPointerCancel={(event) => { event.stopPropagation(); gestureRuntime.current.cancel(`pointer:${event.pointerId}`); }}>
+        <div data-resource-drawer-page={RESOURCE_DRAWER_GESTURE_PAGE_IDS.files} data-resource-drawer-scope={RESOURCE_DRAWER_GESTURE_SCOPE_IDS.drawerContentPage} style={{ minHeight: 0, flex: 1, display: tab === 'files' ? 'block' : 'none' }} onTouchStart={(event) => event.stopPropagation()} onTouchEnd={(event) => event.stopPropagation()} onTouchCancel={(event) => { event.stopPropagation(); handleTouchCancel(event); }} onPointerDown={(event) => event.stopPropagation()} onPointerUp={(event) => event.stopPropagation()} onPointerCancel={(event) => { event.stopPropagation(); gestureRuntime.current.cancel(`pointer:${event.pointerId}`); }}>
           {fileBrowserNode}
         </div>
         {tab === 'stream' ? (
@@ -236,7 +271,7 @@ export function ResourceBottomSheet({
             onTouchStart={(event) => event.stopPropagation()}
             onTouchMove={(event) => event.stopPropagation()}
             onTouchEnd={(event) => event.stopPropagation()}
-            onTouchCancel={(event) => { event.stopPropagation(); handleTouchCancel(); }}
+            onTouchCancel={(event) => { event.stopPropagation(); handleTouchCancel(event); }}
             onPointerDown={(event) => event.stopPropagation()}
             onPointerUp={(event) => event.stopPropagation()}
             onPointerCancel={(event) => { event.stopPropagation(); gestureRuntime.current.cancel(`pointer:${event.pointerId}`); }}
@@ -245,7 +280,7 @@ export function ResourceBottomSheet({
           </div>
         ) : null}
         {tab === 'web' ? (
-          <div data-testid="resource-web-pane" data-resource-drawer-page={RESOURCE_DRAWER_GESTURE_PAGE_IDS.web} data-resource-drawer-scope={RESOURCE_DRAWER_GESTURE_SCOPE_IDS.remoteWindowSurface} onTouchStart={(event) => event.stopPropagation()} onTouchEnd={(event) => event.stopPropagation()} onTouchCancel={(event) => { event.stopPropagation(); handleTouchCancel(); }} onPointerDown={(event) => event.stopPropagation()} onPointerUp={(event) => event.stopPropagation()} onPointerCancel={(event) => { event.stopPropagation(); gestureRuntime.current.cancel(`pointer:${event.pointerId}`); }} style={{ minHeight: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 10, padding: '0 14px 14px' }}>
+          <div data-testid="resource-web-pane" data-resource-drawer-page={RESOURCE_DRAWER_GESTURE_PAGE_IDS.web} data-resource-drawer-scope={RESOURCE_DRAWER_GESTURE_SCOPE_IDS.remoteWindowSurface} onTouchStart={(event) => event.stopPropagation()} onTouchEnd={(event) => event.stopPropagation()} onTouchCancel={(event) => { event.stopPropagation(); handleTouchCancel(event); }} onPointerDown={(event) => event.stopPropagation()} onPointerUp={(event) => event.stopPropagation()} onPointerCancel={(event) => { event.stopPropagation(); gestureRuntime.current.cancel(`pointer:${event.pointerId}`); }} style={{ minHeight: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 10, padding: '0 14px 14px' }}>
             {remoteWindowNode ? remoteWindowNode : <form onSubmit={(event) => { event.preventDefault(); submitWebUrl(); }} style={{ display: 'flex', gap: 8 }}>
               <input
                 aria-label="网页地址"
