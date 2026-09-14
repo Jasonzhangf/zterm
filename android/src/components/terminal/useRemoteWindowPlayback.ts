@@ -307,6 +307,18 @@ export function useRemoteWindowPlayback({
     requestPlayback(binding.stream, binding.epoch, binding.track);
   }, [publishDebugSnapshot, requestPlayback]);
 
+  const rearmBoundPlayback = useCallback(() => {
+    const binding = playbackBindingRef.current;
+    if (!binding) {
+      publishDebugSnapshot('rearm-missing-binding');
+      return;
+    }
+    cancelPlaybackFrameCallback();
+    const epoch = ++playbackEpochRef.current;
+    playbackBindingRef.current = { ...binding, epoch };
+    requestPlayback(binding.stream, epoch, binding.track);
+  }, [cancelPlaybackFrameCallback, publishDebugSnapshot, requestPlayback]);
+
   const restoreRetainedPlayback = useCallback((visible: boolean) => {
     const epoch = playbackEpochRef.current;
     playbackBindingRef.current = receiverMediaStream ? {
@@ -423,6 +435,7 @@ export function useRemoteWindowPlayback({
     invalidatePlayback,
     liveDiagnostics,
     publishDebugSnapshot,
+    rearmBoundPlayback,
     requestBoundPlayback,
     restoreRetainedPlayback,
     subscribeDecodedFrame,

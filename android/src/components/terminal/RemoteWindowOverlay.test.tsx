@@ -3332,6 +3332,105 @@ describe('RemoteWindowOverlay', () => {
     expect(stopStream).not.toHaveBeenCalled();
   });
 
+  it('rearms decoded-frame projection after embedded fullscreen relocation so pinch keeps drawing', async () => {
+    const mediaStream = { id: 'media-stream-fullscreen-rearm' } as MediaStream;
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-fullscreen-rearm',
+      targets: [makeTarget('app-fullscreen-rearm', 'TextEdit', 'app-window')],
+    }));
+    const startStream = vi.fn(async (
+      _sessionId: string,
+      _target: RemoteWindowStreamTargetManifest,
+      streamId: string,
+    ) => ({ streamId, mediaStream }));
+    const stopStream = vi.fn(() => true);
+    const frameCallbacks: Array<{ video: HTMLVideoElement; callback: VideoFrameRequestCallback }> = [];
+    vi.mocked(HTMLVideoElement.prototype.requestVideoFrameCallback).mockImplementation(function (this: HTMLVideoElement, callback) {
+      frameCallbacks.push({ video: this, callback });
+      return frameCallbacks.length;
+    });
+    const drawImage = vi.fn();
+    const getContextSpy = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+      drawImage,
+    } as unknown as CanvasRenderingContext2D);
+    const playSpy = vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(() => Promise.resolve());
+
+    try {
+      render(
+        <RemoteWindowOverlay
+          activeSessionId="session-fullscreen-rearm"
+          embedded
+          requestTargets={requestTargets}
+          startStream={startStream}
+          stopStream={stopStream}
+        />,
+      );
+
+      fireEvent.click(await screen.findByTestId('remote-window-target-app-fullscreen-rearm'));
+      const surface = await screen.findByTestId('remote-window-video-surface');
+      const video = await screen.findByTestId('remote-window-video') as HTMLVideoElement;
+      const canvas = screen.getByTestId('remote-window-focus-display-canvas') as HTMLCanvasElement;
+      Object.defineProperties(video, {
+        readyState: { configurable: true, value: 4 },
+        videoWidth: { configurable: true, value: 786 },
+        videoHeight: { configurable: true, value: 720 },
+      });
+      Object.defineProperty(surface, 'getBoundingClientRect', {
+        configurable: true,
+        value: () => ({
+          x: 0,
+          y: 0,
+          left: 0,
+          top: 0,
+          right: 300,
+          bottom: 200,
+          width: 300,
+          height: 200,
+          toJSON: () => ({}),
+        }),
+      });
+      await flushRemoteWindowSurfaceLayout();
+      await waitFor(() => expect(frameCallbacks.some((frame) => frame.video === video)).toBe(true));
+
+      act(() => {
+        frameCallbacks.find((frame) => frame.video === video)?.callback(0, { presentedFrames: 1 } as VideoFrameCallbackMetadata);
+      });
+      await waitFor(() => expect(drawImage).toHaveBeenCalled());
+      expect(screen.getByTestId('remote-window-video-wallpaper').style.opacity).toBe('0');
+      drawImage.mockClear();
+      const callbackCountBeforeFullscreen = frameCallbacks.length;
+
+      fireEvent.doubleClick(surface);
+      await waitFor(() => {
+        expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('fullscreen');
+      });
+
+      // Android WebView can abandon the callback that was pending before the
+      // portal host moved from the drawer anchor to document.body. Do not run
+      // that stale callback; fullscreen must register a fresh callback itself.
+      await waitFor(() => expect(frameCallbacks.length).toBeGreaterThan(callbackCountBeforeFullscreen));
+
+      fireEvent.pointerDown(surface, { pointerId: 71, pointerType: 'touch', clientX: 100, clientY: 100, button: 0, buttons: 1 });
+      fireEvent.pointerDown(surface, { pointerId: 72, pointerType: 'touch', clientX: 200, clientY: 100, button: 0, buttons: 1 });
+      fireEvent.pointerMove(surface, { pointerId: 71, pointerType: 'touch', clientX: 70, clientY: 100, button: 0, buttons: 1 });
+      fireEvent.pointerMove(surface, { pointerId: 72, pointerType: 'touch', clientX: 250, clientY: 100, button: 0, buttons: 1 });
+
+      act(() => {
+        frameCallbacks[callbackCountBeforeFullscreen]?.callback(0, { presentedFrames: 2 } as VideoFrameCallbackMetadata);
+      });
+
+      expect(drawImage).toHaveBeenCalled();
+      expect(screen.getByTestId('remote-window-video')).toBe(video);
+      expect(screen.getByTestId('remote-window-focus-display-canvas')).toBe(canvas);
+      expect(video.srcObject).toBe(mediaStream);
+      expect(startStream).toHaveBeenCalledTimes(1);
+      expect(stopStream).not.toHaveBeenCalled();
+    } finally {
+      getContextSpy.mockRestore();
+      playSpy.mockRestore();
+    }
+  });
+
   it('moves an embedded fullscreen overlay outside its clipping drawer without replacing the video', async () => {
     const mediaStream = { id: 'media-stream-clipping-drawer' } as MediaStream;
     const requestTargets = vi.fn(async () => ({
