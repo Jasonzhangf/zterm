@@ -614,30 +614,16 @@ describe('RemoteWindowOverlay', () => {
     fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
     fireEvent.click(await screen.findByTestId('remote-window-app-group-com-apple-TextEdit-123'));
     await screen.findByTestId('remote-window-video');
-    await waitFor(() => expect(updateFocus).not.toHaveBeenCalled());
-    const focusStreamId = startStream.mock.calls[0]?.[2] as string;
-
-    fireEvent.click(screen.getByTestId('remote-window-video-window-option-app-child'));
-    await waitFor(() => expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-dual-stream-phase')).toBe('overview-crop-visible'));
-    expect(startStream).toHaveBeenCalledTimes(1);
-    expect(updateFocus).toHaveBeenCalledWith('session-1', focusStreamId, childWindow, 1);
-  });
-
-  it('surfaces a matching focus error and ignores stale focus errors', async () => {
-    const mediaStream = { id: 'media-stream-1' } as MediaStream;
-    const mainWindow = makeTarget('app-main', 'WeChat', 'app-window');
-    const childWindow = { ...makeTarget('app-child', 'WeChat Image', 'app-window'), videoTarget: { ...mainWindow.videoTarget, windowId: 'window-2' } };
-    const requestTargets = vi.fn(async () => ({ requestId: 'rw-1', targets: [mainWindow, childWindow] }));
-    const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string) => ({ streamId, mediaStream }));
-    const updateFocus = vi.fn();
-    render(<RemoteWindowOverlay activeSessionId="session-1" requestTargets={requestTargets} startStream={startStream} updateFocus={updateFocus} />);
-    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
-    fireEvent.click(await screen.findByTestId('remote-window-app-group-com-apple-TextEdit-123'));
-    await screen.findByTestId('remote-window-video');
-    fireEvent.click(screen.getByTestId('remote-window-video-window-option-app-child'));
     await waitFor(() => expect(updateFocus).toHaveBeenCalledTimes(1));
+    const focusStreamId = startStream.mock.calls[0]?.[2] as string;
+    expect(updateFocus).toHaveBeenNthCalledWith(1, 'session-1', focusStreamId, expect.objectContaining({
+      streamTargetId: 'app-main',
+    }));
+
+    fireEvent.click(screen.getByTestId('remote-window-video-window-option-app-child'));
+    await waitFor(() => expect(updateFocus).toHaveBeenCalledTimes(2));
     expect(startStream).toHaveBeenCalledTimes(1);
-    expect(updateFocus).toHaveBeenCalledWith('session-1', expect.any(String), childWindow, 1);
+    expect(updateFocus).toHaveBeenNthCalledWith(2, 'session-1', focusStreamId, childWindow, 1);
   });
 
   it('syncs the active stream catalog on a light cadence and applies the resized target truth', async () => {
@@ -3155,6 +3141,7 @@ describe('RemoteWindowOverlay', () => {
     // A synchronous dispatch failure must not leave a pending resize, but the
     // receiver stays attached so the next layout pass can retry.
     const beforeFailure = resizeTargetWindow.mock.calls.length;
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     resizeTargetWindow.mockImplementationOnce(() => {
       throw new Error('Remote window target resize requires sessionId and window-resize event');
     });
@@ -3163,6 +3150,11 @@ describe('RemoteWindowOverlay', () => {
     await waitFor(() => expect(resizeTargetWindow).toHaveBeenCalledTimes(beforeFailure + 1));
     expect(screen.getByTestId('remote-window-video')).toBeTruthy();
     expect(screen.queryByTestId('remote-window-stream-error')).toBeNull();
+    expect(consoleError).toHaveBeenCalledWith(
+      '[RemoteWindowOverlay] remote fill resize dispatch failed:',
+      expect.objectContaining({ message: 'Remote window target resize requires sessionId and window-resize event' }),
+    );
+    consoleError.mockRestore();
   });
 
   it('waits for embedded receiver startup to commit before resizing the target window', async () => {

@@ -1041,17 +1041,22 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     const height = reference.height;
     const delivery = { streamId: currentLockedStreamId, targetId: currentLockedTarget.streamTargetId, width, height };
     if (!force && [appliedRemoteFillResizeRef.current, pendingRemoteFillResizeRef.current].some((current) => current?.streamId === delivery.streamId && current.targetId === delivery.targetId && current.width === width && current.height === height)) return false;
-    const sequence = resizeTargetWindow(activeSessionId, {
-      streamId: currentLockedStreamId,
-      targetId: currentLockedTarget.streamTargetId,
-      event: {
-        kind: 'window-resize',
-        width,
-        height,
-      },
-    });
-    pendingRemoteFillResizeRef.current = { sequence, ...delivery };
-    return true;
+    try {
+      const sequence = resizeTargetWindow(activeSessionId, {
+        streamId: currentLockedStreamId,
+        targetId: currentLockedTarget.streamTargetId,
+        event: {
+          kind: 'window-resize',
+          width,
+          height,
+        },
+      });
+      pendingRemoteFillResizeRef.current = { sequence, ...delivery };
+      return true;
+    } catch (error) {
+      console.error('[RemoteWindowOverlay] remote fill resize dispatch failed:', error);
+      return false;
+    }
   }, [activeSessionId, currentLockedStreamId, currentLockedTarget, embedded, resizeTargetWindow, state, surfaceSize]);
   const handleFullscreen = useCallback(() => {
     publishRemoteWindowInputContext();
