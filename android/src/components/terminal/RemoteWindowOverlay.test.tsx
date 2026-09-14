@@ -2734,7 +2734,7 @@ describe('RemoteWindowOverlay', () => {
     const target = makeTarget('app-1', 'TextEdit', 'app-window');
     target.videoTarget.cropRectTopLeftPx = { x: 10, y: 40, width: 800, height: 600 };
     const mediaStream = { id: 'media-stream-1' } as MediaStream;
-    const resizeTargetWindow = vi.fn();
+    const resizeTargetWindow = vi.fn((_sessionId: string, _payload: unknown) => 'resize-fullscreen');
     const requestTargets = vi.fn(async () => ({
       requestId: 'rw-1',
       targets: [target],
@@ -2934,7 +2934,7 @@ describe('RemoteWindowOverlay', () => {
     Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 });
     const target = makeTarget('app-pending', 'TextEdit', 'app-window');
     const mediaStream = { id: 'media-stream-pending' } as MediaStream;
-    const resizeTargetWindow = vi.fn();
+    const resizeTargetWindow = vi.fn((_sessionId: string, _payload: unknown) => 'resize-embedded-startup');
     const startDeferred = createDeferred<{ streamId: string; mediaStream: MediaStream }>();
     const requestTargets = vi.fn(async () => ({
       requestId: 'rw-pending',
@@ -3009,7 +3009,7 @@ describe('RemoteWindowOverlay', () => {
   it('never resizes an iTerm2 target when entering fullscreen fill', async () => {
     const target = makeTarget('iterm-app', 'iTerm2', 'app-window');
     target.videoTarget.appBundleId = 'com.googlecode.iterm2';
-    const resizeTargetWindow = vi.fn();
+    const resizeTargetWindow = vi.fn((_sessionId: string, _payload: unknown) => 'resize-iterm');
     const requestTargets = vi.fn(async () => ({ requestId: 'rw-iterm', targets: [target] }));
     const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string) => ({
       streamId,
@@ -3043,7 +3043,7 @@ describe('RemoteWindowOverlay', () => {
       value: { width: 390, height: 844, addEventListener: vi.fn(), removeEventListener: vi.fn() },
     });
     const mediaStream = { id: 'media-stream-1' } as MediaStream;
-    const resizeTargetWindow = vi.fn();
+    const resizeTargetWindow = vi.fn((_sessionId: string, _payload: unknown) => 'resize-embedded');
     const requestTargets = vi.fn(async () => ({
       requestId: 'rw-1',
       targets: [makeTarget('app-1', 'TextEdit', 'app-window')],

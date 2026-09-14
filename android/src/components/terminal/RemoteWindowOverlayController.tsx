@@ -218,7 +218,7 @@ export interface RemoteWindowOverlayProps {
   resizeTargetWindow?: (
     sessionId: string,
     payload: Omit<RemoteWindowInputEventPayload, 'requestId'>,
-  ) => void;
+  ) => string;
   onInputDebug?: (event: RemoteWindowTouchInputDebugEvent) => void;
   bottomInsetPx?: number;
   bottomChromeInsetPx?: number;
@@ -372,7 +372,19 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     clientX: number;
     clientY: number;
   } | null>(null);
-  const lastRemoteFillResizeRef = useRef<{ targetId: string; width: number; height: number } | null>(null);
+  const appliedRemoteFillResizeRef = useRef<{
+    streamId: string;
+    targetId: string;
+    width: number;
+    height: number;
+  } | null>(null);
+  const pendingRemoteFillResizeRef = useRef<{
+    sequence: string;
+    streamId: string;
+    targetId: string;
+    width: number;
+    height: number;
+  } | null>(null);
   const longPressTimerRef = useRef<number | null>(null);
   const clearLongPressTimer = useCallback(() => {
     if (longPressTimerRef.current !== null) {
@@ -1036,22 +1048,20 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     const reference = resolveRemoteWindowTargetResizeSize({ viewport: fillReference });
     const width = reference.width;
     const height = reference.height;
-    const last = lastRemoteFillResizeRef.current;
+    const applied = appliedRemoteFillResizeRef.current;
+    const pending = pendingRemoteFillResizeRef.current;
     if (
       !force
-      && last
-      && last.targetId === currentLockedTarget.streamTargetId
-      && last.width === width
-      && last.height === height
+      && [applied, pending].some((delivery) => (
+        delivery?.streamId === currentLockedStreamId
+        && delivery.targetId === currentLockedTarget.streamTargetId
+        && delivery.width === width
+        && delivery.height === height
+      ))
     ) {
       return false;
     }
-    lastRemoteFillResizeRef.current = {
-      targetId: currentLockedTarget.streamTargetId,
-      width,
-      height,
-    };
-    resizeTargetWindow(activeSessionId, {
+    const sequence = resizeTargetWindow(activeSessionId, {
       streamId: currentLockedStreamId,
       targetId: currentLockedTarget.streamTargetId,
       event: {
@@ -1060,6 +1070,13 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
         height,
       },
     });
+    pendingRemoteFillResizeRef.current = {
+      sequence,
+      streamId: currentLockedStreamId,
+      targetId: currentLockedTarget.streamTargetId,
+      width,
+      height,
+    };
     return true;
   }, [activeSessionId, currentLockedStreamId, currentLockedTarget, embedded, resizeTargetWindow, state, surfaceSize]);
   const handleFullscreen = useCallback(() => {
@@ -1417,6 +1434,24 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
           ));
         }
         return;
+      }
+      if (msg.type === 'remote-window-input-ack') {
+        const pending = pendingRemoteFillResizeRef.current;
+        if (
+          pending?.sequence === msg.control.sequence
+          && pending.streamId === msg.payload.streamId
+          && pending.targetId === msg.payload.targetId
+        ) {
+          pendingRemoteFillResizeRef.current = null;
+          if (msg.control.accepted) {
+            appliedRemoteFillResizeRef.current = {
+              streamId: pending.streamId,
+              targetId: pending.targetId,
+              width: pending.width,
+              height: pending.height,
+            };
+          }
+        }
       }
       if (msg.type !== 'remote-window-input-ack' || msg.control.accepted !== true) {
         return;
