@@ -25,10 +25,12 @@ function resolveVariantStyle(variant: AmbientSelectVariant): CSSProperties {
 }
 
 export const AmbientSelect = forwardRef<HTMLSelectElement, AmbientSelectProps>(
-  function AmbientSelect({ variant = 'settings', style, ...props }, ref) {
+  function AmbientSelect({ variant = 'settings', style, className, ...props }, ref) {
+    const ambientClass = ['ambient-control', 'amb-select', 'amb-chamfer', className].filter(Boolean).join(' ');
     return (
       <select
         ref={ref}
+        className={ambientClass}
         style={{ ...resolveVariantStyle(variant), ...style }}
         {...props}
       />

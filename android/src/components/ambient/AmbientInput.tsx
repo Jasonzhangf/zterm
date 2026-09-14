@@ -25,10 +25,12 @@ function resolveVariantStyle(variant: AmbientInputVariant): CSSProperties {
 }
 
 export const AmbientInput = forwardRef<HTMLInputElement, AmbientInputProps>(
-  function AmbientInput({ variant = 'settings', style, ...props }, ref) {
+  function AmbientInput({ variant = 'settings', style, className, ...props }, ref) {
+    const ambientClass = ['ambient-control', 'amb-field', 'amb-chamfer', className].filter(Boolean).join(' ');
     return (
       <input
         ref={ref}
+        className={ambientClass}
         style={{ ...resolveVariantStyle(variant), ...style }}
         {...props}
       />

@@ -149,7 +149,7 @@ AmbientKeyBank
 
 ### Phase 2: Ambient 控件效果
 
-Phase 2 在控件化完成后接入视觉。
+Phase 2 在控件化完成后接入视觉。当前已接入生产 `android/src/ambient.css`，并给共享控件输出 ambient class；剩余项是双皮肤逐页渲染校验、阴影/留白校准和 emulator/真机截图证据。
 
 步骤：
 
@@ -192,8 +192,8 @@ Phase 2 在控件化完成后接入视觉。
 Phase 1 原始估算: 12~19d
 Phase 1 已投入: 约 3~4d（当前分支多个 commit）
 Phase 1 剩余: 0d（live 页面已控件化；TerminalView/server 例外）
-Phase 2: 5~6d
-总计剩余: 5~6d
+Phase 2: 5~6d（已开始 CSS 接入；剩余视觉校准与设备截图）
+总计剩余: 4~6d（仅 Phase 2 校准/截图）
 ```
 
 ## Goal Prompt

@@ -39,10 +39,12 @@ function resolveVariantStyle(variant: AmbientTextareaVariant): CSSProperties {
 }
 
 export const AmbientTextarea = forwardRef<HTMLTextAreaElement, AmbientTextareaProps>(
-  function AmbientTextarea({ variant = 'settings', style, ...props }, ref) {
+  function AmbientTextarea({ variant = 'settings', style, className, ...props }, ref) {
+    const ambientClass = ['ambient-control', 'amb-field', 'amb-chamfer', className].filter(Boolean).join(' ');
     return (
       <textarea
         ref={ref}
+        className={ambientClass}
         style={{ ...resolveVariantStyle(variant), ...style }}
         {...props}
       />

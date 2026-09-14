@@ -311,14 +311,16 @@ function resolveVariantStyle(
 
 export const AmbientButton = forwardRef<HTMLButtonElement, AmbientButtonProps>(
   function AmbientButton(
-    { variant = 'settings', selected = false, style, type = 'button', disabled, ...props },
+    { variant = 'settings', selected = false, style, type = 'button', disabled, className, ...props },
     ref,
   ) {
+    const ambientClass = ['ambient-control', 'amb-button', 'ambx-control', 'amb-chamfer', className].filter(Boolean).join(' ');
     return (
       <button
         ref={ref}
         type={type}
         disabled={disabled}
+        className={ambientClass}
         style={{
           ...commonButtonStyle,
           ...resolveVariantStyle(variant, selected),

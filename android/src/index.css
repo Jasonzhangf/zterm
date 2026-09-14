@@ -1,3 +1,5 @@
+@import "./ambient.css";
+
 * {
   box-sizing: border-box;
 }
@@ -92,6 +94,7 @@ label:focus-visible {
   outline: 2px solid var(--zterm-panel-accent, #128354);
   outline-offset: 2px;
 }
+
 
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -574,3 +577,35 @@ label:focus-visible {
 
 [data-settings-save-status][data-state="saved"] { color: #1f9d5d; font-weight: 700; }
 [data-settings-save-status][data-state="saving"] { color: #6e7781; font-weight: 700; }
+
+.zterm-terminal-shell[data-terminal-shell-skin="black"] {
+  --amb-light-x: -1;
+  --amb-light-y: -1;
+  --amb-key-light-intensity: 0.78;
+  --amb-fill-light-intensity: 0.58;
+  --amb-light-hue: 234;
+  --amb-light-saturation: 18%;
+  --amb-elevation: 1;
+  --amb-highlight-color: rgba(255,255,255,0.92);
+  --amb-lume-hue: 19;
+  --amb-albedo: color(srgb-linear 0.12 0.14 0.19);
+  --amb-mat-roughness: 0.82;
+  --amb-grain-amount: 0.4;
+  --amb-shade: 0.88;
+}
+
+.zterm-terminal-shell[data-terminal-shell-skin="light"] {
+  --amb-light-x: 1;
+  --amb-light-y: -1;
+  --amb-key-light-intensity: 0.42;
+  --amb-fill-light-intensity: 0.38;
+  --amb-light-hue: 236;
+  --amb-light-saturation: 12%;
+  --amb-elevation: 0;
+  --amb-highlight-color: rgba(255,255,255,0.9);
+  --amb-lume-hue: 210;
+  --amb-albedo: color(srgb-linear 0.93 0.94 0.97);
+  --amb-mat-roughness: 0.74;
+  --amb-grain-amount: 0.15;
+  --amb-shade: 1;
+}
