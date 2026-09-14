@@ -2341,6 +2341,9 @@
       "allowed_paths": [
         "src/components/terminal/ResourceBottomSheet.tsx",
         "src/components/terminal/ResourceBottomSheet.test.tsx",
+        "src/components/terminal/resource-drawer-gesture-runtime.ts",
+        "src/components/terminal/resource-drawer-gesture-runtime.test.ts",
+        "docs/decisions/2026-09-13-resource-drawer-gesture-scope.md",
         "src/pages/TerminalPage.tsx",
         "src/pages/TerminalPage.render-isolation.test.tsx",
         "src/components/terminal/FileTransferSheet.tsx",
@@ -2355,6 +2358,7 @@
       ],
       "required_gates": [
         "src/components/terminal/ResourceBottomSheet.test.tsx",
+        "src/components/terminal/resource-drawer-gesture-runtime.test.ts",
         "src/pages/TerminalPage.render-isolation.test.tsx",
         "src/components/terminal/FileTransferSheet.test.tsx",
         "src/lib/module-registry-truth.test.ts",

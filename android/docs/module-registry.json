@@ -2187,6 +2187,8 @@
         "src/pages/TerminalPageCopyMenu.tsx",
         "src/components/terminal/ResourceBottomSheet.tsx",
         "src/components/terminal/ResourceBottomSheet.test.tsx",
+        "src/components/terminal/resource-drawer-gesture-runtime.ts",
+        "src/components/terminal/resource-drawer-gesture-runtime.test.ts",
         "src/lib/terminal-shell-skin.ts"
       ]
     },

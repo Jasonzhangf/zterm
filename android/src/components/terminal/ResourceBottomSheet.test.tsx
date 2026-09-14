@@ -26,7 +26,7 @@ describe('ResourceBottomSheet', () => {
     expect(screen.getByTestId('resource-stream-pane')).toBeTruthy();
     expect(screen.getByTestId('remote-stream')).toBeTruthy();
     expect((screen.getByTestId('resource-bottom-sheet-overlay') as HTMLElement).style.zIndex).toBe('40');
-    expect(renderRemoteWindow).toHaveBeenLastCalledWith(true, 'stream', false, expect.any(Function));
+    expect(renderRemoteWindow).toHaveBeenLastCalledWith(true, 'stream', false);
   });
 
   it('accepts only http(s) URLs and renders the submitted page in a sandbox', () => {
@@ -51,9 +51,10 @@ describe('ResourceBottomSheet', () => {
     const onClose = vi.fn();
     render(<ResourceBottomSheet open renderFileBrowser={() => null} onClose={onClose} />);
     const overlay = screen.getByTestId('resource-bottom-sheet-overlay');
+    const handle = screen.getByLabelText('资源').querySelector('[data-resource-drawer-handle]') as HTMLElement;
     fireEvent.click(overlay);
-    fireEvent.touchStart(overlay, { touches: [{ clientY: 100 }] });
-    fireEvent.touchEnd(overlay, { changedTouches: [{ clientY: 180 }] });
+    fireEvent.touchStart(handle, { touches: [{ clientY: 100 }] });
+    fireEvent.touchEnd(handle, { changedTouches: [{ clientY: 180 }] });
     expect(onClose).toHaveBeenCalledTimes(2);
   });
 
@@ -67,57 +68,66 @@ describe('ResourceBottomSheet', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it('hides duplicate drawer chrome when the stream expands to fullscreen', () => {
-    const renderRemoteWindow = vi.fn((open: boolean) => open ? <div data-testid="stream-surface" /> : null);
+  it('keeps file page vertical drags inside the content scope', () => {
+    const onClose = vi.fn();
+    const onExpand = vi.fn();
     render(
       <ResourceBottomSheet
         open
-        initialTab="stream"
-        placement="bottom"
-        renderFileBrowser={() => null}
-        renderRemoteWindow={renderRemoteWindow}
-        onClose={vi.fn()}
+        renderFileBrowser={() => <div data-testid="remote-files">files</div>}
+        onClose={onClose}
+        onExpand={onExpand}
       />,
     );
 
-    expect(screen.getByRole('navigation', { name: '资源类型' })).toBeTruthy();
-    const overlay = screen.getByTestId('resource-bottom-sheet-overlay');
-    fireEvent.touchStart(overlay, { touches: [{ clientY: 300 }] });
-    fireEvent.touchEnd(overlay, { changedTouches: [{ clientY: 180 }] });
+    const files = screen.getByTestId('remote-files');
+    fireEvent.touchStart(files, { touches: [{ clientY: 150 }] });
+    fireEvent.touchMove(files, { touches: [{ clientY: 220 }] });
+    fireEvent.touchEnd(files, { changedTouches: [{ clientY: 220 }] });
 
-    expect(renderRemoteWindow).toHaveBeenLastCalledWith(true, 'stream', true, expect.any(Function));
-    expect(screen.queryByRole('navigation', { name: '资源类型' })).toBeNull();
-    expect(screen.queryByTestId('resource-bottom-sheet-grip')).toBeNull();
-    expect(screen.getByTestId('resource-bottom-sheet').style.height).toBe('100%');
+    fireEvent.touchStart(files, { touches: [{ clientY: 220 }] });
+    fireEvent.touchEnd(files, { changedTouches: [{ clientY: 140 }] });
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(onExpand).not.toHaveBeenCalled();
   });
 
-  it('restores drawer chrome when the expanded stream exits fullscreen', () => {
-    const renderRemoteWindow = vi.fn((
-      open: boolean,
-      _tab?: 'stream' | 'web',
-      _expanded?: boolean,
-      onExitFullscreen?: () => void,
-    ) => open ? <button type="button" onClick={onExitFullscreen}>退出串流全屏</button> : null);
+  it('keeps toolbar button gestures from driving drawer open/close actions', () => {
+    const onClose = vi.fn();
+    const onExpand = vi.fn();
+    render(<ResourceBottomSheet open renderFileBrowser={() => null} onClose={onClose} onExpand={onExpand} />);
+
+    const nav = screen.getByLabelText('资源类型');
+    fireEvent.touchStart(nav, { touches: [{ clientY: 120 }] });
+    fireEvent.touchEnd(nav, { changedTouches: [{ clientY: 220 }] });
+    fireEvent.touchStart(nav, { touches: [{ clientY: 220 }] });
+    fireEvent.touchEnd(nav, { changedTouches: [{ clientY: 120 }] });
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(onExpand).not.toHaveBeenCalled();
+  });
+
+  it('keeps stream pane vertical drags from expanding or closing the parent drawer', () => {
+    const onClose = vi.fn();
+    const onExpand = vi.fn();
     render(
       <ResourceBottomSheet
         open
         initialTab="stream"
-        placement="bottom"
         renderFileBrowser={() => null}
-        renderRemoteWindow={renderRemoteWindow}
-        onClose={vi.fn()}
+        renderRemoteWindow={() => <div data-testid="stream-surface" />}
+        onClose={onClose}
+        onExpand={onExpand}
       />,
     );
 
-    const overlay = screen.getByTestId('resource-bottom-sheet-overlay');
-    fireEvent.touchStart(overlay, { touches: [{ clientY: 300 }] });
-    fireEvent.touchEnd(overlay, { changedTouches: [{ clientY: 180 }] });
-    expect(screen.queryByRole('navigation', { name: '资源类型' })).toBeNull();
+    const pane = screen.getByTestId('resource-stream-pane');
+    fireEvent.touchStart(pane, { touches: [{ clientY: 240 }] });
+    fireEvent.touchEnd(pane, { changedTouches: [{ clientY: 100 }] });
+    fireEvent.touchStart(pane, { touches: [{ clientY: 100 }] });
+    fireEvent.touchEnd(pane, { changedTouches: [{ clientY: 240 }] });
 
-    fireEvent.click(screen.getByRole('button', { name: '退出串流全屏' }));
-
-    expect(screen.getByRole('navigation', { name: '资源类型' })).toBeTruthy();
-    expect(screen.getByTestId('resource-bottom-sheet-grip')).toBeTruthy();
-    expect(renderRemoteWindow).toHaveBeenLastCalledWith(true, 'stream', false, expect.any(Function));
+    expect(onClose).not.toHaveBeenCalled();
+    expect(onExpand).not.toHaveBeenCalled();
   });
 });

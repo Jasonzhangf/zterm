@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode, type TouchEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type PointerEvent, type ReactNode, type TouchEvent } from 'react';
+import {
+  createResourceDrawerGestureRuntime,
+  resolveResourceDrawerGestureContext,
+  RESOURCE_DRAWER_GESTURE_ATTRS,
+  RESOURCE_DRAWER_GESTURE_PAGE_IDS,
+  RESOURCE_DRAWER_GESTURE_SCOPE_IDS,
+} from './resource-drawer-gesture-runtime';
 
 type ResourceTab = 'files' | 'web' | 'stream';
 type ResourcePlacement = 'bottom' | 'end';
@@ -6,12 +13,7 @@ type ResourcePlacement = 'bottom' | 'end';
 export interface ResourceBottomSheetProps {
   open: boolean;
   renderFileBrowser: (open: boolean) => ReactNode;
-  renderRemoteWindow?: (
-    open: boolean,
-    tab?: 'stream' | 'web',
-    expanded?: boolean,
-    onExitFullscreen?: () => void,
-  ) => ReactNode;
+  renderRemoteWindow?: (open: boolean, tab?: 'stream' | 'web', expanded?: boolean, onExitFullscreen?: () => void) => ReactNode;
   webUrl?: string;
   onWebUrlChange?: (url: string) => void;
   onClose: () => void;
@@ -76,7 +78,7 @@ export function ResourceBottomSheet({
   const [responsivePlacement, setResponsivePlacement] = useState<ResourcePlacement>(() => (
     typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(min-width: 768px)').matches ? 'end' : 'bottom'
   ));
-  const touchStartY = useRef<number | null>(null);
+  const gestureRuntime = useRef(createResourceDrawerGestureRuntime());
   const previousOpenRef = useRef(open);
 
   useEffect(() => {
@@ -104,9 +106,7 @@ export function ResourceBottomSheet({
 
   const resolvedPlacement = placement || responsivePlacement;
   const streamExpanded = expanded && tab === 'stream';
-  const handleExitStreamFullscreen = useCallback(() => {
-    setExpanded(false);
-  }, []);
+  const handleExitStreamFullscreen = useCallback(() => setExpanded(false), []);
 
   const submitWebUrl = useCallback(() => {
     const value = draftUrl.trim();
@@ -123,21 +123,29 @@ export function ResourceBottomSheet({
     }
   }, [draftUrl, onWebUrlChange]);
 
+  const handleGestureStart = (key: string, target: EventTarget | null, clientY: number) => {
+    gestureRuntime.current.start(key, resolveResourceDrawerGestureContext(target), clientY);
+  };
+  const handleGestureEnd = (key: string, clientY: number) => {
+    const action = gestureRuntime.current.end(key, clientY);
+    if (action === 'close') onClose();
+    if (action === 'expand') {
+      setExpanded(true);
+      onExpand?.();
+    }
+  };
   const handleTouchStart = (event: TouchEvent<HTMLDivElement>) => {
-    touchStartY.current = event.touches[0]?.clientY ?? null;
+    handleGestureStart('touch', event.target, event.touches[0]?.clientY ?? 0);
   };
   const handleTouchEnd = (event: TouchEvent<HTMLDivElement>) => {
-    const start = touchStartY.current;
-    touchStartY.current = null;
     const end = event.changedTouches[0]?.clientY;
-    if (start !== null && end !== undefined) {
-      const delta = end - start;
-      if (delta > 64) onClose();
-      if (delta < -64) {
-        setExpanded(true);
-        onExpand?.();
-      }
-    }
+    if (end !== undefined) handleGestureEnd('touch', end);
+  };
+  const handlePointerStart = (event: PointerEvent<HTMLDivElement>) => {
+    handleGestureStart(`pointer:${event.pointerId}`, event.target, event.clientY);
+  };
+  const handlePointerEnd = (event: PointerEvent<HTMLDivElement>) => {
+    handleGestureEnd(`pointer:${event.pointerId}`, event.clientY);
   };
 
   const fileBrowserNode = renderFileBrowser(open && tab === 'files');
@@ -158,25 +166,32 @@ export function ResourceBottomSheet({
   return (
     <div
       data-testid="resource-bottom-sheet-overlay"
+      {...{ [RESOURCE_DRAWER_GESTURE_ATTRS.page]: RESOURCE_DRAWER_GESTURE_PAGE_IDS.backdrop, [RESOURCE_DRAWER_GESTURE_ATTRS.scope]: RESOURCE_DRAWER_GESTURE_SCOPE_IDS.drawerShell }}
       data-placement={resolvedPlacement}
       style={{ ...SHEET_OVERLAY, alignItems: resolvedPlacement === 'end' ? 'stretch' : 'flex-end', justifyContent: resolvedPlacement === 'end' ? 'flex-end' : 'stretch' }}
       onClick={onClose}
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
+      onPointerDown={handlePointerStart}
+      onPointerUp={handlePointerEnd}
+      onPointerCancel={(event) => gestureRuntime.current.cancel(`pointer:${event.pointerId}`)}
     >
       <section
         data-testid="resource-bottom-sheet"
         role="dialog"
         aria-modal="true"
         aria-label="资源"
+        {...{ [RESOURCE_DRAWER_GESTURE_ATTRS.page]: RESOURCE_DRAWER_GESTURE_PAGE_IDS.shell, [RESOURCE_DRAWER_GESTURE_ATTRS.scope]: RESOURCE_DRAWER_GESTURE_SCOPE_IDS.drawerShell }}
           style={{ ...SHEET, width: resolvedPlacement === 'end' ? 'min(560px, 94vw)' : '100%', height: expanded || resolvedPlacement === 'end' ? '100%' : SHEET.height, borderRadius: resolvedPlacement === 'end' || expanded ? 0 : SHEET.borderRadius, borderBottom: resolvedPlacement === 'end' || expanded ? '1px solid var(--zterm-panel-border)' : 0, borderRight: 0 }}
       onClick={(event) => event.stopPropagation()}
       >
         {!streamExpanded ? <div
-          data-testid="resource-bottom-sheet-grip"
+          {...{ [RESOURCE_DRAWER_GESTURE_ATTRS.handle]: 'true' }}
           style={{ display: 'flex', justifyContent: 'center', padding: '10px 0 4px' }}
-          onTouchStart={handleTouchStart}
-          onTouchEnd={handleTouchEnd}
+          onTouchStart={(event) => { event.stopPropagation(); handleTouchStart(event); }}
+          onTouchEnd={(event) => { event.stopPropagation(); handleTouchEnd(event); }}
+          onPointerDown={(event) => { event.stopPropagation(); handlePointerStart(event); }}
+          onPointerUp={(event) => { event.stopPropagation(); handlePointerEnd(event); }}
         >
           <span aria-hidden="true" style={{ width: 38, height: 4, borderRadius: 99, background: 'var(--zterm-panel-border)' }} />
         </div> : null}
@@ -185,7 +200,7 @@ export function ResourceBottomSheet({
           <div style={{ textAlign: 'center', fontSize: 22, fontWeight: 800, letterSpacing: '-0.02em' }}>预览</div>
           <button type="button" aria-label="下载当前资源" disabled={!onDownload} onClick={onDownload} style={{ ...buttonStyle, border: 0, background: 'var(--zterm-panel-surface)', fontSize: 16, opacity: onDownload ? 1 : 0.5 }}>下载</button>
         </header> : null}
-        {!streamExpanded ? <nav aria-label="资源类型" style={{ display: 'flex', gap: 6, padding: '10px 16px 8px' }} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+        {!streamExpanded ? <nav aria-label="资源类型" {...{ [RESOURCE_DRAWER_GESTURE_ATTRS.page]: RESOURCE_DRAWER_GESTURE_PAGE_IDS.toolbar, [RESOURCE_DRAWER_GESTURE_ATTRS.scope]: RESOURCE_DRAWER_GESTURE_SCOPE_IDS.toolbar }} style={{ display: 'flex', gap: 6, padding: '10px 16px 8px' }} onTouchStart={(event) => event.stopPropagation()} onTouchEnd={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onPointerUp={(event) => event.stopPropagation()}>
           {(['files', 'stream', 'web'] as const).map((item) => (
             <button
               key={item}
@@ -203,23 +218,28 @@ export function ResourceBottomSheet({
             </button>
           ))}
         </nav> : null}
-        <div style={{ minHeight: 0, flex: 1, display: tab === 'files' ? 'block' : 'none' }}>
+        <div data-resource-drawer-page={RESOURCE_DRAWER_GESTURE_PAGE_IDS.files} data-resource-drawer-scope={RESOURCE_DRAWER_GESTURE_SCOPE_IDS.drawerContentPage} style={{ minHeight: 0, flex: 1, display: tab === 'files' ? 'block' : 'none' }} onTouchStart={(event) => event.stopPropagation()} onTouchEnd={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onPointerUp={(event) => event.stopPropagation()}>
           {fileBrowserNode}
         </div>
         {tab === 'stream' ? (
           <div
             data-testid="resource-stream-pane"
+            data-resource-drawer-page={RESOURCE_DRAWER_GESTURE_PAGE_IDS.stream}
+            data-resource-drawer-scope={RESOURCE_DRAWER_GESTURE_SCOPE_IDS.remoteWindowSurface}
             style={{ minHeight: 0, flex: 1, position: 'relative', overflow: 'visible' }}
             onTouchStart={(event) => event.stopPropagation()}
             onTouchMove={(event) => event.stopPropagation()}
             onTouchEnd={(event) => event.stopPropagation()}
             onTouchCancel={(event) => event.stopPropagation()}
+            onPointerDown={(event) => event.stopPropagation()}
+            onPointerUp={(event) => event.stopPropagation()}
+            onPointerCancel={(event) => event.stopPropagation()}
           >
             {remoteWindowNode || <div style={{ display: 'grid', placeItems: 'center', height: '100%', color: 'var(--zterm-panel-muted)' }}>窗口串流不可用</div>}
           </div>
         ) : null}
         {tab === 'web' ? (
-          <div data-testid="resource-web-pane" style={{ minHeight: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 10, padding: '0 14px 14px' }}>
+          <div data-testid="resource-web-pane" data-resource-drawer-page={RESOURCE_DRAWER_GESTURE_PAGE_IDS.web} data-resource-drawer-scope={RESOURCE_DRAWER_GESTURE_SCOPE_IDS.remoteWindowSurface} onTouchStart={(event) => event.stopPropagation()} onTouchEnd={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onPointerUp={(event) => event.stopPropagation()} style={{ minHeight: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 10, padding: '0 14px 14px' }}>
             {remoteWindowNode ? remoteWindowNode : <form onSubmit={(event) => { event.preventDefault(); submitWebUrl(); }} style={{ display: 'flex', gap: 8 }}>
               <input
                 aria-label="网页地址"
