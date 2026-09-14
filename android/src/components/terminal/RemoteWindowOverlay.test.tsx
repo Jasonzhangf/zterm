@@ -3274,6 +3274,72 @@ describe('RemoteWindowOverlay', () => {
     expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('floating');
   });
 
+  it('keeps the bound video projection alive when an embedded stream expands fullscreen', async () => {
+    const mediaStream = { id: 'media-stream-embedded-fullscreen' } as MediaStream;
+    const startDeferred = createDeferred<{ streamId: string; mediaStream: MediaStream }>();
+    const stopStream = vi.fn(() => true);
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-embedded-fullscreen',
+      targets: [makeTarget('app-embedded-fullscreen', 'TextEdit', 'app-window')],
+    }));
+    const startStream = vi.fn((
+      _sessionId: string,
+      _target: RemoteWindowStreamTargetManifest,
+      _streamId: string,
+    ) => startDeferred.promise);
+    const renderOverlay = (embeddedFullscreen: boolean) => (
+      <RemoteWindowOverlay
+        activeSessionId="session-embedded-fullscreen"
+        embedded
+        embeddedFullscreen={embeddedFullscreen}
+        requestTargets={requestTargets}
+        startStream={startStream}
+        stopStream={stopStream}
+      />
+    );
+    const view = render(renderOverlay(false));
+
+    fireEvent.click(await screen.findByTestId('remote-window-target-app-embedded-fullscreen'));
+    await waitFor(() => expect(startStream).toHaveBeenCalledTimes(1));
+    const surface = screen.getByTestId('remote-window-video-surface');
+    Object.defineProperty(surface, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({
+        x: 0,
+        y: 0,
+        left: 0,
+        top: 0,
+        right: 300,
+        bottom: 200,
+        width: 300,
+        height: 200,
+        toJSON: () => ({}),
+      }),
+    });
+    await flushRemoteWindowSurfaceLayout();
+    await screen.findByTestId('remote-window-video-projection');
+    const streamId = startStream.mock.calls[0]?.[2] as string;
+    await act(async () => {
+      startDeferred.resolve({ streamId, mediaStream });
+      await startDeferred.promise;
+    });
+    const embeddedVideo = await screen.findByTestId('remote-window-video') as HTMLVideoElement;
+    await waitFor(() => expect(embeddedVideo.srcObject).toBe(mediaStream));
+    await revealVideoThroughBoundPlayback(embeddedVideo);
+
+    view.rerender(renderOverlay(true));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('fullscreen');
+    });
+    const fullscreenVideo = screen.getByTestId('remote-window-video') as HTMLVideoElement;
+    expect(fullscreenVideo).toBe(embeddedVideo);
+    expect(fullscreenVideo.srcObject).toBe(mediaStream);
+    expect(screen.getByTestId('remote-window-video-wallpaper').style.opacity).toBe('0');
+    expect(startStream).toHaveBeenCalledTimes(1);
+    expect(stopStream).not.toHaveBeenCalled();
+  });
+
   it('never resizes an iTerm2 target when entering fullscreen fill', async () => {
     const target = makeTarget('iterm-app', 'iTerm2', 'app-window');
     target.videoTarget.appBundleId = 'com.googlecode.iterm2';

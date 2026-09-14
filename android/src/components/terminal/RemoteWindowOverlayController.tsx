@@ -2827,7 +2827,12 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       }}
       style={videoSurfaceStyle}
     >
-      {embeddedProjectionStyle ? <div data-testid="remote-window-video-projection" style={embeddedProjectionStyle}><div data-testid="remote-window-video-content" style={videoContentStyle}>{lockedVideoContent}</div></div> : <div data-testid="remote-window-video-content" style={videoContentStyle}>{lockedVideoContent}</div>}
+      <div
+        data-testid={embeddedProjectionStyle ? 'remote-window-video-projection' : undefined}
+        style={embeddedProjectionStyle ?? { position: 'absolute', inset: 0 }}
+      >
+        <div data-testid="remote-window-video-content" style={videoContentStyle}>{lockedVideoContent}</div>
+      </div>
       {compositeLayout ? (
         <div data-testid="remote-window-composite-strip" data-no-drag="true" style={styles.compositeStrip}>
           <div
