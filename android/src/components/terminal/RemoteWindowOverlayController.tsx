@@ -1015,10 +1015,10 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     force = false,
   ) => {
     if (
-      state.phase !== 'targetLocked'
+      state.phase !== 'targetLocked' || !state.streamStarted
       || (!embedded && state.mode !== 'fullscreen')
       || !activeSessionId
-      || !currentLockedStreamId
+      || !currentLockedStreamId || activeStreamIdRef.current !== currentLockedStreamId
       || !currentLockedTarget || !canResizeRemoteWindowTarget(currentLockedTarget)
       || !resizeTargetWindow
     ) {

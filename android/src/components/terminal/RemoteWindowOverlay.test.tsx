@@ -2827,6 +2827,83 @@ describe('RemoteWindowOverlay', () => {
     });
   });
 
+  it('waits for embedded receiver startup to commit before resizing the target window', async () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 });
+    const target = makeTarget('app-pending', 'TextEdit', 'app-window');
+    const mediaStream = { id: 'media-stream-pending' } as MediaStream;
+    const resizeTargetWindow = vi.fn();
+    const startDeferred = createDeferred<{ streamId: string; mediaStream: MediaStream }>();
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-pending',
+      targets: [target],
+    }));
+    const startStream = vi.fn((
+      _sessionId: string,
+      _target: RemoteWindowStreamTargetManifest,
+      _streamId: string,
+    ) => startDeferred.promise);
+
+    render(
+      <RemoteWindowOverlay
+        activeSessionId="session-1"
+        embedded
+        embeddedFullscreen
+        requestTargets={requestTargets}
+        startStream={startStream}
+        resizeTargetWindow={resizeTargetWindow}
+      />,
+    );
+
+    await screen.findByTestId('remote-window-target-app-pending');
+    fireEvent.click(screen.getByTestId('remote-window-target-app-pending'));
+    await waitFor(() => {
+      expect(startStream).toHaveBeenCalledTimes(1);
+    });
+    const surface = await screen.findByTestId('remote-window-video-surface');
+    Object.defineProperty(surface, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({
+        x: 0,
+        y: 0,
+        left: 0,
+        top: 0,
+        right: 390,
+        bottom: 844,
+        width: 390,
+        height: 844,
+        toJSON: () => ({}),
+      }),
+    });
+    await act(async () => {
+      window.dispatchEvent(new Event('resize'));
+      await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+    });
+    expect(resizeTargetWindow).not.toHaveBeenCalled();
+
+    const streamId = startStream.mock.calls[0]?.[2] as string;
+    await act(async () => {
+      startDeferred.resolve({ streamId, mediaStream });
+      await startDeferred.promise;
+    });
+
+    await waitFor(() => {
+      expect(resizeTargetWindow).toHaveBeenCalledTimes(1);
+    });
+    expect(resizeTargetWindow).toHaveBeenCalledWith(
+      'session-1',
+      expect.objectContaining({
+        streamId,
+        targetId: 'app-pending',
+        event: {
+          kind: 'window-resize',
+          width: 1080,
+          height: 2337,
+        },
+      }),
+    );
+  });
+
   it('never resizes an iTerm2 target when entering fullscreen fill', async () => {
     const target = makeTarget('iterm-app', 'iTerm2', 'app-window');
     target.videoTarget.appBundleId = 'com.googlecode.iterm2';
