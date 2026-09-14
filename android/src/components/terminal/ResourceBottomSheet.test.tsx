@@ -26,7 +26,7 @@ describe('ResourceBottomSheet', () => {
     expect(screen.getByTestId('resource-stream-pane')).toBeTruthy();
     expect(screen.getByTestId('remote-stream')).toBeTruthy();
     expect((screen.getByTestId('resource-bottom-sheet-overlay') as HTMLElement).style.zIndex).toBe('40');
-    expect(renderRemoteWindow).toHaveBeenLastCalledWith(true, 'stream', false);
+    expect(renderRemoteWindow).toHaveBeenLastCalledWith(true, 'stream', false, expect.any(Function));
   });
 
   it('accepts only http(s) URLs and renders the submitted page in a sandbox', () => {
