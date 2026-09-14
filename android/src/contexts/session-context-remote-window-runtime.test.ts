@@ -30,39 +30,39 @@ function makeSocket() {
   } as any;
 }
 
-function formatSocketReadyState(ws: { readyState?: number } | null) {
-  if (!ws) {
-    return 'missing';
-  }
-  switch (ws.readyState) {
-    case 0:
-      return 'connecting';
-    case 1:
-      return 'open';
-    case 2:
-      return 'closing';
-    case 3:
-      return 'closed';
-    default:
-      return `unknown:${ws.readyState}`;
-  }
-}
-
-function makeDaemonConnection(wsOrFactory: any = makeSocket()) {
-  const readSocket = (sessionId: string, purpose?: string) => (
-    typeof wsOrFactory === 'function' ? wsOrFactory(sessionId, purpose) : wsOrFactory
+function makeDaemonConnection(resourceOrFactory: any = makeSocket()) {
+  const readResource = (sessionId: string) => (
+    typeof resourceOrFactory === 'function'
+      ? resourceOrFactory(sessionId)
+      : {
+          sessionId,
+          socket: resourceOrFactory,
+          terminalSocket: null,
+          targetKey: 'daemon=mac-studio',
+          channel: null,
+        }
   );
   const readOpenSessionSocket = vi.fn((sessionId: string, purpose: string) => {
-    const ws = readSocket(sessionId, purpose) || null;
+    const resource = readResource(sessionId) || null;
+    const ws = resource?.socket || null;
     if (ws && ws.readyState === 1) {
       return ws;
     }
-    throw new Error(`${purpose} requires an open daemon connection (socket=${formatSocketReadyState(ws)}, target=daemon=mac-studio, channel=missing)`);
+    const socketState = !ws
+      ? 'missing'
+      : ws.readyState === 0
+        ? 'connecting'
+        : ws.readyState === 2
+          ? 'closing'
+          : ws.readyState === 3
+            ? 'closed'
+            : `unknown:${ws.readyState}`;
+    throw new Error(`${purpose} requires an open daemon connection (socket=${socketState}, target=${resource?.targetKey || 'daemon=mac-studio'}, channel=${resource?.channel?.state || 'missing'})`);
   });
   return {
-    readSessionResource: vi.fn((sessionId: string) => ({ sessionId, socket: readSocket(sessionId) || null })),
-    readSessionSocket: vi.fn((sessionId: string) => readSocket(sessionId) || null),
-    readSessionTargetSocket: vi.fn((sessionId: string) => readSocket(sessionId) || null),
+    readSessionResource: vi.fn(readResource),
+    readSessionSocket: vi.fn((sessionId: string) => readResource(sessionId)?.socket || null),
+    readSessionTargetSocket: vi.fn((sessionId: string) => readResource(sessionId)?.terminalSocket || null),
     readOpenSessionSocket,
     sendSessionRaw: vi.fn(),
     sendSessionMessage: vi.fn(),
@@ -319,6 +319,219 @@ describe('session context remote window runtime', () => {
       targetCatalogCache,
       now: () => 2,
     })).rejects.toThrow('Remote window catalog requires an open daemon connection (socket=closed');
+  });
+
+  it('waits for the daemon channel to open before sending the catalog request when only socket=missing channel=opening is reported', async () => {
+    let readAttempts = 0;
+    const ws = makeSocket();
+    const terminalSocket = makeSocket();
+    let channelState: 'opening' | 'open' = 'opening';
+    const daemonConnection = makeDaemonConnection((sessionId: string) => {
+      readAttempts += 1;
+      return {
+        sessionId,
+        socket: readAttempts >= 3 ? ws : null,
+        terminalSocket,
+        targetKey: 'daemon=mac-studio',
+        channel: {
+          channelId: 'channel:session-1',
+          sessionId: 'session-1',
+          sessionName: 'tmux-1',
+          targetKey: 'daemon=mac-studio',
+          state: channelState,
+          bodySubscribed: true,
+          openedAt: 1,
+          closedAt: null,
+        },
+      };
+    });
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-wait-success',
+      targets: [],
+      errors: [],
+    }));
+    let now = 1_000;
+    const sleep = vi.fn(async () => {
+      now += 60;
+      if (readAttempts >= 2) {
+        channelState = 'open';
+      }
+    });
+
+    await expect(requestRemoteWindowTargetsRuntime({
+      sessionId: 'session-1',
+      sessions: [{ ...baseSession, state: 'connecting', bridgeHost: '100.66.1.82', bridgePort: 3333 }],
+      daemonConnection,
+      remoteWindowMessageRuntime: { requestTargets },
+      sendSocketPayload: vi.fn(),
+      now: () => now,
+      sleep,
+      catalogOpenTimeoutMs: 2_000,
+      catalogOpenPollIntervalMs: 50,
+    })).resolves.toMatchObject({ requestId: 'rw-wait-success' });
+
+    expect(readAttempts).toBe(3);
+    expect(sleep).toHaveBeenCalled();
+    expect(requestTargets).toHaveBeenCalledTimes(1);
+    expect(requestTargets).toHaveBeenCalledWith('session-1', {
+      ws,
+      sendSocketPayload: expect.any(Function),
+    });
+  });
+
+  it('keeps waiting when the opening channel has not projected its terminal socket yet', async () => {
+    let reads = 0;
+    const targetSocket = makeSocket();
+    const daemonConnection = makeDaemonConnection((sessionId: string) => {
+      reads += 1;
+      return {
+        sessionId,
+        socket: reads >= 3 ? targetSocket : null,
+        terminalSocket: reads >= 3 ? targetSocket : null,
+        targetKey: 'daemon=mac-studio',
+        channel: {
+          channelId: 'channel:session-1',
+          sessionId: 'session-1',
+          sessionName: 'tmux-1',
+          targetKey: 'daemon=mac-studio',
+          state: reads >= 3 ? 'open' : 'opening',
+          bodySubscribed: true,
+          openedAt: 1,
+          closedAt: null,
+        },
+      };
+    });
+    const requestTargets = vi.fn(async () => ({ requestId: 'rw-delayed-socket', targets: [], errors: [] }));
+    let now = 1_000;
+    const sleep = vi.fn(async () => { now += 50; });
+
+    await expect(requestRemoteWindowTargetsRuntime({
+      sessionId: 'session-1',
+      sessions: [{ ...baseSession, state: 'connecting', bridgeHost: '100.66.1.82', bridgePort: 3333 }],
+      daemonConnection,
+      remoteWindowMessageRuntime: { requestTargets },
+      sendSocketPayload: vi.fn(),
+      now: () => now,
+      sleep,
+      catalogOpenTimeoutMs: 2_000,
+      catalogOpenPollIntervalMs: 50,
+    })).resolves.toMatchObject({ requestId: 'rw-delayed-socket' });
+
+    expect(reads).toBe(3);
+    expect(sleep).toHaveBeenCalled();
+    expect(requestTargets).toHaveBeenCalledWith('session-1', expect.objectContaining({ ws: targetSocket }));
+  });
+
+  it('sends the catalog request over an already-open target mux socket while the channel is opening', async () => {
+    const targetSocket = makeSocket();
+    const daemonConnection = makeDaemonConnection((sessionId: string) => ({
+      sessionId,
+      socket: null,
+      terminalSocket: targetSocket,
+      targetKey: 'daemon=mac-studio',
+      channel: {
+        channelId: 'channel:session-1',
+        sessionId: 'session-1',
+        sessionName: 'tmux-1',
+        targetKey: 'daemon=mac-studio',
+        state: 'opening',
+        bodySubscribed: true,
+        openedAt: 1,
+        closedAt: null,
+      },
+    }));
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-target-open',
+      targets: [],
+      errors: [],
+    }));
+    const sleep = vi.fn(async () => undefined);
+
+    await expect(requestRemoteWindowTargetsRuntime({
+      sessionId: 'session-1',
+      sessions: [{ ...baseSession, state: 'connecting', bridgeHost: '100.66.1.82', bridgePort: 3333 }],
+      daemonConnection,
+      remoteWindowMessageRuntime: { requestTargets },
+      sendSocketPayload: vi.fn(),
+      now: () => 1_000,
+      sleep,
+    })).resolves.toMatchObject({ requestId: 'rw-target-open' });
+
+    expect(sleep).not.toHaveBeenCalled();
+    expect(requestTargets).toHaveBeenCalledWith('session-1', {
+      ws: targetSocket,
+      sendSocketPayload: expect.any(Function),
+    });
+  });
+
+  it('surfaces the explicit open daemon connection error when the socket stays missing past the channel-open wait timeout', async () => {
+    const terminalSocket = makeSocket();
+    const daemonConnection = makeDaemonConnection((sessionId: string) => ({
+      sessionId,
+      socket: null,
+      terminalSocket,
+      targetKey: 'daemon=mac-studio',
+      channel: {
+        channelId: 'channel:session-1',
+        sessionId: 'session-1',
+        sessionName: 'tmux-1',
+        targetKey: 'daemon=mac-studio',
+        state: 'opening',
+        bodySubscribed: true,
+        openedAt: 1,
+        closedAt: null,
+      },
+    }));
+    let now = 1_000;
+    const sleep = vi.fn(async () => {
+      now += 200;
+    });
+
+    await expect(requestRemoteWindowTargetsRuntime({
+      sessionId: 'session-1',
+      sessions: [{ ...baseSession, state: 'connecting', bridgeHost: '100.66.1.82', bridgePort: 3333 }],
+      daemonConnection,
+      remoteWindowMessageRuntime: { requestTargets: vi.fn() },
+      sendSocketPayload: vi.fn(),
+      now: () => now,
+      sleep,
+      catalogOpenTimeoutMs: 100,
+      catalogOpenPollIntervalMs: 50,
+    })).rejects.toThrow('Remote window catalog requires an open daemon connection (socket=missing');
+
+    expect(sleep.mock.calls.length).toBeGreaterThan(0);
+  });
+
+  it('does not wait for an open channel when the resource already reports the channel closed', async () => {
+    const daemonConnection = makeDaemonConnection((sessionId: string) => ({
+      sessionId,
+      socket: null,
+      terminalSocket: null,
+      targetKey: 'daemon=mac-studio',
+      channel: {
+        channelId: 'channel:session-1',
+        sessionId: 'session-1',
+        sessionName: 'tmux-1',
+        targetKey: 'daemon=mac-studio',
+        state: 'closed',
+        bodySubscribed: false,
+        openedAt: 1,
+        closedAt: 2,
+      },
+    }));
+    const sleep = vi.fn(async () => undefined);
+
+    await expect(requestRemoteWindowTargetsRuntime({
+      sessionId: 'session-1',
+      sessions: [{ ...baseSession, state: 'connecting', bridgeHost: '100.66.1.82', bridgePort: 3333 }],
+      daemonConnection,
+      remoteWindowMessageRuntime: { requestTargets: vi.fn() },
+      sendSocketPayload: vi.fn(),
+      now: () => 1_000,
+      sleep,
+    })).rejects.toThrow('Remote window catalog requires an open daemon connection (socket=missing');
+
+    expect(sleep).not.toHaveBeenCalled();
   });
 
   it('rejects a missing session id before touching transport state', async () => {

@@ -213,6 +213,54 @@ export function selectRemoteWindowTarget(
   };
 }
 
+export function resolveFreshRemoteWindowTarget(
+  selectedTarget: RemoteWindowStreamTargetManifest,
+  freshTargets: RemoteWindowStreamTargetManifest[],
+): RemoteWindowStreamTargetManifest | null {
+  const exactTarget = freshTargets.find((target) => (
+    target.streamTargetId === selectedTarget.streamTargetId
+  ));
+  if (exactTarget) {
+    return exactTarget;
+  }
+
+  const selectedVideoTarget = selectedTarget.videoTarget;
+  const exactWindowMatches = freshTargets.filter((target) => (
+    target.videoTarget.kind === selectedVideoTarget.kind
+    && target.videoTarget.windowId === selectedVideoTarget.windowId
+    && target.videoTarget.appBundleId === selectedVideoTarget.appBundleId
+    && target.videoTarget.pid === selectedVideoTarget.pid
+  ));
+  if (exactWindowMatches.length === 1) {
+    return exactWindowMatches[0];
+  }
+
+  const appBundleId = selectedVideoTarget.appBundleId?.trim() || '';
+  const pid = selectedVideoTarget.pid;
+  if (selectedVideoTarget.kind !== 'app-window' || !appBundleId || !pid) {
+    return null;
+  }
+  const appMatches = freshTargets.filter((target) => (
+    target.videoTarget.kind === 'app-window'
+    && target.videoTarget.appBundleId?.trim() === appBundleId
+    && target.videoTarget.pid === pid
+  ));
+  return appMatches.length === 1 ? appMatches[0] : null;
+}
+
+export function selectRemoteWindowTargetFromCatalog(
+  state: RemoteWindowOverlayState,
+  target: RemoteWindowStreamTargetManifest,
+  catalogTargets: RemoteWindowStreamTargetManifest[],
+  mode: RemoteWindowOverlayMode,
+): RemoteWindowOverlayState {
+  const stateWithFreshCatalog = state.phase === 'pickerOpen' || state.phase === 'targetLocked'
+    ? { ...state, targets: catalogTargets }
+    : state;
+  const selected = selectRemoteWindowTarget(stateWithFreshCatalog, target.streamTargetId, mode);
+  return selected.phase === 'targetLocked' ? { ...selected, target } : selected;
+}
+
 const ITERM2_APP_BUNDLE_ID = 'com.googlecode.iterm2';
 
 /** iTerm2 is a terminal host; resizing its captured window changes the user's shell geometry. */

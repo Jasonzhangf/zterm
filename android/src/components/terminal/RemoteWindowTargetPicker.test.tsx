@@ -100,4 +100,25 @@ describe('RemoteWindowTargetPicker view owner', () => {
     fireEvent.click(screen.getByTestId('remote-window-app-group-com-google-Chrome-42'));
     expect(onSelectTarget).toHaveBeenCalledWith(chromeTarget);
   });
+
+  it('keeps the drawer picker header titled and statused instead of only showing close', () => {
+    render(<RemoteWindowTargetPicker
+      phase="pickerOpen"
+      targets={[target('app-1')]}
+      errors={[]}
+      errorMessage={null}
+      catalogRefreshing
+      itermPaneTargetsExpanded={false}
+      onToggleItermPaneTargets={vi.fn()}
+      onSelectTarget={vi.fn()}
+      onRefresh={vi.fn()}
+      onClose={vi.fn()}
+      embedded
+    />);
+
+    const header = screen.getByTestId('remote-window-embedded-picker-header');
+    expect(header.textContent).toContain('远程窗口');
+    expect(header.textContent).toContain('1 个目标 · 更新中');
+    expect(header.querySelector('button')).toBeTruthy();
+  });
 });

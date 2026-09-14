@@ -2187,6 +2187,8 @@
         "src/pages/TerminalPageCopyMenu.tsx",
         "src/components/terminal/ResourceBottomSheet.tsx",
         "src/components/terminal/ResourceBottomSheet.test.tsx",
+        "src/components/terminal/resource-drawer-gesture-runtime.ts",
+        "src/components/terminal/resource-drawer-gesture-runtime.test.ts",
         "src/lib/terminal-shell-skin.ts"
       ]
     },
@@ -2403,6 +2405,7 @@
         "src/components/terminal/remote-window-overlay-storage.ts",
         "src/components/terminal/remote-window-overlay-helpers.ts",
         "src/components/terminal/remote-window-overlay-styles.ts",
+        "src/components/terminal/useRemoteWindowLockedPortal.ts",
         "src/components/terminal/remote-window-icons.tsx",
         "src/components/terminal/RemoteWindowDeveloperDiagnostics.tsx",
         "src/components/terminal/RemoteWindowLockedToolbar.tsx",
@@ -2428,6 +2431,7 @@
         "src/components/terminal/useRemoteWindowFocusSwitch.test.tsx",
         "src/components/terminal/useRemoteWindowScreenshot.ts",
         "src/components/terminal/useRemoteWindowScreenshot.test.tsx",
+        "src/components/terminal/useRemoteWindowSelectionAdmission.ts",
         "src/server/remote-window-layout-planner.ts",
         "src/server/remote-window-layout-planner.test.ts"
       ]
