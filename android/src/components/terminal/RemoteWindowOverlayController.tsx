@@ -219,9 +219,7 @@ export interface RemoteWindowOverlayProps {
   ) => void;
   resizeTargetWindow?: (sessionId: string, payload: Omit<RemoteWindowInputEventPayload, 'requestId'>) => string;
   onInputDebug?: (event: RemoteWindowTouchInputDebugEvent) => void;
-  bottomInsetPx?: number;
-  bottomChromeInsetPx?: number;
-  embedded?: boolean; embeddedFullscreen?: boolean;
+  bottomInsetPx?: number; bottomChromeInsetPx?: number; embedded?: boolean; embeddedFullscreen?: boolean; onExitEmbeddedFullscreen?: () => void;
   onOpenResourceDrawer?: (tab: 'web' | 'stream') => void;
   onOpenStateChange?: (open: boolean) => void;
   onBodySubscriptionSuppressedChange?: (suppressed: boolean) => void;
@@ -271,9 +269,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   sendInput,
   resizeTargetWindow,
   onInputDebug,
-  bottomInsetPx = 0,
-  bottomChromeInsetPx = 0,
-  embedded = false, embeddedFullscreen = false,
+  bottomInsetPx = 0, bottomChromeInsetPx = 0, embedded = false, embeddedFullscreen = false, onExitEmbeddedFullscreen,
   onOpenResourceDrawer,
   onOpenStateChange,
   onBodySubscriptionSuppressedChange,
@@ -1008,11 +1004,11 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   }, [inputContext, inputContextKey, onInputContextChange]);
   const handleShrink = useCallback(() => {
     resetFullscreenViewport();
-    // 缩回浮窗时强制退出进行中的双流切流（overview-crop-visible 等），
-    // 防止浮窗残留「video 隐藏 + canvas 无内容」的黑屏状态。
+    // 缩回浮窗时强制退出双流切流，防止浮窗残留「video 隐藏 + canvas 无内容」的黑屏状态。
     setDualStreamSwitch((current) => resetRemoteWindowDualStreamSwitch(current));
     setState((current) => shrinkRemoteWindowOverlay(current));
-  }, [resetFullscreenViewport, setDualStreamSwitch]);
+    if (embedded) onExitEmbeddedFullscreen?.();
+  }, [embedded, onExitEmbeddedFullscreen, resetFullscreenViewport, setDualStreamSwitch]);
   const handleRemoteClose = useCallback(() => state.phase === 'targetLocked' && Boolean(currentLockedTarget) && sendRemoteWindowInputEventsForTarget({ sessionId: activeSessionId || null, streamId: currentLockedStreamId, target: currentLockedTarget!, events: [{ kind: 'close-window' }] }) && handleClose(), [activeSessionId, currentLockedStreamId, currentLockedTarget, handleClose, sendRemoteWindowInputEventsForTarget, state.phase]);
   const requestRemoteTargetFillResize = useCallback((
     force = false,
