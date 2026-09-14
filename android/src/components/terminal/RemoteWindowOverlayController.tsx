@@ -434,7 +434,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   const {
     invalidatePlayback,
     liveDiagnostics: liveDiag,
-    publishDebugSnapshot: publishVideoDebugSnapshot,
+    publishDebugSnapshot: publishVideoDebugSnapshot, rearmBoundPlayback: rearmBoundVideoPlayback,
     requestBoundPlayback: requestBoundVideoPlayback,
     restoreRetainedPlayback: restoreRetainedReceiverPlayback,
     subscribeDecodedFrame,
@@ -499,7 +499,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   const lastReportedBodySuppressionRef = useRef<boolean | null>(null);
   const lastReportedInputContextKeyRef = useRef<string | null>(null);
   const [embeddedLockedPortalAnchorRef, embeddedLockedPortalHost] =
-    useRemoteWindowLockedPortal(embedded, state.phase === 'targetLocked', state.phase === 'targetLocked' && state.mode === 'fullscreen');
+    useRemoteWindowLockedPortal(embedded, state.phase === 'targetLocked', state.phase === 'targetLocked' && state.mode === 'fullscreen', rearmBoundVideoPlayback);
   const clearSurfacePointerState = useCallback(() => {
     clearLongPressTimer();
     surfacePointersRef.current.clear(); surfaceGestureRef.current = null; surfaceLocalPanStartRef.current = null;
