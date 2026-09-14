@@ -379,6 +379,48 @@ describe('session context remote window runtime', () => {
     });
   });
 
+  it('sends the catalog request over an already-open target mux socket while the channel is opening', async () => {
+    const targetSocket = makeSocket();
+    const daemonConnection = makeDaemonConnection((sessionId: string) => ({
+      sessionId,
+      socket: null,
+      terminalSocket: targetSocket,
+      targetKey: 'daemon=mac-studio',
+      channel: {
+        channelId: 'channel:session-1',
+        sessionId: 'session-1',
+        sessionName: 'tmux-1',
+        targetKey: 'daemon=mac-studio',
+        state: 'opening',
+        bodySubscribed: true,
+        openedAt: 1,
+        closedAt: null,
+      },
+    }));
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-target-open',
+      targets: [],
+      errors: [],
+    }));
+    const sleep = vi.fn(async () => undefined);
+
+    await expect(requestRemoteWindowTargetsRuntime({
+      sessionId: 'session-1',
+      sessions: [{ ...baseSession, state: 'connecting', bridgeHost: '100.66.1.82', bridgePort: 3333 }],
+      daemonConnection,
+      remoteWindowMessageRuntime: { requestTargets },
+      sendSocketPayload: vi.fn(),
+      now: () => 1_000,
+      sleep,
+    })).resolves.toMatchObject({ requestId: 'rw-target-open' });
+
+    expect(sleep).not.toHaveBeenCalled();
+    expect(requestTargets).toHaveBeenCalledWith('session-1', {
+      ws: targetSocket,
+      sendSocketPayload: expect.any(Function),
+    });
+  });
+
   it('surfaces the explicit open daemon connection error when the socket stays missing past the channel-open wait timeout', async () => {
     const terminalSocket = makeSocket();
     const daemonConnection = makeDaemonConnection((sessionId: string) => ({
