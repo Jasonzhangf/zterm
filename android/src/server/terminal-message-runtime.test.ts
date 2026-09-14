@@ -866,6 +866,52 @@ describe('terminal message runtime explicit error truth', () => {
     expect(sendBufferHeadToSession).not.toHaveBeenCalled();
   });
 
+  it('treats a repeated body-subscription true as an attach lease renewal, not a reattach', async () => {
+    const mirror = createReadyMirror();
+    const {
+      runtime,
+      sessions,
+      sendBufferHeadToSession,
+      scheduleMirrorLiveSync,
+      attachTmux,
+    } = createRuntime({ mirror });
+    const session = createSession();
+    session.bodySubscribed = true;
+    session.sessionAttachHeartbeatAt = 1;
+    sessions.set(session.id, session);
+    const connection = createConnection(session.id);
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'body-subscription',
+      payload: { version: 1, subscribed: true },
+    })));
+
+    expect(session.bodySubscribed).toBe(true);
+    expect(session.sessionAttachHeartbeatAt).toBeGreaterThan(1);
+    expect(attachTmux).not.toHaveBeenCalled();
+    expect(sendBufferHeadToSession).not.toHaveBeenCalled();
+    expect(scheduleMirrorLiveSync).not.toHaveBeenCalled();
+    expect(connection.transport.close).not.toHaveBeenCalled();
+  });
+
+  it('clears the attach lease heartbeat when body demand is released', async () => {
+    const mirror = createReadyMirror();
+    const { runtime, sessions } = createRuntime({ mirror });
+    const session = createSession();
+    session.sessionAttachHeartbeatAt = Date.now();
+    sessions.set(session.id, session);
+    const connection = createConnection(session.id);
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'body-subscription',
+      payload: { version: 1, subscribed: false },
+    })));
+
+    expect(session.bodySubscribed).toBe(false);
+    expect(session.sessionAttachHeartbeatAt).toBeUndefined();
+    expect(connection.transport.close).not.toHaveBeenCalled();
+  });
+
   it('does not echo legacy clientSessionId in session-ticket because daemon owns no client state', async () => {
     const { runtime, sendTransportMessage } = createRuntime();
     const connection = createConnection(null);

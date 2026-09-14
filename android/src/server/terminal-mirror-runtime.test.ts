@@ -4,6 +4,7 @@ import { buildChangedRangesBufferSyncPayload } from './buffer-sync-contract';
 import type { TerminalSession, SessionMirror } from './terminal-runtime-types';
 import { findChangedIndexedRanges } from './canonical-buffer';
 import type { TerminalCell } from '../lib/types';
+import type { AdaptiveWidthOwnershipStore, AdaptiveWidthOwnershipRecord } from './adaptive-width-ownership-store';
 
 function createSession(id = 'session-1'): TerminalSession {
   return {
@@ -39,6 +40,7 @@ function createRuntime(overrides: {
   getMirrorKey?: (sessionName: string, backend?: 'tmux' | 'herdr') => string;
   mirrorBufferChanged?: (mirror: SessionMirror, previousStartIndex: number, previousLines: TerminalCell[][]) => Array<{ startIndex: number; endIndex: number }>;
   waitMs?: (delayMs: number) => Promise<void>;
+  adaptiveWidthOwnershipStore?: AdaptiveWidthOwnershipStore;
 } = {}) {
   const sessions = new Map<string, TerminalSession>();
   const mirrors = new Map<string, SessionMirror>();
@@ -102,6 +104,7 @@ function createRuntime(overrides: {
     waitMs: overrides.waitMs || (async () => {}),
     logTimePrefix: () => '2026-05-01 00:00:00',
     runTmux,
+    adaptiveWidthOwnershipStore: overrides.adaptiveWidthOwnershipStore,
     closeTransportSubscriber,
     getSessionMirror: (session: TerminalSession) => (session.mirrorKey ? mirrors.get(session.mirrorKey) || null : null),
   });
@@ -133,6 +136,29 @@ function expectOnlyAdaptiveWidthTmuxMutation(runTmux: { mock: { calls: unknown[]
     }
     expect(args.join(' ')).not.toContain('@zterm_adaptive_width_');
   }
+}
+
+function createOwnershipStore(
+  initialRecords: AdaptiveWidthOwnershipRecord[] = [],
+  overrides: { removeError?: Error } = {},
+) {
+  let records = initialRecords;
+  return {
+    read: vi.fn(() => records),
+    upsert: vi.fn((record: Omit<AdaptiveWidthOwnershipRecord, 'updatedAt'>) => {
+      records = [
+        ...records.filter((entry) => entry.sessionName !== record.sessionName),
+        { ...record, updatedAt: '2026-09-13T00:00:00.000Z' },
+      ];
+    }),
+    remove: vi.fn((sessionName: string) => {
+      if (overrides.removeError) {
+        throw overrides.removeError;
+      }
+      records = records.filter((entry) => entry.sessionName !== sessionName);
+    }),
+    records: () => records,
+  };
 }
 
 describe('terminal mirror runtime lifecycle truth', () => {
@@ -969,6 +995,32 @@ describe('terminal mirror runtime lifecycle truth', () => {
     expectOnlyAdaptiveWidthTmuxMutation(runTmux);
   });
 
+  it('persists daemon-owned adaptive width ownership without tmux option state', async () => {
+    const ownership = createOwnershipStore();
+    const { runtime, sessions, runTmux } = createRuntime({
+      adaptiveWidthOwnershipStore: ownership,
+    });
+    const session = createSession('session-1');
+    sessions.set(session.id, session);
+
+    await runtime.attachTmux(session, {
+      sessionName: 'demo',
+      cols: 88,
+      rows: 24,
+      widthMode: 'adaptive-phone',
+    });
+
+    expect(ownership.upsert).toHaveBeenCalledWith({
+      sessionName: 'demo',
+      paneId: '%1',
+      baseline: { cols: 120, rows: 40 },
+      appliedCols: 88,
+      appliedRows: 24,
+    });
+    expect(ownership.records()).toHaveLength(1);
+    expectOnlyAdaptiveWidthTmuxMutation(runTmux);
+  });
+
   it('updates adaptive resize lease by resizing tmux width only', async () => {
     const { runtime, sessions, mirrors, runTmux } = createRuntime();
     const session = createSession('session-1');
@@ -999,7 +1051,10 @@ describe('terminal mirror runtime lifecycle truth', () => {
   });
 
   it('clears adaptive lease when a subscriber switches to mirror-fixed and releases tmux width ownership', async () => {
-    const { runtime, sessions, mirrors, runTmux } = createRuntime();
+    const ownership = createOwnershipStore();
+    const { runtime, sessions, mirrors, runTmux } = createRuntime({
+      adaptiveWidthOwnershipStore: ownership,
+    });
     const session = createSession('session-1');
     sessions.set(session.id, session);
 
@@ -1022,6 +1077,35 @@ describe('terminal mirror runtime lifecycle truth', () => {
     expectOnlyAdaptiveWidthTmuxMutation(runTmux);
     expect(mirrors.get('demo')?.cols).toBe(120);
     expect(session.adaptiveWidthCols).toBeNull();
+    expect(ownership.remove).toHaveBeenCalledWith('demo');
+    expect(ownership.records()).toEqual([]);
+  });
+
+  it('restores baseline width before unsetting window-size during final release', async () => {
+    const { runtime, sessions, runTmux } = createRuntime();
+    const session = createSession('session-1');
+    sessions.set(session.id, session);
+
+    await runtime.attachTmux(session, {
+      sessionName: 'demo',
+      cols: 100,
+      rows: 40,
+      widthMode: 'adaptive-phone',
+    });
+    runTmux.mockClear();
+
+    runtime.handleAdaptiveResize(session, {
+      cols: 60,
+      widthMode: 'mirror-fixed',
+    });
+
+    const calls = runTmux.mock.calls as unknown as Array<[string[]]>;
+    const resizeCallIndex = calls.findIndex(([args]) => args?.[0] === 'resize-window');
+    const unsetCallIndex = calls.findIndex(([args]) => args?.[0] === 'set-window-option');
+    expect(resizeCallIndex).toBeGreaterThanOrEqual(0);
+    expect(unsetCallIndex).toBeGreaterThan(resizeCallIndex);
+    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '120']);
+    expect(runTmux).toHaveBeenCalledWith(['set-window-option', '-u', '-t', '=demo', 'window-size']);
   });
 
   it('re-sorts adaptive leases when the narrowest subscriber disappears', async () => {
@@ -1143,7 +1227,10 @@ describe('terminal mirror runtime lifecycle truth', () => {
   });
 
   it('retries retained adaptive width cleanup before re-creating a mirror', async () => {
-    const { runtime, sessions, mirrors, runTmux } = createRuntime();
+    const ownership = createOwnershipStore();
+    const { runtime, sessions, mirrors, runTmux } = createRuntime({
+      adaptiveWidthOwnershipStore: ownership,
+    });
     const session = createSession('session-1');
     sessions.set(session.id, session);
 
@@ -1170,6 +1257,33 @@ describe('terminal mirror runtime lifecycle truth', () => {
 
     expect(runTmux).toHaveBeenCalledWith(['set-window-option', '-u', '-t', '=demo', 'window-size']);
     expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '120']);
+    expect(ownership.remove).toHaveBeenCalledWith('demo');
+    expect(ownership.records()).toEqual([]);
+  });
+
+  it('keeps released tmux state authoritative when journal cleanup fails', async () => {
+    const ownership = createOwnershipStore([], {
+      removeError: new Error('journal remove failed'),
+    });
+    const { runtime, sessions, mirrors, runTmux } = createRuntime({
+      adaptiveWidthOwnershipStore: ownership,
+    });
+    const session = createSession('session-1');
+    sessions.set(session.id, session);
+
+    await runtime.attachTmux(session, {
+      sessionName: 'demo',
+      cols: 70,
+      rows: 40,
+      widthMode: 'adaptive-phone',
+    });
+    runTmux.mockClear();
+
+    expect(runtime.destroyMirror(mirrors.get('demo')!, 'daemon shutdown')).toBe(true);
+    expect(mirrors.has('demo')).toBe(false);
+    expect(session.mirrorKey).toBeNull();
+    expect(runTmux).toHaveBeenCalledWith(['set-window-option', '-u', '-t', '=demo', 'window-size']);
+    expect(ownership.remove).toHaveBeenCalledWith('demo');
   });
 
   it('blocks mirror creation while retained adaptive width cleanup cannot succeed', async () => {
@@ -1279,6 +1393,70 @@ describe('terminal mirror runtime lifecycle truth', () => {
 
     expect(restored).toBe(0);
     expectOnlyAdaptiveWidthTmuxMutation(runTmux);
+  });
+
+  it('restores daemon-owned adaptive width baseline on daemon start and clears the journal', () => {
+    const ownership = createOwnershipStore([{
+      sessionName: 'demo',
+      paneId: '%1',
+      baseline: { cols: 120, rows: 40 },
+      appliedCols: 55,
+      appliedRows: 24,
+      updatedAt: '2026-09-13T00:00:00.000Z',
+    }]);
+    const { runtime, runTmux } = createRuntime({
+      adaptiveWidthOwnershipStore: ownership,
+    });
+
+    const restored = runtime.restorePersistedAdaptiveWidthBaselines(['demo']);
+
+    expect(restored).toBe(1);
+    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '120']);
+    expect(runTmux).toHaveBeenCalledWith(['set-window-option', '-u', '-t', '=demo', 'window-size']);
+    expect(ownership.remove).toHaveBeenCalledWith('demo');
+    expect(ownership.records()).toEqual([]);
+  });
+
+  it('does not restore a stale journal when the tmux pane identity changed', () => {
+    const ownership = createOwnershipStore([{
+      sessionName: 'demo',
+      paneId: '%old-pane',
+      baseline: { cols: 120, rows: 40 },
+      appliedCols: 55,
+      appliedRows: 24,
+      updatedAt: '2026-09-13T00:00:00.000Z',
+    }]);
+    const { runtime, runTmux } = createRuntime({
+      adaptiveWidthOwnershipStore: ownership,
+    });
+
+    const restored = runtime.restorePersistedAdaptiveWidthBaselines(['demo']);
+
+    expect(restored).toBe(0);
+    expect(runTmux).not.toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '120']);
+    expect(runTmux).not.toHaveBeenCalledWith(['set-window-option', '-u', '-t', '=demo', 'window-size']);
+    expect(ownership.remove).toHaveBeenCalledWith('demo');
+    expect(ownership.records()).toEqual([]);
+  });
+
+  it('removes stale journal records for tmux sessions that no longer exist', () => {
+    const ownership = createOwnershipStore([{
+      sessionName: 'old-session',
+      paneId: '%1',
+      baseline: { cols: 120, rows: 40 },
+      appliedCols: 55,
+      appliedRows: 24,
+      updatedAt: '2026-09-13T00:00:00.000Z',
+    }]);
+    const { runtime } = createRuntime({
+      adaptiveWidthOwnershipStore: ownership,
+    });
+
+    const restored = runtime.restorePersistedAdaptiveWidthBaselines(['demo']);
+
+    expect(restored).toBe(0);
+    expect(ownership.remove).toHaveBeenCalledWith('old-session');
+    expect(ownership.records()).toEqual([]);
   });
 
   it('does not resize orphaned narrow tmux windows on daemon start', () => {

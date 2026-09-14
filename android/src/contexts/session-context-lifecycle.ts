@@ -6,6 +6,7 @@ import type { SessionManagerState } from './session-context-core';
 import type { SessionReconnectStore } from '../lib/session-reconnect-store';
 import { getPrimarySessionPullState, hasActiveSessionPullState } from '../lib/session-pull-state-helpers';
 
+export const FOREGROUND_ATTACH_LEASE_RENEW_INTERVAL_MS = 30_000;
 
 /** Transport health signals for cadence decisions */
 export interface TransportHealth {
@@ -250,6 +251,10 @@ export function useSessionContextLifecycle(options: {
     markResumeTail?: boolean;
     allowReconnectIfUnavailable?: boolean;
   }) => boolean;
+  /** Foreground attach-lease renewal: resends `body-subscription true` for the
+   *  current attach set so the daemon keeps those tmux mirrors held. Background
+   *  stops renewing, which lets the daemon release every session. */
+  renewForegroundSessionAttachLease: (reason: string) => void;
   resolveActiveHeadRefreshTickMs: (sessionId?: string | null) => number;
   resolveHeadStalePingMs: (sessionId?: string | null) => number;
   clearSessionHandshakeTimeout: (sessionId: string) => void;
@@ -406,6 +411,16 @@ export function useSessionContextLifecycle(options: {
       });
     });
   }, [options.ensureActiveSessionFresh, options.state.liveSessionIds, options.state.sessions]);
+
+  useEffect(() => {
+    if (options.appForegroundActive === false) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      options.renewForegroundSessionAttachLease('foreground-attach-heartbeat');
+    }, FOREGROUND_ATTACH_LEASE_RENEW_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [options.appForegroundActive, options.renewForegroundSessionAttachLease]);
 
   useEffect(() => {
     if (options.appForegroundActive === false) {

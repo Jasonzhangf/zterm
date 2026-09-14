@@ -217,6 +217,7 @@ tmux -> daemon mirror writer -> daemon mirror store -> read api -> client
   - 同一 tmux mirror 多个 adaptive lease 必须按 active holders 聚合最窄 `cols`，并只在 `applyAdaptiveTmuxWidth()` 内请求 `tmux resize-window -x <cols>` 让 tmux 自己重排。
   - 持有 lease 的 transport close/detach、切到 `mirror-fixed`、invalid cols 或 heartbeat 过期后必须清理该 subscriber metadata 并重算；最后一个 lease 消失必须在 `releaseAdaptiveTmuxWidth()` 恢复/释放 tmux 宽度控制权。
   - `widthMode`、`terminalWidthMode`、`requestedAdaptiveCols` 不得写入 daemon 业务真相；`resize-window` / `window-size` 只允许出现在 adaptive lease owner 的 apply/release 函数里。
+  - tmux 的 `resize-window -x` 会把 window 切成 `window-size=manual`；final release 必须先恢复 baseline 宽度，最后再执行 `set-window-option -u window-size`。若先 unset 再 resize，resize 会再次留下 `manual`，iTerm2 等真实 tmux client 会被冻结在 daemon 最后一帧尺寸，历史/重排表现异常。
   - daemon 请求 tmux resize 后不得自写 `mirror.rows/cols`；mirror 内容和尺寸仍只能来自 tmux capture/readback。
 - 好网 fast lane 与弱网 slow lane 必须由红测锁定；性能 trace 只记录 timestamp/duration/bytes/line count/id/kind 这类 metadata，禁止记录真实 terminal payload 内容。
 - 生产性能 trace 必须按 `traceId + mirrorRevision + subscriberId` 关联独立样本；同 session 的不同 revision 不得被拼成一个伪 latency。完整阶段是 `capture -> canonicalize -> mirror commit -> send -> client rx -> buffer apply -> RAF -> render commit`，只允许有界 metadata ring 和 p50/p95/p99 summary。
@@ -600,6 +601,8 @@ UI 只负责容器位置与裁切：
 - daemon 在 `buffer-head-request / buffer-sync-request` 路径里触发 tmux capture
 - daemon 根据 client 状态决定“要不要先刷新一下 mirror 再回复”
 - daemon 因单个 subscriber detach 就销毁仍有 sibling 的 mirror，或把 mirror release 错误升级成 `tmux kill-session`
+- daemon 默认不释放 session，或把 physical transport 保活（`mux-ping`）当成 session attach 心跳；正确语义是「前台 `body-subscription true` 续约 attach lease，后台 ping 只保活 physical transport」
+- client 进后台后还靠 wake-lock 宽限期继续持有 tmux session / mirror
 - daemon 把 cursor / selection / transient visual state 直接写进 buffer cells
 - client viewport 变窄就改写 daemon mirror / tmux 宽度
 - `mirror-fixed` 下把长行本地重排成手机宽度

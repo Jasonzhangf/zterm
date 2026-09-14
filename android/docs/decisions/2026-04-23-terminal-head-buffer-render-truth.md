@@ -251,6 +251,21 @@ daemon transport connection
 - legacy non-mux subscriber 释放 mirror ownership 时保留 physical transport 和 logical session；后续 `body-subscription { subscribed:true }` 必须能在该物理 transport 上重新 attach mirror。
 - client 收到 `code:'no_body_demand'` 时只能进入业务 idle，禁止 target control query 或 transport reconnect；后续显式 active/live demand 才允许重开 channel。
 
+### 1.4.2 session attach lease（daemon 默认释放）
+
+daemon 的默认状态是**释放所有 session**；session 只有在被有效前台心跳续约时才会被持有/attach。这条规则把「physical transport 保活」和「session attach 持有」彻底分开：
+
+- 前台心跳 = attach/hold session 的唯一真源：client 前台时周期性发送 `body-subscription { subscribed:true }`，daemon 收到即刷新该 subscriber 的 `sessionAttachHeartbeatAt`。
+- 后台心跳 = 只保活 physical transport：`mux-ping` 只刷新物理 transport liveness，**不得**刷新 session attach lease，也**不得**刷新 adaptive width lease。
+- daemon 维护 per-subscriber `sessionAttachHeartbeatAt`，TTL 固定为 `TERMINAL_SESSION_ATTACH_LEASE_MS`（90s）。lease 过期时只允许：
+  1. 把该 subscriber 的 body demand 置为 false；
+  2. 关闭 logical mux channel，并发送 `mux-channel-closed { code:'no_body_demand' }`；
+  3. 释放 mirror/capture/adaptive width；
+  4. **保留** physical target transport。
+- client 进入后台必须立即清空 live session 集合并发送 `body-subscription { subscribed:false }`；禁止用「5 分钟宽限期」这类 wake-lock 延迟继续持有 tmux session。
+- client 回到前台时重新发送 `body-subscription { subscribed:true }`，daemon 必须在**同一个 physical transport** 上重开 logical channel 并重新 attach mirror。
+- daemon heartbeat sweep 必须把「physical transport stale」与「session attach lease expired」作为两条独立判定：前者关闭 physical transport，后者只关闭 logical channel。mux 连接即使所有 channel 都已因 lease 过期释放，仍必须继续用 `mux-ping` 校验 physical liveness，避免死客户端永久占用 idle transport。
+
 ### 1.4 daemon 不允许持有客户端 UI/viewport 语义
 
 daemon 不允许维护：
@@ -610,7 +625,8 @@ UI shell 只负责：
 - `adaptive-phone` 的 attach / reconnect 几何真相也必须干净：
   - client 可以携带**最近一次已测得的 adaptive cols**
   - client **不得**携带 runtime rows
-  - daemon 只允许消费 `cols`，`rows` 继续取 mirror / tmux baseline
+- daemon 只允许消费 `cols`，`rows` 继续取 mirror / tmux baseline
+- final release 的顺序必须是：先恢复 baseline width，最后 `set-window-option -u window-size`。tmux `resize-window -x` 自身会重新把 window 切回 `manual`；先 unset 再 resize 会再次留下 daemon-owned manual state，导致 iTerm2 等真实 tmux client 的窗口/历史重排被冻结。
   - 若当前没有已测得的 adaptive cols，则 attach 不得凭 UI 容器高度/抖动构造脏 geometry
 
 ### 4.3 app lifecycle 规则

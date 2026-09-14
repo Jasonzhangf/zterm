@@ -305,7 +305,7 @@ export function createSessionInfraFacadeRuntime(options: {
 
   const transportAccessors = createTransportInfraAccessorsRuntime(options.transportRuntimeStoreRef);
 
-  function reconcilePhysicalBodySubscriptions(reason: string) {
+  function reconcilePhysicalBodySubscriptions(reason: string, renewOptions?: { renewOnly?: boolean }) {
     const liveSessionIds = resolvePhysicalBodySubscribedSessionIdsRuntime({
       activeSessionId: options.stateRef.current.activeSessionId,
       liveSessionIds: options.stateRef.current.liveSessionIds,
@@ -314,6 +314,9 @@ export function createSessionInfraFacadeRuntime(options: {
     for (const session of options.stateRef.current.sessions) {
       const channel = transportAccessors.readSessionTerminalChannel(session.id);
       const subscribed = liveSessionIds.has(session.id);
+      if (renewOptions?.renewOnly && !subscribed) {
+        continue;
+      }
       setSessionChannelBodySubscribed(options.transportRuntimeStoreRef.current.terminalChannels, session.id, subscribed);
       if (subscribed && channel?.state === 'closed') {
         options.reopenSessionTerminalChannelRef?.current(session.id);

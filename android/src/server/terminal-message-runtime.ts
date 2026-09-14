@@ -26,6 +26,10 @@ import {
   type DaemonControlGatewayDeps,
   type DaemonControlGatewayRuntime,
 } from './daemon-control-gateway-runtime';
+import {
+  clearSessionAttachHeartbeat,
+  markSessionAttachHeartbeat,
+} from './terminal-session-attach-lease-runtime';
 import type { RemoteWindowStreamDaemonRuntime } from './remote-window-stream-daemon';
 import type { DaemonInputQueueRuntime } from './daemon-input-queue-runtime';
 import { createTerminalMuxChannelRuntime } from './terminal-mux-channel-runtime';
@@ -406,9 +410,17 @@ export function createTerminalMessageRuntime(
           });
           break;
         }
+        const wasBodySubscribed = session.bodySubscribed !== false;
         session.bodySubscribed = message.payload.subscribed;
         const mirror = deps.getSessionMirror(session);
         if (message.payload.subscribed) {
+          markSessionAttachHeartbeat(session);
+          // A renewal from an already-subscribed session is an attach
+          // heartbeat, not a reattach. Attach work stays owned by the
+          // false->true transition or by a missing mirror.
+          if (wasBodySubscribed && mirror) {
+            break;
+          }
           if (mirror?.lifecycle === 'ready') {
             deps.sendBufferHeadToSession(session, mirror);
             deps.scheduleMirrorLiveSync(mirror, 0);
@@ -433,9 +445,12 @@ export function createTerminalMessageRuntime(
               });
             }
           }
-        } else if (mirror) {
-          deps.releaseMirrorIfNoBodyDemand(mirror, 'body subscription released');
-          deps.scheduleMirrorLiveSync(mirror, 0);
+        } else {
+          clearSessionAttachHeartbeat(session);
+          if (mirror) {
+            deps.releaseMirrorIfNoBodyDemand(mirror, 'body subscription released');
+            deps.scheduleMirrorLiveSync(mirror, 0);
+          }
         }
         break;
       }

@@ -1,37 +1,57 @@
-# 2026-09-13 daemon body-demand release verification
+# 2026-09-14 daemon session attach-lease release verification
 
 Candidate: amended `fix/daemon-release-without-body-demand` commit under
 `playground/daemon-release-body-false`; exact reviewed SHA is supplied as the
 review `commit` argument for this series.
 
+## Frozen semantics under test
+
+- Daemon default is **release all sessions**. A session is held/attached only
+  while a valid foreground attach lease is renewed.
+- Foreground heartbeat = `body-subscription { subscribed:true }`; it renews
+  `sessionAttachHeartbeatAt` (TTL `TERMINAL_SESSION_ATTACH_LEASE_MS` = 90s).
+- Background heartbeat = `mux-ping`; it renews physical transport liveness only
+  and must never renew the session attach lease or adaptive width lease.
+- On lease expiry the daemon closes only the logical mux channel
+  (`mux-channel-closed { code:'no_body_demand' }`), releases
+  mirror/capture/adaptive width, and preserves the physical target transport.
+
 ## Gates run
 
-- L0 static/build:
-  - `pnpm --dir android run build` passed.
-  - Type-check, repo layout gate, feature registry, and Android prebuild suite passed inside `build`.
+- L0 static:
+  - `npx tsc --noEmit -p android/tsconfig.json` passed.
+  - `git diff --check` passed.
+  - `pnpm --dir android run test:feature-registry` passed (104 tests).
+  - Registry gates `module-registry-truth`, `edge-registry-truth`,
+    `module-import-graph-truth` passed (29 tests).
 - L1 focused runtime tests:
-  - `pnpm exec vitest run src/server/terminal-mirror-runtime.test.ts src/server/terminal-message-runtime.test.ts src/server/terminal-runtime.detached-session.test.ts src/contexts/session-context-transport-runtime.test.ts src/contexts/session-context-transport-orchestration-runtime.test.ts src/lib/android-connection-service-socket.test.ts`
-  - 181 tests passed.
-- L2 daemon/tmux real loop:
-  - `pnpm --dir android run daemon:mirror:close-loop`
-  - All 9 replay + strict audit cases passed:
-    `codex-live`, `top-live`, `vim-live`, `initial-sync`, `local-input-echo`, `long-input-echo`, `external-input-echo`, `daemon-restart-recover`, `schedule-fire`.
-- L5 packaged APK:
-  - `pnpm --dir android run build:android` passed.
-  - versionName: `0.1.3.2950`
-  - versionCode: `1100029500`
-  - APK: `android/native/android/app/build/outputs/apk/debug/app-debug.apk`
-  - SHA-256: `276cb4d34f41fecf32d073273d243509a09c4542cd41dc904f2f7722da809770`
-  - The build also prepared the local daemon update channel under `~/.zterm/updates`; Relay publication was not requested.
-  - Installed on AVD `Medium_Phone_API_36.1` with `adb install -r`; install returned `Success`.
-  - `dumpsys package com.zterm.android` shows `versionName=0.1.3.2950`,
-    `versionCode=1100029500`, `lastUpdateTime=2026-09-14 10:38:57`.
-  - `am start -n com.zterm.android/.MainActivity` launched; `mFocusedApp` shows
-    `com.zterm.android/.MainActivity`, process `pidof com.zterm.android` is alive,
-    and logcat showed no `FATAL`/`AndroidRuntime` crash.
+  - Server lease/transport/bridge/message suite:
+    `terminal-daemon-runtime`, `terminal-bridge-runtime`,
+    `terminal-message-runtime`, `terminal-session-attach-lease-runtime`,
+    `server.transport-lifecycle-truth` — 72 tests passed.
+  - Client lifecycle/handoff suite:
+    `session-context-lifecycle`, `useOpenTabLifecycleEffects` — 35 tests passed.
+  - Client integration suite `SessionContext.ws-refresh` — 139 tests passed.
+  - Combined focused rerun: 10 files, 157 tests passed.
+- L2 daemon/tmux real protocol loop (candidate daemon PID-scoped restart, new bundle):
+  - `node android/scripts/daemon-attach-lease-smoke.mjs 3344 <token> <session> resubscribe`
+    - `foreground-hold`: mirror lifecycle `ready`.
+    - `background-release`: `mux-channel-closed code=no_body_demand`,
+      `physicalOpen=true`.
+    - `background-ping-only`: `attached=false`, `subscribers=0`,
+      `physicalOpen=true`.
+    - `foreground-reattach`: same transport, mirror `attached=true`.
+  - `node android/scripts/daemon-attach-lease-smoke.mjs 3344 <token> <session> lease-expiry`
+    - Daemon log:
+      `session attach lease expired session=zterm-attach-lease-expiry subscriber=<id>`
+    - `lease-expiry-release`: `attached=false`, `physicalOpen=true`.
 
 ## Explicit gaps
 
-- The emulator install/launch verifies packaged APK installation and app entry, but does
-  not yet automate a full end-to-end daemon/tmux body unsubscribe/resubscribe renderer
-  smoke on the device. That remains a manual/future device loop gap.
+- No packaged APK build/install/device renderer smoke is included in this revision.
+  The live proof above is a daemon protocol loop plus client unit/integration tests;
+  an on-device background/foreground renderer smoke remains a device-loop gap.
+- Pre-existing failures unrelated to this change (reproduced on clean `HEAD`):
+  `src/contexts/session-context-infra-runtime.test.ts` (traversal candidate
+  ordering) and `src/server/server.mirror-capture-truth.test.ts` (mirror geometry
+  write scan). Neither is touched by this change.

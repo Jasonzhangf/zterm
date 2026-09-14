@@ -85,6 +85,11 @@ export interface TerminalTransportSubscriber {
   backend?: 'tmux' | 'herdr';
   mirrorKey: string | null;
   bodySubscribed?: boolean;
+  /** Last valid foreground attach heartbeat for this session. The daemon holds
+   *  the tmux mirror only while this lease is renewed by `body-subscription
+   *  true`; a stale lease releases the session without touching the physical
+   *  transport. */
+  sessionAttachHeartbeatAt?: number;
   adaptiveWidthCols?: number | null;
   adaptiveWidthRows?: number | null;
   adaptiveWidthHeartbeatAt?: number;

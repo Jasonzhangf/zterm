@@ -87,6 +87,7 @@ import {
   createRemoteWindowStreamDaemonRuntime,
 } from './remote-window-stream-daemon';
 import { createTerminalPerformanceTraceStore } from '@zterm/shared/terminal/performance-trace';
+import { createAdaptiveWidthOwnershipStore } from './adaptive-width-ownership-store';
 
 const DAEMON_CONFIG = resolveDaemonRuntimeConfig();
 const PORT = DAEMON_CONFIG.port || DEFAULT_BRIDGE_PORT;
@@ -129,6 +130,7 @@ const UPLOAD_DIR = join(WTERM_HOME_DIR, 'uploads');
 const DOWNLOADS_DIR = join(homedir(), 'Downloads', 'zterm');
 const LOG_DIR = join(WTERM_HOME_DIR, 'logs');
 const ATTACHMENTS_DIR = join(WTERM_HOME_DIR, 'attachments');
+const ADAPTIVE_WIDTH_OWNERSHIP_STORE = createAdaptiveWidthOwnershipStore();
 const APP_UPDATE_VERSION_CODE = Number.parseInt(process.env.ZTERM_APP_UPDATE_VERSION_CODE || '', 10);
 const APP_UPDATE_VERSION_NAME = (process.env.ZTERM_APP_UPDATE_VERSION_NAME || '').trim();
 const APP_UPDATE_MANIFEST_URL = (process.env.ZTERM_APP_UPDATE_MANIFEST_URL || '').trim();
@@ -296,6 +298,7 @@ const terminalRuntime = createTerminalRuntime({
   waitMs: (delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)),
   runTmux: (args) => terminalControlRuntime.runTmux(args),
   buildExactTmuxSessionTarget: (sessionName) => terminalControlRuntime.buildExactTmuxSessionTarget(sessionName),
+  adaptiveWidthOwnershipStore: ADAPTIVE_WIDTH_OWNERSHIP_STORE,
   daemonRuntimeDebug,
   logTimePrefix,
 });
@@ -571,6 +574,7 @@ const terminalDaemonRuntime = createTerminalDaemonRuntime({
     sessionsMap.clear();
   },
   detachSubscriberTransportOnly: terminalRuntime.detachSubscriberTransportOnly,
+  releaseSessionAttachLease: terminalRuntime.releaseSessionAttachLease,
   listMuxChannelSubscriberIds: terminalChannelMuxRuntime.listMuxChannelSubscriberIds,
   releaseAllMuxChannelSubscribers: terminalChannelMuxRuntime.releaseAllMuxChannelSubscribers,
   destroyMirror: terminalRuntime.destroyMirror,

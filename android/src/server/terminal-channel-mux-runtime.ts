@@ -112,6 +112,7 @@ export function createTerminalChannelMuxRuntime(
       backend: 'tmux',
       mirrorKey: null,
       bodySubscribed: true,
+      sessionAttachHeartbeatAt: Date.now(),
       adaptiveWidthCols: null,
       adaptiveWidthHeartbeatAt: 0,
       pendingPasteImage: null,

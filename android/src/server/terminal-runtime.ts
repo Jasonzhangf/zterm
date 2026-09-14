@@ -38,6 +38,7 @@ export interface TerminalRuntime {
     notifyClient?: boolean,
     code?: string,
   ) => void;
+  releaseSessionAttachLease: (subscriber: TerminalTransportSubscriber, reason: string) => boolean;
   destroyMirror: (
     mirror: SessionMirror,
     reason: string,
@@ -96,6 +97,7 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
       backend: 'tmux',
       mirrorKey: null,
       bodySubscribed: true,
+      sessionAttachHeartbeatAt: Date.now(),
       adaptiveWidthCols: null,
       adaptiveWidthRows: null,
       adaptiveWidthHeartbeatAt: 0,
@@ -135,6 +137,7 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
     subscriber.muxChannelId = null;
     subscriber.muxParentTransportId = null;
     subscriber.bodySubscribed = true;
+    subscriber.sessionAttachHeartbeatAt = Date.now();
     connection.transport.requestOrigin = connection.requestOrigin;
     connection.transport.connectedSent = false;
     connection.role = 'session';
@@ -238,6 +241,29 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
     sessions.delete(subscriber.id);
   }
 
+  function releaseSessionAttachLease(subscriber: TerminalTransportSubscriber, reason: string) {
+    const current = sessions.get(subscriber.id);
+    if (!current || current !== subscriber) {
+      return false;
+    }
+    subscriber.bodySubscribed = false;
+    subscriber.sessionAttachHeartbeatAt = undefined;
+    if (subscriber.muxChannelId) {
+      // Mux subscribers own a logical channel, not the physical transport:
+      // closing the subscriber sends mux-channel-closed and detaches the
+      // mirror while the target transport stays connected.
+      closeTransportSubscriber(subscriber, reason, false, 'no_body_demand');
+      return true;
+    }
+    const mirror = getSubscriberMirror(subscriber);
+    if (!mirror) {
+      return false;
+    }
+    // Legacy direct transports keep their physical connection; only mirror
+    // ownership is released.
+    return mirrorRuntime.releaseMirrorIfNoBodyDemand(mirror, reason);
+  }
+
   const { defaultSessionName: _defaultSessionName, daemonRuntimeDebug: _debug, ...mirrorDeps } = deps;
   const mirrorRuntime = createTerminalMirrorRuntime({
     ...mirrorDeps,
@@ -256,6 +282,7 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
     bindConnectionToSubscriber,
     detachSubscriberTransportOnly,
     closeTransportSubscriber,
+    releaseSessionAttachLease,
     destroyMirror: mirrorRuntime.destroyMirror,
     releaseMirrorIfNoBodyDemand: mirrorRuntime.releaseMirrorIfNoBodyDemand,
     disposeLiveMirrorInputBatch: (sessionName, reason, backend) =>

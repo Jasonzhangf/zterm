@@ -17,6 +17,7 @@ import type { Host, ServerMessage, TerminalBufferPayload, TerminalIndexedLine } 
 import { applyBufferSyncToSessionBuffer, cellsToLine, createSessionBufferState } from '../lib/terminal-buffer';
 import { defaultTraversalRouteHealthCache } from '../lib/traversal/route-health-cache';
 import { SESSION_TRANSPORT_KEEPALIVE_GRACE_MS } from './session-context-activity-runtime';
+import { FOREGROUND_ATTACH_LEASE_RENEW_INTERVAL_MS } from './session-context-lifecycle';
 
 vi.mock('@capacitor/filesystem', () => ({
   Directory: {
@@ -7476,6 +7477,64 @@ describe('SessionContext websocket dynamic refresh', () => {
     expect(MockWebSocket.physicalInstances).toHaveLength(1);
     expect(readSentMessages(ws1).some((item) => item.type === 'connect')).toBe(true);
     expect(readSentMessages(ws2).some((item) => item.type === 'connect')).toBe(true);
+  });
+
+  it('renews the foreground session attach lease on the same physical transport and stops when backgrounded', async () => {
+    vi.useFakeTimers();
+    try {
+      const view = render(
+        <SessionProvider wsUrl="ws://127.0.0.1:3333/ws" appForegroundActive>
+          <SessionHarness />
+        </SessionProvider>,
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(MockWebSocket.instances).toHaveLength(1);
+      const ws = MockWebSocket.instances[0]!;
+      ws.triggerOpen();
+      ws.triggerMessage({
+        type: 'connected',
+        payload: { sessionId: 'session-1' },
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      const trueCount = () => readSentMessages(ws).filter((item) =>
+        item.type === 'body-subscription' && item.payload?.subscribed === true).length;
+      const before = trueCount();
+
+      // Foreground heartbeat: the client must periodically renew body demand so
+      // the daemon keeps the attach lease held.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(FOREGROUND_ATTACH_LEASE_RENEW_INTERVAL_MS);
+      });
+      expect(trueCount()).toBeGreaterThan(before);
+      expect(MockWebSocket.physicalInstances).toHaveLength(1);
+
+      view.rerender(
+        <SessionProvider wsUrl="ws://127.0.0.1:3333/ws" appForegroundActive={false}>
+          <SessionHarness />
+        </SessionProvider>,
+      );
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      // Background: no further renewal is sent, so the daemon's attach lease
+      // expires and releases the session while the physical link stays up.
+      // (The immediate `body-subscription false` send is owned by the App-level
+      // useBackgroundLiveSessionHandoff, covered in its own test.)
+      const afterBackground = trueCount();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(FOREGROUND_ATTACH_LEASE_RENEW_INTERVAL_MS * 3);
+      });
+      expect(trueCount()).toBe(afterBackground);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('resubscribes an initially inactive mux channel over the existing target socket when it becomes active', async () => {
