@@ -2430,6 +2430,7 @@
         "src/components/terminal/useRemoteWindowFocusSwitch.test.tsx",
         "src/components/terminal/useRemoteWindowScreenshot.ts",
         "src/components/terminal/useRemoteWindowScreenshot.test.tsx",
+        "src/components/terminal/useRemoteWindowSelectionAdmission.ts",
         "src/server/remote-window-layout-planner.ts",
         "src/server/remote-window-layout-planner.test.ts"
       ]
