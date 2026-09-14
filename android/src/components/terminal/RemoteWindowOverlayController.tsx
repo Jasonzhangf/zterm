@@ -127,7 +127,6 @@ import {
   SurfacePointerGesture,
   FloatingOverlayResize,
   FloatingOverlayOffset,
-  initialFullscreenViewport,
   initialFullscreenDisplayMode,
   clampFloatingOffset,
   clampNumber,
@@ -1774,9 +1773,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       receiverFrameSize,
       compositeLayout ? focusedWindowSlot : null,
     );
-    const viewport = state.mode === 'fullscreen'
-      ? fullscreenViewportRef.current
-      : initialFullscreenViewport;
+    const viewport = fullscreenViewportRef.current;
     // Floating and fullscreen surfaces share the same intrinsic-ratio fit
     // projection. Remote resize is controlled independently below.
     const displayMode = state.mode === 'fullscreen'
@@ -1941,7 +1938,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       const surfaceRect = videoSurfaceRef.current?.getBoundingClientRect();
       if (
         state.phase === 'targetLocked'
-        && state.mode === 'fullscreen'
+        && (state.mode === 'fullscreen' || state.mode === 'floating')
         && surfaceRect
         && surfaceRect.width > 0
         && surfaceRect.height > 0
@@ -2082,7 +2079,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
         firstPointer: firstSample,
         secondPointer: secondSample,
         timeMs: event.timeStamp,
-        pinchEnabled: state.mode === 'fullscreen',
+        pinchEnabled: state.mode === 'fullscreen' || state.mode === 'floating',
         scrollEnabled: true,
       });
       surfaceLocalPanStartRef.current = null;
@@ -2106,7 +2103,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       pointer: pointerSampleFromReactEvent(event),
       geometry,
       zoomedProjection: event.pointerType === 'touch'
-        && state.mode === 'fullscreen'
+        && (state.mode === 'fullscreen' || state.mode === 'floating')
         && fullscreenViewportRef.current.scale > 1.01,
       touchMode: inputModeRef.current === 'touch',
     });
@@ -2164,7 +2161,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
               timeMs: pendingSecond.downTimeMs,
             },
             timeMs: event.timeStamp,
-            pinchEnabled: state.mode === 'fullscreen',
+            pinchEnabled: state.mode === 'fullscreen' || state.mode === 'floating',
             scrollEnabled: true,
           });
           surfaceGestureRef.current = pairResult.nextState;
@@ -2220,9 +2217,9 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
         timeMs: event.timeStamp,
         scrollFraction: touchScrollFractionRef.current,
         invertGestureDirection: touchScrollInvertedRef.current,
-        pinchEnabled: state.mode === 'fullscreen',
+        pinchEnabled: state.mode === 'fullscreen' || state.mode === 'floating',
         scrollEnabled: true,
-        panEnabled: state.mode === 'fullscreen' && fullscreenViewportRef.current.scale > REMOTE_WINDOW_FULLSCREEN_MIN_SCALE,
+        panEnabled: false,
       });
       surfaceGestureRef.current = pairResult.nextState;
       if (pairResult.remoteEvents.length > 0) {
@@ -2317,7 +2314,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       return;
     }
     if (gesture.mode === 'pan' && gesture.pointerId === event.pointerId) {
-      const zoomedSingleFingerSuppressed = state.phase === 'targetLocked' && state.mode === 'fullscreen' && fullscreenViewportRef.current.scale > 1.01;
+      const zoomedSingleFingerSuppressed = state.phase === 'targetLocked' && (state.mode === 'fullscreen' || state.mode === 'floating') && fullscreenViewportRef.current.scale > 1.01;
       if (!gesture.moved && !zoomedSingleFingerSuppressed) {
         const geometry = resolveSurfaceInputGeometry();
         const clickPayload = geometry
@@ -2613,7 +2610,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
 	      receiverFrameSize,
 	      compositeLayout ? focusedWindowSlot : null,
 	    );
-	    const viewport = state.mode === 'fullscreen' ? fullscreenViewport : initialFullscreenViewport;
+	    const viewport = fullscreenViewport;
 	    // The preview accepts the remote frame's intrinsic size and centers it;
 	    // it must not cover-crop or stretch the decoded frame.
 	    const displayMode = state.mode === 'fullscreen'
