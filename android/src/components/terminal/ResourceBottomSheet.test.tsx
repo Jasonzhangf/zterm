@@ -233,6 +233,95 @@ describe('ResourceBottomSheet', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  it('ends the owner touch when a batch release lists a non-owner first', () => {
+    const onClose = vi.fn();
+    const onExpand = vi.fn();
+    const renderRemoteWindow = vi.fn((
+      open: boolean,
+      _tab?: 'stream' | 'web',
+      _expanded?: boolean,
+      onExitFullscreen?: () => void,
+    ) => open ? <button type="button" onClick={onExitFullscreen}>退出串流全屏</button> : null);
+    render(
+      <ResourceBottomSheet
+        open
+        initialTab="stream"
+        renderFileBrowser={() => null}
+        renderRemoteWindow={renderRemoteWindow}
+        onClose={onClose}
+        onExpand={onExpand}
+      />,
+    );
+
+    let handle = screen.getByLabelText('资源').querySelector('[data-resource-drawer-handle]') as HTMLElement;
+    fireEvent.touchStart(handle, {
+      touches: [{ identifier: 11, clientY: 240 }],
+      changedTouches: [{ identifier: 11, clientY: 240 }],
+    });
+    fireEvent.touchEnd(handle, {
+      touches: [],
+      changedTouches: [{ identifier: 22, clientY: 340 }, { identifier: 11, clientY: 100 }],
+    });
+
+    expect(onExpand).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: '退出串流全屏' }));
+    handle = screen.getByLabelText('资源').querySelector('[data-resource-drawer-handle]') as HTMLElement;
+
+    fireEvent.touchStart(handle, {
+      touches: [{ identifier: 33, clientY: 240 }],
+      changedTouches: [{ identifier: 33, clientY: 240 }],
+    });
+    fireEvent.touchEnd(handle, {
+      touches: [],
+      changedTouches: [{ identifier: 33, clientY: 100 }],
+    });
+
+    expect(onExpand).toHaveBeenCalledTimes(2);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('cancels the owner touch when a batch cancel lists a non-owner first', () => {
+    const onClose = vi.fn();
+    const onExpand = vi.fn();
+    render(
+      <ResourceBottomSheet
+        open
+        initialTab="stream"
+        renderFileBrowser={() => null}
+        renderRemoteWindow={() => <div data-testid="stream-surface" />}
+        onClose={onClose}
+        onExpand={onExpand}
+      />,
+    );
+
+    const handle = screen.getByLabelText('资源').querySelector('[data-resource-drawer-handle]') as HTMLElement;
+    fireEvent.touchStart(handle, {
+      touches: [{ identifier: 11, clientY: 240 }],
+      changedTouches: [{ identifier: 11, clientY: 240 }],
+    });
+    fireEvent.touchCancel(handle, {
+      touches: [],
+      changedTouches: [{ identifier: 22, clientY: 100 }, { identifier: 11, clientY: 100 }],
+    });
+
+    expect(onExpand).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.touchStart(handle, {
+      touches: [{ identifier: 33, clientY: 240 }],
+      changedTouches: [{ identifier: 33, clientY: 240 }],
+    });
+    fireEvent.touchEnd(handle, {
+      touches: [],
+      changedTouches: [{ identifier: 33, clientY: 100 }],
+    });
+
+    expect(onExpand).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it('keeps handle pointer ownership while a stream pinch runs in parallel', () => {
     const onClose = vi.fn();
     const onExpand = vi.fn();

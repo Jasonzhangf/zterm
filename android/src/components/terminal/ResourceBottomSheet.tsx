@@ -159,12 +159,19 @@ export function ResourceBottomSheet({
     handleGestureStart(touchGestureKey(touch), event.target, touch?.clientY ?? 0);
   };
   const handleTouchEnd = (event: TouchEvent<HTMLDivElement>) => {
-    const touch = event.changedTouches[0];
-    if (touch) handleGestureEnd(touchGestureKey(touch), touch.clientY);
+    for (const touch of Array.from(event.changedTouches)) {
+      handleGestureEnd(touchGestureKey(touch), touch.clientY);
+    }
   };
   const handleTouchCancel = (event: TouchEvent<HTMLDivElement>) => {
-    const touch = event.changedTouches[0] ?? event.touches[0];
-    gestureRuntime.current.cancel(touchGestureKey(touch));
+    const touches = event.changedTouches.length > 0 ? event.changedTouches : event.touches;
+    if (touches.length === 0) {
+      gestureRuntime.current.cancel(touchGestureKey(undefined));
+      return;
+    }
+    for (const touch of Array.from(touches)) {
+      gestureRuntime.current.cancel(touchGestureKey(touch));
+    }
   };
   const handlePointerStart = (event: PointerEvent<HTMLDivElement>) => {
     handleGestureStart(`pointer:${event.pointerId}`, event.target, event.clientY);
