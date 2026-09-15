@@ -425,6 +425,9 @@ function TerminalSessionDrawerComponent({
         <div
           data-testid="terminal-session-drawer-tree"
           role="tree"
+          onTouchStart={(event) => event.stopPropagation()}
+          onTouchMove={(event) => event.stopPropagation()}
+          onTouchEnd={(event) => event.stopPropagation()}
           style={{
             flex: '0 1 auto',
             minHeight: 0,
