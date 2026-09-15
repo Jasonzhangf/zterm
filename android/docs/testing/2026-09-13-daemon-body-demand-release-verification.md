@@ -116,3 +116,89 @@ review `commit` argument for this series.
   `src/contexts/session-context-infra-runtime.test.ts` (traversal candidate
   ordering) and `src/server/server.mirror-capture-truth.test.ts` (mirror geometry
   write scan). Neither is touched by this change.
+
+## Final candidate re-verification (368bd970)
+
+The earlier L5 section above is bound to `9db8560a` / `0.1.3.2975`. It is kept as
+history and does not substitute for this section. Everything below was executed
+against the frozen release candidate after the adaptive-width ownership
+hardening commits, in worktree
+`playground/daemon-release-merge-0914` on branch
+`fix/daemon-two-tier-heartbeat-0914`.
+
+- Candidate: `368bd97043d2a891ac092766ddc91f6d292e04cd`, base `a9e6e61c`.
+- Candidate daemon: isolated home `/tmp/zterm-daemon-candidate-2980/home`,
+  port `3344`, pid `61496`, bundle
+  `android/release-dist/zterm-daemon-0.1.3-darwin-arm64/runtime/server.cjs`
+  sha256 `519b24f171af4ced6b14a5d40f59d4c869f56287ca7015f26e001615e22da33e`.
+- Production daemon (`launchd com.zterm.android.zterm-daemon`, port `3333`) was
+  not touched by this verification.
+
+### L1 focused runtime gates
+
+- `pnpm exec vitest run src/contexts/session-context-transport-runtime.test.ts
+  src/contexts/session-context-transport-open-runtime.test.ts
+  src/contexts/session-context-infra-facade-runtime.test.ts
+  src/server/terminal-mirror-runtime.test.ts
+  src/server/terminal-message-runtime.test.ts
+  src/server/terminal-daemon-runtime.test.ts` -> 6 files, 174 tests passed,
+  exit `0` (log `/tmp/zterm-l1-focused-368bd970.log`).
+- `pnpm exec vitest run src/contexts/SessionContext.ws-refresh.test.tsx` ->
+  1 file, 142 tests passed, exit `0`
+  (log `/tmp/zterm-l3-wsrefresh-368bd970.log`).
+- `pnpm exec tsc -p tsconfig.json --noEmit --pretty false` -> exit `0`
+  (log `/tmp/zterm-typecheck-368bd970.log`).
+- `pnpm --dir android run test:android-connection-service:native` ->
+  `AndroidConnectionServiceTransportTest` + `assembleDebug`, `BUILD SUCCESSFUL`,
+  exit `0` (log `/tmp/zterm-native-gate-368bd970.log`).
+
+### L2 real daemon/tmux protocol loop
+
+Evidence directory: `android/evidence/daemon-release-368bd970/` (gitignored,
+contains the raw JSON/PNG/tmux captures referenced here).
+
+- `node android/scripts/daemon-attach-lease-smoke.mjs 3344 wterm-4123456
+  zterm-release-368bd970 resubscribe`
+  (`l2-attach-lease-resubscribe.jsonl`): `foreground-hold lifecycle=ready
+  attached=true`; `background-release closedCode=no_body_demand
+  physicalOpen=true`; `background-ping-only attached=false subscribers=0
+  physicalOpen=true`; `foreground-reattach physicalOpen=true attached=true`;
+  `ok=true`.
+- `... lease-expiry` (`l2-attach-lease-expiry.jsonl`): `foreground-hold
+  lifecycle=ready`; `lease-expiry-release attached=false physicalOpen=true`;
+  `ok=true` — proves the daemon self-releases on TTL expiry with no
+  `body-subscription=false` and no client action.
+- Adaptive width ownership (`l2-adaptive-reattach.txt`): `baseline=80x24 latest`
+  -> adaptive attach `56x24 manual` -> body withdraw `80x24 latest` -> adaptive
+  reattach `56x24 manual`. The tmux window returns to policy (`latest`) on
+  release and the per-subscriber adaptive geometry is restored on reattach.
+
+### L5 packaged Android device loop
+
+- APK: `android/native/android/app/build/outputs/apk/debug/app-debug.apk`,
+  `versionName=0.1.3.2980`, `versionCode=1100029800`, sha256
+  `08e5513b78492bae73f5f136f0063cd19dff5c49e7e36eba4f45309df27ccb4a`.
+  OTA bundle (`android/update-dist/latest.json`,
+  `~/.zterm/updates/latest.json`) verified by
+  `node scripts/verify-update-bundle.mjs` (all checks `true`).
+- Device: PLZ110 `100.104.163.65:5555`, installed in place with
+  `adb install -r`; `firstInstallTime` preserved, package reports
+  `versionName=0.1.3.2980`.
+- Loop (candidate daemon `3344`, session `release-gate-368bd970`, tmux baseline
+  `120x40`):
+  - foreground attach: daemon mirror `ready`, `transportSubscribers` has the
+    device with `bodySubscribed=true`, UI renders the injected
+    `FOREGROUND_RESUME_368BD970_*` marker
+    (`tmux-foreground-attach.txt`, `runtime-foreground-attach.json`,
+    `foreground-attach.png`).
+  - background (`KEYCODE_HOME`): `mirrors=[]`, `transportSubscribers=[]`, tmux
+    window restored to `120x40 window-size=latest`
+    (`tmux-background-release.txt`, `runtime-background-release.json`).
+  - foreground (`am start`): mirror back to `ready` with a fresh revision, device
+    subscriber `bodySubscribed=true`, and the same-process WebView renders the
+    marker again (`tmux-foreground-resume.txt`,
+    `runtime-foreground-resume.json`, `foreground-resume.png`,
+    `device-marker-after-resume.txt`).
+- `candidate-meta.txt` in the same directory pins candidate SHA, APK
+  version/sha256, daemon bundle sha256, device serial, and installed package
+  version for this evidence set.
