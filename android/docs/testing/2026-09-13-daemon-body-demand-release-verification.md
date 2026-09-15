@@ -38,6 +38,11 @@ review `commit` argument for this series.
     `session-context-lifecycle`, `useOpenTabLifecycleEffects` — 35 tests passed.
   - Client integration suite `SessionContext.ws-refresh` — 139 tests passed.
   - Combined focused rerun: 10 files, 157 tests passed.
+  - Candidate `9db8560a` verification rerun: focused daemon/mirror/tmux suite
+    6 files, 101 tests passed; `pnpm --dir android exec tsc -p
+    tsconfig.json --noEmit --pretty false` passed; Mac gate 23 files/167 tests
+    and type-check passed; `pnpm --dir android run daemon:mirror:close-loop`
+    passed all 9 replay/audit cases.
 - L2 daemon/tmux real protocol loop (candidate daemon PID-scoped restart, new bundle):
   - `node android/scripts/daemon-attach-lease-smoke.mjs 3344 <token> <session> resubscribe`
     - `foreground-hold`: mirror lifecycle `ready`.
