@@ -430,8 +430,12 @@ export function buildReconnectTransportOpenIntentOptionsRuntime(options: {
         ws,
       });
     },
-    onClosed: (reason) => {
+    onClosed: (reason, code) => {
       options.reconnectStore.deleteRuntime(options.sessionId);
+      if (code === 'no_body_demand') {
+        options.updateSessionSync(options.sessionId, buildSessionIdleAfterReconnectBlockedUpdates(reason || ''));
+        return;
+      }
       options.updateSessionSync(options.sessionId, buildSessionClosedUpdates(reason));
       options.emitSessionStatus(options.sessionId, 'closed', reason);
     },
@@ -481,7 +485,11 @@ export function buildConnectTransportOpenIntentOptionsRuntime(options: {
         ws,
       });
     },
-    onClosed: (reason) => {
+    onClosed: (reason, code) => {
+      if (code === 'no_body_demand') {
+        options.updateSessionSync(options.sessionId, buildSessionIdleAfterReconnectBlockedUpdates(reason || ''));
+        return;
+      }
       options.updateSessionSync(options.sessionId, buildSessionClosedUpdates(reason));
       options.emitSessionStatus(options.sessionId, 'closed', reason);
     },

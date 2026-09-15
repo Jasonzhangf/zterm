@@ -33,6 +33,7 @@ import {
   type BridgeClientMessage,
   type TerminalMuxClientFrame,
 } from '@zterm/shared/protocol';
+import { buildBodySubscriptionMessage } from './session-wire-helpers';
 import {
   CLIENT_TRANSPORT_HEARTBEAT_INTERVAL_MS,
   CLIENT_TRANSPORT_HEARTBEAT_MAX_MISSES,
@@ -200,6 +201,7 @@ export function createSessionInfraFacadeRuntime(options: {
   sessionAttachTokensRef: { current: Map<string, string> };
   pendingSessionTransportOpenIntentsRef: { current: Map<string, unknown> };
   activeBodySubscriptionSuppressedRef: { current: boolean };
+  reopenSessionTerminalChannelRef?: { current: (sessionId: string) => void };
   reconnectStore: SessionReconnectStore;
   tailRefreshStore: SessionTailRefreshStore;
   bufferFrameAssemblyRef: { current: Map<string, BufferFrameAssemblyResourceState> };
@@ -304,7 +306,7 @@ export function createSessionInfraFacadeRuntime(options: {
 
   const transportAccessors = createTransportInfraAccessorsRuntime(options.transportRuntimeStoreRef);
 
-  function reconcilePhysicalBodySubscriptions(reason: string) {
+  function reconcilePhysicalBodySubscriptions(reason: string, renewOptions?: { renewOnly?: boolean }) {
     const liveSessionIds = resolvePhysicalBodySubscribedSessionIdsRuntime({
       activeSessionId: options.stateRef.current.activeSessionId,
       liveSessionIds: options.stateRef.current.liveSessionIds,
@@ -313,7 +315,14 @@ export function createSessionInfraFacadeRuntime(options: {
     for (const session of options.stateRef.current.sessions) {
       const channel = transportAccessors.readSessionTerminalChannel(session.id);
       const subscribed = liveSessionIds.has(session.id);
+      if (renewOptions?.renewOnly && !subscribed) {
+        continue;
+      }
       setSessionChannelBodySubscribed(options.transportRuntimeStoreRef.current.terminalChannels, session.id, subscribed);
+      if (subscribed && channel?.state === 'closed') {
+        options.reopenSessionTerminalChannelRef?.current(session.id);
+        continue;
+      }
       const ws = channel
         ? (
           channel.state === 'open'
@@ -324,13 +333,12 @@ export function createSessionInfraFacadeRuntime(options: {
       if (!ws || ws.readyState !== WebSocket.OPEN) {
         continue;
       }
-      sendSocketPayload(session.id, ws, JSON.stringify({
-        type: 'body-subscription',
-        payload: {
-          version: 1,
-          subscribed,
-        },
-      }));
+      sendSocketPayload(session.id, ws, JSON.stringify(buildBodySubscriptionMessage({
+        subscribed,
+        geometry: subscribed
+          ? transportAccessors.readSessionRequestedTerminalGeometry(session.id)
+          : null,
+      })));
       options.runtimeDebug('session.body-subscription.sent', {
         sessionId: session.id,
         subscribed,

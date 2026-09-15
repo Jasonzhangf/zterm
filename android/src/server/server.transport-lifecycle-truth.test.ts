@@ -118,10 +118,15 @@ describe('server transport/session lifecycle truth gates', () => {
     expect(pongBlock).not.toContain('refreshBoundAdaptiveLease(connection)');
     const messageBlock = extractBlock(source, "ws.on('message'", 600);
     expect(messageBlock).toContain("'mux-ping'");
-    expect(messageBlock).toContain('markTransportConnectionPong(connection)');
+    // mux-ping is the background keepalive: it renews physical transport
+    // liveness (so the target link survives) but must never renew the adaptive
+    // width lease or the session attach lease.
+    expect(messageBlock).toContain('markTransportConnectionInboundActivity(connection)');
+    expect(messageBlock).not.toContain('refreshBoundAdaptiveLease(connection)');
     const rtcOnMessageBlock = extractBlock(source, 'onMessage: (_transportId, data, isBinary) =>', 600);
     expect(rtcOnMessageBlock).toContain("'mux-ping'");
-    expect(rtcOnMessageBlock).toContain('markTransportConnectionPong(connection)');
+    expect(rtcOnMessageBlock).toContain('markTransportConnectionInboundActivity(connection)');
+    expect(rtcOnMessageBlock).not.toContain('refreshBoundAdaptiveLease(connection)');
     expect(errorBlock).toContain("detachConnectionSubscribers(connection, `websocket error: ${error.message}`)");
     expect(errorBlock).not.toContain("closeTransportSubscriber(session, `websocket error: ${error.message}`, false)");
     expect(detachBlock).toContain('connection.boundSubscriberId');
@@ -211,9 +216,9 @@ describe('server transport/session lifecycle truth gates', () => {
     expect(reconcileLeaseBlock).not.toContain('writeMirrorBaselineGeometry(mirror, {');
     const applyAdaptiveBlock = extractBlock(mirrorRuntimeSource, 'function applyAdaptiveTmuxWidth', 2400);
     const releaseAdaptiveBlock = extractBlock(mirrorRuntimeSource, 'function releaseAdaptiveTmuxWidth', 2400);
-    expect(applyAdaptiveBlock).toContain("deps.runTmux(['resize-window'");
-    expect(releaseAdaptiveBlock).toContain("deps.runTmux(['resize-window'");
-    expect(releaseAdaptiveBlock).toContain("'window-size'");
+    expect(applyAdaptiveBlock).toMatch(/deps\.runTmux\(\s*\[\s*'resize-window'/);
+    expect(releaseAdaptiveBlock).toMatch(/deps\.runTmux\(\s*\[\s*'resize-window'[\s\S]*?'-y'/);
+    expect(releaseAdaptiveBlock).toMatch(/deps\.runTmux\(\s*\[\s*'set-window-option'[\s\S]*?'window-size'/);
     const runtimeWithoutAdaptiveOwnerBlocks = mirrorRuntimeSource
       .replace(applyAdaptiveBlock, '')
       .replace(releaseAdaptiveBlock, '');

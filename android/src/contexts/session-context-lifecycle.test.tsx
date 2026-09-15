@@ -11,6 +11,7 @@ import {
   shouldScheduleActiveTickRefresh,
   shouldSchedulePassiveVisibleTickRefresh,
   useSessionContextLifecycle,
+  FOREGROUND_ATTACH_LEASE_RENEW_INTERVAL_MS,
 } from './session-context-lifecycle';
 import { createSessionHeartbeatStore } from '../lib/session-heartbeat-store';
 import { createSessionReconnectStore } from '../lib/session-reconnect-store';
@@ -285,6 +286,7 @@ describe('session-context-lifecycle', () => {
         flushRuntimeDebugLogs: () => undefined,
         clientRuntimeDebugFlushIntervalMs: 10_000,
         ensureActiveSessionFresh,
+        renewForegroundSessionAttachLease: () => undefined,
         resolveActiveHeadRefreshTickMs: () => 10_000,
         resolveHeadStalePingMs: () => 10_000,
         clearSessionHandshakeTimeout: () => undefined,
@@ -364,6 +366,7 @@ describe('session-context-lifecycle', () => {
         flushRuntimeDebugLogs: () => undefined,
         clientRuntimeDebugFlushIntervalMs: 10_000,
         ensureActiveSessionFresh,
+        renewForegroundSessionAttachLease: () => undefined,
         resolveActiveHeadRefreshTickMs: () => 10_000,
         resolveHeadStalePingMs: () => 10_000,
         clearSessionHandshakeTimeout: () => undefined,
@@ -452,6 +455,7 @@ describe('session-context-lifecycle', () => {
         flushRuntimeDebugLogs: () => undefined,
         clientRuntimeDebugFlushIntervalMs: 10_000,
         ensureActiveSessionFresh,
+        renewForegroundSessionAttachLease: () => undefined,
         resolveActiveHeadRefreshTickMs: () => 10_000,
         resolveHeadStalePingMs: () => 10_000,
         clearSessionHandshakeTimeout: clearSessionHandshakeTimeoutFn,
@@ -544,6 +548,7 @@ describe('session-context-lifecycle', () => {
         flushRuntimeDebugLogs: () => undefined,
         clientRuntimeDebugFlushIntervalMs: 10_000,
         ensureActiveSessionFresh,
+        renewForegroundSessionAttachLease: () => undefined,
         resolveActiveHeadRefreshTickMs: () => 10_000,
         resolveHeadStalePingMs: () => 10_000,
         clearSessionHandshakeTimeout: () => undefined,
@@ -569,6 +574,81 @@ describe('session-context-lifecycle', () => {
       markResumeTail: true,
       allowReconnectIfUnavailable: true,
     });
+  });
+
+  it('renews the foreground session attach lease on an interval and stops when backgrounded', async () => {
+    vi.useFakeTimers();
+    const renewForegroundSessionAttachLease = vi.fn();
+    const ensureActiveSessionFresh = vi.fn(() => true);
+    const lifecycleRefs = {
+      foregroundActiveRef: { current: true },
+      stateRef: {
+        current: {
+          sessions: [{ id: 's1', state: 'connected' } as any],
+          activeSessionId: 's1',
+          liveSessionIds: [],
+        } as any,
+      },
+      scheduleStatesRef: { current: {} },
+      sessionDebugMetricsStoreRef: { current: { refresh: () => ({}) } },
+      transportRuntimeStoreRef: {
+        current: {
+          targets: new Map(),
+          sessions: new Map(),
+          terminalChannels: createTerminalChannelMuxStore(),
+        },
+      },
+      sessionPullStateRef: { current: new Map() },
+      lastActivatedSessionIdRef: { current: 's1' },
+      lastActiveReentryAtRef: { current: new Map() },
+      lastConnectedBaselineAtRef: { current: new Map() },
+      heartbeatStore: createSessionHeartbeatStore(),
+      remoteScreenshotRuntimeRef: { current: { dispose: () => undefined } },
+      remoteWindowMessageRuntimeRef: { current: { dispose: () => undefined } },
+      handshakeTimeoutsRef: { current: new Map() },
+      reconnectStore: createSessionReconnectStore(),
+    };
+
+    function Harness({ appForegroundActive }: { appForegroundActive: boolean }) {
+      lifecycleRefs.foregroundActiveRef.current = appForegroundActive;
+      useSessionContextLifecycle({
+        appForegroundActive,
+        state: {
+          sessions: [{ id: 's1', state: 'connected' } as any],
+          activeSessionId: 's1',
+          liveSessionIds: [],
+        } as any,
+        scheduleStates: {},
+        refs: lifecycleRefs,
+        flushRuntimeDebugLogs: () => undefined,
+        clientRuntimeDebugFlushIntervalMs: 10_000,
+        ensureActiveSessionFresh,
+        renewForegroundSessionAttachLease,
+        resolveActiveHeadRefreshTickMs: () => 10_000,
+        resolveHeadStalePingMs: () => 10_000,
+        clearSessionHandshakeTimeout: () => undefined,
+        cleanupSocket: () => undefined,
+        cleanupControlSocket: () => undefined,
+      });
+      return null;
+    }
+
+    const view = render(<Harness appForegroundActive />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(FOREGROUND_ATTACH_LEASE_RENEW_INTERVAL_MS);
+    });
+    expect(renewForegroundSessionAttachLease).toHaveBeenCalledTimes(1);
+    expect(renewForegroundSessionAttachLease).toHaveBeenCalledWith('foreground-attach-heartbeat');
+
+    view.rerender(<Harness appForegroundActive={false} />);
+    renewForegroundSessionAttachLease.mockClear();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(FOREGROUND_ATTACH_LEASE_RENEW_INTERVAL_MS * 3);
+    });
+
+    // Background keeps the physical transport but must stop renewing the
+    // session attach lease so the daemon releases every tmux mirror.
+    expect(renewForegroundSessionAttachLease).not.toHaveBeenCalled();
   });
 
   it('does not start debug or refresh timers while app foreground truth is false', () => {
@@ -617,6 +697,7 @@ describe('session-context-lifecycle', () => {
         flushRuntimeDebugLogs: () => undefined,
         clientRuntimeDebugFlushIntervalMs: 10_000,
         ensureActiveSessionFresh,
+        renewForegroundSessionAttachLease: () => undefined,
         resolveActiveHeadRefreshTickMs: () => 16,
         resolveHeadStalePingMs: () => 10_000,
         clearSessionHandshakeTimeout: () => undefined,

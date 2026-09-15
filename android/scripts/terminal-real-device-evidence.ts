@@ -40,6 +40,9 @@ interface CliOptions {
   buildMode: Command;
   serial?: string;
   apkPath?: string;
+  host?: string;
+  port?: number;
+  token?: string;
 }
 
 function run(command: string, args: string[], cwd = ROOT_DIR, encoding: BufferEncoding | 'buffer' = 'utf8') {
@@ -76,6 +79,22 @@ function parseCli(argv: string[]): CliOptions {
     }
     if (value === '--apk') {
       options.apkPath = argv[index + 1]?.trim() || undefined;
+      index += 1;
+      continue;
+    }
+    if (value === '--host') {
+      options.host = argv[index + 1]?.trim() || undefined;
+      index += 1;
+      continue;
+    }
+    if (value === '--port') {
+      const port = Number.parseInt(argv[index + 1]?.trim() || '', 10);
+      options.port = Number.isFinite(port) && port > 0 ? port : undefined;
+      index += 1;
+      continue;
+    }
+    if (value === '--token') {
+      options.token = argv[index + 1]?.trim() || undefined;
       index += 1;
     }
   }
@@ -266,14 +285,28 @@ function captureWindowDump(serial: string) {
 }
 
 function resolveWebViewDevtoolsSocket(serial: string) {
+  const appPids = adbText(serial, ['shell', 'pidof', APP_ID])
+    .split(/\s+/u)
+    .map((value) => value.trim())
+    .filter((value) => /^\d+$/u.test(value));
+  if (appPids.length === 0) {
+    fail(`could not find the running ${APP_ID} process`);
+  }
   const unixSockets = adbText(serial, ['shell', 'cat', '/proc/net/unix']);
-  const match = unixSockets.match(/@webview_devtools_remote_\d+/u);
-  return match?.[0] || '';
+  for (const pid of appPids) {
+    const socketName = `@webview_devtools_remote_${pid}`;
+    if (unixSockets.includes(socketName)) {
+      return socketName;
+    }
+  }
+  fail(`could not find a WebView DevTools socket owned by ${APP_ID} PID(s) ${appPids.join(', ')}`);
 }
 
 async function fetchWebViewDevtoolsPages() {
   try {
-    const response = await fetch(`http://127.0.0.1:${WEBVIEW_DEVTOOLS_FORWARD_PORT}/json/list`);
+    const response = await fetch(`http://127.0.0.1:${WEBVIEW_DEVTOOLS_FORWARD_PORT}/json/list`, {
+      signal: AbortSignal.timeout(5_000),
+    });
     if (!response.ok) {
       const body = await response.text();
       throw new Error(`HTTP ${response.status}: ${body}`);
@@ -347,6 +380,7 @@ async function evaluateWebViewExpressionOnce(serial: string, expression: string)
         params: {
           expression,
           returnByValue: true,
+          awaitPromise: true,
         },
       }));
     });
@@ -469,26 +503,66 @@ async function clickWebViewKeyboardButton(serial: string) {
   return true;
 }
 
-async function ensureWebViewTerminalPage(serial: string, sessionName?: string, bridgeHost?: string) {
+async function ensureWebViewTerminalPage(
+  serial: string,
+  sessionName?: string,
+  bridgeHost?: string,
+  bridgePort?: number,
+) {
   let resumeRequested = false;
   let connectionRequested = false;
   const deadline = Date.now() + 12_000;
   while (Date.now() <= deadline) {
     try {
-      const connectionClick = bridgeHost && !connectionRequested
-        ? `const ariaLabel = 'Open ' + ${JSON.stringify(bridgeHost)};
-           const connection = buttons.find((candidate) => (
-             candidate.getAttribute('aria-label') === ariaLabel
+      const expectedEndpoint = bridgeHost && bridgePort
+        ? `${bridgeHost}:${bridgePort}`
+        : bridgeHost
+          ? `${bridgeHost}:`
+          : '';
+      const connectionClick = expectedEndpoint && !connectionRequested
+        ? `const connection = buttons.find((candidate) => (
+             candidate.getAttribute('data-testid') === 'saved-connection-open'
+             && (candidate.textContent || '').includes(${JSON.stringify(expectedEndpoint)})
            ));
-           if (connection) {
+           if (connection instanceof HTMLButtonElement) {
              connection.click();
-             return { terminalPage: false, resumed: false, connectionRequested: true, button: ariaLabel };
+             return { terminalPage: false, resumed: false, connectionRequested: true, button: connection.textContent || '' };
            }`
         : '';
       const value = await evaluateWebViewExpression(
         serial,
         `(() => {
+          const expectedHost = ${JSON.stringify(bridgeHost || '')};
+          const expectedPort = ${JSON.stringify(bridgePort || 0)};
+          const activeOpenTab = (() => {
+            try {
+              const openTabs = JSON.parse(localStorage.getItem('zterm:open-tabs') || '[]');
+              const activeSessionId = localStorage.getItem('zterm:active-session') || '';
+              const layout = JSON.parse(localStorage.getItem('zterm:terminal-layout') || '{}');
+              const activePane = (layout.panes || []).find((pane) => pane.id === layout.activePaneId);
+              const activeTab = (activePane?.tabs || []).find((tab) => tab.id === activePane.activeTabId);
+              const layoutSessionId = activeTab?.sessionId || '';
+              const sessionId = activeSessionId || layoutSessionId;
+              return openTabs.find((tab) => tab.sessionId === sessionId) || null;
+            } catch {
+              return null;
+            }
+          })();
           const terminal = document.querySelector('[data-testid="terminal-quickbar-shell"]');
+          if (terminal && expectedHost && expectedPort) {
+            const tabHost = activeOpenTab?.bridgeHost || '';
+            const tabPort = Number(activeOpenTab?.bridgePort);
+            if (tabHost !== expectedHost || tabPort !== expectedPort) {
+              const back = Array.from(document.querySelectorAll('button')).find((candidate) => (
+                candidate.getAttribute('data-testid') === 'terminal-portrait-back-button'
+              ));
+              if (back instanceof HTMLButtonElement) {
+                back.click();
+                return { terminalPage: false, resumed: false, connectionRequested: false, wrongTarget: true };
+              }
+              return { terminalPage: false, resumed: false, connectionRequested: false, wrongTarget: true };
+            }
+          }
           if (terminal) {
             return { terminalPage: true, resumed: false, button: '' };
           }
@@ -511,6 +585,10 @@ async function ensureWebViewTerminalPage(serial: string, sessionName?: string, b
       if (state.terminalPage === true) {
         return;
       }
+      if (state.wrongTarget === true) {
+        connectionRequested = false;
+        continue;
+      }
       if (state.resumed === true) {
         resumeRequested = true;
       } else if (state.connectionRequested === true) {
@@ -528,12 +606,16 @@ async function ensureWebViewTerminalPage(serial: string, sessionName?: string, b
   fail('Resume/connection button did not open the Terminal page before the bounded verifier deadline');
 }
 
-async function establishAuthenticatedBridgeSettings(serial: string) {
-  const authToken = resolveDaemonAuthToken();
+async function establishAuthenticatedBridgeSettings(
+  serial: string,
+  target?: { host: string; port: number; token: string },
+) {
+  const authToken = target?.token || resolveDaemonAuthToken();
   if (!authToken) {
     fail('live-gate fixture could not resolve the daemon auth token from ZTERM_DAEMON_AUTH_TOKEN or ~/.zterm/config.json');
   }
-  const targetHost = resolveDaemonDeviceHost();
+  const targetHost = target?.host || resolveDaemonDeviceHost();
+  const targetPort = target?.port || 3333;
   const value = await evaluateWebViewExpression(
     serial,
     `(() => {
@@ -541,11 +623,44 @@ async function establishAuthenticatedBridgeSettings(serial: string) {
       const settings = JSON.parse(localStorage.getItem(key) || '{}');
       const authToken = ${JSON.stringify(authToken)};
       const targetHost = ${JSON.stringify(targetHost)};
+      const targetPort = ${JSON.stringify(targetPort)};
+      const normalizeSessionGroups = (raw) => {
+        if (!Array.isArray(raw)) {
+          return raw;
+        }
+        return raw.map((group) => {
+          if (!group || typeof group !== 'object') {
+            return group;
+          }
+          const groupHost = typeof group.bridgeHost === 'string' ? group.bridgeHost.trim() : '';
+          const groupPort = Number(group.bridgePort);
+          const sameDaemon = (
+            groupPort === targetPort
+            && (
+              groupHost === targetHost
+              || groupHost === '127.0.0.1'
+              || groupHost === 'localhost'
+            )
+          );
+          if (!sameDaemon) {
+            return group;
+          }
+          return {
+            ...group,
+            id: \`bridge:\${targetHost}::\${targetPort}\`,
+            bridgeHost: targetHost,
+            bridgePort: targetPort,
+            authToken,
+          };
+        });
+      };
+      const sessionGroups = normalizeSessionGroups(JSON.parse(localStorage.getItem('zterm:session-groups') || '[]'));
+      localStorage.setItem('zterm:session-groups', JSON.stringify(sessionGroups));
       settings.targetHost = targetHost;
-      settings.targetPort = 3333;
+      settings.targetPort = targetPort;
       settings.targetAuthToken = authToken;
       settings.servers = (Array.isArray(settings.servers) ? settings.servers : []).map((server) => (
-        server.targetHost === targetHost && Number(server.targetPort) === 3333
+        server.targetHost === targetHost && Number(server.targetPort) === targetPort
           ? { ...server, authToken }
           : server
       ));
@@ -553,9 +668,10 @@ async function establishAuthenticatedBridgeSettings(serial: string) {
       return {
         configured: true,
         targetHost,
+        targetPort,
         serverCount: settings.servers.length,
         targetServerCount: settings.servers.filter((server) => (
-          server.targetHost === targetHost && Number(server.targetPort) === 3333
+          server.targetHost === targetHost && Number(server.targetPort) === targetPort
         )).length,
       };
     })()`,
@@ -608,6 +724,24 @@ async function ensureWebViewTerminalImeFocus(serial: string) {
     nativeImeServedViewText: nativeState.servedView,
     keyboardButtonTapped: true,
   };
+}
+
+async function emitWebViewTerminalInput(serial: string, text: string) {
+  const value = await evaluateWebViewExpression(
+    serial,
+    `(async () => {
+      const capacitor = window.Capacitor;
+      const plugin = capacitor?.Plugins?.ImeAnchor;
+      if (!plugin || typeof plugin.debugEmitInput !== 'function') {
+        return { emitted: false, reason: 'ImeAnchor.debugEmitInput unavailable' };
+      }
+      await plugin.debugEmitInput({ text: ${JSON.stringify(text)} });
+      return { emitted: true };
+    })()`,
+  );
+  if (!value || typeof value !== 'object' || (value as Record<string, unknown>).emitted !== true) {
+    fail(`could not emit terminal input through ImeAnchor: ${JSON.stringify(value)}`);
+  }
 }
 
 function addToken(url: URL, token?: string) {
@@ -855,7 +989,12 @@ async function main() {
   ensureInteractiveDevice(serial);
   adbText(serial, ['shell', 'cmd', 'statusbar', 'collapse']);
   const activityDump = waitForForeground(serial, 10_000);
-  await establishAuthenticatedBridgeSettings(serial);
+  await establishAuthenticatedBridgeSettings(
+    serial,
+    options.host && options.port && options.token
+      ? { host: options.host, port: options.port, token: options.token }
+      : undefined,
+  );
   const launchPng = capturePng(serial);
   const beforeImeUi = captureUiDump(serial);
   const beforeImeInputMethod = captureInputMethodDump(serial);
@@ -869,6 +1008,14 @@ async function main() {
   }
 
   await ensureWebViewTerminalPage(serial, storageTarget.target.sessionName, storageTarget.target.bridgeHost);
+  if (options.host && options.port) {
+    await ensureWebViewTerminalPage(
+      serial,
+      storageTarget.target.sessionName,
+      options.host,
+      options.port,
+    );
+  }
   const navigatedStorage = await readWebViewLocalStorageSnapshot(serial);
   const navigatedTarget = extractApkSmokeBridgeDebugTargetFromLocalStorageSnapshot(navigatedStorage.snapshot);
   if (navigatedTarget.target) {
@@ -959,9 +1106,9 @@ async function main() {
   await ensureWebViewTerminalPage(serial, bridgeTarget.sessionName, bridgeTarget.bridgeHost);
   const terminalFocusState = await ensureWebViewTerminalImeFocus(serial);
   sleep(500);
-  adbText(serial, ['shell', 'input', 'text', INPUT_SAMPLE]);
+  await emitWebViewTerminalInput(serial, INPUT_SAMPLE);
   sleep(400);
-  adbText(serial, ['shell', 'input', 'keyevent', '66']);
+  await emitWebViewTerminalInput(serial, '\r');
   const afterImePng = capturePng(serial);
   const afterImeUi = captureUiDump(serial);
   const afterImeInputMethod = captureInputMethodDump(serial);

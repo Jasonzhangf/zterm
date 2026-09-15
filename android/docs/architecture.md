@@ -379,8 +379,8 @@ Android floating entry
 - `adaptive-phone` 的上游宽度 owner 只能是 daemon：
   - client 只上报 latest measured cols
   - daemon 只允许按活跃 `adaptive-phone` 连接集合计算最小 cols，并在唯一 adaptive lease owner 内执行 `resize-window -x <cols>`
-  - 断开连接、切回 `mirror-fixed` 或心跳过期后立即重算；最后一个 holder 消失时恢复/释放 tmux 宽度控制权
-  - tmux 高度不在这条链路内，daemon 不得改写 rows
+  - 断开连接、切回 `mirror-fixed` 或心跳过期后立即重算；最后一个 holder 消失时必须先用捕获的 baseline `cols + rows` 恢复几何，再 unset `window-size`，释放 tmux 宽度/高度控制权
+  - 运行期 tmux 高度不在这条链路内，daemon 不得改写 rows；final release 是唯一允许用捕获的 baseline rows 恢复 daemon 占用前高度的例外
   - mirror 内容与 `mirror.rows/cols` 仍只能来自 tmux capture/readback，daemon 不得因为刚请求了 resize 就自写 mirror geometry
 - viewport / geometry 变化时不允许：
   - clear terminal
@@ -517,6 +517,7 @@ daemon server
 - 连通性探测必须显式触发；未填写 token 时禁止自动探测 / 自动重试 tmux 列表
 - websocket mux 采用物理 target 级保活观测：一个 daemon target 的物理 WebSocket/RTC transport 只有一个 app-level `mux-ping` timer，logical tmux session/channel 不得各自发 heartbeat；正常周期为低频 30 秒。合法 mux frame 更新 target activity，channel 切换、foreground resume、body-subscription 变化不得新建 heartbeat 或物理 transport。只有物理 `close/error`、send 抛错、daemon 不可达，或 target health owner 明确确认物理 transport 失效，才允许进入 target 重建；单个 channel 错误只能重开该 channel。
 - WebSocket protocol `pong` 与 client `mux-ping` 都只证明 physical transport liveness，不得作为 app-level mux heartbeat。daemon 收到二者只能维护 transport 自身的 `wsAlive`，不得刷新 stale inbound grace 或 adaptive width lease heartbeat。Android service 停止 mux heartbeat 后，即使 socket 仍自动回应 ping，stale sweep 也必须最终释放 physical subscriber、mirror capture 与 adaptive width ownership，但不杀 tmux session；活跃 foreground 会话由周期性 `buffer-head-request` / `body-subscription` / `input` 刷新 stale inbound grace，只有只剩 native transport keepalive 的静默 transport 才会被主动释放。stale sweep 释放 mux subscriber 前必须发送 `mux-channel-closed`，让 Android native service 删除 desired channel，避免背景重连后重新 attach 无人看的 tmux session。
+- `body-subscription { subscribed:false }` 使最后一个 ready body subscriber 消失时，daemon 必须释放 mirror/capture/adaptive width，并以 `mux-channel-closed { code:'no_body_demand' }` 只关闭该 logical channel；物理 target transport 保持打开。client 必须把该 code 视为业务 idle，不得查询 target sessions 或调度 transport reconnect；只有后续显式 active/live demand 才可在同一物理 transport 上重新打开 channel。
 - 核心 transport policy 的 Rust 迁移登记在 `docs/goals/terminal-transport-multiplex-refactor-plan.md#10-rust-migration-register`。`status: planned` 只表示目标态：当前 target network probe 的唯一 runtime owner 仍是 `src/contexts/session-context-target-network-probe-runtime.ts#createSessionTargetNetworkProbeRuntime`；Rust crate、parity gate、bridge 和旧 TS owner 物理删除全部完成前，禁止把计划路径声明成 active truth。
 - daemon 初始化 / attach 阶段任何 `tmux capture-pane` 失败都只能记录错误并继续提供 `head + range` 能力；禁止再降级成第二套 snapshot 语义，也不允许因此让 daemon 进程退出
 

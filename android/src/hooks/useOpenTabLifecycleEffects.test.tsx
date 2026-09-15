@@ -6,8 +6,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createForegroundRefreshRuntime } from '../lib/app-foreground-refresh';
 import { createNetworkIdentityRuntime } from '../lib/network-identity';
 import {
-  BACKGROUND_HANDOFF_WAKE_LOCK_MS,
   useOpenTabLifecycleEffects,
+  useBackgroundLiveSessionHandoff,
 } from './useOpenTabLifecycleEffects';
 import type { Session } from '../lib/types';
 import type { SessionTargetNetworkProbeFailure } from '../contexts/session-context-target-network-probe-runtime';
@@ -132,6 +132,37 @@ afterEach(() => {
 });
 
 describe('useOpenTabLifecycleEffects', () => {
+  it('releases every live session immediately when the app goes background', () => {
+    const setActiveBodySubscriptionSuppressed = vi.fn();
+    const setLiveSessionIds = vi.fn();
+
+    function HandoffHarness({ appForegroundActive }: { appForegroundActive: boolean }) {
+      useBackgroundLiveSessionHandoff({
+        appForegroundActive,
+        liveSessionIds: ['s1', 's2'],
+        setActiveBodySubscriptionSuppressed,
+        setLiveSessionIds,
+      });
+      return <div>mounted</div>;
+    }
+
+    const view = render(<HandoffHarness appForegroundActive />);
+    setLiveSessionIds.mockClear();
+    setActiveBodySubscriptionSuppressed.mockClear();
+
+    view.rerender(<HandoffHarness appForegroundActive={false} />);
+
+    // Background is business-idle: no 5-minute grace period may keep tmux
+    // sessions attached. The daemon must see body demand drop immediately.
+    expect(setActiveBodySubscriptionSuppressed).toHaveBeenCalledWith(true);
+    expect(setLiveSessionIds).toHaveBeenCalledWith([]);
+
+    view.rerender(<HandoffHarness appForegroundActive />);
+
+    expect(setActiveBodySubscriptionSuppressed).toHaveBeenCalledWith(false);
+    expect(setLiveSessionIds).toHaveBeenCalledWith(['s1', 's2']);
+  });
+
   it('keeps retained transport independent from UI lifecycle', () => {
     const onForegroundResume = vi.fn();
     render(<LifecycleHarness
@@ -143,7 +174,6 @@ describe('useOpenTabLifecycleEffects', () => {
   });
 
   it('projects inactive without starting a second background owner', async () => {
-    expect(BACKGROUND_HANDOFF_WAKE_LOCK_MS).toBe(5 * 60 * 1000);
     const onForegroundActiveChange = vi.fn();
     render(<LifecycleHarness
       onForegroundResume={vi.fn()}

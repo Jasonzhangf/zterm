@@ -61,6 +61,9 @@
 - head / range / input 只走 per-session transport，不复用到 control transport
 - session attach / resume 必须复用 control transport，但不能把每个 session 的高频流量都塞回 control transport
 - inactive tab 只停取数，不关 session / transport
+- 最后一个 ready body subscriber 取消订阅时，daemon 可释放 mirror/capture/adaptive width，但必须保留 physical target transport
+- mux 场景的 no body demand release 只关闭 logical mux channel，并携带 `code:'no_body_demand'`；client 收到后只进入业务 idle，不查询 target sessions、不调度 transport reconnect
+- legacy non-mux 场景释放 mirror ownership 后保留 logical session / physical transport；重新订阅 body demand 时必须重新 attach mirror
 - ws close 只说明 transport 死，不说明 session truth 作废
 - daemon 端 reconnect 必须绑定回同一个 `clientSessionId`
 - daemon shutdown 才是统一资源回收点；client 显式 close 是单 session 回收点
