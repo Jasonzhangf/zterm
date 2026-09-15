@@ -269,7 +269,7 @@ function TerminalSessionDrawerComponent({
             position: 'absolute',
             inset: 0,
             border: 'none',
-            background: 'color-mix(in srgb, #050608 18%, transparent)',
+            background: 'color-mix(in srgb, #16191f 18%, transparent)',
             zIndex: 149,
             padding: 0,
             margin: 0,

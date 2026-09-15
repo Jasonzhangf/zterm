@@ -46,21 +46,23 @@ export interface SettingsTheme {
   accentText: string;
   danger: string;
   shadow: string;
+  isDark: boolean;
 }
 
 export function resolveSettingsTheme(shellSkin: string | undefined): SettingsTheme {
   if (shellSkin === 'black' || shellSkin === 'blue') {
     return {
-      background: '#050608',
-      surface: '#101114',
-      field: '#18191d',
-      text: '#f5f7fb',
-      muted: '#9b9da5',
-      border: 'rgba(255,255,255,0.14)',
+      background: '#16191f',
+      surface: '#20252d',
+      field: '#1b1f26',
+      text: '#f2f5fa',
+      muted: '#a7afbc',
+      border: 'rgba(255,255,255,0.12)',
       accent: '#38d47d',
       accentText: '#07110b',
       danger: '#ff7a86',
-      shadow: '0 12px 30px rgba(0,0,0,0.32)',
+      shadow: '0 14px 30px rgba(0,0,0,0.46)',
+      isDark: true,
     };
   }
   return {
@@ -74,5 +76,6 @@ export function resolveSettingsTheme(shellSkin: string | undefined): SettingsThe
     accentText: '#ffffff',
     danger: '#b4233a',
     shadow: '0 12px 30px rgba(17,19,21,0.10)',
+    isDark: false,
   };
 }
