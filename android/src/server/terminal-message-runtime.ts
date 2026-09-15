@@ -26,6 +26,10 @@ import {
   type DaemonControlGatewayDeps,
   type DaemonControlGatewayRuntime,
 } from './daemon-control-gateway-runtime';
+import {
+  clearSessionAttachHeartbeat,
+  markSessionAttachHeartbeat,
+} from './terminal-session-attach-lease-runtime';
 import type { RemoteWindowStreamDaemonRuntime } from './remote-window-stream-daemon';
 import type { DaemonInputQueueRuntime } from './daemon-input-queue-runtime';
 import { createTerminalMuxChannelRuntime } from './terminal-mux-channel-runtime';
@@ -75,6 +79,7 @@ export interface TerminalMessageRuntimeDeps {
   ) => 'queued' | 'missing-subscriber' | 'transport-not-open' | 'queue-full';
   scheduleMirrorLiveSync: (mirror: SessionMirror, delayMs?: number) => void;
   refreshMirrorHeadForSession: (session: TerminalSession, mirror: SessionMirror) => Promise<boolean>;
+  releaseMirrorIfNoBodyDemand: (mirror: SessionMirror, reason: string) => boolean;
   daemonInputQueue: DaemonInputQueueRuntime;
   closeSession: (session: TerminalSession, reason: string, notifyClient?: boolean) => void;
   fileTransferMessageRuntime: TerminalFileTransferMessageRuntime;
@@ -405,13 +410,66 @@ export function createTerminalMessageRuntime(
           });
           break;
         }
+        const wasBodySubscribed = session.bodySubscribed !== false;
         session.bodySubscribed = message.payload.subscribed;
         const mirror = deps.getSessionMirror(session);
-        if (mirror?.lifecycle === 'ready') {
-          if (message.payload.subscribed) {
-            deps.sendBufferHeadToSession(session, mirror);
+        if (message.payload.subscribed) {
+          markSessionAttachHeartbeat(session);
+          // A renewal from an already-subscribed session is an attach
+          // heartbeat, not a reattach. Attach work stays owned by the
+          // false->true transition or by a missing mirror.
+          if (wasBodySubscribed && mirror) {
+            break;
           }
-          deps.scheduleMirrorLiveSync(mirror, 0);
+          if (mirror?.lifecycle === 'ready') {
+            deps.sendBufferHeadToSession(session, mirror);
+            deps.scheduleMirrorLiveSync(mirror, 0);
+          } else {
+            try {
+              // A false->true reattach must restore the subscriber's current
+              // width intent. The client re-sends its requested geometry with
+              // the attach heartbeat, so the adaptive-phone lease owner can
+              // reflow tmux width again. Absent geometry attaches unchanged
+              // (mirror-fixed).
+              const attachWidthMode = message.payload?.widthMode === 'adaptive-phone'
+                ? 'adaptive-phone'
+                : undefined;
+              await deps.controlRuntimeDeps.attachTmux(session, {
+                sessionName: session.sessionName,
+                backend: session.backend,
+                ...(attachWidthMode
+                  ? {
+                      widthMode: attachWidthMode,
+                      cols: typeof message.payload?.cols === 'number' && Number.isFinite(message.payload.cols)
+                        ? message.payload.cols
+                        : undefined,
+                      rows: typeof message.payload?.rows === 'number' && Number.isFinite(message.payload.rows)
+                        ? message.payload.rows
+                        : undefined,
+                    }
+                  : {}),
+              });
+              const restoredMirror = deps.getSessionMirror(session);
+              if (restoredMirror?.lifecycle === 'ready') {
+                deps.sendBufferHeadToSession(session, restoredMirror);
+                deps.scheduleMirrorLiveSync(restoredMirror, 0);
+              }
+            } catch (error) {
+              deps.sendMessage(session, {
+                type: 'error',
+                payload: {
+                  message: error instanceof Error ? error.message : 'Body subscription attach failed',
+                  code: 'body_subscription_attach_failed',
+                },
+              });
+            }
+          }
+        } else {
+          clearSessionAttachHeartbeat(session);
+          if (mirror) {
+            deps.releaseMirrorIfNoBodyDemand(mirror, 'body subscription released');
+            deps.scheduleMirrorLiveSync(mirror, 0);
+          }
         }
         break;
       }

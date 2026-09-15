@@ -118,10 +118,15 @@ describe('server transport/session lifecycle truth gates', () => {
     expect(pongBlock).not.toContain('refreshBoundAdaptiveLease(connection)');
     const messageBlock = extractBlock(source, "ws.on('message'", 600);
     expect(messageBlock).toContain("'mux-ping'");
-    expect(messageBlock).toContain('markTransportConnectionPong(connection)');
+    // mux-ping is the background keepalive: it renews physical transport
+    // liveness (so the target link survives) but must never renew the adaptive
+    // width lease or the session attach lease.
+    expect(messageBlock).toContain('markTransportConnectionInboundActivity(connection)');
+    expect(messageBlock).not.toContain('refreshBoundAdaptiveLease(connection)');
     const rtcOnMessageBlock = extractBlock(source, 'onMessage: (_transportId, data, isBinary) =>', 600);
     expect(rtcOnMessageBlock).toContain("'mux-ping'");
-    expect(rtcOnMessageBlock).toContain('markTransportConnectionPong(connection)');
+    expect(rtcOnMessageBlock).toContain('markTransportConnectionInboundActivity(connection)');
+    expect(rtcOnMessageBlock).not.toContain('refreshBoundAdaptiveLease(connection)');
     expect(errorBlock).toContain("detachConnectionSubscribers(connection, `websocket error: ${error.message}`)");
     expect(errorBlock).not.toContain("closeTransportSubscriber(session, `websocket error: ${error.message}`, false)");
     expect(detachBlock).toContain('connection.boundSubscriberId');

@@ -26,7 +26,6 @@ export type OpenTabAuditReason =
 
 type ForegroundResumeReason = Extract<OpenTabAuditReason, 'visibilitychange' | 'resume' | 'appStateChange' | 'online'>;
 type ForegroundResumeSignalReason = Exclude<ForegroundResumeReason, 'online'>;
-export const BACKGROUND_HANDOFF_WAKE_LOCK_MS = 5 * 60 * 1000;
 
 interface UseOpenTabLifecycleEffectsOptions {
   sessionsRef: MutableRefObject<Session[]>;
@@ -68,7 +67,6 @@ export function useBackgroundLiveSessionHandoff(options: {
     setActiveBodySubscriptionSuppressed,
     setLiveSessionIds,
   } = options;
-  const liveSessionClearTimerRef = useRef<number | null>(null);
   const latestLiveSessionIdsRef = useRef<string[]>([]);
   const clearedLiveSessionIdsRef = useRef<string[] | null>(null);
 
@@ -77,29 +75,17 @@ export function useBackgroundLiveSessionHandoff(options: {
   }, [liveSessionIds]);
 
   useEffect(() => {
-    const clearLiveSessionTimer = () => {
-      if (liveSessionClearTimerRef.current === null) {
-        return;
-      }
-      window.clearTimeout(liveSessionClearTimerRef.current);
-      liveSessionClearTimerRef.current = null;
-    };
-    clearLiveSessionTimer();
     if (appForegroundActive === false) {
       setActiveBodySubscriptionSuppressed(true);
-      liveSessionClearTimerRef.current = window.setTimeout(() => {
-        liveSessionClearTimerRef.current = null;
-        clearedLiveSessionIdsRef.current = latestLiveSessionIdsRef.current;
-        setLiveSessionIds([]);
-      }, BACKGROUND_HANDOFF_WAKE_LOCK_MS);
-      return clearLiveSessionTimer;
+      clearedLiveSessionIdsRef.current = latestLiveSessionIdsRef.current;
+      setLiveSessionIds([]);
+      return;
     }
     setActiveBodySubscriptionSuppressed(false);
     if (clearedLiveSessionIdsRef.current && clearedLiveSessionIdsRef.current.length > 0) {
       setLiveSessionIds(clearedLiveSessionIdsRef.current);
     }
     clearedLiveSessionIdsRef.current = null;
-    return clearLiveSessionTimer;
   }, [appForegroundActive, setActiveBodySubscriptionSuppressed, setLiveSessionIds]);
 }
 

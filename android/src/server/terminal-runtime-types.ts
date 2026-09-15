@@ -19,7 +19,7 @@ export interface TerminalSessionTransport {
   lastSendError?: string | null;
   backpressureCount?: number;
   sendText: (text: string) => void;
-  close: (reason?: string) => void;
+  close: (reason?: string, code?: string) => void;
   ping?: () => void;
   requestOrigin?: string;
   connectedSent?: boolean;
@@ -28,7 +28,7 @@ export interface TerminalSessionTransport {
 export interface TerminalTransportConnection {
   transportId: string;
   transport: TerminalSessionTransport;
-  closeTransport: (reason: string) => void;
+  closeTransport: (reason: string, code?: string) => void;
   closed?: boolean;
   requestOrigin: string;
   role: 'pending' | 'control' | 'session';
@@ -77,7 +77,7 @@ export interface TerminalTransportSubscriber {
   id: string;
   transportId: string;
   transport: TerminalSessionTransport | null;
-  closeTransport?: (reason: string) => void;
+  closeTransport?: (reason: string, code?: string) => void;
   connectedSent?: boolean;
   muxChannelId?: string | null;
   muxParentTransportId?: string | null;
@@ -85,6 +85,11 @@ export interface TerminalTransportSubscriber {
   backend?: 'tmux' | 'herdr';
   mirrorKey: string | null;
   bodySubscribed?: boolean;
+  /** Last valid foreground attach heartbeat for this session. The daemon holds
+   *  the tmux mirror only while this lease is renewed by `body-subscription
+   *  true`; a stale lease releases the session without touching the physical
+   *  transport. */
+  sessionAttachHeartbeatAt?: number;
   adaptiveWidthCols?: number | null;
   adaptiveWidthRows?: number | null;
   adaptiveWidthHeartbeatAt?: number;

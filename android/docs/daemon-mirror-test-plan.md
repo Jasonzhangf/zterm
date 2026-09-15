@@ -209,6 +209,9 @@ tmux truth
    - foreground resume 优先复用原 session transport，不 fresh recreate session
    - daemon transport close 只 detach 对应 subscriber；最后一个 physical subscriber 才回收 daemon mirror/runtime，且不 kill tmux
    - 两个 subscriber attach 同一 tmux target 时，关闭一个不得影响另一个；关闭最后一个后 tmux target 仍存在
+   - `body-subscription { subscribed:false }` 使最后一个 ready body subscriber 消失时，daemon 释放 mirror/capture/adaptive width，但不关闭 physical target transport
+   - mux 场景释放时发送 `mux-channel-closed { code:'no_body_demand' }`，client 进入业务 idle，不得 target control query / reconnect
+   - legacy non-mux 场景释放 mirror ownership 后保留 logical session / physical transport；再次 `body-subscription { subscribed:true }` 必须重新 attach mirror
 
 ### 编译前门禁
 

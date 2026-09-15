@@ -5,6 +5,7 @@ import {
   TERMINAL_TRANSPORT_STALE_INBOUND_MS,
   type DaemonTransportConnection,
 } from './terminal-transport-runtime';
+import { TERMINAL_SESSION_ATTACH_LEASE_MS } from './terminal-session-attach-lease-runtime';
 
 function createSessionSubscriber(transportId: string): TerminalTransportSubscriber {
   return {
@@ -14,6 +15,7 @@ function createSessionSubscriber(transportId: string): TerminalTransportSubscrib
     sessionName: 'demo',
     mirrorKey: 'demo',
     bodySubscribed: true,
+    sessionAttachHeartbeatAt: Date.now(),
     adaptiveWidthCols: 58,
     adaptiveWidthHeartbeatAt: Date.now(),
     pendingPasteImage: null,
@@ -58,6 +60,11 @@ function createRuntimeHarness() {
   sessions.set(subscriber.id, subscriber);
   connections.set(connection.id, connection);
   const detachSubscriberTransportOnly = vi.fn();
+  const releaseSessionAttachLease = vi.fn((target: TerminalTransportSubscriber) => {
+    target.bodySubscribed = false;
+    target.sessionAttachHeartbeatAt = undefined;
+    return true;
+  });
   const destroyMirror = vi.fn();
   const sendTransportMessage = vi.fn();
   const runtime = createTerminalDaemonRuntime({
@@ -90,6 +97,7 @@ function createRuntimeHarness() {
     disposeRelayHostClient: vi.fn(),
     disposeRtcBridgeServer: vi.fn(),
     detachSubscriberTransportOnly,
+    releaseSessionAttachLease,
     listMuxChannelSubscriberIds: (target) => Array.from(target.muxChannels?.values() || []),
     releaseAllMuxChannelSubscribers: (target) => {
       const subscriberIds = Array.from(target.muxChannels?.values() || []);
@@ -104,6 +112,7 @@ function createRuntimeHarness() {
     connections,
     detachSubscriberTransportOnly,
     destroyMirror,
+    releaseSessionAttachLease,
     runtime,
     sendTransportMessage,
     sessions,
@@ -166,6 +175,60 @@ describe('terminal daemon runtime transport liveness', () => {
     expect(connection.closeTransport).not.toHaveBeenCalled();
     expect(detachSubscriberTransportOnly).not.toHaveBeenCalled();
     expect(connections.has(connection.id)).toBe(true);
+  });
+
+  it('releases the session attach lease while keeping the physical transport open', () => {
+    const { connection, connections, releaseSessionAttachLease, runtime, subscriber } = createRuntimeHarness();
+    subscriber.sessionAttachHeartbeatAt = Date.now();
+
+    runtime.startHeartbeatLoop();
+    vi.setSystemTime(new Date(Date.parse('2026-07-20T00:00:00Z') + TERMINAL_SESSION_ATTACH_LEASE_MS + 1000));
+    vi.advanceTimersByTime(1000);
+
+    expect(releaseSessionAttachLease).toHaveBeenCalledWith(subscriber, 'session attach lease expired');
+    expect(connection.closeTransport).not.toHaveBeenCalled();
+    expect(connections.has(connection.id)).toBe(true);
+  });
+
+  it('keeps the session attach lease held while foreground heartbeats renew it', () => {
+    const { releaseSessionAttachLease, runtime, subscriber } = createRuntimeHarness();
+    runtime.startHeartbeatLoop();
+
+    for (const elapsedMs of [30_000, 60_000, 90_000, 120_000]) {
+      vi.setSystemTime(new Date(Date.parse('2026-07-20T00:00:00Z') + elapsedMs));
+      subscriber.sessionAttachHeartbeatAt = Date.now();
+      vi.advanceTimersByTime(1000);
+    }
+
+    expect(releaseSessionAttachLease).not.toHaveBeenCalled();
+  });
+
+  it('does not release a session whose body demand is already false', () => {
+    const { releaseSessionAttachLease, runtime, subscriber } = createRuntimeHarness();
+    subscriber.bodySubscribed = false;
+    subscriber.sessionAttachHeartbeatAt = undefined;
+
+    runtime.startHeartbeatLoop();
+    vi.setSystemTime(new Date(Date.parse('2026-07-20T00:00:00Z') + TERMINAL_SESSION_ATTACH_LEASE_MS + 1000));
+    vi.advanceTimersByTime(1000);
+
+    expect(releaseSessionAttachLease).not.toHaveBeenCalled();
+  });
+
+  it('still enforces physical liveness for a mux transport whose channels were all released', () => {
+    const { connection, connections, detachSubscriberTransportOnly, runtime, sessions } = createRuntimeHarness();
+    sessions.clear();
+    connection.boundSubscriberId = null;
+    connection.muxVersion = 1;
+    connection.muxChannels = new Map();
+
+    runtime.startHeartbeatLoop();
+    vi.setSystemTime(new Date(Date.parse('2026-07-20T00:00:00Z') + TERMINAL_TRANSPORT_STALE_INBOUND_MS + 1000));
+    vi.advanceTimersByTime(1000);
+
+    expect(connection.closeTransport).toHaveBeenCalledWith('transport heartbeat stale');
+    expect(detachSubscriberTransportOnly).not.toHaveBeenCalled();
+    expect(connections.has(connection.id)).toBe(false);
   });
 
   it('detaches every mux channel subscriber when the physical target transport goes stale', () => {

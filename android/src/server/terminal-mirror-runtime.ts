@@ -15,6 +15,7 @@ import { createDaemonBufferPublisherRuntime } from './daemon-buffer-publisher-ru
 import { detachMirrorSubscriber, releaseMirrorSubscribers } from './mirror-lifecycle';
 import { resolveTerminalLiveSyncDelay } from './terminal-performance-scheduler';
 import type { DaemonInputQueueRuntime } from './daemon-input-queue-runtime';
+import type { AdaptiveWidthOwnershipStore } from './adaptive-width-ownership-store';
 import type {
   TerminalSession,
   SessionMirror,
@@ -73,7 +74,13 @@ export interface TerminalMirrorRuntimeDeps {
   logTimePrefix: () => string;
   runTmux: (args: string[]) => { ok: true; stdout: string };
   buildExactTmuxSessionTarget: (sessionName: string) => string;
-  closeTransportSubscriber: (session: TerminalSession, reason: string, notifyClient?: boolean) => void;
+  adaptiveWidthOwnershipStore?: AdaptiveWidthOwnershipStore;
+  closeTransportSubscriber: (
+    session: TerminalSession,
+    reason: string,
+    notifyClient?: boolean,
+    code?: string,
+  ) => void;
   getSessionMirror: (session: TerminalSession) => SessionMirror | null;
 }
 
@@ -82,9 +89,15 @@ export interface TerminalMirrorRuntime {
   destroyMirror: (
     mirror: SessionMirror,
     reason: string,
-    options?: { closeTransportSubscribers?: boolean; notifyClientClose?: boolean; releaseCode?: string },
+    options?: {
+      closeTransportSubscribers?: boolean;
+      notifyClientClose?: boolean;
+      notifySubscriberRelease?: boolean;
+      releaseCode?: string;
+    },
   ) => boolean;
   destroyMirrorIfUnsubscribed: (mirror: SessionMirror, reason: string) => boolean;
+  releaseMirrorIfNoBodyDemand: (mirror: SessionMirror, reason: string) => boolean;
   ensureSessionReady: (session: TerminalSession, mirror: SessionMirror) => void;
   sendBufferHeadToSession: (session: TerminalSession, mirror: SessionMirror) => void;
   enqueueRangeBufferSyncResponse: (
@@ -244,6 +257,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     mirror: SessionMirror,
     reason: string,
     code = 'tmux_session_unavailable',
+    notify = true,
   ) {
     const releasedSessionIds = releaseMirrorSubscribers(sessions, mirror.subscribers);
     for (const sessionId of releasedSessionIds) {
@@ -256,7 +270,9 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       client.adaptiveWidthHeartbeatAt = 0;
       client.pendingPasteImage = null;
       client.pendingAttachFile = null;
-      deps.sendMessage(client, { type: 'error', payload: { message: reason, code } });
+      if (notify) {
+        deps.sendMessage(client, { type: 'error', payload: { message: reason, code } });
+      }
     }
   }
 
@@ -266,6 +282,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     options?: {
       closeTransportSubscribers?: boolean;
       notifyClientClose?: boolean;
+      notifySubscriberRelease?: boolean;
       releaseCode?: string;
     },
   ): boolean {
@@ -297,10 +314,20 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
         if (!client) {
           continue;
         }
-        deps.closeTransportSubscriber(client, reason, Boolean(options.notifyClientClose));
+        deps.closeTransportSubscriber(
+          client,
+          reason,
+          Boolean(options.notifyClientClose),
+          options.releaseCode,
+        );
       }
     } else {
-      releaseMirrorForSubscribers(mirror, reason, options?.releaseCode || 'tmux_session_unavailable');
+      releaseMirrorForSubscribers(
+        mirror,
+        reason,
+        options?.releaseCode || 'tmux_session_unavailable',
+        options?.notifySubscriberRelease !== false,
+      );
     }
     mirror.subscribers.clear();
     mirror.scratchBridge = null;
@@ -339,6 +366,64 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       closeTransportSubscribers: false,
       releaseCode: 'no_subscribers',
     });
+  }
+
+  // Releases one subscriber's hold on a mirror without touching peers.
+  // Mux subscribers own a logical channel, so releasing means closing that
+  // channel (the physical transport stays open). Legacy subscribers own the
+  // physical transport directly, so only mirror ownership is detached.
+  function releaseSubscriberMirrorHold(
+    mirror: SessionMirror,
+    session: TerminalSession,
+    reason: string,
+  ) {
+    if (session.muxChannelId) {
+      deps.closeTransportSubscriber(session, reason, false, 'no_body_demand');
+      return;
+    }
+    releaseAdaptiveWidthLease(session, `body-release:${reason}`);
+    const detachResult = detachMirrorSubscriber(mirror.subscribers, session.id);
+    mirror.subscribers = detachResult.nextSubscribers;
+    session.mirrorKey = null;
+  }
+
+  function releaseMirrorIfNoBodyDemand(mirror: SessionMirror, reason: string) {
+    if (mirror.lifecycle === 'destroyed') {
+      return false;
+    }
+    const readyBodyDemand = countReadyBodySubscribedSubscribers(mirror);
+    if (readyBodyDemand > 0) {
+      // Peers still demand the body, so the mirror stays. Every subscriber that
+      // has already withdrawn demand must still release its own logical channel
+      // and adaptive width lease; otherwise a backgrounded client keeps
+      // holding a channel and can keep tmux pinned to its narrow width.
+      for (const sessionId of [...mirror.subscribers]) {
+        const session = sessions.get(sessionId);
+        if (!session || session.bodySubscribed !== false) {
+          continue;
+        }
+        releaseSubscriberMirrorHold(mirror, session, reason);
+      }
+      return false;
+    }
+    for (const sessionId of [...mirror.subscribers]) {
+      const session = sessions.get(sessionId);
+      if (!session) {
+        continue;
+      }
+      releaseSubscriberMirrorHold(mirror, session, reason);
+    }
+    if (!mirrors.has(mirror.key)) {
+      return true;
+    }
+    if (mirror.subscribers.size > 0) {
+      return destroyMirror(mirror, reason, {
+        closeTransportSubscribers: false,
+        notifySubscriberRelease: false,
+        releaseCode: 'no_body_demand',
+      });
+    }
+    return destroyMirrorIfUnsubscribed(mirror, reason);
   }
 
   function ensureSessionReady(session: TerminalSession, mirror: SessionMirror) {
@@ -615,6 +700,11 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       if (!subscriber || !subscriber.transport || subscriber.transport.readyState !== 1) {
         continue;
       }
+      if (subscriber.bodySubscribed === false) {
+        // A withdrawn subscriber must never contribute to the aggregate tmux
+        // width, even if its lease release is still in flight.
+        continue;
+      }
       if (!subscriber.adaptiveWidthCols || subscriber.adaptiveWidthCols <= 0) {
         continue;
       }
@@ -664,6 +754,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
           console.warn(
             `[${deps.logTimePrefix()}] adaptive width target already unavailable for ${mirror.sessionName}; cleanup state discarded`,
           );
+          removeAdaptiveWidthOwnershipRecord(mirror.sessionName);
           pendingAdaptiveWidthCleanup.delete(mirror.key);
           mirror.adaptiveWidthAppliedCols = null;
           mirror.adaptiveWidthBaselineGeometry = null;
@@ -679,6 +770,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       }
     }
     pendingAdaptiveWidthCleanup.delete(mirror.key);
+    removeAdaptiveWidthOwnershipRecord(mirror.sessionName);
     mirror.adaptiveWidthAppliedCols = null;
     mirror.adaptiveWidthBaselineGeometry = null;
     return true;
@@ -713,6 +805,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     if (mirror.adaptiveWidthAppliedCols === cols && mirror.adaptiveWidthAppliedRows === targetRows) {
       return;
     }
+    persistAdaptiveWidthOwnership(mirror, cols, deps.normalizeTerminalRows(targetRows));
     if (deps.resizeBackendSession) {
       deps.resizeBackendSession(mirror.sessionName, {
         cols,
@@ -744,6 +837,57 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     });
   }
 
+  function persistAdaptiveWidthOwnership(mirror: SessionMirror, cols: number, rows: number) {
+    if (
+      mirror.backend !== 'tmux'
+      || !deps.adaptiveWidthOwnershipStore
+      || !mirror.adaptiveWidthBaselineGeometry
+    ) {
+      return;
+    }
+    let paneId: string;
+    try {
+      paneId = deps.readTmuxPaneMetrics(mirror.sessionName, mirror.backend).paneId;
+    } catch (error) {
+      console.error(
+        `[${deps.logTimePrefix()}] adaptive width ownership persist failed to read pane identity for ${mirror.sessionName}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return;
+    }
+    try {
+      deps.adaptiveWidthOwnershipStore.upsert({
+        sessionName: mirror.sessionName,
+        paneId,
+        baseline: { ...mirror.adaptiveWidthBaselineGeometry },
+        appliedCols: cols,
+        appliedRows: rows,
+      });
+    } catch (error) {
+      console.error(
+        `[${deps.logTimePrefix()}] adaptive width ownership persist failed for ${mirror.sessionName}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
+  function removeAdaptiveWidthOwnershipRecord(sessionName: string) {
+    if (!deps.adaptiveWidthOwnershipStore) {
+      return;
+    }
+    try {
+      deps.adaptiveWidthOwnershipStore.remove(sessionName);
+    } catch (error) {
+      console.error(
+        `[${deps.logTimePrefix()}] adaptive width ownership remove failed for ${sessionName}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
   function attemptPendingAdaptiveWidthCleanup(key: string) {
     const pending = pendingAdaptiveWidthCleanup.get(key);
     if (!pending) {
@@ -761,6 +905,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
         } catch (error) {
           if (isTmuxSessionUnavailableError(error)) {
             pendingAdaptiveWidthCleanup.delete(key);
+            removeAdaptiveWidthOwnershipRecord(pending.sessionName);
             return true;
           }
           return false;
@@ -770,6 +915,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
             `[${deps.logTimePrefix()}] adaptive width cleanup target changed for ${pending.sessionName}; discarding stale cleanup`,
           );
           pendingAdaptiveWidthCleanup.delete(key);
+          removeAdaptiveWidthOwnershipRecord(pending.sessionName);
           return true;
         }
       }
@@ -779,6 +925,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
         adaptiveWidthBaselineGeometry: pending.baseline,
       }, `retry:${pending.key}`);
       pendingAdaptiveWidthCleanup.delete(key);
+      removeAdaptiveWidthOwnershipRecord(pending.sessionName);
       return true;
     } catch (error) {
       console.error(
@@ -802,9 +949,6 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     mirror: Pick<SessionMirror, 'sessionName' | 'backend' | 'adaptiveWidthBaselineGeometry'>,
     reason: string,
   ) {
-    if (mirror.backend === 'tmux') {
-      deps.runTmux(['set-window-option', '-u', '-t', deps.buildExactTmuxSessionTarget(mirror.sessionName), 'window-size']);
-    }
     const baseline = mirror.adaptiveWidthBaselineGeometry;
     if (baseline) {
       if (deps.resizeBackendSession) {
@@ -815,6 +959,11 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       } else {
         deps.runTmux(['resize-window', '-t', deps.buildExactTmuxSessionTarget(mirror.sessionName), '-x', String(deps.normalizeTerminalCols(baseline.cols))]);
       }
+    }
+    // resize-window itself switches the window to manual. Unset window-size
+    // last so tmux returns to its configured policy (normally latest).
+    if (mirror.backend === 'tmux') {
+      deps.runTmux(['set-window-option', '-u', '-t', deps.buildExactTmuxSessionTarget(mirror.sessionName), 'window-size']);
     }
     console.log(`[${deps.logTimePrefix()}] adaptive width released`, {
       sessionName: mirror.sessionName,
@@ -885,8 +1034,42 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
   }
 
   function restorePersistedAdaptiveWidthBaselines(sessionNames: string[]) {
-    void sessionNames;
-    return 0;
+    if (!deps.adaptiveWidthOwnershipStore) {
+      return 0;
+    }
+    const liveSessionNames = new Set(sessionNames);
+    let restored = 0;
+    for (const record of deps.adaptiveWidthOwnershipStore.read()) {
+      if (!liveSessionNames.has(record.sessionName)) {
+        removeAdaptiveWidthOwnershipRecord(record.sessionName);
+        continue;
+      }
+      try {
+        const metrics = deps.readTmuxPaneMetrics(record.sessionName, 'tmux');
+        if (metrics.paneId !== record.paneId) {
+          removeAdaptiveWidthOwnershipRecord(record.sessionName);
+          continue;
+        }
+        releaseAdaptiveTmuxWidth({
+          sessionName: record.sessionName,
+          backend: 'tmux',
+          adaptiveWidthBaselineGeometry: record.baseline,
+        }, 'restore:daemon-start-no-subscriber');
+        removeAdaptiveWidthOwnershipRecord(record.sessionName);
+        restored += 1;
+      } catch (error) {
+        if (isTmuxSessionUnavailableError(error)) {
+          removeAdaptiveWidthOwnershipRecord(record.sessionName);
+          continue;
+        }
+        console.error(
+          `[${deps.logTimePrefix()}] adaptive width startup restore failed for ${record.sessionName}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+    return restored;
   }
 
   async function startMirror(
@@ -921,7 +1104,10 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     reconcileAdaptiveWidthLeases(mirror, 'mirror-ready');
 
     if (countReadyBodySubscribedSubscribers(mirror) === 0) {
-      announceMirrorSubscribersReady(mirror);
+      // body-subscription=false can arrive while the mirror is still booting,
+      // before the ready check in terminal-message-runtime. Do not announce or
+      // keep a mirror that no client is asking to see.
+      releaseMirrorIfNoBodyDemand(mirror, 'body subscription released');
       return;
     }
 
@@ -1098,6 +1284,14 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     }
     deps.sendMessage(session, { type: 'title', payload: mirror.sessionName });
 
+    if (mirror.lifecycle === 'ready' && session.bodySubscribed === false) {
+      // A subscriber can attach without body demand while a peer keeps the
+      // mirror alive. Release this subscriber's channel/lease now instead of
+      // relying on a later body-subscription message.
+      releaseMirrorIfNoBodyDemand(mirror, 'body subscription released');
+      return;
+    }
+
     if (mirror.lifecycle === 'ready') {
       ensureSessionReady(session, mirror);
       scheduleMirrorLiveSync(mirror, 0);
@@ -1196,6 +1390,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     scheduleMirrorLiveSync,
     startMirror,
     attachTmux,
+    releaseMirrorIfNoBodyDemand,
     handleAdaptiveResize,
     restorePersistedAdaptiveWidthBaselines,
     refreshAdaptiveWidthLeaseHeartbeat,

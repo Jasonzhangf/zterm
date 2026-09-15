@@ -86,7 +86,7 @@ describe.skipIf(!hasTmux())('tmux window-size semantics for adaptive width', () 
     await cleanupScratchSessions();
   });
 
-  it('proves resize-window -x switches tmux to manual and freezes height until latest is restored', async () => {
+  it('proves final release must restore baseline before unsetting window-size', async () => {
     const sessionName = `zterm-height-${Date.now()}`;
     const socketName = `zterm-height-test-${Date.now()}`;
     SCRATCH_SESSIONS.set(sessionName, socketName);
@@ -111,10 +111,11 @@ describe.skipIf(!hasTmux())('tmux window-size semantics for adaptive width', () 
     expect(frozenMetrics.windowWidth).toBe(56);
     expect(frozenMetrics.windowHeight).toBe(initialMetrics.windowHeight);
 
-    tmux(socketName, ['set-window-option', '-t', `${sessionName}:0`, 'window-size', 'latest']);
+    tmux(socketName, ['resize-window', '-t', `${sessionName}:0`, '-x', String(initialMetrics.windowWidth)]);
+    tmux(socketName, ['set-window-option', '-u', '-t', `${sessionName}:0`, 'window-size']);
     await wait(250);
     const releasedMetrics = readMetrics(socketName, sessionName);
-    expect(releasedMetrics.windowSizeMode).toBe('latest');
+    expect(releasedMetrics.windowSizeMode).toBe('');
     expect(releasedMetrics.windowWidth).toBeGreaterThan(frozenMetrics.windowWidth);
     expect(releasedMetrics.windowHeight).toBeGreaterThan(frozenMetrics.windowHeight);
 

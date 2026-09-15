@@ -102,6 +102,7 @@ export function resolveMuxChannelClosedWithControlStatusRuntime(options: {
   sessionName: string;
   channelId: string;
   reason: string;
+  code?: string;
   shouldReconnectNow: boolean;
   queryTargetSessions: () => Promise<string[] | null>;
   routeTargetControlUnavailable?: (sessionId: string, message: string) => void;
@@ -126,6 +127,22 @@ export function resolveMuxChannelClosedWithControlStatusRuntime(options: {
     }
     return channel;
   };
+
+  if (options.code === 'no_body_demand') {
+    if (!readCurrentClosedChannel()) {
+      return;
+    }
+    options.updateSessionSync(
+      options.sessionId,
+      buildSessionIdleAfterReconnectBlockedUpdates(options.reason),
+    );
+    options.runtimeDebug('session.mux.channel-closed.no-body-demand', {
+      sessionId: options.sessionId,
+      channelId: options.channelId,
+      reason: options.reason,
+    });
+    return;
+  }
 
   if (!options.shouldReconnectNow) {
     options.updateSessionSync(
@@ -476,7 +493,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
       rawFrameBytes?: number;
       onConnected: () => void;
       onFailure: (message: string, retryable: boolean) => void;
-      onClosed: (reason?: string) => void;
+      onClosed: (reason?: string, code?: string) => void;
     }, msg: ServerMessage) => void) | null>;
     handleSocketConnectedBaselineRef: MutableRefObject<((options: {
       sessionId: string;
@@ -663,7 +680,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
     finalizeFailure: (message: string, retryable: boolean) => void;
     onBeforeConnectSend?: (ctx: { sessionName: string }) => void;
     onConnected: () => void;
-    onClosed?: (reason?: string) => void;
+    onClosed?: (reason?: string, code?: string) => void;
   }) => {
     bindSessionTransportSocketLifecycleOrchestrationRuntime({
       sessionId: bindOptions.sessionId,
@@ -756,10 +773,10 @@ export function createSessionTransportOrchestrationRuntime(options: {
         }
         scheduleReconnect(sessionId, message, retryable);
       },
-      onClosed: (reason?: string) => {
+      onClosed: (reason?: string, code?: string) => {
         if (pending) {
           deletePendingSessionTransportOpenIntent(options.refs.pendingSessionTransportOpenIntentsRef.current, sessionId);
-          pending.onClosed?.(reason);
+          pending.onClosed?.(reason, code);
           return;
         }
         if (reason) {
@@ -771,6 +788,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
             sessionName,
             channelId: channel?.channelId || '',
             reason,
+            code,
             shouldReconnectNow: (
               options.stateRef.current.activeSessionId === sessionId
               || Boolean(options.stateRef.current.liveSessionIds?.includes(sessionId))
@@ -888,6 +906,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
           readSessionTerminalChannelBodySubscribed: (sessionId) => (
             options.readSessionTerminalChannel(sessionId)?.bodySubscribed ?? null
           ),
+          readRequestedTerminalGeometry: options.readRequestedTerminalGeometry,
           updateSessionTerminalChannelState: options.writeSessionTerminalChannelState,
           sendSocketPayload: options.sendSocketPayload,
           handleSocketServerMessage: (params, msg) => {

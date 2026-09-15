@@ -1,16 +1,22 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
   createSessionTransportRuntimeStore,
   getSessionTransportRuntime,
+  setSessionRequestedTerminalGeometry,
   setSessionTargetTerminalMuxReady,
   setTargetTerminalTransport,
   upsertSessionTransportRuntime,
 } from '../lib/session-transport-runtime';
-import { ensureSessionTerminalChannel } from '../lib/terminal-channel-mux-runtime';
+import {
+  ensureSessionTerminalChannel,
+  getSessionTerminalChannel,
+  updateSessionTerminalChannelState,
+} from '../lib/terminal-channel-mux-runtime';
 import type { Host } from '../lib/types';
 import {
+  createSessionInfraFacadeRuntime,
   shouldRouteAndroidHostToTraversalSocket,
   wrapSessionPayloadForTargetMuxRuntime,
 } from './session-context-infra-facade-runtime';
@@ -92,6 +98,115 @@ describe('Android connection service platform wiring', () => {
     expect(source).toContain('shouldRouteAndroidHostToTraversalSocket(host)');
     expect(source).toContain("transportRole: 'session'");
     expect(source).toContain('buildTraversalSocketForHostRuntime({');
+  });
+});
+
+describe('body demand reconciliation', () => {
+  it('reopens a closed mux channel when the session becomes body-subscribed again', () => {
+    const { store } = createMuxStore();
+    const channel = getSessionTerminalChannel(store.terminalChannels, 'session-1');
+    if (!channel) {
+      throw new Error('channel not initialized');
+    }
+    channel.state = 'closed';
+    const reopenSessionTerminalChannel = vi.fn();
+    const stateRef = {
+      current: {
+        activeSessionId: null,
+        liveSessionIds: ['session-1'],
+        sessions: [{ id: 'session-1', state: 'connected' }],
+      },
+    };
+    const runtime = createSessionInfraFacadeRuntime({
+      stateRef,
+      dispatch: vi.fn(),
+      reduceSessionAction: (state: unknown, _action: unknown) => state,
+      transportRuntimeStoreRef: { current: store },
+      sessionBufferStoreRef: { current: {} },
+      sessionRenderGateRef: { current: {} },
+      sessionHeadStoreRef: { current: {} },
+      sessionDebugMetricsStoreRef: { current: { recordTxBytes: vi.fn(), recordRxBytes: vi.fn() } },
+      scheduleStatesRef: { current: {} },
+      setScheduleStates: vi.fn(),
+      sessionAttachTokensRef: { current: new Map() },
+      pendingSessionTransportOpenIntentsRef: { current: new Map() },
+      activeBodySubscriptionSuppressedRef: { current: false },
+      reopenSessionTerminalChannelRef: { current: reopenSessionTerminalChannel },
+      reconnectStore: {},
+      tailRefreshStore: {},
+      bufferFrameAssemblyRef: { current: new Map() },
+      sessionPullStateRef: { current: new Map() },
+      heartbeatStore: {},
+      handshakeTimeoutsRef: { current: new Map() },
+      sessionRevisionResetRef: { current: new Map() },
+      lastHeadRequestAtRef: { current: new Map() },
+      terminalCacheLines: 1000,
+      defaultRows: 40,
+      bridgeSettings: {},
+      staleActivityMs: 3000,
+      runtimeDebug: vi.fn(),
+    } as any);
+
+    runtime.reconcilePhysicalBodySubscriptions('live-sessions');
+
+    expect(reopenSessionTerminalChannel).toHaveBeenCalledWith('session-1');
+  });
+
+  it('sends the current adaptive-phone geometry with a foreground body-subscription so reattach restores the lease', () => {
+    const { store, targetSocket } = createMuxStore();
+    updateSessionTerminalChannelState(store.terminalChannels, 'session-1', 'open');
+    setSessionRequestedTerminalGeometry(store, 'session-1', { cols: 68, widthMode: 'adaptive-phone' });
+    const sent: string[] = [];
+    (targetSocket as any).send = (data: string) => { sent.push(data); };
+    const stateRef = {
+      current: {
+        activeSessionId: 'session-1',
+        liveSessionIds: ['session-1'],
+        sessions: [{ id: 'session-1', state: 'connected' }],
+      },
+    };
+    const runtime = createSessionInfraFacadeRuntime({
+      stateRef,
+      dispatch: vi.fn(),
+      reduceSessionAction: (state: unknown, _action: unknown) => state,
+      transportRuntimeStoreRef: { current: store },
+      sessionBufferStoreRef: { current: {} },
+      sessionRenderGateRef: { current: {} },
+      sessionHeadStoreRef: { current: {} },
+      sessionDebugMetricsStoreRef: { current: { recordTxBytes: vi.fn(), recordRxBytes: vi.fn() } },
+      scheduleStatesRef: { current: {} },
+      setScheduleStates: vi.fn(),
+      sessionAttachTokensRef: { current: new Map() },
+      pendingSessionTransportOpenIntentsRef: { current: new Map() },
+      activeBodySubscriptionSuppressedRef: { current: false },
+      reopenSessionTerminalChannelRef: { current: vi.fn() },
+      reconnectStore: {},
+      tailRefreshStore: {},
+      bufferFrameAssemblyRef: { current: new Map() },
+      sessionPullStateRef: { current: new Map() },
+      heartbeatStore: {},
+      handshakeTimeoutsRef: { current: new Map() },
+      sessionRevisionResetRef: { current: new Map() },
+      lastHeadRequestAtRef: { current: new Map() },
+      terminalCacheLines: 1000,
+      defaultRows: 40,
+      bridgeSettings: {},
+      staleActivityMs: 3000,
+      runtimeDebug: vi.fn(),
+    } as any);
+
+    runtime.reconcilePhysicalBodySubscriptions('live-sessions');
+
+    const bodyMessage = sent
+      .map((item) => JSON.parse(item))
+      .find((item) => item.type === 'mux-channel-message' && item.payload?.message?.type === 'body-subscription');
+    expect(bodyMessage).toBeTruthy();
+    expect(bodyMessage.payload.message.payload).toEqual({
+      version: 1,
+      subscribed: true,
+      cols: 68,
+      widthMode: 'adaptive-phone',
+    });
   });
 });
 

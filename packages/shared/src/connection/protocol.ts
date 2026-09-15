@@ -853,7 +853,20 @@ export type BridgeClientMessage =
   | { type: 'session-open'; payload: HostConfigMessage }
   | { type: 'connect'; payload: HostConfigMessage }
   | { type: 'resize'; payload: { cols?: number; rows?: number; widthMode?: TerminalWidthMode } }
-  | { type: 'body-subscription'; payload: { version: 1; subscribed: boolean } }
+  | {
+      type: 'body-subscription';
+      // Optional geometry carries the subscriber's current `adaptive-phone`
+      // request so a false->true reattach can restore tmux width ownership.
+      // It is per-message request metadata; the daemon must not store it as
+      // long-lived session/mirror truth.
+      payload: {
+        version: 1;
+        subscribed: boolean;
+        cols?: number;
+        rows?: number;
+        widthMode?: TerminalWidthMode;
+      };
+    }
   | { type: 'buffer-head-request' }
   | { type: 'buffer-sync-request'; payload: BufferSyncRequestPayload }
   | { type: 'list-sessions'; payload?: { terminalBackend?: TerminalBackendKind } }

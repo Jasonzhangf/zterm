@@ -311,7 +311,8 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
         type: 'mux-channel-closed',
         payload: {
           channelId: event.channelId,
-          reason: 'service-channel-closed',
+          reason: event.reason || 'service-channel-closed',
+          ...(event.code ? { code: event.code } : {}),
         },
       }),
     });

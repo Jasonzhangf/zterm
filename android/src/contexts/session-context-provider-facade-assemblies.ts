@@ -289,6 +289,8 @@ export function useSessionProviderFacadeAssemblies(
     flushRuntimeDebugLogs: core.flushRuntimeDebugLogs,
     clientRuntimeDebugFlushIntervalMs: CLIENT_RUNTIME_DEBUG_FLUSH_INTERVAL_MS,
     ensureActiveSessionFresh,
+    renewForegroundSessionAttachLease: (reason: string) =>
+      core.reconcilePhysicalBodySubscriptions(reason, { renewOnly: true }),
     resolveActiveHeadRefreshTickMs: (sessionId?: string | null) => core.resolveTerminalRefreshCadence(sessionId).headTickMs,
     resolveHeadStalePingMs: (sessionId?: string | null) => core.resolveTerminalRefreshCadence(sessionId).headStalePingMs,
     clearSessionHandshakeTimeout: core.clearSessionHandshakeTimeout,

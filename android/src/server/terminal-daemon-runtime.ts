@@ -6,6 +6,7 @@ import type { TerminalSessionTransport } from './terminal-runtime-types';
 import type { TerminalSession, SessionMirror } from './terminal-runtime';
 import type { DaemonTransportConnection } from './terminal-transport-runtime';
 import { TERMINAL_TRANSPORT_STALE_INBOUND_MS } from './terminal-transport-runtime';
+import { isSessionAttachLeaseExpired } from './terminal-session-attach-lease-runtime';
 import { publishSessionActivitiesRuntime } from './terminal-session-activity-runtime';
 
 export interface DestroyMirrorOptions {
@@ -43,6 +44,7 @@ export interface TerminalDaemonRuntimeDeps {
   logTimePrefix: () => string;
   shutdownTerminalSessions: (sessions: Map<string, TerminalSession>, reason: string) => void;
   detachSubscriberTransportOnly: (subscriber: TerminalSession, reason: string, transportId?: string) => void;
+  releaseSessionAttachLease: (subscriber: TerminalSession, reason: string) => boolean;
   listMuxChannelSubscriberIds: (connection: DaemonTransportConnection) => string[];
   releaseAllMuxChannelSubscribers: (connection: DaemonTransportConnection) => string[];
   destroyMirror: (mirror: SessionMirror, reason: string, options?: DestroyMirrorOptions) => void;
@@ -122,6 +124,16 @@ export function createTerminalDaemonRuntime(
     }
     heartbeatTimer = setInterval(() => {
       const now = Date.now();
+      for (const subscriber of [...deps.sessions.values()]) {
+        if (!isSessionAttachLeaseExpired(subscriber, now)) {
+          continue;
+        }
+        const reason = 'session attach lease expired';
+        console.log(
+          `[${deps.logTimePrefix()}] session attach lease expired session=${subscriber.sessionName} subscriber=${subscriber.id}`,
+        );
+        deps.releaseSessionAttachLease(subscriber, reason);
+      }
       for (const connection of deps.connections.values()) {
         const boundSubscriberIds = new Set<string>();
         if (connection.boundSubscriberId) {
@@ -131,7 +143,12 @@ export function createTerminalDaemonRuntime(
           boundSubscriberIds.add(subscriberId);
         }
 
-        if (connection.transport.readyState === WebSocket.OPEN && boundSubscriberIds.size > 0) {
+        // A mux connection whose channels were all released by attach-lease
+        // expiry still owns a live physical transport. It must keep proving
+        // app-level liveness with mux-ping, otherwise a dead client would keep
+        // an idle transport (and its daemon resources) forever.
+        const requiresClientLiveness = boundSubscriberIds.size > 0 || Boolean(connection.muxVersion);
+        if (connection.transport.readyState === WebSocket.OPEN && requiresClientLiveness) {
           const lastInboundAt = Math.max(0, Math.floor(connection.lastInboundAt || 0));
           const staleForMs = lastInboundAt > 0 ? now - lastInboundAt : Number.POSITIVE_INFINITY;
           if (staleForMs > TERMINAL_TRANSPORT_STALE_INBOUND_MS) {

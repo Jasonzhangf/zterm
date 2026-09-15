@@ -1314,12 +1314,14 @@ public class AndroidConnectionService extends Service {
             if (channelId.trim().isEmpty()) {
                 throw new IllegalArgumentException("mux channel-closed channelId missing");
             }
+            String reason = payload.optString("reason", "closed");
+            String code = payload.optString("code", "");
             desiredChannels.remove(channelId);
             stateMachine.dispatch(AndroidConnectionServiceEvent.channelClosed(
-                generation, channelId, payload.optString("reason", "closed")),
+                generation, channelId, reason),
                 System.currentTimeMillis());
             publishEvent(AndroidConnectionServiceEventEnvelope.channelClosed(
-                target.targetKey, generation, channelId));
+                target.targetKey, generation, channelId, reason, code));
         }
 
         private void handleMuxError(JSONObject payload) {
