@@ -5,6 +5,7 @@
 import { memo as ReactMemo, useEffect, useState, type ComponentProps } from 'react';
 import { useRef } from 'react';
 import { RenameDialog } from '../components/terminal/RenameDialog';
+import { AmbientButton } from '../components/ambient';
 import { formatDebugRate } from './terminal-page-debug-helpers';
 import type { Session, SessionDebugOverlayMetrics } from '../lib/types';
 import {
@@ -51,6 +52,7 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
   const [renameErrorMessage, setRenameErrorMessage] = useState<string | null>(null);
   const renameLongPressTimerRef = useRef<number | null>(null);
+  const keyboardFocusIntentRef = useRef(false);
   const stableStatusRef = useRef<'connected' | 'unstable' | 'error'>('unstable');
   const unstableSinceRef = useRef<number>(0);
   const debouncedStatusRef = useRef<string>('waiting');
@@ -69,6 +71,23 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
     if (renameLongPressTimerRef.current !== null) {
       window.clearTimeout(renameLongPressTimerRef.current);
     }
+  }, []);
+
+  useEffect(() => {
+    const markKeyboardFocusIntent = (event: KeyboardEvent) => {
+      if (event.key === 'Tab') {
+        keyboardFocusIntentRef.current = true;
+      }
+    };
+    const clearKeyboardFocusIntent = () => {
+      keyboardFocusIntentRef.current = false;
+    };
+    document.addEventListener('keydown', markKeyboardFocusIntent, true);
+    document.addEventListener('pointerdown', clearKeyboardFocusIntent, true);
+    return () => {
+      document.removeEventListener('keydown', markKeyboardFocusIntent, true);
+      document.removeEventListener('pointerdown', clearKeyboardFocusIntent, true);
+    };
   }, []);
 
   void tick;
@@ -119,9 +138,9 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
   const status = debouncedStatusRef.current as typeof rawStatus;
   const activityLabel = resolveConnectionActivityLabel(session, status);
   const statusTone = status === 'error' || status === 'closed'
-    ? '#ff8a8a'
+    ? 'var(--zterm-panel-danger)'
     : activityLabel
-      ? '#ffd27a'
+      ? 'var(--zterm-settings-warning)'
       : 'var(--zterm-panel-muted)';
   const visibleRouteLabel = activityLabel || routeLabel;
   const terminalBackend = session.terminalBackend === 'herdr' ? 'herdr' : 'tmux';
@@ -134,6 +153,28 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
       aria-label={`连接状态 ${visibleRouteLabel} session ${session.sessionName} 后端 ${terminalBackend} 上行 ${formatDebugRate(uplinkBps)} 下行 ${formatDebugRate(downlinkBps)}`}
       role='button'
       tabIndex={0}
+      onPointerDown={() => {
+        keyboardFocusIntentRef.current = false;
+      }}
+      onFocus={(event) => {
+        if (keyboardFocusIntentRef.current) {
+          event.currentTarget.setAttribute('data-keyboard-focus', 'true');
+          return;
+        }
+        event.currentTarget.removeAttribute('data-keyboard-focus');
+      }}
+      onBlur={(event) => {
+        event.currentTarget.removeAttribute('data-keyboard-focus');
+      }}
+      onKeyDown={(event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') {
+          return;
+        }
+        event.preventDefault();
+        keyboardFocusIntentRef.current = true;
+        event.currentTarget.setAttribute('data-keyboard-focus', 'true');
+        setRouteMenuOpen((current) => !current);
+      }}
       onClick={() => setRouteMenuOpen((current) => !current)}
       style={{
         position: 'absolute',
@@ -304,7 +345,7 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
           }}
           onClick={(event) => event.stopPropagation()}
         >
-          <button
+          <AmbientButton
             type="button"
             data-testid='terminal-route-option-auto'
             onClick={() => {
@@ -314,8 +355,8 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
             style={connectionRouteOptionStyle}
           >
             自动选择
-          </button>
-          <button
+          </AmbientButton>
+          <AmbientButton
             type="button"
             data-testid='terminal-route-option-websocket'
             onClick={() => {
@@ -325,8 +366,8 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
             style={connectionRouteOptionStyle}
           >
             直连 / Tailscale
-          </button>
-          <button
+          </AmbientButton>
+          <AmbientButton
             type="button"
             data-testid='terminal-route-option-webrtc'
             onClick={() => {
@@ -336,7 +377,7 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
             style={connectionRouteOptionStyle}
           >
             WebRTC / Relay
-          </button>
+          </AmbientButton>
         </div>
       ) : null}
       </div>

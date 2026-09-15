@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { mobileTheme } from '../../lib/mobile-ui';
 import { RenameDialog } from './RenameDialog';
+import { AmbientButton } from '../ambient';
 
 const DRAG_HANDLE_LONG_PRESS_MS = 360;
 
@@ -163,7 +164,7 @@ function TabManagerSheetComponent({
         position: 'fixed',
         inset: 0,
         zIndex: 120,
-        backgroundColor: 'rgba(10, 14, 24, 0.48)',
+        backgroundColor: 'var(--zterm-sheet-overlay)',
         display: 'flex',
         alignItems: 'flex-end',
       }}
@@ -178,7 +179,7 @@ function TabManagerSheetComponent({
           WebkitOverflowScrolling: 'touch',
           borderTopLeftRadius: '28px',
           borderTopRightRadius: '28px',
-          backgroundColor: mobileTheme.colors.lightBg,
+          backgroundColor: 'var(--zterm-settings-background)',
           padding: `${mobileTheme.safeArea.top} 16px ${mobileTheme.safeArea.bottom}`,
           boxShadow: mobileTheme.shadow.strong,
           display: 'flex',
@@ -193,54 +194,54 @@ function TabManagerSheetComponent({
               当前 tab 只属于本次运行。长按右侧排序按钮可重排当前 tab。
             </div>
           </div>
-          <button
+          <AmbientButton
             onClick={onClose}
             style={{
               width: '42px',
               height: '42px',
               borderRadius: '14px',
               border: 'none',
-              backgroundColor: '#ffffff',
-              color: mobileTheme.colors.lightText,
+              backgroundColor: 'var(--zterm-settings-surface)',
+              color: 'var(--zterm-settings-text)',
               fontSize: '20px',
               boxShadow: mobileTheme.shadow.soft,
             }}
           >
             ×
-          </button>
+          </AmbientButton>
         </div>
 
         <div
           style={{
             borderRadius: '22px',
             padding: '14px',
-            backgroundColor: '#ffffff',
+            backgroundColor: 'var(--zterm-settings-surface)',
             boxShadow: mobileTheme.shadow.soft,
             display: 'grid',
             gridTemplateColumns: '1fr',
             gap: '10px',
           }}
         >
-          <button
+          <AmbientButton
             onClick={onOpenQuickTabPicker}
             style={{
               minHeight: '46px',
               border: 'none',
               borderRadius: '16px',
-              backgroundColor: mobileTheme.colors.shell,
-              color: '#ffffff',
+              backgroundColor: 'var(--zterm-settings-accent)',
+              color: 'var(--zterm-settings-accent-text)',
               fontWeight: 800,
             }}
           >
             + New Tab
-          </button>
+          </AmbientButton>
         </div>
 
         <div
           style={{
             borderRadius: '22px',
             padding: '14px',
-            backgroundColor: '#ffffff',
+            backgroundColor: 'var(--zterm-settings-surface)',
             boxShadow: mobileTheme.shadow.soft,
             display: 'flex',
             flexDirection: 'column',
@@ -263,14 +264,16 @@ function TabManagerSheetComponent({
                     gap: '8px',
                     borderRadius: '18px',
                     padding: '10px 12px',
-                    backgroundColor: active ? 'rgba(31,214,122,0.14)' : '#f6f8fb',
+                    backgroundColor: active
+                      ? 'color-mix(in srgb, var(--zterm-settings-accent) 14%, var(--zterm-settings-surface))'
+                      : 'var(--zterm-settings-field)',
                     transform: dragging ? `translateY(${dragState?.offsetY || 0}px)` : 'translateY(0)',
-                    boxShadow: dragging ? '0 10px 18px rgba(0,0,0,0.16)' : 'none',
+                    boxShadow: dragging ? 'var(--zterm-settings-shadow)' : 'none',
                     zIndex: dragging ? 3 : 1,
                     position: 'relative',
                   }}
                 >
-                  <button
+                  <AmbientButton
                     onClick={() => onSwitchSession(session.id)}
                     style={{
                       flex: 1,
@@ -291,8 +294,8 @@ function TabManagerSheetComponent({
                       {session.bridgeHost}:{session.bridgePort} · {session.sessionName}
                       {formatResolvedPath(session.resolvedPath, session.resolvedRelayTransport) ? ` · ${formatResolvedPath(session.resolvedPath, session.resolvedRelayTransport)}` : ''}
                     </div>
-                  </button>
-                  <button
+                  </AmbientButton>
+                  <AmbientButton
                     type="button"
                     aria-label={`重命名 ${session.customName || session.sessionName}`}
                     onClick={() => requestRename(session)}
@@ -301,13 +304,13 @@ function TabManagerSheetComponent({
                       height: '36px',
                       borderRadius: '12px',
                       border: 'none',
-                      backgroundColor: '#ffffff',
-                      color: mobileTheme.colors.lightText,
+                      backgroundColor: 'var(--zterm-settings-field)',
+                      color: 'var(--zterm-settings-text)',
                     }}
                   >
                     ✎
-                  </button>
-                  <button
+                  </AmbientButton>
+                  <AmbientButton
                     type="button"
                     aria-label={`关闭 ${session.customName || session.sessionName}`}
                     tabIndex={-1}
@@ -334,13 +337,13 @@ function TabManagerSheetComponent({
                       height: '36px',
                       borderRadius: '12px',
                       border: 'none',
-                      backgroundColor: 'rgba(255,124,146,0.16)',
+                      backgroundColor: 'var(--zterm-settings-danger-soft)',
                       color: mobileTheme.colors.danger,
                     }}
                   >
                     ×
-                  </button>
-                  <button
+                  </AmbientButton>
+                  <AmbientButton
                     title="Long press to sort"
                     onPointerDown={(event) => {
                       clearDragTimer();
@@ -406,15 +409,15 @@ function TabManagerSheetComponent({
                       height: '36px',
                       borderRadius: '12px',
                       border: 'none',
-                      backgroundColor: mobileTheme.colors.shellMuted,
-                      color: '#ffffff',
+                      backgroundColor: 'var(--zterm-settings-field)',
+                      color: 'var(--zterm-settings-text)',
                       fontWeight: 800,
                       touchAction: 'none',
                     }}
                     aria-label={`Sort ${session.customName || session.sessionName}`}
                   >
                     ≡
-                  </button>
+                  </AmbientButton>
                 </div>
               );
             })}

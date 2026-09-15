@@ -1,4 +1,5 @@
 import { type CSSProperties, useEffect, useMemo, useRef } from 'react';
+import { AmbientButton } from '../components/ambient';
 import { hasRelayRtcCandidate } from '../lib/home-connection-projection';
 import { mobileTheme } from '../lib/mobile-ui';
 import type { Host, Session } from '../lib/types';
@@ -75,9 +76,9 @@ function getSessionEndpoint(session: ConnectionsHomeActiveSession) {
 }
 
 function getSessionStateColor(state: ConnectionsHomeActiveSession['state']) {
-  if (state === 'connected') return '#087a46';
-  if (state === 'connecting' || state === 'reconnecting') return '#9a6300';
-  if (state === 'error' || state === 'closed') return '#a22c3f';
+  if (state === 'connected') return 'var(--zterm-settings-success)';
+  if (state === 'connecting' || state === 'reconnecting') return 'var(--zterm-settings-warning)';
+  if (state === 'error' || state === 'closed') return 'var(--zterm-settings-danger)';
   return mobileTheme.colors.lightMuted;
 }
 
@@ -169,7 +170,7 @@ function ServerGlyph({ label, active = false }: { label: string; active?: boolea
         fontSize: active ? '17px' : '15px',
         fontWeight: 950,
         flex: '0 0 auto',
-        boxShadow: active ? '0 12px 22px rgba(23, 27, 45, 0.18)' : 'none',
+        boxShadow: active ? 'var(--zterm-settings-shadow)' : 'none',
       }}
     >
       {active ? '>_' : getServerMark(label)}
@@ -250,7 +251,7 @@ export function ConnectionsPage({
                 placeItems: 'center',
                 fontSize: '18px',
                 fontWeight: 950,
-                boxShadow: '0 14px 28px rgba(23, 27, 45, 0.20)',
+                boxShadow: 'var(--zterm-settings-shadow)',
                 flex: '0 0 auto',
               }}
             >
@@ -266,34 +267,17 @@ export function ConnectionsPage({
               </div>
             </div>
           </div>
-          <button
-            type="button"
+          <AmbientButton
+            variant="settings"
             data-connections-settings-entry="true"
             ref={settingsEntryRef}
             aria-label="设置和升级"
             title="设置和升级"
             onClick={onOpenSettings}
-            style={{
-              minWidth: '78px',
-              height: '48px',
-              padding: '0 12px',
-              borderRadius: '16px',
-              border: `1px solid ${mobileTheme.colors.lightBorder}`,
-              backgroundColor: 'var(--zterm-settings-surface)',
-              color: mobileTheme.colors.lightText,
-              fontSize: '14px',
-              fontWeight: 900,
-              boxShadow: mobileTheme.shadow.soft,
-              flex: '0 0 auto',
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '6px',
-            }}
           >
             <SettingsGlyph />
             <span>设置</span>
-          </button>
+          </AmbientButton>
         </header>
 
         {orderedActiveSessions.length > 0 ? (
@@ -309,27 +293,13 @@ export function ConnectionsPage({
                 const label = getSessionLabel(session);
                 const stateColor = getSessionStateColor(session.state);
                 return (
-                  <button
+                  <AmbientButton
                     key={session.id}
-                    type="button"
+                    variant="active-session"
+                    selected={session.id === activeSessionId}
                     data-testid="active-session-row"
                     aria-label={`恢复 ${label}`}
                     onClick={() => onResumeSession?.(session.id)}
-                    style={{
-                      width: '100%',
-                      minHeight: '76px',
-                      padding: '12px',
-                      border: `1px solid ${session.id === activeSessionId ? 'rgba(8, 122, 70, 0.34)' : mobileTheme.colors.lightBorder}`,
-                      borderRadius: '20px',
-                      backgroundColor: 'var(--zterm-settings-surface)',
-                      color: mobileTheme.colors.lightText,
-                      display: 'grid',
-                      gridTemplateColumns: 'auto 1fr auto',
-                      alignItems: 'center',
-                      gap: '12px',
-                      textAlign: 'left',
-                      boxShadow: mobileTheme.shadow.soft,
-                    }}
                   >
                     <ServerGlyph label={label} active />
                     <span style={{ minWidth: 0 }}>
@@ -363,7 +333,7 @@ export function ConnectionsPage({
                       />
                       {session.id === activeSessionId ? '当前' : getSessionStateLabel(session.state)}
                     </span>
-                  </button>
+                  </AmbientButton>
                 );
               })}
             </div>
@@ -378,28 +348,14 @@ export function ConnectionsPage({
                 {orderedSavedConnections.length}
               </span>
             </div>
-            <button
-              type="button"
+            <AmbientButton
+              variant="accent"
               aria-label="配置服务器"
               title="配置服务器"
               onClick={onOpenSettings}
-              style={{
-                width: '44px',
-                height: '44px',
-                borderRadius: '14px',
-                border: 'none',
-                backgroundColor: 'var(--zterm-settings-accent)',
-                color: 'var(--zterm-settings-accent-text)',
-                lineHeight: 1,
-                boxShadow: mobileTheme.shadow.soft,
-                flex: '0 0 auto',
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
             >
               <PlusGlyph />
-            </button>
+            </AmbientButton>
           </div>
           {orderedSavedConnections.length === 0 ? (
             <div
@@ -428,31 +384,15 @@ export function ConnectionsPage({
               <div style={{ fontSize: '13px', color: mobileTheme.colors.lightMuted, lineHeight: 1.5, maxWidth: '28em' }}>
                 添加 Tailscale IP、桥接地址或 Relay 设备，即可从任意设备打开或重新加入 session。
               </div>
-              <button
-                type="button"
+              <AmbientButton
+                variant="accent-wide"
                 aria-label="添加第一台服务器"
                 title="添加服务器"
                 onClick={onOpenSettings}
-                style={{
-                  marginTop: '6px',
-                  minHeight: '44px',
-                  padding: '0 18px',
-                  borderRadius: '16px',
-                  border: 'none',
-                  backgroundColor: 'var(--zterm-settings-accent)',
-                  color: 'var(--zterm-settings-accent-text)',
-                  fontSize: '14px',
-                  fontWeight: 800,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  boxShadow: mobileTheme.shadow.soft,
-                  cursor: 'pointer',
-                }}
               >
                 <PlusGlyph />
                 添加服务器
-              </button>
+              </AmbientButton>
             </div>
           ) : (
             <div data-testid="saved-connection-list" style={{ display: 'grid', gap: '10px' }}>
@@ -479,25 +419,11 @@ export function ConnectionsPage({
                       overflow: 'hidden',
                     }}
                   >
-                    <button
-                      type="button"
+                    <AmbientButton
+                      variant="saved-open"
                       data-testid="saved-connection-open"
                       aria-label={`打开 ${host.name}`}
                       onClick={() => onOpenSavedConnection?.(host)}
-                      style={{
-                        width: '100%',
-                        minHeight: '82px',
-                        padding: '13px 12px',
-                        border: 'none',
-                        backgroundColor: 'transparent',
-                        color: 'inherit',
-                        display: 'grid',
-                        gridTemplateColumns: 'auto 1fr auto',
-                        alignItems: 'center',
-                        gap: '12px',
-                        textAlign: 'left',
-                        minWidth: 0,
-                      }}
                     >
                       <ServerGlyph label={host.name} />
                       <span style={{ minWidth: 0 }}>
@@ -529,7 +455,7 @@ export function ConnectionsPage({
                       >
                         ›
                       </span>
-                    </button>
+                    </AmbientButton>
                   </div>
                 );
               })}

@@ -1,5 +1,6 @@
 import { DEFAULT_BRIDGE_PORT } from '../../lib/mobile-config';
 import { ConnectionSection, FieldLabel, inputStyle } from './ConnectionSection';
+import { AmbientInput } from '../ambient';
 
 interface ConnectionSectionFieldsProps {
   bridgeHost: string;
@@ -22,7 +23,7 @@ export function ConnectionSectionFields({
     <ConnectionSection title="Connection" description="Bridge address, Tailscale IP priority, and daemon auth token.">
       <div>
         <FieldLabel>Bridge Host / Tailscale IP *</FieldLabel>
-        <input
+        <AmbientInput
           value={bridgeHost}
           onChange={(event) => onBridgeHostChange(event.target.value)}
           placeholder="100.127.23.27[:40807] 或 macstudio.tailnet"
@@ -32,7 +33,7 @@ export function ConnectionSectionFields({
 
       <div>
         <FieldLabel>Bridge Port</FieldLabel>
-        <input
+        <AmbientInput
           type="number"
           value={bridgePort}
           onChange={(event) => onBridgePortChange(Number.parseInt(event.target.value, 10) || DEFAULT_BRIDGE_PORT)}
@@ -42,7 +43,7 @@ export function ConnectionSectionFields({
 
       <div>
         <FieldLabel>Bridge Auth Token</FieldLabel>
-        <input
+        <AmbientInput
           value={authToken}
           onChange={(event) => onAuthTokenChange(event.target.value)}
           placeholder="daemon 的共享 token"

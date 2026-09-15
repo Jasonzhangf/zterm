@@ -67,9 +67,9 @@ const TerminalNetworkBanner = ReactMemo(function TerminalNetworkBanner({
     ? null
     : activeSessionState === "error"
       ? {
-          tone: "#ff6b6b",
-          background: "rgba(109, 24, 33, 0.92)",
-          border: "rgba(255, 107, 107, 0.42)",
+          tone: "var(--zterm-settings-danger)",
+          background: "var(--zterm-settings-danger-soft)",
+          border: "var(--zterm-settings-danger-border)",
           title: "连接失败",
           detail: "标准自动恢复流程未能恢复连接，请检查网络或服务器状态。",
         }
@@ -93,8 +93,8 @@ const TerminalNetworkBanner = ReactMemo(function TerminalNetworkBanner({
         borderRadius: "12px",
         border: `1px solid ${networkBanner.border}`,
         background: networkBanner.background,
-        color: "#fff",
-        boxShadow: "0 10px 24px rgba(0,0,0,0.18)",
+        color: "var(--zterm-settings-text)",
+        boxShadow: "var(--zterm-settings-shadow)",
       }}
     >
       <div
@@ -107,7 +107,7 @@ const TerminalNetworkBanner = ReactMemo(function TerminalNetworkBanner({
           marginTop: "3px",
           fontSize: "12px",
           lineHeight: 1.35,
-          color: "rgba(255,255,255,0.9)",
+          color: "var(--zterm-settings-muted)",
         }}
       >
         {networkBanner.detail}

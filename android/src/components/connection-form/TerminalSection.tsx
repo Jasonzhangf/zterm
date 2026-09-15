@@ -1,4 +1,5 @@
 import { ConnectionSection, FieldLabel, inputStyle } from './ConnectionSection';
+import { AmbientInput } from '../ambient';
 
 interface TerminalSectionProps {
   autoCommand: string;
@@ -10,7 +11,7 @@ export function TerminalSection({ autoCommand, onAutoCommandChange }: TerminalSe
     <ConnectionSection title="Terminal" description="Commands to run right after tmux becomes ready.">
       <div>
         <FieldLabel>Auto Command</FieldLabel>
-        <input
+        <AmbientInput
           value={autoCommand}
           onChange={(event) => onAutoCommandChange(event.target.value)}
           placeholder="例如：tmux attach -t main"

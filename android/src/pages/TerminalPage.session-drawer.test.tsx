@@ -1739,7 +1739,7 @@ describe('TerminalPage portrait session drawer', () => {
     fireEvent.touchEnd(swipeSurface!, { changedTouches: [{ clientX: 236, clientY: 206 }] });
 
     expect((await screen.findByTestId('terminal-session-drawer-host-mac-studio')).textContent).toContain('1');
-    expect(screen.getByTestId('terminal-session-drawer-host-mac-studio').querySelector('span')?.style.background).toBe('rgb(68, 226, 160)');
+    expect(screen.getByTestId('terminal-session-drawer-host-mac-studio').querySelector('span')?.style.background).toBe('var(--zterm-settings-success)');
     expect(screen.queryByTestId('terminal-session-drawer-host-rtc-verify-1784267569532')).toBeNull();
     expect(screen.queryByText('rtc-device-1784267569532')).toBeNull();
   });

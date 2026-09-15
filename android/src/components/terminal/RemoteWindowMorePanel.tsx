@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import type { RemoteWindowBrowserUserAgent, RemoteWindowVideoPreference } from '../../lib/types';
 import { styles } from './remote-window-overlay-styles';
+import { AmbientButton, AmbientSelect } from '../ambient';
 
 export interface RemoteWindowMorePanelProps {
   fullscreen: boolean;
@@ -34,18 +35,18 @@ export function RemoteWindowMorePanel({
   return (
     <div data-testid="remote-window-stream-status-panel" data-no-drag="true" style={styles.streamStatusPanel}>
       {fullscreen ? (
-        <button
+        <AmbientButton
           type="button"
           data-testid="remote-window-fullscreen-display-toggle"
           onClick={onToggleFullscreenDisplayMode}
           style={styles.headerButton}
         >
           重新匹配远端比例
-        </button>
+        </AmbientButton>
       ) : null}
       <label style={styles.moreField}>
         <span>串流偏好</span>
-        <select
+        <AmbientSelect
           aria-label="远程窗口串流偏好"
           data-testid="remote-window-video-preference-select"
           value={videoPreference}
@@ -54,12 +55,12 @@ export function RemoteWindowMorePanel({
         >
           <option value="smooth">流畅优先</option>
           <option value="quality">清晰优先</option>
-        </select>
+        </AmbientSelect>
       </label>
       {browserMode && onBrowserUserAgentChange ? (
         <label style={styles.moreField}>
           <span>浏览器排版</span>
-          <select
+          <AmbientSelect
             aria-label="浏览器移动 UA"
             data-testid="remote-window-browser-user-agent-select"
             value={browserUserAgent}
@@ -69,7 +70,7 @@ export function RemoteWindowMorePanel({
           >
             <option value="desktop">桌面版</option>
             <option value="mobile">移动版</option>
-          </select>
+          </AmbientSelect>
           <span data-testid="remote-window-browser-user-agent-status">
             {browserUserAgentStatus === 'pending' ? '正在切换…' : browserUserAgentStatus === 'rejected' ? `失败：${browserUserAgentError || 'CDP 未接受'}` : browserUserAgentStatus === 'applied' ? '已应用' : ''}
           </span>

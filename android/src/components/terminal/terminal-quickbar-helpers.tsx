@@ -76,14 +76,14 @@ export function renderShortcutVisualNode(label: string, variant: 'button' | 'lis
         : { width: '38px', height: '16px' };
 
     return (
-      <span data-shortcut-keycap="space" data-shortcut-space-visual="true" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: spaceMetrics.width, height: spaceMetrics.height, borderRadius: variant === 'list' ? '10px' : '8px', border: `${metrics.borderWidth} solid currentColor`, boxSizing: 'border-box', verticalAlign: 'middle', backgroundColor: 'rgba(255,255,255,0.05)', boxShadow: 'inset 0 -1px 0 rgba(255,255,255,0.12)' }}>
+      <span data-shortcut-keycap="space" data-shortcut-space-visual="true" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: spaceMetrics.width, height: spaceMetrics.height, borderRadius: variant === 'list' ? '10px' : '8px', border: `${metrics.borderWidth} solid currentColor`, boxSizing: 'border-box', verticalAlign: 'middle', backgroundColor: 'color-mix(in srgb, currentColor 5%, transparent)', boxShadow: 'inset 0 -1px 0 color-mix(in srgb, currentColor 12%, transparent)' }}>
         <span style={{ display: 'block', width: variant === 'list' ? '28px' : variant === 'token' ? '22px' : '20px', height: variant === 'list' ? '3px' : '2.5px', borderRadius: '999px', backgroundColor: 'currentColor', opacity: 0.92 }} />
       </span>
     );
   }
 
   return (
-    <span data-shortcut-keycap={resolveShortcutTokenDisplayLabel(label)} aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: metrics.minWidth, height: metrics.height, padding: metrics.padding, borderRadius: metrics.radius, border: `${metrics.borderWidth} solid currentColor`, boxSizing: 'border-box', verticalAlign: 'middle', backgroundColor: 'rgba(255,255,255,0.05)', boxShadow: 'inset 0 -1px 0 rgba(255,255,255,0.12)', fontSize: metrics.fontSize, fontWeight: metrics.fontWeight, letterSpacing: resolveShortcutVisualLabel(label).length > 2 ? '-0.01em' : 0, lineHeight: 1, whiteSpace: 'nowrap' }}>
+    <span data-shortcut-keycap={resolveShortcutTokenDisplayLabel(label)} aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: metrics.minWidth, height: metrics.height, padding: metrics.padding, borderRadius: metrics.radius, border: `${metrics.borderWidth} solid currentColor`, boxSizing: 'border-box', verticalAlign: 'middle', backgroundColor: 'color-mix(in srgb, currentColor 5%, transparent)', boxShadow: 'inset 0 -1px 0 color-mix(in srgb, currentColor 12%, transparent)', fontSize: metrics.fontSize, fontWeight: metrics.fontWeight, letterSpacing: resolveShortcutVisualLabel(label).length > 2 ? '-0.01em' : 0, lineHeight: 1, whiteSpace: 'nowrap' }}>
       {resolveShortcutVisualLabel(label)}
     </span>
   );

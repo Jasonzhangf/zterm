@@ -6,6 +6,7 @@ import {
   resolveNormalizedBridgeHost,
 } from '@zterm/shared';
 import { AppearanceSection } from '../components/connection-form/AppearanceSection';
+import { AmbientButton, AmbientTextarea } from '../components/ambient';
 import { AuthSection } from '../components/connection-form/AuthSection';
 import { ConnectionSection } from '../components/connection-form/ConnectionSection';
 import { ConnectionSectionFields } from '../components/connection-form/ConnectionSectionFields';
@@ -180,8 +181,8 @@ export function ConnectionPropertiesPage({
       width: 192,
       errorCorrectionLevel: 'M',
       color: {
-        dark: '#101218',
-        light: '#ffffff',
+        dark: '#0b0c10',
+        light: '#f7f8fa',
       },
     })
       .then((svg) => {
@@ -414,44 +415,25 @@ export function ConnectionPropertiesPage({
             borderBottom: '1px solid var(--zterm-settings-border)',
         }}
       >
-        <button
+        <AmbientButton
+          variant="back"
           onClick={onCancel}
-          style={{
-            width: '56px',
-            height: '56px',
-            borderRadius: '20px',
-            border: 'none',
-            backgroundColor: 'var(--zterm-settings-surface)',
-            color: 'var(--zterm-settings-text)',
-            fontSize: '26px',
-            boxShadow: mobileTheme.shadow.soft,
-            cursor: 'pointer',
-          }}
+          aria-label="取消"
         >
           ×
-        </button>
+        </AmbientButton>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: '20px', fontWeight: 800 }}>{pageTitle}</div>
           <div style={{ marginTop: '4px', fontSize: '13px', color: mobileTheme.colors.lightMuted }}>
             先从历史/tmux 预填，再在这里做最后确认。
           </div>
         </div>
-        <button
+        <AmbientButton
+          variant="save"
           onClick={handleSave}
-          style={{
-            minWidth: '92px',
-            height: '56px',
-            borderRadius: '20px',
-            border: 'none',
-            backgroundColor: 'var(--zterm-settings-accent)',
-            color: 'var(--zterm-settings-accent-text)',
-            fontWeight: 800,
-            boxShadow: mobileTheme.shadow.soft,
-            cursor: 'pointer',
-          }}
         >
           Save
-        </button>
+        </AmbientButton>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '18px 18px 32px' }}>
@@ -469,24 +451,14 @@ export function ConnectionPropertiesPage({
                       Paste a zterm share link from another device.
                     </div>
                   </div>
-                  <button
-                    type="button"
+                  <AmbientButton
+                    variant="compact-accent"
                     onClick={handleImportConnectionLink}
-                    style={{
-                      border: 'none',
-                      borderRadius: '16px',
-                      minHeight: '42px',
-                      padding: '0 14px',
-                      backgroundColor: 'var(--zterm-settings-accent)',
-                      color: 'var(--zterm-settings-accent-text)',
-                      fontWeight: 900,
-                      cursor: 'pointer',
-                    }}
                   >
                     Import
-                  </button>
+                  </AmbientButton>
                 </div>
-                <textarea
+                <AmbientTextarea
                   aria-label="Connection share link"
                   value={connectionImportInput}
                   onChange={(event) => {
@@ -533,29 +505,20 @@ export function ConnectionPropertiesPage({
                     {shareableHosts.map((candidate) => {
                       const active = candidate.id === selectedShareHostId;
                       return (
-                        <button
+                        <AmbientButton
                           key={candidate.id}
-                          type="button"
+                          variant="option"
+                          selected={active}
                           onClick={() => {
                             setShareScope('single');
                             setSelectedShareHostId(candidate.id);
-                          }}
-                          style={{
-                            border: 'none',
-                            borderRadius: '16px',
-                            padding: '12px 14px',
-                            backgroundColor: active ? 'var(--zterm-settings-accent)' : 'var(--zterm-settings-field)',
-                            color: active ? 'var(--zterm-settings-accent-text)' : 'var(--zterm-settings-text)',
-                            boxShadow: mobileTheme.shadow.soft,
-                            cursor: 'pointer',
-                            textAlign: 'left',
                           }}
                         >
                           <div style={{ fontWeight: 800 }}>{candidate.name}</div>
                           <div style={{ fontSize: '12px', opacity: 0.8 }}>
                             {candidate.bridgeHost}:{candidate.bridgePort}
                           </div>
-                        </button>
+                        </AmbientButton>
                       );
                     })}
                   </div>
@@ -597,8 +560,10 @@ export function ConnectionPropertiesPage({
               {rememberedServerViews.map(({ server, daemonHostId, bridgeLabel, daemonLabel }) => {
                 const active = server.targetHost === form.bridgeHost && server.targetPort === form.bridgePort;
                 return (
-                  <button
+                  <AmbientButton
                     key={server.id}
+                    variant="option"
+                    selected={active}
                     onClick={() =>
                       setForm((current) => ({
                         ...current,
@@ -610,22 +575,13 @@ export function ConnectionPropertiesPage({
                         relayDeviceId: server.relayDeviceId || current.relayDeviceId,
                       }))
                     }
-                    style={{
-                      border: 'none',
-                      borderRadius: '16px',
-                      padding: '12px 14px',
-                      backgroundColor: active ? 'var(--zterm-settings-accent)' : 'var(--zterm-settings-field)',
-                      color: active ? 'var(--zterm-settings-accent-text)' : 'var(--zterm-settings-text)',
-                      boxShadow: mobileTheme.shadow.soft,
-                      cursor: 'pointer',
-                    }}
                   >
                     <div style={{ fontWeight: 800 }}>{server.name}</div>
                     <div style={{ fontSize: '12px', opacity: 0.8 }}>{bridgeLabel}</div>
                     {daemonHostId ? (
                       <div style={{ fontSize: '11px', opacity: 0.74 }}>{daemonLabel}</div>
                     ) : null}
-                  </button>
+                  </AmbientButton>
                 );
               })}
             </div>
@@ -703,22 +659,12 @@ export function ConnectionPropertiesPage({
           description={'填写好 host + token 后，显式点 Connect / Refresh 才会拉 tmux session。'}
         >
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '12px' }}>
-            <button
+            <AmbientButton
+              variant="discover"
               onClick={() => void handleDiscoverSessions()}
-              style={{
-                minWidth: '132px',
-                minHeight: '42px',
-                borderRadius: '14px',
-                border: 'none',
-                backgroundColor: 'var(--zterm-settings-accent)',
-                color: 'var(--zterm-settings-accent-text)',
-                fontWeight: 800,
-                cursor: 'pointer',
-                boxShadow: mobileTheme.shadow.soft,
-              }}
             >
               {sessionDiscoveryState === 'done' ? 'Refresh Sessions' : 'Connect'}
-            </button>
+            </AmbientButton>
           </div>
           <div style={{ color: mobileTheme.colors.lightMuted, lineHeight: 1.6 }}>
             {sessionDiscoveryState === 'idle' && (sessionDiscoveryError || 'Fill bridge host + token, then tap Connect.')}
@@ -732,22 +678,14 @@ export function ConnectionPropertiesPage({
               {availableSessions.map((session) => {
                 const active = session === form.sessionName;
                 return (
-                  <button
+                  <AmbientButton
                     key={session}
+                    variant="option-strong"
+                    selected={active}
                     onClick={() => setForm((current) => ({ ...current, sessionName: session }))}
-                    style={{
-                      border: 'none',
-                      borderRadius: '16px',
-                      padding: '12px 14px',
-                      backgroundColor: active ? 'var(--zterm-settings-accent)' : 'var(--zterm-settings-field)',
-                      color: active ? 'var(--zterm-settings-accent-text)' : 'var(--zterm-settings-text)',
-                      boxShadow: mobileTheme.shadow.soft,
-                      cursor: 'pointer',
-                      fontWeight: 700,
-                    }}
                   >
                     {session}
-                  </button>
+                  </AmbientButton>
                 );
               })}
             </div>
@@ -783,9 +721,9 @@ export function ConnectionPropertiesPage({
                     width: '216px',
                     minHeight: '216px',
                     borderRadius: '24px',
-                    backgroundColor: '#ffffff',
+                    backgroundColor: 'var(--zterm-settings-surface)',
                     boxShadow: mobileTheme.shadow.soft,
-                    border: `1px solid ${mobileTheme.colors.lightBorder}`,
+                    border: '1px solid var(--zterm-settings-accent-border)',
                     display: 'grid',
                     placeItems: 'center',
                     padding: '12px',
@@ -801,7 +739,7 @@ export function ConnectionPropertiesPage({
                     width: '216px',
                     minHeight: '216px',
                     borderRadius: '24px',
-                    backgroundColor: '#ffffff',
+                    backgroundColor: 'var(--zterm-settings-surface)',
                     boxShadow: mobileTheme.shadow.soft,
                     border: `1px solid ${mobileTheme.colors.lightBorder}`,
                     display: 'grid',
@@ -810,12 +748,12 @@ export function ConnectionPropertiesPage({
                     overflow: 'hidden',
                   }}
                 >
-                  <span style={{ color: mobileTheme.colors.lightMuted, fontSize: '12px' }}>
+                  <span style={{ color: 'var(--zterm-settings-muted)', fontSize: '12px' }}>
                     QR building...
                   </span>
                 </div>
               )}
-              <textarea
+              <AmbientTextarea
                 data-testid="connection-share-link"
                 readOnly
                 value={shareLink}
@@ -835,40 +773,19 @@ export function ConnectionPropertiesPage({
               />
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
                 {!host && shareScope === 'single' && shareableHosts.length > 1 && (
-                  <button
-                    type="button"
+                  <AmbientButton
+                    variant="outline"
                     onClick={() => setShareScope('all')}
-                    style={{
-                      minHeight: '42px',
-                      borderRadius: '14px',
-                      border: '1px solid var(--zterm-settings-border)',
-                      backgroundColor: 'var(--zterm-settings-field)',
-                      color: 'var(--zterm-settings-text)',
-                      fontWeight: 800,
-                      padding: '0 16px',
-                      cursor: 'pointer',
-                    }}
                   >
                     Share All Connections
-                  </button>
+                  </AmbientButton>
                 )}
-                <button
-                  type="button"
+                <AmbientButton
+                  variant="compact-accent-shadow"
                   onClick={() => void handleCopyShareLink()}
-                  style={{
-                    minHeight: '42px',
-                    borderRadius: '14px',
-                    border: 'none',
-                    backgroundColor: 'var(--zterm-settings-accent)',
-                    color: 'var(--zterm-settings-accent-text)',
-                    fontWeight: 800,
-                    padding: '0 16px',
-                    cursor: 'pointer',
-                    boxShadow: mobileTheme.shadow.soft,
-                  }}
                 >
                   Copy Link
-                </button>
+                </AmbientButton>
                 {shareState === 'copied' && (
                   <span style={{ color: mobileTheme.colors.lightMuted, fontSize: '13px' }}>Copied</span>
                 )}

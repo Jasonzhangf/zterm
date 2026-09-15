@@ -22,8 +22,8 @@
 早期代码主要集中在：
 
 - `src/App.tsx`
-- `src/components/HostList.tsx`
-- `src/components/HostForm.tsx`
+- `src/components/HostList.tsx`（已物理删除，见 module registry）
+- `src/components/HostForm.tsx`（已物理删除，见 module registry）
 - `src/components/TerminalView.tsx`
 - `src/contexts/SessionContext.tsx`
 

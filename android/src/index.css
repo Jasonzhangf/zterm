@@ -1,3 +1,5 @@
+@import "./ambient.css";
+
 * {
   box-sizing: border-box;
 }
@@ -8,7 +10,7 @@ html, body, #root {
   width: 100%;
   height: 100%;
   min-height: 100%;
-  background: var(--zterm-settings-background, #0b1220);
+  background: var(--zterm-shell-bg, var(--zterm-settings-background, #f0f2f4));
   color: var(--zterm-settings-text, #e6edf6);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   overflow: hidden;
@@ -38,8 +40,8 @@ body {
 
 header {
   padding: 16px;
-  background: #2a2a2a;
-  border-bottom: 1px solid #3a3a3a;
+  background: var(--zterm-settings-background);
+  border-bottom: 1px solid var(--zterm-settings-border);
 }
 
 header h1 {
@@ -49,7 +51,7 @@ header h1 {
 
 header p {
   margin: 4px 0 0;
-  color: #888;
+  color: var(--zterm-settings-muted);
 }
 
 main {
@@ -92,6 +94,24 @@ label:focus-visible {
   outline: 2px solid var(--zterm-panel-accent, #128354);
   outline-offset: 2px;
 }
+
+/*
+ * The status strip is role=button, so without this it inherits the global
+ * [role=button]:focus-visible green ring after pointer/Android WebView focus.
+ * Keep keyboard focus visible through data-keyboard-focus instead.
+ */
+.zterm-connection-status-strip:focus,
+.zterm-connection-status-strip:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.zterm-connection-status-strip[data-keyboard-focus="true"]:focus,
+.zterm-connection-status-strip[data-keyboard-focus="true"]:focus-visible {
+  outline: 2px solid var(--zterm-panel-accent, #128354);
+  outline-offset: 2px;
+}
+
 
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -159,7 +179,11 @@ label:focus-visible {
   --zterm-panel-muted: #6e7781;
   --zterm-panel-border: rgba(31, 35, 40, 0.12);
   --zterm-panel-accent: #128354;
+  --zterm-panel-accent-soft: rgba(18, 131, 84, 0.12);
+  --zterm-panel-accent-border: rgba(18, 131, 84, 0.36);
   --zterm-panel-danger: #c43e4d;
+  --zterm-panel-danger-soft: rgba(196, 62, 77, 0.12);
+  --zterm-panel-danger-border: rgba(196, 62, 77, 0.34);
   --zterm-panel-shadow: rgba(14, 19, 33, 0.18);
   --zterm-neo-header-bg: var(--zterm-panel-bg);
   --zterm-neo-quickbar-bg: var(--zterm-panel-bg);
@@ -193,55 +217,7 @@ label:focus-visible {
   --zterm-dialog-error-soft: rgba(196, 62, 77, 0.12);
   --zterm-dialog-error-border: rgba(196, 62, 77, 0.34);
   --zterm-dialog-accent-text: #07110b;
-}
-
-.zterm-terminal-shell[data-terminal-shell-skin="blue"] {
-  --zterm-shell-bg: #171b2d;
-  --zterm-stage-bg: #111420;
-  --zterm-stage-text: #ffffff;
-  --zterm-stage-muted: #97a2ba;
-  --zterm-panel-bg: #20283a;
-  --zterm-panel-surface: #252d40;
-  --zterm-panel-active: #34425c;
-  --zterm-panel-text: #d9e4f6;
-  --zterm-panel-active-text: #f1f7ff;
-  --zterm-panel-muted: #97a2ba;
-  --zterm-panel-border: rgba(190, 212, 244, 0.16);
-  --zterm-panel-accent: #7ddfff;
-  --zterm-panel-danger: #ff8b95;
-  --zterm-panel-shadow: rgba(5, 9, 18, 0.58);
-  --zterm-neo-header-bg: var(--zterm-panel-bg);
-  --zterm-neo-quickbar-bg: var(--zterm-panel-bg);
-  --zterm-neo-border: rgba(190, 212, 244, 0.16);
-  --zterm-neo-base: #252d40;
-  --zterm-neo-raised-bg: linear-gradient(145deg, #34425c 0%, #20283a 100%);
-  --zterm-neo-active: #34425c;
-  --zterm-neo-pressed: #3a4d6a;
-  --zterm-neo-highlight: rgba(215, 232, 255, 0.22);
-  --zterm-neo-inset: rgba(9, 14, 26, 0.30);
-  --zterm-neo-shadow: rgba(5, 9, 18, 0.68);
-  --zterm-neo-text: #d9e4f6;
-  --zterm-neo-text-shadow: 0 -1px 0 rgba(5, 9, 18, 0.72);
-  --zterm-neo-active-text: #f1f7ff;
-  --zterm-neo-accent: #7ddfff;
-  --zterm-neo-focus: rgba(125, 223, 255, 0.72);
-  --zterm-fixed-cluster-bg: rgba(59, 74, 108, 0.95);
-  --zterm-fixed-cluster-border: rgba(255, 255, 255, 0.12);
-  --zterm-fixed-cluster-shadow: rgba(5, 9, 18, 0.32);
-  --zterm-sheet-overlay: rgba(5, 8, 14, 0.74);
-  --zterm-dialog-info: var(--zterm-panel-accent);
-  --zterm-dialog-info-soft: rgba(125, 223, 255, 0.14);
-  --zterm-dialog-info-border: rgba(125, 223, 255, 0.38);
-  --zterm-dialog-success: #38d47d;
-  --zterm-dialog-success-soft: rgba(56, 212, 125, 0.14);
-  --zterm-dialog-success-border: rgba(56, 212, 125, 0.38);
-  --zterm-dialog-warning: #ffb454;
-  --zterm-dialog-warning-soft: rgba(255, 180, 84, 0.14);
-  --zterm-dialog-warning-border: rgba(255, 180, 84, 0.38);
-  --zterm-dialog-error: var(--zterm-panel-danger);
-  --zterm-dialog-error-soft: rgba(255, 139, 149, 0.14);
-  --zterm-dialog-error-border: rgba(255, 139, 149, 0.38);
-  --zterm-dialog-accent-text: #07111b;
+  --zterm-video-bg: #050608;
 }
 
 .zterm-terminal-shell[data-terminal-shell-skin="black"] {
@@ -257,7 +233,11 @@ label:focus-visible {
   --zterm-panel-muted: #8a93a3;
   --zterm-panel-border: rgba(245, 247, 251, 0.12);
   --zterm-panel-accent: #38d47d;
+  --zterm-panel-accent-soft: rgba(56, 212, 125, 0.14);
+  --zterm-panel-accent-border: rgba(56, 212, 125, 0.38);
   --zterm-panel-danger: #ff7a86;
+  --zterm-panel-danger-soft: rgba(255, 122, 134, 0.14);
+  --zterm-panel-danger-border: rgba(255, 122, 134, 0.38);
   --zterm-panel-shadow: rgba(0, 0, 0, 0.70);
   --zterm-neo-header-bg: var(--zterm-panel-bg);
   --zterm-neo-quickbar-bg: var(--zterm-panel-bg);
@@ -291,6 +271,7 @@ label:focus-visible {
   --zterm-dialog-error-soft: rgba(255, 122, 134, 0.14);
   --zterm-dialog-error-border: rgba(255, 122, 134, 0.38);
   --zterm-dialog-accent-text: #07110b;
+  --zterm-video-bg: #050608;
 }
 
 .zterm-neo-header,
@@ -516,7 +497,7 @@ label:focus-visible {
 
 /* Settings group content reveal. */
 .zterm-settings-group > [data-settings-group-content] {
-  display: grid;
+  display: none;
   gap: 16px;
   width: 100%;
   box-sizing: border-box;
@@ -529,6 +510,7 @@ label:focus-visible {
     opacity 180ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 .zterm-settings-group[open] > [data-settings-group-content] {
+  display: grid;
   padding: clamp(16px, 4vw, 36px);
   transform: translateY(0);
   opacity: 1;
@@ -573,4 +555,55 @@ label:focus-visible {
 [data-tmux-picker-panel][data-state="closing"] { transform: translateY(12%); opacity: 0; }
 
 [data-settings-save-status][data-state="saved"] { color: #1f9d5d; font-weight: 700; }
-[data-settings-save-status][data-state="saving"] { color: #6e7781; font-weight: 700; }
+[data-settings-save-status][data-state="saving"] { color: var(--zterm-settings-muted); font-weight: 700; }
+
+/* Ambient Phase 2 校准：让 .ambient 光影生效，同时避免控件高度/阴影抢占可读区域。 */
+.ambient-control {
+  --amb-elevation: .65;
+  --amb-thickness: .7;
+  --amb-sh-gain: .48;
+  isolation: isolate;
+}
+
+.zterm-settings-group > [data-settings-group-content] {
+  padding-block: 12px;
+  padding-inline: clamp(12px, 3.2vw, 22px) !important;
+}
+
+.zterm-terminal-shell .ambient-control {
+  --amb-elevation: 1;
+  --amb-thickness: .65;
+  --amb-mat-roughness: .82;
+}
+
+.zterm-terminal-shell[data-terminal-shell-skin="black"] {
+  --amb-light-x: -1;
+  --amb-light-y: -1;
+  --amb-key-light-intensity: 0.78;
+  --amb-fill-light-intensity: 0.58;
+  --amb-light-hue: 145;
+  --amb-light-saturation: 8%;
+  --amb-elevation: 1;
+  --amb-highlight-color: rgba(255,255,255,0.92);
+  --amb-lume-hue: 19;
+  --amb-albedo: color(srgb-linear 0.12 0.13 0.14);
+  --amb-mat-roughness: 0.82;
+  --amb-grain-amount: 0.4;
+  --amb-shade: 0.88;
+}
+
+.zterm-terminal-shell[data-terminal-shell-skin="light"] {
+  --amb-light-x: 1;
+  --amb-light-y: -1;
+  --amb-key-light-intensity: 0.42;
+  --amb-fill-light-intensity: 0.38;
+  --amb-light-hue: 145;
+  --amb-light-saturation: 6%;
+  --amb-elevation: 0;
+  --amb-highlight-color: rgba(255,255,255,0.9);
+  --amb-lume-hue: 210;
+  --amb-albedo: color(srgb-linear 0.93 0.94 0.95);
+  --amb-mat-roughness: 0.74;
+  --amb-grain-amount: 0.15;
+  --amb-shade: 1;
+}

@@ -124,4 +124,36 @@ describe('TerminalConnectionStatusStrip', () => {
     expect(alertSpy).not.toHaveBeenCalled();
     alertSpy.mockRestore();
   });
+
+  it('keeps keyboard reachability while hiding pointer and programmatic focus rings', () => {
+    render(
+      <TerminalConnectionStatusStrip
+        session={makeSession()}
+        topInsetPx={0}
+      />,
+    );
+    const strip = screen.getByTestId('terminal-connection-status-strip');
+    expect(strip.getAttribute('role')).toBe('button');
+    expect(strip.tabIndex).toBe(0);
+
+    strip.focus();
+    expect(document.activeElement).toBe(strip);
+    expect(strip.getAttribute('data-keyboard-focus')).toBeNull();
+
+    fireEvent.keyDown(document, { key: 'Tab' });
+    strip.blur();
+    strip.focus();
+    expect(document.activeElement).toBe(strip);
+    expect(strip.getAttribute('data-keyboard-focus')).toBe('true');
+
+    fireEvent.pointerDown(strip, { pointerId: 1, pointerType: 'touch', button: 0 });
+    strip.blur();
+    strip.focus();
+    expect(document.activeElement).toBe(strip);
+    expect(strip.getAttribute('data-keyboard-focus')).toBeNull();
+
+    fireEvent.keyDown(strip, { key: 'Enter' });
+    expect(screen.getByTestId('terminal-connection-route-menu')).toBeTruthy();
+    expect(strip.getAttribute('data-keyboard-focus')).toBe('true');
+  });
 });

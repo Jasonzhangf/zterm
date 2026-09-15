@@ -40,6 +40,7 @@ import { registerClientDebugSnapshotSource } from './lib/client-debug-snapshot';
 import { openConnectionsPage, openTerminalPage } from './lib/page-state';
 import { ConnectionsPage } from './pages/ConnectionsPage';
 import { ConnectionPropertiesPage } from './pages/ConnectionPropertiesPage';
+import { AmbientButton } from './components/ambient';
 import { SettingsPage } from './pages/SettingsPage';
 import { TerminalPage } from './pages/TerminalPage';
 import { projectHomeSavedConnections } from './lib/home-connection-projection';
@@ -809,7 +810,85 @@ export function AppContent({
     ensureTerminalPageVisible();
   }, [ensureTerminalPageVisible, handleSwitchSessionWithHistory]);
 
-  const appTheme = useMemo(() => resolveSettingsTheme(bridgeSettings.terminalShellSkin), [bridgeSettings.terminalShellSkin]);
+  const appTheme = useMemo(
+    () => resolveSettingsTheme(bridgeSettings.terminalShellSkin),
+    [bridgeSettings.terminalShellSkin],
+  );
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const isBlack = appTheme.background === '#050608';
+    const themeVariables: Record<string, string> = {
+      '--zterm-settings-background': appTheme.background,
+      '--zterm-settings-surface': appTheme.surface,
+      '--zterm-settings-field': appTheme.field,
+      '--zterm-settings-text': appTheme.text,
+      '--zterm-settings-muted': appTheme.muted,
+      '--zterm-settings-border': appTheme.border,
+      '--zterm-settings-accent': appTheme.accent,
+      '--zterm-settings-accent-text': appTheme.accentText,
+      '--zterm-settings-accent-soft': `color-mix(in srgb, ${appTheme.accent} 14%, transparent)`,
+      '--zterm-settings-accent-border': `color-mix(in srgb, ${appTheme.accent} 38%, transparent)`,
+      '--zterm-settings-success': isBlack ? '#38d47d' : '#1f8f55',
+      '--zterm-settings-success-soft': isBlack
+        ? 'rgba(56,212,125,0.14)'
+        : 'rgba(31,143,85,0.12)',
+      '--zterm-settings-warning': isBlack ? '#ffb454' : '#8f5b00',
+      '--zterm-settings-warning-soft': isBlack
+        ? 'rgba(255,180,84,0.14)'
+        : 'rgba(143,91,0,0.12)',
+      '--zterm-settings-danger': appTheme.danger,
+      '--zterm-settings-danger-soft': isBlack
+        ? 'rgba(255,122,134,0.14)'
+        : 'rgba(180,35,58,0.10)',
+      '--zterm-settings-danger-border': isBlack
+        ? 'rgba(255,122,134,0.38)'
+        : 'rgba(180,35,58,0.30)',
+      '--zterm-settings-video-bg': '#050608',
+      '--zterm-settings-shadow': appTheme.shadow,
+      '--zterm-dialog-info': appTheme.accent,
+      '--zterm-dialog-info-soft': `color-mix(in srgb, ${appTheme.accent} 14%, transparent)`,
+      '--zterm-dialog-info-border': `color-mix(in srgb, ${appTheme.accent} 38%, transparent)`,
+      '--zterm-dialog-success': isBlack ? '#38d47d' : '#1f8f55',
+      '--zterm-dialog-success-soft': isBlack
+        ? 'rgba(56,212,125,0.14)'
+        : 'rgba(31,143,85,0.12)',
+      '--zterm-dialog-success-border': isBlack
+        ? 'rgba(56,212,125,0.38)'
+        : 'rgba(31,143,85,0.30)',
+      '--zterm-dialog-warning': isBlack ? '#ffb454' : '#8f5b00',
+      '--zterm-dialog-warning-soft': isBlack
+        ? 'rgba(255,180,84,0.14)'
+        : 'rgba(143,91,0,0.12)',
+      '--zterm-dialog-warning-border': isBlack
+        ? 'rgba(255,180,84,0.38)'
+        : 'rgba(143,91,0,0.30)',
+      '--zterm-dialog-error': appTheme.danger,
+      '--zterm-dialog-error-soft': isBlack
+        ? 'rgba(255,122,134,0.14)'
+        : 'rgba(180,35,58,0.10)',
+      '--zterm-dialog-error-border': isBlack
+        ? 'rgba(255,122,134,0.38)'
+        : 'rgba(180,35,58,0.30)',
+      '--zterm-dialog-accent-text': isBlack ? '#07110b' : '#ffffff',
+      '--zterm-shell-bg': appTheme.background,
+      '--zterm-panel-bg': appTheme.background,
+      '--zterm-panel-surface': appTheme.field,
+      '--zterm-panel-active': appTheme.field,
+      '--zterm-panel-text': appTheme.text,
+      '--zterm-panel-active-text': appTheme.text,
+      '--zterm-panel-muted': appTheme.muted,
+      '--zterm-panel-border': appTheme.border,
+      '--zterm-panel-accent': appTheme.accent,
+      '--zterm-panel-danger': appTheme.danger,
+      '--zterm-sheet-overlay': isBlack ? 'rgba(0,0,0,0.76)' : 'rgba(17,19,21,0.24)',
+    };
+    for (const [name, value] of Object.entries(themeVariables)) {
+      root.style.setProperty(name, value);
+    }
+    root.style.colorScheme = isBlack ? 'dark' : 'light';
+    root.dataset.ztermShellSkin = isBlack ? 'black' : 'light';
+  }, [appTheme]);
 
   return (
     <div
@@ -826,6 +905,24 @@ export function AppContent({
         ['--zterm-settings-border' as string]: appTheme.border,
         ['--zterm-settings-accent' as string]: appTheme.accent,
         ['--zterm-settings-accent-text' as string]: appTheme.accentText,
+        ['--zterm-settings-accent-soft' as string]: `color-mix(in srgb, ${appTheme.accent} 14%, transparent)`,
+        ['--zterm-settings-accent-border' as string]: `color-mix(in srgb, ${appTheme.accent} 38%, transparent)`,
+        ['--zterm-settings-success' as string]: appTheme.background === '#050608' ? '#38d47d' : '#1f8f55',
+        ['--zterm-settings-success-soft' as string]: appTheme.background === '#050608'
+          ? 'rgba(56,212,125,0.14)'
+          : 'rgba(31,143,85,0.12)',
+        ['--zterm-settings-warning' as string]: appTheme.background === '#050608' ? '#ffb454' : '#8f5b00',
+        ['--zterm-settings-warning-soft' as string]: appTheme.background === '#050608'
+          ? 'rgba(255,180,84,0.14)'
+          : 'rgba(143,91,0,0.12)',
+        ['--zterm-settings-danger' as string]: appTheme.danger,
+        ['--zterm-settings-danger-soft' as string]: appTheme.background === '#050608'
+          ? 'rgba(255,122,134,0.14)'
+          : 'rgba(180,35,58,0.10)',
+        ['--zterm-settings-danger-border' as string]: appTheme.background === '#050608'
+          ? 'rgba(255,122,134,0.38)'
+          : 'rgba(180,35,58,0.30)',
+        ['--zterm-settings-video-bg' as string]: '#050608',
         ['--zterm-settings-shadow' as string]: appTheme.shadow,
         display: 'flex',
         justifyContent: 'center',
@@ -1071,7 +1168,7 @@ export function AppContent({
           垂直居中右侧——不覆盖顶部/底部浮动标签（quickbar 固定簇等） */}
       {screenOrientationLock.showSwitchButton &&
         screenOrientationLock.pendingTarget && (
-          <button
+          <AmbientButton
             type="button"
             data-testid="screen-orientation-switch-button"
             aria-label={`切换到${screenOrientationLock.pendingTarget === 'landscape' ? '横屏' : '竖屏'}`}
@@ -1087,20 +1184,20 @@ export function AppContent({
               height: 40,
               borderRadius: 20,
               border: 'none',
-              backgroundColor: 'rgba(18, 20, 24, 0.72)',
-              color: '#ffffff',
+              backgroundColor: 'var(--zterm-settings-surface)',
+              color: 'var(--zterm-settings-text)',
               fontSize: 18,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              boxShadow: '0 2px 10px rgba(0, 0, 0, 0.35)',
+              boxShadow: 'var(--zterm-settings-shadow)',
               zIndex: 2147483000,
               cursor: 'pointer',
               padding: 0,
             }}
           >
             ↻
-          </button>
+          </AmbientButton>
         )}
 
       <TmuxSessionPickerSheet
@@ -1146,7 +1243,7 @@ export function AppContent({
             position: 'fixed',
             inset: 0,
             zIndex: 300,
-            backgroundColor: 'rgba(8, 12, 18, 0.48)',
+            backgroundColor: 'var(--zterm-sheet-overlay, rgba(8, 12, 18, 0.48))',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -1157,9 +1254,10 @@ export function AppContent({
             style={{
               width: 'min(420px, calc(100vw - 24px))',
               borderRadius: '24px',
-              backgroundColor: '#fff',
-              color: '#111827',
-              boxShadow: '0 24px 70px rgba(0,0,0,0.28)',
+              backgroundColor: 'var(--zterm-settings-surface)',
+              color: 'var(--zterm-settings-text)',
+              border: '1px solid var(--zterm-settings-border)',
+              boxShadow: 'var(--zterm-settings-shadow)',
               padding: '22px',
               display: 'flex',
               flexDirection: 'column',
@@ -1168,7 +1266,7 @@ export function AppContent({
           >
             <div>
               <div style={{ fontSize: '22px', fontWeight: 800 }}>发现新版本</div>
-              <div style={{ marginTop: '6px', fontSize: '14px', lineHeight: 1.6, color: '#5b6478' }}>
+              <div style={{ marginTop: '6px', fontSize: '14px', lineHeight: 1.6, color: 'var(--zterm-settings-muted)' }}>
                 当前版本与服务器版本不一致，可以下载并调起系统安装。
               </div>
             </div>
@@ -1176,7 +1274,7 @@ export function AppContent({
             <div
               style={{
                 borderRadius: '18px',
-                backgroundColor: '#f6f8fb',
+                backgroundColor: 'var(--zterm-settings-field)',
                 padding: '14px 16px',
                 display: 'flex',
                 flexDirection: 'column',
@@ -1184,22 +1282,22 @@ export function AppContent({
               }}
             >
               <div style={{ fontSize: '14px', fontWeight: 700 }}>Remote: {availableManifest.versionName}</div>
-              <div style={{ fontSize: '13px', color: '#5b6478' }}>versionCode {availableManifest.versionCode}</div>
+              <div style={{ fontSize: '13px', color: 'var(--zterm-settings-muted)' }}>versionCode {availableManifest.versionCode}</div>
               {availableManifest.notes.map((item, index) => (
-                <div key={`${item}-${index}`} style={{ fontSize: '13px', color: '#374151' }}>
+                <div key={`${item}-${index}`} style={{ fontSize: '13px', color: 'var(--zterm-settings-text)' }}>
                   - {item}
                 </div>
               ))}
             </div>
 
             {updateError ? (
-              <div style={{ fontSize: '13px', lineHeight: 1.5, color: '#dc2626' }}>
+              <div style={{ fontSize: '13px', lineHeight: 1.5, color: 'var(--zterm-settings-danger)' }}>
                 {updateError}
               </div>
             ) : null}
 
             <div style={{ display: 'grid', gap: '10px' }}>
-              <button
+              <AmbientButton
                 onClick={() => {
                   void startUpdate(availableManifest);
                 }}
@@ -1208,53 +1306,53 @@ export function AppContent({
                   minHeight: '46px',
                   borderRadius: '16px',
                   border: 'none',
-                  backgroundColor: '#111827',
-                  color: '#fff',
+                  backgroundColor: 'var(--zterm-settings-accent)',
+                  color: 'var(--zterm-settings-accent-text)',
                   fontWeight: 800,
                   cursor: updateInstalling ? 'wait' : 'pointer',
                 }}
               >
                 {updateInstalling ? '准备安装…' : '立即升级'}
-              </button>
-              <button
+              </AmbientButton>
+              <AmbientButton
                 onClick={() => skipCurrentVersion(availableManifest)}
                 style={{
                   minHeight: '42px',
                   borderRadius: '14px',
                   border: 'none',
-                  backgroundColor: '#eef2f8',
-                  color: '#111827',
+                  backgroundColor: 'var(--zterm-settings-field)',
+                  color: 'var(--zterm-settings-text)',
                   fontWeight: 700,
                 }}
               >
                 跳过当前版本
-              </button>
-              <button
+              </AmbientButton>
+              <AmbientButton
                 onClick={ignoreUntilManualCheck}
                 style={{
                   minHeight: '42px',
                   borderRadius: '14px',
                   border: 'none',
-                  backgroundColor: '#eef2f8',
-                  color: '#111827',
+                  backgroundColor: 'var(--zterm-settings-field)',
+                  color: 'var(--zterm-settings-text)',
                   fontWeight: 700,
                 }}
               >
                 一直忽略，直到手动检查
-              </button>
-              <button
+              </AmbientButton>
+              <AmbientButton
                 onClick={dismissAvailableManifest}
                 style={{
                   minHeight: '40px',
                   borderRadius: '14px',
-                  border: '1px solid #d8dee8',
-                  backgroundColor: '#fff',
-                  color: '#5b6478',
+                  border: '1px solid var(--zterm-settings-border)',
+                  backgroundColor: 'var(--zterm-settings-surface)',
+                  color: 'var(--zterm-settings-muted)',
                   fontWeight: 700,
                 }}
               >
                 先不处理
-              </button>
+              </AmbientButton>
             </div>
           </div>
         </div>

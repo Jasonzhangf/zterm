@@ -1,6 +1,7 @@
 import { mobileTheme } from '../../lib/mobile-ui';
 import type { TraversalRelayDeviceSnapshot } from '../../lib/types';
 import { ConnectionSection } from './ConnectionSection';
+import { AmbientButton } from '../ambient';
 
 interface RelayDevicePickerProps {
   relayEnabled: boolean;
@@ -52,7 +53,7 @@ export function RelayDevicePicker({
           <div>deviceId: {selectedDevice.deviceId}</div>
           <div>hostId: {selectedDevice.daemon.hostId}</div>
           <div>daemon version: {selectedDevice.daemon.version || '-'}</div>
-          <button
+          <AmbientButton
             type="button"
             onClick={onClear}
             style={{
@@ -69,7 +70,7 @@ export function RelayDevicePicker({
             }}
           >
             清空绑定
-          </button>
+          </AmbientButton>
         </div>
       ) : null}
 
@@ -82,7 +83,7 @@ export function RelayDevicePicker({
           {devices.map((device) => {
             const active = device.deviceId === selectedRelayDeviceId || device.daemon.hostId === selectedRelayHostId;
             return (
-              <button
+              <AmbientButton
                 key={`${device.deviceId}:${device.daemon.hostId}`}
                 type="button"
                 onClick={() => onSelect(device)}
@@ -95,7 +96,7 @@ export function RelayDevicePicker({
                   padding: '14px 16px',
                   textAlign: 'left',
                   cursor: 'pointer',
-                  boxShadow: active ? '0 12px 26px rgba(31,214,122,0.14)' : mobileTheme.shadow.soft,
+                  boxShadow: active ? 'var(--zterm-settings-shadow)' : mobileTheme.shadow.soft,
                 }}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center' }}>
@@ -115,7 +116,7 @@ export function RelayDevicePicker({
                 <div style={{ marginTop: '4px', fontSize: '12px', color: 'var(--zterm-settings-muted)' }}>
                   platform: {device.platform || '-'} · daemon version: {device.daemon.version || '-'}
                 </div>
-              </button>
+              </AmbientButton>
             );
           })}
         </div>

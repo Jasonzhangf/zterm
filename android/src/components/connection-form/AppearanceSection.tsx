@@ -1,5 +1,6 @@
 import { ConnectionSection } from './ConnectionSection';
 import { mobileTheme } from '../../lib/mobile-ui';
+import { AmbientButton } from '../ambient';
 
 interface AppearanceSectionProps {
   pinned: boolean;
@@ -9,7 +10,7 @@ interface AppearanceSectionProps {
 export function AppearanceSection({ pinned, onPinnedChange }: AppearanceSectionProps) {
   return (
     <ConnectionSection title="Appearance" description="Visual emphasis and card placement preferences.">
-      <button
+      <AmbientButton
         type="button"
         onClick={() => onPinnedChange(!pinned)}
         style={{
@@ -29,7 +30,7 @@ export function AppearanceSection({ pinned, onPinnedChange }: AppearanceSectionP
       >
         <span>Pin this connection to the top</span>
         <span>{pinned ? 'ON' : 'OFF'}</span>
-      </button>
+      </AmbientButton>
 
       <div
         style={{

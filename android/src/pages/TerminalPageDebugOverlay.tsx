@@ -1,6 +1,7 @@
 import { memo as ReactMemo, useEffect, useState } from "react";
 import { formatDebugHz, formatDebugRate, resolveDebugStatus } from "./terminal-page-debug-helpers";
 import type { TerminalDebugOverlayProps } from "../lib/plugin-debug-console/debug-console-contract";
+import { AmbientButton } from "../components/ambient";
 import type { Session } from "../lib/types";
 
 const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
@@ -79,10 +80,10 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
     width: "192px",
     padding: "6px 7px",
     borderRadius: "10px",
-    border: `1.5px solid ${metrics?.bufferPullActive ? "rgba(34, 197, 94, 0.6)" : "rgba(83, 139, 255, 0.6)"}`,
-    background: "rgba(10, 16, 26, 0.35)",
-    boxShadow: "0 8px 18px rgba(0, 0, 0, 0.10)",
-    color: "rgba(231, 238, 252, 0.78)",
+    border: `1.5px solid ${metrics?.bufferPullActive ? "var(--zterm-panel-accent-border)" : "var(--zterm-panel-border)"}`,
+    background: "color-mix(in srgb, var(--zterm-panel-surface) 86%, transparent)",
+    boxShadow: "var(--zterm-settings-shadow)",
+    color: "var(--zterm-panel-muted)",
     fontSize: "8px",
     lineHeight: 1.25,
     backdropFilter: "blur(8px)",
@@ -129,7 +130,7 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px", fontWeight: 700 }}>
         <span>状态</span>
-        <button
+        <AmbientButton
           type="button"
           aria-label="关闭调试浮窗"
           onClick={onClose}
@@ -139,15 +140,15 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
             padding: 0,
             border: "none",
             borderRadius: "999px",
-            background: "rgba(255,255,255,0.12)",
-            color: "#e7eefc",
+            background: "var(--zterm-panel-field, var(--zterm-panel-surface))",
+            color: "var(--zterm-panel-text)",
             fontSize: "9px",
             lineHeight: "12px",
             cursor: "pointer",
           }}
         >
           ×
-        </button>
+        </AmbientButton>
       </div>
       <div
         data-testid="terminal-debug-ime-metrics"
@@ -158,8 +159,8 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
           rowGap: "3px",
           marginTop: "4px",
           paddingTop: "4px",
-          borderTop: "1px solid rgba(255,255,255,0.10)",
-          color: "rgba(231, 238, 252, 0.86)",
+          borderTop: "1px solid var(--zterm-panel-border)",
+          color: "var(--zterm-panel-text)",
           fontVariantNumeric: "tabular-nums",
           wordBreak: "break-word",
         }}
@@ -168,7 +169,7 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
         <span>状态</span>
         <span
           data-testid="terminal-debug-active-flag"
-          style={{ color: metrics?.bufferPullActive ? "#86efac" : "#93c5fd" }}
+          style={{ color: metrics?.bufferPullActive ? "var(--zterm-panel-accent)" : "var(--zterm-panel-muted)" }}
         >
           {session.state}{metrics ? ` / ${status}` : ""}{metrics?.active ? " · A" : ""}
         </span>

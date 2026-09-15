@@ -26,9 +26,14 @@ import type {
 } from '../lib/plugin-settings-update/settings-update-contract';
 import { ConnectionConfigSection } from '../components/settings/ConnectionConfigSection';
 import {
+  AmbientButton,
+  AmbientInput,
+  AmbientSelect,
+  AmbientTextarea,
+} from '../components/ambient';
+import {
   settingsViewportPadding,
   SettingsSectionTitle,
-  settingsInputStyle,
   settingsSectionStyle,
 } from '../components/settings/SettingsSection';
 import { TerminalThemeSection } from '../components/settings/TerminalThemeSection';
@@ -183,6 +188,7 @@ export function SettingsPage({
   const updateDraftEditedRef = useRef(false);
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const settingsTheme = useMemo(() => resolveSettingsTheme(draft.terminalShellSkin), [draft.terminalShellSkin]);
+  const terminalShellSkinOptions = TERMINAL_SHELL_SKIN_OPTIONS.filter((option) => option.id !== 'blue');
   const saveResetTimerRef = useRef<number | null>(null);
   useEffect(() => {
     if (saveState !== 'saved') {
@@ -281,6 +287,7 @@ export function SettingsPage({
         ['--zterm-settings-border' as string]: settingsTheme.border,
         ['--zterm-settings-accent' as string]: settingsTheme.accent,
         ['--zterm-settings-accent-text' as string]: settingsTheme.accentText,
+        ['--zterm-settings-danger' as string]: settingsTheme.danger,
         ['--zterm-settings-shadow' as string]: settingsTheme.shadow,
       }}
     >
@@ -298,25 +305,14 @@ export function SettingsPage({
           borderBottom: `1px solid ${settingsTheme.border}`,
         }}
       >
-        <button
-          type="button"
+        <AmbientButton
+          variant="settings-back"
           aria-label="返回连接列表"
           title="返回"
           onClick={onBack}
-          style={{
-            width: '56px',
-            height: '56px',
-            borderRadius: '20px',
-            border: 'none',
-            backgroundColor: settingsTheme.surface,
-            color: settingsTheme.text,
-            fontSize: '26px',
-            boxShadow: mobileTheme.shadow.soft,
-            cursor: 'pointer',
-          }}
         >
           ‹
-        </button>
+        </AmbientButton>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: '20px', fontWeight: 800 }}>设置</div>
         </div>
@@ -329,27 +325,15 @@ export function SettingsPage({
         >
           {saveState === 'saved' ? '已保存' : saveState === 'error' ? '保存失败，请重试' : ''}
         </span>
-        <button
-          type="button"
+        <AmbientButton
+          variant="settings-save"
           aria-label="保存"
           title="保存设置"
           onClick={handleSave}
           disabled={saveState === 'saving'}
-          style={{
-            minWidth: 'clamp(84px, 22vw, 112px)',
-            height: '56px',
-            borderRadius: '20px',
-            border: 'none',
-            backgroundColor: settingsTheme.accent,
-            color: settingsTheme.accentText,
-            fontWeight: 800,
-            boxShadow: mobileTheme.shadow.soft,
-            cursor: 'pointer',
-            opacity: saveState === 'saving' ? 0.72 : 1,
-          }}
         >
           {saveState === 'saved' ? '已保存' : saveState === 'error' ? '重试保存' : '保存'}
-        </button>
+        </AmbientButton>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: `${settingsViewportPadding} ${settingsViewportPadding} 32px`, width: '100%', boxSizing: 'border-box', minWidth: 0 }}>
@@ -402,7 +386,7 @@ export function SettingsPage({
             <label htmlFor="settings-terminal-cache-lines" style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: 700 }}>
               缓存行数
             </label>
-            <input
+            <AmbientInput
               id="settings-terminal-cache-lines"
               type="number"
               min={200}
@@ -417,7 +401,6 @@ export function SettingsPage({
                   ),
                 }))
               }
-              style={settingsInputStyle()}
             />
           </div>
         </div>
@@ -432,23 +415,14 @@ export function SettingsPage({
             {TERMINAL_WIDTH_MODE_OPTIONS.map((option) => {
               const active = draft.terminalWidthMode === option.id;
               return (
-                <button
+                <AmbientButton
                   key={option.id}
-                  type="button"
+                  variant="settings-segment"
+                  selected={active}
                   onClick={() => setDraft((current) => updateBridgeSettingsTerminalWidthMode(current, option.id))}
-                  style={{
-                    flex: 1,
-                    minHeight: '48px',
-                    borderRadius: '16px',
-                    border: 'none',
-                    backgroundColor: active ? settingsTheme.accent : settingsTheme.field,
-                    color: active ? settingsTheme.accentText : settingsTheme.text,
-                    fontWeight: 800,
-                    cursor: 'pointer',
-                  }}
                 >
                   {option.label}
-                </button>
+                </AmbientButton>
               );
             })}
           </div>
@@ -463,27 +437,18 @@ export function SettingsPage({
             {TERMINAL_SESSION_GROUP_LAYOUT_OPTIONS.map((option) => {
               const active = normalizeTerminalSessionGroupLayoutMode(draft.terminalSessionGroupLayoutMode) === option.id;
               return (
-                <button
+                <AmbientButton
                   key={option.id}
-                  type="button"
+                  variant="settings-segment"
+                  selected={active}
                   title={option.description}
                   onClick={() => setDraft((current) => ({
                     ...current,
                     terminalSessionGroupLayoutMode: option.id,
                   }))}
-                  style={{
-                    flex: 1,
-                    minHeight: '48px',
-                    borderRadius: '16px',
-                    border: 'none',
-                    backgroundColor: active ? settingsTheme.accent : settingsTheme.field,
-                    color: active ? settingsTheme.accentText : settingsTheme.text,
-                    fontWeight: 800,
-                    cursor: 'pointer',
-                  }}
                 >
                   {getTerminalSessionGroupLayoutLabel(option.id)}
-                </button>
+                </AmbientButton>
               );
             })}
           </div>
@@ -497,7 +462,7 @@ export function SettingsPage({
           <label htmlFor="settings-session-drawer-filter-mode" style={{ display: 'block', marginTop: '12px', marginBottom: '8px', fontSize: '14px', fontWeight: 700 }}>
             筛选模式
           </label>
-          <select
+          <AmbientSelect
             id="settings-session-drawer-filter-mode"
             aria-label="会话抽屉筛选模式"
             value={sessionDrawerFilterDraft.mode}
@@ -508,16 +473,16 @@ export function SettingsPage({
                 mode,
               }));
             }}
-            style={settingsInputStyle()}
           >
             {SESSION_DRAWER_FILTER_MODES.map((mode) => (
               <option key={mode} value={mode}>{SESSION_DRAWER_FILTER_LABELS[mode]}</option>
             ))}
-          </select>
+          </AmbientSelect>
           <label htmlFor="settings-session-drawer-master-names" style={{ display: 'block', marginTop: '12px', marginBottom: '8px', fontSize: '14px', fontWeight: 700 }}>
             master 会话名（每行一个）
           </label>
-          <textarea
+          <AmbientTextarea
+            variant="settings-multiline"
             id="settings-session-drawer-master-names"
             aria-label="master 会话名"
             data-testid="settings-session-drawer-master-names"
@@ -530,12 +495,12 @@ export function SettingsPage({
                 masterNames,
               }));
             }}
-            style={{ ...settingsInputStyle(), minHeight: '96px', resize: 'vertical' }}
           />
           <label htmlFor="settings-session-drawer-subagent-names" style={{ display: 'block', marginTop: '12px', marginBottom: '8px', fontSize: '14px', fontWeight: 700 }}>
             subagent 会话名（每行一个）
           </label>
-          <textarea
+          <AmbientTextarea
+            variant="settings-multiline"
             id="settings-session-drawer-subagent-names"
             aria-label="subagent 会话名"
             data-testid="settings-session-drawer-subagent-names"
@@ -548,7 +513,6 @@ export function SettingsPage({
                 subagentNames,
               }));
             }}
-            style={{ ...settingsInputStyle(), minHeight: '96px', resize: 'vertical' }}
           />
         </div>
         </SettingsGroup>
@@ -560,31 +524,18 @@ export function SettingsPage({
           <div style={{ fontSize: '13px', lineHeight: 1.6, color: settingsTheme.muted }}>
             打开后，客户端会临时通过当前已连接的会话 WebSocket 上送 runtime debug 日志到 daemon，默认 10 分钟后自动停止。关闭后立即停止上送。
           </div>
-          <button
-            type="button"
+          <AmbientButton
+            variant="settings-toggle"
+            selected={runtimeDebugEnabled}
             onClick={() => {
               const nextEnabled = !runtimeDebugEnabled;
               setRuntimeDebugEnabled(nextEnabled);
               setRuntimeDebugEnabledState(nextEnabled);
             }}
-            style={{
-              minHeight: '48px',
-              borderRadius: '16px',
-              border: 'none',
-              backgroundColor: runtimeDebugEnabled ? settingsTheme.accent : settingsTheme.field,
-              color: runtimeDebugEnabled ? settingsTheme.accentText : settingsTheme.text,
-              fontWeight: 800,
-              fontSize: '16px',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '8px',
-            }}
           >
             <ToggleGlyph checked={runtimeDebugEnabled} />
             调试日志（daemon）{runtimeDebugEnabled ? '已开启' : '已关闭'}
-          </button>
+          </AmbientButton>
         </div>
 
         <div style={settingsSectionStyle()}>
@@ -592,27 +543,14 @@ export function SettingsPage({
           <div style={{ fontSize: '13px', lineHeight: 1.6, color: settingsTheme.muted }}>
             开启后，高频使用的快捷键会自动排到前面（历史使用占 80%，最近 10 分钟占 20%），减少滚动查找。
           </div>
-          <button
-            type="button"
+          <AmbientButton
+            variant="settings-toggle"
+            selected={draft.shortcutSmartSort}
             onClick={() => setDraft((current) => ({ ...current, shortcutSmartSort: !current.shortcutSmartSort }))}
-            style={{
-              minHeight: '48px',
-              borderRadius: '16px',
-              border: 'none',
-              backgroundColor: draft.shortcutSmartSort ? settingsTheme.accent : settingsTheme.field,
-              color: draft.shortcutSmartSort ? settingsTheme.accentText : settingsTheme.text,
-              fontWeight: 800,
-              fontSize: '16px',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '8px',
-            }}
           >
             <ToggleGlyph checked={draft.shortcutSmartSort} />
             智能排序 {draft.shortcutSmartSort ? '已开启' : '已关闭'}
-          </button>
+          </AmbientButton>
         </div>
         </SettingsGroup>
 
@@ -624,23 +562,22 @@ export function SettingsPage({
             串流画质与触控滚动偏好，作用于后续远程窗口会话。
           </div>
           <div style={{ marginTop: '12px', marginBottom: '8px', fontSize: '14px', fontWeight: 700 }}>默认串流偏好</div>
-          <select
+          <AmbientSelect
             value={remoteWindowVideoPreference}
             onChange={(event) => {
               const next = event.currentTarget.value as RemoteWindowVideoPreference;
               setRemoteWindowVideoPreference(next);
               writeRemoteWindowVideoPreferenceGlobalDefault(next);
             }}
-            style={settingsInputStyle()}
           >
             {REMOTE_WINDOW_VIDEO_PREFERENCES.map((preference) => (
               <option key={preference} value={preference}>
                 {preference === 'smooth' ? '流畅优先' : '清晰优先'}
               </option>
             ))}
-          </select>
+          </AmbientSelect>
           <div style={{ marginTop: '12px', marginBottom: '8px', fontSize: '14px', fontWeight: 700 }}>滚动幅度</div>
-          <select
+          <AmbientSelect
             value={String(remoteScrollFraction)}
             onChange={(event) => {
               const next = Number(event.currentTarget.value);
@@ -649,17 +586,17 @@ export function SettingsPage({
                 window.localStorage.setItem('zterm:remote-window:touch-scroll-fraction-v1', String(next));
               }
             }}
-            style={settingsInputStyle()}
           >
             {[0.125, 0.25, 0.5, 1].map((fraction) => (
               <option key={fraction} value={fraction}>
                 {fraction === 1 ? '整屏' : `${Math.round(fraction * 100)}%`}
               </option>
             ))}
-          </select>
+          </AmbientSelect>
           <div style={{ marginTop: '12px', marginBottom: '8px', fontSize: '14px', fontWeight: 700 }}>滚动方向</div>
-          <button
-            type="button"
+          <AmbientButton
+            variant="settings-toggle"
+            selected={remoteScrollInverted}
             onClick={() => {
               const next = !remoteScrollInverted;
               setRemoteScrollInverted(next);
@@ -667,20 +604,9 @@ export function SettingsPage({
                 window.localStorage.setItem('zterm:remote-window:touch-scroll-inverted-v1', String(next));
               }
             }}
-            style={{
-              minHeight: '48px',
-              width: '100%',
-              borderRadius: '16px',
-              border: 'none',
-              backgroundColor: remoteScrollInverted ? settingsTheme.accent : settingsTheme.field,
-              color: remoteScrollInverted ? settingsTheme.accentText : settingsTheme.text,
-              fontWeight: 800,
-              fontSize: '16px',
-              cursor: 'pointer',
-            }}
           >
             {remoteScrollInverted ? '反向滚动（已开启）' : '正向滚动'}
-          </button>
+          </AmbientButton>
         </div>
         </SettingsGroup>
 
@@ -702,7 +628,7 @@ export function SettingsPage({
           <div style={{ fontSize: '13px', lineHeight: 1.6, color: settingsTheme.muted }}>
             选择终端正文显示字号，当前默认字号为最小。
           </div>
-          <select
+          <AmbientSelect
             aria-label="终端字号"
             data-testid="settings-terminal-font-size"
             value={draft.terminalFontSize}
@@ -710,12 +636,11 @@ export function SettingsPage({
               ...current,
               terminalFontSize: event.currentTarget.value as BridgeSettings['terminalFontSize'],
             }))}
-            style={settingsInputStyle()}
           >
             {TERMINAL_FONT_SIZE_OPTIONS.map((option) => (
               <option key={option.id} value={option.id}>{option.label}</option>
             ))}
-          </select>
+          </AmbientSelect>
         </div>
 
         <div style={settingsSectionStyle()}>
@@ -724,12 +649,13 @@ export function SettingsPage({
             这里单独控制顶部栏、快捷栏和终端外壳，不改变终端 ANSI 颜色。默认跟主页保持白灰配色。
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(118px, 100%), 1fr))', gap: '10px' }}>
-            {TERMINAL_SHELL_SKIN_OPTIONS.map((option) => {
+            {terminalShellSkinOptions.map((option) => {
               const active = draft.terminalShellSkin === option.id;
               return (
-                <button
+                <AmbientButton
                   key={option.id}
-                  type="button"
+                  variant="settings-skin-option"
+                  selected={active}
                   onClick={() => {
                     if (onTerminalShellSkinChange) {
                       livePreviewPatchRef.current = { terminalShellSkin: option.id };
@@ -737,23 +663,12 @@ export function SettingsPage({
                     setDraft((current) => ({ ...current, terminalShellSkin: option.id }));
                     onTerminalShellSkinChange?.(option.id);
                   }}
-                  style={{
-                    minHeight: '76px',
-                    borderRadius: '18px',
-                    border: active ? `2px solid ${settingsTheme.accent}` : `1px solid ${settingsTheme.border}`,
-                    backgroundColor: active ? settingsTheme.surface : settingsTheme.field,
-                    color: settingsTheme.text,
-                    boxShadow: active ? '0 12px 26px rgba(31,214,122,0.14)' : 'none',
-                    cursor: 'pointer',
-                    textAlign: 'left',
-                    padding: '12px',
-                  }}
                 >
                   <div style={{ fontSize: '15px', fontWeight: 850 }}>{option.label}</div>
                   <div style={{ marginTop: '5px', fontSize: '11px', lineHeight: 1.35, color: settingsTheme.muted }}>
                     {option.description}
                   </div>
-                </button>
+                </AmbientButton>
               );
             })}
           </div>

@@ -100,6 +100,7 @@
       ],
       "status": "active",
       "owned_paths": [
+        "src/components/ambient/",
         "src/components/terminal/WindowGroupLayout.tsx",
         "src/lib/app-foreground-refresh.ts",
         "src/lib/app-version.ts",
@@ -1652,8 +1653,6 @@
       ],
       "status": "active",
       "owned_paths": [
-        "src/components/HostForm.tsx",
-        "src/components/HostList.tsx",
         "src/components/settings/ConnectionConfigSection.tsx",
         "src/components/settings/connection-config-entries.test.ts",
         "src/components/connection-form/",
