@@ -817,7 +817,7 @@ export function AppContent({
 
   useEffect(() => {
     const root = document.documentElement;
-    const isBlack = appTheme.background === '#050608';
+    const isBlack = appTheme.isDark;
     const themeVariables: Record<string, string> = {
       '--zterm-settings-background': appTheme.background,
       '--zterm-settings-surface': appTheme.surface,
@@ -844,7 +844,7 @@ export function AppContent({
       '--zterm-settings-danger-border': isBlack
         ? 'rgba(255,122,134,0.38)'
         : 'rgba(180,35,58,0.30)',
-      '--zterm-settings-video-bg': '#050608',
+      '--zterm-settings-video-bg': isBlack ? '#10141a' : '#050608',
       '--zterm-settings-shadow': appTheme.shadow,
       '--zterm-dialog-info': appTheme.accent,
       '--zterm-dialog-info-soft': `color-mix(in srgb, ${appTheme.accent} 14%, transparent)`,
@@ -871,23 +871,12 @@ export function AppContent({
         ? 'rgba(255,122,134,0.38)'
         : 'rgba(180,35,58,0.30)',
       '--zterm-dialog-accent-text': isBlack ? '#07110b' : '#ffffff',
-      '--zterm-shell-bg': appTheme.background,
-      '--zterm-panel-bg': appTheme.background,
-      '--zterm-panel-surface': appTheme.field,
-      '--zterm-panel-active': appTheme.field,
-      '--zterm-panel-text': appTheme.text,
-      '--zterm-panel-active-text': appTheme.text,
-      '--zterm-panel-muted': appTheme.muted,
-      '--zterm-panel-border': appTheme.border,
-      '--zterm-panel-accent': appTheme.accent,
-      '--zterm-panel-danger': appTheme.danger,
-      '--zterm-sheet-overlay': isBlack ? 'rgba(0,0,0,0.76)' : 'rgba(17,19,21,0.24)',
     };
     for (const [name, value] of Object.entries(themeVariables)) {
       root.style.setProperty(name, value);
     }
     root.style.colorScheme = isBlack ? 'dark' : 'light';
-    root.dataset.ztermShellSkin = isBlack ? 'black' : 'light';
+    root.dataset.terminalShellSkin = isBlack ? 'black' : 'light';
   }, [appTheme]);
 
   return (
@@ -907,22 +896,22 @@ export function AppContent({
         ['--zterm-settings-accent-text' as string]: appTheme.accentText,
         ['--zterm-settings-accent-soft' as string]: `color-mix(in srgb, ${appTheme.accent} 14%, transparent)`,
         ['--zterm-settings-accent-border' as string]: `color-mix(in srgb, ${appTheme.accent} 38%, transparent)`,
-        ['--zterm-settings-success' as string]: appTheme.background === '#050608' ? '#38d47d' : '#1f8f55',
-        ['--zterm-settings-success-soft' as string]: appTheme.background === '#050608'
+        ['--zterm-settings-success' as string]: appTheme.isDark ? '#38d47d' : '#1f8f55',
+        ['--zterm-settings-success-soft' as string]: appTheme.isDark
           ? 'rgba(56,212,125,0.14)'
           : 'rgba(31,143,85,0.12)',
-        ['--zterm-settings-warning' as string]: appTheme.background === '#050608' ? '#ffb454' : '#8f5b00',
-        ['--zterm-settings-warning-soft' as string]: appTheme.background === '#050608'
+        ['--zterm-settings-warning' as string]: appTheme.isDark ? '#ffb454' : '#8f5b00',
+        ['--zterm-settings-warning-soft' as string]: appTheme.isDark
           ? 'rgba(255,180,84,0.14)'
           : 'rgba(143,91,0,0.12)',
         ['--zterm-settings-danger' as string]: appTheme.danger,
-        ['--zterm-settings-danger-soft' as string]: appTheme.background === '#050608'
+        ['--zterm-settings-danger-soft' as string]: appTheme.isDark
           ? 'rgba(255,122,134,0.14)'
           : 'rgba(180,35,58,0.10)',
-        ['--zterm-settings-danger-border' as string]: appTheme.background === '#050608'
+        ['--zterm-settings-danger-border' as string]: appTheme.isDark
           ? 'rgba(255,122,134,0.38)'
           : 'rgba(180,35,58,0.30)',
-        ['--zterm-settings-video-bg' as string]: '#050608',
+        ['--zterm-settings-video-bg' as string]: appTheme.isDark ? '#10141a' : '#050608',
         ['--zterm-settings-shadow' as string]: appTheme.shadow,
         display: 'flex',
         justifyContent: 'center',

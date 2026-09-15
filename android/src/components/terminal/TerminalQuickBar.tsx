@@ -3095,7 +3095,7 @@ function TerminalQuickBarComponent({
               position: "fixed",
               inset: 0,
               zIndex: 129,
-              backgroundColor: "color-mix(in srgb, #050608 18%, transparent)",
+              backgroundColor: "color-mix(in srgb, #16191f 18%, transparent)",
             }}
           />
           <div

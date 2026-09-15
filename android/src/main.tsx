@@ -28,7 +28,7 @@ class RootErrorBoundary extends React.Component<
             margin: 0,
             display: 'grid',
             placeItems: 'center',
-            backgroundColor: '#050608',
+            backgroundColor: '#16191f',
             color: '#f5f7fb',
           },
         },

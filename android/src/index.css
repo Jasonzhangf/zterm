@@ -165,6 +165,12 @@ label:focus-visible {
   /* Keep cached terminal geometry for IME/layout calculations, but clip the
    * visual shell to the current App/WebView viewport after rotation. */
   max-height: 100%;
+}
+
+/* Skin tokens are attribute-driven so app-level pages, terminal chrome, and
+ * body portals all read one ramp. The black skin overrides this base later. */
+.zterm-terminal-shell,
+[data-terminal-shell-skin] {
   /* GitHub Light / system grouped-background values keep the light shell off
    * pure white while preserving familiar neutral terminal contrast. */
   --zterm-shell-bg: #f0f2f4;
@@ -220,44 +226,47 @@ label:focus-visible {
   --zterm-video-bg: #050608;
 }
 
-.zterm-terminal-shell[data-terminal-shell-skin="black"] {
-  --zterm-shell-bg: #050608;
-  --zterm-stage-bg: #0a0c10;
-  --zterm-stage-text: #f5f7fb;
-  --zterm-stage-muted: #8a93a3;
-  --zterm-panel-bg: #0e1015;
-  --zterm-panel-surface: #171a21;
-  --zterm-panel-active: #232833;
-  --zterm-panel-text: #e5e7eb;
+/* Graphite ramp: every tier stays off pure black and keeps a visible step from
+ * its neighbours, so shell -> stage -> panel -> surface -> active reads as
+ * depth instead of one black slab with a bright edge. */
+[data-terminal-shell-skin="black"] {
+  --zterm-shell-bg: #16191f;
+  --zterm-stage-bg: #1b1f26;
+  --zterm-stage-text: #f2f5fa;
+  --zterm-stage-muted: #a7afbc;
+  --zterm-panel-bg: #20252d;
+  --zterm-panel-surface: #272d36;
+  --zterm-panel-active: #313843;
+  --zterm-panel-text: #eef2f7;
   --zterm-panel-active-text: #ffffff;
-  --zterm-panel-muted: #8a93a3;
-  --zterm-panel-border: rgba(245, 247, 251, 0.12);
+  --zterm-panel-muted: #a7afbc;
+  --zterm-panel-border: rgba(245, 247, 251, 0.10);
   --zterm-panel-accent: #38d47d;
   --zterm-panel-accent-soft: rgba(56, 212, 125, 0.14);
   --zterm-panel-accent-border: rgba(56, 212, 125, 0.38);
   --zterm-panel-danger: #ff7a86;
   --zterm-panel-danger-soft: rgba(255, 122, 134, 0.14);
   --zterm-panel-danger-border: rgba(255, 122, 134, 0.38);
-  --zterm-panel-shadow: rgba(0, 0, 0, 0.70);
-  --zterm-neo-header-bg: var(--zterm-panel-bg);
-  --zterm-neo-quickbar-bg: var(--zterm-panel-bg);
-  --zterm-neo-border: rgba(245, 247, 251, 0.20);
-  --zterm-neo-base: #171a21;
-  --zterm-neo-raised-bg: linear-gradient(145deg, #303640 0%, #171a21 100%);
-  --zterm-neo-active: #232833;
-  --zterm-neo-pressed: #2b313d;
-  --zterm-neo-highlight: rgba(255, 255, 255, 0.28);
-  --zterm-neo-inset: rgba(0, 0, 0, 0.48);
-  --zterm-neo-shadow: rgba(0, 0, 0, 0.82);
-  --zterm-neo-text: #e5e7eb;
-  --zterm-neo-text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.92);
+  --zterm-panel-shadow: rgba(0, 0, 0, 0.46);
+  --zterm-neo-header-bg: linear-gradient(180deg, #242a33 0%, #1d222a 100%);
+  --zterm-neo-quickbar-bg: linear-gradient(180deg, #232932 0%, #1c2129 100%);
+  --zterm-neo-border: rgba(245, 247, 251, 0.12);
+  --zterm-neo-base: #272d36;
+  --zterm-neo-raised-bg: linear-gradient(145deg, #39414d 0%, #242a33 100%);
+  --zterm-neo-active: #2e3540;
+  --zterm-neo-pressed: #37404b;
+  --zterm-neo-highlight: rgba(255, 255, 255, 0.22);
+  --zterm-neo-inset: rgba(0, 0, 0, 0.42);
+  --zterm-neo-shadow: rgba(0, 0, 0, 0.48);
+  --zterm-neo-text: #eef2f7;
+  --zterm-neo-text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.62);
   --zterm-neo-active-text: #ffffff;
   --zterm-neo-accent: #38d47d;
   --zterm-neo-focus: rgba(56, 212, 125, 0.64);
-  --zterm-fixed-cluster-bg: #20242c;
+  --zterm-fixed-cluster-bg: #2a313b;
   --zterm-fixed-cluster-border: rgba(255, 255, 255, 0.10);
-  --zterm-fixed-cluster-shadow: rgba(0, 0, 0, 0.42);
-  --zterm-sheet-overlay: rgba(0, 0, 0, 0.76);
+  --zterm-fixed-cluster-shadow: rgba(0, 0, 0, 0.34);
+  --zterm-sheet-overlay: rgba(0, 0, 0, 0.66);
   --zterm-dialog-info: var(--zterm-panel-accent);
   --zterm-dialog-info-soft: rgba(56, 212, 125, 0.14);
   --zterm-dialog-info-border: rgba(56, 212, 125, 0.38);
@@ -271,7 +280,7 @@ label:focus-visible {
   --zterm-dialog-error-soft: rgba(255, 122, 134, 0.14);
   --zterm-dialog-error-border: rgba(255, 122, 134, 0.38);
   --zterm-dialog-accent-text: #07110b;
-  --zterm-video-bg: #050608;
+  --zterm-video-bg: #10141a;
 }
 
 .zterm-neo-header,
@@ -576,23 +585,23 @@ label:focus-visible {
   --amb-mat-roughness: .82;
 }
 
-.zterm-terminal-shell[data-terminal-shell-skin="black"] {
+[data-terminal-shell-skin="black"] {
   --amb-light-x: -1;
   --amb-light-y: -1;
-  --amb-key-light-intensity: 0.78;
-  --amb-fill-light-intensity: 0.58;
-  --amb-light-hue: 145;
-  --amb-light-saturation: 8%;
-  --amb-elevation: 1;
-  --amb-highlight-color: rgba(255,255,255,0.92);
+  --amb-key-light-intensity: 0.62;
+  --amb-fill-light-intensity: 0.70;
+  --amb-light-hue: 215;
+  --amb-light-saturation: 5%;
+  --amb-elevation: .8;
+  --amb-highlight-color: rgba(255,255,255,0.45);
   --amb-lume-hue: 19;
-  --amb-albedo: color(srgb-linear 0.12 0.13 0.14);
-  --amb-mat-roughness: 0.82;
-  --amb-grain-amount: 0.4;
-  --amb-shade: 0.88;
+  --amb-albedo: color(srgb-linear 0.18 0.20 0.23);
+  --amb-mat-roughness: 0.86;
+  --amb-grain-amount: 0.22;
+  --amb-shade: 0.94;
 }
 
-.zterm-terminal-shell[data-terminal-shell-skin="light"] {
+[data-terminal-shell-skin="light"] {
   --amb-light-x: 1;
   --amb-light-y: -1;
   --amb-key-light-intensity: 0.42;

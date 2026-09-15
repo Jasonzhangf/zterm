@@ -27,16 +27,17 @@ describe('terminal shell skin resolution', () => {
   it('maps default renderer theme to the effective shell skin', () => {
     expect(resolveTerminalRendererThemeForSkin('classic-dark', 'light')).toBe('tabby-pencil-light');
     expect(resolveTerminalRendererThemeForSkin('default', 'light')).toBe('tabby-pencil-light');
-    expect(resolveTerminalRendererThemeForSkin('default', 'black')).toBe('classic-dark');
-    expect(resolveTerminalRendererThemeForSkin('classic-dark', 'black')).toBe('classic-dark');
+    // The black shell must not fall back to the pure-black classic-dark canvas.
+    expect(resolveTerminalRendererThemeForSkin('default', 'black')).toBe('one-dark');
+    expect(resolveTerminalRendererThemeForSkin('classic-dark', 'black')).toBe('one-dark');
     expect(resolveTerminalRendererThemeForSkin('gruvbox-dark', 'light')).toBe('gruvbox-dark');
   });
 
   it('defines one shared panel token contract for every shell skin', () => {
     const css = readFileSync(new URL('../index.css', import.meta.url), 'utf8');
     for (const selector of [
-      '.zterm-terminal-shell {',
-      '.zterm-terminal-shell[data-terminal-shell-skin="black"] {',
+      '.zterm-terminal-shell,\n[data-terminal-shell-skin] {',
+      '[data-terminal-shell-skin="black"] {',
     ]) {
       const start = css.indexOf(selector);
       expect(start).toBeGreaterThanOrEqual(0);
@@ -50,11 +51,11 @@ describe('terminal shell skin resolution', () => {
       expect(block).toContain('--zterm-neo-raised-bg:');
       expect(block).toContain('--zterm-neo-text-shadow:');
     }
-    const blackStart = css.indexOf('.zterm-terminal-shell[data-terminal-shell-skin="black"] {');
+    const blackStart = css.indexOf('[data-terminal-shell-skin="black"] {');
     const blackEnd = css.indexOf('}', blackStart);
     const blackBlock = css.slice(blackStart, blackEnd);
     expect(blackBlock).toContain('--zterm-neo-raised-bg: linear-gradient(');
-    expect(blackBlock).toContain('--zterm-neo-highlight: rgba(255, 255, 255, 0.28);');
+    expect(blackBlock).toContain('--zterm-neo-highlight: rgba(255, 255, 255, 0.22);');
     expect(css).toContain('.zterm-neo-drawer');
     expect(css).toContain('.zterm-connection-route-menu');
     expect(css).toContain('.zterm-neo-quickbar[data-quickbar-surface="expanded"]');

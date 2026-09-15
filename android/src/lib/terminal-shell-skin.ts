@@ -41,5 +41,8 @@ export function resolveTerminalRendererThemeForSkin(
   if (effectiveSkin === 'light') {
     return 'tabby-pencil-light';
   }
-  return 'classic-dark';
+  // The black shell skin must not fall back to the pure-black classic-dark
+  // canvas; one-dark keeps a graphite body that stays in the same ramp as the
+  // shell chrome while preserving terminal contrast.
+  return 'one-dark';
 }
