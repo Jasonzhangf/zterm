@@ -841,7 +841,12 @@ function TerminalSessionDrawerComponent({
                   }}
                   style={{
                     width: '32px',
+                    minWidth: '32px',
+                    maxWidth: '32px',
                     height: '32px',
+                    minHeight: '32px',
+                    maxHeight: '32px',
+                    flex: '0 0 32px',
                     borderRadius: '999px',
                     display: 'flex',
                     alignItems: 'center',
