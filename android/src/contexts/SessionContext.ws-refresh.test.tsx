@@ -408,6 +408,13 @@ function readMuxChannelOpenMessages(ws: MockWebSocket, startIndex = 0) {
     .filter((item) => item.type === 'mux-channel-open');
 }
 
+function readRawMuxFrames(ws: MockWebSocket, startIndex = 0) {
+  return ws.sent
+    .slice(startIndex)
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => JSON.parse(item));
+}
+
 async function openMockSessionChannels(count: number) {
   await act(async () => {
     await Promise.resolve();
@@ -7474,8 +7481,10 @@ describe('SessionContext websocket dynamic refresh', () => {
     ws2.triggerOpen();
 
     expect(MockWebSocket.physicalInstances).toHaveLength(1);
-    expect(readSentMessages(ws1).some((item) => item.type === 'connect')).toBe(true);
-    expect(readSentMessages(ws2).some((item) => item.type === 'connect')).toBe(true);
+    expect(readRawMuxFrames(ws1).filter((item) => item.type === 'mux-hello')).toHaveLength(1);
+    expect(readMuxChannelOpenMessages(ws1).filter((item) => item.payload?.channelId === ws1.channelId)).toHaveLength(1);
+    expect(readMuxChannelOpenMessages(ws1).filter((item) => item.payload?.channelId === ws2.channelId)).toHaveLength(1);
+    expect(readRawMuxFrames(ws1).some((item) => item.type === 'connect')).toBe(false);
   });
 
   it('resubscribes an initially inactive mux channel over the existing target socket when it becomes active', async () => {
@@ -7550,6 +7559,138 @@ describe('SessionContext websocket dynamic refresh', () => {
       item.type === 'body-subscription' && item.payload?.subscribed === true).length).toBeGreaterThanOrEqual(4);
     expect(readSentMessages(session2).filter((item) =>
       item.type === 'body-subscription' && item.payload?.subscribed === true).length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('does not reopen an existing mux channel or physical transport across repeated session switches', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <MultiSessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitForMockSessionInstances(2);
+
+    const rootSocket = MockWebSocket.physicalInstances[0]!;
+    const session1 = MockWebSocket.instances[0]!;
+    const session2 = MockWebSocket.instances[1]!;
+    session1.triggerOpen();
+    session2.triggerOpen();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('session-1-state').textContent).toBe('connected');
+      expect(screen.getByTestId('session-2-state').textContent).toBe('connected');
+    });
+
+    const firstChannelId = session1.channelId || '';
+    const secondChannelId = session2.channelId || '';
+    const helloCountBefore = readRawMuxFrames(rootSocket)
+      .filter((item) => item.type === 'mux-hello').length;
+    const session1OpenCountBefore = readMuxChannelOpenMessages(rootSocket)
+      .filter((item) => item.payload?.channelId === firstChannelId).length;
+    const session2OpenCountBefore = readMuxChannelOpenMessages(rootSocket)
+      .filter((item) => item.payload?.channelId === secondChannelId).length;
+
+    for (let index = 0; index < 3; index += 1) {
+      fireEvent.click(screen.getByText('switch-second'));
+      await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-2'));
+      fireEvent.click(screen.getByText('switch-first'));
+      await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-1'));
+    }
+
+    expect(MockWebSocket.physicalInstances).toHaveLength(1);
+    expect(readRawMuxFrames(rootSocket).filter((item) => item.type === 'mux-hello')).toHaveLength(helloCountBefore);
+    expect(readMuxChannelOpenMessages(rootSocket)
+      .filter((item) => item.payload?.channelId === firstChannelId)).toHaveLength(session1OpenCountBefore);
+    expect(readMuxChannelOpenMessages(rootSocket)
+      .filter((item) => item.payload?.channelId === secondChannelId)).toHaveLength(session2OpenCountBefore);
+  });
+
+  it('does not reopen an opening mux channel when the user switches back before channel-opened arrives', async () => {
+    MockWebSocket.autoOpenChannelReplies = false;
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_000);
+    try {
+      render(
+        <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+          <MultiSessionHarness />
+        </SessionProvider>,
+      );
+
+      await waitForMockSessionInstances(2);
+
+      const rootSocket = MockWebSocket.physicalInstances[0]!;
+      const session1 = MockWebSocket.instances[0]!;
+      const session2 = MockWebSocket.instances[1]!;
+      session1.triggerOpen();
+      session2.triggerOpen();
+
+      const session1Open = readMuxChannelOpenMessages(rootSocket)
+        .find((item) => item.payload?.sessionName === host.sessionName);
+      const session2Open = readMuxChannelOpenMessages(rootSocket)
+        .find((item) => item.payload?.sessionName === host2.sessionName);
+      expect(typeof session1Open?.payload?.channelId).toBe('string');
+      expect(typeof session2Open?.payload?.channelId).toBe('string');
+
+      session1.triggerChannelOpened(session1Open!.payload.channelId, host.sessionName);
+      await waitFor(() => expect(screen.getByTestId('session-1-state').textContent).toBe('connected'));
+
+      const session2OpenCountBefore = readMuxChannelOpenMessages(rootSocket)
+        .filter((item) => item.payload?.channelId === session2Open!.payload.channelId).length;
+
+      nowSpy.mockReturnValue(2_500);
+      fireEvent.click(screen.getByText('switch-second'));
+      fireEvent.click(screen.getByText('switch-first'));
+      fireEvent.click(screen.getByText('switch-second'));
+
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(MockWebSocket.physicalInstances).toHaveLength(1);
+      expect(readMuxChannelOpenMessages(rootSocket)
+        .filter((item) => item.payload?.channelId === session2Open!.payload.channelId)).toHaveLength(session2OpenCountBefore);
+    } finally {
+      nowSpy.mockRestore();
+      MockWebSocket.autoOpenChannelReplies = true;
+    }
+  });
+
+  it('requests only the latest tail when a session has a large remote history', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <MultiSessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitForMockSessionInstances(2);
+
+    const ws = MockWebSocket.instances[0]!;
+    ws.triggerOpen();
+    await waitFor(() => expect(screen.getByTestId('session-1-state').textContent).toBe('connected'));
+
+    const sentBeforeHead = ws.sent.length;
+    ws.triggerMessage({
+      type: 'buffer-head',
+      payload: {
+        sessionId: 'session-1',
+        revision: 77,
+        latestEndIndex: 10_000,
+        availableStartIndex: 0,
+        availableEndIndex: 10_000,
+      },
+    } as ServerMessage);
+
+    await waitFor(() => {
+      const request = readSentMessages(ws, sentBeforeHead)
+        .find((item) => item.type === 'buffer-sync-request');
+      expect(request).toBeTruthy();
+    });
+
+    const request = readSentMessages(ws, sentBeforeHead)
+      .find((item) => item.type === 'buffer-sync-request');
+    expect(request?.payload?.requestStartIndex).toBeGreaterThan(0);
+    expect(request?.payload?.requestEndIndex).toBeLessThanOrEqual(10_000);
+    expect(request?.payload?.requestEndIndex - request?.payload?.requestStartIndex).toBeLessThanOrEqual(72);
   });
 
   it('manages tmux sessions over the existing mux target transport without opening another physical socket', async () => {
