@@ -111,7 +111,15 @@ describe.skipIf(!hasTmux())('tmux window-size semantics for adaptive width', () 
     expect(frozenMetrics.windowWidth).toBe(56);
     expect(frozenMetrics.windowHeight).toBe(initialMetrics.windowHeight);
 
-    tmux(socketName, ['resize-window', '-t', `${sessionName}:0`, '-x', String(initialMetrics.windowWidth)]);
+    tmux(socketName, [
+      'resize-window',
+      '-t',
+      `${sessionName}:0`,
+      '-x',
+      String(initialMetrics.windowWidth),
+      '-y',
+      String(initialMetrics.windowHeight),
+    ]);
     tmux(socketName, ['set-window-option', '-u', '-t', `${sessionName}:0`, 'window-size']);
     await wait(250);
     const releasedMetrics = readMetrics(socketName, sessionName);

@@ -41,6 +41,12 @@ function createRuntime(overrides: {
   mirrorBufferChanged?: (mirror: SessionMirror, previousStartIndex: number, previousLines: TerminalCell[][]) => Array<{ startIndex: number; endIndex: number }>;
   waitMs?: (delayMs: number) => Promise<void>;
   adaptiveWidthOwnershipStore?: AdaptiveWidthOwnershipStore;
+  resizeBackendSession?: (
+    sessionName: string,
+    geometry: { cols: number; rows: number },
+    backend: 'tmux' | 'herdr' | undefined,
+    operation: 'apply' | 'release',
+  ) => void;
 } = {}) {
   const sessions = new Map<string, TerminalSession>();
   const mirrors = new Map<string, SessionMirror>();
@@ -104,6 +110,7 @@ function createRuntime(overrides: {
     waitMs: overrides.waitMs || (async () => {}),
     logTimePrefix: () => '2026-05-01 00:00:00',
     runTmux,
+    resizeBackendSession: overrides.resizeBackendSession,
     adaptiveWidthOwnershipStore: overrides.adaptiveWidthOwnershipStore,
     closeTransportSubscriber,
     getSessionMirror: (session: TerminalSession) => (session.mirrorKey ? mirrors.get(session.mirrorKey) || null : null),
@@ -127,7 +134,11 @@ function expectOnlyAdaptiveWidthTmuxMutation(runTmux: { mock: { calls: unknown[]
   for (const [rawArgs] of runTmux.mock.calls) {
     const args = rawArgs as string[];
     if (args[0] === 'resize-window') {
-      expect(args).toEqual(['resize-window', '-t', expect.any(String), '-x', expect.any(String)]);
+      if (args.length === 5) {
+        expect(args).toEqual(['resize-window', '-t', expect.any(String), '-x', expect.any(String)]);
+      } else {
+        expect(args).toEqual(['resize-window', '-t', expect.any(String), '-x', expect.any(String), '-y', expect.any(String)]);
+      }
       continue;
     }
     if (args[0] === 'set-window-option') {
@@ -1109,7 +1120,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
     });
     expect(session.adaptiveWidthCols).toBeNull();
     expect(mirrors.get('demo')?.cols).toBe(120);
-    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '120']);
+    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '120', '-y', '40']);
     expect(runTmux).toHaveBeenCalledWith(['set-window-option', '-u', '-t', '=demo', 'window-size']);
     expectOnlyAdaptiveWidthTmuxMutation(runTmux);
   });
@@ -1150,7 +1161,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
       paneId: '%1',
       baseline: { cols: 120, rows: 40 },
       appliedCols: 88,
-      appliedRows: 24,
+      appliedRows: 40,
     });
     expect(ownership.records()).toHaveLength(1);
     expectOnlyAdaptiveWidthTmuxMutation(runTmux);
@@ -1207,7 +1218,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
     });
 
     expect(result).toEqual({ ok: true });
-    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '120']);
+    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '120', '-y', '40']);
     expect(runTmux).toHaveBeenCalledWith(['set-window-option', '-u', '-t', '=demo', 'window-size']);
     expectOnlyAdaptiveWidthTmuxMutation(runTmux);
     expect(mirrors.get('demo')?.cols).toBe(120);
@@ -1239,8 +1250,43 @@ describe('terminal mirror runtime lifecycle truth', () => {
     const unsetCallIndex = calls.findIndex(([args]) => args?.[0] === 'set-window-option');
     expect(resizeCallIndex).toBeGreaterThanOrEqual(0);
     expect(unsetCallIndex).toBeGreaterThan(resizeCallIndex);
-    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '120']);
+    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '120', '-y', '40']);
     expect(runTmux).toHaveBeenCalledWith(['set-window-option', '-u', '-t', '=demo', 'window-size']);
+  });
+
+  it('uses the backend resize hook with explicit apply and release operations', async () => {
+    const resizeBackendSession = vi.fn();
+    const { runtime, sessions, mirrors } = createRuntime({
+      readTmuxPaneMetrics: () => ({
+        paneId: '%1',
+        tmuxAvailableLineCountHint: 0,
+        paneRows: 52,
+        paneCols: 120,
+        alternateOn: false,
+      }),
+      resizeBackendSession,
+    });
+    const session = createSession('session-1');
+    session.backend = 'herdr';
+    sessions.set(session.id, session);
+
+    await runtime.attachTmux(session, {
+      sessionName: 'demo',
+      backend: 'herdr',
+      cols: 100,
+      rows: 40,
+      widthMode: 'adaptive-phone',
+    });
+    expect(resizeBackendSession).toHaveBeenCalledWith('demo', { cols: 100, rows: 52 }, 'herdr', 'apply');
+    resizeBackendSession.mockClear();
+
+    runtime.handleAdaptiveResize(session, {
+      cols: 60,
+      widthMode: 'mirror-fixed',
+    });
+
+    expect(resizeBackendSession).toHaveBeenCalledWith('demo', { cols: 120, rows: 52 }, 'herdr', 'release');
+    expect(mirrors.get('demo')?.adaptiveWidthAppliedCols).toBeNull();
   });
 
   it('re-sorts adaptive leases when the narrowest subscriber disappears', async () => {
@@ -1293,7 +1339,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
 
       expect(mirrors.get('demo')?.cols).toBe(120);
       expect(mirrors.get('demo')?.adaptiveWidthAppliedCols).toBeNull();
-      expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '120']);
+      expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '120', '-y', '40']);
       expect(runTmux).toHaveBeenCalledWith(['set-window-option', '-u', '-t', '=demo', 'window-size']);
       expectOnlyAdaptiveWidthTmuxMutation(runTmux);
       expect(session.adaptiveWidthCols).toBeNull();
@@ -1321,7 +1367,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
     expect(mirrors.has('demo')).toBe(false);
     expect(mirror.lifecycle).toBe('destroyed');
     expect(session.adaptiveWidthCols).toBeNull();
-    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '120']);
+    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '120', '-y', '40']);
     expect(runTmux).toHaveBeenCalledWith(['set-window-option', '-u', '-t', '=demo', 'window-size']);
     expectOnlyAdaptiveWidthTmuxMutation(runTmux);
   });
@@ -1391,7 +1437,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
     runtime.createMirror('demo');
 
     expect(runTmux).toHaveBeenCalledWith(['set-window-option', '-u', '-t', '=demo', 'window-size']);
-    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '120']);
+    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '120', '-y', '40']);
     expect(ownership.remove).toHaveBeenCalledWith('demo');
     expect(ownership.records()).toEqual([]);
   });
@@ -1546,7 +1592,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
     const restored = runtime.restorePersistedAdaptiveWidthBaselines(['demo']);
 
     expect(restored).toBe(1);
-    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '120']);
+    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '120', '-y', '40']);
     expect(runTmux).toHaveBeenCalledWith(['set-window-option', '-u', '-t', '=demo', 'window-size']);
     expect(ownership.remove).toHaveBeenCalledWith('demo');
     expect(ownership.records()).toEqual([]);

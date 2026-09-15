@@ -251,10 +251,15 @@ const terminalRuntime = createTerminalRuntime({
   normalizeTerminalRows,
   resolveAttachGeometry,
   readTmuxPaneMetrics: (sessionName, backend) => terminalMirrorCapture.readTmuxPaneMetrics(sessionName, backend),
-  resizeBackendSession: (sessionName, geometry, backend) => {
+  resizeBackendSession: (sessionName, geometry, backend, operation) => {
     if ((backend || 'tmux') === 'tmux' && TERMINAL_BACKEND_KIND !== 'wezterm') {
       terminalControlRuntime.runTmux([
-        'resize-window', '-t', terminalControlRuntime.buildExactTmuxSessionTarget(sessionName), '-x', String(geometry.cols),
+        'resize-window',
+        '-t',
+        terminalControlRuntime.buildExactTmuxSessionTarget(sessionName),
+        '-x',
+        String(geometry.cols),
+        ...(operation === 'release' ? ['-y', String(geometry.rows)] : []),
       ]);
       return;
     }

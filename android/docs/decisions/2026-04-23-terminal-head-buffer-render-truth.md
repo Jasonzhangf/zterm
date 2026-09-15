@@ -620,13 +620,14 @@ UI shell 只负责：
   - `width-mode reconcile` 只允许在 `adaptive-phone` 下改 cols，且 **daemon 是唯一 owner**
   - daemon 只允许在自己持有的 `adaptive-phone` 活连接集合上计算 **最小 cols**
   - 连接断开 / attach 迁移 / 显式 close 后，daemon 必须立刻按剩余活连接重新计算最小 cols
-  - daemon upstream resize 只允许写 `-x cols`；**永远禁止写 `-y rows`**
+  - daemon upstream resize 的运行期 apply 只允许写 `-x cols`；**不得写 `-y rows`**
+  - final release 唯一例外：必须先用捕获的 baseline `cols + rows` 执行一次 `resize-window -x <cols> -y <rows>`，恢复 daemon 占用前的几何真相，再执行 `set-window-option -u window-size`。该 `-y` 不是客户端 rows 写回，而是释放 daemon 的 geometry ownership
   - `mirror-fixed` 下 upstream geometry write 必须是 0
 - `adaptive-phone` 的 attach / reconnect 几何真相也必须干净：
   - client 可以携带**最近一次已测得的 adaptive cols**
   - client **不得**携带 runtime rows
 - daemon 只允许消费 `cols`，`rows` 继续取 mirror / tmux baseline
-- final release 的顺序必须是：先恢复 baseline width，最后 `set-window-option -u window-size`。tmux `resize-window -x` 自身会重新把 window 切回 `manual`；先 unset 再 resize 会再次留下 daemon-owned manual state，导致 iTerm2 等真实 tmux client 的窗口/历史重排被冻结。
+- final release 的顺序必须是：先恢复 baseline width 和 height，最后 `set-window-option -u window-size`。tmux `resize-window` 自身会重新把 window 切回 `manual`；先 unset 再 resize 会再次留下 daemon-owned manual state，导致 iTerm2 等真实 tmux client 的窗口/历史重排被冻结。
   - 若当前没有已测得的 adaptive cols，则 attach 不得凭 UI 容器高度/抖动构造脏 geometry
 
 ### 4.3 app lifecycle 规则

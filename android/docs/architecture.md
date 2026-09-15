@@ -379,8 +379,8 @@ Android floating entry
 - `adaptive-phone` 的上游宽度 owner 只能是 daemon：
   - client 只上报 latest measured cols
   - daemon 只允许按活跃 `adaptive-phone` 连接集合计算最小 cols，并在唯一 adaptive lease owner 内执行 `resize-window -x <cols>`
-  - 断开连接、切回 `mirror-fixed` 或心跳过期后立即重算；最后一个 holder 消失时恢复/释放 tmux 宽度控制权
-  - tmux 高度不在这条链路内，daemon 不得改写 rows
+  - 断开连接、切回 `mirror-fixed` 或心跳过期后立即重算；最后一个 holder 消失时必须先用捕获的 baseline `cols + rows` 恢复几何，再 unset `window-size`，释放 tmux 宽度/高度控制权
+  - 运行期 tmux 高度不在这条链路内，daemon 不得改写 rows；final release 是唯一允许用捕获的 baseline rows 恢复 daemon 占用前高度的例外
   - mirror 内容与 `mirror.rows/cols` 仍只能来自 tmux capture/readback，daemon 不得因为刚请求了 resize 就自写 mirror geometry
 - viewport / geometry 变化时不允许：
   - clear terminal

@@ -216,9 +216,9 @@ describe('server transport/session lifecycle truth gates', () => {
     expect(reconcileLeaseBlock).not.toContain('writeMirrorBaselineGeometry(mirror, {');
     const applyAdaptiveBlock = extractBlock(mirrorRuntimeSource, 'function applyAdaptiveTmuxWidth', 2400);
     const releaseAdaptiveBlock = extractBlock(mirrorRuntimeSource, 'function releaseAdaptiveTmuxWidth', 2400);
-    expect(applyAdaptiveBlock).toContain("deps.runTmux(['resize-window'");
-    expect(releaseAdaptiveBlock).toContain("deps.runTmux(['resize-window'");
-    expect(releaseAdaptiveBlock).toContain("'window-size'");
+    expect(applyAdaptiveBlock).toMatch(/deps\.runTmux\(\s*\[\s*'resize-window'/);
+    expect(releaseAdaptiveBlock).toMatch(/deps\.runTmux\(\s*\[\s*'resize-window'[\s\S]*?'-y'/);
+    expect(releaseAdaptiveBlock).toMatch(/deps\.runTmux\(\s*\[\s*'set-window-option'[\s\S]*?'window-size'/);
     const runtimeWithoutAdaptiveOwnerBlocks = mirrorRuntimeSource
       .replace(applyAdaptiveBlock, '')
       .replace(releaseAdaptiveBlock, '');

@@ -55,7 +55,12 @@ export interface TerminalMirrorRuntimeDeps {
     previousSessionGeometry: TerminalGeometry;
   }) => TerminalGeometry;
   readTmuxPaneMetrics: (sessionName: string, backend?: 'tmux' | 'herdr') => TmuxPaneMetrics;
-  resizeBackendSession?: (sessionName: string, geometry: TerminalGeometry, backend?: 'tmux' | 'herdr') => void;
+  resizeBackendSession?: (
+    sessionName: string,
+    geometry: TerminalGeometry,
+    backend: 'tmux' | 'herdr' | undefined,
+    operation: 'apply' | 'release',
+  ) => void;
   assertTmuxSessionExists: (sessionName: string, backend?: 'tmux' | 'herdr') => void;
   resolveTerminalSessionBackend?: (sessionName: string) => 'tmux' | 'herdr';
   captureMirrorAuthoritativeBufferFromTmux: (mirror: SessionMirror) => Promise<boolean>;
@@ -793,7 +798,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     }
   }
 
-  function applyAdaptiveTmuxWidth(mirror: SessionMirror, targetCols: number, targetRows: number, reason: string) {
+  function applyAdaptiveTmuxWidth(mirror: SessionMirror, targetCols: number, reason: string) {
     const cols = deps.normalizeTerminalCols(targetCols);
     if (!mirror.adaptiveWidthBaselineGeometry) {
       mirror.adaptiveWidthBaselineGeometry =
@@ -802,20 +807,20 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
           rows: deps.normalizeTerminalRows(mirror.baselineRows || mirror.rows),
         };
     }
-    if (mirror.adaptiveWidthAppliedCols === cols && mirror.adaptiveWidthAppliedRows === targetRows) {
+    if (mirror.adaptiveWidthAppliedCols === cols) {
       return;
     }
-    persistAdaptiveWidthOwnership(mirror, cols, deps.normalizeTerminalRows(targetRows));
+    persistAdaptiveWidthOwnership(mirror, cols, deps.normalizeTerminalRows(mirror.adaptiveWidthBaselineGeometry.rows));
     if (deps.resizeBackendSession) {
       deps.resizeBackendSession(mirror.sessionName, {
         cols,
-        rows: targetRows,
-      }, mirror.backend);
+        rows: deps.normalizeTerminalRows(mirror.adaptiveWidthBaselineGeometry.rows),
+      }, mirror.backend, 'apply');
     } else {
       deps.runTmux(['resize-window', '-t', deps.buildExactTmuxSessionTarget(mirror.sessionName), '-x', String(cols)]);
     }
     mirror.adaptiveWidthAppliedCols = cols;
-    mirror.adaptiveWidthAppliedRows = targetRows;
+    mirror.adaptiveWidthAppliedRows = null;
     console.log(`[${deps.logTimePrefix()}] adaptive width applied`, {
       sessionName: mirror.sessionName,
       cols,
@@ -955,9 +960,17 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
         deps.resizeBackendSession(mirror.sessionName, {
           cols: deps.normalizeTerminalCols(baseline.cols),
           rows: deps.normalizeTerminalRows(baseline.rows),
-        }, mirror.backend);
+        }, mirror.backend, 'release');
       } else {
-        deps.runTmux(['resize-window', '-t', deps.buildExactTmuxSessionTarget(mirror.sessionName), '-x', String(deps.normalizeTerminalCols(baseline.cols))]);
+        deps.runTmux([
+          'resize-window',
+          '-t',
+          deps.buildExactTmuxSessionTarget(mirror.sessionName),
+          '-x',
+          String(deps.normalizeTerminalCols(baseline.cols)),
+          '-y',
+          String(deps.normalizeTerminalRows(baseline.rows)),
+        ]);
       }
     }
     // resize-window itself switches the window to manual. Unset window-size
@@ -993,12 +1006,9 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     }
 
     const targetCols = leases[0].cols;
-    if (
-      mirror.adaptiveWidthAppliedCols !== targetCols
-      || mirror.adaptiveWidthAppliedRows !== leases[0].rows
-    ) {
+    if (mirror.adaptiveWidthAppliedCols !== targetCols) {
       if (mirror.lifecycle === 'ready') {
-        applyAdaptiveTmuxWidth(mirror, targetCols, leases[0].rows, reason);
+        applyAdaptiveTmuxWidth(mirror, targetCols, reason);
         scheduleMirrorLiveSync(mirror, 0);
       }
     }

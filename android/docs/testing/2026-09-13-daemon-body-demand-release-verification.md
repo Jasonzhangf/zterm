@@ -82,12 +82,31 @@ review `commit` argument for this series.
     (`ok=true`) and `/tmp/zterm-device-attach-smoke-1789399466614/smoke.json`
     (`ok=true`, re-run after the multi-subscriber release fix).
 
+- L5 candidate `100.66.1.82:3344` release/reattach replay (PLZ110,
+  `0.1.3.2975`):
+  - Foreground attach reached mirror `revision=1` with the
+    `CANDIDATE_RELEASE_1789451956` marker applied and rendered.
+  - After `KEYCODE_HOME`, the daemon retained one physical mux transport but
+    released the logical channel: the old subscriber moved to
+    `transport-detached`, `sessions.attached` and
+    `mirrors.subscribers` reached `0`, and the tmux session remained alive at
+    `120x40`.
+  - Returning the same app process to foreground created a new mux channel on
+    the candidate daemon (`fb4d43bb-49e0-485a-bd0c-81108de34509`),
+    `bodySubscribed=true`, mirror `lifecycle=ready`, and a fresh full
+    `buffer-sync` (`revision=1`, rows `0..39`) followed by
+    `buffer-apply-done -> render-raf -> render-commit`.
+  - The device UI hierarchy contained `CANDIDATE_RELEASE_1789451956` after
+    reattach, proving the reattached frame reached the real Android terminal
+    surface rather than only daemon-side state.
+  - Evidence:
+    `android/evidence/daemon-width-release-0914/background-marker.txt`,
+    `background-health.json`, `background-runtime.json`,
+    `background-tmux.txt`, `background-tmux-capture.txt`, `background.png`,
+    and the post-reattach runtime/UI captures under the same directory.
+
 ## Explicit gaps
 
-- The L5 device smoke proves the daemon-side attach lease and device
-  background/foreground lifecycle. It does not add a new renderer screenshot
-  assertion for the reattached frame; renderer body truth is covered by the L1
-  client integration suites above.
 - Pre-existing failures unrelated to this change (reproduced on clean `HEAD`):
   `src/contexts/session-context-infra-runtime.test.ts` (traversal candidate
   ordering) and `src/server/server.mirror-capture-truth.test.ts` (mirror geometry
