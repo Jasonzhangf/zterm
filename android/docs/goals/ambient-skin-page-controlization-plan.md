@@ -49,7 +49,7 @@ ConnectionsPage      按钮已迁移
 ConnectionPropertiesPage 按钮已迁移；仍有 2 处 textarea
 SettingsPage         button/input/select/textarea 已迁移
 TerminalHeader       header 本地按钮已迁移
-HostForm / HostList 表单按钮 / 输入 / 多行已迁移
+HostForm / HostList 死页面已物理删除（无运行时引用，registry 同步移除）
 app 主壳按钮        部分全局按钮已迁移
 RenameDialog / ZtermDialog / SessionDrawer 菜单 / 新建会话 Dialog 已迁移
 TerminalQuickBar / TmuxSessionPickerSheet / SessionScheduleSheet / FileTransferSheet 已迁移
@@ -213,7 +213,7 @@ Phase 2: 5~6d（已开始 CSS 接入；剩余视觉校准与设备截图）
 - branch: codex/page-controlization-ambient-0913
 - base: origin/main
 - 已存在共享控件：AmbientButton / AmbientInput / AmbientSelect / AmbientTextarea
-- 已迁移主面：ConnectionsPage、ConnectionPropertiesPage 按钮、SettingsPage、TerminalHeader、HostForm/HostList、部分 Dialog/Menu
+- 已迁移主面：ConnectionsPage、ConnectionPropertiesPage 按钮、SettingsPage、TerminalHeader、部分 Dialog/Menu；HostForm/HostList 死页面已物理删除
 - 剩余生产控件量：live 页面可迁移控件 0；只保留 TerminalView 终端输入与 traversal-relay/server.ts 非 UI 例外
 
 执行方式：
@@ -234,6 +234,8 @@ Phase 2: 5~6d（已开始 CSS 接入；剩余视觉校准与设备截图）
 本任务允许写入：
 
 ```text
+android/src/App.tsx
+android/src/main.tsx
 android/src/components/ambient/
 android/src/pages/ConnectionsPage.tsx
 android/src/pages/ConnectionPropertiesPage.tsx
@@ -247,9 +249,14 @@ android/src/components/settings/*
 android/src/components/connection-form/*
 android/src/index.css
 android/src/lib/mobile-ui.ts
+android/src/lib/server-color.ts
+android/src/lib/server-color.test.ts
+android/src/lib/terminal-quickbar-logic.ts
+android/src/components/terminal/terminal-quickbar-helpers.tsx
 android/src/lib/terminal-shell-skin.ts
 android/docs/goals/ambient-skin-page-controlization-plan.md
 android/docs/architecture.md
+android/docs/ui-slices.md
 android/docs/ui-slices.md
 android/docs/dev-workflow.md
 android/docs/feature-registry.json

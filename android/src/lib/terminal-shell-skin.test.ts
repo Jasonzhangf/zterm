@@ -7,9 +7,9 @@ import {
 } from './terminal-shell-skin';
 
 describe('terminal shell skin resolution', () => {
-  it('keeps explicit light, blue, and black selections', () => {
+  it('keeps explicit light and black selections and folds legacy blue into black', () => {
     expect(resolveEffectiveTerminalShellSkin('light', new Date('2026-08-03T23:00:00'))).toBe('light');
-    expect(resolveEffectiveTerminalShellSkin('blue', new Date('2026-08-03T12:00:00'))).toBe('blue');
+    expect(resolveEffectiveTerminalShellSkin('blue', new Date('2026-08-03T12:00:00'))).toBe('black');
     expect(resolveEffectiveTerminalShellSkin('black', new Date('2026-08-03T12:00:00'))).toBe('black');
   });
 
@@ -27,7 +27,7 @@ describe('terminal shell skin resolution', () => {
   it('maps default renderer theme to the effective shell skin', () => {
     expect(resolveTerminalRendererThemeForSkin('classic-dark', 'light')).toBe('tabby-pencil-light');
     expect(resolveTerminalRendererThemeForSkin('default', 'light')).toBe('tabby-pencil-light');
-    expect(resolveTerminalRendererThemeForSkin('default', 'blue')).toBe('tabby-cobalt2');
+    expect(resolveTerminalRendererThemeForSkin('default', 'black')).toBe('classic-dark');
     expect(resolveTerminalRendererThemeForSkin('classic-dark', 'black')).toBe('classic-dark');
     expect(resolveTerminalRendererThemeForSkin('gruvbox-dark', 'light')).toBe('gruvbox-dark');
   });
@@ -36,7 +36,6 @@ describe('terminal shell skin resolution', () => {
     const css = readFileSync(new URL('../index.css', import.meta.url), 'utf8');
     for (const selector of [
       '.zterm-terminal-shell {',
-      '.zterm-terminal-shell[data-terminal-shell-skin="blue"] {',
       '.zterm-terminal-shell[data-terminal-shell-skin="black"] {',
     ]) {
       const start = css.indexOf(selector);

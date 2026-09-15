@@ -2,7 +2,6 @@
  * TerminalQuickBar 纯逻辑子模块（client.input_runtime）。
  * 从 terminal-quickbar-helpers.tsx 拆出：常量、类型、纯函数；不含 JSX。
  */
-import { mobileTheme } from './mobile-ui';
 import { resolveTerminalViewportMetrics } from './terminal-viewport-metrics';
 import type { QuickAction, TerminalShortcutAction } from './types';
 import { createDefaultShortcutActions, isBuiltInShortcutAction } from './terminal-shortcut-actions';
@@ -190,9 +189,9 @@ export function editorInputStyle() {
     minHeight: '44px',
     padding: '10px 12px',
     borderRadius: '14px',
-    border: '1px solid rgba(255,255,255,0.12)',
-    backgroundColor: '#1f2437',
-    color: '#fff',
+    border: '1px solid var(--zterm-settings-border)',
+    backgroundColor: 'var(--zterm-settings-field)',
+    color: 'var(--zterm-settings-text)',
     fontSize: '14px',
   } as const;
 }
@@ -200,9 +199,9 @@ export function editorInputStyle() {
 export function lightEditorInputStyle() {
   return {
     ...editorInputStyle(),
-    backgroundColor: '#f4f6fb',
-    border: '1px solid rgba(23, 27, 45, 0.1)',
-    color: mobileTheme.colors.lightText,
+    backgroundColor: 'var(--zterm-settings-field)',
+    border: '1px solid var(--zterm-settings-border)',
+    color: 'var(--zterm-settings-text)',
   } as const;
 }
 
@@ -473,8 +472,8 @@ export function overlayIconButton(disabled: boolean) {
     height: '32px',
     borderRadius: '999px',
     border: 'none',
-    backgroundColor: disabled ? '#f3f5f9' : '#eef2f8',
-    color: disabled ? '#c3cad7' : mobileTheme.colors.lightText,
+    backgroundColor: 'var(--zterm-settings-field)',
+    color: disabled ? 'var(--zterm-settings-muted)' : 'var(--zterm-settings-text)',
     cursor: disabled ? 'not-allowed' : 'pointer',
     fontWeight: 700,
     flexShrink: 0,
@@ -527,19 +526,23 @@ export function floatingPillButton(backgroundColor: string, color: string) {
   } as const;
 }
 
-export function shortcutTokenGridButton(isModifier: boolean, active: boolean) {
+export function shortcutTokenGridButton(_isModifier: boolean, active: boolean) {
   return {
     minHeight: '62px',
     borderRadius: '14px',
-    border: active ? '1px solid rgba(22, 119, 255, 0.28)' : '1px solid rgba(23, 27, 45, 0.12)',
-    backgroundColor: active ? 'rgba(22, 119, 255, 0.10)' : isModifier ? '#ffffff' : '#f7f9fc',
-    color: active ? '#1677ff' : mobileTheme.colors.lightText,
+    border: active
+      ? '1px solid color-mix(in srgb, var(--zterm-settings-accent) 45%, transparent)'
+      : '1px solid var(--zterm-settings-border)',
+    backgroundColor: active
+      ? 'color-mix(in srgb, var(--zterm-settings-accent) 14%, var(--zterm-settings-surface))'
+      : 'var(--zterm-settings-field)',
+    color: active ? 'var(--zterm-settings-accent)' : 'var(--zterm-settings-text)',
     cursor: 'pointer',
     fontWeight: 700,
     fontSize: '12px',
     padding: '6px 4px',
     textAlign: 'center',
-    boxShadow: active ? '0 4px 10px rgba(22, 119, 255, 0.08)' : 'none',
+    boxShadow: active ? '0 4px 10px color-mix(in srgb, var(--zterm-settings-accent) 16%, transparent)' : 'none',
     overflow: 'hidden',
   } as const;
 }

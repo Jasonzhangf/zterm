@@ -254,7 +254,7 @@ export function RemoteScreenshotSheet({
         position: 'fixed',
         inset: 0,
         zIndex: 112,
-        background: 'rgba(5, 8, 14, 0.86)',
+        background: 'var(--zterm-sheet-overlay)',
         display: 'flex',
         alignItems: 'flex-end',
         justifyContent: 'stretch',
@@ -266,14 +266,14 @@ export function RemoteScreenshotSheet({
           maxHeight: '84vh',
           borderTopLeftRadius: '22px',
           borderTopRightRadius: '22px',
-          border: `1px solid ${mobileTheme.colors.cardBorder}`,
-          background: mobileTheme.colors.shell,
-          boxShadow: '0 -16px 40px rgba(0,0,0,0.32)',
+          border: '1px solid var(--zterm-settings-border)',
+          background: 'var(--zterm-settings-surface)',
+          boxShadow: 'var(--zterm-settings-shadow)',
           overflow: 'hidden',
         }}
       >
         <div style={{ padding: '14px 16px 10px' }}>
-          <div style={{ color: '#fff', fontSize: '17px', fontWeight: 800 }}>{copy.title}</div>
+          <div style={{ color: 'var(--zterm-settings-text)', fontSize: '17px', fontWeight: 800 }}>{copy.title}</div>
           <div style={{ marginTop: '4px', color: mobileTheme.colors.textSecondary, fontSize: '13px' }}>
             {copy.detail}
           </div>
@@ -293,19 +293,19 @@ export function RemoteScreenshotSheet({
                 style={{
                   borderRadius: '12px',
                   border: step.status === 'done'
-                    ? '1px solid rgba(31,214,122,0.28)'
+                    ? '1px solid var(--zterm-settings-accent-border)'
                     : step.status === 'error'
-                      ? '1px solid rgba(255,107,107,0.30)'
+                      ? '1px solid var(--zterm-settings-danger-border)'
                     : step.status === 'active'
-                      ? '1px solid rgba(141,183,255,0.36)'
-                      : '1px solid rgba(255,255,255,0.08)',
+                    ? '1px solid var(--zterm-settings-accent-border)'
+                      : '1px solid var(--zterm-settings-border)',
                   background: step.status === 'done'
-                    ? 'rgba(31,214,122,0.10)'
+                    ? 'var(--zterm-settings-accent-soft)'
                     : step.status === 'error'
-                      ? 'rgba(255,107,107,0.12)'
+                      ? 'var(--zterm-settings-danger-soft)'
                     : step.status === 'active'
-                      ? 'rgba(141,183,255,0.10)'
-                      : 'rgba(255,255,255,0.03)',
+                      ? 'var(--zterm-settings-accent-soft)'
+                      : 'var(--zterm-settings-field)',
                   padding: '8px 6px',
                 }}
               >
@@ -314,9 +314,9 @@ export function RemoteScreenshotSheet({
                     color: step.status === 'done'
                       ? mobileTheme.colors.accent
                       : step.status === 'error'
-                        ? '#ff9b9b'
+                        ? 'var(--zterm-settings-danger)'
                       : step.status === 'active'
-                        ? '#8db7ff'
+                        ? 'var(--zterm-settings-accent)'
                         : mobileTheme.colors.textSecondary,
                     fontSize: '11px',
                     fontWeight: 800,
@@ -342,8 +342,8 @@ export function RemoteScreenshotSheet({
               minHeight: '220px',
               maxHeight: '56vh',
               borderRadius: '18px',
-              border: '1px solid rgba(255,255,255,0.08)',
-              background: '#0e1320',
+              border: '1px solid var(--zterm-settings-border)',
+              background: 'var(--zterm-settings-video-bg)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -372,7 +372,7 @@ export function RemoteScreenshotSheet({
                   flexDirection: 'column',
                   alignItems: 'center',
                   gap: '10px',
-                  color: '#ffd4d4',
+                  color: 'var(--zterm-settings-danger)',
                   fontSize: '14px',
                   padding: '0 20px',
                   textAlign: 'center',
@@ -383,8 +383,8 @@ export function RemoteScreenshotSheet({
                     width: '32px',
                     height: '32px',
                     borderRadius: '999px',
-                    background: 'rgba(255,107,107,0.18)',
-                    color: '#ff9b9b',
+                    background: 'var(--zterm-settings-danger-soft)',
+                    color: 'var(--zterm-settings-danger)',
                     display: 'grid',
                     placeItems: 'center',
                     fontSize: '18px',
@@ -403,7 +403,7 @@ export function RemoteScreenshotSheet({
                   flexDirection: 'column',
                   alignItems: 'center',
                   gap: '12px',
-                  color: '#dce7ff',
+                  color: 'var(--zterm-settings-muted)',
                   fontSize: '14px',
                 }}
               >
@@ -412,8 +412,8 @@ export function RemoteScreenshotSheet({
                     width: '28px',
                     height: '28px',
                     borderRadius: '999px',
-                    border: '3px solid rgba(141, 183, 255, 0.22)',
-                    borderTopColor: '#8db7ff',
+                    border: '3px solid color-mix(in srgb, var(--zterm-settings-accent) 22%, transparent)',
+                    borderTopColor: 'var(--zterm-settings-accent)',
                     animation: 'zterm-remote-shot-spin 0.9s linear infinite',
                   }}
                 />
@@ -438,9 +438,9 @@ export function RemoteScreenshotSheet({
               flex: 1,
               minHeight: '44px',
               borderRadius: '14px',
-              border: '1px solid rgba(255,255,255,0.10)',
-              background: 'rgba(31, 38, 53, 0.82)',
-              color: '#fff',
+              border: '1px solid var(--zterm-settings-border)',
+              background: 'var(--zterm-settings-field)',
+              color: 'var(--zterm-settings-text)',
               fontWeight: 700,
               opacity: busy ? 0.45 : 1,
               cursor: busy ? 'not-allowed' : 'pointer',
@@ -456,8 +456,8 @@ export function RemoteScreenshotSheet({
               flex: 1,
               minHeight: '44px',
               borderRadius: '14px',
-              border: '1px solid rgba(31,214,122,0.18)',
-              background: 'rgba(31,214,122,0.18)',
+              border: '1px solid var(--zterm-settings-accent-border)',
+              background: 'var(--zterm-settings-accent-soft)',
               color: mobileTheme.colors.accent,
               fontWeight: 800,
               opacity: state.phase === 'preview-ready' ? 1 : 0.45,

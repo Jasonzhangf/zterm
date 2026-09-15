@@ -181,8 +181,8 @@ export function ConnectionPropertiesPage({
       width: 192,
       errorCorrectionLevel: 'M',
       color: {
-        dark: '#101218',
-        light: '#ffffff',
+        dark: '#0b0c10',
+        light: '#f7f8fa',
       },
     })
       .then((svg) => {
@@ -721,9 +721,9 @@ export function ConnectionPropertiesPage({
                     width: '216px',
                     minHeight: '216px',
                     borderRadius: '24px',
-                    backgroundColor: '#ffffff',
+                    backgroundColor: 'var(--zterm-settings-surface)',
                     boxShadow: mobileTheme.shadow.soft,
-                    border: `1px solid ${mobileTheme.colors.lightBorder}`,
+                    border: '1px solid var(--zterm-settings-accent-border)',
                     display: 'grid',
                     placeItems: 'center',
                     padding: '12px',
@@ -739,7 +739,7 @@ export function ConnectionPropertiesPage({
                     width: '216px',
                     minHeight: '216px',
                     borderRadius: '24px',
-                    backgroundColor: '#ffffff',
+                    backgroundColor: 'var(--zterm-settings-surface)',
                     boxShadow: mobileTheme.shadow.soft,
                     border: `1px solid ${mobileTheme.colors.lightBorder}`,
                     display: 'grid',
@@ -748,7 +748,7 @@ export function ConnectionPropertiesPage({
                     overflow: 'hidden',
                   }}
                 >
-                  <span style={{ color: mobileTheme.colors.lightMuted, fontSize: '12px' }}>
+                  <span style={{ color: 'var(--zterm-settings-muted)', fontSize: '12px' }}>
                     QR building...
                   </span>
                 </div>

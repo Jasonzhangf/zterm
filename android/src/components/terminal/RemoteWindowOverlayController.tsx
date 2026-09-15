@@ -3190,9 +3190,9 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
           to { transform: translate(-50%, 0) scale(1); opacity: 1; }
         }
         @keyframes zterm-remote-window-shot-pulse {
-          0% { box-shadow: 0 0 0 0 rgba(31,214,122,0.28); }
-          70% { box-shadow: 0 0 0 10px rgba(31,214,122,0); }
-          100% { box-shadow: 0 0 0 0 rgba(31,214,122,0); }
+          0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--zterm-panel-accent) 28%, transparent); }
+          70% { box-shadow: 0 0 0 10px transparent; }
+          100% { box-shadow: 0 0 0 0 transparent; }
         }
       `}</style>
     </>

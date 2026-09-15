@@ -61,7 +61,7 @@ export function RenameDialog({
         alignItems: 'center',
         justifyContent: 'center',
         padding: '18px',
-        backgroundColor: 'rgba(8, 12, 20, 0.62)',
+        backgroundColor: 'var(--zterm-sheet-overlay)',
         backdropFilter: 'blur(6px)',
       }}
       onPointerDown={(event) => {
@@ -84,7 +84,7 @@ export function RenameDialog({
           background: 'var(--zterm-panel-bg, #101622)',
           color: 'var(--zterm-panel-text, #f5f7fb)',
           border: '1px solid var(--zterm-panel-border, rgba(255,255,255,0.14))',
-          boxShadow: '0 24px 60px rgba(0,0,0,0.44)',
+          boxShadow: 'var(--zterm-settings-shadow)',
         }}
       >
         <div style={{ fontSize: '16px', fontWeight: 800 }}>{title}</div>
@@ -114,7 +114,7 @@ export function RenameDialog({
             padding: '0 12px',
             borderRadius: '12px',
             border: '1px solid var(--zterm-panel-border, rgba(255,255,255,0.18))',
-            background: 'var(--zterm-input-bg, #18202f)',
+            background: 'var(--zterm-settings-field)',
             color: 'var(--zterm-panel-text, #f5f7fb)',
             fontSize: '15px',
             outline: 'none',
@@ -126,7 +126,7 @@ export function RenameDialog({
             data-testid="rename-dialog-error"
             style={{
               marginTop: '10px',
-              color: '#ff8a8a',
+              color: 'var(--zterm-settings-danger)',
               fontSize: '12px',
               lineHeight: 1.45,
             }}
@@ -162,8 +162,8 @@ export function RenameDialog({
               padding: '0 18px',
               border: 'none',
               borderRadius: '12px',
-              background: 'var(--zterm-accent, #1fd67a)',
-              color: '#07110b',
+              background: 'var(--zterm-settings-accent)',
+              color: 'var(--zterm-settings-accent-text)',
               fontSize: '14px',
               fontWeight: 900,
               opacity: value.trim() ? 1 : 0.45,

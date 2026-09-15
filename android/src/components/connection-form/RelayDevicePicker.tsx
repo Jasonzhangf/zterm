@@ -96,7 +96,7 @@ export function RelayDevicePicker({
                   padding: '14px 16px',
                   textAlign: 'left',
                   cursor: 'pointer',
-                  boxShadow: active ? '0 12px 26px rgba(31,214,122,0.14)' : mobileTheme.shadow.soft,
+                  boxShadow: active ? 'var(--zterm-settings-shadow)' : mobileTheme.shadow.soft,
                 }}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center' }}>

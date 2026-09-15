@@ -1,21 +1,21 @@
 export const mobileTheme = {
   colors: {
-    shell: '#171b2d',
-    shellMuted: '#242a41',
-    canvas: '#111420',
-    card: '#1a2033',
-    cardBorder: 'rgba(255, 255, 255, 0.08)',
-    cardSoft: '#2b3149',
-    accent: '#1fd67a',
-    accentSoft: 'rgba(31, 214, 122, 0.18)',
-    textPrimary: '#ffffff',
-    textSecondary: '#97a2ba',
-    textMuted: '#667089',
-    danger: '#ff7c92',
+    shell: 'var(--zterm-settings-background, #f0f2f4)',
+    shellMuted: 'var(--zterm-settings-field, #eef0f2)',
+    canvas: 'var(--zterm-settings-background, #f0f2f4)',
+    card: 'var(--zterm-settings-surface, #ffffff)',
+    cardBorder: 'var(--zterm-settings-border, rgba(17, 19, 21, 0.14))',
+    cardSoft: 'var(--zterm-settings-field, #eef0f2)',
+    accent: 'var(--zterm-settings-accent, #128354)',
+    accentSoft: 'color-mix(in srgb, var(--zterm-settings-accent, #128354) 16%, transparent)',
+    textPrimary: 'var(--zterm-settings-text, #111315)',
+    textSecondary: 'var(--zterm-settings-muted, #62676f)',
+    textMuted: 'var(--zterm-settings-muted, #62676f)',
+    danger: 'var(--zterm-settings-danger, #b4233a)',
     lightBg: 'var(--zterm-settings-background, #edf2f6)',
     lightCard: 'var(--zterm-settings-surface, #ffffff)',
     lightBorder: 'var(--zterm-settings-border, #d5dde6)',
-    lightText: 'var(--zterm-settings-text, #171b2d)',
+    lightText: 'var(--zterm-settings-text, #111315)',
     lightMuted: 'var(--zterm-settings-muted, #7b8aa1)',
     lightAccent: 'var(--zterm-settings-field, #b8d8fb)',
   },
@@ -44,32 +44,35 @@ export interface SettingsTheme {
   border: string;
   accent: string;
   accentText: string;
+  danger: string;
   shadow: string;
 }
 
 export function resolveSettingsTheme(shellSkin: string | undefined): SettingsTheme {
-  if (shellSkin === 'blue' || shellSkin === 'black') {
+  if (shellSkin === 'black' || shellSkin === 'blue') {
     return {
-      background: shellSkin === 'black' ? '#101114' : '#111420',
-      surface: shellSkin === 'black' ? '#1a1b1f' : '#20283a',
-      field: shellSkin === 'black' ? '#24252a' : '#252d40',
-      text: '#f1f5fb',
-      muted: shellSkin === 'black' ? '#a4a8b2' : '#97a2ba',
-      border: shellSkin === 'black' ? 'rgba(255,255,255,.14)' : 'rgba(190,212,244,.16)',
-      accent: '#1fd67a',
-      accentText: '#081018',
-      shadow: '0 18px 40px rgba(0,0,0,.28)',
+      background: '#050608',
+      surface: '#101114',
+      field: '#18191d',
+      text: '#f5f7fb',
+      muted: '#9b9da5',
+      border: 'rgba(255,255,255,0.14)',
+      accent: '#38d47d',
+      accentText: '#07110b',
+      danger: '#ff7a86',
+      shadow: '0 12px 30px rgba(0,0,0,0.32)',
     };
   }
   return {
-    background: '#edf2f6',
+    background: '#f0f2f4',
     surface: '#ffffff',
-    field: '#f7f9fc',
-    text: '#171b2d',
-    muted: '#7b8aa1',
-    border: '#d5dde6',
+    field: '#eef0f2',
+    text: '#111315',
+    muted: '#62676f',
+    border: 'rgba(17,19,21,0.14)',
     accent: '#128354',
     accentText: '#ffffff',
-    shadow: mobileTheme.shadow.soft,
+    danger: '#b4233a',
+    shadow: '0 12px 30px rgba(17,19,21,0.10)',
   };
 }

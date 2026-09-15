@@ -25,10 +25,10 @@ import { AmbientButton } from '../ambient';
 
 
 const zoomButtonStyle: React.CSSProperties = {
-  background: 'rgba(255,255,255,0.15)',
+  background: 'var(--zterm-settings-surface)',
   border: 'none',
   borderRadius: 20,
-  color: '#fff',
+  color: 'var(--zterm-settings-text)',
   fontSize: 18,
   width: 40,
   height: 40,
@@ -126,7 +126,6 @@ function AttachmentDrawerComponent({
   queryAttachmentHistory,
   fetchAttachmentAsset,
   onClose,
-  terminalShellSkin = 'light',
 }: AttachmentDrawerProps) {
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
   const [previewEntry, setPreviewEntry] = useState<AttachmentEntry | null>(null);
@@ -395,14 +394,12 @@ function AttachmentDrawerComponent({
   };
 
   // Shell skin theming
-  const isDark = terminalShellSkin === 'black';
-  const isBlue = terminalShellSkin === 'blue';
-  const bgColor = isDark ? '#0d1117' : isBlue ? '#1a1a2e' : '#ffffff';
-  const textColor = isDark ? '#e6edf3' : isBlue ? '#c9d1d9' : '#24292f';
-  const secondaryTextColor = isDark ? '#8b949e' : isBlue ? '#8b949e' : '#57606a';
-  const dividerColor = isDark ? '#30363d' : isBlue ? '#30363d' : '#e1e4e8';
-  const itemBg = isDark ? '#161b22' : isBlue ? '#1e2433' : '#f6f8fa';
-  const accentColor = '#3b7aff';
+  const bgColor = 'var(--zterm-settings-background)';
+  const textColor = 'var(--zterm-settings-text)';
+  const secondaryTextColor = 'var(--zterm-settings-muted)';
+  const dividerColor = 'var(--zterm-settings-border)';
+  const itemBg = 'var(--zterm-settings-surface)';
+  const accentColor = 'var(--zterm-settings-accent)';
 
   if (!open) return null;
 
@@ -414,7 +411,7 @@ function AttachmentDrawerComponent({
         style={{
           position: 'fixed',
           inset: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.4)',
+          backgroundColor: 'var(--zterm-sheet-overlay)',
           zIndex: 900,
         }}
       />
@@ -541,7 +538,9 @@ function AttachmentDrawerComponent({
                     display: 'flex',
                     padding: '10px 16px',
                     borderBottom: `1px solid ${dividerColor}`,
-                    backgroundColor: selectedIds.has(entry.attachmentId) ? `${accentColor}26` : itemBg,
+                    backgroundColor: selectedIds.has(entry.attachmentId)
+                      ? 'var(--zterm-settings-accent-soft)'
+                      : itemBg,
                     cursor: 'pointer',
                   }}
                   onClick={() => {
@@ -611,7 +610,7 @@ function AttachmentDrawerComponent({
                     <div
                       style={{
                         fontSize: 11,
-                        color: '#cf222e',
+                        color: 'var(--zterm-settings-danger)',
                         alignSelf: 'center',
                         maxWidth: 120,
                         flexShrink: 0,
@@ -630,7 +629,7 @@ function AttachmentDrawerComponent({
                         background: downloading.has(entry.attachmentId) ? dividerColor : accentColor,
                         border: 'none',
                         borderRadius: 6,
-                        color: '#fff',
+                        color: 'var(--zterm-settings-accent-text)',
                         fontSize: 12,
                         fontWeight: 500,
                         padding: '4px 10px',
@@ -673,7 +672,9 @@ function AttachmentDrawerComponent({
                     display: 'flex',
                     padding: '10px 16px',
                     borderBottom: `1px solid ${dividerColor}`,
-                    backgroundColor: selectedIds.has(entry.attachmentId) ? `${accentColor}26` : itemBg,
+                    backgroundColor: selectedIds.has(entry.attachmentId)
+                      ? 'var(--zterm-settings-accent-soft)'
+                      : itemBg,
                     cursor: 'pointer',
                   }}
                   onClick={() =>
@@ -732,7 +733,7 @@ function AttachmentDrawerComponent({
                     <span
                       style={{
                         fontSize: 11,
-                        color: '#cf222e',
+                        color: 'var(--zterm-settings-danger)',
                         alignSelf: 'center',
                         maxWidth: 110,
                         flexShrink: 0,
@@ -744,7 +745,7 @@ function AttachmentDrawerComponent({
                     <span
                       style={{
                         fontSize: 11,
-                        color: '#2da44e',
+                        color: 'var(--zterm-settings-success)',
                         alignSelf: 'center',
                         flexShrink: 0,
                       }}
@@ -755,7 +756,9 @@ function AttachmentDrawerComponent({
                     <span
                       style={{
                         fontSize: 11,
-                        color: receiveFeedback.kind === 'error' ? '#cf222e' : accentColor,
+                        color: receiveFeedback.kind === 'error'
+                          ? 'var(--zterm-settings-danger)'
+                          : accentColor,
                         alignSelf: 'center',
                         maxWidth: 110,
                         flexShrink: 0,
@@ -785,7 +788,7 @@ function AttachmentDrawerComponent({
                         background: accentColor,
                         border: 'none',
                         borderRadius: 6,
-                        color: '#fff',
+                        color: 'var(--zterm-settings-accent-text)',
                         fontSize: 12,
                         fontWeight: 500,
                         padding: '4px 10px',
@@ -845,7 +848,7 @@ function AttachmentDrawerComponent({
                   background: accentColor,
                   border: 'none',
                   borderRadius: 18,
-                  color: '#fff',
+                  color: 'var(--zterm-settings-accent-text)',
                   fontSize: 14,
                   fontWeight: 600,
                   cursor: 'pointer',
@@ -908,7 +911,7 @@ function AttachmentDrawerComponent({
           style={{
             position: 'fixed',
             inset: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.9)',
+            backgroundColor: 'rgba(0, 0, 0, 0.92)',
             zIndex: 1000,
             display: 'flex',
             alignItems: 'center',

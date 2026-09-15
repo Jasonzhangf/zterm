@@ -205,7 +205,7 @@ export function SessionScheduleSheet({
         position: 'fixed',
         inset: 0,
         zIndex: 90,
-        background: 'rgba(5, 8, 14, 0.72)',
+        background: 'var(--zterm-sheet-overlay)',
         display: 'flex',
         alignItems: 'flex-end',
         justifyContent: 'stretch',
@@ -223,7 +223,7 @@ export function SessionScheduleSheet({
           border: `1px solid ${mobileTheme.colors.cardBorder}`,
           background: mobileTheme.colors.shell,
           padding: '12px 14px 24px',
-          boxShadow: '0 -16px 40px rgba(0,0,0,0.32)',
+          boxShadow: 'var(--zterm-settings-shadow)',
         }}
         onClick={(event) => event.stopPropagation()}
       >
@@ -249,9 +249,9 @@ export function SessionScheduleSheet({
             style={{
               marginTop: '10px',
               borderRadius: '12px',
-              border: '1px solid rgba(255, 120, 120, 0.35)',
-              background: 'rgba(103, 29, 37, 0.42)',
-              color: '#ffd0d0',
+              border: '1px solid var(--zterm-settings-danger-border)',
+              background: 'var(--zterm-settings-danger-soft)',
+              color: 'var(--zterm-settings-danger)',
               padding: '8px 10px',
               fontSize: '12px',
               lineHeight: 1.35,
@@ -267,9 +267,15 @@ export function SessionScheduleSheet({
             style={{
               marginTop: '10px',
               borderRadius: '12px',
-              border: scheduleState.error ? '1px solid rgba(255, 120, 120, 0.35)' : `1px solid ${mobileTheme.colors.cardBorder}`,
-              background: scheduleState.error ? 'rgba(103, 29, 37, 0.42)' : mobileTheme.colors.shellMuted,
-              color: scheduleState.error ? '#ffd0d0' : mobileTheme.colors.textSecondary,
+              border: scheduleState.error
+                ? '1px solid var(--zterm-settings-danger-border)'
+                : `1px solid ${mobileTheme.colors.cardBorder}`,
+              background: scheduleState.error
+                ? 'var(--zterm-settings-danger-soft)'
+                : mobileTheme.colors.shellMuted,
+              color: scheduleState.error
+                ? 'var(--zterm-settings-danger)'
+                : mobileTheme.colors.textSecondary,
               padding: '8px 10px',
               fontSize: '12px',
               lineHeight: 1.35,
@@ -305,7 +311,7 @@ export function SessionScheduleSheet({
                       {' · '}
                       截止：{job.execution.endAt ? formatScheduleDateTime(job.execution.endAt) : '无'}
                     </div>
-                    <div style={{ marginTop: '6px', fontSize: '12px', color: job.lastResult === 'error' ? '#ff8f8f' : mobileTheme.colors.textMuted }}>
+                    <div style={{ marginTop: '6px', fontSize: '12px', color: job.lastResult === 'error' ? 'var(--zterm-settings-danger)' : mobileTheme.colors.textMuted }}>
                       {job.lastResult === 'error'
                         ? `最近错误：${job.lastError || 'unknown error'}`
                         : `发送后回车：${job.payload.appendEnter ? '是' : '否'}`}
@@ -601,8 +607,13 @@ export function SessionScheduleSheet({
                         })}
                         style={{
                           ...ghostButtonStyle,
-                          background: selected ? 'rgba(110, 168, 255, 0.2)' : ghostButtonStyle.background,
-                          borderColor: selected ? 'rgba(110, 168, 255, 0.4)' : ghostButtonStyle.border as string,
+                          background: selected
+                            ? 'var(--zterm-settings-accent-soft)'
+                            : ghostButtonStyle.background,
+                          borderColor: selected
+                            ? 'var(--zterm-settings-accent-border)'
+                            : ghostButtonStyle.border as string,
+                          color: selected ? 'var(--zterm-settings-accent)' : ghostButtonStyle.color,
                         }}
                       >
                         {label}
@@ -706,13 +717,14 @@ const ghostButtonStyle = {
 
 const primaryButtonStyle = {
   ...ghostButtonStyle,
-  background: 'linear-gradient(180deg, rgba(96, 149, 255, 0.92), rgba(72, 122, 230, 0.92))',
-  border: '1px solid rgba(113, 164, 255, 0.42)',
+  background: 'var(--zterm-settings-accent)',
+  border: '1px solid var(--zterm-settings-accent)',
+  color: 'var(--zterm-settings-accent-text)',
 };
 
 const dangerButtonStyle = {
   ...ghostButtonStyle,
-  color: '#ffd0d0',
-  background: 'rgba(103, 29, 37, 0.92)',
-  border: '1px solid rgba(255, 120, 120, 0.32)',
+  color: 'var(--zterm-settings-danger)',
+  background: 'color-mix(in srgb, var(--zterm-settings-danger) 12%, var(--zterm-settings-surface))',
+  border: '1px solid color-mix(in srgb, var(--zterm-settings-danger) 34%, transparent)',
 };

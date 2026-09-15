@@ -239,7 +239,7 @@ function TerminalHeaderComponent({
               minWidth: 0,
               borderRight:
                 splitVisible && groupIndex < renderedPaneGroups.length - 1
-                  ? '1px solid rgba(255,255,255,0.12)'
+                  ? '1px solid var(--zterm-settings-border)'
                   : undefined,
               paddingRight:
                 splitVisible && groupIndex < renderedPaneGroups.length - 1
@@ -322,9 +322,10 @@ function TerminalHeaderComponent({
                 minWidth: '168px',
                 borderRadius: '14px',
                 padding: '8px',
-                backgroundColor: 'rgba(16, 20, 30, 0.96)',
-                border: '1px solid rgba(255,255,255,0.12)',
-                boxShadow: '0 18px 40px rgba(0,0,0,0.42)',
+                backgroundColor: 'var(--zterm-settings-surface)',
+                color: 'var(--zterm-settings-text)',
+                border: '1px solid var(--zterm-settings-border)',
+                boxShadow: 'var(--zterm-settings-shadow)',
                 display: 'grid',
                 gap: '6px',
               }}

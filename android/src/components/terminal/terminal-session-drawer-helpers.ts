@@ -21,23 +21,23 @@ export function resolveSessionGroupSlotTone(
     case 'top':
       return {
         label: beforeLabel,
-        color: '#8bd5ff',
-        background: 'rgba(139, 213, 255, 0.14)',
-        border: 'rgba(139, 213, 255, 0.70)',
+        color: 'var(--zterm-settings-accent)',
+        background: 'var(--zterm-settings-accent-soft)',
+        border: 'var(--zterm-settings-accent-border)',
       };
     case 'center':
       return {
         label: '中间',
-        color: '#44e2a0',
-        background: 'rgba(68, 226, 160, 0.14)',
-        border: 'rgba(68, 226, 160, 0.72)',
+        color: 'var(--zterm-settings-accent)',
+        background: 'var(--zterm-settings-accent-soft)',
+        border: 'var(--zterm-settings-accent-border)',
       };
     case 'bottom':
       return {
         label: afterLabel,
-        color: '#f5b659',
-        background: 'rgba(245, 182, 89, 0.14)',
-        border: 'rgba(245, 182, 89, 0.72)',
+        color: 'var(--zterm-settings-text)',
+        background: 'var(--zterm-settings-field)',
+        border: 'var(--zterm-settings-border)',
       };
     default:
       return null;

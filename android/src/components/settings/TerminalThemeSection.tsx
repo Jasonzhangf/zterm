@@ -62,7 +62,7 @@ export function TerminalThemeSection({
                     color: 'var(--zterm-settings-text)',
                     padding: '14px',
                     cursor: 'pointer',
-                    boxShadow: active ? '0 12px 26px rgba(31,214,122,0.14)' : mobileTheme.shadow.soft,
+                    boxShadow: active ? 'var(--zterm-settings-shadow)' : mobileTheme.shadow.soft,
                     textAlign: 'left',
                   }}
                 >

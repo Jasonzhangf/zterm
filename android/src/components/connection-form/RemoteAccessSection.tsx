@@ -79,7 +79,7 @@ export function RemoteAccessSection({
         />
       </div>
 
-      <div style={{ marginTop: '-2px', fontSize: '12px', color: '#6b7688', lineHeight: 1.5 }}>
+      <div style={{ marginTop: '-2px', fontSize: '12px', color: 'var(--zterm-settings-muted)', lineHeight: 1.5 }}>
         {relayBound
           ? '当前已启用 relay 控制面；signal / TURN / ws 地址自动注入。具体连接哪个 daemon，请在下方 Relay Daemon 区域点选设备。'
           : '当前未登录 relay；仅使用直连路径。若要使用 TURN 穿透，请先在设置中登录 relay。'}

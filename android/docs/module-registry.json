@@ -1653,8 +1653,6 @@
       ],
       "status": "active",
       "owned_paths": [
-        "src/components/HostForm.tsx",
-        "src/components/HostList.tsx",
         "src/components/settings/ConnectionConfigSection.tsx",
         "src/components/settings/connection-config-entries.test.ts",
         "src/components/connection-form/",

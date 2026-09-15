@@ -193,7 +193,11 @@ export function TmuxSessionPickerSheet({
   const serverViews = useMemo(() => buildBridgeServerPresetViews(servers), [servers]);
   const sortedServers = useMemo(() => serverViews.map((entry) => entry.server), [serverViews]);
   const statusTone =
-    discoveryState === 'done' ? mobileTheme.colors.accent : discoveryState === 'error' ? mobileTheme.colors.danger : '#f2b94b';
+    discoveryState === 'done'
+      ? mobileTheme.colors.accent
+      : discoveryState === 'error'
+        ? mobileTheme.colors.danger
+        : 'var(--zterm-settings-warning)';
   void clockTick;
   const isEditGroupMode = mode === 'edit-group';
   const relayEnabled = Boolean(bridgeSettings.traversalRelay?.accessToken);
@@ -296,8 +300,8 @@ export function TmuxSessionPickerSheet({
       width: 192,
       errorCorrectionLevel: 'M',
       color: {
-        dark: '#101218',
-        light: '#ffffff',
+        dark: '#0b0c10',
+        light: '#f7f8fa',
       },
     })
       .then((svg) => {
@@ -589,7 +593,7 @@ export function TmuxSessionPickerSheet({
         position: 'fixed',
         inset: 0,
         zIndex: 80,
-        backgroundColor: 'rgba(10, 14, 24, 0.48)',
+        backgroundColor: 'var(--zterm-sheet-overlay)',
         display: 'flex',
         alignItems: 'flex-end',
       }}
@@ -789,7 +793,7 @@ export function TmuxSessionPickerSheet({
                     borderRadius: '24px',
                     backgroundColor: 'var(--zterm-settings-surface)',
                     boxShadow: mobileTheme.shadow.soft,
-                    border: `1px solid ${mobileTheme.colors.lightBorder}`,
+                    border: '1px solid var(--zterm-settings-accent-border)',
                     display: 'grid',
                     placeItems: 'center',
                     padding: '12px',
@@ -1178,7 +1182,7 @@ export function TmuxSessionPickerSheet({
             style={{
               padding: '10px 14px',
               borderRadius: '12px',
-              backgroundColor: 'rgba(255, 124, 146, 0.12)',
+              backgroundColor: 'var(--zterm-settings-danger-soft)',
               color: mobileTheme.colors.danger,
               fontSize: '12px',
               lineHeight: 1.5,
@@ -1272,8 +1276,12 @@ export function TmuxSessionPickerSheet({
                     borderRadius: '18px',
                     padding: '12px 14px',
                     backgroundColor: missingRemote
-                      ? '#eef1f5'
-                      : row.openTab ? 'rgba(113, 164, 255, 0.16)' : selected ? 'rgba(31,214,122,0.14)' : '#f6f8fb',
+                      ? 'var(--zterm-settings-field)'
+                      : row.openTab
+                        ? 'var(--zterm-settings-accent-soft)'
+                        : selected
+                          ? 'var(--zterm-settings-accent-soft)'
+                          : 'var(--zterm-settings-field)',
                     color: mobileTheme.colors.lightText,
                     textAlign: 'left',
                     fontWeight: 800,
@@ -1359,7 +1367,7 @@ export function TmuxSessionPickerSheet({
                     height: '44px',
                     border: 'none',
                     borderRadius: '14px',
-                    backgroundColor: 'rgba(255,124,146,0.16)',
+                    backgroundColor: 'var(--zterm-settings-danger-soft)',
                     color: mobileTheme.colors.danger,
                   }}
                 >
@@ -1475,7 +1483,7 @@ export function TmuxSessionPickerSheet({
             alignItems: 'center',
             justifyContent: 'center',
             padding: '24px',
-            backgroundColor: 'rgba(15, 23, 42, 0.42)',
+            backgroundColor: 'var(--zterm-sheet-overlay)',
           }}
         >
           <div style={{ width: 'min(420px, 100%)', borderRadius: '24px', padding: '20px', backgroundColor: 'var(--zterm-settings-surface)', boxShadow: mobileTheme.shadow.soft }}>

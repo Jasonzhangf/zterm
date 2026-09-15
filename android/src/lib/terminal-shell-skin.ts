@@ -1,13 +1,16 @@
 import type { TerminalShellSkin } from './bridge-settings';
 
-export type EffectiveTerminalShellSkin = 'light' | 'blue' | 'black';
+export type EffectiveTerminalShellSkin = 'light' | 'black';
 
 export function resolveEffectiveTerminalShellSkin(
   skin: TerminalShellSkin | undefined,
   date: Date = new Date(),
 ): EffectiveTerminalShellSkin {
-  if (skin === 'blue' || skin === 'black' || skin === 'light') {
+  if (skin === 'black' || skin === 'light') {
     return skin;
+  }
+  if (skin === 'blue') {
+    return 'black';
   }
   const hour = date.getHours() + date.getMinutes() / 60;
   return hour >= 6 && hour < 18 ? 'light' : 'black';
@@ -38,5 +41,5 @@ export function resolveTerminalRendererThemeForSkin(
   if (effectiveSkin === 'light') {
     return 'tabby-pencil-light';
   }
-  return effectiveSkin === 'blue' ? 'tabby-cobalt2' : 'classic-dark';
+  return 'classic-dark';
 }

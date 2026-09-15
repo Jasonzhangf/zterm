@@ -421,7 +421,7 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
           style={{
             position: 'absolute', top: '2px', right: '2px', zIndex: 2,
             width: '20px', height: '20px', padding: 0, border: 0, borderRadius: '4px',
-            background: 'rgba(0,0,0,0.24)', color: mobileTheme.colors.textPrimary,
+            background: 'var(--zterm-settings-surface)', color: mobileTheme.colors.textPrimary,
             fontSize: '14px', lineHeight: '20px', textAlign: 'center',
           }}
         >
@@ -534,11 +534,11 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
         <AmbientButton type="button" aria-label="向上浏览预览队列" onClick={() => setPrimaryPreviewSessionId((current) => {
           const index = Math.max(0, sessions.findIndex((session) => session.id === current));
           return sessions[(index - 1 + sessions.length) % sessions.length]?.id || current;
-        })} style={{ position: 'absolute', top: 4, left: 4, width: 34, height: 44, border: 0, borderRadius: 10, background: 'rgba(10,15,22,.72)', color: '#dce8ff' }}>↑</AmbientButton>
+        })} style={{ position: 'absolute', top: 4, left: 4, width: 34, height: 44, border: '1px solid var(--zterm-settings-border)', borderRadius: 10, background: 'var(--zterm-settings-surface)', color: 'var(--zterm-settings-text)' }}>↑</AmbientButton>
         <AmbientButton type="button" aria-label="向下浏览预览队列" onClick={() => setPrimaryPreviewSessionId((current) => {
           const index = Math.max(0, sessions.findIndex((session) => session.id === current));
           return sessions[(index + 1) % sessions.length]?.id || current;
-        })} style={{ position: 'absolute', bottom: 4, right: 4, width: 34, height: 44, border: 0, borderRadius: 10, background: 'rgba(10,15,22,.72)', color: '#dce8ff' }}>↓</AmbientButton>
+        })} style={{ position: 'absolute', bottom: 4, right: 4, width: 34, height: 44, border: '1px solid var(--zterm-settings-border)', borderRadius: 10, background: 'var(--zterm-settings-surface)', color: 'var(--zterm-settings-text)' }}>↓</AmbientButton>
       </div>
       {canAddSession ? (
         <AmbientButton
@@ -573,7 +573,7 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
           style={{
             position: 'absolute', left: '10px', right: '10px', bottom: '10px', zIndex: 18,
             border: `1px solid ${mobileTheme.colors.cardBorder}`, borderRadius: '8px',
-            background: mobileTheme.colors.canvas, boxShadow: '0 16px 40px rgba(0,0,0,0.38)',
+            background: mobileTheme.colors.canvas, boxShadow: 'var(--zterm-settings-shadow)',
             padding: '8px', display: 'flex', flexDirection: 'column', gap: '6px',
             maxHeight: '48%', overflowY: 'auto',
           }}
@@ -623,7 +623,7 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
           style={{
             position: 'absolute', left: '10px', right: '10px', bottom: '10px', zIndex: 18,
             border: `1px solid ${mobileTheme.colors.cardBorder}`, borderRadius: '8px',
-            background: mobileTheme.colors.canvas, boxShadow: '0 16px 40px rgba(0,0,0,0.38)',
+            background: mobileTheme.colors.canvas, boxShadow: 'var(--zterm-settings-shadow)',
             padding: '8px', display: 'grid', gridTemplateColumns: `repeat(${Math.min(3, sessions.length)}, minmax(0, 1fr))`, gap: '6px',
           }}
         >
@@ -671,7 +671,7 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
             border: `1px solid ${mobileTheme.colors.cardBorder}`,
             borderRadius: '8px',
             background: mobileTheme.colors.canvas,
-            boxShadow: '0 16px 40px rgba(0,0,0,0.38)',
+            boxShadow: 'var(--zterm-settings-shadow)',
             padding: '8px',
             display: 'flex',
             flexDirection: 'column',

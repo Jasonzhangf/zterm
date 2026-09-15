@@ -269,7 +269,7 @@ function TerminalSessionDrawerComponent({
             position: 'absolute',
             inset: 0,
             border: 'none',
-            background: 'rgba(0, 0, 0, 0.18)',
+            background: 'color-mix(in srgb, #050608 18%, transparent)',
             zIndex: 149,
             padding: 0,
             margin: 0,
@@ -450,13 +450,17 @@ function TerminalSessionDrawerComponent({
                 const tone = group.hostKey
                   ? getServerIdentityTone({ daemonHostId: group.hostKey, connectionName: group.hostLabel })
                   : {
-                      accent: 'rgba(220, 232, 255, 0.26)',
-                      accentSoft: 'rgba(220, 232, 255, 0.08)',
-                      lightCardBorder: 'rgba(255,255,255,0.08)',
-                      tabActiveBackground: 'rgba(255,255,255,0.06)',
-                      previewText: '#dce8ff',
+                      accent: 'var(--zterm-settings-accent)',
+                      accentSoft: 'var(--zterm-settings-accent-soft)',
+                      lightCardBorder: 'var(--zterm-settings-border)',
+                      tabActiveBackground: 'var(--zterm-settings-field)',
+                      previewText: 'var(--zterm-settings-text)',
                     };
-                const statusColor = group.connected === false ? '#ff727d' : group.connected ? '#44e2a0' : 'var(--zterm-panel-muted)';
+                const statusColor = group.connected === false
+                  ? 'var(--zterm-settings-danger)'
+                  : group.connected
+                    ? 'var(--zterm-settings-success)'
+                    : 'var(--zterm-panel-muted)';
                 return (
                   <AmbientButton
                     key={group.groupKey}
@@ -623,7 +627,7 @@ function TerminalSessionDrawerComponent({
                 border: slotTone
                   ? `1px solid ${slotTone.border}`
                   : session.active
-                  ? '1px solid rgba(106, 167, 255, 0.9)'
+                  ? '1px solid var(--zterm-settings-accent-border)'
                   : '1px solid var(--zterm-panel-border)',
                 background: slotTone
                   ? slotTone.background
@@ -766,7 +770,7 @@ function TerminalSessionDrawerComponent({
                       width: '24px', height: '24px', borderRadius: '6px', display: 'flex',
                       alignItems: 'center', justifyContent: 'center',
                       border: previewSelectionIndex >= 0 ? '1px solid var(--zterm-panel-accent)' : '1px solid var(--zterm-panel-border)',
-                      background: previewSelectionIndex >= 0 ? 'rgba(139,213,255,0.18)' : 'transparent',
+                      background: previewSelectionIndex >= 0 ? 'var(--zterm-settings-accent-soft)' : 'transparent',
                       color: previewSelectionIndex >= 0 ? 'var(--zterm-panel-accent)' : 'var(--zterm-panel-muted)',
                       opacity: 1,
                       fontSize: '11px', fontWeight: 900,
@@ -781,7 +785,7 @@ function TerminalSessionDrawerComponent({
                       minWidth: '34px',
                       padding: '3px 7px',
                       borderRadius: '999px',
-                      background: 'rgba(106, 167, 255, 0.16)',
+                      background: 'var(--zterm-settings-accent-soft)',
                       color: 'var(--zterm-panel-accent)',
                       textAlign: 'center',
                       fontSize: '10px',

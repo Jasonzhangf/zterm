@@ -1377,7 +1377,7 @@ export function FileTransferSheet({
           </div>
           {browserMode ? (
             <div style={{ display: "flex", gap: "8px", padding: "8px 10px", flexShrink: 0 }}>
-              <AmbientButton type="button" disabled={selectedRemote.size === 0} onClick={() => { setDirection("download"); void startTransfer(); }} style={actionButtonStyle("rgba(31,214,122,0.22)", selectedRemote.size ? SHEET_ACCENT : SHEET_MUTED)}>
+              <AmbientButton type="button" disabled={selectedRemote.size === 0} onClick={() => { setDirection("download"); void startTransfer(); }} style={actionButtonStyle("var(--zterm-panel-accent-soft)", selectedRemote.size ? SHEET_ACCENT : SHEET_MUTED)}>
                 下载选中 ({selectedRemote.size})
               </AmbientButton>
             </div>
@@ -1418,7 +1418,7 @@ export function FileTransferSheet({
                 disabled={previewSaving}
                 style={{
                   ...actionButtonStyle(
-                    "rgba(255,255,255,0.06)",
+                    "var(--zterm-panel-surface)",
                     SHEET_TEXT,
                   ),
                   minHeight: "34px",
@@ -1458,7 +1458,7 @@ export function FileTransferSheet({
                   disabled={preview.loading || Boolean(preview.error) || previewSaving}
                   style={{
                     ...actionButtonStyle(
-                      "rgba(31,214,122,0.22)",
+                      "var(--zterm-panel-accent-soft)",
                       SHEET_ACCENT,
                     ),
                     minHeight: "24px",
@@ -1495,7 +1495,7 @@ export function FileTransferSheet({
                   disabled={saveDisabledForPreview}
                   style={{
                     ...actionButtonStyle(
-                      "rgba(31,214,122,0.22)",
+                      "var(--zterm-panel-accent-soft)",
                       SHEET_ACCENT,
                     ),
                     minHeight: "24px",
@@ -1515,7 +1515,7 @@ export function FileTransferSheet({
                     disabled={syncCopyDisabledForPreview}
                     style={{
                       ...actionButtonStyle(
-                        "rgba(96, 149, 255, 0.18)",
+                        "var(--zterm-panel-accent-soft)",
                         SHEET_TEXT,
                       ),
                       minHeight: "24px",
@@ -1591,7 +1591,7 @@ export function FileTransferSheet({
                           resize: "none",
                           borderRadius: "12px",
                           border: `1px solid ${SHEET_BORDER}`,
-                          background: "rgba(255,255,255,0.04)",
+                          background: "var(--zterm-panel-surface)",
                           color: SHEET_TEXT,
                           padding: "10px",
                           fontFamily:
@@ -1651,7 +1651,7 @@ export function FileTransferSheet({
                 onClick={() => setDirection("download")}
                 style={actionButtonStyle(
                   direction === "download"
-                    ? "rgba(31,214,122,0.22)"
+                    ? "var(--zterm-panel-accent-soft)"
                     : SHEET_SURFACE,
                   direction === "download" ? SHEET_ACCENT : SHEET_TEXT,
                 )}
@@ -1662,8 +1662,8 @@ export function FileTransferSheet({
                 type="button"
                 onClick={startTransfer}
                 style={actionButtonStyle(
-                  "linear-gradient(180deg, rgba(96, 149, 255, 0.92), rgba(72, 122, 230, 0.92))",
-                  "#fff",
+                  SHEET_ACCENT,
+                  "var(--zterm-settings-accent-text)",
                 )}
               >
                 {resolvePrimaryTransferLabel(
@@ -1678,7 +1678,7 @@ export function FileTransferSheet({
                 onClick={() => setDirection("upload")}
                 style={actionButtonStyle(
                   direction === "upload"
-                    ? "rgba(31,214,122,0.22)"
+                    ? "var(--zterm-panel-accent-soft)"
                     : SHEET_SURFACE,
                   direction === "upload" ? SHEET_ACCENT : SHEET_TEXT,
                 )}

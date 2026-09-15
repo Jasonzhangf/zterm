@@ -123,10 +123,12 @@ function resolveVariantStyle(
         minHeight: '34px',
         borderRadius: '10px',
         border: `1px solid ${
-          selected ? 'rgba(113, 164, 255, 0.28)' : 'rgba(255,255,255,0.08)'
+          selected ? 'color-mix(in srgb, var(--zterm-settings-accent) 44%, transparent)' : 'var(--zterm-settings-border)'
         }`,
-        backgroundColor: selected ? 'rgba(113, 164, 255, 0.16)' : 'rgba(31, 38, 53, 0.82)',
-        color: selected ? '#8db7ff' : '#fff',
+        backgroundColor: selected
+          ? 'color-mix(in srgb, var(--zterm-settings-accent) 16%, var(--zterm-settings-field))'
+          : 'var(--zterm-settings-field)',
+        color: selected ? 'var(--zterm-settings-accent)' : 'var(--zterm-settings-text)',
         fontSize: '12px',
         fontWeight: 700,
         textAlign: 'left',
@@ -183,7 +185,7 @@ function resolveVariantStyle(
         minHeight: '68px',
         padding: '10px 12px',
         border: `1px solid ${
-          selected ? 'rgba(8, 122, 70, 0.34)' : mobileTheme.colors.lightBorder
+          selected ? 'var(--zterm-settings-accent)' : mobileTheme.colors.lightBorder
         }`,
         borderRadius: '16px',
         backgroundColor: 'var(--zterm-settings-surface)',

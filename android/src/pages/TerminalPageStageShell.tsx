@@ -305,7 +305,7 @@ const TerminalStageShell = ReactMemo(
                     flex: 1,
                     minHeight: 0,
                     width: "100%",
-                    border: "1px dashed rgba(220,232,255,0.24)",
+                    border: "1px dashed var(--zterm-panel-border)",
                     borderRadius: paneProfile.stage.paneRadius,
                     backgroundColor: "var(--zterm-stage-bg)",
                     color: "var(--zterm-stage-muted)",

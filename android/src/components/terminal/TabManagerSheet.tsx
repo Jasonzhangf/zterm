@@ -164,7 +164,7 @@ function TabManagerSheetComponent({
         position: 'fixed',
         inset: 0,
         zIndex: 120,
-        backgroundColor: 'rgba(10, 14, 24, 0.48)',
+        backgroundColor: 'var(--zterm-sheet-overlay)',
         display: 'flex',
         alignItems: 'flex-end',
       }}
@@ -179,7 +179,7 @@ function TabManagerSheetComponent({
           WebkitOverflowScrolling: 'touch',
           borderTopLeftRadius: '28px',
           borderTopRightRadius: '28px',
-          backgroundColor: mobileTheme.colors.lightBg,
+          backgroundColor: 'var(--zterm-settings-background)',
           padding: `${mobileTheme.safeArea.top} 16px ${mobileTheme.safeArea.bottom}`,
           boxShadow: mobileTheme.shadow.strong,
           display: 'flex',
@@ -201,8 +201,8 @@ function TabManagerSheetComponent({
               height: '42px',
               borderRadius: '14px',
               border: 'none',
-              backgroundColor: '#ffffff',
-              color: mobileTheme.colors.lightText,
+              backgroundColor: 'var(--zterm-settings-surface)',
+              color: 'var(--zterm-settings-text)',
               fontSize: '20px',
               boxShadow: mobileTheme.shadow.soft,
             }}
@@ -215,7 +215,7 @@ function TabManagerSheetComponent({
           style={{
             borderRadius: '22px',
             padding: '14px',
-            backgroundColor: '#ffffff',
+            backgroundColor: 'var(--zterm-settings-surface)',
             boxShadow: mobileTheme.shadow.soft,
             display: 'grid',
             gridTemplateColumns: '1fr',
@@ -228,8 +228,8 @@ function TabManagerSheetComponent({
               minHeight: '46px',
               border: 'none',
               borderRadius: '16px',
-              backgroundColor: mobileTheme.colors.shell,
-              color: '#ffffff',
+              backgroundColor: 'var(--zterm-settings-accent)',
+              color: 'var(--zterm-settings-accent-text)',
               fontWeight: 800,
             }}
           >
@@ -241,7 +241,7 @@ function TabManagerSheetComponent({
           style={{
             borderRadius: '22px',
             padding: '14px',
-            backgroundColor: '#ffffff',
+            backgroundColor: 'var(--zterm-settings-surface)',
             boxShadow: mobileTheme.shadow.soft,
             display: 'flex',
             flexDirection: 'column',
@@ -264,9 +264,11 @@ function TabManagerSheetComponent({
                     gap: '8px',
                     borderRadius: '18px',
                     padding: '10px 12px',
-                    backgroundColor: active ? 'rgba(31,214,122,0.14)' : '#f6f8fb',
+                    backgroundColor: active
+                      ? 'color-mix(in srgb, var(--zterm-settings-accent) 14%, var(--zterm-settings-surface))'
+                      : 'var(--zterm-settings-field)',
                     transform: dragging ? `translateY(${dragState?.offsetY || 0}px)` : 'translateY(0)',
-                    boxShadow: dragging ? '0 10px 18px rgba(0,0,0,0.16)' : 'none',
+                    boxShadow: dragging ? 'var(--zterm-settings-shadow)' : 'none',
                     zIndex: dragging ? 3 : 1,
                     position: 'relative',
                   }}
@@ -302,8 +304,8 @@ function TabManagerSheetComponent({
                       height: '36px',
                       borderRadius: '12px',
                       border: 'none',
-                      backgroundColor: '#ffffff',
-                      color: mobileTheme.colors.lightText,
+                      backgroundColor: 'var(--zterm-settings-field)',
+                      color: 'var(--zterm-settings-text)',
                     }}
                   >
                     ✎
@@ -335,7 +337,7 @@ function TabManagerSheetComponent({
                       height: '36px',
                       borderRadius: '12px',
                       border: 'none',
-                      backgroundColor: 'rgba(255,124,146,0.16)',
+                      backgroundColor: 'var(--zterm-settings-danger-soft)',
                       color: mobileTheme.colors.danger,
                     }}
                   >
@@ -407,8 +409,8 @@ function TabManagerSheetComponent({
                       height: '36px',
                       borderRadius: '12px',
                       border: 'none',
-                      backgroundColor: mobileTheme.colors.shellMuted,
-                      color: '#ffffff',
+                      backgroundColor: 'var(--zterm-settings-field)',
+                      color: 'var(--zterm-settings-text)',
                       fontWeight: 800,
                       touchAction: 'none',
                     }}

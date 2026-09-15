@@ -76,9 +76,9 @@ function getSessionEndpoint(session: ConnectionsHomeActiveSession) {
 }
 
 function getSessionStateColor(state: ConnectionsHomeActiveSession['state']) {
-  if (state === 'connected') return '#087a46';
-  if (state === 'connecting' || state === 'reconnecting') return '#9a6300';
-  if (state === 'error' || state === 'closed') return '#a22c3f';
+  if (state === 'connected') return 'var(--zterm-settings-success)';
+  if (state === 'connecting' || state === 'reconnecting') return 'var(--zterm-settings-warning)';
+  if (state === 'error' || state === 'closed') return 'var(--zterm-settings-danger)';
   return mobileTheme.colors.lightMuted;
 }
 
@@ -170,7 +170,7 @@ function ServerGlyph({ label, active = false }: { label: string; active?: boolea
         fontSize: active ? '17px' : '15px',
         fontWeight: 950,
         flex: '0 0 auto',
-        boxShadow: active ? '0 12px 22px rgba(23, 27, 45, 0.18)' : 'none',
+        boxShadow: active ? 'var(--zterm-settings-shadow)' : 'none',
       }}
     >
       {active ? '>_' : getServerMark(label)}
@@ -251,7 +251,7 @@ export function ConnectionsPage({
                 placeItems: 'center',
                 fontSize: '18px',
                 fontWeight: 950,
-                boxShadow: '0 14px 28px rgba(23, 27, 45, 0.20)',
+                boxShadow: 'var(--zterm-settings-shadow)',
                 flex: '0 0 auto',
               }}
             >

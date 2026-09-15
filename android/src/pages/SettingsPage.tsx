@@ -188,6 +188,7 @@ export function SettingsPage({
   const updateDraftEditedRef = useRef(false);
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const settingsTheme = useMemo(() => resolveSettingsTheme(draft.terminalShellSkin), [draft.terminalShellSkin]);
+  const terminalShellSkinOptions = TERMINAL_SHELL_SKIN_OPTIONS.filter((option) => option.id !== 'blue');
   const saveResetTimerRef = useRef<number | null>(null);
   useEffect(() => {
     if (saveState !== 'saved') {
@@ -286,6 +287,7 @@ export function SettingsPage({
         ['--zterm-settings-border' as string]: settingsTheme.border,
         ['--zterm-settings-accent' as string]: settingsTheme.accent,
         ['--zterm-settings-accent-text' as string]: settingsTheme.accentText,
+        ['--zterm-settings-danger' as string]: settingsTheme.danger,
         ['--zterm-settings-shadow' as string]: settingsTheme.shadow,
       }}
     >
@@ -647,7 +649,7 @@ export function SettingsPage({
             这里单独控制顶部栏、快捷栏和终端外壳，不改变终端 ANSI 颜色。默认跟主页保持白灰配色。
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(118px, 100%), 1fr))', gap: '10px' }}>
-            {TERMINAL_SHELL_SKIN_OPTIONS.map((option) => {
+            {terminalShellSkinOptions.map((option) => {
               const active = draft.terminalShellSkin === option.id;
               return (
                 <AmbientButton

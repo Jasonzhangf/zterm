@@ -3615,7 +3615,7 @@ function TerminalPageComponent({
                       color: 'var(--zterm-panel-text)',
                       fontSize: '17px',
                       lineHeight: 1,
-                      boxShadow: '0 8px 18px rgba(0,0,0,0.18)',
+                      boxShadow: 'var(--zterm-settings-shadow)',
                     }}
                   >
                     ☰
@@ -3638,7 +3638,7 @@ function TerminalPageComponent({
                       color: 'var(--zterm-panel-text)',
                       fontSize: '18px',
                       lineHeight: 1,
-                      boxShadow: '0 8px 18px rgba(0,0,0,0.18)',
+                      boxShadow: 'var(--zterm-settings-shadow)',
                       backdropFilter: 'blur(8px)',
                     }}
                   >
@@ -3665,7 +3665,7 @@ function TerminalPageComponent({
                         fontSize: '13px',
                         fontWeight: 850,
                         lineHeight: 1,
-                        boxShadow: '0 8px 18px rgba(0,0,0,0.18)',
+                        boxShadow: 'var(--zterm-settings-shadow)',
                         backdropFilter: 'blur(8px)',
                         display: 'inline-flex',
                         alignItems: 'center',
