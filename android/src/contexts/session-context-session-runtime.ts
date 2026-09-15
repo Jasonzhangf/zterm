@@ -561,7 +561,8 @@ export function reconnectSessionRuntime(options: {
     return;
   }
 
-  if (pendingTransportOpenStale && options.refs.pendingSessionTransportOpenIntentsRef) {
+  const orphanedPendingOpen = reusePlan.reason === 'orphaned-pending-open';
+  if ((pendingTransportOpenStale || orphanedPendingOpen) && options.refs.pendingSessionTransportOpenIntentsRef) {
     deletePendingSessionTransportOpenIntent(
       options.refs.pendingSessionTransportOpenIntentsRef.current as Parameters<typeof deletePendingSessionTransportOpenIntent>[0],
       options.sessionId,

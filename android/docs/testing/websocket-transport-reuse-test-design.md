@@ -100,6 +100,7 @@ Positive reuse:
 - Same target + `WebSocket.OPEN` + connect source returns `reuse-open`.
 - Same target + `WebSocket.OPEN` + reconnect source returns `reuse-open`.
 - Same target + `WebSocket.CONNECTING` + fresh pending open returns `wait-existing-open`.
+- Same target + pending open intent with no physical socket, or a `CLOSED` physical socket, is orphaned bookkeeping: explicit resume must return `rebuild/orphaned-pending-open` so the unique transport owner can restore the target on the same route. A fresh `CONNECTING` socket remains waitable and must never be replaced.
 - Foreground false->true is mapped to `explicit-resume`; it must share the cold-start/explicit resume transport owner instead of owning a separate `active-resume` branch.
 - Explicit resume with an over-budget pending open still returns `skip/transport-open-pending`; it must not create a second WebSocket.
 - Explicit resume with an over-budget `WebSocket.CONNECTING` session socket after the control intent has settled still returns `skip/transport-open-pending`; it must not create a second WebSocket.
@@ -147,6 +148,7 @@ Negative:
 `reconnectSessionRuntime()`:
 - Given same target and `OPEN` socket, it must not call `cleanupSocket` or `scheduleReconnect`.
 - Given same target and `CONNECTING` plus fresh pending open, it must not call `cleanupSocket` or `scheduleReconnect`.
+- Given same target and a pending open intent whose physical socket is missing or `CLOSED`, it must delete the orphaned intent and rebuild one target transport; a second physical socket must not be created.
 - Given same target and `CONNECTING` plus fresh pending open, it must update visible session state to `reconnecting` with a waiting message.
 - Given explicit resume marks a pending open as stale under the active wait budget, `ensureActiveSessionFreshRuntime()` must keep waiting on the same socket and must not call `reconnectSession`.
 - Given explicit resume sees an over-budget `WebSocket.CONNECTING` target transport after the target-open intent cleared the pending open, `ensureActiveSessionFreshRuntime()` must keep waiting on the same socket and must not call `reconnectSession`.
@@ -158,6 +160,11 @@ Negative:
 - Given the same unavailable socket after the keepalive grace window expires, it must call the same unique reconnect owner.
 - Given reconnect already in flight inside the grace window, it must keep the existing in-flight behavior and must not queue a duplicate reconnect.
 - Given manual close, it must skip reconnect.
+
+Integrated foreground identity case:
+- Start with two same-target Sessions and distinct local body markers while their channel-open intents are still pending.
+- Simulate the physical target socket becoming `CLOSED` without delivering a synthetic close event, then foreground the active Session without switching tabs.
+- Explicit resume must rebuild exactly one physical target transport, reopen the active logical channel, apply the new active body marker through the real buffer store, and leave the inactive Session marker out of the active DOM projection.
 
 `useSessionOpenActions.handleCloseGroupSession()`:
 - Positive: when `tmux-kill-session` succeeds, the matching logical session is first stopped with `preserveTargetTransport`, then finalized locally; unrelated same-target sessions are never closed.

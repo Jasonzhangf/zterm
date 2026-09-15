@@ -47,7 +47,7 @@ export type SessionTransportReusePlan =
   | { action: 'reuse-open'; reason: 'open-same-target' }
   | { action: 'wait-existing-open'; reason: 'connecting-same-target' | 'pending-open' }
   | { action: 'skip'; reason: 'manual-closed' }
-  | { action: 'rebuild'; reason: 'missing-target' | 'target-mismatch' | 'closed' | 'missing-socket' | 'stale-pending-open' };
+  | { action: 'rebuild'; reason: 'missing-target' | 'target-mismatch' | 'closed' | 'missing-socket' | 'stale-pending-open' | 'orphaned-pending-open' };
 
 export interface TransportOpenConnectedEffectPlan {
   debugEvent: 'session.ws.connected' | 'session.ws.reconnect.connected';
@@ -66,6 +66,28 @@ export type ReconnectHandshakeFailurePlan =
   | { action: 'terminal-error' }
   | { action: 'retry-reconnect' };
 
+/**
+ * A pending transport-open intent only represents an in-flight handshake while
+ * a physical socket still exists. Once the socket is gone (null/closed) the
+ * intent can never settle: it is orphaned bookkeeping, not a live open.
+ *
+ * This matters for background->foreground resume: the app can be suspended
+ * long enough for the daemon to release the attach lease and drop the socket,
+ * while the intent map still holds the entry created before suspension. Treat
+ * that orphan as non-blocking so explicit resume can rebuild the transport
+ * instead of waiting forever on a handshake that will never complete.
+ */
+export function isPendingTransportOpenOrphaned(options: {
+  pendingTransportOpen: boolean;
+  wsReadyState: number | null;
+}) {
+  return options.pendingTransportOpen
+    && (
+      options.wsReadyState === null
+      || options.wsReadyState === WebSocket.CLOSED
+    );
+}
+
 export function buildSessionTransportReusePlan(
   options: SessionTransportReusePlanOptions,
 ): SessionTransportReusePlan {
@@ -75,6 +97,10 @@ export function buildSessionTransportReusePlan(
 
   if (options.pendingTransportOpen && options.pendingTransportOpenStale) {
     return { action: 'rebuild', reason: 'stale-pending-open' };
+  }
+
+  if (isPendingTransportOpenOrphaned(options)) {
+    return { action: 'rebuild', reason: 'orphaned-pending-open' };
   }
 
   if (!options.requestedTargetKey || !options.currentTargetKey) {
@@ -98,10 +124,6 @@ export function buildSessionTransportReusePlan(
 
   if (options.wsReadyState === WebSocket.CONNECTING) {
     return { action: 'wait-existing-open', reason: 'connecting-same-target' };
-  }
-
-  if (options.pendingTransportOpen) {
-    return { action: 'wait-existing-open', reason: 'pending-open' };
   }
 
   if (
@@ -456,6 +478,10 @@ export function shouldReconnectActivatedSession(options: SessionReconnectDecisio
 
 export function buildActiveSessionRefreshPlan(options: ActiveSessionRefreshPlanOptions): ActiveSessionRefreshPlan {
   const hasBlockingPendingTransportOpen = options.pendingTransportOpen && !options.pendingTransportOpenStale;
+  const blocksPendingTransportOpen = (
+    hasBlockingPendingTransportOpen
+    && !isPendingTransportOpenOrphaned(options)
+  );
   if (!options.hasSession || !options.isRefreshTarget) {
     return { action: 'skip', reason: 'inactive-or-missing-session' };
   }
@@ -520,7 +546,7 @@ export function buildActiveSessionRefreshPlan(options: ActiveSessionRefreshPlanO
     };
   }
 
-  if (hasBlockingPendingTransportOpen) {
+  if (blocksPendingTransportOpen) {
     return { action: 'skip', reason: 'transport-open-pending' };
   }
 

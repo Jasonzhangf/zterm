@@ -1607,6 +1607,62 @@ describe('session transport reuse runtime gates', () => {
     });
   });
 
+  it('reconnectSessionRuntime clears orphaned pending open bookkeeping and rebuilds the same target when the physical socket is gone', () => {
+    const cleanupSocket = vi.fn();
+    const cleanupControlSocket = vi.fn();
+    const scheduleReconnect = vi.fn();
+    const pendingStore = new Map<string, any>([
+      ['session-1', { sessionId: 'session-1', createdAt: Date.now() }],
+    ]);
+
+    reconnectSessionRuntime({
+      sessionId: 'session-1',
+      refs: {
+        stateRef: {
+          current: {
+            sessions: [{
+              id: 'session-1',
+              hostId: 'host-1',
+              connectionName: 'conn',
+              bridgeHost: '127.0.0.1',
+              bridgePort: 3333,
+              sessionName: 'tmux-1',
+              authToken: undefined,
+              autoCommand: undefined,
+              createdAt: 1,
+            } as Session],
+            activeSessionId: 'session-1',
+          },
+        },
+        reconnectStore: createSessionReconnectStore(),
+        pendingSessionTransportOpenIntentsRef: { current: pendingStore },
+      },
+      clearReconnectForSession: vi.fn(),
+      readSessionTransportHost: () => host,
+      readSessionTargetKey: () => targetKey,
+      readSessionTargetRuntime: () => ({ sessionIds: ['session-1'] }),
+      daemonConnection: makeDaemonConnection({ socket: { readyState: WebSocket.CLOSED } as any }),
+      hasPendingSessionTransportOpen: () => true,
+      isPendingSessionTransportOpenStale: () => false,
+      runtimeDebug: vi.fn(),
+      cleanupSocket,
+      cleanupControlSocket,
+      writeSessionTransportHost: vi.fn(),
+      updateSessionSync: vi.fn(),
+      reconcilePhysicalBodySubscriptions: vi.fn(),
+      scheduleReconnect,
+    } as any);
+
+    expect(pendingStore.has('session-1')).toBe(false);
+    expect(cleanupControlSocket).toHaveBeenCalledWith('session-1', true);
+    expect(cleanupSocket).toHaveBeenCalledWith('session-1', false);
+    expect(scheduleReconnect).toHaveBeenCalledWith('session-1', 'manual reconnect', true, {
+      immediate: true,
+      resetAttempt: true,
+      force: true,
+    });
+  });
+
   it('reconnectSessionRuntime preserves the automatic retry budget during lifecycle recovery', () => {
     const clearReconnectForSession = vi.fn();
     const scheduleReconnect = vi.fn();
