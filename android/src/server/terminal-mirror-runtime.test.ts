@@ -151,12 +151,17 @@ function expectOnlyAdaptiveWidthTmuxMutation(runTmux: { mock: { calls: unknown[]
 
 function createOwnershipStore(
   initialRecords: AdaptiveWidthOwnershipRecord[] = [],
-  overrides: { removeError?: Error; upsertError?: Error } = {},
+  overrides: { removeError?: Error; upsertError?: Error; upsertErrorOnce?: Error } = {},
 ) {
   let records = initialRecords;
   return {
     read: vi.fn(() => records),
     upsert: vi.fn((record: Omit<AdaptiveWidthOwnershipRecord, 'updatedAt'>) => {
+      if (overrides.upsertErrorOnce) {
+        const error = overrides.upsertErrorOnce;
+        overrides.upsertErrorOnce = undefined;
+        throw error;
+      }
       if (overrides.upsertError) {
         throw overrides.upsertError;
       }
@@ -1225,6 +1230,59 @@ describe('terminal mirror runtime lifecycle truth', () => {
     expect(ownership.remove).toHaveBeenCalledWith('demo');
     expect(ownership.records()).toEqual([]);
     expect(mirrors.get('demo')?.adaptiveWidthAppliedCols).toBe(100);
+  });
+
+  it('keeps a lease-expiry reconciliation failure bounded inside the timer owner', async () => {
+    vi.useFakeTimers();
+    try {
+      const ownershipOverrides: { upsertErrorOnce?: Error } = {};
+      const ownership = createOwnershipStore([], ownershipOverrides);
+      const resizeBackendSession = vi.fn();
+      const { runtime, sessions, mirrors } = createRuntime({
+        adaptiveWidthOwnershipStore: ownership,
+        resizeBackendSession,
+      });
+      const wideSession = createSession('session-wide');
+      const narrowSession = createSession('session-narrow');
+      narrowSession.transportId = 'transport-narrow';
+      sessions.set(wideSession.id, wideSession);
+      sessions.set(narrowSession.id, narrowSession);
+
+      await runtime.attachTmux(wideSession, {
+        sessionName: 'demo',
+        cols: 100,
+        rows: 40,
+        widthMode: 'adaptive-phone',
+      });
+      await runtime.attachTmux(narrowSession, {
+        sessionName: 'demo',
+        cols: 60,
+        rows: 40,
+        widthMode: 'adaptive-phone',
+      });
+      await vi.advanceTimersByTimeAsync(10000);
+      runtime.refreshAdaptiveWidthLeaseHeartbeat(wideSession);
+      ownershipOverrides.upsertErrorOnce = new Error('ownership write failed');
+      const uncaught: unknown[] = [];
+      const onUncaught = (error: unknown) => uncaught.push(error);
+      process.on('uncaughtException', onUncaught);
+      resizeBackendSession.mockClear();
+
+      try {
+        await vi.advanceTimersByTimeAsync(55001);
+        await Promise.resolve();
+      } finally {
+        process.off('uncaughtException', onUncaught);
+      }
+
+      expect(uncaught).toEqual([]);
+      expect(resizeBackendSession).not.toHaveBeenCalled();
+      expect(mirrors.get('demo')?.adaptiveWidthAppliedCols).toBe(60);
+      expect(narrowSession.adaptiveWidthCols).toBeNull();
+      expect(wideSession.adaptiveWidthCols).toBe(100);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('updates adaptive resize lease by resizing tmux width only', async () => {

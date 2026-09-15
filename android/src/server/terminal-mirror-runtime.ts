@@ -741,7 +741,16 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     const delayMs = Math.max(1, nextExpiresAt - Date.now() + 1);
     mirror.adaptiveWidthLeaseTimer = setTimeout(() => {
       mirror.adaptiveWidthLeaseTimer = null;
-      reconcileAdaptiveWidthLeases(mirror, 'lease-expired');
+      try {
+        reconcileAdaptiveWidthLeases(mirror, 'lease-expired');
+      } catch (error) {
+        console.error(
+          `[${deps.logTimePrefix()}] adaptive width lease reconciliation failed for ${mirror.sessionName}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+        scheduleAdaptiveWidthLeaseExpiry(mirror);
+      }
     }, delayMs);
     mirror.adaptiveWidthLeaseTimer.unref?.();
   }
