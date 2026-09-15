@@ -810,14 +810,24 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     if (mirror.adaptiveWidthAppliedCols === cols) {
       return;
     }
-    persistAdaptiveWidthOwnership(mirror, cols, deps.normalizeTerminalRows(mirror.adaptiveWidthBaselineGeometry.rows));
-    if (deps.resizeBackendSession) {
-      deps.resizeBackendSession(mirror.sessionName, {
-        cols,
-        rows: deps.normalizeTerminalRows(mirror.adaptiveWidthBaselineGeometry.rows),
-      }, mirror.backend, 'apply');
-    } else {
-      deps.runTmux(['resize-window', '-t', deps.buildExactTmuxSessionTarget(mirror.sessionName), '-x', String(cols)]);
+    const rows = deps.normalizeTerminalRows(mirror.adaptiveWidthBaselineGeometry.rows);
+    // Ownership must be durable before the shared tmux geometry mutation: a
+    // crash after resize without a record leaves no baseline to restore.
+    persistAdaptiveWidthOwnership(mirror, cols, rows);
+    try {
+      if (deps.resizeBackendSession) {
+        deps.resizeBackendSession(mirror.sessionName, {
+          cols,
+          rows,
+        }, mirror.backend, 'apply');
+      } else {
+        deps.runTmux(['resize-window', '-t', deps.buildExactTmuxSessionTarget(mirror.sessionName), '-x', String(cols)]);
+      }
+    } catch (error) {
+      // Do not leave a false ownership record for a geometry mutation that
+      // never landed, or startup restore may resize an unowned session.
+      removeAdaptiveWidthOwnershipRecord(mirror.sessionName);
+      throw error;
     }
     mirror.adaptiveWidthAppliedCols = cols;
     mirror.adaptiveWidthAppliedRows = null;
@@ -859,7 +869,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
           error instanceof Error ? error.message : String(error)
         }`,
       );
-      return;
+      throw error;
     }
     try {
       deps.adaptiveWidthOwnershipStore.upsert({
@@ -875,6 +885,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
           error instanceof Error ? error.message : String(error)
         }`,
       );
+      throw error;
     }
   }
 

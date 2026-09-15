@@ -151,12 +151,15 @@ function expectOnlyAdaptiveWidthTmuxMutation(runTmux: { mock: { calls: unknown[]
 
 function createOwnershipStore(
   initialRecords: AdaptiveWidthOwnershipRecord[] = [],
-  overrides: { removeError?: Error } = {},
+  overrides: { removeError?: Error; upsertError?: Error } = {},
 ) {
   let records = initialRecords;
   return {
     read: vi.fn(() => records),
     upsert: vi.fn((record: Omit<AdaptiveWidthOwnershipRecord, 'updatedAt'>) => {
+      if (overrides.upsertError) {
+        throw overrides.upsertError;
+      }
       records = [
         ...records.filter((entry) => entry.sessionName !== record.sessionName),
         { ...record, updatedAt: '2026-09-13T00:00:00.000Z' },
@@ -1165,6 +1168,63 @@ describe('terminal mirror runtime lifecycle truth', () => {
     });
     expect(ownership.records()).toHaveLength(1);
     expectOnlyAdaptiveWidthTmuxMutation(runTmux);
+  });
+
+  it('does not mutate tmux when adaptive width ownership persistence fails', async () => {
+    const ownership = createOwnershipStore([], {
+      upsertError: new Error('ownership write failed'),
+    });
+    const resizeBackendSession = vi.fn();
+    const { runtime, sessions, runTmux } = createRuntime({
+      adaptiveWidthOwnershipStore: ownership,
+      resizeBackendSession,
+    });
+    const session = createSession('session-1');
+    sessions.set(session.id, session);
+
+    await expect(runtime.attachTmux(session, {
+      sessionName: 'demo',
+      cols: 88,
+      rows: 24,
+      widthMode: 'adaptive-phone',
+    })).rejects.toThrow('ownership write failed');
+
+    expect(resizeBackendSession).not.toHaveBeenCalled();
+    expect(runTmux).not.toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '88']);
+    expect(ownership.records()).toEqual([]);
+  });
+
+  it('removes adaptive width ownership when the tmux mutation fails', async () => {
+    const ownership = createOwnershipStore();
+    const resizeError = new Error('tmux resize failed');
+    const resizeBackendSession = vi.fn()
+      .mockImplementationOnce(() => {})
+      .mockImplementationOnce(() => {
+        throw resizeError;
+      });
+    const { runtime, sessions, mirrors } = createRuntime({
+      adaptiveWidthOwnershipStore: ownership,
+      resizeBackendSession,
+    });
+    const session = createSession('session-1');
+    sessions.set(session.id, session);
+
+    await runtime.attachTmux(session, {
+      sessionName: 'demo',
+      cols: 100,
+      rows: 24,
+      widthMode: 'adaptive-phone',
+    });
+    expect(ownership.records()).toHaveLength(1);
+
+    expect(() => runtime.handleAdaptiveResize(session, {
+      cols: 72,
+      widthMode: 'adaptive-phone',
+    })).toThrow(resizeError);
+
+    expect(ownership.remove).toHaveBeenCalledWith('demo');
+    expect(ownership.records()).toEqual([]);
+    expect(mirrors.get('demo')?.adaptiveWidthAppliedCols).toBe(100);
   });
 
   it('updates adaptive resize lease by resizing tmux width only', async () => {
