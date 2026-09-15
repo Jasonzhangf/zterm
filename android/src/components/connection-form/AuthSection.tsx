@@ -1,4 +1,5 @@
 import { ConnectionSection, FieldLabel, inputStyle } from './ConnectionSection';
+import { AmbientInput } from '../ambient';
 
 interface AuthSectionProps {
   sessionName: string;
@@ -13,7 +14,7 @@ export function AuthSection({
     <ConnectionSection title="Tmux Session" description="Optional tmux session name. Leave empty to use the connection name.">
       <div>
         <FieldLabel>Session Name</FieldLabel>
-        <input value={sessionName} onChange={(event) => onSessionNameChange(event.target.value)} placeholder="例如：fin" style={inputStyle()} />
+        <AmbientInput value={sessionName} onChange={(event) => onSessionNameChange(event.target.value)} placeholder="例如：fin" style={inputStyle()} />
       </div>
     </ConnectionSection>
   );

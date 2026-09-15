@@ -76,8 +76,8 @@ describe('SettingsPage terminal theme selection', () => {
   });
 
   it('keeps the shared app accent green across dark shell skins', () => {
-    expect(resolveSettingsTheme('black').accent).toBe('#1fd67a');
-    expect(resolveSettingsTheme('blue').accent).toBe('#1fd67a');
+    expect(resolveSettingsTheme('black').accent).toBe('#38d47d');
+    expect(resolveSettingsTheme('blue').accent).toBe('#38d47d');
   });
 
   it('renders the expanded built-in theme catalog', () => {
@@ -273,6 +273,9 @@ describe('SettingsPage terminal theme selection', () => {
     const view = render(renderSettingsPage(baseSettings));
 
     fireEvent.click(screen.getByRole('button', { name: '适应手机屏宽' }));
+    expect(screen.getByText('全白底')).toBeTruthy();
+    expect(screen.getByText('全黑底')).toBeTruthy();
+    expect(screen.queryByText('全蓝底')).toBeNull();
     const blackSkinButton = screen.getByText('全黑底').closest('button');
     expect(blackSkinButton).toBeTruthy();
     fireEvent.click(blackSkinButton!);

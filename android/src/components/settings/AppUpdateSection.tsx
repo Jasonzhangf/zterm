@@ -5,6 +5,7 @@ export type {
   SettingsUpdateUiProps as AppUpdateSectionProps,
 } from '../../lib/plugin-settings-update/settings-update-contract';
 import { SettingsSectionTitle, settingsInputStyle, settingsSectionStyle } from './SettingsSection';
+import { AmbientButton, AmbientInput } from '../ambient';
 
 function formatManifestCandidateButtonLabel(label: string) {
   return label === '当前 daemon 地址' ? '使用当前 daemon 地址' : `使用 ${label}`;
@@ -43,7 +44,7 @@ export function AppUpdateSection({
 
       <div>
         <div style={{ marginBottom: '8px', fontSize: '14px', fontWeight: 700 }}>更新清单地址</div>
-        <input
+        <AmbientInput
           type="url"
           value={updateDraft.manifestUrl}
           onChange={(event) =>
@@ -60,7 +61,7 @@ export function AppUpdateSection({
         {routeCandidates.length > 0 ? (
           <div style={{ marginTop: '10px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             {routeCandidates.map((candidate) => (
-              <button
+              <AmbientButton
                 key={candidate.id}
                 type="button"
                 onClick={() =>
@@ -82,7 +83,7 @@ export function AppUpdateSection({
                 }}
               >
                 {formatManifestCandidateButtonLabel(candidate.label)}
-              </button>
+              </AmbientButton>
             ))}
           </div>
         ) : null}
@@ -97,7 +98,7 @@ export function AppUpdateSection({
           fontWeight: 600,
         }}
       >
-        <input
+        <AmbientInput
           type="checkbox"
           checked={updateDraft.autoCheckOnLaunch}
           onChange={(event) =>
@@ -128,7 +129,7 @@ export function AppUpdateSection({
       ) : null}
 
       <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-        <button
+        <AmbientButton
           onClick={onCheckForUpdate}
           disabled={updateChecking}
           style={{
@@ -144,8 +145,8 @@ export function AppUpdateSection({
           }}
         >
           {updateChecking ? '检查中…' : '检查更新'}
-        </button>
-        <button
+        </AmbientButton>
+        <AmbientButton
           onClick={onInstallUpdate}
           disabled={!hasNewVersion || updateInstalling}
           style={{
@@ -161,8 +162,8 @@ export function AppUpdateSection({
           }}
        >
          {updateInstalling ? '准备安装…' : '下载并安装'}
-       </button>
-        <button
+       </AmbientButton>
+        <AmbientButton
           onClick={onExportConfig}
           disabled={configExporting || configImporting}
           style={{
@@ -178,8 +179,8 @@ export function AppUpdateSection({
           }}
         >
           {configExporting ? '导出中…' : '导出配置'}
-        </button>
-        <button
+        </AmbientButton>
+        <AmbientButton
           onClick={onImportConfig}
           disabled={configImporting || configExporting}
           style={{
@@ -195,9 +196,9 @@ export function AppUpdateSection({
           }}
         >
           {configImporting ? '导入中…' : '导入配置'}
-        </button>
+        </AmbientButton>
         {rollbackBackup ? (
-          <button
+          <AmbientButton
             onClick={onRollback}
             disabled={isRollingBack}
             style={{
@@ -213,10 +214,10 @@ export function AppUpdateSection({
             }}
           >
             {isRollingBack ? '正在回滚…' : `回退到 ${rollbackBackup.versionName}`}
-          </button>
+          </AmbientButton>
         ) : null}
         {rollbackToPreviousEntry ? (
-          <button
+          <AmbientButton
             onClick={onRollbackToPrevious}
             disabled={isRollingBack}
             style={{
@@ -234,10 +235,10 @@ export function AppUpdateSection({
             {isRollingBack
               ? '正在回退到上一版本…'
               : `回退到上一版本 ${rollbackToPreviousEntry.sourceVersionName}`}
-          </button>
+          </AmbientButton>
         ) : null}
         {hasUpdateIgnorePolicy ? (
-          <button
+          <AmbientButton
             onClick={onResetUpdateIgnorePolicy}
             style={{
               minHeight: '44px',
@@ -251,7 +252,7 @@ export function AppUpdateSection({
             }}
           >
             清除忽略
-          </button>
+          </AmbientButton>
         ) : null}
       </div>
     </div>

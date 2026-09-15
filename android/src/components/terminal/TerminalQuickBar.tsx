@@ -71,6 +71,7 @@ import {
 import { shouldAllowQuickBarShellPointerEvent } from "./terminal-quickbar-shell-guards";
 import { buildTerminalShortcutSequence } from "../../../../packages/shared/src/shortcuts/terminal-shortcut-composer";
 import { resolveTerminalOrientation } from "../../lib/terminal-viewport-metrics";
+import { AmbientButton, AmbientInput, AmbientTextarea } from "../ambient";
 
 export interface TerminalQuickBarProps {
   /** Selects the isolated toolbar projection used by the fullscreen remote window. */
@@ -1494,7 +1495,7 @@ function TerminalQuickBarComponent({
     const actionDisplayLabel = resolveShortcutVisualLabel(action.label);
     const actionUsesSpaceBarVisual = isSpaceShortcutLabel(action.label);
     return (
-      <button
+      <AmbientButton
         key={action.id}
         tabIndex={-1}
         disabled={disabled}
@@ -1623,39 +1624,39 @@ function TerminalQuickBarComponent({
           outline: "none",
           borderRadius: "10px",
           backgroundColor: repeatActive
-            ? "rgba(113, 164, 255, 0.28)"
+            ? "color-mix(in srgb, var(--zterm-settings-accent) 28%, transparent)"
             : disabled
-              ? "rgba(68, 74, 86, 0.48)"
+              ? "var(--zterm-settings-field)"
               : action.id === "keyboard" && keyboardVisible
-                ? "rgba(31,214,122,0.18)"
+                ? "color-mix(in srgb, var(--zterm-settings-accent) 18%, transparent)"
                 : action.id === "tmux-copy" && copyModeActive
-                  ? "rgba(113, 164, 255, 0.28)"
+                  ? "color-mix(in srgb, var(--zterm-settings-accent) 28%, transparent)"
                   : action.id === "debug-overlay" && debugOverlayVisible
-                    ? "rgba(31,214,122,0.18)"
+                    ? "color-mix(in srgb, var(--zterm-settings-accent) 18%, transparent)"
                     : action.id === "line-numbers" && absoluteLineNumbersVisible
-                      ? "rgba(31,214,122,0.18)"
+                      ? "color-mix(in srgb, var(--zterm-settings-accent) 18%, transparent)"
                       : action.id === "remote-screenshot" &&
                           remoteScreenshotStatus !== "idle"
-                        ? "rgba(113, 164, 255, 0.18)"
+                        ? "color-mix(in srgb, var(--zterm-settings-accent) 18%, transparent)"
                         : fixed
-                          ? "rgba(22, 28, 41, 0.92)"
-                          : "rgba(31, 38, 53, 0.82)",
+                          ? "var(--zterm-settings-surface)"
+                          : "var(--zterm-settings-field)",
           color: repeatActive
-            ? "#bcd3ff"
+            ? "var(--zterm-settings-accent)"
             : disabled
-              ? "rgba(218, 224, 235, 0.46)"
+              ? "var(--zterm-settings-muted)"
               : action.id === "keyboard" && keyboardVisible
                 ? mobileTheme.colors.accent
                 : action.id === "tmux-copy" && copyModeActive
-                  ? "#8db7ff"
+                  ? mobileTheme.colors.accent
                   : action.id === "debug-overlay" && debugOverlayVisible
                     ? mobileTheme.colors.accent
                     : action.id === "line-numbers" && absoluteLineNumbersVisible
                       ? mobileTheme.colors.accent
                       : action.id === "remote-screenshot" &&
                           remoteScreenshotStatus !== "idle"
-                        ? "#8db7ff"
-                        : "#fff",
+                        ? mobileTheme.colors.accent
+                        : "var(--zterm-settings-text)",
           fontSize: fixed
             ? "13px"
             : action.id === "continue"
@@ -1674,17 +1675,17 @@ function TerminalQuickBarComponent({
           whiteSpace: "nowrap",
           opacity: disabled ? 0.58 : 1,
           boxShadow: disabled
-            ? "inset 0 0 0 1px rgba(255,255,255,0.06)"
+            ? "none"
             : repeatActive
-            ? "inset 0 0 0 1px rgba(141,183,255,0.55)"
+            ? "inset 0 0 0 1px color-mix(in srgb, var(--zterm-settings-accent) 55%, transparent)"
             : action.id === "remote-screenshot" &&
                 remoteScreenshotStatus !== "idle"
-              ? "inset 0 0 0 1px rgba(141,183,255,0.42)"
+              ? "inset 0 0 0 1px color-mix(in srgb, var(--zterm-settings-accent) 42%, transparent)"
               : "none",
         }}
       >
         {renderShortcutVisualNode(action.label, "button")}
-      </button>
+      </AmbientButton>
     );
   };
 
@@ -1696,7 +1697,7 @@ function TerminalQuickBarComponent({
     const actionDisplayLabel = resolveShortcutVisualLabel(action.label);
     const disabled = action.supported === false;
     return (
-      <button
+      <AmbientButton
         key={action.id}
         tabIndex={-1}
         disabled={disabled}
@@ -1724,12 +1725,12 @@ function TerminalQuickBarComponent({
               : actionDisplayLabel.length > 1
                 ? "48px"
                 : "34px",
-          border: "1px solid rgba(255,255,255,0.10)",
+          border: "1px solid var(--zterm-settings-border)",
           borderRadius: "12px",
           backgroundColor: disabled
-            ? "rgba(68, 74, 86, 0.48)"
-            : "rgba(31, 38, 53, 0.92)",
-          color: disabled ? "rgba(218, 224, 235, 0.46)" : "#fff",
+            ? "var(--zterm-settings-field)"
+            : "var(--zterm-settings-surface)",
+          color: disabled ? "var(--zterm-settings-muted)" : "var(--zterm-settings-text)",
           fontSize: compact ? "12px" : "13px",
           fontWeight: 800,
           cursor: disabled ? "not-allowed" : "pointer",
@@ -1743,7 +1744,7 @@ function TerminalQuickBarComponent({
         }}
       >
         {actionDisplayLabel}
-      </button>
+      </AmbientButton>
     );
   };
 
@@ -2032,7 +2033,7 @@ function TerminalQuickBarComponent({
             : "1px solid var(--zterm-neo-border)",
       }}
     >
-      <input
+      <AmbientInput
         ref={imageInputRef}
         type="file"
         disabled={!imagePasteSupported}
@@ -2055,7 +2056,7 @@ function TerminalQuickBarComponent({
         }}
         onChange={handleImageInputChange}
       />
-      <input
+      <AmbientInput
         ref={fileInputRef}
         type="file"
         disabled={!fileTransferSupported}
@@ -2099,7 +2100,7 @@ function TerminalQuickBarComponent({
             position: "fixed",
             inset: 0,
             zIndex: 120,
-            backgroundColor: "rgba(8, 10, 18, 0.78)",
+            backgroundColor: "var(--zterm-sheet-overlay)",
             backdropFilter: "blur(10px)",
             display: "flex",
             alignItems: "flex-end",
@@ -2112,9 +2113,9 @@ function TerminalQuickBarComponent({
               height: overlaySheetHeightStyle,
               maxHeight: overlaySheetHeightStyle,
               borderRadius: "26px 26px 0 0",
-              backgroundColor: "#f7f8fb",
-              color: mobileTheme.colors.lightText,
-              boxShadow: "0 -20px 50px rgba(0,0,0,0.28)",
+              backgroundColor: "var(--zterm-settings-background)",
+              color: "var(--zterm-settings-text)",
+              boxShadow: "var(--zterm-settings-shadow)",
               display: "flex",
               flexDirection: "column",
               minHeight: 0,
@@ -2124,8 +2125,8 @@ function TerminalQuickBarComponent({
             <div
               style={{
                 padding: "10px 18px 12px",
-                borderBottom: "1px solid rgba(23, 27, 45, 0.08)",
-                backgroundColor: "#fff",
+                borderBottom: "1px solid var(--zterm-settings-border)",
+                backgroundColor: "var(--zterm-settings-surface)",
               }}
             >
               <div
@@ -2133,22 +2134,22 @@ function TerminalQuickBarComponent({
                   width: "42px",
                   height: "5px",
                   borderRadius: "999px",
-                  backgroundColor: "rgba(23, 27, 45, 0.15)",
+                  backgroundColor: "var(--zterm-settings-border)",
                   margin: "0 auto 12px",
                 }}
               />
               <div
                 style={{ display: "flex", alignItems: "center", gap: "12px" }}
               >
-                <button
+                <AmbientButton
                   onClick={closeEditor}
                   style={{
                     width: "34px",
                     height: "34px",
                     borderRadius: "999px",
                     border: "none",
-                    backgroundColor: "#eef2f8",
-                    color: mobileTheme.colors.lightText,
+                    backgroundColor: "var(--zterm-settings-field)",
+                    color: "var(--zterm-settings-text)",
                     fontSize: "20px",
                     cursor: "pointer",
                     flexShrink: 0,
@@ -2156,7 +2157,7 @@ function TerminalQuickBarComponent({
                   aria-label="Close shortcut editor"
                 >
                   ×
-                </button>
+                </AmbientButton>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: "20px", fontWeight: 800 }}>
                     快捷输入设置
@@ -2194,29 +2195,29 @@ function TerminalQuickBarComponent({
                     当前快捷输入
                   </div>
                 </div>
-                <button
+                <AmbientButton
                   onClick={() => openDraftForm()}
                   style={{
                     minHeight: "38px",
                     padding: "0 14px",
                     borderRadius: "999px",
                     border: "none",
-                    backgroundColor: "rgba(22, 119, 255, 0.12)",
-                    color: "#1677ff",
+                    backgroundColor: "color-mix(in srgb, var(--zterm-settings-accent) 14%, transparent)",
+                    color: "var(--zterm-settings-accent)",
                     fontWeight: 800,
                     cursor: "pointer",
                     flexShrink: 0,
                   }}
                 >
                   + 添加
-                </button>
+                </AmbientButton>
               </div>
 
               <div
                 style={{
                   borderRadius: "20px",
-                  backgroundColor: "#fff",
-                  border: "1px solid rgba(23, 27, 45, 0.08)",
+                  backgroundColor: "var(--zterm-settings-surface)",
+                  border: "1px solid var(--zterm-settings-border)",
                   overflow: "hidden",
                 }}
               >
@@ -2234,7 +2235,7 @@ function TerminalQuickBarComponent({
                         borderTop:
                           index === 0
                             ? "none"
-                            : "1px solid rgba(23, 27, 45, 0.08)",
+                            : "1px solid var(--zterm-settings-border)",
                       }}
                     >
                       <div style={{ flex: 1, minWidth: 0 }}>
@@ -2244,7 +2245,7 @@ function TerminalQuickBarComponent({
                         <div
                           style={{
                             fontSize: "12px",
-                            color: mobileTheme.colors.lightMuted,
+                            color: "var(--zterm-settings-muted)",
                             marginTop: "4px",
                             whiteSpace: "nowrap",
                             overflow: "hidden",
@@ -2262,7 +2263,7 @@ function TerminalQuickBarComponent({
                           flexShrink: 0,
                         }}
                       >
-                        <button
+                        <AmbientButton
                           onClick={() =>
                             persistDraftActions(
                               moveItem(draftActions, index, index - 1),
@@ -2273,8 +2274,8 @@ function TerminalQuickBarComponent({
                           aria-label={`Move ${action.label} up`}
                         >
                           ↑
-                        </button>
-                        <button
+                        </AmbientButton>
+                        <AmbientButton
                           onClick={() =>
                             persistDraftActions(
                               moveItem(draftActions, index, index + 1),
@@ -2287,17 +2288,17 @@ function TerminalQuickBarComponent({
                           aria-label={`Move ${action.label} down`}
                         >
                           ↓
-                        </button>
-                        <button
+                        </AmbientButton>
+                        <AmbientButton
                           onClick={() => openDraftForm(action)}
                           style={overlayTextButton(
-                            "#eef2f8",
-                            mobileTheme.colors.lightText,
+                            "var(--zterm-settings-field)",
+                            "var(--zterm-settings-text)",
                           )}
                         >
                           编辑
-                        </button>
-                        <button
+                        </AmbientButton>
+                        <AmbientButton
                           onClick={() => {
                             persistDraftActions(
                               draftActions.filter(
@@ -2311,12 +2312,12 @@ function TerminalQuickBarComponent({
                             }
                           }}
                           style={overlayTextButton(
-                            "rgba(255, 124, 146, 0.12)",
+                            "var(--zterm-settings-danger-soft)",
                             mobileTheme.colors.danger,
                           )}
                         >
                           删除
-                        </button>
+                        </AmbientButton>
                       </div>
                     </div>
                   ))
@@ -2327,8 +2328,8 @@ function TerminalQuickBarComponent({
                 <div
                   style={{
                     borderRadius: "20px",
-                    backgroundColor: "#fff",
-                    border: "1px solid rgba(23, 27, 45, 0.08)",
+                    backgroundColor: "var(--zterm-settings-surface)",
+                    border: "1px solid var(--zterm-settings-border)",
                     padding: "16px",
                     display: "flex",
                     flexDirection: "column",
@@ -2341,7 +2342,7 @@ function TerminalQuickBarComponent({
                     </div>
                   </div>
 
-                  <input
+                  <AmbientInput
                     value={draftLabel}
                     onChange={(event) => {
                       const nextValue = event.target.value;
@@ -2351,7 +2352,7 @@ function TerminalQuickBarComponent({
                     placeholder="显示名称"
                     style={lightEditorInputStyle()}
                   />
-                  <textarea
+                  <AmbientTextarea
                     value={draftTextInput}
                     onChange={(event) => {
                       const nextValue = event.target.value;
@@ -2368,21 +2369,21 @@ function TerminalQuickBarComponent({
                   />
 
                   <div style={{ display: "flex", gap: "10px" }}>
-                    <button
+                    <AmbientButton
                       onClick={closeEditor}
                       style={{
                         width: "100%",
                         minHeight: "44px",
                         border: "none",
                         borderRadius: "14px",
-                        backgroundColor: "#eef2f8",
-                        color: mobileTheme.colors.lightText,
+                        backgroundColor: "var(--zterm-settings-field)",
+                        color: "var(--zterm-settings-text)",
                         fontWeight: 700,
                         cursor: "pointer",
                       }}
                     >
                       完成
-                    </button>
+                    </AmbientButton>
                   </div>
                 </div>
               )}
@@ -2401,7 +2402,7 @@ function TerminalQuickBarComponent({
               position: "fixed",
               inset: 0,
               zIndex: 240,
-              backgroundColor: "rgba(8, 10, 18, 0.78)",
+              backgroundColor: "var(--zterm-sheet-overlay)",
               backdropFilter: "blur(10px)",
               display: "flex",
               alignItems: "flex-end",
@@ -2414,9 +2415,9 @@ function TerminalQuickBarComponent({
                 height: overlaySheetHeightStyle,
                 maxHeight: overlaySheetHeightStyle,
                 borderRadius: "26px 26px 0 0",
-                backgroundColor: "#f7f8fb",
-                color: mobileTheme.colors.lightText,
-                boxShadow: "0 -20px 50px rgba(0,0,0,0.28)",
+                backgroundColor: "var(--zterm-settings-background)",
+                color: "var(--zterm-settings-text)",
+                boxShadow: "var(--zterm-settings-shadow)",
                 display: "flex",
                 flexDirection: "column",
                 minHeight: 0,
@@ -2426,8 +2427,8 @@ function TerminalQuickBarComponent({
             <div
               style={{
                 padding: "10px 18px 12px",
-                borderBottom: "1px solid rgba(23, 27, 45, 0.08)",
-                backgroundColor: "#fff",
+                borderBottom: "1px solid var(--zterm-settings-border)",
+                backgroundColor: "var(--zterm-settings-surface)",
               }}
             >
               <div
@@ -2435,7 +2436,7 @@ function TerminalQuickBarComponent({
                   width: "42px",
                   height: "5px",
                   borderRadius: "999px",
-                  backgroundColor: "rgba(23, 27, 45, 0.15)",
+                  backgroundColor: "var(--zterm-settings-border)",
                   margin: "0 auto 12px",
                 }}
               />
@@ -2443,15 +2444,15 @@ function TerminalQuickBarComponent({
                 style={{ display: "flex", alignItems: "center", gap: "12px" }}
               >
                 {shortcutEditorMode === "form" ? (
-                  <button
+                  <AmbientButton
                     onClick={backToShortcutList}
                     style={{
                       width: "34px",
                       height: "34px",
                       borderRadius: "999px",
                       border: "none",
-                      backgroundColor: "#eef2f8",
-                      color: mobileTheme.colors.lightText,
+                      backgroundColor: "var(--zterm-settings-field)",
+                      color: "var(--zterm-settings-text)",
                       fontSize: "20px",
                       cursor: "pointer",
                       flexShrink: 0,
@@ -2459,7 +2460,7 @@ function TerminalQuickBarComponent({
                     aria-label="返回快捷键列表"
                   >
                     ‹
-                  </button>
+                  </AmbientButton>
                 ) : (
                   <div
                     style={{ width: "34px", height: "34px", flexShrink: 0 }}
@@ -2480,15 +2481,15 @@ function TerminalQuickBarComponent({
                       : "快捷按键设置"}
                   </div>
                 </div>
-                <button
+                <AmbientButton
                   onClick={closeShortcutEditor}
                   style={{
                     width: "34px",
                     height: "34px",
                     borderRadius: "999px",
                     border: "none",
-                    backgroundColor: "#eef2f8",
-                    color: mobileTheme.colors.lightText,
+                    backgroundColor: "var(--zterm-settings-field)",
+                    color: "var(--zterm-settings-text)",
                     fontSize: "20px",
                     cursor: "pointer",
                     flexShrink: 0,
@@ -2496,7 +2497,7 @@ function TerminalQuickBarComponent({
                   aria-label="关闭快捷键设置"
                 >
                   ×
-                </button>
+                </AmbientButton>
               </div>
             </div>
 
@@ -2532,7 +2533,7 @@ function TerminalQuickBarComponent({
                     <div
                       style={{
                         fontSize: "12px",
-                        color: mobileTheme.colors.lightMuted,
+                        color: "var(--zterm-settings-muted)",
                         marginTop: "4px",
                       }}
                     >
@@ -2551,8 +2552,8 @@ function TerminalQuickBarComponent({
                         key={row}
                         style={{
                           borderRadius: "20px",
-                          backgroundColor: "#fff",
-                          border: "1px solid rgba(23, 27, 45, 0.08)",
+                          backgroundColor: "var(--zterm-settings-surface)",
+                          border: "1px solid var(--zterm-settings-border)",
                           overflow: "hidden",
                         }}
                       >
@@ -2563,7 +2564,7 @@ function TerminalQuickBarComponent({
                             alignItems: "center",
                             justifyContent: "space-between",
                             gap: "12px",
-                            backgroundColor: "#fff",
+                            backgroundColor: "var(--zterm-settings-surface)",
                           }}
                         >
                           <div>
@@ -2573,29 +2574,29 @@ function TerminalQuickBarComponent({
                             <div
                               style={{
                                 fontSize: "12px",
-                                color: mobileTheme.colors.lightMuted,
+                                color: "var(--zterm-settings-muted)",
                                 marginTop: "4px",
                               }}
                             >
                               {rowMeta.summary}
                             </div>
                           </div>
-                          <button
+                          <AmbientButton
                             onClick={() => openShortcutForm(row)}
                             style={{
                               minHeight: "38px",
                               padding: "0 14px",
                               borderRadius: "999px",
                               border: "none",
-                              backgroundColor: "rgba(22, 119, 255, 0.12)",
-                              color: "#1677ff",
+                              backgroundColor: "color-mix(in srgb, var(--zterm-settings-accent) 14%, transparent)",
+                              color: "var(--zterm-settings-accent)",
                               fontWeight: 800,
                               cursor: "pointer",
                               flexShrink: 0,
                             }}
                           >
                             {rowMeta.addLabel}
-                          </button>
+                          </AmbientButton>
                         </div>
 
                         {rowActions.length === 0 ? (
@@ -2603,7 +2604,7 @@ function TerminalQuickBarComponent({
                             style={{
                               padding: "0 16px 18px",
                               fontSize: "13px",
-                              color: mobileTheme.colors.lightMuted,
+                              color: "var(--zterm-settings-muted)",
                             }}
                           >
                             当前还没有内容，点右侧按钮进入详情页添加。
@@ -2622,10 +2623,10 @@ function TerminalQuickBarComponent({
                                   display: "flex",
                                   alignItems: "center",
                                   gap: "10px",
-                                  borderTop: "1px solid rgba(23, 27, 45, 0.08)",
+                                  borderTop: "1px solid var(--zterm-settings-border)",
                                 }}
                               >
-                                <button
+                                <AmbientButton
                                   onClick={
                                     isBuiltInShortcutAction(action.id)
                                       ? undefined
@@ -2659,7 +2660,7 @@ function TerminalQuickBarComponent({
                                       fontWeight: displayMeta.titleUsesKeycap
                                         ? 700
                                         : 600,
-                                      color: mobileTheme.colors.lightText,
+                                      color: "var(--zterm-settings-text)",
                                     }}
                                   >
                                     {displayMeta.titleUsesKeycap
@@ -2673,7 +2674,7 @@ function TerminalQuickBarComponent({
                                     <div
                                       style={{
                                         fontSize: "12px",
-                                        color: mobileTheme.colors.lightMuted,
+                                        color: "var(--zterm-settings-muted)",
                                         marginTop: displayMeta.titleUsesKeycap
                                           ? "4px"
                                           : "3px",
@@ -2683,7 +2684,7 @@ function TerminalQuickBarComponent({
                                       {displayMeta.subtitle}
                                     </div>
                                   ) : null}
-                                </button>
+                                </AmbientButton>
                                 <div
                                   style={{
                                     display: "flex",
@@ -2695,20 +2696,20 @@ function TerminalQuickBarComponent({
                                   }}
                                 >
                                   {!isBuiltInShortcutAction(action.id) ? (
-                                    <button
+                                    <AmbientButton
                                       onClick={() =>
                                         openShortcutForm(row, action)
                                       }
                                       style={compactOverlayTextButton(
-                                        "rgba(22, 119, 255, 0.12)",
-                                        "#1677ff",
+                                        "color-mix(in srgb, var(--zterm-settings-accent) 14%, transparent)",
+                                        "var(--zterm-settings-accent)",
                                       )}
                                       aria-label={`编辑 ${action.label || "未命名快捷键"}`}
                                     >
                                       编辑
-                                    </button>
+                                    </AmbientButton>
                                   ) : null}
-                                  <button
+                                  <AmbientButton
                                     onClick={() =>
                                       persistShortcutActions(
                                         moveShortcutActionWithinRow(
@@ -2726,8 +2727,8 @@ function TerminalQuickBarComponent({
                                     aria-label={`上移 ${action.label}`}
                                   >
                                     ↑
-                                  </button>
-                                  <button
+                                  </AmbientButton>
+                                  <AmbientButton
                                     onClick={() =>
                                       persistShortcutActions(
                                         moveShortcutActionWithinRow(
@@ -2745,9 +2746,9 @@ function TerminalQuickBarComponent({
                                     aria-label={`下移 ${action.label}`}
                                   >
                                     ↓
-                                  </button>
+                                  </AmbientButton>
                                   {!isBuiltInShortcutAction(action.id) ? (
-                                    <button
+                                    <AmbientButton
                                       onClick={() =>
                                         persistShortcutActions(
                                           draftShortcutActions.filter(
@@ -2756,13 +2757,13 @@ function TerminalQuickBarComponent({
                                         )
                                       }
                                       style={compactOverlayTextButton(
-                                        "rgba(255, 124, 146, 0.12)",
+                                        "var(--zterm-settings-danger-soft)",
                                         mobileTheme.colors.danger,
                                       )}
                                       aria-label={`删除 ${action.label}`}
                                     >
                                       删除
-                                    </button>
+                                    </AmbientButton>
                                   ) : null}
                                 </div>
                               </div>
@@ -2777,15 +2778,15 @@ function TerminalQuickBarComponent({
                 <div
                   style={{
                     borderRadius: "24px",
-                    backgroundColor: "#fff",
-                    border: "1px solid rgba(23, 27, 45, 0.08)",
+                    backgroundColor: "var(--zterm-settings-surface)",
+                    border: "1px solid var(--zterm-settings-border)",
                     padding: "18px",
                     display: "flex",
                     flexDirection: "column",
                     gap: "14px",
                   }}
                 >
-                  <input
+                  <AmbientInput
                     value={draftShortcutLabel}
                     onChange={(event) =>
                       setDraftShortcutLabel(event.target.value)
@@ -2796,7 +2797,7 @@ function TerminalQuickBarComponent({
                   <div
                     style={{
                       borderRadius: "16px",
-                      backgroundColor: "#eef2f8",
+                      backgroundColor: "var(--zterm-settings-field)",
                       padding: "12px 14px",
                       display: "flex",
                       flexDirection: "column",
@@ -2807,7 +2808,7 @@ function TerminalQuickBarComponent({
                       style={{
                         fontSize: "13px",
                         fontWeight: 800,
-                        color: "#1677ff",
+                        color: "var(--zterm-settings-accent)",
                       }}
                     >
                       {draftShortcutRowMeta.formTag}
@@ -2815,7 +2816,7 @@ function TerminalQuickBarComponent({
                     <div
                       style={{
                         fontSize: "12px",
-                        color: mobileTheme.colors.lightMuted,
+                        color: "var(--zterm-settings-muted)",
                         lineHeight: 1.5,
                       }}
                     >
@@ -2828,11 +2829,11 @@ function TerminalQuickBarComponent({
                       gridTemplateColumns: "1fr 1fr",
                       gap: "8px",
                       borderRadius: "18px",
-                      backgroundColor: "#eef2f5",
+                      backgroundColor: "var(--zterm-settings-field)",
                       padding: "6px",
                     }}
                   >
-                    <button
+                    <AmbientButton
                       onClick={() => setShortcutEditorTab("keyboard")}
                       style={{
                         minHeight: "44px",
@@ -2840,23 +2841,23 @@ function TerminalQuickBarComponent({
                         border: "none",
                         backgroundColor:
                           shortcutEditorTab === "keyboard"
-                            ? "#ffffff"
+                            ? "var(--zterm-settings-surface)"
                             : "transparent",
                         color:
                           shortcutEditorTab === "keyboard"
-                            ? "#1677ff"
-                            : mobileTheme.colors.lightText,
+                            ? "var(--zterm-settings-accent)"
+                            : "var(--zterm-settings-text)",
                         fontWeight: 800,
                         cursor: "pointer",
                         boxShadow:
                           shortcutEditorTab === "keyboard"
-                            ? "0 1px 2px rgba(0,0,0,0.06)"
+                            ? "0 1px 2px color-mix(in srgb, var(--zterm-settings-text) 10%, transparent)"
                             : "none",
                       }}
                     >
                       键盘按键
-                    </button>
-                    <button
+                    </AmbientButton>
+                    <AmbientButton
                       onClick={() => setShortcutEditorTab("common")}
                       style={{
                         minHeight: "44px",
@@ -2864,24 +2865,24 @@ function TerminalQuickBarComponent({
                         border: "none",
                         backgroundColor:
                           shortcutEditorTab === "common"
-                            ? "#ffffff"
+                            ? "var(--zterm-settings-surface)"
                             : "transparent",
                         color:
                           shortcutEditorTab === "common"
-                            ? "#1677ff"
-                            : mobileTheme.colors.lightText,
+                            ? "var(--zterm-settings-accent)"
+                            : "var(--zterm-settings-text)",
                         fontWeight: 800,
                         cursor: "pointer",
                         boxShadow:
                           shortcutEditorTab === "common"
-                            ? "0 1px 2px rgba(0,0,0,0.06)"
+                            ? "0 1px 2px color-mix(in srgb, var(--zterm-settings-text) 10%, transparent)"
                             : "none",
                       }}
                     >
                       系统操作
-                    </button>
+                    </AmbientButton>
                   </div>
-                  <textarea
+                  <AmbientTextarea
                     value={draftShortcutBuild.preview || draftShortcutSequence}
                     readOnly
                     placeholder={
@@ -2908,39 +2909,37 @@ function TerminalQuickBarComponent({
                       <div
                         style={{
                           fontSize: "12px",
-                          color: mobileTheme.colors.lightMuted,
+                          color: "var(--zterm-settings-muted)",
                         }}
                       >
                         当前还没有加入特殊键
                       </div>
                     ) : (
                       draftShortcutTokens.map((token, index) => (
-                        <button
+                        <AmbientButton
                           key={`${token.label}-${index}`}
                           onClick={() => removeShortcutToken(index)}
                           style={floatingPillButton(
-                            "rgba(22, 119, 255, 0.08)",
-                            "#1677ff",
+                            "color-mix(in srgb, var(--zterm-settings-accent) 10%, transparent)",
+                            "var(--zterm-settings-accent)",
                           )}
                         >
                           {token.label} ×
-                        </button>
+                        </AmbientButton>
                       ))
                     )}
-                    <button
+                    <AmbientButton
                       onClick={clearShortcutTokens}
                       disabled={draftShortcutTokens.length === 0}
                       style={floatingPillButton(
+                        "var(--zterm-settings-field)",
                         draftShortcutTokens.length === 0
-                          ? "#f3f5f9"
-                          : "#eef2f8",
-                        draftShortcutTokens.length === 0
-                          ? "#c3cad7"
-                          : mobileTheme.colors.lightText,
+                          ? "var(--zterm-settings-muted)"
+                          : "var(--zterm-settings-text)",
                       )}
                     >
                       清空
-                    </button>
+                    </AmbientButton>
                   </div>
 
                   {draftShortcutEffectiveError ? (
@@ -2958,7 +2957,7 @@ function TerminalQuickBarComponent({
                   {shortcutEditorTab === "keyboard" ? (
                     <>
                       <div style={{ display: "flex", gap: "8px" }}>
-                        <input
+                        <AmbientInput
                           value={draftShortcutTextInput}
                           onChange={(event) =>
                             setDraftShortcutTextInput(event.target.value)
@@ -2970,21 +2969,21 @@ function TerminalQuickBarComponent({
                             flex: 1,
                           }}
                         />
-                        <button
+                        <AmbientButton
                           onClick={appendShortcutTextInput}
                           style={{
                             minWidth: "84px",
                             minHeight: "40px",
                             border: "none",
                             borderRadius: "14px",
-                            backgroundColor: "rgba(22, 119, 255, 0.12)",
-                            color: "#1677ff",
+                            backgroundColor: "color-mix(in srgb, var(--zterm-settings-accent) 14%, transparent)",
+                            color: "var(--zterm-settings-accent)",
                             fontWeight: 800,
                             cursor: "pointer",
                           }}
                         >
                           加入
-                        </button>
+                        </AmbientButton>
                       </div>
 
                       <div
@@ -2995,7 +2994,7 @@ function TerminalQuickBarComponent({
                         }}
                       >
                         {availableKeyboardShortcutTokens.map((token) => (
-                          <button
+                          <AmbientButton
                             key={`${token.label}-${token.sequence}`}
                             onClick={() => appendShortcutToken(token)}
                             aria-label={token.label}
@@ -3018,7 +3017,7 @@ function TerminalQuickBarComponent({
                             >
                               {renderShortcutVisualNode(token.label, "token")}
                             </span>
-                          </button>
+                          </AmbientButton>
                         ))}
                       </div>
                     </>
@@ -3031,7 +3030,7 @@ function TerminalQuickBarComponent({
                       }}
                     >
                       {availableCommonShortcutTokens.map((token) => (
-                        <button
+                        <AmbientButton
                           key={`${token.label}-${token.sequence}`}
                           onClick={() => appendShortcutToken(token)}
                           style={shortcutTokenGridButton(
@@ -3044,12 +3043,12 @@ function TerminalQuickBarComponent({
                           )}
                         >
                           {token.label}
-                        </button>
+                        </AmbientButton>
                       ))}
                     </div>
                   )}
 
-                  <button
+                  <AmbientButton
                     onClick={saveShortcutForm}
                     disabled={
                       !draftShortcutBuild.sequence ||
@@ -3060,8 +3059,8 @@ function TerminalQuickBarComponent({
                       minHeight: "52px",
                       border: "none",
                       borderRadius: "16px",
-                      backgroundColor: "#1677ff",
-                      color: "#fff",
+                      backgroundColor: "var(--zterm-settings-accent)",
+                      color: "var(--zterm-settings-accent-text)",
                       fontWeight: 800,
                       fontSize: "18px",
                       cursor:
@@ -3078,7 +3077,7 @@ function TerminalQuickBarComponent({
                     }}
                   >
                     {editingShortcutIndex >= 0 ? "保存快捷键" : "添加快捷键"}
-                  </button>
+                  </AmbientButton>
                 </div>
               )}
             </div>
@@ -3096,7 +3095,7 @@ function TerminalQuickBarComponent({
               position: "fixed",
               inset: 0,
               zIndex: 129,
-              backgroundColor: "rgba(5, 8, 14, 0.18)",
+              backgroundColor: "color-mix(in srgb, #050608 18%, transparent)",
             }}
           />
           <div
@@ -3111,20 +3110,20 @@ function TerminalQuickBarComponent({
               width: "min(320px, calc(100vw - 24px))",
               maxHeight: `min(500px, calc(100dvh - ${Math.max(156, keyboardInsetPx + 64)}px))`,
               borderRadius: "18px",
-              backgroundColor: "rgba(23, 27, 45, 0.96)",
-              color: "#fff",
-              boxShadow: "0 20px 50px rgba(0,0,0,0.32)",
+              backgroundColor: "var(--zterm-settings-surface)",
+              color: "var(--zterm-settings-text)",
+              boxShadow: "var(--zterm-settings-shadow)",
               display: "flex",
               flexDirection: "column",
               minHeight: 0,
               overflow: "hidden",
-              border: "1px solid rgba(255,255,255,0.08)",
+              border: "1px solid var(--zterm-settings-border)",
             }}
           >
             <div
               style={{
                 padding: "10px 10px 8px",
-                borderBottom: "1px solid rgba(255,255,255,0.08)",
+                borderBottom: "1px solid var(--zterm-settings-border)",
                 display: "flex",
                 flexDirection: "column",
                 gap: "8px",
@@ -3147,23 +3146,23 @@ function TerminalQuickBarComponent({
                       style={{
                         marginTop: "4px",
                         fontSize: "11px",
-                        color: "rgba(134,239,172,0.95)",
+                        color: "var(--zterm-settings-accent)",
                       }}
                     >
                       {copyDebugLabel}
                     </div>
                   ) : null}
                 </div>
-                <button
+                <AmbientButton
                   type="button"
                   onClick={() => setFloatingMenuOpen(false)}
                   style={{
                     width: "34px",
                     height: "34px",
                     borderRadius: "999px",
-                    border: "1px solid rgba(255,255,255,0.08)",
-                    backgroundColor: "rgba(255,255,255,0.08)",
-                    color: "#fff",
+                    border: "1px solid var(--zterm-settings-border)",
+                    backgroundColor: "var(--zterm-settings-field)",
+                    color: "var(--zterm-settings-text)",
                     fontSize: "18px",
                     fontWeight: 800,
                     cursor: "pointer",
@@ -3172,20 +3171,20 @@ function TerminalQuickBarComponent({
                   aria-label="关闭快捷输入"
                 >
                   ×
-                </button>
+                </AmbientButton>
               </div>
 
               <div
                 className="zterm-quick-input-editor-shell"
                 style={{
                   borderRadius: "18px",
-                  border: "1px solid rgba(255,255,255,0.08)",
-                  backgroundColor: "rgba(14, 19, 31, 0.88)",
-                  boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.02)",
+                  border: "1px solid var(--zterm-settings-border)",
+                  backgroundColor: "var(--zterm-settings-field)",
+                  boxShadow: "none",
                   padding: "6px",
                 }}
               >
-                <textarea
+                <AmbientTextarea
                   ref={quickInputTextareaRef}
                   value={quickInputValue}
                   onChange={(event) =>
@@ -3205,9 +3204,9 @@ function TerminalQuickBarComponent({
                     resize: "vertical",
                     padding: "9px 10px",
                     borderRadius: "12px",
-                    border: "1px solid rgba(255,255,255,0.08)",
-                    backgroundColor: "rgba(255,255,255,0.04)",
-                    color: "#fff",
+                    border: "1px solid var(--zterm-settings-border)",
+                    backgroundColor: "var(--zterm-settings-surface)",
+                    color: "var(--zterm-settings-text)",
                     fontSize: "14px",
                     whiteSpace: "pre-wrap",
                     lineHeight: 1.35,
@@ -3216,7 +3215,7 @@ function TerminalQuickBarComponent({
               </div>
 
               <div style={{ display: "flex", gap: "8px" }}>
-                <button
+                <AmbientButton
                   onClick={() => {
                     setFloatingMenuOpen(false);
                     onOpenScheduleComposer?.(quickInputValueRef.current);
@@ -3225,33 +3224,33 @@ function TerminalQuickBarComponent({
                   style={{
                     flex: 1,
                     minHeight: "36px",
-                    border: "1px solid rgba(113, 164, 255, 0.24)",
+                    border: "1px solid color-mix(in srgb, var(--zterm-settings-accent) 28%, transparent)",
                     borderRadius: "12px",
-                    backgroundColor: "rgba(113, 164, 255, 0.12)",
-                    color: "#8db7ff",
+                    backgroundColor: "color-mix(in srgb, var(--zterm-settings-accent) 14%, transparent)",
+                    color: "var(--zterm-settings-accent)",
                     fontWeight: 800,
                     opacity: !activeSessionId ? 0.45 : 1,
                     cursor: !activeSessionId ? "not-allowed" : "pointer",
                   }}
                 >
                   定时
-                </button>
-                <button
+                </AmbientButton>
+                <AmbientButton
                   onClick={() => {
                     sendSessionDraft();
                   }}
                   style={{
                     flex: 1,
                     minHeight: "36px",
-                    border: "1px solid rgba(31,214,122,0.18)",
+                    border: "1px solid color-mix(in srgb, var(--zterm-settings-accent) 28%, transparent)",
                     borderRadius: "12px",
-                    backgroundColor: "rgba(31,214,122,0.18)",
+                    backgroundColor: "color-mix(in srgb, var(--zterm-settings-accent) 18%, transparent)",
                     color: mobileTheme.colors.accent,
                     fontWeight: 800,
                   }}
                 >
                   发送
-                </button>
+                </AmbientButton>
               </div>
             </div>
 
@@ -3277,7 +3276,7 @@ function TerminalQuickBarComponent({
                     const active = count === currentSplitCount;
                     const disabled = isRemoteWindowTerminalOnlyAction(`split-count-${count}`);
                     return (
-                      <button
+                      <AmbientButton
                         key={`split-count-${count}`}
                         type="button"
                         onClick={() => {
@@ -3294,25 +3293,25 @@ function TerminalQuickBarComponent({
                           minWidth: "72px",
                           minHeight: "34px",
                           padding: "0 10px",
-                          border: `1px solid ${active ? "rgba(113, 164, 255, 0.28)" : "rgba(255,255,255,0.08)"}`,
+                          border: `1px solid ${active ? "color-mix(in srgb, var(--zterm-settings-accent) 28%, transparent)" : "var(--zterm-settings-border)"}`,
                           borderRadius: "14px",
                           backgroundColor: active
-                            ? "rgba(113, 164, 255, 0.18)"
+                            ? "color-mix(in srgb, var(--zterm-settings-accent) 18%, transparent)"
                             : disabled
-                              ? "rgba(68, 74, 86, 0.48)"
-                            : "rgba(31, 38, 53, 0.82)",
-                          color: disabled ? "rgba(218, 224, 235, 0.46)" : active ? "#8db7ff" : "#fff",
+                              ? "var(--zterm-settings-field)"
+                            : "var(--zterm-settings-field)",
+                          color: disabled ? "var(--zterm-settings-muted)" : active ? "var(--zterm-settings-accent)" : "var(--zterm-settings-text)",
                           fontWeight: 800,
                           opacity: disabled ? 0.58 : 1,
                           cursor: disabled ? "not-allowed" : "pointer",
                         }}
                       >
                         {count} 分屏
-                      </button>
+                      </AmbientButton>
                     );
                   })}
                   {normalizedSplitCountOptions.length === 0 ? (
-                    <button
+                    <AmbientButton
                       type="button"
                       onClick={() => {
                         if (isRemoteWindowTerminalOnlyAction("split-toggle")) {
@@ -3326,27 +3325,27 @@ function TerminalQuickBarComponent({
                       style={{
                         flex: 1,
                         minHeight: "40px",
-                        border: "1px solid rgba(113, 164, 255, 0.24)",
+                        border: "1px solid color-mix(in srgb, var(--zterm-settings-accent) 28%, transparent)",
                         borderRadius: "14px",
                         backgroundColor: isRemoteWindowTerminalOnlyAction("split-toggle")
-                          ? "rgba(68, 74, 86, 0.48)"
+                          ? "var(--zterm-settings-field)"
                           : splitVisible
-                          ? "rgba(113, 164, 255, 0.18)"
-                          : "rgba(31, 38, 53, 0.82)",
+                          ? "color-mix(in srgb, var(--zterm-settings-accent) 18%, transparent)"
+                          : "var(--zterm-settings-field)",
                         color: isRemoteWindowTerminalOnlyAction("split-toggle")
-                          ? "rgba(218, 224, 235, 0.46)"
-                          : splitVisible ? "#8db7ff" : "#fff",
+                          ? "var(--zterm-settings-muted)"
+                          : splitVisible ? "var(--zterm-settings-accent)" : "var(--zterm-settings-text)",
                         fontWeight: 800,
                         opacity: isRemoteWindowTerminalOnlyAction("split-toggle") ? 0.58 : 1,
                         cursor: isRemoteWindowTerminalOnlyAction("split-toggle") ? "not-allowed" : "pointer",
                       }}
                     >
                       {splitVisible ? "关闭分屏" : "开启分屏"}
-                    </button>
+                    </AmbientButton>
                   ) : null}
                 </div>
                 {splitVisible && onCycleSplitPane ? (
-                  <button
+                  <AmbientButton
                     type="button"
                     onClick={() => {
                       onCycleSplitPane();
@@ -3355,15 +3354,15 @@ function TerminalQuickBarComponent({
                     style={{
                       width: "110px",
                       minHeight: "34px",
-                      border: "1px solid rgba(255,255,255,0.08)",
+                      border: "1px solid var(--zterm-settings-border)",
                       borderRadius: "14px",
-                      backgroundColor: "rgba(22, 28, 41, 0.92)",
-                      color: "#fff",
+                      backgroundColor: "var(--zterm-settings-field)",
+                      color: "var(--zterm-settings-text)",
                       fontWeight: 700,
                     }}
                   >
                     切换副屏
-                  </button>
+                  </AmbientButton>
                 ) : null}
               </div>
             )}
@@ -3378,36 +3377,36 @@ function TerminalQuickBarComponent({
                   minWidth: 0,
                   padding: "3px",
                   borderRadius: "13px",
-                  backgroundColor: "rgba(14, 19, 31, 0.72)",
-                  border: "1px solid rgba(255,255,255,0.08)",
+                  backgroundColor: "var(--zterm-settings-field)",
+                  border: "1px solid var(--zterm-settings-border)",
                 }}
               >
-                <button
+                <AmbientButton
                   onClick={() => setFloatingPanelTab("quick-actions")}
                   style={floatingPillButton(
                     floatingPanelTab === "quick-actions"
-                      ? "rgba(31,214,122,0.18)"
-                      : "rgba(31, 38, 53, 0.82)",
+                      ? "color-mix(in srgb, var(--zterm-settings-accent) 18%, transparent)"
+                      : "var(--zterm-settings-field)",
                     floatingPanelTab === "quick-actions"
                       ? mobileTheme.colors.accent
-                      : "#fff",
+                      : "var(--zterm-settings-text)",
                   )}
                 >
                   快捷
-                </button>
-                <button
+                </AmbientButton>
+                <AmbientButton
                   onClick={() => setFloatingPanelTab("clipboard")}
                   style={floatingPillButton(
                     floatingPanelTab === "clipboard"
-                      ? "rgba(113, 164, 255, 0.18)"
+                      ? "color-mix(in srgb, var(--zterm-settings-accent) 18%, transparent)"
                       : "transparent",
                     floatingPanelTab === "clipboard"
-                      ? "#8db7ff"
-                      : "#fff",
+                      ? "var(--zterm-settings-accent)"
+                      : "var(--zterm-settings-text)",
                   )}
                 >
                   剪贴板
-                </button>
+                </AmbientButton>
               </div>
             </div>
 
@@ -3444,7 +3443,7 @@ function TerminalQuickBarComponent({
                           gap: "8px",
                         }}
                       >
-                        <button
+                        <AmbientButton
                           onClick={() => {
                             handleQuickActionDoubleTap(
                               action.id,
@@ -3457,8 +3456,8 @@ function TerminalQuickBarComponent({
                             minHeight: "36px",
                             border: "none",
                             borderRadius: "14px",
-                            backgroundColor: "rgba(255,255,255,0.08)",
-                            color: "#fff",
+                            backgroundColor: "var(--zterm-settings-field)",
+                            color: "var(--zterm-settings-text)",
                             padding: "0 10px",
                             textAlign: "left",
                             display: "flex",
@@ -3481,22 +3480,22 @@ function TerminalQuickBarComponent({
                           <span
                             style={{
                               fontSize: "11px",
-                              color: "rgba(255,255,255,0.55)",
+                              color: "var(--zterm-settings-muted)",
                               flexShrink: 0,
                             }}
                           >
                             {formatSnippetPreview(action.sequence) || "(空)"}
                           </span>
-                        </button>
-                        <button
+                        </AmbientButton>
+                        <AmbientButton
                           onClick={() => openEditor("edit", draftAction)}
                           style={{
                             width: "36px",
                             height: "36px",
                             borderRadius: "12px",
                             border: "none",
-                            backgroundColor: "rgba(255,255,255,0.1)",
-                            color: "#fff",
+                            backgroundColor: "var(--zterm-settings-field)",
+                            color: "var(--zterm-settings-text)",
                             fontSize: "16px",
                             cursor: "pointer",
                             flexShrink: 0,
@@ -3504,14 +3503,14 @@ function TerminalQuickBarComponent({
                           aria-label={`Edit ${action.label || "quick action"}`}
                         >
                           ✎
-                        </button>
+                        </AmbientButton>
                       </div>
                     );
                   })
                 )
               ) : (
                 <>
-                  <button
+                  <AmbientButton
                     onClick={() => {
                       void captureSystemClipboard();
                     }}
@@ -3519,18 +3518,18 @@ function TerminalQuickBarComponent({
                       minHeight: "40px",
                       border: "none",
                       borderRadius: "14px",
-                      backgroundColor: "rgba(255,255,255,0.12)",
-                      color: "#fff",
+                      backgroundColor: "var(--zterm-settings-field)",
+                      color: "var(--zterm-settings-text)",
                       fontWeight: 800,
                     }}
                   >
                     {clipboardBusy ? "读取中…" : "读取系统剪贴板"}
-                  </button>
+                  </AmbientButton>
                   {clipboardError && (
                     <div
                       style={{
                         fontSize: "12px",
-                        color: "rgba(255, 173, 96, 0.92)",
+                        color: "var(--zterm-settings-warning)",
                         lineHeight: 1.4,
                       }}
                     >
@@ -3541,7 +3540,7 @@ function TerminalQuickBarComponent({
                     <div style={{ height: "8px" }} />
                   ) : (
                     clipboardHistory.map((entry, index) => (
-                      <button
+                      <AmbientButton
                         key={`${index}-${entry.slice(0, 12)}`}
                         onClick={() => handleClipboardDoubleTap(entry, index)}
                         style={{
@@ -3549,8 +3548,8 @@ function TerminalQuickBarComponent({
                           minHeight: "46px",
                           border: "none",
                           borderRadius: "14px",
-                          backgroundColor: "rgba(255,255,255,0.08)",
-                          color: "#fff",
+                          backgroundColor: "var(--zterm-settings-field)",
+                          color: "var(--zterm-settings-text)",
                           padding: "10px 14px",
                           textAlign: "left",
                           fontWeight: 600,
@@ -3560,7 +3559,7 @@ function TerminalQuickBarComponent({
                         <div
                           style={{
                             fontSize: "11px",
-                            color: "rgba(255,255,255,0.5)",
+                            color: "var(--zterm-settings-muted)",
                             marginBottom: "4px",
                           }}
                         >
@@ -3574,7 +3573,7 @@ function TerminalQuickBarComponent({
                         >
                           {entry}
                         </div>
-                      </button>
+                      </AmbientButton>
                     ))
                   )}
                 </>
@@ -3586,7 +3585,7 @@ function TerminalQuickBarComponent({
 
       {!editorOpen && !shortcutEditorOpen && (
         <>
-        <button
+        <AmbientButton
           data-quickbar-allow-pointer="true"
           type="button"
           tabIndex={-1}
@@ -3771,12 +3770,12 @@ function TerminalQuickBarComponent({
               width: `${FLOATING_BUBBLE_SIZE}px`,
               height: `${FLOATING_BUBBLE_SIZE}px`,
               borderRadius: "999px",
-              border: "1px solid rgba(255,255,255,0.12)",
-              background: "rgba(18, 24, 38, 0.72)",
-              color: "#fff",
+              border: "1px solid var(--zterm-settings-border)",
+              background: "var(--zterm-settings-surface)",
+              color: "var(--zterm-settings-text)",
               fontSize: "20px",
               fontWeight: 800,
-              boxShadow: "0 8px 18px rgba(0,0,0,0.24)",
+              boxShadow: "var(--zterm-settings-shadow)",
               transform: "none",
               touchAction: "none",
               cursor: fileTransferSupported ? "pointer" : "not-allowed",
@@ -3788,7 +3787,7 @@ function TerminalQuickBarComponent({
             <svg aria-hidden="true" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
               <path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h5l2 2h8A1.5 1.5 0 0 1 21 8.5v8A1.5 1.5 0 0 1 19.5 18h-15A1.5 1.5 0 0 1 3 16.5z" />
             </svg>
-          </button>
+        </AmbientButton>
         </>
       )}
 
@@ -3855,7 +3854,7 @@ function TerminalQuickBarComponent({
                   alignItems: "stretch",
                   gap: `${QUICK_BAR_ROW_GAP}px`,
                   padding: `2px ${QUICK_BAR_SIDE_PADDING}px 4px`,
-                  backgroundColor: "rgba(255,255,255,0.02)",
+                  backgroundColor: "color-mix(in srgb, var(--zterm-settings-text) 2%, transparent)",
                 }}
               >
                 <div
@@ -3950,7 +3949,7 @@ function TerminalQuickBarComponent({
                   alignItems: "stretch",
                   gap: `${QUICK_BAR_ROW_GAP}px`,
                   padding: `2px ${QUICK_BAR_SIDE_PADDING}px 4px`,
-                  backgroundColor: "rgba(255,255,255,0.02)",
+                  backgroundColor: "color-mix(in srgb, var(--zterm-settings-text) 2%, transparent)",
                 }}
               >
                 <div
@@ -4069,14 +4068,15 @@ function TerminalQuickBarComponent({
             left: "50%",
             transform: "translate(-50%, -50%)",
             zIndex: 200,
-            backgroundColor: "rgba(23, 27, 45, 0.92)",
-            color: "#fff",
+            backgroundColor: "var(--zterm-settings-surface)",
+            color: "var(--zterm-settings-text)",
+            border: "1px solid var(--zterm-settings-border)",
             padding: "12px 24px",
             borderRadius: "16px",
             fontSize: "15px",
             fontWeight: 700,
             pointerEvents: "none",
-            boxShadow: "0 8px 32px rgba(0,0,0,0.32)",
+            boxShadow: "var(--zterm-settings-shadow)",
           }}
         >
           {toastMessage}
@@ -4095,11 +4095,10 @@ function TerminalQuickBarComponent({
             maxWidth: "min(86vw, 320px)",
             padding: "12px 14px",
             borderRadius: "16px",
-            border: "1px solid rgba(255,255,255,0.1)",
-            background:
-              "linear-gradient(180deg, rgba(18, 24, 38, 0.96), rgba(10, 14, 24, 0.96))",
-            color: "#fff",
-            boxShadow: "0 12px 36px rgba(0,0,0,0.28)",
+            border: "1px solid var(--zterm-settings-border)",
+            background: "var(--zterm-settings-surface)",
+            color: "var(--zterm-settings-text)",
+            boxShadow: "var(--zterm-settings-shadow)",
             pointerEvents: "none",
             display: "flex",
             alignItems: "center",
@@ -4112,7 +4111,7 @@ function TerminalQuickBarComponent({
               width: "18px",
               height: "18px",
               borderRadius: "999px",
-              border: "2px solid rgba(255,255,255,0.22)",
+              border: "2px solid var(--zterm-settings-border)",
               borderTopColor: mobileTheme.colors.accent,
               animation: "terminal-quickbar-spin 0.9s linear infinite",
               flexShrink: 0,
@@ -4123,7 +4122,7 @@ function TerminalQuickBarComponent({
               style={{
                 fontSize: "13px",
                 fontWeight: 800,
-                color: "#f4f8ff",
+                color: "var(--zterm-settings-text)",
                 whiteSpace: "nowrap",
               }}
             >
@@ -4132,7 +4131,7 @@ function TerminalQuickBarComponent({
             <div
               style={{
                 fontSize: "12px",
-                color: "rgba(220,232,255,0.78)",
+                color: "var(--zterm-settings-muted)",
                 overflow: "hidden",
                 textOverflow: "ellipsis",
                 whiteSpace: "nowrap",
@@ -4180,10 +4179,10 @@ const REMOTE_WINDOW_BUTTON_STYLE = {
   minWidth: 42,
   height: 36,
   padding: '0 11px',
-  border: '1px solid rgba(255,255,255,0.16)',
+  border: '1px solid var(--zterm-settings-border)',
   borderRadius: 10,
-  background: 'rgba(255,255,255,0.08)',
-  color: 'var(--zterm-panel-text, #f5f7fa)',
+  background: 'var(--zterm-settings-field)',
+  color: 'var(--zterm-settings-text)',
   fontSize: 13,
   fontWeight: 750,
   touchAction: 'manipulation' as const,
@@ -4209,15 +4208,15 @@ export function RemoteWindowQuickBar({
 
   if (collapsed) {
     return (
-      <button
+      <AmbientButton
         type="button"
         data-testid="remote-window-quickbar-collapsed"
         aria-label="展开串流快捷栏"
         onClick={() => setCollapsed(false)}
-        style={{ ...REMOTE_WINDOW_BUTTON_STYLE, minWidth: 48, borderRadius: 999, background: 'rgba(18,22,30,0.94)' }}
+        style={{ ...REMOTE_WINDOW_BUTTON_STYLE, minWidth: 48, borderRadius: 999, background: 'var(--zterm-settings-surface)' }}
       >
         ⌨
-      </button>
+      </AmbientButton>
     );
   }
 
@@ -4227,25 +4226,25 @@ export function RemoteWindowQuickBar({
       ref={(node) => {
         if (node) onMeasuredHeightChange?.(node.getBoundingClientRect().height);
       }}
-      style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: 10, border: '1px solid rgba(255,255,255,0.14)', borderRadius: 16, background: 'rgba(18,22,30,0.94)', boxShadow: '0 10px 28px rgba(0,0,0,0.32)', backdropFilter: 'blur(14px)', color: 'var(--zterm-panel-text, #f5f7fa)' }}
+      style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: 10, border: '1px solid var(--zterm-settings-border)', borderRadius: 16, background: 'var(--zterm-settings-surface)', boxShadow: 'var(--zterm-settings-shadow)', backdropFilter: 'blur(14px)', color: 'var(--zterm-settings-text)' }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={{ flex: 1, fontSize: 12, fontWeight: 800, opacity: 0.72 }}>串流窗口</span>
-        <button type="button" aria-label="收起串流快捷栏" onClick={() => setCollapsed(true)} style={{ ...REMOTE_WINDOW_BUTTON_STYLE, minWidth: 34, width: 34, padding: 0, height: 30 }}>−</button>
+        <AmbientButton type="button" aria-label="收起串流快捷栏" onClick={() => setCollapsed(true)} style={{ ...REMOTE_WINDOW_BUTTON_STYLE, minWidth: 34, width: 34, padding: 0, height: 30 }}>−</AmbientButton>
       </div>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-        <button type="button" aria-label="复制" onClick={() => onSendRemoteKeyboardInput?.({ key: 'c', code: 'KeyC', metaKey: true })} style={REMOTE_WINDOW_BUTTON_STYLE}>复制</button>
-        <button type="button" aria-label="粘贴" onClick={() => onSendRemoteKeyboardInput?.({ key: 'v', code: 'KeyV', metaKey: true })} style={REMOTE_WINDOW_BUTTON_STYLE}>粘贴</button>
+        <AmbientButton type="button" aria-label="复制" onClick={() => onSendRemoteKeyboardInput?.({ key: 'c', code: 'KeyC', metaKey: true })} style={REMOTE_WINDOW_BUTTON_STYLE}>复制</AmbientButton>
+        <AmbientButton type="button" aria-label="粘贴" onClick={() => onSendRemoteKeyboardInput?.({ key: 'v', code: 'KeyV', metaKey: true })} style={REMOTE_WINDOW_BUTTON_STYLE}>粘贴</AmbientButton>
         {REMOTE_WINDOW_ACTIONS.filter((action) => action.id !== 'remote-copy' && action.id !== 'remote-paste').map((action) => (
-          <button key={action.id} type="button" aria-label={action.label} onClick={() => onSendSequence?.(action.sequence)} style={REMOTE_WINDOW_BUTTON_STYLE}>
+          <AmbientButton key={action.id} type="button" aria-label={action.label} onClick={() => onSendSequence?.(action.sequence)} style={REMOTE_WINDOW_BUTTON_STYLE}>
             {action.label}
-          </button>
+          </AmbientButton>
         ))}
-        <button type="button" aria-label={keyboardVisible ? '隐藏键盘' : '显示键盘'} aria-pressed={keyboardVisible} onClick={() => onToggleKeyboard?.()} style={{ ...REMOTE_WINDOW_BUTTON_STYLE, background: keyboardVisible ? 'rgba(84,150,255,0.34)' : REMOTE_WINDOW_BUTTON_STYLE.background }}>键盘</button>
+        <AmbientButton type="button" aria-label={keyboardVisible ? '隐藏键盘' : '显示键盘'} aria-pressed={keyboardVisible} onClick={() => onToggleKeyboard?.()} style={{ ...REMOTE_WINDOW_BUTTON_STYLE, background: keyboardVisible ? 'var(--zterm-settings-accent-soft)' : REMOTE_WINDOW_BUTTON_STYLE.background, color: keyboardVisible ? 'var(--zterm-settings-accent)' : REMOTE_WINDOW_BUTTON_STYLE.color }}>键盘</AmbientButton>
       </div>
       <div style={{ display: 'flex', gap: 6 }}>
-        <input aria-label="发送到串流窗口" value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); submitDraft(); } }} placeholder="输入并发送到远程窗口" style={{ flex: 1, minWidth: 0, height: 36, padding: '0 11px', border: '1px solid rgba(255,255,255,0.16)', borderRadius: 10, background: 'rgba(0,0,0,0.2)', color: 'inherit', outline: 'none' }} />
-        <button type="button" aria-label="发送文本" onClick={submitDraft} style={{ ...REMOTE_WINDOW_BUTTON_STYLE, background: 'rgba(84,150,255,0.34)' }}>发送</button>
+        <AmbientInput aria-label="发送到串流窗口" value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); submitDraft(); } }} placeholder="输入并发送到远程窗口" style={{ flex: 1, minWidth: 0, height: 36, padding: '0 11px', border: '1px solid var(--zterm-settings-border)', borderRadius: 10, background: 'var(--zterm-settings-field)', color: 'inherit', outline: 'none' }} />
+        <AmbientButton type="button" aria-label="发送文本" onClick={submitDraft} style={{ ...REMOTE_WINDOW_BUTTON_STYLE, background: 'var(--zterm-settings-accent-soft)', color: 'var(--zterm-settings-accent)' }}>发送</AmbientButton>
       </div>
       <span style={{ fontSize: 10, opacity: 0.5, textAlign: 'right' }}>快捷栏与 Shell 独立 · inset {Math.round(keyboardInsetPx)}px</span>
     </div>

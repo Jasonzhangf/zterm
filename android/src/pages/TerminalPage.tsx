@@ -12,6 +12,7 @@ import { AttachmentDrawer } from '../components/terminal/AttachmentDrawer';
 import { ResourceBottomSheet } from '../components/terminal/ResourceBottomSheet';
 import { RemoteScreenshotSheet } from '../components/terminal/RemoteScreenshotSheet';
 import { TerminalHeader } from '../components/terminal/TerminalHeader';
+import { AmbientButton } from '../components/ambient';
 import {
   resolveSessionInputEpoch,
   resolveTerminalSessionGroupActiveSessionProjection,
@@ -3596,7 +3597,7 @@ function TerminalPageComponent({
             <>
               {!sessionDrawerOpen ? (
                 <>
-                  <button
+                  <AmbientButton
                     type="button"
                     aria-label="打开会话抽屉"
                     data-testid="terminal-portrait-session-drawer-button"
@@ -3614,12 +3615,12 @@ function TerminalPageComponent({
                       color: 'var(--zterm-panel-text)',
                       fontSize: '17px',
                       lineHeight: 1,
-                      boxShadow: '0 8px 18px rgba(0,0,0,0.18)',
+                      boxShadow: 'var(--zterm-settings-shadow)',
                     }}
                   >
                     ☰
-                  </button>
-                  <button
+                  </AmbientButton>
+                  <AmbientButton
                     type="button"
                     aria-label="返回连接列表"
                     data-testid="terminal-portrait-back-button"
@@ -3637,14 +3638,14 @@ function TerminalPageComponent({
                       color: 'var(--zterm-panel-text)',
                       fontSize: '18px',
                       lineHeight: 1,
-                      boxShadow: '0 8px 18px rgba(0,0,0,0.18)',
+                      boxShadow: 'var(--zterm-settings-shadow)',
                       backdropFilter: 'blur(8px)',
                     }}
                   >
                     ←
-                  </button>
+                  </AmbientButton>
                   {onOpenSettings ? (
-                    <button
+                    <AmbientButton
                       type="button"
                       aria-label="设置和升级"
                       data-testid="terminal-portrait-settings-button"
@@ -3664,7 +3665,7 @@ function TerminalPageComponent({
                         fontSize: '13px',
                         fontWeight: 850,
                         lineHeight: 1,
-                        boxShadow: '0 8px 18px rgba(0,0,0,0.18)',
+                        boxShadow: 'var(--zterm-settings-shadow)',
                         backdropFilter: 'blur(8px)',
                         display: 'inline-flex',
                         alignItems: 'center',
@@ -3674,7 +3675,7 @@ function TerminalPageComponent({
                     >
                       <span aria-hidden="true" style={{ fontSize: '15px', lineHeight: 1 }}>⚙</span>
                       <span>设置</span>
-                    </button>
+                    </AmbientButton>
                   ) : null}
                 </>
               ) : null}

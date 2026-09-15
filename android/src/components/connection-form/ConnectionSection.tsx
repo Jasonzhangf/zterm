@@ -1,5 +1,6 @@
 import type { CSSProperties, ReactNode } from 'react';
 import { mobileTheme } from '../../lib/mobile-ui';
+import { AmbientButton } from '../ambient';
 
 export function ConnectionSection({
   title,
@@ -86,7 +87,7 @@ export function TagList({ tags, onRemove }: { tags: string[]; onRemove: (tag: st
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
       {tags.map((tag) => (
-        <button
+        <AmbientButton
           key={tag}
           type="button"
           onClick={() => onRemove(tag)}
@@ -101,7 +102,7 @@ export function TagList({ tags, onRemove }: { tags: string[]; onRemove: (tag: st
           }}
         >
           #{tag} ×
-        </button>
+        </AmbientButton>
       ))}
     </div>
   );

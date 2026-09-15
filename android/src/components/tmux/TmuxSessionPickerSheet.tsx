@@ -30,6 +30,7 @@ import {
   filterActionableTmuxSelections,
   shouldAutoRefreshTmuxPicker,
 } from './tmux-session-picker-rows';
+import { AmbientButton, AmbientInput, AmbientTextarea } from '../ambient';
 
 interface TmuxSessionPickerSheetProps {
   mode: 'new-connection' | 'quick-tab' | 'edit-group';
@@ -192,7 +193,11 @@ export function TmuxSessionPickerSheet({
   const serverViews = useMemo(() => buildBridgeServerPresetViews(servers), [servers]);
   const sortedServers = useMemo(() => serverViews.map((entry) => entry.server), [serverViews]);
   const statusTone =
-    discoveryState === 'done' ? mobileTheme.colors.accent : discoveryState === 'error' ? mobileTheme.colors.danger : '#f2b94b';
+    discoveryState === 'done'
+      ? mobileTheme.colors.accent
+      : discoveryState === 'error'
+        ? mobileTheme.colors.danger
+        : 'var(--zterm-settings-warning)';
   void clockTick;
   const isEditGroupMode = mode === 'edit-group';
   const relayEnabled = Boolean(bridgeSettings.traversalRelay?.accessToken);
@@ -295,8 +300,8 @@ export function TmuxSessionPickerSheet({
       width: 192,
       errorCorrectionLevel: 'M',
       color: {
-        dark: '#101218',
-        light: '#ffffff',
+        dark: '#0b0c10',
+        light: '#f7f8fa',
       },
     })
       .then((svg) => {
@@ -588,7 +593,7 @@ export function TmuxSessionPickerSheet({
         position: 'fixed',
         inset: 0,
         zIndex: 80,
-        backgroundColor: 'rgba(10, 14, 24, 0.48)',
+        backgroundColor: 'var(--zterm-sheet-overlay)',
         display: 'flex',
         alignItems: 'flex-end',
       }}
@@ -626,7 +631,7 @@ export function TmuxSessionPickerSheet({
                   : '先输入/选择 Tailscale IP，再拉 tmux sessions。支持多选勾选后一次打开多个 tab。'}
             </div>
           </div>
-          <button
+          <AmbientButton
             onClick={onClose}
             style={{
               width: '42px',
@@ -640,7 +645,7 @@ export function TmuxSessionPickerSheet({
             }}
           >
             ×
-          </button>
+          </AmbientButton>
         </div>
 
         {mode === 'new-connection' && (
@@ -659,7 +664,7 @@ export function TmuxSessionPickerSheet({
               title="新增服务器"
               subtitle="这一步是创建一台新的服务器配置，不和已有服务器混成一个语义。"
             />
-            <button
+            <AmbientButton
               type="button"
               data-testid="tmux-session-picker-add-server"
               onClick={() => onSelectCleanSession(selectedTarget)}
@@ -674,7 +679,7 @@ export function TmuxSessionPickerSheet({
               }}
             >
               新增服务器
-            </button>
+            </AmbientButton>
           </div>
         )}
 
@@ -695,7 +700,7 @@ export function TmuxSessionPickerSheet({
               subtitle="粘贴分享链接、扫描二维码图片，或选择已有连接生成二维码给另一台机器同步。"
             />
             <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-              <button
+              <AmbientButton
                 type="button"
                 onClick={() => handleImportConnectionLink(connectionImportInput)}
                 style={{
@@ -709,8 +714,8 @@ export function TmuxSessionPickerSheet({
                 }}
               >
                 导入链接
-              </button>
-              <button
+              </AmbientButton>
+              <AmbientButton
                 type="button"
                 onClick={() => qrScanInputRef.current?.click()}
                 style={{
@@ -724,8 +729,8 @@ export function TmuxSessionPickerSheet({
                 }}
               >
                 扫描二维码图片
-              </button>
-              <input
+              </AmbientButton>
+              <AmbientInput
                 ref={qrScanInputRef}
                 aria-label="Scan connection QR image"
                 type="file"
@@ -735,7 +740,7 @@ export function TmuxSessionPickerSheet({
                 onChange={(event) => void handleScanQrFile(event.target.files?.[0])}
               />
             </div>
-            <textarea
+            <AmbientTextarea
               aria-label="Connection share link"
               value={connectionImportInput}
               onChange={(event) => {
@@ -788,7 +793,7 @@ export function TmuxSessionPickerSheet({
                     borderRadius: '24px',
                     backgroundColor: 'var(--zterm-settings-surface)',
                     boxShadow: mobileTheme.shadow.soft,
-                    border: `1px solid ${mobileTheme.colors.lightBorder}`,
+                    border: '1px solid var(--zterm-settings-accent-border)',
                     display: 'grid',
                     placeItems: 'center',
                     padding: '12px',
@@ -796,7 +801,7 @@ export function TmuxSessionPickerSheet({
                   }}
                   dangerouslySetInnerHTML={{ __html: shareQrSvg || '<span>QR building...</span>' }}
                 />
-                <textarea
+                <AmbientTextarea
                   data-testid="tmux-session-picker-share-link"
                   readOnly
                   value={selectedShareLink}
@@ -816,7 +821,7 @@ export function TmuxSessionPickerSheet({
                 />
                 <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
                   {shareScope === 'single' && shareableHosts.length > 1 && (
-                    <button
+                    <AmbientButton
                       type="button"
                       onClick={() => setShareScope('all')}
                       style={{
@@ -830,9 +835,9 @@ export function TmuxSessionPickerSheet({
                       }}
                     >
                       改为分享全部连接
-                    </button>
+                    </AmbientButton>
                   )}
-                  <button
+                  <AmbientButton
                     type="button"
                     onClick={() => void handleCopyShareLink()}
                     style={{
@@ -846,7 +851,7 @@ export function TmuxSessionPickerSheet({
                     }}
                   >
                     复制分享链接
-                  </button>
+                  </AmbientButton>
                   {shareCopyStatus && (
                     <span style={{ fontSize: '12px', color: shareCopyStatus.includes('失败') ? mobileTheme.colors.danger : mobileTheme.colors.lightMuted }}>
                       {shareCopyStatus}
@@ -864,7 +869,7 @@ export function TmuxSessionPickerSheet({
                 {shareableHosts.length > 0 ? shareableHosts.map((host) => {
                   const active = shareScope === 'single' && host.id === selectedShareHostId;
                   return (
-                    <button
+                    <AmbientButton
                       key={host.id}
                       type="button"
                       aria-pressed={active}
@@ -884,7 +889,7 @@ export function TmuxSessionPickerSheet({
                     >
                       <div style={{ fontWeight: 800 }}>{host.name}</div>
                       <div style={{ fontSize: '11px', opacity: 0.78 }}>{host.bridgeHost}:{host.bridgePort}</div>
-                    </button>
+                    </AmbientButton>
                   );
                 }) : (
                   <div style={{ fontSize: '13px', color: mobileTheme.colors.lightMuted }}>
@@ -957,7 +962,7 @@ export function TmuxSessionPickerSheet({
                 : '支持手动输入 Tailscale IP/域名；填写完成后显式点击 Connect，才会测试连通并刷新 tmux sessions。'
             }
           />
-          <input
+          <AmbientInput
             value={selectedTarget.bridgeHost}
             onChange={(event) => setSelectedTarget((current) => ({ ...current, bridgeHost: event.target.value }))}
             placeholder="100.127.23.27 或 your-device.ts.net"
@@ -973,7 +978,7 @@ export function TmuxSessionPickerSheet({
           <div style={{ display: 'flex', gap: '10px' }}>
             <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }} aria-label="new session backend">
               {(['tmux', 'herdr'] as const).map((backend) => (
-                <button
+                <AmbientButton
                   key={backend}
                   type="button"
                   aria-pressed={newSessionBackend === backend}
@@ -992,10 +997,10 @@ export function TmuxSessionPickerSheet({
                   }}
                 >
                   {backend === 'tmux' ? 'tmux' : 'Herdr'}
-                </button>
+                </AmbientButton>
               ))}
             </div>
-            <input
+            <AmbientInput
               type="number"
               value={selectedTarget.bridgePort}
               onChange={(event) =>
@@ -1014,7 +1019,7 @@ export function TmuxSessionPickerSheet({
                 fontSize: '15px',
               }}
             />
-            <input
+            <AmbientInput
               value={selectedTarget.authToken || ''}
               onChange={(event) => setSelectedTarget((current) => ({ ...current, authToken: event.target.value }))}
               placeholder="Bridge auth token"
@@ -1070,7 +1075,7 @@ export function TmuxSessionPickerSheet({
               </div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-              <button
+              <AmbientButton
                 onClick={() => void handleRefreshNow()}
                 style={{
                   minWidth: '84px',
@@ -1084,9 +1089,9 @@ export function TmuxSessionPickerSheet({
                 }}
               >
                 {discoveryState === 'done' ? 'Reconnect' : 'Connect'}
-              </button>
+              </AmbientButton>
               {discoveryState === 'done' && (
-                <button
+                <AmbientButton
                   onClick={() => void handleRefreshNow()}
                   style={{
                     minWidth: '72px',
@@ -1100,7 +1105,7 @@ export function TmuxSessionPickerSheet({
                   }}
                 >
                   Refresh
-                </button>
+                </AmbientButton>
               )}
             </div>
           </div>
@@ -1109,7 +1114,7 @@ export function TmuxSessionPickerSheet({
             {serverViews.map(({ server, daemonHostId, bridgeLabel, daemonLabel, targetBadge }) => {
               const active = server.targetHost === selectedTarget.bridgeHost && server.targetPort === selectedTarget.bridgePort;
               return (
-                <button
+                <AmbientButton
                   key={server.id}
                   onClick={() =>
                     setSelectedTarget({
@@ -1137,7 +1142,7 @@ export function TmuxSessionPickerSheet({
                     <div style={{ fontSize: '10px', opacity: 0.72 }}>{daemonLabel}</div>
                   ) : null}
                   <div style={{ fontSize: '10px', opacity: 0.72 }}>{targetBadge} · {server.authToken ? 'Auth' : 'No auth'}</div>
-                </button>
+                </AmbientButton>
               );
             })}
           </div>
@@ -1177,7 +1182,7 @@ export function TmuxSessionPickerSheet({
             style={{
               padding: '10px 14px',
               borderRadius: '12px',
-              backgroundColor: 'rgba(255, 124, 146, 0.12)',
+              backgroundColor: 'var(--zterm-settings-danger-soft)',
               color: mobileTheme.colors.danger,
               fontSize: '12px',
               lineHeight: 1.5,
@@ -1237,7 +1242,7 @@ export function TmuxSessionPickerSheet({
                 }}
               >
                 {!row.openTab && row.remotePresent && !missingRemote ? (
-                  <button
+                  <AmbientButton
                     onClick={() => toggleSession(sessionName)}
                     aria-label={`Select ${sessionName}`}
                     style={{
@@ -1252,9 +1257,9 @@ export function TmuxSessionPickerSheet({
                     }}
                   >
                     {selected ? '✓' : ''}
-                  </button>
+                  </AmbientButton>
                 ) : null}
-                <button
+                <AmbientButton
                   onClick={() => {
                     if (row.openTab && !missingRemote) {
                       onSwitchOpenTab?.(row.openTab.id);
@@ -1271,8 +1276,12 @@ export function TmuxSessionPickerSheet({
                     borderRadius: '18px',
                     padding: '12px 14px',
                     backgroundColor: missingRemote
-                      ? '#eef1f5'
-                      : row.openTab ? 'rgba(113, 164, 255, 0.16)' : selected ? 'rgba(31,214,122,0.14)' : '#f6f8fb',
+                      ? 'var(--zterm-settings-field)'
+                      : row.openTab
+                        ? 'var(--zterm-settings-accent-soft)'
+                        : selected
+                          ? 'var(--zterm-settings-accent-soft)'
+                          : 'var(--zterm-settings-field)',
                     color: mobileTheme.colors.lightText,
                     textAlign: 'left',
                     fontWeight: 800,
@@ -1283,9 +1292,9 @@ export function TmuxSessionPickerSheet({
                       {openStatus}
                       {row.displayName !== sessionName ? ` · ${sessionName}` : ''}
                     </div>
-                  </button>
+                  </AmbientButton>
                 {row.openTab && !missingRemote ? (
-                  <button
+                  <AmbientButton
                     onClick={() => {
                       onSwitchOpenTab?.(row.openTab!.id);
                       onClose();
@@ -1301,9 +1310,9 @@ export function TmuxSessionPickerSheet({
                     }}
                   >
                     Enter
-                  </button>
+                  </AmbientButton>
                 ) : !missingRemote ? (
-                  <button
+                  <AmbientButton
                     onClick={() => onOpenTmuxSession(selectedTarget, sessionName)}
                     style={{
                       minWidth: '56px',
@@ -1316,10 +1325,10 @@ export function TmuxSessionPickerSheet({
                     }}
                   >
                     Open
-                  </button>
+                  </AmbientButton>
                 ) : null}
                 {missingRemote ? null : (
-                <button
+                <AmbientButton
                   type="button"
                   aria-label={row.openTab ? `重命名标签页 ${row.displayName}` : `重命名 session ${sessionName}`}
                   onClick={() => {
@@ -1340,10 +1349,10 @@ export function TmuxSessionPickerSheet({
                   }}
                 >
                     ✎
-                  </button>
+                  </AmbientButton>
                 )}
                 {missingRemote ? null : (
-                <button
+                <AmbientButton
                   aria-label={row.openTab ? undefined : `关闭 session ${sessionName}`}
                   onClick={() => {
                     if (row.openTab) {
@@ -1358,19 +1367,19 @@ export function TmuxSessionPickerSheet({
                     height: '44px',
                     border: 'none',
                     borderRadius: '14px',
-                    backgroundColor: 'rgba(255,124,146,0.16)',
+                    backgroundColor: 'var(--zterm-settings-danger-soft)',
                     color: mobileTheme.colors.danger,
                   }}
                 >
                     {row.openTab ? 'Close' : '×'}
-                  </button>
+                  </AmbientButton>
                 )}
               </div>
             );
           })}
 
           {(selectedCount > 0 || isEditGroupMode) && (
-            <button
+            <AmbientButton
               onClick={() => {
                 if (isEditGroupMode) {
                   onSaveGroupSelection?.(selectedTarget, selectedSessions);
@@ -1392,11 +1401,11 @@ export function TmuxSessionPickerSheet({
                   ? `Save ${selectedCount} selected sessions`
                   : 'Clear remembered group'
                 : `Open ${selectedCount} selected sessions as tabs`}
-            </button>
+            </AmbientButton>
           )}
 
           <div style={{ display: 'flex', gap: '10px' }}>
-            <input
+            <AmbientInput
               value={newSessionName}
               onChange={(event) => setNewSessionName(event.target.value)}
               placeholder="new-session"
@@ -1409,7 +1418,7 @@ export function TmuxSessionPickerSheet({
                 fontSize: '14px',
               }}
             />
-            <button
+            <AmbientButton
               onClick={() => setBackendChoiceOpen(true)}
               disabled={busyAction !== null}
               style={{
@@ -1422,7 +1431,7 @@ export function TmuxSessionPickerSheet({
               }}
             >
               Create
-            </button>
+            </AmbientButton>
           </div>
         </div>
 
@@ -1439,7 +1448,7 @@ export function TmuxSessionPickerSheet({
             }}
           >
             <SectionTitle title="Clean Session" subtitle="不选历史和现有 tmux session，就走干净的新连接/新 tab。" />
-            <button
+            <AmbientButton
               onClick={() => onSelectCleanSession(selectedTarget)}
               style={{
                 border: 'none',
@@ -1452,7 +1461,7 @@ export function TmuxSessionPickerSheet({
               }}
             >
               {mode === 'quick-tab' ? 'Create blank tab target' : isEditGroupMode ? 'Use full connection form' : 'Open full connection form'}
-            </button>
+            </AmbientButton>
             {isLikelyTailscaleHost(selectedTarget.bridgeHost) && (
               <div style={{ fontSize: '11px', color: mobileTheme.colors.lightMuted }}>
                 当前目标是 Tailscale，会优先记忆这个 IP。
@@ -1474,14 +1483,14 @@ export function TmuxSessionPickerSheet({
             alignItems: 'center',
             justifyContent: 'center',
             padding: '24px',
-            backgroundColor: 'rgba(15, 23, 42, 0.42)',
+            backgroundColor: 'var(--zterm-sheet-overlay)',
           }}
         >
           <div style={{ width: 'min(420px, 100%)', borderRadius: '24px', padding: '20px', backgroundColor: 'var(--zterm-settings-surface)', boxShadow: mobileTheme.shadow.soft }}>
             <SectionTitle title="选择新 session backend" subtitle="只创建单一 terminal surface；Herdr 不映射 pane、tab 或 workspace。" />
             <div style={{ display: 'grid', gap: '10px', marginTop: '16px' }}>
               {(['tmux', 'herdr'] as const).map((backend) => (
-                <button
+                <AmbientButton
                   key={backend}
                   type="button"
                   onClick={() => {
@@ -1492,9 +1501,9 @@ export function TmuxSessionPickerSheet({
                   style={{ border: 'none', borderRadius: '16px', padding: '14px', backgroundColor: backend === 'herdr' ? 'var(--zterm-settings-field)' : 'var(--zterm-settings-accent)', color: backend === 'herdr' ? 'var(--zterm-settings-text)' : 'var(--zterm-settings-accent-text)', fontWeight: 800, textAlign: 'left' }}
                 >
                   {backend === 'tmux' ? 'tmux — existing tmux backend' : 'Herdr — official single-session backend'}
-                </button>
+                </AmbientButton>
               ))}
-              <button type="button" onClick={() => setBackendChoiceOpen(false)} style={{ border: '1px solid var(--zterm-settings-border)', borderRadius: '16px', padding: '12px', backgroundColor: 'var(--zterm-settings-field)', color: 'var(--zterm-settings-text)' }}>取消</button>
+              <AmbientButton type="button" onClick={() => setBackendChoiceOpen(false)} style={{ border: '1px solid var(--zterm-settings-border)', borderRadius: '16px', padding: '12px', backgroundColor: 'var(--zterm-settings-field)', color: 'var(--zterm-settings-text)' }}>取消</AmbientButton>
             </div>
           </div>
         </div>

@@ -10,6 +10,7 @@ import {
   safeRemoteWindowGroupId,
 } from './remote-window-overlay-helpers';
 import { styles } from './remote-window-overlay-styles';
+import { AmbientButton } from '../ambient';
 
 export interface RemoteWindowTargetPickerProps {
   phase: 'targetEnumerating' | 'pickerOpen';
@@ -78,7 +79,7 @@ export function RemoteWindowTargetPicker({
               : `${visibleTargets.length} 个目标${catalogRefreshing ? ' · 更新中' : ''}`}
           </div>
         </div>
-        <button type="button" aria-label="关闭远程窗口选择" onClick={onClose} style={styles.headerIconButton}>×</button>
+        <AmbientButton type="button" aria-label="关闭远程窗口选择" onClick={onClose} style={styles.headerIconButton}>×</AmbientButton>
       </div> : <div style={styles.panelHeader}>
         <div>
           <div style={styles.panelTitle}>{browserOnly ? '浏览器窗口' : '远程窗口'}</div>
@@ -89,17 +90,17 @@ export function RemoteWindowTargetPicker({
           </div>
         </div>
         <div style={styles.panelActions}>
-          <button
+          <AmbientButton
             type="button"
             aria-label="刷新远程窗口列表"
             onClick={onRefresh}
             style={styles.headerButton}
           >
             刷新
-          </button>
-          <button type="button" aria-label="关闭远程窗口选择" onClick={onClose} style={styles.headerIconButton}>
+          </AmbientButton>
+          <AmbientButton type="button" aria-label="关闭远程窗口选择" onClick={onClose} style={styles.headerIconButton}>
             x
-          </button>
+          </AmbientButton>
         </div>
       </div>}
       {phase === 'pickerOpen' && errorMessage ? (
@@ -116,7 +117,7 @@ export function RemoteWindowTargetPicker({
             {appGroups.map((group) => {
               const primary = group.targets[0];
               return (
-                <button
+                <AmbientButton
                   type="button"
                   key={group.groupId}
                   data-testid={`remote-window-app-group-${safeRemoteWindowGroupId(group.groupId)}`}
@@ -129,11 +130,11 @@ export function RemoteWindowTargetPicker({
                   <span data-testid={`remote-window-target-${primary.streamTargetId}`} style={styles.targetMeta}>
                     {group.targets.length} 个窗口 · 打开后在视频内切换 · {formatTargetSubtitle(primary)}
                   </span>
-                </button>
+                </AmbientButton>
               );
             })}
             {itermPaneTargets.length > 0 ? (
-              <button
+              <AmbientButton
                 type="button"
                 data-testid="remote-window-iterm-pane-group"
                 aria-expanded={itermPaneTargetsExpanded}
@@ -145,10 +146,10 @@ export function RemoteWindowTargetPicker({
                 <span style={styles.targetMeta}>
                   {itermPaneTargetsExpanded ? `${itermPaneTargets.length} 个 pane` : `${itermPaneTargets.length} 个 pane · 已折叠`}
                 </span>
-              </button>
+              </AmbientButton>
             ) : null}
             {itermPaneTargetsExpanded ? itermPaneTargets.map((target) => (
-              <button
+              <AmbientButton
                 key={target.streamTargetId}
                 type="button"
                 data-testid={`remote-window-target-${target.streamTargetId}`}
@@ -158,7 +159,7 @@ export function RemoteWindowTargetPicker({
                 <span style={styles.targetKind}>{formatTargetKind(target)}</span>
                 <span style={styles.targetMain}>{target.videoTarget.title || target.videoTarget.appBundleId}</span>
                 <span style={styles.targetMeta}>{formatTargetSubtitle(target)}</span>
-              </button>
+              </AmbientButton>
             )) : null}
           </>
         )}

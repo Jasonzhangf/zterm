@@ -1,4 +1,5 @@
 import { ConnectionSection, FieldLabel, TagList, inputStyle } from './ConnectionSection';
+import { AmbientButton, AmbientInput } from '../ambient';
 
 interface GeneralSectionProps {
   name: string;
@@ -23,21 +24,21 @@ export function GeneralSection({
     <ConnectionSection title="General" description="Basic identity and grouping for this connection.">
       <div>
         <FieldLabel>Name *</FieldLabel>
-        <input value={name} onChange={(event) => onNameChange(event.target.value)} placeholder="例如：MacStudio" style={inputStyle()} />
+        <AmbientInput value={name} onChange={(event) => onNameChange(event.target.value)} placeholder="例如：MacStudio" style={inputStyle()} />
       </div>
 
       <div>
         <FieldLabel>Tags</FieldLabel>
         <div style={{ display: 'flex', gap: '10px' }}>
-          <input
+          <AmbientInput
             value={tagInput}
             onChange={(event) => onTagInputChange(event.target.value)}
             placeholder="例如：home-lab"
             style={inputStyle({ flex: 1 })}
           />
-          <button type="button" onClick={onAddTag} style={{ ...inputStyle({ width: '96px' }), fontWeight: 700, cursor: 'pointer' }}>
+          <AmbientButton type="button" onClick={onAddTag} style={{ ...inputStyle({ width: '96px' }), fontWeight: 700, cursor: 'pointer' }}>
             Add
-          </button>
+          </AmbientButton>
         </div>
         <div style={{ marginTop: '12px' }}>
           <TagList tags={tags} onRemove={onRemoveTag} />

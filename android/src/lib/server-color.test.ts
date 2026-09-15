@@ -1,13 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { getServerColorToneByKey } from './server-color';
 
-function extractHue(color: string) {
-  const match = color.match(/hsl[a]?\((\d+)/);
-  return match ? Number.parseInt(match[1], 10) : Number.NaN;
-}
-
 describe('server color tone', () => {
-  it('uses the approved red/yellow/blue/green palette instead of magenta-purple hues', () => {
+  it('keeps all server identity tones on the shared monochrome green palette', () => {
     const keys = [
       'mac-studio',
       '100.86.84.63',
@@ -21,13 +16,11 @@ describe('server color tone', () => {
       'server-g',
     ];
 
-    const hues = keys.map((key) => extractHue(getServerColorToneByKey(key).accent));
+    const tones = keys.map((key) => getServerColorToneByKey(key));
 
-    expect(hues.every((hue) => Number.isFinite(hue))).toBe(true);
-    expect(hues.every((hue) => hue < 260 || hue > 330)).toBe(true);
-    expect(hues.some((hue) => hue >= 188 && hue <= 224)).toBe(true);
-    expect(hues.some((hue) => hue >= 120 && hue <= 190)).toBe(true);
-    expect(hues.some((hue) => hue <= 45 || hue >= 350)).toBe(true);
-    expect(getServerColorToneByKey('mac-studio').accent).not.toBe(getServerColorToneByKey('100.86.84.63').accent);
+    expect(tones.every((tone) => tone.accent === 'var(--zterm-panel-accent)')).toBe(true);
+    expect(tones.every((tone) => tone.accentSoft === 'var(--zterm-panel-accent-soft)')).toBe(true);
+    expect(tones.every((tone) => tone.lightCardBorder === 'var(--zterm-panel-border)')).toBe(true);
+    expect(getServerColorToneByKey('mac-studio').key).toBe('mac-studio');
   });
 });

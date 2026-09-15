@@ -3,6 +3,7 @@ import { TERMINAL_THEME_OPTIONS, getTerminalThemePreset } from '@zterm/shared';
 import { mobileTheme } from '../../lib/mobile-ui';
 import type { BridgeSettings } from '../../lib/bridge-settings';
 import { SettingsSectionTitle, settingsSectionStyle } from './SettingsSection';
+import { AmbientButton } from '../ambient';
 
 interface TerminalThemeSectionProps {
   terminalThemeId: BridgeSettings['terminalThemeId'];
@@ -18,7 +19,7 @@ export function TerminalThemeSection({
 
   return (
     <div style={settingsSectionStyle()}>
-      <button
+      <AmbientButton
         type="button"
         aria-expanded={expanded}
         onClick={() => setExpanded((current) => !current)}
@@ -39,7 +40,7 @@ export function TerminalThemeSection({
         <span style={{ fontSize: '13px', color: mobileTheme.colors.lightMuted, fontWeight: 700, flexShrink: 0 }}>
           {expanded ? '收起 ▴' : `${selectedTerminalTheme.name} · 展开 ▾`}
         </span>
-      </button>
+      </AmbientButton>
       {expanded ? (
         <>
           <div style={{ fontSize: '13px', lineHeight: 1.6, color: mobileTheme.colors.lightMuted }}>
@@ -50,7 +51,7 @@ export function TerminalThemeSection({
             {TERMINAL_THEME_OPTIONS.map((theme) => {
               const active = terminalThemeId === theme.id;
               return (
-                <button
+                <AmbientButton
                   key={theme.id}
                   type="button"
                   onClick={() => onSelectTheme(theme.id)}
@@ -61,7 +62,7 @@ export function TerminalThemeSection({
                     color: 'var(--zterm-settings-text)',
                     padding: '14px',
                     cursor: 'pointer',
-                    boxShadow: active ? '0 12px 26px rgba(31,214,122,0.14)' : mobileTheme.shadow.soft,
+                    boxShadow: active ? 'var(--zterm-settings-shadow)' : mobileTheme.shadow.soft,
                     textAlign: 'left',
                   }}
                 >
@@ -114,7 +115,7 @@ export function TerminalThemeSection({
               <div style={{ marginTop: '10px', fontSize: '12px', lineHeight: 1.6, color: mobileTheme.colors.lightMuted }}>
                 {theme.description}
               </div>
-            </button>
+            </AmbientButton>
           );
         })}
           </div>

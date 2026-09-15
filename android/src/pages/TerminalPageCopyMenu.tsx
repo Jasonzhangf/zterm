@@ -1,4 +1,5 @@
 import { copyMenuButtonStyle } from "./terminal-page-shell-ui";
+import { AmbientButton } from "../components/ambient";
 import type { CopySelectionState } from "./terminal-copy-selection";
 
 export interface TerminalPageCopyMenuProps {
@@ -60,36 +61,36 @@ export function TerminalPageCopyMenu({
          event.stopPropagation();
        }}
      >
-     <button
+     <AmbientButton
        type="button"
        onClick={onSetStart}
        style={copyMenuButtonStyle()}
      >
        设为起点
-     </button>
-     <button
+     </AmbientButton>
+     <AmbientButton
        type="button"
        disabled={startRowIndex === null}
        onClick={onSetEnd}
        style={copyMenuButtonStyle(startRowIndex === null)}
      >
        设为终点
-     </button>
-     <button
+     </AmbientButton>
+     <AmbientButton
        type="button"
        disabled={startRowIndex === null}
        onClick={onCopy}
        style={copyMenuButtonStyle(startRowIndex === null)}
      >
        复制
-     </button>
-     <button
+     </AmbientButton>
+     <AmbientButton
        type="button"
        onClick={onClose}
        style={copyMenuButtonStyle(false, true)}
      >
        关闭
-     </button>
+     </AmbientButton>
      </div>
    </>
  );

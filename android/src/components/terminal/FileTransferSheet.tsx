@@ -36,6 +36,7 @@ import {
 } from "../../lib/file-transfer-throughput-runtime";
 import { StoragePermissionPlugin } from "../../plugins/StoragePermissionPlugin";
 import { FILE_TRANSFER_WIRE_CHUNK_BYTES, FILE_TRANSFER_WIRE_FRAME_MAX_CHARS } from "@zterm/shared/protocol";
+import { AmbientButton, AmbientTextarea } from "../ambient";
 import {
   buildTransferSheetContainerStyle,
   buildTransferSheetOverlayStyle,
@@ -344,7 +345,7 @@ export function FileTransferSheet({
     setSortDirection: (direction: FileSortDirection) => void,
   ) => (
     <div style={sortControlStyle}>
-      <button
+      <AmbientButton
         type="button"
         onClick={() =>
           setSortField(sortField === "name" ? "modified" : "name")
@@ -357,8 +358,8 @@ export function FileTransferSheet({
         }}
       >
         {sortField === "name" ? "按名称" : "按时间"}
-      </button>
-      <button
+      </AmbientButton>
+      <AmbientButton
         type="button"
         onClick={() =>
           setSortDirection(sortDirection === "asc" ? "desc" : "asc")
@@ -371,7 +372,7 @@ export function FileTransferSheet({
         }}
       >
         {sortDirection === "asc" ? "正序" : "倒序"}
-      </button>
+      </AmbientButton>
     </div>
   );
 
@@ -1201,13 +1202,13 @@ export function FileTransferSheet({
           >
             {browserMode ? "文件浏览" : "文件同步"}
           </div>
-          <button
+          <AmbientButton
             type="button"
             onClick={onClose}
             style={actionButtonStyle(SHEET_SURFACE, SHEET_TEXT)}
           >
             ✕
-          </button>
+          </AmbientButton>
         </div>
 
         {/* Remote panel */}
@@ -1242,7 +1243,7 @@ export function FileTransferSheet({
             )}
           </div>
           <div style={pathBreadcrumbStyle}>
-            <button
+            <AmbientButton
               type="button"
               onClick={() =>
                 remoteParentPath && navigateRemotePath(remoteParentPath)
@@ -1255,7 +1256,7 @@ export function FileTransferSheet({
               }}
             >
               ← 上级
-            </button>
+            </AmbientButton>
             <span style={{ color: SHEET_MUTED }}>
               {shortenDisplayPath(remotePath)}
             </span>
@@ -1334,7 +1335,7 @@ export function FileTransferSheet({
                   }}
                 >
                   {entry.type === "file" ? (
-                    <button
+                    <AmbientButton
                       type="button"
                       aria-label={`选择远程 ${entry.name}`}
                       onClick={(event) => {
@@ -1344,7 +1345,7 @@ export function FileTransferSheet({
                       style={fileCheckboxStyle(selectedRemote.has(entry.name))}
                     >
                       {selectedRemote.has(entry.name) ? "✓" : ""}
-                    </button>
+                    </AmbientButton>
                   ) : <span style={{ width: "18px", flexShrink: 0 }} />}
                   <FileEntryGlyph type={entry.type} />
                   <span
@@ -1376,9 +1377,9 @@ export function FileTransferSheet({
           </div>
           {browserMode ? (
             <div style={{ display: "flex", gap: "8px", padding: "8px 10px", flexShrink: 0 }}>
-              <button type="button" disabled={selectedRemote.size === 0} onClick={() => { setDirection("download"); void startTransfer(); }} style={actionButtonStyle("rgba(31,214,122,0.22)", selectedRemote.size ? SHEET_ACCENT : SHEET_MUTED)}>
+              <AmbientButton type="button" disabled={selectedRemote.size === 0} onClick={() => { setDirection("download"); void startTransfer(); }} style={actionButtonStyle("var(--zterm-panel-accent-soft)", selectedRemote.size ? SHEET_ACCENT : SHEET_MUTED)}>
                 下载选中 ({selectedRemote.size})
-              </button>
+              </AmbientButton>
             </div>
           ) : null}
         </>
@@ -1411,13 +1412,13 @@ export function FileTransferSheet({
                 flexShrink: 0,
               }}
             >
-              <button
+              <AmbientButton
                 type="button"
                 onClick={closePreview}
                 disabled={previewSaving}
                 style={{
                   ...actionButtonStyle(
-                    "rgba(255,255,255,0.06)",
+                    "var(--zterm-panel-surface)",
                     SHEET_TEXT,
                   ),
                   minHeight: "34px",
@@ -1427,7 +1428,7 @@ export function FileTransferSheet({
                 }}
               >
                 ← 返回
-              </button>
+              </AmbientButton>
               <span
                 style={{
                   flex: 1,
@@ -1451,13 +1452,13 @@ export function FileTransferSheet({
                   minWidth: 0,
                 }}
               >
-                <button
+                <AmbientButton
                   type="button"
                   onClick={openInlinePreviewEditor}
                   disabled={preview.loading || Boolean(preview.error) || previewSaving}
                   style={{
                     ...actionButtonStyle(
-                      "rgba(31,214,122,0.22)",
+                      "var(--zterm-panel-accent-soft)",
                       SHEET_ACCENT,
                     ),
                     minHeight: "24px",
@@ -1468,8 +1469,8 @@ export function FileTransferSheet({
                   }}
                 >
                   编辑
-                </button>
-                <button
+                </AmbientButton>
+                <AmbientButton
                   type="button"
                   onClick={openPreviewInLocalEditor}
                   disabled={localOpenDisabledForPreview}
@@ -1485,8 +1486,8 @@ export function FileTransferSheet({
                   }}
                 >
                   本地打开
-                </button>
-                <button
+                </AmbientButton>
+                <AmbientButton
                   type="button"
                   onClick={() => {
                     void savePreviewToRemote();
@@ -1494,7 +1495,7 @@ export function FileTransferSheet({
                   disabled={saveDisabledForPreview}
                   style={{
                     ...actionButtonStyle(
-                      "rgba(31,214,122,0.22)",
+                      "var(--zterm-panel-accent-soft)",
                       SHEET_ACCENT,
                     ),
                     minHeight: "24px",
@@ -1504,9 +1505,9 @@ export function FileTransferSheet({
                   }}
                 >
                   保存
-                </button>
+                </AmbientButton>
                 {externalEditCopy?.fileName === preview.fileName ? (
-                  <button
+                  <AmbientButton
                     type="button"
                     onClick={() => {
                       void syncExternalEditCopyToRemote();
@@ -1514,7 +1515,7 @@ export function FileTransferSheet({
                     disabled={syncCopyDisabledForPreview}
                     style={{
                       ...actionButtonStyle(
-                        "rgba(96, 149, 255, 0.18)",
+                        "var(--zterm-panel-accent-soft)",
                         SHEET_TEXT,
                       ),
                       minHeight: "24px",
@@ -1524,9 +1525,9 @@ export function FileTransferSheet({
                     }}
                   >
                     同步本地副本
-                  </button>
+                  </AmbientButton>
                 ) : null}
-                <button
+                <AmbientButton
                   type="button"
                   onClick={onClose}
                   disabled={previewSaving}
@@ -1542,7 +1543,7 @@ export function FileTransferSheet({
                   }}
                 >
                   关闭
-                </button>
+                </AmbientButton>
               </div>
             </div>
             <div
@@ -1574,7 +1575,7 @@ export function FileTransferSheet({
                           {renderMarkdownPreview(previewEditorText)}
                         </div>
                       ) : null}
-                      <textarea
+                      <AmbientTextarea
                         aria-label="编辑远程文本"
                         ref={previewEditorRef}
                         value={previewEditorText}
@@ -1590,7 +1591,7 @@ export function FileTransferSheet({
                           resize: "none",
                           borderRadius: "12px",
                           border: `1px solid ${SHEET_BORDER}`,
-                          background: "rgba(255,255,255,0.04)",
+                          background: "var(--zterm-panel-surface)",
                           color: SHEET_TEXT,
                           padding: "10px",
                           fontFamily:
@@ -1645,24 +1646,24 @@ export function FileTransferSheet({
                 flexShrink: 0,
               }}
             >
-              <button
+              <AmbientButton
                 type="button"
                 onClick={() => setDirection("download")}
                 style={actionButtonStyle(
                   direction === "download"
-                    ? "rgba(31,214,122,0.22)"
+                    ? "var(--zterm-panel-accent-soft)"
                     : SHEET_SURFACE,
                   direction === "download" ? SHEET_ACCENT : SHEET_TEXT,
                 )}
               >
                 ⬇ 下载到本地
-              </button>
-              <button
+              </AmbientButton>
+              <AmbientButton
                 type="button"
                 onClick={startTransfer}
                 style={actionButtonStyle(
-                  "linear-gradient(180deg, rgba(96, 149, 255, 0.92), rgba(72, 122, 230, 0.92))",
-                  "#fff",
+                  SHEET_ACCENT,
+                  "var(--zterm-settings-accent-text)",
                 )}
               >
                 {resolvePrimaryTransferLabel(
@@ -1671,19 +1672,19 @@ export function FileTransferSheet({
                     ? selectedRemote.size
                     : selectedLocal.size,
                 )}
-              </button>
-              <button
+              </AmbientButton>
+              <AmbientButton
                 type="button"
                 onClick={() => setDirection("upload")}
                 style={actionButtonStyle(
                   direction === "upload"
-                    ? "rgba(31,214,122,0.22)"
+                    ? "var(--zterm-panel-accent-soft)"
                     : SHEET_SURFACE,
                   direction === "upload" ? SHEET_ACCENT : SHEET_TEXT,
                 )}
               >
                 ⬆ 上传到远程
-              </button>
+              </AmbientButton>
             </div>
 
             {/* Local panel */}
@@ -1697,7 +1698,7 @@ export function FileTransferSheet({
               )}
             </div>
             <div style={pathBreadcrumbStyle}>
-              <button
+              <AmbientButton
                 type="button"
                 onClick={() => {
                   setLocalPath(getParentLocalDisplayPath(localPath));
@@ -1711,7 +1712,7 @@ export function FileTransferSheet({
                 }}
               >
                 ← 上级
-              </button>
+              </AmbientButton>
               <span style={{ color: SHEET_MUTED }}>
                 {shortenDisplayPath(localPath)}
               </span>
@@ -1777,7 +1778,7 @@ export function FileTransferSheet({
                   }
                 }}
               >
-                <button
+                <AmbientButton
                   type="button"
                   aria-label={`选择本地 ${entry.name}`}
                   onClick={(event) => {
@@ -1787,7 +1788,7 @@ export function FileTransferSheet({
                   style={fileCheckboxStyle(selectedLocal.has(entry.name))}
                 >
                   {selectedLocal.has(entry.name) ? "✓" : ""}
-                </button>
+                </AmbientButton>
                 <FileEntryGlyph type={entry.type} />
                 <span
                   style={{

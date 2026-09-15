@@ -18,6 +18,7 @@ import { formatTargetBadge } from '../../lib/network-target';
 import { getDefaultTraversalRelayBaseUrl } from '../../lib/traversal-relay-client';
 import type { TraversalRelayDeviceSnapshot } from '../../lib/types';
 import { SettingsSectionTitle, settingsInputStyle, settingsSectionStyle } from './SettingsSection';
+import { AmbientButton, AmbientInput } from '../ambient';
 
 interface ConnectionConfigSectionProps {
   settings: BridgeSettings;
@@ -238,18 +239,17 @@ export function ConnectionConfigSection({
 
   return (
     <div style={settingsSectionStyle()}>
-      <button
+      <AmbientButton
         type="button"
         data-testid="settings-connection-config-expand"
         onClick={() => setExpanded((current) => !current)}
         style={{
           width: '100%',
           border: '1px solid var(--zterm-settings-border)',
-          borderRadius: '18px',
-          padding: '14px 16px',
+          borderRadius: '12px',
+          padding: '10px 12px',
           backgroundColor: 'var(--zterm-settings-surface)',
           color: 'var(--zterm-settings-text)',
-          boxShadow: 'var(--zterm-settings-shadow)',
           cursor: 'pointer',
           display: 'flex',
           alignItems: 'center',
@@ -270,7 +270,7 @@ export function ConnectionConfigSection({
         <span style={{ flex: '0 0 auto', fontSize: '12px', fontWeight: 800, color: 'var(--zterm-settings-accent)' }}>
           {expanded ? '收起' : '展开'}
         </span>
-      </button>
+      </AmbientButton>
 
       {expanded ? (
         <>
@@ -337,7 +337,7 @@ export function ConnectionConfigSection({
                 {relayStatus && !relayStatus.includes('已登录') ? ` · ${relayStatus}` : ''}
               </div>
             </div>
-            <button
+            <AmbientButton
               type="button"
               onClick={handleLogout}
               disabled={busy}
@@ -353,7 +353,7 @@ export function ConnectionConfigSection({
               }}
             >
               退出登录
-            </button>
+            </AmbientButton>
           </div>
         ) : (
           <form
@@ -374,7 +374,7 @@ export function ConnectionConfigSection({
               <label htmlFor="relay-account" style={{ fontSize: '13px', fontWeight: 700 }}>
                 账号
               </label>
-              <input
+              <AmbientInput
                 id="relay-account"
                 aria-label="Relay 账号"
                 autoComplete="username"
@@ -395,7 +395,7 @@ export function ConnectionConfigSection({
               <label htmlFor="relay-password" style={{ fontSize: '13px', fontWeight: 700 }}>
                 密码
               </label>
-              <input
+              <AmbientInput
                 id="relay-password"
                 aria-label="Relay 密码"
                 type="password"
@@ -406,7 +406,7 @@ export function ConnectionConfigSection({
                 style={{ ...settingsInputStyle(), minWidth: 0 }}
               />
             </div>
-            <button
+            <AmbientButton
               type="submit"
               disabled={busy || !loginUsername.trim() || !loginPassword}
               style={{
@@ -422,7 +422,7 @@ export function ConnectionConfigSection({
               }}
             >
               {busy ? '登录中…' : '登录'}
-            </button>
+            </AmbientButton>
             <div
               data-testid="settings-relay-login-status"
               role={relayStatusIsError ? 'alert' : 'status'}
@@ -445,7 +445,7 @@ export function ConnectionConfigSection({
         <div style={{ display: 'grid', gap: '8px' }}>
           <label style={{ display: 'grid', gap: '5px', fontSize: '13px', fontWeight: 700 }}>
             名称
-            <input
+            <AmbientInput
               aria-label="服务器名称"
               value={draft.name}
               onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
@@ -456,7 +456,7 @@ export function ConnectionConfigSection({
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 96px', gap: '8px' }}>
             <label style={{ display: 'grid', gap: '5px', fontSize: '13px', fontWeight: 700 }}>
               主机
-              <input
+              <AmbientInput
                 aria-label="服务器地址"
                 value={draft.targetHost}
                 onChange={(event) => setDraft((current) => ({ ...current, targetHost: event.target.value }))}
@@ -466,7 +466,7 @@ export function ConnectionConfigSection({
             </label>
             <label style={{ display: 'grid', gap: '5px', fontSize: '13px', fontWeight: 700 }}>
               端口
-              <input
+              <AmbientInput
                 aria-label="服务器端口"
                 inputMode="numeric"
                 value={draft.targetPort}
@@ -477,7 +477,7 @@ export function ConnectionConfigSection({
           </div>
           <label style={{ display: 'grid', gap: '5px', fontSize: '13px', fontWeight: 700 }}>
             认证 Token
-            <input
+            <AmbientInput
               aria-label="服务器认证令牌"
               value={draft.authToken}
               onChange={(event) => setDraft((current) => ({ ...current, authToken: event.target.value }))}
@@ -487,7 +487,7 @@ export function ConnectionConfigSection({
           </label>
           <label style={{ display: 'grid', gap: '5px', fontSize: '13px', fontWeight: 700 }}>
             守护进程 ID（Daemon ID）
-            <input
+            <AmbientInput
               aria-label="守护进程 ID（Daemon ID）"
               value={draft.relayHostId}
               onChange={(event) => setDraft((current) => ({ ...current, relayHostId: event.target.value }))}
@@ -495,7 +495,7 @@ export function ConnectionConfigSection({
               style={settingsInputStyle()}
             />
           </label>
-          <button
+          <AmbientButton
             type="button"
             onClick={handleAddServer}
             disabled={!canAddServer}
@@ -510,7 +510,7 @@ export function ConnectionConfigSection({
             }}
           >
             添加服务器
-          </button>
+          </AmbientButton>
         </div>
       </div>
 
@@ -525,7 +525,7 @@ export function ConnectionConfigSection({
             if (entry.kind === 'bridge-preset') {
               const active = entry.active;
               return (
-                <button
+                <AmbientButton
                   key={`preset:${entry.server.id}`}
                   onClick={() => onSettingsChange((current) => setDefaultBridgeServer(current, entry.server.id))}
                   style={{
@@ -556,7 +556,7 @@ export function ConnectionConfigSection({
                   <span style={{ fontSize: '12px', opacity: 0.8, flex: '0 0 auto' }}>
                     {active ? '默认' : '使用'}
                   </span>
-                </button>
+                </AmbientButton>
               );
             }
 
@@ -621,7 +621,7 @@ export function ConnectionConfigSection({
       )}
 
       {hasDefaultServer && (
-        <button
+        <AmbientButton
           onClick={onRemoveDefaultServer}
           style={{
             height: '52px',
@@ -634,7 +634,7 @@ export function ConnectionConfigSection({
           }}
         >
           移除默认服务器
-        </button>
+        </AmbientButton>
       )}
         </>
       ) : null}

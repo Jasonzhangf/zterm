@@ -13,6 +13,7 @@ import { TerminalSessionDrawerFolderMenu } from './TerminalSessionDrawerFolderMe
 import { TerminalSessionDrawerNewSessionDialog } from './TerminalSessionDrawerNewSessionDialog';
 import { TerminalSessionDrawerSlotMenu } from './TerminalSessionDrawerSlotMenu';
 import { getServerIdentityTone } from '../../lib/server-identity';
+import { AmbientButton } from '../ambient';
 import type {
   TerminalSessionDrawerItem,
   TerminalSessionDrawerProps,
@@ -250,7 +251,7 @@ function TerminalSessionDrawerComponent({
 
   return (
     <>
-      <button
+      <AmbientButton
         type="button"
         aria-label="关闭 session 抽屉"
         aria-hidden={!open}
@@ -268,7 +269,7 @@ function TerminalSessionDrawerComponent({
             position: 'absolute',
             inset: 0,
             border: 'none',
-            background: 'rgba(0, 0, 0, 0.18)',
+            background: 'color-mix(in srgb, #050608 18%, transparent)',
             zIndex: 149,
             padding: 0,
             margin: 0,
@@ -366,7 +367,7 @@ function TerminalSessionDrawerComponent({
                 {previewSelectedSessionIds.length}/6
               </span>
             ) : null}
-            <button
+            <AmbientButton
               type="button"
               aria-label="关闭 session 抽屉"
               data-testid="terminal-session-drawer-close"
@@ -386,9 +387,9 @@ function TerminalSessionDrawerComponent({
               }}
             >
               ×
-            </button>
+            </AmbientButton>
             {onPreviewSelectionModeChange ? (
-              <button
+              <AmbientButton
                 type="button"
                 data-testid="terminal-session-drawer-preview-mode"
                 aria-pressed={previewSelectionMode}
@@ -404,7 +405,7 @@ function TerminalSessionDrawerComponent({
                 }}
               >
                 {previewSelectionMode ? '完成' : '多选'}
-              </button>
+              </AmbientButton>
             ) : null}
           </div>
         </div>
@@ -449,15 +450,19 @@ function TerminalSessionDrawerComponent({
                 const tone = group.hostKey
                   ? getServerIdentityTone({ daemonHostId: group.hostKey, connectionName: group.hostLabel })
                   : {
-                      accent: 'rgba(220, 232, 255, 0.26)',
-                      accentSoft: 'rgba(220, 232, 255, 0.08)',
-                      lightCardBorder: 'rgba(255,255,255,0.08)',
-                      tabActiveBackground: 'rgba(255,255,255,0.06)',
-                      previewText: '#dce8ff',
+                      accent: 'var(--zterm-settings-accent)',
+                      accentSoft: 'var(--zterm-settings-accent-soft)',
+                      lightCardBorder: 'var(--zterm-settings-border)',
+                      tabActiveBackground: 'var(--zterm-settings-field)',
+                      previewText: 'var(--zterm-settings-text)',
                     };
-                const statusColor = group.connected === false ? '#ff727d' : group.connected ? '#44e2a0' : 'var(--zterm-panel-muted)';
+                const statusColor = group.connected === false
+                  ? 'var(--zterm-settings-danger)'
+                  : group.connected
+                    ? 'var(--zterm-settings-success)'
+                    : 'var(--zterm-panel-muted)';
                 return (
-                  <button
+                  <AmbientButton
                     key={group.groupKey}
                     type="button"
                     role="treeitem"
@@ -499,7 +504,7 @@ function TerminalSessionDrawerComponent({
                         {group.sessions.length}
                       </span>
                     </div>
-                  </button>
+                  </AmbientButton>
                 );
               })}
             </div>
@@ -525,7 +530,7 @@ function TerminalSessionDrawerComponent({
                 borderLeft: '1px solid var(--zterm-panel-border)',
               }}
             >
-              <button
+              <AmbientButton
                 type="button"
                 role="treeitem"
                 aria-level={2}
@@ -581,7 +586,7 @@ function TerminalSessionDrawerComponent({
                 <span aria-hidden="true">{expandedFolderCwd === folder.cwd ? '▾' : '▸'}</span>
                 <span style={{ minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shortenFolderLabel(folder.cwd)}</span>
                 <span style={{ color: 'var(--zterm-panel-muted)', fontSize: '10px' }}>{folder.items.length}</span>
-              </button>
+              </AmbientButton>
               {expandedFolderCwd === folder.cwd && (!previewSelectionMode || folder.cwd === 'cwd 未知') ? folder.items.map((session) => {
             const previewSelectionIndex = previewSelectedSessionIds.indexOf(session.id);
             const slotTone = resolveSessionGroupSlotTone(session.sessionGroupSlot, sessionGroupLayoutAxis);
@@ -622,7 +627,7 @@ function TerminalSessionDrawerComponent({
                 border: slotTone
                   ? `1px solid ${slotTone.border}`
                   : session.active
-                  ? '1px solid rgba(106, 167, 255, 0.9)'
+                  ? '1px solid var(--zterm-settings-accent-border)'
                   : '1px solid var(--zterm-panel-border)',
                 background: slotTone
                   ? slotTone.background
@@ -638,7 +643,7 @@ function TerminalSessionDrawerComponent({
                 overflow: 'hidden',
               }}
             >
-                <button
+                <AmbientButton
                   type="button"
                   data-testid={`terminal-session-drawer-select-${session.id}`}
                   onMouseDown={(event) => {
@@ -734,7 +739,7 @@ function TerminalSessionDrawerComponent({
                   {session.subtitle}
                 </div>
               </div>
-              </button>
+              </AmbientButton>
 
               <div
                 style={{
@@ -745,7 +750,7 @@ function TerminalSessionDrawerComponent({
                 }}
               >
                 {previewSelectionMode ? (
-                  <button
+                  <AmbientButton
                     type="button"
                     data-testid={`terminal-session-drawer-preview-check-${session.id}`}
                     aria-label={previewSelectionIndex >= 0 ? `预览顺序 ${previewSelectionIndex + 1}` : '选择预览'}
@@ -765,14 +770,14 @@ function TerminalSessionDrawerComponent({
                       width: '24px', height: '24px', borderRadius: '6px', display: 'flex',
                       alignItems: 'center', justifyContent: 'center',
                       border: previewSelectionIndex >= 0 ? '1px solid var(--zterm-panel-accent)' : '1px solid var(--zterm-panel-border)',
-                      background: previewSelectionIndex >= 0 ? 'rgba(139,213,255,0.18)' : 'transparent',
+                      background: previewSelectionIndex >= 0 ? 'var(--zterm-settings-accent-soft)' : 'transparent',
                       color: previewSelectionIndex >= 0 ? 'var(--zterm-panel-accent)' : 'var(--zterm-panel-muted)',
                       opacity: 1,
                       fontSize: '11px', fontWeight: 900,
                     }}
                   >
                     {previewSelectionIndex >= 0 ? previewSelectionIndex + 1 : ''}
-                  </button>
+                  </AmbientButton>
                 ) : null}
                 {session.paneLabel ? (
                   <span
@@ -780,7 +785,7 @@ function TerminalSessionDrawerComponent({
                       minWidth: '34px',
                       padding: '3px 7px',
                       borderRadius: '999px',
-                      background: 'rgba(106, 167, 255, 0.16)',
+                      background: 'var(--zterm-settings-accent-soft)',
                       color: 'var(--zterm-panel-accent)',
                       textAlign: 'center',
                       fontSize: '10px',
@@ -810,7 +815,7 @@ function TerminalSessionDrawerComponent({
                     {slotTone.label}
                   </span>
                 ) : null}
-                <button
+                <AmbientButton
                   type="button"
                   aria-label={`关闭 ${session.title}`}
                   data-testid={`terminal-session-drawer-close-${session.id}`}
@@ -855,7 +860,7 @@ function TerminalSessionDrawerComponent({
                   }}
                 >
                   ×
-                </button>
+                </AmbientButton>
               </div>
             </div>
             );
@@ -921,24 +926,24 @@ function TerminalSessionDrawerComponent({
               borderTop: '1px solid var(--zterm-panel-border)', display: 'flex', gap: '8px', flexShrink: 0,
             }}
           >
-            <button
+            <AmbientButton
               type="button"
               onClick={onClearPreviewSelection}
               disabled={previewSelectedSessionIds.length === 0}
               style={{ flex: 1, height: '38px', borderRadius: '6px', border: '1px solid var(--zterm-panel-border)', background: 'var(--zterm-panel-surface)', color: 'var(--zterm-panel-text)' }}
             >
               清空
-            </button>
-            <button
+            </AmbientButton>
+            <AmbientButton
               type="button"
               onClick={() => onPreviewSelectionModeChange?.(false)}
               style={{ flex: 1, height: '38px', borderRadius: '6px', border: '1px solid var(--zterm-panel-border)', background: 'var(--zterm-panel-active)', color: 'var(--zterm-panel-accent)', fontWeight: 850 }}
             >
               完成 {previewSelectedSessionIds.length}/6
-            </button>
+            </AmbientButton>
           </div>
         ) : (
-        <button
+        <AmbientButton
           data-testid="terminal-session-drawer-add"
           aria-label="新建 session"
           type="button"
@@ -1016,7 +1021,7 @@ function TerminalSessionDrawerComponent({
             </span>
             <span>New Session</span>
           </div>
-        </button>
+        </AmbientButton>
         )}
       </aside>
     </>

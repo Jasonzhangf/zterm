@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { AmbientButton } from '../ambient';
 
 export type ZtermDialogTone = 'info' | 'success' | 'warning' | 'error';
 
@@ -18,24 +19,24 @@ export interface ZtermDialogProps {
 }
 
 const toneAccent: Record<ZtermDialogTone, string> = {
-  info: 'var(--zterm-dialog-info, var(--zterm-panel-accent, #6aa7ff))',
-  success: 'var(--zterm-dialog-success, var(--zterm-panel-accent, #1fd67a))',
-  warning: 'var(--zterm-dialog-warning, var(--zterm-panel-danger, #ffb454))',
-  error: 'var(--zterm-dialog-error, var(--zterm-panel-danger, #ff7e7e))',
+  info: 'var(--zterm-dialog-info, var(--zterm-panel-accent, #38d47d))',
+  success: 'var(--zterm-dialog-success, var(--zterm-panel-accent, #38d47d))',
+  warning: 'var(--zterm-dialog-warning, #ffb454)',
+  error: 'var(--zterm-dialog-error, var(--zterm-panel-danger, #ff7a86))',
 };
 
 const toneSoftBackground: Record<ZtermDialogTone, string> = {
-  info: 'var(--zterm-dialog-info-soft, rgba(106,167,255,0.13))',
-  success: 'var(--zterm-dialog-success-soft, rgba(31,214,122,0.13))',
+  info: 'var(--zterm-dialog-info-soft, rgba(56,212,125,0.14))',
+  success: 'var(--zterm-dialog-success-soft, rgba(56,212,125,0.14))',
   warning: 'var(--zterm-dialog-warning-soft, rgba(255,180,84,0.13))',
-  error: 'var(--zterm-dialog-error-soft, rgba(255,126,126,0.13))',
+  error: 'var(--zterm-dialog-error-soft, rgba(255,122,134,0.14))',
 };
 
 const toneBorder: Record<ZtermDialogTone, string> = {
-  info: 'var(--zterm-dialog-info-border, rgba(106,167,255,0.34))',
-  success: 'var(--zterm-dialog-success-border, rgba(31,214,122,0.34))',
+  info: 'var(--zterm-dialog-info-border, rgba(56,212,125,0.38))',
+  success: 'var(--zterm-dialog-success-border, rgba(56,212,125,0.38))',
   warning: 'var(--zterm-dialog-warning-border, rgba(255,180,84,0.34))',
-  error: 'var(--zterm-dialog-error-border, rgba(255,126,126,0.34))',
+  error: 'var(--zterm-dialog-error-border, rgba(255,122,134,0.38))',
 };
 
 function ToneGlyph({ tone }: { tone: ZtermDialogTone }) {
@@ -245,7 +246,7 @@ export function ZtermDialog({
             background: 'var(--zterm-panel-bg, #101622)',
             color: 'var(--zterm-panel-text, #f5f7fb)',
             border: '1px solid var(--zterm-panel-border, rgba(255,255,255,0.14))',
-            boxShadow: '0 24px 60px rgba(0,0,0,0.44)',
+            boxShadow: 'var(--zterm-settings-shadow)',
             animation: closing
               ? 'ztermDialogPanelExit 150ms ease-in forwards'
               : 'ztermDialogPop 220ms cubic-bezier(0.22, 1, 0.36, 1)',
@@ -345,7 +346,7 @@ export function ZtermDialog({
           }}
         >
           {showCancel ? (
-            <button
+            <AmbientButton
               type="button"
               aria-label={cancelLabel}
               data-testid="zterm-dialog-cancel"
@@ -364,9 +365,9 @@ export function ZtermDialog({
               }}
             >
               {cancelLabel}
-            </button>
+            </AmbientButton>
           ) : null}
-          <button
+          <AmbientButton
             type="button"
             aria-label={confirmLabel}
             data-testid="zterm-dialog-confirm"
@@ -385,7 +386,7 @@ export function ZtermDialog({
             }}
           >
             {confirmLabel}
-          </button>
+          </AmbientButton>
         </div>
       </div>
     </div>
