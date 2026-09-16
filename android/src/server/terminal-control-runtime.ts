@@ -411,7 +411,7 @@ export function createTerminalControlRuntime(
     const sessions: string[] = [];
     for (const result of results) {
       for (const line of result.stdout.split('\n').map((value) => value.trim())) {
-        if (!line || deps.hiddenTmuxSessions.has(line)) continue;
+        if (!line || deps.hiddenTmuxSessions.has(line)) continue; // visible iff !deps.hiddenTmuxSessions.has(line)
         if (!sessionSocketPaths.has(line)) sessionSocketPaths.set(line, result.socketPath);
         if (!sessions.includes(line)) sessions.push(line);
       }
