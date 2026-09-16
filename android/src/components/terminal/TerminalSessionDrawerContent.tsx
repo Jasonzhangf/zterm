@@ -426,10 +426,15 @@ function TerminalSessionDrawerComponent({
         <div
           data-testid="terminal-session-drawer-tree"
           role="tree"
+          onTouchStart={(event) => event.stopPropagation()}
+          onTouchMove={(event) => event.stopPropagation()}
+          onTouchEnd={(event) => event.stopPropagation()}
           style={{
             flex: '0 1 auto',
             minHeight: 0,
             overflowY: 'auto',
+            touchAction: 'pan-y',
+            WebkitOverflowScrolling: 'touch',
             padding: '6px 10px 10px',
           }}
         >
@@ -525,8 +530,6 @@ function TerminalSessionDrawerComponent({
               data-testid={`terminal-session-drawer-folder-${folder.cwd}`}
               role="group"
               style={{
-                marginLeft: '12px',
-                paddingLeft: '12px',
                 borderLeft: '1px solid var(--zterm-panel-border)',
               }}
             >
@@ -635,12 +638,12 @@ function TerminalSessionDrawerComponent({
                   ? 'var(--zterm-panel-active)'
                   : 'var(--zterm-panel-surface)',
                 display: 'grid',
-                gridTemplateColumns: '1fr auto',
-                gap: '8px',
+                gridTemplateColumns: '1fr',
                 alignItems: 'center',
                 color: 'var(--zterm-panel-text)',
                 opacity: 1,
                 overflow: 'hidden',
+                position: 'relative',
               }}
             >
                 <AmbientButton
@@ -710,7 +713,7 @@ function TerminalSessionDrawerComponent({
                   background: 'transparent',
                   color: 'inherit',
                   textAlign: 'left',
-                  padding: '10px 0 10px 12px',
+                  padding: '10px 12px',
                 }}
               >
               <div style={{ minWidth: 0 }}>
@@ -743,6 +746,9 @@ function TerminalSessionDrawerComponent({
 
               <div
                 style={{
+                  position: 'absolute',
+                  top: '8px',
+                  right: '8px',
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: 'flex-end',
@@ -845,16 +851,21 @@ function TerminalSessionDrawerComponent({
                     activateCloseSession(session.id);
                   }}
                   style={{
-                    width: '32px',
-                    height: '32px',
-                    borderRadius: '999px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    border: '1px solid var(--zterm-panel-border)',
-                    background: 'var(--zterm-panel-surface)',
+                    position: 'absolute',
+                    top: '3px',
+                    right: '3px',
+                    width: '18px',
+                    minWidth: '18px',
+                    maxWidth: '18px',
+                    height: '18px',
+                    minHeight: '18px',
+                    maxHeight: '18px',
+                    padding: 0,
+                    border: 'none',
+                    borderRadius: 0,
+                    background: 'transparent',
                     color: 'var(--zterm-panel-danger)',
-                    fontSize: '13px',
+                    fontSize: '12px',
                     lineHeight: 1,
                     pointerEvents: 'auto',
                   }}
