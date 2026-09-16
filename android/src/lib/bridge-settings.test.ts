@@ -485,6 +485,7 @@ describe('bridge-settings helpers', () => {
         mode: 'hide-subagent',
         masterNames: [' zterm-3 ', 'zterm-3'],
         subagentNames: ['zterm-subagent-rw-ui-0906', ''],
+        hiddenSessionNames: [' OneStop-1 ', 'OneStop-1'],
       },
     });
 
@@ -493,6 +494,7 @@ describe('bridge-settings helpers', () => {
       mode: 'hide-subagent',
       masterNames: ['zterm-3'],
       subagentNames: ['zterm-subagent-rw-ui-0906'],
+      hiddenSessionNames: ['OneStop-1'],
     });
     expect(normalizeBridgeSettings({ ...baseSettings }).sessionDrawerFilter).toBeUndefined();
   });

@@ -1143,6 +1143,12 @@ export function AppContent({
             terminalWidthMode={bridgeSettings.terminalWidthMode}
             terminalSessionGroupLayoutMode={bridgeSettings.terminalSessionGroupLayoutMode}
             sessionDrawerFilterConfig={bridgeSettings.sessionDrawerFilter}
+            onSessionDrawerFilterConfigChange={(sessionDrawerFilter) => {
+              persistBridgeSettings((current) => ({
+                ...current,
+                sessionDrawerFilter,
+              }));
+            }}
             resolveFileBrowserSessionPort={resolveFileBrowserSessionPort}
             onRemoteWindowMessage={onRemoteWindowMessage}
             shortcutSmartSort={bridgeSettings.shortcutSmartSort}

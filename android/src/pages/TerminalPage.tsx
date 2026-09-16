@@ -38,7 +38,9 @@ import type {
 } from '../lib/plugin-session-drawer/session-drawer-contract';
 import {
   filterSessionsByDrawerVisibility,
+  hideSessionName,
   normalizeSessionDrawerFilterConfig,
+  restoreAllHiddenSessions,
   resolveSessionNameForVisibility,
   type SessionDrawerFilterConfig,
 } from '../lib/plugin-session-drawer/session-drawer-visibility';
@@ -528,6 +530,7 @@ interface TerminalPageProps {
   shortcutFrequencyMap?: Record<string, number>;
   onShortcutUse?: (shortcutId: string) => void;
   sessionDrawerFilterConfig?: SessionDrawerFilterConfig;
+  onSessionDrawerFilterConfigChange?: (config: SessionDrawerFilterConfig) => void;
 }
 
 interface ScheduleComposerTarget {
@@ -619,6 +622,7 @@ function TerminalPageComponent({
   shortcutFrequencyMap,
   onShortcutUse,
   sessionDrawerFilterConfig,
+  onSessionDrawerFilterConfigChange,
 }: TerminalPageProps) {
   const isAndroid = Capacitor.getPlatform() === 'android';
   const [terminalShellNow, setTerminalShellNow] = useState(() => new Date());
@@ -3263,6 +3267,24 @@ function TerminalPageComponent({
     }
   }, [handleSwitchSessionFromChrome]);
 
+  const handleHideSessionFromDrawer = useCallback((sessionId: string) => {
+    const sessionName = drawerRemoteSessions.items
+      .concat(drawerSessions)
+      .find((item) => item.id === sessionId)?.sessionName?.trim();
+    if (!sessionName || !onSessionDrawerFilterConfigChange) {
+      return;
+    }
+    onSessionDrawerFilterConfigChange(
+      hideSessionName(resolvedSessionDrawerFilterConfig, sessionName),
+    );
+  }, [drawerRemoteSessions.items, drawerSessions, onSessionDrawerFilterConfigChange, resolvedSessionDrawerFilterConfig]);
+
+  const handleRestoreAllHiddenSessions = useCallback(() => {
+    onSessionDrawerFilterConfigChange?.(
+      restoreAllHiddenSessions(resolvedSessionDrawerFilterConfig),
+    );
+  }, [onSessionDrawerFilterConfigChange, resolvedSessionDrawerFilterConfig]);
+
   const handleActivateSessionGroupSlot = useCallback((sessionId: string, sourceSlot?: TerminalSessionGroupSlotName) => {
     void sourceSlot;
     const fixedSlot = resolveSessionGroupSlot(sessionId);
@@ -3704,6 +3726,9 @@ function TerminalPageComponent({
                 onSelectSession: handleSelectSessionFromDrawer,
                 onCloseSession: handleCloseSessionFromDrawer,
                 onAssignSessionGroupSlot: handleAssignSessionGroupSlot,
+                onHideSession: handleHideSessionFromDrawer,
+                onRestoreAllHiddenSessions: handleRestoreAllHiddenSessions,
+                hiddenSessionCount: resolvedSessionDrawerFilterConfig.hiddenSessionNames.length,
                 sessionGroupLayoutAxis,
                 onOpenQuickTabPicker: handleOpenQuickTabPickerFromDrawer,
                 onDebugAddEvent: handleSessionDrawerDebugAddEvent,
@@ -4027,6 +4052,8 @@ function terminalPagePropsEqual(
     && prev.terminalFontSize === next.terminalFontSize
     && prev.terminalWidthMode === next.terminalWidthMode
     && prev.terminalSessionGroupLayoutMode === next.terminalSessionGroupLayoutMode
+    && prev.sessionDrawerFilterConfig === next.sessionDrawerFilterConfig
+    && prev.onSessionDrawerFilterConfigChange === next.onSessionDrawerFilterConfigChange
     && prev.onTerminalWidthModeChange === next.onTerminalWidthModeChange
     && prev.resolveFileBrowserSessionPort === next.resolveFileBrowserSessionPort
     && prev.renderDebugConsole === next.renderDebugConsole

@@ -5,7 +5,7 @@
 - Feature: `terminal.session_drawer`
 - Resources: `resource.ui_projection -> resource.open_tab -> resource.active_session`; fixed-width crop gestures also border `resource.renderer_window` but must not mutate terminal content truth.
 - Owner: `src/components/terminal/TerminalSessionDrawer.tsx` for drawer intent; `src/pages/TerminalPage.tsx` for page-level projection and host canonicalization; `src/lib/server-identity.ts` for endpoint-to-daemon alias resolution; `src/App.tsx` only wires saved/Home server identity inputs into the page.
-- Change class: physically remove cross-gesture selection, keep the session list content-sized with bounded scrolling, separate fixed-width crop pan from drawer open, and ensure remote catalog row selection materializes and projects the selected session on the first tap. The edge swipe that opens the drawer may expose rows under the release point, but that same gesture must never become a row-selection intent. In `mirror-fixed`, right-side or middle horizontal drags belong to renderer crop pan; the drawer may only start from the left edge and only emit the `previous` drawer-open direction.
+- Change class: physically remove cross-gesture selection, keep the session list content-sized with bounded scrolling, separate fixed-width crop pan from drawer open, ensure remote catalog row selection materializes and projects the selected session on the first tap, and make the drawer panel's capture-phase left swipe close the drawer even when the gesture starts inside the scrollable list. The edge swipe that opens the drawer may expose rows under the release point, but that same gesture must never become a row-selection intent. In `mirror-fixed`, right-side or middle horizontal drags belong to renderer crop pan; the drawer may only start from the left edge and only emit the `previous` drawer-open direction.
 - Shell theme projection: the drawer consumes the effective terminal shell skin from its parent and uses the same background, surface, border, text, muted-text, active, pressed, and accent tokens as Header and QuickBar. Light, blue, and black skins may differ in palette, but a drawer must not retain hard-coded blue text/surfaces while another skin is active.
 - Android back contract: Settings and connection properties retain back-to-Home navigation. On the terminal page, the system back/left-edge exit intent is consumed so it cannot terminate the app while the same edge is reserved for the session drawer gesture.
 
@@ -30,7 +30,10 @@
 17. Short session catalogs size the list to its rows and place the footer directly after the list. Long catalogs may shrink the list and scroll inside it, but the list must not use growing flex space that creates a large blank band above the footer.
 18. The drawer is a tmux-only projection. Legacy persisted Herdr groups normalize to tmux and merge with the same canonical daemon/session identity; equal session names produce one row, while remote catalog target identity (`daemonHostId`/session name) remains unchanged.
 19. While the drawer is open it is the only terminal chrome interaction layer: portrait status/back/settings controls, debug overlays, copy menus, and the fixed quickbar must not render above it. The drawer backdrop and panel must sit above the normal terminal chrome stack, while transient toast/progress feedback may remain above the drawer.
-19. The narrow drawer header must remain one compact control row. It may expose the preview-selection command and count, but must not stack tutorial/help copy over terminal or session content.
+19. The narrow drawer header must remain one compact control row. It may expose the preview-selection command and count, but must not stack tutorial/help copy over terminal or session content. At the 187px maximum drawer width, header controls stay on one line and session rows use a 56px minimum height with a 13px single-line title and 10px single-line subtitle; body text reserves space for trailing row actions and ellipsizes instead of wrapping or colliding with them.
+20. The long-press session menu must expose both the existing slot assignment intent and an explicit hide intent; hiding stores the trimmed exact `sessionName` in the client-only `hiddenSessionNames[]` list, and the drawer projects only non-hidden rows.
+21. The header restore-all action appears only while the hidden list is non-empty and clears that list through the same Settings persistence path.
+22. A left swipe that starts anywhere inside the drawer panel, including the scrollable tree, closes the drawer once when horizontal displacement dominates vertical displacement and crosses the close threshold. Vertical list scrolling, row selection, and the close button must not emit a close intent.
 
 ## Paired Tests
 
@@ -41,6 +44,11 @@
 - Positive: a saved/Home server mapping aliases an IP group into the matching daemon rail when production Relay exposes only `relay-rtc`.
 - Positive: an rtc-only Relay daemon plus a saved/Home endpoint-to-daemon alias projects the direct group into the daemon rail, with the catalog supplying rows only.
 - Negative: a pointer click delivered after drawer open without a matching row press does not select any session.
+- Positive: long-press on a drawer row opens the session menu and the hide action removes the exact session name from the visible projection.
+- Positive: restore-all appears only while hidden names exist and restores all hidden rows through the existing Settings config.
+- Positive: a horizontal-dominant left swipe beginning inside the scrollable tree closes the drawer once.
+- Negative: a vertical-dominant list scroll does not close the drawer.
+- Negative: hiding `zterm-3` must not hide `zterm-30`; matching is exact trimmed session-name equality.
 - Negative: an unavailable row remains non-selectable even after a matching press.
 - Negative: arming one row cannot authorize selection of another row.
 - Negative: selecting a remote-only catalog row must not switch or render the remote catalog placeholder id when no materialized `sessionId` is returned.
@@ -58,6 +66,7 @@
 - Positive: a short drawer catalog uses `flex: 0 1 auto` with `min-height: 0`, keeping the footer adjacent to the final row.
 - Negative: the session list must not use `flex: 1` or another grow rule that turns unused drawer height into blank list space.
 - Positive: opening the drawer leaves one compact header row and keeps the drawer panel above the normal terminal chrome z-index ceiling.
+- Positive: at the 187px drawer width, the header controls remain on one row and session rows keep the compact 56px height, 13px title, 10px subtitle, and ellipsized single-line text contract.
 - Negative: portrait status/back/settings controls, debug overlay, copy menu, fixed quickbar, and instructional header paragraphs do not remain visible while the drawer is open.
 - Negative: opening the drawer must not request a host-session catalog refresh, mutate `lastOpenedAt`, or reorder the existing host/session projection.
 - Positive: a catalog update produced independently by the background owner may update the next drawer projection without coupling refresh work to drawer entry.

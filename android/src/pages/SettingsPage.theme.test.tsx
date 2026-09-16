@@ -80,6 +80,47 @@ describe('SettingsPage terminal theme selection', () => {
     expect(resolveSettingsTheme('blue').accent).toBe('#38d47d');
   });
 
+  it('renders update version metadata with settings tokens in the dark shell', () => {
+    render(
+      <SettingsPage
+        settings={{ ...baseSettings, terminalShellSkin: 'black' }}
+        currentVersionName="0.1.1.1590"
+        currentVersionCode={1011590}
+        updatePreferences={baseUpdatePreferences}
+        latestManifest={{
+          versionName: '0.1.1.1591',
+          versionCode: 1011591,
+          apkUrl: 'zterm-0.1.1.1591.apk',
+          sha256: 'abc',
+          notes: [],
+          publishedAt: '2026-09-16T10:00:00.000Z',
+        }}
+        updateChecking={false}
+        updateInstalling={false}
+        updateError="更新检查失败"
+        hasNewVersion
+        hasUpdateIgnorePolicy={false}
+        onSave={vi.fn(successfulBridgeSettings)}
+        onUpdatePreferencesChange={vi.fn(successfulUpdatePreferences)}
+        onCheckForUpdate={vi.fn()}
+        onInstallUpdate={vi.fn()}
+        onResetUpdateIgnorePolicy={vi.fn()}
+        onBack={vi.fn()}
+        renderSettingsUpdate={(props) => <AppUpdateSection {...props} />}
+      />,
+    );
+
+    const versionInfo = screen.getByTestId('settings-update-version-info');
+    expect(versionInfo.style.color).toBe('var(--zterm-settings-muted)');
+    expect(versionInfo.style.backgroundColor).toBe('var(--zterm-settings-field)');
+    expect(versionInfo.style.fontSize).toBe('12px');
+    expect(within(versionInfo).getByText('发布时间 2026-09-16T10:00:00.000Z')).toBeTruthy();
+
+    const updateError = screen.getByTestId('settings-update-error');
+    expect(updateError.style.color).toBe('var(--zterm-settings-danger)');
+    expect(updateError.style.fontSize).toBe('12px');
+  });
+
   it('renders the expanded built-in theme catalog', () => {
     render(
       <SettingsPage

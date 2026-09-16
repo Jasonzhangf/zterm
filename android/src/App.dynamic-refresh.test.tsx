@@ -680,6 +680,7 @@ vi.mock('./pages/TerminalPage', () => ({
     onOpenConnections,
     onTerminalInput,
     onTerminalWidthModeChange,
+    onSessionDrawerFilterConfigChange,
     onSessionDraftSend,
     followResetEpoch,
     sessionBufferStore,
@@ -700,6 +701,7 @@ vi.mock('./pages/TerminalPage', () => ({
     onOpenConnections: () => void;
     onTerminalInput?: (sessionId: string, data: string) => void;
     onTerminalWidthModeChange?: (sessionId: string, mode: 'adaptive-phone' | 'mirror-fixed', cols?: number | null) => void;
+    onSessionDrawerFilterConfigChange?: (config: unknown) => void;
     onSessionDraftSend?: (value: string, sessionId?: string) => void;
     followResetEpoch?: number;
     sessionBufferStore?: { getSnapshot: (sessionId: string) => { buffer?: { marker?: string; revision?: number } } };
@@ -791,6 +793,21 @@ vi.mock('./pages/TerminalPage', () => ({
           }}
         >
           set-active-adaptive-width
+        </button>
+        <button
+          type="button"
+          data-testid="set-session-drawer-filter"
+          onClick={() => {
+            onSessionDrawerFilterConfigChange?.({
+              version: 1,
+              mode: 'all',
+              masterNames: [],
+              subagentNames: [],
+              hiddenSessionNames: ['zterm-3'],
+            });
+          }}
+        >
+          set-session-drawer-filter
         </button>
         <button
           type="button"
@@ -1012,6 +1029,27 @@ describe('App dynamic refresh matrix', () => {
 
     await waitFor(() => expect(screen.getByTestId('terminal-shell-slot').textContent).toBe('ready'));
     expect(renderTerminalShell).not.toHaveBeenCalled();
+  });
+
+  it('persists session drawer visibility changes through BridgeSettings', async () => {
+    const setBridgeSettings = makeBridgeSettingsSetter();
+    render(
+      <AppContent
+        bridgeSettings={{ servers: [] } as any}
+        setBridgeSettings={setBridgeSettings}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('set-session-drawer-filter'));
+
+    const updater = readBridgeSettingsUpdater(setBridgeSettings);
+    expect(updater({ servers: [], sessionDrawerFilter: undefined }).sessionDrawerFilter).toEqual({
+      version: 1,
+      mode: 'all',
+      masterNames: [],
+      subagentNames: [],
+      hiddenSessionNames: ['zterm-3'],
+    });
   });
 
   it('forwards the plugin-provided settings update slot render to SettingsPage', async () => {
