@@ -246,7 +246,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
     expect(reconnectSession).toHaveBeenCalledWith('session-1');
   });
 
-  it('waits for fresh pending transport open instead of starting a second reconnect', () => {
+  it('waits for a fresh pending transport open whose socket is still connecting', () => {
     const reconnectSession = vi.fn();
     const updateSessionSync = vi.fn();
     const options = createBaseOptions({
@@ -255,7 +255,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
         source: 'explicit-resume',
         allowReconnectIfUnavailable: true,
       },
-      daemonConnection: makeDaemonConnection(null),
+      daemonConnection: makeDaemonConnection({ readyState: WebSocket.CONNECTING }),
       hasPendingSessionTransportOpen: () => true,
       isPendingSessionTransportOpenStale: () => false,
       reconnectSession,
@@ -278,6 +278,62 @@ describe('ensureActiveSessionFreshRuntime', () => {
       lastError: 'Waiting for existing websocket open',
     });
     expect(reconnectSession).not.toHaveBeenCalled();
+  });
+
+  it('rebuilds an orphaned pending transport open whose socket is already gone', () => {
+    const reconnectSession = vi.fn();
+    const options = createBaseOptions({
+      refreshOptions: {
+        sessionId: 'session-1',
+        source: 'explicit-resume',
+        allowReconnectIfUnavailable: true,
+      },
+      daemonConnection: makeDaemonConnection(null),
+      hasPendingSessionTransportOpen: () => true,
+      isPendingSessionTransportOpenStale: () => false,
+      reconnectSession,
+      refs: {
+        ...createBaseOptions().refs,
+        stateRef: {
+          current: {
+            sessions: [{ id: 'session-1', state: 'reconnecting' } as any],
+            activeSessionId: 'session-1',
+            liveSessionIds: [],
+          },
+        },
+      },
+    });
+
+    expect(ensureActiveSessionFreshRuntime(options)).toBe(true);
+    expect(reconnectSession).toHaveBeenCalledWith('session-1');
+  });
+
+  it('rebuilds an orphaned pending transport open whose socket already closed', () => {
+    const reconnectSession = vi.fn();
+    const options = createBaseOptions({
+      refreshOptions: {
+        sessionId: 'session-1',
+        source: 'explicit-resume',
+        allowReconnectIfUnavailable: true,
+      },
+      daemonConnection: makeDaemonConnection({ readyState: WebSocket.CLOSED }),
+      hasPendingSessionTransportOpen: () => true,
+      isPendingSessionTransportOpenStale: () => false,
+      reconnectSession,
+      refs: {
+        ...createBaseOptions().refs,
+        stateRef: {
+          current: {
+            sessions: [{ id: 'session-1', state: 'reconnecting' } as any],
+            activeSessionId: 'session-1',
+            liveSessionIds: [],
+          },
+        },
+      },
+    });
+
+    expect(ensureActiveSessionFreshRuntime(options)).toBe(true);
+    expect(reconnectSession).toHaveBeenCalledWith('session-1');
   });
 
   it('does not reconnect closed sessions from passive active reentry', () => {

@@ -2678,6 +2678,7 @@ describe("FileTransferSheet", () => {
         totalBytes: 9,
       },
     });
+    await waitFor(() => expect(screen.getByText("FROM node")).toBeTruthy());
     vi.mocked(StoragePermissionPlugin.stat).mockRejectedValue(new Error("EIO"));
 
     await waitFor(() => {
@@ -2689,6 +2690,7 @@ describe("FileTransferSheet", () => {
     fireEvent.click(screen.getByRole("button", { name: "本地打开" }));
 
     await waitFor(() => {
+      expect(StoragePermissionPlugin.stat).toHaveBeenCalledWith({ path: targetPath });
       expect(document.body.textContent).toContain("本地打开失败：EIO");
       expect(StoragePermissionPlugin.writeFile).not.toHaveBeenCalledWith(
         expect.objectContaining({ path: targetPath }),
