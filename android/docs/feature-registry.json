@@ -2339,6 +2339,7 @@
       ],
       "allowed_paths": [
         "src/components/ambient/",
+        "src/main.tsx",
         "src/pages/ConnectionsPage.tsx",
         "src/pages/ConnectionsPage.test.tsx",
         "src/pages/ConnectionPropertiesPage.tsx",
@@ -2388,6 +2389,7 @@
       ],
       "required_gates": [
         "src/components/ambient/ambient-controls-truth.test.ts",
+        "src/components/ambient/input-modality-runtime.test.ts",
         "src/pages/ConnectionsPage.test.tsx",
         "src/pages/ConnectionPropertiesPage.test.tsx",
         "src/pages/SettingsPage.theme.test.tsx",

@@ -371,3 +371,60 @@ adb -s <device-or-emulator> install -r -d app-debug.apk
 adb -s <device-or-emulator> shell am start -n com.zterm.android/.MainActivity
 adb -s <device-or-emulator> exec-out screencap -p > evidence/png
 ```
+
+### 2026-09-15 green focus regression evidence
+
+Candidate source:
+
+```text
+base: bb224c608face642ead9c14108736766912c7ee4
+worktree: /Volumes/extension/code/zterm/playground/ambient-phase2-final-0915
+branch: fix/ambient-phase2-final-0915
+```
+
+Data-preserving emulator install:
+
+```text
+adb -s emulator-5554 install -r -d -t android/native/android/app/build/outputs/apk/debug/app-debug.apk
+adb -s emulator-5554 shell am start -W -n com.zterm.android/.MainActivity
+versionName: 0.1.3.2980
+versionCode: 1100029800
+firstInstallTime: 2026-09-08 06:36:23
+lastUpdateTime: 2026-09-15 20:08:23
+dataDir: /data/user/0/com.zterm.android
+APK SHA-256: 33746fa48e2fd379349d528fcc0c79270aa1da2e28cd9715d4021859bec439a9
+```
+
+The APK bundle contains `data-zterm-input-modality`; the app entry initializes
+the runtime as `pointer`. On the installed Terminal page, a real pointer tap on
+the connection status strip produced:
+
+```text
+modality: pointer
+data-keyboard-focus: null
+outline-style: none
+outline-color: rgb(238, 242, 247)
+```
+
+After a real `adb shell input keyevent 61` (Tab), the status strip became the
+active element and produced:
+
+```text
+modality: keyboard
+data-keyboard-focus: true
+outline: rgb(56, 212, 125) solid 1.90476px
+```
+
+A subsequent real pointer tap returned the strip to `pointer` and
+`outline-style: none`, proving the keyboard-only path does not leak into touch
+focus.
+
+Evidence files:
+
+```text
+android/evidence/2026-09-13-skin-design/emulator-2980-focus-pointer.png
+SHA-256: 259c26f40a41bf49ead4c4bc53d2ea077b590bdd675d7d6ab37eb43f2343733a
+
+android/evidence/2026-09-13-skin-design/emulator-2980-focus-keyboard.png
+SHA-256: ab36ded6e0c844200cc1ea83154f90bf88fd88195da3617ba187c62a7a8f340a
+```
