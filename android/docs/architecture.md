@@ -95,6 +95,7 @@
 - Daemon Control：`daemon.control_gateway` 持有认证后的 typed control ingress 与 daemon command owner 注册；`daemon.control_center` 负责 capability/deadline/idempotency/correlation/唯一 routing 与有界 audit。schedule/tmux control 必须经 gateway -> control center -> 唯一 owner，`terminal-message-runtime.ts` 不得保留第二套 schedule/tmux 控制实现。控制层不持有 mirror/transport/file/media body，也不得把控制元数据写入业务 payload。
 - Daemon Buffer Publisher：`daemon.buffer_publisher` 是 mirror 到 physical transport subscriber 的唯一正文发布边界，拥有 per-subscriber pending-latest、range merge/collapse、backpressure hysteresis、head broadcast cache、oversized contiguous same-revision frame split、trace stages 与显式 flush status；`daemon.mirror_writer` 负责 snapshot commit writes，`daemon.mirror_store` 负责 revision 与 runtime scheduling，发布只消费当前 mirror truth，不拥有 subscriber 发布状态。
 - Daemon Session Catalog：`daemon.session_catalog` 是 backend session catalog 与 `list-sessions` control dispatch 的唯一 owner，通过 `src/server/daemon-session-catalog-runtime.ts` 构造 backend-qualified `sessionCatalog` rows，发布 legacy `sessions` payload 与 list-time `session-activity` facts。`daemon.control_gateway` 只能委托该 owner；`daemon.schedule_runtime` 只消费共享 catalog builder 做 republish，不拥有 catalog truth。daemon 不得让 catalog 持有 client active/session、mirror、transport subscriber、renderer 或 UI truth。
+- Session list truth：session 列表每次通过目标主机 tmux API（`tmux list-sessions`）实时获取；不得读取或写入持久化 session 列表，不得扫描任意 `/tmp`/`/private/tmp` socket，不得把 tmux attach client 参数、cwd、测试 session 或缓存内容当作 session。测试必须使用隔离的 tmux server，且不得污染默认 server。
 
 ## 跨尺寸布局真源
 
