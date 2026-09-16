@@ -149,7 +149,7 @@ AmbientKeyBank
 
 ### Phase 2: Ambient 控件效果
 
-Phase 2 在控件化完成后接入视觉。当前已接入生产 `android/src/ambient.css`，并给共享控件输出 ambient class；已抓取手机真机截图与平板模拟器截图：`android/evidence/2026-09-13-skin-design/current-phone.png`、`current-tablet.png`。剩余项是双皮肤逐页渲染校验和阴影/留白校准。
+Phase 2 在控件化完成后接入视觉。当前已接入生产 `android/src/ambient.css`，并给共享控件输出 ambient class；已抓取手机真机截图与平板模拟器截图：`android/evidence/2026-09-13-skin-design/current-phone.png`、`current-tablet.png`。已完成双皮肤逐页渲染校验、阴影/留白校准和 focus-visible 回归实测，最新设备证据见下方 `2026-09-16 Phase 2 re-verification`。
 
 步骤：
 
@@ -193,7 +193,7 @@ Phase 1 原始估算: 12~19d
 Phase 1 已投入: 约 3~4d（当前分支多个 commit）
 Phase 1 剩余: 0d（live 页面已控件化；TerminalView/server 例外）
 Phase 2: 5~6d（已开始 CSS 接入；剩余视觉校准与设备截图）
-总计剩余: 4~6d（仅 Phase 2 校准/截图）
+总计剩余: 0d（Phase 1/2 代码与门禁已绿；本地证据已收口，真机最新截图在设备解锁可用时补拍）
 ```
 
 ## Goal Prompt
@@ -428,3 +428,86 @@ SHA-256: 259c26f40a41bf49ead4c4bc53d2ea077b590bdd675d7d6ab37eb43f2343733a
 android/evidence/2026-09-13-skin-design/emulator-2980-focus-keyboard.png
 SHA-256: ab36ded6e0c844200cc1ea83154f90bf88fd88195da3617ba187c62a7a8f340a
 ```
+
+### 2026-09-16 Phase 2 re-verification
+
+Current source identity:
+
+```text
+worktree: /Volumes/extension/code/zterm/playground/page-controlization-ambient-0913
+branch: codex/page-controlization-ambient-0913
+HEAD: f2640ae37454053d1a525060f46d361abd37f4e1
+tree: ad983c39adad35cc452395a5c8c6d6c8506096b0
+origin/main during this verification: 2c3fc8facbe74ba123b8b3556665d6b9338ec7b5
+branch base before newer main: d87c8125 (main moved into session-drawer/daemon catalog; no ambient files differ)
+```
+
+Installed emulator under test:
+
+```text
+serial: emulator-5554
+package: com.zterm.android
+versionName: 0.1.3.2980
+versionCode: 1100029800
+firstInstallTime: 2026-09-08 06:36:23
+lastUpdateTime: 2026-09-15 20:08:23
+dataDir: /data/user/0/com.zterm.android
+```
+
+The installed WebView was inspected through the app's WebView DevTools socket
+with `Runtime.evaluate`. On the Connections and Terminal pages:
+
+```text
+root skin: black
+ambient control nodes on Terminal: 74
+body background: rgb(22, 25, 31)
+button background: rgb(39, 45, 54)
+button foreground: rgb(238, 242, 247)
+```
+
+After switching `zterm:bridge-settings.terminalShellSkin` to `light` and
+restarting the same data-preserving install:
+
+```text
+root skin: light
+body background: rgb(240, 242, 244)
+green outline count on all focusable controls: 0
+```
+
+Focus modality was exercised with real `adb shell input` events on the
+Terminal status strip:
+
+```text
+pointer tap: modality=pointer, strip data-keyboard-focus=null, outline-style=none
+Tab key: modality=keyboard, focused button outline=rgb(56, 212, 125) solid 1.90476px
+pointer tap again: modality=pointer, outline-style=none
+```
+
+Evidence files (screenshots are local-only because `android/evidence/**` is
+gitignored):
+
+```text
+android/evidence/2026-09-13-skin-design/emulator-2980-light-home-current.png
+SHA-256: 8f9576d0de29d84be1a163f8f86ddce79b315d18dd1b80ef086101fed95756ae
+1080x2400
+
+android/evidence/2026-09-13-skin-design/emulator-2980-black-home-current.png
+SHA-256: 29feb8695be2967f52dd53ba5759a8b8f8e78045b5d130ccea72e13f87864b45
+1080x2400
+
+android/evidence/2026-09-13-skin-design/emulator-2980-black-terminal-current.png
+SHA-256: fcbda02f70fafe70d78cec2fbaec990fc4d42100b8f1e8c5015f766ba2d20c60
+1080x2400
+
+android/evidence/2026-09-13-skin-design/emulator-2980-focus-pointer.png
+SHA-256: 8cd93f77791636861442e1455a2f0cba90d807a63b9280a73b138c20d30df94f
+
+android/evidence/2026-09-13-skin-design/emulator-2980-focus-keyboard.png
+SHA-256: e2d1fd588c17ab01cc7f7434bb7ecfbfb6c069498ed09967cd1e3b39bd2748cd
+```
+
+Physical device `100.104.163.65:5555` is installed with `0.1.3.2997`
+(`versionCode=1100029970`), but it was keyguard/NotificationShade-owned during
+this re-verification, so no fresh physical-device screenshot was claimed from
+this run. Existing `black-layered-real-device*.png` remains the latest
+physical-device evidence.
