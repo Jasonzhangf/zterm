@@ -734,6 +734,15 @@ describe('bindTargetMuxTransportSocketLifecycleRuntime', () => {
         bodySubscribed: true,
       },
     });
+    expect(Object.fromEntries(
+      sendSocketPayload.mock.calls.slice(1).map(([, , data]) => {
+        const frame = JSON.parse(data);
+        return [frame.payload.channelId, frame.payload.sessionName];
+      }),
+    )).toEqual({
+      'channel-a': 'tmux-a',
+      'channel-b': 'tmux-b',
+    });
   });
 
   it('calls confirmTransportReady on mux-ready when the socket supports it', () => {
