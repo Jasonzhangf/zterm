@@ -45,6 +45,9 @@ function TerminalSessionDrawerComponent({
   onTogglePreviewSession,
   onClearPreviewSelection,
   onPreviewFolder,
+  onHideSession,
+  onRestoreAllHiddenSessions,
+  hiddenSessionCount = 0,
   terminalShellSkin = 'light',
 }: TerminalSessionDrawerProps) {
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -91,7 +94,7 @@ function TerminalSessionDrawerComponent({
     onCloseSession(sessionId);
   };
   const openSlotMenu = (session: TerminalSessionDrawerItem, x: number, y: number) => {
-    if (!onAssignSessionGroupSlot) {
+    if (!onAssignSessionGroupSlot && !onHideSession) {
       return;
     }
     suppressNextClickRef.current = true;
@@ -287,11 +290,6 @@ function TerminalSessionDrawerComponent({
         data-state={open ? 'open' : 'closed'}
         onTouchStartCapture={(event) => {
           onDebugAddEvent?.(`cap:start:${describeEventTarget(event.target)}`);
-        }}
-        onTouchEndCapture={(event) => {
-          onDebugAddEvent?.(`cap:end:${describeEventTarget(event.target)}`);
-        }}
-        onTouchStart={(event) => {
           onDebugAddEvent?.('drawer:touchstart');
           const touch = event.touches[0];
           if (!touch) {
@@ -300,7 +298,24 @@ function TerminalSessionDrawerComponent({
           }
           touchStartRef.current = { x: touch.clientX, y: touch.clientY };
         }}
-        onTouchEnd={(event) => {
+        onTouchMoveCapture={(event) => {
+          const start = touchStartRef.current;
+          const touch = event.touches[0];
+          if (!start || !touch) {
+            return;
+          }
+          const dx = touch.clientX - start.x;
+          const dy = touch.clientY - start.y;
+          if (dx > -SWIPE_CLOSE_THRESHOLD_PX || Math.abs(dx) <= Math.abs(dy)) {
+            return;
+          }
+          touchStartRef.current = null;
+          clearLongPressTimer();
+          selectionPressRef.current = null;
+          onClose();
+        }}
+        onTouchEndCapture={(event) => {
+          onDebugAddEvent?.(`cap:end:${describeEventTarget(event.target)}`);
           onDebugAddEvent?.('drawer:touchend');
           const start = touchStartRef.current;
           touchStartRef.current = null;
@@ -310,10 +325,11 @@ function TerminalSessionDrawerComponent({
           }
           const dx = touch.clientX - start.x;
           const dy = touch.clientY - start.y;
-          if (dx > -SWIPE_CLOSE_THRESHOLD_PX) {
-            return;
-          }
-          if (Math.abs(dy) > SWIPE_CLOSE_VERTICAL_TOLERANCE_PX) {
+          if (
+            dx > -SWIPE_CLOSE_THRESHOLD_PX
+            || Math.abs(dx) <= Math.abs(dy)
+            || Math.abs(dy) > SWIPE_CLOSE_VERTICAL_TOLERANCE_PX
+          ) {
             return;
           }
           onClose();
@@ -359,6 +375,26 @@ function TerminalSessionDrawerComponent({
             会话
           </span>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: '0 0 auto' }}>
+            {hiddenSessionCount > 0 ? (
+              <AmbientButton
+                type="button"
+                aria-label="恢复全部隐藏"
+                data-testid="terminal-session-drawer-restore-hidden"
+                onClick={onRestoreAllHiddenSessions}
+                style={{
+                  height: '28px',
+                  padding: '0 8px',
+                  borderRadius: '6px',
+                  border: '1px solid var(--zterm-panel-border)',
+                  background: 'var(--zterm-panel-surface)',
+                  color: 'var(--zterm-panel-text)',
+                  fontSize: '11px',
+                  fontWeight: 800,
+                }}
+              >
+                恢复全部
+              </AmbientButton>
+            ) : null}
             {previewSelectionMode ? (
               <span
                 aria-label={`已选 ${previewSelectedSessionIds.length}/6`}
@@ -905,7 +941,7 @@ function TerminalSessionDrawerComponent({
             onClose={() => setFolderMenu(null)}
           />
         ) : null}
-        {slotMenu && onAssignSessionGroupSlot ? (
+        {slotMenu ? (
           <TerminalSessionDrawerSlotMenu
             sessionId={slotMenu.sessionId}
             title={slotMenu.title}
@@ -913,7 +949,11 @@ function TerminalSessionDrawerComponent({
             y={slotMenu.y}
             axis={sessionGroupLayoutAxis}
             onAssign={(sessionId, slot) => {
-              onAssignSessionGroupSlot(sessionId, slot);
+              onAssignSessionGroupSlot?.(sessionId, slot);
+              suppressNextClickRef.current = true;
+            }}
+            onHide={(sessionId) => {
+              onHideSession?.(sessionId);
               suppressNextClickRef.current = true;
             }}
             onClose={() => setSlotMenu(null)}
@@ -1054,6 +1094,9 @@ function terminalSessionDrawerPropsEqual(
   if (prev.onSelectSession !== next.onSelectSession) mismatchFields.push('onSelectSession');
   if (prev.onCloseSession !== next.onCloseSession) mismatchFields.push('onCloseSession');
   if (prev.onAssignSessionGroupSlot !== next.onAssignSessionGroupSlot) mismatchFields.push('onAssignSessionGroupSlot');
+  if (prev.onHideSession !== next.onHideSession) mismatchFields.push('onHideSession');
+  if (prev.onRestoreAllHiddenSessions !== next.onRestoreAllHiddenSessions) mismatchFields.push('onRestoreAllHiddenSessions');
+  if (prev.hiddenSessionCount !== next.hiddenSessionCount) mismatchFields.push('hiddenSessionCount');
   if (prev.onOpenQuickTabPicker !== next.onOpenQuickTabPicker) mismatchFields.push('onOpenQuickTabPicker');
   if (prev.onDebugAddEvent !== next.onDebugAddEvent) mismatchFields.push('onDebugAddEvent');
   if (prev.onPreviewSelectionModeChange !== next.onPreviewSelectionModeChange) mismatchFields.push('onPreviewSelectionModeChange');

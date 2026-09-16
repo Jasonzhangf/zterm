@@ -50,6 +50,9 @@ export interface TerminalSessionDrawerProps {
   onTogglePreviewSession?: (sessionId: string) => void;
   onClearPreviewSelection?: () => void;
   onPreviewFolder?: (cwd: string) => void;
+  onHideSession?: (sessionId: string) => void;
+  onRestoreAllHiddenSessions?: () => void;
+  hiddenSessionCount?: number;
   terminalShellSkin?: 'light' | 'blue' | 'black';
 }
 

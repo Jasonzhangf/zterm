@@ -14,6 +14,7 @@ export interface SessionDrawerFilterConfig {
   mode: SessionDrawerFilterMode;
   masterNames: string[];
   subagentNames: string[];
+  hiddenSessionNames: string[];
 }
 
 export const DEFAULT_SESSION_DRAWER_FILTER_CONFIG: SessionDrawerFilterConfig = {
@@ -21,6 +22,7 @@ export const DEFAULT_SESSION_DRAWER_FILTER_CONFIG: SessionDrawerFilterConfig = {
   mode: 'all',
   masterNames: [],
   subagentNames: [],
+  hiddenSessionNames: [],
 };
 
 export const SESSION_DRAWER_FILTER_LABELS: Record<SessionDrawerFilterMode, string> = {
@@ -59,6 +61,7 @@ export function createDefaultSessionDrawerFilterConfig(): SessionDrawerFilterCon
     mode: DEFAULT_SESSION_DRAWER_FILTER_CONFIG.mode,
     masterNames: [],
     subagentNames: [],
+    hiddenSessionNames: [],
   };
 }
 
@@ -73,6 +76,7 @@ export function normalizeSessionDrawerFilterConfig(value: unknown): SessionDrawe
       : DEFAULT_SESSION_DRAWER_FILTER_CONFIG.mode,
     masterNames: normalizeNameList(candidate.masterNames),
     subagentNames: normalizeNameList(candidate.subagentNames),
+    hiddenSessionNames: normalizeNameList(candidate.hiddenSessionNames),
   };
 }
 
@@ -134,19 +138,43 @@ export function sessionMatchesDrawerVisibility(
   return true;
 }
 
+export function hideSessionName(
+  config: SessionDrawerFilterConfig,
+  sessionName: string,
+): SessionDrawerFilterConfig {
+  const normalized = normalizeSessionDrawerFilterConfig(config);
+  const name = sessionName.trim();
+  if (!name || normalized.hiddenSessionNames.includes(name)) {
+    return normalized;
+  }
+  return {
+    ...normalized,
+    hiddenSessionNames: [...normalized.hiddenSessionNames, name],
+  };
+}
+
+export function restoreAllHiddenSessions(config: SessionDrawerFilterConfig): SessionDrawerFilterConfig {
+  return {
+    ...normalizeSessionDrawerFilterConfig(config),
+    hiddenSessionNames: [],
+  };
+}
+
 export function filterSessionsByDrawerVisibility<T>(
   sessions: readonly T[],
   config: SessionDrawerFilterConfig,
   resolveSessionName: (session: T) => string,
 ): T[] {
   const normalized = normalizeSessionDrawerFilterConfig(config);
-  if (normalized.mode === 'all') {
-    return [...sessions];
-  }
-  return sessions.filter((session) => (
-    sessionMatchesDrawerVisibility(
-      classifySessionDrawerVisibility(resolveSessionName(session), normalized),
+  const hiddenSessionNames = new Set(normalized.hiddenSessionNames);
+  return sessions.filter((session) => {
+    const sessionName = resolveSessionName(session).trim();
+    if (sessionName && hiddenSessionNames.has(sessionName)) {
+      return false;
+    }
+    return sessionMatchesDrawerVisibility(
+      classifySessionDrawerVisibility(sessionName, normalized),
       normalized.mode,
-    )
-  ));
+    );
+  });
 }

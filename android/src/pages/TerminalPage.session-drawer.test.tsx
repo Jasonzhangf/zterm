@@ -2834,12 +2834,14 @@ describe('TerminalPage portrait session drawer', () => {
     mode: 'only-master',
     masterNames: ['zterm-3'],
     subagentNames: ['zterm-subagent-rw-ui-0906'],
+    hiddenSessionNames: [],
   };
 
   function renderVisibilityFixture(options: {
     onCloseSession?: ComponentProps<typeof TerminalPageBase>['onCloseSession'];
     onCloseDrawerRemoteSession?: ComponentProps<typeof TerminalPageBase>['onCloseDrawerRemoteSession'];
     sessionDrawerFilterConfig?: SessionDrawerFilterConfig;
+    onSessionDrawerFilterConfigChange?: ComponentProps<typeof TerminalPageBase>['onSessionDrawerFilterConfigChange'];
   } = {}) {
     const master = makeSession('master');
     master.daemonHostId = 'daemon-a';
@@ -2868,6 +2870,7 @@ describe('TerminalPage portrait session drawer', () => {
         sessionGroups={sessionGroups}
         activeSession={master}
         sessionDrawerFilterConfig={options.sessionDrawerFilterConfig}
+        onSessionDrawerFilterConfigChange={options.onSessionDrawerFilterConfigChange}
         onSwitchSession={vi.fn()}
         onMoveSession={vi.fn()}
         onRenameSession={vi.fn()}
@@ -2970,6 +2973,7 @@ describe('TerminalPage portrait session drawer', () => {
         mode: 'all',
         masterNames: [],
         subagentNames: [],
+        hiddenSessionNames: [],
       }),
     );
     const getItemSpy = vi.spyOn(localStorage, 'getItem');
@@ -2986,6 +2990,96 @@ describe('TerminalPage portrait session drawer', () => {
       getItemSpy.mock.calls.some((call) => call[0] === SESSION_DRAWER_FILTER_STORAGE_KEY),
     ).toBe(false);
     getItemSpy.mockRestore();
+  });
+
+  it('hides an exact session name from the long-press menu and restores all hidden rows', async () => {
+    const onSessionDrawerFilterConfigChange = vi.fn();
+    renderVisibilityFixture({
+      sessionDrawerFilterConfig: {
+        ...visibilityFilterConfig,
+        mode: 'all',
+        masterNames: [],
+        subagentNames: [],
+      },
+      onSessionDrawerFilterConfigChange,
+    });
+    swipeOpenPortraitDrawer();
+
+    await waitFor(() => expect(screen.getByTestId('terminal-session-drawer-row-master')).toBeTruthy());
+    const masterRow = screen.getByTestId('terminal-session-drawer-row-master');
+    fireEvent.contextMenu(masterRow, { clientX: 120, clientY: 220 });
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-slot-menu-hide'));
+
+    expect(onSessionDrawerFilterConfigChange).toHaveBeenCalledWith(expect.objectContaining({
+      hiddenSessionNames: ['zterm-3'],
+    }));
+  });
+
+  it('shows restore-all only for hidden names and clears the hidden list', async () => {
+    const onSessionDrawerFilterConfigChange = vi.fn();
+    const { rerender } = render(
+      <TerminalPage
+        sessions={[makeSession('master')]}
+        sessionGroups={[]}
+        activeSession={makeSession('master')}
+        sessionDrawerFilterConfig={{
+          version: 1,
+          mode: 'all',
+          masterNames: [],
+          subagentNames: [],
+          hiddenSessionNames: ['tmux-master'],
+        }}
+        onSessionDrawerFilterConfigChange={onSessionDrawerFilterConfigChange}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+    swipeOpenPortraitDrawer();
+
+    const restore = await screen.findByTestId('terminal-session-drawer-restore-hidden');
+    fireEvent.click(restore);
+    expect(onSessionDrawerFilterConfigChange).toHaveBeenCalledWith(expect.objectContaining({
+      hiddenSessionNames: [],
+    }));
+
+    rerender(
+      <TerminalPage
+        sessions={[makeSession('master')]}
+        sessionGroups={[]}
+        activeSession={makeSession('master')}
+        sessionDrawerFilterConfig={{
+          version: 1,
+          mode: 'all',
+          masterNames: [],
+          subagentNames: [],
+          hiddenSessionNames: [],
+        }}
+        onSessionDrawerFilterConfigChange={onSessionDrawerFilterConfigChange}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+    expect(screen.queryByTestId('terminal-session-drawer-restore-hidden')).toBeNull();
   });
 });
 

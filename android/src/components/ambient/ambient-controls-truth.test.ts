@@ -103,14 +103,13 @@ describe('ambient control ownership truth', () => {
   it('keeps ambient production CSS and shared control class wiring in place', () => {
     const indexCss = read('src/index.css');
     expect(indexCss).toContain('@import "./ambient.css";');
-    expect(indexCss).toContain('data-terminal-shell-skin="black"');
-    expect(indexCss).toContain('data-terminal-shell-skin="light"');
-    expect(indexCss).toContain('--amb-key-light-intensity');
-    expect(indexCss).toContain('--amb-albedo');
-    expect(indexCss).toContain('--amb-elevation');
 
     const ambientCss = read('src/ambient.css');
+    expect(ambientCss).toContain('data-terminal-shell-skin="black"');
+    expect(ambientCss).toContain('data-terminal-shell-skin="light"');
     expect(ambientCss).toContain('--amb-key-light-intensity');
+    expect(ambientCss).toContain('--amb-albedo');
+    expect(ambientCss).toContain('--amb-elevation');
     expect(ambientCss).toContain('.amb-button');
     expect(ambientCss).toContain('.amb-chamfer');
 
@@ -127,22 +126,22 @@ describe('ambient control ownership truth', () => {
   });
 
   it('defines complete ambient tokens for both light and black skins', () => {
-    const indexCss = read('src/index.css');
+    const ambientCss = read('src/ambient.css');
     const skinBlock = (skin: 'light' | 'black') => {
       const selector = `[data-terminal-shell-skin="${skin}"] {`;
-      let start = indexCss.indexOf(selector);
+      let start = ambientCss.indexOf(selector);
       while (start >= 0) {
-        const end = indexCss.indexOf('}', start);
-        const block = indexCss.slice(start, end);
+        const end = ambientCss.indexOf('}', start);
+        const block = ambientCss.slice(start, end);
         if (block.includes('--amb-light-x:')) {
           return block;
         }
-        start = indexCss.indexOf(selector, start + selector.length);
+        start = ambientCss.indexOf(selector, start + selector.length);
       }
       expect(start, `missing ${skin} ambient token block`).toBeGreaterThanOrEqual(0);
-      const end = indexCss.indexOf('}', start);
+      const end = ambientCss.indexOf('}', start);
       expect(end, `unterminated ${skin} skin token block`).toBeGreaterThan(start);
-      return indexCss.slice(start, end);
+      return ambientCss.slice(start, end);
     };
 
     for (const skin of ['light', 'black'] as const) {
@@ -214,10 +213,51 @@ describe('ambient control ownership truth', () => {
         previous * 1.15,
       );
     }
-    expect(relativeLuminance(ramp[0].value), 'shell tier needs visible luminance').toBeGreaterThan(0.008);
+    expect(relativeLuminance(ramp[0].value), 'black shell must be deeper than the previous graphite tier').toBeLessThan(
+      relativeLuminance('#16191f'),
+    );
     expect(blackBlock).toContain('--zterm-neo-raised-bg: linear-gradient(');
     expect(blackBlock).toContain('--zterm-neo-header-bg: linear-gradient(');
     expect(read('src/lib/mobile-ui.ts')).toContain("background: '#16191f'");
     expect(read('src/lib/mobile-ui.ts')).toContain("surface: '#20252d'");
+  });
+
+  it('keeps quickbar and the floating panel on ambient tokens without local color literals', () => {
+    const quickBar = read('src/components/terminal/TerminalQuickBar.tsx');
+    expect(quickBar).toContain('className="ambient ambient-control amb-surface zterm-neo-quickbar"');
+    expect(quickBar).toContain(
+      'className="ambient ambient-control amb-surface zterm-quick-input-panel"',
+    );
+    expect(quickBar).toContain('var(--amb-panel-bg)');
+    expect(quickBar).not.toContain('mobileTheme');
+    expect(quickBar).not.toMatch(/\brgba\s*\(/);
+  });
+
+  it('owns the black ambient material and panel tiers in ambient.css', () => {
+    const ambientCss = read('src/ambient.css');
+    const indexCss = read('src/index.css');
+    const blackStart = ambientCss.indexOf('[data-terminal-shell-skin="black"] {');
+    expect(blackStart).toBeGreaterThanOrEqual(0);
+    const blackEnd = ambientCss.indexOf('}', blackStart);
+    const blackBlock = ambientCss.slice(blackStart, blackEnd);
+
+    for (const token of [
+      '--amb-panel-bg',
+      '--amb-panel-surface',
+      '--amb-panel-active',
+      '--amb-panel-text',
+      '--amb-panel-muted',
+      '--amb-panel-border',
+      '--amb-panel-accent',
+      '--amb-panel-accent-soft',
+      '--amb-panel-accent-border',
+      '--amb-panel-danger',
+      '--amb-panel-danger-soft',
+      '--amb-panel-shadow',
+    ]) {
+      expect(blackBlock, `black ambient block missing ${token}`).toContain(`${token}:`);
+    }
+    expect(blackBlock).toContain('--amb-albedo:color(srgb-linear .085 .10 .125)');
+    expect(indexCss).not.toContain('--amb-albedo:');
   });
 });

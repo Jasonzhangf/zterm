@@ -2,7 +2,6 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type ChangeEve
 import { createPortal } from "react-dom";
 import { Capacitor } from "@capacitor/core";
 import { Keyboard } from "@capacitor/keyboard";
-import { mobileTheme } from "../../lib/mobile-ui";
 import {
   DeviceClipboardPlugin,
   isNativeClipboardSupported,
@@ -1120,9 +1119,9 @@ function TerminalQuickBarComponent({
     alignItems: "center",
     padding: `2px ${FIXED_CLUSTER_PADDING_X}px`,
     borderRadius: "12px",
-    backgroundColor: "var(--zterm-fixed-cluster-bg)",
-    border: "1px solid var(--zterm-fixed-cluster-border)",
-    boxShadow: "0 2px 5px var(--zterm-fixed-cluster-shadow)",
+    backgroundColor: "var(--amb-panel-surface)",
+    border: "1px solid var(--amb-panel-border)",
+    boxShadow: "0 2px 5px var(--amb-panel-shadow)",
     width: `${QUICK_BAR_FIXED_COLUMNS * FIXED_BUTTON_MIN_WIDTH + (QUICK_BAR_FIXED_COLUMNS - 1) * QUICK_BAR_ROW_GAP + FIXED_CLUSTER_PADDING_X * 2}px`,
   } as const;
 
@@ -1624,39 +1623,39 @@ function TerminalQuickBarComponent({
           outline: "none",
           borderRadius: "10px",
           backgroundColor: repeatActive
-            ? "color-mix(in srgb, var(--zterm-settings-accent) 28%, transparent)"
+            ? "color-mix(in srgb, var(--amb-panel-accent) 28%, transparent)"
             : disabled
-              ? "var(--zterm-settings-field)"
+              ? "var(--amb-panel-surface)"
               : action.id === "keyboard" && keyboardVisible
-                ? "color-mix(in srgb, var(--zterm-settings-accent) 18%, transparent)"
+                ? "color-mix(in srgb, var(--amb-panel-accent) 18%, transparent)"
                 : action.id === "tmux-copy" && copyModeActive
-                  ? "color-mix(in srgb, var(--zterm-settings-accent) 28%, transparent)"
+                  ? "color-mix(in srgb, var(--amb-panel-accent) 28%, transparent)"
                   : action.id === "debug-overlay" && debugOverlayVisible
-                    ? "color-mix(in srgb, var(--zterm-settings-accent) 18%, transparent)"
+                    ? "color-mix(in srgb, var(--amb-panel-accent) 18%, transparent)"
                     : action.id === "line-numbers" && absoluteLineNumbersVisible
-                      ? "color-mix(in srgb, var(--zterm-settings-accent) 18%, transparent)"
+                      ? "color-mix(in srgb, var(--amb-panel-accent) 18%, transparent)"
                       : action.id === "remote-screenshot" &&
                           remoteScreenshotStatus !== "idle"
-                        ? "color-mix(in srgb, var(--zterm-settings-accent) 18%, transparent)"
+                        ? "color-mix(in srgb, var(--amb-panel-accent) 18%, transparent)"
                         : fixed
-                          ? "var(--zterm-settings-surface)"
-                          : "var(--zterm-settings-field)",
+                          ? "var(--amb-panel-surface)"
+                          : "var(--amb-panel-bg)",
           color: repeatActive
-            ? "var(--zterm-settings-accent)"
+            ? "var(--amb-panel-accent)"
             : disabled
-              ? "var(--zterm-settings-muted)"
+              ? "var(--amb-panel-muted)"
               : action.id === "keyboard" && keyboardVisible
-                ? mobileTheme.colors.accent
+                ? "var(--amb-panel-accent)"
                 : action.id === "tmux-copy" && copyModeActive
-                  ? mobileTheme.colors.accent
+                  ? "var(--amb-panel-accent)"
                   : action.id === "debug-overlay" && debugOverlayVisible
-                    ? mobileTheme.colors.accent
+                    ? "var(--amb-panel-accent)"
                     : action.id === "line-numbers" && absoluteLineNumbersVisible
-                      ? mobileTheme.colors.accent
+                      ? "var(--amb-panel-accent)"
                       : action.id === "remote-screenshot" &&
                           remoteScreenshotStatus !== "idle"
-                        ? mobileTheme.colors.accent
-                        : "var(--zterm-settings-text)",
+                        ? "var(--amb-panel-accent)"
+                        : "var(--amb-panel-text)",
           fontSize: fixed
             ? "13px"
             : action.id === "continue"
@@ -1677,10 +1676,10 @@ function TerminalQuickBarComponent({
           boxShadow: disabled
             ? "none"
             : repeatActive
-            ? "inset 0 0 0 1px color-mix(in srgb, var(--zterm-settings-accent) 55%, transparent)"
+            ? "inset 0 0 0 1px color-mix(in srgb, var(--amb-panel-accent) 55%, transparent)"
             : action.id === "remote-screenshot" &&
                 remoteScreenshotStatus !== "idle"
-              ? "inset 0 0 0 1px color-mix(in srgb, var(--zterm-settings-accent) 42%, transparent)"
+              ? "inset 0 0 0 1px color-mix(in srgb, var(--amb-panel-accent) 42%, transparent)"
               : "none",
         }}
       >
@@ -1725,12 +1724,12 @@ function TerminalQuickBarComponent({
               : actionDisplayLabel.length > 1
                 ? "48px"
                 : "34px",
-          border: "1px solid var(--zterm-settings-border)",
+          border: "1px solid var(--amb-panel-border)",
           borderRadius: "12px",
           backgroundColor: disabled
-            ? "var(--zterm-settings-field)"
-            : "var(--zterm-settings-surface)",
-          color: disabled ? "var(--zterm-settings-muted)" : "var(--zterm-settings-text)",
+            ? "var(--amb-panel-bg)"
+            : "var(--amb-panel-surface)",
+          color: disabled ? "var(--amb-panel-muted)" : "var(--amb-panel-text)",
           fontSize: compact ? "12px" : "13px",
           fontWeight: 800,
           cursor: disabled ? "not-allowed" : "pointer",
@@ -1968,7 +1967,7 @@ function TerminalQuickBarComponent({
   return (
     <div
       ref={rootRef}
-      className="zterm-neo-quickbar"
+      className="ambient ambient-control amb-surface zterm-neo-quickbar"
       data-quickbar-surface={shellCollapsed || floatingMenuOpen ? "transparent" : "expanded"}
       onFocusCapture={(event) => {
         const target = event.target as HTMLElement | null;
@@ -2021,16 +2020,16 @@ function TerminalQuickBarComponent({
           ? "0"
           : floatingMenuOpen
             ? "0"
-            : `8px 0 calc(${mobileTheme.safeArea.bottom} + 6px)`,
+            : "8px 0 calc(env(safe-area-inset-bottom, 0px) + 6px)",
         position: "relative",
         backgroundColor:
           shellCollapsed || floatingMenuOpen
             ? "transparent"
-            : "var(--zterm-neo-quickbar-bg)",
+            : "var(--amb-panel-bg)",
         borderTop:
           shellCollapsed || floatingMenuOpen
             ? "none"
-            : "1px solid var(--zterm-neo-border)",
+            : "1px solid var(--amb-panel-border)",
       }}
     >
       <AmbientInput
@@ -2113,9 +2112,9 @@ function TerminalQuickBarComponent({
               height: overlaySheetHeightStyle,
               maxHeight: overlaySheetHeightStyle,
               borderRadius: "26px 26px 0 0",
-              backgroundColor: "var(--zterm-settings-background)",
-              color: "var(--zterm-settings-text)",
-              boxShadow: "var(--zterm-settings-shadow)",
+              backgroundColor: "var(--amb-panel-bg)",
+              color: "var(--amb-panel-text)",
+              boxShadow: "0 20px 50px var(--amb-panel-shadow)",
               display: "flex",
               flexDirection: "column",
               minHeight: 0,
@@ -2125,8 +2124,8 @@ function TerminalQuickBarComponent({
             <div
               style={{
                 padding: "10px 18px 12px",
-                borderBottom: "1px solid var(--zterm-settings-border)",
-                backgroundColor: "var(--zterm-settings-surface)",
+                borderBottom: "1px solid var(--zterm-panel-border)",
+                backgroundColor: "var(--zterm-panel-surface)",
               }}
             >
               <div
@@ -2134,7 +2133,7 @@ function TerminalQuickBarComponent({
                   width: "42px",
                   height: "5px",
                   borderRadius: "999px",
-                  backgroundColor: "var(--zterm-settings-border)",
+                  backgroundColor: "var(--zterm-panel-border)",
                   margin: "0 auto 12px",
                 }}
               />
@@ -2148,8 +2147,8 @@ function TerminalQuickBarComponent({
                     height: "34px",
                     borderRadius: "999px",
                     border: "none",
-                    backgroundColor: "var(--zterm-settings-field)",
-                    color: "var(--zterm-settings-text)",
+                    backgroundColor: "var(--zterm-panel-bg)",
+                    color: "var(--zterm-panel-text)",
                     fontSize: "20px",
                     cursor: "pointer",
                     flexShrink: 0,
@@ -2202,8 +2201,8 @@ function TerminalQuickBarComponent({
                     padding: "0 14px",
                     borderRadius: "999px",
                     border: "none",
-                    backgroundColor: "color-mix(in srgb, var(--zterm-settings-accent) 14%, transparent)",
-                    color: "var(--zterm-settings-accent)",
+                    backgroundColor: "color-mix(in srgb, var(--zterm-panel-accent) 14%, transparent)",
+                    color: "var(--zterm-panel-accent)",
                     fontWeight: 800,
                     cursor: "pointer",
                     flexShrink: 0,
@@ -2216,8 +2215,8 @@ function TerminalQuickBarComponent({
               <div
                 style={{
                   borderRadius: "20px",
-                  backgroundColor: "var(--zterm-settings-surface)",
-                  border: "1px solid var(--zterm-settings-border)",
+                  backgroundColor: "var(--zterm-panel-surface)",
+                  border: "1px solid var(--zterm-panel-border)",
                   overflow: "hidden",
                 }}
               >
@@ -2235,7 +2234,7 @@ function TerminalQuickBarComponent({
                         borderTop:
                           index === 0
                             ? "none"
-                            : "1px solid var(--zterm-settings-border)",
+                            : "1px solid var(--zterm-panel-border)",
                       }}
                     >
                       <div style={{ flex: 1, minWidth: 0 }}>
@@ -2245,7 +2244,7 @@ function TerminalQuickBarComponent({
                         <div
                           style={{
                             fontSize: "12px",
-                            color: "var(--zterm-settings-muted)",
+                            color: "var(--zterm-panel-muted)",
                             marginTop: "4px",
                             whiteSpace: "nowrap",
                             overflow: "hidden",
@@ -2292,8 +2291,8 @@ function TerminalQuickBarComponent({
                         <AmbientButton
                           onClick={() => openDraftForm(action)}
                           style={overlayTextButton(
-                            "var(--zterm-settings-field)",
-                            "var(--zterm-settings-text)",
+                            "var(--zterm-panel-bg)",
+                            "var(--zterm-panel-text)",
                           )}
                         >
                           编辑
@@ -2312,8 +2311,8 @@ function TerminalQuickBarComponent({
                             }
                           }}
                           style={overlayTextButton(
-                            "var(--zterm-settings-danger-soft)",
-                            mobileTheme.colors.danger,
+                            "var(--zterm-panel-danger-soft)",
+                            "var(--zterm-panel-danger)",
                           )}
                         >
                           删除
@@ -2328,8 +2327,8 @@ function TerminalQuickBarComponent({
                 <div
                   style={{
                     borderRadius: "20px",
-                    backgroundColor: "var(--zterm-settings-surface)",
-                    border: "1px solid var(--zterm-settings-border)",
+                    backgroundColor: "var(--zterm-panel-surface)",
+                    border: "1px solid var(--zterm-panel-border)",
                     padding: "16px",
                     display: "flex",
                     flexDirection: "column",
@@ -2376,8 +2375,8 @@ function TerminalQuickBarComponent({
                         minHeight: "44px",
                         border: "none",
                         borderRadius: "14px",
-                        backgroundColor: "var(--zterm-settings-field)",
-                        color: "var(--zterm-settings-text)",
+                        backgroundColor: "var(--zterm-panel-bg)",
+                        color: "var(--zterm-panel-text)",
                         fontWeight: 700,
                         cursor: "pointer",
                       }}
@@ -2415,9 +2414,9 @@ function TerminalQuickBarComponent({
                 height: overlaySheetHeightStyle,
                 maxHeight: overlaySheetHeightStyle,
                 borderRadius: "26px 26px 0 0",
-                backgroundColor: "var(--zterm-settings-background)",
-                color: "var(--zterm-settings-text)",
-                boxShadow: "var(--zterm-settings-shadow)",
+                backgroundColor: "var(--zterm-panel-bg)",
+                color: "var(--zterm-panel-text)",
+                boxShadow: "0 20px 50px var(--zterm-panel-shadow)",
                 display: "flex",
                 flexDirection: "column",
                 minHeight: 0,
@@ -2427,8 +2426,8 @@ function TerminalQuickBarComponent({
             <div
               style={{
                 padding: "10px 18px 12px",
-                borderBottom: "1px solid var(--zterm-settings-border)",
-                backgroundColor: "var(--zterm-settings-surface)",
+                borderBottom: "1px solid var(--zterm-panel-border)",
+                backgroundColor: "var(--zterm-panel-surface)",
               }}
             >
               <div
@@ -2436,7 +2435,7 @@ function TerminalQuickBarComponent({
                   width: "42px",
                   height: "5px",
                   borderRadius: "999px",
-                  backgroundColor: "var(--zterm-settings-border)",
+                  backgroundColor: "var(--zterm-panel-border)",
                   margin: "0 auto 12px",
                 }}
               />
@@ -2451,8 +2450,8 @@ function TerminalQuickBarComponent({
                       height: "34px",
                       borderRadius: "999px",
                       border: "none",
-                      backgroundColor: "var(--zterm-settings-field)",
-                      color: "var(--zterm-settings-text)",
+                      backgroundColor: "var(--zterm-panel-bg)",
+                      color: "var(--zterm-panel-text)",
                       fontSize: "20px",
                       cursor: "pointer",
                       flexShrink: 0,
@@ -2488,8 +2487,8 @@ function TerminalQuickBarComponent({
                     height: "34px",
                     borderRadius: "999px",
                     border: "none",
-                    backgroundColor: "var(--zterm-settings-field)",
-                    color: "var(--zterm-settings-text)",
+                    backgroundColor: "var(--zterm-panel-bg)",
+                    color: "var(--zterm-panel-text)",
                     fontSize: "20px",
                     cursor: "pointer",
                     flexShrink: 0,
@@ -2533,7 +2532,7 @@ function TerminalQuickBarComponent({
                     <div
                       style={{
                         fontSize: "12px",
-                        color: "var(--zterm-settings-muted)",
+                        color: "var(--zterm-panel-muted)",
                         marginTop: "4px",
                       }}
                     >
@@ -2552,8 +2551,8 @@ function TerminalQuickBarComponent({
                         key={row}
                         style={{
                           borderRadius: "20px",
-                          backgroundColor: "var(--zterm-settings-surface)",
-                          border: "1px solid var(--zterm-settings-border)",
+                          backgroundColor: "var(--zterm-panel-surface)",
+                          border: "1px solid var(--zterm-panel-border)",
                           overflow: "hidden",
                         }}
                       >
@@ -2564,7 +2563,7 @@ function TerminalQuickBarComponent({
                             alignItems: "center",
                             justifyContent: "space-between",
                             gap: "12px",
-                            backgroundColor: "var(--zterm-settings-surface)",
+                            backgroundColor: "var(--zterm-panel-surface)",
                           }}
                         >
                           <div>
@@ -2574,7 +2573,7 @@ function TerminalQuickBarComponent({
                             <div
                               style={{
                                 fontSize: "12px",
-                                color: "var(--zterm-settings-muted)",
+                                color: "var(--zterm-panel-muted)",
                                 marginTop: "4px",
                               }}
                             >
@@ -2588,8 +2587,8 @@ function TerminalQuickBarComponent({
                               padding: "0 14px",
                               borderRadius: "999px",
                               border: "none",
-                              backgroundColor: "color-mix(in srgb, var(--zterm-settings-accent) 14%, transparent)",
-                              color: "var(--zterm-settings-accent)",
+                              backgroundColor: "color-mix(in srgb, var(--zterm-panel-accent) 14%, transparent)",
+                              color: "var(--zterm-panel-accent)",
                               fontWeight: 800,
                               cursor: "pointer",
                               flexShrink: 0,
@@ -2604,7 +2603,7 @@ function TerminalQuickBarComponent({
                             style={{
                               padding: "0 16px 18px",
                               fontSize: "13px",
-                              color: "var(--zterm-settings-muted)",
+                              color: "var(--zterm-panel-muted)",
                             }}
                           >
                             当前还没有内容，点右侧按钮进入详情页添加。
@@ -2623,7 +2622,7 @@ function TerminalQuickBarComponent({
                                   display: "flex",
                                   alignItems: "center",
                                   gap: "10px",
-                                  borderTop: "1px solid var(--zterm-settings-border)",
+                                  borderTop: "1px solid var(--zterm-panel-border)",
                                 }}
                               >
                                 <AmbientButton
@@ -2660,7 +2659,7 @@ function TerminalQuickBarComponent({
                                       fontWeight: displayMeta.titleUsesKeycap
                                         ? 700
                                         : 600,
-                                      color: "var(--zterm-settings-text)",
+                                      color: "var(--zterm-panel-text)",
                                     }}
                                   >
                                     {displayMeta.titleUsesKeycap
@@ -2674,7 +2673,7 @@ function TerminalQuickBarComponent({
                                     <div
                                       style={{
                                         fontSize: "12px",
-                                        color: "var(--zterm-settings-muted)",
+                                        color: "var(--zterm-panel-muted)",
                                         marginTop: displayMeta.titleUsesKeycap
                                           ? "4px"
                                           : "3px",
@@ -2701,8 +2700,8 @@ function TerminalQuickBarComponent({
                                         openShortcutForm(row, action)
                                       }
                                       style={compactOverlayTextButton(
-                                        "color-mix(in srgb, var(--zterm-settings-accent) 14%, transparent)",
-                                        "var(--zterm-settings-accent)",
+                                        "color-mix(in srgb, var(--zterm-panel-accent) 14%, transparent)",
+                                        "var(--zterm-panel-accent)",
                                       )}
                                       aria-label={`编辑 ${action.label || "未命名快捷键"}`}
                                     >
@@ -2757,8 +2756,8 @@ function TerminalQuickBarComponent({
                                         )
                                       }
                                       style={compactOverlayTextButton(
-                                        "var(--zterm-settings-danger-soft)",
-                                        mobileTheme.colors.danger,
+                                        "var(--zterm-panel-danger-soft)",
+                                        "var(--zterm-panel-danger)",
                                       )}
                                       aria-label={`删除 ${action.label}`}
                                     >
@@ -2778,8 +2777,8 @@ function TerminalQuickBarComponent({
                 <div
                   style={{
                     borderRadius: "24px",
-                    backgroundColor: "var(--zterm-settings-surface)",
-                    border: "1px solid var(--zterm-settings-border)",
+                    backgroundColor: "var(--zterm-panel-surface)",
+                    border: "1px solid var(--zterm-panel-border)",
                     padding: "18px",
                     display: "flex",
                     flexDirection: "column",
@@ -2797,7 +2796,7 @@ function TerminalQuickBarComponent({
                   <div
                     style={{
                       borderRadius: "16px",
-                      backgroundColor: "var(--zterm-settings-field)",
+                      backgroundColor: "var(--zterm-panel-bg)",
                       padding: "12px 14px",
                       display: "flex",
                       flexDirection: "column",
@@ -2808,7 +2807,7 @@ function TerminalQuickBarComponent({
                       style={{
                         fontSize: "13px",
                         fontWeight: 800,
-                        color: "var(--zterm-settings-accent)",
+                        color: "var(--amb-panel-accent)",
                       }}
                     >
                       {draftShortcutRowMeta.formTag}
@@ -2816,7 +2815,7 @@ function TerminalQuickBarComponent({
                     <div
                       style={{
                         fontSize: "12px",
-                        color: "var(--zterm-settings-muted)",
+                        color: "var(--zterm-panel-muted)",
                         lineHeight: 1.5,
                       }}
                     >
@@ -2829,7 +2828,7 @@ function TerminalQuickBarComponent({
                       gridTemplateColumns: "1fr 1fr",
                       gap: "8px",
                       borderRadius: "18px",
-                      backgroundColor: "var(--zterm-settings-field)",
+                      backgroundColor: "var(--zterm-panel-bg)",
                       padding: "6px",
                     }}
                   >
@@ -2841,17 +2840,17 @@ function TerminalQuickBarComponent({
                         border: "none",
                         backgroundColor:
                           shortcutEditorTab === "keyboard"
-                            ? "var(--zterm-settings-surface)"
+                            ? "var(--zterm-panel-surface)"
                             : "transparent",
                         color:
                           shortcutEditorTab === "keyboard"
-                            ? "var(--zterm-settings-accent)"
-                            : "var(--zterm-settings-text)",
+                            ? "var(--zterm-panel-accent)"
+                            : "var(--zterm-panel-text)",
                         fontWeight: 800,
                         cursor: "pointer",
                         boxShadow:
                           shortcutEditorTab === "keyboard"
-                            ? "0 1px 2px color-mix(in srgb, var(--zterm-settings-text) 10%, transparent)"
+                            ? "0 1px 2px color-mix(in srgb, var(--zterm-panel-text) 10%, transparent)"
                             : "none",
                       }}
                     >
@@ -2865,17 +2864,17 @@ function TerminalQuickBarComponent({
                         border: "none",
                         backgroundColor:
                           shortcutEditorTab === "common"
-                            ? "var(--zterm-settings-surface)"
+                            ? "var(--zterm-panel-surface)"
                             : "transparent",
                         color:
                           shortcutEditorTab === "common"
-                            ? "var(--zterm-settings-accent)"
-                            : "var(--zterm-settings-text)",
+                            ? "var(--zterm-panel-accent)"
+                            : "var(--zterm-panel-text)",
                         fontWeight: 800,
                         cursor: "pointer",
                         boxShadow:
                           shortcutEditorTab === "common"
-                            ? "0 1px 2px color-mix(in srgb, var(--zterm-settings-text) 10%, transparent)"
+                            ? "0 1px 2px color-mix(in srgb, var(--zterm-panel-text) 10%, transparent)"
                             : "none",
                       }}
                     >
@@ -2909,7 +2908,7 @@ function TerminalQuickBarComponent({
                       <div
                         style={{
                           fontSize: "12px",
-                          color: "var(--zterm-settings-muted)",
+                          color: "var(--zterm-panel-muted)",
                         }}
                       >
                         当前还没有加入特殊键
@@ -2920,8 +2919,8 @@ function TerminalQuickBarComponent({
                           key={`${token.label}-${index}`}
                           onClick={() => removeShortcutToken(index)}
                           style={floatingPillButton(
-                            "color-mix(in srgb, var(--zterm-settings-accent) 10%, transparent)",
-                            "var(--zterm-settings-accent)",
+                            "color-mix(in srgb, var(--zterm-panel-accent) 10%, transparent)",
+                            "var(--zterm-panel-accent)",
                           )}
                         >
                           {token.label} ×
@@ -2932,10 +2931,10 @@ function TerminalQuickBarComponent({
                       onClick={clearShortcutTokens}
                       disabled={draftShortcutTokens.length === 0}
                       style={floatingPillButton(
-                        "var(--zterm-settings-field)",
+                        "var(--zterm-panel-bg)",
                         draftShortcutTokens.length === 0
-                          ? "var(--zterm-settings-muted)"
-                          : "var(--zterm-settings-text)",
+                          ? "var(--zterm-panel-muted)"
+                          : "var(--zterm-panel-text)",
                       )}
                     >
                       清空
@@ -2946,7 +2945,7 @@ function TerminalQuickBarComponent({
                     <div
                       style={{
                         fontSize: "12px",
-                        color: mobileTheme.colors.danger,
+                        color: "var(--zterm-panel-danger)",
                         lineHeight: 1.5,
                       }}
                     >
@@ -2976,8 +2975,8 @@ function TerminalQuickBarComponent({
                             minHeight: "40px",
                             border: "none",
                             borderRadius: "14px",
-                            backgroundColor: "color-mix(in srgb, var(--zterm-settings-accent) 14%, transparent)",
-                            color: "var(--zterm-settings-accent)",
+                            backgroundColor: "color-mix(in srgb, var(--zterm-panel-accent) 14%, transparent)",
+                            color: "var(--zterm-panel-accent)",
                             fontWeight: 800,
                             cursor: "pointer",
                           }}
@@ -3059,8 +3058,8 @@ function TerminalQuickBarComponent({
                       minHeight: "52px",
                       border: "none",
                       borderRadius: "16px",
-                      backgroundColor: "var(--zterm-settings-accent)",
-                      color: "var(--zterm-settings-accent-text)",
+                      backgroundColor: "var(--zterm-panel-accent)",
+                      color: "var(--zterm-panel-active-text)",
                       fontWeight: 800,
                       fontSize: "18px",
                       cursor:
@@ -3095,12 +3094,12 @@ function TerminalQuickBarComponent({
               position: "fixed",
               inset: 0,
               zIndex: 129,
-              backgroundColor: "color-mix(in srgb, #16191f 18%, transparent)",
+              backgroundColor: "color-mix(in srgb, var(--zterm-shell-bg) 18%, transparent)",
             }}
           />
           <div
             ref={floatingPanelRef}
-            className="zterm-quick-input-panel"
+            className="ambient ambient-control amb-surface zterm-quick-input-panel"
             data-quickbar-allow-pointer="true"
             style={{
               position: "fixed",
@@ -3110,20 +3109,20 @@ function TerminalQuickBarComponent({
               width: "min(320px, calc(100vw - 24px))",
               maxHeight: `min(500px, calc(100dvh - ${Math.max(156, keyboardInsetPx + 64)}px))`,
               borderRadius: "18px",
-              backgroundColor: "var(--zterm-settings-surface)",
-              color: "var(--zterm-settings-text)",
-              boxShadow: "var(--zterm-settings-shadow)",
+              backgroundColor: "var(--amb-panel-bg)",
+              color: "var(--amb-panel-text)",
+              boxShadow: "0 20px 50px var(--amb-panel-shadow)",
               display: "flex",
               flexDirection: "column",
               minHeight: 0,
               overflow: "hidden",
-              border: "1px solid var(--zterm-settings-border)",
+              border: "1px solid var(--amb-panel-border)",
             }}
           >
             <div
               style={{
                 padding: "10px 10px 8px",
-                borderBottom: "1px solid var(--zterm-settings-border)",
+                borderBottom: "1px solid var(--amb-panel-border)",
                 display: "flex",
                 flexDirection: "column",
                 gap: "8px",
@@ -3146,7 +3145,7 @@ function TerminalQuickBarComponent({
                       style={{
                         marginTop: "4px",
                         fontSize: "11px",
-                        color: "var(--zterm-settings-accent)",
+                        color: "var(--amb-panel-accent)",
                       }}
                     >
                       {copyDebugLabel}
@@ -3160,9 +3159,9 @@ function TerminalQuickBarComponent({
                     width: "34px",
                     height: "34px",
                     borderRadius: "999px",
-                    border: "1px solid var(--zterm-settings-border)",
-                    backgroundColor: "var(--zterm-settings-field)",
-                    color: "var(--zterm-settings-text)",
+                    border: "1px solid var(--amb-panel-border)",
+                    backgroundColor: "var(--amb-panel-bg)",
+                    color: "var(--amb-panel-text)",
                     fontSize: "18px",
                     fontWeight: 800,
                     cursor: "pointer",
@@ -3178,8 +3177,8 @@ function TerminalQuickBarComponent({
                 className="zterm-quick-input-editor-shell"
                 style={{
                   borderRadius: "18px",
-                  border: "1px solid var(--zterm-settings-border)",
-                  backgroundColor: "var(--zterm-settings-field)",
+                  border: "1px solid var(--amb-panel-border)",
+                  backgroundColor: "var(--amb-panel-bg)",
                   boxShadow: "none",
                   padding: "6px",
                 }}
@@ -3204,9 +3203,9 @@ function TerminalQuickBarComponent({
                     resize: "vertical",
                     padding: "9px 10px",
                     borderRadius: "12px",
-                    border: "1px solid var(--zterm-settings-border)",
-                    backgroundColor: "var(--zterm-settings-surface)",
-                    color: "var(--zterm-settings-text)",
+                    border: "1px solid var(--amb-panel-border)",
+                    backgroundColor: "var(--amb-panel-surface)",
+                    color: "var(--amb-panel-text)",
                     fontSize: "14px",
                     whiteSpace: "pre-wrap",
                     lineHeight: 1.35,
@@ -3224,10 +3223,10 @@ function TerminalQuickBarComponent({
                   style={{
                     flex: 1,
                     minHeight: "36px",
-                    border: "1px solid color-mix(in srgb, var(--zterm-settings-accent) 28%, transparent)",
+                    border: "1px solid var(--amb-panel-accent-border)",
                     borderRadius: "12px",
-                    backgroundColor: "color-mix(in srgb, var(--zterm-settings-accent) 14%, transparent)",
-                    color: "var(--zterm-settings-accent)",
+                    backgroundColor: "var(--amb-panel-accent-soft)",
+                    color: "var(--amb-panel-accent)",
                     fontWeight: 800,
                     opacity: !activeSessionId ? 0.45 : 1,
                     cursor: !activeSessionId ? "not-allowed" : "pointer",
@@ -3242,10 +3241,10 @@ function TerminalQuickBarComponent({
                   style={{
                     flex: 1,
                     minHeight: "36px",
-                    border: "1px solid color-mix(in srgb, var(--zterm-settings-accent) 28%, transparent)",
+                    border: "1px solid var(--amb-panel-accent-border)",
                     borderRadius: "12px",
-                    backgroundColor: "color-mix(in srgb, var(--zterm-settings-accent) 18%, transparent)",
-                    color: mobileTheme.colors.accent,
+                    backgroundColor: "var(--amb-panel-accent-soft)",
+                    color: "var(--amb-panel-accent)",
                     fontWeight: 800,
                   }}
                 >
@@ -3293,14 +3292,14 @@ function TerminalQuickBarComponent({
                           minWidth: "72px",
                           minHeight: "34px",
                           padding: "0 10px",
-                          border: `1px solid ${active ? "color-mix(in srgb, var(--zterm-settings-accent) 28%, transparent)" : "var(--zterm-settings-border)"}`,
+                          border: `1px solid ${active ? "var(--amb-panel-accent-border)" : "var(--amb-panel-border)"}`,
                           borderRadius: "14px",
                           backgroundColor: active
-                            ? "color-mix(in srgb, var(--zterm-settings-accent) 18%, transparent)"
+                            ? "var(--amb-panel-accent-soft)"
                             : disabled
-                              ? "var(--zterm-settings-field)"
-                            : "var(--zterm-settings-field)",
-                          color: disabled ? "var(--zterm-settings-muted)" : active ? "var(--zterm-settings-accent)" : "var(--zterm-settings-text)",
+                              ? "var(--amb-panel-bg)"
+                            : "var(--amb-panel-bg)",
+                          color: disabled ? "var(--amb-panel-muted)" : active ? "var(--amb-panel-accent)" : "var(--amb-panel-text)",
                           fontWeight: 800,
                           opacity: disabled ? 0.58 : 1,
                           cursor: disabled ? "not-allowed" : "pointer",
@@ -3325,16 +3324,16 @@ function TerminalQuickBarComponent({
                       style={{
                         flex: 1,
                         minHeight: "40px",
-                        border: "1px solid color-mix(in srgb, var(--zterm-settings-accent) 28%, transparent)",
+                        border: "1px solid var(--amb-panel-accent-border)",
                         borderRadius: "14px",
                         backgroundColor: isRemoteWindowTerminalOnlyAction("split-toggle")
-                          ? "var(--zterm-settings-field)"
+                          ? "var(--amb-panel-bg)"
                           : splitVisible
-                          ? "color-mix(in srgb, var(--zterm-settings-accent) 18%, transparent)"
-                          : "var(--zterm-settings-field)",
+                          ? "var(--amb-panel-accent-soft)"
+                          : "var(--amb-panel-bg)",
                         color: isRemoteWindowTerminalOnlyAction("split-toggle")
-                          ? "var(--zterm-settings-muted)"
-                          : splitVisible ? "var(--zterm-settings-accent)" : "var(--zterm-settings-text)",
+                          ? "var(--amb-panel-muted)"
+                          : splitVisible ? "var(--amb-panel-accent)" : "var(--amb-panel-text)",
                         fontWeight: 800,
                         opacity: isRemoteWindowTerminalOnlyAction("split-toggle") ? 0.58 : 1,
                         cursor: isRemoteWindowTerminalOnlyAction("split-toggle") ? "not-allowed" : "pointer",
@@ -3354,10 +3353,10 @@ function TerminalQuickBarComponent({
                     style={{
                       width: "110px",
                       minHeight: "34px",
-                      border: "1px solid var(--zterm-settings-border)",
+                      border: "1px solid var(--amb-panel-border)",
                       borderRadius: "14px",
-                      backgroundColor: "var(--zterm-settings-field)",
-                      color: "var(--zterm-settings-text)",
+                      backgroundColor: "var(--amb-panel-bg)",
+                      color: "var(--amb-panel-text)",
                       fontWeight: 700,
                     }}
                   >
@@ -3377,19 +3376,19 @@ function TerminalQuickBarComponent({
                   minWidth: 0,
                   padding: "3px",
                   borderRadius: "13px",
-                  backgroundColor: "var(--zterm-settings-field)",
-                  border: "1px solid var(--zterm-settings-border)",
+                  backgroundColor: "var(--amb-panel-bg)",
+                  border: "1px solid var(--amb-panel-border)",
                 }}
               >
                 <AmbientButton
                   onClick={() => setFloatingPanelTab("quick-actions")}
                   style={floatingPillButton(
                     floatingPanelTab === "quick-actions"
-                      ? "color-mix(in srgb, var(--zterm-settings-accent) 18%, transparent)"
-                      : "var(--zterm-settings-field)",
+                      ? "var(--amb-panel-accent-soft)"
+                      : "var(--amb-panel-bg)",
                     floatingPanelTab === "quick-actions"
-                      ? mobileTheme.colors.accent
-                      : "var(--zterm-settings-text)",
+                      ? "var(--amb-panel-accent)"
+                      : "var(--amb-panel-text)",
                   )}
                 >
                   快捷
@@ -3398,11 +3397,11 @@ function TerminalQuickBarComponent({
                   onClick={() => setFloatingPanelTab("clipboard")}
                   style={floatingPillButton(
                     floatingPanelTab === "clipboard"
-                      ? "color-mix(in srgb, var(--zterm-settings-accent) 18%, transparent)"
+                      ? "var(--amb-panel-accent-soft)"
                       : "transparent",
                     floatingPanelTab === "clipboard"
-                      ? "var(--zterm-settings-accent)"
-                      : "var(--zterm-settings-text)",
+                      ? "var(--amb-panel-accent)"
+                      : "var(--amb-panel-text)",
                   )}
                 >
                   剪贴板
@@ -3456,8 +3455,8 @@ function TerminalQuickBarComponent({
                             minHeight: "36px",
                             border: "none",
                             borderRadius: "14px",
-                            backgroundColor: "var(--zterm-settings-field)",
-                            color: "var(--zterm-settings-text)",
+                            backgroundColor: "var(--amb-panel-bg)",
+                            color: "var(--amb-panel-text)",
                             padding: "0 10px",
                             textAlign: "left",
                             display: "flex",
@@ -3480,7 +3479,7 @@ function TerminalQuickBarComponent({
                           <span
                             style={{
                               fontSize: "11px",
-                              color: "var(--zterm-settings-muted)",
+                              color: "var(--amb-panel-muted)",
                               flexShrink: 0,
                             }}
                           >
@@ -3494,8 +3493,8 @@ function TerminalQuickBarComponent({
                             height: "36px",
                             borderRadius: "12px",
                             border: "none",
-                            backgroundColor: "var(--zterm-settings-field)",
-                            color: "var(--zterm-settings-text)",
+                            backgroundColor: "var(--amb-panel-bg)",
+                            color: "var(--amb-panel-text)",
                             fontSize: "16px",
                             cursor: "pointer",
                             flexShrink: 0,
@@ -3518,8 +3517,8 @@ function TerminalQuickBarComponent({
                       minHeight: "40px",
                       border: "none",
                       borderRadius: "14px",
-                      backgroundColor: "var(--zterm-settings-field)",
-                      color: "var(--zterm-settings-text)",
+                      backgroundColor: "var(--amb-panel-bg)",
+                      color: "var(--amb-panel-text)",
                       fontWeight: 800,
                     }}
                   >
@@ -3529,7 +3528,7 @@ function TerminalQuickBarComponent({
                     <div
                       style={{
                         fontSize: "12px",
-                        color: "var(--zterm-settings-warning)",
+                        color: "var(--zterm-dialog-warning)",
                         lineHeight: 1.4,
                       }}
                     >
@@ -3548,8 +3547,8 @@ function TerminalQuickBarComponent({
                           minHeight: "46px",
                           border: "none",
                           borderRadius: "14px",
-                          backgroundColor: "var(--zterm-settings-field)",
-                          color: "var(--zterm-settings-text)",
+                          backgroundColor: "var(--amb-panel-bg)",
+                          color: "var(--amb-panel-text)",
                           padding: "10px 14px",
                           textAlign: "left",
                           fontWeight: 600,
@@ -3559,7 +3558,7 @@ function TerminalQuickBarComponent({
                         <div
                           style={{
                             fontSize: "11px",
-                            color: "var(--zterm-settings-muted)",
+                            color: "var(--amb-panel-muted)",
                             marginBottom: "4px",
                           }}
                         >
@@ -3770,12 +3769,12 @@ function TerminalQuickBarComponent({
               width: `${FLOATING_BUBBLE_SIZE}px`,
               height: `${FLOATING_BUBBLE_SIZE}px`,
               borderRadius: "999px",
-              border: "1px solid var(--zterm-settings-border)",
-              background: "var(--zterm-settings-surface)",
-              color: "var(--zterm-settings-text)",
+              border: "1px solid var(--amb-panel-border)",
+              background: "var(--amb-panel-surface)",
+              color: "var(--amb-panel-text)",
               fontSize: "20px",
               fontWeight: 800,
-              boxShadow: "var(--zterm-settings-shadow)",
+              boxShadow: "0 12px 30px var(--amb-panel-shadow)",
               transform: "none",
               touchAction: "none",
               cursor: fileTransferSupported ? "pointer" : "not-allowed",
@@ -3854,7 +3853,7 @@ function TerminalQuickBarComponent({
                   alignItems: "stretch",
                   gap: `${QUICK_BAR_ROW_GAP}px`,
                   padding: `2px ${QUICK_BAR_SIDE_PADDING}px 4px`,
-                  backgroundColor: "color-mix(in srgb, var(--zterm-settings-text) 2%, transparent)",
+                  backgroundColor: "color-mix(in srgb, var(--amb-panel-text) 2%, transparent)",
                 }}
               >
                 <div
@@ -3949,7 +3948,7 @@ function TerminalQuickBarComponent({
                   alignItems: "stretch",
                   gap: `${QUICK_BAR_ROW_GAP}px`,
                   padding: `2px ${QUICK_BAR_SIDE_PADDING}px 4px`,
-                  backgroundColor: "color-mix(in srgb, var(--zterm-settings-text) 2%, transparent)",
+                  backgroundColor: "color-mix(in srgb, var(--amb-panel-text) 2%, transparent)",
                 }}
               >
                 <div
@@ -4068,15 +4067,15 @@ function TerminalQuickBarComponent({
             left: "50%",
             transform: "translate(-50%, -50%)",
             zIndex: 200,
-            backgroundColor: "var(--zterm-settings-surface)",
-            color: "var(--zterm-settings-text)",
-            border: "1px solid var(--zterm-settings-border)",
+            backgroundColor: "var(--amb-panel-surface)",
+            color: "var(--amb-panel-text)",
+            border: "1px solid var(--amb-panel-border)",
             padding: "12px 24px",
             borderRadius: "16px",
             fontSize: "15px",
             fontWeight: 700,
             pointerEvents: "none",
-            boxShadow: "var(--zterm-settings-shadow)",
+            boxShadow: "0 12px 30px var(--amb-panel-shadow)",
           }}
         >
           {toastMessage}
@@ -4095,10 +4094,10 @@ function TerminalQuickBarComponent({
             maxWidth: "min(86vw, 320px)",
             padding: "12px 14px",
             borderRadius: "16px",
-            border: "1px solid var(--zterm-settings-border)",
-            background: "var(--zterm-settings-surface)",
-            color: "var(--zterm-settings-text)",
-            boxShadow: "var(--zterm-settings-shadow)",
+            border: "1px solid var(--amb-panel-border)",
+            background: "var(--amb-panel-surface)",
+            color: "var(--amb-panel-text)",
+            boxShadow: "0 12px 30px var(--amb-panel-shadow)",
             pointerEvents: "none",
             display: "flex",
             alignItems: "center",
@@ -4111,8 +4110,8 @@ function TerminalQuickBarComponent({
               width: "18px",
               height: "18px",
               borderRadius: "999px",
-              border: "2px solid var(--zterm-settings-border)",
-              borderTopColor: mobileTheme.colors.accent,
+              border: "2px solid var(--amb-panel-border)",
+              borderTopColor: "var(--amb-panel-accent)",
               animation: "terminal-quickbar-spin 0.9s linear infinite",
               flexShrink: 0,
             }}
@@ -4122,7 +4121,7 @@ function TerminalQuickBarComponent({
               style={{
                 fontSize: "13px",
                 fontWeight: 800,
-                color: "var(--zterm-settings-text)",
+                color: "var(--amb-panel-text)",
                 whiteSpace: "nowrap",
               }}
             >
@@ -4131,7 +4130,7 @@ function TerminalQuickBarComponent({
             <div
               style={{
                 fontSize: "12px",
-                color: "var(--zterm-settings-muted)",
+                color: "var(--amb-panel-muted)",
                 overflow: "hidden",
                 textOverflow: "ellipsis",
                 whiteSpace: "nowrap",
