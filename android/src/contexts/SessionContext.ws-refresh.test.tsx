@@ -824,6 +824,62 @@ function MultiSessionHarness() {
   );
 }
 
+function ForegroundOrphanSessionIdentityHarness() {
+  const {
+    state,
+    createSession,
+    switchSession,
+    getSessionBufferStore,
+  } = useSession();
+
+  useEffect(() => {
+    createSession(host, {
+      sessionId: 'session-1',
+      buffer: createSessionBufferState({
+        lines: ['SESSION_ONE_OLD'],
+        startIndex: 0,
+        endIndex: 1,
+        bufferHeadStartIndex: 0,
+        bufferTailEndIndex: 1,
+        cols: 80,
+        rows: 24,
+        revision: 1,
+        cacheLines: DEFAULT_TERMINAL_CACHE_LINES,
+      }),
+    });
+    createSession(host2, {
+      sessionId: 'session-2',
+      buffer: createSessionBufferState({
+        lines: ['SESSION_TWO_OLD'],
+        startIndex: 0,
+        endIndex: 1,
+        bufferHeadStartIndex: 0,
+        bufferTailEndIndex: 1,
+        cols: 80,
+        rows: 24,
+        revision: 1,
+        cacheLines: DEFAULT_TERMINAL_CACHE_LINES,
+      }),
+    });
+    switchSession('session-1');
+  }, [createSession, switchSession]);
+
+  const activeSession = state.sessions.find((session) => session.id === state.activeSessionId) || null;
+  const activeBufferSnapshot = useSessionBufferSnapshot(getSessionBufferStore(), activeSession?.id || null);
+  const activeBufferText = activeBufferSnapshot.buffer.lines.map(cellsToLine).join('|');
+
+  return (
+    <div>
+      <div data-testid="foreground-orphan-active-session">
+        {state.activeSessionId || 'missing'}
+      </div>
+      <div data-testid="foreground-orphan-active-body">
+        {activeBufferText}
+      </div>
+    </div>
+  );
+}
+
 const previewBootstrapSessionIds = ['preview-1', 'preview-2', 'preview-3', 'preview-4', 'preview-5', 'preview-6'];
 const previewBootstrapHosts = previewBootstrapSessionIds.map((_, index) => ({
   ...host,
@@ -1604,6 +1660,75 @@ describe('SessionContext websocket dynamic refresh', () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
       expect(MockWebSocket.instances).toHaveLength(1);
       expect(staleSessionSocket.readyState).toBe(MockWebSocket.CONNECTING);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('rebuilds an orphaned pending target once on foreground and refreshes active body from head truth without manual body injection', async () => {
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1000);
+    try {
+      const view = render(
+        <SessionProvider wsUrl="ws://127.0.0.1:3333/ws" appForegroundActive={false}>
+          <ForegroundOrphanSessionIdentityHarness />
+        </SessionProvider>,
+      );
+
+      await waitForMockSessionInstances(2);
+      expect(screen.getByTestId('foreground-orphan-active-session').textContent).toBe('session-1');
+      expect(screen.getByTestId('foreground-orphan-active-body').textContent).toContain('SESSION_ONE_OLD');
+      expect(screen.getByTestId('foreground-orphan-active-body').textContent).not.toContain('SESSION_TWO_OLD');
+
+      const orphanedRoot = MockWebSocket.physicalInstances[0]!;
+      orphanedRoot.readyState = MockWebSocket.CLOSED;
+
+      view.rerender(
+        <SessionProvider
+          wsUrl="ws://127.0.0.1:3333/ws"
+          appForegroundActive
+          foregroundResumeEpoch={1}
+        >
+          <ForegroundOrphanSessionIdentityHarness />
+        </SessionProvider>,
+      );
+
+      await waitForMockPhysicalInstances(2);
+      await waitForMockSessionInstances(3);
+
+      const recoveredRoot = MockWebSocket.physicalInstances[1]!;
+      const activeChannelOpen = readMuxChannelOpenMessages(recoveredRoot)
+        .find((item) => item.payload?.sessionName === host.sessionName);
+      const activeChannelId = activeChannelOpen?.payload?.channelId;
+      expect(typeof activeChannelId).toBe('string');
+
+      const activeChannel = MockWebSocket.instances
+        .slice(2)
+        .find((ws) => ws.channelId === activeChannelId);
+      expect(activeChannel).toBeDefined();
+      activeChannel!.triggerMessage({
+        type: 'buffer-head',
+        payload: {
+          sessionId: 'session-1',
+          revision: 2,
+          latestEndIndex: 3,
+        },
+      });
+
+      await waitFor(() => {
+        const sentMessages = readSentMessages(activeChannel!);
+        expect(sentMessages.some((item) => item.type === 'buffer-sync-request')).toBe(true);
+      });
+
+      activeChannel!.triggerBufferSync(2, 'SESSION_ONE_RESUMED', activeChannelId!);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('foreground-orphan-active-body').textContent).toContain('SESSION_ONE_RESUMED');
+      });
+      const activeBody = screen.getByTestId('foreground-orphan-active-body').textContent || '';
+      expect(activeBody).not.toContain('SESSION_ONE_OLD');
+      expect(activeBody).not.toContain('SESSION_TWO_OLD');
+      expect(MockWebSocket.physicalInstances).toHaveLength(2);
+      expect(MockWebSocket.physicalInstances.filter((ws) => ws.readyState !== MockWebSocket.CLOSED)).toHaveLength(1);
     } finally {
       nowSpy.mockRestore();
     }

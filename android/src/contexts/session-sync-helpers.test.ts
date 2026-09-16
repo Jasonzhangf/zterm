@@ -269,6 +269,21 @@ describe('session sync helper refresh planner', () => {
     })).toEqual({ action: 'reconnect' });
   });
 
+  it('lets explicit resume rebuild an orphaned pending transport-open that has no live socket', () => {
+    expect(buildActiveSessionRefreshPlan({
+      hasSession: true,
+      isRefreshTarget: true,
+      sessionState: 'connecting',
+      wsReadyState: null,
+      reconnectInFlight: false,
+      pendingTransportOpen: true,
+      pendingTransportOpenStale: false,
+      allowReconnectIfUnavailable: true,
+      transportStale: false,
+      source: 'explicit-resume',
+    })).toEqual({ action: 'reconnect' });
+  });
+
   it('keeps active tick from force-replacing a fresh pending transport open', () => {
     expect(buildActiveSessionRefreshPlan({
       hasSession: true,
@@ -416,6 +431,34 @@ describe('session transport reuse planner', () => {
     })).toEqual({
       action: 'rebuild',
       reason: 'stale-pending-open',
+    });
+  });
+
+  it('rebuilds an orphaned pending open whose socket is already gone', () => {
+    expect(buildSessionTransportReusePlan({
+      currentTargetKey: targetKey,
+      requestedTargetKey: targetKey,
+      wsReadyState: null,
+      pendingTransportOpen: true,
+      pendingTransportOpenStale: false,
+      source: 'reconnect',
+    })).toEqual({
+      action: 'rebuild',
+      reason: 'orphaned-pending-open',
+    });
+  });
+
+  it('rebuilds an orphaned pending open whose socket already closed', () => {
+    expect(buildSessionTransportReusePlan({
+      currentTargetKey: targetKey,
+      requestedTargetKey: targetKey,
+      wsReadyState: WebSocket.CLOSED,
+      pendingTransportOpen: true,
+      pendingTransportOpenStale: false,
+      source: 'reconnect',
+    })).toEqual({
+      action: 'rebuild',
+      reason: 'orphaned-pending-open',
     });
   });
 
