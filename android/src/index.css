@@ -83,14 +83,14 @@ label:focus {
   box-shadow: none;
 }
 
-button:focus-visible,
-[role="button"]:focus-visible,
-input:focus-visible,
-textarea:focus-visible,
-select:focus-visible,
-a:focus-visible,
-summary:focus-visible,
-label:focus-visible {
+[data-zterm-input-modality="keyboard"] button:focus-visible,
+[data-zterm-input-modality="keyboard"] [role="button"]:focus-visible,
+[data-zterm-input-modality="keyboard"] input:focus-visible,
+[data-zterm-input-modality="keyboard"] textarea:focus-visible,
+[data-zterm-input-modality="keyboard"] select:focus-visible,
+[data-zterm-input-modality="keyboard"] a:focus-visible,
+[data-zterm-input-modality="keyboard"] summary:focus-visible,
+[data-zterm-input-modality="keyboard"] label:focus-visible {
   outline: 2px solid var(--zterm-panel-accent, #128354);
   outline-offset: 2px;
 }
@@ -488,9 +488,9 @@ label:focus-visible {
   filter: saturate(0.55);
 }
 
-.zterm-neo-header button:focus-visible,
-.zterm-neo-quickbar > button:focus-visible,
-.zterm-neo-quickbar [data-quickbar-shell-row="true"] button:focus-visible {
+[data-zterm-input-modality="keyboard"] .zterm-neo-header button:focus-visible,
+[data-zterm-input-modality="keyboard"] .zterm-neo-quickbar > button:focus-visible,
+[data-zterm-input-modality="keyboard"] .zterm-neo-quickbar [data-quickbar-shell-row="true"] button:focus-visible {
   outline: 2px solid currentColor;
   outline-offset: 2px;
 }

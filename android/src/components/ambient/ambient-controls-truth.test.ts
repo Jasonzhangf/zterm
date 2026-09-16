@@ -126,6 +126,60 @@ describe('ambient control ownership truth', () => {
     }
   });
 
+  it('defines complete ambient tokens for both light and black skins', () => {
+    const indexCss = read('src/index.css');
+    const skinBlock = (skin: 'light' | 'black') => {
+      const selector = `[data-terminal-shell-skin="${skin}"] {`;
+      let start = indexCss.indexOf(selector);
+      while (start >= 0) {
+        const end = indexCss.indexOf('}', start);
+        const block = indexCss.slice(start, end);
+        if (block.includes('--amb-light-x:')) {
+          return block;
+        }
+        start = indexCss.indexOf(selector, start + selector.length);
+      }
+      expect(start, `missing ${skin} ambient token block`).toBeGreaterThanOrEqual(0);
+      const end = indexCss.indexOf('}', start);
+      expect(end, `unterminated ${skin} skin token block`).toBeGreaterThan(start);
+      return indexCss.slice(start, end);
+    };
+
+    for (const skin of ['light', 'black'] as const) {
+      const block = skinBlock(skin);
+      for (const token of [
+        '--amb-light-x',
+        '--amb-key-light-intensity',
+        '--amb-fill-light-intensity',
+        '--amb-light-hue',
+        '--amb-albedo',
+        '--amb-mat-roughness',
+      ]) {
+        expect(block, `${skin} skin missing ${token}`).toContain(`${token}:`);
+      }
+    }
+  });
+
+  it('shows focus rings only after keyboard tab navigation', () => {
+    const indexCss = read('src/index.css');
+    for (const selector of ['button', '[role="button"]', 'input', 'textarea', 'select', 'a', 'summary', 'label']) {
+      expect(indexCss).toContain(
+        `[data-zterm-input-modality="keyboard"] ${selector}:focus-visible`,
+      );
+    }
+    for (const selector of [
+      '.zterm-neo-header button',
+      '.zterm-neo-quickbar > button',
+      '.zterm-neo-quickbar [data-quickbar-shell-row="true"] button',
+    ]) {
+      expect(indexCss).toContain(
+        `[data-zterm-input-modality="keyboard"] ${selector}:focus-visible`,
+      );
+      expect(indexCss).not.toMatch(new RegExp(`^${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:focus-visible`, 'm'));
+    }
+    expect(read('src/main.tsx')).toContain('installInputModalityRuntime();');
+  });
+
   it('keeps the black skin on a layered graphite ramp instead of flat black', () => {
     const indexCss = read('src/index.css');
     const blackStart = indexCss.indexOf('[data-terminal-shell-skin="black"] {');
