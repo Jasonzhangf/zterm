@@ -230,43 +230,43 @@ label:focus {
  * its neighbours, so shell -> stage -> panel -> surface -> active reads as
  * depth instead of one black slab with a bright edge. */
 [data-terminal-shell-skin="black"] {
-  --zterm-shell-bg: #16191f;
-  --zterm-stage-bg: #1b1f26;
+  --zterm-shell-bg: #0b0d11;
+  --zterm-stage-bg: #0e1116;
   --zterm-stage-text: #f2f5fa;
   --zterm-stage-muted: #a7afbc;
-  --zterm-panel-bg: #20252d;
-  --zterm-panel-surface: #272d36;
-  --zterm-panel-active: #313843;
+  --zterm-panel-bg: #12151a;
+  --zterm-panel-surface: #191d24;
+  --zterm-panel-active: #232832;
   --zterm-panel-text: #eef2f7;
   --zterm-panel-active-text: #ffffff;
-  --zterm-panel-muted: #a7afbc;
-  --zterm-panel-border: rgba(245, 247, 251, 0.10);
+  --zterm-panel-muted: #9aa3b1;
+  --zterm-panel-border: rgba(245, 247, 251, 0.14);
   --zterm-panel-accent: #38d47d;
   --zterm-panel-accent-soft: rgba(56, 212, 125, 0.14);
   --zterm-panel-accent-border: rgba(56, 212, 125, 0.38);
   --zterm-panel-danger: #ff7a86;
   --zterm-panel-danger-soft: rgba(255, 122, 134, 0.14);
   --zterm-panel-danger-border: rgba(255, 122, 134, 0.38);
-  --zterm-panel-shadow: rgba(0, 0, 0, 0.46);
-  --zterm-neo-header-bg: linear-gradient(180deg, #242a33 0%, #1d222a 100%);
-  --zterm-neo-quickbar-bg: linear-gradient(180deg, #232932 0%, #1c2129 100%);
-  --zterm-neo-border: rgba(245, 247, 251, 0.12);
-  --zterm-neo-base: #272d36;
-  --zterm-neo-raised-bg: linear-gradient(145deg, #39414d 0%, #242a33 100%);
-  --zterm-neo-active: #2e3540;
-  --zterm-neo-pressed: #37404b;
-  --zterm-neo-highlight: rgba(255, 255, 255, 0.22);
+  --zterm-panel-shadow: rgba(0, 0, 0, 0.62);
+  --zterm-neo-header-bg: linear-gradient(180deg, #171b22 0%, #101318 100%);
+  --zterm-neo-quickbar-bg: linear-gradient(180deg, #151920 0%, #0f1217 100%);
+  --zterm-neo-border: rgba(245, 247, 251, 0.14);
+  --zterm-neo-base: #191d24;
+  --zterm-neo-raised-bg: linear-gradient(145deg, #272d37 0%, #171b22 100%);
+  --zterm-neo-active: #20252e;
+  --zterm-neo-pressed: #272d37;
+  --zterm-neo-highlight: rgba(255, 255, 255, 0.26);
   --zterm-neo-inset: rgba(0, 0, 0, 0.42);
-  --zterm-neo-shadow: rgba(0, 0, 0, 0.48);
+  --zterm-neo-shadow: rgba(0, 0, 0, 0.62);
   --zterm-neo-text: #eef2f7;
   --zterm-neo-text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.62);
   --zterm-neo-active-text: #ffffff;
   --zterm-neo-accent: #38d47d;
   --zterm-neo-focus: rgba(56, 212, 125, 0.64);
-  --zterm-fixed-cluster-bg: #2a313b;
-  --zterm-fixed-cluster-border: rgba(255, 255, 255, 0.10);
-  --zterm-fixed-cluster-shadow: rgba(0, 0, 0, 0.34);
-  --zterm-sheet-overlay: rgba(0, 0, 0, 0.66);
+  --zterm-fixed-cluster-bg: #1c2129;
+  --zterm-fixed-cluster-border: rgba(255, 255, 255, 0.14);
+  --zterm-fixed-cluster-shadow: rgba(0, 0, 0, 0.46);
+  --zterm-sheet-overlay: rgba(0, 0, 0, 0.72);
   --zterm-dialog-info: var(--zterm-panel-accent);
   --zterm-dialog-info-soft: rgba(56, 212, 125, 0.14);
   --zterm-dialog-info-border: rgba(56, 212, 125, 0.38);
@@ -356,7 +356,7 @@ label:focus {
   color: var(--neo-text) !important;
   box-shadow:
     inset 1px 1px 0 var(--neo-highlight),
-    inset -2px -3px 5px var(--zterm-neo-inset),
+    inset -2px -3px 5px rgba(0, 0, 0, 0.42),
     4px 5px 8px var(--neo-shadow) !important;
 }
 
@@ -381,16 +381,16 @@ label:focus {
 .zterm-neo-quickbar [data-quickbar-shell-row="true"] button:active {
   transform: translateY(1px);
   box-shadow:
-    inset 2px 2px 5px var(--zterm-neo-inset),
-    inset -1px -1px 0 var(--neo-highlight) !important;
+    inset 2px 2px 5px color-mix(in srgb, var(--amb-panel-shadow) 68%, transparent),
+    inset -1px -1px 0 var(--amb-highlight-color) !important;
 }
 
 .zterm-neo-quickbar[data-quickbar-surface="expanded"] {
-  background: var(--zterm-neo-quickbar-bg) !important;
-  border-top: 1px solid var(--zterm-neo-border) !important;
+  background: var(--amb-panel-bg) !important;
+  border-top: 1px solid var(--amb-panel-border) !important;
   box-shadow:
-    inset 0 1px 0 var(--neo-highlight),
-    0 -10px 22px var(--neo-shadow);
+    inset 0 1px 0 var(--amb-highlight-color),
+    0 -10px 22px var(--amb-panel-shadow);
 }
 
 .zterm-neo-quickbar [data-quickbar-shell-row="true"] {
@@ -398,47 +398,47 @@ label:focus {
 }
 
 .zterm-neo-quickbar [data-quickbar-fixed-cluster="true"] {
-  background: var(--zterm-fixed-cluster-bg) !important;
-  border-color: var(--zterm-fixed-cluster-border) !important;
-  box-shadow: inset 0 1px 0 var(--neo-highlight), 0 2px 5px var(--zterm-fixed-cluster-shadow) !important;
+  background: var(--amb-panel-bg) !important;
+  border-color: var(--amb-panel-border) !important;
+  box-shadow: inset 0 1px 0 var(--amb-highlight-color), 0 2px 5px var(--amb-panel-shadow) !important;
 }
 
 .zterm-quick-input-panel {
-  background: var(--zterm-panel-bg) !important;
-  color: var(--zterm-panel-text) !important;
-  border-color: var(--zterm-panel-border) !important;
-  box-shadow: 0 20px 50px var(--zterm-panel-shadow) !important;
+  background: var(--amb-panel-bg) !important;
+  color: var(--amb-panel-text) !important;
+  border-color: var(--amb-panel-border) !important;
+  box-shadow: 0 20px 50px var(--amb-panel-shadow) !important;
 }
 
 .zterm-quick-input-editor-shell,
 .zterm-quick-input-panel textarea {
-  background: var(--zterm-panel-surface) !important;
-  color: var(--zterm-panel-text) !important;
-  border-color: var(--zterm-panel-border) !important;
+  background: var(--amb-panel-surface) !important;
+  color: var(--amb-panel-text) !important;
+  border-color: var(--amb-panel-border) !important;
 }
 
 .zterm-quick-input-panel textarea::placeholder {
-  color: var(--zterm-panel-muted);
+  color: var(--amb-panel-muted);
 }
 
 .zterm-quick-input-panel button {
-  background: var(--zterm-panel-surface) !important;
-  color: var(--zterm-panel-text) !important;
-  border-color: var(--zterm-panel-border) !important;
+  background: var(--amb-panel-surface) !important;
+  color: var(--amb-panel-text) !important;
+  border-color: var(--amb-panel-border) !important;
 }
 
 .zterm-quick-input-panel button[aria-pressed="true"],
 .zterm-quick-input-panel button[data-active="true"] {
-  background: var(--zterm-panel-active) !important;
-  color: var(--zterm-panel-accent) !important;
+  background: var(--amb-panel-active) !important;
+  color: var(--amb-panel-accent) !important;
 }
 
 .zterm-quick-input-panel > div:first-child {
-  border-bottom-color: var(--zterm-panel-border) !important;
+  border-bottom-color: var(--amb-panel-border) !important;
 }
 
 .zterm-quick-input-panel [data-quick-input-muted="true"] {
-  color: var(--zterm-panel-muted) !important;
+  color: var(--amb-panel-muted) !important;
 }
 
 .zterm-file-sheet-overlay {
@@ -461,25 +461,25 @@ label:focus {
 
 .zterm-neo-quickbar > button,
 .zterm-neo-quickbar [data-quickbar-shell-row="true"] button {
-  border: 1px solid var(--zterm-neo-border) !important;
+  border: 1px solid var(--amb-panel-border) !important;
   border-radius: 12px !important;
-  background: var(--zterm-neo-raised-bg) !important;
-  color: var(--neo-text) !important;
-  text-shadow: var(--zterm-neo-text-shadow);
+  background: var(--amb-panel-surface) !important;
+  color: var(--amb-panel-text) !important;
+  text-shadow: 0 -1px 0 color-mix(in srgb, var(--amb-panel-shadow) 100%, transparent);
   box-shadow:
-    inset 1px 1px 1px var(--neo-highlight),
-    inset -2px -3px 5px var(--zterm-neo-inset),
-    3px 4px 8px var(--neo-shadow) !important;
+    inset 1px 1px 1px var(--amb-highlight-color),
+    inset -2px -3px 5px color-mix(in srgb, var(--amb-panel-shadow) 68%, transparent),
+    3px 4px 8px var(--amb-panel-shadow) !important;
 }
 
 .zterm-neo-quickbar > button[aria-pressed="true"],
 .zterm-neo-quickbar [data-quickbar-shell-row="true"] button[aria-pressed="true"] {
-  background: var(--zterm-neo-pressed) !important;
-  color: var(--neo-accent) !important;
+  background: var(--amb-panel-active) !important;
+  color: var(--amb-panel-accent) !important;
   box-shadow:
-    inset 2px 2px 5px var(--zterm-neo-inset),
-    inset -1px -1px 0 var(--neo-highlight),
-    0 0 0 1px var(--zterm-neo-focus) !important;
+    inset 2px 2px 5px color-mix(in srgb, var(--amb-panel-shadow) 68%, transparent),
+    inset -1px -1px 0 var(--amb-highlight-color),
+    0 0 0 1px var(--amb-panel-accent-border) !important;
 }
 
 .zterm-neo-quickbar > button:disabled,
@@ -583,36 +583,4 @@ label:focus {
   --amb-elevation: 1;
   --amb-thickness: .65;
   --amb-mat-roughness: .82;
-}
-
-[data-terminal-shell-skin="black"] {
-  --amb-light-x: -1;
-  --amb-light-y: -1;
-  --amb-key-light-intensity: 0.62;
-  --amb-fill-light-intensity: 0.70;
-  --amb-light-hue: 215;
-  --amb-light-saturation: 5%;
-  --amb-elevation: .8;
-  --amb-highlight-color: rgba(255,255,255,0.45);
-  --amb-lume-hue: 19;
-  --amb-albedo: color(srgb-linear 0.18 0.20 0.23);
-  --amb-mat-roughness: 0.86;
-  --amb-grain-amount: 0.22;
-  --amb-shade: 0.94;
-}
-
-[data-terminal-shell-skin="light"] {
-  --amb-light-x: 1;
-  --amb-light-y: -1;
-  --amb-key-light-intensity: 0.42;
-  --amb-fill-light-intensity: 0.38;
-  --amb-light-hue: 145;
-  --amb-light-saturation: 6%;
-  --amb-elevation: 0;
-  --amb-highlight-color: rgba(255,255,255,0.9);
-  --amb-lume-hue: 210;
-  --amb-albedo: color(srgb-linear 0.93 0.94 0.95);
-  --amb-mat-roughness: 0.74;
-  --amb-grain-amount: 0.15;
-  --amb-shade: 1;
 }

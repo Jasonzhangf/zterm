@@ -1,4 +1,3 @@
-import { mobileTheme } from '../../lib/mobile-ui';
 import type { SettingsUpdateUiProps } from '../../lib/plugin-settings-update/settings-update-contract';
 export type {
   AppUpdateManifestCandidate,
@@ -111,21 +110,38 @@ export function AppUpdateSection({
         启动时自动检查更新
       </label>
 
-      <div style={{ fontSize: '13px', color: mobileTheme.colors.lightMuted, lineHeight: 1.5 }}>
+      <div
+        data-testid="settings-update-version-info"
+        style={{
+          display: 'grid',
+          gap: '4px',
+          padding: '10px',
+          borderRadius: '10px',
+          border: '1px solid var(--zterm-settings-border)',
+          backgroundColor: 'var(--zterm-settings-field)',
+          color: 'var(--zterm-settings-muted)',
+          fontSize: '12px',
+          lineHeight: 1.45,
+        }}
+      >
         <div>当前版本 {currentVersionName}</div>
         <div>内部版本号 versionCode {currentVersionCode}</div>
-      </div>
-
-      {latestManifest ? (
-        <div style={{ fontSize: '13px', color: mobileTheme.colors.lightMuted, lineHeight: 1.5 }}>
+        {latestManifest ? (
+          <>
           <div>最新版本 {latestManifest.versionName}</div>
           <div>最新内部版本号 versionCode {latestManifest.versionCode}</div>
-          {latestManifest.publishedAt ? ` · ${latestManifest.publishedAt}` : ''}
-        </div>
-      ) : null}
+          {latestManifest.publishedAt ? <div>发布时间 {latestManifest.publishedAt}</div> : null}
+          </>
+        ) : null}
+      </div>
 
       {updateError ? (
-        <div style={{ color: mobileTheme.colors.danger, fontSize: '13px', lineHeight: 1.5 }}>{updateError}</div>
+        <div
+          data-testid="settings-update-error"
+          style={{ color: 'var(--zterm-settings-danger)', fontSize: '12px', lineHeight: 1.45 }}
+        >
+          {updateError}
+        </div>
       ) : null}
 
       <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>

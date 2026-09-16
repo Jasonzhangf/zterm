@@ -30,6 +30,7 @@ export interface SessionDrawerFilterSettings {
   mode: 'all' | 'only-master' | 'hide-subagent';
   masterNames: string[];
   subagentNames: string[];
+  hiddenSessionNames: string[];
 }
 
 export const TERMINAL_FONT_SIZE_OPTIONS = [
@@ -540,6 +541,7 @@ function normalizeSessionDrawerFilterSettings(value: unknown): SessionDrawerFilt
     mode,
     masterNames: normalizeNameList(candidate.masterNames),
     subagentNames: normalizeNameList(candidate.subagentNames),
+    hiddenSessionNames: normalizeNameList(candidate.hiddenSessionNames),
   };
 }
 

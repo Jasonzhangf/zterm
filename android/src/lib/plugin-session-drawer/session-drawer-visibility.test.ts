@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   classifySessionDrawerVisibility,
   filterSessionsByDrawerVisibility,
+  hideSessionName,
   normalizeSessionDrawerFilterConfig,
   parseSessionDrawerFilterConfig,
   resolveSessionNameForVisibility,
+  restoreAllHiddenSessions,
   serializeSessionDrawerFilterConfig,
   sessionMatchesDrawerVisibility,
   type SessionDrawerFilterConfig,
@@ -90,11 +92,46 @@ describe('session drawer visibility', () => {
     expect(classifySessionDrawerVisibility('later-subagent', lists)).toBe('unclassified');
   });
 
+  it('hides exact session names and restores all hidden names', () => {
+    const sessions = [
+      { id: 'exact', sessionName: 'zterm-3' },
+      { id: 'prefix', sessionName: 'zterm-30' },
+      { id: 'other', sessionName: 'OneStop-1' },
+    ];
+    const hidden = hideSessionName(config(), ' zterm-3 ');
+
+    expect(hidden.hiddenSessionNames).toEqual(['zterm-3']);
+    expect(filterSessionsByDrawerVisibility(sessions, hidden, (row) => row.sessionName).map((row) => row.id))
+      .toEqual(['prefix', 'other']);
+
+    const restored = restoreAllHiddenSessions(hidden);
+    expect(restored.hiddenSessionNames).toEqual([]);
+    expect(filterSessionsByDrawerVisibility(sessions, restored, (row) => row.sessionName).map((row) => row.id))
+      .toEqual(['exact', 'prefix', 'other']);
+  });
+
+  it('normalizes and deduplicates hidden session names', () => {
+    expect(normalizeSessionDrawerFilterConfig({
+      version: 1,
+      mode: 'all',
+      masterNames: [],
+      subagentNames: [],
+      hiddenSessionNames: [' zterm-3 ', 'zterm-3', '', 'OneStop-1'],
+    })).toEqual({
+      version: 1,
+      mode: 'all',
+      masterNames: [],
+      subagentNames: [],
+      hiddenSessionNames: ['zterm-3', 'OneStop-1'],
+    });
+  });
+
   it('round-trips Settings config JSON without promoting unknown names', () => {
     const original = config({
       mode: 'hide-subagent',
       masterNames: ['  zterm-3  ', 'zterm-3', ''],
       subagentNames: ['zterm-subagent-rw-ui-0906', ' not-a-collab '],
+      hiddenSessionNames: [' OneStop-1 ', 'OneStop-1'],
     });
     const parsed = parseSessionDrawerFilterConfig(serializeSessionDrawerFilterConfig(original));
     expect(parsed).toEqual({
@@ -102,6 +139,7 @@ describe('session drawer visibility', () => {
       mode: 'hide-subagent',
       masterNames: ['zterm-3'],
       subagentNames: ['zterm-subagent-rw-ui-0906', 'not-a-collab'],
+      hiddenSessionNames: ['OneStop-1'],
     });
     expect(classifySessionDrawerVisibility('zterm-2', parsed)).toBe('unclassified');
     expect(parseSessionDrawerFilterConfig('{bad')).toEqual({
@@ -109,12 +147,14 @@ describe('session drawer visibility', () => {
       mode: 'all',
       masterNames: [],
       subagentNames: [],
+      hiddenSessionNames: [],
     });
     expect(normalizeSessionDrawerFilterConfig({ mode: 'whitelist-master', masterNames: ['zterm-3'] })).toEqual({
       version: 1,
       mode: 'all',
       masterNames: ['zterm-3'],
       subagentNames: [],
+      hiddenSessionNames: [],
     });
   });
 });

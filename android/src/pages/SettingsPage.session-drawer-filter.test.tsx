@@ -78,6 +78,7 @@ describe('SettingsPage session drawer filter', () => {
           mode: 'hide-subagent',
           masterNames: ['zterm-3', 'master-a'],
           subagentNames: ['worker-a'],
+          hiddenSessionNames: ['OneStop-1'],
         },
       },
     });
@@ -85,6 +86,7 @@ describe('SettingsPage session drawer filter', () => {
     expect((screen.getByLabelText('会话抽屉筛选模式') as HTMLSelectElement).value).toBe('hide-subagent');
     expect((screen.getByLabelText('master 会话名') as HTMLTextAreaElement).value).toBe('zterm-3\nmaster-a');
     expect((screen.getByLabelText('subagent 会话名') as HTMLTextAreaElement).value).toBe('worker-a');
+    expect((screen.getByLabelText('隐藏会话名') as HTMLTextAreaElement).value).toBe('OneStop-1');
   });
 
   it('normalizes edited values into BridgeSettings on the existing save action', () => {
@@ -100,6 +102,9 @@ describe('SettingsPage session drawer filter', () => {
     fireEvent.change(screen.getByLabelText('subagent 会话名'), {
       target: { value: '\nworker-a\n worker-b \nworker-a' },
     });
+    fireEvent.change(screen.getByLabelText('隐藏会话名'), {
+      target: { value: '\nOneStop-1\n OneStop-1 \n' },
+    });
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
 
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
@@ -108,6 +113,7 @@ describe('SettingsPage session drawer filter', () => {
         mode: 'only-master',
         masterNames: ['zterm-3', 'master-a'],
         subagentNames: ['worker-a', 'worker-b'],
+        hiddenSessionNames: ['OneStop-1'],
       },
     }));
   });
@@ -127,6 +133,7 @@ describe('SettingsPage session drawer filter', () => {
             mode: 'only-master',
             masterNames: ['persisted-master'],
             subagentNames: ['persisted-worker'],
+            hiddenSessionNames: ['persisted-hidden'],
           },
         }}
         currentVersionName="0.1.3"
@@ -154,6 +161,7 @@ describe('SettingsPage session drawer filter', () => {
     expect((screen.getByLabelText('会话抽屉筛选模式') as HTMLSelectElement).value).toBe('only-master');
     expect((screen.getByLabelText('master 会话名') as HTMLTextAreaElement).value).toBe('persisted-master');
     expect((screen.getByLabelText('subagent 会话名') as HTMLTextAreaElement).value).toBe('persisted-worker');
+    expect((screen.getByLabelText('隐藏会话名') as HTMLTextAreaElement).value).toBe('persisted-hidden');
   });
 
   it('round-trips sessionDrawerFilter through the existing BridgeSettings export key only', () => {
@@ -174,6 +182,7 @@ describe('SettingsPage session drawer filter', () => {
         mode: 'hide-subagent' as const,
         masterNames: ['zterm-3'],
         subagentNames: ['worker-a'],
+        hiddenSessionNames: ['OneStop-1'],
       },
     };
     storage.setItem(STORAGE_KEYS.BRIDGE_SETTINGS, JSON.stringify(settings));

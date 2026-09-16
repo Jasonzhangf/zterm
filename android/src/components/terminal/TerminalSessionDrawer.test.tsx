@@ -1,8 +1,13 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TerminalSessionDrawer } from './TerminalSessionDrawer';
+import {
+  TERMINAL_SESSION_DRAWER_ROW_MIN_HEIGHT_PX,
+  TERMINAL_SESSION_DRAWER_ROW_SUBTITLE_FONT_SIZE_PX,
+  TERMINAL_SESSION_DRAWER_ROW_TITLE_FONT_SIZE_PX,
+} from './TerminalSessionDrawerContent';
 
 afterEach(() => {
   cleanup();
@@ -94,6 +99,44 @@ describe('TerminalSessionDrawer', () => {
     expect(screen.getByText('会话')).toBeTruthy();
     expect(screen.queryByText('快速切换')).toBeNull();
     expect(screen.queryByText('左滑收起，点击进入，上下滑动浏览。')).toBeNull();
+  });
+
+  it('keeps the narrow drawer header and session rows dense without text overflow', () => {
+    render(
+      <TerminalSessionDrawer
+        open
+        topInsetPx={24}
+        sessions={sessions}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onPreviewSelectionModeChange={vi.fn()}
+      />,
+    );
+
+    const header = screen.getByTestId('terminal-session-drawer-header');
+    expect(header.style.paddingTop).toBe('28px');
+    expect(header.style.paddingBottom).toBe('6px');
+    expect(screen.getByTestId('terminal-session-drawer-close').style.width).toBe('28px');
+    expect(screen.getByTestId('terminal-session-drawer-close').style.height).toBe('28px');
+
+    const row = screen.getByTestId('terminal-session-drawer-row-s1');
+    const select = within(row).getByTestId('terminal-session-drawer-select-s1');
+    expect(row.style.minHeight).toBe(`${TERMINAL_SESSION_DRAWER_ROW_MIN_HEIGHT_PX}px`);
+    expect(select.style.minHeight).toBe(`${TERMINAL_SESSION_DRAWER_ROW_MIN_HEIGHT_PX}px`);
+    expect(select.style.paddingRight).toBe('50px');
+
+    const title = within(select).getByText('demo');
+    const subtitle = within(select).getByText('100.127.23.27:3333 · demo');
+    expect(title.style.fontSize).toBe(`${TERMINAL_SESSION_DRAWER_ROW_TITLE_FONT_SIZE_PX}px`);
+    expect(title.style.whiteSpace).toBe('nowrap');
+    expect(title.style.overflow).toBe('hidden');
+    expect(title.style.textOverflow).toBe('ellipsis');
+    expect(subtitle.style.fontSize).toBe(`${TERMINAL_SESSION_DRAWER_ROW_SUBTITLE_FONT_SIZE_PX}px`);
+    expect(subtitle.style.whiteSpace).toBe('nowrap');
+    expect(subtitle.style.overflow).toBe('hidden');
+    expect(subtitle.style.textOverflow).toBe('ellipsis');
   });
 
   it('renders a single-column session list and routes select/plus actions', () => {
@@ -625,10 +668,11 @@ describe('TerminalSessionDrawer', () => {
 
     expect(onDebugAddEvent.mock.calls.map(([eventName]) => eventName)).toEqual([
       'cap:start:terminal-session-drawer-add',
+      'drawer:touchstart',
       'add:capstart:terminal-session-drawer-add',
       'add:touchstart',
-      'drawer:touchstart',
       'cap:end:terminal-session-drawer-add',
+      'drawer:touchend',
       'add:capend:terminal-session-drawer-add',
       'add:touchend',
       'add:callback',
@@ -658,6 +702,50 @@ describe('TerminalSessionDrawer', () => {
     fireEvent.touchStart(drawer, { touches: [{ clientX: 220, clientY: 120 }] });
     fireEvent.touchEnd(drawer, { changedTouches: [{ clientX: 120, clientY: 126 }] });
     expect(onClose).toHaveBeenCalledTimes(2);
+  });
+
+  it('closes from a horizontal left swipe that starts inside the scrollable list', () => {
+    const onClose = vi.fn();
+
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={sessions}
+        onClose={onClose}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+
+    const tree = screen.getByTestId('terminal-session-drawer-tree');
+    fireEvent.touchStart(tree, { touches: [{ clientX: 170, clientY: 220 }] });
+    fireEvent.touchMove(tree, { touches: [{ clientX: 100, clientY: 224 }] });
+    fireEvent.touchEnd(tree, { changedTouches: [{ clientX: 100, clientY: 224 }] });
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not close on vertical list scrolling', () => {
+    const onClose = vi.fn();
+
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={sessions}
+        onClose={onClose}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+
+    const tree = screen.getByTestId('terminal-session-drawer-tree');
+    fireEvent.touchStart(tree, { touches: [{ clientX: 160, clientY: 180 }] });
+    fireEvent.touchMove(tree, { touches: [{ clientX: 145, clientY: 280 }] });
+    fireEvent.touchEnd(tree, { changedTouches: [{ clientX: 145, clientY: 280 }] });
+
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it('shows host rail and filters sessions when multiple hostKeys present', () => {
@@ -938,6 +1026,37 @@ describe('TerminalSessionDrawer', () => {
 
     fireEvent.click(screen.getByTestId('terminal-session-drawer-slot-menu-center'));
     expect(onAssignSessionGroupSlot).toHaveBeenCalledWith('s1', 'center');
+    expect(onSelectSession).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it('hides a session from the long-press menu without selecting it', async () => {
+    vi.useFakeTimers();
+    const onSelectSession = vi.fn();
+    const onHideSession = vi.fn();
+
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={sessions}
+        onClose={vi.fn()}
+        onSelectSession={onSelectSession}
+        onCloseSession={vi.fn()}
+        onAssignSessionGroupSlot={vi.fn()}
+        onHideSession={onHideSession}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+
+    fireEvent.touchStart(screen.getByTestId('terminal-session-drawer-row-s1'), {
+      touches: [{ clientX: 120, clientY: 220 }],
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(420);
+    });
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-slot-menu-hide'));
+
+    expect(onHideSession).toHaveBeenCalledWith('s1');
     expect(onSelectSession).not.toHaveBeenCalled();
     vi.useRealTimers();
   });

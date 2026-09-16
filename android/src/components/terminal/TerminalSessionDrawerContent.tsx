@@ -18,6 +18,9 @@ import type {
   TerminalSessionDrawerItem,
   TerminalSessionDrawerProps,
 } from '../../lib/plugin-session-drawer/session-drawer-contract';
+export const TERMINAL_SESSION_DRAWER_ROW_MIN_HEIGHT_PX = 56;
+export const TERMINAL_SESSION_DRAWER_ROW_TITLE_FONT_SIZE_PX = 13;
+export const TERMINAL_SESSION_DRAWER_ROW_SUBTITLE_FONT_SIZE_PX = 10;
 export type {
   TerminalSessionDrawerHost,
   TerminalSessionDrawerItem,
@@ -45,6 +48,9 @@ function TerminalSessionDrawerComponent({
   onTogglePreviewSession,
   onClearPreviewSelection,
   onPreviewFolder,
+  onHideSession,
+  onRestoreAllHiddenSessions,
+  hiddenSessionCount = 0,
   terminalShellSkin = 'light',
 }: TerminalSessionDrawerProps) {
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -91,7 +97,7 @@ function TerminalSessionDrawerComponent({
     onCloseSession(sessionId);
   };
   const openSlotMenu = (session: TerminalSessionDrawerItem, x: number, y: number) => {
-    if (!onAssignSessionGroupSlot) {
+    if (!onAssignSessionGroupSlot && !onHideSession) {
       return;
     }
     suppressNextClickRef.current = true;
@@ -287,11 +293,6 @@ function TerminalSessionDrawerComponent({
         data-state={open ? 'open' : 'closed'}
         onTouchStartCapture={(event) => {
           onDebugAddEvent?.(`cap:start:${describeEventTarget(event.target)}`);
-        }}
-        onTouchEndCapture={(event) => {
-          onDebugAddEvent?.(`cap:end:${describeEventTarget(event.target)}`);
-        }}
-        onTouchStart={(event) => {
           onDebugAddEvent?.('drawer:touchstart');
           const touch = event.touches[0];
           if (!touch) {
@@ -300,7 +301,24 @@ function TerminalSessionDrawerComponent({
           }
           touchStartRef.current = { x: touch.clientX, y: touch.clientY };
         }}
-        onTouchEnd={(event) => {
+        onTouchMoveCapture={(event) => {
+          const start = touchStartRef.current;
+          const touch = event.touches[0];
+          if (!start || !touch) {
+            return;
+          }
+          const dx = touch.clientX - start.x;
+          const dy = touch.clientY - start.y;
+          if (dx > -SWIPE_CLOSE_THRESHOLD_PX || Math.abs(dx) <= Math.abs(dy)) {
+            return;
+          }
+          touchStartRef.current = null;
+          clearLongPressTimer();
+          selectionPressRef.current = null;
+          onClose();
+        }}
+        onTouchEndCapture={(event) => {
+          onDebugAddEvent?.(`cap:end:${describeEventTarget(event.target)}`);
           onDebugAddEvent?.('drawer:touchend');
           const start = touchStartRef.current;
           touchStartRef.current = null;
@@ -310,10 +328,11 @@ function TerminalSessionDrawerComponent({
           }
           const dx = touch.clientX - start.x;
           const dy = touch.clientY - start.y;
-          if (dx > -SWIPE_CLOSE_THRESHOLD_PX) {
-            return;
-          }
-          if (Math.abs(dy) > SWIPE_CLOSE_VERTICAL_TOLERANCE_PX) {
+          if (
+            dx > -SWIPE_CLOSE_THRESHOLD_PX
+            || Math.abs(dx) <= Math.abs(dy)
+            || Math.abs(dy) > SWIPE_CLOSE_VERTICAL_TOLERANCE_PX
+          ) {
             return;
           }
           onClose();
@@ -347,22 +366,43 @@ function TerminalSessionDrawerComponent({
         <div
           data-testid="terminal-session-drawer-header"
           style={{
-            padding: `${Math.max(10, topInsetPx + 8)}px 10px 9px`,
+            padding: `${Math.max(8, topInsetPx + 4)}px 8px 6px`,
             borderBottom: '1px solid var(--zterm-panel-border)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            gap: '8px',
+            gap: '6px',
           }}
         >
-          <span style={{ minWidth: 0, fontSize: '16px', fontWeight: 800, color: 'var(--zterm-panel-text)' }}>
+          <span style={{ minWidth: 0, fontSize: '14px', fontWeight: 800, color: 'var(--zterm-panel-text)' }}>
             会话
           </span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: '0 0 auto' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flex: '0 0 auto', whiteSpace: 'nowrap' }}>
+            {hiddenSessionCount > 0 ? (
+              <AmbientButton
+                type="button"
+                aria-label="恢复全部隐藏"
+                data-testid="terminal-session-drawer-restore-hidden"
+                onClick={onRestoreAllHiddenSessions}
+                style={{
+                  height: '26px',
+                  padding: '0 6px',
+                  borderRadius: '6px',
+                  border: '1px solid var(--zterm-panel-border)',
+                  background: 'var(--zterm-panel-surface)',
+                  color: 'var(--zterm-panel-text)',
+                  fontSize: '10px',
+                  fontWeight: 800,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                恢复全部
+              </AmbientButton>
+            ) : null}
             {previewSelectionMode ? (
               <span
                 aria-label={`已选 ${previewSelectedSessionIds.length}/6`}
-                style={{ color: 'var(--zterm-panel-muted)', fontSize: '11px', fontWeight: 800 }}
+                style={{ color: 'var(--zterm-panel-muted)', fontSize: '10px', fontWeight: 800 }}
               >
                 {previewSelectedSessionIds.length}/6
               </span>
@@ -374,14 +414,14 @@ function TerminalSessionDrawerComponent({
               ref={closeButtonRef}
               onClick={onClose}
               style={{
-                width: '32px',
-                height: '32px',
+                width: '28px',
+                height: '28px',
                 padding: 0,
                 borderRadius: '8px',
                 border: '1px solid var(--zterm-panel-border)',
                 background: 'var(--zterm-panel-surface)',
                 color: 'var(--zterm-panel-text)',
-                fontSize: '15px',
+                fontSize: '14px',
                 lineHeight: 1,
                 fontWeight: 800,
               }}
@@ -398,10 +438,10 @@ function TerminalSessionDrawerComponent({
                   onPreviewSelectionModeChange(!previewSelectionMode);
                 }}
                 style={{
-                  height: '28px', padding: '0 9px', borderRadius: '6px',
+                  height: '26px', padding: '0 7px', borderRadius: '6px',
                   border: '1px solid var(--zterm-panel-border)',
                   background: previewSelectionMode ? 'var(--zterm-panel-active)' : 'var(--zterm-panel-surface)',
-                  color: previewSelectionMode ? 'var(--zterm-panel-accent)' : 'var(--zterm-panel-text)', fontSize: '11px', fontWeight: 850,
+                  color: previewSelectionMode ? 'var(--zterm-panel-accent)' : 'var(--zterm-panel-text)', fontSize: '10px', fontWeight: 850, whiteSpace: 'nowrap',
                 }}
               >
                 {previewSelectionMode ? '完成' : '多选'}
@@ -435,7 +475,7 @@ function TerminalSessionDrawerComponent({
             overflowY: 'auto',
             touchAction: 'pan-y',
             WebkitOverflowScrolling: 'touch',
-            padding: '6px 10px 10px',
+            padding: '4px 8px 8px',
           }}
         >
           {showHostRail ? (
@@ -521,7 +561,7 @@ function TerminalSessionDrawerComponent({
               paddingTop: '6px',
               display: 'flex',
               flexDirection: 'column',
-              gap: '4px',
+              gap: '3px',
             }}
           >
           {cwdGroups.map((folder) => (
@@ -580,7 +620,7 @@ function TerminalSessionDrawerComponent({
                   clearLongPressTimer();
                 }}
                 style={{
-                  width: '100%', minHeight: '36px', padding: '0 8px', borderRadius: '4px',
+                  width: '100%', minHeight: '32px', padding: '0 6px', borderRadius: '4px',
                   border: 'none', background: 'transparent',
                   color: 'var(--zterm-panel-text)', display: 'flex', alignItems: 'center', gap: '8px',
                   textAlign: 'left', fontSize: '12px', fontWeight: 800,
@@ -623,7 +663,7 @@ function TerminalSessionDrawerComponent({
               onTouchEnd={clearLongPressTimer}
               onTouchCancel={clearLongPressTimer}
               style={{
-                minHeight: '72px',
+                minHeight: `${TERMINAL_SESSION_DRAWER_ROW_MIN_HEIGHT_PX}px`,
                 width: '100%',
                 padding: 0,
                 borderRadius: '6px',
@@ -707,21 +747,21 @@ function TerminalSessionDrawerComponent({
                   }}
                   style={{
                   height: '100%',
-                  minHeight: '72px',
+                  minHeight: `${TERMINAL_SESSION_DRAWER_ROW_MIN_HEIGHT_PX}px`,
                   minWidth: 0,
                   border: 'none',
                   background: 'transparent',
                   color: 'inherit',
                   textAlign: 'left',
-                  padding: '10px 12px',
+                  padding: '6px 50px 6px 10px',
                 }}
               >
               <div style={{ minWidth: 0 }}>
                 <div
                   style={{
-                    fontSize: '15px',
+                    fontSize: `${TERMINAL_SESSION_DRAWER_ROW_TITLE_FONT_SIZE_PX}px`,
                     fontWeight: 760,
-                    lineHeight: 1.15,
+                    lineHeight: 1.1,
                     whiteSpace: 'nowrap',
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
@@ -731,8 +771,9 @@ function TerminalSessionDrawerComponent({
                 </div>
                 <div
                   style={{
-                    marginTop: '5px',
-                    fontSize: '11px',
+                    marginTop: '3px',
+                    fontSize: `${TERMINAL_SESSION_DRAWER_ROW_SUBTITLE_FONT_SIZE_PX}px`,
+                    lineHeight: 1.2,
                     color: 'var(--zterm-panel-muted)',
                     whiteSpace: 'nowrap',
                     overflow: 'hidden',
@@ -747,12 +788,12 @@ function TerminalSessionDrawerComponent({
               <div
                 style={{
                   position: 'absolute',
-                  top: '8px',
-                  right: '8px',
+                  top: '4px',
+                  right: '4px',
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: 'flex-end',
-                  gap: '8px',
+                  gap: '4px',
                 }}
               >
                 {previewSelectionMode ? (
@@ -773,7 +814,7 @@ function TerminalSessionDrawerComponent({
                     }}
                     style={{
                       padding: 0,
-                      width: '24px', height: '24px', borderRadius: '6px', display: 'flex',
+                      width: '22px', height: '22px', borderRadius: '5px', display: 'flex',
                       alignItems: 'center', justifyContent: 'center',
                       border: previewSelectionIndex >= 0 ? '1px solid var(--zterm-panel-accent)' : '1px solid var(--zterm-panel-border)',
                       background: previewSelectionIndex >= 0 ? 'var(--zterm-settings-accent-soft)' : 'transparent',
@@ -788,13 +829,13 @@ function TerminalSessionDrawerComponent({
                 {session.paneLabel ? (
                   <span
                     style={{
-                      minWidth: '34px',
-                      padding: '3px 7px',
+                      minWidth: '30px',
+                      padding: '2px 6px',
                       borderRadius: '999px',
                       background: 'var(--zterm-settings-accent-soft)',
                       color: 'var(--zterm-panel-accent)',
                       textAlign: 'center',
-                      fontSize: '10px',
+                      fontSize: '9px',
                       fontWeight: 900,
                     }}
                   >
@@ -807,13 +848,13 @@ function TerminalSessionDrawerComponent({
                   <span
                     data-testid={`terminal-session-drawer-slot-${session.id}`}
                     style={{
-                      minWidth: '38px',
-                      padding: '3px 7px',
+                      minWidth: '34px',
+                      padding: '2px 6px',
                       borderRadius: '999px',
                       background: slotTone.background,
                       color: slotTone.color,
                       textAlign: 'center',
-                      fontSize: '10px',
+                      fontSize: '9px',
                       fontWeight: 900,
                       border: `1px solid ${slotTone.border}`,
                     }}
@@ -905,7 +946,7 @@ function TerminalSessionDrawerComponent({
             onClose={() => setFolderMenu(null)}
           />
         ) : null}
-        {slotMenu && onAssignSessionGroupSlot ? (
+        {slotMenu ? (
           <TerminalSessionDrawerSlotMenu
             sessionId={slotMenu.sessionId}
             title={slotMenu.title}
@@ -913,7 +954,11 @@ function TerminalSessionDrawerComponent({
             y={slotMenu.y}
             axis={sessionGroupLayoutAxis}
             onAssign={(sessionId, slot) => {
-              onAssignSessionGroupSlot(sessionId, slot);
+              onAssignSessionGroupSlot?.(sessionId, slot);
+              suppressNextClickRef.current = true;
+            }}
+            onHide={(sessionId) => {
+              onHideSession?.(sessionId);
               suppressNextClickRef.current = true;
             }}
             onClose={() => setSlotMenu(null)}
@@ -1054,6 +1099,9 @@ function terminalSessionDrawerPropsEqual(
   if (prev.onSelectSession !== next.onSelectSession) mismatchFields.push('onSelectSession');
   if (prev.onCloseSession !== next.onCloseSession) mismatchFields.push('onCloseSession');
   if (prev.onAssignSessionGroupSlot !== next.onAssignSessionGroupSlot) mismatchFields.push('onAssignSessionGroupSlot');
+  if (prev.onHideSession !== next.onHideSession) mismatchFields.push('onHideSession');
+  if (prev.onRestoreAllHiddenSessions !== next.onRestoreAllHiddenSessions) mismatchFields.push('onRestoreAllHiddenSessions');
+  if (prev.hiddenSessionCount !== next.hiddenSessionCount) mismatchFields.push('hiddenSessionCount');
   if (prev.onOpenQuickTabPicker !== next.onOpenQuickTabPicker) mismatchFields.push('onOpenQuickTabPicker');
   if (prev.onDebugAddEvent !== next.onDebugAddEvent) mismatchFields.push('onDebugAddEvent');
   if (prev.onPreviewSelectionModeChange !== next.onPreviewSelectionModeChange) mismatchFields.push('onPreviewSelectionModeChange');

@@ -514,6 +514,24 @@ export function SettingsPage({
               }));
             }}
           />
+          <label htmlFor="settings-session-drawer-hidden-names" style={{ display: 'block', marginTop: '12px', marginBottom: '8px', fontSize: '14px', fontWeight: 700 }}>
+            隐藏会话名（每行一个）
+          </label>
+          <AmbientTextarea
+            variant="settings-multiline"
+            id="settings-session-drawer-hidden-names"
+            aria-label="隐藏会话名"
+            data-testid="settings-session-drawer-hidden-names"
+            rows={4}
+            value={sessionDrawerNamesToText(sessionDrawerFilterDraft.hiddenSessionNames)}
+            onChange={(event) => {
+              const hiddenSessionNames = sessionDrawerNamesFromText(event.currentTarget.value);
+              setSessionDrawerFilterDraft((current) => ({
+                ...current,
+                hiddenSessionNames,
+              }));
+            }}
+          />
         </div>
         </SettingsGroup>
 
