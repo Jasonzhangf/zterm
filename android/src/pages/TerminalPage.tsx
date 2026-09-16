@@ -1284,6 +1284,7 @@ function TerminalPageComponent({
     });
     const catalogGroups = [...relayCatalogGroups, ...manualHistoryGroups];
     const liveSessionByReuseKey = new Map<string, Session>();
+    const liveSessionByDaemonSession = new Map<string, Session>();
     for (const session of sessions) {
       liveSessionByReuseKey.set(
         buildSessionSemanticReuseKey({
@@ -1295,6 +1296,10 @@ function TerminalPageComponent({
         }),
         session,
       );
+      const daemonKey = session.daemonHostId?.trim() || resolveServerIdentity(session).key;
+      if (daemonKey && session.sessionName.trim()) {
+        liveSessionByDaemonSession.set(`${daemonKey}::${session.terminalBackend || 'tmux'}::${session.sessionName.trim()}`, session);
+      }
       const rawIdentity = resolveServerIdentity(session);
       const aliasedIdentity = resolveDrawerIdentity(session);
       if (aliasedIdentity.key && aliasedIdentity.key !== rawIdentity.key) {
@@ -1354,7 +1359,9 @@ function TerminalPageComponent({
           sessionName,
           terminalBackend: groupBackend,
         });
-        const liveSession = liveSessionByReuseKey.get(reuseKey) || null;
+        const liveSession = liveSessionByReuseKey.get(reuseKey)
+          || liveSessionByDaemonSession.get(`${resolvedDaemonHostId || group.daemonHostId || serverIdentity.key}::${groupBackend}::${sessionName.trim()}`)
+          || null;
         // 业务 id 保持原语义（本地已打开 → local id，未打开 → remote key）；
         // React key 稳定性改由 stableKey 承担，避免亚秒级连接状态抖动触发整列表重建。
         const id = liveSession?.id || `remote:${ownerKey}::session:${sessionName}`;
