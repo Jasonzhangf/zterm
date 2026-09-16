@@ -423,10 +423,10 @@ Evidence files:
 
 ```text
 android/evidence/2026-09-13-skin-design/emulator-2980-focus-pointer.png
-SHA-256: 259c26f40a41bf49ead4c4bc53d2ea077b590bdd675d7d6ab37eb43f2343733a
+SHA-256: 8cd93f77791636861442e1455a2f0cba90d807a63b9280a73b138c20d30df94f
 
 android/evidence/2026-09-13-skin-design/emulator-2980-focus-keyboard.png
-SHA-256: ab36ded6e0c844200cc1ea83154f90bf88fd88195da3617ba187c62a7a8f340a
+SHA-256: e2d1fd588c17ab01cc7f7434bb7ecfbfb6c069498ed09967cd1e3b39bd2748cd
 ```
 
 ### 2026-09-16 Phase 2 re-verification
@@ -436,8 +436,8 @@ Current source identity:
 ```text
 worktree: /Volumes/extension/code/zterm/playground/page-controlization-ambient-0913
 branch: codex/page-controlization-ambient-0913
-HEAD: f2640ae37454053d1a525060f46d361abd37f4e1
-tree: ad983c39adad35cc452395a5c8c6d6c8506096b0
+HEAD: 370434d8e69cbbc238b43f5dabe39404ba6fb5a2
+tree: f7260b2e3b4788afec31d873bb695743baf4e0ea
 origin/main during this verification: 2c3fc8facbe74ba123b8b3556665d6b9338ec7b5
 branch base before newer main: d87c8125 (main moved into session-drawer/daemon catalog; no ambient files differ)
 ```
