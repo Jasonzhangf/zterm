@@ -40,7 +40,7 @@ export interface TerminalControlRuntimeDeps {
 export function discoverTmuxSocketPaths(options: { stableSocketDir?: string; uid?: number } = {}) {
   const uid = options.uid ?? process.getuid?.();
   const socketDirName = uid === undefined ? undefined : `tmux-${uid}`;
-  const roots = [process.env.TMUX_TMPDIR, tmpdir(), '/private/tmp', '/tmp', options.stableSocketDir]
+  const roots = [process.env.TMUX_TMPDIR || tmpdir(), options.stableSocketDir]
     .filter((root): root is string => Boolean(root));
   const paths = new Set<string>();
   for (const root of roots) {
@@ -54,7 +54,7 @@ export function discoverTmuxSocketPaths(options: { stableSocketDir?: string; uid
     for (const entry of entries) {
       const socketPath = join(directory, entry);
       try {
-        if (statSync(socketPath).isSocket()) paths.add(socketPath);
+        if (statSync(socketPath).isSocket() && (entry === 'default' || root === options.stableSocketDir)) paths.add(socketPath);
       } catch {
         // Socket may disappear during a live refresh.
       }
@@ -392,27 +392,26 @@ export function createTerminalControlRuntime(
       return externalBackend.listSessions().map((session) => session.sessionName);
     }
     sessionSocketPaths.clear();
-    const candidates = socketPaths();
     const results: Array<{ stdout: string; socketPath?: string }> = [];
-    if (candidates.length === 0) {
+    try {
       results.push({ stdout: runTmux(['list-sessions', '-F', '#S']).stdout });
-    } else {
-      for (const socketPath of candidates) {
+    } catch (error) {
+      if (!deps.tmuxSocketPaths) throw error;
+    }
+    if (deps.tmuxSocketPaths) {
+      for (const socketPath of socketPaths()) {
         try {
-          results.push({
-            stdout: runTmuxWithSocketPath(['list-sessions', '-F', '#S'], socketPath).stdout,
-            socketPath,
-          });
+          results.push({ stdout: runTmuxWithSocketPath(['list-sessions', '-F', '#S'], socketPath).stdout, socketPath });
         } catch {
-          // A socket may disappear during refresh; continue with remaining live sockets.
+          // A configured socket may disappear during refresh.
         }
       }
-      if (results.length === 0) throw new Error('no reachable tmux socket');
     }
+    if (results.length === 0) throw new Error('no reachable tmux socket');
     const sessions: string[] = [];
     for (const result of results) {
       for (const line of result.stdout.split('\n').map((value) => value.trim())) {
-        if (!line || deps.hiddenTmuxSessions.has(line)) continue; // visible iff !deps.hiddenTmuxSessions.has(line)
+        if (!line || deps.hiddenTmuxSessions.has(line)) continue;
         if (!sessionSocketPaths.has(line)) sessionSocketPaths.set(line, result.socketPath);
         if (!sessions.includes(line)) sessions.push(line);
       }
@@ -426,24 +425,16 @@ export function createTerminalControlRuntime(
     if (selectedBackend === 'tmux' || selectedBackend === 'wezterm') {
       const cwdBySession = new Map<string, string>();
       if (selectedBackend === 'tmux') {
-        const paneSocketPaths = socketPaths();
-        if (paneSocketPaths.length === 0) {
-          paneSocketPaths.push('');
-        }
-        for (const socketPath of paneSocketPaths) {
-          try {
-            const paneResult = socketPath
-              ? runTmuxWithSocketPath(['list-panes', '-a', '-F', '#{session_name}\t#{pane_current_path}'], socketPath)
-              : runTmux(['list-panes', '-a', '-F', '#{session_name}\t#{pane_current_path}']);
-            for (const line of paneResult.stdout.split('\n')) {
-              const [sessionName, cwd] = line.split('\t');
-              if (sessionName?.trim() && cwd?.trim() && !cwdBySession.has(sessionName.trim())) {
-                cwdBySession.set(sessionName.trim(), cwd.trim());
-              }
+        try {
+          const paneResult = runTmux(['list-panes', '-a', '-F', '#{session_name}\t#{pane_current_path}']);
+          for (const line of paneResult.stdout.split('\n')) {
+            const [sessionName, cwd] = line.split('\t');
+            if (sessionName?.trim() && cwd?.trim() && !cwdBySession.has(sessionName.trim())) {
+              cwdBySession.set(sessionName.trim(), cwd.trim());
             }
-          } catch {
-            // Session names remain authoritative if a socket disappears mid-refresh.
           }
+        } catch {
+          // Session names remain authoritative when pane metadata is unavailable.
         }
       }
       for (const sessionName of listTmuxSessions('tmux')) {
