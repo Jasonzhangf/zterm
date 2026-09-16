@@ -1354,11 +1354,17 @@ function TerminalPageComponent({
         const relayDevice = resolvedDaemonHostId ? relayDeviceByDaemonHostId.get(resolvedDaemonHostId) || null : null;
         const relayRtcCandidates = getRelayRtcEndpointCandidates(relayDevice?.daemon.endpoints || []);
         const useRelayRouteTarget = Boolean(relayDevice && relayRtcCandidates.length > 0);
-        const targetBridgeHost = useRelayRouteTarget && liveSession?.bridgeHost?.trim() && !group.bridgeHost.trim()
-          ? liveSession.bridgeHost
+        const liveDirectEndpoint = (relayDevice?.daemon.endpoints || []).find((endpoint) => (
+          endpoint.kind === 'tailscale' && endpoint.host?.trim() && endpoint.port
+        )) || (relayDevice?.daemon.endpoints || []).find((endpoint) => endpoint.host?.trim() && endpoint.port);
+        // The catalog came from the currently online daemon. Reuse that
+        // daemon's live direct endpoint for the subsequent attach; a saved
+        // group endpoint may be stale or point at a different tmux server.
+        const targetBridgeHost = useRelayRouteTarget
+          ? liveDirectEndpoint?.host?.trim() || liveSession?.bridgeHost?.trim() || group.bridgeHost
           : group.bridgeHost;
-        const targetBridgePort = useRelayRouteTarget && liveSession?.bridgeHost?.trim() && !group.bridgeHost.trim()
-          ? liveSession.bridgePort || group.bridgePort
+        const targetBridgePort = useRelayRouteTarget
+          ? liveDirectEndpoint?.port || liveSession?.bridgePort || group.bridgePort
           : group.bridgePort;
         const relayEndpointCandidates = relayDevice && relayRtcCandidates.length > 0
           ? relayDevice.daemon.endpoints || relayRtcCandidates

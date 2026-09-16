@@ -1328,6 +1328,60 @@ describe('TerminalPage portrait session drawer', () => {
     );
   });
 
+  it('attaches a live catalog row through the online daemon endpoint when saved group host is stale', async () => {
+    const activeSession = makeSession('drawer-anchor');
+    activeSession.daemonHostId = 'other-daemon';
+    const onOpenDrawerRemoteSession = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={[activeSession]}
+        activeSession={activeSession}
+        sessionGroups={[{
+          id: 'stale-mac-studio-group',
+          name: 'Mac Studio',
+          bridgeHost: '10.0.0.9',
+          bridgePort: 3333,
+          daemonHostId: 'mac-studio',
+          sessionNames: ['routecodex-1'],
+          lastOpenedAt: 1,
+        }]}
+        relayDevices={[makeRelayDevice({ sessions: ['routecodex-1'] })]}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onOpenDrawerRemoteSession={onOpenDrawerRemoteSession}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    const swipeSurface = document.querySelector('[data-testid^="terminal-swipe-surface-"][data-swipe-enabled="true"]') as HTMLElement | null;
+    expect(swipeSurface).toBeTruthy();
+    fireEvent.touchStart(swipeSurface!, { touches: [{ clientX: 56, clientY: 200 }] });
+    fireEvent.touchMove(swipeSurface!, { touches: [{ clientX: 236, clientY: 206 }], cancelable: true });
+    fireEvent.touchEnd(swipeSurface!, { changedTouches: [{ clientX: 236, clientY: 206 }] });
+
+    fireEvent.click(await screen.findByTestId('terminal-session-drawer-select-remote:daemon:mac-studio::session:routecodex-1'));
+
+    expect(onOpenDrawerRemoteSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bridgeHost: '100.66.1.82',
+        bridgePort: 3333,
+        daemonHostId: 'mac-studio',
+        relayHostId: 'mac-studio',
+      }),
+      'routecodex-1',
+    );
+  });
+
   it('switches an already-open direct drawer row locally when Relay owns the catalog', async () => {
     const activeSession = makeSession('active-zterm');
     activeSession.bridgeHost = '100.66.1.82';
