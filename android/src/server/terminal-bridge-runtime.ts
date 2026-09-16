@@ -192,13 +192,14 @@ export function createTerminalBridgeRuntime(
       console.log(`[${deps.logTimePrefix()}] rtc transport ${connection.id} created`);
       return {
         onMessage: (_transportId, data, isBinary) => {
-          // mux-ping proves transport liveness only. It must not refresh
-          // lastInboundAt or the stale sweep can never release subscribers/
-          // mirrors while Android's native service keeps heartbeating.
+          // mux-ping is the background keepalive: it renews physical transport
+          // liveness only. It must not refresh the adaptive width lease or the
+          // session attach lease, so a backgrounded client keeps its link but
+          // releases every tmux mirror.
           if (!isBinary) {
             try {
               if ((JSON.parse(decodeRawText(data)) as { type?: string }).type === 'mux-ping') {
-                markTransportConnectionPong(connection);
+                markTransportConnectionInboundActivity(connection);
                 enqueueConnectionMessage(connection, data, isBinary);
                 return;
               }
@@ -244,13 +245,14 @@ export function createTerminalBridgeRuntime(
     });
 
     ws.on('message', (rawData, isBinary) => {
-      // mux-ping proves transport liveness only. It must not refresh
-      // lastInboundAt or the stale sweep can never release subscribers/
-      // mirrors while Android's native service keeps heartbeating.
+      // mux-ping is the background keepalive: it renews physical transport
+      // liveness only. It must not refresh the adaptive width lease or the
+      // session attach lease, so a backgrounded client keeps its link but
+      // releases every tmux mirror.
       if (!isBinary) {
         try {
           if ((JSON.parse(decodeRawText(rawData)) as { type?: string }).type === 'mux-ping') {
-            markTransportConnectionPong(connection);
+            markTransportConnectionInboundActivity(connection);
             enqueueConnectionMessage(connection, rawData, isBinary);
             return;
           }

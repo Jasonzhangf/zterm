@@ -82,7 +82,13 @@ export function createClientDaemonConnection(options: {
 
   const readOpenSessionSocket = (sessionId: string, purpose: string) => {
     const resource = readSessionResource(sessionId);
-    const ws = resource.socket || null;
+    // A mux channel can be opening before `resource.socket` is projected.
+    // The physical target socket is already the daemon transport in that
+    // state, so feature requests must reuse it instead of reporting
+    // `socket=missing, channel=opening`.
+    const ws = resource.socket
+      || (resource.channel?.state === 'opening' ? resource.terminalSocket : null)
+      || null;
     if (ws && ws.readyState === WebSocket.OPEN) {
       return ws;
     }

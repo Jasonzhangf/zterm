@@ -46,6 +46,8 @@ export interface AndroidConnectionServiceChannelClosedEvent {
   targetKey: string;
   generation: string;
   channelId: string;
+  reason: string;
+  code?: string;
 }
 
 export type AndroidConnectionServiceListenerMap = {

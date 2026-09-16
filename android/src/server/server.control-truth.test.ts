@@ -64,6 +64,8 @@ describe('server control runtime truth gates', () => {
     const resizeBlock = extractBlock(source, 'resizeBackendSession:', 900);
 
     expect(resizeBlock).toContain("(backend || 'tmux') === 'tmux'");
+    expect(resizeBlock).toContain("operation === 'release'");
+    expect(resizeBlock).toContain("'-y'");
     expect(resizeBlock).toContain('HERDR_BACKEND_RUNTIME');
     expect(resizeBlock).toContain('externalBackend?.resizeSession');
   });

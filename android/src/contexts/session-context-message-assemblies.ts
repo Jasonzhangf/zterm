@@ -175,7 +175,7 @@ export interface SessionSocketServerMessageOptions {
   rawFrameBytes?: number;
   onConnected: () => void;
   onFailure: (message: string, retryable: boolean) => void;
-  onClosed: (reason?: string) => void;
+  onClosed: (reason?: string, code?: string) => void;
 }
 
 export interface SessionSocketConnectedBaselineOptions {

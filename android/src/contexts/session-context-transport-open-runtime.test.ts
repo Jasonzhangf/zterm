@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  buildConnectTransportOpenIntentOptionsRuntime,
+  buildReconnectTransportOpenIntentOptionsRuntime,
   handleReconnectHandshakeFailureRuntime,
   openSessionMuxChannelByIntentRuntime,
   queueSessionTransportOpenIntentRuntime,
@@ -523,5 +525,58 @@ describe('handleReconnectHandshakeFailureRuntime', () => {
     });
     expect(emitSessionStatus).not.toHaveBeenCalled();
     expect(scheduleReconnect).not.toHaveBeenCalled();
+  });
+});
+
+describe('pending transport open no_body_demand close', () => {
+  it('treats reconnect open close with no_body_demand as idle without closed status', () => {
+    const reconnectStore = createSessionReconnectStore();
+    const updateSessionSync = vi.fn();
+    const emitSessionStatus = vi.fn();
+
+    const intent = buildReconnectTransportOpenIntentOptionsRuntime({
+      sessionId: 'session-1',
+      host: makeHost(),
+      handleReconnectBeforeConnectSend: vi.fn(),
+      handleReconnectHandshakeFailure: vi.fn(),
+      applyTransportOpenLiveFailureEffects: vi.fn(),
+      reconnectStore,
+      applyTransportOpenConnectedEffects: vi.fn(),
+      emitSessionStatus,
+      updateSessionSync,
+    });
+
+    intent.onClosed?.('body subscription released', 'no_body_demand');
+
+    expect(updateSessionSync).toHaveBeenCalledWith('session-1', expect.objectContaining({
+      state: 'idle',
+      ws: null,
+      lastError: 'body subscription released',
+    }));
+    expect(emitSessionStatus).not.toHaveBeenCalled();
+  });
+
+  it('treats initial open close with no_body_demand as idle without closed status', () => {
+    const updateSessionSync = vi.fn();
+    const emitSessionStatus = vi.fn();
+
+    const intent = buildConnectTransportOpenIntentOptionsRuntime({
+      sessionId: 'session-1',
+      host: makeHost(),
+      applyTransportOpenLiveFailureEffects: vi.fn(),
+      scheduleReconnect: vi.fn(),
+      applyTransportOpenConnectedEffects: vi.fn(),
+      emitSessionStatus,
+      updateSessionSync,
+    });
+
+    intent.onClosed?.('body subscription released', 'no_body_demand');
+
+    expect(updateSessionSync).toHaveBeenCalledWith('session-1', expect.objectContaining({
+      state: 'idle',
+      ws: null,
+      lastError: 'body subscription released',
+    }));
+    expect(emitSessionStatus).not.toHaveBeenCalled();
   });
 });

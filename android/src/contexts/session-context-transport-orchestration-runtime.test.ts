@@ -554,6 +554,80 @@ describe('handleTargetMuxTransportFailureRuntime', () => {
 });
 
 describe('resolveMuxChannelClosedWithControlStatusRuntime', () => {
+  it('treats no_body_demand as business idle without control query or reconnect', async () => {
+    const queryTargetSessions = vi.fn(async () => ['demo']);
+    const scheduleReconnect = vi.fn();
+    const updateSessionSync = vi.fn();
+    const emitSessionStatus = vi.fn();
+    const runtimeDebug = vi.fn();
+
+    resolveMuxChannelClosedWithControlStatusRuntime({
+      sessionId: 'session-1',
+      sessionName: 'demo',
+      channelId: 'channel-1',
+      reason: 'body subscription released',
+      code: 'no_body_demand',
+      shouldReconnectNow: true,
+      queryTargetSessions,
+      readSessionTerminalChannel: () => makeClosedChannel('demo'),
+      scheduleReconnect,
+      updateSessionSync,
+      emitSessionStatus,
+      runtimeDebug,
+    });
+
+    expect(updateSessionSync).toHaveBeenCalledWith('session-1', expect.objectContaining({
+      state: 'idle',
+      ws: null,
+      lastError: 'body subscription released',
+    }));
+    expect(queryTargetSessions).not.toHaveBeenCalled();
+    expect(scheduleReconnect).not.toHaveBeenCalled();
+    expect(emitSessionStatus).not.toHaveBeenCalled();
+    expect(runtimeDebug).toHaveBeenCalledWith('session.mux.channel-closed.no-body-demand', {
+      sessionId: 'session-1',
+      channelId: 'channel-1',
+      reason: 'body subscription released',
+    });
+    await Promise.resolve();
+  });
+
+  it('ignores a stale no_body_demand close when the channel has been replaced', async () => {
+    const queryTargetSessions = vi.fn(async () => ['demo']);
+    const scheduleReconnect = vi.fn();
+    const updateSessionSync = vi.fn();
+    const emitSessionStatus = vi.fn();
+    const runtimeDebug = vi.fn();
+
+    resolveMuxChannelClosedWithControlStatusRuntime({
+      sessionId: 'session-1',
+      sessionName: 'demo',
+      channelId: 'channel-1',
+      reason: 'body subscription released',
+      code: 'no_body_demand',
+      shouldReconnectNow: true,
+      queryTargetSessions,
+      readSessionTerminalChannel: () => ({
+        ...makeClosedChannel('demo'),
+        channelId: 'channel-2',
+      }),
+      scheduleReconnect,
+      updateSessionSync,
+      emitSessionStatus,
+      runtimeDebug,
+    });
+
+    expect(updateSessionSync).not.toHaveBeenCalled();
+    expect(queryTargetSessions).not.toHaveBeenCalled();
+    expect(scheduleReconnect).not.toHaveBeenCalled();
+    expect(emitSessionStatus).not.toHaveBeenCalled();
+    expect(runtimeDebug).toHaveBeenCalledWith('session.mux.channel-closed.control-status.stale', {
+      sessionId: 'session-1',
+      channelId: 'channel-1',
+    });
+    await Promise.resolve();
+  });
+
   it('uses the current channel name when rename races with the closed-channel control query', async () => {
     let resolveQuery!: (names: string[]) => void;
     let channel = makeClosedChannel('old-name');

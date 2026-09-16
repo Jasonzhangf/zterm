@@ -125,7 +125,7 @@ export interface PendingSessionTransportOpenIntent {
   finalizeFailure: (message: string, retryable: boolean) => void;
   onChannelAllocated?: () => void;
   onConnected: (ws: BridgeTransportSocket) => void;
-  onClosed?: (reason?: string) => void;
+  onClosed?: (reason?: string, code?: string) => void;
 }
 
 export interface QueueSessionTransportOpenIntentOptions {
@@ -138,7 +138,7 @@ export interface QueueSessionTransportOpenIntentOptions {
   onHandshakeConnected?: (ws: BridgeTransportSocket, sessionName: string) => void;
   onHandshakeFailure?: (message: string, retryable: boolean, stage: SessionTransportOpenFailureStage) => void;
   onChannelAllocated?: () => void;
-  onClosed?: (reason?: string) => void;
+  onClosed?: (reason?: string, code?: string) => void;
   clearHandshakeTimeout: () => void;
   finalizeSocketFailureBaseline: (options: {
     sessionId: string;

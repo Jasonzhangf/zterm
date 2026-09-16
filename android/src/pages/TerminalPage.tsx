@@ -3857,7 +3857,7 @@ function TerminalPageComponent({
           webUrl={resourceWebUrl}
           onWebUrlChange={setResourceWebUrl}
           onClose={() => setFileTransferOpen(false)}
-          renderRemoteWindow={(open, resourceTab, expanded) => open && renderRemoteWindow ? renderRemoteWindow({
+          renderRemoteWindow={(open, resourceTab, expanded, onExitFullscreen) => open && renderRemoteWindow ? renderRemoteWindow({
             activeSessionId: uiSessionId,
             appForegroundActive,
             streamInvalidation: remoteWindowStreamInvalidation,
@@ -3875,6 +3875,7 @@ function TerminalPageComponent({
             bottomChromeInsetPx: terminalChromeBottomPx,
             embedded: true,
             embeddedFullscreen: Boolean(expanded && resourceTab === 'stream'),
+            onExitEmbeddedFullscreen: onExitFullscreen,
             browserOnly: resourceTab === 'web',
             browserEntryEnabled: false,
             onOpenStateChange: handleRemoteWindowOverlayOpenStateChange,

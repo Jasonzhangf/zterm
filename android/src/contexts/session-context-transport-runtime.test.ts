@@ -520,6 +520,36 @@ describe('handleTargetMuxServerFrameRuntime', () => {
     expect(handleSocketServerMessage).toHaveBeenCalledTimes(1);
   });
 
+  it('forwards the mux channel close code to channel callbacks', () => {
+    const onClosed = vi.fn();
+
+    handleTargetMuxServerFrameRuntime({
+      anchorSessionId: 'session-anchor',
+      host: makeHost(),
+      ws: { readyState: WebSocket.OPEN } as any,
+      debugScope: 'reconnect',
+      frame: {
+        type: 'mux-channel-closed',
+        payload: {
+          channelId: 'channel-a',
+          reason: 'body subscription released',
+          code: 'no_body_demand',
+        },
+      },
+      resolveSessionIdForChannel: () => 'session-1',
+      updateSessionTerminalChannelState: vi.fn(),
+      handleSocketServerMessage: vi.fn(),
+      buildChannelCallbacks: () => ({
+        onConnected: vi.fn(),
+        onFailure: vi.fn(),
+        onClosed,
+      }),
+      runtimeDebug: vi.fn(),
+    });
+
+    expect(onClosed).toHaveBeenCalledWith('body subscription released', 'no_body_demand');
+  });
+
   it('marks a channel closed before routing a plain closed channel message into reconnect handling', () => {
     const updateSessionTerminalChannelState = vi.fn();
     const handleSocketServerMessage = vi.fn((_params, msg) => {

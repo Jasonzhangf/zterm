@@ -13,16 +13,16 @@ describe('android apk smoke device bridge target parser', () => {
       'utf8',
     );
 
-    expect(script).toContain("candidate.getAttribute('aria-label') === ariaLabel");
-    expect(script).not.toContain(
-      "|| candidate.getAttribute('data-testid') === 'saved-connection-open'",
+    expect(script).toContain(
+      "candidate.getAttribute('data-testid') === 'saved-connection-open'",
     );
+    expect(script).toContain('(candidate.textContent || \'\').includes');
     expect(script).not.toContain("settings.targetHost = '127.0.0.1'");
     expect(script).toContain('resolveDaemonDeviceHost()');
     expect(script).toContain(
       'Number((value as Record<string, unknown>).targetServerCount) < 1',
     );
-    expect(script.indexOf("adbText(serial, ['shell', 'input', 'text', INPUT_SAMPLE])"))
+    expect(script.indexOf('await emitWebViewTerminalInput(serial, INPUT_SAMPLE)'))
       .toBeLessThan(script.indexOf('const afterImeUi = captureUiDump(serial)'));
   });
 

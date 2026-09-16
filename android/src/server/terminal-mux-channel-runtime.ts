@@ -182,6 +182,7 @@ export function createTerminalMuxChannelRuntime(
         subscriber.sessionName = deps.sanitizeSessionName(frame.payload.sessionName);
         subscriber.backend = frame.payload.backend;
         subscriber.bodySubscribed = frame.payload.bodySubscribed !== false;
+        subscriber.sessionAttachHeartbeatAt = subscriber.bodySubscribed ? Date.now() : undefined;
         try {
           handleMuxChannelOpenedMessageRuntime(
             { mirrors: deps.mirrors, sendTransportMessage: deps.sendTransportMessage } as Parameters<typeof handleMuxChannelOpenedMessageRuntime>[0],

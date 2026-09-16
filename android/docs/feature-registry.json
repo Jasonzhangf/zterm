@@ -2339,6 +2339,7 @@
       ],
       "allowed_paths": [
         "src/components/ambient/",
+        "src/main.tsx",
         "src/pages/ConnectionsPage.tsx",
         "src/pages/ConnectionsPage.test.tsx",
         "src/pages/ConnectionPropertiesPage.tsx",
@@ -2388,6 +2389,7 @@
       ],
       "required_gates": [
         "src/components/ambient/ambient-controls-truth.test.ts",
+        "src/components/ambient/input-modality-runtime.test.ts",
         "src/pages/ConnectionsPage.test.tsx",
         "src/pages/ConnectionPropertiesPage.test.tsx",
         "src/pages/SettingsPage.theme.test.tsx",
@@ -2422,6 +2424,9 @@
       "allowed_paths": [
         "src/components/terminal/ResourceBottomSheet.tsx",
         "src/components/terminal/ResourceBottomSheet.test.tsx",
+        "src/components/terminal/resource-drawer-gesture-runtime.ts",
+        "src/components/terminal/resource-drawer-gesture-runtime.test.ts",
+        "docs/decisions/2026-09-13-resource-drawer-gesture-scope.md",
         "src/pages/TerminalPage.tsx",
         "src/pages/TerminalPage.render-isolation.test.tsx",
         "src/components/terminal/FileTransferSheet.tsx",
@@ -2436,6 +2441,7 @@
       ],
       "required_gates": [
         "src/components/terminal/ResourceBottomSheet.test.tsx",
+        "src/components/terminal/resource-drawer-gesture-runtime.test.ts",
         "src/pages/TerminalPage.render-isolation.test.tsx",
         "src/components/terminal/FileTransferSheet.test.tsx",
         "src/lib/module-registry-truth.test.ts",

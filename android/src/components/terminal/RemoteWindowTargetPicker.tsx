@@ -70,7 +70,15 @@ export function RemoteWindowTargetPicker({
         boxShadow: 'none', backdropFilter: 'none',
       } : {}),
     }}>
-      {embedded ? <div data-testid="remote-window-embedded-picker-header" style={{ ...styles.panelHeader, justifyContent: 'flex-end', paddingTop: 'calc(env(safe-area-inset-top, 0px) + 10px)' }}>
+      {embedded ? <div data-testid="remote-window-embedded-picker-header" style={{ ...styles.panelHeader, paddingTop: 'calc(env(safe-area-inset-top, 0px) + 10px)' }}>
+        <div>
+          <div style={styles.panelTitle}>{browserOnly ? '浏览器窗口' : '远程窗口'}</div>
+          <div style={styles.panelSubtitle}>
+            {phase === 'targetEnumerating'
+              ? '正在读取窗口列表'
+              : `${visibleTargets.length} 个目标${catalogRefreshing ? ' · 更新中' : ''}`}
+          </div>
+        </div>
         <AmbientButton type="button" aria-label="关闭远程窗口选择" onClick={onClose} style={styles.headerIconButton}>×</AmbientButton>
       </div> : <div style={styles.panelHeader}>
         <div>

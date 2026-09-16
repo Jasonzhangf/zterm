@@ -55,6 +55,19 @@ describe('client.daemon_connection interface', () => {
     );
   });
 
+  it('reuses an open target socket while the mux channel is opening', () => {
+    const targetSocket = { readyState: WebSocket.OPEN };
+    const connection = createClientDaemonConnection({
+      readSessionTransportResource: () => createResource(null, {
+        terminalSocket: targetSocket,
+        channel: { channelId: 'channel:session-1', state: 'opening' },
+      }),
+      sendSocketPayload: vi.fn(),
+    });
+
+    expect(connection.readOpenSessionSocket('session-1', 'remote window catalog')).toBe(targetSocket);
+  });
+
   it('opens target transports through the daemon connection owner hook', () => {
     const openedSocket = { readyState: WebSocket.CONNECTING };
     const openSessionTargetTransport = vi.fn(() => openedSocket as any);

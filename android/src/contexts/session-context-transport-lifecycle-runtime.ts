@@ -71,12 +71,12 @@ export function bindSessionTransportSocketLifecycleOrchestrationRuntime(options:
     rawFrameBytes?: number;
     onConnected: () => void;
     onFailure: (message: string, retryable: boolean) => void;
-    onClosed: (reason?: string) => void;
+    onClosed: (reason?: string, code?: string) => void;
   }, msg: ServerMessage) => void;
   finalizeFailure: (message: string, retryable: boolean) => void;
   onBeforeConnectSend?: (ctx: { sessionName: string }) => void;
   onConnected: () => void;
-  onClosed?: (reason?: string) => void;
+  onClosed?: (reason?: string, code?: string) => void;
   sessionHandshakeTimeoutMs: number;
   readRequestedTerminalGeometry?: (sessionId: string) => { cols?: number | null; rows?: number | null; widthMode?: TerminalWidthMode } | null;
 }) {

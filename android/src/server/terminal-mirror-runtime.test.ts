@@ -4,6 +4,7 @@ import { buildChangedRangesBufferSyncPayload } from './buffer-sync-contract';
 import type { TerminalSession, SessionMirror } from './terminal-runtime-types';
 import { findChangedIndexedRanges } from './canonical-buffer';
 import type { TerminalCell } from '../lib/types';
+import type { AdaptiveWidthOwnershipStore, AdaptiveWidthOwnershipRecord } from './adaptive-width-ownership-store';
 
 function createSession(id = 'session-1'): TerminalSession {
   return {
@@ -39,11 +40,18 @@ function createRuntime(overrides: {
   getMirrorKey?: (sessionName: string, backend?: 'tmux' | 'herdr') => string;
   mirrorBufferChanged?: (mirror: SessionMirror, previousStartIndex: number, previousLines: TerminalCell[][]) => Array<{ startIndex: number; endIndex: number }>;
   waitMs?: (delayMs: number) => Promise<void>;
+  adaptiveWidthOwnershipStore?: AdaptiveWidthOwnershipStore;
+  resizeBackendSession?: (
+    sessionName: string,
+    geometry: { cols: number; rows: number },
+    backend: 'tmux' | 'herdr' | undefined,
+    operation: 'apply' | 'release',
+  ) => void;
 } = {}) {
   const sessions = new Map<string, TerminalSession>();
   const mirrors = new Map<string, SessionMirror>();
   const assertTmuxSessionExists = vi.fn();
-  const runTmux = vi.fn(() => ({ ok: true as const, stdout: '' }));
+  const runTmux = vi.fn((_args: string[]) => ({ ok: true as const, stdout: '' }));
   const captureMirrorAuthoritativeBufferFromTmux = vi.fn(overrides.captureMirrorAuthoritativeBufferFromTmux || (async (mirror: SessionMirror) => {
     mirror.bufferLines = [];
     mirror.bufferStartIndex = 0;
@@ -54,6 +62,7 @@ function createRuntime(overrides: {
   const sendMessage = vi.fn();
   const sendText = vi.fn();
   const sendScheduleStateToSession = vi.fn();
+  const closeTransportSubscriber = vi.fn();
 
   const runtime = createTerminalMirrorRuntime({
     defaultViewport: { cols: 120, rows: 40 },
@@ -101,7 +110,9 @@ function createRuntime(overrides: {
     waitMs: overrides.waitMs || (async () => {}),
     logTimePrefix: () => '2026-05-01 00:00:00',
     runTmux,
-    closeTransportSubscriber: vi.fn(),
+    resizeBackendSession: overrides.resizeBackendSession,
+    adaptiveWidthOwnershipStore: overrides.adaptiveWidthOwnershipStore,
+    closeTransportSubscriber,
     getSessionMirror: (session: TerminalSession) => (session.mirrorKey ? mirrors.get(session.mirrorKey) || null : null),
   });
 
@@ -115,6 +126,7 @@ function createRuntime(overrides: {
     sendMessage,
     sendText,
     sendScheduleStateToSession,
+    closeTransportSubscriber,
   };
 }
 
@@ -122,7 +134,11 @@ function expectOnlyAdaptiveWidthTmuxMutation(runTmux: { mock: { calls: unknown[]
   for (const [rawArgs] of runTmux.mock.calls) {
     const args = rawArgs as string[];
     if (args[0] === 'resize-window') {
-      expect(args).toEqual(['resize-window', '-t', expect.any(String), '-x', expect.any(String)]);
+      if (args.length === 5) {
+        expect(args).toEqual(['resize-window', '-t', expect.any(String), '-x', expect.any(String)]);
+      } else {
+        expect(args).toEqual(['resize-window', '-t', expect.any(String), '-x', expect.any(String), '-y', expect.any(String)]);
+      }
       continue;
     }
     if (args[0] === 'set-window-option') {
@@ -131,6 +147,37 @@ function expectOnlyAdaptiveWidthTmuxMutation(runTmux: { mock: { calls: unknown[]
     }
     expect(args.join(' ')).not.toContain('@zterm_adaptive_width_');
   }
+}
+
+function createOwnershipStore(
+  initialRecords: AdaptiveWidthOwnershipRecord[] = [],
+  overrides: { removeError?: Error; upsertError?: Error; upsertErrorOnce?: Error } = {},
+) {
+  let records = initialRecords;
+  return {
+    read: vi.fn(() => records),
+    upsert: vi.fn((record: Omit<AdaptiveWidthOwnershipRecord, 'updatedAt'>) => {
+      if (overrides.upsertErrorOnce) {
+        const error = overrides.upsertErrorOnce;
+        overrides.upsertErrorOnce = undefined;
+        throw error;
+      }
+      if (overrides.upsertError) {
+        throw overrides.upsertError;
+      }
+      records = [
+        ...records.filter((entry) => entry.sessionName !== record.sessionName),
+        { ...record, updatedAt: '2026-09-13T00:00:00.000Z' },
+      ];
+    }),
+    remove: vi.fn((sessionName: string) => {
+      if (overrides.removeError) {
+        throw overrides.removeError;
+      }
+      records = records.filter((entry) => entry.sessionName !== sessionName);
+    }),
+    records: () => records,
+  };
 }
 
 describe('terminal mirror runtime lifecycle truth', () => {
@@ -183,10 +230,41 @@ describe('terminal mirror runtime lifecycle truth', () => {
     expect(sendScheduleStateToSession).toHaveBeenCalledWith(session, 'demo');
   });
 
-  it('attaches an inactive body-suppressed channel without doing initial buffer capture', async () => {
-    const { runtime, sessions, mirrors, assertTmuxSessionExists, captureMirrorAuthoritativeBufferFromTmux, sendMessage, sendScheduleStateToSession } = createRuntime();
+  it('releases an inactive body-suppressed channel without doing initial buffer capture', async () => {
+    const { runtime, sessions, mirrors, assertTmuxSessionExists, captureMirrorAuthoritativeBufferFromTmux, closeTransportSubscriber } = createRuntime();
     const session = createSession();
     session.bodySubscribed = false;
+    session.muxChannelId = 'channel-demo';
+    sessions.set(session.id, session);
+
+    await runtime.attachTmux(session, {
+      sessionName: 'demo',
+      cols: 120,
+      rows: 40,
+    });
+
+    expect(mirrors.has('demo')).toBe(false);
+    expect(assertTmuxSessionExists).toHaveBeenCalledTimes(1);
+    expect(captureMirrorAuthoritativeBufferFromTmux).not.toHaveBeenCalled();
+    expect(closeTransportSubscriber).toHaveBeenCalledWith(
+      session,
+      'body subscription released',
+      false,
+      'no_body_demand',
+    );
+    expect(session.transport?.close).not.toHaveBeenCalled();
+  });
+
+  it('releases the mirror and mux channel when the last body subscriber unsubscribes', async () => {
+    const {
+      runtime,
+      sessions,
+      mirrors,
+      closeTransportSubscriber,
+    } = createRuntime();
+    const session = createSession();
+    session.bodySubscribed = true;
+    session.muxChannelId = 'channel-demo';
     sessions.set(session.id, session);
 
     await runtime.attachTmux(session, {
@@ -197,24 +275,249 @@ describe('terminal mirror runtime lifecycle truth', () => {
 
     const mirror = mirrors.get('demo');
     expect(mirror).toBeTruthy();
+    expect(mirror?.subscribers.has(session.id)).toBe(true);
+
+    session.bodySubscribed = false;
+    expect(runtime.releaseMirrorIfNoBodyDemand(mirror!, 'body subscription released')).toBe(true);
+
+    expect(mirrors.has('demo')).toBe(false);
+    expect(closeTransportSubscriber).toHaveBeenCalledWith(
+      session,
+      'body subscription released',
+      false,
+      'no_body_demand',
+    );
+    expect(session.transport?.close).not.toHaveBeenCalled();
+  });
+
+  it('keeps the mirror while another ready body subscriber still demands it', async () => {
+    const {
+      runtime,
+      sessions,
+      mirrors,
+      closeTransportSubscriber,
+    } = createRuntime();
+    const first = createSession('session-1');
+    const second = createSession('session-2');
+    sessions.set(first.id, first);
+    sessions.set(second.id, second);
+
+    await runtime.attachTmux(first, {
+      sessionName: 'demo',
+      cols: 120,
+      rows: 40,
+    });
+    await runtime.attachTmux(second, {
+      sessionName: 'demo',
+      cols: 120,
+      rows: 40,
+    });
+
+    const mirror = mirrors.get('demo');
+    expect(mirror).toBeTruthy();
+    first.bodySubscribed = false;
+
+    expect(runtime.releaseMirrorIfNoBodyDemand(mirror!, 'body subscription released')).toBe(false);
+    expect(mirrors.has('demo')).toBe(true);
+    expect(mirror?.subscribers.has(second.id)).toBe(true);
+    expect(closeTransportSubscriber).not.toHaveBeenCalled();
+  });
+
+  it('releases the withdrawn subscriber channel and adaptive width while a peer keeps the mirror', async () => {
+    const {
+      runtime,
+      sessions,
+      mirrors,
+      runTmux,
+      closeTransportSubscriber,
+    } = createRuntime();
+    const first = createSession('session-1');
+    const second = createSession('session-2');
+    first.muxChannelId = 'channel-first';
+    second.muxChannelId = 'channel-second';
+    sessions.set(first.id, first);
+    sessions.set(second.id, second);
+
+    await runtime.attachTmux(first, {
+      sessionName: 'demo',
+      cols: 80,
+      rows: 40,
+      widthMode: 'adaptive-phone',
+    });
+    await runtime.attachTmux(second, {
+      sessionName: 'demo',
+      cols: 120,
+      rows: 40,
+      widthMode: 'adaptive-phone',
+    });
+
+    const mirror = mirrors.get('demo');
+    expect(mirror).toBeTruthy();
+    expect(mirror?.adaptiveWidthAppliedCols).toBe(80);
+    expect(first.adaptiveWidthCols).toBe(80);
+    // The real closeTransportSubscriber releases the lease through the mirror
+    // owner and detaches the subscriber; emulate that production contract.
+    closeTransportSubscriber.mockImplementation((session: TerminalSession, reason: string) => {
+      runtime.releaseAdaptiveWidthLease(session, `close:${reason}`);
+      mirror?.subscribers.delete(session.id);
+      session.mirrorKey = null;
+    });
+    runTmux.mockClear();
+
+    first.bodySubscribed = false;
+    expect(runtime.releaseMirrorIfNoBodyDemand(mirror!, 'body subscription released')).toBe(false);
+
+    expect(mirrors.has('demo')).toBe(true);
+    expect(mirror?.subscribers.has(first.id)).toBe(false);
+    expect(mirror?.subscribers.has(second.id)).toBe(true);
+    expect(first.adaptiveWidthCols).toBeNull();
+    expect(second.adaptiveWidthCols).toBe(120);
+    expect(closeTransportSubscriber).toHaveBeenCalledTimes(1);
+    expect(closeTransportSubscriber).toHaveBeenCalledWith(
+      first,
+      'body subscription released',
+      false,
+      'no_body_demand',
+    );
+    expect(closeTransportSubscriber).not.toHaveBeenCalledWith(
+      second,
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(first.transport?.close).not.toHaveBeenCalled();
+    expect(second.transport?.close).not.toHaveBeenCalled();
+    // The remaining subscriber's 120-col lease must win once the withdrawn
+    // 80-col lease is gone.
+    const resizeCalls = runTmux.mock.calls
+      .map((call) => call[0] as string[])
+      .filter((args) => args[0] === 'resize-window');
+    expect(resizeCalls.at(-1)).toEqual(['resize-window', '-t', '=demo', '-x', '120']);
+  });
+
+  it('releases a body-suppressed attach while a ready peer keeps the mirror', async () => {
+    const {
+      runtime,
+      sessions,
+      mirrors,
+      runTmux,
+      closeTransportSubscriber,
+    } = createRuntime();
+    const peer = createSession('session-peer');
+    const withdrawn = createSession('session-withdrawn');
+    peer.muxChannelId = 'channel-peer';
+    withdrawn.muxChannelId = 'channel-withdrawn';
+    sessions.set(peer.id, peer);
+    sessions.set(withdrawn.id, withdrawn);
+
+    await runtime.attachTmux(peer, {
+      sessionName: 'demo',
+      cols: 120,
+      rows: 40,
+      widthMode: 'adaptive-phone',
+    });
+
+    const mirror = mirrors.get('demo');
     expect(mirror?.lifecycle).toBe('ready');
-    expect(assertTmuxSessionExists).toHaveBeenCalledTimes(1);
-    expect(captureMirrorAuthoritativeBufferFromTmux).not.toHaveBeenCalled();
-    expect(session.mirrorKey).toBe('demo');
-    expect(session.transport?.connectedSent).toBe(true);
-    expect(sendMessage).toHaveBeenCalledWith(
-      session,
-      expect.objectContaining({ type: 'connected' }),
+    expect(mirror?.subscribers.has(peer.id)).toBe(true);
+    closeTransportSubscriber.mockImplementation((session: TerminalSession, reason: string) => {
+      runtime.releaseAdaptiveWidthLease(session, `close:${reason}`);
+      mirror?.subscribers.delete(session.id);
+      session.mirrorKey = null;
+    });
+    runTmux.mockClear();
+
+    withdrawn.bodySubscribed = false;
+    await runtime.attachTmux(withdrawn, {
+      sessionName: 'demo',
+      cols: 80,
+      rows: 40,
+      widthMode: 'adaptive-phone',
+    });
+
+    expect(mirrors.get('demo')).toBe(mirror);
+    expect(mirror?.lifecycle).toBe('ready');
+    expect(mirror?.subscribers.has(peer.id)).toBe(true);
+    expect(mirror?.subscribers.has(withdrawn.id)).toBe(false);
+    expect(peer.mirrorKey).toBe('demo');
+    expect(withdrawn.mirrorKey).toBeNull();
+    expect(withdrawn.adaptiveWidthCols).toBeNull();
+    expect(peer.adaptiveWidthCols).toBe(120);
+    expect(closeTransportSubscriber).toHaveBeenCalledTimes(1);
+    expect(closeTransportSubscriber).toHaveBeenCalledWith(
+      withdrawn,
+      'body subscription released',
+      false,
+      'no_body_demand',
     );
-    expect(sendScheduleStateToSession).toHaveBeenCalledWith(session, 'demo');
-    expect(sendMessage).not.toHaveBeenCalledWith(
+    expect(withdrawn.transport?.close).not.toHaveBeenCalled();
+    expect(peer.transport?.close).not.toHaveBeenCalled();
+    const resizeCalls = runTmux.mock.calls
+      .map((call) => call[0] as string[])
+      .filter((args) => args[0] === 'resize-window');
+    expect(resizeCalls).toEqual([]);
+  });
+
+  it('releases a mirror if body subscription is false before async attach reaches ready', async () => {
+    const {
+      runtime,
+      sessions,
+      mirrors,
+      assertTmuxSessionExists,
+      closeTransportSubscriber,
+    } = createRuntime();
+    const session = createSession();
+    session.bodySubscribed = true;
+    session.muxChannelId = 'channel-demo';
+    sessions.set(session.id, session);
+    assertTmuxSessionExists.mockImplementation(() => {
+      session.bodySubscribed = false;
+    });
+
+    await runtime.attachTmux(session, {
+      sessionName: 'demo',
+      cols: 120,
+      rows: 40,
+    });
+
+    expect(mirrors.has('demo')).toBe(false);
+    expect(closeTransportSubscriber).toHaveBeenCalledWith(
       session,
-      expect.objectContaining({ type: 'buffer-head' }),
+      'body subscription released',
+      false,
+      'no_body_demand',
     );
-    expect(sendMessage).not.toHaveBeenCalledWith(
-      session,
-      expect.objectContaining({ type: 'buffer-sync' }),
-    );
+    expect(session.transport?.close).not.toHaveBeenCalled();
+  });
+
+  it('releases mirror ownership for a legacy non-mux subscriber while keeping its physical transport open', async () => {
+    const {
+      runtime,
+      sessions,
+      mirrors,
+      closeTransportSubscriber,
+    } = createRuntime();
+    const session = createSession();
+    session.bodySubscribed = true;
+    session.muxChannelId = null;
+    sessions.set(session.id, session);
+
+    await runtime.attachTmux(session, {
+      sessionName: 'demo',
+      cols: 120,
+      rows: 40,
+    });
+    const mirror = mirrors.get('demo');
+    expect(mirror).toBeTruthy();
+
+    session.bodySubscribed = false;
+    expect(runtime.releaseMirrorIfNoBodyDemand(mirror!, 'body subscription released')).toBe(true);
+
+    expect(mirrors.has('demo')).toBe(false);
+    expect(sessions.has(session.id)).toBe(true);
+    expect(closeTransportSubscriber).not.toHaveBeenCalled();
+    expect(session.transport?.close).not.toHaveBeenCalled();
+    expect(session.mirrorKey).toBe(null);
   });
 
   it('releases the old mirror when one subscriber moves to another tmux target', async () => {
@@ -825,7 +1128,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
     });
     expect(session.adaptiveWidthCols).toBeNull();
     expect(mirrors.get('demo')?.cols).toBe(120);
-    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '120']);
+    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '120', '-y', '40']);
     expect(runTmux).toHaveBeenCalledWith(['set-window-option', '-u', '-t', '=demo', 'window-size']);
     expectOnlyAdaptiveWidthTmuxMutation(runTmux);
   });
@@ -844,6 +1147,142 @@ describe('terminal mirror runtime lifecycle truth', () => {
     expect(session.adaptiveWidthCols).toBe(88);
     expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '88']);
     expectOnlyAdaptiveWidthTmuxMutation(runTmux);
+  });
+
+  it('persists daemon-owned adaptive width ownership without tmux option state', async () => {
+    const ownership = createOwnershipStore();
+    const { runtime, sessions, runTmux } = createRuntime({
+      adaptiveWidthOwnershipStore: ownership,
+    });
+    const session = createSession('session-1');
+    sessions.set(session.id, session);
+
+    await runtime.attachTmux(session, {
+      sessionName: 'demo',
+      cols: 88,
+      rows: 24,
+      widthMode: 'adaptive-phone',
+    });
+
+    expect(ownership.upsert).toHaveBeenCalledWith({
+      sessionName: 'demo',
+      paneId: '%1',
+      baseline: { cols: 120, rows: 40 },
+      appliedCols: 88,
+      appliedRows: 40,
+    });
+    expect(ownership.records()).toHaveLength(1);
+    expectOnlyAdaptiveWidthTmuxMutation(runTmux);
+  });
+
+  it('does not mutate tmux when adaptive width ownership persistence fails', async () => {
+    const ownership = createOwnershipStore([], {
+      upsertError: new Error('ownership write failed'),
+    });
+    const resizeBackendSession = vi.fn();
+    const { runtime, sessions, runTmux } = createRuntime({
+      adaptiveWidthOwnershipStore: ownership,
+      resizeBackendSession,
+    });
+    const session = createSession('session-1');
+    sessions.set(session.id, session);
+
+    await expect(runtime.attachTmux(session, {
+      sessionName: 'demo',
+      cols: 88,
+      rows: 24,
+      widthMode: 'adaptive-phone',
+    })).rejects.toThrow('ownership write failed');
+
+    expect(resizeBackendSession).not.toHaveBeenCalled();
+    expect(runTmux).not.toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '88']);
+    expect(ownership.records()).toEqual([]);
+  });
+
+  it('removes adaptive width ownership when the tmux mutation fails', async () => {
+    const ownership = createOwnershipStore();
+    const resizeError = new Error('tmux resize failed');
+    const resizeBackendSession = vi.fn()
+      .mockImplementationOnce(() => {})
+      .mockImplementationOnce(() => {
+        throw resizeError;
+      });
+    const { runtime, sessions, mirrors } = createRuntime({
+      adaptiveWidthOwnershipStore: ownership,
+      resizeBackendSession,
+    });
+    const session = createSession('session-1');
+    sessions.set(session.id, session);
+
+    await runtime.attachTmux(session, {
+      sessionName: 'demo',
+      cols: 100,
+      rows: 24,
+      widthMode: 'adaptive-phone',
+    });
+    expect(ownership.records()).toHaveLength(1);
+
+    expect(() => runtime.handleAdaptiveResize(session, {
+      cols: 72,
+      widthMode: 'adaptive-phone',
+    })).toThrow(resizeError);
+
+    expect(ownership.remove).toHaveBeenCalledWith('demo');
+    expect(ownership.records()).toEqual([]);
+    expect(mirrors.get('demo')?.adaptiveWidthAppliedCols).toBe(100);
+  });
+
+  it('keeps a lease-expiry reconciliation failure bounded inside the timer owner', async () => {
+    vi.useFakeTimers();
+    try {
+      const ownershipOverrides: { upsertErrorOnce?: Error } = {};
+      const ownership = createOwnershipStore([], ownershipOverrides);
+      const resizeBackendSession = vi.fn();
+      const { runtime, sessions, mirrors } = createRuntime({
+        adaptiveWidthOwnershipStore: ownership,
+        resizeBackendSession,
+      });
+      const wideSession = createSession('session-wide');
+      const narrowSession = createSession('session-narrow');
+      narrowSession.transportId = 'transport-narrow';
+      sessions.set(wideSession.id, wideSession);
+      sessions.set(narrowSession.id, narrowSession);
+
+      await runtime.attachTmux(wideSession, {
+        sessionName: 'demo',
+        cols: 100,
+        rows: 40,
+        widthMode: 'adaptive-phone',
+      });
+      await runtime.attachTmux(narrowSession, {
+        sessionName: 'demo',
+        cols: 60,
+        rows: 40,
+        widthMode: 'adaptive-phone',
+      });
+      await vi.advanceTimersByTimeAsync(10000);
+      runtime.refreshAdaptiveWidthLeaseHeartbeat(wideSession);
+      ownershipOverrides.upsertErrorOnce = new Error('ownership write failed');
+      const uncaught: unknown[] = [];
+      const onUncaught = (error: unknown) => uncaught.push(error);
+      process.on('uncaughtException', onUncaught);
+      resizeBackendSession.mockClear();
+
+      try {
+        await vi.advanceTimersByTimeAsync(55001);
+        await Promise.resolve();
+      } finally {
+        process.off('uncaughtException', onUncaught);
+      }
+
+      expect(uncaught).toEqual([]);
+      expect(resizeBackendSession).not.toHaveBeenCalled();
+      expect(mirrors.get('demo')?.adaptiveWidthAppliedCols).toBe(60);
+      expect(narrowSession.adaptiveWidthCols).toBeNull();
+      expect(wideSession.adaptiveWidthCols).toBe(100);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('updates adaptive resize lease by resizing tmux width only', async () => {
@@ -876,7 +1315,10 @@ describe('terminal mirror runtime lifecycle truth', () => {
   });
 
   it('clears adaptive lease when a subscriber switches to mirror-fixed and releases tmux width ownership', async () => {
-    const { runtime, sessions, mirrors, runTmux } = createRuntime();
+    const ownership = createOwnershipStore();
+    const { runtime, sessions, mirrors, runTmux } = createRuntime({
+      adaptiveWidthOwnershipStore: ownership,
+    });
     const session = createSession('session-1');
     sessions.set(session.id, session);
 
@@ -894,11 +1336,75 @@ describe('terminal mirror runtime lifecycle truth', () => {
     });
 
     expect(result).toEqual({ ok: true });
-    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '120']);
+    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '120', '-y', '40']);
     expect(runTmux).toHaveBeenCalledWith(['set-window-option', '-u', '-t', '=demo', 'window-size']);
     expectOnlyAdaptiveWidthTmuxMutation(runTmux);
     expect(mirrors.get('demo')?.cols).toBe(120);
     expect(session.adaptiveWidthCols).toBeNull();
+    expect(ownership.remove).toHaveBeenCalledWith('demo');
+    expect(ownership.records()).toEqual([]);
+  });
+
+  it('restores baseline width before unsetting window-size during final release', async () => {
+    const { runtime, sessions, runTmux } = createRuntime();
+    const session = createSession('session-1');
+    sessions.set(session.id, session);
+
+    await runtime.attachTmux(session, {
+      sessionName: 'demo',
+      cols: 100,
+      rows: 40,
+      widthMode: 'adaptive-phone',
+    });
+    runTmux.mockClear();
+
+    runtime.handleAdaptiveResize(session, {
+      cols: 60,
+      widthMode: 'mirror-fixed',
+    });
+
+    const calls = runTmux.mock.calls as unknown as Array<[string[]]>;
+    const resizeCallIndex = calls.findIndex(([args]) => args?.[0] === 'resize-window');
+    const unsetCallIndex = calls.findIndex(([args]) => args?.[0] === 'set-window-option');
+    expect(resizeCallIndex).toBeGreaterThanOrEqual(0);
+    expect(unsetCallIndex).toBeGreaterThan(resizeCallIndex);
+    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '120', '-y', '40']);
+    expect(runTmux).toHaveBeenCalledWith(['set-window-option', '-u', '-t', '=demo', 'window-size']);
+  });
+
+  it('uses the backend resize hook with explicit apply and release operations', async () => {
+    const resizeBackendSession = vi.fn();
+    const { runtime, sessions, mirrors } = createRuntime({
+      readTmuxPaneMetrics: () => ({
+        paneId: '%1',
+        tmuxAvailableLineCountHint: 0,
+        paneRows: 52,
+        paneCols: 120,
+        alternateOn: false,
+      }),
+      resizeBackendSession,
+    });
+    const session = createSession('session-1');
+    session.backend = 'herdr';
+    sessions.set(session.id, session);
+
+    await runtime.attachTmux(session, {
+      sessionName: 'demo',
+      backend: 'herdr',
+      cols: 100,
+      rows: 40,
+      widthMode: 'adaptive-phone',
+    });
+    expect(resizeBackendSession).toHaveBeenCalledWith('demo', { cols: 100, rows: 52 }, 'herdr', 'apply');
+    resizeBackendSession.mockClear();
+
+    runtime.handleAdaptiveResize(session, {
+      cols: 60,
+      widthMode: 'mirror-fixed',
+    });
+
+    expect(resizeBackendSession).toHaveBeenCalledWith('demo', { cols: 120, rows: 52 }, 'herdr', 'release');
+    expect(mirrors.get('demo')?.adaptiveWidthAppliedCols).toBeNull();
   });
 
   it('re-sorts adaptive leases when the narrowest subscriber disappears', async () => {
@@ -951,7 +1457,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
 
       expect(mirrors.get('demo')?.cols).toBe(120);
       expect(mirrors.get('demo')?.adaptiveWidthAppliedCols).toBeNull();
-      expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '120']);
+      expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '120', '-y', '40']);
       expect(runTmux).toHaveBeenCalledWith(['set-window-option', '-u', '-t', '=demo', 'window-size']);
       expectOnlyAdaptiveWidthTmuxMutation(runTmux);
       expect(session.adaptiveWidthCols).toBeNull();
@@ -979,7 +1485,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
     expect(mirrors.has('demo')).toBe(false);
     expect(mirror.lifecycle).toBe('destroyed');
     expect(session.adaptiveWidthCols).toBeNull();
-    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '120']);
+    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '120', '-y', '40']);
     expect(runTmux).toHaveBeenCalledWith(['set-window-option', '-u', '-t', '=demo', 'window-size']);
     expectOnlyAdaptiveWidthTmuxMutation(runTmux);
   });
@@ -1020,7 +1526,10 @@ describe('terminal mirror runtime lifecycle truth', () => {
   });
 
   it('retries retained adaptive width cleanup before re-creating a mirror', async () => {
-    const { runtime, sessions, mirrors, runTmux } = createRuntime();
+    const ownership = createOwnershipStore();
+    const { runtime, sessions, mirrors, runTmux } = createRuntime({
+      adaptiveWidthOwnershipStore: ownership,
+    });
     const session = createSession('session-1');
     sessions.set(session.id, session);
 
@@ -1046,7 +1555,34 @@ describe('terminal mirror runtime lifecycle truth', () => {
     runtime.createMirror('demo');
 
     expect(runTmux).toHaveBeenCalledWith(['set-window-option', '-u', '-t', '=demo', 'window-size']);
-    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '120']);
+    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '120', '-y', '40']);
+    expect(ownership.remove).toHaveBeenCalledWith('demo');
+    expect(ownership.records()).toEqual([]);
+  });
+
+  it('keeps released tmux state authoritative when journal cleanup fails', async () => {
+    const ownership = createOwnershipStore([], {
+      removeError: new Error('journal remove failed'),
+    });
+    const { runtime, sessions, mirrors, runTmux } = createRuntime({
+      adaptiveWidthOwnershipStore: ownership,
+    });
+    const session = createSession('session-1');
+    sessions.set(session.id, session);
+
+    await runtime.attachTmux(session, {
+      sessionName: 'demo',
+      cols: 70,
+      rows: 40,
+      widthMode: 'adaptive-phone',
+    });
+    runTmux.mockClear();
+
+    expect(runtime.destroyMirror(mirrors.get('demo')!, 'daemon shutdown')).toBe(true);
+    expect(mirrors.has('demo')).toBe(false);
+    expect(session.mirrorKey).toBeNull();
+    expect(runTmux).toHaveBeenCalledWith(['set-window-option', '-u', '-t', '=demo', 'window-size']);
+    expect(ownership.remove).toHaveBeenCalledWith('demo');
   });
 
   it('blocks mirror creation while retained adaptive width cleanup cannot succeed', async () => {
@@ -1156,6 +1692,70 @@ describe('terminal mirror runtime lifecycle truth', () => {
 
     expect(restored).toBe(0);
     expectOnlyAdaptiveWidthTmuxMutation(runTmux);
+  });
+
+  it('restores daemon-owned adaptive width baseline on daemon start and clears the journal', () => {
+    const ownership = createOwnershipStore([{
+      sessionName: 'demo',
+      paneId: '%1',
+      baseline: { cols: 120, rows: 40 },
+      appliedCols: 55,
+      appliedRows: 24,
+      updatedAt: '2026-09-13T00:00:00.000Z',
+    }]);
+    const { runtime, runTmux } = createRuntime({
+      adaptiveWidthOwnershipStore: ownership,
+    });
+
+    const restored = runtime.restorePersistedAdaptiveWidthBaselines(['demo']);
+
+    expect(restored).toBe(1);
+    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '120', '-y', '40']);
+    expect(runTmux).toHaveBeenCalledWith(['set-window-option', '-u', '-t', '=demo', 'window-size']);
+    expect(ownership.remove).toHaveBeenCalledWith('demo');
+    expect(ownership.records()).toEqual([]);
+  });
+
+  it('does not restore a stale journal when the tmux pane identity changed', () => {
+    const ownership = createOwnershipStore([{
+      sessionName: 'demo',
+      paneId: '%old-pane',
+      baseline: { cols: 120, rows: 40 },
+      appliedCols: 55,
+      appliedRows: 24,
+      updatedAt: '2026-09-13T00:00:00.000Z',
+    }]);
+    const { runtime, runTmux } = createRuntime({
+      adaptiveWidthOwnershipStore: ownership,
+    });
+
+    const restored = runtime.restorePersistedAdaptiveWidthBaselines(['demo']);
+
+    expect(restored).toBe(0);
+    expect(runTmux).not.toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '120']);
+    expect(runTmux).not.toHaveBeenCalledWith(['set-window-option', '-u', '-t', '=demo', 'window-size']);
+    expect(ownership.remove).toHaveBeenCalledWith('demo');
+    expect(ownership.records()).toEqual([]);
+  });
+
+  it('removes stale journal records for tmux sessions that no longer exist', () => {
+    const ownership = createOwnershipStore([{
+      sessionName: 'old-session',
+      paneId: '%1',
+      baseline: { cols: 120, rows: 40 },
+      appliedCols: 55,
+      appliedRows: 24,
+      updatedAt: '2026-09-13T00:00:00.000Z',
+    }]);
+    const { runtime } = createRuntime({
+      adaptiveWidthOwnershipStore: ownership,
+    });
+
+    const restored = runtime.restorePersistedAdaptiveWidthBaselines(['demo']);
+
+    expect(restored).toBe(0);
+    expect(ownership.remove).toHaveBeenCalledWith('old-session');
+    expect(ownership.records()).toEqual([]);
   });
 
   it('does not resize orphaned narrow tmux windows on daemon start', () => {

@@ -362,7 +362,7 @@ describe('terminal bridge runtime message scheduling', () => {
     wss.close();
   });
 
-  it('does not treat mux-ping as app heartbeat or adaptive lease refresh', async () => {
+  it('treats mux-ping as physical transport liveness but not adaptive lease refresh', async () => {
     const handled: string[] = [];
     const { connection, refreshAdaptiveWidthLeaseHeartbeat, runtime, wss } = createRuntime(async (_connection, rawData) => {
       const message = JSON.parse(Buffer.from(rawData as ArrayBuffer).toString('utf8')) as { type: string };
@@ -373,6 +373,7 @@ describe('terminal bridge runtime message scheduling', () => {
     const ws = new FakeWebSocket();
 
     runtime.handleWebSocketConnection(ws as never, createRequest());
+    const inboundBeforePing = Date.now();
     ws.emit('message', Buffer.from(JSON.stringify({
       type: 'mux-ping',
       payload: { sentAt: Date.now() },
@@ -380,7 +381,10 @@ describe('terminal bridge runtime message scheduling', () => {
     await flushMicrotasks();
 
     expect(handled).toEqual(['mux-ping']);
-    expect(connection.lastInboundAt).toBe(1);
+    // mux-ping is the background keepalive: it renews physical transport
+    // liveness (lastInboundAt) so the target link survives, but it must never
+    // renew the adaptive width lease (that would keep tmux geometry held).
+    expect(connection.lastInboundAt).toBeGreaterThanOrEqual(inboundBeforePing);
     expect(connection.wsAlive).toBe(true);
     expect(refreshAdaptiveWidthLeaseHeartbeat).not.toHaveBeenCalled();
     wss.close();

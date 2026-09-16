@@ -51,6 +51,90 @@ function computeTraversalReconnectDelay(attempt: number) {
   return Math.min(RECONNECT_MAX_DELAY_MS, RECONNECT_BASE_DELAY_MS * 2 ** Math.max(0, attempt));
 }
 
+function parseRtcCandidateField(payload: { candidate?: string; address?: string }, offset: -2 | 0) {
+  if (typeof payload.address === 'string' && payload.address.trim()) {
+    return payload.address.trim();
+  }
+  const parts = String(payload.candidate || '').split(' ');
+  const typIndex = parts.indexOf('typ');
+  if (typIndex <= 0) {
+    return '';
+  }
+  return parts[typIndex + offset] || '';
+}
+
+function rtcCandidateAddress(payload: { candidate?: string; address?: string }) {
+  return parseRtcCandidateField(payload, -2);
+}
+
+function rtcCandidateType(payload: { candidate?: string }) {
+  const parts = String(payload.candidate || '').split(' ');
+  const typIndex = parts.indexOf('typ');
+  return typIndex > 0 ? parts[typIndex + 1] : '';
+}
+
+function isTailscaleIceAddress(value?: string) {
+  if (!value) {
+    return false;
+  }
+  return /^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\./.test(value)
+    || /^fd7a:115c:a1e0:/i.test(value);
+}
+
+function isTailscaleIceCandidate(payload: { candidate?: string; address?: string }) {
+  const raw = String(payload.candidate || payload.address || '');
+  return /100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.|fd7a:115c:a1e0:/i.test(raw)
+    || isTailscaleIceAddress(rtcCandidateAddress(payload));
+}
+
+function shouldSignalIceCandidate(plan: TraversalPlanCandidate, payload: { candidate?: string; address?: string }) {
+  if (plan.kind !== 'rtc' || plan.path !== 'rtc-direct') {
+    return true;
+  }
+  if (isTailscaleIceCandidate(payload)) {
+    return false;
+  }
+  const type = rtcCandidateType(payload);
+  if (type && type !== 'srflx' && type !== 'prflx') {
+    return false;
+  }
+  return true;
+}
+
+function shouldAcceptIceCandidate(plan: TraversalPlanCandidate, payload: { candidate?: string; address?: string }) {
+  if (plan.kind !== 'rtc' || plan.path !== 'rtc-direct') {
+    return true;
+  }
+  if (isTailscaleIceCandidate(payload)) {
+    return false;
+  }
+  const type = rtcCandidateType(payload);
+  if (type && type !== 'srflx' && type !== 'prflx') {
+    return false;
+  }
+  return true;
+}
+
+function stripRtcDirectSdp(sdp: string) {
+  if (typeof sdp !== 'string') {
+    return sdp;
+  }
+  return sdp.split(/\r?\n/).filter((line) => {
+    if (!line.startsWith('a=candidate:')) {
+      return true;
+    }
+    const payload = { candidate: line.slice(2) };
+    if (isTailscaleIceCandidate(payload)) {
+      return false;
+    }
+    const type = rtcCandidateType(payload);
+    if (type && type !== 'srflx' && type !== 'prflx') {
+      return false;
+    }
+    return true;
+  }).join('\r\n');
+}
+
 type Backend = {
   readonly readyState: number;
   readonly bufferedAmount: number;
@@ -460,9 +544,13 @@ class WebRtcBackend implements Backend {
           if (!event.candidate) {
             return;
           }
+          const payload = event.candidate.toJSON();
+          if (!shouldSignalIceCandidate(this.candidate, payload)) {
+            return;
+          }
           this.sendSignalMessage(signalSocket, {
             type: 'rtc-candidate',
-            payload: event.candidate.toJSON(),
+            payload,
           });
         };
         peerConnection.onconnectionstatechange = async () => {
@@ -498,6 +586,9 @@ class WebRtcBackend implements Backend {
         }
 
         const offer = await peerConnection.createOffer();
+        if (this.candidate.path === 'rtc-direct') {
+          offer.sdp = stripRtcDirectSdp(offer.sdp || '');
+        }
         await peerConnection.setLocalDescription(offer);
         if (!this.sendSignalMessage(signalSocket, {
           type: 'rtc-offer',
@@ -527,15 +618,20 @@ class WebRtcBackend implements Backend {
             handlers.onerror('rtc answer before peer init');
             return;
           }
+          const rawSdp = typeof message.payload?.sdp === 'string' ? message.payload.sdp : '';
+          const sdp = this.candidate.path === 'rtc-direct' ? stripRtcDirectSdp(rawSdp) : rawSdp;
           await this.peerConnection.setRemoteDescription(new RTCSessionDescription({
             type: 'answer',
-            sdp: typeof message.payload?.sdp === 'string' ? message.payload.sdp : '',
+            sdp,
           }));
           await this.flushPendingRemoteIceCandidates();
           return;
         }
         if (message.type === 'rtc-candidate' && this.peerConnection && message.payload?.candidate) {
           const candidate = message.payload as RTCIceCandidateInit;
+          if (!shouldAcceptIceCandidate(this.candidate, candidate)) {
+            return;
+          }
           if (!this.peerConnection.remoteDescription) {
             if (this.pendingRemoteIceCandidates.length >= WebRtcBackend.MAX_PENDING_REMOTE_ICE_CANDIDATES) {
               throw new Error('rtc remote ICE candidate queue full before answer');

@@ -123,6 +123,17 @@ interface RemoteWindowReceiverRuntimeLike {
 
 export const REMOTE_WINDOW_TARGET_CATALOG_CACHE_TTL_MS = 60_000;
 
+// Catalog transport readiness: the daemon may have already accepted the
+// physical mux channel request (`channel.state === 'opening'`) before the
+// picker issues its `remote-window-targets-request`. Rather than failing the
+// catalog call with `socket=missing` and forcing the picker to wait for the
+// paste-style timeout, the runtime waits for the channel + mux ready owner to
+// publish an open session socket within a bounded budget. The picker still
+// surfaces the explicit `requires an open daemon connection` error if the
+// transport cannot become ready in time.
+export const REMOTE_WINDOW_CATALOG_OPEN_WAIT_TIMEOUT_MS = 8_000;
+export const REMOTE_WINDOW_CATALOG_OPEN_WAIT_INTERVAL_MS = 50;
+
 export interface RemoteWindowTargetCatalogCacheEntry {
   cacheKey: string;
   updatedAt: number;
@@ -163,6 +174,83 @@ function resolveRemoteWindowTransport(options: {
     targetSessionId,
     `Remote window ${options.operationLabel}`,
   );
+}
+
+function isRemoteWindowCatalogTransportAwaitable(
+  resource: ReturnType<ClientDaemonConnection['readSessionResource']> | null | undefined,
+): boolean {
+  if (!resource) {
+    return false;
+  }
+  // An already-open effective socket means the catalog caller can proceed
+  // without waiting; the outer readOpenSessionSocket call will succeed.
+  if (resource.socket && resource.socket.readyState === 1) {
+    return false;
+  }
+  const channelState = resource.channel?.state;
+  // While the channel is opening, the physical target socket may not yet be
+  // projected into the session resource. Keep polling the same authoritative
+  // channel state until mux readiness publishes the socket; do not fail early
+  // on a transient terminalSocket=null snapshot.
+  if (channelState === 'opening') {
+    return true;
+  }
+  if (channelState) {
+    return false;
+  }
+  return Boolean(resource.terminalSocket);
+}
+
+function defaultRemoteWindowCatalogSleep(ms: number): Promise<void> {
+  return new Promise<void>((resolve) => {
+    globalThis.setTimeout(resolve, ms);
+  });
+}
+
+export async function awaitRemoteWindowCatalogTransport(options: {
+  sessionId: string;
+  sessions: Session[];
+  daemonConnection: ClientDaemonConnection;
+  timeoutMs?: number;
+  pollIntervalMs?: number;
+  now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
+}): Promise<BridgeTransportSocket> {
+  const targetSessionId = options.sessionId.trim();
+  if (!targetSessionId) {
+    throw new Error('No target session for remote window catalog');
+  }
+  const session = options.sessions.find((item) => item.id === targetSessionId) || null;
+  if (!session) {
+    throw new Error('Remote window catalog session no longer exists');
+  }
+  const now = options.now ?? (() => Date.now());
+  const sleep = options.sleep ?? defaultRemoteWindowCatalogSleep;
+  const timeoutMs = Math.max(0, options.timeoutMs ?? REMOTE_WINDOW_CATALOG_OPEN_WAIT_TIMEOUT_MS);
+  const pollIntervalMs = Math.max(
+    1,
+    Math.floor(options.pollIntervalMs ?? REMOTE_WINDOW_CATALOG_OPEN_WAIT_INTERVAL_MS),
+  );
+  const deadline = now() + timeoutMs;
+  while (true) {
+    try {
+      return options.daemonConnection.readOpenSessionSocket(
+        targetSessionId,
+        'Remote window catalog',
+      );
+    } catch (error) {
+      const resource = options.daemonConnection.readSessionResource(targetSessionId);
+      if (!isRemoteWindowCatalogTransportAwaitable(resource)) {
+        throw error;
+      }
+      const current = now();
+      if (current >= deadline) {
+        throw error;
+      }
+      const remaining = deadline - current;
+      await sleep(Math.min(pollIntervalMs, Math.max(1, Math.floor(remaining))));
+    }
+  }
 }
 
 function normalizeRemoteWindowIceServers(
@@ -248,6 +336,9 @@ export async function requestRemoteWindowTargetsRuntime(options: {
   cacheTtlMs?: number;
   forceRefresh?: boolean;
   now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
+  catalogOpenTimeoutMs?: number;
+  catalogOpenPollIntervalMs?: number;
 }) {
   const targetSessionId = options.sessionId.trim();
   if (!targetSessionId) {
@@ -258,10 +349,14 @@ export async function requestRemoteWindowTargetsRuntime(options: {
   if (!session) {
     throw new Error('Remote window catalog session no longer exists');
   }
-  const ws = resolveRemoteWindowCatalogTransport({
+  const ws = await awaitRemoteWindowCatalogTransport({
     sessionId: targetSessionId,
     sessions: options.sessions,
     daemonConnection: options.daemonConnection,
+    timeoutMs: options.catalogOpenTimeoutMs,
+    pollIntervalMs: options.catalogOpenPollIntervalMs,
+    now: options.now,
+    sleep: options.sleep,
   });
   const cacheKey = buildRemoteWindowTargetCatalogCacheKey(session);
   const now = options.now?.() ?? Date.now();

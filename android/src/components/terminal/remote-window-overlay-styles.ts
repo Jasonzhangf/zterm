@@ -473,6 +473,15 @@ export const styles: Record<string, CSSProperties> = {
     fontSize: 11,
     lineHeight: 1.3,
   },
+  compactStatusLine: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    padding: '0 10px 4px',
+    color: 'var(--zterm-panel-muted)',
+    fontSize: 11,
+    lineHeight: 1.3,
+  },
   lockedTitle: {
     minWidth: 0,
     flex: '1 1 auto',

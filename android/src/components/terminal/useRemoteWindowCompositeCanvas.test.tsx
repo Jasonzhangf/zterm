@@ -42,6 +42,11 @@ describe('useRemoteWindowCompositeCanvas projection owner', () => {
 
     act(() => subscriber?.({ video, presentedFrames: 1 }));
     expect(context.drawImage).toHaveBeenCalledWith(video, 0, 0, 1280, 720);
+    Object.defineProperty(video, 'videoWidth', { configurable: true, value: 786 });
+    act(() => subscriber?.({ video, presentedFrames: 2 }));
+    expect(focus.width).toBe(786);
+    expect(focus.height).toBe(720);
+    expect(context.drawImage).toHaveBeenLastCalledWith(video, 0, 0, 786, 720);
   });
 
   it('crops the visible focus canvas from the daemon canvas layout', () => {

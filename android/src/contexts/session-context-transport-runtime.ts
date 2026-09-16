@@ -1,4 +1,5 @@
 import type { Host, HostConfigMessage, ServerMessage } from '../lib/types';
+import { buildBodySubscriptionMessage } from './session-wire-helpers';
 import type { SessionTerminalChannelRuntime } from '../lib/terminal-channel-mux-runtime';
 import {
   ensureSessionTerminalChannel,
@@ -230,6 +231,9 @@ export function handleTargetMuxServerFrameRuntime(options: {
   frame: TerminalMuxServerFrame;
   resolveSessionIdForChannel: (channelId: string) => string | null;
   readSessionTerminalChannelBodySubscribed?: (sessionId: string) => boolean | null;
+  readRequestedTerminalGeometry?: (
+    sessionId: string,
+  ) => { cols?: number | null; rows?: number | null; widthMode?: 'adaptive-phone' | 'mirror-fixed' } | null;
   updateSessionTerminalChannelState: (sessionId: string, state: 'opening' | 'open' | 'closing' | 'closed') => unknown;
   sendSocketPayload?: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
   handleSocketServerMessage: (params: {
@@ -240,13 +244,13 @@ export function handleTargetMuxServerFrameRuntime(options: {
     rawFrameBytes?: number;
     onConnected: () => void;
     onFailure: (message: string, retryable: boolean) => void;
-    onClosed: (reason?: string) => void;
+    onClosed: (reason?: string, code?: string) => void;
   }, msg: ServerMessage) => void;
   buildChannelCallbacks: (sessionId: string) => {
     onChannelAllocated?: () => void;
     onConnected: () => void;
     onFailure: (message: string, retryable: boolean) => void;
-    onClosed: (reason?: string) => void;
+    onClosed: (reason?: string, code?: string) => void;
   };
   handleTargetMuxMessage?: (payload: { requestId?: string; message: TerminalMuxTargetServerMessage }) => boolean;
   recordSessionRx?: (sessionId: string, data: string | ArrayBuffer) => void;
@@ -310,13 +314,12 @@ export function handleTargetMuxServerFrameRuntime(options: {
       if (typeof bodySubscribed === 'boolean') {
         options.sendSocketPayload?.(sessionId, options.ws, JSON.stringify(buildTerminalMuxChannelMessage(
           options.frame.payload.channelId,
-          {
-            type: 'body-subscription',
-            payload: {
-              version: 1,
-              subscribed: bodySubscribed,
-            },
-          },
+          buildBodySubscriptionMessage({
+            subscribed: bodySubscribed,
+            geometry: bodySubscribed
+              ? options.readRequestedTerminalGeometry?.(sessionId) || null
+              : null,
+          }),
         )));
       }
       return;
@@ -333,7 +336,10 @@ export function handleTargetMuxServerFrameRuntime(options: {
       }
       recordChannelActivity(sessionId);
       options.updateSessionTerminalChannelState(sessionId, 'closed');
-      options.buildChannelCallbacks(sessionId).onClosed(options.frame.payload.reason);
+      options.buildChannelCallbacks(sessionId).onClosed(
+        options.frame.payload.reason,
+        options.frame.payload.code,
+      );
       return;
     }
     case 'mux-error': {
@@ -601,12 +607,12 @@ export function bindSessionTransportSocketLifecycle(options: {
     rawFrameBytes?: number;
     onConnected: () => void;
     onFailure: (message: string, retryable: boolean) => void;
-    onClosed: (reason?: string) => void;
+    onClosed: (reason?: string, code?: string) => void;
   }, msg: ServerMessage) => void;
   finalizeFailure: (message: string, retryable: boolean) => void;
   onBeforeConnectSend?: (ctx: { sessionName: string }) => void;
   onConnected: () => void;
-  onClosed?: (reason?: string) => void;
+  onClosed?: (reason?: string, code?: string) => void;
   sessionHandshakeTimeoutMs: number;
 }) {
   const { sessionId, host, ws, debugScope, finalizeFailure, onBeforeConnectSend, onConnected } = options;
@@ -665,8 +671,8 @@ export function bindSessionTransportSocketLifecycle(options: {
         rawFrameBytes: estimateIncomingFrameBytes(event.data),
         onConnected,
         onFailure: finalizeFailure,
-        onClosed: (reason) => {
-          options.onClosed?.(reason);
+        onClosed: (reason, code) => {
+          options.onClosed?.(reason, code);
         },
       }, msg);
     } catch (error) {
