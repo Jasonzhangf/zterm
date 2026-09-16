@@ -1341,10 +1341,16 @@ function TerminalPageComponent({
         if (!sessionName) {
           continue;
         }
+        const relayDevice = resolvedDaemonHostId ? relayDeviceByDaemonHostId.get(resolvedDaemonHostId) || null : null;
+        const relayRtcCandidates = getRelayRtcEndpointCandidates(relayDevice?.daemon.endpoints || []);
+        const useLiveDaemonTarget = Boolean(relayDevice);
+        const liveDirectEndpoint = (relayDevice?.daemon.endpoints || []).find((endpoint) => (
+          endpoint.kind === 'tailscale' && endpoint.host?.trim() && endpoint.port
+        )) || (relayDevice?.daemon.endpoints || []).find((endpoint) => endpoint.host?.trim() && endpoint.port);
         const reuseKey = buildSessionSemanticReuseKey({
           daemonHostId: resolvedDaemonHostId || group.daemonHostId,
-          bridgeHost: group.bridgeHost,
-          bridgePort: group.bridgePort,
+          bridgeHost: liveDirectEndpoint?.host?.trim() || group.bridgeHost,
+          bridgePort: liveDirectEndpoint?.port || group.bridgePort,
           sessionName,
           terminalBackend: groupBackend,
         });
@@ -1352,12 +1358,6 @@ function TerminalPageComponent({
         // 业务 id 保持原语义（本地已打开 → local id，未打开 → remote key）；
         // React key 稳定性改由 stableKey 承担，避免亚秒级连接状态抖动触发整列表重建。
         const id = liveSession?.id || `remote:${ownerKey}::session:${sessionName}`;
-        const relayDevice = resolvedDaemonHostId ? relayDeviceByDaemonHostId.get(resolvedDaemonHostId) || null : null;
-        const relayRtcCandidates = getRelayRtcEndpointCandidates(relayDevice?.daemon.endpoints || []);
-        const useLiveDaemonTarget = Boolean(relayDevice);
-        const liveDirectEndpoint = (relayDevice?.daemon.endpoints || []).find((endpoint) => (
-          endpoint.kind === 'tailscale' && endpoint.host?.trim() && endpoint.port
-        )) || (relayDevice?.daemon.endpoints || []).find((endpoint) => endpoint.host?.trim() && endpoint.port);
         // The catalog came from the currently online daemon. Reuse that
         // daemon's live direct endpoint for the subsequent attach; a saved
         // group endpoint may be stale or point at a different tmux server.
