@@ -30,7 +30,7 @@
 17. Short session catalogs size the list to its rows and place the footer directly after the list. Long catalogs may shrink the list and scroll inside it, but the list must not use growing flex space that creates a large blank band above the footer.
 18. The drawer is a tmux-only projection. Legacy persisted Herdr groups normalize to tmux and merge with the same canonical daemon/session identity; equal session names produce one row, while remote catalog target identity (`daemonHostId`/session name) remains unchanged.
 19. While the drawer is open it is the only terminal chrome interaction layer: portrait status/back/settings controls, debug overlays, copy menus, and the fixed quickbar must not render above it. The drawer backdrop and panel must sit above the normal terminal chrome stack, while transient toast/progress feedback may remain above the drawer.
-19. The narrow drawer header must remain one compact control row. It may expose the preview-selection command and count, but must not stack tutorial/help copy over terminal or session content.
+19. The narrow drawer header must remain one compact control row. It may expose the preview-selection command and count, but must not stack tutorial/help copy over terminal or session content. At the 187px maximum drawer width, header controls stay on one line and session rows use a 56px minimum height with a 13px single-line title and 10px single-line subtitle; body text reserves space for trailing row actions and ellipsizes instead of wrapping or colliding with them.
 20. The long-press session menu must expose both the existing slot assignment intent and an explicit hide intent; hiding stores the trimmed exact `sessionName` in the client-only `hiddenSessionNames[]` list, and the drawer projects only non-hidden rows.
 21. The header restore-all action appears only while the hidden list is non-empty and clears that list through the same Settings persistence path.
 22. A left swipe that starts anywhere inside the drawer panel, including the scrollable tree, closes the drawer once when horizontal displacement dominates vertical displacement and crosses the close threshold. Vertical list scrolling, row selection, and the close button must not emit a close intent.
@@ -66,6 +66,7 @@
 - Positive: a short drawer catalog uses `flex: 0 1 auto` with `min-height: 0`, keeping the footer adjacent to the final row.
 - Negative: the session list must not use `flex: 1` or another grow rule that turns unused drawer height into blank list space.
 - Positive: opening the drawer leaves one compact header row and keeps the drawer panel above the normal terminal chrome z-index ceiling.
+- Positive: at the 187px drawer width, the header controls remain on one row and session rows keep the compact 56px height, 13px title, 10px subtitle, and ellipsized single-line text contract.
 - Negative: portrait status/back/settings controls, debug overlay, copy menu, fixed quickbar, and instructional header paragraphs do not remain visible while the drawer is open.
 - Negative: opening the drawer must not request a host-session catalog refresh, mutate `lastOpenedAt`, or reorder the existing host/session projection.
 - Positive: a catalog update produced independently by the background owner may update the next drawer projection without coupling refresh work to drawer entry.
