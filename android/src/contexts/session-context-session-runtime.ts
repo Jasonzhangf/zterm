@@ -567,7 +567,9 @@ export function reconnectSessionRuntime(options: {
       options.refs.pendingSessionTransportOpenIntentsRef.current as Parameters<typeof deletePendingSessionTransportOpenIntent>[0],
       options.sessionId,
     );
-    options.cleanupControlSocket?.(options.sessionId, true);
+    if ((targetRuntime?.sessionIds.length || 0) <= 1) {
+      options.cleanupControlSocket?.(options.sessionId, true);
+    }
   }
   options.cleanupSocket(options.sessionId, false);
   options.refs.reconnectStore.clearManualClosed(options.sessionId);
