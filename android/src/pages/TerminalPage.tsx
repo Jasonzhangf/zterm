@@ -1353,17 +1353,17 @@ function TerminalPageComponent({
         const id = liveSession?.id || `remote:${ownerKey}::session:${sessionName}`;
         const relayDevice = resolvedDaemonHostId ? relayDeviceByDaemonHostId.get(resolvedDaemonHostId) || null : null;
         const relayRtcCandidates = getRelayRtcEndpointCandidates(relayDevice?.daemon.endpoints || []);
-        const useRelayRouteTarget = Boolean(relayDevice && relayRtcCandidates.length > 0);
+        const useLiveDaemonTarget = Boolean(relayDevice);
         const liveDirectEndpoint = (relayDevice?.daemon.endpoints || []).find((endpoint) => (
           endpoint.kind === 'tailscale' && endpoint.host?.trim() && endpoint.port
         )) || (relayDevice?.daemon.endpoints || []).find((endpoint) => endpoint.host?.trim() && endpoint.port);
         // The catalog came from the currently online daemon. Reuse that
         // daemon's live direct endpoint for the subsequent attach; a saved
         // group endpoint may be stale or point at a different tmux server.
-        const targetBridgeHost = useRelayRouteTarget
+        const targetBridgeHost = useLiveDaemonTarget
           ? liveDirectEndpoint?.host?.trim() || liveSession?.bridgeHost?.trim() || group.bridgeHost
           : group.bridgeHost;
-        const targetBridgePort = useRelayRouteTarget
+        const targetBridgePort = useLiveDaemonTarget
           ? liveDirectEndpoint?.port || liveSession?.bridgePort || group.bridgePort
           : group.bridgePort;
         const relayEndpointCandidates = relayDevice && relayRtcCandidates.length > 0
@@ -1376,9 +1376,9 @@ function TerminalPageComponent({
           bridgePort: targetBridgePort,
           terminalBackend: groupBackend,
           ...(canonicalDaemonHostId ? { daemonHostId: canonicalDaemonHostId, relayHostId: canonicalDaemonHostId } : {}),
-          authToken: group.authToken,
+          authToken: liveDirectEndpoint?.authToken || group.authToken,
           ...(relayEndpointCandidates?.length ? { relayEndpointCandidates } : {}),
-          ...(useRelayRouteTarget ? { transportMode: 'webrtc' as const } : {}),
+          ...(relayDevice && relayRtcCandidates.length > 0 ? { transportMode: 'webrtc' as const } : {}),
           sessionNames: group.sessionNames,
         };
         const canonicalSessionRowKey = `${serverIdentity.key}::session:${sessionName}`;
@@ -1390,7 +1390,7 @@ function TerminalPageComponent({
           rowIdByStableSessionKey.set(stableKey, existingRowId);
           const existingCloseTarget = closeTargets.get(existingRowId);
           closeTargets.set(existingRowId, {
-            target: useRelayRouteTarget ? remoteCatalogTarget : existingCloseTarget?.target || remoteCatalogTarget,
+            target: useLiveDaemonTarget ? remoteCatalogTarget : existingCloseTarget?.target || remoteCatalogTarget,
             sessionName,
             localSessionId: existingCloseTarget?.localSessionId || liveSession?.id || null,
           });
