@@ -272,6 +272,8 @@ describe('TerminalSessionDrawer', () => {
     const tree = screen.getByTestId('terminal-session-drawer-tree');
     expect(tree.style.flex).toBe('0 1 auto');
     expect(tree.style.minHeight).toBe('0px');
+    expect(tree.style.overflowY).toBe('auto');
+    expect(tree.style.touchAction).toBe('pan-y');
     expect(screen.getByTestId('terminal-session-drawer-add')).toBeTruthy();
   });
 
@@ -1144,8 +1146,9 @@ describe('TerminalSessionDrawer', () => {
     expect(overlay.style.transition).toContain('opacity 150ms ease');
 
     const closeTarget = screen.getByTestId(`terminal-session-drawer-close-${sessions[0]!.id}`) as HTMLElement;
-    expect(closeTarget.style.width).toBe('32px');
-    expect(closeTarget.style.height).toBe('32px');
+    expect(closeTarget.style.width).toBe('18px');
+    expect(closeTarget.style.height).toBe('18px');
+    expect(closeTarget.style.position).toBe('absolute');
     expect(closeTarget.style.color).toBe('var(--zterm-panel-danger)');
   });
 
