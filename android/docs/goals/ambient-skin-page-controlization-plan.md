@@ -436,9 +436,9 @@ Current source identity:
 ```text
 worktree: /Volumes/extension/code/zterm/playground/page-controlization-ambient-0913
 branch: codex/page-controlization-ambient-0913
-HEAD: 370434d8e69cbbc238b43f5dabe39404ba6fb5a2
-tree: f7260b2e3b4788afec31d873bb695743baf4e0ea
-origin/main during this verification: 2c3fc8facbe74ba123b8b3556665d6b9338ec7b5
+HEAD: eb313b5fb1946480aa88c42843228365b902922d
+tree: 521409062d2e2c4c9bf5f507423d5c6d651f2478
+origin/main during this verification: 5ca045f4cf117694b8731904f9f5eb0ce71f3fa7
 branch base before newer main: d87c8125 (main moved into session-drawer/daemon catalog; no ambient files differ)
 ```
 
