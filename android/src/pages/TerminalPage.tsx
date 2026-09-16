@@ -1249,12 +1249,14 @@ function TerminalPageComponent({
         || resolveDrawerIdentity(group).key === daemonHostId
         || (directEndpoint?.host?.trim() === group.bridgeHost.trim() && directEndpoint.port === group.bridgePort)
       ));
+      const catalogSessions = liveTmuxCatalog
+        || (onRefreshRemoteSessions ? [] : device.daemon.sessions || []);
       const sessionNames = [...new Set(
-        (liveTmuxCatalog || device.daemon.sessions || []).map((session) => session.name.trim()).filter(Boolean),
+        catalogSessions.map((session) => session.name.trim()).filter(Boolean),
       )].sort((left, right) => left.localeCompare(right));
       const sessionCwdByName = Object.fromEntries([
         ...Object.entries(existingGroup?.sessionCwdByName || {}),
-        ...((liveTmuxCatalog || device.daemon.sessions || []) as Array<{ name: string; cwd?: string }>)
+        ...(catalogSessions as Array<{ name: string; cwd?: string }>)
           .filter((session) => session.name.trim() && session.cwd?.trim())
           .map((session) => [session.name.trim(), session.cwd!.trim()] as const),
       ].filter(([name]) => sessionNames.includes(name)));
@@ -1482,7 +1484,7 @@ function TerminalPageComponent({
       closeTargets,
       catalogLiveSessionIds,
     };
-  }, [activeSession, drawerServerIdentityAliases, liveRelaySessionCatalogs, onlineDrawerServerIdentityAliases, onlineRelayDaemonDevices, relayDeviceByDaemonHostId, renderedPaneSessions, resolveSessionGroupSlot, resolvedSessionDrawerFilterConfig, sessionGroups, sessions]);
+  }, [activeSession, drawerServerIdentityAliases, liveRelaySessionCatalogs, onRefreshRemoteSessions, onlineDrawerServerIdentityAliases, onlineRelayDaemonDevices, relayDeviceByDaemonHostId, renderedPaneSessions, resolveSessionGroupSlot, resolvedSessionDrawerFilterConfig, sessionGroups, sessions]);
   const drawerHosts = useMemo<TerminalSessionDrawerHost[]>(() => {
     const hosts = new Map<string, TerminalSessionDrawerHost>();
     for (const device of onlineRelayDaemonDevices) {
