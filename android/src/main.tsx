@@ -1,7 +1,10 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
+import { installInputModalityRuntime } from './components/ambient/input-modality-runtime';
 import './index.css';
+
+installInputModalityRuntime();
 
 class RootErrorBoundary extends React.Component<
   { children: React.ReactNode },
@@ -28,7 +31,7 @@ class RootErrorBoundary extends React.Component<
             margin: 0,
             display: 'grid',
             placeItems: 'center',
-            backgroundColor: '#050608',
+            backgroundColor: '#16191f',
             color: '#f5f7fb',
           },
         },

@@ -125,4 +125,99 @@ describe('ambient control ownership truth', () => {
       expect(owner).toContain("'amb-chamfer'");
     }
   });
+
+  it('defines complete ambient tokens for both light and black skins', () => {
+    const indexCss = read('src/index.css');
+    const skinBlock = (skin: 'light' | 'black') => {
+      const selector = `[data-terminal-shell-skin="${skin}"] {`;
+      let start = indexCss.indexOf(selector);
+      while (start >= 0) {
+        const end = indexCss.indexOf('}', start);
+        const block = indexCss.slice(start, end);
+        if (block.includes('--amb-light-x:')) {
+          return block;
+        }
+        start = indexCss.indexOf(selector, start + selector.length);
+      }
+      expect(start, `missing ${skin} ambient token block`).toBeGreaterThanOrEqual(0);
+      const end = indexCss.indexOf('}', start);
+      expect(end, `unterminated ${skin} skin token block`).toBeGreaterThan(start);
+      return indexCss.slice(start, end);
+    };
+
+    for (const skin of ['light', 'black'] as const) {
+      const block = skinBlock(skin);
+      for (const token of [
+        '--amb-light-x',
+        '--amb-key-light-intensity',
+        '--amb-fill-light-intensity',
+        '--amb-light-hue',
+        '--amb-albedo',
+        '--amb-mat-roughness',
+      ]) {
+        expect(block, `${skin} skin missing ${token}`).toContain(`${token}:`);
+      }
+    }
+  });
+
+  it('shows focus rings only after keyboard tab navigation', () => {
+    const indexCss = read('src/index.css');
+    for (const selector of ['button', '[role="button"]', 'input', 'textarea', 'select', 'a', 'summary', 'label']) {
+      expect(indexCss).toContain(
+        `[data-zterm-input-modality="keyboard"] ${selector}:focus-visible`,
+      );
+    }
+    for (const selector of [
+      '.zterm-neo-header button',
+      '.zterm-neo-quickbar > button',
+      '.zterm-neo-quickbar [data-quickbar-shell-row="true"] button',
+    ]) {
+      expect(indexCss).toContain(
+        `[data-zterm-input-modality="keyboard"] ${selector}:focus-visible`,
+      );
+      expect(indexCss).not.toMatch(new RegExp(`^${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:focus-visible`, 'm'));
+    }
+    expect(read('src/main.tsx')).toContain('installInputModalityRuntime();');
+  });
+
+  it('keeps the black skin on a layered graphite ramp instead of flat black', () => {
+    const indexCss = read('src/index.css');
+    const blackStart = indexCss.indexOf('[data-terminal-shell-skin="black"] {');
+    expect(blackStart).toBeGreaterThanOrEqual(0);
+    const blackEnd = indexCss.indexOf('}', blackStart);
+    const blackBlock = indexCss.slice(blackStart, blackEnd);
+
+    const tokenValue = (name: string) => {
+      const match = blackBlock.match(new RegExp(`--${name}: (#[0-9a-f]{6});`));
+      expect(match, `missing --${name}`).not.toBeNull();
+      return match?.[1] ?? '';
+    };
+    const relativeLuminance = (hex: string) => {
+      const linear = [1, 3, 5].map((offset) => {
+        const channel = Number.parseInt(hex.slice(offset, offset + 2), 16) / 255;
+        return channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+      });
+      return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+    };
+
+    const ramp = ['shell-bg', 'stage-bg', 'panel-bg', 'panel-surface', 'panel-active'].map((tier) => ({
+      tier,
+      value: tokenValue(`zterm-${tier}`),
+    }));
+    for (const step of ramp) {
+      expect(step.value, `${step.tier} must stay off pure black`).not.toBe('#000000');
+    }
+    for (let index = 1; index < ramp.length; index += 1) {
+      const previous = relativeLuminance(ramp[index - 1].value);
+      const current = relativeLuminance(ramp[index].value);
+      expect(current, `${ramp[index].tier} must read above ${ramp[index - 1].tier}`).toBeGreaterThan(
+        previous * 1.15,
+      );
+    }
+    expect(relativeLuminance(ramp[0].value), 'shell tier needs visible luminance').toBeGreaterThan(0.008);
+    expect(blackBlock).toContain('--zterm-neo-raised-bg: linear-gradient(');
+    expect(blackBlock).toContain('--zterm-neo-header-bg: linear-gradient(');
+    expect(read('src/lib/mobile-ui.ts')).toContain("background: '#16191f'");
+    expect(read('src/lib/mobile-ui.ts')).toContain("surface: '#20252d'");
+  });
 });
