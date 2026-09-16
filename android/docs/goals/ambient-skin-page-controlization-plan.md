@@ -431,13 +431,13 @@ SHA-256: e2d1fd588c17ab01cc7f7434bb7ecfbfb6c069498ed09967cd1e3b39bd2748cd
 
 ### 2026-09-16 Phase 2 re-verification
 
-Current source identity:
+Verification source identity:
 
 ```text
 worktree: /Volumes/extension/code/zterm/playground/page-controlization-ambient-0913
 branch: codex/page-controlization-ambient-0913
-HEAD: eb313b5fb1946480aa88c42843228365b902922d
-tree: 521409062d2e2c4c9bf5f507423d5c6d651f2478
+HEAD: f2e259c4914a49bf6d6f2b414967d0c0d744f53b
+tree: b3fe351f351694b0532b04b79f84c74fbde79db1
 origin/main during this verification: 5ca045f4cf117694b8731904f9f5eb0ce71f3fa7
 branch base before newer main: d87c8125 (main moved into session-drawer/daemon catalog; no ambient files differ)
 ```
