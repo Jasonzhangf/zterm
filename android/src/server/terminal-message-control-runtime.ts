@@ -331,13 +331,14 @@ export function handleTmuxControlMessageRuntime(
     | { type: 'tmux-rename-session'; payload: { sessionName: string; nextSessionName: string } }
     | { type: 'tmux-kill-session'; payload: { sessionName: string } },
 ): DaemonControlHandlerResult {
-  function publishCatalogAfterMutation() {
+  function publishCatalogAfterMutation(): DaemonControlHandlerResult {
     try {
       deps.refreshSessionCatalog?.();
       deps.sendTransportMessage(connection.transport, {
         type: 'sessions',
         payload: buildSessionsCatalogPayload(deps),
       });
+      return { ok: true };
     } catch (error) {
       const err = error instanceof Error ? error.message : String(error);
       deps.sendTransportMessage(connection.transport, {
@@ -347,6 +348,11 @@ export function handleTmuxControlMessageRuntime(
           code: 'catalog_refresh_failed',
         },
       });
+      return {
+        ok: false,
+        code: 'catalog_refresh_failed',
+        message: `Failed to publish daemon session catalog after mutation: ${err}`,
+      } as const;
     }
   }
 
@@ -355,8 +361,7 @@ export function handleTmuxControlMessageRuntime(
       try {
         const backend = 'tmux' as const;
         deps.createDetachedTmuxSession(message.payload.sessionName, message.payload.cwd, backend);
-        publishCatalogAfterMutation();
-        return { ok: true };
+        return publishCatalogAfterMutation();
       } catch (error) {
         const err = error instanceof Error ? error.message : String(error);
         deps.sendTransportMessage(connection.transport, {
@@ -393,8 +398,7 @@ export function handleTmuxControlMessageRuntime(
             deps.sendMessage(subscriber, { type: 'title', payload: nextName });
           }
         }
-        publishCatalogAfterMutation();
-        return { ok: true };
+        return publishCatalogAfterMutation();
       } catch (error) {
         const err = error instanceof Error ? error.message : String(error);
         deps.sendTransportMessage(connection.transport, {
@@ -420,8 +424,7 @@ export function handleTmuxControlMessageRuntime(
             releaseCode: 'tmux_session_killed',
           });
         }
-        publishCatalogAfterMutation();
-        return { ok: true };
+        return publishCatalogAfterMutation();
       } catch (error) {
         const err = error instanceof Error ? error.message : String(error);
         if (/can't find session|no server running|session not found/i.test(err)) {
@@ -437,8 +440,7 @@ export function handleTmuxControlMessageRuntime(
               releaseCode: 'tmux_session_killed',
             });
           }
-          publishCatalogAfterMutation();
-          return { ok: true };
+          return publishCatalogAfterMutation();
         }
         deps.sendTransportMessage(connection.transport, {
           type: 'error',

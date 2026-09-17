@@ -137,7 +137,7 @@ describe('terminal-message-control-runtime tmux kill truth', () => {
     expect(deps.sendTransportMessage).toHaveBeenCalledWith(null, expect.objectContaining({ type: 'sessions' }));
   });
 
-  it('keeps a successful create ok when catalog refresh fails', () => {
+  it('reports catalog refresh failure without turning the tmux mutation into tmux_create_failed', () => {
     const refreshSessionCatalog = vi.fn(() => {
       throw new Error('catalog backend unavailable');
     });
@@ -151,7 +151,11 @@ describe('terminal-message-control-runtime tmux kill truth', () => {
     });
 
     expect(deps.createDetachedTmuxSession).toHaveBeenCalledWith('tmux-new', undefined, 'tmux');
-    expect(result).toEqual({ ok: true });
+    expect(result).toEqual({
+      ok: false,
+      code: 'catalog_refresh_failed',
+      message: 'Failed to publish daemon session catalog after mutation: catalog backend unavailable',
+    });
     expect(deps.sendTransportMessage).toHaveBeenCalledWith(null, {
       type: 'error',
       payload: {
