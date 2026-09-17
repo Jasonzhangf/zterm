@@ -43,13 +43,6 @@ export interface TerminalSessionDrawerProps {
     terminalBackend?: 'tmux' | 'herdr';
   }) => void;
   onDebugAddEvent?: (eventName: string) => void;
-  previewSelectionMode?: boolean;
-  previewSelectedSessionIds?: string[];
-  previewSelectionError?: string | null;
-  onPreviewSelectionModeChange?: (active: boolean) => void;
-  onTogglePreviewSession?: (sessionId: string) => void;
-  onClearPreviewSelection?: () => void;
-  onPreviewFolder?: (cwd: string) => void;
   onHideSession?: (sessionId: string) => void;
   onRestoreAllHiddenSessions?: () => void;
   hiddenSessionCount?: number;

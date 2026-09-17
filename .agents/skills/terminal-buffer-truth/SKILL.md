@@ -830,15 +830,16 @@ tmux truth
 - 多终端快捷预览只能是 UI projection：数据链必须保持 `tmux -> daemon mirror -> client sparse buffer -> immutable render store -> shared TerminalView -> preview DOM`。
 - 禁止 preview 自建 ANSI/cell/cursor parser、截图/文本 cache、transport/reconnect、resize、viewport writeback、width-mode write、tmux geometry write 或 buffer reset。
 - Preview tile 必须把 `TerminalView` 作为 read-only shared renderer 使用：`active=false`、`live=true`、无 input/resize/viewport callbacks、`allowDomFocus=false`、`mirror-fixed`。
-- Secondary preview 的每行必须是同一 passive row 投影：复用共享 `terminalCellStyle()`/row view-model，按相同 style run 聚合成少量 span，保留 ANSI fg/bg/flags；禁止退回纯文本 `theme.foreground` 或另写第二套 color parser。
-- Preview selection 持久化时必须存完整 open-session identity，并在恢复时至少匹配 `sessionId + bridgeHost + bridgePort + sessionName`，有 `daemonHostId` 时也必须匹配；stale target 是失效选择，不是隐式 open/reconnect intent。
-- Preview 打开才允许把 selected ids 临时加入 body subscription live set；关闭/后台必须回到 baseline。黑盒 gate 必须自动比较 tmux source、daemon/client sparse truth、render store 和 preview DOM，并验证 subscriber lifecycle。
+- Preview 唯一数据模型是 `JunctionPreviewLatticeV1` 的 coordinate-keyed cells；focus coordinate 只属于 preview mode，不持久化。点击边缘格只平移 focus，不能移动 session target 或切 active shell。
+- Preview cell 持久化时必须存完整 open-session identity，并在恢复时至少匹配 `sessionId + bridgeHost + bridgePort + sessionName`，有 `daemonHostId` 时也必须匹配；stale cell 是空格，不是隐式 open/reconnect intent。旧 `zterm:session-preview-selection:v1` 不迁移、不读写。
+- Portrait/landscape/wide 可见格与 crop 几何只能由 `junction-preview-layout.ts` 推导；所有窗格保持全尺寸，只允许边缘裁切和 translate，禁止 `scale` / `transform: scale`。
+- Preview 打开才允许把当前可见且有 session 的 cell ids 临时加入 body subscription live set；关闭/后台必须回到 baseline。黑盒 gate 必须自动比较 tmux source、daemon/client sparse truth、render store 和 preview DOM，并验证 subscriber lifecycle。
 - App foreground truth 是唯一的 preview/body-demand 输入；后台态必须把 preview 选中集拉回 baseline，不能继续维持额外 body subscription、视频解码或轮询。任何 offscreen 重媒体流都必须由同一个 foreground gate 停掉，禁止再长出第二套后台 timer/observer 补偿。
 - Android 原生后台服务只允许作为平台执行支持：Activity 停止且 retained sessions 存在时，可持有通知面与一个进程级 `PARTIAL_WAKE_LOCK`（保留 `WAKE_LOCK` 权限）供现有 control-plane / target-transport owner 做低频心跳；必须保持 bounded lifecycle，`sessionCount <= 0` / stop 即 release 并 `stopForeground(true)` / `stopSelf()`。它禁止拥有 socket、route、session truth，禁止请求忽略电池优化权限，禁止替 transport owner 开/建连接、做 body/video 订阅或后台保活。
 - Preview tile activation 必须走唯一 page owner：先把目标 session 投进当前 focused session-group slot，再发 active-session switch。只切 active session 不改 viewport projection，会让输入/live 到新 session、真实 shell 仍显示旧 center session；preview 关闭后旧 center 不再 live，表现为“preview 刷新但进入 shell 不刷新”。
 - Source-to-shell 黑盒 gate 必须覆盖 preview grid -> real `TerminalStageShell` 替换后继续刷新：选中 session 新 marker 出现在真实 shell DOM，旧 session marker 被排除，物理 socket 不重建，subscribers 恢复 baseline。
-- Preview tile 长按替换只改 ordered selection：420ms 长按必须有移动阈值，触发或移动后都要抑制 synthetic click；菜单只列当前 open 且未选中的 session，替换保持原 slot 顺序。禁止借替换触发 active switch、socket open owner、buffer reset 或 renderer 写入。
-- Preview 打开时由 mode owner 捕获 entry `{ activeSessionId, slotIds, focusSlot }`。关闭按钮、右滑退出、Android system Back 都走唯一 cancel owner 并恢复该快照；tile tap activation 必须先清除快照再执行显式 switch。Back listener 只在 preview open 生命周期注册。
+- Preview cell 长按/空格 `+` 只改该 coordinate：420ms 长按必须有移动阈值，触发或移动后都要抑制 synthetic click；菜单只列当前 open 且未被其它 cell 占用的 session。抽屉在 preview open 时只替换 focus cell，其它格不动。禁止借 cell edit 触发 active switch、socket open owner、buffer reset 或 renderer 写入。
+- Preview 打开时由 mode owner 捕获 entry `{ activeSessionId, slotIds, focusSlot }`。关闭按钮、右滑退出、Android system Back 都走唯一 cancel owner 并恢复该快照。Back listener 只在 preview open 生命周期注册。
 
 ## 2026-06-29 buffer publish short-circuit
 

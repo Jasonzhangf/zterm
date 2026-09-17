@@ -2191,7 +2191,7 @@ describe('TerminalPage portrait session drawer', () => {
     );
   });
 
-  it('opens a folder preview from the drawer menu and closes the drawer', async () => {
+  it('keeps folder rows as normal expand/collapse and removes preview from the folder menu', async () => {
     const sessions = [makeSession('s1'), makeSession('s2')];
     sessions[0]!.daemonHostId = 'daemon-a';
     sessions[1]!.daemonHostId = 'daemon-a';
@@ -2237,13 +2237,17 @@ describe('TerminalPage portrait session drawer', () => {
 
     const folder = await screen.findByTestId('terminal-session-drawer-folder-button-/Users/jason/projects/zterm');
     fireEvent.contextMenu(folder, { clientX: 80, clientY: 160 });
-    fireEvent.click(screen.getByRole('menuitem', { name: '预览' }));
 
-    expect(await screen.findByTestId('terminal-preview-grid')).toBeTruthy();
-    expect(screen.getByTestId('terminal-session-drawer').getAttribute('aria-hidden')).toBe('true');
+    expect(screen.queryByRole('menuitem', { name: '预览' })).toBeNull();
+    expect(screen.getByTestId('terminal-session-drawer').getAttribute('aria-hidden')).toBe('false');
+    fireEvent.click(screen.getByRole('menuitem', { name: '取消' }));
+    fireEvent.click(folder);
+    expect(screen.queryByTestId('terminal-session-drawer-select-s1')).toBeNull();
+    fireEvent.click(folder);
+    expect(screen.getByTestId('terminal-session-drawer-select-s1')).toBeTruthy();
   });
 
-  it('opens a folder preview from the current open session when the remote catalog has no cwd row', async () => {
+  it('does not expose a folder preview entry for the fallback cwd group', async () => {
     const sessions = [makeSession('s1')];
 
     render(
@@ -2273,10 +2277,10 @@ describe('TerminalPage portrait session drawer', () => {
 
     const folder = await screen.findByTestId('terminal-session-drawer-folder-button-cwd 未知');
     fireEvent.contextMenu(folder, { clientX: 80, clientY: 160 });
-    fireEvent.click(screen.getByRole('menuitem', { name: '预览' }));
 
-    expect(await screen.findByTestId('terminal-preview-grid')).toBeTruthy();
-    expect(screen.getByTestId('terminal-session-drawer').getAttribute('aria-hidden')).toBe('true');
+    expect(screen.queryByRole('menuitem', { name: '预览' })).toBeNull();
+    expect(screen.getByTestId('terminal-session-drawer').getAttribute('aria-hidden')).toBe('false');
+    fireEvent.click(screen.getByRole('menuitem', { name: '取消' }));
   });
 
   it('merges a legacy Herdr catalog row into the tmux row for one daemon/session', async () => {

@@ -2,7 +2,13 @@
 
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  JUNCTION_PREVIEW_EDGE_PX,
+  JUNCTION_PREVIEW_GAP_PX,
+  JUNCTION_PREVIEW_HEADER_HEIGHT_PX,
+} from '../../lib/junction-preview-layout';
 import type { Session } from '../../lib/types';
+import type { JunctionPreviewLatticeV1 } from '../../lib/junction-preview-lattice';
 
 const terminalViewSpy = vi.hoisted(() => vi.fn());
 vi.mock('../TerminalView', () => ({
@@ -21,7 +27,7 @@ afterEach(() => {
   terminalViewSpy.mockClear();
 });
 
-const sessions = Array.from({ length: 6 }, (_, index) => ({
+const sessions = Array.from({ length: 8 }, (_, index) => ({
   id: `s${index + 1}`,
   title: `Session ${index + 1}`,
   sessionName: `tmux-${index + 1}`,
@@ -30,389 +36,207 @@ const sessions = Array.from({ length: 6 }, (_, index) => ({
   bridgePort: 3333,
 })) as Session[];
 
+function latticeFor(coordinates: Array<{ col: number; row: number; session: Session }>): JunctionPreviewLatticeV1 {
+  return {
+    version: 1,
+    cells: coordinates.map(({ col, row, session }) => ({
+      col,
+      row,
+      target: {
+        sessionId: session.id,
+        daemonHostId: session.daemonHostId,
+        bridgeHost: session.bridgeHost,
+        bridgePort: session.bridgePort,
+        sessionName: session.sessionName,
+      },
+    })),
+  };
+}
+
+function setViewport(width: number, height: number) {
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
+  Object.defineProperty(window, 'innerHeight', { configurable: true, value: height });
+}
+
+function renderGrid(overrides: Partial<Parameters<typeof TerminalPreviewGrid>[0]> = {}) {
+  return render(
+    <TerminalPreviewGrid
+      lattice={latticeFor([
+        { col: -1, row: 0, session: sessions[0] },
+        { col: 0, row: -1, session: sessions[1] },
+        { col: 0, row: 0, session: sessions[2] },
+        { col: 0, row: 1, session: sessions[3] },
+        { col: 1, row: 0, session: sessions[4] },
+      ])}
+      focus={{ col: 0, row: 0 }}
+      candidates={sessions}
+      sessionBufferStore={null}
+      fontSize={10}
+      onFocusChange={vi.fn()}
+      onSetCell={vi.fn()}
+      onClearCell={vi.fn()}
+      onClose={vi.fn()}
+      {...overrides}
+    />,
+  );
+}
+
 describe('TerminalPreviewGrid', () => {
-  it.each([
-    [false, 1, 'row', 'row'],
-    [false, 4, 'column', 'row'],
-    [true, 4, 'row', 'column'],
-  ])('derives grouped %s orientation layout for %i selected sessions', (landscape, count, primaryAxis, secondaryAxis) => {
-    render(
-      <TerminalPreviewGrid
-        sessions={sessions.slice(0, count)}
-        sessionBufferStore={null}
-        landscape={landscape}
-        fontSize={10}
-        onActivateSession={vi.fn()}
-        onClose={vi.fn()}
-      />,
-    );
+  it('projects portrait phone as focus plus one side strip and two horizontal strips', () => {
+    setViewport(374, 706);
+    renderGrid();
 
     const grid = screen.getByTestId('terminal-preview-grid');
-    expect(grid.dataset.windowGroupPrimaryAxis).toBe(primaryAxis);
-    expect(grid.dataset.windowGroupSecondaryAxis).toBe(secondaryAxis);
-    expect(screen.getAllByTestId(/terminal-preview-tile-/)).toHaveLength(count);
+    expect(grid.dataset.layoutForm).toBe('portrait');
+    expect(screen.getByTestId('terminal-preview-tile-s1').dataset.previewEdge).toBe('left');
+    expect(screen.getByTestId('terminal-preview-tile-s2').dataset.previewEdge).toBe('top');
+    expect(screen.getByTestId('terminal-preview-tile-s3').dataset.previewEdge).toBe('focus');
+    expect(screen.getByTestId('terminal-preview-tile-s4').dataset.previewEdge).toBe('bottom');
+    expect(screen.queryByTestId('terminal-preview-tile-s5')).toBeNull();
+    expect(screen.getAllByTestId(/terminal-preview-tile-/)).toHaveLength(4);
   });
 
-  it('renders six ordered read-only terminals in a primary-plus-children layout', () => {
-    const onActivateSession = vi.fn();
-    render(
-      <TerminalPreviewGrid
-        sessions={sessions}
-        sessionBufferStore={null}
-        landscape={false}
-        fontSize={10}
-        themeId="default"
-        onActivateSession={onActivateSession}
-        onClose={vi.fn()}
-      />,
-    );
+  it('projects landscape phone as two center panes plus top and bottom strips', () => {
+    setViewport(800, 500);
+    renderGrid();
 
     const grid = screen.getByTestId('terminal-preview-grid');
-    expect(grid.dataset.windowGroupPrimaryAxis).toBe('column');
-    expect(grid.dataset.windowGroupSecondaryAxis).toBe('row');
-    expect(screen.getAllByTestId(/terminal-preview-tile-/)).toHaveLength(6);
-    expect(terminalViewSpy).toHaveBeenCalledTimes(6);
-    const terminalProps = terminalViewSpy.mock.calls.map(([props]) => props as Record<string, unknown>);
-    expect(terminalProps[0]).toMatchObject({ active: false, live: true, projectionMode: 'preview-primary', splitVisible: true });
-    for (const props of terminalProps.slice(1)) {
-      expect(props).toMatchObject({ active: false, live: true, projectionMode: 'preview-secondary', splitVisible: true });
-      expect((props as Record<string, unknown>).onInput).toBeUndefined();
-      expect((props as Record<string, unknown>).onResize).toBeUndefined();
-      expect((props as Record<string, unknown>).onViewportChange).toBeUndefined();
-    }
+    const focusWidth = (800 - JUNCTION_PREVIEW_GAP_PX) / 2;
+    const top = screen.getByTestId('terminal-preview-tile-s2');
+    const bottom = screen.getByTestId('terminal-preview-tile-s4');
+    expect(grid.dataset.layoutForm).toBe('landscape');
+    expect(screen.getByTestId('terminal-preview-tile-s1').dataset.previewEdge).toBe('focus');
+    expect(screen.getByTestId('terminal-preview-tile-s2').dataset.previewEdge).toBe('top');
+    expect(screen.getByTestId('terminal-preview-tile-s3').dataset.previewEdge).toBe('focus');
+    expect(screen.getByTestId('terminal-preview-tile-s4').dataset.previewEdge).toBe('bottom');
+    expect(top.style.left).toBe(`${focusWidth + JUNCTION_PREVIEW_GAP_PX}px`);
+    expect(top.style.top).toBe('0px');
+    expect(top.style.width).toBe(`${focusWidth}px`);
+    expect(top.style.height).toBe(`${JUNCTION_PREVIEW_EDGE_PX.topBottom}px`);
+    expect(bottom.style.left).toBe(`${focusWidth + JUNCTION_PREVIEW_GAP_PX}px`);
+    expect(bottom.style.top).toBe(`${500 - JUNCTION_PREVIEW_HEADER_HEIGHT_PX - JUNCTION_PREVIEW_EDGE_PX.topBottom}px`);
+    expect(bottom.style.width).toBe(`${focusWidth}px`);
+    expect(bottom.style.height).toBe(`${JUNCTION_PREVIEW_EDGE_PX.topBottom}px`);
+    expect(screen.getAllByTestId(/terminal-preview-tile-/)).toHaveLength(4);
+  });
+
+  it('projects wide viewport as focus plus left, right, top, and bottom strips', () => {
+    setViewport(1280, 720);
+    renderGrid();
+
+    const grid = screen.getByTestId('terminal-preview-grid');
+    const focusWidth = 1280 - JUNCTION_PREVIEW_EDGE_PX.side * 2 - JUNCTION_PREVIEW_GAP_PX * 2;
+    const focusLeft = JUNCTION_PREVIEW_EDGE_PX.side + JUNCTION_PREVIEW_GAP_PX;
+    const top = screen.getByTestId('terminal-preview-tile-s2');
+    const bottom = screen.getByTestId('terminal-preview-tile-s4');
+    expect(grid.dataset.layoutForm).toBe('wide');
+    expect(screen.getByTestId('terminal-preview-tile-s1').dataset.previewEdge).toBe('left');
+    expect(screen.getByTestId('terminal-preview-tile-s2').dataset.previewEdge).toBe('top');
+    expect(screen.getByTestId('terminal-preview-tile-s3').dataset.previewEdge).toBe('focus');
+    expect(screen.getByTestId('terminal-preview-tile-s5').dataset.previewEdge).toBe('right');
+    expect(screen.getByTestId('terminal-preview-tile-s4').dataset.previewEdge).toBe('bottom');
+    expect(top.style.left).toBe(`${focusLeft}px`);
+    expect(top.style.top).toBe('0px');
+    expect(top.style.width).toBe(`${focusWidth}px`);
+    expect(top.style.height).toBe(`${JUNCTION_PREVIEW_EDGE_PX.topBottom}px`);
+    expect(bottom.style.left).toBe(`${focusLeft}px`);
+    expect(bottom.style.top).toBe(`${720 - JUNCTION_PREVIEW_HEADER_HEIGHT_PX - JUNCTION_PREVIEW_EDGE_PX.topBottom}px`);
+    expect(bottom.style.width).toBe(`${focusWidth}px`);
+    expect(bottom.style.height).toBe(`${JUNCTION_PREVIEW_EDGE_PX.topBottom}px`);
+    expect(screen.getAllByTestId(/terminal-preview-tile-/)).toHaveLength(5);
+  });
+
+  it('pans focus to an edge cell without changing lattice ownership', () => {
+    setViewport(374, 706);
+    const onFocusChange = vi.fn();
+    const onSetCell = vi.fn();
+    const lattice = latticeFor([
+      { col: -1, row: 0, session: sessions[0] },
+      { col: 0, row: 0, session: sessions[2] },
+    ]);
+    renderGrid({ lattice, onFocusChange, onSetCell });
 
     fireEvent.click(screen.getByTestId('terminal-preview-tile-s1'));
-    expect(onActivateSession).toHaveBeenCalledWith('s1');
+    expect(onFocusChange).toHaveBeenCalledWith({ col: -1, row: 0 });
+    expect(onSetCell).not.toHaveBeenCalled();
   });
 
-  it('uses landscape side-rail layout and exposes close command', () => {
-    const onClose = vi.fn();
-    render(
-      <TerminalPreviewGrid
-        sessions={sessions.slice(0, 2)}
-        sessionBufferStore={null}
-        landscape
-        fontSize={10}
-        themeId="default"
-        onActivateSession={vi.fn()}
-        onClose={onClose}
-      />,
-    );
-    expect(screen.getByTestId('terminal-preview-grid').dataset.windowGroupPrimaryAxis).toBe('row');
-    expect(screen.getByTestId('terminal-preview-secondary-s2').getAttribute('style') || '').toContain('flex');
-    fireEvent.click(screen.getByLabelText('退出终端预览'));
-    expect(onClose).toHaveBeenCalledTimes(1);
+  it('renders empty and stale cells as plus and assigns a session through the slot menu', () => {
+    setViewport(374, 706);
+    const onSetCell = vi.fn();
+    renderGrid({
+      lattice: latticeFor([{ col: 0, row: 0, session: sessions[2] }]),
+      onSetCell,
+    });
+
+    expect(screen.getByTestId('terminal-preview-empty--1-0')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('terminal-preview-empty--1-0'));
+    fireEvent.click(screen.getByTestId('terminal-preview-assign-s1'));
+    expect(onSetCell).toHaveBeenCalledWith({ col: -1, row: 0 }, 's1');
   });
 
-  it('clicking a child preview promotes it to the large primary preview without activating', () => {
-    const onActivateSession = vi.fn();
-    render(
-      <TerminalPreviewGrid
-        sessions={sessions.slice(0, 3)}
-        sessionBufferStore={null}
-        landscape={false}
-        fontSize={10}
-        onActivateSession={onActivateSession}
-        onClose={vi.fn()}
-      />,
-    );
-
-    expect(screen.getByTestId('terminal-preview-tile-s1').dataset.previewVariant).toBe('primary');
-    fireEvent.click(screen.getByTestId('terminal-preview-secondary-s2'));
-    expect(onActivateSession).not.toHaveBeenCalled();
-    expect(screen.getByTestId('terminal-preview-tile-s2').dataset.previewVariant).toBe('primary');
-  });
-
-  it('keeps one layout and no quick peek when selecting a child', () => {
-    render(
-      <TerminalPreviewGrid
-        sessions={sessions.slice(0, 3)}
-        sessionBufferStore={null}
-        landscape={false}
-        fontSize={10}
-        onActivateSession={vi.fn()}
-        onClose={vi.fn()}
-      />,
-    );
-
-    fireEvent.click(screen.getByTestId('terminal-preview-body-s2'));
-
-    expect(screen.getAllByTestId('terminal-preview-grid')).toHaveLength(1);
-    expect(screen.queryByTestId('terminal-preview-quick-peek')).toBeNull();
-    expect(screen.getAllByTestId(/terminal-preview-tile-/)).toHaveLength(3);
-  });
-
-  it('clicking inside a child preview body promotes it without activating', () => {
-    const onActivateSession = vi.fn();
-    render(
-      <TerminalPreviewGrid
-        sessions={sessions.slice(0, 3)}
-        sessionBufferStore={null}
-        landscape={false}
-        fontSize={10}
-        onActivateSession={onActivateSession}
-        onClose={vi.fn()}
-      />,
-    );
-
-    expect(screen.getByTestId('terminal-preview-tile-s1').dataset.previewVariant).toBe('primary');
-    fireEvent.click(screen.getByTestId('terminal-preview-body-s2'));
-    expect(onActivateSession).not.toHaveBeenCalled();
-    expect(screen.getByTestId('terminal-preview-tile-s2').dataset.previewVariant).toBe('primary');
-  });
-
-  it('promotes from the title bar and activates the full shell only after the promoted primary body is tapped', () => {
-    const onActivateSession = vi.fn();
-    render(
-      <TerminalPreviewGrid
-        sessions={sessions.slice(0, 3)}
-        sessionBufferStore={null}
-        landscape={false}
-        fontSize={10}
-        onActivateSession={onActivateSession}
-        onClose={vi.fn()}
-      />,
-    );
-
-    const childTitlebar = screen.getByTestId('terminal-preview-tile-s2').querySelector('[data-preview-titlebar="true"]') as HTMLElement;
-    fireEvent.click(childTitlebar);
-    expect(onActivateSession).not.toHaveBeenCalled();
-    expect(screen.getByTestId('terminal-preview-tile-s2').dataset.previewVariant).toBe('primary');
-
-    fireEvent.click(screen.getByTestId('terminal-preview-body-s2'));
-    expect(onActivateSession).toHaveBeenCalledTimes(1);
-    expect(onActivateSession).toHaveBeenCalledWith('s2');
-  });
-
-  it('keeps order metadata but does not render order badges in tile titlebars', () => {
-    const namedSessions = [
-      { ...sessions[0], title: 'alpha', sessionName: 'alpha' },
-      { ...sessions[1], title: 'beta', sessionName: 'beta' },
-    ] as Session[];
-    render(
-      <TerminalPreviewGrid
-        sessions={namedSessions}
-        sessionBufferStore={null}
-        landscape={false}
-        fontSize={10}
-        onActivateSession={vi.fn()}
-        onClose={vi.fn()}
-      />,
-    );
-
-    const firstTile = screen.getByTestId('terminal-preview-tile-s1');
-    const titlebar = firstTile.querySelector('[data-preview-titlebar="true"]');
-    expect(firstTile.dataset.previewOrder).toBe('1');
-    expect(titlebar?.textContent).toContain('alpha');
-    expect(titlebar?.textContent).not.toContain('1');
-  });
-
-  it('renders secondary preview tiles with a compact local font without resize callbacks', () => {
-    render(
-      <TerminalPreviewGrid
-        sessions={sessions.slice(0, 3)}
-        sessionBufferStore={null}
-        landscape={false}
-        fontSize={14}
-        onActivateSession={vi.fn()}
-        onClose={vi.fn()}
-      />,
-    );
-
-    const terminalProps = terminalViewSpy.mock.calls.map(([props]) => props as Record<string, unknown>);
-    expect(terminalProps.map((props) => [props.sessionId, props.fontSize, props.rowHeight])).toEqual([
-      ['s1', 12, '14px'],
-      ['s2', 9, '10px'],
-      ['s3', 9, '10px'],
-    ]);
-    for (const props of terminalProps) {
-      expect(props.widthMode).toBe('mirror-fixed');
-      expect(props.onResize).toBeUndefined();
-      expect(props.onWidthModeChange).toBeUndefined();
-      expect(props.onViewportChange).toBeUndefined();
-    }
-  });
-
-  it('removes a preview tile without activating or closing its Session', () => {
-    const onActivateSession = vi.fn();
-    const onRemoveSession = vi.fn();
-    render(
-      <TerminalPreviewGrid
-        sessions={sessions.slice(0, 3)}
-        sessionBufferStore={null}
-        landscape={false}
-        fontSize={10}
-        onActivateSession={onActivateSession}
-        onRemoveSession={onRemoveSession}
-        onClose={vi.fn()}
-      />,
-    );
-
-    fireEvent.click(screen.getByLabelText('从预览移除 Session 2'));
-    expect(onRemoveSession).toHaveBeenCalledWith('s2');
-    expect(onActivateSession).not.toHaveBeenCalled();
-  });
-
-  it('adds an unselected Session from the inline add row', () => {
-    const onAddSession = vi.fn();
-    render(
-      <TerminalPreviewGrid
-        sessions={sessions.slice(0, 4)}
-        replacementCandidates={sessions.slice(4, 6)}
-        sessionBufferStore={null}
-        landscape={false}
-        fontSize={10}
-        onActivateSession={vi.fn()}
-        onAddSession={onAddSession}
-        onClose={vi.fn()}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: '增加预览窗口' }));
-    expect(screen.getByTestId('terminal-preview-add-s5')).toBeTruthy();
-    expect(screen.getByTestId('terminal-preview-add-s6')).toBeTruthy();
-    expect(screen.queryByTestId('terminal-preview-add-s1')).toBeNull();
-    fireEvent.click(screen.getByTestId('terminal-preview-add-s5'));
-    expect(onAddSession).toHaveBeenCalledWith('s5');
-  });
-
-  it('long presses the title bar to move a tile without opening replacement or activating', () => {
+  it('long-presses an edge cell to clear its assignment without panning focus', () => {
     vi.useFakeTimers();
-    const onActivateSession = vi.fn();
-    const onMoveSession = vi.fn();
-    render(
-      <TerminalPreviewGrid
-        sessions={sessions.slice(0, 4)}
-        replacementCandidates={sessions.slice(4, 6)}
-        sessionBufferStore={null}
-        landscape={false}
-        fontSize={10}
-        onActivateSession={onActivateSession}
-        onMoveSession={onMoveSession}
-        onClose={vi.fn()}
-      />,
-    );
+    setViewport(374, 706);
+    const onClearCell = vi.fn();
+    const onFocusChange = vi.fn();
+    renderGrid({ onClearCell, onFocusChange });
 
-    const titlebar = screen.getByTestId('terminal-preview-tile-s3').querySelector('[data-preview-titlebar="true"]') as HTMLElement;
-    fireEvent.pointerDown(titlebar, { clientX: 30, clientY: 80, pointerId: 1 });
-    act(() => vi.advanceTimersByTime(450));
-    expect(screen.getByRole('menu', { name: '移动预览 Session 3' })).toBeTruthy();
-    expect(screen.queryByTestId('terminal-preview-replacement-menu')).toBeNull();
-    fireEvent.pointerUp(titlebar, { clientX: 30, clientY: 80, pointerId: 1 });
-    fireEvent.click(screen.getByTestId('terminal-preview-move-to-1'));
-    expect(onMoveSession).toHaveBeenCalledWith('s3', 0);
-    expect(onActivateSession).not.toHaveBeenCalled();
+    fireEvent.pointerDown(screen.getByTestId('terminal-preview-tile-s1'), { clientX: 10, clientY: 10 });
+    act(() => {
+      vi.advanceTimersByTime(450);
+    });
+    fireEvent.click(screen.getByTestId('terminal-preview-clear--1-0'));
+
+    expect(onClearCell).toHaveBeenCalledWith({ col: -1, row: 0 });
+    expect(onFocusChange).not.toHaveBeenCalled();
   });
 
-  it('enables read-only body touch scrolling with smaller preview typography', () => {
+  it('suppresses the click emitted after a long-press menu opens', () => {
     vi.useFakeTimers();
-    const onActivateSession = vi.fn();
-    render(
-      <TerminalPreviewGrid
-        sessions={sessions.slice(0, 1)}
-        sessionBufferStore={null}
-        landscape={false}
-        fontSize={10}
-        onActivateSession={onActivateSession}
-        onClose={vi.fn()}
-      />,
-    );
+    setViewport(374, 706);
+    const onFocusChange = vi.fn();
+    const onClearCell = vi.fn();
+    renderGrid({ onFocusChange, onClearCell });
 
-    const body = screen.getByTestId('terminal-preview-body-s1');
-    expect(body.style.pointerEvents).toBe('auto');
-    expect(body.style.webkitTextSizeAdjust).toBe('none');
-    expect(body.closest('button')).toBeNull();
-    fireEvent.pointerDown(body, { clientX: 20, clientY: 70, pointerId: 1 });
-    act(() => vi.advanceTimersByTime(450));
-    fireEvent.touchStart(body, { touches: [{ clientX: 20, clientY: 70 }] });
-    fireEvent.touchMove(body, { touches: [{ clientX: 8, clientY: 120 }] });
-    fireEvent.click(body);
-    expect(onActivateSession).not.toHaveBeenCalled();
-    expect(screen.queryByTestId('terminal-preview-replacement-menu')).toBeNull();
-    expect(terminalViewSpy).toHaveBeenLastCalledWith(expect.objectContaining({
-      fontSize: 8,
-      rowHeight: '10px',
-      widthMode: 'mirror-fixed',
-      active: false,
-      live: true,
-      projectionMode: 'preview-primary',
-      splitVisible: true,
-    }));
+    const tile = screen.getByTestId('terminal-preview-tile-s1');
+    fireEvent.pointerDown(tile, { clientX: 10, clientY: 10 });
+    act(() => {
+      vi.advanceTimersByTime(450);
+    });
+    fireEvent.pointerUp(tile, { clientX: 10, clientY: 10 });
+    fireEvent.click(tile);
+
+    expect(onFocusChange).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('terminal-preview-clear--1-0'));
+    expect(onClearCell).toHaveBeenCalledTimes(1);
   });
 
   it('exits on a horizontal right swipe but not a vertical gesture', () => {
+    setViewport(374, 706);
     const onClose = vi.fn();
-    render(
-      <TerminalPreviewGrid
-        sessions={sessions.slice(0, 1)}
-        sessionBufferStore={null}
-        landscape={false}
-        fontSize={10}
-        onActivateSession={vi.fn()}
-        onClose={onClose}
-      />,
-    );
-    const shell = screen.getByTestId('terminal-preview-grid-shell');
-    fireEvent.touchStart(shell, { touches: [{ clientX: 40, clientY: 300 }] });
-    fireEvent.touchEnd(shell, { changedTouches: [{ clientX: 110, clientY: 305 }] });
+    renderGrid({ onClose });
+    const grid = screen.getByTestId('terminal-preview-grid');
+
+    fireEvent.touchStart(grid, { touches: [{ clientX: 80, clientY: 200 }] });
+    fireEvent.touchEnd(grid, { changedTouches: [{ clientX: 160, clientY: 204 }] });
     expect(onClose).toHaveBeenCalledTimes(1);
-    fireEvent.touchStart(shell, { touches: [{ clientX: 40, clientY: 300 }] });
-    fireEvent.touchEnd(shell, { changedTouches: [{ clientX: 45, clientY: 380 }] });
+
+    fireEvent.touchStart(grid, { touches: [{ clientX: 80, clientY: 200 }] });
+    fireEvent.touchEnd(grid, { changedTouches: [{ clientX: 84, clientY: 280 }] });
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('opens replacement choices on long press without activating the tile', () => {
-    vi.useFakeTimers();
-    const onActivateSession = vi.fn();
-    const onReplaceSession = vi.fn();
-    render(
-      <TerminalPreviewGrid
-        sessions={sessions.slice(0, 2)}
-        replacementCandidates={sessions.slice(2, 4)}
-        sessionBufferStore={null}
-        landscape={false}
-        fontSize={10}
-        onActivateSession={onActivateSession}
-        onReplaceSession={onReplaceSession}
-        onClose={vi.fn()}
-      />,
-    );
+  it('mounts a read-only mirror-fixed renderer only for visible populated cells', () => {
+    setViewport(374, 706);
+    renderGrid();
 
-    const tile = screen.getByTestId('terminal-preview-tile-s1');
-    fireEvent.pointerDown(tile, { clientX: 30, clientY: 80, pointerId: 1 });
-    act(() => vi.advanceTimersByTime(450));
-    expect(screen.getByRole('menu', { name: '替换预览 Session 1' })).toBeTruthy();
-    fireEvent.pointerUp(tile, { clientX: 30, clientY: 80, pointerId: 1 });
-    fireEvent.click(tile);
-    expect(onActivateSession).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByRole('menuitem', { name: /Session 3/ }));
-    expect(onReplaceSession).toHaveBeenCalledWith('s1', 's3');
-    expect(onReplaceSession).toHaveBeenCalledTimes(1);
-  });
-
-  it('cancels long press and suppresses activation after pointer movement', () => {
-    vi.useFakeTimers();
-    const onActivateSession = vi.fn();
-    render(
-      <TerminalPreviewGrid
-        sessions={sessions.slice(0, 2)}
-        replacementCandidates={sessions.slice(2, 3)}
-        sessionBufferStore={null}
-        landscape={false}
-        fontSize={10}
-        onActivateSession={onActivateSession}
-        onReplaceSession={vi.fn()}
-        onClose={vi.fn()}
-      />,
-    );
-    const tile = screen.getByTestId('terminal-preview-tile-s1');
-    fireEvent.pointerDown(tile, { clientX: 30, clientY: 80, pointerId: 1 });
-    fireEvent.pointerMove(tile, { clientX: 60, clientY: 80, pointerId: 1 });
-    act(() => vi.advanceTimersByTime(450));
-    fireEvent.pointerUp(tile, { clientX: 60, clientY: 80, pointerId: 1 });
-    fireEvent.click(tile);
-    expect(screen.queryByTestId('terminal-preview-replacement-menu')).toBeNull();
-    expect(onActivateSession).not.toHaveBeenCalled();
+    const calls = terminalViewSpy.mock.calls.map(([props]) => props as Record<string, unknown>);
+    expect(calls).toHaveLength(4);
+    expect(calls.every((props) => props.active === false)).toBe(true);
+    expect(calls.every((props) => props.widthMode === 'mirror-fixed')).toBe(true);
+    expect(calls.every((props) => props.onInput === undefined)).toBe(true);
+    expect(calls.every((props) => props.onResize === undefined)).toBe(true);
+    expect(terminalViewSpy.mock.calls.some(([props]) => (props as { sessionId: string }).sessionId === 's5')).toBe(false);
   });
 });

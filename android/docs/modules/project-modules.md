@@ -121,7 +121,7 @@ Daemon hard boundary:
 | `client.reliable_input` | `resource.client_reliable_input_queue` | session transport, daemon target transport | reconnect/open intent, backend/tmux/mirror/renderer/UI truth |
 | `client.terminal_shell` | Android terminal shell projection | platform terminal surface, UI projection, renderer window, active session | daemon/backend mutation, sparse/render truth |
 | `client.input_runtime` | `resource.platform_input_channel` | session transport, remote-window overlay | backend/tmux direct write |
-| `client.session_drawer_preview` | `resource.session_preview_selection`, `resource.session_preview_mode` | UI, open tabs, active session, renderer | transport/backend/mirror ownership |
+| `client.session_drawer_preview` | `resource.session_preview_lattice`, `resource.session_preview_mode` | UI, open tabs, active session, renderer | transport/backend/mirror ownership |
 | `client.remote_window_overlay` | `resource.remote_window_overlay`, `resource.remote_window_touch_action`; pending resources (design): `resource.remote_window_quality_control`, `resource.remote_window_input_delivery_client`, `resource.remote_window_frame_projection`, `resource.remote_window_canvas_encode` | UI, remote-window stream, transport target | terminal mirror/buffer/tmux/daemon capture truth |
 | `client.file_browser` | `resource.client_file_browser`, `resource.file_browser_ui_contract` | target mux request, native file store, file transfer, UI | tmux/mirror, new physical transport |
 | `client.settings_update` | `resource.client_settings_update`, `resource.settings_update_ui_contract` | release artifact, runtime home, UI | open-tab/session/tmux truth |

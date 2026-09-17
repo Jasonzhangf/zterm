@@ -6,6 +6,7 @@ import { createSessionRenderBufferStore } from '../../lib/session-render-buffer-
 import type { Session, SessionRenderBufferSnapshot, TerminalCell } from '../../lib/types';
 import { TerminalStageShell } from '../../pages/TerminalPageStageShell';
 import { TerminalPreviewGrid } from './TerminalPreviewGrid';
+import type { JunctionPreviewLatticeV1 } from '../../lib/junction-preview-lattice';
 
 class ResizeObserverMock {
   observe() {}
@@ -69,94 +70,133 @@ const sessions = Array.from({ length: 6 }, (_, index) => ({
   bridgePort: 3333,
 })) as Session[];
 
+function latticeFor(cells: Array<{ col: number; row: number; session: Session }>): JunctionPreviewLatticeV1 {
+  return {
+    version: 1,
+    cells: cells.map(({ col, row, session }) => ({
+      col,
+      row,
+      target: {
+        sessionId: session.id,
+        daemonHostId: session.daemonHostId,
+        bridgeHost: session.bridgeHost,
+        bridgePort: session.bridgePort,
+        sessionName: session.sessionName,
+      },
+    })),
+  };
+}
+
 describe('TerminalPreviewGrid render truth', () => {
-  it('automatically keeps six preview DOM bodies equal to their own live render-store snapshots', async () => {
+  it('automatically keeps visible preview DOM bodies equal to their own live render-store snapshots', async () => {
     const store = createSessionRenderBufferStore();
-    for (let index = 0; index < sessions.length; index += 1) {
+    const visibleSessions = sessions.slice(0, 4);
+    for (let index = 0; index < visibleSessions.length; index += 1) {
       store.setBuffer(sessions[index].id, snapshot(index + 1, 1, 'INITIAL'));
     }
 
     const view = render(
       <div style={{ width: '720px', height: '960px' }}>
         <TerminalPreviewGrid
-          sessions={sessions}
+          lattice={latticeFor([
+            { col: -1, row: 0, session: visibleSessions[0] },
+            { col: 0, row: -1, session: visibleSessions[1] },
+            { col: 0, row: 0, session: visibleSessions[2] },
+            { col: 0, row: 1, session: visibleSessions[3] },
+          ])}
+          focus={{ col: 0, row: 0 }}
+          candidates={visibleSessions}
           sessionBufferStore={store}
-          landscape={false}
+          viewportWidth={374}
+          viewportHeight={706}
           fontSize={10}
-          onActivateSession={() => undefined}
+          onFocusChange={() => undefined}
+          onSetCell={() => undefined}
+          onClearCell={() => undefined}
           onClose={() => undefined}
         />
       </div>,
     );
 
-    for (let index = 0; index < sessions.length; index += 1) {
-      const tile = view.getByTestId(`terminal-preview-tile-${sessions[index].id}`);
+    for (let index = 0; index < visibleSessions.length; index += 1) {
+      const tile = view.getByTestId(`terminal-preview-tile-${visibleSessions[index].id}`);
       expect(renderedRows(tile)).toEqual([
         `S${index + 1}-INITIAL-R1-HEAD`,
         `S${index + 1}-INITIAL-R1-TUI`,
         `S${index + 1}-INITIAL-R1-INPUT`,
       ]);
     }
+    expect(view.queryByTestId('terminal-preview-tile-preview-session-5')).toBeNull();
+    expect(view.queryByTestId('terminal-preview-tile-preview-session-6')).toBeNull();
 
     act(() => {
-      for (let index = 0; index < sessions.length; index += 1) {
+      for (let index = 0; index < visibleSessions.length; index += 1) {
         store.setBuffer(sessions[index].id, snapshot(index + 1, 2, 'REFRESH'));
       }
     });
 
     await waitFor(() => {
-      for (let index = 0; index < sessions.length; index += 1) {
-        const tile = view.getByTestId(`terminal-preview-tile-${sessions[index].id}`);
+      for (let index = 0; index < visibleSessions.length; index += 1) {
+        const tile = view.getByTestId(`terminal-preview-tile-${visibleSessions[index].id}`);
         expect(renderedRows(tile)).toEqual([
           `S${index + 1}-REFRESH-R2-HEAD`,
           `S${index + 1}-REFRESH-R2-TUI`,
           `S${index + 1}-REFRESH-R2-INPUT`,
         ]);
-        const terminal = tile.querySelector<HTMLElement>(`[data-terminal-session-id="${sessions[index].id}"]`);
+        const terminal = tile.querySelector<HTMLElement>(`[data-terminal-session-id="${visibleSessions[index].id}"]`);
         expect(terminal?.dataset.hasOninput).toBe('false');
         expect(terminal?.dataset.hasOnresize).toBe('false');
         expect(terminal?.dataset.widthMode).toBe('mirror-fixed');
       }
     });
 
-    const allRows = sessions.flatMap((session) => renderedRows(view.getByTestId(`terminal-preview-tile-${session.id}`)));
-    expect(new Set(allRows).size).toBe(18);
+    const allRows = visibleSessions.flatMap((session) => renderedRows(view.getByTestId(`terminal-preview-tile-${session.id}`)));
+    expect(new Set(allRows).size).toBe(12);
   });
 
-  it('keeps child preview DOM refreshing after a body tap promotes another child to primary', async () => {
+  it('keeps child preview DOM refreshing after a body tap pans focus to another cell', async () => {
     const store = createSessionRenderBufferStore();
-    const previewSessions = sessions.slice(0, 4);
-    for (let index = 0; index < previewSessions.length; index += 1) {
-      store.setBuffer(previewSessions[index].id, snapshot(index + 1, 1, 'INITIAL'));
+    const visibleSessions = sessions.slice(0, 4);
+    for (let index = 0; index < visibleSessions.length; index += 1) {
+      store.setBuffer(visibleSessions[index].id, snapshot(index + 1, 1, 'INITIAL'));
     }
-    const onActivateSession = vi.fn();
+    const onFocusChange = vi.fn();
 
     const view = render(
       <div style={{ width: '720px', height: '960px' }}>
         <TerminalPreviewGrid
-          sessions={previewSessions}
+          lattice={latticeFor([
+            { col: -1, row: 0, session: visibleSessions[0] },
+            { col: 0, row: -1, session: visibleSessions[1] },
+            { col: 0, row: 0, session: visibleSessions[2] },
+            { col: 0, row: 1, session: visibleSessions[3] },
+          ])}
+          focus={{ col: 0, row: 0 }}
+          candidates={visibleSessions}
           sessionBufferStore={store}
-          landscape={false}
+          viewportWidth={374}
+          viewportHeight={706}
           fontSize={10}
-          onActivateSession={onActivateSession}
+          onFocusChange={onFocusChange}
+          onSetCell={() => undefined}
+          onClearCell={() => undefined}
           onClose={() => undefined}
         />
       </div>,
     );
 
-    fireEvent.click(view.getByTestId(`terminal-preview-body-${previewSessions[1].id}`));
-    expect(onActivateSession).not.toHaveBeenCalled();
-    expect(view.getByTestId(`terminal-preview-tile-${previewSessions[1].id}`).dataset.previewVariant).toBe('primary');
+    fireEvent.click(view.getByTestId(`terminal-preview-body-${visibleSessions[1].id}`));
+    expect(onFocusChange).toHaveBeenCalledWith({ col: 0, row: -1 });
 
     act(() => {
-      for (let index = 0; index < previewSessions.length; index += 1) {
-        store.setBuffer(previewSessions[index].id, snapshot(index + 1, 2, 'REFRESH'));
+      for (let index = 0; index < visibleSessions.length; index += 1) {
+        store.setBuffer(visibleSessions[index].id, snapshot(index + 1, 2, 'REFRESH'));
       }
     });
 
     await waitFor(() => {
-      for (let index = 0; index < previewSessions.length; index += 1) {
-        const tile = view.getByTestId(`terminal-preview-tile-${previewSessions[index].id}`);
+      for (let index = 0; index < visibleSessions.length; index += 1) {
+        const tile = view.getByTestId(`terminal-preview-tile-${visibleSessions[index].id}`);
         expect(renderedRows(tile)).toEqual([
           `S${index + 1}-REFRESH-R2-HEAD`,
           `S${index + 1}-REFRESH-R2-TUI`,
@@ -197,6 +237,10 @@ describe('TerminalPreviewGrid render truth', () => {
       },
       onLongPressRow: stableNoop,
     };
+    const previewLattice = latticeFor([
+      { col: -1, row: 0, session: sessions[0] },
+      { col: 0, row: 0, session: target },
+    ]);
 
     const view = render(
       <div style={{ width: '720px', height: '960px' }}>
@@ -205,8 +249,14 @@ describe('TerminalPreviewGrid render truth', () => {
           interactiveSession={sessions[0]}
           sessionBufferStore={store}
           sessionPreviewOpen
-          sessionPreviewSessions={sessions.slice(0, 2)}
-          onActivatePreviewSession={stableNoop}
+          sessionPreviewLattice={previewLattice}
+          sessionPreviewFocus={{ col: 0, row: 0 }}
+          sessionPreviewCandidates={sessions.slice(0, 2)}
+          sessionPreviewViewportWidth={720}
+          sessionPreviewViewportHeight={960}
+          onPreviewFocusChange={stableNoop}
+          onSetPreviewCell={stableNoop}
+          onClearPreviewCell={stableNoop}
           onCloseSessionPreview={stableNoop}
         />
       </div>,
@@ -225,8 +275,14 @@ describe('TerminalPreviewGrid render truth', () => {
           interactiveSession={target}
           sessionBufferStore={store}
           sessionPreviewOpen={false}
-          sessionPreviewSessions={sessions.slice(0, 2)}
-          onActivatePreviewSession={stableNoop}
+          sessionPreviewLattice={previewLattice}
+          sessionPreviewFocus={{ col: 0, row: 0 }}
+          sessionPreviewCandidates={sessions.slice(0, 2)}
+          sessionPreviewViewportWidth={720}
+          sessionPreviewViewportHeight={960}
+          onPreviewFocusChange={stableNoop}
+          onSetPreviewCell={stableNoop}
+          onClearPreviewCell={stableNoop}
           onCloseSessionPreview={stableNoop}
         />
       </div>,

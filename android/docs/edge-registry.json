@@ -1147,18 +1147,19 @@
       "status": "active"
     },
     {
-      "edge_id": "edge.client_ui_to_preview_selection",
+      "edge_id": "edge.client_ui_to_preview_lattice",
       "from_module": "client.app_shell",
       "to_module": "client.session_drawer_preview",
       "resource_from": "resource.ui_projection",
-      "resource_to": "resource.session_preview_selection",
+      "resource_to": "resource.session_preview_lattice",
       "via_resources": [],
       "relation_status": "direct",
       "owner_feature": "terminal.session_preview",
       "allowed_callers": [
         "src/components/terminal/TerminalSessionDrawer.tsx",
         "src/components/terminal/TerminalPreviewGrid.tsx",
-        "src/lib/session-preview-selection.ts"
+        "src/lib/junction-preview-lattice.ts",
+        "src/lib/junction-preview-layout.ts"
       ],
       "forbidden_callers": [
         "src/lib/traversal/socket.ts",
@@ -1166,22 +1167,22 @@
       ],
       "request_chain": [
         "PreviewIn01UiIntent",
-        "PreviewIn02SelectionUpdate"
+        "PreviewIn02LatticeUpdate"
       ],
       "response_chain": [
-        "PreviewOut01OrderedSelection"
+        "PreviewOut01VisibleLattice"
       ],
       "error_chain": [
-        "PreviewError01SelectionLimit",
+        "PreviewError01DuplicateSession",
         "PreviewError02MissingOpenSession"
       ],
       "mainline_call_ids": [
-        "android_preview:SessionDrawer->PreviewSelectionOwner",
-        "android_preview:PreviewAddMenu->PreviewSelectionOwner"
+        "android_preview:SessionDrawer->PreviewLatticeOwner",
+        "android_preview:PreviewSlotMenu->PreviewLatticeOwner"
       ],
       "required_gates": [
         "src/lib/edge-registry-truth.test.ts",
-        "src/lib/session-preview-selection.test.ts"
+        "src/lib/junction-preview-lattice.test.ts"
       ],
       "status": "active"
     },
