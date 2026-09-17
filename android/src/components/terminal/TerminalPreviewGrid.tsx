@@ -1,96 +1,120 @@
-import { memo, useEffect, useRef, useState, type MouseEvent, type PointerEvent, type TouchEvent } from 'react';
+import { memo, useEffect, useLayoutEffect, useRef, useState, type PointerEvent } from 'react';
+import { TERMINAL_DRAWER_EDGE_SWIPE_START_PX } from '@zterm/shared';
 import { TerminalView } from '../TerminalView';
 import type { SessionRenderBufferStore } from '../../lib/session-render-buffer-store';
 import type { Session } from '../../lib/types';
 import { getServerIdentityTone, resolveServerDisplayName } from '../../lib/server-identity';
 import { mobileTheme } from '../../lib/mobile-ui';
-import { WindowGroupLayout } from './WindowGroupLayout';
-import { encodeTerminalSgrMouseClick, TERMINAL_MOUSE_LEFT_BUTTON } from '../../lib/terminal-mouse-wheel-sgr';
 import { AmbientButton } from '../ambient';
+import {
+  JUNCTION_PREVIEW_HEADER_HEIGHT_PX,
+  JUNCTION_PREVIEW_EDGE_PX,
+  JUNCTION_PREVIEW_GAP_PX,
+  resolveJunctionPreviewLayout,
+} from '../../lib/junction-preview-layout';
+import {
+  resolveJunctionPreviewCell,
+  type JunctionPreviewCoordinate,
+  type JunctionPreviewLatticeV1,
+} from '../../lib/junction-preview-lattice';
 
 export interface TerminalPreviewGridProps {
-  sessions: Session[];
-  replacementCandidates?: Session[];
+  lattice: JunctionPreviewLatticeV1;
+  focus: JunctionPreviewCoordinate;
+  candidates: Session[];
   sessionBufferStore?: SessionRenderBufferStore | null;
-  landscape: boolean;
   fontSize: number;
   themeId?: string;
-  onActivateSession: (sessionId: string) => void;
-  onAddSession?: (sessionId: string) => void;
-  onRemoveSession?: (sessionId: string) => void;
-  onMoveSession?: (sourceSessionId: string, targetIndex: number) => void;
-  onReplaceSession?: (sourceSessionId: string, replacementSessionId: string) => void;
-  onPrimarySessionChange?: (sessionId: string) => void;
-  onTerminalInput?: (sessionId: string, data: string) => void;
+  viewportWidth?: number;
+  viewportHeight?: number;
+  sideEdge?: 'left' | 'right';
+  onFocusChange: (coordinate: JunctionPreviewCoordinate) => void;
+  onSetCell: (coordinate: JunctionPreviewCoordinate, sessionId: string) => void;
+  onClearCell: (coordinate: JunctionPreviewCoordinate) => void;
   onClose: () => void;
 }
 
-const PREVIEW_TILE_LONG_PRESS_MS = 420;
+const PREVIEW_LONG_PRESS_MS = 420;
+const PREVIEW_LONG_PRESS_CLICK_SUPPRESSION_MS = 1_000;
 
-// Approximate char width ratio for preview font calculation
-const PREVIEW_CHAR_WIDTH_RATIO = 0.55;
-
-// Compute terminal row/col from click position in preview body
-// titlebarHeight: non-compact=24px, compact=22px
-// previewFontSize: non-compact=5-7, compact=7
-// previewRows: estimated ~10 for non-compact, ~30 for compact
-function computePreviewClickPosition(
-  clientX: number,
-  clientY: number,
-  element: HTMLElement,
-  compact: boolean,
-): { row: number; col: number } {
-  const rect = element.getBoundingClientRect();
-  const titlebarHeight = compact ? 22 : 24;
-  const previewFontSize = compact ? 3 : 6;
-  const charHeight = previewFontSize;
-  const charWidth = previewFontSize * PREVIEW_CHAR_WIDTH_RATIO;
-  
-  // Relative position within the body (below titlebar)
-  const relY = clientY - rect.top - titlebarHeight;
-  const relX = clientX - rect.left;
-  
-  // Compute row/col (1-based for SGR protocol)
-  const row = Math.max(1, Math.floor(relY / charHeight) + 1);
-  const col = Math.max(1, Math.floor(relX / charWidth) + 1);
-  
-  return { row, col };
+function coordinateKey(coord: JunctionPreviewCoordinate) {
+  return `${coord.col}:${coord.row}`;
 }
 
-
 export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
-  sessions,
-  replacementCandidates = [],
+  lattice,
+  focus,
+  candidates,
   sessionBufferStore = null,
-  landscape,
   fontSize,
   themeId,
-  onActivateSession,
-  onAddSession,
-  onRemoveSession,
-  onMoveSession,
-  onReplaceSession,
-  onPrimarySessionChange,
-  onTerminalInput,
+  viewportWidth,
+  viewportHeight,
+  sideEdge,
+  onFocusChange,
+  onSetCell,
+  onClearCell,
   onClose,
 }: TerminalPreviewGridProps) {
+  const resolvedViewportWidth = Math.max(
+    1,
+    viewportWidth ?? (typeof window !== 'undefined' ? window.innerWidth || 0 : 0),
+  );
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const [measuredViewport, setMeasuredViewport] = useState<{ width: number; height: number } | null>(null);
+  useLayoutEffect(() => {
+    const node = contentRef.current;
+    if (!node) return;
+    const measure = () => {
+      const rect = node.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+      setMeasuredViewport((current) => {
+        const width = rect.width;
+        const height = rect.height;
+        return current && current.width === width && current.height === height
+          ? current
+          : { width, height };
+      });
+    };
+    measure();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    observer?.observe(node);
+    return () => observer?.disconnect();
+  }, []);
+  const resolvedViewportHeight = Math.max(
+    1,
+    measuredViewport?.height ?? (
+      (viewportHeight ?? (typeof window !== 'undefined' ? window.innerHeight || 0 : 0))
+        - JUNCTION_PREVIEW_HEADER_HEIGHT_PX
+    ),
+  );
+  const layoutViewportWidth = measuredViewport?.width ?? resolvedViewportWidth;
+  const layout = resolveJunctionPreviewLayout({
+    viewportWidth: layoutViewportWidth,
+    viewportHeight: resolvedViewportHeight,
+    fontSize: Math.max(1, fontSize),
+    focus,
+    sideEdge,
+  });
+  const rowHeightPx = Math.max(fontSize + 4, Math.ceil(fontSize * 1.5));
   const exitGestureRef = useRef<{ x: number; y: number } | null>(null);
   const longPressTimerRef = useRef<number | null>(null);
   const longPressStartRef = useRef<{ x: number; y: number } | null>(null);
-  const suppressActivationClickRef = useRef<string | null>(null);
-  const suppressActivationClickTimerRef = useRef<number | null>(null);
-  const bodyGestureStartRef = useRef<{ sessionId: string; x: number; y: number } | null>(null);
-  const [replacementSourceSessionId, setReplacementSourceSessionId] = useState<string | null>(null);
-  const [addMenuOpen, setAddMenuOpen] = useState(false);
-  const [moveSourceSessionId, setMoveSourceSessionId] = useState<string | null>(null);
-  const [edgeQueueVisible, setEdgeQueueVisible] = useState(false);
-  const [primaryPreviewSessionId, setPrimaryPreviewSessionId] = useState<string | null>(() => sessions[0]?.id || null);
-  const resolvedPrimaryPreviewSessionId = sessions.some((session) => session.id === primaryPreviewSessionId)
-    ? primaryPreviewSessionId
-    : (sessions[0]?.id || null);
-  const replacementSourceSession = sessions.find((session) => session.id === replacementSourceSessionId) || null;
-  const moveSourceSession = sessions.find((session) => session.id === moveSourceSessionId) || null;
-  const canAddSession = sessions.length < 6 && replacementCandidates.length > 0;
+  const suppressClickRef = useRef<JunctionPreviewCoordinate | null>(null);
+  const suppressClickTimerRef = useRef<number | null>(null);
+  const [slotMenu, setSlotMenu] = useState<{
+    coordinate: JunctionPreviewCoordinate;
+    existingSessionId?: string;
+  } | null>(null);
+
+  useEffect(() => () => {
+    if (longPressTimerRef.current !== null) {
+      window.clearTimeout(longPressTimerRef.current);
+    }
+    if (suppressClickTimerRef.current !== null) {
+      window.clearTimeout(suppressClickTimerRef.current);
+    }
+  }, []);
 
   const clearLongPress = () => {
     if (longPressTimerRef.current !== null) {
@@ -100,351 +124,126 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
     longPressStartRef.current = null;
   };
 
-  const clearSuppressedActivationClick = () => {
-    if (suppressActivationClickTimerRef.current !== null) {
-      window.clearTimeout(suppressActivationClickTimerRef.current);
-    }
-    suppressActivationClickTimerRef.current = null;
-    suppressActivationClickRef.current = null;
-  };
-
-  const suppressNextActivationClick = (sessionId: string) => {
-    if (suppressActivationClickTimerRef.current !== null) {
-      window.clearTimeout(suppressActivationClickTimerRef.current);
-    }
-    suppressActivationClickRef.current = sessionId;
-    suppressActivationClickTimerRef.current = window.setTimeout(() => {
-      if (suppressActivationClickRef.current === sessionId) {
-        suppressActivationClickRef.current = null;
-      }
-      suppressActivationClickTimerRef.current = null;
-    }, 500);
-  };
-
-  const consumeSuppressedActivationClick = (sessionId: string) => {
-    if (suppressActivationClickRef.current !== sessionId) {
-      return false;
-    }
-    clearSuppressedActivationClick();
-    return true;
-  };
-
-  const beginBodyGesture = (sessionId: string, x: number, y: number) => {
+  const startLongPress = (
+    coordinate: JunctionPreviewCoordinate,
+    existingSessionId: string | undefined,
+    event: PointerEvent<HTMLElement>,
+  ) => {
     clearLongPress();
-    bodyGestureStartRef.current = { sessionId, x, y };
+    longPressStartRef.current = { x: event.clientX, y: event.clientY };
+    longPressTimerRef.current = window.setTimeout(() => {
+      longPressTimerRef.current = null;
+      longPressStartRef.current = null;
+      suppressClickRef.current = { col: coordinate.col, row: coordinate.row };
+      if (suppressClickTimerRef.current !== null) {
+        window.clearTimeout(suppressClickTimerRef.current);
+      }
+      suppressClickTimerRef.current = window.setTimeout(() => {
+        suppressClickRef.current = null;
+        suppressClickTimerRef.current = null;
+      }, PREVIEW_LONG_PRESS_CLICK_SUPPRESSION_MS);
+      setSlotMenu({ coordinate, existingSessionId });
+    }, PREVIEW_LONG_PRESS_MS);
   };
 
-  const updateBodyGesture = (sessionId: string, x: number, y: number) => {
-    const start = bodyGestureStartRef.current;
-    if (!start || start.sessionId !== sessionId) {
-      return;
-    }
-    if (Math.hypot(x - start.x, y - start.y) > 8) {
-      suppressNextActivationClick(sessionId);
+  const updateLongPress = (event: PointerEvent<HTMLElement>) => {
+    const start = longPressStartRef.current;
+    if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > 8) {
+      clearLongPress();
     }
   };
 
-  const finishBodyGesture = () => {
-    bodyGestureStartRef.current = null;
+  const finishLongPress = () => {
     clearLongPress();
   };
 
-  const beginBodyPointerGesture = (sessionId: string, event: PointerEvent<HTMLElement>) => {
-    beginBodyGesture(sessionId, event.clientX, event.clientY);
-  };
+  const focusWidth = layout.focusSizePx.width;
+  const focusHeight = layout.focusSizePx.height;
+  const centerTop = JUNCTION_PREVIEW_EDGE_PX.topBottom + JUNCTION_PREVIEW_GAP_PX;
+  const centerLeft = layout.form === 'portrait' && layout.side.edge === 'right'
+    ? 0
+    : JUNCTION_PREVIEW_EDGE_PX.side + JUNCTION_PREVIEW_GAP_PX;
+  const cellRects = new Map<string, {
+    clip: { left: number; top: number; width: number; height: number };
+    pane: { left: number; top: number; width: number; height: number };
+    isFocus: boolean;
+  }>();
 
-  const updateBodyPointerGesture = (sessionId: string, event: PointerEvent<HTMLElement>) => {
-    updateBodyGesture(sessionId, event.clientX, event.clientY);
-  };
+  for (const cell of layout.visibleCells) {
+    const isFocus = cell.col === focus.col && cell.row === focus.row;
+    let clip = { left: 0, top: 0, width: 0, height: 0 };
+    let pane = { left: centerLeft, top: centerTop, width: focusWidth, height: focusHeight };
 
-  const beginBodyTouchGesture = (sessionId: string, event: TouchEvent<HTMLElement>) => {
-    const touch = event.touches[0] || event.changedTouches[0];
-    if (!touch) {
-      return;
+    if (layout.form === 'landscape' && cell.edge === 'focus') {
+      const paneLeft = cell.col === focus.col ? focusWidth + JUNCTION_PREVIEW_GAP_PX : 0;
+      clip = { left: paneLeft, top: centerTop, width: focusWidth, height: focusHeight };
+      pane = { left: paneLeft, top: centerTop, width: focusWidth, height: focusHeight };
+    } else if (cell.edge === 'focus') {
+      clip = { left: centerLeft, top: centerTop, width: focusWidth, height: focusHeight };
+      pane = { left: centerLeft, top: centerTop, width: focusWidth, height: focusHeight };
+    } else if (cell.edge === 'left') {
+      clip = { left: 0, top: centerTop, width: JUNCTION_PREVIEW_EDGE_PX.side, height: focusHeight };
+      pane = { left: centerLeft - focusWidth, top: centerTop, width: focusWidth, height: focusHeight };
+    } else if (cell.edge === 'right') {
+      clip = {
+        left: layoutViewportWidth - JUNCTION_PREVIEW_EDGE_PX.side,
+        top: centerTop,
+        width: JUNCTION_PREVIEW_EDGE_PX.side,
+        height: focusHeight,
+      };
+      pane = { left: centerLeft + focusWidth, top: centerTop, width: focusWidth, height: focusHeight };
+    } else if (cell.edge === 'top') {
+      const topWidth = focusWidth;
+      const topLeft = layout.form === 'landscape' ? focusWidth + JUNCTION_PREVIEW_GAP_PX : centerLeft;
+      clip = { left: topLeft, top: 0, width: topWidth, height: JUNCTION_PREVIEW_EDGE_PX.topBottom };
+      pane = { left: topLeft, top: centerTop - focusHeight, width: topWidth, height: focusHeight };
+    } else if (cell.edge === 'bottom') {
+      const bottomWidth = focusWidth;
+      const bottomLeft = layout.form === 'landscape' ? focusWidth + JUNCTION_PREVIEW_GAP_PX : centerLeft;
+      clip = {
+        left: bottomLeft,
+        top: resolvedViewportHeight - JUNCTION_PREVIEW_EDGE_PX.topBottom,
+        width: bottomWidth,
+        height: JUNCTION_PREVIEW_EDGE_PX.topBottom,
+      };
+      pane = { left: bottomLeft, top: centerTop + focusHeight, width: bottomWidth, height: focusHeight };
     }
-    beginBodyGesture(sessionId, touch.clientX, touch.clientY);
-  };
 
-  const updateBodyTouchGesture = (sessionId: string, event: TouchEvent<HTMLElement>) => {
-    const touch = event.touches[0] || event.changedTouches[0];
-    if (!touch) {
-      return;
-    }
-    updateBodyGesture(sessionId, touch.clientX, touch.clientY);
-  };
+    cellRects.set(coordinateKey(cell), { clip, pane, isFocus });
+  }
 
-  useEffect(() => () => {
-    if (longPressTimerRef.current !== null) window.clearTimeout(longPressTimerRef.current);
-    if (suppressActivationClickTimerRef.current !== null) {
-      window.clearTimeout(suppressActivationClickTimerRef.current);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (sessions.some((session) => session.id === primaryPreviewSessionId)) {
-      return;
-    }
-    setPrimaryPreviewSessionId(sessions[0]?.id || null);
-  }, [primaryPreviewSessionId, sessions]);
-
-  useEffect(() => {
-    if (!resolvedPrimaryPreviewSessionId) {
-      return;
-    }
-    onPrimarySessionChange?.(resolvedPrimaryPreviewSessionId);
-  }, [onPrimarySessionChange, resolvedPrimaryPreviewSessionId]);
-
-  const renderPreviewTile = (session: Session, index: number, variant: 'primary' | 'secondary') => {
-    const tone = getServerIdentityTone(session);
-    const title = session.customName || session.title || session.sessionName || session.id;
-    const compact = variant === 'secondary';
-    const previewFontSize = compact
-      ? 9
-      : Math.max(8, Math.min(12, fontSize - 2));
-    const previewRowHeight = compact
-      ? '10px'
-      : `${Math.max(10, Math.min(14, fontSize))}px`;
-    const handlePreviewClick = (event: MouseEvent<HTMLElement>) => {
-      if (consumeSuppressedActivationClick(session.id)) {
-        event.preventDefault();
-        event.stopPropagation();
-        return;
-      }
-      event.preventDefault();
-      event.stopPropagation();
-      if (compact) {
-        setPrimaryPreviewSessionId(session.id);
-        return;
-      }
-      onActivateSession(session.id);
-    };
-    return (
-      <div
-        key={session.id}
-        style={{
-          minWidth: 0,
-          minHeight: 0,
-          position: 'relative',
-          display: 'flex',
-          flex: 1,
-        }}
-      >
-        <div
-          role="button"
-          tabIndex={0}
-          data-testid={`terminal-preview-tile-${session.id}`}
-          data-preview-session-id={session.id}
-          data-preview-order={index + 1}
-          data-preview-variant={variant}
-          onPointerDown={(event) => {
-            clearLongPress();
-            longPressStartRef.current = { x: event.clientX, y: event.clientY };
-            longPressTimerRef.current = window.setTimeout(() => {
-              longPressTimerRef.current = null;
-              longPressStartRef.current = null;
-              suppressNextActivationClick(session.id);
-              setReplacementSourceSessionId(session.id);
-            }, PREVIEW_TILE_LONG_PRESS_MS);
-          }}
-          onPointerMove={(event) => {
-            const start = longPressStartRef.current;
-            if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > 8) {
-              suppressNextActivationClick(session.id);
-              clearLongPress();
-            }
-          }}
-          onPointerUp={clearLongPress}
-          onPointerCancel={clearLongPress}
-          onPointerLeave={clearLongPress}
-          onContextMenu={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            suppressNextActivationClick(session.id);
-            setReplacementSourceSessionId(session.id);
-          }}
-          onClick={handlePreviewClick}
-          onKeyDown={(event) => {
-            if (event.key !== 'Enter' && event.key !== ' ') return;
-            event.preventDefault();
-            if (variant === 'secondary') {
-              setPrimaryPreviewSessionId(session.id);
-              return;
-            }
-            onActivateSession(session.id);
-          }}
-          style={{
-            width: '100%', height: '100%', minWidth: 0, minHeight: 0, padding: 0,
-            overflow: 'hidden', position: 'relative', display: 'flex', flexDirection: 'column',
-            border: `1px solid ${tone.lightCardBorder}`, borderRadius: '6px',
-            background: mobileTheme.colors.canvas, color: mobileTheme.colors.textPrimary, textAlign: 'left',
-          }}
-        >
-          <span
-            data-preview-titlebar="true"
-            onClick={handlePreviewClick}
-            onPointerDown={(event) => {
-              event.stopPropagation();
-              clearLongPress();
-              longPressStartRef.current = { x: event.clientX, y: event.clientY };
-              longPressTimerRef.current = window.setTimeout(() => {
-                longPressTimerRef.current = null;
-                longPressStartRef.current = null;
-                suppressNextActivationClick(session.id);
-                setMoveSourceSessionId(session.id);
-                setReplacementSourceSessionId(null);
-                setAddMenuOpen(false);
-              }, PREVIEW_TILE_LONG_PRESS_MS);
-            }}
-            onPointerMove={(event) => {
-              event.stopPropagation();
-              const start = longPressStartRef.current;
-              if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > 8) {
-                suppressNextActivationClick(session.id);
-                clearLongPress();
-              }
-            }}
-            onPointerUp={(event) => {
-              event.stopPropagation();
-              clearLongPress();
-            }}
-            onPointerCancel={(event) => {
-              event.stopPropagation();
-              clearLongPress();
-            }}
-            style={{
-              height: compact ? '22px' : '24px', flexShrink: 0, display: 'grid',
-              gridTemplateColumns: compact ? 'minmax(0, 1fr) 20px' : 'minmax(0, 1fr) 54px 20px',
-              alignItems: 'center', gap: '4px',
-              padding: '0 4px 0 8px', background: tone.previewBackground, boxSizing: 'border-box',
-            }}
-          >
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: compact ? '9px' : '10px', fontWeight: 800 }}>
-              {title}
-            </span>
-            {!compact ? (
-              <span style={{ color: tone.previewText, fontSize: '8px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {resolveServerDisplayName(session)}
-              </span>
-            ) : null}
-            <span aria-hidden="true" />
-          </span>
-          <span
-            data-testid={`terminal-preview-body-${session.id}`}
-            data-preview-scroll-surface="true"
-            onClick={(event) => {
-              handlePreviewClick(event);
-              // Sync click to remote terminal via SGR mouse click
-              const element = event.currentTarget as HTMLElement;
-              const { row, col } = computePreviewClickPosition(
-                event.clientX,
-                event.clientY,
-                element,
-                compact,
-              );
-              const clickSequence = encodeTerminalSgrMouseClick(
-                TERMINAL_MOUSE_LEFT_BUTTON,
-                col,
-                row,
-              );
-              onTerminalInput?.(session.id, clickSequence);
-            }}
-            onPointerDown={(event) => {
-              event.stopPropagation();
-              beginBodyPointerGesture(session.id, event);
-            }}
-            onPointerMove={(event) => {
-              event.stopPropagation();
-              updateBodyPointerGesture(session.id, event);
-            }}
-            onPointerUp={(event) => {
-              event.stopPropagation();
-              finishBodyGesture();
-            }}
-            onPointerCancel={(event) => {
-              event.stopPropagation();
-              finishBodyGesture();
-            }}
-            onTouchStart={(event) => {
-              event.stopPropagation();
-              beginBodyTouchGesture(session.id, event);
-            }}
-            onTouchMove={(event) => {
-              event.stopPropagation();
-              updateBodyTouchGesture(session.id, event);
-            }}
-            onTouchEnd={(event) => {
-              event.stopPropagation();
-              finishBodyGesture();
-            }}
-            onTouchCancel={(event) => {
-              event.stopPropagation();
-              finishBodyGesture();
-            }}
-            style={{
-              flex: 1,
-              minHeight: 0,
-              width: '100%',
-              overflow: 'hidden',
-              pointerEvents: 'auto',
-              WebkitTextSizeAdjust: 'none',
-              textSizeAdjust: 'none',
-            }}
-          >
-            <TerminalView
-              sessionId={session.id}
-              sessionBufferStore={sessionBufferStore}
-              active={false}
-              live
-              projectionMode={compact ? 'preview-secondary' : 'preview-primary'}
-              allowDomFocus={false}
-              domInputOffscreen
-              focusNonce={0}
-              fontSize={previewFontSize}
-              rowHeight={previewRowHeight}
-              themeId={themeId || 'default'}
-              widthMode="mirror-fixed"
-              showAbsoluteLineNumbers={false}
-              copyModeActive={false}
-              splitVisible
-            />
-          </span>
-        </div>
-        <AmbientButton
-          type="button"
-          aria-label={`从预览移除 ${title}`}
-          onPointerDown={(event) => event.stopPropagation()}
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            onRemoveSession?.(session.id);
-          }}
-          style={{
-            position: 'absolute', top: '2px', right: '2px', zIndex: 2,
-            width: '20px', height: '20px', padding: 0, border: 0, borderRadius: '4px',
-            background: 'var(--zterm-settings-surface)', color: mobileTheme.colors.textPrimary,
-            fontSize: '14px', lineHeight: '20px', textAlign: 'center',
-          }}
-        >
-          ×
-        </AmbientButton>
-      </div>
-    );
-  };
+  const usedSessionIds = new Set(
+    lattice.cells
+      .filter((candidate) => (
+        candidate.col !== slotMenu?.coordinate.col
+        || candidate.row !== slotMenu?.coordinate.row
+      ))
+      .map((candidate) => candidate.target.sessionId),
+  );
+  const menuCandidates = candidates.filter((candidate) => !usedSessionIds.has(candidate.id));
+  const menuSession = slotMenu?.existingSessionId
+    ? candidates.find((candidate) => candidate.id === slotMenu?.existingSessionId) || null
+    : null;
 
   return (
     <section
-      data-testid="terminal-preview-grid-shell"
+      data-testid="terminal-preview-grid"
+      data-layout-form={layout.form}
+      data-columns={layout.centerColumns}
       aria-label="终端快捷预览"
       onTouchStart={(event) => {
-        if ((event.target as HTMLElement | null)?.closest('[data-preview-scroll-surface="true"]')) {
-          exitGestureRef.current = null;
-          return;
-        }
-        if ((event.target as HTMLElement | null)?.closest('[data-preview-menu-surface="true"]')) {
-          exitGestureRef.current = null;
-          return;
-        }
         const touch = event.touches[0];
+        const viewportWidth = typeof window !== 'undefined' ? window.innerWidth || 0 : 0;
+        if (touch && viewportWidth > 0 && touch.clientX <= TERMINAL_DRAWER_EDGE_SWIPE_START_PX) {
+          exitGestureRef.current = null;
+          return;
+        }
+        if ((event.target as HTMLElement | null)?.closest(
+          '[data-preview-scroll-surface="true"], [data-preview-menu-surface="true"]',
+        )) {
+          exitGestureRef.current = null;
+          return;
+        }
         exitGestureRef.current = touch ? { x: touch.clientX, y: touch.clientY } : null;
       }}
       onTouchEnd={(event) => {
@@ -456,11 +255,6 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
         const dy = touch.clientY - start.y;
         if (dx >= 48 && Math.abs(dx) > Math.abs(dy)) onClose();
       }}
-      onPointerMove={(event) => {
-        const edgeDistance = Math.min(event.clientX, window.innerWidth - event.clientX);
-        if (edgeDistance <= 28) setEdgeQueueVisible(true);
-      }}
-      onPointerLeave={() => setEdgeQueueVisible(false)}
       style={{
         position: 'absolute',
         inset: 0,
@@ -468,9 +262,8 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
         display: 'flex',
         flexDirection: 'column',
         background: mobileTheme.colors.shell,
-        padding: '8px',
         boxSizing: 'border-box',
-        overflowY: landscape ? 'hidden' : 'auto',
+        overflow: 'hidden',
       }}
     >
       <header
@@ -480,9 +273,13 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: '0 2px 6px 6px',
+          padding: '0 8px',
+          boxSizing: 'border-box',
         }}
       >
+        <span style={{ fontSize: '12px', fontWeight: 850, color: mobileTheme.colors.textPrimary }}>
+          交界取景
+        </span>
         <AmbientButton
           type="button"
           aria-label="退出终端预览"
@@ -502,235 +299,261 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
         </AmbientButton>
       </header>
 
-      <WindowGroupLayout
-        testId="terminal-preview-grid"
-        items={sessions.slice(0, 6).map((session, index) => ({
-          id: session.id,
-          node: renderPreviewTile(
-            session,
-            index,
-            session.id === resolvedPrimaryPreviewSessionId ? 'primary' : 'secondary',
-          ),
-          testId: `terminal-preview-secondary-${session.id}`,
-          roleLabel: `切换预览主窗口 ${session.customName || session.title || session.sessionName || session.id}`,
-        }))}
-        primaryItemId={resolvedPrimaryPreviewSessionId}
-        onPrimaryItemChange={setPrimaryPreviewSessionId}
-        landscape={landscape}
-        secondaryWrap={landscape ? 'nowrap' : 'wrap'}
-        secondaryItemFlex={landscape ? '1 1 0' : '0 0 100%'}
-        secondaryOverflowX={landscape ? undefined : 'hidden'}
-        style={{ flex: 1, minHeight: 0 }}
-      />
-      <div
-        data-testid="terminal-preview-edge-queue"
-        aria-hidden={!edgeQueueVisible}
-        style={{
-          position: 'absolute', inset: '42px 0 34px', pointerEvents: edgeQueueVisible ? 'auto' : 'none',
-          opacity: edgeQueueVisible ? 1 : 0, transition: 'opacity 120ms ease', zIndex: 14,
-        }}
-        onTouchStart={() => setEdgeQueueVisible(true)}
-      >
-        <AmbientButton type="button" aria-label="向上浏览预览队列" onClick={() => setPrimaryPreviewSessionId((current) => {
-          const index = Math.max(0, sessions.findIndex((session) => session.id === current));
-          return sessions[(index - 1 + sessions.length) % sessions.length]?.id || current;
-        })} style={{ position: 'absolute', top: 4, left: 4, width: 34, height: 44, border: '1px solid var(--zterm-settings-border)', borderRadius: 10, background: 'var(--zterm-settings-surface)', color: 'var(--zterm-settings-text)' }}>↑</AmbientButton>
-        <AmbientButton type="button" aria-label="向下浏览预览队列" onClick={() => setPrimaryPreviewSessionId((current) => {
-          const index = Math.max(0, sessions.findIndex((session) => session.id === current));
-          return sessions[(index + 1) % sessions.length]?.id || current;
-        })} style={{ position: 'absolute', bottom: 4, right: 4, width: 34, height: 44, border: '1px solid var(--zterm-settings-border)', borderRadius: 10, background: 'var(--zterm-settings-surface)', color: 'var(--zterm-settings-text)' }}>↓</AmbientButton>
-      </div>
-      {canAddSession ? (
-        <AmbientButton
-          type="button"
-          data-testid="terminal-preview-add-row"
-          aria-label="增加预览窗口"
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            setAddMenuOpen(true);
-            setReplacementSourceSessionId(null);
-            setMoveSourceSessionId(null);
-          }}
-          style={{
-            height: '30px', flexShrink: 0, marginTop: '6px', borderRadius: '6px',
-            border: `1px dashed ${mobileTheme.colors.cardBorder}`,
-            background: mobileTheme.colors.canvas, color: mobileTheme.colors.textSecondary,
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
-            fontSize: '12px', fontWeight: 800,
-          }}
-        >
-          <span aria-hidden="true" style={{ fontSize: '18px', lineHeight: 1 }}>+</span>
-          增加窗口
-        </AmbientButton>
-      ) : null}
-      {addMenuOpen ? (
-        <div
-          role="menu"
-          aria-label="增加预览窗口"
-          data-testid="terminal-preview-add-menu"
-          data-preview-menu-surface="true"
-          style={{
-            position: 'absolute', left: '10px', right: '10px', bottom: '10px', zIndex: 18,
-            border: `1px solid ${mobileTheme.colors.cardBorder}`, borderRadius: '8px',
-            background: mobileTheme.colors.canvas, boxShadow: 'var(--zterm-settings-shadow)',
-            padding: '8px', display: 'flex', flexDirection: 'column', gap: '6px',
-            maxHeight: '48%', overflowY: 'auto',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-            <span style={{ color: mobileTheme.colors.textPrimary, fontSize: '12px', fontWeight: 850 }}>增加窗口</span>
-            <AmbientButton type="button" aria-label="关闭增加窗口菜单" onClick={() => setAddMenuOpen(false)}
-              style={{ width: '26px', height: '26px', borderRadius: '6px', border: `1px solid ${mobileTheme.colors.cardBorder}`, background: mobileTheme.colors.shell, color: mobileTheme.colors.textPrimary }}>
-              ×
-            </AmbientButton>
-          </div>
-          {replacementCandidates.map((candidate) => {
-            const tone = getServerIdentityTone(candidate);
-            const candidateTitle = candidate.customName || candidate.title || candidate.sessionName || candidate.id;
-            return (
-              <AmbientButton
-                key={candidate.id}
-                type="button"
-                role="menuitem"
-                data-testid={`terminal-preview-add-${candidate.id}`}
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  onAddSession?.(candidate.id);
-                  setAddMenuOpen(false);
-                }}
-                style={{
-                  minHeight: '38px', borderRadius: '6px', border: `1px solid ${tone.lightCardBorder}`,
-                  background: tone.previewBackground, color: mobileTheme.colors.textPrimary,
-                  display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', alignItems: 'center',
-                  gap: '8px', padding: '0 10px', textAlign: 'left',
-                }}
-              >
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '12px', fontWeight: 800 }}>{candidateTitle}</span>
-                <span style={{ color: tone.previewText, fontSize: '10px', maxWidth: '90px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{resolveServerDisplayName(candidate)}</span>
-              </AmbientButton>
-            );
-          })}
-        </div>
-      ) : null}
-      {moveSourceSession ? (
-        <div
-          role="menu"
-          aria-label={`移动预览 ${moveSourceSession.customName || moveSourceSession.title || moveSourceSession.sessionName || moveSourceSession.id}`}
-          data-testid="terminal-preview-move-menu"
-          data-preview-menu-surface="true"
-          style={{
-            position: 'absolute', left: '10px', right: '10px', bottom: '10px', zIndex: 18,
-            border: `1px solid ${mobileTheme.colors.cardBorder}`, borderRadius: '8px',
-            background: mobileTheme.colors.canvas, boxShadow: 'var(--zterm-settings-shadow)',
-            padding: '8px', display: 'grid', gridTemplateColumns: `repeat(${Math.min(3, sessions.length)}, minmax(0, 1fr))`, gap: '6px',
-          }}
-        >
-          <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-            <span style={{ color: mobileTheme.colors.textPrimary, fontSize: '12px', fontWeight: 850 }}>移动到位置</span>
-            <AmbientButton type="button" aria-label="关闭移动菜单" onClick={() => setMoveSourceSessionId(null)}
-              style={{ width: '26px', height: '26px', borderRadius: '6px', border: `1px solid ${mobileTheme.colors.cardBorder}`, background: mobileTheme.colors.shell, color: mobileTheme.colors.textPrimary }}>
-              ×
-            </AmbientButton>
-          </div>
-          {sessions.map((_, targetIndex) => (
-            <AmbientButton
-              key={targetIndex}
-              type="button"
-              role="menuitem"
-              data-testid={`terminal-preview-move-to-${targetIndex + 1}`}
-              onClick={(event) => {
+      <div ref={contentRef} style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+        {layout.visibleCells.map((cell) => {
+          const rect = cellRects.get(coordinateKey(cell));
+          if (!rect) return null;
+          const session = resolveJunctionPreviewCell(lattice, cell, candidates);
+          const canPan = !rect.isFocus && Boolean(session);
+          const tone = session ? getServerIdentityTone(session) : null;
+          const title = session ? session.customName || session.title || session.sessionName || session.id : '';
+          return (
+            <div
+              key={coordinateKey(cell)}
+              data-testid={session
+                ? `terminal-preview-tile-${session.id}`
+                : `terminal-preview-empty-${cell.col}-${cell.row}`}
+              data-preview-coordinate={coordinateKey(cell)}
+              data-preview-edge={cell.edge}
+              data-preview-focus={rect.isFocus ? 'true' : 'false'}
+              data-preview-session-id={session?.id || ''}
+              role={session ? undefined : 'button'}
+              tabIndex={session ? undefined : 0}
+              onClick={session
+                ? () => {
+                  const suppressed = suppressClickRef.current;
+                  suppressClickRef.current = null;
+                  if (suppressClickTimerRef.current !== null) {
+                    window.clearTimeout(suppressClickTimerRef.current);
+                    suppressClickTimerRef.current = null;
+                  }
+                  if (suppressed?.col === cell.col && suppressed.row === cell.row) {
+                    return;
+                  }
+                  if (canPan) onFocusChange({ col: cell.col, row: cell.row });
+                }
+                : () => setSlotMenu({ coordinate: { col: cell.col, row: cell.row } })}
+              onKeyDown={session ? undefined : (event) => {
+                if (event.key !== 'Enter' && event.key !== ' ') return;
                 event.preventDefault();
-                event.stopPropagation();
-                onMoveSession?.(moveSourceSession.id, targetIndex);
-                setMoveSourceSessionId(null);
+                setSlotMenu({ coordinate: { col: cell.col, row: cell.row } });
+              }}
+              onPointerDown={(event) => {
+                if (!session || rect.isFocus) return;
+                startLongPress({ col: cell.col, row: cell.row }, session.id, event);
+              }}
+              onPointerMove={updateLongPress}
+              onPointerUp={clearLongPress}
+              onPointerCancel={finishLongPress}
+              onContextMenu={(event) => {
+                if (!session || rect.isFocus) return;
+                event.preventDefault();
+                setSlotMenu({
+                  coordinate: { col: cell.col, row: cell.row },
+                  existingSessionId: session.id,
+                });
               }}
               style={{
-                height: '38px', borderRadius: '6px', border: `1px solid ${mobileTheme.colors.cardBorder}`,
-                background: mobileTheme.colors.shell, color: mobileTheme.colors.textPrimary, fontWeight: 850,
+                position: 'absolute',
+                left: rect.clip.left,
+                top: rect.clip.top,
+                width: rect.clip.width,
+                height: rect.clip.height,
+                overflow: 'hidden',
+                border: rect.isFocus ? `1px solid ${mobileTheme.colors.cardBorder}` : 'none',
+                background: mobileTheme.colors.canvas,
+                boxSizing: 'border-box',
               }}
             >
-              {targetIndex + 1}
-            </AmbientButton>
-          ))}
-        </div>
-      ) : null}
-      {replacementSourceSession ? (
-        <div
-          role="menu"
-          aria-label={`替换预览 ${replacementSourceSession.customName || replacementSourceSession.title || replacementSourceSession.sessionName || replacementSourceSession.id}`}
-          data-testid="terminal-preview-replacement-menu"
-          data-preview-menu-surface="true"
-          style={{
-            position: 'absolute',
-            left: '10px',
-            right: '10px',
-            bottom: '10px',
-            zIndex: 18,
-            border: `1px solid ${mobileTheme.colors.cardBorder}`,
-            borderRadius: '8px',
-            background: mobileTheme.colors.canvas,
-            boxShadow: 'var(--zterm-settings-shadow)',
-            padding: '8px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '6px',
-            maxHeight: '48%',
-            overflowY: 'auto',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-            <span style={{ color: mobileTheme.colors.textPrimary, fontSize: '12px', fontWeight: 850 }}>替换预览</span>
-            <AmbientButton
-              type="button"
-              aria-label="关闭替换菜单"
-              onClick={() => setReplacementSourceSessionId(null)}
-              style={{
-                width: '26px', height: '26px', borderRadius: '6px', border: `1px solid ${mobileTheme.colors.cardBorder}`,
-                background: mobileTheme.colors.shell, color: mobileTheme.colors.textPrimary,
-              }}
-            >
-              ×
-            </AmbientButton>
-          </div>
-          {replacementCandidates.length > 0 ? replacementCandidates.map((candidate) => {
-            const tone = getServerIdentityTone(candidate);
-            const candidateTitle = candidate.customName || candidate.title || candidate.sessionName || candidate.id;
-            return (
+              {session ? (
+                <div
+                  data-testid={`terminal-preview-body-${session.id}`}
+                  data-preview-scroll-surface="true"
+                  style={{
+                    position: 'absolute',
+                    left: rect.pane.left - rect.clip.left,
+                    top: rect.pane.top - rect.clip.top,
+                    width: rect.pane.width,
+                    height: rect.pane.height,
+                  }}
+                >
+                  <TerminalView
+                    sessionId={session.id}
+                    sessionBufferStore={sessionBufferStore}
+                    active={false}
+                    live
+                    projectionMode="preview-primary"
+                    allowDomFocus={false}
+                    domInputOffscreen
+                    focusNonce={0}
+                    fontSize={fontSize}
+                    rowHeight={`${rowHeightPx}px`}
+                    themeId={themeId || 'default'}
+                    widthMode="mirror-fixed"
+                    showAbsoluteLineNumbers={false}
+                    copyModeActive={false}
+                    splitVisible
+                  />
+                </div>
+              ) : (
+                <div
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <span style={{ fontSize: '22px', fontWeight: 900, color: mobileTheme.colors.textSecondary }}>+</span>
+                </div>
+              )}
+              {session && tone ? (
+                <div
+                  data-preview-chip="true"
+                  style={{
+                    position: 'absolute',
+                    left: 2,
+                    top: 2,
+                    maxWidth: 'calc(100% - 4px)',
+                    padding: '1px 4px',
+                    overflow: 'hidden',
+                    whiteSpace: 'nowrap',
+                    textOverflow: 'ellipsis',
+                    background: tone.previewBackground,
+                    color: tone.previewText,
+                    borderRadius: '3px',
+                    fontSize: '9px',
+                    fontWeight: 800,
+                    pointerEvents: 'none',
+                  }}
+                >
+                  {title} · {resolveServerDisplayName(session)}
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+
+        {slotMenu ? (
+          <div
+            role="menu"
+            aria-label={`配置预览格 ${slotMenu.coordinate.col},${slotMenu.coordinate.row}`}
+            data-testid="terminal-preview-slot-menu"
+            data-preview-menu-surface="true"
+            style={{
+              position: 'absolute',
+              left: 10,
+              right: 10,
+              bottom: 10,
+              zIndex: 18,
+              border: `1px solid ${mobileTheme.colors.cardBorder}`,
+              borderRadius: '8px',
+              background: mobileTheme.colors.canvas,
+              boxShadow: 'var(--zterm-settings-shadow)',
+              padding: '8px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '6px',
+              maxHeight: '60%',
+              overflowY: 'auto',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+              <span style={{ color: mobileTheme.colors.textPrimary, fontSize: '12px', fontWeight: 850 }}>
+                {menuSession
+                  ? `重选格 ${slotMenu.coordinate.col},${slotMenu.coordinate.row}`
+                  : `给空格 ${slotMenu.coordinate.col},${slotMenu.coordinate.row} 指定 session`}
+              </span>
               <AmbientButton
-                key={candidate.id}
+                type="button"
+                aria-label="关闭预览格菜单"
+                onClick={() => setSlotMenu(null)}
+                style={{
+                  width: '26px',
+                  height: '26px',
+                  borderRadius: '6px',
+                  border: `1px solid ${mobileTheme.colors.cardBorder}`,
+                  background: mobileTheme.colors.shell,
+                  color: mobileTheme.colors.textPrimary,
+                }}
+              >
+                ×
+              </AmbientButton>
+            </div>
+            {menuSession ? (
+              <AmbientButton
                 type="button"
                 role="menuitem"
-                data-testid={`terminal-preview-replace-${candidate.id}`}
+                data-testid={`terminal-preview-clear-${slotMenu.coordinate.col}-${slotMenu.coordinate.row}`}
                 onClick={(event) => {
                   event.preventDefault();
                   event.stopPropagation();
-                  onReplaceSession?.(replacementSourceSession.id, candidate.id);
-                  setReplacementSourceSessionId(null);
+                  onClearCell(slotMenu.coordinate);
+                  setSlotMenu(null);
                 }}
                 style={{
-                  minHeight: '38px', borderRadius: '6px', border: `1px solid ${tone.lightCardBorder}`,
-                  background: tone.previewBackground, color: mobileTheme.colors.textPrimary,
-                  display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', alignItems: 'center', gap: '8px',
-                  padding: '0 10px', textAlign: 'left',
+                  minHeight: '38px',
+                  borderRadius: '6px',
+                  border: '1px solid var(--zterm-settings-border)',
+                  background: mobileTheme.colors.shell,
+                  color: mobileTheme.colors.textPrimary,
                 }}
               >
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '12px', fontWeight: 800 }}>
-                  {candidateTitle}
-                </span>
-                <span style={{ color: tone.previewText, fontSize: '10px', maxWidth: '90px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {resolveServerDisplayName(candidate)}
-                </span>
+                清空格位
               </AmbientButton>
-            );
-          }) : (
-            <div role="note" style={{ color: mobileTheme.colors.textSecondary, fontSize: '12px', padding: '4px 2px' }}>
-              没有可替换的未选中 session
-            </div>
-          )}
-        </div>
-      ) : null}
+            ) : null}
+            {menuCandidates.length > 0 ? menuCandidates.map((candidate) => {
+              const candidateTone = getServerIdentityTone(candidate);
+              return (
+                <AmbientButton
+                  key={`${slotMenu.coordinate.col}:${slotMenu.coordinate.row}:${candidate.id}`}
+                  type="button"
+                  role="menuitem"
+                  data-testid={`terminal-preview-assign-${candidate.id}`}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onSetCell(slotMenu.coordinate, candidate.id);
+                    setSlotMenu(null);
+                  }}
+                  style={{
+                    minHeight: '38px',
+                    borderRadius: '6px',
+                    border: `1px solid ${candidateTone.lightCardBorder}`,
+                    background: candidateTone.previewBackground,
+                    color: mobileTheme.colors.textPrimary,
+                    display: 'grid',
+                    gridTemplateColumns: 'minmax(0, 1fr) auto',
+                    alignItems: 'center',
+                    gap: '8px',
+                    padding: '0 10px',
+                    textAlign: 'left',
+                  }}
+                >
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '12px', fontWeight: 800 }}>
+                    {candidate.customName || candidate.title || candidate.sessionName || candidate.id}
+                  </span>
+                  <span style={{
+                    color: candidateTone.previewText,
+                    fontSize: '10px',
+                    maxWidth: '90px',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}>
+                    {resolveServerDisplayName(candidate)}
+                  </span>
+                </AmbientButton>
+              );
+            }) : (
+              <div role="note" style={{ color: mobileTheme.colors.textSecondary, fontSize: '12px', padding: '4px 2px' }}>
+                没有可用的 session
+              </div>
+            )}
+          </div>
+        ) : null}
+      </div>
     </section>
   );
 });

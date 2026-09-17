@@ -2295,9 +2295,9 @@
       "level": 1,
       "parent_module_id": "client.runtime",
       "owner_feature": "terminal.session_preview",
-      "responsibility": "Own session drawer projection, ordered preview selection, preview mode, layout, body promotion, add/remove/replace, and cancel-to-entry projection.",
+      "responsibility": "Own session drawer projection, coordinate-keyed preview lattice, focus panning, junction geometry, focus-cell replacement/clear, and cancel-to-entry projection.",
       "owned_resources": [
-        "resource.session_preview_selection",
+        "resource.session_preview_lattice",
         "resource.session_preview_mode"
       ],
       "consumed_resources": [
@@ -2311,7 +2311,8 @@
         "src/components/terminal/TerminalSessionDrawer.tsx",
         "src/components/terminal/TerminalSessionDrawerContent.tsx",
         "src/components/terminal/TerminalPreviewGrid.tsx",
-        "src/lib/session-preview-selection.ts"
+        "src/lib/junction-preview-lattice.ts",
+        "src/lib/junction-preview-layout.ts"
       ],
       "forbidden_resources": [
         "resource.tmux_session",
@@ -2326,7 +2327,8 @@
       "required_gates": [
         "src/lib/module-registry-truth.test.ts",
         "src/components/terminal/TerminalPreviewGrid.test.tsx",
-        "src/lib/session-preview-selection.test.ts"
+        "src/lib/junction-preview-lattice.test.ts",
+        "src/lib/junction-preview-layout.test.ts"
       ],
       "status": "active",
       "owned_paths": [
@@ -2338,7 +2340,8 @@
         "src/components/terminal/TerminalSessionDrawerNewSessionDialog.tsx",
         "src/components/terminal/TerminalSessionDrawerSlotMenu.tsx",
         "src/components/terminal/TerminalTabSwipeSurface.tsx",
-        "src/lib/session-preview-selection.ts",
+        "src/lib/junction-preview-lattice.ts",
+        "src/lib/junction-preview-layout.ts",
         "src/lib/terminal-tab-swipe-gesture.ts",
         "src/components/terminal/terminal-session-drawer-helpers.ts"
       ]

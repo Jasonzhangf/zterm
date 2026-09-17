@@ -1,10 +1,20 @@
 import { memo as ReactMemo, useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
-import { PaneStage, type PaneSlotDefinition } from "@zterm/shared";
+import { PaneStage, TERMINAL_DRAWER_EDGE_SWIPE_START_PX, type PaneSlotDefinition } from "@zterm/shared";
 import { TerminalView } from "../components/TerminalView";
 import { AmbientButton } from "../components/ambient";
 import type { SessionRenderBufferStore } from "../lib/session-render-buffer-store";
 import { TerminalTabSwipeSurface } from "../components/terminal/TerminalTabSwipeSurface";
 import { TerminalPreviewGrid } from "../components/terminal/TerminalPreviewGrid";
+import {
+  beginTerminalTabSwipeGesture,
+  createTerminalTabSwipeGestureState,
+  resolveTerminalTabSwipeDirection,
+  updateTerminalTabSwipeGesture,
+} from "../lib/terminal-tab-swipe-gesture";
+import type {
+  JunctionPreviewCoordinate,
+  JunctionPreviewLatticeV1,
+} from "../lib/junction-preview-lattice";
 import {
   beginSessionPreviewGesture,
   createSessionPreviewGestureState,
@@ -61,16 +71,18 @@ const TerminalStageShell = ReactMemo(
     onLongPressRow,
     onCopySelectionDismiss,
     sessionPreviewOpen = false,
-    sessionPreviewSessions = [],
-    sessionPreviewReplacementCandidates = [],
+    sessionPreviewLattice,
+    sessionPreviewFocus,
+    sessionPreviewCandidates = [],
+    sessionPreviewSideEdge,
+    sessionPreviewViewportWidth,
+    sessionPreviewViewportHeight,
     onOpenSessionPreview,
     onCloseSessionPreview,
-    onActivatePreviewSession,
-    onAddPreviewSession,
-    onRemovePreviewSession,
-    onMovePreviewSession,
-    onReplacePreviewSession,
-    onPreviewPrimarySessionChange,
+    onPreviewFocusChange,
+    onSetPreviewCell,
+    onClearPreviewCell,
+    onOpenSessionDrawer,
   }: {
     interactiveSession: Session | null;
     sessionBufferStore?: SessionRenderBufferStore | null;
@@ -121,18 +133,22 @@ const TerminalStageShell = ReactMemo(
     ) => void;
     onCopySelectionDismiss?: () => void;
     sessionPreviewOpen?: boolean;
-    sessionPreviewSessions?: Session[];
-    sessionPreviewReplacementCandidates?: Session[];
+    sessionPreviewLattice?: JunctionPreviewLatticeV1 | null;
+    sessionPreviewFocus?: JunctionPreviewCoordinate | null;
+    sessionPreviewCandidates?: Session[];
+    sessionPreviewSideEdge?: 'left' | 'right';
+    sessionPreviewViewportWidth?: number;
+    sessionPreviewViewportHeight?: number;
     onOpenSessionPreview?: () => void;
     onCloseSessionPreview?: () => void;
-    onActivatePreviewSession?: (sessionId: string) => void;
-    onAddPreviewSession?: (sessionId: string) => void;
-    onRemovePreviewSession?: (sessionId: string) => void;
-    onMovePreviewSession?: (sourceSessionId: string, targetIndex: number) => void;
-    onReplacePreviewSession?: (sourceSessionId: string, replacementSessionId: string) => void;
-    onPreviewPrimarySessionChange?: (sessionId: string) => void;
+    onPreviewFocusChange?: (coordinate: JunctionPreviewCoordinate) => void;
+    onSetPreviewCell?: (coordinate: JunctionPreviewCoordinate, sessionId: string) => void;
+    onClearPreviewCell?: (coordinate: JunctionPreviewCoordinate) => void;
+    onOpenSessionDrawer?: () => void;
   }) {
     const previewGestureRef = useRef(createSessionPreviewGestureState());
+    const drawerGestureRef = useRef(createTerminalTabSwipeGestureState());
+    const drawerGestureStartRef = useRef<{ x: number; y: number } | null>(null);
     const landscape =
       typeof window !== "undefined"
         ? resolveTerminalOrientation() === "landscape"
@@ -236,7 +252,7 @@ const TerminalStageShell = ReactMemo(
             onLongPressRow={onLongPressRow}
             onCopySelectionDismiss={onCopySelectionDismiss}
             splitVisible={splitVisible}
-            reserveRightEdgeSwipe={Boolean(onOpenSessionPreview && sessionPreviewSessions.length > 0)}
+            reserveRightEdgeSwipe={Boolean(onOpenSessionPreview && sessionPreviewCandidates.length > 0)}
           />
         </TerminalTabSwipeSurface>
       ),
@@ -262,6 +278,8 @@ const TerminalStageShell = ReactMemo(
         copySelection,
         onLongPressRow,
         onCopySelectionDismiss,
+        sessionPreviewCandidates.length,
+        onOpenSessionPreview,
       ],
     );
 
@@ -529,12 +547,20 @@ const TerminalStageShell = ReactMemo(
         data-testid="terminal-stage-shell"
         data-terminal-shell-skin={terminalShellSkin}
         onTouchStartCapture={(event) => {
-          if (sessionPreviewOpen || !onOpenSessionPreview || sessionPreviewSessions.length === 0) {
+          const touch = event.touches[0];
+          const width = window.visualViewport?.width || window.innerWidth || 0;
+          drawerGestureStartRef.current = null;
+          drawerGestureRef.current = createTerminalTabSwipeGestureState();
+          if (touch && onOpenSessionDrawer && touch.clientX <= TERMINAL_DRAWER_EDGE_SWIPE_START_PX) {
+            drawerGestureStartRef.current = { x: touch.clientX, y: touch.clientY };
+            drawerGestureRef.current = beginTerminalTabSwipeGesture(touch.clientX, touch.clientY);
             previewGestureRef.current = createSessionPreviewGestureState();
             return;
           }
-          const touch = event.touches[0];
-          const width = window.visualViewport?.width || window.innerWidth || 0;
+          if (sessionPreviewOpen || !onOpenSessionPreview || sessionPreviewCandidates.length === 0) {
+            previewGestureRef.current = createSessionPreviewGestureState();
+            return;
+          }
           previewGestureRef.current = touch
             ? beginSessionPreviewGesture(touch.clientX, touch.clientY, width)
             : createSessionPreviewGestureState();
@@ -542,6 +568,18 @@ const TerminalStageShell = ReactMemo(
         onTouchMoveCapture={(event) => {
           const touch = event.touches[0];
           if (!touch) return;
+          if (drawerGestureStartRef.current) {
+            drawerGestureRef.current = updateTerminalTabSwipeGesture(
+              drawerGestureRef.current,
+              touch.clientX,
+              touch.clientY,
+            );
+            const drawerGesture = drawerGestureRef.current;
+            if (drawerGesture.axis === 'horizontal' && drawerGesture.deltaX > 0) {
+              event.preventDefault();
+              event.stopPropagation();
+            }
+          }
           previewGestureRef.current = updateSessionPreviewGesture(
             previewGestureRef.current,
             touch.clientX,
@@ -553,12 +591,26 @@ const TerminalStageShell = ReactMemo(
             event.stopPropagation();
           }
         }}
-        onTouchEndCapture={() => {
+        onTouchEndCapture={(event) => {
+          const drawerDirection = drawerGestureStartRef.current
+            ? resolveTerminalTabSwipeDirection(drawerGestureRef.current)
+            : null;
+          drawerGestureStartRef.current = null;
+          drawerGestureRef.current = createTerminalTabSwipeGestureState();
+          if (drawerDirection === 'previous') {
+            event.preventDefault();
+            event.stopPropagation();
+            previewGestureRef.current = createSessionPreviewGestureState();
+            onOpenSessionDrawer?.();
+            return;
+          }
           const intent = resolveSessionPreviewGesture(previewGestureRef.current);
           previewGestureRef.current = createSessionPreviewGestureState();
           if (intent === 'open-preview') onOpenSessionPreview?.();
         }}
         onTouchCancelCapture={() => {
+          drawerGestureStartRef.current = null;
+          drawerGestureRef.current = createTerminalTabSwipeGestureState();
           previewGestureRef.current = createSessionPreviewGestureState();
         }}
         style={{
@@ -588,21 +640,20 @@ const TerminalStageShell = ReactMemo(
             overscrollBehaviorY: "contain",
           }}
         >
-          {sessionPreviewOpen && sessionPreviewSessions.length > 0 ? (
+          {sessionPreviewOpen && sessionPreviewLattice && sessionPreviewFocus ? (
             <TerminalPreviewGrid
-              sessions={sessionPreviewSessions}
-              replacementCandidates={sessionPreviewReplacementCandidates}
+              lattice={sessionPreviewLattice}
+              focus={sessionPreviewFocus}
+              candidates={sessionPreviewCandidates}
               sessionBufferStore={sessionBufferStore}
-              landscape={landscape}
               fontSize={terminalFontSize}
               themeId={terminalThemeId}
-              onActivateSession={(sessionId) => onActivatePreviewSession?.(sessionId)}
-              onAddSession={(sessionId) => onAddPreviewSession?.(sessionId)}
-              onRemoveSession={(sessionId) => onRemovePreviewSession?.(sessionId)}
-              onMoveSession={(sourceSessionId, targetIndex) => onMovePreviewSession?.(sourceSessionId, targetIndex)}
-              onReplaceSession={(sourceSessionId, replacementSessionId) => onReplacePreviewSession?.(sourceSessionId, replacementSessionId)}
-              onPrimarySessionChange={onPreviewPrimarySessionChange}
-              onTerminalInput={onTerminalInput}
+              viewportWidth={sessionPreviewViewportWidth}
+              viewportHeight={sessionPreviewViewportHeight}
+              sideEdge={sessionPreviewSideEdge}
+              onFocusChange={(coordinate) => onPreviewFocusChange?.(coordinate)}
+              onSetCell={(coordinate, sessionId) => onSetPreviewCell?.(coordinate, sessionId)}
+              onClearCell={(coordinate) => onClearPreviewCell?.(coordinate)}
               onClose={() => onCloseSessionPreview?.()}
             />
           ) : sessionGroup ? (
@@ -725,18 +776,20 @@ const TerminalStageShell = ReactMemo(
     prev.onLongPressRow === next.onLongPressRow &&
     prev.onCopySelectionDismiss === next.onCopySelectionDismiss &&
     prev.sessionPreviewOpen === next.sessionPreviewOpen &&
-    terminalPageRenderedSessionsUiKey(prev.sessionPreviewSessions || []) ===
-      terminalPageRenderedSessionsUiKey(next.sessionPreviewSessions || []) &&
-    terminalPageRenderedSessionsUiKey(prev.sessionPreviewReplacementCandidates || []) ===
-      terminalPageRenderedSessionsUiKey(next.sessionPreviewReplacementCandidates || []) &&
+    prev.sessionPreviewLattice === next.sessionPreviewLattice &&
+    prev.sessionPreviewFocus?.col === next.sessionPreviewFocus?.col &&
+    prev.sessionPreviewFocus?.row === next.sessionPreviewFocus?.row &&
+    prev.sessionPreviewSideEdge === next.sessionPreviewSideEdge &&
+    prev.sessionPreviewViewportWidth === next.sessionPreviewViewportWidth &&
+    prev.sessionPreviewViewportHeight === next.sessionPreviewViewportHeight &&
+    terminalPageRenderedSessionsUiKey(prev.sessionPreviewCandidates || []) ===
+      terminalPageRenderedSessionsUiKey(next.sessionPreviewCandidates || []) &&
     prev.onOpenSessionPreview === next.onOpenSessionPreview &&
     prev.onCloseSessionPreview === next.onCloseSessionPreview &&
-    prev.onActivatePreviewSession === next.onActivatePreviewSession &&
-    prev.onAddPreviewSession === next.onAddPreviewSession &&
-    prev.onRemovePreviewSession === next.onRemovePreviewSession &&
-    prev.onMovePreviewSession === next.onMovePreviewSession &&
-    prev.onReplacePreviewSession === next.onReplacePreviewSession &&
-    prev.onPreviewPrimarySessionChange === next.onPreviewPrimarySessionChange &&
+    prev.onPreviewFocusChange === next.onPreviewFocusChange &&
+    prev.onSetPreviewCell === next.onSetPreviewCell &&
+    prev.onClearPreviewCell === next.onClearPreviewCell &&
+    prev.onOpenSessionDrawer === next.onOpenSessionDrawer &&
     prev.visiblePaneEntries
       .map((entry) => `${entry.pane.id}:${entry.session?.id || ""}`)
       .join("||") ===

@@ -117,19 +117,23 @@ import {
   type TerminalSessionGroupSlotName,
 } from '../lib/session-group-viewport';
 import {
-  appendSessionPreviewTarget,
-  moveSessionPreviewTarget,
-  projectSessionPreviewLiveIds,
-  pruneSessionPreviewSelectionToOpenSessions,
-  readSessionPreviewSelection,
-  removeSessionPreviewTarget,
-  replaceSessionPreviewTarget,
-  resolveSessionPreviewTargets,
-  toggleSessionPreviewTarget,
-  writeSessionPreviewSelection,
-  type SessionPreviewSelectionV1,
-  type SessionPreviewTarget,
-} from '../lib/session-preview-selection';
+  JUNCTION_PREVIEW_HEADER_HEIGHT_PX,
+  resolveJunctionPreviewLayout,
+} from '../lib/junction-preview-layout';
+import {
+  clearJunctionPreviewCell,
+  createEmptyJunctionPreviewLattice,
+  findJunctionPreviewCellBySessionId,
+  findNearestJunctionPreviewCell,
+  projectJunctionPreviewLiveIds,
+  readJunctionPreviewLattice,
+  resolveJunctionPreviewCell,
+  setJunctionPreviewCell,
+  writeJunctionPreviewLattice,
+  type JunctionPreviewCoordinate,
+  type JunctionPreviewLatticeV1,
+  type JunctionPreviewTarget,
+} from '../lib/junction-preview-lattice';
 export {
   resolveTerminalSessionGroupSlotReplacement,
   resolveTerminalSessionGroupViewportSlots,
@@ -696,20 +700,30 @@ function TerminalPageComponent({
   const initialSessionPreviewRead = useMemo(() => {
     const storage = getBrowserStorage();
     return storage
-      ? readSessionPreviewSelection(storage)
-      : { status: 'empty' as const, selection: { version: 1 as const, orderedTargets: [] } };
+      ? readJunctionPreviewLattice(storage)
+      : { status: 'empty' as const, lattice: createEmptyJunctionPreviewLattice() };
   }, []);
-  const [sessionPreviewSelection, setSessionPreviewSelection] = useState<SessionPreviewSelectionV1>(() =>
+  const [sessionPreviewLattice, setSessionPreviewLattice] = useState<JunctionPreviewLatticeV1>(() =>
     initialSessionPreviewRead.status === 'invalid'
-      ? { version: 1, orderedTargets: [] }
-      : initialSessionPreviewRead.selection,
+      ? createEmptyJunctionPreviewLattice()
+      : initialSessionPreviewRead.lattice,
   );
-  const [sessionPreviewSelectionMode, setSessionPreviewSelectionMode] = useState(false);
   const [sessionPreviewOpen, setSessionPreviewOpen] = useState(false);
-  const [sessionPreviewInputSessionId, setSessionPreviewInputSessionId] = useState<string | null>(null);
-  const [sessionPreviewError, setSessionPreviewError] = useState<string | null>(() =>
-    initialSessionPreviewRead.status === 'invalid' ? '预览选择存储损坏，请重新选择。' : null,
-  );
+  const [sessionPreviewFocus, setSessionPreviewFocus] = useState<JunctionPreviewCoordinate>({ col: 0, row: 0 });
+  const [sessionPreviewSideEdge, setSessionPreviewSideEdge] = useState<'left' | 'right'>('left');
+  const showSessionPreviewError = useCallback((message: string, detail?: string) => {
+    setTerminalDialog({
+      tone: 'error',
+      title: '终端预览',
+      message,
+      detail,
+    });
+  }, []);
+  useEffect(() => {
+    if (initialSessionPreviewRead.status === 'invalid') {
+      showSessionPreviewError('预览格子存储损坏，已回退为空。');
+    }
+  }, [initialSessionPreviewRead.status, showSessionPreviewError]);
   const [sessionDrawerDebug, setSessionDrawerDebug] = useState({
     lastEvent: '-',
     eventSeq: 0,
@@ -744,8 +758,10 @@ function TerminalPageComponent({
     slotIds: TerminalSessionGroupSlotIds;
     focusSlot: TerminalSessionGroupSlotName;
   } | null>(null);
+  const handleCancelSessionPreviewRef = useRef<(() => void) | null>(null);
   const landscape = typeof window !== 'undefined' ? resolveTerminalOrientation() === 'landscape' : false;
   const portraitSessionDrawerEnabled = !landscape;
+  const sessionDrawerGestureEnabled = portraitSessionDrawerEnabled || sessionPreviewOpen;
   const sessionViewportModeStoreRef = useRef(createSessionViewportModeStore());
   const [debugOverlayPos, setDebugOverlayPos] = useState({ x: -1, y: -1 }); // -1 means use defaults
   const debugOverlayDragRef = useRef<{ startX: number; startY: number; startPosX: number; startPosY: number; dragging: boolean }>({ startX: 0, startY: 0, startPosX: 0, startPosY: 0, dragging: false });
@@ -1091,49 +1107,76 @@ function TerminalPageComponent({
           .filter((session): session is Session => Boolean(session))
       : (interactiveSession ? [interactiveSession] : [])
   ), [interactiveSession, splitVisible, visiblePaneEntries]);
-  const sessionPreviewSessions = useMemo(
-    () => resolveSessionPreviewTargets(sessionPreviewSelection, sessions),
-    [sessionPreviewSelection, sessions],
+  const sessionPreviewLayout = useMemo(
+    () => (sessionPreviewOpen
+      ? resolveJunctionPreviewLayout({
+        viewportWidth: Math.max(1, viewportWidth),
+        viewportHeight: Math.max(
+          1,
+          currentLayoutViewportHeight - JUNCTION_PREVIEW_HEADER_HEIGHT_PX,
+        ),
+        fontSize: Math.max(1, terminalFontSize),
+        focus: sessionPreviewFocus,
+        sideEdge: sessionPreviewSideEdge,
+      })
+      : null),
+    [
+      currentLayoutViewportHeight,
+      sessionPreviewFocus,
+      sessionPreviewOpen,
+      sessionPreviewSideEdge,
+      terminalFontSize,
+      viewportWidth,
+    ],
   );
-  const sessionPreviewInputSessionValid = Boolean(
-    sessionPreviewInputSessionId
-      && sessionPreviewSessions.some((session) => session.id === sessionPreviewInputSessionId),
+  const sessionPreviewVisibleSessions = useMemo(
+    () => (sessionPreviewLayout?.visibleCells || [])
+      .map((cell) => resolveJunctionPreviewCell(sessionPreviewLattice, cell, sessions))
+      .filter((session): session is NonNullable<typeof session> => Boolean(session)),
+    [sessionPreviewLayout, sessionPreviewLattice, sessions],
   );
-  const terminalActionSessionId = sessionPreviewOpen && sessionPreviewInputSessionValid
-    ? sessionPreviewInputSessionId
+  const sessionPreviewFocusSession = sessionPreviewOpen
+    ? resolveJunctionPreviewCell(sessionPreviewLattice, sessionPreviewFocus, sessions)
+    : null;
+  const terminalActionSessionId = sessionPreviewOpen && sessionPreviewFocusSession
+    ? sessionPreviewFocusSession.id
     : uiSessionId;
   const terminalActionSession = terminalActionSessionId
     ? sessions.find((session) => session.id === terminalActionSessionId) || null
     : null;
   useEffect(() => {
     if (!sessionPreviewOpen) {
-      if (sessionPreviewInputSessionId !== null) {
-        setSessionPreviewInputSessionId(null);
-      }
       return;
     }
-    if (sessionPreviewInputSessionValid) {
-      return;
-    }
-    setSessionPreviewInputSessionId(sessionPreviewSessions[0]?.id || null);
-  }, [
-    sessionPreviewInputSessionId,
-    sessionPreviewInputSessionValid,
-    sessionPreviewOpen,
-    sessionPreviewSessions,
-  ]);
-  const sessionPreviewReplacementCandidates = useMemo(() => {
-    const selectedIds = new Set(sessionPreviewSessions.map((session) => session.id));
-    return sessions.filter((session) =>
-      !selectedIds.has(session.id)
-      && session.state !== 'closed',
+    if (sessionPreviewFocusSession) return;
+    const fallbackCoordinate = findNearestJunctionPreviewCell(
+      sessionPreviewLattice,
+      sessionPreviewFocus,
+      sessions,
     );
-  }, [sessionPreviewSessions, sessions]);
-  const livePaneSessionIds = useMemo(() => projectSessionPreviewLiveIds(
-    renderedPaneSessions.map((session) => session.id),
-    sessionPreviewSessions.map((session) => session.id),
+    const fallback = fallbackCoordinate
+      ? resolveJunctionPreviewCell(sessionPreviewLattice, fallbackCoordinate, sessions)
+      : null;
+    if (!fallback) {
+      handleCancelSessionPreviewRef.current?.();
+      return;
+    }
+    if (fallbackCoordinate) setSessionPreviewFocus(fallbackCoordinate);
+  }, [
     sessionPreviewOpen,
-  ), [renderedPaneSessions, sessionPreviewOpen, sessionPreviewSessions]);
+    sessionPreviewFocusSession,
+    sessionPreviewLattice,
+    sessionPreviewFocus,
+  ]);
+  const sessionPreviewCandidates = useMemo(
+    () => sessions.filter((session) => session.state !== 'closed'),
+    [sessions],
+  );
+  const livePaneSessionIds = useMemo(() => projectJunctionPreviewLiveIds(
+    renderedPaneSessions.map((session) => session.id),
+    sessionPreviewVisibleSessions.map((session) => session.id),
+    sessionPreviewOpen,
+  ), [renderedPaneSessions, sessionPreviewOpen, sessionPreviewVisibleSessions]);
   const livePaneSessionIdsKey = useMemo(
     () => livePaneSessionIds.join('||'),
     [livePaneSessionIds],
@@ -1578,19 +1621,10 @@ function TerminalPageComponent({
   ), [terminalActionSessionId, resolveFileBrowserSessionPort]);
 
   useEffect(() => {
-    if (!portraitSessionDrawerEnabled && sessionDrawerOpen) {
+    if (!sessionDrawerGestureEnabled && sessionDrawerOpen) {
       setSessionDrawerOpen(false);
     }
-  }, [portraitSessionDrawerEnabled, sessionDrawerOpen]);
-
-  useEffect(() => {
-    if (sessions.length === 0) return;
-    const next = pruneSessionPreviewSelectionToOpenSessions(sessionPreviewSelection, sessions);
-    if (next === sessionPreviewSelection) return;
-    setSessionPreviewSelection(next);
-    const storage = getBrowserStorage();
-    if (storage) writeSessionPreviewSelection(storage, next);
-  }, [sessionPreviewSelection, sessions]);
+  }, [sessionDrawerGestureEnabled, sessionDrawerOpen]);
 
   useEffect(() => {
     setSessionDrawerOpen(false);
@@ -2045,7 +2079,7 @@ function TerminalPageComponent({
   }, [alignActiveTerminalToFollowForInput]);
 
   const handleSwipeTab = useCallback((sessionId: string, direction: 'previous' | 'next') => {
-    if (portraitSessionDrawerEnabled && direction === 'previous') {
+    if (sessionDrawerGestureEnabled && direction === 'previous') {
       setSessionDrawerDebug((current) => ({
         ...current,
         lastEvent: 'page:drawer-open',
@@ -2076,7 +2110,7 @@ function TerminalPageComponent({
       switchTabInPane(targetPane.id, `tab-${targetSession.id}`);
     }
     onSwitchSession(targetSession.id);
-  }, [findPaneForSession, getPaneSessionIds, onSwitchSession, portraitSessionDrawerEnabled, switchTabInPane]);
+  }, [findPaneForSession, getPaneSessionIds, onSwitchSession, sessionDrawerGestureEnabled, switchTabInPane]);
 
   const handleSaveRemoteScreenshot = useCallback(async () => {
     if (
@@ -2906,36 +2940,18 @@ function TerminalPageComponent({
   const drawerRemoteSessionsRef = useRef(drawerRemoteSessions);
   drawerRemoteSessionsRef.current = drawerRemoteSessions;
 
-  const handleSelectSessionFromDrawer = useCallback((sessionId: string) => {
-    const remoteTarget = drawerRemoteSessionsRef.current.targets.get(sessionId);
-    if (remoteTarget) {
-      const openedSessionId = onOpenDrawerRemoteSession?.(remoteTarget.target, remoteTarget.sessionName);
-      if (typeof openedSessionId === 'string' && openedSessionId.trim()) {
-        activateSessionInViewportSlot(openedSessionId.trim());
-      }
-      setSessionDrawerOpen(false);
-      return;
-    }
-    handleActivateOpenSessionInViewport(sessionId);
-    setSessionDrawerOpen(false);
-  }, [
-    activateSessionInViewportSlot,
-    handleActivateOpenSessionInViewport,
-    onOpenDrawerRemoteSession,
-  ]);
-
-  const persistSessionPreviewSelection = useCallback((next: SessionPreviewSelectionV1) => {
-    setSessionPreviewSelection(next);
+  const persistSessionPreviewLattice = useCallback((next: JunctionPreviewLatticeV1) => {
+    setSessionPreviewLattice(next);
     const storage = getBrowserStorage();
     if (!storage) {
-      setSessionPreviewError('无法访问预览选择存储。');
+      showSessionPreviewError('无法访问预览格子存储。');
       return;
     }
-    const result = writeSessionPreviewSelection(storage, next);
-    setSessionPreviewError(result.ok ? null : '保存预览选择失败。');
-  }, []);
+    const result = writeJunctionPreviewLattice(storage, next);
+    if (!result.ok) showSessionPreviewError('保存预览格子失败。');
+  }, [showSessionPreviewError]);
 
-  const resolveSessionPreviewTargetFromDrawerSelection = useCallback((sessionId: string): SessionPreviewTarget | null => {
+  const resolveSessionPreviewTargetFromDrawerSelection = useCallback((sessionId: string): JunctionPreviewTarget | null => {
     const openSession = sessions.find((candidate) =>
       candidate.id === sessionId
       && candidate.state !== 'closed',
@@ -2952,7 +2968,7 @@ function TerminalPageComponent({
 
     const remoteTarget = drawerRemoteSessions.targets.get(sessionId);
     if (!remoteTarget) {
-      setSessionPreviewError('该 session 尚未打开，不能加入实时预览。');
+      showSessionPreviewError('该 session 尚未打开，不能加入实时预览。');
       return null;
     }
 
@@ -2962,7 +2978,7 @@ function TerminalPageComponent({
     });
     const materializedSessionId = typeof openedSessionId === 'string' ? openedSessionId.trim() : '';
     if (!materializedSessionId) {
-      setSessionPreviewError('无法打开该 session，不能加入实时预览。');
+      showSessionPreviewError('无法打开该 session，不能加入实时预览。');
       return null;
     }
 
@@ -2987,127 +3003,86 @@ function TerminalPageComponent({
       bridgePort: remoteTarget.target.bridgePort,
       sessionName: remoteTarget.sessionName,
     };
-  }, [drawerRemoteSessions.targets, onOpenDrawerRemoteSession, sessions]);
+  }, [drawerRemoteSessions.targets, onOpenDrawerRemoteSession, sessions, showSessionPreviewError]);
 
-  const handleToggleSessionPreviewSelection = useCallback((sessionId: string) => {
+  const handleSetSessionPreviewCell = useCallback((
+    coordinate: JunctionPreviewCoordinate,
+    sessionId: string,
+  ) => {
     const target = resolveSessionPreviewTargetFromDrawerSelection(sessionId);
-    if (!target) {
-      return;
-    }
-    const currentSelection = pruneSessionPreviewSelectionToOpenSessions(sessionPreviewSelection, sessions);
-    const result = toggleSessionPreviewTarget(currentSelection, target);
+    if (!target) return;
+    const result = setJunctionPreviewCell(sessionPreviewLattice, coordinate, target);
     if (!result.ok) {
-      setSessionPreviewError(result.reason === 'limit' ? '最多选择 6 个 session。' : '该 session 无法加入预览。');
+      showSessionPreviewError('该格无法指定 session。');
       return;
     }
-    persistSessionPreviewSelection(result.selection);
-  }, [persistSessionPreviewSelection, resolveSessionPreviewTargetFromDrawerSelection, sessionPreviewSelection, sessions]);
+    persistSessionPreviewLattice(result.lattice);
+  }, [persistSessionPreviewLattice, resolveSessionPreviewTargetFromDrawerSelection, sessionPreviewLattice]);
 
-  const handleSessionPreviewSelectionModeChange = useCallback((active: boolean) => {
-    setSessionPreviewSelectionMode(active);
-    setSessionPreviewError(null);
-    if (!active) setSessionDrawerOpen(false);
+  const handleClearSessionPreviewCell = useCallback((coordinate: JunctionPreviewCoordinate) => {
+    persistSessionPreviewLattice(clearJunctionPreviewCell(sessionPreviewLattice, coordinate));
+  }, [persistSessionPreviewLattice, sessionPreviewLattice]);
+
+  const handlePreviewFocusChange = useCallback((coordinate: JunctionPreviewCoordinate) => {
+    setSessionPreviewSideEdge((current) => {
+      if (coordinate.col < sessionPreviewFocus.col) return 'right';
+      if (coordinate.col > sessionPreviewFocus.col) return 'left';
+      return current;
+    });
+    setSessionPreviewFocus(coordinate);
+  }, [sessionPreviewFocus]);
+
+  const handleOpenSessionDrawer = useCallback(() => {
+    setSessionDrawerOpen(true);
   }, []);
 
-  const handlePreviewFolder = useCallback((cwd: string) => {
-    const folderItems = drawerSessions.filter((item) => (item.cwd?.trim() || 'cwd 未知') === cwd);
-    const orderedTargets: SessionPreviewTarget[] = [];
-    for (const item of folderItems) {
-      const target = resolveSessionPreviewTargetFromDrawerSelection(item.id);
-      if (target && !orderedTargets.some((candidate) => candidate.sessionId === target.sessionId)) {
-        orderedTargets.push(target);
+  const handleSelectSessionFromDrawer = useCallback((sessionId: string) => {
+    if (sessionPreviewOpen) {
+      const target = resolveSessionPreviewTargetFromDrawerSelection(sessionId);
+      if (target) {
+        const result = setJunctionPreviewCell(sessionPreviewLattice, sessionPreviewFocus, target);
+        if (result.ok) {
+          persistSessionPreviewLattice(result.lattice);
+        } else {
+          showSessionPreviewError('该格无法指定 session。');
+        }
       }
-      if (orderedTargets.length === 6) break;
-    }
-    if (orderedTargets.length === 0) {
-      setSessionPreviewError('该 cwd 没有可预览的 session。');
+      setSessionDrawerOpen(false);
       return;
     }
-    const nextSelection = { version: 1 as const, orderedTargets };
-    const previewSessions = resolveSessionPreviewTargets(nextSelection, sessions);
-    persistSessionPreviewSelection(nextSelection);
-    setSessionPreviewSelectionMode(false);
-    setSessionPreviewError(orderedTargets.length < folderItems.length ? '预览最多显示 6 个 session。' : null);
-    sessionPreviewEntryRef.current = {
-      activeSessionId: activeSession?.id || null,
-      slotIds: { ...effectiveSessionGroupSlotIds },
-      focusSlot: sessionGroupFocusSlot,
-    };
-    setSessionPreviewInputSessionId(previewSessions[0]?.id || null);
-    setSessionPreviewOpen(true);
+    const remoteTarget = drawerRemoteSessionsRef.current.targets.get(sessionId);
+    if (remoteTarget) {
+      const openedSessionId = onOpenDrawerRemoteSession?.(remoteTarget.target, remoteTarget.sessionName);
+      if (typeof openedSessionId === 'string' && openedSessionId.trim()) {
+        activateSessionInViewportSlot(openedSessionId.trim());
+      }
+      setSessionDrawerOpen(false);
+      return;
+    }
+    handleActivateOpenSessionInViewport(sessionId);
     setSessionDrawerOpen(false);
-  }, [activeSession?.id, drawerSessions, effectiveSessionGroupSlotIds, persistSessionPreviewSelection, resolveSessionPreviewTargetFromDrawerSelection, sessionGroupFocusSlot, sessions]);
-
-  const handleReplaceSessionPreview = useCallback((sourceSessionId: string, replacementSessionId: string) => {
-    const replacementSession = sessions.find((session) => session.id === replacementSessionId);
-    if (!replacementSession) {
-      setSessionPreviewError('替换目标已不在打开的 session 中。');
-      return;
-    }
-    const result = replaceSessionPreviewTarget(sessionPreviewSelection, sourceSessionId, {
-      sessionId: replacementSession.id,
-      daemonHostId: replacementSession.daemonHostId,
-      bridgeHost: replacementSession.bridgeHost,
-      bridgePort: replacementSession.bridgePort,
-      sessionName: replacementSession.sessionName,
-    });
-    if (!result.ok) {
-      setSessionPreviewError(
-        result.reason === 'already-selected'
-          ? '该 session 已在预览中。'
-          : '当前预览项已失效，无法替换。',
-      );
-      return;
-    }
-    persistSessionPreviewSelection(result.selection);
-  }, [persistSessionPreviewSelection, sessionPreviewSelection, sessions]);
-
-  const handleAddSessionPreview = useCallback((sessionId: string) => {
-    const session = sessions.find((item) =>
-      item.id === sessionId && item.state !== 'closed',
-    );
-    if (!session) {
-      setSessionPreviewError('只能添加当前仍打开的 session。');
-      return;
-    }
-    const currentSelection = pruneSessionPreviewSelectionToOpenSessions(sessionPreviewSelection, sessions);
-    const result = appendSessionPreviewTarget(currentSelection, {
-      sessionId: session.id,
-      daemonHostId: session.daemonHostId,
-      bridgeHost: session.bridgeHost,
-      bridgePort: session.bridgePort,
-      sessionName: session.sessionName,
-    });
-    if (!result.ok) {
-      setSessionPreviewError(
-        result.reason === 'limit'
-          ? '最多选择 6 个 session。'
-          : result.reason === 'already-selected'
-            ? '该 session 已在预览中。'
-            : '该 session 无法加入预览。',
-      );
-      return;
-    }
-    persistSessionPreviewSelection(result.selection);
-  }, [persistSessionPreviewSelection, sessionPreviewSelection, sessions]);
-
-  const handleMoveSessionPreview = useCallback((sourceSessionId: string, targetIndex: number) => {
-    const currentSelection = pruneSessionPreviewSelectionToOpenSessions(sessionPreviewSelection, sessions);
-    const result = moveSessionPreviewTarget(currentSelection, sourceSessionId, targetIndex);
-    if (!result.ok) {
-      setSessionPreviewError('当前预览项或目标位置已失效，无法移动。');
-      return;
-    }
-    persistSessionPreviewSelection(result.selection);
-  }, [persistSessionPreviewSelection, sessionPreviewSelection, sessions]);
+  }, [
+    activateSessionInViewportSlot,
+    handleActivateOpenSessionInViewport,
+    onOpenDrawerRemoteSession,
+    persistSessionPreviewLattice,
+    resolveSessionPreviewTargetFromDrawerSelection,
+    sessionPreviewFocus,
+    sessionPreviewLattice,
+    sessionPreviewOpen,
+  ]);
 
   const handleOpenSessionPreview = useCallback(() => {
-    if (sessionPreviewSessions.length === 0) {
-      setSessionPreviewError('请先在抽屉中选择至少一个已打开的 session。');
+    if (keyboardInset > 0 || terminalKeyboardRequestedRef.current) {
+      showSessionPreviewError('请先收起输入法再进入终端预览。');
       return;
     }
-    if (keyboardInset > 0 || terminalKeyboardRequestedRef.current) {
-      setSessionPreviewError('请先收起输入法再进入终端预览。');
+    const activeId = activeSession?.id || uiSessionId;
+    const activeSessionRecord = activeId
+      ? sessions.find((session) => session.id === activeId && session.state !== 'closed') || null
+      : null;
+    if (!activeSessionRecord) {
+      showSessionPreviewError('当前没有可进入预览的活动 session。');
       return;
     }
     sessionPreviewEntryRef.current = {
@@ -3115,54 +3090,67 @@ function TerminalPageComponent({
       slotIds: { ...effectiveSessionGroupSlotIds },
       focusSlot: sessionGroupFocusSlot,
     };
-    setSessionPreviewInputSessionId(sessionPreviewSessions[0]?.id || null);
+    const activeCoordinate = findJunctionPreviewCellBySessionId(sessionPreviewLattice, activeSessionRecord.id);
+    const activeCoordinateHasCurrentIdentity = activeCoordinate
+      ? resolveJunctionPreviewCell(
+        sessionPreviewLattice,
+        activeCoordinate,
+        [activeSessionRecord],
+      ) !== null
+      : false;
+    if (activeCoordinate && activeCoordinateHasCurrentIdentity) {
+      setSessionPreviewFocus(activeCoordinate);
+      setSessionPreviewSideEdge(activeCoordinate.col < 0 ? 'right' : 'left');
+      setSessionPreviewOpen(true);
+      return;
+    }
+
+    const target = {
+      sessionId: activeSessionRecord.id,
+      daemonHostId: activeSessionRecord.daemonHostId,
+      bridgeHost: activeSessionRecord.bridgeHost,
+      bridgePort: activeSessionRecord.bridgePort,
+      sessionName: activeSessionRecord.sessionName,
+    };
+    const coordinate = { col: 0, row: 0 };
+    const result = setJunctionPreviewCell(sessionPreviewLattice, coordinate, target);
+    if (!result.ok) {
+      showSessionPreviewError('无法把当前 session 放入预览焦点格。');
+      return;
+    }
+    persistSessionPreviewLattice(result.lattice);
+    setSessionPreviewFocus(coordinate);
+    setSessionPreviewSideEdge('left');
     setSessionPreviewOpen(true);
-  }, [activeSession?.id, effectiveSessionGroupSlotIds, keyboardInset, sessionGroupFocusSlot, sessionPreviewSessions]);
+  }, [
+    activeSession?.id,
+    effectiveSessionGroupSlotIds,
+    keyboardInset,
+    persistSessionPreviewLattice,
+    sessionGroupFocusSlot,
+    sessions,
+    sessionPreviewLattice,
+    showSessionPreviewError,
+    uiSessionId,
+  ]);
 
   const handleCancelSessionPreview = useCallback(() => {
     const entry = sessionPreviewEntryRef.current;
     sessionPreviewEntryRef.current = null;
     setSessionPreviewOpen(false);
-    setSessionPreviewInputSessionId(null);
     if (!entry) return;
     setSessionGroupSlotIds(entry.slotIds);
     setSessionGroupFocusSlot(entry.focusSlot);
     if (entry.activeSessionId && entry.activeSessionId !== activeSession?.id) {
       const entryStillOpen = sessions.some((session) => session.id === entry.activeSessionId);
       if (!entryStillOpen) {
-        setSessionPreviewError('进入预览前的 session 已关闭，无法恢复。');
+        showSessionPreviewError('进入预览前的 session 已关闭，无法恢复。');
         return;
       }
       handleSwitchSessionFromChrome(entry.activeSessionId);
     }
   }, [activeSession?.id, handleSwitchSessionFromChrome, sessions]);
-
-  const handleActivateSessionFromPreview = useCallback((sessionId: string) => {
-    sessionPreviewEntryRef.current = null;
-    handleActivateOpenSessionInViewport(sessionId);
-    setSessionPreviewOpen(false);
-    setSessionPreviewInputSessionId(null);
-  }, [handleActivateOpenSessionInViewport]);
-
-  const handleSessionPreviewPrimarySessionChange = useCallback((sessionId: string) => {
-    setSessionPreviewInputSessionId(sessionId);
-  }, []);
-
-  const handleRemoveSessionFromPreview = useCallback((sessionId: string) => {
-    const session = sessions.find((item) => item.id === sessionId);
-    if (!session) {
-      setSessionPreviewError('要移除的预览 session 已不在打开列表中。');
-      return;
-    }
-    const currentSelection = pruneSessionPreviewSelectionToOpenSessions(sessionPreviewSelection, sessions);
-    const result = removeSessionPreviewTarget(currentSelection, session.id);
-    if (!result.ok) {
-      setSessionPreviewError('无法从预览中移除该 session。');
-      return;
-    }
-    persistSessionPreviewSelection(result.selection);
-    if (result.selection.orderedTargets.length === 0) handleCancelSessionPreview();
-  }, [handleCancelSessionPreview, persistSessionPreviewSelection, sessionPreviewSelection, sessions]);
+  handleCancelSessionPreviewRef.current = handleCancelSessionPreview;
 
   useEffect(() => {
     if (!sessionPreviewOpen) return;
@@ -3177,7 +3165,7 @@ function TerminalPageComponent({
         listenerHandle = handle;
       })
       .catch((error) => {
-        setSessionPreviewError(`系统返回监听失败：${error instanceof Error ? error.message : String(error)}`);
+        showSessionPreviewError(`系统返回监听失败：${error instanceof Error ? error.message : String(error)}`);
       });
     return () => {
       disposed = true;
@@ -3325,15 +3313,6 @@ function TerminalPageComponent({
   const handleCloseSessionDrawer = useCallback(() => {
     setSessionDrawerOpen(false);
   }, []);
-
-  const handleClearDrawerPreviewSelection = useCallback(() => {
-    persistSessionPreviewSelection({ version: 1, orderedTargets: [] });
-  }, [persistSessionPreviewSelection]);
-
-  const drawerPreviewSelectedSessionIds = useMemo(
-    () => sessionPreviewSessions.map((session) => session.id),
-    [sessionPreviewSessions],
-  );
 
   const handleOpenTabManager = useCallback((paneId?: string) => {
     setTabManagerScopePaneId(paneId || null);
@@ -3564,9 +3543,9 @@ function TerminalPageComponent({
                 onRenameRemoteSession,
               }
             : null,
-          controls: portraitSessionDrawerEnabled ? (
+          controls: (portraitSessionDrawerEnabled || sessionDrawerGestureEnabled) ? (
             <>
-              {!sessionDrawerOpen ? (
+              {portraitSessionDrawerEnabled && !sessionDrawerOpen ? (
                 <>
                   <AmbientButton
                     type="button"
@@ -3650,7 +3629,7 @@ function TerminalPageComponent({
                   ) : null}
                 </>
               ) : null}
-              {renderSessionDrawer ? renderSessionDrawer({
+              {sessionDrawerGestureEnabled && renderSessionDrawer ? renderSessionDrawer({
                 open: sessionDrawerOpen,
                 topInsetPx: headerTopInsetPx,
                 bottomInsetPx: keyboardInset,
@@ -3666,13 +3645,6 @@ function TerminalPageComponent({
                 sessionGroupLayoutAxis,
                 onOpenQuickTabPicker: handleOpenQuickTabPickerFromDrawer,
                 onDebugAddEvent: handleSessionDrawerDebugAddEvent,
-                previewSelectionMode: sessionPreviewSelectionMode,
-                previewSelectedSessionIds: drawerPreviewSelectedSessionIds,
-                previewSelectionError: sessionPreviewError,
-                onPreviewSelectionModeChange: handleSessionPreviewSelectionModeChange,
-                onTogglePreviewSession: handleToggleSessionPreviewSelection,
-                onPreviewFolder: handlePreviewFolder,
-                onClearPreviewSelection: handleClearDrawerPreviewSelection,
                 terminalShellSkin: effectiveTerminalShellSkin,
               }) : null}
             </>
@@ -3715,16 +3687,18 @@ function TerminalPageComponent({
           onLongPressRow: handleLongPressCopyRow,
           onCopySelectionDismiss: handleCloseCopyMenu,
           sessionPreviewOpen,
-          sessionPreviewSessions,
-          sessionPreviewReplacementCandidates,
+          sessionPreviewLattice,
+          sessionPreviewFocus,
+          sessionPreviewCandidates,
+          sessionPreviewSideEdge,
+          sessionPreviewViewportWidth: viewportWidth,
+          sessionPreviewViewportHeight: currentLayoutViewportHeight,
           onOpenSessionPreview: handleOpenSessionPreview,
           onCloseSessionPreview: handleCancelSessionPreview,
-          onActivatePreviewSession: handleActivateSessionFromPreview,
-          onAddPreviewSession: handleAddSessionPreview,
-          onRemovePreviewSession: handleRemoveSessionFromPreview,
-          onMovePreviewSession: handleMoveSessionPreview,
-          onReplacePreviewSession: handleReplaceSessionPreview,
-          onPreviewPrimarySessionChange: handleSessionPreviewPrimarySessionChange,
+          onPreviewFocusChange: handlePreviewFocusChange,
+          onSetPreviewCell: handleSetSessionPreviewCell,
+          onClearPreviewCell: handleClearSessionPreviewCell,
+          onOpenSessionDrawer: sessionDrawerGestureEnabled ? handleOpenSessionDrawer : undefined,
         },
         copyMenu: copySelection.menu && !sessionDrawerOpen
           ? {

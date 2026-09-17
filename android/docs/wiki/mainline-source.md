@@ -241,23 +241,21 @@ rebound when each target edge becomes active.
 
 ```mermaid
 flowchart TD
-  SessionDrawer["src/components/terminal/TerminalSessionDrawer.tsx#TerminalSessionDrawer"] --> PreviewSelectionOwner["src/lib/session-preview-selection.ts#toggleSessionPreviewTarget"]
+  SessionDrawer["src/components/terminal/TerminalSessionDrawer.tsx#TerminalSessionDrawer"] --> PreviewLatticeOwner["src/lib/junction-preview-lattice.ts#setJunctionPreviewCell"]
   SessionDrawer --> RemoteSessionOpenOwner["src/hooks/useSessionOpenActions.ts#handleOpenGroupSession"]
-  RemoteSessionOpenOwner --> PreviewSelectionOwner
-  PreviewSelectionOwner --> OpenTabResolver["src/lib/session-preview-selection.ts#resolveSessionPreviewTargets"]
+  RemoteSessionOpenOwner --> PreviewLatticeOwner
+  PreviewLatticeOwner --> OpenTabResolver["src/lib/junction-preview-lattice.ts#resolveJunctionPreviewCell"]
   TerminalShellGesture["src/lib/session-preview-gesture.ts#resolveSessionPreviewGesture"] --> PreviewModeOwner["src/pages/TerminalPage.tsx#sessionPreviewOpen"]
-  PreviewModeOwner --> PreviewLiveSetProjector["src/lib/session-preview-selection.ts#projectSessionPreviewLiveIds"]
+  PreviewModeOwner --> PreviewLiveSetProjector["src/lib/junction-preview-lattice.ts#projectJunctionPreviewLiveIds"]
   PreviewLiveSetProjector --> SessionBodySubscriptionIntent["src/pages/TerminalPage.tsx#onLiveSessionIdsChange"]
   PreviewModeOwner --> TerminalPreviewGrid["src/components/terminal/TerminalPreviewGrid.tsx#TerminalPreviewGrid"]
-  TerminalPreviewGrid --> WindowGroupLayout["src/components/terminal/WindowGroupLayout.tsx#WindowGroupLayout"]
-  WindowGroupLayout --> TerminalPreviewTile["src/components/terminal/TerminalPreviewGrid.tsx#preview-tile"]
+  TerminalPreviewGrid --> JunctionPreviewLayout["src/lib/junction-preview-layout.ts#resolveJunctionPreviewLayout"]
+  JunctionPreviewLayout --> TerminalPreviewTile["src/components/terminal/TerminalPreviewGrid.tsx#preview-cell"]
   TerminalPreviewTile --> SharedRenderSurface["src/components/TerminalView.tsx#TerminalView"]
-  TerminalPreviewTile --> PreviewReplacementMenu["src/components/terminal/TerminalPreviewGrid.tsx#preview-replacement-menu"]
-  PreviewReplacementMenu --> PreviewSelectionOwner
-  PreviewAddMenu["src/components/terminal/TerminalPreviewGrid.tsx#terminal-preview-add-menu"] --> PreviewSelectionOwner
-  TerminalPreviewTileClose["src/pages/TerminalPage.tsx#handleRemoveSessionFromPreview"] --> PreviewSelectionOwner
-  TerminalPreviewTile --> ActiveSessionIntent["src/pages/TerminalPage.tsx#handleActivateOpenSessionInViewport"]
-  ActiveSessionIntent --> TerminalPage["src/pages/TerminalPage.tsx"]
+  TerminalPreviewTile --> PreviewSlotMenu["src/components/terminal/TerminalPreviewGrid.tsx#terminal-preview-slot-menu"]
+  PreviewSlotMenu --> PreviewLatticeOwner
+  PreviewModeOwner --> PreviewFocus["src/pages/TerminalPage.tsx#handlePreviewFocusChange"]
+  PreviewFocus --> PreviewLatticeOwner
   SystemBackIntent["@capacitor/app#backButton"] --> PreviewModeOwner
   PreviewModeOwner --> EntrySessionProjection["src/pages/TerminalPage.tsx#handleCancelSessionPreview"]
   EntrySessionProjection --> TerminalPage
@@ -415,7 +413,7 @@ flowchart TD
   RendererWindow --> DomRenderer["client.dom_renderer / DOM projection"]
   DomRenderer --> TerminalShell["client.terminal_shell / terminal shell projection"]
   TerminalShell --> UiProjection["resource.ui_projection"]
-  UiProjection --> PreviewSelection["resource.session_preview_selection"]
+  UiProjection --> PreviewLattice["resource.session_preview_lattice"]
   UiProjection --> PreviewMode["resource.session_preview_mode"]
   UiProjection --> RemoteWindowContract["resource.remote_window_ui_contract"]
   RemoteWindowContract --> RemoteWindowOverlay
@@ -460,7 +458,7 @@ flowchart TD
 | Remote window UI plugin | `src/lib/plugin-remote-window/remote-window-contract.ts` (typed slot contract), `src/lib/plugin-host/remote-window-ui-plugin.tsx` (slot provider), `src/components/terminal/RemoteWindowOverlay.tsx` (UI), `src/App.tsx` (slot consumer), `src/pages/TerminalPage.tsx` (remote window stream/catalog/session/action callback consumer only) |
 | Quickbar UI plugin | `src/lib/plugin-quickbar/quickbar-contract.ts` (typed slot contract), `src/lib/plugin-host/quickbar-ui-plugin.tsx` (slot provider), `src/components/terminal/TerminalQuickBar.tsx` (UI), `src/App.tsx` (slot consumer), `src/pages/TerminalPage.tsx` (quickbar action projection and callback consumer only) |
 | Terminal shell UI plugin | `src/lib/plugin-terminal-shell/terminal-shell-contract.ts` (typed slot contract), `src/lib/plugin-host/terminal-shell-ui-plugin.tsx` (slot provider), `src/pages/TerminalConnectionStatusStrip.tsx`, `src/pages/TerminalPageCopyMenu.tsx`, `src/pages/TerminalPageStageShell.tsx`, `src/pages/terminal-page-shell-ui.tsx`, `src/App.tsx` (slot consumer), `src/pages/TerminalPage.tsx` (terminal shell projection and callback consumer only) |
-| Session quick preview | `src/lib/session-preview-selection.ts`, `src/lib/session-preview-gesture.ts`, `src/components/terminal/TerminalPreviewGrid.tsx`, `src/pages/TerminalPageStageShell.tsx`; secondary title/body tap promotes primary through `WindowGroupLayout`, secondary previews use compact local typography, and body drag remains local preview scroll/pan |
+| Session quick preview | `src/lib/junction-preview-lattice.ts`, `src/lib/junction-preview-layout.ts`, `src/lib/session-preview-gesture.ts`, `src/components/terminal/TerminalPreviewGrid.tsx`, `src/pages/TerminalPageStageShell.tsx`; one lattice and focus coordinate drive portrait/landscape/wide junction framing, visible populated cells reuse the read-only shared renderer, and edge taps pan focus without moving session targets |
 | Daemon runtime | `src/server/server.ts`, `src/server/terminal-daemon-runtime.ts`, `src/server/terminal-runtime.ts`, `src/server/terminal-message-runtime.ts`, `src/server/terminal-attachment-message-runtime.ts`, `src/server/daemon-input-queue-runtime.ts`, `src/server/terminal-reliable-input-ack.ts`, `src/server/terminal-mirror-runtime.ts`, `src/server/terminal-message-control-runtime.ts`, `src/server/daemon-session-catalog-runtime.ts`, `src/server/terminal-transport-runtime.ts`, `src/server/remote-window-stream-daemon.ts` |
 | Daemon control edges | `src/server/terminal-control-runtime.ts`, `src/server/terminal-file-transfer-runtime.ts`, `src/server/terminal-schedule-runtime.ts`, `src/server/remote-screenshot-daemon.ts`, `src/server/remote-window-stream-daemon.ts`, `src/server/terminal-http-runtime.ts`, `src/server/daemon-session-catalog-runtime.ts` |
 | Daemon attachment delivery | `src/server/attachment-delivery-runtime.ts#createAttachmentDeliveryRuntime` -> `src/server/terminal-http-runtime.ts#createTerminalHttpRuntime` -> `scripts/zterm-send-image.mjs`; transport-message pending/history/asset/receipt projection is owned by `src/server/terminal-attachment-message-runtime.ts#createTerminalAttachmentMessageRuntime` and only routed by `terminal-message-runtime.ts`; durable manifests provide per-device missed-push recovery, preview-first reads, receipts, and 48-hour cleanup. |
