@@ -37,6 +37,20 @@ describe('ambient shared controls render owner DOM', () => {
     expect(defaultButton.style.minWidth).toBe('44px');
   });
 
+  it('marks transparent button variants as flat so material hover states do not fill them', () => {
+    const { container } = render(
+      <>
+        <AmbientButton aria-label="saved open" variant="saved-open" />
+        <AmbientButton aria-label="transparent" style={{ background: 'transparent' }} />
+        <AmbientButton aria-label="material" />
+      </>,
+    );
+    const [savedOpen, transparent, material] = Array.from(container.querySelectorAll('button'));
+    expect(savedOpen.getAttribute('data-amb-flat')).toBe('true');
+    expect(transparent.getAttribute('data-amb-flat')).toBe('true');
+    expect(material.hasAttribute('data-amb-flat')).toBe(false);
+  });
+
   it('renders AmbientInput as an input with ambient classes', () => {
     const { container } = render(<AmbientInput aria-label="ambient input" />);
     const input = container.querySelector('input');
@@ -64,6 +78,71 @@ describe('ambient shared controls render owner DOM', () => {
     expect(checkbox.style.flex).toBe('0 0 18px');
     expect(textField.style.width).toBe('100%');
     expect(textField.style.minHeight).toBe('44px');
+  });
+
+  it('keeps caller geometry while the shared field material owns visual properties', () => {
+    const { container } = render(
+      <>
+        <AmbientInput
+          aria-label="input"
+          style={{
+            width: '72%',
+            background: 'rgb(1, 2, 3)',
+            border: '1px solid red',
+            borderColor: 'red',
+            borderWidth: '3px',
+            borderStyle: 'dashed',
+            color: 'red',
+            boxShadow: 'none',
+            textShadow: 'none',
+          }}
+        />
+        <AmbientSelect
+          aria-label="select"
+          style={{
+            minHeight: '38px',
+            background: 'rgb(1, 2, 3)',
+            border: '1px solid red',
+            borderColor: 'red',
+            borderWidth: '3px',
+            borderStyle: 'dashed',
+            color: 'red',
+            boxShadow: 'none',
+            textShadow: 'none',
+          }}
+        >
+          <option>a</option>
+        </AmbientSelect>
+        <AmbientTextarea
+          aria-label="textarea"
+          style={{
+            minHeight: '76px',
+            background: 'rgb(1, 2, 3)',
+            border: '1px solid red',
+            borderColor: 'red',
+            borderWidth: '3px',
+            borderStyle: 'dashed',
+            color: 'red',
+            boxShadow: 'none',
+            textShadow: 'none',
+          }}
+        />
+      </>,
+    );
+
+    const input = container.querySelector('input');
+    const select = container.querySelector('select');
+    const textarea = container.querySelector('textarea');
+    expect(input?.style.width).toBe('72%');
+    expect(select?.style.minHeight).toBe('38px');
+    expect(textarea?.style.minHeight).toBe('76px');
+    for (const control of [input, select, textarea]) {
+      expect(control?.style.border).toContain('var(--amb-control-border)');
+      expect(control?.style.backgroundColor).toBe('var(--amb-control-bg)');
+      expect(control?.style.color).toBe('var(--amb-control-text)');
+      expect(control?.style.boxShadow).toContain('var(--amb-control-inset)');
+      expect(control?.style.textShadow).toContain('var(--amb-control-text-shadow');
+    }
   });
 
   it('renders AmbientSelect as a select with ambient classes', () => {

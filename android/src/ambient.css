@@ -6,3 +6,96 @@
 :root,[data-terminal-shell-skin="light"]{--amb-panel-bg:#f6f8fa;--amb-panel-surface:#eef1f4;--amb-panel-active:#ffffff;--amb-panel-text:#57606a;--amb-panel-muted:#6e7781;--amb-panel-border:rgba(31,35,40,.12);--amb-panel-accent:#128354;--amb-panel-accent-soft:rgba(18,131,84,.12);--amb-panel-accent-border:rgba(18,131,84,.36);--amb-panel-danger:#c43e4d;--amb-panel-danger-soft:rgba(196,62,77,.12);--amb-panel-shadow:rgba(14,19,33,.18)}
 [data-terminal-shell-skin="black"] {--amb-panel-bg:#0f1116;--amb-panel-surface:#15181e;--amb-panel-active:#1e222a;--amb-panel-text:#f0f3f8;--amb-panel-muted:#98a1af;--amb-panel-border:rgba(245,247,251,.14);--amb-panel-accent:#38d47d;--amb-panel-accent-soft:rgba(56,212,125,.14);--amb-panel-accent-border:rgba(56,212,125,.38);--amb-panel-danger:#ff7a86;--amb-panel-danger-soft:rgba(255,122,134,.14);--amb-panel-shadow:rgba(0,0,0,.64);--amb-light-x:-1;--amb-light-y:-1;--amb-key-light-intensity:.62;--amb-fill-light-intensity:.70;--amb-light-hue:215;--amb-light-saturation:5%;--amb-elevation:.8;--amb-highlight-color:rgba(255,255,255,.45);--amb-lume-hue:19;--amb-albedo:color(srgb-linear .085 .10 .125);--amb-mat-roughness:.86;--amb-grain-amount:.22;--amb-shade:.94}
 [data-terminal-shell-skin="light"] {--amb-light-x:1;--amb-light-y:-1;--amb-key-light-intensity:.42;--amb-fill-light-intensity:.38;--amb-light-hue:145;--amb-light-saturation:6%;--amb-elevation:0;--amb-highlight-color:rgba(255,255,255,.9);--amb-lume-hue:210;--amb-albedo:color(srgb-linear .93 .94 .95);--amb-mat-roughness:.74;--amb-grain-amount:.15;--amb-shade:1}
+
+/* Light skeuomorphic controls: frosted grey keys with a crisp top highlight,
+ * a restrained bottom shade, and a shallow inset press state. The black skin
+ * below shares the same geometry and state model. */
+:root,[data-terminal-shell-skin="light"]{
+  --amb-control-bg:#eef0f2;
+  --amb-control-text:#111315;
+  --amb-control-border:rgba(17,19,21,.14);
+  --amb-control-text-shadow:0 1px 0 rgba(255,255,255,.82);
+  --amb-control-shadow:
+    inset 0 1px 0 rgba(255,255,255,.92),
+    inset 0 -1px 0 rgba(17,19,21,.08),
+    0 2px 3px rgba(17,19,21,.10),
+    0 8px 16px rgba(17,19,21,.08);
+  --amb-control-inset:
+    inset 0 1px 2px rgba(17,19,21,.14),
+    inset 0 -1px 0 rgba(255,255,255,.72);
+  --amb-control-active-bg:#ffffff;
+  --amb-control-active-text:#0b6b45;
+  --amb-control-active-border:rgba(18,131,84,.52);
+  --amb-control-active-shadow:
+    inset 0 1px 0 rgba(255,255,255,.96),
+    inset 0 -2px 4px rgba(17,19,21,.10),
+    0 1px 2px rgba(17,19,21,.10),
+    0 0 0 1px rgba(18,131,84,.14);
+  --amb-control-pressed-shadow:
+    inset 0 2px 4px rgba(17,19,21,.20),
+    inset 0 -1px 0 rgba(255,255,255,.78);
+  --amb-control-disabled-opacity:.46;
+}
+
+[data-terminal-shell-skin="black"]{
+  --amb-control-bg:#20252d;
+  --amb-control-text:#f2f5fa;
+  --amb-control-border:rgba(245,247,251,.16);
+  --amb-control-text-shadow:0 -1px 0 rgba(0,0,0,.68);
+  --amb-control-shadow:
+    inset 0 1px 0 rgba(255,255,255,.18),
+    inset 0 -1px 0 rgba(0,0,0,.56),
+    0 2px 3px rgba(0,0,0,.42),
+    0 8px 18px rgba(0,0,0,.34);
+  --amb-control-inset:
+    inset 0 1px 3px rgba(0,0,0,.72),
+    inset 0 -1px 0 rgba(255,255,255,.10);
+  --amb-control-active-bg:#29313b;
+  --amb-control-active-text:#7cf0ad;
+  --amb-control-active-border:rgba(56,212,125,.52);
+  --amb-control-active-shadow:
+    inset 0 1px 0 rgba(255,255,255,.20),
+    inset 0 -2px 4px rgba(0,0,0,.52),
+    0 1px 2px rgba(0,0,0,.46),
+    0 0 0 1px rgba(56,212,125,.18);
+  --amb-control-pressed-shadow:
+    inset 0 2px 5px rgba(0,0,0,.78),
+    inset 0 -1px 0 rgba(255,255,255,.12);
+  --amb-control-disabled-opacity:.42;
+}
+
+.amb-button[data-selected="true"]{
+  background-color:var(--amb-control-active-bg) !important;
+  color:var(--amb-control-active-text) !important;
+  border-color:var(--amb-control-active-border) !important;
+  box-shadow:var(--amb-control-active-shadow) !important;
+}
+
+.amb-button:hover:not(:disabled):not([data-amb-flat="true"]){
+  background-color:color-mix(in srgb,var(--amb-control-bg) 88%,var(--amb-control-active-bg)) !important;
+}
+
+.amb-button:active:not(:disabled):not([data-amb-flat="true"]){
+  transform:translateY(1px);
+  box-shadow:var(--amb-control-pressed-shadow) !important;
+}
+
+.amb-button:disabled,
+.amb-field:disabled,
+.amb-select:disabled{
+  cursor:not-allowed;
+  opacity:var(--amb-control-disabled-opacity) !important;
+  box-shadow:var(--amb-control-inset) !important;
+}
+
+.amb-field:focus-visible,
+.amb-select:focus-visible{
+  outline:2px solid var(--amb-control-active-border);
+  outline-offset:2px;
+  box-shadow:var(--amb-control-active-shadow) !important;
+}
+
+.amb-button:focus-visible{
+  outline:2px solid var(--amb-control-active-border);
+  outline-offset:2px;
+}

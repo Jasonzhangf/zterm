@@ -1,5 +1,4 @@
 import { forwardRef, type ButtonHTMLAttributes, type CSSProperties } from 'react';
-import { mobileTheme } from '../../lib/mobile-ui';
 
 export type AmbientButtonVariant =
   | 'settings'
@@ -30,7 +29,31 @@ export interface AmbientButtonProps extends ButtonHTMLAttributes<HTMLButtonEleme
 
 const commonButtonStyle: CSSProperties = {
   cursor: 'pointer',
+  border: '1px solid var(--amb-control-border)',
+  backgroundColor: 'var(--amb-control-bg)',
+  color: 'var(--amb-control-text)',
+  textShadow: 'var(--amb-control-text-shadow, none)',
+  boxShadow: 'var(--amb-control-shadow)',
+  transition:
+    'box-shadow 160ms cubic-bezier(0.2, 0, 0, 1), background-color 160ms cubic-bezier(0.2, 0, 0, 1), color 160ms cubic-bezier(0.2, 0, 0, 1), transform 160ms cubic-bezier(0.2, 0, 0, 1)',
 };
+
+const accentButtonStyle: CSSProperties = {
+  border: '1px solid var(--amb-control-active-border)',
+  backgroundColor: 'var(--amb-control-active-bg)',
+  color: 'var(--amb-control-active-text)',
+  boxShadow: 'var(--amb-control-active-shadow)',
+};
+
+function hasFlatMaterial(variant: AmbientButtonVariant, style: CSSProperties | undefined) {
+  return (
+    variant === 'saved-open'
+    || style?.background === 'transparent'
+    || style?.background === 'none'
+    || style?.backgroundColor === 'transparent'
+    || style?.backgroundColor === 'none'
+  );
+}
 
 function resolveVariantStyle(
   variant: AmbientButtonVariant,
@@ -43,9 +66,6 @@ function resolveVariantStyle(
         height: '40px',
         padding: '0 10px',
         borderRadius: '12px',
-        border: `1px solid ${mobileTheme.colors.lightBorder}`,
-        backgroundColor: 'var(--zterm-settings-surface)',
-        color: mobileTheme.colors.lightText,
         fontSize: '14px',
         fontWeight: 900,
         flex: '0 0 auto',
@@ -59,20 +79,15 @@ function resolveVariantStyle(
         width: '44px',
         height: '44px',
         borderRadius: '14px',
-        border: 'none',
-        backgroundColor: 'var(--zterm-settings-surface)',
-        color: 'var(--zterm-settings-text)',
         fontSize: '22px',
         cursor: 'pointer',
       };
     case 'settings-save':
       return {
+        ...accentButtonStyle,
         minWidth: 'clamp(84px, 18vw, 96px)',
         height: '44px',
         borderRadius: '14px',
-        border: 'none',
-        backgroundColor: 'var(--zterm-settings-accent)',
-        color: 'var(--zterm-settings-accent-text)',
         fontWeight: 800,
         fontSize: '14px',
         padding: '0 14px',
@@ -83,9 +98,8 @@ function resolveVariantStyle(
         flex: 1,
         minHeight: '40px',
         borderRadius: '12px',
-        border: 'none',
-        backgroundColor: selected ? 'var(--zterm-settings-accent)' : 'var(--zterm-settings-field)',
-        color: selected ? 'var(--zterm-settings-accent-text)' : 'var(--zterm-settings-text)',
+        backgroundColor: selected ? 'var(--amb-control-active-bg)' : 'var(--amb-control-bg)',
+        color: selected ? 'var(--amb-control-active-text)' : 'var(--amb-control-text)',
         fontWeight: 800,
         cursor: 'pointer',
       };
@@ -94,9 +108,8 @@ function resolveVariantStyle(
         minHeight: '40px',
         width: '100%',
         borderRadius: '12px',
-        border: 'none',
-        backgroundColor: selected ? 'var(--zterm-settings-accent)' : 'var(--zterm-settings-field)',
-        color: selected ? 'var(--zterm-settings-accent-text)' : 'var(--zterm-settings-text)',
+        backgroundColor: selected ? 'var(--amb-control-active-bg)' : 'var(--amb-control-bg)',
+        color: selected ? 'var(--amb-control-active-text)' : 'var(--amb-control-text)',
         fontWeight: 800,
         fontSize: '15px',
         cursor: 'pointer',
@@ -110,10 +123,10 @@ function resolveVariantStyle(
         minHeight: '64px',
         borderRadius: '14px',
         border: selected
-          ? '2px solid var(--zterm-settings-accent)'
-          : '1px solid var(--zterm-settings-border)',
-        backgroundColor: selected ? 'var(--zterm-settings-surface)' : 'var(--zterm-settings-field)',
-        color: 'var(--zterm-settings-text)',
+          ? '1px solid var(--amb-control-active-border)'
+          : '1px solid var(--amb-control-border)',
+        backgroundColor: selected ? 'var(--amb-control-active-bg)' : 'var(--amb-control-bg)',
+        color: selected ? 'var(--amb-control-active-text)' : 'var(--amb-control-text)',
         cursor: 'pointer',
         textAlign: 'left',
         padding: '10px 12px',
@@ -123,12 +136,12 @@ function resolveVariantStyle(
         minHeight: '34px',
         borderRadius: '10px',
         border: `1px solid ${
-          selected ? 'color-mix(in srgb, var(--zterm-settings-accent) 44%, transparent)' : 'var(--zterm-settings-border)'
+          selected ? 'var(--amb-control-active-border)' : 'var(--amb-control-border)'
         }`,
         backgroundColor: selected
-          ? 'color-mix(in srgb, var(--zterm-settings-accent) 16%, var(--zterm-settings-field))'
-          : 'var(--zterm-settings-field)',
-        color: selected ? 'var(--zterm-settings-accent)' : 'var(--zterm-settings-text)',
+          ? 'var(--amb-control-active-bg)'
+          : 'var(--amb-control-bg)',
+        color: selected ? 'var(--amb-control-active-text)' : 'var(--amb-control-text)',
         fontSize: '12px',
         fontWeight: 700,
         textAlign: 'left',
@@ -151,12 +164,10 @@ function resolveVariantStyle(
       };
     case 'accent':
       return {
+        ...accentButtonStyle,
         width: '40px',
         height: '40px',
         borderRadius: '12px',
-        border: 'none',
-        backgroundColor: 'var(--zterm-settings-accent)',
-        color: 'var(--zterm-settings-accent-text)',
         lineHeight: 1,
         flex: '0 0 auto',
         display: 'inline-flex',
@@ -165,13 +176,11 @@ function resolveVariantStyle(
       };
     case 'accent-wide':
       return {
+        ...accentButtonStyle,
         marginTop: '6px',
         minHeight: '40px',
         padding: '0 14px',
         borderRadius: '12px',
-        border: 'none',
-        backgroundColor: 'var(--zterm-settings-accent)',
-        color: 'var(--zterm-settings-accent-text)',
         fontSize: '14px',
         fontWeight: 800,
         display: 'inline-flex',
@@ -185,11 +194,11 @@ function resolveVariantStyle(
         minHeight: '68px',
         padding: '10px 12px',
         border: `1px solid ${
-          selected ? 'var(--zterm-settings-accent)' : mobileTheme.colors.lightBorder
+          selected ? 'var(--amb-control-active-border)' : 'var(--amb-control-border)'
         }`,
         borderRadius: '16px',
-        backgroundColor: 'var(--zterm-settings-surface)',
-        color: mobileTheme.colors.lightText,
+        backgroundColor: selected ? 'var(--amb-control-active-bg)' : 'var(--amb-control-bg)',
+        color: selected ? 'var(--amb-control-active-text)' : 'var(--amb-control-text)',
         display: 'grid',
         gridTemplateColumns: 'auto 1fr auto',
         alignItems: 'center',
@@ -202,9 +211,10 @@ function resolveVariantStyle(
         width: '100%',
         minHeight: '72px',
         padding: '10px 12px',
-        border: 'none',
+        border: '1px solid transparent',
         backgroundColor: 'transparent',
         color: 'inherit',
+        boxShadow: 'none',
         display: 'grid',
         gridTemplateColumns: 'auto 1fr auto',
         alignItems: 'center',
@@ -217,20 +227,15 @@ function resolveVariantStyle(
         width: '44px',
         height: '44px',
         borderRadius: '14px',
-        border: 'none',
-        backgroundColor: 'var(--zterm-settings-surface)',
-        color: 'var(--zterm-settings-text)',
         fontSize: '22px',
         cursor: 'pointer',
       };
     case 'save':
       return {
+        ...accentButtonStyle,
         minWidth: '84px',
         height: '44px',
         borderRadius: '14px',
-        border: 'none',
-        backgroundColor: 'var(--zterm-settings-accent)',
-        color: 'var(--zterm-settings-accent-text)',
         fontWeight: 800,
         fontSize: '14px',
         padding: '0 14px',
@@ -238,56 +243,48 @@ function resolveVariantStyle(
       };
     case 'compact-accent':
       return {
-        border: 'none',
+        ...accentButtonStyle,
         borderRadius: '12px',
         minHeight: '38px',
         padding: '0 12px',
-        backgroundColor: 'var(--zterm-settings-accent)',
-        color: 'var(--zterm-settings-accent-text)',
         fontWeight: 900,
         fontSize: '14px',
         cursor: 'pointer',
       };
     case 'compact-accent-shadow':
       return {
-        border: 'none',
+        ...accentButtonStyle,
         borderRadius: '12px',
         minHeight: '38px',
         padding: '0 14px',
-        backgroundColor: 'var(--zterm-settings-accent)',
-        color: 'var(--zterm-settings-accent-text)',
         fontWeight: 800,
         fontSize: '14px',
         cursor: 'pointer',
       };
     case 'option':
       return {
-        border: 'none',
         borderRadius: '12px',
         padding: '10px 12px',
-        backgroundColor: selected ? 'var(--zterm-settings-accent)' : 'var(--zterm-settings-field)',
-        color: selected ? 'var(--zterm-settings-accent-text)' : 'var(--zterm-settings-text)',
+        backgroundColor: selected ? 'var(--amb-control-active-bg)' : 'var(--amb-control-bg)',
+        color: selected ? 'var(--amb-control-active-text)' : 'var(--amb-control-text)',
         cursor: 'pointer',
         textAlign: 'left',
       };
     case 'option-strong':
       return {
-        border: 'none',
         borderRadius: '12px',
         padding: '10px 12px',
-        backgroundColor: selected ? 'var(--zterm-settings-accent)' : 'var(--zterm-settings-field)',
-        color: selected ? 'var(--zterm-settings-accent-text)' : 'var(--zterm-settings-text)',
+        backgroundColor: selected ? 'var(--amb-control-active-bg)' : 'var(--amb-control-bg)',
+        color: selected ? 'var(--amb-control-active-text)' : 'var(--amb-control-text)',
         cursor: 'pointer',
         fontWeight: 700,
       };
     case 'discover':
       return {
+        ...accentButtonStyle,
         minWidth: '120px',
         minHeight: '38px',
         borderRadius: '12px',
-        border: 'none',
-        backgroundColor: 'var(--zterm-settings-accent)',
-        color: 'var(--zterm-settings-accent-text)',
         fontWeight: 800,
         cursor: 'pointer',
       };
@@ -295,9 +292,9 @@ function resolveVariantStyle(
       return {
         minHeight: '38px',
         borderRadius: '12px',
-        border: '1px solid var(--zterm-settings-border)',
-        backgroundColor: 'var(--zterm-settings-field)',
-        color: 'var(--zterm-settings-text)',
+        border: '1px solid var(--amb-control-border)',
+        backgroundColor: 'var(--amb-control-bg)',
+        color: 'var(--amb-control-text)',
         fontWeight: 800,
         padding: '0 14px',
         cursor: 'pointer',
@@ -311,6 +308,7 @@ export const AmbientButton = forwardRef<HTMLButtonElement, AmbientButtonProps>(
     ref,
   ) {
     const ambientClass = ['ambient', 'ambient-control', 'amb-button', 'ambx-control', 'amb-chamfer', className].filter(Boolean).join(' ');
+    const flatMaterial = hasFlatMaterial(variant, style);
     // An explicit caller geometry is authoritative: variant minimums must not
     // inflate a checkbox, close button or icon button that asked for an exact size.
     const geometryOverride: CSSProperties = {};
@@ -325,12 +323,13 @@ export const AmbientButton = forwardRef<HTMLButtonElement, AmbientButtonProps>(
         ref={ref}
         type={type}
         disabled={disabled}
+        data-selected={selected ? 'true' : undefined}
+        data-amb-flat={flatMaterial ? 'true' : undefined}
         className={ambientClass}
         style={{
           ...commonButtonStyle,
           ...resolveVariantStyle(variant, selected),
           ...geometryOverride,
-          boxShadow: undefined,
           ...(variant === 'settings-save' && disabled ? { opacity: 0.72 } : null),
           ...style,
         }}
