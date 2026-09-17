@@ -528,10 +528,10 @@ centerRows = floor((viewHeight - edgeRows - gaps - railH) / rowH)
 - 本轮后续 emulator 被 `com.agentbrowser.app` 抢占前台，`adb shell input swipe` 与 CDP `Input.dispatchTouchEvent` 均无法稳定触发 WebView 的 React touch capture；该环境限制不作为产品通过证据，也不替代自动化覆盖。已复现 6 次，未发现新的产品失败证据。
 - 2026-09-17 emulator-5556（`2560x1440` 临时尺寸覆盖、density 240、landscape）已取得宽屏五窗真实设备证据：
   - 五窗均绑定真实 session：焦点 `code-1`，左 `AgentBrowser-2`，右 `AgentTeams-1`，上 `appsdk-3`，下 `AgentBrowser-1`。
-  - 截图：`android/evidence/session-preview/2026-09-17/tablet-wide-final/01-wide-five-session-preview.png`
-  - DOM 几何：`android/evidence/session-preview/2026-09-17/tablet-wide-final/dom-geometry.json`
-  - 同期设备信息与日志：`wm-size.txt`、`wm-density.txt`、`package.txt`、`logcat-preview.log`
-  - 实测 viewport `1707x960`（比例 `1.778`），`layoutForm=wide`，左右边缘 `38px`、上下边缘 `30px`，焦点窗 `1619x852`。
+  - 截图：`android/evidence/session-preview/2026-09-17/tablet-wide-3011/01-wide-five-session-preview.png`
+  - DOM 几何：`android/evidence/session-preview/2026-09-17/tablet-wide-3011/dom-geometry.json`
+  - 同期设备信息与日志：`wm-size.txt`、`wm-density.txt`、`rotation.txt`、`package.txt`、`logcat-preview.log`
+  - 实测 viewport `1707x960`（比例 `1.778`），预览内容区 `1698.67x724.33`；`layoutForm=wide`，左右边缘 `38px`、上下边缘 `30px`，焦点窗 `1610.67x616.33`，底边缘格 `top=781px`，仍在内容区内。
 
 ---
 
@@ -563,8 +563,9 @@ centerRows = floor((viewHeight - edgeRows - gaps - railH) / rowH)
 - `pnpm run test:feature-registry`：13 files / 104 tests PASS
 - `pnpm run terminal:preview:source-dom-gate` PASS；证据：
   `android/evidence/session-preview/2026-09-17/source-dom-gate.json`
-- Android APK `0.1.3.3013` 已覆盖安装并加载本 worktree的 Vite 产物；横屏预览、空格指定、长按重选/清空、左缘抽屉替换焦点格的 CDP/DOM/截图证据：
-  `android/evidence/session-preview/2026-09-17/device-final/`
+- Android APK `0.1.3.3011`（`versionCode=1100030110`，SHA-256 `fc2d69211cda2b28ee47ac58eec6b037733b03eb9f53ccb8308c81326d6446b7`）已覆盖安装并加载本 worktree 的 Vite 产物；安装保留 `firstInstallTime=2026-08-30 04:15:27`；宽屏五窗与竖屏交互证据见：
+  `android/evidence/session-preview/2026-09-17/tablet-wide-3011/`、`android/evidence/session-preview/2026-09-17/junction-device/`
+- 旧 `device-final/` 包记录为 `0.1.3.3006`，只能作为历史交互证据，不作为本次候选的版本绑定证据。
 
 仍未验证：
 
