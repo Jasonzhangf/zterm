@@ -97,7 +97,7 @@ describe('ambient control ownership truth', () => {
     const owner = read('src/components/ambient/AmbientButton.tsx');
     expect(owner).not.toMatch(/from ['"](?:\.\.\/)+(?:contexts|server|components\/TerminalView)/);
     expect(owner).not.toMatch(/from ['"].*(?:session|transport|mirror|renderer|buffer)/i);
-    expect(owner).toContain('mobileTheme');
+    expect(owner).toContain('var(--amb-control-bg)');
   });
 
   it('keeps ambient production CSS and shared control class wiring in place', () => {
@@ -111,6 +111,10 @@ describe('ambient control ownership truth', () => {
     expect(ambientCss).toContain('--amb-albedo');
     expect(ambientCss).toContain('--amb-elevation');
     expect(ambientCss).toContain('.amb-button');
+    expect(ambientCss).toContain(':not([data-amb-flat="true"])');
+    expect(ambientCss).toContain(':not([data-selected="true"])');
+    expect(ambientCss).toContain('[data-amb-pressed="true"]');
+    expect(ambientCss).toContain('[data-selected="true"][data-amb-pressed="true"]');
     expect(ambientCss).toContain('.amb-chamfer');
 
     for (const file of [
@@ -122,6 +126,34 @@ describe('ambient control ownership truth', () => {
       const owner = read(file);
       expect(owner).toContain("'ambient-control'");
       expect(owner).toContain("'amb-chamfer'");
+    }
+  });
+
+  it('routes shared control surfaces through the skeuomorphic token contract', () => {
+    const ambientCss = read('src/ambient.css');
+    for (const token of [
+      '--amb-control-bg',
+      '--amb-control-text',
+      '--amb-control-border',
+      '--amb-control-shadow',
+      '--amb-control-inset',
+      '--amb-control-active-bg',
+      '--amb-control-active-text',
+      '--amb-control-disabled-opacity',
+    ]) {
+      expect(ambientCss).toContain(token);
+    }
+
+    for (const file of [
+      'src/components/ambient/AmbientButton.tsx',
+      'src/components/ambient/AmbientInput.tsx',
+      'src/components/ambient/AmbientSelect.tsx',
+      'src/components/ambient/AmbientTextarea.tsx',
+    ]) {
+      const owner = read(file);
+      expect(owner).toContain('var(--amb-control-bg');
+      expect(owner).toContain('var(--amb-control-text');
+      expect(owner).toContain('var(--amb-control-border');
     }
   });
 
