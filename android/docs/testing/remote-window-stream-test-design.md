@@ -13,6 +13,27 @@ The applicable closeout evidence is the focused remote-window RVFC/composite
 tests, Android type-check and feature/UI gates, the WebRTC loopback gate, and
 an install/launch smoke check on an available Android device.
 
+## Candidate Evidence Receipt
+
+Candidate commit: `e7d42e7020a17623a4aedff246370be07652c453`
+
+- `pnpm --dir android run type-check`: PASS
+- `pnpm --dir android run test:feature-registry`: PASS, 104 tests
+- `pnpm --dir android run test:remote-window-ui`: PASS, 137 tests
+- `pnpm --dir android run test:remote-window-webrtc-loopback`: PASS,
+  `single-focus` received 8 focus frames; `overview-plus-focus` received 7
+  focus and 7 overview frames
+- `pnpm --dir android exec vitest run
+  src/components/terminal/useRemoteWindowPlayback.test.tsx
+  src/components/terminal/useRemoteWindowCompositeCanvas.test.tsx
+  src/lib/remote-window-boundary-truth.test.ts`: PASS, 23 tests
+- Android debug APK built as `0.1.3.3009` / `1100030090`; SHA-256
+  `23ef241e8f135fe6723d70416092ea212152fca9c6fe226c5de150ad20b46cb4`
+- `adb install -r` succeeded on emulator `emulator-5554` and device
+  `100.104.163.65:5555`; both launched `com.zterm.android/.MainActivity`
+  without an application crash. Device `lastUpdateTime` values were
+  `2026-09-17 07:37:17` and `2026-09-17 22:37:48` respectively.
+
 ## Current Implementation Status
 
 The implemented Android/catalog slice started narrower than feature completion:
