@@ -112,6 +112,7 @@ describe('ambient control ownership truth', () => {
     expect(ambientCss).toContain('--amb-elevation');
     expect(ambientCss).toContain('.amb-button');
     expect(ambientCss).toContain(':not([data-amb-flat="true"])');
+    expect(ambientCss).toContain(':not([data-selected="true"])');
     expect(ambientCss).toContain('.amb-chamfer');
 
     for (const file of [

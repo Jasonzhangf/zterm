@@ -71,7 +71,7 @@
   box-shadow:var(--amb-control-active-shadow) !important;
 }
 
-.amb-button:hover:not(:disabled):not([data-amb-flat="true"]){
+.amb-button:hover:not(:disabled):not([data-amb-flat="true"]):not([data-selected="true"]){
   background-color:color-mix(in srgb,var(--amb-control-bg) 88%,var(--amb-control-active-bg)) !important;
 }
 
