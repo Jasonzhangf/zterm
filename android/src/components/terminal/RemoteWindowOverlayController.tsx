@@ -422,9 +422,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   const collectStreamStatsRef = useRef<(() => Promise<RemoteWindowVideoStatsSample | null>) | null>(null);
   const handleCanvasProjectionErrorRef = useRef<(message: string) => void>(() => {});
   const handlePlaybackProjectionError = useCallback(
-    (message: string) => handleCanvasProjectionErrorRef.current(message),
-    [],
-  );
+    (message: string) => handleCanvasProjectionErrorRef.current(message), []);
   const activeSessionIdRef = useRef(activeSessionId); const stopStreamRef = useRef(stopStream);
   activeSessionIdRef.current = activeSessionId; stopStreamRef.current = stopStream;
   useEffect(() => () => {
@@ -1677,12 +1675,9 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
           updateReceiverVideoVisibility(false);
           setReceiverMediaStream(committedResult.mediaStream || null);
           setOverviewMediaStream(committedResult.overviewMediaStream || null);
-          const playbackBindings = Array.isArray(committedResult.bindings)
-            ? committedResult.bindings
-            : [];
+          const playbackBindings = Array.isArray(committedResult.bindings) ? committedResult.bindings : [];
           setPlaybackBindingsByLane(new Map(playbackBindings
-            .filter((binding) => binding.mediaStream === committedResult.mediaStream
-              || binding.mediaStream === committedResult.overviewMediaStream)
+            .filter((binding) => binding.mediaStream === committedResult.mediaStream || binding.mediaStream === committedResult.overviewMediaStream)
             .map((binding) => [binding.lane, binding] as const)));
           // React setState(fn) is an updater: passing commitDecodedFrame directly
           // calls it with previous state (null) -> TypeError reading 'frameId'.
