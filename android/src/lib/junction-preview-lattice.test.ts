@@ -118,4 +118,19 @@ describe('junction preview lattice truth', () => {
       JSON.stringify(lattice.lattice),
     );
   });
+
+  it('rejects persisted lattices that assign one session to multiple coordinates', () => {
+    const storage = {
+      getItem: vi.fn(() => JSON.stringify({
+        version: 1,
+        cells: [
+          { col: 0, row: 0, target: target(1) },
+          { col: 1, row: 0, target: target(1) },
+        ],
+      })),
+      setItem: vi.fn(),
+    };
+
+    expect(readJunctionPreviewLattice(storage)).toMatchObject({ status: 'invalid' });
+  });
 });

@@ -57,7 +57,8 @@ export function normalizeJunctionPreviewLattice(value: unknown): JunctionPreview
   if (!value || typeof value !== 'object') return null;
   const candidate = value as Partial<JunctionPreviewLatticeV1>;
   if (candidate.version !== 1 || !Array.isArray(candidate.cells)) return null;
-  const seen = new Set<string>();
+  const seenCoordinates = new Set<string>();
+  const seenSessionIds = new Set<string>();
   const cells: JunctionPreviewLatticeCellV1[] = [];
   for (const raw of candidate.cells) {
     if (!raw || typeof raw !== 'object') return null;
@@ -65,10 +66,12 @@ export function normalizeJunctionPreviewLattice(value: unknown): JunctionPreview
     if (typeof cell.col !== 'number' || typeof cell.row !== 'number') return null;
     if (!Number.isInteger(cell.col) || !Number.isInteger(cell.row)) return null;
     const key = `${cell.col}:${cell.row}`;
-    if (seen.has(key)) return null;
+    if (seenCoordinates.has(key)) return null;
     const target = normalizeJunctionPreviewTarget(cell.target);
     if (!target) return null;
-    seen.add(key);
+    if (seenSessionIds.has(target.sessionId)) return null;
+    seenCoordinates.add(key);
+    seenSessionIds.add(target.sessionId);
     cells.push({ col: cell.col, row: cell.row, target });
   }
   return { version: 1, cells };
