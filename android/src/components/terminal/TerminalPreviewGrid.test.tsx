@@ -274,6 +274,21 @@ describe('TerminalPreviewGrid', () => {
     expect(onClearCell).toHaveBeenCalledTimes(1);
   });
 
+  it('does not suppress a later click on a different edge cell after long-press', () => {
+    vi.useFakeTimers();
+    setViewport(1280, 720);
+    const onFocusChange = vi.fn();
+    renderGrid({ onFocusChange });
+
+    fireEvent.pointerDown(screen.getByTestId('terminal-preview-tile-s1'), { clientX: 10, clientY: 10 });
+    act(() => {
+      vi.advanceTimersByTime(450);
+    });
+    fireEvent.click(screen.getByTestId('terminal-preview-tile-s5'));
+
+    expect(onFocusChange).toHaveBeenCalledWith({ col: 1, row: 0 });
+  });
+
   it('exits on a horizontal right swipe but not a vertical gesture', () => {
     setViewport(374, 706);
     const onClose = vi.fn();

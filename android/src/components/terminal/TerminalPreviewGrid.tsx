@@ -35,6 +35,7 @@ export interface TerminalPreviewGridProps {
 }
 
 const PREVIEW_LONG_PRESS_MS = 420;
+const PREVIEW_LONG_PRESS_CLICK_SUPPRESSION_MS = 1_000;
 
 function coordinateKey(coord: JunctionPreviewCoordinate) {
   return `${coord.col}:${coord.row}`;
@@ -99,7 +100,8 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
   const exitGestureRef = useRef<{ x: number; y: number } | null>(null);
   const longPressTimerRef = useRef<number | null>(null);
   const longPressStartRef = useRef<{ x: number; y: number } | null>(null);
-  const suppressNextClickRef = useRef(false);
+  const suppressClickRef = useRef<JunctionPreviewCoordinate | null>(null);
+  const suppressClickTimerRef = useRef<number | null>(null);
   const [slotMenu, setSlotMenu] = useState<{
     coordinate: JunctionPreviewCoordinate;
     existingSessionId?: string;
@@ -108,6 +110,9 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
   useEffect(() => () => {
     if (longPressTimerRef.current !== null) {
       window.clearTimeout(longPressTimerRef.current);
+    }
+    if (suppressClickTimerRef.current !== null) {
+      window.clearTimeout(suppressClickTimerRef.current);
     }
   }, []);
 
@@ -129,7 +134,14 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
     longPressTimerRef.current = window.setTimeout(() => {
       longPressTimerRef.current = null;
       longPressStartRef.current = null;
-      suppressNextClickRef.current = true;
+      suppressClickRef.current = { col: coordinate.col, row: coordinate.row };
+      if (suppressClickTimerRef.current !== null) {
+        window.clearTimeout(suppressClickTimerRef.current);
+      }
+      suppressClickTimerRef.current = window.setTimeout(() => {
+        suppressClickRef.current = null;
+        suppressClickTimerRef.current = null;
+      }, PREVIEW_LONG_PRESS_CLICK_SUPPRESSION_MS);
       setSlotMenu({ coordinate, existingSessionId });
     }, PREVIEW_LONG_PRESS_MS);
   };
@@ -309,8 +321,13 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
               tabIndex={session ? undefined : 0}
               onClick={session
                 ? () => {
-                  if (suppressNextClickRef.current) {
-                    suppressNextClickRef.current = false;
+                  const suppressed = suppressClickRef.current;
+                  suppressClickRef.current = null;
+                  if (suppressClickTimerRef.current !== null) {
+                    window.clearTimeout(suppressClickTimerRef.current);
+                    suppressClickTimerRef.current = null;
+                  }
+                  if (suppressed?.col === cell.col && suppressed.row === cell.row) {
                     return;
                   }
                   if (canPan) onFocusChange({ col: cell.col, row: cell.row });
