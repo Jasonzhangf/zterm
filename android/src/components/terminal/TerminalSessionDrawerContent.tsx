@@ -635,6 +635,16 @@ function TerminalSessionDrawerComponent({
               {expandedFolderCwd === folder.cwd && (!previewSelectionMode || folder.cwd === 'cwd 未知') ? folder.items.map((session) => {
             const previewSelectionIndex = previewSelectedSessionIds.indexOf(session.id);
             const slotTone = resolveSessionGroupSlotTone(session.sessionGroupSlot, sessionGroupLayoutAxis);
+            const activeRowBorderColor = slotTone
+              ? slotTone.border
+              : session.active
+              ? 'var(--zterm-panel-accent)'
+              : 'var(--zterm-panel-border)';
+            const activeRowBackground = slotTone
+              ? slotTone.background
+              : session.active
+              ? 'var(--zterm-panel-active)'
+              : 'var(--zterm-panel-surface)';
             return (
             <div
               key={session.stableKey}
@@ -672,12 +682,12 @@ function TerminalSessionDrawerComponent({
                 border: slotTone
                   ? `1px solid ${slotTone.border}`
                   : session.active
-                  ? '1px solid var(--zterm-settings-accent-border)'
+                  ? `1px solid ${activeRowBorderColor}`
                   : '1px solid var(--zterm-panel-border)',
                 background: slotTone
                   ? slotTone.background
                   : session.active
-                  ? 'var(--zterm-panel-active)'
+                  ? activeRowBackground
                   : 'var(--zterm-panel-surface)',
                 display: 'grid',
                 gridTemplateColumns: '1fr',
@@ -686,6 +696,9 @@ function TerminalSessionDrawerComponent({
                 opacity: 1,
                 overflow: 'hidden',
                 position: 'relative',
+                boxShadow: session.active && !slotTone
+                  ? 'inset 0 0 0 1px color-mix(in srgb, var(--zterm-panel-accent) 22%, transparent)'
+                  : 'none',
               }}
             >
                 <AmbientButton
@@ -790,12 +803,16 @@ function TerminalSessionDrawerComponent({
               <div
                 style={{
                   position: 'absolute',
-                  top: '4px',
-                  right: '4px',
+                  top: '5px',
+                  right: '5px',
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: 'flex-end',
-                  gap: '4px',
+                  gap: '3px',
+                  padding: '3px',
+                  borderRadius: '8px',
+                  border: '1px solid color-mix(in srgb, var(--zterm-panel-border) 70%, transparent)',
+                  background: 'color-mix(in srgb, var(--zterm-panel-bg) 80%, transparent)',
                 }}
               >
                 {previewSelectionMode ? (
@@ -816,13 +833,13 @@ function TerminalSessionDrawerComponent({
                     }}
                     style={{
                       padding: 0,
-                      width: '22px', height: '22px', borderRadius: '5px', display: 'flex',
+                      width: '20px', height: '20px', borderRadius: '5px', display: 'flex',
                       alignItems: 'center', justifyContent: 'center',
                       border: previewSelectionIndex >= 0 ? '1px solid var(--zterm-panel-accent)' : '1px solid var(--zterm-panel-border)',
-                      background: previewSelectionIndex >= 0 ? 'var(--zterm-settings-accent-soft)' : 'transparent',
+                      background: previewSelectionIndex >= 0 ? 'var(--zterm-panel-accent-soft)' : 'var(--zterm-panel-surface)',
                       color: previewSelectionIndex >= 0 ? 'var(--zterm-panel-accent)' : 'var(--zterm-panel-muted)',
                       opacity: 1,
-                      fontSize: '11px', fontWeight: 900,
+                      fontSize: '11px', fontWeight: 900, flexShrink: 0,
                     }}
                   >
                     {previewSelectionIndex >= 0 ? previewSelectionIndex + 1 : ''}
@@ -831,14 +848,16 @@ function TerminalSessionDrawerComponent({
                 {session.paneLabel ? (
                   <span
                     style={{
-                      minWidth: '30px',
+                      minWidth: '26px',
                       padding: '2px 6px',
                       borderRadius: '999px',
-                      background: 'var(--zterm-settings-accent-soft)',
+                      border: '1px solid var(--zterm-panel-accent-border)',
+                      background: 'var(--zterm-panel-accent-soft)',
                       color: 'var(--zterm-panel-accent)',
                       textAlign: 'center',
                       fontSize: '9px',
                       fontWeight: 900,
+                      flexShrink: 0,
                     }}
                   >
                     {session.paneLabel}
@@ -850,7 +869,7 @@ function TerminalSessionDrawerComponent({
                   <span
                     data-testid={`terminal-session-drawer-slot-${session.id}`}
                     style={{
-                      minWidth: '34px',
+                      minWidth: '30px',
                       padding: '2px 6px',
                       borderRadius: '999px',
                       background: slotTone.background,
@@ -859,6 +878,7 @@ function TerminalSessionDrawerComponent({
                       fontSize: '9px',
                       fontWeight: 900,
                       border: `1px solid ${slotTone.border}`,
+                      flexShrink: 0,
                     }}
                   >
                     {slotTone.label}
@@ -894,23 +914,22 @@ function TerminalSessionDrawerComponent({
                     activateCloseSession(session.id);
                   }}
                   style={{
-                    position: 'absolute',
-                    top: '3px',
-                    right: '3px',
-                    width: '18px',
-                    minWidth: '18px',
-                    maxWidth: '18px',
-                    height: '18px',
-                    minHeight: '18px',
-                    maxHeight: '18px',
+                    width: '20px',
+                    minWidth: '20px',
+                    maxWidth: '20px',
+                    height: '20px',
+                    minHeight: '20px',
+                    maxHeight: '20px',
                     padding: 0,
-                    border: 'none',
-                    borderRadius: 0,
-                    background: 'transparent',
+                    border: '1px solid var(--zterm-panel-border)',
+                    borderRadius: '5px',
+                    background: 'var(--zterm-panel-surface)',
                     color: 'var(--zterm-panel-danger)',
-                    fontSize: '12px',
+                    fontSize: '13px',
                     lineHeight: 1,
+                    fontWeight: 800,
                     pointerEvents: 'auto',
+                    flexShrink: 0,
                   }}
                 >
                   ×

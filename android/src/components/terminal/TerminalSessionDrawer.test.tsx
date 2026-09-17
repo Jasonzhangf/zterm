@@ -1203,6 +1203,29 @@ describe('TerminalSessionDrawer', () => {
     }
   });
 
+  it('draws active row with accent border + inner accent glow and groups close/badge into one chip (no absolute close)', () => {
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={sessions}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+    const activeRow = screen.getByTestId(`terminal-session-drawer-row-${sessions[0]!.id}`) as HTMLElement;
+    expect(activeRow.getAttribute('data-active')).toBe('true');
+    expect(activeRow.style.border).toBe('1px solid var(--zterm-panel-accent)');
+    expect(activeRow.style.boxShadow).toContain('color-mix');
+    const closeTarget = screen.getByTestId(`terminal-session-drawer-close-${sessions[0]!.id}`) as HTMLElement;
+    expect(closeTarget.style.position).not.toBe('absolute');
+    const chip = closeTarget.parentElement as HTMLElement | null;
+    expect(chip).not.toBeNull();
+    expect(chip?.style.borderRadius).toBe('8px');
+    expect(chip?.style.background).toContain('color-mix');
+  });
+
   it('does not use backdrop-filter or open-dependent boxShadow on the drawer surface (Android WebView compositing flicker)', () => {
     const { rerender } = render(
       <TerminalSessionDrawer
@@ -1284,9 +1307,8 @@ describe('TerminalSessionDrawer', () => {
     expect(overlay.style.transition).toContain('opacity 150ms ease');
 
     const closeTarget = screen.getByTestId(`terminal-session-drawer-close-${sessions[0]!.id}`) as HTMLElement;
-    expect(closeTarget.style.width).toBe('18px');
-    expect(closeTarget.style.height).toBe('18px');
-    expect(closeTarget.style.position).toBe('absolute');
+    expect(closeTarget.style.width).toBe('20px');
+    expect(closeTarget.style.height).toBe('20px');
     expect(closeTarget.style.color).toBe('var(--zterm-panel-danger)');
   });
 
