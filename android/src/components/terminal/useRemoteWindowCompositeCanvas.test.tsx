@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import { act, cleanup, renderHook } from '@testing-library/react';
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useRemoteWindowCompositeCanvas } from './useRemoteWindowCompositeCanvas';
+import type { RemoteWindowDecodedFrame } from './useRemoteWindowPlayback';
 
 afterEach(() => {
   cleanup();
@@ -21,7 +22,7 @@ describe('useRemoteWindowCompositeCanvas projection owner', () => {
     const focus = document.createElement('canvas');
     const context = { drawImage: vi.fn() };
     focus.getContext = vi.fn(() => context) as unknown as HTMLCanvasElement['getContext'];
-    let subscriber: ((frame: { video: HTMLVideoElement; presentedFrames?: number }) => void) | null = null;
+    let subscriber: ((frame: RemoteWindowDecodedFrame) => void) | null = null;
 
     renderHook(() => useRemoteWindowCompositeCanvas({
       layout: null,
@@ -40,10 +41,10 @@ describe('useRemoteWindowCompositeCanvas projection owner', () => {
       },
     }));
 
-    act(() => subscriber?.({ video, presentedFrames: 1 }));
+    act(() => subscriber?.({ video, lane: 'focus', presentedFrames: 1 }));
     expect(context.drawImage).toHaveBeenCalledWith(video, 0, 0, 1280, 720);
     Object.defineProperty(video, 'videoWidth', { configurable: true, value: 786 });
-    act(() => subscriber?.({ video, presentedFrames: 2 }));
+    act(() => subscriber?.({ video, lane: 'focus', presentedFrames: 2 }));
     expect(focus.width).toBe(786);
     expect(focus.height).toBe(720);
     expect(context.drawImage).toHaveBeenLastCalledWith(video, 0, 0, 786, 720);
@@ -62,7 +63,7 @@ describe('useRemoteWindowCompositeCanvas projection owner', () => {
     const context = { drawImage: vi.fn() };
     focus.getContext = vi.fn(() => context) as unknown as HTMLCanvasElement['getContext'];
     const focusedWindow = { windowId: 'focus', offsetX: 560, offsetY: 324, width: 800, height: 600 };
-    let subscriber: ((frame: { video: HTMLVideoElement; presentedFrames?: number }) => void) | null = null;
+    let subscriber: ((frame: RemoteWindowDecodedFrame) => void) | null = null;
 
     renderHook(() => useRemoteWindowCompositeCanvas({
       layout: { windows: [focusedWindow], canvasWidth: 1920, canvasHeight: 1080 },
@@ -81,16 +82,15 @@ describe('useRemoteWindowCompositeCanvas projection owner', () => {
       },
     }));
 
-    act(() => subscriber?.({ video, presentedFrames: 1 }));
+    act(() => subscriber?.({ video, lane: 'focus', presentedFrames: 1 }));
 
     expect(focus.width).toBe(800);
     expect(focus.height).toBe(600);
     expect(context.drawImage).toHaveBeenCalledWith(video, 560, 324, 800, 600, 0, 0, 800, 600);
   });
 
-  it('draws overview and thumbnails once per decoded frame with cached contexts', () => {
+  it('draws overview and thumbnails once per decoded frame with cached contexts', async () => {
     const requestAnimationFrame = vi.spyOn(window, 'requestAnimationFrame');
-    let frameCallback: ((now: number, metadata: { presentedFrames?: number }) => void) | null = null;
     const receiver = { getTracks: () => [] } as unknown as MediaStream;
     const video = document.createElement('video');
     Object.defineProperties(video, {
@@ -98,14 +98,10 @@ describe('useRemoteWindowCompositeCanvas projection owner', () => {
       videoWidth: { value: 1920, configurable: true },
       videoHeight: { value: 1080, configurable: true },
     });
-    video.srcObject = receiver;
-    Object.assign(video, {
-      requestVideoFrameCallback: vi.fn((callback: typeof frameCallback) => {
-        frameCallback = callback;
-        return 1;
-      }),
-      cancelVideoFrameCallback: vi.fn(),
-    });
+    const overviewStream = { getTracks: () => [] } as unknown as MediaStream;
+    video.srcObject = overviewStream;
+    const requestVideoFrameCallback = vi.fn();
+    Object.assign(video, { requestVideoFrameCallback });
     const overview = document.createElement('canvas');
     overview.width = 320;
     overview.height = 180;
@@ -118,34 +114,38 @@ describe('useRemoteWindowCompositeCanvas projection owner', () => {
     thumbnail.getContext = vi.fn(() => thumbnailContext) as unknown as HTMLCanvasElement['getContext'];
     const slot = { windowId: 'window-1', offsetX: 10, offsetY: 20, width: 800, height: 600 };
     let unsubscribe: (() => void) | null = null;
+    let subscriber: ((frame: RemoteWindowDecodedFrame) => void) | null = null;
     const hook = renderHook(() => useRemoteWindowCompositeCanvas({
       layout: { windows: [slot], canvasWidth: 1920, canvasHeight: 1080 },
       focusedWindow: slot,
       overviewCropVisible: true,
       receiverMediaStream: receiver,
-      overviewMediaStream: { getTracks: () => [] } as unknown as MediaStream,
+      overviewMediaStream: overviewStream,
       videoElementRef: { current: null },
       overviewVideoElementRef: { current: video },
       overviewCanvasRef: { current: overview },
       thumbnailCanvasRefs: { current: new Map([['window-1', thumbnail]]) },
-      subscribeDecodedFrame: () => {
+      subscribeDecodedFrame: (callback) => {
+        subscriber = callback;
         unsubscribe = () => {};
         return () => { unsubscribe = null; };
       },
     }));
 
     expect(requestAnimationFrame).not.toHaveBeenCalled();
-    act(() => frameCallback?.(0, { presentedFrames: 1 }));
+    expect(requestVideoFrameCallback).not.toHaveBeenCalled();
+    await waitFor(() => expect(subscriber).not.toBeNull());
+    act(() => subscriber?.({ video, lane: 'overview', presentedFrames: 1 }));
     expect(overviewContext.drawImage).toHaveBeenCalledTimes(1);
     expect(thumbnailContext.drawImage).toHaveBeenCalledTimes(1);
     expect(thumbnailContext.clearRect).toHaveBeenCalledWith(0, 0, 160, 90);
     expect(overview.getContext).toHaveBeenCalledTimes(1);
     expect(thumbnail.getContext).toHaveBeenCalledTimes(1);
 
-    act(() => frameCallback?.(1, { presentedFrames: 1 }));
+    act(() => subscriber?.({ video, lane: 'overview', presentedFrames: 1 }));
     expect(overviewContext.drawImage).toHaveBeenCalledTimes(1);
     expect(thumbnailContext.drawImage).toHaveBeenCalledTimes(1);
-    act(() => frameCallback?.(2, { presentedFrames: 2 }));
+    act(() => subscriber?.({ video, lane: 'overview', presentedFrames: 2 }));
     expect(overviewContext.drawImage).toHaveBeenCalledTimes(2);
     expect(thumbnailContext.drawImage).toHaveBeenCalledTimes(2);
     expect(overview.getContext).toHaveBeenCalledTimes(1);
@@ -167,7 +167,7 @@ describe('useRemoteWindowCompositeCanvas projection owner', () => {
     const focus = document.createElement('canvas');
     const context = { drawImage: vi.fn() };
     focus.getContext = vi.fn(() => context) as unknown as HTMLCanvasElement['getContext'];
-    let subscriber: ((frame: { video: HTMLVideoElement; presentedFrames?: number }) => void) | null = null;
+    let subscriber: ((frame: RemoteWindowDecodedFrame) => void) | null = null;
 
     renderHook(() => useRemoteWindowCompositeCanvas({
       layout: null,
@@ -186,9 +186,9 @@ describe('useRemoteWindowCompositeCanvas projection owner', () => {
       },
     }));
 
-    act(() => subscriber?.({ video, presentedFrames: 4 }));
-    act(() => subscriber?.({ video, presentedFrames: 4 }));
-    act(() => subscriber?.({ video, presentedFrames: 5 }));
+    act(() => subscriber?.({ video, lane: 'focus', presentedFrames: 4 }));
+    act(() => subscriber?.({ video, lane: 'focus', presentedFrames: 4 }));
+    act(() => subscriber?.({ video, lane: 'focus', presentedFrames: 5 }));
     expect(context.drawImage).toHaveBeenCalledTimes(2);
     expect(focus.getContext).toHaveBeenCalledTimes(1);
     expect(focus.width).toBe(1280);

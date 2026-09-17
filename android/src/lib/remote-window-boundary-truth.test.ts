@@ -72,6 +72,12 @@ describe('remote window architecture boundary truth', () => {
     }
     expect(read('src/components/terminal/useRemoteWindowCompositeCanvas.ts'))
       .not.toContain('requestAnimationFrame');
+    expect(read('src/components/terminal/useRemoteWindowCompositeCanvas.ts'))
+      .not.toContain('requestVideoFrameCallback');
+    expect(read('src/components/terminal/useRemoteWindowPlayback.ts'))
+      .toContain("lane: 'focus'");
+    expect(read('src/components/terminal/useRemoteWindowPlayback.ts'))
+      .toContain("lane: 'overview'");
   });
 
   it('keeps locked controls and developer diagnostics outside the overlay controller body', () => {
