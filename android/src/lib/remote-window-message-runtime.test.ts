@@ -128,7 +128,7 @@ describe('remote window message runtime', () => {
     expect(runtime.getPendingCount()).toBe(0);
   });
 
-  it('carries explicit force-refresh to the daemon catalog owner', () => {
+  it('requests the daemon-owned catalog snapshot without a client refresh flag', () => {
     const sendSocketPayload = vi.fn();
     const runtime = createRemoteWindowMessageRuntime({
       now: () => 45,
@@ -138,7 +138,6 @@ describe('remote window message runtime', () => {
 
     void runtime.requestTargets('session-1', {
       ws: makeSocket(),
-      request: { forceRefresh: true },
       sendSocketPayload,
     });
 
@@ -149,9 +148,9 @@ describe('remote window message runtime', () => {
         requestId: expect.stringMatching(/^rw-45-/),
         includeAppWindows: true,
         includeIterm2: true,
-        forceRefresh: true,
       },
     });
+    expect(sent.payload).not.toHaveProperty('forceRefresh');
   });
 
   it('times out requests without pretending an empty catalog is success', async () => {

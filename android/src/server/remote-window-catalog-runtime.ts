@@ -27,13 +27,16 @@ interface RemoteWindowTargetCatalogCacheEntry {
   response: RemoteWindowStreamTargetsResponsePayload;
 }
 
+const DEFAULT_REMOTE_WINDOW_TARGET_CATALOG_REFRESH_INTERVAL_MS = 5_000;
+
 export interface RemoteWindowCatalogRuntimeDeps {
   platform: NodeJS.Platform;
   pythonBinary: string;
   swiftBinary: string;
   iterm2PythonTimeoutMs: number;
   appWindowCatalogTimeoutMs: number;
-  targetCatalogCacheTtlMs: number;
+  /** Daemon-owned self-refresh cadence for the resident catalog snapshot. */
+  targetCatalogRefreshIntervalMs?: number;
   now: () => string;
   nowMs: () => number;
   runIterm2Python: (script: string, options: { pythonBinary: string; timeoutMs: number }) => Promise<string>;
@@ -55,6 +58,11 @@ export function createRemoteWindowCatalogRuntime(
 ): RemoteWindowCatalogRuntime {
   const cache = new Map<string, RemoteWindowTargetCatalogCacheEntry>();
   const refreshes = new Map<string, Promise<RemoteWindowStreamTargetsResponsePayload | RemoteWindowStreamErrorPayload>>();
+  const refreshTimers = new Map<string, ReturnType<typeof setInterval>>();
+  const refreshIntervalMs = Math.max(
+    1_000,
+    Math.floor(deps.targetCatalogRefreshIntervalMs ?? DEFAULT_REMOTE_WINDOW_TARGET_CATALOG_REFRESH_INTERVAL_MS),
+  );
 
   const queryIterm2Catalog = async () => parseIterm2Catalog(await deps.runIterm2Python(
     ITERM2_CATALOG_PYTHON,
@@ -162,10 +170,11 @@ export function createRemoteWindowCatalogRuntime(
       ))
       .then((result) => {
         if ('targets' in result) {
-          cache.set(cacheKey, {
+          const entry: RemoteWindowTargetCatalogCacheEntry = {
             updatedAtMs: deps.nowMs(),
             response: cloneRemoteWindowTargetCatalogResponse(result, result.requestId),
-          });
+          };
+          cache.set(cacheKey, entry);
         }
         return result;
       })
@@ -182,6 +191,20 @@ export function createRemoteWindowCatalogRuntime(
     cloneRemoteWindowTargetCatalogResult(await startRefresh(cacheKey, payload), payload.requestId)
   );
 
+  const ensureSelfRefresh = (cacheKey: string, payload: RemoteWindowStreamRequestPayload) => {
+    if (refreshTimers.has(cacheKey)) {
+      return;
+    }
+    const timer = setInterval(() => {
+      void startRefresh(cacheKey, payload);
+    }, refreshIntervalMs);
+    timer.unref?.();
+    refreshTimers.set(cacheKey, timer);
+  };
+
+  // Client requests only read the daemon-owned snapshot. The daemon keeps the
+  // snapshot warm through its own self-refresh loop, so a request never forces
+  // a live enumeration; `forceRefresh` is treated as a background kick only.
   const listTargets = async (
     payload: RemoteWindowStreamRequestPayload,
   ): Promise<RemoteWindowStreamTargetsResponsePayload | RemoteWindowStreamErrorPayload> => {
@@ -192,13 +215,9 @@ export function createRemoteWindowCatalogRuntime(
       return remoteWindowError(payload, 'remote_window_platform_unsupported', 'remote window stream catalog is only available on macOS daemon hosts');
     }
     const cacheKey = buildRemoteWindowTargetCatalogCacheKey(payload);
+    ensureSelfRefresh(cacheKey, payload);
     const cached = cache.get(cacheKey) || null;
-    const cacheAgeMs = cached ? deps.nowMs() - cached.updatedAtMs : Number.POSITIVE_INFINITY;
-    const cacheFresh = Boolean(cached && cacheAgeMs >= 0 && cacheAgeMs < deps.targetCatalogCacheTtlMs);
-    if (!payload.forceRefresh && cached && cacheFresh) {
-      return cloneRemoteWindowTargetCatalogResponse(cached.response, payload.requestId);
-    }
-    if (!payload.forceRefresh && cached) {
+    if (cached) {
       void startRefresh(cacheKey, payload);
       return cloneRemoteWindowTargetCatalogResponse(cached.response, payload.requestId);
     }
@@ -214,7 +233,9 @@ export function createRemoteWindowCatalogRuntime(
       includeAppWindows: true,
       includeIterm2: true,
     };
-    void startRefresh(buildRemoteWindowTargetCatalogCacheKey(payload), payload);
+    const cacheKey = buildRemoteWindowTargetCatalogCacheKey(payload);
+    void startRefresh(cacheKey, payload);
+    ensureSelfRefresh(cacheKey, payload);
   };
 
   const listAppWindowTargets = async () => buildMacosAppWindowTargets(
@@ -223,6 +244,10 @@ export function createRemoteWindowCatalogRuntime(
   );
 
   const dispose = () => {
+    for (const timer of refreshTimers.values()) {
+      clearInterval(timer);
+    }
+    refreshTimers.clear();
     cache.clear();
     refreshes.clear();
   };

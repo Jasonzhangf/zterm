@@ -26,7 +26,7 @@ interface RemoteWindowCatalogMessageRuntimeLike {
     sessionId: string,
     options: {
       ws: BridgeTransportSocket;
-      request?: { includeAppWindows?: boolean; includeIterm2?: boolean; forceRefresh?: boolean };
+      request?: { includeAppWindows?: boolean; includeIterm2?: boolean };
       sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
     },
   ) => Promise<RemoteWindowStreamTargetsResponsePayload>;
@@ -121,8 +121,6 @@ interface RemoteWindowReceiverRuntimeLike {
   stopStream: (streamId: string) => boolean;
 }
 
-export const REMOTE_WINDOW_TARGET_CATALOG_CACHE_TTL_MS = 60_000;
-
 // Catalog transport readiness: the daemon may have already accepted the
 // physical mux channel request (`channel.state === 'opening'`) before the
 // picker issues its `remote-window-targets-request`. Rather than failing the
@@ -133,31 +131,6 @@ export const REMOTE_WINDOW_TARGET_CATALOG_CACHE_TTL_MS = 60_000;
 // transport cannot become ready in time.
 export const REMOTE_WINDOW_CATALOG_OPEN_WAIT_TIMEOUT_MS = 8_000;
 export const REMOTE_WINDOW_CATALOG_OPEN_WAIT_INTERVAL_MS = 50;
-
-export interface RemoteWindowTargetCatalogCacheEntry {
-  cacheKey: string;
-  updatedAt: number;
-  payload: RemoteWindowStreamTargetsResponsePayload;
-}
-
-export type RemoteWindowTargetCatalogCacheStore = Map<string, RemoteWindowTargetCatalogCacheEntry>;
-
-function buildRemoteWindowTargetCatalogCacheKey(session: Session) {
-  return [
-    session.daemonHostId || '',
-    session.bridgeHost || '',
-    session.bridgePort || 0,
-    session.authToken || '',
-  ].join('|');
-}
-
-function cloneRemoteWindowTargetsPayload(payload: RemoteWindowStreamTargetsResponsePayload): RemoteWindowStreamTargetsResponsePayload {
-  return {
-    requestId: payload.requestId,
-    targets: [...payload.targets],
-    ...(payload.errors ? { errors: [...payload.errors] } : {}),
-  };
-}
 
 function resolveRemoteWindowTransport(options: {
   sessionId: string;
@@ -332,9 +305,6 @@ export async function requestRemoteWindowTargetsRuntime(options: {
   daemonConnection: ClientDaemonConnection;
   remoteWindowMessageRuntime: RemoteWindowCatalogMessageRuntimeLike;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
-  targetCatalogCache?: RemoteWindowTargetCatalogCacheStore;
-  cacheTtlMs?: number;
-  forceRefresh?: boolean;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
   catalogOpenTimeoutMs?: number;
@@ -358,24 +328,13 @@ export async function requestRemoteWindowTargetsRuntime(options: {
     now: options.now,
     sleep: options.sleep,
   });
-  const cacheKey = buildRemoteWindowTargetCatalogCacheKey(session);
-  const now = options.now?.() ?? Date.now();
-  const cacheTtlMs = Math.max(0, Math.floor(options.cacheTtlMs ?? REMOTE_WINDOW_TARGET_CATALOG_CACHE_TTL_MS));
-  const cached = options.targetCatalogCache?.get(cacheKey) || null;
-  if (!options.forceRefresh && cached && now - cached.updatedAt >= 0 && now - cached.updatedAt < cacheTtlMs) {
-    return cloneRemoteWindowTargetsPayload(cached.payload);
-  }
-  const payload = await options.remoteWindowMessageRuntime.requestTargets(targetSessionId, {
+  // The daemon owns the catalog snapshot and refreshes it on its own cadence.
+  // The client reads that snapshot on every open; it keeps no projection cache
+  // and never drives a trusted enumeration.
+  return options.remoteWindowMessageRuntime.requestTargets(targetSessionId, {
     ws,
-    ...(options.forceRefresh ? { request: { forceRefresh: true } } : {}),
     sendSocketPayload: options.sendSocketPayload,
   });
-  options.targetCatalogCache?.set(cacheKey, {
-    cacheKey,
-    updatedAt: now,
-    payload: cloneRemoteWindowTargetsPayload(payload),
-  });
-  return payload;
 }
 
 export async function requestRemoteWindowStreamStartRuntime(options: {

@@ -43,7 +43,6 @@ import type {
   SessionSocketFailureBaselineResult,
   SessionSocketServerMessageOptions,
 } from './session-context-message-assemblies';
-import type { RemoteWindowTargetCatalogCacheStore } from './session-context-remote-window-runtime';
 import type { SessionTmuxTargetRequestStore } from './session-context-tmux-management-runtime';
 import type {
   SessionTargetNetworkProbeRuntime,
@@ -101,7 +100,6 @@ export interface SessionProviderRuntimeRefs {
   tmuxTargetRequestsRef: MutableRefObject<SessionTmuxTargetRequestStore>;
   activeBodySubscriptionSuppressedRef: MutableRefObject<boolean>;
   remoteScreenshotRuntimeRef: MutableRefObject<RemoteScreenshotRuntime>;
-  remoteWindowTargetCatalogCacheRef: MutableRefObject<RemoteWindowTargetCatalogCacheStore>;
   remoteWindowMessageRuntimeRef: MutableRefObject<RemoteWindowMessageRuntime>;
   remoteWindowReceiverRuntimeRef: MutableRefObject<RemoteWindowReceiverRuntime>;
   fileTransferMessageRuntimeRef: MutableRefObject<FileTransferMessageRuntime>;

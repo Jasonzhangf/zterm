@@ -79,7 +79,6 @@ export function SessionProvider({
       tmuxTargetRequestsRef,
       activeBodySubscriptionSuppressedRef,
       remoteScreenshotRuntimeRef,
-      remoteWindowTargetCatalogCacheRef,
       remoteWindowMessageRuntimeRef,
       remoteWindowReceiverRuntimeRef,
       fileTransferMessageRuntimeRef,
@@ -183,7 +182,6 @@ export function SessionProvider({
       tmuxTargetRequestsRef,
       activeBodySubscriptionSuppressedRef,
       remoteScreenshotRuntimeRef,
-      remoteWindowTargetCatalogCacheRef,
       remoteWindowMessageRuntimeRef,
       remoteWindowReceiverRuntimeRef,
       fileTransferMessageRuntimeRef,
@@ -360,9 +358,8 @@ export function SessionProvider({
     ) => contextRuntimeRef.current.requestRemoteScreenshot(sessionId, onProgress, request),
     requestRemoteWindowTargets: (
       sessionId: string,
-      options?: { forceRefresh?: boolean },
     ) => (
-      contextRuntimeRef.current.requestRemoteWindowTargets(sessionId, options)
+      contextRuntimeRef.current.requestRemoteWindowTargets(sessionId)
     ),
     requestRemoteWindowStreamStart: (...args: Parameters<typeof requestRemoteWindowStreamStart>) => (
       contextRuntimeRef.current.requestRemoteWindowStreamStart(...args)

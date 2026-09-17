@@ -252,7 +252,6 @@ export interface SessionContextValue {
   ) => Promise<RemoteScreenshotCapture>;
   requestRemoteWindowTargets: (
     sessionId: string,
-    options?: { forceRefresh?: boolean },
   ) => Promise<RemoteWindowStreamTargetsResponsePayload>;
   requestRemoteWindowStreamStart: (
     sessionId: string,
