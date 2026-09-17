@@ -1431,7 +1431,7 @@ debug overlay 现在显示 MU（菜单位置）和 CE（结束行），长按后
 
 ## Remote-window sibling preview performance
 - Trigger: same-app multi-window preview looks frozen or sluggish after adding sibling tiles/thumbnails.
-- Rule: sibling thumbnails are projection hints, not stream truth. Keep active catalog sync on a light seconds-class cadence, run at most one screenshot thumbnail request in-flight globally, keep the in-flight lock until the real screenshot promise settles, and prioritize missing thumbnails before refreshing ready thumbnails.
+- Rule: sibling thumbnails are projection hints, not stream truth. Read the daemon-owned resident catalog snapshot once on active-stream entry and retry only bounded read failures; the daemon owns the refresh loop, so the client never polls. Run at most one screenshot thumbnail request in-flight globally, keep the in-flight lock until the real screenshot promise settles, and prioritize missing thumbnails before refreshing ready thumbnails.
 - Rule: failed thumbnail state is terminal for the same request/target identity; only a new target/session/request identity may retry. Completion must match `{sessionId,targetId,requestId}` before mutating thumbnail state.
 - Anti-pattern: per-sibling screenshot loops, local stale-timeout marker deletion while the real request is still in flight, retrying failed thumbnails on an interval, clearing in-flight markers in ordinary effect cleanup, or dropping/resurrecting resolved screenshot results because the effect re-rendered.
 - Required gate: `RemoteWindowOverlay.test.tsx` must include slow screenshot, terminal failure, and stale completion cases proving no duplicate in-flight request, no interval retry after failure, and no old-generation thumbnail write into a new overlay.
