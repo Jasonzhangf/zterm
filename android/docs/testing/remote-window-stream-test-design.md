@@ -6,6 +6,13 @@ Feature id: `desktop.remote_window_stream`
 
 This gate covers remote app/window and iTerm2 pane video streaming from a daemon host to Android, plus the future input-return contract. The stream is a desktop media resource, not terminal buffer truth.
 
+This scope is independent of the terminal buffer/render/daemon-mirror
+truth chain. Changes limited to the remote-window decoded-frame projection
+therefore do not require terminal-buffer L5 or daemon mirror close-loop gates.
+The applicable closeout evidence is the focused remote-window RVFC/composite
+tests, Android type-check and feature/UI gates, the WebRTC loopback gate, and
+an install/launch smoke check on an available Android device.
+
 ## Current Implementation Status
 
 The implemented Android/catalog slice started narrower than feature completion:
