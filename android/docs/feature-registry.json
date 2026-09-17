@@ -2407,7 +2407,6 @@
         "src/components/tmux/TmuxSessionPickerSheet.test.tsx",
         "src/components/terminal/SessionScheduleSheet.test.tsx",
         "src/components/terminal/FileTransferSheet.test.tsx",
-        "src/components/terminal/RemoteWindowOverlay.test.tsx",
         "src/lib/terminal-shell-skin.test.ts",
         "src/lib/module-import-graph-truth.test.ts",
         "src/lib/feature-registry-truth.test.ts"

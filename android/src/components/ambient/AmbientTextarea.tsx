@@ -1,4 +1,5 @@
 import { forwardRef, type CSSProperties, type TextareaHTMLAttributes } from 'react';
+import { stripAmbientFieldMaterial } from './ambient-field-style';
 
 export type AmbientTextareaVariant = 'settings' | 'settings-multiline';
 
@@ -13,9 +14,11 @@ function resolveVariantStyle(variant: AmbientTextareaVariant): CSSProperties {
         width: '100%',
         minHeight: '48px',
         borderRadius: '12px',
-        border: '1px solid var(--zterm-settings-border, #d5dde6)',
-        backgroundColor: 'var(--zterm-settings-field, #ffffff)',
-        color: 'var(--zterm-settings-text)',
+        border: '1px solid var(--amb-control-border)',
+        backgroundColor: 'var(--amb-control-bg)',
+        color: 'var(--amb-control-text)',
+        boxShadow: 'var(--amb-control-inset)',
+        textShadow: 'var(--amb-control-text-shadow, none)',
         fontSize: '15px',
         padding: '10px 12px',
         boxSizing: 'border-box',
@@ -26,9 +29,11 @@ function resolveVariantStyle(variant: AmbientTextareaVariant): CSSProperties {
         width: '100%',
         minHeight: '84px',
         borderRadius: '12px',
-        border: '1px solid var(--zterm-settings-border, #d5dde6)',
-        backgroundColor: 'var(--zterm-settings-field, #ffffff)',
-        color: 'var(--zterm-settings-text)',
+        border: '1px solid var(--amb-control-border)',
+        backgroundColor: 'var(--amb-control-bg)',
+        color: 'var(--amb-control-text)',
+        boxShadow: 'var(--amb-control-inset)',
+        textShadow: 'var(--amb-control-text-shadow, none)',
         fontSize: '15px',
         padding: '10px 12px',
         boxSizing: 'border-box',
@@ -41,11 +46,15 @@ function resolveVariantStyle(variant: AmbientTextareaVariant): CSSProperties {
 export const AmbientTextarea = forwardRef<HTMLTextAreaElement, AmbientTextareaProps>(
   function AmbientTextarea({ variant = 'settings', style, className, ...props }, ref) {
     const ambientClass = ['ambient', 'ambient-control', 'amb-field', 'amb-chamfer', className].filter(Boolean).join(' ');
+    const materialStyle = resolveVariantStyle(variant);
     return (
       <textarea
         ref={ref}
         className={ambientClass}
-        style={{ ...resolveVariantStyle(variant), ...style }}
+        style={{
+          ...materialStyle,
+          ...stripAmbientFieldMaterial(style),
+        }}
         {...props}
       />
     );
