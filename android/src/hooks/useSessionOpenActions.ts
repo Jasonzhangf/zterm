@@ -32,7 +32,6 @@ import {
   fetchTmuxSessions,
   killTmuxSession,
   renameTmuxSession,
-  refreshTmuxSessionCatalog,
 } from '../lib/tmux-sessions';
 import type { TerminalSessionCatalog } from '@zterm/shared/protocol';
 import type { Host, PersistedOpenTab, Session, SessionGroupHistory, TraversalRelayDeviceSnapshot } from '../lib/types';
@@ -120,10 +119,6 @@ interface UseSessionOpenActionsOptions {
     sessionId: string,
     message: TerminalMuxTargetClientMessage,
   ) => Promise<string[] | null>;
-  queryTerminalSessionCatalogOnOpenTransport?: (
-    sessionId: string,
-    message: TerminalMuxTargetClientMessage,
-  ) => Promise<TerminalSessionCatalog | null>;
   runtimeActiveSessionId: string | null;
   runtimeRefs: OpenTabRuntimeRefs;
   ensureTerminalPageVisible: () => void;
@@ -180,7 +175,6 @@ export interface SessionOpenActionsResult {
   }) => void;
   handleSelectCleanSession: (target: BridgeTarget) => void;
   handleRemoteSessionsRefreshed: (target: BridgeTarget, sessionNames: string[], catalog?: TerminalSessionCatalog, auditReason?: OpenTabAuditReason) => void;
-  handleRefreshDrawerHostSessions: (hostKey?: string) => Promise<TerminalSessionCatalog | null | undefined>;
   handleForceRelaySession: (sessionId: string) => void;
   handleUseAutoSession: (sessionId: string) => void;
   handleUseWebSocketSession: (sessionId: string) => void;
@@ -203,7 +197,6 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     switchSession,
     renameRemoteSession,
     manageTmuxSessionsOnOpenTransport,
-    queryTerminalSessionCatalogOnOpenTransport,
     runtimeActiveSessionId,
     runtimeRefs,
     ensureTerminalPageVisible,
@@ -705,30 +698,6 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     terminalActiveSessionIdRef,
   ]);
 
-  const queryRemoteSessionCatalogForTarget = useCallback(async (target: BridgeTarget) => {
-    const reusableSession = resolveReusableOpenSessionForTarget(
-      sessionsRef.current,
-      target,
-      '',
-      [terminalActiveSessionIdRef.current, runtimeActiveSessionId],
-      false,
-    );
-    if (reusableSession && queryTerminalSessionCatalogOnOpenTransport) {
-      const catalog = await queryTerminalSessionCatalogOnOpenTransport(reusableSession.id, { type: 'list-sessions' });
-      if (catalog === null) {
-        throw new Error('Existing terminal transport is unavailable for session catalog refresh');
-      }
-      return catalog;
-    }
-    return refreshTmuxSessionCatalog(target, bridgeSettingsRef.current);
-  }, [
-    bridgeSettingsRef,
-    queryTerminalSessionCatalogOnOpenTransport,
-    runtimeActiveSessionId,
-    sessionsRef,
-    terminalActiveSessionIdRef,
-  ]);
-
   const handleRenameRemoteSession = useCallback(async (
     sessionId: string,
     nextSessionName: string,
@@ -1190,21 +1159,6 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     resolveTargetByHostKey,
   ]);
 
-  const handleRefreshDrawerHostSessions = useCallback(async (hostKey?: string) => {
-    const target = resolveTargetByHostKey(hostKey);
-    if (!target) {
-      return;
-    }
-    const discoveryTarget = normalizeBridgeTarget({ ...target, terminalBackend: undefined });
-    const catalog = await queryRemoteSessionCatalogForTarget(discoveryTarget);
-    handleRemoteSessionsRefreshed(discoveryTarget, catalog?.sessionNames ?? [], catalog ?? undefined, 'drawer-open');
-    return catalog;
-  }, [
-    handleRemoteSessionsRefreshed,
-    queryRemoteSessionCatalogForTarget,
-    resolveTargetByHostKey,
-  ]);
-
   const resolveCanonicalRelayHostId = useCallback((tab: PersistedOpenTab) => {
     const currentBridgeSettings = bridgeSettingsRef.current;
     return (
@@ -1381,7 +1335,6 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     handleDeleteServerGroup,
     handleSelectCleanSession,
     handleRemoteSessionsRefreshed,
-    handleRefreshDrawerHostSessions,
     handleForceRelaySession,
     handleUseAutoSession,
     handleUseWebSocketSession,

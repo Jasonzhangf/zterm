@@ -13,16 +13,19 @@ import {
 } from '../../lib/remote-window-overlay-runtime';
 import { cloneRemoteWindowCatalogPayload } from './remote-window-overlay-helpers';
 import {
-  REMOTE_WINDOW_ACTIVE_CATALOG_SYNC_INTERVAL_MS,
-  REMOTE_WINDOW_CATALOG_PROJECTION_CACHE_TTL_MS,
   REMOTE_WINDOW_CATALOG_UI_TIMEOUT_MS,
 } from './remote-window-overlay-constants';
 
 interface RemoteWindowCatalogProjectionSnapshot {
   sessionId: string;
   payload: RemoteWindowStreamTargetsResponsePayload;
-  updatedAt: number;
 }
+
+// A transient transport/session failure must not leave the active catalog
+// unsynchronized for the whole stream, but the client still must not poll the
+// daemon. Retry only after a real failure and stop after this many attempts.
+const MAX_ACTIVE_SNAPSHOT_RETRY_COUNT = 2;
+const ACTIVE_SNAPSHOT_RETRY_DELAY_MS = 1_000;
 
 export interface UseRemoteWindowCatalogOptions {
   activeSessionId: string | null | undefined;
@@ -30,7 +33,6 @@ export interface UseRemoteWindowCatalogOptions {
   setState: Dispatch<SetStateAction<RemoteWindowOverlayState>>;
   requestTargets?: (
     sessionId: string,
-    options?: { forceRefresh?: boolean },
   ) => Promise<RemoteWindowStreamTargetsResponsePayload>;
   activeStreamReady: boolean;
   suspendActiveRefresh: boolean;
@@ -51,6 +53,10 @@ export function useRemoteWindowCatalog({
   const watchdogRef = useRef<number | null>(null);
   const watchdogEpochRef = useRef<number | null>(null);
   const lastCatalogPayloadRef = useRef<RemoteWindowCatalogProjectionSnapshot | null>(null);
+  const lastActiveSnapshotSessionRef = useRef<string | null>(null);
+  const activeSnapshotRetrySessionRef = useRef<string | null>(null);
+  const activeSnapshotRetryCountRef = useRef(0);
+  const [activeSnapshotRetryEpoch, setActiveSnapshotRetryEpoch] = useState(0);
 
   const clearWatchdog = useCallback((requestEpoch?: number) => {
     if (typeof requestEpoch === 'number' && watchdogEpochRef.current !== requestEpoch) {
@@ -65,7 +71,7 @@ export function useRemoteWindowCatalog({
 
   const rememberPayload = useCallback((sessionId: string, payload: RemoteWindowStreamTargetsResponsePayload) => {
     const cachedPayload = cloneRemoteWindowCatalogPayload(payload);
-    lastCatalogPayloadRef.current = { sessionId, payload: cachedPayload, updatedAt: Date.now() };
+    lastCatalogPayloadRef.current = { sessionId, payload: cachedPayload };
     return cachedPayload;
   }, []);
 
@@ -77,23 +83,26 @@ export function useRemoteWindowCatalog({
     lastCatalogPayloadRef.current = {
       sessionId,
       payload: upsertRemoteWindowCatalogTarget(basePayload, target),
-      updatedAt: Date.now(),
     };
   }, []);
 
+  // The daemon owns the catalog snapshot and refreshes it on its own cadence.
+  // Clients only read that snapshot; they never drive a trusted enumeration.
   const requestFreshTargets = useCallback(async (sessionId: string) => {
     if (!requestTargets) {
       throw new Error('当前连接不支持远程窗口列表刷新');
     }
-    return rememberPayload(sessionId, await requestTargets(sessionId, { forceRefresh: true }));
+    return rememberPayload(sessionId, await requestTargets(sessionId));
   }, [rememberPayload, requestTargets]);
+  const requestFreshTargetsRef = useRef(requestFreshTargets);
+  requestFreshTargetsRef.current = requestFreshTargets;
 
   const applyActivePayload = useCallback((payload: RemoteWindowStreamTargetsResponsePayload) => {
     setActiveCatalogSyncError(null);
     setState((current) => applyRemoteWindowTargetCatalogSnapshot(current, payload));
   }, [setState]);
 
-  const openPicker = useCallback((options?: { forceRefresh?: boolean }) => {
+  const openPicker = useCallback(() => {
     clearWatchdog();
     onOpenPicker();
     setActiveCatalogSyncError(null);
@@ -101,7 +110,6 @@ export function useRemoteWindowCatalog({
     const targetSessionId = activeSessionId?.trim() || '';
     const cachedSnapshot = lastCatalogPayloadRef.current;
     const canProjectCachedCatalog = Boolean(cachedSnapshot && cachedSnapshot.sessionId === targetSessionId);
-    const forceRefresh = options?.forceRefresh === true;
     if (canProjectCachedCatalog && cachedSnapshot) {
       setState(applyRemoteWindowTargetCatalog(
         started.state,
@@ -121,20 +129,6 @@ export function useRemoteWindowCatalog({
       ));
       return;
     }
-    const cacheAgeMs = canProjectCachedCatalog && cachedSnapshot
-      ? Date.now() - cachedSnapshot.updatedAt
-      : Number.POSITIVE_INFINITY;
-    if (
-      canProjectCachedCatalog
-      && cachedSnapshot
-      && !forceRefresh
-      && cacheAgeMs >= 0
-      && cacheAgeMs < REMOTE_WINDOW_CATALOG_PROJECTION_CACHE_TTL_MS
-    ) {
-      setCatalogRefreshing(false);
-      return;
-    }
-
     setCatalogRefreshing(canProjectCachedCatalog);
     watchdogEpochRef.current = started.requestEpoch;
     watchdogRef.current = window.setTimeout(() => {
@@ -154,16 +148,14 @@ export function useRemoteWindowCatalog({
       ));
     }, REMOTE_WINDOW_CATALOG_UI_TIMEOUT_MS);
 
-    const requestPromise = forceRefresh
-      ? requestFreshTargets(targetSessionId)
-      : requestTargets(targetSessionId);
+    const requestPromise = requestFreshTargets(targetSessionId);
     void requestPromise.then((payload) => {
       clearWatchdog(started.requestEpoch);
       setCatalogRefreshing(false);
       setState((current) => applyRemoteWindowTargetCatalog(
         current,
         started.requestEpoch,
-        forceRefresh ? payload : rememberPayload(targetSessionId, payload),
+        payload,
       ));
     }).catch((error) => {
       console.log(`[remote-window-picker] catalog request failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -190,32 +182,52 @@ export function useRemoteWindowCatalog({
       return;
     }
     const targetSessionId = activeSessionId.trim();
+    if (lastActiveSnapshotSessionRef.current === targetSessionId) {
+      return;
+    }
+    if (activeSnapshotRetrySessionRef.current !== targetSessionId) {
+      activeSnapshotRetrySessionRef.current = targetSessionId;
+      activeSnapshotRetryCountRef.current = 0;
+    }
+    lastActiveSnapshotSessionRef.current = targetSessionId;
     let disposed = false;
-    let inFlight = false;
-    const refresh = () => {
-      if (disposed || inFlight) {
+    let retryTimer: number | null = null;
+    // The active stream only projects the daemon-owned snapshot once on
+    // entry. The daemon owns ongoing refresh, so the client never polls.
+    void requestFreshTargetsRef.current(targetSessionId).then((payload) => {
+      if (!disposed) {
+        activeSnapshotRetryCountRef.current = 0;
+        applyActivePayload(payload);
+      }
+    }).catch((error) => {
+      if (disposed) {
         return;
       }
-      inFlight = true;
-      void requestFreshTargets(targetSessionId).then((payload) => {
-        if (!disposed) {
-          applyActivePayload(payload);
-        }
-      }).catch((error) => {
-        if (!disposed) {
-          setActiveCatalogSyncError(error instanceof Error ? error.message : String(error));
-          console.warn('[useRemoteWindowCatalog] active remote window catalog sync failed:', error);
-        }
-      }).finally(() => {
-        inFlight = false;
-      });
-    };
-    const intervalId = window.setInterval(refresh, REMOTE_WINDOW_ACTIVE_CATALOG_SYNC_INTERVAL_MS);
+      setActiveCatalogSyncError(error instanceof Error ? error.message : String(error));
+      console.warn('[useRemoteWindowCatalog] active remote window catalog snapshot read failed:', error);
+      if (activeSnapshotRetryCountRef.current >= MAX_ACTIVE_SNAPSHOT_RETRY_COUNT) {
+        return;
+      }
+      activeSnapshotRetryCountRef.current += 1;
+      retryTimer = window.setTimeout(() => {
+        lastActiveSnapshotSessionRef.current = null;
+        setActiveSnapshotRetryEpoch((current) => current + 1);
+      }, ACTIVE_SNAPSHOT_RETRY_DELAY_MS);
+    });
     return () => {
       disposed = true;
-      window.clearInterval(intervalId);
+      if (retryTimer !== null) {
+        window.clearTimeout(retryTimer);
+      }
     };
-  }, [activeSessionId, activeStreamReady, applyActivePayload, requestFreshTargets, requestTargets, suspendActiveRefresh]);
+  }, [activeSessionId, activeStreamReady, activeSnapshotRetryEpoch, applyActivePayload, requestTargets, suspendActiveRefresh]);
+
+  useEffect(() => {
+    if (!activeStreamReady || !activeSessionId) {
+      lastActiveSnapshotSessionRef.current = null;
+      activeSnapshotRetryCountRef.current = 0;
+    }
+  }, [activeSessionId, activeStreamReady]);
 
   useEffect(() => () => clearWatchdog(), [clearWatchdog]);
 

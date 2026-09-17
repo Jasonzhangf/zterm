@@ -219,6 +219,7 @@ export function createTraversalRelayHostClient(options: CreateTraversalRelayHost
   let socket: WebSocket | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let publishLoop: ReturnType<typeof createRelayHostDirectoryPublishLoop> | null = null;
+  let publishDirectoryUpdate: (() => boolean) | null = null;
   let disposed = false;
 
   function clearReconnectTimer() {
@@ -266,20 +267,25 @@ export function createTraversalRelayHostClient(options: CreateTraversalRelayHost
       const nextSocket = new WebSocket(wsUrl);
       socket = nextSocket;
       publishLoop?.stop();
+      const publishCurrentDirectoryUpdate = () => {
+        if (nextSocket.readyState !== WebSocket.OPEN) {
+          return false;
+        }
+        const publishResult = publishRelayDirectoryUpdate({
+          socket: nextSocket,
+          listEndpointCandidates: options.listEndpointCandidates,
+          listTerminalSessionCatalog: options.listTerminalSessionCatalog,
+          now: options.now || (() => new Date().toISOString()),
+        });
+        if (!publishResult.ok) {
+          console.warn(`[${new Date().toISOString()}] traversal relay directory publish failed: ${publishResult.reason}`);
+        }
+        return publishResult.ok;
+      };
+      publishDirectoryUpdate = publishCurrentDirectoryUpdate;
       publishLoop = createRelayHostDirectoryPublishLoop({
         socket: nextSocket,
-        publish: () => {
-          const publishResult = publishRelayDirectoryUpdate({
-            socket: nextSocket,
-            listEndpointCandidates: options.listEndpointCandidates,
-            listTerminalSessionCatalog: options.listTerminalSessionCatalog,
-            now: options.now || (() => new Date().toISOString()),
-          });
-          if (!publishResult.ok) {
-            console.warn(`[${new Date().toISOString()}] traversal relay directory publish failed: ${publishResult.reason}`);
-          }
-          return publishResult.ok;
-        },
+        publish: publishCurrentDirectoryUpdate,
         warn: (message) => console.warn(message),
       });
 
@@ -341,6 +347,7 @@ export function createTraversalRelayHostClient(options: CreateTraversalRelayHost
       nextSocket.on('close', (code, reasonBuffer) => {
         if (socket === nextSocket) {
           socket = null;
+          publishDirectoryUpdate = null;
         }
         publishLoop?.stop();
         publishLoop = null;
@@ -366,11 +373,15 @@ export function createTraversalRelayHostClient(options: CreateTraversalRelayHost
       }
       void connect();
     },
+    publishDirectoryUpdate() {
+      publishDirectoryUpdate?.();
+    },
     dispose() {
       disposed = true;
       clearReconnectTimer();
       publishLoop?.stop();
       publishLoop = null;
+      publishDirectoryUpdate = null;
       if (socket && socket.readyState < WebSocket.CLOSING) {
         socket.close(1000, 'relay host client disposed');
       }

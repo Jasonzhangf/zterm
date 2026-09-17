@@ -247,7 +247,6 @@ export function AppContent({
     resizeRemoteWindowTarget,
     sendMessageRaw,
     manageTmuxSessionsOnOpenTransport,
-    queryTerminalSessionCatalogOnOpenTransport,
     onFileTransferMessage,
     onRemoteWindowMessage,
     updateSessionViewport,
@@ -702,7 +701,6 @@ export function AppContent({
     handleOpenGroupSession,
     handleRenameRemoteSession,
     handleCloseGroupSession,
-    handleRefreshDrawerHostSessions,
     handleSaveServerGroupSelection,
     handleSelectCleanSession,
     handleRemoteSessionsRefreshed,
@@ -726,7 +724,6 @@ export function AppContent({
     switchSession,
     renameRemoteSession,
     manageTmuxSessionsOnOpenTransport,
-    queryTerminalSessionCatalogOnOpenTransport,
     runtimeActiveSessionId: state.activeSessionId,
     runtimeRefs,
     ensureTerminalPageVisible,
@@ -1078,8 +1075,6 @@ export function AppContent({
             onOpenDrawerRemoteSession={handleOpenGroupSession}
             onRenameRemoteSession={handleRenameRemoteSession}
             onCloseDrawerRemoteSession={handleCloseGroupSession}
-            onRefreshRemoteSessions={handleRefreshDrawerHostSessions}
-            onAuditOpenTabsAgainstRemoteSessions={auditOpenTabsAgainstRemoteSessions}
             relayDevices={relayDevices}
             serverIdentityAliasInputs={homeSavedConnections}
             sessionPickerDebugMode={pickerMode}

@@ -146,6 +146,45 @@ describe('remote-window-overlay-helpers', () => {
     expect(clamped.panX).toBeGreaterThanOrEqual(-50);
   });
 
+  it('projects a landscape window point-to-point inside a portrait surface', () => {
+    const { content } = resolveZoomedContentRect(
+      { width: 390, height: 844 },
+      { width: 1600, height: 900 },
+      { scale: 1, panX: 0, panY: 0 },
+      'fit',
+    );
+    expect(content.width).toBeCloseTo(390, 1);
+    expect(content.height).toBeCloseTo(219.375, 1);
+    expect(content.left).toBeCloseTo(0, 1);
+    expect(content.top).toBeCloseTo((844 - content.height) / 2, 1);
+  });
+
+  it('projects a standard 4:3 window inside the surface without crop', () => {
+    const { content } = resolveZoomedContentRect(
+      { width: 390, height: 844 },
+      { width: 1024, height: 768 },
+      { scale: 1, panX: 0, panY: 0 },
+      'fit',
+    );
+    expect(content.width).toBeCloseTo(390, 1);
+    expect(content.height).toBeCloseTo(292.5, 1);
+    expect(content.left).toBeCloseTo(0, 1);
+    expect(content.top).toBeCloseTo((844 - content.height) / 2, 1);
+  });
+
+  it('projects a narrow tall window centered inside a landscape surface', () => {
+    const { content } = resolveZoomedContentRect(
+      { width: 844, height: 390 },
+      { width: 400, height: 1200 },
+      { scale: 1, panX: 0, panY: 0 },
+      'fit',
+    );
+    expect(content.width).toBeCloseTo(130, 1);
+    expect(content.height).toBeCloseTo(390, 1);
+    expect(content.left).toBeCloseTo((844 - content.width) / 2, 1);
+    expect(content.top).toBeCloseTo(0, 1);
+  });
+
   it('formats target kinds and groups app targets by bundle', () => {
     expect(formatTargetKind({ videoTarget: { kind: 'app-window' } } as never)).toBeTruthy();
     expect(safeRemoteWindowGroupId('a/b:c')).toBe('a-b-c');
