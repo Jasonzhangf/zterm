@@ -379,7 +379,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   }, []);
   const [receiverMediaStream, setReceiverMediaStream] = useState<MediaStream | null>(null);
   const [overviewMediaStream, setOverviewMediaStream] = useState<MediaStream | null>(null);
-  const [receiverPlaybackBinding, setReceiverPlaybackBinding] = useState<RemoteWindowPlaybackBinding | null>(null);
+  const [playbackBindingsByLane, setPlaybackBindingsByLane] = useState<ReadonlyMap<'focus' | 'overview', RemoteWindowPlaybackBinding>>(() => new Map());
   const [receiverDecodedCommit, setReceiverDecodedCommit] = useState<((commit: DecodedFrameCommit) => boolean) | null>(null);
   const [receiverFrameSize, setReceiverFrameSize] = useState<SurfaceSize | null>(null);
   const [receiverStartupTelemetry, setReceiverStartupTelemetry] = useState<RemoteWindowReceiverStartupTelemetry | null>(null);
@@ -420,6 +420,11 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   const activeHandoffRef = useRef<RemoteWindowStreamHandoffState | null>(null);
   const handoffVideoVisibilityRef = useRef<boolean | null>(null);
   const collectStreamStatsRef = useRef<(() => Promise<RemoteWindowVideoStatsSample | null>) | null>(null);
+  const handleCanvasProjectionErrorRef = useRef<(message: string) => void>(() => {});
+  const handlePlaybackProjectionError = useCallback(
+    (message: string) => handleCanvasProjectionErrorRef.current(message),
+    [],
+  );
   const activeSessionIdRef = useRef(activeSessionId); const stopStreamRef = useRef(stopStream);
   activeSessionIdRef.current = activeSessionId; stopStreamRef.current = stopStream;
   useEffect(() => () => {
@@ -427,7 +432,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     if (!sessionId || !stop) return;
     new Set<string>([activeStreamIdRef.current, activeCanvasStreamIdRef.current, activeFocusStreamIdRef.current, pendingFocusStreamIdRef.current].filter((value): value is string => Boolean(value))).forEach((streamId) => void Promise.resolve(stop(sessionId, streamId)).catch((error) => console.error('[RemoteWindowOverlay] unmount stream stop failed:', error)));
     activeStreamIdRef.current = null; activeCanvasStreamIdRef.current = null; activeFocusStreamIdRef.current = null; pendingFocusStreamIdRef.current = null;
-    setReceiverPlaybackBinding(null);
+    setPlaybackBindingsByLane(new Map());
     setReceiverDecodedCommit(null);
   }, []);
   const qualityStreamId = state.phase === 'targetLocked' ? state.streamId ?? null : null;
@@ -452,7 +457,9 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     overviewVideoElementRef,
     onVideoDebug,
     onDecodedFrameSize: setReceiverFrameSize,
-    playbackBinding: receiverPlaybackBinding,
+    onProjectionError: handlePlaybackProjectionError,
+    receiverPlaybackBinding: playbackBindingsByLane.get('focus') ?? null,
+    overviewPlaybackBinding: playbackBindingsByLane.get('overview') ?? null,
     commitDecodedFrame: receiverDecodedCommit ?? undefined,
   });
   const {
@@ -1234,7 +1241,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     finishFloatingResize,
     updateFloatingResizeFromPointer,
   ]);
-
   const handleCanvasProjectionError = useCallback((message: string) => {
     const streamId = activeStreamIdRef.current;
     if (!streamId) {
@@ -1272,7 +1278,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     stopStream,
     updateReceiverVideoVisibility,
   ]);
-
+  handleCanvasProjectionErrorRef.current = handleCanvasProjectionError;
   useEffect(() => {
     if (lastReportedQuickBarSuppressionRef.current === quickBarSuppressed) {
       return;
@@ -1608,7 +1614,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     // 自动在同一 peerConnection 加第二个 video transceiver（stream id='overview'），
     // daemon 看到 composite target 会同步开 overview capture。overviewMediaStream 用于
     // 缩略图 drawImage + 切换瞬间主画面低清占位（同连接双流不进 canvas 预览流饿死 focus 路径）。
-    setReceiverPlaybackBinding(null);
+    setPlaybackBindingsByLane(new Map());
     setReceiverDecodedCommit(null);
     updateFocus?.(targetSessionId, focusStreamId, effectiveTarget);
     void startStream(targetSessionId, effectiveTarget, focusStreamId, {
@@ -1674,11 +1680,10 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
           const playbackBindings = Array.isArray(committedResult.bindings)
             ? committedResult.bindings
             : [];
-          setReceiverPlaybackBinding(
-            playbackBindings.find((binding) => (
-              binding.lane === 'focus' && binding.mediaStream === committedResult.mediaStream
-            )) ?? null,
-          );
+          setPlaybackBindingsByLane(new Map(playbackBindings
+            .filter((binding) => binding.mediaStream === committedResult.mediaStream
+              || binding.mediaStream === committedResult.overviewMediaStream)
+            .map((binding) => [binding.lane, binding] as const)));
           // React setState(fn) is an updater: passing commitDecodedFrame directly
           // calls it with previous state (null) -> TypeError reading 'frameId'.
           setReceiverDecodedCommit(() => (

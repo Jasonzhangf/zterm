@@ -898,7 +898,12 @@ describe('RemoteWindowOverlay', () => {
   it('stops the stream and reports unsupported decoded-frame projection', async () => {
     Reflect.deleteProperty(HTMLVideoElement.prototype, 'requestVideoFrameCallback');
     Reflect.deleteProperty(HTMLVideoElement.prototype, 'cancelVideoFrameCallback');
-    const mediaStream = { id: 'media-stream-no-frame-callback' } as MediaStream;
+    const focusTrack = { id: 'focus-track-no-frame-callback', kind: 'video', readyState: 'live', muted: false };
+    const mediaStream = {
+      id: 'media-stream-no-frame-callback',
+      getTracks: () => [focusTrack],
+      getVideoTracks: () => [focusTrack],
+    } as unknown as MediaStream;
     const requestTargets = vi.fn(async () => ({
       requestId: 'rw-no-frame-callback',
       targets: [makeTarget('pane-no-frame-callback', 'zterm pane', 'iterm2-pane')],
@@ -906,6 +911,14 @@ describe('RemoteWindowOverlay', () => {
     const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string) => ({
       streamId,
       mediaStream,
+      bindings: [{
+        lane: 'focus' as const,
+        mediaStream,
+        streamId,
+        mediaPlanVersion: 1,
+        mediaEpoch: 0,
+        trackId: 'focus-track-no-frame-callback',
+      }],
     }));
     const stopStream = vi.fn();
 
@@ -1117,7 +1130,12 @@ describe('RemoteWindowOverlay', () => {
         return frameCallbacks.length;
       }),
     });
-    const mediaStream = { id: 'media-stream-1' } as MediaStream;
+    const focusTrack = { id: 'focus-track-reveal-frame', kind: 'video', readyState: 'live', muted: false };
+    const mediaStream = {
+      id: 'media-stream-1',
+      getTracks: () => [focusTrack],
+      getVideoTracks: () => [focusTrack],
+    } as unknown as MediaStream;
     const requestTargets = vi.fn(async () => ({
       requestId: 'rw-1',
       targets: [makeTarget('app-1', 'TextEdit', 'app-window')],
@@ -1125,6 +1143,14 @@ describe('RemoteWindowOverlay', () => {
     const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string) => ({
       streamId,
       mediaStream,
+      bindings: [{
+        lane: 'focus' as const,
+        mediaStream,
+        streamId,
+        mediaPlanVersion: 1,
+        mediaEpoch: 0,
+        trackId: 'focus-track-reveal-frame',
+      }],
     }));
 
     try {
@@ -1141,6 +1167,11 @@ describe('RemoteWindowOverlay', () => {
       const video = await screen.findByTestId('remote-window-video');
       expect(screen.getByTestId('remote-window-video-wallpaper')).toBeTruthy();
       expect((video as HTMLVideoElement).style.visibility).toBe('visible');
+      Object.defineProperties(video, {
+        readyState: { configurable: true, value: 2 },
+        videoWidth: { configurable: true, value: 1280 },
+        videoHeight: { configurable: true, value: 720 },
+      });
 
       act(() => {
         frameCallbacks.slice().forEach((callback) => callback(0, { presentedFrames: 1 }));

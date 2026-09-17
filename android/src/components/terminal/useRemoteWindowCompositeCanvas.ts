@@ -1,4 +1,5 @@
 import { useEffect, useRef, type RefObject } from 'react';
+import type { RemoteWindowDecodedFrame } from './useRemoteWindowPlayback';
 
 export interface RemoteWindowCompositeCanvasSlot {
   windowId: string;
@@ -25,7 +26,7 @@ export interface UseRemoteWindowCompositeCanvasOptions {
   overviewCanvasRef: RefObject<HTMLCanvasElement | null>;
   focusDisplayCanvasRef?: RefObject<HTMLCanvasElement | null>;
   thumbnailCanvasRefs: RefObject<Map<string, HTMLCanvasElement | null>>;
-  subscribeDecodedFrame?: (callback: (frame: { video: HTMLVideoElement; presentedFrames?: number }) => void) => () => void;
+  subscribeDecodedFrame?: (callback: (frame: RemoteWindowDecodedFrame) => void) => () => void;
   onProjectionError?: (message: string) => void;
 }
 
@@ -61,14 +62,14 @@ export function useRemoteWindowCompositeCanvas({
     let lastPresentedFrames: number | null = null;
     let cachedCanvas: HTMLCanvasElement | null = null;
     let cachedContext: CanvasRenderingContext2D | null = null;
-    const drawFocus = (frame: { video: HTMLVideoElement; presentedFrames?: number }) => {
+    const drawFocus = (frame: RemoteWindowDecodedFrame) => {
       if (cancelled) {
         return;
       }
+      if (frame.lane !== 'focus') return;
       if (frame.video !== video || video.srcObject !== receiverMediaStream) return;
-      const metadata = frame;
-      const presentedFrames = Number.isFinite(metadata?.presentedFrames)
-        ? Number(metadata.presentedFrames)
+      const presentedFrames = Number.isFinite(frame.presentedFrames)
+        ? Number(frame.presentedFrames)
         : null;
       if (presentedFrames !== null && presentedFrames === lastPresentedFrames) {
         return;
@@ -133,30 +134,27 @@ export function useRemoteWindowCompositeCanvas({
     if (!video) {
       return;
     }
-    if (typeof video.requestVideoFrameCallback !== 'function') {
-      onProjectionError?.('remote window overview decoded-frame callback is unavailable');
+    if (!subscribeDecodedFrame) {
       return;
     }
     let cancelled = false;
-    let callbackId: number | null = null;
     let lastPresentedFrames: number | null = null;
     let overviewContext: CanvasRenderingContext2D | null = null;
     let overviewContextCanvas: HTMLCanvasElement | null = null;
     const thumbnailContexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>();
-    const requestFrame = video.requestVideoFrameCallback.bind(video);
-    const draw = (_now: number, metadata: { presentedFrames?: number }) => {
+    const draw = (frame: RemoteWindowDecodedFrame) => {
       if (cancelled) {
         return;
       }
-      const presentedFrames = Number.isFinite(metadata?.presentedFrames)
-        ? Number(metadata.presentedFrames)
+      if (frame.lane !== 'overview') return;
+      if (frame.video !== video || video.srcObject !== overviewMediaStream) return;
+      const presentedFrames = Number.isFinite(frame.presentedFrames)
+        ? Number(frame.presentedFrames)
         : null;
       if (presentedFrames !== null && presentedFrames === lastPresentedFrames) {
-        callbackId = requestFrame(draw);
         return;
       }
       if (video.readyState < 2 || video.videoWidth <= 0 || video.videoHeight <= 0) {
-        callbackId = requestFrame(draw);
         return;
       }
       try {
@@ -223,14 +221,11 @@ export function useRemoteWindowCompositeCanvas({
         return;
       }
       lastPresentedFrames = presentedFrames;
-      callbackId = requestFrame(draw);
     };
-    callbackId = requestFrame(draw);
+    const unsubscribe = subscribeDecodedFrame(draw);
     return () => {
       cancelled = true;
-      if (callbackId !== null) {
-        video.cancelVideoFrameCallback?.(callbackId);
-      }
+      unsubscribe();
     };
   }, [
     focusedWindow,
@@ -241,6 +236,7 @@ export function useRemoteWindowCompositeCanvas({
     overviewMediaStream,
     overviewVideoElementRef,
     receiverMediaStream,
+    subscribeDecodedFrame,
     thumbnailCanvasRefs,
   ]);
 }
