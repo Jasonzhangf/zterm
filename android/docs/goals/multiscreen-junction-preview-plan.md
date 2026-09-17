@@ -21,7 +21,7 @@
 - 不做缩略图（任何 `scale` / `transform: scale` 都被禁止）。
 - 不新增第二套 ANSI / cell / cursor 解析器。
 - 不改 daemon mirror、sparse buffer、transport、tmux 宽度语义。
-- 本次不改版本号、不发布 OTA。
+- 本次不发布 OTA；APK 构建由 `scripts/bump-build-version.mjs` 分配 buildNumber（当前证据为 3013）。
 
 ---
 
@@ -516,6 +516,17 @@ centerRows = floor((viewHeight - edgeRows - gaps - railH) / rowH)
 - build：`pnpm run build`（内部先跑 type-check 再 vite build）
 - 架构/registry 门禁：`pnpm run test:feature-registry`
 - 预览 source→DOM 门禁：`pnpm run terminal:preview:source-dom-gate`
+
+## 13. 设备证据状态
+
+- 2026-09-17 emulator-5554（2560x1600，density 320）已取得：
+  - 横屏手机预览：`android/evidence/session-preview/2026-09-17/junction-device/01-landscape-preview.png`
+  - 竖屏手机预览：`02-portrait-before-pan.png`
+  - 竖屏空格 “+” 菜单：`03-portrait-empty-plus-menu.png`
+  - 预览中左缘右滑抽屉：`04-portrait-drawer-over-preview.png`
+  - 抽屉选择后焦点格重定向：`05-portrait-focus-retargeted.png`
+- 本轮后续 emulator 被 `com.agentbrowser.app` 抢占前台，`adb shell input swipe` 与 CDP `Input.dispatchTouchEvent` 均无法稳定触发 WebView 的 React touch capture；该环境限制不作为产品通过证据，也不替代自动化覆盖。已复现 6 次，未发现新的产品失败证据。
+- 宽屏/平板五窗由 `junction-preview-layout.test.ts` 与 `TerminalPreviewGrid.test.tsx` 覆盖；真机宽屏截图待可用平板或稳定 emulator 输入环境补齐。
 
 ---
 

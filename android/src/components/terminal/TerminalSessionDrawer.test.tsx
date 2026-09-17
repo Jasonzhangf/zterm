@@ -239,7 +239,6 @@ describe('TerminalSessionDrawer', () => {
 
   it('does not route folder long press into preview mode', async () => {
     vi.useFakeTimers();
-    const onPreviewFolder = vi.fn();
     render(
       <TerminalSessionDrawer
         open
@@ -257,7 +256,6 @@ describe('TerminalSessionDrawer', () => {
       vi.advanceTimersByTime(420);
     });
 
-    expect(onPreviewFolder).not.toHaveBeenCalled();
     expect(screen.queryByTestId('terminal-session-drawer-folder-menu')).toBeNull();
     fireEvent.pointerUp(folderButton, { pointerId: 1, pointerType: 'touch' });
     vi.useRealTimers();
@@ -265,7 +263,6 @@ describe('TerminalSessionDrawer', () => {
 
   it('keeps folder long-press inert even when the pointer moves before the threshold', async () => {
     vi.useFakeTimers();
-    const onPreviewFolder = vi.fn();
     render(
       <TerminalSessionDrawer
         open
@@ -284,7 +281,7 @@ describe('TerminalSessionDrawer', () => {
       vi.advanceTimersByTime(420);
     });
 
-    expect(onPreviewFolder).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('terminal-session-drawer-folder-menu')).toBeNull();
     vi.useRealTimers();
   });
 
