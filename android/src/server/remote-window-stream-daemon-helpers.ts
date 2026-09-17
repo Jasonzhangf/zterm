@@ -5,7 +5,6 @@
 import type {
   RemoteWindowStreamErrorPayload,
   RemoteWindowStreamIceCandidate,
-  RemoteWindowStreamRequestPayload,
   RemoteWindowStreamRtcDescription,
   RemoteWindowStreamTargetsResponsePayload,
   RemoteWindowVideoProfile,
@@ -16,13 +15,6 @@ export interface RtcVideoFrame {
   width: number;
   height: number;
   data: Uint8Array;
-}
-
-export function buildRemoteWindowTargetCatalogCacheKey(payload: RemoteWindowStreamRequestPayload) {
-  return [
-    payload.includeAppWindows !== false ? 'app' : 'no-app',
-    payload.includeIterm2 !== false ? 'iterm2' : 'no-iterm2',
-  ].join('|');
 }
 
 export function cloneRemoteWindowTargetCatalogResponse(

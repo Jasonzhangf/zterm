@@ -151,9 +151,8 @@ describe('session context remote window runtime', () => {
     expect(requestTargets).toHaveBeenCalledTimes(1);
   });
 
-  it('reuses a fresh remote-window target catalog cache without re-enumerating daemon targets', async () => {
+  it('reads the daemon-owned target snapshot without client enumeration', async () => {
     const ws = makeSocket();
-    const targetCatalogCache = new Map();
     let now = 10_000;
     const requestTargets = vi.fn(async () => ({
       requestId: 'rw-live',
@@ -168,7 +167,6 @@ describe('session context remote window runtime', () => {
       daemonConnection: makeDaemonConnection(ws),
       remoteWindowMessageRuntime: { requestTargets },
       sendSocketPayload,
-      targetCatalogCache,
       now: () => now,
     })).resolves.toMatchObject({ requestId: 'rw-live', targets: [expect.objectContaining({ streamTargetId: 'pane-1' })] });
 
@@ -179,19 +177,17 @@ describe('session context remote window runtime', () => {
       daemonConnection: makeDaemonConnection(ws),
       remoteWindowMessageRuntime: { requestTargets },
       sendSocketPayload,
-      targetCatalogCache,
       now: () => now,
     })).resolves.toMatchObject({ requestId: 'rw-live', targets: [expect.objectContaining({ streamTargetId: 'pane-1' })] });
 
-    expect(requestTargets).toHaveBeenCalledTimes(1);
+    expect(requestTargets).toHaveBeenCalledTimes(2);
   });
 
-  it('honors explicit force-refresh even when the daemon app catalog cache is fresh', async () => {
+  it('does not send force-refresh through the client catalog request', async () => {
     const ws = makeSocket();
-    const targetCatalogCache = new Map();
     const requestTargets = vi.fn()
       .mockResolvedValueOnce({ requestId: 'rw-first', targets: [], errors: [] })
-      .mockResolvedValueOnce({ requestId: 'rw-refresh', targets: [makeTarget()], errors: [] });
+      .mockResolvedValueOnce({ requestId: 'rw-second', targets: [makeTarget()], errors: [] });
 
     await requestRemoteWindowTargetsRuntime({
       sessionId: 'session-1',
@@ -199,7 +195,6 @@ describe('session context remote window runtime', () => {
       daemonConnection: makeDaemonConnection(ws),
       remoteWindowMessageRuntime: { requestTargets },
       sendSocketPayload: vi.fn(),
-      targetCatalogCache,
       now: () => 10_000,
     });
 
@@ -209,25 +204,21 @@ describe('session context remote window runtime', () => {
       daemonConnection: makeDaemonConnection(ws),
       remoteWindowMessageRuntime: { requestTargets },
       sendSocketPayload: vi.fn(),
-      targetCatalogCache,
-      forceRefresh: true,
       now: () => 10_001,
     })).resolves.toMatchObject({
-      requestId: 'rw-refresh',
+      requestId: 'rw-second',
       targets: [expect.objectContaining({ streamTargetId: 'pane-1' })],
     });
 
     expect(requestTargets).toHaveBeenCalledTimes(2);
     expect(requestTargets).toHaveBeenLastCalledWith('session-1', {
       ws,
-      request: { forceRefresh: true },
       sendSocketPayload: expect.any(Function),
     });
   });
 
-  it('shares the daemon app catalog cache across session switches on the same daemon', async () => {
+  it('reads the daemon-owned snapshot across session switches', async () => {
     const ws = makeSocket();
-    const targetCatalogCache = new Map();
     const requestTargets = vi.fn(async () => ({
       requestId: 'rw-daemon-wide',
       targets: [makeTarget()],
@@ -245,7 +236,6 @@ describe('session context remote window runtime', () => {
       daemonConnection: makeDaemonConnection(ws),
       remoteWindowMessageRuntime: { requestTargets },
       sendSocketPayload: vi.fn(),
-      targetCatalogCache,
       now: () => 30_000,
     });
 
@@ -255,16 +245,14 @@ describe('session context remote window runtime', () => {
       daemonConnection: makeDaemonConnection(ws),
       remoteWindowMessageRuntime: { requestTargets },
       sendSocketPayload: vi.fn(),
-      targetCatalogCache,
       now: () => 30_001,
     })).resolves.toMatchObject({ requestId: 'rw-daemon-wide' });
 
-    expect(requestTargets).toHaveBeenCalledTimes(1);
+    expect(requestTargets).toHaveBeenCalledTimes(2);
   });
 
-  it('refreshes remote-window targets after the catalog cache ttl expires', async () => {
+  it('reads the daemon snapshot on repeated requests', async () => {
     const ws = makeSocket();
-    const targetCatalogCache = new Map();
     let now = 20_000;
     const requestTargets = vi.fn()
       .mockResolvedValueOnce({ requestId: 'rw-first', targets: [], errors: [] })
@@ -276,8 +264,6 @@ describe('session context remote window runtime', () => {
       daemonConnection: makeDaemonConnection(ws),
       remoteWindowMessageRuntime: { requestTargets },
       sendSocketPayload: vi.fn(),
-      targetCatalogCache,
-      cacheTtlMs: 500,
       now: () => now,
     });
     now += 501;
@@ -288,8 +274,6 @@ describe('session context remote window runtime', () => {
       daemonConnection: makeDaemonConnection(ws),
       remoteWindowMessageRuntime: { requestTargets },
       sendSocketPayload: vi.fn(),
-      targetCatalogCache,
-      cacheTtlMs: 500,
       now: () => now,
     })).resolves.toMatchObject({ requestId: 'rw-second' });
 
@@ -297,7 +281,6 @@ describe('session context remote window runtime', () => {
   });
 
   it('does not use target catalog cache to hide a closed transport', async () => {
-    const targetCatalogCache = new Map();
     await requestRemoteWindowTargetsRuntime({
       sessionId: 'session-1',
       sessions: [{ ...baseSession, bridgeHost: '100.66.1.82', bridgePort: 3333 }],
@@ -306,7 +289,6 @@ describe('session context remote window runtime', () => {
         requestTargets: vi.fn(async () => ({ requestId: 'rw-cached', targets: [makeTarget()], errors: [] })),
       },
       sendSocketPayload: vi.fn(),
-      targetCatalogCache,
       now: () => 1,
     });
 
@@ -316,7 +298,6 @@ describe('session context remote window runtime', () => {
       daemonConnection: makeDaemonConnection({ ...makeSocket(), readyState: 3 }),
       remoteWindowMessageRuntime: { requestTargets: vi.fn() },
       sendSocketPayload: vi.fn(),
-      targetCatalogCache,
       now: () => 2,
     })).rejects.toThrow('Remote window catalog requires an open daemon connection (socket=closed');
   });

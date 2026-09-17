@@ -195,7 +195,7 @@ export function createSessionInteractionRuntime(options: {
 
   const requestRemoteWindowTargets = async (
     sessionId: string,
-    requestOptions?: { forceRefresh?: boolean },
+    _requestOptions?: { forceRefresh?: boolean },
   ) => {
     return requestRemoteWindowTargetsRuntime({
       sessionId,
@@ -203,8 +203,6 @@ export function createSessionInteractionRuntime(options: {
       daemonConnection,
       remoteWindowMessageRuntime: options.refs.remoteWindowMessageRuntimeRef.current,
       sendSocketPayload: options.sendSocketPayload,
-      targetCatalogCache: options.refs.remoteWindowTargetCatalogCacheRef?.current,
-      forceRefresh: requestOptions?.forceRefresh === true,
     });
   };
 

@@ -14,24 +14,19 @@ import {
 import { cloneRemoteWindowCatalogPayload } from './remote-window-overlay-helpers';
 import {
   REMOTE_WINDOW_ACTIVE_CATALOG_SYNC_INTERVAL_MS,
-  REMOTE_WINDOW_CATALOG_PROJECTION_CACHE_TTL_MS,
   REMOTE_WINDOW_CATALOG_UI_TIMEOUT_MS,
 } from './remote-window-overlay-constants';
 
 interface RemoteWindowCatalogProjectionSnapshot {
   sessionId: string;
   payload: RemoteWindowStreamTargetsResponsePayload;
-  updatedAt: number;
 }
 
 export interface UseRemoteWindowCatalogOptions {
   activeSessionId: string | null | undefined;
   state: RemoteWindowOverlayState;
   setState: Dispatch<SetStateAction<RemoteWindowOverlayState>>;
-  requestTargets?: (
-    sessionId: string,
-    options?: { forceRefresh?: boolean },
-  ) => Promise<RemoteWindowStreamTargetsResponsePayload>;
+  requestTargets?: (sessionId: string) => Promise<RemoteWindowStreamTargetsResponsePayload>;
   activeStreamReady: boolean;
   suspendActiveRefresh: boolean;
   onOpenPicker: () => void;
@@ -65,7 +60,7 @@ export function useRemoteWindowCatalog({
 
   const rememberPayload = useCallback((sessionId: string, payload: RemoteWindowStreamTargetsResponsePayload) => {
     const cachedPayload = cloneRemoteWindowCatalogPayload(payload);
-    lastCatalogPayloadRef.current = { sessionId, payload: cachedPayload, updatedAt: Date.now() };
+    lastCatalogPayloadRef.current = { sessionId, payload: cachedPayload };
     return cachedPayload;
   }, []);
 
@@ -77,15 +72,14 @@ export function useRemoteWindowCatalog({
     lastCatalogPayloadRef.current = {
       sessionId,
       payload: upsertRemoteWindowCatalogTarget(basePayload, target),
-      updatedAt: Date.now(),
     };
   }, []);
 
-  const requestFreshTargets = useCallback(async (sessionId: string) => {
+  const requestSnapshotTargets = useCallback(async (sessionId: string) => {
     if (!requestTargets) {
-      throw new Error('当前连接不支持远程窗口列表刷新');
+      throw new Error('当前连接不支持远程窗口列表读取');
     }
-    return rememberPayload(sessionId, await requestTargets(sessionId, { forceRefresh: true }));
+    return rememberPayload(sessionId, await requestTargets(sessionId));
   }, [rememberPayload, requestTargets]);
 
   const applyActivePayload = useCallback((payload: RemoteWindowStreamTargetsResponsePayload) => {
@@ -93,7 +87,7 @@ export function useRemoteWindowCatalog({
     setState((current) => applyRemoteWindowTargetCatalogSnapshot(current, payload));
   }, [setState]);
 
-  const openPicker = useCallback((options?: { forceRefresh?: boolean }) => {
+  const openPicker = useCallback((_options?: { forceRefresh?: boolean }) => {
     clearWatchdog();
     onOpenPicker();
     setActiveCatalogSyncError(null);
@@ -101,7 +95,6 @@ export function useRemoteWindowCatalog({
     const targetSessionId = activeSessionId?.trim() || '';
     const cachedSnapshot = lastCatalogPayloadRef.current;
     const canProjectCachedCatalog = Boolean(cachedSnapshot && cachedSnapshot.sessionId === targetSessionId);
-    const forceRefresh = options?.forceRefresh === true;
     if (canProjectCachedCatalog && cachedSnapshot) {
       setState(applyRemoteWindowTargetCatalog(
         started.state,
@@ -121,20 +114,6 @@ export function useRemoteWindowCatalog({
       ));
       return;
     }
-    const cacheAgeMs = canProjectCachedCatalog && cachedSnapshot
-      ? Date.now() - cachedSnapshot.updatedAt
-      : Number.POSITIVE_INFINITY;
-    if (
-      canProjectCachedCatalog
-      && cachedSnapshot
-      && !forceRefresh
-      && cacheAgeMs >= 0
-      && cacheAgeMs < REMOTE_WINDOW_CATALOG_PROJECTION_CACHE_TTL_MS
-    ) {
-      setCatalogRefreshing(false);
-      return;
-    }
-
     setCatalogRefreshing(canProjectCachedCatalog);
     watchdogEpochRef.current = started.requestEpoch;
     watchdogRef.current = window.setTimeout(() => {
@@ -154,16 +133,13 @@ export function useRemoteWindowCatalog({
       ));
     }, REMOTE_WINDOW_CATALOG_UI_TIMEOUT_MS);
 
-    const requestPromise = forceRefresh
-      ? requestFreshTargets(targetSessionId)
-      : requestTargets(targetSessionId);
-    void requestPromise.then((payload) => {
+    void requestSnapshotTargets(targetSessionId).then((payload) => {
       clearWatchdog(started.requestEpoch);
       setCatalogRefreshing(false);
       setState((current) => applyRemoteWindowTargetCatalog(
         current,
         started.requestEpoch,
-        forceRefresh ? payload : rememberPayload(targetSessionId, payload),
+        payload,
       ));
     }).catch((error) => {
       console.log(`[remote-window-picker] catalog request failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -177,7 +153,7 @@ export function useRemoteWindowCatalog({
           : failRemoteWindowTargetCatalog(current, started.requestEpoch, error)
       ));
     });
-  }, [activeSessionId, clearWatchdog, onOpenPicker, rememberPayload, requestFreshTargets, requestTargets, setState, state]);
+  }, [activeSessionId, clearWatchdog, onOpenPicker, requestSnapshotTargets, requestTargets, setState, state]);
 
   const resetCatalog = useCallback(() => {
     clearWatchdog();
@@ -197,7 +173,7 @@ export function useRemoteWindowCatalog({
         return;
       }
       inFlight = true;
-      void requestFreshTargets(targetSessionId).then((payload) => {
+      void requestSnapshotTargets(targetSessionId).then((payload) => {
         if (!disposed) {
           applyActivePayload(payload);
         }
@@ -215,7 +191,7 @@ export function useRemoteWindowCatalog({
       disposed = true;
       window.clearInterval(intervalId);
     };
-  }, [activeSessionId, activeStreamReady, applyActivePayload, requestFreshTargets, requestTargets, suspendActiveRefresh]);
+  }, [activeSessionId, activeStreamReady, applyActivePayload, requestSnapshotTargets, requestTargets, suspendActiveRefresh]);
 
   useEffect(() => () => clearWatchdog(), [clearWatchdog]);
 
@@ -223,7 +199,7 @@ export function useRemoteWindowCatalog({
     activeCatalogSyncError,
     catalogRefreshing,
     openPicker,
-    requestFreshTargets,
+    requestFreshTargets: requestSnapshotTargets,
     rememberTarget,
     resetCatalog,
   };

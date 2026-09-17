@@ -97,13 +97,54 @@ describe('remote-window-overlay-helpers', () => {
     expect(rect.top).toBe(25);
   });
 
-  it('resolves a unified 1080p short-edge remote window resize size', () => {
-    expect(resolveRemoteWindowTargetResizeSize({ viewport: { width: 390, height: 844 } }))
-      .toEqual({ width: 1080, height: 2337 });
-    expect(resolveRemoteWindowTargetResizeSize({ viewport: { width: 844, height: 390 }, orientation: 'landscape' }))
-      .toEqual({ width: 2337, height: 1080 });
-    expect(resolveRemoteWindowTargetResizeSize({ viewport: { width: 1080, height: 1080 }, shortEdge: 720 }))
-      .toEqual({ width: 720, height: 720 });
+  it('resolves a point-to-point remote window resize from the container size and DPR', () => {
+    const target = appTarget('com.apple.TextEdit');
+    target.videoTarget.windowBoundsTopLeftPx = { x: 0, y: 0, width: 900, height: 700 };
+    target.videoTarget.cropRectTopLeftPx = { x: 0, y: 0, width: 900, height: 700 };
+    expect(resolveRemoteWindowTargetResizeSize({
+      viewport: { width: 1280, height: 800 },
+      devicePixelRatio: 2,
+      target,
+    })).toEqual({ width: 2560, height: 1600 });
+  });
+
+  it('scales the container aspect ratio down to fit inside the display bounds', () => {
+    const target = appTarget('com.apple.TextEdit');
+    target.videoTarget.windowBoundsTopLeftPx = { x: 0, y: 0, width: 900, height: 700 };
+    target.videoTarget.cropRectTopLeftPx = { x: 0, y: 0, width: 900, height: 700 };
+    target.capture.displayBoundsTopLeftPx = { x: 0, y: 0, width: 1920, height: 1080 };
+    const resized = resolveRemoteWindowTargetResizeSize({
+      viewport: { width: 1280, height: 800 },
+      devicePixelRatio: 2,
+      target,
+    });
+    expect(resized).toEqual({ width: 1728, height: 1080 });
+    expect(resized.width / resized.height).toBeCloseTo(1280 / 800, 5);
+    expect(resized.width).toBeLessThanOrEqual(1920);
+    expect(resized.height).toBeLessThanOrEqual(1080);
+    const rect = resolveAspectRect(
+      { width: 1280, height: 800 },
+      resized,
+      'fit',
+    );
+    expect(rect.left).toBeCloseTo((1280 - rect.width) / 2, 5);
+    expect(rect.top).toBeCloseTo((800 - rect.height) / 2, 5);
+  });
+
+  it('subtracts the current window origin before clamping to the display bounds', () => {
+    const target = appTarget('com.apple.TextEdit');
+    target.videoTarget.windowBoundsTopLeftPx = { x: 200, y: 200, width: 900, height: 700 };
+    target.videoTarget.cropRectTopLeftPx = { x: 200, y: 200, width: 900, height: 700 };
+    target.capture.displayBoundsTopLeftPx = { x: 0, y: 0, width: 1920, height: 1080 };
+    const resized = resolveRemoteWindowTargetResizeSize({
+      viewport: { width: 1280, height: 800 },
+      devicePixelRatio: 2,
+      target,
+    });
+    // 可用宽高是 display 减去窗口原点：1720 x 880，按容器比例回缩后不越界。
+    expect(resized.width).toBeLessThanOrEqual(1920 - 200);
+    expect(resized.height).toBeLessThanOrEqual(1080 - 200);
+    expect(resized.width / resized.height).toBeCloseTo(1280 / 800, 5);
   });
 
   it('fills fullscreen geometry while preserving fit geometry', () => {

@@ -31,7 +31,7 @@ const target: RemoteWindowStreamTargetManifest = {
 };
 
 describe('useRemoteWindowCatalog owner', () => {
-  it('projects a fresh catalog and reuses its cache without another request', async () => {
+  it('projects the daemon snapshot on every picker open', async () => {
     const requestTargets = vi.fn().mockResolvedValue({ requestId: 'catalog-1', targets: [target] });
     const onOpenPicker = vi.fn();
     const { result } = renderHook(() => {
@@ -54,8 +54,33 @@ describe('useRemoteWindowCatalog owner', () => {
     expect(requestTargets).toHaveBeenCalledTimes(1);
     act(() => result.current.openPicker());
     await waitFor(() => expect(result.current.state.phase).toBe('pickerOpen'));
-    expect(requestTargets).toHaveBeenCalledTimes(1);
+    expect(requestTargets).toHaveBeenCalledTimes(2);
     expect(onOpenPicker).toHaveBeenCalledTimes(2);
+  });
+
+  it('opens the picker with one snapshot read and never requests a daemon enumeration', async () => {
+    const requestTargets = vi.fn().mockResolvedValue({ requestId: 'catalog-1', targets: [target] });
+    const { result } = renderHook(() => {
+      const [state, setState] = useState(initialRemoteWindowOverlayState);
+      return {
+        state,
+        ...useRemoteWindowCatalog({
+          activeSessionId: 'session',
+          state,
+          setState,
+          requestTargets,
+          activeStreamReady: false,
+          suspendActiveRefresh: false,
+          onOpenPicker: vi.fn(),
+        }),
+      };
+    });
+
+    act(() => result.current.openPicker());
+    await waitFor(() => expect(result.current.state.phase).toBe('pickerOpen'));
+
+    expect(requestTargets).toHaveBeenCalledTimes(1);
+    expect(requestTargets).toHaveBeenCalledWith('session');
   });
 
   it('fails explicitly when no daemon session can own enumeration', async () => {
