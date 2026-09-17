@@ -34,7 +34,6 @@ export interface AmbientButtonProps extends ButtonHTMLAttributes<HTMLButtonEleme
 }
 
 const commonButtonStyle: CSSProperties = {
-  cursor: 'pointer',
   border: '1px solid var(--amb-control-border)',
   backgroundColor: 'var(--amb-control-bg)',
   color: 'var(--amb-control-text)',
@@ -347,22 +346,31 @@ export const AmbientButton = forwardRef<HTMLButtonElement, AmbientButtonProps>(
         className={ambientClass}
         onPointerDown={(event: PointerEvent<HTMLButtonElement>) => {
           if (!disabled && !flatMaterial) setPressed(true);
+          if (!disabled && !flatMaterial) event.currentTarget.setPointerCapture?.(event.pointerId);
           onPointerDown?.(event);
         }}
         onPointerUp={(event: PointerEvent<HTMLButtonElement>) => {
           setPressed(false);
+          if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+            event.currentTarget.releasePointerCapture?.(event.pointerId);
+          }
           onPointerUp?.(event);
         }}
         onPointerCancel={(event: PointerEvent<HTMLButtonElement>) => {
           setPressed(false);
+          if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+            event.currentTarget.releasePointerCapture?.(event.pointerId);
+          }
           onPointerCancel?.(event);
         }}
+        onLostPointerCapture={() => setPressed(false)}
         style={{
           ...commonButtonStyle,
           ...resolveVariantStyle(variant, selected),
           ...geometryOverride,
           ...(variant === 'settings-save' && disabled ? { opacity: 0.72 } : null),
           ...style,
+          cursor: disabled ? 'not-allowed' : 'pointer',
         }}
         {...props}
       />

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { fireEvent, render } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   AmbientButton,
   AmbientInput,
@@ -64,6 +64,31 @@ describe('ambient shared controls render owner DOM', () => {
     expect(button?.getAttribute('data-amb-pressed')).toBe('true');
     fireEvent.pointerCancel(button!);
     expect(button?.getAttribute('data-amb-pressed')).toBeNull();
+  });
+
+  it('clears press material when pointer capture is lost outside the button', () => {
+    const { container } = render(<AmbientButton aria-label="captured press">Press</AmbientButton>);
+    const button = container.querySelector('button')!;
+    const setPointerCapture = vi.fn();
+    const releasePointerCapture = vi.fn();
+    const hasPointerCapture = vi.fn(() => true);
+    Object.defineProperty(button, 'setPointerCapture', { configurable: true, value: setPointerCapture });
+    Object.defineProperty(button, 'releasePointerCapture', { configurable: true, value: releasePointerCapture });
+    Object.defineProperty(button, 'hasPointerCapture', { configurable: true, value: hasPointerCapture });
+
+    fireEvent.pointerDown(button, { pointerId: 7 });
+    expect(setPointerCapture).toHaveBeenCalledWith(7);
+    expect(button.getAttribute('data-amb-pressed')).toBe('true');
+
+    fireEvent.lostPointerCapture(button, { pointerId: 7 });
+    expect(button.getAttribute('data-amb-pressed')).toBeNull();
+  });
+
+  it('keeps disabled controls on the disabled cursor and material state', () => {
+    const { container } = render(<AmbientButton aria-label="disabled" disabled>Disabled</AmbientButton>);
+    const button = container.querySelector('button');
+    expect(button?.disabled).toBe(true);
+    expect(button?.style.cursor).toBe('not-allowed');
   });
 
   it('keeps flat buttons out of the shared press material', () => {
