@@ -91,6 +91,49 @@ describe('useRemoteWindowCatalog owner', () => {
     vi.useRealTimers();
   });
 
+  it('retries the active-stream snapshot read after a transient failure and then stops', async () => {
+    vi.useFakeTimers();
+    const requestTargets = vi.fn()
+      .mockRejectedValueOnce(new Error('catalog transport closed'))
+      .mockRejectedValueOnce(new Error('catalog transport closed'))
+      .mockRejectedValueOnce(new Error('catalog transport closed'))
+      .mockResolvedValue({ requestId: 'catalog-late', targets: [target] });
+    const { rerender, result } = renderHook(({ ready }) => {
+      const [state, setState] = useState(initialRemoteWindowOverlayState);
+      return useRemoteWindowCatalog({
+        activeSessionId: 'session',
+        state,
+        setState,
+        requestTargets,
+        activeStreamReady: ready,
+        suspendActiveRefresh: false,
+        onOpenPicker: vi.fn(),
+      });
+    }, { initialProps: { ready: false } });
+
+    await act(async () => {
+      rerender({ ready: true });
+    });
+    expect(requestTargets).toHaveBeenCalledTimes(1);
+    // A failed read must not leave the active catalog unsynchronized for the
+    // whole stream: retry after a delay, bounded so the client never polls.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(requestTargets).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(requestTargets).toHaveBeenCalledTimes(3);
+    expect(result.current.activeCatalogSyncError).toBeTruthy();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(requestTargets).toHaveBeenCalledTimes(3);
+    vi.useRealTimers();
+  });
+
   it('fails explicitly when no daemon session can own enumeration', async () => {
     const { result } = renderHook(() => {
       const [state, setState] = useState(initialRemoteWindowOverlayState);

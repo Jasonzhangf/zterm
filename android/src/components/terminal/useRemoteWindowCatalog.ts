@@ -21,6 +21,12 @@ interface RemoteWindowCatalogProjectionSnapshot {
   payload: RemoteWindowStreamTargetsResponsePayload;
 }
 
+// A transient transport/session failure must not leave the active catalog
+// unsynchronized for the whole stream, but the client still must not poll the
+// daemon. Retry only after a real failure and stop after this many attempts.
+const MAX_ACTIVE_SNAPSHOT_RETRY_COUNT = 2;
+const ACTIVE_SNAPSHOT_RETRY_DELAY_MS = 1_000;
+
 export interface UseRemoteWindowCatalogOptions {
   activeSessionId: string | null | undefined;
   state: RemoteWindowOverlayState;
@@ -48,6 +54,9 @@ export function useRemoteWindowCatalog({
   const watchdogEpochRef = useRef<number | null>(null);
   const lastCatalogPayloadRef = useRef<RemoteWindowCatalogProjectionSnapshot | null>(null);
   const lastActiveSnapshotSessionRef = useRef<string | null>(null);
+  const activeSnapshotRetrySessionRef = useRef<string | null>(null);
+  const activeSnapshotRetryCountRef = useRef(0);
+  const [activeSnapshotRetryEpoch, setActiveSnapshotRetryEpoch] = useState(0);
 
   const clearWatchdog = useCallback((requestEpoch?: number) => {
     if (typeof requestEpoch === 'number' && watchdogEpochRef.current !== requestEpoch) {
@@ -176,28 +185,47 @@ export function useRemoteWindowCatalog({
     if (lastActiveSnapshotSessionRef.current === targetSessionId) {
       return;
     }
+    if (activeSnapshotRetrySessionRef.current !== targetSessionId) {
+      activeSnapshotRetrySessionRef.current = targetSessionId;
+      activeSnapshotRetryCountRef.current = 0;
+    }
     lastActiveSnapshotSessionRef.current = targetSessionId;
     let disposed = false;
+    let retryTimer: number | null = null;
     // The active stream only projects the daemon-owned snapshot once on
     // entry. The daemon owns ongoing refresh, so the client never polls.
     void requestFreshTargetsRef.current(targetSessionId).then((payload) => {
       if (!disposed) {
+        activeSnapshotRetryCountRef.current = 0;
         applyActivePayload(payload);
       }
     }).catch((error) => {
-      if (!disposed) {
-        setActiveCatalogSyncError(error instanceof Error ? error.message : String(error));
-        console.warn('[useRemoteWindowCatalog] active remote window catalog snapshot read failed:', error);
+      if (disposed) {
+        return;
       }
+      setActiveCatalogSyncError(error instanceof Error ? error.message : String(error));
+      console.warn('[useRemoteWindowCatalog] active remote window catalog snapshot read failed:', error);
+      if (activeSnapshotRetryCountRef.current >= MAX_ACTIVE_SNAPSHOT_RETRY_COUNT) {
+        return;
+      }
+      activeSnapshotRetryCountRef.current += 1;
+      retryTimer = window.setTimeout(() => {
+        lastActiveSnapshotSessionRef.current = null;
+        setActiveSnapshotRetryEpoch((current) => current + 1);
+      }, ACTIVE_SNAPSHOT_RETRY_DELAY_MS);
     });
     return () => {
       disposed = true;
+      if (retryTimer !== null) {
+        window.clearTimeout(retryTimer);
+      }
     };
-  }, [activeSessionId, activeStreamReady, applyActivePayload, requestTargets, suspendActiveRefresh]);
+  }, [activeSessionId, activeStreamReady, activeSnapshotRetryEpoch, applyActivePayload, requestTargets, suspendActiveRefresh]);
 
   useEffect(() => {
     if (!activeStreamReady || !activeSessionId) {
       lastActiveSnapshotSessionRef.current = null;
+      activeSnapshotRetryCountRef.current = 0;
     }
   }, [activeSessionId, activeStreamReady]);
 
