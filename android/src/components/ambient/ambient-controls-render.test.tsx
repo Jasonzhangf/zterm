@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { render } from '@testing-library/react';
+import { fireEvent, render } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import {
   AmbientButton,
@@ -49,6 +49,30 @@ describe('ambient shared controls render owner DOM', () => {
     expect(savedOpen.getAttribute('data-amb-flat')).toBe('true');
     expect(transparent.getAttribute('data-amb-flat')).toBe('true');
     expect(material.hasAttribute('data-amb-flat')).toBe(false);
+  });
+
+  it('tracks pointer press through the shared material state', () => {
+    const { container } = render(<AmbientButton aria-label="pressable">Press</AmbientButton>);
+    const button = container.querySelector('button');
+    expect(button?.getAttribute('data-amb-pressed')).toBeNull();
+    fireEvent.pointerDown(button!);
+    expect(button?.getAttribute('data-amb-pressed')).toBe('true');
+    fireEvent.pointerUp(button!);
+    expect(button?.getAttribute('data-amb-pressed')).toBeNull();
+
+    fireEvent.pointerDown(button!);
+    expect(button?.getAttribute('data-amb-pressed')).toBe('true');
+    fireEvent.pointerCancel(button!);
+    expect(button?.getAttribute('data-amb-pressed')).toBeNull();
+  });
+
+  it('keeps flat buttons out of the shared press material', () => {
+    const { container } = render(
+      <AmbientButton aria-label="flat" style={{ background: 'transparent' }}>Flat</AmbientButton>,
+    );
+    const button = container.querySelector('button');
+    fireEvent.pointerDown(button!);
+    expect(button?.getAttribute('data-amb-pressed')).toBeNull();
   });
 
   it('renders AmbientInput as an input with ambient classes', () => {

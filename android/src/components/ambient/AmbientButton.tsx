@@ -1,4 +1,10 @@
-import { forwardRef, type ButtonHTMLAttributes, type CSSProperties } from 'react';
+import {
+  forwardRef,
+  useState,
+  type ButtonHTMLAttributes,
+  type CSSProperties,
+  type PointerEvent,
+} from 'react';
 
 export type AmbientButtonVariant =
   | 'settings'
@@ -304,11 +310,23 @@ function resolveVariantStyle(
 
 export const AmbientButton = forwardRef<HTMLButtonElement, AmbientButtonProps>(
   function AmbientButton(
-    { variant = 'settings', selected = false, style, type = 'button', disabled, className, ...props },
+    {
+      variant = 'settings',
+      selected = false,
+      style,
+      type = 'button',
+      disabled,
+      className,
+      onPointerDown,
+      onPointerUp,
+      onPointerCancel,
+      ...props
+    },
     ref,
   ) {
     const ambientClass = ['ambient', 'ambient-control', 'amb-button', 'ambx-control', 'amb-chamfer', className].filter(Boolean).join(' ');
     const flatMaterial = hasFlatMaterial(variant, style);
+    const [pressed, setPressed] = useState(false);
     // An explicit caller geometry is authoritative: variant minimums must not
     // inflate a checkbox, close button or icon button that asked for an exact size.
     const geometryOverride: CSSProperties = {};
@@ -325,7 +343,20 @@ export const AmbientButton = forwardRef<HTMLButtonElement, AmbientButtonProps>(
         disabled={disabled}
         data-selected={selected ? 'true' : undefined}
         data-amb-flat={flatMaterial ? 'true' : undefined}
+        data-amb-pressed={pressed && !flatMaterial ? 'true' : undefined}
         className={ambientClass}
+        onPointerDown={(event: PointerEvent<HTMLButtonElement>) => {
+          if (!disabled && !flatMaterial) setPressed(true);
+          onPointerDown?.(event);
+        }}
+        onPointerUp={(event: PointerEvent<HTMLButtonElement>) => {
+          setPressed(false);
+          onPointerUp?.(event);
+        }}
+        onPointerCancel={(event: PointerEvent<HTMLButtonElement>) => {
+          setPressed(false);
+          onPointerCancel?.(event);
+        }}
         style={{
           ...commonButtonStyle,
           ...resolveVariantStyle(variant, selected),

@@ -75,8 +75,12 @@
   background-color:color-mix(in srgb,var(--amb-control-bg) 88%,var(--amb-control-active-bg)) !important;
 }
 
-.amb-button:active:not(:disabled):not([data-amb-flat="true"]){
+.amb-button[data-amb-pressed="true"]:not(:disabled):not([data-amb-flat="true"]){
   transform:translateY(1px);
+  box-shadow:var(--amb-control-pressed-shadow) !important;
+}
+
+.amb-button[data-selected="true"][data-amb-pressed="true"]:not(:disabled){
   box-shadow:var(--amb-control-pressed-shadow) !important;
 }
 
