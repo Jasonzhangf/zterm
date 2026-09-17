@@ -64,6 +64,25 @@ describe('TerminalSessionDrawer', () => {
     expect(Number(screen.getByTestId('terminal-session-drawer-overlay').style.zIndex)).toBeGreaterThan(140);
   });
 
+  it('uses a full-surface overlay without inherited compact button height', () => {
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={sessions}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+
+    const overlay = screen.getByTestId('terminal-session-drawer-overlay');
+    expect(overlay.tagName).toBe('BUTTON');
+    expect(overlay.style.position).toBe('absolute');
+    expect(overlay.style.inset).toBe('0px');
+    expect(overlay.style.height).toBe('auto');
+  });
+
   it.each(['light', 'blue', 'black'] as const)('projects the %s shell skin onto the drawer surface', (skin) => {
     render(
       <TerminalSessionDrawer

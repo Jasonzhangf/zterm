@@ -47,6 +47,25 @@ describe('ambient shared controls render owner DOM', () => {
     expect(input?.className).toContain('amb-chamfer');
   });
 
+  it('keeps checkbox geometry fixed instead of stretching to the field width', () => {
+    const { container } = render(
+      <>
+        <AmbientInput aria-label="checkbox" type="checkbox" />
+        <AmbientInput aria-label="text field" />
+      </>,
+    );
+    const [checkbox, textField] = Array.from(container.querySelectorAll('input'));
+    expect(checkbox.style.width).toBe('18px');
+    expect(checkbox.style.height).toBe('18px');
+    expect(checkbox.style.minWidth).toBe('18px');
+    expect(checkbox.style.minHeight).toBe('18px');
+    expect(checkbox.style.padding).toBe('0px');
+    expect(checkbox.style.margin).toBe('0px');
+    expect(checkbox.style.flex).toBe('0 0 18px');
+    expect(textField.style.width).toBe('100%');
+    expect(textField.style.minHeight).toBe('44px');
+  });
+
   it('renders AmbientSelect as a select with ambient classes', () => {
     const { container } = render(<AmbientSelect aria-label="ambient select"><option>a</option></AmbientSelect>);
     const select = container.querySelector('select');
