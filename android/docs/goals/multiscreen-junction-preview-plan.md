@@ -526,7 +526,12 @@ centerRows = floor((viewHeight - edgeRows - gaps - railH) / rowH)
   - 预览中左缘右滑抽屉：`04-portrait-drawer-over-preview.png`
   - 抽屉选择后焦点格重定向：`05-portrait-focus-retargeted.png`
 - 本轮后续 emulator 被 `com.agentbrowser.app` 抢占前台，`adb shell input swipe` 与 CDP `Input.dispatchTouchEvent` 均无法稳定触发 WebView 的 React touch capture；该环境限制不作为产品通过证据，也不替代自动化覆盖。已复现 6 次，未发现新的产品失败证据。
-- 宽屏/平板五窗由 `junction-preview-layout.test.ts` 与 `TerminalPreviewGrid.test.tsx` 覆盖；真机宽屏截图待可用平板或稳定 emulator 输入环境补齐。
+- 2026-09-17 emulator-5556（`2560x1440` 临时尺寸覆盖、density 240、landscape）已取得宽屏五窗真实设备证据：
+  - 五窗均绑定真实 session：焦点 `code-1`，左 `AgentBrowser-2`，右 `AgentTeams-1`，上 `appsdk-3`，下 `AgentBrowser-1`。
+  - 截图：`android/evidence/session-preview/2026-09-17/tablet-wide-final/01-wide-five-session-preview.png`
+  - DOM 几何：`android/evidence/session-preview/2026-09-17/tablet-wide-final/dom-geometry.json`
+  - 同期设备信息与日志：`wm-size.txt`、`wm-density.txt`、`package.txt`、`logcat-preview.log`
+  - 实测 viewport `1707x960`（比例 `1.778`），`layoutForm=wide`，左右边缘 `38px`、上下边缘 `30px`，焦点窗 `1619x852`。
 
 ---
 
@@ -564,7 +569,7 @@ centerRows = floor((viewHeight - edgeRows - gaps - railH) / rowH)
 仍未验证：
 
 - 独立 review PASS
-- 宽屏/平板设备端截图；当前模拟器输入注入不稳定，竖屏已由 junction-device 截图覆盖，宽屏几何由纯函数和组件测试覆盖
+- 无
 - commit / main 合并 / push 远端验证
 
 ### DoD
