@@ -41,13 +41,6 @@ function TerminalSessionDrawerComponent({
   sessionGroupLayoutAxis = 'vertical',
   onOpenQuickTabPicker,
   onDebugAddEvent,
-  previewSelectionMode = false,
-  previewSelectedSessionIds = [],
-  previewSelectionError = null,
-  onPreviewSelectionModeChange,
-  onTogglePreviewSession,
-  onClearPreviewSelection,
-  onPreviewFolder,
   onHideSession,
   onRestoreAllHiddenSessions,
   hiddenSessionCount = 0,
@@ -401,14 +394,6 @@ function TerminalSessionDrawerComponent({
                 恢复全部
               </AmbientButton>
             ) : null}
-            {previewSelectionMode ? (
-              <span
-                aria-label={`已选 ${previewSelectedSessionIds.length}/6`}
-                style={{ color: 'var(--zterm-panel-muted)', fontSize: '10px', fontWeight: 800 }}
-              >
-                {previewSelectedSessionIds.length}/6
-              </span>
-            ) : null}
             <AmbientButton
               type="button"
               aria-label="关闭 session 抽屉"
@@ -430,40 +415,8 @@ function TerminalSessionDrawerComponent({
             >
               ×
             </AmbientButton>
-            {onPreviewSelectionModeChange ? (
-              <AmbientButton
-                type="button"
-                data-testid="terminal-session-drawer-preview-mode"
-                aria-pressed={previewSelectionMode}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onPreviewSelectionModeChange(!previewSelectionMode);
-                }}
-                style={{
-                  height: '26px', padding: '0 7px', borderRadius: '6px',
-                  border: '1px solid var(--zterm-panel-border)',
-                  background: previewSelectionMode ? 'var(--zterm-panel-active)' : 'var(--zterm-panel-surface)',
-                  color: previewSelectionMode ? 'var(--zterm-panel-accent)' : 'var(--zterm-panel-text)', fontSize: '10px', fontWeight: 850, whiteSpace: 'nowrap',
-                }}
-              >
-                {previewSelectionMode ? '完成' : '多选'}
-              </AmbientButton>
-            ) : null}
           </div>
         </div>
-        {previewSelectionError ? (
-          <div
-            role="alert"
-            style={{
-              padding: '7px 10px',
-              borderBottom: '1px solid var(--zterm-panel-border)',
-              color: 'var(--zterm-panel-danger)',
-              fontSize: '11px',
-            }}
-          >
-            {previewSelectionError}
-          </div>
-        ) : null}
 
         <div
           data-testid="terminal-session-drawer-tree"
@@ -588,10 +541,6 @@ function TerminalSessionDrawerComponent({
                     suppressNextClickRef.current = false;
                     return;
                   }
-                  if (previewSelectionMode) {
-                    onPreviewFolder?.(folder.cwd);
-                    return;
-                  }
                   setExpandedFolderCwd((current) => current === folder.cwd ? null : folder.cwd);
                 }}
                 onContextMenu={(event) => {
@@ -606,7 +555,6 @@ function TerminalSessionDrawerComponent({
                     longPressTimerRef.current = null;
                     suppressNextClickRef.current = true;
                     setSlotMenu(null);
-                    onPreviewFolder?.(folder.cwd);
                   }, 420);
                 }}
                 onPointerUp={() => {
@@ -632,8 +580,7 @@ function TerminalSessionDrawerComponent({
                 <span style={{ minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shortenFolderLabel(folder.cwd)}</span>
                 <span style={{ color: 'var(--zterm-panel-muted)', fontSize: '10px' }}>{folder.items.length}</span>
               </AmbientButton>
-              {expandedFolderCwd === folder.cwd && (!previewSelectionMode || folder.cwd === 'cwd 未知') ? folder.items.map((session) => {
-            const previewSelectionIndex = previewSelectedSessionIds.indexOf(session.id);
+              {expandedFolderCwd === folder.cwd ? folder.items.map((session) => {
             const slotTone = resolveSessionGroupSlotTone(session.sessionGroupSlot, sessionGroupLayoutAxis);
             return (
             <div
@@ -741,10 +688,6 @@ function TerminalSessionDrawerComponent({
                       suppressNextClickRef.current = false;
                       return;
                     }
-                    if (previewSelectionMode) {
-                      onTogglePreviewSession?.(session.id);
-                      return;
-                    }
                     onSelectSession(session.id);
                   }}
                   style={{
@@ -798,36 +741,6 @@ function TerminalSessionDrawerComponent({
                   gap: '4px',
                 }}
               >
-                {previewSelectionMode ? (
-                  <AmbientButton
-                    type="button"
-                    data-testid={`terminal-session-drawer-preview-check-${session.id}`}
-                    aria-label={previewSelectionIndex >= 0 ? `预览顺序 ${previewSelectionIndex + 1}` : '选择预览'}
-                    onMouseDown={(event) => event.stopPropagation()}
-                    onTouchStart={(event) => {
-                      event.stopPropagation();
-                      clearLongPressTimer();
-                    }}
-                    onTouchEnd={(event) => event.stopPropagation()}
-                    onClick={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      onTogglePreviewSession?.(session.id);
-                    }}
-                    style={{
-                      padding: 0,
-                      width: '22px', height: '22px', borderRadius: '5px', display: 'flex',
-                      alignItems: 'center', justifyContent: 'center',
-                      border: previewSelectionIndex >= 0 ? '1px solid var(--zterm-panel-accent)' : '1px solid var(--zterm-panel-border)',
-                      background: previewSelectionIndex >= 0 ? 'var(--zterm-settings-accent-soft)' : 'transparent',
-                      color: previewSelectionIndex >= 0 ? 'var(--zterm-panel-accent)' : 'var(--zterm-panel-muted)',
-                      opacity: 1,
-                      fontSize: '11px', fontWeight: 900,
-                    }}
-                  >
-                    {previewSelectionIndex >= 0 ? previewSelectionIndex + 1 : ''}
-                  </AmbientButton>
-                ) : null}
                 {session.paneLabel ? (
                   <span
                     style={{
@@ -944,7 +857,6 @@ function TerminalSessionDrawerComponent({
             cwd={folderMenu.cwd}
             x={folderMenu.x}
             y={folderMenu.y}
-            onPreview={(cwd) => onPreviewFolder?.(cwd)}
             onClose={() => setFolderMenu(null)}
           />
         ) : null}
@@ -976,31 +888,6 @@ function TerminalSessionDrawerComponent({
           />
         ) : null}
 
-        {previewSelectionMode ? (
-          <div
-            data-testid="terminal-session-drawer-preview-footer"
-            style={{
-              padding: `10px 12px ${Math.max(12, Math.round(bottomInsetPx) + 12)}px`,
-              borderTop: '1px solid var(--zterm-panel-border)', display: 'flex', gap: '8px', flexShrink: 0,
-            }}
-          >
-            <AmbientButton
-              type="button"
-              onClick={onClearPreviewSelection}
-              disabled={previewSelectedSessionIds.length === 0}
-              style={{ flex: 1, height: '38px', borderRadius: '6px', border: '1px solid var(--zterm-panel-border)', background: 'var(--zterm-panel-surface)', color: 'var(--zterm-panel-text)' }}
-            >
-              清空
-            </AmbientButton>
-            <AmbientButton
-              type="button"
-              onClick={() => onPreviewSelectionModeChange?.(false)}
-              style={{ flex: 1, height: '38px', borderRadius: '6px', border: '1px solid var(--zterm-panel-border)', background: 'var(--zterm-panel-active)', color: 'var(--zterm-panel-accent)', fontWeight: 850 }}
-            >
-              完成 {previewSelectedSessionIds.length}/6
-            </AmbientButton>
-          </div>
-        ) : (
         <AmbientButton
           data-testid="terminal-session-drawer-add"
           aria-label="新建 session"
@@ -1080,7 +967,6 @@ function TerminalSessionDrawerComponent({
             <span>New Session</span>
           </div>
         </AmbientButton>
-        )}
       </aside>
     </>
   );
@@ -1093,10 +979,8 @@ function terminalSessionDrawerPropsEqual(
   if (prev.open !== next.open) mismatchFields.push('open');
   if (prev.topInsetPx !== next.topInsetPx) mismatchFields.push('topInsetPx');
   if (prev.bottomInsetPx !== next.bottomInsetPx) mismatchFields.push('bottomInsetPx');
-  if (prev.previewSelectionMode !== next.previewSelectionMode) mismatchFields.push('previewSelectionMode');
   if (prev.sessionGroupLayoutAxis !== next.sessionGroupLayoutAxis) mismatchFields.push('sessionGroupLayoutAxis');
   if (prev.terminalShellSkin !== next.terminalShellSkin) mismatchFields.push('terminalShellSkin');
-  if (prev.previewSelectionError !== next.previewSelectionError) mismatchFields.push('previewSelectionError');
   if (prev.onClose !== next.onClose) mismatchFields.push('onClose');
   if (prev.onSelectSession !== next.onSelectSession) mismatchFields.push('onSelectSession');
   if (prev.onCloseSession !== next.onCloseSession) mismatchFields.push('onCloseSession');
@@ -1106,9 +990,6 @@ function terminalSessionDrawerPropsEqual(
   if (prev.hiddenSessionCount !== next.hiddenSessionCount) mismatchFields.push('hiddenSessionCount');
   if (prev.onOpenQuickTabPicker !== next.onOpenQuickTabPicker) mismatchFields.push('onOpenQuickTabPicker');
   if (prev.onDebugAddEvent !== next.onDebugAddEvent) mismatchFields.push('onDebugAddEvent');
-  if (prev.onPreviewSelectionModeChange !== next.onPreviewSelectionModeChange) mismatchFields.push('onPreviewSelectionModeChange');
-  if (prev.onTogglePreviewSession !== next.onTogglePreviewSession) mismatchFields.push('onTogglePreviewSession');
-  if (prev.onClearPreviewSelection !== next.onClearPreviewSelection) mismatchFields.push('onClearPreviewSelection');
   if (prev.sessions.length !== next.sessions.length) mismatchFields.push('sessions.length');
   const sessionCount = Math.min(prev.sessions.length, next.sessions.length);
   for (let i = 0; i < sessionCount; i += 1) {
@@ -1134,9 +1015,6 @@ function terminalSessionDrawerPropsEqual(
     if (a.hostKey !== b.hostKey) mismatchFields.push(`hosts[${i}].hostKey`);
     if (a.hostLabel !== b.hostLabel) mismatchFields.push(`hosts[${i}].hostLabel`);
   }
-  const prevSelected = prev.previewSelectedSessionIds ?? [];
-  const nextSelected = next.previewSelectedSessionIds ?? [];
-  if (prevSelected.length !== nextSelected.length) mismatchFields.push('previewSelected.length');
   return mismatchFields.length === 0;
 }
 

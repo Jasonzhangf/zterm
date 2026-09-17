@@ -3524,15 +3524,16 @@
       "lifecycle_id": "android_preview",
       "title": "Android Session Preview Mainline",
       "entrypoint": "SessionDrawer",
-      "return_path": "TerminalPreviewTile -> ActiveSessionIntent -> TerminalPage | SystemBackIntent -> PreviewModeOwner -> EntrySessionProjection -> TerminalPage",
+      "return_path": "SystemBackIntent -> PreviewModeOwner -> EntrySessionProjection -> TerminalPage",
       "owner_feature": "terminal.session_preview",
       "canonical_docs": [
-        "docs/goals/terminal-session-preview-plan.md",
+        "docs/goals/multiscreen-junction-preview-plan.md",
         "docs/testing/terminal-session-preview-test-design.md",
         "docs/function-map.md"
       ],
       "verification_gates": [
-        "src/lib/session-preview-selection.test.ts",
+        "src/lib/junction-preview-lattice.test.ts",
+        "src/lib/junction-preview-layout.test.ts",
         "src/lib/session-preview-gesture.test.ts",
         "src/components/terminal/TerminalPreviewGrid.render-truth.test.tsx",
         "src/pages/TerminalPage.session-preview.test.tsx"
@@ -3543,8 +3544,8 @@
           "label": "src/components/terminal/TerminalSessionDrawer.tsx#TerminalSessionDrawer"
         },
         {
-          "id": "PreviewSelectionOwner",
-          "label": "src/lib/session-preview-selection.ts#toggleSessionPreviewTarget"
+          "id": "PreviewLatticeOwner",
+          "label": "src/lib/junction-preview-lattice.ts#setJunctionPreviewCell"
         },
         {
           "id": "RemoteSessionOpenOwner",
@@ -3552,7 +3553,7 @@
         },
         {
           "id": "OpenTabResolver",
-          "label": "src/lib/session-preview-selection.ts#resolveSessionPreviewTargets"
+          "label": "src/lib/junction-preview-lattice.ts#resolveJunctionPreviewCell"
         },
         {
           "id": "TerminalShellGesture",
@@ -3564,7 +3565,7 @@
         },
         {
           "id": "PreviewLiveSetProjector",
-          "label": "src/lib/session-preview-selection.ts#projectSessionPreviewLiveIds"
+          "label": "src/lib/junction-preview-lattice.ts#projectJunctionPreviewLiveIds"
         },
         {
           "id": "SessionBodySubscriptionIntent",
@@ -3575,32 +3576,24 @@
           "label": "src/components/terminal/TerminalPreviewGrid.tsx#TerminalPreviewGrid"
         },
         {
-          "id": "WindowGroupLayout",
-          "label": "src/components/terminal/WindowGroupLayout.tsx#WindowGroupLayout"
+          "id": "JunctionPreviewLayout",
+          "label": "src/lib/junction-preview-layout.ts#resolveJunctionPreviewLayout"
         },
         {
           "id": "TerminalPreviewTile",
           "label": "src/components/terminal/TerminalPreviewGrid.tsx#preview-tile"
         },
         {
-          "id": "TerminalPreviewTileClose",
-          "label": "src/pages/TerminalPage.tsx#handleRemoveSessionFromPreview"
+          "id": "PreviewFocus",
+          "label": "src/pages/TerminalPage.tsx#handlePreviewFocusChange"
         },
         {
-          "id": "PreviewReplacementMenu",
-          "label": "src/components/terminal/TerminalPreviewGrid.tsx#preview-replacement-menu"
-        },
-        {
-          "id": "PreviewAddMenu",
-          "label": "src/components/terminal/TerminalPreviewGrid.tsx#terminal-preview-add-menu"
+          "id": "PreviewSlotMenu",
+          "label": "src/components/terminal/TerminalPreviewGrid.tsx#terminal-preview-slot-menu"
         },
         {
           "id": "SharedRenderSurface",
           "label": "src/components/TerminalView.tsx#TerminalView"
-        },
-        {
-          "id": "ActiveSessionIntent",
-          "label": "src/pages/TerminalPage.tsx#handleActivateOpenSessionInViewport"
         },
         {
           "id": "SystemBackIntent",
@@ -3618,14 +3611,14 @@
       "edges": [
         {
           "from": "SessionDrawer",
-          "to": "PreviewSelectionOwner",
+          "to": "PreviewLatticeOwner",
           "owner_feature": "terminal.session_preview",
-          "semantic_input": "eligible already-open row toggle intent",
-          "semantic_output": "ordered maximum-six preview target selection",
+          "semantic_input": "eligible already-open row selection while preview is open",
+          "semantic_output": "focus-cell replacement while every other lattice coordinate stays unchanged",
           "status": "anchored",
-          "edge_id": "android_preview:SessionDrawer->PreviewSelectionOwner",
+          "edge_id": "android_preview:SessionDrawer->PreviewLatticeOwner",
           "resource_from": "resource.ui_projection",
-          "resource_to": "resource.session_preview_selection",
+          "resource_to": "resource.session_preview_lattice",
           "via_resources": [],
           "relation_status": "direct"
         },
@@ -3646,26 +3639,26 @@
         },
         {
           "from": "RemoteSessionOpenOwner",
-          "to": "PreviewSelectionOwner",
+          "to": "PreviewLatticeOwner",
           "owner_feature": "terminal.session_preview",
           "semantic_input": "materialized local session id plus server/tmux identity",
-          "semantic_output": "ordered maximum-six preview target selection without remote placeholder ids",
+          "semantic_output": "coordinate-keyed preview target without remote placeholder ids",
           "status": "anchored",
-          "edge_id": "android_preview:RemoteSessionOpenOwner->PreviewSelectionOwner",
+          "edge_id": "android_preview:RemoteSessionOpenOwner->PreviewLatticeOwner",
           "resource_from": "resource.open_tab",
-          "resource_to": "resource.session_preview_selection",
+          "resource_to": "resource.session_preview_lattice",
           "via_resources": [],
           "relation_status": "direct"
         },
         {
-          "from": "PreviewSelectionOwner",
+          "from": "PreviewLatticeOwner",
           "to": "OpenTabResolver",
           "owner_feature": "terminal.session_preview",
-          "semantic_input": "persisted ordered preview targets",
-          "semantic_output": "currently open session projections only",
+          "semantic_input": "persisted coordinate-keyed preview targets",
+          "semantic_output": "currently open matching session projections, with stale cells empty",
           "status": "anchored",
-          "edge_id": "android_preview:PreviewSelectionOwner->OpenTabResolver",
-          "resource_from": "resource.session_preview_selection",
+          "edge_id": "android_preview:PreviewLatticeOwner->OpenTabResolver",
+          "resource_from": "resource.session_preview_lattice",
           "resource_to": "resource.open_tab",
           "via_resources": [],
           "relation_status": "direct"
@@ -3687,7 +3680,7 @@
           "from": "PreviewModeOwner",
           "to": "PreviewLiveSetProjector",
           "owner_feature": "terminal.session_preview",
-          "semantic_input": "preview-open state and resolved selected ids independent of foreground lifecycle",
+          "semantic_input": "preview-open state and resolved visible populated cell ids independent of foreground lifecycle",
           "semantic_output": "deduplicated stable live session id projection consumed by the dedicated background handoff owner",
           "status": "anchored",
           "edge_id": "android_preview:PreviewModeOwner->PreviewLiveSetProjector",
@@ -3713,8 +3706,8 @@
           "from": "PreviewModeOwner",
           "to": "TerminalPreviewGrid",
           "owner_feature": "terminal.session_preview",
-          "semantic_input": "open preview projection and ordered resolved sessions",
-          "semantic_output": "primary-plus-children preview projection intent",
+          "semantic_input": "open preview mode, lattice, focus coordinate, side edge, and candidate sessions",
+          "semantic_output": "junction-framed visible-cell projection intent",
           "status": "anchored",
           "edge_id": "android_preview:PreviewModeOwner->TerminalPreviewGrid",
           "resource_from": "resource.session_preview_mode",
@@ -3724,12 +3717,12 @@
         },
         {
           "from": "TerminalPreviewGrid",
-          "to": "WindowGroupLayout",
+          "to": "JunctionPreviewLayout",
           "owner_feature": "terminal.session_preview",
-          "semantic_input": "ordered one-to-six open sessions, current primary preview id, and orientation",
-          "semantic_output": "one large primary container and independent child containers with portrait top rail or landscape side rail",
+          "semantic_input": "viewport size, font size, focus coordinate, and side-edge preference",
+          "semantic_output": "portrait, landscape, or wide visible-cell geometry with one shared focus coordinate",
           "status": "anchored",
-          "edge_id": "android_preview:TerminalPreviewGrid->WindowGroupLayout",
+          "edge_id": "android_preview:TerminalPreviewGrid->JunctionPreviewLayout",
           "resource_from": "resource.ui_projection",
           "resource_to": "resource.ui_projection",
           "via_resources": [
@@ -3738,13 +3731,13 @@
           "relation_status": "via"
         },
         {
-          "from": "WindowGroupLayout",
+          "from": "JunctionPreviewLayout",
           "to": "TerminalPreviewTile",
           "owner_feature": "terminal.session_preview",
-          "semantic_input": "primary or child container slot for one selected open session",
-          "semantic_output": "one read-only tile projection per session; child title/body tap promotes to primary without activation, primary title/body tap activates the full shell, visual ordinal badges stay out of the titlebar, and secondary child previews use passive tail rendering with compact local typography without resize callbacks",
+          "semantic_input": "one visible lattice coordinate and clip rectangle",
+          "semantic_output": "one read-only full-size cell projection clipped at the viewport edge; populated cells use the shared renderer and empty/stale cells show `+`",
           "status": "anchored",
-          "edge_id": "android_preview:WindowGroupLayout->TerminalPreviewTile",
+          "edge_id": "android_preview:JunctionPreviewLayout->TerminalPreviewTile",
           "resource_from": "resource.ui_projection",
           "resource_to": "resource.ui_projection",
           "via_resources": [
@@ -3753,17 +3746,19 @@
           "relation_status": "via"
         },
         {
-          "from": "TerminalPreviewTileClose",
-          "to": "PreviewSelectionOwner",
+          "from": "TerminalPreviewTile",
+          "to": "PreviewFocus",
           "owner_feature": "terminal.session_preview",
-          "semantic_input": "explicit remove-this-preview-target command",
-          "semantic_output": "persisted ordered preview selection without the target",
+          "semantic_input": "tap on one populated non-focus edge cell",
+          "semantic_output": "focus coordinate moved by one cell with all session targets unchanged",
           "status": "anchored",
-          "edge_id": "android_preview:TerminalPreviewTileClose->PreviewSelectionOwner",
+          "edge_id": "android_preview:TerminalPreviewTile->PreviewFocus",
           "resource_from": "resource.ui_projection",
-          "resource_to": "resource.session_preview_selection",
-          "via_resources": [],
-          "relation_status": "direct"
+          "resource_to": "resource.session_preview_mode",
+          "via_resources": [
+            "resource.session_preview_lattice"
+          ],
+          "relation_status": "via"
         },
         {
           "from": "TerminalPreviewTile",
@@ -3782,12 +3777,12 @@
         },
         {
           "from": "TerminalPreviewTile",
-          "to": "PreviewReplacementMenu",
+          "to": "PreviewSlotMenu",
           "owner_feature": "terminal.session_preview",
-          "semantic_input": "long press on one selected preview tile",
-          "semantic_output": "replacement menu containing only unselected open sessions",
+          "semantic_input": "long press on one populated edge cell or activation of an empty `+` cell",
+          "semantic_output": "coordinate-scoped set/clear menu with synthetic click suppression",
           "status": "anchored",
-          "edge_id": "android_preview:TerminalPreviewTile->PreviewReplacementMenu",
+          "edge_id": "android_preview:TerminalPreviewTile->PreviewSlotMenu",
           "resource_from": "resource.ui_projection",
           "resource_to": "resource.ui_projection",
           "via_resources": [
@@ -3796,60 +3791,17 @@
           "relation_status": "via"
         },
         {
-          "from": "PreviewReplacementMenu",
-          "to": "PreviewSelectionOwner",
+          "from": "PreviewSlotMenu",
+          "to": "PreviewLatticeOwner",
           "owner_feature": "terminal.session_preview",
-          "semantic_input": "source tile id and one unselected open-session target",
-          "semantic_output": "ordered preview selection with one in-place replacement",
+          "semantic_input": "one coordinate plus set or clear command",
+          "semantic_output": "coordinate target updated without moving any other cell",
           "status": "anchored",
-          "edge_id": "android_preview:PreviewReplacementMenu->PreviewSelectionOwner",
+          "edge_id": "android_preview:PreviewSlotMenu->PreviewLatticeOwner",
           "resource_from": "resource.ui_projection",
-          "resource_to": "resource.session_preview_selection",
+          "resource_to": "resource.session_preview_lattice",
           "via_resources": [],
           "relation_status": "direct"
-        },
-        {
-          "from": "PreviewAddMenu",
-          "to": "PreviewSelectionOwner",
-          "owner_feature": "terminal.session_preview",
-          "semantic_input": "one currently open eligible Session absent from the preview",
-          "semantic_output": "ordered preview selection with the unselected target appended",
-          "status": "anchored",
-          "edge_id": "android_preview:PreviewAddMenu->PreviewSelectionOwner",
-          "resource_from": "resource.ui_projection",
-          "resource_to": "resource.session_preview_selection",
-          "via_resources": [],
-          "relation_status": "direct"
-        },
-        {
-          "from": "TerminalPreviewTile",
-          "to": "ActiveSessionIntent",
-          "owner_feature": "terminal.session_preview",
-          "semantic_input": "explicit preview tile tap",
-          "semantic_output": "focused viewport projection plus one existing active-session switch intent",
-          "status": "anchored",
-          "edge_id": "android_preview:TerminalPreviewTile->ActiveSessionIntent",
-          "resource_from": "resource.ui_projection",
-          "resource_to": "resource.active_session",
-          "via_resources": [
-            "resource.open_tab"
-          ],
-          "relation_status": "via"
-        },
-        {
-          "from": "ActiveSessionIntent",
-          "to": "TerminalPage",
-          "owner_feature": "terminal.session_preview",
-          "semantic_input": "focused viewport projection and existing session switch completion",
-          "semantic_output": "preview closed with selected session active",
-          "status": "anchored",
-          "edge_id": "android_preview:ActiveSessionIntent->TerminalPage",
-          "resource_from": "resource.active_session",
-          "resource_to": "resource.ui_projection",
-          "via_resources": [
-            "resource.session_preview_mode"
-          ],
-          "relation_status": "via"
         },
         {
           "from": "SystemBackIntent",

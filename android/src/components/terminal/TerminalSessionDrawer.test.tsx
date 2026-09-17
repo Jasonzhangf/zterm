@@ -110,7 +110,6 @@ describe('TerminalSessionDrawer', () => {
         onSelectSession={vi.fn()}
         onCloseSession={vi.fn()}
         onOpenQuickTabPicker={vi.fn()}
-        onPreviewSelectionModeChange={vi.fn()}
       />,
     );
 
@@ -130,7 +129,6 @@ describe('TerminalSessionDrawer', () => {
         onSelectSession={vi.fn()}
         onCloseSession={vi.fn()}
         onOpenQuickTabPicker={vi.fn()}
-        onPreviewSelectionModeChange={vi.fn()}
       />,
     );
 
@@ -213,8 +211,7 @@ describe('TerminalSessionDrawer', () => {
     expect(screen.queryByTestId('terminal-session-drawer-row-s1')).toBeNull();
   });
 
-  it('closes the folder menu from the scrim or Escape and routes its preview action', () => {
-    const onPreviewFolder = vi.fn();
+  it('closes the folder menu from the scrim or Escape without a preview action', () => {
     render(
       <TerminalSessionDrawer
         open
@@ -223,7 +220,6 @@ describe('TerminalSessionDrawer', () => {
         onSelectSession={vi.fn()}
         onCloseSession={vi.fn()}
         onOpenQuickTabPicker={vi.fn()}
-        onPreviewFolder={onPreviewFolder}
       />,
     );
 
@@ -237,15 +233,12 @@ describe('TerminalSessionDrawer', () => {
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(screen.queryByTestId('terminal-session-drawer-folder-menu')).toBeNull();
 
-    fireEvent.contextMenu(folderButton, { clientX: 80, clientY: 160 });
-    fireEvent.click(screen.getByRole('menuitem', { name: '预览' }));
-    expect(onPreviewFolder).toHaveBeenCalledWith('/Users/jason/projects/zterm');
     expect(screen.queryByTestId('terminal-session-drawer-folder-menu')).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: '预览' })).toBeNull();
   });
 
-  it('opens folder preview from the pointer long press without a second touch timer', async () => {
+  it('does not route folder long press into preview mode', async () => {
     vi.useFakeTimers();
-    const onPreviewFolder = vi.fn();
     render(
       <TerminalSessionDrawer
         open
@@ -254,7 +247,6 @@ describe('TerminalSessionDrawer', () => {
         onSelectSession={vi.fn()}
         onCloseSession={vi.fn()}
         onOpenQuickTabPicker={vi.fn()}
-        onPreviewFolder={onPreviewFolder}
       />,
     );
 
@@ -264,15 +256,13 @@ describe('TerminalSessionDrawer', () => {
       vi.advanceTimersByTime(420);
     });
 
-    expect(onPreviewFolder).toHaveBeenCalledOnce();
-    expect(onPreviewFolder).toHaveBeenCalledWith('/Users/jason/projects/zterm');
+    expect(screen.queryByTestId('terminal-session-drawer-folder-menu')).toBeNull();
     fireEvent.pointerUp(folderButton, { pointerId: 1, pointerType: 'touch' });
     vi.useRealTimers();
   });
 
-  it('cancels folder preview when the pointer moves before the long-press threshold', async () => {
+  it('keeps folder long-press inert even when the pointer moves before the threshold', async () => {
     vi.useFakeTimers();
-    const onPreviewFolder = vi.fn();
     render(
       <TerminalSessionDrawer
         open
@@ -281,7 +271,6 @@ describe('TerminalSessionDrawer', () => {
         onSelectSession={vi.fn()}
         onCloseSession={vi.fn()}
         onOpenQuickTabPicker={vi.fn()}
-        onPreviewFolder={onPreviewFolder}
       />,
     );
 
@@ -292,7 +281,7 @@ describe('TerminalSessionDrawer', () => {
       vi.advanceTimersByTime(420);
     });
 
-    expect(onPreviewFolder).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('terminal-session-drawer-folder-menu')).toBeNull();
     vi.useRealTimers();
   });
 
@@ -339,120 +328,21 @@ describe('TerminalSessionDrawer', () => {
     expect(screen.getByTestId('terminal-session-drawer-add')).toBeTruthy();
   });
 
-  it('keeps preview multi-select isolated from normal session switching', () => {
-    const onSelectSession = vi.fn();
-    const onTogglePreviewSession = vi.fn();
-    const onPreviewSelectionModeChange = vi.fn();
+  it('does not render preview multi-select controls', () => {
     render(
       <TerminalSessionDrawer
         open
         sessions={sessions}
-        previewSelectionMode
-        previewSelectedSessionIds={['s1']}
         onClose={vi.fn()}
-        onSelectSession={onSelectSession}
+        onSelectSession={vi.fn()}
         onCloseSession={vi.fn()}
         onOpenQuickTabPicker={vi.fn()}
-        onTogglePreviewSession={onTogglePreviewSession}
-        onPreviewSelectionModeChange={onPreviewSelectionModeChange}
-        onClearPreviewSelection={vi.fn()}
       />,
     );
 
-    fireEvent.mouseDown(screen.getByTestId('terminal-session-drawer-select-s2'));
-    fireEvent.click(screen.getByTestId('terminal-session-drawer-select-s2'));
-    expect(onTogglePreviewSession).toHaveBeenCalledWith('s2');
-    expect(onSelectSession).not.toHaveBeenCalled();
-    expect(screen.getByTestId('terminal-session-drawer-preview-check-s1').textContent).toBe('1');
-    expect(screen.queryByTestId('terminal-session-drawer-add')).toBeNull();
-    fireEvent.click(screen.getByText('完成 1/6'));
-    expect(onPreviewSelectionModeChange).toHaveBeenCalledWith(false);
-  });
-
-  it('keeps each session close action available while preview multi-select is active', () => {
-    const onCloseSession = vi.fn();
-    const onSelectSession = vi.fn();
-    const onTogglePreviewSession = vi.fn();
-
-    render(
-      <TerminalSessionDrawer
-        open
-        sessions={sessions}
-        previewSelectionMode
-        previewSelectedSessionIds={['s1']}
-        onClose={vi.fn()}
-        onSelectSession={onSelectSession}
-        onCloseSession={onCloseSession}
-        onOpenQuickTabPicker={vi.fn()}
-        onTogglePreviewSession={onTogglePreviewSession}
-      />,
-    );
-
-    const closeButton = screen.getByTestId('terminal-session-drawer-close-s1');
-    expect(closeButton).toBeTruthy();
-    fireEvent.click(closeButton);
-
-    expect(onCloseSession).toHaveBeenCalledWith('s1');
-    expect(onCloseSession).toHaveBeenCalledTimes(1);
-    expect(onSelectSession).not.toHaveBeenCalled();
-    expect(onTogglePreviewSession).not.toHaveBeenCalled();
-  });
-
-  it('keeps each session close action available while preview multi-select is active for touch activation', () => {
-    const onCloseSession = vi.fn();
-    const onSelectSession = vi.fn();
-    const onTogglePreviewSession = vi.fn();
-
-    render(
-      <TerminalSessionDrawer
-        open
-        sessions={sessions}
-        previewSelectionMode
-        previewSelectedSessionIds={['s1']}
-        onClose={vi.fn()}
-        onSelectSession={onSelectSession}
-        onCloseSession={onCloseSession}
-        onOpenQuickTabPicker={vi.fn()}
-        onTogglePreviewSession={onTogglePreviewSession}
-      />,
-    );
-
-    const closeButton = screen.getByTestId('terminal-session-drawer-close-s1');
-    fireEvent.touchStart(closeButton, {
-      touches: [{ clientX: 240, clientY: 120 }],
-    });
-    fireEvent.touchEnd(closeButton, {
-      changedTouches: [{ clientX: 240, clientY: 120 }],
-    });
-
-    expect(onCloseSession).toHaveBeenCalledWith('s1');
-    expect(onCloseSession).toHaveBeenCalledTimes(1);
-    expect(onSelectSession).not.toHaveBeenCalled();
-    expect(onTogglePreviewSession).not.toHaveBeenCalled();
-  });
-
-  it('toggles preview selection from the visible checkbox control', () => {
-    const onSelectSession = vi.fn();
-    const onTogglePreviewSession = vi.fn();
-    render(
-      <TerminalSessionDrawer
-        open
-        sessions={sessions}
-        previewSelectionMode
-        previewSelectedSessionIds={['s1']}
-        onClose={vi.fn()}
-        onSelectSession={onSelectSession}
-        onCloseSession={vi.fn()}
-        onOpenQuickTabPicker={vi.fn()}
-        onTogglePreviewSession={onTogglePreviewSession}
-      />,
-    );
-
-    fireEvent.click(screen.getByTestId('terminal-session-drawer-preview-check-s2'));
-
-    expect(onTogglePreviewSession).toHaveBeenCalledWith('s2');
-    expect(onTogglePreviewSession).toHaveBeenCalledTimes(1);
-    expect(onSelectSession).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('terminal-session-drawer-preview-mode')).toBeNull();
+    expect(screen.queryByTestId('terminal-session-drawer-preview-check-s1')).toBeNull();
+    expect(screen.queryByTestId('terminal-session-drawer-preview-footer')).toBeNull();
   });
 
 

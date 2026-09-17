@@ -3,7 +3,7 @@
 import { useState, type ComponentType } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { SESSION_PREVIEW_SELECTION_STORAGE_KEY } from '../lib/session-preview-selection';
+import { JUNCTION_PREVIEW_LATTICE_STORAGE_KEY } from '../lib/junction-preview-lattice';
 import type { Session } from '../lib/types';
 import type { ComponentProps } from 'react';
 import type { TerminalQuickBarProps } from '../components/terminal/TerminalQuickBar';
@@ -61,9 +61,6 @@ afterEach(() => {
   localStorage.clear();
 });
 
-// TerminalPage reads attachment counts from SessionContext (badge/drawer).
-// These page-level tests render TerminalPage directly without the app-level
-// SessionProvider, so provide the minimal session facade the page consumes.
 vi.mock('../contexts/SessionContext', () => ({
   useSession: () => ({
     getPendingAttachmentCount: () => 0,
@@ -74,7 +71,6 @@ vi.mock('@capacitor/core', () => ({
   Capacitor: { getPlatform: () => 'web', isNativePlatform: () => false },
   registerPlugin: () => ({ addListener: vi.fn(async () => ({ remove: vi.fn() })) }),
 }));
-
 vi.mock('@capacitor/keyboard', () => ({
   Keyboard: {
     addListener: vi.fn(async () => ({ remove: vi.fn() })),
@@ -82,7 +78,6 @@ vi.mock('@capacitor/keyboard', () => ({
     show: vi.fn(async () => undefined),
   },
 }));
-
 vi.mock('@capacitor/app', () => ({
   App: {
     addListener: vi.fn((eventName: string, listener: () => void) => {
@@ -95,7 +90,6 @@ vi.mock('@capacitor/app', () => ({
     }),
   },
 }));
-
 vi.mock('../plugins/ImeAnchorPlugin', () => ({
   ImeAnchor: {
     show: vi.fn(async () => ({})),
@@ -104,19 +98,15 @@ vi.mock('../plugins/ImeAnchorPlugin', () => ({
     addListener: vi.fn(async () => ({ remove: vi.fn() })),
   },
 }));
-
 vi.mock('../components/terminal/TerminalHeader', () => ({
   TerminalHeader: () => null,
 }));
-
 vi.mock('../components/terminal/TabManagerSheet', () => ({
   TabManagerSheet: () => null,
 }));
-
 vi.mock('../components/terminal/SessionScheduleSheet', () => ({
   SessionScheduleSheet: () => null,
 }));
-
 vi.mock('../components/terminal/RemoteScreenshotSheet', () => ({
   RemoteScreenshotSheet: () => null,
 }));
@@ -140,28 +130,21 @@ vi.mock('../components/TerminalView', () => ({
   TerminalView: ({ sessionId }: { sessionId: string }) => <div data-testid={`terminal-view-${sessionId}`} />,
 }));
 
-const session = {
-  id: 's1',
-  title: 'Session 1',
-  sessionName: 'tmux-1',
-  state: 'connected',
-  bridgeHost: 'mac.local',
-  bridgePort: 3333,
-} as Session;
-
 function makeSession(id: string): Session {
   return {
-    ...session,
     id,
-    title: 'Session ' + id,
-    sessionName: 'tmux-' + id,
+    title: `Session ${id}`,
+    sessionName: `tmux-${id}`,
+    state: 'connected',
+    bridgeHost: 'mac.local',
+    bridgePort: 3333,
     createdAt: id === 's1' ? 1 : 2,
-  };
+  } as Session;
 }
 
 const baseProps = {
-  interactiveSession: session,
-  renderedPaneSessions: [session],
+  interactiveSession: makeSession('s1'),
+  renderedPaneSessions: [makeSession('s1')],
   visiblePaneEntries: [],
   splitVisible: false,
   activePaneId: 'pane-main',
@@ -180,199 +163,168 @@ const baseProps = {
   onLongPressRow: vi.fn(),
 };
 
-describe('TerminalPage session preview integration', () => {
+function writeLattice(sessions: Session[]) {
+  const cells = sessions.map((session, index) => {
+    if (index === 0) return { col: 0, row: 0, target: session };
+    if (index === 1) return { col: -1, row: 0, target: session };
+    if (index === 2) return { col: 0, row: -1, target: session };
+    if (index === 3) return { col: 0, row: 1, target: session };
+    return { col: 1, row: 0, target: session };
+  });
+  localStorage.setItem(JUNCTION_PREVIEW_LATTICE_STORAGE_KEY, JSON.stringify({
+    version: 1,
+    cells: cells.map(({ col, row, target }) => ({
+      col,
+      row,
+      target: {
+        sessionId: target.id,
+        daemonHostId: target.daemonHostId,
+        bridgeHost: target.bridgeHost,
+        bridgePort: target.bridgePort,
+        sessionName: target.sessionName,
+      },
+    })),
+  }));
+}
+
+async function openPreview(stage: HTMLElement) {
+  fireEvent.touchStart(stage, { touches: [{ clientX: 338, clientY: 400 }] });
+  fireEvent.touchMove(stage, { touches: [{ clientX: 270, clientY: 404 }], cancelable: true });
+  fireEvent.touchEnd(stage, { changedTouches: [{ clientX: 270, clientY: 404 }] });
+  await waitFor(() => expect(screen.getByTestId('terminal-preview-grid')).toBeTruthy());
+}
+
+function renderPage(overrides: Partial<ComponentProps<typeof TerminalPageComponent>> = {}) {
+  const TerminalPage = withTerminalShell(TerminalPageComponent);
+  const onSwitchSession = vi.fn();
+  const stableNoop = vi.fn();
+
+  function Harness() {
+    const [activeSession, setActiveSession] = useState(makeSession('s1'));
+    const sessions = overrides.sessions || [activeSession];
+    return (
+      <TerminalPage
+        sessions={sessions}
+        activeSession={overrides.activeSession || activeSession}
+        onSwitchSession={(sessionId) => {
+          onSwitchSession(sessionId);
+          const next = sessions.find((item) => item.id === sessionId);
+          if (next) setActiveSession(next);
+        }}
+        onMoveSession={stableNoop}
+        onRenameSession={stableNoop}
+        onCloseSession={stableNoop}
+        onOpenConnections={stableNoop}
+        onOpenQuickTabPicker={stableNoop}
+        onTerminalViewportChange={stableNoop}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        {...overrides}
+      />
+    );
+  }
+
+  const view = render(<Harness />);
+  return { view, onSwitchSession, stableNoop };
+}
+
+describe('TerminalPage junction preview integration', () => {
   it('opens preview only for a left swipe starting at the right edge', async () => {
     const { TerminalStageShell } = await import('./TerminalPageStageShell');
     const onOpenSessionPreview = vi.fn();
     render(
       <TerminalStageShell
         {...baseProps}
-        sessionPreviewSessions={[session]}
+        sessionPreviewCandidates={[makeSession('s1')]}
         onOpenSessionPreview={onOpenSessionPreview}
       />,
     );
     const stage = screen.getByTestId('terminal-stage-shell');
+
     fireEvent.touchStart(stage, { touches: [{ clientX: 338, clientY: 400 }] });
     fireEvent.touchMove(stage, { touches: [{ clientX: 270, clientY: 404 }] });
     fireEvent.touchEnd(stage, { changedTouches: [{ clientX: 270, clientY: 404 }] });
     expect(onOpenSessionPreview).toHaveBeenCalledTimes(1);
-  });
 
-  it('keeps middle fixed crop and wrong-direction gestures out of preview', async () => {
-    const { TerminalStageShell } = await import('./TerminalPageStageShell');
-    const onOpenSessionPreview = vi.fn();
-    render(
-      <TerminalStageShell
-        {...baseProps}
-        sessionPreviewSessions={[session]}
-        onOpenSessionPreview={onOpenSessionPreview}
-      />,
-    );
-    const stage = screen.getByTestId('terminal-stage-shell');
     fireEvent.touchStart(stage, { touches: [{ clientX: 180, clientY: 400 }] });
     fireEvent.touchMove(stage, { touches: [{ clientX: 100, clientY: 402 }] });
     fireEvent.touchEnd(stage, { changedTouches: [{ clientX: 100, clientY: 402 }] });
-    fireEvent.touchStart(stage, { touches: [{ clientX: 338, clientY: 400 }] });
-    fireEvent.touchMove(stage, { touches: [{ clientX: 359, clientY: 402 }] });
-    fireEvent.touchEnd(stage, { changedTouches: [{ clientX: 359, clientY: 402 }] });
-    expect(onOpenSessionPreview).not.toHaveBeenCalled();
+    expect(onOpenSessionPreview).toHaveBeenCalledTimes(1);
   });
 
-  it('replaces normal stage with a read-only preview and delegates one tile activation to the page owner', async () => {
-    const { TerminalStageShell } = await import('./TerminalPageStageShell');
-    const onActivatePreviewSession = vi.fn();
-    const onCloseSessionPreview = vi.fn();
-    render(
-      <TerminalStageShell
-        {...baseProps}
-        sessionPreviewOpen
-        sessionPreviewSessions={[session]}
-        onActivatePreviewSession={onActivatePreviewSession}
-        onCloseSessionPreview={onCloseSessionPreview}
-      />,
-    );
-    expect(screen.getByTestId('terminal-preview-grid')).toBeTruthy();
-    fireEvent.click(screen.getByTestId('terminal-preview-tile-s1'));
-    expect(onActivatePreviewSession).toHaveBeenCalledWith('s1');
-    expect(onActivatePreviewSession).toHaveBeenCalledTimes(1);
-    expect(onCloseSessionPreview).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByLabelText('退出终端预览'));
-    expect(onCloseSessionPreview).toHaveBeenCalledTimes(1);
-  });
-
-  it('projects a tapped preview tile into the real shell before preview subscriptions close', async () => {
-    const sessions = [makeSession('s1'), makeSession('s2')];
-    localStorage.setItem(SESSION_PREVIEW_SELECTION_STORAGE_KEY, JSON.stringify({
-      version: 1,
-      orderedTargets: sessions.map((item) => ({
-        sessionId: item.id,
-        bridgeHost: item.bridgeHost,
-        bridgePort: item.bridgePort,
-        sessionName: item.sessionName,
-      })),
-    }));
-    const onSwitchSession = vi.fn();
-    const stableNoop = vi.fn();
-
-    function Harness() {
-      const [activeSession, setActiveSession] = useState(sessions[0]);
-      return (
-        <TerminalPage
-          sessions={sessions}
-          activeSession={activeSession}
-          onSwitchSession={(sessionId) => {
-            onSwitchSession(sessionId);
-            setActiveSession(sessions.find((item) => item.id === sessionId) || sessions[0]);
-          }}
-          onMoveSession={stableNoop}
-          onRenameSession={stableNoop}
-          onCloseSession={stableNoop}
-          onOpenConnections={stableNoop}
-          onOpenQuickTabPicker={stableNoop}
-          onTerminalViewportChange={stableNoop}
-          quickActions={[]}
-          shortcutActions={[]}
-          sessionDraft=""
-        />
-      );
-    }
-
-    const { TerminalPage: TerminalPageBase } = await import('./TerminalPage');
-    const TerminalPage = withTerminalShell(TerminalPageBase);
-    render(<Harness />);
-
-    const stage = screen.getByTestId('terminal-stage-shell');
-    fireEvent.touchStart(stage, { touches: [{ clientX: 338, clientY: 400 }] });
-    fireEvent.touchMove(stage, {
-      touches: [{ clientX: 270, clientY: 404 }],
-      cancelable: true,
-    });
-    fireEvent.touchEnd(stage, { changedTouches: [{ clientX: 270, clientY: 404 }] });
-
-    fireEvent.click(await screen.findByTestId('terminal-preview-tile-s2'));
-    expect(screen.getByTestId('terminal-preview-tile-s2').dataset.previewVariant).toBe('primary');
-    expect(onSwitchSession).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByTestId('terminal-preview-tile-s2'));
-    await waitFor(() => expect(screen.queryByTestId('terminal-preview-grid')).toBeNull());
-    expect(onSwitchSession).toHaveBeenCalledTimes(1);
-    expect(onSwitchSession).toHaveBeenCalledWith('s2');
-    expect(screen.getByTestId('terminal-view-s2')).toBeTruthy();
-    expect(screen.queryByTestId('terminal-view-s1')).toBeNull();
-  });
-
-  it('routes quickbar input to the current preview primary instead of the previous active session', async () => {
-    const sessions = [makeSession('s1'), makeSession('s2')];
-    localStorage.setItem(SESSION_PREVIEW_SELECTION_STORAGE_KEY, JSON.stringify({
-      version: 1,
-      orderedTargets: sessions.map((item) => ({
-        sessionId: item.id,
-        bridgeHost: item.bridgeHost,
-        bridgePort: item.bridgePort,
-        sessionName: item.sessionName,
-      })),
-    }));
-    const onQuickActionInput = vi.fn();
-    const onSwitchSession = vi.fn();
-    const stableNoop = vi.fn();
-    const { TerminalPage: TerminalPageBase } = await import('./TerminalPage');
-    const TerminalPage = withTerminalShell(TerminalPageBase);
-
-    render(
-      <TerminalPage
-        sessions={sessions}
-        activeSession={sessions[0]}
-        onSwitchSession={onSwitchSession}
-        onMoveSession={stableNoop}
-        onRenameSession={stableNoop}
-        onCloseSession={stableNoop}
-        onOpenConnections={stableNoop}
-        onOpenQuickTabPicker={stableNoop}
-        onTerminalViewportChange={stableNoop}
-        quickActions={[]}
-        shortcutActions={[]}
-        sessionDraft=""
-        onQuickActionInput={onQuickActionInput}
-        renderQuickBar={renderQuickBar}
-      />,
-    );
-
-    const stage = screen.getByTestId('terminal-stage-shell');
-    fireEvent.touchStart(stage, { touches: [{ clientX: 338, clientY: 400 }] });
-    fireEvent.touchMove(stage, { touches: [{ clientX: 270, clientY: 404 }], cancelable: true });
-    fireEvent.touchEnd(stage, { changedTouches: [{ clientX: 270, clientY: 404 }] });
-    await waitFor(() => expect(screen.getByTestId('terminal-preview-grid')).toBeTruthy());
-
-    expect(screen.getByTestId('terminal-quickbar').dataset.activeSessionId).toBe('s1');
-    fireEvent.click(screen.getByTestId('terminal-preview-body-s2'));
-    await waitFor(() => expect(screen.getByTestId('terminal-preview-tile-s2').dataset.previewVariant).toBe('primary'));
-    expect(onSwitchSession).not.toHaveBeenCalled();
-    expect(screen.getByTestId('terminal-quickbar').dataset.activeSessionId).toBe('s2');
-
-    fireEvent.click(screen.getByTestId('terminal-quickbar-send'));
-    expect(onQuickActionInput).toHaveBeenCalledTimes(1);
-    expect(onQuickActionInput).toHaveBeenCalledWith('PING', 's2');
-  });
-
-  it('keeps preview mode and every selected live id stable across a short background round trip', async () => {
-    const sessions = [makeSession('s1'), makeSession('s2'), makeSession('s3'), makeSession('s4')];
-    localStorage.setItem(SESSION_PREVIEW_SELECTION_STORAGE_KEY, JSON.stringify({
-      version: 1,
-      orderedTargets: sessions.map((item) => ({
-        sessionId: item.id,
-        bridgeHost: item.bridgeHost,
-        bridgePort: item.bridgePort,
-        sessionName: item.sessionName,
-      })),
-    }));
+  it('subscribes only visible lattice cells while preview is open', async () => {
+    const sessions = Array.from({ length: 5 }, (_, index) => makeSession(`s${index + 1}`));
+    writeLattice(sessions);
     const onLiveSessionIdsChange = vi.fn();
+    renderPage({
+      sessions,
+      activeSession: sessions[0],
+      onLiveSessionIdsChange,
+    });
+
+    const stage = screen.getByTestId('terminal-stage-shell');
+    await openPreview(stage);
+
+    await waitFor(() => expect(onLiveSessionIdsChange.mock.calls.at(-1)?.[0]).toEqual(
+      expect.arrayContaining(['s1', 's2', 's3', 's4']),
+    ));
+    expect(onLiveSessionIdsChange.mock.calls.at(-1)?.[0]).not.toContain('s5');
+  });
+
+  it('pans focus to an edge cell without switching the active shell session', async () => {
+    const sessions = [makeSession('s1'), makeSession('s2'), makeSession('s3')];
+    writeLattice(sessions);
+    const { onSwitchSession } = renderPage({ sessions, activeSession: sessions[0] });
+    const stage = screen.getByTestId('terminal-stage-shell');
+    await openPreview(stage);
+
+    fireEvent.click(screen.getByTestId('terminal-preview-tile-s2'));
+
+    await waitFor(() => expect(screen.getByTestId('terminal-preview-tile-s2').dataset.previewFocus).toBe('true'));
+    expect(onSwitchSession).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('terminal-preview-grid')).toBeTruthy();
+  });
+
+  it('treats a reused session id with changed endpoint identity as an empty persisted cell', async () => {
+    const activeSession = makeSession('s1');
+    writeLattice([activeSession]);
+    const staleRaw = localStorage.getItem(JUNCTION_PREVIEW_LATTICE_STORAGE_KEY);
+    expect(staleRaw).not.toBeNull();
+    localStorage.setItem(
+      JUNCTION_PREVIEW_LATTICE_STORAGE_KEY,
+      staleRaw!.replace('"bridgePort":3333', '"bridgePort":4444'),
+    );
+    const { onSwitchSession } = renderPage({
+      sessions: [activeSession],
+      activeSession,
+    });
+    const stage = screen.getByTestId('terminal-stage-shell');
+
+    await openPreview(stage);
+
+    await waitFor(() => expect(screen.getByTestId('terminal-preview-tile-s1').dataset.previewFocus).toBe('true'));
+    expect(screen.getByTestId('terminal-preview-grid')).toBeTruthy();
+    expect(onSwitchSession).not.toHaveBeenCalled();
+  });
+
+  it('opens the drawer from the left edge during preview and changes only the focus cell', async () => {
+    const sessions = [makeSession('s1'), makeSession('s2'), makeSession('s3')];
+    writeLattice([sessions[0], sessions[1]]);
     const stableNoop = vi.fn();
     const { TerminalPage: TerminalPageBase } = await import('./TerminalPage');
-    const TerminalPage = withTerminalShell(TerminalPageBase);
-
-    const renderPage = (appForegroundActive: boolean) => (
+    const TerminalPage = withTerminalShell(withSessionDrawer(TerminalPageBase));
+    render(
       <TerminalPage
-        appForegroundActive={appForegroundActive}
         sessions={sessions}
+        sessionGroups={[{
+          id: 'mac-local',
+          name: 'Mac Local',
+          bridgeHost: 'mac.local',
+          bridgePort: 3333,
+          sessionNames: sessions.map((session) => session.sessionName),
+          lastOpenedAt: 1,
+        }]}
         activeSession={sessions[0]}
         onSwitchSession={stableNoop}
         onMoveSession={stableNoop}
@@ -381,195 +333,153 @@ describe('TerminalPage session preview integration', () => {
         onOpenConnections={stableNoop}
         onOpenQuickTabPicker={stableNoop}
         onTerminalViewportChange={stableNoop}
-        onLiveSessionIdsChange={onLiveSessionIdsChange}
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-      />
+      />,
     );
-
-    const view = render(renderPage(true));
-    await waitFor(() => expect(onLiveSessionIdsChange).toHaveBeenLastCalledWith(['s1']));
-
     const stage = screen.getByTestId('terminal-stage-shell');
-    fireEvent.touchStart(stage, { touches: [{ clientX: 338, clientY: 400 }] });
-    fireEvent.touchMove(stage, { touches: [{ clientX: 270, clientY: 404 }], cancelable: true });
-    fireEvent.touchEnd(stage, { changedTouches: [{ clientX: 270, clientY: 404 }] });
-    await waitFor(() => expect(screen.getByTestId('terminal-preview-grid')).toBeTruthy());
-    await waitFor(() => expect(onLiveSessionIdsChange).toHaveBeenLastCalledWith(['s1', 's2', 's3', 's4']));
-    const foregroundProjectionCallCount = onLiveSessionIdsChange.mock.calls.length;
+    await openPreview(stage);
 
-    view.rerender(renderPage(false));
-    await waitFor(() => expect(onLiveSessionIdsChange).toHaveBeenLastCalledWith(['s1', 's2', 's3', 's4']));
-    expect(onLiveSessionIdsChange).toHaveBeenCalledTimes(foregroundProjectionCallCount);
+    fireEvent.touchStart(stage, { touches: [{ clientX: 30, clientY: 400 }] });
+    fireEvent.touchMove(stage, { touches: [{ clientX: 160, clientY: 404 }], cancelable: true });
+    fireEvent.touchEnd(stage, { changedTouches: [{ clientX: 160, clientY: 404 }] });
+    await waitFor(() => expect(screen.getByTestId('terminal-session-drawer')).toBeTruthy());
+
+    const unscopedHost = screen.queryByTestId('terminal-session-drawer-host-__unscoped__');
+    if (unscopedHost) fireEvent.click(unscopedHost);
+    await waitFor(() => expect(screen.getByTestId('terminal-session-drawer-select-s3')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-select-s3'));
+    await waitFor(() => expect(screen.getByTestId('terminal-session-drawer').getAttribute('aria-hidden')).toBe('true'));
+    await waitFor(() => expect(screen.getByTestId('terminal-preview-tile-s3').dataset.previewFocus).toBe('true'));
+    expect(screen.getByTestId('terminal-preview-tile-s2').dataset.previewEdge).toBe('left');
     expect(screen.getByTestId('terminal-preview-grid')).toBeTruthy();
-
-    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
-    fireEvent(document, new Event('visibilitychange'));
-    expect(screen.getByTestId('terminal-preview-grid')).toBeTruthy();
-    expect(onLiveSessionIdsChange).toHaveBeenLastCalledWith(['s1', 's2', 's3', 's4']);
-
-    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
-    view.rerender(renderPage(true));
-    await waitFor(() => expect(onLiveSessionIdsChange).toHaveBeenLastCalledWith(['s1', 's2', 's3', 's4']));
   });
 
-  it('materializes a remote-only drawer row before adding it to preview selection', async () => {
-    const currentSession = makeSession('s1');
-    currentSession.daemonHostId = 'daemon-a';
-    currentSession.sessionName = 'tmux-s1';
-    const openedSession = makeSession('remote-opened');
-    openedSession.daemonHostId = 'daemon-a';
-    openedSession.bridgeHost = '100.127.23.27';
-    openedSession.bridgePort = 3333;
-    openedSession.sessionName = 'remote-beta';
-    openedSession.title = 'remote beta tab';
-    const onOpenDrawerRemoteSession = vi.fn((_target: unknown, _sessionName: string, _options?: { activate?: boolean; navigate?: boolean }) => 'remote-opened');
-    const stableNoop = vi.fn();
-    const { TerminalPage: TerminalPageBase } = await import('./TerminalPage');
-    const TerminalPage = withTerminalShell(withSessionDrawer(TerminalPageBase));
-
-    function Harness() {
-      const [sessions, setSessions] = useState<Session[]>([currentSession]);
-      return (
+  it('keeps the preview drawer reachable from the left edge in landscape', async () => {
+    const originalInnerWidth = window.innerWidth;
+    const originalInnerHeight = window.innerHeight;
+    const originalClientHeight = document.documentElement.clientHeight;
+    const originalVisualViewport = window.visualViewport;
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 800 });
+    Object.defineProperty(document.documentElement, 'clientHeight', { configurable: true, value: 800 });
+    Object.defineProperty(window, 'visualViewport', {
+      configurable: true,
+      value: {
+        width: 1280,
+        height: 800,
+        offsetTop: 0,
+        offsetLeft: 0,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      },
+    });
+    try {
+      const sessions = [makeSession('s1'), makeSession('s2')];
+      writeLattice(sessions);
+      const stableNoop = vi.fn();
+      const { TerminalPage: TerminalPageBase } = await import('./TerminalPage');
+      const TerminalPage = withTerminalShell(withSessionDrawer(TerminalPageBase));
+      render(
         <TerminalPage
           sessions={sessions}
           sessionGroups={[{
-            id: 'daemon:daemon-a',
-            name: 'Daemon A',
-            bridgeHost: '100.127.23.27',
+            id: 'mac-local',
+            name: 'Mac Local',
+            bridgeHost: 'mac.local',
             bridgePort: 3333,
-            daemonHostId: 'daemon-a',
-            authToken: 'token-a',
-            sessionNames: ['tmux-s1', 'remote-beta'],
+            sessionNames: sessions.map((session) => session.sessionName),
             lastOpenedAt: 1,
           }]}
-          activeSession={sessions[0] || null}
+          activeSession={sessions[0]}
           onSwitchSession={stableNoop}
           onMoveSession={stableNoop}
           onRenameSession={stableNoop}
           onCloseSession={stableNoop}
           onOpenConnections={stableNoop}
           onOpenQuickTabPicker={stableNoop}
-          onOpenDrawerRemoteSession={(target, sessionName, options) => {
-            const openedId = onOpenDrawerRemoteSession(target, sessionName, options);
-            setSessions([currentSession, openedSession]);
-            return openedId;
-          }}
           onTerminalViewportChange={stableNoop}
           quickActions={[]}
           shortcutActions={[]}
           sessionDraft=""
-        />
+        />,
       );
+      const stage = screen.getByTestId('terminal-stage-shell');
+      fireEvent.touchStart(stage, { touches: [{ clientX: 1250, clientY: 400 }] });
+      fireEvent.touchMove(stage, { touches: [{ clientX: 1160, clientY: 404 }], cancelable: true });
+      fireEvent.touchEnd(stage, { changedTouches: [{ clientX: 1160, clientY: 404 }] });
+      await waitFor(() => expect(screen.getByTestId('terminal-preview-grid')).toBeTruthy());
+
+      const preview = screen.getByTestId('terminal-preview-grid');
+      fireEvent.touchStart(preview, { touches: [{ clientX: 30, clientY: 400 }] });
+      fireEvent.touchMove(preview, { touches: [{ clientX: 160, clientY: 404 }], cancelable: true });
+      fireEvent.touchEnd(preview, { changedTouches: [{ clientX: 160, clientY: 404 }] });
+
+      await waitFor(() => expect(screen.getByTestId('terminal-session-drawer')).toBeTruthy());
+      expect(screen.getByTestId('terminal-preview-grid')).toBeTruthy();
+    } finally {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalInnerWidth });
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: originalInnerHeight });
+      Object.defineProperty(document.documentElement, 'clientHeight', {
+        configurable: true,
+        value: originalClientHeight,
+      });
+      Object.defineProperty(window, 'visualViewport', {
+        configurable: true,
+        value: originalVisualViewport,
+      });
     }
-
-    render(<Harness />);
-    const swipeSurface = document.querySelector('[data-testid^="terminal-swipe-surface-"][data-swipe-enabled="true"]') as HTMLElement | null;
-    expect(swipeSurface).toBeTruthy();
-    fireEvent.touchStart(swipeSurface!, { touches: [{ clientX: 56, clientY: 200 }] });
-    fireEvent.touchMove(swipeSurface!, { touches: [{ clientX: 236, clientY: 206 }], cancelable: true });
-    fireEvent.touchEnd(swipeSurface!, { changedTouches: [{ clientX: 236, clientY: 206 }] });
-    fireEvent.click(await screen.findByTestId('terminal-session-drawer-preview-mode'));
-    fireEvent.click(await screen.findByTestId('terminal-session-drawer-preview-check-remote:daemon:daemon-a::session:remote-beta'));
-
-    await waitFor(() => expect(onOpenDrawerRemoteSession).toHaveBeenCalledWith(
-      {
-        name: 'Daemon A',
-        bridgeHost: '100.127.23.27',
-        bridgePort: 3333,
-        daemonHostId: 'daemon-a',
-        relayHostId: 'daemon-a',
-        authToken: 'token-a',
-        sessionNames: ['tmux-s1', 'remote-beta'],
-        terminalBackend: 'tmux',
-      },
-      'remote-beta',
-      { activate: false, navigate: false },
-    ));
-    await waitFor(() => expect(screen.getByTestId('terminal-session-drawer-preview-check-remote-opened').textContent).toBe('1'));
-    const stored = JSON.parse(localStorage.getItem(SESSION_PREVIEW_SELECTION_STORAGE_KEY) || '{}');
-    expect(stored.orderedTargets.map((item: { sessionId: string }) => item.sessionId)).toEqual(['remote-opened']);
-    expect(stored.orderedTargets[0]).toEqual(expect.objectContaining({
-      bridgeHost: '100.127.23.27',
-      bridgePort: 3333,
-      sessionName: 'remote-beta',
-      daemonHostId: 'daemon-a',
-    }));
-    expect(stored.orderedTargets[0].sessionId).not.toContain('remote:daemon');
-    expect(stableNoop).not.toHaveBeenCalledWith('remote:daemon:daemon-a::session:remote-beta');
   });
 
-  it('does not persist a remote placeholder when preview auto-open fails', async () => {
-    const currentSession = makeSession('s1');
-    currentSession.daemonHostId = 'daemon-a';
-    currentSession.sessionName = 'tmux-s1';
-    const onOpenDrawerRemoteSession = vi.fn((_target: unknown, _sessionName: string, _options?: { activate?: boolean; navigate?: boolean }) => undefined);
+  it('routes QuickBar input to the focused preview session without exiting preview', async () => {
+    const sessions = [makeSession('s1'), makeSession('s2')];
+    writeLattice(sessions);
+    const onQuickActionInput = vi.fn();
     const stableNoop = vi.fn();
     const { TerminalPage: TerminalPageBase } = await import('./TerminalPage');
-    const TerminalPage = withTerminalShell(withSessionDrawer(TerminalPageBase));
-
+    const TerminalPage = withTerminalShell(TerminalPageBase);
     render(
       <TerminalPage
-        sessions={[currentSession]}
-        sessionGroups={[{
-          id: 'daemon:daemon-a',
-          name: 'Daemon A',
-          bridgeHost: '100.127.23.27',
-          bridgePort: 3333,
-          daemonHostId: 'daemon-a',
-          authToken: 'token-a',
-          sessionNames: ['tmux-s1', 'remote-beta'],
-          lastOpenedAt: 1,
-        }]}
-        activeSession={currentSession}
+        sessions={sessions}
+        activeSession={sessions[0]}
         onSwitchSession={stableNoop}
         onMoveSession={stableNoop}
         onRenameSession={stableNoop}
         onCloseSession={stableNoop}
         onOpenConnections={stableNoop}
         onOpenQuickTabPicker={stableNoop}
-        onOpenDrawerRemoteSession={onOpenDrawerRemoteSession}
         onTerminalViewportChange={stableNoop}
+        onQuickActionInput={onQuickActionInput}
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
+        renderQuickBar={renderQuickBar}
       />,
     );
+    const stage = screen.getByTestId('terminal-stage-shell');
+    await openPreview(stage);
 
-    const swipeSurface = document.querySelector('[data-testid^="terminal-swipe-surface-"][data-swipe-enabled="true"]') as HTMLElement | null;
-    expect(swipeSurface).toBeTruthy();
-    fireEvent.touchStart(swipeSurface!, { touches: [{ clientX: 56, clientY: 200 }] });
-    fireEvent.touchMove(swipeSurface!, { touches: [{ clientX: 236, clientY: 206 }], cancelable: true });
-    fireEvent.touchEnd(swipeSurface!, { changedTouches: [{ clientX: 236, clientY: 206 }] });
-    fireEvent.click(await screen.findByTestId('terminal-session-drawer-preview-mode'));
-    fireEvent.click(await screen.findByTestId('terminal-session-drawer-preview-check-remote:daemon:daemon-a::session:remote-beta'));
+    expect(screen.getByTestId('terminal-quickbar').dataset.activeSessionId).toBe('s1');
+    fireEvent.click(screen.getByTestId('terminal-preview-tile-s2'));
+    await waitFor(() => expect(screen.getByTestId('terminal-preview-tile-s2').dataset.previewFocus).toBe('true'));
+    expect(screen.getByTestId('terminal-quickbar').dataset.activeSessionId).toBe('s2');
 
-    expect(onOpenDrawerRemoteSession).toHaveBeenCalledTimes(1);
-    await waitFor(() => expect(screen.getByText('无法打开该 session，不能加入实时预览。')).toBeTruthy());
-    const stored = localStorage.getItem(SESSION_PREVIEW_SELECTION_STORAGE_KEY);
-    expect(stored === null || JSON.parse(stored).orderedTargets.length === 0).toBe(true);
+    fireEvent.click(screen.getByTestId('terminal-quickbar-send'));
+    expect(onQuickActionInput).toHaveBeenCalledWith('PING', 's2');
   });
 
-  it('replaces a preview tile with an unselected open session without changing active session', async () => {
-    const previewSessions = [makeSession('s1'), makeSession('s2'), makeSession('s3')];
-    localStorage.setItem(SESSION_PREVIEW_SELECTION_STORAGE_KEY, JSON.stringify({
-      version: 1,
-      orderedTargets: previewSessions.slice(0, 2).map((item) => ({
-        sessionId: item.id,
-        bridgeHost: item.bridgeHost,
-        bridgePort: item.bridgePort,
-        sessionName: item.sessionName,
-      })),
-    }));
+  it('exits from the top close control and restores the entry projection', async () => {
+    const sessions = [makeSession('s1'), makeSession('s2')];
+    writeLattice(sessions);
     const onSwitchSession = vi.fn();
     const stableNoop = vi.fn();
     const { TerminalPage: TerminalPageBase } = await import('./TerminalPage');
     const TerminalPage = withTerminalShell(TerminalPageBase);
     render(
       <TerminalPage
-        sessions={previewSessions}
-        activeSession={previewSessions[0]}
+        sessions={sessions}
+        activeSession={sessions[0]}
         onSwitchSession={onSwitchSession}
         onMoveSession={stableNoop}
         onRenameSession={stableNoop}
@@ -582,92 +492,25 @@ describe('TerminalPage session preview integration', () => {
         sessionDraft=""
       />,
     );
-
     const stage = screen.getByTestId('terminal-stage-shell');
-    fireEvent.touchStart(stage, { touches: [{ clientX: 338, clientY: 400 }] });
-    fireEvent.touchMove(stage, { touches: [{ clientX: 270, clientY: 404 }], cancelable: true });
-    fireEvent.touchEnd(stage, { changedTouches: [{ clientX: 270, clientY: 404 }] });
-    const tile = await screen.findByTestId('terminal-preview-tile-s1');
-    fireEvent.contextMenu(tile);
-    expect(screen.queryByTestId('terminal-preview-replace-s1')).toBeNull();
-    expect(screen.queryByTestId('terminal-preview-replace-s2')).toBeNull();
-    expect(screen.getByTestId('terminal-preview-replace-s3')).toBeTruthy();
-    fireEvent.click(screen.getByTestId('terminal-preview-replace-s3'));
+    await openPreview(stage);
 
-    expect(screen.queryByTestId('terminal-preview-tile-s1')).toBeNull();
-    expect(screen.getByTestId('terminal-preview-tile-s3')).toBeTruthy();
-    expect(onSwitchSession).not.toHaveBeenCalled();
-    expect(JSON.parse(localStorage.getItem(SESSION_PREVIEW_SELECTION_STORAGE_KEY) || '{}').orderedTargets
-      .map((item: { sessionId: string }) => item.sessionId)).toEqual(['s3', 's2']);
-  });
-
-  it('removes preview targets without closing Sessions and cancels after the final removal', async () => {
-    const previewSessions = [makeSession('s1'), makeSession('s2')];
-    localStorage.setItem(SESSION_PREVIEW_SELECTION_STORAGE_KEY, JSON.stringify({
-      version: 1,
-      orderedTargets: previewSessions.map((item) => ({
-        sessionId: item.id,
-        bridgeHost: item.bridgeHost,
-        bridgePort: item.bridgePort,
-        sessionName: item.sessionName,
-      })),
-    }));
-    const onCloseSession = vi.fn();
-    const stableNoop = vi.fn();
-    const { TerminalPage: TerminalPageBase } = await import('./TerminalPage');
-    const TerminalPage = withTerminalShell(TerminalPageBase);
-    render(
-      <TerminalPage
-        sessions={previewSessions}
-        activeSession={previewSessions[0]}
-        onSwitchSession={stableNoop}
-        onMoveSession={stableNoop}
-        onRenameSession={stableNoop}
-        onCloseSession={onCloseSession}
-        onOpenConnections={stableNoop}
-        onOpenQuickTabPicker={stableNoop}
-        onTerminalViewportChange={stableNoop}
-        quickActions={[]}
-        shortcutActions={[]}
-        sessionDraft=""
-      />,
-    );
-
-    const stage = screen.getByTestId('terminal-stage-shell');
-    fireEvent.touchStart(stage, { touches: [{ clientX: 338, clientY: 400 }] });
-    fireEvent.touchMove(stage, { touches: [{ clientX: 270, clientY: 404 }], cancelable: true });
-    fireEvent.touchEnd(stage, { changedTouches: [{ clientX: 270, clientY: 404 }] });
-    expect(await screen.findByTestId('terminal-preview-grid')).toBeTruthy();
-
-    fireEvent.click(screen.getByLabelText('从预览移除 Session s2'));
-    await waitFor(() => expect(screen.queryByTestId('terminal-preview-tile-s2')).toBeNull());
-    expect(screen.getAllByTestId(/terminal-preview-tile-/)).toHaveLength(1);
-    expect(JSON.parse(localStorage.getItem(SESSION_PREVIEW_SELECTION_STORAGE_KEY) || '{}').orderedTargets)
-      .toHaveLength(1);
-
-    fireEvent.click(screen.getByLabelText('从预览移除 Session s1'));
+    fireEvent.click(screen.getByLabelText('退出终端预览'));
     await waitFor(() => expect(screen.queryByTestId('terminal-preview-grid')).toBeNull());
-    expect(onCloseSession).not.toHaveBeenCalled();
+    expect(onSwitchSession).not.toHaveBeenCalled();
+    expect(screen.getByTestId('terminal-view-s1')).toBeTruthy();
   });
 
-  it('lists every open unselected Session after removing preview tiles and adds one back', async () => {
-    const previewSessions = Array.from({ length: 6 }, (_, index) => makeSession(`s${index + 1}`));
-    localStorage.setItem(SESSION_PREVIEW_SELECTION_STORAGE_KEY, JSON.stringify({
-      version: 1,
-      orderedTargets: previewSessions.map((item) => ({
-        sessionId: item.id,
-        bridgeHost: item.bridgeHost,
-        bridgePort: item.bridgePort,
-        sessionName: item.sessionName,
-      })),
-    }));
+  it('consumes system Back while preview is open', async () => {
+    const sessions = [makeSession('s1'), makeSession('s2')];
+    writeLattice(sessions);
     const stableNoop = vi.fn();
     const { TerminalPage: TerminalPageBase } = await import('./TerminalPage');
     const TerminalPage = withTerminalShell(TerminalPageBase);
     render(
       <TerminalPage
-        sessions={previewSessions}
-        activeSession={previewSessions[0]}
+        sessions={sessions}
+        activeSession={sessions[0]}
         onSwitchSession={stableNoop}
         onMoveSession={stableNoop}
         onRenameSession={stableNoop}
@@ -680,88 +523,10 @@ describe('TerminalPage session preview integration', () => {
         sessionDraft=""
       />,
     );
-
     const stage = screen.getByTestId('terminal-stage-shell');
-    fireEvent.touchStart(stage, { touches: [{ clientX: 338, clientY: 400 }] });
-    fireEvent.touchMove(stage, { touches: [{ clientX: 270, clientY: 404 }], cancelable: true });
-    fireEvent.touchEnd(stage, { changedTouches: [{ clientX: 270, clientY: 404 }] });
-    expect(await screen.findByTestId('terminal-preview-grid')).toBeTruthy();
-
-    fireEvent.click(screen.getByLabelText('从预览移除 Session s5'));
-    fireEvent.click(screen.getByLabelText('从预览移除 Session s6'));
-    await waitFor(() => expect(screen.getAllByTestId(/terminal-preview-tile-/)).toHaveLength(4));
-
-    fireEvent.click(screen.getByRole('button', { name: '增加预览窗口' }));
-    expect(screen.getByTestId('terminal-preview-add-s5')).toBeTruthy();
-    expect(screen.getByTestId('terminal-preview-add-s6')).toBeTruthy();
-    expect(screen.queryByTestId('terminal-preview-add-s1')).toBeNull();
-    expect(screen.queryByTestId('terminal-preview-add-s2')).toBeNull();
-    expect(screen.queryByTestId('terminal-preview-add-s3')).toBeNull();
-    expect(screen.queryByTestId('terminal-preview-add-s4')).toBeNull();
-
-    fireEvent.click(screen.getByTestId('terminal-preview-add-s6'));
-    await waitFor(() => expect(screen.getByTestId('terminal-preview-tile-s6')).toBeTruthy());
-    expect(JSON.parse(localStorage.getItem(SESSION_PREVIEW_SELECTION_STORAGE_KEY) || '{}').orderedTargets
-      .map((item: { sessionId: string }) => item.sessionId)).toEqual(['s1', 's2', 's3', 's4', 's6']);
-  });
-
-  it('consumes system Back in preview and restores the session active when preview opened', async () => {
-    const previewSessions = [makeSession('s1'), makeSession('s2')];
-    localStorage.setItem(SESSION_PREVIEW_SELECTION_STORAGE_KEY, JSON.stringify({
-      version: 1,
-      orderedTargets: previewSessions.map((item) => ({
-        sessionId: item.id,
-        bridgeHost: item.bridgeHost,
-        bridgePort: item.bridgePort,
-        sessionName: item.sessionName,
-      })),
-    }));
-    const onSwitchSession = vi.fn();
-    const stableNoop = vi.fn();
-    let moveActiveSession: ((sessionId: string) => void) | null = null;
-
-    function Harness() {
-      const [activeSession, setActiveSession] = useState(previewSessions[0]);
-      moveActiveSession = (sessionId) => setActiveSession(
-        previewSessions.find((item) => item.id === sessionId) || previewSessions[0],
-      );
-      return (
-        <TerminalPage
-          sessions={previewSessions}
-          activeSession={activeSession}
-          onSwitchSession={(sessionId) => {
-            onSwitchSession(sessionId);
-            moveActiveSession?.(sessionId);
-          }}
-          onMoveSession={stableNoop}
-          onRenameSession={stableNoop}
-          onCloseSession={stableNoop}
-          onOpenConnections={stableNoop}
-          onOpenQuickTabPicker={stableNoop}
-          onTerminalViewportChange={stableNoop}
-          quickActions={[]}
-          shortcutActions={[]}
-          sessionDraft=""
-        />
-      );
-    }
-
-    const { TerminalPage: TerminalPageBase } = await import('./TerminalPage');
-    const TerminalPage = withTerminalShell(TerminalPageBase);
-    render(<Harness />);
-    expect(appListenerMock.backButton).toBeNull();
-    const stage = screen.getByTestId('terminal-stage-shell');
-    fireEvent.touchStart(stage, { touches: [{ clientX: 338, clientY: 400 }] });
-    fireEvent.touchMove(stage, { touches: [{ clientX: 270, clientY: 404 }], cancelable: true });
-    fireEvent.touchEnd(stage, { changedTouches: [{ clientX: 270, clientY: 404 }] });
-    expect(await screen.findByTestId('terminal-preview-grid')).toBeTruthy();
-    act(() => moveActiveSession?.('s2'));
-    await waitFor(() => expect(appListenerMock.backButton).not.toBeNull());
+    await openPreview(stage);
+    expect(appListenerMock.backButton).not.toBeNull();
     act(() => appListenerMock.backButton?.());
     await waitFor(() => expect(screen.queryByTestId('terminal-preview-grid')).toBeNull());
-    expect(onSwitchSession).toHaveBeenCalledTimes(1);
-    expect(onSwitchSession).toHaveBeenCalledWith('s1');
-    expect(screen.getByTestId('terminal-view-s1')).toBeTruthy();
-    await waitFor(() => expect(appListenerMock.backButton).toBeNull());
   });
 });

@@ -76,6 +76,7 @@
 - daemon 请求 tmux 重排后不得自写 mirror truth；`mirror.rows/cols/bufferStartIndex/bufferLines/cursor` 仍只能来自 tmux capture/readback
 - `mirror-fixed` 下，client viewport / IME / 容器宽度变化**不得**改写 daemon mirror / tmux 宽度；renderer 只能裁切和横向平移
 - `mirror-fixed` 的手势归属按 terminal decision 与 `terminal-buffer-truth`：横向 pan 生效时不得与 tab swipe 争用；没有 pan 链时不得仅因模式名禁用唯一横向交互出口
+- Session preview 唯一真源是 `android/docs/goals/multiscreen-junction-preview-plan.md`：全尺寸窗格组成 coordinate-keyed lattice，手机屏幕是取景框；点击边缘格只平移 focus，不移动 session，不切 active shell。抽屉在 preview open 时只替换 focus cell，空格/stale 显示 `+`，长按只改该格，旧 `zterm:session-preview-selection:v1` 不迁移也不读写。竖屏/横屏/宽屏由 `junction-preview-layout.ts` 单一 owner 推导；preview 只能订阅当前可见且有 session 的格，禁止 scale、第二解析器、transport/resize/reconnect/buffer side effect。
 - 不提交大批 evidence / 构建物 / node_modules
 - MemPalace / 本地搜索只允许代码、文档、项目记忆、local skill 等源文件；`wing=zterm` 必须通过 `scripts/mempalace-mine-zterm.sh` 生成安全语料后再 mine，禁止直接索引仓库根目录；生成物、构建物、release/update 包、evidence、缓存目录、依赖目录不得进入搜索语料或本地搜索结果
 

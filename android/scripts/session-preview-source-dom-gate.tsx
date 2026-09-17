@@ -17,12 +17,30 @@ import { createSessionRenderBufferStore } from '../src/lib/session-render-buffer
 import type { Session, SessionBufferState, SessionRenderBufferSnapshot } from '../src/lib/types';
 import { TerminalPreviewGrid } from '../src/components/terminal/TerminalPreviewGrid';
 import { TerminalStageShell } from '../src/pages/TerminalPageStageShell';
+import type { JunctionPreviewLatticeV1 } from '../src/lib/junction-preview-lattice';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const SESSION_COUNT = 6;
 const CACHE_LINES = 500;
 const SESSION_PREFIX = 'zterm-preview-gate';
 const MAX_PREVIEW_DOM_NODE_COUNT = 8_000;
+
+function previewLattice(cells: Array<{ col: number; row: number; session: Session }>): JunctionPreviewLatticeV1 {
+  return {
+    version: 1,
+    cells: cells.map(({ col, row, session }) => ({
+      col,
+      row,
+      target: {
+        sessionId: session.id,
+        daemonHostId: session.daemonHostId,
+        bridgeHost: session.bridgeHost,
+        bridgePort: session.bridgePort,
+        sessionName: session.sessionName,
+      },
+    })),
+  };
+}
 
 function sleep(ms: number) {
   return new Promise<void>((resolvePromise) => setTimeout(resolvePromise, ms));
@@ -340,14 +358,31 @@ async function main() {
     const dom = installDom();
     const renderStartedAt = performance.now();
     const renderCpuStartedAt = process.cpuUsage();
+    const visibleSessions = [
+      sessions[0],
+      sessions[1],
+      sessions[2],
+      sessions[3],
+    ];
+    const lattice = previewLattice([
+      { col: -1, row: 0, session: sessions[0] },
+      { col: 0, row: -1, session: sessions[1] },
+      { col: 0, row: 0, session: sessions[2] },
+      { col: 0, row: 1, session: sessions[3] },
+    ]);
     const view = render(
       <div style={{ width: '720px', height: '960px' }}>
         <TerminalPreviewGrid
-          sessions={sessions}
+          lattice={lattice}
+          focus={{ col: 0, row: 0 }}
+          candidates={visibleSessions}
           sessionBufferStore={renderStore}
-          landscape={false}
+          viewportWidth={720}
+          viewportHeight={960}
           fontSize={10}
-          onActivateSession={() => undefined}
+          onFocusChange={() => undefined}
+          onSetCell={() => undefined}
+          onClearCell={() => undefined}
           onClose={() => undefined}
         />
       </div>,
@@ -355,7 +390,8 @@ async function main() {
 
     const initialRenderMs = performance.now() - renderStartedAt;
     const convergenceStartedAt = performance.now();
-    const comparisons = await Promise.all(clients.map(async (client, index) => {
+    const comparisons = await Promise.all(visibleSessions.map(async (session, index) => {
+      const client = clients[index];
       const expected = expectedBySession.get(client.sessionName) || [];
       const tmuxSource = captureTmux(client.sessionName);
       const tile = view.getByTestId(`terminal-preview-tile-${client.sessionId}`);
@@ -382,8 +418,8 @@ async function main() {
         throw new Error(`${client.sessionName}: parity failed ${JSON.stringify(checks)}`);
       }
       return {
-        sessionName: client.sessionName,
-        sessionId: client.sessionId,
+        sessionName: session.sessionName,
+        sessionId: session.id,
         expected,
         checks,
         metrics: client.metrics(),
@@ -428,6 +464,14 @@ async function main() {
           terminalThemeId="default"
           terminalWidthMode="mirror-fixed"
           absoluteLineNumbersVisible={false}
+          sessionPreviewLattice={lattice}
+          sessionPreviewFocus={{ col: 0, row: 0 }}
+          sessionPreviewCandidates={visibleSessions}
+          sessionPreviewViewportWidth={720}
+          sessionPreviewViewportHeight={960}
+          onPreviewFocusChange={() => undefined}
+          onSetPreviewCell={() => undefined}
+          onClearPreviewCell={() => undefined}
           copySelection={{
             active: false,
             sessionId: null,
@@ -493,7 +537,7 @@ async function main() {
       wsUrl,
       sessions: comparisons,
       preview: {
-        selectedCount: sessions.length,
+        selectedCount: visibleSessions.length,
         ...previewLayout,
         maxDomNodeCount: MAX_PREVIEW_DOM_NODE_COUNT,
         transportBytes: comparisons.reduce((total, item) => total + item.metrics.receivedBytes, 0),

@@ -1802,18 +1802,21 @@
     },
     {
       "feature_id": "terminal.session_preview",
-      "title": "Maximum-six terminal preview grid with folder quick-peek sheet",
+      "title": "Junction-framed terminal preview lattice",
       "domain": "terminal-ui",
       "owners": [
-        "src/lib/session-preview-selection.ts",
+        "src/lib/junction-preview-lattice.ts",
+        "src/lib/junction-preview-layout.ts",
         "src/lib/session-preview-gesture.ts",
         "src/components/terminal/TerminalPreviewGrid.tsx",
         "src/pages/TerminalPageStageShell.tsx",
         "src/pages/TerminalPage.tsx"
       ],
       "allowed_paths": [
-        "src/lib/session-preview-selection.ts",
-        "src/lib/session-preview-selection.test.ts",
+        "src/lib/junction-preview-lattice.ts",
+        "src/lib/junction-preview-lattice.test.ts",
+        "src/lib/junction-preview-layout.ts",
+        "src/lib/junction-preview-layout.test.ts",
         "src/lib/session-preview-gesture.ts",
         "src/lib/session-preview-gesture.test.ts",
         "src/components/terminal/TerminalPreviewGrid.tsx",
@@ -1834,7 +1837,7 @@
         "src/pages/TerminalPageStageShell.pane-stage.test.tsx",
         "src/lib/types.ts",
         "docs/testing/terminal-session-preview-test-design.md",
-        "docs/goals/terminal-session-preview-plan.md"
+        "docs/goals/multiscreen-junction-preview-plan.md"
       ],
       "forbidden_paths": [
         "src/server/",
@@ -1842,7 +1845,8 @@
         "src/contexts/session-context-buffer-runtime.ts"
       ],
       "required_gates": [
-        "src/lib/session-preview-selection.test.ts",
+        "src/lib/junction-preview-lattice.test.ts",
+        "src/lib/junction-preview-layout.test.ts",
         "src/lib/session-preview-gesture.test.ts",
         "src/components/terminal/TerminalPreviewGrid.test.tsx",
         "src/components/terminal/TerminalPreviewGrid.render-truth.test.tsx",
@@ -1853,7 +1857,7 @@
         "src/lib/function-wiki-truth.test.ts"
       ],
       "truth_sources": [
-        "docs/goals/terminal-session-preview-plan.md",
+        "docs/goals/multiscreen-junction-preview-plan.md",
         "docs/testing/terminal-session-preview-test-design.md",
         "docs/resource-map.md",
         "docs/function-map.md",

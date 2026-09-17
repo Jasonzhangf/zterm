@@ -1076,7 +1076,7 @@
       "direct_relations": [
         "resource.active_session",
         "resource.visible_pane_session",
-        "resource.session_preview_selection"
+        "resource.session_preview_lattice"
       ],
       "indirect_relations": [
         "resource.session_transport"
@@ -2674,7 +2674,7 @@
         "sort_projection"
       ],
       "direct_relations": [
-        "resource.session_preview_selection",
+        "resource.session_preview_lattice",
         "resource.session_preview_mode",
         "resource.remote_window_overlay"
       ],
@@ -2965,20 +2965,18 @@
       ]
     },
     {
-      "resource_id": "resource.session_preview_selection",
+      "resource_id": "resource.session_preview_lattice",
       "resource_type": "projection_resource",
-      "identity": "Ordered maximum-six open-session preview preference",
+      "identity": "Coordinate-keyed open-session preview lattice with a non-persisted focus coordinate",
       "owner_feature": "terminal.session_preview",
-      "truth_store": "versioned client storage plus selection owner",
+      "truth_store": "versioned client storage plus lattice owner",
       "allowed_operations": [
-        "select_open_session",
-        "materialize_remote_catalog_selection",
-        "append_unselected_open_session",
-        "remove_selection",
-        "replace_selection_in_place",
-        "reorder_selection",
+        "set_cell_target",
+        "clear_cell_target",
+        "move_focus_coordinate",
+        "materialize_remote_catalog_target",
         "resolve_open_tabs",
-        "persist_selection"
+        "persist_lattice"
       ],
       "direct_relations": [
         "resource.open_tab"
@@ -3000,11 +2998,11 @@
       ],
       "required_gates": [
         "src/lib/resource-registry-truth.test.ts",
-        "src/lib/session-preview-selection.test.ts"
+        "src/lib/junction-preview-lattice.test.ts"
       ],
       "canonical_docs": [
         "docs/resource-map.md",
-        "docs/goals/terminal-session-preview-plan.md"
+        "docs/goals/multiscreen-junction-preview-plan.md"
       ]
     },
     {
@@ -3018,8 +3016,9 @@
         "close_preview",
         "capture_entry_projection",
         "restore_entry_projection_on_cancel",
-        "project_live_selection",
-        "emit_tile_activation_intent"
+        "pan_focus_coordinate",
+        "project_visible_lattice_cells",
+        "replace_focus_cell_target"
       ],
       "direct_relations": [
         "resource.ui_projection"
@@ -3045,7 +3044,7 @@
       ],
       "canonical_docs": [
         "docs/resource-map.md",
-        "docs/goals/terminal-session-preview-plan.md"
+        "docs/goals/multiscreen-junction-preview-plan.md"
       ]
     },
     {
