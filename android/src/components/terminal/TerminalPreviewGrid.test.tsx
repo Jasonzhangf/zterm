@@ -146,6 +146,68 @@ describe('TerminalPreviewGrid', () => {
     expect(screen.getAllByTestId(/terminal-preview-tile-/)).toHaveLength(5);
   });
 
+  it('uses the rendered preview container height instead of the full viewport for bottom-edge geometry', () => {
+    setViewport(1707, 960);
+    const rect = {
+      x: 0,
+      y: 0,
+      width: 1699,
+      height: 688,
+      top: 0,
+      right: 1699,
+      bottom: 688,
+      left: 0,
+      toJSON: () => ({}),
+    };
+    const resizeObservers: Array<() => void> = [];
+    const originalResizeObserver = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = class ResizeObserverMock {
+      private readonly callback: ResizeObserverCallback;
+
+      constructor(callback: ResizeObserverCallback) {
+        this.callback = callback;
+        resizeObservers.push(() => this.callback([], this as unknown as ResizeObserver));
+      }
+
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+    render(
+      <div style={{ width: '1699px', height: '724px' }}>
+        <TerminalPreviewGrid
+          lattice={latticeFor([
+            { col: -1, row: 0, session: sessions[0] },
+            { col: 0, row: -1, session: sessions[1] },
+            { col: 0, row: 0, session: sessions[2] },
+            { col: 0, row: 1, session: sessions[3] },
+            { col: 1, row: 0, session: sessions[4] },
+          ])}
+          focus={{ col: 0, row: 0 }}
+          candidates={sessions}
+          sessionBufferStore={null}
+          fontSize={10}
+          onFocusChange={vi.fn()}
+          onSetCell={vi.fn()}
+          onClearCell={vi.fn()}
+          onClose={vi.fn()}
+        />
+      </div>,
+    );
+
+    const grid = screen.getByTestId('terminal-preview-grid');
+    const bottom = screen.getByTestId('terminal-preview-tile-s4');
+    const content = grid.lastElementChild as HTMLElement;
+    content.getBoundingClientRect = () => rect as DOMRect;
+    act(() => {
+      for (const trigger of resizeObservers) trigger();
+    });
+    globalThis.ResizeObserver = originalResizeObserver;
+
+    expect(grid.dataset.layoutForm).toBe('wide');
+    expect(bottom.style.top).toBe(`${688 - JUNCTION_PREVIEW_EDGE_PX.topBottom}px`);
+  });
+
   it('pans focus to an edge cell without changing lattice ownership', () => {
     setViewport(374, 706);
     const onFocusChange = vi.fn();

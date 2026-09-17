@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState, type PointerEvent } from 'react';
+import { memo, useEffect, useLayoutEffect, useRef, useState, type PointerEvent } from 'react';
 import { TERMINAL_DRAWER_EDGE_SWIPE_START_PX } from '@zterm/shared';
 import { TerminalView } from '../TerminalView';
 import type { SessionRenderBufferStore } from '../../lib/session-render-buffer-store';
@@ -59,13 +59,37 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
     1,
     viewportWidth ?? (typeof window !== 'undefined' ? window.innerWidth || 0 : 0),
   );
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const [measuredViewport, setMeasuredViewport] = useState<{ width: number; height: number } | null>(null);
+  useLayoutEffect(() => {
+    const node = contentRef.current;
+    if (!node) return;
+    const measure = () => {
+      const rect = node.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+      setMeasuredViewport((current) => {
+        const width = rect.width;
+        const height = rect.height;
+        return current && current.width === width && current.height === height
+          ? current
+          : { width, height };
+      });
+    };
+    measure();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    observer?.observe(node);
+    return () => observer?.disconnect();
+  }, []);
   const resolvedViewportHeight = Math.max(
     1,
-    (viewportHeight ?? (typeof window !== 'undefined' ? window.innerHeight || 0 : 0))
-      - JUNCTION_PREVIEW_HEADER_HEIGHT_PX,
+    measuredViewport?.height ?? (
+      (viewportHeight ?? (typeof window !== 'undefined' ? window.innerHeight || 0 : 0))
+        - JUNCTION_PREVIEW_HEADER_HEIGHT_PX
+    ),
   );
+  const layoutViewportWidth = measuredViewport?.width ?? resolvedViewportWidth;
   const layout = resolveJunctionPreviewLayout({
-    viewportWidth: resolvedViewportWidth,
+    viewportWidth: layoutViewportWidth,
     viewportHeight: resolvedViewportHeight,
     fontSize: Math.max(1, fontSize),
     focus,
@@ -150,7 +174,7 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
       pane = { left: centerLeft - focusWidth, top: centerTop, width: focusWidth, height: focusHeight };
     } else if (cell.edge === 'right') {
       clip = {
-        left: resolvedViewportWidth - JUNCTION_PREVIEW_EDGE_PX.side,
+        left: layoutViewportWidth - JUNCTION_PREVIEW_EDGE_PX.side,
         top: centerTop,
         width: JUNCTION_PREVIEW_EDGE_PX.side,
         height: focusHeight,
@@ -263,7 +287,7 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
         </AmbientButton>
       </header>
 
-      <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+      <div ref={contentRef} style={{ flex: 1, minHeight: 0, position: 'relative' }}>
         {layout.visibleCells.map((cell) => {
           const rect = cellRects.get(coordinateKey(cell));
           if (!rect) return null;
