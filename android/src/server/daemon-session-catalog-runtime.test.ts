@@ -111,6 +111,29 @@ describe('daemon session catalog runtime', () => {
     }
   });
 
+  it('lets the daemon detection loop run the shared refresh and publication path', () => {
+    vi.useFakeTimers();
+    try {
+      const listTerminalSessionCatalog = vi.fn(() => [
+        { name: 'alpha', backend: 'tmux' as const },
+      ]);
+      const runtime = createDaemonSessionCatalogRuntime({
+        listTmuxSessions: vi.fn(() => []),
+        listTerminalSessionCatalog,
+      });
+      const refresh = vi.fn(() => runtime.refresh());
+      runtime.startRefreshLoop(1000, refresh);
+
+      vi.advanceTimersByTime(1000);
+
+      expect(refresh).toHaveBeenCalledTimes(1);
+      expect(listTerminalSessionCatalog).toHaveBeenCalledTimes(1);
+      runtime.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('invalidates the cached catalog after a background refresh failure and blocks stale publication until an explicit refresh', () => {
     vi.useFakeTimers();
     try {

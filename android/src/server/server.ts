@@ -379,8 +379,16 @@ const daemonSessionCatalogRuntime = createDaemonSessionCatalogRuntime({
   listTerminalSessionCatalog: enumerateTerminalSessionCatalog,
 });
 const listTerminalSessionCatalog = () => daemonSessionCatalogRuntime.read();
-const refreshDaemonSessionCatalog = () => daemonSessionCatalogRuntime.refresh();
-daemonSessionCatalogRuntime.startRefreshLoop();
+let relayHostClient: ReturnType<typeof createTraversalRelayHostClient> | null = null;
+const refreshDaemonSessionCatalog = () => {
+  const catalog = daemonSessionCatalogRuntime.refresh();
+  relayHostClient?.publishDirectoryUpdate();
+  return catalog;
+};
+daemonSessionCatalogRuntime.startRefreshLoop(
+  undefined,
+  refreshDaemonSessionCatalog,
+);
 remoteWindowStreamRuntime = createRemoteWindowStreamDaemonRuntime({
   platform: process.platform,
   warmTargetCatalogOnStart: true,
@@ -594,8 +602,8 @@ const terminalDaemonRuntime = createTerminalDaemonRuntime({
   destroyMirror: terminalRuntime.destroyMirror,
   disposeScheduleRuntime: () => terminalScheduleRuntime.dispose(),
   disposeSessionCatalogRuntime: () => daemonSessionCatalogRuntime.dispose(),
-  startRelayHostClient: () => relayHostClient.start(),
-  disposeRelayHostClient: () => relayHostClient.dispose(),
+  startRelayHostClient: () => relayHostClient?.start(),
+  disposeRelayHostClient: () => relayHostClient?.dispose(),
   disposeRtcBridgeServer: () => rtcBridgeServer.dispose(),
   sendTransportMessage,
 });
@@ -636,7 +644,7 @@ const {
   handleRelaySignal,
   closeRelayPeer,
 } = terminalBridgeRuntime;
-const relayHostClient = createTraversalRelayHostClient({
+relayHostClient = createTraversalRelayHostClient({
   config: DAEMON_CONFIG.relay,
   handleRelaySignal,
   closeRelayPeer,

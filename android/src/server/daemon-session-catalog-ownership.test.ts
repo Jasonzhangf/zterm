@@ -45,7 +45,8 @@ describe('daemon session catalog ownership gates', () => {
 
     const serverSource = read('src/server/server.ts');
     const relaySource = read('src/server/relay-client.ts');
-    expect(serverSource).toContain('daemonSessionCatalogRuntime.startRefreshLoop()');
+    expect(serverSource).toContain('daemonSessionCatalogRuntime.startRefreshLoop(');
+    expect(serverSource).toContain('relayHostClient?.publishDirectoryUpdate()');
     expect(serverSource).toContain('listTerminalSessionCatalog,\n});');
     expect(relaySource).not.toContain('refreshSessionCatalog');
   });

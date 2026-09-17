@@ -22,7 +22,10 @@ export interface DaemonSessionCatalogDeps {
 export interface DaemonSessionCatalogRuntime {
   read: (backend?: 'tmux' | 'herdr') => TerminalSessionCatalogEntry[];
   refresh: (backend?: 'tmux' | 'herdr') => TerminalSessionCatalogEntry[];
-  startRefreshLoop: (intervalMs?: number) => void;
+  startRefreshLoop: (
+    intervalMs?: number,
+    refresh?: () => TerminalSessionCatalogEntry[],
+  ) => void;
   dispose: () => void;
 }
 
@@ -73,17 +76,27 @@ export function createDaemonSessionCatalogRuntime(
       }
       return read(backend);
     },
-    startRefreshLoop(intervalMs = DAEMON_SESSION_CATALOG_REFRESH_INTERVAL_MS) {
-      if (refreshTimer) {
-        return;
-      }
-      refreshTimer = setInterval(() => {
+    startRefreshLoop(
+      intervalMs = DAEMON_SESSION_CATALOG_REFRESH_INTERVAL_MS,
+      refresh = () => {
         try {
           snapshot = enumerate();
           invalidated = false;
         } catch (error) {
           snapshot = null;
           invalidated = true;
+          throw error;
+        }
+        return read();
+      },
+    ) {
+      if (refreshTimer) {
+        return;
+      }
+      refreshTimer = setInterval(() => {
+        try {
+          refresh();
+        } catch (error) {
           console.warn(
             `[daemon.session_catalog] refresh failed, snapshot invalidated: ${
               error instanceof Error ? error.message : String(error)
