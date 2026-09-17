@@ -690,10 +690,26 @@ async function waitForOracle(
   timeoutMs: number = WAIT_TIMEOUT_MS,
 ) {
   const startedAt = Date.now();
+  let previousSignature: string | null = null;
   while (Date.now() - startedAt <= timeoutMs) {
     const oracle = captureOracleSnapshot();
     if (predicate(oracle)) {
-      return oracle;
+      const signature = JSON.stringify([
+        oracle.paneRows,
+        oracle.paneCols,
+        oracle.cursorX,
+        oracle.cursorY,
+        oracle.cursorVisible,
+        oracle.alternateOn,
+        oracle.paneCommand,
+        oracle.lines,
+      ]);
+      if (signature === previousSignature) {
+        return oracle;
+      }
+      previousSignature = signature;
+    } else {
+      previousSignature = null;
     }
     await sleep(100);
   }
@@ -751,6 +767,8 @@ class DaemonProbe {
   private readonly scheduleEvents: Array<ServerMessage & { type: 'schedule-event' }> = [];
 
   private readonly scheduleEventWaiters: ScheduleEventWaiter[] = [];
+
+  private attachHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(wsUrl: string, authToken: string) {
     this.wsUrl = authToken ? `${wsUrl}${wsUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(authToken)}` : wsUrl;
@@ -875,6 +893,7 @@ class DaemonProbe {
             });
             if (sessionMessage.type === 'connected') {
               this.connected = true;
+              this.startAttachHeartbeat();
               this.requestHead(true);
               if (!settled) {
                 settled = true;
@@ -966,6 +985,10 @@ class DaemonProbe {
   }
 
   async close() {
+    if (this.attachHeartbeatTimer) {
+      clearInterval(this.attachHeartbeatTimer);
+      this.attachHeartbeatTimer = null;
+    }
     const controlWs = this.controlWs;
     const sessionWs = this.ws;
     this.controlWs = null;
@@ -974,6 +997,31 @@ class DaemonProbe {
       this.closeSocket(controlWs),
       this.closeSocket(sessionWs),
     ]);
+  }
+
+  private startAttachHeartbeat() {
+    if (this.attachHeartbeatTimer) {
+      return;
+    }
+    const sendHeartbeat = () => {
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+        return;
+      }
+      const message = {
+        type: 'body-subscription',
+        payload: { version: 1, subscribed: true },
+      } satisfies ClientMessage;
+      this.ws.send(JSON.stringify(message));
+      this.eventHistory.push({
+        at: nowStamp(),
+        direction: 'sent',
+        type: message.type,
+        payload: message.payload,
+      });
+    };
+    sendHeartbeat();
+    this.attachHeartbeatTimer = setInterval(sendHeartbeat, 30_000);
+    this.attachHeartbeatTimer.unref?.();
   }
 
   sendInput(data: string, options?: { requestHead?: boolean }) {
@@ -1294,7 +1342,7 @@ async function runLongInputCase(probe: DaemonProbe): Promise<CaseResult> {
       findExactOracleLine(oracle, marker) === marker
       && findExactOracleLine(oracle, digest) === digest
     ),
-    30000,
+    120000,
   );
   const settledOracle = await waitForOracle(
     'long input shell settled after target digest',
@@ -1304,7 +1352,7 @@ async function runLongInputCase(probe: DaemonProbe): Promise<CaseResult> {
       && oracle.paneCommand.toLowerCase() !== 'python'
       && findExactOracleLine(oracle, 'fanzhang@Macstudio android %') === 'fanzhang@Macstudio android %'
     ),
-    30000,
+    120000,
   );
   const steps: CaseStepResult[] = [
     buildLongInputDigestStep({

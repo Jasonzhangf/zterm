@@ -49,6 +49,7 @@ export interface TerminalDaemonRuntimeDeps {
   releaseAllMuxChannelSubscribers: (connection: DaemonTransportConnection) => string[];
   destroyMirror: (mirror: SessionMirror, reason: string, options?: DestroyMirrorOptions) => void;
   disposeScheduleRuntime: () => void;
+  disposeSessionCatalogRuntime: () => void;
   startRelayHostClient: () => void;
   disposeRelayHostClient: () => void;
   disposeRtcBridgeServer: () => void;
@@ -252,6 +253,7 @@ export function createTerminalDaemonRuntime(
     clearHeartbeatLoop();
     clearMemoryGuardLoop();
     deps.disposeScheduleRuntime();
+    deps.disposeSessionCatalogRuntime();
     deps.disposeRelayHostClient();
 
     for (const connection of deps.connections.values()) {
@@ -299,6 +301,7 @@ export function createTerminalDaemonRuntime(
     clearHeartbeatLoop();
     clearMemoryGuardLoop();
     deps.disposeScheduleRuntime();
+    deps.disposeSessionCatalogRuntime();
     deps.disposeRelayHostClient();
     deps.disposeRtcBridgeServer();
   }

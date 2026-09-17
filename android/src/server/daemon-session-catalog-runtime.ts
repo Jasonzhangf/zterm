@@ -19,12 +19,88 @@ export interface DaemonSessionCatalogDeps {
   observationHistory?: Map<string, import('./daemon-session-agent-status-runtime').DaemonSessionObservationHistoryEntry>;
 }
 
+export interface DaemonSessionCatalogRuntime {
+  read: (backend?: 'tmux' | 'herdr') => TerminalSessionCatalogEntry[];
+  refresh: (backend?: 'tmux' | 'herdr') => TerminalSessionCatalogEntry[];
+  startRefreshLoop: (intervalMs?: number) => void;
+  dispose: () => void;
+}
+
+export const DAEMON_SESSION_CATALOG_REFRESH_INTERVAL_MS = 5_000;
+
 export interface DaemonSessionCatalogRuntimeDeps extends DaemonSessionCatalogDeps {
   mirrors: ReadonlyMap<string, SessionMirror>;
   sendTransportMessage: (
     transport: TerminalSessionTransport | null | undefined,
     message: TerminalTransportServerFrame,
   ) => void;
+}
+
+export function createDaemonSessionCatalogRuntime(
+  deps: DaemonSessionCatalogDeps,
+): DaemonSessionCatalogRuntime {
+  let snapshot: TerminalSessionCatalogEntry[] | null = null;
+  let invalidated = false;
+  let refreshTimer: ReturnType<typeof setInterval> | null = null;
+
+  function enumerate() {
+    if (deps.listTerminalSessionCatalog) {
+      return deps.listTerminalSessionCatalog();
+    }
+    const sessions = deps.listTerminalSessions ? deps.listTerminalSessions() : deps.listTmuxSessions();
+    return sessions.map((name) => ({ name, backend: 'tmux' as const }));
+  }
+
+  function read(backend?: 'tmux' | 'herdr') {
+    if (invalidated) {
+      throw new Error('daemon session catalog is stale; explicit refresh required');
+    }
+    const current = snapshot ?? (snapshot = enumerate());
+    return (backend ? current.filter((entry) => entry.backend === backend) : current)
+      .map((entry) => ({ ...entry }));
+  }
+
+  return {
+    read,
+    refresh(backend?: 'tmux' | 'herdr') {
+      try {
+        snapshot = enumerate();
+        invalidated = false;
+      } catch (error) {
+        snapshot = null;
+        invalidated = true;
+        throw error;
+      }
+      return read(backend);
+    },
+    startRefreshLoop(intervalMs = DAEMON_SESSION_CATALOG_REFRESH_INTERVAL_MS) {
+      if (refreshTimer) {
+        return;
+      }
+      refreshTimer = setInterval(() => {
+        try {
+          snapshot = enumerate();
+          invalidated = false;
+        } catch (error) {
+          snapshot = null;
+          invalidated = true;
+          console.warn(
+            `[daemon.session_catalog] refresh failed, snapshot invalidated: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+      }, intervalMs);
+      refreshTimer.unref?.();
+    },
+    dispose() {
+      if (!refreshTimer) {
+        return;
+      }
+      clearInterval(refreshTimer);
+      refreshTimer = null;
+    },
+  };
 }
 
 export function buildSessionsCatalogPayload(

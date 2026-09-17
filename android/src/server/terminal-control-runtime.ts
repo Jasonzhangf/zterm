@@ -419,7 +419,7 @@ export function createTerminalControlRuntime(
     return sessions;
   }
 
-  function listTerminalSessionCatalog() {
+  function buildTerminalSessionCatalog(): TerminalSessionCatalogEntry[] {
     const entries: TerminalSessionCatalogEntry[] = [];
     const selectedBackend = deps.defaultBackend || (deps.wezTermBackend ? 'wezterm' : 'tmux');
     if (selectedBackend === 'tmux' || selectedBackend === 'wezterm') {
@@ -452,6 +452,10 @@ export function createTerminalControlRuntime(
       const nameOrder = left.name.localeCompare(right.name);
       return nameOrder || left.backend.localeCompare(right.backend);
     });
+  }
+
+  function listTerminalSessionCatalog() {
+    return buildTerminalSessionCatalog();
   }
 
   function listTerminalSessions() {

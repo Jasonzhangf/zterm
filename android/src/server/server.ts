@@ -44,6 +44,7 @@ import {
 import { createTerminalFileTransferRuntime } from './terminal-file-transfer-runtime';
 import { createTerminalFileTransferMessageRuntime } from './terminal-file-transfer-message-runtime';
 import { createTerminalMessageRuntime } from './terminal-message-runtime';
+import { createDaemonSessionCatalogRuntime } from './daemon-session-catalog-runtime';
 import { createTerminalAttachmentMessageRuntime } from './terminal-attachment-message-runtime';
 import { createTerminalChannelMuxRuntime } from './terminal-channel-mux-runtime';
 import { createDaemonInputQueueRuntime } from './daemon-input-queue-runtime';
@@ -366,12 +367,20 @@ const {
   runTmux,
   listTmuxSessions,
   listTerminalSessions,
-  listTerminalSessionCatalog,
+  listTerminalSessionCatalog: enumerateTerminalSessionCatalog,
   resolveTerminalSessionBackend,
   createDetachedTmuxSession,
   closeDetachedTerminalSession,
   renameTmuxSession,
 } = terminalControlRuntime;
+const daemonSessionCatalogRuntime = createDaemonSessionCatalogRuntime({
+  listTmuxSessions,
+  listTerminalSessions,
+  listTerminalSessionCatalog: enumerateTerminalSessionCatalog,
+});
+const listTerminalSessionCatalog = () => daemonSessionCatalogRuntime.read();
+const refreshDaemonSessionCatalog = () => daemonSessionCatalogRuntime.refresh();
+daemonSessionCatalogRuntime.startRefreshLoop();
 remoteWindowStreamRuntime = createRemoteWindowStreamDaemonRuntime({
   platform: process.platform,
   warmTargetCatalogOnStart: true,
@@ -384,6 +393,7 @@ if (TERMINAL_BACKEND_KIND === 'tmux') {
   terminalControlRuntime.ensureTmuxServerRunning();
   terminalRuntime.restorePersistedAdaptiveWidthBaselines(listTmuxSessions());
 }
+refreshDaemonSessionCatalog();
 const terminalTransportRuntime = createTerminalTransportRuntime({
   sessions,
   connections,
@@ -515,6 +525,7 @@ const terminalMessageRuntime = createTerminalMessageRuntime({
     listTmuxSessions,
     listTerminalSessions,
     listTerminalSessionCatalog,
+    refreshSessionCatalog: refreshDaemonSessionCatalog,
     runTmux,
     observationHistory: daemonSessionObservationHistory,
     readProcessGroup: readDaemonProcessGroup,
@@ -582,6 +593,7 @@ const terminalDaemonRuntime = createTerminalDaemonRuntime({
   releaseAllMuxChannelSubscribers: terminalChannelMuxRuntime.releaseAllMuxChannelSubscribers,
   destroyMirror: terminalRuntime.destroyMirror,
   disposeScheduleRuntime: () => terminalScheduleRuntime.dispose(),
+  disposeSessionCatalogRuntime: () => daemonSessionCatalogRuntime.dispose(),
   startRelayHostClient: () => relayHostClient.start(),
   disposeRelayHostClient: () => relayHostClient.dispose(),
   disposeRtcBridgeServer: () => rtcBridgeServer.dispose(),

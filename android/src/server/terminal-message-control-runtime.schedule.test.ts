@@ -116,12 +116,33 @@ describe('terminal-message-control-runtime tmux kill truth', () => {
   const connection = { transport: null } as unknown as TerminalTransportConnection;
 
   it('creates a tmux session and republishes the catalog', () => {
+    const refreshSessionCatalog = vi.fn();
     const deps = makeDeps({
       listTerminalSessionCatalog: vi.fn(() => [
         { name: 'tmux-default', backend: 'tmux' },
         { name: 'tmux-new', backend: 'tmux' },
       ]),
       createDetachedTmuxSession: vi.fn(),
+      refreshSessionCatalog,
+    });
+
+    const result = handleTmuxControlMessageRuntime(deps, connection, {
+      type: 'tmux-create-session',
+      payload: { sessionName: 'tmux-new' },
+    });
+
+    expect(deps.createDetachedTmuxSession).toHaveBeenCalledWith('tmux-new', undefined, 'tmux');
+    expect(refreshSessionCatalog).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ ok: true });
+    expect(deps.sendTransportMessage).toHaveBeenCalledWith(null, expect.objectContaining({ type: 'sessions' }));
+  });
+
+  it('keeps a successful create ok when catalog refresh fails', () => {
+    const refreshSessionCatalog = vi.fn(() => {
+      throw new Error('catalog backend unavailable');
+    });
+    const deps = makeDeps({
+      refreshSessionCatalog,
     });
 
     const result = handleTmuxControlMessageRuntime(deps, connection, {
@@ -131,16 +152,32 @@ describe('terminal-message-control-runtime tmux kill truth', () => {
 
     expect(deps.createDetachedTmuxSession).toHaveBeenCalledWith('tmux-new', undefined, 'tmux');
     expect(result).toEqual({ ok: true });
-    expect(deps.sendTransportMessage).toHaveBeenCalledWith(null, expect.objectContaining({ type: 'sessions' }));
+    expect(deps.sendTransportMessage).toHaveBeenCalledWith(null, {
+      type: 'error',
+      payload: {
+        message: 'Failed to publish daemon session catalog after mutation: catalog backend unavailable',
+        code: 'catalog_refresh_failed',
+      },
+    });
+    expect(deps.sendTransportMessage).not.toHaveBeenCalledWith(null, {
+      type: 'error',
+      payload: {
+        message: 'Failed to create tmux session: catalog backend unavailable',
+        code: 'tmux_create_failed',
+      },
+    });
+    expect(deps.sendTransportMessage).not.toHaveBeenCalledWith(null, expect.objectContaining({ type: 'sessions' }));
   });
 
   it('routes tmux rename through the resolved tmux backend', () => {
+    const refreshSessionCatalog = vi.fn();
     const deps = makeDeps({
       resolveTerminalSessionBackend: vi.fn(() => 'tmux'),
       renameTmuxSession: vi.fn(() => 'renamed'),
       listTerminalSessionCatalog: vi.fn(() => [
         { name: 'renamed', backend: 'tmux' },
       ]),
+      refreshSessionCatalog,
     });
 
     const result = handleTmuxControlMessageRuntime(deps, connection, {
@@ -150,14 +187,17 @@ describe('terminal-message-control-runtime tmux kill truth', () => {
 
     expect(result).toEqual({ ok: true });
     expect(deps.renameTmuxSession).toHaveBeenCalledWith('original', 'renamed', 'tmux');
+    expect(refreshSessionCatalog).toHaveBeenCalledTimes(1);
   });
 
   it('projects tmux-only rename failure with the typed tmux_rename_failed code', () => {
+    const refreshSessionCatalog = vi.fn();
     const deps = makeDeps({
       resolveTerminalSessionBackend: vi.fn(),
       renameTmuxSession: vi.fn(() => {
         throw new Error('tmux rename-session permission denied');
       }),
+      refreshSessionCatalog,
     });
 
     const result = handleTmuxControlMessageRuntime(deps, connection, {
@@ -174,6 +214,7 @@ describe('terminal-message-control-runtime tmux kill truth', () => {
       code: 'tmux_rename_failed',
       message: 'Failed to rename tmux session: tmux rename-session permission denied',
     });
+    expect(refreshSessionCatalog).not.toHaveBeenCalled();
     expect(deps.sendTransportMessage).toHaveBeenCalledWith(null, {
       type: 'error',
       payload: {
@@ -223,6 +264,7 @@ describe('terminal-message-control-runtime tmux kill truth', () => {
   });
 
   it('treats an already absent tmux session as idempotently closed and republishes the current list', () => {
+    const refreshSessionCatalog = vi.fn();
     const deps = makeDeps({
       closeDetachedTerminalSession: vi.fn(() => {
         throw new Error("can't find session: stale");
@@ -236,6 +278,7 @@ describe('terminal-message-control-runtime tmux kill truth', () => {
         stdout: args[0] === 'list-panes' ? '99\tcodex' : '',
       })),
       readProcessGroup: vi.fn(() => ({ groupId: 'pg-1', alive: true })),
+      refreshSessionCatalog,
     });
 
     handleTmuxControlMessageRuntime(deps, connection, {
@@ -244,6 +287,7 @@ describe('terminal-message-control-runtime tmux kill truth', () => {
     });
 
     expect(deps.scheduleEngine.markSessionMissing).toHaveBeenCalledWith('stale', 'session already absent', 'tmux');
+    expect(refreshSessionCatalog).toHaveBeenCalledTimes(1);
     expect(deps.sendTransportMessage).toHaveBeenCalledWith(null, {
       type: 'sessions',
       payload: {
@@ -255,11 +299,13 @@ describe('terminal-message-control-runtime tmux kill truth', () => {
   });
 
   it('keeps a real tmux kill failure explicit', () => {
+    const refreshSessionCatalog = vi.fn();
     const deps = makeDeps({
       closeDetachedTerminalSession: vi.fn(() => {
         throw new Error('permission denied');
       }),
       resolveTerminalSessionBackend: vi.fn(() => 'tmux'),
+      refreshSessionCatalog,
     });
 
     handleTmuxControlMessageRuntime(deps, connection, {
@@ -274,6 +320,7 @@ describe('terminal-message-control-runtime tmux kill truth', () => {
         code: 'tmux_kill_failed',
       },
     });
+    expect(refreshSessionCatalog).not.toHaveBeenCalled();
   });
 
   it('treats an already absent tmux session as idempotently closed and republishes the catalog', () => {
