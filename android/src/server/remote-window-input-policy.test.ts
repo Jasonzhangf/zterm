@@ -108,6 +108,12 @@ describe('remote window input policy owner', () => {
       sampledAtMs: 200,
       deadlineMs: 100,
     }, { targetId: target.streamTargetId, target, canvasLayout: layout })).toThrow('precedes');
+    expect(() => validateRemoteWindowInputPayload({
+      ...clickPayload(),
+      deliveryKind: 'action',
+      sampledAtMs: 100,
+      deadlineMs: Number.NaN,
+    }, { targetId: target.streamTargetId, target, canvasLayout: layout })).toThrow('timestamp or deadline is invalid');
   });
 
   it('accepts current-generation coordinate input and generation-independent key input', () => {

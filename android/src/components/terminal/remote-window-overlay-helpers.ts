@@ -477,19 +477,40 @@ export function resolveRemoteWindowTargetAspectRatio(options: {
 
 export function resolveRemoteWindowTargetResizeSize(options: {
   viewport: SurfaceSize;
-  orientation?: RemoteWindowOrientationPolicy;
-  shortEdge?: number;
-}): SurfaceSize {
-  const ratio = resolveRemoteWindowTargetAspectRatio({
-    viewport: options.viewport,
-    orientation: options.orientation ?? 'follow-device',
-  });
-  const shortEdge = Math.max(120, Math.round(options.shortEdge ?? 1080));
-  const width = ratio >= 1 ? Math.round(shortEdge * ratio) : shortEdge;
-  const height = ratio >= 1 ? shortEdge : Math.round(shortEdge / ratio);
+  devicePixelRatio?: number;
+  target?: RemoteWindowStreamTargetManifest | null;
+}): SurfaceSize | null {
+  const viewportWidth = Math.max(1, options.viewport.width);
+  const viewportHeight = Math.max(1, options.viewport.height);
+  const dpr = Number.isFinite(options.devicePixelRatio) && (options.devicePixelRatio || 0) > 0
+    ? options.devicePixelRatio as number
+    : 1;
+  let width = Math.max(120, Math.round(viewportWidth * dpr));
+  let height = Math.max(120, Math.round(viewportHeight * dpr));
+
+  const target = options.target;
+  if (target) {
+    const display = target.capture.displayBoundsTopLeftPx;
+    if (display && display.width > 0 && display.height > 0) {
+      // The daemon validates x + width <= display.x + display.width, so the
+      // current window origin must be subtracted before clamping.
+      const origin = target.videoTarget.windowBoundsTopLeftPx;
+      const maxWidth = Math.floor(display.x + display.width - origin.x);
+      const maxHeight = Math.floor(display.y + display.height - origin.y);
+      if (maxWidth < 120 || maxHeight < 120) {
+        return null;
+      }
+      const scale = Math.min(1, maxWidth / Math.max(1, width), maxHeight / Math.max(1, height));
+      if (scale < 1) {
+        width = Math.round(width * scale);
+        height = Math.round(height * scale);
+      }
+    }
+  }
+
   return {
-    width: Math.max(120, width),
-    height: Math.max(120, height),
+    width: Math.round(width),
+    height: Math.round(height),
   };
 }
 

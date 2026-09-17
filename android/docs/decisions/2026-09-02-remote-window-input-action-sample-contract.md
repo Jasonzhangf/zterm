@@ -163,8 +163,16 @@ receivedAtMs = daemon 接收时间（接收观测）
 4. 先补红测，再改 shared typed contract、client delivery、daemon policy/apply。
 5. 运行定向测试、全局 gate、构建、emulator/真实用户入口；验证完成后才能 review、commit、merge 或发布。
 
+## 时钟边界修正（2026-09-17）
+
+`sampledAtMs` / `deadlineMs` 是客户端时钟上的业务有效期，不能与 daemon 墙钟直接比较：两端时钟不同步时，daemon 侧 deadline admission 会误杀全部可靠 Action。修正后：
+
+- daemon 不再用本机 `Date.now()` 比较客户端 `deadlineMs`；只保留 delivery control 校验与 sequence 去重。
+- 过期判定唯一 owner 是客户端 delivery owner（`client.remote_window_input_delivery`），在出队和重试前都用本机时钟复检；过期 Action 回 `remote_window_input_action_expired`，不发送、不重放。
+- Action 有效期必须大于一次 ACK 超时，否则唯一一次重试必然已过期；默认 `deadlineMs = sampledAtMs + ACK_TIMEOUT_MS * MAX_ATTEMPTS`。
+
 ## 当前落地状态（2026-09-02）
 
-本轮已落地第一 slice：wire payload 增加 `deliveryKind`、`sampledAtMs`、`deadlineMs`；客户端为 Action 自动设置有界 deadline，sample/scroll 立即发送；客户端和 daemon 均移除 continuous 的 pending/cache/flush 合并路径。daemon 对显式 sample/action 做边界校验，并在 Action 进入执行队列前检查 deadline。
+本轮已落地第一 slice：wire payload 增加 `deliveryKind`、`sampledAtMs`、`deadlineMs`；客户端为 Action 自动设置有界 deadline，sample/scroll 立即发送；客户端和 daemon 均移除 continuous 的 pending/cache/flush 合并路径。daemon 对显式 sample/action 做边界校验与 sequence 去重；deadline 过期判定见上方「时钟边界修正」，由客户端 delivery owner 负责。
 
 仍未宣称完整协议闭环：当前旧事件形状尚未全部升级为独立的 `gesture-action` / `scroll-action start/update/end` union，daemon 也尚未持有每个 gesture 的 sequence/lifecycle 接收状态；这些属于下一 slice，不能用本轮字段标记替代。

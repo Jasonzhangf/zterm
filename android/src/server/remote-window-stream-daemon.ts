@@ -64,6 +64,7 @@ import {
   DEFAULT_SCREEN_CAPTURE_KIT_STARTUP_TIMEOUT_MS,
   RemoteWindowCaptureTargetOutOfDisplayError,
   RemoteWindowCaptureTargetUnavailableError,
+  buildResizedRemoteWindowTarget,
   startScreenCaptureKitFrameSource,
   validateStreamTargetForCapture,
   type RemoteWindowCaptureFrame,
@@ -76,7 +77,7 @@ export * from './remote-window-catalog';
 export * from './remote-window-input-helper';
 export * from './remote-window-capture';
 
-const DEFAULT_REMOTE_WINDOW_TARGET_CATALOG_CACHE_TTL_MS = 60_000;
+const DEFAULT_REMOTE_WINDOW_TARGET_CATALOG_REFRESH_INTERVAL_MS = 5_000;
 
 type RtcPeerConnectionCtor = typeof globalThis.RTCPeerConnection;
 type RtcSessionDescriptionCtor = typeof globalThis.RTCSessionDescription;
@@ -119,7 +120,7 @@ export interface RemoteWindowStreamDaemonDeps {
   captureBinary?: string;
   iterm2PythonTimeoutMs?: number;
   appWindowCatalogTimeoutMs?: number;
-  targetCatalogCacheTtlMs?: number;
+  targetCatalogRefreshIntervalMs?: number;
   nowMs?: () => number;
   warmTargetCatalogOnStart?: boolean;
   captureStartupTimeoutMs?: number;
@@ -417,9 +418,9 @@ export function createRemoteWindowStreamDaemonRuntime(
   const pendingIceCandidatesByStream = new Map<string, RTCIceCandidateInit[]>();
   const iceCandidateFingerprintsByStream = new Map<string, Set<string>>();
   const closedStreamIds = new Set<string>();
-  const targetCatalogCacheTtlMs = Math.max(
-    0,
-    Math.floor(deps.targetCatalogCacheTtlMs ?? DEFAULT_REMOTE_WINDOW_TARGET_CATALOG_CACHE_TTL_MS),
+  const targetCatalogRefreshIntervalMs = Math.max(
+    1_000,
+    Math.floor(deps.targetCatalogRefreshIntervalMs ?? DEFAULT_REMOTE_WINDOW_TARGET_CATALOG_REFRESH_INTERVAL_MS),
   );
   const nowMs = deps.nowMs || Date.now;
   const catalogRuntime = createRemoteWindowCatalogRuntime({
@@ -428,7 +429,7 @@ export function createRemoteWindowStreamDaemonRuntime(
     swiftBinary,
     iterm2PythonTimeoutMs,
     appWindowCatalogTimeoutMs,
-    targetCatalogCacheTtlMs,
+    targetCatalogRefreshIntervalMs,
     now,
     nowMs,
     runIterm2Python,
@@ -1026,6 +1027,7 @@ export function createRemoteWindowStreamDaemonRuntime(
               return;
             }
             try {
+              // Composite auto-add/remove keeps its capture-layer live query cadence.
               const targets = await catalogRuntime.listAppWindowTargets();
               const sameApp = targets.filter((item) => (
                 item.videoTarget.kind === 'app-window'
@@ -1518,6 +1520,9 @@ export function createRemoteWindowStreamDaemonRuntime(
         canvasLayout: entry.canvasLayout,
       }).event,
     };
+    const resizeTarget = payload.event.kind === 'window-resize'
+      ? buildResizedRemoteWindowTarget(entry.target, payload.event, now())
+      : null;
     await runRemoteWindowInputEvent(mappedPayload, entry.target, {
       swiftBinary,
       runTmux: deps.runTmux,
@@ -1528,18 +1533,7 @@ export function createRemoteWindowStreamDaemonRuntime(
       },
     });
     if (payload.event.kind === 'window-resize') {
-      const observedTarget: RemoteWindowStreamTargetManifest = {
-        ...entry.target,
-        videoTarget: {
-          ...entry.target.videoTarget,
-          windowBoundsTopLeftPx: {
-            x: entry.target.videoTarget.windowBoundsTopLeftPx.x,
-            y: entry.target.videoTarget.windowBoundsTopLeftPx.y,
-            width: payload.event.width,
-            height: payload.event.height,
-          },
-        },
-      };
+      const observedTarget = resizeTarget!;
       const resized = await applyRemoteWindowTargetResize(
         entry,
         observedTarget,
@@ -1603,19 +1597,6 @@ export function createRemoteWindowStreamDaemonRuntime(
       });
     }
     const daemonReceivedAtMs = nowMs();
-    if (
-      payload.deliveryKind === 'action'
-      && Number.isFinite(payload.deadlineMs)
-      && daemonReceivedAtMs > Number(payload.deadlineMs)
-    ) {
-      return buildInputAck(control, payload, {
-        accepted: false,
-        error: {
-          code: 'remote_window_input_action_expired',
-          message: 'Remote window input action expired before admission',
-        },
-      });
-    }
     if (control.lane === 'continuous') {
       if (payload.event.kind === 'scroll' && payload.event.gestureId && Number.isFinite(payload.sampledAtMs)) {
         const phase = payload.event.phase;

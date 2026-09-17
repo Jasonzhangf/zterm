@@ -1,6 +1,5 @@
 import { memo as ReactMemo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useSession } from '../contexts/SessionContext';
-import type { OpenTabAuditReason } from '../hooks/useOpenTabLifecycleEffects';
 import { Keyboard } from '@capacitor/keyboard';
 import { App as CapacitorApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
@@ -82,7 +81,6 @@ import {
   type ServerIdentityInput,
 } from '../lib/server-identity';
 import { getRelayRtcEndpointCandidates } from '../lib/session-picker';
-import type { TerminalSessionCatalog } from '@zterm/shared/protocol';
 import { buildSessionSemanticOwnerKey, buildSessionSemanticReuseKey } from '../lib/session-semantic-identity';
 import { listOnlineTraversalRelayDaemonDevices } from '../lib/traversal-relay-devices';
 import { ImeAnchor } from '../plugins/ImeAnchorPlugin';
@@ -449,8 +447,6 @@ interface TerminalPageProps {
   onOpenDrawerRemoteSession?: (target: DrawerRemoteSessionTarget, sessionName: string, options?: { activate?: boolean; navigate?: boolean }) => string | null | undefined | void;
   onRenameRemoteSession?: (sessionId: string, nextSessionName: string) => void | Promise<void>;
   onCloseDrawerRemoteSession?: (target: DrawerRemoteSessionTarget, sessionName: string) => void | Promise<void>;
-  onRefreshRemoteSessions?: (hostKey?: string) => void | Promise<void | TerminalSessionCatalog | null>;
-  onAuditOpenTabsAgainstRemoteSessions?: (reason: OpenTabAuditReason) => void | Promise<void>;
   relayDevices?: TraversalRelayDeviceSnapshot[];
   serverIdentityAliasInputs?: ServerIdentityInput[];
   sessionPickerDebugMode?: string | null;
@@ -475,7 +471,6 @@ interface TerminalPageProps {
   ) => Promise<RemoteScreenshotCapture>;
   onRequestRemoteWindowTargets?: (
     sessionId: string,
-    options?: { forceRefresh?: boolean },
   ) => Promise<RemoteWindowStreamTargetsResponsePayload>;
   onRequestRemoteWindowStreamStart?: (
     sessionId: string,
@@ -574,12 +569,10 @@ function TerminalPageComponent({
   onOpenQuickTabPicker,
   onOpenDrawerRemoteSession,
   onCloseDrawerRemoteSession,
-  onRefreshRemoteSessions,
   relayDevices = [],
   serverIdentityAliasInputs = [],
   sessionPickerDebugMode = null,
   pendingPaneAttachIntent = null,
-  onAuditOpenTabsAgainstRemoteSessions,
   onPaneAttachIntentApplied,
   onResize,
   onTerminalInput,
@@ -673,9 +666,6 @@ function TerminalPageComponent({
     nonce: number;
   } | null>(null);
   const [sessionDrawerOpen, setSessionDrawerOpen] = useState(false);
-  // Live relay catalogs are view state populated by the drawer refresh. They
-  // intentionally do not share the persisted session history resource.
-  const [liveRelaySessionCatalogs, setLiveRelaySessionCatalogs] = useState<Record<string, TerminalSessionCatalog>>({});
   const [drawerCloseDialog, setDrawerCloseDialog] = useState<{
     sessionId: string;
     sessionName: string;
@@ -1271,20 +1261,10 @@ function TerminalPageComponent({
     );
     const relayCatalogGroups: SessionGroupHistory[] = onlineRelayDaemonDevices.flatMap((device) => {
       const daemonHostId = device.daemon.hostId.trim();
-      const liveCatalog = liveRelaySessionCatalogs[daemonHostId];
       // Relay daemon directory entries represent the tmux catalog. Herdr
       // sessions keep their explicit backend-qualified history path. Older
       // daemon responses may only carry the legacy `sessions` names, which
       // are still live tmux names when no qualified catalog was returned.
-      const liveTmuxCatalog = liveCatalog
-        ? (liveCatalog.sessionCatalog.length > 0
-          ? liveCatalog.sessionCatalog.filter((entry) => entry.backend === 'tmux')
-          : liveCatalog.sessionNames.map((name) => ({ name, backend: 'tmux' as const })))
-        : undefined;
-      // A relay snapshot may legitimately have an empty/stale session array.
-      // Keep the online daemon as a refresh target so the drawer immediately
-      // queries the daemon's live catalog instead of treating the snapshot as
-      // the session truth.
       if (!daemonHostId) {
         return [];
       }
@@ -1296,8 +1276,7 @@ function TerminalPageComponent({
         || resolveDrawerIdentity(group).key === daemonHostId
         || (directEndpoint?.host?.trim() === group.bridgeHost.trim() && directEndpoint.port === group.bridgePort)
       ));
-      const catalogSessions = liveTmuxCatalog
-        || (onRefreshRemoteSessions ? [] : device.daemon.sessions || []);
+      const catalogSessions = device.daemon.sessions || [];
       const sessionNames = [...new Set(
         catalogSessions.map((session) => session.name.trim()).filter(Boolean),
       )].sort((left, right) => left.localeCompare(right));
@@ -1531,7 +1510,7 @@ function TerminalPageComponent({
       closeTargets,
       catalogLiveSessionIds,
     };
-  }, [activeSession, drawerServerIdentityAliases, liveRelaySessionCatalogs, onRefreshRemoteSessions, onlineDrawerServerIdentityAliases, onlineRelayDaemonDevices, relayDeviceByDaemonHostId, renderedPaneSessions, resolveSessionGroupSlot, resolvedSessionDrawerFilterConfig, sessionGroups, sessions]);
+  }, [activeSession, drawerServerIdentityAliases, onlineDrawerServerIdentityAliases, onlineRelayDaemonDevices, relayDeviceByDaemonHostId, renderedPaneSessions, resolveSessionGroupSlot, resolvedSessionDrawerFilterConfig, sessionGroups, sessions]);
   const drawerHosts = useMemo<TerminalSessionDrawerHost[]>(() => {
     const hosts = new Map<string, TerminalSessionDrawerHost>();
     for (const device of onlineRelayDaemonDevices) {
@@ -1562,51 +1541,6 @@ function TerminalPageComponent({
     }
     return [...hosts.values()];
   }, [drawerRemoteSessions.items, onlineRelayDaemonDevices]);
-  // Trigger live catalog refresh and remote session audit when drawer opens.
-  // 只在 drawer 从关闭→打开的变化沿触发一次（ref guard），避免远端目录更新、
-  // sessions 更新和回调引用变化形成重渲染循环。
-  const drawerOpenDiscoveryFiredRef = useRef(false);
-  useEffect(() => {
-    if (!sessionDrawerOpen) {
-      drawerOpenDiscoveryFiredRef.current = false;
-      return;
-    }
-    if (drawerOpenDiscoveryFiredRef.current) {
-      return;
-    }
-    const hostKeys = Array.from(new Set(
-      drawerHosts
-        .map((host) => host.hostKey?.trim())
-        .filter((hostKey): hostKey is string => Boolean(hostKey)),
-    ));
-    if (hostKeys.length === 0) {
-      return;
-    }
-    if (onAuditOpenTabsAgainstRemoteSessions) {
-      void onAuditOpenTabsAgainstRemoteSessions('drawer-open');
-    }
-    if (onRefreshRemoteSessions) {
-      drawerOpenDiscoveryFiredRef.current = true;
-      void Promise.allSettled(
-        hostKeys.map((hostKey) => (
-          Promise.resolve().then(async () => {
-            const refreshed = await onRefreshRemoteSessions(hostKey);
-            if (refreshed && typeof refreshed === 'object' && Array.isArray(refreshed.sessionNames)) {
-              setLiveRelaySessionCatalogs((current) => ({ ...current, [hostKey]: refreshed }));
-            }
-          })
-        )),
-      ).then((results) => {
-        results.forEach((result, index) => {
-          if (result.status === 'rejected') {
-            console.warn(`[TerminalPage] Drawer remote session refresh failed for host ${hostKeys[index]}:`, result.reason);
-          }
-        });
-      });
-      return;
-    }
-    drawerOpenDiscoveryFiredRef.current = true;
-  }, [drawerHosts, onAuditOpenTabsAgainstRemoteSessions, onRefreshRemoteSessions, sessionDrawerOpen]);
   const drawerSessions = useMemo(() => {
     const activeSessionIds = new Set(renderedPaneSessions.map((session) => session.id));
 

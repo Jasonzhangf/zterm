@@ -3,7 +3,6 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  buildRemoteWindowTargetCatalogCacheKey,
   convertRgbaToI420Frame,
   formatRemoteWindowVideoProfileError,
   normalizeIceCandidate,
@@ -13,11 +12,6 @@ import { MACOS_REMOTE_WINDOW_INPUT_SWIFT } from './remote-window-scripts';
 import { makeRemoteWindowVideoProfileFixture } from './remote-window-video-profile-test-fixture';
 
 describe('remote-window-stream-daemon-helpers', () => {
-  it('builds catalog cache keys from include flags', () => {
-    expect(buildRemoteWindowTargetCatalogCacheKey({} as never)).toBe('app|iterm2');
-    expect(buildRemoteWindowTargetCatalogCacheKey({ includeAppWindows: false, includeIterm2: false } as never)).toBe('no-app|no-iterm2');
-  });
-
   it('normalizes ice candidates with toJSON fallback', () => {
     const normalized = normalizeIceCandidate({ toJSON: () => ({ candidate: 'c', sdpMid: '0', sdpMLineIndex: 1, usernameFragment: 'ufrag' }) } as never);
     expect(normalized.candidate).toBe('c');

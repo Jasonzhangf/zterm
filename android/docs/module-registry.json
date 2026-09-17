@@ -885,7 +885,7 @@
       "level": 1,
       "parent_module_id": "daemon.runtime",
       "owner_feature": "daemon.session_catalog",
-      "responsibility": "Own backend session catalog construction and list-sessions control dispatch, including backend-qualified session rows, without owning client active/session state.",
+      "responsibility": "Own the daemon in-memory backend session catalog, explicit event/server-detection refresh, and list-sessions control dispatch, including backend-qualified session rows, without owning client active/session state.",
       "owned_resources": [
         "resource.daemon_session_catalog"
       ],
