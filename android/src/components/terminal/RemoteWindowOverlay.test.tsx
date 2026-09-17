@@ -880,7 +880,12 @@ describe('RemoteWindowOverlay', () => {
   it('stops the stream and reports unsupported decoded-frame projection', async () => {
     Reflect.deleteProperty(HTMLVideoElement.prototype, 'requestVideoFrameCallback');
     Reflect.deleteProperty(HTMLVideoElement.prototype, 'cancelVideoFrameCallback');
-    const mediaStream = { id: 'media-stream-no-frame-callback' } as MediaStream;
+    const focusTrack = { id: 'focus-track-no-frame-callback', kind: 'video', readyState: 'live', muted: false };
+    const mediaStream = {
+      id: 'media-stream-no-frame-callback',
+      getTracks: () => [focusTrack],
+      getVideoTracks: () => [focusTrack],
+    } as unknown as MediaStream;
     const requestTargets = vi.fn(async () => ({
       requestId: 'rw-no-frame-callback',
       targets: [makeTarget('pane-no-frame-callback', 'zterm pane', 'iterm2-pane')],
@@ -888,6 +893,14 @@ describe('RemoteWindowOverlay', () => {
     const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string) => ({
       streamId,
       mediaStream,
+      bindings: [{
+        lane: 'focus' as const,
+        mediaStream,
+        streamId,
+        mediaPlanVersion: 1,
+        mediaEpoch: 0,
+        trackId: 'focus-track-no-frame-callback',
+      }],
     }));
     const stopStream = vi.fn();
 
@@ -1099,7 +1112,12 @@ describe('RemoteWindowOverlay', () => {
         return frameCallbacks.length;
       }),
     });
-    const mediaStream = { id: 'media-stream-1' } as MediaStream;
+    const focusTrack = { id: 'focus-track-reveal-frame', kind: 'video', readyState: 'live', muted: false };
+    const mediaStream = {
+      id: 'media-stream-1',
+      getTracks: () => [focusTrack],
+      getVideoTracks: () => [focusTrack],
+    } as unknown as MediaStream;
     const requestTargets = vi.fn(async () => ({
       requestId: 'rw-1',
       targets: [makeTarget('app-1', 'TextEdit', 'app-window')],
@@ -1107,6 +1125,14 @@ describe('RemoteWindowOverlay', () => {
     const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string) => ({
       streamId,
       mediaStream,
+      bindings: [{
+        lane: 'focus' as const,
+        mediaStream,
+        streamId,
+        mediaPlanVersion: 1,
+        mediaEpoch: 0,
+        trackId: 'focus-track-reveal-frame',
+      }],
     }));
 
     try {
@@ -1123,6 +1149,11 @@ describe('RemoteWindowOverlay', () => {
       const video = await screen.findByTestId('remote-window-video');
       expect(screen.getByTestId('remote-window-video-wallpaper')).toBeTruthy();
       expect((video as HTMLVideoElement).style.visibility).toBe('visible');
+      Object.defineProperties(video, {
+        readyState: { configurable: true, value: 2 },
+        videoWidth: { configurable: true, value: 1280 },
+        videoHeight: { configurable: true, value: 720 },
+      });
 
       act(() => {
         frameCallbacks.slice().forEach((callback) => callback(0, { presentedFrames: 1 }));
@@ -2927,23 +2958,19 @@ describe('RemoteWindowOverlay', () => {
       expect(resizeTargetWindow).toHaveBeenCalledTimes(1);
     });
     const first = resizeTargetWindow.mock.calls[0]?.[1];
-    // Usable fullscreen bounds: overlay 1280x800 minus 44px top padding and
-    // the 100px toolbar. jsdom cannot resolve the `max(8px, env(...))` side
-    // insets, so the horizontal reference stays 1280. The remote target must
-    // match that usable-area ratio, not the stale 720x1293 surface rect.
-    const usableWidth = 1280;
-    const usableHeight = 800 - 44 - 100;
-    const expectedWidth = Math.round(1080 * (usableWidth / usableHeight));
+    // Usable fullscreen bounds: overlay 1280x800 minus the top padding and the
+    // 100px toolbar. jsdom cannot resolve the `max(8px, env(...))` side insets,
+    // so the horizontal reference stays 1280. The remote target must match that
+    // usable area in device pixels, not the stale 720x1293 surface rect.
     expect(first).toMatchObject({
       streamId: expect.any(String),
       targetId: 'app-1',
       event: {
         kind: 'window-resize',
-        width: expectedWidth,
-        height: 1080,
+        width: 1280,
+        height: 656,
       },
     });
-    expect(expectedWidth).not.toBe(1975);
 
     fireEvent.click(screen.getByTestId('remote-window-more-toggle'));
     fireEvent.click(screen.getByTestId('remote-window-fullscreen-display-toggle'));
@@ -2952,14 +2979,87 @@ describe('RemoteWindowOverlay', () => {
     });
   });
 
+  it('uses device pixels for the fullscreen resize and centers the fitted projection', async () => {
+    const originalDevicePixelRatio = Object.getOwnPropertyDescriptor(window, 'devicePixelRatio');
+    Object.defineProperty(window, 'devicePixelRatio', { configurable: true, value: 2 });
+    try {
+      const target = makeTarget('app-1', 'TextEdit', 'app-window');
+      target.videoTarget.windowBoundsTopLeftPx = { x: 10, y: 20, width: 900, height: 700 };
+      target.videoTarget.cropRectTopLeftPx = { x: 10, y: 20, width: 900, height: 700 };
+      target.capture.displayBoundsTopLeftPx = { x: 0, y: 0, width: 1920, height: 1080 };
+      const resizeTargetWindow = vi.fn((_sessionId: string, _payload: unknown) => 'resize-dpr');
+      const requestTargets = vi.fn(async () => ({ requestId: 'rw-dpr', targets: [target] }));
+      const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string) => ({
+        streamId,
+        mediaStream: { id: streamId } as MediaStream,
+      }));
+
+      render(
+        <RemoteWindowOverlay
+          activeSessionId="session-1"
+          requestTargets={requestTargets}
+          startStream={startStream}
+          resizeTargetWindow={resizeTargetWindow}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+      fireEvent.click(await screen.findByTestId('remote-window-target-app-1'));
+      await screen.findByTestId('remote-window-video');
+      fireEvent.click(screen.getByRole('button', { name: '全屏远程窗口' }));
+
+      const overlay = screen.getByTestId('remote-window-locked-overlay');
+      const toolbar = screen.getByTestId('remote-window-locked-toolbar');
+      const surface = screen.getByTestId('remote-window-video-surface');
+      Object.defineProperty(overlay, 'getBoundingClientRect', {
+        configurable: true,
+        value: () => ({ x: 0, y: 0, left: 0, top: 0, right: 1280, bottom: 800, width: 1280, height: 800, toJSON: () => ({}) }),
+      });
+      Object.defineProperty(toolbar, 'getBoundingClientRect', {
+        configurable: true,
+        value: () => ({ x: 0, y: 16, left: 0, top: 16, right: 1280, bottom: 100, width: 1280, height: 100, toJSON: () => ({}) }),
+      });
+      Object.defineProperty(surface, 'getBoundingClientRect', {
+        configurable: true,
+        value: () => ({ x: 0, y: 100, left: 0, top: 100, right: 1280, bottom: 800, width: 1280, height: 700, toJSON: () => ({}) }),
+      });
+      await flushRemoteWindowSurfaceLayout();
+
+      await waitFor(() => expect(resizeTargetWindow).toHaveBeenCalledTimes(1));
+      // Usable fullscreen area is 1280x656 CSS px at DPR 2 => 2560x1312 device
+      // px, scaled down by the 1920x1080 display bounds minus the window origin
+      // (10,20) to 1910x979.
+      expect(resizeTargetWindow).toHaveBeenCalledWith(
+        'session-1',
+        expect.objectContaining({
+          event: { kind: 'window-resize', width: 1910, height: 979 },
+        }),
+      );
+
+      const content = screen.getByTestId('remote-window-video-content');
+      await waitFor(() => {
+        expect(Number.parseFloat(content.style.left)).toBeCloseTo(190, 1);
+        expect(Number.parseFloat(content.style.top)).toBeCloseTo(0, 1);
+        expect(Number.parseFloat(content.style.width)).toBeCloseTo(900, 1);
+        expect(Number.parseFloat(content.style.height)).toBeCloseTo(700, 1);
+      });
+    } finally {
+      if (originalDevicePixelRatio) {
+        Object.defineProperty(window, 'devicePixelRatio', originalDevicePixelRatio);
+      } else {
+        Reflect.deleteProperty(window, 'devicePixelRatio');
+      }
+    }
+  });
+
   it('tracks remote fill resize delivery per stream and only dedupes an accepted request', async () => {
     const target = makeTarget('app-1', 'TextEdit', 'app-window');
     const resizedTarget: RemoteWindowStreamTargetManifest = {
       ...target,
       videoTarget: {
         ...target.videoTarget,
-        windowBoundsTopLeftPx: { x: 10, y: 20, width: 1975, height: 1080 },
-        cropRectTopLeftPx: { x: 10, y: 20, width: 1975, height: 1080 },
+        windowBoundsTopLeftPx: { x: 10, y: 20, width: 1280, height: 700 },
+        cropRectTopLeftPx: { x: 10, y: 20, width: 1280, height: 700 },
       },
     };
     const resizeTargetWindow = vi.fn()
@@ -3035,7 +3135,7 @@ describe('RemoteWindowOverlay', () => {
           streamId: firstStreamId,
           targetId: 'app-1',
           target: resizedTarget,
-          capture: { source: 'ScreenCaptureKit', frameWidth: 1975, frameHeight: 1080, frameRate: 30, targetKind: 'app-window' },
+          capture: { source: 'ScreenCaptureKit', frameWidth: 1280, frameHeight: 700, frameRate: 30, targetKind: 'app-window' },
         },
       });
     });
@@ -3217,8 +3317,8 @@ describe('RemoteWindowOverlay', () => {
         targetId: 'app-pending',
         event: {
           kind: 'window-resize',
-          width: 1080,
-          height: 2337,
+          width: 390,
+          height: 844,
         },
       }),
     );
@@ -3611,7 +3711,7 @@ describe('RemoteWindowOverlay', () => {
     expect(resizeTargetWindow).not.toHaveBeenCalled();
   });
 
-  it('requests a point-to-point resize from the measured embedded container ratio', async () => {
+  it('requests a point-to-point resize from the measured embedded container', async () => {
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
     Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 });
     Object.defineProperty(window, 'visualViewport', {
@@ -3669,8 +3769,8 @@ describe('RemoteWindowOverlay', () => {
       expect.objectContaining({
         event: {
           kind: 'window-resize',
-          width: 1620,
-          height: 1080,
+          width: 300,
+          height: 200,
         },
       }),
     );

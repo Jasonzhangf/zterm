@@ -64,6 +64,7 @@ import {
   DEFAULT_SCREEN_CAPTURE_KIT_STARTUP_TIMEOUT_MS,
   RemoteWindowCaptureTargetOutOfDisplayError,
   RemoteWindowCaptureTargetUnavailableError,
+  buildResizedRemoteWindowTarget,
   startScreenCaptureKitFrameSource,
   validateStreamTargetForCapture,
   type RemoteWindowCaptureFrame,
@@ -1528,18 +1529,7 @@ export function createRemoteWindowStreamDaemonRuntime(
       },
     });
     if (payload.event.kind === 'window-resize') {
-      const observedTarget: RemoteWindowStreamTargetManifest = {
-        ...entry.target,
-        videoTarget: {
-          ...entry.target.videoTarget,
-          windowBoundsTopLeftPx: {
-            x: entry.target.videoTarget.windowBoundsTopLeftPx.x,
-            y: entry.target.videoTarget.windowBoundsTopLeftPx.y,
-            width: payload.event.width,
-            height: payload.event.height,
-          },
-        },
-      };
+      const observedTarget = buildResizedRemoteWindowTarget(entry.target, payload.event, now());
       const resized = await applyRemoteWindowTargetResize(
         entry,
         observedTarget,
@@ -1603,19 +1593,6 @@ export function createRemoteWindowStreamDaemonRuntime(
       });
     }
     const daemonReceivedAtMs = nowMs();
-    if (
-      payload.deliveryKind === 'action'
-      && Number.isFinite(payload.deadlineMs)
-      && daemonReceivedAtMs > Number(payload.deadlineMs)
-    ) {
-      return buildInputAck(control, payload, {
-        accepted: false,
-        error: {
-          code: 'remote_window_input_action_expired',
-          message: 'Remote window input action expired before admission',
-        },
-      });
-    }
     if (control.lane === 'continuous') {
       if (payload.event.kind === 'scroll' && payload.event.gestureId && Number.isFinite(payload.sampledAtMs)) {
         const phase = payload.event.phase;

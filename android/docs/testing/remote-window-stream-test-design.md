@@ -6,6 +6,16 @@ Feature id: `desktop.remote_window_stream`
 
 This gate covers remote app/window and iTerm2 pane video streaming from a daemon host to Android, plus the future input-return contract. The stream is a desktop media resource, not terminal buffer truth.
 
+This scope is independent of the terminal buffer/render/daemon-mirror
+truth chain. Changes limited to the remote-window decoded-frame projection
+therefore do not require terminal-buffer L5 or daemon mirror close-loop gates.
+Applicable incremental evidence for this slice is the focused remote-window
+RVFC/composite tests, Android type-check and feature/UI gates, the WebRTC
+loopback gate, and an install/launch smoke check on an available Android
+device. These do not replace the feature-completion gates listed below:
+installed-WebView rendered-pixel proof and live iTerm2-pane pixel proof remain
+required before `desktop.remote_window_stream` is complete.
+
 ## Current Implementation Status
 
 The implemented Android/catalog slice started narrower than feature completion:
@@ -32,7 +42,8 @@ Still pending for feature completion:
 1. Android real-device rendered-pixel proof through the installed WebView receiver.
 2. Live iTerm2-pane stream pixel proof through the same ScreenCaptureKit/WebRTC path.
 3. iTerm2/tmux-specific input-return proof.
-4. APK build/publish for this interaction slice after focused, architecture, type, and local daemon gates pass.
+4. OTA/Relay publish for this interaction slice. Local debug APK build and
+   install/launch smoke evidence are recorded on the candidate commit message.
 
 Current executable gates:
 
@@ -116,7 +127,7 @@ Current executable gates:
    - The overlay catalog watchdog must be longer than the daemon app-window catalog timeout, and live catalog probes must wait longer than that daemon timeout; otherwise the client/test times out before the unique daemon catalog owner can return its explicit error.
    - The negative gate must prove catalog failure does not start screenshot, terminal buffer render, hidden video, or transport rebuild fallback.
    - The client holds no catalog projection cache. Opening the picker, re-reading admission, or entering an active stream each sends one `remote-window-targets-request` that reads the daemon-owned snapshot, so a newer daemon refresh is never masked by a client TTL. A closed physical transport must still return an explicit transport error even when a previous snapshot exists.
-   - Daemon runtime startup warms the default app-window+iTerm2 snapshot and the catalog runtime keeps it current with its own refresh loop. A client request must not trigger a trusted live enumeration; it reads the resident snapshot and surfaces the owner's real result/error.
+   - Daemon runtime startup warms one canonical full app-window+iTerm2 snapshot and the catalog runtime keeps it current with its own refresh loop. A client request must not trigger a trusted live enumeration; it projects the resident snapshot by requested source set and surfaces the owner's real result/error instead of substituting an empty catalog. A read before the first snapshot completes must wait for that daemon-owned refresh or fail with explicit `remote_window_catalog_not_ready`.
    - Snapshot responses must rewrite the top-level and nested error `requestId` to the current request so concurrent or later callers cannot receive another request's identity.
    - Overlay projection keeps the last successful catalog for the current active session and renders those rows immediately on picker reopen or manual refresh, while still re-reading the daemon snapshot in the background. The first uncached open may show a compact loading row; a reopen must not blank the target list.
    - While picker state suppresses the QuickBar, `TerminalPage` stage bottom reserve must be `0`; target-locked floating/fullscreen modes restore the normal QuickBar/IME chrome projection.

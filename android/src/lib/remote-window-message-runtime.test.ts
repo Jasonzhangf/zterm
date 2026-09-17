@@ -1097,6 +1097,49 @@ describe('remote window message runtime', () => {
     expect(barrier.control.sequence).not.toBe(first.control.sequence);
   });
 
+  it('drops an expired reliable action on ACK timeout instead of retrying it', () => {
+    const sendSocketPayload = vi.fn();
+    const timers: Array<{ callback: () => void; delay: number }> = [];
+    const listener = vi.fn();
+    let clockMs = 1_000;
+    const runtime = createRemoteWindowMessageRuntime({
+      now: () => clockMs,
+      setTimeoutFn: vi.fn((callback: () => void, delay: number) => {
+        timers.push({ callback, delay });
+        return timers.length;
+      }) as any,
+      clearTimeoutFn: vi.fn() as any,
+    });
+    runtime.subscribe(listener);
+    runtime.sendInputEvent('session-1', {
+      ws: makeSocket(),
+      sendSocketPayload,
+      payload: {
+        streamId: 'stream-expired-retry',
+        targetId: 'target-expired-retry',
+        event: { kind: 'close-window' },
+      },
+    });
+
+    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
+    const first = JSON.parse(sendSocketPayload.mock.calls[0]![2] as string);
+    expect(first.payload.deadlineMs).toBeGreaterThan(first.payload.sampledAtMs);
+
+    clockMs = first.payload.deadlineMs + 1;
+    timers[0]!.callback();
+
+    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
+    expect(listener).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'remote-window-input-ack',
+      control: expect.objectContaining({
+        sequence: first.control.sequence,
+        accepted: false,
+        retryable: false,
+        error: expect.objectContaining({ code: 'remote_window_input_action_expired' }),
+      }),
+    }));
+  });
+
   it('coalesces pointer samples at the quality cadence', () => {
     const sendSocketPayload = vi.fn();
     const timers: Array<{ callback: () => void; delay: number }> = [];

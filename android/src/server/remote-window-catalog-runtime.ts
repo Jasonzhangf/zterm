@@ -5,7 +5,6 @@ import type {
   RemoteWindowStreamTargetsResponsePayload,
 } from '@zterm/shared/protocol';
 import {
-  buildRemoteWindowTargetCatalogCacheKey,
   cloneRemoteWindowTargetCatalogResponse,
   cloneRemoteWindowTargetCatalogResult,
 } from './remote-window-stream-daemon-helpers';
@@ -23,7 +22,6 @@ import { ITERM2_CATALOG_PYTHON, MACOS_APP_WINDOW_CATALOG_SWIFT } from './remote-
 import { remoteWindowError, summarizeRemoteWindowCatalogError } from './remote-window-support';
 
 interface RemoteWindowTargetCatalogCacheEntry {
-  updatedAtMs: number;
   response: RemoteWindowStreamTargetsResponsePayload;
 }
 
@@ -56,13 +54,47 @@ export interface RemoteWindowCatalogRuntime {
 export function createRemoteWindowCatalogRuntime(
   deps: RemoteWindowCatalogRuntimeDeps,
 ): RemoteWindowCatalogRuntime {
-  const cache = new Map<string, RemoteWindowTargetCatalogCacheEntry>();
-  const refreshes = new Map<string, Promise<RemoteWindowStreamTargetsResponsePayload | RemoteWindowStreamErrorPayload>>();
-  const refreshTimers = new Map<string, ReturnType<typeof setInterval>>();
+  // The daemon owns one canonical full catalog snapshot; source-set selection is a read-time projection.
+  let snapshot: RemoteWindowTargetCatalogCacheEntry | null = null;
+  let refresh: Promise<RemoteWindowStreamTargetsResponsePayload | RemoteWindowStreamErrorPayload> | null = null;
+  let refreshTimer: ReturnType<typeof setInterval> | null = null;
+  let disposed = false;
+  let generation = 0;
   const refreshIntervalMs = Math.max(
     1_000,
     Math.floor(deps.targetCatalogRefreshIntervalMs ?? DEFAULT_REMOTE_WINDOW_TARGET_CATALOG_REFRESH_INTERVAL_MS),
   );
+
+  const buildFullCatalogPayload = (requestId: string): RemoteWindowStreamRequestPayload => ({
+    requestId,
+    includeAppWindows: true,
+    includeIterm2: true,
+  });
+
+  const projectSnapshot = (
+    response: RemoteWindowStreamTargetsResponsePayload,
+    payload: RemoteWindowStreamRequestPayload,
+  ): RemoteWindowStreamTargetsResponsePayload => {
+    const includeAppWindows = payload.includeAppWindows !== false;
+    const includeIterm2 = payload.includeIterm2 !== false;
+    if (includeAppWindows && includeIterm2) {
+      return cloneRemoteWindowTargetCatalogResponse(response, payload.requestId);
+    }
+    const excludedCodes = new Set<string>([
+      ...(includeAppWindows ? [] : ['app_window_catalog_unavailable']),
+      ...(includeIterm2 ? [] : ['iterm2_api_unavailable', 'tmux_client_catalog_unavailable']),
+    ]);
+    const errors = (response.errors ?? [])
+      .filter((error) => !excludedCodes.has(error.code))
+      .map((error) => ({ ...error, requestId: payload.requestId }));
+    return {
+      requestId: payload.requestId,
+      targets: response.targets.filter((target) => (
+        target.videoTarget.kind === 'app-window' ? includeAppWindows : includeIterm2
+      )),
+      ...(errors.length > 0 ? { errors } : {}),
+    };
+  };
 
   const queryIterm2Catalog = async () => parseIterm2Catalog(await deps.runIterm2Python(
     ITERM2_CATALOG_PYTHON,
@@ -153,58 +185,48 @@ export function createRemoteWindowCatalogRuntime(
     return errors[0] || { requestId: payload.requestId, targets: [] };
   };
 
-  const startRefresh = (cacheKey: string, payload: RemoteWindowStreamRequestPayload) => {
-    const existing = refreshes.get(cacheKey);
-    if (existing) {
-      return existing;
+  const startRefresh = (requestId: string) => {
+    if (disposed || refresh) {
+      return refresh;
     }
-    const refreshPayload = {
-      ...payload,
-      requestId: payload.requestId || `rw-catalog-refresh-${deps.nowMs()}`,
-    };
-    const refresh = listTargetsLive(refreshPayload)
+    const refreshPayload = buildFullCatalogPayload(requestId || `rw-catalog-refresh-${deps.nowMs()}`);
+    const startedGeneration = generation;
+    const started = listTargetsLive(refreshPayload)
       .catch((error: unknown) => remoteWindowError(
         refreshPayload,
         'remote_window_catalog_failed',
         error instanceof Error ? error.message : 'remote window catalog failed',
       ))
       .then((result) => {
-        if ('targets' in result) {
-          const entry: RemoteWindowTargetCatalogCacheEntry = {
-            updatedAtMs: deps.nowMs(),
+        if (!disposed && startedGeneration === generation && 'targets' in result) {
+          snapshot = {
             response: cloneRemoteWindowTargetCatalogResponse(result, result.requestId),
           };
-          cache.set(cacheKey, entry);
         }
         return result;
       })
       .finally(() => {
-        if (refreshes.get(cacheKey) === refresh) {
-          refreshes.delete(cacheKey);
+        if (refresh === started) {
+          refresh = null;
         }
       });
-    refreshes.set(cacheKey, refresh);
-    return refresh;
+    refresh = started;
+    return started;
   };
 
-  const refresh = async (cacheKey: string, payload: RemoteWindowStreamRequestPayload) => (
-    cloneRemoteWindowTargetCatalogResult(await startRefresh(cacheKey, payload), payload.requestId)
-  );
-
-  const ensureSelfRefresh = (cacheKey: string, payload: RemoteWindowStreamRequestPayload) => {
-    if (refreshTimers.has(cacheKey)) {
+  const startRefreshTimer = () => {
+    if (refreshTimer || disposed || deps.platform !== 'darwin') {
       return;
     }
-    const timer = setInterval(() => {
-      void startRefresh(cacheKey, payload);
+    refreshTimer = setInterval(() => {
+      void startRefresh(`rw-catalog-refresh-${deps.nowMs()}`);
     }, refreshIntervalMs);
-    timer.unref?.();
-    refreshTimers.set(cacheKey, timer);
+    refreshTimer.unref?.();
   };
 
   // Client requests only read the daemon-owned snapshot. The daemon keeps the
   // snapshot warm through its own self-refresh loop, so a request never forces
-  // a live enumeration; `forceRefresh` is treated as a background kick only.
+  // a live enumeration.
   const listTargets = async (
     payload: RemoteWindowStreamRequestPayload,
   ): Promise<RemoteWindowStreamTargetsResponsePayload | RemoteWindowStreamErrorPayload> => {
@@ -214,14 +236,30 @@ export function createRemoteWindowCatalogRuntime(
     if (deps.platform !== 'darwin') {
       return remoteWindowError(payload, 'remote_window_platform_unsupported', 'remote window stream catalog is only available on macOS daemon hosts');
     }
-    const cacheKey = buildRemoteWindowTargetCatalogCacheKey(payload);
-    ensureSelfRefresh(cacheKey, payload);
-    const cached = cache.get(cacheKey) || null;
-    if (cached) {
-      void startRefresh(cacheKey, payload);
-      return cloneRemoteWindowTargetCatalogResponse(cached.response, payload.requestId);
+    if (disposed) {
+      return remoteWindowError(
+        payload,
+        'remote_window_catalog_not_ready',
+        'remote window target catalog runtime is disposed',
+      );
     }
-    return refresh(cacheKey, payload);
+    const ready = snapshot;
+    if (ready) {
+      return projectSnapshot(ready.response, payload);
+    }
+    if (refresh) {
+      const pending = await refresh;
+      const refreshed = snapshot;
+      if ('targets' in pending && refreshed) {
+        return projectSnapshot(refreshed.response, payload);
+      }
+      return cloneRemoteWindowTargetCatalogResult(pending, payload.requestId);
+    }
+    return remoteWindowError(
+      payload,
+      'remote_window_catalog_not_ready',
+      'remote window target catalog is not ready',
+    );
   };
 
   const warm = () => {
@@ -233,9 +271,8 @@ export function createRemoteWindowCatalogRuntime(
       includeAppWindows: true,
       includeIterm2: true,
     };
-    const cacheKey = buildRemoteWindowTargetCatalogCacheKey(payload);
-    void startRefresh(cacheKey, payload);
-    ensureSelfRefresh(cacheKey, payload);
+    void startRefresh(payload.requestId);
+    startRefreshTimer();
   };
 
   const listAppWindowTargets = async () => buildMacosAppWindowTargets(
@@ -244,12 +281,14 @@ export function createRemoteWindowCatalogRuntime(
   );
 
   const dispose = () => {
-    for (const timer of refreshTimers.values()) {
-      clearInterval(timer);
+    disposed = true;
+    generation += 1;
+    if (refreshTimer) {
+      clearInterval(refreshTimer);
+      refreshTimer = null;
     }
-    refreshTimers.clear();
-    cache.clear();
-    refreshes.clear();
+    snapshot = null;
+    refresh = null;
   };
 
   return { listTargets, warm, listAppWindowTargets, dispose };

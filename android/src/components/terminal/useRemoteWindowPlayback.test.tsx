@@ -41,6 +41,11 @@ describe('useRemoteWindowPlayback owner', () => {
     const video = document.createElement('video') as HTMLVideoElement & {
       requestVideoFrameCallback: (callback: () => void) => number;
     };
+    Object.defineProperties(video, {
+      readyState: { configurable: true, value: 2 },
+      videoWidth: { configurable: true, value: 1280 },
+      videoHeight: { configurable: true, value: 720 },
+    });
     const frameCallbacks: Array<() => void> = [];
     video.requestVideoFrameCallback = vi.fn((callback: () => void) => {
       frameCallbacks.push(callback);
@@ -81,6 +86,11 @@ describe('useRemoteWindowPlayback owner', () => {
     const video = document.createElement('video') as HTMLVideoElement & {
       requestVideoFrameCallback: (callback: () => void) => number;
     };
+    Object.defineProperties(video, {
+      readyState: { configurable: true, value: 2 },
+      videoWidth: { configurable: true, value: 1280 },
+      videoHeight: { configurable: true, value: 720 },
+    });
     const frameCallbacks: Array<() => void> = [];
     video.requestVideoFrameCallback = vi.fn((callback: () => void) => {
       frameCallbacks.push(callback);
@@ -105,14 +115,13 @@ describe('useRemoteWindowPlayback owner', () => {
     );
 
     await waitFor(() => expect(frameCallbacks.length).toBeGreaterThan(0));
-    const staleReveal = frameCallbacks[1];
+    const staleFrame = frameCallbacks[0];
     rerender({ receiverMediaStream: second });
     await waitFor(() => expect(video.srcObject).toBe(second));
-    expect(video.cancelVideoFrameCallback).toHaveBeenCalledWith(1);
-    const currentReveal = frameCallbacks[frameCallbacks.length - 1];
-    act(() => staleReveal());
+    const currentFrame = frameCallbacks[frameCallbacks.length - 1];
+    act(() => staleFrame());
     expect(result.current.videoHasPlayed).toBe(false);
-    act(() => currentReveal());
+    act(() => currentFrame());
     expect(result.current.videoHasPlayed).toBe(true);
   });
 
@@ -121,6 +130,7 @@ describe('useRemoteWindowPlayback owner', () => {
       requestVideoFrameCallback: (callback: () => void) => number;
     };
     Object.defineProperties(video, {
+      readyState: { configurable: true, value: 2 },
       videoWidth: { configurable: true, value: 1280 },
       videoHeight: { configurable: true, value: 720 },
     });
@@ -153,15 +163,13 @@ describe('useRemoteWindowPlayback owner', () => {
     const staleFrame = frameCallbacks[0];
     rerender({ receiverMediaStream: second });
     await waitFor(() => expect(video.srcObject).toBe(second));
-    const currentFrame = frameCallbacks[frameCallbacks.length - 2];
-    const currentReveal = frameCallbacks[frameCallbacks.length - 1];
+    const currentFrame = frameCallbacks[frameCallbacks.length - 1];
 
     act(() => staleFrame());
     expect(onDecodedFrameSize).not.toHaveBeenCalled();
     expect(result.current.videoHasPlayed).toBe(false);
 
     act(() => currentFrame());
-    act(() => currentReveal());
     expect(onDecodedFrameSize).toHaveBeenCalledWith({ width: 1280, height: 720 });
     expect(result.current.videoHasPlayed).toBe(true);
   });
@@ -195,7 +203,7 @@ describe('useRemoteWindowPlayback owner', () => {
       overviewVideoElementRef,
     }));
 
-    let decodedFrame: { video: HTMLVideoElement; presentedFrames?: number } | null = null;
+    let decodedFrame: { video: HTMLVideoElement; lane: 'focus' | 'overview'; presentedFrames?: number } | null = null;
     act(() => {
       result.current.subscribeDecodedFrame((frame) => {
         decodedFrame = frame;
@@ -206,11 +214,247 @@ describe('useRemoteWindowPlayback owner', () => {
     Object.defineProperty(video, 'readyState', { configurable: true, value: 1 });
     act(() => frameCallbacks[0]?.(0, { presentedFrames: 1 }));
     expect(decodedFrame).toBeNull();
-    await waitFor(() => expect(frameCallbacks.length).toBeGreaterThan(2));
+    await waitFor(() => expect(frameCallbacks.length).toBeGreaterThan(1));
 
     Object.defineProperty(video, 'readyState', { configurable: true, value: 2 });
-    act(() => frameCallbacks[2]?.(1, { presentedFrames: 2 }));
-    expect(decodedFrame).toEqual({ video, presentedFrames: 2 });
+    act(() => frameCallbacks[1]?.(1, { presentedFrames: 2 }));
+    expect(decodedFrame).toEqual({ video, lane: 'focus', presentedFrames: 2 });
+  });
+
+  it('owns both focus and overview RVFC lanes and publishes lane-tagged decoded frames', async () => {
+    const focusVideo = document.createElement('video');
+    const overviewVideo = document.createElement('video');
+    Object.defineProperties(focusVideo, {
+      readyState: { configurable: true, value: 2 },
+      videoWidth: { configurable: true, value: 1280 },
+      videoHeight: { configurable: true, value: 720 },
+    });
+    Object.defineProperties(overviewVideo, {
+      readyState: { configurable: true, value: 2 },
+      videoWidth: { configurable: true, value: 1920 },
+      videoHeight: { configurable: true, value: 1080 },
+    });
+    const focusCallbacks: Array<(now: number, metadata: unknown) => void> = [];
+    const overviewCallbacks: Array<(now: number, metadata: unknown) => void> = [];
+    const focusRequest = vi.fn((callback: (now: number, metadata: unknown) => void) => {
+      focusCallbacks.push(callback);
+      return focusCallbacks.length;
+    });
+    const overviewRequest = vi.fn((callback: (now: number, metadata: unknown) => void) => {
+      overviewCallbacks.push(callback);
+      return overviewCallbacks.length;
+    });
+    focusVideo.requestVideoFrameCallback = focusRequest;
+    focusVideo.cancelVideoFrameCallback = vi.fn();
+    overviewVideo.requestVideoFrameCallback = overviewRequest;
+    overviewVideo.cancelVideoFrameCallback = vi.fn();
+    focusVideo.play = vi.fn(() => new Promise<void>(() => {}));
+    overviewVideo.play = vi.fn(() => new Promise<void>(() => {}));
+    const receiver = stream('focus-lane', 'focus-track');
+    const overview = stream('overview-lane', 'overview-track');
+    const videoElementRef = { current: focusVideo };
+    const overviewVideoElementRef = { current: overviewVideo };
+    const { result } = renderHook(() => useRemoteWindowPlayback({
+      receiverMediaStream: receiver,
+      overviewMediaStream: overview,
+      streamStatus: 'streaming',
+      streamId: receiver.id,
+      videoElementRef,
+      overviewVideoElementRef,
+    }));
+
+    const frames: Array<{ video: HTMLVideoElement; lane: 'focus' | 'overview'; presentedFrames?: number }> = [];
+    act(() => {
+      result.current.subscribeDecodedFrame((frame) => frames.push(frame));
+    });
+    await waitFor(() => {
+      expect(focusCallbacks.length).toBeGreaterThan(0);
+      expect(overviewCallbacks.length).toBeGreaterThan(0);
+    });
+    expect(focusRequest).toHaveBeenCalledTimes(1);
+    expect(overviewRequest).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      focusCallbacks[0]?.(0, { presentedFrames: 10 });
+      overviewCallbacks[0]?.(0, { presentedFrames: 20 });
+    });
+    expect(frames).toEqual([
+      { video: focusVideo, lane: 'focus', presentedFrames: 10 },
+      { video: overviewVideo, lane: 'overview', presentedFrames: 20 },
+    ]);
+  });
+
+  it('rearms the retained overview lane after playback invalidation', async () => {
+    const focusVideo = document.createElement('video');
+    const overviewVideo = document.createElement('video');
+    Object.defineProperties(focusVideo, {
+      readyState: { configurable: true, value: 2 },
+      videoWidth: { configurable: true, value: 1280 },
+      videoHeight: { configurable: true, value: 720 },
+    });
+    Object.defineProperties(overviewVideo, {
+      readyState: { configurable: true, value: 2 },
+      videoWidth: { configurable: true, value: 1920 },
+      videoHeight: { configurable: true, value: 1080 },
+    });
+    let nextCallbackId = 0;
+    const focusRequest = vi.fn(() => ++nextCallbackId);
+    const overviewRequest = vi.fn(() => ++nextCallbackId);
+    focusVideo.requestVideoFrameCallback = focusRequest;
+    focusVideo.cancelVideoFrameCallback = vi.fn();
+    overviewVideo.requestVideoFrameCallback = overviewRequest;
+    overviewVideo.cancelVideoFrameCallback = vi.fn();
+    focusVideo.play = vi.fn(() => new Promise<void>(() => {}));
+    overviewVideo.play = vi.fn(() => new Promise<void>(() => {}));
+    const receiver = stream('retained-focus', 'retained-focus-track');
+    const overview = stream('retained-overview', 'retained-overview-track');
+    const videoElementRef = { current: focusVideo };
+    const overviewVideoElementRef = { current: overviewVideo };
+    const { result } = renderHook(() => useRemoteWindowPlayback({
+      receiverMediaStream: receiver,
+      overviewMediaStream: overview,
+      streamStatus: 'streaming',
+      streamId: receiver.id,
+      videoElementRef,
+      overviewVideoElementRef,
+    }));
+
+    await waitFor(() => {
+      expect(focusRequest).toHaveBeenCalledTimes(1);
+      expect(overviewRequest).toHaveBeenCalledTimes(1);
+    });
+
+    act(() => {
+      result.current.invalidatePlayback();
+      result.current.restoreRetainedPlayback(false);
+    });
+
+    await waitFor(() => {
+      expect(focusRequest).toHaveBeenCalledTimes(2);
+      expect(overviewRequest).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it('reports unavailable RVFC for the required overview projection lane', async () => {
+    const focusVideo = document.createElement('video');
+    const overviewVideo = document.createElement('video');
+    const focusCallbacks: Array<(now: number, metadata: unknown) => void> = [];
+    Object.defineProperties(focusVideo, {
+      requestVideoFrameCallback: {
+        configurable: true,
+        value: vi.fn((callback: (now: number, metadata: unknown) => void) => {
+          focusCallbacks.push(callback);
+          return focusCallbacks.length;
+        }),
+      },
+      cancelVideoFrameCallback: { configurable: true, value: vi.fn() },
+      play: { configurable: true, value: vi.fn(() => new Promise<void>(() => {})) },
+    });
+    Object.defineProperties(overviewVideo, {
+      requestVideoFrameCallback: { configurable: true, value: undefined },
+      cancelVideoFrameCallback: { configurable: true, value: undefined },
+      play: { configurable: true, value: vi.fn(() => new Promise<void>(() => {})) },
+    });
+    const onProjectionError = vi.fn();
+    const receiver = stream('rvfc-focus', 'rvfc-focus-track');
+    const overview = stream('rvfc-overview', 'rvfc-overview-track');
+    const videoElementRef = { current: focusVideo };
+    const overviewVideoElementRef = { current: overviewVideo };
+    renderHook(() => useRemoteWindowPlayback({
+      receiverMediaStream: receiver,
+      overviewMediaStream: overview,
+      streamStatus: 'streaming',
+      streamId: receiver.id,
+      videoElementRef,
+      overviewVideoElementRef,
+      onProjectionError,
+    }));
+
+    await waitFor(() => expect(onProjectionError).toHaveBeenCalledWith(
+      'remote window decoded-frame callback is unavailable',
+    ));
+    expect(overviewVideo.play).not.toHaveBeenCalled();
+  });
+
+  it('reports overview autoplay rejection through the projection error path', async () => {
+    const focusVideo = document.createElement('video');
+    const overviewVideo = document.createElement('video');
+    const focusCallbacks: Array<(now: number, metadata: unknown) => void> = [];
+    Object.defineProperties(focusVideo, {
+      requestVideoFrameCallback: {
+        configurable: true,
+        value: vi.fn((callback: (now: number, metadata: unknown) => void) => {
+          focusCallbacks.push(callback);
+          return focusCallbacks.length;
+        }),
+      },
+      cancelVideoFrameCallback: { configurable: true, value: vi.fn() },
+      play: { configurable: true, value: vi.fn(() => new Promise<void>(() => {})) },
+    });
+    Object.defineProperties(overviewVideo, {
+      requestVideoFrameCallback: {
+        configurable: true,
+        value: vi.fn(() => 1),
+      },
+      cancelVideoFrameCallback: { configurable: true, value: vi.fn() },
+      play: {
+        configurable: true,
+        value: vi.fn(() => Promise.reject(new Error('overview autoplay blocked'))),
+      },
+    });
+    const onProjectionError = vi.fn();
+    const receiver = stream('overview-reject-focus', 'overview-reject-focus-track');
+    const overview = stream('overview-reject', 'overview-reject-track');
+    const videoElementRef = { current: focusVideo };
+    const overviewVideoElementRef = { current: overviewVideo };
+    renderHook(() => useRemoteWindowPlayback({
+      receiverMediaStream: receiver,
+      overviewMediaStream: overview,
+      streamStatus: 'streaming',
+      streamId: receiver.id,
+      videoElementRef,
+      overviewVideoElementRef,
+      onProjectionError,
+    }));
+
+    await waitFor(() => expect(onProjectionError).toHaveBeenCalledWith(
+      'remote window overview playback was rejected: overview autoplay blocked',
+    ));
+  });
+
+  it('reports unavailable RVFC for a required focus projection lane', async () => {
+    const video = document.createElement('video');
+    Object.defineProperties(video, {
+      requestVideoFrameCallback: { configurable: true, value: undefined },
+      cancelVideoFrameCallback: { configurable: true, value: undefined },
+      play: { configurable: true, value: vi.fn(() => new Promise<void>(() => {})) },
+    });
+    const onProjectionError = vi.fn();
+    const receiver = stream('rvfc-required-focus', 'rvfc-required-focus-track');
+    const videoElementRef = { current: video };
+    const overviewVideoElementRef = { current: null };
+    renderHook(() => useRemoteWindowPlayback({
+      receiverMediaStream: receiver,
+      overviewMediaStream: null,
+      receiverPlaybackBinding: {
+        streamId: 'rvfc-required-focus-stream',
+        mediaPlanVersion: 1,
+        lane: 'focus',
+        mediaEpoch: 0,
+        mediaStream: receiver,
+        trackId: 'rvfc-required-focus-track',
+      },
+      streamStatus: 'streaming',
+      streamId: receiver.id,
+      videoElementRef,
+      overviewVideoElementRef,
+      onProjectionError,
+    }));
+
+    await waitFor(() => expect(onProjectionError).toHaveBeenCalledWith(
+      'remote window decoded-frame callback is unavailable',
+    ));
+    expect(video.play).not.toHaveBeenCalled();
   });
 
   it('keeps visibility false when playback is explicitly invalidated', () => {
