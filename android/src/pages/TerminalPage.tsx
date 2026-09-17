@@ -3156,10 +3156,15 @@ function TerminalPageComponent({
       slotIds: { ...effectiveSessionGroupSlotIds },
       focusSlot: sessionGroupFocusSlot,
     };
-    const activeCoordinate = activeId
-      ? findJunctionPreviewCellBySessionId(sessionPreviewLattice, activeId)
-      : null;
-    if (activeCoordinate) {
+    const activeCoordinate = findJunctionPreviewCellBySessionId(sessionPreviewLattice, activeSessionRecord.id);
+    const activeCoordinateHasCurrentIdentity = activeCoordinate
+      ? resolveJunctionPreviewCell(
+        sessionPreviewLattice,
+        activeCoordinate,
+        [activeSessionRecord],
+      ) !== null
+      : false;
+    if (activeCoordinate && activeCoordinateHasCurrentIdentity) {
       setSessionPreviewFocus(activeCoordinate);
       setSessionPreviewSideEdge(activeCoordinate.col < 0 ? 'right' : 'left');
       setSessionPreviewOpen(true);

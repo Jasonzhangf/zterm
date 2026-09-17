@@ -286,6 +286,28 @@ describe('TerminalPage junction preview integration', () => {
     expect(screen.queryByTestId('terminal-preview-grid')).toBeTruthy();
   });
 
+  it('treats a reused session id with changed endpoint identity as an empty persisted cell', async () => {
+    const activeSession = makeSession('s1');
+    writeLattice([activeSession]);
+    const staleRaw = localStorage.getItem(JUNCTION_PREVIEW_LATTICE_STORAGE_KEY);
+    expect(staleRaw).not.toBeNull();
+    localStorage.setItem(
+      JUNCTION_PREVIEW_LATTICE_STORAGE_KEY,
+      staleRaw!.replace('"bridgePort":3333', '"bridgePort":4444'),
+    );
+    const { onSwitchSession } = renderPage({
+      sessions: [activeSession],
+      activeSession,
+    });
+    const stage = screen.getByTestId('terminal-stage-shell');
+
+    await openPreview(stage);
+
+    await waitFor(() => expect(screen.getByTestId('terminal-preview-tile-s1').dataset.previewFocus).toBe('true'));
+    expect(screen.getByTestId('terminal-preview-grid')).toBeTruthy();
+    expect(onSwitchSession).not.toHaveBeenCalled();
+  });
+
   it('opens the drawer from the left edge during preview and changes only the focus cell', async () => {
     const sessions = [makeSession('s1'), makeSession('s2'), makeSession('s3')];
     writeLattice([sessions[0], sessions[1]]);
