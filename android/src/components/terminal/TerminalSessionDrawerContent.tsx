@@ -272,16 +272,18 @@ function TerminalSessionDrawerComponent({
           }
         }}
         style={{
-            position: 'absolute',
-            inset: 0,
-            border: 'none',
-            background: 'color-mix(in srgb, #16191f 18%, transparent)',
-            zIndex: 149,
-            padding: 0,
-            margin: 0,
-            opacity: open ? 1 : 0,
-            pointerEvents: open ? 'auto' : 'none',
-            transition: 'opacity 150ms ease',
+          position: 'absolute',
+          inset: 0,
+          height: 'auto',
+          minHeight: 0,
+          border: 'none',
+          background: 'color-mix(in srgb, #16191f 18%, transparent)',
+          zIndex: 149,
+          padding: 0,
+          margin: 0,
+          opacity: open ? 1 : 0,
+          pointerEvents: open ? 'auto' : 'none',
+          transition: 'opacity 150ms ease',
         }}
       />
       <aside
