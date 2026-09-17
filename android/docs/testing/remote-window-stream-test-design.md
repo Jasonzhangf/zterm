@@ -9,9 +9,12 @@ This gate covers remote app/window and iTerm2 pane video streaming from a daemon
 This scope is independent of the terminal buffer/render/daemon-mirror
 truth chain. Changes limited to the remote-window decoded-frame projection
 therefore do not require terminal-buffer L5 or daemon mirror close-loop gates.
-The applicable closeout evidence is the focused remote-window RVFC/composite
-tests, Android type-check and feature/UI gates, the WebRTC loopback gate, and
-an install/launch smoke check on an available Android device.
+Applicable incremental evidence for this slice is the focused remote-window
+RVFC/composite tests, Android type-check and feature/UI gates, the WebRTC
+loopback gate, and an install/launch smoke check on an available Android
+device. These do not replace the feature-completion gates listed below:
+installed-WebView rendered-pixel proof and live iTerm2-pane pixel proof remain
+required before `desktop.remote_window_stream` is complete.
 
 ## Current Implementation Status
 

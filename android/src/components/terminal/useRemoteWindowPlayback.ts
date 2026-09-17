@@ -405,9 +405,11 @@ export function useRemoteWindowPlayback({
     };
     const playResult = typeof overviewVideo.play === 'function' ? overviewVideo.play() : null;
     if (playResult && typeof playResult.catch === 'function') {
-      playResult.catch(() => {
-        // The focus lane owns the stream error projection. The overview video
-        // is a decode surface only, so a rejected autoplay stays non-fatal.
+      playResult.catch((error) => {
+        if (!isCurrentOverviewPlayback()) return;
+        onProjectionError?.(
+          `remote window overview playback was rejected: ${error instanceof Error ? error.message : String(error || 'play rejected')}`,
+        );
       });
     }
   }, [

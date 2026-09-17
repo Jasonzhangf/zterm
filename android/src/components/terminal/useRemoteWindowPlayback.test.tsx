@@ -376,6 +376,52 @@ describe('useRemoteWindowPlayback owner', () => {
     expect(overviewVideo.play).not.toHaveBeenCalled();
   });
 
+  it('reports overview autoplay rejection through the projection error path', async () => {
+    const focusVideo = document.createElement('video');
+    const overviewVideo = document.createElement('video');
+    const focusCallbacks: Array<(now: number, metadata: unknown) => void> = [];
+    Object.defineProperties(focusVideo, {
+      requestVideoFrameCallback: {
+        configurable: true,
+        value: vi.fn((callback: (now: number, metadata: unknown) => void) => {
+          focusCallbacks.push(callback);
+          return focusCallbacks.length;
+        }),
+      },
+      cancelVideoFrameCallback: { configurable: true, value: vi.fn() },
+      play: { configurable: true, value: vi.fn(() => new Promise<void>(() => {})) },
+    });
+    Object.defineProperties(overviewVideo, {
+      requestVideoFrameCallback: {
+        configurable: true,
+        value: vi.fn(() => 1),
+      },
+      cancelVideoFrameCallback: { configurable: true, value: vi.fn() },
+      play: {
+        configurable: true,
+        value: vi.fn(() => Promise.reject(new Error('overview autoplay blocked'))),
+      },
+    });
+    const onProjectionError = vi.fn();
+    const receiver = stream('overview-reject-focus', 'overview-reject-focus-track');
+    const overview = stream('overview-reject', 'overview-reject-track');
+    const videoElementRef = { current: focusVideo };
+    const overviewVideoElementRef = { current: overviewVideo };
+    renderHook(() => useRemoteWindowPlayback({
+      receiverMediaStream: receiver,
+      overviewMediaStream: overview,
+      streamStatus: 'streaming',
+      streamId: receiver.id,
+      videoElementRef,
+      overviewVideoElementRef,
+      onProjectionError,
+    }));
+
+    await waitFor(() => expect(onProjectionError).toHaveBeenCalledWith(
+      'remote window overview playback was rejected: overview autoplay blocked',
+    ));
+  });
+
   it('reports unavailable RVFC for a required focus projection lane', async () => {
     const video = document.createElement('video');
     Object.defineProperties(video, {
