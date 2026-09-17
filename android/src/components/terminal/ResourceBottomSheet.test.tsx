@@ -419,6 +419,31 @@ describe('ResourceBottomSheet', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  it('keeps a cancelled grip gesture from expanding or closing the drawer', () => {
+    const onClose = vi.fn();
+    const onExpand = vi.fn();
+    render(
+      <ResourceBottomSheet
+        open
+        initialTab="stream"
+        renderFileBrowser={() => null}
+        renderRemoteWindow={() => <div data-testid="stream-surface" />}
+        onClose={onClose}
+        onExpand={onExpand}
+      />,
+    );
+
+    const handle = screen.getByTestId('resource-bottom-sheet-grip');
+    expect(handle.style.touchAction).toBe('none');
+
+    fireEvent.pointerDown(handle, { pointerId: 9, clientY: 240 });
+    fireEvent.pointerCancel(handle, { pointerId: 9, clientY: 100 });
+    fireEvent.touchEnd(handle, { changedTouches: [{ identifier: 9, clientY: 100 }] });
+
+    expect(onExpand).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it('hides duplicate drawer chrome when the stream expands to fullscreen', () => {
     const renderRemoteWindow = vi.fn((open: boolean) => open ? <div data-testid="stream-surface" /> : null);
     render(
