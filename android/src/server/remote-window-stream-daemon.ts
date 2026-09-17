@@ -1027,6 +1027,7 @@ export function createRemoteWindowStreamDaemonRuntime(
               return;
             }
             try {
+              // Composite auto-add/remove keeps its capture-layer live query cadence.
               const targets = await catalogRuntime.listAppWindowTargets();
               const sameApp = targets.filter((item) => (
                 item.videoTarget.kind === 'app-window'
@@ -1519,6 +1520,9 @@ export function createRemoteWindowStreamDaemonRuntime(
         canvasLayout: entry.canvasLayout,
       }).event,
     };
+    const resizeTarget = payload.event.kind === 'window-resize'
+      ? buildResizedRemoteWindowTarget(entry.target, payload.event, now())
+      : null;
     await runRemoteWindowInputEvent(mappedPayload, entry.target, {
       swiftBinary,
       runTmux: deps.runTmux,
@@ -1529,7 +1533,7 @@ export function createRemoteWindowStreamDaemonRuntime(
       },
     });
     if (payload.event.kind === 'window-resize') {
-      const observedTarget = buildResizedRemoteWindowTarget(entry.target, payload.event, now());
+      const observedTarget = resizeTarget!;
       const resized = await applyRemoteWindowTargetResize(
         entry,
         observedTarget,

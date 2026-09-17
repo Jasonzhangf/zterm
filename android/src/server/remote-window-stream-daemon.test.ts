@@ -21,6 +21,23 @@ const target = () => ({ streamTargetId: 'app-window:app:window', videoTarget: { 
 const profile = () => makeRemoteWindowVideoProfileFixture('smooth');
 const start = (streamId: string): RemoteWindowStreamStartRequestV2Payload => ({ requestId: `${streamId}-request`, streamId, mediaPlan: 'single-focus', mediaPlanVersion: 2, target: target(), videoProfile: profile() });
 
+async function startRuntimeStream(
+  runtime: ReturnType<typeof createRemoteWindowStreamDaemonRuntime>,
+  payload: RemoteWindowStreamStartRequestV2Payload,
+) {
+  const started = runtime.startStream(payload, {
+    sendOffer: (offer) => {
+      void runtime.acceptAnswer!({
+        requestId: offer.requestId,
+        streamId: offer.streamId,
+        mediaPlanVersion: 2,
+        answer: { type: 'answer', sdp: 'answer-sdp' },
+      });
+    },
+  });
+  await expect(started).resolves.toMatchObject({ streamId: payload.streamId, mediaPlanVersion: 2 });
+}
+
 function makePeerConnection() {
   const peerConnection = {
     localDescription: null as RTCSessionDescriptionInit | null,
@@ -97,17 +114,7 @@ describe('remote window stream daemon v2 contract', () => {
     });
 
     const payload = start('clock-skew-resize');
-    const started = runtime.startStream(payload, {
-      sendOffer: (offer) => {
-        void runtime.acceptAnswer!({
-          requestId: offer.requestId,
-          streamId: offer.streamId,
-          mediaPlanVersion: 2,
-          answer: { type: 'answer', sdp: 'answer-sdp' },
-        });
-      },
-    });
-    await expect(started).resolves.toMatchObject({ streamId: payload.streamId, mediaPlanVersion: 2 });
+    await startRuntimeStream(runtime, payload);
 
     const ack = await runtime.injectInput({
       streamId: payload.streamId,
@@ -144,6 +151,82 @@ describe('remote window stream daemon v2 contract', () => {
         },
       },
     });
+    runtime.dispose();
+  });
+
+  it('validates resize against display bounds before native input injection', async () => {
+    const runRemoteWindowInputEvent = vi.fn(async () => undefined);
+    const peerConnection = makePeerConnection();
+    const captureSource = {
+      captureEpoch: 0,
+      width: 800,
+      height: 600,
+      frameRate: 30,
+      maxCaptureWidth: 1440,
+      maxCaptureHeight: 900,
+      updateTarget: vi.fn(async () => undefined),
+      updateVideoProfile: vi.fn(async () => undefined),
+      stop: vi.fn(),
+    };
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      arch: 'arm64',
+      captureBinary: '/tmp/zterm-daemon',
+      nowMs: () => 1_000_000,
+      peerConnectionFactory: () => peerConnection as unknown as RTCPeerConnection,
+      rtcSessionDescriptionFactory: (description) => description as RTCSessionDescription,
+      rtcIceCandidateFactory: (candidate) => candidate as RTCIceCandidate,
+      videoSourceFactory: () => ({
+        createTrack: () => ({ id: 'video-track' }) as MediaStreamTrack,
+        onFrame: vi.fn(),
+      }),
+      rgbaToI420: vi.fn(),
+      captureSourceFactory: vi.fn(async () => captureSource),
+      runRemoteWindowInputEvent,
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    const payload = start('resize-bounds');
+    payload.target.capture.displayBoundsTopLeftPx = { x: 0, y: 0, width: 900, height: 700 };
+    await startRuntimeStream(runtime, payload);
+
+    const rejected = await runtime.injectInput({
+      streamId: payload.streamId,
+      targetId: payload.target.streamTargetId,
+      deliveryKind: 'action',
+      sampledAtMs: 100,
+      deadlineMs: 200,
+      event: { kind: 'window-resize', width: 1200, height: 800 },
+    }, {
+      version: 1,
+      sequence: 'rw-resize-out-of-display',
+      lane: 'reliable',
+      attempt: 1,
+      sentAtMs: 100,
+    });
+    expect(rejected).not.toBeNull();
+    if (!rejected) throw new Error('expected resize rejection ack');
+    expect(rejected.control).toMatchObject({ accepted: false, retryable: false });
+    expect(runRemoteWindowInputEvent).not.toHaveBeenCalled();
+
+    const accepted = await runtime.injectInput({
+      streamId: payload.streamId,
+      targetId: payload.target.streamTargetId,
+      deliveryKind: 'action',
+      sampledAtMs: 100,
+      deadlineMs: 200,
+      event: { kind: 'window-resize', width: 800, height: 600 },
+    }, {
+      version: 1,
+      sequence: 'rw-resize-in-display',
+      lane: 'reliable',
+      attempt: 1,
+      sentAtMs: 100,
+    });
+    expect(accepted).not.toBeNull();
+    if (!accepted) throw new Error('expected resize acceptance ack');
+    expect(accepted.control).toMatchObject({ accepted: true });
+    expect(runRemoteWindowInputEvent).toHaveBeenCalledTimes(1);
     runtime.dispose();
   });
 });

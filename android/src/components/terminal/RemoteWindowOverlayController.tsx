@@ -1038,6 +1038,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       return false;
     }
     const reference = resolveRemoteWindowTargetResizeSize({ viewport: fillReference, devicePixelRatio: window.devicePixelRatio, target: currentLockedTarget });
+    if (!reference) return false;
     const width = reference.width;
     const height = reference.height;
     const delivery = { streamId: currentLockedStreamId, targetId: currentLockedTarget.streamTargetId, width, height };

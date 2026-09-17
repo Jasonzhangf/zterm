@@ -56,6 +56,8 @@ export function createRemoteWindowCatalogRuntime(
 ): RemoteWindowCatalogRuntime {
   // The daemon owns one canonical full catalog snapshot; source-set selection is a read-time projection.
   let snapshot: RemoteWindowTargetCatalogCacheEntry | null = null;
+  let refreshFailure: RemoteWindowStreamErrorPayload | null = null;
+  let hasSuccessfulSnapshot = false;
   let refresh: Promise<RemoteWindowStreamTargetsResponsePayload | RemoteWindowStreamErrorPayload> | null = null;
   let refreshTimer: ReturnType<typeof setInterval> | null = null;
   let disposed = false;
@@ -198,10 +200,21 @@ export function createRemoteWindowCatalogRuntime(
         error instanceof Error ? error.message : 'remote window catalog failed',
       ))
       .then((result) => {
-        if (!disposed && startedGeneration === generation && 'targets' in result) {
-          snapshot = {
-            response: cloneRemoteWindowTargetCatalogResponse(result, result.requestId),
-          };
+        if (!disposed && startedGeneration === generation) {
+          if ('targets' in result && !(result.errors?.length)) {
+            snapshot = {
+              response: cloneRemoteWindowTargetCatalogResponse(result, result.requestId),
+            };
+            hasSuccessfulSnapshot = true;
+            refreshFailure = null;
+          } else {
+            snapshot = null;
+            refreshFailure = hasSuccessfulSnapshot
+              ? 'targets' in result
+                ? { ...result.errors![0], requestId: result.requestId }
+                : { ...result }
+              : null;
+          }
         }
         return result;
       })
@@ -247,11 +260,24 @@ export function createRemoteWindowCatalogRuntime(
     if (ready) {
       return projectSnapshot(ready.response, payload);
     }
+    if (refreshFailure) {
+      return {
+        ...refreshFailure,
+        requestId: payload.requestId,
+      };
+    }
     if (refresh) {
       const pending = await refresh;
       const refreshed = snapshot;
       if ('targets' in pending && refreshed) {
         return projectSnapshot(refreshed.response, payload);
+      }
+      if (!hasSuccessfulSnapshot) {
+        return remoteWindowError(
+          payload,
+          'remote_window_catalog_not_ready',
+          'remote window target catalog is not ready',
+        );
       }
       return cloneRemoteWindowTargetCatalogResult(pending, payload.requestId);
     }
@@ -288,6 +314,8 @@ export function createRemoteWindowCatalogRuntime(
       refreshTimer = null;
     }
     snapshot = null;
+    refreshFailure = null;
+    hasSuccessfulSnapshot = false;
     refresh = null;
   };
 

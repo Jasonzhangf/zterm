@@ -118,6 +118,8 @@ describe('remote-window-overlay-helpers', () => {
       devicePixelRatio: 2,
       target,
     });
+    expect(resized).not.toBeNull();
+    if (!resized) throw new Error('expected resized target');
     expect(resized).toEqual({ width: 1728, height: 1080 });
     expect(resized.width / resized.height).toBeCloseTo(1280 / 800, 5);
     expect(resized.width).toBeLessThanOrEqual(1920);
@@ -141,10 +143,24 @@ describe('remote-window-overlay-helpers', () => {
       devicePixelRatio: 2,
       target,
     });
+    expect(resized).not.toBeNull();
+    if (!resized) throw new Error('expected resized target');
     // 可用宽高是 display 减去窗口原点：1720 x 880，按容器比例回缩后不越界。
     expect(resized.width).toBeLessThanOrEqual(1920 - 200);
     expect(resized.height).toBeLessThanOrEqual(1080 - 200);
     expect(resized.width / resized.height).toBeCloseTo(1280 / 800, 5);
+  });
+
+  it('returns null when the display has no drawable space at the target origin', () => {
+    const target = appTarget('com.apple.TextEdit');
+    target.videoTarget.windowBoundsTopLeftPx = { x: 1900, y: 1000, width: 900, height: 700 };
+    target.videoTarget.cropRectTopLeftPx = { x: 1900, y: 1000, width: 900, height: 700 };
+    target.capture.displayBoundsTopLeftPx = { x: 0, y: 0, width: 1920, height: 1080 };
+    expect(resolveRemoteWindowTargetResizeSize({
+      viewport: { width: 1280, height: 800 },
+      devicePixelRatio: 2,
+      target,
+    })).toBeNull();
   });
 
   it('fills fullscreen geometry while preserving fit geometry', () => {

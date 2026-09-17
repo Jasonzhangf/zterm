@@ -479,7 +479,7 @@ export function resolveRemoteWindowTargetResizeSize(options: {
   viewport: SurfaceSize;
   devicePixelRatio?: number;
   target?: RemoteWindowStreamTargetManifest | null;
-}): SurfaceSize {
+}): SurfaceSize | null {
   const viewportWidth = Math.max(1, options.viewport.width);
   const viewportHeight = Math.max(1, options.viewport.height);
   const dpr = Number.isFinite(options.devicePixelRatio) && (options.devicePixelRatio || 0) > 0
@@ -495,19 +495,22 @@ export function resolveRemoteWindowTargetResizeSize(options: {
       // The daemon validates x + width <= display.x + display.width, so the
       // current window origin must be subtracted before clamping.
       const origin = target.videoTarget.windowBoundsTopLeftPx;
-      const maxWidth = Math.max(120, Math.floor(display.x + display.width - origin.x));
-      const maxHeight = Math.max(120, Math.floor(display.y + display.height - origin.y));
+      const maxWidth = Math.floor(display.x + display.width - origin.x);
+      const maxHeight = Math.floor(display.y + display.height - origin.y);
+      if (maxWidth < 120 || maxHeight < 120) {
+        return null;
+      }
       const scale = Math.min(1, maxWidth / Math.max(1, width), maxHeight / Math.max(1, height));
       if (scale < 1) {
-        width = Math.max(120, Math.round(width * scale));
-        height = Math.max(120, Math.round(height * scale));
+        width = Math.round(width * scale);
+        height = Math.round(height * scale);
       }
     }
   }
 
   return {
-    width: Math.max(120, Math.round(width)),
-    height: Math.max(120, Math.round(height)),
+    width: Math.round(width),
+    height: Math.round(height),
   };
 }
 

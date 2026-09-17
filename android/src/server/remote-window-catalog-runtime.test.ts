@@ -57,7 +57,6 @@ describe('remote window catalog runtime owner', () => {
 
     await expect(runtime.listTargets({
       requestId: 'read-1',
-      forceRefresh: true,
     })).resolves.toMatchObject({
       requestId: 'read-1',
       targets: [],
@@ -210,6 +209,110 @@ describe('remote window catalog runtime owner', () => {
     await vi.waitFor(() => {
       expect(runIterm2Python).toHaveBeenCalledTimes(2);
       expect(runMacosAppWindowCatalog).toHaveBeenCalledTimes(2);
+    });
+    runtime.dispose();
+  });
+
+  it('surfaces a failed resident refresh instead of serving the old snapshot', async () => {
+    vi.useFakeTimers();
+    let refreshCount = 0;
+    const runMacosAppWindowCatalog = vi.fn(async () => {
+      refreshCount += 1;
+      if (refreshCount === 2) {
+        throw new Error('app window catalog unavailable');
+      }
+      return JSON.stringify({
+        windows: [{
+          windowId: 'window-1',
+          ownerName: 'Example',
+          appBundleId: 'com.example.app',
+          pid: 42,
+          title: 'Example',
+          frame: { x: 0, y: 0, width: 800, height: 600 },
+        }],
+      });
+    });
+    const runtime = createRuntime('darwin', {
+      targetCatalogRefreshIntervalMs: 1_000,
+      runIterm2Python: vi.fn(async () => JSON.stringify({ windows: [] })),
+      runMacosAppWindowCatalog,
+    });
+
+    runtime.warm();
+    await vi.advanceTimersByTimeAsync(0);
+    await expect(runtime.listTargets({ requestId: 'read-before-failure' })).resolves.toMatchObject({
+      requestId: 'read-before-failure',
+      targets: [expect.objectContaining({ streamTargetId: 'app-window:42:window-1' })],
+    });
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    await expect(runtime.listTargets({ requestId: 'read-after-failure' })).resolves.toMatchObject({
+      requestId: 'read-after-failure',
+      code: 'app_window_catalog_unavailable',
+    });
+
+    refreshCount = 2;
+    await vi.advanceTimersByTimeAsync(1_000);
+    const recovered = await runtime.listTargets({ requestId: 'read-after-recovery' });
+    expect(recovered).toMatchObject({
+      requestId: 'read-after-recovery',
+      targets: [expect.objectContaining({ streamTargetId: 'app-window:42:window-1' })],
+    });
+    runtime.dispose();
+  });
+
+  it('invalidates the resident snapshot when a refresh has source errors', async () => {
+    vi.useFakeTimers();
+    let refreshCount = 0;
+    const runtime = createRuntime('darwin', {
+      targetCatalogRefreshIntervalMs: 1_000,
+      runIterm2Python: vi.fn(async () => {
+        refreshCount += 1;
+        if (refreshCount === 2) {
+          throw new Error('iTerm2 Python API unavailable');
+        }
+        return JSON.stringify({ windows: [] });
+      }),
+      runMacosAppWindowCatalog: vi.fn(async () => {
+        return JSON.stringify({
+          windows: [{
+            windowId: 'window-1',
+            ownerName: 'Example',
+            appBundleId: 'com.example.app',
+            pid: 42,
+            title: 'Example',
+            frame: { x: 0, y: 0, width: 800, height: 600 },
+          }],
+        });
+      }),
+    });
+
+    runtime.warm();
+    await vi.advanceTimersByTimeAsync(0);
+    await expect(runtime.listTargets({ requestId: 'read-before-source-error' })).resolves.toMatchObject({
+      targets: [expect.objectContaining({ streamTargetId: 'app-window:42:window-1' })],
+    });
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    await expect(runtime.listTargets({ requestId: 'read-source-error' })).resolves.toMatchObject({
+      requestId: 'read-source-error',
+      code: 'iterm2_api_unavailable',
+    });
+    runtime.dispose();
+  });
+
+  it('keeps a first refresh failure as not ready', async () => {
+    const runtime = createRuntime('darwin', {
+      runIterm2Python: vi.fn(async () => JSON.stringify({ windows: [] })),
+      runMacosAppWindowCatalog: vi.fn(async () => {
+        throw new Error('app window catalog unavailable');
+      }),
+    });
+
+    runtime.warm();
+    await expect(runtime.listTargets({ requestId: 'read-first-failure' })).resolves.toMatchObject({
+      requestId: 'read-first-failure',
+      code: 'remote_window_catalog_not_ready',
     });
     runtime.dispose();
   });
