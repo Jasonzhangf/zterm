@@ -66,19 +66,6 @@ export function inputStyle(extra?: CSSProperties): CSSProperties {
   };
 }
 
-export function segmentedButtonStyle(active: boolean): CSSProperties {
-  return {
-    flex: 1,
-    minHeight: '48px',
-    borderRadius: '16px',
-    border: 'none',
-    backgroundColor: active ? 'var(--zterm-settings-accent)' : 'var(--zterm-settings-field)',
-    color: active ? 'var(--zterm-settings-accent-text)' : 'var(--zterm-settings-muted)',
-    fontWeight: 700,
-    cursor: 'pointer',
-  };
-}
-
 export function TagList({ tags, onRemove }: { tags: string[]; onRemove: (tag: string) => void }) {
   if (tags.length === 0) {
     return <div style={{ fontSize: '13px', color: 'var(--zterm-settings-muted)' }}>No tags yet</div>;

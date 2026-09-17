@@ -1,4 +1,4 @@
-import { ConnectionSection, FieldLabel, inputStyle, segmentedButtonStyle } from './ConnectionSection';
+import { ConnectionSection, FieldLabel, inputStyle } from './ConnectionSection';
 import { AmbientButton, AmbientInput } from '../ambient';
 
 interface RemoteAccessSectionProps {
@@ -30,20 +30,27 @@ export function RemoteAccessSection({
       description="自动连接顺序由 Settings 的 Auto 线路优先级决定；若已登录 relay，则协议信息自动从控制面下发，对用户透明。"
     >
       <div style={{ display: 'flex', gap: '10px' }}>
-        <AmbientButton type="button" onClick={() => onTransportModeChange('auto')} style={segmentedButtonStyle(transportMode === 'auto')}>
+        <AmbientButton
+          type="button"
+          variant="settings-segment"
+          selected={transportMode === 'auto'}
+          onClick={() => onTransportModeChange('auto')}
+        >
           Auto
         </AmbientButton>
         <AmbientButton
           type="button"
+          variant="settings-segment"
+          selected={transportMode === 'websocket'}
           onClick={() => onTransportModeChange('websocket')}
-          style={segmentedButtonStyle(transportMode === 'websocket')}
         >
           WS Only
         </AmbientButton>
         <AmbientButton
           type="button"
+          variant="settings-segment"
+          selected={transportMode === 'webrtc'}
           onClick={() => onTransportModeChange('webrtc')}
-          style={segmentedButtonStyle(transportMode === 'webrtc')}
         >
           RTC First
         </AmbientButton>

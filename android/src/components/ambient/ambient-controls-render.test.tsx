@@ -21,6 +21,22 @@ describe('ambient shared controls render owner DOM', () => {
     expect(button?.className).toContain('amb-chamfer');
   });
 
+  it('lets explicit caller geometry win over variant minimums', () => {
+    const { container } = render(
+      <>
+        <AmbientButton aria-label="checkbox" style={{ width: '18px', height: '18px' }} />
+        <AmbientButton aria-label="icon" style={{ width: '34px', height: '34px' }} />
+        <AmbientButton aria-label="default" />
+      </>,
+    );
+    const [checkbox, icon, defaultButton] = Array.from(container.querySelectorAll('button'));
+    for (const button of [checkbox, icon]) {
+      expect(button.style.minWidth).toBe('0px');
+      expect(button.style.minHeight).toBe('0px');
+    }
+    expect(defaultButton.style.minWidth).toBe('44px');
+  });
+
   it('renders AmbientInput as an input with ambient classes', () => {
     const { container } = render(<AmbientInput aria-label="ambient input" />);
     const input = container.querySelector('input');

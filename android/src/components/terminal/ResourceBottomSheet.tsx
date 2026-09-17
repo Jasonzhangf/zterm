@@ -222,7 +222,11 @@ export function ResourceBottomSheet({
         {!streamExpanded ? <div
           data-testid="resource-bottom-sheet-grip"
           {...{ [RESOURCE_DRAWER_GESTURE_ATTRS.handle]: 'true' }}
-          style={{ display: 'flex', justifyContent: 'center', padding: '10px 0 4px' }}
+          // Android WebView 会把把手上的竖向拖动当作滚动 pan 仲裁并发出
+          // pointercancel，取消已激活的 drawer gesture，导致"半截 -> 全屏"
+          // 上滑永远拿不到 touchend/pointerup。把手是显式拖动面，必须声明
+          // touch-action: none 才能让浏览器把手势交给本组件。
+          style={{ display: 'flex', justifyContent: 'center', padding: '10px 0 4px', touchAction: 'none' }}
           onTouchStart={(event) => { event.stopPropagation(); handleTouchStart(event); }}
           onTouchEnd={(event) => { event.stopPropagation(); handleTouchEnd(event); }}
           onTouchCancel={(event) => { event.stopPropagation(); handleTouchCancel(event); }}

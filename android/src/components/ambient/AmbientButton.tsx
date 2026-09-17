@@ -39,7 +39,7 @@ function resolveVariantStyle(
   switch (variant) {
     case 'settings':
       return {
-        minWidth: '72px',
+        minWidth: '44px',
         height: '40px',
         padding: '0 10px',
         borderRadius: '12px',
@@ -311,6 +311,15 @@ export const AmbientButton = forwardRef<HTMLButtonElement, AmbientButtonProps>(
     ref,
   ) {
     const ambientClass = ['ambient', 'ambient-control', 'amb-button', 'ambx-control', 'amb-chamfer', className].filter(Boolean).join(' ');
+    // An explicit caller geometry is authoritative: variant minimums must not
+    // inflate a checkbox, close button or icon button that asked for an exact size.
+    const geometryOverride: CSSProperties = {};
+    if (style?.width !== undefined && style?.minWidth === undefined) {
+      geometryOverride.minWidth = 0;
+    }
+    if (style?.height !== undefined && style?.minHeight === undefined) {
+      geometryOverride.minHeight = 0;
+    }
     return (
       <button
         ref={ref}
@@ -320,6 +329,7 @@ export const AmbientButton = forwardRef<HTMLButtonElement, AmbientButtonProps>(
         style={{
           ...commonButtonStyle,
           ...resolveVariantStyle(variant, selected),
+          ...geometryOverride,
           boxShadow: undefined,
           ...(variant === 'settings-save' && disabled ? { opacity: 0.72 } : null),
           ...style,
