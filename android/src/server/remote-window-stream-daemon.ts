@@ -76,7 +76,7 @@ export * from './remote-window-catalog';
 export * from './remote-window-input-helper';
 export * from './remote-window-capture';
 
-const DEFAULT_REMOTE_WINDOW_TARGET_CATALOG_CACHE_TTL_MS = 60_000;
+const DEFAULT_REMOTE_WINDOW_TARGET_CATALOG_REFRESH_INTERVAL_MS = 5_000;
 
 type RtcPeerConnectionCtor = typeof globalThis.RTCPeerConnection;
 type RtcSessionDescriptionCtor = typeof globalThis.RTCSessionDescription;
@@ -119,7 +119,7 @@ export interface RemoteWindowStreamDaemonDeps {
   captureBinary?: string;
   iterm2PythonTimeoutMs?: number;
   appWindowCatalogTimeoutMs?: number;
-  targetCatalogCacheTtlMs?: number;
+  targetCatalogRefreshIntervalMs?: number;
   nowMs?: () => number;
   warmTargetCatalogOnStart?: boolean;
   captureStartupTimeoutMs?: number;
@@ -417,9 +417,9 @@ export function createRemoteWindowStreamDaemonRuntime(
   const pendingIceCandidatesByStream = new Map<string, RTCIceCandidateInit[]>();
   const iceCandidateFingerprintsByStream = new Map<string, Set<string>>();
   const closedStreamIds = new Set<string>();
-  const targetCatalogCacheTtlMs = Math.max(
-    0,
-    Math.floor(deps.targetCatalogCacheTtlMs ?? DEFAULT_REMOTE_WINDOW_TARGET_CATALOG_CACHE_TTL_MS),
+  const targetCatalogRefreshIntervalMs = Math.max(
+    1_000,
+    Math.floor(deps.targetCatalogRefreshIntervalMs ?? DEFAULT_REMOTE_WINDOW_TARGET_CATALOG_REFRESH_INTERVAL_MS),
   );
   const nowMs = deps.nowMs || Date.now;
   const catalogRuntime = createRemoteWindowCatalogRuntime({
@@ -428,7 +428,7 @@ export function createRemoteWindowStreamDaemonRuntime(
     swiftBinary,
     iterm2PythonTimeoutMs,
     appWindowCatalogTimeoutMs,
-    targetCatalogCacheTtlMs,
+    targetCatalogRefreshIntervalMs,
     now,
     nowMs,
     runIterm2Python,

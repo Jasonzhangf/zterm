@@ -34,6 +34,8 @@ export function useRemoteWindowSelectionAdmission({
       return;
     }
 
+    // Admission re-reads the daemon-owned snapshot to confirm the selected
+    // identity; it never asks the daemon to enumerate on the client's behalf.
     void requestFreshTargets(targetSessionId).then((payload) => {
       if (streamRequestEpochRef.current !== streamRequestEpoch) {
         return;

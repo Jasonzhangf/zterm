@@ -7,7 +7,6 @@ import {
   sendInputRuntime,
 } from './session-context-transfer-runtime';
 import {
-  type RemoteWindowTargetCatalogCacheStore,
   requestRemoteWindowStreamStartRuntime,
   requestRemoteWindowTargetsRuntime,
   setRemoteWindowBrowserUserAgentRuntime,
@@ -88,7 +87,6 @@ export function createSessionInteractionRuntime(options: {
     imagePasteWaiterRuntimeRef: { current: ImagePasteWaiterRuntime };
     fileTransferMessageRuntimeRef: { current: Pick<FileTransferMessageRuntime, 'subscribe'> };
     remoteScreenshotRuntimeRef: { current: RemoteScreenshotRuntimeLike };
-    remoteWindowTargetCatalogCacheRef?: { current: RemoteWindowTargetCatalogCacheStore };
     remoteWindowMessageRuntimeRef: { current: RemoteWindowMessageRuntimeLike };
     remoteWindowReceiverRuntimeRef: { current: RemoteWindowReceiverRuntimeLike };
   };
@@ -195,7 +193,6 @@ export function createSessionInteractionRuntime(options: {
 
   const requestRemoteWindowTargets = async (
     sessionId: string,
-    requestOptions?: { forceRefresh?: boolean },
   ) => {
     return requestRemoteWindowTargetsRuntime({
       sessionId,
@@ -203,8 +200,6 @@ export function createSessionInteractionRuntime(options: {
       daemonConnection,
       remoteWindowMessageRuntime: options.refs.remoteWindowMessageRuntimeRef.current,
       sendSocketPayload: options.sendSocketPayload,
-      targetCatalogCache: options.refs.remoteWindowTargetCatalogCacheRef?.current,
-      forceRefresh: requestOptions?.forceRefresh === true,
     });
   };
 

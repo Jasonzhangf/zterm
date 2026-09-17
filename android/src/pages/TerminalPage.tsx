@@ -467,7 +467,6 @@ interface TerminalPageProps {
   ) => Promise<RemoteScreenshotCapture>;
   onRequestRemoteWindowTargets?: (
     sessionId: string,
-    options?: { forceRefresh?: boolean },
   ) => Promise<RemoteWindowStreamTargetsResponsePayload>;
   onRequestRemoteWindowStreamStart?: (
     sessionId: string,

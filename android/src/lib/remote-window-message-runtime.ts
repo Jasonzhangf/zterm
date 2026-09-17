@@ -559,7 +559,7 @@ export function createRemoteWindowMessageRuntime(input?: {
   const runtime = {
     requestTargets(sessionId: string, options: {
       ws: BridgeTransportSocket;
-      request?: Omit<RemoteWindowStreamRequestPayload, 'requestId'>;
+      request?: Omit<RemoteWindowStreamRequestPayload, 'requestId' | 'forceRefresh'>;
       sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
     }) {
       const targetSessionId = sessionId.trim();
@@ -582,7 +582,6 @@ export function createRemoteWindowMessageRuntime(input?: {
             requestId,
             includeAppWindows: options.request?.includeAppWindows ?? true,
             includeIterm2: options.request?.includeIterm2 ?? true,
-            ...(options.request?.forceRefresh ? { forceRefresh: true } : {}),
           };
           sendClientMessage(targetSessionId, options.ws, options.sendSocketPayload, {
             type: 'remote-window-targets-request',

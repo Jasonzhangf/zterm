@@ -185,7 +185,6 @@ export interface RemoteWindowOverlayProps {
   } | null;
   requestTargets?: (
     sessionId: string,
-    options?: { forceRefresh?: boolean },
   ) => Promise<RemoteWindowStreamTargetsResponsePayload>;
   startStream?: (
     sessionId: string,
@@ -2604,7 +2603,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       itermPaneTargetsExpanded={itermPaneTargetsExpanded}
       onToggleItermPaneTargets={() => setItermPaneTargetsExpanded((current) => !current)}
       onSelectTarget={handleSelectTarget}
-      onRefresh={() => handleOpenPicker({ forceRefresh: true })}
+      onRefresh={handleOpenPicker}
       onClose={handleClose}
       browserOnly={browserPickerOpen}
       embedded={embedded}

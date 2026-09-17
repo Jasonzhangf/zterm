@@ -31,7 +31,7 @@ const target: RemoteWindowStreamTargetManifest = {
 };
 
 describe('useRemoteWindowCatalog owner', () => {
-  it('projects a fresh catalog and reuses its cache without another request', async () => {
+  it('projects the daemon snapshot on every open without a client-driven refresh', async () => {
     const requestTargets = vi.fn().mockResolvedValue({ requestId: 'catalog-1', targets: [target] });
     const onOpenPicker = vi.fn();
     const { result } = renderHook(() => {
@@ -52,10 +52,43 @@ describe('useRemoteWindowCatalog owner', () => {
     await waitFor(() => expect(result.current.state.phase).toBe('pickerOpen'));
     expect(result.current.state).toMatchObject({ targets: [target] });
     expect(requestTargets).toHaveBeenCalledTimes(1);
+    expect(requestTargets).toHaveBeenCalledWith('session');
     act(() => result.current.openPicker());
     await waitFor(() => expect(result.current.state.phase).toBe('pickerOpen'));
-    expect(requestTargets).toHaveBeenCalledTimes(1);
+    // Every open re-reads the daemon-owned snapshot; the client never caches a
+    // catalog projection that could hide a newer daemon refresh.
+    expect(requestTargets).toHaveBeenCalledTimes(2);
+    expect(requestTargets).toHaveBeenLastCalledWith('session');
     expect(onOpenPicker).toHaveBeenCalledTimes(2);
+  });
+
+  it('reads a daemon-owned snapshot on active stream entry without polling', async () => {
+    vi.useFakeTimers();
+    const requestTargets = vi.fn().mockResolvedValue({ requestId: 'catalog-1', targets: [target] });
+    const { rerender } = renderHook(({ ready }) => {
+      const [state, setState] = useState(initialRemoteWindowOverlayState);
+      return useRemoteWindowCatalog({
+        activeSessionId: 'session',
+        state,
+        setState,
+        requestTargets,
+        activeStreamReady: ready,
+        suspendActiveRefresh: false,
+        onOpenPicker: vi.fn(),
+      });
+    }, { initialProps: { ready: false } });
+
+    rerender({ ready: true });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(requestTargets).toHaveBeenCalledWith('session');
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(requestTargets).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
   });
 
   it('fails explicitly when no daemon session can own enumeration', async () => {
