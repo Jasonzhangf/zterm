@@ -13,7 +13,7 @@
 
 - 多屏预览收敛为**唯一一种形态**：全尺寸窗格组成虚拟网格，手机屏幕是取景框，取景位置落在网格交界处。
 - 生命周期闭环：从进入、运行、集合变更到退出，每条路径都有唯一 owner、明确前后置条件和可验收结果。
-- 预览保持只读投影：不切 active session、不改 tmux geometry、不重连 transport、不重置 buffer。
+- 预览不切 active session、不改 tmux geometry、不重连 transport、不重置 buffer；QuickBar 输入只允许路由到当前焦点格，不得改 active session / geometry / transport / buffer。
 
 ### 非目标
 
@@ -21,7 +21,7 @@
 - 不做缩略图（任何 `scale` / `transform: scale` 都被禁止）。
 - 不新增第二套 ANSI / cell / cursor 解析器。
 - 不改 daemon mirror、sparse buffer、transport、tmux 宽度语义。
-- 本次不发布 OTA；APK 构建由 `scripts/bump-build-version.mjs` 分配 buildNumber（当前证据为 3013）。
+- 本次不发布 OTA，不把构建分配号写入功能提交；需要设备包时由 `scripts/bump-build-version.mjs` 在工作树本地分配。
 
 ---
 
@@ -558,13 +558,13 @@ centerRows = floor((viewHeight - edgeRows - gaps - railH) / rowH)
 - `pnpm run test:feature-registry`：13 files / 104 tests PASS
 - `pnpm run terminal:preview:source-dom-gate` PASS；证据：
   `android/evidence/session-preview/2026-09-17/source-dom-gate.json`
-- Android APK `0.1.3.3006` 已覆盖安装并加载 `index-BW-shc8M.js`；横屏预览、空格指定、长按重选/清空、左缘抽屉替换焦点格的 CDP/DOM/截图证据：
+- Android APK `0.1.3.3013` 已覆盖安装并加载本 worktree的 Vite 产物；横屏预览、空格指定、长按重选/清空、左缘抽屉替换焦点格的 CDP/DOM/截图证据：
   `android/evidence/session-preview/2026-09-17/device-final/`
 
 仍未验证：
 
 - 独立 review PASS
-- 竖屏/宽屏设备端截图；当前应用在模拟器上保持横屏，竖屏/宽屏几何由纯函数和组件测试覆盖
+- 宽屏/平板设备端截图；当前模拟器输入注入不稳定，竖屏已由 junction-device 截图覆盖，宽屏几何由纯函数和组件测试覆盖
 - commit / main 合并 / push 远端验证
 
 ### DoD
