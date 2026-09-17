@@ -9,6 +9,20 @@
 - Shell theme projection: the drawer consumes the effective terminal shell skin from its parent and uses the same background, surface, border, text, muted-text, active, pressed, and accent tokens as Header and QuickBar. Light, blue, and black skins may differ in palette, but a drawer must not retain hard-coded blue text/surfaces while another skin is active.
 - Android back contract: Settings and connection properties retain back-to-Home navigation. On the terminal page, the system back/left-edge exit intent is consumed so it cannot terminate the app while the same edge is reserved for the session drawer gesture.
 
+## Architecture Mapping
+
+- Feature: `terminal.session_drawer` + shared `client.ambient_controls` presentation.
+- Change class: UI projection only. No session/transport/daemon/mirror/sparse-buffer/renderer truth is introduced, mutated, or bypassed.
+- Owner:
+  - `TerminalSessionDrawerContent.tsx`: drawer/backdrop presentation and close intent.
+  - `TerminalPage.tsx`: page-level drawer projection and existing `onClose` wiring.
+  - `AmbientInput.tsx`: shared checkbox geometry under `client.ambient_controls`.
+- Resource relation: `resource.ui_projection -> resource.open_tab -> resource.active_session`; `resource.session_drawer_ui_contract` supplies the typed drawer slot rendered by `resource.ui_projection`. `resource.renderer_window` is only an adjacent crop/gesture boundary and is not consumed or mutated by this change.
+- Allowed paths: `src/components/terminal/TerminalSessionDrawerContent.tsx`, `src/components/terminal/TerminalSessionDrawer.tsx`, `src/components/terminal/TerminalSessionDrawer.test.tsx`, `src/components/ambient/AmbientInput.tsx`, `src/components/ambient/ambient-controls-render.test.tsx`, and this test design.
+- Forbidden paths: daemon, tmux, transport, mirror store, client sparse buffer, renderer truth, session catalog refresh, session switching, and terminal content mutation.
+- Positive gates: full-stage backdrop closes the drawer on terminal-area click; checkbox stays `18x18`; drawer close preserves the active session and does not request refresh.
+- Negative gates: backdrop must not inherit a compact button height; dismiss must not mutate transport/session or trigger catalog refresh; checkbox must not inherit the settings field `width:100%` / `minHeight:44px`.
+
 ## Lifecycle
 
 1. A terminal edge gesture starts outside the closed drawer.
@@ -34,6 +48,7 @@
 20. The long-press session menu must expose both the existing slot assignment intent and an explicit hide intent; hiding stores the trimmed exact `sessionName` in the client-only `hiddenSessionNames[]` list, and the drawer projects only non-hidden rows.
 21. The header restore-all action appears only while the hidden list is non-empty and clears that list through the same Settings persistence path.
 22. A left swipe that starts anywhere inside the drawer panel, including the scrollable tree, closes the drawer once when horizontal displacement dominates vertical displacement and crosses the close threshold. Vertical list scrolling, row selection, and the close button must not emit a close intent.
+23. While the drawer is open, its backdrop covers the full terminal stage outside the drawer panel. A real click or tap on the visible terminal area closes the drawer through the backdrop; a compact button style must not shrink the backdrop hit area to its content height.
 
 ## Paired Tests
 
@@ -47,6 +62,8 @@
 - Positive: long-press on a drawer row opens the session menu and the hide action removes the exact session name from the visible projection.
 - Positive: restore-all appears only while hidden names exist and restores all hidden rows through the existing Settings config.
 - Positive: a horizontal-dominant left swipe beginning inside the scrollable tree closes the drawer once.
+- Positive: a click on the full-stage backdrop outside the drawer panel closes the drawer.
+- Negative: the backdrop must not inherit a compact button height that leaves most of the terminal area outside its hit target.
 - Negative: a vertical-dominant list scroll does not close the drawer.
 - Negative: hiding `zterm-3` must not hide `zterm-30`; matching is exact trimmed session-name equality.
 - Negative: an unavailable row remains non-selectable even after a matching press.
@@ -91,6 +108,14 @@
 - `test:feature-registry`
 - Android typecheck
 - Android packaged real-device smoke: active `zterm` -> repeatedly edge-open/close drawer without catalog refresh or row reorder -> active remains `zterm`; no `routecodex2` transport/banner.
+
+## Current Evidence
+
+- `2026-09-17` candidate `0.1.3.3008` / `versionCode=1100030080`, APK sha256 `11ac61c4789d899ec7b62ce2920a4664330d6e58bf9ac7c7b59a546f88b0f801`; the debug APK and `update-dist/zterm-0.1.3.3008.apk` hashes match `update-dist/latest.json`.
+- Android typecheck passed. Focused render tests passed `80/80`; `test:feature-registry` passed `104/104`.
+- `pnpm --dir android run daemon:mirror:close-loop` passed all nine cases (`codex-live`, `top-live`, `vim-live`, `initial-sync`, `local-input-echo`, `long-input-echo`, `external-input-echo`, `daemon-restart-recover`, `schedule-fire`) at `2026-09-17T10:55:47.889Z`. `strict-audit.json` is `ok=true`; every case has `daemonCompare=true`, `clientCompare=true`, `stepsOk=true`, `compactWire=true`, plus the applicable `headReceived` / `bufferSyncReceived` or input-refresh checks. Each case contains the tmux oracle, daemon payload, `client-mirror-comparison.json`, and `source-and-client-render` step verification under `android/evidence/daemon-mirror/2026-09-17/`.
+- Installed with `adb -s emulator-5554 install -r`; package data remained at `dataDir=/data/user/0/com.zterm.android` with `firstInstallTime=2026-09-08 06:36:23`.
+- WebView smoke on the installed candidate: two consecutive portrait drawer open -> terminal-area click -> close rounds returned `data-state=closed` / `aria-hidden=true`; the overlay rect was `{x:0,y:0,w:800,h:1280}` and the terminal-area hit target was `terminal-session-drawer-overlay`. The active session remained `routecodex-1` and no catalog refresh or row reorder occurred.
 
 ## Known Gap
 

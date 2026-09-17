@@ -823,6 +823,7 @@ tmux truth
   4. 真机脚本必须确认 app surface 可见；keyguard/SystemUI 拥有焦点时只能标 L5 阻塞
 - `mirror-fixed` 横向滑动只能是 renderer projection：`.term-grid` 可按 session 记住水平 offset 并做 `translateX(-offset)`；禁止把横滑映射成 daemon resize、tmux width change、adaptive lease 或 buffer/mirror truth 修改。`adaptive-phone` 不响应横向 pan，它的宽度变化只走 daemon adaptive lease owner。
 - `mirror-fixed` 横向手势归属：只有 offset 已为 0 且起点在左缘热区内的右滑可交给 drawer；positive offset 右滑、非左缘右滑、右侧/中间横滑都必须由 `TerminalView` 消费并 `stopPropagation()`，即使 offset 已经被 clamp 到 0、视觉上不能继续移动。禁止只 `preventDefault()` 后让父层 `touchend` 解析成 drawer `previous`。
+- drawer 打开时 backdrop 必须覆盖完整 terminal stage 外部区域；普通 compact button 继承的 `min-height` 不得把 backdrop hit area 缩成顶部一条。terminal 区域真实点击只允许发 drawer close intent，不得切换 session、刷新 catalog、关闭 transport 或改写 buffer/renderer truth。
 
 ## Session preview truth
 
