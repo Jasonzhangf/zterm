@@ -44,10 +44,7 @@ export interface TerminalMessageControlRuntimeDeps {
   listTmuxSessions: (backend?: 'tmux' | 'herdr') => string[];
   listTerminalSessions?: () => string[];
   listTerminalSessionCatalog?: () => TerminalSessionCatalogEntry[];
-  refreshSessionCatalog?: () => void;
-  runTmux: (args: string[]) => { ok: true; stdout: string } | { ok: false; error: string };
-  observationHistory?: Map<string, import('./daemon-session-agent-status-runtime').DaemonSessionObservationHistoryEntry>;
-  readProcessGroup?: (pid: string) => { groupId: string; alive: boolean } | undefined;
+  refreshSessionCatalog?: () => Promise<unknown>;
   resolveTerminalSessionBackend?: (sessionName: string) => 'tmux' | 'herdr';
   createDetachedTmuxSession: (sessionName?: string, cwd?: string, backend?: 'tmux' | 'herdr') => string;
   closeDetachedTerminalSession: (sessionName: string, backend?: 'tmux' | 'herdr') => void;
@@ -323,17 +320,17 @@ export async function handleScheduleMessageRuntime(
   }
 }
 
-export function handleTmuxControlMessageRuntime(
+export async function handleTmuxControlMessageRuntime(
   deps: TerminalMessageControlRuntimeDeps,
   connection: TerminalTransportConnection,
   message:
     | { type: 'tmux-create-session'; payload: { sessionName: string; cwd?: string } }
     | { type: 'tmux-rename-session'; payload: { sessionName: string; nextSessionName: string } }
     | { type: 'tmux-kill-session'; payload: { sessionName: string } },
-): DaemonControlHandlerResult {
-  function publishCatalogAfterMutation(): DaemonControlHandlerResult {
+): Promise<DaemonControlHandlerResult> {
+  async function publishCatalogAfterMutation(): Promise<DaemonControlHandlerResult> {
     try {
-      deps.refreshSessionCatalog?.();
+      await deps.refreshSessionCatalog?.();
       deps.sendTransportMessage(connection.transport, {
         type: 'sessions',
         payload: buildSessionsCatalogPayload(deps),
@@ -361,7 +358,7 @@ export function handleTmuxControlMessageRuntime(
       try {
         const backend = 'tmux' as const;
         deps.createDetachedTmuxSession(message.payload.sessionName, message.payload.cwd, backend);
-        return publishCatalogAfterMutation();
+        return await publishCatalogAfterMutation();
       } catch (error) {
         const err = error instanceof Error ? error.message : String(error);
         deps.sendTransportMessage(connection.transport, {
@@ -398,7 +395,7 @@ export function handleTmuxControlMessageRuntime(
             deps.sendMessage(subscriber, { type: 'title', payload: nextName });
           }
         }
-        return publishCatalogAfterMutation();
+        return await publishCatalogAfterMutation();
       } catch (error) {
         const err = error instanceof Error ? error.message : String(error);
         deps.sendTransportMessage(connection.transport, {
@@ -424,7 +421,7 @@ export function handleTmuxControlMessageRuntime(
             releaseCode: 'tmux_session_killed',
           });
         }
-        return publishCatalogAfterMutation();
+        return await publishCatalogAfterMutation();
       } catch (error) {
         const err = error instanceof Error ? error.message : String(error);
         if (/can't find session|no server running|session not found/i.test(err)) {

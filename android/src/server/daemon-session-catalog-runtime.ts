@@ -8,23 +8,28 @@ import type {
   TerminalTransportConnection,
 } from './terminal-runtime-types';
 import { publishSessionActivitiesRuntime } from './terminal-session-activity-runtime';
-import { readDaemonSessionObservation } from './daemon-session-agent-status-runtime';
+import {
+  readDaemonSessionObservations,
+  type DaemonProcessGroupObservation,
+} from './daemon-session-agent-status-runtime';
 
 export interface DaemonSessionCatalogDeps {
   listTmuxSessions: (backend?: 'tmux' | 'herdr') => string[];
   listTerminalSessions?: () => string[];
   listTerminalSessionCatalog?: () => TerminalSessionCatalogEntry[];
-  runTmux?: (args: string[]) => { ok: true; stdout: string } | { ok: false; error: string };
-  readProcessGroup?: (pid: string) => { groupId: string; alive: boolean } | undefined;
+  runTmuxAsync?: (args: string[]) => Promise<{ ok: true; stdout: string }>;
+  readProcessGroup?: (
+    pid: string,
+  ) => DaemonProcessGroupObservation | undefined | Promise<DaemonProcessGroupObservation | undefined>;
   observationHistory?: Map<string, import('./daemon-session-agent-status-runtime').DaemonSessionObservationHistoryEntry>;
 }
 
 export interface DaemonSessionCatalogRuntime {
   read: (backend?: 'tmux' | 'herdr') => TerminalSessionCatalogEntry[];
-  refresh: (backend?: 'tmux' | 'herdr') => TerminalSessionCatalogEntry[];
+  refresh: (backend?: 'tmux' | 'herdr') => Promise<TerminalSessionCatalogEntry[]>;
   startRefreshLoop: (
     intervalMs?: number,
-    refresh?: () => TerminalSessionCatalogEntry[],
+    refresh?: () => Promise<TerminalSessionCatalogEntry[]>,
   ) => void;
   dispose: () => void;
 }
@@ -45,6 +50,7 @@ export function createDaemonSessionCatalogRuntime(
   let snapshot: TerminalSessionCatalogEntry[] | null = null;
   let invalidated = false;
   let refreshTimer: ReturnType<typeof setInterval> | null = null;
+  let refreshInFlight: Promise<TerminalSessionCatalogEntry[]> | null = null;
 
   function enumerate() {
     if (deps.listTerminalSessionCatalog) {
@@ -54,55 +60,107 @@ export function createDaemonSessionCatalogRuntime(
     return sessions.map((name) => ({ name, backend: 'tmux' as const }));
   }
 
-  function read(backend?: 'tmux' | 'herdr') {
-    if (invalidated) {
-      throw new Error('daemon session catalog is stale; explicit refresh required');
+  async function sampleObservations(entries: TerminalSessionCatalogEntry[]) {
+    if (!deps.runTmuxAsync) {
+      return entries.map((entry) => ({ ...entry }));
     }
-    const current = snapshot ?? (snapshot = enumerate());
-    return (backend ? current.filter((entry) => entry.backend === backend) : current)
-      .map((entry) => ({ ...entry }));
+    const tmuxEntries = entries.filter((entry) => entry.backend === 'tmux');
+    const observations = await readDaemonSessionObservations(
+      {
+        runTmuxAsync: deps.runTmuxAsync,
+        history: deps.observationHistory,
+        readProcessGroup: deps.readProcessGroup,
+      },
+      tmuxEntries.map((entry) => entry.name),
+      Date.now(),
+    );
+    return entries.map((entry) => {
+      const observation = entry.backend === 'tmux' ? observations.get(entry.name) : undefined;
+      return observation ? { ...entry, observation } : { ...entry };
+    });
   }
 
-  return {
-    read,
-    refresh(backend?: 'tmux' | 'herdr') {
+  function rebuild(backend?: 'tmux' | 'herdr'): Promise<TerminalSessionCatalogEntry[]> {
+    if (refreshInFlight) {
+      return refreshInFlight.then(() => read(backend), () => read(backend));
+    }
+    refreshInFlight = (async () => {
+      let entries: TerminalSessionCatalogEntry[];
       try {
-        snapshot = enumerate();
-        invalidated = false;
+        entries = enumerate();
       } catch (error) {
         snapshot = null;
         invalidated = true;
         throw error;
       }
+      if (snapshot === null) {
+        // Cold start: there is no last complete snapshot to preserve, so the
+        // real enumerated session list is published immediately and the
+        // sampled candidate replaces it when sampling commits.
+        snapshot = entries.map((entry) => ({ ...entry }));
+      }
+      let candidate: TerminalSessionCatalogEntry[];
+      try {
+        candidate = await sampleObservations(entries);
+      } catch (error) {
+        // Enumeration already produced the real session list; a failed
+        // observation sample must not hide live sessions or surface as a
+        // catalog failure to the caller. Publish the enumeration-only
+        // candidate explicitly instead of leaving a partially refreshed
+        // snapshot resident.
+        console.warn(
+          `[daemon.session_catalog] observation sampling failed; publishing enumeration-only snapshot: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+        candidate = entries.map((entry) => ({ ...entry }));
+      }
+      // Publish only after the candidate is complete so an in-flight cadence
+      // refresh keeps serving the last complete snapshot. The cold-start
+      // publication above is the only enumeration-only read window.
+      snapshot = candidate;
+      invalidated = false;
       return read(backend);
-    },
+    })().finally(() => {
+      refreshInFlight = null;
+    });
+    return refreshInFlight;
+  }
+
+  function read(backend?: 'tmux' | 'herdr') {
+    if (invalidated) {
+      throw new Error('daemon session catalog is stale; explicit refresh required');
+    }
+    if (!snapshot) {
+      throw new Error('daemon session catalog is not initialized; explicit refresh required');
+    }
+    const current = snapshot;
+    return (backend ? current.filter((entry) => entry.backend === backend) : current)
+      .map((entry) => (
+        entry.observation
+          ? { ...entry, observation: { ...entry.observation } }
+          : { ...entry }
+      ));
+  }
+
+  return {
+    read,
+    refresh: rebuild,
     startRefreshLoop(
       intervalMs = DAEMON_SESSION_CATALOG_REFRESH_INTERVAL_MS,
-      refresh = () => {
-        try {
-          snapshot = enumerate();
-          invalidated = false;
-        } catch (error) {
-          snapshot = null;
-          invalidated = true;
-          throw error;
-        }
-        return read();
-      },
+      refresh = () => rebuild(),
     ) {
       if (refreshTimer) {
         return;
       }
       refreshTimer = setInterval(() => {
-        try {
-          refresh();
-        } catch (error) {
+        void refresh().catch((error) => {
           console.warn(
             `[daemon.session_catalog] refresh failed, snapshot invalidated: ${
               error instanceof Error ? error.message : String(error)
             }`,
           );
-        }
+        });
       }, intervalMs);
       refreshTimer.unref?.();
     },
@@ -120,26 +178,21 @@ export function buildSessionsCatalogPayload(
   deps: DaemonSessionCatalogDeps,
   backend?: 'tmux' | 'herdr',
 ) {
-  const observe = (entries: TerminalSessionCatalogEntry[]) => entries.map((entry) => ({
-    ...entry,
-    ...(deps.runTmux && entry.backend === 'tmux'
-      ? { observation: readDaemonSessionObservation({ runTmux: deps.runTmux!, history: deps.observationHistory, readProcessGroup: deps.readProcessGroup }, entry.name, Date.now()) }
-      : {}),
-  }));
+  // Pure read-time projection: the daemon session catalog owner already sampled
+  // passive observation into its resident snapshot.
   if (backend) {
     if (!deps.listTerminalSessionCatalog) {
       throw new Error('backend session catalog requires daemon-owned terminal session catalog');
     }
-    const sessionCatalog = observe(
-      deps.listTerminalSessionCatalog().filter((entry) => entry.backend === backend),
-    );
+    const sessionCatalog = deps.listTerminalSessionCatalog()
+      .filter((entry) => entry.backend === backend);
     return {
       sessions: sessionCatalog.map((entry) => entry.name),
       sessionCatalog,
     };
   }
   if (deps.listTerminalSessionCatalog) {
-    const sessionCatalog = observe(deps.listTerminalSessionCatalog());
+    const sessionCatalog = deps.listTerminalSessionCatalog();
     return {
       sessions: sessionCatalog.map((entry) => entry.name),
       sessionCatalog,
@@ -148,7 +201,7 @@ export function buildSessionsCatalogPayload(
   const sessions = deps.listTerminalSessions ? deps.listTerminalSessions() : deps.listTmuxSessions();
   return {
     sessions,
-    sessionCatalog: observe(sessions.map((name) => ({ name, backend: 'tmux' as const }))),
+    sessionCatalog: sessions.map((name) => ({ name, backend: 'tmux' as const })),
   };
 }
 

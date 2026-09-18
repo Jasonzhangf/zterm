@@ -12,9 +12,16 @@ export interface DaemonSessionObservationHistoryEntry {
   idleConfirmations: number; lastPublishedAt?: number;
 }
 export interface DaemonSessionObservationDeps {
-  runTmux: (args: string[]) => { ok: true; stdout: string } | { ok: false; error: string };
-  readProcessGroup?: (pid: string) => DaemonProcessGroupObservation | undefined;
+  runTmuxAsync: (args: string[]) => Promise<{ ok: true; stdout: string }>;
+  readProcessGroup?: (
+    pid: string,
+  ) => DaemonProcessGroupObservation | undefined | Promise<DaemonProcessGroupObservation | undefined>;
   history?: Map<string, DaemonSessionObservationHistoryEntry>;
+}
+export interface DaemonPaneProcessFact {
+  sessionName: string;
+  processId?: string;
+  foregroundProcess?: string;
 }
 interface DaemonSessionAgentManifestEntry {
   process: RegExp; runningMarkers: readonly RegExp[]; idleMarkers: readonly RegExp[];
@@ -74,16 +81,121 @@ function classify(processName: string | undefined, processId: string | undefined
   return { status: candidate, statusReason: 'evidence-confirmed', stableRefreshDue };
 }
 
-export function readDaemonSessionObservation(deps: DaemonSessionObservationDeps, sessionName: string, observedAt: number): TerminalSessionObservation {
-  const paneResult = deps.runTmux(['list-panes', '-t', sessionName, '-F', '#{pane_pid}\t#{pane_current_command}']);
-  if (!paneResult.ok) { deps.history?.delete(sessionName); return { observedAt, recentOutput: false, oscTitleSeen: false, oscProgressSeen: false, status: 'error', statusReason: 'observation-error' }; }
-  const pane = paneResult.stdout.trim().split('\t');
-  const processId = pane[0]?.trim() || undefined;
-  const foregroundProcess = pane[1]?.trim() || undefined;
-  const processGroup = processId ? deps.readProcessGroup?.(processId) : undefined;
-  const outputResult = deps.runTmux(['capture-pane', '-p', '-e', '-t', sessionName, '-S', '-20']);
-  if (!outputResult.ok) { deps.history?.delete(sessionName); return { observedAt, ...(foregroundProcess ? { foregroundProcess } : {}), ...(processGroup ? { processGroupAlive: processGroup.alive } : {}), recentOutput: false, oscTitleSeen: false, oscProgressSeen: false, status: 'error', statusReason: 'observation-error' }; }
-  const output = outputResult.stdout;
-  const status = classify(foregroundProcess?.replace(/\.exe$/iu, '').trim(), processId, processGroup, output, observedAt, sessionName, deps.history);
-  return { observedAt, ...(foregroundProcess ? { foregroundProcess } : {}), ...(processGroup ? { processGroupAlive: processGroup.alive } : {}), recentOutput: output.trim().length > 0, oscTitleSeen: /\x1b\]0;|\x1b\]2;/u.test(output), oscProgressSeen: /\x1b\]9;|\x1b\]133;/u.test(output), ...status };
+function parsePaneProcessFacts(stdout: string) {
+  const facts = new Map<string, DaemonPaneProcessFact>();
+  for (const line of stdout.split('\n')) {
+    const [sessionNameRaw, processIdRaw, foregroundProcessRaw] = line.split('\t');
+    const sessionName = sessionNameRaw?.trim();
+    if (!sessionName || facts.has(sessionName)) continue;
+    const processId = processIdRaw?.trim() || undefined;
+    const foregroundProcess = foregroundProcessRaw?.trim() || undefined;
+    facts.set(sessionName, { sessionName, ...(processId ? { processId } : {}), ...(foregroundProcess ? { foregroundProcess } : {}) });
+  }
+  return facts;
+}
+
+function observationFromFacts(
+  deps: Pick<DaemonSessionObservationDeps, 'readProcessGroup' | 'history'>,
+  fact: DaemonPaneProcessFact,
+  processGroup: DaemonProcessGroupObservation | undefined,
+  output: string,
+  observedAt: number,
+): TerminalSessionObservation {
+  const status = classify(
+    fact.foregroundProcess?.replace(/\.exe$/iu, '').trim(),
+    fact.processId,
+    processGroup,
+    output,
+    observedAt,
+    fact.sessionName,
+    deps.history,
+  );
+  return {
+    observedAt,
+    ...(fact.foregroundProcess ? { foregroundProcess: fact.foregroundProcess } : {}),
+    ...(processGroup ? { processGroupAlive: processGroup.alive } : {}),
+    recentOutput: output.trim().length > 0,
+    oscTitleSeen: /\x1b\]0;|\x1b\]2;/u.test(output),
+    oscProgressSeen: /\x1b\]9;|\x1b\]133;/u.test(output),
+    ...status,
+  };
+}
+
+export async function readDaemonSessionObservations(
+  deps: DaemonSessionObservationDeps,
+  sessionNames: readonly string[],
+  observedAt: number,
+): Promise<Map<string, TerminalSessionObservation>> {
+  const observations = new Map<string, TerminalSessionObservation>();
+  if (sessionNames.length === 0) return observations;
+  let paneFacts: Map<string, DaemonPaneProcessFact>;
+  try {
+    const paneResult = await deps.runTmuxAsync([
+      'list-panes',
+      '-a',
+      '-F',
+      '#{session_name}\t#{pane_pid}\t#{pane_current_command}',
+    ]);
+    paneFacts = parsePaneProcessFacts(paneResult.stdout);
+  } catch {
+    for (const sessionName of sessionNames) {
+      deps.history?.delete(sessionName);
+      observations.set(sessionName, {
+        observedAt,
+        recentOutput: false,
+        oscTitleSeen: false,
+        oscProgressSeen: false,
+        status: 'error',
+        statusReason: 'observation-error',
+      });
+    }
+    return observations;
+  }
+
+  for (const sessionName of sessionNames) {
+    const fact = paneFacts.get(sessionName);
+    if (!fact) {
+      deps.history?.delete(sessionName);
+      observations.set(sessionName, {
+        observedAt,
+        recentOutput: false,
+        oscTitleSeen: false,
+        oscProgressSeen: false,
+        status: 'error',
+        statusReason: 'observation-error',
+      });
+      continue;
+    }
+    let processGroup: DaemonProcessGroupObservation | undefined;
+    try {
+      processGroup = fact.processId ? await deps.readProcessGroup?.(fact.processId) : undefined;
+    } catch {
+      processGroup = undefined;
+    }
+    try {
+      const outputResult = await deps.runTmuxAsync([
+        'capture-pane',
+        '-p',
+        '-e',
+        '-t',
+        sessionName,
+        '-S',
+        '-20',
+      ]);
+      observations.set(sessionName, observationFromFacts(deps, fact, processGroup, outputResult.stdout, observedAt));
+    } catch {
+      deps.history?.delete(sessionName);
+      observations.set(sessionName, {
+        observedAt,
+        ...(fact.foregroundProcess ? { foregroundProcess: fact.foregroundProcess } : {}),
+        ...(processGroup ? { processGroupAlive: processGroup.alive } : {}),
+        recentOutput: false,
+        oscTitleSeen: false,
+        oscProgressSeen: false,
+        status: 'error',
+        statusReason: 'observation-error',
+      });
+    }
+  }
+  return observations;
 }
