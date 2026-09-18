@@ -946,9 +946,11 @@ export function handleBufferHeadRuntime(options: {
     });
     return;
   }
+  const pendingResumeTailRefresh = options.refs.tailRefreshStoreRef.current.hasPendingResumeTailRefresh(options.sessionId);
   const needsTailRefresh = (
     revisionResetDetected
     || localWindowInvalid
+    || pendingResumeTailRefresh
     || shouldPullFollowBuffer(demandHead, visibleRange, plannerBuffer)
   );
   if (needsTailRefresh) {
@@ -956,7 +958,8 @@ export function handleBufferHeadRuntime(options: {
       reason:
         revisionResetDetected ? 'buffer-head-revision-reset'
           : localWindowInvalid ? 'buffer-head-invalid-local-window'
-            : 'buffer-head-update',
+            : pendingResumeTailRefresh ? 'buffer-head-resume-tail'
+              : 'buffer-head-update',
       purpose: 'tail-refresh',
       headOverride: demandHead,
       liveHead,

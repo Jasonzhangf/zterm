@@ -440,6 +440,7 @@ reconnect 语义也固定：
 
 - 若 transport 死了，buffer manager / session runtime 只能做 **same session identity** 的 transport retry
 - 不允许把 reconnect 实现成“先删 session 语义，再创建一个新 session 假装恢复”
+- explicit foreground resume 是显式 body freshness demand，不是普通重复 head。即使 daemon 返回相同 revision / latestEndIndex，也必须按 pending resume tail demand 请求一次 authoritative visible-window `buffer-sync`；不得用 numeric head equality 吞掉显式恢复请求。
 - reconnect bookkeeping 也必须按 **session** 隔离：
   - 不允许再做 `same host -> reconnect bucket -> activeSessionId` 的跨 session 串行门
   - 一个 session 的旧 ws / handshake 卡住，**不得**挡住同 host 其他 session 的 retry / resume / active re-entry
