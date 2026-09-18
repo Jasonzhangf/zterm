@@ -375,7 +375,6 @@ export function useSessionContextLifecycle(options: {
       sessionId: options.state.activeSessionId,
       source: 'active-reentry',
       forceHead: true,
-      markResumeTail: true,
       allowReconnectIfUnavailable: true,
     });
   }, [options.ensureActiveSessionFresh, options.state.activeSessionId]);

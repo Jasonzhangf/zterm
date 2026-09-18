@@ -502,7 +502,7 @@ describe('session-context-lifecycle', () => {
     expect(refreshedClearSessionHandshakeTimeout).not.toHaveBeenCalled();
   });
 
-  it('marks resume-tail when the active session changes through lifecycle reentry', async () => {
+  it('refreshes head without resume-tail when the active session changes through lifecycle reentry', async () => {
     vi.useFakeTimers();
     const ensureActiveSessionFresh = vi.fn(() => true);
     const lifecycleRefs = {
@@ -571,7 +571,6 @@ describe('session-context-lifecycle', () => {
       sessionId: 's2',
       source: 'active-reentry',
       forceHead: true,
-      markResumeTail: true,
       allowReconnectIfUnavailable: true,
     });
   });

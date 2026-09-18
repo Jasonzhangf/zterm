@@ -2548,6 +2548,87 @@ describe('SessionContext websocket dynamic refresh', () => {
     expect(MockWebSocket.physicalInstances).toHaveLength(1);
   });
 
+  it('refreshes the visible body on foreground resume when the daemon head revision and end are unchanged', async () => {
+    const view = render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws" appForegroundActive={false}>
+        <SessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitForMockSessionInstances(1);
+    const ws = MockWebSocket.instances[0]!;
+    ws.triggerOpen();
+    ws.triggerMessage({
+      type: 'connected',
+      payload: {
+        sessionId: 'session-1',
+      },
+    });
+    ws.triggerMessage({
+      type: 'buffer-sync',
+      payload: compactPayload({
+        startIndex: 0,
+        endIndex: 2,
+        revision: 1,
+        lines: [[0, 'foreground-old-line-001'], [1, 'foreground-old-line-002']],
+      }),
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('render-session-lines').textContent).toContain('foreground-old-line-001');
+    });
+    ws.sent.length = 0;
+
+    view.rerender(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws" appForegroundActive foregroundResumeEpoch={1}>
+        <SessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => {
+      expect(readSentMessages(ws).some((item) => item.type === 'buffer-head-request')).toBe(true);
+    });
+    ws.triggerMessage({
+      type: 'buffer-head',
+      payload: {
+        sessionId: 'session-1',
+        revision: 1,
+        latestEndIndex: 2,
+        availableStartIndex: 0,
+        availableEndIndex: 2,
+      },
+    });
+
+    await waitFor(() => {
+      expect(readSentMessages(ws)).toContainEqual({
+        type: 'buffer-sync-request',
+        payload: expect.objectContaining({
+          knownRevision: 1,
+          localStartIndex: 0,
+          localEndIndex: 2,
+          requestStartIndex: 0,
+          requestEndIndex: 2,
+        }),
+      });
+    });
+
+    ws.triggerMessage({
+      type: 'buffer-sync',
+      payload: compactPayload({
+        startIndex: 0,
+        endIndex: 2,
+        revision: 1,
+        lines: [[0, 'foreground-new-line-001'], [1, 'foreground-new-line-002']],
+      }),
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('render-session-lines').textContent).toContain('foreground-new-line-001');
+      expect(screen.getByTestId('render-session-lines').textContent).not.toContain('foreground-old-line-001');
+    });
+    expect(MockWebSocket.physicalInstances).toHaveLength(1);
+  });
+
 
   it('does not stack multiple active-tick probe loops across provider rerenders', async () => {
     vi.useFakeTimers();
