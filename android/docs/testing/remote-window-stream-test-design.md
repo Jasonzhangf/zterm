@@ -123,6 +123,7 @@ Current executable gates:
    - A session whose UI/runtime state is still `connecting` but whose physical session socket is already `OPEN` must be able to send exactly one `remote-window-targets-request`.
    - Catalog readiness must not reuse image/file paste readiness, because paste requires heavier terminal-session connected semantics.
    - If no open physical session socket exists, the picker must surface an explicit remote-window catalog transport error and must not wait for the paste timeout or emit `Active session is not ready yet`.
+   - A background-service reentry may report the active session mux channel as `closed` before reopening it. Catalog readiness must wait within the bounded catalog-open budget for that same session to transition through `opening` to `open`; a stale physical socket bound to the closed channel must never be reused, and a channel that stays closed must fail with the explicit transport error at timeout.
    - If `requestTargets()` never resolves or rejects, the overlay's local watchdog must surface `远程窗口列表读取超时` and move to an error state without starting screenshot/video/terminal-buffer fallback.
    - The overlay catalog watchdog must be longer than the daemon app-window catalog timeout, and live catalog probes must wait longer than that daemon timeout; otherwise the client/test times out before the unique daemon catalog owner can return its explicit error.
    - The negative gate must prove catalog failure does not start screenshot, terminal buffer render, hidden video, or transport rebuild fallback.
