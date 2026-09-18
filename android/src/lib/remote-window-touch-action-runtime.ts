@@ -613,17 +613,21 @@ export function resolveRemoteWindowTouchPointerDownRuntime(options: {
     && options.touchMode
     && pointer.pointerType === 'touch'
   ) {
-    return emptyResult({
-      mode: 'actionPending',
+    return withLocalEffect({
+      mode: 'localPan',
       pointerId: pointer.pointerId,
-      button,
       startClientX: pointer.clientX,
       startClientY: pointer.clientY,
       lastClientX: pointer.clientX,
       lastClientY: pointer.clientY,
       startAtMs: pointer.timeMs,
-      suppressTap: true,
-    }, true);
+      moved: false,
+    }, {
+      kind: 'local-pan-start',
+      pointerId: pointer.pointerId,
+      clientX: pointer.clientX,
+      clientY: pointer.clientY,
+    });
   }
   return emptyResult({
     mode: 'actionPending',

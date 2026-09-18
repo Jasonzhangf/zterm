@@ -158,7 +158,7 @@ import { RemoteWindowLockedToolbar } from './RemoteWindowLockedToolbar';
 import { RemoteWindowTargetPicker } from './RemoteWindowTargetPicker';
 import { RemoteWindowAppSwitch } from './RemoteWindowAppSwitch';
 import { RemoteWindowMorePanel } from './RemoteWindowMorePanel';
-import { useRemoteWindowQuality } from './useRemoteWindowQuality';
+import { useRemoteWindowQuality } from './useRemoteWindowQuality'; import { useRemoteWindowForegroundReentry } from './useRemoteWindowForegroundReentry';
 import { useRemoteWindowPlayback, type RemoteWindowVideoDebugSnapshot } from './useRemoteWindowPlayback';
 import { useRemoteWindowCompositeCanvas } from './useRemoteWindowCompositeCanvas';
 import { RemoteWindowVideoContent } from './RemoteWindowVideoContent';
@@ -219,7 +219,7 @@ export interface RemoteWindowOverlayProps {
   ) => void;
   resizeTargetWindow?: (sessionId: string, payload: Omit<RemoteWindowInputEventPayload, 'requestId'>) => string;
   onInputDebug?: (event: RemoteWindowTouchInputDebugEvent) => void;
-  bottomInsetPx?: number; bottomChromeInsetPx?: number; embedded?: boolean; embeddedFullscreen?: boolean; onExitEmbeddedFullscreen?: () => void;
+  bottomInsetPx?: number; bottomChromeInsetPx?: number; embedded?: boolean; embeddedFullscreen?: boolean; onExitEmbeddedFullscreen?: () => void; onCloseEmbedded?: () => void;
   onOpenResourceDrawer?: (tab: 'web' | 'stream') => void;
   onOpenStateChange?: (open: boolean) => void;
   onBodySubscriptionSuppressedChange?: (suppressed: boolean) => void;
@@ -269,7 +269,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   sendInput,
   resizeTargetWindow,
   onInputDebug,
-  bottomInsetPx = 0, bottomChromeInsetPx = 0, embedded = false, embeddedFullscreen = false, onExitEmbeddedFullscreen,
+  bottomInsetPx = 0, bottomChromeInsetPx = 0, embedded = false, embeddedFullscreen = false, onExitEmbeddedFullscreen, onCloseEmbedded,
   onOpenResourceDrawer,
   onOpenStateChange,
   onBodySubscriptionSuppressedChange,
@@ -483,6 +483,8 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       setStreamCapability(null);
     },
   });
+
+  useRemoteWindowForegroundReentry({ appForegroundActive, state, onReopenPicker: handleOpenPicker });
   const handleOpenBrowserPicker = useCallback(() => {
     setBrowserPickerOpen(true);
     handleOpenPicker();
@@ -930,10 +932,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     setFloatingOverlayWidthPx(null);
     resetFullscreenViewport();
     setFullscreenDisplayMode(initialFullscreenDisplayMode);
-    // Keep the revision across close: the daemon stream may outlive the
-    // overlay (e.g. background-close where stopStream is not authoritative),
-    // and its focusRevision is not reset. Resetting to 0 would make the next
-    // switch's revision<=daemon focusRevision and be rejected as stale.
+    // daemon stream may outlive the overlay; keep focusRevision across close so the next switch isn't rejected as stale.
     setDualStreamSwitch((current) => ({
       ...resetRemoteWindowDualStreamSwitch(current),
       activeTargetId: null,
@@ -942,7 +941,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       overviewCropTargetId: null,
       error: null,
     }));
-    setState((current) => closeRemoteWindowOverlay(current));
+    setState((current) => closeRemoteWindowOverlay(current)); if (embedded) onCloseEmbedded?.();
   }, [
     activeSessionId,
     clearSurfacePointerState,
@@ -955,6 +954,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     stopStream,
     clearCompositeThumbCanvases,
     resetQualityApplyState,
+    onCloseEmbedded,
   ]);
 
   useEffect(() => {
