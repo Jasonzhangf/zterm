@@ -459,6 +459,73 @@ describe('TerminalPreviewGrid', () => {
     expect(overviewFocusBody.style.height).toBe(bodyHeight);
   });
 
+  it('fits and centers the overview projection inside the preview viewport', () => {
+    setViewport(374, 706);
+    renderGrid();
+
+    const grid = screen.getByTestId('terminal-preview-grid');
+    const content = grid.lastElementChild as HTMLElement;
+    const contentRect = {
+      x: 0,
+      y: 0,
+      width: 374,
+      height: 706 - JUNCTION_PREVIEW_HEADER_HEIGHT_PX,
+      top: 0,
+      right: 374,
+      bottom: 706 - JUNCTION_PREVIEW_HEADER_HEIGHT_PX,
+      left: 0,
+      toJSON: () => ({}),
+    };
+    const resizeObservers: Array<() => void> = [];
+    const originalResizeObserver = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = class ResizeObserverMock {
+      private readonly callback: ResizeObserverCallback;
+
+      constructor(callback: ResizeObserverCallback) {
+        this.callback = callback;
+        resizeObservers.push(() => this.callback([], this as unknown as ResizeObserver));
+      }
+
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+    content.getBoundingClientRect = () => contentRect as DOMRect;
+    act(() => {
+      for (const trigger of resizeObservers) trigger();
+    });
+    globalThis.ResizeObserver = originalResizeObserver;
+
+    fireEvent.touchStart(grid, {
+      touches: [
+        { clientX: 100, clientY: 200 },
+        { clientX: 200, clientY: 200 },
+      ],
+    });
+    fireEvent.touchMove(grid, {
+      touches: [
+        { clientX: 125, clientY: 200 },
+        { clientX: 175, clientY: 200 },
+      ],
+    });
+
+    const scaler = screen.getByTestId('terminal-preview-scaler');
+    const fitScale = Number(scaler.dataset.previewEffectiveScale);
+    const contentWidth = Number(scaler.dataset.previewContentWidth);
+    const contentHeight = Number(scaler.dataset.previewContentHeight);
+    const translateX = Number(scaler.dataset.previewTranslateX);
+    const translateY = Number(scaler.dataset.previewTranslateY);
+
+    expect(fitScale).toBeGreaterThan(0);
+    expect(fitScale).toBeLessThanOrEqual(1);
+    expect(translateX).toBeGreaterThanOrEqual(0);
+    expect(translateY).toBeGreaterThanOrEqual(0);
+    expect(translateX + contentWidth * fitScale).toBeLessThanOrEqual(contentRect.width);
+    expect(translateY + contentHeight * fitScale).toBeLessThanOrEqual(contentRect.height);
+    expect(translateX).toBeCloseTo((contentRect.width - contentWidth * fitScale) / 2, 5);
+    expect(translateY).toBeCloseTo((contentRect.height - contentHeight * fitScale) / 2, 5);
+  });
+
   it('allows an empty-cell tap immediately after a pinch gesture', () => {
     setViewport(374, 706);
     renderGrid({
