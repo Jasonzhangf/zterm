@@ -1,15 +1,16 @@
 # Gate evidence: two-finger same-direction remote scroll never committed
 
-Candidate commit: a8646733666255e5c485cd89f035cf2c16ac5f2e
+Candidate commit: 3d9ae8c321c7c7ff3b4a1fbc5b33ddbeee3907a6
 Base: ddef58c8 (local main, build 3039); origin/main at the time: ace989e2
 Date: 2026-09-18
 
 ## Binding
 
 Source and test files under test, with their blob hashes in this commit:
-c46cdeff28349a813e0b293d3eeb487f700c6a2a  android/src/lib/remote-window-touch-action-runtime.ts
-ceb2903f24b9684a414df8fcbed9af6c23c9f489  android/src/lib/remote-window-touch-action-runtime.test.ts
-3b961e4a9f226d4d92f2b3fd7407141fe336934c  android/src/components/terminal/RemoteWindowOverlay.test.tsx
+  runtime          android/src/lib/remote-window-touch-action-runtime.ts
+  runtime test     android/src/lib/remote-window-touch-action-runtime.test.ts
+  overlay gate     android/src/components/terminal/RemoteWindowOverlay.test.tsx
+  evidence         android/evidence/rwd-2finger-scroll-0919/gate.txt
 
 The only file in this commit that is not covered by the gate commands below is this
 evidence file itself.
@@ -93,6 +94,44 @@ per-sample deltas.
    /private/tmp/zterm-main-8fdaeec-check. The probe's temporary .app bundle is not matched by
    the running daemon's window catalog in this environment, so this gate cannot run here.
    It is not evidence about this change either way.
+
+## Second defect found by on-device measurement (same root cause family)
+
+After the cumulative-commit fix, a wire-level re-measurement on emulator-5554 with the
+rebuilt 3042 candidate showed a two-finger same-direction swipe still delivered almost no
+scroll:
+
+  18 samples x 4.444 px -> 1 scroll frame (the commit frame only)
+   9 samples x 8.889 px -> 9 scroll frames
+
+Per-finger `pointermove` deltas measured on the device were exactly -4.4444 px with
+inter-arrival times of 17-175 ms. The device delivers the two fingers INTERLEAVED: sample i
+delivers finger A at y_i while finger B is still at y_{i-1}, then finger B at y_i. The
+overlay therefore calls the pair-pointer-move runtime once per delivered pointer event, so
+each call advances the midpoint by only half the finger step.
+
+Root cause: the latched `twoFingerScroll` update gate compared the PER-SAMPLE midpoint shift
+against `REMOTE_WINDOW_TWO_FINGER_SCROLL_DEADZONE_PX` (4 px). Half of a 4.444 px step is
+2.22 px, which never clears the 4 px deadzone, so every update frame was suppressed. This is
+the same class of bug as the commit gate: a per-sample quantity compared against a threshold
+calibrated for gesture-level travel, making behaviour depend on pointer delivery
+interleaving.
+
+Fix: the update gate now uses the same cumulative start-relative travel basis as the commit
+decision. Per-sample deltas remain the emitted scroll payload, so consecutive update frames
+still sum to the true gesture travel exactly once.
+
+Runtime replay of the interleaved delivery shape (one pointer per call, 18 samples):
+  step 4.444 px: before 1 event  -> after 33 events, sum(deltaY) = -66.48
+  step 8.889 px: before 35 events -> after 35 events, sum(deltaY) = -132.97
+The 8.889 px case was already proportional (35 events) and stays unchanged; the 4.444 px
+case goes from one frame to full proportionality. Both pointers in a single call (the shape
+the existing unit tests used) gave 17 events before and after, which is why the existing
+suite never caught this: the tests never modelled interleaved per-finger delivery.
+
+Fail-first: with the runtime reverted to the previous commit, the new
+"keeps interleaved two-finger samples proportional without double-counting travel" case
+fails with `expected 1 to be greater than or equal to 10`; with the fix it passes.
 
 ## Scroll delta trace (runtime level)
 
