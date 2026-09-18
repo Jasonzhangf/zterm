@@ -59,9 +59,7 @@ describe('terminal shell skin resolution', () => {
     expect(css).toContain('.zterm-neo-drawer');
     expect(css).toContain('.zterm-connection-route-menu');
     expect(css).toContain('.zterm-neo-quickbar[data-quickbar-surface="expanded"]');
-    expect(css).toContain(
-      'text-shadow: 0 -1px 0 color-mix(in srgb, var(--amb-panel-shadow) 100%, transparent);',
-    );
+    expect(css).toContain('text-shadow: var(--zterm-skeu-text-shadow) !important;');
     expect(css).not.toContain('0 -1px 0 rgba(31, 35, 40, 0.24),');
   });
 

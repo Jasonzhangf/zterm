@@ -8,7 +8,6 @@ import { mobileTheme } from '../../lib/mobile-ui';
 import { AmbientButton } from '../ambient';
 import {
   JUNCTION_PREVIEW_HEADER_HEIGHT_PX,
-  JUNCTION_PREVIEW_EDGE_PX,
   JUNCTION_PREVIEW_GAP_PX,
   resolveJunctionPreviewLayout,
 } from '../../lib/junction-preview-layout';
@@ -159,10 +158,12 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
 
   const focusWidth = layout.focusSizePx.width;
   const focusHeight = layout.focusSizePx.height;
-  const centerTop = JUNCTION_PREVIEW_EDGE_PX.topBottom + JUNCTION_PREVIEW_GAP_PX;
+  const sideSizePx = layout.side.sizePx;
+  const topBottomSizePx = layout.topBottomSizePx;
+  const centerTop = topBottomSizePx + JUNCTION_PREVIEW_GAP_PX;
   const centerLeft = layout.form === 'portrait' && layout.side.edge === 'right'
     ? 0
-    : JUNCTION_PREVIEW_EDGE_PX.side + JUNCTION_PREVIEW_GAP_PX;
+    : sideSizePx + JUNCTION_PREVIEW_GAP_PX;
   const cellRects = new Map<string, {
     clip: { left: number; top: number; width: number; height: number };
     pane: { left: number; top: number; width: number; height: number };
@@ -182,29 +183,29 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
       clip = { left: centerLeft, top: centerTop, width: focusWidth, height: focusHeight };
       pane = { left: centerLeft, top: centerTop, width: focusWidth, height: focusHeight };
     } else if (cell.edge === 'left') {
-      clip = { left: 0, top: centerTop, width: JUNCTION_PREVIEW_EDGE_PX.side, height: focusHeight };
+      clip = { left: 0, top: centerTop, width: sideSizePx, height: focusHeight };
       pane = { left: centerLeft - focusWidth, top: centerTop, width: focusWidth, height: focusHeight };
     } else if (cell.edge === 'right') {
       clip = {
-        left: layoutViewportWidth - JUNCTION_PREVIEW_EDGE_PX.side,
+        left: layoutViewportWidth - sideSizePx,
         top: centerTop,
-        width: JUNCTION_PREVIEW_EDGE_PX.side,
+        width: sideSizePx,
         height: focusHeight,
       };
       pane = { left: centerLeft + focusWidth, top: centerTop, width: focusWidth, height: focusHeight };
     } else if (cell.edge === 'top') {
       const topWidth = focusWidth;
       const topLeft = layout.form === 'landscape' ? focusWidth + JUNCTION_PREVIEW_GAP_PX : centerLeft;
-      clip = { left: topLeft, top: 0, width: topWidth, height: JUNCTION_PREVIEW_EDGE_PX.topBottom };
+      clip = { left: topLeft, top: 0, width: topWidth, height: topBottomSizePx };
       pane = { left: topLeft, top: centerTop - focusHeight, width: topWidth, height: focusHeight };
     } else if (cell.edge === 'bottom') {
       const bottomWidth = focusWidth;
       const bottomLeft = layout.form === 'landscape' ? focusWidth + JUNCTION_PREVIEW_GAP_PX : centerLeft;
       clip = {
         left: bottomLeft,
-        top: resolvedViewportHeight - JUNCTION_PREVIEW_EDGE_PX.topBottom,
+        top: resolvedViewportHeight - topBottomSizePx,
         width: bottomWidth,
-        height: JUNCTION_PREVIEW_EDGE_PX.topBottom,
+        height: topBottomSizePx,
       };
       pane = { left: bottomLeft, top: centerTop + focusHeight, width: bottomWidth, height: focusHeight };
     }

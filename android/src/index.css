@@ -184,35 +184,35 @@ label:focus {
   --zterm-panel-active-text: #424a53;
   --zterm-panel-muted: #6e7781;
   --zterm-panel-border: rgba(31, 35, 40, 0.12);
-  --zterm-panel-accent: #128354;
-  --zterm-panel-accent-soft: rgba(18, 131, 84, 0.12);
-  --zterm-panel-accent-border: rgba(18, 131, 84, 0.36);
+  --zterm-panel-accent: #111315;
+  --zterm-panel-accent-soft: rgba(17, 19, 21, 0.12);
+  --zterm-panel-accent-border: rgba(17, 19, 21, 0.36);
   --zterm-panel-danger: #c43e4d;
   --zterm-panel-danger-soft: rgba(196, 62, 77, 0.12);
   --zterm-panel-danger-border: rgba(196, 62, 77, 0.34);
   --zterm-panel-shadow: rgba(14, 19, 33, 0.18);
-  --zterm-neo-header-bg: var(--zterm-panel-bg);
-  --zterm-neo-quickbar-bg: var(--zterm-panel-bg);
-  --zterm-neo-border: rgba(23, 27, 45, 0.10);
-  --zterm-neo-base: #f6f8fa;
-  --zterm-neo-raised-bg: linear-gradient(145deg, #ffffff 0%, #edf0f3 100%);
+  --zterm-neo-header-bg: linear-gradient(180deg, var(--zterm-skeu-material-hover) 0%, var(--zterm-skeu-material) 100%);
+  --zterm-neo-quickbar-bg: linear-gradient(180deg, var(--zterm-skeu-material-hover) 0%, var(--zterm-skeu-material) 100%);
+  --zterm-neo-border: rgba(17, 19, 21, 0.16);
+  --zterm-neo-base: #eef0f2;
+  --zterm-neo-raised-bg: linear-gradient(145deg, var(--zterm-skeu-material-hover) 0%, var(--zterm-skeu-material) 100%);
   --zterm-neo-active: #ffffff;
-  --zterm-neo-pressed: #e9eef5;
+  --zterm-neo-pressed: #e6e9ec;
   --zterm-neo-highlight: rgba(255, 255, 255, 0.86);
   --zterm-neo-inset: rgba(125, 139, 159, 0.22);
   --zterm-neo-shadow: rgba(14, 19, 33, 0.16);
   --zterm-neo-text: #626b75;
   --zterm-neo-text-shadow: 0 1px 0 rgba(255, 255, 255, 0.82);
   --zterm-neo-active-text: #424a53;
-  --zterm-neo-accent: #128354;
-  --zterm-neo-focus: rgba(31, 214, 122, 0.58);
+  --zterm-neo-accent: #111315;
+  --zterm-neo-focus: rgba(17, 19, 21, 0.58);
   --zterm-fixed-cluster-bg: #e7eaee;
   --zterm-fixed-cluster-border: rgba(82, 96, 116, 0.12);
   --zterm-fixed-cluster-shadow: rgba(78, 91, 108, 0.10);
   --zterm-sheet-overlay: rgba(43, 52, 65, 0.24);
-  --zterm-dialog-info: #128354;
-  --zterm-dialog-info-soft: rgba(18, 131, 84, 0.12);
-  --zterm-dialog-info-border: rgba(18, 131, 84, 0.34);
+  --zterm-dialog-info: var(--zterm-panel-accent);
+  --zterm-dialog-info-soft: var(--zterm-panel-accent-soft);
+  --zterm-dialog-info-border: var(--zterm-panel-accent-border);
   --zterm-dialog-success: #1f9d5d;
   --zterm-dialog-success-soft: rgba(31, 157, 93, 0.12);
   --zterm-dialog-success-border: rgba(31, 157, 93, 0.34);
@@ -224,6 +224,22 @@ label:focus {
   --zterm-dialog-error-border: rgba(196, 62, 77, 0.34);
   --zterm-dialog-accent-text: #07110b;
   --zterm-video-bg: #050608;
+  /* Full-surface skeuomorphic material. Controls, cards and sheets consume
+   * these roles so light/black share one depth model instead of page-local
+   * shadows. The terminal renderer owns its own canvas colors. */
+  --zterm-skeu-material: #eef0f2;
+  --zterm-skeu-material-hover: #f5f6f8;
+  --zterm-skeu-material-active: #ffffff;
+  --zterm-skeu-material-pressed: #e6e9ec;
+  --zterm-skeu-well: #e7eaed;
+  --zterm-skeu-well-deep: #dfe3e7;
+  --zterm-skeu-edge-light: rgba(255, 255, 255, 0.94);
+  --zterm-skeu-edge-dark: rgba(17, 19, 21, 0.16);
+  --zterm-skeu-shadow-soft: rgba(17, 19, 21, 0.12);
+  --zterm-skeu-shadow-strong: rgba(17, 19, 21, 0.18);
+  --zterm-skeu-inset-shadow: inset 0 2px 5px rgba(17, 19, 21, 0.16);
+  --zterm-skeu-text-shadow: 0 1px 0 rgba(255, 255, 255, 0.84);
+  --zterm-skeu-text: #111315;
 }
 
 /* Graphite ramp: every tier stays off pure black and keeps a visible step from
@@ -241,28 +257,28 @@ label:focus {
   --zterm-panel-active-text: #ffffff;
   --zterm-panel-muted: #9aa3b1;
   --zterm-panel-border: rgba(245, 247, 251, 0.14);
-  --zterm-panel-accent: #38d47d;
-  --zterm-panel-accent-soft: rgba(56, 212, 125, 0.14);
-  --zterm-panel-accent-border: rgba(56, 212, 125, 0.38);
+  --zterm-panel-accent: #f2f5fa;
+  --zterm-panel-accent-soft: rgba(242, 245, 250, 0.14);
+  --zterm-panel-accent-border: rgba(242, 245, 250, 0.38);
   --zterm-panel-danger: #ff7a86;
   --zterm-panel-danger-soft: rgba(255, 122, 134, 0.14);
   --zterm-panel-danger-border: rgba(255, 122, 134, 0.38);
   --zterm-panel-shadow: rgba(0, 0, 0, 0.62);
-  --zterm-neo-header-bg: linear-gradient(180deg, #171b22 0%, #101318 100%);
-  --zterm-neo-quickbar-bg: linear-gradient(180deg, #151920 0%, #0f1217 100%);
+  --zterm-neo-header-bg: linear-gradient(180deg, var(--zterm-skeu-material-hover) 0%, var(--zterm-skeu-material) 100%);
+  --zterm-neo-quickbar-bg: linear-gradient(180deg, var(--zterm-skeu-material-hover) 0%, var(--zterm-skeu-material) 100%);
   --zterm-neo-border: rgba(245, 247, 251, 0.14);
-  --zterm-neo-base: #191d24;
-  --zterm-neo-raised-bg: linear-gradient(145deg, #272d37 0%, #171b22 100%);
-  --zterm-neo-active: #20252e;
-  --zterm-neo-pressed: #272d37;
+  --zterm-neo-base: #20252d;
+  --zterm-neo-raised-bg: linear-gradient(145deg, var(--zterm-skeu-material-hover) 0%, var(--zterm-skeu-material) 100%);
+  --zterm-neo-active: #29313b;
+  --zterm-neo-pressed: #171b21;
   --zterm-neo-highlight: rgba(255, 255, 255, 0.26);
   --zterm-neo-inset: rgba(0, 0, 0, 0.42);
   --zterm-neo-shadow: rgba(0, 0, 0, 0.62);
   --zterm-neo-text: #eef2f7;
   --zterm-neo-text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.62);
   --zterm-neo-active-text: #ffffff;
-  --zterm-neo-accent: #38d47d;
-  --zterm-neo-focus: rgba(56, 212, 125, 0.64);
+  --zterm-neo-accent: #f2f5fa;
+  --zterm-neo-focus: rgba(242, 245, 250, 0.64);
   --zterm-fixed-cluster-bg: #1c2129;
   --zterm-fixed-cluster-border: rgba(255, 255, 255, 0.14);
   --zterm-fixed-cluster-shadow: rgba(0, 0, 0, 0.46);
@@ -270,9 +286,9 @@ label:focus {
   --zterm-dialog-info: var(--zterm-panel-accent);
   --zterm-dialog-info-soft: rgba(56, 212, 125, 0.14);
   --zterm-dialog-info-border: rgba(56, 212, 125, 0.38);
-  --zterm-dialog-success: #38d47d;
-  --zterm-dialog-success-soft: rgba(56, 212, 125, 0.14);
-  --zterm-dialog-success-border: rgba(56, 212, 125, 0.38);
+  --zterm-dialog-success: #d9f0e4;
+  --zterm-dialog-success-soft: rgba(217, 240, 228, 0.14);
+  --zterm-dialog-success-border: rgba(217, 240, 228, 0.38);
   --zterm-dialog-warning: #ffb454;
   --zterm-dialog-warning-soft: rgba(255, 180, 84, 0.14);
   --zterm-dialog-warning-border: rgba(255, 180, 84, 0.38);
@@ -281,6 +297,19 @@ label:focus {
   --zterm-dialog-error-border: rgba(255, 122, 134, 0.38);
   --zterm-dialog-accent-text: #07110b;
   --zterm-video-bg: #10141a;
+  --zterm-skeu-material: #20252d;
+  --zterm-skeu-material-hover: #282e37;
+  --zterm-skeu-material-active: #29313b;
+  --zterm-skeu-material-pressed: #171b21;
+  --zterm-skeu-well: #15191f;
+  --zterm-skeu-well-deep: #101318;
+  --zterm-skeu-edge-light: rgba(255, 255, 255, 0.20);
+  --zterm-skeu-edge-dark: rgba(0, 0, 0, 0.62);
+  --zterm-skeu-shadow-soft: rgba(0, 0, 0, 0.44);
+  --zterm-skeu-shadow-strong: rgba(0, 0, 0, 0.68);
+  --zterm-skeu-inset-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.76);
+  --zterm-skeu-text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.68);
+  --zterm-skeu-text: #f2f5fa;
 }
 
 .zterm-neo-header,
@@ -294,15 +323,15 @@ label:focus {
 }
 
 .zterm-neo-drawer {
-  background: var(--zterm-panel-bg) !important;
-  color: var(--zterm-panel-text) !important;
-  border-right-color: var(--zterm-panel-border) !important;
+  background: var(--zterm-skeu-material) !important;
+  color: var(--zterm-skeu-text) !important;
+  border-right-color: var(--zterm-skeu-edge-dark) !important;
 }
 
 .zterm-neo-drawer input {
-  background: var(--zterm-panel-surface) !important;
-  color: var(--zterm-panel-text) !important;
-  border-color: var(--zterm-panel-border) !important;
+  background: var(--zterm-skeu-well) !important;
+  color: var(--zterm-skeu-text) !important;
+  border-color: var(--zterm-skeu-edge-dark) !important;
 }
 
 .zterm-neo-drawer input::placeholder {
@@ -310,43 +339,67 @@ label:focus {
 }
 
 .zterm-neo-drawer button:active {
-  background: var(--zterm-neo-pressed) !important;
+  background: var(--zterm-skeu-material-pressed) !important;
 }
 
 .zterm-connection-status-strip {
-  color: var(--zterm-panel-text) !important;
+  color: var(--zterm-skeu-text) !important;
 }
 
 .zterm-connection-route-menu {
-  background: var(--zterm-panel-bg) !important;
-  color: var(--zterm-panel-text) !important;
-  border-color: var(--zterm-panel-border) !important;
-  box-shadow: 0 18px 42px var(--zterm-panel-shadow) !important;
+  background: var(--zterm-skeu-material) !important;
+  color: var(--zterm-skeu-text) !important;
+  border-color: var(--zterm-skeu-edge-dark) !important;
+  box-shadow: 0 18px 42px var(--zterm-skeu-shadow-strong) !important;
 }
 
 .zterm-connection-route-menu button,
 .zterm-copy-menu button {
-  background: var(--zterm-panel-surface) !important;
-  color: var(--zterm-panel-text) !important;
-  border-color: var(--zterm-panel-border) !important;
+  background: var(--zterm-skeu-material) !important;
+  color: var(--zterm-skeu-text) !important;
+  border-color: var(--zterm-skeu-edge-dark) !important;
 }
 
 .zterm-copy-menu {
-  background: var(--zterm-panel-bg) !important;
-  border-color: var(--zterm-panel-border) !important;
-  box-shadow: 0 14px 32px var(--zterm-panel-shadow) !important;
+  background: var(--zterm-skeu-material) !important;
+  border-color: var(--zterm-skeu-edge-dark) !important;
+  box-shadow: 0 14px 32px var(--zterm-skeu-shadow-strong) !important;
 }
 
 .zterm-neo-header {
   background: var(--zterm-neo-header-bg) !important;
   border-bottom: 1px solid var(--zterm-neo-border) !important;
   box-shadow:
-    inset 0 1px 0 var(--neo-highlight),
-    0 8px 18px var(--neo-shadow);
+    inset 0 1px 0 var(--zterm-skeu-edge-light),
+    0 8px 18px var(--zterm-skeu-shadow-soft);
 }
 
 .zterm-neo-header > div {
   border-right-color: var(--zterm-neo-border) !important;
+}
+
+.zterm-neo-header [data-tab-id],
+.zterm-neo-header [data-testid^="pane-plus-"],
+.zterm-neo-header [data-testid^="pane-tab-close-"] {
+  border-color: var(--zterm-skeu-edge-dark) !important;
+  background: var(--zterm-skeu-material) !important;
+  color: var(--zterm-settings-text) !important;
+  text-shadow: var(--zterm-skeu-text-shadow) !important;
+  box-shadow:
+    inset 1px 1px 0 var(--zterm-skeu-edge-light),
+    inset -1px -1px 0 color-mix(in srgb, var(--zterm-skeu-edge-dark) 58%, transparent),
+    0 3px 8px var(--zterm-skeu-shadow-soft) !important;
+}
+
+.zterm-neo-header [data-tab-id][data-tab-active="true"],
+.zterm-neo-header [data-tab-id][aria-selected="true"] {
+  border-color: var(--zterm-settings-accent-border) !important;
+  background: var(--zterm-skeu-material-active) !important;
+  color: var(--zterm-settings-accent) !important;
+  box-shadow:
+    inset 2px 2px 5px color-mix(in srgb, var(--zterm-skeu-edge-dark) 64%, transparent),
+    inset -1px -1px 0 var(--zterm-skeu-edge-light),
+    0 0 0 1px color-mix(in srgb, var(--zterm-settings-accent) 16%, transparent) !important;
 }
 
 .zterm-neo-header button {
@@ -355,9 +408,9 @@ label:focus {
   background: var(--zterm-neo-raised-bg) !important;
   color: var(--neo-text) !important;
   box-shadow:
-    inset 1px 1px 0 var(--neo-highlight),
-    inset -2px -3px 5px rgba(0, 0, 0, 0.42),
-    4px 5px 8px var(--neo-shadow) !important;
+    inset 1px 1px 0 var(--zterm-skeu-edge-light),
+    inset -1px -1px 0 color-mix(in srgb, var(--zterm-skeu-edge-dark) 58%, transparent),
+    0 4px 10px var(--zterm-skeu-shadow-soft) !important;
 }
 
 .zterm-neo-header button[aria-selected="true"],
@@ -367,9 +420,9 @@ label:focus {
   background: var(--zterm-neo-active) !important;
   color: var(--zterm-neo-active-text) !important;
   box-shadow:
-    inset 1px 1px 0 var(--neo-highlight),
-    inset 0 -3px 5px var(--zterm-neo-inset),
-    4px 5px 10px var(--neo-shadow) !important;
+    inset 2px 2px 5px color-mix(in srgb, var(--zterm-skeu-edge-dark) 64%, transparent),
+    inset -1px -1px 0 var(--zterm-skeu-edge-light),
+    0 2px 6px var(--zterm-skeu-shadow-soft) !important;
 }
 
 .zterm-neo-header button[aria-label="关闭当前 tab"] {
@@ -380,17 +433,15 @@ label:focus {
 .zterm-neo-quickbar > button:active,
 .zterm-neo-quickbar [data-quickbar-shell-row="true"] button:active {
   transform: translateY(1px);
-  box-shadow:
-    inset 2px 2px 5px color-mix(in srgb, var(--amb-panel-shadow) 68%, transparent),
-    inset -1px -1px 0 var(--amb-highlight-color) !important;
+  box-shadow: var(--zterm-skeu-inset-shadow) !important;
 }
 
 .zterm-neo-quickbar[data-quickbar-surface="expanded"] {
-  background: var(--amb-panel-bg) !important;
-  border-top: 1px solid var(--amb-panel-border) !important;
+  background: var(--zterm-skeu-material) !important;
+  border-top: 1px solid var(--zterm-skeu-edge-dark) !important;
   box-shadow:
-    inset 0 1px 0 var(--amb-highlight-color),
-    0 -10px 22px var(--amb-panel-shadow);
+    inset 0 1px 0 var(--zterm-skeu-edge-light),
+    0 -10px 22px var(--zterm-skeu-shadow-soft);
 }
 
 .zterm-neo-quickbar [data-quickbar-shell-row="true"] {
@@ -398,47 +449,53 @@ label:focus {
 }
 
 .zterm-neo-quickbar [data-quickbar-fixed-cluster="true"] {
-  background: var(--amb-panel-bg) !important;
-  border-color: var(--amb-panel-border) !important;
-  box-shadow: inset 0 1px 0 var(--amb-highlight-color), 0 2px 5px var(--amb-panel-shadow) !important;
+  background: var(--zterm-skeu-well) !important;
+  border-color: var(--zterm-skeu-edge-dark) !important;
+  box-shadow:
+    inset 0 2px 6px color-mix(in srgb, var(--zterm-skeu-edge-dark) 72%, transparent),
+    inset 0 -1px 0 var(--zterm-skeu-edge-light) !important;
 }
 
 .zterm-quick-input-panel {
-  background: var(--amb-panel-bg) !important;
-  color: var(--amb-panel-text) !important;
-  border-color: var(--amb-panel-border) !important;
-  box-shadow: 0 20px 50px var(--amb-panel-shadow) !important;
+  background: var(--zterm-skeu-material) !important;
+  color: var(--zterm-skeu-text) !important;
+  border-color: var(--zterm-skeu-edge-dark) !important;
+  box-shadow: 0 20px 50px var(--zterm-skeu-shadow-strong) !important;
 }
 
 .zterm-quick-input-editor-shell,
 .zterm-quick-input-panel textarea {
-  background: var(--amb-panel-surface) !important;
-  color: var(--amb-panel-text) !important;
-  border-color: var(--amb-panel-border) !important;
+  background: var(--zterm-skeu-well) !important;
+  color: var(--zterm-skeu-text) !important;
+  border-color: var(--zterm-skeu-edge-dark) !important;
 }
 
 .zterm-quick-input-panel textarea::placeholder {
-  color: var(--amb-panel-muted);
+  color: var(--zterm-settings-muted);
 }
 
 .zterm-quick-input-panel button {
-  background: var(--amb-panel-surface) !important;
-  color: var(--amb-panel-text) !important;
-  border-color: var(--amb-panel-border) !important;
+  background: var(--zterm-skeu-material) !important;
+  color: var(--zterm-skeu-text) !important;
+  border-color: var(--zterm-skeu-edge-dark) !important;
 }
 
 .zterm-quick-input-panel button[aria-pressed="true"],
 .zterm-quick-input-panel button[data-active="true"] {
-  background: var(--amb-panel-active) !important;
-  color: var(--amb-panel-accent) !important;
+  background: var(--zterm-skeu-material-active) !important;
+  color: var(--zterm-panel-accent) !important;
+  box-shadow:
+    inset 2px 2px 5px color-mix(in srgb, var(--zterm-skeu-edge-dark) 64%, transparent),
+    inset -1px -1px 0 var(--zterm-skeu-edge-light),
+    0 0 0 1px color-mix(in srgb, var(--zterm-panel-accent) 16%, transparent) !important;
 }
 
 .zterm-quick-input-panel > div:first-child {
-  border-bottom-color: var(--amb-panel-border) !important;
+  border-bottom-color: var(--zterm-skeu-edge-dark) !important;
 }
 
 .zterm-quick-input-panel [data-quick-input-muted="true"] {
-  color: var(--amb-panel-muted) !important;
+  color: var(--zterm-settings-muted) !important;
 }
 
 .zterm-file-sheet-overlay {
@@ -446,40 +503,40 @@ label:focus {
 }
 
 .zterm-file-sheet {
-  background: var(--zterm-panel-bg) !important;
-  color: var(--zterm-panel-text) !important;
-  border-color: var(--zterm-panel-border) !important;
-  box-shadow: 0 -16px 40px var(--zterm-panel-shadow) !important;
+  background: var(--zterm-skeu-material) !important;
+  color: var(--zterm-skeu-text) !important;
+  border-color: var(--zterm-skeu-edge-dark) !important;
+  box-shadow: 0 -16px 40px var(--zterm-skeu-shadow-strong) !important;
 }
 
 .zterm-file-sheet [data-file-sheet-surface="true"],
 .zterm-file-sheet textarea {
-  background: var(--zterm-panel-surface) !important;
-  color: var(--zterm-panel-text) !important;
-  border-color: var(--zterm-panel-border) !important;
+  background: var(--zterm-skeu-well) !important;
+  color: var(--zterm-skeu-text) !important;
+  border-color: var(--zterm-skeu-edge-dark) !important;
 }
 
 .zterm-neo-quickbar > button,
 .zterm-neo-quickbar [data-quickbar-shell-row="true"] button {
-  border: 1px solid var(--amb-panel-border) !important;
+  border: 1px solid var(--zterm-skeu-edge-dark) !important;
   border-radius: 12px !important;
-  background: var(--amb-panel-surface) !important;
-  color: var(--amb-panel-text) !important;
-  text-shadow: 0 -1px 0 color-mix(in srgb, var(--amb-panel-shadow) 100%, transparent);
+  background: var(--zterm-skeu-material) !important;
+  color: var(--zterm-skeu-text) !important;
+  text-shadow: var(--zterm-skeu-text-shadow) !important;
   box-shadow:
-    inset 1px 1px 1px var(--amb-highlight-color),
-    inset -2px -3px 5px color-mix(in srgb, var(--amb-panel-shadow) 68%, transparent),
-    3px 4px 8px var(--amb-panel-shadow) !important;
+    inset 1px 1px 0 var(--zterm-skeu-edge-light),
+    inset -1px -1px 0 color-mix(in srgb, var(--zterm-skeu-edge-dark) 58%, transparent),
+    0 3px 8px var(--zterm-skeu-shadow-soft) !important;
 }
 
 .zterm-neo-quickbar > button[aria-pressed="true"],
 .zterm-neo-quickbar [data-quickbar-shell-row="true"] button[aria-pressed="true"] {
-  background: var(--amb-panel-active) !important;
-  color: var(--amb-panel-accent) !important;
+  background: var(--zterm-skeu-material-active) !important;
+  color: var(--zterm-panel-accent) !important;
   box-shadow:
-    inset 2px 2px 5px color-mix(in srgb, var(--amb-panel-shadow) 68%, transparent),
-    inset -1px -1px 0 var(--amb-highlight-color),
-    0 0 0 1px var(--amb-panel-accent-border) !important;
+    inset 2px 2px 5px color-mix(in srgb, var(--zterm-skeu-edge-dark) 64%, transparent),
+    inset -1px -1px 0 var(--zterm-skeu-edge-light),
+    0 0 0 1px color-mix(in srgb, var(--zterm-panel-accent) 16%, transparent) !important;
 }
 
 .zterm-neo-quickbar > button:disabled,
@@ -583,4 +640,182 @@ label:focus {
   --amb-elevation: 1;
   --amb-thickness: .65;
   --amb-mat-roughness: .82;
+}
+
+/* App-wide skeuomorphic surfaces. Page components keep their structure and
+ * geometry; these classes own only the shared material/depth language.
+ * The terminal renderer canvas is intentionally excluded. */
+.connections-home-shell,
+[data-testid="settings-scroll"],
+[data-testid="connection-properties-scroll"] {
+  background:
+    radial-gradient(120% 80% at 50% -20%, color-mix(in srgb, var(--zterm-skeu-edge-light) 36%, transparent), transparent 62%),
+    var(--zterm-settings-background) !important;
+}
+
+[data-testid="connections-home-header"],
+[data-testid="settings-scroll"] > div:first-child,
+[data-testid="connection-properties-scroll"] > div:first-child {
+  background: color-mix(in srgb, var(--zterm-settings-background) 92%, transparent) !important;
+  border-bottom-color: var(--zterm-skeu-edge-dark) !important;
+  box-shadow:
+    inset 0 1px 0 var(--zterm-skeu-edge-light),
+    0 8px 18px var(--zterm-skeu-shadow-soft) !important;
+}
+
+.zterm-skeu-card,
+.zterm-skeu-sheet,
+.zterm-settings-group > [data-settings-group-content] > div,
+[data-testid="resource-bottom-sheet"],
+.zterm-file-sheet,
+[data-testid="zterm-dialog-panel"],
+[data-testid="rename-dialog"] > div {
+  background: var(--zterm-skeu-material) !important;
+  border-color: var(--zterm-skeu-edge-dark) !important;
+  box-shadow:
+    inset 1px 1px 0 var(--zterm-skeu-edge-light),
+    inset -1px -1px 0 color-mix(in srgb, var(--zterm-skeu-edge-dark) 58%, transparent),
+    0 6px 14px var(--zterm-skeu-shadow-soft),
+    0 18px 34px var(--zterm-skeu-shadow-strong) !important;
+}
+
+.zterm-skeu-card {
+  border-radius: 18px !important;
+  border: 1px solid var(--zterm-skeu-edge-dark) !important;
+}
+
+.zterm-skeu-sheet {
+  border-radius: 22px !important;
+  border: 1px solid var(--zterm-skeu-edge-dark) !important;
+}
+
+.zterm-settings-group > summary {
+  background: var(--zterm-skeu-material) !important;
+  border: 1px solid var(--zterm-skeu-edge-dark) !important;
+  border-radius: 16px !important;
+  padding-inline: 14px !important;
+  box-shadow:
+    inset 1px 1px 0 var(--zterm-skeu-edge-light),
+    inset -1px -1px 0 color-mix(in srgb, var(--zterm-skeu-edge-dark) 58%, transparent),
+    0 5px 12px var(--zterm-skeu-shadow-soft) !important;
+}
+
+.zterm-settings-group[open] > summary {
+  border-bottom-left-radius: 10px !important;
+  border-bottom-right-radius: 10px !important;
+  background: var(--zterm-skeu-material-active) !important;
+  box-shadow:
+    inset 2px 2px 5px color-mix(in srgb, var(--zterm-skeu-edge-dark) 64%, transparent),
+    inset -1px -1px 0 var(--zterm-skeu-edge-light),
+    0 2px 6px var(--zterm-skeu-shadow-soft) !important;
+}
+
+.zterm-settings-group > [data-settings-group-content] {
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--zterm-skeu-well) 82%, var(--zterm-settings-background)) !important;
+  box-shadow:
+    inset 0 2px 6px color-mix(in srgb, var(--zterm-skeu-edge-dark) 72%, transparent),
+    inset 0 -1px 0 var(--zterm-skeu-edge-light) !important;
+}
+
+.zterm-skeu-well,
+.zterm-skeu-input,
+.amb-field,
+.zterm-neo-drawer input,
+.zterm-quick-input-editor-shell,
+.zterm-file-sheet textarea,
+.zterm-file-sheet input,
+[data-testid="zterm-dialog-panel"] input,
+[data-testid="rename-dialog"] input {
+  background: var(--zterm-skeu-well) !important;
+  color: var(--zterm-skeu-text) !important;
+  border-color: var(--zterm-skeu-edge-dark) !important;
+  box-shadow: var(--zterm-skeu-inset-shadow) !important;
+  text-shadow: none !important;
+}
+
+.zterm-skeu-raised,
+.zterm-neo-drawer button,
+.zterm-connection-route-menu button,
+.zterm-copy-menu button,
+.zterm-file-sheet button,
+[data-testid="resource-bottom-sheet"] button,
+[data-testid="zterm-dialog-panel"] button,
+[data-testid="rename-dialog"] button {
+  background: var(--zterm-skeu-material) !important;
+  color: var(--zterm-skeu-text) !important;
+  border-color: var(--zterm-skeu-edge-dark) !important;
+  text-shadow: var(--zterm-skeu-text-shadow) !important;
+  box-shadow:
+    inset 1px 1px 0 var(--zterm-skeu-edge-light),
+    inset -1px -1px 0 color-mix(in srgb, var(--zterm-skeu-edge-dark) 58%, transparent),
+    0 4px 10px var(--zterm-skeu-shadow-soft) !important;
+}
+
+.zterm-skeu-raised[data-selected="true"] {
+  background: var(--zterm-skeu-material-active) !important;
+  border-color: var(--zterm-settings-accent-border) !important;
+  color: var(--zterm-settings-accent) !important;
+}
+
+.zterm-skeu-raised[data-amb-pressed="true"] {
+  background: var(--zterm-skeu-material-pressed) !important;
+  box-shadow: var(--zterm-skeu-inset-shadow) !important;
+  transform: translateY(1px);
+}
+
+.zterm-skeu-raised:hover,
+.zterm-neo-drawer button:hover,
+.zterm-file-sheet button:hover,
+[data-testid="resource-bottom-sheet"] button:hover,
+[data-testid="zterm-dialog-panel"] button:hover,
+[data-testid="rename-dialog"] button:hover {
+  background: var(--zterm-skeu-material-hover) !important;
+}
+
+.zterm-skeu-raised:active,
+.zterm-neo-drawer button:active,
+.zterm-file-sheet button:active,
+[data-testid="resource-bottom-sheet"] button:active,
+[data-testid="zterm-dialog-panel"] button:active,
+[data-testid="rename-dialog"] button:active {
+  background: var(--zterm-skeu-material-pressed) !important;
+  box-shadow: var(--zterm-skeu-inset-shadow) !important;
+  transform: translateY(1px);
+}
+
+.zterm-skeu-raised[aria-pressed="true"],
+.zterm-skeu-raised[aria-selected="true"],
+.zterm-skeu-raised[data-active="true"],
+.zterm-neo-drawer button[aria-pressed="true"],
+.zterm-neo-drawer button[aria-selected="true"],
+.zterm-neo-drawer button[data-active="true"] {
+  background: var(--zterm-skeu-material-active) !important;
+  color: var(--zterm-panel-accent) !important;
+  border-color: var(--zterm-panel-accent-border) !important;
+  box-shadow:
+    inset 2px 2px 5px color-mix(in srgb, var(--zterm-skeu-edge-dark) 64%, transparent),
+    inset -1px -1px 0 var(--zterm-skeu-edge-light),
+    0 0 0 1px color-mix(in srgb, var(--zterm-panel-accent) 16%, transparent) !important;
+}
+
+.zterm-skeu-raised:disabled,
+.zterm-neo-drawer button:disabled,
+.zterm-file-sheet button:disabled,
+[data-testid="resource-bottom-sheet"] button:disabled,
+[data-testid="zterm-dialog-panel"] button:disabled,
+[data-testid="rename-dialog"] button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+  box-shadow: var(--zterm-skeu-inset-shadow) !important;
+}
+
+[data-zterm-input-modality="keyboard"] .zterm-skeu-raised:focus-visible,
+[data-zterm-input-modality="keyboard"] .zterm-neo-drawer button:focus-visible,
+[data-zterm-input-modality="keyboard"] .zterm-file-sheet button:focus-visible,
+[data-zterm-input-modality="keyboard"] [data-testid="resource-bottom-sheet"] button:focus-visible,
+[data-zterm-input-modality="keyboard"] [data-testid="zterm-dialog-panel"] button:focus-visible,
+[data-zterm-input-modality="keyboard"] [data-testid="rename-dialog"] button:focus-visible {
+  outline: 2px solid var(--zterm-panel-accent) !important;
+  outline-offset: 2px;
 }
