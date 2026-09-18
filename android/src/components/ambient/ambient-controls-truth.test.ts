@@ -374,6 +374,7 @@ describe('ambient control ownership truth', () => {
     const forbidden = [
       /background(?:Color)?:\s*['"]var\(--zterm-(?:settings|panel)-accent\)['"]/,
       /background(?:Color)?:\s*['"]var\(--zterm-skeu-material-active\)['"][\s\S]{0,120}?color:\s*['"]var\(--zterm-(?:settings|panel)-accent-text\)['"]/,
+      /actionButtonStyle\(\s*SHEET_ACCENT\s*,/,
     ];
     for (const file of files) {
       const source = read(file);
