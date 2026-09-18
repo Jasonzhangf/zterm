@@ -1,8 +1,17 @@
-import { memo, useEffect, useLayoutEffect, useRef, useState, type PointerEvent } from 'react';
+import {
+  memo,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type PointerEvent,
+  type TouchEvent,
+} from 'react';
 import { TERMINAL_DRAWER_EDGE_SWIPE_START_PX } from '@zterm/shared';
 import { TerminalView } from '../TerminalView';
 import type { SessionRenderBufferStore } from '../../lib/session-render-buffer-store';
 import type { Session } from '../../lib/types';
+import type { TerminalSessionDrawerItem } from '../../lib/plugin-session-drawer/session-drawer-contract';
 import { getServerIdentityTone, resolveServerDisplayName } from '../../lib/server-identity';
 import { mobileTheme } from '../../lib/mobile-ui';
 import { AmbientButton } from '../ambient';
@@ -21,6 +30,7 @@ export interface TerminalPreviewGridProps {
   lattice: JunctionPreviewLatticeV1;
   focus: JunctionPreviewCoordinate;
   candidates: Session[];
+  slotMenuCandidates?: TerminalSessionDrawerItem[];
   sessionBufferStore?: SessionRenderBufferStore | null;
   fontSize: number;
   themeId?: string;
@@ -35,6 +45,44 @@ export interface TerminalPreviewGridProps {
 
 const PREVIEW_LONG_PRESS_MS = 420;
 const PREVIEW_LONG_PRESS_CLICK_SUPPRESSION_MS = 1_000;
+const PREVIEW_MIN_SCALE = 0.35;
+const PREVIEW_PAN_LOCK_PX = 4;
+
+type TerminalPreviewSlotMenuCandidate = {
+  id: string;
+  title: string;
+  sessionName?: string;
+  hostKey?: string;
+  hostLabel?: string;
+  bridgeHost?: string;
+  bridgePort?: number;
+  daemonHostId?: string;
+};
+
+function touchSpan(touches: React.TouchList) {
+  if (touches.length < 2) return 0;
+  return Math.hypot(
+    touches[1].clientX - touches[0].clientX,
+    touches[1].clientY - touches[0].clientY,
+  );
+}
+
+function resolveSlotMenuCandidateTone(candidate: TerminalPreviewSlotMenuCandidate) {
+  return getServerIdentityTone({
+    bridgeHost: candidate.bridgeHost || candidate.hostKey,
+    bridgePort: candidate.bridgePort,
+    daemonHostId: candidate.daemonHostId,
+    connectionName: candidate.hostLabel,
+  });
+}
+
+function resolveSlotMenuCandidateHostLabel(candidate: TerminalPreviewSlotMenuCandidate) {
+  if (candidate.hostLabel) return candidate.hostLabel;
+  if (candidate.bridgeHost || candidate.bridgePort || candidate.daemonHostId) {
+    return resolveServerDisplayName(candidate);
+  }
+  return candidate.hostKey || 'unknown server';
+}
 
 function coordinateKey(coord: JunctionPreviewCoordinate) {
   return `${coord.col}:${coord.row}`;
@@ -44,6 +92,7 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
   lattice,
   focus,
   candidates,
+  slotMenuCandidates,
   sessionBufferStore = null,
   fontSize,
   themeId,
@@ -101,6 +150,20 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
   const longPressStartRef = useRef<{ x: number; y: number } | null>(null);
   const suppressClickRef = useRef<JunctionPreviewCoordinate | null>(null);
   const suppressClickTimerRef = useRef<number | null>(null);
+  const suppressPreviewClickRef = useRef(false);
+  const suppressPreviewClickTimerRef = useRef<number | null>(null);
+  const pinchGestureRef = useRef<{ startSpan: number; startScale: number } | null>(null);
+  const panGestureRef = useRef<{
+    startX: number;
+    startY: number;
+    startPanX: number;
+    startPanY: number;
+    moved: boolean;
+  } | null>(null);
+  const previewScaleRef = useRef(1);
+  const previewPanRef = useRef({ x: 0, y: 0 });
+  const [previewScale, setPreviewScale] = useState(1);
+  const [previewPan, setPreviewPan] = useState({ x: 0, y: 0 });
   const [slotMenu, setSlotMenu] = useState<{
     coordinate: JunctionPreviewCoordinate;
     existingSessionId?: string;
@@ -113,7 +176,46 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
     if (suppressClickTimerRef.current !== null) {
       window.clearTimeout(suppressClickTimerRef.current);
     }
+    if (suppressPreviewClickTimerRef.current !== null) {
+      window.clearTimeout(suppressPreviewClickTimerRef.current);
+    }
   }, []);
+
+  const suppressNextPreviewClick = () => {
+    suppressPreviewClickRef.current = true;
+    if (suppressPreviewClickTimerRef.current !== null) {
+      window.clearTimeout(suppressPreviewClickTimerRef.current);
+    }
+    suppressPreviewClickTimerRef.current = window.setTimeout(() => {
+      suppressPreviewClickRef.current = false;
+      suppressPreviewClickTimerRef.current = null;
+    }, PREVIEW_LONG_PRESS_CLICK_SUPPRESSION_MS);
+  };
+
+  const clearSuppressedPreviewClick = () => {
+    suppressPreviewClickRef.current = false;
+    if (suppressPreviewClickTimerRef.current !== null) {
+      window.clearTimeout(suppressPreviewClickTimerRef.current);
+      suppressPreviewClickTimerRef.current = null;
+    }
+  };
+
+  const consumeSuppressedPreviewClick = () => {
+    if (!suppressPreviewClickRef.current) return false;
+    clearSuppressedPreviewClick();
+    return true;
+  };
+
+  const applyPreviewScale = (nextScale: number) => {
+    const clamped = Math.min(1, Math.max(PREVIEW_MIN_SCALE, nextScale));
+    const resolved = clamped >= 0.995 ? 1 : clamped;
+    previewScaleRef.current = resolved;
+    if (resolved >= 1) {
+      previewPanRef.current = { x: 0, y: 0 };
+      setPreviewPan({ x: 0, y: 0 });
+    }
+    setPreviewScale(resolved);
+  };
 
   const clearLongPress = () => {
     if (longPressTimerRef.current !== null) {
@@ -221,10 +323,99 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
       ))
       .map((candidate) => candidate.target.sessionId),
   );
-  const menuCandidates = candidates.filter((candidate) => !usedSessionIds.has(candidate.id));
+  const menuCatalog: TerminalPreviewSlotMenuCandidate[] = slotMenuCandidates ?? candidates;
+  const menuCandidates = menuCatalog.filter((candidate) => !usedSessionIds.has(candidate.id));
   const menuSession = slotMenu?.existingSessionId
-    ? candidates.find((candidate) => candidate.id === slotMenu?.existingSessionId) || null
+    ? menuCatalog.find((candidate) => candidate.id === slotMenu?.existingSessionId) || null
     : null;
+
+  const onPreviewTouchStartCapture = (event: TouchEvent<HTMLElement>) => {
+    const touches = event.touches;
+    // A new touch sequence is a fresh user intent. The synthetic click emitted
+    // after the previous pinch/pan has no intervening touchstart.
+    clearSuppressedPreviewClick();
+    if (touches.length >= 2) {
+      clearLongPress();
+      exitGestureRef.current = null;
+      pinchGestureRef.current = {
+        startSpan: Math.max(1, touchSpan(touches)),
+        startScale: previewScaleRef.current,
+      };
+      panGestureRef.current = null;
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    if (touches.length === 1 && previewScaleRef.current < 1) {
+      clearLongPress();
+      exitGestureRef.current = null;
+      const touch = touches[0];
+      panGestureRef.current = {
+        startX: touch.clientX,
+        startY: touch.clientY,
+        startPanX: previewPanRef.current.x,
+        startPanY: previewPanRef.current.y,
+        moved: false,
+      };
+    }
+  };
+
+  const onPreviewTouchMoveCapture = (event: TouchEvent<HTMLElement>) => {
+    const touches = event.touches;
+    const pinch = pinchGestureRef.current;
+    if (pinch && touches.length >= 2) {
+      const ratio = touchSpan(touches) / pinch.startSpan;
+      applyPreviewScale(pinch.startScale * ratio);
+      suppressNextPreviewClick();
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+
+    const pan = panGestureRef.current;
+    if (!pan || touches.length !== 1 || previewScaleRef.current >= 1) {
+      return;
+    }
+    const touch = touches[0];
+    const dx = touch.clientX - pan.startX;
+    const dy = touch.clientY - pan.startY;
+    if (!pan.moved && Math.hypot(dx, dy) < PREVIEW_PAN_LOCK_PX) {
+      return;
+    }
+    pan.moved = true;
+    const nextPan = {
+      x: pan.startPanX + dx,
+      y: pan.startPanY + dy,
+    };
+    previewPanRef.current = nextPan;
+    setPreviewPan(nextPan);
+    suppressNextPreviewClick();
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  const onPreviewTouchEndCapture = (event: TouchEvent<HTMLElement>) => {
+    if (pinchGestureRef.current) {
+      if (event.touches.length < 2) {
+        pinchGestureRef.current = null;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    const pan = panGestureRef.current;
+    if (!pan) return;
+    panGestureRef.current = null;
+    if (pan.moved) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  };
+
+  const onPreviewTouchCancelCapture = () => {
+    pinchGestureRef.current = null;
+    panGestureRef.current = null;
+  };
 
   return (
     <section
@@ -232,9 +423,17 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
       data-layout-form={layout.form}
       data-columns={layout.centerColumns}
       aria-label="终端快捷预览"
+      onTouchStartCapture={onPreviewTouchStartCapture}
+      onTouchMoveCapture={onPreviewTouchMoveCapture}
+      onTouchEndCapture={onPreviewTouchEndCapture}
+      onTouchCancelCapture={onPreviewTouchCancelCapture}
       onTouchStart={(event) => {
         const touch = event.touches[0];
         const viewportWidth = typeof window !== 'undefined' ? window.innerWidth || 0 : 0;
+        if (event.touches.length !== 1 || previewScaleRef.current < 1) {
+          exitGestureRef.current = null;
+          return;
+        }
         if (touch && viewportWidth > 0 && touch.clientX <= TERMINAL_DRAWER_EDGE_SWIPE_START_PX) {
           exitGestureRef.current = null;
           return;
@@ -251,7 +450,7 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
         const start = exitGestureRef.current;
         exitGestureRef.current = null;
         const touch = event.changedTouches[0];
-        if (!start || !touch) return;
+        if (!start || !touch || event.touches.length > 0 || previewScaleRef.current < 1) return;
         const dx = touch.clientX - start.x;
         const dy = touch.clientY - start.y;
         if (dx >= 48 && Math.abs(dx) > Math.abs(dy)) onClose();
@@ -300,8 +499,23 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
         </AmbientButton>
       </header>
 
-      <div ref={contentRef} style={{ flex: 1, minHeight: 0, position: 'relative' }}>
-        {layout.visibleCells.map((cell) => {
+      <div ref={contentRef} style={{ flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden' }}>
+        <div
+          data-testid="terminal-preview-scaler"
+          data-preview-scale={String(previewScale)}
+          data-preview-pan-x={String(previewPan.x)}
+          data-preview-pan-y={String(previewPan.y)}
+          style={{
+            position: 'absolute',
+            inset: 0,
+            transform: `translate3d(${previewPan.x}px, ${previewPan.y}px, 0) scale(${previewScale})`,
+            transformOrigin: '0 0',
+            willChange: previewScale < 1 || previewPan.x !== 0 || previewPan.y !== 0
+              ? 'transform'
+              : undefined,
+          }}
+        >
+          {layout.visibleCells.map((cell) => {
           const rect = cellRects.get(coordinateKey(cell));
           if (!rect) return null;
           const session = resolveJunctionPreviewCell(lattice, cell, candidates);
@@ -322,6 +536,7 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
               tabIndex={session ? undefined : 0}
               onClick={session
                 ? () => {
+                  if (consumeSuppressedPreviewClick()) return;
                   const suppressed = suppressClickRef.current;
                   suppressClickRef.current = null;
                   if (suppressClickTimerRef.current !== null) {
@@ -333,7 +548,10 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
                   }
                   if (canPan) onFocusChange({ col: cell.col, row: cell.row });
                 }
-                : () => setSlotMenu({ coordinate: { col: cell.col, row: cell.row } })}
+                : () => {
+                  if (consumeSuppressedPreviewClick()) return;
+                  setSlotMenu({ coordinate: { col: cell.col, row: cell.row } });
+                }}
               onKeyDown={session ? undefined : (event) => {
                 if (event.key !== 'Enter' && event.key !== ' ') return;
                 event.preventDefault();
@@ -434,7 +652,8 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
               ) : null}
             </div>
           );
-        })}
+          })}
+        </div>
 
         {slotMenu ? (
           <div
@@ -505,7 +724,7 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
               </AmbientButton>
             ) : null}
             {menuCandidates.length > 0 ? menuCandidates.map((candidate) => {
-              const candidateTone = getServerIdentityTone(candidate);
+              const candidateTone = resolveSlotMenuCandidateTone(candidate);
               return (
                 <AmbientButton
                   key={`${slotMenu.coordinate.col}:${slotMenu.coordinate.row}:${candidate.id}`}
@@ -533,7 +752,7 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
                   }}
                 >
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '12px', fontWeight: 800 }}>
-                    {candidate.customName || candidate.title || candidate.sessionName || candidate.id}
+                    {candidate.title || candidate.sessionName || candidate.id}
                   </span>
                   <span style={{
                     color: candidateTone.previewText,
@@ -543,7 +762,7 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
                     textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap',
                   }}>
-                    {resolveServerDisplayName(candidate)}
+                    {resolveSlotMenuCandidateHostLabel(candidate)}
                   </span>
                 </AmbientButton>
               );

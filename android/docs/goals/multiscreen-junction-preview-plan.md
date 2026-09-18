@@ -18,7 +18,7 @@
 ### 非目标
 
 - 不保留旧的主次 3:1 布局、左中右三列、group 形态。
-- 不做缩略图（任何 `scale` / `transform: scale` 都被禁止）。
+- 默认不做缩略图；审批修正后允许用户主动 pinch 到 `0.35x..1x` 的本地总览投影，文字随窗格等比缩小。该投影不改 renderer 真源、不改格子、不改焦点、不触发 transport/resize/tmux geometry；恢复 `1x` 时必须清零本地 pan。
 - 不新增第二套 ANSI / cell / cursor 解析器。
 - 不改 daemon mirror、sparse buffer、transport、tmux 宽度语义。
 - 本次不发布 OTA，不把构建分配号写入功能提交；需要设备包时由 `scripts/bump-build-version.mjs` 在工作树本地分配。
@@ -118,7 +118,8 @@ interface JunctionPreviewLatticeV1 {
 - 存储 key：`zterm:junction-preview-lattice:v1`（独立于 active session，独立于旧 preview selection）。
 - 格子坐标是持久真源；**焦点坐标是预览内状态**，不写进这份真源。
 - 写入时机：给空格指定 session、长按重选、长按清空、抽屉给焦点格换 session。
-- 解析时机：每次渲染时用当前打开集合解析；解析不到的格子视为空，显示“+”，不自动新开 session。
+- 解析时机：每次渲染时用当前打开集合解析格子目标；解析不到的格子视为空，显示“+”，不自动新开 session。
+- slot 菜单目录不是“当前已打开集合”的子集：它来自完整可见 drawer catalog（包括未打开的远端行）。选择未打开行必须复用现有 drawer remote-open owner 后台物化，并把返回的本地 `sessionId` 写入格子；禁止写 `remote:...` placeholder。
 - 旧 `zterm:session-preview-selection:v1` 的迁移：**不迁移**。它的语义（最多 6 个有序选择）与新模型不同，强行映射会造出假状态；旧 key 作为死数据保留，不做静默转换。
 
 #### 上下槽位跟随焦点列（已定）
@@ -178,8 +179,10 @@ interface SessionPreviewEntrySnapshot {
 | --- | --- | --- | --- |
 | 进入 | 当前为 `closed` | 捕获快照 → 建立取景框与可见渲染集 → `open` | active session 不变；只读投影就绪 |
 | 点击边缘格 | `open` 且该格有 session | 取景框平移一格，焦点坐标更新 | 格子坐标不变；无 session 搬运 |
-| 点击空“+” | `open` | 打开选择菜单 → 给该格指定 session 并持久化 | 其余格不动 |
+| 点击空“+” | `open` | 打开完整 drawer catalog 菜单；选中未打开行时先经现有 remote-open owner 物化，再给该格指定本地 session | 其余格不动 |
 | 长按边缘格 | `open` | 打开重选 / 清空菜单 | 不退出、不移动焦点 |
+| pinch 缩小 | `open` | 只缩放预览投影与文字；不改格子、焦点、renderer、transport、resize 或 tmux geometry | 不退出、不移动焦点 |
+| 缩小后单指移动 | `open` 且 `scale < 1` | 只移动本地预览投影 | 恢复 `1x` 时 pan 清零 |
 | 抽屉切焦点格 | `open` 且抽屉选中项仍在打开集合 | 只替换焦点格的 session | 其余格与快照不变 |
 | 退出 | `open` | 释放可见渲染集 → 恢复快照 → `closed` | 无重连、无 buffer 重置；格子保留 |
 
@@ -439,7 +442,7 @@ centerRows = floor((viewHeight - edgeRows - gaps - railH) / rowH)
 
 | 任务 | 动作 | 文件 | 交付 iff |
 | --- | --- | --- | --- |
-| B1 | **重写**为交界取景 + 取景框平移；删 `WindowGroupLayout` 依赖、删主次 tile、删边缘队列 overlay | `src/components/terminal/TerminalPreviewGrid.tsx` | 只渲染可见格；空格画“+”；无 `scale`；平移不搬运 session |
+| B1 | **重写**为交界取景 + 取景框平移；删 `WindowGroupLayout` 依赖、删主次 tile、删边缘队列 overlay | `src/components/terminal/TerminalPreviewGrid.tsx` | 只渲染可见格；空格画“+”；pinch/pan 只做本地总览投影；平移不搬运 session |
 | B2 | **新增**“+”选择菜单与长按重选 / 清空菜单 | 同上（或拆 `TerminalPreviewSlotMenu.tsx`） | 点“+”指定格；长按可重选 / 清空；不退出预览 |
 | B3 | **重写**测试：几何、四 / 五窗口、平移、空态、长按、render-truth | `TerminalPreviewGrid.test.tsx`、`TerminalPreviewGrid.render-truth.test.tsx` | 正反例覆盖；DOM 与 render store 快照一致 |
 | B4 | **复用不改**只读终端投影 | `src/components/TerminalView.tsx` | `preview-primary` 语义保持；无第二解析器 |
@@ -540,7 +543,7 @@ centerRows = floor((viewHeight - edgeRows - gaps - railH) / rowH)
 ```text
 /goal
 目标：把 zterm Android 多屏预览收敛为唯一形态——全尺寸窗格组成格子，手机屏幕是取景框，点击边缘格 = 取景框平移一格。
-范围与约束：允许改 android/src/lib/junction-preview-*.ts、TerminalPreviewGrid.tsx、TerminalPage.tsx、TerminalPageStageShell.tsx、TerminalSessionDrawerContent.tsx、session-drawer-contract.ts、对应测试与 registry/wiki 文档；禁止改 src/server/、session-context-transport-runtime.ts、session-context-buffer-runtime.ts；禁止 scale、第二解析器、transport/resize/buffer 副作用。
+范围与约束：允许改 android/src/lib/junction-preview-*.ts、TerminalPreviewGrid.tsx、TerminalPage.tsx、TerminalPageStageShell.tsx、TerminalSessionDrawerContent.tsx、session-drawer-contract.ts、对应测试与 registry/wiki 文档；禁止改 src/server/、session-context-transport-runtime.ts、session-context-buffer-runtime.ts；允许唯一预览投影 pinch/pan scale，禁止第二解析器、renderer 双真源和 transport/resize/buffer 副作用。
 依据：android/docs/goals/multiscreen-junction-preview-plan.md
 验收：竖屏 4 窗口 / 横屏 2 分屏 + 上下 / 平板 5 窗口三形态几何测试全绿；点击边缘平移不搬运 session；抽屉不再多选且只改焦点格；预览中抽屉可划出；旧 selection 代码与抽屉多选物理删除；定向测试 + typecheck + registry gates + build 全绿；emulator 截图与 logcat 证据齐全；独立 review PASS。
 直接执行本任务，不再为它生成一层提示词。

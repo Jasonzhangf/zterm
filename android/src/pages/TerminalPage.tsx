@@ -3690,6 +3690,7 @@ function TerminalPageComponent({
           sessionPreviewLattice,
           sessionPreviewFocus,
           sessionPreviewCandidates,
+          sessionPreviewSlotMenuCandidates: drawerSessions,
           sessionPreviewSideEdge,
           sessionPreviewViewportWidth: viewportWidth,
           sessionPreviewViewportHeight: currentLayoutViewportHeight,

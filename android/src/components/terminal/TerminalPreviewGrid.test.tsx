@@ -259,6 +259,134 @@ describe('TerminalPreviewGrid', () => {
     expect(onSetCell).toHaveBeenCalledWith({ col: -1, row: 0 }, 's1');
   });
 
+  it('shows the full visible drawer catalog in the slot menu, including unopened sessions', () => {
+    setViewport(374, 706);
+    const unopenedId = 'remote:mac::session:unopened';
+    renderGrid({
+      lattice: latticeFor([{ col: 0, row: 0, session: sessions[2] }]),
+      candidates: sessions.slice(0, 3),
+      slotMenuCandidates: [
+        ...sessions.slice(0, 3).map((session) => ({
+          id: session.id,
+          stableKey: session.id,
+          title: session.title,
+          subtitle: session.sessionName,
+          sessionName: session.sessionName,
+          hostKey: 'mac.local:3333',
+          hostLabel: 'mac.local',
+        })),
+        {
+          id: unopenedId,
+          stableKey: unopenedId,
+          title: 'Unopened Session',
+          subtitle: 'mac.local · unopened',
+          sessionName: 'unopened',
+          hostKey: 'mac.local:3333',
+          hostLabel: 'mac.local',
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByTestId('terminal-preview-empty--1-0'));
+
+    expect(screen.getByTestId('terminal-preview-assign-s1')).toBeTruthy();
+    expect(screen.getByTestId(`terminal-preview-assign-${unopenedId}`)).toBeTruthy();
+  });
+
+  it('pinches to overview scale, pans locally, and restores to 1x with cleared pan', () => {
+    setViewport(374, 706);
+    renderGrid();
+
+    const grid = screen.getByTestId('terminal-preview-grid');
+    const scaler = screen.getByTestId('terminal-preview-scaler');
+    expect(scaler.dataset.previewScale).toBe('1');
+
+    fireEvent.touchStart(grid, {
+      touches: [
+        { clientX: 100, clientY: 200 },
+        { clientX: 200, clientY: 200 },
+      ],
+    });
+    fireEvent.touchMove(grid, {
+      touches: [
+        { clientX: 125, clientY: 220 },
+        { clientX: 175, clientY: 220 },
+      ],
+    });
+    expect(Number(scaler.dataset.previewScale)).toBeLessThan(1);
+    expect(Number(scaler.dataset.previewPanX)).toBe(0);
+    expect(Number(scaler.dataset.previewPanY)).toBe(0);
+
+    fireEvent.touchEnd(grid, {
+      changedTouches: [
+        { clientX: 125, clientY: 220 },
+        { clientX: 175, clientY: 220 },
+      ],
+    });
+    fireEvent.touchStart(grid, { touches: [{ clientX: 160, clientY: 260 }] });
+    fireEvent.touchMove(grid, { touches: [{ clientX: 190, clientY: 280 }] });
+    fireEvent.touchEnd(grid, { changedTouches: [{ clientX: 190, clientY: 280 }] });
+
+    expect(Number(scaler.dataset.previewPanX)).toBeGreaterThan(0);
+    expect(Number(scaler.dataset.previewPanY)).toBeGreaterThan(0);
+
+    fireEvent.touchStart(grid, {
+      touches: [
+        { clientX: 120, clientY: 220 },
+        { clientX: 180, clientY: 220 },
+      ],
+    });
+    fireEvent.touchMove(grid, {
+      touches: [
+        { clientX: 90, clientY: 200 },
+        { clientX: 210, clientY: 200 },
+      ],
+    });
+    fireEvent.touchEnd(grid, {
+      changedTouches: [
+        { clientX: 90, clientY: 200 },
+        { clientX: 210, clientY: 200 },
+      ],
+    });
+
+    expect(scaler.dataset.previewScale).toBe('1');
+    expect(scaler.dataset.previewPanX).toBe('0');
+    expect(scaler.dataset.previewPanY).toBe('0');
+  });
+
+  it('allows an empty-cell tap immediately after a pinch gesture', () => {
+    setViewport(374, 706);
+    renderGrid({
+      lattice: latticeFor([{ col: 0, row: 0, session: sessions[2] }]),
+    });
+
+    const grid = screen.getByTestId('terminal-preview-grid');
+    fireEvent.touchStart(grid, {
+      touches: [
+        { clientX: 100, clientY: 200 },
+        { clientX: 200, clientY: 200 },
+      ],
+    });
+    fireEvent.touchMove(grid, {
+      touches: [
+        { clientX: 125, clientY: 200 },
+        { clientX: 175, clientY: 200 },
+      ],
+    });
+    fireEvent.touchEnd(grid, {
+      changedTouches: [
+        { clientX: 125, clientY: 200 },
+        { clientX: 175, clientY: 200 },
+      ],
+    });
+
+    fireEvent.touchStart(grid, { touches: [{ clientX: 40, clientY: 300 }] });
+    fireEvent.touchEnd(grid, { changedTouches: [{ clientX: 40, clientY: 300 }] });
+    fireEvent.click(screen.getByTestId('terminal-preview-empty--1-0'));
+
+    expect(screen.getByTestId('terminal-preview-slot-menu')).toBeTruthy();
+  });
+
   it('long-presses an edge cell to clear its assignment without panning focus', () => {
     vi.useFakeTimers();
     setViewport(374, 706);
