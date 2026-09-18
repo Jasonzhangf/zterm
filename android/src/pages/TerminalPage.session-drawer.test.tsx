@@ -538,7 +538,9 @@ describe('TerminalPage portrait session drawer', () => {
     fireEvent.pointerDown(title, { button: 0, pointerId: 1 });
     await new Promise((resolve) => window.setTimeout(resolve, 550));
     fireEvent.pointerUp(title, { button: 0, pointerId: 1 });
-    fireEvent.change(screen.getByRole('textbox', { name: '新的 session 名称' }), {
+    const renameInput = await screen.findByRole('textbox', { name: '新的 session 名称' });
+    await waitFor(() => expect((renameInput as HTMLInputElement).value).toBe('tmux-s1'));
+    fireEvent.change(renameInput, {
       target: { value: 'renamed-session' },
     });
     fireEvent.click(screen.getByRole('button', { name: '确认重命名' }));
