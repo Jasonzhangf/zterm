@@ -946,9 +946,11 @@ export function handleBufferHeadRuntime(options: {
     });
     return;
   }
+  const pendingResumeTailRefresh = options.refs.tailRefreshStoreRef.current.hasPendingResumeTailRefresh(options.sessionId);
   const needsTailRefresh = (
     revisionResetDetected
     || localWindowInvalid
+    || pendingResumeTailRefresh
     || shouldPullFollowBuffer(demandHead, visibleRange, plannerBuffer)
   );
   if (needsTailRefresh) {
@@ -956,7 +958,8 @@ export function handleBufferHeadRuntime(options: {
       reason:
         revisionResetDetected ? 'buffer-head-revision-reset'
           : localWindowInvalid ? 'buffer-head-invalid-local-window'
-            : 'buffer-head-update',
+            : pendingResumeTailRefresh ? 'buffer-head-resume-tail'
+              : 'buffer-head-update',
       purpose: 'tail-refresh',
       headOverride: demandHead,
       liveHead,
@@ -1676,7 +1679,6 @@ function applyResolvedBufferSyncPayloadRuntime(options: ApplyResolvedBufferSyncP
     && (
       nextBuffer.endIndex !== localBuffer.endIndex
       || nextBuffer.revision > Math.max(0, Math.floor(localBuffer.revision || 0))
-      || (liveHead && nextBuffer.revision >= Math.max(0, Math.floor(liveHead.revision || 0)))
     )
   ) {
     options.refs.tailRefreshStoreRef.current.clearPendingResumeTailRefresh(options.sessionId);

@@ -2266,6 +2266,76 @@ describe('session-context-buffer-runtime inactive gating', () => {
     });
   });
 
+  it('keeps a pending resume tail demand when an unchanged same-revision body apply reaches the current head', () => {
+    const sessionId = 'session-1';
+    const session = makeSession(sessionId);
+    const localBuffer = createSessionBufferState({
+      lines: ['same-tail-100', 'same-tail-101', 'same-tail-102', 'same-tail-103'],
+      startIndex: 100,
+      endIndex: 104,
+      bufferHeadStartIndex: 100,
+      bufferTailEndIndex: 104,
+      cols: 80,
+      rows: 24,
+      revision: 10,
+      cacheLines: 1000,
+    });
+    session.buffer = localBuffer;
+    const tailRefreshStoreRef = makeTailRefreshStoreRef({ resume: [sessionId] });
+    const commitSessionBufferUpdate = vi.fn(() => true);
+
+    applyIncomingBufferSyncRuntime({
+      sessionId,
+      payload: {
+        revision: 10,
+        startIndex: 100,
+        endIndex: 104,
+        availableStartIndex: 100,
+        availableEndIndex: 104,
+        cols: 80,
+        rows: 24,
+        cursorKeysApp: false,
+        lines: [
+          { ...makeLine('same-tail-100'), index: 100 },
+          { ...makeLine('same-tail-101'), index: 101 },
+          { ...makeLine('same-tail-102'), index: 102 },
+          { ...makeLine('same-tail-103'), index: 103 },
+        ],
+      },
+      refs: {
+        stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
+        sessionRevisionResetRef: { current: new Map() },
+        sessionHeadStoreRef: makeLiveHeadStoreRef([[sessionId, {
+          revision: 10,
+          latestEndIndex: 104,
+          availableStartIndex: 100,
+          availableEndIndex: 104,
+          seenAt: 10,
+        }]]),
+        tailRefreshStoreRef,
+        bufferFrameAssemblyRef: { current: new Map() },
+        sessionVisibleRangeRef: {
+          current: new Map([[sessionId, { startIndex: 100, endIndex: 104, viewportRows: 4 }]]),
+        },
+      },
+      readSessionBufferSnapshot: () => localBuffer,
+      resolveSessionCacheLines: () => 1000,
+      summarizeBufferPayload: (payload) => ({
+        revision: payload.revision,
+        startIndex: payload.startIndex,
+        endIndex: payload.endIndex,
+        lineCount: payload.lines.length,
+      }),
+      runtimeDebug: vi.fn(),
+      commitSessionBufferUpdate,
+      scheduleSessionRenderCommit: vi.fn(),
+      isSessionTransportActive: () => true,
+      requestSessionBufferSync: vi.fn(() => true),
+    });
+
+    expect(tailRefreshStoreRef.current.hasPendingResumeTailRefresh(sessionId)).toBe(true);
+  });
+
   it('expires retained frame chunks from the head cadence and dispatches one exact-range repair', () => {
     const sessionId = 'session-1';
     const session = makeSession(sessionId);
@@ -4140,6 +4210,94 @@ describe('session-context-buffer-runtime inactive gating', () => {
     expect(commitSessionBufferUpdate).not.toHaveBeenCalled();
     expect(setHead).toHaveBeenCalledTimes(1);
     expect(scheduleSessionRenderCommit).not.toHaveBeenCalled();
+  });
+
+  it('does not request body sync when buffer-head repeats the same revision and end without a pending resume demand', () => {
+    const sessionId = 'session-1';
+    const session = makeSession(sessionId);
+    session.buffer = createSessionBufferState({
+      lines: ['old-tail-100', 'old-tail-101', 'old-tail-102', 'old-tail-103'],
+      startIndex: 100,
+      endIndex: 104,
+      bufferHeadStartIndex: 100,
+      bufferTailEndIndex: 104,
+      cols: 80,
+      rows: 24,
+      revision: 10,
+      cacheLines: 1000,
+    });
+    const requestSessionBufferSync = vi.fn(() => true);
+    const refs = makeHeadRuntimeRefs({
+      sessions: [session],
+      activeSessionId: sessionId,
+      visibleRangeEntries: [[sessionId, buildDefaultSessionVisibleRange(session, undefined, session.buffer)]],
+    });
+
+    handleBufferHeadRuntime({
+      sessionId,
+      latestRevision: 10,
+      latestEndIndex: 104,
+      availableStartIndex: 100,
+      availableEndIndex: 104,
+      refs,
+      readSessionTransportSocket: () => ({ readyState: WebSocket.OPEN } as any),
+      readSessionBufferSnapshot: () => session.buffer,
+      commitSessionBufferUpdate: vi.fn(() => false),
+      scheduleSessionRenderCommit: vi.fn(),
+      isSessionTransportActive: () => true,
+      runtimeDebug: vi.fn(),
+      requestSessionBufferSync,
+    });
+
+    expect(requestSessionBufferSync).not.toHaveBeenCalled();
+  });
+
+  it('requests an authoritative visible tail refresh when an explicit resume returns the same revision and end', () => {
+    const sessionId = 'session-1';
+    const session = makeSession(sessionId);
+    session.buffer = createSessionBufferState({
+      lines: ['old-tail-100', 'old-tail-101', 'old-tail-102', 'old-tail-103'],
+      startIndex: 100,
+      endIndex: 104,
+      bufferHeadStartIndex: 100,
+      bufferTailEndIndex: 104,
+      cols: 80,
+      rows: 24,
+      revision: 10,
+      cacheLines: 1000,
+    });
+    const requestSessionBufferSync = vi.fn(() => true);
+    const refs = makeHeadRuntimeRefs({
+      sessions: [session],
+      activeSessionId: sessionId,
+      visibleRangeEntries: [[sessionId, buildDefaultSessionVisibleRange(session, undefined, session.buffer)]],
+    });
+    refs.tailRefreshStoreRef.current.markPendingResumeTailRefresh(sessionId);
+
+    handleBufferHeadRuntime({
+      sessionId,
+      latestRevision: 10,
+      latestEndIndex: 104,
+      availableStartIndex: 100,
+      availableEndIndex: 104,
+      refs,
+      readSessionTransportSocket: () => ({ readyState: WebSocket.OPEN } as any),
+      readSessionBufferSnapshot: () => session.buffer,
+      commitSessionBufferUpdate: vi.fn(() => false),
+      scheduleSessionRenderCommit: vi.fn(),
+      isSessionTransportActive: () => true,
+      runtimeDebug: vi.fn(),
+      requestSessionBufferSync,
+    });
+
+    expect(requestSessionBufferSync).toHaveBeenCalledWith(sessionId, expect.objectContaining({
+      reason: 'buffer-head-resume-tail',
+      purpose: 'tail-refresh',
+      headOverride: {
+        daemonHeadRevision: 10,
+        daemonHeadEndIndex: 104,
+      },
+    }));
   });
 
   it('does not schedule a render commit when buffer-head only advances daemon head metadata', () => {

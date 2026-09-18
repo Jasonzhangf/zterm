@@ -246,6 +246,29 @@ describe('ensureActiveSessionFreshRuntime', () => {
     expect(reconnectSession).toHaveBeenCalledWith('session-1');
   });
 
+  it('preserves an explicit resume tail demand after reconnecting a closed transport', () => {
+    const refs = createBaseOptions().refs;
+    const reconnectSession = vi.fn(() => {
+      refs.tailRefreshStore.clearPendingTailRefreshMarks('session-1');
+    });
+    const options = createBaseOptions({
+      refreshOptions: {
+        sessionId: 'session-1',
+        source: 'explicit-resume',
+        forceHead: true,
+        markResumeTail: true,
+        allowReconnectIfUnavailable: true,
+      },
+      refs,
+      daemonConnection: makeDaemonConnection(null),
+      reconnectSession,
+    });
+
+    expect(ensureActiveSessionFreshRuntime(options)).toBe(true);
+    expect(reconnectSession).toHaveBeenCalledWith('session-1');
+    expect(refs.tailRefreshStore.hasPendingResumeTailRefresh('session-1')).toBe(true);
+  });
+
   it('waits for a fresh pending transport open whose socket is still connecting', () => {
     const reconnectSession = vi.fn();
     const updateSessionSync = vi.fn();

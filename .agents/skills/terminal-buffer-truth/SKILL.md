@@ -138,6 +138,7 @@ terminal / daemon / client / renderer 相关任务完成前，先写清本轮影
 - App 层若只是把 tab/runtime 切成 active，**不等于 transport 已连通**
 - `session.state === connected`、terminal page 显示 connected、activeSessionId 命中，都**不是** transport freshness 真源
 - transport freshness 唯一 owner 只能留在 `SessionContext -> ensureActiveSessionFresh / buildActiveSessionRefreshPlan`
+- explicit foreground resume 是显式 body freshness demand：即使同一 physical transport 上 daemon 返回相同 revision / latestEndIndex，也必须消费 pending resume tail demand，并按 visible window 请求一次 authoritative `buffer-sync`。不得用 numeric head equality 吞掉恢复后的正文刷新；没有 pending resume demand 的普通重复 head 仍不得触发 body request。
 - transport `closed/error/tmux_session_unavailable` 只属于 **transport / attach fact**，**不得**被 App 直接映射成 open-tab 物理关闭
 - `tmux_session_unavailable` 也不得从非 active、非 live session 投影成当前 UI 的错误/重连 banner。抽屉打开、session picker refresh、foreground audit 发现 stale persisted tab 时，只能记录缺失事实并停止该 session 的自动 retry；不能 emit `SESSION_STATUS_EVENT(type='error')`，不能让缺失的旧 tab 污染当前 active session。
 - open-tab 物理关闭只能由用户显式 close 触发；远端 tmux session-name audit 只能记录缺失/更新历史 session group，不得删除 open tab、切走 active tab、写 closed tombstone、调用 runtime `closeSession`
