@@ -162,11 +162,16 @@ function isRemoteWindowCatalogTransportAwaitable(
   if (channelState === 'open') {
     return false;
   }
-  // While the channel is opening, the physical target socket may not yet be
-  // projected into the session resource. Keep polling the same authoritative
-  // channel state until mux readiness publishes the socket; do not fail early
-  // on a transient terminalSocket=null snapshot.
-  if (channelState === 'opening') {
+  // A background service can close the channel before it reopens the same
+  // session. Keep polling that bounded transition instead of failing the
+  // catalog request during the closed -> opening -> open window. The stale
+  // physical socket is still not reused because the caller only accepts the
+  // effective socket published by readOpenSessionSocket.
+  if (
+    channelState === 'closed'
+    || channelState === 'closing'
+    || channelState === 'opening'
+  ) {
     return true;
   }
   if (channelState) {
