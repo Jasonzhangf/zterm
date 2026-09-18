@@ -790,6 +790,43 @@ describe('remote-window-touch-action-runtime', () => {
       expect(move.remoteEvents[0].kind).toBe('scroll');
     });
 
+    it.each([4, 5])('commits same-direction two-finger scroll with realistic %ipx samples', (step) => {
+      const candidate = pairDown({ clientX: 100, clientY: 60 }, { clientX: 120, clientY: 60 });
+      let state = candidate.nextState;
+      const remoteEvents: Array<{ kind: string }> = [];
+
+      for (let index = 1; index <= 10; index += 1) {
+        const move = resolveRemoteWindowTouchPairPointerMoveRuntime({
+          state,
+          pair: {
+            first: {
+              pointerId: 1,
+              pointerType: 'touch',
+              clientX: 100,
+              clientY: 60 + step * index,
+              timeMs: 1_000 + index * 10,
+            },
+            second: {
+              pointerId: 2,
+              pointerType: 'touch',
+              clientX: 120,
+              clientY: 60 + step * index,
+              timeMs: 1_000 + index * 10,
+            },
+          },
+          geometry,
+          timeMs: 1_000 + index * 10,
+          pinchEnabled: true,
+          scrollEnabled: true,
+        });
+        state = move.nextState;
+        remoteEvents.push(...move.remoteEvents);
+      }
+
+      expect(state.mode).toBe('twoFingerScroll');
+      expect(remoteEvents.some((event) => event.kind === 'scroll')).toBe(true);
+    });
+
     it('keeps a vertical two-finger swipe as scroll when finger spacing changes during the swipe', () => {
       const candidate = pairDown({ clientX: 100, clientY: 60 }, { clientX: 120, clientY: 60 });
       const observe = resolveRemoteWindowTouchPairPointerMoveRuntime({
@@ -948,9 +985,14 @@ describe('remote-window-touch-action-runtime', () => {
         scrollEnabled: true,
         panEnabled: true,
       });
+      // Cumulative travel commits the pan one sample earlier, so the pan-start is
+      // emitted on `observe2`; the gesture-level contract is what matters here:
+      // exactly one local-pan-start across the gesture, no remote events.
       expect(move.nextState.mode).toBe('twoFingerPan');
       expect(move.remoteEvents).toEqual([]);
-      expect(move.localEffect).toEqual(expect.objectContaining({ kind: 'local-pan-start' }));
+      expect([observe.localEffect, observe2.localEffect, move.localEffect].filter(
+        (effect) => effect.kind === 'local-pan-start',
+      )).toHaveLength(1);
     });
 
     it('commits zoomed vertical two-finger motion to local pan when enabled', () => {

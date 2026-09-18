@@ -1248,6 +1248,10 @@ export function resolveRemoteWindowTouchPairPointerMoveRuntime(options: RemoteWi
   const midpointDeltaX = midpoint.clientX - state.lastMidX;
   const midpointDeltaY = midpoint.clientY - state.lastMidY;
   const midpointShift = Math.hypot(midpointDeltaX, midpointDeltaY);
+  const cumulativeMidpointShift = Math.hypot(
+    midpoint.clientX - state.startMidX,
+    midpoint.clientY - state.startMidY,
+  );
   if (
     state.mode === 'twoFingerCandidate'
     && options.timeMs - state.startedAtMs < REMOTE_WINDOW_TWO_FINGER_OBSERVE_MS
@@ -1420,7 +1424,7 @@ export function resolveRemoteWindowTouchPairPointerMoveRuntime(options: RemoteWi
       secondStart: state.secondStart,
       secondCurrent,
     });
-  if (midpointShift >= REMOTE_WINDOW_TWO_FINGER_SCROLL_MIN_MIDPOINT_PX
+  if (cumulativeMidpointShift >= REMOTE_WINDOW_TWO_FINGER_SCROLL_MIN_MIDPOINT_PX
     && (coherentPanIntent || coherentScrollIntent)
   ) {
     if (coherentPanIntent) {
