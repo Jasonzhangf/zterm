@@ -426,6 +426,39 @@ describe('TerminalPreviewGrid', () => {
     ]);
   });
 
+  it('scales the overview projection without changing the renderer pane dimensions', () => {
+    setViewport(374, 706);
+    renderGrid();
+
+    const focusTile = screen.getByTestId('terminal-preview-tile-s3');
+    const focusBody = screen.getByTestId('terminal-preview-body-s3');
+    const focusWidth = focusTile.style.width;
+    const focusHeight = focusTile.style.height;
+    const bodyWidth = focusBody.style.width;
+    const bodyHeight = focusBody.style.height;
+
+    const grid = screen.getByTestId('terminal-preview-grid');
+    fireEvent.touchStart(grid, {
+      touches: [
+        { clientX: 100, clientY: 200 },
+        { clientX: 200, clientY: 200 },
+      ],
+    });
+    fireEvent.touchMove(grid, {
+      touches: [
+        { clientX: 125, clientY: 200 },
+        { clientX: 175, clientY: 200 },
+      ],
+    });
+
+    const overviewFocusTile = screen.getByTestId('terminal-preview-tile-s3');
+    const overviewFocusBody = screen.getByTestId('terminal-preview-body-s3');
+    expect(overviewFocusTile.style.width).toBe(focusWidth);
+    expect(overviewFocusTile.style.height).toBe(focusHeight);
+    expect(overviewFocusBody.style.width).toBe(bodyWidth);
+    expect(overviewFocusBody.style.height).toBe(bodyHeight);
+  });
+
   it('allows an empty-cell tap immediately after a pinch gesture', () => {
     setViewport(374, 706);
     renderGrid({

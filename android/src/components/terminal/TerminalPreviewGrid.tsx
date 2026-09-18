@@ -370,8 +370,8 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
   if (overviewBounds && overviewCells) {
     const columnCount = overviewBounds.maxCol - overviewBounds.minCol + 1;
     const rowCount = overviewBounds.maxRow - overviewBounds.minRow + 1;
-    const overviewCellWidth = Math.max(120, layoutViewportWidth * 0.4);
-    const overviewCellHeight = Math.max(150, resolvedViewportHeight * 0.3);
+    const overviewCellWidth = layout.focusSizePx.width;
+    const overviewCellHeight = layout.focusSizePx.height;
     const overviewWidth = columnCount * overviewCellWidth + Math.max(0, columnCount - 1) * JUNCTION_PREVIEW_GAP_PX;
     const overviewHeight = rowCount * overviewCellHeight + Math.max(0, rowCount - 1) * JUNCTION_PREVIEW_GAP_PX;
     const originX = (layoutViewportWidth - overviewWidth) / 2;
