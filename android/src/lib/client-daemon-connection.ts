@@ -82,17 +82,22 @@ export function createClientDaemonConnection(options: {
 
   const readOpenSessionSocket = (sessionId: string, purpose: string) => {
     const resource = readSessionResource(sessionId);
-    // A mux channel can be opening before `resource.socket` is projected.
-    // The physical target socket is already the daemon transport in that
-    // state, so feature requests must reuse it instead of reporting
-    // `socket=missing, channel=opening`.
-    const ws = resource.socket
-      || (resource.channel?.state === 'opening' ? resource.terminalSocket : null)
-      || null;
+    // Session-bound feature messages are wrapped into the mux channel. A
+    // physical socket is only sufficient before a channel is bound or while
+    // that channel is still opening; once it is closed, report the exact
+    // readiness failure instead of letting the wrapper throw later.
+    const channelState = resource.channel?.state;
+    const ws = channelState
+      ? (channelState === 'open'
+          ? resource.socket
+          : channelState === 'opening'
+            ? resource.terminalSocket
+            : null)
+      : resource.socket;
     if (ws && ws.readyState === WebSocket.OPEN) {
       return ws;
     }
-    throw new Error(`${purpose} requires an open daemon connection (socket=${formatSocketReadyState(ws)}, target=${resource.targetKey || 'missing'}, channel=${resource.channel?.state || 'missing'})`);
+    throw new Error(`${purpose} requires an open daemon connection (socket=${formatSocketReadyState(ws)}, target=${resource.targetKey || 'missing'}, channel=${channelState || 'missing'})`);
   };
 
   const sendSessionRaw = (sessionId: string, message: unknown) => {

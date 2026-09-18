@@ -68,6 +68,21 @@ describe('client.daemon_connection interface', () => {
     expect(connection.readOpenSessionSocket('session-1', 'remote window catalog')).toBe(targetSocket);
   });
 
+  it('rejects an open target socket when the bound mux channel is closed', () => {
+    const targetSocket = { readyState: WebSocket.OPEN };
+    const connection = createClientDaemonConnection({
+      readSessionTransportResource: () => createResource(null, {
+        terminalSocket: targetSocket,
+        channel: { channelId: 'channel:session-1', state: 'closed' },
+      }),
+      sendSocketPayload: vi.fn(),
+    });
+
+    expect(() => connection.readOpenSessionSocket('session-1', 'remote window catalog')).toThrow(
+      'remote window catalog requires an open daemon connection (socket=missing',
+    );
+  });
+
   it('opens target transports through the daemon connection owner hook', () => {
     const openedSocket = { readyState: WebSocket.CONNECTING };
     const openSessionTargetTransport = vi.fn(() => openedSocket as any);
