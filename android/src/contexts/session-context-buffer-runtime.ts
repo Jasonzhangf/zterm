@@ -1679,7 +1679,6 @@ function applyResolvedBufferSyncPayloadRuntime(options: ApplyResolvedBufferSyncP
     && (
       nextBuffer.endIndex !== localBuffer.endIndex
       || nextBuffer.revision > Math.max(0, Math.floor(localBuffer.revision || 0))
-      || (liveHead && nextBuffer.revision >= Math.max(0, Math.floor(liveHead.revision || 0)))
     )
   ) {
     options.refs.tailRefreshStoreRef.current.clearPendingResumeTailRefresh(options.sessionId);
