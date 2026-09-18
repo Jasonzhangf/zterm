@@ -27,21 +27,21 @@ per-sample deltas.
 ## Gates
 
 1) Declared required gates for desktop.remote_window_stream
-   Source: docs/feature-registry.json required_gates.
-   Command (cwd android):
-     pnpm exec vitest run <all 37 declared required_gates .test.ts/.test.tsx entries>
-   Result: 35 passed / 1 failed (36 test files reported before the runner stopped)
-           Tests: 1 failed | 353 passed (375)
-   Only failure: src/components/terminal/useRemoteWindowQuality.test.tsx
+   Source: docs/feature-registry.json required_gates; 38 entries end in .test.ts/.test.tsx.
+   The command was generated directly from that list, so the count is exact:
+     pnpm exec vitest run <all 38 registry-derived .test.ts/.test.tsx entries>
+   Result: Test Files 2 failed | 35 passed (38); Tests 7 failed | 440 passed (468)
+   The 7 failures are all PRE-EXISTING and reproduce on the untouched base:
+   - src/components/terminal/useRemoteWindowQuality.test.tsx
      "skips exactly two stats samples after apply before adaptive downgrade" -> Test timed out in 5000ms
-   PRE-EXISTING: the identical single failure reproduces on the untouched base at
-   /private/tmp/zterm-main-8fdaeec-check (origin/main ace989e2):
-     pnpm exec vitest run src/components/terminal/useRemoteWindowQuality.test.tsx
-     -> Tests 1 failed | 5 passed (6)
-   Neither useRemoteWindowQuality.tsx nor its test was touched by this change
-   (git log ace989e2..ddef58c8 -- those files is empty).
+     Reproduced in isolation on origin/main ace989e2 at /private/tmp/zterm-main-8fdaeec-check:
+       pnpm exec vitest run src/components/terminal/useRemoteWindowQuality.test.tsx
+       -> Tests 1 failed | 5 passed (6)
+     Neither useRemoteWindowQuality.tsx nor its test was touched by this change
+     (git log ace989e2..ddef58c8 -- those files is empty).
+   - src/components/terminal/RemoteWindowOverlay.test.tsx: the 6 failures listed under (2).
 
-2) RemoteWindowOverlay UI gate
+2) RemoteWindowOverlay UI gate (one of the 38 gates above; re-run in isolation)
    Command (cwd android): pnpm exec vitest run src/components/terminal/RemoteWindowOverlay.test.tsx
    Result: Tests 6 failed | 87 passed (93)
    PRE-EXISTING: the same 6 failures reproduce on the untouched base commit ddef58c8 and on
