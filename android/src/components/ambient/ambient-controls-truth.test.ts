@@ -362,17 +362,22 @@ describe('ambient control ownership truth', () => {
       'src/components/settings/ConnectionConfigSection.tsx',
       'src/components/terminal/AttachmentDrawer.tsx',
       'src/components/terminal/FileTransferSheet.tsx',
+      'src/components/terminal/RemoteScreenshotSheet.tsx',
       'src/components/terminal/RenameDialog.tsx',
       'src/components/terminal/ResourceBottomSheet.tsx',
       'src/components/terminal/SessionScheduleSheet.tsx',
       'src/components/terminal/TabManagerSheet.tsx',
       'src/components/terminal/TerminalQuickBar.tsx',
       'src/components/terminal/ZtermDialog.tsx',
+      'src/components/terminal/remote-window-overlay-styles.ts',
+      'src/components/terminal/terminal-session-drawer-helpers.ts',
       'src/components/tmux/TmuxSessionPickerSheet.tsx',
       'src/pages/ConnectionsPage.tsx',
     ];
     const forbidden = [
       /background(?:Color)?:\s*['"]var\(--zterm-(?:settings|panel)-accent\)['"]/,
+      /background(?:Color)?:\s*['"]var\(--zterm-(?:settings|panel)-accent-soft\)['"]/,
+      /background(?:Color)?:\s*mobileTheme\.colors\.accentSoft/,
       /background(?:Color)?:\s*['"]var\(--zterm-skeu-material-active\)['"][\s\S]{0,120}?color:\s*['"]var\(--zterm-(?:settings|panel)-accent-text\)['"]/,
       /actionButtonStyle\(\s*SHEET_ACCENT\s*,/,
     ];

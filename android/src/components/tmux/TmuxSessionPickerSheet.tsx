@@ -672,8 +672,8 @@ export function TmuxSessionPickerSheet({
                 border: 'none',
                 borderRadius: '18px',
                 padding: '14px',
-                backgroundColor: mobileTheme.colors.accentSoft,
-                color: mobileTheme.colors.lightText,
+                backgroundColor: 'var(--zterm-skeu-material)',
+                color: 'var(--zterm-settings-text)',
                 fontWeight: 800,
                 textAlign: 'left',
               }}
@@ -1306,8 +1306,8 @@ export function TmuxSessionPickerSheet({
                       height: '44px',
                       border: 'none',
                       borderRadius: '14px',
-                      backgroundColor: mobileTheme.colors.accentSoft,
-                      color: mobileTheme.colors.accent,
+                      backgroundColor: 'var(--zterm-skeu-material)',
+                      color: 'var(--zterm-settings-accent)',
                       fontWeight: 800,
                     }}
                   >
@@ -1321,8 +1321,8 @@ export function TmuxSessionPickerSheet({
                       height: '44px',
                       border: 'none',
                       borderRadius: '14px',
-                      backgroundColor: mobileTheme.colors.accentSoft,
-                      color: mobileTheme.colors.accent,
+                      backgroundColor: 'var(--zterm-skeu-material)',
+                      color: 'var(--zterm-settings-accent)',
                       fontWeight: 800,
                     }}
                   >
@@ -1456,8 +1456,8 @@ export function TmuxSessionPickerSheet({
                 border: 'none',
                 borderRadius: '18px',
                 padding: '14px',
-                backgroundColor: mobileTheme.colors.accentSoft,
-                color: mobileTheme.colors.lightText,
+                backgroundColor: 'var(--zterm-skeu-material)',
+                color: 'var(--zterm-settings-text)',
                 fontWeight: 800,
                 textAlign: 'left',
               }}
