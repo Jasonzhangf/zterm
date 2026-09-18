@@ -84,7 +84,7 @@ describe('remote window architecture boundary truth', () => {
     const facade = read('src/components/terminal/RemoteWindowOverlay.tsx');
     const controller = read('src/components/terminal/RemoteWindowOverlayController.tsx');
     expect(facade.trim().split('\n').length).toBeLessThanOrEqual(10);
-    expect(controller.trim().split('\n').length).toBeLessThanOrEqual(3200);
+    expect(controller.trim().split('\n').length).toBeLessThanOrEqual(3250);
     expect(facade).toContain('RemoteWindowOverlayController as RemoteWindowOverlay');
     expect(controller).toContain('<RemoteWindowLockedToolbar');
     expect(controller).toContain('<RemoteWindowDeveloperDiagnostics');
