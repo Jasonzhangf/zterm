@@ -13,15 +13,13 @@ export function ConnectionSection({
 }) {
   return (
     <section
+      className="zterm-skeu-card"
       style={{
-        borderRadius: '28px',
-        backgroundColor: 'var(--zterm-settings-surface)',
-        border: `1px solid ${mobileTheme.colors.lightBorder}`,
+        borderRadius: '18px',
         padding: '20px',
         display: 'flex',
         flexDirection: 'column',
         gap: '16px',
-        boxShadow: mobileTheme.shadow.soft,
       }}
     >
       <div>

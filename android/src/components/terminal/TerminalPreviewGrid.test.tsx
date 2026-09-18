@@ -25,6 +25,7 @@ afterEach(() => {
   vi.useRealTimers();
   cleanup();
   terminalViewSpy.mockClear();
+  Reflect.deleteProperty(window, 'visualViewport');
 });
 
 const sessions = Array.from({ length: 8 }, (_, index) => ({
@@ -56,6 +57,13 @@ function latticeFor(coordinates: Array<{ col: number; row: number; session: Sess
 function setViewport(width: number, height: number) {
   Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
   Object.defineProperty(window, 'innerHeight', { configurable: true, value: height });
+}
+
+function setVisualViewportHeight(height: number) {
+  Object.defineProperty(window, 'visualViewport', {
+    configurable: true,
+    value: { width: window.innerWidth, height },
+  });
 }
 
 function renderGrid(overrides: Partial<Parameters<typeof TerminalPreviewGrid>[0]> = {}) {
@@ -94,6 +102,20 @@ describe('TerminalPreviewGrid', () => {
     expect(screen.getByTestId('terminal-preview-tile-s4').dataset.previewEdge).toBe('bottom');
     expect(screen.queryByTestId('terminal-preview-tile-s5')).toBeNull();
     expect(screen.getAllByTestId(/terminal-preview-tile-/)).toHaveLength(4);
+  });
+
+  it('collapses top and bottom strips to the layout plan while IME is visible', () => {
+    setViewport(374, 706);
+    setVisualViewportHeight(400);
+    renderGrid();
+
+    const top = screen.getByTestId('terminal-preview-tile-s2');
+    const bottom = screen.getByTestId('terminal-preview-tile-s4');
+    const focus = screen.getByTestId('terminal-preview-tile-s3');
+    expect(top.style.height).toBe('0px');
+    expect(bottom.style.height).toBe('0px');
+    expect(bottom.style.top).toBe(`${706 - JUNCTION_PREVIEW_HEADER_HEIGHT_PX}px`);
+    expect(focus.style.top).toBe(`${JUNCTION_PREVIEW_GAP_PX}px`);
   });
 
   it('projects landscape phone as two center panes plus top and bottom strips', () => {

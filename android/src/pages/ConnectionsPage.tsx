@@ -359,15 +359,14 @@ export function ConnectionsPage({
           </div>
           {orderedSavedConnections.length === 0 ? (
             <div
+              className="zterm-skeu-card"
               data-testid="connections-empty-state"
               role="region"
               aria-label="暂无已配置服务器"
               style={{
                 minHeight: '160px',
                 padding: '20px 18px',
-                border: `1px dashed ${mobileTheme.colors.lightBorder}`,
-                borderRadius: '22px',
-                backgroundColor: 'color-mix(in srgb, var(--zterm-settings-surface) 78%, transparent)',
+                borderStyle: 'dashed',
                 color: mobileTheme.colors.lightText,
                 display: 'grid',
                 gap: '10px',
@@ -403,19 +402,16 @@ export function ConnectionsPage({
                 return (
                   <div
                     key={host.id}
+                    className="zterm-skeu-card"
                     data-testid="saved-connection-row"
                     style={{
                       width: '100%',
                       minHeight: '82px',
-                      border: `1px solid ${mobileTheme.colors.lightBorder}`,
-                      borderRadius: '20px',
-                      backgroundColor: 'var(--zterm-settings-surface)',
                       color: mobileTheme.colors.lightText,
                       display: 'grid',
                       gridTemplateColumns: '1fr',
                       alignItems: 'center',
                       textAlign: 'left',
-                      boxShadow: mobileTheme.shadow.soft,
                       overflow: 'hidden',
                     }}
                   >

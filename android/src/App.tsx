@@ -826,9 +826,9 @@ export function AppContent({
       '--zterm-settings-accent-text': appTheme.accentText,
       '--zterm-settings-accent-soft': `color-mix(in srgb, ${appTheme.accent} 14%, transparent)`,
       '--zterm-settings-accent-border': `color-mix(in srgb, ${appTheme.accent} 38%, transparent)`,
-      '--zterm-settings-success': isBlack ? '#38d47d' : '#1f8f55',
+      '--zterm-settings-success': isBlack ? '#d9f0e4' : '#1f8f55',
       '--zterm-settings-success-soft': isBlack
-        ? 'rgba(56,212,125,0.14)'
+        ? 'rgba(217,240,228,0.14)'
         : 'rgba(31,143,85,0.12)',
       '--zterm-settings-warning': isBlack ? '#ffb454' : '#8f5b00',
       '--zterm-settings-warning-soft': isBlack
@@ -846,12 +846,12 @@ export function AppContent({
       '--zterm-dialog-info': appTheme.accent,
       '--zterm-dialog-info-soft': `color-mix(in srgb, ${appTheme.accent} 14%, transparent)`,
       '--zterm-dialog-info-border': `color-mix(in srgb, ${appTheme.accent} 38%, transparent)`,
-      '--zterm-dialog-success': isBlack ? '#38d47d' : '#1f8f55',
+      '--zterm-dialog-success': isBlack ? '#d9f0e4' : '#1f8f55',
       '--zterm-dialog-success-soft': isBlack
-        ? 'rgba(56,212,125,0.14)'
+        ? 'rgba(217,240,228,0.14)'
         : 'rgba(31,143,85,0.12)',
       '--zterm-dialog-success-border': isBlack
-        ? 'rgba(56,212,125,0.38)'
+        ? 'rgba(217,240,228,0.38)'
         : 'rgba(31,143,85,0.30)',
       '--zterm-dialog-warning': isBlack ? '#ffb454' : '#8f5b00',
       '--zterm-dialog-warning-soft': isBlack
@@ -867,7 +867,7 @@ export function AppContent({
       '--zterm-dialog-error-border': isBlack
         ? 'rgba(255,122,134,0.38)'
         : 'rgba(180,35,58,0.30)',
-      '--zterm-dialog-accent-text': isBlack ? '#07110b' : '#ffffff',
+      '--zterm-dialog-accent-text': isBlack ? '#111315' : '#ffffff',
     };
     for (const [name, value] of Object.entries(themeVariables)) {
       root.style.setProperty(name, value);
@@ -893,9 +893,9 @@ export function AppContent({
         ['--zterm-settings-accent-text' as string]: appTheme.accentText,
         ['--zterm-settings-accent-soft' as string]: `color-mix(in srgb, ${appTheme.accent} 14%, transparent)`,
         ['--zterm-settings-accent-border' as string]: `color-mix(in srgb, ${appTheme.accent} 38%, transparent)`,
-        ['--zterm-settings-success' as string]: appTheme.isDark ? '#38d47d' : '#1f8f55',
+        ['--zterm-settings-success' as string]: appTheme.isDark ? '#d9f0e4' : '#1f8f55',
         ['--zterm-settings-success-soft' as string]: appTheme.isDark
-          ? 'rgba(56,212,125,0.14)'
+          ? 'rgba(217,240,228,0.14)'
           : 'rgba(31,143,85,0.12)',
         ['--zterm-settings-warning' as string]: appTheme.isDark ? '#ffb454' : '#8f5b00',
         ['--zterm-settings-warning-soft' as string]: appTheme.isDark
