@@ -160,10 +160,10 @@ export function RenameDialog({
             style={{
               minHeight: '40px',
               padding: '0 18px',
-              border: 'none',
+              border: '1px solid var(--zterm-settings-accent-border)',
               borderRadius: '12px',
-              background: 'var(--zterm-settings-accent)',
-              color: 'var(--zterm-settings-accent-text)',
+              background: 'var(--zterm-skeu-material)',
+              color: 'var(--zterm-settings-accent)',
               fontSize: '14px',
               fontWeight: 900,
               opacity: value.trim() ? 1 : 0.45,

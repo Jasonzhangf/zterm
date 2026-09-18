@@ -194,6 +194,22 @@ describe('ambient shared controls render owner DOM', () => {
     }
   });
 
+  it('keeps accent buttons on the active skin material instead of inverting the theme', () => {
+    const { container } = render(
+      <>
+        <AmbientButton aria-label="accent" variant="accent">Accent</AmbientButton>
+        <AmbientButton aria-label="settings save" variant="settings-save">Save</AmbientButton>
+        <AmbientButton aria-label="compact accent" variant="compact-accent">Compact</AmbientButton>
+      </>,
+    );
+
+    for (const button of Array.from(container.querySelectorAll('button'))) {
+      expect(button.style.backgroundColor).toBe('var(--zterm-skeu-material)');
+      expect(button.style.color).toBe('var(--zterm-settings-accent)');
+      expect(button.style.border).toContain('var(--zterm-settings-accent-border)');
+    }
+  });
+
   it('renders AmbientSelect as a select with ambient classes', () => {
     const { container } = render(<AmbientSelect aria-label="ambient select"><option>a</option></AmbientSelect>);
     const select = container.querySelector('select');

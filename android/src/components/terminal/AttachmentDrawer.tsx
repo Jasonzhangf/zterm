@@ -626,10 +626,10 @@ function AttachmentDrawerComponent({
                         handleDownloadOriginal(entry);
                       }}
                       style={{
-                        background: downloading.has(entry.attachmentId) ? dividerColor : accentColor,
-                        border: 'none',
+                        background: downloading.has(entry.attachmentId) ? dividerColor : 'var(--zterm-skeu-material)',
+                        border: '1px solid var(--zterm-settings-accent-border)',
                         borderRadius: 6,
-                        color: 'var(--zterm-settings-accent-text)',
+                        color: 'var(--zterm-settings-accent)',
                         fontSize: 12,
                         fontWeight: 500,
                         padding: '4px 10px',
@@ -785,10 +785,10 @@ function AttachmentDrawerComponent({
                         }
                       }}
                       style={{
-                        background: accentColor,
-                        border: 'none',
+                        background: 'var(--zterm-skeu-material)',
+                        border: '1px solid var(--zterm-settings-accent-border)',
                         borderRadius: 6,
-                        color: 'var(--zterm-settings-accent-text)',
+                        color: 'var(--zterm-settings-accent)',
                         fontSize: 12,
                         fontWeight: 500,
                         padding: '4px 10px',
@@ -845,10 +845,10 @@ function AttachmentDrawerComponent({
                 onClick={handleBatchDownload}
                 disabled={selectedIds.size === 0 || batchMessage.startsWith('下载中')}
                 style={{
-                  background: accentColor,
-                  border: 'none',
+                  background: 'var(--zterm-skeu-material)',
+                  border: '1px solid var(--zterm-settings-accent-border)',
                   borderRadius: 18,
-                  color: 'var(--zterm-settings-accent-text)',
+                  color: 'var(--zterm-settings-accent)',
                   fontSize: 14,
                   fontWeight: 600,
                   cursor: 'pointer',
@@ -961,10 +961,10 @@ function AttachmentDrawerComponent({
                 bottom: 24,
                 left: '50%',
                 transform: 'translateX(-50%)',
-                background: accentColor,
-                border: 'none',
+                background: 'var(--zterm-skeu-material)',
+                border: '1px solid var(--zterm-settings-accent-border)',
                 borderRadius: 22,
-                color: '#fff',
+                color: 'var(--zterm-settings-accent)',
                 fontSize: 15,
                 fontWeight: 600,
                 padding: '12px 28px',

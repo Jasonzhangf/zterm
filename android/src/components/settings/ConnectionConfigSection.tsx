@@ -411,10 +411,10 @@ export function ConnectionConfigSection({
               disabled={busy || !loginUsername.trim() || !loginPassword}
               style={{
                 minHeight: '44px',
-                border: 'none',
+                border: '1px solid var(--zterm-settings-accent-border)',
                 borderRadius: '7px',
-                backgroundColor: 'var(--zterm-settings-accent)',
-                color: 'var(--zterm-settings-accent-text)',
+                backgroundColor: 'var(--zterm-skeu-material)',
+                color: 'var(--zterm-settings-accent)',
                 fontSize: '14px',
                 fontWeight: 800,
                 opacity: busy || !loginUsername.trim() || !loginPassword ? 0.55 : 1,
@@ -502,9 +502,9 @@ export function ConnectionConfigSection({
             style={{
               minHeight: '48px',
               borderRadius: '16px',
-              border: 'none',
-              backgroundColor: canAddServer ? 'var(--zterm-settings-accent, #128354)' : 'var(--zterm-settings-field, #d9e1ea)',
-              color: canAddServer ? 'var(--zterm-settings-accent-text)' : 'var(--zterm-settings-muted)',
+              border: '1px solid var(--zterm-skeu-edge-dark)',
+              backgroundColor: canAddServer ? 'var(--zterm-skeu-material)' : 'var(--zterm-settings-field, #d9e1ea)',
+              color: canAddServer ? 'var(--zterm-settings-accent)' : 'var(--zterm-settings-muted)',
               fontWeight: 800,
               cursor: canAddServer ? 'pointer' : 'not-allowed',
             }}
@@ -529,12 +529,12 @@ export function ConnectionConfigSection({
                   key={`preset:${entry.server.id}`}
                   onClick={() => onSettingsChange((current) => setDefaultBridgeServer(current, entry.server.id))}
                   style={{
-                    border: 'none',
+                    border: '1px solid var(--zterm-skeu-edge-dark)',
                     borderRadius: '20px',
                     padding: '14px 16px',
                     textAlign: 'left',
-                    backgroundColor: active ? 'var(--zterm-settings-accent)' : 'var(--zterm-settings-surface)',
-                    color: active ? 'var(--zterm-settings-accent-text)' : 'var(--zterm-settings-text)',
+                    backgroundColor: active ? 'var(--zterm-skeu-material-active)' : 'var(--zterm-settings-surface)',
+                    color: active ? 'var(--zterm-settings-accent)' : 'var(--zterm-settings-text)',
                     boxShadow: mobileTheme.shadow.soft,
                     cursor: 'pointer',
                     display: 'flex',
