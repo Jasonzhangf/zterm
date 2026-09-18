@@ -327,7 +327,6 @@ function createRuntime(options?: {
       createDetachedTmuxSession: vi.fn(() => 'demo'),
       closeDetachedTerminalSession: vi.fn(),
       renameTmuxSession: vi.fn(() => 'demo'),
-      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
       sanitizeSessionName: vi.fn((input?: string) => input?.trim() || 'demo'),
       createTransportSubscriber: vi.fn(),
       bindConnectionToSubscriber: vi.fn(),

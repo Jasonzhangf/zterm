@@ -152,7 +152,7 @@ export function createDaemonControlGateway(
       {
         ownerId: `daemon.control_center:${commandType}`,
         async execute(command, context) {
-          const result = handleTmuxControlMessageRuntime(deps, context.connection, command.params);
+          const result = await handleTmuxControlMessageRuntime(deps, context.connection, command.params);
           return toControlHandlerOutcome(result, command.commandType);
         },
       },

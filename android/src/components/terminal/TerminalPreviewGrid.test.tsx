@@ -354,6 +354,111 @@ describe('TerminalPreviewGrid', () => {
     expect(scaler.dataset.previewPanY).toBe('0');
   });
 
+  it('renders the whole lattice in overview and lets a distant tile become focus', () => {
+    setViewport(374, 706);
+    const onFocusChange = vi.fn();
+    renderGrid({
+      lattice: latticeFor([
+        { col: 0, row: 0, session: sessions[2] },
+        { col: 4, row: 0, session: sessions[7] },
+      ]),
+      onFocusChange,
+    });
+
+    expect(screen.queryByTestId('terminal-preview-tile-s8')).toBeNull();
+    const grid = screen.getByTestId('terminal-preview-grid');
+    fireEvent.touchStart(grid, {
+      touches: [
+        { clientX: 100, clientY: 200 },
+        { clientX: 200, clientY: 200 },
+      ],
+    });
+    fireEvent.touchMove(grid, {
+      touches: [
+        { clientX: 125, clientY: 220 },
+        { clientX: 175, clientY: 220 },
+      ],
+    });
+    fireEvent.touchEnd(grid, {
+      changedTouches: [
+        { clientX: 125, clientY: 220 },
+        { clientX: 175, clientY: 220 },
+      ],
+    });
+
+    const distantTile = screen.getByTestId('terminal-preview-tile-s8');
+    expect(distantTile.dataset.previewFocus).toBe('false');
+    expect(Number.parseFloat(distantTile.style.width)).toBeGreaterThan(100);
+    fireEvent.touchStart(distantTile, { touches: [{ clientX: 40, clientY: 300 }] });
+    fireEvent.touchEnd(distantTile, { changedTouches: [{ clientX: 40, clientY: 300 }] });
+    fireEvent.click(distantTile);
+    expect(onFocusChange).toHaveBeenCalledWith({ col: 4, row: 0 });
+  });
+
+  it('reports the full populated lattice to the live projection while overview is active', () => {
+    setViewport(374, 706);
+    const onOverviewChange = vi.fn();
+    renderGrid({
+      lattice: latticeFor([
+        { col: 0, row: 0, session: sessions[2] },
+        { col: 4, row: 0, session: sessions[7] },
+      ]),
+      onOverviewChange,
+    });
+
+    const grid = screen.getByTestId('terminal-preview-grid');
+    fireEvent.touchStart(grid, {
+      touches: [
+        { clientX: 100, clientY: 200 },
+        { clientX: 200, clientY: 200 },
+      ],
+    });
+    fireEvent.touchMove(grid, {
+      touches: [
+        { clientX: 125, clientY: 200 },
+        { clientX: 175, clientY: 200 },
+      ],
+    });
+
+    expect(onOverviewChange).toHaveBeenLastCalledWith([
+      { col: 0, row: 0 },
+      { col: 4, row: 0 },
+    ]);
+  });
+
+  it('scales the overview projection without changing the renderer pane dimensions', () => {
+    setViewport(374, 706);
+    renderGrid();
+
+    const focusTile = screen.getByTestId('terminal-preview-tile-s3');
+    const focusBody = screen.getByTestId('terminal-preview-body-s3');
+    const focusWidth = focusTile.style.width;
+    const focusHeight = focusTile.style.height;
+    const bodyWidth = focusBody.style.width;
+    const bodyHeight = focusBody.style.height;
+
+    const grid = screen.getByTestId('terminal-preview-grid');
+    fireEvent.touchStart(grid, {
+      touches: [
+        { clientX: 100, clientY: 200 },
+        { clientX: 200, clientY: 200 },
+      ],
+    });
+    fireEvent.touchMove(grid, {
+      touches: [
+        { clientX: 125, clientY: 200 },
+        { clientX: 175, clientY: 200 },
+      ],
+    });
+
+    const overviewFocusTile = screen.getByTestId('terminal-preview-tile-s3');
+    const overviewFocusBody = screen.getByTestId('terminal-preview-body-s3');
+    expect(overviewFocusTile.style.width).toBe(focusWidth);
+    expect(overviewFocusTile.style.height).toBe(focusHeight);
+    expect(overviewFocusBody.style.width).toBe(bodyWidth);
+    expect(overviewFocusBody.style.height).toBe(bodyHeight);
+  });
+
   it('allows an empty-cell tap immediately after a pinch gesture', () => {
     setViewport(374, 706);
     renderGrid({

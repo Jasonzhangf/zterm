@@ -6,6 +6,7 @@ import {
   type DaemonSessionCatalogRuntimeDeps,
 } from './daemon-session-catalog-runtime';
 import type { TerminalTransportConnection } from './terminal-runtime-types';
+import type { TerminalSessionCatalogEntry } from '@zterm/shared/protocol';
 
 function makeDeps(
   overrides: Partial<DaemonSessionCatalogRuntimeDeps> = {},
@@ -19,7 +20,7 @@ function makeDeps(
 }
 
 describe('daemon session catalog runtime', () => {
-  it('caches the daemon-owned catalog until an explicit refresh', () => {
+  it('caches the daemon-owned catalog until an explicit refresh', async () => {
     const listTerminalSessionCatalog = vi.fn(() => [
       { name: 'alpha', backend: 'tmux' as const },
       { name: 'herdr-one', backend: 'herdr' as const },
@@ -29,6 +30,7 @@ describe('daemon session catalog runtime', () => {
       listTerminalSessionCatalog,
     });
 
+    await runtime.refresh();
     expect(runtime.read()).toEqual([
       { name: 'alpha', backend: 'tmux' },
       { name: 'herdr-one', backend: 'herdr' },
@@ -43,7 +45,7 @@ describe('daemon session catalog runtime', () => {
       { name: 'alpha', backend: 'tmux' as const },
       { name: 'beta', backend: 'tmux' as const },
     ]);
-    expect(runtime.refresh()).toEqual([
+    await expect(runtime.refresh()).resolves.toEqual([
       { name: 'alpha', backend: 'tmux' },
       { name: 'beta', backend: 'tmux' },
     ]);
@@ -54,7 +56,7 @@ describe('daemon session catalog runtime', () => {
     expect(listTerminalSessionCatalog).toHaveBeenCalledTimes(2);
   });
 
-  it('filters cached reads by backend without re-enumerating', () => {
+  it('filters cached reads by backend without re-enumerating', async () => {
     const listTerminalSessionCatalog = vi.fn(() => [
       { name: 'alpha', backend: 'tmux' as const },
       { name: 'herdr-one', backend: 'herdr' as const },
@@ -64,17 +66,19 @@ describe('daemon session catalog runtime', () => {
       listTerminalSessionCatalog,
     });
 
+    await runtime.refresh();
     expect(runtime.read('tmux')).toEqual([{ name: 'alpha', backend: 'tmux' }]);
     expect(runtime.read('herdr')).toEqual([{ name: 'herdr-one', backend: 'herdr' }]);
     expect(listTerminalSessionCatalog).toHaveBeenCalledTimes(1);
   });
 
-  it('does not expose mutable cache entries to callers', () => {
+  it('does not expose mutable cache entries to callers', async () => {
     const runtime = createDaemonSessionCatalogRuntime({
       listTmuxSessions: vi.fn(() => []),
       listTerminalSessionCatalog: () => [{ name: 'alpha', backend: 'tmux', cwd: '/tmp/alpha' }],
     });
 
+    await runtime.refresh();
     const firstRead = runtime.read();
     firstRead[0]!.name = 'mutated';
     firstRead[0]!.cwd = '/tmp/mutated';
@@ -82,7 +86,7 @@ describe('daemon session catalog runtime', () => {
     expect(runtime.read()).toEqual([{ name: 'alpha', backend: 'tmux', cwd: '/tmp/alpha' }]);
   });
 
-  it('refreshes the cached catalog from the daemon-owned detection loop', () => {
+  it('refreshes the cached catalog from the daemon-owned detection loop', async () => {
     vi.useFakeTimers();
     try {
       const listTerminalSessionCatalog = vi.fn()
@@ -96,9 +100,13 @@ describe('daemon session catalog runtime', () => {
         listTerminalSessionCatalog,
       });
 
+      await runtime.refresh();
       expect(runtime.read()).toEqual([{ name: 'alpha', backend: 'tmux' }]);
       runtime.startRefreshLoop(1000);
       vi.advanceTimersByTime(1000);
+      await vi.waitFor(() => {
+        expect(listTerminalSessionCatalog).toHaveBeenCalledTimes(2);
+      });
 
       expect(runtime.read()).toEqual([
         { name: 'alpha', backend: 'tmux' },
@@ -111,7 +119,7 @@ describe('daemon session catalog runtime', () => {
     }
   });
 
-  it('lets the daemon detection loop run the shared refresh and publication path', () => {
+  it('lets the daemon detection loop run the shared refresh and publication path', async () => {
     vi.useFakeTimers();
     try {
       const listTerminalSessionCatalog = vi.fn(() => [
@@ -125,6 +133,9 @@ describe('daemon session catalog runtime', () => {
       runtime.startRefreshLoop(1000, refresh);
 
       vi.advanceTimersByTime(1000);
+      await vi.waitFor(() => {
+        expect(refresh).toHaveBeenCalledTimes(1);
+      });
 
       expect(refresh).toHaveBeenCalledTimes(1);
       expect(listTerminalSessionCatalog).toHaveBeenCalledTimes(1);
@@ -134,7 +145,7 @@ describe('daemon session catalog runtime', () => {
     }
   });
 
-  it('invalidates the cached catalog after a background refresh failure and blocks stale publication until an explicit refresh', () => {
+  it('invalidates the cached catalog after a background refresh failure and blocks stale publication until an explicit refresh', async () => {
     vi.useFakeTimers();
     try {
       const listTerminalSessionCatalog = vi.fn()
@@ -151,14 +162,18 @@ describe('daemon session catalog runtime', () => {
         listTerminalSessionCatalog,
       });
 
+      await runtime.refresh();
       expect(runtime.read()).toEqual([{ name: 'alpha', backend: 'tmux' }]);
       runtime.startRefreshLoop(1000);
       vi.advanceTimersByTime(1000);
+      await vi.waitFor(() => {
+        expect(listTerminalSessionCatalog).toHaveBeenCalledTimes(2);
+      });
 
       expect(() => runtime.read()).toThrow(/stale; explicit refresh required/);
       expect(listTerminalSessionCatalog).toHaveBeenCalledTimes(2);
 
-      expect(runtime.refresh()).toEqual([
+      await expect(runtime.refresh()).resolves.toEqual([
         { name: 'alpha', backend: 'tmux' },
         { name: 'beta', backend: 'tmux' },
       ]);
@@ -169,37 +184,259 @@ describe('daemon session catalog runtime', () => {
     }
   });
 
-  it('runs the passive observation reader only for catalog sessions', () => {
-    const observation = {
-      observedAt: 1000,
-      foregroundProcess: 'codex',
-      processGroupAlive: true,
-      recentOutput: true,
-      oscTitleSeen: false,
-      oscProgressSeen: true,
-      status: 'unknown',
-      statusReason: 'insufficient-evidence',
-    } as const;
-    const runTmux = vi.fn((args: string[]) => ({
+  it('samples passive observation into the resident snapshot only for tmux catalog sessions', async () => {
+    const runTmuxAsync = vi.fn(async (args: string[]) => ({
       ok: true as const,
-      stdout: args[0] === 'list-panes' ? '1234\tcodex' : '\u001b]133;A\u0007output',
+      stdout: args[0] === 'list-panes' ? 'agent-a\t1234\tcodex' : '\u001b]133;A\u0007output',
     }));
-    const payload = buildSessionsCatalogPayload({
+    const runtime = createDaemonSessionCatalogRuntime({
+      listTmuxSessions: vi.fn(() => []),
       listTerminalSessionCatalog: () => [
         { name: 'agent-a', backend: 'tmux' },
         { name: 'external-a', backend: 'herdr' },
       ],
-      listTmuxSessions: () => [],
-      runTmux,
+      runTmuxAsync,
       readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
     });
-    expect(payload.sessionCatalog[0]).toMatchObject({
-      name: 'agent-a', backend: 'tmux', observation: { ...observation, observedAt: expect.any(Number) },
+
+    const sampled = await runtime.refresh();
+    expect(sampled[0]).toMatchObject({
+      name: 'agent-a',
+      backend: 'tmux',
+      observation: { observedAt: expect.any(Number) },
     });
-    expect(payload.sessionCatalog[1]).toEqual({ name: 'external-a', backend: 'herdr' });
-    expect(payload.sessionCatalog[0]?.observation).toMatchObject({ foregroundProcess: 'codex', recentOutput: true, oscProgressSeen: true });
-    expect(runTmux).toHaveBeenCalledWith(['list-panes', '-t', 'agent-a', '-F', '#{pane_pid}\t#{pane_current_command}']);
-    expect(runTmux).toHaveBeenCalledWith(['capture-pane', '-p', '-e', '-t', 'agent-a', '-S', '-20']);
+    expect(sampled[1]).toEqual({ name: 'external-a', backend: 'herdr' });
+    expect(sampled[0]?.observation).toMatchObject({
+      foregroundProcess: 'codex',
+      recentOutput: true,
+      oscProgressSeen: true,
+    });
+    expect(runTmuxAsync).toHaveBeenCalledWith(['list-panes', '-a', '-F', '#{session_name}\t#{pane_pid}\t#{pane_current_command}']);
+    expect(runTmuxAsync).toHaveBeenCalledWith(['capture-pane', '-p', '-e', '-t', 'agent-a', '-S', '-20']);
+    runtime.dispose();
+  });
+
+  it('samples pane facts once and keeps the passive output observation for every tmux session', async () => {
+    const runTmuxAsync = vi.fn(async (args: string[]) => {
+      if (args[0] === 'list-panes') {
+        return {
+          ok: true as const,
+          stdout: [
+            'agent-a\t1234\tcodex',
+            'shell-a\t5678\tzsh',
+            'agent-b\t9012\tclaude',
+          ].join('\n'),
+        };
+      }
+      return {
+        ok: true as const,
+        stdout: args.includes('agent-b') ? 'thinking' : 'should not be read',
+      };
+    });
+    const runtime = createDaemonSessionCatalogRuntime({
+      listTmuxSessions: vi.fn(() => []),
+      listTerminalSessionCatalog: () => [
+        { name: 'agent-a', backend: 'tmux' },
+        { name: 'shell-a', backend: 'tmux' },
+        { name: 'agent-b', backend: 'tmux' },
+      ],
+      runTmuxAsync,
+      readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
+    });
+
+    const sampled = await runtime.refresh();
+    expect(sampled.map((entry) => entry.name)).toEqual(['agent-a', 'shell-a', 'agent-b']);
+    expect(sampled[1]?.observation).toMatchObject({
+      foregroundProcess: 'zsh',
+      status: 'unknown',
+      statusReason: 'insufficient-evidence',
+    });
+    expect(runTmuxAsync.mock.calls.filter(([args]) => args[0] === 'list-panes')).toHaveLength(1);
+    expect(runTmuxAsync.mock.calls.filter(([args]) => args[0] === 'capture-pane')).toEqual([
+      [['capture-pane', '-p', '-e', '-t', 'agent-a', '-S', '-20']],
+      [['capture-pane', '-p', '-e', '-t', 'shell-a', '-S', '-20']],
+      [['capture-pane', '-p', '-e', '-t', 'agent-b', '-S', '-20']],
+    ]);
+  });
+
+  it('keeps the last complete snapshot while a cadence refresh is in flight', async () => {
+    let releaseCapture: (() => void) | undefined;
+    const runTmuxAsync = vi.fn(async (args: string[]) => {
+      if (args[0] === 'list-panes') return { ok: true as const, stdout: 'agent-a\t1234\tcodex' };
+      await new Promise<void>((resolve) => {
+        releaseCapture = resolve;
+      });
+      return { ok: true as const, stdout: 'thinking' };
+    });
+    const runtime = createDaemonSessionCatalogRuntime({
+      listTmuxSessions: vi.fn(() => []),
+      listTerminalSessionCatalog: () => [{ name: 'agent-a', backend: 'tmux' }],
+      runTmuxAsync,
+      readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
+    });
+
+    const refresh = runtime.refresh();
+    await vi.waitFor(() => {
+      expect(releaseCapture).toBeTypeOf('function');
+    });
+    expect(runtime.read()).toEqual([{ name: 'agent-a', backend: 'tmux' }]);
+    releaseCapture?.();
+    await refresh;
+    expect(runtime.read()[0]?.observation?.foregroundProcess).toBe('codex');
+  });
+
+  it('keeps the last complete snapshot when the enumerated session set changes mid-refresh', async () => {
+    let releaseCapture: (() => void) | undefined;
+    const captureGate = new Promise<void>((resolve) => {
+      releaseCapture = resolve;
+    });
+    let gateCaptures = false;
+    let capturesStarted = 0;
+    const runTmuxAsync = vi.fn(async (args: string[]) => {
+      if (args[0] === 'list-panes') {
+        return { ok: true as const, stdout: 'alpha\t1234\tcodex\nbeta\t5678\tcodex' };
+      }
+      if (gateCaptures) {
+        capturesStarted += 1;
+        await captureGate;
+      }
+      return { ok: true as const, stdout: 'thinking' };
+    });
+    let enumerated: TerminalSessionCatalogEntry[] = [{ name: 'alpha', backend: 'tmux' }];
+    const runtime = createDaemonSessionCatalogRuntime({
+      listTmuxSessions: vi.fn(() => []),
+      listTerminalSessionCatalog: () => enumerated,
+      runTmuxAsync,
+      readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
+    });
+
+    await runtime.refresh();
+    const published = runtime.read();
+    expect(published.map((entry) => entry.name)).toEqual(['alpha']);
+    expect(published[0]?.observation?.foregroundProcess).toBe('codex');
+
+    enumerated = [
+      { name: 'alpha', backend: 'tmux' },
+      { name: 'beta', backend: 'tmux' },
+    ];
+    gateCaptures = true;
+    const refresh = runtime.refresh();
+    await vi.waitFor(() => {
+      expect(capturesStarted).toBeGreaterThan(0);
+    });
+
+    // The in-flight refresh enumerated a new session set, but the resident
+    // snapshot must stay on the last complete publication until the sampled
+    // candidate commits atomically.
+    const inFlight = runtime.read();
+    expect(inFlight.map((entry) => entry.name)).toEqual(['alpha']);
+    expect(inFlight[0]?.observation?.foregroundProcess).toBe('codex');
+
+    releaseCapture?.();
+    await refresh;
+    const committed = runtime.read();
+    expect(committed.map((entry) => entry.name)).toEqual(['alpha', 'beta']);
+    expect(committed[1]?.observation?.foregroundProcess).toBe('codex');
+    runtime.dispose();
+  });
+
+  it('keeps the session list when an async sample reports observation errors', async () => {
+    const runTmuxAsync = vi.fn(async (args: string[]) => {
+      if (args[0] === 'list-panes') return { ok: true as const, stdout: 'agent-a\t1234\tcodex' };
+      return { ok: true as const, stdout: 'thinking' };
+    });
+    const runtime = createDaemonSessionCatalogRuntime({
+      listTmuxSessions: vi.fn(() => []),
+      listTerminalSessionCatalog: () => [{ name: 'agent-a', backend: 'tmux' }],
+      runTmuxAsync,
+      readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
+    });
+    await runtime.refresh();
+    runTmuxAsync.mockRejectedValueOnce(new Error('tmux observation failed'));
+    await expect(runtime.refresh()).resolves.toEqual([
+      {
+        name: 'agent-a',
+        backend: 'tmux',
+        observation: expect.objectContaining({
+          status: 'error',
+          statusReason: 'observation-error',
+        }),
+      },
+    ]);
+    expect(runtime.read()).toHaveLength(1);
+    expect(runtime.read()[0]?.name).toBe('agent-a');
+  });
+
+  it('serves client catalog requests from the snapshot without re-sampling observation', async () => {
+    const runTmuxAsync = vi.fn(async (args: string[]) => ({
+      ok: true as const,
+      stdout: args[0] === 'list-panes' ? 'agent-a\t1234\tcodex' : 'thinking',
+    }));
+    const runtime = createDaemonSessionCatalogRuntime({
+      listTmuxSessions: vi.fn(() => []),
+      listTerminalSessionCatalog: () => [{ name: 'agent-a', backend: 'tmux' }],
+      runTmuxAsync,
+      readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
+    });
+    // Prime the resident snapshot the same way the daemon refresh loop does.
+    await runtime.refresh();
+    const samplesAfterRefresh = runTmuxAsync.mock.calls.length;
+    expect(samplesAfterRefresh).toBeGreaterThan(0);
+
+    const payload = buildSessionsCatalogPayload({
+      listTmuxSessions: () => [],
+      listTerminalSessionCatalog: () => runtime.read(),
+      runTmuxAsync,
+      readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
+    });
+    const repeated = buildSessionsCatalogPayload({
+      listTmuxSessions: () => [],
+      listTerminalSessionCatalog: () => runtime.read(),
+      runTmuxAsync,
+      readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
+    });
+
+    const firstObservation = 'observation' in payload.sessionCatalog[0]!
+      ? payload.sessionCatalog[0].observation
+      : undefined;
+    expect(firstObservation).toMatchObject({ foregroundProcess: 'codex' });
+    expect('observation' in repeated.sessionCatalog[0]! ? repeated.sessionCatalog[0].observation : undefined)
+      .toEqual(firstObservation);
+    expect(runTmuxAsync.mock.calls.length).toBe(samplesAfterRefresh);
+    runtime.dispose();
+  });
+
+  it('refreshes observation on the daemon cadence, not on client requests', async () => {
+    vi.useFakeTimers();
+    try {
+      const runtime = createDaemonSessionCatalogRuntime({
+        listTmuxSessions: vi.fn(() => []),
+        listTerminalSessionCatalog: () => [{ name: 'agent-a', backend: 'tmux' }],
+        runTmuxAsync: async (args: string[]) => ({
+          ok: true as const,
+          stdout: args[0] === 'list-panes' ? 'agent-a\t1234\tcodex' : 'thinking',
+        }),
+        readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
+      });
+
+      await runtime.refresh();
+      expect(runtime.read()[0]?.observation?.observedAt).toBeGreaterThan(0);
+      runtime.startRefreshLoop(1_000);
+
+      const before = runtime.read()[0]?.observation?.observedAt ?? 0;
+      // Client reads in between must not re-sample.
+      runtime.read();
+      runtime.read();
+      expect(runtime.read()[0]?.observation?.observedAt).toBe(before);
+
+      vi.advanceTimersByTime(1_000);
+      await vi.waitFor(() => {
+        expect(runtime.read()[0]?.observation?.observedAt ?? 0).toBeGreaterThan(before);
+      });
+      runtime.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('builds a backend-qualified catalog for backend-opaque list-sessions', () => {
@@ -272,27 +509,35 @@ describe('daemon session catalog runtime', () => {
     });
   });
 
-  it('publishes daemon status in the real sessions control frame', () => {
+  it('publishes daemon status in the real sessions control frame', async () => {
     const connection = { transport: null } as unknown as TerminalTransportConnection;
     const sendTransportMessage = vi.fn();
     const history = new Map();
-    const deps = makeDeps({
+    const runtime = createDaemonSessionCatalogRuntime({
+      listTmuxSessions: vi.fn(() => []),
       listTerminalSessionCatalog: () => [{ name: 'agent-a', backend: 'tmux' }],
-      runTmux: (args: string[]) => ({
+      runTmuxAsync: async (args: string[]) => ({
         ok: true as const,
-        stdout: args[0] === 'list-panes' ? '42\tcodex' : 'thinking',
+        stdout: args[0] === 'list-panes' ? 'agent-a\t42\tcodex' : 'thinking',
       }),
       readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
       observationHistory: history,
+    });
+    const deps = makeDeps({
+      // The daemon session catalog runtime owns observation sampling; the
+      // list-sessions handler only projects its resident snapshot.
+      listTerminalSessionCatalog: () => runtime.read(),
       sendTransportMessage,
     });
 
+    await runtime.refresh();
     handleListSessionsMessageRuntime(deps, connection, { type: 'list-sessions' });
     const sessionsFrame = sendTransportMessage.mock.calls.find(([_, message]) => message.type === 'sessions')?.[1];
     expect(sessionsFrame).toMatchObject({
       type: 'sessions',
       payload: { sessionCatalog: [{ name: 'agent-a', backend: 'tmux', observation: { status: 'unknown', statusReason: 'insufficient-evidence' } }] },
     });
+    runtime.dispose();
   });
 
   it('keeps list-sessions failure explicit and wire-compatible', () => {
