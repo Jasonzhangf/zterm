@@ -40,6 +40,7 @@ export interface TerminalPreviewGridProps {
   onFocusChange: (coordinate: JunctionPreviewCoordinate) => void;
   onSetCell: (coordinate: JunctionPreviewCoordinate, sessionId: string) => void;
   onClearCell: (coordinate: JunctionPreviewCoordinate) => void;
+  onOverviewChange?: (coordinates: JunctionPreviewCoordinate[] | null) => void;
   onClose: () => void;
 }
 
@@ -88,6 +89,38 @@ function coordinateKey(coord: JunctionPreviewCoordinate) {
   return `${coord.col}:${coord.row}`;
 }
 
+function resolveOverviewBounds(coordinates: JunctionPreviewCoordinate[]) {
+  if (coordinates.length === 0) return null;
+  let minCol = coordinates[0].col;
+  let maxCol = coordinates[0].col;
+  let minRow = coordinates[0].row;
+  let maxRow = coordinates[0].row;
+  for (const coordinate of coordinates) {
+    minCol = Math.min(minCol, coordinate.col);
+    maxCol = Math.max(maxCol, coordinate.col);
+    minRow = Math.min(minRow, coordinate.row);
+    maxRow = Math.max(maxRow, coordinate.row);
+  }
+  return { minCol, maxCol, minRow, maxRow };
+}
+
+function buildOverviewGrid(
+  lattice: JunctionPreviewLatticeV1,
+  focus: JunctionPreviewCoordinate,
+): JunctionPreviewCoordinate[] | null {
+  const coordinates = lattice.cells.map((cell) => ({ col: cell.col, row: cell.row }));
+  coordinates.push({ col: focus.col, row: focus.row });
+  const bounds = resolveOverviewBounds(coordinates);
+  if (!bounds) return null;
+  const cells: JunctionPreviewCoordinate[] = [];
+  for (let col = bounds.minCol - 1; col <= bounds.maxCol + 1; col += 1) {
+    for (let row = bounds.minRow - 1; row <= bounds.maxRow + 1; row += 1) {
+      cells.push({ col, row });
+    }
+  }
+  return cells;
+}
+
 export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
   lattice,
   focus,
@@ -102,6 +135,7 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
   onFocusChange,
   onSetCell,
   onClearCell,
+  onOverviewChange,
   onClose,
 }: TerminalPreviewGridProps) {
   const resolvedViewportWidth = Math.max(
@@ -180,6 +214,13 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
       window.clearTimeout(suppressPreviewClickTimerRef.current);
     }
   }, []);
+
+  useEffect(() => {
+    if (!onOverviewChange) return;
+    onOverviewChange(previewScale < 1
+      ? lattice.cells.map((cell) => ({ col: cell.col, row: cell.row }))
+      : null);
+  }, [lattice.cells, onOverviewChange, previewScale]);
 
   const suppressNextPreviewClick = () => {
     suppressPreviewClickRef.current = true;
@@ -315,6 +356,37 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
     cellRects.set(coordinateKey(cell), { clip, pane, isFocus });
   }
 
+  const overviewCells = previewScale < 1
+    ? buildOverviewGrid(lattice, focus)
+    : null;
+  const overviewBounds = overviewCells ? resolveOverviewBounds(overviewCells) : null;
+  const overviewCellRects = new Map<string, {
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+    isFocus: boolean;
+  }>();
+  if (overviewBounds && overviewCells) {
+    const columnCount = overviewBounds.maxCol - overviewBounds.minCol + 1;
+    const rowCount = overviewBounds.maxRow - overviewBounds.minRow + 1;
+    const overviewCellWidth = layout.focusSizePx.width;
+    const overviewCellHeight = layout.focusSizePx.height;
+    const overviewWidth = columnCount * overviewCellWidth + Math.max(0, columnCount - 1) * JUNCTION_PREVIEW_GAP_PX;
+    const overviewHeight = rowCount * overviewCellHeight + Math.max(0, rowCount - 1) * JUNCTION_PREVIEW_GAP_PX;
+    const originX = (layoutViewportWidth - overviewWidth) / 2;
+    const originY = (resolvedViewportHeight - overviewHeight) / 2;
+    for (const cell of overviewCells) {
+      overviewCellRects.set(coordinateKey(cell), {
+        left: originX + (cell.col - overviewBounds.minCol) * (overviewCellWidth + JUNCTION_PREVIEW_GAP_PX),
+        top: originY + (cell.row - overviewBounds.minRow) * (overviewCellHeight + JUNCTION_PREVIEW_GAP_PX),
+        width: overviewCellWidth,
+        height: overviewCellHeight,
+        isFocus: cell.col === focus.col && cell.row === focus.row,
+      });
+    }
+  }
+
   const usedSessionIds = new Set(
     lattice.cells
       .filter((candidate) => (
@@ -406,15 +478,169 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
     const pan = panGestureRef.current;
     if (!pan) return;
     panGestureRef.current = null;
-    if (pan.moved) {
-      event.preventDefault();
-      event.stopPropagation();
-    }
+    if (!pan.moved) return;
+    event.preventDefault();
+    event.stopPropagation();
   };
 
   const onPreviewTouchCancelCapture = () => {
     pinchGestureRef.current = null;
     panGestureRef.current = null;
+  };
+
+  const renderPreviewCell = (
+    cell: JunctionPreviewCoordinate & { edge?: string },
+    rect: {
+      clip?: { left: number; top: number; width: number; height: number };
+      pane?: { left: number; top: number; width: number; height: number };
+      left?: number;
+      top?: number;
+      width?: number;
+      height?: number;
+      isFocus?: boolean;
+    },
+  ) => {
+    const session = resolveJunctionPreviewCell(lattice, cell, candidates);
+    const canPan = !rect.isFocus && Boolean(session);
+    const tone = session ? getServerIdentityTone(session) : null;
+    const title = session ? session.customName || session.title || session.sessionName || session.id : '';
+    const clip = rect.clip || {
+      left: rect.left || 0,
+      top: rect.top || 0,
+      width: rect.width || 0,
+      height: rect.height || 0,
+    };
+    const pane = rect.pane || clip;
+    return (
+      <div
+        key={coordinateKey(cell)}
+        data-testid={session
+          ? `terminal-preview-tile-${session.id}`
+          : `terminal-preview-empty-${cell.col}-${cell.row}`}
+        data-preview-coordinate={coordinateKey(cell)}
+        data-preview-edge={cell.edge}
+        data-preview-focus={rect.isFocus ? 'true' : 'false'}
+        data-preview-session-id={session?.id || ''}
+        role={session ? undefined : 'button'}
+        tabIndex={session ? undefined : 0}
+        onClick={session
+          ? () => {
+            if (consumeSuppressedPreviewClick()) return;
+            const suppressed = suppressClickRef.current;
+            suppressClickRef.current = null;
+            if (suppressClickTimerRef.current !== null) {
+              window.clearTimeout(suppressClickTimerRef.current);
+              suppressClickTimerRef.current = null;
+            }
+            if (suppressed?.col === cell.col && suppressed.row === cell.row) {
+              return;
+            }
+            if (canPan) onFocusChange({ col: cell.col, row: cell.row });
+          }
+          : () => {
+            if (consumeSuppressedPreviewClick()) return;
+            setSlotMenu({ coordinate: { col: cell.col, row: cell.row } });
+          }}
+        onKeyDown={session ? undefined : (event) => {
+          if (event.key !== 'Enter' && event.key !== ' ') return;
+          event.preventDefault();
+          setSlotMenu({ coordinate: { col: cell.col, row: cell.row } });
+        }}
+        onPointerDown={(event) => {
+          if (!session || rect.isFocus) return;
+          startLongPress({ col: cell.col, row: cell.row }, session.id, event);
+        }}
+        onPointerMove={updateLongPress}
+        onPointerUp={clearLongPress}
+        onPointerCancel={finishLongPress}
+        onContextMenu={(event) => {
+          if (!session || rect.isFocus) return;
+          event.preventDefault();
+          setSlotMenu({
+            coordinate: { col: cell.col, row: cell.row },
+            existingSessionId: session.id,
+          });
+        }}
+        style={{
+          position: 'absolute',
+          left: clip.left,
+          top: clip.top,
+          width: clip.width,
+          height: clip.height,
+          overflow: 'hidden',
+          border: rect.isFocus ? `1px solid ${mobileTheme.colors.cardBorder}` : 'none',
+          background: mobileTheme.colors.canvas,
+          boxSizing: 'border-box',
+        }}
+      >
+        {session ? (
+          <div
+            data-testid={`terminal-preview-body-${session.id}`}
+            data-preview-scroll-surface="true"
+            style={{
+              position: 'absolute',
+              left: pane.left - clip.left,
+              top: pane.top - clip.top,
+              width: pane.width,
+              height: pane.height,
+            }}
+          >
+            <TerminalView
+              sessionId={session.id}
+              sessionBufferStore={sessionBufferStore}
+              active={false}
+              live
+              projectionMode="preview-primary"
+              allowDomFocus={false}
+              domInputOffscreen
+              focusNonce={0}
+              fontSize={fontSize}
+              rowHeight={`${rowHeightPx}px`}
+              themeId={themeId || 'default'}
+              widthMode="mirror-fixed"
+              showAbsoluteLineNumbers={false}
+              copyModeActive={false}
+              splitVisible
+            />
+          </div>
+        ) : (
+          <div
+            style={{
+              width: '100%',
+              height: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <span style={{ fontSize: '22px', fontWeight: 900, color: mobileTheme.colors.textSecondary }}>+</span>
+          </div>
+        )}
+        {session && tone ? (
+          <div
+            data-preview-chip="true"
+            style={{
+              position: 'absolute',
+              left: 2,
+              top: 2,
+              maxWidth: 'calc(100% - 4px)',
+              padding: '1px 4px',
+              overflow: 'hidden',
+              whiteSpace: 'nowrap',
+              textOverflow: 'ellipsis',
+              background: tone.previewBackground,
+              color: tone.previewText,
+              borderRadius: '3px',
+              fontSize: '9px',
+              fontWeight: 800,
+              pointerEvents: 'none',
+            }}
+          >
+            {title} · {resolveServerDisplayName(session)}
+          </div>
+        ) : null}
+      </div>
+    );
   };
 
   return (
@@ -515,144 +741,15 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
               : undefined,
           }}
         >
-          {layout.visibleCells.map((cell) => {
-          const rect = cellRects.get(coordinateKey(cell));
-          if (!rect) return null;
-          const session = resolveJunctionPreviewCell(lattice, cell, candidates);
-          const canPan = !rect.isFocus && Boolean(session);
-          const tone = session ? getServerIdentityTone(session) : null;
-          const title = session ? session.customName || session.title || session.sessionName || session.id : '';
-          return (
-            <div
-              key={coordinateKey(cell)}
-              data-testid={session
-                ? `terminal-preview-tile-${session.id}`
-                : `terminal-preview-empty-${cell.col}-${cell.row}`}
-              data-preview-coordinate={coordinateKey(cell)}
-              data-preview-edge={cell.edge}
-              data-preview-focus={rect.isFocus ? 'true' : 'false'}
-              data-preview-session-id={session?.id || ''}
-              role={session ? undefined : 'button'}
-              tabIndex={session ? undefined : 0}
-              onClick={session
-                ? () => {
-                  if (consumeSuppressedPreviewClick()) return;
-                  const suppressed = suppressClickRef.current;
-                  suppressClickRef.current = null;
-                  if (suppressClickTimerRef.current !== null) {
-                    window.clearTimeout(suppressClickTimerRef.current);
-                    suppressClickTimerRef.current = null;
-                  }
-                  if (suppressed?.col === cell.col && suppressed.row === cell.row) {
-                    return;
-                  }
-                  if (canPan) onFocusChange({ col: cell.col, row: cell.row });
-                }
-                : () => {
-                  if (consumeSuppressedPreviewClick()) return;
-                  setSlotMenu({ coordinate: { col: cell.col, row: cell.row } });
-                }}
-              onKeyDown={session ? undefined : (event) => {
-                if (event.key !== 'Enter' && event.key !== ' ') return;
-                event.preventDefault();
-                setSlotMenu({ coordinate: { col: cell.col, row: cell.row } });
-              }}
-              onPointerDown={(event) => {
-                if (!session || rect.isFocus) return;
-                startLongPress({ col: cell.col, row: cell.row }, session.id, event);
-              }}
-              onPointerMove={updateLongPress}
-              onPointerUp={clearLongPress}
-              onPointerCancel={finishLongPress}
-              onContextMenu={(event) => {
-                if (!session || rect.isFocus) return;
-                event.preventDefault();
-                setSlotMenu({
-                  coordinate: { col: cell.col, row: cell.row },
-                  existingSessionId: session.id,
-                });
-              }}
-              style={{
-                position: 'absolute',
-                left: rect.clip.left,
-                top: rect.clip.top,
-                width: rect.clip.width,
-                height: rect.clip.height,
-                overflow: 'hidden',
-                border: rect.isFocus ? `1px solid ${mobileTheme.colors.cardBorder}` : 'none',
-                background: mobileTheme.colors.canvas,
-                boxSizing: 'border-box',
-              }}
-            >
-              {session ? (
-                <div
-                  data-testid={`terminal-preview-body-${session.id}`}
-                  data-preview-scroll-surface="true"
-                  style={{
-                    position: 'absolute',
-                    left: rect.pane.left - rect.clip.left,
-                    top: rect.pane.top - rect.clip.top,
-                    width: rect.pane.width,
-                    height: rect.pane.height,
-                  }}
-                >
-                  <TerminalView
-                    sessionId={session.id}
-                    sessionBufferStore={sessionBufferStore}
-                    active={false}
-                    live
-                    projectionMode="preview-primary"
-                    allowDomFocus={false}
-                    domInputOffscreen
-                    focusNonce={0}
-                    fontSize={fontSize}
-                    rowHeight={`${rowHeightPx}px`}
-                    themeId={themeId || 'default'}
-                    widthMode="mirror-fixed"
-                    showAbsoluteLineNumbers={false}
-                    copyModeActive={false}
-                    splitVisible
-                  />
-                </div>
-              ) : (
-                <div
-                  style={{
-                    width: '100%',
-                    height: '100%',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <span style={{ fontSize: '22px', fontWeight: 900, color: mobileTheme.colors.textSecondary }}>+</span>
-                </div>
-              )}
-              {session && tone ? (
-                <div
-                  data-preview-chip="true"
-                  style={{
-                    position: 'absolute',
-                    left: 2,
-                    top: 2,
-                    maxWidth: 'calc(100% - 4px)',
-                    padding: '1px 4px',
-                    overflow: 'hidden',
-                    whiteSpace: 'nowrap',
-                    textOverflow: 'ellipsis',
-                    background: tone.previewBackground,
-                    color: tone.previewText,
-                    borderRadius: '3px',
-                    fontSize: '9px',
-                    fontWeight: 800,
-                    pointerEvents: 'none',
-                  }}
-                >
-                  {title} · {resolveServerDisplayName(session)}
-                </div>
-              ) : null}
-            </div>
-          );
-          })}
+          {overviewCells
+            ? overviewCells.map((cell) => {
+              const rect = overviewCellRects.get(coordinateKey(cell));
+              return rect ? renderPreviewCell(cell, rect) : null;
+            })
+            : layout.visibleCells.map((cell) => {
+              const rect = cellRects.get(coordinateKey(cell));
+              return rect ? renderPreviewCell(cell, rect) : null;
+            })}
         </div>
 
         {slotMenu ? (

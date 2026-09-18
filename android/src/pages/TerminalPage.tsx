@@ -711,6 +711,9 @@ function TerminalPageComponent({
   const [sessionPreviewOpen, setSessionPreviewOpen] = useState(false);
   const [sessionPreviewFocus, setSessionPreviewFocus] = useState<JunctionPreviewCoordinate>({ col: 0, row: 0 });
   const [sessionPreviewSideEdge, setSessionPreviewSideEdge] = useState<'left' | 'right'>('left');
+  const [sessionPreviewOverviewCoordinates, setSessionPreviewOverviewCoordinates] = useState<
+    JunctionPreviewCoordinate[] | null
+  >(null);
   const showSessionPreviewError = useCallback((message: string, detail?: string) => {
     setTerminalDialog({
       tone: 'error',
@@ -1130,10 +1133,10 @@ function TerminalPageComponent({
     ],
   );
   const sessionPreviewVisibleSessions = useMemo(
-    () => (sessionPreviewLayout?.visibleCells || [])
+    () => (sessionPreviewOverviewCoordinates || sessionPreviewLayout?.visibleCells || [])
       .map((cell) => resolveJunctionPreviewCell(sessionPreviewLattice, cell, sessions))
       .filter((session): session is NonNullable<typeof session> => Boolean(session)),
-    [sessionPreviewLayout, sessionPreviewLattice, sessions],
+    [sessionPreviewLayout, sessionPreviewLattice, sessionPreviewOverviewCoordinates, sessions],
   );
   const sessionPreviewFocusSession = sessionPreviewOpen
     ? resolveJunctionPreviewCell(sessionPreviewLattice, sessionPreviewFocus, sessions)
@@ -3099,6 +3102,7 @@ function TerminalPageComponent({
       ) !== null
       : false;
     if (activeCoordinate && activeCoordinateHasCurrentIdentity) {
+      setSessionPreviewOverviewCoordinates(null);
       setSessionPreviewFocus(activeCoordinate);
       setSessionPreviewSideEdge(activeCoordinate.col < 0 ? 'right' : 'left');
       setSessionPreviewOpen(true);
@@ -3119,6 +3123,7 @@ function TerminalPageComponent({
       return;
     }
     persistSessionPreviewLattice(result.lattice);
+    setSessionPreviewOverviewCoordinates(null);
     setSessionPreviewFocus(coordinate);
     setSessionPreviewSideEdge('left');
     setSessionPreviewOpen(true);
@@ -3137,6 +3142,7 @@ function TerminalPageComponent({
   const handleCancelSessionPreview = useCallback(() => {
     const entry = sessionPreviewEntryRef.current;
     sessionPreviewEntryRef.current = null;
+    setSessionPreviewOverviewCoordinates(null);
     setSessionPreviewOpen(false);
     if (!entry) return;
     setSessionGroupSlotIds(entry.slotIds);
@@ -3699,6 +3705,7 @@ function TerminalPageComponent({
           onPreviewFocusChange: handlePreviewFocusChange,
           onSetPreviewCell: handleSetSessionPreviewCell,
           onClearPreviewCell: handleClearSessionPreviewCell,
+          onPreviewOverviewChange: setSessionPreviewOverviewCoordinates,
           onOpenSessionDrawer: sessionDrawerGestureEnabled ? handleOpenSessionDrawer : undefined,
         },
         copyMenu: copySelection.menu && !sessionDrawerOpen
