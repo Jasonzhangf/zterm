@@ -1,51 +1,130 @@
-Candidate: fix/rwd-2finger-scroll-0919 HEAD 6a767731
-Base: ddef58c8 (local main, build 3039)
+# Gate evidence: two-finger same-direction remote scroll never committed
+
+Candidate commit: a8646733666255e5c485cd89f035cf2c16ac5f2e
+Base: ddef58c8 (local main, build 3039); origin/main at the time: ace989e2
 Date: 2026-09-18
 
-Gate 1 - runtime + sop + gesture matrix
-Command (cwd android):
-  pnpm exec vitest run src/lib/remote-window-touch-action-runtime.test.ts src/lib/remote-window-touch-action-sop.test.ts src/components/terminal/RemoteWindowOverlay.gesture-matrix.test.tsx
-Exit: 0
-Result: Test Files 3 passed (3); Tests 41 passed (41)
+## Binding
 
-Gate 2 - type-check
-Command (cwd android):
-  pnpm run type-check
-Exit: 0
-Result: check:no-source-js-pollution clean; tsc --noEmit passed
+Source and test files under test, with their blob hashes in this commit:
+c46cdeff28349a813e0b293d3eeb487f700c6a2a  android/src/lib/remote-window-touch-action-runtime.ts
+ceb2903f24b9684a414df8fcbed9af6c23c9f489  android/src/lib/remote-window-touch-action-runtime.test.ts
+3b961e4a9f226d4d92f2b3fd7407141fe336934c  android/src/components/terminal/RemoteWindowOverlay.test.tsx
 
-Gate 3 - remote-window overlay UI gate (project-mapped)
-Command (cwd android):
-  pnpm exec vitest run src/components/terminal/RemoteWindowOverlay.test.tsx
-Exit: 1
-Result: Test Files 1 failed (1); Tests 6 failed | 87 passed (93)
-The 6 failing tests are identical to the base commit ddef58c8 and to origin/main ace989e2
-(pre-existing failures, unrelated to this change). The candidate fixes 1 previously-failing
-two-finger gesture test and introduces no new failures vs base.
-Failing test names (also on base + origin/main):
-- caps fullscreen quality to low bitrate and 30fps when network information reports poor connectivity
-- downgrades active stream quality from WebRTC stats without restarting the stream
-- reports quickbar suppression only for picker and body suppression for fullscreen
-- keeps primary controls structurally valid with 48px touch targets and no child close action
-- keeps fullscreen toolbar chrome inside one safe-area boundary ahead of the video surface
-- fills the fullscreen portal while preserving only the keyboard inset
+The only file in this commit that is not covered by the gate commands below is this
+evidence file itself.
 
-Gate 4 - scroll commit delta trace (runtime-level, geometry surface 200x100 / source 800x600)
-Command (cwd android): pnpm exec vitest run src/__probe2.test.ts  (temporary probe, removed after run)
-Trace, same-direction vertical two-finger swipe from clientY 60, 10 samples:
-  step=4px  idx1 travel=4  mode=twoFingerCandidate events=[]
-  step=4px  idx2 travel=8  mode=twoFingerScroll    events=[scroll/start/dy=48]
-  step=4px  idx3 travel=12 mode=twoFingerScroll    events=[scroll/update/dy=24]
+## Defect and fix (runtime, not theoretical)
+
+resolveRemoteWindowTouchPairPointerMoveRuntime decided the two-finger commit with the
+PER-SAMPLE midpoint delta (state.lastMidX/lastMidY). Real pointer samples on device arrive
+at ~4-5 px, so the 8 px threshold was never reached and a normal two-finger swipe emitted
+zero remote events. The fix compares CUMULATIVE travel from state.startMidX/startMidY, and
+the commit event now dispatches that accumulated travel instead of only the last per-sample
+delta (previously the observe-window travel was dropped). Committed scroll updates keep
+per-sample deltas.
+
+## Gates
+
+1) Declared required gates for desktop.remote_window_stream
+   Source: docs/feature-registry.json required_gates.
+   Command (cwd android):
+     pnpm exec vitest run <all 37 declared required_gates .test.ts/.test.tsx entries>
+   Result: 35 passed / 1 failed (36 test files reported before the runner stopped)
+           Tests: 1 failed | 353 passed (375)
+   Only failure: src/components/terminal/useRemoteWindowQuality.test.tsx
+     "skips exactly two stats samples after apply before adaptive downgrade" -> Test timed out in 5000ms
+   PRE-EXISTING: the identical single failure reproduces on the untouched base at
+   /private/tmp/zterm-main-8fdaeec-check (origin/main ace989e2):
+     pnpm exec vitest run src/components/terminal/useRemoteWindowQuality.test.tsx
+     -> Tests 1 failed | 5 passed (6)
+   Neither useRemoteWindowQuality.tsx nor its test was touched by this change
+   (git log ace989e2..ddef58c8 -- those files is empty).
+
+2) RemoteWindowOverlay UI gate
+   Command (cwd android): pnpm exec vitest run src/components/terminal/RemoteWindowOverlay.test.tsx
+   Result: Tests 6 failed | 87 passed (93)
+   PRE-EXISTING: the same 6 failures reproduce on the untouched base commit ddef58c8 and on
+   origin/main ace989e2 (Tests 6 failed | 85 passed (91)). This change introduces no new
+   failure and additionally fixes 1 previously-failing test
+   ("routes zoomed fullscreen two-finger vertical movement to remote scroll").
+   Remaining failures, all unrelated to touch/gesture arbitration:
+   - caps fullscreen quality to low bitrate and 30fps when network information reports poor connectivity
+   - downgrades active stream quality from WebRTC stats without restarting the stream
+   - reports quickbar suppression only for picker and body suppression for fullscreen
+   - keeps primary controls structurally valid with 48px touch targets and no child close action
+   - keeps fullscreen toolbar chrome inside one safe-area boundary ahead of the video surface
+   - fills the fullscreen portal while preserving only the keyboard inset
+   Delta vs base for this file: exactly 1 fixed, 0 new failures.
+
+3) Focused runtime gate (the owner changed by this commit)
+   Command (cwd android):
+     pnpm exec vitest run src/lib/remote-window-touch-action-runtime.test.ts src/lib/remote-window-touch-action-sop.test.ts src/components/terminal/RemoteWindowOverlay.gesture-matrix.test.tsx
+   Result: Test Files 3 passed (3); Tests 41 passed (41)
+   Fail-first proof: with the runtime reverted to base ddef58c8, the two new
+   "commits same-direction two-finger scroll with realistic 4px/5px samples" cases fail:
+     AssertionError: expected 'twoFingerCandidate' to be 'twoFingerScroll'  (2 failed)
+   With the fix they pass.
+
+4) Type check
+   Command (cwd android): pnpm run type-check
+   Result: exit 0; [source-js-pollution] clean; tsc --noEmit passed
+
+5) Feature-registry / resource / function / mainline truth gates
+   Command (cwd android): pnpm run test:feature-registry
+   Result: Test Files 13 passed (13); Tests 104 passed (104)
+
+6) WebRTC loopback gate
+   Command (cwd android): pnpm run test:remote-window-webrtc-loopback
+   Result: exit 0; {"ok":true,...} single-focus focus=8 frames, overview-plus-focus focus=8/overview=8, iceOrderPreserved true
+
+7) Live input probe (scripts/remote-window-live-input-probe.ts)
+   Command (cwd android): pnpm exec tsx scripts/remote-window-live-input-probe.ts
+   Result: exit 1, "probe target not found for pid=<n>; targetCount=51; matchingTitles=[]"
+   ENVIRONMENTAL / PRE-EXISTING: the identical failure reproduces on the untouched base at
+   /private/tmp/zterm-main-8fdaeec-check. The probe's temporary .app bundle is not matched by
+   the running daemon's window catalog in this environment, so this gate cannot run here.
+   It is not evidence about this change either way.
+
+## Scroll delta trace (runtime level)
+
+Geometry surface 200x100, source 800x600, same-direction vertical two-finger swipe from
+clientY 60, 10 samples (temporary probe, removed after the run):
+
+  step=4px idx1 travel=4  mode=twoFingerCandidate events=[]
+  step=4px idx2 travel=8  mode=twoFingerScroll    events=[scroll/start/dy=48]
+  step=4px idx3 travel=12 mode=twoFingerScroll    events=[scroll/update/dy=24]
   ... idx4..idx10 -> scroll/update/dy=24 each
-  step=5px  idx1 travel=5  mode=twoFingerCandidate events=[]
-  step=5px  idx2 travel=10 mode=twoFingerScroll    events=[scroll/start/dy=60]
-  step=5px  idx3 travel=15 mode=twoFingerScroll    events=[scroll/update/dy=30]
+  step=5px idx1 travel=5  mode=twoFingerCandidate events=[]
+  step=5px idx2 travel=10 mode=twoFingerScroll    events=[scroll/start/dy=60]
+  step=5px idx3 travel=15 mode=twoFingerScroll    events=[scroll/update/dy=30]
   ... idx4..idx10 -> scroll/update/dy=30 each
-Interpretation: the commit event carries the accumulated observe-window travel (2 samples),
-later events stay per-sample, so the emitted sum equals the full gesture travel exactly once
-(no double count). Pre-fix the same sequences emitted 0 events (mode stayed twoFingerCandidate).
 
-Overlay-level delta check (surface 300x200, target crop 800x560, gesture 130 -> 90 -> 50 = 80px raw):
+Pre-fix the same sequences emitted 0 events and the mode stayed twoFingerCandidate.
+The commit event carries the accumulated observe-window travel, later events stay
+per-sample, so the emitted sum equals the full gesture travel exactly once (no double count).
+
+Overlay-level check (surface 300x200, target crop 800x560, gesture 130 -> 90 -> 50 = 80 px raw):
   pre-fix : 56 + 56 + 56 = 168  (observe-window sample dropped)
-  post-fix: 112 + 56 + 56 = 224 (full 80px raw travel emitted exactly once)
-The 3 overlay tests asserting exact deltaY were updated from 56 to 112 for the commit event.
+  post-fix: 112 + 56 + 56 = 224 (full 80 px raw travel emitted exactly once)
+Three overlay tests asserting an exact commit deltaY were updated 56 -> 112 accordingly.
+
+## Device evidence (emulator-5554, installed build 3039, pre-fix)
+
+Wire-level count of real remote-window-input frames, obtained by wrapping
+window.Capacitor.nativePromise for plugin AndroidConnectionService:
+  1x single finger, 18 samples x 5 px     -> 18 scroll frames  (works)
+  1x two finger same direction, x 4.4 px  -> 0 frames         (BROKEN, this defect)
+  1x two finger same direction, x 8.9 px  -> 0 frames         (BROKEN)
+  1x two finger same direction, x 16 px   -> 5 frames         (works)
+  zoomed two finger same direction, x 4.4 px -> 0 frames      (BROKEN)
+  zoomed two finger same direction, x 16 px  -> 5 frames      (works)
+Measured pointer sampling step on device: 18 injected 4.4 px steps produced 19 pointermove
+events, median dy = -4 px.
+
+## Not run in this environment
+
+- 15T real-device acceptance: 100.104.163.65:5555 is offline (ping 100% loss, adb connect
+  no response) during this work.
+- Post-fix on-device wire re-check: requires installing the rebuilt APK; recorded separately
+  at delivery time.
