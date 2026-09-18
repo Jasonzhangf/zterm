@@ -97,13 +97,70 @@ describe('remote-window-overlay-helpers', () => {
     expect(rect.top).toBe(25);
   });
 
-  it('resolves a unified 1080p short-edge remote window resize size', () => {
-    expect(resolveRemoteWindowTargetResizeSize({ viewport: { width: 390, height: 844 } }))
-      .toEqual({ width: 1080, height: 2337 });
-    expect(resolveRemoteWindowTargetResizeSize({ viewport: { width: 844, height: 390 }, orientation: 'landscape' }))
-      .toEqual({ width: 2337, height: 1080 });
-    expect(resolveRemoteWindowTargetResizeSize({ viewport: { width: 1080, height: 1080 }, shortEdge: 720 }))
-      .toEqual({ width: 720, height: 720 });
+  it('resolves a point-to-point remote window resize from the container size and DPR', () => {
+    const target = appTarget('com.apple.TextEdit');
+    target.videoTarget.windowBoundsTopLeftPx = { x: 0, y: 0, width: 900, height: 700 };
+    target.videoTarget.cropRectTopLeftPx = { x: 0, y: 0, width: 900, height: 700 };
+    expect(resolveRemoteWindowTargetResizeSize({
+      viewport: { width: 1280, height: 800 },
+      devicePixelRatio: 2,
+      target,
+    })).toEqual({ width: 2560, height: 1600 });
+  });
+
+  it('scales the container aspect ratio down to fit inside the display bounds', () => {
+    const target = appTarget('com.apple.TextEdit');
+    target.videoTarget.windowBoundsTopLeftPx = { x: 0, y: 0, width: 900, height: 700 };
+    target.videoTarget.cropRectTopLeftPx = { x: 0, y: 0, width: 900, height: 700 };
+    target.capture.displayBoundsTopLeftPx = { x: 0, y: 0, width: 1920, height: 1080 };
+    const resized = resolveRemoteWindowTargetResizeSize({
+      viewport: { width: 1280, height: 800 },
+      devicePixelRatio: 2,
+      target,
+    });
+    expect(resized).not.toBeNull();
+    if (!resized) throw new Error('expected resized target');
+    expect(resized).toEqual({ width: 1728, height: 1080 });
+    expect(resized.width / resized.height).toBeCloseTo(1280 / 800, 5);
+    expect(resized.width).toBeLessThanOrEqual(1920);
+    expect(resized.height).toBeLessThanOrEqual(1080);
+    const rect = resolveAspectRect(
+      { width: 1280, height: 800 },
+      resized,
+      'fit',
+    );
+    expect(rect.left).toBeCloseTo((1280 - rect.width) / 2, 5);
+    expect(rect.top).toBeCloseTo((800 - rect.height) / 2, 5);
+  });
+
+  it('subtracts the current window origin before clamping to the display bounds', () => {
+    const target = appTarget('com.apple.TextEdit');
+    target.videoTarget.windowBoundsTopLeftPx = { x: 200, y: 200, width: 900, height: 700 };
+    target.videoTarget.cropRectTopLeftPx = { x: 200, y: 200, width: 900, height: 700 };
+    target.capture.displayBoundsTopLeftPx = { x: 0, y: 0, width: 1920, height: 1080 };
+    const resized = resolveRemoteWindowTargetResizeSize({
+      viewport: { width: 1280, height: 800 },
+      devicePixelRatio: 2,
+      target,
+    });
+    expect(resized).not.toBeNull();
+    if (!resized) throw new Error('expected resized target');
+    // 可用宽高是 display 减去窗口原点：1720 x 880，按容器比例回缩后不越界。
+    expect(resized.width).toBeLessThanOrEqual(1920 - 200);
+    expect(resized.height).toBeLessThanOrEqual(1080 - 200);
+    expect(resized.width / resized.height).toBeCloseTo(1280 / 800, 5);
+  });
+
+  it('returns null when the display has no drawable space at the target origin', () => {
+    const target = appTarget('com.apple.TextEdit');
+    target.videoTarget.windowBoundsTopLeftPx = { x: 1900, y: 1000, width: 900, height: 700 };
+    target.videoTarget.cropRectTopLeftPx = { x: 1900, y: 1000, width: 900, height: 700 };
+    target.capture.displayBoundsTopLeftPx = { x: 0, y: 0, width: 1920, height: 1080 };
+    expect(resolveRemoteWindowTargetResizeSize({
+      viewport: { width: 1280, height: 800 },
+      devicePixelRatio: 2,
+      target,
+    })).toBeNull();
   });
 
   it('fills fullscreen geometry while preserving fit geometry', () => {
@@ -144,6 +201,45 @@ describe('remote-window-overlay-helpers', () => {
     );
     expect(clamped.scale).toBeLessThanOrEqual(4);
     expect(clamped.panX).toBeGreaterThanOrEqual(-50);
+  });
+
+  it('projects a landscape window point-to-point inside a portrait surface', () => {
+    const { content } = resolveZoomedContentRect(
+      { width: 390, height: 844 },
+      { width: 1600, height: 900 },
+      { scale: 1, panX: 0, panY: 0 },
+      'fit',
+    );
+    expect(content.width).toBeCloseTo(390, 1);
+    expect(content.height).toBeCloseTo(219.375, 1);
+    expect(content.left).toBeCloseTo(0, 1);
+    expect(content.top).toBeCloseTo((844 - content.height) / 2, 1);
+  });
+
+  it('projects a standard 4:3 window inside the surface without crop', () => {
+    const { content } = resolveZoomedContentRect(
+      { width: 390, height: 844 },
+      { width: 1024, height: 768 },
+      { scale: 1, panX: 0, panY: 0 },
+      'fit',
+    );
+    expect(content.width).toBeCloseTo(390, 1);
+    expect(content.height).toBeCloseTo(292.5, 1);
+    expect(content.left).toBeCloseTo(0, 1);
+    expect(content.top).toBeCloseTo((844 - content.height) / 2, 1);
+  });
+
+  it('projects a narrow tall window centered inside a landscape surface', () => {
+    const { content } = resolveZoomedContentRect(
+      { width: 844, height: 390 },
+      { width: 400, height: 1200 },
+      { scale: 1, panX: 0, panY: 0 },
+      'fit',
+    );
+    expect(content.width).toBeCloseTo(130, 1);
+    expect(content.height).toBeCloseTo(390, 1);
+    expect(content.left).toBeCloseTo((844 - content.width) / 2, 1);
+    expect(content.top).toBeCloseTo(0, 1);
   });
 
   it('formats target kinds and groups app targets by bundle', () => {

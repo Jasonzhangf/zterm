@@ -11,9 +11,9 @@
 - Visible populated cells join live body demand while preview is open. Foreground/background lifecycle does not close preview or rewrite that projection; the dedicated background handoff owner may suppress body transfer and clear/restore live demand only after its configured keepalive window.
 - Clicking a populated non-focus edge cell pans the focus coordinate by one cell. It must not switch the active shell session or move any session target.
 - Preview entry captures the current active session plus focused session-group projection. System Back is a cancel intent: it closes preview and restores that exact entry projection without selecting a preview tile.
-- Long-pressing one populated edge cell opens a coordinate-scoped menu that can clear the cell or assign another currently open, unassigned session. Clicking an empty/stale `+` cell opens the same set menu. Long press must suppress the synthetic click.
+- Long-pressing one populated edge cell opens a coordinate-scoped menu that can clear the cell or assign any unassigned session from the complete visible drawer catalog, including unopened remote rows. Clicking an empty/stale `+` cell opens the same set menu. Selecting an unopened row materializes it through the existing drawer remote-open owner; the lattice stores only the returned local session id. Long press must suppress the synthetic click.
 - Preview geometry is a pure projection through `resolveJunctionPreviewLayout`: portrait shows focus + one side strip + top/bottom strips, landscape shows two center panes + top/bottom strips, and wide/tablet shows focus + left/right/top/bottom strips.
-- All populated cells render full-size through the read-only shared renderer and are clipped by the viewport edge; empty/stale cells render `+`. No scale transform or thumbnail parser is allowed.
+- Populated cells render through the read-only shared renderer and are clipped by the viewport edge; empty/stale cells render `+`. Pinch changes only the grid's local projection scale, and single-finger pan moves only that projection while scaled below `1x`; renderer, lattice, focus, transport, resize, and tmux geometry are unchanged. Restoring `1x` clears local pan.
 - The drawer remains reachable by a left-edge right swipe while preview is open. Drawer selection replaces only the focus-cell target and leaves every other coordinate unchanged.
 - Preview focus pan and cell edits are renderer projection only: no resize, width-mode, viewport callback, tmux geometry, daemon mirror, transport, or reconnect change is allowed.
 - Preview bodies accept local vertical scroll and horizontal fixed-width crop while remaining input/resize/viewport inert.
@@ -25,6 +25,8 @@
 - Project normal live ids union visible populated cell ids while preview is open.
 - Admit a leftward swipe beginning in the right-edge band.
 - Render every tile from its own immutable render-store snapshot.
+- Pinch below `1x` scales the grid projection and all rendered text together without changing renderer snapshots; restore to `1x` clears local pan.
+- Pan locally while scaled below `1x`; the pan is not persisted and never moves lattice targets or focus.
 - Pan focus from one populated cell to another without changing lattice ownership or active shell session.
 - Replace only the focus-cell target from the drawer and preserve every other coordinate.
 - Android system Back closes preview and restores the entry active session and session-group projection.
@@ -32,6 +34,7 @@
 - Resolve portrait, landscape, and wide junction geometry from one pure function.
 - Set and clear one coordinate without moving another coordinate; stale cells resolve as empty.
 - Empty and stale cells render `+`; populated visible cells render through the shared renderer.
+- The slot menu uses the complete visible drawer catalog while excluding sessions already assigned to other lattice cells.
 - Visible populated cells without an interactive renderer viewport receive a bounded tail bootstrap after head advancement; non-visible cells remain body-pull silent.
 - Source-to-DOM proof compares each visible populated cell's immutable render-store snapshot with its clipped preview DOM.
 
@@ -50,6 +53,7 @@
 - System Back outside preview must not be consumed by the preview owner.
 - Never pad visible cells or create sessions for stale coordinates.
 - Edge-cell pan must not activate or close a Session. Body pan/scroll must not move focus, trigger preview exit, or emit terminal mutation callbacks.
+- Preview pinch/pan must not change lattice targets, active session, focus, transport, resize, width mode, viewport, daemon mirror, or tmux geometry.
 
 ## Module Black-Box
 

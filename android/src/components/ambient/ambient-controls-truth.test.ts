@@ -97,7 +97,7 @@ describe('ambient control ownership truth', () => {
     const owner = read('src/components/ambient/AmbientButton.tsx');
     expect(owner).not.toMatch(/from ['"](?:\.\.\/)+(?:contexts|server|components\/TerminalView)/);
     expect(owner).not.toMatch(/from ['"].*(?:session|transport|mirror|renderer|buffer)/i);
-    expect(owner).toContain('var(--amb-control-bg)');
+    expect(owner).toContain('var(--zterm-skeu-material)');
   });
 
   it('keeps ambient production CSS and shared control class wiring in place', () => {
@@ -132,14 +132,14 @@ describe('ambient control ownership truth', () => {
   it('routes shared control surfaces through the skeuomorphic token contract', () => {
     const ambientCss = read('src/ambient.css');
     for (const token of [
-      '--amb-control-bg',
-      '--amb-control-text',
-      '--amb-control-border',
-      '--amb-control-shadow',
-      '--amb-control-inset',
-      '--amb-control-active-bg',
-      '--amb-control-active-text',
-      '--amb-control-disabled-opacity',
+      '--zterm-skeu-material',
+      '--zterm-skeu-material-active',
+      '--zterm-skeu-material-hover',
+      '--zterm-skeu-inset-shadow',
+      '--zterm-skeu-edge-light',
+      '--zterm-skeu-edge-dark',
+      '--zterm-settings-accent',
+      '--zterm-settings-accent-border',
     ]) {
       expect(ambientCss).toContain(token);
     }
@@ -151,10 +151,35 @@ describe('ambient control ownership truth', () => {
       'src/components/ambient/AmbientTextarea.tsx',
     ]) {
       const owner = read(file);
-      expect(owner).toContain('var(--amb-control-bg');
-      expect(owner).toContain('var(--amb-control-text');
-      expect(owner).toContain('var(--amb-control-border');
+      expect(owner).toMatch(/var\(--zterm-skeu-(?:material|well)/);
+      expect(owner).toContain('var(--zterm-skeu-text');
+      expect(owner).toContain('var(--zterm-skeu-edge-dark');
     }
+  });
+
+  it('lets the shared material owner override caller material instead of stale local colors', () => {
+    const owner = read('src/components/ambient/AmbientButton.tsx');
+    expect(owner).toContain('var(--zterm-skeu-material)');
+    expect(owner).toContain('var(--zterm-skeu-edge-light)');
+    expect(owner).toContain('var(--zterm-skeu-shadow-soft)');
+    expect(owner).not.toContain("backgroundColor: 'var(--amb-control-bg)'");
+    expect(owner).not.toContain("boxShadow: 'var(--amb-control-shadow)'");
+  });
+
+  it('projects one terminal chrome material over header, drawer, and quickbar controls', () => {
+    const indexCss = read('src/index.css');
+    for (const selector of [
+      '.zterm-neo-header',
+      '.zterm-neo-drawer',
+      '.zterm-neo-quickbar[data-quickbar-surface="expanded"]',
+      '.zterm-neo-header button',
+      '.zterm-neo-drawer button',
+      '.zterm-neo-quickbar [data-quickbar-shell-row="true"] button',
+    ]) {
+      expect(indexCss).toContain(selector);
+    }
+    expect(indexCss).toContain('var(--zterm-skeu-material) !important');
+    expect(indexCss).toContain('var(--zterm-skeu-inset-shadow) !important');
   });
 
   it('defines complete ambient tokens for both light and black skins', () => {
@@ -291,5 +316,27 @@ describe('ambient control ownership truth', () => {
     }
     expect(blackBlock).toContain('--amb-albedo:color(srgb-linear .085 .10 .125)');
     expect(indexCss).not.toContain('--amb-albedo:');
+  });
+
+  it('keeps ambient panel accents sourced from the global theme accent owner', () => {
+    const ambientCss = read('src/ambient.css');
+    for (const token of [
+      '--amb-panel-accent',
+      '--amb-panel-accent-soft',
+      '--amb-panel-accent-border',
+    ]) {
+      expect(ambientCss).toContain(`${token}:var(--zterm-panel-accent`);
+    }
+    expect(ambientCss).not.toContain('--amb-panel-accent:#38d47d');
+    expect(ambientCss).not.toContain('--amb-panel-accent:#128354');
+  });
+
+  it('keeps light and black shell accents on the neutral material ramp', () => {
+    const indexCss = read('src/index.css');
+    expect(indexCss).toContain('--zterm-panel-accent: #111315;');
+    expect(indexCss).toContain('--zterm-panel-accent: #f2f5fa;');
+    expect(indexCss).not.toContain('--zterm-panel-accent: #128354;');
+    expect(indexCss).not.toContain('--zterm-neo-accent: #128354;');
+    expect(indexCss).not.toContain('--zterm-dialog-info: #128354;');
   });
 });

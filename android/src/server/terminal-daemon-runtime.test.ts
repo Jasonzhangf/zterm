@@ -93,6 +93,7 @@ function createRuntimeHarness() {
     shutdownTerminalSessions: vi.fn(),
     destroyMirror,
     disposeScheduleRuntime: vi.fn(),
+    disposeSessionCatalogRuntime: vi.fn(),
     startRelayHostClient: vi.fn(),
     disposeRelayHostClient: vi.fn(),
     disposeRtcBridgeServer: vi.fn(),

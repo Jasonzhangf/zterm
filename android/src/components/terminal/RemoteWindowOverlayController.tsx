@@ -185,7 +185,6 @@ export interface RemoteWindowOverlayProps {
   } | null;
   requestTargets?: (
     sessionId: string,
-    options?: { forceRefresh?: boolean },
   ) => Promise<RemoteWindowStreamTargetsResponsePayload>;
   startStream?: (
     sessionId: string,
@@ -1038,7 +1037,8 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     if (!fillReference) {
       return false;
     }
-    const reference = resolveRemoteWindowTargetResizeSize({ viewport: fillReference });
+    const reference = resolveRemoteWindowTargetResizeSize({ viewport: fillReference, devicePixelRatio: window.devicePixelRatio, target: currentLockedTarget });
+    if (!reference) return false;
     const width = reference.width;
     const height = reference.height;
     const delivery = { streamId: currentLockedStreamId, targetId: currentLockedTarget.streamTargetId, width, height };
@@ -2604,7 +2604,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       itermPaneTargetsExpanded={itermPaneTargetsExpanded}
       onToggleItermPaneTargets={() => setItermPaneTargetsExpanded((current) => !current)}
       onSelectTarget={handleSelectTarget}
-      onRefresh={() => handleOpenPicker({ forceRefresh: true })}
+      onRefresh={handleOpenPicker}
       onClose={handleClose}
       browserOnly={browserPickerOpen}
       embedded={embedded}

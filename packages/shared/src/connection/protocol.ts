@@ -174,7 +174,6 @@ export interface RemoteWindowStreamRequestPayload {
   requestId: string;
   includeAppWindows?: boolean;
   includeIterm2?: boolean;
-  forceRefresh?: boolean;
 }
 
 export type RemoteWindowBrowserUserAgent = 'desktop' | 'mobile';

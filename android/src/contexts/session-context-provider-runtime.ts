@@ -25,7 +25,6 @@ import type {
   HandleSocketConnectedBaselineFn,
   HandleSocketServerMessageFn,
 } from './session-context-provider-assembly-types';
-import type { RemoteWindowTargetCatalogCacheStore } from './session-context-remote-window-runtime';
 import { createSessionAttachmentStore } from '../lib/session-attachment-store';
 import { createSessionAttachmentFetchRuntime } from '../lib/session-attachment-fetch-runtime';
 import { createImagePasteWaiterRuntime } from './session-context-transfer-runtime';
@@ -80,7 +79,6 @@ export function useSessionProviderRuntime(options: {
   const tmuxTargetRequestsRef = useRef<SessionTmuxTargetRequestStore>(new Map());
   const activeBodySubscriptionSuppressedRef = useRef(false);
   const remoteScreenshotRuntimeRef = useRef(createRemoteScreenshotRuntime());
-  const remoteWindowTargetCatalogCacheRef = useRef<RemoteWindowTargetCatalogCacheStore>(new Map());
   const remoteWindowReceiverRuntimeRef = useRef(createRemoteWindowReceiverRuntime());
   const remoteWindowMessageRuntimeRef = useRef(createRemoteWindowMessageRuntime({
     onStreamIceCandidate: (payload) => remoteWindowReceiverRuntimeRef.current.addIceCandidate(payload),
@@ -159,7 +157,6 @@ export function useSessionProviderRuntime(options: {
       tmuxTargetRequestsRef,
       activeBodySubscriptionSuppressedRef,
       remoteScreenshotRuntimeRef,
-      remoteWindowTargetCatalogCacheRef,
       remoteWindowMessageRuntimeRef,
       remoteWindowReceiverRuntimeRef,
       fileTransferMessageRuntimeRef,

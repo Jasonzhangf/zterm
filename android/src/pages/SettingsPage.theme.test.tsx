@@ -75,9 +75,9 @@ describe('SettingsPage terminal theme selection', () => {
     cleanup();
   });
 
-  it('keeps the shared app accent green across dark shell skins', () => {
-    expect(resolveSettingsTheme('black').accent).toBe('#38d47d');
-    expect(resolveSettingsTheme('blue').accent).toBe('#38d47d');
+  it('keeps the dark shell accent monochrome', () => {
+    expect(resolveSettingsTheme('black').accent).toBe('#f2f5fa');
+    expect(resolveSettingsTheme('blue').accent).toBe('#f2f5fa');
   });
 
   it('renders update version metadata with settings tokens in the dark shell', () => {

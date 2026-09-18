@@ -4215,6 +4215,11 @@
     },
     {
       "from_module": "client.terminal_shell",
+      "to_module": "client.session_drawer_ui",
+      "status": "active"
+    },
+    {
+      "from_module": "client.terminal_shell",
       "to_module": "client.runtime",
       "status": "active"
     },
@@ -4464,6 +4469,17 @@
       "from_module": "daemon.runtime_entry",
       "to_module": "daemon.transport_subscriber",
       "status": "active"
+    },
+    {
+      "from_module": "daemon.runtime_entry",
+      "to_module": "daemon.session_catalog",
+      "status": "active",
+      "allowed_callers": [
+        "src/server/server.ts"
+      ],
+      "allowed_callees": [
+        "src/server/daemon-session-catalog-runtime.ts"
+      ]
     },
     {
       "from_module": "daemon.runtime_entry",

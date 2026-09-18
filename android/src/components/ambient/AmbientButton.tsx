@@ -34,20 +34,28 @@ export interface AmbientButtonProps extends ButtonHTMLAttributes<HTMLButtonEleme
 }
 
 const commonButtonStyle: CSSProperties = {
-  border: '1px solid var(--amb-control-border)',
-  backgroundColor: 'var(--amb-control-bg)',
-  color: 'var(--amb-control-text)',
-  textShadow: 'var(--amb-control-text-shadow, none)',
-  boxShadow: 'var(--amb-control-shadow)',
+  border: '1px solid var(--zterm-skeu-edge-dark)',
+  backgroundColor: 'var(--zterm-skeu-material)',
+  color: 'var(--zterm-skeu-text)',
+  textShadow: 'var(--zterm-skeu-text-shadow, none)',
+  boxShadow: [
+    'inset 1px 1px 0 var(--zterm-skeu-edge-light)',
+    'inset -1px -1px 0 color-mix(in srgb, var(--zterm-skeu-edge-dark) 58%, transparent)',
+    '0 4px 10px var(--zterm-skeu-shadow-soft)',
+  ].join(', '),
   transition:
     'box-shadow 160ms cubic-bezier(0.2, 0, 0, 1), background-color 160ms cubic-bezier(0.2, 0, 0, 1), color 160ms cubic-bezier(0.2, 0, 0, 1), transform 160ms cubic-bezier(0.2, 0, 0, 1)',
 };
 
 const accentButtonStyle: CSSProperties = {
-  border: '1px solid var(--amb-control-active-border)',
-  backgroundColor: 'var(--amb-control-active-bg)',
-  color: 'var(--amb-control-active-text)',
-  boxShadow: 'var(--amb-control-active-shadow)',
+  border: '1px solid var(--zterm-settings-accent-border)',
+  backgroundColor: 'var(--zterm-skeu-material-active)',
+  color: 'var(--zterm-settings-accent)',
+  boxShadow: [
+    'inset 2px 2px 5px color-mix(in srgb, var(--zterm-skeu-edge-dark) 64%, transparent)',
+    'inset -1px -1px 0 var(--zterm-skeu-edge-light)',
+    '0 0 0 1px color-mix(in srgb, var(--zterm-settings-accent) 16%, transparent)',
+  ].join(', '),
 };
 
 function hasFlatMaterial(variant: AmbientButtonVariant, style: CSSProperties | undefined) {
@@ -103,8 +111,8 @@ function resolveVariantStyle(
         flex: 1,
         minHeight: '40px',
         borderRadius: '12px',
-        backgroundColor: selected ? 'var(--amb-control-active-bg)' : 'var(--amb-control-bg)',
-        color: selected ? 'var(--amb-control-active-text)' : 'var(--amb-control-text)',
+        backgroundColor: selected ? 'var(--zterm-skeu-material-active)' : 'var(--zterm-skeu-material)',
+        color: selected ? 'var(--zterm-settings-accent)' : 'var(--zterm-skeu-text)',
         fontWeight: 800,
         cursor: 'pointer',
       };
@@ -113,8 +121,8 @@ function resolveVariantStyle(
         minHeight: '40px',
         width: '100%',
         borderRadius: '12px',
-        backgroundColor: selected ? 'var(--amb-control-active-bg)' : 'var(--amb-control-bg)',
-        color: selected ? 'var(--amb-control-active-text)' : 'var(--amb-control-text)',
+        backgroundColor: selected ? 'var(--zterm-skeu-material-active)' : 'var(--zterm-skeu-material)',
+        color: selected ? 'var(--zterm-settings-accent)' : 'var(--zterm-skeu-text)',
         fontWeight: 800,
         fontSize: '15px',
         cursor: 'pointer',
@@ -128,10 +136,10 @@ function resolveVariantStyle(
         minHeight: '64px',
         borderRadius: '14px',
         border: selected
-          ? '1px solid var(--amb-control-active-border)'
-          : '1px solid var(--amb-control-border)',
-        backgroundColor: selected ? 'var(--amb-control-active-bg)' : 'var(--amb-control-bg)',
-        color: selected ? 'var(--amb-control-active-text)' : 'var(--amb-control-text)',
+          ? '1px solid var(--zterm-settings-accent-border)'
+          : '1px solid var(--zterm-skeu-edge-dark)',
+        backgroundColor: selected ? 'var(--zterm-skeu-material-active)' : 'var(--zterm-skeu-material)',
+        color: selected ? 'var(--zterm-settings-accent)' : 'var(--zterm-skeu-text)',
         cursor: 'pointer',
         textAlign: 'left',
         padding: '10px 12px',
@@ -141,12 +149,12 @@ function resolveVariantStyle(
         minHeight: '34px',
         borderRadius: '10px',
         border: `1px solid ${
-          selected ? 'var(--amb-control-active-border)' : 'var(--amb-control-border)'
+          selected ? 'var(--zterm-settings-accent-border)' : 'var(--zterm-skeu-edge-dark)'
         }`,
         backgroundColor: selected
-          ? 'var(--amb-control-active-bg)'
-          : 'var(--amb-control-bg)',
-        color: selected ? 'var(--amb-control-active-text)' : 'var(--amb-control-text)',
+          ? 'var(--zterm-skeu-material-active)'
+          : 'var(--zterm-skeu-material)',
+        color: selected ? 'var(--zterm-settings-accent)' : 'var(--zterm-skeu-text)',
         fontSize: '12px',
         fontWeight: 700,
         textAlign: 'left',
@@ -199,11 +207,11 @@ function resolveVariantStyle(
         minHeight: '68px',
         padding: '10px 12px',
         border: `1px solid ${
-          selected ? 'var(--amb-control-active-border)' : 'var(--amb-control-border)'
+          selected ? 'var(--zterm-settings-accent-border)' : 'var(--zterm-skeu-edge-dark)'
         }`,
         borderRadius: '16px',
-        backgroundColor: selected ? 'var(--amb-control-active-bg)' : 'var(--amb-control-bg)',
-        color: selected ? 'var(--amb-control-active-text)' : 'var(--amb-control-text)',
+        backgroundColor: selected ? 'var(--zterm-skeu-material-active)' : 'var(--zterm-skeu-material)',
+        color: selected ? 'var(--zterm-settings-accent)' : 'var(--zterm-skeu-text)',
         display: 'grid',
         gridTemplateColumns: 'auto 1fr auto',
         alignItems: 'center',
@@ -270,8 +278,8 @@ function resolveVariantStyle(
       return {
         borderRadius: '12px',
         padding: '10px 12px',
-        backgroundColor: selected ? 'var(--amb-control-active-bg)' : 'var(--amb-control-bg)',
-        color: selected ? 'var(--amb-control-active-text)' : 'var(--amb-control-text)',
+        backgroundColor: selected ? 'var(--zterm-skeu-material-active)' : 'var(--zterm-skeu-material)',
+        color: selected ? 'var(--zterm-settings-accent)' : 'var(--zterm-skeu-text)',
         cursor: 'pointer',
         textAlign: 'left',
       };
@@ -279,8 +287,8 @@ function resolveVariantStyle(
       return {
         borderRadius: '12px',
         padding: '10px 12px',
-        backgroundColor: selected ? 'var(--amb-control-active-bg)' : 'var(--amb-control-bg)',
-        color: selected ? 'var(--amb-control-active-text)' : 'var(--amb-control-text)',
+        backgroundColor: selected ? 'var(--zterm-skeu-material-active)' : 'var(--zterm-skeu-material)',
+        color: selected ? 'var(--zterm-settings-accent)' : 'var(--zterm-skeu-text)',
         cursor: 'pointer',
         fontWeight: 700,
       };
@@ -297,9 +305,9 @@ function resolveVariantStyle(
       return {
         minHeight: '38px',
         borderRadius: '12px',
-        border: '1px solid var(--amb-control-border)',
-        backgroundColor: 'var(--amb-control-bg)',
-        color: 'var(--amb-control-text)',
+        border: '1px solid var(--zterm-skeu-edge-dark)',
+        backgroundColor: 'var(--zterm-skeu-material)',
+        color: 'var(--zterm-skeu-text)',
         fontWeight: 800,
         padding: '0 14px',
         cursor: 'pointer',

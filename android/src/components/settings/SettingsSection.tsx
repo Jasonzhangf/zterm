@@ -8,8 +8,6 @@ export function settingsSectionStyle(): CSSProperties {
   return {
     borderRadius: '18px',
     padding: settingsCardPadding,
-    backgroundColor: 'var(--zterm-settings-surface, #ffffff)',
-    boxShadow: 'var(--zterm-settings-shadow, 0 18px 40px rgba(14, 19, 33, 0.12))',
     display: 'flex',
     flexDirection: 'column',
     gap: '10px',

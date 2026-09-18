@@ -538,7 +538,9 @@ describe('TerminalPage portrait session drawer', () => {
     fireEvent.pointerDown(title, { button: 0, pointerId: 1 });
     await new Promise((resolve) => window.setTimeout(resolve, 550));
     fireEvent.pointerUp(title, { button: 0, pointerId: 1 });
-    fireEvent.change(screen.getByRole('textbox', { name: '新的 session 名称' }), {
+    const renameInput = await screen.findByRole('textbox', { name: '新的 session 名称' });
+    await waitFor(() => expect((renameInput as HTMLInputElement).value).toBe('tmux-s1'));
+    fireEvent.change(renameInput, {
       target: { value: 'renamed-session' },
     });
     fireEvent.click(screen.getByRole('button', { name: '确认重命名' }));
@@ -1602,32 +1604,39 @@ describe('TerminalPage portrait session drawer', () => {
     expect(screen.queryByText('routecodex-5')).toBeNull();
   });
 
-  it('replaces an empty Relay snapshot with the live daemon catalog after drawer refresh', async () => {
+  it('projects only the daemon-published Relay catalog without a drawer refresh', async () => {
     const anchor = makeSession('anchor');
-    const onRefreshRemoteSessions = vi.fn(async () => ({
-      sessionNames: ['live-session', 'live-herdr'],
-      sessionCatalog: [
-        { name: 'live-session', backend: 'tmux' as const },
-        { name: 'live-herdr', backend: 'herdr' as const },
-      ],
-    }));
-
-    render(
+    const handlers = {
+      onSwitchSession: vi.fn(),
+      onMoveSession: vi.fn(),
+      onRenameSession: vi.fn(),
+      onCloseSession: vi.fn(),
+      onOpenConnections: vi.fn(),
+      onOpenQuickTabPicker: vi.fn(),
+      onResize: vi.fn(),
+      onTerminalInput: vi.fn(),
+      onTerminalViewportChange: vi.fn(),
+    };
+    const { rerender } = render(
       <TerminalPage
         sessions={[anchor]}
         activeSession={anchor}
         sessionGroups={[]}
         relayDevices={[makeRelayDevice({ sessions: [] })]}
-        onRefreshRemoteSessions={onRefreshRemoteSessions}
-        onSwitchSession={vi.fn()}
-        onMoveSession={vi.fn()}
-        onRenameSession={vi.fn()}
-        onCloseSession={vi.fn()}
-        onOpenConnections={vi.fn()}
-        onOpenQuickTabPicker={vi.fn()}
-        onResize={vi.fn()}
-        onTerminalInput={vi.fn()}
-        onTerminalViewportChange={vi.fn()}
+        {...handlers}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    rerender(
+      <TerminalPage
+        sessions={[anchor]}
+        activeSession={anchor}
+        sessionGroups={[]}
+        relayDevices={[makeRelayDevice({ sessions: ['live-session'] })]}
+        {...handlers}
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
@@ -1640,89 +1649,8 @@ describe('TerminalPage portrait session drawer', () => {
     fireEvent.touchMove(swipeSurface!, { touches: [{ clientX: 236, clientY: 206 }], cancelable: true });
     fireEvent.touchEnd(swipeSurface!, { changedTouches: [{ clientX: 236, clientY: 206 }] });
 
-    await waitFor(() => expect(onRefreshRemoteSessions).toHaveBeenCalledWith('mac-studio'));
     expect(await screen.findByTestId('terminal-session-drawer-row-remote:daemon:mac-studio::session:live-session')).toBeTruthy();
-    expect(screen.queryByText('live-herdr')).toBeNull();
     expect(screen.getByTestId('terminal-session-drawer-host-mac-studio').textContent).toContain('1');
-  });
-
-  it('keeps legacy live session names visible when the daemon omits qualified catalog rows', async () => {
-    const anchor = makeSession('anchor');
-    const onRefreshRemoteSessions = vi.fn(async () => ({
-      sessionNames: ['legacy-live-session'],
-      sessionCatalog: [],
-    }));
-
-    render(
-      <TerminalPage
-        sessions={[anchor]}
-        activeSession={anchor}
-        sessionGroups={[]}
-        relayDevices={[makeRelayDevice({ sessions: [] })]}
-        onRefreshRemoteSessions={onRefreshRemoteSessions}
-        onSwitchSession={vi.fn()}
-        onMoveSession={vi.fn()}
-        onRenameSession={vi.fn()}
-        onCloseSession={vi.fn()}
-        onOpenConnections={vi.fn()}
-        onOpenQuickTabPicker={vi.fn()}
-        onResize={vi.fn()}
-        onTerminalInput={vi.fn()}
-        onTerminalViewportChange={vi.fn()}
-        quickActions={[]}
-        shortcutActions={[]}
-        sessionDraft=""
-      />,
-    );
-
-    const swipeSurface = document.querySelector('[data-testid^="terminal-swipe-surface-"][data-swipe-enabled="true"]') as HTMLElement | null;
-    expect(swipeSurface).toBeTruthy();
-    fireEvent.touchStart(swipeSurface!, { touches: [{ clientX: 56, clientY: 200 }] });
-    fireEvent.touchMove(swipeSurface!, { touches: [{ clientX: 236, clientY: 206 }], cancelable: true });
-    fireEvent.touchEnd(swipeSurface!, { changedTouches: [{ clientX: 236, clientY: 206 }] });
-
-    await waitFor(() => expect(onRefreshRemoteSessions).toHaveBeenCalledWith('mac-studio'));
-    expect(await screen.findByTestId('terminal-session-drawer-row-remote:daemon:mac-studio::session:legacy-live-session')).toBeTruthy();
-  });
-
-  it('does not keep stale Relay snapshot rows after a live refresh', async () => {
-    const anchor = makeSession('anchor');
-    const onRefreshRemoteSessions = vi.fn(async () => ({
-      sessionNames: ['live-session'],
-      sessionCatalog: [{ name: 'live-session', backend: 'tmux' as const }],
-    }));
-
-    render(
-      <TerminalPage
-        sessions={[anchor]}
-        activeSession={anchor}
-        sessionGroups={[]}
-        relayDevices={[makeRelayDevice({ sessions: ['stale-session'] })]}
-        onRefreshRemoteSessions={onRefreshRemoteSessions}
-        onSwitchSession={vi.fn()}
-        onMoveSession={vi.fn()}
-        onRenameSession={vi.fn()}
-        onCloseSession={vi.fn()}
-        onOpenConnections={vi.fn()}
-        onOpenQuickTabPicker={vi.fn()}
-        onResize={vi.fn()}
-        onTerminalInput={vi.fn()}
-        onTerminalViewportChange={vi.fn()}
-        quickActions={[]}
-        shortcutActions={[]}
-        sessionDraft=""
-      />,
-    );
-
-    const swipeSurface = document.querySelector('[data-testid^="terminal-swipe-surface-"][data-swipe-enabled="true"]') as HTMLElement | null;
-    expect(swipeSurface).toBeTruthy();
-    fireEvent.touchStart(swipeSurface!, { touches: [{ clientX: 56, clientY: 200 }] });
-    fireEvent.touchMove(swipeSurface!, { touches: [{ clientX: 236, clientY: 206 }], cancelable: true });
-    fireEvent.touchEnd(swipeSurface!, { changedTouches: [{ clientX: 236, clientY: 206 }] });
-
-    await waitFor(() => expect(onRefreshRemoteSessions).toHaveBeenCalledWith('mac-studio'));
-    expect(await screen.findByTestId('terminal-session-drawer-row-remote:daemon:mac-studio::session:live-session')).toBeTruthy();
-    expect(screen.queryByText('stale-session')).toBeNull();
   });
 
   it('does not enumerate disconnected stale relay daemon devices as empty drawer hosts', async () => {

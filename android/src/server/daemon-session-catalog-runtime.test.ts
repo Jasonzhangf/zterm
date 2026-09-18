@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   buildSessionsCatalogPayload,
+  createDaemonSessionCatalogRuntime,
   handleListSessionsMessageRuntime,
   type DaemonSessionCatalogRuntimeDeps,
 } from './daemon-session-catalog-runtime';
@@ -18,6 +19,156 @@ function makeDeps(
 }
 
 describe('daemon session catalog runtime', () => {
+  it('caches the daemon-owned catalog until an explicit refresh', () => {
+    const listTerminalSessionCatalog = vi.fn(() => [
+      { name: 'alpha', backend: 'tmux' as const },
+      { name: 'herdr-one', backend: 'herdr' as const },
+    ]);
+    const runtime = createDaemonSessionCatalogRuntime({
+      listTmuxSessions: vi.fn(() => []),
+      listTerminalSessionCatalog,
+    });
+
+    expect(runtime.read()).toEqual([
+      { name: 'alpha', backend: 'tmux' },
+      { name: 'herdr-one', backend: 'herdr' },
+    ]);
+    expect(runtime.read()).toEqual([
+      { name: 'alpha', backend: 'tmux' },
+      { name: 'herdr-one', backend: 'herdr' },
+    ]);
+    expect(listTerminalSessionCatalog).toHaveBeenCalledTimes(1);
+
+    listTerminalSessionCatalog.mockReturnValueOnce([
+      { name: 'alpha', backend: 'tmux' as const },
+      { name: 'beta', backend: 'tmux' as const },
+    ]);
+    expect(runtime.refresh()).toEqual([
+      { name: 'alpha', backend: 'tmux' },
+      { name: 'beta', backend: 'tmux' },
+    ]);
+    expect(runtime.read()).toEqual([
+      { name: 'alpha', backend: 'tmux' },
+      { name: 'beta', backend: 'tmux' },
+    ]);
+    expect(listTerminalSessionCatalog).toHaveBeenCalledTimes(2);
+  });
+
+  it('filters cached reads by backend without re-enumerating', () => {
+    const listTerminalSessionCatalog = vi.fn(() => [
+      { name: 'alpha', backend: 'tmux' as const },
+      { name: 'herdr-one', backend: 'herdr' as const },
+    ]);
+    const runtime = createDaemonSessionCatalogRuntime({
+      listTmuxSessions: vi.fn(() => []),
+      listTerminalSessionCatalog,
+    });
+
+    expect(runtime.read('tmux')).toEqual([{ name: 'alpha', backend: 'tmux' }]);
+    expect(runtime.read('herdr')).toEqual([{ name: 'herdr-one', backend: 'herdr' }]);
+    expect(listTerminalSessionCatalog).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not expose mutable cache entries to callers', () => {
+    const runtime = createDaemonSessionCatalogRuntime({
+      listTmuxSessions: vi.fn(() => []),
+      listTerminalSessionCatalog: () => [{ name: 'alpha', backend: 'tmux', cwd: '/tmp/alpha' }],
+    });
+
+    const firstRead = runtime.read();
+    firstRead[0]!.name = 'mutated';
+    firstRead[0]!.cwd = '/tmp/mutated';
+
+    expect(runtime.read()).toEqual([{ name: 'alpha', backend: 'tmux', cwd: '/tmp/alpha' }]);
+  });
+
+  it('refreshes the cached catalog from the daemon-owned detection loop', () => {
+    vi.useFakeTimers();
+    try {
+      const listTerminalSessionCatalog = vi.fn()
+        .mockReturnValueOnce([{ name: 'alpha', backend: 'tmux' as const }])
+        .mockReturnValueOnce([
+          { name: 'alpha', backend: 'tmux' as const },
+          { name: 'beta', backend: 'tmux' as const },
+        ]);
+      const runtime = createDaemonSessionCatalogRuntime({
+        listTmuxSessions: vi.fn(() => []),
+        listTerminalSessionCatalog,
+      });
+
+      expect(runtime.read()).toEqual([{ name: 'alpha', backend: 'tmux' }]);
+      runtime.startRefreshLoop(1000);
+      vi.advanceTimersByTime(1000);
+
+      expect(runtime.read()).toEqual([
+        { name: 'alpha', backend: 'tmux' },
+        { name: 'beta', backend: 'tmux' },
+      ]);
+      expect(listTerminalSessionCatalog).toHaveBeenCalledTimes(2);
+      runtime.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('lets the daemon detection loop run the shared refresh and publication path', () => {
+    vi.useFakeTimers();
+    try {
+      const listTerminalSessionCatalog = vi.fn(() => [
+        { name: 'alpha', backend: 'tmux' as const },
+      ]);
+      const runtime = createDaemonSessionCatalogRuntime({
+        listTmuxSessions: vi.fn(() => []),
+        listTerminalSessionCatalog,
+      });
+      const refresh = vi.fn(() => runtime.refresh());
+      runtime.startRefreshLoop(1000, refresh);
+
+      vi.advanceTimersByTime(1000);
+
+      expect(refresh).toHaveBeenCalledTimes(1);
+      expect(listTerminalSessionCatalog).toHaveBeenCalledTimes(1);
+      runtime.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('invalidates the cached catalog after a background refresh failure and blocks stale publication until an explicit refresh', () => {
+    vi.useFakeTimers();
+    try {
+      const listTerminalSessionCatalog = vi.fn()
+        .mockReturnValueOnce([{ name: 'alpha', backend: 'tmux' as const }])
+        .mockImplementationOnce(() => {
+          throw new Error('tmux backend unavailable');
+        })
+        .mockReturnValueOnce([
+          { name: 'alpha', backend: 'tmux' as const },
+          { name: 'beta', backend: 'tmux' as const },
+        ]);
+      const runtime = createDaemonSessionCatalogRuntime({
+        listTmuxSessions: vi.fn(() => []),
+        listTerminalSessionCatalog,
+      });
+
+      expect(runtime.read()).toEqual([{ name: 'alpha', backend: 'tmux' }]);
+      runtime.startRefreshLoop(1000);
+      vi.advanceTimersByTime(1000);
+
+      expect(() => runtime.read()).toThrow(/stale; explicit refresh required/);
+      expect(listTerminalSessionCatalog).toHaveBeenCalledTimes(2);
+
+      expect(runtime.refresh()).toEqual([
+        { name: 'alpha', backend: 'tmux' },
+        { name: 'beta', backend: 'tmux' },
+      ]);
+      expect(listTerminalSessionCatalog).toHaveBeenCalledTimes(3);
+      runtime.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('runs the passive observation reader only for catalog sessions', () => {
     const observation = {
       observedAt: 1000,

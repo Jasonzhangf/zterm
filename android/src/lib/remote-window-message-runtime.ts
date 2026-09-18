@@ -104,6 +104,9 @@ export const REMOTE_WINDOW_STREAM_STOP_REQUEST_TIMEOUT_MS = 15_000;
 export const REMOTE_WINDOW_STREAM_QUALITY_REQUEST_TIMEOUT_MS = 10_000;
 export const REMOTE_WINDOW_INPUT_RELIABLE_MAX_ATTEMPTS = 2;
 export const REMOTE_WINDOW_INPUT_RELIABLE_ACK_TIMEOUT_MS = 4_000;
+// Action validity must outlive one ACK timeout, otherwise the single retry is always already expired.
+export const REMOTE_WINDOW_INPUT_ACTION_DEADLINE_MS =
+  REMOTE_WINDOW_INPUT_RELIABLE_ACK_TIMEOUT_MS * REMOTE_WINDOW_INPUT_RELIABLE_MAX_ATTEMPTS;
 export const REMOTE_WINDOW_INPUT_SMOOTH_FLUSH_INTERVAL_MS = Math.ceil(1_000 / 45);
 
 export function isRemoteWindowControlMessage(msg: ServerMessage): msg is RemoteWindowControlMessage {
@@ -294,6 +297,32 @@ export function createRemoteWindowMessageRuntime(input?: {
     }
   };
 
+  const isReliableInputExpired = (pending: PendingRemoteWindowReliableInput) => (
+    Number.isFinite(pending.payload.deadlineMs) && now() > Number(pending.payload.deadlineMs)
+  );
+
+  const publishExpiredReliableInput = (pending: PendingRemoteWindowReliableInput) => {
+    notifySubscribers({
+      type: 'remote-window-input-ack',
+      control: {
+        version: 1,
+        sequence: pending.control.sequence,
+        accepted: false,
+        retryable: false,
+        duplicate: false,
+        receivedAtMs: now(),
+        error: {
+          code: 'remote_window_input_action_expired',
+          message: 'Remote window input action expired before send',
+        },
+      },
+      payload: {
+        streamId: pending.payload.streamId,
+        targetId: pending.payload.targetId,
+      },
+    });
+  };
+
   const publishInputSendFailure = (pending: PendingRemoteWindowReliableInput, error: unknown) => {
     notifySubscribers({
       type: 'remote-window-input-ack',
@@ -314,6 +343,23 @@ export function createRemoteWindowMessageRuntime(input?: {
         targetId: pending.payload.targetId,
       },
     });
+  };
+
+  const retryReliableInput = (pending: PendingRemoteWindowReliableInput) => {
+    if (isReliableInputExpired(pending)) {
+      publishExpiredReliableInput(pending);
+      if (reliableInputInFlight === pending) {
+        reliableInputInFlight = null;
+        pumpReliableInput();
+      }
+      return;
+    }
+    pending.control = {
+      ...pending.control,
+      attempt: pending.control.attempt + 1,
+      sentAtMs: now(),
+    };
+    sendReliableInput(pending);
   };
 
   const sendReliableInput = (pending: PendingRemoteWindowReliableInput, immediateSequence?: string) => {
@@ -344,12 +390,7 @@ export function createRemoteWindowMessageRuntime(input?: {
         return;
       }
       if (pending.control.attempt < REMOTE_WINDOW_INPUT_RELIABLE_MAX_ATTEMPTS) {
-        pending.control = {
-          ...pending.control,
-          attempt: pending.control.attempt + 1,
-          sentAtMs: now(),
-        };
-        sendReliableInput(pending);
+        retryReliableInput(pending);
         return;
       }
       notifySubscribers({
@@ -404,26 +445,8 @@ export function createRemoteWindowMessageRuntime(input?: {
       return;
     }
     let next = reliableInputQueue.shift();
-    while (next && Number.isFinite(next.payload.deadlineMs) && now() > Number(next.payload.deadlineMs)) {
-      notifySubscribers({
-        type: 'remote-window-input-ack',
-        control: {
-          version: 1,
-          sequence: next.control.sequence,
-          accepted: false,
-          retryable: false,
-          duplicate: false,
-          receivedAtMs: now(),
-          error: {
-            code: 'remote_window_input_action_expired',
-            message: 'Remote window input action expired before send',
-          },
-        },
-        payload: {
-          streamId: next.payload.streamId,
-          targetId: next.payload.targetId,
-        },
-      });
+    while (next && isReliableInputExpired(next)) {
+      publishExpiredReliableInput(next);
       next = reliableInputQueue.shift();
     }
     if (!next) {
@@ -458,7 +481,7 @@ export function createRemoteWindowMessageRuntime(input?: {
       deliveryKind: continuous ? 'sample' : 'action',
       sampledAtMs,
       ...(continuous ? {} : {
-        deadlineMs: pending.payload.deadlineMs ?? sampledAtMs + REMOTE_WINDOW_INPUT_RELIABLE_ACK_TIMEOUT_MS,
+        deadlineMs: pending.payload.deadlineMs ?? sampledAtMs + REMOTE_WINDOW_INPUT_ACTION_DEADLINE_MS,
       }),
     };
     const control: RemoteWindowInputDeliveryControl = {
@@ -521,12 +544,7 @@ export function createRemoteWindowMessageRuntime(input?: {
       && control.retryable
       && inFlight.control.attempt < REMOTE_WINDOW_INPUT_RELIABLE_MAX_ATTEMPTS
     ) {
-      inFlight.control = {
-        ...inFlight.control,
-        attempt: inFlight.control.attempt + 1,
-        sentAtMs: now(),
-      };
-      sendReliableInput(inFlight);
+      retryReliableInput(inFlight);
       return true;
     }
     reliableInputInFlight = null;
@@ -582,7 +600,6 @@ export function createRemoteWindowMessageRuntime(input?: {
             requestId,
             includeAppWindows: options.request?.includeAppWindows ?? true,
             includeIterm2: options.request?.includeIterm2 ?? true,
-            ...(options.request?.forceRefresh ? { forceRefresh: true } : {}),
           };
           sendClientMessage(targetSessionId, options.ws, options.sendSocketPayload, {
             type: 'remote-window-targets-request',

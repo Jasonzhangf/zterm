@@ -29,6 +29,7 @@ import {
 import type { TerminalShellSkin } from "../lib/bridge-settings";
 import { getServerIdentityTone, resolveServerDisplayName, resolveServerIdentityKey } from "../lib/server-identity";
 import type { TerminalSessionGroupSlotName, TerminalSessionGroupViewportProjection } from "../lib/session-group-viewport";
+import type { TerminalSessionDrawerItem } from "../lib/plugin-session-drawer/session-drawer-contract";
 import { terminalPageRenderedSessionUiKey, terminalPageRenderedSessionsUiKey, resolveRenderedSessionsInputEpochKey } from "./terminal-page-render-keys";
 import type { AndroidWorkspacePane, Session, TerminalResizeHandler, TerminalViewportChangeHandler, TerminalWidthMode } from "../lib/types";
 import type { CopySelectionState } from "./useTerminalPageCopyRuntime";
@@ -74,6 +75,7 @@ const TerminalStageShell = ReactMemo(
     sessionPreviewLattice,
     sessionPreviewFocus,
     sessionPreviewCandidates = [],
+    sessionPreviewSlotMenuCandidates = [],
     sessionPreviewSideEdge,
     sessionPreviewViewportWidth,
     sessionPreviewViewportHeight,
@@ -136,6 +138,7 @@ const TerminalStageShell = ReactMemo(
     sessionPreviewLattice?: JunctionPreviewLatticeV1 | null;
     sessionPreviewFocus?: JunctionPreviewCoordinate | null;
     sessionPreviewCandidates?: Session[];
+    sessionPreviewSlotMenuCandidates?: TerminalSessionDrawerItem[];
     sessionPreviewSideEdge?: 'left' | 'right';
     sessionPreviewViewportWidth?: number;
     sessionPreviewViewportHeight?: number;
@@ -645,6 +648,7 @@ const TerminalStageShell = ReactMemo(
               lattice={sessionPreviewLattice}
               focus={sessionPreviewFocus}
               candidates={sessionPreviewCandidates}
+              slotMenuCandidates={sessionPreviewSlotMenuCandidates}
               sessionBufferStore={sessionBufferStore}
               fontSize={terminalFontSize}
               themeId={terminalThemeId}
@@ -784,6 +788,12 @@ const TerminalStageShell = ReactMemo(
     prev.sessionPreviewViewportHeight === next.sessionPreviewViewportHeight &&
     terminalPageRenderedSessionsUiKey(prev.sessionPreviewCandidates || []) ===
       terminalPageRenderedSessionsUiKey(next.sessionPreviewCandidates || []) &&
+    (prev.sessionPreviewSlotMenuCandidates || [])
+      .map((candidate) => `${candidate.id}:${candidate.title}:${candidate.hostKey || ""}:${candidate.sessionName || ""}`)
+      .join("||") ===
+      (next.sessionPreviewSlotMenuCandidates || [])
+        .map((candidate) => `${candidate.id}:${candidate.title}:${candidate.hostKey || ""}:${candidate.sessionName || ""}`)
+        .join("||") &&
     prev.onOpenSessionPreview === next.onOpenSessionPreview &&
     prev.onCloseSessionPreview === next.onCloseSessionPreview &&
     prev.onPreviewFocusChange === next.onPreviewFocusChange &&

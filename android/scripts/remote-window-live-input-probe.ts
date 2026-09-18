@@ -744,7 +744,6 @@ async function main() {
       type: 'remote-window-targets-request',
       payload: {
         requestId: catalogRequestId,
-        forceRefresh: true,
       },
     });
     const catalog = await waitForServerMessage(

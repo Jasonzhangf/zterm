@@ -186,11 +186,11 @@ describe('ambient shared controls render owner DOM', () => {
     expect(select?.style.minHeight).toBe('38px');
     expect(textarea?.style.minHeight).toBe('76px');
     for (const control of [input, select, textarea]) {
-      expect(control?.style.border).toContain('var(--amb-control-border)');
-      expect(control?.style.backgroundColor).toBe('var(--amb-control-bg)');
-      expect(control?.style.color).toBe('var(--amb-control-text)');
-      expect(control?.style.boxShadow).toContain('var(--amb-control-inset)');
-      expect(control?.style.textShadow).toContain('var(--amb-control-text-shadow');
+      expect(control?.style.border).toContain('var(--zterm-skeu-edge-dark)');
+      expect(control?.style.backgroundColor).toBe('var(--zterm-skeu-well)');
+      expect(control?.style.color).toBe('var(--zterm-skeu-text)');
+      expect(control?.style.boxShadow).toContain('var(--zterm-skeu-inset-shadow)');
+      expect(control?.style.textShadow).toContain('none');
     }
   });
 

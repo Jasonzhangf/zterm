@@ -286,6 +286,70 @@ describe('TerminalPage junction preview integration', () => {
     expect(screen.queryByTestId('terminal-preview-grid')).toBeTruthy();
   });
 
+  it('materializes an unopened drawer catalog session from the preview slot menu', async () => {
+    const activeSession = makeSession('s1');
+    activeSession.daemonHostId = 'mac-studio';
+    activeSession.hostId = 'mac-studio';
+    activeSession.connectionName = 'Mac Studio';
+    writeLattice([activeSession]);
+    const onOpenDrawerRemoteSession = vi.fn(() => 'opened-remote');
+    const now = new Date().toISOString();
+    renderPage({
+      sessions: [activeSession],
+      activeSession,
+      relayDevices: [{
+        deviceId: 'device-mac-studio',
+        deviceName: 'Mac Studio',
+        platform: 'darwin',
+        appVersion: 'test',
+        updatedAt: now,
+        client: { connected: true, lastSeenAt: now },
+        daemon: {
+          connected: true,
+          lastSeenAt: now,
+          hostId: 'mac-studio',
+          version: 'test',
+          endpoints: [{
+            id: 'direct:tailscale:mac-studio',
+            kind: 'tailscale',
+            host: '100.66.1.82',
+            port: 3333,
+            authRequired: true,
+            lastSeenAt: now,
+          }],
+          sessions: [{
+            name: 'unopened',
+            cwd: '/Users/jason',
+            title: 'Unopened',
+            updatedAt: now,
+          }],
+        },
+      }],
+      onOpenDrawerRemoteSession,
+    });
+    const stage = screen.getByTestId('terminal-stage-shell');
+    await openPreview(stage);
+
+    fireEvent.click(screen.getByTestId('terminal-preview-empty--1-0'));
+    fireEvent.click(await screen.findByTestId(
+      'terminal-preview-assign-remote:daemon:mac-studio::session:unopened',
+    ));
+
+    expect(onOpenDrawerRemoteSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bridgeHost: '100.66.1.82',
+        bridgePort: 3333,
+        daemonHostId: 'mac-studio',
+      }),
+      'unopened',
+      { activate: false, navigate: false },
+    );
+    expect(localStorage.getItem(JUNCTION_PREVIEW_LATTICE_STORAGE_KEY)).toContain('opened-remote');
+    expect(localStorage.getItem(JUNCTION_PREVIEW_LATTICE_STORAGE_KEY)).not.toContain(
+      'remote:daemon:mac-studio::session:unopened',
+    );
+  });
+
   it('treats a reused session id with changed endpoint identity as an empty persisted cell', async () => {
     const activeSession = makeSession('s1');
     writeLattice([activeSession]);
