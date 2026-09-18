@@ -6,7 +6,10 @@ export default defineConfig({
   test: {
     setupFiles: ['./src/vitest.setup.ts'],
     // wrtc native media requires process isolation, not worker-thread isolation.
-    poolMatchGlobs: [['**/src/server/remote-window-stream-daemon-webrtc.test.ts', 'forks']],
+    // `rtc-bridge.test.ts` is the only suite that imports the real
+    // @roamhq/wrtc native addon; running it in a worker thread aborts the
+    // whole runner (node_webrtc::PeerConnectionFactory::GetOrCreateDefault).
+    poolMatchGlobs: [['**/src/server/rtc-bridge.test.ts', 'forks']],
     exclude: [
       '**/node_modules/**',
       '**/dist/**',
