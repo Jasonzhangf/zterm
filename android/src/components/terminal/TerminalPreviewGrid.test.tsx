@@ -404,6 +404,32 @@ describe('TerminalPreviewGrid', () => {
     expect(onFocusChange).not.toHaveBeenCalled();
   });
 
+  it('keeps the clear action when the assigned session is absent from the drawer catalog', () => {
+    vi.useFakeTimers();
+    setViewport(374, 706);
+    const onClearCell = vi.fn();
+    renderGrid({
+      onClearCell,
+      slotMenuCandidates: sessions.slice(1).map((session) => ({
+        id: session.id,
+        stableKey: session.id,
+        title: session.title,
+        subtitle: session.sessionName,
+        sessionName: session.sessionName,
+        hostKey: 'mac.local:3333',
+        hostLabel: 'mac.local',
+      })),
+    });
+
+    fireEvent.pointerDown(screen.getByTestId('terminal-preview-tile-s1'), { clientX: 10, clientY: 10 });
+    act(() => {
+      vi.advanceTimersByTime(450);
+    });
+    fireEvent.click(screen.getByTestId('terminal-preview-clear--1-0'));
+
+    expect(onClearCell).toHaveBeenCalledWith({ col: -1, row: 0 });
+  });
+
   it('suppresses the click emitted after a long-press menu opens', () => {
     vi.useFakeTimers();
     setViewport(374, 706);

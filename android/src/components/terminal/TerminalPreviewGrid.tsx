@@ -326,7 +326,7 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
   const menuCatalog: TerminalPreviewSlotMenuCandidate[] = slotMenuCandidates ?? candidates;
   const menuCandidates = menuCatalog.filter((candidate) => !usedSessionIds.has(candidate.id));
   const menuSession = slotMenu?.existingSessionId
-    ? menuCatalog.find((candidate) => candidate.id === slotMenu?.existingSessionId) || null
+    ? candidates.find((candidate) => candidate.id === slotMenu.existingSessionId) || null
     : null;
 
   const onPreviewTouchStartCapture = (event: TouchEvent<HTMLElement>) => {
