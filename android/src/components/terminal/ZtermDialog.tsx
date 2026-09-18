@@ -376,10 +376,10 @@ export function ZtermDialog({
             style={{
               minHeight: '40px',
               padding: '0 18px',
-              border: 'none',
+              border: `1px solid ${toneBorder[tone]}`,
               borderRadius: '12px',
-              background: accent,
-              color: 'var(--zterm-dialog-accent-text, #07110b)',
+              background: 'var(--zterm-panel-active, var(--zterm-skeu-material))',
+              color: accent,
               fontSize: '14px',
               fontWeight: 900,
               opacity: busy ? 0.55 : 1,

@@ -717,9 +717,9 @@ const ghostButtonStyle = {
 
 const primaryButtonStyle = {
   ...ghostButtonStyle,
-  background: 'var(--zterm-settings-accent)',
-  border: '1px solid var(--zterm-settings-accent)',
-  color: 'var(--zterm-settings-accent-text)',
+  background: 'var(--zterm-skeu-material)',
+  border: '1px solid var(--zterm-settings-accent-border)',
+  color: 'var(--zterm-settings-accent)',
 };
 
 const dangerButtonStyle = {

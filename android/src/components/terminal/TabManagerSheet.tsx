@@ -226,10 +226,10 @@ function TabManagerSheetComponent({
             onClick={onOpenQuickTabPicker}
             style={{
               minHeight: '46px',
-              border: 'none',
+              border: '1px solid var(--zterm-settings-accent-border)',
               borderRadius: '16px',
-              backgroundColor: 'var(--zterm-settings-accent)',
-              color: 'var(--zterm-settings-accent-text)',
+              backgroundColor: 'var(--zterm-skeu-material)',
+              color: 'var(--zterm-settings-accent)',
               fontWeight: 800,
             }}
           >

@@ -262,8 +262,11 @@ export function ResourceBottomSheet({
               style={{
                 ...buttonStyle,
                 flex: 1,
-                background: tab === item ? 'var(--zterm-panel-accent)' : 'var(--zterm-panel-surface)',
-                color: tab === item ? 'var(--zterm-panel-active-text)' : 'var(--zterm-panel-text)',
+                border: tab === item
+                  ? '1px solid var(--zterm-panel-accent-border)'
+                  : '1px solid var(--zterm-panel-border)',
+                background: tab === item ? 'var(--zterm-panel-active)' : 'var(--zterm-panel-surface)',
+                color: tab === item ? 'var(--zterm-panel-accent)' : 'var(--zterm-panel-text)',
               }}
               onClick={() => setTab(item)}
             >
