@@ -1,0 +1,51 @@
+Candidate: fix/rwd-2finger-scroll-0919 HEAD 6a767731
+Base: ddef58c8 (local main, build 3039)
+Date: 2026-09-18
+
+Gate 1 - runtime + sop + gesture matrix
+Command (cwd android):
+  pnpm exec vitest run src/lib/remote-window-touch-action-runtime.test.ts src/lib/remote-window-touch-action-sop.test.ts src/components/terminal/RemoteWindowOverlay.gesture-matrix.test.tsx
+Exit: 0
+Result: Test Files 3 passed (3); Tests 41 passed (41)
+
+Gate 2 - type-check
+Command (cwd android):
+  pnpm run type-check
+Exit: 0
+Result: check:no-source-js-pollution clean; tsc --noEmit passed
+
+Gate 3 - remote-window overlay UI gate (project-mapped)
+Command (cwd android):
+  pnpm exec vitest run src/components/terminal/RemoteWindowOverlay.test.tsx
+Exit: 1
+Result: Test Files 1 failed (1); Tests 6 failed | 87 passed (93)
+The 6 failing tests are identical to the base commit ddef58c8 and to origin/main ace989e2
+(pre-existing failures, unrelated to this change). The candidate fixes 1 previously-failing
+two-finger gesture test and introduces no new failures vs base.
+Failing test names (also on base + origin/main):
+- caps fullscreen quality to low bitrate and 30fps when network information reports poor connectivity
+- downgrades active stream quality from WebRTC stats without restarting the stream
+- reports quickbar suppression only for picker and body suppression for fullscreen
+- keeps primary controls structurally valid with 48px touch targets and no child close action
+- keeps fullscreen toolbar chrome inside one safe-area boundary ahead of the video surface
+- fills the fullscreen portal while preserving only the keyboard inset
+
+Gate 4 - scroll commit delta trace (runtime-level, geometry surface 200x100 / source 800x600)
+Command (cwd android): pnpm exec vitest run src/__probe2.test.ts  (temporary probe, removed after run)
+Trace, same-direction vertical two-finger swipe from clientY 60, 10 samples:
+  step=4px  idx1 travel=4  mode=twoFingerCandidate events=[]
+  step=4px  idx2 travel=8  mode=twoFingerScroll    events=[scroll/start/dy=48]
+  step=4px  idx3 travel=12 mode=twoFingerScroll    events=[scroll/update/dy=24]
+  ... idx4..idx10 -> scroll/update/dy=24 each
+  step=5px  idx1 travel=5  mode=twoFingerCandidate events=[]
+  step=5px  idx2 travel=10 mode=twoFingerScroll    events=[scroll/start/dy=60]
+  step=5px  idx3 travel=15 mode=twoFingerScroll    events=[scroll/update/dy=30]
+  ... idx4..idx10 -> scroll/update/dy=30 each
+Interpretation: the commit event carries the accumulated observe-window travel (2 samples),
+later events stay per-sample, so the emitted sum equals the full gesture travel exactly once
+(no double count). Pre-fix the same sequences emitted 0 events (mode stayed twoFingerCandidate).
+
+Overlay-level delta check (surface 300x200, target crop 800x560, gesture 130 -> 90 -> 50 = 80px raw):
+  pre-fix : 56 + 56 + 56 = 168  (observe-window sample dropped)
+  post-fix: 112 + 56 + 56 = 224 (full 80px raw travel emitted exactly once)
+The 3 overlay tests asserting exact deltaY were updated from 56 to 112 for the commit event.
