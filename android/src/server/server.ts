@@ -9,7 +9,7 @@
 
 import { WebSocketServer } from 'ws';
 import { createServer } from 'http';
-import { spawnSync } from 'child_process';
+import { spawn } from 'child_process';
 import { join } from 'path';
 import { homedir } from 'os';
 import type {
@@ -153,11 +153,24 @@ const daemonSessionObservationHistory = new Map<string, {
   idleConfirmations: number;
   lastPublishedAt?: number;
 }>();
-const readDaemonProcessGroup = (pid: string) => {
-  const result = spawnSync('ps', ['-o', 'pgid=,stat=', '-p', pid], { encoding: 'utf8' });
-  const [groupId, state] = result.stdout.trim().split(/\s+/u);
-  return groupId && state ? { groupId, alive: !state.includes('Z') } : undefined;
-};
+const readDaemonProcessGroup = (pid: string) => new Promise<{
+  groupId: string;
+  alive: boolean;
+} | undefined>((resolve) => {
+  const child = spawn('ps', ['-o', 'pgid=,stat=', '-p', pid], {
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
+  let stdout = '';
+  child.stdout.setEncoding('utf8');
+  child.stdout.on('data', (chunk) => {
+    stdout += chunk;
+  });
+  child.on('error', () => resolve(undefined));
+  child.on('close', () => {
+    const [groupId, state] = stdout.trim().split(/\s+/u);
+    resolve(groupId && state ? { groupId, alive: !state.includes('Z') } : undefined);
+  });
+});
 const MEMORY_GUARD_MAX_RSS_BYTES = 2.5 * 1024 * 1024 * 1024;
 const MEMORY_GUARD_MAX_HEAP_USED_BYTES = 1.5 * 1024 * 1024 * 1024;
 
@@ -377,11 +390,14 @@ const daemonSessionCatalogRuntime = createDaemonSessionCatalogRuntime({
   listTmuxSessions,
   listTerminalSessions,
   listTerminalSessionCatalog: enumerateTerminalSessionCatalog,
+  runTmuxAsync: (args) => terminalControlRuntime.runTmuxAsync(args),
+  readProcessGroup: readDaemonProcessGroup,
+  observationHistory: daemonSessionObservationHistory,
 });
 const listTerminalSessionCatalog = () => daemonSessionCatalogRuntime.read();
 let relayHostClient: ReturnType<typeof createTraversalRelayHostClient> | null = null;
-const refreshDaemonSessionCatalog = () => {
-  const catalog = daemonSessionCatalogRuntime.refresh();
+const refreshDaemonSessionCatalog = async () => {
+  const catalog = await daemonSessionCatalogRuntime.refresh();
   relayHostClient?.publishDirectoryUpdate();
   return catalog;
 };
@@ -401,7 +417,13 @@ if (TERMINAL_BACKEND_KIND === 'tmux') {
   terminalControlRuntime.ensureTmuxServerRunning();
   terminalRuntime.restorePersistedAdaptiveWidthBaselines(listTmuxSessions());
 }
-refreshDaemonSessionCatalog();
+void refreshDaemonSessionCatalog().catch((error) => {
+  console.error(
+    `[${logTimePrefix()}] initial daemon session catalog refresh failed: ${
+      error instanceof Error ? error.message : String(error)
+    }`,
+  );
+});
 const terminalTransportRuntime = createTerminalTransportRuntime({
   sessions,
   connections,
@@ -534,9 +556,6 @@ const terminalMessageRuntime = createTerminalMessageRuntime({
     listTerminalSessions,
     listTerminalSessionCatalog,
     refreshSessionCatalog: refreshDaemonSessionCatalog,
-    runTmux,
-    observationHistory: daemonSessionObservationHistory,
-    readProcessGroup: readDaemonProcessGroup,
     resolveTerminalSessionBackend,
     createDetachedTmuxSession,
     closeDetachedTerminalSession,

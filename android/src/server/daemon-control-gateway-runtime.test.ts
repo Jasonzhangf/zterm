@@ -37,7 +37,6 @@ function makeDeps(overrides?: Partial<TerminalMessageControlRuntimeDeps>): Termi
     createDetachedTmuxSession: vi.fn(() => 'tmux-1'),
     closeDetachedTerminalSession: vi.fn(),
     renameTmuxSession: vi.fn(() => 'tmux-2'),
-    runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
     sanitizeSessionName: (input?: string) => (input || '').trim(),
     resolveTerminalSessionBackend: vi.fn(() => 'tmux'),
     createTransportSubscriber: vi.fn(() => makeSession()),
