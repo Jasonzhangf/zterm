@@ -22,14 +22,14 @@ export function resolveSessionGroupSlotTone(
       return {
         label: beforeLabel,
         color: 'var(--zterm-settings-accent)',
-        background: 'var(--zterm-settings-accent-soft)',
+        background: 'var(--zterm-skeu-material-active)',
         border: 'var(--zterm-settings-accent-border)',
       };
     case 'center':
       return {
         label: '中间',
         color: 'var(--zterm-settings-accent)',
-        background: 'var(--zterm-settings-accent-soft)',
+        background: 'var(--zterm-skeu-material-active)',
         border: 'var(--zterm-settings-accent-border)',
       };
     case 'bottom':

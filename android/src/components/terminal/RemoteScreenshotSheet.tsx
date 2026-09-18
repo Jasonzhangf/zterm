@@ -300,12 +300,12 @@ export function RemoteScreenshotSheet({
                     ? '1px solid var(--zterm-settings-accent-border)'
                       : '1px solid var(--zterm-settings-border)',
                   background: step.status === 'done'
-                    ? 'var(--zterm-settings-accent-soft)'
+                    ? 'var(--zterm-skeu-material-active)'
                     : step.status === 'error'
                       ? 'var(--zterm-settings-danger-soft)'
                     : step.status === 'active'
-                      ? 'var(--zterm-settings-accent-soft)'
-                      : 'var(--zterm-settings-field)',
+                      ? 'var(--zterm-skeu-material-active)'
+                      : 'var(--zterm-skeu-material)',
                   padding: '8px 6px',
                 }}
               >
@@ -457,8 +457,8 @@ export function RemoteScreenshotSheet({
               minHeight: '44px',
               borderRadius: '14px',
               border: '1px solid var(--zterm-settings-accent-border)',
-              background: 'var(--zterm-settings-accent-soft)',
-              color: mobileTheme.colors.accent,
+              background: 'var(--zterm-skeu-material)',
+              color: 'var(--zterm-settings-accent)',
               fontWeight: 800,
               opacity: state.phase === 'preview-ready' ? 1 : 0.45,
               cursor: state.phase === 'preview-ready' ? 'pointer' : 'not-allowed',
