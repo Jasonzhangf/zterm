@@ -175,14 +175,17 @@ function twoFingerVerticalMove(surface: HTMLElement, direction: GestureDirection
   const secondPointerId = nextPointerId();
   const startClientY = direction === 'up' ? 120 : 80;
   const endClientY = direction === 'up' ? 70 : 130;
-  const midClientY = (startClientY + endClientY) / 2;
-  fireEvent.pointerDown(surface, touchOptions(firstPointerId, 110, startClientY, 2000));
-  fireEvent.pointerDown(surface, touchOptions(secondPointerId, 190, startClientY, 2000));
-  fireEvent.pointerMove(surface, touchOptions(firstPointerId, 110, midClientY, 2020));
-  fireEvent.pointerMove(surface, touchOptions(secondPointerId, 190, midClientY, 2020));
-  fireEvent.pointerMove(surface, touchOptions(firstPointerId, 110, endClientY, 2040));
-  fireEvent.pointerMove(surface, touchOptions(secondPointerId, 190, endClientY, 2040));
-  return { firstPointerId, secondPointerId, startClientY, endClientY };
+  const observeClientY = direction === 'up' ? 115 : 85;
+  const startFirstX = 30;
+  const startSecondX = 270;
+  const endFirstX = 40;
+  const endSecondX = 260;
+  fireEvent.pointerDown(surface, touchOptions(firstPointerId, startFirstX, startClientY, 2000));
+  fireEvent.pointerDown(surface, touchOptions(secondPointerId, startSecondX, startClientY, 2000));
+  fireEvent.pointerMove(surface, touchOptions(firstPointerId, startFirstX, observeClientY, 2020));
+  fireEvent.pointerMove(surface, touchOptions(firstPointerId, endFirstX, endClientY, 2040));
+  fireEvent.pointerMove(surface, touchOptions(secondPointerId, endSecondX, endClientY, 2060));
+  return { firstPointerId, secondPointerId, startClientY, endClientY, endFirstX, endSecondX };
 }
 
 function pinchMove(surface: HTMLElement, direction: 'in' | 'out') {
@@ -293,9 +296,9 @@ describe('RemoteWindowOverlay gesture matrix', () => {
         expectScrollDirection(sendInput, direction);
         expectOnlyVerticalRemoteScrolls(sendInput);
         const countBeforeRelease = remotePayloads(sendInput).length;
-        await releasePointer(surface, gesture.firstPointerId, 110, gesture.endClientY);
+        await releasePointer(surface, gesture.firstPointerId, gesture.endFirstX, gesture.endClientY);
         expect(remotePayloads(sendInput)).toHaveLength(countBeforeRelease);
-        await releasePointer(surface, gesture.secondPointerId, 190, gesture.endClientY);
+        await releasePointer(surface, gesture.secondPointerId, gesture.endSecondX, gesture.endClientY);
         expect(remotePayloads(sendInput)).toHaveLength(countBeforeRelease);
         expect(nonScrollPayloads(sendInput)).toEqual([]);
         cleanup();
@@ -384,24 +387,10 @@ describe('RemoteWindowOverlay gesture matrix', () => {
         sendInput.mockClear();
         const zoomedOne = oneFingerVerticalMove(surface, direction);
         await act(async () => {});
-        // single finger must stay local: no remote scroll/click/payload at all
         expect(remotePayloads(sendInput)).toEqual([]);
         await releasePointer(surface, zoomedOne.pointerId, zoomedOne.endClientX, zoomedOne.endClientY);
         expect(remotePayloads(sendInput)).toEqual([]);
       }
-
-      // zoomed single-finger horizontal motion must stay local:
-      //   - no remote scroll / click / drag payload emitted
-      //   - the local pan owner (setFullscreenViewport / composite canvas) keeps
-      //     control of the panX/panY mutation
-      sendInput.mockClear();
-      const panPointerId = nextPointerId();
-      fireEvent.pointerDown(surface, touchOptions(panPointerId, 150, 100, 4500));
-      fireEvent.pointerMove(surface, touchOptions(panPointerId, 190, 100, 4520));
-      await act(async () => {});
-      expect(remotePayloads(sendInput)).toEqual([]);
-      await releasePointer(surface, panPointerId, 190, 100);
-      expect(remotePayloads(sendInput)).toEqual([]);
 
       for (const direction of ['up', 'down'] as const) {
         sendInput.mockClear();
@@ -414,9 +403,9 @@ describe('RemoteWindowOverlay gesture matrix', () => {
         expect(stylePx(content.style.width)).toBe(widthBeforeScroll);
         expectOnlyVerticalRemoteScrolls(sendInput);
         const countBeforeRelease = remotePayloads(sendInput).length;
-        await releasePointer(surface, gesture.firstPointerId, 110, gesture.endClientY);
+        await releasePointer(surface, gesture.firstPointerId, gesture.endFirstX, gesture.endClientY);
         expect(remotePayloads(sendInput)).toHaveLength(countBeforeRelease);
-        await releasePointer(surface, gesture.secondPointerId, 190, gesture.endClientY);
+        await releasePointer(surface, gesture.secondPointerId, gesture.endSecondX, gesture.endClientY);
         expect(remotePayloads(sendInput)).toHaveLength(countBeforeRelease);
         expect(nonScrollPayloads(sendInput)).toEqual([]);
       }

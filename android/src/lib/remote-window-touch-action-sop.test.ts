@@ -17,21 +17,24 @@ describe('remote window touch action sop truth', () => {
     const decision = read('docs/decisions/2026-08-30-remote-window-quality-gesture-control-amendment.md');
 
     expect(sop).toContain('Feature: `desktop.remote_window_stream`');
-    expect(sop).toContain('Tap emits one remote left click at release at both 1x and zoomed scale.');
-    expect(sop).toContain('pixel scroll at both 1x and zoomed scale; pointer-up emits no swipe replay.');
+    expect(sop).toContain('Tap emits one remote left click at release at 1x; zoomed tap is suppressed.');
+    expect(sop).toContain('pixel scroll at 1x and local canvas pan while zoomed; pointer-up emits no');
     expect(sop).toContain('A five-second gesture remains valid. Reliable pointer-up and cancel-release');
     expect(sop).toContain('Anti-parallel distance change is local pinch zoom.');
     expect(sop).toContain('The remote window never shrinks below fit and no');
 
     expect(featureGates).toContain('The fullscreen video surface must never advertise a minimap/viewport overlay or allow shrinking below fit once the remote target is fullscreen.');
-    expect(featureGates).toContain('single-finger movement is realtime remote scroll at both 1x and zoomed scale');
+    expect(featureGates).toContain('single-finger movement is realtime remote scroll at 1x and local canvas pan while zoomed');
+    expect(featureGates).toContain('two-finger same-direction motion is remote scroll at both 1x and zoomed scale');
     expect(functionMap).toContain('remote-window-gesture-arena');
     expect(resourceMap).toContain('fullscreen zoom/pan state');
     expect(resourceMap).toContain('screenshot intent');
-    expect(resourceMap).toContain('realtime bounded pixel scroll at both 1x and zoomed scale');
+    expect(resourceMap).toContain('At zoomed scale, single-finger movement is local-only container pan/end');
     expect(decision).not.toContain('top-right minimap projects the current viewport');
-    expect(decision).toContain('Zoomed pointer-down does not pre-commit local pan.');
+    expect(decision).toContain('Zoomed pointer-down starts local single-finger pan');
     expect(decision).toContain('pointer-up and pointer-cancel both');
+    expect(sop).toContain('Two-finger same-direction motion is realtime remote scroll at 1x and');
+    expect(sop).toContain('Zoomed pointer-down starts local single-finger pan');
     expect(featureGates).not.toContain('zoomed fullscreen one-finger drag remains local pan');
     expect(resourceMap).not.toContain('actual user operations still obey the one-second stale/drop rule');
   });

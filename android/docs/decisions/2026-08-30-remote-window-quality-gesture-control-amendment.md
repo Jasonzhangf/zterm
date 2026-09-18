@@ -11,8 +11,8 @@ Supersedes:
 - `2026-08-23-remote-window-touch-gesture-arena-amendment.md` in full.
 - The `2mbps | 5mbps | 10mbps | 20mbps | fullscreen` product-preset contract.
 - Any gate, map, SOP, or test that requires release-time single-finger swipe,
-  zoomed single-finger local pan, one-second gesture expiry, or refresh of
-  queued continuous-input receive timestamps.
+  one-second gesture expiry, or refresh of queued continuous-input receive
+  timestamps.
 
 Canonical implementation plan:
 
@@ -56,7 +56,7 @@ At 1x:
 
 At zoomed scale:
 
-- one-finger movement is suppressed: it neither pans the local canvas nor emits remote input;
+- one-finger movement pans the local canvas and emits no remote input;
 - two-finger same-direction vertical motion commits to realtime remote scroll;
 - anti-parallel distance change commits to local pinch zoom;
 - double tap toggles back to 1x.
@@ -66,11 +66,12 @@ With two fingers:
 - anti-parallel distance change commits to local pinch zoom only, never remote scroll;
 - same-direction motion at 1x and zoomed scale commits to realtime remote scroll.
 
-Zoomed pointer-down does not pre-commit remote action. A committed gesture remains
-latched until the pointer sequence ends. Gesture duration never makes a
-release stale. If a remote down was emitted, pointer-up and pointer-cancel both
-produce a reliable release. Touch outside the rendered content rect maps to no
-source point; it is never clamped to a remote edge.
+Zoomed pointer-down starts local single-finger pan; a second finger upgrades to
+two-finger classification. A committed gesture remains latched until the
+pointer sequence ends. Gesture duration never makes a release stale. If a
+remote down was emitted, pointer-up and pointer-cancel both produce a reliable
+release. Touch outside the rendered content rect maps to no source point; it is
+never clamped to a remote edge.
 
 Mouse Emulation retains remote pointer move/down/up/drag and remote two-finger
 wheel semantics. Pinch remains local. Local mouse-mode pan requires the
@@ -144,8 +145,8 @@ not calculate macOS global coordinates or mutate capture truth.
 
 - bitrate-only, in-place cadence/dimension, same-profile no-op, group rollback,
   rejected/busy recovery, latest-wins, cooldown, and cause-split tests;
-- 1x one-finger realtime scroll, zoomed one-finger local suppression, zoomed
-  two-finger same-direction realtime scroll, pinch, hold-drag, right-click,
+- 1x one-finger realtime scroll, zoomed one-finger local pan, zoomed two-finger
+  same-direction realtime scroll, pinch, hold-drag, right-click,
   five-second release, cancel-release, letterbox-null, and mouse-mode tests;
 - 120 Hz coalescing, continuous expiry, reliable barrier, stable-sequence
   retry, dedupe, ACK/NACK, and queue-overflow tests;

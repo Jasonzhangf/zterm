@@ -259,6 +259,10 @@ export const REMOTE_WINDOW_TOUCH_SCROLL_MAX_FRACTION = 1;
 export const REMOTE_WINDOW_TWO_FINGER_OBSERVE_MS = 120;
 export const REMOTE_WINDOW_TWO_FINGER_OBSERVE_MOVES = 1;
 export const REMOTE_WINDOW_TWO_FINGER_PINCH_MIN_SCALE_RATIO = 0.08;
+// 共模（中点位移）与差模（指间距变化）在同一手势窗口内比较。Direct Touch
+// 契约规定 anti-parallel distance change 一律归 pinch，因此平局判给 pinch；
+// 收紧成严格占优会把“反向张指 + 同向下滑”的平局手势退回 remote scroll。
+const REMOTE_WINDOW_TWO_FINGER_PINCH_MIN_DIFFERENTIAL_TO_COMMON_RATIO = 1;
 export const REMOTE_WINDOW_TWO_FINGER_SCROLL_MIN_MIDPOINT_PX = 8;
 export const REMOTE_WINDOW_LONG_PRESS_MS = 500;
 
@@ -606,24 +610,26 @@ export function resolveRemoteWindowTouchPointerDownRuntime(options: {
   }
   // Zoomed fullscreen in Direct Touch keeps a single finger local to the
   // container: down/move/up must not create remote scroll, click, or drag.
-  // Suppressing the pending tap keeps movement from becoming remote action
-  // and prevents residual pointer up from being treated as a click.
   if (
     options.zoomedProjection
     && options.touchMode
     && pointer.pointerType === 'touch'
   ) {
-    return emptyResult({
-      mode: 'actionPending',
+    return withLocalEffect({
+      mode: 'localPan',
       pointerId: pointer.pointerId,
-      button,
       startClientX: pointer.clientX,
       startClientY: pointer.clientY,
       lastClientX: pointer.clientX,
       lastClientY: pointer.clientY,
       startAtMs: pointer.timeMs,
-      suppressTap: true,
-    }, true);
+      moved: false,
+    }, {
+      kind: 'local-pan-start',
+      pointerId: pointer.pointerId,
+      clientX: pointer.clientX,
+      clientY: pointer.clientY,
+    });
   }
   return emptyResult({
     mode: 'actionPending',
@@ -1136,12 +1142,30 @@ function hasCoherentTwoFingerVerticalScrollIntent(options: {
     && Math.abs(secondDeltaY) >= Math.abs(secondDeltaX);
 }
 
+function hasDominantPinchDifferentialMotion(options: {
+  startMidX: number;
+  startMidY: number;
+  currentMidX: number;
+  currentMidY: number;
+  startDistance: number;
+  currentDistance: number;
+}) {
+  const commonModeMagnitude = Math.hypot(
+    options.currentMidX - options.startMidX,
+    options.currentMidY - options.startMidY,
+  );
+  const differentialModeMagnitude = Math.abs(options.currentDistance - options.startDistance);
+  return differentialModeMagnitude
+    >= commonModeMagnitude * REMOTE_WINDOW_TWO_FINGER_PINCH_MIN_DIFFERENTIAL_TO_COMMON_RATIO;
+}
+
 export function resolveRemoteWindowTouchPairPointerDownRuntime(options: {
   firstPointer: RemoteWindowTouchPairPointerSample;
   secondPointer: RemoteWindowTouchPairPointerSample;
   timeMs: number;
   pinchEnabled: boolean;
   scrollEnabled: boolean;
+  skipObserve?: boolean;
 }): RemoteWindowTouchPairRuntimeResult {
   if (!options.pinchEnabled && !options.scrollEnabled) {
     return {
@@ -1171,7 +1195,7 @@ export function resolveRemoteWindowTouchPairPointerDownRuntime(options: {
     lastMidX: midpoint.clientX,
     lastMidY: midpoint.clientY,
     startedAtMs: options.timeMs,
-    moveCount: 0,
+    moveCount: options.skipObserve ? REMOTE_WINDOW_TWO_FINGER_OBSERVE_MOVES : 0,
     committed: false,
   };
   return {
@@ -1335,6 +1359,14 @@ export function resolveRemoteWindowTouchPairPointerMoveRuntime(options: RemoteWi
 
   if (
     options.pinchEnabled
+    && hasDominantPinchDifferentialMotion({
+      startMidX: state.startMidX,
+      startMidY: state.startMidY,
+      currentMidX: midpoint.clientX,
+      currentMidY: midpoint.clientY,
+      startDistance: state.startDistance,
+      currentDistance: distance,
+    })
     && isPinchIntentPair({
       firstStart: state.firstStart,
       firstCurrent,
