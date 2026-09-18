@@ -384,10 +384,24 @@ describe('RemoteWindowOverlay gesture matrix', () => {
         sendInput.mockClear();
         const zoomedOne = oneFingerVerticalMove(surface, direction);
         await act(async () => {});
+        // single finger must stay local: no remote scroll/click/payload at all
         expect(remotePayloads(sendInput)).toEqual([]);
         await releasePointer(surface, zoomedOne.pointerId, zoomedOne.endClientX, zoomedOne.endClientY);
         expect(remotePayloads(sendInput)).toEqual([]);
       }
+
+      // zoomed single-finger horizontal motion must stay local:
+      //   - no remote scroll / click / drag payload emitted
+      //   - the local pan owner (setFullscreenViewport / composite canvas) keeps
+      //     control of the panX/panY mutation
+      sendInput.mockClear();
+      const panPointerId = nextPointerId();
+      fireEvent.pointerDown(surface, touchOptions(panPointerId, 150, 100, 4500));
+      fireEvent.pointerMove(surface, touchOptions(panPointerId, 190, 100, 4520));
+      await act(async () => {});
+      expect(remotePayloads(sendInput)).toEqual([]);
+      await releasePointer(surface, panPointerId, 190, 100);
+      expect(remotePayloads(sendInput)).toEqual([]);
 
       for (const direction of ['up', 'down'] as const) {
         sendInput.mockClear();

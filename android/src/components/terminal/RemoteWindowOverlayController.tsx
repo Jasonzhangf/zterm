@@ -158,7 +158,7 @@ import { RemoteWindowLockedToolbar } from './RemoteWindowLockedToolbar';
 import { RemoteWindowTargetPicker } from './RemoteWindowTargetPicker';
 import { RemoteWindowAppSwitch } from './RemoteWindowAppSwitch';
 import { RemoteWindowMorePanel } from './RemoteWindowMorePanel';
-import { useRemoteWindowQuality } from './useRemoteWindowQuality';
+import { useRemoteWindowQuality } from './useRemoteWindowQuality'; import { useRemoteWindowForegroundReentry } from './useRemoteWindowForegroundReentry';
 import { useRemoteWindowPlayback, type RemoteWindowVideoDebugSnapshot } from './useRemoteWindowPlayback';
 import { useRemoteWindowCompositeCanvas } from './useRemoteWindowCompositeCanvas';
 import { RemoteWindowVideoContent } from './RemoteWindowVideoContent';
@@ -219,7 +219,7 @@ export interface RemoteWindowOverlayProps {
   ) => void;
   resizeTargetWindow?: (sessionId: string, payload: Omit<RemoteWindowInputEventPayload, 'requestId'>) => string;
   onInputDebug?: (event: RemoteWindowTouchInputDebugEvent) => void;
-  bottomInsetPx?: number; bottomChromeInsetPx?: number; embedded?: boolean; embeddedFullscreen?: boolean; onExitEmbeddedFullscreen?: () => void;
+  bottomInsetPx?: number; bottomChromeInsetPx?: number; embedded?: boolean; embeddedFullscreen?: boolean; onExitEmbeddedFullscreen?: () => void; onCloseEmbedded?: () => void;
   onOpenResourceDrawer?: (tab: 'web' | 'stream') => void;
   onOpenStateChange?: (open: boolean) => void;
   onBodySubscriptionSuppressedChange?: (suppressed: boolean) => void;
@@ -269,7 +269,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   sendInput,
   resizeTargetWindow,
   onInputDebug,
-  bottomInsetPx = 0, bottomChromeInsetPx = 0, embedded = false, embeddedFullscreen = false, onExitEmbeddedFullscreen,
+  bottomInsetPx = 0, bottomChromeInsetPx = 0, embedded = false, embeddedFullscreen = false, onExitEmbeddedFullscreen, onCloseEmbedded,
   onOpenResourceDrawer,
   onOpenStateChange,
   onBodySubscriptionSuppressedChange,
@@ -483,6 +483,8 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       setStreamCapability(null);
     },
   });
+
+  useRemoteWindowForegroundReentry({ appForegroundActive, state, onReopenPicker: handleOpenPicker });
   const handleOpenBrowserPicker = useCallback(() => {
     setBrowserPickerOpen(true);
     handleOpenPicker();
@@ -930,10 +932,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     setFloatingOverlayWidthPx(null);
     resetFullscreenViewport();
     setFullscreenDisplayMode(initialFullscreenDisplayMode);
-    // Keep the revision across close: the daemon stream may outlive the
-    // overlay (e.g. background-close where stopStream is not authoritative),
-    // and its focusRevision is not reset. Resetting to 0 would make the next
-    // switch's revision<=daemon focusRevision and be rejected as stale.
+    // daemon stream may outlive the overlay; keep focusRevision across close so the next switch isn't rejected as stale.
     setDualStreamSwitch((current) => ({
       ...resetRemoteWindowDualStreamSwitch(current),
       activeTargetId: null,
@@ -942,7 +941,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       overviewCropTargetId: null,
       error: null,
     }));
-    setState((current) => closeRemoteWindowOverlay(current));
+    setState((current) => closeRemoteWindowOverlay(current)); if (embedded) onCloseEmbedded?.();
   }, [
     activeSessionId,
     clearSurfacePointerState,
@@ -955,6 +954,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     stopStream,
     clearCompositeThumbCanvases,
     resetQualityApplyState,
+    onCloseEmbedded,
   ]);
 
   useEffect(() => {
@@ -2185,6 +2185,39 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     }
 
     const runtimeGesture = toRemoteWindowTouchGestureState(gesture);
+    if (
+      runtimeGesture.mode === 'actionPending'
+      && runtimeGesture.suppressTap
+      && runtimeGesture.pointerId === event.pointerId
+      && event.pointerType === 'touch'
+      && fullscreenViewportRef.current.scale > 1.01
+    ) {
+      if (!surfaceLocalPanStartRef.current || surfaceLocalPanStartRef.current.pointerId !== event.pointerId) {
+        surfaceLocalPanStartRef.current = {
+          pointerId: event.pointerId,
+          startPanX: fullscreenViewportRef.current.panX,
+          startPanY: fullscreenViewportRef.current.panY,
+        };
+      }
+      applyRemoteWindowTouchLocalEffect({
+        kind: 'local-pan-move',
+        pointerId: event.pointerId,
+        deltaX: event.clientX - runtimeGesture.startClientX,
+        deltaY: event.clientY - runtimeGesture.startClientY,
+        moved: Math.hypot(
+          event.clientX - runtimeGesture.startClientX,
+          event.clientY - runtimeGesture.startClientY,
+        ) > REMOTE_WINDOW_FULLSCREEN_PAN_TAP_THRESHOLD_PX,
+      });
+      surfaceGestureRef.current = {
+        ...runtimeGesture,
+        lastClientX: event.clientX,
+        lastClientY: event.clientY,
+      };
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     if (runtimeGesture.mode === 'twoFingerCandidate' || runtimeGesture.mode === 'twoFingerScroll' || runtimeGesture.mode === 'twoFingerPan' || runtimeGesture.mode === 'pinch') {
       const first = surfacePointersRef.current.get(runtimeGesture.firstPointerId);
       const second = surfacePointersRef.current.get(runtimeGesture.secondPointerId);
@@ -2293,6 +2326,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     }
 
   }, [
+    applyRemoteWindowTouchLocalEffect,
     applyRemoteWindowTouchPointerResult,
     resolveSurfaceInputGeometry,
     setFullscreenViewport,
@@ -2342,6 +2376,21 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     }
     const runtimeGesture = toRemoteWindowTouchGestureState(gesture);
     if (runtimeGesture.mode !== 'idle') {
+      if (
+        runtimeGesture.mode === 'actionPending'
+        && runtimeGesture.suppressTap
+        && runtimeGesture.pointerId === event.pointerId
+        && event.pointerType === 'touch'
+        && fullscreenViewportRef.current.scale > 1.01
+      ) {
+        surfaceLocalPanStartRef.current = null;
+        surfaceGestureRef.current = null;
+        surfacePointersRef.current.delete(event.pointerId);
+        commitFullscreenViewport();
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
       const geometry = resolveSurfaceInputGeometry();
       if (geometry) {
         const result = resolveRemoteWindowTouchPointerUpRuntime({

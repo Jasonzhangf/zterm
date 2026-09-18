@@ -697,6 +697,28 @@ describe('RemoteWindowOverlay', () => {
     expect(screen.getByTestId('remote-window-picker-error').textContent).toContain('远程窗口列表读取超时');
   });
 
+  it('always closes the overlay when the picker × fires (no stuck phase, even with stale error)', async () => {
+    // bug 1129e6e: × must always reach handleClose, including pickerOpen +
+    // errorMessage (catalog channel=closed) or targetEnumerating.
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-picker-close',
+      targets: [],
+      errors: [{ requestId: 'rw-picker-close', code: 'channel-closed', message: 'requires an open daemon connection (socket=missing, target=daemon=mac-studio, channel=closed)' }],
+    }));
+    render(
+      <RemoteWindowOverlay
+        activeSessionId="session-picker-close"
+        requestTargets={requestTargets}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    await waitFor(() => {
+      expect(screen.queryByTestId('remote-window-picker')).not.toBeNull();
+    });
+    fireEvent.click(screen.getByRole('button', { name: '关闭远程窗口选择' }));
+    expect(screen.queryByTestId('remote-window-picker')).toBeNull();
+  });
+
   it('reopens the remote-window picker from the cached catalog without a blank loading panel', async () => {
     const requestTargets = vi.fn(async () => ({
       requestId: 'rw-1',
@@ -3401,6 +3423,39 @@ describe('RemoteWindowOverlay', () => {
     expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('floating');
   });
 
+  it('notifies the outer sheet when embedded toolbar close fires (ResourceBottomSheet exit)', async () => {
+    // bug 1129e6e: embedded × must always reach the outer sheet via onCloseEmbedded.
+    // × on the embedded toolbar calls handleClose, which must fire both the
+    // internal overlay reset AND the outer sheet's onCloseEmbedded callback.
+    const onExitEmbeddedFullscreen = vi.fn();
+    const onCloseEmbedded = vi.fn();
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-embedded-close',
+      targets: [makeTarget('app-embedded-close', 'TextEdit', 'app-window')],
+    }));
+    const renderOverlay = (embeddedFullscreen: boolean) => (
+      <RemoteWindowOverlay
+        activeSessionId="session-embedded-close"
+        embedded
+        embeddedFullscreen={embeddedFullscreen}
+        requestTargets={requestTargets}
+        onExitEmbeddedFullscreen={onExitEmbeddedFullscreen}
+        onCloseEmbedded={onCloseEmbedded}
+      />
+    );
+    const view = render(renderOverlay(false));
+    fireEvent.click(await screen.findByTestId('remote-window-target-app-embedded-close'));
+    await waitFor(() => {
+      expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('floating');
+    });
+    view.rerender(renderOverlay(true));
+    await waitFor(() => {
+      expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('fullscreen');
+    });
+    fireEvent.click(screen.getByRole('button', { name: '关闭远程窗口' }));
+    expect(onCloseEmbedded).toHaveBeenCalledTimes(1);
+  });
+
   it('reports embedded fullscreen exit when Android Back shrinks the stream', async () => {
     const onExitEmbeddedFullscreen = vi.fn();
     const requestTargets = vi.fn(async () => ({
@@ -4104,10 +4159,13 @@ describe('RemoteWindowOverlay', () => {
     expect(sendInput).not.toHaveBeenCalled();
     sendInput.mockClear();
     fireEvent.pointerUp(surface, { pointerId: 2, pointerType: 'touch', clientX: 260, clientY: 100, button: 0, buttons: 0 });
+    // zoomed single-finger motion now goes through local pan:
+    //   - content.left must change (single-finger panX mutation)
+    //   - sendInput must remain silent (no remote scroll/click/drag)
     fireEvent.pointerDown(surface, { pointerId: 5, pointerType: 'touch', clientX: 150, clientY: 100, button: 0, buttons: 1 });
     fireEvent.pointerMove(surface, { pointerId: 5, pointerType: 'touch', clientX: 170, clientY: 120, button: 0, buttons: 1 });
     fireEvent.pointerUp(surface, { pointerId: 5, pointerType: 'touch', clientX: 150, clientY: 100, button: 0, buttons: 0 });
-    expect(Number.parseFloat(content.style.left || '0')).toBe(leftAfterPinch);
+    expect(Number.parseFloat(content.style.left || '0')).not.toBe(leftAfterPinch);
     expect(sendInput).not.toHaveBeenCalled();
     sendInput.mockClear();
 
