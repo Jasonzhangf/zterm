@@ -793,7 +793,7 @@ describe('remote-window-touch-action-runtime', () => {
     it.each([4, 5])('commits same-direction two-finger scroll with realistic %ipx samples', (step) => {
       const candidate = pairDown({ clientX: 100, clientY: 60 }, { clientX: 120, clientY: 60 });
       let state = candidate.nextState;
-      const remoteEvents: Array<{ kind: string }> = [];
+      const remoteEvents: Array<{ kind: string; deltaY?: number }> = [];
 
       for (let index = 1; index <= 10; index += 1) {
         const move = resolveRemoteWindowTouchPairPointerMoveRuntime({
@@ -825,6 +825,11 @@ describe('remote-window-touch-action-runtime', () => {
 
       expect(state.mode).toBe('twoFingerScroll');
       expect(remoteEvents.some((event) => event.kind === 'scroll')).toBe(true);
+      // Commit fires once cumulative travel reaches the 8px threshold (sample 2),
+      // and the start event must carry that accumulated travel rather than only
+      // the last per-sample delta: raw 2*step px over a 100px surface onto a
+      // 600px source => step * 12 wheel delta (below the 150px clamp).
+      expect(remoteEvents[0]).toEqual(expect.objectContaining({ kind: 'scroll', deltaY: step * 12 }));
     });
 
     it('keeps a vertical two-finger swipe as scroll when finger spacing changes during the swipe', () => {

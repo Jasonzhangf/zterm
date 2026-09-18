@@ -1457,8 +1457,12 @@ export function resolveRemoteWindowTouchPairPointerMoveRuntime(options: RemoteWi
       geometry,
       midClientX: midpoint.clientX,
       midClientY: midpoint.clientY,
-      rawDeltaX: midpointDeltaX,
-      rawDeltaY: midpointDeltaY,
+      // Observe-window travel was accepted but never emitted; the commit event
+      // must carry the accumulated travel since gesture start, not just the
+      // per-sample delta, so a slow two-finger swipe does not lose its pre-commit
+      // displacement to the remote target.
+      rawDeltaX: midpoint.clientX - state.startMidX,
+      rawDeltaY: midpoint.clientY - state.startMidY,
       scrollFraction: scrollFraction ?? REMOTE_WINDOW_TOUCH_SCROLL_DEFAULT_FRACTION,
       inverted: invertGestureDirection ?? false,
       phase: 'start',
