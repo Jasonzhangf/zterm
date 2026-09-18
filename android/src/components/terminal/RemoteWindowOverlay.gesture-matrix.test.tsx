@@ -264,6 +264,7 @@ describe('RemoteWindowOverlay gesture matrix', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     cleanup();
     backListeners.splice(0, backListeners.length);
     window.localStorage.clear();
@@ -431,5 +432,39 @@ describe('RemoteWindowOverlay gesture matrix', () => {
       expectOnlyVerticalRemoteScrolls(sendInput);
       cleanup();
     }
+  });
+
+  it('cancels the long-press timer when a second finger enters a zoomed gesture', async () => {
+    const { sendInput, surface } = await openRemoteWindow(true);
+    const content = projectionElement();
+    const initialWidth = stylePx(content.style.width);
+
+    const zoomOut = pinchMove(surface, 'out');
+    await waitFor(() => {
+      expect(stylePx(content.style.width)).toBeGreaterThan(initialWidth + 1);
+    });
+    await releasePair(
+      surface,
+      zoomOut.firstPointerId,
+      zoomOut.secondPointerId,
+      zoomOut.firstEndX,
+      zoomOut.secondEndX,
+      zoomOut.y,
+    );
+    sendInput.mockClear();
+
+    vi.useFakeTimers();
+    const firstPointerId = nextPointerId();
+    const secondPointerId = nextPointerId();
+    fireEvent.pointerDown(surface, touchOptions(firstPointerId, 110, 100, 5000));
+    fireEvent.pointerDown(surface, touchOptions(secondPointerId, 190, 100, 5010));
+    await act(async () => {
+      vi.advanceTimersByTime(600);
+    });
+
+    expect(remotePayloads(sendInput)).toEqual([]);
+    await releasePointer(surface, firstPointerId, 110, 100);
+    await releasePointer(surface, secondPointerId, 190, 100);
+    expect(remotePayloads(sendInput)).toEqual([]);
   });
 });

@@ -2000,7 +2000,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   const handleLongPressTimer = useCallback(() => {
     longPressTimerRef.current = null;
     const gesture = surfaceGestureRef.current;
-    if (!gesture || inputModeRef.current !== 'touch') {
+    if (!gesture || inputModeRef.current !== 'touch' || surfacePointersRef.current.size > 1) {
       return;
     }
     if (gesture.mode === 'actionPending') {
@@ -2045,6 +2045,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     });
     const pointers = Array.from(surfacePointersRef.current.entries());
     if (pointers.length >= 2 && event.pointerType === 'touch') {
+      clearLongPressTimer();
       const currentGesture = surfaceGestureRef.current;
       if (currentGesture && (currentGesture.mode === 'localPan' || currentGesture.mode === 'pan')) {
         secondPointerPendingRef.current = {
@@ -2121,6 +2122,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     event.stopPropagation();
   }, [
     applyRemoteWindowTouchPointerResult,
+    clearLongPressTimer,
     publishRemoteWindowInputContext,
     requestBoundVideoPlayback,
     resolveSurfaceInputGeometry,
