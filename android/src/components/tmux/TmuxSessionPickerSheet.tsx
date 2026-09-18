@@ -672,8 +672,8 @@ export function TmuxSessionPickerSheet({
                 border: 'none',
                 borderRadius: '18px',
                 padding: '14px',
-                backgroundColor: mobileTheme.colors.accentSoft,
-                color: mobileTheme.colors.lightText,
+                backgroundColor: 'var(--zterm-skeu-material)',
+                color: 'var(--zterm-settings-text)',
                 fontWeight: 800,
                 textAlign: 'left',
               }}
@@ -707,9 +707,9 @@ export function TmuxSessionPickerSheet({
                   minHeight: '40px',
                   padding: '0 14px',
                   borderRadius: '14px',
-                  border: 'none',
-                  backgroundColor: 'var(--zterm-settings-accent)',
-                  color: 'var(--zterm-settings-accent-text)',
+                  border: '1px solid var(--zterm-settings-accent-border)',
+                  backgroundColor: 'var(--zterm-skeu-material)',
+                  color: 'var(--zterm-settings-accent)',
                   fontWeight: 800,
                 }}
               >
@@ -844,9 +844,9 @@ export function TmuxSessionPickerSheet({
                       minHeight: '40px',
                       padding: '0 14px',
                       borderRadius: '14px',
-                      border: 'none',
-                      backgroundColor: 'var(--zterm-settings-accent)',
-                      color: 'var(--zterm-settings-accent-text)',
+                      border: '1px solid var(--zterm-settings-accent-border)',
+                      backgroundColor: 'var(--zterm-skeu-material)',
+                      color: 'var(--zterm-settings-accent)',
                       fontWeight: 800,
                     }}
                   >
@@ -1080,10 +1080,10 @@ export function TmuxSessionPickerSheet({
                 style={{
                   minWidth: '84px',
                   height: '38px',
-                  border: 'none',
+                  border: '1px solid var(--zterm-settings-accent-border)',
                   borderRadius: '12px',
-                  backgroundColor: 'var(--zterm-settings-accent)',
-                  color: 'var(--zterm-settings-accent-text)',
+                  backgroundColor: 'var(--zterm-skeu-material)',
+                  color: 'var(--zterm-settings-accent)',
                   fontWeight: 800,
                   boxShadow: mobileTheme.shadow.soft,
                 }}
@@ -1127,11 +1127,13 @@ export function TmuxSessionPickerSheet({
                     })
                   }
                   style={{
-                    border: 'none',
+                    border: active
+                      ? '1px solid var(--zterm-settings-accent-border)'
+                      : '1px solid var(--zterm-skeu-edge-dark)',
                     borderRadius: '16px',
                     padding: '10px 12px',
-                    backgroundColor: active ? 'var(--zterm-settings-accent)' : 'var(--zterm-settings-field)',
-                    color: active ? 'var(--zterm-settings-accent-text)' : 'var(--zterm-settings-text)',
+                    backgroundColor: active ? 'var(--zterm-skeu-material-active)' : 'var(--zterm-settings-field)',
+                    color: active ? 'var(--zterm-settings-accent)' : 'var(--zterm-settings-text)',
                     boxShadow: mobileTheme.shadow.soft,
                     textAlign: 'left',
                   }}
@@ -1304,8 +1306,8 @@ export function TmuxSessionPickerSheet({
                       height: '44px',
                       border: 'none',
                       borderRadius: '14px',
-                      backgroundColor: mobileTheme.colors.accentSoft,
-                      color: mobileTheme.colors.accent,
+                      backgroundColor: 'var(--zterm-skeu-material)',
+                      color: 'var(--zterm-settings-accent)',
                       fontWeight: 800,
                     }}
                   >
@@ -1319,8 +1321,8 @@ export function TmuxSessionPickerSheet({
                       height: '44px',
                       border: 'none',
                       borderRadius: '14px',
-                      backgroundColor: mobileTheme.colors.accentSoft,
-                      color: mobileTheme.colors.accent,
+                      backgroundColor: 'var(--zterm-skeu-material)',
+                      color: 'var(--zterm-settings-accent)',
                       fontWeight: 800,
                     }}
                   >
@@ -1389,10 +1391,10 @@ export function TmuxSessionPickerSheet({
               }}
               style={{
                 minHeight: '48px',
-                border: 'none',
+                border: '1px solid var(--zterm-settings-accent-border)',
                 borderRadius: '16px',
-                backgroundColor: 'var(--zterm-settings-accent)',
-                color: 'var(--zterm-settings-accent-text)',
+                backgroundColor: 'var(--zterm-skeu-material)',
+                color: 'var(--zterm-settings-accent)',
                 fontWeight: 800,
               }}
             >
@@ -1423,10 +1425,10 @@ export function TmuxSessionPickerSheet({
               disabled={busyAction !== null}
               style={{
                 minWidth: '88px',
-                border: 'none',
+                border: '1px solid var(--zterm-settings-accent-border)',
                 borderRadius: '16px',
-                backgroundColor: 'var(--zterm-settings-accent)',
-                color: 'var(--zterm-settings-accent-text)',
+                backgroundColor: 'var(--zterm-skeu-material)',
+                color: 'var(--zterm-settings-accent)',
                 fontWeight: 800,
               }}
             >
@@ -1454,8 +1456,8 @@ export function TmuxSessionPickerSheet({
                 border: 'none',
                 borderRadius: '18px',
                 padding: '14px',
-                backgroundColor: mobileTheme.colors.accentSoft,
-                color: mobileTheme.colors.lightText,
+                backgroundColor: 'var(--zterm-skeu-material)',
+                color: 'var(--zterm-settings-text)',
                 fontWeight: 800,
                 textAlign: 'left',
               }}
@@ -1498,7 +1500,7 @@ export function TmuxSessionPickerSheet({
                     setBackendChoiceOpen(false);
                     void handleCreateSession(backend);
                   }}
-                  style={{ border: 'none', borderRadius: '16px', padding: '14px', backgroundColor: backend === 'herdr' ? 'var(--zterm-settings-field)' : 'var(--zterm-settings-accent)', color: backend === 'herdr' ? 'var(--zterm-settings-text)' : 'var(--zterm-settings-accent-text)', fontWeight: 800, textAlign: 'left' }}
+                  style={{ border: backend === 'herdr' ? '1px solid var(--zterm-skeu-edge-dark)' : '1px solid var(--zterm-settings-accent-border)', borderRadius: '16px', padding: '14px', backgroundColor: backend === 'herdr' ? 'var(--zterm-settings-field)' : 'var(--zterm-skeu-material)', color: backend === 'herdr' ? 'var(--zterm-settings-text)' : 'var(--zterm-settings-accent)', fontWeight: 800, textAlign: 'left' }}
                 >
                   {backend === 'tmux' ? 'tmux — existing tmux backend' : 'Herdr — official single-session backend'}
                 </AmbientButton>

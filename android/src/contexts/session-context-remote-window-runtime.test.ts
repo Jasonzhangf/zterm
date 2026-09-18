@@ -44,7 +44,14 @@ function makeDaemonConnection(resourceOrFactory: any = makeSocket()) {
   );
   const readOpenSessionSocket = vi.fn((sessionId: string, purpose: string) => {
     const resource = readResource(sessionId) || null;
-    const ws = resource?.socket || null;
+    const channelState = resource?.channel?.state;
+    const ws = channelState
+      ? channelState === 'open'
+        ? resource.socket
+        : channelState === 'opening'
+          ? resource.terminalSocket || resource.socket
+          : null
+      : resource?.socket || null;
     if (ws && ws.readyState === 1) {
       return ws;
     }
@@ -236,7 +243,7 @@ describe('session context remote window runtime', () => {
     })).rejects.toThrow('Remote window catalog requires an open daemon connection (socket=closed');
   });
 
-  it('waits for the daemon channel to open before sending the catalog request when only socket=missing channel=opening is reported', async () => {
+  it('reuses the physical target socket while the mux channel is opening', async () => {
     let readAttempts = 0;
     const ws = makeSocket();
     const terminalSocket = makeSocket();
@@ -285,11 +292,11 @@ describe('session context remote window runtime', () => {
       catalogOpenPollIntervalMs: 50,
     })).resolves.toMatchObject({ requestId: 'rw-wait-success' });
 
-    expect(readAttempts).toBe(3);
-    expect(sleep).toHaveBeenCalled();
+    expect(readAttempts).toBe(1);
+    expect(sleep).not.toHaveBeenCalled();
     expect(requestTargets).toHaveBeenCalledTimes(1);
     expect(requestTargets).toHaveBeenCalledWith('session-1', {
-      ws,
+      ws: terminalSocket,
       sendSocketPayload: expect.any(Function),
     });
   });
@@ -379,7 +386,7 @@ describe('session context remote window runtime', () => {
     });
   });
 
-  it('surfaces the explicit open daemon connection error when the socket stays missing past the channel-open wait timeout', async () => {
+  it('reuses the physical target socket when the channel is opening and the effective socket is missing', async () => {
     const terminalSocket = makeSocket();
     const daemonConnection = makeDaemonConnection((sessionId: string) => ({
       sessionId,
@@ -397,31 +404,81 @@ describe('session context remote window runtime', () => {
         closedAt: null,
       },
     }));
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-opening-target',
+      targets: [],
+      errors: [],
+    }));
+
+    await expect(requestRemoteWindowTargetsRuntime({
+      sessionId: 'session-1',
+      sessions: [{ ...baseSession, state: 'connecting', bridgeHost: '100.66.1.82', bridgePort: 3333 }],
+      daemonConnection,
+      remoteWindowMessageRuntime: { requestTargets },
+      sendSocketPayload: vi.fn(),
+    })).resolves.toMatchObject({ requestId: 'rw-opening-target' });
+
+    expect(requestTargets).toHaveBeenCalledWith('session-1', {
+      ws: terminalSocket,
+      sendSocketPayload: expect.any(Function),
+    });
+  });
+
+  it('waits through a closed channel reopen before sending the catalog request', async () => {
+    const targetSocket = makeSocket();
+    let channelState: 'closed' | 'opening' | 'open' = 'closed';
+    const daemonConnection = makeDaemonConnection((sessionId: string) => ({
+      sessionId,
+      socket: channelState === 'open' ? targetSocket : null,
+      terminalSocket: channelState === 'opening' ? null : targetSocket,
+      targetKey: 'daemon=mac-studio',
+      channel: {
+        channelId: 'channel:session-1',
+        sessionId: 'session-1',
+        sessionName: 'tmux-1',
+        targetKey: 'daemon=mac-studio',
+        state: channelState,
+        bodySubscribed: false,
+        openedAt: 1,
+        closedAt: channelState === 'closed' ? 2 : null,
+      },
+    }));
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-reopened',
+      targets: [],
+      errors: [],
+    }));
     let now = 1_000;
     const sleep = vi.fn(async () => {
-      now += 200;
+      now += 60;
+      channelState = channelState === 'closed' ? 'opening' : 'open';
     });
 
     await expect(requestRemoteWindowTargetsRuntime({
       sessionId: 'session-1',
       sessions: [{ ...baseSession, state: 'connecting', bridgeHost: '100.66.1.82', bridgePort: 3333 }],
       daemonConnection,
-      remoteWindowMessageRuntime: { requestTargets: vi.fn() },
+      remoteWindowMessageRuntime: { requestTargets },
       sendSocketPayload: vi.fn(),
       now: () => now,
       sleep,
-      catalogOpenTimeoutMs: 100,
+      catalogOpenTimeoutMs: 2_000,
       catalogOpenPollIntervalMs: 50,
-    })).rejects.toThrow('Remote window catalog requires an open daemon connection (socket=missing');
+    })).resolves.toMatchObject({ requestId: 'rw-reopened' });
 
-    expect(sleep.mock.calls.length).toBeGreaterThan(0);
+    expect(sleep).toHaveBeenCalledTimes(2);
+    expect(requestTargets).toHaveBeenCalledWith('session-1', {
+      ws: targetSocket,
+      sendSocketPayload: expect.any(Function),
+    });
   });
 
-  it('does not wait for an open channel when the resource already reports the channel closed', async () => {
+  it('keeps waiting for a closed channel but rejects its stale open target socket at timeout', async () => {
+    const targetSocket = makeSocket();
     const daemonConnection = makeDaemonConnection((sessionId: string) => ({
       sessionId,
       socket: null,
-      terminalSocket: null,
+      terminalSocket: targetSocket,
       targetKey: 'daemon=mac-studio',
       channel: {
         channelId: 'channel:session-1',
@@ -434,19 +491,28 @@ describe('session context remote window runtime', () => {
         closedAt: 2,
       },
     }));
-    const sleep = vi.fn(async () => undefined);
+    const requestTargets = vi.fn();
+    let now = 1_000;
+    const sleep = vi.fn(async () => {
+      now += 60;
+    });
 
     await expect(requestRemoteWindowTargetsRuntime({
       sessionId: 'session-1',
-      sessions: [{ ...baseSession, state: 'connecting', bridgeHost: '100.66.1.82', bridgePort: 3333 }],
+      sessions: [baseSession],
       daemonConnection,
-      remoteWindowMessageRuntime: { requestTargets: vi.fn() },
+      remoteWindowMessageRuntime: { requestTargets },
       sendSocketPayload: vi.fn(),
-      now: () => 1_000,
+      now: () => now,
       sleep,
-    })).rejects.toThrow('Remote window catalog requires an open daemon connection (socket=missing');
+      catalogOpenTimeoutMs: 100,
+      catalogOpenPollIntervalMs: 50,
+    })).rejects.toThrow(
+      'Remote window catalog requires an open daemon connection (socket=missing, target=daemon=mac-studio, channel=closed)',
+    );
 
-    expect(sleep).not.toHaveBeenCalled();
+    expect(sleep).toHaveBeenCalled();
+    expect(requestTargets).not.toHaveBeenCalled();
   });
 
   it('rejects a missing session id before touching transport state', async () => {

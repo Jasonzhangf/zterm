@@ -153,7 +153,7 @@ export function useSessionProviderFacadeAssemblies(
       sessionId: id,
       source: refreshSource,
       forceHead: true,
-      markResumeTail: true,
+      markResumeTail: refreshSource === 'explicit-resume',
       allowReconnectIfUnavailable: true,
     });
   };

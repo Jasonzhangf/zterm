@@ -1295,9 +1295,9 @@ export function AppContent({
                 style={{
                   minHeight: '46px',
                   borderRadius: '16px',
-                  border: 'none',
-                  backgroundColor: 'var(--zterm-settings-accent)',
-                  color: 'var(--zterm-settings-accent-text)',
+                  border: '1px solid var(--zterm-settings-accent-border)',
+                  backgroundColor: 'var(--zterm-skeu-material)',
+                  color: 'var(--zterm-settings-accent)',
                   fontWeight: 800,
                   cursor: updateInstalling ? 'wait' : 'pointer',
                 }}

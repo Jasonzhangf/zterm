@@ -74,9 +74,11 @@ export function AppUpdateSection({
                   minHeight: '40px',
                   padding: '0 14px',
                   borderRadius: '14px',
-                  border: 'none',
-                  backgroundColor: updateDraft.manifestUrl === candidate.manifestUrl ? 'var(--zterm-settings-accent)' : 'var(--zterm-settings-field)',
-                  color: updateDraft.manifestUrl === candidate.manifestUrl ? 'var(--zterm-settings-accent-text)' : 'var(--zterm-settings-text)',
+                  border: updateDraft.manifestUrl === candidate.manifestUrl
+                    ? '1px solid var(--zterm-settings-accent-border)'
+                    : '1px solid var(--zterm-skeu-edge-dark)',
+                  backgroundColor: updateDraft.manifestUrl === candidate.manifestUrl ? 'var(--zterm-skeu-material-active)' : 'var(--zterm-settings-field)',
+                  color: updateDraft.manifestUrl === candidate.manifestUrl ? 'var(--zterm-settings-accent)' : 'var(--zterm-settings-text)',
                   fontWeight: 700,
                   cursor: 'pointer',
                 }}
@@ -152,9 +154,9 @@ export function AppUpdateSection({
             minHeight: '44px',
             padding: '0 16px',
             borderRadius: '14px',
-            border: 'none',
-            backgroundColor: 'var(--zterm-settings-accent)',
-            color: 'var(--zterm-settings-accent-text)',
+            border: '1px solid var(--zterm-settings-accent-border)',
+            backgroundColor: 'var(--zterm-skeu-material)',
+            color: 'var(--zterm-settings-accent)',
             fontWeight: 800,
             cursor: updateChecking ? 'wait' : 'pointer',
             opacity: updateChecking ? 0.72 : 1,

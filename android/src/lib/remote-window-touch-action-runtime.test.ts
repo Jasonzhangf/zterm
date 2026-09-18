@@ -412,7 +412,7 @@ describe('remote-window-touch-action-runtime', () => {
     ]);
   });
 
-  it('suppresses zoomed fullscreen single-finger tap and scroll', () => {
+  it('routes zoomed fullscreen single-finger motion to local pan and never to remote', () => {
     const down = resolveRemoteWindowTouchPointerDownRuntime({
       state: createRemoteWindowTouchPointerState(),
       pointer: pointer({ pointerId: 9, clientX: 90, clientY: 50 }),
@@ -420,11 +420,19 @@ describe('remote-window-touch-action-runtime', () => {
       zoomedProjection: true,
       touchMode: true,
     });
-    expect(down.nextState.mode).toBe('actionPending');
+    expect(down.nextState.mode).toBe('localPan');
     expect(down.nextState).toEqual(expect.objectContaining({
-      suppressTap: true,
+      pointerId: 9,
+      startClientX: 90,
+      startClientY: 50,
+      moved: false,
     }));
-    expect(down.localEffect).toEqual({ kind: 'none' });
+    expect(down.localEffect).toEqual({
+      kind: 'local-pan-start',
+      pointerId: 9,
+      clientX: 90,
+      clientY: 50,
+    });
     expect(down.remoteEvents).toEqual([]);
 
     const move = resolveRemoteWindowTouchPointerMoveRuntime({
@@ -433,13 +441,14 @@ describe('remote-window-touch-action-runtime', () => {
       geometry,
       touchMode: true,
     });
-    expect(move.nextState.mode).toBe('actionPending');
-    expect(move.nextState).toEqual(expect.objectContaining({
-      suppressTap: true,
-      lastClientX: 120,
-      lastClientY: 80,
-    }));
-    expect(move.localEffect).toEqual({ kind: 'none' });
+    expect(move.nextState.mode).toBe('localPan');
+    expect(move.localEffect).toEqual({
+      kind: 'local-pan-move',
+      pointerId: 9,
+      deltaX: 30,
+      deltaY: 30,
+      moved: true,
+    });
     expect(move.remoteEvents).toEqual([]);
 
     const upAfterMove = resolveRemoteWindowTouchPointerUpRuntime({
@@ -449,6 +458,11 @@ describe('remote-window-touch-action-runtime', () => {
       touchMode: true,
     });
     expect(upAfterMove.nextState.mode).toBe('idle');
+    expect(upAfterMove.localEffect).toEqual({
+      kind: 'local-pan-end',
+      pointerId: 9,
+      moved: true,
+    });
     expect(upAfterMove.remoteEvents).toEqual([]);
 
     const tapDown = resolveRemoteWindowTouchPointerDownRuntime({
@@ -465,9 +479,14 @@ describe('remote-window-touch-action-runtime', () => {
       touchMode: true,
     });
     expect(tapUp.remoteEvents).toEqual([]);
+    expect(tapUp.localEffect).toEqual({
+      kind: 'local-pan-end',
+      pointerId: 10,
+      moved: false,
+    });
   });
 
-  it('keeps zoomed single-finger movement suppressed after the old hold threshold', () => {
+  it('keeps zoomed single-finger local-pan hold within the old hold threshold without remote events', () => {
     const down = resolveRemoteWindowTouchPointerDownRuntime({
       state: createRemoteWindowTouchPointerState(),
       pointer: pointer({ pointerId: 13, timeMs: 2_000 }),
@@ -481,8 +500,14 @@ describe('remote-window-touch-action-runtime', () => {
       geometry,
       touchMode: true,
     });
-    expect(hold.nextState.mode).toBe('actionPending');
-    expect(hold.nextState).toEqual(expect.objectContaining({ suppressTap: true }));
+    expect(hold.nextState.mode).toBe('localPan');
+    expect(hold.localEffect).toEqual({
+      kind: 'local-pan-move',
+      pointerId: 13,
+      deltaX: 10,
+      deltaY: 0,
+      moved: true,
+    });
     expect(hold.remoteEvents).toEqual([]);
     const release = resolveRemoteWindowTouchPointerUpRuntime({
       state: hold.nextState,
@@ -491,6 +516,11 @@ describe('remote-window-touch-action-runtime', () => {
       touchMode: true,
     });
     expect(release.remoteEvents).toEqual([]);
+    expect(release.localEffect).toEqual({
+      kind: 'local-pan-end',
+      pointerId: 13,
+      moved: true,
+    });
   });
 
   it('releases a remote drag on cancel', () => {
@@ -693,6 +723,30 @@ describe('remote-window-touch-action-runtime', () => {
       expect(move.remoteEvents).toEqual([]);
     });
 
+    it('classifies the first sample after a second finger upgrades an active local pan', () => {
+      const candidate = resolveRemoteWindowTouchPairPointerDownRuntime({
+        firstPointer: { pointerId: 1, pointerType: 'touch', clientX: 100, clientY: 60, timeMs: 1_000 },
+        secondPointer: { pointerId: 2, pointerType: 'touch', clientX: 120, clientY: 60, timeMs: 1_020 },
+        timeMs: 1_020,
+        pinchEnabled: true,
+        scrollEnabled: true,
+        skipObserve: true,
+      });
+      const move = resolveRemoteWindowTouchPairPointerMoveRuntime({
+        state: candidate.nextState,
+        pair: {
+          first: { pointerId: 1, pointerType: 'touch', clientX: 100, clientY: 100, timeMs: 1_040 },
+          second: { pointerId: 2, pointerType: 'touch', clientX: 120, clientY: 100, timeMs: 1_040 },
+        },
+        geometry,
+        timeMs: 1_040,
+        pinchEnabled: true,
+        scrollEnabled: true,
+      });
+      expect(move.nextState.mode).toBe('twoFingerScroll');
+      expect(move.remoteEvents[0]?.kind).toBe('scroll');
+    });
+
     it('commits same-direction two-finger motion to scroll after the observe window', () => {
       const candidate = pairDown({ clientX: 100, clientY: 60 }, { clientX: 120, clientY: 60 });
       // 观察期 2 个 move（moveCount 0→1→2）
@@ -734,6 +788,61 @@ describe('remote-window-touch-action-runtime', () => {
       expect(move.nextState.mode).toBe('twoFingerScroll');
       expect(move.remoteEvents.length).toBeGreaterThan(0);
       expect(move.remoteEvents[0].kind).toBe('scroll');
+    });
+
+    it('keeps a vertical two-finger swipe as scroll when finger spacing changes during the swipe', () => {
+      const candidate = pairDown({ clientX: 100, clientY: 60 }, { clientX: 120, clientY: 60 });
+      const observe = resolveRemoteWindowTouchPairPointerMoveRuntime({
+        state: candidate.nextState,
+        pair: {
+          first: { pointerId: 1, pointerType: 'touch', clientX: 100, clientY: 100, timeMs: 1_050 },
+          second: { pointerId: 2, pointerType: 'touch', clientX: 120, clientY: 100, timeMs: 1_050 },
+        },
+        geometry,
+        timeMs: 1_050,
+        pinchEnabled: true,
+        scrollEnabled: true,
+      });
+      const move = resolveRemoteWindowTouchPairPointerMoveRuntime({
+        state: observe.nextState,
+        pair: {
+          first: { pointerId: 1, pointerType: 'touch', clientX: 90, clientY: 120, timeMs: 1_200 },
+          second: { pointerId: 2, pointerType: 'touch', clientX: 130, clientY: 120, timeMs: 1_200 },
+        },
+        geometry,
+        timeMs: 1_200,
+        pinchEnabled: true,
+        scrollEnabled: true,
+        scrollFraction: 1,
+      });
+      expect(move.nextState.mode).toBe('twoFingerScroll');
+      expect(move.remoteEvents.length).toBeGreaterThan(0);
+      expect(move.remoteEvents[0].kind).toBe('scroll');
+      expect(move.localEffect).toEqual(expect.objectContaining({ kind: 'two-finger-scroll-start' }));
+    });
+
+    it('commits anti-parallel spacing change with vertical midpoint motion to local pinch', () => {
+      const candidate = pairDown({ clientX: 100, clientY: 60 }, { clientX: 120, clientY: 60 });
+      const move = resolveRemoteWindowTouchPairPointerMoveRuntime({
+        state: candidate.nextState,
+        pair: {
+          first: { pointerId: 1, pointerType: 'touch', clientX: 80, clientY: 100, timeMs: 1_200 },
+          second: { pointerId: 2, pointerType: 'touch', clientX: 140, clientY: 100, timeMs: 1_200 },
+        },
+        geometry,
+        timeMs: 1_200,
+        pinchEnabled: true,
+        scrollEnabled: true,
+        scrollFraction: 1,
+      });
+      expect(move.nextState.mode).toBe('pinch');
+      expect(move.remoteEvents).toEqual([]);
+      expect(move.localEffect.kind).toBe('pinch-move');
+      // 平局边界：共模（中点位移 40px）等于差模（间距变化 40px）时必须仍归
+      // pinch。收紧成严格占优会让这条 anti-parallel 手势退回 remote scroll。
+      const commonMode = Math.hypot(110 - 110, 100 - 60);
+      const differential = Math.abs(60 - 20);
+      expect(differential).toBe(commonMode);
     });
 
     it('accepts coherent horizontal-only and diagonal zoomed two-finger pan motion', () => {

@@ -3056,10 +3056,10 @@ function TerminalQuickBarComponent({
                     style={{
                       width: "100%",
                       minHeight: "52px",
-                      border: "none",
+                      border: "1px solid var(--zterm-panel-accent-border)",
                       borderRadius: "16px",
-                      backgroundColor: "var(--zterm-panel-accent)",
-                      color: "var(--zterm-panel-active-text)",
+                      backgroundColor: "var(--zterm-panel-active)",
+                      color: "var(--zterm-panel-accent)",
                       fontWeight: 800,
                       fontSize: "18px",
                       cursor:
@@ -3225,7 +3225,7 @@ function TerminalQuickBarComponent({
                     minHeight: "36px",
                     border: "1px solid var(--amb-panel-accent-border)",
                     borderRadius: "12px",
-                    backgroundColor: "var(--amb-panel-accent-soft)",
+                    backgroundColor: "var(--amb-panel-active)",
                     color: "var(--amb-panel-accent)",
                     fontWeight: 800,
                     opacity: !activeSessionId ? 0.45 : 1,
@@ -3243,7 +3243,7 @@ function TerminalQuickBarComponent({
                     minHeight: "36px",
                     border: "1px solid var(--amb-panel-accent-border)",
                     borderRadius: "12px",
-                    backgroundColor: "var(--amb-panel-accent-soft)",
+                    backgroundColor: "var(--amb-panel-active)",
                     color: "var(--amb-panel-accent)",
                     fontWeight: 800,
                   }}
@@ -3295,7 +3295,7 @@ function TerminalQuickBarComponent({
                           border: `1px solid ${active ? "var(--amb-panel-accent-border)" : "var(--amb-panel-border)"}`,
                           borderRadius: "14px",
                           backgroundColor: active
-                            ? "var(--amb-panel-accent-soft)"
+                            ? "var(--amb-panel-active)"
                             : disabled
                               ? "var(--amb-panel-bg)"
                             : "var(--amb-panel-bg)",
@@ -3329,7 +3329,7 @@ function TerminalQuickBarComponent({
                         backgroundColor: isRemoteWindowTerminalOnlyAction("split-toggle")
                           ? "var(--amb-panel-bg)"
                           : splitVisible
-                          ? "var(--amb-panel-accent-soft)"
+                          ? "var(--amb-panel-active)"
                           : "var(--amb-panel-bg)",
                         color: isRemoteWindowTerminalOnlyAction("split-toggle")
                           ? "var(--amb-panel-muted)"
@@ -3384,7 +3384,7 @@ function TerminalQuickBarComponent({
                   onClick={() => setFloatingPanelTab("quick-actions")}
                   style={floatingPillButton(
                     floatingPanelTab === "quick-actions"
-                      ? "var(--amb-panel-accent-soft)"
+                      ? "var(--amb-panel-active)"
                       : "var(--amb-panel-bg)",
                     floatingPanelTab === "quick-actions"
                       ? "var(--amb-panel-accent)"
@@ -3397,7 +3397,7 @@ function TerminalQuickBarComponent({
                   onClick={() => setFloatingPanelTab("clipboard")}
                   style={floatingPillButton(
                     floatingPanelTab === "clipboard"
-                      ? "var(--amb-panel-accent-soft)"
+                      ? "var(--amb-panel-active)"
                       : "transparent",
                     floatingPanelTab === "clipboard"
                       ? "var(--amb-panel-accent)"
@@ -4239,11 +4239,11 @@ export function RemoteWindowQuickBar({
             {action.label}
           </AmbientButton>
         ))}
-        <AmbientButton type="button" aria-label={keyboardVisible ? '隐藏键盘' : '显示键盘'} aria-pressed={keyboardVisible} onClick={() => onToggleKeyboard?.()} style={{ ...REMOTE_WINDOW_BUTTON_STYLE, background: keyboardVisible ? 'var(--zterm-settings-accent-soft)' : REMOTE_WINDOW_BUTTON_STYLE.background, color: keyboardVisible ? 'var(--zterm-settings-accent)' : REMOTE_WINDOW_BUTTON_STYLE.color }}>键盘</AmbientButton>
+        <AmbientButton type="button" aria-label={keyboardVisible ? '隐藏键盘' : '显示键盘'} aria-pressed={keyboardVisible} onClick={() => onToggleKeyboard?.()} style={{ ...REMOTE_WINDOW_BUTTON_STYLE, background: keyboardVisible ? 'var(--zterm-skeu-material-active)' : REMOTE_WINDOW_BUTTON_STYLE.background, color: keyboardVisible ? 'var(--zterm-settings-accent)' : REMOTE_WINDOW_BUTTON_STYLE.color }}>键盘</AmbientButton>
       </div>
       <div style={{ display: 'flex', gap: 6 }}>
         <AmbientInput aria-label="发送到串流窗口" value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); submitDraft(); } }} placeholder="输入并发送到远程窗口" style={{ flex: 1, minWidth: 0, height: 36, padding: '0 11px', border: '1px solid var(--zterm-settings-border)', borderRadius: 10, background: 'var(--zterm-settings-field)', color: 'inherit', outline: 'none' }} />
-        <AmbientButton type="button" aria-label="发送文本" onClick={submitDraft} style={{ ...REMOTE_WINDOW_BUTTON_STYLE, background: 'var(--zterm-settings-accent-soft)', color: 'var(--zterm-settings-accent)' }}>发送</AmbientButton>
+        <AmbientButton type="button" aria-label="发送文本" onClick={submitDraft} style={{ ...REMOTE_WINDOW_BUTTON_STYLE, background: 'var(--zterm-skeu-material)', color: 'var(--zterm-settings-accent)' }}>发送</AmbientButton>
       </div>
       <span style={{ fontSize: 10, opacity: 0.5, textAlign: 'right' }}>快捷栏与 Shell 独立 · inset {Math.round(keyboardInsetPx)}px</span>
     </div>

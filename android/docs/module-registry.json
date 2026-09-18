@@ -2433,6 +2433,7 @@
         "src/components/terminal/useRemoteWindowCompositeCanvas.test.tsx",
         "src/components/terminal/useRemoteWindowCatalog.ts",
         "src/components/terminal/useRemoteWindowCatalog.test.tsx",
+        "src/components/terminal/useRemoteWindowForegroundReentry.ts",
         "src/components/terminal/useRemoteWindowViewport.ts",
         "src/components/terminal/useRemoteWindowViewport.test.tsx",
         "src/components/terminal/useRemoteWindowFocusSwitch.ts",

@@ -161,13 +161,13 @@ const fileCheckboxStyle = (checked: boolean) => ({
   border: checked
     ? `2px solid ${SHEET_ACCENT}`
     : `2px solid ${SHEET_BORDER}`,
-  background: checked ? SHEET_ACCENT : "transparent",
+  background: checked ? "var(--zterm-panel-active)" : "transparent",
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
   padding: 0,
   flexShrink: 0,
-  color: "var(--zterm-panel-active-text)",
+  color: SHEET_ACCENT,
   fontSize: "12px",
   fontWeight: 800,
   cursor: "pointer",
@@ -189,7 +189,7 @@ const actionButtonStyle = (bg: string, color: string) => ({
   minHeight: "36px",
   padding: "0 14px",
   borderRadius: "12px",
-  border: "none",
+  border: `1px solid ${SHEET_BORDER}`,
   background: bg,
   color,
   fontWeight: 700,
@@ -1662,8 +1662,8 @@ export function FileTransferSheet({
                 type="button"
                 onClick={startTransfer}
                 style={actionButtonStyle(
+                  "var(--zterm-skeu-material)",
                   SHEET_ACCENT,
-                  "var(--zterm-settings-accent-text)",
                 )}
               >
                 {resolvePrimaryTransferLabel(
