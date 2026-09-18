@@ -2000,7 +2000,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   const handleLongPressTimer = useCallback(() => {
     longPressTimerRef.current = null;
     const gesture = surfaceGestureRef.current;
-    if (!gesture || inputModeRef.current !== 'touch') {
+    if (!gesture || inputModeRef.current !== 'touch' || surfacePointersRef.current.size > 1) {
       return;
     }
     if (gesture.mode === 'actionPending') {
@@ -2045,6 +2045,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     });
     const pointers = Array.from(surfacePointersRef.current.entries());
     if (pointers.length >= 2 && event.pointerType === 'touch') {
+      clearLongPressTimer();
       const currentGesture = surfaceGestureRef.current;
       if (currentGesture && (currentGesture.mode === 'localPan' || currentGesture.mode === 'pan')) {
         secondPointerPendingRef.current = {
@@ -2121,6 +2122,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     event.stopPropagation();
   }, [
     applyRemoteWindowTouchPointerResult,
+    clearLongPressTimer,
     publishRemoteWindowInputContext,
     requestBoundVideoPlayback,
     resolveSurfaceInputGeometry,
@@ -2166,7 +2168,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
             },
             timeMs: event.timeStamp,
             pinchEnabled: state.mode === 'fullscreen' || state.mode === 'floating',
-            scrollEnabled: true,
+            scrollEnabled: true, skipObserve: true,
           });
           surfaceGestureRef.current = pairResult.nextState;
           surfaceLocalPanStartRef.current = null;
@@ -2185,39 +2187,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     }
 
     const runtimeGesture = toRemoteWindowTouchGestureState(gesture);
-    if (
-      runtimeGesture.mode === 'actionPending'
-      && runtimeGesture.suppressTap
-      && runtimeGesture.pointerId === event.pointerId
-      && event.pointerType === 'touch'
-      && fullscreenViewportRef.current.scale > 1.01
-    ) {
-      if (!surfaceLocalPanStartRef.current || surfaceLocalPanStartRef.current.pointerId !== event.pointerId) {
-        surfaceLocalPanStartRef.current = {
-          pointerId: event.pointerId,
-          startPanX: fullscreenViewportRef.current.panX,
-          startPanY: fullscreenViewportRef.current.panY,
-        };
-      }
-      applyRemoteWindowTouchLocalEffect({
-        kind: 'local-pan-move',
-        pointerId: event.pointerId,
-        deltaX: event.clientX - runtimeGesture.startClientX,
-        deltaY: event.clientY - runtimeGesture.startClientY,
-        moved: Math.hypot(
-          event.clientX - runtimeGesture.startClientX,
-          event.clientY - runtimeGesture.startClientY,
-        ) > REMOTE_WINDOW_FULLSCREEN_PAN_TAP_THRESHOLD_PX,
-      });
-      surfaceGestureRef.current = {
-        ...runtimeGesture,
-        lastClientX: event.clientX,
-        lastClientY: event.clientY,
-      };
-      event.preventDefault();
-      event.stopPropagation();
-      return;
-    }
     if (runtimeGesture.mode === 'twoFingerCandidate' || runtimeGesture.mode === 'twoFingerScroll' || runtimeGesture.mode === 'twoFingerPan' || runtimeGesture.mode === 'pinch') {
       const first = surfacePointersRef.current.get(runtimeGesture.firstPointerId);
       const second = surfacePointersRef.current.get(runtimeGesture.secondPointerId);
@@ -2326,7 +2295,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     }
 
   }, [
-    applyRemoteWindowTouchLocalEffect,
     applyRemoteWindowTouchPointerResult,
     resolveSurfaceInputGeometry,
     setFullscreenViewport,
@@ -2335,8 +2303,16 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
 
   const handleVideoSurfacePointerUp = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     clearLongPressTimer();
-    if (secondPointerPendingRef.current?.pointerId === event.pointerId) {
+    const pendingSecondPointerId = secondPointerPendingRef.current?.pointerId ?? null;
+    if (pendingSecondPointerId === event.pointerId) {
       secondPointerPendingRef.current = null;
+    }
+    if (pendingSecondPointerId === event.pointerId) {
+      surfacePointersRef.current.delete(event.pointerId);
+      releasePointerCaptureSafely(event.currentTarget, event.pointerId);
+      event.preventDefault();
+      event.stopPropagation();
+      return;
     }
     const gesture = surfaceGestureRef.current;
     if (gesture) {
@@ -2376,21 +2352,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     }
     const runtimeGesture = toRemoteWindowTouchGestureState(gesture);
     if (runtimeGesture.mode !== 'idle') {
-      if (
-        runtimeGesture.mode === 'actionPending'
-        && runtimeGesture.suppressTap
-        && runtimeGesture.pointerId === event.pointerId
-        && event.pointerType === 'touch'
-        && fullscreenViewportRef.current.scale > 1.01
-      ) {
-        surfaceLocalPanStartRef.current = null;
-        surfaceGestureRef.current = null;
-        surfacePointersRef.current.delete(event.pointerId);
-        commitFullscreenViewport();
-        event.preventDefault();
-        event.stopPropagation();
-        return;
-      }
       const geometry = resolveSurfaceInputGeometry();
       if (geometry) {
         const result = resolveRemoteWindowTouchPointerUpRuntime({
