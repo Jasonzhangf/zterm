@@ -272,6 +272,52 @@ describe('TerminalPage junction preview integration', () => {
     expect(onLiveSessionIdsChange.mock.calls.at(-1)?.[0]).not.toContain('s5');
   });
 
+  it('subscribes the full lattice while overview is active and restores the junction view on 1x', async () => {
+    const sessions = Array.from({ length: 5 }, (_, index) => makeSession(`s${index + 1}`));
+    writeLattice(sessions);
+    const onLiveSessionIdsChange = vi.fn();
+    renderPage({
+      sessions,
+      activeSession: sessions[0],
+      onLiveSessionIdsChange,
+    });
+
+    const stage = screen.getByTestId('terminal-stage-shell');
+    await openPreview(stage);
+    expect(onLiveSessionIdsChange.mock.calls.at(-1)?.[0]).not.toContain('s5');
+
+    const grid = screen.getByTestId('terminal-preview-grid');
+    fireEvent.touchStart(grid, {
+      touches: [
+        { clientX: 100, clientY: 200 },
+        { clientX: 200, clientY: 200 },
+      ],
+    });
+    fireEvent.touchMove(grid, {
+      touches: [
+        { clientX: 125, clientY: 200 },
+        { clientX: 175, clientY: 200 },
+      ],
+    });
+    await waitFor(() => expect(onLiveSessionIdsChange.mock.calls.at(-1)?.[0]).toEqual(
+      expect.arrayContaining(['s1', 's2', 's3', 's4', 's5']),
+    ));
+
+    fireEvent.touchMove(grid, {
+      touches: [
+        { clientX: 90, clientY: 190 },
+        { clientX: 210, clientY: 190 },
+      ],
+    });
+    fireEvent.touchMove(grid, {
+      touches: [
+        { clientX: 75, clientY: 180 },
+        { clientX: 225, clientY: 180 },
+      ],
+    });
+    await waitFor(() => expect(onLiveSessionIdsChange.mock.calls.at(-1)?.[0]).not.toContain('s5'));
+  });
+
   it('pans focus to an edge cell without switching the active shell session', async () => {
     const sessions = [makeSession('s1'), makeSession('s2'), makeSession('s3')];
     writeLattice(sessions);
