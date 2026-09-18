@@ -2303,8 +2303,16 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
 
   const handleVideoSurfacePointerUp = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     clearLongPressTimer();
-    if (secondPointerPendingRef.current?.pointerId === event.pointerId) {
+    const pendingSecondPointerId = secondPointerPendingRef.current?.pointerId ?? null;
+    if (pendingSecondPointerId === event.pointerId) {
       secondPointerPendingRef.current = null;
+    }
+    if (pendingSecondPointerId === event.pointerId) {
+      surfacePointersRef.current.delete(event.pointerId);
+      releasePointerCaptureSafely(event.currentTarget, event.pointerId);
+      event.preventDefault();
+      event.stopPropagation();
+      return;
     }
     const gesture = surfaceGestureRef.current;
     if (gesture) {

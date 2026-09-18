@@ -467,4 +467,37 @@ describe('RemoteWindowOverlay gesture matrix', () => {
     await releasePointer(surface, secondPointerId, 190, 100);
     expect(remotePayloads(sendInput)).toEqual([]);
   });
+
+  it('drops a pending second finger released before the zoomed upgrade threshold', async () => {
+    const { sendInput, surface } = await openRemoteWindow(true);
+    const content = projectionElement();
+    const initialWidth = stylePx(content.style.width);
+
+    const zoomOut = pinchMove(surface, 'out');
+    await waitFor(() => {
+      expect(stylePx(content.style.width)).toBeGreaterThan(initialWidth + 1);
+    });
+    await releasePair(
+      surface,
+      zoomOut.firstPointerId,
+      zoomOut.secondPointerId,
+      zoomOut.firstEndX,
+      zoomOut.secondEndX,
+      zoomOut.y,
+    );
+    sendInput.mockClear();
+
+    const firstPointerId = nextPointerId();
+    const secondPointerId = nextPointerId();
+    fireEvent.pointerDown(surface, touchOptions(firstPointerId, 110, 100, 6000));
+    fireEvent.pointerDown(surface, touchOptions(secondPointerId, 190, 100, 6010));
+    await releasePointer(surface, secondPointerId, 190, 100);
+
+    const recovered = oneFingerVerticalMove(surface, 'up');
+    await act(async () => {});
+    expect(remotePayloads(sendInput)).toEqual([]);
+    await releasePointer(surface, firstPointerId, 110, 100);
+    await releasePointer(surface, recovered.pointerId, recovered.endClientX, recovered.endClientY);
+    expect(remotePayloads(sendInput)).toEqual([]);
+  });
 });
