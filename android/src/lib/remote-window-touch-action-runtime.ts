@@ -1273,7 +1273,7 @@ export function resolveRemoteWindowTouchPairPointerMoveRuntime(options: RemoteWi
 
   if (state.mode === 'twoFingerScroll') {
     if (
-      midpointShift < REMOTE_WINDOW_TWO_FINGER_SCROLL_DEADZONE_PX
+      cumulativeMidpointShift < REMOTE_WINDOW_TWO_FINGER_SCROLL_DEADZONE_PX
       && Math.abs(scaleRatio - 1) < REMOTE_WINDOW_TWO_FINGER_PINCH_MIN_SCALE_RATIO
     ) {
       // Neither scroll nor pinch - just update mid tracking
