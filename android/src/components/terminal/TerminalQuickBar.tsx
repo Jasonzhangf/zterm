@@ -3056,10 +3056,10 @@ function TerminalQuickBarComponent({
                     style={{
                       width: "100%",
                       minHeight: "52px",
-                      border: "none",
+                      border: "1px solid var(--zterm-panel-accent-border)",
                       borderRadius: "16px",
-                      backgroundColor: "var(--zterm-panel-accent)",
-                      color: "var(--zterm-panel-active-text)",
+                      backgroundColor: "var(--zterm-panel-active)",
+                      color: "var(--zterm-panel-accent)",
                       fontWeight: 800,
                       fontSize: "18px",
                       cursor:

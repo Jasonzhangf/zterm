@@ -49,12 +49,12 @@ const commonButtonStyle: CSSProperties = {
 
 const accentButtonStyle: CSSProperties = {
   border: '1px solid var(--zterm-settings-accent-border)',
-  backgroundColor: 'var(--zterm-skeu-material-active)',
+  backgroundColor: 'var(--zterm-skeu-material)',
   color: 'var(--zterm-settings-accent)',
   boxShadow: [
-    'inset 2px 2px 5px color-mix(in srgb, var(--zterm-skeu-edge-dark) 64%, transparent)',
+    'inset 1px 1px 0 var(--zterm-skeu-edge-light)',
     'inset -1px -1px 0 var(--zterm-skeu-edge-light)',
-    '0 0 0 1px color-mix(in srgb, var(--zterm-settings-accent) 16%, transparent)',
+    '0 4px 10px var(--zterm-skeu-shadow-soft)',
   ].join(', '),
 };
 
