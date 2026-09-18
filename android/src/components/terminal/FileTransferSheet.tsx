@@ -1662,8 +1662,8 @@ export function FileTransferSheet({
                 type="button"
                 onClick={startTransfer}
                 style={actionButtonStyle(
+                  "var(--zterm-skeu-material)",
                   SHEET_ACCENT,
-                  "var(--zterm-settings-accent-text)",
                 )}
               >
                 {resolvePrimaryTransferLabel(
