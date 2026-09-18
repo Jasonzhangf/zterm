@@ -367,26 +367,37 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
     height: number;
     isFocus: boolean;
   }>();
+  let overviewWidth = 0;
+  let overviewHeight = 0;
+  let overviewFitScale = 1;
+  let overviewScale = 1;
+  let overviewTranslateX = 0;
+  let overviewTranslateY = 0;
   if (overviewBounds && overviewCells) {
     const columnCount = overviewBounds.maxCol - overviewBounds.minCol + 1;
     const rowCount = overviewBounds.maxRow - overviewBounds.minRow + 1;
     const overviewCellWidth = layout.focusSizePx.width;
     const overviewCellHeight = layout.focusSizePx.height;
-    const overviewWidth = columnCount * overviewCellWidth + Math.max(0, columnCount - 1) * JUNCTION_PREVIEW_GAP_PX;
-    const overviewHeight = rowCount * overviewCellHeight + Math.max(0, rowCount - 1) * JUNCTION_PREVIEW_GAP_PX;
-    const originX = (layoutViewportWidth - overviewWidth) / 2;
-    const originY = (resolvedViewportHeight - overviewHeight) / 2;
+    overviewWidth = columnCount * overviewCellWidth + Math.max(0, columnCount - 1) * JUNCTION_PREVIEW_GAP_PX;
+    overviewHeight = rowCount * overviewCellHeight + Math.max(0, rowCount - 1) * JUNCTION_PREVIEW_GAP_PX;
+    overviewFitScale = Math.min(
+      1,
+      layoutViewportWidth / overviewWidth,
+      resolvedViewportHeight / overviewHeight,
+    );
+    overviewScale = Math.min(1, previewScale, overviewFitScale);
+    overviewTranslateX = (layoutViewportWidth - overviewWidth * overviewScale) / 2;
+    overviewTranslateY = (resolvedViewportHeight - overviewHeight * overviewScale) / 2;
     for (const cell of overviewCells) {
       overviewCellRects.set(coordinateKey(cell), {
-        left: originX + (cell.col - overviewBounds.minCol) * (overviewCellWidth + JUNCTION_PREVIEW_GAP_PX),
-        top: originY + (cell.row - overviewBounds.minRow) * (overviewCellHeight + JUNCTION_PREVIEW_GAP_PX),
+        left: (cell.col - overviewBounds.minCol) * (overviewCellWidth + JUNCTION_PREVIEW_GAP_PX),
+        top: (cell.row - overviewBounds.minRow) * (overviewCellHeight + JUNCTION_PREVIEW_GAP_PX),
         width: overviewCellWidth,
         height: overviewCellHeight,
         isFocus: cell.col === focus.col && cell.row === focus.row,
       });
     }
   }
-
   const usedSessionIds = new Set(
     lattice.cells
       .filter((candidate) => (
@@ -731,10 +742,18 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
           data-preview-scale={String(previewScale)}
           data-preview-pan-x={String(previewPan.x)}
           data-preview-pan-y={String(previewPan.y)}
+          data-preview-fit-scale={String(overviewFitScale)}
+          data-preview-effective-scale={String(overviewScale)}
+          data-preview-content-width={String(overviewWidth)}
+          data-preview-content-height={String(overviewHeight)}
+          data-preview-translate-x={String(overviewTranslateX)}
+          data-preview-translate-y={String(overviewTranslateY)}
           style={{
             position: 'absolute',
             inset: 0,
-            transform: `translate3d(${previewPan.x}px, ${previewPan.y}px, 0) scale(${previewScale})`,
+            transform: overviewCells
+              ? `translate3d(${overviewTranslateX + previewPan.x}px, ${overviewTranslateY + previewPan.y}px, 0) scale(${overviewScale})`
+              : `translate3d(${previewPan.x}px, ${previewPan.y}px, 0) scale(${previewScale})`,
             transformOrigin: '0 0',
             willChange: previewScale < 1 || previewPan.x !== 0 || previewPan.y !== 0
               ? 'transform'
