@@ -175,3 +175,38 @@ events, median dy = -4 px.
   no response) during this work.
 - Post-fix on-device wire re-check: requires installing the rebuilt APK; recorded separately
   at delivery time.
+
+## Post-fix device evidence (emulator-5554, build 3049, candidate commit 509b7f51)
+
+Installed APK: android/native/android/app/build/outputs/apk/debug/app-debug.apk, versionName 0.1.3.3049,
+versionCode 1100030490. Overlay opened on target `remote-window-target-app-window:28882:17799`
+(TextEdit), live stream active (`remote-window-locked-overlay` + `remote-window-video-surface` present).
+Wire evidence obtained by wrapping `window.Capacitor.nativePromise` for plugin
+`AndroidConnectionService` and counting `remote-window-input` frames on `sendChannelMessage`.
+
+Full matrix (`/tmp/rwd-matrix3039.cjs`, same script used for the pre-fix 3039 baseline):
+
+  1x  1F 18x5px swipe            -> 18 scroll frames   (works, unchanged)
+  1x  2F 18x4.4px same-dir       -> 17 scroll frames   (pre-fix 3039: 0)  FIXED
+  1x  2F  9x8.9px same-dir       ->  9 scroll frames   (pre-fix 3039: 0)  FIXED
+  1x  2F  5x16px same-dir        ->  5 scroll frames   (works, unchanged)
+  1x  2F pinch out               ->  0 remote frames, local scale 1 -> 2.399  (unchanged)
+  zoomed 1F swipe                ->  0 remote frames   (local pan only, unchanged)
+  zoomed 2F 18x4.4px same-dir    -> 17 scroll frames   (pre-fix 3039: 0)  FIXED
+  zoomed 2F 5x16px same-dir      ->  5 scroll frames   (works, unchanged)
+
+Per-event trace (`/tmp/rwd-detail.cjs`), 18 injected 4.44 px steps:
+  commit frame scroll/start dy=17.78, then 16 scroll/update frames dy=8.89 each.
+  Sum = 17.78 + 16*8.89 = 160.0 px, matching the 18*8.89 px midpoint travel of the two
+  fingers exactly once (no double count, no dropped observe-window travel).
+9 injected 8.89 px steps: 1 commit dy=17.78 + 8 updates dy=17.78 each = 160.0 px.
+
+Both fixes are therefore confirmed at the real wire boundary on a device, not only in the
+runtime replay: the commit gate and the update gate now both use cumulative start-relative
+travel, and the commit frame carries the accumulated observe-window travel.
+
+## Remaining not-verified
+
+- 15T (100.104.163.65:5555) acceptance: the device is reachable over adb now but runs build
+  3031, so it cannot exercise this candidate. Real-device acceptance requires the OTA
+  upgrade to land first.
