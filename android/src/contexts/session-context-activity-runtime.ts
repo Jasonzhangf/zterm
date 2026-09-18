@@ -158,9 +158,6 @@ export function ensureActiveSessionFreshRuntime(options: {
       targetKey: transportRuntime?.targetKey || null,
       targetSessionCount: targetRuntime?.sessionIds.length || 0,
     });
-    if (options.refreshOptions.markResumeTail) {
-      options.refs.tailRefreshStore.markPendingResumeTailRefresh(options.refreshOptions.sessionId);
-    }
     if (options.refreshOptions.source === 'active-reentry') {
       options.refs.lastActiveReentryAtRef.current.set(options.refreshOptions.sessionId, Date.now());
     }
@@ -168,6 +165,9 @@ export function ensureActiveSessionFreshRuntime(options: {
       options.reopenSessionTerminalChannel(options.refreshOptions.sessionId);
     } else {
       options.reconnectSession(options.refreshOptions.sessionId);
+    }
+    if (options.refreshOptions.markResumeTail) {
+      options.refs.tailRefreshStore.markPendingResumeTailRefresh(options.refreshOptions.sessionId);
     }
     return true;
   }
@@ -406,6 +406,9 @@ export function ensureActiveSessionFreshRuntime(options: {
 
   if (refreshPlan.action === 'reconnect') {
     options.reconnectSession(options.refreshOptions.sessionId);
+    if (options.refreshOptions.markResumeTail) {
+      options.refs.tailRefreshStore.markPendingResumeTailRefresh(options.refreshOptions.sessionId);
+    }
     return true;
   }
 
