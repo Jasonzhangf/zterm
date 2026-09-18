@@ -31,15 +31,23 @@ per-sample deltas.
    The command was generated directly from that list, so the count is exact:
      pnpm exec vitest run <all 38 registry-derived .test.ts/.test.tsx entries>
    Result: Test Files 2 failed | 35 passed (38); Tests 7 failed | 440 passed (468)
-   The 7 failures are all PRE-EXISTING and reproduce on the untouched base:
+   Accounting: 37 of the 38 gate files reported. 35 passed. 2 failed with 7 failures total,
+   all PRE-EXISTING and reproduced on the untouched base / origin/main ace989e2
+   at /private/tmp/zterm-main-8fdaeec-check:
    - src/components/terminal/useRemoteWindowQuality.test.tsx
      "skips exactly two stats samples after apply before adaptive downgrade" -> Test timed out in 5000ms
-     Reproduced in isolation on origin/main ace989e2 at /private/tmp/zterm-main-8fdaeec-check:
-       pnpm exec vitest run src/components/terminal/useRemoteWindowQuality.test.tsx
-       -> Tests 1 failed | 5 passed (6)
+     Reproduced in isolation on origin/main: Tests 1 failed | 5 passed (6).
      Neither useRemoteWindowQuality.tsx nor its test was touched by this change
      (git log ace989e2..ddef58c8 -- those files is empty).
    - src/components/terminal/RemoteWindowOverlay.test.tsx: the 6 failures listed under (2).
+   The 38th gate file, src/contexts/session-context-remote-window-runtime.test.ts, cannot
+   run in this environment at all: Vitest aborts before test collection with
+     Error: Worker terminated due to reaching memory limit: JS heap out of memory
+     Test Files (1); Tests (21); Errors 1 error; tests 0ms
+   ENVIRONMENTAL / PRE-EXISTING: the identical abort reproduces on the untouched base at
+   /private/tmp/zterm-main-8fdaeec-check, and also with --pool=forks,
+   --no-file-parallelism, and NODE_OPTIONS=--max-old-space-size=8192. It is not evidence
+   about this change either way; the file is not in this change's diff.
 
 2) RemoteWindowOverlay UI gate (one of the 38 gates above; re-run in isolation)
    Command (cwd android): pnpm exec vitest run src/components/terminal/RemoteWindowOverlay.test.tsx
