@@ -790,6 +790,125 @@ describe('remote-window-touch-action-runtime', () => {
       expect(move.remoteEvents[0].kind).toBe('scroll');
     });
 
+    it.each([4, 5])('commits same-direction two-finger scroll with realistic %ipx samples', (step) => {
+      const candidate = pairDown({ clientX: 100, clientY: 60 }, { clientX: 120, clientY: 60 });
+      let state = candidate.nextState;
+      const remoteEvents: Array<{ kind: string; deltaY?: number }> = [];
+
+      for (let index = 1; index <= 10; index += 1) {
+        const move = resolveRemoteWindowTouchPairPointerMoveRuntime({
+          state,
+          pair: {
+            first: {
+              pointerId: 1,
+              pointerType: 'touch',
+              clientX: 100,
+              clientY: 60 + step * index,
+              timeMs: 1_000 + index * 10,
+            },
+            second: {
+              pointerId: 2,
+              pointerType: 'touch',
+              clientX: 120,
+              clientY: 60 + step * index,
+              timeMs: 1_000 + index * 10,
+            },
+          },
+          geometry,
+          timeMs: 1_000 + index * 10,
+          pinchEnabled: true,
+          scrollEnabled: true,
+        });
+        state = move.nextState;
+        remoteEvents.push(...move.remoteEvents);
+      }
+
+      expect(state.mode).toBe('twoFingerScroll');
+      expect(remoteEvents.some((event) => event.kind === 'scroll')).toBe(true);
+      // Commit fires once cumulative travel reaches the 8px threshold (sample 2),
+      // and the start event must carry that accumulated travel rather than only
+      // the last per-sample delta: raw 2*step px over a 100px surface onto a
+      // 600px source => step * 12 wheel delta (below the 150px clamp).
+      expect(remoteEvents[0]).toEqual(expect.objectContaining({ kind: 'scroll', deltaY: step * 12 }));
+    });
+
+    it('keeps interleaved two-finger samples proportional without double-counting travel', () => {
+      const step = 4.444;
+      const sampleCount = 18;
+      const candidate = pairDown({ clientX: 100, clientY: 20 }, { clientX: 120, clientY: 20 });
+      let state = candidate.nextState;
+      const scrollEvents: Array<{ kind: string; deltaY?: number }> = [];
+
+      for (let index = 1; index <= sampleCount; index += 1) {
+        const firstY = 20 + step * index;
+        const timeMs = 1_000 + index * 10;
+        const firstMove = resolveRemoteWindowTouchPairPointerMoveRuntime({
+          state,
+          pair: {
+            first: { pointerId: 1, pointerType: 'touch', clientX: 100, clientY: firstY, timeMs },
+            second: { pointerId: 2, pointerType: 'touch', clientX: 120, clientY: 20 + step * (index - 1), timeMs },
+          },
+          geometry,
+          timeMs,
+          pinchEnabled: true,
+          scrollEnabled: true,
+        });
+        state = firstMove.nextState;
+        scrollEvents.push(...firstMove.remoteEvents.filter((event) => event.kind === 'scroll'));
+
+        const secondMove = resolveRemoteWindowTouchPairPointerMoveRuntime({
+          state,
+          pair: {
+            first: { pointerId: 1, pointerType: 'touch', clientX: 100, clientY: firstY, timeMs },
+            second: { pointerId: 2, pointerType: 'touch', clientX: 120, clientY: firstY, timeMs },
+          },
+          geometry,
+          timeMs,
+          pinchEnabled: true,
+          scrollEnabled: true,
+        });
+        state = secondMove.nextState;
+        scrollEvents.push(...secondMove.remoteEvents.filter((event) => event.kind === 'scroll'));
+      }
+
+      expect(state.mode).toBe('twoFingerScroll');
+      expect(scrollEvents.length).toBeGreaterThanOrEqual(10);
+      expect(scrollEvents.reduce((sum, event) => sum + (event.deltaY ?? 0), 0)).toBeCloseTo(step * sampleCount * 6);
+    });
+
+    it('emits the reversal when a committed two-finger scroll returns to its origin', () => {
+      const candidate = pairDown({ clientX: 100, clientY: 20 }, { clientX: 120, clientY: 20 });
+      let state = candidate.nextState;
+      const scrollEvents: Array<{ kind: string; deltaY?: number }> = [];
+      const move = (clientY: number, timeMs: number) => {
+        const result = resolveRemoteWindowTouchPairPointerMoveRuntime({
+          state,
+          pair: {
+            first: { pointerId: 1, pointerType: 'touch', clientX: 100, clientY, timeMs },
+            second: { pointerId: 2, pointerType: 'touch', clientX: 120, clientY, timeMs },
+          },
+          geometry,
+          timeMs,
+          pinchEnabled: true,
+          scrollEnabled: true,
+        });
+        state = result.nextState;
+        scrollEvents.push(...result.remoteEvents.filter((event) => event.kind === 'scroll'));
+      };
+
+      // Commit downwards, then drag back up to the exact gesture origin.
+      move(40, 1_100);
+      move(30, 1_200);
+      move(20, 1_300);
+
+      expect(state.mode).toBe('twoFingerScroll');
+      const total = scrollEvents.reduce((sum, event) => sum + (event.deltaY ?? 0), 0);
+      // Net travel is zero, so the emitted scroll must cancel out. A start-relative
+      // deadzone drops the return samples and leaves the remote target displaced.
+      expect(total).toBeCloseTo(0);
+      expect(scrollEvents.some((event) => (event.deltaY ?? 0) < 0)).toBe(true);
+    });
+
     it('keeps a vertical two-finger swipe as scroll when finger spacing changes during the swipe', () => {
       const candidate = pairDown({ clientX: 100, clientY: 60 }, { clientX: 120, clientY: 60 });
       const observe = resolveRemoteWindowTouchPairPointerMoveRuntime({
@@ -948,9 +1067,14 @@ describe('remote-window-touch-action-runtime', () => {
         scrollEnabled: true,
         panEnabled: true,
       });
+      // Cumulative travel commits the pan one sample earlier, so the pan-start is
+      // emitted on `observe2`; the gesture-level contract is what matters here:
+      // exactly one local-pan-start across the gesture, no remote events.
       expect(move.nextState.mode).toBe('twoFingerPan');
       expect(move.remoteEvents).toEqual([]);
-      expect(move.localEffect).toEqual(expect.objectContaining({ kind: 'local-pan-start' }));
+      expect([observe.localEffect, observe2.localEffect, move.localEffect].filter(
+        (effect) => effect.kind === 'local-pan-start',
+      )).toHaveLength(1);
     });
 
     it('commits zoomed vertical two-finger motion to local pan when enabled', () => {

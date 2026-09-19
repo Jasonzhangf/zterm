@@ -1,0 +1,277 @@
+# Gate evidence: two-finger same-direction remote scroll never committed
+
+Base: 15d2c0dc (origin/main merge of PR #90)
+Date: 2026-09-18
+
+## Binding
+
+The reviewed range is 15d2c0dc..HEAD. Source and test files under test, with their blob
+hashes in the candidate tree at commit c928b378:
+  runtime          android/src/lib/remote-window-touch-action-runtime.ts   27f4ea62234324e1c8276b722b56fb053a78f434
+  runtime test     android/src/lib/remote-window-touch-action-runtime.test.ts   6379a0c4e6bccf5a5e895858b9d095a465369502
+  overlay gate     android/src/components/terminal/RemoteWindowOverlay.test.tsx   3b961e4a9f226d4d92f2b3fd7407141fe336934c
+
+The runtime/test blobs above are the tree the "Reversal fix" section verified. Earlier
+sections of this file record the 3d9ae8c3 and 509b7f51 trees and say so where they differ.
+This evidence file is excluded from its own binding because its hash changes with each edit.
+
+## Defect and fix (runtime, not theoretical)
+
+resolveRemoteWindowTouchPairPointerMoveRuntime decided the two-finger commit with the
+PER-SAMPLE midpoint delta (state.lastMidX/lastMidY). Real pointer samples on device arrive
+at ~4-5 px, so the 8 px threshold was never reached and a normal two-finger swipe emitted
+zero remote events. The fix compares CUMULATIVE travel from state.startMidX/startMidY, and
+the commit event now dispatches that accumulated travel instead of only the last per-sample
+delta (previously the observe-window travel was dropped). Committed scroll updates keep
+per-sample deltas.
+
+## Gates
+
+1) Declared required gates for desktop.remote_window_stream
+   Source: docs/feature-registry.json required_gates; 38 entries end in .test.ts/.test.tsx.
+   The command was generated directly from that list, so the count is exact:
+     pnpm exec vitest run <all 38 registry-derived .test.ts/.test.tsx entries>
+   Result: Test Files 2 failed | 35 passed (38); Tests 7 failed | 440 passed (468)
+   Accounting: 37 of the 38 gate files reported. 35 passed. 2 failed with 7 failures total,
+   all PRE-EXISTING and reproduced on the untouched base / origin/main ace989e2
+   at /private/tmp/zterm-main-8fdaeec-check:
+   - src/components/terminal/useRemoteWindowQuality.test.tsx
+     "skips exactly two stats samples after apply before adaptive downgrade" -> Test timed out in 5000ms
+     Reproduced in isolation on origin/main: Tests 1 failed | 5 passed (6).
+     Neither useRemoteWindowQuality.tsx nor its test was touched by this change
+     (git log ace989e2..ddef58c8 -- those files is empty).
+   - src/components/terminal/RemoteWindowOverlay.test.tsx: the 6 failures listed under (2).
+   The 38th gate file, src/contexts/session-context-remote-window-runtime.test.ts, cannot
+   run in this environment at all: Vitest aborts before test collection with
+     Error: Worker terminated due to reaching memory limit: JS heap out of memory
+     Test Files (1); Tests (21); Errors 1 error; tests 0ms
+   ENVIRONMENTAL / PRE-EXISTING: the identical abort reproduces on the untouched base at
+   /private/tmp/zterm-main-8fdaeec-check, and also with --pool=forks,
+   --no-file-parallelism, and NODE_OPTIONS=--max-old-space-size=8192. It is not evidence
+   about this change either way; the file is not in this change's diff.
+
+2) RemoteWindowOverlay UI gate (one of the 38 gates above; re-run in isolation)
+   Command (cwd android): pnpm exec vitest run src/components/terminal/RemoteWindowOverlay.test.tsx
+   Result: Tests 6 failed | 87 passed (93)
+   PRE-EXISTING: the same 6 failures reproduce on the untouched base commit ddef58c8 and on
+   origin/main ace989e2 (Tests 6 failed | 85 passed (91)). This change introduces no new
+   failure and additionally fixes 1 previously-failing test
+   ("routes zoomed fullscreen two-finger vertical movement to remote scroll").
+   Remaining failures, all unrelated to touch/gesture arbitration:
+   - caps fullscreen quality to low bitrate and 30fps when network information reports poor connectivity
+   - downgrades active stream quality from WebRTC stats without restarting the stream
+   - reports quickbar suppression only for picker and body suppression for fullscreen
+   - keeps primary controls structurally valid with 48px touch targets and no child close action
+   - keeps fullscreen toolbar chrome inside one safe-area boundary ahead of the video surface
+   - fills the fullscreen portal while preserving only the keyboard inset
+   Delta vs base for this file: exactly 1 fixed, 0 new failures.
+
+3) Focused runtime gate (the owner changed by this commit)
+   Command (cwd android):
+     pnpm exec vitest run src/lib/remote-window-touch-action-runtime.test.ts src/lib/remote-window-touch-action-sop.test.ts src/components/terminal/RemoteWindowOverlay.gesture-matrix.test.tsx
+   Result: Test Files 3 passed (3); Tests 41 passed (41)
+   Fail-first proof: with the runtime reverted to base ddef58c8, the two new
+   "commits same-direction two-finger scroll with realistic 4px/5px samples" cases fail:
+     AssertionError: expected 'twoFingerCandidate' to be 'twoFingerScroll'  (2 failed)
+   With the fix they pass.
+
+4) Type check
+   Command (cwd android): pnpm run type-check
+   Result: exit 0; [source-js-pollution] clean; tsc --noEmit passed
+
+5) Feature-registry / resource / function / mainline truth gates
+   Command (cwd android): pnpm run test:feature-registry
+   Result: Test Files 13 passed (13); Tests 104 passed (104)
+
+6) WebRTC loopback gate
+   Command (cwd android): pnpm run test:remote-window-webrtc-loopback
+   Result: exit 0; {"ok":true,...} single-focus focus=8 frames, overview-plus-focus focus=8/overview=8, iceOrderPreserved true
+
+7) Live input probe (scripts/remote-window-live-input-probe.ts)
+   Command (cwd android): pnpm exec tsx scripts/remote-window-live-input-probe.ts
+   Result: exit 1, "probe target not found for pid=<n>; targetCount=51; matchingTitles=[]"
+   ENVIRONMENTAL / PRE-EXISTING: the identical failure reproduces on the untouched base at
+   /private/tmp/zterm-main-8fdaeec-check. The probe's temporary .app bundle is not matched by
+   the running daemon's window catalog in this environment, so this gate cannot run here.
+   It is not evidence about this change either way.
+
+## Second defect found by on-device measurement (same root cause family)
+
+After the cumulative-commit fix, a wire-level re-measurement on emulator-5554 with the
+rebuilt 3042 candidate showed a two-finger same-direction swipe still delivered almost no
+scroll:
+
+  18 samples x 4.444 px -> 1 scroll frame (the commit frame only)
+   9 samples x 8.889 px -> 9 scroll frames
+
+Per-finger `pointermove` deltas measured on the device were exactly -4.4444 px with
+inter-arrival times of 17-175 ms. The device delivers the two fingers INTERLEAVED: sample i
+delivers finger A at y_i while finger B is still at y_{i-1}, then finger B at y_i. The
+overlay therefore calls the pair-pointer-move runtime once per delivered pointer event, so
+each call advances the midpoint by only half the finger step.
+
+Root cause: the latched `twoFingerScroll` update gate compared the PER-SAMPLE midpoint shift
+against `REMOTE_WINDOW_TWO_FINGER_SCROLL_DEADZONE_PX` (4 px). Half of a 4.444 px step is
+2.22 px, which never clears the 4 px deadzone, so every update frame was suppressed. This is
+the same class of bug as the commit gate: a per-sample quantity compared against a threshold
+calibrated for gesture-level travel, making behaviour depend on pointer delivery
+interleaving.
+
+Fix: the update gate now uses the same cumulative start-relative travel basis as the commit
+decision. Per-sample deltas remain the emitted scroll payload, so consecutive update frames
+still sum to the true gesture travel exactly once.
+
+Runtime replay of the interleaved delivery shape (one pointer per call, 18 samples):
+  step 4.444 px: before 1 event  -> after 33 events, sum(deltaY) = -66.48
+  step 8.889 px: before 35 events -> after 35 events, sum(deltaY) = -132.97
+The 8.889 px case was already proportional (35 events) and stays unchanged; the 4.444 px
+case goes from one frame to full proportionality. Both pointers in a single call (the shape
+the existing unit tests used) gave 17 events before and after, which is why the existing
+suite never caught this: the tests never modelled interleaved per-finger delivery.
+
+Fail-first: with the runtime reverted to the previous commit, the new
+"keeps interleaved two-finger samples proportional without double-counting travel" case
+fails with `expected 1 to be greater than or equal to 10`; with the fix it passes.
+
+## Scroll delta trace (runtime level)
+
+Geometry surface 200x100, source 800x600, same-direction vertical two-finger swipe from
+clientY 60, 10 samples (temporary probe, removed after the run):
+
+  step=4px idx1 travel=4  mode=twoFingerCandidate events=[]
+  step=4px idx2 travel=8  mode=twoFingerScroll    events=[scroll/start/dy=48]
+  step=4px idx3 travel=12 mode=twoFingerScroll    events=[scroll/update/dy=24]
+  ... idx4..idx10 -> scroll/update/dy=24 each
+  step=5px idx1 travel=5  mode=twoFingerCandidate events=[]
+  step=5px idx2 travel=10 mode=twoFingerScroll    events=[scroll/start/dy=60]
+  step=5px idx3 travel=15 mode=twoFingerScroll    events=[scroll/update/dy=30]
+  ... idx4..idx10 -> scroll/update/dy=30 each
+
+Pre-fix the same sequences emitted 0 events and the mode stayed twoFingerCandidate.
+The commit event carries the accumulated observe-window travel, later events stay
+per-sample, so the emitted sum equals the full gesture travel exactly once (no double count).
+
+Overlay-level check (surface 300x200, target crop 800x560, gesture 130 -> 90 -> 50 = 80 px raw):
+  pre-fix : 56 + 56 + 56 = 168  (observe-window sample dropped)
+  post-fix: 112 + 56 + 56 = 224 (full 80 px raw travel emitted exactly once)
+Three overlay tests asserting an exact commit deltaY were updated 56 -> 112 accordingly.
+
+## Device evidence (emulator-5554, installed build 3039, pre-fix)
+
+Wire-level count of real remote-window-input frames, obtained by wrapping
+window.Capacitor.nativePromise for plugin AndroidConnectionService:
+  1x single finger, 18 samples x 5 px     -> 18 scroll frames  (works)
+  1x two finger same direction, x 4.4 px  -> 0 frames         (BROKEN, this defect)
+  1x two finger same direction, x 8.9 px  -> 0 frames         (BROKEN)
+  1x two finger same direction, x 16 px   -> 5 frames         (works)
+  zoomed two finger same direction, x 4.4 px -> 0 frames      (BROKEN)
+  zoomed two finger same direction, x 16 px  -> 5 frames      (works)
+Measured pointer sampling step on device: 18 injected 4.4 px steps produced 19 pointermove
+events, median dy = -4 px.
+
+## Not run in this environment
+
+- 15T real-device acceptance: 100.104.163.65:5555 is offline (ping 100% loss, adb connect
+  no response) during this work.
+- Post-fix on-device wire re-check: requires installing the rebuilt APK; recorded separately
+  at delivery time.
+
+## Post-fix device evidence (emulator-5554, build 3049, candidate commit 509b7f51)
+
+Installed APK: android/native/android/app/build/outputs/apk/debug/app-debug.apk, versionName 0.1.3.3049,
+versionCode 1100030490. Overlay opened on target `remote-window-target-app-window:28882:17799`
+(TextEdit), live stream active (`remote-window-locked-overlay` + `remote-window-video-surface` present).
+Wire evidence obtained by wrapping `window.Capacitor.nativePromise` for plugin
+`AndroidConnectionService` and counting `remote-window-input` frames on `sendChannelMessage`.
+
+Full matrix (`/tmp/rwd-matrix3039.cjs`, same script used for the pre-fix 3039 baseline):
+
+  1x  1F 18x5px swipe            -> 18 scroll frames   (works, unchanged)
+  1x  2F 18x4.4px same-dir       -> 17 scroll frames   (pre-fix 3039: 0)  FIXED
+  1x  2F  9x8.9px same-dir       ->  9 scroll frames   (pre-fix 3039: 0)  FIXED
+  1x  2F  5x16px same-dir        ->  5 scroll frames   (works, unchanged)
+  1x  2F pinch out               ->  0 remote frames, local scale 1 -> 2.399  (unchanged)
+  zoomed 1F swipe                ->  0 remote frames   (local pan only, unchanged)
+  zoomed 2F 18x4.4px same-dir    -> 17 scroll frames   (pre-fix 3039: 0)  FIXED
+  zoomed 2F 5x16px same-dir      ->  5 scroll frames   (works, unchanged)
+
+Per-event trace (`/tmp/rwd-detail.cjs`), 18 injected 4.44 px steps:
+  commit frame scroll/start dy=17.78, then 16 scroll/update frames dy=8.89 each.
+  Sum = 17.78 + 16*8.89 = 160.0 px, matching the 18*8.89 px midpoint travel of the two
+  fingers exactly once (no double count, no dropped observe-window travel).
+9 injected 8.89 px steps: 1 commit dy=17.78 + 8 updates dy=17.78 each = 160.0 px.
+
+Both fixes are therefore confirmed at the real wire boundary on a device, not only in the
+runtime replay: the commit gate and the update gate now both use cumulative start-relative
+travel, and the commit frame carries the accumulated observe-window travel.
+
+## 15T real-device acceptance (build 3049, commit 509b7f51)
+
+15T (100.104.163.65:5555, PLZ110, 1216x2640 @ 3.5 dpr) accepted a manual `adb install -r`
+of the same 3049 APK. Overlay opened on `remote-window-target-app-window:28882:17799`
+(TextEdit) with a live stream. Same wire-counting matrix as the emulator:
+
+  1x  1F 18x5px swipe            -> 14 scroll frames
+  1x  2F 18x4.4px same-dir       -> 15 scroll frames
+  1x  2F  9x8.9px same-dir       ->  9 scroll frames
+  1x  2F  5x16px same-dir        ->  3 scroll frames
+  1x  2F pinch out               ->  0 remote frames, local scale 0.704 -> 1.69
+  zoomed 1F swipe                ->  0 remote frames (local pan only)
+  zoomed 2F 18x4.4px same-dir    -> 16 scroll frames
+  zoomed 2F 5x16px same-dir      ->  4 scroll frames
+
+The two-finger same-direction cases that were dead on the pre-fix build all produce
+scroll frames on the real device, and the zoomed single-finger case stays local.
+
+## Reversal fix (candidate c928b378, after review r6)
+
+Review r6 found that the update gate introduced by 509b7f51 compared travel against the
+gesture start, so a committed scroll that reverses direction (including a return to the
+gesture origin) had its return samples suppressed and left the remote target displaced.
+The gate now compares against the last EMITTED frame anchor and no longer advances that
+anchor on a suppressed sample, so the suppressed travel accumulates until it clears the
+deadzone. The redundant start-relative coherence re-check on the committed path is removed
+because committed scroll is already locked.
+
+Fail-first: with the runtime reverted to f07445b1, the new
+"emits the reversal when a committed two-finger scroll returns to its origin" case fails
+with `expected 60 to be close to +0`; with the fix it passes. The interleaved-delivery case
+above still passes, so both defects are covered by one gate basis.
+
+Verified on c928b378: focused gate 3 files / 43 tests pass, `pnpm run type-check` exit 0,
+`pnpm run test:feature-registry` 13 files / 104 tests pass. Full 38-gate registry run:
+`Test Files 2 failed | 36 passed (38); Tests 7 failed | 464 passed (471)` — the same 7
+pre-existing failures that reproduce on 15d2c0dc (`useRemoteWindowQuality` stats-sample
+timeout plus 6 `RemoteWindowOverlay` quality/quickbar/toolbar/portal assertions), no new
+failures.
+
+## 15T acceptance on the reversal-fixed candidate (build 3050)
+
+APK rebuilt from c928b378 source: versionName `0.1.3.3050`, versionCode `1100030500`,
+sha256 `cf0ab9055c2e8acb5970ceccbf30236cb8c08e31195f341f59e2d5a73bb3a618`, identical to
+`android/update-dist/latest.json`'s `sha256` for the same build. Installed on 15T
+(100.104.163.65:5555) with `adb install -r`; `dumpsys package` reports `0.1.3.3050`.
+Overlay opened on `remote-window-target-app-window:28882:17799` with a live stream.
+
+Matrix on build 3050 (same wire counter as the emulator runs):
+
+  1x  1F 18x5px swipe            -> 16 scroll frames
+  1x  2F 18x4.4px same-dir       -> 17 scroll frames
+  1x  2F  9x8.9px same-dir       ->  9 scroll frames
+  1x  2F  5x16px same-dir        ->  4 scroll frames
+  1x  2F pinch out               ->  0 remote frames, local scale 1 -> 2.399
+  zoomed 1F swipe                ->  0 remote frames (local pan only)
+  zoomed 2F 18x4.4px same-dir    -> 15 scroll frames
+  zoomed 2F 5x16px same-dir      ->  5 scroll frames
+
+Reversal cases on the same device and build:
+
+  down 20 px then back up 20 px inside one gesture
+    -> 4 frames, deltaY seq [-35.01, -35.01, 35.01, 35.01], sum 0.00
+    (the return samples are emitted and cancel the commit travel exactly)
+  three consecutive gestures down/up/down
+    -> 5 frames, deltaY seq [35.01, 35.01, -70.01, -35.01, -35.01]
+    (the reversal is delivered instead of being swallowed by a start-relative deadzone)
+
+This is the evidence review r7 asked for: the changed reversal path is exercised on the
+real device with a rebuilt, hash-identified candidate APK.

@@ -4244,12 +4244,15 @@ describe('RemoteWindowOverlay', () => {
     await waitForActionRemoteInputCount(sendInput, 3);
     expectEveryRemoteInputIsActionOnly(sendInput);
     expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('floating');
+    // The commit event carries the travel accumulated during the observe window
+    // (40px raw here), while later events stay per-sample (20px raw). The emitted
+    // total therefore equals the full 80px gesture travel exactly once.
     expect(actionRemoteInputPayloads(sendInput).map((payload) => payload.event)).toEqual([
       expect.objectContaining({
         kind: 'scroll',
         unit: 'pixel',
         deltaX: 0,
-        deltaY: 56,
+        deltaY: 112,
       }),
       expect.objectContaining({
         kind: 'scroll',
@@ -4408,12 +4411,14 @@ describe('RemoteWindowOverlay', () => {
     await waitForActionRemoteInputCount(sendInput, 1);
     expectEveryRemoteInputIsActionOnly(sendInput);
     expect(screen.queryByTestId('remote-window-minimap')).toBeNull();
+    // Commit carries the observe-window travel (40px raw); the gesture totals 80px
+    // raw and is emitted exactly once across the start + update events.
     expect(actionRemoteInputPayloads(sendInput).map((payload) => payload.event)).toEqual([
       expect.objectContaining({
         kind: 'scroll',
         unit: 'pixel',
         deltaX: 0,
-        deltaY: 56,
+        deltaY: 112,
       }),
     ]);
   });
@@ -4472,12 +4477,14 @@ describe('RemoteWindowOverlay', () => {
     await waitForActionRemoteInputCount(sendInput, 1);
     expectEveryRemoteInputIsActionOnly(sendInput);
     expect(screen.queryByTestId('remote-window-minimap')).toBeNull();
+    // Commit carries the observe-window travel (40px raw); the gesture totals 80px
+    // raw and is emitted exactly once across the start + update events.
     expect(actionRemoteInputPayloads(sendInput).map((payload) => payload.event)).toEqual([
       expect.objectContaining({
         kind: 'scroll',
         unit: 'pixel',
         deltaX: 0,
-        deltaY: 56,
+        deltaY: 112,
       }),
     ]);
   });
