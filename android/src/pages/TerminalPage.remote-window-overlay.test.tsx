@@ -498,9 +498,10 @@ describe('TerminalPage remote window overlay', () => {
     await waitFor(() => {
       expect(screen.getByTestId('resource-bottom-sheet-overlay')).toBeTruthy();
       expect(screen.getByRole('button', { name: 'close-embedded-remote-window' })).toBeTruthy();
+      expect(screen.getByRole('button', { name: '关闭资源抽屉' })).toBeTruthy();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'close-embedded-remote-window' }));
+    fireEvent.click(screen.getByRole('button', { name: '关闭资源抽屉' }));
 
     await waitFor(() => {
       expect(screen.queryByTestId('resource-bottom-sheet-overlay')).toBeNull();

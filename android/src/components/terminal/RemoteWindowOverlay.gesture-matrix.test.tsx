@@ -495,6 +495,46 @@ describe('RemoteWindowOverlay gesture matrix', () => {
     expect(nonScrollPayloads(sendInput)).toEqual([]);
   });
 
+  it('restores the pre-pan viewport as soon as a second finger enters a zoomed gesture', async () => {
+    const { sendInput, surface } = await openRemoteWindow(true);
+    const content = projectionElement();
+    const initialWidth = stylePx(content.style.width);
+
+    const zoomOut = pinchMove(surface, 'out');
+    await waitFor(() => {
+      expect(stylePx(content.style.width)).toBeGreaterThan(initialWidth + 1);
+    });
+    await releasePair(
+      surface,
+      zoomOut.firstPointerId,
+      zoomOut.secondPointerId,
+      zoomOut.firstEndX,
+      zoomOut.secondEndX,
+      zoomOut.y,
+    );
+    sendInput.mockClear();
+
+    const firstPointerId = nextPointerId();
+    const secondPointerId = nextPointerId();
+    const topBeforePan = stylePx(content.style.top);
+    fireEvent.pointerDown(surface, touchOptions(firstPointerId, 120, 120, 7000));
+    fireEvent.pointerMove(surface, touchOptions(firstPointerId, 120, 90, 7020));
+    await waitFor(() => {
+      expect(stylePx(content.style.top)).not.toBe(topBeforePan);
+    });
+
+    fireEvent.pointerDown(surface, touchOptions(secondPointerId, 180, 90, 7040));
+
+    await waitFor(() => {
+      expect(stylePx(content.style.top)).toBe(topBeforePan);
+    });
+    expect(remotePayloads(sendInput)).toEqual([]);
+
+    await releasePointer(surface, firstPointerId, 120, 90);
+    await releasePointer(surface, secondPointerId, 180, 90);
+    expect(remotePayloads(sendInput)).toEqual([]);
+  });
+
   it('routes zoomed two-finger horizontal same-direction motion to remote scroll without moving the viewport', async () => {
     const { sendInput, surface } = await openRemoteWindow(true);
     const content = projectionElement();
