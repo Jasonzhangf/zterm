@@ -2362,7 +2362,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
             const filtered: typeof result.remoteEvents = [];
             if (state.mode === 'fullscreen') {
               handleDoubleTapZoom(event.clientX, event.clientY);
-            } else {
+            } else if (remoteWindowInteractionEnabled) {
               handleFullscreen();
             }
             applyRemoteWindowTouchPointerResult({ ...result, remoteEvents: filtered });

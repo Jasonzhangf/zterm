@@ -368,6 +368,20 @@ describe('RemoteWindowOverlay gesture matrix', () => {
     expect(remotePayloads(preview.sendInput)).toEqual([]);
   });
 
+  it('keeps an embedded half-sheet touch double-tap passive and drawer-owned', async () => {
+    const preview = await openRemoteWindow(false);
+    const first = nextPointerId();
+    const second = nextPointerId();
+
+    fireEvent.pointerDown(preview.surface, touchOptions(first, 150, 100, 1000));
+    await releasePointer(preview.surface, first, 150, 100);
+    fireEvent.pointerDown(preview.surface, touchOptions(second, 150, 100, 1200));
+    await releasePointer(preview.surface, second, 150, 100);
+
+    expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('floating');
+    expect(remotePayloads(preview.sendInput)).toEqual([]);
+  });
+
   it('routes unzoomed one-finger and two-finger vertical movement to remote scroll', async () => {
     for (const direction of ['up', 'down'] as const) {
       const { sendInput, surface } = await openRemoteWindow(true);
