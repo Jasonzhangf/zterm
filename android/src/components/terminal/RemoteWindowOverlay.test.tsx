@@ -1753,6 +1753,45 @@ describe('RemoteWindowOverlay', () => {
     });
   });
 
+  it('keeps the embedded half-sheet preview from publishing a remote-window input context', async () => {
+    const mediaStream = { id: 'media-stream-embedded-context' } as MediaStream;
+    const onInputContextChange = vi.fn();
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-embedded-context',
+      targets: [makeTarget('app-embedded-context', 'TextEdit', 'app-window')],
+    }));
+    const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string) => ({
+      streamId,
+      mediaStream,
+    }));
+    const renderOverlay = (embeddedFullscreen: boolean) => (
+      <RemoteWindowOverlay
+        activeSessionId="session-embedded-context"
+        embedded
+        embeddedFullscreen={embeddedFullscreen}
+        requestTargets={requestTargets}
+        startStream={startStream}
+        onInputContextChange={onInputContextChange}
+      />
+    );
+
+    const view = render(renderOverlay(false));
+    fireEvent.click(await screen.findByTestId('remote-window-target-app-embedded-context'));
+    await screen.findByTestId('remote-window-video');
+    await waitFor(() => {
+      expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('floating');
+    });
+    expect(onInputContextChange.mock.calls.every(([context]) => context === null)).toBe(true);
+
+    view.rerender(renderOverlay(true));
+    await waitFor(() => {
+      expect(onInputContextChange).toHaveBeenLastCalledWith(expect.objectContaining({
+        sessionId: 'session-embedded-context',
+        targetId: 'app-embedded-context',
+      }));
+    });
+  });
+
   it('does not focus on stream setup and sends later wheel or key input as single action events', async () => {
     const mediaStream = { id: 'media-stream-1' } as MediaStream;
     const sendInput = vi.fn();

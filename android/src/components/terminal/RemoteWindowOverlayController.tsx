@@ -580,7 +580,10 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   });
   const quickBarSuppressed = state.phase === 'targetEnumerating' || state.phase === 'pickerOpen';
   const bodySubscriptionSuppressed = state.phase === 'targetEnumerating' || state.phase === 'pickerOpen' || (state.phase === 'targetLocked' && state.mode === 'fullscreen');
-  const inputContext = state.phase === 'targetLocked'
+  // The embedded half-sheet preview is passive: it must never advertise a
+  // remote-window paste/input target while it is still floating.
+  const inputContext = remoteWindowInteractionEnabled
+    && state.phase === 'targetLocked'
     && state.streamId
     && state.streamStatus !== 'error'
     && isRemoteWindowInputSupported(state.target)
