@@ -2800,7 +2800,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       data-testid="remote-window-video-surface"
       ref={videoSurfaceRef}
       tabIndex={0}
-      onDoubleClick={handleFullscreen}
+      onDoubleClick={embedded && state.mode === 'floating' ? undefined : handleFullscreen}
       onPointerDown={handleVideoSurfacePointerDown}
       onPointerMove={handleVideoSurfacePointerMove}
       onPointerUp={handleVideoSurfacePointerUp}

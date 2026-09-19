@@ -358,6 +358,16 @@ describe('RemoteWindowOverlay gesture matrix', () => {
     expectOnlyVerticalRemoteScrolls(fullscreen.sendInput);
   });
 
+  it('does not let an embedded half-sheet video double-click bypass the drawer promotion owner', async () => {
+    const preview = await openRemoteWindow(false);
+
+    fireEvent.doubleClick(preview.surface);
+    await act(async () => {});
+
+    expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('floating');
+    expect(remotePayloads(preview.sendInput)).toEqual([]);
+  });
+
   it('routes unzoomed one-finger and two-finger vertical movement to remote scroll', async () => {
     for (const direction of ['up', 'down'] as const) {
       const { sendInput, surface } = await openRemoteWindow(true);
