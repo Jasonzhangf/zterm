@@ -65,8 +65,8 @@ Machine source: [`zterm-cordis-v2-review.mmd`](zterm-cordis-v2-review.mmd)
 ## Review commands
 
 ```text
-pnpm run test:cordis-v2-governance
-pnpm run test:cordis-v2-governance:negative
+pnpm run archive:test:cordis-v2-governance
+pnpm run archive:test:cordis-v2-governance:negative
 ```
 
 The HTML review surface is deterministic and offline. It contains no runtime
