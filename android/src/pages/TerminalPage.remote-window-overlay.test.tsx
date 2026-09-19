@@ -317,8 +317,8 @@ describe('TerminalPage remote window overlay', () => {
     await waitFor(() => {
       expect(onRequestRemoteWindowTargets).toHaveBeenCalledWith('s1');
       expect(screen.getByTestId('remote-window-target-app-1')).toBeTruthy();
-      // 与文件按键一致：picker 打开时 QuickBar 保留，terminal stage 底部不置 0
-      expect(screen.getByTestId('terminal-quickbar')).toBeTruthy();
+      expect(screen.queryByTestId('terminal-quickbar')).toBeNull();
+      expect(screen.queryByTestId('terminal-quickbar-shell')).toBeNull();
       expect(screen.getByTestId('terminal-stage-shell').getAttribute('style') || '').toMatch(/bottom: (?!0px)\d+px/);
       expect(onActiveBodySubscriptionSuppressedChange).toHaveBeenCalledWith(true);
     });
