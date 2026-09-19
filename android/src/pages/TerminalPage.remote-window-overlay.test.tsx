@@ -447,6 +447,66 @@ describe('TerminalPage remote window overlay', () => {
     });
   });
 
+  it('closes the outer ResourceBottomSheet when embedded remote-window closes', async () => {
+    const session = makeSession('s-resource-close');
+    const port = {
+      daemonFileScopeId: 'daemon:s-resource-close',
+      sendJson: vi.fn(),
+      onFileTransferMessage: vi.fn(),
+      fileTransferRuntime: { getState: vi.fn(), open: vi.fn() },
+      onFileTransferStateChange: vi.fn(),
+      dispose: vi.fn(async () => undefined),
+    } as any;
+    const renderFileBrowser = vi.fn((props: { open: boolean }) => (
+      <div data-testid="resource-close-file-browser" data-open={String(props.open)} />
+    ));
+    const renderEmbeddedRemoteWindow = (props: RemoteWindowUiProps) => props.embedded ? (
+      <button type="button" onClick={props.onCloseEmbedded}>
+        close-embedded-remote-window
+      </button>
+    ) : (
+      <button type="button" onClick={() => props.onOpenResourceDrawer?.('stream')}>
+        open-resource-remote-window
+      </button>
+    );
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        renderRemoteWindow={renderEmbeddedRemoteWindow}
+        renderFileBrowser={renderFileBrowser}
+        resolveFileBrowserSessionPort={() => port}
+        openRemoteWindowInResourceDrawer
+        renderQuickBar={renderQuickBar}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'open-resource-remote-window' }));
+    await waitFor(() => {
+      expect(screen.getByTestId('resource-bottom-sheet-overlay')).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'close-embedded-remote-window' })).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'close-embedded-remote-window' }));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('resource-bottom-sheet-overlay')).toBeNull();
+    });
+  });
+
   it('routes phone video-surface tap and touch drag through remote-window input instead of terminal input', async () => {
     const session = makeSession('s1');
     const mediaStream = { id: 'media-stream-1' } as MediaStream;
