@@ -147,13 +147,13 @@ describe('remote-window-video-quality', () => {
     });
   });
 
-  it('steps smooth mode by halving bitrate before lowering cadence, then holds 15fps', () => {
+  it('steps smooth mode by halving bitrate while keeping the 30fps cadence', () => {
     const first = buildRemoteWindowVideoProfile('smooth', { cause: 'network', level: 1 });
     const second = buildRemoteWindowVideoProfile('smooth', { cause: 'network', level: 2 });
-    expect(first).toMatchObject({ maxBitrateBps: 2_000_000, maxFrameRateFps: 15 });
-    expect(second).toMatchObject({ maxBitrateBps: 1_500_000, maxFrameRateFps: 10 });
+    expect(first).toMatchObject({ maxBitrateBps: 2_000_000, maxFrameRateFps: 30 });
+    expect(second).toMatchObject({ maxBitrateBps: 1_000_000, maxFrameRateFps: 15 });
     expect(buildRemoteWindowVideoProfile('smooth', { cause: 'network', level: 2 }).maxFrameRateFps)
-      .toBe(10);
+      .toBe(15);
   });
 
   it('steps quality mode by reducing frame rate while retaining full capture resolution', () => {
