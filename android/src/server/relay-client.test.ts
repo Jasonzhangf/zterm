@@ -9,8 +9,10 @@ import {
 
 const { MockWebSocket, sockets } = vi.hoisted(() => {
   class MockWebSocket {
+    static CONNECTING = 0;
     static OPEN = 1;
     static CLOSING = 2;
+    static CLOSED = 3;
 
     readyState = MockWebSocket.OPEN;
     sent: string[] = [];
@@ -68,6 +70,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   MockWebSocket.OPEN = 1;
   MockWebSocket.CLOSING = 2;
+  MockWebSocket.CLOSED = 3;
 });
 
 describe('traversal relay host reconnect ownership', () => {
@@ -107,13 +110,13 @@ describe('traversal relay host reconnect ownership', () => {
     staleSocket.emit('message', JSON.stringify({ type: 'relay-ready', hostId: 'mac-studio' }));
 
     staleSocket.readyState = MockWebSocket.CLOSING;
+    staleSocket.emit('close', 1012, Buffer.from('host relay replaced'));
     client.start();
     await vi.waitFor(() => expect(sockets).toHaveLength(2));
     const currentSocket = sockets[1];
     currentSocket.emit('open');
     currentSocket.emit('message', JSON.stringify({ type: 'relay-ready', hostId: 'mac-studio' }));
 
-    staleSocket.emit('close', 1012, Buffer.from('host relay replaced'));
     staleSocket.emit('message', JSON.stringify({
       type: 'relay-peer-close',
       peerId: 'stale-peer',
@@ -149,6 +152,35 @@ describe('traversal relay host reconnect ownership', () => {
     client.start();
     await vi.waitFor(() => expect(sockets).toHaveLength(1));
     sockets[0].emit('open');
+    client.start();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(sockets).toHaveLength(1);
+  });
+
+  it('does not open a replacement socket while the current socket is closing', async () => {
+    const client = createTraversalRelayHostClient({
+      config: {
+        relayUrl: 'https://relay.example.test/',
+        username: 'test',
+        password: 'test',
+        hostId: 'mac-studio',
+        deviceId: 'device-1',
+        deviceName: 'Mac Studio',
+        platform: 'darwin',
+        appVersion: '1.0.0',
+        daemonVersion: '1.0.0',
+      },
+      handleRelaySignal: async () => {},
+      closeRelayPeer: () => {},
+      listEndpointCandidates: () => [],
+      listTerminalSessionCatalog: () => [],
+    });
+
+    client.start();
+    await vi.waitFor(() => expect(sockets).toHaveLength(1));
+    sockets[0].emit('open');
+    sockets[0].readyState = MockWebSocket.CLOSING;
     client.start();
     await vi.advanceTimersByTimeAsync(0);
 

@@ -221,6 +221,7 @@ export function createTraversalRelayHostClient(options: CreateTraversalRelayHost
   let publishLoop: ReturnType<typeof createRelayHostDirectoryPublishLoop> | null = null;
   let publishDirectoryUpdate: (() => boolean) | null = null;
   let connectPromise: Promise<void> | null = null;
+  let connectionGeneration = 0;
   let disposed = false;
 
   function clearReconnectTimer() {
@@ -247,7 +248,7 @@ export function createTraversalRelayHostClient(options: CreateTraversalRelayHost
     if (disposed || !config) {
       return;
     }
-    if (socket && socket.readyState < WebSocket.CLOSING) {
+    if (socket && socket.readyState !== WebSocket.CLOSED) {
       return;
     }
     if (connectPromise) {
@@ -260,9 +261,10 @@ export function createTraversalRelayHostClient(options: CreateTraversalRelayHost
   }
 
   async function connectOnce(activeConfig: TraversalRelayRuntimeConfig) {
+    const generation = ++connectionGeneration;
     try {
       const accessToken = await login(activeConfig);
-      if (disposed) {
+      if (disposed || generation !== connectionGeneration) {
         return;
       }
       const wsUrl = buildWsUrl(activeConfig.relayUrl, 'ws/host');
@@ -372,7 +374,7 @@ export function createTraversalRelayHostClient(options: CreateTraversalRelayHost
       });
 
       nextSocket.on('close', (code, reasonBuffer) => {
-        if (socket !== nextSocket) {
+        if (generation !== connectionGeneration || socket !== nextSocket) {
           return;
         }
         socket = null;
