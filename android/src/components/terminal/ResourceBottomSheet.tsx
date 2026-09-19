@@ -160,15 +160,14 @@ export function ResourceBottomSheet({
     handleGestureStart(touchGestureKey(touch), event.target, touch?.clientY ?? 0);
   };
   const handleTouchEnd = (event: TouchEvent<HTMLDivElement>) => {
-    const context = resolveResourceDrawerGestureContext(event.target);
     for (const touch of Array.from(event.changedTouches)) {
       const key = touchGestureKey(touch);
-      if (context?.capability === 'drag') {
+      if (gestureRuntime.current.isActive(key)) {
         handleGestureEnd(key, touch.clientY);
       } else {
-        // Content/toolbar/backdrop touchend may still reach the shell when an
-        // embedded surface retargets the sequence. It can release its own
-        // consumed owner, but it must never complete the handle's drag.
+        // Content/toolbar/backdrop gestures may reach the shell but must never
+        // complete a handle drag; only the drag owner recorded at touchstart
+        // can produce an expand/close action.
         gestureRuntime.current.cancel(key);
       }
     }

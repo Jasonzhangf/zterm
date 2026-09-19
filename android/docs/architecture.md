@@ -335,6 +335,7 @@ Android floating entry
 规则：
 
 - `resource.remote_window_overlay` 只拥有 Android picker / floating overlay / fullscreen overlay / Back 缩小 / close intent 投影。
+- `resource.remote_window_overlay` 的 embedded resource-drawer half-sheet（`embedded && mode === "floating"`）是 passive preview：不发 input context、不发 pointer/scroll/gesture/wheel/key，也不做本地 pinch/pan；只有显式 drawer grip 才能把半截预览提升到 embedded fullscreen。embedded fullscreen 与 standalone floating 保持完整 Direct Touch / Mouse Emulation 契约。
 - `resource.remote_window_stream` 是 daemon/native 侧唯一真源，拥有 app/window 枚举、iTerm2 pane 枚举、坐标归一化、tmux 反查、capture、encoder/WebRTC sender、input target lease。
 - `resource.remote_window_quality_control`、`resource.remote_window_input_delivery_client`、`resource.remote_window_input_delivery_daemon`、`resource.remote_window_frame_projection`、`resource.remote_window_capture_backpressure` 在 2026-08-30 amendment 的 Phase 0 中是 design 资源；只有对应 runtime、owned paths、相邻 mainline/import edges 与正反 gate 同时通过后才可转 active。
 - 质量控制与媒体 payload 物理隔离：`smooth`（默认）/`quality` profile、revision、single-flight/latest-wins、cause facts、cooldown 走 typed control；bitrate-only 不触碰 capture，cadence/dimensions/filter 只原位更新现有 `SCStream`，quality update 禁止 stop/start capture。
