@@ -2362,7 +2362,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
             const filtered: typeof result.remoteEvents = [];
             if (state.mode === 'fullscreen') {
               handleDoubleTapZoom(event.clientX, event.clientY);
-            } else {
+            } else if (remoteWindowInteractionEnabled) {
               handleFullscreen();
             }
             applyRemoteWindowTouchPointerResult({ ...result, remoteEvents: filtered });
@@ -2800,7 +2800,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       data-testid="remote-window-video-surface"
       ref={videoSurfaceRef}
       tabIndex={0}
-      onDoubleClick={handleFullscreen}
+      onDoubleClick={embedded && state.mode === 'floating' ? undefined : handleFullscreen}
       onPointerDown={handleVideoSurfacePointerDown}
       onPointerMove={handleVideoSurfacePointerMove}
       onPointerUp={handleVideoSurfacePointerUp}

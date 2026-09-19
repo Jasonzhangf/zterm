@@ -31,8 +31,9 @@ The resource drawer embeds the remote window in two presentations:
 - `halfSheetPreview`: the `embedded && mode === "floating"` container. It is a
   passive preview only. It must not publish a remote-window input context and
   must not send pointer, scroll, gesture, wheel, or key events. It must not
-  perform local pinch/pan projection either. The explicit drawer grip (or the
-  existing double-tap promotion) is the half-sheet-to-fullscreen affordance.
+  perform local pinch/pan projection either. The explicit drawer grip is the
+  only half-sheet-to-fullscreen affordance; the video surface must not promote
+  itself with double-tap or any Direct Touch gesture.
 - `embeddedFullscreen`: the `embedded && mode === "fullscreen"` container. It
   keeps the full Direct Touch and Mouse Emulation contract below.
 
