@@ -876,6 +876,39 @@ describe('remote-window-touch-action-runtime', () => {
       expect(scrollEvents.reduce((sum, event) => sum + (event.deltaY ?? 0), 0)).toBeCloseTo(step * sampleCount * 6);
     });
 
+    it('emits the reversal when a committed two-finger scroll returns to its origin', () => {
+      const candidate = pairDown({ clientX: 100, clientY: 20 }, { clientX: 120, clientY: 20 });
+      let state = candidate.nextState;
+      const scrollEvents: Array<{ kind: string; deltaY?: number }> = [];
+      const move = (clientY: number, timeMs: number) => {
+        const result = resolveRemoteWindowTouchPairPointerMoveRuntime({
+          state,
+          pair: {
+            first: { pointerId: 1, pointerType: 'touch', clientX: 100, clientY, timeMs },
+            second: { pointerId: 2, pointerType: 'touch', clientX: 120, clientY, timeMs },
+          },
+          geometry,
+          timeMs,
+          pinchEnabled: true,
+          scrollEnabled: true,
+        });
+        state = result.nextState;
+        scrollEvents.push(...result.remoteEvents.filter((event) => event.kind === 'scroll'));
+      };
+
+      // Commit downwards, then drag back up to the exact gesture origin.
+      move(40, 1_100);
+      move(30, 1_200);
+      move(20, 1_300);
+
+      expect(state.mode).toBe('twoFingerScroll');
+      const total = scrollEvents.reduce((sum, event) => sum + (event.deltaY ?? 0), 0);
+      // Net travel is zero, so the emitted scroll must cancel out. A start-relative
+      // deadzone drops the return samples and leaves the remote target displaced.
+      expect(total).toBeCloseTo(0);
+      expect(scrollEvents.some((event) => (event.deltaY ?? 0) < 0)).toBe(true);
+    });
+
     it('keeps a vertical two-finger swipe as scroll when finger spacing changes during the swipe', () => {
       const candidate = pairDown({ clientX: 100, clientY: 60 }, { clientX: 120, clientY: 60 });
       const observe = resolveRemoteWindowTouchPairPointerMoveRuntime({

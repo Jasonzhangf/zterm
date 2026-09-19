@@ -1273,23 +1273,15 @@ export function resolveRemoteWindowTouchPairPointerMoveRuntime(options: RemoteWi
 
   if (state.mode === 'twoFingerScroll') {
     if (
-      cumulativeMidpointShift < REMOTE_WINDOW_TWO_FINGER_SCROLL_DEADZONE_PX
+      midpointShift < REMOTE_WINDOW_TWO_FINGER_SCROLL_DEADZONE_PX
       && Math.abs(scaleRatio - 1) < REMOTE_WINDOW_TWO_FINGER_PINCH_MIN_SCALE_RATIO
     ) {
-      // Neither scroll nor pinch - just update mid tracking
-      return {
-        nextState: { ...state, lastMidX: midpoint.clientX, lastMidY: midpoint.clientY },
-        remoteEvents: [],
-        localEffect: { kind: 'none' },
-        consumed: true,
-      };
-    }
-    if (!hasCoherentTwoFingerVerticalScrollIntent({
-      firstStart: state.firstStart,
-      firstCurrent,
-      secondStart: state.secondStart,
-      secondCurrent,
-    })) {
+      // Neither scroll nor pinch yet. `lastMidX/Y` is the anchor of the last emitted
+      // scroll frame, so it must NOT advance here: the suppressed travel has to
+      // accumulate until it clears the deadzone. Advancing it per sample would compare
+      // against the previous sample (half a finger step under interleaved delivery, so
+      // it never clears the deadzone), and comparing against gesture start instead would
+      // swallow direction reversals.
       return {
         nextState: state,
         remoteEvents: [],
@@ -1297,6 +1289,10 @@ export function resolveRemoteWindowTouchPairPointerMoveRuntime(options: RemoteWi
         consumed: true,
       };
     }
+    // Once committed, the scroll is locked: a start-relative intent re-check would drop
+    // the samples of a reversal back toward the gesture origin (both fingers are near
+    // their start points again, so the coherence magnitude collapses) and leave the
+    // remote target displaced. Pinch takeover is already excluded for this mode.
     const events = buildRemoteWindowTwoFingerScrollEventsRuntime({
       geometry,
       midClientX: midpoint.clientX,
@@ -1319,7 +1315,11 @@ export function resolveRemoteWindowTouchPairPointerMoveRuntime(options: RemoteWi
       : { kind: 'none' };
     // Both twoFingerScroll and twoFingerCandidate can produce scroll events
     return {
-      nextState: { ...state, lastMidX: midpoint.clientX, lastMidY: midpoint.clientY },
+      nextState: {
+        ...state,
+        lastMidX: midpoint.clientX,
+        lastMidY: midpoint.clientY,
+      },
       remoteEvents: events,
       localEffect: scrollEffect,
       consumed: true,
