@@ -247,6 +247,9 @@ export function createTraversalRelayHostClient(options: CreateTraversalRelayHost
     if (disposed || !config) {
       return;
     }
+    if (socket && socket.readyState < WebSocket.CLOSING) {
+      return;
+    }
     if (connectPromise) {
       return connectPromise;
     }
@@ -302,17 +305,27 @@ export function createTraversalRelayHostClient(options: CreateTraversalRelayHost
         publish: publishCurrentDirectoryUpdate,
         warn: (message) => console.warn(message),
       });
+      const isCurrentSocket = () => socket === nextSocket;
 
       nextSocket.on('open', () => {
+        if (!isCurrentSocket()) {
+          return;
+        }
         publishLoop?.markPong();
         console.log(`[${new Date().toISOString()}] traversal relay host online: ${activeConfig.hostId} -> ${wsUrl.origin}`);
       });
 
       nextSocket.on('pong', () => {
+        if (!isCurrentSocket()) {
+          return;
+        }
         publishLoop?.markPong();
       });
 
       nextSocket.on('message', async (rawData) => {
+        if (!isCurrentSocket()) {
+          return;
+        }
         try {
           const envelope = JSON.parse(String(rawData)) as RelayHostEnvelope;
           if (envelope.type === 'relay-ready') {
@@ -339,7 +352,7 @@ export function createTraversalRelayHostClient(options: CreateTraversalRelayHost
           }
           if (envelope.type === 'relay-signal' && envelope.peerId && envelope.message) {
             await options.handleRelaySignal(envelope.peerId, envelope.message, (message) => {
-              if (nextSocket.readyState !== WebSocket.OPEN) {
+              if (!isCurrentSocket() || nextSocket.readyState !== WebSocket.OPEN) {
                 return;
               }
               nextSocket.send(JSON.stringify({

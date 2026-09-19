@@ -81,6 +81,52 @@ describe('traversal relay host reconnect ownership', () => {
   });
 
   it('ignores a stale socket close after a newer socket is current', async () => {
+    const closeRelayPeer = vi.fn();
+    const client = createTraversalRelayHostClient({
+      config: {
+        relayUrl: 'https://relay.example.test/',
+        username: 'test',
+        password: 'test',
+        hostId: 'mac-studio',
+        deviceId: 'device-1',
+        deviceName: 'Mac Studio',
+        platform: 'darwin',
+        appVersion: '1.0.0',
+        daemonVersion: '1.0.0',
+      },
+      handleRelaySignal: async () => {},
+      closeRelayPeer,
+      listEndpointCandidates: () => [],
+      listTerminalSessionCatalog: () => [],
+    });
+
+    client.start();
+    await vi.waitFor(() => expect(sockets).toHaveLength(1));
+    const staleSocket = sockets[0];
+    staleSocket.emit('open');
+    staleSocket.emit('message', JSON.stringify({ type: 'relay-ready', hostId: 'mac-studio' }));
+
+    staleSocket.readyState = MockWebSocket.CLOSING;
+    client.start();
+    await vi.waitFor(() => expect(sockets).toHaveLength(2));
+    const currentSocket = sockets[1];
+    currentSocket.emit('open');
+    currentSocket.emit('message', JSON.stringify({ type: 'relay-ready', hostId: 'mac-studio' }));
+
+    staleSocket.emit('close', 1012, Buffer.from('host relay replaced'));
+    staleSocket.emit('message', JSON.stringify({
+      type: 'relay-peer-close',
+      peerId: 'stale-peer',
+      reason: 'stale close event',
+    }));
+
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(sockets).toHaveLength(2);
+    expect(currentSocket.sent.length).toBeGreaterThan(0);
+    expect(closeRelayPeer).not.toHaveBeenCalled();
+  });
+
+  it('does not open another socket while the current socket is live', async () => {
     const client = createTraversalRelayHostClient({
       config: {
         relayUrl: 'https://relay.example.test/',
@@ -100,22 +146,13 @@ describe('traversal relay host reconnect ownership', () => {
     });
 
     client.start();
-    await vi.waitFor(() => expect(sockets).toHaveLength(1));
-    const staleSocket = sockets[0];
-    staleSocket.emit('open');
-    staleSocket.emit('message', JSON.stringify({ type: 'relay-ready', hostId: 'mac-studio' }));
-
     client.start();
-    await vi.waitFor(() => expect(sockets).toHaveLength(2));
-    const currentSocket = sockets[1];
-    currentSocket.emit('open');
-    currentSocket.emit('message', JSON.stringify({ type: 'relay-ready', hostId: 'mac-studio' }));
+    await vi.waitFor(() => expect(sockets).toHaveLength(1));
+    sockets[0].emit('open');
+    client.start();
+    await vi.advanceTimersByTimeAsync(0);
 
-    staleSocket.emit('close', 1012, Buffer.from('host relay replaced'));
-
-    await vi.advanceTimersByTimeAsync(2000);
-    expect(sockets).toHaveLength(2);
-    expect(currentSocket.sent.length).toBeGreaterThan(0);
+    expect(sockets).toHaveLength(1);
   });
 });
 
