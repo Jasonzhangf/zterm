@@ -21,6 +21,7 @@ const repoRoot = join(androidRoot, '..');
 const registryPath = join(androidRoot, 'docs', 'feature-registry.json');
 const functionMapPath = join(androidRoot, 'docs', 'function-map.md');
 const featureGatesPath = join(androidRoot, 'docs', 'feature-gates.md');
+const prebuildRunnerPath = join(androidRoot, 'scripts', 'run-prebuild-gates.mjs');
 const architecturePath = join(androidRoot, 'docs', 'architecture.md');
 const workflowPath = join(androidRoot, 'docs', 'dev-workflow.md');
 
@@ -145,8 +146,9 @@ describe('feature registry truth gate', () => {
     expect(packageJson.scripts?.['test:file-transfer:throughput']).toBe(
       'bash ./scripts/run-file-transfer-throughput-gate.sh',
     );
-    expect(packageJson.scripts?.prebuild).toContain(
-      'pnpm run test:file-transfer:throughput',
+    expect(packageJson.scripts?.prebuild).toContain('run-prebuild-gates.mjs');
+    expect(readFileSync(prebuildRunnerPath, 'utf8')).toContain(
+      "'test:file-transfer:throughput'",
     );
     expect(ciWorkflow).toContain(
       'pnpm --dir android run test:file-transfer:throughput',
