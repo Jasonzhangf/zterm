@@ -458,6 +458,38 @@ describe('RemoteWindowOverlay gesture matrix', () => {
     }
   });
 
+  it('keeps the zoomed one-finger local pan committed after release', async () => {
+    const { sendInput, surface } = await openRemoteWindow(true);
+    const content = projectionElement();
+    const initialWidth = stylePx(content.style.width);
+
+    const zoomOut = pinchMove(surface, 'out');
+    await waitFor(() => {
+      expect(stylePx(content.style.width)).toBeGreaterThan(initialWidth + 1);
+    });
+    await releasePair(
+      surface,
+      zoomOut.firstPointerId,
+      zoomOut.secondPointerId,
+      zoomOut.firstEndX,
+      zoomOut.secondEndX,
+      zoomOut.y,
+    );
+    sendInput.mockClear();
+
+    const topBeforePan = stylePx(content.style.top);
+    const pan = oneFingerVerticalMove(surface, 'up');
+    await waitFor(() => {
+      expect(stylePx(content.style.top)).not.toBe(topBeforePan);
+    });
+    const topAfterPan = stylePx(content.style.top);
+
+    await releasePointer(surface, pan.pointerId, pan.endClientX, pan.endClientY);
+
+    expect(stylePx(content.style.top)).toBe(topAfterPan);
+    expect(remotePayloads(sendInput)).toEqual([]);
+  });
+
   it('discards pre-upgrade one-finger local pan when a second finger starts fullscreen remote scroll', async () => {
     const { sendInput, surface } = await openRemoteWindow(true);
     const content = projectionElement();
