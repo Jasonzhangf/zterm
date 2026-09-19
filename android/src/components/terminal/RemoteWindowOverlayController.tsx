@@ -106,7 +106,6 @@ import {
   REMOTE_WINDOW_FULLSCREEN_MAX_SCALE,
   REMOTE_WINDOW_FULLSCREEN_MIN_SCALE,
   REMOTE_WINDOW_FULLSCREEN_PAN_TAP_THRESHOLD_PX,
-  REMOTE_WINDOW_SECOND_FINGER_UPGRADE_PX,
   type FloatingResizeAnchor,
   type RemoteWindowInputMode,
 } from './remote-window-overlay-constants';
@@ -356,12 +355,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     : null;
   const focusedWindowSlotRef = useRef(focusedWindowSlot);
   focusedWindowSlotRef.current = focusedWindowSlot;
-  const secondPointerPendingRef = useRef<{
-    pointerId: number;
-    clientX: number;
-    clientY: number;
-    downTimeMs: number;
-  } | null>(null);
   const lastTapRef = useRef<{
     atMs: number;
     clientX: number;
@@ -414,6 +407,10 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   const activeCanvasStreamIdRef = useRef<string | null>(null);
   const activeFocusStreamIdRef = useRef<string | null>(null);
   const pendingFocusStreamIdRef = useRef<string | null>(null);
+  const suppressEmbeddedReopenRef = useRef(false);
+  const embeddedFullscreenRef = useRef(false);
+  const embeddedFullscreenPromotionPendingRef = useRef(false);
+  const suppressEmbeddedFullscreenPromotionRef = useRef(false);
   const streamRequestEpochRef = useRef(0);
   const handoffEpochRef = useRef(0);
   const activeHandoffRef = useRef<RemoteWindowStreamHandoffState | null>(null);
@@ -486,11 +483,23 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
 
   useRemoteWindowForegroundReentry({ appForegroundActive, state, onReopenPicker: handleOpenPicker });
   const handleOpenBrowserPicker = useCallback(() => {
+    suppressEmbeddedReopenRef.current = false;
     setBrowserPickerOpen(true);
     handleOpenPicker();
   }, [handleOpenPicker]);
   const handleResourceEntry = useCallback((tab: 'web' | 'stream', fallback: () => void) => onOpenResourceDrawer ? onOpenResourceDrawer(tab) : fallback(), [onOpenResourceDrawer]);
-  useEffect(() => { if (embedded && appForegroundActive !== false && state.phase === 'closed') { setBrowserPickerOpen(browserOnly); handleOpenPicker(); } }, [appForegroundActive, browserOnly, embedded, handleOpenPicker, state.phase]);
+  const handleOpenEmbeddedPicker = useCallback(() => { suppressEmbeddedReopenRef.current = false; setBrowserPickerOpen(browserOnly); handleOpenPicker(); }, [browserOnly, handleOpenPicker]);
+  useEffect(() => {
+    if (
+      embedded
+      && appForegroundActive !== false
+      && state.phase === 'closed'
+      && !suppressEmbeddedReopenRef.current
+    ) {
+      setBrowserPickerOpen(browserOnly);
+      handleOpenPicker();
+    }
+  }, [appForegroundActive, browserOnly, embedded, handleOpenPicker, state.phase]);
   const surfacePointersRef = useRef<Map<number, SurfacePointerPosition>>(new Map());
   const surfaceGestureRef = useRef<SurfacePointerGesture | null>(null);
   const surfaceLocalPanStartRef = useRef<{
@@ -510,7 +519,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   const clearSurfacePointerState = useCallback(() => {
     clearLongPressTimer();
     surfacePointersRef.current.clear(); surfaceGestureRef.current = null; surfaceLocalPanStartRef.current = null;
-    surfacePinchStartRef.current = null; secondPointerPendingRef.current = null;
+    surfacePinchStartRef.current = null;
   }, [clearLongPressTimer]);
   const resetSurfaceGestures = clearSurfacePointerState;
   const {
@@ -880,7 +889,11 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     state,
   ]);
 
-  const handleClose = useCallback(() => {
+  // closeEmbedded=true 用户关窗口并抑制自动重开；false 后台停流保留重开行为。
+  const handleClose = useCallback((closeEmbedded = false) => {
+    if (closeEmbedded && embedded) {
+      suppressEmbeddedReopenRef.current = true;
+    }
     setBrowserPickerOpen(false);
     setBrowserUserAgent('desktop');
     setBrowserUserAgentStatus('idle');
@@ -941,7 +954,8 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       overviewCropTargetId: null,
       error: null,
     }));
-    setState((current) => closeRemoteWindowOverlay(current)); if (embedded) onCloseEmbedded?.();
+    setState((current) => closeRemoteWindowOverlay(current));
+    if (closeEmbedded && embedded) onCloseEmbedded?.();
   }, [
     activeSessionId,
     clearSurfacePointerState,
@@ -1007,14 +1021,20 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     lastReportedInputContextKeyRef.current = inputContextKey;
     onInputContextChange?.(inputContext);
   }, [inputContext, inputContextKey, onInputContextChange]);
+  const handleFullscreen = useCallback(() => { publishRemoteWindowInputContext(); resetFullscreenViewport(); setState((current) => enterRemoteWindowFullscreen(current)); }, [publishRemoteWindowInputContext, resetFullscreenViewport]);
   const handleShrink = useCallback(() => {
     resetFullscreenViewport();
+    if (embedded) {
+      embeddedFullscreenPromotionPendingRef.current = false;
+      suppressEmbeddedFullscreenPromotionRef.current = true;
+    }
     // 缩回浮窗时强制退出双流切流，防止浮窗残留「video 隐藏 + canvas 无内容」的黑屏状态。
     setDualStreamSwitch((current) => resetRemoteWindowDualStreamSwitch(current));
     setState((current) => shrinkRemoteWindowOverlay(current));
     if (embedded) onExitEmbeddedFullscreen?.();
   }, [embedded, onExitEmbeddedFullscreen, resetFullscreenViewport, setDualStreamSwitch]);
-  const handleRemoteClose = useCallback(() => state.phase === 'targetLocked' && Boolean(currentLockedTarget) && sendRemoteWindowInputEventsForTarget({ sessionId: activeSessionId || null, streamId: currentLockedStreamId, target: currentLockedTarget!, events: [{ kind: 'close-window' }] }) && handleClose(), [activeSessionId, currentLockedStreamId, currentLockedTarget, handleClose, sendRemoteWindowInputEventsForTarget, state.phase]);
+  const handleExplicitClose = useCallback(() => handleClose(true), [handleClose]);
+  const handleRemoteClose = useCallback(() => state.phase === 'targetLocked' && Boolean(currentLockedTarget) && sendRemoteWindowInputEventsForTarget({ sessionId: activeSessionId || null, streamId: currentLockedStreamId, target: currentLockedTarget!, events: [{ kind: 'close-window' }] }) && handleExplicitClose(), [activeSessionId, currentLockedStreamId, currentLockedTarget, handleExplicitClose, sendRemoteWindowInputEventsForTarget, state.phase]);
   const requestRemoteTargetFillResize = useCallback((
     force = false,
   ) => {
@@ -1060,12 +1080,11 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       return false;
     }
   }, [activeSessionId, currentLockedStreamId, currentLockedTarget, embedded, resizeTargetWindow, state, surfaceSize]);
-  const handleFullscreen = useCallback(() => {
-    publishRemoteWindowInputContext();
-    resetFullscreenViewport();
-    setState((current) => enterRemoteWindowFullscreen(current));
-  }, [publishRemoteWindowInputContext, resetFullscreenViewport]);
-  const embeddedFullscreenRef = useRef(false); useEffect(() => { const entered = embeddedFullscreen && !embeddedFullscreenRef.current; embeddedFullscreenRef.current = embeddedFullscreen; if (entered && state.phase === 'targetLocked' && state.mode === 'floating') handleFullscreen(); }, [embeddedFullscreen, handleFullscreen, state]);
+  useEffect(() => {
+    if (!embeddedFullscreen) { embeddedFullscreenRef.current = false; embeddedFullscreenPromotionPendingRef.current = false; suppressEmbeddedFullscreenPromotionRef.current = false; return; }
+    if (!embeddedFullscreenRef.current) { embeddedFullscreenRef.current = true; embeddedFullscreenPromotionPendingRef.current = true; suppressEmbeddedFullscreenPromotionRef.current = false; }
+    if (embeddedFullscreenPromotionPendingRef.current && !suppressEmbeddedFullscreenPromotionRef.current && state.phase === 'targetLocked' && state.mode === 'floating') { embeddedFullscreenPromotionPendingRef.current = false; handleFullscreen(); }
+  }, [embeddedFullscreen, handleFullscreen, state]);
   useEffect(() => {
     if (state.phase !== 'targetLocked' || (!embedded && state.mode !== 'fullscreen')) {
       return;
@@ -2048,19 +2067,15 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       clearLongPressTimer();
       const currentGesture = surfaceGestureRef.current;
       if (currentGesture && (currentGesture.mode === 'localPan' || currentGesture.mode === 'pan')) {
-        secondPointerPendingRef.current = {
-          pointerId: event.pointerId,
-          clientX: event.clientX,
-          clientY: event.clientY,
-          downTimeMs: event.timeStamp,
-        };
-        surfacePointersRef.current.set(event.pointerId, {
-          clientX: event.clientX,
-          clientY: event.clientY,
-        });
-        event.preventDefault();
-        event.stopPropagation();
-        return;
+        // 第二指落下即撤销单指阶段已应用的本地 pan，并立刻把控制权交给
+        // pair runtime。Android 会把真实双指交错派发为「第一指继续 move」，
+        // 若在这里等待第二指自己移动过阈值，第一指后续 move 会被整段吞掉，
+        // 表现为双指只拖动窗口、不发远端 scroll。
+        const baseline = surfaceLocalPanStartRef.current;
+        if (baseline && baseline.pointerId === currentGesture.pointerId) {
+          setFullscreenViewport((current) => ({ scale: current.scale, panX: baseline.startPanX, panY: baseline.startPanY }));
+        }
+        surfaceLocalPanStartRef.current = null;
       }
       const [firstEntry, secondEntry] = pointers.slice(-2) as [
         [number, SurfacePointerPosition],
@@ -2141,45 +2156,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       clientX: event.clientX,
       clientY: event.clientY,
     });
-
-    const pendingSecond = secondPointerPendingRef.current;
-    if (pendingSecond && pendingSecond.pointerId === event.pointerId) {
-      const pendingDelta = Math.hypot(
-        event.clientX - pendingSecond.clientX,
-        event.clientY - pendingSecond.clientY,
-      );
-      if (pendingDelta >= REMOTE_WINDOW_SECOND_FINGER_UPGRADE_PX) {
-        const currentGesture = surfaceGestureRef.current;
-        if (currentGesture && (currentGesture.mode === 'localPan' || currentGesture.mode === 'pan')) {
-          const pairResult = resolveRemoteWindowTouchPairPointerDownRuntime({
-            firstPointer: {
-              pointerId: currentGesture.pointerId,
-              pointerType: 'touch',
-              clientX: currentGesture.startClientX,
-              clientY: currentGesture.startClientY,
-              timeMs: currentGesture.startAtMs,
-            },
-            secondPointer: {
-              pointerId: pendingSecond.pointerId,
-              pointerType: 'touch',
-              clientX: pendingSecond.clientX,
-              clientY: pendingSecond.clientY,
-              timeMs: pendingSecond.downTimeMs,
-            },
-            timeMs: event.timeStamp,
-            pinchEnabled: state.mode === 'fullscreen' || state.mode === 'floating',
-            scrollEnabled: true, skipObserve: true,
-          });
-          surfaceGestureRef.current = pairResult.nextState;
-          surfaceLocalPanStartRef.current = null;
-          secondPointerPendingRef.current = null;
-          // Continue through the pair move path for this same sample. The
-          // first post-upgrade motion must not be discarded, otherwise a
-          // short two-finger vertical swipe produces no remote scroll.
-        }
-        secondPointerPendingRef.current = null;
-      }
-    }
 
     const gesture = surfaceGestureRef.current;
     if (!gesture) {
@@ -2303,17 +2279,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
 
   const handleVideoSurfacePointerUp = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     clearLongPressTimer();
-    const pendingSecondPointerId = secondPointerPendingRef.current?.pointerId ?? null;
-    if (pendingSecondPointerId === event.pointerId) {
-      secondPointerPendingRef.current = null;
-    }
-    if (pendingSecondPointerId === event.pointerId) {
-      surfacePointersRef.current.delete(event.pointerId);
-      releasePointerCaptureSafely(event.currentTarget, event.pointerId);
-      event.preventDefault();
-      event.stopPropagation();
-      return;
-    }
     const gesture = surfaceGestureRef.current;
     if (gesture) {
       surfacePointersRef.current.set(event.pointerId, {
@@ -2504,7 +2469,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
 
   const handleVideoSurfacePointerCancel = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     clearLongPressTimer();
-    if (secondPointerPendingRef.current?.pointerId === event.pointerId) secondPointerPendingRef.current = null;
     const gesture = surfaceGestureRef.current;
     surfacePointersRef.current.delete(event.pointerId);
     releasePointerCaptureSafely(event.currentTarget, event.pointerId);
@@ -2533,7 +2497,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
         }
       }
       surfaceGestureRef.current = null; surfaceLocalPanStartRef.current = null; surfacePinchStartRef.current = null;
-      secondPointerPendingRef.current = null; surfacePointersRef.current.clear();
+      surfacePointersRef.current.clear();
       event.preventDefault();
       event.stopPropagation();
     }
@@ -2615,7 +2579,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       onToggleItermPaneTargets={() => setItermPaneTargetsExpanded((current) => !current)}
       onSelectTarget={handleSelectTarget}
       onRefresh={handleOpenPicker}
-      onClose={handleClose}
+      onClose={handleExplicitClose}
       browserOnly={browserPickerOpen}
       embedded={embedded}
     />
@@ -3077,7 +3041,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
           screenshotButtonStyle={screenshotButtonStyle}
           streamStatusText={`串流：${state.streamStatus === 'streaming' ? '已连接' : state.streamStatus} · ${activeProfile.maxBitrateBps / 1_000_000} Mbps / ${activeProfile.maxFrameRateFps} FPS`}
           targetKindLabel={formatTargetKind(state.target)}
-          onClose={handleClose}
+          onClose={handleExplicitClose}
           onRemoteClose={handleRemoteClose}
           onFullscreen={handleFullscreen}
           onRequestKeyboard={handleRequestKeyboard}
@@ -3138,10 +3102,10 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
               return;
             }
             if (state.phase === 'closed') {
-              handleResourceEntry('stream', handleOpenPicker);
+              handleResourceEntry('stream', handleOpenEmbeddedPicker);
               return;
             }
-            handleClose();
+            handleExplicitClose();
           }}
           style={{
             ...styles.entryButton,
@@ -3167,7 +3131,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
               handleResourceEntry('web', handleOpenBrowserPicker);
               return;
             }
-            handleClose();
+            handleExplicitClose();
           }}
           style={{
             ...styles.entryButton,

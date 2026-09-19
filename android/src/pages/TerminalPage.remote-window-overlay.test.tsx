@@ -493,7 +493,6 @@ describe('TerminalPage remote window overlay', () => {
       onFileTransferStateChange: vi.fn(() => () => undefined),
       dispose: vi.fn(async () => undefined),
     };
-
     render(
       <TerminalPage
         sessions={[session]}
