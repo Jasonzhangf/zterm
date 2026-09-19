@@ -12,4 +12,4 @@ while IFS= read -r line; do
   esac
 done
 
-pnpm run verify:ci
+node ./scripts/run-gate.mjs --severity block --name verify:ci -- pnpm run verify:ci

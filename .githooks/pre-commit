@@ -9,4 +9,4 @@ case "$branch" in
     ;;
 esac
 
-pnpm run verify:local
+node ./scripts/run-gate.mjs --severity block --name verify:local -- pnpm run verify:local
