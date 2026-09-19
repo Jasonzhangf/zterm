@@ -92,6 +92,41 @@ describe('ResourceBottomSheet', () => {
     expect(onExpand).not.toHaveBeenCalled();
   });
 
+  it('does not let a shell-targeted content touchend complete the handle gesture', () => {
+    const onClose = vi.fn();
+    const onExpand = vi.fn();
+    render(
+      <ResourceBottomSheet
+        open
+        renderFileBrowser={() => <div data-testid="remote-files">files</div>}
+        onClose={onClose}
+        onExpand={onExpand}
+      />,
+    );
+
+    const overlay = screen.getByTestId('resource-bottom-sheet-overlay');
+    const handle = screen.getByTestId('resource-bottom-sheet-grip');
+    fireEvent.touchStart(handle, {
+      touches: [{ identifier: 41, clientY: 240 }],
+      changedTouches: [{ identifier: 41, clientY: 240 }],
+    });
+    fireEvent.touchEnd(overlay, {
+      changedTouches: [{ identifier: 41, clientY: 100 }],
+    });
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(onExpand).not.toHaveBeenCalled();
+
+    fireEvent.touchStart(handle, {
+      touches: [{ identifier: 42, clientY: 240 }],
+      changedTouches: [{ identifier: 42, clientY: 240 }],
+    });
+    fireEvent.touchEnd(handle, {
+      changedTouches: [{ identifier: 42, clientY: 100 }],
+    });
+    expect(onExpand).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps toolbar button gestures from driving drawer open/close actions', () => {
     const onClose = vi.fn();
     const onExpand = vi.fn();

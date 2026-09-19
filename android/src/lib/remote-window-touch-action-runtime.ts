@@ -992,15 +992,17 @@ function resolveRemoteWindowPairScrollDeltaRuntime(options: {
   scrollFraction: number;
   inverted: boolean;
 }) {
-  const { rawDeltaY, surfaceRect, sourceRect } = options;
-  if (rawDeltaY === 0) {
-    return { deltaX: 0, deltaY: 0 };
-  }
+  const { rawDeltaX, rawDeltaY, surfaceRect, sourceRect } = options;
   const tuning = {
     fraction: options.scrollFraction,
     inverted: options.inverted,
   };
-  const deltaX = 0;
+  const deltaX = resolveRemoteWindowTouchWheelDeltaRuntime(
+    rawDeltaX,
+    surfaceRect.width,
+    sourceRect.width,
+    tuning,
+  );
   const deltaY = resolveRemoteWindowTouchWheelDeltaRuntime(
     rawDeltaY,
     surfaceRect.height,
@@ -1123,23 +1125,6 @@ function hasCoherentTwoFingerMotionIntent(options: {
     return false;
   }
   return firstDeltaX * secondDeltaX + firstDeltaY * secondDeltaY > 0;
-}
-
-function hasCoherentTwoFingerVerticalScrollIntent(options: {
-  firstStart: { clientX: number; clientY: number };
-  firstCurrent: { clientX: number; clientY: number };
-  secondStart: { clientX: number; clientY: number };
-  secondCurrent: { clientX: number; clientY: number };
-}) {
-  if (!hasCoherentTwoFingerMotionIntent(options)) {
-    return false;
-  }
-  const firstDeltaX = options.firstCurrent.clientX - options.firstStart.clientX;
-  const firstDeltaY = options.firstCurrent.clientY - options.firstStart.clientY;
-  const secondDeltaX = options.secondCurrent.clientX - options.secondStart.clientX;
-  const secondDeltaY = options.secondCurrent.clientY - options.secondStart.clientY;
-  return Math.abs(firstDeltaY) >= Math.abs(firstDeltaX)
-    && Math.abs(secondDeltaY) >= Math.abs(secondDeltaX);
 }
 
 function hasDominantPinchDifferentialMotion(options: {
@@ -1289,10 +1274,9 @@ export function resolveRemoteWindowTouchPairPointerMoveRuntime(options: RemoteWi
         consumed: true,
       };
     }
-    // Once committed, the scroll is locked: a start-relative intent re-check would drop
-    // the samples of a reversal back toward the gesture origin (both fingers are near
-    // their start points again, so the coherence magnitude collapses) and leave the
-    // remote target displaced. Pinch takeover is already excluded for this mode.
+    // Once committed, the scroll is locked until the pointer sequence ends.
+    // Pinch classification belongs to the candidate phase; re-checking it here
+    // would drop midpoint movement from interleaved pointer samples.
     const events = buildRemoteWindowTwoFingerScrollEventsRuntime({
       geometry,
       midClientX: midpoint.clientX,
@@ -1418,7 +1402,7 @@ export function resolveRemoteWindowTouchPairPointerMoveRuntime(options: RemoteWi
   });
   const coherentScrollIntent = options.scrollEnabled
     && !options.panEnabled
-    && hasCoherentTwoFingerVerticalScrollIntent({
+    && hasCoherentTwoFingerMotionIntent({
       firstStart: state.firstStart,
       firstCurrent,
       secondStart: state.secondStart,

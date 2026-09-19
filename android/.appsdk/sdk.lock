@@ -1,11 +1,14 @@
 {
   "binary_ref": "project-sdk",
-  "bundle_digest": "sha256:cb54d8aacb6debffb202422307d67e6a1ea562e97e123a8a4240c4bf32a28591",
-  "bundle_manifest_digest": "sha256:5e1977d7ee1d8ac2effc92bab780bdaf8c616782940f92177793e2be8751b3df",
+  "bundle_digest": "sha256:28fdd46b018e57a93c9505133c872f66b53a3ebebc2ce53bd69b8af22e0cd773",
+  "bundle_manifest_digest": "sha256:da3f0c34033f8e2edc3b9f4c0b253b09df3e30fae8cb1273e1e036cd1da00668",
   "bundle_resources": {
     "contracts": [
       "contracts/sdk-bundle.manifest.json",
       "contracts/project.schema.json",
+      "contracts/communication/communication-request.schema.json",
+      "contracts/communication/communication-event.schema.json",
+      "contracts/communication/communication-capabilities.schema.json",
       "contracts/development-scenarios.manifest.json",
       "contracts/guidance/guidance-manifest.schema.json",
       "contracts/guidance/tour-review.schema.json",
@@ -15,10 +18,15 @@
       "contracts/maps/mainline-call-map.json",
       "contracts/maps/verification-map.json",
       "contracts/migrations/sdk-0.1.5-to-0.1.6.json",
+      "contracts/migrations/sdk-0.1.6-to-0.1.7.json",
       "contracts/migrations/0.1.5/governance-maps/resource-map.json",
       "contracts/migrations/0.1.5/governance-maps/function-map.json",
       "contracts/migrations/0.1.5/governance-maps/mainline-call-map.json",
       "contracts/migrations/0.1.5/governance-maps/verification-map.json",
+      "contracts/migrations/0.1.6/governance-maps/resource-map.json",
+      "contracts/migrations/0.1.6/governance-maps/function-map.json",
+      "contracts/migrations/0.1.6/governance-maps/mainline-call-map.json",
+      "contracts/migrations/0.1.6/governance-maps/verification-map.json",
       "contracts/transitions/zone-transition.manifest.json",
       "contracts/lifecycle-state-machines.manifest.json",
       "contracts/records/record-graph.contract.json",
@@ -26,6 +34,7 @@
       "contracts/records/reproduction-record.schema.json",
       "contracts/records/evidence-record.schema.json",
       "contracts/records/fix-candidate-record.schema.json",
+      "contracts/records/goal-clarification-record.schema.json",
       "contracts/records/review-record.schema.json",
       "contracts/records/effectiveness-record.schema.json",
       "contracts/records/pre-review-validation-record.schema.json",
@@ -45,13 +54,15 @@
     ],
     "docs": [
       "docs/design/appsdk-project-integration.md",
+      "docs/design/apps-sdk-communication.md",
       "docs/design/fix-lifecycle-v2.md",
       "docs/design/development-scenarios.md",
       "docs/design/appsdk-guidance-framework.md",
       "docs/test-design/appsdk-guidance-framework.md",
       "docs/architecture/development-process-control-harness.md",
       "docs/architecture/appsdk-governance-architecture.md",
-      "docs/design/project-memory.md"
+      "docs/design/project-memory.md",
+      "docs/design/appsdk-global-registry.md"
     ],
     "rules": [
       "skills/appsdk-project-governance/SKILL.md"
@@ -61,18 +72,23 @@
       "skills/appsdk-project-governance/agents/openai.yaml",
       "skills/appsdk-project-governance/appsdk-guidance.json",
       "skills/appsdk-project-governance/references/bootstrap-migration.md",
+      "skills/appsdk-project-governance/references/command-surface.md",
       "skills/appsdk-project-governance/references/contracts-and-failures.md",
       "skills/appsdk-project-governance/references/development-debug.md",
       "skills/appsdk-project-governance/references/goal-prompt.md",
+      "skills/appsdk-project-governance/references/init-prompts.md",
       "skills/appsdk-project-governance/references/process-control-harness.md",
       "skills/appsdk-project-governance/references/review-delivery.md",
+      "skills/appsdk-project-governance/references/state-paths.md",
+      "skills/appsdk-project-governance/references/subagents-config.md",
+      "skills/appsdk-migration/SKILL.md",
       "skills/project-memory/SKILL.md"
     ]
   },
-  "compiler_digest": "sha256:09de72eae0528b8860cf893ba8b5d194f7b3f4fbd8ebff04e93f1ccc972f9b25",
+  "compiler_digest": "sha256:94e2d909a4674f009a41de8e9fb582ec011c6e60d6132f260241f7353cfd019c",
   "contract_schema": 1,
-  "digest": "sha256:09de72eae0528b8860cf893ba8b5d194f7b3f4fbd8ebff04e93f1ccc972f9b25",
+  "digest": "sha256:94e2d909a4674f009a41de8e9fb582ec011c6e60d6132f260241f7353cfd019c",
   "previous_bundle_digest": "sha256:001d1fae6bca07bd10e15eaf793ab56caa1d256f7da28585efbb1ae48052a584",
   "sdk": "appsdk",
-  "version": "0.1.6"
+  "version": "0.1.7"
 }

@@ -5,6 +5,7 @@ import type { TerminalSession, SessionMirror } from './terminal-runtime-types';
 import { findChangedIndexedRanges } from './canonical-buffer';
 import type { TerminalCell } from '../lib/types';
 import type { AdaptiveWidthOwnershipStore, AdaptiveWidthOwnershipRecord } from './adaptive-width-ownership-store';
+import { TERMINAL_SESSION_ATTACH_LEASE_MS } from './terminal-session-attach-lease-runtime';
 
 function createSession(id = 'session-1'): TerminalSession {
   return {
@@ -21,6 +22,7 @@ function createSession(id = 'session-1'): TerminalSession {
     closeTransport: vi.fn(),
     sessionName: 'demo',
     mirrorKey: null,
+    sessionAttachHeartbeatAt: Date.now(),
     pendingPasteImage: null,
     pendingAttachFile: null,
   };
@@ -877,6 +879,40 @@ describe('terminal mirror runtime lifecycle truth', () => {
       expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(callsBeforeCapWindow + 1);
       await vi.advanceTimersByTimeAsync(500);
       expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(callsBeforeCapWindow + 2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops capture when the last body demand attach lease expires while keeping transport open', async () => {
+    vi.useFakeTimers();
+    try {
+      const {
+        runtime,
+        sessions,
+        mirrors,
+        captureMirrorAuthoritativeBufferFromTmux,
+      } = createRuntime();
+      const session = createSession();
+      sessions.set(session.id, session);
+
+      await runtime.attachTmux(session, {
+        sessionName: 'demo',
+        cols: 120,
+        rows: 40,
+      });
+
+      const mirror = mirrors.get('demo');
+      expect(mirror?.lifecycle).toBe('ready');
+      expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(1);
+
+      session.sessionAttachHeartbeatAt = Date.now() - TERMINAL_SESSION_ATTACH_LEASE_MS - 1;
+      runtime.scheduleMirrorLiveSync(mirror!, 0);
+      await vi.advanceTimersByTimeAsync(1);
+
+      expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(1);
+      expect(mirror?.liveSyncTimer).toBeNull();
+      expect(session.transport?.readyState).toBe(1);
     } finally {
       vi.useRealTimers();
     }

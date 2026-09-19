@@ -2978,6 +2978,7 @@ describe('RemoteWindowOverlay', () => {
 
     await waitFor(() => {
       expect(resizeTargetWindow).toHaveBeenCalledTimes(1);
+      expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('fullscreen');
     });
     const first = resizeTargetWindow.mock.calls[0]?.[1];
     // Usable fullscreen bounds: overlay 1280x800 minus the top padding and the
@@ -3269,7 +3270,7 @@ describe('RemoteWindowOverlay', () => {
     consoleError.mockRestore();
   });
 
-  it('waits for embedded receiver startup to commit before resizing the target window', async () => {
+  it('retries embedded fullscreen promotion after receiver startup commits before resizing the target window', async () => {
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
     Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 });
     const target = makeTarget('app-pending', 'TextEdit', 'app-window');
@@ -3456,24 +3457,92 @@ describe('RemoteWindowOverlay', () => {
     expect(onCloseEmbedded).toHaveBeenCalledTimes(1);
   });
 
-  it('reports embedded fullscreen exit when Android Back shrinks the stream', async () => {
-    const onExitEmbeddedFullscreen = vi.fn();
+  it('does not reopen the embedded picker after an explicit toolbar close', async () => {
+    const stopStream = vi.fn();
+    const onCloseEmbedded = vi.fn();
+    const onBodySubscriptionSuppressedChange = vi.fn();
+    const mediaStream = { id: 'media-stream-explicit-close' } as MediaStream;
     const requestTargets = vi.fn(async () => ({
-      requestId: 'rw-embedded-back-exit',
-      targets: [makeTarget('app-embedded-back-exit', 'TextEdit', 'app-window')],
+      requestId: 'rw-explicit-close',
+      targets: [makeTarget('app-explicit-close', 'TextEdit', 'app-window')],
     }));
+    const startStream = vi.fn(async (
+      _sessionId: string,
+      _target: RemoteWindowStreamTargetManifest,
+      streamId: string,
+    ) => ({ streamId, mediaStream }));
     const renderOverlay = (embeddedFullscreen: boolean) => (
       <RemoteWindowOverlay
-        activeSessionId="session-embedded-back-exit"
+        activeSessionId="session-explicit-close"
         embedded
         embeddedFullscreen={embeddedFullscreen}
         requestTargets={requestTargets}
-        onExitEmbeddedFullscreen={onExitEmbeddedFullscreen}
+        startStream={startStream}
+        stopStream={stopStream}
+        onCloseEmbedded={onCloseEmbedded}
+        onBodySubscriptionSuppressedChange={onBodySubscriptionSuppressedChange}
       />
     );
     const view = render(renderOverlay(false));
 
-    fireEvent.click(await screen.findByTestId('remote-window-target-app-embedded-back-exit'));
+    fireEvent.click(await screen.findByTestId('remote-window-target-app-explicit-close'));
+    await screen.findByTestId('remote-window-video');
+    view.rerender(renderOverlay(true));
+    await waitFor(() => {
+      expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('fullscreen');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭远程窗口' }));
+    await waitFor(() => {
+      expect(screen.queryByTestId('remote-window-locked-overlay')).toBeNull();
+      expect(screen.queryByTestId('remote-window-target-app-explicit-close')).toBeNull();
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const requestCountAfterClose = requestTargets.mock.calls.length;
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.queryByTestId('remote-window-locked-overlay')).toBeNull();
+    expect(screen.queryByTestId('remote-window-target-app-explicit-close')).toBeNull();
+    expect(requestTargets).toHaveBeenCalledTimes(requestCountAfterClose);
+    expect(stopStream).toHaveBeenCalledTimes(1);
+    expect(onCloseEmbedded).toHaveBeenCalledTimes(1);
+    expect(onBodySubscriptionSuppressedChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it('shrinks embedded fullscreen on Android Back without stopping the stream or closing the sheet', async () => {
+    const stopStream = vi.fn();
+    const onCloseEmbedded = vi.fn();
+    const onExitEmbeddedFullscreen = vi.fn();
+    const mediaStream = { id: 'media-stream-back-shrink' } as MediaStream;
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-back-shrink',
+      targets: [makeTarget('app-back-shrink', 'TextEdit', 'app-window')],
+    }));
+    const startStream = vi.fn(async (
+      _sessionId: string,
+      _target: RemoteWindowStreamTargetManifest,
+      streamId: string,
+    ) => ({ streamId, mediaStream }));
+    const renderOverlay = (embeddedFullscreen: boolean) => (
+      <RemoteWindowOverlay
+        activeSessionId="session-back-shrink"
+        embedded
+        embeddedFullscreen={embeddedFullscreen}
+        requestTargets={requestTargets}
+        startStream={startStream}
+        stopStream={stopStream}
+        onExitEmbeddedFullscreen={onExitEmbeddedFullscreen}
+        onCloseEmbedded={onCloseEmbedded}
+      />
+    );
+    const view = render(renderOverlay(false));
+
+    fireEvent.click(await screen.findByTestId('remote-window-target-app-back-shrink'));
+    await screen.findByTestId('remote-window-video');
     view.rerender(renderOverlay(true));
     await waitFor(() => {
       expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('fullscreen');
@@ -3481,10 +3550,12 @@ describe('RemoteWindowOverlay', () => {
 
     expect(backListeners.length).toBeGreaterThan(0);
     backListeners[backListeners.length - 1]?.();
-
     await waitFor(() => {
       expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('floating');
     });
+    expect(screen.getByTestId('remote-window-video')).toBeTruthy();
+    expect(stopStream).not.toHaveBeenCalled();
+    expect(onCloseEmbedded).not.toHaveBeenCalled();
     expect(onExitEmbeddedFullscreen).toHaveBeenCalledTimes(1);
   });
 
@@ -4184,7 +4255,10 @@ describe('RemoteWindowOverlay', () => {
     expect(Number.parseFloat(content.style.left || '0')).toBe(leftBeforeTwoFingerScroll);
     expect(screen.queryByTestId('remote-window-minimap')).toBeNull();
     expectEveryRemoteInputIsActionOnly(sendInput);
-    expect(actionRemoteInputPayloads(sendInput).every((payload) => payload.event.kind === 'scroll' && payload.event.deltaX === 0)).toBe(true);
+    // 双指同向移动保真两个轴：这一手势横向位移 35px、纵向 35px，
+    // 必须同时发出 deltaX/deltaY，而不是丢弃横向分量。
+    expect(actionRemoteInputPayloads(sendInput).every((payload) => payload.event.kind === 'scroll')).toBe(true);
+    expect(actionRemoteInputPayloads(sendInput).some((payload) => payload.event.deltaX !== 0)).toBe(true);
   });
 
   it('routes floating two-finger vertical movement to realtime remote scroll actions without entering fullscreen', async () => {
@@ -4412,7 +4486,8 @@ describe('RemoteWindowOverlay', () => {
     expectEveryRemoteInputIsActionOnly(sendInput);
     expect(screen.queryByTestId('remote-window-minimap')).toBeNull();
     // Commit carries the observe-window travel (40px raw); the gesture totals 80px
-    // raw and is emitted exactly once across the start + update events.
+    // raw and is emitted exactly once across the start + update events. 两指
+    // 横向位移互为反向（-5px/+5px），中点横向位移为 0，因此 deltaX 仍为 0。
     expect(actionRemoteInputPayloads(sendInput).map((payload) => payload.event)).toEqual([
       expect.objectContaining({
         kind: 'scroll',
@@ -4477,13 +4552,12 @@ describe('RemoteWindowOverlay', () => {
     await waitForActionRemoteInputCount(sendInput, 1);
     expectEveryRemoteInputIsActionOnly(sendInput);
     expect(screen.queryByTestId('remote-window-minimap')).toBeNull();
-    // Commit carries the observe-window travel (40px raw); the gesture totals 80px
-    // raw and is emitted exactly once across the start + update events.
+    // 两指同向右移 30px、上移 40px，共模位移两个轴都要保真：deltaX/deltaY 均非零。
     expect(actionRemoteInputPayloads(sendInput).map((payload) => payload.event)).toEqual([
       expect.objectContaining({
         kind: 'scroll',
         unit: 'pixel',
-        deltaX: 0,
+        deltaX: -80,
         deltaY: 112,
       }),
     ]);
@@ -4560,7 +4634,7 @@ describe('RemoteWindowOverlay', () => {
     expect(sendInput).not.toHaveBeenCalled();
   });
 
-  it('lets an active two-finger scroll become pinch zoom only after clear distance change', async () => {
+  it('keeps an active two-finger scroll latched across later distance changes', async () => {
     const mediaStream = { id: 'media-stream-1' } as MediaStream;
     const sendInput = vi.fn();
     const requestTargets = vi.fn(async () => ({
@@ -4612,11 +4686,20 @@ describe('RemoteWindowOverlay', () => {
     sendInput.mockClear();
 
     fireEvent.pointerMove(surface, { pointerId: 81, pointerType: 'touch', clientX: 70, clientY: 90, button: 0, buttons: 1 });
-    expect(sendInput).not.toHaveBeenCalled();
+    await waitForActionRemoteInputCount(sendInput, 1);
+    expect(sendInput).toHaveBeenCalledTimes(1);
+    expect(actionRemoteInputPayloads(sendInput).map((payload) => payload.event)).toEqual([
+      expect.objectContaining({ kind: 'scroll' }),
+    ]);
     fireEvent.pointerMove(surface, { pointerId: 82, pointerType: 'touch', clientX: 230, clientY: 90, button: 0, buttons: 1 });
 
     expect(screen.queryByTestId('remote-window-minimap')).toBeNull();
-    expect(sendInput).not.toHaveBeenCalled();
+    await waitForActionRemoteInputCount(sendInput, 2);
+    expect(sendInput).toHaveBeenCalledTimes(2);
+    expect(actionRemoteInputPayloads(sendInput).map((payload) => payload.event)).toEqual([
+      expect.objectContaining({ kind: 'scroll' }),
+      expect.objectContaining({ kind: 'scroll' }),
+    ]);
   });
 
   it('routes zoomed fullscreen two-finger vertical movement to remote scroll', async () => {

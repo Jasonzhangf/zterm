@@ -4411,6 +4411,17 @@
       "status": "active"
     },
     {
+      "from_module": "daemon.mirror_store",
+      "to_module": "daemon.transport_subscriber",
+      "status": "active",
+      "allowed_callers": [
+        "src/server/terminal-mirror-runtime.ts"
+      ],
+      "allowed_callees": [
+        "src/server/terminal-session-attach-lease-runtime.ts"
+      ]
+    },
+    {
       "from_module": "daemon.mirror_writer",
       "to_module": "daemon.source_adapter",
       "status": "active"

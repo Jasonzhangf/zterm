@@ -42,6 +42,7 @@ const renderQuickBar = (props: TerminalQuickBarProps) => (
   >
     <button type="button" onClick={() => props.onSendSequence?.('\x1b[A')}>quickbar-arrow-up</button>
     <button type="button" onClick={() => props.onSessionDraftSend?.('继续执行\r')}>quickbar-send-draft</button>
+    <button type="button" onClick={() => props.onOpenFileTransfer?.('browser')}>open-file-transfer</button>
     <button
       type="button"
       onClick={() => props.activeSessionId && props.onImagePaste?.(
@@ -316,8 +317,8 @@ describe('TerminalPage remote window overlay', () => {
     await waitFor(() => {
       expect(onRequestRemoteWindowTargets).toHaveBeenCalledWith('s1');
       expect(screen.getByTestId('remote-window-target-app-1')).toBeTruthy();
-      // 与文件按键一致：picker 打开时 QuickBar 保留，terminal stage 底部不置 0
-      expect(screen.getByTestId('terminal-quickbar')).toBeTruthy();
+      expect(screen.queryByTestId('terminal-quickbar')).toBeNull();
+      expect(screen.queryByTestId('terminal-quickbar-shell')).toBeNull();
       expect(screen.getByTestId('terminal-stage-shell').getAttribute('style') || '').toMatch(/bottom: (?!0px)\d+px/);
       expect(onActiveBodySubscriptionSuppressedChange).toHaveBeenCalledWith(true);
     });
@@ -444,6 +445,102 @@ describe('TerminalPage remote window overlay', () => {
       expect(screen.queryByTestId('remote-window-locked-overlay')).toBeNull();
       expect(screen.getByTestId('terminal-quickbar')).toBeTruthy();
       expect(onActiveBodySubscriptionSuppressedChange).toHaveBeenLastCalledWith(false);
+    });
+  });
+
+  it('closes the embedded resource sheet when the fullscreen remote-window close button is pressed', async () => {
+    const session = makeSession('s1');
+    const mediaStream = { id: 'media-stream-embedded-close' } as MediaStream;
+    const onRequestRemoteWindowTargets = vi.fn(async () => ({
+      requestId: 'rw-embedded-close',
+      targets: [makeTarget()],
+      errors: [],
+    }));
+    const onRequestRemoteWindowStreamStart = vi.fn(async (
+      _sessionId: string,
+      _target: RemoteWindowStreamTargetManifest,
+      streamId: string,
+    ) => ({
+      streamId,
+      mediaStream,
+      bindings: [{ streamId, mediaPlanVersion: 2, lane: 'focus' as const, mediaEpoch: 0, mediaStream, trackId: 'mock-track' }],
+      commitDecodedFrame: vi.fn(() => true),
+      replaceLaneBinding: vi.fn(async () => false),
+      started: {
+        requestId: 'rw-start-embedded-close',
+        streamId,
+        targetId: 'app-1',
+        mediaPlan: 'single-focus' as const,
+        mediaPlanVersion: 1 as const,
+        answer: { type: 'answer' as const, sdp: 'v=0' },
+        capture: {
+          source: 'ScreenCaptureKit' as const,
+          frameWidth: 800,
+          frameHeight: 560,
+          frameRate: 30,
+          targetKind: 'app-window' as const,
+        },
+        transport: {
+          kind: 'webrtc-video' as const,
+        },
+      },
+    }));
+    const fileBrowserPort = {
+      daemonFileScopeId: 'daemon:s1',
+      sendJson: vi.fn(),
+      onFileTransferMessage: vi.fn(() => () => undefined),
+      fileTransferRuntime: { getState: vi.fn(), open: vi.fn() },
+      onFileTransferStateChange: vi.fn(() => () => undefined),
+      dispose: vi.fn(async () => undefined),
+    };
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        onRequestRemoteWindowTargets={onRequestRemoteWindowTargets}
+        onRequestRemoteWindowStreamStart={onRequestRemoteWindowStreamStart}
+        onSendRemoteWindowInput={vi.fn()}
+        onStopRemoteWindowStream={vi.fn()}
+        renderRemoteWindow={renderRemoteWindow}
+        renderQuickBar={renderQuickBar}
+        renderFileBrowser={() => <div data-testid="embedded-file-browser" />}
+        resolveFileBrowserSessionPort={() => fileBrowserPort as any}
+        openRemoteWindowInResourceDrawer
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    fireEvent.click(screen.getByText('open-file-transfer'));
+    expect(await screen.findByTestId('resource-bottom-sheet')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '窗口串流' }));
+
+    fireEvent.click(await screen.findByTestId('remote-window-target-app-1'));
+    await waitFor(() => {
+      expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('floating');
+    });
+
+    const grip = screen.getByTestId('resource-bottom-sheet-grip');
+    fireEvent.touchStart(grip, { touches: [{ clientY: 300 }] });
+    fireEvent.touchEnd(grip, { changedTouches: [{ clientY: 180 }] });
+    await waitFor(() => {
+      expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('fullscreen');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭远程窗口' }));
+    await waitFor(() => {
+      expect(screen.queryByTestId('resource-bottom-sheet')).toBeNull();
+      expect(screen.queryByTestId('remote-window-locked-overlay')).toBeNull();
     });
   });
 

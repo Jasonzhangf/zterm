@@ -47,9 +47,11 @@ Forbidden paths:
   - long input becomes multiple `{ type: 'input', payload: string }` frames.
   - every frame is under the daemon frame budget.
   - backpressured transport still sends zero chunks, keeps reliable retries on backoff, and never lets the input owner close/replace the socket.
-  - one sequence remains pending until a matching ACK, then is removed exactly once.
+  - each in-flight sequence remains pending until a matching ACK, then is removed exactly once.
+  - the ordered window may send later independent frames before the first ACK; it must not wait one RTT per keystroke.
   - the owner does not retry before the 5-second ACK timeout.
-  - ACK timeout or physical transport replacement retries the same sequence instead of allocating a duplicate.
+  - ACK timeout retries the oldest sequence instead of allocating a duplicate.
+  - physical transport replacement resets the whole in-flight window and re-sends every unacknowledged sequence in FIFO order.
   - route-configuration generation changes under the same physical socket do not trigger a duplicate send.
 - daemon message runtime:
   - payload exactly at the frame max is accepted.

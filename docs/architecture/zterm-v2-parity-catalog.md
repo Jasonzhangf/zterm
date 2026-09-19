@@ -52,13 +52,13 @@ Individual feature rows remain `pending` because this reconciliation does not re
 Positive gate:
 
 ```bash
-pnpm run test:v2-parity-catalog
+pnpm run archive:test:v2-parity-catalog
 ```
 
 Negative duplicate/unknown-reference fixture:
 
 ```bash
-pnpm run test:v2-parity-catalog:negative
+pnpm run archive:test:v2-parity-catalog:negative
 ```
 
 The validator parses JSON, rejects duplicate feature/platform IDs, resolves Android registry feature IDs, verifies direct owner and entrypoint/test/script paths, requires behavior/error/lifecycle fields, and requires each profile to state its runtime evidence gap.

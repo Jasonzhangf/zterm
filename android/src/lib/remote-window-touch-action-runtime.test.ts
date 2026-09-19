@@ -1218,6 +1218,66 @@ describe('remote-window-touch-action-runtime', () => {
       expect(moved.localEffect.kind).not.toBe('pinch-move');
     });
 
+    it('keeps emitting a committed scroll when an interleaved sample also changes finger distance', () => {
+      const candidate = pairDown({ clientX: 100, clientY: 60 }, { clientX: 120, clientY: 60 });
+      const commit = resolveRemoteWindowTouchPairPointerMoveRuntime({
+        state: candidate.nextState,
+        pair: {
+          first: { pointerId: 1, pointerType: 'touch', clientX: 100, clientY: 100, timeMs: 1_200 },
+          second: { pointerId: 2, pointerType: 'touch', clientX: 120, clientY: 100, timeMs: 1_200 },
+        },
+        geometry,
+        timeMs: 1_200,
+        pinchEnabled: true,
+        scrollEnabled: true,
+        scrollFraction: 1,
+      });
+      expect(commit.nextState.mode).toBe('twoFingerScroll');
+      expect(commit.remoteEvents).toEqual([
+        expect.objectContaining({ kind: 'scroll', deltaX: 0, deltaY: 240 }),
+      ]);
+
+      const interleavedDistanceChange = resolveRemoteWindowTouchPairPointerMoveRuntime({
+        state: commit.nextState,
+        pair: {
+          first: { pointerId: 1, pointerType: 'touch', clientX: 80, clientY: 110, timeMs: 1_300 },
+          second: { pointerId: 2, pointerType: 'touch', clientX: 120, clientY: 100, timeMs: 1_300 },
+        },
+        geometry,
+        timeMs: 1_300,
+        pinchEnabled: true,
+        scrollEnabled: true,
+        scrollFraction: 1,
+      });
+      expect(interleavedDistanceChange.remoteEvents).toEqual([
+        expect.objectContaining({
+          kind: 'scroll',
+          deltaX: -40,
+          deltaY: 30,
+        }),
+      ]);
+      expect(interleavedDistanceChange.nextState).toEqual(expect.objectContaining({
+        mode: 'twoFingerScroll',
+        lastMidX: 100,
+        lastMidY: 105,
+      }));
+
+      const release = resolveRemoteWindowTouchPairPointerUpRuntime({
+        state: interleavedDistanceChange.nextState,
+        pair: {
+          first: { pointerId: 1, pointerType: 'touch', clientX: 80, clientY: 118, timeMs: 1_340 },
+          second: { pointerId: 2, pointerType: 'touch', clientX: 120, clientY: 100, timeMs: 1_340 },
+        },
+        geometry,
+        remainingPointer: null,
+        timeMs: 1_340,
+      });
+
+      expect(release.remoteEvents).toEqual([]);
+      expect(release.localEffect.kind).toBe('two-finger-scroll-end');
+      expect(release.nextState.mode).toBe('idle');
+    });
+
     it('returns the remaining unzoomed direct-touch pointer to remote action, not local pan', () => {
       const state = {
         mode: 'twoFingerScroll' as const,

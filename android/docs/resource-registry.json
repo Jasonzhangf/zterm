@@ -1648,12 +1648,12 @@
     {
       "resource_id": "resource.client_reliable_input_queue",
       "resource_type": "platform_client_truth",
-      "identity": "Per-session reliable terminal input seq, in-flight ACK, and retry-generation queue",
+      "identity": "Per-session reliable terminal input seq, bounded ordered in-flight window, ACK, and retry-generation queue",
       "owner_feature": "terminal.daemon_input",
       "truth_store": "src/lib/reliable-input/reliable-input-queue.ts",
       "allowed_operations": [
         "enqueue_input_seq",
-        "publish_one_in_flight_seq",
+        "publish_bounded_ordered_in_flight_seq",
         "apply_input_ack",
         "retry_same_seq_after_ack_timeout",
         "retry_same_seq_after_route_generation_change"
