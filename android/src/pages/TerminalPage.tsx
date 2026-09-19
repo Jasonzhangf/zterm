@@ -3832,6 +3832,7 @@ function TerminalPageComponent({
             embedded: true,
             embeddedFullscreen: Boolean(expanded && resourceTab === 'stream'),
             onExitEmbeddedFullscreen: onExitFullscreen,
+            onCloseEmbedded: () => setFileTransferOpen(false),
             browserOnly: resourceTab === 'web',
             browserEntryEnabled: false,
             onOpenStateChange: handleRemoteWindowOverlayOpenStateChange,
