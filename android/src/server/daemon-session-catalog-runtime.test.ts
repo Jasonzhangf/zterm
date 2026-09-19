@@ -86,15 +86,10 @@ describe('daemon session catalog runtime', () => {
     expect(runtime.read()).toEqual([{ name: 'alpha', backend: 'tmux', cwd: '/tmp/alpha' }]);
   });
 
-  it('refreshes the cached catalog from the daemon-owned detection loop', async () => {
+  it('keeps the cached catalog when the daemon detection loop sees no membership change', async () => {
     vi.useFakeTimers();
     try {
-      const listTerminalSessionCatalog = vi.fn()
-        .mockReturnValueOnce([{ name: 'alpha', backend: 'tmux' as const }])
-        .mockReturnValueOnce([
-          { name: 'alpha', backend: 'tmux' as const },
-          { name: 'beta', backend: 'tmux' as const },
-        ]);
+      const listTerminalSessionCatalog = vi.fn(() => [{ name: 'alpha', backend: 'tmux' as const }]);
       const runtime = createDaemonSessionCatalogRuntime({
         listTmuxSessions: vi.fn(() => []),
         listTerminalSessionCatalog,
@@ -108,10 +103,7 @@ describe('daemon session catalog runtime', () => {
         expect(listTerminalSessionCatalog).toHaveBeenCalledTimes(2);
       });
 
-      expect(runtime.read()).toEqual([
-        { name: 'alpha', backend: 'tmux' },
-        { name: 'beta', backend: 'tmux' },
-      ]);
+      expect(runtime.read()).toEqual([{ name: 'alpha', backend: 'tmux' }]);
       expect(listTerminalSessionCatalog).toHaveBeenCalledTimes(2);
       runtime.dispose();
     } finally {
@@ -119,33 +111,112 @@ describe('daemon session catalog runtime', () => {
     }
   });
 
-  it('lets the daemon detection loop run the shared refresh and publication path', async () => {
+  it('runs the shared refresh path when daemon detection sees a new tmux session', async () => {
     vi.useFakeTimers();
     try {
-      const listTerminalSessionCatalog = vi.fn(() => [
-        { name: 'alpha', backend: 'tmux' as const },
-      ]);
+      let entries: TerminalSessionCatalogEntry[] = [{ name: 'alpha', backend: 'tmux' }];
+      const listTerminalSessionCatalog = vi.fn(() => entries);
       const runtime = createDaemonSessionCatalogRuntime({
         listTmuxSessions: vi.fn(() => []),
         listTerminalSessionCatalog,
       });
-      const refresh = vi.fn(() => runtime.refresh());
+      const refresh = vi.fn((detectedEntries?: TerminalSessionCatalogEntry[]) => (
+        runtime.refresh(undefined, detectedEntries)
+      ));
+      await runtime.refresh();
       runtime.startRefreshLoop(1000, refresh);
 
+      entries = [
+        { name: 'alpha', backend: 'tmux' as const },
+        { name: 'beta', backend: 'tmux' as const },
+      ];
       vi.advanceTimersByTime(1000);
       await vi.waitFor(() => {
         expect(refresh).toHaveBeenCalledTimes(1);
       });
 
       expect(refresh).toHaveBeenCalledTimes(1);
-      expect(listTerminalSessionCatalog).toHaveBeenCalledTimes(1);
+      expect(refresh.mock.calls[0]?.[0]).toEqual([
+        { name: 'alpha', backend: 'tmux' },
+        { name: 'beta', backend: 'tmux' },
+      ]);
+      expect(listTerminalSessionCatalog).toHaveBeenCalledTimes(2);
+      expect(runtime.read()).toEqual([
+        { name: 'alpha', backend: 'tmux' },
+        { name: 'beta', backend: 'tmux' },
+      ]);
       runtime.dispose();
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it('invalidates the cached catalog after a background refresh failure and blocks stale publication until an explicit refresh', async () => {
+  it('refreshes the cached catalog when daemon detection sees a new Herdr session', async () => {
+    vi.useFakeTimers();
+    try {
+      let entries: TerminalSessionCatalogEntry[] = [{ name: 'alpha', backend: 'tmux' }];
+      const listTerminalSessionCatalog = vi.fn(() => entries);
+      const runtime = createDaemonSessionCatalogRuntime({
+        listTmuxSessions: vi.fn(() => []),
+        listTerminalSessionCatalog,
+      });
+      const refresh = vi.fn((detectedEntries?: TerminalSessionCatalogEntry[]) => (
+        runtime.refresh(undefined, detectedEntries)
+      ));
+      await runtime.refresh();
+      runtime.startRefreshLoop(1000, refresh);
+
+      entries = [
+        { name: 'alpha', backend: 'tmux' as const },
+        { name: 'herdr-one', backend: 'herdr' as const },
+      ];
+      vi.advanceTimersByTime(1000);
+      await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+
+      expect(runtime.read()).toEqual([
+        { name: 'alpha', backend: 'tmux' },
+        { name: 'herdr-one', backend: 'herdr' },
+      ]);
+      runtime.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('refreshes the cached catalog when daemon detection sees a session removal', async () => {
+    vi.useFakeTimers();
+    try {
+      let entries: TerminalSessionCatalogEntry[] = [
+        { name: 'alpha', backend: 'tmux' },
+        { name: 'herdr-one', backend: 'herdr' },
+      ];
+      const listTerminalSessionCatalog = vi.fn(() => entries);
+      const runtime = createDaemonSessionCatalogRuntime({
+        listTmuxSessions: vi.fn(() => []),
+        listTerminalSessionCatalog,
+      });
+      const refresh = vi.fn((detectedEntries?: TerminalSessionCatalogEntry[]) => (
+        runtime.refresh(undefined, detectedEntries)
+      ));
+      await runtime.refresh();
+      runtime.startRefreshLoop(1000, refresh);
+
+      entries = [{ name: 'herdr-one', backend: 'herdr' }];
+      vi.advanceTimersByTime(1000);
+      await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+      expect(runtime.read()).toEqual([{ name: 'herdr-one', backend: 'herdr' }]);
+
+      entries = [];
+      vi.advanceTimersByTime(1000);
+      await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(2));
+      expect(runtime.read()).toEqual([]);
+      runtime.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps the last complete snapshot when new-session detection cannot enumerate', async () => {
     vi.useFakeTimers();
     try {
       const listTerminalSessionCatalog = vi.fn()
@@ -170,13 +241,39 @@ describe('daemon session catalog runtime', () => {
         expect(listTerminalSessionCatalog).toHaveBeenCalledTimes(2);
       });
 
-      expect(() => runtime.read()).toThrow(/stale; explicit refresh required/);
+      expect(runtime.read()).toEqual([{ name: 'alpha', backend: 'tmux' }]);
       expect(listTerminalSessionCatalog).toHaveBeenCalledTimes(2);
 
-      await expect(runtime.refresh()).resolves.toEqual([
-        { name: 'alpha', backend: 'tmux' },
+      runtime.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('retries daemon-side detection after an explicit refresh invalidates the snapshot', async () => {
+    vi.useFakeTimers();
+    try {
+      let entries: TerminalSessionCatalogEntry[] = [{ name: 'alpha', backend: 'tmux' }];
+      const listTerminalSessionCatalog = vi.fn(() => entries);
+      const runtime = createDaemonSessionCatalogRuntime({
+        listTmuxSessions: vi.fn(() => []),
+        listTerminalSessionCatalog,
+      });
+      await runtime.refresh();
+
+      listTerminalSessionCatalog.mockImplementationOnce(() => {
+        throw new Error('explicit refresh failed');
+      });
+      await expect(runtime.refresh()).rejects.toThrow('explicit refresh failed');
+      expect(() => runtime.read()).toThrow(/stale; explicit refresh required/);
+
+      runtime.startRefreshLoop(1000);
+      entries = [{ name: 'beta', backend: 'tmux' }];
+      vi.advanceTimersByTime(1000);
+      await vi.waitFor(() => expect(runtime.read()).toEqual([
         { name: 'beta', backend: 'tmux' },
-      ]);
+      ]));
+
       expect(listTerminalSessionCatalog).toHaveBeenCalledTimes(3);
       runtime.dispose();
     } finally {
@@ -406,21 +503,23 @@ describe('daemon session catalog runtime', () => {
     runtime.dispose();
   });
 
-  it('refreshes observation on the daemon cadence, not on client requests', async () => {
+  it('does not re-sample observation on unchanged daemon detection', async () => {
     vi.useFakeTimers();
     try {
+      const runTmuxAsync = vi.fn(async (args: string[]) => ({
+        ok: true as const,
+        stdout: args[0] === 'list-panes' ? 'agent-a\t1234\tcodex' : 'thinking',
+      }));
       const runtime = createDaemonSessionCatalogRuntime({
         listTmuxSessions: vi.fn(() => []),
         listTerminalSessionCatalog: () => [{ name: 'agent-a', backend: 'tmux' }],
-        runTmuxAsync: async (args: string[]) => ({
-          ok: true as const,
-          stdout: args[0] === 'list-panes' ? 'agent-a\t1234\tcodex' : 'thinking',
-        }),
+        runTmuxAsync,
         readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
       });
 
       await runtime.refresh();
       expect(runtime.read()[0]?.observation?.observedAt).toBeGreaterThan(0);
+      const samplesAfterRefresh = runTmuxAsync.mock.calls.length;
       runtime.startRefreshLoop(1_000);
 
       const before = runtime.read()[0]?.observation?.observedAt ?? 0;
@@ -431,8 +530,9 @@ describe('daemon session catalog runtime', () => {
 
       vi.advanceTimersByTime(1_000);
       await vi.waitFor(() => {
-        expect(runtime.read()[0]?.observation?.observedAt ?? 0).toBeGreaterThan(before);
+        expect(runtime.read()[0]?.observation?.observedAt ?? 0).toBe(before);
       });
+      expect(runTmuxAsync).toHaveBeenCalledTimes(samplesAfterRefresh);
       runtime.dispose();
     } finally {
       vi.useRealTimers();

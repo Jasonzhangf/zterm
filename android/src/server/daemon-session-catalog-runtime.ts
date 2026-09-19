@@ -26,10 +26,13 @@ export interface DaemonSessionCatalogDeps {
 
 export interface DaemonSessionCatalogRuntime {
   read: (backend?: 'tmux' | 'herdr') => TerminalSessionCatalogEntry[];
-  refresh: (backend?: 'tmux' | 'herdr') => Promise<TerminalSessionCatalogEntry[]>;
+  refresh: (
+    backend?: 'tmux' | 'herdr',
+    detectedEntries?: TerminalSessionCatalogEntry[],
+  ) => Promise<TerminalSessionCatalogEntry[]>;
   startRefreshLoop: (
     intervalMs?: number,
-    refresh?: () => Promise<TerminalSessionCatalogEntry[]>,
+    refresh?: (entries?: TerminalSessionCatalogEntry[]) => Promise<TerminalSessionCatalogEntry[]>,
   ) => void;
   dispose: () => void;
 }
@@ -80,18 +83,25 @@ export function createDaemonSessionCatalogRuntime(
     });
   }
 
-  function rebuild(backend?: 'tmux' | 'herdr'): Promise<TerminalSessionCatalogEntry[]> {
+  function rebuild(
+    backend?: 'tmux' | 'herdr',
+    detectedEntries?: TerminalSessionCatalogEntry[],
+  ): Promise<TerminalSessionCatalogEntry[]> {
     if (refreshInFlight) {
       return refreshInFlight.then(() => read(backend), () => read(backend));
     }
     refreshInFlight = (async () => {
       let entries: TerminalSessionCatalogEntry[];
-      try {
-        entries = enumerate();
-      } catch (error) {
-        snapshot = null;
-        invalidated = true;
-        throw error;
+      if (detectedEntries) {
+        entries = detectedEntries;
+      } else {
+        try {
+          entries = enumerate();
+        } catch (error) {
+          snapshot = null;
+          invalidated = true;
+          throw error;
+        }
       }
       if (snapshot === null) {
         // Cold start: there is no last complete snapshot to preserve, so the
@@ -148,15 +158,40 @@ export function createDaemonSessionCatalogRuntime(
     refresh: rebuild,
     startRefreshLoop(
       intervalMs = DAEMON_SESSION_CATALOG_REFRESH_INTERVAL_MS,
-      refresh = () => rebuild(),
+      refresh = (entries) => rebuild(undefined, entries),
     ) {
       if (refreshTimer) {
         return;
       }
       refreshTimer = setInterval(() => {
-        void refresh().catch((error) => {
+        if (refreshInFlight) {
+          return;
+        }
+        let entries: TerminalSessionCatalogEntry[];
+        try {
+          entries = enumerate();
+        } catch (error) {
           console.warn(
-            `[daemon.session_catalog] refresh failed, snapshot invalidated: ${
+            `[daemon.session_catalog] new-session detection failed; keeping resident snapshot: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+          return;
+        }
+        const residentIdentities = new Set(
+          snapshot?.map((entry) => `${entry.backend}:${entry.name}`) ?? [],
+        );
+        const detectedIdentities = new Set(
+          entries.map((entry) => `${entry.backend}:${entry.name}`),
+        );
+        const hasCatalogMembershipChange = residentIdentities.size !== detectedIdentities.size
+          || [...residentIdentities].some((identity) => !detectedIdentities.has(identity));
+        if (snapshot && !hasCatalogMembershipChange) {
+          return;
+        }
+        void refresh(entries).catch((error) => {
+          console.warn(
+            `[daemon.session_catalog] new-session refresh failed: ${
               error instanceof Error ? error.message : String(error)
             }`,
           );
