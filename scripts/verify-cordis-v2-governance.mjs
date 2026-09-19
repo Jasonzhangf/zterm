@@ -21,8 +21,8 @@ function requireUnique(values, label) {
   }
 }
 
-function requireContains(text, expected, label) {
-  if (!text.includes(expected)) fail(`${label} is not wired to ${expected}`);
+function requireAbsent(text, unexpected, label) {
+  if (text.includes(unexpected)) fail(`${label} still contains active legacy call: ${unexpected}`);
 }
 
 function readManifest(root) {
@@ -104,11 +104,20 @@ export function validateManifest(manifest, root) {
     if (!commandPath || !existsSync(resolve(root, commandPath))) fail(`${gate.id} command path is missing: ${gate.command}`);
   }
   const rootPackage = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'));
-  requireString(rootPackage.scripts?.['test:cordis-v2-governance'], 'package.json test:cordis-v2-governance');
+  requireString(rootPackage.scripts?.['archive:test:cordis-v2-governance'], 'package.json archive:test:cordis-v2-governance');
   const androidPackage = JSON.parse(readFileSync(resolve(root, 'android/package.json'), 'utf8'));
-  requireContains(androidPackage.scripts?.prebuild ?? '', 'pnpm --dir .. run test:cordis-v2-governance', 'android prebuild');
+  const legacyCalls = [
+    'test:cordis-v2-governance',
+    'test:cordis-v2-governance:negative',
+    'test:v2:map-registries',
+    'test:v2-parity-catalog',
+    'test:v2-parity-catalog:negative',
+  ];
+  for (const call of legacyCalls) {
+    requireAbsent(androidPackage.scripts?.prebuild ?? '', call, 'android prebuild');
+  }
   const ci = readFileSync(resolve(root, '.github/workflows/ci.yml'), 'utf8');
-  requireContains(ci, 'pnpm run test:cordis-v2-governance', 'CI workflow');
+  for (const call of legacyCalls) requireAbsent(ci, `pnpm run ${call}`, 'CI workflow');
   return { phaseCount: manifest.phases.length, nodeCount: review.nodes.length, edgeCount: review.edges.length, activeGateCount: activeGates.length };
 }
 
