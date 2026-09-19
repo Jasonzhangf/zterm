@@ -1,10 +1,56 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   buildRelayDirectoryUpdateEnvelope,
   createRelayHostDirectoryPublishLoop,
+  createTraversalRelayHostClient,
   DIRECTORY_PUBLISH_INTERVAL_MS,
   publishRelayDirectoryUpdate,
 } from './relay-client';
+
+const { MockWebSocket, sockets } = vi.hoisted(() => {
+  class MockWebSocket {
+    static OPEN = 1;
+    static CLOSING = 2;
+
+    readyState = MockWebSocket.OPEN;
+    sent: string[] = [];
+    ping = vi.fn();
+    terminate = vi.fn();
+    private listeners = new Map<string, Array<(...args: unknown[]) => void>>();
+
+    constructor(public readonly url: URL) {
+      sockets.push(this);
+    }
+
+    on(event: string, listener: (...args: unknown[]) => void) {
+      const listeners = this.listeners.get(event) || [];
+      listeners.push(listener);
+      this.listeners.set(event, listeners);
+      return this;
+    }
+
+    emit(event: string, ...args: unknown[]) {
+      for (const listener of this.listeners.get(event) || []) {
+        listener(...args);
+      }
+    }
+
+    send(payload: string) {
+      this.sent.push(payload);
+    }
+
+    close() {
+      this.readyState = MockWebSocket.CLOSING;
+    }
+  }
+
+  const sockets: MockWebSocket[] = [];
+  return { MockWebSocket, sockets };
+});
+
+vi.mock('ws', () => ({
+  WebSocket: MockWebSocket,
+}));
 
 function createOpenSocket() {
   const sent: string[] = [];
@@ -19,6 +65,58 @@ function createOpenSocket() {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllGlobals();
+  MockWebSocket.OPEN = 1;
+  MockWebSocket.CLOSING = 2;
+});
+
+describe('traversal relay host reconnect ownership', () => {
+  beforeEach(() => {
+    sockets.length = 0;
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ accessToken: 'test-token' }),
+    })));
+  });
+
+  it('ignores a stale socket close after a newer socket is current', async () => {
+    const client = createTraversalRelayHostClient({
+      config: {
+        relayUrl: 'https://relay.example.test/',
+        username: 'test',
+        password: 'test',
+        hostId: 'mac-studio',
+        deviceId: 'device-1',
+        deviceName: 'Mac Studio',
+        platform: 'darwin',
+        appVersion: '1.0.0',
+        daemonVersion: '1.0.0',
+      },
+      handleRelaySignal: async () => {},
+      closeRelayPeer: () => {},
+      listEndpointCandidates: () => [],
+      listTerminalSessionCatalog: () => [],
+    });
+
+    client.start();
+    await vi.waitFor(() => expect(sockets).toHaveLength(1));
+    const staleSocket = sockets[0];
+    staleSocket.emit('open');
+    staleSocket.emit('message', JSON.stringify({ type: 'relay-ready', hostId: 'mac-studio' }));
+
+    client.start();
+    await vi.waitFor(() => expect(sockets).toHaveLength(2));
+    const currentSocket = sockets[1];
+    currentSocket.emit('open');
+    currentSocket.emit('message', JSON.stringify({ type: 'relay-ready', hostId: 'mac-studio' }));
+
+    staleSocket.emit('close', 1012, Buffer.from('host relay replaced'));
+
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(sockets).toHaveLength(2);
+    expect(currentSocket.sent.length).toBeGreaterThan(0);
+  });
 });
 
 describe('traversal relay daemon directory publisher', () => {
