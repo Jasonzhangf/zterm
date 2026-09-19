@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
+import { constants as osConstants } from "node:os";
 
 const severities = new Set(["block", "warn", "info"]);
 
@@ -35,11 +36,16 @@ if (!name) usage("missing gate name");
 if (command.length === 0) usage("missing command");
 
 const result = spawnSync(command[0], command.slice(1), { stdio: "inherit" });
-const exitCode = result.status ?? 1;
+const signalNumber = result.signal ? osConstants.signals[result.signal] : undefined;
+const exitCode = result.status ?? (signalNumber ? 128 + signalNumber : 1);
 if (exitCode === 0 && !result.error) process.exit(0);
 
 const label = severity.toUpperCase();
-const detail = result.error ? result.error.message : `exit ${exitCode}`;
+const detail = result.error
+  ? result.error.message
+  : result.signal
+    ? `signal ${result.signal} (exit ${exitCode})`
+    : `exit ${exitCode}`;
 const line = `[${label}] ${name}: ${detail}\n`;
 if (severity === "info") {
   process.stdout.write(line);
