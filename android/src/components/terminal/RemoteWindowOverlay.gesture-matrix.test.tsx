@@ -313,148 +313,185 @@ describe('RemoteWindowOverlay gesture matrix', () => {
     Reflect.deleteProperty(HTMLVideoElement.prototype, 'cancelVideoFrameCallback');
   });
 
-  it('routes unzoomed one-finger and two-finger vertical movement to remote scroll', async () => {
-    for (const fullscreen of [true, false]) {
-      for (const direction of ['up', 'down'] as const) {
-        const { sendInput, surface } = await openRemoteWindow(fullscreen);
-        const gesture = oneFingerVerticalMove(surface, direction);
-        await waitFor(() => {
-          expect(scrollPayloads(sendInput).length).toBeGreaterThan(0);
-        });
-        expectScrollDirection(sendInput, direction);
-        const countBeforeRelease = remotePayloads(sendInput).length;
-        await releasePointer(surface, gesture.pointerId, gesture.endClientX, gesture.endClientY);
-        expect(remotePayloads(sendInput)).toHaveLength(countBeforeRelease);
-        expect(nonScrollPayloads(sendInput)).toEqual([]);
-        cleanup();
-      }
+  it('keeps the embedded half-sheet preview passive and enables gestures only after fullscreen', async () => {
+    const preview = await openRemoteWindow(false);
+    const content = projectionElement();
+    const widthBefore = stylePx(content.style.width);
+    const topBefore = stylePx(content.style.top);
 
-      for (const direction of ['up', 'down'] as const) {
-        const { sendInput, surface } = await openRemoteWindow(fullscreen);
-        const gesture = twoFingerVerticalMove(surface, direction);
-        await waitFor(() => {
-          expect(scrollPayloads(sendInput).length).toBeGreaterThan(0);
-        });
-        expectScrollDirection(sendInput, direction);
-        expectOnlyVerticalRemoteScrolls(sendInput);
-        const countBeforeRelease = remotePayloads(sendInput).length;
-        await releasePointer(surface, gesture.firstPointerId, gesture.endFirstX, gesture.endClientY);
-        expect(remotePayloads(sendInput)).toHaveLength(countBeforeRelease);
-        await releasePointer(surface, gesture.secondPointerId, gesture.endSecondX, gesture.endClientY);
-        expect(remotePayloads(sendInput)).toHaveLength(countBeforeRelease);
-        expect(nonScrollPayloads(sendInput)).toEqual([]);
-        cleanup();
-      }
+    const previewOneFinger = oneFingerVerticalMove(preview.surface, 'up');
+    await act(async () => {});
+    await releasePointer(
+      preview.surface,
+      previewOneFinger.pointerId,
+      previewOneFinger.endClientX,
+      previewOneFinger.endClientY,
+    );
+    expect(remotePayloads(preview.sendInput)).toEqual([]);
+
+    const previewPinch = pinchMove(preview.surface, 'out');
+    await act(async () => {});
+    await releasePair(
+      preview.surface,
+      previewPinch.firstPointerId,
+      previewPinch.secondPointerId,
+      previewPinch.firstEndX,
+      previewPinch.secondEndX,
+      previewPinch.y,
+    );
+    expect(remotePayloads(preview.sendInput)).toEqual([]);
+    expect(stylePx(content.style.width)).toBe(widthBefore);
+    expect(stylePx(content.style.top)).toBe(topBefore);
+
+    cleanup();
+    const fullscreen = await openRemoteWindow(true);
+    const fullscreenGesture = oneFingerVerticalMove(fullscreen.surface, 'up');
+    await waitFor(() => {
+      expect(scrollPayloads(fullscreen.sendInput).length).toBeGreaterThan(0);
+    });
+    await releasePointer(
+      fullscreen.surface,
+      fullscreenGesture.pointerId,
+      fullscreenGesture.endClientX,
+      fullscreenGesture.endClientY,
+    );
+    expectOnlyVerticalRemoteScrolls(fullscreen.sendInput);
+  });
+
+  it('routes unzoomed one-finger and two-finger vertical movement to remote scroll', async () => {
+    for (const direction of ['up', 'down'] as const) {
+      const { sendInput, surface } = await openRemoteWindow(true);
+      const gesture = oneFingerVerticalMove(surface, direction);
+      await waitFor(() => {
+        expect(scrollPayloads(sendInput).length).toBeGreaterThan(0);
+      });
+      expectScrollDirection(sendInput, direction);
+      const countBeforeRelease = remotePayloads(sendInput).length;
+      await releasePointer(surface, gesture.pointerId, gesture.endClientX, gesture.endClientY);
+      expect(remotePayloads(sendInput)).toHaveLength(countBeforeRelease);
+      expect(nonScrollPayloads(sendInput)).toEqual([]);
+      cleanup();
+    }
+
+    for (const direction of ['up', 'down'] as const) {
+      const { sendInput, surface } = await openRemoteWindow(true);
+      const gesture = twoFingerVerticalMove(surface, direction);
+      await waitFor(() => {
+        expect(scrollPayloads(sendInput).length).toBeGreaterThan(0);
+      });
+      expectScrollDirection(sendInput, direction);
+      expectOnlyVerticalRemoteScrolls(sendInput);
+      const countBeforeRelease = remotePayloads(sendInput).length;
+      await releasePointer(surface, gesture.firstPointerId, gesture.endFirstX, gesture.endClientY);
+      expect(remotePayloads(sendInput)).toHaveLength(countBeforeRelease);
+      await releasePointer(surface, gesture.secondPointerId, gesture.endSecondX, gesture.endClientY);
+      expect(remotePayloads(sendInput)).toHaveLength(countBeforeRelease);
+      expect(nonScrollPayloads(sendInput)).toEqual([]);
+      cleanup();
     }
   });
 
   it('keeps pinch local and restores 1x single-finger scroll after pinch-back', async () => {
-    for (const fullscreen of [true, false]) {
-      const { sendInput, surface } = await openRemoteWindow(fullscreen);
-      const content = projectionElement();
-      const initialWidth = stylePx(content.style.width);
-      expect(initialWidth).toBeGreaterThan(0);
+    const { sendInput, surface } = await openRemoteWindow(true);
+    const content = projectionElement();
+    const initialWidth = stylePx(content.style.width);
+    expect(initialWidth).toBeGreaterThan(0);
 
-      const zoomOut = pinchMove(surface, 'out');
-      await waitFor(() => {
-        expect(stylePx(content.style.width)).toBeGreaterThan(initialWidth + 1);
-      });
-      expect(remotePayloads(sendInput)).toEqual([]);
-      await releasePair(
-        surface,
-        zoomOut.firstPointerId,
-        zoomOut.secondPointerId,
-        zoomOut.firstEndX,
-        zoomOut.secondEndX,
-        zoomOut.y,
-      );
-      expect(remotePayloads(sendInput)).toEqual([]);
+    const zoomOut = pinchMove(surface, 'out');
+    await waitFor(() => {
+      expect(stylePx(content.style.width)).toBeGreaterThan(initialWidth + 1);
+    });
+    expect(remotePayloads(sendInput)).toEqual([]);
+    await releasePair(
+      surface,
+      zoomOut.firstPointerId,
+      zoomOut.secondPointerId,
+      zoomOut.firstEndX,
+      zoomOut.secondEndX,
+      zoomOut.y,
+    );
+    expect(remotePayloads(sendInput)).toEqual([]);
 
-      const zoomedOne = oneFingerVerticalMove(surface, 'up');
-      await act(async () => {});
-      expect(remotePayloads(sendInput)).toEqual([]);
-      await releasePointer(surface, zoomedOne.pointerId, zoomedOne.endClientX, zoomedOne.endClientY);
-      expect(remotePayloads(sendInput)).toEqual([]);
+    const zoomedOne = oneFingerVerticalMove(surface, 'up');
+    await act(async () => {});
+    expect(remotePayloads(sendInput)).toEqual([]);
+    await releasePointer(surface, zoomedOne.pointerId, zoomedOne.endClientX, zoomedOne.endClientY);
+    expect(remotePayloads(sendInput)).toEqual([]);
 
-      const pinchIn = pinchMove(surface, 'in');
-      await waitFor(() => {
-        expect(stylePx(content.style.width)).toBeLessThanOrEqual(fitWidth() + 1);
-        expect(stylePx(content.style.width)).toBeGreaterThan(fitWidth() - 1);
-      });
-      expect(remotePayloads(sendInput)).toEqual([]);
-      await releasePair(
-        surface,
-        pinchIn.firstPointerId,
-        pinchIn.secondPointerId,
-        pinchIn.firstEndX,
-        pinchIn.secondEndX,
-        pinchIn.y,
-      );
-      expect(remotePayloads(sendInput)).toEqual([]);
+    const pinchIn = pinchMove(surface, 'in');
+    await waitFor(() => {
+      expect(stylePx(content.style.width)).toBeLessThanOrEqual(fitWidth() + 1);
+      expect(stylePx(content.style.width)).toBeGreaterThan(fitWidth() - 1);
+    });
+    expect(remotePayloads(sendInput)).toEqual([]);
+    await releasePair(
+      surface,
+      pinchIn.firstPointerId,
+      pinchIn.secondPointerId,
+      pinchIn.firstEndX,
+      pinchIn.secondEndX,
+      pinchIn.y,
+    );
+    expect(remotePayloads(sendInput)).toEqual([]);
 
-      sendInput.mockClear();
-      const recovered = oneFingerVerticalMove(surface, 'down');
-      await waitFor(() => {
-        expect(scrollPayloads(sendInput).length).toBeGreaterThan(0);
-      });
-      expectScrollDirection(sendInput, 'down');
-      expectOnlyVerticalRemoteScrolls(sendInput);
-      await releasePointer(surface, recovered.pointerId, recovered.endClientX, recovered.endClientY);
-      expectOnlyVerticalRemoteScrolls(sendInput);
-      cleanup();
-    }
+    sendInput.mockClear();
+    const recovered = oneFingerVerticalMove(surface, 'down');
+    await waitFor(() => {
+      expect(scrollPayloads(sendInput).length).toBeGreaterThan(0);
+    });
+    expectScrollDirection(sendInput, 'down');
+    expectOnlyVerticalRemoteScrolls(sendInput);
+    await releasePointer(surface, recovered.pointerId, recovered.endClientX, recovered.endClientY);
+    expectOnlyVerticalRemoteScrolls(sendInput);
   });
 
   it('keeps zoomed one-finger local and routes zoomed two-finger vertical motion to remote scroll', async () => {
-    for (const fullscreen of [true, false]) {
-      const { sendInput, surface } = await openRemoteWindow(fullscreen);
-      const content = projectionElement();
-      const initialWidth = stylePx(content.style.width);
+    const { sendInput, surface } = await openRemoteWindow(true);
+    const content = projectionElement();
+    const initialWidth = stylePx(content.style.width);
 
-      const zoomOut = pinchMove(surface, 'out');
+    const zoomOut = pinchMove(surface, 'out');
+    await waitFor(() => {
+      expect(stylePx(content.style.width)).toBeGreaterThan(initialWidth + 1);
+    });
+    await releasePair(
+      surface,
+      zoomOut.firstPointerId,
+      zoomOut.secondPointerId,
+      zoomOut.firstEndX,
+      zoomOut.secondEndX,
+      zoomOut.y,
+    );
+    expect(remotePayloads(sendInput)).toEqual([]);
+
+    for (const direction of ['up', 'down'] as const) {
+      sendInput.mockClear();
+      const topBeforePan = stylePx(content.style.top);
+      const zoomedOne = oneFingerVerticalMove(surface, direction);
       await waitFor(() => {
-        expect(stylePx(content.style.width)).toBeGreaterThan(initialWidth + 1);
+        expect(stylePx(content.style.top)).not.toBe(topBeforePan);
       });
-      await releasePair(
-        surface,
-        zoomOut.firstPointerId,
-        zoomOut.secondPointerId,
-        zoomOut.firstEndX,
-        zoomOut.secondEndX,
-        zoomOut.y,
-      );
       expect(remotePayloads(sendInput)).toEqual([]);
+      await releasePointer(surface, zoomedOne.pointerId, zoomedOne.endClientX, zoomedOne.endClientY);
+      expect(remotePayloads(sendInput)).toEqual([]);
+    }
 
-      for (const direction of ['up', 'down'] as const) {
-        sendInput.mockClear();
-        const topBeforePan = stylePx(content.style.top);
-        const zoomedOne = oneFingerVerticalMove(surface, direction);
-        await waitFor(() => {
-          expect(stylePx(content.style.top)).not.toBe(topBeforePan);
-        });
-        expect(remotePayloads(sendInput)).toEqual([]);
-        await releasePointer(surface, zoomedOne.pointerId, zoomedOne.endClientX, zoomedOne.endClientY);
-        expect(remotePayloads(sendInput)).toEqual([]);
-      }
-
-      for (const direction of ['up', 'down'] as const) {
-        sendInput.mockClear();
-        const widthBeforeScroll = stylePx(content.style.width);
-        const gesture = twoFingerVerticalMove(surface, direction);
-        await waitFor(() => {
-          expect(scrollPayloads(sendInput).length).toBeGreaterThan(0);
-        });
-        expectScrollDirection(sendInput, direction);
-        expect(stylePx(content.style.width)).toBe(widthBeforeScroll);
-        expectOnlyVerticalRemoteScrolls(sendInput);
-        const countBeforeRelease = remotePayloads(sendInput).length;
-        await releasePointer(surface, gesture.firstPointerId, gesture.endFirstX, gesture.endClientY);
-        expect(remotePayloads(sendInput)).toHaveLength(countBeforeRelease);
-        await releasePointer(surface, gesture.secondPointerId, gesture.endSecondX, gesture.endClientY);
-        expect(remotePayloads(sendInput)).toHaveLength(countBeforeRelease);
-        expect(nonScrollPayloads(sendInput)).toEqual([]);
-      }
-      cleanup();
+    for (const direction of ['up', 'down'] as const) {
+      sendInput.mockClear();
+      const widthBeforeScroll = stylePx(content.style.width);
+      const gesture = twoFingerVerticalMove(surface, direction);
+      await waitFor(() => {
+        expect(scrollPayloads(sendInput).length).toBeGreaterThan(0);
+      });
+      expectScrollDirection(sendInput, direction);
+      expect(stylePx(content.style.width)).toBe(widthBeforeScroll);
+      expectOnlyVerticalRemoteScrolls(sendInput);
+      const countBeforeRelease = remotePayloads(sendInput).length;
+      await releasePointer(surface, gesture.firstPointerId, gesture.endFirstX, gesture.endClientY);
+      expect(remotePayloads(sendInput)).toHaveLength(countBeforeRelease);
+      await releasePointer(surface, gesture.secondPointerId, gesture.endSecondX, gesture.endClientY);
+      expect(remotePayloads(sendInput)).toHaveLength(countBeforeRelease);
+      expect(nonScrollPayloads(sendInput)).toEqual([]);
     }
   });
 
@@ -656,23 +693,20 @@ describe('RemoteWindowOverlay gesture matrix', () => {
   });
 
   it('suppresses pointerCancel tap and recovers the next pointer sequence', async () => {
-    for (const fullscreen of [true, false]) {
-      const { sendInput, surface } = await openRemoteWindow(fullscreen);
-      const cancelledPointerId = nextPointerId();
-      fireEvent.pointerDown(surface, touchOptions(cancelledPointerId, 150, 100, 4000));
-      fireEvent.pointerCancel(surface, touchUpOptions(cancelledPointerId, 150, 100));
-      await act(async () => {});
-      expect(remotePayloads(sendInput)).toEqual([]);
+    const { sendInput, surface } = await openRemoteWindow(true);
+    const cancelledPointerId = nextPointerId();
+    fireEvent.pointerDown(surface, touchOptions(cancelledPointerId, 150, 100, 4000));
+    fireEvent.pointerCancel(surface, touchUpOptions(cancelledPointerId, 150, 100));
+    await act(async () => {});
+    expect(remotePayloads(sendInput)).toEqual([]);
 
-      const recovered = oneFingerVerticalMove(surface, 'up');
-      await waitFor(() => {
-        expect(scrollPayloads(sendInput).length).toBeGreaterThan(0);
-      });
-      expectOnlyVerticalRemoteScrolls(sendInput);
-      await releasePointer(surface, recovered.pointerId, recovered.endClientX, recovered.endClientY);
-      expectOnlyVerticalRemoteScrolls(sendInput);
-      cleanup();
-    }
+    const recovered = oneFingerVerticalMove(surface, 'up');
+    await waitFor(() => {
+      expect(scrollPayloads(sendInput).length).toBeGreaterThan(0);
+    });
+    expectOnlyVerticalRemoteScrolls(sendInput);
+    await releasePointer(surface, recovered.pointerId, recovered.endClientX, recovered.endClientY);
+    expectOnlyVerticalRemoteScrolls(sendInput);
   });
 
   it('cancels the long-press timer when a second finger enters a zoomed gesture', async () => {
