@@ -7,6 +7,7 @@ import {
   resetTerminalReliableInputRuntimeForTests,
   TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES,
   TERMINAL_RELIABLE_INPUT_ACK_TIMEOUT_MS,
+  TERMINAL_RELIABLE_INPUT_MAX_IN_FLIGHT,
   TERMINAL_RELIABLE_INPUT_RETRY_MS,
   type SendInputTransportOptions,
 } from './reliable-input-queue';
@@ -204,15 +205,18 @@ describe('client.reliable_input queue runtime', () => {
     expect(options.sendSocketPayload).toHaveBeenCalledTimes(1);
   });
 
-  it('does not send the next chunk until the current chunk is acked', () => {
+  it('sends an ordered bounded burst before the first ack arrives', () => {
     vi.useFakeTimers();
     const { options } = createOptions();
     const longInput = `${'a'.repeat(TERMINAL_INPUT_CHUNK_BYTES - 3)}中文😀${'b'.repeat(128)}`;
     const inputChunks = [longInput.slice(0, 100), longInput.slice(100)];
 
     enqueueReliableInputChunks(options, 'session-2', inputChunks);
-    expect(options.sendSocketPayload).toHaveBeenCalledTimes(1);
+    expect(options.sendSocketPayload).toHaveBeenCalledTimes(2);
     const first = parseReliablePayload(options.sendSocketPayload);
+    const second = parseReliablePayload(options.sendSocketPayload, 1);
+    expect(second.seq).not.toBe(first.seq);
+    expect(first.data + second.data).toBe(longInput);
 
     handleTerminalInputAck('session-2', {
       version: 1,
@@ -221,7 +225,116 @@ describe('client.reliable_input queue runtime', () => {
       bytes: first.data.length,
     });
     expect(options.sendSocketPayload).toHaveBeenCalledTimes(2);
-    expect(parseReliablePayload(options.sendSocketPayload, 1).seq).not.toBe(first.seq);
+  });
+
+  it('keeps separate keystroke enqueues in flight without waiting for the first ack', () => {
+    vi.useFakeTimers();
+    const { options } = createOptions();
+
+    enqueueReliableInputChunks(options, 'session-2', ['a']);
+    enqueueReliableInputChunks(options, 'session-2', ['b']);
+    enqueueReliableInputChunks(options, 'session-2', ['c']);
+
+    expect(options.sendSocketPayload).toHaveBeenCalledTimes(3);
+    expect(Array.from(
+      { length: 3 },
+      (_, index) => parseReliablePayload(options.sendSocketPayload, index).data,
+    )).toEqual(['a', 'b', 'c']);
+  });
+
+  it('caps the ordered in-flight window', () => {
+    vi.useFakeTimers();
+    const { options } = createOptions();
+    const chunks = Array.from(
+      { length: TERMINAL_RELIABLE_INPUT_MAX_IN_FLIGHT + 2 },
+      (_, index) => String(index),
+    );
+
+    enqueueReliableInputChunks(options, 'session-2', chunks);
+
+    expect(options.sendSocketPayload).toHaveBeenCalledTimes(
+      TERMINAL_RELIABLE_INPUT_MAX_IN_FLIGHT,
+    );
+    const payloads = Array.from(
+      { length: TERMINAL_RELIABLE_INPUT_MAX_IN_FLIGHT },
+      (_, index) => parseReliablePayload(options.sendSocketPayload, index),
+    );
+    expect(payloads.map((payload) => payload.data)).toEqual(
+      chunks.slice(0, TERMINAL_RELIABLE_INPUT_MAX_IN_FLIGHT),
+    );
+
+    handleTerminalInputAck('session-2', {
+      version: 1,
+      seq: payloads[0]!.seq,
+      accepted: true,
+      bytes: 1,
+    });
+    expect(options.sendSocketPayload).toHaveBeenCalledTimes(
+      TERMINAL_RELIABLE_INPUT_MAX_IN_FLIGHT + 1,
+    );
+  });
+
+  it('slides the ordered window after an ack without waiting for earlier frames', () => {
+    vi.useFakeTimers();
+    const { options } = createOptions();
+    const chunks = Array.from(
+      { length: TERMINAL_RELIABLE_INPUT_MAX_IN_FLIGHT + 1 },
+      (_, index) => String(index),
+    );
+
+    enqueueReliableInputChunks(options, 'session-2', chunks);
+    expect(options.sendSocketPayload).toHaveBeenCalledTimes(
+      TERMINAL_RELIABLE_INPUT_MAX_IN_FLIGHT,
+    );
+
+    const second = parseReliablePayload(options.sendSocketPayload, 1);
+    handleTerminalInputAck('session-2', {
+      version: 1,
+      seq: second.seq,
+      accepted: true,
+      bytes: second.data.length,
+    });
+
+    expect(options.sendSocketPayload).toHaveBeenCalledTimes(
+      TERMINAL_RELIABLE_INPUT_MAX_IN_FLIGHT + 1,
+    );
+    expect(parseReliablePayload(
+      options.sendSocketPayload,
+      TERMINAL_RELIABLE_INPUT_MAX_IN_FLIGHT,
+    ).data).toBe(chunks[TERMINAL_RELIABLE_INPUT_MAX_IN_FLIGHT]);
+  });
+
+  it('keeps unsent frames behind an earlier in-flight frame on transport replacement', () => {
+    vi.useFakeTimers();
+    const oldWs = createSocket(WebSocket.OPEN);
+    const newWs = createSocket(WebSocket.OPEN);
+    let currentWs = oldWs;
+    const { options } = createOptions({
+      daemonConnection: createDaemonConnection((sessionId) => createResource(sessionId, currentWs)),
+    });
+    const chunks = ['a', 'b', 'c'];
+
+    enqueueReliableInputChunks(options, 'session-2', chunks);
+    const first = parseReliablePayload(options.sendSocketPayload);
+    const second = parseReliablePayload(options.sendSocketPayload, 1);
+    currentWs = newWs;
+    vi.advanceTimersByTime(TERMINAL_RELIABLE_INPUT_RETRY_MS);
+
+    expect(options.sendSocketPayload).toHaveBeenCalledTimes(6);
+    expect(parseReliablePayload(options.sendSocketPayload, 3)).toMatchObject({
+      seq: first.seq,
+      data: 'a',
+      attempt: 2,
+    });
+    expect(parseReliablePayload(options.sendSocketPayload, 4)).toMatchObject({
+      seq: second.seq,
+      data: 'b',
+      attempt: 2,
+    });
+    expect(parseReliablePayload(options.sendSocketPayload, 5)).toMatchObject({
+      data: 'c',
+      attempt: 2,
+    });
   });
 
   it('retries a retryable daemon nack with the same seq', () => {
@@ -311,5 +424,59 @@ describe('client.reliable_input queue runtime', () => {
     vi.advanceTimersByTime(1);
     expect(options.sendSocketPayload).toHaveBeenCalledTimes(4);
     expect(parseReliablePayload(options.sendSocketPayload, 3).attempt).toBe(4);
+  });
+
+  it('uses the computed ACK-wait backoff delay instead of polling every retry interval', () => {
+    vi.useFakeTimers();
+    const retryWaits: Array<{ attempt: number; at: number }> = [];
+    const options = enqueueOne({
+      runtimeDebug: vi.fn((event, payload) => {
+        if (event === 'session.input.reliable-wait.ack') {
+          retryWaits.push({
+            attempt: Number(payload?.attempt || 0),
+            at: Date.now(),
+          });
+        }
+      }),
+    });
+
+    const first = parseReliablePayload(options.sendSocketPayload);
+    vi.advanceTimersByTime(TERMINAL_RELIABLE_INPUT_ACK_TIMEOUT_MS);
+    expect(options.sendSocketPayload).toHaveBeenCalledTimes(2);
+    expect(parseReliablePayload(options.sendSocketPayload, 1)).toMatchObject({
+      seq: first.seq,
+      attempt: 2,
+    });
+
+    vi.advanceTimersByTime(TERMINAL_RELIABLE_INPUT_ACK_TIMEOUT_MS);
+    expect(options.sendSocketPayload).toHaveBeenCalledTimes(3);
+    expect(parseReliablePayload(options.sendSocketPayload, 2)).toMatchObject({
+      seq: first.seq,
+      attempt: 3,
+    });
+
+    vi.advanceTimersByTime(TERMINAL_RELIABLE_INPUT_ACK_TIMEOUT_MS);
+    expect(options.sendSocketPayload).toHaveBeenCalledTimes(4);
+    expect(parseReliablePayload(options.sendSocketPayload, 3)).toMatchObject({
+      seq: first.seq,
+      attempt: 4,
+    });
+
+    vi.advanceTimersByTime(TERMINAL_RELIABLE_INPUT_ACK_TIMEOUT_MS + 2000);
+    expect(options.sendSocketPayload).toHaveBeenCalledTimes(5);
+    expect(parseReliablePayload(options.sendSocketPayload, 4)).toMatchObject({
+      seq: first.seq,
+      attempt: 5,
+    });
+
+    const attempt3Waits = retryWaits.filter((entry) => entry.attempt === 3);
+    expect(attempt3Waits.map((entry, index) => (
+      index === 0 ? null : entry.at - attempt3Waits[index - 1]!.at
+    )).filter((delay): delay is number => delay !== null)).toEqual([1000, 1000, 1000]);
+
+    const attempt4Waits = retryWaits.filter((entry) => entry.attempt === 4);
+    expect(attempt4Waits.map((entry, index) => (
+      index === 0 ? null : entry.at - attempt4Waits[index - 1]!.at
+    )).filter((delay): delay is number => delay !== null)).toEqual([2000]);
   });
 });

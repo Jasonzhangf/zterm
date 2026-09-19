@@ -775,7 +775,7 @@ Experiment: production ownership slice in
 
 Whitebox:
 - `client.reliable_input` owns reliable terminal input seq allocation, ordered
-  pending queue, one-in-flight send, ACK application, ACK-timeout retry,
+  pending queue, bounded ordered in-flight window, ACK application, ACK-timeout retry,
   transport-generation retry, retryable nack handling, and exponential
   backoff in `src/lib/reliable-input/reliable-input-queue.ts`.
 - The queue never imports SessionContext or session runtime state machines,
@@ -796,8 +796,9 @@ Blackbox:
   `android_mainline:TerminalInputDispatch->ClientReliableInputQueue`,
   `android_mainline:ClientReliableInputQueue->ChannelSend`, and
   `android_mainline:SocketMessage->ClientReliableInputAck`.
-- Positive and negative queue tests cover ack-before-resend, ack timeout,
-  transport-generation resend, route-config no-resend, chunk order,
+- Positive and negative queue tests cover burst/keystroke sends before the
+  first ack, ordered window slide/cap, ack-before-resend, ack timeout,
+  transport-generation window resend, route-config no-resend, chunk order,
   retryable/non-retryable nack, and backoff bounds.
 
 Gate:

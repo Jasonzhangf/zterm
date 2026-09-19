@@ -252,7 +252,7 @@ describe('session-context-input-runtime', () => {
     expect(sendSocketPayload).toHaveBeenCalledTimes(1);
   });
 
-  it('does not send the next reliable chunk until the daemon acks the current chunk', () => {
+  it('sends an ordered reliable chunk burst before the first daemon ack', () => {
     vi.useFakeTimers();
     const sendSocketPayload = vi.fn();
     const longInput = `${'a'.repeat(TERMINAL_INPUT_CHUNK_BYTES - 3)}中文😀${'b'.repeat(128)}`;
@@ -266,9 +266,12 @@ describe('session-context-input-runtime', () => {
       sendSocketPayload,
     });
 
-    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
+    expect(sendSocketPayload).toHaveBeenCalledTimes(2);
     const first = parseSentReliableInputPayload(sendSocketPayload);
+    const second = parseSentReliableInputPayload(sendSocketPayload, 1);
     expect(first.data.length).toBeLessThan(longInput.length);
+    expect(second.seq).not.toBe(first.seq);
+    expect(first.data + second.data).toBe(longInput);
 
     handleTerminalInputAck('session-2', {
       version: 1,
@@ -278,9 +281,6 @@ describe('session-context-input-runtime', () => {
     });
 
     expect(sendSocketPayload).toHaveBeenCalledTimes(2);
-    const second = parseSentReliableInputPayload(sendSocketPayload, 1);
-    expect(second.seq).not.toBe(first.seq);
-    expect(first.data + second.data).toBe(longInput);
   });
 
   it('queues reliable input while the transport is not open and sends it when the same transport owner becomes open', () => {

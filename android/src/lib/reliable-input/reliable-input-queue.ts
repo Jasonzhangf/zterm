@@ -13,6 +13,7 @@ export interface RuntimeDebugFn {
 export const TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES = 128 * 1024;
 export const TERMINAL_RELIABLE_INPUT_RETRY_MS = 500;
 export const TERMINAL_RELIABLE_INPUT_ACK_TIMEOUT_MS = 5000;
+export const TERMINAL_RELIABLE_INPUT_MAX_IN_FLIGHT = 8;
 
 export interface SendInputTransportOptions {
   sessionId: string;
@@ -141,6 +142,40 @@ function isReliableInputInFlight(item: ReliableInputQueueItem) {
   return item.sentAt !== null;
 }
 
+function countReliableInputInFlight(queue: ReliableInputSessionQueue) {
+  return queue.items.reduce(
+    (count, item) => count + (isReliableInputInFlight(item) ? 1 : 0),
+    0,
+  );
+}
+
+function hasReliableInputTransportGenerationChanged(
+  queue: ReliableInputSessionQueue,
+  resource: SessionTransportResource,
+) {
+  return queue.items.some((item) => (
+    isReliableInputInFlight(item)
+    && (
+      item.sentTargetKey !== resource.targetKey
+      || item.sentTransportSocket !== resource.socket
+    )
+  ));
+}
+
+function resetReliableInputTransportGeneration(queue: ReliableInputSessionQueue) {
+  let resetCount = 0;
+  for (const item of queue.items) {
+    if (!isReliableInputInFlight(item)) {
+      continue;
+    }
+    item.sentAt = null;
+    item.sentTargetKey = null;
+    item.sentTransportSocket = null;
+    resetCount += 1;
+  }
+  return resetCount;
+}
+
 function getReliableInputQueue(sessionId: string, options: SendInputTransportOptions) {
   const current = reliableInputQueues.get(sessionId);
   if (current) {
@@ -259,37 +294,71 @@ function flushReliableInputQueue(sessionId: string) {
     return;
   }
 
-  const item = queue.items[0];
-  if (!item) {
+  if (queue.items.length === 0) {
     clearReliableInputTimer(queue);
     reliableInputQueues.delete(sessionId);
     return;
   }
-  if (isReliableInputInFlight(item)) {
-    const retryDecision = shouldRetryReliableInputInFlight(item, resource);
-    if (!retryDecision.retry) {
+
+  const transportGenerationChanged = hasReliableInputTransportGenerationChanged(queue, resource);
+  if (transportGenerationChanged) {
+    const resetCount = resetReliableInputTransportGeneration(queue);
+    queue.options.runtimeDebug('session.input.reliable-retry.transport-generation', {
+      sessionId,
+      queueDepth: queue.items.length,
+      resetCount,
+      resourceTargetKey: resource.targetKey,
+    });
+  }
+
+  const oldestItem = queue.items[0]!;
+  let retryDelayMs = TERMINAL_RELIABLE_INPUT_RETRY_MS;
+  if (!transportGenerationChanged && isReliableInputInFlight(oldestItem)) {
+    const retryDecision = shouldRetryReliableInputInFlight(oldestItem);
+    retryDelayMs = Math.max(TERMINAL_RELIABLE_INPUT_RETRY_MS, retryDecision.delayMs);
+    if (retryDecision.retry) {
+      queue.options.runtimeDebug('session.input.reliable-retry.in-flight', {
+        sessionId,
+        seq: oldestItem.seq,
+        attempt: oldestItem.attempt,
+        reason: retryDecision.reason,
+        queueDepth: queue.items.length,
+        resourceTargetKey: resource.targetKey,
+        transportSocketChanged: oldestItem.sentTransportSocket !== resource.socket,
+      });
+      oldestItem.sentAt = null;
+    } else {
       queue.options.runtimeDebug('session.input.reliable-wait.ack', {
         sessionId,
-        seq: item.seq,
-        attempt: item.attempt,
+        seq: oldestItem.seq,
+        attempt: oldestItem.attempt,
         queueDepth: queue.items.length,
       });
-      scheduleReliableInputFlush(queue, retryDecision.delayMs);
-      return;
     }
-    queue.options.runtimeDebug('session.input.reliable-retry.in-flight', {
-      sessionId,
-      seq: item.seq,
-      attempt: item.attempt,
-      reason: retryDecision.reason,
-      queueDepth: queue.items.length,
-      resourceTargetKey: resource.targetKey,
-      transportSocketChanged: item.sentTransportSocket !== resource.socket,
-    });
-    item.sentAt = null;
   }
-  sendReliableInputFrame(queue, item, ws, resource);
-  scheduleReliableInputFlush(queue);
+
+  const availableInFlight = Math.max(
+    0,
+    TERMINAL_RELIABLE_INPUT_MAX_IN_FLIGHT - countReliableInputInFlight(queue),
+  );
+  let sentInFlush = 0;
+  for (const item of queue.items) {
+    if (sentInFlush >= availableInFlight) {
+      break;
+    }
+    if (isReliableInputInFlight(item)) {
+      continue;
+    }
+    sendReliableInputFrame(queue, item, ws, resource);
+    sentInFlush += 1;
+    const bufferedBytesAfterSend = Number.isFinite(ws.bufferedAmount)
+      ? Math.max(0, Math.floor(ws.bufferedAmount || 0))
+      : 0;
+    if (bufferedBytesAfterSend >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES) {
+      break;
+    }
+  }
+  scheduleReliableInputFlush(queue, retryDelayMs);
 }
 
 export function enqueueReliableInputChunks(options: SendInputTransportOptions, sessionId: string, inputChunks: string[]) {
@@ -341,20 +410,11 @@ function computeReliableInputRetryDelayMs(attempt: number, baseMs = TERMINAL_REL
   return delay;
 }
 
-function shouldRetryReliableInputInFlight(item: ReliableInputQueueItem, resource: SessionTransportResource) {
+function shouldRetryReliableInputInFlight(item: ReliableInputQueueItem) {
   if (item.sentAt === null) {
     return { retry: false, delayMs: computeReliableInputRetryDelayMs(item.attempt), reason: null };
   }
   const ageMs = Math.max(0, Date.now() - item.sentAt);
-  const transportChanged = item.sentTargetKey !== resource.targetKey
-    || item.sentTransportSocket !== resource.socket;
-  if (transportChanged) {
-    return {
-      retry: true,
-      delayMs: computeReliableInputRetryDelayMs(item.attempt + 1),
-      reason: 'transport-generation-changed',
-    };
-  }
   if (ageMs >= TERMINAL_RELIABLE_INPUT_ACK_TIMEOUT_MS) {
     return {
       retry: true,
