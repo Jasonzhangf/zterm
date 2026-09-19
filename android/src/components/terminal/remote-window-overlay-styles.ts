@@ -156,6 +156,7 @@ export const styles: Record<string, CSSProperties> = {
   },
   headerModeButton: {
     flex: '0 0 auto',
+    height: 48,
     minWidth: 48,
     minHeight: 48,
     padding: '0 8px',
@@ -168,6 +169,7 @@ export const styles: Record<string, CSSProperties> = {
   },
   headerModeButtonActive: {
     flex: '0 0 auto',
+    height: 48,
     minWidth: 48,
     minHeight: 48,
     padding: '0 8px',
@@ -412,12 +414,13 @@ export const styles: Record<string, CSSProperties> = {
     paddingTop: 'calc(44px + env(safe-area-inset-top, 0px))',
     paddingLeft: 'max(8px, env(safe-area-inset-left, 0px))',
     paddingRight: 'max(8px, env(safe-area-inset-right, 0px))',
-    background: 'var(--zterm-stage-bg)',
+    background: 'var(--zterm-stage-bg, #05090f)',
     color: 'var(--zterm-stage-text)',
     contain: 'layout paint',
     isolation: 'isolate',
   },
   lockedToolbar: {
+    flex: '0 0 auto',
     minHeight: 40,
     display: 'flex',
     flexDirection: 'column',
@@ -501,6 +504,7 @@ export const styles: Record<string, CSSProperties> = {
   },
   activeAppSwitchButton: {
     width: '100%',
+    height: 48,
     minWidth: 48,
     minHeight: 48,
     display: 'block',
