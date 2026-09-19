@@ -48,6 +48,7 @@ function createSession(id: string, bufferedAmount = 0): TerminalSession {
     sessionName: 'demo',
     mirrorKey: 'demo',
     bodySubscribed: true,
+    sessionAttachHeartbeatAt: Date.now(),
     pendingPasteImage: null,
     pendingAttachFile: null,
   };

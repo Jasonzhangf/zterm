@@ -14,6 +14,7 @@ import { buildRequestedRangeBufferPayload } from './buffer-sync-contract';
 import { createDaemonBufferPublisherRuntime } from './daemon-buffer-publisher-runtime';
 import { detachMirrorSubscriber, releaseMirrorSubscribers } from './mirror-lifecycle';
 import { resolveTerminalLiveSyncDelay } from './terminal-performance-scheduler';
+import { isSessionAttachLeaseExpired } from './terminal-session-attach-lease-runtime';
 import type { DaemonInputQueueRuntime } from './daemon-input-queue-runtime';
 import type { AdaptiveWidthOwnershipStore } from './adaptive-width-ownership-store';
 import type {
@@ -203,6 +204,9 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     for (const sessionId of mirror.subscribers) {
       const session = sessions.get(sessionId);
       if (!session || session.bodySubscribed === false) {
+        continue;
+      }
+      if (isSessionAttachLeaseExpired(session)) {
         continue;
       }
       if (!session.transport || session.transport.readyState !== 1) {
