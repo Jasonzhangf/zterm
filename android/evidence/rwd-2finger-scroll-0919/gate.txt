@@ -6,16 +6,14 @@ Date: 2026-09-18
 ## Binding
 
 The reviewed range is 15d2c0dc..HEAD. Source and test files under test, with their blob
-hashes in the candidate tree (HEAD at the time the gates were last run):
-  runtime          android/src/lib/remote-window-touch-action-runtime.ts   ed4c735e6d8b75528909cd63ffbb9645e0137e6f
-  runtime test     android/src/lib/remote-window-touch-action-runtime.test.ts   fb070279510664cc8f6943d3e9ab195c0b26138a
+hashes in the candidate tree at commit c928b378:
+  runtime          android/src/lib/remote-window-touch-action-runtime.ts   27f4ea62234324e1c8276b722b56fb053a78f434
+  runtime test     android/src/lib/remote-window-touch-action-runtime.test.ts   6379a0c4e6bccf5a5e895858b9d095a465369502
   overlay gate     android/src/components/terminal/RemoteWindowOverlay.test.tsx   3b961e4a9f226d4d92f2b3fd7407141fe336934c
-  evidence         android/evidence/rwd-2finger-scroll-0919/gate.txt   3d554aa407b02ca06f95bd7347c8dc6b7fe965bb
 
-The blob hashes above are the 3d9ae8c3 tree. Later commits in the same range change only
-this evidence file and the runtime/test blobs noted in the "Post-fix device evidence"
-section, which records its own tree. The sections below are labelled with the tree they
-belong to; the "Reversal fix" section records the current candidate.
+The runtime/test blobs above are the tree the "Reversal fix" section verified. Earlier
+sections of this file record the 3d9ae8c3 and 509b7f51 trees and say so where they differ.
+This evidence file is excluded from its own binding because its hash changes with each edit.
 
 ## Defect and fix (runtime, not theoretical)
 
