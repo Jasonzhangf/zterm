@@ -1248,6 +1248,10 @@ export function resolveRemoteWindowTouchPairPointerMoveRuntime(options: RemoteWi
   const midpointDeltaX = midpoint.clientX - state.lastMidX;
   const midpointDeltaY = midpoint.clientY - state.lastMidY;
   const midpointShift = Math.hypot(midpointDeltaX, midpointDeltaY);
+  const cumulativeMidpointShift = Math.hypot(
+    midpoint.clientX - state.startMidX,
+    midpoint.clientY - state.startMidY,
+  );
   if (
     state.mode === 'twoFingerCandidate'
     && options.timeMs - state.startedAtMs < REMOTE_WINDOW_TWO_FINGER_OBSERVE_MS
@@ -1272,20 +1276,12 @@ export function resolveRemoteWindowTouchPairPointerMoveRuntime(options: RemoteWi
       midpointShift < REMOTE_WINDOW_TWO_FINGER_SCROLL_DEADZONE_PX
       && Math.abs(scaleRatio - 1) < REMOTE_WINDOW_TWO_FINGER_PINCH_MIN_SCALE_RATIO
     ) {
-      // Neither scroll nor pinch - just update mid tracking
-      return {
-        nextState: { ...state, lastMidX: midpoint.clientX, lastMidY: midpoint.clientY },
-        remoteEvents: [],
-        localEffect: { kind: 'none' },
-        consumed: true,
-      };
-    }
-    if (!hasCoherentTwoFingerVerticalScrollIntent({
-      firstStart: state.firstStart,
-      firstCurrent,
-      secondStart: state.secondStart,
-      secondCurrent,
-    })) {
+      // Neither scroll nor pinch yet. `lastMidX/Y` is the anchor of the last emitted
+      // scroll frame, so it must NOT advance here: the suppressed travel has to
+      // accumulate until it clears the deadzone. Advancing it per sample would compare
+      // against the previous sample (half a finger step under interleaved delivery, so
+      // it never clears the deadzone), and comparing against gesture start instead would
+      // swallow direction reversals.
       return {
         nextState: state,
         remoteEvents: [],
@@ -1293,6 +1289,10 @@ export function resolveRemoteWindowTouchPairPointerMoveRuntime(options: RemoteWi
         consumed: true,
       };
     }
+    // Once committed, the scroll is locked: a start-relative intent re-check would drop
+    // the samples of a reversal back toward the gesture origin (both fingers are near
+    // their start points again, so the coherence magnitude collapses) and leave the
+    // remote target displaced. Pinch takeover is already excluded for this mode.
     const events = buildRemoteWindowTwoFingerScrollEventsRuntime({
       geometry,
       midClientX: midpoint.clientX,
@@ -1315,7 +1315,11 @@ export function resolveRemoteWindowTouchPairPointerMoveRuntime(options: RemoteWi
       : { kind: 'none' };
     // Both twoFingerScroll and twoFingerCandidate can produce scroll events
     return {
-      nextState: { ...state, lastMidX: midpoint.clientX, lastMidY: midpoint.clientY },
+      nextState: {
+        ...state,
+        lastMidX: midpoint.clientX,
+        lastMidY: midpoint.clientY,
+      },
       remoteEvents: events,
       localEffect: scrollEffect,
       consumed: true,
@@ -1420,7 +1424,7 @@ export function resolveRemoteWindowTouchPairPointerMoveRuntime(options: RemoteWi
       secondStart: state.secondStart,
       secondCurrent,
     });
-  if (midpointShift >= REMOTE_WINDOW_TWO_FINGER_SCROLL_MIN_MIDPOINT_PX
+  if (cumulativeMidpointShift >= REMOTE_WINDOW_TWO_FINGER_SCROLL_MIN_MIDPOINT_PX
     && (coherentPanIntent || coherentScrollIntent)
   ) {
     if (coherentPanIntent) {
@@ -1453,8 +1457,12 @@ export function resolveRemoteWindowTouchPairPointerMoveRuntime(options: RemoteWi
       geometry,
       midClientX: midpoint.clientX,
       midClientY: midpoint.clientY,
-      rawDeltaX: midpointDeltaX,
-      rawDeltaY: midpointDeltaY,
+      // Observe-window travel was accepted but never emitted; the commit event
+      // must carry the accumulated travel since gesture start, not just the
+      // per-sample delta, so a slow two-finger swipe does not lose its pre-commit
+      // displacement to the remote target.
+      rawDeltaX: midpoint.clientX - state.startMidX,
+      rawDeltaY: midpoint.clientY - state.startMidY,
       scrollFraction: scrollFraction ?? REMOTE_WINDOW_TOUCH_SCROLL_DEFAULT_FRACTION,
       inverted: invertGestureDirection ?? false,
       phase: 'start',
