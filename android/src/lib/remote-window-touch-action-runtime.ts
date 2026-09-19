@@ -109,7 +109,6 @@ export type RemoteWindowTouchPointerState =
       startMidY: number;
       lastMidX: number;
       lastMidY: number;
-      lastObservedDistance: number;
       startedAtMs: number;
       scrollGestureId?: string;
       committed: true;
@@ -1275,37 +1274,9 @@ export function resolveRemoteWindowTouchPairPointerMoveRuntime(options: RemoteWi
         consumed: true,
       };
     }
-    // 已提交的 scroll 保持锁存。但 anti-parallel（两指反向、指间距变化占主导）
-    // 属于 pinch 意图，不能在 scroll 通道里被当作中点位移发出去。这里必须用
-    // 差模/共模比较，而不是 start-relative 的位移方向：手指回到手势原点时位移
-    // 归零，用位移方向会丢掉反向补偿样本，让远端停在错误位置。共模基准必须取
-    // 上一帧已发送的中点与独立 distance 观察锚，取手势起点会把已经发出去
-    // 的 scroll 行程算进共模，导致双指交错样本里单指先动的一帧被误判成 scroll。
-    if (
-      Math.abs(scaleRatio - 1) >= REMOTE_WINDOW_TWO_FINGER_PINCH_MIN_SCALE_RATIO
-      && hasDominantPinchDifferentialMotion({
-        startMidX: state.lastMidX,
-        startMidY: state.lastMidY,
-        currentMidX: midpoint.clientX,
-        currentMidY: midpoint.clientY,
-        startDistance: state.lastObservedDistance,
-        currentDistance: distance,
-      })
-    ) {
-      return {
-        nextState: {
-          ...state,
-          lastObservedDistance: distance,
-        },
-        remoteEvents: [],
-        localEffect: { kind: 'none' },
-        consumed: true,
-      };
-    }
-    // Once committed, the scroll is locked: a start-relative intent re-check would drop
-    // the samples of a reversal back toward the gesture origin (both fingers are near
-    // their start points again, so the coherence magnitude collapses) and leave the
-    // remote target displaced. Pinch takeover is already excluded for this mode.
+    // Once committed, the scroll is locked until the pointer sequence ends.
+    // Pinch classification belongs to the candidate phase; re-checking it here
+    // would drop midpoint movement from interleaved pointer samples.
     const events = buildRemoteWindowTwoFingerScrollEventsRuntime({
       geometry,
       midClientX: midpoint.clientX,
@@ -1332,7 +1303,6 @@ export function resolveRemoteWindowTouchPairPointerMoveRuntime(options: RemoteWi
         ...state,
         lastMidX: midpoint.clientX,
         lastMidY: midpoint.clientY,
-        lastObservedDistance: distance,
       },
       remoteEvents: events,
       localEffect: scrollEffect,
@@ -1494,7 +1464,6 @@ export function resolveRemoteWindowTouchPairPointerMoveRuntime(options: RemoteWi
         startMidY: state.startMidY,
         lastMidX: midpoint.clientX,
         lastMidY: midpoint.clientY,
-        lastObservedDistance: distance,
         startedAtMs: state.startedAtMs,
         scrollGestureId: `scroll-${state.firstPointerId}-${state.startedAtMs}`,
         committed: true,

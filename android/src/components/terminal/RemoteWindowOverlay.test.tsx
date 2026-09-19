@@ -4634,7 +4634,7 @@ describe('RemoteWindowOverlay', () => {
     expect(sendInput).not.toHaveBeenCalled();
   });
 
-  it('lets an active two-finger scroll become pinch zoom only after clear distance change', async () => {
+  it('keeps an active two-finger scroll latched across later distance changes', async () => {
     const mediaStream = { id: 'media-stream-1' } as MediaStream;
     const sendInput = vi.fn();
     const requestTargets = vi.fn(async () => ({
@@ -4686,11 +4686,20 @@ describe('RemoteWindowOverlay', () => {
     sendInput.mockClear();
 
     fireEvent.pointerMove(surface, { pointerId: 81, pointerType: 'touch', clientX: 70, clientY: 90, button: 0, buttons: 1 });
-    expect(sendInput).not.toHaveBeenCalled();
+    await waitForActionRemoteInputCount(sendInput, 1);
+    expect(sendInput).toHaveBeenCalledTimes(1);
+    expect(actionRemoteInputPayloads(sendInput).map((payload) => payload.event)).toEqual([
+      expect.objectContaining({ kind: 'scroll' }),
+    ]);
     fireEvent.pointerMove(surface, { pointerId: 82, pointerType: 'touch', clientX: 230, clientY: 90, button: 0, buttons: 1 });
 
     expect(screen.queryByTestId('remote-window-minimap')).toBeNull();
-    expect(sendInput).not.toHaveBeenCalled();
+    await waitForActionRemoteInputCount(sendInput, 2);
+    expect(sendInput).toHaveBeenCalledTimes(2);
+    expect(actionRemoteInputPayloads(sendInput).map((payload) => payload.event)).toEqual([
+      expect.objectContaining({ kind: 'scroll' }),
+      expect.objectContaining({ kind: 'scroll' }),
+    ]);
   });
 
   it('routes zoomed fullscreen two-finger vertical movement to remote scroll', async () => {
