@@ -3,6 +3,12 @@ import AppKit
 import CoreGraphics
 import Foundation
 
+@_silgen_name("_AXUIElementGetWindow")
+func _AXUIElementGetWindow(
+    _ element: AXUIElement,
+    _ windowId: UnsafeMutablePointer<CGWindowID>
+) -> AXError
+
 struct InputConfig: Decodable {
     let pid: Int32
     let appBundleId: String
@@ -67,10 +73,6 @@ func inputError(_ message: String, code: Int = 1) -> NSError {
     return NSError(domain: "RemoteWindowInput", code: code, userInfo: [NSLocalizedDescriptionKey: message])
 }
 
-func closeEnough(_ lhs: Double, _ rhs: Double, tolerance: Double = 8.0) -> Bool {
-    return abs(lhs - rhs) <= tolerance
-}
-
 func copyAttribute(_ element: AXUIElement, _ attribute: String) -> AnyObject? {
     var value: CFTypeRef?
     let result = AXUIElementCopyAttributeValue(element, attribute as CFString, &value)
@@ -78,35 +80,6 @@ func copyAttribute(_ element: AXUIElement, _ attribute: String) -> AnyObject? {
         return nil
     }
     return value as AnyObject?
-}
-
-func rectScore(_ position: CGPoint, _ size: CGSize, _ bounds: Rect) -> Double {
-    return abs(position.x - bounds.x)
-        + abs(position.y - bounds.y)
-        + abs(size.width - bounds.width)
-        + abs(size.height - bounds.height)
-}
-
-func axPoint(_ value: AnyObject?) -> CGPoint? {
-    guard let value = value else { return nil }
-    let axValue = value as! AXValue
-    var point = CGPoint.zero
-    if AXValueGetType(axValue) != .cgPoint {
-        return nil
-    }
-    AXValueGetValue(axValue, .cgPoint, &point)
-    return point
-}
-
-func axSize(_ value: AnyObject?) -> CGSize? {
-    guard let value = value else { return nil }
-    let axValue = value as! AXValue
-    var size = CGSize.zero
-    if AXValueGetType(axValue) != .cgSize {
-        return nil
-    }
-    AXValueGetValue(axValue, .cgSize, &size)
-    return size
 }
 
 func frontmostProcessPidFromSystemEvents() -> Int32? {
@@ -155,22 +128,35 @@ func waitForRunningApplication(_ pid: Int32) -> NSRunningApplication? {
     return nil
 }
 
-func axWindowMatchesBounds(_ window: AXUIElement, _ bounds: Rect) -> Bool {
+func parseTargetWindowId(_ config: InputConfig) throws -> CGWindowID {
     guard
-        let position = axPoint(copyAttribute(window, kAXPositionAttribute)),
-        let size = axSize(copyAttribute(window, kAXSizeAttribute))
+        let rawWindowId = CGWindowID(config.window.windowId),
+        rawWindowId > 0
     else {
-        return false
+        throw inputError("remote input target window id is invalid", code: 4)
     }
-    return rectScore(position, size, bounds) <= 96.0
+    return rawWindowId
 }
 
-func focusedWindowMatchesTarget(_ appElement: AXUIElement, _ bounds: Rect) -> Bool {
+func axWindowId(_ window: AXUIElement) -> CGWindowID? {
+    var windowId = CGWindowID(0)
+    guard _AXUIElementGetWindow(window, &windowId) == .success, windowId > 0 else {
+        return nil
+    }
+    return windowId
+}
+
+func focusedWindowMatchesTarget(_ appElement: AXUIElement, _ targetWindowId: CGWindowID) -> Bool {
     guard let focusedWindow = copyAttribute(appElement, kAXFocusedWindowAttribute) else {
         return false
     }
     let focusedElement = focusedWindow as! AXUIElement
-    return axWindowMatchesBounds(focusedElement, bounds)
+    return axWindowId(focusedElement) == targetWindowId
+}
+
+func findAxWindow(_ appElement: AXUIElement, _ targetWindowId: CGWindowID) -> AXUIElement? {
+    let windows = copyAttribute(appElement, kAXWindowsAttribute) as? [AXUIElement] ?? []
+    return windows.first { axWindowId($0) == targetWindowId }
 }
 
 func activateTargetApplication(_ config: InputConfig, _ app: NSRunningApplication) {
@@ -196,42 +182,27 @@ func focusTargetWindow(_ config: InputConfig) throws {
         throw NSError(domain: "RemoteWindowInput", code: 3, userInfo: [NSLocalizedDescriptionKey: "remote input target app is not running pid=" + String(config.pid)])
     }
     let appElement = AXUIElementCreateApplication(config.pid)
+    let targetWindowId = try parseTargetWindowId(config)
     // 同一应用可有多个窗口；前台 PID 不等于目标窗口已聚焦。
-    if frontmostPidMatches(config.pid) && focusedWindowMatchesTarget(appElement, config.window.bounds) {
+    if frontmostPidMatches(config.pid) && focusedWindowMatchesTarget(appElement, targetWindowId) {
         return
     }
-    let windows = copyAttribute(appElement, kAXWindowsAttribute) as? [AXUIElement] ?? []
-    var bestWindow: AXUIElement?
-    var bestScore = Double.greatestFiniteMagnitude
-    for window in windows {
-        guard
-            let position = axPoint(copyAttribute(window, kAXPositionAttribute)),
-            let size = axSize(copyAttribute(window, kAXSizeAttribute))
-        else {
-            continue
-        }
-        let score = rectScore(position, size, config.window.bounds)
-        if score < bestScore {
-            bestScore = score
-            bestWindow = window
-        }
+    guard let window = findAxWindow(appElement, targetWindowId) else {
+        throw inputError("remote input target window could not be matched for focus", code: 4)
     }
-    guard let window = bestWindow, bestScore <= 96.0 else {
-        throw NSError(domain: "RemoteWindowInput", code: 4, userInfo: [NSLocalizedDescriptionKey: "remote input target window could not be matched for focus"])
-    }
-	    var isFrontmost = false
-	    var isFocused = false
-	    for attempt in 0..<3 {
-	        activateTargetApplication(config, app)
-	        AXUIElementSetAttributeValue(appElement, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
-	        AXUIElementPerformAction(window, kAXRaiseAction as CFString)
-	        AXUIElementSetAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, window)
-	        AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
-	        AXUIElementSetAttributeValue(window, kAXFocusedAttribute as CFString, kCFBooleanTrue)
-	        AXUIElementSetAttributeValue(appElement, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
-	        usleep(attempt == 0 ? 120000 : 180000)
+    var isFrontmost = false
+    var isFocused = false
+    for attempt in 0..<3 {
+        activateTargetApplication(config, app)
+        AXUIElementSetAttributeValue(appElement, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
+        AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+        AXUIElementSetAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, window)
+        AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
+        AXUIElementSetAttributeValue(window, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+        AXUIElementSetAttributeValue(appElement, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
+        usleep(attempt == 0 ? 120000 : 180000)
         isFrontmost = frontmostPidMatches(config.pid)
-        isFocused = focusedWindowMatchesTarget(appElement, config.window.bounds)
+        isFocused = focusedWindowMatchesTarget(appElement, targetWindowId)
         if isFrontmost && isFocused {
             return
         }
@@ -252,24 +223,9 @@ func findTargetWindow(_ config: InputConfig) throws -> AXUIElement {
         throw NSError(domain: "RemoteWindowInput", code: 3, userInfo: [NSLocalizedDescriptionKey: "remote input target app is not running pid=" + String(config.pid)])
     }
     let appElement = AXUIElementCreateApplication(config.pid)
-    let windows = copyAttribute(appElement, kAXWindowsAttribute) as? [AXUIElement] ?? []
-    var bestWindow: AXUIElement?
-    var bestScore = Double.greatestFiniteMagnitude
-    for window in windows {
-        guard
-            let position = axPoint(copyAttribute(window, kAXPositionAttribute)),
-            let size = axSize(copyAttribute(window, kAXSizeAttribute))
-        else {
-            continue
-        }
-        let score = rectScore(position, size, config.window.bounds)
-        if score < bestScore {
-            bestScore = score
-            bestWindow = window
-        }
-    }
-    guard let window = bestWindow, bestScore <= 96.0 else {
-        throw NSError(domain: "RemoteWindowInput", code: 4, userInfo: [NSLocalizedDescriptionKey: "remote input target window could not be matched"])
+    let targetWindowId = try parseTargetWindowId(config)
+    guard let window = findAxWindow(appElement, targetWindowId) else {
+        throw inputError("remote input target window could not be matched", code: 4)
     }
     return window
 }
