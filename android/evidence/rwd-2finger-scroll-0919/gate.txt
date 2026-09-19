@@ -1,19 +1,21 @@
 # Gate evidence: two-finger same-direction remote scroll never committed
 
-Candidate commit: 3d9ae8c321c7c7ff3b4a1fbc5b33ddbeee3907a6
-Base: ddef58c8 (local main, build 3039); origin/main at the time: ace989e2
+Base: 15d2c0dc (origin/main merge of PR #90)
 Date: 2026-09-18
 
 ## Binding
 
-Source and test files under test, with their blob hashes in this commit:
-  runtime          android/src/lib/remote-window-touch-action-runtime.ts
-  runtime test     android/src/lib/remote-window-touch-action-runtime.test.ts
-  overlay gate     android/src/components/terminal/RemoteWindowOverlay.test.tsx
-  evidence         android/evidence/rwd-2finger-scroll-0919/gate.txt
+The reviewed range is 15d2c0dc..HEAD. Source and test files under test, with their blob
+hashes in the candidate tree (HEAD at the time the gates were last run):
+  runtime          android/src/lib/remote-window-touch-action-runtime.ts   ed4c735e6d8b75528909cd63ffbb9645e0137e6f
+  runtime test     android/src/lib/remote-window-touch-action-runtime.test.ts   fb070279510664cc8f6943d3e9ab195c0b26138a
+  overlay gate     android/src/components/terminal/RemoteWindowOverlay.test.tsx   3b961e4a9f226d4d92f2b3fd7407141fe336934c
+  evidence         android/evidence/rwd-2finger-scroll-0919/gate.txt   3d554aa407b02ca06f95bd7347c8dc6b7fe965bb
 
-The only file in this commit that is not covered by the gate commands below is this
-evidence file itself.
+The blob hashes above are the 3d9ae8c3 tree. Later commits in the same range change only
+this evidence file and the runtime/test blobs noted in the "Post-fix device evidence"
+section, which records its own tree. The sections below are labelled with the tree they
+belong to; the "Reversal fix" section records the current candidate.
 
 ## Defect and fix (runtime, not theoretical)
 
@@ -205,8 +207,38 @@ Both fixes are therefore confirmed at the real wire boundary on a device, not on
 runtime replay: the commit gate and the update gate now both use cumulative start-relative
 travel, and the commit frame carries the accumulated observe-window travel.
 
-## Remaining not-verified
+## 15T real-device acceptance (build 3049, commit 509b7f51)
 
-- 15T (100.104.163.65:5555) acceptance: the device is reachable over adb now but runs build
-  3031, so it cannot exercise this candidate. Real-device acceptance requires the OTA
-  upgrade to land first.
+15T (100.104.163.65:5555, PLZ110, 1216x2640 @ 3.5 dpr) accepted a manual `adb install -r`
+of the same 3049 APK. Overlay opened on `remote-window-target-app-window:28882:17799`
+(TextEdit) with a live stream. Same wire-counting matrix as the emulator:
+
+  1x  1F 18x5px swipe            -> 14 scroll frames
+  1x  2F 18x4.4px same-dir       -> 15 scroll frames
+  1x  2F  9x8.9px same-dir       ->  9 scroll frames
+  1x  2F  5x16px same-dir        ->  3 scroll frames
+  1x  2F pinch out               ->  0 remote frames, local scale 0.704 -> 1.69
+  zoomed 1F swipe                ->  0 remote frames (local pan only)
+  zoomed 2F 18x4.4px same-dir    -> 16 scroll frames
+  zoomed 2F 5x16px same-dir      ->  4 scroll frames
+
+The two-finger same-direction cases that were dead on the pre-fix build all produce
+scroll frames on the real device, and the zoomed single-finger case stays local.
+
+## Reversal fix (candidate c928b378, after review r6)
+
+Review r6 found that the update gate introduced by 509b7f51 compared travel against the
+gesture start, so a committed scroll that reverses direction (including a return to the
+gesture origin) had its return samples suppressed and left the remote target displaced.
+The gate now compares against the last EMITTED frame anchor and no longer advances that
+anchor on a suppressed sample, so the suppressed travel accumulates until it clears the
+deadzone. The redundant start-relative coherence re-check on the committed path is removed
+because committed scroll is already locked.
+
+Fail-first: with the runtime reverted to f07445b1, the new
+"emits the reversal when a committed two-finger scroll returns to its origin" case fails
+with `expected 60 to be close to +0`; with the fix it passes. The interleaved-delivery case
+above still passes, so both defects are covered by one gate basis.
+
+Verified on c928b378: focused gate 3 files / 43 tests pass, `pnpm run type-check` exit 0,
+`pnpm run test:feature-registry` 13 files / 104 tests pass.
