@@ -275,3 +275,21 @@ Reversal cases on the same device and build:
 
 This is the evidence review r7 asked for: the changed reversal path is exercised on the
 real device with a rebuilt, hash-identified candidate APK.
+
+## Delivery closure (main 7e8b3bbd, OTA build 3050)
+
+  candidate review PASS   codex-review rwd-2finger-scroll-0919-r8 (mode=base, base=15d2c0dc,
+                          commit=7122e6d3), controller verdict `pass`
+  merge to main           PR #91 -> c26f4f47; build record PR #92 -> 7e8b3bbd
+  rebuild from main       worktree playground/rwd-2f-ota3050-main at origin/main 7e8b3bbd
+  artifact                versionName 0.1.3.3050, versionCode 1100030500,
+                          sha256 cf0ab9055c2e8acb5970ceccbf30236cb8c08e31195f341f59e2d5a73bb3a618
+  OTA publish             ~/.zterm/updates/latest.json = 0.1.3.3050, same sha256; served by the
+                          daemon at http://127.0.0.1:3333/updates/latest.json with the same sha256
+  bundle verify           scripts/verify-update-bundle.mjs: all 18 checks true
+  15T OTA upgrade         15T was downgraded to 3049, the in-app updater detected 0.1.3.3050,
+                          downloaded and installed it; `dumpsys package` then reported
+                          0.1.3.3050 / versionCode 1100030500
+  15T post-OTA behavior   overlay opened on remote-window-target-app-window:28882:17799 and the
+                          reversal gesture still emitted 4 frames summing to 0.00, i.e. the
+                          OTA-delivered build behaves the same as the reviewed candidate
