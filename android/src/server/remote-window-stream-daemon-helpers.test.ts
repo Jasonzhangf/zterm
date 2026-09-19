@@ -46,12 +46,39 @@ describe('remote-window-stream-daemon-helpers', () => {
 
   it('requires the daemon input owner to verify the focused target window atomically', () => {
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain(
-      'frontmostPidMatches(config.pid) && focusedWindowMatchesTarget(appElement, config.window.bounds)',
+      'frontmostPidMatches(config.pid) && focusedWindowMatchesTarget(appElement, targetWindowId)',
     );
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('@_silgen_name("_AXUIElementGetWindow")');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('CGWindowID');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).not.toContain('rectScore(');
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('try focusTargetWindow(config)');
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).not.toContain('skipFocus');
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('let isContinuousMotion = config.event.kind == "scroll"');
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('if !isContinuousMotion {');
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).not.toContain('lastVerifiedFocusAt');
+  });
+
+  it('matches the exact CG window when AX frames differ from CG bounds', () => {
+    const targetCgBounds = { x: 100, y: 100, width: 800, height: 620 };
+    const targetAxFrame = { x: 100, y: 128, width: 800, height: 592 };
+    const siblingAxFrame = { x: 104, y: 124, width: 800, height: 596 };
+    const oldBoundsScore = (frame: typeof targetAxFrame) =>
+      Math.abs(frame.x - targetCgBounds.x)
+      + Math.abs(frame.y - targetCgBounds.y)
+      + Math.abs(frame.width - targetCgBounds.width)
+      + Math.abs(frame.height - targetCgBounds.height);
+
+    expect(oldBoundsScore(siblingAxFrame)).toBeLessThan(oldBoundsScore(targetAxFrame));
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain(
+      'return windows.first { axWindowId($0) == targetWindowId }',
+    );
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).not.toContain('config.window.title');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).not.toContain('window.pid');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain(
+      'throw inputError("remote input target window could not be matched", code: 4)',
+    );
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain(
+      'throw inputError("remote input target window could not be matched for focus", code: 4)',
+    );
   });
 });
