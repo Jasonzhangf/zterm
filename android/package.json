@@ -6,6 +6,9 @@
   "scripts": {
     "predev": "chmod +x node_modules/node-pty/prebuilds/darwin-*/spawn-helper ../node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null; command -v portless >/dev/null 2>&1 || (echo '\\nportless is required but not installed. Run: npm i -g portless\\n' && exit 1)",
     "prebuild": "bash ./scripts/ensure-pnpm-install.sh; install_status=$?; chmod +x node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null; node ./scripts/run-prebuild-gates.mjs; gate_status=$?; if [ \"$install_status\" -ne 0 ]; then exit \"$install_status\"; fi; exit \"$gate_status\"",
+    "test:prebuild-gates": "node ./scripts/run-prebuild-gates.mjs",
+    "test:prebuild-gates:unit": "node --test ./scripts/run-prebuild-gates.test.mjs",
+    "test:ci-gates": "node ./scripts/run-prebuild-gates.mjs --profile ci",
     "test:build-version": "node --test ./scripts/bump-build-version.test.mjs ./scripts/verify-update-manifest-version.test.mjs",
     "test:android-network-identity": "pnpm exec vitest run src/lib/android-network-identity-truth.test.ts src/lib/client-daemon-connection.test.ts src/lib/network-identity.test.ts src/hooks/useOpenTabLifecycleEffects.test.tsx src/contexts/session-context-target-network-probe-runtime.test.ts src/contexts/session-context-transport-orchestration-runtime.test.ts src/App.dynamic-refresh.test.tsx",
     "test:traversal": "pnpm exec vitest run src/lib/traversal/socket.test.ts src/lib/traversal/route-health-cache.test.ts src/lib/traversal/route-selector.test.ts src/lib/traversal/config.test.ts --reporter dot",
@@ -29,6 +32,7 @@
     "test:settings-connection-config": "pnpm exec vitest run src/pages/SettingsPage.relay-account.test.tsx src/components/settings/connection-config-entries.test.ts",
     "test:remote-window-ui": "pnpm exec vitest run src/lib/plugin-remote-window/remote-window-ui-ownership.test.ts src/lib/plugin-host/plugin-host-runtime.test.ts src/pages/TerminalPage.remote-window-overlay.test.tsx src/pages/TerminalPage.android-ime.test.tsx src/App.dynamic-refresh.test.tsx",
     "test:remote-window-webrtc-loopback": "node ./scripts/remote-window-webrtc-loopback-gate.mjs",
+    "test:remote-screenshot-regression": "pnpm exec vitest run src/lib/remote-screenshot-runtime.test.ts src/lib/remote-screenshot-preview-runtime.test.ts src/pages/TerminalPage.remote-screenshot.test.tsx src/server/remote-screenshot-daemon-blackbox.test.ts src/server/remote-screenshot.test.ts --reporter dot",
     "test:quickbar-ui": "pnpm exec vitest run src/lib/plugin-quickbar/quickbar-ui-ownership.test.ts src/lib/plugin-host/plugin-host-runtime.test.ts src/pages/TerminalPage.render-isolation.test.tsx src/App.dynamic-refresh.test.tsx",
     "test:terminal-shell-ui": "pnpm exec vitest run src/lib/plugin-terminal-shell/terminal-shell-ui-ownership.test.ts src/components/terminal/SessionScheduleSheet.test.tsx src/components/terminal/ZtermDialog.test.tsx src/lib/plugin-host/plugin-host-runtime.test.ts src/pages/TerminalPage.render-isolation.test.tsx src/App.dynamic-refresh.test.tsx",
     "test:composition-root": "pnpm exec vitest run src/lib/composition-root/client-composition-root.test.ts src/lib/composition-root/client-composition-root-ownership.test.ts",
