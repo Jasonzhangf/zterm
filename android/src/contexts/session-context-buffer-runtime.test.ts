@@ -3155,6 +3155,106 @@ describe('session-context-buffer-runtime inactive gating', () => {
     );
   });
 
+  it('does not replace a retained higher-revision frame for a malformed lower-revision chunk', () => {
+    const sessionId = 'session-1';
+    const session = makeSession(sessionId);
+    const localBuffer = createSessionBufferState({
+      lines: ['old-generation-a', 'old-generation-b'],
+      startIndex: 100,
+      endIndex: 102,
+      bufferHeadStartIndex: 100,
+      bufferTailEndIndex: 102,
+      cols: 80,
+      rows: 24,
+      revision: 2,
+      cacheLines: 1000,
+    });
+    session.buffer = localBuffer;
+    const retainedPending = {
+      frameKey: '3:100:104:1234:2',
+      revision: 3,
+      frameStartIndex: 100,
+      frameEndIndex: 104,
+      frameChunkCount: 2,
+      generatedAt: 1234,
+      firstReceivedAt: Date.now(),
+      retainedBytes: 100,
+      chunks: new Map(),
+    };
+    const commitSessionBufferUpdate = vi.fn(() => true);
+    const scheduleSessionRenderCommit = vi.fn();
+    const requestSessionBufferSync = vi.fn(() => true);
+    const runtimeDebug = vi.fn();
+    const tailRefreshStoreRef = makeTailRefreshStoreRef({ resume: [sessionId] });
+    const bufferFrameAssemblyRef = {
+      current: new Map([[sessionId, {
+        pending: retainedPending,
+        error: null,
+        repairDispatchedRevisions: [3],
+      }]]),
+    };
+
+    applyIncomingBufferSyncRuntime({
+      sessionId,
+      payload: {
+        revision: 1,
+        startIndex: 0,
+        endIndex: 2,
+        availableStartIndex: 0,
+        availableEndIndex: 4,
+        frameStartIndex: 0,
+        frameEndIndex: 4,
+        frameChunkIndex: -1,
+        frameChunkCount: 2,
+        generatedAt: 2000,
+        cols: 80,
+        rows: 24,
+        cursorKeysApp: false,
+        lines: [
+          { ...makeLine('malformed-a'), index: 0 },
+          { ...makeLine('malformed-b'), index: 1 },
+        ],
+      },
+      refs: {
+        stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
+        sessionRevisionResetRef: { current: new Map() },
+        sessionHeadStoreRef: makeLiveHeadStoreRef(),
+        tailRefreshStoreRef,
+        bufferFrameAssemblyRef,
+        sessionVisibleRangeRef: {
+          current: new Map([[sessionId, { startIndex: 100, endIndex: 102, viewportRows: 2 }]]),
+        },
+      },
+      readSessionBufferSnapshot: () => localBuffer,
+      resolveSessionCacheLines: () => 1000,
+      summarizeBufferPayload: (payload) => ({
+        revision: payload.revision,
+        startIndex: payload.startIndex,
+        endIndex: payload.endIndex,
+        lineCount: payload.lines.length,
+      }),
+      runtimeDebug,
+      commitSessionBufferUpdate,
+      scheduleSessionRenderCommit,
+      isSessionTransportActive: () => true,
+      requestSessionBufferSync,
+    });
+
+    const retainedResource = bufferFrameAssemblyRef.current.get(sessionId);
+    expect(retainedResource?.pending).toBe(retainedPending);
+    expect(retainedResource?.repairDispatchedRevisions).toEqual([3]);
+    expect(commitSessionBufferUpdate).not.toHaveBeenCalled();
+    expect(scheduleSessionRenderCommit).not.toHaveBeenCalled();
+    expect(runtimeDebug).toHaveBeenCalledWith(
+      'session.buffer.frame.stale-rejection-observed',
+      expect.objectContaining({
+        error: 'stale-frame',
+        incomingRevision: 1,
+        retainedPendingRevision: 3,
+      }),
+    );
+  });
+
   it('does not rebase a complete lower-revision payload without a resume freshness demand', () => {
     const sessionId = 'session-1';
     const session = makeSession(sessionId);

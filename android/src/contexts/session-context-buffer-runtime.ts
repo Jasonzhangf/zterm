@@ -82,6 +82,12 @@ function readBufferRuntimeSocket(
     || options.readSessionTransportSocket(sessionId);
 }
 
+function readStrictBufferInteger(value: unknown) {
+  return typeof value === 'number' && Number.isSafeInteger(value)
+    ? value
+    : null;
+}
+
 const SESSION_SYNC_REQUEST_DEBOUNCE_MS = 33;
 
 interface RevisionResetExpectation {
@@ -477,27 +483,42 @@ function isAuthoritativeFullTailPayload(options: {
   localBuffer: SessionBufferState;
 }) {
   const payload = options.payload;
-  const incomingRevision = Math.max(0, Math.floor(payload.revision || 0));
-  const localRevision = Math.max(0, Math.floor(options.localBuffer.revision || 0));
+  const incomingRevision = readStrictBufferInteger(payload.revision);
+  const localRevision = readStrictBufferInteger(options.localBuffer.revision);
+  if (incomingRevision === null || localRevision === null) {
+    return false;
+  }
   if (localRevision <= 0 || incomingRevision >= localRevision || payload.lines.length === 0) {
     return false;
   }
-  const startIndex = Math.max(0, Math.floor(payload.startIndex || 0));
-  const endIndex = Math.max(startIndex, Math.floor(payload.endIndex || startIndex));
+  const startIndex = readStrictBufferInteger(payload.startIndex);
+  const endIndex = readStrictBufferInteger(payload.endIndex);
+  if (startIndex === null || startIndex < 0 || endIndex === null) {
+    return false;
+  }
   if (endIndex <= startIndex) {
     return false;
   }
-  const frameChunkCount = Math.max(0, Math.floor(payload.frameChunkCount || 0));
-  const frameStartIndex = Number.isFinite(payload.frameStartIndex)
-    ? Math.max(0, Math.floor(payload.frameStartIndex!))
-    : null;
-  const frameEndIndex = Number.isFinite(payload.frameEndIndex)
-    ? Math.max(0, Math.floor(payload.frameEndIndex!))
-    : null;
-  const frameChunkIndex = Number.isFinite(payload.frameChunkIndex)
-    ? Math.max(0, Math.floor(payload.frameChunkIndex!))
-    : null;
-  const chunkedFrame = frameChunkCount > 1 && frameStartIndex !== null && frameEndIndex !== null;
+  const frameChunkCount = readStrictBufferInteger(payload.frameChunkCount);
+  const frameStartIndex = readStrictBufferInteger(payload.frameStartIndex);
+  const frameEndIndex = readStrictBufferInteger(payload.frameEndIndex);
+  const frameChunkIndex = readStrictBufferInteger(payload.frameChunkIndex);
+  if (frameChunkCount !== null && frameChunkCount < 0) {
+    return false;
+  }
+  if (frameStartIndex !== null && frameStartIndex < 0) {
+    return false;
+  }
+  if (frameEndIndex !== null && frameEndIndex <= 0) {
+    return false;
+  }
+  if (frameChunkIndex !== null && frameChunkIndex < 0) {
+    return false;
+  }
+  const chunkedFrame = frameChunkCount !== null
+    && frameChunkCount > 1
+    && frameStartIndex !== null
+    && frameEndIndex !== null;
   if (chunkedFrame && (frameChunkIndex === null || frameChunkIndex >= frameChunkCount)) {
     return false;
   }
@@ -509,13 +530,18 @@ function isAuthoritativeFullTailPayload(options: {
   if (chunkedFrame && (startIndex < windowStartIndex || endIndex > windowEndIndex)) {
     return false;
   }
-  const availableStartIndex = Number.isFinite(payload.availableStartIndex)
-    ? Math.max(0, Math.floor(payload.availableStartIndex!))
-    : windowStartIndex;
-  const availableEndIndex = Number.isFinite(payload.availableEndIndex)
-    ? Math.max(0, Math.floor(payload.availableEndIndex!))
-    : windowEndIndex;
-  if (windowStartIndex !== availableStartIndex || windowEndIndex !== availableEndIndex) {
+  const availableStartIndex = readStrictBufferInteger(payload.availableStartIndex);
+  const availableEndIndex = readStrictBufferInteger(payload.availableEndIndex);
+  if (
+    (payload.availableStartIndex !== undefined && availableStartIndex === null)
+    || (payload.availableEndIndex !== undefined && availableEndIndex === null)
+  ) {
+    return false;
+  }
+  if (
+    windowStartIndex !== (availableStartIndex ?? windowStartIndex)
+    || windowEndIndex !== (availableEndIndex ?? windowEndIndex)
+  ) {
     return false;
   }
   const lineIndexes = normalizeWireLines(payload.lines, payload.cols || options.localBuffer.cols || 80)
