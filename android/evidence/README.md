@@ -28,7 +28,7 @@ evidence/
 原始日志、DOM/health 快照与安装态截图仍保留在本地 ignored evidence 目录；主线只记录可复核索引。
 
 - Base：`897040f7f46da8f11c31eea0ccc075e47128a9df`
-- 本地 focused：`session-context-buffer-runtime.test.ts` 74/74 PASS；`tsc --noEmit` PASS；`test:feature-registry` 105/105 PASS
+- 本地 focused：`session-context-buffer-runtime.test.ts` + `buffer-frame-assembly` 97/97 PASS；`tsc --noEmit` PASS；`test:feature-registry` 105/105 PASS
 - daemon/tmux close loop：`android/evidence/daemon-mirror/2026-09-20/`，9/9 real cases PASS，`strict-audit.json` `ok=true`（该证据早于当前 candidate，仅证明 daemon/mirror 主链）
 - 历史 exact APK + emulator replay（旧 candidate，不代表当前 candidate）：
   - `bug-8fdaeec-foreground-refresh-main-0919-r4/`：candidate `19c4e296a1040eff486175d38e6e29aabc8685c3`
