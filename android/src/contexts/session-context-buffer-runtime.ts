@@ -1379,7 +1379,24 @@ export function applyIncomingBufferSyncRuntime(options: ApplyIncomingBufferSyncR
   }
 
   const frameAssemblyStore = options.refs.bufferFrameAssemblyRef.current;
-  const currentFrameResource = frameAssemblyStore.get(options.sessionId) || null;
+  const pendingResumeTailRefresh = options.refs.tailRefreshStoreRef.current.hasPendingResumeTailRefresh(options.sessionId);
+  const bodyFirstGenerationReset = (
+    pendingResumeTailRefresh
+    && isAuthoritativeFullTailPayload({
+      payload: options.payload,
+      localBuffer,
+    })
+  );
+  let currentFrameResource = frameAssemblyStore.get(options.sessionId) || null;
+  if (bodyFirstGenerationReset) {
+    const resetFrameResource = resetBufferSyncFrameAssemblyEpoch(currentFrameResource);
+    currentFrameResource = resetFrameResource;
+    if (resetFrameResource) {
+      frameAssemblyStore.set(options.sessionId, resetFrameResource);
+    } else {
+      frameAssemblyStore.delete(options.sessionId);
+    }
+  }
   const frameAssembly = assembleBufferSyncFrameChunk(
     currentFrameResource?.pending || null,
     options.payload,
@@ -1466,14 +1483,6 @@ function applyResolvedBufferSyncPayloadRuntime(options: ApplyResolvedBufferSyncP
       localBuffer,
     })
   );
-  if (bodyFirstGenerationReset) {
-    const resetFrameResource = resetBufferSyncFrameAssemblyEpoch(
-      options.refs.bufferFrameAssemblyRef.current.get(options.sessionId) || null,
-    );
-    if (resetFrameResource) {
-      options.refs.bufferFrameAssemblyRef.current.set(options.sessionId, resetFrameResource);
-    }
-  }
   const revisionResetExpectation = (
     options.refs.sessionRevisionResetRef.current.get(options.sessionId)
     || (bodyFirstGenerationReset
