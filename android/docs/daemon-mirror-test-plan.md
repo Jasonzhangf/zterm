@@ -100,6 +100,7 @@ tmux truth
 - 本次回复是 `buffer-head` 还是 `buffer-sync`
 - `buffer-sync` 实际回了哪个 range
 - 是否出现异常大 payload / 高频重复回复
+- mirror flush 期间 stdout / stderr 是否保持 bounded；不得出现 `mirror.flush.inspect` 或 terminal row / cell 内容
 
 ### Loop 3. client buffer worker
 
