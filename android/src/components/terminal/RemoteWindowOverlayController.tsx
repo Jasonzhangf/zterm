@@ -506,6 +506,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     pointerId: number;
     startPanX: number;
     startPanY: number;
+    moved: boolean;
   } | null>(null);
   const surfacePinchStartRef = useRef<{
     pointerId: number;
@@ -1045,7 +1046,25 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     if (embedded) onExitEmbeddedFullscreen?.();
   }, [embedded, onExitEmbeddedFullscreen, resetFullscreenViewport, setDualStreamSwitch]);
   const handleExplicitClose = useCallback(() => handleClose(true), [handleClose]);
-  const handleRemoteClose = useCallback(() => state.phase === 'targetLocked' && Boolean(currentLockedTarget) && sendRemoteWindowInputEventsForTarget({ sessionId: activeSessionId || null, streamId: currentLockedStreamId, target: currentLockedTarget!, events: [{ kind: 'close-window' }] }) && handleExplicitClose(), [activeSessionId, currentLockedStreamId, currentLockedTarget, handleExplicitClose, sendRemoteWindowInputEventsForTarget, state.phase]);
+  const handleRemoteClose = useCallback(() => {
+    if (state.phase !== 'targetLocked' || !currentLockedTarget) {
+      return;
+    }
+    sendRemoteWindowInputEventsForTarget({
+      sessionId: activeSessionId || null,
+      streamId: currentLockedStreamId,
+      target: currentLockedTarget,
+      events: [{ kind: 'close-window' }],
+    });
+    handleExplicitClose();
+  }, [
+    activeSessionId,
+    currentLockedStreamId,
+    currentLockedTarget,
+    handleExplicitClose,
+    sendRemoteWindowInputEventsForTarget,
+    state.phase,
+  ]);
   const requestRemoteTargetFillResize = useCallback((
     force = false,
   ) => {
@@ -1910,6 +1929,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
         pointerId: effect.pointerId,
         startPanX: fullscreenViewportRef.current.panX,
         startPanY: fullscreenViewportRef.current.panY,
+        moved: false,
       };
       return;
     }
@@ -1918,6 +1938,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       if (!start || start.pointerId !== effect.pointerId) {
         return;
       }
+      start.moved = true;
       const surfaceRect = videoSurfaceRef.current?.getBoundingClientRect();
       if (state.phase === 'targetLocked' && surfaceRect && surfaceRect.width > 0 && surfaceRect.height > 0) {
         const displaySourceSize = resolveRemoteWindowDisplaySourceSize(state.target, receiverFrameSize, focusedWindowSlotRef.current);
@@ -2078,15 +2099,20 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     if (pointers.length >= 2 && event.pointerType === 'touch') {
       clearLongPressTimer();
       const currentGesture = surfaceGestureRef.current;
-      if (currentGesture && (currentGesture.mode === 'localPan' || currentGesture.mode === 'pan')) {
+      const localPanBaseline = surfaceLocalPanStartRef.current;
+      const upgradesAppliedLocalPan = Boolean(
+        currentGesture
+        && (currentGesture.mode === 'localPan' || currentGesture.mode === 'pan')
+        && localPanBaseline
+        && localPanBaseline.moved
+        && localPanBaseline.pointerId === currentGesture.pointerId,
+      );
+      if (upgradesAppliedLocalPan) {
         // 第二指落下即撤销单指阶段已应用的本地 pan，并立刻把控制权交给
         // pair runtime。Android 会把真实双指交错派发为「第一指继续 move」，
         // 若在这里等待第二指自己移动过阈值，第一指后续 move 会被整段吞掉，
         // 表现为双指只拖动窗口、不发远端 scroll。
-        const baseline = surfaceLocalPanStartRef.current;
-        if (baseline && baseline.pointerId === currentGesture.pointerId) {
-          setFullscreenViewport((current) => ({ scale: current.scale, panX: baseline.startPanX, panY: baseline.startPanY }));
-        }
+        setFullscreenViewport((current) => ({ scale: current.scale, panX: localPanBaseline!.startPanX, panY: localPanBaseline!.startPanY }));
         surfaceLocalPanStartRef.current = null;
       }
       const [firstEntry, secondEntry] = pointers.slice(-2) as [
@@ -2113,6 +2139,9 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
         timeMs: event.timeStamp,
         pinchEnabled: true,
         scrollEnabled: true,
+        // 只有已经实际应用过单指 local pan 的升级才越过观察窗；双指几乎同时
+        // 落下仍走原有观察期，避免把 pinch 起始样本误判成远端 scroll。
+        skipObserve: upgradesAppliedLocalPan,
       });
       surfaceLocalPanStartRef.current = null;
       surfaceGestureRef.current = pairResult.nextState;
@@ -2451,6 +2480,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
           pointerId: pairResult.nextState.pointerId,
           startPanX: fullscreenViewportRef.current.panX,
           startPanY: fullscreenViewportRef.current.panY,
+          moved: false,
         };
       } else if (pairResult.nextState.mode === 'idle') {
         surfaceLocalPanStartRef.current = null;
