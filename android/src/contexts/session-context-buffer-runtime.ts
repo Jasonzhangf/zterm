@@ -297,7 +297,7 @@ function settleBufferFrameResourceAfterResolvedPayload(options: {
   currentResource: BufferFrameAssemblyResourceState | null;
   frameAssemblyStore: Map<string, BufferFrameAssemblyResourceState>;
 }) {
-  const settledResource = options.frameAssemblyStore.get(options.sessionId) ?? options.currentResource;
+  const settledResource = options.currentResource ?? options.frameAssemblyStore.get(options.sessionId);
   const repairDispatchedRevisions = settledResource?.repairDispatchedRevisions ?? [];
   if (repairDispatchedRevisions.length > 0) {
     options.frameAssemblyStore.set(options.sessionId, {
@@ -507,14 +507,14 @@ function isAuthoritativeFullTailPayload(options: {
     const availableStartIndex = readStrictBufferInteger(payload.availableStartIndex);
     const availableEndIndex = readStrictBufferInteger(payload.availableEndIndex);
     if (
-      (payload.availableStartIndex !== undefined && availableStartIndex === null)
-      || (payload.availableEndIndex !== undefined && availableEndIndex === null)
+      availableStartIndex === null
+      || availableEndIndex === null
     ) {
       return false;
     }
     if (
-      startIndex !== (availableStartIndex ?? startIndex)
-      || endIndex !== (availableEndIndex ?? endIndex)
+      startIndex !== availableStartIndex
+      || endIndex !== availableEndIndex
     ) {
       return false;
     }
@@ -567,8 +567,10 @@ function isAuthoritativeFullTailPayload(options: {
   const windowEndIndex = frameChunkCount === 1 ? endIndex : frameEndIndex!;
   const availableStartIndex = readStrictBufferInteger(payload.availableStartIndex);
   const availableEndIndex = readStrictBufferInteger(payload.availableEndIndex);
+  const requiresExplicitAvailableBounds = frameChunkCount === 1 && !hasFrameWindowMetadata;
   if (
-    (payload.availableStartIndex !== undefined && availableStartIndex === null)
+    (requiresExplicitAvailableBounds && (availableStartIndex === null || availableEndIndex === null))
+    || (payload.availableStartIndex !== undefined && availableStartIndex === null)
     || (payload.availableEndIndex !== undefined && availableEndIndex === null)
   ) {
     return false;
@@ -1463,27 +1465,22 @@ export function applyIncomingBufferSyncRuntime(options: ApplyIncomingBufferSyncR
 
   const frameAssemblyStore = options.refs.bufferFrameAssemblyRef.current;
   const pendingResumeTailRefresh = options.refs.tailRefreshStoreRef.current.hasPendingResumeTailRefresh(options.sessionId);
-  const bodyFirstGenerationReset = (
-    pendingResumeTailRefresh
+  let currentFrameResource = frameAssemblyStore.get(options.sessionId) || null;
+  const bodyFirstGenerationCandidate = pendingResumeTailRefresh
     && isAuthoritativeFullTailPayload({
       payload: options.payload,
       localBuffer,
-    })
-  );
-  let currentFrameResource = frameAssemblyStore.get(options.sessionId) || null;
-  const pendingFrameGenerationMismatch = currentFrameResource?.pending
-    && Math.max(0, Math.floor(options.payload.revision || 0)) < currentFrameResource.pending.revision;
-  if (bodyFirstGenerationReset && (!currentFrameResource?.pending || pendingFrameGenerationMismatch)) {
-    const resetFrameResource = resetBufferSyncFrameAssemblyEpoch(currentFrameResource);
-    currentFrameResource = resetFrameResource;
-    if (resetFrameResource) {
-      frameAssemblyStore.set(options.sessionId, resetFrameResource);
-    } else {
-      frameAssemblyStore.delete(options.sessionId);
-    }
-  }
+    });
+  const bodyFirstChunkCount = readStrictBufferInteger(options.payload.frameChunkCount);
+  const isBodyFirstChunkedCandidate = bodyFirstGenerationCandidate
+    && bodyFirstChunkCount !== null
+    && bodyFirstChunkCount > 1;
   const frameAssembly = assembleBufferSyncFrameChunk(
-    currentFrameResource?.pending || null,
+    isBodyFirstChunkedCandidate
+      ? currentFrameResource?.pendingBodyFirstFrame || null
+      : bodyFirstGenerationCandidate
+        ? null
+        : currentFrameResource?.pending || null,
     options.payload,
     Date.now(),
   );
@@ -1495,7 +1492,10 @@ export function applyIncomingBufferSyncRuntime(options: ApplyIncomingBufferSyncR
       || retainedError.revision < frameAssembly.state.revision
     );
     frameAssemblyStore.set(options.sessionId, {
-      pending: frameAssembly.state,
+      pending: isBodyFirstChunkedCandidate
+        ? currentFrameResource?.pending ?? null
+        : frameAssembly.state,
+      ...(isBodyFirstChunkedCandidate ? { pendingBodyFirstFrame: frameAssembly.state } : {}),
       error: errorSuperseded ? null : retainedError,
       repairDispatchedRevisions: currentFrameResource?.repairDispatchedRevisions ?? [],
     });
@@ -1510,6 +1510,17 @@ export function applyIncomingBufferSyncRuntime(options: ApplyIncomingBufferSyncR
     return;
   }
   if (frameAssembly.kind === 'rejected') {
+    if (isBodyFirstChunkedCandidate && currentFrameResource) {
+      const { pendingBodyFirstFrame: _stagedBodyFirstFrame, ...retainedResource } = currentFrameResource;
+      frameAssemblyStore.set(options.sessionId, retainedResource);
+      options.runtimeDebug('session.buffer.frame.body-first-candidate-rejected', {
+        sessionId: options.sessionId,
+        error: frameAssembly.error,
+        incomingRevision: frameAssembly.repairRevision,
+        retainedPendingRevision: currentFrameResource.pending?.revision ?? null,
+      });
+      return;
+    }
     projectRejectedBufferFrameRuntime({
       sessionId: options.sessionId,
       rejection: frameAssembly,
@@ -1524,6 +1535,14 @@ export function applyIncomingBufferSyncRuntime(options: ApplyIncomingBufferSyncR
     return;
   }
   if (frameAssembly.kind === 'complete') {
+    const bodyFirstGenerationReset = pendingResumeTailRefresh
+      && isAuthoritativeFullTailPayload({
+        payload: frameAssembly.payload,
+        localBuffer,
+      });
+    const resolvedFrameResource = bodyFirstGenerationReset
+      ? resetBufferSyncFrameAssemblyEpoch(currentFrameResource)
+      : currentFrameResource;
     options.runtimeDebug('session.buffer.frame.complete', {
       sessionId: options.sessionId,
       revision: frameAssembly.payload.revision,
@@ -1538,13 +1557,21 @@ export function applyIncomingBufferSyncRuntime(options: ApplyIncomingBufferSyncR
     if (accepted) {
       settleBufferFrameResourceAfterResolvedPayload({
         sessionId: options.sessionId,
-        currentResource: currentFrameResource,
+        currentResource: resolvedFrameResource,
         frameAssemblyStore,
       });
     }
     return;
   }
 
+  const bodyFirstGenerationReset = pendingResumeTailRefresh
+    && isAuthoritativeFullTailPayload({
+      payload: frameAssembly.payload,
+      localBuffer,
+    });
+  const resolvedFrameResource = bodyFirstGenerationReset
+    ? resetBufferSyncFrameAssemblyEpoch(currentFrameResource)
+    : currentFrameResource;
   const accepted = applyResolvedBufferSyncPayloadRuntime({
     ...options,
     payload: frameAssembly.payload,
@@ -1552,7 +1579,7 @@ export function applyIncomingBufferSyncRuntime(options: ApplyIncomingBufferSyncR
   if (accepted) {
     settleBufferFrameResourceAfterResolvedPayload({
       sessionId: options.sessionId,
-      currentResource: currentFrameResource,
+      currentResource: resolvedFrameResource,
       frameAssemblyStore,
     });
   }

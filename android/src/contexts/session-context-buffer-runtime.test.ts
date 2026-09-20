@@ -12,6 +12,7 @@ import {
   handleBufferHeadRuntime,
   requestSessionBufferHeadRuntime,
   requestSessionBufferSyncRuntime,
+  type BufferFrameAssemblyResourceState,
 } from './session-context-buffer-runtime';
 import { buildDefaultSessionVisibleRange } from './session-visible-range-helpers';
 import { createSessionTailRefreshStore } from '../lib/session-tail-refresh-store';
@@ -2764,7 +2765,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
     const tailRefreshStoreRef = makeTailRefreshStoreRef({ resume: [sessionId] });
     const sessionRevisionResetRef = { current: new Map() };
     const bufferFrameAssemblyRef = {
-      current: new Map([[sessionId, {
+      current: new Map<string, BufferFrameAssemblyResourceState>([[sessionId, {
         pending: null,
         error: null,
         repairDispatchedRevisions: [2],
@@ -2915,6 +2916,85 @@ describe('session-context-buffer-runtime inactive gating', () => {
     );
   });
 
+  it('does not rebase on a dense lower-revision tail missing available bounds during resume', () => {
+    const sessionId = 'session-1';
+    const session = makeSession(sessionId);
+    const localBuffer = createSessionBufferState({
+      lines: ['old-generation-a', 'old-generation-b'],
+      startIndex: 100,
+      endIndex: 102,
+      bufferHeadStartIndex: 100,
+      bufferTailEndIndex: 102,
+      cols: 80,
+      rows: 24,
+      revision: 2,
+      cacheLines: 1000,
+    });
+    session.buffer = localBuffer;
+    const commitSessionBufferUpdate = vi.fn(() => true);
+    const scheduleSessionRenderCommit = vi.fn();
+    const requestSessionBufferSync = vi.fn(() => true);
+    const runtimeDebug = vi.fn();
+    const bufferFrameAssemblyRef = {
+      current: new Map<string, BufferFrameAssemblyResourceState>([[sessionId, {
+        pending: null,
+        error: null,
+        repairDispatchedRevisions: [2],
+      }]]),
+    };
+
+    applyIncomingBufferSyncRuntime({
+      sessionId,
+      payload: {
+        revision: 1,
+        startIndex: 0,
+        endIndex: 2,
+        cols: 80,
+        rows: 24,
+        cursorKeysApp: false,
+        lines: [
+          { ...makeLine('missing-bounds-a'), index: 0 },
+          { ...makeLine('missing-bounds-b'), index: 1 },
+        ],
+      },
+      refs: {
+        stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
+        sessionRevisionResetRef: { current: new Map() },
+        sessionHeadStoreRef: makeLiveHeadStoreRef(),
+        tailRefreshStoreRef: makeTailRefreshStoreRef({ resume: [sessionId] }),
+        bufferFrameAssemblyRef,
+        sessionVisibleRangeRef: {
+          current: new Map([[sessionId, { startIndex: 100, endIndex: 102, viewportRows: 2 }]]),
+        },
+      },
+      readSessionBufferSnapshot: () => localBuffer,
+      resolveSessionCacheLines: () => 1000,
+      summarizeBufferPayload: (payload) => ({
+        revision: payload.revision,
+        startIndex: payload.startIndex,
+        endIndex: payload.endIndex,
+        lineCount: payload.lines.length,
+      }),
+      runtimeDebug,
+      commitSessionBufferUpdate,
+      scheduleSessionRenderCommit,
+      isSessionTransportActive: () => true,
+      requestSessionBufferSync,
+    });
+
+    expect(commitSessionBufferUpdate).not.toHaveBeenCalled();
+    expect(scheduleSessionRenderCommit).not.toHaveBeenCalled();
+    expect(bufferFrameAssemblyRef.current.get(sessionId)?.repairDispatchedRevisions).toEqual([2]);
+    expect(runtimeDebug).toHaveBeenCalledWith(
+      'session.buffer.sync.stale-lower-revision-drop',
+      expect.objectContaining({
+        sessionId,
+        localRevision: 2,
+        incomingRevision: 1,
+      }),
+    );
+  });
+
   it('replaces a retained higher-revision incomplete frame when resume receives an authoritative lower-revision tail', () => {
     const sessionId = 'session-1';
     const session = makeSession(sessionId);
@@ -2941,7 +3021,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
     const tailRefreshStoreRef = makeTailRefreshStoreRef({ resume: [sessionId] });
     const sessionRevisionResetRef = { current: new Map() };
     const bufferFrameAssemblyRef = {
-      current: new Map([[sessionId, {
+      current: new Map<string, BufferFrameAssemblyResourceState>([[sessionId, {
         pending: {
           frameKey: '3:100:104:1234:2',
           revision: 3,
@@ -3043,19 +3123,20 @@ describe('session-context-buffer-runtime inactive gating', () => {
     const runtimeDebug = vi.fn();
     const tailRefreshStoreRef = makeTailRefreshStoreRef({ resume: [sessionId] });
     const sessionRevisionResetRef = { current: new Map() };
+    const retainedPendingFrame = {
+      frameKey: '3:100:104:1234:2',
+      revision: 3,
+      frameStartIndex: 100,
+      frameEndIndex: 104,
+      frameChunkCount: 2,
+      generatedAt: 1234,
+      firstReceivedAt: Date.now(),
+      retainedBytes: 100,
+      chunks: new Map(),
+    };
     const bufferFrameAssemblyRef = {
-      current: new Map([[sessionId, {
-        pending: {
-          frameKey: '3:100:104:1234:2',
-          revision: 3,
-          frameStartIndex: 100,
-          frameEndIndex: 104,
-          frameChunkCount: 2,
-          generatedAt: 1234,
-          firstReceivedAt: Date.now(),
-          retainedBytes: 100,
-          chunks: new Map(),
-        },
+      current: new Map<string, BufferFrameAssemblyResourceState>([[sessionId, {
+        pending: retainedPendingFrame,
         error: null,
         repairDispatchedRevisions: [3],
       }]]),
@@ -3112,13 +3193,15 @@ describe('session-context-buffer-runtime inactive gating', () => {
 
     expect(commitSessionBufferUpdate).not.toHaveBeenCalled();
     const firstResource = bufferFrameAssemblyRef.current.get(sessionId);
-    expect(firstResource?.pending).toMatchObject({
+    expect(firstResource?.pending).toBe(retainedPendingFrame);
+    expect(firstResource?.repairDispatchedRevisions).toEqual([3]);
+    expect(firstResource?.pendingBodyFirstFrame).toMatchObject({
       revision: 1,
       frameStartIndex: 0,
       frameEndIndex: 4,
       frameChunkCount: 2,
     });
-    expect(firstResource?.pending?.chunks.size).toBe(1);
+    expect(firstResource?.pendingBodyFirstFrame?.chunks.size).toBe(1);
     expect(requestSessionBufferSync).not.toHaveBeenCalled();
     expect(runtimeDebug).not.toHaveBeenCalledWith(
       'session.buffer.frame.rejected',
