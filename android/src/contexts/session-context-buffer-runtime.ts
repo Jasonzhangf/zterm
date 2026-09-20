@@ -237,7 +237,9 @@ function projectRejectedBufferFrameRuntime(options: {
 }) {
   const incomingRevision = options.rejection.repairRevision;
   const retainedRevision = Math.max(
-    options.currentResource?.pending?.revision ?? -1,
+    options.preservePending
+      ? -1
+      : options.currentResource?.pending?.revision ?? -1,
     options.currentResource?.error?.revision ?? -1,
   );
   if (incomingRevision !== null && retainedRevision >= 0 && incomingRevision < retainedRevision) {
@@ -1516,8 +1518,11 @@ export function applyIncomingBufferSyncRuntime(options: ApplyIncomingBufferSyncR
   const isBodyFirstChunkedCandidate = bodyFirstGenerationCandidate
     && bodyFirstChunkCount !== null
     && bodyFirstChunkCount > 1;
+  const hasStagedBodyFirstFrame = Boolean(currentFrameResource?.pendingBodyFirstFrame);
+  const isBodyFirstFrameContinuation = isBodyFirstChunkedCandidate
+    || (hasStagedBodyFirstFrame && !bodyFirstGenerationCandidate);
   const frameAssembly = assembleBufferSyncFrameChunk(
-    isBodyFirstChunkedCandidate
+    isBodyFirstFrameContinuation
       ? currentFrameResource?.pendingBodyFirstFrame || null
       : bodyFirstGenerationCandidate
         ? null
@@ -1533,10 +1538,10 @@ export function applyIncomingBufferSyncRuntime(options: ApplyIncomingBufferSyncR
       || retainedError.revision < frameAssembly.state.revision
     );
     frameAssemblyStore.set(options.sessionId, {
-      pending: isBodyFirstChunkedCandidate
+      pending: isBodyFirstFrameContinuation
         ? currentFrameResource?.pending ?? null
         : frameAssembly.state,
-      ...(isBodyFirstChunkedCandidate ? { pendingBodyFirstFrame: frameAssembly.state } : {}),
+      ...(isBodyFirstFrameContinuation ? { pendingBodyFirstFrame: frameAssembly.state } : {}),
       error: errorSuperseded ? null : retainedError,
       repairDispatchedRevisions: currentFrameResource?.repairDispatchedRevisions ?? [],
     });
@@ -1551,10 +1556,23 @@ export function applyIncomingBufferSyncRuntime(options: ApplyIncomingBufferSyncR
     return;
   }
   if (frameAssembly.kind === 'rejected') {
-    if (isBodyFirstChunkedCandidate) {
-      if (currentFrameResource) {
+    if (isBodyFirstFrameContinuation) {
+      if (frameAssembly.error === 'frame-assembly-expired' && currentFrameResource) {
         const { pendingBodyFirstFrame: _stagedBodyFirstFrame, ...retainedResource } = currentFrameResource;
         frameAssemblyStore.set(options.sessionId, retainedResource);
+        projectRejectedBufferFrameRuntime({
+          sessionId: options.sessionId,
+          rejection: frameAssembly,
+          currentResource: retainedResource,
+          frameAssemblyStore,
+          tailRefreshStore: options.refs.tailRefreshStoreRef.current,
+          liveHead: options.refs.sessionHeadStoreRef.current.getLiveHead(options.sessionId),
+          requestSessionBufferSync: options.requestSessionBufferSync,
+          runtimeDebug: options.runtimeDebug,
+          incomingSummary: options.summarizeBufferPayload(options.payload),
+          preservePending: true,
+        });
+        return;
       }
       options.runtimeDebug('session.buffer.frame.body-first-candidate-rejected', {
         sessionId: options.sessionId,
