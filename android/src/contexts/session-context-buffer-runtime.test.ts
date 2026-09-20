@@ -2399,6 +2399,70 @@ describe('session-context-buffer-runtime inactive gating', () => {
     });
   });
 
+  it('expires a staged body-first frame from the head cadence without retaining it', () => {
+    const sessionId = 'session-1';
+    const session = makeSession(sessionId);
+    const refs = makeHeadRuntimeRefs({
+      sessions: [session],
+      activeSessionId: sessionId,
+      visibleRangeEntries: [[sessionId, { startIndex: 100, endIndex: 104, viewportRows: 4 }]],
+    });
+    refs.bufferFrameAssemblyRef.current.set(sessionId, {
+      pending: null,
+      pendingBodyFirstFrame: {
+        frameKey: '11:100:104:1234:2',
+        revision: 11,
+        frameStartIndex: 100,
+        frameEndIndex: 104,
+        frameChunkCount: 2,
+        generatedAt: 1234,
+        firstReceivedAt: Date.now() - TERMINAL_BUFFER_SYNC_FRAME_MAX_AGE_MS - 1,
+        retainedBytes: 100,
+        chunks: new Map(),
+      },
+      repairDispatchedRevisions: [],
+      error: null,
+    });
+    const requestSessionBufferSync = vi.fn((_requestedSessionId: string, requestOptions?: { reason?: string }) => (
+      requestOptions?.reason === 'buffer-sync-frame-frame-assembly-expired'
+    ));
+
+    handleBufferHeadRuntime({
+      sessionId,
+      latestRevision: 11,
+      latestEndIndex: 104,
+      availableStartIndex: 100,
+      availableEndIndex: 104,
+      refs,
+      readSessionTransportSocket: () => ({ readyState: WebSocket.OPEN } as any),
+      readSessionBufferSnapshot: () => session.buffer,
+      commitSessionBufferUpdate: vi.fn(() => false),
+      scheduleSessionRenderCommit: vi.fn(),
+      isSessionTransportActive: () => true,
+      runtimeDebug: vi.fn(),
+      requestSessionBufferSync,
+    });
+
+    expect(requestSessionBufferSync).toHaveBeenCalledWith(sessionId, expect.objectContaining({
+      reason: 'buffer-sync-frame-frame-assembly-expired',
+      requestWindowOverride: {
+        requestStartIndex: 100,
+        requestEndIndex: 104,
+      },
+    }));
+    const retainedResource = refs.bufferFrameAssemblyRef.current.get(sessionId);
+    expect(retainedResource).toMatchObject({
+      pending: null,
+      repairDispatchedRevisions: [11],
+      error: {
+        error: 'frame-assembly-expired',
+        revision: 11,
+        repair: { status: 'dispatched' },
+      },
+    });
+    expect(retainedResource).not.toHaveProperty('pendingBodyFirstFrame');
+  });
+
   it('records the exact authoritative range when frame limits reject assembly', () => {
     const sessionId = 'session-frame-resource-limit';
     const session = makeSession(sessionId);

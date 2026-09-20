@@ -233,6 +233,7 @@ function projectRejectedBufferFrameRuntime(options: {
   requestSessionBufferSync: RequestSessionBufferSyncFn;
   runtimeDebug: RuntimeDebugFn;
   incomingSummary?: Record<string, unknown>;
+  preservePending?: boolean;
 }) {
   const incomingRevision = options.rejection.repairRevision;
   const retainedRevision = Math.max(
@@ -270,7 +271,9 @@ function projectRejectedBufferFrameRuntime(options: {
     repair,
   };
   options.frameAssemblyStore.set(options.sessionId, {
-    pending: options.rejection.state,
+    pending: options.preservePending
+      ? options.currentResource?.pending ?? null
+      : options.rejection.state,
     error: errorTruth,
     repairDispatchedRevisions: options.currentResource?.repairDispatchedRevisions ?? [],
   });
@@ -290,6 +293,40 @@ function projectRejectedBufferFrameRuntime(options: {
       runtimeDebug: options.runtimeDebug,
     });
   }
+}
+
+function expirePendingBodyFirstFrameRuntime(options: {
+  sessionId: string;
+  frameAssemblyStore: Map<string, BufferFrameAssemblyResourceState>;
+  tailRefreshStore: SessionTailRefreshStore;
+  liveHead: SessionBufferHeadState | null;
+  requestSessionBufferSync: RequestSessionBufferSyncFn;
+  runtimeDebug: RuntimeDebugFn;
+  receivedAt: number;
+}) {
+  const currentResource = options.frameAssemblyStore.get(options.sessionId) || null;
+  const pendingBodyFirstFrame = currentResource?.pendingBodyFirstFrame || null;
+  const expiredFrame = expireBufferSyncFrameAssembly(
+    pendingBodyFirstFrame,
+    options.receivedAt,
+  );
+  if (!currentResource || expiredFrame?.kind !== 'rejected') {
+    return false;
+  }
+  const { pendingBodyFirstFrame: _stagedBodyFirstFrame, ...retainedResource } = currentResource;
+  options.frameAssemblyStore.set(options.sessionId, retainedResource);
+  projectRejectedBufferFrameRuntime({
+    sessionId: options.sessionId,
+    rejection: expiredFrame,
+    currentResource: retainedResource,
+    frameAssemblyStore: options.frameAssemblyStore,
+    tailRefreshStore: options.tailRefreshStore,
+    liveHead: options.liveHead,
+    requestSessionBufferSync: options.requestSessionBufferSync,
+    runtimeDebug: options.runtimeDebug,
+    preservePending: true,
+  });
+  return true;
 }
 
 function settleBufferFrameResourceAfterResolvedPayload(options: {
@@ -927,6 +964,15 @@ export function handleBufferHeadRuntime(options: {
       runtimeDebug: options.runtimeDebug,
     });
   }
+  expirePendingBodyFirstFrameRuntime({
+    sessionId: options.sessionId,
+    frameAssemblyStore: options.refs.bufferFrameAssemblyRef.current,
+    tailRefreshStore: options.refs.tailRefreshStoreRef.current,
+    liveHead,
+    requestSessionBufferSync: options.requestSessionBufferSync,
+    runtimeDebug: options.runtimeDebug,
+    receivedAt: incomingHead.seenAt,
+  });
   dispatchPendingBufferFrameRepair({
     sessionId: options.sessionId,
     frameAssemblyStore: options.refs.bufferFrameAssemblyRef.current,
