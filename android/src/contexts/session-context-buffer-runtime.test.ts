@@ -2738,6 +2738,238 @@ describe('session-context-buffer-runtime inactive gating', () => {
     );
   });
 
+  it('rebases to a new daemon mirror generation when resume receives an authoritative lower-revision tail', () => {
+    const sessionId = 'session-1';
+    const session = makeSession(sessionId);
+    const localBuffer = createSessionBufferState({
+      lines: ['old-generation-a', 'old-generation-b'],
+      startIndex: 100,
+      endIndex: 102,
+      bufferHeadStartIndex: 100,
+      bufferTailEndIndex: 102,
+      cols: 80,
+      rows: 24,
+      revision: 2,
+      cacheLines: 1000,
+    });
+    session.buffer = localBuffer;
+    const committedBuffers: SessionBufferState[] = [];
+    const commitSessionBufferUpdate = vi.fn((_sessionId: string, nextBuffer: SessionBufferState) => {
+      committedBuffers.push(nextBuffer);
+      return true;
+    });
+    const scheduleSessionRenderCommit = vi.fn();
+    const requestSessionBufferSync = vi.fn(() => true);
+    const runtimeDebug = vi.fn();
+    const tailRefreshStoreRef = makeTailRefreshStoreRef({ resume: [sessionId] });
+    const sessionRevisionResetRef = { current: new Map() };
+    const bufferFrameAssemblyRef = {
+      current: new Map([[sessionId, {
+        pending: null,
+        error: null,
+        repairDispatchedRevisions: [2],
+      }]]),
+    };
+
+    applyIncomingBufferSyncRuntime({
+      sessionId,
+      payload: {
+        revision: 1,
+        startIndex: 0,
+        endIndex: 2,
+        availableStartIndex: 0,
+        availableEndIndex: 2,
+        cols: 80,
+        rows: 24,
+        cursorKeysApp: false,
+        lines: [
+          { ...makeLine('new-generation-a'), index: 0 },
+          { ...makeLine('new-generation-b'), index: 1 },
+        ],
+      },
+      refs: {
+        stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
+        sessionRevisionResetRef,
+        sessionHeadStoreRef: makeLiveHeadStoreRef(),
+        tailRefreshStoreRef,
+        bufferFrameAssemblyRef,
+        sessionVisibleRangeRef: {
+          current: new Map([[sessionId, { startIndex: 100, endIndex: 102, viewportRows: 2 }]]),
+        },
+      },
+      readSessionBufferSnapshot: () => localBuffer,
+      resolveSessionCacheLines: () => 1000,
+      summarizeBufferPayload: (payload) => ({
+        revision: payload.revision,
+        startIndex: payload.startIndex,
+        endIndex: payload.endIndex,
+        lineCount: payload.lines.length,
+      }),
+      runtimeDebug,
+      commitSessionBufferUpdate,
+      scheduleSessionRenderCommit,
+      isSessionTransportActive: () => true,
+      requestSessionBufferSync,
+    });
+
+    expect(commitSessionBufferUpdate).toHaveBeenCalledOnce();
+    expect(committedBuffers[0]).toMatchObject({
+      revision: 1,
+      startIndex: 0,
+      endIndex: 2,
+      bufferHeadStartIndex: 0,
+      bufferTailEndIndex: 2,
+    });
+    expect(cellsToText(committedBuffers[0]!.lines[0])).toBe('new-generation-a');
+    expect(cellsToText(committedBuffers[0]!.lines[1])).toBe('new-generation-b');
+    expect(scheduleSessionRenderCommit).toHaveBeenCalledWith(sessionId);
+    expect(tailRefreshStoreRef.current.hasPendingResumeTailRefresh(sessionId)).toBe(false);
+    expect(sessionRevisionResetRef.current.has(sessionId)).toBe(false);
+    expect(bufferFrameAssemblyRef.current.has(sessionId)).toBe(false);
+    expect(requestSessionBufferSync).not.toHaveBeenCalled();
+    expect(runtimeDebug).not.toHaveBeenCalledWith(
+      'session.buffer.sync.stale-lower-revision-drop',
+      expect.anything(),
+    );
+  });
+
+  it('does not rebase on a sparse lower-revision payload during resume', () => {
+    const sessionId = 'session-1';
+    const session = makeSession(sessionId);
+    const localBuffer = createSessionBufferState({
+      lines: ['old-generation-a', 'old-generation-b'],
+      startIndex: 100,
+      endIndex: 102,
+      bufferHeadStartIndex: 100,
+      bufferTailEndIndex: 102,
+      cols: 80,
+      rows: 24,
+      revision: 2,
+      cacheLines: 1000,
+    });
+    session.buffer = localBuffer;
+    const commitSessionBufferUpdate = vi.fn(() => true);
+    const runtimeDebug = vi.fn();
+
+    applyIncomingBufferSyncRuntime({
+      sessionId,
+      payload: {
+        revision: 1,
+        startIndex: 0,
+        endIndex: 2,
+        availableStartIndex: 0,
+        availableEndIndex: 2,
+        cols: 80,
+        rows: 24,
+        cursorKeysApp: false,
+        lines: [
+          { ...makeLine('new-generation-b'), index: 1 },
+        ],
+      },
+      refs: {
+        stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
+        sessionRevisionResetRef: { current: new Map() },
+        sessionHeadStoreRef: makeLiveHeadStoreRef(),
+        tailRefreshStoreRef: makeTailRefreshStoreRef({ resume: [sessionId] }),
+        bufferFrameAssemblyRef: { current: new Map() },
+        sessionVisibleRangeRef: {
+          current: new Map([[sessionId, { startIndex: 100, endIndex: 102, viewportRows: 2 }]]),
+        },
+      },
+      readSessionBufferSnapshot: () => localBuffer,
+      resolveSessionCacheLines: () => 1000,
+      summarizeBufferPayload: (payload) => ({
+        revision: payload.revision,
+        startIndex: payload.startIndex,
+        endIndex: payload.endIndex,
+        lineCount: payload.lines.length,
+      }),
+      runtimeDebug,
+      commitSessionBufferUpdate,
+      scheduleSessionRenderCommit: vi.fn(),
+      isSessionTransportActive: () => true,
+      requestSessionBufferSync: vi.fn(() => true),
+    });
+
+    expect(commitSessionBufferUpdate).not.toHaveBeenCalled();
+    expect(runtimeDebug).toHaveBeenCalledWith(
+      'session.buffer.sync.stale-lower-revision-drop',
+      expect.objectContaining({
+        localRevision: 2,
+        incomingRevision: 1,
+      }),
+    );
+  });
+
+  it('does not rebase a complete lower-revision payload without a resume freshness demand', () => {
+    const sessionId = 'session-1';
+    const session = makeSession(sessionId);
+    const localBuffer = createSessionBufferState({
+      lines: ['old-generation-a', 'old-generation-b'],
+      startIndex: 100,
+      endIndex: 102,
+      bufferHeadStartIndex: 100,
+      bufferTailEndIndex: 102,
+      cols: 80,
+      rows: 24,
+      revision: 2,
+      cacheLines: 1000,
+    });
+    session.buffer = localBuffer;
+    const commitSessionBufferUpdate = vi.fn(() => true);
+    const runtimeDebug = vi.fn();
+
+    applyIncomingBufferSyncRuntime({
+      sessionId,
+      payload: {
+        revision: 1,
+        startIndex: 0,
+        endIndex: 2,
+        availableStartIndex: 0,
+        availableEndIndex: 2,
+        cols: 80,
+        rows: 24,
+        cursorKeysApp: false,
+        lines: [
+          { ...makeLine('new-generation-a'), index: 0 },
+          { ...makeLine('new-generation-b'), index: 1 },
+        ],
+      },
+      refs: {
+        stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
+        sessionRevisionResetRef: { current: new Map() },
+        sessionHeadStoreRef: makeLiveHeadStoreRef(),
+        tailRefreshStoreRef: makeTailRefreshStoreRef(),
+        bufferFrameAssemblyRef: { current: new Map() },
+        sessionVisibleRangeRef: {
+          current: new Map([[sessionId, { startIndex: 100, endIndex: 102, viewportRows: 2 }]]),
+        },
+      },
+      readSessionBufferSnapshot: () => localBuffer,
+      resolveSessionCacheLines: () => 1000,
+      summarizeBufferPayload: (payload) => ({
+        revision: payload.revision,
+        startIndex: payload.startIndex,
+        endIndex: payload.endIndex,
+        lineCount: payload.lines.length,
+      }),
+      runtimeDebug,
+      commitSessionBufferUpdate,
+      scheduleSessionRenderCommit: vi.fn(),
+      isSessionTransportActive: () => true,
+      requestSessionBufferSync: vi.fn(() => true),
+    });
+
+    expect(commitSessionBufferUpdate).not.toHaveBeenCalled();
+    expect(runtimeDebug).toHaveBeenCalledWith(
+      'session.buffer.sync.stale-lower-revision-drop',
+      expect.objectContaining({
+        localRevision: 2,
+        incomingRevision: 1,
+      }),
+    );
+  });
+
   it('still applies same-revision buffer-sync when it fills a local gap', () => {
     const sessionId = 'session-1';
     const session = makeSession(sessionId);
