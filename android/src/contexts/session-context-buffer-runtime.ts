@@ -488,7 +488,7 @@ function isAuthoritativeFullTailPayload(options: {
   if (incomingRevision === null || localRevision === null) {
     return false;
   }
-  if (localRevision <= 0 || incomingRevision >= localRevision || payload.lines.length === 0) {
+  if (incomingRevision <= 0 || localRevision <= 0 || incomingRevision >= localRevision || payload.lines.length === 0) {
     return false;
   }
   const startIndex = readStrictBufferInteger(payload.startIndex);
@@ -499,37 +499,58 @@ function isAuthoritativeFullTailPayload(options: {
   if (endIndex <= startIndex) {
     return false;
   }
+  const hasFrameMetadata = payload.frameChunkCount !== undefined
+    || payload.frameStartIndex !== undefined
+    || payload.frameEndIndex !== undefined
+    || payload.frameChunkIndex !== undefined;
+  if (!hasFrameMetadata) {
+    const lineIndexes = normalizeWireLines(payload.lines, payload.cols || options.localBuffer.cols || 80)
+      .map((line) => line.index);
+    return lineIndexes.length === endIndex - startIndex
+      && lineIndexes.every((lineIndex, offset) => lineIndex === startIndex + offset);
+  }
   const frameChunkCount = readStrictBufferInteger(payload.frameChunkCount);
   const frameStartIndex = readStrictBufferInteger(payload.frameStartIndex);
   const frameEndIndex = readStrictBufferInteger(payload.frameEndIndex);
   const frameChunkIndex = readStrictBufferInteger(payload.frameChunkIndex);
-  if (frameChunkCount !== null && frameChunkCount < 0) {
+  const hasFrameWindowMetadata = payload.frameStartIndex !== undefined
+    || payload.frameEndIndex !== undefined
+    || payload.frameChunkIndex !== undefined;
+  if (frameChunkCount === null || frameChunkCount < 1) {
     return false;
   }
-  if (frameStartIndex !== null && frameStartIndex < 0) {
-    return false;
+  const generatedAt = readStrictBufferInteger(payload.generatedAt);
+  if (frameChunkCount === 1) {
+    if (
+      hasFrameWindowMetadata
+      && (
+        frameStartIndex !== startIndex
+        || frameEndIndex !== endIndex
+        || frameChunkIndex !== 0
+      )
+    ) {
+      return false;
+    }
+  } else {
+    if (
+      frameStartIndex === null
+      || frameStartIndex < 0
+      || frameEndIndex === null
+      || frameEndIndex <= frameStartIndex
+      || frameChunkIndex === null
+      || frameChunkIndex < 0
+      || frameChunkIndex >= frameChunkCount
+      || generatedAt === null
+      || generatedAt <= 0
+      || startIndex < frameStartIndex
+      || endIndex > frameEndIndex
+      || frameChunkCount > frameEndIndex - frameStartIndex
+    ) {
+      return false;
+    }
   }
-  if (frameEndIndex !== null && frameEndIndex <= 0) {
-    return false;
-  }
-  if (frameChunkIndex !== null && frameChunkIndex < 0) {
-    return false;
-  }
-  const chunkedFrame = frameChunkCount !== null
-    && frameChunkCount > 1
-    && frameStartIndex !== null
-    && frameEndIndex !== null;
-  if (chunkedFrame && (frameChunkIndex === null || frameChunkIndex >= frameChunkCount)) {
-    return false;
-  }
-  const windowStartIndex = chunkedFrame ? frameStartIndex! : startIndex;
-  const windowEndIndex = chunkedFrame ? frameEndIndex! : endIndex;
-  if (windowEndIndex <= windowStartIndex) {
-    return false;
-  }
-  if (chunkedFrame && (startIndex < windowStartIndex || endIndex > windowEndIndex)) {
-    return false;
-  }
+  const windowStartIndex = frameChunkCount === 1 ? startIndex : frameStartIndex!;
+  const windowEndIndex = frameChunkCount === 1 ? endIndex : frameEndIndex!;
   const availableStartIndex = readStrictBufferInteger(payload.availableStartIndex);
   const availableEndIndex = readStrictBufferInteger(payload.availableEndIndex);
   if (

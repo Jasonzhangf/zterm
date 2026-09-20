@@ -3155,7 +3155,29 @@ describe('session-context-buffer-runtime inactive gating', () => {
     );
   });
 
-  it('does not replace a retained higher-revision frame for a malformed lower-revision chunk', () => {
+  it.each([
+    {
+      label: 'negative-index',
+      lineCount: 2,
+      frameMetadata: {
+        frameStartIndex: 0,
+        frameEndIndex: 4,
+        frameChunkIndex: -1,
+        frameChunkCount: 2,
+        generatedAt: 2000,
+      },
+    },
+    {
+      label: 'missing-boundary',
+      lineCount: 4,
+      frameMetadata: {
+        frameStartIndex: 0,
+        frameChunkIndex: 0,
+        frameChunkCount: 2,
+        generatedAt: 2000,
+      },
+    },
+  ])('does not replace a retained higher-revision frame for a malformed lower-revision $label chunk', ({ label, lineCount, frameMetadata }) => {
     const sessionId = 'session-1';
     const session = makeSession(sessionId);
     const localBuffer = createSessionBufferState({
@@ -3199,21 +3221,17 @@ describe('session-context-buffer-runtime inactive gating', () => {
       payload: {
         revision: 1,
         startIndex: 0,
-        endIndex: 2,
+        endIndex: lineCount,
         availableStartIndex: 0,
         availableEndIndex: 4,
-        frameStartIndex: 0,
-        frameEndIndex: 4,
-        frameChunkIndex: -1,
-        frameChunkCount: 2,
-        generatedAt: 2000,
+        ...frameMetadata,
         cols: 80,
         rows: 24,
         cursorKeysApp: false,
-        lines: [
-          { ...makeLine('malformed-a'), index: 0 },
-          { ...makeLine('malformed-b'), index: 1 },
-        ],
+        lines: Array.from({ length: lineCount }, (_, index) => ({
+          ...makeLine(`malformed-${label}-${index}`),
+          index,
+        })),
       },
       refs: {
         stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
