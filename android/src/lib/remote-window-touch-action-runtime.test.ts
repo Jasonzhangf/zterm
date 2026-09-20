@@ -747,6 +747,30 @@ describe('remote-window-touch-action-runtime', () => {
       expect(move.remoteEvents[0]?.kind).toBe('scroll');
     });
 
+    it('keeps axis-parallel upgraded motion available for pinch', () => {
+      const candidate = resolveRemoteWindowTouchPairPointerDownRuntime({
+        firstPointer: { pointerId: 1, pointerType: 'touch', clientX: 100, clientY: 60, timeMs: 1_000 },
+        secondPointer: { pointerId: 2, pointerType: 'touch', clientX: 120, clientY: 60, timeMs: 1_020 },
+        timeMs: 1_020,
+        pinchEnabled: true,
+        scrollEnabled: true,
+        skipObserve: true,
+      });
+      const move = resolveRemoteWindowTouchPairPointerMoveRuntime({
+        state: candidate.nextState,
+        pair: {
+          first: { pointerId: 1, pointerType: 'touch', clientX: 140, clientY: 60, timeMs: 1_040 },
+          second: { pointerId: 2, pointerType: 'touch', clientX: 120, clientY: 60, timeMs: 1_040 },
+        },
+        geometry,
+        timeMs: 1_040,
+        pinchEnabled: true,
+        scrollEnabled: true,
+      });
+      expect(move.nextState.mode).toBe('twoFingerCandidate');
+      expect(move.remoteEvents).toEqual([]);
+    });
+
     it('commits same-direction two-finger motion to scroll after the observe window', () => {
       const candidate = pairDown({ clientX: 100, clientY: 60 }, { clientX: 120, clientY: 60 });
       // 观察期 2 个 move（moveCount 0→1→2）

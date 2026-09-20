@@ -220,6 +220,8 @@ export function createTraversalRelayHostClient(options: CreateTraversalRelayHost
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let publishLoop: ReturnType<typeof createRelayHostDirectoryPublishLoop> | null = null;
   let publishDirectoryUpdate: (() => boolean) | null = null;
+  let connectPromise: Promise<void> | null = null;
+  let connectionGeneration = 0;
   let disposed = false;
 
   function clearReconnectTimer() {
@@ -246,23 +248,40 @@ export function createTraversalRelayHostClient(options: CreateTraversalRelayHost
     if (disposed || !config) {
       return;
     }
+    if (socket && socket.readyState !== WebSocket.CLOSED) {
+      return;
+    }
+    if (connectPromise) {
+      return connectPromise;
+    }
+    connectPromise = connectOnce(config).finally(() => {
+      connectPromise = null;
+    });
+    return connectPromise;
+  }
+
+  async function connectOnce(activeConfig: TraversalRelayRuntimeConfig) {
+    const generation = ++connectionGeneration;
     try {
-      const accessToken = await login(config);
-      const wsUrl = buildWsUrl(config.relayUrl, 'ws/host');
+      const accessToken = await login(activeConfig);
+      if (disposed || generation !== connectionGeneration) {
+        return;
+      }
+      const wsUrl = buildWsUrl(activeConfig.relayUrl, 'ws/host');
       wsUrl.searchParams.set('token', accessToken);
-      wsUrl.searchParams.set('hostId', config.hostId);
-      wsUrl.searchParams.set('deviceId', config.deviceId);
-      if (config.deviceName) {
-        wsUrl.searchParams.set('deviceName', config.deviceName);
+      wsUrl.searchParams.set('hostId', activeConfig.hostId);
+      wsUrl.searchParams.set('deviceId', activeConfig.deviceId);
+      if (activeConfig.deviceName) {
+        wsUrl.searchParams.set('deviceName', activeConfig.deviceName);
       }
-      if (config.platform) {
-        wsUrl.searchParams.set('platform', config.platform);
+      if (activeConfig.platform) {
+        wsUrl.searchParams.set('platform', activeConfig.platform);
       }
-      if (config.appVersion) {
-        wsUrl.searchParams.set('appVersion', config.appVersion);
+      if (activeConfig.appVersion) {
+        wsUrl.searchParams.set('appVersion', activeConfig.appVersion);
       }
-      if (config.daemonVersion) {
-        wsUrl.searchParams.set('daemonVersion', config.daemonVersion);
+      if (activeConfig.daemonVersion) {
+        wsUrl.searchParams.set('daemonVersion', activeConfig.daemonVersion);
       }
       const nextSocket = new WebSocket(wsUrl);
       socket = nextSocket;
@@ -288,21 +307,31 @@ export function createTraversalRelayHostClient(options: CreateTraversalRelayHost
         publish: publishCurrentDirectoryUpdate,
         warn: (message) => console.warn(message),
       });
+      const isCurrentSocket = () => socket === nextSocket;
 
       nextSocket.on('open', () => {
+        if (!isCurrentSocket()) {
+          return;
+        }
         publishLoop?.markPong();
-        console.log(`[${new Date().toISOString()}] traversal relay host online: ${config.hostId} -> ${wsUrl.origin}`);
+        console.log(`[${new Date().toISOString()}] traversal relay host online: ${activeConfig.hostId} -> ${wsUrl.origin}`);
       });
 
       nextSocket.on('pong', () => {
+        if (!isCurrentSocket()) {
+          return;
+        }
         publishLoop?.markPong();
       });
 
       nextSocket.on('message', async (rawData) => {
+        if (!isCurrentSocket()) {
+          return;
+        }
         try {
           const envelope = JSON.parse(String(rawData)) as RelayHostEnvelope;
           if (envelope.type === 'relay-ready') {
-            console.log(`[${new Date().toISOString()}] traversal relay ready for host ${envelope.hostId || config.hostId}`);
+            console.log(`[${new Date().toISOString()}] traversal relay ready for host ${envelope.hostId || activeConfig.hostId}`);
             const publishResult = publishRelayDirectoryUpdate({
               socket: nextSocket,
               listEndpointCandidates: options.listEndpointCandidates,
@@ -311,7 +340,7 @@ export function createTraversalRelayHostClient(options: CreateTraversalRelayHost
             });
             if (publishResult.ok) {
               console.log(
-                `[${new Date().toISOString()}] traversal relay directory published: host=${config.hostId} endpoints=${publishResult.envelope.directory?.endpoints?.length || 0} sessions=${publishResult.envelope.directory?.sessions?.length || 0}`,
+                `[${new Date().toISOString()}] traversal relay directory published: host=${activeConfig.hostId} endpoints=${publishResult.envelope.directory?.endpoints?.length || 0} sessions=${publishResult.envelope.directory?.sessions?.length || 0}`,
               );
             } else {
               console.warn(`[${new Date().toISOString()}] traversal relay directory publish failed: ${publishResult.reason}`);
@@ -325,7 +354,7 @@ export function createTraversalRelayHostClient(options: CreateTraversalRelayHost
           }
           if (envelope.type === 'relay-signal' && envelope.peerId && envelope.message) {
             await options.handleRelaySignal(envelope.peerId, envelope.message, (message) => {
-              if (nextSocket.readyState !== WebSocket.OPEN) {
+              if (!isCurrentSocket() || nextSocket.readyState !== WebSocket.OPEN) {
                 return;
               }
               nextSocket.send(JSON.stringify({
@@ -345,10 +374,11 @@ export function createTraversalRelayHostClient(options: CreateTraversalRelayHost
       });
 
       nextSocket.on('close', (code, reasonBuffer) => {
-        if (socket === nextSocket) {
-          socket = null;
-          publishDirectoryUpdate = null;
+        if (generation !== connectionGeneration || socket !== nextSocket) {
+          return;
         }
+        socket = null;
+        publishDirectoryUpdate = null;
         publishLoop?.stop();
         publishLoop = null;
         const reason = Buffer.isBuffer(reasonBuffer) ? reasonBuffer.toString('utf-8') : String(reasonBuffer || '');

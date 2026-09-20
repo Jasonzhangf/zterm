@@ -46,6 +46,14 @@ must not enter video-frame, input-action, or other business payload metadata.
 
 ## Direct Touch contract
 
+Scope: the Direct Touch contract below applies to standalone floating,
+embedded fullscreen, and the standalone fullscreen overlay. The embedded
+resource-drawer half-sheet preview (`embedded && mode === "floating"`) is a
+passive preview: it does not run this gesture arena, does not change zoom/pan,
+and emits no remote input. The drawer grip is the only affordance that promotes
+the half-sheet preview to embedded fullscreen. There is no video double-tap
+or other Direct Touch promotion from the half-sheet preview.
+
 At 1x:
 
 - tap emits one remote left click;
