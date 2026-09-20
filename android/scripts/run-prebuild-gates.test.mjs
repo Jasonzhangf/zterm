@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import {
   CI_ONLY_GATE_SCRIPTS,
+  LOCAL_ONLY_GATE_SCRIPTS,
   PREBUILD_GATE_SCRIPTS,
   collectGatePlan,
   runPrebuildGates,
@@ -113,4 +114,47 @@ test('keeps CI Android test-gate ownership in the grouped verifier', () => {
   const androidTestCommands = [...workflow.matchAll(/run: pnpm --dir android run (test:[^\s]+)/gu)]
     .map((match) => match[1]);
   assert.deepEqual(androidTestCommands, ['test:ci-gates']);
+});
+
+test('keeps developer-machine-only gates out of the CI profile', () => {
+  const invoked = [];
+  const runPrebuildProfile = (profile) => {
+    invoked.length = 0;
+    runPrebuildGates({
+      profile,
+      packageJson,
+      androidRoot,
+      run(command) {
+        invoked.push(command);
+        return { status: 0 };
+      },
+      write() {},
+    });
+    return [...invoked];
+  };
+
+  const ciCommands = runPrebuildProfile('ci');
+  const prebuildCommands = runPrebuildProfile('prebuild');
+
+  assert.ok(LOCAL_ONLY_GATE_SCRIPTS.includes('test:terminal:regression:core'));
+
+  // The relay smoke needs a live relay and real tmux; it must stay local.
+  assert.ok(
+    !ciCommands.some((invokedCommand) => invokedCommand.includes('traversal-relay-local-smoke.ts')),
+    'CI profile must not run the relay smoke',
+  );
+  assert.ok(
+    prebuildCommands.some((invokedCommand) => invokedCommand.includes('traversal-relay-local-smoke.ts')),
+    'local prebuild profile must still run the relay smoke',
+  );
+
+  // The contracts gate expands into its own vitest command, so assert on the
+  // expanded command rather than the script filename.
+  const contractsCommand = prebuildCommands.find((invokedCommand) =>
+    invokedCommand.includes('src/server/terminal-mirror-runtime.backpressure.test.ts'));
+  assert.ok(contractsCommand, 'local prebuild profile must still run the terminal contracts suite');
+  assert.ok(
+    !ciCommands.includes(contractsCommand),
+    'CI profile must not run the terminal contracts suite',
+  );
 });

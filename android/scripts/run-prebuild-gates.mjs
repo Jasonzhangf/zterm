@@ -54,6 +54,15 @@ export const CI_ONLY_GATE_SCRIPTS = Object.freeze([
   'test:remote-screenshot-regression',
 ]);
 
+// Gates whose inputs exist only on a developer machine: replay evidence under
+// the gitignored `android/evidence/daemon-mirror`, a prepared daemon bundle
+// under the gitignored `android/release-dist`, a live relay, and real tmux.
+// They remain in the local `prebuild` profile and are never admitted to CI,
+// where a clean checkout has none of those inputs.
+export const LOCAL_ONLY_GATE_SCRIPTS = Object.freeze([
+  'test:terminal:regression:core',
+]);
+
 function splitShellCommands(script) {
   return script
     .split(/\s*(?:&&|;)\s*/u)
@@ -242,6 +251,7 @@ export function runPrebuildGates({
   if (!scripts) throw new Error('Android package scripts are required');
   const gateNames = selectedGateNames ?? (profile === 'ci'
     ? [...PREBUILD_GATE_SCRIPTS, ...CI_ONLY_GATE_SCRIPTS]
+      .filter((name) => !LOCAL_ONLY_GATE_SCRIPTS.includes(name))
     : [...PREBUILD_GATE_SCRIPTS]);
   const { plan, duplicates } = collectGatePlan({ scripts, gateNames, androidRoot });
   const failures = [];
