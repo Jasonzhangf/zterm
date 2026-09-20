@@ -291,7 +291,8 @@ function settleBufferFrameResourceAfterResolvedPayload(options: {
   currentResource: BufferFrameAssemblyResourceState | null;
   frameAssemblyStore: Map<string, BufferFrameAssemblyResourceState>;
 }) {
-  const repairDispatchedRevisions = options.currentResource?.repairDispatchedRevisions ?? [];
+  const settledResource = options.frameAssemblyStore.get(options.sessionId) ?? options.currentResource;
+  const repairDispatchedRevisions = settledResource?.repairDispatchedRevisions ?? [];
   if (repairDispatchedRevisions.length > 0) {
     options.frameAssemblyStore.set(options.sessionId, {
       pending: null,
@@ -469,6 +470,36 @@ function resolvePostApplyVisibleRange(options: {
     return visibleRange;
   }
   return buildDefaultSessionVisibleRange(options.head, visibleRange, options.nextBuffer);
+}
+
+function isAuthoritativeFullTailPayload(options: {
+  payload: TerminalBufferPayload;
+  localBuffer: SessionBufferState;
+}) {
+  const payload = options.payload;
+  const incomingRevision = Math.max(0, Math.floor(payload.revision || 0));
+  const localRevision = Math.max(0, Math.floor(options.localBuffer.revision || 0));
+  if (localRevision <= 0 || incomingRevision >= localRevision || payload.lines.length === 0) {
+    return false;
+  }
+  const startIndex = Math.max(0, Math.floor(payload.startIndex || 0));
+  const endIndex = Math.max(startIndex, Math.floor(payload.endIndex || startIndex));
+  if (endIndex <= startIndex) {
+    return false;
+  }
+  const availableStartIndex = Number.isFinite(payload.availableStartIndex)
+    ? Math.max(0, Math.floor(payload.availableStartIndex!))
+    : startIndex;
+  const availableEndIndex = Number.isFinite(payload.availableEndIndex)
+    ? Math.max(0, Math.floor(payload.availableEndIndex!))
+    : endIndex;
+  if (startIndex !== availableStartIndex || endIndex !== availableEndIndex) {
+    return false;
+  }
+  const lineIndexes = normalizeWireLines(payload.lines, payload.cols || options.localBuffer.cols || 80)
+    .map((line) => line.index);
+  return lineIndexes.length === endIndex - startIndex
+    && lineIndexes.every((lineIndex, offset) => lineIndex === startIndex + offset);
 }
 
 function resolveVisibleNonGapRepairRequestAfterSparseAdvance(options: {
@@ -1427,7 +1458,39 @@ export function applyIncomingBufferSyncRuntime(options: ApplyIncomingBufferSyncR
 
 function applyResolvedBufferSyncPayloadRuntime(options: ApplyResolvedBufferSyncPayloadRuntimeOptions) {
   const localBuffer = options.readSessionBufferSnapshot(options.sessionId);
-  const revisionResetExpectation = options.refs.sessionRevisionResetRef.current.get(options.sessionId) || null;
+  const pendingResumeTailRefresh = options.refs.tailRefreshStoreRef.current.hasPendingResumeTailRefresh(options.sessionId);
+  const bodyFirstGenerationReset = (
+    pendingResumeTailRefresh
+    && isAuthoritativeFullTailPayload({
+      payload: options.payload,
+      localBuffer,
+    })
+  );
+  if (bodyFirstGenerationReset) {
+    const resetFrameResource = resetBufferSyncFrameAssemblyEpoch(
+      options.refs.bufferFrameAssemblyRef.current.get(options.sessionId) || null,
+    );
+    if (resetFrameResource) {
+      options.refs.bufferFrameAssemblyRef.current.set(options.sessionId, resetFrameResource);
+    }
+  }
+  const revisionResetExpectation = (
+    options.refs.sessionRevisionResetRef.current.get(options.sessionId)
+    || (bodyFirstGenerationReset
+      ? {
+          revision: Math.max(0, Math.floor(options.payload.revision || 0)),
+          latestEndIndex: Math.max(
+            0,
+            Math.floor(
+              Number.isFinite(options.payload.availableEndIndex)
+                ? options.payload.availableEndIndex!
+                : options.payload.endIndex || 0,
+            ),
+          ),
+          seenAt: Date.now(),
+        }
+      : null)
+  );
   const lowerRevisionPayload = revisionResetExpectation
     && Math.max(0, Math.floor(options.payload.revision || 0)) <= Math.max(0, Math.floor(localBuffer.revision || 0))
       ? options.payload

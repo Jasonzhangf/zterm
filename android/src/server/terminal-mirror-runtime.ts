@@ -8,8 +8,6 @@ import type {
   TerminalCell,
   TerminalCursorState,
 } from '@zterm/shared/types';
-import { summarizeIndexedLinesForDebug } from '@zterm/shared/terminal-buffer';
-import { sliceIndexedLines } from './canonical-buffer';
 import { buildRequestedRangeBufferPayload } from './buffer-sync-contract';
 import { createDaemonBufferPublisherRuntime } from './daemon-buffer-publisher-runtime';
 import { detachMirrorSubscriber, releaseMirrorSubscribers } from './mirror-lifecycle';
@@ -566,34 +564,6 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
               lineCount: mirror.bufferLines.length,
             });
           }
-        }
-        if (changedRanges.length > 0 || cursorChanged || cursorKeysAppChanged || forceRevision) {
-          const firstRange = changedRanges[0] || null;
-          const lastRange = changedRanges[changedRanges.length - 1] || null;
-          console.debug(`[${deps.logTimePrefix()}] mirror.flush.inspect`, {
-            sessionName: mirror.sessionName,
-            revision: mirror.revision,
-            previousStartIndex,
-            previousEndIndex: previousStartIndex + previousLines.length,
-            nextStartIndex: mirror.bufferStartIndex,
-            nextEndIndex: mirror.bufferStartIndex + mirror.bufferLines.length,
-            changedRangeCount: changedRanges.length,
-            firstChangedRange: firstRange,
-            lastChangedRange: lastRange,
-            cursorChanged,
-            cursorKeysAppChanged,
-            forceRevision,
-            changedLinePreview: firstRange
-              ? summarizeIndexedLinesForDebug(
-                  sliceIndexedLines(
-                    mirror.bufferStartIndex,
-                    mirror.bufferLines,
-                    firstRange.startIndex,
-                    Math.min(firstRange.endIndex, firstRange.startIndex + 6),
-                  ),
-                )
-              : [],
-          });
         }
         if (changedRanges.length > 0 || forceRevision) {
           bufferPublisher.broadcastChangedRangesBufferSyncToSubscribers(

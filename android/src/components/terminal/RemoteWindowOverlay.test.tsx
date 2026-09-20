@@ -3724,7 +3724,8 @@ describe('RemoteWindowOverlay', () => {
     } as unknown as CanvasRenderingContext2D);
     const playSpy = vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(() => Promise.resolve());
 
-    const renderOverlay = (embeddedFullscreen: boolean) => (
+    try {
+      const renderOverlay = (embeddedFullscreen: boolean) => (
         <RemoteWindowOverlay
           activeSessionId="session-fullscreen-rearm"
           embedded
@@ -3733,10 +3734,9 @@ describe('RemoteWindowOverlay', () => {
           startStream={startStream}
           stopStream={stopStream}
         />
-    );
-
-    try {
+      );
       const view = render(renderOverlay(false));
+
       fireEvent.click(await screen.findByTestId('remote-window-target-app-fullscreen-rearm'));
       const surface = await screen.findByTestId('remote-window-video-surface');
       const video = await screen.findByTestId('remote-window-video') as HTMLVideoElement;
@@ -3861,7 +3861,7 @@ describe('RemoteWindowOverlay', () => {
       _target: RemoteWindowStreamTargetManifest,
       streamId: string,
     ) => ({ streamId, mediaStream }));
-    const renderOverlay = (bottomInsetPx: number, embeddedFullscreen: boolean) => (
+    const renderOverlay = (bottomInsetPx: number, embeddedFullscreen = false) => (
       <RemoteWindowOverlay
         activeSessionId="session-fullscreen-fill"
         embedded
@@ -3875,6 +3875,7 @@ describe('RemoteWindowOverlay', () => {
     const view = render(renderOverlay(165, false));
 
     fireEvent.click(await screen.findByTestId('remote-window-target-app-fullscreen-fill'));
+    await screen.findByTestId('remote-window-video-surface');
     view.rerender(renderOverlay(165, true));
 
     const overlay = await screen.findByTestId('remote-window-locked-overlay');

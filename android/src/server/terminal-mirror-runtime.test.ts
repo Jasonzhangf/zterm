@@ -2195,6 +2195,43 @@ describe('terminal mirror runtime lifecycle truth', () => {
     );
   });
 
+  it('does not emit per-flush terminal previews to console output', async () => {
+    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+    try {
+      const { runtime } = createRuntime({
+        captureMirrorAuthoritativeBufferFromTmux: async (mirror: SessionMirror) => {
+          mirror.bufferStartIndex = 100;
+          mirror.bufferLines = [
+            [{ char: 98, fg: 256, bg: 256, flags: 0, width: 1 }],
+          ];
+          mirror.cursor = null;
+          mirror.cursorKeysApp = false;
+          return true;
+        },
+        mirrorBufferChanged: (mirror, previousStartIndex, previousLines) => findChangedIndexedRanges({
+          previousStartIndex,
+          previousLines,
+          nextStartIndex: mirror.bufferStartIndex,
+          nextLines: mirror.bufferLines,
+        }),
+      });
+      const mirror = runtime.createMirror('demo');
+      mirror.lifecycle = 'ready';
+      mirror.bufferStartIndex = 100;
+      mirror.bufferLines = [
+        [{ char: 97, fg: 256, bg: 256, flags: 0, width: 1 }],
+      ];
+
+      await runtime.syncMirrorCanonicalBuffer(mirror);
+
+      expect(
+        debugSpy.mock.calls.some(([message]) => String(message).includes('mirror.flush.inspect')),
+      ).toBe(false);
+    } finally {
+      debugSpy.mockRestore();
+    }
+  });
+
   it('does not release a ready mirror when live sync later discovers a dead pane target', async () => {
     const { sessions, sendMessage } = createRuntime();
     const session = createSession();
