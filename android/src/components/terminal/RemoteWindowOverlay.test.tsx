@@ -2186,6 +2186,43 @@ describe('RemoteWindowOverlay', () => {
     expect(screen.queryByTestId('remote-window-locked-overlay')).toBeNull();
   });
 
+  it('tears down the local overlay and stream when remote close dispatch is unavailable', async () => {
+    const stopStream = vi.fn();
+    const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string) => ({
+      streamId,
+      mediaStream: { id: 'remote-close-fallback-stream' } as MediaStream,
+    }));
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-remote-close-fallback',
+      targets: [makeTarget('app-remote-close-fallback', 'TextEdit', 'app-window')],
+    }));
+
+    render(
+      <RemoteWindowOverlay
+        activeSessionId="session-remote-close-fallback"
+        requestTargets={requestTargets}
+        startStream={startStream}
+        stopStream={stopStream}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    fireEvent.click(await screen.findByTestId('remote-window-target-app-remote-close-fallback'));
+    await screen.findByTestId('remote-window-video');
+    fireEvent.click(screen.getByRole('button', { name: '全屏远程窗口' }));
+    await waitFor(() => {
+      expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('fullscreen');
+    });
+
+    fireEvent.click(screen.getByTestId('remote-window-remote-close'));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('remote-window-locked-overlay')).toBeNull();
+    });
+    expect(stopStream).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('remote-window-video')).toBeNull();
+  });
+
   it('resizes the floating overlay from the edge while preserving the source aspect ratio', async () => {
     const requestTargets = vi.fn(async () => ({
       requestId: 'rw-1',
@@ -3835,7 +3872,7 @@ describe('RemoteWindowOverlay', () => {
         startStream={startStream}
       />
     );
-    const view = render(renderOverlay(165));
+    const view = render(renderOverlay(165, false));
 
     fireEvent.click(await screen.findByTestId('remote-window-target-app-fullscreen-fill'));
     await screen.findByTestId('remote-window-video-surface');

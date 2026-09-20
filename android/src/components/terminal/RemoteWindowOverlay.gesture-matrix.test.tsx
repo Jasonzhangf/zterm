@@ -588,6 +588,54 @@ describe('RemoteWindowOverlay gesture matrix', () => {
     expect(nonScrollPayloads(sendInput)).toEqual([]);
   });
 
+  it('classifies the first pair sample after a second finger upgrades a zoomed local pan', async () => {
+    const { sendInput, surface } = await openRemoteWindow(true);
+    const content = projectionElement();
+    const initialWidth = stylePx(content.style.width);
+
+    const zoomOut = pinchMove(surface, 'out');
+    await waitFor(() => {
+      expect(stylePx(content.style.width)).toBeGreaterThan(initialWidth + 1);
+    });
+    await releasePair(
+      surface,
+      zoomOut.firstPointerId,
+      zoomOut.secondPointerId,
+      zoomOut.firstEndX,
+      zoomOut.secondEndX,
+      zoomOut.y,
+    );
+    sendInput.mockClear();
+
+    const firstPointerId = nextPointerId();
+    const secondPointerId = nextPointerId();
+    const topBeforePan = stylePx(content.style.top);
+    fireEvent.pointerDown(surface, touchOptions(firstPointerId, 120, 120, 8000));
+    fireEvent.pointerMove(surface, touchOptions(firstPointerId, 120, 90, 8020));
+    await waitFor(() => {
+      expect(stylePx(content.style.top)).not.toBe(topBeforePan);
+    });
+
+    fireEvent.pointerDown(surface, touchOptions(secondPointerId, 180, 90, 8040));
+    await waitFor(() => {
+      expect(stylePx(content.style.top)).toBe(topBeforePan);
+    });
+
+    fireEvent.pointerMove(surface, touchOptions(firstPointerId, 120, 60, 8060));
+    expect(scrollPayloads(sendInput)).toHaveLength(1);
+    expectScrollDirection(sendInput, 'up');
+    expectOnlyVerticalRemoteScrolls(sendInput);
+
+    fireEvent.pointerMove(surface, touchOptions(secondPointerId, 180, 60, 8080));
+    expect(scrollPayloads(sendInput)).toHaveLength(2);
+    expectScrollDirection(sendInput, 'up');
+    expectOnlyVerticalRemoteScrolls(sendInput);
+
+    await releasePointer(surface, firstPointerId, 120, 60);
+    await releasePointer(surface, secondPointerId, 180, 60);
+    expect(nonScrollPayloads(sendInput)).toEqual([]);
+  });
+
   it('restores the pre-pan viewport as soon as a second finger enters a zoomed gesture', async () => {
     const { sendInput, surface } = await openRemoteWindow(true);
     const content = projectionElement();

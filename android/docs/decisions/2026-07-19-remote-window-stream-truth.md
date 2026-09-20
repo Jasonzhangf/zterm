@@ -40,6 +40,35 @@ The resource drawer embeds the remote window in two presentations:
 Standalone (non-embedded) floating keeps the existing floating interaction
 contract. This boundary applies only to the embedded half-sheet preview.
 
+### Fullscreen gesture and close amendment (2026-09-19)
+
+This amendment resolves the real-device feedback where zoomed fullscreen
+two-finger motion only moved the local projection, a single tap did not reach
+the remote target, and the remote close action could leave the overlay stuck.
+
+- `client.remote_window_overlay` owns the fullscreen/floating projection and
+  the local stream teardown for close. The remote close action first emits the
+  existing `close-window` business event to the target, but local teardown must
+  run even when that event is unsupported, unconfigured, or rejected by the
+  input dispatcher. A missing dispatcher must not strand the overlay in
+  `targetLocked` or `fullscreen`.
+- Back and minimize keep their existing shrink semantics: they exit fullscreen
+  to floating without closing or recreating the stream. They must never leave
+  the overlay stuck in `targetLocked`/`fullscreen`.
+- `resource.remote_window_touch_action` owns gesture classification. At zoomed
+  fullscreen scale, one finger remains local pan and emits no remote input.
+  Two-finger coherent same-direction motion is remote scroll, not local window
+  pan. When a second finger upgrades an active one-finger local pan, the pair
+  owner takes over immediately; the first pair sample must be classified and
+  must not be consumed by the observation window.
+- At 1x, a stationary tap remains one remote `click` business event. The
+  daemon-owned `resource.remote_window_stream` performs the exact
+  `CGWindowID` focus/raise check inline before injecting that click; the client
+  must not replace the click with a local visual-only focus change.
+- No second gesture channel, fallback input path, or daemon-side client state
+  may be introduced for these fixes. The shared wire event remains the single
+  input contract.
+
 The stream is not view-only long term. It must support mouse and keyboard event return. Input return must carry an explicit focus policy:
 
 - `bring-to-focus`: the daemon brings the selected app/window/pane to focus before forwarding OS input.

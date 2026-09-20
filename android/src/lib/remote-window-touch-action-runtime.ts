@@ -96,6 +96,7 @@ export type RemoteWindowTouchPointerState =
       lastMidY: number;
       startedAtMs: number;
       moveCount: number;
+      upgradedFromLocalPan?: true;
       committed: false;
     }
   | {
@@ -1181,6 +1182,7 @@ export function resolveRemoteWindowTouchPairPointerDownRuntime(options: {
     lastMidY: midpoint.clientY,
     startedAtMs: options.timeMs,
     moveCount: options.skipObserve ? REMOTE_WINDOW_TWO_FINGER_OBSERVE_MOVES : 0,
+    ...(options.skipObserve ? { upgradedFromLocalPan: true as const } : {}),
     committed: false,
   };
   return {
@@ -1239,6 +1241,7 @@ export function resolveRemoteWindowTouchPairPointerMoveRuntime(options: RemoteWi
   );
   if (
     state.mode === 'twoFingerCandidate'
+    && !state.upgradedFromLocalPan
     && options.timeMs - state.startedAtMs < REMOTE_WINDOW_TWO_FINGER_OBSERVE_MS
     && state.moveCount < REMOTE_WINDOW_TWO_FINGER_OBSERVE_MOVES
   ) {
@@ -1254,6 +1257,72 @@ export function resolveRemoteWindowTouchPairPointerMoveRuntime(options: RemoteWi
       localEffect: { kind: 'none' },
       consumed: true,
     };
+  }
+
+  if (state.mode === 'twoFingerCandidate' && state.upgradedFromLocalPan) {
+    const firstTravel = Math.hypot(
+      firstCurrent.clientX - state.firstStart.clientX,
+      firstCurrent.clientY - state.firstStart.clientY,
+    );
+    const secondTravel = Math.hypot(
+      secondCurrent.clientX - state.secondStart.clientX,
+      secondCurrent.clientY - state.secondStart.clientY,
+    );
+    const firstMoved = firstTravel >= REMOTE_WINDOW_TWO_FINGER_SCROLL_DEADZONE_PX;
+    const secondMoved = secondTravel >= REMOTE_WINDOW_TWO_FINGER_SCROLL_DEADZONE_PX;
+    if (
+      firstMoved !== secondMoved
+      && cumulativeMidpointShift >= REMOTE_WINDOW_TWO_FINGER_SCROLL_MIN_MIDPOINT_PX
+    ) {
+      const movedStart = firstMoved ? state.firstStart : state.secondStart;
+      const movedCurrent = firstMoved ? firstCurrent : secondCurrent;
+      const axisX = state.secondStart.clientX - state.firstStart.clientX;
+      const axisY = state.secondStart.clientY - state.firstStart.clientY;
+      const axisLength = Math.max(1, Math.hypot(axisX, axisY));
+      const movedDeltaX = movedCurrent.clientX - movedStart.clientX;
+      const movedDeltaY = movedCurrent.clientY - movedStart.clientY;
+      const parallelTravel = Math.abs(movedDeltaX * axisX + movedDeltaY * axisY) / axisLength;
+      const perpendicularTravel = Math.abs(movedDeltaX * axisY - movedDeltaY * axisX) / axisLength;
+      if (perpendicularTravel > parallelTravel) {
+        const scrollGestureId = `scroll-${state.firstPointerId}-${state.startedAtMs}`;
+        const events = buildRemoteWindowTwoFingerScrollEventsRuntime({
+          geometry,
+          midClientX: midpoint.clientX,
+          midClientY: midpoint.clientY,
+          rawDeltaX: midpoint.clientX - state.startMidX,
+          rawDeltaY: midpoint.clientY - state.startMidY,
+          scrollFraction: scrollFraction ?? REMOTE_WINDOW_TOUCH_SCROLL_DEFAULT_FRACTION,
+          inverted: invertGestureDirection ?? false,
+          phase: 'start',
+          gestureId: scrollGestureId,
+        });
+        if (events.length > 0) {
+          return {
+            nextState: {
+              mode: 'twoFingerScroll',
+              firstPointerId: state.firstPointerId,
+              secondPointerId: state.secondPointerId,
+              firstStart: state.firstStart,
+              secondStart: state.secondStart,
+              startDistance: state.startDistance,
+              startMidX: state.startMidX,
+              startMidY: state.startMidY,
+              lastMidX: midpoint.clientX,
+              lastMidY: midpoint.clientY,
+              startedAtMs: state.startedAtMs,
+              scrollGestureId,
+              committed: true,
+            },
+            remoteEvents: events,
+            localEffect: {
+              kind: 'two-finger-scroll-start',
+              pointerId: state.firstPointerId,
+            },
+            consumed: true,
+          };
+        }
+      }
+    }
   }
 
   if (state.mode === 'twoFingerScroll') {
