@@ -43,5 +43,6 @@ evidence/
   - 命令：`cd android && pnpm exec vitest run src/contexts/session-context-buffer-runtime.test.ts src/contexts/session-context-pull-runtime.test.ts src/contexts/session-context-socket-runtime.test.ts --reporter=dot`
   - 结果：exit 0；`Test Files  3 passed (3)`、`Tests  96 passed (96)`（`session-context-buffer-runtime.test.ts` 79 + `session-context-pull-runtime.test.ts` 5 + `session-context-socket-runtime.test.ts` 12）
   - 原始输出按项目规则保留在本地 ignored 目录 `android/evidence/fg-refresh-mainline-0920/focused-vitest.txt`（`evidence/` 默认不入库）；本索引记录的命令与计数可直接复现。本次提交只改本 README，未改动 `android/src`，因此上述 revision/tree 即被测试源码
-  - `978f84b7` 的 exact APK 设备回放（`0.1.3.3066`）仍是本 lineage 上最近一次真机/模拟器前台恢复回放；`43377946` 只在其上追加 body-first staged frame 保留与测试，尚未重跑设备回放，不得据 3066 回放宣称 3067 已设备验收。
+  - `43377946` 已按 exact-main lineage 在真机 `100.104.163.65:5555` 重跑 `0.1.3.3067` 设备回放：`adb install -r` 保留应用数据；HOME -> 同一 MainActivity 前台且不切 session 后，active session 保持 `session-1789919271377-853l25hl`，DOM 同时包含 `MOCK_INITIAL_4F31A` 与 `MOCK_RESUME_7C92B`；mock `connections` `1 -> 1`、`closed=0`，resume 请求覆盖 `knownRevision=2 -> targetHeadRevision=1`。本轮只使用 `127.0.0.1` mock，未执行任何 tmux 操作。证据：`android/evidence/bug-8fdaeec-fg-refresh-main-0919-main-3067/real-device-3067-resume.json` 与同目录 package dump。
+  - `978f84b7` 的 `0.1.3.3066` 真机/模拟器回放保留为上一代历史证据；当前 `0.1.3.3067` 验收以上条为准。
   - 当前 candidate 的 OTA/公开 Relay 发布：本地 `~/.zterm/updates/latest.json` 已指向 `0.1.3.3067`（sha256 `d47c641c788eb42e353cebd8da15e1aa76dc4662fcd5b08e28eea6bd0894a52e`）；公开 Relay 发布是独立授权阶段，尚未执行。
