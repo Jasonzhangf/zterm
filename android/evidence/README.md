@@ -45,3 +45,18 @@ evidence/
   - 原始输出按项目规则保留在本地 ignored 目录 `android/evidence/fg-refresh-mainline-0920/focused-vitest.txt`（`evidence/` 默认不入库）；本索引记录的命令与计数可直接复现。本次提交只改本 README，未改动 `android/src`，因此上述 revision/tree 即被测试源码
   - `978f84b7` 的 exact APK 设备回放（`0.1.3.3066`）仍是本 lineage 上最近一次真机/模拟器前台恢复回放；`43377946` 只在其上追加 body-first staged frame 保留与测试，尚未重跑设备回放，不得据 3066 回放宣称 3067 已设备验收。
   - 当前 candidate 的 OTA/公开 Relay 发布：本地 `~/.zterm/updates/latest.json` 已指向 `0.1.3.3067`（sha256 `d47c641c788eb42e353cebd8da15e1aa76dc4662fcd5b08e28eea6bd0894a52e`）；公开 Relay 发布是独立授权阶段，尚未执行。
+
+## rwd-geometry-gesture-0920 真机回放索引
+
+候选 `e9b08c81`（`fix/rwd-geometry-gesture-0920`，base `e9a5fd26` = origin/main）在 15t 上的真机回放；原始记录保留在本地 ignored 目录 `android/evidence/rwd-geometry-gesture-0920-15t/replay.txt`。
+
+- 设备与产物身份：`100.104.163.65:5555`（PLZ110，`ro.serialno 3B162D0024S00000`），`versionName 0.1.3.3067` / `versionCode 1100030670`，`firstInstallTime 2026-09-18 12:20:15` 保留（`adb install -r`），安装态 APK sha256 `d2a260b2e49adbcdc6af7cc547fd8a35daf6e0497b5c169d46f0fea0f704cdb0` 与 host `android/native/android/app/build/outputs/apk/debug/app-debug.apk` 完全一致。
+- 真实入口：Mac Studio daemon 0.1.3（launchd）→ tmux `zterm-3` → 远程窗口 Finder `app-window:29243:37285`；解码视频 `readyState 4`、`720x1065`、`currentTime` 推进。
+- 观测层：远端输入在真实传输边界取证（`Capacitor.nativePromise` / `toNative`，plugin `AndroidConnectionService`）。Android 传输是 native Capacitor plugin，不是 DOM WebSocket，DOM `WebSocket.prototype.send` 钩子记录为 0，不构成证据。
+- A 缩放后全屏单指完全 no-op：pinch 后 content `{x:-452,y:-423,w:1243,h:1839}`，真实 `adb shell input swipe 608 2000 608 1400 300` 后 rect 不变（dx=dy=dw=dh=0），`remote-window-input` 计数 0 → PASS。
+- B 缩放后全屏双击不重置投影（`ddf9613d`）：真实 100ms 内两次 `input tap 608 1740`，rect 保持不变 → PASS。
+- C 双指同向为实时远端 scroll：双指 100px 同向位移，本地投影不变，传输层出现 `remote-window-input`（`rw-input-1789936500393-27` phase=start x=2111.85 y=1277.22 dy=46.23，随后 8 个 update）→ PASS。
+- D pinch 缩放：in `{8,252,331,490}` → `{-452,-423,1243,1839}`（dw=+912 dh=+1349）；out 精确还原（dw=-912 dh=-1349），不缩到 fit 以下 → PASS。
+- E 1x 单击：真实 `input tap` 后恰好 1 条 `remote-window-input`，`event.kind=click`、`button=left`、`seq rw-input-1789936677337-46` → PASS。
+- F 全屏进入/退出链条：抽屉把手真实上滑 → `data-mode floating→fullscreen` 且 toolbar 出现；`缩小远程窗口` → `fullscreen→floating`；`关闭远程窗口` → overlay 与 bottom sheet 同时消失，无需杀 App → PASS。
+- 未覆盖：embedded（半截抽屉）floating 的 pinch 在本轮未改变 content rect（该路径不是本候选两个缺陷的修复对象）；daemon 启动错误不再被 cleanup 失败覆盖（`f8dcac3f`）由 `remote-window-capture.test.ts` 单测覆盖，本轮未在设备上重导。
