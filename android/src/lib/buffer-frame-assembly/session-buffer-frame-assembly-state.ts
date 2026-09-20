@@ -67,6 +67,9 @@ export function resetBufferSyncFrameAssemblyEpoch(
   return resource
     ? {
         pending: null,
+        ...(resource.pendingBodyFirstFrame
+          ? { pendingBodyFirstFrame: resource.pendingBodyFirstFrame }
+          : {}),
         error: null,
         repairDispatchedRevisions: [],
       }

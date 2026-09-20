@@ -3452,6 +3452,142 @@ describe('session-context-buffer-runtime inactive gating', () => {
     }
   });
 
+  it('keeps a staged body-first frame across a lower-revision head epoch reset', () => {
+    const sessionId = 'session-body-first-head-reset';
+    const session = makeSession(sessionId);
+    const localBuffer = createSessionBufferState({
+      lines: ['old-generation-a', 'old-generation-b'],
+      startIndex: 100,
+      endIndex: 102,
+      bufferHeadStartIndex: 100,
+      bufferTailEndIndex: 102,
+      cols: 80,
+      rows: 24,
+      revision: 2,
+      cacheLines: 1000,
+    });
+    session.buffer = localBuffer;
+    const committedBuffers: SessionBufferState[] = [];
+    const commitSessionBufferUpdate = vi.fn((_sessionId: string, nextBuffer: SessionBufferState) => {
+      committedBuffers.push(nextBuffer);
+      return true;
+    });
+    const scheduleSessionRenderCommit = vi.fn();
+    const requestSessionBufferSync = vi.fn(() => true);
+    const runtimeDebug = vi.fn();
+    const refs = makeHeadRuntimeRefs({
+      sessions: [session],
+      activeSessionId: sessionId,
+      visibleRangeEntries: [[sessionId, { startIndex: 100, endIndex: 102, viewportRows: 2 }]],
+    });
+    refs.tailRefreshStoreRef.current.markPendingResumeTailRefresh(sessionId);
+    const baseOptions = {
+      sessionId,
+      refs,
+      readSessionBufferSnapshot: () => localBuffer,
+      resolveSessionCacheLines: () => 1000,
+      summarizeBufferPayload: (payload: TerminalBufferPayload) => ({
+        revision: payload.revision,
+        startIndex: payload.startIndex,
+        endIndex: payload.endIndex,
+        lineCount: payload.lines.length,
+      }),
+      runtimeDebug,
+      commitSessionBufferUpdate,
+      scheduleSessionRenderCommit,
+      isSessionTransportActive: () => true,
+      requestSessionBufferSync,
+    };
+
+    applyIncomingBufferSyncRuntime({
+      ...baseOptions,
+      payload: {
+        revision: 1,
+        startIndex: 0,
+        endIndex: 2,
+        availableStartIndex: 0,
+        availableEndIndex: 4,
+        frameStartIndex: 0,
+        frameEndIndex: 4,
+        frameChunkIndex: 0,
+        frameChunkCount: 2,
+        generatedAt: 2000,
+        cols: 80,
+        rows: 24,
+        cursorKeysApp: false,
+        lines: [
+          { ...makeLine('new-generation-a'), index: 0 },
+          { ...makeLine('new-generation-b'), index: 1 },
+        ],
+      },
+    });
+    const stagedFrame = refs.bufferFrameAssemblyRef.current.get(sessionId)?.pendingBodyFirstFrame || null;
+    expect(stagedFrame?.chunks.size).toBe(1);
+
+    handleBufferHeadRuntime({
+      sessionId,
+      latestRevision: 1,
+      latestEndIndex: 4,
+      availableStartIndex: 0,
+      availableEndIndex: 4,
+      refs,
+      readSessionTransportSocket: () => ({ readyState: WebSocket.OPEN } as any),
+      readSessionBufferSnapshot: () => localBuffer,
+      commitSessionBufferUpdate: vi.fn(() => false),
+      scheduleSessionRenderCommit: vi.fn(),
+      isSessionTransportActive: () => true,
+      runtimeDebug: vi.fn(),
+      requestSessionBufferSync: vi.fn(() => true),
+    });
+    const resetResource = refs.bufferFrameAssemblyRef.current.get(sessionId);
+    expect(resetResource?.pending).toBeNull();
+    expect(resetResource?.error).toBeNull();
+    expect(resetResource?.repairDispatchedRevisions).toEqual([]);
+    expect(resetResource?.pendingBodyFirstFrame).toBe(stagedFrame);
+    expect(resetResource?.pendingBodyFirstFrame?.chunks.size).toBe(1);
+
+    applyIncomingBufferSyncRuntime({
+      ...baseOptions,
+      payload: {
+        revision: 1,
+        startIndex: 2,
+        endIndex: 4,
+        availableStartIndex: 0,
+        availableEndIndex: 4,
+        frameStartIndex: 0,
+        frameEndIndex: 4,
+        frameChunkIndex: 1,
+        frameChunkCount: 2,
+        generatedAt: 2000,
+        cols: 80,
+        rows: 24,
+        cursorKeysApp: false,
+        lines: [
+          { ...makeLine('new-generation-c'), index: 2 },
+          { ...makeLine('new-generation-d'), index: 3 },
+        ],
+      },
+    });
+
+    expect(commitSessionBufferUpdate).toHaveBeenCalledOnce();
+    expect(committedBuffers[0]).toMatchObject({
+      revision: 1,
+      startIndex: 0,
+      endIndex: 4,
+      bufferHeadStartIndex: 0,
+      bufferTailEndIndex: 4,
+    });
+    expect(committedBuffers[0]!.lines.map(cellsToText)).toEqual([
+      'new-generation-a',
+      'new-generation-b',
+      'new-generation-c',
+      'new-generation-d',
+    ]);
+    expect(scheduleSessionRenderCommit).toHaveBeenCalledWith(sessionId);
+    expect(requestSessionBufferSync).not.toHaveBeenCalled();
+    expect(refs.bufferFrameAssemblyRef.current.has(sessionId)).toBe(false);
+  });
+
   it('keeps staged body-first chunks across malformed, invalid-line, and resource-limit rejections', () => {
     const sessionId = 'session-body-first-preserve';
     const session = makeSession(sessionId);
