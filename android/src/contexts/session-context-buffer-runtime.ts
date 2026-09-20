@@ -1505,14 +1505,16 @@ export function applyIncomingBufferSyncRuntime(options: ApplyIncomingBufferSyncR
     return;
   }
   if (frameAssembly.kind === 'rejected') {
-    if (isBodyFirstChunkedCandidate && currentFrameResource) {
-      const { pendingBodyFirstFrame: _stagedBodyFirstFrame, ...retainedResource } = currentFrameResource;
-      frameAssemblyStore.set(options.sessionId, retainedResource);
+    if (isBodyFirstChunkedCandidate) {
+      if (currentFrameResource) {
+        const { pendingBodyFirstFrame: _stagedBodyFirstFrame, ...retainedResource } = currentFrameResource;
+        frameAssemblyStore.set(options.sessionId, retainedResource);
+      }
       options.runtimeDebug('session.buffer.frame.body-first-candidate-rejected', {
         sessionId: options.sessionId,
         error: frameAssembly.error,
         incomingRevision: frameAssembly.repairRevision,
-        retainedPendingRevision: currentFrameResource.pending?.revision ?? null,
+        retainedPendingRevision: currentFrameResource?.pending?.revision ?? null,
       });
       return;
     }

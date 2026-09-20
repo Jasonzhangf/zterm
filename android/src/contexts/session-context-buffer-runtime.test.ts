@@ -5,6 +5,7 @@ import { createSessionBufferState } from '../lib/terminal-buffer';
 import type { Session, SessionBufferState, TerminalBufferPayload } from '../lib/types';
 import {
   TERMINAL_BUFFER_SYNC_FRAME_MAX_AGE_MS,
+  TERMINAL_BUFFER_SYNC_FRAME_MAX_CHUNKS,
   TERMINAL_BUFFER_SYNC_FRAME_MAX_SPAN_LINES,
 } from '@zterm/shared/types';
 import {
@@ -3559,6 +3560,93 @@ describe('session-context-buffer-runtime inactive gating', () => {
         incomingRevision: 1,
         retainedPendingRevision: 3,
       }),
+    );
+  });
+
+  it('stale-drops an over-limit lower-revision body-first chunk when no frame resource exists', () => {
+    const sessionId = 'session-1';
+    const session = makeSession(sessionId);
+    const localBuffer = createSessionBufferState({
+      lines: ['old-generation-a', 'old-generation-b'],
+      startIndex: 100,
+      endIndex: 102,
+      bufferHeadStartIndex: 100,
+      bufferTailEndIndex: 102,
+      cols: 80,
+      rows: 24,
+      revision: 2,
+      cacheLines: 1000,
+    });
+    session.buffer = localBuffer;
+    const commitSessionBufferUpdate = vi.fn(() => true);
+    const scheduleSessionRenderCommit = vi.fn();
+    const requestSessionBufferSync = vi.fn(() => true);
+    const runtimeDebug = vi.fn();
+    const bufferFrameAssemblyRef = {
+      current: new Map<string, BufferFrameAssemblyResourceState>(),
+    };
+
+    applyIncomingBufferSyncRuntime({
+      sessionId,
+      payload: {
+        revision: 1,
+        startIndex: 0,
+        endIndex: 1,
+        availableStartIndex: 0,
+        availableEndIndex: TERMINAL_BUFFER_SYNC_FRAME_MAX_CHUNKS + 1,
+        frameStartIndex: 0,
+        frameEndIndex: TERMINAL_BUFFER_SYNC_FRAME_MAX_CHUNKS + 1,
+        frameChunkIndex: 0,
+        frameChunkCount: TERMINAL_BUFFER_SYNC_FRAME_MAX_CHUNKS + 1,
+        generatedAt: 2000,
+        cols: 80,
+        rows: 24,
+        cursorKeysApp: false,
+        lines: [
+          { ...makeLine('malformed-body-first'), index: 0 },
+        ],
+      },
+      refs: {
+        stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
+        sessionRevisionResetRef: { current: new Map() },
+        sessionHeadStoreRef: makeLiveHeadStoreRef(),
+        tailRefreshStoreRef: makeTailRefreshStoreRef({ resume: [sessionId] }),
+        bufferFrameAssemblyRef,
+        sessionVisibleRangeRef: {
+          current: new Map([[sessionId, { startIndex: 100, endIndex: 102, viewportRows: 2 }]]),
+        },
+      },
+      readSessionBufferSnapshot: () => localBuffer,
+      resolveSessionCacheLines: () => 1000,
+      summarizeBufferPayload: (payload) => ({
+        revision: payload.revision,
+        startIndex: payload.startIndex,
+        endIndex: payload.endIndex,
+        lineCount: payload.lines.length,
+      }),
+      runtimeDebug,
+      commitSessionBufferUpdate,
+      scheduleSessionRenderCommit,
+      isSessionTransportActive: () => true,
+      requestSessionBufferSync,
+    });
+
+    expect(commitSessionBufferUpdate).not.toHaveBeenCalled();
+    expect(scheduleSessionRenderCommit).not.toHaveBeenCalled();
+    expect(requestSessionBufferSync).not.toHaveBeenCalled();
+    expect(bufferFrameAssemblyRef.current.has(sessionId)).toBe(false);
+    expect(runtimeDebug).toHaveBeenCalledWith(
+      'session.buffer.frame.body-first-candidate-rejected',
+      expect.objectContaining({
+        sessionId,
+        error: 'frame-resource-limit-exceeded',
+        incomingRevision: 1,
+        retainedPendingRevision: null,
+      }),
+    );
+    expect(runtimeDebug).not.toHaveBeenCalledWith(
+      'session.buffer.frame.rejected',
+      expect.anything(),
     );
   });
 
