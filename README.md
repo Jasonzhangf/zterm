@@ -24,6 +24,13 @@ zterm/
 
 Legacy runtime and demo source trees are intentionally not part of this app repo. The root layout gate blocks those trees from being reintroduced.
 
+The gate grades findings by blast radius. Banned legacy paths and stale
+references inside build inputs or CI wiring (for example `package.json`,
+`pnpm-workspace.yaml`, or `.github/workflows/ci.yml`) block delivery. Stale
+references that only survive in documentation, skills, or history are reported
+as `[WARN] repo-layout: ...` and do not fail the gate, because they mislead
+readers without changing what builds or runs.
+
 ## Development
 
 Install dependencies:
