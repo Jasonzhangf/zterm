@@ -548,6 +548,38 @@ describe('RemoteWindowOverlay gesture matrix', () => {
     expect(remotePayloads(sendInput)).toEqual([]);
   });
 
+  it('keeps a zoomed fullscreen projection when the surface double-clicks', async () => {
+    const { sendInput, surface } = await openRemoteWindow(true);
+    const content = projectionElement();
+    const initialWidth = stylePx(content.style.width);
+
+    const zoomOut = pinchMove(surface, 'out');
+    await waitFor(() => {
+      expect(stylePx(content.style.width)).toBeGreaterThan(initialWidth + 1);
+    });
+    await releasePair(
+      surface,
+      zoomOut.firstPointerId,
+      zoomOut.secondPointerId,
+      zoomOut.firstEndX,
+      zoomOut.secondEndX,
+      zoomOut.y,
+    );
+    sendInput.mockClear();
+
+    const zoomedWidth = stylePx(content.style.width);
+    const zoomedTop = stylePx(content.style.top);
+    expect(zoomedWidth).toBeGreaterThan(initialWidth + 1);
+
+    fireEvent.doubleClick(surface);
+    await act(async () => {});
+
+    expect(stylePx(content.style.width)).toBe(zoomedWidth);
+    expect(stylePx(content.style.top)).toBe(zoomedTop);
+    expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('fullscreen');
+    expect(remotePayloads(sendInput)).toEqual([]);
+  });
+
   it('upgrades a suppressed one-finger sequence to fullscreen remote scroll', async () => {
     const { sendInput, surface } = await openRemoteWindow(true);
     const content = projectionElement();
