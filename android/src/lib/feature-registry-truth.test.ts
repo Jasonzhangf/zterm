@@ -150,9 +150,8 @@ describe('feature registry truth gate', () => {
     expect(readFileSync(prebuildRunnerPath, 'utf8')).toContain(
       "'test:file-transfer:throughput'",
     );
-    expect(ciWorkflow).toContain(
-      'pnpm --dir android run test:file-transfer:throughput',
-    );
+    expect(ciWorkflow).toContain('pnpm --dir android run test:ci-gates');
+    expect(ciWorkflow).not.toContain('pnpm --dir android run test:file-transfer:throughput');
     expect(fileTransferFeature?.required_gates).toContain(
       'scripts/run-file-transfer-throughput-gate.sh',
     );

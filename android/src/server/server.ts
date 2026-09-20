@@ -14,6 +14,7 @@ import { join } from 'path';
 import { homedir } from 'os';
 import type {
   BridgeServerMessage as ServerMessage,
+  TerminalSessionCatalogEntry,
 } from '@zterm/shared/protocol';
 import {
   buildDaemonSessionName,
@@ -396,8 +397,8 @@ const daemonSessionCatalogRuntime = createDaemonSessionCatalogRuntime({
 });
 const listTerminalSessionCatalog = () => daemonSessionCatalogRuntime.read();
 let relayHostClient: ReturnType<typeof createTraversalRelayHostClient> | null = null;
-const refreshDaemonSessionCatalog = async () => {
-  const catalog = await daemonSessionCatalogRuntime.refresh();
+const refreshDaemonSessionCatalog = async (detectedEntries?: TerminalSessionCatalogEntry[]) => {
+  const catalog = await daemonSessionCatalogRuntime.refresh(undefined, detectedEntries);
   relayHostClient?.publishDirectoryUpdate();
   return catalog;
 };

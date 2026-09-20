@@ -150,6 +150,13 @@ high RTT / high buffered bytes / send backlog / over-budget capture
 
 禁止把真实 terminal payload 内容写入 trace 来换取观测便利。
 
+### 1.0.3 daemon mirror flush 日志边界
+
+- `terminal-mirror-runtime.ts` 的每次 canonical mirror flush 不得无条件写 stdout / stderr。
+- 禁止输出 `mirror.flush.inspect`、`changedLinePreview` 或任何 terminal row / cell 内容；flush 级观测只能进入已有的有界 performance trace，且只记录 metadata。
+- 真实 capture / flush failure 仍必须显式记录错误，不得被日志收敛吞掉。
+- 回归 gate 必须证明 mirror 内容变化并 flush 时不会产生 `mirror.flush.inspect` console output。
+
 ### 1.1 server 响应规则
 
 - `buffer-head-request`：返回当前 head

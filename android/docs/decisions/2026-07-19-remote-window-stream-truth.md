@@ -24,6 +24,51 @@ Remote window stream starts from the Android floating entry. The old floating qu
 14. Floating and fullscreen overlays expose a screenshot button. It captures the selected desktop app/window target through the existing remote screenshot/file-download pipeline, using the target manifest to request either the macOS window id or normalized pane crop rectangle, then saves the PNG on Android. Screenshot capture is not remote input and must not focus or raise the desktop app.
 15. When the Android app goes to background, an active remote-window stream is explicitly stopped and the overlay closes instead of keeping ScreenCaptureKit/WebRTC alive offscreen. Foreground return does not auto-resume a hidden stream; the user must reopen the overlay.
 
+### Embedded resource-drawer preview boundary (2026-09-19)
+
+The resource drawer embeds the remote window in two presentations:
+
+- `halfSheetPreview`: the `embedded && mode === "floating"` container. It is a
+  passive preview only. It must not publish a remote-window input context and
+  must not send pointer, scroll, gesture, wheel, or key events. It must not
+  perform local pinch/pan projection either. The explicit drawer grip is the
+  only half-sheet-to-fullscreen affordance; the video surface must not promote
+  itself with double-tap or any Direct Touch gesture.
+- `embeddedFullscreen`: the `embedded && mode === "fullscreen"` container. It
+  keeps the full Direct Touch and Mouse Emulation contract below.
+
+Standalone (non-embedded) floating keeps the existing floating interaction
+contract. This boundary applies only to the embedded half-sheet preview.
+
+### Fullscreen gesture and close amendment (2026-09-19)
+
+This amendment resolves the real-device feedback where zoomed fullscreen
+two-finger motion only moved the local projection, a single tap did not reach
+the remote target, and the remote close action could leave the overlay stuck.
+
+- `client.remote_window_overlay` owns the fullscreen/floating projection and
+  the local stream teardown for close. The remote close action first emits the
+  existing `close-window` business event to the target, but local teardown must
+  run even when that event is unsupported, unconfigured, or rejected by the
+  input dispatcher. A missing dispatcher must not strand the overlay in
+  `targetLocked` or `fullscreen`.
+- Back and minimize keep their existing shrink semantics: they exit fullscreen
+  to floating without closing or recreating the stream. They must never leave
+  the overlay stuck in `targetLocked`/`fullscreen`.
+- `resource.remote_window_touch_action` owns gesture classification. At zoomed
+  fullscreen scale, one finger remains local pan and emits no remote input.
+  Two-finger coherent same-direction motion is remote scroll, not local window
+  pan. When a second finger upgrades an active one-finger local pan, the pair
+  owner takes over immediately; the first pair sample must be classified and
+  must not be consumed by the observation window.
+- At 1x, a stationary tap remains one remote `click` business event. The
+  daemon-owned `resource.remote_window_stream` performs the exact
+  `CGWindowID` focus/raise check inline before injecting that click; the client
+  must not replace the click with a local visual-only focus change.
+- No second gesture channel, fallback input path, or daemon-side client state
+  may be introduced for these fixes. The shared wire event remains the single
+  input contract.
+
 The stream is not view-only long term. It must support mouse and keyboard event return. Input return must carry an explicit focus policy:
 
 - `bring-to-focus`: the daemon brings the selected app/window/pane to focus before forwarding OS input.
@@ -138,7 +183,7 @@ idle
 
 Only `closed` releases capture, encoder, WebRTC sender, and target lease. Back from `fullscreenStream` must not close or recreate the stream.
 
-Floating preview geometry and fullscreen zoom state are Android projection-only. The floating preview uses the selected manifest crop/window aspect ratio instead of a fixed frame. Fullscreen local drawing/input stays aspect-fit; the fill action is an explicit daemon `window-resize` request only for ordinary app-window targets. iTerm2 app-window and pane targets must reject that request so streaming cannot resize the iTerm window or tmux shell; the behavior must not be faked by local cover/crop, tmux resize, capture restart, WebRTC renegotiation, or coordinate fallback. Pinch zoom may enlarge above fit and shrink back to 1x, but the client must not render a minimap/viewport overlay or allow shrinking below fit. Pointer/keyboard events emitted from the video surface are normalized against the selected manifest crop and sent as explicit input intents; the media `<video>` is pointer-transparent and daemon/native input policy is still the only injection truth.
+Floating preview geometry and fullscreen zoom state are Android projection-only. The floating preview uses the selected manifest crop/window aspect ratio instead of a fixed frame. Fullscreen local drawing/input stays aspect-fit; the fill action is an explicit daemon `window-resize` request only for ordinary app-window targets. iTerm2 app-window and pane targets must reject that request so streaming cannot resize the iTerm window or tmux shell; the behavior must not be faked by local cover/crop, tmux resize, capture restart, WebRTC renegotiation, or coordinate fallback. Pinch zoom may enlarge above fit and shrink back to 1x, but the client must not render a minimap/viewport overlay or allow shrinking below fit. Pointer/keyboard events emitted from the video surface are normalized against the selected manifest crop and sent as explicit input intents; the media `<video>` is pointer-transparent and daemon/native input policy is still the only injection truth. In the embedded half-sheet preview the video surface is non-interactive: it renders the received frame only, and the drawer grip owns the transition to embedded fullscreen.
 
 Remote-window media negotiation is a separate WebRTC peer connection, but its ICE configuration must be derived from the current session traversal route. When the active session resolved through `rtc-direct`, the video receiver/start request uses the same STUN-only direct ICE truth. When it resolved through `rtc-relay`, the video receiver/start request uses the Relay TURN ICE truth. Android must not leave the remote-window video peer connection as no-ICE on Relay/cellular paths, and must not invent a screenshot or terminal-buffer fallback if ICE/media negotiation fails.
 
