@@ -567,17 +567,12 @@ function isAuthoritativeFullTailPayload(options: {
   const windowEndIndex = frameChunkCount === 1 ? endIndex : frameEndIndex!;
   const availableStartIndex = readStrictBufferInteger(payload.availableStartIndex);
   const availableEndIndex = readStrictBufferInteger(payload.availableEndIndex);
-  const requiresExplicitAvailableBounds = frameChunkCount === 1 && !hasFrameWindowMetadata;
-  if (
-    (requiresExplicitAvailableBounds && (availableStartIndex === null || availableEndIndex === null))
-    || (payload.availableStartIndex !== undefined && availableStartIndex === null)
-    || (payload.availableEndIndex !== undefined && availableEndIndex === null)
-  ) {
+  if (availableStartIndex === null || availableEndIndex === null) {
     return false;
   }
   if (
-    windowStartIndex !== (availableStartIndex ?? windowStartIndex)
-    || windowEndIndex !== (availableEndIndex ?? windowEndIndex)
+    windowStartIndex !== availableStartIndex
+    || windowEndIndex !== availableEndIndex
   ) {
     return false;
   }
