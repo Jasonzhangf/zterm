@@ -3688,15 +3688,17 @@ describe('RemoteWindowOverlay', () => {
     const playSpy = vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(() => Promise.resolve());
 
     try {
-      render(
+      const renderOverlay = (embeddedFullscreen: boolean) => (
         <RemoteWindowOverlay
           activeSessionId="session-fullscreen-rearm"
           embedded
+          embeddedFullscreen={embeddedFullscreen}
           requestTargets={requestTargets}
           startStream={startStream}
           stopStream={stopStream}
-        />,
+        />
       );
+      const view = render(renderOverlay(false));
 
       fireEvent.click(await screen.findByTestId('remote-window-target-app-fullscreen-rearm'));
       const surface = await screen.findByTestId('remote-window-video-surface');
@@ -3732,7 +3734,7 @@ describe('RemoteWindowOverlay', () => {
       drawImage.mockClear();
       const callbackCountBeforeFullscreen = frameCallbacks.length;
 
-      fireEvent.doubleClick(surface);
+      view.rerender(renderOverlay(true));
       await waitFor(() => {
         expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('fullscreen');
       });
@@ -3778,23 +3780,24 @@ describe('RemoteWindowOverlay', () => {
     clippingDrawer.style.overflow = 'hidden';
     document.body.appendChild(clippingDrawer);
 
-    const view = render(
+    const renderOverlay = (embeddedFullscreen: boolean) => (
       <RemoteWindowOverlay
         activeSessionId="session-clipping-drawer"
         embedded
+        embeddedFullscreen={embeddedFullscreen}
         requestTargets={requestTargets}
         startStream={startStream}
-      />,
-      { container: clippingDrawer },
+      />
     );
+    const view = render(renderOverlay(false), { container: clippingDrawer });
 
     fireEvent.click(await screen.findByTestId('remote-window-target-app-clipping-drawer'));
-    const surface = await screen.findByTestId('remote-window-video-surface');
+    await screen.findByTestId('remote-window-video-surface');
     const embeddedVideo = await screen.findByTestId('remote-window-video') as HTMLVideoElement;
     await waitFor(() => expect(embeddedVideo.srcObject).toBe(mediaStream));
     expect(clippingDrawer.contains(screen.getByTestId('remote-window-locked-overlay'))).toBe(true);
 
-    fireEvent.doubleClick(surface);
+    view.rerender(renderOverlay(true));
 
     await waitFor(() => {
       expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('fullscreen');
@@ -3821,10 +3824,11 @@ describe('RemoteWindowOverlay', () => {
       _target: RemoteWindowStreamTargetManifest,
       streamId: string,
     ) => ({ streamId, mediaStream }));
-    const renderOverlay = (bottomInsetPx: number) => (
+    const renderOverlay = (bottomInsetPx: number, embeddedFullscreen = false) => (
       <RemoteWindowOverlay
         activeSessionId="session-fullscreen-fill"
         embedded
+        embeddedFullscreen={embeddedFullscreen}
         bottomInsetPx={bottomInsetPx}
         bottomChromeInsetPx={165}
         requestTargets={requestTargets}
@@ -3834,15 +3838,15 @@ describe('RemoteWindowOverlay', () => {
     const view = render(renderOverlay(165));
 
     fireEvent.click(await screen.findByTestId('remote-window-target-app-fullscreen-fill'));
-    const surface = await screen.findByTestId('remote-window-video-surface');
-    fireEvent.doubleClick(surface);
+    await screen.findByTestId('remote-window-video-surface');
+    view.rerender(renderOverlay(165, true));
 
     const overlay = await screen.findByTestId('remote-window-locked-overlay');
     await waitFor(() => expect(overlay.getAttribute('data-mode')).toBe('fullscreen'));
     expect(overlay.style.paddingBottom).toBe('0px');
     expect(overlay.style.background).toBe('var(--zterm-stage-bg, #05090f)');
 
-    view.rerender(renderOverlay(465));
+    view.rerender(renderOverlay(465, true));
 
     await waitFor(() => expect(overlay.style.paddingBottom).toBe('300px'));
   });
