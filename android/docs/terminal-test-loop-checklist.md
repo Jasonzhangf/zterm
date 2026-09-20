@@ -145,6 +145,7 @@ tmux oracle
 10. reconnect 仍使用同一 session identity
 11. same target 下多个 session 不共享 reconnect fate
 12. foreground resume 优先复用原 session transport，不 fresh recreate session
+13. explicit resume 的 lower-revision fresh body 早于 head 到达时，完整 authoritative tail 可建立新 epoch；dense partial available window、缺 available metadata、malformed frame 都必须保持 stale drop，且不得清掉 pending frame / repair ledger / local buffer truth；staged body-first frame 的 malformed/interleave/resource-limit输入只拒绝本次输入并保留已收 chunks，唯有过期候选走 exact-range repair
 
 ### Group C. renderer orchestration
 

@@ -158,7 +158,7 @@ describe('session-context-pull-runtime', () => {
     );
   });
 
-  it('clears only pending frame assembly while retaining repair error and dispatch ledger across tab switch', () => {
+  it('clears both pending frame assemblies while retaining repair error and dispatch ledger across tab switch', () => {
     const sessionId = 'session-ledger';
     const frameResource = {
       pending: {
@@ -168,6 +168,17 @@ describe('session-context-pull-runtime', () => {
         frameEndIndex: 2,
         frameChunkCount: 2,
         generatedAt: 100,
+        firstReceivedAt: 100,
+        retainedBytes: 10,
+        chunks: new Map(),
+      },
+      pendingBodyFirstFrame: {
+        frameKey: '11:0:2:200:2',
+        revision: 11,
+        frameStartIndex: 0,
+        frameEndIndex: 2,
+        frameChunkCount: 2,
+        generatedAt: 200,
         firstReceivedAt: 100,
         retainedBytes: 10,
         chunks: new Map(),
@@ -183,6 +194,7 @@ describe('session-context-pull-runtime', () => {
       repairDispatchedRevisions: [11],
     };
     const bufferFrameAssemblyRef = { current: new Map([[sessionId, frameResource]]) };
+    const runtimeDebug = vi.fn();
 
     resetSessionTransportPullBookkeeping({
       sessionId,
@@ -191,9 +203,18 @@ describe('session-context-pull-runtime', () => {
       sessionPullStateRef: { current: new Map() } as any,
       tailRefreshStore: createSessionTailRefreshStore(),
       bufferFrameAssemblyRef,
-      runtimeDebug: vi.fn(),
+      runtimeDebug,
     });
 
+    expect(runtimeDebug).toHaveBeenCalledWith(
+      'session.buffer.pull.reset',
+      expect.objectContaining({
+        sessionId,
+        reason: 'tab-switch-out',
+        hadPendingBufferFrame: true,
+        hadPendingBodyFirstFrame: true,
+      }),
+    );
     expect(bufferFrameAssemblyRef.current.get(sessionId)).toEqual({
       pending: null,
       error: frameResource.error,

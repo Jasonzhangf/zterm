@@ -183,8 +183,16 @@ export function resetSessionTransportPullBookkeeping(options: {
   const hadReadingRepairDebounce = options.tailRefreshStore.hasSyncRequest(options.sessionId, 'reading-repair');
   const frameResource = options.bufferFrameAssemblyRef.current.get(options.sessionId) || null;
   const hadPendingBufferFrame = frameResource?.pending !== null && frameResource?.pending !== undefined;
+  const hadPendingBodyFirstFrame = Boolean(frameResource?.pendingBodyFirstFrame);
   const hasLivePullBookkeeping = Boolean(pullStates && hasActiveSessionPullState(pullStates));
-  if (!hasLivePullBookkeeping && !hadPendingInputTailRefresh && !hadTailRefreshDebounce && !hadReadingRepairDebounce && !hadPendingBufferFrame) {
+  if (
+    !hasLivePullBookkeeping
+    && !hadPendingInputTailRefresh
+    && !hadTailRefreshDebounce
+    && !hadReadingRepairDebounce
+    && !hadPendingBufferFrame
+    && !hadPendingBodyFirstFrame
+  ) {
     return;
   }
   options.runtimeDebug('session.buffer.pull.reset', {
@@ -196,6 +204,7 @@ export function resetSessionTransportPullBookkeeping(options: {
     hadTailRefreshDebounce,
     hadReadingRepairDebounce,
     hadPendingBufferFrame,
+    hadPendingBodyFirstFrame,
   });
   if (hasLivePullBookkeeping) {
     clearSessionPullState({

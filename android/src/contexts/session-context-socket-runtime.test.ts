@@ -265,7 +265,7 @@ describe('session-context-socket-runtime heartbeat lifecycle', () => {
     expect(heartbeatStore.readPingInterval('session-b')).toBeNull();
   });
 
-  it('clears stale tail-refresh markers together with head throttle state during socket cleanup prep', () => {
+  it('clears both staged frame assemblies and stale tail-refresh markers during socket cleanup prep', () => {
     const sessionId = 'session-1';
     const liveHeads = new Map([[sessionId, { revision: 5, latestEndIndex: 88, seenAt: 1 }]]);
     const sessionHeadStoreRef = {
@@ -293,6 +293,17 @@ describe('session-context-socket-runtime heartbeat lifecycle', () => {
         frameEndIndex: 2,
         frameChunkCount: 2,
         generatedAt: 100,
+        firstReceivedAt: 100,
+        retainedBytes: 10,
+        chunks: new Map(),
+      },
+      pendingBodyFirstFrame: {
+        frameKey: '11:0:2:200:2',
+        revision: 11,
+        frameStartIndex: 0,
+        frameEndIndex: 2,
+        frameChunkCount: 2,
+        generatedAt: 200,
         firstReceivedAt: 100,
         retainedBytes: 10,
         chunks: new Map(),

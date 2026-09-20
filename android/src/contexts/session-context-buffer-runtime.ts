@@ -82,6 +82,12 @@ function readBufferRuntimeSocket(
     || options.readSessionTransportSocket(sessionId);
 }
 
+function readStrictBufferInteger(value: unknown) {
+  return typeof value === 'number' && Number.isSafeInteger(value)
+    ? value
+    : null;
+}
+
 const SESSION_SYNC_REQUEST_DEBOUNCE_MS = 33;
 
 interface RevisionResetExpectation {
@@ -227,10 +233,13 @@ function projectRejectedBufferFrameRuntime(options: {
   requestSessionBufferSync: RequestSessionBufferSyncFn;
   runtimeDebug: RuntimeDebugFn;
   incomingSummary?: Record<string, unknown>;
+  preservePending?: boolean;
 }) {
   const incomingRevision = options.rejection.repairRevision;
   const retainedRevision = Math.max(
-    options.currentResource?.pending?.revision ?? -1,
+    options.preservePending
+      ? -1
+      : options.currentResource?.pending?.revision ?? -1,
     options.currentResource?.error?.revision ?? -1,
   );
   if (incomingRevision !== null && retainedRevision >= 0 && incomingRevision < retainedRevision) {
@@ -264,7 +273,9 @@ function projectRejectedBufferFrameRuntime(options: {
     repair,
   };
   options.frameAssemblyStore.set(options.sessionId, {
-    pending: options.rejection.state,
+    pending: options.preservePending
+      ? options.currentResource?.pending ?? null
+      : options.rejection.state,
     error: errorTruth,
     repairDispatchedRevisions: options.currentResource?.repairDispatchedRevisions ?? [],
   });
@@ -286,12 +297,46 @@ function projectRejectedBufferFrameRuntime(options: {
   }
 }
 
+function expirePendingBodyFirstFrameRuntime(options: {
+  sessionId: string;
+  frameAssemblyStore: Map<string, BufferFrameAssemblyResourceState>;
+  tailRefreshStore: SessionTailRefreshStore;
+  liveHead: SessionBufferHeadState | null;
+  requestSessionBufferSync: RequestSessionBufferSyncFn;
+  runtimeDebug: RuntimeDebugFn;
+  receivedAt: number;
+}) {
+  const currentResource = options.frameAssemblyStore.get(options.sessionId) || null;
+  const pendingBodyFirstFrame = currentResource?.pendingBodyFirstFrame || null;
+  const expiredFrame = expireBufferSyncFrameAssembly(
+    pendingBodyFirstFrame,
+    options.receivedAt,
+  );
+  if (!currentResource || expiredFrame?.kind !== 'rejected') {
+    return false;
+  }
+  const { pendingBodyFirstFrame: _stagedBodyFirstFrame, ...retainedResource } = currentResource;
+  options.frameAssemblyStore.set(options.sessionId, retainedResource);
+  projectRejectedBufferFrameRuntime({
+    sessionId: options.sessionId,
+    rejection: expiredFrame,
+    currentResource: retainedResource,
+    frameAssemblyStore: options.frameAssemblyStore,
+    tailRefreshStore: options.tailRefreshStore,
+    liveHead: options.liveHead,
+    requestSessionBufferSync: options.requestSessionBufferSync,
+    runtimeDebug: options.runtimeDebug,
+    preservePending: true,
+  });
+  return true;
+}
+
 function settleBufferFrameResourceAfterResolvedPayload(options: {
   sessionId: string;
   currentResource: BufferFrameAssemblyResourceState | null;
   frameAssemblyStore: Map<string, BufferFrameAssemblyResourceState>;
 }) {
-  const settledResource = options.frameAssemblyStore.get(options.sessionId) ?? options.currentResource;
+  const settledResource = options.currentResource ?? options.frameAssemblyStore.get(options.sessionId);
   const repairDispatchedRevisions = settledResource?.repairDispatchedRevisions ?? [];
   if (repairDispatchedRevisions.length > 0) {
     options.frameAssemblyStore.set(options.sessionId, {
@@ -477,23 +522,97 @@ function isAuthoritativeFullTailPayload(options: {
   localBuffer: SessionBufferState;
 }) {
   const payload = options.payload;
-  const incomingRevision = Math.max(0, Math.floor(payload.revision || 0));
-  const localRevision = Math.max(0, Math.floor(options.localBuffer.revision || 0));
-  if (localRevision <= 0 || incomingRevision >= localRevision || payload.lines.length === 0) {
+  const incomingRevision = readStrictBufferInteger(payload.revision);
+  const localRevision = readStrictBufferInteger(options.localBuffer.revision);
+  if (incomingRevision === null || localRevision === null) {
     return false;
   }
-  const startIndex = Math.max(0, Math.floor(payload.startIndex || 0));
-  const endIndex = Math.max(startIndex, Math.floor(payload.endIndex || startIndex));
+  if (incomingRevision <= 0 || localRevision <= 0 || incomingRevision >= localRevision || payload.lines.length === 0) {
+    return false;
+  }
+  const startIndex = readStrictBufferInteger(payload.startIndex);
+  const endIndex = readStrictBufferInteger(payload.endIndex);
+  if (startIndex === null || startIndex < 0 || endIndex === null) {
+    return false;
+  }
   if (endIndex <= startIndex) {
     return false;
   }
-  const availableStartIndex = Number.isFinite(payload.availableStartIndex)
-    ? Math.max(0, Math.floor(payload.availableStartIndex!))
-    : startIndex;
-  const availableEndIndex = Number.isFinite(payload.availableEndIndex)
-    ? Math.max(0, Math.floor(payload.availableEndIndex!))
-    : endIndex;
-  if (startIndex !== availableStartIndex || endIndex !== availableEndIndex) {
+  const hasFrameMetadata = payload.frameChunkCount !== undefined
+    || payload.frameStartIndex !== undefined
+    || payload.frameEndIndex !== undefined
+    || payload.frameChunkIndex !== undefined;
+  if (!hasFrameMetadata) {
+    const availableStartIndex = readStrictBufferInteger(payload.availableStartIndex);
+    const availableEndIndex = readStrictBufferInteger(payload.availableEndIndex);
+    if (
+      availableStartIndex === null
+      || availableEndIndex === null
+    ) {
+      return false;
+    }
+    if (
+      startIndex !== availableStartIndex
+      || endIndex !== availableEndIndex
+    ) {
+      return false;
+    }
+    const lineIndexes = normalizeWireLines(payload.lines, payload.cols || options.localBuffer.cols || 80)
+      .map((line) => line.index);
+    return lineIndexes.length === endIndex - startIndex
+      && lineIndexes.every((lineIndex, offset) => lineIndex === startIndex + offset);
+  }
+  const frameChunkCount = readStrictBufferInteger(payload.frameChunkCount);
+  const frameStartIndex = readStrictBufferInteger(payload.frameStartIndex);
+  const frameEndIndex = readStrictBufferInteger(payload.frameEndIndex);
+  const frameChunkIndex = readStrictBufferInteger(payload.frameChunkIndex);
+  const hasFrameWindowMetadata = payload.frameStartIndex !== undefined
+    || payload.frameEndIndex !== undefined
+    || payload.frameChunkIndex !== undefined;
+  if (frameChunkCount === null || frameChunkCount < 1) {
+    return false;
+  }
+  const generatedAt = readStrictBufferInteger(payload.generatedAt);
+  if (frameChunkCount === 1) {
+    if (
+      hasFrameWindowMetadata
+      && (
+        frameStartIndex !== startIndex
+        || frameEndIndex !== endIndex
+        || frameChunkIndex !== 0
+      )
+    ) {
+      return false;
+    }
+  } else {
+    if (
+      frameStartIndex === null
+      || frameStartIndex < 0
+      || frameEndIndex === null
+      || frameEndIndex <= frameStartIndex
+      || frameChunkIndex === null
+      || frameChunkIndex < 0
+      || frameChunkIndex >= frameChunkCount
+      || generatedAt === null
+      || generatedAt <= 0
+      || startIndex < frameStartIndex
+      || endIndex > frameEndIndex
+      || frameChunkCount > frameEndIndex - frameStartIndex
+    ) {
+      return false;
+    }
+  }
+  const windowStartIndex = frameChunkCount === 1 ? startIndex : frameStartIndex!;
+  const windowEndIndex = frameChunkCount === 1 ? endIndex : frameEndIndex!;
+  const availableStartIndex = readStrictBufferInteger(payload.availableStartIndex);
+  const availableEndIndex = readStrictBufferInteger(payload.availableEndIndex);
+  if (availableStartIndex === null || availableEndIndex === null) {
+    return false;
+  }
+  if (
+    windowStartIndex !== availableStartIndex
+    || windowEndIndex !== availableEndIndex
+  ) {
     return false;
   }
   const lineIndexes = normalizeWireLines(payload.lines, payload.cols || options.localBuffer.cols || 80)
@@ -847,6 +966,15 @@ export function handleBufferHeadRuntime(options: {
       runtimeDebug: options.runtimeDebug,
     });
   }
+  expirePendingBodyFirstFrameRuntime({
+    sessionId: options.sessionId,
+    frameAssemblyStore: options.refs.bufferFrameAssemblyRef.current,
+    tailRefreshStore: options.refs.tailRefreshStoreRef.current,
+    liveHead,
+    requestSessionBufferSync: options.requestSessionBufferSync,
+    runtimeDebug: options.runtimeDebug,
+    receivedAt: incomingHead.seenAt,
+  });
   dispatchPendingBufferFrameRepair({
     sessionId: options.sessionId,
     frameAssemblyStore: options.refs.bufferFrameAssemblyRef.current,
@@ -1379,9 +1507,26 @@ export function applyIncomingBufferSyncRuntime(options: ApplyIncomingBufferSyncR
   }
 
   const frameAssemblyStore = options.refs.bufferFrameAssemblyRef.current;
-  const currentFrameResource = frameAssemblyStore.get(options.sessionId) || null;
+  const pendingResumeTailRefresh = options.refs.tailRefreshStoreRef.current.hasPendingResumeTailRefresh(options.sessionId);
+  let currentFrameResource = frameAssemblyStore.get(options.sessionId) || null;
+  const bodyFirstGenerationCandidate = pendingResumeTailRefresh
+    && isAuthoritativeFullTailPayload({
+      payload: options.payload,
+      localBuffer,
+    });
+  const bodyFirstChunkCount = readStrictBufferInteger(options.payload.frameChunkCount);
+  const isBodyFirstChunkedCandidate = bodyFirstGenerationCandidate
+    && bodyFirstChunkCount !== null
+    && bodyFirstChunkCount > 1;
+  const hasStagedBodyFirstFrame = Boolean(currentFrameResource?.pendingBodyFirstFrame);
+  const isBodyFirstFrameContinuation = isBodyFirstChunkedCandidate
+    || (hasStagedBodyFirstFrame && !bodyFirstGenerationCandidate);
   const frameAssembly = assembleBufferSyncFrameChunk(
-    currentFrameResource?.pending || null,
+    isBodyFirstFrameContinuation
+      ? currentFrameResource?.pendingBodyFirstFrame || null
+      : bodyFirstGenerationCandidate
+        ? null
+        : currentFrameResource?.pending || null,
     options.payload,
     Date.now(),
   );
@@ -1393,7 +1538,10 @@ export function applyIncomingBufferSyncRuntime(options: ApplyIncomingBufferSyncR
       || retainedError.revision < frameAssembly.state.revision
     );
     frameAssemblyStore.set(options.sessionId, {
-      pending: frameAssembly.state,
+      pending: isBodyFirstFrameContinuation
+        ? currentFrameResource?.pending ?? null
+        : frameAssembly.state,
+      ...(isBodyFirstFrameContinuation ? { pendingBodyFirstFrame: frameAssembly.state } : {}),
       error: errorSuperseded ? null : retainedError,
       repairDispatchedRevisions: currentFrameResource?.repairDispatchedRevisions ?? [],
     });
@@ -1408,6 +1556,32 @@ export function applyIncomingBufferSyncRuntime(options: ApplyIncomingBufferSyncR
     return;
   }
   if (frameAssembly.kind === 'rejected') {
+    if (isBodyFirstFrameContinuation) {
+      if (frameAssembly.error === 'frame-assembly-expired' && currentFrameResource) {
+        const { pendingBodyFirstFrame: _stagedBodyFirstFrame, ...retainedResource } = currentFrameResource;
+        frameAssemblyStore.set(options.sessionId, retainedResource);
+        projectRejectedBufferFrameRuntime({
+          sessionId: options.sessionId,
+          rejection: frameAssembly,
+          currentResource: retainedResource,
+          frameAssemblyStore,
+          tailRefreshStore: options.refs.tailRefreshStoreRef.current,
+          liveHead: options.refs.sessionHeadStoreRef.current.getLiveHead(options.sessionId),
+          requestSessionBufferSync: options.requestSessionBufferSync,
+          runtimeDebug: options.runtimeDebug,
+          incomingSummary: options.summarizeBufferPayload(options.payload),
+          preservePending: true,
+        });
+        return;
+      }
+      options.runtimeDebug('session.buffer.frame.body-first-candidate-rejected', {
+        sessionId: options.sessionId,
+        error: frameAssembly.error,
+        incomingRevision: frameAssembly.repairRevision,
+        retainedPendingRevision: currentFrameResource?.pending?.revision ?? null,
+      });
+      return;
+    }
     projectRejectedBufferFrameRuntime({
       sessionId: options.sessionId,
       rejection: frameAssembly,
@@ -1422,6 +1596,14 @@ export function applyIncomingBufferSyncRuntime(options: ApplyIncomingBufferSyncR
     return;
   }
   if (frameAssembly.kind === 'complete') {
+    const bodyFirstGenerationReset = pendingResumeTailRefresh
+      && isAuthoritativeFullTailPayload({
+        payload: frameAssembly.payload,
+        localBuffer,
+      });
+    const resolvedFrameResource = bodyFirstGenerationReset
+      ? resetBufferSyncFrameAssemblyEpoch(currentFrameResource)
+      : currentFrameResource;
     options.runtimeDebug('session.buffer.frame.complete', {
       sessionId: options.sessionId,
       revision: frameAssembly.payload.revision,
@@ -1436,13 +1618,21 @@ export function applyIncomingBufferSyncRuntime(options: ApplyIncomingBufferSyncR
     if (accepted) {
       settleBufferFrameResourceAfterResolvedPayload({
         sessionId: options.sessionId,
-        currentResource: currentFrameResource,
+        currentResource: resolvedFrameResource,
         frameAssemblyStore,
       });
     }
     return;
   }
 
+  const bodyFirstGenerationReset = pendingResumeTailRefresh
+    && isAuthoritativeFullTailPayload({
+      payload: frameAssembly.payload,
+      localBuffer,
+    });
+  const resolvedFrameResource = bodyFirstGenerationReset
+    ? resetBufferSyncFrameAssemblyEpoch(currentFrameResource)
+    : currentFrameResource;
   const accepted = applyResolvedBufferSyncPayloadRuntime({
     ...options,
     payload: frameAssembly.payload,
@@ -1450,7 +1640,7 @@ export function applyIncomingBufferSyncRuntime(options: ApplyIncomingBufferSyncR
   if (accepted) {
     settleBufferFrameResourceAfterResolvedPayload({
       sessionId: options.sessionId,
-      currentResource: currentFrameResource,
+      currentResource: resolvedFrameResource,
       frameAssemblyStore,
     });
   }
@@ -1466,14 +1656,6 @@ function applyResolvedBufferSyncPayloadRuntime(options: ApplyResolvedBufferSyncP
       localBuffer,
     })
   );
-  if (bodyFirstGenerationReset) {
-    const resetFrameResource = resetBufferSyncFrameAssemblyEpoch(
-      options.refs.bufferFrameAssemblyRef.current.get(options.sessionId) || null,
-    );
-    if (resetFrameResource) {
-      options.refs.bufferFrameAssemblyRef.current.set(options.sessionId, resetFrameResource);
-    }
-  }
   const revisionResetExpectation = (
     options.refs.sessionRevisionResetRef.current.get(options.sessionId)
     || (bodyFirstGenerationReset

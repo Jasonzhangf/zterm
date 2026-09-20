@@ -41,6 +41,7 @@ export interface BufferFrameAssemblyErrorTruth {
 
 export interface BufferFrameAssemblyResourceState {
   pending: BufferFrameAssemblyState | null;
+  pendingBodyFirstFrame?: BufferFrameAssemblyState | null;
   error: BufferFrameAssemblyErrorTruth | null;
   repairDispatchedRevisions: readonly number[];
 }
@@ -50,12 +51,14 @@ export const BUFFER_FRAME_REPAIR_LEDGER_MAX_REVISIONS = 512;
 export function clearPendingBufferSyncFrameAssembly(
   resource: BufferFrameAssemblyResourceState | null,
 ): BufferFrameAssemblyResourceState | null {
-  return resource
-    ? {
-        ...resource,
-        pending: null,
-      }
-    : null;
+  if (!resource) {
+    return null;
+  }
+  const { pendingBodyFirstFrame: _stagedBodyFirstFrame, ...retained } = resource;
+  return {
+    ...retained,
+    pending: null,
+  };
 }
 
 export function resetBufferSyncFrameAssemblyEpoch(
@@ -64,6 +67,9 @@ export function resetBufferSyncFrameAssemblyEpoch(
   return resource
     ? {
         pending: null,
+        ...(resource.pendingBodyFirstFrame
+          ? { pendingBodyFirstFrame: resource.pendingBodyFirstFrame }
+          : {}),
         error: null,
         repairDispatchedRevisions: [],
       }
