@@ -2,6 +2,10 @@
 
 - 日期：2026-08-08
 - 状态：**APPROVED — 2026-08-08 四项决策点全部采纳推荐项（触控模式默认 / 单指未放大=滚动 / 双击缩放 / 长按右键）**
+- Superseded：zoomed fullscreen 单指手势部分已被
+  `2026-08-30-remote-window-quality-gesture-control-amendment.md` 取代。本文
+  的 zoomed fullscreen `localPan` 方案仅保留为历史设计；zoomed floating
+  `localPan` 仍是当前契约。
 - 功能块：`client.remote_window_overlay`（owner：`RemoteWindowOverlay.tsx` + `remote-window-touch-action-runtime.ts`）；daemon 注入 `remote-window-scripts.ts`；wire 协议 `@zterm/shared` `RemoteWindowInputEventPayload`
 - 不涉及 terminal buffer / renderer / daemon mirror 真源
 

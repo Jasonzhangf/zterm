@@ -11,19 +11,20 @@ This is the canonical touch/action gate for the Android remote-window overlay.
    lane and never enters action metadata.
 2. Tap emits one remote left click at release at 1x; zoomed tap is suppressed.
 3. One-finger movement crossing 8 px before hold commits to realtime bounded
-   pixel scroll at 1x and local canvas pan while zoomed; pointer-up emits no
-   swipe replay.
+   pixel scroll at 1x. At zoomed fullscreen scale one finger is a complete
+   no-op; pointer-up emits no swipe replay. At zoomed floating scale,
+   one-finger movement keeps the existing local canvas pan.
 4. Movement after a 250 ms hold commits to reliable remote drag
    (`down -> move* -> up`) at 1x.
 5. Stationary 500 ms hold at 1x emits one right click; release emits no
-   duplicate. At zoomed scale, a stationary 500 ms single-finger hold may
-   promote to one reliable left-button drag; zoomed tap/movement remains
-   local-only.
+   duplicate. At zoomed fullscreen scale, tap, hold, drag, local pan, and
+   double-tap are all suppressed for one finger.
 6. Two-finger same-direction motion is realtime remote scroll at 1x and
    zoomed scale. Anti-parallel distance change is local pinch zoom.
-7. Zoomed pointer-down starts local single-finger pan; a second finger
-   upgrades to two-finger classification. Gesture modes latch once selected
-   and do not oscillate inside one pointer sequence.
+7. Zoomed floating pointer-down starts local single-finger pan; zoomed
+   fullscreen pointer-down starts a suppressed single-finger sequence. A
+   second finger upgrades either to two-finger classification. Gesture modes
+   latch once selected and do not oscillate inside one pointer sequence.
 8. Double tap toggles 1x/2x. The remote window never shrinks below fit and no
    minimap or viewport overlay is introduced.
 9. A five-second gesture remains valid. Reliable pointer-up and cancel-release
@@ -53,8 +54,8 @@ This is the canonical touch/action gate for the Android remote-window overlay.
 1. Tap at 1x and confirm exactly one left click per sequence; repeat at 2x and
    confirm the zoomed tap is suppressed.
 2. Move one finger at 1x and confirm AppKit scroll markers arrive during
-   pointer movement, not after pointer-up; repeat at 2x and confirm local
-   canvas pan with no remote action.
+   pointer movement, not after pointer-up; repeat at 2x and confirm neither
+   local projection nor remote action changes.
 3. Hold then drag for five seconds and confirm one reliable down and one
    reliable release. Repeat with pointer-cancel and confirm no stuck button.
 4. Move two fingers together while zoomed and confirm only realtime remote
@@ -69,8 +70,8 @@ This is the canonical touch/action gate for the Android remote-window overlay.
 
 - More than the active profile's bounded continuous action rate is observed.
 - Pointer-up replays a swipe after realtime one-finger scroll.
-- Zoomed one-finger movement emits remote input instead of panning the local
-  canvas.
+- Zoomed one-finger movement emits remote input or changes the local
+  projection.
 - Zoomed two-finger same-direction motion pans the local canvas instead of
   emitting remote scroll.
 - Five-second drag or pointer-cancel omits the reliable release.

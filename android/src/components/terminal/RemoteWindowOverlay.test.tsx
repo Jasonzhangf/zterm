@@ -4310,13 +4310,13 @@ describe('RemoteWindowOverlay', () => {
     expect(sendInput).not.toHaveBeenCalled();
     sendInput.mockClear();
     fireEvent.pointerUp(surface, { pointerId: 2, pointerType: 'touch', clientX: 260, clientY: 100, button: 0, buttons: 0 });
-    // zoomed single-finger motion now goes through local pan:
-    //   - content.left must change (single-finger panX mutation)
+    // zoomed single-finger motion is a complete no-op:
+    //   - content position must remain unchanged
     //   - sendInput must remain silent (no remote scroll/click/drag)
     fireEvent.pointerDown(surface, { pointerId: 5, pointerType: 'touch', clientX: 150, clientY: 100, button: 0, buttons: 1 });
     fireEvent.pointerMove(surface, { pointerId: 5, pointerType: 'touch', clientX: 170, clientY: 120, button: 0, buttons: 1 });
     fireEvent.pointerUp(surface, { pointerId: 5, pointerType: 'touch', clientX: 150, clientY: 100, button: 0, buttons: 0 });
-    expect(Number.parseFloat(content.style.left || '0')).not.toBe(leftAfterPinch);
+    expect(Number.parseFloat(content.style.left || '0')).toBe(leftAfterPinch);
     expect(sendInput).not.toHaveBeenCalled();
     sendInput.mockClear();
 
