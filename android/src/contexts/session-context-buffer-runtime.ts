@@ -487,13 +487,35 @@ function isAuthoritativeFullTailPayload(options: {
   if (endIndex <= startIndex) {
     return false;
   }
+  const frameChunkCount = Math.max(0, Math.floor(payload.frameChunkCount || 0));
+  const frameStartIndex = Number.isFinite(payload.frameStartIndex)
+    ? Math.max(0, Math.floor(payload.frameStartIndex!))
+    : null;
+  const frameEndIndex = Number.isFinite(payload.frameEndIndex)
+    ? Math.max(0, Math.floor(payload.frameEndIndex!))
+    : null;
+  const frameChunkIndex = Number.isFinite(payload.frameChunkIndex)
+    ? Math.max(0, Math.floor(payload.frameChunkIndex!))
+    : null;
+  const chunkedFrame = frameChunkCount > 1 && frameStartIndex !== null && frameEndIndex !== null;
+  if (chunkedFrame && (frameChunkIndex === null || frameChunkIndex >= frameChunkCount)) {
+    return false;
+  }
+  const windowStartIndex = chunkedFrame ? frameStartIndex! : startIndex;
+  const windowEndIndex = chunkedFrame ? frameEndIndex! : endIndex;
+  if (windowEndIndex <= windowStartIndex) {
+    return false;
+  }
+  if (chunkedFrame && (startIndex < windowStartIndex || endIndex > windowEndIndex)) {
+    return false;
+  }
   const availableStartIndex = Number.isFinite(payload.availableStartIndex)
     ? Math.max(0, Math.floor(payload.availableStartIndex!))
-    : startIndex;
+    : windowStartIndex;
   const availableEndIndex = Number.isFinite(payload.availableEndIndex)
     ? Math.max(0, Math.floor(payload.availableEndIndex!))
-    : endIndex;
-  if (startIndex !== availableStartIndex || endIndex !== availableEndIndex) {
+    : windowEndIndex;
+  if (windowStartIndex !== availableStartIndex || windowEndIndex !== availableEndIndex) {
     return false;
   }
   const lineIndexes = normalizeWireLines(payload.lines, payload.cols || options.localBuffer.cols || 80)
@@ -1388,7 +1410,9 @@ export function applyIncomingBufferSyncRuntime(options: ApplyIncomingBufferSyncR
     })
   );
   let currentFrameResource = frameAssemblyStore.get(options.sessionId) || null;
-  if (bodyFirstGenerationReset) {
+  const pendingFrameGenerationMismatch = currentFrameResource?.pending
+    && Math.max(0, Math.floor(options.payload.revision || 0)) < currentFrameResource.pending.revision;
+  if (bodyFirstGenerationReset && (!currentFrameResource?.pending || pendingFrameGenerationMismatch)) {
     const resetFrameResource = resetBufferSyncFrameAssemblyEpoch(currentFrameResource);
     currentFrameResource = resetFrameResource;
     if (resetFrameResource) {
