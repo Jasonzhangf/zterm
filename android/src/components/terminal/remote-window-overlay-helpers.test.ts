@@ -242,6 +242,30 @@ describe('remote-window-overlay-helpers', () => {
     expect(content.top).toBeCloseTo(0, 1);
   });
 
+  it('locks embedded and fullscreen contain geometry to the real-device ratios', () => {
+    const embedded = resolveZoomedContentRect(
+      { width: 347, height: 253 },
+      { width: 932, height: 679 },
+      { scale: 1, panX: 0, panY: 0 },
+      'fit',
+    ).content;
+    expect(embedded.width).toBeCloseTo(347, 4);
+    expect(embedded.height).toBeCloseTo(252.8036, 4);
+    expect(embedded.left).toBeCloseTo(0, 4);
+    expect(embedded.top).toBeCloseTo(0.0982, 4);
+
+    const fullscreen = resolveZoomedContentRect(
+      { width: 331, height: 515 },
+      { width: 437, height: 679 },
+      { scale: 1, panX: 0, panY: 0 },
+      'fit',
+    ).content;
+    expect(fullscreen.width).toBeCloseTo(331, 4);
+    expect(fullscreen.height).toBeCloseTo(514.2998, 4);
+    expect(fullscreen.left).toBeCloseTo(0, 4);
+    expect(fullscreen.top).toBeCloseTo(0.3501, 4);
+  });
+
   it('formats target kinds and groups app targets by bundle', () => {
     expect(formatTargetKind({ videoTarget: { kind: 'app-window' } } as never)).toBeTruthy();
     expect(safeRemoteWindowGroupId('a/b:c')).toBe('a-b-c');

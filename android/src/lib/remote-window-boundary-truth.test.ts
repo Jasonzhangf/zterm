@@ -123,12 +123,14 @@ describe('remote window architecture boundary truth', () => {
     const architecture = read('docs/architecture.md');
     const amendment = read('docs/decisions/2026-08-30-remote-window-quality-gesture-control-amendment.md');
     const sop = read('docs/testing/remote-window-touch-action-sop.md');
+    expect(amendment).toContain('one finger is a complete no-op: tap, hold, drag, local pan, and double-tap do');
     expect(amendment).toContain('one-finger movement pans the local canvas and emits no remote input');
     expect(amendment).toContain('two-finger same-direction vertical motion commits to realtime remote scroll');
     expect(amendment).toContain('same-direction motion at 1x and zoomed scale commits to realtime remote scroll');
-    expect(sop).toContain('local canvas pan while zoomed');
+    expect(sop).toContain('At zoomed floating scale,');
+    expect(sop).toContain('At zoomed fullscreen scale one finger is a complete');
     expect(sop).toContain('Two-finger same-direction motion is realtime remote scroll at 1x and');
-    expect(architecture).toContain('zoomed 单指移动是本地 canvas pan');
+    expect(architecture).toContain('zoomed fullscreen 单指完全 no-op');
     expect(architecture).toContain('1x 与 zoomed 的双指同向移动都是 realtime remote scroll');
     expect(architecture).not.toContain('zoomed 双指同向移动才是本地 pan');
     expect(architecture).not.toContain('1x/zoomed 的单指移动都是 realtime remote pixel scroll');

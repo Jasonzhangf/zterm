@@ -400,6 +400,15 @@ function stopChildProcess(
   }
 }
 
+function withStartupCleanupDiagnostics(error: Error, cleanupErrors: readonly Error[]) {
+  if (cleanupErrors.length === 0) {
+    return error;
+  }
+  return new Error(
+    `${error.message}; cleanup failed: ${cleanupErrors.map((cleanupError) => cleanupError.message).join('; ')}`,
+  );
+}
+
 export async function startScreenCaptureKitFrameSource(
   target: RemoteWindowStreamTargetManifest,
   options: {
@@ -441,7 +450,9 @@ export async function startScreenCaptureKitFrameSource(
   let stderrBuffer = '';
   let stderrLineBuffer = '';
   let firstFrameResolved = false;
+  let startupSettled = false;
   let stopped = false;
+  const startupCleanupErrors: Error[] = [];
   let frameWidth = Math.max(1, Math.floor(captureConfig.cropRect.width));
   let frameHeight = Math.max(1, Math.floor(captureConfig.cropRect.height));
   let captureEpoch = options.captureEpoch ?? 0;
@@ -488,7 +499,13 @@ export async function startScreenCaptureKitFrameSource(
       stopped = true;
       cleanupListeners();
       rejectPendingCaptureUpdates(new Error('ScreenCaptureKit capture source stopped'));
-      stopChildProcess(child, options.onError);
+      stopChildProcess(child, (error) => {
+        if (!startupSettled) {
+          startupCleanupErrors.push(error);
+          return;
+        }
+        options.onError(error);
+      });
     },
   };
 
@@ -602,10 +619,11 @@ export async function startScreenCaptureKitFrameSource(
       return;
     }
     frameSource.stop();
-    rejectStart(new Error(buildScreenCaptureKitStartupTimeoutMessage(
+    startupSettled = true;
+    rejectStart(withStartupCleanupDiagnostics(new Error(buildScreenCaptureKitStartupTimeoutMessage(
       stderrBuffer,
       options.startupTimeoutMs,
-    )));
+    )), startupCleanupErrors));
   }, Math.max(1, options.startupTimeoutMs));
 
   function fail(error: Error) {
@@ -613,7 +631,8 @@ export async function startScreenCaptureKitFrameSource(
     if (!firstFrameResolved) {
       clearTimeout(startupTimer);
       frameSource.stop();
-      rejectStart(error);
+      startupSettled = true;
+      rejectStart(withStartupCleanupDiagnostics(error, startupCleanupErrors));
       return;
     }
     options.onError(error);
@@ -632,6 +651,7 @@ export async function startScreenCaptureKitFrameSource(
     if (!firstFrameResolved) {
       firstFrameResolved = true;
       clearTimeout(startupTimer);
+      startupSettled = true;
       resolveStart(frameSource);
     }
   }

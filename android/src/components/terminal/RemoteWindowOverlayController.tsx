@@ -2166,6 +2166,8 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       zoomedProjection: event.pointerType === 'touch'
         && fullscreenViewportRef.current.scale > 1.01,
       touchMode: inputModeRef.current === 'touch',
+      suppressSingleFinger: state.mode === 'fullscreen'
+        && fullscreenViewportRef.current.scale > 1.01,
     });
     applyRemoteWindowTouchPointerResult(result);
     // 触控模式：按下启动长按定时器（手指不动 ≥500ms → 右键）
