@@ -39,7 +39,9 @@ evidence/
   - 两次 mock 均只监听 `127.0.0.1`，未创建、关闭、resize 或写入任何 tmux session；mock 日志中的 resume 请求覆盖 `knownRevision=2 -> targetHeadRevision=1`。
   - incomplete frame owner gate：`session-context-buffer-runtime.test.ts` 的 staged body-first 与 retained multi-chunk 两条 timeout 测试 2/2 PASS，断言 15s lifetime 到期后请求精确 repair range `100-104`。
 - 历史 exact-candidate 可复核索引：`android/evidence/bug-8fdaeec-fg-refresh-main-0919-exact-r2/`
-- 当前 candidate `43377946` / tree `d97f60e9c3460617ead83976ef405b295d66189c`（build 3067）：
-  - 本地 focused：`session-context-buffer-runtime.test.ts` + `session-context-pull-runtime.test.ts` + `session-context-socket-runtime.test.ts` 96/96 PASS（2026-09-20，main worktree 运行）
+- 当前 candidate `8c6183d4`（build 3067）；被测试 revision 为 `8c6183d471cdc7d147bb1c348a1a356d12621ec4` / tree `c6f9be67a18b1a889980d3ab310a5524c039e811`：
+  - 命令：`cd android && pnpm exec vitest run src/contexts/session-context-buffer-runtime.test.ts src/contexts/session-context-pull-runtime.test.ts src/contexts/session-context-socket-runtime.test.ts --reporter=dot`
+  - 结果：exit 0；`Test Files  3 passed (3)`、`Tests  96 passed (96)`（`session-context-buffer-runtime.test.ts` 79 + `session-context-pull-runtime.test.ts` 5 + `session-context-socket-runtime.test.ts` 12）
+  - 原始输出按项目规则保留在本地 ignored 目录 `android/evidence/fg-refresh-mainline-0920/focused-vitest.txt`（`evidence/` 默认不入库）；本索引记录的命令与计数可直接复现。本次提交只改本 README，未改动 `android/src`，因此上述 revision/tree 即被测试源码
   - `978f84b7` 的 exact APK 设备回放（`0.1.3.3066`）仍是本 lineage 上最近一次真机/模拟器前台恢复回放；`43377946` 只在其上追加 body-first staged frame 保留与测试，尚未重跑设备回放，不得据 3066 回放宣称 3067 已设备验收。
   - 当前 candidate 的 OTA/公开 Relay 发布：本地 `~/.zterm/updates/latest.json` 已指向 `0.1.3.3067`（sha256 `d47c641c788eb42e353cebd8da15e1aa76dc4662fcd5b08e28eea6bd0894a52e`）；公开 Relay 发布是独立授权阶段，尚未执行。
