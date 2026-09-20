@@ -504,6 +504,20 @@ function isAuthoritativeFullTailPayload(options: {
     || payload.frameEndIndex !== undefined
     || payload.frameChunkIndex !== undefined;
   if (!hasFrameMetadata) {
+    const availableStartIndex = readStrictBufferInteger(payload.availableStartIndex);
+    const availableEndIndex = readStrictBufferInteger(payload.availableEndIndex);
+    if (
+      (payload.availableStartIndex !== undefined && availableStartIndex === null)
+      || (payload.availableEndIndex !== undefined && availableEndIndex === null)
+    ) {
+      return false;
+    }
+    if (
+      startIndex !== (availableStartIndex ?? startIndex)
+      || endIndex !== (availableEndIndex ?? endIndex)
+    ) {
+      return false;
+    }
     const lineIndexes = normalizeWireLines(payload.lines, payload.cols || options.localBuffer.cols || 80)
       .map((line) => line.index);
     return lineIndexes.length === endIndex - startIndex

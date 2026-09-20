@@ -2833,6 +2833,88 @@ describe('session-context-buffer-runtime inactive gating', () => {
     );
   });
 
+  it('does not rebase on a dense partial lower-revision window during resume', () => {
+    const sessionId = 'session-1';
+    const session = makeSession(sessionId);
+    const localBuffer = createSessionBufferState({
+      lines: ['old-generation-a', 'old-generation-b'],
+      startIndex: 100,
+      endIndex: 102,
+      bufferHeadStartIndex: 100,
+      bufferTailEndIndex: 102,
+      cols: 80,
+      rows: 24,
+      revision: 2,
+      cacheLines: 1000,
+    });
+    session.buffer = localBuffer;
+    const commitSessionBufferUpdate = vi.fn(() => true);
+    const scheduleSessionRenderCommit = vi.fn();
+    const requestSessionBufferSync = vi.fn(() => true);
+    const runtimeDebug = vi.fn();
+    const tailRefreshStoreRef = makeTailRefreshStoreRef({ resume: [sessionId] });
+    const bufferFrameAssemblyRef = {
+      current: new Map([[sessionId, {
+        pending: null,
+        error: null,
+        repairDispatchedRevisions: [2],
+      }]]),
+    };
+
+    applyIncomingBufferSyncRuntime({
+      sessionId,
+      payload: {
+        revision: 1,
+        startIndex: 0,
+        endIndex: 2,
+        availableStartIndex: 0,
+        availableEndIndex: 100,
+        cols: 80,
+        rows: 24,
+        cursorKeysApp: false,
+        lines: [
+          { ...makeLine('partial-a'), index: 0 },
+          { ...makeLine('partial-b'), index: 1 },
+        ],
+      },
+      refs: {
+        stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
+        sessionRevisionResetRef: { current: new Map() },
+        sessionHeadStoreRef: makeLiveHeadStoreRef(),
+        tailRefreshStoreRef,
+        bufferFrameAssemblyRef,
+        sessionVisibleRangeRef: {
+          current: new Map([[sessionId, { startIndex: 100, endIndex: 102, viewportRows: 2 }]]),
+        },
+      },
+      readSessionBufferSnapshot: () => localBuffer,
+      resolveSessionCacheLines: () => 1000,
+      summarizeBufferPayload: (payload) => ({
+        revision: payload.revision,
+        startIndex: payload.startIndex,
+        endIndex: payload.endIndex,
+        lineCount: payload.lines.length,
+      }),
+      runtimeDebug,
+      commitSessionBufferUpdate,
+      scheduleSessionRenderCommit,
+      isSessionTransportActive: () => true,
+      requestSessionBufferSync,
+    });
+
+    expect(commitSessionBufferUpdate).not.toHaveBeenCalled();
+    expect(scheduleSessionRenderCommit).not.toHaveBeenCalled();
+    expect(bufferFrameAssemblyRef.current.get(sessionId)?.repairDispatchedRevisions).toEqual([2]);
+    expect(runtimeDebug).toHaveBeenCalledWith(
+      'session.buffer.sync.stale-lower-revision-drop',
+      expect.objectContaining({
+        sessionId,
+        localRevision: 2,
+        incomingRevision: 1,
+      }),
+    );
+  });
+
   it('replaces a retained higher-revision incomplete frame when resume receives an authoritative lower-revision tail', () => {
     const sessionId = 'session-1';
     const session = makeSession(sessionId);
