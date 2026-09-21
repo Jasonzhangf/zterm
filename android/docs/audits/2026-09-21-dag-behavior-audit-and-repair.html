@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>zterm / Collab DAG 行为审计与修复 2026-09-21</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  :root { --ink:#1b1f24; --muted:#5b6470; --line:#d8dee6; --ok:#0f7a3d; --bad:#b4231f; --warn:#8a5a00; }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:32px 28px 64px; font:15px/1.65 -apple-system, "Helvetica Neue", Arial, "PingFang SC", sans-serif; color:var(--ink); background:#fff; }
+  main { max-width:1180px; margin:0 auto; }
+  h1 { font-size:26px; margin:0 0 6px; letter-spacing:0; }
+  h2 { font-size:19px; margin:34px 0 10px; padding-bottom:6px; border-bottom:1px solid var(--line); letter-spacing:0; }
+  h3 { font-size:16px; margin:22px 0 8px; letter-spacing:0; }
+  p, li { color:var(--ink); }
+  .sub { color:var(--muted); margin:0 0 22px; }
+  table { border-collapse:collapse; width:100%; margin:12px 0; font-size:14px; }
+  th, td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+  th { background:#f4f6f9; font-weight:600; }
+  code { font:13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; background:#f4f6f9; padding:1px 5px; border-radius:4px; }
+  .dag { border:1px solid var(--line); border-radius:8px; padding:14px; margin:12px 0 6px; overflow:auto; background:#fbfcfe; }
+  .tag { display:inline-block; font-size:12px; padding:1px 7px; border-radius:999px; border:1px solid var(--line); margin-right:6px; }
+  .ok { color:var(--ok); border-color:#b7ddc6; background:#f1faf4; }
+  .bad { color:var(--bad); border-color:#f0c4c2; background:#fdf3f3; }
+  .warn { color:var(--warn); border-color:#ecd9ad; background:#fdf8ec; }
+  ul { padding-left:22px; }
+  .note { color:var(--muted); font-size:13px; }
+</style>
+</head>
+<body>
+<main>
+<h1>zterm / Collab DAG 行为审计与修复</h1>
+<p class="sub">2026-09-21 · 只读审计 zterm daemon / client UI / connection 三条 DAG，并修复一个已 live 验证的 Collab P0/P1 级缺陷。未修改任何 tmux session。</p>
+
+<h2>1. 事实基线</h2>
+<table>
+<tr><th>项</th><th>实测值</th></tr>
+<tr><td>zterm <code>main</code> / <code>origin/main</code></td><td><code>9250e47f</code>（一致）</td></tr>
+<tr><td>AppSDK <code>main</code> / <code>origin/main</code></td><td><code>e5bf25a7</code>（一致，已 push）</td></tr>
+<tr><td>本轮候选 / merge</td><td><code>8a45047</code> / <code>e5bf25a</code>（--no-ff）</td></tr>
+<tr><td>review</td><td><code>review-up-readiness-window-20260921-r1</code> controller <span class="tag ok">pass</span> findings 空</td></tr>
+<tr><td>安装产物</td><td><code>collab 0.2.0089</code> sha256 <code>4f8c1924…</code></td></tr>
+<tr><td>daemon</td><td>PID <code>61552</code>，官方 <code>collab down</code> / <code>up</code> 受控重启</td></tr>
+</table>
+
+<h2>2. Daemon 行为 DAG</h2>
+<div class="dag">
+<pre class="mermaid">
+flowchart TD
+  Release["daemon_runtime_artifact"] -->|install| Proc["daemon_process"]
+  Proc -->|spawn serve| Backend["terminal_backend"]
+  Backend --> Tmux["tmux_session / wezterm_pane / herdr_session"]
+  Tmux -->|single-capture -> canonicalize| Writer["daemon.mirror_writer"]
+  Writer -->|structural stability gate| Store["mirror_store"]
+  Store -->|unsolicited live body| Publisher["daemon_buffer_publisher"]
+  Publisher -->|frame-split, bounded pending| Sub["transport_subscriber"]
+  Sub --> Client["client_sparse_buffer"]
+  Proc --> Gateway["daemon_connection_gateway"]
+  Gateway --> Catalog["daemon_session_catalog"]
+  Gateway --> Center["daemon_control_center"]
+  Center -->|adaptive width lease only| Backend
+  Store --> Idle["session_idle_facts"]
+</pre>
+</div>
+<p><span class="tag ok">闭合</span><code>mirror_writer → mirror_store → buffer_publisher → subscriber</code> 是唯一 live body 路径；daemon 无客户端心智。</p>
+<p><span class="tag bad">未闭合</span>remote_window_* 系列仍为 design-only；L2 daemon/tmux 真回环本轮未跑（不驱动 tmux），mirror 真源保持 UNVERIFIED。</p>
+
+<h2>3. 客户端 UI 行为 DAG</h2>
+<div class="dag">
+<pre class="mermaid">
+flowchart TD
+  Native["native/android/app"] --> Main["src/main.tsx"]
+  Main --> App["src/App.tsx"]
+  App --> Host["client_plugin_host"]
+  Host --> Slots["plugin_ui_slot_registry"]
+  Slots --> Drawer["terminal.session-drawer"]
+  Slots --> Quickbar["terminal.quickbar"]
+  Slots --> Shell["terminal.shell"]
+  App --> Ctx["SessionContext / TransportOrchestration"]
+  Ctx --> OpenTab["open_tab (sessionId 身份)"]
+  OpenTab --> Active["active_session"]
+  Ctx --> SocketMsg["session-context-socket-message-runtime"]
+  SocketMsg --> Normalize["buffer-wire-normalize"]
+  Normalize --> Assembly["client_buffer_frame_assembly"]
+  Assembly -->|frame identity 覆盖完整后一次 apply| Sparse["client_sparse_buffer"]
+  Sparse --> Renderer["renderer_window"]
+  Renderer --> Dom["client.dom_renderer"]
+  Dom --> Stage["terminal_shell projection"]
+</pre>
+</div>
+<p><span class="tag ok">闭合</span>open-tab / active-session / sparse buffer / renderer / DOM 各自单一 owner。</p>
+<p><span class="tag bad">未闭合</span>client_manual_route_policy 仍 design-only；L4/L5（打包 APK / 真机 / OTA）本轮未验证。</p>
+
+<h2>4. 连接行为 DAG</h2>
+<div class="dag">
+<pre class="mermaid">
+flowchart TD
+  Home["ConnectionsPage / Home"] --> OpenOwner["useSessionOpenActions"]
+  OpenOwner --> Ctx["SessionContext / TransportOrchestration"]
+  Ctx --> Plan["TransportOpen / reuse plan"]
+  Plan --> Factory["TraversalSocketFactory"]
+  Factory --> Socket["TraversalSocket"]
+  Socket --> RouteSel["route-selector"]
+  RouteSel --> Target["transport_target"]
+  Socket --> TargetTransport["session-transport-runtime"]
+  TargetTransport --> MuxHello["mux-hello / mux-ready"]
+  MuxHello --> Channel["terminal-channel-mux-runtime"]
+  Channel --> Sub["transport_subscriber"]
+  Channel --> Input["daemon_input_queue"]
+  Input --> Backend["backend_session"]
+  Sub --> Mirror["mirror_store / buffer_publisher"]
+</pre>
+</div>
+<p><span class="tag ok">闭合</span>open intent → route → mux target transport → channel 已声明；transport closed 不映射为 open-tab 关闭。</p>
+<p><span class="tag bad">未闭合</span>L3/L4/L5 未跑，Relay / Tailscale / 直连 / WebRTC 无 live 证据；daemon 重启后 route 不自动恢复，是连接 DAG 的断边。</p>
+
+<h2>5. Buglist 现状</h2>
+<table>
+<tr><th>指标</th><th>数量</th></tr>
+<tr><td>open（全部）</td><td>35</td></tr>
+<tr><td>open 且 label 含 P0</td><td>11</td></tr>
+<tr><td>open 且 label 含 P1</td><td>13</td></tr>
+<tr><td>open P0/P1（按标题补 label 遗漏后去重）</td><td>25</td></tr>
+<tr><td>closed</td><td>123</td></tr>
+</table>
+<p class="note"><code>508510a</code> 标题标 P0 但 label 只有 <code>classification:bug</code>，按 label 过滤会漏项。</p>
+
+<h2>6. 本轮修复：collab up readiness 假阴性</h2>
+<p>现象：<code>collab up</code> 报 <code>DAEMON_STARTING: daemon did not become reachable while its lock remained held</code> 且 exit 1；数秒后 daemon 实际已监听并服务。根因是 <code>wait_for_server</code> 固定 4 秒窗口，而本机冷启动实测需 8–23 秒。</p>
+<ul>
+<li>红测：延迟就绪 fixture 在 4.02s 放弃，报 <code>DAEMON_UNAVAILABLE … after launch</code></li>
+<li>绿测：<code>client::</code> 66 passed / 1 ignored；<code>--bin collab</code> 656 passed / 1 ignored；fmt / diff-check PASS</li>
+<li>review PASS → merge <code>e5bf25a</code> → push <code>origin/main</code></li>
+<li>live：重建安装 <code>0.2.0089</code>，受控 <code>down</code>+<code>up</code> 一次成功 <code>{"ok":true,"started":true}</code>，耗时 23.4s</li>
+</ul>
+
+<h2>7. 仍未闭合</h2>
+<ul>
+<li>重启后 route 恢复：<code>ROUTE_RESOLVE_NOT_FOUND</code> 持续 30s 未恢复，需再次 <code>collab init</code>。<code>a6438fd</code> / <code>508510a</code> 保持 open。</li>
+<li><code>5192b5c</code> / <code>a7e52bc</code>：本机无第二个真实 App Server peer，peer-to-peer live closure 无法诚实复现。</li>
+<li>zterm L2/L3/L4/L5 与真机 / OTA 全未验证。</li>
+</ul>
+</main>
+<script>
+  mermaid.initialize({ startOnLoad: true, theme: 'neutral', flowchart: { nodeSpacing: 28, rankSpacing: 44, fontSize: 14 } });
+  document.querySelectorAll('.mermaid').forEach(el => { el.style.fontSize = '14px'; });
+</script>
+</body>
+</html>
