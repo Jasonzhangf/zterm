@@ -485,6 +485,60 @@ public final class AndroidConnectionServiceTransportTest {
             candidatePaths(newRuntime(service, target)));
     }
 
+    @Test
+    public void autoRouteAdvancesToNextCandidateWithinOneAttemptAfterFailure()
+        throws Exception {
+        AndroidConnectionService.resetForTests();
+        try {
+            AndroidConnectionService service = new AndroidConnectionService();
+            AndroidConnectionServiceTarget target = new AndroidConnectionServiceTarget.Builder()
+                .targetKey("target-fallback")
+                .bridgeHost("100.64.0.2")
+                .bridgePort(3333)
+                .lanHost("127.0.0.2")
+                .tailscaleHost("100.64.0.2")
+                .ipv4Host("203.0.113.10")
+                .build();
+            Object runtime = newRuntime(service, target);
+            setField(runtime, "stateMachine",
+                connectingStateMachine(target));
+            setField(runtime, "generation", "gen-1");
+            setField(runtime, "transportNetworkGeneration", 0L);
+            setField(service, "networkGeneration", 0L);
+            setField(service, "workerHandler", new Handler(Looper.getMainLooper()));
+
+            // The first candidate fails synchronously as soon as it is opened.
+            List<String> openedUrls = new ArrayList<>();
+            setField(service, "httpClient", newWebSocketFactory(request -> {
+                openedUrls.add(request.url().toString());
+                if (openedUrls.size() == 1) {
+                    throw new IllegalStateException("lan refused");
+                }
+                return fakeSocket(new ArrayList<>(), true);
+            }));
+
+            Method openCandidate = runtime.getClass().getDeclaredMethod("openCandidate");
+            openCandidate.setAccessible(true);
+            openCandidate.invoke(runtime);
+
+            assertEquals(2, openedUrls.size());
+            assertTrue("first candidate must be the same-subnet LAN url",
+                openedUrls.get(0).contains("127.0.0.2"));
+            assertTrue("failure must fall through to the next auto candidate",
+                openedUrls.get(1).contains("100.64.0.2"));
+
+            Field stateMachineField = runtime.getClass().getDeclaredField("stateMachine");
+            stateMachineField.setAccessible(true);
+            AndroidConnectionStateMachine stateMachine =
+                (AndroidConnectionStateMachine) stateMachineField.get(runtime);
+            assertEquals("fallback stays inside the same attempt",
+                AndroidConnectionServiceSnapshot.State.CONNECTING,
+                stateMachine.readSnapshot().state);
+        } finally {
+            AndroidConnectionService.resetForTests();
+        }
+    }
+
     private static void setDesiredChannelOpened(Object runtime, String channelId, boolean opened)
         throws Exception {
         Field desiredChannelsField = runtime.getClass().getDeclaredField("desiredChannels");
@@ -532,6 +586,29 @@ public final class AndroidConnectionServiceTransportTest {
             "{\"version\":1,\"capabilities\":{\"channelEnvelope\":true,\"targetMessages\":true}}"),
             3L);
         return stateMachine;
+    }
+
+    private static AndroidConnectionStateMachine connectingStateMachine(
+        AndroidConnectionServiceTarget target
+    ) {
+        AndroidConnectionStateMachine stateMachine =
+            new AndroidConnectionStateMachine(snapshot -> { });
+        stateMachine.dispatch(AndroidConnectionServiceEvent.bindTarget(target), 1L);
+        stateMachine.dispatch(AndroidConnectionServiceEvent.transportOpening("gen-1"), 2L);
+        return stateMachine;
+    }
+
+    private interface RequestHandler {
+        WebSocket open(okhttp3.Request request);
+    }
+
+    private static okhttp3.OkHttpClient newWebSocketFactory(RequestHandler handler) {
+        return new okhttp3.OkHttpClient() {
+            @Override
+            public WebSocket newWebSocket(okhttp3.Request request, okhttp3.WebSocketListener listener) {
+                return handler.open(request);
+            }
+        };
     }
 
     private static Object newRuntime(AndroidConnectionService service) throws Exception {

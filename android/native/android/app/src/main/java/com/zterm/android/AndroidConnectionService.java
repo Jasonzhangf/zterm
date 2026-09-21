@@ -962,6 +962,12 @@ public class AndroidConnectionService extends Service {
             }
         }
 
+        /** True while this attempt still has an unopened route candidate. */
+        private boolean hasNextCandidate() {
+            List<RouteCandidate> candidates = buildCandidates();
+            return candidateIndex < candidates.size();
+        }
+
         private RouteCandidate nextCandidate() {
             List<RouteCandidate> candidates = buildCandidates();
             if (candidates.isEmpty()) {
@@ -1944,6 +1950,15 @@ public class AndroidConnectionService extends Service {
             if (physicalErrorFirstAtMillis == 0L) {
                 physicalErrorFirstAtMillis = nowMillis;
             }
+            // Auto route fallback stays within one attempt: before the mux
+            // handshake completes, advance to the next candidate instead of
+            // retiring the generation and entering backoff.
+            if (isConnectingState() && hasNextCandidate()) {
+                closeQuietly(socket);
+                socket = null;
+                openCandidate();
+                return;
+            }
             closeQuietly(socket);
             socket = null;
             String failedGeneration = generation;
@@ -1956,6 +1971,12 @@ public class AndroidConnectionService extends Service {
                 publishPhysicalError(code, message);
             }
             scheduleBackoff();
+        }
+
+        private boolean isConnectingState() {
+            return stateMachine != null
+                && stateMachine.readSnapshot().state
+                    == AndroidConnectionServiceSnapshot.State.CONNECTING;
         }
 
         void retireForNetworkChange(String reason) {
