@@ -253,6 +253,55 @@ describe('notifyTargetNetworkSignalRuntime', () => {
     targetNetworkProbeRuntime.dispose();
   });
 
+  it('skips the JS mux-ping probe for a service-owned transport', () => {
+    const socket = Object.assign(makeFailedSocket(WebSocket.OPEN), {
+      transportOwnership: 'service' as const,
+    });
+    const targetNetworkProbeRuntime = createSessionTargetNetworkProbeRuntime({
+      probeTimeoutMs: 2_500,
+      now: () => 1_000,
+    });
+    const sendTargetProbe = vi.fn();
+    const submitTargetSocketFailure = vi.fn();
+
+    expect(notifyTargetNetworkSignalRuntime({
+      signal: { source: 'foreground-resume' },
+      targetRuntimes: [{ key: 'daemon-service', sessionIds: ['session-a1'], terminalTransport: socket }],
+      targetNetworkProbeRuntime,
+      sendTargetProbe,
+      submitTargetSocketFailure,
+      submitTargetNetworkProbeError: vi.fn(),
+      runtimeDebug: vi.fn(),
+    })).toEqual([]);
+    expect(sendTargetProbe).not.toHaveBeenCalled();
+    expect(submitTargetSocketFailure).not.toHaveBeenCalled();
+    expect(socket.close).not.toHaveBeenCalled();
+    targetNetworkProbeRuntime.dispose();
+  });
+
+  it('still probes a non-service transport', () => {
+    const socket = Object.assign(makeFailedSocket(WebSocket.OPEN), {
+      transportOwnership: 'client' as const,
+    });
+    const targetNetworkProbeRuntime = createSessionTargetNetworkProbeRuntime({
+      probeTimeoutMs: 2_500,
+      now: () => 1_000,
+    });
+    const sendTargetProbe = vi.fn();
+
+    expect(notifyTargetNetworkSignalRuntime({
+      signal: { source: 'foreground-resume' },
+      targetRuntimes: [{ key: 'daemon-client', sessionIds: ['session-a1'], terminalTransport: socket }],
+      targetNetworkProbeRuntime,
+      sendTargetProbe,
+      submitTargetSocketFailure: vi.fn(),
+      submitTargetNetworkProbeError: vi.fn(),
+      runtimeDebug: vi.fn(),
+    })).toEqual([{ targetKey: 'daemon-client', result: 'started' }]);
+    expect(sendTargetProbe).toHaveBeenCalledWith('daemon-client', socket, 1_000);
+    targetNetworkProbeRuntime.dispose();
+  });
+
   it('projects probe send failure explicitly into the one target failure owner', () => {
     const socket = makeFailedSocket(WebSocket.OPEN);
     const targetNetworkProbeRuntime = createSessionTargetNetworkProbeRuntime({ probeTimeoutMs: 2_500, now: Date.now });

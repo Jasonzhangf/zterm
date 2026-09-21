@@ -422,6 +422,12 @@ export function notifyTargetNetworkSignalRuntime(options: {
     if (!socket) {
       continue;
     }
+    // Service-owned transports run their probe/heartbeat inside the native
+    // owner; a JS mux-ping would be rejected as an unsupported channel frame
+    // and tear the transport down. Skip the JS probe for those targets.
+    if (socket.transportOwnership === 'service') {
+      continue;
+    }
     const result = options.targetNetworkProbeRuntime.probe({
       targetKey: targetRuntime.key,
       socket,
