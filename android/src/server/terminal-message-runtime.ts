@@ -1,6 +1,7 @@
 import type { RawData } from 'ws';
 import {
   buildTerminalMuxError,
+  buildTerminalMuxServerChannelMessage,
   buildTerminalMuxUnwrappedSessionMessageError,
   classifyTerminalMuxClientMessage,
 } from '@zterm/shared/protocol';
@@ -169,6 +170,21 @@ export function createTerminalMessageRuntime(
     connection: TerminalTransportConnection,
     message: ServerMessage,
   ) {
+    if (connection.muxChannelId) {
+      const channelId = connection.muxChannelId;
+      const subscriberId = connection.muxChannelSubscriberId || connection.boundSubscriberId || '';
+      if (!connection.muxChannelRegistry || connection.muxChannelRegistry.get(channelId) !== subscriberId) {
+        return;
+      }
+      if (!connection.muxParentTransport || connection.muxParentTransport.readyState !== 1) {
+        return;
+      }
+      deps.sendTransportMessage(
+        connection.muxParentTransport,
+        buildTerminalMuxServerChannelMessage(channelId, message),
+      );
+      return;
+    }
     deps.sendTransportMessage(connection.transport, message);
   }
 
