@@ -192,6 +192,37 @@ describe('notifyTargetNetworkSignalRuntime', () => {
     targetNetworkProbeRuntime.dispose();
   });
 
+  it('keeps a service-owned transport when the client network generation changes', () => {
+    const socket = Object.assign(makeFailedSocket(WebSocket.OPEN), {
+      transportOwnership: 'service' as const,
+    });
+    const targetNetworkProbeRuntime = createSessionTargetNetworkProbeRuntime({
+      probeTimeoutMs: 2_500,
+      now: Date.now,
+    });
+    const submitTargetSocketFailure = vi.fn();
+
+    expect(notifyTargetNetworkSignalRuntime({
+      signal: {
+        connected: true,
+        connectionType: 'cellular',
+        source: 'capacitor',
+        networkGeneration: 2,
+        fingerprintChanged: true,
+      },
+      targetRuntimes: [{ key: 'daemon-service', sessionIds: ['session-a1'], terminalTransport: socket }],
+      targetNetworkProbeRuntime,
+      sendTargetProbe: vi.fn(),
+      submitTargetSocketFailure,
+      submitTargetNetworkProbeError: vi.fn(),
+      runtimeDebug: vi.fn(),
+    })).toEqual([]);
+
+    expect(submitTargetSocketFailure).not.toHaveBeenCalled();
+    expect(socket.close).not.toHaveBeenCalled();
+    targetNetworkProbeRuntime.dispose();
+  });
+
   it('probes every physical daemon target once and does not multiply by logical channels', () => {
     const targetA = makeFailedSocket(WebSocket.OPEN);
     const targetB = makeFailedSocket(WebSocket.OPEN);
@@ -250,6 +281,55 @@ describe('notifyTargetNetworkSignalRuntime', () => {
       runtimeDebug: vi.fn(),
     })).toEqual([{ targetKey: 'daemon-idle', result: 'started' }]);
     expect(sendTargetProbe).toHaveBeenCalledWith('daemon-idle', socket, 1_000);
+    targetNetworkProbeRuntime.dispose();
+  });
+
+  it('skips the JS mux-ping probe for a service-owned transport', () => {
+    const socket = Object.assign(makeFailedSocket(WebSocket.OPEN), {
+      transportOwnership: 'service' as const,
+    });
+    const targetNetworkProbeRuntime = createSessionTargetNetworkProbeRuntime({
+      probeTimeoutMs: 2_500,
+      now: () => 1_000,
+    });
+    const sendTargetProbe = vi.fn();
+    const submitTargetSocketFailure = vi.fn();
+
+    expect(notifyTargetNetworkSignalRuntime({
+      signal: { source: 'foreground-resume' },
+      targetRuntimes: [{ key: 'daemon-service', sessionIds: ['session-a1'], terminalTransport: socket }],
+      targetNetworkProbeRuntime,
+      sendTargetProbe,
+      submitTargetSocketFailure,
+      submitTargetNetworkProbeError: vi.fn(),
+      runtimeDebug: vi.fn(),
+    })).toEqual([]);
+    expect(sendTargetProbe).not.toHaveBeenCalled();
+    expect(submitTargetSocketFailure).not.toHaveBeenCalled();
+    expect(socket.close).not.toHaveBeenCalled();
+    targetNetworkProbeRuntime.dispose();
+  });
+
+  it('still probes a non-service transport', () => {
+    const socket = Object.assign(makeFailedSocket(WebSocket.OPEN), {
+      transportOwnership: 'client' as const,
+    });
+    const targetNetworkProbeRuntime = createSessionTargetNetworkProbeRuntime({
+      probeTimeoutMs: 2_500,
+      now: () => 1_000,
+    });
+    const sendTargetProbe = vi.fn();
+
+    expect(notifyTargetNetworkSignalRuntime({
+      signal: { source: 'foreground-resume' },
+      targetRuntimes: [{ key: 'daemon-client', sessionIds: ['session-a1'], terminalTransport: socket }],
+      targetNetworkProbeRuntime,
+      sendTargetProbe,
+      submitTargetSocketFailure: vi.fn(),
+      submitTargetNetworkProbeError: vi.fn(),
+      runtimeDebug: vi.fn(),
+    })).toEqual([{ targetKey: 'daemon-client', result: 'started' }]);
+    expect(sendTargetProbe).toHaveBeenCalledWith('daemon-client', socket, 1_000);
     targetNetworkProbeRuntime.dispose();
   });
 
