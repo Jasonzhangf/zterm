@@ -539,6 +539,74 @@ public final class AndroidConnectionServiceTransportTest {
         }
     }
 
+    @Test
+    public void invalidWebSocketUrlSkipsCandidateWithoutRecursiveTransportFailure()
+        throws Exception {
+        AndroidConnectionService.resetForTests();
+        try {
+            AndroidConnectionService service = new AndroidConnectionService();
+            AndroidConnectionServiceTarget target = new AndroidConnectionServiceTarget.Builder()
+                .targetKey("target-invalid-url")
+                .bridgeHost("bad host")
+                .bridgePort(3333)
+                .build();
+            Object runtime = newRuntime(service, target);
+            setField(runtime, "stateMachine",
+                connectingStateMachine(target));
+            setField(runtime, "generation", "gen-1");
+
+            assertEquals(
+                java.util.Collections.emptyList(),
+                candidatePaths(runtime));
+
+            Field stateMachineField = runtime.getClass().getDeclaredField("stateMachine");
+            stateMachineField.setAccessible(true);
+            AndroidConnectionStateMachine stateMachine =
+                (AndroidConnectionStateMachine) stateMachineField.get(runtime);
+            assertEquals("candidate construction must be side-effect-free",
+                AndroidConnectionServiceSnapshot.State.CONNECTING,
+                stateMachine.readSnapshot().state);
+        } finally {
+            AndroidConnectionService.resetForTests();
+        }
+    }
+
+    @Test
+    public void connectingWithNoUsableCandidateEntersControlledBackoff()
+        throws Exception {
+        AndroidConnectionService.resetForTests();
+        try {
+            AndroidConnectionService service = new AndroidConnectionService();
+            AndroidConnectionServiceTarget target = new AndroidConnectionServiceTarget.Builder()
+                .targetKey("target-no-candidates")
+                .bridgeHost("bad host")
+                .bridgePort(3333)
+                .build();
+            Object runtime = newRuntime(service, target);
+            setField(runtime, "stateMachine",
+                connectingStateMachine(target));
+            setField(runtime, "generation", "gen-1");
+            setField(runtime, "transportNetworkGeneration", 0L);
+            setField(service, "networkGeneration", 0L);
+            setField(service, "workerHandler", new Handler(Looper.getMainLooper()));
+
+            Method openCandidate = runtime.getClass().getDeclaredMethod("openCandidate");
+            openCandidate.setAccessible(true);
+            openCandidate.invoke(runtime);
+
+            Field stateMachineField = runtime.getClass().getDeclaredField("stateMachine");
+            stateMachineField.setAccessible(true);
+            AndroidConnectionStateMachine stateMachine =
+                (AndroidConnectionStateMachine) stateMachineField.get(runtime);
+            assertEquals(AndroidConnectionServiceSnapshot.State.BACKOFF_RECONNECT,
+                stateMachine.readSnapshot().state);
+            assertEquals("no usable route candidate",
+                stateMachine.readSnapshot().error.message);
+        } finally {
+            AndroidConnectionService.resetForTests();
+        }
+    }
+
     private static void setDesiredChannelOpened(Object runtime, String channelId, boolean opened)
         throws Exception {
         Field desiredChannelsField = runtime.getClass().getDeclaredField("desiredChannels");
