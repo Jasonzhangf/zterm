@@ -406,6 +406,9 @@ export function notifyTargetNetworkSignalRuntime(options: {
       if (!socket) {
         continue;
       }
+      if (socket.transportOwnership === 'service') {
+        continue;
+      }
       options.submitTargetSocketFailure(targetRuntime.key, socket, message);
       outcomes.push({ targetKey: targetRuntime.key, result: 'generation-changed' });
       options.runtimeDebug('session.mux.target-network-generation-changed', {
@@ -420,6 +423,12 @@ export function notifyTargetNetworkSignalRuntime(options: {
   for (const targetRuntime of options.targetRuntimes) {
     const socket = targetRuntime.terminalTransport;
     if (!socket) {
+      continue;
+    }
+    // Service-owned transports run their probe/heartbeat inside the native
+    // owner; a JS mux-ping would be rejected as an unsupported channel frame
+    // and tear the transport down. Skip the JS probe for those targets.
+    if (socket.transportOwnership === 'service') {
       continue;
     }
     const result = options.targetNetworkProbeRuntime.probe({

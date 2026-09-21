@@ -62,19 +62,29 @@ At 1x:
 - a stationary 500 ms hold emits one remote right click;
 - double tap toggles to 2x.
 
-At zoomed scale:
+At zoomed floating scale:
 
 - one-finger movement pans the local canvas and emits no remote input;
 - two-finger same-direction vertical motion commits to realtime remote scroll;
 - anti-parallel distance change commits to local pinch zoom;
 - double tap toggles back to 1x.
 
+At zoomed fullscreen scale:
+
+- one finger is a complete no-op: tap, hold, drag, local pan, and double-tap do
+  not emit remote input or change the local projection;
+- two-finger same-direction vertical motion commits to realtime remote scroll;
+- anti-parallel distance change commits to local pinch zoom;
+- only the two-finger gestures above remain active until the viewport returns
+  to 1x.
+
 With two fingers:
 
 - anti-parallel distance change commits to local pinch zoom only, never remote scroll;
 - same-direction motion at 1x and zoomed scale commits to realtime remote scroll.
 
-Zoomed pointer-down starts local single-finger pan; a second finger upgrades to
+Zoomed pointer-down starts local single-finger pan in floating and a suppressed
+single-finger sequence in fullscreen; a second finger upgrades either to
 two-finger classification. A committed gesture remains latched until the
 pointer sequence ends. Gesture duration never makes a release stale. If a
 remote down was emitted, pointer-up and pointer-cancel both produce a reliable
@@ -153,8 +163,9 @@ not calculate macOS global coordinates or mutate capture truth.
 
 - bitrate-only, in-place cadence/dimension, same-profile no-op, group rollback,
   rejected/busy recovery, latest-wins, cooldown, and cause-split tests;
-- 1x one-finger realtime scroll, zoomed one-finger local pan, zoomed two-finger
-  same-direction realtime scroll, pinch, hold-drag, right-click,
+- 1x one-finger realtime scroll, zoomed floating one-finger local pan, zoomed
+  fullscreen one-finger no-op, zoomed two-finger same-direction realtime scroll,
+  pinch, hold-drag, right-click,
   five-second release, cancel-release, letterbox-null, and mouse-mode tests;
 - 120 Hz coalescing, continuous expiry, reliable barrier, stable-sequence
   retry, dedupe, ACK/NACK, and queue-overflow tests;

@@ -82,7 +82,8 @@ single tap        -> one click
 single drag       -> one release-time gesture/swipe
 two-finger scroll -> realtime vertical pixel scroll, moveCursor=false
 two-finger pinch  -> local zoom
-zoomed one-finger -> local pan
+zoomed fullscreen one-finger -> complete no-op (tap/hold/drag/pan/double-tap)
+zoomed floating one-finger   -> local pan
 ~~~
 
 Mouse Emulation：

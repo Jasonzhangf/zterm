@@ -49,7 +49,11 @@ done
   return captureBinary;
 }
 
-async function controlledCapture(options: { captureEpoch?: number; onEpochRetired?: (epoch: number) => void } = {}) {
+async function controlledCapture(options: {
+  captureEpoch?: number;
+  onEpochRetired?: (epoch: number) => void;
+  onError?: (error: Error) => void;
+} = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'rw-capture-controlled-'));
   const captureBinary = join(directory, 'capture');
   writeFileSync(captureBinary, `#!/bin/sh
@@ -338,6 +342,102 @@ printf '\\132\\122\\127\\061\\002\\000\\000\\000\\002\\000\\000\\000\\020\\000\\
         onError,
       })).rejects.toThrow('ScreenCaptureKit capture process exited code=4');
       expect(onError).not.toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('process-group SIGTERM failed') }));
+    } finally {
+      killSpy.mockRestore();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves the original startup error and appends cleanup EPERM diagnostics', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'rw-capture-cleanup-eperm-'));
+    const captureBinary = join(directory, 'capture');
+    writeFileSync(captureBinary, '#!/bin/sh\nprintf "bad-frame-header"\n/bin/sleep 5\n');
+    chmodSync(captureBinary, 0o755);
+    const onError = vi.fn();
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(((pid: number, _signal?: string | number) => {
+      if (typeof pid === 'number' && pid < 0) {
+        const error = Object.assign(new Error('kill EPERM'), { code: 'EPERM' });
+        throw error;
+      }
+      return true;
+    }) as typeof process.kill);
+    try {
+      let startupError: Error | null = null;
+      try {
+        await startScreenCaptureKitFrameSource(makeTarget(), {
+          frameRate: 30,
+          startupTimeoutMs: 1_000,
+          swiftBinary: '/bin/echo',
+          captureBinary,
+          validateTargets: async () => undefined,
+          onFrame: () => undefined,
+          onError,
+        });
+      } catch (error) {
+        startupError = error instanceof Error ? error : new Error(String(error));
+      }
+      expect(startupError?.message).toMatch(/^ScreenCaptureKit frame stream header mismatch/u);
+      expect(startupError?.message).toContain('cleanup failed:');
+      expect(startupError?.message).toContain('process-group SIGTERM failed: kill EPERM');
+      expect(onError).not.toHaveBeenCalled();
+    } finally {
+      killSpy.mockRestore();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('does not append cleanup diagnostics when process-group cleanup reports ESRCH', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'rw-capture-cleanup-esrch-'));
+    const captureBinary = join(directory, 'capture');
+    writeFileSync(captureBinary, '#!/bin/sh\nprintf "bad-frame-header"\n/bin/sleep 5\n');
+    chmodSync(captureBinary, 0o755);
+    const onError = vi.fn();
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(((pid: number, _signal?: string | number) => {
+      if (typeof pid === 'number' && pid < 0) {
+        const error = Object.assign(new Error('kill ESRCH'), { code: 'ESRCH' });
+        throw error;
+      }
+      return true;
+    }) as typeof process.kill);
+    try {
+      let startupError: Error | null = null;
+      try {
+        await startScreenCaptureKitFrameSource(makeTarget(), {
+          frameRate: 30,
+          startupTimeoutMs: 1_000,
+          swiftBinary: '/bin/echo',
+          captureBinary,
+          validateTargets: async () => undefined,
+          onFrame: () => undefined,
+          onError,
+        });
+      } catch (error) {
+        startupError = error instanceof Error ? error : new Error(String(error));
+      }
+      expect(startupError?.message).toMatch(/^ScreenCaptureKit frame stream header mismatch/u);
+      expect(startupError?.message).not.toContain('cleanup failed:');
+      expect(onError).not.toHaveBeenCalled();
+    } finally {
+      killSpy.mockRestore();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('reports cleanup errors through onError after capture startup succeeds', async () => {
+    const onError = vi.fn();
+    const { source, directory } = await controlledCapture({ onError });
+    const cleanupError = Object.assign(new Error('kill EPERM'), { code: 'EPERM' });
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(((pid: number, _signal?: string | number) => {
+      if (typeof pid === 'number' && pid < 0) {
+        throw cleanupError;
+      }
+      return true;
+    }) as typeof process.kill);
+    try {
+      source.stop();
+      expect(onError).toHaveBeenCalledWith(expect.objectContaining({
+        message: expect.stringContaining('process-group SIGTERM failed: kill EPERM'),
+      }));
     } finally {
       killSpy.mockRestore();
       rmSync(directory, { recursive: true, force: true });

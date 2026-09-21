@@ -1923,7 +1923,7 @@
           "to": "RemoteWindowOverlay",
           "owner_feature": "desktop.remote_window_stream",
           "semantic_input": "active session id plus remote-window catalog/start/stop/input/screenshot callbacks",
-          "semantic_output": "picker, stream setup, floating/fullscreen video overlay, decoded-frame projection, source-aspect input transform, smooth/quality preference, realtime 1x/zoomed single-finger remote scroll, held remote drag, zoomed two-finger local pan, pinch zoom, Mouse Emulation pointer/wheel, reliable cancel release, and close intent",
+          "semantic_output": "picker, stream setup, floating/fullscreen video overlay, decoded-frame projection, source-aspect input transform, smooth/quality preference, realtime 1x single-finger remote scroll, zoomed fullscreen single-finger no-op, zoomed floating local pan, zoomed two-finger remote scroll, pinch zoom, Mouse Emulation pointer/wheel, reliable cancel release, and close intent",
           "status": "anchored",
           "edge_id": "android_mainline:TerminalPage->RemoteWindowOverlay",
           "resource_from": "resource.ui_projection",

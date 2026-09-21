@@ -600,6 +600,7 @@ export function resolveRemoteWindowTouchPointerDownRuntime(options: {
   geometry: RemoteWindowTouchSurfaceGeometry;
   zoomedProjection: boolean;
   touchMode?: boolean;
+  suppressSingleFinger?: boolean;
 }): RemoteWindowTouchPointerRuntimeResult {
   const { pointer } = options;
   if (pointer.pointerType === 'mouse' && pointer.button > 2) {
@@ -609,8 +610,27 @@ export function resolveRemoteWindowTouchPointerDownRuntime(options: {
   if (button === 'none') {
     return emptyResult(options.state, false);
   }
-  // Zoomed fullscreen in Direct Touch keeps a single finger local to the
-  // container: down/move/up must not create remote scroll, click, or drag.
+  // Zoomed fullscreen in Direct Touch suppresses one finger completely:
+  // down/move/up must not create remote input or move the local projection.
+  if (
+    options.zoomedProjection
+    && options.touchMode
+    && pointer.pointerType === 'touch'
+    && options.suppressSingleFinger
+  ) {
+    return emptyResult({
+      mode: 'actionPending',
+      pointerId: pointer.pointerId,
+      button,
+      startClientX: pointer.clientX,
+      startClientY: pointer.clientY,
+      lastClientX: pointer.clientX,
+      lastClientY: pointer.clientY,
+      startAtMs: pointer.timeMs,
+      suppressTap: true,
+    }, true);
+  }
+  // Zoomed floating remains the existing local-pan projection.
   if (
     options.zoomedProjection
     && options.touchMode

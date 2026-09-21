@@ -950,7 +950,7 @@ public class AndroidConnectionService extends Service {
             }
             RouteCandidate candidate = nextCandidate();
             if (candidate == null) {
-                scheduleBackoff();
+                transportFailure("no-route-candidates", "no usable route candidate");
                 return;
             }
             Request request = new Request.Builder().url(candidate.url).build();
@@ -960,6 +960,12 @@ public class AndroidConnectionService extends Service {
             } catch (RuntimeException error) {
                 transportFailure("websocket-open-rejected", String.valueOf(error.getMessage()));
             }
+        }
+
+        /** True while this attempt still has an unopened route candidate. */
+        private boolean hasNextCandidate() {
+            List<RouteCandidate> candidates = buildCandidates();
+            return candidateIndex < candidates.size();
         }
 
         private RouteCandidate nextCandidate() {
@@ -1075,7 +1081,7 @@ public class AndroidConnectionService extends Service {
                 return new URI(uri.getScheme(), uri.getUserInfo(), uri.getHost(), uri.getPort(),
                     uri.getPath(), nextQuery, uri.getFragment()).toString();
             } catch (URISyntaxException error) {
-                transportFailure("invalid-websocket-url", String.valueOf(error.getMessage()));
+                Log.w(TAG, "invalid websocket url for " + host + ": " + error.getMessage());
                 return null;
             }
         }
@@ -1944,6 +1950,15 @@ public class AndroidConnectionService extends Service {
             if (physicalErrorFirstAtMillis == 0L) {
                 physicalErrorFirstAtMillis = nowMillis;
             }
+            // Auto route fallback stays within one attempt: before the mux
+            // handshake completes, advance to the next candidate instead of
+            // retiring the generation and entering backoff.
+            if (isConnectingState() && hasNextCandidate()) {
+                closeQuietly(socket);
+                socket = null;
+                openCandidate();
+                return;
+            }
             closeQuietly(socket);
             socket = null;
             String failedGeneration = generation;
@@ -1956,6 +1971,12 @@ public class AndroidConnectionService extends Service {
                 publishPhysicalError(code, message);
             }
             scheduleBackoff();
+        }
+
+        private boolean isConnectingState() {
+            return stateMachine != null
+                && stateMachine.readSnapshot().state
+                    == AndroidConnectionServiceSnapshot.State.CONNECTING;
         }
 
         void retireForNetworkChange(String reason) {
