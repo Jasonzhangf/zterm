@@ -1134,6 +1134,46 @@ describe('TerminalSessionDrawer', () => {
   });
 
   it('keeps the scrim mounted for exit fading and uses 44px session close targets', () => {
+    let activeElementAtClose: Element | null = null;
+    const onCloseSession = vi.fn(() => {
+      activeElementAtClose = document.activeElement;
+    });
+    const renderDrawer = (open: boolean) => (
+      <>
+        <button type="button" data-testid="drawer-focus-return-target">
+          Open sessions
+        </button>
+        <TerminalSessionDrawer
+          open={open}
+          sessions={sessions}
+          onClose={vi.fn()}
+          onSelectSession={vi.fn()}
+          onCloseSession={onCloseSession}
+          onOpenQuickTabPicker={vi.fn()}
+        />
+      </>
+    );
+    const { rerender } = render(renderDrawer(false));
+    const returnTarget = screen.getByTestId('drawer-focus-return-target');
+    returnTarget.focus();
+
+    rerender(renderDrawer(true));
+    expect(document.activeElement).toBe(screen.getByTestId('terminal-session-drawer-close'));
+
+    const sessionClose = screen.getByTestId('terminal-session-drawer-close-s1');
+    fireEvent.touchStart(sessionClose, {
+      touches: [{ clientX: 240, clientY: 120 }],
+    });
+    fireEvent.touchEnd(sessionClose, {
+      changedTouches: [{ clientX: 240, clientY: 120 }],
+    });
+
+    expect(onCloseSession).toHaveBeenCalledTimes(1);
+    expect(activeElementAtClose).toBe(returnTarget);
+    expect(activeElementAtClose).not.toBe(sessionClose);
+  });
+
+  it('keeps the scrim mounted for exit fading and uses 44px session close targets', () => {
     const { rerender } = render(
       <TerminalSessionDrawer
         open={false}
