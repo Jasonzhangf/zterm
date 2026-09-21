@@ -79,6 +79,13 @@ describe('remote window stream daemon v2 contract', () => {
     expect(source).toContain('answer-accepted');
   });
 
+  it('reports expired capture frames as typed media telemetry', () => {
+    const source = readFileSync(new URL('./remote-window-stream-daemon.ts', import.meta.url), 'utf8');
+    expect(source).toContain('framesDropped');
+    expect(source).toContain("phase: 'streaming'");
+    expect(source).toContain('remote window capture frame expired');
+  });
+
   it('admits a client-timestamped action across host clock skew and publishes resize geometry atomically', async () => {
     const peerConnection = makePeerConnection();
     const captureSource = {

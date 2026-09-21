@@ -542,6 +542,8 @@ export interface RemoteWindowStreamStatusPayload {
   lane?: 'focus' | 'overview';
   capability?: RemoteWindowStreamCapabilityTelemetry;
   framesSent?: number;
+  framesDropped?: number;
+  frameAgeMs?: number;
   frameWidth?: number;
   frameHeight?: number;
   message?: string;
