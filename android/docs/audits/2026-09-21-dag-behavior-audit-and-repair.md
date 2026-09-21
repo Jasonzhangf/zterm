@@ -186,9 +186,9 @@ live runtime / 设备验收，互不替代。
 | `177293a` | P1 | 外部 owner | HumanAgent subagent close 的 App Server archive 跨设备问题 |
 | `59b0553` / `3bffc10` | P1 | 外部 owner | OneStop `verify-appsdk-governance.mjs` 与 gitignored `.appsdk/sdk.bin` 冲突 |
 | `8d2a27a` / `919f8f0` | P1 | 需授权 | 涉及 identity rebind 契约，不得擅自重置身份 |
-| `4127e73` | P1 | 需设计决策 | native 路径是否回流 daemon reducer |
+| `4127e73` | P1 | **已闭环并关闭** | 候选 `f7c5931`，merge `458e9ee`，review r2 PASS；main 上 selected endpoint 恒 fail-closed（`ADAPTER_ENDPOINT_UNAVAILABLE`），daemon 独占 reducer/sink；新增生产入口负向回归 |
 | `4911fed` | P1 | 需设计决策 | task/feature DAG 机器可验证闭包注册表 |
-| `ca5eaed` | P1 | 需设计决策 | migration receipt 不可变 prefix / commit fence |
+| `ca5eaed` | P1 | BLOCKED | 源码已修（独立 archive digest、prefix 字节绑定、commit evidence 校验），migration 61 测试通过；缺真实 freeze/archive/replay/rebind 授权与 live 证据 |
 | `fc04d0b` | P1 | 需设计决策 | preflight handoff target 未注册的语义 |
 | `db35c60` | P1 | 保持 open | 需 live orphan task closure receipt |
 
