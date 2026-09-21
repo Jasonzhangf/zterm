@@ -36,6 +36,10 @@ export interface TerminalTransportConnection {
   muxVersion?: number;
   muxClientInstanceId?: string | null;
   muxChannels?: Map<string, string>;
+  muxChannelId?: string | null;
+  muxChannelSubscriberId?: string | null;
+  muxChannelRegistry?: Map<string, string> | null;
+  muxParentTransport?: TerminalSessionTransport | null;
 }
 
 export interface PendingBinaryTransfer<TPayload extends { byteLength: number }> {
