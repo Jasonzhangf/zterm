@@ -308,4 +308,75 @@ describe('useOpenTabRuntime explicit resume gating', () => {
 
     expect(removeItem).toHaveBeenCalledTimes(6);
   });
+
+  it('keeps the terminal page when a background tab is closed', () => {
+    const setPageState = vi.fn();
+    const { result } = renderHook(() => useOpenTabRuntime({
+      bridgeSettings: { servers: [] } as any,
+      hosts: [],
+      hostsLoaded: true,
+      restoreSwitchReason: 'restore-sync' as const,
+      sessions: [buildSession('s1', 'connected'), buildSession('s2', 'connected')],
+      sessionGroups: [],
+      runtimeActiveSessionId: 's1',
+      createSession: vi.fn(() => 's2'),
+      closeSession: vi.fn(),
+      switchSession: vi.fn(),
+      moveSession: vi.fn(),
+      renameSession: vi.fn(),
+      reconnectSession: vi.fn(),
+      resumeActiveSessionTransport: vi.fn(() => true),
+      notifyTargetNetworkSignal: vi.fn(),
+      reportTargetNetworkProbeError: vi.fn(),
+      clearSessionDraft: vi.fn(),
+      ensureTerminalPageVisible: vi.fn(),
+      setPageState,
+      pruneSessionGroupSelectionToRemoteTruth: vi.fn(),
+    }));
+
+    setPageState.mockClear();
+
+    act(() => {
+      result.current.handleCloseSession('s2', 'terminal-session-drawer-close-button');
+    });
+
+    const updater = setPageState.mock.calls.at(-1)?.[0] as (current: { kind: 'terminal' }) => { kind: 'terminal' };
+    const currentState = { kind: 'terminal' } as const;
+    expect(updater(currentState)).toBe(currentState);
+  });
+
+  it('leaves the terminal page when the active tab is closed and tabs remain', () => {
+    const setPageState = vi.fn();
+    const { result } = renderHook(() => useOpenTabRuntime({
+      bridgeSettings: { servers: [] } as any,
+      hosts: [],
+      hostsLoaded: true,
+      restoreSwitchReason: 'restore-sync' as const,
+      sessions: [buildSession('s1', 'connected'), buildSession('s2', 'connected')],
+      sessionGroups: [],
+      runtimeActiveSessionId: 's1',
+      createSession: vi.fn(() => 's2'),
+      closeSession: vi.fn(),
+      switchSession: vi.fn(),
+      moveSession: vi.fn(),
+      renameSession: vi.fn(),
+      reconnectSession: vi.fn(),
+      resumeActiveSessionTransport: vi.fn(() => true),
+      notifyTargetNetworkSignal: vi.fn(),
+      reportTargetNetworkProbeError: vi.fn(),
+      clearSessionDraft: vi.fn(),
+      ensureTerminalPageVisible: vi.fn(),
+      setPageState,
+      pruneSessionGroupSelectionToRemoteTruth: vi.fn(),
+    }));
+
+    setPageState.mockClear();
+
+    act(() => {
+      result.current.handleCloseSession('s1', 'terminal-session-drawer-close-button');
+    });
+
+    const updater = setPageState.mock.calls.at(-1)?.[0] as (current: { kind: 'terminal' }) => { kind: 'terminal' };
+    expect(updater({ kind: 'terminal' })).toEqual({ kind: 'terminal' });
+  });
 });

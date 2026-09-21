@@ -371,6 +371,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
       });
     }
     const nextOpenTabState = closeResult.nextState;
+    const previousActiveSessionId = openTabStateRef.current.activeSessionId;
 
     closedOpenTabSessionIdsRef.current.add(normalizedSessionId);
     applyOpenTabState(nextOpenTabState);
@@ -384,6 +385,9 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
 
     setPageState((current) => {
       if (current.kind !== 'terminal') {
+        return current;
+      }
+      if (previousActiveSessionId !== normalizedSessionId) {
         return current;
       }
       if (nextOpenTabState.tabs.length === 0) {
