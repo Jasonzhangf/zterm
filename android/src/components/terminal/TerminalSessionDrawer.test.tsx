@@ -1133,7 +1133,7 @@ describe('TerminalSessionDrawer', () => {
     expect(openStyle.boxShadow ?? '').toBe('none');
   });
 
-  it('keeps the scrim mounted for exit fading and uses 44px session close targets', () => {
+  it('moves focus outside before a session close can hide the drawer', () => {
     let activeElementAtClose: Element | null = null;
     const onCloseSession = vi.fn(() => {
       activeElementAtClose = document.activeElement;

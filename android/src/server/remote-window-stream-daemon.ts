@@ -201,6 +201,7 @@ interface ActiveRemoteWindowStream extends Omit<RemoteWindowStreamSessionResourc
   overviewVideoSender?: RTCRtpSender | null;
   overviewVideoSource?: RtcVideoSourceLike;
   overviewFramesSent?: number;
+  framesDropped: number;
   compositePollTimer: ReturnType<typeof setInterval> | null;
   handlers: RemoteWindowStreamDaemonHandlers;
   focusRevision: number;
@@ -612,6 +613,19 @@ export function createRemoteWindowStreamDaemonRuntime(
         return;
       }
       if (nowMs() - pending.capturedAtMs > entry.maxFrameAgeMs) {
+        const frameAgeMs = Math.max(0, nowMs() - pending.capturedAtMs);
+        entry.framesDropped += 1;
+        entry.handlers.sendStatus?.({
+          requestId: entry.requestId,
+          streamId: entry.streamId,
+          purpose: entry.purpose,
+          phase: 'streaming',
+          lane,
+          framesSent: entry.framesSent,
+          framesDropped: entry.framesDropped,
+          frameAgeMs,
+          message: 'remote window capture frame expired',
+        });
         if (lane === 'overview' ? entry.pendingOverviewFrame : entry.pendingFocusFrame) {
           scheduleRemoteWindowFrameDrain(entry, lane);
         }
@@ -800,6 +814,7 @@ export function createRemoteWindowStreamDaemonRuntime(
         compositePollTimer: null,
         handlers,
         framesSent: 0,
+        framesDropped: 0,
         focusRevision: 0,
         pendingFocusReady: null,
         pendingFocusFrame: null,
@@ -1253,6 +1268,7 @@ export function createRemoteWindowStreamDaemonRuntime(
       purpose: entry.purpose,
       phase: 'stopped',
       framesSent,
+      framesDropped: entry.framesDropped,
       message: 'remote window stream stopped',
     };
   }
