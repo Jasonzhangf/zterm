@@ -192,6 +192,37 @@ describe('notifyTargetNetworkSignalRuntime', () => {
     targetNetworkProbeRuntime.dispose();
   });
 
+  it('keeps a service-owned transport when the client network generation changes', () => {
+    const socket = Object.assign(makeFailedSocket(WebSocket.OPEN), {
+      transportOwnership: 'service' as const,
+    });
+    const targetNetworkProbeRuntime = createSessionTargetNetworkProbeRuntime({
+      probeTimeoutMs: 2_500,
+      now: Date.now,
+    });
+    const submitTargetSocketFailure = vi.fn();
+
+    expect(notifyTargetNetworkSignalRuntime({
+      signal: {
+        connected: true,
+        connectionType: 'cellular',
+        source: 'capacitor',
+        networkGeneration: 2,
+        fingerprintChanged: true,
+      },
+      targetRuntimes: [{ key: 'daemon-service', sessionIds: ['session-a1'], terminalTransport: socket }],
+      targetNetworkProbeRuntime,
+      sendTargetProbe: vi.fn(),
+      submitTargetSocketFailure,
+      submitTargetNetworkProbeError: vi.fn(),
+      runtimeDebug: vi.fn(),
+    })).toEqual([]);
+
+    expect(submitTargetSocketFailure).not.toHaveBeenCalled();
+    expect(socket.close).not.toHaveBeenCalled();
+    targetNetworkProbeRuntime.dispose();
+  });
+
   it('probes every physical daemon target once and does not multiply by logical channels', () => {
     const targetA = makeFailedSocket(WebSocket.OPEN);
     const targetB = makeFailedSocket(WebSocket.OPEN);

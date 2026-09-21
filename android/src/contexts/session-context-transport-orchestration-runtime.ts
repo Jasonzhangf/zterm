@@ -406,6 +406,9 @@ export function notifyTargetNetworkSignalRuntime(options: {
       if (!socket) {
         continue;
       }
+      if (socket.transportOwnership === 'service') {
+        continue;
+      }
       options.submitTargetSocketFailure(targetRuntime.key, socket, message);
       outcomes.push({ targetKey: targetRuntime.key, result: 'generation-changed' });
       options.runtimeDebug('session.mux.target-network-generation-changed', {
