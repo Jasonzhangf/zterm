@@ -49,7 +49,10 @@ function TerminalSessionDrawerComponent({
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
   const longPressTimerRef = useRef<number | null>(null);
   const folderPointerGestureRef = useRef(false);
+  const drawerRef = useRef<HTMLElement | null>(null);
+  const overlayRef = useRef<HTMLButtonElement | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const focusReturnTargetRef = useRef<HTMLElement | null>(null);
   const suppressNextClickRef = useRef(false);
   const selectionPressRef = useRef<{ sessionId: string; x: number; y: number } | null>(null);
   const closeTouchHandledRef = useRef<string | null>(null);
@@ -66,8 +69,41 @@ function TerminalSessionDrawerComponent({
     terminalBackend: 'tmux' | 'herdr';
   } | null>(null);
   const [folderMenu, setFolderMenu] = useState<{ cwd: string; x: number; y: number } | null>(null);
+  const isDrawerChromeElement = (element: Element | null) => {
+    if (!(element instanceof HTMLElement)) {
+      return false;
+    }
+    return Boolean(drawerRef.current?.contains(element) || overlayRef.current === element);
+  };
+  const restoreFocusOutsideDrawer = () => {
+    const activeElement = document.activeElement;
+    if (!(activeElement instanceof HTMLElement) || !isDrawerChromeElement(activeElement)) {
+      return;
+    }
+    const returnTarget = focusReturnTargetRef.current;
+    const canRestore = (
+      returnTarget?.isConnected
+      && !isDrawerChromeElement(returnTarget)
+      && !returnTarget.closest('[inert], [aria-hidden="true"]')
+    );
+    if (canRestore) {
+      returnTarget.focus({ preventScroll: true });
+      if (!isDrawerChromeElement(document.activeElement)) {
+        return;
+      }
+    }
+    activeElement.blur();
+  };
+  const requestCloseDrawer = () => {
+    restoreFocusOutsideDrawer();
+    onClose();
+  };
   useEffect(() => {
     if (open) {
+      const activeElement = document.activeElement;
+      if (activeElement instanceof HTMLElement && !isDrawerChromeElement(activeElement)) {
+        focusReturnTargetRef.current = activeElement;
+      }
       closeButtonRef.current?.focus({ preventScroll: true });
     }
   }, [open]);
@@ -87,6 +123,7 @@ function TerminalSessionDrawerComponent({
   };
   const activateCloseSession = (sessionId: string) => {
     clearLongPressTimer();
+    restoreFocusOutsideDrawer();
     onCloseSession(sessionId);
   };
   const openSlotMenu = (session: TerminalSessionDrawerItem, x: number, y: number) => {
@@ -258,10 +295,11 @@ function TerminalSessionDrawerComponent({
         data-testid="terminal-session-drawer-overlay"
         disabled={!open}
         tabIndex={open ? 0 : -1}
-        onClick={onClose}
+        ref={overlayRef}
+        onClick={requestCloseDrawer}
         onKeyDown={(event) => {
           if (event.key === 'Escape') {
-            onClose();
+            requestCloseDrawer();
           }
         }}
         style={{
@@ -280,6 +318,7 @@ function TerminalSessionDrawerComponent({
         }}
       />
       <aside
+        ref={drawerRef}
         aria-hidden={!open}
         inert={!open}
         className="zterm-neo-drawer"
@@ -310,7 +349,7 @@ function TerminalSessionDrawerComponent({
           touchStartRef.current = null;
           clearLongPressTimer();
           selectionPressRef.current = null;
-          onClose();
+          requestCloseDrawer();
         }}
         onTouchEndCapture={(event) => {
           onDebugAddEvent?.(`cap:end:${describeEventTarget(event.target)}`);
@@ -330,11 +369,11 @@ function TerminalSessionDrawerComponent({
           ) {
             return;
           }
-          onClose();
+          requestCloseDrawer();
         }}
         onKeyDown={(event) => {
           if (event.key === 'Escape') {
-            onClose();
+            requestCloseDrawer();
           }
         }}
         style={{
@@ -399,7 +438,7 @@ function TerminalSessionDrawerComponent({
               aria-label="关闭 session 抽屉"
               data-testid="terminal-session-drawer-close"
               ref={closeButtonRef}
-              onClick={onClose}
+              onClick={requestCloseDrawer}
               style={{
                 width: '28px',
                 height: '28px',
