@@ -1,7 +1,6 @@
 # Search-only excludes for source/doc queries.
 .DS_Store
 .git/
-.beads/
 .agent-state/
 .reasonix/
 .local-index/

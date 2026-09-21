@@ -26,8 +26,6 @@ android/.turbo/
 /.build-meta.json
 android/update-dist/
 android/note.md
-android/.beads/*
-!android/.beads/issues.jsonl
 android/CACHE.md
 android/screenshot-*.png
 android/evidence/**

@@ -30,7 +30,6 @@ required_ignored=(
 rsync_excludes=(
   "--exclude=.DS_Store"
   "--exclude=.git/"
-  "--exclude=.beads/"
   "--exclude=.agent-state/"
   "--exclude=.reasonix/"
   "--exclude=.local-index/"
@@ -188,7 +187,7 @@ copy_file "mac/tsconfig.node.json"
 copy_file "mac/vite.config.ts"
 copy_file "mac/vitest.config.ts"
 
-forbidden_corpus_regex='/(node_modules|dist|build|target|coverage|\.next|\.cache|\.turbo|\.pnpm-store|\.yarn|release-dist|update-dist|evidence|artifacts|tmp|\.tmp|backups|archive|\.git|\.reasonix|\.beads)(/|$)|/(docs/wiki/generated|docs/tab-swipe-grid-preview|docs/tab-swipe-grid-session-preview|android/native/android/app/src/main/assets/public)(/|$)|/android/native/android/app/src/main/assets/capacitor\.(config|plugins)\.json$|\.(apk|tgz|zip|tar|gz|html|log|pem|key|png|jpg|jpeg|gif|webp|ico|icns|mp4|mov|webm|map)$|(^|/)\.DS_Store$|(^|/)pnpm-lock\.yaml$|(^|/)package-lock\.json$|(^|/)yarn\.lock$'
+forbidden_corpus_regex='/(node_modules|dist|build|target|coverage|\.next|\.cache|\.turbo|\.pnpm-store|\.yarn|release-dist|update-dist|evidence|artifacts|tmp|\.tmp|backups|archive|\.git|\.reasonix)(/|$)|/(docs/wiki/generated|docs/tab-swipe-grid-preview|docs/tab-swipe-grid-session-preview|android/native/android/app/src/main/assets/public)(/|$)|/android/native/android/app/src/main/assets/capacitor\.(config|plugins)\.json$|\.(apk|tgz|zip|tar|gz|html|log|pem|key|png|jpg|jpeg|gif|webp|ico|icns|mp4|mov|webm|map)$|(^|/)\.DS_Store$|(^|/)pnpm-lock\.yaml$|(^|/)package-lock\.json$|(^|/)yarn\.lock$'
 forbidden_hits="$(find "$CORPUS" -type f -print | LC_ALL=C grep -E "$forbidden_corpus_regex" || true)"
 if [[ -n "$forbidden_hits" ]]; then
   printf '%s\n' "$forbidden_hits" >&2
