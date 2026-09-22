@@ -74,6 +74,7 @@ export function createTerminalMuxChannelRuntime(
     connection: TerminalTransportConnection,
     subscriber: TerminalSession,
   ): TerminalTransportConnection {
+    const channelId = subscriber.muxChannelId || null;
     return {
       ...connection,
       role: 'session',
@@ -82,6 +83,10 @@ export function createTerminalMuxChannelRuntime(
       closeTransport: subscriber.closeTransport || (() => {}),
       muxVersion: undefined,
       muxClientInstanceId: null,
+      muxChannelId: channelId,
+      muxChannelSubscriberId: subscriber.id,
+      muxChannelRegistry: connection.muxChannels || null,
+      muxParentTransport: connection.transport,
       muxChannels: undefined,
     };
   }

@@ -187,6 +187,10 @@ type DrawerRemoteSessionTarget = {
   terminalBackend?: 'tmux' | 'herdr';
 };
 
+function hasRelayDaemonCatalogProjectionTruth(device: TraversalRelayDeviceSnapshot) {
+  return (device.daemon.sessions?.length || 0) > 0;
+}
+
 type RemoteWindowInputDebugSource =
   | 'overlay'
   | 'quickbar-sequence'
@@ -1194,16 +1198,20 @@ function TerminalPageComponent({
     () => listOnlineTraversalRelayDaemonDevices(relayDevices),
     [relayDevices],
   );
+  const relayCatalogProjectionDevices = useMemo(
+    () => onlineRelayDaemonDevices.filter(hasRelayDaemonCatalogProjectionTruth),
+    [onlineRelayDaemonDevices],
+  );
   const relayDeviceByDaemonHostId = useMemo(() => {
     const devices = new Map<string, TraversalRelayDeviceSnapshot>();
-    for (const device of onlineRelayDaemonDevices) {
+    for (const device of relayCatalogProjectionDevices) {
       const hostId = device.daemon.hostId.trim();
       if (hostId) {
         devices.set(hostId, device);
       }
     }
     return devices;
-  }, [onlineRelayDaemonDevices]);
+  }, [relayCatalogProjectionDevices]);
   const drawerServerIdentityAliases = useMemo(() => {
     const aliasInputs: ServerIdentityInput[] = [...(serverIdentityAliasInputs || [])];
     for (const device of onlineRelayDaemonDevices) {
@@ -1260,9 +1268,9 @@ function TerminalPageComponent({
       return resolveServerIdentity(input, drawerServerIdentityAliases);
     };
     const relayHostIds = new Set(
-      onlineRelayDaemonDevices.map((device) => device.daemon.hostId.trim()).filter(Boolean),
+      relayCatalogProjectionDevices.map((device) => device.daemon.hostId.trim()).filter(Boolean),
     );
-    const relayCatalogGroups: SessionGroupHistory[] = onlineRelayDaemonDevices.flatMap((device) => {
+    const relayCatalogGroups: SessionGroupHistory[] = relayCatalogProjectionDevices.flatMap((device) => {
       const daemonHostId = device.daemon.hostId.trim();
       // Relay daemon directory entries represent the tmux catalog. Herdr
       // sessions keep their explicit backend-qualified history path. Older
@@ -1513,10 +1521,10 @@ function TerminalPageComponent({
       closeTargets,
       catalogLiveSessionIds,
     };
-  }, [activeSession, drawerServerIdentityAliases, onlineDrawerServerIdentityAliases, onlineRelayDaemonDevices, relayDeviceByDaemonHostId, renderedPaneSessions, resolveSessionGroupSlot, resolvedSessionDrawerFilterConfig, sessionGroups, sessions]);
+  }, [activeSession, drawerServerIdentityAliases, onlineDrawerServerIdentityAliases, relayCatalogProjectionDevices, relayDeviceByDaemonHostId, renderedPaneSessions, resolveSessionGroupSlot, resolvedSessionDrawerFilterConfig, sessionGroups, sessions]);
   const drawerHosts = useMemo<TerminalSessionDrawerHost[]>(() => {
     const hosts = new Map<string, TerminalSessionDrawerHost>();
-    for (const device of onlineRelayDaemonDevices) {
+    for (const device of relayCatalogProjectionDevices) {
       const hostKey = device.daemon.hostId.trim();
       if (!hostKey) {
         continue;
@@ -1543,7 +1551,7 @@ function TerminalPageComponent({
       });
     }
     return [...hosts.values()];
-  }, [drawerRemoteSessions.items, onlineRelayDaemonDevices]);
+  }, [drawerRemoteSessions.items, relayCatalogProjectionDevices]);
   const drawerSessions = useMemo(() => {
     const activeSessionIds = new Set(renderedPaneSessions.map((session) => session.id));
 

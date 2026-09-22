@@ -37,7 +37,6 @@ function appliedResult(
 
 function renderQualityHook(options: {
   preference?: RemoteWindowVideoPreference;
-  interactionActive?: boolean;
   updateStreamQuality: RemoteWindowQualityUpdater;
   collectStats?: () => Promise<null | {
     sampledAtMs: number;
@@ -47,7 +46,6 @@ function renderQualityHook(options: {
 }) {
   return renderHook((props: {
     preference: RemoteWindowVideoPreference;
-    interactionActive: boolean;
   }) => useRemoteWindowQuality({
     activeSessionId: 'session',
     streamId: 'stream',
@@ -56,13 +54,11 @@ function renderQualityHook(options: {
     streamReady: true,
     focusStreamActive: true,
     videoPreference: props.preference,
-    interactionActive: props.interactionActive,
     updateStreamQuality: options.updateStreamQuality,
     collectStatsRef: { current: options.collectStats ?? null },
   }), {
     initialProps: {
       preference: options.preference ?? 'smooth',
-      interactionActive: options.interactionActive ?? false,
     },
   });
 }
@@ -94,13 +90,13 @@ describe('useRemoteWindowQuality owner', () => {
     const { rerender } = renderQualityHook({ updateStreamQuality });
     await waitFor(() => expect(updateStreamQuality).toHaveBeenCalledTimes(1));
 
-    rerender({ preference: 'quality', interactionActive: false });
-    rerender({ preference: 'quality', interactionActive: true });
+    rerender({ preference: 'quality' });
+    rerender({ preference: 'quality' });
     expect(updateStreamQuality).toHaveBeenCalledTimes(1);
     await act(async () => resolvers[0](appliedResult(updateStreamQuality.mock.calls[0][1])));
     await waitFor(() => expect(updateStreamQuality).toHaveBeenCalledTimes(2));
     expect(updateStreamQuality.mock.calls[1][1].videoProfile).toEqual(
-      buildRemoteWindowVideoProfile('quality', { interactionActive: true }),
+      buildRemoteWindowVideoProfile('quality', { interactionActive: false }),
     );
   });
 
@@ -113,7 +109,7 @@ describe('useRemoteWindowQuality owner', () => {
       .mockImplementationOnce(async (_sessionId, payload) => appliedResult(payload));
     const { result, rerender } = renderQualityHook({ updateStreamQuality });
     await waitFor(() => expect(updateStreamQuality).toHaveBeenCalledTimes(1));
-    rerender({ preference: 'quality', interactionActive: false });
+    rerender({ preference: 'quality' });
     const firstPayload = updateStreamQuality.mock.calls[0][1];
     await act(async () => firstResolve({
       ...appliedResult(firstPayload),
@@ -135,7 +131,7 @@ describe('useRemoteWindowQuality owner', () => {
     const { result, rerender } = renderQualityHook({ updateStreamQuality });
     await act(async () => Promise.resolve());
     expect(updateStreamQuality).toHaveBeenCalledTimes(1);
-    rerender({ preference: 'quality', interactionActive: false });
+    rerender({ preference: 'quality' });
 
     await act(async () => {
       vi.advanceTimersByTime(REMOTE_WINDOW_QUALITY_REQUEST_TIMEOUT_MS);
@@ -152,32 +148,23 @@ describe('useRemoteWindowQuality owner', () => {
     expect(result.current.qualityApplyState).toMatchObject({ phase: 'applied', revision: 2 });
   });
 
-  it('skips exactly two stats samples after apply before adaptive downgrade', async () => {
-    vi.useFakeTimers();
+  it('keeps stats observable without adapting the media profile', async () => {
     let sampledAtMs = 0;
-    let statsEnabled = false;
-    const collectStats = vi.fn(async () => statsEnabled ? {
+    const collectStats = vi.fn(async () => ({
       sampledAtMs: sampledAtMs += 2_000,
       availableOutgoingBitrateBps: 3_000_000,
       qualityLimitationReason: 'bandwidth',
-    } : null);
+    }));
     const updateStreamQuality = vi.fn<Parameters<RemoteWindowQualityUpdater>, ReturnType<RemoteWindowQualityUpdater>>(async (_sessionId, payload) => appliedResult(payload));
-    renderQualityHook({ updateStreamQuality, collectStats });
-    await act(async () => Promise.resolve());
+    const { result } = renderQualityHook({ updateStreamQuality, collectStats });
+    await waitFor(() => expect(updateStreamQuality).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(collectStats).toHaveBeenCalled());
     expect(updateStreamQuality).toHaveBeenCalledTimes(1);
-    statsEnabled = true;
-
-    await act(async () => {
-      vi.advanceTimersByTime(4_000);
-      await Promise.resolve();
+    expect(result.current.adaptiveCause).toBe('none');
+    expect(result.current.lastStatsSample).toMatchObject({
+      availableOutgoingBitrateBps: 3_000_000,
+      qualityLimitationReason: 'bandwidth',
     });
-    expect(updateStreamQuality).toHaveBeenCalledTimes(1);
-    await act(async () => {
-      vi.advanceTimersByTime(2_000);
-      await Promise.resolve();
-    });
-    expect(updateStreamQuality).toHaveBeenCalledTimes(2);
-    expect(updateStreamQuality.mock.calls[1][1].videoProfile.maxBitrateBps).toBe(4_000_000);
   });
 
   it('cancels an active timeout and ignores its late result after reset', async () => {

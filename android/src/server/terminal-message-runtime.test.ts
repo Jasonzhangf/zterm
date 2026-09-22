@@ -2047,4 +2047,47 @@ describe('terminal message runtime explicit error truth', () => {
       },
     });
   });
+
+  it('drops remote window mux channel replies after the channel is no longer bound', async () => {
+    const { runtime, remoteWindowStreamRuntime } = createRuntime({
+      useRealChannelMux: true,
+      passThroughTransportSend: true,
+    });
+    const connection = createConnection(null);
+    connection.muxVersion = 1;
+    let resolveTargets!: (payload: Awaited<ReturnType<RemoteWindowStreamDaemonRuntime['listTargets']>>) => void;
+    remoteWindowStreamRuntime.listTargets.mockReturnValueOnce(new Promise((resolve) => {
+      resolveTargets = resolve;
+    }));
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'mux-channel-open',
+      payload: {
+        channelId: 'rw-channel',
+        sessionName: 'remote-window',
+        bodySubscribed: false,
+      },
+    })));
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'mux-channel-message',
+      payload: {
+        channelId: 'rw-channel',
+        message: {
+          type: 'remote-window-targets-request',
+          payload: { requestId: 'rw-targets-after-close' },
+        },
+      },
+    })));
+    connection.muxChannels?.delete('rw-channel');
+    resolveTargets({ requestId: 'rw-targets-after-close', targets: [] });
+    await flushAsyncHandlers();
+
+    const transportFrames = (connection.transport.sendText as ReturnType<typeof vi.fn>).mock.calls
+      .map((call) => JSON.parse(call[0] as string) as TerminalTransportServerFrame);
+    expect(transportFrames.some((frame) => (
+      frame.type === 'mux-channel-message'
+      && frame.payload.channelId === 'rw-channel'
+      && frame.payload.message.type === 'remote-window-targets-response'
+    ))).toBe(false);
+  });
 });
