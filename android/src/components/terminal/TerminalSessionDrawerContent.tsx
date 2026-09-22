@@ -676,11 +676,12 @@ function TerminalSessionDrawerComponent({
                   ? activeRowBackground
                   : 'var(--zterm-panel-surface)',
                 display: 'grid',
-                gridTemplateColumns: '1fr',
-                alignItems: 'center',
+                gridTemplateColumns: 'minmax(0, 1fr) auto',
+                alignItems: 'stretch',
+                columnGap: '6px',
                 color: 'var(--zterm-panel-text)',
                 opacity: 1,
-                overflow: 'hidden',
+                overflow: 'visible',
                 position: 'relative',
                 boxShadow: session.active && !slotTone
                   ? 'inset 0 0 0 1px color-mix(in srgb, var(--zterm-panel-accent) 22%, transparent)'
@@ -750,7 +751,7 @@ function TerminalSessionDrawerComponent({
                   background: 'transparent',
                   color: 'inherit',
                   textAlign: 'left',
-                  padding: '6px 50px 6px 10px',
+                  padding: '6px 4px 6px 10px',
                 }}
               >
               <div style={{ minWidth: 0 }}>
@@ -783,18 +784,21 @@ function TerminalSessionDrawerComponent({
               </AmbientButton>
 
               <div
+                data-testid={`terminal-session-drawer-row-chip-${session.id}`}
                 style={{
-                  position: 'absolute',
-                  top: '4px',
-                  right: '4px',
+                  alignSelf: 'center',
+                  justifySelf: 'end',
                   display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'flex-end',
+                  flexDirection: 'row',
+                  flexWrap: 'wrap',
+                  alignItems: 'center',
+                  justifyContent: 'flex-end',
                   gap: '3px',
                   padding: '3px',
                   borderRadius: '8px',
                   border: '1px solid color-mix(in srgb, var(--zterm-panel-border) 70%, transparent)',
                   background: 'color-mix(in srgb, var(--zterm-panel-bg) 80%, transparent)',
+                  maxWidth: '90px',
                 }}
               >
                 {session.paneLabel ? (
@@ -814,9 +818,7 @@ function TerminalSessionDrawerComponent({
                   >
                     {session.paneLabel}
                   </span>
-                ) : (
-                  <span />
-                )}
+                ) : null}
                 {slotTone ? (
                   <span
                     data-testid={`terminal-session-drawer-slot-${session.id}`}
