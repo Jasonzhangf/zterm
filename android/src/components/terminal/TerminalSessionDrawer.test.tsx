@@ -142,7 +142,7 @@ describe('TerminalSessionDrawer', () => {
     const select = within(row).getByTestId('terminal-session-drawer-select-s1');
     expect(row.style.minHeight).toBe(`${TERMINAL_SESSION_DRAWER_ROW_MIN_HEIGHT_PX}px`);
     expect(select.style.minHeight).toBe(`${TERMINAL_SESSION_DRAWER_ROW_MIN_HEIGHT_PX}px`);
-    expect(select.style.paddingRight).toBe('50px');
+    expect(select.style.paddingRight).toBe('4px');
 
     const title = within(select).getByText('demo');
     const subtitle = within(select).getByText('100.127.23.27:3333 · demo');
@@ -1133,6 +1133,64 @@ describe('TerminalSessionDrawer', () => {
     expect(openStyle.boxShadow ?? '').toBe('none');
   });
 
+  it('draws the active row with accent border and groups close/badges into one chip', () => {
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={sessions}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+
+    const activeRow = screen.getByTestId(`terminal-session-drawer-row-${sessions[0]!.id}`) as HTMLElement;
+    expect(activeRow.getAttribute('data-active')).toBe('true');
+    expect(activeRow.style.border).toBe('1px solid var(--zterm-panel-accent)');
+    expect(activeRow.style.boxShadow).toContain('color-mix');
+
+    const closeTarget = screen.getByTestId(`terminal-session-drawer-close-${sessions[0]!.id}`) as HTMLElement;
+    expect(closeTarget.style.position).not.toBe('absolute');
+    expect(closeTarget.style.border).toBe('1px solid var(--zterm-panel-border)');
+    const chip = closeTarget.parentElement as HTMLElement | null;
+    expect(chip).not.toBeNull();
+    expect(chip?.style.borderRadius).toBe('8px');
+    expect(chip?.style.background).toContain('color-mix');
+  });
+
+  it('keeps pane, slot, and close controls in row flow so grouped rows are not clipped', () => {
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={[
+          {
+            ...sessions[0],
+            paneLabel: 'P1',
+            sessionGroupSlot: 'top',
+          },
+        ]}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onAssignSessionGroupSlot={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+
+    const row = screen.getByTestId(`terminal-session-drawer-row-${sessions[0]!.id}`) as HTMLElement;
+    expect(row.style.gridTemplateColumns).toBe('minmax(0, 1fr) auto');
+    expect(row.style.overflow).toBe('visible');
+
+    const chip = screen.getByTestId(`terminal-session-drawer-row-chip-${sessions[0]!.id}`) as HTMLElement;
+    expect(chip.style.position).not.toBe('absolute');
+    expect(chip.style.flexDirection).toBe('row');
+    expect(chip.style.flexWrap).toBe('wrap');
+    expect(screen.getByText('P1')).toBeTruthy();
+    expect(screen.getByTestId(`terminal-session-drawer-slot-${sessions[0]!.id}`).textContent).toContain('上方');
+    expect(screen.getByTestId(`terminal-session-drawer-close-${sessions[0]!.id}`)).toBeTruthy();
+  });
+
   it('moves focus outside before a session close can hide the drawer', () => {
     let activeElementAtClose: Element | null = null;
     const onCloseSession = vi.fn(() => {
@@ -1214,9 +1272,9 @@ describe('TerminalSessionDrawer', () => {
     expect(overlay.style.transition).toContain('opacity 150ms ease');
 
     const closeTarget = screen.getByTestId(`terminal-session-drawer-close-${sessions[0]!.id}`) as HTMLElement;
-    expect(closeTarget.style.width).toBe('18px');
-    expect(closeTarget.style.height).toBe('18px');
-    expect(closeTarget.style.position).toBe('absolute');
+    expect(closeTarget.style.width).toBe('20px');
+    expect(closeTarget.style.height).toBe('20px');
+    expect(closeTarget.style.position).toBe('');
     expect(closeTarget.style.color).toBe('var(--zterm-panel-danger)');
   });
 
