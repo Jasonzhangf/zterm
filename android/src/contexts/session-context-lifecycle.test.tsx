@@ -503,6 +503,111 @@ describe('session-context-lifecycle', () => {
     });
   });
 
+  it('allows reconnect for passive sessions materialized after a foreground resume', async () => {
+    vi.useFakeTimers();
+    const ensureActiveSessionFresh = vi.fn(() => true);
+    const stateRef = {
+      current: {
+        sessions: [{ id: 's1', state: 'connected' } as any],
+        activeSessionId: 's1',
+        liveSessionIds: [],
+      } as any,
+    };
+    const lifecycleRefs = {
+      foregroundActiveRef: { current: false },
+      stateRef,
+      scheduleStatesRef: { current: {} },
+      sessionDebugMetricsStoreRef: { current: { refresh: () => ({}) } },
+      transportRuntimeStoreRef: {
+        current: {
+          targets: new Map(),
+          sessions: new Map(),
+          terminalChannels: createTerminalChannelMuxStore(),
+        },
+      },
+      sessionPullStateRef: { current: new Map() },
+      lastActivatedSessionIdRef: { current: 's1' },
+      lastActiveReentryAtRef: { current: new Map() },
+      lastConnectedBaselineAtRef: { current: new Map() },
+      heartbeatStore: createSessionHeartbeatStore(),
+      remoteScreenshotRuntimeRef: { current: { dispose: () => undefined } },
+      remoteWindowMessageRuntimeRef: { current: { dispose: () => undefined } },
+      handshakeTimeoutsRef: { current: new Map() },
+      reconnectStore: createSessionReconnectStore(),
+    };
+
+    function Harness({
+      appForegroundActive,
+      liveSessionIds,
+      includePassiveSession,
+    }: {
+      appForegroundActive: boolean;
+      liveSessionIds: string[];
+      includePassiveSession: boolean;
+    }) {
+      const state = {
+        sessions: [
+          { id: 's1', state: 'connected' } as any,
+          ...(includePassiveSession ? [{ id: 's2', state: 'connected' } as any] : []),
+        ],
+        activeSessionId: 's1',
+        liveSessionIds,
+      } as any;
+      stateRef.current = state;
+      lifecycleRefs.foregroundActiveRef.current = appForegroundActive;
+      useSessionContextLifecycle({
+        appForegroundActive,
+        state,
+        scheduleStates: {},
+        refs: lifecycleRefs,
+        flushRuntimeDebugLogs: () => undefined,
+        clientRuntimeDebugFlushIntervalMs: 10_000,
+        ensureActiveSessionFresh,
+        renewForegroundSessionAttachLease: () => undefined,
+        resolveActiveHeadRefreshTickMs: () => 10_000,
+        resolveHeadStalePingMs: () => 10_000,
+        clearSessionHandshakeTimeout: () => undefined,
+        cleanupSocket: () => undefined,
+        cleanupControlSocket: () => undefined,
+      });
+      return null;
+    }
+
+    const view = render(
+      <Harness appForegroundActive={false} liveSessionIds={[]} includePassiveSession={false} />,
+    );
+    view.rerender(
+      <Harness appForegroundActive liveSessionIds={[]} includePassiveSession={false} />,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(ensureActiveSessionFresh).toHaveBeenCalledTimes(1);
+    expect(ensureActiveSessionFresh).toHaveBeenCalledWith({
+      sessionId: 's1',
+      source: 'explicit-resume',
+      forceHead: true,
+      markResumeTail: true,
+      allowReconnectIfUnavailable: false,
+    });
+
+    view.rerender(
+      <Harness appForegroundActive liveSessionIds={['s1', 's2']} includePassiveSession />,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(ensureActiveSessionFresh).toHaveBeenCalledTimes(2);
+    expect(ensureActiveSessionFresh).toHaveBeenNthCalledWith(2, {
+      sessionId: 's2',
+      source: 'explicit-resume',
+      forceHead: true,
+      allowReconnectIfUnavailable: true,
+    });
+  });
+
   it('does not close an open transport when lifecycle callback identities refresh, but cleans up on unmount', async () => {
     vi.useFakeTimers();
     const socket: { readyState: number } = { readyState: WebSocket.OPEN };
