@@ -852,6 +852,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     }
     const bounds = resolveFloatingOverlayClampBounds({
       viewportFallback: { width: window.innerWidth || rect.width, height: window.innerHeight || rect.height },
+      container: overlay.parentElement?.getBoundingClientRect(),
       overlay: { width: rect.width, height: rect.height },
       margin: FLOATING_OVERLAY_VIEWPORT_MARGIN_PX,
       topSafeMargin: FLOATING_OVERLAY_TOP_SAFE_MARGIN_PX,
