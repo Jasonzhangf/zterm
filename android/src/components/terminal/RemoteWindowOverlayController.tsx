@@ -282,23 +282,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   const [floatingOffset, setFloatingOffsetState] = useState<FloatingOverlayOffset>({ x: 0, y: 0 });
   const [floatingOverlayWidthPx, setFloatingOverlayWidthPxState] = useState<number | null>(null);
   const [videoPreference, setVideoPreference] = useState<RemoteWindowVideoPreference>('smooth');
-  const [qualityInteractionActive, setQualityInteractionActive] = useState(false);
-  const qualityInteractionTimerRef = useRef<number | null>(null);
-  const markQualityInteractionActive = useCallback(() => {
-    setQualityInteractionActive(true);
-    if (qualityInteractionTimerRef.current !== null) {
-      window.clearTimeout(qualityInteractionTimerRef.current);
-    }
-    qualityInteractionTimerRef.current = window.setTimeout(() => {
-      qualityInteractionTimerRef.current = null;
-      setQualityInteractionActive(false);
-    }, 600);
-  }, []);
-  useEffect(() => () => {
-    if (qualityInteractionTimerRef.current !== null) {
-      window.clearTimeout(qualityInteractionTimerRef.current);
-    }
-  }, []);
   const [touchScrollFraction] = useState<RemoteWindowTouchScrollFraction>(() => readRemoteWindowTouchScrollFraction());
   const [touchScrollInverted] = useState(() => readRemoteWindowTouchScrollInverted());
   const [inputMode, setInputMode] = useState<RemoteWindowInputMode>(() => readRemoteWindowInputMode());
@@ -566,7 +549,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     focusStreamActive: Boolean(qualityStreamId && activeFocusStreamIdRef.current === qualityStreamId),
     videoPreference,
     target: state.phase === 'targetLocked' ? state.target : null,
-    interactionActive: qualityInteractionActive,
     updateStreamQuality,
     collectStatsRef: collectStreamStatsRef,
   });
@@ -676,16 +658,13 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     ) {
       return false;
     }
-    if (events.length > 0) {
-      markQualityInteractionActive();
-    }
     return sendRemoteWindowInputEventsForTarget({
       sessionId: activeSessionId,
       streamId: currentLockedStreamId,
       target: currentLockedTarget,
       events,
     });
-  }, [activeSessionId, currentLockedStreamId, currentLockedTarget, markQualityInteractionActive, sendRemoteWindowInputEventsForTarget, state.phase]);
+  }, [activeSessionId, currentLockedStreamId, currentLockedTarget, sendRemoteWindowInputEventsForTarget, state.phase]);
   const setFloatingOffset = useCallback((next: FloatingOverlayOffset) => {
     floatingOffsetRef.current = next;
     setFloatingOffsetState(next);
@@ -1921,9 +1900,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   }, [dispatchRemoteWindowInputEvents]);
 
   const applyRemoteWindowTouchLocalEffect = useCallback((effect: RemoteWindowTouchLocalEffect) => {
-    if (effect.kind !== 'none') {
-      markQualityInteractionActive();
-    }
     if (effect.kind === 'local-pan-start') {
       surfaceLocalPanStartRef.current = {
         pointerId: effect.pointerId,
@@ -2026,7 +2002,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   }, [
     bottomInsetPx,
     commitFullscreenViewport,
-    markQualityInteractionActive,
     receiverFrameSize,
     remoteWindowInteractionEnabled,
     setFullscreenViewport,

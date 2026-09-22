@@ -1345,7 +1345,7 @@ describe('RemoteWindowOverlay', () => {
     await waitFor(() => expect(updateStreamQuality).toHaveBeenCalledTimes(1));
   });
 
-  it('downgrades active stream quality from WebRTC stats without restarting the stream', async () => {
+  it('keeps WebRTC stats observable without adapting active stream quality', async () => {
     const mediaStream = { id: 'media-stream-1' } as MediaStream;
     const collectStats = vi.fn(async () => ({
       sampledAtMs: 1_000,
@@ -1383,18 +1383,9 @@ describe('RemoteWindowOverlay', () => {
     await screen.findByTestId('remote-window-video');
     capabilityStatus.publishCapabilityStatus(startStream.mock.calls[0]![2] as string);
 
-    await waitFor(() => {
-      expect(updateStreamQuality).toHaveBeenCalledWith('session-1', expect.objectContaining({
-        videoProfile: expect.objectContaining({
-          preference: 'smooth',
-          maxBitrateBps: 2_000_000,
-          maxFrameRateFps: 30,
-          maxCaptureWidth: 720,
-        }),
-      }));
-    }, { timeout: 5500 });
-    expect(startStream).toHaveBeenCalledTimes(1);
-
+    await waitFor(() => expect(updateStreamQuality).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(collectStats).toHaveBeenCalled());
+    expect(updateStreamQuality).toHaveBeenCalledTimes(1);
     expect(startStream).toHaveBeenCalledTimes(1);
   });
 
