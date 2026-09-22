@@ -57,6 +57,7 @@ import {
 } from './terminal-schedule-runtime';
 import {
   createTerminalControlRuntime,
+  discoverTmuxSocketPaths,
   type TerminalControlRuntime,
 } from './terminal-control-runtime';
 import {
@@ -371,6 +372,7 @@ terminalControlRuntime = createTerminalControlRuntime({
   defaultSessionName: DEFAULT_SESSION_NAME,
   hiddenTmuxSessions: HIDDEN_TMUX_SESSIONS,
   tmuxSocketDir: join(WTERM_HOME_DIR, 'tmux'),
+  tmuxSocketPaths: () => discoverTmuxSocketPaths({ stableSocketDir: join(WTERM_HOME_DIR, 'tmux') }),
   sanitizeSessionName,
   daemonRuntimeDebug,
   wezTermBackend: TERMINAL_BACKEND_RUNTIME,
