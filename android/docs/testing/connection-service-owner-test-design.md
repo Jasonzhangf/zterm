@@ -12,6 +12,8 @@ WebRTC remains inside the same `AndroidConnectionService` physical-target lifecy
 
 The service projection carries the exact `mux-ready` payload and target generation. A late WebView listener replays the current healthy projection without opening a second physical transport or sending a JS mux hello.
 
+Foreground resume is a data-refresh trigger only. On Android it may refresh the Relay/control directory and request `buffer-head` plus the missing body range over an already-open projected channel. It must not emit `notifyTargetNetworkSignal`, resample transport identity, reopen a channel, reconnect a target, or start/stop the service. When the projected socket/channel is unavailable, the UI skips the refresh and waits for the service-owned snapshot/event path.
+
 ## Required Gates
 
 1. `pnpm --dir android run test:feature-registry`
@@ -58,6 +60,8 @@ The service projection carries the exact `mux-ready` payload and target generati
 - Snapshot subscription remains valid while Activity/WebView is detached.
 - Reattach consumes the latest service snapshot without creating a reconnect intent.
 - Foreground/background, pause/resume, visibility, and Activity recreation do not call connect, probe, route selection, heartbeat, or socket close.
+- Foreground resume on an open channel sends `buffer-head-request` on the same socket and applies the missing body range without changing physical generation.
+- Foreground resume with a missing socket or closed channel performs no UI-owned reopen/reconnect; service failure/backoff tests separately prove recovery remains live.
 - The reducer has no `request-reconnect` output.
 
 ### Native tests
@@ -84,6 +88,7 @@ Update the existing lifecycle/power tests to assert the new boundary:
 | Pong preserves the generation | Three misses retire exactly that generation |
 | Manual route command changes policy | Snapshot/event cannot change policy |
 | Detached UI receives later snapshot | Detached UI cannot trigger reconnect |
+| Foreground data refresh requests head on the existing channel | Missing/closed projection cannot reopen a channel or transport |
 | Current generation accepts a server frame | Stale generation is rejected |
 
 ## Black-box Acceptance
