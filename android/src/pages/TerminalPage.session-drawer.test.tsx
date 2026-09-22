@@ -1653,6 +1653,129 @@ describe('TerminalPage portrait session drawer', () => {
     expect(screen.getByTestId('terminal-session-drawer-host-mac-studio').textContent).toContain('1');
   });
 
+  it('does not let endpointless Relay presence hide saved session catalog rows', async () => {
+    const active = makeSession('active-other');
+    active.bridgeHost = '100.66.1.90';
+    active.bridgePort = 3333;
+    active.daemonHostId = 'windows-pc';
+    active.sessionName = 'powershell';
+    active.title = 'powershell';
+    const endpointlessRelayDevice = makeRelayDevice({
+      hostId: 'mac-studio',
+      includeDirectEndpoint: false,
+      sessions: [],
+    });
+    endpointlessRelayDevice.daemon.endpoints = [];
+
+    render(
+      <TerminalPage
+        sessions={[active]}
+        activeSession={active}
+        sessionGroups={[{
+          id: 'daemon:mac-studio',
+          name: 'Mac Studio',
+          bridgeHost: '100.66.1.82',
+          bridgePort: 3333,
+          daemonHostId: 'mac-studio',
+          terminalBackend: 'tmux',
+          sessionNames: ['rcc'],
+          lastOpenedAt: 1,
+        }]}
+        relayDevices={[endpointlessRelayDevice]}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    const swipeSurface = document.querySelector('[data-testid^="terminal-swipe-surface-"][data-swipe-enabled="true"]') as HTMLElement | null;
+    expect(swipeSurface).toBeTruthy();
+    fireEvent.touchStart(swipeSurface!, { touches: [{ clientX: 56, clientY: 200 }] });
+    fireEvent.touchMove(swipeSurface!, { touches: [{ clientX: 236, clientY: 206 }], cancelable: true });
+    fireEvent.touchEnd(swipeSurface!, { changedTouches: [{ clientX: 236, clientY: 206 }] });
+
+    expect(await screen.findByText('rcc')).toBeTruthy();
+    expect(screen.getByTestId('terminal-session-drawer-host-mac-studio').textContent).toContain('1');
+  });
+
+  it('does not let endpoint-only Relay presence hide saved session catalog rows', async () => {
+    const active = makeSession('active-other');
+    active.bridgeHost = '100.66.1.90';
+    active.bridgePort = 3333;
+    active.daemonHostId = 'windows-pc';
+    active.sessionName = 'powershell';
+    active.title = 'powershell';
+    const onOpenDrawerRemoteSession = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={[active]}
+        activeSession={active}
+        sessionGroups={[{
+          id: 'daemon:mac-studio',
+          name: 'Mac Studio',
+          bridgeHost: '100.66.1.82',
+          bridgePort: 3333,
+          daemonHostId: 'mac-studio',
+          terminalBackend: 'tmux',
+          sessionNames: ['rcc'],
+          lastOpenedAt: 1,
+        }]}
+        relayDevices={[makeRelayDevice({
+          hostId: 'mac-studio',
+          sessions: [],
+        })]}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onOpenDrawerRemoteSession={onOpenDrawerRemoteSession}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    const swipeSurface = document.querySelector('[data-testid^="terminal-swipe-surface-"][data-swipe-enabled="true"]') as HTMLElement | null;
+    expect(swipeSurface).toBeTruthy();
+    fireEvent.touchStart(swipeSurface!, { touches: [{ clientX: 56, clientY: 200 }] });
+    fireEvent.touchMove(swipeSurface!, { touches: [{ clientX: 236, clientY: 206 }], cancelable: true });
+    fireEvent.touchEnd(swipeSurface!, { changedTouches: [{ clientX: 236, clientY: 206 }] });
+
+    expect(await screen.findByText('rcc')).toBeTruthy();
+    expect(screen.getByTestId('terminal-session-drawer-host-mac-studio').textContent).toContain('1');
+
+    fireEvent.click(screen.getByText('rcc'));
+
+    expect(onOpenDrawerRemoteSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bridgeHost: '100.66.1.82',
+        bridgePort: 3333,
+        daemonHostId: 'mac-studio',
+      }),
+      'rcc',
+    );
+    expect(onOpenDrawerRemoteSession.mock.calls[0]?.[0]).not.toEqual(
+      expect.objectContaining({
+        transportMode: 'webrtc',
+      }),
+    );
+  });
+
   it('does not enumerate disconnected stale relay daemon devices as empty drawer hosts', async () => {
     const directSession = makeSession('direct-rcc');
     directSession.bridgeHost = '100.66.1.82';
