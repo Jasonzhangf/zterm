@@ -1056,7 +1056,7 @@ describe('TerminalPage portrait session drawer', () => {
 
     await waitFor(() => expect(screen.getByTestId('terminal-session-drawer-list')).toBeTruthy());
     const drawerList = within(screen.getByTestId('terminal-session-drawer-list'));
-    expect(drawerList.getAllByTestId(/terminal-session-drawer-row-/)).toHaveLength(1);
+    expect(drawerList.getAllByTestId(/^terminal-session-drawer-row-(?!chip-)/)).toHaveLength(1);
     expect(drawerList.getAllByText('rcc')).toHaveLength(1);
   });
 
