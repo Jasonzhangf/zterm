@@ -266,7 +266,7 @@ export function useSessionContextLifecycle(options: {
   const lastRuntimeSessionIdsRef = useRef<string[]>([]);
   const passiveVisibleRefreshCursorRef = useRef(0);
   const lastForegroundActiveRef = useRef(options.appForegroundActive !== false);
-  const foregroundResumeDataRefreshOnlyRef = useRef(false);
+  const foregroundResumeDataRefreshOnlySessionIdsRef = useRef<Set<string>>(new Set());
   const lastForegroundResumeEpochRef = useRef<number | null>(
     Number.isFinite(options.foregroundResumeEpoch)
       ? Number(options.foregroundResumeEpoch)
@@ -294,7 +294,7 @@ export function useSessionContextLifecycle(options: {
     options.refs.foregroundActiveRef.current = nextForegroundActive;
     lastForegroundActiveRef.current = nextForegroundActive;
     if (!nextForegroundActive) {
-      foregroundResumeDataRefreshOnlyRef.current = false;
+      foregroundResumeDataRefreshOnlySessionIdsRef.current.clear();
       return;
     }
     const nextForegroundResumeEpoch = Number.isFinite(options.foregroundResumeEpoch)
@@ -308,8 +308,13 @@ export function useSessionContextLifecycle(options: {
     } else if (previousForegroundActive === nextForegroundActive) {
       return;
     }
-    foregroundResumeDataRefreshOnlyRef.current = true;
-    const activeSessionId = options.refs.stateRef.current.activeSessionId;
+    const resumeState = options.refs.stateRef.current;
+    const activeSessionId = resumeState.activeSessionId;
+    foregroundResumeDataRefreshOnlySessionIdsRef.current = new Set(
+      resumeState.sessions
+        .map((session) => session.id)
+        .filter((sessionId) => sessionId !== activeSessionId),
+    );
     if (!activeSessionId) {
       return;
     }
@@ -401,22 +406,18 @@ export function useSessionContextLifecycle(options: {
         nextLiveSessionIds,
       ),
     ]));
-    const dataRefreshOnly = foregroundResumeDataRefreshOnlyRef.current;
-    const allowReconnectIfUnavailable = !dataRefreshOnly;
     refreshTargets.forEach((sessionId) => {
       if (sessionId === options.state.activeSessionId) {
         return;
       }
+      const dataRefreshOnly = foregroundResumeDataRefreshOnlySessionIdsRef.current.delete(sessionId);
       options.ensureActiveSessionFresh({
         sessionId,
         source: 'explicit-resume',
         forceHead: true,
-        allowReconnectIfUnavailable,
+        allowReconnectIfUnavailable: !dataRefreshOnly,
       });
     });
-    if (dataRefreshOnly && refreshTargets.length > 0) {
-      foregroundResumeDataRefreshOnlyRef.current = false;
-    }
   }, [options.ensureActiveSessionFresh, options.state.liveSessionIds, options.state.sessions]);
 
   useEffect(() => {
