@@ -146,6 +146,16 @@ export function ensureActiveSessionFreshRuntime(options: {
   const isActiveReentryTarget = options.refreshOptions.source === 'active-reentry';
   const isRefreshTarget = isExplicitResumeTarget || isActiveReentryTarget || isActive || isLive;
   if (muxChannelUnavailableOnOpenTarget && isRefreshTarget) {
+    if (options.refreshOptions.allowReconnectIfUnavailable !== true) {
+      options.runtimeDebug(`session.transport.${options.refreshOptions.source}.data-refresh-only-skip`, {
+        sessionId: options.refreshOptions.sessionId,
+        activeSessionId: options.refs.stateRef.current.activeSessionId,
+        physicalWsReadyState: ws?.readyState ?? null,
+        terminalChannelState: terminalChannel?.state || null,
+        targetKey: transportRuntime?.targetKey || null,
+      });
+      return false;
+    }
     options.runtimeDebug(`session.transport.${options.refreshOptions.source}.mux-channel-reopen`, {
       sessionId: options.refreshOptions.sessionId,
       activeSessionId: options.refs.stateRef.current.activeSessionId,
@@ -158,6 +168,9 @@ export function ensureActiveSessionFreshRuntime(options: {
       targetKey: transportRuntime?.targetKey || null,
       targetSessionCount: targetRuntime?.sessionIds.length || 0,
     });
+    if (options.refreshOptions.markResumeTail) {
+      options.refs.tailRefreshStore.markPendingResumeTailRefresh(options.refreshOptions.sessionId);
+    }
     if (options.refreshOptions.source === 'active-reentry') {
       options.refs.lastActiveReentryAtRef.current.set(options.refreshOptions.sessionId, Date.now());
     }
@@ -165,9 +178,6 @@ export function ensureActiveSessionFreshRuntime(options: {
       options.reopenSessionTerminalChannel(options.refreshOptions.sessionId);
     } else {
       options.reconnectSession(options.refreshOptions.sessionId);
-    }
-    if (options.refreshOptions.markResumeTail) {
-      options.refs.tailRefreshStore.markPendingResumeTailRefresh(options.refreshOptions.sessionId);
     }
     return true;
   }

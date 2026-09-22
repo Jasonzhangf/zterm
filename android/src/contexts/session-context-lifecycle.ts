@@ -266,6 +266,7 @@ export function useSessionContextLifecycle(options: {
   const lastRuntimeSessionIdsRef = useRef<string[]>([]);
   const passiveVisibleRefreshCursorRef = useRef(0);
   const lastForegroundActiveRef = useRef(options.appForegroundActive !== false);
+  const foregroundResumeDataRefreshOnlyRef = useRef(false);
   const lastForegroundResumeEpochRef = useRef<number | null>(
     Number.isFinite(options.foregroundResumeEpoch)
       ? Number(options.foregroundResumeEpoch)
@@ -293,6 +294,7 @@ export function useSessionContextLifecycle(options: {
     options.refs.foregroundActiveRef.current = nextForegroundActive;
     lastForegroundActiveRef.current = nextForegroundActive;
     if (!nextForegroundActive) {
+      foregroundResumeDataRefreshOnlyRef.current = false;
       return;
     }
     const nextForegroundResumeEpoch = Number.isFinite(options.foregroundResumeEpoch)
@@ -306,6 +308,7 @@ export function useSessionContextLifecycle(options: {
     } else if (previousForegroundActive === nextForegroundActive) {
       return;
     }
+    foregroundResumeDataRefreshOnlyRef.current = true;
     const activeSessionId = options.refs.stateRef.current.activeSessionId;
     if (!activeSessionId) {
       return;
@@ -315,7 +318,7 @@ export function useSessionContextLifecycle(options: {
       source: 'explicit-resume',
       forceHead: true,
       markResumeTail: true,
-      allowReconnectIfUnavailable: true,
+      allowReconnectIfUnavailable: false,
     });
   }, [options.appForegroundActive, options.foregroundResumeEpoch]);
 
@@ -398,6 +401,8 @@ export function useSessionContextLifecycle(options: {
         nextLiveSessionIds,
       ),
     ]));
+    const dataRefreshOnly = foregroundResumeDataRefreshOnlyRef.current;
+    const allowReconnectIfUnavailable = !dataRefreshOnly;
     refreshTargets.forEach((sessionId) => {
       if (sessionId === options.state.activeSessionId) {
         return;
@@ -406,9 +411,12 @@ export function useSessionContextLifecycle(options: {
         sessionId,
         source: 'explicit-resume',
         forceHead: true,
-        allowReconnectIfUnavailable: true,
+        allowReconnectIfUnavailable,
       });
     });
+    if (dataRefreshOnly && refreshTargets.length > 0) {
+      foregroundResumeDataRefreshOnlyRef.current = false;
+    }
   }, [options.ensureActiveSessionFresh, options.state.liveSessionIds, options.state.sessions]);
 
   useEffect(() => {

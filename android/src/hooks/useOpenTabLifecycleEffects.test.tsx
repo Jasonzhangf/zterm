@@ -627,6 +627,7 @@ describe('useOpenTabLifecycleEffects', () => {
 
     render(<HarnessNativeTransportOwner />);
     capacitorNetworkHarness.emit('networkStatusChange', { connected: true, connectionType: 'wifi' });
+    notifyTargetNetworkSignal.mockClear();
 
     Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
     capacitorAppHarness.emit('appStateChange', { isActive: false });
@@ -636,10 +637,7 @@ describe('useOpenTabLifecycleEffects', () => {
     capacitorAppHarness.emit('appStateChange', { isActive: true });
     await Promise.resolve();
 
-    expect(notifyTargetNetworkSignal).toHaveBeenLastCalledWith({
-      source: 'foreground-resume',
-      networkGeneration: 1,
-      fingerprintChanged: false,
-    });
+    expect(notifyTargetNetworkSignal).not.toHaveBeenCalled();
+    expect(capacitorNetworkHarness.getStatus).not.toHaveBeenCalled();
   });
 });
