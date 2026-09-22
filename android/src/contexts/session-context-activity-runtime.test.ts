@@ -127,6 +127,53 @@ describe('ensureActiveSessionFreshRuntime', () => {
     expect(reconnectSession).not.toHaveBeenCalled();
   });
 
+  it('keeps foreground data refresh from reopening a closed channel or reconnecting', () => {
+    const targetSocket = { readyState: WebSocket.OPEN } as any;
+    const requestSessionBufferHead = vi.fn(() => true);
+    const reconnectSession = vi.fn();
+    const reopenSessionTerminalChannel = vi.fn();
+    const options = createBaseOptions({
+      refreshOptions: {
+        sessionId: 'session-1',
+        source: 'explicit-resume',
+        forceHead: true,
+        markResumeTail: true,
+        allowReconnectIfUnavailable: false,
+      },
+      daemonConnection: makeDaemonConnection(targetSocket),
+      readSessionTerminalChannel: () => ({ state: 'closed' }),
+      requestSessionBufferHead,
+      reconnectSession,
+      reopenSessionTerminalChannel,
+    });
+
+    expect(ensureActiveSessionFreshRuntime(options)).toBe(false);
+    expect(requestSessionBufferHead).not.toHaveBeenCalled();
+    expect(reopenSessionTerminalChannel).not.toHaveBeenCalled();
+    expect(reconnectSession).not.toHaveBeenCalled();
+  });
+
+  it('keeps foreground data refresh from reconnecting a missing transport', () => {
+    const requestSessionBufferHead = vi.fn();
+    const reconnectSession = vi.fn();
+    const options = createBaseOptions({
+      refreshOptions: {
+        sessionId: 'session-1',
+        source: 'explicit-resume',
+        forceHead: true,
+        markResumeTail: true,
+        allowReconnectIfUnavailable: false,
+      },
+      daemonConnection: makeDaemonConnection(null),
+      requestSessionBufferHead,
+      reconnectSession,
+    });
+
+    expect(ensureActiveSessionFreshRuntime(options)).toBe(false);
+    expect(requestSessionBufferHead).not.toHaveBeenCalled();
+    expect(reconnectSession).not.toHaveBeenCalled();
+  });
+
   it('does not treat a missing channel handle as a closed mux channel while the socket is open', () => {
     const targetSocket = { readyState: WebSocket.OPEN } as any;
     const requestSessionBufferHead = vi.fn(() => true);
