@@ -1,6 +1,10 @@
-import { readFileSync } from 'fs';
+import { spawn, type ChildProcess } from 'child_process';
+import { createServer as createNetServer } from 'net';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
 import { join } from 'path';
 import { describe, expect, it } from 'vitest';
+import { WebSocket } from 'ws';
 
 function readServerSource() {
   const main = readFileSync(join(process.cwd(), 'src/traversal-relay/server.ts'), 'utf8');
@@ -10,6 +14,235 @@ function readServerSource() {
 
 function readRtcBridgeSource() {
   return readFileSync(join(process.cwd(), 'src/server/rtc-bridge.ts'), 'utf8');
+}
+
+function availablePort() {
+  return new Promise<number>((resolve, reject) => {
+    const server = createNetServer();
+    server.unref();
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      if (!address || typeof address === 'string') {
+        server.close(() => reject(new Error('failed to allocate relay test port')));
+        return;
+      }
+      const port = address.port;
+      server.close((error) => error ? reject(error) : resolve(port));
+    });
+  });
+}
+
+async function waitForHttpOk(url: string, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError = 'not attempted';
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(url);
+      if (response.ok) return;
+      lastError = `HTTP ${response.status}`;
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`relay server did not become healthy: ${lastError}`);
+}
+
+async function startRelayServer() {
+  const port = await availablePort();
+  const tempRoot = mkdtempSync(join(tmpdir(), 'zterm-relay-host-replace-test-'));
+  const updatesDir = join(tempRoot, 'updates');
+  mkdirSync(updatesDir, { recursive: true });
+  writeFileSync(join(updatesDir, 'latest.json'), '{"versionCode":1,"apkUrl":"noop.apk"}\n');
+  writeFileSync(join(updatesDir, 'noop.apk'), 'noop');
+
+  const output: string[] = [];
+  const child = spawn(join(process.cwd(), 'node_modules', '.bin', 'tsx'), ['src/traversal-relay/server.ts'], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      ZTERM_TRAVERSAL_HOST: '127.0.0.1',
+      ZTERM_TRAVERSAL_PORT: String(port),
+      ZTERM_TRAVERSAL_BASE_PATH: '',
+      ZTERM_TRAVERSAL_DATA_DIR: join(tempRoot, 'data'),
+      ZTERM_TRAVERSAL_UPDATES_DIR: updatesDir,
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  child.stdout.on('data', (chunk) => output.push(String(chunk)));
+  child.stderr.on('data', (chunk) => output.push(String(chunk)));
+
+  const baseUrl = `http://127.0.0.1:${port}`;
+  try {
+    await waitForHttpOk(`${baseUrl}/health`);
+  } catch (error) {
+    await stopRelayServer(child, tempRoot);
+    throw new Error(`${error instanceof Error ? error.message : String(error)}\n${output.join('')}`);
+  }
+  return { baseUrl, wsBaseUrl: `ws://127.0.0.1:${port}`, child, tempRoot, output };
+}
+
+async function stopRelayServer(child: ChildProcess, tempRoot: string) {
+  if (child.exitCode === null && !child.killed) {
+    child.kill('SIGTERM');
+    await new Promise<void>((resolve) => {
+      const timeout = setTimeout(() => {
+        if (child.exitCode === null && !child.killed) {
+          child.kill('SIGKILL');
+        }
+        resolve();
+      }, 3000);
+      timeout.unref?.();
+      child.once('exit', () => {
+        clearTimeout(timeout);
+        resolve();
+      });
+    });
+  }
+  rmSync(tempRoot, { recursive: true, force: true });
+}
+
+async function registerAndLogin(baseUrl: string) {
+  const username = `relay-host-replace-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const password = `pw-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const registerResponse = await fetch(`${baseUrl}/api/auth/register`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  });
+  expect(registerResponse.status).toBe(201);
+  const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  });
+  const login = await loginResponse.json() as { accessToken?: string };
+  expect(loginResponse.ok).toBe(true);
+  expect(login.accessToken).toBeTruthy();
+  return login.accessToken as string;
+}
+
+function waitForEnvelope<T extends Record<string, unknown>>(
+  socket: WebSocket,
+  predicate: (envelope: T) => boolean,
+  timeoutMs = 5000,
+) {
+  return new Promise<T>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error('relay envelope timeout'));
+    }, timeoutMs);
+    timeout.unref?.();
+    const cleanup = () => {
+      clearTimeout(timeout);
+      socket.off('message', onMessage);
+      socket.off('error', onError);
+      socket.off('close', onClose);
+    };
+    const onMessage = (raw: WebSocket.RawData) => {
+      const envelope = JSON.parse(String(raw)) as T;
+      if (!predicate(envelope)) return;
+      cleanup();
+      resolve(envelope);
+    };
+    const onError = (error: Error) => {
+      cleanup();
+      reject(error);
+    };
+    const onClose = (code: number, reason: Buffer) => {
+      cleanup();
+      reject(new Error(`websocket closed while waiting: ${code} ${reason.toString()}`));
+    };
+    socket.on('message', onMessage);
+    socket.once('error', onError);
+    socket.once('close', onClose);
+  });
+}
+
+function waitForClose(socket: WebSocket, timeoutMs = 5000) {
+  return new Promise<{ code: number; reason: string }>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('websocket close timeout')), timeoutMs);
+    timeout.unref?.();
+    socket.once('close', (code, reason) => {
+      clearTimeout(timeout);
+      resolve({ code, reason: reason.toString() });
+    });
+  });
+}
+
+async function openSocket(url: string) {
+  const socket = new WebSocket(url);
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error(`websocket open timeout: ${url}`)), 5000);
+    timeout.unref?.();
+    socket.once('open', () => {
+      clearTimeout(timeout);
+      resolve();
+    });
+    socket.once('error', (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+  });
+  return socket;
+}
+
+async function connectHost(wsBaseUrl: string, accessToken: string, hostId: string, deviceId: string) {
+  const socket = await openSocket(
+    `${wsBaseUrl}/ws/host?token=${encodeURIComponent(accessToken)}&hostId=${encodeURIComponent(hostId)}&deviceId=${encodeURIComponent(deviceId)}&deviceName=${encodeURIComponent(deviceId)}&platform=test&appVersion=test&daemonVersion=test`,
+  );
+  await waitForEnvelope(socket, (envelope: { type?: string }) => envelope.type === 'relay-ready');
+  return socket;
+}
+
+async function connectClient(wsBaseUrl: string, accessToken: string, hostId: string, deviceId: string) {
+  return await openSocket(
+    `${wsBaseUrl}/ws/client?token=${encodeURIComponent(accessToken)}&hostId=${encodeURIComponent(hostId)}&deviceId=${encodeURIComponent(deviceId)}`,
+  );
+}
+
+async function waitForDirectoryDevice(
+  baseUrl: string,
+  accessToken: string,
+  hostId: string,
+  deviceId: string,
+  sessionName: string,
+  timeoutMs = 5000,
+) {
+  const deadline = Date.now() + timeoutMs;
+  let lastDirectory: unknown = null;
+  while (Date.now() < deadline) {
+    const response = await fetch(`${baseUrl}/api/directory`, {
+      headers: { authorization: `Bearer ${accessToken}` },
+    });
+    expect(response.ok).toBe(true);
+    const payload = await response.json() as { directory?: { devices?: Array<any> } };
+    lastDirectory = payload.directory;
+    const matches = payload.directory?.devices?.filter((device) => device?.daemon?.hostId === hostId) || [];
+    if (
+      matches.length === 1
+      && matches[0]?.deviceId === deviceId
+      && matches[0]?.daemon?.presence?.connected === true
+      && matches[0]?.daemon?.sessions?.length === 1
+      && matches[0]?.daemon?.sessions?.[0]?.name === sessionName
+    ) {
+      return matches[0];
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`directory device timeout: ${JSON.stringify(lastDirectory)}`);
+}
+
+function publishDirectory(socket: WebSocket, sessionName: string) {
+  socket.send(JSON.stringify({
+    type: 'directory-update',
+    directory: {
+      endpoints: [],
+      sessions: [{ name: sessionName, updatedAt: new Date().toISOString() }],
+      publishedAt: new Date().toISOString(),
+    },
+  }));
 }
 
 describe('traversal relay server directory contract', () => {
@@ -93,6 +326,76 @@ describe('traversal relay server directory contract', () => {
     );
   });
 
+  it('replaces the authenticated stable host generation without letting the old socket retire the new host', () => {
+    const source = readServerSource();
+    const closeHostStart = source.indexOf('function closeHost');
+    const registerHostStart = source.indexOf('function registerHost');
+    const registerHostEnd = source.indexOf('function registerClient');
+    const closeHostSource = source.slice(closeHostStart, registerHostStart);
+    const hostSource = source.slice(registerHostStart, registerHostEnd);
+
+    expect(hostSource).not.toContain('host ${hostId} already connected');
+    expect(hostSource).toContain('const replacedHost = hosts.get(key)');
+    expect(hostSource).toContain("replacedHost.socket.close(1012, 'host relay replaced')");
+    expect(hostSource.indexOf('hosts.set(key, host)')).toBeLessThan(
+      hostSource.indexOf("replacedHost.socket.close(1012, 'host relay replaced')"),
+    );
+    expect(hostSource).toContain('if (hosts.get(key) !== host)');
+    expect(closeHostSource).toContain('if (hosts.get(key) !== host)');
+    expect(closeHostSource).toContain('closeHostPeers(host.userId, host.hostId, reason)');
+  });
+
+  it('executes stable host replacement without stale old-socket callbacks retiring the new host', async () => {
+    const relay = await startRelayServer();
+    const sockets: WebSocket[] = [];
+    try {
+      const accessToken = await registerAndLogin(relay.baseUrl);
+      const hostId = 'stable-host';
+      const oldHost = await connectHost(relay.wsBaseUrl, accessToken, hostId, 'daemon-old');
+      sockets.push(oldHost);
+      publishDirectory(oldHost, 'old-session');
+      await waitForDirectoryDevice(relay.baseUrl, accessToken, hostId, 'daemon-old', 'old-session');
+
+      const oldClient = await connectClient(relay.wsBaseUrl, accessToken, hostId, 'phone-a');
+      sockets.push(oldClient);
+      oldClient.send(JSON.stringify({ type: 'rtc-init', payload: { marker: 'old-client' } }));
+      const oldPeer = await waitForEnvelope(oldHost, (envelope: { type?: string; peerId?: string }) => (
+        envelope.type === 'relay-signal' && Boolean(envelope.peerId)
+      ));
+
+      const oldHostClose = waitForClose(oldHost);
+      const oldClientClose = waitForClose(oldClient);
+      const replacementHost = await connectHost(relay.wsBaseUrl, accessToken, hostId, 'daemon-new');
+      sockets.push(replacementHost);
+      expect(await oldHostClose).toEqual({ code: 1012, reason: 'host relay replaced' });
+      expect(await oldClientClose).toEqual({ code: 1013, reason: 'host relay replaced' });
+
+      publishDirectory(replacementHost, 'new-session');
+      await waitForDirectoryDevice(relay.baseUrl, accessToken, hostId, 'daemon-new', 'new-session');
+
+      const replacementClient = await connectClient(relay.wsBaseUrl, accessToken, hostId, 'phone-a');
+      sockets.push(replacementClient);
+      replacementClient.send(JSON.stringify({ type: 'rtc-init', payload: { marker: 'replacement-client' } }));
+      const replacementPeer = await waitForEnvelope(replacementHost, (envelope: { type?: string; peerId?: string }) => (
+        envelope.type === 'relay-signal' && Boolean(envelope.peerId)
+      ));
+      expect(replacementPeer.peerId).not.toBe(oldPeer.peerId);
+
+      const siblingHost = await connectHost(relay.wsBaseUrl, accessToken, 'sibling-host', 'daemon-sibling');
+      sockets.push(siblingHost);
+      publishDirectory(siblingHost, 'sibling-session');
+      await waitForDirectoryDevice(relay.baseUrl, accessToken, hostId, 'daemon-new', 'new-session');
+      await waitForDirectoryDevice(relay.baseUrl, accessToken, 'sibling-host', 'daemon-sibling', 'sibling-session');
+    } finally {
+      for (const socket of sockets) {
+        if (socket.readyState < WebSocket.CLOSING) {
+          socket.close(1000, 'test cleanup');
+        }
+      }
+      await stopRelayServer(relay.child, relay.tempRoot);
+    }
+  }, 15_000);
+
   it('keeps client relay peers idle for 30 minutes after signaling close before notifying the daemon', () => {
     const source = readServerSource();
 
@@ -126,7 +429,7 @@ describe('traversal relay server directory contract', () => {
     expect(source).toContain('function bindClientPeerSocket');
     expect(source).toContain("previousSocket.close(1000, 'relay client socket replaced')");
     expect(source).toContain('if (client.socket !== ws || !clients.has(client.peerId))');
-    expect(source).toContain('clearIdleClientPeersForHost(host.userId, host.hostId, reason)');
+    expect(source).toContain('clearIdleClientPeersForHost(userId, hostId, reason)');
   });
 
   it('lets relay resume renegotiate the same peer id instead of ignoring a second rtc-init', () => {
