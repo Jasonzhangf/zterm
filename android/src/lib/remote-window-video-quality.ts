@@ -19,6 +19,21 @@ export const REMOTE_WINDOW_VIDEO_BUDGET_MULTIPLIERS = [1, 2, 4] as const;
 
 export type RemoteWindowVideoBudgetMultiplier = typeof REMOTE_WINDOW_VIDEO_BUDGET_MULTIPLIERS[number];
 export const REMOTE_WINDOW_QUALITY_FRAME_RATE_OPTIONS = [15, 30, 60] as const;
+
+// The default selection keeps the per-preference baseline budget that
+// `buildRemoteWindowVideoProfile` already declares (smooth 2x / quality 4x).
+export const REMOTE_WINDOW_BITRATE_MULTIPLIER_AUTO = 'auto' as const;
+export type RemoteWindowBitrateMultiplierSelection =
+  | RemoteWindowVideoBudgetMultiplier
+  | typeof REMOTE_WINDOW_BITRATE_MULTIPLIER_AUTO;
+
+export function resolveRemoteWindowBitrateMultiplier(
+  selection: RemoteWindowBitrateMultiplierSelection,
+): RemoteWindowVideoBudgetMultiplier | undefined {
+  return selection === REMOTE_WINDOW_BITRATE_MULTIPLIER_AUTO
+    ? undefined
+    : selection;
+}
 export type RemoteWindowQualityMaxFrameRate = typeof REMOTE_WINDOW_QUALITY_FRAME_RATE_OPTIONS[number];
 
 export function resolveRemoteWindowQualityStreamSize(

@@ -5,7 +5,9 @@
  */
 import {
   REMOTE_WINDOW_QUALITY_FRAME_RATE_OPTIONS,
+  REMOTE_WINDOW_BITRATE_MULTIPLIER_AUTO,
   type RemoteWindowQualityMaxFrameRate,
+  type RemoteWindowBitrateMultiplierSelection,
   type RemoteWindowVideoBudgetMultiplier,
 } from '../../lib/remote-window-video-quality';
 import { REMOTE_WINDOW_TOUCH_SCROLL_DEFAULT_FRACTION } from '../../lib/remote-window-touch-action-runtime';
@@ -185,20 +187,33 @@ function resolveRemoteWindowMaxFrameRate(value: unknown): RemoteWindowQualityMax
     : null;
 }
 
-export function readRemoteWindowBitrateMultiplier(): RemoteWindowVideoBudgetMultiplier {
+export { REMOTE_WINDOW_BITRATE_MULTIPLIER_AUTO, type RemoteWindowBitrateMultiplierSelection };
+
+// `auto` means the user has not overridden the bitrate budget, so the resolved
+// profile keeps its per-preference baseline (smooth 2x / quality 4x).
+export function readRemoteWindowBitrateMultiplierSelection(): RemoteWindowBitrateMultiplierSelection {
   if (typeof window === 'undefined') {
-    return 1;
+    return REMOTE_WINDOW_BITRATE_MULTIPLIER_AUTO;
   }
   return resolveRemoteWindowBitrateMultiplier(
     window.localStorage.getItem(REMOTE_WINDOW_QUALITY_BITRATE_MULTIPLIER_STORAGE_KEY),
-  ) ?? 1;
+  ) ?? REMOTE_WINDOW_BITRATE_MULTIPLIER_AUTO;
 }
 
-export function writeRemoteWindowBitrateMultiplier(multiplier: RemoteWindowVideoBudgetMultiplier) {
-  if (typeof window === 'undefined' || resolveRemoteWindowBitrateMultiplier(multiplier) === null) {
+export function writeRemoteWindowBitrateMultiplierSelection(
+  selection: RemoteWindowBitrateMultiplierSelection,
+) {
+  if (typeof window === 'undefined') {
     return;
   }
-  window.localStorage.setItem(REMOTE_WINDOW_QUALITY_BITRATE_MULTIPLIER_STORAGE_KEY, String(multiplier));
+  if (selection === REMOTE_WINDOW_BITRATE_MULTIPLIER_AUTO) {
+    window.localStorage.removeItem(REMOTE_WINDOW_QUALITY_BITRATE_MULTIPLIER_STORAGE_KEY);
+    return;
+  }
+  if (resolveRemoteWindowBitrateMultiplier(selection) === null) {
+    return;
+  }
+  window.localStorage.setItem(REMOTE_WINDOW_QUALITY_BITRATE_MULTIPLIER_STORAGE_KEY, String(selection));
 }
 
 export function readRemoteWindowMaxFrameRate(): RemoteWindowQualityMaxFrameRate {

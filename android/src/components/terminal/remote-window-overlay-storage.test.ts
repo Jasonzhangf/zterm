@@ -13,7 +13,7 @@ import {
   REMOTE_WINDOW_QUALITY_MAX_FRAME_RATE_STORAGE_KEY,
   REMOTE_WINDOW_TOUCH_SCROLL_FRACTION_STORAGE_KEY,
   REMOTE_WINDOW_TOUCH_SCROLL_INVERTED_STORAGE_KEY,
-  readRemoteWindowBitrateMultiplier,
+  readRemoteWindowBitrateMultiplierSelection,
   readRemoteWindowDisplayOrientation,
   readRemoteWindowInputMode,
   readRemoteWindowMaxFrameRate,
@@ -22,7 +22,7 @@ import {
   readStoredEntryPosition,
   readStoredBrowserEntryPosition,
   resolveTouchScrollFractionPreset,
-  writeRemoteWindowBitrateMultiplier,
+  writeRemoteWindowBitrateMultiplierSelection,
   writeRemoteWindowDisplayOrientation,
   writeRemoteWindowInputMode,
   writeRemoteWindowMaxFrameRate,
@@ -94,15 +94,18 @@ describe('remote-window-overlay-storage', () => {
     window.localStorage.setItem(REMOTE_WINDOW_DISPLAY_ORIENTATION_STORAGE_KEY, 'bogus');
     expect(readRemoteWindowDisplayOrientation()).toBe('follow-device');
 
-    expect(readRemoteWindowBitrateMultiplier()).toBe(1);
+    expect(readRemoteWindowBitrateMultiplierSelection()).toBe('auto');
     expect(readRemoteWindowMaxFrameRate()).toBe(30);
-    writeRemoteWindowBitrateMultiplier(4);
+    writeRemoteWindowBitrateMultiplierSelection(4);
     writeRemoteWindowMaxFrameRate(60);
-    expect(readRemoteWindowBitrateMultiplier()).toBe(4);
+    expect(readRemoteWindowBitrateMultiplierSelection()).toBe(4);
     expect(readRemoteWindowMaxFrameRate()).toBe(60);
     window.localStorage.setItem(REMOTE_WINDOW_QUALITY_BITRATE_MULTIPLIER_STORAGE_KEY, '3');
     window.localStorage.setItem(REMOTE_WINDOW_QUALITY_MAX_FRAME_RATE_STORAGE_KEY, '24');
-    expect(readRemoteWindowBitrateMultiplier()).toBe(1);
+    expect(readRemoteWindowBitrateMultiplierSelection()).toBe('auto');
     expect(readRemoteWindowMaxFrameRate()).toBe(30);
+
+    writeRemoteWindowBitrateMultiplierSelection('auto');
+    expect(window.localStorage.getItem(REMOTE_WINDOW_QUALITY_BITRATE_MULTIPLIER_STORAGE_KEY)).toBeNull();
   });
 });

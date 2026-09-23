@@ -65,6 +65,7 @@ import {
 } from '../../lib/remote-window-overlay-runtime';
 import {
   applyRemoteWindowMaxFrameRate,
+  REMOTE_WINDOW_BITRATE_MULTIPLIER_AUTO,
   getRemoteWindowSourceRect,
   readRemoteWindowVideoPreference,
   resolveInitialRemoteWindowVideoProfile,
@@ -114,20 +115,21 @@ import {
 } from './remote-window-overlay-constants';
 import {
   readRemoteWindowInputMode,
-  readRemoteWindowBitrateMultiplier,
+  readRemoteWindowBitrateMultiplierSelection,
   readRemoteWindowDisplayOrientation,
   readRemoteWindowMaxFrameRate,
   readRemoteWindowTouchScrollFraction,
   readRemoteWindowTouchScrollInverted,
   readStoredBrowserEntryPosition,
   readStoredEntryPosition,
-  writeRemoteWindowBitrateMultiplier,
+  writeRemoteWindowBitrateMultiplierSelection,
   writeRemoteWindowDisplayOrientation,
   writeRemoteWindowInputMode,
   writeRemoteWindowMaxFrameRate,
   writeStoredBrowserEntryPosition,
   writeStoredEntryPosition,
   type FloatingEntryPosition,
+  type RemoteWindowBitrateMultiplierSelection,
   type RemoteWindowTouchScrollFraction,
 } from './remote-window-overlay-storage';
 import {
@@ -297,7 +299,11 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   useEffect(() => {
     displayOrientationRef.current = displayOrientation;
   }, [displayOrientation]);
-  const [bitrateMultiplier, setBitrateMultiplierState] = useState<RemoteWindowVideoBudgetMultiplier>(() => readRemoteWindowBitrateMultiplier());
+  const [bitrateMultiplierSelection, setBitrateMultiplierSelectionState] = useState<RemoteWindowBitrateMultiplierSelection>(() => readRemoteWindowBitrateMultiplierSelection());
+  const bitrateMultiplierRef = useRef(bitrateMultiplierSelection);
+  useEffect(() => {
+    bitrateMultiplierRef.current = bitrateMultiplierSelection;
+  }, [bitrateMultiplierSelection]);
   const [maxFrameRateFps, setMaxFrameRateFpsState] = useState<RemoteWindowQualityMaxFrameRate>(() => readRemoteWindowMaxFrameRate());
   const [touchScrollFraction] = useState<RemoteWindowTouchScrollFraction>(() => readRemoteWindowTouchScrollFraction());
   const [touchScrollInverted] = useState(() => readRemoteWindowTouchScrollInverted());
@@ -565,7 +571,9 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     streamReady: state.phase === 'targetLocked' && Boolean(state.streamStarted),
     focusStreamActive: Boolean(qualityStreamId && activeFocusStreamIdRef.current === qualityStreamId),
     videoPreference,
-    bitrateMultiplier,
+    bitrateMultiplier: bitrateMultiplierSelection === REMOTE_WINDOW_BITRATE_MULTIPLIER_AUTO
+      ? undefined
+      : bitrateMultiplierSelection,
     maxFrameRateFps,
     target: state.phase === 'targetLocked' ? state.target : null,
     updateStreamQuality,
@@ -1120,9 +1128,9 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     writeRemoteWindowDisplayOrientation(orientation);
     requestRemoteTargetFillResize(true);
   }, [requestRemoteTargetFillResize]);
-  const handleBitrateMultiplierChange = useCallback((multiplier: RemoteWindowVideoBudgetMultiplier) => {
-    setBitrateMultiplierState(multiplier);
-    writeRemoteWindowBitrateMultiplier(multiplier);
+  const handleBitrateMultiplierChange = useCallback((selection: RemoteWindowBitrateMultiplierSelection) => {
+    setBitrateMultiplierSelectionState(selection);
+    writeRemoteWindowBitrateMultiplierSelection(selection);
     resetQualityApplyState();
   }, [resetQualityApplyState]);
   const handleMaxFrameRateChange = useCallback((frameRate: RemoteWindowQualityMaxFrameRate) => {
@@ -1591,7 +1599,9 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     const videoProfile = applyRemoteWindowMaxFrameRate(
       resolveInitialRemoteWindowVideoProfile(selectedVideoPreference, networkQuality, false, {
         target: effectiveTarget,
-        budgetMultiplier: bitrateMultiplier,
+        budgetMultiplier: bitrateMultiplierRef.current === REMOTE_WINDOW_BITRATE_MULTIPLIER_AUTO
+          ? undefined
+          : bitrateMultiplierRef.current as RemoteWindowVideoBudgetMultiplier,
       }),
       maxFrameRateFps,
     );
@@ -1808,7 +1818,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       });
   }, [
     activeSessionId,
-    bitrateMultiplier,
+    bitrateMultiplierSelection,
     browserPickerOpen,
     invalidatePlayback,
     maxFrameRateFps,
@@ -3041,7 +3051,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       videoPreference={videoPreference}
       displayOrientation={displayOrientation}
       onDisplayOrientationChange={handleDisplayOrientationChange}
-      bitrateMultiplier={bitrateMultiplier}
+      bitrateMultiplierSelection={bitrateMultiplierSelection}
       onBitrateMultiplierChange={handleBitrateMultiplierChange}
       maxFrameRateFps={maxFrameRateFps}
       onMaxFrameRateChange={handleMaxFrameRateChange}

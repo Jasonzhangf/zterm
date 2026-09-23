@@ -553,6 +553,42 @@ describe('RemoteWindowOverlay', () => {
     });
   });
 
+  it('keeps the per-preference bitrate baseline and 30 FPS default before the user overrides them', async () => {
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-default-profile',
+      targets: [makeTarget('app-default', 'TextEdit', 'app-window')],
+    }));
+    const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string, _options: { videoProfile: { maxBitrateBps: number; maxFrameRateFps: number } }) => ({
+      streamId,
+      mediaStream: { id: streamId } as MediaStream,
+    }));
+
+    render(
+      <RemoteWindowOverlay
+        activeSessionId="session-default"
+        requestTargets={requestTargets}
+        startStream={startStream}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    fireEvent.click(await screen.findByTestId('remote-window-target-app-default'));
+    await waitFor(() => expect(startStream).toHaveBeenCalledTimes(1));
+
+    expect(startStream.mock.calls[0]?.[3].videoProfile).toMatchObject({
+      maxBitrateBps: 2_000_000,
+      maxFrameRateFps: 30,
+    });
+    fireEvent.click(screen.getByTestId('remote-window-more-toggle'));
+    expect((screen.getByTestId('remote-window-bitrate-multiplier-select') as HTMLSelectElement).value).toBe('auto');
+
+    fireEvent.change(screen.getByTestId('remote-window-bitrate-multiplier-select'), { target: { value: '1' } });
+    expect(window.localStorage.getItem('zterm:remote-window:quality-bitrate-multiplier-v1')).toBe('1');
+
+    fireEvent.change(screen.getByTestId('remote-window-bitrate-multiplier-select'), { target: { value: 'auto' } });
+    expect(window.localStorage.getItem('zterm:remote-window:quality-bitrate-multiplier-v1')).toBeNull();
+  });
+
   it('opens an active app-title switch list and switches to another target without reopening the picker', async () => {
     const mediaStream = { id: 'media-stream-1' } as MediaStream;
     const appOne = makeTarget('app-1', 'TextEdit', 'app-window');

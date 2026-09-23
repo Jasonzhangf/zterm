@@ -32,7 +32,7 @@ describe('RemoteWindowMorePanel view owner', () => {
     const onBitrateMultiplierChange = vi.fn();
     const onMaxFrameRateChange = vi.fn();
     render(<RemoteWindowMorePanel
-      fullscreen={false}
+      fullscreen
       videoPreference="smooth"
       streamStatusText="串流：已连接"
       networkStatusText="网络：4g"
@@ -41,7 +41,7 @@ describe('RemoteWindowMorePanel view owner', () => {
       onVideoPreferenceChange={vi.fn()}
       displayOrientation="follow-device"
       onDisplayOrientationChange={onDisplayOrientationChange}
-      bitrateMultiplier={1}
+      bitrateMultiplierSelection="auto"
       onBitrateMultiplierChange={onBitrateMultiplierChange}
       maxFrameRateFps={30}
       onMaxFrameRateChange={onMaxFrameRateChange}
@@ -54,6 +54,24 @@ describe('RemoteWindowMorePanel view owner', () => {
     expect(onDisplayOrientationChange).toHaveBeenCalledWith('landscape');
     expect(onBitrateMultiplierChange).toHaveBeenCalledWith(4);
     expect(onMaxFrameRateChange).toHaveBeenCalledWith(60);
+  });
+
+  it('keeps the orientation select out of floating mode and offers the auto bitrate baseline', () => {
+    render(<RemoteWindowMorePanel
+      fullscreen={false}
+      videoPreference="smooth"
+      streamStatusText="串流：已连接"
+      networkStatusText="网络：4g"
+      developerDiagnostics={null}
+      onToggleFullscreenDisplayMode={vi.fn()}
+      onVideoPreferenceChange={vi.fn()}
+      onDisplayOrientationChange={vi.fn()}
+      bitrateMultiplierSelection="auto"
+      onBitrateMultiplierChange={vi.fn()}
+    />);
+
+    expect(screen.queryByTestId('remote-window-display-orientation-select')).toBeNull();
+    expect((screen.getByTestId('remote-window-bitrate-multiplier-select') as HTMLSelectElement).value).toBe('auto');
   });
 
   it('does not show the fullscreen display action in floating mode', () => {

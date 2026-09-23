@@ -8,6 +8,10 @@ import {
 import { styles } from './remote-window-overlay-styles';
 import { AmbientButton, AmbientSelect } from '../ambient';
 import type { RemoteWindowOrientationPolicy } from './remote-window-overlay-helpers';
+import {
+  REMOTE_WINDOW_BITRATE_MULTIPLIER_AUTO,
+  type RemoteWindowBitrateMultiplierSelection,
+} from './remote-window-overlay-storage';
 
 export interface RemoteWindowMorePanelProps {
   fullscreen: boolean;
@@ -19,8 +23,8 @@ export interface RemoteWindowMorePanelProps {
   onVideoPreferenceChange: (preference: RemoteWindowVideoPreference) => void;
   displayOrientation?: RemoteWindowOrientationPolicy;
   onDisplayOrientationChange?: (orientation: RemoteWindowOrientationPolicy) => void;
-  bitrateMultiplier?: RemoteWindowVideoBudgetMultiplier;
-  onBitrateMultiplierChange?: (multiplier: RemoteWindowVideoBudgetMultiplier) => void;
+  bitrateMultiplierSelection?: RemoteWindowBitrateMultiplierSelection;
+  onBitrateMultiplierChange?: (selection: RemoteWindowBitrateMultiplierSelection) => void;
   maxFrameRateFps?: RemoteWindowQualityMaxFrameRate;
   onMaxFrameRateChange?: (frameRate: RemoteWindowQualityMaxFrameRate) => void;
   browserMode?: boolean;
@@ -40,7 +44,7 @@ export function RemoteWindowMorePanel({
   onVideoPreferenceChange,
   displayOrientation = 'follow-device',
   onDisplayOrientationChange,
-  bitrateMultiplier = 1,
+  bitrateMultiplierSelection = REMOTE_WINDOW_BITRATE_MULTIPLIER_AUTO,
   onBitrateMultiplierChange,
   maxFrameRateFps = 30,
   onMaxFrameRateChange,
@@ -75,29 +79,36 @@ export function RemoteWindowMorePanel({
           <option value="quality">清晰优先</option>
         </AmbientSelect>
       </label>
-      <label style={styles.moreField}>
-        <span>显示方向</span>
-        <AmbientSelect
-          aria-label="远程窗口显示方向"
-          data-testid="remote-window-display-orientation-select"
-          value={displayOrientation}
-          onChange={(event) => onDisplayOrientationChange?.(event.currentTarget.value as RemoteWindowOrientationPolicy)}
-          style={styles.bitrateSelect}
-        >
-          <option value="portrait">竖屏</option>
-          <option value="landscape">横屏</option>
-          <option value="follow-device">跟随设备</option>
-        </AmbientSelect>
-      </label>
+      {fullscreen ? (
+        <label style={styles.moreField}>
+          <span>显示方向</span>
+          <AmbientSelect
+            aria-label="远程窗口显示方向"
+            data-testid="remote-window-display-orientation-select"
+            value={displayOrientation}
+            onChange={(event) => onDisplayOrientationChange?.(event.currentTarget.value as RemoteWindowOrientationPolicy)}
+            style={styles.bitrateSelect}
+          >
+            <option value="portrait">竖屏</option>
+            <option value="landscape">横屏</option>
+            <option value="follow-device">跟随设备</option>
+          </AmbientSelect>
+        </label>
+      ) : null}
       <label style={styles.moreField}>
         <span>码率倍数</span>
         <AmbientSelect
           aria-label="远程窗口码率倍数"
           data-testid="remote-window-bitrate-multiplier-select"
-          value={bitrateMultiplier}
-          onChange={(event) => onBitrateMultiplierChange?.(Number(event.currentTarget.value) as RemoteWindowVideoBudgetMultiplier)}
+          value={bitrateMultiplierSelection}
+          onChange={(event) => onBitrateMultiplierChange?.(
+            event.currentTarget.value === REMOTE_WINDOW_BITRATE_MULTIPLIER_AUTO
+              ? REMOTE_WINDOW_BITRATE_MULTIPLIER_AUTO
+              : Number(event.currentTarget.value) as RemoteWindowVideoBudgetMultiplier,
+          )}
           style={styles.bitrateSelect}
         >
+          <option value="auto">默认</option>
           <option value={1}>1x</option>
           <option value={2}>2x</option>
           <option value={4}>4x</option>

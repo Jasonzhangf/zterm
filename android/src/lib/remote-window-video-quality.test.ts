@@ -4,6 +4,8 @@ import {
   REMOTE_WINDOW_VIDEO_BITRATE_STORAGE_KEY,
   REMOTE_WINDOW_VIDEO_PREFERENCE_STORAGE_KEY,
   applyRemoteWindowMaxFrameRate,
+  REMOTE_WINDOW_BITRATE_MULTIPLIER_AUTO,
+  resolveRemoteWindowBitrateMultiplier,
   buildRemoteWindowVideoProfile,
   REMOTE_WINDOW_VIDEO_BITRATE_BOUNDS,
   readRemoteWindowVideoPreference,
@@ -107,6 +109,17 @@ describe('remote-window-video-quality', () => {
   });
 
   it('applies the user FPS ceiling without overriding a lower pressure ceiling', () => {
+    expect(resolveRemoteWindowBitrateMultiplier(REMOTE_WINDOW_BITRATE_MULTIPLIER_AUTO)).toBeUndefined();
+    expect(resolveRemoteWindowBitrateMultiplier(1)).toBe(1);
+    expect(buildRemoteWindowVideoProfile('smooth', {
+      budgetMultiplier: resolveRemoteWindowBitrateMultiplier(REMOTE_WINDOW_BITRATE_MULTIPLIER_AUTO),
+    })).toMatchObject({ maxBitrateBps: 2_000_000 });
+    expect(buildRemoteWindowVideoProfile('quality', {
+      budgetMultiplier: resolveRemoteWindowBitrateMultiplier(REMOTE_WINDOW_BITRATE_MULTIPLIER_AUTO),
+    })).toMatchObject({ maxBitrateBps: 8_000_000 });
+    expect(buildRemoteWindowVideoProfile('quality', {
+      budgetMultiplier: resolveRemoteWindowBitrateMultiplier(1),
+    })).toMatchObject({ maxBitrateBps: 2_000_000 });
     expect(applyRemoteWindowMaxFrameRate(buildRemoteWindowVideoProfile('smooth'), 60))
       .toMatchObject({ maxFrameRateFps: 60 });
     expect(applyRemoteWindowMaxFrameRate(
