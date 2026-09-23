@@ -12,6 +12,8 @@ import {
   isRemoteWindowChromeTarget,
   resolveAspectRect,
   resolveZoomedContentRect,
+  resolveRemoteWindowContainerViewport,
+  resolveRemoteWindowTargetAspectRatio,
   resolveRemoteWindowTargetResizeSize,
   safeRemoteWindowGroupId,
 } from './remote-window-overlay-helpers';
@@ -240,6 +242,52 @@ describe('remote-window-overlay-helpers', () => {
     expect(content.height).toBeCloseTo(390, 1);
     expect(content.left).toBeCloseTo((844 - content.width) / 2, 1);
     expect(content.top).toBeCloseTo(0, 1);
+  });
+
+  it('derives portrait/landscape contain viewports and target aspect ratios', () => {
+    const portrait = resolveRemoteWindowContainerViewport({
+      orientation: 'portrait',
+      device: { width: 844, height: 390 },
+    });
+    expect(portrait).toEqual({ width: 390, height: 844 });
+    expect(resolveRemoteWindowTargetAspectRatio({
+      viewport: portrait,
+      orientation: 'portrait',
+    })).toBeCloseTo(390 / 844, 5);
+
+    const landscape = resolveRemoteWindowContainerViewport({
+      orientation: 'landscape',
+      device: { width: 390, height: 844 },
+      visualViewport: { width: 390, height: 844 },
+    });
+    expect(landscape).toEqual({ width: 844, height: 390 });
+    expect(resolveRemoteWindowTargetAspectRatio({
+      viewport: landscape,
+      orientation: 'landscape',
+    })).toBeCloseTo(844 / 390, 5);
+
+    expect(resolveRemoteWindowContainerViewport({
+      orientation: 'follow-device',
+      device: { width: 390, height: 844 },
+    })).toEqual({ width: 390, height: 844 });
+  });
+
+  it('applies orientation to the remote resize request dimensions', () => {
+    expect(resolveRemoteWindowTargetResizeSize({
+      viewport: { width: 390, height: 844 },
+      devicePixelRatio: 1,
+      orientation: 'landscape',
+    })).toEqual({ width: 844, height: 390 });
+    expect(resolveRemoteWindowTargetResizeSize({
+      viewport: { width: 844, height: 390 },
+      devicePixelRatio: 1,
+      orientation: 'portrait',
+    })).toEqual({ width: 390, height: 844 });
+    expect(resolveRemoteWindowTargetResizeSize({
+      viewport: { width: 390, height: 844 },
+      devicePixelRatio: 1,
+      orientation: 'follow-device',
+    })).toEqual({ width: 390, height: 844 });
   });
 
   it('locks embedded and fullscreen contain geometry to the real-device ratios', () => {
