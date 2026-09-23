@@ -122,18 +122,22 @@ describe('remote window architecture boundary truth', () => {
   it('keeps the bitrate budget on the selection render path with no lagging ref', () => {
     const controls = read('src/components/terminal/useRemoteWindowDisplayQualityControls.ts');
     const controller = read('src/components/terminal/RemoteWindowOverlayController.tsx');
-    const controlsHook = controls.replace(/\s+/g, ' ');
-    // One truth: the multiplier is derived from state, not synced into a ref.
-    expect(controls).not.toContain('bitrateMultiplierRef');
-    expect(controls).not.toContain('MultiplierRef');
-    expect(controlsHook).toContain('const budgetMultiplier = useMemo(');
-    expect(controlsHook).toContain('bitrateMultiplierSelection === REMOTE_WINDOW_BITRATE_MULTIPLIER_AUTO');
-    // The controller consumes the derived value on both the hook input and the
-    // start profile, so a reintroduced lagging ref cannot feed either path.
-    expect(controller).not.toContain('bitrateMultiplierRef');
-    expect(controller).not.toContain('resolveBudgetMultiplier');
-    expect(controller).toContain('bitrateMultiplier: budgetMultiplier');
-    expect(controller).toContain('budgetMultiplier,');
+    const compact = (source: string) => source.replace(/\s+/g, ' ');
+    // The selection -> multiplier mapping keeps its single owner helper, and the
+    // hook derives it on the render path rather than through a post-commit ref.
+    expect(compact(controls)).toContain(
+      'const budgetMultiplier = useMemo( () => resolveRemoteWindowBitrateMultiplier(bitrateMultiplierSelection)',
+    );
+    // Rename-resistant: no ref may carry the selection. Matching the mechanism
+    // (useRef(selection) / ref.current = selection) rather than a symbol name
+    // keeps a reintroduced lagging ref from slipping past under a new name.
+    for (const source of [controls, controller]) {
+      expect(source).not.toMatch(/useRef\(\s*bitrateMultiplierSelection/);
+      expect(source).not.toMatch(/Ref\.current\s*=\s*bitrateMultiplierSelection/);
+    }
+    // Both consumers read the hook's derived value, not a ref.
+    expect(compact(controller)).toContain('bitrateMultiplier: budgetMultiplier');
+    expect(compact(controller)).toContain('budgetMultiplier,');
   });
 
   it('keeps the architecture gesture contract aligned with the active amendment', () => {

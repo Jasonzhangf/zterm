@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  REMOTE_WINDOW_BITRATE_MULTIPLIER_AUTO,
+  resolveRemoteWindowBitrateMultiplier,
   type RemoteWindowQualityMaxFrameRate,
   type RemoteWindowVideoBudgetMultiplier,
 } from '../../lib/remote-window-video-quality';
@@ -41,12 +41,12 @@ export function useRemoteWindowDisplayQualityControls(): RemoteWindowDisplayQual
     displayOrientationRef.current = displayOrientation;
   }, [displayOrientation]);
   // Single truth: the derived budget multiplier follows the selection state on
-  // the render path, so a change can never be read one render late.
-  const budgetMultiplier = useMemo(() => (
-    bitrateMultiplierSelection === REMOTE_WINDOW_BITRATE_MULTIPLIER_AUTO
-      ? undefined
-      : bitrateMultiplierSelection
-  ), [bitrateMultiplierSelection]);
+  // the render path, so a change can never be read one render late. The mapping
+  // itself stays owned by resolveRemoteWindowBitrateMultiplier.
+  const budgetMultiplier = useMemo(
+    () => resolveRemoteWindowBitrateMultiplier(bitrateMultiplierSelection),
+    [bitrateMultiplierSelection],
+  );
 
   const setDisplayOrientation = useCallback((orientation: RemoteWindowOrientationPolicy) => {
     displayOrientationRef.current = orientation;
