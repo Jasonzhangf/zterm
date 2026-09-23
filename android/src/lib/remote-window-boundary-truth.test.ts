@@ -119,6 +119,23 @@ describe('remote window architecture boundary truth', () => {
     expect(controller).not.toContain('data-testid="remote-window-stream-status-panel"');
   });
 
+  it('keeps the bitrate budget on the selection render path with no lagging ref', () => {
+    const controls = read('src/components/terminal/useRemoteWindowDisplayQualityControls.ts');
+    const controller = read('src/components/terminal/RemoteWindowOverlayController.tsx');
+    const controlsHook = controls.replace(/\s+/g, ' ');
+    // One truth: the multiplier is derived from state, not synced into a ref.
+    expect(controls).not.toContain('bitrateMultiplierRef');
+    expect(controls).not.toContain('MultiplierRef');
+    expect(controlsHook).toContain('const budgetMultiplier = useMemo(');
+    expect(controlsHook).toContain('bitrateMultiplierSelection === REMOTE_WINDOW_BITRATE_MULTIPLIER_AUTO');
+    // The controller consumes the derived value on both the hook input and the
+    // start profile, so a reintroduced lagging ref cannot feed either path.
+    expect(controller).not.toContain('bitrateMultiplierRef');
+    expect(controller).not.toContain('resolveBudgetMultiplier');
+    expect(controller).toContain('bitrateMultiplier: budgetMultiplier');
+    expect(controller).toContain('budgetMultiplier,');
+  });
+
   it('keeps the architecture gesture contract aligned with the active amendment', () => {
     const architecture = read('docs/architecture.md');
     const amendment = read('docs/decisions/2026-08-30-remote-window-quality-gesture-control-amendment.md');
