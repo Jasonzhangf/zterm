@@ -126,18 +126,19 @@ describe('remote window architecture boundary truth', () => {
     // The selection -> multiplier mapping keeps its single owner helper, and the
     // hook derives it on the render path rather than through a post-commit ref.
     expect(compact(controls)).toContain(
-      'const budgetMultiplier = useMemo( () => resolveRemoteWindowBitrateMultiplier(bitrateMultiplierSelection)',
+      'resolveRemoteWindowBitrateMultiplier(bitrateMultiplierSelection)',
     );
-    // Rename-resistant: no ref may carry the selection. Matching the mechanism
-    // (useRef(selection) / ref.current = selection) rather than a symbol name
-    // keeps a reintroduced lagging ref from slipping past under a new name.
+    // Rename-resistant: match the mechanism, not a symbol name, so a lagging ref
+    // cannot slip past under a new name. A ref may carry neither the selection
+    // nor the derived multiplier, in either the hook or the controller.
     for (const source of [controls, controller]) {
-      expect(source).not.toMatch(/useRef\(\s*bitrateMultiplierSelection/);
-      expect(source).not.toMatch(/Ref\.current\s*=\s*bitrateMultiplierSelection/);
+      expect(source).not.toMatch(/useRef(?:<[^>]*>)?\(\s*(?:bitrateMultiplierSelection|budgetMultiplier)\b/);
+      expect(source).not.toMatch(/\.current\s*=\s*(?:bitrateMultiplierSelection|budgetMultiplier)\b/);
     }
-    // Both consumers read the hook's derived value, not a ref.
+    // Both consumers read the hook's derived value, not a ref: the live quality
+    // request and the start profile each get their own structural anchor.
     expect(compact(controller)).toContain('bitrateMultiplier: budgetMultiplier');
-    expect(compact(controller)).toContain('budgetMultiplier,');
+    expect(compact(controller)).toContain('budgetMultiplier, }),');
   });
 
   it('keeps the architecture gesture contract aligned with the active amendment', () => {
