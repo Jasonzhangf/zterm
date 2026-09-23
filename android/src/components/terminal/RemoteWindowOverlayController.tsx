@@ -292,7 +292,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     displayOrientationRef,
     bitrateMultiplierSelection,
     maxFrameRateFps,
-    resolveBudgetMultiplier,
+    budgetMultiplier,
     setDisplayOrientation,
     setBitrateMultiplierSelection,
     setMaxFrameRateFps,
@@ -563,7 +563,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     streamReady: state.phase === 'targetLocked' && Boolean(state.streamStarted),
     focusStreamActive: Boolean(qualityStreamId && activeFocusStreamIdRef.current === qualityStreamId),
     videoPreference,
-    bitrateMultiplier: resolveBudgetMultiplier(),
+    bitrateMultiplier: budgetMultiplier,
     maxFrameRateFps,
     target: state.phase === 'targetLocked' ? state.target : null,
     updateStreamQuality,
@@ -1585,7 +1585,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     const videoProfile = applyRemoteWindowMaxFrameRate(
       resolveInitialRemoteWindowVideoProfile(selectedVideoPreference, networkQuality, false, {
         target: effectiveTarget,
-        budgetMultiplier: resolveBudgetMultiplier(),
+        budgetMultiplier,
       }),
       maxFrameRateFps,
     );
