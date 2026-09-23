@@ -128,17 +128,65 @@ describe('remote window architecture boundary truth', () => {
     expect(compact(controls)).toContain(
       'resolveRemoteWindowBitrateMultiplier(bitrateMultiplierSelection)',
     );
-    // Rename-resistant: match the mechanism, not a symbol name, so a lagging ref
-    // cannot slip past under a new name. A ref may carry neither the selection
-    // nor the derived multiplier, in either the hook or the controller.
-    for (const source of [controls, controller]) {
-      expect(source).not.toMatch(/useRef(?:<[^>]*>)?\(\s*(?:bitrateMultiplierSelection|budgetMultiplier)\b/);
-      expect(source).not.toMatch(/\.current\s*=\s*(?:bitrateMultiplierSelection|budgetMultiplier)\b/);
+    // Follow the value, not the name. The exported hook field is a contract, so
+    // resolve the local identifier it is destructured into and require the two
+    // consumers to pass that render-path binding. A renamed local that is really
+    // a `.current` read then fails these assertions instead of slipping through.
+    const hookCall = controller.match(/const\s*\{([^}]*)\}\s*=\s*useRemoteWindowDisplayQualityControls\(\)/);
+    expect(hookCall).not.toBeNull();
+    const destructured = hookCall![1].split(',').map((entry) => entry.trim()).filter(Boolean);
+    const localNameFor = (exported: string) => {
+      for (const entry of destructured) {
+        const match = entry.match(/^(\w+)(?:\s*:\s*(\w+))?$/);
+        if (match && match[1] === exported) return match[2] ?? match[1];
+      }
+      return null;
+    };
+    const budgetLocal = localNameFor('budgetMultiplier');
+    expect(budgetLocal, 'controller must destructure budgetMultiplier from the hook').toBeTruthy();
+
+    // The hook must bind the exported budget value directly to the owner helper
+    // on the render path, never through a `.current` read, whatever the local
+    // bound to the helper result is called.
+    const hookDerivation = compact(controls).match(
+      /const budgetMultiplier = resolveRemoteWindowBitrateMultiplier\(\s*\w+\s*\);/,
+    );
+    expect(hookDerivation, 'hook must derive budgetMultiplier via the owner helper').not.toBeNull();
+    const hookDerivedNames = new Set<string>(['budgetMultiplier']);
+    for (const match of controls.matchAll(/const\s+(\w+)\s*=\s*resolveRemoteWindowBitrateMultiplier\(/g)) {
+      hookDerivedNames.add(match[1]!);
     }
+    for (const match of controls.matchAll(/useRef(?:<[^>]*>)?\(\s*(\w+)\b/g)) {
+      expect(hookDerivedNames.has(match[1]!), `hook ref created from budget value: ${match[1]}`).toBe(false);
+    }
+    for (const match of controls.matchAll(/\.current\s*=\s*(\w+)\b/g)) {
+      expect(hookDerivedNames.has(match[1]!), `hook ref synced from budget value: ${match[1]}`).toBe(false);
+    }
+
+    // Any identifier bound to a `.current` read is a lagging value; the budget
+    // binding must never be one of them.
+    const refReadBindings = new Set<string>();
+    for (const match of controller.matchAll(/(?:const|let|var)\s+(\w+)\s*=\s*[^;\n]*\.current\b/g)) {
+      refReadBindings.add(match[1]!);
+    }
+    expect(refReadBindings.has(budgetLocal!)).toBe(false);
+
+    // No ref may be initialized or synced from the budget value or its aliases.
+    const aliases = new Set<string>([budgetLocal!]);
+    for (const match of controller.matchAll(/(?:const|let|var)\s+(\w+)\s*=\s*(\w+)\s*;/g)) {
+      if (aliases.has(match[2]!)) aliases.add(match[1]!);
+    }
+    for (const match of controller.matchAll(/useRef(?:<[^>]*>)?\(\s*(\w+)\b/g)) {
+      expect(aliases.has(match[1]!), `ref created from budget value: ${match[1]}`).toBe(false);
+    }
+    for (const match of controller.matchAll(/\.current\s*=\s*(\w+)\b/g)) {
+      expect(aliases.has(match[1]!), `ref synced from budget value: ${match[1]}`).toBe(false);
+    }
+
     // Both consumers read the hook's derived value, not a ref: the live quality
     // request and the start profile each get their own structural anchor.
-    expect(compact(controller)).toContain('bitrateMultiplier: budgetMultiplier');
-    expect(compact(controller)).toContain('budgetMultiplier, }),');
+    expect(compact(controller)).toContain(`bitrateMultiplier: ${budgetLocal}`);
+    expect(compact(controller)).toContain(`${budgetLocal}, }),`);
   });
 
   it('keeps the architecture gesture contract aligned with the active amendment', () => {

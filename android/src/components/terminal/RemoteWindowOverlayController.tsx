@@ -121,6 +121,7 @@ import {
   writeStoredBrowserEntryPosition,
   writeStoredEntryPosition,
   type FloatingEntryPosition,
+  type RemoteWindowBitrateMultiplierSelection,
   type RemoteWindowTouchScrollFraction,
 } from './remote-window-overlay-storage';
 import {
@@ -162,7 +163,6 @@ import { RemoteWindowAppSwitch } from './RemoteWindowAppSwitch';
 import { RemoteWindowMorePanel } from './RemoteWindowMorePanel';
 import { useRemoteWindowQuality } from './useRemoteWindowQuality'; import { useRemoteWindowForegroundReentry } from './useRemoteWindowForegroundReentry';
 import { useRemoteWindowDisplayQualityControls } from './useRemoteWindowDisplayQualityControls';
-import type { RemoteWindowBitrateMultiplierSelection } from './remote-window-overlay-storage';
 import { useRemoteWindowPlayback, type RemoteWindowVideoDebugSnapshot } from './useRemoteWindowPlayback';
 import { useRemoteWindowCompositeCanvas } from './useRemoteWindowCompositeCanvas';
 import { RemoteWindowVideoContent } from './RemoteWindowVideoContent';
