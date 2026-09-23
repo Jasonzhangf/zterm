@@ -2425,6 +2425,7 @@
         "src/components/terminal/RemoteWindowMorePanel.test.tsx",
         "src/components/terminal/RemoteWindowVideoContent.tsx",
         "src/components/terminal/RemoteWindowVideoContent.test.tsx",
+        "src/components/terminal/useRemoteWindowDisplayQualityControls.ts",
         "src/components/terminal/useRemoteWindowQuality.ts",
         "src/components/terminal/useRemoteWindowQuality.test.tsx",
         "src/components/terminal/useRemoteWindowPlayback.ts",
