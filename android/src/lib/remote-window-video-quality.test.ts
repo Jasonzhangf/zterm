@@ -3,6 +3,7 @@ import type { RemoteWindowStreamTargetManifest } from './types';
 import {
   REMOTE_WINDOW_VIDEO_BITRATE_STORAGE_KEY,
   REMOTE_WINDOW_VIDEO_PREFERENCE_STORAGE_KEY,
+  applyRemoteWindowMaxFrameRate,
   buildRemoteWindowVideoProfile,
   REMOTE_WINDOW_VIDEO_BITRATE_BOUNDS,
   readRemoteWindowVideoPreference,
@@ -103,6 +104,17 @@ describe('remote-window-video-quality', () => {
       maxFrameAgeMs: 150,
     });
     expect(resolveRemoteWindowDesktopCoverageRatio(makeTarget(960, 540))).toBe(0.25);
+  });
+
+  it('applies the user FPS ceiling without overriding a lower pressure ceiling', () => {
+    expect(applyRemoteWindowMaxFrameRate(buildRemoteWindowVideoProfile('smooth'), 60))
+      .toMatchObject({ maxFrameRateFps: 60 });
+    expect(applyRemoteWindowMaxFrameRate(
+      buildRemoteWindowVideoProfile('smooth', { cause: 'network', level: 2 }),
+      60,
+    )).toMatchObject({ maxFrameRateFps: 15 });
+    expect(applyRemoteWindowMaxFrameRate(buildRemoteWindowVideoProfile('smooth'), 15))
+      .toMatchObject({ maxFrameRateFps: 15 });
   });
 
   it('migrates the legacy stored preset once and writes only the v2 preference truth', () => {

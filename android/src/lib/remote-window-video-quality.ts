@@ -18,6 +18,8 @@ export const REMOTE_WINDOW_VIDEO_QUALITY_TIERS = Object.freeze({
 export const REMOTE_WINDOW_VIDEO_BUDGET_MULTIPLIERS = [1, 2, 4] as const;
 
 export type RemoteWindowVideoBudgetMultiplier = typeof REMOTE_WINDOW_VIDEO_BUDGET_MULTIPLIERS[number];
+export const REMOTE_WINDOW_QUALITY_FRAME_RATE_OPTIONS = [15, 30, 60] as const;
+export type RemoteWindowQualityMaxFrameRate = typeof REMOTE_WINDOW_QUALITY_FRAME_RATE_OPTIONS[number];
 
 export function resolveRemoteWindowQualityStreamSize(
   source: { width: number; height: number },
@@ -34,6 +36,22 @@ export function resolveRemoteWindowQualityStreamSize(
   return {
     width: Math.max(1, Math.floor(width * scale)),
     height: Math.max(1, Math.floor(height * scale)),
+  };
+}
+
+export function applyRemoteWindowMaxFrameRate(
+  profile: RemoteWindowVideoProfile,
+  maxFrameRateFps: RemoteWindowQualityMaxFrameRate,
+): RemoteWindowVideoProfile {
+  // The selection bounds the requested ceiling; it never lifts a ceiling the
+  // adaptive policy already tightened for network/host/render pressure.
+  const adaptiveCeiling = profile.maxFrameRateFps;
+  const selectedCeiling = adaptiveCeiling >= 30
+    ? maxFrameRateFps
+    : Math.min(adaptiveCeiling, maxFrameRateFps);
+  return {
+    ...profile,
+    maxFrameRateFps: selectedCeiling,
   };
 }
 

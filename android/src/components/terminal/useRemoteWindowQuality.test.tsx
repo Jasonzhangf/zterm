@@ -35,8 +35,16 @@ function appliedResult(
   };
 }
 
+interface RenderQualityHookProps {
+  preference: RemoteWindowVideoPreference;
+  bitrateMultiplier?: 1 | 2 | 4;
+  maxFrameRateFps?: 15 | 30 | 60;
+}
+
 function renderQualityHook(options: {
   preference?: RemoteWindowVideoPreference;
+  bitrateMultiplier?: 1 | 2 | 4;
+  maxFrameRateFps?: 15 | 30 | 60;
   updateStreamQuality: RemoteWindowQualityUpdater;
   collectStats?: () => Promise<null | {
     sampledAtMs: number;
@@ -44,9 +52,7 @@ function renderQualityHook(options: {
     qualityLimitationReason: string;
   }>;
 }) {
-  return renderHook((props: {
-    preference: RemoteWindowVideoPreference;
-  }) => useRemoteWindowQuality({
+  return renderHook<ReturnType<typeof useRemoteWindowQuality>, RenderQualityHookProps>((props: RenderQualityHookProps) => useRemoteWindowQuality({
     activeSessionId: 'session',
     streamId: 'stream',
     targetId: 'target',
@@ -54,12 +60,16 @@ function renderQualityHook(options: {
     streamReady: true,
     focusStreamActive: true,
     videoPreference: props.preference,
+    bitrateMultiplier: props.bitrateMultiplier,
+    maxFrameRateFps: props.maxFrameRateFps,
     updateStreamQuality: options.updateStreamQuality,
     collectStatsRef: { current: options.collectStats ?? null },
   }), {
     initialProps: {
       preference: options.preference ?? 'smooth',
-    },
+      bitrateMultiplier: options.bitrateMultiplier,
+      maxFrameRateFps: options.maxFrameRateFps,
+    } satisfies RenderQualityHookProps,
   });
 }
 
@@ -79,6 +89,21 @@ describe('useRemoteWindowQuality owner', () => {
     expect(result.current.qualityApplyState).toMatchObject({
       phase: 'applied',
       applied: buildRemoteWindowVideoProfile('smooth'),
+    });
+  });
+
+  it('propagates the selected bitrate multiplier and frame-rate ceiling into the requested profile', async () => {
+    const updateStreamQuality = vi.fn<Parameters<RemoteWindowQualityUpdater>, ReturnType<RemoteWindowQualityUpdater>>(async (_sessionId, payload) => appliedResult(payload));
+    renderQualityHook({
+      updateStreamQuality,
+      bitrateMultiplier: 4,
+      maxFrameRateFps: 60,
+    });
+
+    await waitFor(() => expect(updateStreamQuality).toHaveBeenCalledTimes(1));
+    expect(updateStreamQuality.mock.calls[0][1].videoProfile).toMatchObject({
+      maxBitrateBps: 4_000_000,
+      maxFrameRateFps: 60,
     });
   });
 

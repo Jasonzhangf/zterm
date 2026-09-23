@@ -27,6 +27,35 @@ describe('RemoteWindowMorePanel view owner', () => {
     expect(screen.getByTestId('diagnostics-slot')).toBeTruthy();
   });
 
+  it('emits orientation and quality control intents', () => {
+    const onDisplayOrientationChange = vi.fn();
+    const onBitrateMultiplierChange = vi.fn();
+    const onMaxFrameRateChange = vi.fn();
+    render(<RemoteWindowMorePanel
+      fullscreen={false}
+      videoPreference="smooth"
+      streamStatusText="串流：已连接"
+      networkStatusText="网络：4g"
+      developerDiagnostics={null}
+      onToggleFullscreenDisplayMode={vi.fn()}
+      onVideoPreferenceChange={vi.fn()}
+      displayOrientation="follow-device"
+      onDisplayOrientationChange={onDisplayOrientationChange}
+      bitrateMultiplier={1}
+      onBitrateMultiplierChange={onBitrateMultiplierChange}
+      maxFrameRateFps={30}
+      onMaxFrameRateChange={onMaxFrameRateChange}
+    />);
+
+    fireEvent.change(screen.getByTestId('remote-window-display-orientation-select'), { target: { value: 'landscape' } });
+    fireEvent.change(screen.getByTestId('remote-window-bitrate-multiplier-select'), { target: { value: '4' } });
+    fireEvent.change(screen.getByTestId('remote-window-max-frame-rate-select'), { target: { value: '60' } });
+
+    expect(onDisplayOrientationChange).toHaveBeenCalledWith('landscape');
+    expect(onBitrateMultiplierChange).toHaveBeenCalledWith(4);
+    expect(onMaxFrameRateChange).toHaveBeenCalledWith(60);
+  });
+
   it('does not show the fullscreen display action in floating mode', () => {
     render(<RemoteWindowMorePanel
       fullscreen={false}
