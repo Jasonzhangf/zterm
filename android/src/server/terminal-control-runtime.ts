@@ -37,10 +37,14 @@ export interface TerminalControlRuntimeDeps {
 }
 
 /** Enumerate live tmux sockets without persisting a session catalog. */
-export function discoverTmuxSocketPaths(options: { stableSocketDir?: string; uid?: number } = {}) {
+export function discoverTmuxSocketPaths(options: {
+  stableSocketDir?: string;
+  cliDefaultRoot?: string;
+  uid?: number;
+} = {}) {
   const uid = options.uid ?? process.getuid?.();
   const socketDirName = uid === undefined ? undefined : `tmux-${uid}`;
-  const roots = [process.env.TMUX_TMPDIR || tmpdir(), options.stableSocketDir]
+  const roots = [process.env.TMUX_TMPDIR || tmpdir(), options.cliDefaultRoot ?? '/tmp', options.stableSocketDir]
     .filter((root): root is string => Boolean(root));
   const paths = new Set<string>();
   for (const root of roots) {
@@ -54,7 +58,12 @@ export function discoverTmuxSocketPaths(options: { stableSocketDir?: string; uid
     for (const entry of entries) {
       const socketPath = join(directory, entry);
       try {
-        if (statSync(socketPath).isSocket() && (entry === 'default' || root === options.stableSocketDir)) paths.add(socketPath);
+        if (
+          statSync(socketPath).isSocket()
+          && (entry === 'default' || root === options.stableSocketDir)
+        ) {
+          paths.add(socketPath);
+        }
       } catch {
         // Socket may disappear during a live refresh.
       }
