@@ -63,4 +63,59 @@ describe('daemon session catalog across tmux sockets', () => {
       'extra-1',
     ]);
   });
+
+  it('resolves a session-targeted tmux command through the cached socket even when the daemon latched the stable socket', () => {
+    // Reproduces the production latch: the daemon starts before
+    // /private/tmp/tmux-501/default exists, so ensureTmuxServerRunning()
+    // falls through to the stable daemon-owned socket and latches it. The
+    // real session lives on the default socket, which appears later and is
+    // only reachable through the per-session socket cache populated by
+    // listTmuxSessions.
+    let defaultSocketLive = false;
+    const sessionTargetedCalls: Array<{ args: string[]; socketPath?: string }> = [];
+    spawnSyncMock.mockImplementation((_binary: string, args: string[]) => {
+      const socketIndex = args.indexOf('-S');
+      const socketPath = socketIndex >= 0 ? args[socketIndex + 1] : undefined;
+      if (args.includes('list-sessions')) {
+        if (socketPath === DEFAULT_SOCKET) {
+          return defaultSocketLive
+            ? { status: 0, stdout: 'real-session\n', stderr: '' }
+            : { status: 1, stdout: '', stderr: `error connecting to ${DEFAULT_SOCKET} (No such file or directory)` };
+        }
+        // Latched stable socket: only the daemon keepalive exists.
+        return { status: 0, stdout: 'zterm-daemon-keepalive\n', stderr: '' };
+      }
+      if (args.includes('display-message')) {
+        sessionTargetedCalls.push({ args, socketPath });
+        if (socketPath === DEFAULT_SOCKET) {
+          return { status: 0, stdout: '%7\t0\t24\t95\t0\t0\n', stderr: '' };
+        }
+        return { status: 1, stdout: '', stderr: 'no server running on stable socket' };
+      }
+      return { status: 0, stdout: '', stderr: '' };
+    });
+    const runtime = createTerminalControlRuntime({
+      tmuxBinary: 'tmux',
+      defaultSessionName: 'demo',
+      hiddenTmuxSessions: new Set(),
+      sanitizeSessionName: (input) => input?.trim() || 'demo',
+      tmuxSocketDir: '/tmp/stable-tmux',
+      tmuxSocketPaths: () => [DEFAULT_SOCKET],
+    });
+
+    // Default socket is absent -> the daemon latches the stable socket.
+    runtime.ensureTmuxServerRunning();
+    // The real session's socket appears after the daemon started.
+    defaultSocketLive = true;
+    expect(runtime.listTmuxSessions()).toContain('real-session');
+
+    const metrics = runtime.runTmuxForSession(
+      ['display-message', '-p', '-t', '=real-session:0.0', '#{pane_width}'],
+      'real-session',
+    );
+
+    expect(metrics.stdout).toBe('%7\t0\t24\t95\t0\t0\n');
+    expect(sessionTargetedCalls).toHaveLength(1);
+    expect(sessionTargetedCalls[0]?.socketPath).toBe(DEFAULT_SOCKET);
+  });
 });

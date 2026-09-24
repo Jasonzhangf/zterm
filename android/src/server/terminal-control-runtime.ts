@@ -75,6 +75,8 @@ export function discoverTmuxSocketPaths(options: {
 export interface TerminalControlRuntime {
   runTmux: (args: string[]) => { ok: true; stdout: string };
   runTmuxAsync: (args: string[]) => Promise<{ ok: true; stdout: string }>;
+  runTmuxForSession: (args: string[], sessionName: string) => { ok: true; stdout: string };
+  runTmuxAsyncForSession: (args: string[], sessionName: string) => Promise<{ ok: true; stdout: string }>;
   runCommand: (command: string, args: string[]) => ReturnType<typeof spawnSync>;
   ensureTmuxServerRunning: () => void;
   writeBackendInputGroup: (
@@ -164,6 +166,11 @@ export function createTerminalControlRuntime(
   function runTmuxForSession(args: string[], sessionName: string) {
     const socketPath = resolveSessionSocketPath(sessionName);
     return socketPath ? runTmuxWithSocketPath(args, socketPath) : runTmux(args);
+  }
+
+  function runTmuxAsyncForSession(args: string[], sessionName: string) {
+    const socketPath = resolveSessionSocketPath(sessionName);
+    return socketPath ? runTmuxAsyncWithSocketPath(args, socketPath) : runTmuxAsync(args);
   }
 
   function resolveExternalBackend(kind = deps.defaultBackend || (deps.wezTermBackend ? 'wezterm' : 'tmux')) {
@@ -548,6 +555,8 @@ export function createTerminalControlRuntime(
     runTmux,
     ensureTmuxServerRunning,
     runTmuxAsync,
+    runTmuxForSession,
+    runTmuxAsyncForSession,
     runCommand,
     writeBackendInputGroup,
     resolveBackendInputMaxChunkBytes,

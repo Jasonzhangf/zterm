@@ -13,26 +13,31 @@ function batchDeps(options: {
   listPanesFails?: boolean;
 }) {
   const output = options.output ?? 'thinking';
+  const runTmuxAsync = async (args: string[]) => {
+    if (args[0] === 'list-panes') {
+      if (options.listPanesFails) {
+        throw new Error('tmux list-panes failed');
+      }
+      return {
+        ok: true as const,
+        stdout: options.listPanes
+          ? options.listPanes()
+          : options.names.map((name) => `${name}\t42\tcodex`).join('\n'),
+      };
+    }
+    const sessionName = args[args.indexOf('-t') + 1]!;
+    return {
+      ok: true as const,
+      stdout: typeof output === 'function' ? output(sessionName) : output,
+    };
+  };
   return {
     history: options.history,
     readProcessGroup: options.readProcessGroup ?? (() => ({ groupId: 'pg-1', alive: true })),
-    runTmuxAsync: async (args: string[]) => {
-      if (args[0] === 'list-panes') {
-        if (options.listPanesFails) {
-          throw new Error('tmux list-panes failed');
-        }
-        return {
-          ok: true as const,
-          stdout: options.listPanes
-            ? options.listPanes()
-            : options.names.map((name) => `${name}\t42\tcodex`).join('\n'),
-        };
-      }
-      const sessionName = args[args.indexOf('-t') + 1]!;
-      return {
-        ok: true as const,
-        stdout: typeof output === 'function' ? output(sessionName) : output,
-      };
+    runTmuxAsync,
+    runTmuxAsyncForSession: async (args: string[], sessionName: string) => {
+      expect(args[args.indexOf('-t') + 1]).toBe(sessionName);
+      return runTmuxAsync(args);
     },
   };
 }

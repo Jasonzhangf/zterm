@@ -149,7 +149,7 @@ function createHarness(options?: {
     autoCommandDelayMs: 0,
     waitMs: async () => {},
     logTimePrefix: () => '2026-07-13 16:00:00',
-    runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    runTmuxForSession: vi.fn((_args: string[], _sessionName: string) => ({ ok: true as const, stdout: '' })),
     closeTransportSubscriber: vi.fn(),
     getSessionMirror: (session: TerminalSession) => (
       session.mirrorKey ? mirrors.get(session.mirrorKey) || null : null

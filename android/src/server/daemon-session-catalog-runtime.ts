@@ -18,6 +18,7 @@ export interface DaemonSessionCatalogDeps {
   listTerminalSessions?: () => string[];
   listTerminalSessionCatalog?: () => TerminalSessionCatalogEntry[];
   runTmuxAsync?: (args: string[]) => Promise<{ ok: true; stdout: string }>;
+  runTmuxAsyncForSession?: (args: string[], sessionName: string) => Promise<{ ok: true; stdout: string }>;
   readProcessGroup?: (
     pid: string,
   ) => DaemonProcessGroupObservation | undefined | Promise<DaemonProcessGroupObservation | undefined>;
@@ -67,10 +68,14 @@ export function createDaemonSessionCatalogRuntime(
     if (!deps.runTmuxAsync) {
       return entries.map((entry) => ({ ...entry }));
     }
+    if (!deps.runTmuxAsyncForSession) {
+      throw new Error('daemon session catalog sampling requires runTmuxAsyncForSession so session-scoped tmux reads resolve the owning socket');
+    }
     const tmuxEntries = entries.filter((entry) => entry.backend === 'tmux');
     const observations = await readDaemonSessionObservations(
       {
         runTmuxAsync: deps.runTmuxAsync,
+        runTmuxAsyncForSession: deps.runTmuxAsyncForSession,
         history: deps.observationHistory,
         readProcessGroup: deps.readProcessGroup,
       },

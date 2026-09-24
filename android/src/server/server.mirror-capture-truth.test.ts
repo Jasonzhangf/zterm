@@ -35,7 +35,7 @@ describe('server mirror capture truth gates', () => {
 
     expect(block).toContain('canonicalizeCapturedMirrorLines');
     expect(block).toContain('await readTmuxPaneMetricsAsync(mirror.sessionName)');
-    expect(block).toContain('await captureTmuxMirrorLinesAsync(metrics.paneId');
+    expect(block).toContain('await captureTmuxMirrorLinesAsync(mirror.sessionName, metrics.paneId');
     expect(block).not.toContain("writeString(capturedLines.join('\\r\\n'))");
     expect(block).not.toContain('getScrollbackCount()');
     expect(block).not.toContain('readScrollbackRangeByOldestIndex(');

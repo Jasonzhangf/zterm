@@ -24,7 +24,7 @@ function createTransportConnection(id: string): TerminalTransportConnection {
 function createDeps() {
   const sessions = new Map<string, TerminalSession>();
   const mirrors = new Map<string, SessionMirror>();
-  const runTmux = vi.fn(() => ({ ok: true as const, stdout: '' }));
+  const runTmux = vi.fn((_args: string[]) => ({ ok: true as const, stdout: '' }));
   const sendText = vi.fn();
   const daemonInputQueue = {
     handleInputMessage: vi.fn(async () => {}),
@@ -97,7 +97,7 @@ function createDeps() {
       daemonInputQueue,
       autoCommandDelayMs: 0,
       waitMs: async () => {},
-      runTmux,
+      runTmuxForSession: (args, _sessionName) => runTmux(args),
       daemonRuntimeDebug: vi.fn(),
       logTimePrefix: () => '2026-05-03 00:00:00',
     }),

@@ -293,6 +293,7 @@ describe('daemon session catalog runtime', () => {
         { name: 'external-a', backend: 'herdr' },
       ],
       runTmuxAsync,
+      runTmuxAsyncForSession: (args, _sessionName) => runTmuxAsync(args),
       readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
     });
 
@@ -338,6 +339,7 @@ describe('daemon session catalog runtime', () => {
         { name: 'agent-b', backend: 'tmux' },
       ],
       runTmuxAsync,
+      runTmuxAsyncForSession: (args, _sessionName) => runTmuxAsync(args),
       readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
     });
 
@@ -369,6 +371,7 @@ describe('daemon session catalog runtime', () => {
       listTmuxSessions: vi.fn(() => []),
       listTerminalSessionCatalog: () => [{ name: 'agent-a', backend: 'tmux' }],
       runTmuxAsync,
+      runTmuxAsyncForSession: (args, _sessionName) => runTmuxAsync(args),
       readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
     });
 
@@ -404,6 +407,7 @@ describe('daemon session catalog runtime', () => {
       listTmuxSessions: vi.fn(() => []),
       listTerminalSessionCatalog: () => enumerated,
       runTmuxAsync,
+      runTmuxAsyncForSession: (args, _sessionName) => runTmuxAsync(args),
       readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
     });
 
@@ -446,6 +450,7 @@ describe('daemon session catalog runtime', () => {
       listTmuxSessions: vi.fn(() => []),
       listTerminalSessionCatalog: () => [{ name: 'agent-a', backend: 'tmux' }],
       runTmuxAsync,
+      runTmuxAsyncForSession: (args, _sessionName) => runTmuxAsync(args),
       readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
     });
     await runtime.refresh();
@@ -473,6 +478,7 @@ describe('daemon session catalog runtime', () => {
       listTmuxSessions: vi.fn(() => []),
       listTerminalSessionCatalog: () => [{ name: 'agent-a', backend: 'tmux' }],
       runTmuxAsync,
+      runTmuxAsyncForSession: (args, _sessionName) => runTmuxAsync(args),
       readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
     });
     // Prime the resident snapshot the same way the daemon refresh loop does.
@@ -484,12 +490,14 @@ describe('daemon session catalog runtime', () => {
       listTmuxSessions: () => [],
       listTerminalSessionCatalog: () => runtime.read(),
       runTmuxAsync,
+      runTmuxAsyncForSession: (args, _sessionName) => runTmuxAsync(args),
       readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
     });
     const repeated = buildSessionsCatalogPayload({
       listTmuxSessions: () => [],
       listTerminalSessionCatalog: () => runtime.read(),
       runTmuxAsync,
+      runTmuxAsyncForSession: (args, _sessionName) => runTmuxAsync(args),
       readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
     });
 
@@ -514,6 +522,7 @@ describe('daemon session catalog runtime', () => {
         listTmuxSessions: vi.fn(() => []),
         listTerminalSessionCatalog: () => [{ name: 'agent-a', backend: 'tmux' }],
         runTmuxAsync,
+        runTmuxAsyncForSession: (args) => runTmuxAsync(args),
         readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
       });
 
@@ -617,6 +626,10 @@ describe('daemon session catalog runtime', () => {
       listTmuxSessions: vi.fn(() => []),
       listTerminalSessionCatalog: () => [{ name: 'agent-a', backend: 'tmux' }],
       runTmuxAsync: async (args: string[]) => ({
+        ok: true as const,
+        stdout: args[0] === 'list-panes' ? 'agent-a\t42\tcodex' : 'thinking',
+      }),
+      runTmuxAsyncForSession: async (args: string[]) => ({
         ok: true as const,
         stdout: args[0] === 'list-panes' ? 'agent-a\t42\tcodex' : 'thinking',
       }),

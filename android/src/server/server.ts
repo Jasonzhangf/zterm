@@ -240,7 +240,8 @@ const {
 const terminalMirrorCapture = createTerminalMirrorCaptureRuntime({
   resolveMirrorCacheLines,
   runTmux: (args) => terminalControlRuntime.runTmux(args),
-  runTmuxAsync: (args) => terminalControlRuntime.runTmuxAsync(args),
+  runTmuxForSession: (args, sessionName) => terminalControlRuntime.runTmuxForSession(args, sessionName),
+  runTmuxAsyncForSession: (args, sessionName) => terminalControlRuntime.runTmuxAsyncForSession(args, sessionName),
   buildExactTmuxPaneTarget: (sessionName) => terminalControlRuntime.buildExactTmuxPaneTarget(sessionName),
   logTimePrefix,
   wezTermBackend: TERMINAL_BACKEND_RUNTIME,
@@ -268,14 +269,14 @@ const terminalRuntime = createTerminalRuntime({
   readTmuxPaneMetrics: (sessionName, backend) => terminalMirrorCapture.readTmuxPaneMetrics(sessionName, backend),
   resizeBackendSession: (sessionName, geometry, backend, operation) => {
     if ((backend || 'tmux') === 'tmux' && TERMINAL_BACKEND_KIND !== 'wezterm') {
-      terminalControlRuntime.runTmux([
+      terminalControlRuntime.runTmuxForSession([
         'resize-window',
         '-t',
         terminalControlRuntime.buildExactTmuxSessionTarget(sessionName),
         '-x',
         String(geometry.cols),
         ...(operation === 'release' ? ['-y', String(geometry.rows)] : []),
-      ]);
+      ], sessionName);
       return;
     }
     const externalBackend = backend === 'herdr' ? HERDR_BACKEND_RUNTIME : TERMINAL_BACKEND_RUNTIMES.wezterm;
@@ -300,9 +301,9 @@ const terminalRuntime = createTerminalRuntime({
       }
       return;
     }
-    terminalControlRuntime.runTmux([
+    terminalControlRuntime.runTmuxForSession([
       'has-session', '-t', terminalControlRuntime.buildExactTmuxSessionTarget(sessionName),
-    ]);
+    ], sessionName);
   },
   resolveTerminalSessionBackend: (sessionName) => terminalControlRuntime.resolveTerminalSessionBackend(sessionName),
   captureMirrorAuthoritativeBufferFromTmux: terminalMirrorCapture.captureMirrorAuthoritativeBufferFromTmux,
@@ -316,7 +317,7 @@ const terminalRuntime = createTerminalRuntime({
   daemonInputQueue: daemonInputQueueRuntimeProxy,
   autoCommandDelayMs: AUTO_COMMAND_DELAY_MS,
   waitMs: (delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)),
-  runTmux: (args) => terminalControlRuntime.runTmux(args),
+  runTmuxForSession: (args, sessionName) => terminalControlRuntime.runTmuxForSession(args, sessionName),
   buildExactTmuxSessionTarget: (sessionName) => terminalControlRuntime.buildExactTmuxSessionTarget(sessionName),
   adaptiveWidthOwnershipStore: ADAPTIVE_WIDTH_OWNERSHIP_STORE,
   daemonRuntimeDebug,
@@ -394,6 +395,7 @@ const daemonSessionCatalogRuntime = createDaemonSessionCatalogRuntime({
   listTerminalSessions,
   listTerminalSessionCatalog: enumerateTerminalSessionCatalog,
   runTmuxAsync: (args) => terminalControlRuntime.runTmuxAsync(args),
+  runTmuxAsyncForSession: (args, sessionName) => terminalControlRuntime.runTmuxAsyncForSession(args, sessionName),
   readProcessGroup: readDaemonProcessGroup,
   observationHistory: daemonSessionObservationHistory,
 });

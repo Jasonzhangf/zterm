@@ -55,6 +55,52 @@ function makeReadyMirror(overrides?: Partial<SessionMirror>): SessionMirror {
 }
 
 describe('terminal mirror capture runtime', () => {
+  it('resolves session-targeted capture through the per-session socket runner instead of the daemon-latched socket', async () => {
+    const sessionScopedArgs: string[][] = [];
+    // The daemon latched its plain (non-session) runner to the wrong socket at
+    // startup: every call there fails, exactly as it does when the default
+    // socket appears after the daemon started. Only the session-scoped runner
+    // (fed by the listTmuxSessions socket cache) can reach the real session.
+    const runTmux = vi.fn(() => {
+      throw new Error('no server running on /private/tmp/tmux-501/default');
+    });
+    const runTmuxForSession = vi.fn((args: string[], _sessionName: string) => {
+      sessionScopedArgs.push(args);
+      if (args[0] === 'display-message' && args.includes('#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{pane_dead}')) {
+        return { ok: true as const, stdout: '%7\t3\t24\t95\t0\t0\n' };
+      }
+      if (args[0] === 'display-message' && args.includes('#{cursor_x} #{cursor_y} #{cursor_flag} #{keypad_cursor_flag}')) {
+        return { ok: true as const, stdout: '0 2 1 0\n' };
+      }
+      if (args[0] === 'capture-pane') {
+        return { ok: true as const, stdout: 'hello-from-default-socket\n' };
+      }
+      throw new Error(`unexpected tmux args: ${args.join(' ')}`);
+    });
+
+    const runtime = createTerminalMirrorCaptureRuntime({
+      resolveMirrorCacheLines: (rows) => rows,
+      buildExactTmuxPaneTarget: (sessionName) => `=${sessionName}:0.0`,
+      runTmux,
+      runTmuxForSession,
+      runTmuxAsyncForSession: async (args, sessionName) => runTmuxForSession(args, sessionName),
+      logTimePrefix: () => '2026-09-23 00:00:00',
+    });
+
+    const mirror = makeReadyMirror({ sessionName: 'demo', key: 'demo' });
+    const changed = await runtime.captureMirrorAuthoritativeBufferFromTmux(mirror);
+
+    expect(changed).toBe(true);
+    expect(mirror.lifecycle).toBe('ready');
+    expect(mirror.bufferLines.map(rowText)).toContain('hello-from-default-socket');
+    expect(runTmux).not.toHaveBeenCalled();
+    expect(runTmuxForSession).toHaveBeenCalledWith(
+      expect.arrayContaining(['display-message']),
+      'demo',
+    );
+    expect(sessionScopedArgs.some((args) => args[0] === 'capture-pane')).toBe(true);
+  });
+
   it('replaces a cache-sized absolute tail when tmux clear-history shrinks the authoritative source', async () => {
     let historySize = 100000;
     let captureIndex = 0;
@@ -80,7 +126,8 @@ describe('terminal mirror capture runtime', () => {
       resolveMirrorCacheLines: () => 100000,
       buildExactTmuxPaneTarget: (sessionName) => `=${sessionName}:0.0`,
       runTmux,
-      runTmuxAsync: async (args) => runTmux(args),
+      runTmuxForSession: (args, _sessionName) => runTmux(args),
+      runTmuxAsyncForSession: async (args, _sessionName) => runTmux(args),
       logTimePrefix: () => '2026-09-21 00:00:00',
     });
 
@@ -112,7 +159,8 @@ describe('terminal mirror capture runtime', () => {
       resolveMirrorCacheLines: (rows) => rows,
       buildExactTmuxPaneTarget: (sessionName) => `=${sessionName}:0.0`,
       runTmux,
-      runTmuxAsync: async (args) => runTmux(args),
+      runTmuxForSession: (args, _sessionName) => runTmux(args),
+      runTmuxAsyncForSession: async (args, _sessionName) => runTmux(args),
       logTimePrefix: () => '2026-05-02 00:00:00',
     });
 
@@ -137,7 +185,8 @@ describe('terminal mirror capture runtime', () => {
       resolveMirrorCacheLines: (rows) => rows,
       buildExactTmuxPaneTarget: (sessionName) => `=${sessionName}:0.0`,
       runTmux,
-      runTmuxAsync: async (args) => runTmux(args),
+      runTmuxForSession: (args, _sessionName) => runTmux(args),
+      runTmuxAsyncForSession: async (args, _sessionName) => runTmux(args),
       logTimePrefix: () => '2026-05-02 00:00:00',
     });
 
@@ -162,7 +211,8 @@ describe('terminal mirror capture runtime', () => {
       resolveMirrorCacheLines: (rows) => rows,
       buildExactTmuxPaneTarget: (sessionName) => `=${sessionName}:0.0`,
       runTmux,
-      runTmuxAsync: async (args) => runTmux(args),
+      runTmuxForSession: (args, _sessionName) => runTmux(args),
+      runTmuxAsyncForSession: async (args, _sessionName) => runTmux(args),
       logTimePrefix: () => '2026-05-12 23:55:00',
     });
 
@@ -336,7 +386,8 @@ describe('terminal mirror capture runtime', () => {
       resolveMirrorCacheLines: () => 20,
       buildExactTmuxPaneTarget: (sessionName) => `=${sessionName}:0.0`,
       runTmux,
-      runTmuxAsync: async (args) => runTmux(args),
+      runTmuxForSession: (args, _sessionName) => runTmux(args),
+      runTmuxAsyncForSession: async (args, _sessionName) => runTmux(args),
       logTimePrefix: () => '2026-05-06 21:22:00',
     });
 
@@ -390,7 +441,10 @@ describe('terminal mirror capture runtime', () => {
       runTmux: () => {
         throw new Error('tmux must not be used for an unavailable herdr backend');
       },
-      runTmuxAsync: async () => {
+      runTmuxForSession: () => {
+        throw new Error('tmux must not be used for an unavailable herdr backend');
+      },
+      runTmuxAsyncForSession: async () => {
         throw new Error('tmux must not be used for an unavailable herdr backend');
       },
       logTimePrefix: () => '2026-08-15 00:00:00',
@@ -410,7 +464,10 @@ describe('terminal mirror capture runtime', () => {
       runTmux: () => {
         throw new Error('tmux must not be used for an available wezterm backend');
       },
-      runTmuxAsync: async () => {
+      runTmuxForSession: () => {
+        throw new Error('tmux must not be used for an available wezterm backend');
+      },
+      runTmuxAsyncForSession: async () => {
         throw new Error('tmux must not be used for an available wezterm backend');
       },
       logTimePrefix: () => '2026-09-21 00:00:00',
@@ -473,7 +530,8 @@ describe('terminal mirror capture runtime', () => {
       resolveMirrorCacheLines: (rows) => rows,
       buildExactTmuxPaneTarget: (sessionName) => `=${sessionName}:0.0`,
       runTmux,
-      runTmuxAsync: async (args) => runTmux(args),
+      runTmuxForSession: (args, _sessionName) => runTmux(args),
+      runTmuxAsyncForSession: async (args, _sessionName) => runTmux(args),
       logTimePrefix: () => '2026-07-08 00:00:00',
     });
 

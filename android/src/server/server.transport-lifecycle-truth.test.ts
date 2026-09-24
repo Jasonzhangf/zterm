@@ -216,14 +216,13 @@ describe('server transport/session lifecycle truth gates', () => {
     expect(reconcileLeaseBlock).not.toContain('writeMirrorBaselineGeometry(mirror, {');
     const applyAdaptiveBlock = extractBlock(mirrorRuntimeSource, 'function applyAdaptiveTmuxWidth', 2400);
     const releaseAdaptiveBlock = extractBlock(mirrorRuntimeSource, 'function releaseAdaptiveTmuxWidth', 2400);
-    expect(applyAdaptiveBlock).toMatch(/deps\.runTmux\(\s*\[\s*'resize-window'/);
-    expect(releaseAdaptiveBlock).toMatch(/deps\.runTmux\(\s*\[\s*'resize-window'[\s\S]*?'-y'/);
-    expect(releaseAdaptiveBlock).toMatch(/deps\.runTmux\(\s*\[\s*'set-window-option'[\s\S]*?'window-size'/);
+    expect(applyAdaptiveBlock).toMatch(/deps\.runTmuxForSession\(\s*\[\s*'resize-window'/);
+    expect(releaseAdaptiveBlock).toMatch(/deps\.runTmuxForSession\(\s*\[\s*'resize-window'[\s\S]*?'-y'/);
+    expect(releaseAdaptiveBlock).toMatch(/deps\.runTmuxForSession\(\s*\[\s*'set-window-option'[\s\S]*?'window-size'/);
     const runtimeWithoutAdaptiveOwnerBlocks = mirrorRuntimeSource
       .replace(applyAdaptiveBlock, '')
       .replace(releaseAdaptiveBlock, '');
-    expect(runtimeWithoutAdaptiveOwnerBlocks).not.toContain("runTmux(['resize-window'");
-    expect(runtimeWithoutAdaptiveOwnerBlocks).not.toContain("deps.runTmux(['resize-window'");
+    expect(runtimeWithoutAdaptiveOwnerBlocks).not.toMatch(/runTmux(?:ForSession)?\(\s*\[\s*'resize-window'/);
     expect(runtimeWithoutAdaptiveOwnerBlocks).not.toContain("'window-size'");
     expect(mirrorRuntimeSource).not.toContain('@zterm_adaptive_width_');
   });
