@@ -13,18 +13,7 @@ function batchDeps(options: {
   listPanesFails?: boolean;
 }) {
   const output = options.output ?? 'thinking';
-  const runTmuxAsync = async (args: string[]) => {
-    if (args[0] === 'list-panes') {
-      if (options.listPanesFails) {
-        throw new Error('tmux list-panes failed');
-      }
-      return {
-        ok: true as const,
-        stdout: options.listPanes
-          ? options.listPanes()
-          : options.names.map((name) => `${name}\t42\tcodex`).join('\n'),
-      };
-    }
+  const capturePane = async (args: string[]) => {
     const sessionName = args[args.indexOf('-t') + 1]!;
     return {
       ok: true as const,
@@ -34,10 +23,26 @@ function batchDeps(options: {
   return {
     history: options.history,
     readProcessGroup: options.readProcessGroup ?? (() => ({ groupId: 'pg-1', alive: true })),
-    runTmuxAsync,
+    // Global pane facts must span every live socket; the latched single-socket
+    // runner is a defect and is tripped here if anything routes through it.
+    runTmuxAsyncAcrossSockets: async (args: string[]) => {
+      expect(args.slice(0, 2)).toEqual(['list-panes', '-a']);
+      if (options.listPanesFails) {
+        throw new Error('tmux list-panes failed');
+      }
+      return {
+        ok: true as const,
+        stdout: options.listPanes
+          ? options.listPanes()
+          : options.names.map((name) => `${name}\t42\tcodex`).join('\n'),
+      };
+    },
+    runTmuxAsync: async () => {
+      throw new Error('latched single-socket runner must not serve session-scoped reads');
+    },
     runTmuxAsyncForSession: async (args: string[], sessionName: string) => {
       expect(args[args.indexOf('-t') + 1]).toBe(sessionName);
-      return runTmuxAsync(args);
+      return capturePane(args);
     },
   };
 }
@@ -116,6 +121,25 @@ describe('daemon passive session observation', () => {
     const result = (await readDaemonSessionObservations(deps, ['gone'], 1000)).get('gone');
     expect(result?.status).toBe('error');
     expect(result?.statusReason).toBe('observation-error');
+  });
+
+  it('serves a cross-socket session from the fan-out pane facts so capture-pane is reachable', async () => {
+    // The daemon latched a stable socket at startup; the real session lives on
+    // the default socket and is therefore visible only to the fan-out, not to
+    // the latched runner. The latched runner is tripped so this test fails if
+    // the pane-fact read regresses to it.
+    const deps = batchDeps({
+      names: ['cross-socket'],
+      history: new Map(),
+      listPanes: () => 'cross-socket\t42\tcodex',
+    });
+    // A stable sample requires a confirming second observation, exactly like
+    // the core running test.
+    const first = (await readDaemonSessionObservations(deps, ['cross-socket'], 1000)).get('cross-socket');
+    const result = (await readDaemonSessionObservations(deps, ['cross-socket'], 4000)).get('cross-socket');
+    expect(first?.status).toBe('unknown');
+    expect(result?.status).toBe('running');
+    expect(result?.foregroundProcess).toBe('codex');
   });
 
   it('stabilizes a changed process/output sample before publishing a new status', async () => {

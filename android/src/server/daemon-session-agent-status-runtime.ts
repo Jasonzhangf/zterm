@@ -12,7 +12,7 @@ export interface DaemonSessionObservationHistoryEntry {
   idleConfirmations: number; lastPublishedAt?: number;
 }
 export interface DaemonSessionObservationDeps {
-  runTmuxAsync: (args: string[]) => Promise<{ ok: true; stdout: string }>;
+  runTmuxAsyncAcrossSockets: (args: string[]) => Promise<{ ok: true; stdout: string }>;
   runTmuxAsyncForSession: (args: string[], sessionName: string) => Promise<{ ok: true; stdout: string }>;
   readProcessGroup?: (
     pid: string,
@@ -131,7 +131,7 @@ export async function readDaemonSessionObservations(
   if (sessionNames.length === 0) return observations;
   let paneFacts: Map<string, DaemonPaneProcessFact>;
   try {
-    const paneResult = await deps.runTmuxAsync([
+    const paneResult = await deps.runTmuxAsyncAcrossSockets([
       'list-panes',
       '-a',
       '-F',

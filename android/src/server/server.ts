@@ -395,6 +395,7 @@ const daemonSessionCatalogRuntime = createDaemonSessionCatalogRuntime({
   listTerminalSessions,
   listTerminalSessionCatalog: enumerateTerminalSessionCatalog,
   runTmuxAsync: (args) => terminalControlRuntime.runTmuxAsync(args),
+  runTmuxAsyncAcrossSockets: (args) => terminalControlRuntime.runTmuxAsyncAcrossSockets(args),
   runTmuxAsyncForSession: (args, sessionName) => terminalControlRuntime.runTmuxAsyncForSession(args, sessionName),
   readProcessGroup: readDaemonProcessGroup,
   observationHistory: daemonSessionObservationHistory,
