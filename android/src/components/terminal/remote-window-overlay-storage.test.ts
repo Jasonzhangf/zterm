@@ -7,16 +7,25 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   REMOTE_WINDOW_ENTRY_POSITION_STORAGE_KEY,
   REMOTE_WINDOW_BROWSER_ENTRY_POSITION_STORAGE_KEY,
+  REMOTE_WINDOW_DISPLAY_ORIENTATION_STORAGE_KEY,
   REMOTE_WINDOW_INPUT_MODE_STORAGE_KEY,
+  REMOTE_WINDOW_QUALITY_BITRATE_MULTIPLIER_STORAGE_KEY,
+  REMOTE_WINDOW_QUALITY_MAX_FRAME_RATE_STORAGE_KEY,
   REMOTE_WINDOW_TOUCH_SCROLL_FRACTION_STORAGE_KEY,
   REMOTE_WINDOW_TOUCH_SCROLL_INVERTED_STORAGE_KEY,
+  readRemoteWindowBitrateMultiplierSelection,
+  readRemoteWindowDisplayOrientation,
   readRemoteWindowInputMode,
+  readRemoteWindowMaxFrameRate,
   readRemoteWindowTouchScrollFraction,
   readRemoteWindowTouchScrollInverted,
   readStoredEntryPosition,
   readStoredBrowserEntryPosition,
   resolveTouchScrollFractionPreset,
+  writeRemoteWindowBitrateMultiplierSelection,
+  writeRemoteWindowDisplayOrientation,
   writeRemoteWindowInputMode,
+  writeRemoteWindowMaxFrameRate,
   writeStoredEntryPosition,
   writeStoredBrowserEntryPosition,
 } from './remote-window-overlay-storage';
@@ -76,5 +85,27 @@ describe('remote-window-overlay-storage', () => {
     expect(readRemoteWindowInputMode()).toBe('mouse');
     window.localStorage.setItem(REMOTE_WINDOW_INPUT_MODE_STORAGE_KEY, 'bogus');
     expect(readRemoteWindowInputMode()).toBe('touch');
+  });
+
+  it('round-trips display orientation and quality controls with invalid-value fallback', () => {
+    expect(readRemoteWindowDisplayOrientation()).toBe('follow-device');
+    writeRemoteWindowDisplayOrientation('landscape');
+    expect(readRemoteWindowDisplayOrientation()).toBe('landscape');
+    window.localStorage.setItem(REMOTE_WINDOW_DISPLAY_ORIENTATION_STORAGE_KEY, 'bogus');
+    expect(readRemoteWindowDisplayOrientation()).toBe('follow-device');
+
+    expect(readRemoteWindowBitrateMultiplierSelection()).toBe('auto');
+    expect(readRemoteWindowMaxFrameRate()).toBe(30);
+    writeRemoteWindowBitrateMultiplierSelection(4);
+    writeRemoteWindowMaxFrameRate(60);
+    expect(readRemoteWindowBitrateMultiplierSelection()).toBe(4);
+    expect(readRemoteWindowMaxFrameRate()).toBe(60);
+    window.localStorage.setItem(REMOTE_WINDOW_QUALITY_BITRATE_MULTIPLIER_STORAGE_KEY, '3');
+    window.localStorage.setItem(REMOTE_WINDOW_QUALITY_MAX_FRAME_RATE_STORAGE_KEY, '24');
+    expect(readRemoteWindowBitrateMultiplierSelection()).toBe('auto');
+    expect(readRemoteWindowMaxFrameRate()).toBe(30);
+
+    writeRemoteWindowBitrateMultiplierSelection('auto');
+    expect(window.localStorage.getItem(REMOTE_WINDOW_QUALITY_BITRATE_MULTIPLIER_STORAGE_KEY)).toBeNull();
   });
 });

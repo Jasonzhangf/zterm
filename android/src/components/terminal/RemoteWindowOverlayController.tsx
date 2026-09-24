@@ -64,10 +64,12 @@ import {
   type RemoteWindowOverlayState,
 } from '../../lib/remote-window-overlay-runtime';
 import {
+  applyRemoteWindowMaxFrameRate,
   getRemoteWindowSourceRect,
   readRemoteWindowVideoPreference,
   resolveInitialRemoteWindowVideoProfile,
   writeRemoteWindowVideoPreference,
+  type RemoteWindowQualityMaxFrameRate,
   type RemoteWindowVideoStatsSample,
 } from '../../lib/remote-window-video-quality';
 import {
@@ -119,6 +121,7 @@ import {
   writeStoredBrowserEntryPosition,
   writeStoredEntryPosition,
   type FloatingEntryPosition,
+  type RemoteWindowBitrateMultiplierSelection,
   type RemoteWindowTouchScrollFraction,
 } from './remote-window-overlay-storage';
 import {
@@ -149,6 +152,7 @@ import {
   isRemoteWindowChromeTarget,
   releasePointerCaptureSafely,
   setPointerCaptureSafely,
+  type RemoteWindowOrientationPolicy,
 } from './remote-window-overlay-helpers';
 import { styles } from './remote-window-overlay-styles';
 import { AmbientButton } from '../ambient';
@@ -158,6 +162,7 @@ import { RemoteWindowTargetPicker } from './RemoteWindowTargetPicker';
 import { RemoteWindowAppSwitch } from './RemoteWindowAppSwitch';
 import { RemoteWindowMorePanel } from './RemoteWindowMorePanel';
 import { useRemoteWindowQuality } from './useRemoteWindowQuality'; import { useRemoteWindowForegroundReentry } from './useRemoteWindowForegroundReentry';
+import { useRemoteWindowDisplayQualityControls } from './useRemoteWindowDisplayQualityControls';
 import { useRemoteWindowPlayback, type RemoteWindowVideoDebugSnapshot } from './useRemoteWindowPlayback';
 import { useRemoteWindowCompositeCanvas } from './useRemoteWindowCompositeCanvas';
 import { RemoteWindowVideoContent } from './RemoteWindowVideoContent';
@@ -282,6 +287,16 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   const [floatingOffset, setFloatingOffsetState] = useState<FloatingOverlayOffset>({ x: 0, y: 0 });
   const [floatingOverlayWidthPx, setFloatingOverlayWidthPxState] = useState<number | null>(null);
   const [videoPreference, setVideoPreference] = useState<RemoteWindowVideoPreference>('smooth');
+  const {
+    displayOrientation,
+    displayOrientationRef,
+    bitrateMultiplierSelection,
+    maxFrameRateFps,
+    budgetMultiplier,
+    setDisplayOrientation,
+    setBitrateMultiplierSelection,
+    setMaxFrameRateFps,
+  } = useRemoteWindowDisplayQualityControls();
   const [touchScrollFraction] = useState<RemoteWindowTouchScrollFraction>(() => readRemoteWindowTouchScrollFraction());
   const [touchScrollInverted] = useState(() => readRemoteWindowTouchScrollInverted());
   const [inputMode, setInputMode] = useState<RemoteWindowInputMode>(() => readRemoteWindowInputMode());
@@ -548,6 +563,8 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     streamReady: state.phase === 'targetLocked' && Boolean(state.streamStarted),
     focusStreamActive: Boolean(qualityStreamId && activeFocusStreamIdRef.current === qualityStreamId),
     videoPreference,
+    bitrateMultiplier: budgetMultiplier,
+    maxFrameRateFps,
     target: state.phase === 'targetLocked' ? state.target : null,
     updateStreamQuality,
     collectStatsRef: collectStreamStatsRef,
@@ -1067,7 +1084,12 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     if (!fillReference) {
       return false;
     }
-    const reference = resolveRemoteWindowTargetResizeSize({ viewport: fillReference, devicePixelRatio: window.devicePixelRatio, target: currentLockedTarget });
+    const reference = resolveRemoteWindowTargetResizeSize({
+      viewport: fillReference,
+      devicePixelRatio: window.devicePixelRatio,
+      target: currentLockedTarget,
+      orientation: displayOrientationRef.current,
+    });
     if (!reference) return false;
     const width = reference.width;
     const height = reference.height;
@@ -1090,6 +1112,18 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       return false;
     }
   }, [activeSessionId, currentLockedStreamId, currentLockedTarget, embedded, resizeTargetWindow, state, surfaceSize]);
+  const handleDisplayOrientationChange = useCallback((orientation: RemoteWindowOrientationPolicy) => {
+    setDisplayOrientation(orientation);
+    requestRemoteTargetFillResize(true);
+  }, [requestRemoteTargetFillResize, setDisplayOrientation]);
+  const handleBitrateMultiplierChange = useCallback((selection: RemoteWindowBitrateMultiplierSelection) => {
+    setBitrateMultiplierSelection(selection);
+    resetQualityApplyState();
+  }, [resetQualityApplyState, setBitrateMultiplierSelection]);
+  const handleMaxFrameRateChange = useCallback((frameRate: RemoteWindowQualityMaxFrameRate) => {
+    setMaxFrameRateFps(frameRate);
+    resetQualityApplyState();
+  }, [resetQualityApplyState, setMaxFrameRateFps]);
   useEffect(() => {
     if (!embeddedFullscreen) { embeddedFullscreenRef.current = false; embeddedFullscreenPromotionPendingRef.current = false; suppressEmbeddedFullscreenPromotionRef.current = false; return; }
     if (!embeddedFullscreenRef.current) { embeddedFullscreenRef.current = true; embeddedFullscreenPromotionPendingRef.current = true; suppressEmbeddedFullscreenPromotionRef.current = false; }
@@ -1548,9 +1582,13 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     if (!previousHadStream) {
       setVideoPreference(selectedVideoPreference);
     }
-    const videoProfile = resolveInitialRemoteWindowVideoProfile(selectedVideoPreference, networkQuality, false, {
-      target: effectiveTarget,
-    });
+    const videoProfile = applyRemoteWindowMaxFrameRate(
+      resolveInitialRemoteWindowVideoProfile(selectedVideoPreference, networkQuality, false, {
+        target: effectiveTarget,
+        budgetMultiplier,
+      }),
+      maxFrameRateFps,
+    );
 
     const selectEffectiveTarget = (current: RemoteWindowOverlayState) => selectRemoteWindowTargetFromCatalog(
       current, effectiveTarget, catalogTargets, browserMode ? 'fullscreen' : 'floating',
@@ -1764,8 +1802,10 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       });
   }, [
     activeSessionId,
+    bitrateMultiplierSelection,
     browserPickerOpen,
     invalidatePlayback,
+    maxFrameRateFps,
     networkQuality,
     resetCatalog,
     resetQualityApplyState,
@@ -2993,6 +3033,12 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     <RemoteWindowMorePanel
       fullscreen={state.mode === 'fullscreen'}
       videoPreference={videoPreference}
+      displayOrientation={displayOrientation}
+      onDisplayOrientationChange={handleDisplayOrientationChange}
+      bitrateMultiplierSelection={bitrateMultiplierSelection}
+      onBitrateMultiplierChange={handleBitrateMultiplierChange}
+      maxFrameRateFps={maxFrameRateFps}
+      onMaxFrameRateChange={handleMaxFrameRateChange}
       streamStatusText={`串流：${state.streamStatus === 'streaming' ? '已连接' : state.streamStatus} · ${activeProfile.maxBitrateBps / 1_000_000} Mbps / ${activeProfile.maxFrameRateFps} FPS`}
       networkStatusText={`压力：${adaptiveCause === 'none' ? '无' : adaptiveCause} · 网络：${networkQuality?.effectiveType || '未知'}${networkQuality?.rttMs ? ` · RTT ${networkQuality.rttMs}ms` : ''}`}
       browserMode={state.phase === 'targetLocked' && isRemoteWindowChromeTarget(state.target)}

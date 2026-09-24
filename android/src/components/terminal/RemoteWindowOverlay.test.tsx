@@ -446,6 +446,205 @@ describe('RemoteWindowOverlay', () => {
     expect(screen.getByTestId('remote-window-video-window-option-app-child')).toBeTruthy();
   });
 
+  it('persists display orientation and quality controls, applies resize and start profile, and keeps sibling window switching', async () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 });
+    Object.defineProperty(window, 'visualViewport', {
+      configurable: true,
+      value: { width: 390, height: 844, addEventListener: vi.fn(), removeEventListener: vi.fn() },
+    });
+    const mainWindow = makeTarget('app-main', 'WeChat', 'app-window');
+    const childWindow: RemoteWindowStreamTargetManifest = {
+      ...makeTarget('app-child', 'WeChat Image', 'app-window'),
+      videoTarget: {
+        ...mainWindow.videoTarget,
+        windowId: 'window-2',
+        title: 'WeChat Image',
+        windowBoundsTopLeftPx: { x: 120, y: 90, width: 320, height: 240 },
+        cropRectTopLeftPx: { x: 120, y: 90, width: 320, height: 240 },
+      },
+    };
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-controls-integration',
+      targets: [childWindow, mainWindow],
+    }));
+    const resizeTargetWindow = vi.fn((_sessionId: string, _payload: Omit<RemoteWindowInputEventPayload, 'requestId'>) => 'resize-controls');
+    const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string, _options: { videoProfile: { maxBitrateBps: number; maxFrameRateFps: number } }) => ({
+      streamId,
+      mediaStream: { id: streamId } as MediaStream,
+    }));
+    const updateFocus = vi.fn();
+
+    render(
+      <RemoteWindowOverlay
+        activeSessionId="session-1"
+        requestTargets={requestTargets}
+        resizeTargetWindow={resizeTargetWindow}
+        startStream={startStream}
+        updateFocus={updateFocus}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    fireEvent.click(await screen.findByTestId('remote-window-app-group-com-apple-TextEdit-123'));
+    await screen.findByTestId('remote-window-video');
+    fireEvent.click(screen.getByRole('button', { name: '全屏远程窗口' }));
+
+    const setFullscreenRects = () => {
+      const overlay = screen.getByTestId('remote-window-locked-overlay');
+      const toolbar = screen.getByTestId('remote-window-locked-toolbar');
+      const surface = screen.getByTestId('remote-window-video-surface');
+      Object.defineProperty(overlay, 'getBoundingClientRect', {
+        configurable: true,
+        value: () => ({ x: 0, y: 0, left: 0, top: 0, right: 1280, bottom: 800, width: 1280, height: 800, toJSON: () => ({}) }),
+      });
+      Object.defineProperty(toolbar, 'getBoundingClientRect', {
+        configurable: true,
+        value: () => ({ x: 0, y: 16, left: 0, top: 16, right: 1280, bottom: 100, width: 1280, height: 100, toJSON: () => ({}) }),
+      });
+      Object.defineProperty(surface, 'getBoundingClientRect', {
+        configurable: true,
+        value: () => ({ x: 0, y: 100, left: 0, top: 100, right: 1280, bottom: 800, width: 1280, height: 700, toJSON: () => ({}) }),
+      });
+    };
+    setFullscreenRects();
+    await flushRemoteWindowSurfaceLayout();
+    await waitFor(() => expect(resizeTargetWindow).toHaveBeenCalledTimes(1));
+    expect(resizeTargetWindow.mock.calls[0]?.[1]).toMatchObject({
+      event: { kind: 'window-resize', width: 1280, height: 656 },
+    });
+
+    fireEvent.click(screen.getByTestId('remote-window-more-toggle'));
+    fireEvent.change(screen.getByTestId('remote-window-display-orientation-select'), { target: { value: 'landscape' } });
+    await waitFor(() => expect(resizeTargetWindow).toHaveBeenCalledTimes(2));
+    expect(resizeTargetWindow.mock.calls[1]?.[1]).toMatchObject({
+      event: { kind: 'window-resize', width: 1280, height: 656 },
+    });
+    expect(window.localStorage.getItem('zterm:remote-window:display-orientation-v1')).toBe('landscape');
+
+    const content = screen.getByTestId('remote-window-video-content');
+    await waitFor(() => {
+      expect(Number.parseFloat(content.style.width || '0')).toBeCloseTo(1000, 1);
+      expect(Number.parseFloat(content.style.height || '0')).toBeCloseTo(700, 1);
+      expect(Number.parseFloat(content.style.left || '0')).toBeCloseTo(140, 1);
+      expect(Number.parseFloat(content.style.top || '0')).toBeCloseTo(0, 1);
+    });
+
+    fireEvent.change(screen.getByTestId('remote-window-bitrate-multiplier-select'), { target: { value: '4' } });
+    fireEvent.change(screen.getByTestId('remote-window-max-frame-rate-select'), { target: { value: '60' } });
+    expect(window.localStorage.getItem('zterm:remote-window:quality-bitrate-multiplier-v1')).toBe('4');
+    expect(window.localStorage.getItem('zterm:remote-window:quality-max-frame-rate-v1')).toBe('60');
+
+    fireEvent.click(screen.getByTestId('remote-window-video-window-option-app-child'));
+    await waitFor(() => expect(updateFocus).toHaveBeenCalledWith(
+      'session-1',
+      expect.any(String),
+      childWindow,
+      1,
+    ));
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭远程窗口' }));
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    fireEvent.click(await screen.findByTestId('remote-window-app-group-com-apple-TextEdit-123'));
+    await waitFor(() => expect(startStream).toHaveBeenCalledTimes(2));
+    expect(startStream.mock.calls[1]?.[3].videoProfile).toMatchObject({
+      maxBitrateBps: 4_000_000,
+      maxFrameRateFps: 60,
+    });
+  });
+
+  it('keeps the per-preference bitrate baseline and 30 FPS default before the user overrides them', async () => {
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-default-profile',
+      targets: [makeTarget('app-default', 'TextEdit', 'app-window')],
+    }));
+    const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string, _options: { videoProfile: { maxBitrateBps: number; maxFrameRateFps: number } }) => ({
+      streamId,
+      mediaStream: { id: streamId } as MediaStream,
+    }));
+
+    render(
+      <RemoteWindowOverlay
+        activeSessionId="session-default"
+        requestTargets={requestTargets}
+        startStream={startStream}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    fireEvent.click(await screen.findByTestId('remote-window-target-app-default'));
+    await waitFor(() => expect(startStream).toHaveBeenCalledTimes(1));
+
+    expect(startStream.mock.calls[0]?.[3].videoProfile).toMatchObject({
+      maxBitrateBps: 2_000_000,
+      maxFrameRateFps: 30,
+    });
+    fireEvent.click(screen.getByTestId('remote-window-more-toggle'));
+    expect((screen.getByTestId('remote-window-bitrate-multiplier-select') as HTMLSelectElement).value).toBe('auto');
+
+    fireEvent.change(screen.getByTestId('remote-window-bitrate-multiplier-select'), { target: { value: '1' } });
+    expect(window.localStorage.getItem('zterm:remote-window:quality-bitrate-multiplier-v1')).toBe('1');
+
+    fireEvent.change(screen.getByTestId('remote-window-bitrate-multiplier-select'), { target: { value: 'auto' } });
+    expect(window.localStorage.getItem('zterm:remote-window:quality-bitrate-multiplier-v1')).toBeNull();
+  });
+
+  it('reports the current bitrate selection to the quality request and the next start profile (auto -> 1x -> auto)', async () => {
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-bitrate-live',
+      targets: [makeTarget('app-bitrate', 'TextEdit', 'app-window')],
+    }));
+    const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string, _options: { videoProfile: { maxBitrateBps: number } }) => ({
+      streamId,
+      mediaStream: { id: streamId } as MediaStream,
+    }));
+    const updateStreamQuality = createAppliedQualityMock();
+    const capabilityStatus = createCapabilityStatusChannel();
+
+    render(
+      <RemoteWindowOverlay
+        activeSessionId="session-bitrate"
+        requestTargets={requestTargets}
+        startStream={startStream}
+        updateStreamQuality={updateStreamQuality}
+        onRemoteWindowMessage={capabilityStatus.onRemoteWindowMessage}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    fireEvent.click(await screen.findByTestId('remote-window-target-app-bitrate'));
+    await screen.findByTestId('remote-window-video');
+    capabilityStatus.publishCapabilityStatus(startStream.mock.calls[0]![2] as string);
+    await waitFor(() => expect(updateStreamQuality).toHaveBeenCalled());
+    const autoQualityBitrate = updateStreamQuality.mock.calls.at(-1)![1].videoProfile.maxBitrateBps;
+    expect(autoQualityBitrate).toBe(2_000_000);
+
+    fireEvent.click(screen.getByTestId('remote-window-more-toggle'));
+    fireEvent.change(screen.getByTestId('remote-window-bitrate-multiplier-select'), { target: { value: '1' } });
+    await waitFor(() => {
+      expect(updateStreamQuality.mock.calls.at(-1)![1].videoProfile.maxBitrateBps).toBe(1_000_000);
+    });
+
+    fireEvent.change(screen.getByTestId('remote-window-bitrate-multiplier-select'), { target: { value: 'auto' } });
+    await waitFor(() => {
+      expect(updateStreamQuality.mock.calls.at(-1)![1].videoProfile.maxBitrateBps).toBe(2_000_000);
+    });
+
+    fireEvent.change(screen.getByTestId('remote-window-bitrate-multiplier-select'), { target: { value: '4' } });
+    fireEvent.click(screen.getByRole('button', { name: '关闭远程窗口' }));
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    fireEvent.click(await screen.findByTestId('remote-window-target-app-bitrate'));
+    await waitFor(() => expect(startStream).toHaveBeenCalledTimes(2));
+    expect(startStream.mock.calls[1]?.[3].videoProfile).toMatchObject({ maxBitrateBps: 4_000_000 });
+
+    fireEvent.change(screen.getByTestId('remote-window-bitrate-multiplier-select'), { target: { value: 'auto' } });
+    fireEvent.click(screen.getByRole('button', { name: '关闭远程窗口' }));
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    fireEvent.click(await screen.findByTestId('remote-window-target-app-bitrate'));
+    await waitFor(() => expect(startStream).toHaveBeenCalledTimes(3));
+    expect(startStream.mock.calls[2]?.[3].videoProfile).toMatchObject({ maxBitrateBps: 2_000_000 });
+  });
+
   it('opens an active app-title switch list and switches to another target without reopening the picker', async () => {
     const mediaStream = { id: 'media-stream-1' } as MediaStream;
     const appOne = makeTarget('app-1', 'TextEdit', 'app-window');

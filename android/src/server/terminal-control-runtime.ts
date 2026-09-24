@@ -37,10 +37,14 @@ export interface TerminalControlRuntimeDeps {
 }
 
 /** Enumerate live tmux sockets without persisting a session catalog. */
-export function discoverTmuxSocketPaths(options: { stableSocketDir?: string; uid?: number } = {}) {
+export function discoverTmuxSocketPaths(options: {
+  stableSocketDir?: string;
+  cliDefaultRoot?: string;
+  uid?: number;
+} = {}) {
   const uid = options.uid ?? process.getuid?.();
   const socketDirName = uid === undefined ? undefined : `tmux-${uid}`;
-  const roots = [process.env.TMUX_TMPDIR || tmpdir(), options.stableSocketDir]
+  const roots = [process.env.TMUX_TMPDIR || tmpdir(), options.cliDefaultRoot ?? '/tmp', options.stableSocketDir]
     .filter((root): root is string => Boolean(root));
   const paths = new Set<string>();
   for (const root of roots) {
@@ -54,7 +58,12 @@ export function discoverTmuxSocketPaths(options: { stableSocketDir?: string; uid
     for (const entry of entries) {
       const socketPath = join(directory, entry);
       try {
-        if (statSync(socketPath).isSocket() && (entry === 'default' || root === options.stableSocketDir)) paths.add(socketPath);
+        if (
+          statSync(socketPath).isSocket()
+          && (entry === 'default' || root === options.stableSocketDir)
+        ) {
+          paths.add(socketPath);
+        }
       } catch {
         // Socket may disappear during a live refresh.
       }
@@ -66,6 +75,10 @@ export function discoverTmuxSocketPaths(options: { stableSocketDir?: string; uid
 export interface TerminalControlRuntime {
   runTmux: (args: string[]) => { ok: true; stdout: string };
   runTmuxAsync: (args: string[]) => Promise<{ ok: true; stdout: string }>;
+  runTmuxForSession: (args: string[], sessionName: string) => { ok: true; stdout: string };
+  runTmuxAsyncForSession: (args: string[], sessionName: string) => Promise<{ ok: true; stdout: string }>;
+  runTmuxAcrossSockets: (args: string[]) => { ok: true; stdout: string };
+  runTmuxAsyncAcrossSockets: (args: string[]) => Promise<{ ok: true; stdout: string }>;
   runCommand: (command: string, args: string[]) => ReturnType<typeof spawnSync>;
   ensureTmuxServerRunning: () => void;
   writeBackendInputGroup: (
@@ -155,6 +168,63 @@ export function createTerminalControlRuntime(
   function runTmuxForSession(args: string[], sessionName: string) {
     const socketPath = resolveSessionSocketPath(sessionName);
     return socketPath ? runTmuxWithSocketPath(args, socketPath) : runTmux(args);
+  }
+
+  function runTmuxAsyncForSession(args: string[], sessionName: string) {
+    const socketPath = resolveSessionSocketPath(sessionName);
+    return socketPath ? runTmuxAsyncWithSocketPath(args, socketPath) : runTmuxAsync(args);
+  }
+
+  // Global session/panee enumerations must span every live socket, exactly like
+  // listTmuxSessions. Running them on the single latched socket would hide
+  // sessions that live on another discovered socket, and would gate
+  // session-targeted reads (e.g. capture-pane) on a missing pane fact.
+  function tmuxSocketTargets(): Array<string | undefined> {
+    return [undefined, ...socketPaths()];
+  }
+
+  function runTmuxAcrossSockets(args: string[]): { ok: true; stdout: string } {
+    const outputs: string[] = [];
+    let firstError: unknown;
+    let reached = false;
+    for (const socketPath of tmuxSocketTargets()) {
+      try {
+        const result = socketPath ? runTmuxWithSocketPath(args, socketPath) : runTmux(args);
+        // Each tmux stdout is newline-terminated; strip it before joining so a
+        // multi-socket merge does not emit a blank boundary line.
+        outputs.push(result.stdout.replace(/\n$/u, ''));
+        reached = true;
+      } catch (error) {
+        if (firstError === undefined) firstError = error;
+      }
+    }
+    if (!reached) {
+      throw firstError instanceof Error ? firstError : new Error('no reachable tmux socket');
+    }
+    return { ok: true as const, stdout: outputs.join('\n') };
+  }
+
+  async function runTmuxAsyncAcrossSockets(args: string[]): Promise<{ ok: true; stdout: string }> {
+    const outputs: string[] = [];
+    let firstError: unknown;
+    let reached = false;
+    for (const socketPath of tmuxSocketTargets()) {
+      try {
+        const result = socketPath
+          ? await runTmuxAsyncWithSocketPath(args, socketPath)
+          : await runTmuxAsync(args);
+        // Each tmux stdout is newline-terminated; strip it before joining so a
+        // multi-socket merge does not emit a blank boundary line.
+        outputs.push(result.stdout.replace(/\n$/u, ''));
+        reached = true;
+      } catch (error) {
+        if (firstError === undefined) firstError = error;
+      }
+    }
+    if (!reached) {
+      throw firstError instanceof Error ? firstError : new Error('no reachable tmux socket');
+    }
+    return { ok: true as const, stdout: outputs.join('\n') };
   }
 
   function resolveExternalBackend(kind = deps.defaultBackend || (deps.wezTermBackend ? 'wezterm' : 'tmux')) {
@@ -393,18 +463,18 @@ export function createTerminalControlRuntime(
     }
     sessionSocketPaths.clear();
     const results: Array<{ stdout: string; socketPath?: string }> = [];
-    try {
-      results.push({ stdout: runTmux(['list-sessions', '-F', '#S']).stdout });
-    } catch (error) {
-      if (!deps.tmuxSocketPaths) throw error;
-    }
-    if (deps.tmuxSocketPaths) {
-      for (const socketPath of socketPaths()) {
-        try {
-          results.push({ stdout: runTmuxWithSocketPath(['list-sessions', '-F', '#S'], socketPath).stdout, socketPath });
-        } catch {
-          // A configured socket may disappear during refresh.
-        }
+    for (const socketPath of tmuxSocketTargets()) {
+      try {
+        results.push({
+          stdout: socketPath
+            ? runTmuxWithSocketPath(['list-sessions', '-F', '#S'], socketPath).stdout
+            : runTmux(['list-sessions', '-F', '#S']).stdout,
+          ...(socketPath ? { socketPath } : {}),
+        });
+      } catch (error) {
+        // The latched socket is authoritative when it answers; a configured
+        // socket may also disappear during refresh.
+        if (!socketPath && !deps.tmuxSocketPaths) throw error;
       }
     }
     if (results.length === 0) throw new Error('no reachable tmux socket');
@@ -426,7 +496,7 @@ export function createTerminalControlRuntime(
       const cwdBySession = new Map<string, string>();
       if (selectedBackend === 'tmux') {
         try {
-          const paneResult = runTmux(['list-panes', '-a', '-F', '#{session_name}\t#{pane_current_path}']);
+          const paneResult = runTmuxAcrossSockets(['list-panes', '-a', '-F', '#{session_name}\t#{pane_current_path}']);
           for (const line of paneResult.stdout.split('\n')) {
             const [sessionName, cwd] = line.split('\t');
             if (sessionName?.trim() && cwd?.trim() && !cwdBySession.has(sessionName.trim())) {
@@ -539,6 +609,10 @@ export function createTerminalControlRuntime(
     runTmux,
     ensureTmuxServerRunning,
     runTmuxAsync,
+    runTmuxForSession,
+    runTmuxAsyncForSession,
+    runTmuxAcrossSockets,
+    runTmuxAsyncAcrossSockets,
     runCommand,
     writeBackendInputGroup,
     resolveBackendInputMaxChunkBytes,

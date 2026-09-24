@@ -76,7 +76,7 @@ export interface TerminalMirrorRuntimeDeps {
   autoCommandDelayMs: number;
   waitMs: (delayMs: number) => Promise<void>;
   logTimePrefix: () => string;
-  runTmux: (args: string[]) => { ok: true; stdout: string };
+  runTmuxForSession: (args: string[], sessionName: string) => { ok: true; stdout: string };
   buildExactTmuxSessionTarget: (sessionName: string) => string;
   adaptiveWidthOwnershipStore?: AdaptiveWidthOwnershipStore;
   closeTransportSubscriber: (
@@ -804,7 +804,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
           rows,
         }, mirror.backend, 'apply');
       } else {
-        deps.runTmux(['resize-window', '-t', deps.buildExactTmuxSessionTarget(mirror.sessionName), '-x', String(cols)]);
+        deps.runTmuxForSession(['resize-window', '-t', deps.buildExactTmuxSessionTarget(mirror.sessionName), '-x', String(cols)], mirror.sessionName);
       }
     } catch (error) {
       // Do not leave a false ownership record for a geometry mutation that
@@ -956,7 +956,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
           rows: deps.normalizeTerminalRows(baseline.rows),
         }, mirror.backend, 'release');
       } else {
-        deps.runTmux([
+        deps.runTmuxForSession([
           'resize-window',
           '-t',
           deps.buildExactTmuxSessionTarget(mirror.sessionName),
@@ -964,13 +964,13 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
           String(deps.normalizeTerminalCols(baseline.cols)),
           '-y',
           String(deps.normalizeTerminalRows(baseline.rows)),
-        ]);
+        ], mirror.sessionName);
       }
     }
     // resize-window itself switches the window to manual. Unset window-size
     // last so tmux returns to its configured policy (normally latest).
     if (mirror.backend === 'tmux') {
-      deps.runTmux(['set-window-option', '-u', '-t', deps.buildExactTmuxSessionTarget(mirror.sessionName), 'window-size']);
+      deps.runTmuxForSession(['set-window-option', '-u', '-t', deps.buildExactTmuxSessionTarget(mirror.sessionName), 'window-size'], mirror.sessionName);
     }
     console.log(`[${deps.logTimePrefix()}] adaptive width released`, {
       sessionName: mirror.sessionName,

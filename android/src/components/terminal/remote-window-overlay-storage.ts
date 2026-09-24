@@ -3,8 +3,16 @@
  * 浮钮位置 / 触摸滚动参数 / 输入模式只经本模块读写 localStorage；
  * 组件禁止直写 raw storage key。
  */
+import {
+  REMOTE_WINDOW_QUALITY_FRAME_RATE_OPTIONS,
+  REMOTE_WINDOW_BITRATE_MULTIPLIER_AUTO,
+  type RemoteWindowQualityMaxFrameRate,
+  type RemoteWindowBitrateMultiplierSelection,
+  type RemoteWindowVideoBudgetMultiplier,
+} from '../../lib/remote-window-video-quality';
 import { REMOTE_WINDOW_TOUCH_SCROLL_DEFAULT_FRACTION } from '../../lib/remote-window-touch-action-runtime';
 import type { RemoteWindowInputMode } from './remote-window-overlay-constants';
+import type { RemoteWindowOrientationPolicy } from './remote-window-overlay-helpers';
 
 export const REMOTE_WINDOW_ENTRY_POSITION_STORAGE_KEY =
   'zterm:remote-window:entry-position-v1';
@@ -16,6 +24,18 @@ export const REMOTE_WINDOW_TOUCH_SCROLL_INVERTED_STORAGE_KEY =
   'zterm:remote-window:touch-scroll-inverted-v1';
 export const REMOTE_WINDOW_INPUT_MODE_STORAGE_KEY =
   'zterm:remote-window:input-mode-v1';
+export const REMOTE_WINDOW_DISPLAY_ORIENTATION_STORAGE_KEY =
+  'zterm:remote-window:display-orientation-v1';
+export const REMOTE_WINDOW_QUALITY_BITRATE_MULTIPLIER_STORAGE_KEY =
+  'zterm:remote-window:quality-bitrate-multiplier-v1';
+export const REMOTE_WINDOW_QUALITY_MAX_FRAME_RATE_STORAGE_KEY =
+  'zterm:remote-window:quality-max-frame-rate-v1';
+
+export const REMOTE_WINDOW_DISPLAY_ORIENTATION_OPTIONS = [
+  'portrait',
+  'landscape',
+  'follow-device',
+] as const;
 
 export const REMOTE_WINDOW_TOUCH_SCROLL_FRACTION_OPTIONS = [0.125, 0.25, 0.5, 1] as const;
 export type RemoteWindowTouchScrollFraction =
@@ -136,4 +156,78 @@ export function writeRemoteWindowInputMode(mode: RemoteWindowInputMode) {
     return;
   }
   window.localStorage.setItem(REMOTE_WINDOW_INPUT_MODE_STORAGE_KEY, mode);
+}
+
+export function readRemoteWindowDisplayOrientation(): RemoteWindowOrientationPolicy {
+  if (typeof window === 'undefined') {
+    return 'follow-device';
+  }
+  const raw = window.localStorage.getItem(REMOTE_WINDOW_DISPLAY_ORIENTATION_STORAGE_KEY);
+  return (REMOTE_WINDOW_DISPLAY_ORIENTATION_OPTIONS as readonly string[]).includes(raw || '')
+    ? raw as RemoteWindowOrientationPolicy
+    : 'follow-device';
+}
+
+export function writeRemoteWindowDisplayOrientation(orientation: RemoteWindowOrientationPolicy) {
+  if (typeof window === 'undefined' || !(REMOTE_WINDOW_DISPLAY_ORIENTATION_OPTIONS as readonly string[]).includes(orientation)) {
+    return;
+  }
+  window.localStorage.setItem(REMOTE_WINDOW_DISPLAY_ORIENTATION_STORAGE_KEY, orientation);
+}
+
+function resolveRemoteWindowBitrateMultiplier(value: unknown): RemoteWindowVideoBudgetMultiplier | null {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return parsed === 1 || parsed === 2 || parsed === 4 ? parsed : null;
+}
+
+function resolveRemoteWindowMaxFrameRate(value: unknown): RemoteWindowQualityMaxFrameRate | null {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return (REMOTE_WINDOW_QUALITY_FRAME_RATE_OPTIONS as readonly number[]).includes(parsed)
+    ? parsed as RemoteWindowQualityMaxFrameRate
+    : null;
+}
+
+export { REMOTE_WINDOW_BITRATE_MULTIPLIER_AUTO, type RemoteWindowBitrateMultiplierSelection };
+
+// `auto` means the user has not overridden the bitrate budget, so the resolved
+// profile keeps its per-preference baseline (smooth 2x / quality 4x).
+export function readRemoteWindowBitrateMultiplierSelection(): RemoteWindowBitrateMultiplierSelection {
+  if (typeof window === 'undefined') {
+    return REMOTE_WINDOW_BITRATE_MULTIPLIER_AUTO;
+  }
+  return resolveRemoteWindowBitrateMultiplier(
+    window.localStorage.getItem(REMOTE_WINDOW_QUALITY_BITRATE_MULTIPLIER_STORAGE_KEY),
+  ) ?? REMOTE_WINDOW_BITRATE_MULTIPLIER_AUTO;
+}
+
+export function writeRemoteWindowBitrateMultiplierSelection(
+  selection: RemoteWindowBitrateMultiplierSelection,
+) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  if (selection === REMOTE_WINDOW_BITRATE_MULTIPLIER_AUTO) {
+    window.localStorage.removeItem(REMOTE_WINDOW_QUALITY_BITRATE_MULTIPLIER_STORAGE_KEY);
+    return;
+  }
+  if (resolveRemoteWindowBitrateMultiplier(selection) === null) {
+    return;
+  }
+  window.localStorage.setItem(REMOTE_WINDOW_QUALITY_BITRATE_MULTIPLIER_STORAGE_KEY, String(selection));
+}
+
+export function readRemoteWindowMaxFrameRate(): RemoteWindowQualityMaxFrameRate {
+  if (typeof window === 'undefined') {
+    return 30;
+  }
+  return resolveRemoteWindowMaxFrameRate(
+    window.localStorage.getItem(REMOTE_WINDOW_QUALITY_MAX_FRAME_RATE_STORAGE_KEY),
+  ) ?? 30;
+}
+
+export function writeRemoteWindowMaxFrameRate(frameRate: RemoteWindowQualityMaxFrameRate) {
+  if (typeof window === 'undefined' || resolveRemoteWindowMaxFrameRate(frameRate) === null) {
+    return;
+  }
+  window.localStorage.setItem(REMOTE_WINDOW_QUALITY_MAX_FRAME_RATE_STORAGE_KEY, String(frameRate));
 }

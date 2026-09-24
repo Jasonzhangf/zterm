@@ -111,7 +111,7 @@ function createRuntime(overrides: {
     autoCommandDelayMs: 0,
     waitMs: overrides.waitMs || (async () => {}),
     logTimePrefix: () => '2026-05-01 00:00:00',
-    runTmux,
+    runTmuxForSession: (args, _sessionName) => runTmux(args),
     resizeBackendSession: overrides.resizeBackendSession,
     adaptiveWidthOwnershipStore: overrides.adaptiveWidthOwnershipStore,
     closeTransportSubscriber,
@@ -779,7 +779,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
       autoCommandDelayMs: 0,
       waitMs: async () => {},
       logTimePrefix: () => '2026-05-13 00:30:00',
-      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+      runTmuxForSession: vi.fn((_args: string[], _sessionName: string) => ({ ok: true as const, stdout: '' })),
       closeTransportSubscriber: vi.fn(),
       getSessionMirror: (candidate: TerminalSession) => (candidate.mirrorKey ? mirrors.get(candidate.mirrorKey) || null : null),
     });
@@ -2090,7 +2090,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
       autoCommandDelayMs: 0,
       waitMs: async () => {},
       logTimePrefix: () => '2026-05-03 00:00:00',
-      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+      runTmuxForSession: vi.fn((_args: string[], _sessionName: string) => ({ ok: true as const, stdout: '' })),
       closeTransportSubscriber: vi.fn(),
       getSessionMirror: (session: TerminalSession) => (session.mirrorKey ? mirrors.get(session.mirrorKey) || null : null),
     });
@@ -2177,7 +2177,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
       autoCommandDelayMs: 0,
       waitMs: async () => {},
       logTimePrefix: () => '2026-05-11 00:00:00',
-      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+      runTmuxForSession: vi.fn((_args: string[], _sessionName: string) => ({ ok: true as const, stdout: '' })),
       closeTransportSubscriber: vi.fn(),
       getSessionMirror: () => mirror,
     });
@@ -2315,7 +2315,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
       autoCommandDelayMs: 0,
       waitMs: async () => {},
       logTimePrefix: () => '2026-05-13 00:31:00',
-      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+      runTmuxForSession: vi.fn((_args: string[], _sessionName: string) => ({ ok: true as const, stdout: '' })),
       closeTransportSubscriber: vi.fn(),
       getSessionMirror: (candidate: TerminalSession) => (candidate.mirrorKey ? mirrors.get(candidate.mirrorKey) || null : null),
     });
@@ -2405,7 +2405,7 @@ it('skips buffer-head broadcast for a backpressured subscriber while healthy pee
     autoCommandDelayMs: 0,
     waitMs: async () => {},
     logTimePrefix: () => '2026-05-06 00:00:00',
-    runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    runTmuxForSession: vi.fn((_args: string[], _sessionName: string) => ({ ok: true as const, stdout: '' })),
     closeTransportSubscriber: vi.fn(),
     getSessionMirror: () => mirror,
   });
@@ -2489,7 +2489,7 @@ it('skips buffer-head broadcast for a backpressured subscriber while healthy pee
       autoCommandDelayMs: 0,
       waitMs: async () => {},
       logTimePrefix: () => '2026-05-06 00:00:00',
-      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+      runTmuxForSession: vi.fn((_args: string[], _sessionName: string) => ({ ok: true as const, stdout: '' })),
       closeTransportSubscriber: vi.fn(),
       getSessionMirror: () => mirror,
     });
@@ -2571,7 +2571,7 @@ it('skips buffer-head broadcast for a backpressured subscriber while healthy pee
       autoCommandDelayMs: 0,
       waitMs: async () => {},
       logTimePrefix: () => '2026-05-06 00:00:00',
-      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+      runTmuxForSession: vi.fn((_args: string[], _sessionName: string) => ({ ok: true as const, stdout: '' })),
       closeTransportSubscriber: vi.fn(),
       getSessionMirror: () => mirror,
     });

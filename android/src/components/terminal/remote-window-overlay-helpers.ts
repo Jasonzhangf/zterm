@@ -475,13 +475,42 @@ export function resolveRemoteWindowTargetAspectRatio(options: {
   return options.viewport.width / Math.max(1, options.viewport.height);
 }
 
+export function resolveRemoteWindowContainerViewport(options: {
+  orientation: RemoteWindowOrientationPolicy;
+  device: SurfaceSize;
+  visualViewport?: SurfaceSize | null;
+}): SurfaceSize {
+  const width = Math.max(1, Math.round(options.visualViewport?.width ?? options.device.width));
+  const height = Math.max(1, Math.round(options.visualViewport?.height ?? options.device.height));
+  if (options.orientation === 'landscape') {
+    return {
+      width: Math.max(width, height),
+      height: Math.min(width, height),
+    };
+  }
+  if (options.orientation === 'portrait') {
+    return {
+      width: Math.min(width, height),
+      height: Math.max(width, height),
+    };
+  }
+  return { width, height };
+}
+
 export function resolveRemoteWindowTargetResizeSize(options: {
   viewport: SurfaceSize;
   devicePixelRatio?: number;
   target?: RemoteWindowStreamTargetManifest | null;
+  orientation?: RemoteWindowOrientationPolicy;
 }): SurfaceSize | null {
-  const viewportWidth = Math.max(1, options.viewport.width);
-  const viewportHeight = Math.max(1, options.viewport.height);
+  const viewport = options.orientation && options.orientation !== 'follow-device'
+    ? resolveRemoteWindowContainerViewport({
+        orientation: options.orientation,
+        device: options.viewport,
+      })
+    : options.viewport;
+  const viewportWidth = Math.max(1, viewport.width);
+  const viewportHeight = Math.max(1, viewport.height);
   const dpr = Number.isFinite(options.devicePixelRatio) && (options.devicePixelRatio || 0) > 0
     ? options.devicePixelRatio as number
     : 1;
