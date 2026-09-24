@@ -17,7 +17,6 @@ export interface DaemonSessionCatalogDeps {
   listTmuxSessions: (backend?: 'tmux' | 'herdr') => string[];
   listTerminalSessions?: () => string[];
   listTerminalSessionCatalog?: () => TerminalSessionCatalogEntry[];
-  runTmuxAsync?: (args: string[]) => Promise<{ ok: true; stdout: string }>;
   runTmuxAsyncAcrossSockets?: (args: string[]) => Promise<{ ok: true; stdout: string }>;
   runTmuxAsyncForSession?: (args: string[], sessionName: string) => Promise<{ ok: true; stdout: string }>;
   readProcessGroup?: (
@@ -66,7 +65,7 @@ export function createDaemonSessionCatalogRuntime(
   }
 
   async function sampleObservations(entries: TerminalSessionCatalogEntry[]) {
-    if (!deps.runTmuxAsync) {
+    if (!deps.runTmuxAsyncForSession && !deps.runTmuxAsyncAcrossSockets) {
       return entries.map((entry) => ({ ...entry }));
     }
     if (!deps.runTmuxAsyncForSession) {

@@ -26,7 +26,7 @@ describe('server mirror capture truth gates', () => {
 
     expect(source).toContain('createTerminalMirrorCaptureRuntime');
     expect(source).toContain('captureMirrorAuthoritativeBufferFromTmux: terminalMirrorCapture.captureMirrorAuthoritativeBufferFromTmux');
-    expect(source).toContain('runTmuxAsync: (args) => terminalControlRuntime.runTmuxAsync(args)');
+    expect(source).toContain('runTmuxAsyncForSession: (args, sessionName) => terminalControlRuntime.runTmuxAsyncForSession(args, sessionName)');
   });
 
   it('canonicalizes captured lines directly inside the snapshot capture owner instead of replaying a joined screen snapshot into synthetic scrollback', () => {

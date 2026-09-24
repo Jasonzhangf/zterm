@@ -118,4 +118,67 @@ describe('daemon session catalog across tmux sockets', () => {
     expect(sessionTargetedCalls).toHaveLength(1);
     expect(sessionTargetedCalls[0]?.socketPath).toBe(DEFAULT_SOCKET);
   });
+
+  it('fans a global pane read across every socket in latched-then-discovered order', async () => {
+    // The daemon latched the stable socket, which only answers list-panes for
+    // its own keepalive; the real session 'extra-session' lives on the default
+    // socket. A global pane read must return rows from every socket, in the
+    // latched-first order that listTmuxSessions uses. Deduplication by session
+    // name is the consumer's job (parsePaneProcessFacts / cwdBySession).
+    const paneReads: string[] = [];
+    spawnSyncMock.mockImplementation((_binary: string, args: string[]) => {
+      const socketIndex = args.indexOf('-S');
+      const socketPath = socketIndex >= 0 ? args[socketIndex + 1] : undefined;
+      if (args.includes('list-panes')) {
+        paneReads.push(socketPath ?? '(latched)');
+        if (socketPath === DEFAULT_SOCKET) {
+          return { status: 0, stdout: 'default-only\t10\tzsh\nextra-session\t20\tcodex\n', stderr: '' };
+        }
+        if (socketPath === EXTRA_SOCKET) {
+          return { status: 0, stdout: 'extra-session\t20\tcodex\n', stderr: '' };
+        }
+        return { status: 1, stdout: '', stderr: 'no server running' };
+      }
+      return { status: 0, stdout: '', stderr: '' };
+    });
+    const runtime = createTerminalControlRuntime({
+      tmuxBinary: 'tmux',
+      defaultSessionName: 'demo',
+      hiddenTmuxSessions: new Set(),
+      sanitizeSessionName: (input) => input?.trim() || 'demo',
+      tmuxSocketDir: '/tmp/stable-tmux',
+      tmuxSocketPaths: () => [DEFAULT_SOCKET, EXTRA_SOCKET],
+    });
+
+    const result = runtime.runTmuxAcrossSockets(['list-panes', '-a', '-F', '#{session_name}']);
+
+    // Latched socket first, then each discovered socket.
+    expect(paneReads).toEqual(['(latched)', DEFAULT_SOCKET, EXTRA_SOCKET]);
+    expect(result.stdout).toBe(
+      'default-only\t10\tzsh\n' +
+      'extra-session\t20\tcodex\n' +
+      'extra-session\t20\tcodex',
+    );
+  });
+
+  it('propagates the underlying error when every socket fails a global pane read', () => {
+    spawnSyncMock.mockImplementation((_binary: string, args: string[]) => {
+      if (args.includes('list-panes')) {
+        return { status: 1, stdout: '', stderr: 'no server running on any socket' };
+      }
+      return { status: 0, stdout: '', stderr: '' };
+    });
+    const runtime = createTerminalControlRuntime({
+      tmuxBinary: 'tmux',
+      defaultSessionName: 'demo',
+      hiddenTmuxSessions: new Set(),
+      sanitizeSessionName: (input) => input?.trim() || 'demo',
+      tmuxSocketDir: '/tmp/stable-tmux',
+      tmuxSocketPaths: () => [DEFAULT_SOCKET],
+    });
+
+    // No socket answered: the fan-out must surface the failure, not silently
+    // return empty output (project rule: no silent failure).
+    expect(() => runtime.runTmuxAcrossSockets(['list-panes', '-a'])).toThrow('no server running on any socket');
+  });
 });

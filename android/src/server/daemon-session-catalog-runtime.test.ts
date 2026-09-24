@@ -292,7 +292,6 @@ describe('daemon session catalog runtime', () => {
         { name: 'agent-a', backend: 'tmux' },
         { name: 'external-a', backend: 'herdr' },
       ],
-      runTmuxAsync,
       runTmuxAsyncAcrossSockets: (args) => runTmuxAsync(args),
       runTmuxAsyncForSession: (args, _sessionName) => runTmuxAsync(args),
       readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
@@ -339,7 +338,6 @@ describe('daemon session catalog runtime', () => {
         { name: 'shell-a', backend: 'tmux' },
         { name: 'agent-b', backend: 'tmux' },
       ],
-      runTmuxAsync,
       runTmuxAsyncAcrossSockets: (args) => runTmuxAsync(args),
       runTmuxAsyncForSession: (args, _sessionName) => runTmuxAsync(args),
       readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
@@ -372,7 +370,6 @@ describe('daemon session catalog runtime', () => {
     const runtime = createDaemonSessionCatalogRuntime({
       listTmuxSessions: vi.fn(() => []),
       listTerminalSessionCatalog: () => [{ name: 'agent-a', backend: 'tmux' }],
-      runTmuxAsync,
       runTmuxAsyncAcrossSockets: (args) => runTmuxAsync(args),
       runTmuxAsyncForSession: (args, _sessionName) => runTmuxAsync(args),
       readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
@@ -409,7 +406,6 @@ describe('daemon session catalog runtime', () => {
     const runtime = createDaemonSessionCatalogRuntime({
       listTmuxSessions: vi.fn(() => []),
       listTerminalSessionCatalog: () => enumerated,
-      runTmuxAsync,
       runTmuxAsyncAcrossSockets: (args) => runTmuxAsync(args),
       runTmuxAsyncForSession: (args, _sessionName) => runTmuxAsync(args),
       readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
@@ -453,7 +449,6 @@ describe('daemon session catalog runtime', () => {
     const runtime = createDaemonSessionCatalogRuntime({
       listTmuxSessions: vi.fn(() => []),
       listTerminalSessionCatalog: () => [{ name: 'agent-a', backend: 'tmux' }],
-      runTmuxAsync,
       runTmuxAsyncAcrossSockets: (args) => runTmuxAsync(args),
       runTmuxAsyncForSession: (args, _sessionName) => runTmuxAsync(args),
       readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
@@ -482,7 +477,6 @@ describe('daemon session catalog runtime', () => {
     const runtime = createDaemonSessionCatalogRuntime({
       listTmuxSessions: vi.fn(() => []),
       listTerminalSessionCatalog: () => [{ name: 'agent-a', backend: 'tmux' }],
-      runTmuxAsync,
       runTmuxAsyncAcrossSockets: (args) => runTmuxAsync(args),
       runTmuxAsyncForSession: (args, _sessionName) => runTmuxAsync(args),
       readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
@@ -495,7 +489,6 @@ describe('daemon session catalog runtime', () => {
     const payload = buildSessionsCatalogPayload({
       listTmuxSessions: () => [],
       listTerminalSessionCatalog: () => runtime.read(),
-      runTmuxAsync,
       runTmuxAsyncAcrossSockets: (args) => runTmuxAsync(args),
       runTmuxAsyncForSession: (args, _sessionName) => runTmuxAsync(args),
       readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
@@ -503,7 +496,6 @@ describe('daemon session catalog runtime', () => {
     const repeated = buildSessionsCatalogPayload({
       listTmuxSessions: () => [],
       listTerminalSessionCatalog: () => runtime.read(),
-      runTmuxAsync,
       runTmuxAsyncAcrossSockets: (args) => runTmuxAsync(args),
       runTmuxAsyncForSession: (args, _sessionName) => runTmuxAsync(args),
       readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
@@ -529,7 +521,6 @@ describe('daemon session catalog runtime', () => {
       const runtime = createDaemonSessionCatalogRuntime({
         listTmuxSessions: vi.fn(() => []),
         listTerminalSessionCatalog: () => [{ name: 'agent-a', backend: 'tmux' }],
-        runTmuxAsync,
         runTmuxAsyncAcrossSockets: (args) => runTmuxAsync(args),
         runTmuxAsyncForSession: (args) => runTmuxAsync(args),
         readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
@@ -634,10 +625,6 @@ describe('daemon session catalog runtime', () => {
     const runtime = createDaemonSessionCatalogRuntime({
       listTmuxSessions: vi.fn(() => []),
       listTerminalSessionCatalog: () => [{ name: 'agent-a', backend: 'tmux' }],
-      runTmuxAsync: async (args: string[]) => ({
-        ok: true as const,
-        stdout: args[0] === 'list-panes' ? 'agent-a\t42\tcodex' : 'thinking',
-      }),
       runTmuxAsyncAcrossSockets: async (args: string[]) => ({
         ok: true as const,
         stdout: args[0] === 'list-panes' ? 'agent-a\t42\tcodex' : 'thinking',

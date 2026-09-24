@@ -190,7 +190,9 @@ export function createTerminalControlRuntime(
     for (const socketPath of tmuxSocketTargets()) {
       try {
         const result = socketPath ? runTmuxWithSocketPath(args, socketPath) : runTmux(args);
-        outputs.push(result.stdout);
+        // Each tmux stdout is newline-terminated; strip it before joining so a
+        // multi-socket merge does not emit a blank boundary line.
+        outputs.push(result.stdout.replace(/\n$/u, ''));
         reached = true;
       } catch (error) {
         if (firstError === undefined) firstError = error;
@@ -211,7 +213,9 @@ export function createTerminalControlRuntime(
         const result = socketPath
           ? await runTmuxAsyncWithSocketPath(args, socketPath)
           : await runTmuxAsync(args);
-        outputs.push(result.stdout);
+        // Each tmux stdout is newline-terminated; strip it before joining so a
+        // multi-socket merge does not emit a blank boundary line.
+        outputs.push(result.stdout.replace(/\n$/u, ''));
         reached = true;
       } catch (error) {
         if (firstError === undefined) firstError = error;
