@@ -428,14 +428,6 @@ impl Operator for BufferPublisherPlan {
         let out_of_bounds = changed_ranges
             .iter()
             .any(|(start, end)| *start < truth_window_min || *end > truth_window_max);
-        let range_count_over = changed_ranges.len() as u64 > max_ranges;
-        let span_over = changed_ranges
-            .iter()
-            .map(|(start, end)| end.saturating_sub(*start))
-            .max()
-            .unwrap_or(0)
-            > max_span;
-
         let subscribers = subscriber_facts
             .get("subscribers")
             .and_then(Value::as_array)
@@ -449,15 +441,14 @@ impl Operator for BufferPublisherPlan {
             }));
         }
 
-        let mut full_resync = full_resync_policy || out_of_bounds || range_count_over || span_over;
+        // Incoming changed ranges are diff truth; promotion to full-window
+        // resync belongs to the daemon publisher's per-subscriber pending
+        // bounds, not to this mirror-store diff projection.
+        let mut full_resync = full_resync_policy || out_of_bounds;
         let mut resync_reason = if full_resync_policy {
             Some("policy")
         } else if out_of_bounds {
             Some("range-bounds")
-        } else if range_count_over {
-            Some("range-count")
-        } else if span_over {
-            Some("span-lines")
         } else {
             None
         };

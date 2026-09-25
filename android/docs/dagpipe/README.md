@@ -52,16 +52,21 @@ Mirror update semantics captured in the DAG:
 - refresh range: `compute_changed_ranges` compares the previous canonical
   window against the committed mirror truth; `classify_update` turns that into
   append / rewrite / window-shift / reset / head-only; `plan_refresh` collapses
-  pending ranges into no-hole contiguous ranges and escalates to full resync
-  when range count, span, age, or backpressure thresholds require it.
+  changed ranges into no-hole contiguous spans and applies subscriber pending
+  bounds supplied in `arc.subscriber_facts`. Per-subscriber range count, span,
+  age, and backpressure resync remain owned by `daemon.buffer_publisher`.
 
 Diff policy:
 
 - `arc.diff_policy` is an explicit graph input, not hard-coded operator state.
-  It configures rewrite handling for TUI apps that update older rows, max
-  changed-span policy, and the full-resync thresholds.
+  The daemon passes the same pending range/span/age limits that
+  `daemon.buffer_publisher` enforces for subscribers.
 - The default target is no-hole updates: a publish frame must cover every row
   from `startIndex` through `endIndex - 1`. Sparse holes are not sent.
+- Incoming changed ranges are diff truth only: `daemon.mirror_store.diff`
+  returns them unchanged, and the bridge must return exactly the ranges
+  computed by `src/server/canonical-buffer.ts#findChangedIndexedRanges`.
+  Subscriber pending bounds stay in `daemon.buffer_publisher`.
 - Configurable rules may decide between tail append, contiguous rewrite span,
   window-shift prefix/tail, or full-window resync.
 
@@ -72,8 +77,8 @@ Diff trigger conditions:
 - Do not run diff on `buffer-head-request` or client read requests.
 - First ready mirror, forced attach refresh, invalid revision lineage, and
   explicit resync requests use full-window output.
-- Range count / span / pending age / transport backpressure may promote the
-  next flush to full-window resync.
+- Subscriber pending range count / span / pending age / transport backpressure
+  may promote the next flush to full-window resync.
 
 State machines:
 

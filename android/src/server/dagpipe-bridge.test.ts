@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { compilePhase0, runMirrorPublish, runControlDispatch } from './dagpipe-bridge';
+import { findChangedIndexedRanges } from './canonical-buffer';
 
 function cell(ch: string) {
   const codePoint = Array.from(ch)[0]?.codePointAt(0) ?? 32;
@@ -37,6 +38,12 @@ function mirrorRequest(prevLines: string[], nextLines: string[], diffPolicy = {}
       },
     },
   };
+}
+
+function frameRanges(result: ReturnType<typeof runMirrorPublish>) {
+  const frames = (result as { ok: true; outputs: Record<string, { frames: Array<{ ranges: Array<{ startIndex: number; endIndex: number }> }> }> })
+    .outputs['arc.wire_frames'].frames;
+  return frames[0]?.ranges ?? [];
 }
 
 describe('dagpipe bridge parity', () => {
@@ -79,6 +86,32 @@ describe('dagpipe bridge parity', () => {
     const frames = (result as { ok: true; outputs: Record<string, { frames: Array<Record<string, any>> }> })
       .outputs['arc.wire_frames'].frames;
     expect(frames[0]?.action).toBe('hold');
+  });
+
+  it('matches findChangedIndexedRanges for a broad rewrite over 4096 lines', () => {
+    const prevLines = Array.from({ length: 5_000 }, (_, index) => `line-${index}`);
+    const nextLines = prevLines.map((value, index) => (index < 4_200 ? `changed-${index}` : value));
+    const expected = findChangedIndexedRanges({
+      previousStartIndex: 0,
+      previousLines: prevLines.map(line),
+      nextStartIndex: 0,
+      nextLines: nextLines.map(line),
+    });
+    const result = runMirrorPublish(mirrorRequest(prevLines, nextLines));
+    expect(frameRanges(result)).toEqual(expected);
+  });
+
+  it('matches findChangedIndexedRanges with more than 64 sparse ranges', () => {
+    const prevLines = Array.from({ length: 200 }, (_, index) => `line-${index}`);
+    const nextLines = prevLines.map((value, index) => (index % 2 === 0 ? `changed-${index}` : value));
+    const expected = findChangedIndexedRanges({
+      previousStartIndex: 0,
+      previousLines: prevLines.map(line),
+      nextStartIndex: 0,
+      nextLines: nextLines.map(line),
+    });
+    const result = runMirrorPublish(mirrorRequest(prevLines, nextLines));
+    expect(frameRanges(result)).toEqual(expected);
   });
 
   it('dispatches valid control commands', () => {

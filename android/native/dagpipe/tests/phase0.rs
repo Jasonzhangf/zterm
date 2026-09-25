@@ -142,7 +142,14 @@ fn pending_bounds_escalate_to_full_resync() {
         0,
         &["a", "b", "c"],
         json!({ "maxPendingRanges": 0 }),
-        json!({ "availableStartIndex": 0, "availableEndIndex": 3 }),
+        json!({
+            "availableStartIndex": 0,
+            "availableEndIndex": 3,
+            "subscribers": [{
+                "id": "s1",
+                "pendingRanges": [{ "startIndex": 0, "endIndex": 1 }],
+            }]
+        }),
     );
     let result =
         zterm_dagpipe::core::run_mirror_publish_json(serde_json::to_string(&request).unwrap())

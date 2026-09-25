@@ -90,6 +90,11 @@ import {
 } from './remote-window-stream-daemon';
 import { createTerminalPerformanceTraceStore } from '@zterm/shared/terminal/performance-trace';
 import { createAdaptiveWidthOwnershipStore } from './adaptive-width-ownership-store';
+import {
+  SUBSCRIBER_PENDING_AGE_LIMIT_MS,
+  SUBSCRIBER_PENDING_RANGE_LIMIT,
+  SUBSCRIBER_PENDING_SPAN_LINE_LIMIT,
+} from './daemon-buffer-publisher-runtime';
 import { compilePhase0, runMirrorPublish, runControlDispatch } from './dagpipe-bridge';
 
 const DAEMON_CONFIG = resolveDaemonRuntimeConfig();
@@ -218,7 +223,12 @@ function planMirrorPublishRanges(
         cursorKeysApp: mirror.cursorKeysApp,
         cursor: mirror.cursor,
       },
-      'arc.diff_policy': {},
+      'arc.diff_policy': {
+        fullResync: false,
+        maxPendingRanges: SUBSCRIBER_PENDING_RANGE_LIMIT,
+        maxPendingSpanLines: SUBSCRIBER_PENDING_SPAN_LINE_LIMIT,
+        maxPendingAgeMs: SUBSCRIBER_PENDING_AGE_LIMIT_MS,
+      },
       'arc.prev_mirror_snapshot': {
         revision: mirror.revision,
         bufferStartIndex: previousStartIndex,

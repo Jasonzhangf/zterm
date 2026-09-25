@@ -230,8 +230,10 @@ Phase 1 scope added:
 `android/native/dagpipe` implements the daemon graph operators, compiles both
 daemon graphs, and exposes `compilePhase0`, `runMirrorPublish`, and
 `runControlDispatch` through N-API. `src/server/dagpipe-bridge.ts` is the TS
-load boundary; `server.ts` uses the bridge for mirror changed-range/plan
-decisions and control route decisions.
+load boundary; `server.ts` uses the bridge for mirror changed-range decisions
+and control route decisions. For the mirror path the bridge must return exactly
+the ranges computed by `src/server/canonical-buffer.ts#findChangedIndexedRanges`;
+subscriber pending bounds stay in `daemon-buffer-publisher-runtime.ts`.
 
 Required evidence:
 
