@@ -217,6 +217,7 @@ describe('resource registry truth gate', () => {
     expect(releaseBuilder).not.toContain('tsx src/server/server.ts');
 
     expect(npmPackager).toContain("requirePath(resolve(releaseDir, 'runtime/server.cjs')");
+    expect(npmPackager).toContain("requirePath(resolve(releaseDir, 'runtime/dagpipe.node')");
     expect(npmPackager).toContain("cpSync(resolve(releaseDir, 'runtime'), resolve(npmPackageDir, 'runtime')");
     expect(npmPackager).toContain("const script = resolve(packageRoot, 'support/windows/zterm-daemon.ps1')");
     expect(npmPackager).not.toContain("resolve(projectRoot, 'src/server/server.ts')");

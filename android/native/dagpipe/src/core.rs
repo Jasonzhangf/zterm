@@ -466,8 +466,8 @@ impl Operator for BufferPublisherPlan {
         // Incoming changed ranges are diff truth; promotion to full-window
         // resync belongs to the daemon publisher's per-subscriber pending
         // bounds, not to this mirror-store diff projection.
-        let mut full_resync = full_resync_policy || out_of_bounds;
-        let mut resync_reason = if full_resync_policy {
+        let initial_resync = full_resync_policy || out_of_bounds;
+        let initial_reason = if full_resync_policy {
             Some("policy")
         } else if out_of_bounds {
             Some("range-bounds")
@@ -498,6 +498,8 @@ impl Operator for BufferPublisherPlan {
                 }));
                 continue;
             }
+            let mut full_resync = initial_resync;
+            let mut resync_reason = initial_reason;
             let age_ms = subscriber
                 .get("pendingSinceMs")
                 .and_then(Value::as_u64)
@@ -534,6 +536,8 @@ impl Operator for BufferPublisherPlan {
                     "subscriberId": id,
                     "action": "head-only",
                     "ranges": [],
+                    "fullResync": full_resync,
+                    "resyncReason": resync_reason,
                 }));
                 continue;
             }
@@ -545,11 +549,13 @@ impl Operator for BufferPublisherPlan {
                 "subscriberId": id,
                 "action": if full_resync { "resync" } else { "body" },
                 "ranges": merged.into_iter().map(range_to_json).collect::<Vec<_>>(),
+                "fullResync": full_resync,
+                "resyncReason": resync_reason,
             }));
         }
         Ok(json!({
-            "fullResync": full_resync,
-            "resyncReason": resync_reason,
+            "fullResync": initial_resync,
+            "resyncReason": initial_reason,
             "updateClass": kind,
             "subscribers": plans,
         }))
@@ -571,11 +577,11 @@ impl Operator for BufferPublisherEmit {
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
-        let full_resync = plan
+        let plan_full_resync = plan
             .get("fullResync")
             .and_then(Value::as_bool)
             .unwrap_or(false);
-        let reason = plan.get("resyncReason").cloned().unwrap_or(Value::Null);
+        let plan_reason = plan.get("resyncReason").cloned().unwrap_or(Value::Null);
         let frames = subscribers
             .iter()
             .map(|subscriber| {
@@ -583,6 +589,14 @@ impl Operator for BufferPublisherEmit {
                     .get("action")
                     .and_then(Value::as_str)
                     .unwrap_or("hold");
+                let full_resync = subscriber
+                    .get("fullResync")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(plan_full_resync);
+                let reason = subscriber
+                    .get("resyncReason")
+                    .cloned()
+                    .unwrap_or_else(|| plan_reason.clone());
                 let kind = if action == "head-only" {
                     "head"
                 } else if action == "hold" {

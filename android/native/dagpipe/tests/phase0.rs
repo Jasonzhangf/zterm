@@ -185,6 +185,38 @@ fn backpressured_subscriber_holds() {
 }
 
 #[test]
+fn one_subscriber_resync_does_not_promote_its_siblings() {
+    let request = mirror_request(
+        0,
+        &["a", "b"],
+        0,
+        &["a", "b", "c"],
+        json!({ "maxPendingRanges": 0 }),
+        json!({
+            "availableStartIndex": 0,
+            "availableEndIndex": 3,
+            "subscribers": [
+                {
+                    "id": "pressured",
+                    "pendingRanges": [{ "startIndex": 0, "endIndex": 1 }],
+                },
+                { "id": "clean" }
+            ]
+        }),
+    );
+    let result =
+        zterm_dagpipe::core::run_mirror_publish_json(serde_json::to_string(&request).unwrap())
+            .unwrap();
+    let frames = output_frames(&result);
+    assert_eq!(frames[0]["subscriberId"], "pressured");
+    assert_eq!(frames[0]["fullResync"], true);
+    assert_eq!(frames[0]["ranges"], json!([{"startIndex":0,"endIndex":3}]));
+    assert_eq!(frames[1]["subscriberId"], "clean");
+    assert_eq!(frames[1]["fullResync"], false);
+    assert_eq!(frames[1]["ranges"], json!([{"startIndex":2,"endIndex":3}]));
+}
+
+#[test]
 fn invalid_control_produces_explicit_failure() {
     let request = json!({
         "execution_id": "phase0-control",
