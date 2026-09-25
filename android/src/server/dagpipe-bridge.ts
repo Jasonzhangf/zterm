@@ -8,6 +8,7 @@ const require = createRequire(typeof __filename !== 'undefined' ? __filename : i
 interface DagpipeNativeModule {
   compilePhase0: () => string;
   compileAllDagpipePhases: () => string;
+  runPhase2DaemonConnection: (inputJson: string) => string;
   runMirrorPublish: (inputJson: string) => string;
   runControlDispatch: (inputJson: string) => string;
 }
@@ -78,6 +79,12 @@ export function compileAllDagpipePhases(): DagpipeCompileResult {
 
 export function runMirrorPublish(input: Record<string, unknown>): DagpipeResult {
   return JSON.parse(loadDagpipeNative().runMirrorPublish(JSON.stringify(input))) as DagpipeResult;
+}
+
+export function runPhase2DaemonConnection(input: Record<string, unknown>): DagpipeResult {
+  return JSON.parse(
+    loadDagpipeNative().runPhase2DaemonConnection(JSON.stringify(input)),
+  ) as DagpipeResult;
 }
 
 export function runControlDispatch(input: Record<string, unknown>): DagpipeResult {
