@@ -41,6 +41,11 @@ Phase 4 static graphs:
 
 - `remote-window-stream-overlay.graph.json`
 
+Phase 5 static graphs:
+
+- `android-session-shell-lifecycle.graph.json`
+- `android-session-preview-lattice.graph.json`
+
 Validation:
 
 ```sh

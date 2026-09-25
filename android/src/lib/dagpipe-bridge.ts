@@ -20,6 +20,7 @@ interface DagpipeNativeModule {
   compilePhase2: () => string;
   compilePhase3: () => string;
   compilePhase4: () => string;
+  compilePhase5: () => string;
   runConnectionLifecycle: (inputJson: string) => string;
   runBufferManagement: (inputJson: string) => string;
   runBufferRender: (inputJson: string) => string;
@@ -33,6 +34,8 @@ interface DagpipeNativeModule {
   runPhase3Attachment: (inputJson: string) => string;
   runPhase3Screenshot: (inputJson: string) => string;
   runPhase4RemoteWindow: (inputJson: string) => string;
+  runPhase5ShellLifecycle: (inputJson: string) => string;
+  runPhase5PreviewLattice: (inputJson: string) => string;
 }
 
 function sourceIndexNode() {
@@ -86,6 +89,10 @@ export function compilePhase3(): DagpipeCompileResult {
 
 export function compilePhase4(): DagpipeCompileResult {
   return JSON.parse(cached().compilePhase4()) as DagpipeCompileResult;
+}
+
+export function compilePhase5(): DagpipeCompileResult {
+  return JSON.parse(cached().compilePhase5()) as DagpipeCompileResult;
 }
 
 function run(fn: keyof DagpipeNativeModule, input: Record<string, unknown>): DagpipeResult {
@@ -148,6 +155,14 @@ export function runPhase3Screenshot(input: Record<string, unknown>): DagpipeResu
 
 export function runPhase4RemoteWindow(input: Record<string, unknown>): DagpipeResult {
   return run('runPhase4RemoteWindow', input);
+}
+
+export function runPhase5ShellLifecycle(input: Record<string, unknown>): DagpipeResult {
+  return run('runPhase5ShellLifecycle', input);
+}
+
+export function runPhase5PreviewLattice(input: Record<string, unknown>): DagpipeResult {
+  return run('runPhase5PreviewLattice', input);
 }
 
 export { readDagpipeInputChunks } from './dagpipe-input-chunks';

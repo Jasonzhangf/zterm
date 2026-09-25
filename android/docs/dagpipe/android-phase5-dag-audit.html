@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>zterm Android DAGpipe Phase 5 独立审查</title>
+    <style>
+      :root { color-scheme: light; --bg:#f7f7f5; --panel:#ffffff; --ink:#1f2933; --muted:#5b6b79; --line:#d8dee6; --ok:#0f766e; --ok-bg:#ecfdf5; }
+      * { box-sizing:border-box; }
+      body { margin:0; background:var(--bg); color:var(--ink); font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; line-height:1.55; }
+      main { max-width:1100px; margin:0 auto; padding:32px 20px 64px; }
+      header { border-bottom:1px solid var(--line); padding-bottom:20px; margin-bottom:28px; }
+      h1 { font-size:26px; margin:0 0 8px; letter-spacing:0; }
+      h2 { font-size:18px; margin:0 0 12px; letter-spacing:0; }
+      .muted { color:var(--muted); }
+      section { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:18px; margin-bottom:18px; }
+      table { width:100%; border-collapse:collapse; font-size:14px; }
+      th, td { border:1px solid var(--line); padding:8px 10px; text-align:left; vertical-align:top; }
+      th { background:#f0f3f6; }
+      .pass-badge { display:inline-block; background:var(--ok-bg); color:var(--ok); border:1px solid #99f6e4; border-radius:999px; padding:3px 10px; font-size:12px; font-weight:700; }
+      code, pre { font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:0.92em; }
+      .chain { border:1px solid var(--line); border-radius:8px; padding:12px; margin:10px 0; }
+      ol { margin:8px 0 0; padding-left:22px; }
+      ul { margin:8px 0; padding-left:22px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p><span class="pass-badge">独立审查 PASS</span></p>
+        <h1>zterm Android DAGpipe Phase 5 审计：Session / Shell / Preview UI 业务边</h1>
+        <p class="muted">审查范围：android-session-shell-lifecycle、android-session-preview-lattice、Phase5 Rust core、NAPI/TS bridge。</p>
+      </header>
+
+      <section>
+        <h2>Review 结论</h2>
+        <table>
+          <tbody>
+            <tr><th>静态图 review</th><td>PASS (20260925T175042Z-review-86578-n69ahn)</td></tr>
+            <tr><th>Rust core + bridge review（重构后）</th><td>PASS (20260925T181548Z-review-11718-ol0bbl)</td></tr>
+            <tr><th>findings</th><td>[]</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>DAG 链路（中文业务语义）</h2>
+        <div class="chain">
+          Shell lifecycle（android.session_shell_lifecycle）
+          <ol>
+            <li>用户打开 tab</li>
+            <li>激活 session</li>
+            <li>订阅 body</li>
+            <li>投影 shell / quickbar / copy / keyboard</li>
+          </ol>
+        </div>
+        <div class="chain">
+          Preview lattice（android.session_preview_lattice）
+          <ol>
+            <li>打开 session 预览</li>
+            <li>投影 lattice</li>
+            <li>选择坐标格或边缘平移 focus；两条互斥路径独立执行</li>
+            <li>分别应用 selected focus / panned focus</li>
+          </ol>
+        </div>
+      </section>
+
+      <section>
+        <h2>状态机</h2>
+        <ul>
+          <li>preview 模式：关闭 → 已打开 → 选择/平移/Back；focus 选择不移动 session、不切 active shell。</li>
+          <li>失败终点：tab-failed、subscribe-failed、preview-failed；由 Operator 显式错误和调用方状态机描述。</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>验证证据</h2>
+        <ul>
+          <li><code>node ./scripts/validate-dagpipe-graphs.mjs</code> 通过：17 张 graph file。</li>
+          <li><code>bash scripts/run-dagpipe-phase1-tests.sh</code> 通过：Rust phase0 22 + phase2 5 + phase3 13 + phase4 4 + phase5 3；TS 34。</li>
+          <li><code>pnpm exec tsc --noEmit</code> 通过。</li>
+        </ul>
+      </section>
+    </main>
+  </body>
+</html>

@@ -3,6 +3,7 @@ pub mod daemon_core;
 pub mod phase2_core;
 pub mod phase3_core;
 pub mod phase4_core;
+pub mod phase5_core;
 
 #[cfg(feature = "napi")]
 use napi_derive::napi;
@@ -187,4 +188,32 @@ pub fn compile_phase4() -> String {
 #[napi]
 pub fn run_phase4_remote_window(input_json: String) -> String {
     json_to_string(phase4_core::run_phase4_remote_window_json(input_json))
+}
+
+#[cfg(feature = "napi")]
+#[napi]
+pub fn compile_phase5() -> String {
+    match phase5_core::compile_phase5_graphs() {
+        Ok(graphs) => json_to_string(Ok(serde_json::json!({
+            "ok": true,
+            "graphs": graphs,
+        }))),
+        Err(error) => serde_json::to_string(&serde_json::json!({
+            "ok": false,
+            "error": error.message,
+        }))
+        .unwrap_or_default(),
+    }
+}
+
+#[cfg(feature = "napi")]
+#[napi]
+pub fn run_phase5_shell_lifecycle(input_json: String) -> String {
+    json_to_string(phase5_core::run_phase5_shell_lifecycle_json(input_json))
+}
+
+#[cfg(feature = "napi")]
+#[napi]
+pub fn run_phase5_preview_lattice(input_json: String) -> String {
+    json_to_string(phase5_core::run_phase5_preview_lattice_json(input_json))
 }

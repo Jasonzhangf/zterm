@@ -1,0 +1,95 @@
+{
+  "id": "android.session_shell_lifecycle",
+  "version": "0.1",
+  "inputs": [
+    { "id": "arc.open_tab_intent", "schema": "Object" },
+    { "id": "arc.shell_state", "schema": "Object" }
+  ],
+  "nodes": [
+    {
+      "id": "open_tab",
+      "operator": "client.app_shell.open_tab",
+      "operator_version": "0.1",
+      "inputs": ["arc.open_tab_intent"],
+      "output": { "id": "arc.opened_tab", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "activate_session",
+      "operator": "client.session_runtime.activate",
+      "operator_version": "0.1",
+      "inputs": ["arc.opened_tab"],
+      "output": { "id": "arc.active_session", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "subscribe_body",
+      "operator": "client.session_runtime.subscribe",
+      "operator_version": "0.1",
+      "inputs": ["arc.active_session"],
+      "output": { "id": "arc.body_subscription", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "project_shell",
+      "operator": "client.terminal_shell.project",
+      "operator_version": "0.1",
+      "inputs": ["arc.body_subscription", "arc.shell_state"],
+      "output": { "id": "arc.shell_projection", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "project_quickbar",
+      "operator": "client.terminal_shell.project_quickbar",
+      "operator_version": "0.1",
+      "inputs": ["arc.shell_projection"],
+      "output": { "id": "arc.quickbar_projection", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "project_copy",
+      "operator": "client.terminal_shell.project_copy",
+      "operator_version": "0.1",
+      "inputs": ["arc.shell_projection"],
+      "output": { "id": "arc.copy_projection", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "project_keyboard",
+      "operator": "client.terminal_shell.project_keyboard",
+      "operator_version": "0.1",
+      "inputs": ["arc.shell_projection"],
+      "output": { "id": "arc.keyboard_lift", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    { "from": "open_tab", "to": "activate_session", "arc_id": "arc.opened_tab" },
+    { "from": "activate_session", "to": "subscribe_body", "arc_id": "arc.active_session" },
+    { "from": "subscribe_body", "to": "project_shell", "arc_id": "arc.body_subscription" },
+    { "from": "project_shell", "to": "project_quickbar", "arc_id": "arc.shell_projection" },
+    { "from": "project_shell", "to": "project_copy", "arc_id": "arc.shell_projection" },
+    { "from": "project_shell", "to": "project_keyboard", "arc_id": "arc.shell_projection" }
+  ],
+  "outputs": [
+    "arc.body_subscription",
+    "arc.shell_projection",
+    "arc.quickbar_projection",
+    "arc.copy_projection",
+    "arc.keyboard_lift"
+  ]
+}

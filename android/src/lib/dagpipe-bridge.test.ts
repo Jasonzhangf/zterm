@@ -4,6 +4,7 @@ import {
   compilePhase2,
   compilePhase3,
   compilePhase4,
+  compilePhase5,
   readDagpipeInputChunks,
   runBufferManagement,
   runBufferRender,
@@ -18,6 +19,8 @@ import {
   runPhase3Attachment,
   runPhase3Screenshot,
   runPhase4RemoteWindow,
+  runPhase5ShellLifecycle,
+  runPhase5PreviewLattice,
 } from './dagpipe-bridge';
 
 function cell(ch: string) {
@@ -80,6 +83,16 @@ describe('dagpipe native bridge', () => {
     });
   });
 
+  it('compiles Phase5 session shell preview graph', () => {
+    expect(compilePhase5()).toEqual({
+      ok: true,
+      graphs: [
+        'android.session_shell_lifecycle@0.1',
+        'android.session_preview_lattice@0.1',
+      ],
+    });
+  });
+
   it('routes remote window overlay projections through native core', () => {
     const result = runPhase4RemoteWindow({
       execution_id: 'bridge-phase4-stream',
@@ -98,6 +111,38 @@ describe('dagpipe native bridge', () => {
     const outputs = (result as { outputs: Record<string, { state: string }> }).outputs;
     expect(outputs['arc.overlay_projection'].state).toBe('projected');
     expect(outputs['arc.input_result'].state).toBe('injected');
+  });
+
+  it('routes Phase5 shell lifecycle projections through native core', () => {
+    const result = runPhase5ShellLifecycle({
+      execution_id: 'bridge-phase5-shell',
+      attempt_id: '1',
+      inputs: {
+        'arc.open_tab_intent': { sessionId: 's1' },
+        'arc.shell_state': { visible: true },
+      },
+    });
+    const outputs = (result as { outputs: Record<string, { state: string }> }).outputs;
+    expect(outputs['arc.shell_projection'].state).toBe('projected');
+    expect(outputs['arc.quickbar_projection'].state).toBe('projected');
+  });
+
+  it('routes Phase5 preview lattice select and pan without forced join', () => {
+    const result = runPhase5PreviewLattice({
+      execution_id: 'bridge-phase5-preview',
+      attempt_id: '1',
+      inputs: {
+        'arc.preview_open_intent': {
+          sessionId: 's1',
+          cells: [{ cellId: 'c1', sessionId: 's1' }],
+        },
+        'arc.preview_select': {},
+        'arc.focus_pan': { direction: 'right' },
+      },
+    });
+    const outputs = (result as { outputs: Record<string, { state: string }> }).outputs;
+    expect(outputs['arc.focus_selection'].state).toBe('skipped');
+    expect(outputs['arc.focus_panned'].state).toBe('applied');
   });
 
   it('routes Phase3 input/schedule and transfer projections through native core', () => {
