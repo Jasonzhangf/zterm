@@ -520,11 +520,44 @@
       "owned_paths": [
         "src/server/launch-agent-plist.ts",
         "src/server/server.ts",
-        "src/server/dagpipe-bridge.ts",
-        "src/server/dagpipe-bridge.test.ts",
         "src/server/terminal-core-support.ts",
         "src/server/terminal-daemon-runtime.ts",
         "src/server/terminal-http-runtime.ts"
+      ]
+    },
+    {
+      "module_id": "daemon.dagpipe_bridge",
+      "runtime_side": "daemon",
+      "level": 1,
+      "parent_module_id": "daemon.runtime",
+      "owner_feature": "daemon.dagpipe_bridge",
+      "responsibility": "Native DAGpipe load boundary and thin TS bridge for daemon-side graph execution gates.",
+      "owned_resources": [
+      ],
+      "consumed_resources": [],
+      "pending_resources": [],
+      "public_interfaces": [
+        "src/server/dagpipe-bridge.ts"
+      ],
+      "forbidden_resources": [
+        "resource.open_tab",
+        "resource.active_session",
+        "resource.renderer_window",
+        "resource.ui_projection"
+      ],
+      "canonical_docs": [
+        "docs/modules/project-modules.md",
+        "docs/dagpipe/phase0-design-slice.md",
+        "docs/wiki/mainline-source.md"
+      ],
+      "required_gates": [
+        "src/lib/module-registry-truth.test.ts",
+        "src/server/dagpipe-bridge.test.ts"
+      ],
+      "status": "active",
+      "owned_paths": [
+        "src/server/dagpipe-bridge.ts",
+        "src/server/dagpipe-bridge.test.ts"
       ]
     },
     {

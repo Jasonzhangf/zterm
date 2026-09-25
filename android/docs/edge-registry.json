@@ -4896,6 +4896,36 @@
       "from_module": "daemon.runtime_entry",
       "to_module": "shared.debug_contract",
       "status": "active"
+    },
+    {
+      "from_module": "daemon.runtime_entry",
+      "to_module": "daemon.dagpipe_bridge",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.input_queue",
+      "to_module": "daemon.dagpipe_bridge",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.session_catalog",
+      "to_module": "daemon.dagpipe_bridge",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.file_transfer",
+      "to_module": "daemon.dagpipe_bridge",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.remote_window_stream",
+      "to_module": "daemon.dagpipe_bridge",
+      "status": "active"
+    },
+    {
+      "from_module": "client.connection_service",
+      "to_module": "client.runtime",
+      "status": "active"
     }
   ]
 }
