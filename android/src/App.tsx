@@ -36,6 +36,7 @@ import {
   compileDagpipeAllPhases,
   isDagpipeNativeCapable,
   runDagpipePhase6Control,
+  runDagpipePhase6Composition,
 } from './lib/dagpipe-native-client';
 import { useFileBrowserSessionPortOwner } from './lib/plugin-file-browser/file-browser-session-port';
 import { buildAppUpdateManifestCandidates } from './lib/app-update-relay-manifest';
@@ -1508,8 +1509,37 @@ export default function App() {
       return;
     }
     pluginStartRequestedRef.current = true;
-    void pluginHost.startAll().then(() => {
-      setPluginRuntimeReady(true);
+    const startPlugins = () => {
+      void pluginHost.startAll().then(() => {
+        setPluginRuntimeReady(true);
+      }).catch((error: unknown) => {
+        setPluginRuntimeError(error instanceof Error ? error : new Error(String(error)));
+      });
+    };
+    if (!isDagpipeNativeCapable()) {
+      startPlugins();
+      return;
+    }
+    void runDagpipePhase6Composition({
+      execution_id: 'app-composition-gate',
+      attempt_id: '1',
+      inputs: {
+        'arc.composition_request': {
+          runtimeId: 'app-shell',
+          ports: ['plugin-host', 'control-center'],
+        },
+        'arc.plugin_manifest': {
+          pluginId: 'zterm-core',
+          capabilities: [],
+          uiSlots: [],
+        },
+      },
+    }).then((result) => {
+      if (!result.ok) {
+        setPluginRuntimeError(new Error(String(result.error)));
+        return;
+      }
+      startPlugins();
     }).catch((error: unknown) => {
       setPluginRuntimeError(error instanceof Error ? error : new Error(String(error)));
     });
