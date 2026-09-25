@@ -11,6 +11,8 @@ interface DagpipeCoreNativePlugin {
   runPhase3InputSchedule(options: { inputJson: string }): Promise<{ method: 'runPhase3InputSchedule'; json: string }>;
   runPhase2DaemonConnection(options: { inputJson: string }): Promise<{ method: 'runPhase2DaemonConnection'; json: string }>;
   runPhase5PreviewLattice(options: { inputJson: string }): Promise<{ method: 'runPhase5PreviewLattice'; json: string }>;
+  runPhase6ConfigExport(options: { inputJson: string }): Promise<{ method: 'runPhase6ConfigExport'; json: string }>;
+  runPhase6ConfigImport(options: { inputJson: string }): Promise<{ method: 'runPhase6ConfigImport'; json: string }>;
   runPhase8Connection(options: { inputJson: string }): Promise<{ method: 'runPhase8Connection'; json: string }>;
   runConnectionLifecycle(options: { inputJson: string }): Promise<{ method: 'runConnectionLifecycle'; json: string }>;
   runBufferManagement(options: { inputJson: string }): Promise<{ method: 'runBufferManagement'; json: string }>;
@@ -95,6 +97,20 @@ export async function runDagpipePhase5PreviewLattice(input: Record<string, unkno
   return parseResult(
     'runPhase5PreviewLattice',
     (await DagpipeCore.runPhase5PreviewLattice({ inputJson: JSON.stringify(input) })).json,
+  );
+}
+
+export async function runDagpipePhase6ConfigExport(input: Record<string, unknown>): Promise<DagpipeResult> {
+  return parseResult(
+    'runPhase6ConfigExport',
+    (await DagpipeCore.runPhase6ConfigExport({ inputJson: JSON.stringify(input) })).json,
+  );
+}
+
+export async function runDagpipePhase6ConfigImport(input: Record<string, unknown>): Promise<DagpipeResult> {
+  return parseResult(
+    'runPhase6ConfigImport',
+    (await DagpipeCore.runPhase6ConfigImport({ inputJson: JSON.stringify(input) })).json,
   );
 }
 

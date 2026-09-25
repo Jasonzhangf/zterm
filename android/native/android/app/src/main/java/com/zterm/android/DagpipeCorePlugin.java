@@ -114,6 +114,24 @@ public final class DagpipeCorePlugin extends Plugin {
     }
 
     @PluginMethod
+    public void runPhase6ConfigExport(PluginCall call) {
+        try {
+            call.resolve(result("runPhase6ConfigExport", DagpipeCoreBridge.runPhase6ConfigExport(call.getString("inputJson", "{}"))));
+        } catch (Throwable error) {
+            rejectCall(call, "runPhase6ConfigExport", error);
+        }
+    }
+
+    @PluginMethod
+    public void runPhase6ConfigImport(PluginCall call) {
+        try {
+            call.resolve(result("runPhase6ConfigImport", DagpipeCoreBridge.runPhase6ConfigImport(call.getString("inputJson", "{}"))));
+        } catch (Throwable error) {
+            rejectCall(call, "runPhase6ConfigImport", error);
+        }
+    }
+
+    @PluginMethod
     public void runConnectionLifecycle(PluginCall call) {
         try {
             call.resolve(result("runConnectionLifecycle", DagpipeCoreBridge.runConnectionLifecycle(call.getString("inputJson", "{}"))));

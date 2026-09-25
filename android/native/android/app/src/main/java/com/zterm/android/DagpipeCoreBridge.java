@@ -36,6 +36,10 @@ public final class DagpipeCoreBridge {
 
     public static native String runPhase5PreviewLattice(String inputJson);
 
+    public static native String runPhase6ConfigExport(String inputJson);
+
+    public static native String runPhase6ConfigImport(String inputJson);
+
     public static native String runConnectionLifecycle(String inputJson);
 
     public static native String runBufferManagement(String inputJson);

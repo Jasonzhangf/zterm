@@ -184,6 +184,36 @@ pub extern "system" fn Java_com_zterm_android_DagpipeCoreBridge_runPhase5Preview
 }
 
 #[no_mangle]
+pub extern "system" fn Java_com_zterm_android_DagpipeCoreBridge_runPhase6ConfigExport(
+    mut env: JNIEnv,
+    _class: JClass,
+    input_json: jstring,
+) -> jstring {
+    let input = read_string(&mut env, input_json);
+    let result = string_result(
+        crate::phase6_core::run_phase6_config_export_json(input).map(|value| value.to_string()),
+    );
+    env.new_string(result)
+        .expect("jni new_string run_phase6_config_export")
+        .into_raw()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_zterm_android_DagpipeCoreBridge_runPhase6ConfigImport(
+    mut env: JNIEnv,
+    _class: JClass,
+    input_json: jstring,
+) -> jstring {
+    let input = read_string(&mut env, input_json);
+    let result = string_result(
+        crate::phase6_core::run_phase6_config_import_json(input).map(|value| value.to_string()),
+    );
+    env.new_string(result)
+        .expect("jni new_string run_phase6_config_import")
+        .into_raw()
+}
+
+#[no_mangle]
 pub extern "system" fn Java_com_zterm_android_DagpipeCoreBridge_runConnectionLifecycle(
     mut env: JNIEnv,
     _class: JClass,
