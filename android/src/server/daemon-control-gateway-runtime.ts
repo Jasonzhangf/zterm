@@ -107,6 +107,13 @@ export function createDaemonControlGateway(
     commandSequence += 1;
     const commandId = `${commandType}:${subject}:${commandSequence}`;
     if (deps.dispatchControl) {
+      const ownerByCommand: Record<string, string> = {};
+      for (const registeredType of center.getCommandTypes()) {
+        const ownerId = center.getOwnerId(registeredType);
+        if (ownerId) {
+          ownerByCommand[registeredType] = ownerId;
+        }
+      }
       const dispatch = deps.dispatchControl({
         commandType,
         commandId,
@@ -114,12 +121,21 @@ export function createDaemonControlGateway(
         subject,
         capabilities: [daemonControlCapability],
         params,
+        ownerByCommand,
       });
       if (!dispatch.ok) {
         return Promise.resolve(errorControlOutcome({
           code: 'handler_failed',
           commandType,
           message: dispatch.message,
+        }));
+      }
+      const registeredOwnerId = center.getOwnerId(commandType);
+      if (!registeredOwnerId || dispatch.ownerId !== registeredOwnerId) {
+        return Promise.resolve(errorControlOutcome({
+          code: 'handler_failed',
+          commandType,
+          message: `dagpipe route owner mismatch: expected ${registeredOwnerId ?? 'unknown'}, got ${dispatch.ownerId}`,
         }));
       }
     }

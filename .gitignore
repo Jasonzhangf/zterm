@@ -36,6 +36,7 @@ android/native/android/local.properties
 android/native/android/**/build/
 android/native/dagpipe/target/
 android/native/dagpipe/index.node
+android/native/dagpipe/vendor/
 mac/node_modules/
 mac/dist/
 mac/dist-electron/

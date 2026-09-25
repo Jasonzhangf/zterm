@@ -73,6 +73,7 @@ export interface TerminalMessageControlRuntimeDeps {
     subject: string;
     capabilities: readonly string[];
     params: unknown;
+    ownerByCommand: Record<string, string>;
   }) => { ok: true; ownerId: string } | { ok: false; code: string; message: string };
 }
 

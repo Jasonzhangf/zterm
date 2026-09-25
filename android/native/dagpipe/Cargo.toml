@@ -13,7 +13,7 @@ default = ["napi"]
 napi = ["dep:napi", "dep:napi-derive", "dep:napi-build"]
 
 [dependencies]
-pipeline_runtime = { path = "/Users/fanzhang/.local/share/dagpipe/sdk" }
+pipeline_runtime = { path = "vendor/pipeline_runtime" }
 serde_json = "1"
 napi = { version = "2", features = ["napi8"], optional = true }
 napi-derive = { version = "2", optional = true }

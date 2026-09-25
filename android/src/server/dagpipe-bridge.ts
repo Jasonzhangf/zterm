@@ -70,17 +70,9 @@ export function compilePhase0(): DagpipeCompileResult {
 }
 
 export function runMirrorPublish(input: Record<string, unknown>): DagpipeResult {
-  const raw = JSON.parse(loadDagpipeNative().runMirrorPublish(JSON.stringify(input))) as DagpipeResult;
-  if (!raw.ok) {
-    throw new Error(raw.error);
-  }
-  return raw;
+  return JSON.parse(loadDagpipeNative().runMirrorPublish(JSON.stringify(input))) as DagpipeResult;
 }
 
 export function runControlDispatch(input: Record<string, unknown>): DagpipeResult {
-  const raw = JSON.parse(loadDagpipeNative().runControlDispatch(JSON.stringify(input))) as DagpipeResult;
-  if (!raw.ok) {
-    throw new Error(raw.error);
-  }
-  return raw;
+  return JSON.parse(loadDagpipeNative().runControlDispatch(JSON.stringify(input))) as DagpipeResult;
 }

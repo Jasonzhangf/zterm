@@ -183,17 +183,6 @@ if (!DAGPIPE_COMPILE_RESULT.ok) {
 }
 console.log('[server] DAGpipe phase0 operators compiled: native runtime active');
 
-const CONTROL_OWNER_BY_COMMAND: Record<string, string> = {
-  'schedule-list': 'daemon.control_center:schedule-list',
-  'schedule-upsert': 'daemon.control_center:schedule-upsert',
-  'schedule-delete': 'daemon.control_center:schedule-delete',
-  'schedule-toggle': 'daemon.control_center:schedule-toggle',
-  'schedule-run-now': 'daemon.control_center:schedule-run-now',
-  'tmux-create-session': 'daemon.control_center:tmux-create-session',
-  'tmux-rename-session': 'daemon.control_center:tmux-rename-session',
-  'tmux-kill-session': 'daemon.control_center:tmux-kill-session',
-};
-
 function dispatchControlRequest(request: {
   commandType: string;
   commandId: string;
@@ -201,6 +190,7 @@ function dispatchControlRequest(request: {
   subject: string;
   capabilities: readonly string[];
   params: unknown;
+  ownerByCommand: Record<string, string>;
 }): { ok: true; ownerId: string } | { ok: false; code: string; message: string } {
   const result = runControlDispatch({
     execution_id: `control-dispatch:${request.commandType}:${Date.now()}`,
@@ -215,7 +205,7 @@ function dispatchControlRequest(request: {
         params: request.params,
       },
       'arc.capability_policy': {
-        ownerByCommand: CONTROL_OWNER_BY_COMMAND,
+        ownerByCommand: request.ownerByCommand,
       },
     },
   });

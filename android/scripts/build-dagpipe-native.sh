@@ -10,6 +10,17 @@ if [[ ! -d "${DAGPIPE_DIR}" ]]; then
   exit 1
 fi
 
+DAGPIPE_SDK_PATH="${DAGPIPE_SDK_PATH:-${HOME}/.local/share/dagpipe/sdk}"
+if [[ ! -d "${DAGPIPE_SDK_PATH}" ]]; then
+  echo "missing dagpipe SDK path: ${DAGPIPE_SDK_PATH}" >&2
+  echo "run: dagpipe sdk path, or install the DAGpipe SDK from the DAGpipe checkout" >&2
+  exit 1
+fi
+
+mkdir -p "${DAGPIPE_DIR}/vendor"
+rm -rf "${DAGPIPE_DIR}/vendor/pipeline_runtime"
+ln -s "${DAGPIPE_SDK_PATH}" "${DAGPIPE_DIR}/vendor/pipeline_runtime"
+
 cd "${DAGPIPE_DIR}"
 
 if [[ "${PROFILE}" == "release" ]]; then

@@ -27,6 +27,12 @@ toolchain):
 pnpm --dir android run test:dagpipe-phase1
 ```
 
+The Rust crate resolves `pipeline_runtime` through a repo-local
+`vendor/pipeline_runtime` symlink created by `scripts/build-dagpipe-native.sh`.
+Set `DAGPIPE_SDK_PATH` to override the default SDK location
+(`$HOME/.local/share/dagpipe/sdk`); the build script fails explicitly when the
+SDK directory is missing.
+
 Design slice:
 
 - See `phase0-design-slice.md` for identities, roles, events, state machines,

@@ -136,4 +136,25 @@ describe('dagpipe bridge parity', () => {
     expect((result as { outputs: Record<string, { ok: boolean; ownerId: string }> })
       .outputs['arc.control_result']?.ownerId).toBe('daemon.control_center:schedule-list');
   });
+
+  it('returns typed control errors instead of throwing', () => {
+    const result = runControlDispatch({
+      execution_id: 'control-bridge-test',
+      attempt_id: '1',
+      inputs: {
+        'arc.control_ingress': {
+          commandId: 'c1',
+          correlationId: 'c1',
+          commandType: 'unknown-command',
+          subject: 'session',
+        },
+        'arc.capability_policy': {
+          ownerByCommand: {
+            'schedule-list': 'daemon.control_center:schedule-list',
+          },
+        },
+      },
+    });
+    expect(result.ok).toBe(false);
+  });
 });
