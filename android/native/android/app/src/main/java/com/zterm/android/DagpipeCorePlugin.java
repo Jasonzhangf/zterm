@@ -69,6 +69,15 @@ public final class DagpipeCorePlugin extends Plugin {
     }
 
     @PluginMethod
+    public void runPhase4RemoteWindow(PluginCall call) {
+        try {
+            call.resolve(result("runPhase4RemoteWindow", DagpipeCoreBridge.runPhase4RemoteWindow(call.getString("inputJson", "{}"))));
+        } catch (Throwable error) {
+            rejectCall(call, "runPhase4RemoteWindow", error);
+        }
+    }
+
+    @PluginMethod
     public void runConnectionLifecycle(PluginCall call) {
         try {
             call.resolve(result("runConnectionLifecycle", DagpipeCoreBridge.runConnectionLifecycle(call.getString("inputJson", "{}"))));

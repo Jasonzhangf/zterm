@@ -6,6 +6,7 @@ interface DagpipeCoreNativePlugin {
   compileAllDagpipePhases(): Promise<{ method: 'compileAllDagpipePhases'; json: string }>;
   runPhase6Control(options: { inputJson: string }): Promise<{ method: 'runPhase6Control'; json: string }>;
   runPhase7Update(options: { inputJson: string }): Promise<{ method: 'runPhase7Update'; json: string }>;
+  runPhase4RemoteWindow(options: { inputJson: string }): Promise<{ method: 'runPhase4RemoteWindow'; json: string }>;
   runPhase8Connection(options: { inputJson: string }): Promise<{ method: 'runPhase8Connection'; json: string }>;
   runConnectionLifecycle(options: { inputJson: string }): Promise<{ method: 'runConnectionLifecycle'; json: string }>;
   runBufferManagement(options: { inputJson: string }): Promise<{ method: 'runBufferManagement'; json: string }>;
@@ -55,6 +56,13 @@ export async function runDagpipePhase7Update(input: Record<string, unknown>): Pr
   return parseResult(
     'runPhase7Update',
     (await DagpipeCore.runPhase7Update({ inputJson: JSON.stringify(input) })).json,
+  );
+}
+
+export async function runDagpipePhase4RemoteWindow(input: Record<string, unknown>): Promise<DagpipeResult> {
+  return parseResult(
+    'runPhase4RemoteWindow',
+    (await DagpipeCore.runPhase4RemoteWindow({ inputJson: JSON.stringify(input) })).json,
   );
 }
 

@@ -109,6 +109,21 @@ pub extern "system" fn Java_com_zterm_android_DagpipeCoreBridge_runPhase7Update(
 }
 
 #[no_mangle]
+pub extern "system" fn Java_com_zterm_android_DagpipeCoreBridge_runPhase4RemoteWindow(
+    mut env: JNIEnv,
+    _class: JClass,
+    input_json: jstring,
+) -> jstring {
+    let input = read_string(&mut env, input_json);
+    let result = string_result(
+        crate::phase4_core::run_phase4_remote_window_json(input).map(|value| value.to_string()),
+    );
+    env.new_string(result)
+        .expect("jni new_string run_phase4_remote_window")
+        .into_raw()
+}
+
+#[no_mangle]
 pub extern "system" fn Java_com_zterm_android_DagpipeCoreBridge_runConnectionLifecycle(
     mut env: JNIEnv,
     _class: JClass,
