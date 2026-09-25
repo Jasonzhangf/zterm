@@ -1,0 +1,226 @@
+{
+  "id": "android.buffer_render",
+  "version": "0.1",
+  "inputs": [
+    {
+      "id": "arc.daemon_wire_frame",
+      "schema": "Object"
+    },
+    {
+      "id": "arc.visible_range_demand",
+      "schema": "Object"
+    },
+    {
+      "id": "arc.local_sparse_state",
+      "schema": "Object"
+    },
+    {
+      "id": "arc.buffer_policy",
+      "schema": "Object"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "normalize_wire_frame",
+      "operator": "client.wire_ingress.normalize",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.daemon_wire_frame"
+      ],
+      "output": {
+        "id": "arc.normalized_frame",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "assemble_frame",
+      "operator": "client.buffer_frame_assembly.assemble",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.normalized_frame",
+        "arc.buffer_policy"
+      ],
+      "output": {
+        "id": "arc.complete_frame",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "plan_sparse_apply",
+      "operator": "client.buffer_planner.plan",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.complete_frame",
+        "arc.local_sparse_state",
+        "arc.visible_range_demand",
+        "arc.buffer_policy"
+      ],
+      "output": {
+        "id": "arc.apply_plan",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "apply_sparse",
+      "operator": "client.sparse_buffer.apply",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.apply_plan"
+      ],
+      "output": {
+        "id": "arc.sparse_truth",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "emit_repair_request",
+      "operator": "client.buffer_planner.request",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.apply_plan"
+      ],
+      "output": {
+        "id": "arc.buffer_sync_request",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "commit_render_snapshot",
+      "operator": "client.renderer_window.commit",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.sparse_truth",
+        "arc.visible_range_demand"
+      ],
+      "output": {
+        "id": "arc.render_snapshot",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "project_dom",
+      "operator": "client.dom_renderer.project",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.render_snapshot"
+      ],
+      "output": {
+        "id": "arc.dom_commit",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    {
+      "from": "normalize_wire_frame",
+      "to": "assemble_frame",
+      "arc_id": "arc.normalized_frame"
+    },
+    {
+      "from": "assemble_frame",
+      "to": "plan_sparse_apply",
+      "arc_id": "arc.complete_frame"
+    },
+    {
+      "from": "plan_sparse_apply",
+      "to": "apply_sparse",
+      "arc_id": "arc.apply_plan"
+    },
+    {
+      "from": "plan_sparse_apply",
+      "to": "emit_repair_request",
+      "arc_id": "arc.apply_plan"
+    },
+    {
+      "from": "apply_sparse",
+      "to": "commit_render_snapshot",
+      "arc_id": "arc.sparse_truth"
+    },
+    {
+      "from": "commit_render_snapshot",
+      "to": "project_dom",
+      "arc_id": "arc.render_snapshot"
+    }
+  ],
+  "outputs": [
+    "arc.buffer_sync_request",
+    "arc.dom_commit"
+  ]
+}

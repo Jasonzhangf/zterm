@@ -1,0 +1,238 @@
+{
+  "id": "daemon.mirror_publish",
+  "version": "0.2",
+  "inputs": [
+    {
+      "id": "arc.source_readback",
+      "schema": "Object"
+    },
+    {
+      "id": "arc.diff_policy",
+      "schema": "Object"
+    },
+    {
+      "id": "arc.prev_mirror_snapshot",
+      "schema": "Object"
+    },
+    {
+      "id": "arc.subscriber_facts",
+      "schema": "Object"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "normalize_capture",
+      "operator": "daemon.source_adapter.normalize",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.source_readback"
+      ],
+      "output": {
+        "id": "arc.canonical_snapshot",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "commit_mirror",
+      "operator": "daemon.mirror_writer.commit",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.canonical_snapshot"
+      ],
+      "output": {
+        "id": "arc.mirror_revision",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "apply_mirror_truth",
+      "operator": "daemon.mirror_store.apply",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.mirror_revision"
+      ],
+      "output": {
+        "id": "arc.mirror_truth",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "compute_changed_ranges",
+      "operator": "daemon.mirror_store.diff",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.diff_policy",
+        "arc.prev_mirror_snapshot",
+        "arc.mirror_truth"
+      ],
+      "output": {
+        "id": "arc.changed_ranges",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "classify_update",
+      "operator": "daemon.mirror_store.classify",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.diff_policy",
+        "arc.prev_mirror_snapshot",
+        "arc.mirror_truth",
+        "arc.changed_ranges"
+      ],
+      "output": {
+        "id": "arc.update_class",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "plan_refresh",
+      "operator": "daemon.buffer_publisher.plan",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.diff_policy",
+        "arc.update_class",
+        "arc.changed_ranges",
+        "arc.subscriber_facts"
+      ],
+      "output": {
+        "id": "arc.publish_plan",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "emit_wire_frames",
+      "operator": "daemon.buffer_publisher.emit",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.publish_plan"
+      ],
+      "output": {
+        "id": "arc.wire_frames",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    {
+      "from": "normalize_capture",
+      "to": "commit_mirror",
+      "arc_id": "arc.canonical_snapshot"
+    },
+    {
+      "from": "commit_mirror",
+      "to": "apply_mirror_truth",
+      "arc_id": "arc.mirror_revision"
+    },
+    {
+      "from": "apply_mirror_truth",
+      "to": "compute_changed_ranges",
+      "arc_id": "arc.mirror_truth"
+    },
+    {
+      "from": "apply_mirror_truth",
+      "to": "classify_update",
+      "arc_id": "arc.mirror_truth"
+    },
+    {
+      "from": "compute_changed_ranges",
+      "to": "classify_update",
+      "arc_id": "arc.changed_ranges"
+    },
+    {
+      "from": "classify_update",
+      "to": "plan_refresh",
+      "arc_id": "arc.update_class"
+    },
+    {
+      "from": "compute_changed_ranges",
+      "to": "plan_refresh",
+      "arc_id": "arc.changed_ranges"
+    },
+    {
+      "from": "plan_refresh",
+      "to": "emit_wire_frames",
+      "arc_id": "arc.publish_plan"
+    }
+  ],
+  "outputs": [
+    "arc.wire_frames"
+  ]
+}

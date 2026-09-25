@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>zterm DAGpipe Phase 0 独立审查</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f7f7f5;
+        --panel: #ffffff;
+        --ink: #1f2933;
+        --muted: #5b6b79;
+        --line: #d8dee6;
+        --ok: #0f766e;
+        --ok-bg: #ecfdf5;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+          "Microsoft YaHei", sans-serif;
+        line-height: 1.55;
+      }
+      main {
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 32px 20px 64px;
+      }
+      header {
+        border-bottom: 1px solid var(--line);
+        padding-bottom: 20px;
+        margin-bottom: 28px;
+      }
+      h1 {
+        font-size: 26px;
+        margin: 0 0 8px;
+        letter-spacing: 0;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      section {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 18px;
+        margin-bottom: 18px;
+      }
+      h2 {
+        font-size: 18px;
+        margin: 0 0 12px;
+        letter-spacing: 0;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 14px;
+      }
+      th,
+      td {
+        border: 1px solid var(--line);
+        padding: 8px 10px;
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        background: #f0f3f6;
+      }
+      .pass-badge {
+        display: inline-block;
+        background: var(--ok-bg);
+        color: var(--ok);
+        border: 1px solid #99f6e4;
+        border-radius: 999px;
+        padding: 3px 10px;
+        font-size: 12px;
+        font-weight: 700;
+      }
+      code,
+      pre {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.92em;
+      }
+      pre {
+        background: #f4f6f8;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 12px;
+        overflow: auto;
+      }
+      ul {
+        margin: 8px 0;
+        padding-left: 22px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p><span class="pass-badge">独立审查 PASS</span></p>
+        <h1>zterm DAGpipe Phase 0 审计</h1>
+        <p class="muted">
+          审查范围：当前 uncommitted Phase0 变更。结论：无可阻断 finding。
+        </p>
+      </header>
+
+      <section>
+        <h2>Review 结论</h2>
+        <table>
+          <tbody>
+            <tr><th>结果</th><td>PASS</td></tr>
+            <tr><th>review_task</th><td><code>20260925T063855Z-review-27780-8usha1</code></td></tr>
+            <tr><th>outcome_reason</th><td><code>controller_no_blocking_findings</code></td></tr>
+            <tr><th>findings</th><td>0</td></tr>
+            <tr><th>mode</th><td>uncommitted</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>验证证据</h2>
+        <ul>
+          <li><code>pnpm --dir android test:dagpipe-phase0</code> 通过。</li>
+          <li><code>dagpipe graph validate</code> / <code>inspect</code>：mirror 和 control 两张图均通过。</li>
+          <li>当前 mirror publish：7 nodes / 8 edges / 7 waves。</li>
+          <li>当前 control dispatch：3 nodes / 2 edges / 3 waves。</li>
+          <li>未添加 Rust crate、未改 daemon runtime、未接 CI/OTA。</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Review final JSON</h2>
+        <pre>{
+  "contract_version": "1",
+  "scope": {
+    "mode": "uncommitted",
+    "commit": null,
+    "base": null
+  },
+  "module_boundary_evidence": [],
+  "findings": []
+}</pre>
+      </section>
+
+      <section>
+        <h2>证据文件</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>文件</th>
+              <th>路径</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>review status</td>
+              <td><code>.agent-collab/review/20260925T063855Z-review-27780-8usha1/status.json</code></td>
+            </tr>
+            <tr>
+              <td>review final</td>
+              <td><code>.agent-collab/review/20260925T063855Z-review-27780-8usha1/review.final.md</code></td>
+            </tr>
+            <tr>
+              <td>review log</td>
+              <td><code>.agent-collab/review/20260925T063855Z-review-27780-8usha1/review.log</code></td>
+            </tr>
+            <tr>
+              <td>review exit</td>
+              <td><code>.agent-collab/review/20260925T063855Z-review-27780-8usha1/review.exit</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+  </body>
+</html>

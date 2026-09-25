@@ -4896,6 +4896,12 @@
       "from_module": "daemon.runtime_entry",
       "to_module": "shared.debug_contract",
       "status": "active"
+    },
+    {
+      "from_module": "shared.test_environment",
+      "to_module": "client.runtime",
+      "status": "active",
+      "note": "host NAPI DAGpipe bridge imports the pure type contract for parity tests and local tooling"
     }
   ]
 }

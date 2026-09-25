@@ -1,0 +1,283 @@
+{
+  "id": "relay.account_peer_route",
+  "version": "0.1",
+  "inputs": [
+    {
+      "id": "arc.account_credentials",
+      "schema": "Object"
+    },
+    {
+      "id": "arc.relay_settings",
+      "schema": "Object"
+    },
+    {
+      "id": "arc.device_capabilities",
+      "schema": "Object"
+    },
+    {
+      "id": "arc.route_policy",
+      "schema": "Object"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "login_relay_account",
+      "operator": "relay.account_directory.login",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.account_credentials",
+        "arc.relay_settings"
+      ],
+      "output": {
+        "id": "arc.relay_session",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "publish_client_device",
+      "operator": "relay.account_directory.publish_device",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.relay_session",
+        "arc.device_capabilities"
+      ],
+      "output": {
+        "id": "arc.device_presence",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "project_account_directory",
+      "operator": "relay.account_directory.project",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.relay_session",
+        "arc.device_presence"
+      ],
+      "output": {
+        "id": "arc.account_directory",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "resolve_candidate_routes",
+      "operator": "relay.route_selection.resolve",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.account_directory",
+        "arc.route_policy"
+      ],
+      "output": {
+        "id": "arc.route_plan",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "issue_peer_lease",
+      "operator": "relay.peer_lease.issue",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.route_plan",
+        "arc.device_presence"
+      ],
+      "output": {
+        "id": "arc.peer_lease",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "validate_peer_lease",
+      "operator": "relay.peer_lease.validate",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.peer_lease",
+        "arc.device_presence"
+      ],
+      "output": {
+        "id": "arc.validated_lease",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "bind_daemon_target",
+      "operator": "relay.peer_lease.bind_target",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.validated_lease",
+        "arc.route_plan"
+      ],
+      "output": {
+        "id": "arc.bound_daemon_target",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "resume_bound_target",
+      "operator": "client.connection_home.resume_target",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.bound_daemon_target",
+        "arc.device_presence"
+      ],
+      "output": {
+        "id": "arc.resume_plan",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    {
+      "from": "login_relay_account",
+      "to": "publish_client_device",
+      "arc_id": "arc.relay_session"
+    },
+    {
+      "from": "login_relay_account",
+      "to": "project_account_directory",
+      "arc_id": "arc.relay_session"
+    },
+    {
+      "from": "publish_client_device",
+      "to": "project_account_directory",
+      "arc_id": "arc.device_presence"
+    },
+    {
+      "from": "publish_client_device",
+      "to": "issue_peer_lease",
+      "arc_id": "arc.device_presence"
+    },
+    {
+      "from": "publish_client_device",
+      "to": "validate_peer_lease",
+      "arc_id": "arc.device_presence"
+    },
+    {
+      "from": "publish_client_device",
+      "to": "resume_bound_target",
+      "arc_id": "arc.device_presence"
+    },
+    {
+      "from": "project_account_directory",
+      "to": "resolve_candidate_routes",
+      "arc_id": "arc.account_directory"
+    },
+    {
+      "from": "resolve_candidate_routes",
+      "to": "issue_peer_lease",
+      "arc_id": "arc.route_plan"
+    },
+    {
+      "from": "resolve_candidate_routes",
+      "to": "bind_daemon_target",
+      "arc_id": "arc.route_plan"
+    },
+    {
+      "from": "issue_peer_lease",
+      "to": "validate_peer_lease",
+      "arc_id": "arc.peer_lease"
+    },
+    {
+      "from": "validate_peer_lease",
+      "to": "bind_daemon_target",
+      "arc_id": "arc.validated_lease"
+    },
+    {
+      "from": "bind_daemon_target",
+      "to": "resume_bound_target",
+      "arc_id": "arc.bound_daemon_target"
+    }
+  ],
+  "outputs": [
+    "arc.account_directory",
+    "arc.validated_lease",
+    "arc.resume_plan"
+  ]
+}

@@ -70,3 +70,9 @@ update-dist/
 /.worktree-appsdk-013-debug-2/
 /.worktree-appsdk-013-debug-3/
 /.worktree-appsdk-013-v4/
+
+# DAGpipe native build artifacts
+android/native/dagpipe/target/
+android/native/dagpipe/index.node
+android/native/dagpipe/sdk
+android/native/android/app/src/main/jniLibs/

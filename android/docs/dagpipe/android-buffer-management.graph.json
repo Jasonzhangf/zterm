@@ -1,0 +1,242 @@
+{
+  "id": "android.buffer_management",
+  "version": "0.1",
+  "inputs": [
+    {
+      "id": "arc.session_buffer_demand",
+      "schema": "Object"
+    },
+    {
+      "id": "arc.daemon_head_facts",
+      "schema": "Object"
+    },
+    {
+      "id": "arc.local_buffer_state",
+      "schema": "Object"
+    },
+    {
+      "id": "arc.buffer_policy",
+      "schema": "Object"
+    },
+    {
+      "id": "arc.wire_range_responses",
+      "schema": "Object"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "observe_heads",
+      "operator": "client.buffer_manager.observe_heads",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.daemon_head_facts",
+        "arc.session_buffer_demand"
+      ],
+      "output": {
+        "id": "arc.head_observations",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "plan_session_windows",
+      "operator": "client.buffer_manager.plan_windows",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.head_observations",
+        "arc.local_buffer_state",
+        "arc.session_buffer_demand",
+        "arc.buffer_policy"
+      ],
+      "output": {
+        "id": "arc.window_plan",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dispatch_range_requests",
+      "operator": "client.buffer_manager.dispatch_requests",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.window_plan",
+        "arc.buffer_policy"
+      ],
+      "output": {
+        "id": "arc.range_requests",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "ingest_range_responses",
+      "operator": "client.buffer_manager.ingest_responses",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.range_requests",
+        "arc.wire_range_responses",
+        "arc.buffer_policy"
+      ],
+      "output": {
+        "id": "arc.range_responses",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "merge_sparse_truth",
+      "operator": "client.buffer_manager.merge_sparse",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.range_responses",
+        "arc.local_buffer_state",
+        "arc.buffer_policy"
+      ],
+      "output": {
+        "id": "arc.sparse_truth",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "update_repair_ledger",
+      "operator": "client.buffer_manager.update_repair_ledger",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.window_plan",
+        "arc.sparse_truth"
+      ],
+      "output": {
+        "id": "arc.repair_ledger",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "publish_render_scope",
+      "operator": "client.buffer_manager.publish_render_scope",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.sparse_truth",
+        "arc.session_buffer_demand"
+      ],
+      "output": {
+        "id": "arc.render_scope",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    {
+      "from": "observe_heads",
+      "to": "plan_session_windows",
+      "arc_id": "arc.head_observations"
+    },
+    {
+      "from": "plan_session_windows",
+      "to": "dispatch_range_requests",
+      "arc_id": "arc.window_plan"
+    },
+    {
+      "from": "dispatch_range_requests",
+      "to": "ingest_range_responses",
+      "arc_id": "arc.range_requests"
+    },
+    {
+      "from": "ingest_range_responses",
+      "to": "merge_sparse_truth",
+      "arc_id": "arc.range_responses"
+    },
+    {
+      "from": "merge_sparse_truth",
+      "to": "update_repair_ledger",
+      "arc_id": "arc.sparse_truth"
+    },
+    {
+      "from": "merge_sparse_truth",
+      "to": "publish_render_scope",
+      "arc_id": "arc.sparse_truth"
+    },
+    {
+      "from": "plan_session_windows",
+      "to": "update_repair_ledger",
+      "arc_id": "arc.window_plan"
+    }
+  ],
+  "outputs": [
+    "arc.range_requests",
+    "arc.repair_ledger",
+    "arc.render_scope"
+  ]
+}

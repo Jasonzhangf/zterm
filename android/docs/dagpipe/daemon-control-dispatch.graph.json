@@ -1,0 +1,101 @@
+{
+  "id": "daemon.control_dispatch",
+  "version": "0.1",
+  "inputs": [
+    {
+      "id": "arc.control_ingress",
+      "schema": "Object"
+    },
+    {
+      "id": "arc.capability_policy",
+      "schema": "Object"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "authenticate_ingress",
+      "operator": "daemon.control_gateway.authenticate",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.control_ingress"
+      ],
+      "output": {
+        "id": "arc.authenticated_command",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "route_control",
+      "operator": "daemon.control_center.route",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.authenticated_command",
+        "arc.capability_policy"
+      ],
+      "output": {
+        "id": "arc.routed_command",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dispatch_owner",
+      "operator": "daemon.control_owner.dispatch",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.routed_command"
+      ],
+      "output": {
+        "id": "arc.control_result",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    {
+      "from": "authenticate_ingress",
+      "to": "route_control",
+      "arc_id": "arc.authenticated_command"
+    },
+    {
+      "from": "route_control",
+      "to": "dispatch_owner",
+      "arc_id": "arc.routed_command"
+    }
+  ],
+  "outputs": [
+    "arc.control_result"
+  ]
+}

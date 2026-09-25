@@ -1,0 +1,315 @@
+{
+  "id": "android.connection_lifecycle",
+  "version": "0.1",
+  "inputs": [
+    {
+      "id": "arc.account_credentials",
+      "schema": "Object"
+    },
+    {
+      "id": "arc.relay_settings",
+      "schema": "Object"
+    },
+    {
+      "id": "arc.target_candidates",
+      "schema": "Object"
+    },
+    {
+      "id": "arc.session_demand_set",
+      "schema": "Object"
+    },
+    {
+      "id": "arc.connection_policy",
+      "schema": "Object"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "login_relay_account",
+      "operator": "client.relay_account.login",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.account_credentials",
+        "arc.relay_settings"
+      ],
+      "output": {
+        "id": "arc.relay_session",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "publish_client_device",
+      "operator": "client.relay_account.publish_device",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.relay_session"
+      ],
+      "output": {
+        "id": "arc.device_presence",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "resolve_target_routes",
+      "operator": "client.connection.resolve_routes",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.target_candidates",
+        "arc.device_presence",
+        "arc.relay_session",
+        "arc.connection_policy"
+      ],
+      "output": {
+        "id": "arc.route_plan",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "establish_target_transport",
+      "operator": "client.connection.establish_transport",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.route_plan",
+        "arc.connection_policy"
+      ],
+      "output": {
+        "id": "arc.target_transport",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "negotiate_mux",
+      "operator": "client.connection.negotiate_mux",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.target_transport"
+      ],
+      "output": {
+        "id": "arc.mux_session",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "open_session_channels",
+      "operator": "client.session_channel.open_all",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.mux_session",
+        "arc.session_demand_set",
+        "arc.connection_policy"
+      ],
+      "output": {
+        "id": "arc.session_channels",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "subscribe_session_bodies",
+      "operator": "client.session_channel.subscribe_bodies",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.session_channels",
+        "arc.session_demand_set"
+      ],
+      "output": {
+        "id": "arc.body_subscriptions",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "maintain_connection",
+      "operator": "client.connection.maintain",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.target_transport",
+        "arc.mux_session",
+        "arc.body_subscriptions",
+        "arc.connection_policy"
+      ],
+      "output": {
+        "id": "arc.connection_health",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "plan_recovery",
+      "operator": "client.connection.plan_recovery",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.connection_health",
+        "arc.route_plan",
+        "arc.connection_policy"
+      ],
+      "output": {
+        "id": "arc.recovery_plan",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    {
+      "from": "login_relay_account",
+      "to": "publish_client_device",
+      "arc_id": "arc.relay_session"
+    },
+    {
+      "from": "login_relay_account",
+      "to": "resolve_target_routes",
+      "arc_id": "arc.relay_session"
+    },
+    {
+      "from": "publish_client_device",
+      "to": "resolve_target_routes",
+      "arc_id": "arc.device_presence"
+    },
+    {
+      "from": "resolve_target_routes",
+      "to": "establish_target_transport",
+      "arc_id": "arc.route_plan"
+    },
+    {
+      "from": "establish_target_transport",
+      "to": "negotiate_mux",
+      "arc_id": "arc.target_transport"
+    },
+    {
+      "from": "negotiate_mux",
+      "to": "open_session_channels",
+      "arc_id": "arc.mux_session"
+    },
+    {
+      "from": "open_session_channels",
+      "to": "subscribe_session_bodies",
+      "arc_id": "arc.session_channels"
+    },
+    {
+      "from": "subscribe_session_bodies",
+      "to": "maintain_connection",
+      "arc_id": "arc.body_subscriptions"
+    },
+    {
+      "from": "establish_target_transport",
+      "to": "maintain_connection",
+      "arc_id": "arc.target_transport"
+    },
+    {
+      "from": "negotiate_mux",
+      "to": "maintain_connection",
+      "arc_id": "arc.mux_session"
+    },
+    {
+      "from": "maintain_connection",
+      "to": "plan_recovery",
+      "arc_id": "arc.connection_health"
+    },
+    {
+      "from": "resolve_target_routes",
+      "to": "plan_recovery",
+      "arc_id": "arc.route_plan"
+    }
+  ],
+  "outputs": [
+    "arc.connection_health",
+    "arc.recovery_plan",
+    "arc.body_subscriptions"
+  ]
+}

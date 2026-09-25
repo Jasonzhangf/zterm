@@ -1,0 +1,473 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>zterm Android DAGpipe Phase 0 审批</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f7f7f5;
+        --panel: #ffffff;
+        --ink: #1f2933;
+        --muted: #5b6b79;
+        --line: #d8dee6;
+        --accent: #0f766e;
+        --accent-soft: #ecfdf5;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+          "Microsoft YaHei", sans-serif;
+        line-height: 1.55;
+      }
+      main {
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 32px 20px 64px;
+      }
+      header {
+        border-bottom: 1px solid var(--line);
+        padding-bottom: 20px;
+        margin-bottom: 28px;
+      }
+      h1 {
+        font-size: 26px;
+        margin: 0 0 8px;
+        letter-spacing: 0;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      section {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 18px;
+        margin-bottom: 18px;
+      }
+      h2 {
+        font-size: 18px;
+        margin: 0 0 12px;
+        letter-spacing: 0;
+      }
+      .mermaid {
+        text-align: center;
+        font-size: 20px;
+      }
+      .mermaid svg {
+        max-width: 100%;
+        height: auto;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 14px;
+      }
+      th,
+      td {
+        border: 1px solid var(--line);
+        padding: 8px 10px;
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        background: #f0f3f6;
+      }
+      .badge {
+        display: inline-block;
+        background: var(--accent-soft);
+        color: var(--accent);
+        border: 1px solid #99f6e4;
+        border-radius: 999px;
+        padding: 3px 10px;
+        font-size: 12px;
+        font-weight: 600;
+      }
+      .check {
+        color: var(--accent);
+        font-weight: 700;
+      }
+      ul,
+      ol {
+        margin: 8px 0;
+        padding-left: 22px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="badge">Phase 0 审批</p>
+        <h1>zterm DAGpipe 分阶段导入 - Android 客户端全链路静态 DAG</h1>
+        <p class="muted">
+          当前交付：Android 侧 Phase 0 静态 DAG 与 CLI 校验。覆盖 Relay 账号登录、
+          目标连接、buffer 管理、buffer 到 render、输入发送。不含 Rust crate、
+          不含 runtime 接线、不含 APK/OTA。
+        </p>
+      </header>
+
+      <section>
+        <h2>审批目标</h2>
+        <ul>
+          <li>接受 Android 全链路 Phase 0 DAG 作为后续框架重写的输入。</li>
+          <li>确认当前只做静态治理，不把计划状态伪装成已接入 runtime。</li>
+          <li>确认后续顺序为：Phase 1 Rust core + compile()/Runtime::run()，黑盒测试，接线。</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Relay 账号登录 + 目标连接 + 多 session 通道（竖向）</h2>
+        <div class="mermaid">
+          flowchart TB
+            creds["账号凭据"]
+            relay_settings["Relay 配置"]
+            candidates["目标候选"]
+            demands["session 需求集合（1..N）"]
+            policy["连接策略"]
+            login["登录 Relay 账号"]
+            publish["发布本机设备"]
+            resolve["解析目标线路"]
+            establish["建立目标物理 transport"]
+            mux["协商 mux"]
+            channels["按需求打开 session 通道"]
+            subscribe["订阅各通道 body"]
+            maintain["维持连接健康"]
+            recover["规划恢复"]
+            health["连接健康"]
+            recovery["恢复计划"]
+            subs["body 订阅事实"]
+            creds --> login
+            relay_settings --> login
+            login --> publish
+            login --> resolve
+            publish --> resolve
+            candidates --> resolve
+            policy --> resolve
+            resolve --> establish
+            establish --> mux
+            mux --> channels
+            demands --> channels
+            policy --> channels
+            channels --> subscribe
+            demands --> subscribe
+            subscribe --> maintain
+            establish --> maintain
+            mux --> maintain
+            policy --> maintain
+            maintain --> recover
+            resolve --> recover
+            policy --> recover
+            maintain --> health
+            recover --> recovery
+            subscribe --> subs
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>规则</th>
+              <th>语义</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>一个目标一条物理连接</td>
+              <td>同一 daemon 目标只建立一个物理 transport；多个 session 是逻辑通道，不新建每 session socket。</td>
+            </tr>
+            <tr>
+              <td>账号登录</td>
+              <td>Relay 登录是账号级、token-per-login；登录失败或退出不得隐藏已保存的直连 / Tailscale 目标。</td>
+            </tr>
+            <tr>
+              <td>维持与恢复</td>
+              <td>心跳、网络变更、重连与退避属于目标连接角色；foreground / background 只改变数据刷新节奏，不重建健康连接。</td>
+            </tr>
+            <tr>
+              <td>单 / 多 session</td>
+              <td>单 session 只有一条通道；多 session 每条通道独立 open/close、body 订阅、head/range lane，一个通道失败不连坐其它通道。</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>Android buffer 管理状态机（竖向）</h2>
+        <div class="mermaid">
+          flowchart TB
+            demand["session buffer 需求"]
+            head["daemon head 事实"]
+            local["本地 sparse 状态"]
+            bp["buffer 策略"]
+            observe["观察各 session head"]
+            plan["计划各 session 拉取窗口"]
+            dispatch["发送 range 请求"]
+            ingest["接收 range 响应"]
+            merge["合并 sparse truth"]
+            ledger["更新 repair ledger"]
+            scope["发布 render scope"]
+            req["range 请求"]
+            repair["repair ledger"]
+            render_scope["render scope"]
+            head --> observe
+            demand --> observe
+            observe --> plan
+            local --> plan
+            demand --> plan
+            bp --> plan
+            plan --> dispatch
+            bp --> dispatch
+            dispatch --> ingest
+            bp --> ingest
+            ingest --> merge
+            local --> merge
+            bp --> merge
+            merge --> ledger
+            plan --> ledger
+            merge --> scope
+            demand --> scope
+            dispatch --> req
+            ledger --> repair
+            scope --> render_scope
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>状态</th>
+              <th>语义</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>每 session 独立</td>
+              <td>absolute-row truth、revision epoch、缺口 repair、repair ledger 都按 session 隔离。</td>
+            </tr>
+            <tr>
+              <td>active / inactive</td>
+              <td>active 高频 head-first；visible passive 有界轮转；inactive 停止主动拉取但保留 buffer truth，不关 transport。</td>
+            </tr>
+            <tr>
+              <td>正文 repaint</td>
+              <td>只有完整无洞 frame 的 sparse apply 可以进入 render scope；head / cursor 只更新 metadata。</td>
+            </tr>
+            <tr>
+              <td>repair ledger</td>
+              <td>未实际写 wire 保持 pending；dispatch 后保留；权威覆盖或显式 epoch reset 才清除。</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>Android buffer -&gt; render 原子投影（竖向）</h2>
+        <div class="mermaid">
+          flowchart TB
+            wire["daemon wire frame"]
+            visible["可见范围需求"]
+            sparse_state["本地 sparse 状态"]
+            buf_policy["buffer 策略"]
+            norm["归一 wire frame"]
+            asm["组装完整 frame"]
+            planner["规划 sparse apply / repair"]
+            apply["应用 sparse truth"]
+            repair_req["发出 exact repair 请求"]
+            commit["提交 render snapshot"]
+            dom["投影 DOM"]
+            sync_out["exact repair 请求"]
+            dom_out["DOM 投影"]
+            wire --> norm
+            norm --> asm
+            buf_policy --> asm
+            asm --> planner
+            sparse_state --> planner
+            visible --> planner
+            buf_policy --> planner
+            planner --> apply
+            planner --> repair_req
+            repair_req --> sync_out
+            apply --> commit
+            visible --> commit
+            commit --> dom
+            dom --> dom_out
+        </div>
+        <p class="muted">
+          规则：只有 sparse apply 更新本地 body truth；frame 缺洞 / 冲突 / 越界
+          不得提升 revision 或触发 render；repair 保留已有 absolute-row truth。
+        </p>
+      </section>
+
+      <section>
+        <h2>Android 输入发送链（竖向）</h2>
+        <div class="mermaid">
+          flowchart TB
+            text["已提交文本"]
+            input_policy["输入策略"]
+            facts["transport 观察事实"]
+            normalizer["归一提交文本"]
+            batch["计划可靠输入批次"]
+            emitter["发送到当前 mux channel"]
+            out["mux channel 发送"]
+            text --> normalizer
+            normalizer --> batch
+            input_policy --> batch
+            facts --> batch
+            batch --> emitter
+            emitter --> out
+        </div>
+        <p class="muted">
+          规则：normalizer 只做纯文本归一；可靠输入队列唯一持有 seq / ACK / retry；
+          最终输出走当前 mux channel，不替换物理 transport。
+        </p>
+      </section>
+
+      <section>
+        <h2>状态机与角色</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>对象</th>
+              <th>定义</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Relay 账号</td>
+              <td>未登录 -&gt; 鉴权中 -&gt; 已登录 -&gt; 未登录；鉴权拒绝显式清除，不隐藏直连目标。</td>
+            </tr>
+            <tr>
+              <td>目标物理连接</td>
+              <td>空闲 -&gt; 解析线路 -&gt; 建立连接 -&gt; mux 协商 -&gt; 就绪 -&gt; 恢复；鉴权失败停止自动重连。</td>
+            </tr>
+            <tr>
+              <td>会话通道</td>
+              <td>无需求 -&gt; 打开中 -&gt; 已打开 -&gt; 已订阅；inactive 只停 body，不关通道。</td>
+            </tr>
+            <tr>
+              <td>Buffer 管理</td>
+              <td>未初始化 -&gt; head 已观察 -&gt; 在线 -&gt; 缺口修复 -&gt; 在线；revision 重置保留已有行。</td>
+            </tr>
+            <tr>
+              <td>Renderer window</td>
+              <td>follow -&gt; 用户上滚 -&gt; reading；到底 / 重新进入 / 用户输入回到 follow。</td>
+            </tr>
+            <tr>
+              <td>可靠输入</td>
+              <td>空闲 -&gt; 排队 -&gt; 在途 -&gt; 空闲；背压只在窗口满或高水位时进入。</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>状态闭合与资源释放</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>对象</th>
+              <th>终态与释放</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Relay 账号</td>
+              <td>鉴权拒绝 / 退出到未登录；显式清除本地 account、Relay 配置与目录投影，但不隐藏 direct / Tailscale 目标。</td>
+            </tr>
+            <tr>
+              <td>目标物理连接</td>
+              <td>释放 / 销毁：取消心跳、关闭 transport、释放代际与 channel registry；不 kill tmux。</td>
+            </tr>
+            <tr>
+              <td>会话通道</td>
+              <td>已关闭 / 已销毁：只释放该通道 body、pending、input lane；sibling 通道不受影响。</td>
+            </tr>
+            <tr>
+              <td>Buffer 管理</td>
+              <td>session 销毁时删除 sparse truth / revision epoch / frame assembly / repair ledger；inactive 与 tab 切换不销毁。</td>
+            </tr>
+            <tr>
+              <td>Renderer window</td>
+              <td>session 或 pane hidden 时移除 renderer 实例；不持有 buffer / transport 生命周期。</td>
+            </tr>
+            <tr>
+              <td>可靠输入</td>
+              <td>随 session 销毁；transport 代际变化只重置 sent 状态，不丢未确认数据。</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>Phase 0 完成标准</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>项目</th>
+              <th>状态</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>android connection lifecycle graph</td>
+              <td><span class="check">已完成</span></td>
+            </tr>
+            <tr>
+              <td>android buffer management graph</td>
+              <td><span class="check">已完成</span></td>
+            </tr>
+            <tr>
+              <td>android buffer/render graph</td>
+              <td><span class="check">已完成</span></td>
+            </tr>
+            <tr>
+              <td>android input graph</td>
+              <td><span class="check">已完成</span></td>
+            </tr>
+            <tr>
+              <td>dagpipe graph validate / inspect</td>
+              <td><span class="check">本机通过</span></td>
+            </tr>
+            <tr>
+              <td>不引入 Rust crate / Cargo.toml</td>
+              <td><span class="check">保持</span></td>
+            </tr>
+            <tr>
+              <td>不碰 Android runtime 代码</td>
+              <td><span class="check">保持</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>审批后的下一步</h2>
+        <ol>
+          <li>建立 Rust crate，按 Android 四张图注册 Operators 并完成 compile()。</li>
+          <li>为每个 Operator 写黑盒测试，验证连接、buffer、render、input 与当前 TS 行为 parity。</li>
+          <li>测试通过后，再接薄 bridge 到现有 Android client，并保留旧实现直至 parity gate 通过。</li>
+        </ol>
+        <p class="muted">
+          本 HTML 仅供审批参考；审批通过前不会进入 Cargo.toml、runtime、APK 或 OTA。
+        </p>
+      </section>
+    </main>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({
+        startOnLoad: true,
+        theme: "default",
+        securityLevel: "strict",
+        flowchart: {
+          curve: "basis",
+          padding: 12,
+        },
+        themeVariables: {
+          fontSize: "18px",
+        },
+      });
+    </script>
+  </body>
+</html>
