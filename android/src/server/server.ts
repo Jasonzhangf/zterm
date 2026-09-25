@@ -352,7 +352,7 @@ const terminalRuntime = createTerminalRuntime({
   mirrorBufferChanged: (mirror, previousStartIndex, previousLines) => {
     const result = mirrorPublishChangedRanges({
       sourceReadback: {
-        revision: mirror.revision,
+        revision: mirror.revision + 1,
         bufferStartIndex: mirror.bufferStartIndex,
         bufferLines: mirror.bufferLines,
         rows: mirror.rows,
@@ -361,7 +361,7 @@ const terminalRuntime = createTerminalRuntime({
         cursor: mirror.cursor ?? null,
       },
       prevMirrorSnapshot: {
-        revision: Math.max(0, mirror.revision - 1),
+        revision: mirror.revision,
         bufferStartIndex: previousStartIndex,
         bufferLines: previousLines,
       },

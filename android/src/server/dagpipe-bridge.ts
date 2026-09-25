@@ -107,10 +107,17 @@ export function mirrorPublishChangedRanges(
   if (!result.ok) {
     return { ok: false, error: result.error };
   }
-  const wireFrames = result.outputs['arc.wire_frames'] as
-    | { frames?: Array<{ action?: string; ranges?: Array<{ startIndex?: number; endIndex?: number }> }> }
-    | undefined;
-  const frames = wireFrames?.frames ?? [];
+  const rawWireFrames = result.outputs['arc.wire_frames'];
+  if (
+    !rawWireFrames ||
+    typeof rawWireFrames !== 'object' ||
+    !Array.isArray((rawWireFrames as { frames?: unknown }).frames)
+  ) {
+    return { ok: false, error: 'DAGpipe mirror publish returned no wire frame plan' };
+  }
+  const frames = (rawWireFrames as {
+    frames: Array<{ action?: string; ranges?: Array<{ startIndex?: number; endIndex?: number }> }>;
+  }).frames;
   const ranges: MirrorChangedRange[] = [];
   for (const frame of frames) {
     const action = frame.action ?? 'body';
