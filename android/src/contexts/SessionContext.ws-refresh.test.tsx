@@ -1665,7 +1665,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     }
   });
 
-  it('rebuilds an orphaned pending target once on foreground and refreshes active body from head truth without manual body injection', async () => {
+  it('rebuilds a dropped target transport once through the reconnect owner and refreshes active body from head truth without manual body injection', async () => {
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1000);
     try {
       const view = render(
@@ -1680,22 +1680,16 @@ describe('SessionContext websocket dynamic refresh', () => {
       expect(screen.getByTestId('foreground-orphan-active-body').textContent).not.toContain('SESSION_TWO_OLD');
 
       const orphanedRoot = MockWebSocket.physicalInstances[0]!;
-      orphanedRoot.readyState = MockWebSocket.CLOSED;
-
-      view.rerender(
-        <SessionProvider
-          wsUrl="ws://127.0.0.1:3333/ws"
-          appForegroundActive
-          foregroundResumeEpoch={1}
-        >
-          <ForegroundOrphanSessionIdentityHarness />
-        </SessionProvider>,
-      );
+      // A dropped physical transport surfaces through the socket close path; the
+      // reconnect owner rebuilds exactly one same-target transport. Foreground
+      // resume stays data-only and must not own the rebuild (see
+      // docs/testing/connection-service-owner-test-design.md).
+      orphanedRoot.close();
 
       await waitForMockPhysicalInstances(2);
-      await waitForMockSessionInstances(3);
 
       const recoveredRoot = MockWebSocket.physicalInstances[1]!;
+      recoveredRoot.triggerOpen();
       const activeChannelOpen = readMuxChannelOpenMessages(recoveredRoot)
         .find((item) => item.payload?.sessionName === host.sessionName);
       const activeChannelId = activeChannelOpen?.payload?.channelId;
@@ -1727,6 +1721,23 @@ describe('SessionContext websocket dynamic refresh', () => {
       const activeBody = screen.getByTestId('foreground-orphan-active-body').textContent || '';
       expect(activeBody).not.toContain('SESSION_ONE_OLD');
       expect(activeBody).not.toContain('SESSION_TWO_OLD');
+      expect(MockWebSocket.physicalInstances).toHaveLength(2);
+      expect(MockWebSocket.physicalInstances.filter((ws) => ws.readyState !== MockWebSocket.CLOSED)).toHaveLength(1);
+
+      // Foreground resume is a data-refresh trigger only: flipping the app back
+      // to active on the recovered open transport must not rebuild a third
+      // physical transport or reopen the channel.
+      view.rerender(
+        <SessionProvider
+          wsUrl="ws://127.0.0.1:3333/ws"
+          appForegroundActive
+          foregroundResumeEpoch={2}
+        >
+          <ForegroundOrphanSessionIdentityHarness />
+        </SessionProvider>,
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, 20));
       expect(MockWebSocket.physicalInstances).toHaveLength(2);
       expect(MockWebSocket.physicalInstances.filter((ws) => ws.readyState !== MockWebSocket.CLOSED)).toHaveLength(1);
     } finally {
