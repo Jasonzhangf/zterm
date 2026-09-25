@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   compilePhase0,
+  compilePhase2,
   readDagpipeInputChunks,
   runBufferManagement,
   runBufferRender,
   runConnectionLifecycle,
   runInputDispatch,
+  runPhase2Relay,
+  runPhase2DaemonConnection,
 } from './dagpipe-bridge';
 
 function cell(ch: string) {
@@ -35,6 +38,56 @@ describe('dagpipe native bridge', () => {
         'daemon.control_dispatch@0.1',
       ],
     });
+  });
+
+  it('compiles Phase2 relay and daemon connection catalog graphs', () => {
+    expect(compilePhase2()).toEqual({
+      ok: true,
+      graphs: [
+        'relay.account_peer_route@0.1',
+        'daemon.connection_channel_catalog@0.1',
+      ],
+    });
+  });
+
+  it('routes relay login to a resume plan through the native core', () => {
+    const result = runPhase2Relay({
+      execution_id: 'bridge-phase2-relay',
+      attempt_id: '1',
+      inputs: {
+        'arc.account_credentials': { accountId: 'u1', authToken: 'tok' },
+        'arc.relay_settings': { relayEnabled: true },
+        'arc.device_capabilities': {
+          deviceId: 'device-a',
+          platform: 'android',
+          routes: ['relay'],
+        },
+        'arc.route_policy': { pathPriority: ['relay'] },
+      },
+    });
+    const resume = (result as { outputs: Record<string, { state: string; action: string }> })
+      .outputs['arc.resume_plan'];
+    expect(resume.state).toBe('ready');
+    expect(resume.action).toBe('resume');
+  });
+
+  it('builds daemon connection catalog and idle facts', () => {
+    const result = runPhase2DaemonConnection({
+      execution_id: 'bridge-phase2-daemon',
+      attempt_id: '1',
+      inputs: {
+        'arc.physical_connection': { connectionId: 'conn-1' },
+        'arc.mux_capabilities': { muxEnabled: true },
+        'arc.session_catalog_request': { sessionNames: [{ sessionId: 's1' }] },
+        'arc.idle_facts_request': {},
+      },
+    });
+    const catalog = (result as { outputs: Record<string, { state: string }> })
+      .outputs['arc.session_catalog'];
+    const idle = (result as { outputs: Record<string, { state: string }> })
+      .outputs['arc.idle_facts'];
+    expect(catalog.state).toBe('ready');
+    expect(idle.state).toBe('published');
   });
 
   it('routes committed text through the input dispatch graph', () => {

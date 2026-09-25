@@ -17,10 +17,13 @@ const require = createRequire(typeof __filename !== 'undefined' ? __filename : i
 
 interface DagpipeNativeModule {
   compilePhase0: () => string;
+  compilePhase2: () => string;
   runConnectionLifecycle: (inputJson: string) => string;
   runBufferManagement: (inputJson: string) => string;
   runBufferRender: (inputJson: string) => string;
   runInputDispatch: (inputJson: string) => string;
+  runPhase2Relay: (inputJson: string) => string;
+  runPhase2DaemonConnection: (inputJson: string) => string;
 }
 
 function sourceIndexNode() {
@@ -64,6 +67,10 @@ export function compilePhase0(): DagpipeCompileResult {
   return JSON.parse(cached().compilePhase0()) as DagpipeCompileResult;
 }
 
+export function compilePhase2(): DagpipeCompileResult {
+  return JSON.parse(cached().compilePhase2()) as DagpipeCompileResult;
+}
+
 function run(fn: keyof DagpipeNativeModule, input: Record<string, unknown>): DagpipeResult {
   const raw = JSON.parse(
     (cached()[fn] as (json: string) => string)(JSON.stringify(input)),
@@ -88,6 +95,14 @@ export function runBufferRender(input: Record<string, unknown>): DagpipeResult {
 
 export function runInputDispatch(input: Record<string, unknown>): DagpipeResult {
   return run('runInputDispatch', input);
+}
+
+export function runPhase2Relay(input: Record<string, unknown>): DagpipeResult {
+  return run('runPhase2Relay', input);
+}
+
+export function runPhase2DaemonConnection(input: Record<string, unknown>): DagpipeResult {
+  return run('runPhase2DaemonConnection', input);
 }
 
 export { readDagpipeInputChunks } from './dagpipe-input-chunks';

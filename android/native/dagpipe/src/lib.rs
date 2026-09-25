@@ -84,3 +84,31 @@ pub fn run_buffer_render(input_json: String) -> String {
 pub fn run_input_dispatch(input_json: String) -> String {
     json_to_string(core::run_input_dispatch_json(input_json))
 }
+
+#[cfg(feature = "napi")]
+#[napi]
+pub fn compile_phase2() -> String {
+    match phase2_core::compile_phase2_graphs() {
+        Ok(graphs) => json_to_string(Ok(serde_json::json!({
+            "ok": true,
+            "graphs": graphs,
+        }))),
+        Err(error) => serde_json::to_string(&serde_json::json!({
+            "ok": false,
+            "error": error.message,
+        }))
+        .unwrap_or_default(),
+    }
+}
+
+#[cfg(feature = "napi")]
+#[napi]
+pub fn run_phase2_relay(input_json: String) -> String {
+    json_to_string(phase2_core::run_phase2_relay_json(input_json))
+}
+
+#[cfg(feature = "napi")]
+#[napi]
+pub fn run_phase2_daemon_connection(input_json: String) -> String {
+    json_to_string(phase2_core::run_phase2_daemon_connection_json(input_json))
+}
