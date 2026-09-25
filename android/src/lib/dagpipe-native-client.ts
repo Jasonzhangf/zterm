@@ -10,6 +10,7 @@ interface DagpipeCoreNativePlugin {
   runPhase5ShellLifecycle(options: { inputJson: string }): Promise<{ method: 'runPhase5ShellLifecycle'; json: string }>;
   runPhase3InputSchedule(options: { inputJson: string }): Promise<{ method: 'runPhase3InputSchedule'; json: string }>;
   runPhase2DaemonConnection(options: { inputJson: string }): Promise<{ method: 'runPhase2DaemonConnection'; json: string }>;
+  runPhase5PreviewLattice(options: { inputJson: string }): Promise<{ method: 'runPhase5PreviewLattice'; json: string }>;
   runPhase8Connection(options: { inputJson: string }): Promise<{ method: 'runPhase8Connection'; json: string }>;
   runConnectionLifecycle(options: { inputJson: string }): Promise<{ method: 'runConnectionLifecycle'; json: string }>;
   runBufferManagement(options: { inputJson: string }): Promise<{ method: 'runBufferManagement'; json: string }>;
@@ -87,6 +88,13 @@ export async function runDagpipePhase2DaemonConnection(input: Record<string, unk
   return parseResult(
     'runPhase2DaemonConnection',
     (await DagpipeCore.runPhase2DaemonConnection({ inputJson: JSON.stringify(input) })).json,
+  );
+}
+
+export async function runDagpipePhase5PreviewLattice(input: Record<string, unknown>): Promise<DagpipeResult> {
+  return parseResult(
+    'runPhase5PreviewLattice',
+    (await DagpipeCore.runPhase5PreviewLattice({ inputJson: JSON.stringify(input) })).json,
   );
 }
 

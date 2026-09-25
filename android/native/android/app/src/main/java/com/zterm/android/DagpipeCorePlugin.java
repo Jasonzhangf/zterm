@@ -105,6 +105,15 @@ public final class DagpipeCorePlugin extends Plugin {
     }
 
     @PluginMethod
+    public void runPhase5PreviewLattice(PluginCall call) {
+        try {
+            call.resolve(result("runPhase5PreviewLattice", DagpipeCoreBridge.runPhase5PreviewLattice(call.getString("inputJson", "{}"))));
+        } catch (Throwable error) {
+            rejectCall(call, "runPhase5PreviewLattice", error);
+        }
+    }
+
+    @PluginMethod
     public void runConnectionLifecycle(PluginCall call) {
         try {
             call.resolve(result("runConnectionLifecycle", DagpipeCoreBridge.runConnectionLifecycle(call.getString("inputJson", "{}"))));
