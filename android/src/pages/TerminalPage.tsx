@@ -71,6 +71,10 @@ import { useTerminalPageCopyRuntime } from './useTerminalPageCopyRuntime';
 import { getBrowserStorage } from '../lib/browser-storage';
 import { resolveTerminalFontSizePx, type TerminalFontSize, type TerminalShellSkin } from '../lib/bridge-settings';
 import {
+  isDagpipeNativeCapable,
+  runDagpipePhase5PreviewLattice,
+} from '../lib/dagpipe-native-client';
+import {
   resolveEffectiveTerminalShellSkin,
   resolveNextTerminalShellBoundaryDelayMs,
   resolveTerminalRendererThemeForSkin,
@@ -3083,7 +3087,7 @@ function TerminalPageComponent({
     sessionPreviewOpen,
   ]);
 
-  const handleOpenSessionPreview = useCallback(() => {
+  const handleOpenSessionPreview = useCallback(async () => {
     if (keyboardInset > 0 || terminalKeyboardRequestedRef.current) {
       showSessionPreviewError('请先收起输入法再进入终端预览。');
       return;
@@ -3095,6 +3099,31 @@ function TerminalPageComponent({
     if (!activeSessionRecord) {
       showSessionPreviewError('当前没有可进入预览的活动 session。');
       return;
+    }
+    if (isDagpipeNativeCapable()) {
+      try {
+        const gate = await runDagpipePhase5PreviewLattice({
+          execution_id: `preview-open:${activeSessionRecord.id}`,
+          attempt_id: '1',
+          inputs: {
+            'arc.preview_open_intent': {
+              sessionId: activeSessionRecord.id,
+            },
+            'arc.preview_select': {},
+            'arc.focus_pan': {},
+          },
+        });
+        if (!gate.ok) {
+          showSessionPreviewError('DAGpipe 预览门禁未通过。', gate.error);
+          return;
+        }
+      } catch (error) {
+        showSessionPreviewError(
+          'DAGpipe 预览门禁执行失败。',
+          error instanceof Error ? error.message : String(error),
+        );
+        return;
+      }
     }
     sessionPreviewEntryRef.current = {
       activeSessionId: activeSession?.id || null,
@@ -3138,8 +3167,10 @@ function TerminalPageComponent({
   }, [
     activeSession?.id,
     effectiveSessionGroupSlotIds,
+    isDagpipeNativeCapable,
     keyboardInset,
     persistSessionPreviewLattice,
+    runDagpipePhase5PreviewLattice,
     sessionGroupFocusSlot,
     sessions,
     sessionPreviewLattice,
