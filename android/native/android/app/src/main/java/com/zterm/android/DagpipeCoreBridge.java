@@ -30,6 +30,10 @@ public final class DagpipeCoreBridge {
 
     public static native String runPhase5ShellLifecycle(String inputJson);
 
+    public static native String runPhase3InputSchedule(String inputJson);
+
+    public static native String runPhase2DaemonConnection(String inputJson);
+
     public static native String runConnectionLifecycle(String inputJson);
 
     public static native String runBufferManagement(String inputJson);

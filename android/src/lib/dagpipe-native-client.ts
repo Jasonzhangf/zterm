@@ -8,6 +8,8 @@ interface DagpipeCoreNativePlugin {
   runPhase7Update(options: { inputJson: string }): Promise<{ method: 'runPhase7Update'; json: string }>;
   runPhase4RemoteWindow(options: { inputJson: string }): Promise<{ method: 'runPhase4RemoteWindow'; json: string }>;
   runPhase5ShellLifecycle(options: { inputJson: string }): Promise<{ method: 'runPhase5ShellLifecycle'; json: string }>;
+  runPhase3InputSchedule(options: { inputJson: string }): Promise<{ method: 'runPhase3InputSchedule'; json: string }>;
+  runPhase2DaemonConnection(options: { inputJson: string }): Promise<{ method: 'runPhase2DaemonConnection'; json: string }>;
   runPhase8Connection(options: { inputJson: string }): Promise<{ method: 'runPhase8Connection'; json: string }>;
   runConnectionLifecycle(options: { inputJson: string }): Promise<{ method: 'runConnectionLifecycle'; json: string }>;
   runBufferManagement(options: { inputJson: string }): Promise<{ method: 'runBufferManagement'; json: string }>;
@@ -71,6 +73,20 @@ export async function runDagpipePhase5ShellLifecycle(input: Record<string, unkno
   return parseResult(
     'runPhase5ShellLifecycle',
     (await DagpipeCore.runPhase5ShellLifecycle({ inputJson: JSON.stringify(input) })).json,
+  );
+}
+
+export async function runDagpipePhase3InputSchedule(input: Record<string, unknown>): Promise<DagpipeResult> {
+  return parseResult(
+    'runPhase3InputSchedule',
+    (await DagpipeCore.runPhase3InputSchedule({ inputJson: JSON.stringify(input) })).json,
+  );
+}
+
+export async function runDagpipePhase2DaemonConnection(input: Record<string, unknown>): Promise<DagpipeResult> {
+  return parseResult(
+    'runPhase2DaemonConnection',
+    (await DagpipeCore.runPhase2DaemonConnection({ inputJson: JSON.stringify(input) })).json,
   );
 }
 

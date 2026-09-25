@@ -87,6 +87,24 @@ public final class DagpipeCorePlugin extends Plugin {
     }
 
     @PluginMethod
+    public void runPhase3InputSchedule(PluginCall call) {
+        try {
+            call.resolve(result("runPhase3InputSchedule", DagpipeCoreBridge.runPhase3InputSchedule(call.getString("inputJson", "{}"))));
+        } catch (Throwable error) {
+            rejectCall(call, "runPhase3InputSchedule", error);
+        }
+    }
+
+    @PluginMethod
+    public void runPhase2DaemonConnection(PluginCall call) {
+        try {
+            call.resolve(result("runPhase2DaemonConnection", DagpipeCoreBridge.runPhase2DaemonConnection(call.getString("inputJson", "{}"))));
+        } catch (Throwable error) {
+            rejectCall(call, "runPhase2DaemonConnection", error);
+        }
+    }
+
+    @PluginMethod
     public void runConnectionLifecycle(PluginCall call) {
         try {
             call.resolve(result("runConnectionLifecycle", DagpipeCoreBridge.runConnectionLifecycle(call.getString("inputJson", "{}"))));
