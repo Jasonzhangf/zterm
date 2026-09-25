@@ -38,7 +38,7 @@ fn compile_all_phase0_graphs() -> Result<Vec<String>, String> {
     Ok(graphs)
 }
 
-pub fn compile_all_dagpipe_phases() -> Result<Vec<String>, String> {
+pub fn compile_all_dagpipe_phases_result() -> Result<Vec<String>, String> {
     let mut graphs = core::compile_phase0_graphs().map_err(|error| error.message)?;
     daemon_core::compile_phase0_graphs()?;
     graphs.extend([
@@ -59,6 +59,23 @@ pub fn compile_all_dagpipe_phases() -> Result<Vec<String>, String> {
 #[napi]
 pub fn compile_phase0() -> String {
     match compile_all_phase0_graphs() {
+        Ok(graphs) => serde_json::to_string(&serde_json::json!({
+            "ok": true,
+            "graphs": graphs,
+        }))
+        .unwrap_or_else(|_| r#"{"ok":false,"error":"json encode failed"}"#.into()),
+        Err(error) => serde_json::to_string(&serde_json::json!({
+            "ok": false,
+            "error": error,
+        }))
+        .unwrap_or_else(|_| r#"{"ok":false,"error":"json encode failed"}"#.into()),
+    }
+}
+
+#[cfg(feature = "napi")]
+#[napi]
+pub fn compile_all_dagpipe_phases() -> String {
+    match compile_all_dagpipe_phases_result() {
         Ok(graphs) => serde_json::to_string(&serde_json::json!({
             "ok": true,
             "graphs": graphs,

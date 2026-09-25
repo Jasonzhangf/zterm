@@ -46,7 +46,7 @@ pub extern "system" fn Java_com_zterm_android_DagpipeCoreBridge_compileAllDagpip
     env: JNIEnv,
     _class: JClass,
 ) -> jstring {
-    let result = match crate::compile_all_dagpipe_phases() {
+    let result = match crate::compile_all_dagpipe_phases_result() {
         Ok(graphs) => serde_json::to_string(&serde_json::json!({
             "ok": true,
             "graphs": graphs,

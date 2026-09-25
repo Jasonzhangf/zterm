@@ -7,7 +7,7 @@ fn run_connection(input: Value) -> Value {
 
 #[test]
 fn compiles_all_dagpipe_phases() {
-    let graphs = zterm_dagpipe::compile_all_dagpipe_phases().unwrap();
+    let graphs = zterm_dagpipe::compile_all_dagpipe_phases_result().unwrap();
     assert!(
         graphs.len() >= 25,
         "expected all phase graphs, got {}",

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { compilePhase0, runMirrorPublish, runControlDispatch } from './dagpipe-bridge';
+import {
+  compileAllDagpipePhases,
+  compilePhase0,
+  runMirrorPublish,
+  runControlDispatch,
+} from './dagpipe-bridge';
 import { findChangedIndexedRanges } from './canonical-buffer';
 
 function cell(ch: string) {
@@ -49,6 +54,10 @@ function frameRanges(result: ReturnType<typeof runMirrorPublish>) {
 describe('dagpipe bridge parity', () => {
   it('compiles phase0 daemon graphs', () => {
     expect(compilePhase0()).toMatchObject({ ok: true });
+  });
+
+  it('compiles all DAGpipe phase graphs from the native core', () => {
+    expect(compileAllDagpipePhases()).toMatchObject({ ok: true });
   });
 
   it('publishes appended tail without holes', () => {
