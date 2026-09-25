@@ -4,6 +4,7 @@ import type { DagpipeCompileResult, DagpipeResult } from './dagpipe-types';
 interface DagpipeCoreNativePlugin {
   compilePhase0(): Promise<{ method: 'compilePhase0'; json: string }>;
   compileAllDagpipePhases(): Promise<{ method: 'compileAllDagpipePhases'; json: string }>;
+  runPhase8Connection(options: { inputJson: string }): Promise<{ method: 'runPhase8Connection'; json: string }>;
   runConnectionLifecycle(options: { inputJson: string }): Promise<{ method: 'runConnectionLifecycle'; json: string }>;
   runBufferManagement(options: { inputJson: string }): Promise<{ method: 'runBufferManagement'; json: string }>;
   runBufferRender(options: { inputJson: string }): Promise<{ method: 'runBufferRender'; json: string }>;
@@ -32,6 +33,13 @@ export async function compileDagpipeAllPhases(): Promise<DagpipeCompileResult> {
   return JSON.parse(
     (await DagpipeCore.compileAllDagpipePhases()).json,
   ) as DagpipeCompileResult;
+}
+
+export async function runDagpipePhase8Connection(input: Record<string, unknown>): Promise<DagpipeResult> {
+  return parseResult(
+    'runPhase8Connection',
+    (await DagpipeCore.runPhase8Connection({ inputJson: JSON.stringify(input) })).json,
+  );
 }
 
 export async function runDagpipeConnection(input: Record<string, unknown>): Promise<DagpipeResult> {

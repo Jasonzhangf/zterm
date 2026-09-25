@@ -20,6 +20,8 @@ public final class DagpipeCoreBridge {
 
     public static native String compileAllDagpipePhases();
 
+    public static native String runPhase8Connection(String inputJson);
+
     public static native String runConnectionLifecycle(String inputJson);
 
     public static native String runBufferManagement(String inputJson);
