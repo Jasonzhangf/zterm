@@ -53,6 +53,12 @@ Phase 6 static graphs:
 - `android-config-export.graph.json`
 - `android-config-import.graph.json`
 
+Phase 7 static graphs:
+
+- `release-runtime-promotion.graph.json`
+- `release-update-lifecycle.graph.json`
+- `observability-debug.graph.json`
+
 Validation:
 
 ```sh

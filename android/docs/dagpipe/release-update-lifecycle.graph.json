@@ -1,0 +1,56 @@
+{
+  "id": "release.update_lifecycle",
+  "version": "0.1",
+  "inputs": [
+    { "id": "arc.update_check", "schema": "Object" },
+    { "id": "arc.update_policy", "schema": "Object" }
+  ],
+  "nodes": [
+    {
+      "id": "check_update",
+      "operator": "release.update_artifact.check",
+      "operator_version": "0.1",
+      "inputs": ["arc.update_check", "arc.update_policy"],
+      "output": { "id": "arc.update_available", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "download_update",
+      "operator": "release.update_artifact.download",
+      "operator_version": "0.1",
+      "inputs": ["arc.update_available"],
+      "output": { "id": "arc.downloaded_update", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "verify_update",
+      "operator": "release.update_artifact.verify_download",
+      "operator_version": "0.1",
+      "inputs": ["arc.downloaded_update"],
+      "output": { "id": "arc.verified_download", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "install_client_update",
+      "operator": "release.update_artifact.install_client",
+      "operator_version": "0.1",
+      "inputs": ["arc.verified_download"],
+      "output": { "id": "arc.client_update_installed", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    { "from": "check_update", "to": "download_update", "arc_id": "arc.update_available" },
+    { "from": "download_update", "to": "verify_update", "arc_id": "arc.downloaded_update" },
+    { "from": "verify_update", "to": "install_client_update", "arc_id": "arc.verified_download" }
+  ],
+  "outputs": ["arc.client_update_installed"]
+}

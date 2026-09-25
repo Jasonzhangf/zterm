@@ -22,6 +22,7 @@ interface DagpipeNativeModule {
   compilePhase4: () => string;
   compilePhase5: () => string;
   compilePhase6: () => string;
+  compilePhase7: () => string;
   runConnectionLifecycle: (inputJson: string) => string;
   runBufferManagement: (inputJson: string) => string;
   runBufferRender: (inputJson: string) => string;
@@ -41,6 +42,9 @@ interface DagpipeNativeModule {
   runPhase6Control: (inputJson: string) => string;
   runPhase6ConfigExport: (inputJson: string) => string;
   runPhase6ConfigImport: (inputJson: string) => string;
+  runPhase7Release: (inputJson: string) => string;
+  runPhase7Update: (inputJson: string) => string;
+  runPhase7Debug: (inputJson: string) => string;
 }
 
 function sourceIndexNode() {
@@ -102,6 +106,10 @@ export function compilePhase5(): DagpipeCompileResult {
 
 export function compilePhase6(): DagpipeCompileResult {
   return JSON.parse(cached().compilePhase6()) as DagpipeCompileResult;
+}
+
+export function compilePhase7(): DagpipeCompileResult {
+  return JSON.parse(cached().compilePhase7()) as DagpipeCompileResult;
 }
 
 function run(fn: keyof DagpipeNativeModule, input: Record<string, unknown>): DagpipeResult {
@@ -188,6 +196,18 @@ export function runPhase6ConfigExport(input: Record<string, unknown>): DagpipeRe
 
 export function runPhase6ConfigImport(input: Record<string, unknown>): DagpipeResult {
   return run('runPhase6ConfigImport', input);
+}
+
+export function runPhase7Release(input: Record<string, unknown>): DagpipeResult {
+  return run('runPhase7Release', input);
+}
+
+export function runPhase7Update(input: Record<string, unknown>): DagpipeResult {
+  return run('runPhase7Update', input);
+}
+
+export function runPhase7Debug(input: Record<string, unknown>): DagpipeResult {
+  return run('runPhase7Debug', input);
 }
 
 export { readDagpipeInputChunks } from './dagpipe-input-chunks';

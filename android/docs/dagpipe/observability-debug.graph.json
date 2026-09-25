@@ -1,0 +1,67 @@
+{
+  "id": "observability.debug",
+  "version": "0.1",
+  "inputs": [
+    { "id": "arc.debug_sample_request", "schema": "Object" },
+    { "id": "arc.debug_policy", "schema": "Object" }
+  ],
+  "nodes": [
+    {
+      "id": "authorize_debug",
+      "operator": "observability.debug_channel.authorize",
+      "operator_version": "0.1",
+      "inputs": ["arc.debug_policy"],
+      "output": { "id": "arc.debug_lease", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "sample_debug",
+      "operator": "observability.debug_channel.sample",
+      "operator_version": "0.1",
+      "inputs": ["arc.debug_sample_request", "arc.debug_lease"],
+      "output": { "id": "arc.debug_sample", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "store_bounded",
+      "operator": "client.debug_hub.store",
+      "operator_version": "0.1",
+      "inputs": ["arc.debug_sample"],
+      "output": { "id": "arc.debug_store", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "export_debug",
+      "operator": "client.debug_hub.export",
+      "operator_version": "0.1",
+      "inputs": ["arc.debug_store"],
+      "output": { "id": "arc.debug_export", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "cleanup_debug",
+      "operator": "client.debug_hub.cleanup",
+      "operator_version": "0.1",
+      "inputs": ["arc.debug_store"],
+      "output": { "id": "arc.debug_cleanup", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    { "from": "authorize_debug", "to": "sample_debug", "arc_id": "arc.debug_lease" },
+    { "from": "sample_debug", "to": "store_bounded", "arc_id": "arc.debug_sample" },
+    { "from": "store_bounded", "to": "export_debug", "arc_id": "arc.debug_store" },
+    { "from": "store_bounded", "to": "cleanup_debug", "arc_id": "arc.debug_store" }
+  ],
+  "outputs": ["arc.debug_export", "arc.debug_cleanup"]
+}

@@ -6,6 +6,7 @@ import {
   compilePhase4,
   compilePhase5,
   compilePhase6,
+  compilePhase7,
   readDagpipeInputChunks,
   runBufferManagement,
   runBufferRender,
@@ -26,6 +27,9 @@ import {
   runPhase6Control,
   runPhase6ConfigExport,
   runPhase6ConfigImport,
+  runPhase7Release,
+  runPhase7Update,
+  runPhase7Debug,
 } from './dagpipe-bridge';
 
 function cell(ch: string) {
@@ -106,6 +110,17 @@ describe('dagpipe native bridge', () => {
         'android.control_command@0.1',
         'android.config_export@0.1',
         'android.config_import@0.1',
+      ],
+    });
+  });
+
+  it('compiles Phase7 release/update/observability graphs', () => {
+    expect(compilePhase7()).toEqual({
+      ok: true,
+      graphs: [
+        'release.runtime_promotion@0.1',
+        'release.update_lifecycle@0.1',
+        'observability.debug@0.1',
       ],
     });
   });
@@ -216,6 +231,47 @@ describe('dagpipe native bridge', () => {
       (configImport as { outputs: Record<string, { state: string }> })
         .outputs['arc.import_result'].state,
     ).toBe('imported');
+  });
+
+  it('routes Phase7 release/update/debug through native core', () => {
+    const release = runPhase7Release({
+      execution_id: 'bridge-phase7-release',
+      attempt_id: '1',
+      inputs: {
+        'arc.build_artifact': { name: 'zterm-daemon', sha256: 'abc123' },
+        'arc.release_policy': { expectedSha256: 'abc123' },
+      },
+    });
+    expect(
+      (release as { outputs: Record<string, { state: string }> })
+        .outputs['arc.runtime_started'].state,
+    ).toBe('started');
+
+    const update = runPhase7Update({
+      execution_id: 'bridge-phase7-update',
+      attempt_id: '1',
+      inputs: {
+        'arc.update_check': { version: '0.1.4', sha256: 'def456' },
+        'arc.update_policy': { allowUpdate: true },
+      },
+    });
+    expect(
+      (update as { outputs: Record<string, { state: string }> })
+        .outputs['arc.client_update_installed'].state,
+    ).toBe('installed');
+
+    const debug = runPhase7Debug({
+      execution_id: 'bridge-phase7-debug',
+      attempt_id: '1',
+      inputs: {
+        'arc.debug_sample_request': { sample: 'trace-1' },
+        'arc.debug_policy': { allowDebug: true },
+      },
+    });
+    expect(
+      (debug as { outputs: Record<string, { state: string }> })
+        .outputs['arc.debug_export'].state,
+    ).toBe('exported');
   });
 
   it('routes Phase3 input/schedule and transfer projections through native core', () => {
