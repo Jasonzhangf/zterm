@@ -102,6 +102,7 @@ Positive reuse:
 - Same target + `WebSocket.CONNECTING` + fresh pending open returns `wait-existing-open`.
 - Same target + pending open intent with no physical socket, or a `CLOSED` physical socket, is orphaned bookkeeping: explicit resume must return `rebuild/orphaned-pending-open` so the unique transport owner can restore the target on the same route. A fresh `CONNECTING` socket remains waitable and must never be replaced.
 - Foreground false->true is mapped to `explicit-resume`; it must share the cold-start/explicit resume transport owner instead of owning a separate `active-resume` branch.
+- Foreground false->true carries `allowReconnectIfUnavailable: false`: it is a data-refresh trigger only and must not rebuild a transport or reopen a channel. Physical transport recovery belongs to the socket close/error path and the unique reconnect owner. See `docs/testing/connection-service-owner-test-design.md` (supersedes the foreground-rebuild expectation this file previously carried).
 - Explicit resume with an over-budget pending open still returns `skip/transport-open-pending`; it must not create a second WebSocket.
 - Explicit resume with an over-budget `WebSocket.CONNECTING` session socket after the control intent has settled still returns `skip/transport-open-pending`; it must not create a second WebSocket.
 - Explicit resume with stale reconnect bookkeeping still returns skip/wait when a current pending/connecting socket exists; local `reconnectRuntime.connecting` is not transport failure truth and must not create a second WebSocket.
@@ -155,7 +156,7 @@ Negative:
 - Given explicit resume sees stale reconnect runtime bookkeeping but no current socket/pending open, `ensureActiveSessionFreshRuntime()` may call the unique reconnect owner; stale bookkeeping alone must not create a second socket while a current socket exists.
 - Force replacement is not a lifecycle/probe/input/foreground/online recovery API.
 - Given an `OPEN` socket with an expired head probe marker, `ensureActiveSessionFreshRuntime()` must request head again on the same socket and must not call `reconnectSession`.
-- Given closed/missing socket, it still schedules immediate reconnect.
+- Given closed/missing socket when the caller allows reconnect (explicit resume / active tick / user reconnect), it still schedules immediate reconnect. Foreground data-refresh-only (`allowReconnectIfUnavailable: false`) never reaches this branch: it returns `skip/transport-unavailable` earlier and leaves recovery to the unique reconnect owner.
 - Given closed/missing socket with recent server activity or connected baseline inside the keepalive grace window, it must call the unique reconnect owner because no live socket can be reused.
 - Given the same unavailable socket after the keepalive grace window expires, it must call the same unique reconnect owner.
 - Given reconnect already in flight inside the grace window, it must keep the existing in-flight behavior and must not queue a duplicate reconnect.
@@ -163,8 +164,8 @@ Negative:
 
 Integrated foreground identity case:
 - Start with two same-target Sessions and distinct local body markers while their channel-open intents are still pending.
-- Simulate the physical target socket becoming `CLOSED` without delivering a synthetic close event, then foreground the active Session without switching tabs.
-- Explicit resume must rebuild exactly one physical target transport, reopen the active logical channel, apply the new active body marker through the real buffer store, and leave the inactive Session marker out of the active DOM projection.
+- Drop the physical target socket through the real close path so the reconnect owner rebuilds exactly one same-target transport, then reopen the active logical channel and apply the new active body marker through the real buffer store, leaving the inactive Session marker out of the active DOM projection.
+- Flipping the app back to foreground on the recovered open transport is data-refresh only and must not rebuild a third physical transport or reopen the channel (see `docs/testing/connection-service-owner-test-design.md`).
 
 `useSessionOpenActions.handleCloseGroupSession()`:
 - Positive: when `tmux-kill-session` succeeds, the matching logical session is first stopped with `preserveTargetTransport`, then finalized locally; unrelated same-target sessions are never closed.
