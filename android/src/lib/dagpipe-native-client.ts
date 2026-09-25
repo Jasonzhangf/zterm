@@ -13,6 +13,9 @@ interface DagpipeCoreNativePlugin {
   runPhase5PreviewLattice(options: { inputJson: string }): Promise<{ method: 'runPhase5PreviewLattice'; json: string }>;
   runPhase6ConfigExport(options: { inputJson: string }): Promise<{ method: 'runPhase6ConfigExport'; json: string }>;
   runPhase6ConfigImport(options: { inputJson: string }): Promise<{ method: 'runPhase6ConfigImport'; json: string }>;
+  runPhase6Composition(options: { inputJson: string }): Promise<{ method: 'runPhase6Composition'; json: string }>;
+  runPhase7Release(options: { inputJson: string }): Promise<{ method: 'runPhase7Release'; json: string }>;
+  runPhase7Debug(options: { inputJson: string }): Promise<{ method: 'runPhase7Debug'; json: string }>;
   runPhase8Connection(options: { inputJson: string }): Promise<{ method: 'runPhase8Connection'; json: string }>;
   runConnectionLifecycle(options: { inputJson: string }): Promise<{ method: 'runConnectionLifecycle'; json: string }>;
   runBufferManagement(options: { inputJson: string }): Promise<{ method: 'runBufferManagement'; json: string }>;
@@ -111,6 +114,27 @@ export async function runDagpipePhase6ConfigImport(input: Record<string, unknown
   return parseResult(
     'runPhase6ConfigImport',
     (await DagpipeCore.runPhase6ConfigImport({ inputJson: JSON.stringify(input) })).json,
+  );
+}
+
+export async function runDagpipePhase6Composition(input: Record<string, unknown>): Promise<DagpipeResult> {
+  return parseResult(
+    'runPhase6Composition',
+    (await DagpipeCore.runPhase6Composition({ inputJson: JSON.stringify(input) })).json,
+  );
+}
+
+export async function runDagpipePhase7Release(input: Record<string, unknown>): Promise<DagpipeResult> {
+  return parseResult(
+    'runPhase7Release',
+    (await DagpipeCore.runPhase7Release({ inputJson: JSON.stringify(input) })).json,
+  );
+}
+
+export async function runDagpipePhase7Debug(input: Record<string, unknown>): Promise<DagpipeResult> {
+  return parseResult(
+    'runPhase7Debug',
+    (await DagpipeCore.runPhase7Debug({ inputJson: JSON.stringify(input) })).json,
   );
 }
 
