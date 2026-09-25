@@ -38,6 +38,7 @@ import type {
 import { getRemoteWindowMediaPlanV2Contract } from '@zterm/shared/protocol';
 import { buildRemoteWindowCanvasLayoutV1 } from './remote-window-canvas-layout';
 import { applyRemoteWindowStreamGroupQuality } from './remote-window-quality';
+import { runPhase4RemoteWindow } from './dagpipe-bridge';
 import {
   releaseRemoteWindowStreamSessionResources,
   type RemoteWindowStreamSessionResources,
@@ -670,6 +671,39 @@ export function createRemoteWindowStreamDaemonRuntime(
   ): Promise<RemoteWindowStreamStartedPayload | RemoteWindowStreamStartedOfferV2Payload | RemoteWindowStreamErrorPayload> {
     if (!payload.requestId || !payload.streamId) {
       return buildStreamError(payload, 'remote_window_stream_request_invalid', 'remote window stream start requires requestId and streamId', 'request-validation');
+    }
+    const targetId = payload.target?.streamTargetId || payload.streamId;
+    const gate = runPhase4RemoteWindow({
+      execution_id: 'remote-window-stream-start',
+      attempt_id: '1',
+      inputs: {
+        'arc.catalog_request': {
+          requestId: payload.requestId,
+          windows: [{ id: targetId }],
+        },
+        'arc.stream_start_intent': {
+          requestId: payload.requestId,
+          targetId,
+        },
+        'arc.touch_action': {
+          kind: 'none',
+          x: 0,
+          y: 0,
+        },
+        'arc.quality_intent': {
+          targetId,
+          mode: 'balanced',
+        },
+        'arc.stream_policy': {
+          allowStream: true,
+          allowQuality: true,
+          allowInput: true,
+        },
+      },
+    });
+    if (!gate.ok) {
+      markStreamClosed(payload.streamId);
+      return buildStreamError(payload, 'remote_window_dagpipe_rejected', `DAGpipe remote window gate rejected stream start: ${gate.error}`, 'stream-lifecycle');
     }
     if (platform !== 'darwin') {
       markStreamClosed(payload.streamId);

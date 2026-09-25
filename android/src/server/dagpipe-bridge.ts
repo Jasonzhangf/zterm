@@ -11,6 +11,7 @@ interface DagpipeNativeModule {
   runPhase2DaemonConnection: (inputJson: string) => string;
   runPhase3InputSchedule: (inputJson: string) => string;
   runPhase3Screenshot: (inputJson: string) => string;
+  runPhase4RemoteWindow: (inputJson: string) => string;
   runMirrorPublish: (inputJson: string) => string;
   runControlDispatch: (inputJson: string) => string;
 }
@@ -98,6 +99,12 @@ export function runPhase3InputSchedule(input: Record<string, unknown>): DagpipeR
 export function runPhase3Screenshot(input: Record<string, unknown>): DagpipeResult {
   return JSON.parse(
     loadDagpipeNative().runPhase3Screenshot(JSON.stringify(input)),
+  ) as DagpipeResult;
+}
+
+export function runPhase4RemoteWindow(input: Record<string, unknown>): DagpipeResult {
+  return JSON.parse(
+    loadDagpipeNative().runPhase4RemoteWindow(JSON.stringify(input)),
   ) as DagpipeResult;
 }
 
