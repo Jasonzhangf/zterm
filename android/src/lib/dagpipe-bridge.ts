@@ -19,6 +19,7 @@ interface DagpipeNativeModule {
   compilePhase0: () => string;
   compilePhase2: () => string;
   compilePhase3: () => string;
+  compilePhase4: () => string;
   runConnectionLifecycle: (inputJson: string) => string;
   runBufferManagement: (inputJson: string) => string;
   runBufferRender: (inputJson: string) => string;
@@ -31,6 +32,7 @@ interface DagpipeNativeModule {
   runPhase3Download: (inputJson: string) => string;
   runPhase3Attachment: (inputJson: string) => string;
   runPhase3Screenshot: (inputJson: string) => string;
+  runPhase4RemoteWindow: (inputJson: string) => string;
 }
 
 function sourceIndexNode() {
@@ -80,6 +82,10 @@ export function compilePhase2(): DagpipeCompileResult {
 
 export function compilePhase3(): DagpipeCompileResult {
   return JSON.parse(cached().compilePhase3()) as DagpipeCompileResult;
+}
+
+export function compilePhase4(): DagpipeCompileResult {
+  return JSON.parse(cached().compilePhase4()) as DagpipeCompileResult;
 }
 
 function run(fn: keyof DagpipeNativeModule, input: Record<string, unknown>): DagpipeResult {
@@ -138,6 +144,10 @@ export function runPhase3Attachment(input: Record<string, unknown>): DagpipeResu
 
 export function runPhase3Screenshot(input: Record<string, unknown>): DagpipeResult {
   return run('runPhase3Screenshot', input);
+}
+
+export function runPhase4RemoteWindow(input: Record<string, unknown>): DagpipeResult {
+  return run('runPhase4RemoteWindow', input);
 }
 
 export { readDagpipeInputChunks } from './dagpipe-input-chunks';

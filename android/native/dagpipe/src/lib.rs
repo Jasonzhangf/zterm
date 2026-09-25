@@ -2,6 +2,7 @@ pub mod core;
 pub mod daemon_core;
 pub mod phase2_core;
 pub mod phase3_core;
+pub mod phase4_core;
 
 #[cfg(feature = "napi")]
 use napi_derive::napi;
@@ -164,4 +165,26 @@ pub fn run_phase3_attachment(input_json: String) -> String {
 #[napi]
 pub fn run_phase3_screenshot(input_json: String) -> String {
     json_to_string(phase3_core::run_phase3_screenshot_json(input_json))
+}
+
+#[cfg(feature = "napi")]
+#[napi]
+pub fn compile_phase4() -> String {
+    match phase4_core::compile_phase4_graphs() {
+        Ok(graphs) => json_to_string(Ok(serde_json::json!({
+            "ok": true,
+            "graphs": graphs,
+        }))),
+        Err(error) => serde_json::to_string(&serde_json::json!({
+            "ok": false,
+            "error": error.message,
+        }))
+        .unwrap_or_default(),
+    }
+}
+
+#[cfg(feature = "napi")]
+#[napi]
+pub fn run_phase4_remote_window(input_json: String) -> String {
+    json_to_string(phase4_core::run_phase4_remote_window_json(input_json))
 }

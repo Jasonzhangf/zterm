@@ -37,6 +37,10 @@ Phase 3 static graphs:
 - `daemon-attachment-delivery.graph.json`
 - `terminal-remote-screenshot.graph.json`
 
+Phase 4 static graphs:
+
+- `remote-window-stream-overlay.graph.json`
+
 Validation:
 
 ```sh

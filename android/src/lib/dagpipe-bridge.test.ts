@@ -3,6 +3,7 @@ import {
   compilePhase0,
   compilePhase2,
   compilePhase3,
+  compilePhase4,
   readDagpipeInputChunks,
   runBufferManagement,
   runBufferRender,
@@ -16,6 +17,7 @@ import {
   runPhase3Download,
   runPhase3Attachment,
   runPhase3Screenshot,
+  runPhase4RemoteWindow,
 } from './dagpipe-bridge';
 
 function cell(ch: string) {
@@ -69,6 +71,33 @@ describe('dagpipe native bridge', () => {
         'terminal.remote_screenshot@0.1',
       ],
     });
+  });
+
+  it('compiles Phase4 remote window stream overlay graph', () => {
+    expect(compilePhase4()).toEqual({
+      ok: true,
+      graphs: ['remote.window_stream_overlay@0.1'],
+    });
+  });
+
+  it('routes remote window overlay projections through native core', () => {
+    const result = runPhase4RemoteWindow({
+      execution_id: 'bridge-phase4-stream',
+      attempt_id: '1',
+      inputs: {
+        'arc.catalog_request': {
+          requestId: 'c1',
+          windows: [{ id: 'w1', name: 'Terminal' }],
+        },
+        'arc.stream_start_intent': { requestId: 's1', targetId: 'w1' },
+        'arc.touch_action': { kind: 'tap', x: 10, y: 20 },
+        'arc.quality_intent': { targetId: 'w1', mode: 'balanced' },
+        'arc.stream_policy': { allowStream: true, allowQuality: true, fps: 30 },
+      },
+    });
+    const outputs = (result as { outputs: Record<string, { state: string }> }).outputs;
+    expect(outputs['arc.overlay_projection'].state).toBe('projected');
+    expect(outputs['arc.input_result'].state).toBe('injected');
   });
 
   it('routes Phase3 input/schedule and transfer projections through native core', () => {
