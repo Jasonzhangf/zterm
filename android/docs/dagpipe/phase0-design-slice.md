@@ -1,78 +1,69 @@
 # DAGpipe Phase 0 Design Slice
 
-Status: static architecture slice only. The Operators below are planned, not
-registered in Rust and not executable through `pipeline_runtime` yet.
+Status: static architecture slice. The Operators below are planned bindings.
+`android-phase0-design-slice.md` holds the Android Chinese semantic design;
+this file records the daemon mirror/control and shared DAGpipe phase-boundary
+context.
 
 ## Goal And Scope
 
 - Model the daemon mirror-publish and control-dispatch paths before any Rust
   runtime rewrite.
-- Keep Phase 0 to graph JSON + CLI validation + this design slice.
-- Do not add `Cargo.toml`, do not register Operators, do not call
-  `compile()`/`Runtime::run()`, and do not touch daemon runtime code.
+- Keep Phase 0 to graph JSON + CLI validation + design slices.
+- Phase 1 registers Android and daemon Operators with the SDK `compile()`
+  contract/effect checks and black-box parity before production wiring.
 
 ## Identity And Roles
 
-Project/execution identities:
+Project identity: `zterm`.
 
-- `project_id`: `zterm` (consuming project)
-- `graph_id`: `daemon.mirror_publish` or `daemon.control_dispatch`
-- `graph_version`: currently `0.2` / `0.1`
-- `execution_id` / `attempt_id`: per-run identities supplied by the caller in
-  Phase 1; retry uses a new `attempt_id`, not a graph cycle.
+Graphs:
+
+- `daemon.mirror_publish@0.2`
+- `daemon.control_dispatch@0.1`
+- `android.connection_lifecycle@0.1`
+- `android.buffer_management@0.1`
+- `android.buffer_render@0.1`
+- `android.input_dispatch@0.1`
 
 Roles:
 
-- Source adapter: normalizes tmux/Herdr/WezTerm readback into a canonical
-  snapshot. It does not own revision, client state, or publish state.
-- Mirror writer: validates capture and commits one authoritative snapshot to
-  the mirror store. It does not orchestrate graph nodes or rewrite topology.
-- Mirror store: owns canonical truth, previous snapshot, and revision. It does
-  not read renderer follow/reading state.
-- Diff/classify: computes changed absolute ranges from previous vs current
-  truth and classifies the update. It does not schedule nodes.
-- Buffer publisher: turns ranges into no-hole subscriber publish plans and owns
-  per-subscriber pending/backpressure. It does not capture tmux or commit
-  mirror truth.
-- Control gateway/center/owner: owns capability/deadline/idempotency/audit and
-  routes control to owners. It does not hold mirror/transport/file bodies.
-- Client consumer: receives head/body frames and owns local sparse
-  buffer/renderer projection. It cannot request capture/diff on daemon.
+- `daemon.source_adapter.normalize`: canonical readback normalization.
+- `daemon.mirror_writer.commit`: authoritative mirror commit.
+- `daemon.mirror_store.apply`: mirror truth and revision owner.
+- `daemon.mirror_store.diff`: previous vs current, policy-driven ranges.
+- `daemon.mirror_store.classify`: append / rewrite / shift / reset / head-only.
+- `daemon.buffer_publisher.plan`: no-hole subscriber publish plan.
+- `daemon.buffer_publisher.emit`: physical wire frames.
+- `daemon.control_gateway/control_center/control_owner`: control only.
+- Android client roles keep Relay account, physical connection, session
+  channels, per-session buffer, renderer window, and reliable input separated.
 
 Forbidden control:
 
 - Operators do not receive the graph, scheduler, Runtime, or ARC store.
 - No Operator or hook may mutate graph structure or retry by creating a cycle.
 - Daemon roles do not own client session/active/foreground/viewport state.
+- Relay/peer lease does not own terminal body, channel, tmux, active tab, or UI
+  truth.
 
 ## Events
 
 Mirror-publish events:
 
-- `source.readback_received`: producer `daemon.source_adapter`, consumer
-  `daemon.mirror_writer`; emitted on successful adapter readback. Payload is
-  the adapter snapshot or an explicit failure.
-- `mirror.commit_succeeded`: producer `daemon.mirror_writer`, consumer
-  `daemon.mirror_store`; emitted after authoritative commit. Carries canonical
-  snapshot and revision lineage.
-- `mirror.commit_failed`: producer `daemon.mirror_writer`, consumer mirror
-  lifecycle; increments consecutive-failure state, may isolate lifecycle to
-  `failed` after threshold.
-- `mirror.truth_changed`: producer `daemon.mirror_store`, consumer
-  `daemon.mirror_store.diff`; emitted only after truth is committed, never on
-  request.
-- `range.plan_changed`: producer `plan_refresh`, consumer
-  `daemon.buffer_publisher.emit`; contains no-hole absolute ranges and optional
-  head-only broadcast.
-- `subscriber.flush_completed`: producer publisher, consumer publish state
-  machine; clears pending or advances pending chunk index.
+- `source.readback_received`
+- `mirror.commit_succeeded`
+- `mirror.commit_failed`
+- `mirror.truth_changed`
+- `range.plan_changed`
+- `subscriber.flush_completed`
 
 Control events:
 
-- `control.ingress_received`: gateway receives typed control command.
-- `control.authorized`: gateway authenticates and forwards command.
-- `control.routed`: control center routes command to unique owner.
-- `control.owner_completed`: owner returns typed result/error.
+- `control.ingress_received`
+- `control.authorized`
+- `control.routed`
+- `control.owner_completed`
 
 Failure/cancellation/retry:
 
@@ -84,74 +75,41 @@ Failure/cancellation/retry:
 
 ### Mirror lifecycle
 
-- `idle`: created but no ready mirror.
-- `ready`: valid mirror truth and capture loop active.
-- `flushing`: a capture/commit flush is in flight.
-- `failed`: repeated source failures isolate the mirror.
-- `destroyed`: terminal state; teardown/unavailable.
-
-Transitions:
-
-- `(idle, start/attach) -> ready`
-- `(ready, flush_start) -> flushing`
-- `(flushing, commit_succeeded) -> ready`
-- `(ready/flushing, consecutive_failure_threshold) -> failed`
-- `(ready/failed, teardown_or_unavailable) -> destroyed`
-
-Owners/guards: mirror lifecycle owned by daemon mirror runtime; source failure
-must be explicit timeout/backend error, not silent fallback.
+`idle -> ready -> flushing -> ready`; repeated source failure escalates
+`ready -> failed`; teardown/unavailable transitions to `destroyed`.
 
 Invalid transitions: `destroyed -> ready`, `failed -> ready` without explicit
 recreate/reattach.
 
 ### Subscriber publish state
 
-- `no-pending`: transport ready, no body sync pending.
-- `pending-diff`: no-hole changed ranges queued, waiting to flush.
-- `flushing`: chunks being sent.
-- `backpressured`: transport high-water/low-water hysteresis active.
-- `resync-required`: range count/span/age/transport-generation escalates to
-  full-window resync.
+`no-pending -> pending-diff -> flushing -> no-pending`; transport high-water
+enters `backpressured`; range count / span / age / transport generation can
+promote to `resync-required` and full-window resync.
 
-Transitions:
+### Android client state machines
 
-- `(no-pending, body_changed) -> pending-diff`
-- `(pending-diff, flush_slot_ready) -> flushing`
-- `(pending-diff/flushing, backpressure) -> backpressured`
-- `(backpressured, low_water_drained) -> flushing`
-- `(pending-diff/backpressured, bounds_exceeded) -> resync-required`
-- `(flushing, all_chunks_sent) -> no-pending`
+See `android-phase0-design-slice.md` for:
 
-Owners/guards: `daemon.buffer_publisher` owns this machine per logical
-subscriber; bodySubscribed=false is still a physical connection but does not
-queue live body frames.
+- Relay account login
+- one daemon target physical connection
+- per-session logical channels
+- per-session sparse buffer management
+- frame assembly / repair ledger
+- renderer window follow/reading
+- reliable input queue
 
 ## DAG And Data Contracts
 
 ### daemon.mirror_publish@0.2
 
-Inputs:
+Inputs: `arc.source_readback`, `arc.diff_policy`, `arc.prev_mirror_snapshot`,
+`arc.subscriber_facts`.
 
-- `arc.source_readback`: adapter snapshot or error.
-- `arc.diff_policy`: rewrite/no-hole/resync policy for diff and plan.
-- `arc.prev_mirror_snapshot`: previously committed canonical window.
-- `arc.subscriber_facts`: physical subscriber ready/body-subscribed/
-  backpressure facts.
+Nodes: `normalize_capture`, `commit_mirror`, `apply_mirror_truth`,
+`compute_changed_ranges`, `classify_update`, `plan_refresh`, `emit_wire_frames`.
 
-Nodes:
-
-- `normalize_capture`
-- `commit_mirror`
-- `apply_mirror_truth`
-- `compute_changed_ranges`
-- `classify_update`
-- `plan_refresh`
-- `emit_wire_frames`
-
-Output:
-
-- `arc.wire_frames`: head- or body-sync wire frames; no-hole guarantee applies
-  to body frames.
+Output: `arc.wire_frames` with no-hole body frames.
 
 ### daemon.control_dispatch@0.1
 
@@ -159,46 +117,12 @@ Inputs: `arc.control_ingress`, `arc.capability_policy`.
 
 Nodes: `authenticate_ingress`, `route_control`, `dispatch_owner`.
 
-Output: `arc.control_result` with typed result/error; no terminal body truth in
-control payloads.
+Output: `arc.control_result`; no terminal body truth in control payloads.
 
-## Node Contracts And Verification
+### Android graphs
 
-Each node has one explainable responsibility; Phase 1 must register these
-operator names/versions and verify with the SDK `compile()`.
-
-- `daemon.source_adapter.normalize@0.1`: input `arc.source_readback`, output
-  `arc.canonical_snapshot`; pure/normalization; verification compares source
-  readback to canonical absolute window.
-- `daemon.mirror_writer.commit@0.1`: input `arc.canonical_snapshot`, output
-  `arc.mirror_revision`; commits authoritative snapshot; failure increments
-  mirror lifecycle failure.
-- `daemon.mirror_store.apply@0.1`: input `arc.mirror_revision`, output
-  `arc.mirror_truth`; applies truth and advances revision.
-- `daemon.mirror_store.diff@0.1`: inputs `arc.diff_policy`,
-  `arc.prev_mirror_snapshot`, `arc.mirror_truth`; output `arc.changed_ranges`;
-  policy-driven absolute range diff; no content-overlap anchoring.
-- `daemon.mirror_store.classify@0.1`: inputs `arc.diff_policy`,
-  `arc.prev_mirror_snapshot`, `arc.mirror_truth`, `arc.changed_ranges`; output
-  `arc.update_class`; classifies append/rewrite/window-shift/reset/head-only.
-- `daemon.buffer_publisher.plan@0.1`: inputs `arc.diff_policy`,
-  `arc.update_class`, `arc.changed_ranges`, `arc.subscriber_facts`; output
-  `arc.publish_plan`; enforces no-hole ranges and subscriber bounds.
-- `daemon.buffer_publisher.emit@0.1`: input `arc.publish_plan`; output
-  `arc.wire_frames`; emits head/body frames and chunk bookkeeping.
-- `daemon.control_gateway.authenticate@0.1`
-- `daemon.control_center.route@0.1`
-- `daemon.control_owner.dispatch@0.1`
-
-Current TS owners to preserve until wiring:
-
-- `src/server/terminal-source-adapter.ts`
-- `src/server/terminal-mirror-capture.ts`
-- `src/server/terminal-mirror-runtime.ts`
-- `src/server/daemon-buffer-publisher-runtime.ts`
-- `src/server/canonical-buffer.ts#findChangedIndexedRanges`
-- `src/server/daemon-control-gateway-runtime.ts`
-- `src/server/daemon-control-center-runtime.ts`
+See `android-phase0-design-slice.md` and the graph JSON files for node/ARC
+contracts.
 
 ## Trigger Conditions
 
@@ -212,28 +136,32 @@ Current TS owners to preserve until wiring:
 
 ## Change Boundary
 
-In scope, this phase:
+Phase 0 scope:
 
 - `android/docs/dagpipe/*`
 - `android/scripts/validate-dagpipe-graphs.mjs`
 - `android/package.json` `test:dagpipe-phase0` script entry
 
-Out of scope until approval:
+Phase 1 scope added:
 
-- `Cargo.toml`, Rust crates, `pipeline_runtime` dependency
-- daemon runtime code, client runtime code, wire protocol
-- prebuild/CI wiring for `dagpipe` (global CLI dependency is not tooled in CI)
+- Rust crate `android/native/dagpipe`
+- `pipeline_runtime` dependency and SDK compile checks
+- black-box parity tests and thin bridge candidates
+
+Out of scope until explicit authorization:
+
 - OTA/APK/release
+- production daemon/client restart as proof of Phase 0
 
 Required evidence:
 
-- `dagpipe graph validate` passes for both graph files.
+- `dagpipe graph validate` passes for all graph files.
 - `dagpipe graph inspect` prints deterministic waves and operator bindings.
 - `pnpm --dir android test:dagpipe-phase0` passes.
-- Future Phase 1 must add SDK `compile()` contract/effect checks, Rust tests,
-  black-box parity against current TS behavior, then wire only after green.
+- Phase 1 must add SDK `compile()` contract/effect checks, Rust tests, black-box
+  parity against current TS behavior, then wire only after green.
 
 ## Not A Runtime Claim
 
-These graphs and operators are Phase 0 static contracts. They do not execute.
-Do not report graph validity as daemon runtime closure.
+Static graph validity alone is not runtime closure. The separate cargo/parity
+tests and real entry-point evidence prove the executable path.

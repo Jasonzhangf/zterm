@@ -23,7 +23,7 @@ function line(text: string, index = 0) {
 }
 
 describe('dagpipe native bridge', () => {
-  it('compiles all four Android Phase0 graphs', () => {
+  it('compiles all Phase0 graphs from the native core', () => {
     expect(compilePhase0()).toEqual({
       ok: true,
       graphs: [
@@ -31,6 +31,8 @@ describe('dagpipe native bridge', () => {
         'android.buffer_management@0.1',
         'android.buffer_render@0.1',
         'android.input_dispatch@0.1',
+        'daemon.mirror_publish@0.2',
+        'daemon.control_dispatch@0.1',
       ],
     });
   });

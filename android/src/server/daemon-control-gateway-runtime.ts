@@ -106,6 +106,49 @@ export function createDaemonControlGateway(
   ): Promise<ControlOutcome<R, ControlCenterError>> {
     commandSequence += 1;
     const commandId = `${commandType}:${subject}:${commandSequence}`;
+    if (deps.dispatchControl) {
+      const ownerByCommand: Record<string, string> = {};
+      for (const registeredType of center.getCommandTypes()) {
+        const ownerId = center.getOwnerId(registeredType);
+        if (ownerId) {
+          ownerByCommand[registeredType] = ownerId;
+        }
+      }
+      const dispatch = deps.dispatchControl({
+        commandType,
+        commandId,
+        correlationId: commandId,
+        subject,
+        capabilities: [daemonControlCapability],
+        params,
+        ownerByCommand,
+      });
+      if (!dispatch.ok) {
+        center.recordRejection(
+          createControlCommand(commandType, commandId, commandId, params),
+          subject,
+          'error',
+        );
+        return Promise.resolve(errorControlOutcome({
+          code: 'handler_failed',
+          commandType,
+          message: dispatch.message,
+        }));
+      }
+      const registeredOwnerId = center.getOwnerId(commandType);
+      if (!registeredOwnerId || dispatch.ownerId !== registeredOwnerId) {
+        center.recordRejection(
+          createControlCommand(commandType, commandId, commandId, params),
+          subject,
+          'error',
+        );
+        return Promise.resolve(errorControlOutcome({
+          code: 'handler_failed',
+          commandType,
+          message: `dagpipe route owner mismatch: expected ${registeredOwnerId ?? 'unknown'}, got ${dispatch.ownerId}`,
+        }));
+      }
+    }
     const request: DaemonControlExecutionRequest<C, CTX> = {
       command: createControlCommand(commandType, commandId, commandId, params),
       subject,

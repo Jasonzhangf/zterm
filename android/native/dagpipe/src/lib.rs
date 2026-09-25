@@ -1,27 +1,11 @@
 pub mod core;
-
-#[cfg(feature = "android-jni")]
-mod android_jni;
+pub mod daemon_core;
 
 #[cfg(feature = "napi")]
 use napi_derive::napi;
 
-#[cfg(feature = "napi")]
-#[napi]
-pub fn compile_phase0() -> String {
-    match core::compile_phase0_graphs() {
-        Ok(graphs) => serde_json::to_string(&serde_json::json!({
-            "ok": true,
-            "graphs": graphs,
-        }))
-        .unwrap_or_else(|_| r#"{"ok":false,"error":"json encode failed"}"#.into()),
-        Err(error) => serde_json::to_string(&serde_json::json!({
-            "ok": false,
-            "error": error.message,
-        }))
-        .unwrap_or_else(|_| r#"{"ok":false,"error":"json encode failed"}"#.into()),
-    }
-}
+#[cfg(feature = "android-jni")]
+mod android_jni;
 
 #[cfg(feature = "napi")]
 fn json_to_string(result: serde_json::Result<serde_json::Value>) -> String {
@@ -34,6 +18,46 @@ fn json_to_string(result: serde_json::Result<serde_json::Value>) -> String {
         }))
         .unwrap_or_default(),
     }
+}
+
+#[cfg(feature = "napi")]
+fn compile_all_phase0_graphs() -> Result<Vec<String>, String> {
+    let mut graphs = core::compile_phase0_graphs().map_err(|error| error.message)?;
+    daemon_core::compile_phase0_graphs()?;
+    graphs.extend([
+        "daemon.mirror_publish@0.2".to_string(),
+        "daemon.control_dispatch@0.1".to_string(),
+    ]);
+    Ok(graphs)
+}
+
+#[cfg(feature = "napi")]
+#[napi]
+pub fn compile_phase0() -> String {
+    match compile_all_phase0_graphs() {
+        Ok(graphs) => serde_json::to_string(&serde_json::json!({
+            "ok": true,
+            "graphs": graphs,
+        }))
+        .unwrap_or_else(|_| r#"{"ok":false,"error":"json encode failed"}"#.into()),
+        Err(error) => serde_json::to_string(&serde_json::json!({
+            "ok": false,
+            "error": error,
+        }))
+        .unwrap_or_else(|_| r#"{"ok":false,"error":"json encode failed"}"#.into()),
+    }
+}
+
+#[cfg(feature = "napi")]
+#[napi]
+pub fn run_mirror_publish(input_json: String) -> String {
+    json_to_string(daemon_core::run_mirror_publish_json(input_json))
+}
+
+#[cfg(feature = "napi")]
+#[napi]
+pub fn run_control_dispatch(input_json: String) -> String {
+    json_to_string(daemon_core::run_control_dispatch_json(input_json))
 }
 
 #[cfg(feature = "napi")]

@@ -1,9 +1,9 @@
-# DAGpipe Phase 0: static DAG governance
+# DAGpipe Phase 0 + Phase 1: Android static and Rust-core DAG governance
 
-Scope: static DAG graphs and CLI validation for the daemon-side and Android
-client rewrite targets. Phase 0 does not add a Rust crate, does not add
-`pipeline_runtime` to `Cargo.toml`, does not touch daemon or client runtime
-code, and does not publish an APK or OTA update.
+Scope: static DAG graphs, CLI validation, and the Android Rust-core parity
+gate. Phase 0 covers graph JSON and CLI validation only. Phase 1 registers the
+Android operators, compiles the approved graphs through `pipeline_runtime`,
+and proves black-box parity before production wiring.
 
 Graphs:
 
@@ -23,25 +23,27 @@ Graphs:
   window planning -> range request dispatch -> response ingest -> sparse merge
   -> repair ledger -> render scope publication
 
-Validation (requires the locally installed `dagpipe` CLI):
+Phase 2 static graphs:
 
-Design slice:
+- `relay-account-peer-route.graph.json`
+- `daemon-connection-channel-catalog.graph.json`
 
-- See `phase0-design-slice.md` for the daemon identities, roles, events, state
-  machines, node contracts, and change boundary.
-- See `android-phase0-design-slice.md` for the Android connection, buffer
-  management, buffer/render, and input design slice. It describes semantics in
-  Chinese and keeps Phase 1 gate evidence separated from Phase 0 static DAG
-  validation.
+Validation:
 
 ```sh
 pnpm --dir android test:dagpipe-phase0
 ```
 
+Phase 1 gate:
+
+```sh
+pnpm --dir android test:dagpipe-phase1
+```
+
 The CLI validates acyclicity, output reachability, and syntactic operator
 version bindings. It is not authoritative for project Operator resolution,
 ARC schema compatibility, or effect capability checks; those remain the SDK
-`compile()` gate and are intentionally deferred to Phase 1.
+`compile()` gate.
 
 Mirror update semantics captured in the DAG:
 
@@ -98,13 +100,6 @@ Roles:
 - `daemon.control_gateway/control_center/control_owner`: control only, no body
   truth.
 
-Acceptance for this phase:
-
-- `dagpipe graph validate` passes for all six graphs.
-- `dagpipe graph inspect` prints waves and operator bindings for all six
-  graphs.
-- No runtime code or dependency change.
-
 Android client boundaries frozen by these graphs:
 
 - Relay account login is account-scoped with token-per-login; it never hides
@@ -128,3 +123,11 @@ Android client boundaries frozen by these graphs:
 - `client.reliable_input` owns ordered in-flight/ACK/retry planning and the
   only client terminal-input queue; transport lifecycle remains outside this
   graph.
+
+Phase 1 current status:
+
+- Rust crate `android/native/dagpipe` compiles and runs the Android graphs
+  through `pipeline_runtime`.
+- Black-box parity tests run through the N-API bridge and a JNI `.so`.
+- The client production path still needs a non-raw-input thin bridge before
+  Phase 1 is considered runtime-closed.
