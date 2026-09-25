@@ -21,6 +21,7 @@ interface DagpipeNativeModule {
   compilePhase3: () => string;
   compilePhase4: () => string;
   compilePhase5: () => string;
+  compilePhase6: () => string;
   runConnectionLifecycle: (inputJson: string) => string;
   runBufferManagement: (inputJson: string) => string;
   runBufferRender: (inputJson: string) => string;
@@ -36,6 +37,10 @@ interface DagpipeNativeModule {
   runPhase4RemoteWindow: (inputJson: string) => string;
   runPhase5ShellLifecycle: (inputJson: string) => string;
   runPhase5PreviewLattice: (inputJson: string) => string;
+  runPhase6Composition: (inputJson: string) => string;
+  runPhase6Control: (inputJson: string) => string;
+  runPhase6ConfigExport: (inputJson: string) => string;
+  runPhase6ConfigImport: (inputJson: string) => string;
 }
 
 function sourceIndexNode() {
@@ -93,6 +98,10 @@ export function compilePhase4(): DagpipeCompileResult {
 
 export function compilePhase5(): DagpipeCompileResult {
   return JSON.parse(cached().compilePhase5()) as DagpipeCompileResult;
+}
+
+export function compilePhase6(): DagpipeCompileResult {
+  return JSON.parse(cached().compilePhase6()) as DagpipeCompileResult;
 }
 
 function run(fn: keyof DagpipeNativeModule, input: Record<string, unknown>): DagpipeResult {
@@ -163,6 +172,22 @@ export function runPhase5ShellLifecycle(input: Record<string, unknown>): Dagpipe
 
 export function runPhase5PreviewLattice(input: Record<string, unknown>): DagpipeResult {
   return run('runPhase5PreviewLattice', input);
+}
+
+export function runPhase6Composition(input: Record<string, unknown>): DagpipeResult {
+  return run('runPhase6Composition', input);
+}
+
+export function runPhase6Control(input: Record<string, unknown>): DagpipeResult {
+  return run('runPhase6Control', input);
+}
+
+export function runPhase6ConfigExport(input: Record<string, unknown>): DagpipeResult {
+  return run('runPhase6ConfigExport', input);
+}
+
+export function runPhase6ConfigImport(input: Record<string, unknown>): DagpipeResult {
+  return run('runPhase6ConfigImport', input);
 }
 
 export { readDagpipeInputChunks } from './dagpipe-input-chunks';

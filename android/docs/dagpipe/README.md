@@ -46,6 +46,13 @@ Phase 5 static graphs:
 - `android-session-shell-lifecycle.graph.json`
 - `android-session-preview-lattice.graph.json`
 
+Phase 6 static graphs:
+
+- `android-composition-plugin.graph.json`
+- `android-control-command.graph.json`
+- `android-config-export.graph.json`
+- `android-config-import.graph.json`
+
 Validation:
 
 ```sh

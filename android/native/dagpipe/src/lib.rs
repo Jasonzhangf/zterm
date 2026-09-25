@@ -4,6 +4,7 @@ pub mod phase2_core;
 pub mod phase3_core;
 pub mod phase4_core;
 pub mod phase5_core;
+pub mod phase6_core;
 
 #[cfg(feature = "napi")]
 use napi_derive::napi;
@@ -216,4 +217,44 @@ pub fn run_phase5_shell_lifecycle(input_json: String) -> String {
 #[napi]
 pub fn run_phase5_preview_lattice(input_json: String) -> String {
     json_to_string(phase5_core::run_phase5_preview_lattice_json(input_json))
+}
+
+#[cfg(feature = "napi")]
+#[napi]
+pub fn compile_phase6() -> String {
+    match phase6_core::compile_phase6_graphs() {
+        Ok(graphs) => json_to_string(Ok(serde_json::json!({
+            "ok": true,
+            "graphs": graphs,
+        }))),
+        Err(error) => serde_json::to_string(&serde_json::json!({
+            "ok": false,
+            "error": error.message,
+        }))
+        .unwrap_or_default(),
+    }
+}
+
+#[cfg(feature = "napi")]
+#[napi]
+pub fn run_phase6_composition(input_json: String) -> String {
+    json_to_string(phase6_core::run_phase6_composition_json(input_json))
+}
+
+#[cfg(feature = "napi")]
+#[napi]
+pub fn run_phase6_control(input_json: String) -> String {
+    json_to_string(phase6_core::run_phase6_control_json(input_json))
+}
+
+#[cfg(feature = "napi")]
+#[napi]
+pub fn run_phase6_config_export(input_json: String) -> String {
+    json_to_string(phase6_core::run_phase6_config_export_json(input_json))
+}
+
+#[cfg(feature = "napi")]
+#[napi]
+pub fn run_phase6_config_import(input_json: String) -> String {
+    json_to_string(phase6_core::run_phase6_config_import_json(input_json))
 }

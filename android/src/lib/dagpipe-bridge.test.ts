@@ -5,6 +5,7 @@ import {
   compilePhase3,
   compilePhase4,
   compilePhase5,
+  compilePhase6,
   readDagpipeInputChunks,
   runBufferManagement,
   runBufferRender,
@@ -21,6 +22,10 @@ import {
   runPhase4RemoteWindow,
   runPhase5ShellLifecycle,
   runPhase5PreviewLattice,
+  runPhase6Composition,
+  runPhase6Control,
+  runPhase6ConfigExport,
+  runPhase6ConfigImport,
 } from './dagpipe-bridge';
 
 function cell(ch: string) {
@@ -93,6 +98,18 @@ describe('dagpipe native bridge', () => {
     });
   });
 
+  it('compiles Phase6 composition/control/config graphs', () => {
+    expect(compilePhase6()).toEqual({
+      ok: true,
+      graphs: [
+        'android.composition_plugin@0.1',
+        'android.control_command@0.1',
+        'android.config_export@0.1',
+        'android.config_import@0.1',
+      ],
+    });
+  });
+
   it('routes remote window overlay projections through native core', () => {
     const result = runPhase4RemoteWindow({
       execution_id: 'bridge-phase4-stream',
@@ -143,6 +160,62 @@ describe('dagpipe native bridge', () => {
     const outputs = (result as { outputs: Record<string, { state: string }> }).outputs;
     expect(outputs['arc.focus_selection'].state).toBe('skipped');
     expect(outputs['arc.focus_panned'].state).toBe('applied');
+  });
+
+  it('routes Phase6 composition, control, and config through native core', () => {
+    const composition = runPhase6Composition({
+      execution_id: 'bridge-phase6-composition',
+      attempt_id: '1',
+      inputs: {
+        'arc.composition_request': { runtimeId: 'rt-1', ports: ['debug'] },
+        'arc.plugin_manifest': {
+          pluginId: 'p1',
+          capabilities: ['quickbar'],
+          uiSlots: ['terminal.quickbar'],
+        },
+      },
+    });
+    expect(
+      (composition as { outputs: Record<string, { state: string }> })
+        .outputs['arc.activated_plugins'].state,
+    ).toBe('active');
+
+    const control = runPhase6Control({
+      execution_id: 'bridge-phase6-control',
+      attempt_id: '1',
+      inputs: {
+        'arc.control_request': { commandId: 'cmd-1', owner: 'settings' },
+        'arc.control_policy': { allowControl: true },
+      },
+    });
+    expect(
+      (control as { outputs: Record<string, { state: string }> })
+        .outputs['arc.control_result'].state,
+    ).toBe('completed');
+
+    const configExport = runPhase6ConfigExport({
+      execution_id: 'bridge-phase6-config',
+      attempt_id: '1',
+      inputs: {
+        'arc.config_export_request': { configId: 'cfg-1' },
+      },
+    });
+    expect(
+      (configExport as { outputs: Record<string, { state: string }> })
+        .outputs['arc.exported_config'].state,
+    ).toBe('exported');
+
+    const configImport = runPhase6ConfigImport({
+      execution_id: 'bridge-phase6-config-import',
+      attempt_id: '1',
+      inputs: {
+        'arc.config_import_request': { configId: 'cfg-1' },
+      },
+    });
+    expect(
+      (configImport as { outputs: Record<string, { state: string }> })
+        .outputs['arc.import_result'].state,
+    ).toBe('imported');
   });
 
   it('routes Phase3 input/schedule and transfer projections through native core', () => {

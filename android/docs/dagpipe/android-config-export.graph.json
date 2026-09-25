@@ -1,0 +1,33 @@
+{
+  "id": "android.config_export",
+  "version": "0.1",
+  "inputs": [
+    { "id": "arc.config_export_request", "schema": "Object" }
+  ],
+  "nodes": [
+    {
+      "id": "validate_export",
+      "operator": "settings.config_transfer.validate_export",
+      "operator_version": "0.1",
+      "inputs": ["arc.config_export_request"],
+      "output": { "id": "arc.export_validation", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "export_config",
+      "operator": "settings.config_transfer.export",
+      "operator_version": "0.1",
+      "inputs": ["arc.export_validation"],
+      "output": { "id": "arc.exported_config", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    { "from": "validate_export", "to": "export_config", "arc_id": "arc.export_validation" }
+  ],
+  "outputs": ["arc.exported_config"]
+}
