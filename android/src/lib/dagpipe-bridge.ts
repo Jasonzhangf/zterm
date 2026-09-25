@@ -23,6 +23,7 @@ interface DagpipeNativeModule {
   compilePhase5: () => string;
   compilePhase6: () => string;
   compilePhase7: () => string;
+  compilePhase8: () => string;
   runConnectionLifecycle: (inputJson: string) => string;
   runBufferManagement: (inputJson: string) => string;
   runBufferRender: (inputJson: string) => string;
@@ -45,6 +46,7 @@ interface DagpipeNativeModule {
   runPhase7Release: (inputJson: string) => string;
   runPhase7Update: (inputJson: string) => string;
   runPhase7Debug: (inputJson: string) => string;
+  runPhase8Connection: (inputJson: string) => string;
 }
 
 function sourceIndexNode() {
@@ -110,6 +112,10 @@ export function compilePhase6(): DagpipeCompileResult {
 
 export function compilePhase7(): DagpipeCompileResult {
   return JSON.parse(cached().compilePhase7()) as DagpipeCompileResult;
+}
+
+export function compilePhase8(): DagpipeCompileResult {
+  return JSON.parse(cached().compilePhase8()) as DagpipeCompileResult;
 }
 
 function run(fn: keyof DagpipeNativeModule, input: Record<string, unknown>): DagpipeResult {
@@ -208,6 +214,10 @@ export function runPhase7Update(input: Record<string, unknown>): DagpipeResult {
 
 export function runPhase7Debug(input: Record<string, unknown>): DagpipeResult {
   return run('runPhase7Debug', input);
+}
+
+export function runPhase8Connection(input: Record<string, unknown>): DagpipeResult {
+  return run('runPhase8Connection', input);
 }
 
 export { readDagpipeInputChunks } from './dagpipe-input-chunks';

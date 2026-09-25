@@ -7,6 +7,7 @@ import {
   compilePhase5,
   compilePhase6,
   compilePhase7,
+  compilePhase8,
   readDagpipeInputChunks,
   runBufferManagement,
   runBufferRender,
@@ -30,6 +31,7 @@ import {
   runPhase7Release,
   runPhase7Update,
   runPhase7Debug,
+  runPhase8Connection,
 } from './dagpipe-bridge';
 
 function cell(ch: string) {
@@ -122,6 +124,13 @@ describe('dagpipe native bridge', () => {
         'release.update_lifecycle@0.1',
         'observability.debug@0.1',
       ],
+    });
+  });
+
+  it('compiles Phase8 android connection service graph', () => {
+    expect(compilePhase8()).toEqual({
+      ok: true,
+      graphs: ['android.connection_service@0.1'],
     });
   });
 
@@ -272,6 +281,46 @@ describe('dagpipe native bridge', () => {
       (debug as { outputs: Record<string, { state: string }> })
         .outputs['arc.debug_export'].state,
     ).toBe('exported');
+  });
+
+  it('routes Phase8 connection service through native core', () => {
+    const result = runPhase8Connection({
+      execution_id: 'bridge-phase8-connection',
+      attempt_id: '1',
+      inputs: {
+        'arc.service_command': {
+          type: 'bind-target',
+          target: {
+            targetKey: 't1',
+            bridgeHost: 'host-1',
+            channels: [{ channelId: 'c1', sessionName: 's1', state: 'open' }],
+          },
+        },
+        'arc.service_policy': {
+          allowTransport: true,
+          allowReconnect: true,
+          allowNotifications: true,
+          maxNotificationActions: 3,
+          maxReplayChannels: 3,
+        },
+        'arc.network_generation_event': { generation: 'g1' },
+        'arc.notification_action': {
+          targetKey: 't1',
+          channelId: 'c1',
+          sessionName: 's1',
+        },
+        'arc.session_activity_fact': {
+          stopped: true,
+          name: 's1',
+          targetKey: 't1',
+          channelId: 'c1',
+        },
+      },
+    });
+    expect(
+      (result as { outputs: Record<string, { state: string }> })
+        .outputs['arc.service_snapshot'].state,
+    ).toBe('healthy');
   });
 
   it('routes Phase3 input/schedule and transfer projections through native core', () => {

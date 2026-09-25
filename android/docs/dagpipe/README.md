@@ -59,6 +59,10 @@ Phase 7 static graphs:
 - `release-update-lifecycle.graph.json`
 - `observability-debug.graph.json`
 
+Phase 8 static graphs:
+
+- `android-connection-service.graph.json`
+
 Validation:
 
 ```sh

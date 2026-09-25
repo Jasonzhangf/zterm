@@ -6,6 +6,7 @@ pub mod phase4_core;
 pub mod phase5_core;
 pub mod phase6_core;
 pub mod phase7_core;
+pub mod phase8_core;
 
 #[cfg(feature = "napi")]
 use napi_derive::napi;
@@ -292,4 +293,26 @@ pub fn run_phase7_update(input_json: String) -> String {
 #[napi]
 pub fn run_phase7_debug(input_json: String) -> String {
     json_to_string(phase7_core::run_phase7_debug_json(input_json))
+}
+
+#[cfg(feature = "napi")]
+#[napi]
+pub fn compile_phase8() -> String {
+    match phase8_core::compile_phase8_graphs() {
+        Ok(graphs) => json_to_string(Ok(serde_json::json!({
+            "ok": true,
+            "graphs": graphs,
+        }))),
+        Err(error) => serde_json::to_string(&serde_json::json!({
+            "ok": false,
+            "error": error.message,
+        }))
+        .unwrap_or_default(),
+    }
+}
+
+#[cfg(feature = "napi")]
+#[napi]
+pub fn run_phase8_connection(input_json: String) -> String {
+    json_to_string(phase8_core::run_phase8_connection_json(input_json))
 }
