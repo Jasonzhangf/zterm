@@ -133,6 +133,9 @@ describe('daemon control gateway outcome truth', () => {
         message: 'unknown control command unknown-command',
       },
     });
+    expect(gateway.getAuditEntries()).toHaveLength(1);
+    expect(gateway.getAuditEntries()[0]?.result).toBe('error');
+    expect(gateway.getAuditEntries()[0]?.commandType).toBe('schedule-delete');
   });
 
   it('returns handler_failed when the DAGpipe owner does not match the registered owner', async () => {
@@ -157,5 +160,8 @@ describe('daemon control gateway outcome truth', () => {
         message: 'dagpipe route owner mismatch: expected daemon.control_center:tmux-create-session, got stale.owner:tmux-create-session',
       },
     });
+    expect(gateway.getAuditEntries()).toHaveLength(1);
+    expect(gateway.getAuditEntries()[0]?.result).toBe('error');
+    expect(gateway.getAuditEntries()[0]?.commandType).toBe('tmux-create-session');
   });
 });

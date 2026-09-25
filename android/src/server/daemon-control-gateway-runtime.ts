@@ -124,6 +124,11 @@ export function createDaemonControlGateway(
         ownerByCommand,
       });
       if (!dispatch.ok) {
+        center.recordRejection(
+          createControlCommand(commandType, commandId, commandId, params),
+          subject,
+          'error',
+        );
         return Promise.resolve(errorControlOutcome({
           code: 'handler_failed',
           commandType,
@@ -132,6 +137,11 @@ export function createDaemonControlGateway(
       }
       const registeredOwnerId = center.getOwnerId(commandType);
       if (!registeredOwnerId || dispatch.ownerId !== registeredOwnerId) {
+        center.recordRejection(
+          createControlCommand(commandType, commandId, commandId, params),
+          subject,
+          'error',
+        );
         return Promise.resolve(errorControlOutcome({
           code: 'handler_failed',
           commandType,

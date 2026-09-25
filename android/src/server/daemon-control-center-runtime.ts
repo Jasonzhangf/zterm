@@ -236,6 +236,14 @@ export class DaemonControlCenter {
     return this.audit;
   }
 
+  recordRejection(
+    command: Readonly<ControlCommand<unknown>>,
+    subject: string,
+    result: ControlAuditEntry['result'],
+  ): void {
+    this.recordAudit(command, subject, result, this.now());
+  }
+
   private recordAudit(
     command: Readonly<ControlCommand<unknown>>,
     subject: string,
