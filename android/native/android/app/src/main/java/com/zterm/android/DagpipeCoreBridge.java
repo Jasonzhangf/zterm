@@ -46,6 +46,18 @@ public final class DagpipeCoreBridge {
 
     public static native String runPhase7Debug(String inputJson);
 
+    public static native String runPhase2Relay(String inputJson);
+
+    public static native String runPhase3FileBrowse(String inputJson);
+
+    public static native String runPhase3Upload(String inputJson);
+
+    public static native String runPhase3Download(String inputJson);
+
+    public static native String runPhase3Attachment(String inputJson);
+
+    public static native String runPhase3Screenshot(String inputJson);
+
     public static native String runConnectionLifecycle(String inputJson);
 
     public static native String runBufferManagement(String inputJson);

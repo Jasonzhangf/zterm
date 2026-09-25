@@ -259,6 +259,96 @@ pub extern "system" fn Java_com_zterm_android_DagpipeCoreBridge_runPhase7Debug(
 }
 
 #[no_mangle]
+pub extern "system" fn Java_com_zterm_android_DagpipeCoreBridge_runPhase2Relay(
+    mut env: JNIEnv,
+    _class: JClass,
+    input_json: jstring,
+) -> jstring {
+    let input = read_string(&mut env, input_json);
+    let result = string_result(
+        crate::phase2_core::run_phase2_relay_json(input).map(|value| value.to_string()),
+    );
+    env.new_string(result)
+        .expect("jni new_string run_phase2_relay")
+        .into_raw()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_zterm_android_DagpipeCoreBridge_runPhase3FileBrowse(
+    mut env: JNIEnv,
+    _class: JClass,
+    input_json: jstring,
+) -> jstring {
+    let input = read_string(&mut env, input_json);
+    let result = string_result(
+        crate::phase3_core::run_phase3_file_browse_json(input).map(|value| value.to_string()),
+    );
+    env.new_string(result)
+        .expect("jni new_string run_phase3_file_browse")
+        .into_raw()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_zterm_android_DagpipeCoreBridge_runPhase3Upload(
+    mut env: JNIEnv,
+    _class: JClass,
+    input_json: jstring,
+) -> jstring {
+    let input = read_string(&mut env, input_json);
+    let result = string_result(
+        crate::phase3_core::run_phase3_upload_json(input).map(|value| value.to_string()),
+    );
+    env.new_string(result)
+        .expect("jni new_string run_phase3_upload")
+        .into_raw()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_zterm_android_DagpipeCoreBridge_runPhase3Download(
+    mut env: JNIEnv,
+    _class: JClass,
+    input_json: jstring,
+) -> jstring {
+    let input = read_string(&mut env, input_json);
+    let result = string_result(
+        crate::phase3_core::run_phase3_download_json(input).map(|value| value.to_string()),
+    );
+    env.new_string(result)
+        .expect("jni new_string run_phase3_download")
+        .into_raw()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_zterm_android_DagpipeCoreBridge_runPhase3Attachment(
+    mut env: JNIEnv,
+    _class: JClass,
+    input_json: jstring,
+) -> jstring {
+    let input = read_string(&mut env, input_json);
+    let result = string_result(
+        crate::phase3_core::run_phase3_attachment_json(input).map(|value| value.to_string()),
+    );
+    env.new_string(result)
+        .expect("jni new_string run_phase3_attachment")
+        .into_raw()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_zterm_android_DagpipeCoreBridge_runPhase3Screenshot(
+    mut env: JNIEnv,
+    _class: JClass,
+    input_json: jstring,
+) -> jstring {
+    let input = read_string(&mut env, input_json);
+    let result = string_result(
+        crate::phase3_core::run_phase3_screenshot_json(input).map(|value| value.to_string()),
+    );
+    env.new_string(result)
+        .expect("jni new_string run_phase3_screenshot")
+        .into_raw()
+}
+
+#[no_mangle]
 pub extern "system" fn Java_com_zterm_android_DagpipeCoreBridge_runConnectionLifecycle(
     mut env: JNIEnv,
     _class: JClass,

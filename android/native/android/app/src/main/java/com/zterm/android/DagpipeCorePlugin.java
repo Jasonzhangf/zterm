@@ -159,6 +159,60 @@ public final class DagpipeCorePlugin extends Plugin {
     }
 
     @PluginMethod
+    public void runPhase2Relay(PluginCall call) {
+        try {
+            call.resolve(result("runPhase2Relay", DagpipeCoreBridge.runPhase2Relay(call.getString("inputJson", "{}"))));
+        } catch (Throwable error) {
+            rejectCall(call, "runPhase2Relay", error);
+        }
+    }
+
+    @PluginMethod
+    public void runPhase3FileBrowse(PluginCall call) {
+        try {
+            call.resolve(result("runPhase3FileBrowse", DagpipeCoreBridge.runPhase3FileBrowse(call.getString("inputJson", "{}"))));
+        } catch (Throwable error) {
+            rejectCall(call, "runPhase3FileBrowse", error);
+        }
+    }
+
+    @PluginMethod
+    public void runPhase3Upload(PluginCall call) {
+        try {
+            call.resolve(result("runPhase3Upload", DagpipeCoreBridge.runPhase3Upload(call.getString("inputJson", "{}"))));
+        } catch (Throwable error) {
+            rejectCall(call, "runPhase3Upload", error);
+        }
+    }
+
+    @PluginMethod
+    public void runPhase3Download(PluginCall call) {
+        try {
+            call.resolve(result("runPhase3Download", DagpipeCoreBridge.runPhase3Download(call.getString("inputJson", "{}"))));
+        } catch (Throwable error) {
+            rejectCall(call, "runPhase3Download", error);
+        }
+    }
+
+    @PluginMethod
+    public void runPhase3Attachment(PluginCall call) {
+        try {
+            call.resolve(result("runPhase3Attachment", DagpipeCoreBridge.runPhase3Attachment(call.getString("inputJson", "{}"))));
+        } catch (Throwable error) {
+            rejectCall(call, "runPhase3Attachment", error);
+        }
+    }
+
+    @PluginMethod
+    public void runPhase3Screenshot(PluginCall call) {
+        try {
+            call.resolve(result("runPhase3Screenshot", DagpipeCoreBridge.runPhase3Screenshot(call.getString("inputJson", "{}"))));
+        } catch (Throwable error) {
+            rejectCall(call, "runPhase3Screenshot", error);
+        }
+    }
+
+    @PluginMethod
     public void runConnectionLifecycle(PluginCall call) {
         try {
             call.resolve(result("runConnectionLifecycle", DagpipeCoreBridge.runConnectionLifecycle(call.getString("inputJson", "{}"))));
