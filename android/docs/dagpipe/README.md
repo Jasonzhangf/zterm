@@ -73,9 +73,10 @@ Diff policy:
   returns them unchanged, and the bridge must return exactly the ranges
   computed by `src/server/canonical-buffer.ts#findChangedIndexedRanges`.
   Subscriber pending bounds stay in `daemon.buffer_publisher`.
-- The live daemon mirror range decision remains owned by
-  `src/server/canonical-buffer.ts#findChangedIndexedRanges`; DAGpipe mirror
-  execution is exercised by the parity tests and startup compile gate.
+- The live daemon mirror range decision is routed through
+  `mirrorPublishChangedRanges`/`runMirrorPublish`; the old TS
+  `findChangedIndexedRanges` remains only as the parity/test source contract
+  for the bridge.
 - Configurable rules may decide between tail append, contiguous rewrite span,
   window-shift prefix/tail, or full-window resync.
 
