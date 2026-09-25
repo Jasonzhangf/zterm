@@ -78,6 +78,15 @@ public final class DagpipeCorePlugin extends Plugin {
     }
 
     @PluginMethod
+    public void runPhase5ShellLifecycle(PluginCall call) {
+        try {
+            call.resolve(result("runPhase5ShellLifecycle", DagpipeCoreBridge.runPhase5ShellLifecycle(call.getString("inputJson", "{}"))));
+        } catch (Throwable error) {
+            rejectCall(call, "runPhase5ShellLifecycle", error);
+        }
+    }
+
+    @PluginMethod
     public void runConnectionLifecycle(PluginCall call) {
         try {
             call.resolve(result("runConnectionLifecycle", DagpipeCoreBridge.runConnectionLifecycle(call.getString("inputJson", "{}"))));

@@ -124,6 +124,21 @@ pub extern "system" fn Java_com_zterm_android_DagpipeCoreBridge_runPhase4RemoteW
 }
 
 #[no_mangle]
+pub extern "system" fn Java_com_zterm_android_DagpipeCoreBridge_runPhase5ShellLifecycle(
+    mut env: JNIEnv,
+    _class: JClass,
+    input_json: jstring,
+) -> jstring {
+    let input = read_string(&mut env, input_json);
+    let result = string_result(
+        crate::phase5_core::run_phase5_shell_lifecycle_json(input).map(|value| value.to_string()),
+    );
+    env.new_string(result)
+        .expect("jni new_string run_phase5_shell_lifecycle")
+        .into_raw()
+}
+
+#[no_mangle]
 pub extern "system" fn Java_com_zterm_android_DagpipeCoreBridge_runConnectionLifecycle(
     mut env: JNIEnv,
     _class: JClass,
