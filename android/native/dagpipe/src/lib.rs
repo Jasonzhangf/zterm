@@ -1,5 +1,6 @@
 pub mod core;
 pub mod daemon_core;
+pub mod phase2_core;
 
 #[cfg(feature = "napi")]
 use napi_derive::napi;
