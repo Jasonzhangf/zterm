@@ -9,6 +9,7 @@ interface DagpipeNativeModule {
   compilePhase0: () => string;
   compileAllDagpipePhases: () => string;
   runPhase2DaemonConnection: (inputJson: string) => string;
+  runPhase3Screenshot: (inputJson: string) => string;
   runMirrorPublish: (inputJson: string) => string;
   runControlDispatch: (inputJson: string) => string;
 }
@@ -84,6 +85,12 @@ export function runMirrorPublish(input: Record<string, unknown>): DagpipeResult 
 export function runPhase2DaemonConnection(input: Record<string, unknown>): DagpipeResult {
   return JSON.parse(
     loadDagpipeNative().runPhase2DaemonConnection(JSON.stringify(input)),
+  ) as DagpipeResult;
+}
+
+export function runPhase3Screenshot(input: Record<string, unknown>): DagpipeResult {
+  return JSON.parse(
+    loadDagpipeNative().runPhase3Screenshot(JSON.stringify(input)),
   ) as DagpipeResult;
 }
 
