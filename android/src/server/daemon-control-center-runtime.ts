@@ -83,6 +83,10 @@ export class DaemonControlCenter {
     return [...this.owners.keys()];
   }
 
+  getOwnerId(commandType: string): string | undefined {
+    return this.owners.get(commandType)?.ownerId;
+  }
+
   async execute<C, CTX, R, E>(
     request: DaemonControlExecutionRequest<C, CTX>,
   ): Promise<ControlOutcome<R, E | ControlCenterError>> {
@@ -230,6 +234,14 @@ export class DaemonControlCenter {
 
   getAuditEntries(): readonly ControlAuditEntry[] {
     return this.audit;
+  }
+
+  recordRejection(
+    command: Readonly<ControlCommand<unknown>>,
+    subject: string,
+    result: ControlAuditEntry['result'],
+  ): void {
+    this.recordAudit(command, subject, result, this.now());
   }
 
   private recordAudit(

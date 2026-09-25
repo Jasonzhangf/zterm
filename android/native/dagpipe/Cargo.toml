@@ -1,0 +1,25 @@
+[package]
+name = "zterm-dagpipe"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "DAGpipe Phase 1 operators for zterm daemon mirror/control core"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["napi"]
+napi = ["dep:napi", "dep:napi-derive", "dep:napi-build"]
+
+[dependencies]
+pipeline_runtime = { path = "vendor/pipeline_runtime" }
+serde_json = "1"
+napi = { version = "2", features = ["napi8"], optional = true }
+napi-derive = { version = "2", optional = true }
+
+[build-dependencies]
+napi-build = { version = "2", optional = true }
+
+[dev-dependencies]
+tempfile = "3"

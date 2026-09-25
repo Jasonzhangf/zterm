@@ -123,8 +123,23 @@ jobs:
           node-version: 20
           cache: pnpm
 
+      - uses: dtolnay/rust-toolchain@stable
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Fetch DAGpipe SDK
+        run: |
+          git clone https://github.com/Jasonzhangf/DAGpipe.git "$RUNNER_TEMP/dagpipe-sdk"
+          git -C "$RUNNER_TEMP/dagpipe-sdk" checkout d88070c9a2ebaaf06d19ebc00ae313bd5f44fd8b
+          echo "DAGPIPE_SDK_PATH=$RUNNER_TEMP/dagpipe-sdk" >> "$GITHUB_ENV"
+
+      - name: Install DAGpipe CLI
+        run: |
+          cargo install --path "$RUNNER_TEMP/dagpipe-sdk" --locked
+
+      - name: DAGpipe phase1 gates
+        run: pnpm --dir android run test:dagpipe-phase1
 
       - name: Prepare daemon standalone release
         run: pnpm --dir android run daemon:prepare-release
@@ -134,6 +149,35 @@ jobs:
 
       - name: npm pack dry-run
         run: npm pack --dry-run android/release-dist/npm/@jsonstudio__zterm-daemon
+
+      - name: Verify packaged daemon runtime
+        run: |
+          RELEASE_DIR="$(find android/release-dist -maxdepth 1 -type d -name 'zterm-daemon-*' | sort | tail -n1)"
+          node - "$RELEASE_DIR" <<'NODE'
+          const { existsSync, readFileSync } = require('node:fs');
+          const { resolve } = require('node:path');
+
+          const releaseDir = resolve(process.argv[2]);
+          const serverPath = resolve(releaseDir, 'runtime/server.cjs');
+          const nativePath = resolve(releaseDir, 'runtime/dagpipe.node');
+          for (const [label, path] of [['server.cjs', serverPath], ['dagpipe.node', nativePath]]) {
+            if (!existsSync(path)) {
+              console.error(`missing packaged daemon runtime ${label}: ${path}`);
+              process.exit(1);
+            }
+          }
+          const server = readFileSync(serverPath, 'utf8');
+          if (!server.includes('DAGpipe phase0 operators compiled: native runtime active')) {
+            console.error('staged server.cjs does not require DAGpipe native runtime');
+            process.exit(1);
+          }
+          const compiled = JSON.parse(require(nativePath).compilePhase0());
+          if (!compiled.ok) {
+            console.error(`packaged dagpipe.node compilePhase0 failed: ${compiled.error}`);
+            process.exit(1);
+          }
+          console.log(`packaged daemon runtime verified: ${releaseDir}`);
+          NODE
 
   mac-desktop-split:
     name: Mac desktop split gate

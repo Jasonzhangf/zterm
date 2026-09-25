@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>zterm DAGpipe Phase 0 审批</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f7f7f5;
+        --panel: #ffffff;
+        --ink: #1f2933;
+        --muted: #5b6b79;
+        --line: #d8dee6;
+        --accent: #0f766e;
+        --accent-soft: #ecfdf5;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+          "Microsoft YaHei", sans-serif;
+        line-height: 1.55;
+      }
+      main {
+        max-width: 1080px;
+        margin: 0 auto;
+        padding: 32px 20px 64px;
+      }
+      header {
+        border-bottom: 1px solid var(--line);
+        padding-bottom: 20px;
+        margin-bottom: 28px;
+      }
+      h1 {
+        font-size: 26px;
+        margin: 0 0 8px;
+        letter-spacing: 0;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      section {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 18px;
+        margin-bottom: 18px;
+      }
+      h2 {
+        font-size: 18px;
+        margin: 0 0 12px;
+        letter-spacing: 0;
+      }
+      .mermaid {
+        text-align: center;
+        font-size: 18px;
+      }
+      .mermaid svg {
+        max-width: 100%;
+        height: auto;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 14px;
+      }
+      th,
+      td {
+        border: 1px solid var(--line);
+        padding: 8px 10px;
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        background: #f0f3f6;
+      }
+      .badge {
+        display: inline-block;
+        background: var(--accent-soft);
+        color: var(--accent);
+        border: 1px solid #99f6e4;
+        border-radius: 999px;
+        padding: 3px 10px;
+        font-size: 12px;
+        font-weight: 600;
+      }
+      .check {
+        color: var(--accent);
+        font-weight: 700;
+      }
+      ul,
+      ol {
+        margin: 8px 0;
+        padding-left: 22px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="badge">Phase 0 审批</p>
+        <h1>zterm DAGpipe 分阶段导入 - daemon 静态 DAG</h1>
+        <p class="muted">
+          当前交付：Phase 0 静态 DAG 与 CLI 校验。不含 Rust crate、不含 runtime
+          接线、不含客户端改造、不含发布。
+        </p>
+      </header>
+
+      <section>
+        <h2>审批目标</h2>
+        <ul>
+          <li>接受 daemon 侧 Phase 0 DAG 作为后续框架重写的输入。</li>
+          <li>确认当前只做静态治理，不把计划状态伪装成已接入 runtime。</li>
+          <li>确认后续顺序为：Phase 1 Rust core + compile()/Runtime::run()，黑盒测试，接线。</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Daemon mirror publish DAG</h2>
+        <div class="mermaid">
+          flowchart TB
+            source_readback["arc.source_readback"]
+            diff_policy["arc.diff_policy"]
+            prev_snapshot["arc.prev_mirror_snapshot"]
+            subscriber_facts["arc.subscriber_facts"]
+            normalize["daemon.source_adapter.normalize"]
+            commit["daemon.mirror_writer.commit"]
+            store["daemon.mirror_store.apply"]
+            diff["daemon.mirror_store.diff"]
+            classify["daemon.mirror_store.classify"]
+            plan["daemon.buffer_publisher.plan"]
+            emit["daemon.buffer_publisher.emit"]
+            wire["arc.wire_frames"]
+            source_readback --> normalize
+            normalize -->|arc.canonical_snapshot| commit
+            commit -->|arc.mirror_revision| store
+            store -->|arc.mirror_truth| diff
+            diff_policy --> diff
+            prev_snapshot --> diff
+            diff_policy --> classify
+            prev_snapshot --> classify
+            store -->|arc.mirror_truth| classify
+            diff_policy --> plan
+            diff -->|arc.changed_ranges| classify
+            classify -->|arc.update_class| plan
+            diff -->|arc.changed_ranges| plan
+            subscriber_facts --> plan
+            plan -->|arc.publish_plan| emit
+            emit --> wire
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>场景</th>
+              <th>判断</th>
+              <th>刷新范围</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>tmux buffer 增长</td>
+              <td>prev bufferStart 不变，tail 新增行</td>
+              <td>只发布新增 tail 对应的 changed range</td>
+            </tr>
+            <tr>
+              <td>tmux buffer 改写</td>
+              <td>绝对窗口内既有行被改写；rewrite 策略由 diff_policy 配置，适配会改写旧行的 TUI</td>
+              <td>按前后快照逐行 diff，并折叠为 no-hole contiguous span；默认不发带洞更新</td>
+            </tr>
+            <tr>
+              <td>刷新范围确定</td>
+              <td>compute_changed_ranges 对比 prev/mirror truth，classify_update 分 append/rewrite/shift/reset/head-only</td>
+              <td>正文变化发无洞 buffer-sync diff；只 cursor 变化发 buffer-head；range 数/span/age/backpressure 超限时退化为全窗 resync</td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="muted">
+          约束：daemon 不持有客户端 session/active/foreground/viewport 状态；
+          本图只描述 daemon 自有 truth 与物理 subscriber 发布事实。
+        </p>
+      </section>
+
+      <section>
+        <h2>Mirror diff 规则</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>项</th>
+              <th>规则</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>diff policy</td>
+              <td>diff/classify/plan 都消费显式 <code>arc.diff_policy</code>，不作为硬编码；TUI 改写旧行时由策略决定 rewrite span 或 full resync</td>
+            </tr>
+            <tr>
+              <td>no-hole</td>
+              <td>默认不允许发送带洞更新；多次改动折叠为从首 changed line 到尾 changed line 的连续范围</td>
+            </tr>
+            <tr>
+              <td>diff trigger</td>
+              <td>仅在 authoritative mirror commit 成功后触发；client buffer-sync-request 走读已有 truth，不触发新 capture/diff</td>
+            </tr>
+            <tr>
+              <td>resync trigger</td>
+              <td>first ready、force refresh、revision lineage 失效、range 数/span/age/backpressure 超限；resync 只发当前全窗，不发 hole</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>状态机与角色</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>对象</th>
+              <th>定义</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>mirror lifecycle</td>
+              <td>idle -&gt; ready -&gt; flushing -&gt; ready；连续失败 ready -&gt; failed；teardown/unavailable 到 destroyed</td>
+            </tr>
+            <tr>
+              <td>subscriber publish</td>
+              <td>no-pending -&gt; pending-diff -&gt; flushing -&gt; no-pending；backpressure 进 backpressured；超限进 resync-required</td>
+            </tr>
+            <tr>
+              <td>角色</td>
+              <td>source_adapter 归一化；mirror_writer 提交；mirror_store 持 revision/truth；buffer_publisher 管 no-hole 计划与发送；control center 只管控制面</td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="muted">
+          Phase 1 Rust core 必须落这些状态机与角色门禁；Phase 0 只先冻结静态契约。
+        </p>
+      </section>
+
+      <section>
+        <h2>Daemon control dispatch DAG</h2>
+        <div class="mermaid">
+          flowchart TB
+            ingress["arc.control_ingress"]
+            policy["arc.capability_policy"]
+            auth["daemon.control_gateway.authenticate"]
+            route["daemon.control_center.route"]
+            dispatch["daemon.control_owner.dispatch"]
+            result["arc.control_result"]
+            ingress --> auth
+            auth -->|arc.authenticated_command| route
+            policy --> route
+            route -->|arc.routed_command| dispatch
+            dispatch --> result
+        </div>
+        <p class="muted">
+          约束：控制面与业务 payload 物理隔离；capability/deadline/idempotency/
+          correlation 只属于 daemon control center。
+        </p>
+      </section>
+
+      <section>
+        <h2>Phase 0 完成标准</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>项目</th>
+              <th>状态</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>daemon mirror publish graph JSON</td>
+              <td><span class="check">已完成</span></td>
+            </tr>
+            <tr>
+              <td>daemon control dispatch graph JSON</td>
+              <td><span class="check">已完成</span></td>
+            </tr>
+            <tr>
+              <td>dagpipe graph validate / inspect</td>
+              <td><span class="check">本机通过</span></td>
+            </tr>
+            <tr>
+              <td>不引入 Rust crate / Cargo.toml</td>
+              <td><span class="check">保持</span></td>
+            </tr>
+            <tr>
+              <td>不碰 daemon runtime 代码</td>
+              <td><span class="check">保持</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>审批后的下一步</h2>
+        <ol>
+          <li>建立 Rust crate，按 Phase 0 DAG 注册 Operators 并完成 compile()。</li>
+          <li>为每个 Operator 写黑盒测试，验证真实行为与 DAG 契约一致。</li>
+          <li>测试通过后，再接薄 TS bridge 到现有 daemon，并保留旧实现直至 parity gate 通过。</li>
+        </ol>
+        <p class="muted">
+          本 HTML 仅供审批参考；审批通过前不会进入 Cargo.toml、runtime 或 OTA。
+        </p>
+      </section>
+    </main>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({
+        startOnLoad: true,
+        theme: "default",
+        securityLevel: "strict",
+        flowchart: { htmlLabels: true, nodeSpacing: 40, rankSpacing: 56, useMaxWidth: true },
+        themeVariables: { fontSize: "18px" },
+      });
+    </script>
+  </body>
+</html>
