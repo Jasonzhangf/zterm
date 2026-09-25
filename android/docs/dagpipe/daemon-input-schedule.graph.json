@@ -1,0 +1,84 @@
+{
+  "id": "daemon.input_schedule",
+  "version": "0.1",
+  "inputs": [
+    { "id": "arc.channel_input_event", "schema": "Object" },
+    { "id": "arc.input_policy", "schema": "Object" },
+    { "id": "arc.schedule_policy", "schema": "Object" },
+    { "id": "arc.schedule_source", "schema": "Object" }
+  ],
+  "nodes": [
+    {
+      "id": "enqueue_channel_input",
+      "operator": "daemon.input_queue.enqueue",
+      "operator_version": "0.1",
+      "inputs": ["arc.channel_input_event", "arc.input_policy"],
+      "output": { "id": "arc.input_queue_item", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "ack_input",
+      "operator": "daemon.input_queue.ack",
+      "operator_version": "0.1",
+      "inputs": ["arc.input_queue_item"],
+      "output": { "id": "arc.input_ack", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "write_backend_input",
+      "operator": "terminal.daemon_input.write",
+      "operator_version": "0.1",
+      "inputs": ["arc.input_ack", "arc.input_policy"],
+      "output": { "id": "arc.backend_write_result", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "plan_schedule",
+      "operator": "terminal.schedule.plan",
+      "operator_version": "0.1",
+      "inputs": ["arc.schedule_policy", "arc.schedule_source"],
+      "output": { "id": "arc.schedule_plan", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "fire_schedule",
+      "operator": "terminal.schedule.fire",
+      "operator_version": "0.1",
+      "inputs": ["arc.schedule_plan"],
+      "output": { "id": "arc.schedule_fire", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dispatch_backend_input",
+      "operator": "daemon.input_queue.dispatch_schedule",
+      "operator_version": "0.1",
+      "inputs": ["arc.schedule_fire", "arc.input_policy"],
+      "output": { "id": "arc.schedule_dispatch", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    { "from": "enqueue_channel_input", "to": "ack_input", "arc_id": "arc.input_queue_item" },
+    { "from": "ack_input", "to": "write_backend_input", "arc_id": "arc.input_ack" },
+    { "from": "plan_schedule", "to": "fire_schedule", "arc_id": "arc.schedule_plan" },
+    { "from": "fire_schedule", "to": "dispatch_backend_input", "arc_id": "arc.schedule_fire" }
+  ],
+  "outputs": [
+    "arc.input_ack",
+    "arc.backend_write_result",
+    "arc.schedule_fire",
+    "arc.schedule_dispatch"
+  ]
+}

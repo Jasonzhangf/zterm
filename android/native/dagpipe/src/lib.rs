@@ -1,6 +1,7 @@
 pub mod core;
 pub mod daemon_core;
 pub mod phase2_core;
+pub mod phase3_core;
 
 #[cfg(feature = "napi")]
 use napi_derive::napi;
@@ -111,4 +112,56 @@ pub fn run_phase2_relay(input_json: String) -> String {
 #[napi]
 pub fn run_phase2_daemon_connection(input_json: String) -> String {
     json_to_string(phase2_core::run_phase2_daemon_connection_json(input_json))
+}
+
+#[cfg(feature = "napi")]
+#[napi]
+pub fn compile_phase3() -> String {
+    match phase3_core::compile_phase3_graphs() {
+        Ok(graphs) => json_to_string(Ok(serde_json::json!({
+            "ok": true,
+            "graphs": graphs,
+        }))),
+        Err(error) => serde_json::to_string(&serde_json::json!({
+            "ok": false,
+            "error": error.message,
+        }))
+        .unwrap_or_default(),
+    }
+}
+
+#[cfg(feature = "napi")]
+#[napi]
+pub fn run_phase3_input_schedule(input_json: String) -> String {
+    json_to_string(phase3_core::run_phase3_input_schedule_json(input_json))
+}
+
+#[cfg(feature = "napi")]
+#[napi]
+pub fn run_phase3_file_browse(input_json: String) -> String {
+    json_to_string(phase3_core::run_phase3_file_browse_json(input_json))
+}
+
+#[cfg(feature = "napi")]
+#[napi]
+pub fn run_phase3_upload(input_json: String) -> String {
+    json_to_string(phase3_core::run_phase3_upload_json(input_json))
+}
+
+#[cfg(feature = "napi")]
+#[napi]
+pub fn run_phase3_download(input_json: String) -> String {
+    json_to_string(phase3_core::run_phase3_download_json(input_json))
+}
+
+#[cfg(feature = "napi")]
+#[napi]
+pub fn run_phase3_attachment(input_json: String) -> String {
+    json_to_string(phase3_core::run_phase3_attachment_json(input_json))
+}
+
+#[cfg(feature = "napi")]
+#[napi]
+pub fn run_phase3_screenshot(input_json: String) -> String {
+    json_to_string(phase3_core::run_phase3_screenshot_json(input_json))
 }

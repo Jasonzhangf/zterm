@@ -28,6 +28,15 @@ Phase 2 static graphs:
 - `relay-account-peer-route.graph.json`
 - `daemon-connection-channel-catalog.graph.json`
 
+Phase 3 static graphs:
+
+- `daemon-input-schedule.graph.json`
+- `daemon-file-transfer-browse.graph.json`
+- `daemon-file-transfer-upload.graph.json`
+- `daemon-file-transfer-download.graph.json`
+- `daemon-attachment-delivery.graph.json`
+- `terminal-remote-screenshot.graph.json`
+
 Validation:
 
 ```sh

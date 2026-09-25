@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   compilePhase0,
   compilePhase2,
+  compilePhase3,
   readDagpipeInputChunks,
   runBufferManagement,
   runBufferRender,
@@ -9,6 +10,12 @@ import {
   runInputDispatch,
   runPhase2Relay,
   runPhase2DaemonConnection,
+  runPhase3InputSchedule,
+  runPhase3FileBrowse,
+  runPhase3Upload,
+  runPhase3Download,
+  runPhase3Attachment,
+  runPhase3Screenshot,
 } from './dagpipe-bridge';
 
 function cell(ch: string) {
@@ -48,6 +55,103 @@ describe('dagpipe native bridge', () => {
         'daemon.connection_channel_catalog@0.1',
       ],
     });
+  });
+
+  it('compiles Phase3 input, file, attachment and screenshot graphs', () => {
+    expect(compilePhase3()).toEqual({
+      ok: true,
+      graphs: [
+        'daemon.input_schedule@0.1',
+        'daemon.file_transfer_browse@0.1',
+        'daemon.file_transfer_upload@0.1',
+        'daemon.file_transfer_download@0.1',
+        'daemon.attachment_delivery@0.1',
+        'terminal.remote_screenshot@0.1',
+      ],
+    });
+  });
+
+  it('routes Phase3 input/schedule and transfer projections through native core', () => {
+    const schedule = runPhase3InputSchedule({
+      execution_id: 'bridge-phase3-input',
+      attempt_id: '1',
+      inputs: {
+        'arc.channel_input_event': { channelId: 'chan-1', inputId: 'i-1', text: 'ls\r' },
+        'arc.input_policy': {},
+        'arc.schedule_policy': { enabled: true },
+        'arc.schedule_source': { jobs: [{ jobId: 'j-1' }] },
+      },
+    });
+    const write = (schedule as { outputs: Record<string, { state: string }> })
+      .outputs['arc.backend_write_result'];
+    expect(write.state).toBe('written');
+
+    const browse = runPhase3FileBrowse({
+      execution_id: 'bridge-phase3-browse',
+      attempt_id: '1',
+      inputs: {
+        'arc.file_browse_request': { path: '/tmp', entries: [{ name: 'a.txt' }] },
+        'arc.fs_permission_policy': { allowRead: true },
+      },
+    });
+    const view = (browse as { outputs: Record<string, { view: { cwd: string } }> })
+      .outputs['arc.file_browser_view'];
+    expect(view.view.cwd).toBe('/tmp');
+
+    const upload = runPhase3Upload({
+      execution_id: 'bridge-phase3-upload',
+      attempt_id: '1',
+      inputs: {
+        'arc.upload_intent': { uploadId: 'up-1', segmentIndex: 1 },
+        'arc.transfer_policy': { allowUpload: true },
+      },
+    });
+    expect(
+      (upload as { outputs: Record<string, { complete: boolean }> })
+        .outputs['arc.upload_complete'].complete,
+    ).toBe(true);
+
+    const download = runPhase3Download({
+      execution_id: 'bridge-phase3-download',
+      attempt_id: '1',
+      inputs: {
+        'arc.download_intent': { downloadId: 'dl-1', path: '/tmp/a.txt' },
+        'arc.transfer_policy': { allowDownload: true },
+      },
+    });
+    expect(
+      (download as { outputs: Record<string, { complete: boolean }> })
+        .outputs['arc.download_complete'].complete,
+    ).toBe(true);
+
+    const attachment = runPhase3Attachment({
+      execution_id: 'bridge-phase3-attachment',
+      attempt_id: '1',
+      inputs: {
+        'arc.attachment_delivery_request': {
+          attachmentId: 'att-1',
+          targetDeviceId: 'dev-1',
+        },
+        'arc.attachment_policy': { allowDelivery: true },
+      },
+    });
+    expect(
+      (attachment as { outputs: Record<string, { state: string }> })
+        .outputs['arc.attachment_delivery_result'].state,
+    ).toBe('published');
+
+    const screenshot = runPhase3Screenshot({
+      execution_id: 'bridge-phase3-screenshot',
+      attempt_id: '1',
+      inputs: {
+        'arc.screenshot_request': { sessionId: 'sess-1' },
+        'arc.screenshot_permission': { allowScreenshot: true },
+      },
+    });
+    expect(
+      (screenshot as { outputs: Record<string, { state: string }> })
+        .outputs['arc.screenshot_result'].state,
+    ).toBe('ready');
   });
 
   it('routes relay login to a resume plan through the native core', () => {

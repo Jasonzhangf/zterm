@@ -18,12 +18,19 @@ const require = createRequire(typeof __filename !== 'undefined' ? __filename : i
 interface DagpipeNativeModule {
   compilePhase0: () => string;
   compilePhase2: () => string;
+  compilePhase3: () => string;
   runConnectionLifecycle: (inputJson: string) => string;
   runBufferManagement: (inputJson: string) => string;
   runBufferRender: (inputJson: string) => string;
   runInputDispatch: (inputJson: string) => string;
   runPhase2Relay: (inputJson: string) => string;
   runPhase2DaemonConnection: (inputJson: string) => string;
+  runPhase3InputSchedule: (inputJson: string) => string;
+  runPhase3FileBrowse: (inputJson: string) => string;
+  runPhase3Upload: (inputJson: string) => string;
+  runPhase3Download: (inputJson: string) => string;
+  runPhase3Attachment: (inputJson: string) => string;
+  runPhase3Screenshot: (inputJson: string) => string;
 }
 
 function sourceIndexNode() {
@@ -71,6 +78,10 @@ export function compilePhase2(): DagpipeCompileResult {
   return JSON.parse(cached().compilePhase2()) as DagpipeCompileResult;
 }
 
+export function compilePhase3(): DagpipeCompileResult {
+  return JSON.parse(cached().compilePhase3()) as DagpipeCompileResult;
+}
+
 function run(fn: keyof DagpipeNativeModule, input: Record<string, unknown>): DagpipeResult {
   const raw = JSON.parse(
     (cached()[fn] as (json: string) => string)(JSON.stringify(input)),
@@ -103,6 +114,30 @@ export function runPhase2Relay(input: Record<string, unknown>): DagpipeResult {
 
 export function runPhase2DaemonConnection(input: Record<string, unknown>): DagpipeResult {
   return run('runPhase2DaemonConnection', input);
+}
+
+export function runPhase3InputSchedule(input: Record<string, unknown>): DagpipeResult {
+  return run('runPhase3InputSchedule', input);
+}
+
+export function runPhase3FileBrowse(input: Record<string, unknown>): DagpipeResult {
+  return run('runPhase3FileBrowse', input);
+}
+
+export function runPhase3Upload(input: Record<string, unknown>): DagpipeResult {
+  return run('runPhase3Upload', input);
+}
+
+export function runPhase3Download(input: Record<string, unknown>): DagpipeResult {
+  return run('runPhase3Download', input);
+}
+
+export function runPhase3Attachment(input: Record<string, unknown>): DagpipeResult {
+  return run('runPhase3Attachment', input);
+}
+
+export function runPhase3Screenshot(input: Record<string, unknown>): DagpipeResult {
+  return run('runPhase3Screenshot', input);
 }
 
 export { readDagpipeInputChunks } from './dagpipe-input-chunks';
