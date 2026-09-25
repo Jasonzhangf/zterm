@@ -134,6 +134,9 @@ jobs:
           git -C "$RUNNER_TEMP/dagpipe-sdk" checkout d88070c9a2ebaaf06d19ebc00ae313bd5f44fd8b
           echo "DAGPIPE_SDK_PATH=$RUNNER_TEMP/dagpipe-sdk" >> "$GITHUB_ENV"
 
+      - name: DAGpipe phase1 gates
+        run: pnpm --dir android run test:dagpipe-phase1
+
       - name: Prepare daemon standalone release
         run: pnpm --dir android run daemon:prepare-release
 
