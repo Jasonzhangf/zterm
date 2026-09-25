@@ -29,6 +29,18 @@ export interface DagpipeCompileResult {
   error?: string;
 }
 
+export interface MirrorChangedRange {
+  startIndex: number;
+  endIndex: number;
+}
+
+export interface MirrorChangedRangesInput {
+  sourceReadback: Record<string, unknown>;
+  prevMirrorSnapshot: Record<string, unknown>;
+  diffPolicy?: Record<string, unknown>;
+  subscriberFacts?: Record<string, unknown>;
+}
+
 function sourceIndexNode() {
   const base = typeof __dirname !== 'undefined'
     ? __dirname
@@ -75,4 +87,54 @@ export function runMirrorPublish(input: Record<string, unknown>): DagpipeResult 
 
 export function runControlDispatch(input: Record<string, unknown>): DagpipeResult {
   return JSON.parse(loadDagpipeNative().runControlDispatch(JSON.stringify(input))) as DagpipeResult;
+}
+
+export function mirrorPublishChangedRanges(
+  input: MirrorChangedRangesInput,
+): { ok: true; ranges: MirrorChangedRange[] } | { ok: false; error: string } {
+  const result = runMirrorPublish({
+    execution_id: 'mirror-runtime',
+    attempt_id: 'mirror-runtime',
+    inputs: {
+      'arc.source_readback': input.sourceReadback,
+      'arc.diff_policy': input.diffPolicy ?? {},
+      'arc.prev_mirror_snapshot': input.prevMirrorSnapshot,
+      'arc.subscriber_facts': input.subscriberFacts ?? {
+        subscribers: [{ id: 'live' }],
+      },
+    },
+  });
+  if (!result.ok) {
+    return { ok: false, error: result.error };
+  }
+  const wireFrames = result.outputs['arc.wire_frames'] as
+    | { frames?: Array<{ action?: string; ranges?: Array<{ startIndex?: number; endIndex?: number }> }> }
+    | undefined;
+  const frames = wireFrames?.frames ?? [];
+  const ranges: MirrorChangedRange[] = [];
+  for (const frame of frames) {
+    const action = frame.action ?? 'body';
+    if (action === 'hold') {
+      continue;
+    }
+    for (const range of frame.ranges ?? []) {
+      const startIndex = Number(range.startIndex ?? 0);
+      const endIndex = Number(range.endIndex ?? 0);
+      if (Number.isFinite(startIndex) && Number.isFinite(endIndex) && endIndex > startIndex) {
+        ranges.push({ startIndex, endIndex });
+      }
+    }
+  }
+  const merged = ranges
+    .sort((left, right) => left.startIndex - right.startIndex || left.endIndex - right.endIndex)
+    .reduce<MirrorChangedRange[]>((acc, range) => {
+      const previous = acc[acc.length - 1];
+      if (previous && range.startIndex <= previous.endIndex) {
+        previous.endIndex = Math.max(previous.endIndex, range.endIndex);
+        return acc;
+      }
+      acc.push({ ...range });
+      return acc;
+    }, []);
+  return { ok: true, ranges: merged };
 }

@@ -198,7 +198,7 @@ Current TS owners to preserve until wiring:
 - `src/server/terminal-mirror-capture.ts`
 - `src/server/terminal-mirror-runtime.ts`
 - `src/server/daemon-buffer-publisher-runtime.ts`
-- `src/server/canonical-buffer.ts#findChangedIndexedRanges`
+- `src/server/canonical-buffer.ts#findChangedIndexedRanges` (parity/test source)
 - `src/server/daemon-control-gateway-runtime.ts`
 - `src/server/daemon-control-center-runtime.ts`
 
@@ -230,11 +230,12 @@ Phase 1 scope added:
 `android/native/dagpipe` implements the daemon graph operators, compiles both
 daemon graphs, and exposes `compilePhase0`, `runMirrorPublish`, and
 `runControlDispatch` through N-API. `src/server/dagpipe-bridge.ts` is the TS
-load boundary; `server.ts` uses the bridge for control route decisions and for
-the startup DAGpipe compile gate. The live mirror range decision remains owned
-by `src/server/canonical-buffer.ts#findChangedIndexedRanges`; the bridge mirror
-path must still return exactly those ranges in parity tests. Subscriber pending
-bounds stay in `daemon-buffer-publisher-runtime.ts`.
+load boundary; `server.ts` uses the bridge for control route decisions, for the
+startup DAGpipe compile gate, and for the live daemon mirror changed-range
+decision through `runMirrorPublish`. Parity tests still compare the bridge
+ranges against `src/server/canonical-buffer.ts#findChangedIndexedRanges` as the
+source contract for the old TS decision. Subscriber pending bounds stay in
+`daemon-buffer-publisher-runtime.ts`.
 
 Required evidence:
 

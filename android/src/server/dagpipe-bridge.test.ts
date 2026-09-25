@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { compilePhase0, runMirrorPublish, runControlDispatch } from './dagpipe-bridge';
+import {
+  compilePhase0,
+  mirrorPublishChangedRanges,
+  runMirrorPublish,
+  runControlDispatch,
+} from './dagpipe-bridge';
 import { findChangedIndexedRanges } from './canonical-buffer';
 
 function cell(ch: string) {
@@ -58,6 +63,18 @@ describe('dagpipe bridge parity', () => {
       .outputs['arc.wire_frames'].frames;
     expect(frames[0]?.changeKind).toBe('append');
     expect(frames[0]?.ranges).toEqual([{ startIndex: 2, endIndex: 3 }]);
+  });
+
+  it('mirrorPublishChangedRanges returns the live bridge diff ranges', () => {
+    const request = mirrorRequest(['a', 'b'], ['a', 'b', 'c']);
+    const result = mirrorPublishChangedRanges({
+      sourceReadback: request.inputs['arc.source_readback'],
+      prevMirrorSnapshot: request.inputs['arc.prev_mirror_snapshot'],
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.ranges).toEqual([{ startIndex: 2, endIndex: 3 }]);
+    }
   });
 
   it('rewrites old lines with a no-hole span', () => {
