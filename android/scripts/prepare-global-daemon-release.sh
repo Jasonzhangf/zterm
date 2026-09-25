@@ -103,6 +103,12 @@ stage_runtime() {
   rm -rf "${RUNTIME_DIR}/node_modules/@roamhq/wrtc" "${RUNTIME_DIR}/node_modules/@roamhq/${wrtc_platform_package_name##*/}"
   cp -RL "${wrtc_package_dir}" "${RUNTIME_DIR}/node_modules/@roamhq/wrtc"
   cp -RL "${wrtc_platform_package_dir}" "${RUNTIME_DIR}/node_modules/@roamhq/${wrtc_platform_package_name##*/}"
+  if [[ "${ZTERM_SKIP_DAGPIPE_NATIVE_BUILD:-}" == "1" ]]; then
+    echo "[prepare-global-daemon-release] skipping DAGpipe native build (ZTERM_SKIP_DAGPIPE_NATIVE_BUILD=1); runtime will not include dagpipe.node"
+  else
+    DAGPIPE_PROFILE=release bash "${ROOT_DIR}/scripts/build-dagpipe-native.sh"
+    cp "${ROOT_DIR}/native/dagpipe/index.node" "${RUNTIME_DIR}/dagpipe.node"
+  fi
   chmod +x "${RUNTIME_DIR}"/node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null || true
 }
 
@@ -155,6 +161,7 @@ LEGACY_LAUNCH_AGENT_PATH="${HOME}/Library/LaunchAgents/${LEGACY_LAUNCH_AGENT_LAB
 STAGED_DAEMON_ENTRY="${RUNTIME_DIR}/server.cjs"
 STAGED_NODE_PTY_HELPER_GLOB="${RUNTIME_DIR}/node_modules/node-pty/prebuilds/darwin-*/spawn-helper"
 NATIVE_DAEMON_BIN="${PACKAGE_ROOT}/support/zterm-daemon"
+DAGPIPE_NATIVE_BIN="${RUNTIME_DIR}/dagpipe.node"
 ITERM2_PYTHON_VENV="${WTERM_HOME}/python/iterm2"
 ITERM2_PYTHON_BIN="${ITERM2_PYTHON_VENV}/bin/python3"
 
@@ -463,7 +470,7 @@ run_foreground() {
   mkdir -p "$LOG_DIR"
   chmod +x ${STAGED_NODE_PTY_HELPER_GLOB} 2>/dev/null || true
   cd "${HOME}"
-  exec env -u TMUX -u TMUX_PANE HOST="$HOST" PORT="$PORT" ZTERM_HOST="$HOST" ZTERM_PORT="$PORT" ZTERM_AUTH_TOKEN="${ZTERM_AUTH_TOKEN:-}" ZTERM_DAEMON_NATIVE="$NATIVE_DAEMON_BIN" "$NODE_BIN" "$STAGED_DAEMON_ENTRY"
+  exec env -u TMUX -u TMUX_PANE HOST="$HOST" PORT="$PORT" ZTERM_HOST="$HOST" ZTERM_PORT="$PORT" ZTERM_AUTH_TOKEN="${ZTERM_AUTH_TOKEN:-}" ZTERM_DAEMON_NATIVE="$NATIVE_DAEMON_BIN" ZTERM_DAGPIPE_NATIVE="${DAGPIPE_NATIVE_BIN}" "$NODE_BIN" "$STAGED_DAEMON_ENTRY"
 }
 
 status_direct() {
@@ -646,7 +653,7 @@ set -euo pipefail
 cd "${HOME}"
 export PATH="${HOME}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 chmod +x ${STAGED_NODE_PTY_HELPER_GLOB} 2>/dev/null || true
-exec env -u TMUX -u TMUX_PANE ZTERM_ITERM2_PYTHON="${ITERM2_PYTHON_BIN}" ZTERM_DAEMON_NATIVE="${NATIVE_DAEMON_BIN}" "${NODE_BIN}" "${STAGED_DAEMON_ENTRY}"
+exec env -u TMUX -u TMUX_PANE ZTERM_ITERM2_PYTHON="${ITERM2_PYTHON_BIN}" ZTERM_DAEMON_NATIVE="${NATIVE_DAEMON_BIN}" ZTERM_DAGPIPE_NATIVE="${DAGPIPE_NATIVE_BIN}" "${NODE_BIN}" "${STAGED_DAEMON_ENTRY}"
 RUNNER
   chmod +x "$DIRECT_RUNNER"
 
@@ -714,7 +721,7 @@ cleanup_child() {
   terminate_child
 }
 trap cleanup_child TERM INT
-env -u TMUX -u TMUX_PANE ZTERM_ITERM2_PYTHON="${ITERM2_PYTHON_BIN}" ZTERM_DAEMON_NATIVE="${NATIVE_DAEMON_BIN}" "${NODE_BIN}" "${STAGED_DAEMON_ENTRY}" &
+env -u TMUX -u TMUX_PANE ZTERM_ITERM2_PYTHON="${ITERM2_PYTHON_BIN}" ZTERM_DAEMON_NATIVE="${NATIVE_DAEMON_BIN}" ZTERM_DAGPIPE_NATIVE="${DAGPIPE_NATIVE_BIN}" "${NODE_BIN}" "${STAGED_DAEMON_ENTRY}" &
 child_pid="\$!"
 missed_health_checks=0
 child_start_epoch="\$(date +%s)"

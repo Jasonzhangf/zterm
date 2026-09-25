@@ -16,6 +16,7 @@ import type {
   BridgeServerMessage as ServerMessage,
   TerminalSessionCatalogEntry,
 } from '@zterm/shared/protocol';
+import type { TerminalCell } from '@zterm/shared/types';
 import {
   buildDaemonSessionName,
   DEFAULT_BRIDGE_PORT,
@@ -29,7 +30,6 @@ import {
   resolveDaemonTailscaleUpdateManifestUrl,
 } from './daemon-connection-endpoint-runtime';
 import { createTraversalRelayHostClient } from './relay-client';
-import { findChangedIndexedRanges } from './canonical-buffer';
 import { buildBufferHeadPayload, buildChangedRangesBufferSyncPayload } from './buffer-sync-contract';
 import { DEFAULT_TERMINAL_SESSION_VIEWPORT, resolveAttachGeometry } from './mirror-geometry';
 import { createTerminalMirrorCaptureRuntime } from './terminal-mirror-capture';
@@ -90,6 +90,7 @@ import {
 } from './remote-window-stream-daemon';
 import { createTerminalPerformanceTraceStore } from '@zterm/shared/terminal/performance-trace';
 import { createAdaptiveWidthOwnershipStore } from './adaptive-width-ownership-store';
+import { compilePhase0, runMirrorPublish, runControlDispatch } from './dagpipe-bridge';
 
 const DAEMON_CONFIG = resolveDaemonRuntimeConfig();
 const PORT = DAEMON_CONFIG.port || DEFAULT_BRIDGE_PORT;
@@ -175,6 +176,101 @@ const readDaemonProcessGroup = (pid: string) => new Promise<{
 });
 const MEMORY_GUARD_MAX_RSS_BYTES = 2.5 * 1024 * 1024 * 1024;
 const MEMORY_GUARD_MAX_HEAP_USED_BYTES = 1.5 * 1024 * 1024 * 1024;
+
+const DAGPIPE_COMPILE_RESULT = compilePhase0();
+if (!DAGPIPE_COMPILE_RESULT.ok) {
+  throw new Error(`DAGpipe phase0 compile failed: ${DAGPIPE_COMPILE_RESULT.error}`);
+}
+console.log('[server] DAGpipe phase0 operators compiled: native runtime active');
+
+const CONTROL_OWNER_BY_COMMAND: Record<string, string> = {
+  'schedule-list': 'daemon.control_center:schedule-list',
+  'schedule-upsert': 'daemon.control_center:schedule-upsert',
+  'schedule-delete': 'daemon.control_center:schedule-delete',
+  'schedule-toggle': 'daemon.control_center:schedule-toggle',
+  'schedule-run-now': 'daemon.control_center:schedule-run-now',
+  'tmux-create-session': 'daemon.control_center:tmux-create-session',
+  'tmux-rename-session': 'daemon.control_center:tmux-rename-session',
+  'tmux-kill-session': 'daemon.control_center:tmux-kill-session',
+};
+
+interface DagpipeWireFrame {
+  ranges: Array<{ startIndex: number; endIndex: number }>;
+  action: string;
+  kind: string;
+}
+
+function planMirrorPublishRanges(
+  previousStartIndex: number,
+  previousLines: TerminalCell[][],
+  mirror: SessionMirror,
+) {
+  const result = runMirrorPublish({
+    execution_id: `mirror-publish:${mirror.key}:${Date.now()}`,
+    attempt_id: '1',
+    inputs: {
+      'arc.source_readback': {
+        revision: mirror.revision + 1,
+        bufferStartIndex: mirror.bufferStartIndex,
+        bufferLines: mirror.bufferLines,
+        rows: mirror.rows,
+        cols: mirror.cols,
+        cursorKeysApp: mirror.cursorKeysApp,
+        cursor: mirror.cursor,
+      },
+      'arc.diff_policy': {},
+      'arc.prev_mirror_snapshot': {
+        revision: mirror.revision,
+        bufferStartIndex: previousStartIndex,
+        bufferLines: previousLines,
+      },
+      'arc.subscriber_facts': {
+        availableStartIndex: mirror.bufferStartIndex,
+        availableEndIndex: mirror.bufferStartIndex + mirror.bufferLines.length,
+      },
+    },
+  });
+  if (!result.ok) {
+    throw new Error(`DAGpipe mirror publish failed: ${result.error}`);
+  }
+  const wireFrames = (result.outputs['arc.wire_frames'] as { frames: DagpipeWireFrame[] }).frames;
+  return wireFrames[0]?.ranges ?? [];
+}
+
+function dispatchControlRequest(request: {
+  commandType: string;
+  commandId: string;
+  correlationId: string;
+  subject: string;
+  capabilities: readonly string[];
+  params: unknown;
+}): { ok: true; ownerId: string } | { ok: false; code: string; message: string } {
+  const result = runControlDispatch({
+    execution_id: `control-dispatch:${request.commandType}:${Date.now()}`,
+    attempt_id: '1',
+    inputs: {
+      'arc.control_ingress': {
+        commandId: request.commandId,
+        correlationId: request.correlationId,
+        commandType: request.commandType,
+        subject: request.subject,
+        capabilities: request.capabilities,
+        params: request.params,
+      },
+      'arc.capability_policy': {
+        ownerByCommand: CONTROL_OWNER_BY_COMMAND,
+      },
+    },
+  });
+  if (!result.ok) {
+    return { ok: false, code: 'dagpipe_control_failed', message: result.error };
+  }
+  const output = result.outputs['arc.control_result'] as { ok: boolean; ownerId?: string };
+  if (!output?.ok || !output.ownerId) {
+    return { ok: false, code: 'dagpipe_control_route_failed', message: 'control dispatch did not produce an owner' };
+  }
+  return { ok: true, ownerId: output.ownerId };
+}
 
 const sessions = new Map<string, TerminalTransportSubscriber>();
 const connections = new Map<string, DaemonTransportConnection>();
@@ -307,12 +403,8 @@ const terminalRuntime = createTerminalRuntime({
   },
   resolveTerminalSessionBackend: (sessionName) => terminalControlRuntime.resolveTerminalSessionBackend(sessionName),
   captureMirrorAuthoritativeBufferFromTmux: terminalMirrorCapture.captureMirrorAuthoritativeBufferFromTmux,
-  mirrorBufferChanged: (mirror, previousStartIndex, previousLines) => findChangedIndexedRanges({
-    previousStartIndex,
-    previousLines,
-    nextStartIndex: mirror.bufferStartIndex,
-    nextLines: mirror.bufferLines,
-  }),
+  mirrorBufferChanged: (mirror, previousStartIndex, previousLines) =>
+    planMirrorPublishRanges(previousStartIndex, previousLines, mirror),
   mirrorCursorEqual,
   daemonInputQueue: daemonInputQueueRuntimeProxy,
   autoCommandDelayMs: AUTO_COMMAND_DELAY_MS,
@@ -574,6 +666,7 @@ const terminalMessageRuntime = createTerminalMessageRuntime({
     attachTmux: terminalRuntime.attachTmux,
     handleAdaptiveResize: terminalRuntime.handleAdaptiveResize,
     destroyMirror: terminalRuntime.destroyMirror,
+    dispatchControl: dispatchControlRequest,
   },
 });
 

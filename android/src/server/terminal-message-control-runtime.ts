@@ -66,6 +66,14 @@ export interface TerminalMessageControlRuntimeDeps {
     reason: string,
     options?: { closeTransportSubscribers?: boolean; notifyClientClose?: boolean; releaseCode?: string },
   ) => void;
+  dispatchControl?: (request: {
+    commandType: string;
+    commandId: string;
+    correlationId: string;
+    subject: string;
+    capabilities: readonly string[];
+    params: unknown;
+  }) => { ok: true; ownerId: string } | { ok: false; code: string; message: string };
 }
 
 export type DaemonControlHandlerResult =

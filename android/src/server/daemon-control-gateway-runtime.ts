@@ -106,6 +106,23 @@ export function createDaemonControlGateway(
   ): Promise<ControlOutcome<R, ControlCenterError>> {
     commandSequence += 1;
     const commandId = `${commandType}:${subject}:${commandSequence}`;
+    if (deps.dispatchControl) {
+      const dispatch = deps.dispatchControl({
+        commandType,
+        commandId,
+        correlationId: commandId,
+        subject,
+        capabilities: [daemonControlCapability],
+        params,
+      });
+      if (!dispatch.ok) {
+        return Promise.resolve(errorControlOutcome({
+          code: 'handler_failed',
+          commandType,
+          message: dispatch.message,
+        }));
+      }
+    }
     const request: DaemonControlExecutionRequest<C, CTX> = {
       command: createControlCommand(commandType, commandId, commandId, params),
       subject,

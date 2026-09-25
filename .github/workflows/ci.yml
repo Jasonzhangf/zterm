@@ -127,6 +127,8 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Prepare daemon standalone release
+        env:
+          ZTERM_SKIP_DAGPIPE_NATIVE_BUILD: "1"
         run: pnpm --dir android run daemon:prepare-release
 
       - name: Prepare daemon npm package
