@@ -116,4 +116,5 @@ Acceptance for this phase:
 
 - `dagpipe graph validate` passes for both graphs.
 - `dagpipe graph inspect` prints waves and operator bindings for both graphs.
-- No runtime code or dependency change.
+- Runtime is wired through the DAGpipe native bridge and live daemon mirror
+  routing; this phase does not by itself request OTA/APK publish.

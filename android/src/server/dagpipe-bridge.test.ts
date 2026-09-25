@@ -116,6 +116,15 @@ describe('dagpipe bridge parity', () => {
     });
     const result = runMirrorPublish(mirrorRequest(prevLines, nextLines));
     expect(frameRanges(result)).toEqual(expected);
+    const request = mirrorRequest(prevLines, nextLines);
+    const wrapper = mirrorPublishChangedRanges({
+      sourceReadback: request.inputs['arc.source_readback'],
+      prevMirrorSnapshot: request.inputs['arc.prev_mirror_snapshot'],
+    });
+    expect(wrapper.ok).toBe(true);
+    if (wrapper.ok) {
+      expect(wrapper.ranges).toEqual(expected);
+    }
   });
 
   it('matches findChangedIndexedRanges with more than 64 sparse ranges', () => {
@@ -129,6 +138,15 @@ describe('dagpipe bridge parity', () => {
     });
     const result = runMirrorPublish(mirrorRequest(prevLines, nextLines));
     expect(frameRanges(result)).toEqual(expected);
+    const request = mirrorRequest(prevLines, nextLines);
+    const wrapper = mirrorPublishChangedRanges({
+      sourceReadback: request.inputs['arc.source_readback'],
+      prevMirrorSnapshot: request.inputs['arc.prev_mirror_snapshot'],
+    });
+    expect(wrapper.ok).toBe(true);
+    if (wrapper.ok) {
+      expect(wrapper.ranges).toEqual(expected);
+    }
   });
 
   it('dispatches valid control commands', () => {
