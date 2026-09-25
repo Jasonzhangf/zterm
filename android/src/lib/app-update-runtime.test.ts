@@ -2,6 +2,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createAppUpdateRuntime } from './app-update-runtime';
 import type { BrowserStorageLike } from './browser-storage';
 
+vi.mock('./dagpipe-native-client', () => ({
+  runDagpipePhase7Update: async () => ({ ok: true, outputs: {} }),
+}));
+
 function createStorage(initial?: Record<string, string>): BrowserStorageLike {
   const map = new Map<string, string>(Object.entries(initial || {}));
   return {
