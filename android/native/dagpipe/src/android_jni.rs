@@ -42,6 +42,28 @@ pub extern "system" fn Java_com_zterm_android_DagpipeCoreBridge_compilePhase0(
 }
 
 #[no_mangle]
+pub extern "system" fn Java_com_zterm_android_DagpipeCoreBridge_compileAllDagpipePhases(
+    env: JNIEnv,
+    _class: JClass,
+) -> jstring {
+    let result = match crate::compile_all_dagpipe_phases() {
+        Ok(graphs) => serde_json::to_string(&serde_json::json!({
+            "ok": true,
+            "graphs": graphs,
+        }))
+        .unwrap_or_else(|_| r#"{"ok":false,"error":"json encode failed"}"#.into()),
+        Err(error) => serde_json::json!({
+            "ok": false,
+            "error": error,
+        })
+        .to_string(),
+    };
+    env.new_string(result)
+        .expect("jni new_string compile_all_dagpipe_phases")
+        .into_raw()
+}
+
+#[no_mangle]
 pub extern "system" fn Java_com_zterm_android_DagpipeCoreBridge_runConnectionLifecycle(
     mut env: JNIEnv,
     _class: JClass,

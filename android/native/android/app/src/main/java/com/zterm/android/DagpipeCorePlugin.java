@@ -29,6 +29,19 @@ public final class DagpipeCorePlugin extends Plugin {
     }
 
     @PluginMethod
+    public void compileAllDagpipePhases(PluginCall call) {
+        try {
+            String raw = DagpipeCoreBridge.compileAllDagpipePhases();
+            if (BuildConfig.DEBUG) {
+                Log.i("DagpipeCore", "compileAllDagpipePhases result=" + raw);
+            }
+            call.resolve(result("compileAllDagpipePhases", raw));
+        } catch (Throwable error) {
+            rejectCall(call, "compileAllDagpipePhases", error);
+        }
+    }
+
+    @PluginMethod
     public void runConnectionLifecycle(PluginCall call) {
         try {
             call.resolve(result("runConnectionLifecycle", DagpipeCoreBridge.runConnectionLifecycle(call.getString("inputJson", "{}"))));

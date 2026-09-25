@@ -33,7 +33,7 @@ import { upsertBridgeServer } from './lib/bridge-settings';
 import { applyTraversalRelaySettings } from './lib/traversal-relay-client';
 import { APP_VERSION, APP_VERSION_CODE } from './lib/app-version';
 import {
-  compileDagpipePhase0,
+  compileDagpipeAllPhases,
   isDagpipeNativeCapable,
 } from './lib/dagpipe-native-client';
 import { useFileBrowserSessionPortOwner } from './lib/plugin-file-browser/file-browser-session-port';
@@ -653,22 +653,22 @@ export function AppContent({
       return;
     }
     let cancelled = false;
-    void compileDagpipePhase0().then((result) => {
+    void compileDagpipeAllPhases().then((result) => {
       if (cancelled) {
         return;
       }
       if (!result.ok) {
         // eslint-disable-next-line no-console
-        console.error('[dagpipe] phase0 native compile failed', result.error);
+        console.error('[dagpipe] all-phase native compile failed', result.error);
         return;
       }
       // Real native entry on device: the Rust core compiles all four approved
-      // Android graphs in the installed runtime before the app proceeds. The
+      // Android/daemon graphs in the installed runtime before the app proceeds. The
       // current Android client still uses TS graph owners until the
       // operational DAGpipe parity gate passes; this probe proves the native
       // bridge is present and loaded.
       // eslint-disable-next-line no-console
-      console.log('[dagpipe] phase0 native compiled', {
+      console.log('[dagpipe] all-phase native compiled', {
         graphs: result.graphs,
       });
     }).catch((error: unknown) => {
@@ -676,7 +676,7 @@ export function AppContent({
         return;
       }
       // eslint-disable-next-line no-console
-      console.error('[dagpipe] phase0 native compile failed', error);
+      console.error('[dagpipe] all-phase native compile failed', error);
     });
     return () => {
       cancelled = true;

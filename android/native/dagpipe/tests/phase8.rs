@@ -5,6 +5,19 @@ fn run_connection(input: Value) -> Value {
         .unwrap()
 }
 
+#[test]
+fn compiles_all_dagpipe_phases() {
+    let graphs = zterm_dagpipe::compile_all_dagpipe_phases().unwrap();
+    assert!(
+        graphs.len() >= 25,
+        "expected all phase graphs, got {}",
+        graphs.len()
+    );
+    assert!(graphs
+        .iter()
+        .any(|id| id == "android.connection_service@0.1"));
+}
+
 fn bind_input(
     target: Value,
     generation: Value,

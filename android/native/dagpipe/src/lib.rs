@@ -38,6 +38,23 @@ fn compile_all_phase0_graphs() -> Result<Vec<String>, String> {
     Ok(graphs)
 }
 
+pub fn compile_all_dagpipe_phases() -> Result<Vec<String>, String> {
+    let mut graphs = core::compile_phase0_graphs().map_err(|error| error.message)?;
+    daemon_core::compile_phase0_graphs()?;
+    graphs.extend([
+        "daemon.mirror_publish@0.2".to_string(),
+        "daemon.control_dispatch@0.1".to_string(),
+    ]);
+    graphs.extend(phase2_core::compile_phase2_graphs().map_err(|error| error.message)?);
+    graphs.extend(phase3_core::compile_phase3_graphs().map_err(|error| error.message)?);
+    graphs.extend(phase4_core::compile_phase4_graphs().map_err(|error| error.message)?);
+    graphs.extend(phase5_core::compile_phase5_graphs().map_err(|error| error.message)?);
+    graphs.extend(phase6_core::compile_phase6_graphs().map_err(|error| error.message)?);
+    graphs.extend(phase7_core::compile_phase7_graphs().map_err(|error| error.message)?);
+    graphs.extend(phase8_core::compile_phase8_graphs().map_err(|error| error.message)?);
+    Ok(graphs)
+}
+
 #[cfg(feature = "napi")]
 #[napi]
 pub fn compile_phase0() -> String {
