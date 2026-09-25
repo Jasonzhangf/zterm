@@ -145,7 +145,7 @@ jobs:
 
       - name: Verify packaged daemon runtime
         run: |
-          RELEASE_DIR="$(ls -d android/release-dist/zterm-daemon-* | tail -n1)"
+          RELEASE_DIR="$(find android/release-dist -maxdepth 1 -type d -name 'zterm-daemon-*' | sort | tail -n1)"
           node - "$RELEASE_DIR" <<'NODE'
 const { existsSync, readFileSync } = require('node:fs');
 const { resolve } = require('node:path');
