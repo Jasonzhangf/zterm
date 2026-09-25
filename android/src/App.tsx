@@ -35,6 +35,7 @@ import { APP_VERSION, APP_VERSION_CODE } from './lib/app-version';
 import {
   compileDagpipeAllPhases,
   isDagpipeNativeCapable,
+  runDagpipePhase6Control,
 } from './lib/dagpipe-native-client';
 import { useFileBrowserSessionPortOwner } from './lib/plugin-file-browser/file-browser-session-port';
 import { buildAppUpdateManifestCandidates } from './lib/app-update-relay-manifest';
@@ -1422,7 +1423,32 @@ export default function App() {
   ) {
     const runtimeRoot = new ClientCompositionRoot();
     const nextPluginHost = createAppPluginHost();
-    const nextControlCenter = new ClientControlCenter();
+    const nextControlCenter = new ClientControlCenter(
+      isDagpipeNativeCapable()
+        ? {
+            dagpipeGate: async ({ commandId, commandType, owner, subject, payload }) => {
+              const result = await runDagpipePhase6Control({
+                execution_id: `control-gate:${commandId}`,
+                attempt_id: '1',
+                inputs: {
+                  'arc.control_request': {
+                    commandId,
+                    commandType,
+                    owner,
+                    subject,
+                    payload,
+                  },
+                  'arc.control_policy': { allowControl: true },
+                },
+              });
+              if (!result.ok) {
+                return { ok: false, error: result.error };
+              }
+              return { ok: true };
+            },
+          }
+        : {},
+    );
     runtimeRoot.bind({ portId: 'plugin-host', value: nextPluginHost });
     runtimeRoot.bind({ portId: 'control-center', value: nextControlCenter });
     runtimeRoot.require(['plugin-host', 'control-center']);
