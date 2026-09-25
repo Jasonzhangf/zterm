@@ -4494,17 +4494,6 @@
     },
     {
       "from_module": "daemon.runtime_entry",
-      "to_module": "daemon.buffer_publisher",
-      "status": "active",
-      "allowed_callers": [
-        "src/server/server.ts"
-      ],
-      "allowed_callees": [
-        "src/server/daemon-buffer-publisher-runtime.ts"
-      ]
-    },
-    {
-      "from_module": "daemon.runtime_entry",
       "to_module": "observability.debug_channel",
       "status": "active"
     },

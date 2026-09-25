@@ -59,14 +59,17 @@ Mirror update semantics captured in the DAG:
 Diff policy:
 
 - `arc.diff_policy` is an explicit graph input, not hard-coded operator state.
-  The daemon passes the same pending range/span/age limits that
-  `daemon.buffer_publisher` enforces for subscribers.
+  The DAGpipe bridge parity tests use the same pending range/span/age limits
+  that `daemon.buffer_publisher` enforces for subscribers.
 - The default target is no-hole updates: a publish frame must cover every row
   from `startIndex` through `endIndex - 1`. Sparse holes are not sent.
 - Incoming changed ranges are diff truth only: `daemon.mirror_store.diff`
   returns them unchanged, and the bridge must return exactly the ranges
   computed by `src/server/canonical-buffer.ts#findChangedIndexedRanges`.
   Subscriber pending bounds stay in `daemon.buffer_publisher`.
+- The live daemon mirror range decision remains owned by
+  `src/server/canonical-buffer.ts#findChangedIndexedRanges`; DAGpipe mirror
+  execution is exercised by the parity tests and startup compile gate.
 - Configurable rules may decide between tail append, contiguous rewrite span,
   window-shift prefix/tail, or full-window resync.
 

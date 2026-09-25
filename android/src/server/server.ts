@@ -16,7 +16,6 @@ import type {
   BridgeServerMessage as ServerMessage,
   TerminalSessionCatalogEntry,
 } from '@zterm/shared/protocol';
-import type { TerminalCell } from '@zterm/shared/types';
 import {
   buildDaemonSessionName,
   DEFAULT_BRIDGE_PORT,
@@ -90,12 +89,8 @@ import {
 } from './remote-window-stream-daemon';
 import { createTerminalPerformanceTraceStore } from '@zterm/shared/terminal/performance-trace';
 import { createAdaptiveWidthOwnershipStore } from './adaptive-width-ownership-store';
-import {
-  SUBSCRIBER_PENDING_AGE_LIMIT_MS,
-  SUBSCRIBER_PENDING_RANGE_LIMIT,
-  SUBSCRIBER_PENDING_SPAN_LINE_LIMIT,
-} from './daemon-buffer-publisher-runtime';
-import { compilePhase0, runMirrorPublish, runControlDispatch } from './dagpipe-bridge';
+import { findChangedIndexedRanges } from './canonical-buffer';
+import { compilePhase0, runControlDispatch } from './dagpipe-bridge';
 
 const DAEMON_CONFIG = resolveDaemonRuntimeConfig();
 const PORT = DAEMON_CONFIG.port || DEFAULT_BRIDGE_PORT;
@@ -198,54 +193,6 @@ const CONTROL_OWNER_BY_COMMAND: Record<string, string> = {
   'tmux-rename-session': 'daemon.control_center:tmux-rename-session',
   'tmux-kill-session': 'daemon.control_center:tmux-kill-session',
 };
-
-interface DagpipeWireFrame {
-  ranges: Array<{ startIndex: number; endIndex: number }>;
-  action: string;
-  kind: string;
-}
-
-function planMirrorPublishRanges(
-  previousStartIndex: number,
-  previousLines: TerminalCell[][],
-  mirror: SessionMirror,
-) {
-  const result = runMirrorPublish({
-    execution_id: `mirror-publish:${mirror.key}:${Date.now()}`,
-    attempt_id: '1',
-    inputs: {
-      'arc.source_readback': {
-        revision: mirror.revision + 1,
-        bufferStartIndex: mirror.bufferStartIndex,
-        bufferLines: mirror.bufferLines,
-        rows: mirror.rows,
-        cols: mirror.cols,
-        cursorKeysApp: mirror.cursorKeysApp,
-        cursor: mirror.cursor,
-      },
-      'arc.diff_policy': {
-        fullResync: false,
-        maxPendingRanges: SUBSCRIBER_PENDING_RANGE_LIMIT,
-        maxPendingSpanLines: SUBSCRIBER_PENDING_SPAN_LINE_LIMIT,
-        maxPendingAgeMs: SUBSCRIBER_PENDING_AGE_LIMIT_MS,
-      },
-      'arc.prev_mirror_snapshot': {
-        revision: mirror.revision,
-        bufferStartIndex: previousStartIndex,
-        bufferLines: previousLines,
-      },
-      'arc.subscriber_facts': {
-        availableStartIndex: mirror.bufferStartIndex,
-        availableEndIndex: mirror.bufferStartIndex + mirror.bufferLines.length,
-      },
-    },
-  });
-  if (!result.ok) {
-    throw new Error(`DAGpipe mirror publish failed: ${result.error}`);
-  }
-  const wireFrames = (result.outputs['arc.wire_frames'] as { frames: DagpipeWireFrame[] }).frames;
-  return wireFrames[0]?.ranges ?? [];
-}
 
 function dispatchControlRequest(request: {
   commandType: string;
@@ -414,7 +361,12 @@ const terminalRuntime = createTerminalRuntime({
   resolveTerminalSessionBackend: (sessionName) => terminalControlRuntime.resolveTerminalSessionBackend(sessionName),
   captureMirrorAuthoritativeBufferFromTmux: terminalMirrorCapture.captureMirrorAuthoritativeBufferFromTmux,
   mirrorBufferChanged: (mirror, previousStartIndex, previousLines) =>
-    planMirrorPublishRanges(previousStartIndex, previousLines, mirror),
+    findChangedIndexedRanges({
+      previousStartIndex,
+      previousLines,
+      nextStartIndex: mirror.bufferStartIndex,
+      nextLines: mirror.bufferLines,
+    }),
   mirrorCursorEqual,
   daemonInputQueue: daemonInputQueueRuntimeProxy,
   autoCommandDelayMs: AUTO_COMMAND_DELAY_MS,

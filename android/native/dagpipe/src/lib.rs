@@ -30,7 +30,7 @@ pub fn compile_phase0() -> String {
         .unwrap_or_else(|_| r#"{"ok":false,"error":"compile response encode failed"}"#.into()),
         Err(error) => serde_json::to_string(&serde_json::json!({
             "ok": false,
-            "error": error.message,
+            "error": error,
         }))
         .unwrap_or_else(|_| r#"{"ok":false,"error":"compile response encode failed"}"#.into()),
     }

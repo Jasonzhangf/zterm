@@ -1,18 +1,41 @@
 use pipeline_runtime::*;
 use serde_json::{json, Map, Value};
 use std::collections::{BTreeSet, HashMap};
+use std::sync::OnceLock;
 
 const MIRROR_GRAPH_JSON: &str =
     include_str!("../../../docs/dagpipe/daemon-mirror-publish.graph.json");
 const CONTROL_GRAPH_JSON: &str =
     include_str!("../../../docs/dagpipe/daemon-control-dispatch.graph.json");
 
-pub fn compile_phase0_graphs() -> Result<(), CompileError> {
-    let registry = registry();
-    let mirror = mirror_graph()?;
-    compile(mirror, &registry, &BTreeSet::new())?;
-    let control = control_graph()?;
-    compile(control, &registry, &BTreeSet::new())?;
+static MIRROR_COMPILED: OnceLock<Result<CompiledGraph, String>> = OnceLock::new();
+static CONTROL_COMPILED: OnceLock<Result<CompiledGraph, String>> = OnceLock::new();
+
+fn mirror_compiled() -> Result<&'static CompiledGraph, &'static str> {
+    match MIRROR_COMPILED.get_or_init(|| {
+        mirror_graph()
+            .and_then(|graph| compile(graph, &registry(), &BTreeSet::new()))
+            .map_err(|error| error.message)
+    }) {
+        Ok(graph) => Ok(graph),
+        Err(message) => Err(message),
+    }
+}
+
+fn control_compiled() -> Result<&'static CompiledGraph, &'static str> {
+    match CONTROL_COMPILED.get_or_init(|| {
+        control_graph()
+            .and_then(|graph| compile(graph, &registry(), &BTreeSet::new()))
+            .map_err(|error| error.message)
+    }) {
+        Ok(graph) => Ok(graph),
+        Err(message) => Err(message),
+    }
+}
+
+pub fn compile_phase0_graphs() -> Result<(), String> {
+    mirror_compiled().map_err(String::from)?;
+    control_compiled().map_err(String::from)?;
     Ok(())
 }
 
@@ -54,19 +77,17 @@ fn run_request_run(
         .unwrap_or_default()
         .into_iter()
         .collect::<HashMap<String, Value>>();
-    let graph = if graph_id == "daemon.mirror_publish" {
-        mirror_graph()
+    let compiled = if graph_id == "daemon.mirror_publish" {
+        mirror_compiled()
     } else {
-        control_graph()
+        control_compiled()
     };
-    let registry = registry();
-    let capabilities = BTreeSet::new();
-    let compiled = match graph.and_then(|graph| compile(graph, &registry, &capabilities)) {
-        Ok(compiled) => compiled,
-        Err(error) => {
+    let compiled = match compiled {
+        Ok(graph) => graph,
+        Err(message) => {
             return Ok(json!({
                 "ok": false,
-                "error": error.message,
+                "error": message,
             }));
         }
     };
@@ -77,8 +98,9 @@ fn run_request_run(
         execution_id,
         attempt_id,
     };
+    let capabilities = BTreeSet::new();
     let runtime = Runtime::new(capabilities);
-    match runtime.run(&compiled, identity, inputs, &Cancellation::default()) {
+    match runtime.run(compiled, identity, inputs, &Cancellation::default()) {
         Ok(result) => {
             let output = result
                 .outputs

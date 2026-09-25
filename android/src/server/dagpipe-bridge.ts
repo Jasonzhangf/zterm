@@ -1,6 +1,7 @@
 import { createRequire } from 'node:module';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const require = createRequire(typeof __filename !== 'undefined' ? __filename : import.meta.url);
 
@@ -29,7 +30,13 @@ export interface DagpipeCompileResult {
 }
 
 function sourceIndexNode() {
-  const base = typeof __dirname !== 'undefined' ? __dirname : process.cwd();
+  const base = typeof __dirname !== 'undefined'
+    ? __dirname
+    : (
+        typeof import.meta.url === 'string' && import.meta.url.length > 0
+          ? fileURLToPath(new URL('.', import.meta.url))
+          : process.cwd()
+      );
   return join(base, '..', '..', 'native', 'dagpipe', 'index.node');
 }
 
