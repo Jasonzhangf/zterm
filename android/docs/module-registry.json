@@ -124,6 +124,7 @@
         "src/lib/terminal-viewport-metrics.ts",
         "src/lib/dagpipe-native-client.ts",
         "src/lib/dagpipe-input-chunks.ts",
+        "src/lib/dagpipe-bridge.ts",
         "src/lib/dagpipe-types.ts"
       ]
     },
@@ -2938,8 +2939,7 @@
       "consumed_resources": [],
       "pending_resources": [],
       "public_interfaces": [
-        "src/vitest.setup.ts",
-        "src/lib/dagpipe-bridge.ts"
+        "src/vitest.setup.ts"
       ],
       "forbidden_resources": [
         "resource.tmux_session",
@@ -2956,8 +2956,7 @@
       ],
       "status": "active",
       "owned_paths": [
-        "src/vitest.setup.ts",
-        "src/lib/dagpipe-bridge.ts"
+        "src/vitest.setup.ts"
       ]
     },
     {

@@ -531,3 +531,174 @@ fn buffer_management_ingest_partial_wire_response_does_not_clear_gap() {
         "pending"
     );
 }
+
+fn daemon_cell(ch: &str) -> serde_json::Value {
+    json!({ "char": ch.chars().next().map(|c| c as u32).unwrap_or(32), "fg": 256, "bg": 256, "flags": 0, "width": 1 })
+}
+
+fn daemon_line(text: &str) -> serde_json::Value {
+    json!(text
+        .chars()
+        .map(|c| daemon_cell(&c.to_string()))
+        .collect::<Vec<_>>())
+}
+
+fn daemon_mirror_request(
+    prev_start: u64,
+    prev_lines: &[&str],
+    next_start: u64,
+    next_lines: &[&str],
+    policy: serde_json::Value,
+    subscribers: serde_json::Value,
+) -> serde_json::Value {
+    json!({
+        "execution_id": "phase0-daemon-test",
+        "attempt_id": "1",
+        "inputs": {
+            "arc.source_readback": {
+                "revision": 4,
+                "bufferStartIndex": next_start,
+                "bufferLines": next_lines.iter().map(|text| daemon_line(text)).collect::<Vec<_>>(),
+                "rows": 3,
+                "cols": 20,
+                "cursorKeysApp": false,
+                "cursor": null,
+            },
+            "arc.diff_policy": policy,
+            "arc.prev_mirror_snapshot": {
+                "revision": 3,
+                "bufferStartIndex": prev_start,
+                "bufferLines": prev_lines.iter().map(|text| daemon_line(text)).collect::<Vec<_>>(),
+            },
+            "arc.subscriber_facts": subscribers,
+        }
+    })
+}
+
+fn daemon_output_frames(body: &serde_json::Value) -> &serde_json::Value {
+    body.get("outputs")
+        .unwrap()
+        .get("arc.wire_frames")
+        .unwrap()
+        .get("frames")
+        .unwrap()
+}
+
+#[test]
+fn daemon_compiles_phase0_graphs() {
+    assert!(zterm_dagpipe::daemon_core::compile_phase0_graphs().is_ok());
+}
+
+#[test]
+fn daemon_pending_bounds_escalate_to_full_resync() {
+    let request = daemon_mirror_request(
+        0,
+        &["a", "b"],
+        0,
+        &["a", "b", "c"],
+        json!({ "maxPendingRanges": 0 }),
+        json!({
+            "availableStartIndex": 0,
+            "availableEndIndex": 3,
+            "subscribers": [{
+                "id": "s1",
+                "pendingRanges": [{ "startIndex": 0, "endIndex": 1 }],
+            }]
+        }),
+    );
+    let result = zterm_dagpipe::daemon_core::run_mirror_publish_json(
+        serde_json::to_string(&request).unwrap(),
+    )
+    .unwrap();
+    let frames = daemon_output_frames(&result);
+    assert_eq!(frames[0]["fullResync"], true);
+    assert_eq!(frames[0]["ranges"], json!([{"startIndex":0,"endIndex":3}]));
+}
+
+#[test]
+fn daemon_backpressured_subscriber_holds() {
+    let request = daemon_mirror_request(
+        0,
+        &["a", "b"],
+        0,
+        &["a", "b", "c"],
+        json!({}),
+        json!({
+            "availableStartIndex": 0,
+            "availableEndIndex": 3,
+            "subscribers": [{
+                "id": "s1",
+                "backpressure": true,
+            }]
+        }),
+    );
+    let result = zterm_dagpipe::daemon_core::run_mirror_publish_json(
+        serde_json::to_string(&request).unwrap(),
+    )
+    .unwrap();
+    let frames = daemon_output_frames(&result);
+    assert_eq!(frames[0]["action"], "hold");
+    assert_eq!(frames[0]["kind"], "hold");
+}
+
+#[test]
+fn daemon_one_subscriber_resync_does_not_promote_its_siblings() {
+    let request = daemon_mirror_request(
+        0,
+        &["a", "b"],
+        0,
+        &["a", "b", "c"],
+        json!({ "maxPendingRanges": 0 }),
+        json!({
+            "availableStartIndex": 0,
+            "availableEndIndex": 3,
+            "subscribers": [
+                {
+                    "id": "pressured",
+                    "pendingRanges": [{ "startIndex": 0, "endIndex": 1 }],
+                },
+                { "id": "clean" }
+            ]
+        }),
+    );
+    let result = zterm_dagpipe::daemon_core::run_mirror_publish_json(
+        serde_json::to_string(&request).unwrap(),
+    )
+    .unwrap();
+    let frames = daemon_output_frames(&result);
+    assert_eq!(frames[0]["subscriberId"], "pressured");
+    assert_eq!(frames[0]["fullResync"], true);
+    assert_eq!(frames[0]["ranges"], json!([{"startIndex":0,"endIndex":3}]));
+    assert_eq!(frames[1]["subscriberId"], "clean");
+    assert_eq!(frames[1]["fullResync"], false);
+    assert_eq!(frames[1]["ranges"], json!([{"startIndex":2,"endIndex":3}]));
+}
+
+#[test]
+fn daemon_invalid_control_produces_explicit_failure() {
+    let request = json!({
+        "execution_id": "phase0-control",
+        "attempt_id": "1",
+        "inputs": {
+            "arc.control_ingress": {
+                "commandId": "c1",
+                "correlationId": "c1",
+                "commandType": "schedule-list",
+            },
+            "arc.capability_policy": {
+                "ownerByCommand": {
+                    "schedule-list": "daemon.control_center:schedule-list"
+                }
+            }
+        }
+    });
+    let result = zterm_dagpipe::daemon_core::run_control_dispatch_json(
+        serde_json::to_string(&request).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(result["ok"], false);
+    assert!(result["error"]
+        .as_str()
+        .unwrap_or("")
+        .contains("missing subject"));
+}
