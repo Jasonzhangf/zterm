@@ -15,6 +15,13 @@ vi.mock('../plugins/AndroidConnectionServicePlugin', () => ({
   sendAndroidConnectionCommand: (command: unknown) => plugin.sendCommand(command),
 }));
 
+vi.mock('../lib/dagpipe-native-client', () => ({
+  runDagpipePhase8Connection: (_input: unknown) => Promise.resolve({
+    ok: true,
+    outputs: {},
+  }),
+}));
+
 import {
   AndroidConnectionServiceTransportSocket,
 } from './android-connection-service-socket';
