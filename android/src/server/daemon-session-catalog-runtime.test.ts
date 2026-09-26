@@ -593,7 +593,7 @@ describe('daemon session catalog runtime', () => {
     });
   });
 
-  it('defers list-sessions on the static phase2 branch until phase2-runtime', () => {
+  it('publishes the sessions payload and list-time session activity facts', () => {
     const connection = { transport: null } as unknown as TerminalTransportConnection;
     const sendTransportMessage = vi.fn();
     const deps = makeDeps({
@@ -606,15 +606,19 @@ describe('daemon session catalog runtime', () => {
     handleListSessionsMessageRuntime(deps, connection, { type: 'list-sessions' });
 
     expect(sendTransportMessage).toHaveBeenCalledWith(null, {
-      type: 'error',
+      type: 'sessions',
       payload: {
-        message: 'list-sessions rejected by dagpipe gateway: daemon.connection_channel_catalog runtime deferred to phase2-runtime task',
-        code: 'list_sessions_failed',
+        sessions: ['live'],
+        sessionCatalog: [{ name: 'live', backend: 'tmux' }],
       },
+    });
+    expect(sendTransportMessage).toHaveBeenCalledWith(null, {
+      type: 'session-activity',
+      payload: { activities: [] },
     });
   });
 
-  it('defers daemon status in the real sessions control frame until phase2-runtime', async () => {
+  it('publishes daemon status in the real sessions control frame', async () => {
     const connection = { transport: null } as unknown as TerminalTransportConnection;
     const sendTransportMessage = vi.fn();
     const history = new Map();
@@ -641,13 +645,10 @@ describe('daemon session catalog runtime', () => {
 
     await runtime.refresh();
     handleListSessionsMessageRuntime(deps, connection, { type: 'list-sessions' });
-    const errorFrame = sendTransportMessage.mock.calls.find(([_, message]) => message.type === 'error')?.[1];
-    expect(errorFrame).toMatchObject({
-      type: 'error',
-      payload: {
-        message: 'list-sessions rejected by dagpipe gateway: daemon.connection_channel_catalog runtime deferred to phase2-runtime task',
-        code: 'list_sessions_failed',
-      },
+    const sessionsFrame = sendTransportMessage.mock.calls.find(([_, message]) => message.type === 'sessions')?.[1];
+    expect(sessionsFrame).toMatchObject({
+      type: 'sessions',
+      payload: { sessionCatalog: [{ name: 'agent-a', backend: 'tmux', observation: { status: 'unknown', statusReason: 'insufficient-evidence' } }] },
     });
     runtime.dispose();
   });
@@ -667,7 +668,7 @@ describe('daemon session catalog runtime', () => {
     expect(sendTransportMessage).toHaveBeenCalledWith(null, {
       type: 'error',
       payload: {
-        message: 'list-sessions rejected by dagpipe gateway: daemon.connection_channel_catalog runtime deferred to phase2-runtime task',
+        message: 'Failed to list tmux sessions: backend unavailable',
         code: 'list_sessions_failed',
       },
     });

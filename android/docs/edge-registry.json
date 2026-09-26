@@ -4908,11 +4908,6 @@
       "status": "active"
     },
     {
-      "from_module": "daemon.session_catalog",
-      "to_module": "daemon.dagpipe_bridge",
-      "status": "active"
-    },
-    {
       "from_module": "daemon.file_transfer",
       "to_module": "daemon.dagpipe_bridge",
       "status": "active"
