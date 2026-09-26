@@ -38,7 +38,7 @@ import type {
 import { getRemoteWindowMediaPlanV2Contract } from '@zterm/shared/protocol';
 import { buildRemoteWindowCanvasLayoutV1 } from './remote-window-canvas-layout';
 import { applyRemoteWindowStreamGroupQuality } from './remote-window-quality';
-import { runPhase4RemoteWindow } from './dagpipe-bridge';
+import { runPhase4RemoteWindow, type DagpipeResult } from './dagpipe-bridge';
 import {
   releaseRemoteWindowStreamSessionResources,
   type RemoteWindowStreamSessionResources,
@@ -79,6 +79,54 @@ export * from './remote-window-input-helper';
 export * from './remote-window-capture';
 
 const DEFAULT_REMOTE_WINDOW_TARGET_CATALOG_REFRESH_INTERVAL_MS = 5_000;
+
+interface RemoteWindowDagpipeGateOptions {
+  requestId: string;
+  targetId: string;
+  windows?: Array<{ id: string; name?: string }>;
+  touch?: { kind: string; x?: number; y?: number };
+  quality?: { targetId: string; mode?: string };
+  policy?: { allowStream?: boolean; allowQuality?: boolean; allowInput?: boolean; fps?: number };
+  executionId?: string;
+}
+
+function runRemoteWindowDagpipeGate(options: RemoteWindowDagpipeGateOptions): DagpipeResult {
+  return runPhase4RemoteWindow({
+    execution_id: options.executionId ?? 'remote-window-stream-gate',
+    attempt_id: '1',
+    inputs: {
+      'arc.catalog_request': {
+        requestId: options.requestId,
+        windows: options.windows ?? [{ id: options.targetId }],
+      },
+      'arc.stream_start_intent': {
+        requestId: options.requestId,
+        targetId: options.targetId,
+      },
+      'arc.touch_action': options.touch ?? { kind: 'none', x: 0, y: 0 },
+      'arc.quality_intent': options.quality ?? {
+        targetId: options.targetId,
+        mode: 'balanced',
+      },
+      'arc.stream_policy': options.policy ?? {
+        allowStream: true,
+        allowQuality: true,
+        allowInput: true,
+        fps: 30,
+      },
+    },
+  });
+}
+
+function isRemoteWindowDagpipeProjectionReady(result: DagpipeResult): boolean {
+  if (!result.ok) {
+    return false;
+  }
+  const outputs = result.outputs as Record<string, { state?: string }>;
+  return outputs['arc.overlay_directory']?.state === 'ready'
+    && outputs['arc.overlay_projection']?.state === 'projected'
+    && outputs['arc.input_result']?.state === 'injected';
+}
 
 type RtcPeerConnectionCtor = typeof globalThis.RTCPeerConnection;
 type RtcSessionDescriptionCtor = typeof globalThis.RTCSessionDescription;
@@ -673,37 +721,19 @@ export function createRemoteWindowStreamDaemonRuntime(
       return buildStreamError(payload, 'remote_window_stream_request_invalid', 'remote window stream start requires requestId and streamId', 'request-validation');
     }
     const targetId = payload.target?.streamTargetId || payload.streamId;
-    const gate = runPhase4RemoteWindow({
-      execution_id: 'remote-window-stream-start',
-      attempt_id: '1',
-      inputs: {
-        'arc.catalog_request': {
-          requestId: payload.requestId,
-          windows: [{ id: targetId }],
-        },
-        'arc.stream_start_intent': {
-          requestId: payload.requestId,
-          targetId,
-        },
-        'arc.touch_action': {
-          kind: 'none',
-          x: 0,
-          y: 0,
-        },
-        'arc.quality_intent': {
-          targetId,
-          mode: 'balanced',
-        },
-        'arc.stream_policy': {
-          allowStream: true,
-          allowQuality: true,
-          allowInput: true,
-        },
-      },
+    const gate = runRemoteWindowDagpipeGate({
+      requestId: payload.requestId,
+      targetId,
+      policy: { allowStream: true, allowQuality: true, fps: 30 },
     });
-    if (!gate.ok) {
+    if (!gate.ok || !isRemoteWindowDagpipeProjectionReady(gate)) {
       markStreamClosed(payload.streamId);
-      return buildStreamError(payload, 'remote_window_dagpipe_rejected', `DAGpipe remote window gate rejected stream start: ${gate.error}`, 'stream-lifecycle');
+      return buildStreamError(
+        payload,
+        'remote_window_dagpipe_rejected',
+        `DAGpipe remote window gate rejected stream start: ${gate.ok ? 'output contract missing' : gate.error}`,
+        'stream-lifecycle',
+      );
     }
     if (platform !== 'darwin') {
       markStreamClosed(payload.streamId);
@@ -1389,6 +1419,33 @@ export function createRemoteWindowStreamDaemonRuntime(
         },
       };
     }
+    const qualityGate = runRemoteWindowDagpipeGate({
+      requestId: payload.requestId,
+      targetId: payload.targetId,
+      quality: {
+        targetId: payload.targetId,
+        mode: payload.videoProfile.preference,
+      },
+      policy: { allowStream: true, allowQuality: true, fps: payload.videoProfile.maxFrameRateFps },
+    });
+    if (!qualityGate.ok || !isRemoteWindowDagpipeProjectionReady(qualityGate)) {
+      return {
+        requestId: payload.requestId,
+        streamId: payload.streamId,
+        streamGroupId: payload.streamGroupId,
+        mediaPlan: payload.mediaPlan,
+        mediaPlanVersion: payload.mediaPlanVersion,
+        revision: payload.revision,
+        purpose: entry.purpose,
+        targetId: payload.targetId,
+        status: 'rejected',
+        requestedVideoProfile: payload.videoProfile,
+        error: {
+          code: 'remote_window_dagpipe_rejected',
+          message: `DAGpipe remote window quality gate rejected: ${qualityGate.ok ? 'output contract missing' : qualityGate.error}`,
+        },
+      };
+    }
     entry.pendingQualityRevision = payload.revision;
     try {
       const videoProfile = normalizeRemoteWindowVideoProfile(payload.videoProfile);
@@ -1570,6 +1627,24 @@ export function createRemoteWindowStreamDaemonRuntime(
         canvasLayout: entry.canvasLayout,
       }).event,
     };
+    const action = mappedPayload.event;
+    const inputGate = runRemoteWindowDagpipeGate({
+      requestId: entry.requestId,
+      targetId: entry.targetId,
+      windows: [{ id: entry.targetId }],
+      touch: {
+        kind: action.kind,
+        ...('x' in action ? { x: action.x } : {}),
+        ...('y' in action ? { y: action.y } : {}),
+      },
+      quality: { targetId: entry.targetId, mode: 'balanced' },
+      policy: { allowStream: true, allowQuality: true, fps: 30 },
+    });
+    if (!inputGate.ok || !isRemoteWindowDagpipeProjectionReady(inputGate)) {
+      throw new Error(
+        `dagpipe remote window input gate rejected: ${inputGate.ok ? 'output contract missing' : inputGate.error}`,
+      );
+    }
     const resizeTarget = payload.event.kind === 'window-resize'
       ? buildResizedRemoteWindowTarget(entry.target, payload.event, now())
       : null;
@@ -1757,7 +1832,29 @@ export function createRemoteWindowStreamDaemonRuntime(
   }
 
   return {
-    listTargets: catalogRuntime.listTargets,
+    listTargets: async (payload) => {
+      const result = await catalogRuntime.listTargets(payload);
+      if ('targets' in result && result.targets.length > 0) {
+        const firstTarget = result.targets[0]!;
+        const gate = runRemoteWindowDagpipeGate({
+          requestId: payload.requestId,
+          targetId: firstTarget.streamTargetId,
+          windows: result.targets.map((target) => ({
+            id: target.streamTargetId,
+            name: target.videoTarget.title ?? '',
+          })),
+          quality: { targetId: firstTarget.streamTargetId, mode: 'balanced' },
+        });
+        if (!gate.ok || !isRemoteWindowDagpipeProjectionReady(gate)) {
+          return buildStreamError(
+            payload,
+            'remote_window_dagpipe_rejected',
+            `DAGpipe remote window catalog gate rejected: ${gate.ok ? 'output contract missing' : gate.error}`,
+          );
+        }
+      }
+      return result;
+    },
     startStream,
     acceptAnswer,
     addIceCandidate,

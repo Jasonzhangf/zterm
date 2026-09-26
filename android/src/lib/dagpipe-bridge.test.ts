@@ -150,8 +150,26 @@ describe('dagpipe native bridge', () => {
       },
     });
     const outputs = (result as { outputs: Record<string, { state: string }> }).outputs;
+    expect(outputs['arc.overlay_directory'].state).toBe('ready');
     expect(outputs['arc.overlay_projection'].state).toBe('projected');
     expect(outputs['arc.input_result'].state).toBe('injected');
+  });
+
+  it('rejects remote window quality when stream policy denies quality', () => {
+    expect(() => runPhase4RemoteWindow({
+      execution_id: 'bridge-phase4-quality-denied',
+      attempt_id: '1',
+      inputs: {
+        'arc.catalog_request': {
+          requestId: 'c1',
+          windows: [{ id: 'w1', name: 'Terminal' }],
+        },
+        'arc.stream_start_intent': { requestId: 's1', targetId: 'w1' },
+        'arc.touch_action': { kind: 'tap', x: 10, y: 20 },
+        'arc.quality_intent': { targetId: 'w1', mode: 'quality' },
+        'arc.stream_policy': { allowStream: true, allowQuality: false, fps: 30 },
+      },
+    })).toThrow(/remote window quality denied by policy/);
   });
 
   it('routes Phase5 shell lifecycle projections through native core', () => {
