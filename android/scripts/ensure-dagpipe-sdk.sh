@@ -6,7 +6,10 @@ DAGPIPE_DIR="${ROOT_DIR}/native/dagpipe"
 SDK_LINK="${DAGPIPE_DIR}/sdk"
 VENDOR_LINK="${DAGPIPE_DIR}/vendor/pipeline_runtime"
 
-SDK_PATH="$(dagpipe sdk path 2>/dev/null || true)"
+SDK_PATH="${DAGPIPE_SDK_PATH:-}"
+if [[ -z "${SDK_PATH}" ]]; then
+  SDK_PATH="$(dagpipe sdk path 2>/dev/null || true)"
+fi
 if [[ -z "${SDK_PATH}" || ! -d "${SDK_PATH}" ]]; then
   echo "dagpipe sdk path is required and must be readable: ${SDK_PATH}" >&2
   exit 1
