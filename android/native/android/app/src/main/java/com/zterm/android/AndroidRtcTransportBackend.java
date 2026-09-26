@@ -692,7 +692,10 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
             }
             Object rtt = stat.getMembers().get("currentRoundTripTime");
             if (rtt instanceof Number) {
-                pair.put("roundTripTimeMs", ((Number) rtt).doubleValue());
+                double seconds = ((Number) rtt).doubleValue();
+                if (Double.isFinite(seconds)) {
+                    pair.put("roundTripTimeMs", Math.max(0L, Math.round(seconds * 1000.0)));
+                }
             }
             selectedPair = pair;
             if (chosen) {

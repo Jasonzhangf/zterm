@@ -6,9 +6,12 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 import org.json.JSONArray;
+import org.json.JSONObject;
 import org.junit.Test;
 import org.webrtc.DataChannel;
 import org.webrtc.PeerConnection;
+import org.webrtc.RTCStats;
+import org.webrtc.RTCStatsReport;
 import org.webrtc.SdpObserver;
 import org.webrtc.SessionDescription;
 import okhttp3.WebSocket;
@@ -18,10 +21,13 @@ import okhttp3.Response;
 import okhttp3.ResponseBody;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -348,6 +354,24 @@ public final class AndroidRtcTransportBackendTest {
             AndroidRtcTransportBackend.resolveIceTransportsType("all"));
         assertEquals(PeerConnection.IceTransportsType.ALL,
             AndroidRtcTransportBackend.resolveIceTransportsType(""));
+    }
+
+    @Test
+    public void selectedIcePairRoundTripTimeIsMillisecondsNotSeconds() throws Exception {
+        Map<String, Object> pairMembers = new HashMap<>();
+        pairMembers.put("selected", true);
+        pairMembers.put("currentRoundTripTime", 0.091);
+        RTCStats pair = new RTCStats(1L, "candidate-pair", "pair", pairMembers);
+        Map<String, RTCStats> stats = new HashMap<>();
+        stats.put("pair", pair);
+        RTCStatsReport report = new RTCStatsReport(1L, stats);
+
+        Method reportMethod = AndroidRtcTransportBackend.class.getDeclaredMethod(
+            "selectedIcePairFromReport", RTCStatsReport.class);
+        reportMethod.setAccessible(true);
+        JSONObject json = (JSONObject) reportMethod.invoke(null, report);
+
+        assertEquals(91, json.getInt("roundTripTimeMs"));
     }
 
     @Test
