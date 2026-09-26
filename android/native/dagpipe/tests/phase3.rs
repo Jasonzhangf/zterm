@@ -129,7 +129,7 @@ fn upload_segment_ack_completes_transfer() {
         "execution_id": "phase3-upload",
         "attempt_id": "1",
         "inputs": {
-            "arc.upload_intent": { "uploadId": "up-1", "segmentIndex": 2, "data": "abc" },
+            "arc.upload_intent": { "uploadId": "up-1", "segmentIndex": 0, "totalChunks": 1, "data": "abc" },
             "arc.transfer_policy": { "allowUpload": true },
         },
     }));
@@ -143,12 +143,192 @@ fn download_segment_ack_completes_transfer() {
         "execution_id": "phase3-download",
         "attempt_id": "1",
         "inputs": {
-            "arc.download_intent": { "downloadId": "dl-1", "path": "/tmp/a.txt", "chunk": "abc" },
+            "arc.download_intent": { "downloadId": "dl-1", "path": "/tmp/a.txt", "chunk": "abc", "segmentIndex": 0, "totalChunks": 1 },
             "arc.transfer_policy": { "allowDownload": true },
         },
     }));
     assert_eq!(result["ok"], true);
     assert_eq!(result["outputs"]["arc.download_complete"]["complete"], true);
+}
+
+#[test]
+fn upload_ack_completes_only_on_exact_final_total_chunks() {
+    let result = run_upload(json!({
+        "execution_id": "phase3-upload-multi-window",
+        "attempt_id": "1",
+        "inputs": {
+            "arc.upload_intent": { "uploadId": "up-mw", "segmentIndex": 11, "totalChunks": 12, "data": "abc" },
+            "arc.transfer_policy": { "allowUpload": true },
+        },
+    }));
+    assert_eq!(result["ok"], true);
+    assert_eq!(result["outputs"]["arc.upload_complete"]["complete"], true);
+}
+
+#[test]
+fn upload_ack_stays_in_progress_before_exact_total_chunks() {
+    let result = run_upload(json!({
+        "execution_id": "phase3-upload-in-progress",
+        "attempt_id": "1",
+        "inputs": {
+            "arc.upload_intent": { "uploadId": "up-2", "segmentIndex": 7, "totalChunks": 12, "data": "abc" },
+            "arc.transfer_policy": { "allowUpload": true },
+        },
+    }));
+    assert_eq!(result["ok"], true);
+    assert_eq!(result["outputs"]["arc.upload_complete"]["complete"], false);
+    assert_eq!(
+        result["outputs"]["arc.upload_complete"]["state"],
+        "in-progress"
+    );
+}
+
+#[test]
+fn upload_rejects_segment_index_at_or_above_total_chunks() {
+    for segment_index in [12, 13] {
+        let result = run_upload(json!({
+            "execution_id": format!("phase3-upload-overshoot-{segment_index}"),
+            "attempt_id": "1",
+            "inputs": {
+                "arc.upload_intent": {
+                    "uploadId": "up-overshoot",
+                    "segmentIndex": segment_index,
+                    "totalChunks": 12,
+                    "data": "abc",
+                },
+                "arc.transfer_policy": { "allowUpload": true },
+            },
+        }));
+        assert_eq!(result["ok"], false);
+        assert!(result["error"]
+            .as_str()
+            .unwrap()
+            .contains("out of range for totalChunks 12"));
+    }
+}
+
+#[test]
+fn upload_rejects_non_integer_or_zero_chunk_fields() {
+    for intent in [
+        json!({ "uploadId": "up-1", "segmentIndex": -1, "totalChunks": 1, "data": "abc" }),
+        json!({ "uploadId": "up-1", "segmentIndex": 1.5, "totalChunks": 1, "data": "abc" }),
+        json!({ "uploadId": "up-1", "segmentIndex": "0", "totalChunks": 1, "data": "abc" }),
+        json!({ "uploadId": "up-1", "segmentIndex": 0, "totalChunks": -1, "data": "abc" }),
+        json!({ "uploadId": "up-1", "segmentIndex": 0, "totalChunks": 0, "data": "abc" }),
+        json!({ "uploadId": "up-1", "segmentIndex": 0, "totalChunks": "1", "data": "abc" }),
+    ] {
+        let result = run_upload(json!({
+            "execution_id": "phase3-upload-invalid-chunk-shape",
+            "attempt_id": "1",
+            "inputs": {
+                "arc.upload_intent": intent,
+                "arc.transfer_policy": { "allowUpload": true },
+            },
+        }));
+        assert_eq!(result["ok"], false);
+        assert!(
+            result["error"]
+                .as_str()
+                .unwrap()
+                .contains("must be a non-negative integer")
+                || result["error"]
+                    .as_str()
+                    .unwrap()
+                    .contains("totalChunks must be at least 1")
+        );
+    }
+}
+
+#[test]
+fn download_ack_completes_only_on_exact_final_total_chunks() {
+    let result = run_download(json!({
+        "execution_id": "phase3-download-multi-batch",
+        "attempt_id": "1",
+        "inputs": {
+            "arc.download_intent": { "downloadId": "dl-mb", "path": "/tmp/a.txt", "chunk": "abc", "segmentIndex": 15, "totalChunks": 16 },
+            "arc.transfer_policy": { "allowDownload": true },
+        },
+    }));
+    assert_eq!(result["ok"], true);
+    assert_eq!(result["outputs"]["arc.download_complete"]["complete"], true);
+}
+
+#[test]
+fn download_ack_stays_in_progress_before_exact_total_chunks() {
+    let result = run_download(json!({
+        "execution_id": "phase3-download-in-progress",
+        "attempt_id": "1",
+        "inputs": {
+            "arc.download_intent": { "downloadId": "dl-2", "path": "/tmp/a.txt", "chunk": "abc", "segmentIndex": 7, "totalChunks": 16 },
+            "arc.transfer_policy": { "allowDownload": true },
+        },
+    }));
+    assert_eq!(result["ok"], true);
+    assert_eq!(
+        result["outputs"]["arc.download_complete"]["complete"],
+        false
+    );
+    assert_eq!(
+        result["outputs"]["arc.download_complete"]["state"],
+        "in-progress"
+    );
+}
+
+#[test]
+fn download_rejects_segment_index_at_or_above_total_chunks() {
+    for segment_index in [16, 17] {
+        let result = run_download(json!({
+            "execution_id": format!("phase3-download-overshoot-{segment_index}"),
+            "attempt_id": "1",
+            "inputs": {
+                "arc.download_intent": {
+                    "downloadId": "dl-overshoot",
+                    "path": "/tmp/a.txt",
+                    "chunk": "abc",
+                    "segmentIndex": segment_index,
+                    "totalChunks": 16,
+                },
+                "arc.transfer_policy": { "allowDownload": true },
+            },
+        }));
+        assert_eq!(result["ok"], false);
+        assert!(result["error"]
+            .as_str()
+            .unwrap()
+            .contains("out of range for totalChunks 16"));
+    }
+}
+
+#[test]
+fn download_rejects_non_integer_or_zero_chunk_fields() {
+    for intent in [
+        json!({ "downloadId": "dl-1", "path": "/tmp/a.txt", "segmentIndex": -1, "totalChunks": 1, "chunk": "abc" }),
+        json!({ "downloadId": "dl-1", "path": "/tmp/a.txt", "segmentIndex": 1.5, "totalChunks": 1, "chunk": "abc" }),
+        json!({ "downloadId": "dl-1", "path": "/tmp/a.txt", "segmentIndex": "0", "totalChunks": 1, "chunk": "abc" }),
+        json!({ "downloadId": "dl-1", "path": "/tmp/a.txt", "segmentIndex": 0, "totalChunks": -1, "chunk": "abc" }),
+        json!({ "downloadId": "dl-1", "path": "/tmp/a.txt", "segmentIndex": 0, "totalChunks": 0, "chunk": "abc" }),
+        json!({ "downloadId": "dl-1", "path": "/tmp/a.txt", "segmentIndex": 0, "totalChunks": "1", "chunk": "abc" }),
+    ] {
+        let result = run_download(json!({
+            "execution_id": "phase3-download-invalid-chunk-shape",
+            "attempt_id": "1",
+            "inputs": {
+                "arc.download_intent": intent,
+                "arc.transfer_policy": { "allowDownload": true },
+            },
+        }));
+        assert_eq!(result["ok"], false);
+        assert!(
+            result["error"]
+                .as_str()
+                .unwrap()
+                .contains("must be a non-negative integer")
+                || result["error"]
+                    .as_str()
+                    .unwrap()
+                    .contains("totalChunks must be at least 1")
+        );
+    }
 }
 
 #[test]
@@ -183,7 +363,7 @@ fn attachment_delivery_receipt_is_not_client_consumption() {
         "execution_id": "phase3-attachment",
         "attempt_id": "1",
         "inputs": {
-            "arc.attachment_delivery_request": { "attachmentId": "att-1", "targetDeviceId": "dev-1" },
+            "arc.attachment_delivery_request": { "attachmentId": "att_12345678-1234-1234-1234-123456789abc", "targetDeviceId": "dev-1" },
             "arc.attachment_policy": { "allowDelivery": true },
         },
     }));
@@ -194,13 +374,43 @@ fn attachment_delivery_receipt_is_not_client_consumption() {
 }
 
 #[test]
+fn attachment_rejects_malformed_id_like_ts_validate_attachment_id() {
+    let result = run_attachment(json!({
+        "execution_id": "phase3-attachment-invalid-id",
+        "attempt_id": "1",
+        "inputs": {
+            "arc.attachment_delivery_request": { "attachmentId": "att-1", "targetDeviceId": "dev-1" },
+            "arc.attachment_policy": { "allowDelivery": true },
+        },
+    }));
+    assert_eq!(result["ok"], false);
+}
+
+#[test]
+fn attachment_accepts_uppercase_prefix_like_ts_validate_attachment_id() {
+    let result = run_attachment(json!({
+        "execution_id": "phase3-attachment-uppercase-id",
+        "attempt_id": "1",
+        "inputs": {
+            "arc.attachment_delivery_request": { "attachmentId": "ATT_12345678-1234-1234-1234-123456789abc", "targetDeviceId": "dev-1" },
+            "arc.attachment_policy": { "allowDelivery": true },
+        },
+    }));
+    assert_eq!(result["ok"], true);
+    assert_eq!(
+        result["outputs"]["arc.attachment_delivery_result"]["state"],
+        "published"
+    );
+}
+
+#[test]
 fn attachment_denied_when_policy_forbids_delivery() {
     let result = run_attachment(json!({
         "execution_id": "phase3-attachment-deny",
         "attempt_id": "1",
         "inputs": {
             "arc.attachment_delivery_request": {
-                "attachmentId": "att-1",
+                "attachmentId": "att_12345678-1234-1234-1234-123456789abc",
                 "targetDeviceId": "dev-1",
             },
             "arc.attachment_policy": { "allowDelivery": false },

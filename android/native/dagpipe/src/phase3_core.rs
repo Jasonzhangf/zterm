@@ -7,6 +7,7 @@
 use pipeline_runtime::*;
 use serde_json::{json, Map, Value};
 use std::collections::{BTreeSet, HashMap};
+use std::sync::OnceLock;
 
 const INPUT_SCHEDULE_GRAPH_JSON: &str =
     include_str!("../../../docs/dagpipe/daemon-input-schedule.graph.json");
@@ -20,6 +21,32 @@ const ATTACHMENT_GRAPH_JSON: &str =
     include_str!("../../../docs/dagpipe/daemon-attachment-delivery.graph.json");
 const SCREENSHOT_GRAPH_JSON: &str =
     include_str!("../../../docs/dagpipe/terminal-remote-screenshot.graph.json");
+
+const FILE_TRANSFER_THROUGHPUT_CONTRACT_JSON: &str =
+    include_str!("../../../contracts/file-transfer-throughput.json");
+
+fn file_transfer_threshold(key: &str) -> Result<u64, String> {
+    static CONTRACT: OnceLock<Result<Value, String>> = OnceLock::new();
+    let contract = CONTRACT
+        .get_or_init(|| {
+            serde_json::from_str(FILE_TRANSFER_THROUGHPUT_CONTRACT_JSON)
+                .map_err(|error| format!("file-transfer-throughput contract parse failed: {error}"))
+        })
+        .as_ref()
+        .map_err(|error| error.clone())?;
+    contract
+        .get(key)
+        .and_then(Value::as_u64)
+        .ok_or_else(|| format!("file-transfer-throughput contract missing {key}"))
+}
+
+fn file_transfer_upload_window_chunks() -> Result<u64, String> {
+    file_transfer_threshold("upload_window_chunks")
+}
+
+fn file_transfer_native_write_batch_chunks() -> Result<u64, String> {
+    file_transfer_threshold("native_write_batch_chunks")
+}
 
 pub const INPUT_SCHEDULE_GRAPH_ID: &str = "daemon.input_schedule";
 pub const FILE_BROWSE_GRAPH_ID: &str = "daemon.file_transfer_browse";
@@ -51,10 +78,92 @@ fn get_bool(object: &Map<String, Value>, key: &str) -> bool {
     object.get(key).and_then(Value::as_bool).unwrap_or(false)
 }
 
+fn parse_uint_field(object: &Map<String, Value>, key: &str) -> Result<Option<u64>, String> {
+    match object.get(key) {
+        None => Ok(None),
+        Some(Value::Number(number)) => {
+            if let Some(value) = number.as_u64() {
+                return Ok(Some(value));
+            }
+            if let Some(float) = number.as_f64() {
+                if float.fract() == 0.0 && float >= 0.0 && float < 2f64.powi(64) {
+                    return Ok(Some(float as u64));
+                }
+            }
+            Err(format!("{key} must be a non-negative integer"))
+        }
+        Some(_) => Err(format!("{key} must be a non-negative integer")),
+    }
+}
+
+/// Strict chunk position reader. The upload/download admission gates omit
+/// segmentIndex/totalChunks, so absent fields keep their defaults (0 and 1);
+/// explicit invalid values are rejected instead of being coerced.
+fn chunk_position(object: &Map<String, Value>) -> Result<(u64, u64), String> {
+    let segment_index = parse_uint_field(object, "segmentIndex")?.unwrap_or_default();
+    let total_chunks_field = match parse_uint_field(object, "totalChunks")? {
+        Some(value) => Some(value),
+        None => parse_uint_field(object, "chunkCount")?,
+    };
+    let total_chunks = match total_chunks_field {
+        Some(value) if value > 0 => value,
+        Some(_) => return Err("totalChunks must be at least 1".into()),
+        None => 1,
+    };
+    if segment_index >= total_chunks {
+        return Err(format!(
+            "segmentIndex {segment_index} is out of range for totalChunks {total_chunks}"
+        ));
+    }
+    Ok((segment_index, total_chunks))
+}
+
 fn json_array(value: Option<&Value>) -> Vec<Value> {
     match value {
         Some(Value::Array(items)) => items.clone(),
         _ => Vec::new(),
+    }
+}
+
+fn is_valid_attachment_id(value: &str) -> bool {
+    let trimmed = value.trim();
+    let bytes = trimmed.as_bytes();
+    if bytes.len() < 4 || !bytes[..3].eq_ignore_ascii_case(b"att") || bytes[3] != b'_' {
+        return false;
+    }
+    let hex_part = &trimmed[4..];
+    let groups: Vec<&str> = hex_part.split('-').collect();
+    let expected_lengths = [8usize, 4, 4, 4, 12];
+    if groups.len() != expected_lengths.len() {
+        return false;
+    }
+    groups.iter().enumerate().all(|(index, group)| {
+        group.len() == expected_lengths[index] && group.chars().all(|c| c.is_ascii_hexdigit())
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn file_transfer_thresholds_lock_to_ts_contract() {
+        let contract: Value = serde_json::from_str(FILE_TRANSFER_THROUGHPUT_CONTRACT_JSON).unwrap();
+        assert_eq!(
+            file_transfer_upload_window_chunks().unwrap(),
+            contract["upload_window_chunks"].as_u64().unwrap()
+        );
+        assert_eq!(
+            file_transfer_native_write_batch_chunks().unwrap(),
+            contract["native_write_batch_chunks"].as_u64().unwrap()
+        );
+    }
+
+    #[test]
+    fn attachment_prefix_matches_ts_case_insensitive_regex() {
+        assert!(is_valid_attachment_id(
+            "ATT_12345678-1234-1234-1234-123456789abc"
+        ));
     }
 }
 
@@ -510,9 +619,11 @@ impl Operator for FileTransferValidateUpload {
         if !get_bool(&policy, "allowUpload") {
             return Err("upload denied by transfer policy".into());
         }
+        let (segment_index, total_chunks) = chunk_position(&intent)?;
         Ok(json!({
             "uploadId": upload_id,
-            "segmentIndex": intent.get("segmentIndex").cloned().unwrap_or_else(|| json!(0)),
+            "segmentIndex": segment_index,
+            "totalChunks": total_chunks,
             "data": intent.get("data").cloned().unwrap_or_else(|| json!("")),
             "state": "validated",
         }))
@@ -539,6 +650,7 @@ impl Operator for FileTransferUploadSegment {
         Ok(json!({
             "uploadId": get_str(&validation, "uploadId"),
             "segmentIndex": validation.get("segmentIndex").cloned().unwrap_or_else(|| json!(0)),
+            "totalChunks": validation.get("totalChunks").cloned().unwrap_or_else(|| json!(1)),
             "acked": true,
             "state": "acked",
         }))
@@ -565,10 +677,16 @@ impl Operator for FileTransferUploadAck {
         if !get_bool(&ack, "acked") {
             return Err("upload segment was not acked".into());
         }
+        let (segment_index, total_chunks) = chunk_position(&ack)?;
+        let complete = segment_index + 1 == total_chunks;
+        let window_chunks = file_transfer_upload_window_chunks()?;
         Ok(json!({
             "uploadId": get_str(&ack, "uploadId"),
-            "complete": true,
-            "state": "complete",
+            "segmentIndex": segment_index,
+            "totalChunks": total_chunks,
+            "windowChunks": window_chunks,
+            "complete": complete,
+            "state": if complete { "complete" } else { "in-progress" },
         }))
     }
 }
@@ -600,10 +718,13 @@ impl Operator for FileTransferValidateDownload {
         if !get_bool(&policy, "allowDownload") {
             return Err("download denied by transfer policy".into());
         }
+        let (segment_index, total_chunks) = chunk_position(&intent)?;
         Ok(json!({
             "downloadId": download_id,
             "path": path,
             "chunk": intent.get("chunk").cloned().unwrap_or_else(|| json!("")),
+            "segmentIndex": segment_index,
+            "totalChunks": total_chunks,
             "state": "validated",
         }))
     }
@@ -630,6 +751,8 @@ impl Operator for FileTransferDownloadSegment {
             "downloadId": get_str(&validation, "downloadId"),
             "path": get_str(&validation, "path"),
             "chunk": validation.get("chunk").cloned().unwrap_or_else(|| json!("")),
+            "segmentIndex": validation.get("segmentIndex").cloned().unwrap_or_else(|| json!(0)),
+            "totalChunks": validation.get("totalChunks").cloned().unwrap_or_else(|| json!(1)),
             "state": "chunked",
         }))
     }
@@ -652,10 +775,16 @@ impl Operator for FileTransferDownloadAck {
 
     fn execute(&self, input: Value, _context: &OperatorContext) -> Result<Value, String> {
         let chunk = obj(inputs(input).first().cloned().unwrap_or_default());
+        let (segment_index, total_chunks) = chunk_position(&chunk)?;
+        let complete = segment_index + 1 == total_chunks;
+        let batch_chunks = file_transfer_native_write_batch_chunks()?;
         Ok(json!({
             "downloadId": get_str(&chunk, "downloadId"),
-            "complete": true,
-            "state": "complete",
+            "segmentIndex": segment_index,
+            "totalChunks": total_chunks,
+            "batchChunks": batch_chunks,
+            "complete": complete,
+            "state": if complete { "complete" } else { "in-progress" },
         }))
     }
 }
@@ -684,11 +813,14 @@ impl Operator for AttachmentValidate {
         if attachment_id.is_empty() || target_device_id.is_empty() {
             return Err("attachment request requires attachmentId and targetDeviceId".into());
         }
+        if !is_valid_attachment_id(&attachment_id) {
+            return Err("invalid attachment id".into());
+        }
         if !get_bool(&policy, "allowDelivery") {
             return Err("attachment delivery denied by policy".into());
         }
         Ok(json!({
-            "attachmentId": attachment_id,
+            "attachmentId": attachment_id.trim(),
             "targetDeviceId": target_device_id,
             "state": "validated",
         }))

@@ -1,16 +1,12 @@
-// Phase2-8 black-box parity, divergence, and smoke harness.
+// Phase2-8 black-box parity and smoke harness.
 //
 // Where the Rust graph and the TypeScript owner consume the same fixture and
 // project the same contract, the case computes the expected value through the
 // real TypeScript owner, passes the *same* fixture to the DAGpipe Rust core via
 // `dagpipe-bridge`, and asserts the Rust output equals that TS-derived value.
 //
-// Two classes of case are deliberately NOT claimed as parity:
-//   * `[divergence]` cases record a known, verified behavioral gap between the
-//     TypeScript owner and the Rust graph (the assertion pins the current Rust
-//     behavior so the gap cannot silently change).
-//   * `[smoke]` cases exercise the Rust graph alone where no equivalent TS
-//     owner output exists to compare against.
+// `[smoke]` cases exercise the Rust graph alone where no equivalent TS owner
+// output exists to compare against.
 // The old TypeScript implementation is kept as the oracle; nothing is deleted.
 //
 // Phase -> TypeScript owner used as oracle:
@@ -18,8 +14,8 @@
 //   Phase2 daemon connection -> daemon session catalog projection
 //   Phase3 input schedule -> shared input-chunking normalization
 //   Phase3 file browse -> server file-transfer path resolution
-//   Phase3 upload/download -> file-transfer-throughput contract [divergence]
-//   Phase3 attachment -> attachment id validation + delivery status [divergence]
+//   Phase3 upload/download -> file-transfer-throughput contract
+//   Phase3 attachment -> attachment id validation + delivery status
 //   Phase3 screenshot -> remote-screenshot chunk assembly
 //   Phase4 remote window -> remote-window input policy validation
 //   Phase5 shell lifecycle -> junction-preview-lattice normalization [smoke]
@@ -166,7 +162,7 @@ function previewLatticeWithCell(): JunctionPreviewLatticeV1 {
   return created.lattice;
 }
 
-describe('DAGpipe Phase2-8 black-box parity, divergence, and smoke with TypeScript owners', () => {
+describe('DAGpipe Phase2-8 black-box parity and smoke with TypeScript owners', () => {
   it('Phase2 relay: Rust route carrier matches the TS-projected relay identity fixture', () => {
     // TS oracle: normalize the directory and then project its daemon snapshots.
     const directory = normalizeRelayAccountDirectory(relayDirectoryPayload);
@@ -292,58 +288,131 @@ describe('DAGpipe Phase2-8 black-box parity, divergence, and smoke with TypeScri
     }))).toThrow(/denied by permission policy/);
   });
 
-  it('[divergence] Phase3 upload/download: Rust ack always completes and ignores the TS threshold contract', () => {
-    // TS oracle: the shared throughput contract says an upload window can send
-    // up to FILE_TRANSFER_UPLOAD_WINDOW_CHUNKS chunks before it needs progress.
+  it('Phase3 upload/download: Rust ack completes only at exact total chunks', () => {
+    // TS oracle: the shared throughput contract only bounds in-flight chunks
+    // and native write batches; completion is the exact final chunk.
     expect(FILE_TRANSFER_UPLOAD_WINDOW_CHUNKS).toBe(8);
     expect(FILE_TRANSFER_NATIVE_WRITE_BATCH_CHUNKS).toBe(8);
 
-    // Exercise below-boundary, boundary, and above-boundary indices. The TS
-    // contract uses the window for backpressure; Rust's FileTransferUploadAck
-    // only checks "acked" and publishes complete=true for every segment.
-    for (const segmentIndex of [
-      0,
-      FILE_TRANSFER_UPLOAD_WINDOW_CHUNKS - 2,
-      FILE_TRANSFER_UPLOAD_WINDOW_CHUNKS - 1,
-      FILE_TRANSFER_UPLOAD_WINDOW_CHUNKS + 1,
+    for (const [segmentIndex, totalChunks] of [
+      [0, 1],
+      [7, 12],
+      [11, 12],
+      [23, 24],
     ]) {
-      const upload = outputs(runPhase3Upload(phaseRequest(`parity-phase3-upload-${segmentIndex}`, {
+      const upload = outputs(runPhase3Upload(phaseRequest(`parity-phase3-upload-${segmentIndex}-${totalChunks}`, {
         'arc.upload_intent': {
           uploadId: 'up-1',
           segmentIndex,
+          totalChunks,
           data: 'abc',
         },
         'arc.transfer_policy': { allowUpload: true },
       })));
-      expect(upload['arc.upload_complete']).toEqual({
+      expect(upload['arc.upload_complete']).toMatchObject({
         uploadId: 'up-1',
-        complete: true,
-        state: 'complete',
+        segmentIndex,
+        totalChunks,
+        windowChunks: FILE_TRANSFER_UPLOAD_WINDOW_CHUNKS,
+        complete: segmentIndex + 1 === totalChunks,
+        state: segmentIndex + 1 === totalChunks ? 'complete' : 'in-progress',
       });
     }
 
-    // Download ack is also unconditional in Rust; policy denial is preserved.
-    const download = outputs(runPhase3Download(phaseRequest('parity-phase3-download', {
-      'arc.download_intent': { downloadId: 'dl-1', path: '/tmp/a.txt', chunk: 'abc' },
-      'arc.transfer_policy': { allowDownload: true },
-    })));
-    expect(download['arc.download_complete']).toEqual({
-      downloadId: 'dl-1',
-      complete: true,
-      state: 'complete',
-    });
+    for (const [segmentIndex, totalChunks] of [
+      [0, 1],
+      [7, 16],
+      [15, 16],
+      [23, 24],
+    ]) {
+      const download = outputs(runPhase3Download(phaseRequest(`parity-phase3-download-${segmentIndex}-${totalChunks}`, {
+        'arc.download_intent': {
+          downloadId: 'dl-1',
+          path: '/tmp/a.txt',
+          chunk: 'abc',
+          segmentIndex,
+          totalChunks,
+        },
+        'arc.transfer_policy': { allowDownload: true },
+      })));
+      expect(download['arc.download_complete']).toMatchObject({
+        downloadId: 'dl-1',
+        segmentIndex,
+        totalChunks,
+        batchChunks: FILE_TRANSFER_NATIVE_WRITE_BATCH_CHUNKS,
+        complete: segmentIndex + 1 === totalChunks,
+        state: segmentIndex + 1 === totalChunks ? 'complete' : 'in-progress',
+      });
+    }
+    for (const [segmentIndex, totalChunks] of [
+      [12, 12],
+      [13, 12],
+    ]) {
+      expect(() => runPhase3Upload(phaseRequest(`parity-phase3-upload-overshoot-${segmentIndex}`, {
+        'arc.upload_intent': {
+          uploadId: 'up-1',
+          segmentIndex,
+          totalChunks,
+          data: 'abc',
+        },
+        'arc.transfer_policy': { allowUpload: true },
+      }))).toThrow(/out of range for totalChunks 12/);
+    }
+    for (const [segmentIndex, totalChunks] of [
+      [16, 16],
+      [17, 16],
+    ]) {
+      expect(() => runPhase3Download(phaseRequest(`parity-phase3-download-overshoot-${segmentIndex}`, {
+        'arc.download_intent': {
+          downloadId: 'dl-1',
+          path: '/tmp/a.txt',
+          chunk: 'abc',
+          segmentIndex,
+          totalChunks,
+        },
+        'arc.transfer_policy': { allowDownload: true },
+      }))).toThrow(/out of range for totalChunks 16/);
+    }
+    for (const invalid of [
+      { segmentIndex: -1, totalChunks: 1 },
+      { segmentIndex: 1.5, totalChunks: 1 },
+      { segmentIndex: '0', totalChunks: 1 },
+      { segmentIndex: 0, totalChunks: -1 },
+      { segmentIndex: 0, totalChunks: 0 },
+      { segmentIndex: 0, totalChunks: '1' },
+    ]) {
+      expect(() => runPhase3Upload(phaseRequest(`parity-phase3-upload-invalid-${JSON.stringify(invalid)}`, {
+        'arc.upload_intent': {
+          uploadId: 'up-1',
+          ...invalid,
+          data: 'abc',
+        },
+        'arc.transfer_policy': { allowUpload: true },
+      }))).toThrow(/must be a non-negative integer|totalChunks must be at least 1/);
+      expect(() => runPhase3Download(phaseRequest(`parity-phase3-download-invalid-${JSON.stringify(invalid)}`, {
+        'arc.download_intent': {
+          downloadId: 'dl-1',
+          path: '/tmp/a.txt',
+          ...invalid,
+          chunk: 'abc',
+        },
+        'arc.transfer_policy': { allowDownload: true },
+      }))).toThrow(/must be a non-negative integer|totalChunks must be at least 1/);
+    }
     expect(() => runPhase3Download(phaseRequest('parity-phase3-download-reject', {
       'arc.download_intent': { downloadId: 'dl-1', path: '/tmp/a.txt' },
       'arc.transfer_policy': { allowDownload: false },
     }))).toThrow(/denied by transfer policy/);
   });
 
-  it('Phase3 attachment: Rust and TS agree on a real UUID id while Rust still diverges on invalid ids', () => {
+  it('Phase3 attachment: Rust and TS agree on valid and malformed attachment ids', () => {
     const validAttachmentId = 'att_12345678-1234-1234-1234-123456789abc';
+    const uppercaseAttachmentId = 'ATT_12345678-1234-1234-1234-123456789abc';
     const invalidAttachmentId = 'att-1';
 
     // TS owner is the id validation oracle for real UUIDs.
     expect(validateAttachmentId(validAttachmentId)).toBe(validAttachmentId);
+    expect(validateAttachmentId(uppercaseAttachmentId)).toBe(uppercaseAttachmentId);
     expect(() => validateAttachmentId(invalidAttachmentId)).toThrow(/invalid attachment id/);
 
     const result = outputs(runPhase3Attachment(phaseRequest('parity-phase3-attachment', {
@@ -356,16 +425,19 @@ describe('DAGpipe Phase2-8 black-box parity, divergence, and smoke with TypeScri
     });
     expect(result['arc.attachment_delivery_result']).not.toHaveProperty('consumed');
 
-    // This divergence is explicit: TS rejects att-1, but the current Rust
-    // AttachmentValidate operator only rejects an empty attachmentId.
-    const invalidRust = outputs(runPhase3Attachment(phaseRequest('parity-phase3-attachment-invalid-id', {
-      'arc.attachment_delivery_request': { attachmentId: invalidAttachmentId, targetDeviceId: 'dev-1' },
+    const uppercaseResult = outputs(runPhase3Attachment(phaseRequest('parity-phase3-attachment-uppercase-id', {
+      'arc.attachment_delivery_request': { attachmentId: uppercaseAttachmentId, targetDeviceId: 'dev-1' },
       'arc.attachment_policy': { allowDelivery: true },
     })));
-    expect(invalidRust['arc.attachment_delivery_result']).toMatchObject({
+    expect(uppercaseResult['arc.attachment_delivery_result']).toMatchObject({
       state: 'published',
       receipt: { state: 'delivered' },
     });
+
+    expect(() => runPhase3Attachment(phaseRequest('parity-phase3-attachment-invalid-id', {
+      'arc.attachment_delivery_request': { attachmentId: invalidAttachmentId, targetDeviceId: 'dev-1' },
+      'arc.attachment_policy': { allowDelivery: true },
+    }))).toThrow(/invalid attachment id/);
     expect(() => runPhase3Attachment(phaseRequest('parity-phase3-attachment-reject', {
       'arc.attachment_delivery_request': { attachmentId: validAttachmentId, targetDeviceId: 'dev-1' },
       'arc.attachment_policy': { allowDelivery: false },
