@@ -167,6 +167,75 @@ fn stopped_pulse_without_matching_action_is_unmatched() {
 }
 
 #[test]
+fn multi_channel_projection_isolates_lifecycle_and_projects_only_open_subscribed_actions() {
+    let result = run_connection(bind_input(
+        json!({
+            "targetKey": "t1",
+            "bridgeHost": "host-1",
+            "channels": [
+                { "channelId": "c1", "sessionName": "s1", "state": "open" },
+                { "channelId": "c2", "sessionName": "s2", "state": "open" },
+                { "channelId": "c3", "sessionName": "s3", "state": "closed" },
+            ],
+        }),
+        json!({ "generation": "g1" }),
+        json!({ "targetKey": "t1", "channelId": "c1", "sessionName": "s1" }),
+        json!({ "stopped": true, "name": "s1", "targetKey": "t1", "channelId": "c1" }),
+    ));
+    assert_eq!(result["ok"], true, "phase8 multi channel failed: {result}");
+    let actions = result["outputs"]["arc.notification_actions"]["actions"]
+        .as_array()
+        .unwrap();
+    assert_eq!(actions.len(), 2);
+    assert_eq!(actions[0]["channelId"], "c1");
+    assert_eq!(actions[1]["channelId"], "c2");
+    assert_eq!(actions[0]["state"], "open");
+    assert_eq!(
+        result["outputs"]["arc.service_snapshot"]["state"],
+        "healthy"
+    );
+    assert_eq!(
+        result["outputs"]["arc.session_open_request"]["state"],
+        "session-open-deep-link-ready"
+    );
+}
+
+#[test]
+fn heartbeat_miss_schedules_backoff_reconnect_without_abandoning_desired_target() {
+    let result = run_connection(json!({
+        "execution_id": "phase8-connection-backoff",
+        "attempt_id": "1",
+        "inputs": {
+            "arc.service_command": {
+                "type": "bind-target",
+                "target": {
+                    "targetKey": "t1",
+                    "bridgeHost": "host-1",
+                    "channels": [
+                        { "channelId": "c1", "sessionName": "s1", "state": "open" },
+                    ],
+                },
+            },
+            "arc.service_policy": {
+                "allowTransport": true,
+                "allowReconnect": true,
+                "allowNotifications": true,
+                "simulateHeartbeatMiss": true,
+            },
+            "arc.network_generation_event": { "generation": "g1" },
+            "arc.notification_action": {},
+            "arc.session_activity_fact": {},
+        },
+    }));
+    assert_eq!(result["ok"], true, "phase8 backoff failed: {result}");
+    assert_eq!(
+        result["outputs"]["arc.service_snapshot"]["state"],
+        "backoff-reconnect"
+    );
+    assert_eq!(result["outputs"]["arc.service_snapshot"]["target"], "t1");
+}
+
+#[test]
 fn release_target_projects_idle_snapshot() {
     let result = run_connection(json!({
         "execution_id": "phase8-release",
