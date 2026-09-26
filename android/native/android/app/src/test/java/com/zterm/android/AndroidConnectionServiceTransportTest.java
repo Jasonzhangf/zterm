@@ -463,7 +463,7 @@ public final class AndroidConnectionServiceTransportTest {
             .build();
 
         assertEquals(
-            java.util.Arrays.asList("lan", "ipv4", "tailscale"),
+            java.util.Arrays.asList("lan", "tailscale", "ipv4"),
             candidatePaths(newRuntime(service, target)));
     }
 
@@ -481,7 +481,7 @@ public final class AndroidConnectionServiceTransportTest {
             .build();
 
         assertEquals(
-            java.util.Arrays.asList("ipv4", "tailscale"),
+            java.util.Arrays.asList("tailscale", "ipv4"),
             candidatePaths(newRuntime(service, target)));
     }
 
@@ -498,10 +498,15 @@ public final class AndroidConnectionServiceTransportTest {
             .ipv6Host("2001:db8::10")
             .tailscaleHost("100.64.0.2")
             .relayHostId("relay-1")
+            .signalUrl("wss://relay.example/client")
+            .relayDeviceId("android-1")
+            .turnUrl("turn:relay.example:3478?transport=udp")
+            .turnUsername("ztermturn")
+            .turnCredential("turn-pass")
             .build();
 
         assertEquals(
-            java.util.Arrays.asList("lan", "ipv4", "ipv6", "tailscale", "rtc-relay"),
+            java.util.Arrays.asList("lan", "rtc-direct", "tailscale", "ipv6", "ipv4", "rtc-relay"),
             candidatePaths(newRuntime(service, target)));
     }
 
@@ -515,10 +520,13 @@ public final class AndroidConnectionServiceTransportTest {
             .bridgePort(3333)
             .ipv4Host("203.0.113.5")
             .ipv6Host("2001:db8::5")
+            .relayHostId("relay-1")
+            .signalUrl("wss://relay.example/client")
+            .relayDeviceId("android-1")
             .build();
 
         assertEquals(
-            java.util.Arrays.asList("ipv4", "ipv6"),
+            java.util.Collections.singletonList("rtc-direct"),
             candidatePaths(newRuntime(service, target,
                 AndroidConnectionServiceRoutePolicy.manual(
                     AndroidConnectionServiceRoutePolicy.Path.RTC_DIRECT))));
@@ -533,6 +541,11 @@ public final class AndroidConnectionServiceTransportTest {
             .bridgeHost("relay.example")
             .bridgePort(3333)
             .relayHostId("relay-1")
+            .signalUrl("wss://relay.example/client")
+            .relayDeviceId("android-1")
+            .turnUrl("turn:relay.example:3478?transport=udp")
+            .turnUsername("ztermturn")
+            .turnCredential("turn-pass")
             .build();
 
         assertEquals(
@@ -540,6 +553,68 @@ public final class AndroidConnectionServiceTransportTest {
             candidatePaths(newRuntime(service, target,
                 AndroidConnectionServiceRoutePolicy.manual(
                     AndroidConnectionServiceRoutePolicy.Path.RTC_RELAY))));
+    }
+
+    @Test
+    public void manualRtcRelayWithoutTurnCredentialsFailsClosedInsteadOfRelayCandidate()
+        throws Exception {
+        AndroidConnectionService service = new AndroidConnectionService();
+        AndroidConnectionServiceTarget target = new AndroidConnectionServiceTarget.Builder()
+            .targetKey("target-rtc-relay-no-turn")
+            .bridgeHost("relay.example")
+            .bridgePort(3333)
+            .relayHostId("relay-1")
+            .signalUrl("wss://relay.example/client")
+            .relayDeviceId("android-1")
+            .build();
+
+        assertEquals(
+            java.util.Collections.emptyList(),
+            candidatePaths(newRuntime(service, target,
+                AndroidConnectionServiceRoutePolicy.manual(
+                    AndroidConnectionServiceRoutePolicy.Path.RTC_RELAY))));
+    }
+
+    @Test
+    public void rtcCandidatesCarryDirectAndRelayIcePolicyWithoutLeakingTurnIntoDirect()
+        throws Exception {
+        AndroidConnectionService service = new AndroidConnectionService();
+        AndroidConnectionServiceTarget target = new AndroidConnectionServiceTarget.Builder()
+            .targetKey("target-rtc-policy")
+            .bridgeHost("relay.example")
+            .bridgePort(3333)
+            .lanHost("127.0.0.2")
+            .tailscaleHost("100.64.0.2")
+            .ipv4Host("203.0.113.10")
+            .ipv6Host("2001:db8::10")
+            .relayHostId("relay-1")
+            .signalUrl("wss://relay.example/client")
+            .relayDeviceId("android-1")
+            .authToken("token-a")
+            .turnUrl("turn:relay.example:3478?transport=udp")
+            .turnUsername("ztermturn")
+            .turnCredential("turn-pass")
+            .build();
+
+        Object runtime = newRuntime(service, target);
+        List<?> candidates = buildCandidates(runtime);
+        Object direct = candidateByPath(candidates, "rtc-direct");
+        Object relay = candidateByPath(candidates, "rtc-relay");
+        assertEquals(true, candidateField(direct, "rtc"));
+        assertEquals("all", candidateField(direct, "iceTransportPolicy"));
+        assertEquals("relay", candidateField(relay, "iceTransportPolicy"));
+        assertTrue("rtc-direct ICE must not carry TURN username",
+            candidateIceJson(direct).toString().indexOf("ztermturn") < 0);
+        assertTrue("rtc-relay ICE must carry TURN username and credential",
+            candidateIceJson(relay).toString().contains("ztermturn"));
+        assertTrue("rtc-relay ICE must carry TURN credential",
+            candidateIceJson(relay).toString().contains("turn-pass"));
+        assertTrue("rtc-direct signal must include relay host identity",
+            String.valueOf(candidateField(direct, "signalUrl")).contains("hostId=relay-1"));
+        assertTrue("rtc-direct signal must include device identity",
+            String.valueOf(candidateField(direct, "signalUrl")).contains("deviceId=android-1"));
+        assertTrue("rtc-direct signal must include auth token",
+            String.valueOf(candidateField(direct, "signalUrl")).contains("token=token-a"));
     }
 
     @Test
@@ -581,8 +656,8 @@ public final class AndroidConnectionServiceTransportTest {
             assertEquals(2, openedUrls.size());
             assertTrue("first candidate must be the same-subnet LAN url",
                 openedUrls.get(0).contains("127.0.0.2"));
-            assertTrue("failure must fall through to the next auto UDP-direct candidate",
-                openedUrls.get(1).contains("203.0.113.10"));
+            assertTrue("failure must fall through to the next auto Tailscale candidate",
+                openedUrls.get(1).contains("100.64.0.2"));
 
             Field stateMachineField = runtime.getClass().getDeclaredField("stateMachine");
             stateMachineField.setAccessible(true);
@@ -763,16 +838,36 @@ public final class AndroidConnectionServiceTransportTest {
     }
 
     private static List<String> candidatePaths(Object runtime) throws Exception {
-        Method buildCandidates = runtime.getClass().getDeclaredMethod("buildCandidates");
-        buildCandidates.setAccessible(true);
-        List<?> candidates = (List<?>) buildCandidates.invoke(runtime);
         List<String> paths = new ArrayList<>();
-        for (Object candidate : candidates) {
-            Field path = candidate.getClass().getDeclaredField("path");
-            path.setAccessible(true);
-            paths.add((String) path.get(candidate));
+        for (Object candidate : buildCandidates(runtime)) {
+            paths.add((String) candidateField(candidate, "path"));
         }
         return paths;
+    }
+
+    private static List<?> buildCandidates(Object runtime) throws Exception {
+        Method buildCandidates = runtime.getClass().getDeclaredMethod("buildCandidates");
+        buildCandidates.setAccessible(true);
+        return (List<?>) buildCandidates.invoke(runtime);
+    }
+
+    private static Object candidateByPath(List<?> candidates, String path) throws Exception {
+        for (Object candidate : candidates) {
+            if (path.equals(candidateField(candidate, "path"))) {
+                return candidate;
+            }
+        }
+        throw new AssertionError("missing candidate path: " + path);
+    }
+
+    private static Object candidateField(Object candidate, String name) throws Exception {
+        Field field = candidate.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        return field.get(candidate);
+    }
+
+    private static org.json.JSONArray candidateIceJson(Object candidate) throws Exception {
+        return (org.json.JSONArray) candidateField(candidate, "iceServers");
     }
 
     private static AndroidConnectionServiceTarget target() {

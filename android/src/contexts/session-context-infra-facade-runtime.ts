@@ -539,7 +539,13 @@ export function createSessionInfraFacadeRuntime(options: {
       && Capacitor.getPlatform() === 'android'
       && !shouldRouteAndroidHostToTraversalSocket(host)
     ) {
-      return openAndroidConnectionServiceTransportSocket(host);
+      return openAndroidConnectionServiceTransportSocket(host, {
+        signalUrl: options.bridgeSettings.signalUrl,
+        turnServerUrl: options.bridgeSettings.turnServerUrl,
+        turnUsername: options.bridgeSettings.turnUsername,
+        turnCredential: options.bridgeSettings.turnCredential,
+        traversalRelay: options.bridgeSettings.traversalRelay,
+      });
     }
     return buildTraversalSocketForHostRuntime({
       host,

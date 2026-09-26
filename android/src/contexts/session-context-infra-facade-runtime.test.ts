@@ -89,7 +89,7 @@ describe('Android connection service platform wiring', () => {
 
     expect(source).toContain('Capacitor.isNativePlatform()');
     expect(source).toContain("Capacitor.getPlatform() === 'android'");
-    expect(source).toContain('openAndroidConnectionServiceTransportSocket(host)');
+    expect(source).toContain('openAndroidConnectionServiceTransportSocket(host, {');
   });
 
   it('routes explicit WebRTC and relay-rtc Android targets through the traversal transport', () => {
