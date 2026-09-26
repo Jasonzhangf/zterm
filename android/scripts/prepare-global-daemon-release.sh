@@ -108,6 +108,36 @@ stage_runtime() {
   chmod +x "${RUNTIME_DIR}"/node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null || true
 }
 
+run_phase7_release_gate() {
+  local artifact_name="$1"
+  local expected_sha="$2"
+  "$NODE_BIN" - "$ROOT_DIR" "$artifact_name" "$expected_sha" <<'NODE'
+const path = require('path');
+const [rootDir, artifactName, expectedSha] = process.argv.slice(2);
+const dagpipe = require(path.join(rootDir, 'native', 'dagpipe', 'index.node'));
+const inputJson = JSON.stringify({
+  execution_id: `release:${artifactName}`,
+  attempt_id: '1',
+  inputs: {
+    'arc.build_artifact': { name: artifactName, sha256: expectedSha },
+    'arc.release_policy': { expectedSha256: expectedSha },
+  },
+});
+const raw = dagpipe.runPhase7Release(inputJson);
+const result = JSON.parse(raw);
+if (!result.ok) {
+  console.error('[prepare-global-daemon-release] phase7 release gate failed:', result.error || 'unknown');
+  process.exit(1);
+}
+const started = result.outputs && result.outputs['arc.runtime_started'];
+if (!started || started.state !== 'started') {
+  console.error('[prepare-global-daemon-release] phase7 release gate did not reach runtime_started');
+  process.exit(1);
+}
+console.log(`[prepare-global-daemon-release] phase7 release gate passed artifact=${artifactName} sha256=${expectedSha}`);
+NODE
+}
+
 stage_native_daemon_binary() {
   if [[ "$(uname -s)" != "Darwin" ]]; then
     return 0
@@ -1111,6 +1141,8 @@ write_readme
 
 verify_deterministic_archive
 shasum -a 256 "${ARCHIVE_PATH}" > "${SHA_PATH}"
+EXPECTED_RELEASE_SHA="$(awk '{print $1}' "${SHA_PATH}")"
+run_phase7_release_gate "${RELEASE_NAME}.tar.gz" "${EXPECTED_RELEASE_SHA}"
 
 echo "[prepare-global-daemon-release] ready"
 echo "- dir: ${RELEASE_DIR}"

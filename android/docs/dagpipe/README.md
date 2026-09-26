@@ -214,12 +214,8 @@ client wrapper entries are N/A on the client side by ownership:
   (`src/server/daemon-input-queue-runtime.ts`).
 - `runDagpipePhase3FileBrowse`, `runDagpipePhase3Download` -> `daemon.file_transfer`
   (`src/server/terminal-file-transfer-list-runtime.ts`).
-- `runDagpipePhase7Release` -> `release.runtime_promotion` is daemon-owned
-  (`release.daemon_artifact` -> `release.runtime_home.install` ->
-  `daemon.runtime_entry.start`); N/A in the client `app-update-runtime.ts`.
-
-`runDagpipePhase7Debug` is N/A for the current observability entrypoint:
-wiring it from `src/lib/runtime-debug-http-exporter.ts` would create an
-`observability.debug_channel -> client.runtime` import edge and violate the
-module import graph gate, so observability keeps its legacy bounded HTTP
-upload path until a client-runtime-owned debug gate owner is extracted.
+- `runDagpipePhase7Release`: `scripts/prepare-global-daemon-release.sh`
+  release gate after deterministic archive + sha256 verification.
+- `runDagpipePhase7Debug`: `src/hooks/useRelayDeviceStream.ts` relay debug
+  request gate. The native gate runs only when the client platform is native;
+  the legacy bounded HTTP upload path remains read-only metadata export.
