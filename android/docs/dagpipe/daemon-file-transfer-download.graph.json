@@ -2,44 +2,180 @@
   "id": "daemon.file_transfer_download",
   "version": "0.1",
   "inputs": [
-    { "id": "arc.download_intent", "schema": "Object" },
-    { "id": "arc.transfer_policy", "schema": "Object" }
+    {
+      "id": "arc.request",
+      "schema": "Object"
+    }
   ],
   "nodes": [
+    {
+      "id": "dagpipe.extract.arc.download_intent",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.download_intent",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.transfer_policy",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.transfer_policy",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
     {
       "id": "validate_download",
       "operator": "daemon.file_transfer.validate_download",
       "operator_version": "0.1",
-      "inputs": ["arc.download_intent", "arc.transfer_policy"],
-      "output": { "id": "arc.download_validation", "schema": "Object" },
-      "input_selector": { "include": [], "exclude": [], "predicate": null },
-      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "inputs": [
+        "arc.download_intent",
+        "arc.transfer_policy"
+      ],
+      "output": {
+        "id": "arc.download_validation",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
       "iterator": "Whole"
     },
     {
       "id": "download_segment",
       "operator": "daemon.file_transfer.download_segment",
       "operator_version": "0.1",
-      "inputs": ["arc.download_validation"],
-      "output": { "id": "arc.download_chunk", "schema": "Object" },
-      "input_selector": { "include": [], "exclude": [], "predicate": null },
-      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "inputs": [
+        "arc.download_validation"
+      ],
+      "output": {
+        "id": "arc.download_chunk",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
       "iterator": "Whole"
     },
     {
       "id": "ack_download_chunk",
       "operator": "daemon.file_transfer.download_ack",
       "operator_version": "0.1",
-      "inputs": ["arc.download_chunk"],
-      "output": { "id": "arc.download_complete", "schema": "Object" },
-      "input_selector": { "include": [], "exclude": [], "predicate": null },
-      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "inputs": [
+        "arc.download_chunk"
+      ],
+      "output": {
+        "id": "arc.download_complete",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.collect.arc.download_complete",
+      "operator": "dagpipe.result.collect",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.download_complete"
+      ],
+      "output": {
+        "id": "arc.result",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
       "iterator": "Whole"
     }
   ],
   "edges": [
-    { "from": "validate_download", "to": "download_segment", "arc_id": "arc.download_validation" },
-    { "from": "download_segment", "to": "ack_download_chunk", "arc_id": "arc.download_chunk" }
+    {
+      "from": "validate_download",
+      "to": "download_segment",
+      "arc_id": "arc.download_validation"
+    },
+    {
+      "from": "download_segment",
+      "to": "ack_download_chunk",
+      "arc_id": "arc.download_chunk"
+    },
+    {
+      "from": "dagpipe.extract.arc.download_intent",
+      "to": "validate_download",
+      "arc_id": "arc.download_intent"
+    },
+    {
+      "from": "dagpipe.extract.arc.transfer_policy",
+      "to": "validate_download",
+      "arc_id": "arc.transfer_policy"
+    },
+    {
+      "from": "ack_download_chunk",
+      "to": "dagpipe.collect.arc.download_complete",
+      "arc_id": "arc.download_complete"
+    }
   ],
-  "outputs": ["arc.download_complete"]
+  "outputs": [
+    "arc.result"
+  ]
 }

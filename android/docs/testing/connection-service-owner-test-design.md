@@ -62,6 +62,7 @@ Foreground resume is a data-refresh trigger only. On Android it may refresh the 
 - Foreground/background, pause/resume, visibility, and Activity recreation do not call connect, probe, route selection, heartbeat, or socket close.
 - Foreground resume on an open channel sends `buffer-head-request` on the same socket and applies the missing body range without changing physical generation.
 - Foreground resume with a missing socket or closed channel performs no UI-owned reopen/reconnect; service failure/backoff tests separately prove recovery remains live.
+- If a legacy hook still delivers `notifyTargetNetworkSignal({ source: 'foreground-resume' })`, the transport runtime treats it as data-refresh-only: no target probe, no network-generation retire, no reconnect wake.
 - The reducer has no `request-reconnect` output.
 
 ### Native tests

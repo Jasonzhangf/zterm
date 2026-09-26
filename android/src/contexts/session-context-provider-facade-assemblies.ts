@@ -154,7 +154,6 @@ export function useSessionProviderFacadeAssemblies(
       source: refreshSource,
       forceHead: true,
       markResumeTail: refreshSource === 'explicit-resume',
-      allowReconnectIfUnavailable: true,
     });
   };
 

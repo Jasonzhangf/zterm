@@ -99,10 +99,9 @@ export function createSessionPublicFacadeRuntime(options: {
   ) => boolean;
   ensureActiveSessionFresh: (options: {
     sessionId: string;
-    source: 'explicit-resume' | 'active-reentry' | 'active-tick';
+    source: 'explicit-resume' | 'foreground-resume' | 'active-reentry' | 'active-tick';
     forceHead?: boolean;
     markResumeTail?: boolean;
-    allowReconnectIfUnavailable?: boolean;
   }) => boolean;
   notifyTargetNetworkSignal: (
     signal: SessionTargetNetworkSignal,
@@ -220,7 +219,6 @@ export function createSessionPublicFacadeRuntime(options: {
         sessionId,
         source: 'active-tick',
         forceHead: true,
-        allowReconnectIfUnavailable: true,
       });
     }
   };
@@ -235,7 +233,6 @@ export function createSessionPublicFacadeRuntime(options: {
       source: 'explicit-resume',
       forceHead: true,
       markResumeTail: true,
-      allowReconnectIfUnavailable: true,
     });
   };
 

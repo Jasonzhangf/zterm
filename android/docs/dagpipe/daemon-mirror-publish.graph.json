@@ -3,23 +3,103 @@
   "version": "0.2",
   "inputs": [
     {
-      "id": "arc.source_readback",
-      "schema": "Object"
-    },
-    {
-      "id": "arc.diff_policy",
-      "schema": "Object"
-    },
-    {
-      "id": "arc.prev_mirror_snapshot",
-      "schema": "Object"
-    },
-    {
-      "id": "arc.subscriber_facts",
+      "id": "arc.request",
       "schema": "Object"
     }
   ],
   "nodes": [
+    {
+      "id": "dagpipe.extract.arc.source_readback",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.source_readback",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.diff_policy",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.diff_policy",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.prev_mirror_snapshot",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.prev_mirror_snapshot",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.subscriber_facts",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.subscriber_facts",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
     {
       "id": "normalize_capture",
       "operator": "daemon.source_adapter.normalize",
@@ -188,6 +268,29 @@
         "predicate": null
       },
       "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.collect.arc.wire_frames",
+      "operator": "dagpipe.result.collect",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.wire_frames"
+      ],
+      "output": {
+        "id": "arc.result",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
     }
   ],
   "edges": [
@@ -230,9 +333,49 @@
       "from": "plan_refresh",
       "to": "emit_wire_frames",
       "arc_id": "arc.publish_plan"
+    },
+    {
+      "from": "dagpipe.extract.arc.source_readback",
+      "to": "normalize_capture",
+      "arc_id": "arc.source_readback"
+    },
+    {
+      "from": "dagpipe.extract.arc.diff_policy",
+      "to": "compute_changed_ranges",
+      "arc_id": "arc.diff_policy"
+    },
+    {
+      "from": "dagpipe.extract.arc.prev_mirror_snapshot",
+      "to": "compute_changed_ranges",
+      "arc_id": "arc.prev_mirror_snapshot"
+    },
+    {
+      "from": "dagpipe.extract.arc.diff_policy",
+      "to": "classify_update",
+      "arc_id": "arc.diff_policy"
+    },
+    {
+      "from": "dagpipe.extract.arc.prev_mirror_snapshot",
+      "to": "classify_update",
+      "arc_id": "arc.prev_mirror_snapshot"
+    },
+    {
+      "from": "dagpipe.extract.arc.diff_policy",
+      "to": "plan_refresh",
+      "arc_id": "arc.diff_policy"
+    },
+    {
+      "from": "dagpipe.extract.arc.subscriber_facts",
+      "to": "plan_refresh",
+      "arc_id": "arc.subscriber_facts"
+    },
+    {
+      "from": "emit_wire_frames",
+      "to": "dagpipe.collect.arc.wire_frames",
+      "arc_id": "arc.wire_frames"
     }
   ],
   "outputs": [
-    "arc.wire_frames"
+    "arc.result"
   ]
 }
