@@ -147,29 +147,6 @@
         "predicate": null
       },
       "iterator": "Whole"
-    },
-    {
-      "id": "dagpipe.collect.arc.mux_channel_send",
-      "operator": "dagpipe.result.collect",
-      "operator_version": "0.1",
-      "inputs": [
-        "arc.mux_channel_send"
-      ],
-      "output": {
-        "id": "arc.result",
-        "schema": "Object"
-      },
-      "input_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "output_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "iterator": "Whole"
     }
   ],
   "edges": [
@@ -197,14 +174,9 @@
       "from": "dagpipe.extract.arc.transport_facts",
       "to": "plan_input_batch",
       "arc_id": "arc.transport_facts"
-    },
-    {
-      "from": "emit_input",
-      "to": "dagpipe.collect.arc.mux_channel_send",
-      "arc_id": "arc.mux_channel_send"
     }
   ],
   "outputs": [
-    "arc.result"
+    "arc.mux_channel_send"
   ]
 }
