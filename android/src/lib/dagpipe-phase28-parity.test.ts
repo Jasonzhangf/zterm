@@ -744,6 +744,28 @@ describe('DAGpipe Phase2-8 black-box parity and smoke with TypeScript owners', (
     }))).toThrow(/debug channel denied/);
   });
 
+  it('Phase7 update/debug reject paths match digest/download/debug-denied semantics', () => {
+    expect(() => runPhase7Release(phaseRequest('parity-phase7-release-missing-digest', {
+      'arc.build_artifact': { name: 'zterm-daemon' },
+      'arc.release_policy': { expectedSha256: 'abc123' },
+    }))).toThrow(/release artifact digest missing/);
+
+    expect(() => runPhase7Update(phaseRequest('parity-phase7-update-download-denied', {
+      'arc.update_check': { version: '0.1.4', sha256: 'def456' },
+      'arc.update_policy': { allowUpdate: false },
+    }))).toThrow(/update is not available/);
+
+    expect(() => runPhase7Update(phaseRequest('parity-phase7-update-digest-failed', {
+      'arc.update_check': { version: '0.1.4', sha256: '' },
+      'arc.update_policy': { allowUpdate: true },
+    }))).toThrow(/downloaded update digest missing/);
+
+    expect(() => runPhase7Debug(phaseRequest('parity-phase7-debug-denied', {
+      'arc.debug_sample_request': { sample: 'trace-denied' },
+      'arc.debug_policy': { allowDebug: false },
+    }))).toThrow(/debug channel denied/);
+  });
+
   it('Phase8 connection service: Rust snapshot matches the TS command/state machine', () => {
     const command = { type: 'bind-target' as const, target: { targetKey: 't1', bridgeHost: 'host-1', bridgePort: 3333 } };
     const parsed = parseAndroidConnectionCommand(command);
