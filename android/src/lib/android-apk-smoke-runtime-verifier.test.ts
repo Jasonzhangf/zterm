@@ -162,6 +162,16 @@ describe('android apk smoke runtime verifier', () => {
           {
             seq: 1,
             ts: '2026-05-12T10:00:00.500Z',
+            scope: 'session.buffer.applied',
+            payload: JSON.stringify({
+              sessionId: 'session-1',
+              nextRevision: 10,
+              nextEndIndex: 120,
+            }),
+          },
+          {
+            seq: 0,
+            ts: '2026-05-12T10:00:00.500Z',
             scope: 'session.ws.connect.buffer-sync',
             payload: JSON.stringify({
               sessionId: 'session-1',
