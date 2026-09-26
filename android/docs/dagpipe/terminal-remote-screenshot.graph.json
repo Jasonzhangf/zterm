@@ -2,44 +2,180 @@
   "id": "terminal.remote_screenshot",
   "version": "0.1",
   "inputs": [
-    { "id": "arc.screenshot_request", "schema": "Object" },
-    { "id": "arc.screenshot_permission", "schema": "Object" }
+    {
+      "id": "arc.request",
+      "schema": "Object"
+    }
   ],
   "nodes": [
+    {
+      "id": "dagpipe.extract.arc.screenshot_request",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.screenshot_request",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.screenshot_permission",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.screenshot_permission",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
     {
       "id": "validate_screenshot_request",
       "operator": "terminal.remote_screenshot.validate",
       "operator_version": "0.1",
-      "inputs": ["arc.screenshot_request", "arc.screenshot_permission"],
-      "output": { "id": "arc.screenshot_validation", "schema": "Object" },
-      "input_selector": { "include": [], "exclude": [], "predicate": null },
-      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "inputs": [
+        "arc.screenshot_request",
+        "arc.screenshot_permission"
+      ],
+      "output": {
+        "id": "arc.screenshot_validation",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
       "iterator": "Whole"
     },
     {
       "id": "capture_remote_screenshot",
       "operator": "terminal.remote_screenshot.capture",
       "operator_version": "0.1",
-      "inputs": ["arc.screenshot_validation"],
-      "output": { "id": "arc.screenshot_bytes", "schema": "Object" },
-      "input_selector": { "include": [], "exclude": [], "predicate": null },
-      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "inputs": [
+        "arc.screenshot_validation"
+      ],
+      "output": {
+        "id": "arc.screenshot_bytes",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
       "iterator": "Whole"
     },
     {
       "id": "store_screenshot_result",
       "operator": "terminal.remote_screenshot.store",
       "operator_version": "0.1",
-      "inputs": ["arc.screenshot_bytes"],
-      "output": { "id": "arc.screenshot_result", "schema": "Object" },
-      "input_selector": { "include": [], "exclude": [], "predicate": null },
-      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "inputs": [
+        "arc.screenshot_bytes"
+      ],
+      "output": {
+        "id": "arc.screenshot_result",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.collect.arc.screenshot_result",
+      "operator": "dagpipe.result.collect",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.screenshot_result"
+      ],
+      "output": {
+        "id": "arc.result",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
       "iterator": "Whole"
     }
   ],
   "edges": [
-    { "from": "validate_screenshot_request", "to": "capture_remote_screenshot", "arc_id": "arc.screenshot_validation" },
-    { "from": "capture_remote_screenshot", "to": "store_screenshot_result", "arc_id": "arc.screenshot_bytes" }
+    {
+      "from": "validate_screenshot_request",
+      "to": "capture_remote_screenshot",
+      "arc_id": "arc.screenshot_validation"
+    },
+    {
+      "from": "capture_remote_screenshot",
+      "to": "store_screenshot_result",
+      "arc_id": "arc.screenshot_bytes"
+    },
+    {
+      "from": "dagpipe.extract.arc.screenshot_request",
+      "to": "validate_screenshot_request",
+      "arc_id": "arc.screenshot_request"
+    },
+    {
+      "from": "dagpipe.extract.arc.screenshot_permission",
+      "to": "validate_screenshot_request",
+      "arc_id": "arc.screenshot_permission"
+    },
+    {
+      "from": "store_screenshot_result",
+      "to": "dagpipe.collect.arc.screenshot_result",
+      "arc_id": "arc.screenshot_result"
+    }
   ],
-  "outputs": ["arc.screenshot_result"]
+  "outputs": [
+    "arc.result"
+  ]
 }

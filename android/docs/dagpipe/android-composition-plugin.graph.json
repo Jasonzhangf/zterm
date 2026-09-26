@@ -2,77 +2,264 @@
   "id": "android.composition_plugin",
   "version": "0.1",
   "inputs": [
-    { "id": "arc.composition_request", "schema": "Object" },
-    { "id": "arc.plugin_manifest", "schema": "Object" }
+    {
+      "id": "arc.request",
+      "schema": "Object"
+    }
   ],
   "nodes": [
+    {
+      "id": "dagpipe.extract.arc.composition_request",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.composition_request",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.plugin_manifest",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.plugin_manifest",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
     {
       "id": "validate_composition",
       "operator": "client.composition_root.validate_ports",
       "operator_version": "0.1",
-      "inputs": ["arc.composition_request"],
-      "output": { "id": "arc.validated_ports", "schema": "Object" },
-      "input_selector": { "include": [], "exclude": [], "predicate": null },
-      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "inputs": [
+        "arc.composition_request"
+      ],
+      "output": {
+        "id": "arc.validated_ports",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
       "iterator": "Whole"
     },
     {
       "id": "compose_runtime",
       "operator": "client.composition_root.compose",
       "operator_version": "0.1",
-      "inputs": ["arc.validated_ports"],
-      "output": { "id": "arc.composed_runtime", "schema": "Object" },
-      "input_selector": { "include": [], "exclude": [], "predicate": null },
-      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "inputs": [
+        "arc.validated_ports"
+      ],
+      "output": {
+        "id": "arc.composed_runtime",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
       "iterator": "Whole"
     },
     {
       "id": "read_plugin_manifest",
       "operator": "client.plugin_host.read_manifest",
       "operator_version": "0.1",
-      "inputs": ["arc.composed_runtime", "arc.plugin_manifest"],
-      "output": { "id": "arc.plugin_manifest_facts", "schema": "Object" },
-      "input_selector": { "include": [], "exclude": [], "predicate": null },
-      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "inputs": [
+        "arc.composed_runtime",
+        "arc.plugin_manifest"
+      ],
+      "output": {
+        "id": "arc.plugin_manifest_facts",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
       "iterator": "Whole"
     },
     {
       "id": "register_capabilities",
       "operator": "client.plugin_host.register_capabilities",
       "operator_version": "0.1",
-      "inputs": ["arc.plugin_manifest_facts"],
-      "output": { "id": "arc.capability_registry", "schema": "Object" },
-      "input_selector": { "include": [], "exclude": [], "predicate": null },
-      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "inputs": [
+        "arc.plugin_manifest_facts"
+      ],
+      "output": {
+        "id": "arc.capability_registry",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
       "iterator": "Whole"
     },
     {
       "id": "register_ui_slots",
       "operator": "client.plugin_host.register_ui_slots",
       "operator_version": "0.1",
-      "inputs": ["arc.capability_registry"],
-      "output": { "id": "arc.ui_slot_registry", "schema": "Object" },
-      "input_selector": { "include": [], "exclude": [], "predicate": null },
-      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "inputs": [
+        "arc.capability_registry"
+      ],
+      "output": {
+        "id": "arc.ui_slot_registry",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
       "iterator": "Whole"
     },
     {
       "id": "activate_plugins",
       "operator": "client.plugin_host.activate",
       "operator_version": "0.1",
-      "inputs": ["arc.ui_slot_registry"],
-      "output": { "id": "arc.activated_plugins", "schema": "Object" },
-      "input_selector": { "include": [], "exclude": [], "predicate": null },
-      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "inputs": [
+        "arc.ui_slot_registry"
+      ],
+      "output": {
+        "id": "arc.activated_plugins",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.collect.arc.activated_plugins",
+      "operator": "dagpipe.result.collect",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.activated_plugins"
+      ],
+      "output": {
+        "id": "arc.result",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
       "iterator": "Whole"
     }
   ],
   "edges": [
-    { "from": "validate_composition", "to": "compose_runtime", "arc_id": "arc.validated_ports" },
-    { "from": "compose_runtime", "to": "read_plugin_manifest", "arc_id": "arc.composed_runtime" },
-    { "from": "read_plugin_manifest", "to": "register_capabilities", "arc_id": "arc.plugin_manifest_facts" },
-    { "from": "register_capabilities", "to": "register_ui_slots", "arc_id": "arc.capability_registry" },
-    { "from": "register_ui_slots", "to": "activate_plugins", "arc_id": "arc.ui_slot_registry" }
+    {
+      "from": "validate_composition",
+      "to": "compose_runtime",
+      "arc_id": "arc.validated_ports"
+    },
+    {
+      "from": "compose_runtime",
+      "to": "read_plugin_manifest",
+      "arc_id": "arc.composed_runtime"
+    },
+    {
+      "from": "read_plugin_manifest",
+      "to": "register_capabilities",
+      "arc_id": "arc.plugin_manifest_facts"
+    },
+    {
+      "from": "register_capabilities",
+      "to": "register_ui_slots",
+      "arc_id": "arc.capability_registry"
+    },
+    {
+      "from": "register_ui_slots",
+      "to": "activate_plugins",
+      "arc_id": "arc.ui_slot_registry"
+    },
+    {
+      "from": "dagpipe.extract.arc.composition_request",
+      "to": "validate_composition",
+      "arc_id": "arc.composition_request"
+    },
+    {
+      "from": "dagpipe.extract.arc.plugin_manifest",
+      "to": "read_plugin_manifest",
+      "arc_id": "arc.plugin_manifest"
+    },
+    {
+      "from": "activate_plugins",
+      "to": "dagpipe.collect.arc.activated_plugins",
+      "arc_id": "arc.activated_plugins"
+    }
   ],
-  "outputs": ["arc.activated_plugins"]
+  "outputs": [
+    "arc.result"
+  ]
 }

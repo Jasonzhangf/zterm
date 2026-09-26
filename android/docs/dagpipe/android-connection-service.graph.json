@@ -2,158 +2,627 @@
   "id": "android.connection_service",
   "version": "0.1",
   "inputs": [
-    { "id": "arc.service_command", "schema": "Object" },
-    { "id": "arc.service_policy", "schema": "Object" },
-    { "id": "arc.network_generation_event", "schema": "Object" },
-    { "id": "arc.notification_action", "schema": "Object" },
-    { "id": "arc.session_activity_fact", "schema": "Object" }
+    {
+      "id": "arc.request",
+      "schema": "Object"
+    }
   ],
   "nodes": [
+    {
+      "id": "dagpipe.extract.arc.service_command",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.service_command",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.service_policy",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.service_policy",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.network_generation_event",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.network_generation_event",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.notification_action",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.notification_action",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.session_activity_fact",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.session_activity_fact",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
     {
       "id": "validate_service_command",
       "operator": "client.connection_service.validate_command",
       "operator_version": "0.1",
-      "inputs": ["arc.service_command", "arc.service_policy"],
-      "output": { "id": "arc.command_gate", "schema": "Object" },
-      "input_selector": { "include": [], "exclude": [], "predicate": null },
-      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "inputs": [
+        "arc.service_command",
+        "arc.service_policy"
+      ],
+      "output": {
+        "id": "arc.command_gate",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
       "iterator": "Whole"
     },
     {
       "id": "bind_desired_target",
       "operator": "client.connection_service.bind_target",
       "operator_version": "0.1",
-      "inputs": ["arc.command_gate", "arc.service_policy"],
-      "output": { "id": "arc.desired_target", "schema": "Object" },
-      "input_selector": { "include": [], "exclude": [], "predicate": null },
-      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "inputs": [
+        "arc.command_gate",
+        "arc.service_policy"
+      ],
+      "output": {
+        "id": "arc.desired_target",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
       "iterator": "Whole"
     },
     {
       "id": "release_desired_target",
       "operator": "client.connection_service.release_target",
       "operator_version": "0.1",
-      "inputs": ["arc.command_gate", "arc.service_policy"],
-      "output": { "id": "arc.release_plan", "schema": "Object" },
-      "input_selector": { "include": [], "exclude": [], "predicate": null },
-      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "inputs": [
+        "arc.command_gate",
+        "arc.service_policy"
+      ],
+      "output": {
+        "id": "arc.release_plan",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
       "iterator": "Whole"
     },
     {
       "id": "validate_network_generation",
       "operator": "client.android_connection_service.validate_network_generation",
       "operator_version": "0.1",
-      "inputs": ["arc.network_generation_event", "arc.desired_target"],
-      "output": { "id": "arc.valid_network_generation", "schema": "Object" },
-      "input_selector": { "include": [], "exclude": [], "predicate": null },
-      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "inputs": [
+        "arc.network_generation_event",
+        "arc.desired_target"
+      ],
+      "output": {
+        "id": "arc.valid_network_generation",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
       "iterator": "Whole"
     },
     {
       "id": "replay_desired_channels",
       "operator": "client.android_connection_service.replay_desired_channels",
       "operator_version": "0.1",
-      "inputs": ["arc.desired_target", "arc.service_policy"],
-      "output": { "id": "arc.channel_replay_plan", "schema": "Object" },
-      "input_selector": { "include": [], "exclude": [], "predicate": null },
-      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "inputs": [
+        "arc.desired_target",
+        "arc.service_policy"
+      ],
+      "output": {
+        "id": "arc.channel_replay_plan",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
       "iterator": "Whole"
     },
     {
       "id": "establish_physical_transport",
       "operator": "client.android_connection_service.establish_transport",
       "operator_version": "0.1",
-      "inputs": ["arc.valid_network_generation", "arc.channel_replay_plan", "arc.service_policy"],
-      "output": { "id": "arc.target_transport", "schema": "Object" },
-      "input_selector": { "include": [], "exclude": [], "predicate": null },
-      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "inputs": [
+        "arc.valid_network_generation",
+        "arc.channel_replay_plan",
+        "arc.service_policy"
+      ],
+      "output": {
+        "id": "arc.target_transport",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
       "iterator": "Whole"
     },
     {
       "id": "maintain_heartbeat",
       "operator": "client.android_connection_service.maintain_heartbeat",
       "operator_version": "0.1",
-      "inputs": ["arc.target_transport", "arc.service_policy"],
-      "output": { "id": "arc.connection_health", "schema": "Object" },
-      "input_selector": { "include": [], "exclude": [], "predicate": null },
-      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "inputs": [
+        "arc.target_transport",
+        "arc.service_policy"
+      ],
+      "output": {
+        "id": "arc.connection_health",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
       "iterator": "Whole"
     },
     {
       "id": "schedule_backoff_reconnect",
       "operator": "client.android_connection_service.schedule_backoff_reconnect",
       "operator_version": "0.1",
-      "inputs": ["arc.connection_health", "arc.desired_target", "arc.service_policy"],
-      "output": { "id": "arc.backoff_plan", "schema": "Object" },
-      "input_selector": { "include": [], "exclude": [], "predicate": null },
-      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "inputs": [
+        "arc.connection_health",
+        "arc.desired_target",
+        "arc.service_policy"
+      ],
+      "output": {
+        "id": "arc.backoff_plan",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
       "iterator": "Whole"
     },
     {
       "id": "project_service_snapshot",
       "operator": "client.connection_service.project_snapshot",
       "operator_version": "0.1",
-      "inputs": ["arc.desired_target", "arc.release_plan", "arc.target_transport", "arc.connection_health", "arc.backoff_plan"],
-      "output": { "id": "arc.service_snapshot", "schema": "Object" },
-      "input_selector": { "include": [], "exclude": [], "predicate": null },
-      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "inputs": [
+        "arc.desired_target",
+        "arc.release_plan",
+        "arc.target_transport",
+        "arc.connection_health",
+        "arc.backoff_plan"
+      ],
+      "output": {
+        "id": "arc.service_snapshot",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
       "iterator": "Whole"
     },
     {
       "id": "project_notification_actions",
       "operator": "client.android_notification_sessions.project_actions",
       "operator_version": "0.1",
-      "inputs": ["arc.target_transport", "arc.service_snapshot", "arc.service_policy"],
-      "output": { "id": "arc.notification_actions", "schema": "Object" },
-      "input_selector": { "include": [], "exclude": [], "predicate": null },
-      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "inputs": [
+        "arc.target_transport",
+        "arc.service_snapshot",
+        "arc.service_policy"
+      ],
+      "output": {
+        "id": "arc.notification_actions",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
       "iterator": "Whole"
     },
     {
       "id": "handle_session_deep_link",
       "operator": "client.android_notification_sessions.open_session_deep_link",
       "operator_version": "0.1",
-      "inputs": ["arc.notification_action", "arc.notification_actions"],
-      "output": { "id": "arc.session_open_request", "schema": "Object" },
-      "input_selector": { "include": [], "exclude": [], "predicate": null },
-      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "inputs": [
+        "arc.notification_action",
+        "arc.notification_actions"
+      ],
+      "output": {
+        "id": "arc.session_open_request",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
       "iterator": "Whole"
     },
     {
       "id": "pulse_stopped_session",
       "operator": "client.android_notification_sessions.pulse_stopped",
       "operator_version": "0.1",
-      "inputs": ["arc.session_activity_fact", "arc.notification_actions", "arc.service_policy"],
-      "output": { "id": "arc.notification_pulse", "schema": "Object" },
-      "input_selector": { "include": [], "exclude": [], "predicate": null },
-      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "inputs": [
+        "arc.session_activity_fact",
+        "arc.notification_actions",
+        "arc.service_policy"
+      ],
+      "output": {
+        "id": "arc.notification_pulse",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.collect.arc.service_snapshot,arc.notification_actions,arc.session_open_request,arc.notification_pulse",
+      "operator": "dagpipe.result.collect",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.service_snapshot",
+        "arc.notification_actions",
+        "arc.session_open_request",
+        "arc.notification_pulse"
+      ],
+      "output": {
+        "id": "arc.result",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
       "iterator": "Whole"
     }
   ],
   "edges": [
-    { "from": "validate_service_command", "to": "bind_desired_target", "arc_id": "arc.command_gate" },
-    { "from": "validate_service_command", "to": "release_desired_target", "arc_id": "arc.command_gate" },
-    { "from": "bind_desired_target", "to": "validate_network_generation", "arc_id": "arc.desired_target" },
-    { "from": "bind_desired_target", "to": "replay_desired_channels", "arc_id": "arc.desired_target" },
-    { "from": "replay_desired_channels", "to": "establish_physical_transport", "arc_id": "arc.channel_replay_plan" },
-    { "from": "validate_network_generation", "to": "establish_physical_transport", "arc_id": "arc.valid_network_generation" },
-    { "from": "establish_physical_transport", "to": "maintain_heartbeat", "arc_id": "arc.target_transport" },
-    { "from": "maintain_heartbeat", "to": "schedule_backoff_reconnect", "arc_id": "arc.connection_health" },
-    { "from": "bind_desired_target", "to": "schedule_backoff_reconnect", "arc_id": "arc.desired_target" },
-    { "from": "release_desired_target", "to": "project_service_snapshot", "arc_id": "arc.release_plan" },
-    { "from": "bind_desired_target", "to": "project_service_snapshot", "arc_id": "arc.desired_target" },
-    { "from": "establish_physical_transport", "to": "project_service_snapshot", "arc_id": "arc.target_transport" },
-    { "from": "maintain_heartbeat", "to": "project_service_snapshot", "arc_id": "arc.connection_health" },
-    { "from": "schedule_backoff_reconnect", "to": "project_service_snapshot", "arc_id": "arc.backoff_plan" },
-    { "from": "project_service_snapshot", "to": "project_notification_actions", "arc_id": "arc.service_snapshot" },
-    { "from": "establish_physical_transport", "to": "project_notification_actions", "arc_id": "arc.target_transport" },
-    { "from": "project_notification_actions", "to": "handle_session_deep_link", "arc_id": "arc.notification_actions" },
-    { "from": "project_notification_actions", "to": "pulse_stopped_session", "arc_id": "arc.notification_actions" }
+    {
+      "from": "validate_service_command",
+      "to": "bind_desired_target",
+      "arc_id": "arc.command_gate"
+    },
+    {
+      "from": "validate_service_command",
+      "to": "release_desired_target",
+      "arc_id": "arc.command_gate"
+    },
+    {
+      "from": "bind_desired_target",
+      "to": "validate_network_generation",
+      "arc_id": "arc.desired_target"
+    },
+    {
+      "from": "bind_desired_target",
+      "to": "replay_desired_channels",
+      "arc_id": "arc.desired_target"
+    },
+    {
+      "from": "replay_desired_channels",
+      "to": "establish_physical_transport",
+      "arc_id": "arc.channel_replay_plan"
+    },
+    {
+      "from": "validate_network_generation",
+      "to": "establish_physical_transport",
+      "arc_id": "arc.valid_network_generation"
+    },
+    {
+      "from": "establish_physical_transport",
+      "to": "maintain_heartbeat",
+      "arc_id": "arc.target_transport"
+    },
+    {
+      "from": "maintain_heartbeat",
+      "to": "schedule_backoff_reconnect",
+      "arc_id": "arc.connection_health"
+    },
+    {
+      "from": "bind_desired_target",
+      "to": "schedule_backoff_reconnect",
+      "arc_id": "arc.desired_target"
+    },
+    {
+      "from": "release_desired_target",
+      "to": "project_service_snapshot",
+      "arc_id": "arc.release_plan"
+    },
+    {
+      "from": "bind_desired_target",
+      "to": "project_service_snapshot",
+      "arc_id": "arc.desired_target"
+    },
+    {
+      "from": "establish_physical_transport",
+      "to": "project_service_snapshot",
+      "arc_id": "arc.target_transport"
+    },
+    {
+      "from": "maintain_heartbeat",
+      "to": "project_service_snapshot",
+      "arc_id": "arc.connection_health"
+    },
+    {
+      "from": "schedule_backoff_reconnect",
+      "to": "project_service_snapshot",
+      "arc_id": "arc.backoff_plan"
+    },
+    {
+      "from": "project_service_snapshot",
+      "to": "project_notification_actions",
+      "arc_id": "arc.service_snapshot"
+    },
+    {
+      "from": "establish_physical_transport",
+      "to": "project_notification_actions",
+      "arc_id": "arc.target_transport"
+    },
+    {
+      "from": "project_notification_actions",
+      "to": "handle_session_deep_link",
+      "arc_id": "arc.notification_actions"
+    },
+    {
+      "from": "project_notification_actions",
+      "to": "pulse_stopped_session",
+      "arc_id": "arc.notification_actions"
+    },
+    {
+      "from": "dagpipe.extract.arc.service_command",
+      "to": "validate_service_command",
+      "arc_id": "arc.service_command"
+    },
+    {
+      "from": "dagpipe.extract.arc.service_policy",
+      "to": "validate_service_command",
+      "arc_id": "arc.service_policy"
+    },
+    {
+      "from": "dagpipe.extract.arc.service_policy",
+      "to": "bind_desired_target",
+      "arc_id": "arc.service_policy"
+    },
+    {
+      "from": "dagpipe.extract.arc.service_policy",
+      "to": "release_desired_target",
+      "arc_id": "arc.service_policy"
+    },
+    {
+      "from": "dagpipe.extract.arc.network_generation_event",
+      "to": "validate_network_generation",
+      "arc_id": "arc.network_generation_event"
+    },
+    {
+      "from": "dagpipe.extract.arc.service_policy",
+      "to": "replay_desired_channels",
+      "arc_id": "arc.service_policy"
+    },
+    {
+      "from": "dagpipe.extract.arc.service_policy",
+      "to": "establish_physical_transport",
+      "arc_id": "arc.service_policy"
+    },
+    {
+      "from": "dagpipe.extract.arc.service_policy",
+      "to": "maintain_heartbeat",
+      "arc_id": "arc.service_policy"
+    },
+    {
+      "from": "dagpipe.extract.arc.service_policy",
+      "to": "schedule_backoff_reconnect",
+      "arc_id": "arc.service_policy"
+    },
+    {
+      "from": "dagpipe.extract.arc.service_policy",
+      "to": "project_notification_actions",
+      "arc_id": "arc.service_policy"
+    },
+    {
+      "from": "dagpipe.extract.arc.notification_action",
+      "to": "handle_session_deep_link",
+      "arc_id": "arc.notification_action"
+    },
+    {
+      "from": "dagpipe.extract.arc.session_activity_fact",
+      "to": "pulse_stopped_session",
+      "arc_id": "arc.session_activity_fact"
+    },
+    {
+      "from": "dagpipe.extract.arc.service_policy",
+      "to": "pulse_stopped_session",
+      "arc_id": "arc.service_policy"
+    },
+    {
+      "from": "project_service_snapshot",
+      "to": "dagpipe.collect.arc.service_snapshot,arc.notification_actions,arc.session_open_request,arc.notification_pulse",
+      "arc_id": "arc.service_snapshot"
+    },
+    {
+      "from": "project_notification_actions",
+      "to": "dagpipe.collect.arc.service_snapshot,arc.notification_actions,arc.session_open_request,arc.notification_pulse",
+      "arc_id": "arc.notification_actions"
+    },
+    {
+      "from": "handle_session_deep_link",
+      "to": "dagpipe.collect.arc.service_snapshot,arc.notification_actions,arc.session_open_request,arc.notification_pulse",
+      "arc_id": "arc.session_open_request"
+    },
+    {
+      "from": "pulse_stopped_session",
+      "to": "dagpipe.collect.arc.service_snapshot,arc.notification_actions,arc.session_open_request,arc.notification_pulse",
+      "arc_id": "arc.notification_pulse"
+    }
   ],
   "outputs": [
-    "arc.service_snapshot",
-    "arc.notification_actions",
-    "arc.session_open_request",
-    "arc.notification_pulse"
+    "arc.result"
   ]
 }

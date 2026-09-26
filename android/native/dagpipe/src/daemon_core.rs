@@ -70,13 +70,21 @@ fn run_request_run(
         .and_then(Value::as_str)
         .unwrap_or("attempt")
         .to_string();
-    let inputs = request
+    let mut inputs = request
         .get("inputs")
         .and_then(Value::as_object)
         .cloned()
         .unwrap_or_default()
         .into_iter()
         .collect::<HashMap<String, Value>>();
+    let graph_json = if graph_id == "daemon.mirror_publish" {
+        MIRROR_GRAPH_JSON
+    } else {
+        CONTROL_GRAPH_JSON
+    };
+    if let Ok(graph_value) = serde_json::from_str::<Value>(graph_json) {
+        crate::sese_core::wrap_request_inputs(&graph_value, &mut inputs);
+    }
     let compiled = if graph_id == "daemon.mirror_publish" {
         mirror_compiled()
     } else {
@@ -102,8 +110,7 @@ fn run_request_run(
     let runtime = Runtime::new(capabilities);
     match runtime.run(compiled, identity, inputs, &Cancellation::default()) {
         Ok(result) => {
-            let output = result
-                .outputs
+            let output = crate::sese_core::unwrap_result_outputs(&result.outputs)
                 .get(output_arc)
                 .map(|arc| arc.payload.clone())
                 .unwrap_or(Value::Null);
@@ -147,6 +154,7 @@ fn registry() -> Registry {
     register!(ControlGatewayAuthenticate);
     register!(ControlCenterRoute);
     register!(ControlOwnerDispatch);
+    crate::sese_core::register_sese_operators(&mut registry);
     registry
 }
 

@@ -2,55 +2,208 @@
   "id": "daemon.attachment_delivery",
   "version": "0.1",
   "inputs": [
-    { "id": "arc.attachment_delivery_request", "schema": "Object" },
-    { "id": "arc.attachment_policy", "schema": "Object" }
+    {
+      "id": "arc.request",
+      "schema": "Object"
+    }
   ],
   "nodes": [
+    {
+      "id": "dagpipe.extract.arc.attachment_delivery_request",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.attachment_delivery_request",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.attachment_policy",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.attachment_policy",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
     {
       "id": "validate_attachment_request",
       "operator": "daemon.attachment_delivery.validate",
       "operator_version": "0.1",
-      "inputs": ["arc.attachment_delivery_request", "arc.attachment_policy"],
-      "output": { "id": "arc.attachment_validation", "schema": "Object" },
-      "input_selector": { "include": [], "exclude": [], "predicate": null },
-      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "inputs": [
+        "arc.attachment_delivery_request",
+        "arc.attachment_policy"
+      ],
+      "output": {
+        "id": "arc.attachment_validation",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
       "iterator": "Whole"
     },
     {
       "id": "enqueue_attachment",
       "operator": "daemon.attachment_delivery.enqueue",
       "operator_version": "0.1",
-      "inputs": ["arc.attachment_validation"],
-      "output": { "id": "arc.attachment_enqueued", "schema": "Object" },
-      "input_selector": { "include": [], "exclude": [], "predicate": null },
-      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "inputs": [
+        "arc.attachment_validation"
+      ],
+      "output": {
+        "id": "arc.attachment_enqueued",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
       "iterator": "Whole"
     },
     {
       "id": "dispatch_attachment",
       "operator": "daemon.attachment_delivery.dispatch",
       "operator_version": "0.1",
-      "inputs": ["arc.attachment_enqueued"],
-      "output": { "id": "arc.attachment_receipt", "schema": "Object" },
-      "input_selector": { "include": [], "exclude": [], "predicate": null },
-      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "inputs": [
+        "arc.attachment_enqueued"
+      ],
+      "output": {
+        "id": "arc.attachment_receipt",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
       "iterator": "Whole"
     },
     {
       "id": "publish_attachment_receipt",
       "operator": "daemon.attachment_delivery.publish_receipt",
       "operator_version": "0.1",
-      "inputs": ["arc.attachment_receipt"],
-      "output": { "id": "arc.attachment_delivery_result", "schema": "Object" },
-      "input_selector": { "include": [], "exclude": [], "predicate": null },
-      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "inputs": [
+        "arc.attachment_receipt"
+      ],
+      "output": {
+        "id": "arc.attachment_delivery_result",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.collect.arc.attachment_delivery_result",
+      "operator": "dagpipe.result.collect",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.attachment_delivery_result"
+      ],
+      "output": {
+        "id": "arc.result",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
       "iterator": "Whole"
     }
   ],
   "edges": [
-    { "from": "validate_attachment_request", "to": "enqueue_attachment", "arc_id": "arc.attachment_validation" },
-    { "from": "enqueue_attachment", "to": "dispatch_attachment", "arc_id": "arc.attachment_enqueued" },
-    { "from": "dispatch_attachment", "to": "publish_attachment_receipt", "arc_id": "arc.attachment_receipt" }
+    {
+      "from": "validate_attachment_request",
+      "to": "enqueue_attachment",
+      "arc_id": "arc.attachment_validation"
+    },
+    {
+      "from": "enqueue_attachment",
+      "to": "dispatch_attachment",
+      "arc_id": "arc.attachment_enqueued"
+    },
+    {
+      "from": "dispatch_attachment",
+      "to": "publish_attachment_receipt",
+      "arc_id": "arc.attachment_receipt"
+    },
+    {
+      "from": "dagpipe.extract.arc.attachment_delivery_request",
+      "to": "validate_attachment_request",
+      "arc_id": "arc.attachment_delivery_request"
+    },
+    {
+      "from": "dagpipe.extract.arc.attachment_policy",
+      "to": "validate_attachment_request",
+      "arc_id": "arc.attachment_policy"
+    },
+    {
+      "from": "publish_attachment_receipt",
+      "to": "dagpipe.collect.arc.attachment_delivery_result",
+      "arc_id": "arc.attachment_delivery_result"
+    }
   ],
-  "outputs": ["arc.attachment_delivery_result"]
+  "outputs": [
+    "arc.result"
+  ]
 }
