@@ -16,7 +16,7 @@ import type { TerminalSession, TerminalTransportConnection } from '../src/server
 import type { ServerMessage } from '../src/lib/types';
 
 const EXPECTED_DAGPIPE_SHA256 =
-  '6bcc3533b1a20e192714c7b98c061ddeb2d7c22ad5401deddea34654ac7ec9f3';
+  '96a64540406fadbd62f7cdbd0599a0b554d9c7f8f90792befdd682f32b94b7a8';
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
