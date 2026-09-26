@@ -129,8 +129,7 @@ fn upload_segment_ack_completes_transfer() {
         "execution_id": "phase3-upload",
         "attempt_id": "1",
         "inputs": {
-            // segmentIndex 7 is the 8th chunk, matching the TS upload window.
-            "arc.upload_intent": { "uploadId": "up-1", "segmentIndex": 7, "data": "abc" },
+            "arc.upload_intent": { "uploadId": "up-1", "segmentIndex": 0, "totalChunks": 1, "data": "abc" },
             "arc.transfer_policy": { "allowUpload": true },
         },
     }));
@@ -144,8 +143,7 @@ fn download_segment_ack_completes_transfer() {
         "execution_id": "phase3-download",
         "attempt_id": "1",
         "inputs": {
-            // segmentIndex 7 is the 8th chunk in one native write batch.
-            "arc.download_intent": { "downloadId": "dl-1", "path": "/tmp/a.txt", "chunk": "abc", "segmentIndex": 7 },
+            "arc.download_intent": { "downloadId": "dl-1", "path": "/tmp/a.txt", "chunk": "abc", "segmentIndex": 0, "totalChunks": 1 },
             "arc.transfer_policy": { "allowDownload": true },
         },
     }));
@@ -154,12 +152,26 @@ fn download_segment_ack_completes_transfer() {
 }
 
 #[test]
-fn upload_ack_stays_in_progress_below_ts_window_threshold() {
+fn upload_ack_completes_only_on_exact_final_total_chunks() {
+    let result = run_upload(json!({
+        "execution_id": "phase3-upload-multi-window",
+        "attempt_id": "1",
+        "inputs": {
+            "arc.upload_intent": { "uploadId": "up-mw", "segmentIndex": 11, "totalChunks": 12, "data": "abc" },
+            "arc.transfer_policy": { "allowUpload": true },
+        },
+    }));
+    assert_eq!(result["ok"], true);
+    assert_eq!(result["outputs"]["arc.upload_complete"]["complete"], true);
+}
+
+#[test]
+fn upload_ack_stays_in_progress_before_exact_total_chunks() {
     let result = run_upload(json!({
         "execution_id": "phase3-upload-in-progress",
         "attempt_id": "1",
         "inputs": {
-            "arc.upload_intent": { "uploadId": "up-2", "segmentIndex": 0, "data": "abc" },
+            "arc.upload_intent": { "uploadId": "up-2", "segmentIndex": 7, "totalChunks": 12, "data": "abc" },
             "arc.transfer_policy": { "allowUpload": true },
         },
     }));
@@ -172,12 +184,26 @@ fn upload_ack_stays_in_progress_below_ts_window_threshold() {
 }
 
 #[test]
-fn download_ack_stays_in_progress_below_ts_batch_threshold() {
+fn download_ack_completes_only_on_exact_final_total_chunks() {
+    let result = run_download(json!({
+        "execution_id": "phase3-download-multi-batch",
+        "attempt_id": "1",
+        "inputs": {
+            "arc.download_intent": { "downloadId": "dl-mb", "path": "/tmp/a.txt", "chunk": "abc", "segmentIndex": 15, "totalChunks": 16 },
+            "arc.transfer_policy": { "allowDownload": true },
+        },
+    }));
+    assert_eq!(result["ok"], true);
+    assert_eq!(result["outputs"]["arc.download_complete"]["complete"], true);
+}
+
+#[test]
+fn download_ack_stays_in_progress_before_exact_total_chunks() {
     let result = run_download(json!({
         "execution_id": "phase3-download-in-progress",
         "attempt_id": "1",
         "inputs": {
-            "arc.download_intent": { "downloadId": "dl-2", "path": "/tmp/a.txt", "chunk": "abc", "segmentIndex": 0 },
+            "arc.download_intent": { "downloadId": "dl-2", "path": "/tmp/a.txt", "chunk": "abc", "segmentIndex": 7, "totalChunks": 16 },
             "arc.transfer_policy": { "allowDownload": true },
         },
     }));
@@ -245,6 +271,23 @@ fn attachment_rejects_malformed_id_like_ts_validate_attachment_id() {
         },
     }));
     assert_eq!(result["ok"], false);
+}
+
+#[test]
+fn attachment_accepts_uppercase_prefix_like_ts_validate_attachment_id() {
+    let result = run_attachment(json!({
+        "execution_id": "phase3-attachment-uppercase-id",
+        "attempt_id": "1",
+        "inputs": {
+            "arc.attachment_delivery_request": { "attachmentId": "ATT_12345678-1234-1234-1234-123456789abc", "targetDeviceId": "dev-1" },
+            "arc.attachment_policy": { "allowDelivery": true },
+        },
+    }));
+    assert_eq!(result["ok"], true);
+    assert_eq!(
+        result["outputs"]["arc.attachment_delivery_result"]["state"],
+        "published"
+    );
 }
 
 #[test]

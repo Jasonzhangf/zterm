@@ -288,25 +288,23 @@ describe('DAGpipe Phase2-8 black-box parity and smoke with TypeScript owners', (
     }))).toThrow(/denied by permission policy/);
   });
 
-  it('Phase3 upload/download: Rust ack matches the TS window and native batch contract', () => {
-    // TS oracle: the shared throughput contract says an upload window can send
-    // up to FILE_TRANSFER_UPLOAD_WINDOW_CHUNKS chunks before it needs progress.
+  it('Phase3 upload/download: Rust ack completes only at exact total chunks', () => {
+    // TS oracle: the shared throughput contract only bounds in-flight chunks
+    // and native write batches; completion is the exact final chunk.
     expect(FILE_TRANSFER_UPLOAD_WINDOW_CHUNKS).toBe(8);
     expect(FILE_TRANSFER_NATIVE_WRITE_BATCH_CHUNKS).toBe(8);
 
-    // Exercise below-boundary, boundary, and above-boundary indices. The TS
-    // contract uses the window for backpressure; Rust mirrors that threshold
-    // while retaining the segment index in its ack projection.
-    for (const segmentIndex of [
-      0,
-      FILE_TRANSFER_UPLOAD_WINDOW_CHUNKS - 2,
-      FILE_TRANSFER_UPLOAD_WINDOW_CHUNKS - 1,
-      FILE_TRANSFER_UPLOAD_WINDOW_CHUNKS + 1,
+    for (const [segmentIndex, totalChunks] of [
+      [0, 1],
+      [7, 12],
+      [11, 12],
+      [23, 24],
     ]) {
-      const upload = outputs(runPhase3Upload(phaseRequest(`parity-phase3-upload-${segmentIndex}`, {
+      const upload = outputs(runPhase3Upload(phaseRequest(`parity-phase3-upload-${segmentIndex}-${totalChunks}`, {
         'arc.upload_intent': {
           uploadId: 'up-1',
           segmentIndex,
+          totalChunks,
           data: 'abc',
         },
         'arc.transfer_policy': { allowUpload: true },
@@ -314,35 +312,36 @@ describe('DAGpipe Phase2-8 black-box parity and smoke with TypeScript owners', (
       expect(upload['arc.upload_complete']).toMatchObject({
         uploadId: 'up-1',
         segmentIndex,
-        complete: segmentIndex + 1 >= FILE_TRANSFER_UPLOAD_WINDOW_CHUNKS,
-        state: segmentIndex + 1 >= FILE_TRANSFER_UPLOAD_WINDOW_CHUNKS
-          ? 'complete'
-          : 'in-progress',
+        totalChunks,
+        windowChunks: FILE_TRANSFER_UPLOAD_WINDOW_CHUNKS,
+        complete: segmentIndex + 1 === totalChunks,
+        state: segmentIndex + 1 === totalChunks ? 'complete' : 'in-progress',
       });
     }
 
-    for (const segmentIndex of [
-      0,
-      FILE_TRANSFER_NATIVE_WRITE_BATCH_CHUNKS - 2,
-      FILE_TRANSFER_NATIVE_WRITE_BATCH_CHUNKS - 1,
-      FILE_TRANSFER_NATIVE_WRITE_BATCH_CHUNKS + 1,
+    for (const [segmentIndex, totalChunks] of [
+      [0, 1],
+      [7, 16],
+      [15, 16],
+      [23, 24],
     ]) {
-      const download = outputs(runPhase3Download(phaseRequest(`parity-phase3-download-${segmentIndex}`, {
+      const download = outputs(runPhase3Download(phaseRequest(`parity-phase3-download-${segmentIndex}-${totalChunks}`, {
         'arc.download_intent': {
           downloadId: 'dl-1',
           path: '/tmp/a.txt',
           chunk: 'abc',
           segmentIndex,
+          totalChunks,
         },
         'arc.transfer_policy': { allowDownload: true },
       })));
       expect(download['arc.download_complete']).toMatchObject({
         downloadId: 'dl-1',
         segmentIndex,
-        complete: segmentIndex + 1 >= FILE_TRANSFER_NATIVE_WRITE_BATCH_CHUNKS,
-        state: segmentIndex + 1 >= FILE_TRANSFER_NATIVE_WRITE_BATCH_CHUNKS
-          ? 'complete'
-          : 'in-progress',
+        totalChunks,
+        batchChunks: FILE_TRANSFER_NATIVE_WRITE_BATCH_CHUNKS,
+        complete: segmentIndex + 1 === totalChunks,
+        state: segmentIndex + 1 === totalChunks ? 'complete' : 'in-progress',
       });
     }
     expect(() => runPhase3Download(phaseRequest('parity-phase3-download-reject', {
@@ -353,10 +352,12 @@ describe('DAGpipe Phase2-8 black-box parity and smoke with TypeScript owners', (
 
   it('Phase3 attachment: Rust and TS agree on valid and malformed attachment ids', () => {
     const validAttachmentId = 'att_12345678-1234-1234-1234-123456789abc';
+    const uppercaseAttachmentId = 'ATT_12345678-1234-1234-1234-123456789abc';
     const invalidAttachmentId = 'att-1';
 
     // TS owner is the id validation oracle for real UUIDs.
     expect(validateAttachmentId(validAttachmentId)).toBe(validAttachmentId);
+    expect(validateAttachmentId(uppercaseAttachmentId)).toBe(uppercaseAttachmentId);
     expect(() => validateAttachmentId(invalidAttachmentId)).toThrow(/invalid attachment id/);
 
     const result = outputs(runPhase3Attachment(phaseRequest('parity-phase3-attachment', {
@@ -368,6 +369,15 @@ describe('DAGpipe Phase2-8 black-box parity and smoke with TypeScript owners', (
       receipt: { state: 'delivered' },
     });
     expect(result['arc.attachment_delivery_result']).not.toHaveProperty('consumed');
+
+    const uppercaseResult = outputs(runPhase3Attachment(phaseRequest('parity-phase3-attachment-uppercase-id', {
+      'arc.attachment_delivery_request': { attachmentId: uppercaseAttachmentId, targetDeviceId: 'dev-1' },
+      'arc.attachment_policy': { allowDelivery: true },
+    })));
+    expect(uppercaseResult['arc.attachment_delivery_result']).toMatchObject({
+      state: 'published',
+      receipt: { state: 'delivered' },
+    });
 
     expect(() => runPhase3Attachment(phaseRequest('parity-phase3-attachment-invalid-id', {
       'arc.attachment_delivery_request': { attachmentId: invalidAttachmentId, targetDeviceId: 'dev-1' },
