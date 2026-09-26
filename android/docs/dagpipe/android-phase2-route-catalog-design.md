@@ -116,10 +116,14 @@ stateDiagram-v2
 
 - 入口：`arc.request`（唯一输入）。
 - 出口：`arc.result`（唯一输出）。
-- 两条独立业务分支在 collect 汇合：
-  - 建立面：物理连接接受 -> mux 协商 -> channel 注册 -> body 订阅绑定 -> session catalog 构建 -> idle facts 发布。
-  - 释放面：channel 移除请求 -> channel 注销 -> body 订阅释放。
-- 建立面与释放面之间通过 channel registry 保持 SESE；任一失败路径都显式进入失败终点，不跨节点回边。
+- 一个请求内描述同一个 daemon 连接通道/catalog 生命周期，建立与释放在同一图、同一执行内共同收敛：
+  1. 物理连接接受 -> mux 协商 -> channel 注册。
+  2. channel 注册同时流向 body 订阅绑定、session catalog 构建与 channel 注销。
+  3. body 订阅绑定后构建 session catalog，再发布 idle facts。
+  4. channel 注销完成后释放 body 订阅。
+  5. `dagpipe.collect` 要求 `arc.session_catalog`、`arc.idle_facts` 与 `arc.subscriber_released` 三个输出同时到达；这不是独立 release 分支，而是同一次生命周期的收口。
+  - catalog-only 查询可以不带移除请求；此时 channel 注销节点输出显式 `no-removal`，订阅释放节点仍产出 released 收口，保证同一次执行仍满足 SESE。
+- 建立与释放之间通过 channel registry 保持 SESE；任一失败路径都显式进入失败终点，不跨节点回边。
 - session catalog 只由 daemon 侧 backend/channel/subscriber 事实构建，不依赖客户端活跃状态。
 
 ## 5. 变更边界

@@ -67,6 +67,8 @@ fn make_registry() -> Registry {
     register!(DaemonBindBodySubscription);
     register!(DaemonBuildSessionCatalog);
     register!(DaemonPublishIdleFacts);
+    register!(DaemonUnregisterChannel);
+    register!(DaemonReleaseBodySubscription);
     crate::sese_core::register_sese_operators(&mut registry);
     registry
 }
@@ -542,6 +544,76 @@ impl Operator for DaemonBindBodySubscription {
             "muxSessionId": get_str(&registry, "muxSessionId"),
             "bodySubscribed": true,
             "state": "bound",
+        }))
+    }
+}
+
+struct DaemonUnregisterChannel;
+
+impl Operator for DaemonUnregisterChannel {
+    fn name(&self) -> &'static str {
+        "daemon.channel_mux.unregister"
+    }
+
+    fn version(&self) -> &'static str {
+        "0.1"
+    }
+
+    fn output_type(&self) -> ValueType {
+        ValueType::Object
+    }
+
+    fn execute(&self, input: Value, _context: &OperatorContext) -> Result<Value, String> {
+        let values = inputs(input);
+        let registry = obj(values.first().cloned().unwrap_or_default());
+        let removal = obj(values.get(1).cloned().unwrap_or_default());
+        let removed = removal
+            .get("removedChannelId")
+            .or_else(|| removal.get("channelId"))
+            .cloned()
+            .unwrap_or(Value::Null);
+        if removed.is_null() {
+            Ok(json!({
+                "muxSessionId": get_str(&registry, "muxSessionId"),
+                "removedChannelId": Value::Null,
+                "state": "no-removal",
+            }))
+        } else {
+            Ok(json!({
+                "muxSessionId": get_str(&registry, "muxSessionId"),
+                "removedChannelId": removed,
+                "state": "unregistered",
+            }))
+        }
+    }
+}
+
+struct DaemonReleaseBodySubscription;
+
+impl Operator for DaemonReleaseBodySubscription {
+    fn name(&self) -> &'static str {
+        "daemon.transport_subscriber.release"
+    }
+
+    fn version(&self) -> &'static str {
+        "0.1"
+    }
+
+    fn output_type(&self) -> ValueType {
+        ValueType::Object
+    }
+
+    fn execute(&self, input: Value, _context: &OperatorContext) -> Result<Value, String> {
+        let removed = obj(inputs(input).first().cloned().unwrap_or_default());
+        let removed_channel = removed
+            .get("removedChannelId")
+            .cloned()
+            .unwrap_or(Value::Null);
+        Ok(json!({
+            "muxSessionId": get_str(&removed, "muxSessionId"),
+            "removedChannelId": removed_channel,
+            "bodySubscribed": false,
+            "state": "released",
         }))
     }
 }

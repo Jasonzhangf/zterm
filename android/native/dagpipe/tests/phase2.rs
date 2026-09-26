@@ -80,13 +80,18 @@ fn daemon_connection_builds_catalog_and_publishes_idle_facts() {
             "arc.physical_connection": { "connectionId": "conn-1" },
             "arc.mux_capabilities": { "muxEnabled": true },
             "arc.session_catalog_request": { "sessionNames": [{ "sessionId": "s1" }] },
-            "arc.idle_facts_request": {}
+            "arc.idle_facts_request": {},
+            "arc.channel_removal_request": { "removedChannelId": "s1" }
         }
     });
     let result = run_daemon_connection(request);
     assert_eq!(result["ok"], true);
     assert_eq!(result["outputs"]["arc.session_catalog"]["state"], "ready");
     assert_eq!(result["outputs"]["arc.idle_facts"]["state"], "published");
+    assert_eq!(
+        result["outputs"]["arc.subscriber_released"]["state"],
+        "released"
+    );
 }
 
 #[test]
@@ -98,7 +103,8 @@ fn daemon_connection_requires_mux_enabled() {
             "arc.physical_connection": { "connectionId": "conn-1" },
             "arc.mux_capabilities": { "muxEnabled": false },
             "arc.session_catalog_request": { "sessionNames": [] },
-            "arc.idle_facts_request": {}
+            "arc.idle_facts_request": {},
+            "arc.channel_removal_request": { "removedChannelId": "s1" }
         }
     });
     let result = run_daemon_connection(request);
@@ -107,4 +113,53 @@ fn daemon_connection_requires_mux_enabled() {
         .as_str()
         .unwrap_or("")
         .contains("muxEnabled"));
+}
+
+#[test]
+fn daemon_connection_releases_body_subscription_after_channel_removal() {
+    let request = json!({
+        "execution_id": "phase2-daemon-removal",
+        "attempt_id": "1",
+        "inputs": {
+            "arc.physical_connection": { "connectionId": "conn-1" },
+            "arc.mux_capabilities": { "muxEnabled": true },
+            "arc.session_catalog_request": { "sessionNames": [{ "sessionId": "s1" }] },
+            "arc.idle_facts_request": {},
+            "arc.channel_removal_request": { "removedChannelId": "s1" }
+        }
+    });
+    let result = run_daemon_connection(request);
+    assert_eq!(result["ok"], true);
+    assert_eq!(
+        result["outputs"]["arc.subscriber_released"]["bodySubscribed"],
+        false
+    );
+    assert_eq!(
+        result["outputs"]["arc.subscriber_released"]["removedChannelId"],
+        "s1"
+    );
+}
+
+#[test]
+fn daemon_connection_catalog_without_removal_is_explicit_noop() {
+    let request = json!({
+        "execution_id": "phase2-daemon-no-removal",
+        "attempt_id": "1",
+        "inputs": {
+            "arc.physical_connection": { "connectionId": "conn-1" },
+            "arc.mux_capabilities": { "muxEnabled": true },
+            "arc.session_catalog_request": { "sessionNames": [{ "sessionId": "s1" }] },
+            "arc.idle_facts_request": {}
+        }
+    });
+    let result = run_daemon_connection(request);
+    assert_eq!(result["ok"], true);
+    assert_eq!(
+        result["outputs"]["arc.subscriber_released"]["state"],
+        "released"
+    );
+    assert_eq!(
+        result["outputs"]["arc.subscriber_released"]["removedChannelId"],
+        serde_json::Value::Null
+    );
 }
