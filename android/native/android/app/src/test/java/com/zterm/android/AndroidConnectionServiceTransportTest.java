@@ -593,6 +593,7 @@ public final class AndroidConnectionServiceTransportTest {
             .signalUrl("wss://relay.example/client")
             .relayDeviceId("android-1")
             .authToken("token-a")
+            .signalToken("relay-token")
             .turnUrl("turn:relay.example:3478?transport=udp")
             .turnUsername("ztermturn")
             .turnCredential("turn-pass")
@@ -615,7 +616,34 @@ public final class AndroidConnectionServiceTransportTest {
             String.valueOf(candidateField(direct, "signalUrl")).contains("hostId=relay-1"));
         assertTrue("rtc-direct signal must include device identity",
             String.valueOf(candidateField(direct, "signalUrl")).contains("deviceId=android-1"));
-        assertTrue("rtc-direct signal must include auth token",
+        assertTrue("rtc-direct signal must use relay signal token, not daemon auth token",
+            String.valueOf(candidateField(direct, "signalUrl")).contains("token=relay-token"));
+        assertFalse("rtc-direct signal must not use daemon auth token for relay signal",
+            String.valueOf(candidateField(direct, "signalUrl")).contains("token=token-a"));
+        assertTrue("rtc-relay signal must use relay signal token, not daemon auth token",
+            String.valueOf(candidateField(relay, "signalUrl")).contains("token=relay-token"));
+        assertFalse("rtc-relay signal must not use daemon auth token for relay signal",
+            String.valueOf(candidateField(relay, "signalUrl")).contains("token=token-a"));
+    }
+
+    @Test
+    public void rtcDirectSignalKeepsDaemonAuthTokenForNonRelaySignalUrl()
+        throws Exception {
+        AndroidConnectionService service = new AndroidConnectionService();
+        AndroidConnectionServiceTarget target = new AndroidConnectionServiceTarget.Builder()
+            .targetKey("target-rtc-direct-signal-token")
+            .bridgeHost("signal.example")
+            .bridgePort(3333)
+            .relayHostId("relay-1")
+            .signalUrl("wss://signal.example/rtc")
+            .relayDeviceId("android-1")
+            .authToken("token-a")
+            .build();
+
+        Object runtime = newRuntime(service, target);
+        List<?> candidates = buildCandidates(runtime);
+        Object direct = candidateByPath(candidates, "rtc-direct");
+        assertTrue("rtc-direct non-relay signal must keep daemon auth token",
             String.valueOf(candidateField(direct, "signalUrl")).contains("token=token-a"));
     }
 

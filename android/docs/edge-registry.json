@@ -4684,6 +4684,11 @@
     },
     {
       "from_module": "client.connection_service",
+      "to_module": "shared.connection_types",
+      "status": "active"
+    },
+    {
+      "from_module": "client.connection_service",
       "to_module": "client.daemon_connection",
       "status": "active"
     },

@@ -25,6 +25,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -67,8 +69,8 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
     private PeerConnection peerConnection;
     private DataChannel dataChannel;
     private volatile DataChannel.State dataChannelState = DataChannel.State.CONNECTING;
-    private boolean disposed;
-    private boolean openPublished;
+    private volatile boolean disposed;
+    private volatile boolean openPublished;
     private ScheduledFuture<?> stabilityFuture;
     private static final int MAX_PENDING_REMOTE_ICE_CANDIDATES = 64;
     private final List<IceCandidate> pendingRemoteIceCandidates = new ArrayList<>();
@@ -277,6 +279,9 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
                     return;
                 }
                 String sdp = payload.optString("sdp", "");
+                if (!isRelay()) {
+                    sdp = stripDirectSdp(sdp);
+                }
                 peerConnection.setRemoteDescription(answerObserver,
                     new SessionDescription(SessionDescription.Type.ANSWER, sdp));
                 flushPendingIceCandidates();
@@ -635,15 +640,35 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
         return !isTailscaleIceCandidate(candidateSdp);
     }
 
+    private static final Pattern IPV4_CANDIDATE = Pattern.compile("\\b(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\b");
+
     static boolean isTailscaleIceCandidate(String candidateSdp) {
-        return candidateSdp.contains("100.6")
-            || candidateSdp.contains("100.7")
-            || candidateSdp.contains("100.8")
-            || candidateSdp.contains("100.9")
-            || candidateSdp.contains("100.10")
-            || candidateSdp.contains("100.11")
-            || candidateSdp.contains("100.12")
-            || candidateSdp.contains("fd7a:115c:a1e0:");
+        if (candidateSdp == null) {
+            return false;
+        }
+        if (candidateSdp.contains("fd7a:115c:a1e0:")) {
+            return true;
+        }
+        Matcher matcher = IPV4_CANDIDATE.matcher(candidateSdp);
+        while (matcher.find()) {
+            int first = parseOctet(matcher.group(1));
+            int second = parseOctet(matcher.group(2));
+            if (first == 100 && second >= 64 && second <= 127) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static int parseOctet(String value) {
+        if (value.length() > 3) {
+            return -1;
+        }
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException error) {
+            return -1;
+        }
     }
 
     static String iceCandidateType(String candidateSdp) {

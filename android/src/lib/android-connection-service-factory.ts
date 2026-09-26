@@ -31,6 +31,11 @@ export function buildAndroidConnectionServiceTarget(
     || settings?.traversalRelay?.wsClientUrl?.trim()
     || settings?.signalUrl?.trim()
     || '';
+  const signalFromRelay = Boolean(settings?.traversalRelay?.wsClientUrl?.trim())
+    && !host.signalUrl?.trim();
+  const signalToken = signalFromRelay
+    ? settings?.traversalRelay?.accessToken?.trim() || ''
+    : '';
   const relayDeviceId = host.relayDeviceId?.trim()
     || settings?.traversalRelay?.deviceId?.trim()
     || '';
@@ -48,6 +53,7 @@ export function buildAndroidConnectionServiceTarget(
     ...(host.ipv6Host ? { ipv6Host: host.ipv6Host } : {}),
     ...(host.ipv4Host ? { ipv4Host: host.ipv4Host } : {}),
     ...(signalUrl ? { signalUrl } : {}),
+    ...(signalToken ? { signalToken } : {}),
     ...(relayDeviceId ? { relayDeviceId } : {}),
     ...(turnUrl ? { turnUrl } : {}),
     ...(turnUsername ? { turnUsername } : {}),

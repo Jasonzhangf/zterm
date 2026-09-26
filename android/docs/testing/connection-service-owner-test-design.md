@@ -69,7 +69,7 @@ Foreground resume is a data-refresh trigger only. On Android it may refresh the 
 
 `AndroidConnectionServiceTest.java`, `AndroidConnectionServiceTransportTest.java`, and `AndroidConnectionServicePluginTest.java` must use fake clock/handler and fake socket seams to cover heartbeat survival across Activity detach, three-miss retirement, auth stop, backoff scheduling, stale generation rejection, manual route command validation, mux-hello retry before mux-ready, and atomic pending-frame consumption with FIFO continuation.
 
-The native WebRTC backend gate must additionally cover offer/answer, early ICE ordering, direct versus relay ICE policy, ordered reliable DataChannel text/binary frames, exact generation fencing, close/error cleanup, and the negative guarantee that the backend cannot schedule route retry or create mux/channel state itself.
+The native WebRTC backend gate must additionally cover offer/answer, early ICE ordering, direct versus relay ICE policy, ordered reliable DataChannel text/binary frames, exact generation fencing, close/error cleanup, and the negative guarantee that the backend cannot schedule route retry or create mux/channel state itself. The candidate gate must also verify relay signal URLs carry the Relay access token as `signalToken` while non-relay signal URLs keep the daemon `authToken`, and that direct-path `rtc-answer` SDP is stripped of host and Tailscale ICE candidates before `setRemoteDescription`.
 
 ### Existing regression gates
 

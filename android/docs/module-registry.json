@@ -3392,6 +3392,7 @@
         "native/android/app/src/main/java/com/zterm/android/AndroidConnectionCommand.java",
         "native/android/app/src/main/java/com/zterm/android/AndroidConnectionServiceRoutePolicy.java",
         "native/android/app/src/main/java/com/zterm/android/AndroidConnectionServiceTarget.java",
+        "native/android/app/src/main/java/com/zterm/android/AndroidRtcTransportBackend.java",
         "docs/testing/android-notification-session-actions-test-design.md"
       ]
     }

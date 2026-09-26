@@ -2,12 +2,14 @@ package com.zterm.android;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 import org.json.JSONArray;
 import org.junit.Test;
 import org.webrtc.DataChannel;
 import org.webrtc.PeerConnection;
+import org.webrtc.SessionDescription;
 import okhttp3.WebSocket;
 
 import java.lang.reflect.Field;
@@ -17,6 +19,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 public final class AndroidRtcTransportBackendTest {
     private static final class RecordingListener
@@ -201,5 +204,69 @@ public final class AndroidRtcTransportBackendTest {
         assertTrue(stripped.contains("typ prflx"));
         assertFalse(stripped.contains("192.0.2.1"));
         assertFalse(stripped.contains("100.64.0.2"));
+    }
+
+    @Test
+    public void directAnswerSdpStripsHostAndTailscaleCandidatesBeforeRemoteDescription()
+        throws Exception {
+        RecordingListener listener = new RecordingListener();
+        AndroidRtcTransportBackend backend = new AndroidRtcTransportBackend(
+            null, null, "wss://relay.example/client", new JSONArray(), "all",
+            true, 1_000L, listener);
+        AtomicReference<SessionDescription> remoteDescription = new AtomicReference<>();
+        PeerConnection fakePeer = (PeerConnection) Proxy.newProxyInstance(
+            PeerConnection.class.getClassLoader(),
+            new Class<?>[] { PeerConnection.class },
+            (proxy, method, args) -> {
+                if ("setRemoteDescription".equals(method.getName())) {
+                    remoteDescription.set((SessionDescription) args[1]);
+                    return null;
+                }
+                if ("getRemoteDescription".equals(method.getName())) {
+                    return new SessionDescription(SessionDescription.Type.ANSWER, "v=0");
+                }
+                if ("toString".equals(method.getName())) {
+                    return "fake-peer-connection";
+                }
+                if (method.getReturnType() == boolean.class) {
+                    return false;
+                }
+                if (method.getReturnType() == int.class) {
+                    return 0;
+                }
+                return null;
+            });
+        Field peerField = AndroidRtcTransportBackend.class
+            .getDeclaredField("peerConnection");
+        peerField.setAccessible(true);
+        peerField.set(backend, fakePeer);
+
+        String sdp = "v=0\r\n"
+            + "a=candidate:1 1 udp 2113937151 192.0.2.1 5000 typ host\r\n"
+            + "a=candidate:2 1 udp 2113937151 100.64.0.2 5000 typ host\r\n"
+            + "a=candidate:3 1 udp 2113937151 203.0.113.1 5000 typ srflx\r\n";
+        String escaped = sdp.replace("\\", "\\\\").replace("\"", "\\\"")
+            .replace("\r", "\\r").replace("\n", "\\n");
+        backend.handleSignalMessage(
+            "{\"type\":\"rtc-answer\",\"payload\":{\"sdp\":\"" + escaped + "\"}}");
+
+        assertNotNull("direct answer must set a remote description", remoteDescription.get());
+        assertFalse("direct answer must strip host candidates",
+            remoteDescription.get().description.contains("192.0.2.1"));
+        assertFalse("direct answer must strip Tailscale candidates",
+            remoteDescription.get().description.contains("100.64.0.2"));
+        assertTrue("direct answer must keep srflx candidates",
+            remoteDescription.get().description.contains("203.0.113.1"));
+        backend.closeQuietly("test");
+    }
+
+    @Test
+    public void tailscaleMatcherRejectsPublicIpv4AndUsesCgnatRange() {
+        assertTrue(AndroidRtcTransportBackend.isTailscaleIceCandidate("candidate:1 1 udp 2113937151 100.64.0.2 5000 typ host"));
+        assertTrue(AndroidRtcTransportBackend.isTailscaleIceCandidate("candidate:1 1 udp 2113937151 100.127.255.255 5000 typ host"));
+        assertTrue(AndroidRtcTransportBackend.isTailscaleIceCandidate("candidate:1 1 udp 2113937151 fd7a:115c:a1e0::1 5000 typ host"));
+        assertFalse(AndroidRtcTransportBackend.isTailscaleIceCandidate("candidate:1 1 udp 2113937151 100.60.22.33 5000 typ host"));
+        assertFalse(AndroidRtcTransportBackend.isTailscaleIceCandidate("candidate:1 1 udp 2113937151 100.128.0.1 5000 typ host"));
+        assertFalse(AndroidRtcTransportBackend.isTailscaleIceCandidate("candidate:1 1 udp 2113937151 2001:db8::1 5000 typ host"));
     }
 }
