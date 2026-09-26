@@ -101,6 +101,29 @@
       "iterator": "Whole"
     },
     {
+      "id": "dagpipe.extract.arc.channel_removal_request",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.channel_removal_request",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
       "id": "accept_physical_connection",
       "operator": "daemon.connection_gateway.accept",
       "operator_version": "0.1",
@@ -243,12 +266,60 @@
       "iterator": "Whole"
     },
     {
-      "id": "dagpipe.collect.arc.session_catalog,arc.idle_facts",
+      "id": "remove_session_channel",
+      "operator": "daemon.channel_mux.unregister",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.channel_registry",
+        "arc.channel_removal_request"
+      ],
+      "output": {
+        "id": "arc.removed_channel",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "release_body_subscription",
+      "operator": "daemon.transport_subscriber.release",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.removed_channel"
+      ],
+      "output": {
+        "id": "arc.subscriber_released",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.collect.arc.session_catalog,arc.idle_facts,arc.subscriber_released",
       "operator": "dagpipe.result.collect",
       "operator_version": "0.1",
       "inputs": [
         "arc.session_catalog",
-        "arc.idle_facts"
+        "arc.idle_facts",
+        "arc.subscriber_released"
       ],
       "output": {
         "id": "arc.result",
@@ -319,14 +390,34 @@
       "arc_id": "arc.idle_facts_request"
     },
     {
+      "from": "dagpipe.extract.arc.channel_removal_request",
+      "to": "remove_session_channel",
+      "arc_id": "arc.channel_removal_request"
+    },
+    {
+      "from": "register_session_channel",
+      "to": "remove_session_channel",
+      "arc_id": "arc.channel_registry"
+    },
+    {
+      "from": "remove_session_channel",
+      "to": "release_body_subscription",
+      "arc_id": "arc.removed_channel"
+    },
+    {
       "from": "build_session_catalog",
-      "to": "dagpipe.collect.arc.session_catalog,arc.idle_facts",
+      "to": "dagpipe.collect.arc.session_catalog,arc.idle_facts,arc.subscriber_released",
       "arc_id": "arc.session_catalog"
     },
     {
       "from": "publish_idle_facts",
-      "to": "dagpipe.collect.arc.session_catalog,arc.idle_facts",
+      "to": "dagpipe.collect.arc.session_catalog,arc.idle_facts,arc.subscriber_released",
       "arc_id": "arc.idle_facts"
+    },
+    {
+      "from": "release_body_subscription",
+      "to": "dagpipe.collect.arc.session_catalog,arc.idle_facts,arc.subscriber_released",
+      "arc_id": "arc.subscriber_released"
     }
   ],
   "outputs": [
