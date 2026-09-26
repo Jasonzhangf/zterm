@@ -481,4 +481,11 @@ describe('zterm daemon service script truth gates', () => {
     expect(script).not.toContain('tmux new-session -d -s "$SESSION_NAME"');
     expect(script).not.toContain('tmux kill-session -t "$SESSION_NAME"');
   });
+
+  it('keeps live mirror diff wired through the DAGpipe bridge instead of TS changed ranges', () => {
+    const serverSource = readFileSync(join(process.cwd(), 'src', 'server', 'server.ts'), 'utf8');
+    expect(serverSource).toContain('mirrorPublishChangedRanges');
+    expect(serverSource).toContain("from './dagpipe-bridge'");
+    expect(serverSource).not.toContain('findChangedIndexedRanges');
+  });
 });

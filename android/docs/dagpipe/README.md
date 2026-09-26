@@ -1,11 +1,9 @@
-# DAGpipe Phase 0: static daemon DAG governance
+# DAGpipe Phase 0 + Phase 1: Android static and Rust-core DAG governance
 
-Scope: static DAG graphs and CLI validation for the daemon-side rewrite target.
-Phase 0 defined the static daemon DAG contracts without executable code.
-Phase 1 adds a Rust crate at `android/native/dagpipe`, registers every Phase 0
-daemon operator, compiles both daemon graphs through `pipeline_runtime`, and
-loads the same operators from the daemon through a thin N-API bridge. It does
-not publish an OTA update by itself.
+Scope: static DAG graphs, CLI validation, and the Android Rust-core parity
+gate. Phase 0 covers graph JSON and CLI validation only. Phase 1 registers the
+Android operators, compiles the approved graphs through `pipeline_runtime`,
+and proves black-box parity before production wiring.
 
 Graphs:
 
@@ -13,40 +11,39 @@ Graphs:
   store -> diff/classify -> buffer publisher plan -> wire frames
 - `daemon-control-dispatch.graph.json` - control gateway -> control center ->
   owner dispatch
+- `android-buffer-render.graph.json` - wire ingress -> frame assembly -> sparse
+  apply / exact repair request -> renderer commit -> DOM projection
+- `android-input-dispatch.graph.json` - committed-text normalization ->
+  reliable input planning -> ordered physical send
+- `android-connection-lifecycle.graph.json` - Relay account login ->
+  device presence -> route resolution -> one daemon-target physical transport
+  -> mux negotiation -> per-session channel open/subscribe -> maintain ->
+  recovery plan
+- `android-buffer-management.graph.json` - per-session head observation ->
+  window planning -> range request dispatch -> response ingest -> sparse merge
+  -> repair ledger -> render scope publication
 
-Validation (requires the locally installed `dagpipe` CLI):
+Phase 2 static graphs:
 
-```sh
-pnpm --dir android run test:dagpipe-phase0
-```
+- `relay-account-peer-route.graph.json`
+- `daemon-connection-channel-catalog.graph.json`
 
-Phase 1 gates (requires the installed `dagpipe` SDK path and a local Rust
-toolchain):
-
-```sh
-pnpm --dir android run test:dagpipe-phase1
-```
-
-The Rust crate resolves `pipeline_runtime` through a repo-local
-`vendor/pipeline_runtime` symlink created by `scripts/build-dagpipe-native.sh`.
-Set `DAGPIPE_SDK_PATH` to override the default SDK location
-(`$HOME/.local/share/dagpipe/sdk`); the build script fails explicitly when the
-SDK directory is missing.
-
-Design slice:
-
-- See `phase0-design-slice.md` for identities, roles, events, state machines,
-  node contracts, and change boundary required by the
-  `dagpipe-runtime` skill.
+Validation:
 
 ```sh
 pnpm --dir android test:dagpipe-phase0
 ```
 
+Phase 1 gate:
+
+```sh
+pnpm --dir android test:dagpipe-phase1
+```
+
 The CLI validates acyclicity, output reachability, and syntactic operator
 version bindings. It is not authoritative for project Operator resolution,
 ARC schema compatibility, or effect capability checks; those remain the SDK
-`compile()` gate and are intentionally deferred to Phase 1.
+`compile()` gate.
 
 Mirror update semantics captured in the DAG:
 
@@ -58,24 +55,24 @@ Mirror update semantics captured in the DAG:
 - refresh range: `compute_changed_ranges` compares the previous canonical
   window against the committed mirror truth; `classify_update` turns that into
   append / rewrite / window-shift / reset / head-only; `plan_refresh` collapses
-  changed ranges into no-hole contiguous spans and applies subscriber pending
-  bounds supplied in `arc.subscriber_facts`. Per-subscriber range count, span,
-  age, and backpressure resync remain owned by `daemon.buffer_publisher`.
+  pending ranges into no-hole contiguous ranges and escalates to full resync
+  when range count, span, age, or backpressure thresholds require it.
 
 Diff policy:
 
 - `arc.diff_policy` is an explicit graph input, not hard-coded operator state.
-  The DAGpipe bridge parity tests use the same pending range/span/age limits
-  that `daemon.buffer_publisher` enforces for subscribers.
+  It configures rewrite handling for TUI apps that update older rows, max
+  changed-span policy, and the full-resync thresholds.
 - The default target is no-hole updates: a publish frame must cover every row
   from `startIndex` through `endIndex - 1`. Sparse holes are not sent.
 - Incoming changed ranges are diff truth only: `daemon.mirror_store.diff`
   returns them unchanged, and the bridge must return exactly the ranges
   computed by `src/server/canonical-buffer.ts#findChangedIndexedRanges`.
   Subscriber pending bounds stay in `daemon.buffer_publisher`.
-- The live daemon mirror range decision remains owned by
-  `src/server/canonical-buffer.ts#findChangedIndexedRanges`; DAGpipe mirror
-  execution is exercised by the parity tests and startup compile gate.
+- The live daemon mirror range decision is routed through
+  `mirrorPublishChangedRanges`/`runMirrorPublish`; the old TS
+  `findChangedIndexedRanges` remains only as the parity/test source contract
+  for the bridge.
 - Configurable rules may decide between tail append, contiguous rewrite span,
   window-shift prefix/tail, or full-window resync.
 
@@ -86,8 +83,8 @@ Diff trigger conditions:
 - Do not run diff on `buffer-head-request` or client read requests.
 - First ready mirror, forced attach refresh, invalid revision lineage, and
   explicit resync requests use full-window output.
-- Subscriber pending range count / span / pending age / transport backpressure
-  may promote the next flush to full-window resync.
+- Range count / span / pending age / transport backpressure may promote the
+  next flush to full-window resync.
 
 State machines:
 
@@ -111,8 +108,38 @@ Roles:
 - `daemon.control_gateway/control_center/control_owner`: control only, no body
   truth.
 
-Acceptance for this phase:
+Android client boundaries frozen by these graphs:
 
+- Relay account login is account-scoped with token-per-login; it never hides
+  saved direct/Tailscale entries and never owns terminal body truth.
+- One stable daemon target owns one physical transport; terminal sessions are
+  logical channels on that transport, not per-session sockets.
+- A session channel failure must not close sibling channels on the same target.
+- Physical transport heartbeat/reconnect/backoff belongs to the connection
+  owner; foreground/background only changes data-refresh cadence.
+- Buffer management is per-session: absolute-row truth, revision epoch, gap
+  repair, and repair ledger stay isolated between sessions.
+- Only `buffer-sync apply` can update local body truth and trigger a body
+  render commit.
+- `client.renderer_window` is the only visible-range owner; the buffer planner
+  consumes declared demand but never derives follow/reading/renderBottomIndex.
+- `client.buffer_frame_assembly` must assemble a chunked authoritative frame
+  into one continuous no-hole payload before sparse apply.
+- A visible gap emits one exact-range `buffer-sync-request`; it does not clear
+  existing absolute-row truth.
+- `client.input_normalizer` is pure committed-text normalization only.
+- `client.reliable_input` owns ordered in-flight/ACK/retry planning and the
+  only client terminal-input queue; transport lifecycle remains outside this
+  graph.
+
+Phase 1 current status:
+
+- Rust crate `android/native/dagpipe` compiles and runs the Android graphs
+  through `pipeline_runtime`.
+- Black-box parity tests run through the N-API bridge and a JNI `.so`.
+- The client production path still needs a non-raw-input thin bridge before
+  Phase 1 is considered runtime-closed.
 - `dagpipe graph validate` passes for both graphs.
 - `dagpipe graph inspect` prints waves and operator bindings for both graphs.
-- No runtime code or dependency change.
+- Runtime is wired through the DAGpipe native bridge and live daemon mirror
+  routing; this phase does not by itself request OTA/APK publish.

@@ -1,0 +1,202 @@
+{
+  "id": "daemon.connection_channel_catalog",
+  "version": "0.1",
+  "inputs": [
+    {
+      "id": "arc.physical_connection",
+      "schema": "Object"
+    },
+    {
+      "id": "arc.mux_capabilities",
+      "schema": "Object"
+    },
+    {
+      "id": "arc.session_catalog_request",
+      "schema": "Object"
+    },
+    {
+      "id": "arc.idle_facts_request",
+      "schema": "Object"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "accept_physical_connection",
+      "operator": "daemon.connection_gateway.accept",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.physical_connection"
+      ],
+      "output": {
+        "id": "arc.accepted_transport",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "negotiate_mux",
+      "operator": "daemon.connection_gateway.negotiate_mux",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.accepted_transport",
+        "arc.mux_capabilities"
+      ],
+      "output": {
+        "id": "arc.mux_ready",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "register_session_channel",
+      "operator": "daemon.channel_mux.register",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.mux_ready"
+      ],
+      "output": {
+        "id": "arc.channel_registry",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "bind_body_subscription",
+      "operator": "daemon.transport_subscriber.bind",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.channel_registry"
+      ],
+      "output": {
+        "id": "arc.body_subscription",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "build_session_catalog",
+      "operator": "daemon.session_catalog.build",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.channel_registry",
+        "arc.body_subscription",
+        "arc.session_catalog_request"
+      ],
+      "output": {
+        "id": "arc.session_catalog",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "publish_idle_facts",
+      "operator": "daemon.session_idle_detection.publish",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.session_catalog",
+        "arc.idle_facts_request"
+      ],
+      "output": {
+        "id": "arc.idle_facts",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    {
+      "from": "accept_physical_connection",
+      "to": "negotiate_mux",
+      "arc_id": "arc.accepted_transport"
+    },
+    {
+      "from": "negotiate_mux",
+      "to": "register_session_channel",
+      "arc_id": "arc.mux_ready"
+    },
+    {
+      "from": "register_session_channel",
+      "to": "bind_body_subscription",
+      "arc_id": "arc.channel_registry"
+    },
+    {
+      "from": "register_session_channel",
+      "to": "build_session_catalog",
+      "arc_id": "arc.channel_registry"
+    },
+    {
+      "from": "bind_body_subscription",
+      "to": "build_session_catalog",
+      "arc_id": "arc.body_subscription"
+    },
+    {
+      "from": "build_session_catalog",
+      "to": "publish_idle_facts",
+      "arc_id": "arc.session_catalog"
+    }
+  ],
+  "outputs": [
+    "arc.session_catalog",
+    "arc.idle_facts"
+  ]
+}

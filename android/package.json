@@ -103,7 +103,8 @@
     "test:workspace:panes": "pnpm exec vitest run src/components/terminal/TerminalHeader.test.tsx src/pages/TerminalPageStageShell.pane-stage.test.tsx src/lib/home-connection-projection.test.ts && pnpm --dir ../packages/shared exec vitest run src/react/pane-profile.test.ts",
     "test:dagpipe-phase0": "node ./scripts/validate-dagpipe-graphs.mjs",
     "test:dagpipe-phase1": "bash ./scripts/run-dagpipe-phase1-tests.sh",
-    "build:dagpipe-native": "bash ./scripts/build-dagpipe-native.sh"
+    "build:dagpipe-native": "bash ./scripts/build-dagpipe-native.sh",
+    "build:dagpipe-android": "bash ./scripts/build-dagpipe-android.sh"
   },
   "dependencies": {
     "@capacitor/android": "^6.2.1",

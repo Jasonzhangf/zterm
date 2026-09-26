@@ -1,0 +1,106 @@
+{
+  "id": "android.input_dispatch",
+  "version": "0.1",
+  "inputs": [
+    {
+      "id": "arc.committed_text",
+      "schema": "Object"
+    },
+    {
+      "id": "arc.input_policy",
+      "schema": "Object"
+    },
+    {
+      "id": "arc.transport_facts",
+      "schema": "Object"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "normalize_input",
+      "operator": "client.input_normalizer.normalize",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.committed_text"
+      ],
+      "output": {
+        "id": "arc.normalized_text",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "plan_input_batch",
+      "operator": "client.reliable_input.plan",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.normalized_text",
+        "arc.input_policy",
+        "arc.transport_facts"
+      ],
+      "output": {
+        "id": "arc.input_batch",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "emit_input",
+      "operator": "client.reliable_input.emit",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.input_batch"
+      ],
+      "output": {
+        "id": "arc.mux_channel_send",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    {
+      "from": "normalize_input",
+      "to": "plan_input_batch",
+      "arc_id": "arc.normalized_text"
+    },
+    {
+      "from": "plan_input_batch",
+      "to": "emit_input",
+      "arc_id": "arc.input_batch"
+    }
+  ],
+  "outputs": [
+    "arc.mux_channel_send"
+  ]
+}

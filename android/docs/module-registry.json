@@ -121,7 +121,11 @@
         "src/components/terminal/attachment-drawer-helpers.ts",
         "src/components/terminal/terminal-copy-gesture.ts",
         "src/lib/terminal-mouse-wheel-sgr.ts",
-        "src/lib/terminal-viewport-metrics.ts"
+        "src/lib/terminal-viewport-metrics.ts",
+        "src/lib/dagpipe-native-client.ts",
+        "src/lib/dagpipe-input-chunks.ts",
+        "src/lib/dagpipe-bridge.ts",
+        "src/lib/dagpipe-types.ts"
       ]
     },
     {
