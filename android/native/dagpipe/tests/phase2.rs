@@ -12,14 +12,17 @@ fn run_daemon_connection(input: serde_json::Value) -> serde_json::Value {
     .unwrap()
 }
 
-fn daemon_request(channel_removal: serde_json::Value) -> serde_json::Value {
+fn daemon_request_with_channels(
+    channels: serde_json::Value,
+    channel_removal: serde_json::Value,
+) -> serde_json::Value {
     json!({
         "execution_id": "phase2-daemon",
         "attempt_id": "1",
         "inputs": {
             "arc.physical_connection": {
                 "connectionId": "conn-1",
-                "channels": [{ "channelId": "s1", "sessionName": "s1" }],
+                "channels": channels,
             },
             "arc.mux_capabilities": { "muxEnabled": true },
             "arc.session_catalog_request": { "sessionNames": [{ "sessionId": "s1" }] },
@@ -27,6 +30,13 @@ fn daemon_request(channel_removal: serde_json::Value) -> serde_json::Value {
             "arc.channel_removal_request": channel_removal,
         }
     })
+}
+
+fn daemon_request(channel_removal: serde_json::Value) -> serde_json::Value {
+    daemon_request_with_channels(
+        json!([{ "channelId": "s1", "sessionName": "s1" }]),
+        channel_removal,
+    )
 }
 
 #[test]
@@ -163,5 +173,42 @@ fn daemon_connection_rejects_channel_id_fallback() {
     assert_eq!(
         result["outputs"]["arc.subscriber_released"]["channels"],
         json!([{ "channelId": "s1", "sessionName": "s1" }])
+    );
+}
+
+#[test]
+fn daemon_connection_release_keeps_sibling_channel_subscribed() {
+    let result = run_daemon_connection(daemon_request_with_channels(
+        json!([
+            { "channelId": "s1", "sessionName": "s1" },
+            { "channelId": "s2", "sessionName": "s2" },
+        ]),
+        json!({ "removedChannelId": "s1" }),
+    ));
+    assert_eq!(result["ok"], true);
+    assert_eq!(
+        result["outputs"]["arc.subscriber_released"]["state"],
+        "released"
+    );
+    assert_eq!(
+        result["outputs"]["arc.subscriber_released"]["removedChannelId"],
+        "s1"
+    );
+    assert_eq!(
+        result["outputs"]["arc.subscriber_released"]["bodySubscribed"],
+        true
+    );
+    assert_eq!(
+        result["outputs"]["arc.subscriber_released"]["bodySubscribedByChannel"]["s2"],
+        true
+    );
+    assert!(
+        result["outputs"]["arc.subscriber_released"]["bodySubscribedByChannel"]
+            .get("s1")
+            .is_none()
+    );
+    assert_eq!(
+        result["outputs"]["arc.subscriber_released"]["channels"],
+        json!([{ "channelId": "s2", "sessionName": "s2" }])
     );
 }

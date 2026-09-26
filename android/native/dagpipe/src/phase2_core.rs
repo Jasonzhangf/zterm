@@ -37,6 +37,18 @@ fn get_bool(object: &Map<String, Value>, key: &str) -> bool {
     object.get(key).and_then(Value::as_bool).unwrap_or(false)
 }
 
+fn subscription_map(channels: &Value) -> Map<String, Value> {
+    let mut map = Map::new();
+    if let Some(items) = channels.as_array() {
+        for channel in items {
+            if let Some(channel_id) = channel.get("channelId").and_then(Value::as_str) {
+                map.insert(channel_id.to_string(), Value::Bool(true));
+            }
+        }
+    }
+    map
+}
+
 fn array_of_strings(value: Option<&Value>) -> Vec<Value> {
     match value {
         Some(Value::Array(items)) => items.clone(),
@@ -554,9 +566,15 @@ impl Operator for DaemonBindBodySubscription {
 
     fn execute(&self, input: Value, _context: &OperatorContext) -> Result<Value, String> {
         let registry = obj(inputs(input).first().cloned().unwrap_or_default());
+        let channels = registry
+            .get("channels")
+            .cloned()
+            .unwrap_or_else(|| Value::Array(Vec::new()));
+        let by_channel = subscription_map(&channels);
         Ok(json!({
             "muxSessionId": get_str(&registry, "muxSessionId"),
-            "bodySubscribed": true,
+            "bodySubscribed": !by_channel.is_empty(),
+            "bodySubscribedByChannel": Value::Object(by_channel),
             "state": "bound",
         }))
     }
@@ -644,14 +662,17 @@ impl Operator for DaemonReleaseBodySubscription {
         match get_str(&removed, "state") {
             "unregistered" => {}
             "noop" => {
+                let channels = removed
+                    .get("channels")
+                    .cloned()
+                    .unwrap_or_else(|| Value::Array(Vec::new()));
+                let by_channel = subscription_map(&channels);
                 return Ok(json!({
                     "muxSessionId": get_str(&removed, "muxSessionId"),
                     "removedChannelId": Value::Null,
-                    "channels": removed
-                        .get("channels")
-                        .cloned()
-                        .unwrap_or_else(|| Value::Array(Vec::new())),
-                    "bodySubscribed": false,
+                    "channels": channels,
+                    "bodySubscribed": !by_channel.is_empty(),
+                    "bodySubscribedByChannel": Value::Object(by_channel),
                     "state": "not-requested",
                 }));
             }
@@ -663,14 +684,17 @@ impl Operator for DaemonReleaseBodySubscription {
             .get("removedChannelId")
             .cloned()
             .unwrap_or(Value::Null);
+        let channels = removed
+            .get("channels")
+            .cloned()
+            .unwrap_or_else(|| Value::Array(Vec::new()));
+        let by_channel = subscription_map(&channels);
         Ok(json!({
             "muxSessionId": get_str(&removed, "muxSessionId"),
             "removedChannelId": removed_channel,
-            "channels": removed
-                .get("channels")
-                .cloned()
-                .unwrap_or_else(|| Value::Array(Vec::new())),
-            "bodySubscribed": false,
+            "channels": channels,
+            "bodySubscribed": !by_channel.is_empty(),
+            "bodySubscribedByChannel": Value::Object(by_channel),
             "state": "released",
         }))
     }

@@ -231,6 +231,7 @@ describe('DAGpipe Phase2-8 black-box parity and smoke with TypeScript owners', (
       state: 'released',
       removedChannelId: 's1',
       bodySubscribed: false,
+      bodySubscribedByChannel: {},
     });
 
     const noRemoval = outputs(runPhase2DaemonConnection(phaseRequest('parity-phase2-daemon-no-removal', {
@@ -245,6 +246,7 @@ describe('DAGpipe Phase2-8 black-box parity and smoke with TypeScript owners', (
       state: 'not-requested',
       removedChannelId: null,
       bodySubscribed: false,
+      bodySubscribedByChannel: {},
     });
 
     expect(() => runPhase2DaemonConnection(phaseRequest('parity-phase2-daemon-reject', {
