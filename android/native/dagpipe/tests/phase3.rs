@@ -184,6 +184,30 @@ fn upload_ack_stays_in_progress_before_exact_total_chunks() {
 }
 
 #[test]
+fn upload_rejects_segment_index_at_or_above_total_chunks() {
+    for segment_index in [12, 13] {
+        let result = run_upload(json!({
+            "execution_id": format!("phase3-upload-overshoot-{segment_index}"),
+            "attempt_id": "1",
+            "inputs": {
+                "arc.upload_intent": {
+                    "uploadId": "up-overshoot",
+                    "segmentIndex": segment_index,
+                    "totalChunks": 12,
+                    "data": "abc",
+                },
+                "arc.transfer_policy": { "allowUpload": true },
+            },
+        }));
+        assert_eq!(result["ok"], false);
+        assert!(result["error"]
+            .as_str()
+            .unwrap()
+            .contains("out of range for totalChunks 12"));
+    }
+}
+
+#[test]
 fn download_ack_completes_only_on_exact_final_total_chunks() {
     let result = run_download(json!({
         "execution_id": "phase3-download-multi-batch",
@@ -216,6 +240,31 @@ fn download_ack_stays_in_progress_before_exact_total_chunks() {
         result["outputs"]["arc.download_complete"]["state"],
         "in-progress"
     );
+}
+
+#[test]
+fn download_rejects_segment_index_at_or_above_total_chunks() {
+    for segment_index in [16, 17] {
+        let result = run_download(json!({
+            "execution_id": format!("phase3-download-overshoot-{segment_index}"),
+            "attempt_id": "1",
+            "inputs": {
+                "arc.download_intent": {
+                    "downloadId": "dl-overshoot",
+                    "path": "/tmp/a.txt",
+                    "chunk": "abc",
+                    "segmentIndex": segment_index,
+                    "totalChunks": 16,
+                },
+                "arc.transfer_policy": { "allowDownload": true },
+            },
+        }));
+        assert_eq!(result["ok"], false);
+        assert!(result["error"]
+            .as_str()
+            .unwrap()
+            .contains("out of range for totalChunks 16"));
+    }
 }
 
 #[test]

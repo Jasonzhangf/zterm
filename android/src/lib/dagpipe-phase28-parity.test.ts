@@ -344,6 +344,35 @@ describe('DAGpipe Phase2-8 black-box parity and smoke with TypeScript owners', (
         state: segmentIndex + 1 === totalChunks ? 'complete' : 'in-progress',
       });
     }
+    for (const [segmentIndex, totalChunks] of [
+      [12, 12],
+      [13, 12],
+    ]) {
+      expect(() => runPhase3Upload(phaseRequest(`parity-phase3-upload-overshoot-${segmentIndex}`, {
+        'arc.upload_intent': {
+          uploadId: 'up-1',
+          segmentIndex,
+          totalChunks,
+          data: 'abc',
+        },
+        'arc.transfer_policy': { allowUpload: true },
+      }))).toThrow(/out of range for totalChunks 12/);
+    }
+    for (const [segmentIndex, totalChunks] of [
+      [16, 16],
+      [17, 16],
+    ]) {
+      expect(() => runPhase3Download(phaseRequest(`parity-phase3-download-overshoot-${segmentIndex}`, {
+        'arc.download_intent': {
+          downloadId: 'dl-1',
+          path: '/tmp/a.txt',
+          chunk: 'abc',
+          segmentIndex,
+          totalChunks,
+        },
+        'arc.transfer_policy': { allowDownload: true },
+      }))).toThrow(/out of range for totalChunks 16/);
+    }
     expect(() => runPhase3Download(phaseRequest('parity-phase3-download-reject', {
       'arc.download_intent': { downloadId: 'dl-1', path: '/tmp/a.txt' },
       'arc.transfer_policy': { allowDownload: false },

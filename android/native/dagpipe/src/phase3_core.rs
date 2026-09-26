@@ -592,10 +592,17 @@ impl Operator for FileTransferValidateUpload {
         if !get_bool(&policy, "allowUpload") {
             return Err("upload denied by transfer policy".into());
         }
+        let segment_index = get_u64(&intent, "segmentIndex");
+        let total_chunks = get_total_chunks(&intent);
+        if segment_index >= total_chunks {
+            return Err(format!(
+                "upload segmentIndex {segment_index} is out of range for totalChunks {total_chunks}"
+            ));
+        }
         Ok(json!({
             "uploadId": upload_id,
-            "segmentIndex": intent.get("segmentIndex").cloned().unwrap_or_else(|| json!(0)),
-            "totalChunks": get_total_chunks(&intent),
+            "segmentIndex": segment_index,
+            "totalChunks": total_chunks,
             "data": intent.get("data").cloned().unwrap_or_else(|| json!("")),
             "state": "validated",
         }))
@@ -651,7 +658,7 @@ impl Operator for FileTransferUploadAck {
         }
         let segment_index = get_u64(&ack, "segmentIndex");
         let total_chunks = get_total_chunks(&ack);
-        let complete = segment_index.saturating_add(1) >= total_chunks;
+        let complete = segment_index + 1 == total_chunks;
         let window_chunks = file_transfer_upload_window_chunks()?;
         Ok(json!({
             "uploadId": get_str(&ack, "uploadId"),
@@ -691,12 +698,19 @@ impl Operator for FileTransferValidateDownload {
         if !get_bool(&policy, "allowDownload") {
             return Err("download denied by transfer policy".into());
         }
+        let segment_index = get_u64(&intent, "segmentIndex");
+        let total_chunks = get_total_chunks(&intent);
+        if segment_index >= total_chunks {
+            return Err(format!(
+                "download segmentIndex {segment_index} is out of range for totalChunks {total_chunks}"
+            ));
+        }
         Ok(json!({
             "downloadId": download_id,
             "path": path,
             "chunk": intent.get("chunk").cloned().unwrap_or_else(|| json!("")),
-            "segmentIndex": intent.get("segmentIndex").cloned().unwrap_or_else(|| json!(0)),
-            "totalChunks": get_total_chunks(&intent),
+            "segmentIndex": segment_index,
+            "totalChunks": total_chunks,
             "state": "validated",
         }))
     }
@@ -749,7 +763,7 @@ impl Operator for FileTransferDownloadAck {
         let chunk = obj(inputs(input).first().cloned().unwrap_or_default());
         let segment_index = get_u64(&chunk, "segmentIndex");
         let total_chunks = get_total_chunks(&chunk);
-        let complete = segment_index.saturating_add(1) >= total_chunks;
+        let complete = segment_index + 1 == total_chunks;
         let batch_chunks = file_transfer_native_write_batch_chunks()?;
         Ok(json!({
             "downloadId": get_str(&chunk, "downloadId"),
