@@ -206,8 +206,10 @@ owning entry points; they do not replace the legacy TypeScript runtime.
 Daemon-owned graphs run through `src/server/dagpipe-bridge.ts`; their native
 client wrapper entries are N/A on the client side by ownership:
 
-- `runDagpipePhase2DaemonConnection` -> `daemon.session_catalog`
-  (`src/server/daemon-session-catalog-runtime.ts`).
+- `runDagpipePhase2DaemonConnection` -> native bridge/plugin test parity only;
+  production `daemon.session_catalog` currently uses
+  `src/server/daemon-session-catalog-runtime.ts` directly without this native
+  gate. This runtime is not wired as a production daemon session catalog owner.
 - `runDagpipePhase3InputSchedule` -> `daemon.input_queue`
   (`src/server/daemon-input-queue-runtime.ts`).
 - `runDagpipePhase3FileBrowse`, `runDagpipePhase3Download` -> `daemon.file_transfer`

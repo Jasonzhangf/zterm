@@ -116,6 +116,9 @@ stateDiagram-v2
 
 - 入口：`arc.request`（唯一输入）。
 - 出口：`arc.result`（唯一输出）。
+- `arc.body_subscription` 是 per-channel 订阅投影：包含 `bodySubscribed` 与
+  `bodySubscribedByChannel`（channelId -> true 的映射）；`arc.subscriber_released`
+  只释放被移除 channel 的订阅，剩余 sibling 保持 `bodySubscribedByChannel[channelId]=true`。
 - 一个请求内描述同一个 daemon 连接通道/catalog 生命周期，建立与释放在同一图、同一执行内共同收敛：
   1. 物理连接接受 -> mux 协商 -> channel 注册。
   2. channel 注册同时流向 body 订阅绑定、session catalog 构建与 channel 注销。
@@ -129,11 +132,19 @@ stateDiagram-v2
 ## 5. 变更边界
 
 - 交付物：`android/docs/dagpipe/relay-account-peer-route.graph.json`、`android/docs/dagpipe/daemon-connection-channel-catalog.graph.json` 与 `android/docs/dagpipe/android-phase2-route-catalog-design.md`。
-- 静态分支边界：`daemon-connection-channel-catalog.graph.json` 新增的 `remove_session_channel` / `release_body_subscription` 尚无对应 operator，因此本分支让两张 phase2 graph 不进入 Rust 编译集——`android/native/dagpipe/src/phase2_core.rs` 不再 `include_str!` 这两张 graph，`compile_phase2_graphs` 返回空集，`run_phase2_relay_json` / `run_phase2_daemon_connection_json` 显式返回 `deferred` 错误；依赖它们的 Rust/TS 测试改为断言该 `deferred` 契约。本分支不新增任何 runtime operator 实现。
-- 两张 graph 仍由 phase0 gate 独立 `validate`/`inspect` 通过，不作为编译期依赖。
-- 后续 phase2-runtime 任务负责：恢复 `include_str!` 与编译，注册 `daemon.channel_mux.unregister` / `daemon.transport_subscriber.release`，恢复 relay/daemon 运行时与 parity 测试，并满足第 4 节 P2 约束。
-- 禁止：触碰 native-rtc lane 文件、在本静态分支新增 runtime operator 实现、修改与本切片无关的 graph/docs。
-- 本分支不接 Rust core、不接 TypeScript runtime、不重建 APK/daemon，不 bump 版本、不 OTA；不 merge/push，不重启 daemon。
+- 两张 graph 仍由 phase0 gate 独立 `validate`/`inspect` 通过，同时作为
+  `phase2_core.rs` 的编译期依赖参与 Rust/parity 门禁。
+- 当前 phase2-runtime 已恢复 Rust 编译与执行：`android/native/dagpipe/src/phase2_core.rs` 重新 `include_str!` 这两张 graph，`compile_phase2_graphs()` 返回
+  `relay.account_peer_route@0.1` / `daemon.connection_channel_catalog@0.1`，
+  `run_phase2_relay_json()` / `run_phase2_daemon_connection_json()` 直接执行 native operators。
+- 生产 `daemon.session_catalog` 仍由 `src/server/daemon-session-catalog-runtime.ts` 直连 backend，
+  不经过 `runDagpipePhase2DaemonConnection`；native phase2 daemon graph 目前是
+  bridge/plugin/test parity 路径，不是生产 daemon catalog owner。
+- 本 runtime 分支已注册 `daemon.channel_mux.unregister` / `daemon.transport_subscriber.release`，
+  release 按 `bodySubscribedByChannel` 保留未移除 channel 的订阅，不移除 sibling。
+- 禁止：触碰 native-rtc lane 文件、把 native phase2 daemon graph 声明为生产
+  `daemon.session_catalog` owner、修改与本切片无关的 graph/docs。
+- 本 runtime 分支不接生产 daemon catalog owner、不重建 APK/daemon，不 bump 版本、不 OTA；不 merge/push，不重启 daemon。
 
 ## 6. 单/多 session 语义
 
