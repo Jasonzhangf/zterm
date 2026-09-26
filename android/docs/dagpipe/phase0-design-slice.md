@@ -123,6 +123,41 @@ Output: `arc.control_result`; no terminal body truth in control payloads.
 
 See `android-phase0-design-slice.md` and the graph JSON files for node/ARC
 contracts.
+Each node has one explainable responsibility; Phase 1 must register these
+operator names/versions and verify with the SDK `compile()`.
+
+- `daemon.source_adapter.normalize@0.1`: input `arc.source_readback`, output
+  `arc.canonical_snapshot`; pure/normalization; verification compares source
+  readback to canonical absolute window.
+- `daemon.mirror_writer.commit@0.1`: input `arc.canonical_snapshot`, output
+  `arc.mirror_revision`; commits authoritative snapshot; failure increments
+  mirror lifecycle failure.
+- `daemon.mirror_store.apply@0.1`: input `arc.mirror_revision`, output
+  `arc.mirror_truth`; applies truth and advances revision.
+- `daemon.mirror_store.diff@0.1`: inputs `arc.diff_policy`,
+  `arc.prev_mirror_snapshot`, `arc.mirror_truth`; output `arc.changed_ranges`;
+  policy-driven absolute range diff; no content-overlap anchoring.
+- `daemon.mirror_store.classify@0.1`: inputs `arc.diff_policy`,
+  `arc.prev_mirror_snapshot`, `arc.mirror_truth`, `arc.changed_ranges`; output
+  `arc.update_class`; classifies append/rewrite/window-shift/reset/head-only.
+- `daemon.buffer_publisher.plan@0.1`: inputs `arc.diff_policy`,
+  `arc.update_class`, `arc.changed_ranges`, `arc.subscriber_facts`; output
+  `arc.publish_plan`; enforces no-hole ranges and subscriber bounds.
+- `daemon.buffer_publisher.emit@0.1`: input `arc.publish_plan`; output
+  `arc.wire_frames`; emits head/body frames and chunk bookkeeping.
+- `daemon.control_gateway.authenticate@0.1`
+- `daemon.control_center.route@0.1`
+- `daemon.control_owner.dispatch@0.1`
+
+Current TS owners to preserve until wiring:
+
+- `src/server/terminal-source-adapter.ts`
+- `src/server/terminal-mirror-capture.ts`
+- `src/server/terminal-mirror-runtime.ts`
+- `src/server/daemon-buffer-publisher-runtime.ts`
+- `src/server/canonical-buffer.ts#findChangedIndexedRanges` (parity/test source)
+- `src/server/daemon-control-gateway-runtime.ts`
+- `src/server/daemon-control-center-runtime.ts`
 
 ## Trigger Conditions
 
@@ -152,6 +187,15 @@ Out of scope until explicit authorization:
 
 - OTA/APK/release
 - production daemon/client restart as proof of Phase 0
+`android/native/dagpipe` implements the daemon graph operators, compiles both
+daemon graphs, and exposes `compilePhase0`, `runMirrorPublish`, and
+`runControlDispatch` through N-API. `src/server/dagpipe-bridge.ts` is the TS
+load boundary; `server.ts` uses the bridge for control route decisions, for the
+startup DAGpipe compile gate, and for the live daemon mirror changed-range
+decision through `runMirrorPublish`. Parity tests still compare the bridge
+ranges against `src/server/canonical-buffer.ts#findChangedIndexedRanges` as the
+source contract for the old TS decision. Subscriber pending bounds stay in
+`daemon-buffer-publisher-runtime.ts`.
 
 Required evidence:
 

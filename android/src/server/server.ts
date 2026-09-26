@@ -90,7 +90,7 @@ import {
 import { createTerminalPerformanceTraceStore } from '@zterm/shared/terminal/performance-trace';
 import { createAdaptiveWidthOwnershipStore } from './adaptive-width-ownership-store';
 import { findChangedIndexedRanges } from './canonical-buffer';
-import { compileAllDagpipePhases, runControlDispatch } from './dagpipe-bridge';
+import { compileAllDagpipePhases, mirrorPublishChangedRanges, runControlDispatch } from './dagpipe-bridge';
 
 const DAEMON_CONFIG = resolveDaemonRuntimeConfig();
 const PORT = DAEMON_CONFIG.port || DEFAULT_BRIDGE_PORT;
@@ -350,13 +350,28 @@ const terminalRuntime = createTerminalRuntime({
   },
   resolveTerminalSessionBackend: (sessionName) => terminalControlRuntime.resolveTerminalSessionBackend(sessionName),
   captureMirrorAuthoritativeBufferFromTmux: terminalMirrorCapture.captureMirrorAuthoritativeBufferFromTmux,
-  mirrorBufferChanged: (mirror, previousStartIndex, previousLines) =>
-    findChangedIndexedRanges({
-      previousStartIndex,
-      previousLines,
-      nextStartIndex: mirror.bufferStartIndex,
-      nextLines: mirror.bufferLines,
-    }),
+  mirrorBufferChanged: (mirror, previousStartIndex, previousLines) => {
+    const result = mirrorPublishChangedRanges({
+      sourceReadback: {
+        revision: mirror.revision + 1,
+        bufferStartIndex: mirror.bufferStartIndex,
+        bufferLines: mirror.bufferLines,
+        rows: mirror.rows,
+        cols: mirror.cols,
+        cursorKeysApp: mirror.cursorKeysApp,
+        cursor: mirror.cursor ?? null,
+      },
+      prevMirrorSnapshot: {
+        revision: mirror.revision,
+        bufferStartIndex: previousStartIndex,
+        bufferLines: previousLines,
+      },
+    });
+    if (!result.ok) {
+      throw new Error(`DAGpipe mirror publish failed: ${result.error}`);
+    }
+    return result.ranges;
+  },
   mirrorCursorEqual,
   daemonInputQueue: daemonInputQueueRuntimeProxy,
   autoCommandDelayMs: AUTO_COMMAND_DELAY_MS,

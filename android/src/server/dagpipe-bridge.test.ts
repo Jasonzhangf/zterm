@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   compileAllDagpipePhases,
   compilePhase0,
+  mirrorPublishChangedRanges,
   runMirrorPublish,
   runControlDispatch,
 } from './dagpipe-bridge';
@@ -69,6 +70,18 @@ describe('dagpipe bridge parity', () => {
     expect(frames[0]?.ranges).toEqual([{ startIndex: 2, endIndex: 3 }]);
   });
 
+  it('mirrorPublishChangedRanges returns the live bridge diff ranges', () => {
+    const request = mirrorRequest(['a', 'b'], ['a', 'b', 'c']);
+    const result = mirrorPublishChangedRanges({
+      sourceReadback: request.inputs['arc.source_readback'],
+      prevMirrorSnapshot: request.inputs['arc.prev_mirror_snapshot'],
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.ranges).toEqual([{ startIndex: 2, endIndex: 3 }]);
+    }
+  });
+
   it('rewrites old lines with a no-hole span', () => {
     const result = runMirrorPublish(mirrorRequest(['a', 'b', 'c'], ['a', 'X', 'c']));
     const frames = (result as { ok: true; outputs: Record<string, { frames: Array<Record<string, any>> }> })
@@ -108,6 +121,15 @@ describe('dagpipe bridge parity', () => {
     });
     const result = runMirrorPublish(mirrorRequest(prevLines, nextLines));
     expect(frameRanges(result)).toEqual(expected);
+    const request = mirrorRequest(prevLines, nextLines);
+    const wrapper = mirrorPublishChangedRanges({
+      sourceReadback: request.inputs['arc.source_readback'],
+      prevMirrorSnapshot: request.inputs['arc.prev_mirror_snapshot'],
+    });
+    expect(wrapper.ok).toBe(true);
+    if (wrapper.ok) {
+      expect(wrapper.ranges).toEqual(expected);
+    }
   });
 
   it('matches findChangedIndexedRanges with more than 64 sparse ranges', () => {
@@ -121,6 +143,15 @@ describe('dagpipe bridge parity', () => {
     });
     const result = runMirrorPublish(mirrorRequest(prevLines, nextLines));
     expect(frameRanges(result)).toEqual(expected);
+    const request = mirrorRequest(prevLines, nextLines);
+    const wrapper = mirrorPublishChangedRanges({
+      sourceReadback: request.inputs['arc.source_readback'],
+      prevMirrorSnapshot: request.inputs['arc.prev_mirror_snapshot'],
+    });
+    expect(wrapper.ok).toBe(true);
+    if (wrapper.ok) {
+      expect(wrapper.ranges).toEqual(expected);
+    }
   });
 
   it('dispatches valid control commands', () => {
