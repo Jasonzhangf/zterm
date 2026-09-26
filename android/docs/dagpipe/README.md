@@ -188,7 +188,9 @@ owning entry points; they do not replace the legacy TypeScript runtime.
 - `runDagpipeConnection`, `runDagpipeBufferManagement`,
   `runDagpipeBufferRender`, `runDagpipeInputDispatch`,
   `runDagpipePhase8Connection`: `src/lib/android-connection-service-factory.ts`
-  socket bind entry.
+  socket bind entry. The buffer/render/input calls are documented as startup-
+  only admission on that entry; they are not owner wiring for
+  `client.buffer_store` / `client.renderer_window` / `client.input_runtime`.
 - `runDagpipePhase2Relay`: `src/hooks/useTraversalRelayAccount.ts`.
 - `runDagpipePhase3Upload`, `runDagpipePhase3Attachment`,
   `runDagpipePhase3Screenshot`: `src/contexts/session-context-transfer-runtime.ts`.
@@ -199,8 +201,7 @@ owning entry points; they do not replace the legacy TypeScript runtime.
 - `runDagpipePhase6Control`, `runDagpipePhase6Composition`: `src/App.tsx`.
 - `runDagpipePhase6ConfigExport`, `runDagpipePhase6ConfigImport`:
   `src/hooks/useConfigExport.ts`.
-- `runDagpipePhase7Update`, `runDagpipePhase7Release`:
-  `src/lib/app-update-runtime.ts`.
+- `runDagpipePhase7Update`: `src/lib/app-update-runtime.ts`.
 
 Daemon-owned graphs run through `src/server/dagpipe-bridge.ts`; their native
 client wrapper entries are N/A on the client side by ownership:
@@ -211,6 +212,9 @@ client wrapper entries are N/A on the client side by ownership:
   (`src/server/daemon-input-queue-runtime.ts`).
 - `runDagpipePhase3FileBrowse`, `runDagpipePhase3Download` -> `daemon.file_transfer`
   (`src/server/terminal-file-transfer-list-runtime.ts`).
+- `runDagpipePhase7Release` -> `release.runtime_promotion` is daemon-owned
+  (`release.daemon_artifact` -> `release.runtime_home.install` ->
+  `daemon.runtime_entry.start`); N/A in the client `app-update-runtime.ts`.
 
 `runDagpipePhase7Debug` is N/A for the current observability entrypoint:
 wiring it from `src/lib/runtime-debug-http-exporter.ts` would create an

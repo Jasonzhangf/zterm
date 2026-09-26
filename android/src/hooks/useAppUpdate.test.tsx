@@ -17,7 +17,6 @@ vi.mock('../plugins/AppUpdatePlugin', () => ({
 }));
 
 vi.mock('../lib/dagpipe-native-client', () => ({
-  runDagpipePhase7Release: async () => ({ ok: true, outputs: {} }),
   runDagpipePhase7Update: async () => ({ ok: true, outputs: {} }),
 }));
 

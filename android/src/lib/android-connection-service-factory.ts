@@ -41,6 +41,9 @@ export function openAndroidConnectionServiceTransportSocket(
   startup.then(
     async () => {
       try {
+        // Connection-service startup-only admission gates. They are not owner
+        // wiring for client.buffer_store / client.renderer_window /
+        // client.input_runtime; those graphs keep their owning runtime entries.
         const admissionGates = await Promise.all([
           runDagpipeConnection({
             execution_id: 'android-connection-lifecycle',

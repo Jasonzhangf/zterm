@@ -2,9 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createAppUpdateRuntime } from './app-update-runtime';
 import type { BrowserStorageLike } from './browser-storage';
 
+const dagpipeMock = vi.hoisted(() => ({
+  runDagpipePhase7Update: vi.fn(),
+}));
+
 vi.mock('./dagpipe-native-client', () => ({
-  runDagpipePhase7Release: async () => ({ ok: true, outputs: {} }),
-  runDagpipePhase7Update: async () => ({ ok: true, outputs: {} }),
+  ...dagpipeMock,
 }));
 
 function createStorage(initial?: Record<string, string>): BrowserStorageLike {
@@ -33,6 +36,7 @@ describe('app-update-runtime', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    dagpipeMock.runDagpipePhase7Update.mockResolvedValue({ ok: true, outputs: {} });
   });
 
   function createRuntime(storage: BrowserStorageLike | null = createStorage()) {
@@ -677,6 +681,30 @@ describe('app-update-runtime', () => {
     expect(backupCurrentApk).not.toHaveBeenCalled();
     expect(downloadAndInstall).not.toHaveBeenCalled();
     expect(runtime.getSnapshot().lastError).toBe('升级清单已变更，请重新检查更新');
+  });
+
+  it('stops before install when the client update gate rejects', async () => {
+    const runtime = createRuntime();
+    withManifestUrl(runtime);
+
+    dagpipeMock.runDagpipePhase7Update.mockResolvedValue({
+      ok: false,
+      error: 'update gate rejected',
+    });
+
+    const installed = await runtime.startUpdate({
+      versionName: '0.1.1.1493',
+      versionCode: 1011493,
+      buildNumber: 1493,
+      apkUrl: 'https://example.com/zterm-0.1.1.1493.apk',
+      sha256: 'abc123',
+      notes: [],
+    });
+
+    expect(installed).toBe(false);
+    expect(backupCurrentApk).not.toHaveBeenCalled();
+    expect(downloadAndInstall).not.toHaveBeenCalled();
+    expect(runtime.getSnapshot().lastError).toContain('update gate rejected');
   });
 
   it('rolls back to previous version and clears rollback backup', async () => {
