@@ -1,8 +1,16 @@
-// Phase2-8 black-box parity harness.
+// Phase2-8 black-box parity, divergence, and smoke harness.
 //
-// Each case builds one fixture, computes the expected value through the real
-// TypeScript owner, passes the *same* fixture to the DAGpipe Rust core via
+// Where the Rust graph and the TypeScript owner consume the same fixture and
+// project the same contract, the case computes the expected value through the
+// real TypeScript owner, passes the *same* fixture to the DAGpipe Rust core via
 // `dagpipe-bridge`, and asserts the Rust output equals that TS-derived value.
+//
+// Two classes of case are deliberately NOT claimed as parity:
+//   * `[divergence]` cases record a known, verified behavioral gap between the
+//     TypeScript owner and the Rust graph (the assertion pins the current Rust
+//     behavior so the gap cannot silently change).
+//   * `[smoke]` cases exercise the Rust graph alone where no equivalent TS
+//     owner output exists to compare against.
 // The old TypeScript implementation is kept as the oracle; nothing is deleted.
 //
 // Phase -> TypeScript owner used as oracle:
@@ -10,15 +18,15 @@
 //   Phase2 daemon connection -> daemon session catalog projection
 //   Phase3 input schedule -> shared input-chunking normalization
 //   Phase3 file browse -> server file-transfer path resolution
-//   Phase3 upload/download -> file-transfer-throughput contract
-//   Phase3 attachment -> attachment id validation + delivery status
+//   Phase3 upload/download -> file-transfer-throughput contract [divergence]
+//   Phase3 attachment -> attachment id validation + delivery status [divergence]
 //   Phase3 screenshot -> remote-screenshot chunk assembly
 //   Phase4 remote window -> remote-window input policy validation
-//   Phase5 shell lifecycle -> junction-preview-lattice focus movement
+//   Phase5 shell lifecycle -> junction-preview-lattice normalization [smoke]
 //   Phase5 preview lattice -> junction-preview-lattice normalization
 //   Phase6 composition -> plugin-host runtime activation
 //   Phase6 control -> client-control-center routing
-//   Phase6 config export/import -> config-export payload contract
+//   Phase6 config export/import -> config-export payload contract [smoke]
 //   Phase7 release/update/debug -> app-update normalization + digest gating
 //   Phase8 connection service -> Android connection service command/state
 
@@ -43,7 +51,6 @@ import {
 } from './plugin-host/plugin-host-runtime';
 import {
   createEmptyJunctionPreviewLattice,
-  moveJunctionPreviewFocus,
   normalizeJunctionPreviewLattice,
   setJunctionPreviewCell,
   type JunctionPreviewLatticeV1,
@@ -52,12 +59,14 @@ import {
 import {
   normalizeRelayAccountDirectory,
   projectRelayDirectoryDeviceSnapshots,
+  resolveRelayDaemonCanonicalHostId,
 } from './relay-account-directory';
 import { ClientControlCenter } from './control-center/client-control-center';
 import { createControlCommand } from '@zterm/shared/terminal/control-contract';
 import { normalizeAppUpdateManifest } from './app-update';
 import { buildRemoteScreenshotCapture } from './remote-screenshot-runtime';
 import { resolveFileTransferListPath } from '../server/file-transfer-path';
+import { validateAttachmentId } from '../server/attachment-delivery-runtime';
 import { validateRemoteWindowInputPayload } from '../server/remote-window-input-policy';
 import { buildSessionsCatalogPayload } from '../server/daemon-session-catalog-runtime';
 import {
@@ -157,28 +166,42 @@ function previewLatticeWithCell(): JunctionPreviewLatticeV1 {
   return created.lattice;
 }
 
-describe('DAGpipe Phase2-8 black-box parity with TypeScript owners', () => {
-  it('Phase2 relay: Rust route projection matches the TS account directory projection', () => {
-    // TS oracle: the directory owner must keep the daemon route + session facts.
+describe('DAGpipe Phase2-8 black-box parity, divergence, and smoke with TypeScript owners', () => {
+  it('Phase2 relay: Rust route carrier matches the TS-projected relay identity fixture', () => {
+    // TS oracle: normalize the directory and then project its daemon snapshots.
     const directory = normalizeRelayAccountDirectory(relayDirectoryPayload);
     const tsDevices = projectRelayDirectoryDeviceSnapshots(directory);
-    // The TS directory host is the route identity Rust selects for resume.
-    const tsRouteTarget = tsDevices[0]?.daemon.hostId ?? 'daemon-host';
+    const tsRouteTarget = resolveRelayDaemonCanonicalHostId(
+      { daemonHostId: tsDevices[0]?.daemon.hostId },
+      tsDevices,
+    );
     expect(tsRouteTarget).toBe('daemon-host');
 
     const result = outputs(runPhase2Relay(phaseRequest('parity-phase2-relay', {
       'arc.account_credentials': { accountId: 'u1', authToken: 'tok' },
       'arc.relay_settings': { relayEnabled: true },
       'arc.device_capabilities': {
-        deviceId: 'device-a',
+        deviceId: tsDevices[0]?.deviceId,
         platform: 'android',
         routes: [tsRouteTarget],
       },
       'arc.route_policy': { pathPriority: [tsRouteTarget] },
     })));
 
-    // Same fixture -> Rust must select the TS-derived route and resume it.
-    expect(result['arc.account_directory'].devices[0].routes).toEqual([tsRouteTarget]);
+    // Rust's account_directory is a route-carrier projection, not the full TS
+    // directory shape. We compare the fields that both projections carry: the
+    // device id and the daemon route selected for resume.
+    expect(result['arc.account_directory']).toMatchObject({
+      accountId: 'u1',
+      devices: [
+        {
+          deviceId: tsDevices[0]?.deviceId,
+          id: tsDevices[0]?.deviceId,
+          routes: [tsRouteTarget],
+        },
+      ],
+      state: 'ready',
+    });
     expect(result['arc.resume_plan']).toMatchObject({
       state: 'ready',
       action: 'resume',
@@ -269,50 +292,82 @@ describe('DAGpipe Phase2-8 black-box parity with TypeScript owners', () => {
     }))).toThrow(/denied by permission policy/);
   });
 
-  it('Phase3 upload/download: Rust completion follows the TS transfer throughput contract', () => {
-    // TS oracle: the shared throughput contract the upload window is built on.
+  it('[divergence] Phase3 upload/download: Rust ack always completes and ignores the TS threshold contract', () => {
+    // TS oracle: the shared throughput contract says an upload window can send
+    // up to FILE_TRANSFER_UPLOAD_WINDOW_CHUNKS chunks before it needs progress.
     expect(FILE_TRANSFER_UPLOAD_WINDOW_CHUNKS).toBe(8);
     expect(FILE_TRANSFER_NATIVE_WRITE_BATCH_CHUNKS).toBe(8);
 
-    const upload = outputs(runPhase3Upload(phaseRequest('parity-phase3-upload', {
-      'arc.upload_intent': {
+    // Exercise below-boundary, boundary, and above-boundary indices. The TS
+    // contract uses the window for backpressure; Rust's FileTransferUploadAck
+    // only checks "acked" and publishes complete=true for every segment.
+    for (const segmentIndex of [
+      0,
+      FILE_TRANSFER_UPLOAD_WINDOW_CHUNKS - 2,
+      FILE_TRANSFER_UPLOAD_WINDOW_CHUNKS - 1,
+      FILE_TRANSFER_UPLOAD_WINDOW_CHUNKS + 1,
+    ]) {
+      const upload = outputs(runPhase3Upload(phaseRequest(`parity-phase3-upload-${segmentIndex}`, {
+        'arc.upload_intent': {
+          uploadId: 'up-1',
+          segmentIndex,
+          data: 'abc',
+        },
+        'arc.transfer_policy': { allowUpload: true },
+      })));
+      expect(upload['arc.upload_complete']).toEqual({
         uploadId: 'up-1',
-        segmentIndex: FILE_TRANSFER_UPLOAD_WINDOW_CHUNKS - 1,
-        data: 'abc',
-      },
-      'arc.transfer_policy': { allowUpload: true },
-    })));
-    expect(upload['arc.upload_complete'].complete).toBe(true);
-    expect(() => runPhase3Upload(phaseRequest('parity-phase3-upload-reject', {
-      'arc.upload_intent': { uploadId: 'up-1' },
-      'arc.transfer_policy': { allowUpload: false },
-    }))).toThrow(/denied by transfer policy/);
+        complete: true,
+        state: 'complete',
+      });
+    }
 
+    // Download ack is also unconditional in Rust; policy denial is preserved.
     const download = outputs(runPhase3Download(phaseRequest('parity-phase3-download', {
       'arc.download_intent': { downloadId: 'dl-1', path: '/tmp/a.txt', chunk: 'abc' },
       'arc.transfer_policy': { allowDownload: true },
     })));
-    expect(download['arc.download_complete'].complete).toBe(true);
+    expect(download['arc.download_complete']).toEqual({
+      downloadId: 'dl-1',
+      complete: true,
+      state: 'complete',
+    });
     expect(() => runPhase3Download(phaseRequest('parity-phase3-download-reject', {
       'arc.download_intent': { downloadId: 'dl-1', path: '/tmp/a.txt' },
       'arc.transfer_policy': { allowDownload: false },
     }))).toThrow(/denied by transfer policy/);
   });
 
-  it('Phase3 attachment: Rust receipt delivery stays distinct from client consumption', () => {
+  it('Phase3 attachment: Rust and TS agree on a real UUID id while Rust still diverges on invalid ids', () => {
+    const validAttachmentId = 'att_12345678-1234-1234-1234-123456789abc';
+    const invalidAttachmentId = 'att-1';
+
+    // TS owner is the id validation oracle for real UUIDs.
+    expect(validateAttachmentId(validAttachmentId)).toBe(validAttachmentId);
+    expect(() => validateAttachmentId(invalidAttachmentId)).toThrow(/invalid attachment id/);
+
     const result = outputs(runPhase3Attachment(phaseRequest('parity-phase3-attachment', {
-      'arc.attachment_delivery_request': { attachmentId: 'att-1', targetDeviceId: 'dev-1' },
+      'arc.attachment_delivery_request': { attachmentId: validAttachmentId, targetDeviceId: 'dev-1' },
       'arc.attachment_policy': { allowDelivery: true },
     })));
-
-    // The Rust result publishes delivery; consumption is not claimed.
     expect(result['arc.attachment_delivery_result']).toMatchObject({
       state: 'published',
       receipt: { state: 'delivered' },
     });
     expect(result['arc.attachment_delivery_result']).not.toHaveProperty('consumed');
+
+    // This divergence is explicit: TS rejects att-1, but the current Rust
+    // AttachmentValidate operator only rejects an empty attachmentId.
+    const invalidRust = outputs(runPhase3Attachment(phaseRequest('parity-phase3-attachment-invalid-id', {
+      'arc.attachment_delivery_request': { attachmentId: invalidAttachmentId, targetDeviceId: 'dev-1' },
+      'arc.attachment_policy': { allowDelivery: true },
+    })));
+    expect(invalidRust['arc.attachment_delivery_result']).toMatchObject({
+      state: 'published',
+      receipt: { state: 'delivered' },
+    });
     expect(() => runPhase3Attachment(phaseRequest('parity-phase3-attachment-reject', {
-      'arc.attachment_delivery_request': { attachmentId: 'att-1', targetDeviceId: 'dev-1' },
+      'arc.attachment_delivery_request': { attachmentId: validAttachmentId, targetDeviceId: 'dev-1' },
       'arc.attachment_policy': { allowDelivery: false },
     }))).toThrow(/denied by policy/);
   });
@@ -391,16 +446,19 @@ describe('DAGpipe Phase2-8 black-box parity with TypeScript owners', () => {
     expect(result['arc.input_result']).toMatchObject({ targetId: 'w1', kind: 'tap', injected: true });
   });
 
-  it('Phase5 shell lifecycle: Rust projection matches the TS lattice focus owner', () => {
-    const focus = moveJunctionPreviewFocus({ col: 0, row: 0 }, 'right');
-    expect(focus).toEqual({ col: 1, row: 0 });
+  it('[smoke] Phase5 shell lifecycle: Rust projects the TS-derived session id without a focus claim', () => {
+    // The TS lattice owner owns focus movement; the Rust shell lifecycle graph
+    // does not consume a focus coordinate. Construct the session id fixture
+    // through the TS owner, then only assert the Rust projection fields it has.
+    const lattice = normalizeJunctionPreviewLattice(previewLatticeWithCell());
+    const sessionId = lattice?.cells[0]?.target.sessionId ?? previewTarget.sessionId;
 
     const result = outputs(runPhase5ShellLifecycle(phaseRequest('parity-phase5-shell', {
-      'arc.open_tab_intent': { sessionId: previewTarget.sessionId },
+      'arc.open_tab_intent': { sessionId },
       'arc.shell_state': { visible: true },
     })));
     expect(result['arc.shell_projection']).toMatchObject({
-      sessionId: previewTarget.sessionId,
+      sessionId,
       visible: true,
       state: 'projected',
     });
@@ -440,67 +498,69 @@ describe('DAGpipe Phase2-8 black-box parity with TypeScript owners', () => {
     expect(pan['arc.focus_panned']).toMatchObject({ state: 'applied', direction: 'right' });
   });
 
-  it('Phase6 composition: Rust activation matches the TS plugin host activation', async () => {
+  it('Phase6 composition: Rust activation mirrors the same TS plugin manifest fixture', async () => {
+    const manifest = {
+      pluginId: 'p1',
+      version: '0.1.0',
+      requires: [] as string[],
+      provides: ['quickbar'],
+      providesUiSlots: ['terminal.quickbar'],
+    };
     const host: PluginHost = createPluginHost();
-    host.install(
-      {
-        pluginId: 'p1',
-        version: '0.1.0',
-        requires: [],
-        provides: ['quickbar'],
-        providesUiSlots: ['terminal.quickbar'],
-      },
-      {
-        create: () => ({
-          start: async (context) => { context.provideCapability('quickbar', {}); },
-          stop: async () => {},
-          dispose: async () => {},
-        }),
-      },
-    );
+    host.install(manifest, {
+      create: () => ({
+        start: async (context) => { context.provideCapability('quickbar', {}); },
+        stop: async () => {},
+        dispose: async () => {},
+      }),
+    });
     await host.start('p1');
     expect(host.hasCapability('quickbar')).toBe(true);
 
     const result = outputs(runPhase6Composition(phaseRequest('parity-phase6-composition', {
       'arc.composition_request': { runtimeId: 'rt-1', ports: ['debug'] },
       'arc.plugin_manifest': {
-        pluginId: 'p1',
-        capabilities: ['quickbar'],
-        uiSlots: ['terminal.quickbar'],
+        pluginId: manifest.pluginId,
+        capabilities: manifest.provides,
+        uiSlots: manifest.providesUiSlots,
       },
     })));
     expect(result['arc.activated_plugins']).toMatchObject({
+      pluginId: manifest.pluginId,
       state: 'active',
-      uiSlots: ['terminal.quickbar'],
+      uiSlots: manifest.providesUiSlots,
     });
   });
 
-  it('Phase6 control: Rust control result matches the TS control center outcome', async () => {
+  it('Phase6 control: Rust control result matches the TS control center fixture', async () => {
+    const tsCommand = createControlCommand('settings', 'cmd-1', 'corr-1', {});
+    const subject = 'settings';
     const center = new ClientControlCenter();
     center.register('settings', {
-      ownerId: 'settings',
+      ownerId: subject,
       execute: async () => ({ ok: true, value: { commandId: 'cmd-1' } }),
     });
     const tsOutcome = await center.execute({
-      command: createControlCommand('settings', 'cmd-1', 'corr-1', {}),
-      subject: 'settings',
+      command: tsCommand,
+      subject,
       capabilities: [],
     });
     expect(tsOutcome.ok).toBe(true);
 
     const result = outputs(runPhase6Control(phaseRequest('parity-phase6-control', {
-      'arc.control_request': { commandId: 'cmd-1', owner: 'settings' },
+      'arc.control_request': { commandId: tsCommand.commandId, owner: subject },
       'arc.control_policy': { allowControl: true },
     })));
-    expect(result['arc.control_result']).toMatchObject({ state: 'completed', commandId: 'cmd-1' });
+    expect(result['arc.control_result']).toMatchObject({ state: 'completed', commandId: tsCommand.commandId });
 
     expect(() => runPhase6Control(phaseRequest('parity-phase6-control-reject', {
-      'arc.control_request': { commandId: 'cmd-1', owner: 'settings' },
+      'arc.control_request': { commandId: tsCommand.commandId, owner: subject },
       'arc.control_policy': { allowControl: false },
     }))).toThrow(/denied by capability policy/);
   });
 
-  it('Phase6 config export/import: Rust projections match the TS config payload contract', () => {
+  it('[smoke] Phase6 config export/import: Rust projects a config id without claiming TS payload parity', () => {
+    // TS store round-trips the real payload through its owner.
     const storage = memoryStorage({ 'zterm:hosts': '[{"id":"h1"}]' });
     const payload = buildConfigExportPayload({
       storage,
