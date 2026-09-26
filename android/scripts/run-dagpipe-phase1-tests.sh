@@ -21,5 +21,5 @@ cargo clippy --no-default-features -- -D warnings
 cargo test --no-default-features
 
 cd "${ROOT_DIR}"
-pnpm --dir "${ROOT_DIR}" exec vitest run src/server/dagpipe-bridge.test.ts src/lib/dagpipe-bridge.test.ts src/lib/dagpipe-phase1-parity.test.ts --reporter dot
+pnpm --dir "${ROOT_DIR}" exec vitest run src/server/dagpipe-bridge.test.ts src/lib/dagpipe-bridge.test.ts src/lib/dagpipe-phase1-parity.test.ts src/lib/dagpipe-phase28-parity.test.ts --reporter dot
 pnpm --dir "${ROOT_DIR}" run test:dagpipe-phase0
