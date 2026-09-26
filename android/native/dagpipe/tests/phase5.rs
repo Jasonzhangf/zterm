@@ -38,6 +38,7 @@ fn shell_lifecycle_projects_open_tab_shell_and_controls() {
     }));
     assert_eq!(result["ok"], true, "phase5 shell failed: {result}");
     let outputs = &result["outputs"];
+    assert_eq!(outputs["arc.body_subscription"]["state"], "subscribed");
     assert_eq!(outputs["arc.shell_projection"]["state"], "projected");
     assert_eq!(outputs["arc.quickbar_projection"]["state"], "projected");
     assert_eq!(outputs["arc.copy_projection"]["state"], "projected");
