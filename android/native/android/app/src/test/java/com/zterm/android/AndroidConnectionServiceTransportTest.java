@@ -674,6 +674,40 @@ public final class AndroidConnectionServiceTransportTest {
     }
 
     @Test
+    public void relaySignalUrlWithEmptySignalTokenDoesNotFallBackToDaemonAuthToken()
+        throws Exception {
+        AndroidConnectionService service = new AndroidConnectionService();
+        AndroidConnectionServiceTarget target = new AndroidConnectionServiceTarget.Builder()
+            .targetKey("target-rtc-relay-empty-signal-token")
+            .bridgeHost("relay.example")
+            .bridgePort(3333)
+            .relayHostId("relay-1")
+            .signalUrl("wss://relay.example/client")
+            .relayDeviceId("android-1")
+            .authToken("token-a")
+            .signalUrlFromRelay(true)
+            .turnUrl("turn:relay.example:3478?transport=udp")
+            .build();
+
+        Object runtime = newRuntime(service, target);
+        List<?> candidates = buildCandidates(runtime);
+        Object direct = candidateByPath(candidates, "rtc-direct");
+        Object relay = candidateByPath(candidates, "rtc-relay");
+        String directSignal = String.valueOf(candidateField(direct, "signalUrl"));
+        String relaySignal = String.valueOf(candidateField(relay, "signalUrl"));
+        assertTrue("relay signal must keep relay host identity",
+            relaySignal.contains("hostId=relay-1"));
+        assertFalse("relay signal must not leak daemon auth token when relay signal token is empty",
+            relaySignal.contains("token=token-a"));
+        assertFalse("relay signal must omit token query when relay signal token is empty",
+            relaySignal.contains("token="));
+        assertFalse("rtc-direct relay signal must not leak daemon auth token either",
+            directSignal.contains("token=token-a"));
+        assertFalse("rtc-direct relay signal must omit token query when relay signal token is empty",
+            directSignal.contains("token="));
+    }
+
+    @Test
     public void rtcDirectCandidateTimeoutAdvancesToTailscaleInDeclaredOrder()
         throws Exception {
         AndroidConnectionService.resetForTests();

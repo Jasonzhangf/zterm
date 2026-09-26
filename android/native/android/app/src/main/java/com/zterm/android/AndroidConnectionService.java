@@ -1178,8 +1178,10 @@ public class AndroidConnectionService extends Service {
             if (nonEmpty(target.relayDeviceId)) {
                 signal = appendQuery(signal, "deviceId", target.relayDeviceId);
             }
-            if (target.signalUrlFromRelay && nonEmpty(target.signalToken)) {
-                signal = appendQuery(signal, "token", target.signalToken);
+            if (target.signalUrlFromRelay) {
+                if (nonEmpty(target.signalToken)) {
+                    signal = appendQuery(signal, "token", target.signalToken);
+                }
             } else if (nonEmpty(target.authToken)) {
                 signal = appendQuery(signal, "token", target.authToken);
             }
