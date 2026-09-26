@@ -116,13 +116,29 @@ export class ClientControlCenter {
     }
 
     if (this.dagpipeGate) {
-      const gate = await this.dagpipeGate({
-        commandId: command.commandId,
-        commandType,
-        owner: owner.ownerId,
-        subject,
-        payload: command.params ?? {},
-      });
+      let gate: { ok: boolean; error?: string };
+      try {
+        gate = await this.dagpipeGate({
+          commandId: command.commandId,
+          commandType,
+          owner: owner.ownerId,
+          subject,
+          payload: command.params ?? {},
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.recordAudit(command, subject, 'error', startedAtMs);
+        return errorControlOutcome({
+          code: 'gate_failed',
+          commandType,
+          message,
+          chain: createControlErrorChain(
+            'gate_failed',
+            message,
+            'client.control_center',
+          ),
+        });
+      }
       if (!gate.ok) {
         this.recordAudit(command, subject, 'denied', startedAtMs);
         return errorControlOutcome({

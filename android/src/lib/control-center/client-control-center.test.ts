@@ -155,6 +155,34 @@ describe('client control center', () => {
     expect(center.getAuditEntries()[0]?.result).toBe('denied');
   });
 
+  it('projects a throwing dagpipe gate into an explicit gate_failed outcome', async () => {
+    const center = new ClientControlCenter({
+      dagpipeGate: async () => {
+        throw new Error('native gate rejected');
+      },
+    });
+    const owner = new RecordingOwner(() => ({ ok: true, value: undefined }));
+    center.register('test.command', owner);
+
+    const result = await center.execute(request('test.command', {}));
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: 'gate_failed',
+        commandType: 'test.command',
+        message: 'native gate rejected',
+        chain: [{
+          code: 'gate_failed',
+          message: 'native gate rejected',
+          source: 'client.control_center',
+        }],
+      },
+    });
+    expect(owner.executions).toHaveLength(0);
+    expect(center.getAuditEntries()[0]?.result).toBe('error');
+  });
+
   it('returns the first outcome for an idempotency key and never re-runs the owner', async () => {
     const center = new ClientControlCenter();
     const owner = new RecordingOwner(() => ({ ok: true, value: { first: true } }));

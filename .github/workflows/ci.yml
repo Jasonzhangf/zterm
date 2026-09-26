@@ -167,7 +167,7 @@ jobs:
             }
           }
           const server = readFileSync(serverPath, 'utf8');
-          if (!server.includes('DAGpipe phase0 operators compiled: native runtime active')) {
+          if (!server.includes('DAGpipe all-phase operators compiled: native runtime active')) {
             console.error('staged server.cjs does not require DAGpipe native runtime');
             process.exit(1);
           }
