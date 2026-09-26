@@ -3,27 +3,126 @@
   "version": "0.1",
   "inputs": [
     {
-      "id": "arc.account_credentials",
-      "schema": "Object"
-    },
-    {
-      "id": "arc.relay_settings",
-      "schema": "Object"
-    },
-    {
-      "id": "arc.target_candidates",
-      "schema": "Object"
-    },
-    {
-      "id": "arc.session_demand_set",
-      "schema": "Object"
-    },
-    {
-      "id": "arc.connection_policy",
+      "id": "arc.request",
       "schema": "Object"
     }
   ],
   "nodes": [
+    {
+      "id": "dagpipe.extract.arc.account_credentials",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.account_credentials",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.relay_settings",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.relay_settings",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.target_candidates",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.target_candidates",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.session_demand_set",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.session_demand_set",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.connection_policy",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.connection_policy",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
     {
       "id": "login_relay_account",
       "operator": "client.relay_account.login",
@@ -243,6 +342,31 @@
         "predicate": null
       },
       "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.collect.arc.connection_health,arc.recovery_plan,arc.body_subscriptions",
+      "operator": "dagpipe.result.collect",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.connection_health",
+        "arc.recovery_plan",
+        "arc.body_subscriptions"
+      ],
+      "output": {
+        "id": "arc.result",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
     }
   ],
   "edges": [
@@ -305,11 +429,74 @@
       "from": "resolve_target_routes",
       "to": "plan_recovery",
       "arc_id": "arc.route_plan"
+    },
+    {
+      "from": "dagpipe.extract.arc.account_credentials",
+      "to": "login_relay_account",
+      "arc_id": "arc.account_credentials"
+    },
+    {
+      "from": "dagpipe.extract.arc.relay_settings",
+      "to": "login_relay_account",
+      "arc_id": "arc.relay_settings"
+    },
+    {
+      "from": "dagpipe.extract.arc.target_candidates",
+      "to": "resolve_target_routes",
+      "arc_id": "arc.target_candidates"
+    },
+    {
+      "from": "dagpipe.extract.arc.connection_policy",
+      "to": "resolve_target_routes",
+      "arc_id": "arc.connection_policy"
+    },
+    {
+      "from": "dagpipe.extract.arc.connection_policy",
+      "to": "establish_target_transport",
+      "arc_id": "arc.connection_policy"
+    },
+    {
+      "from": "dagpipe.extract.arc.session_demand_set",
+      "to": "open_session_channels",
+      "arc_id": "arc.session_demand_set"
+    },
+    {
+      "from": "dagpipe.extract.arc.connection_policy",
+      "to": "open_session_channels",
+      "arc_id": "arc.connection_policy"
+    },
+    {
+      "from": "dagpipe.extract.arc.session_demand_set",
+      "to": "subscribe_session_bodies",
+      "arc_id": "arc.session_demand_set"
+    },
+    {
+      "from": "dagpipe.extract.arc.connection_policy",
+      "to": "maintain_connection",
+      "arc_id": "arc.connection_policy"
+    },
+    {
+      "from": "dagpipe.extract.arc.connection_policy",
+      "to": "plan_recovery",
+      "arc_id": "arc.connection_policy"
+    },
+    {
+      "from": "maintain_connection",
+      "to": "dagpipe.collect.arc.connection_health,arc.recovery_plan,arc.body_subscriptions",
+      "arc_id": "arc.connection_health"
+    },
+    {
+      "from": "plan_recovery",
+      "to": "dagpipe.collect.arc.connection_health,arc.recovery_plan,arc.body_subscriptions",
+      "arc_id": "arc.recovery_plan"
+    },
+    {
+      "from": "subscribe_session_bodies",
+      "to": "dagpipe.collect.arc.connection_health,arc.recovery_plan,arc.body_subscriptions",
+      "arc_id": "arc.body_subscriptions"
     }
   ],
   "outputs": [
-    "arc.connection_health",
-    "arc.recovery_plan",
-    "arc.body_subscriptions"
+    "arc.result"
   ]
 }

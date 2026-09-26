@@ -76,6 +76,19 @@ Phase8 覆盖 Android 原生前台连接服务 slice：
   payload。
 - 禁止通知 action 打开不存在的 session 或悄悄路由到最近 host；未知目标显式警告。
 
+## TS 接线门禁
+
+- WebView/React 的 foreground-resume、active-reentry、active-tick、passive-visible
+  刷新只允许 `request-head` / `buffer-sync` 数据刷新，不得触发 `reconnectSession`
+  或 channel reopen。
+- 即使旧接线仍把 `foreground-resume` 作为 `notify-target-network-signal` 投递，
+  transport orchestration 也只把它当 data-refresh-only：不 probe、不 retire
+  physical transport、不 wake scheduled reconnect。
+- `ensureActiveSessionFresh` 的 `source` 是唯一重连/通道恢复门禁：只有
+  `explicit-resume`（显式用户 resume/switch）才允许打开或重建 transport/channel。
+- 连接恢复只属于 `client.android_connection_service` / DAGpipe
+  `android.connection_lifecycle.plan_recovery`；UI 状态机不再持有自动重连开关。
+
 ## 数据契约
 
 - `resource.client_connection_service_ipc`

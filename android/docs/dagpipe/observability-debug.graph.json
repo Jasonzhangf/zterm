@@ -2,66 +2,242 @@
   "id": "observability.debug",
   "version": "0.1",
   "inputs": [
-    { "id": "arc.debug_sample_request", "schema": "Object" },
-    { "id": "arc.debug_policy", "schema": "Object" }
+    {
+      "id": "arc.request",
+      "schema": "Object"
+    }
   ],
   "nodes": [
+    {
+      "id": "dagpipe.extract.arc.debug_sample_request",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.debug_sample_request",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.debug_policy",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.debug_policy",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
     {
       "id": "authorize_debug",
       "operator": "observability.debug_channel.authorize",
       "operator_version": "0.1",
-      "inputs": ["arc.debug_policy"],
-      "output": { "id": "arc.debug_lease", "schema": "Object" },
-      "input_selector": { "include": [], "exclude": [], "predicate": null },
-      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "inputs": [
+        "arc.debug_policy"
+      ],
+      "output": {
+        "id": "arc.debug_lease",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
       "iterator": "Whole"
     },
     {
       "id": "sample_debug",
       "operator": "observability.debug_channel.sample",
       "operator_version": "0.1",
-      "inputs": ["arc.debug_sample_request", "arc.debug_lease"],
-      "output": { "id": "arc.debug_sample", "schema": "Object" },
-      "input_selector": { "include": [], "exclude": [], "predicate": null },
-      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "inputs": [
+        "arc.debug_sample_request",
+        "arc.debug_lease"
+      ],
+      "output": {
+        "id": "arc.debug_sample",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
       "iterator": "Whole"
     },
     {
       "id": "store_bounded",
       "operator": "client.debug_hub.store",
       "operator_version": "0.1",
-      "inputs": ["arc.debug_sample"],
-      "output": { "id": "arc.debug_store", "schema": "Object" },
-      "input_selector": { "include": [], "exclude": [], "predicate": null },
-      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "inputs": [
+        "arc.debug_sample"
+      ],
+      "output": {
+        "id": "arc.debug_store",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
       "iterator": "Whole"
     },
     {
       "id": "export_debug",
       "operator": "client.debug_hub.export",
       "operator_version": "0.1",
-      "inputs": ["arc.debug_store"],
-      "output": { "id": "arc.debug_export", "schema": "Object" },
-      "input_selector": { "include": [], "exclude": [], "predicate": null },
-      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "inputs": [
+        "arc.debug_store"
+      ],
+      "output": {
+        "id": "arc.debug_export",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
       "iterator": "Whole"
     },
     {
       "id": "cleanup_debug",
       "operator": "client.debug_hub.cleanup",
       "operator_version": "0.1",
-      "inputs": ["arc.debug_store"],
-      "output": { "id": "arc.debug_cleanup", "schema": "Object" },
-      "input_selector": { "include": [], "exclude": [], "predicate": null },
-      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "inputs": [
+        "arc.debug_store"
+      ],
+      "output": {
+        "id": "arc.debug_cleanup",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.collect.arc.debug_export,arc.debug_cleanup",
+      "operator": "dagpipe.result.collect",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.debug_export",
+        "arc.debug_cleanup"
+      ],
+      "output": {
+        "id": "arc.result",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
       "iterator": "Whole"
     }
   ],
   "edges": [
-    { "from": "authorize_debug", "to": "sample_debug", "arc_id": "arc.debug_lease" },
-    { "from": "sample_debug", "to": "store_bounded", "arc_id": "arc.debug_sample" },
-    { "from": "store_bounded", "to": "export_debug", "arc_id": "arc.debug_store" },
-    { "from": "store_bounded", "to": "cleanup_debug", "arc_id": "arc.debug_store" }
+    {
+      "from": "authorize_debug",
+      "to": "sample_debug",
+      "arc_id": "arc.debug_lease"
+    },
+    {
+      "from": "sample_debug",
+      "to": "store_bounded",
+      "arc_id": "arc.debug_sample"
+    },
+    {
+      "from": "store_bounded",
+      "to": "export_debug",
+      "arc_id": "arc.debug_store"
+    },
+    {
+      "from": "store_bounded",
+      "to": "cleanup_debug",
+      "arc_id": "arc.debug_store"
+    },
+    {
+      "from": "dagpipe.extract.arc.debug_policy",
+      "to": "authorize_debug",
+      "arc_id": "arc.debug_policy"
+    },
+    {
+      "from": "dagpipe.extract.arc.debug_sample_request",
+      "to": "sample_debug",
+      "arc_id": "arc.debug_sample_request"
+    },
+    {
+      "from": "export_debug",
+      "to": "dagpipe.collect.arc.debug_export,arc.debug_cleanup",
+      "arc_id": "arc.debug_export"
+    },
+    {
+      "from": "cleanup_debug",
+      "to": "dagpipe.collect.arc.debug_export,arc.debug_cleanup",
+      "arc_id": "arc.debug_cleanup"
+    }
   ],
-  "outputs": ["arc.debug_export", "arc.debug_cleanup"]
+  "outputs": [
+    "arc.result"
+  ]
 }

@@ -3,19 +3,80 @@
   "version": "0.1",
   "inputs": [
     {
-      "id": "arc.committed_text",
-      "schema": "Object"
-    },
-    {
-      "id": "arc.input_policy",
-      "schema": "Object"
-    },
-    {
-      "id": "arc.transport_facts",
+      "id": "arc.request",
       "schema": "Object"
     }
   ],
   "nodes": [
+    {
+      "id": "dagpipe.extract.arc.committed_text",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.committed_text",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.input_policy",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.input_policy",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.transport_facts",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.transport_facts",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
     {
       "id": "normalize_input",
       "operator": "client.input_normalizer.normalize",
@@ -86,6 +147,29 @@
         "predicate": null
       },
       "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.collect.arc.mux_channel_send",
+      "operator": "dagpipe.result.collect",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.mux_channel_send"
+      ],
+      "output": {
+        "id": "arc.result",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
     }
   ],
   "edges": [
@@ -98,9 +182,29 @@
       "from": "plan_input_batch",
       "to": "emit_input",
       "arc_id": "arc.input_batch"
+    },
+    {
+      "from": "dagpipe.extract.arc.committed_text",
+      "to": "normalize_input",
+      "arc_id": "arc.committed_text"
+    },
+    {
+      "from": "dagpipe.extract.arc.input_policy",
+      "to": "plan_input_batch",
+      "arc_id": "arc.input_policy"
+    },
+    {
+      "from": "dagpipe.extract.arc.transport_facts",
+      "to": "plan_input_batch",
+      "arc_id": "arc.transport_facts"
+    },
+    {
+      "from": "emit_input",
+      "to": "dagpipe.collect.arc.mux_channel_send",
+      "arc_id": "arc.mux_channel_send"
     }
   ],
   "outputs": [
-    "arc.mux_channel_send"
+    "arc.result"
   ]
 }

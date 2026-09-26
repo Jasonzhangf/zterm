@@ -2,55 +2,208 @@
   "id": "release.runtime_promotion",
   "version": "0.1",
   "inputs": [
-    { "id": "arc.build_artifact", "schema": "Object" },
-    { "id": "arc.release_policy", "schema": "Object" }
+    {
+      "id": "arc.request",
+      "schema": "Object"
+    }
   ],
   "nodes": [
+    {
+      "id": "dagpipe.extract.arc.build_artifact",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.build_artifact",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.release_policy",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.release_policy",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
     {
       "id": "verify_digest",
       "operator": "release.update_artifact.verify",
       "operator_version": "0.1",
-      "inputs": ["arc.build_artifact", "arc.release_policy"],
-      "output": { "id": "arc.verified_artifact", "schema": "Object" },
-      "input_selector": { "include": [], "exclude": [], "predicate": null },
-      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "inputs": [
+        "arc.build_artifact",
+        "arc.release_policy"
+      ],
+      "output": {
+        "id": "arc.verified_artifact",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
       "iterator": "Whole"
     },
     {
       "id": "promote_daemon_artifact",
       "operator": "release.daemon_artifact.promote",
       "operator_version": "0.1",
-      "inputs": ["arc.verified_artifact"],
-      "output": { "id": "arc.promoted_artifact", "schema": "Object" },
-      "input_selector": { "include": [], "exclude": [], "predicate": null },
-      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "inputs": [
+        "arc.verified_artifact"
+      ],
+      "output": {
+        "id": "arc.promoted_artifact",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
       "iterator": "Whole"
     },
     {
       "id": "install_runtime",
       "operator": "release.runtime_home.install",
       "operator_version": "0.1",
-      "inputs": ["arc.promoted_artifact"],
-      "output": { "id": "arc.installed_runtime", "schema": "Object" },
-      "input_selector": { "include": [], "exclude": [], "predicate": null },
-      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "inputs": [
+        "arc.promoted_artifact"
+      ],
+      "output": {
+        "id": "arc.installed_runtime",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
       "iterator": "Whole"
     },
     {
       "id": "start_runtime",
       "operator": "daemon.runtime_entry.start",
       "operator_version": "0.1",
-      "inputs": ["arc.installed_runtime"],
-      "output": { "id": "arc.runtime_started", "schema": "Object" },
-      "input_selector": { "include": [], "exclude": [], "predicate": null },
-      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "inputs": [
+        "arc.installed_runtime"
+      ],
+      "output": {
+        "id": "arc.runtime_started",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.collect.arc.runtime_started",
+      "operator": "dagpipe.result.collect",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.runtime_started"
+      ],
+      "output": {
+        "id": "arc.result",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
       "iterator": "Whole"
     }
   ],
   "edges": [
-    { "from": "verify_digest", "to": "promote_daemon_artifact", "arc_id": "arc.verified_artifact" },
-    { "from": "promote_daemon_artifact", "to": "install_runtime", "arc_id": "arc.promoted_artifact" },
-    { "from": "install_runtime", "to": "start_runtime", "arc_id": "arc.installed_runtime" }
+    {
+      "from": "verify_digest",
+      "to": "promote_daemon_artifact",
+      "arc_id": "arc.verified_artifact"
+    },
+    {
+      "from": "promote_daemon_artifact",
+      "to": "install_runtime",
+      "arc_id": "arc.promoted_artifact"
+    },
+    {
+      "from": "install_runtime",
+      "to": "start_runtime",
+      "arc_id": "arc.installed_runtime"
+    },
+    {
+      "from": "dagpipe.extract.arc.build_artifact",
+      "to": "verify_digest",
+      "arc_id": "arc.build_artifact"
+    },
+    {
+      "from": "dagpipe.extract.arc.release_policy",
+      "to": "verify_digest",
+      "arc_id": "arc.release_policy"
+    },
+    {
+      "from": "start_runtime",
+      "to": "dagpipe.collect.arc.runtime_started",
+      "arc_id": "arc.runtime_started"
+    }
   ],
-  "outputs": ["arc.runtime_started"]
+  "outputs": [
+    "arc.result"
+  ]
 }

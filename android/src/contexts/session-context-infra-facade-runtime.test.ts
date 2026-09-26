@@ -102,14 +102,13 @@ describe('Android connection service platform wiring', () => {
 });
 
 describe('body demand reconciliation', () => {
-  it('reopens a closed mux channel when the session becomes body-subscribed again', () => {
+  it('never reopens a closed mux channel from body demand reconciliation', () => {
     const { store } = createMuxStore();
     const channel = getSessionTerminalChannel(store.terminalChannels, 'session-1');
     if (!channel) {
       throw new Error('channel not initialized');
     }
     channel.state = 'closed';
-    const reopenSessionTerminalChannel = vi.fn();
     const stateRef = {
       current: {
         activeSessionId: null,
@@ -131,7 +130,6 @@ describe('body demand reconciliation', () => {
       sessionAttachTokensRef: { current: new Map() },
       pendingSessionTransportOpenIntentsRef: { current: new Map() },
       activeBodySubscriptionSuppressedRef: { current: false },
-      reopenSessionTerminalChannelRef: { current: reopenSessionTerminalChannel },
       reconnectStore: {},
       tailRefreshStore: {},
       bufferFrameAssemblyRef: { current: new Map() },
@@ -149,7 +147,8 @@ describe('body demand reconciliation', () => {
 
     runtime.reconcilePhysicalBodySubscriptions('live-sessions');
 
-    expect(reopenSessionTerminalChannel).toHaveBeenCalledWith('session-1');
+    expect(channel.state).toBe('closed');
+    expect(channel.bodySubscribed).toBe(true);
   });
 
   it('sends the current adaptive-phone geometry with a foreground body-subscription so reattach restores the lease', () => {
@@ -179,7 +178,6 @@ describe('body demand reconciliation', () => {
       sessionAttachTokensRef: { current: new Map() },
       pendingSessionTransportOpenIntentsRef: { current: new Map() },
       activeBodySubscriptionSuppressedRef: { current: false },
-      reopenSessionTerminalChannelRef: { current: vi.fn() },
       reconnectStore: {},
       tailRefreshStore: {},
       bufferFrameAssemblyRef: { current: new Map() },

@@ -614,6 +614,7 @@ fn make_registry() -> Registry {
     register!(ProjectNotificationActions);
     register!(HandleSessionDeepLink);
     register!(PulseStoppedSession);
+    crate::sese_core::register_sese_operators(&mut registry);
     registry
 }
 
@@ -632,18 +633,7 @@ fn run_graph(request: Value, graph_json: &str, graph_id: &str) -> serde_json::Re
         .into_iter()
         .collect::<HashMap<String, Value>>();
     if let Ok(graph_value) = serde_json::from_str::<Value>(graph_json) {
-        for input_id in graph_value
-            .get("inputs")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-        {
-            if let Some(id) = input_id.get("id").and_then(Value::as_str) {
-                inputs_map
-                    .entry(id.to_string())
-                    .or_insert_with(|| json!({}));
-            }
-        }
+        crate::sese_core::wrap_request_inputs(&graph_value, &mut inputs_map);
     }
     let registry = make_registry();
     let capabilities = BTreeSet::new();
@@ -674,7 +664,7 @@ fn run_graph(request: Value, graph_json: &str, graph_id: &str) -> serde_json::Re
     match runtime.run(&compiled, identity, inputs_map, &Cancellation::default()) {
         Ok(result) => {
             let mut outputs = serde_json::Map::new();
-            for (arc_id, arc) in result.outputs {
+            for (arc_id, arc) in crate::sese_core::unwrap_result_outputs(&result.outputs) {
                 outputs.insert(arc_id, arc.payload.clone());
             }
             Ok(json!({ "ok": true, "outputs": Value::Object(outputs) }))

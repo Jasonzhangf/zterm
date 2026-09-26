@@ -3,15 +3,57 @@
   "version": "0.1",
   "inputs": [
     {
-      "id": "arc.control_ingress",
-      "schema": "Object"
-    },
-    {
-      "id": "arc.capability_policy",
+      "id": "arc.request",
       "schema": "Object"
     }
   ],
   "nodes": [
+    {
+      "id": "dagpipe.extract.arc.control_ingress",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.control_ingress",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.capability_policy",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.capability_policy",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
     {
       "id": "authenticate_ingress",
       "operator": "daemon.control_gateway.authenticate",
@@ -81,6 +123,29 @@
         "predicate": null
       },
       "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.collect.arc.control_result",
+      "operator": "dagpipe.result.collect",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.control_result"
+      ],
+      "output": {
+        "id": "arc.result",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
     }
   ],
   "edges": [
@@ -93,9 +158,24 @@
       "from": "route_control",
       "to": "dispatch_owner",
       "arc_id": "arc.routed_command"
+    },
+    {
+      "from": "dagpipe.extract.arc.control_ingress",
+      "to": "authenticate_ingress",
+      "arc_id": "arc.control_ingress"
+    },
+    {
+      "from": "dagpipe.extract.arc.capability_policy",
+      "to": "route_control",
+      "arc_id": "arc.capability_policy"
+    },
+    {
+      "from": "dispatch_owner",
+      "to": "dagpipe.collect.arc.control_result",
+      "arc_id": "arc.control_result"
     }
   ],
   "outputs": [
-    "arc.control_result"
+    "arc.result"
   ]
 }

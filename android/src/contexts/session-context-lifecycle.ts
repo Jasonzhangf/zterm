@@ -246,10 +246,9 @@ export function useSessionContextLifecycle(options: {
   clientRuntimeDebugFlushIntervalMs: number;
   ensureActiveSessionFresh: (options: {
     sessionId: string;
-    source: 'explicit-resume' | 'active-reentry' | 'active-tick';
+    source: 'explicit-resume' | 'foreground-resume' | 'active-reentry' | 'active-tick';
     forceHead?: boolean;
     markResumeTail?: boolean;
-    allowReconnectIfUnavailable?: boolean;
   }) => boolean;
   /** Foreground attach-lease renewal: resends `body-subscription true` for the
    *  current attach set so the daemon keeps those tmux mirrors held. Background
@@ -266,7 +265,6 @@ export function useSessionContextLifecycle(options: {
   const lastRuntimeSessionIdsRef = useRef<string[]>([]);
   const passiveVisibleRefreshCursorRef = useRef(0);
   const lastForegroundActiveRef = useRef(options.appForegroundActive !== false);
-  const foregroundResumeDataRefreshOnlySessionIdsRef = useRef<Set<string>>(new Set());
   const lastForegroundResumeEpochRef = useRef<number | null>(
     Number.isFinite(options.foregroundResumeEpoch)
       ? Number(options.foregroundResumeEpoch)
@@ -294,7 +292,6 @@ export function useSessionContextLifecycle(options: {
     options.refs.foregroundActiveRef.current = nextForegroundActive;
     lastForegroundActiveRef.current = nextForegroundActive;
     if (!nextForegroundActive) {
-      foregroundResumeDataRefreshOnlySessionIdsRef.current.clear();
       return;
     }
     const nextForegroundResumeEpoch = Number.isFinite(options.foregroundResumeEpoch)
@@ -310,20 +307,14 @@ export function useSessionContextLifecycle(options: {
     }
     const resumeState = options.refs.stateRef.current;
     const activeSessionId = resumeState.activeSessionId;
-    foregroundResumeDataRefreshOnlySessionIdsRef.current = new Set(
-      resumeState.sessions
-        .map((session) => session.id)
-        .filter((sessionId) => sessionId !== activeSessionId),
-    );
     if (!activeSessionId) {
       return;
     }
     options.ensureActiveSessionFresh({
       sessionId: activeSessionId,
-      source: 'explicit-resume',
+      source: 'foreground-resume',
       forceHead: true,
       markResumeTail: true,
-      allowReconnectIfUnavailable: false,
     });
   }, [options.appForegroundActive, options.foregroundResumeEpoch]);
 
@@ -383,7 +374,6 @@ export function useSessionContextLifecycle(options: {
       sessionId: options.state.activeSessionId,
       source: 'active-reentry',
       forceHead: true,
-      allowReconnectIfUnavailable: true,
     });
   }, [options.ensureActiveSessionFresh, options.state.activeSessionId]);
 
@@ -410,12 +400,10 @@ export function useSessionContextLifecycle(options: {
       if (sessionId === options.state.activeSessionId) {
         return;
       }
-      const dataRefreshOnly = foregroundResumeDataRefreshOnlySessionIdsRef.current.delete(sessionId);
       options.ensureActiveSessionFresh({
         sessionId,
-        source: 'explicit-resume',
+        source: 'active-reentry',
         forceHead: true,
-        allowReconnectIfUnavailable: !dataRefreshOnly,
       });
     });
   }, [options.ensureActiveSessionFresh, options.state.liveSessionIds, options.state.sessions]);
@@ -480,7 +468,6 @@ export function useSessionContextLifecycle(options: {
           options.ensureActiveSessionFresh({
             sessionId: activeSessionId,
             source: 'active-tick',
-            allowReconnectIfUnavailable: options.refs.foregroundActiveRef.current,
           });
         }
         scheduleNext();
@@ -558,7 +545,6 @@ export function useSessionContextLifecycle(options: {
           options.ensureActiveSessionFresh({
             sessionId,
             source: 'active-tick',
-            allowReconnectIfUnavailable: options.refs.foregroundActiveRef.current,
           });
         }
         scheduleNext();

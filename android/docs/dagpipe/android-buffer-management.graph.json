@@ -3,27 +3,126 @@
   "version": "0.1",
   "inputs": [
     {
-      "id": "arc.session_buffer_demand",
-      "schema": "Object"
-    },
-    {
-      "id": "arc.daemon_head_facts",
-      "schema": "Object"
-    },
-    {
-      "id": "arc.local_buffer_state",
-      "schema": "Object"
-    },
-    {
-      "id": "arc.buffer_policy",
-      "schema": "Object"
-    },
-    {
-      "id": "arc.wire_range_responses",
+      "id": "arc.request",
       "schema": "Object"
     }
   ],
   "nodes": [
+    {
+      "id": "dagpipe.extract.arc.session_buffer_demand",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.session_buffer_demand",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.daemon_head_facts",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.daemon_head_facts",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.local_buffer_state",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.local_buffer_state",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.buffer_policy",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.buffer_policy",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.wire_range_responses",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.wire_range_responses",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
     {
       "id": "observe_heads",
       "operator": "client.buffer_manager.observe_heads",
@@ -195,6 +294,31 @@
         "predicate": null
       },
       "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.collect.arc.range_requests,arc.repair_ledger,arc.render_scope",
+      "operator": "dagpipe.result.collect",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.range_requests",
+        "arc.repair_ledger",
+        "arc.render_scope"
+      ],
+      "output": {
+        "id": "arc.result",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
     }
   ],
   "edges": [
@@ -232,11 +356,79 @@
       "from": "plan_session_windows",
       "to": "update_repair_ledger",
       "arc_id": "arc.window_plan"
+    },
+    {
+      "from": "dagpipe.extract.arc.daemon_head_facts",
+      "to": "observe_heads",
+      "arc_id": "arc.daemon_head_facts"
+    },
+    {
+      "from": "dagpipe.extract.arc.session_buffer_demand",
+      "to": "observe_heads",
+      "arc_id": "arc.session_buffer_demand"
+    },
+    {
+      "from": "dagpipe.extract.arc.local_buffer_state",
+      "to": "plan_session_windows",
+      "arc_id": "arc.local_buffer_state"
+    },
+    {
+      "from": "dagpipe.extract.arc.session_buffer_demand",
+      "to": "plan_session_windows",
+      "arc_id": "arc.session_buffer_demand"
+    },
+    {
+      "from": "dagpipe.extract.arc.buffer_policy",
+      "to": "plan_session_windows",
+      "arc_id": "arc.buffer_policy"
+    },
+    {
+      "from": "dagpipe.extract.arc.buffer_policy",
+      "to": "dispatch_range_requests",
+      "arc_id": "arc.buffer_policy"
+    },
+    {
+      "from": "dagpipe.extract.arc.wire_range_responses",
+      "to": "ingest_range_responses",
+      "arc_id": "arc.wire_range_responses"
+    },
+    {
+      "from": "dagpipe.extract.arc.buffer_policy",
+      "to": "ingest_range_responses",
+      "arc_id": "arc.buffer_policy"
+    },
+    {
+      "from": "dagpipe.extract.arc.local_buffer_state",
+      "to": "merge_sparse_truth",
+      "arc_id": "arc.local_buffer_state"
+    },
+    {
+      "from": "dagpipe.extract.arc.buffer_policy",
+      "to": "merge_sparse_truth",
+      "arc_id": "arc.buffer_policy"
+    },
+    {
+      "from": "dagpipe.extract.arc.session_buffer_demand",
+      "to": "publish_render_scope",
+      "arc_id": "arc.session_buffer_demand"
+    },
+    {
+      "from": "dispatch_range_requests",
+      "to": "dagpipe.collect.arc.range_requests,arc.repair_ledger,arc.render_scope",
+      "arc_id": "arc.range_requests"
+    },
+    {
+      "from": "update_repair_ledger",
+      "to": "dagpipe.collect.arc.range_requests,arc.repair_ledger,arc.render_scope",
+      "arc_id": "arc.repair_ledger"
+    },
+    {
+      "from": "publish_render_scope",
+      "to": "dagpipe.collect.arc.range_requests,arc.repair_ledger,arc.render_scope",
+      "arc_id": "arc.render_scope"
     }
   ],
   "outputs": [
-    "arc.range_requests",
-    "arc.repair_ledger",
-    "arc.render_scope"
+    "arc.result"
   ]
 }

@@ -2,44 +2,180 @@
   "id": "daemon.file_transfer_browse",
   "version": "0.1",
   "inputs": [
-    { "id": "arc.file_browse_request", "schema": "Object" },
-    { "id": "arc.fs_permission_policy", "schema": "Object" }
+    {
+      "id": "arc.request",
+      "schema": "Object"
+    }
   ],
   "nodes": [
+    {
+      "id": "dagpipe.extract.arc.file_browse_request",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.file_browse_request",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.fs_permission_policy",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.fs_permission_policy",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
     {
       "id": "validate_browse_request",
       "operator": "daemon.file_transfer.validate_browse",
       "operator_version": "0.1",
-      "inputs": ["arc.file_browse_request", "arc.fs_permission_policy"],
-      "output": { "id": "arc.browse_validation", "schema": "Object" },
-      "input_selector": { "include": [], "exclude": [], "predicate": null },
-      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "inputs": [
+        "arc.file_browse_request",
+        "arc.fs_permission_policy"
+      ],
+      "output": {
+        "id": "arc.browse_validation",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
       "iterator": "Whole"
     },
     {
       "id": "list_directory",
       "operator": "daemon.file_transfer.list",
       "operator_version": "0.1",
-      "inputs": ["arc.browse_validation"],
-      "output": { "id": "arc.directory_listing", "schema": "Object" },
-      "input_selector": { "include": [], "exclude": [], "predicate": null },
-      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "inputs": [
+        "arc.browse_validation"
+      ],
+      "output": {
+        "id": "arc.directory_listing",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
       "iterator": "Whole"
     },
     {
       "id": "project_file_browser_view",
       "operator": "client.file_browser.project",
       "operator_version": "0.1",
-      "inputs": ["arc.directory_listing"],
-      "output": { "id": "arc.file_browser_view", "schema": "Object" },
-      "input_selector": { "include": [], "exclude": [], "predicate": null },
-      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "inputs": [
+        "arc.directory_listing"
+      ],
+      "output": {
+        "id": "arc.file_browser_view",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.collect.arc.file_browser_view",
+      "operator": "dagpipe.result.collect",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.file_browser_view"
+      ],
+      "output": {
+        "id": "arc.result",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
       "iterator": "Whole"
     }
   ],
   "edges": [
-    { "from": "validate_browse_request", "to": "list_directory", "arc_id": "arc.browse_validation" },
-    { "from": "list_directory", "to": "project_file_browser_view", "arc_id": "arc.directory_listing" }
+    {
+      "from": "validate_browse_request",
+      "to": "list_directory",
+      "arc_id": "arc.browse_validation"
+    },
+    {
+      "from": "list_directory",
+      "to": "project_file_browser_view",
+      "arc_id": "arc.directory_listing"
+    },
+    {
+      "from": "dagpipe.extract.arc.file_browse_request",
+      "to": "validate_browse_request",
+      "arc_id": "arc.file_browse_request"
+    },
+    {
+      "from": "dagpipe.extract.arc.fs_permission_policy",
+      "to": "validate_browse_request",
+      "arc_id": "arc.fs_permission_policy"
+    },
+    {
+      "from": "project_file_browser_view",
+      "to": "dagpipe.collect.arc.file_browser_view",
+      "arc_id": "arc.file_browser_view"
+    }
   ],
-  "outputs": ["arc.file_browser_view"]
+  "outputs": [
+    "arc.result"
+  ]
 }
