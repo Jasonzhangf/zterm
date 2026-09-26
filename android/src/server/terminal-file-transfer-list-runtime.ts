@@ -18,6 +18,7 @@ import type {
 } from '@zterm/shared/protocol';
 import { resolveFileTransferListPath } from './file-transfer-path';
 import { resolveRemoteScreenshotErrorMessage } from './remote-screenshot';
+import { runPhase3FileBrowse, runPhase3Download } from './dagpipe-bridge';
 import type { TerminalSession } from './terminal-runtime-types';
 import {
   FILE_CHUNK_SIZE,
@@ -339,6 +340,22 @@ export function createTerminalFileTransferListRuntime(
   function handleFileListRequest(session: TerminalSession, payload: FileListRequestPayload) {
     const { requestId, path: requestedPath, showHidden } = payload;
 
+    const browseGate = runPhase3FileBrowse({
+      execution_id: 'daemon-file-browse',
+      attempt_id: '1',
+      inputs: {
+        'arc.file_browse_request': { path: requestedPath },
+        'arc.fs_permission_policy': { allowRead: true },
+      },
+    });
+    if (!browseGate.ok) {
+      deps.sendMessage(session, {
+        type: 'file-list-error',
+        payload: { requestId, error: `dagpipe_file_browse_rejected: ${browseGate.error}` },
+      });
+      return;
+    }
+
     try {
       const resolvedPath = resolveFileTransferListPath(
         requestedPath,
@@ -401,6 +418,22 @@ export function createTerminalFileTransferListRuntime(
 
   function handleFileDownloadRequest(session: TerminalSession, payload: FileDownloadRequestPayload) {
     const { requestId, remotePath, fileName } = payload;
+
+    const downloadGate = runPhase3Download({
+      execution_id: 'daemon-file-download',
+      attempt_id: '1',
+      inputs: {
+        'arc.download_intent': { downloadId: requestId, path: remotePath },
+        'arc.transfer_policy': { allowDownload: true },
+      },
+    });
+    if (!downloadGate.ok) {
+      deps.sendMessage(session, {
+        type: 'file-download-error',
+        payload: { requestId, error: `dagpipe_file_download_rejected: ${downloadGate.error}` },
+      });
+      return;
+    }
 
     try {
       if (!existsSync(remotePath)) {
