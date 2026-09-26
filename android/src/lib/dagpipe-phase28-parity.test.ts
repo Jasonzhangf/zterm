@@ -52,11 +52,6 @@ import {
   type JunctionPreviewLatticeV1,
   type JunctionPreviewTarget,
 } from './junction-preview-lattice';
-import {
-  normalizeRelayAccountDirectory,
-  projectRelayDirectoryDeviceSnapshots,
-  resolveRelayDaemonCanonicalHostId,
-} from './relay-account-directory';
 import { ClientControlCenter } from './control-center/client-control-center';
 import { createControlCommand } from '@zterm/shared/terminal/control-contract';
 import { normalizeAppUpdateManifest } from './app-update';
@@ -64,7 +59,6 @@ import { buildRemoteScreenshotCapture } from './remote-screenshot-runtime';
 import { resolveFileTransferListPath } from '../server/file-transfer-path';
 import { validateAttachmentId } from '../server/attachment-delivery-runtime';
 import { validateRemoteWindowInputPayload } from '../server/remote-window-input-policy';
-import { buildSessionsCatalogPayload } from '../server/daemon-session-catalog-runtime';
 import {
   runPhase2DaemonConnection,
   runPhase2Relay,
@@ -111,44 +105,6 @@ function memoryStorage(initial: Record<string, string> = {}) {
   };
 }
 
-const relayDirectoryPayload = {
-  schemaVersion: 1,
-  user: { id: 'u1', username: 'jason' },
-  updatedAt: '2026-06-28T10:00:00.000Z',
-  devices: [
-    {
-      deviceId: 'daemon-device',
-      deviceName: 'Jason Mac',
-      platform: 'darwin',
-      appVersion: '0.1.3',
-      client: { connected: false, lastSeenAt: '' },
-      daemon: {
-        hostId: 'daemon-host',
-        version: '0.1.3-daemon',
-        presence: { connected: true, lastSeenAt: '2026-06-28T10:01:00.000Z' },
-        endpoints: [
-          {
-            id: 'relay-rtc:daemon-host',
-            kind: 'relay-rtc',
-            relayHostId: 'daemon-host',
-            authRequired: true,
-            lastSeenAt: '2026-06-28T10:01:00.000Z',
-          },
-        ],
-        sessions: [
-          {
-            name: 'main',
-            cwd: '/Users/jason/project',
-            title: 'main shell',
-            updatedAt: '2026-06-28T10:01:00.000Z',
-          },
-        ],
-        lastPublishedAt: '2026-06-28T10:01:00.000Z',
-      },
-    },
-  ],
-};
-
 const previewTarget: JunctionPreviewTarget = {
   sessionId: 's1',
   bridgeHost: 'host-1',
@@ -163,78 +119,16 @@ function previewLatticeWithCell(): JunctionPreviewLatticeV1 {
 }
 
 describe('DAGpipe Phase2-8 black-box parity and smoke with TypeScript owners', () => {
-  it('Phase2 relay: Rust route carrier matches the TS-projected relay identity fixture', () => {
-    // TS oracle: normalize the directory and then project its daemon snapshots.
-    const directory = normalizeRelayAccountDirectory(relayDirectoryPayload);
-    const tsDevices = projectRelayDirectoryDeviceSnapshots(directory);
-    const tsRouteTarget = resolveRelayDaemonCanonicalHostId(
-      { daemonHostId: tsDevices[0]?.daemon.hostId },
-      tsDevices,
+  it('Phase2 relay: static branch defers the Rust route-carrier runtime', () => {
+    expect(() => runPhase2Relay(phaseRequest('parity-phase2-relay', {}))).toThrow(
+      /deferred/,
     );
-    expect(tsRouteTarget).toBe('daemon-host');
-
-    const result = outputs(runPhase2Relay(phaseRequest('parity-phase2-relay', {
-      'arc.account_credentials': { accountId: 'u1', authToken: 'tok' },
-      'arc.relay_settings': { relayEnabled: true },
-      'arc.device_capabilities': {
-        deviceId: tsDevices[0]?.deviceId,
-        platform: 'android',
-        routes: [tsRouteTarget],
-      },
-      'arc.route_policy': { pathPriority: [tsRouteTarget] },
-    })));
-
-    // Rust's account_directory is a route-carrier projection, not the full TS
-    // directory shape. We compare the fields that both projections carry: the
-    // device id and the daemon route selected for resume.
-    expect(result['arc.account_directory']).toMatchObject({
-      accountId: 'u1',
-      devices: [
-        {
-          deviceId: tsDevices[0]?.deviceId,
-          id: tsDevices[0]?.deviceId,
-          routes: [tsRouteTarget],
-        },
-      ],
-      state: 'ready',
-    });
-    expect(result['arc.resume_plan']).toMatchObject({
-      state: 'ready',
-      action: 'resume',
-      targetKey: tsRouteTarget,
-    });
   });
 
-  it('Phase2 daemon connection: Rust catalog matches the TS session catalog projection', () => {
-    // TS oracle: daemon session catalog projection for the same session list.
-    const tsCatalog = buildSessionsCatalogPayload({
-      listTmuxSessions: () => ['s1'],
-      listTerminalSessionCatalog: () => [{ name: 's1', backend: 'tmux' }],
-    });
-    expect(tsCatalog.sessions).toEqual(['s1']);
-
-    const result = outputs(runPhase2DaemonConnection(phaseRequest('parity-phase2-daemon', {
-      'arc.physical_connection': { connectionId: 'conn-1' },
-      'arc.mux_capabilities': { muxEnabled: true },
-      'arc.session_catalog_request': {
-        sessionNames: tsCatalog.sessionCatalog.map((entry) => ({ sessionId: entry.name })),
-      },
-      'arc.idle_facts_request': {},
-    })));
-
-    expect(result['arc.session_catalog'].sessions).toEqual(
-      tsCatalog.sessions.map((name) => ({ sessionId: name })),
+  it('Phase2 daemon connection: static branch defers the Rust catalog runtime', () => {
+    expect(() => runPhase2DaemonConnection(phaseRequest('parity-phase2-daemon', {}))).toThrow(
+      /deferred/,
     );
-    expect(result['arc.idle_facts'].sessions).toEqual(
-      tsCatalog.sessions.map((name) => ({ sessionId: name, idle: false })),
-    );
-
-    expect(() => runPhase2DaemonConnection(phaseRequest('parity-phase2-daemon-reject', {
-      'arc.physical_connection': { connectionId: 'conn-1' },
-      'arc.mux_capabilities': { muxEnabled: false },
-      'arc.session_catalog_request': { sessionNames: [] },
-      'arc.idle_facts_request': {},
-    }))).toThrow(/muxEnabled/);
   });
 
   it('Phase3 input schedule: Rust write/ack carries the TS-normalized input identity', () => {

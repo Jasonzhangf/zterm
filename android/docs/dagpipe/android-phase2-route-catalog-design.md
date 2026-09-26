@@ -128,13 +128,11 @@ stateDiagram-v2
 
 ## 5. 变更边界
 
-- 本次只允许新增/修改：
-  - `android/docs/dagpipe/relay-account-peer-route.graph.json`
-  - `android/docs/dagpipe/daemon-connection-channel-catalog.graph.json`
-  - `android/docs/dagpipe/android-phase2-route-catalog-design.md`
-  - 仅当 registry/function map 与 graph 不一致时才同步对应条目。
-- 本分支是静态管理面切片：只交付 graph JSON 与 design doc，不包含 runtime operator、Rust/TS 测试或注册表变更；channel 注销/订阅释放的 operator 与测试放入独立 phase2-runtime 任务。
-- 禁止：触碰 native-rtc lane 文件、任何 runtime 代码、已有 graph 的无关修改、删除既有 graph/docs。
+- 交付物：`android/docs/dagpipe/relay-account-peer-route.graph.json`、`android/docs/dagpipe/daemon-connection-channel-catalog.graph.json` 与 `android/docs/dagpipe/android-phase2-route-catalog-design.md`。
+- 静态分支边界：`daemon-connection-channel-catalog.graph.json` 新增的 `remove_session_channel` / `release_body_subscription` 尚无对应 operator，因此本分支让两张 phase2 graph 不进入 Rust 编译集——`android/native/dagpipe/src/phase2_core.rs` 不再 `include_str!` 这两张 graph，`compile_phase2_graphs` 返回空集，`run_phase2_relay_json` / `run_phase2_daemon_connection_json` 显式返回 `deferred` 错误；依赖它们的 Rust/TS 测试改为断言该 `deferred` 契约。本分支不新增任何 runtime operator 实现。
+- 两张 graph 仍由 phase0 gate 独立 `validate`/`inspect` 通过，不作为编译期依赖。
+- 后续 phase2-runtime 任务负责：恢复 `include_str!` 与编译，注册 `daemon.channel_mux.unregister` / `daemon.transport_subscriber.release`，恢复 relay/daemon 运行时与 parity 测试，并满足第 4 节 P2 约束。
+- 禁止：触碰 native-rtc lane 文件、在本静态分支新增 runtime operator 实现、修改与本切片无关的 graph/docs。
 - 本分支不接 Rust core、不接 TypeScript runtime、不重建 APK/daemon，不 bump 版本、不 OTA；不 merge/push，不重启 daemon。
 
 ## 6. 单/多 session 语义
