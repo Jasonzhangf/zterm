@@ -1058,4 +1058,83 @@ describe('AndroidConnectionServiceTransportSocket', () => {
       reason: 'connection service startup failed: bridge unavailable',
     }));
   });
+
+  it('projects auto rtc-direct path, endpoint and selected ICE pair from native snapshot', async () => {
+    const { add } = listenerMock();
+    plugin.addListener.mockImplementation(add);
+    plugin.readSnapshot.mockResolvedValue({
+      state: 'healthy',
+      generation: 'g-rtc-direct-diag',
+      target,
+      route: { mode: 'auto' },
+      channels: [],
+      lastHeartbeatAt: 12,
+      lastActivityAt: 12,
+      nextRetryAt: null,
+      error: null,
+      muxReadyPayload,
+      resolvedPath: 'rtc-direct',
+      resolvedRelayTransport: 'direct',
+      resolvedEndpoint: 'relay.example',
+      selectedIcePair: {
+        roundTripTimeMs: 12,
+        local: { candidateType: 'srflx', address: '203.0.113.5', port: 5000, protocol: 'udp' },
+        remote: { candidateType: 'srflx', address: '198.51.100.7', port: 4000, protocol: 'udp' },
+      },
+    });
+    const socket = new AndroidConnectionServiceTransportSocket(target);
+    await socket.start();
+    socket.onopen = vi.fn();
+    await Promise.resolve();
+
+    expect(socket.getDiagnostics()).toEqual(expect.objectContaining({
+      mode: 'webrtc',
+      resolvedPath: 'rtc-direct',
+      resolvedRelayTransport: 'direct',
+      resolvedEndpoint: 'relay.example',
+      selectedIcePair: expect.objectContaining({
+        local: expect.objectContaining({ candidateType: 'srflx', address: '203.0.113.5' }),
+        remote: expect.objectContaining({ candidateType: 'srflx', address: '198.51.100.7' }),
+      }),
+    }));
+  });
+
+  it('projects auto rtc-relay path and turn metadata from native snapshot', async () => {
+    const { add } = listenerMock();
+    plugin.addListener.mockImplementation(add);
+    plugin.readSnapshot.mockResolvedValue({
+      state: 'healthy',
+      generation: 'g-rtc-relay-diag',
+      target,
+      route: { mode: 'auto' },
+      channels: [],
+      lastHeartbeatAt: 13,
+      lastActivityAt: 13,
+      nextRetryAt: null,
+      error: null,
+      muxReadyPayload,
+      resolvedPath: 'rtc-relay',
+      resolvedRelayTransport: 'turn',
+      resolvedEndpoint: 'relay.example',
+      selectedIcePair: {
+        local: { candidateType: 'relay', address: '203.0.113.6', port: 5011, protocol: 'udp', relayProtocol: 'turn' },
+        remote: { candidateType: 'relay', address: '198.51.100.8', port: 3478, protocol: 'udp', relayProtocol: 'turn' },
+      },
+    });
+    const socket = new AndroidConnectionServiceTransportSocket(target);
+    await socket.start();
+    socket.onopen = vi.fn();
+    await Promise.resolve();
+
+    expect(socket.getDiagnostics()).toEqual(expect.objectContaining({
+      mode: 'webrtc',
+      resolvedPath: 'rtc-relay',
+      resolvedRelayTransport: 'turn',
+      resolvedEndpoint: 'relay.example',
+      selectedIcePair: expect.objectContaining({
+        local: expect.objectContaining({ candidateType: 'relay', relayProtocol: 'turn' }),
+        remote: expect.objectContaining({ candidateType: 'relay', relayProtocol: 'turn' }),
+      }),
+    }));
+  });
 });

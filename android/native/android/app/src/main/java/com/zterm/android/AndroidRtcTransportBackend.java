@@ -13,12 +13,16 @@ import org.webrtc.IceCandidate;
 import org.webrtc.MediaConstraints;
 import org.webrtc.PeerConnection;
 import org.webrtc.PeerConnectionFactory;
+import org.webrtc.RTCStats;
+import org.webrtc.RTCStatsCollectorCallback;
+import org.webrtc.RTCStatsReport;
 import org.webrtc.SdpObserver;
 import org.webrtc.SessionDescription;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Map;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.Executors;
@@ -52,6 +56,8 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
         void onRtcText(String text);
         void onRtcError(String message);
         void onRtcClosed(int code, String reason);
+        default void onRtcSelectedIcePair(String json) {
+        }
     }
 
     private final Context context;
@@ -69,6 +75,8 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
     private PeerConnection peerConnection;
     private DataChannel dataChannel;
     private volatile DataChannel.State dataChannelState = DataChannel.State.CONNECTING;
+    private volatile PeerConnection.IceConnectionState iceConnectionState =
+        PeerConnection.IceConnectionState.NEW;
     private volatile boolean disposed;
     private volatile boolean openPublished;
     private ScheduledFuture<?> stabilityFuture;
@@ -210,9 +218,15 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
         if (isOpen()) {
             return;
         }
-        listener.onRtcError(throwable == null ? "rtc signaling websocket failure"
-            : "rtc signaling websocket failure: " + throwable.getMessage());
-        closeQuietly("rtc signaling websocket failure");
+        String message = throwable == null ? "rtc signaling websocket failure"
+            : "rtc signaling websocket failure: " + throwable.getMessage();
+        if (response != null && (response.code() == 401 || response.code() == 403)) {
+            listener.onRtcClosed(response.code(), message);
+            closeQuietly(message);
+            return;
+        }
+        listener.onRtcError(message);
+        closeQuietly(message);
     }
 
     @Override
@@ -269,7 +283,8 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
             if ("rtc-error".equals(type)) {
                 String reason = payload == null || payload.isNull("message")
                     ? "rtc signaling error" : payload.optString("message", "rtc signaling error");
-                listener.onRtcClosed(4004, reason);
+                int code = payload == null ? 4004 : payload.optInt("code", 4004);
+                listener.onRtcClosed(code, reason);
                 closeQuietly(reason);
                 return;
             }
@@ -479,10 +494,14 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
 
         @Override
         public void onIceConnectionChange(PeerConnection.IceConnectionState iceConnectionState) {
+            AndroidRtcTransportBackend.this.iceConnectionState = iceConnectionState;
             if (iceConnectionState == PeerConnection.IceConnectionState.FAILED
                 || iceConnectionState == PeerConnection.IceConnectionState.CLOSED) {
                 listener.onRtcClosed(1006, "rtc ice connection " + iceConnectionState.name().toLowerCase(Locale.ROOT));
                 closeQuietly("rtc ice connection " + iceConnectionState.name().toLowerCase(Locale.ROOT));
+            } else if (iceConnectionState == PeerConnection.IceConnectionState.CONNECTED
+                || iceConnectionState == PeerConnection.IceConnectionState.COMPLETED) {
+                maybePublishSelectedIcePair();
             }
         }
 
@@ -606,7 +625,119 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
             return;
         }
         openPublished = true;
+        maybePublishSelectedIcePair();
         listener.onRtcOpen();
+    }
+
+    private void maybePublishSelectedIcePair() {
+        PeerConnection peer = peerConnection;
+        if (disposed || peer == null) {
+            return;
+        }
+        if (iceConnectionState != PeerConnection.IceConnectionState.CONNECTED
+            && iceConnectionState != PeerConnection.IceConnectionState.COMPLETED) {
+            return;
+        }
+        try {
+            peer.getStats(new RTCStatsCollectorCallback() {
+                @Override
+                public void onStatsDelivered(RTCStatsReport report) {
+                    if (disposed) {
+                        return;
+                    }
+                    try {
+                        JSONObject pair = selectedIcePairFromReport(report);
+                        if (pair != null) {
+                            listener.onRtcSelectedIcePair(pair.toString());
+                        }
+                    } catch (JSONException error) {
+                        Log.w(TAG, "failed to parse rtc stats", error);
+                    }
+                }
+            });
+        } catch (RuntimeException error) {
+            Log.w(TAG, "rtc stats unavailable", error);
+        }
+    }
+
+    private static JSONObject selectedIcePairFromReport(RTCStatsReport report)
+        throws JSONException {
+        if (report == null) {
+            return null;
+        }
+        Map<String, RTCStats> stats = report.getStatsMap();
+        if (stats == null) {
+            return null;
+        }
+        JSONObject selectedPair = null;
+        for (RTCStats stat : stats.values()) {
+            if (stat == null || !"candidate-pair".equals(stat.getType())) {
+                continue;
+            }
+            Object selected = stat.getMembers().get("selected");
+            boolean chosen = selected instanceof Boolean && (Boolean) selected;
+            if (selectedPair != null && !chosen) {
+                continue;
+            }
+            JSONObject pair = new JSONObject();
+            JSONObject local = candidateJson(stats, stat.getMembers().get("localCandidateId"));
+            JSONObject remote = candidateJson(stats, stat.getMembers().get("remoteCandidateId"));
+            if (local != null) {
+                pair.put("local", local);
+            }
+            if (remote != null) {
+                pair.put("remote", remote);
+            }
+            Object rtt = stat.getMembers().get("currentRoundTripTime");
+            if (rtt instanceof Number) {
+                pair.put("roundTripTimeMs", ((Number) rtt).doubleValue());
+            }
+            selectedPair = pair;
+            if (chosen) {
+                break;
+            }
+        }
+        return selectedPair;
+    }
+
+    private static JSONObject candidateJson(Map<String, RTCStats> stats, Object id)
+        throws JSONException {
+        if (!(id instanceof String)) {
+            return null;
+        }
+        RTCStats stat = stats.get(id);
+        if (stat == null) {
+            return null;
+        }
+        JSONObject json = new JSONObject();
+        putString(json, "id", stat.getId());
+        putString(json, "candidateType", stringMember(stat, "candidateType"));
+        putString(json, "address", stringMember(stat, "address"));
+        putNumber(json, "port", stat.getMembers().get("port"));
+        putString(json, "protocol", stringMember(stat, "protocol"));
+        putString(json, "networkType", stringMember(stat, "networkType"));
+        putString(json, "relayProtocol", stringMember(stat, "relayProtocol"));
+        putString(json, "url", stringMember(stat, "url"));
+        return json;
+    }
+
+    private static String stringMember(RTCStats stat, String key) {
+        Object value = stat.getMembers().get(key);
+        return value == null ? null : String.valueOf(value);
+    }
+
+    private static void putString(JSONObject json, String key, String value)
+        throws JSONException {
+        if (value != null && !value.isEmpty()) {
+            json.put(key, value);
+        }
+    }
+
+    private static void putNumber(JSONObject json, String key, Object value)
+        throws JSONException {
+        if (value instanceof Number) {
+            json.put(key, ((Number) value).doubleValue());
+        }
     }
 
     private void cancelStabilityFuture() {

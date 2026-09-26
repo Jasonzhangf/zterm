@@ -12,6 +12,10 @@ import org.webrtc.PeerConnection;
 import org.webrtc.SdpObserver;
 import org.webrtc.SessionDescription;
 import okhttp3.WebSocket;
+import okhttp3.Protocol;
+import okhttp3.Request;
+import okhttp3.Response;
+import okhttp3.ResponseBody;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Proxy;
@@ -228,6 +232,56 @@ public final class AndroidRtcTransportBackendTest {
 
         assertEquals(Collections.singletonList(4004), listener.closedCodes);
         assertTrue(listener.events.get(0).contains("closed:4004:bad"));
+    }
+
+    @Test
+    public void signalingErrorPreservesUnauthorizedBridgeTokenCloseCode() {
+        RecordingListener listener = new RecordingListener();
+        AndroidRtcTransportBackend backend = new AndroidRtcTransportBackend(
+            null, null, "wss://relay.example/client", new JSONArray(), "all",
+            true, 1_000L, listener);
+
+        backend.handleSignalMessage(
+            "{\"type\":\"rtc-error\",\"payload\":{\"code\":4001,\"message\":\"bridge token unauthorized\"}}");
+
+        assertEquals(Collections.singletonList(4001), listener.closedCodes);
+        assertTrue(listener.events.get(0).contains("closed:4001:bridge token unauthorized"));
+    }
+
+    @Test
+    public void signalingErrorPreservesUnauthorizedRelayClientCloseCode() {
+        RecordingListener listener = new RecordingListener();
+        AndroidRtcTransportBackend backend = new AndroidRtcTransportBackend(
+            null, null, "wss://relay.example/client", new JSONArray(), "all",
+            true, 1_000L, listener);
+
+        backend.handleSignalMessage(
+            "{\"type\":\"rtc-error\",\"payload\":{\"code\":4401,\"message\":\"relay client unauthorized\"}}");
+
+        assertEquals(Collections.singletonList(4401), listener.closedCodes);
+        assertTrue(listener.events.get(0).contains("closed:4401:relay client unauthorized"));
+    }
+
+    @Test
+    public void signalingHttpFailure401ReportsAuthCloseCode() throws Exception {
+        RecordingListener listener = new RecordingListener();
+        AndroidRtcTransportBackend backend = new AndroidRtcTransportBackend(
+            null, null, "wss://relay.example/client", new JSONArray(), "all",
+            true, 1_000L, listener);
+        WebSocket webSocket = fakeWebSocket();
+        setField(backend, "signalSocket", webSocket);
+        Response response = new Response.Builder()
+            .request(new Request.Builder().url("https://relay.example/client").build())
+            .protocol(Protocol.HTTP_1_1)
+            .code(401)
+            .message("Unauthorized")
+            .body(ResponseBody.create(null, ""))
+            .build();
+
+        backend.onFailure(webSocket, new RuntimeException("401"), response);
+
+        assertEquals(Collections.singletonList(401), listener.closedCodes);
+        assertTrue(listener.events.get(0).startsWith("closed:401:"));
     }
 
     @Test

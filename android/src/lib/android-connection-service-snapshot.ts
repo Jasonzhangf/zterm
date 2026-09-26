@@ -2,6 +2,11 @@ import type {
   AndroidConnectionServiceRoutePolicy,
   AndroidConnectionServiceTarget,
 } from './android-connection-service-commands';
+import type {
+  TraversalResolvedPath,
+  TraversalResolvedRelayTransport,
+  TraversalSelectedIcePairDiagnostic,
+} from './traversal/types';
 
 export type AndroidConnectionServiceState =
   | 'idle'
@@ -42,6 +47,10 @@ export interface AndroidConnectionServiceSnapshot {
   nextRetryAt: number | null;
   error: AndroidConnectionServiceError | null;
   muxReadyPayload: Record<string, unknown> | null;
+  resolvedPath?: TraversalResolvedPath | null;
+  resolvedRelayTransport?: TraversalResolvedRelayTransport | null;
+  resolvedEndpoint?: string | null;
+  selectedIcePair?: TraversalSelectedIcePairDiagnostic | null;
 }
 
 export type AndroidConnectionServiceEvent =
@@ -87,6 +96,10 @@ function readonlySnapshot(snapshot: AndroidConnectionServiceSnapshot): AndroidCo
     channels: snapshot.channels.map((channel) => ({ ...channel })),
     error: snapshot.error ? { ...snapshot.error } : null,
     muxReadyPayload: snapshot.muxReadyPayload ? { ...snapshot.muxReadyPayload } : null,
+    resolvedPath: snapshot.resolvedPath ?? null,
+    resolvedRelayTransport: snapshot.resolvedRelayTransport ?? null,
+    resolvedEndpoint: snapshot.resolvedEndpoint ?? null,
+    selectedIcePair: snapshot.selectedIcePair ? { ...snapshot.selectedIcePair } : null,
   };
 }
 
@@ -119,10 +132,14 @@ export function createAndroidConnectionServiceStateMachine(options: AndroidConne
         channels: [],
         lastHeartbeatAt: null,
         lastActivityAt: null,
-        nextRetryAt: null,
-        error: null,
-        muxReadyPayload: null,
-      };
+  nextRetryAt: null,
+  error: null,
+  muxReadyPayload: null,
+  resolvedPath: null,
+  resolvedRelayTransport: null,
+  resolvedEndpoint: null,
+  selectedIcePair: null,
+};
       retiredGenerations = new Set();
       consecutiveHeartbeatMisses = 0;
       return true;

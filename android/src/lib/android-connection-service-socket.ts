@@ -162,21 +162,33 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
 
   getDiagnostics() {
     const route = this.readySnapshot?.route;
-    const resolvedPath = route?.mode === 'manual'
-      && (route.path === 'rtc-direct' || route.path === 'rtc-relay'
-        || route.path === 'lan' || route.path === 'tailscale'
-        || route.path === 'ipv4' || route.path === 'ipv6')
-      ? route.path
-      : undefined;
+    const resolvedPath = this.readySnapshot?.resolvedPath ?? (
+      route?.mode === 'manual'
+        && (route.path === 'rtc-direct' || route.path === 'rtc-relay'
+          || route.path === 'lan' || route.path === 'tailscale'
+          || route.path === 'ipv4' || route.path === 'ipv6')
+        ? route.path
+        : undefined
+    );
     const mode: 'auto' | 'websocket' | 'webrtc' = route?.mode === 'manual'
       ? resolvedPath === 'rtc-direct' || resolvedPath === 'rtc-relay'
         ? 'webrtc'
         : 'websocket'
-      : 'auto';
+      : resolvedPath === 'rtc-direct' || resolvedPath === 'rtc-relay'
+        ? 'webrtc'
+        : 'auto';
     return {
       mode,
       ...(resolvedPath ? { resolvedPath } : {}),
-      resolvedEndpoint: '',
+      ...(this.readySnapshot?.resolvedRelayTransport
+        ? { resolvedRelayTransport: this.readySnapshot.resolvedRelayTransport }
+        : {}),
+      ...(this.readySnapshot?.resolvedEndpoint
+        ? { resolvedEndpoint: this.readySnapshot.resolvedEndpoint }
+        : {}),
+      ...(this.readySnapshot?.selectedIcePair
+        ? { selectedIcePair: this.readySnapshot.selectedIcePair }
+        : {}),
       stage: this.readyState === WebSocket.OPEN ? 'open' as const : 'closed' as const,
       attempts: [],
     };

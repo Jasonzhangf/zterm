@@ -1021,6 +1021,12 @@ public class AndroidConnectionService extends Service {
                                 return;
                             }
                             clearCandidateTimeout();
+                            stateMachine.dispatch(AndroidConnectionServiceEvent.transportResolved(
+                                generation,
+                                candidate.path,
+                                resolvedRelayTransportFor(candidate),
+                                endpointFor(candidate),
+                                null), System.currentTimeMillis());
                             sendMuxHello();
                             scheduleHeartbeat();
                             scheduleBackoffReset();
@@ -1060,7 +1066,27 @@ public class AndroidConnectionService extends Service {
                                 || transportNetworkGeneration != networkGeneration) {
                                 return;
                             }
-                            transportFailure("rtc-closed-" + code, reason);
+                            if (isAuthRtcClose(code, reason)) {
+                                authFailure("auth-close-" + code, reason == null ? "rtc signaling auth closed" : reason);
+                            } else {
+                                transportFailure("rtc-closed-" + code, reason);
+                            }
+                        });
+                    }
+
+                    @Override
+                    public void onRtcSelectedIcePair(String json) {
+                        workerHandler.post(() -> {
+                            if (stopped || rtcBackend != self() || generation == null
+                                || transportNetworkGeneration != networkGeneration) {
+                                return;
+                            }
+                            stateMachine.dispatch(AndroidConnectionServiceEvent.transportResolved(
+                                generation,
+                                candidate.path,
+                                resolvedRelayTransportFor(candidate),
+                                endpointFor(candidate),
+                                json), System.currentTimeMillis());
                         });
                     }
                 });
@@ -1372,8 +1398,7 @@ public class AndroidConnectionService extends Service {
             }
             String reasonText = reason == null ? "closed" : reason;
             // Auth close codes: 4001=bridge token, 4003=auth, 4401=unauthorized, 4403=forbidden
-            if (code == 4001 || code == 4003 || code == 4401 || code == 4403
-                    || reasonText.toLowerCase(java.util.Locale.ROOT).matches(".*(unauthorized|forbidden|token.*invalid|auth.*fail).*")) {
+            if (isAuthRtcClose(code, reasonText)) {
                 authFailure("auth-close-" + code, reasonText);
                 return;
             }
@@ -2387,6 +2412,56 @@ public class AndroidConnectionService extends Service {
 
     private static boolean nonEmpty(String value) {
         return value != null && !value.trim().isEmpty();
+    }
+
+    private static boolean isAuthCloseCode(int code) {
+        return code == 4001 || code == 4003 || code == 4401 || code == 4403
+            || code == 401 || code == 403;
+    }
+
+    static boolean isAuthRtcClose(int code, String reason) {
+        return isAuthCloseCode(code) || isAuthLikeReason(reason);
+    }
+
+    private static boolean isAuthLikeReason(String reason) {
+        if (reason == null || reason.trim().isEmpty()) {
+            return false;
+        }
+        return reason.toLowerCase(Locale.ROOT).matches(
+            ".*(unauthorized|forbidden|token.*invalid|auth.*fail).*");
+    }
+
+    private static String resolvedRelayTransportFor(RouteCandidate candidate) {
+        if (candidate == null || !candidate.rtc) {
+            return null;
+        }
+        if ("rtc-relay".equals(candidate.path)) {
+            return "turn";
+        }
+        if ("rtc-direct".equals(candidate.path)) {
+            return "direct";
+        }
+        return null;
+    }
+
+    private static String endpointFor(RouteCandidate candidate) {
+        if (candidate == null) {
+            return null;
+        }
+        String url = candidate.rtc ? candidate.signalUrl : candidate.url;
+        if (url == null || url.trim().isEmpty()) {
+            return null;
+        }
+        try {
+            URI uri = new URI(url);
+            if (uri.getHost() == null || uri.getHost().trim().isEmpty()) {
+                return null;
+            }
+            return uri.getPort() >= 0 ? uri.getHost() + ":" + uri.getPort() : uri.getHost();
+        } catch (URISyntaxException error) {
+            Log.d(TAG, "invalid resolved endpoint url: " + error.getMessage());
+            return null;
+        }
     }
 
     private static boolean isLikelyTailscale(String host) {

@@ -18,6 +18,7 @@ public final class AndroidConnectionServiceEvent {
         HEARTBEAT_PONG,
         SERVER_ACTIVITY,
         HEARTBEAT_MISSED,
+        TRANSPORT_RESOLVED,
         TRANSPORT_FAILURE,
         AUTHENTICATION_FAILURE,
         TERMINAL_FAILURE,
@@ -35,6 +36,10 @@ public final class AndroidConnectionServiceEvent {
     public final Long atMillis;
     public final String message;
     public final String muxReadyPayloadJson;
+    public final String resolvedPath;
+    public final String resolvedRelayTransport;
+    public final String resolvedEndpoint;
+    public final String selectedIcePairJson;
 
     private AndroidConnectionServiceEvent(Builder b) {
         this.type = b.type;
@@ -47,6 +52,10 @@ public final class AndroidConnectionServiceEvent {
         this.atMillis = b.atMillis;
         this.message = b.message;
         this.muxReadyPayloadJson = b.muxReadyPayloadJson;
+        this.resolvedPath = b.resolvedPath;
+        this.resolvedRelayTransport = b.resolvedRelayTransport;
+        this.resolvedEndpoint = b.resolvedEndpoint;
+        this.selectedIcePairJson = b.selectedIcePairJson;
     }
 
     public static AndroidConnectionServiceEvent bindTarget(AndroidConnectionServiceTarget target) {
@@ -63,6 +72,21 @@ public final class AndroidConnectionServiceEvent {
 
     public static AndroidConnectionServiceEvent transportOpening(String generation) {
         return new Builder(Type.TRANSPORT_OPENING).generation(generation).build();
+    }
+
+    public static AndroidConnectionServiceEvent transportResolved(
+        String generation,
+        String resolvedPath,
+        String resolvedRelayTransport,
+        String resolvedEndpoint,
+        String selectedIcePairJson) {
+        return new Builder(Type.TRANSPORT_RESOLVED)
+            .generation(generation)
+            .resolvedPath(resolvedPath)
+            .resolvedRelayTransport(resolvedRelayTransport)
+            .resolvedEndpoint(resolvedEndpoint)
+            .selectedIcePairJson(selectedIcePairJson)
+            .build();
     }
 
     public static AndroidConnectionServiceEvent muxReady(String generation, String muxReadyPayloadJson) {
@@ -123,6 +147,10 @@ public final class AndroidConnectionServiceEvent {
         private Long atMillis;
         private String message;
         private String muxReadyPayloadJson;
+        private String resolvedPath;
+        private String resolvedRelayTransport;
+        private String resolvedEndpoint;
+        private String selectedIcePairJson;
 
         public Builder(Type type) { this.type = type; }
 
@@ -135,6 +163,10 @@ public final class AndroidConnectionServiceEvent {
         public Builder at(long v) { this.atMillis = v; return this; }
         public Builder message(String v) { this.message = v; return this; }
         public Builder muxReadyPayloadJson(String v) { this.muxReadyPayloadJson = v; return this; }
+        public Builder resolvedPath(String v) { this.resolvedPath = v; return this; }
+        public Builder resolvedRelayTransport(String v) { this.resolvedRelayTransport = v; return this; }
+        public Builder resolvedEndpoint(String v) { this.resolvedEndpoint = v; return this; }
+        public Builder selectedIcePairJson(String v) { this.selectedIcePairJson = v; return this; }
 
         public AndroidConnectionServiceEvent build() {
             if (generation == null && (type == Type.TRANSPORT_OPENING
@@ -144,6 +176,7 @@ public final class AndroidConnectionServiceEvent {
                 || type == Type.HEARTBEAT_PONG
                 || type == Type.SERVER_ACTIVITY
                 || type == Type.HEARTBEAT_MISSED
+                || type == Type.TRANSPORT_RESOLVED
                 || type == Type.TRANSPORT_FAILURE
                 || type == Type.AUTHENTICATION_FAILURE
                 || type == Type.TERMINAL_FAILURE

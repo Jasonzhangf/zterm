@@ -860,6 +860,16 @@ public final class AndroidConnectionServiceTransportTest {
         }
     }
 
+    @Test
+    public void rtcAuthCloseClassificationMatchesRelayAndBridgeAuthCodes() {
+        assertTrue(AndroidConnectionService.isAuthRtcClose(4001, "bridge token unauthorized"));
+        assertTrue(AndroidConnectionService.isAuthRtcClose(4401, "relay client unauthorized"));
+        assertTrue(AndroidConnectionService.isAuthRtcClose(401, "http unauthorized"));
+        assertTrue(AndroidConnectionService.isAuthRtcClose(403, "http forbidden"));
+        assertTrue(AndroidConnectionService.isAuthRtcClose(1000, "token invalid"));
+        assertFalse(AndroidConnectionService.isAuthRtcClose(1000, "normal close"));
+    }
+
     private static void setDesiredChannelOpened(Object runtime, String channelId, boolean opened)
         throws Exception {
         Field desiredChannelsField = runtime.getClass().getDeclaredField("desiredChannels");
