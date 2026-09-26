@@ -18,6 +18,7 @@ flowchart TD
   AndroidConnectionServiceIn02BindTarget --> AndroidConnectionServicePlugin
   AndroidConnectionServiceIn03ReleaseTarget --> AndroidConnectionServicePlugin
   AndroidConnectionServicePlugin --> AndroidConnectionService["native AndroidConnectionService (WebSocket owner)"]
+  AndroidConnectionService --> AndroidRtcTransportBackend["native AndroidRtcTransportBackend (candidate signaling/ICE/DataChannel owner)"]
   AndroidConnectionService --> AndroidConnectionServiceOut01Snapshot["AndroidConnectionServiceOut01Snapshot"]
   AndroidConnectionService --> AndroidConnectionServiceOut02ServerFrame["AndroidConnectionServiceOut02ServerFrame"]
   AndroidConnectionService --> AndroidConnectionServiceOut03CommandRejected["AndroidConnectionServiceOut03CommandRejected"]

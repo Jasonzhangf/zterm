@@ -38,6 +38,12 @@ export interface AndroidConnectionServiceTarget {
   ipv6Host?: string;
   ipv4Host?: string;
   signalUrl?: string;
+  signalToken?: string;
+  signalUrlFromRelay?: boolean;
+  relayDeviceId?: string;
+  turnUrl?: string;
+  turnUsername?: string;
+  turnCredential?: string;
 }
 
 export type AndroidConnectionCommand =
@@ -149,6 +155,12 @@ function parseTarget(value: unknown): AndroidConnectionServiceTarget {
     ...(optionalString(value.ipv6Host) ? { ipv6Host: optionalString(value.ipv6Host) } : {}),
     ...(optionalString(value.ipv4Host) ? { ipv4Host: optionalString(value.ipv4Host) } : {}),
     ...(optionalString(value.signalUrl) ? { signalUrl: optionalString(value.signalUrl) } : {}),
+    ...(optionalString(value.signalToken) ? { signalToken: optionalString(value.signalToken) } : {}),
+    ...(value.signalUrlFromRelay === true ? { signalUrlFromRelay: true } : {}),
+    ...(optionalString(value.relayDeviceId) ? { relayDeviceId: optionalString(value.relayDeviceId) } : {}),
+    ...(optionalString(value.turnUrl) ? { turnUrl: optionalString(value.turnUrl) } : {}),
+    ...(optionalString(value.turnUsername) ? { turnUsername: optionalString(value.turnUsername) } : {}),
+    ...(optionalString(value.turnCredential) ? { turnCredential: optionalString(value.turnCredential) } : {}),
   };
 }
 

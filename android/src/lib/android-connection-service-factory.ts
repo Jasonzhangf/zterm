@@ -5,6 +5,7 @@ import type { Host } from './types';
 import { buildTransportTargetKey } from './session-transport-runtime';
 import { AndroidConnectionServiceTransportSocket } from './android-connection-service-socket';
 import type { AndroidConnectionServiceTarget } from './android-connection-service-commands';
+import type { BridgeSettings } from './bridge-settings';
 import type { BridgeTransportSocket } from './traversal/types';
 import {
   runDagpipeBufferManagement,
@@ -14,7 +15,30 @@ import {
   runDagpipePhase8Connection,
 } from './dagpipe-native-client';
 
-export function buildAndroidConnectionServiceTarget(host: Host): AndroidConnectionServiceTarget {
+export type AndroidConnectionServiceTraversalSettings = Pick<
+  BridgeSettings,
+  'signalUrl' | 'turnServerUrl' | 'turnUsername' | 'turnCredential' | 'traversalRelay'
+>;
+
+export function buildAndroidConnectionServiceTarget(
+  host: Host,
+  settings?: AndroidConnectionServiceTraversalSettings,
+): AndroidConnectionServiceTarget {
+  const turnUrl = settings?.traversalRelay?.turnUrl?.trim() || settings?.turnServerUrl?.trim() || '';
+  const turnUsername = settings?.traversalRelay?.turnUsername?.trim() || settings?.turnUsername?.trim() || '';
+  const turnCredential = settings?.traversalRelay?.turnCredential || settings?.turnCredential || '';
+  const signalUrl = host.signalUrl?.trim()
+    || settings?.traversalRelay?.wsClientUrl?.trim()
+    || settings?.signalUrl?.trim()
+    || '';
+  const signalFromRelay = Boolean(settings?.traversalRelay?.wsClientUrl?.trim())
+    && !host.signalUrl?.trim();
+  const signalToken = signalFromRelay
+    ? settings?.traversalRelay?.accessToken?.trim() || ''
+    : '';
+  const relayDeviceId = host.relayDeviceId?.trim()
+    || settings?.traversalRelay?.deviceId?.trim()
+    || '';
   return {
     targetKey: buildTransportTargetKey(host),
     bridgeHost: host.bridgeHost,
@@ -28,14 +52,21 @@ export function buildAndroidConnectionServiceTarget(host: Host): AndroidConnecti
     ...(host.tailscaleHost ? { tailscaleHost: host.tailscaleHost } : {}),
     ...(host.ipv6Host ? { ipv6Host: host.ipv6Host } : {}),
     ...(host.ipv4Host ? { ipv4Host: host.ipv4Host } : {}),
-    ...(host.signalUrl ? { signalUrl: host.signalUrl } : {}),
+    ...(signalUrl ? { signalUrl } : {}),
+    ...(signalToken ? { signalToken } : {}),
+    ...(signalFromRelay ? { signalUrlFromRelay: true } : {}),
+    ...(relayDeviceId ? { relayDeviceId } : {}),
+    ...(turnUrl ? { turnUrl } : {}),
+    ...(turnUsername ? { turnUsername } : {}),
+    ...(turnCredential ? { turnCredential } : {}),
   };
 }
 
 export function openAndroidConnectionServiceTransportSocket(
   host: Host,
+  settings?: AndroidConnectionServiceTraversalSettings,
 ): BridgeTransportSocket {
-  const target = buildAndroidConnectionServiceTarget(host);
+  const target = buildAndroidConnectionServiceTarget(host, settings);
   const socket = new AndroidConnectionServiceTransportSocket(target);
   const startup = socket.start();
   startup.then(
