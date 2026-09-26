@@ -465,7 +465,7 @@ public final class AndroidConnectionServiceTransportTest {
             .build();
 
         assertEquals(
-            java.util.Arrays.asList("lan", "tailscale", "ipv4"),
+            java.util.Arrays.asList("lan", "ipv4", "tailscale"),
             candidatePaths(newRuntime(service, target)));
     }
 
@@ -483,7 +483,7 @@ public final class AndroidConnectionServiceTransportTest {
             .build();
 
         assertEquals(
-            java.util.Arrays.asList("tailscale", "ipv4"),
+            java.util.Arrays.asList("ipv4", "tailscale"),
             candidatePaths(newRuntime(service, target)));
     }
 
@@ -508,7 +508,7 @@ public final class AndroidConnectionServiceTransportTest {
             .build();
 
         assertEquals(
-            java.util.Arrays.asList("lan", "tailscale", "ipv6", "ipv4", "rtc-direct", "rtc-relay"),
+            java.util.Arrays.asList("lan", "ipv4", "ipv6", "rtc-direct", "tailscale", "rtc-relay"),
             candidatePaths(newRuntime(service, target)));
     }
 
@@ -620,7 +620,7 @@ public final class AndroidConnectionServiceTransportTest {
     }
 
     @Test
-    public void rtcDirectCandidateTimeoutAdvancesToRtcRelayWhenPresent()
+    public void rtcDirectCandidateTimeoutAdvancesToTailscaleInDeclaredOrder()
         throws Exception {
         AndroidConnectionService.resetForTests();
         try {
@@ -656,11 +656,10 @@ public final class AndroidConnectionServiceTransportTest {
             openCandidate.setAccessible(true);
             openCandidate.invoke(runtime);
             openCandidate.invoke(runtime);
-            openCandidate.invoke(runtime);
 
-            assertEquals(3, openedUrls.size());
+            assertEquals(2, openedUrls.size());
             assertTrue("opened=" + openedUrls,
-                openedUrls.get(2).contains("relay.example/client"));
+                openedUrls.get(1).contains("relay.example/client"));
 
             Field timeoutField = runtime.getClass().getDeclaredField("candidateTimeout");
             timeoutField.setAccessible(true);
@@ -668,10 +667,10 @@ public final class AndroidConnectionServiceTransportTest {
             assertNotNull("candidate timeout must be scheduled for rtc-direct", timeout);
             timeout.run();
 
-            assertEquals("timeout must advance to rtc-relay",
-                4, openedUrls.size());
-            assertTrue("next tier must be rtc-relay",
-                openedUrls.get(3).contains("relay.example/client"));
+            assertEquals("timeout must advance to Tailscale after rtc-direct",
+                3, openedUrls.size());
+            assertTrue("next tier must be Tailscale",
+                openedUrls.get(2).contains("100.64.0.2"));
 
             Field stateMachineField = runtime.getClass().getDeclaredField("stateMachine");
             stateMachineField.setAccessible(true);
@@ -724,8 +723,8 @@ public final class AndroidConnectionServiceTransportTest {
             assertEquals(2, openedUrls.size());
             assertTrue("first candidate must be the same-subnet LAN url",
                 openedUrls.get(0).contains("127.0.0.2"));
-            assertTrue("failure must fall through to the next auto Tailscale candidate",
-                openedUrls.get(1).contains("100.64.0.2"));
+            assertTrue("failure must fall through to the next UDP-direct IPv4 candidate",
+                openedUrls.get(1).contains("203.0.113.10"));
 
             Field stateMachineField = runtime.getClass().getDeclaredField("stateMachine");
             stateMachineField.setAccessible(true);

@@ -205,6 +205,9 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
         if (disposed || signalSocket != webSocket) {
             return;
         }
+        if (isOpen()) {
+            return;
+        }
         listener.onRtcError(throwable == null ? "rtc signaling websocket failure"
             : "rtc signaling websocket failure: " + throwable.getMessage());
         closeQuietly("rtc signaling websocket failure");

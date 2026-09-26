@@ -1104,10 +1104,10 @@ public class AndroidConnectionService extends Service {
             if (isLocalLanHost(target.lanHost)) {
                 addCandidate(candidates, seenUrls, AndroidConnectionServiceRoutePolicy.Path.LAN);
             }
-            addCandidate(candidates, seenUrls, AndroidConnectionServiceRoutePolicy.Path.TAILSCALE);
-            addCandidate(candidates, seenUrls, AndroidConnectionServiceRoutePolicy.Path.IPV6);
             addCandidate(candidates, seenUrls, AndroidConnectionServiceRoutePolicy.Path.IPV4);
+            addCandidate(candidates, seenUrls, AndroidConnectionServiceRoutePolicy.Path.IPV6);
             addRtcCandidate(candidates, AndroidConnectionServiceRoutePolicy.Path.RTC_DIRECT);
+            addCandidate(candidates, seenUrls, AndroidConnectionServiceRoutePolicy.Path.TAILSCALE);
             addRtcCandidate(candidates, AndroidConnectionServiceRoutePolicy.Path.RTC_RELAY);
             return candidates;
         }

@@ -8,7 +8,10 @@ import org.json.JSONArray;
 import org.junit.Test;
 import org.webrtc.DataChannel;
 import org.webrtc.PeerConnection;
+import okhttp3.WebSocket;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -105,6 +108,45 @@ public final class AndroidRtcTransportBackendTest {
         backend.simulateDataChannelStateForTests(DataChannel.State.OPEN);
 
         assertTrue(listener.events.contains("open"));
+        backend.closeQuietly("test");
+    }
+
+    @Test
+    public void signalingFailureAfterOpenPreservesHealthyRtcTransport() throws Exception {
+        RecordingListener listener = new RecordingListener();
+        AndroidRtcTransportBackend backend = new AndroidRtcTransportBackend(
+            null, null, "wss://relay.example/client", new JSONArray(), "all",
+            false, 5_000L, listener);
+        WebSocket webSocket = (WebSocket) Proxy.newProxyInstance(
+            WebSocket.class.getClassLoader(),
+            new Class<?>[] { WebSocket.class },
+            (proxy, method, args) -> {
+                if ("toString".equals(method.getName())) {
+                    return "fake-signal-websocket";
+                }
+                if (method.getReturnType() == boolean.class) {
+                    return false;
+                }
+                if (method.getReturnType() == int.class) {
+                    return 0;
+                }
+                return null;
+            });
+        Field signalSocketField = AndroidRtcTransportBackend.class
+            .getDeclaredField("signalSocket");
+        signalSocketField.setAccessible(true);
+        signalSocketField.set(backend, webSocket);
+
+        backend.simulateDataChannelStateForTests(DataChannel.State.OPEN);
+        assertTrue(listener.events.contains("open"));
+
+        backend.onFailure(webSocket, new RuntimeException("signaling websocket down"), null);
+
+        assertTrue("healthy RTC must stay open after a signaling websocket failure",
+            backend.isOpen());
+        assertTrue("no error or close may be published after open",
+            listener.events.stream().noneMatch(event ->
+                event.startsWith("error:") || event.startsWith("closed:")));
         backend.closeQuietly("test");
     }
 
