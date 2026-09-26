@@ -8,6 +8,13 @@ import {
   sendImagePasteRuntime,
 } from './session-context-transfer-runtime';
 
+vi.mock('../lib/dagpipe-native-client', () => ({
+  isDagpipeNativeCapable: () => false,
+  runDagpipePhase3Attachment: async () => ({ ok: true, outputs: {} }),
+  runDagpipePhase3Screenshot: async () => ({ ok: true, outputs: {} }),
+  runDagpipePhase3Upload: async () => ({ ok: true, outputs: {} }),
+}));
+
 function makeFile(name: string, size: number, type = 'image/png') {
   const bytes = new Uint8Array(size);
   for (let index = 0; index < size; index += 1) {

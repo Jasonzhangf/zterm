@@ -3,6 +3,7 @@ import { createAppUpdateRuntime } from './app-update-runtime';
 import type { BrowserStorageLike } from './browser-storage';
 
 vi.mock('./dagpipe-native-client', () => ({
+  runDagpipePhase7Release: async () => ({ ok: true, outputs: {} }),
   runDagpipePhase7Update: async () => ({ ok: true, outputs: {} }),
 }));
 

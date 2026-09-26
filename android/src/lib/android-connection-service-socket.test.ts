@@ -16,6 +16,10 @@ vi.mock('../plugins/AndroidConnectionServicePlugin', () => ({
 }));
 
 vi.mock('../lib/dagpipe-native-client', () => ({
+  runDagpipeBufferManagement: async () => ({ ok: true, outputs: {} }),
+  runDagpipeBufferRender: async () => ({ ok: true, outputs: {} }),
+  runDagpipeConnection: async () => ({ ok: true, outputs: {} }),
+  runDagpipeInputDispatch: async () => ({ ok: true, outputs: {} }),
   runDagpipePhase8Connection: (_input: unknown) => Promise.resolve({
     ok: true,
     outputs: {},

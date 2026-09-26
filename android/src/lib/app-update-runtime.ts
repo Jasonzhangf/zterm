@@ -16,7 +16,7 @@ import {
   type AppUpdateRollbackEntry,
 } from './app-update';
 import { buildRelayInjectedAppUpdatePreferences, isTailscaleManifestCandidate } from './app-update-relay-manifest';
-import { runDagpipePhase7Update } from './dagpipe-native-client';
+import { runDagpipePhase7Release, runDagpipePhase7Update } from './dagpipe-native-client';
 import type { DownloadAndInstallOptions } from '../plugins/AppUpdatePlugin';
 
 export type AppUpdateStage =
@@ -751,6 +751,36 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
       }
 
       try {
+        const releaseGate = await runDagpipePhase7Release({
+          execution_id: `app-release:${installTarget.versionCode}`,
+          attempt_id: '1',
+          inputs: {
+            'arc.build_artifact': {
+              name: 'zterm-android',
+              sha256: installTarget.sha256,
+            },
+            'arc.release_policy': {
+              expectedSha256: installTarget.sha256,
+            },
+          },
+        });
+        if (!releaseGate.ok) {
+          setSnapshot((current) => ({
+            ...current,
+            lastError: releaseGate.error,
+            updateStage: 'failed',
+            lastInstallContext: {
+              manifestUrl: activeManifestUrl,
+              apkUrl: installTarget.apkUrl,
+              versionCode: installTarget.versionCode,
+              versionName: installTarget.versionName,
+              sha256Expected: installTarget.sha256,
+              capturedAt: deps.now(),
+              reason: releaseGate.error,
+            },
+          }));
+          return false;
+        }
         const updateGate = await runDagpipePhase7Update({
           execution_id: `app-update:${installTarget.versionCode}`,
           attempt_id: '1',

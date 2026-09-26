@@ -178,3 +178,42 @@ Phase 1 current status:
 - `dagpipe graph inspect` prints waves and operator bindings for both graphs.
 - Runtime is wired through the DAGpipe native bridge and live daemon mirror
   routing; this phase does not by itself request OTA/APK publish.
+
+## Native client and daemon bridge wiring
+
+`src/lib/dagpipe-native-client.ts` exposes Capacitor-bound `runDagpipe*`
+entrypoints. Production callers are wired as thin admission gates at their
+owning entry points; they do not replace the legacy TypeScript runtime.
+
+- `runDagpipeConnection`, `runDagpipeBufferManagement`,
+  `runDagpipeBufferRender`, `runDagpipeInputDispatch`,
+  `runDagpipePhase8Connection`: `src/lib/android-connection-service-factory.ts`
+  socket bind entry.
+- `runDagpipePhase2Relay`: `src/hooks/useTraversalRelayAccount.ts`.
+- `runDagpipePhase3Upload`, `runDagpipePhase3Attachment`,
+  `runDagpipePhase3Screenshot`: `src/contexts/session-context-transfer-runtime.ts`.
+- `runDagpipePhase4RemoteWindow`: `src/contexts/session-context-interaction-runtime.ts`.
+- `runDagpipePhase5ShellLifecycle`: `src/hooks/useOpenTabRestoreRuntimeSync.ts`
+  cold restore path.
+- `runDagpipePhase5PreviewLattice`: `src/pages/TerminalPage.tsx`.
+- `runDagpipePhase6Control`, `runDagpipePhase6Composition`: `src/App.tsx`.
+- `runDagpipePhase6ConfigExport`, `runDagpipePhase6ConfigImport`:
+  `src/hooks/useConfigExport.ts`.
+- `runDagpipePhase7Update`, `runDagpipePhase7Release`:
+  `src/lib/app-update-runtime.ts`.
+
+Daemon-owned graphs run through `src/server/dagpipe-bridge.ts`; their native
+client wrapper entries are N/A on the client side by ownership:
+
+- `runDagpipePhase2DaemonConnection` -> `daemon.session_catalog`
+  (`src/server/daemon-session-catalog-runtime.ts`).
+- `runDagpipePhase3InputSchedule` -> `daemon.input_queue`
+  (`src/server/daemon-input-queue-runtime.ts`).
+- `runDagpipePhase3FileBrowse`, `runDagpipePhase3Download` -> `daemon.file_transfer`
+  (`src/server/terminal-file-transfer-list-runtime.ts`).
+
+`runDagpipePhase7Debug` is N/A for the current observability entrypoint:
+wiring it from `src/lib/runtime-debug-http-exporter.ts` would create an
+`observability.debug_channel -> client.runtime` import edge and violate the
+module import graph gate, so observability keeps its legacy bounded HTTP
+upload path until a client-runtime-owned debug gate owner is extracted.
