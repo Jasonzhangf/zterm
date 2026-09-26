@@ -208,6 +208,38 @@ fn upload_rejects_segment_index_at_or_above_total_chunks() {
 }
 
 #[test]
+fn upload_rejects_non_integer_or_zero_chunk_fields() {
+    for intent in [
+        json!({ "uploadId": "up-1", "segmentIndex": -1, "totalChunks": 1, "data": "abc" }),
+        json!({ "uploadId": "up-1", "segmentIndex": 1.5, "totalChunks": 1, "data": "abc" }),
+        json!({ "uploadId": "up-1", "segmentIndex": "0", "totalChunks": 1, "data": "abc" }),
+        json!({ "uploadId": "up-1", "segmentIndex": 0, "totalChunks": -1, "data": "abc" }),
+        json!({ "uploadId": "up-1", "segmentIndex": 0, "totalChunks": 0, "data": "abc" }),
+        json!({ "uploadId": "up-1", "segmentIndex": 0, "totalChunks": "1", "data": "abc" }),
+    ] {
+        let result = run_upload(json!({
+            "execution_id": "phase3-upload-invalid-chunk-shape",
+            "attempt_id": "1",
+            "inputs": {
+                "arc.upload_intent": intent,
+                "arc.transfer_policy": { "allowUpload": true },
+            },
+        }));
+        assert_eq!(result["ok"], false);
+        assert!(
+            result["error"]
+                .as_str()
+                .unwrap()
+                .contains("must be a non-negative integer")
+                || result["error"]
+                    .as_str()
+                    .unwrap()
+                    .contains("totalChunks must be at least 1")
+        );
+    }
+}
+
+#[test]
 fn download_ack_completes_only_on_exact_final_total_chunks() {
     let result = run_download(json!({
         "execution_id": "phase3-download-multi-batch",
@@ -264,6 +296,38 @@ fn download_rejects_segment_index_at_or_above_total_chunks() {
             .as_str()
             .unwrap()
             .contains("out of range for totalChunks 16"));
+    }
+}
+
+#[test]
+fn download_rejects_non_integer_or_zero_chunk_fields() {
+    for intent in [
+        json!({ "downloadId": "dl-1", "path": "/tmp/a.txt", "segmentIndex": -1, "totalChunks": 1, "chunk": "abc" }),
+        json!({ "downloadId": "dl-1", "path": "/tmp/a.txt", "segmentIndex": 1.5, "totalChunks": 1, "chunk": "abc" }),
+        json!({ "downloadId": "dl-1", "path": "/tmp/a.txt", "segmentIndex": "0", "totalChunks": 1, "chunk": "abc" }),
+        json!({ "downloadId": "dl-1", "path": "/tmp/a.txt", "segmentIndex": 0, "totalChunks": -1, "chunk": "abc" }),
+        json!({ "downloadId": "dl-1", "path": "/tmp/a.txt", "segmentIndex": 0, "totalChunks": 0, "chunk": "abc" }),
+        json!({ "downloadId": "dl-1", "path": "/tmp/a.txt", "segmentIndex": 0, "totalChunks": "1", "chunk": "abc" }),
+    ] {
+        let result = run_download(json!({
+            "execution_id": "phase3-download-invalid-chunk-shape",
+            "attempt_id": "1",
+            "inputs": {
+                "arc.download_intent": intent,
+                "arc.transfer_policy": { "allowDownload": true },
+            },
+        }));
+        assert_eq!(result["ok"], false);
+        assert!(
+            result["error"]
+                .as_str()
+                .unwrap()
+                .contains("must be a non-negative integer")
+                || result["error"]
+                    .as_str()
+                    .unwrap()
+                    .contains("totalChunks must be at least 1")
+        );
     }
 }
 

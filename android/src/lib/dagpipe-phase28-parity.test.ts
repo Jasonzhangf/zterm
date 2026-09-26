@@ -373,6 +373,32 @@ describe('DAGpipe Phase2-8 black-box parity and smoke with TypeScript owners', (
         'arc.transfer_policy': { allowDownload: true },
       }))).toThrow(/out of range for totalChunks 16/);
     }
+    for (const invalid of [
+      { segmentIndex: -1, totalChunks: 1 },
+      { segmentIndex: 1.5, totalChunks: 1 },
+      { segmentIndex: '0', totalChunks: 1 },
+      { segmentIndex: 0, totalChunks: -1 },
+      { segmentIndex: 0, totalChunks: 0 },
+      { segmentIndex: 0, totalChunks: '1' },
+    ]) {
+      expect(() => runPhase3Upload(phaseRequest(`parity-phase3-upload-invalid-${JSON.stringify(invalid)}`, {
+        'arc.upload_intent': {
+          uploadId: 'up-1',
+          ...invalid,
+          data: 'abc',
+        },
+        'arc.transfer_policy': { allowUpload: true },
+      }))).toThrow(/must be a non-negative integer|totalChunks must be at least 1/);
+      expect(() => runPhase3Download(phaseRequest(`parity-phase3-download-invalid-${JSON.stringify(invalid)}`, {
+        'arc.download_intent': {
+          downloadId: 'dl-1',
+          path: '/tmp/a.txt',
+          ...invalid,
+          chunk: 'abc',
+        },
+        'arc.transfer_policy': { allowDownload: true },
+      }))).toThrow(/must be a non-negative integer|totalChunks must be at least 1/);
+    }
     expect(() => runPhase3Download(phaseRequest('parity-phase3-download-reject', {
       'arc.download_intent': { downloadId: 'dl-1', path: '/tmp/a.txt' },
       'arc.transfer_policy': { allowDownload: false },

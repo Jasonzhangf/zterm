@@ -78,17 +78,44 @@ fn get_bool(object: &Map<String, Value>, key: &str) -> bool {
     object.get(key).and_then(Value::as_bool).unwrap_or(false)
 }
 
-fn get_u64(object: &Map<String, Value>, key: &str) -> u64 {
-    object.get(key).and_then(Value::as_u64).unwrap_or(0)
+fn parse_uint_field(object: &Map<String, Value>, key: &str) -> Result<Option<u64>, String> {
+    match object.get(key) {
+        None => Ok(None),
+        Some(Value::Number(number)) => {
+            if let Some(value) = number.as_u64() {
+                return Ok(Some(value));
+            }
+            if let Some(float) = number.as_f64() {
+                if float.fract() == 0.0 && float >= 0.0 && float < 2f64.powi(64) {
+                    return Ok(Some(float as u64));
+                }
+            }
+            Err(format!("{key} must be a non-negative integer"))
+        }
+        Some(_) => Err(format!("{key} must be a non-negative integer")),
+    }
 }
 
-fn get_total_chunks(object: &Map<String, Value>) -> u64 {
-    object
-        .get("totalChunks")
-        .and_then(Value::as_u64)
-        .or_else(|| object.get("chunkCount").and_then(Value::as_u64))
-        .unwrap_or(1)
-        .max(1)
+/// Strict chunk position reader. The upload/download admission gates omit
+/// segmentIndex/totalChunks, so absent fields keep their defaults (0 and 1);
+/// explicit invalid values are rejected instead of being coerced.
+fn chunk_position(object: &Map<String, Value>) -> Result<(u64, u64), String> {
+    let segment_index = parse_uint_field(object, "segmentIndex")?.unwrap_or_default();
+    let total_chunks_field = match parse_uint_field(object, "totalChunks")? {
+        Some(value) => Some(value),
+        None => parse_uint_field(object, "chunkCount")?,
+    };
+    let total_chunks = match total_chunks_field {
+        Some(value) if value > 0 => value,
+        Some(_) => return Err("totalChunks must be at least 1".into()),
+        None => 1,
+    };
+    if segment_index >= total_chunks {
+        return Err(format!(
+            "segmentIndex {segment_index} is out of range for totalChunks {total_chunks}"
+        ));
+    }
+    Ok((segment_index, total_chunks))
 }
 
 fn json_array(value: Option<&Value>) -> Vec<Value> {
@@ -592,13 +619,7 @@ impl Operator for FileTransferValidateUpload {
         if !get_bool(&policy, "allowUpload") {
             return Err("upload denied by transfer policy".into());
         }
-        let segment_index = get_u64(&intent, "segmentIndex");
-        let total_chunks = get_total_chunks(&intent);
-        if segment_index >= total_chunks {
-            return Err(format!(
-                "upload segmentIndex {segment_index} is out of range for totalChunks {total_chunks}"
-            ));
-        }
+        let (segment_index, total_chunks) = chunk_position(&intent)?;
         Ok(json!({
             "uploadId": upload_id,
             "segmentIndex": segment_index,
@@ -656,8 +677,7 @@ impl Operator for FileTransferUploadAck {
         if !get_bool(&ack, "acked") {
             return Err("upload segment was not acked".into());
         }
-        let segment_index = get_u64(&ack, "segmentIndex");
-        let total_chunks = get_total_chunks(&ack);
+        let (segment_index, total_chunks) = chunk_position(&ack)?;
         let complete = segment_index + 1 == total_chunks;
         let window_chunks = file_transfer_upload_window_chunks()?;
         Ok(json!({
@@ -698,13 +718,7 @@ impl Operator for FileTransferValidateDownload {
         if !get_bool(&policy, "allowDownload") {
             return Err("download denied by transfer policy".into());
         }
-        let segment_index = get_u64(&intent, "segmentIndex");
-        let total_chunks = get_total_chunks(&intent);
-        if segment_index >= total_chunks {
-            return Err(format!(
-                "download segmentIndex {segment_index} is out of range for totalChunks {total_chunks}"
-            ));
-        }
+        let (segment_index, total_chunks) = chunk_position(&intent)?;
         Ok(json!({
             "downloadId": download_id,
             "path": path,
@@ -761,8 +775,7 @@ impl Operator for FileTransferDownloadAck {
 
     fn execute(&self, input: Value, _context: &OperatorContext) -> Result<Value, String> {
         let chunk = obj(inputs(input).first().cloned().unwrap_or_default());
-        let segment_index = get_u64(&chunk, "segmentIndex");
-        let total_chunks = get_total_chunks(&chunk);
+        let (segment_index, total_chunks) = chunk_position(&chunk)?;
         let complete = segment_index + 1 == total_chunks;
         let batch_chunks = file_transfer_native_write_batch_chunks()?;
         Ok(json!({
