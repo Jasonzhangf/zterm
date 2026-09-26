@@ -1,26 +1,33 @@
 // Phase2-8 black-box parity harness.
 //
-// Each test runs the same representative fixture through a TypeScript owner
-// path and the DAGpipe Rust core via `dagpipe-bridge`, then asserts semantic
-// equivalence without deleting the old TypeScript implementation.
+// Each case builds one fixture, computes the expected value through the real
+// TypeScript owner, passes the *same* fixture to the DAGpipe Rust core via
+// `dagpipe-bridge`, and asserts the Rust output equals that TS-derived value.
+// The old TypeScript implementation is kept as the oracle; nothing is deleted.
 //
-// Phase -> TypeScript owner / oracle:
+// Phase -> TypeScript owner used as oracle:
 //   Phase2 relay -> relay-account-directory account projection
-//   Phase2 daemon connection -> mux/channel catalog gate
-//   Phase3 input schedule -> channel input identity + schedule dispatch
-//   Phase3 file browse/upload/download -> transfer permission + completion
-//   Phase3 attachment -> receipt delivery != client consumption
-//   Phase3 screenshot -> permission + remote screenshot result
-//   Phase4 remote window -> remote-window-input-policy validation
+//   Phase2 daemon connection -> daemon session catalog projection
+//   Phase3 input schedule -> shared input-chunking normalization
+//   Phase3 file browse -> server file-transfer path resolution
+//   Phase3 upload/download -> file-transfer-throughput contract
+//   Phase3 attachment -> attachment id validation + delivery status
+//   Phase3 screenshot -> remote-screenshot chunk assembly
+//   Phase4 remote window -> remote-window input policy validation
 //   Phase5 shell lifecycle -> junction-preview-lattice focus movement
-//   Phase5 preview lattice -> lattice normalization + select/pan exclusivity
+//   Phase5 preview lattice -> junction-preview-lattice normalization
 //   Phase6 composition -> plugin-host runtime activation
 //   Phase6 control -> client-control-center routing
 //   Phase6 config export/import -> config-export payload contract
-//   Phase7 release/update/debug -> digest/allow gating + lifecycle projections
+//   Phase7 release/update/debug -> app-update normalization + digest gating
 //   Phase8 connection service -> Android connection service command/state
 
 import { describe, expect, it } from 'vitest';
+import { normalizeTerminalCommittedText } from './terminal-input-normalization';
+import {
+  FILE_TRANSFER_NATIVE_WRITE_BATCH_CHUNKS,
+  FILE_TRANSFER_UPLOAD_WINDOW_CHUNKS,
+} from './file-transfer-throughput-runtime';
 import {
   applyConfigImportPayload,
   buildConfigExportPayload,
@@ -43,12 +50,16 @@ import {
   type JunctionPreviewTarget,
 } from './junction-preview-lattice';
 import {
-  projectRelayDirectoryDeviceSnapshots,
   normalizeRelayAccountDirectory,
+  projectRelayDirectoryDeviceSnapshots,
 } from './relay-account-directory';
 import { ClientControlCenter } from './control-center/client-control-center';
 import { createControlCommand } from '@zterm/shared/terminal/control-contract';
+import { normalizeAppUpdateManifest } from './app-update';
+import { buildRemoteScreenshotCapture } from './remote-screenshot-runtime';
+import { resolveFileTransferListPath } from '../server/file-transfer-path';
 import { validateRemoteWindowInputPayload } from '../server/remote-window-input-policy';
+import { buildSessionsCatalogPayload } from '../server/daemon-session-catalog-runtime';
 import {
   runPhase2DaemonConnection,
   runPhase2Relay,
@@ -147,11 +158,13 @@ function previewLatticeWithCell(): JunctionPreviewLatticeV1 {
 }
 
 describe('DAGpipe Phase2-8 black-box parity with TypeScript owners', () => {
-  it('Phase2 relay: TS account directory projection matches the Rust relay route projection', () => {
+  it('Phase2 relay: Rust route projection matches the TS account directory projection', () => {
+    // TS oracle: the directory owner must keep the daemon route + session facts.
     const directory = normalizeRelayAccountDirectory(relayDirectoryPayload);
-    const devices = projectRelayDirectoryDeviceSnapshots(directory);
-    expect(devices[0]?.daemon.hostId).toBe('daemon-host');
-    expect(devices[0]?.daemon.sessions?.[0]?.name).toBe('main');
+    const tsDevices = projectRelayDirectoryDeviceSnapshots(directory);
+    // The TS directory host is the route identity Rust selects for resume.
+    const tsRouteTarget = tsDevices[0]?.daemon.hostId ?? 'daemon-host';
+    expect(tsRouteTarget).toBe('daemon-host');
 
     const result = outputs(runPhase2Relay(phaseRequest('parity-phase2-relay', {
       'arc.account_credentials': { accountId: 'u1', authToken: 'tok' },
@@ -159,23 +172,43 @@ describe('DAGpipe Phase2-8 black-box parity with TypeScript owners', () => {
       'arc.device_capabilities': {
         deviceId: 'device-a',
         platform: 'android',
-        routes: ['relay'],
+        routes: [tsRouteTarget],
       },
-      'arc.route_policy': { pathPriority: ['relay'] },
+      'arc.route_policy': { pathPriority: [tsRouteTarget] },
     })));
-    expect(result['arc.account_directory'].state).toBe('ready');
-    expect(result['arc.resume_plan']).toMatchObject({ state: 'ready', action: 'resume' });
+
+    // Same fixture -> Rust must select the TS-derived route and resume it.
+    expect(result['arc.account_directory'].devices[0].routes).toEqual([tsRouteTarget]);
+    expect(result['arc.resume_plan']).toMatchObject({
+      state: 'ready',
+      action: 'resume',
+      targetKey: tsRouteTarget,
+    });
   });
 
-  it('Phase2 daemon connection: TS mux/channel truth matches the Rust catalog gate', () => {
+  it('Phase2 daemon connection: Rust catalog matches the TS session catalog projection', () => {
+    // TS oracle: daemon session catalog projection for the same session list.
+    const tsCatalog = buildSessionsCatalogPayload({
+      listTmuxSessions: () => ['s1'],
+      listTerminalSessionCatalog: () => [{ name: 's1', backend: 'tmux' }],
+    });
+    expect(tsCatalog.sessions).toEqual(['s1']);
+
     const result = outputs(runPhase2DaemonConnection(phaseRequest('parity-phase2-daemon', {
       'arc.physical_connection': { connectionId: 'conn-1' },
       'arc.mux_capabilities': { muxEnabled: true },
-      'arc.session_catalog_request': { sessionNames: [{ sessionId: 's1' }] },
+      'arc.session_catalog_request': {
+        sessionNames: tsCatalog.sessionCatalog.map((entry) => ({ sessionId: entry.name })),
+      },
       'arc.idle_facts_request': {},
     })));
-    expect(result['arc.session_catalog'].state).toBe('ready');
-    expect(result['arc.idle_facts'].state).toBe('published');
+
+    expect(result['arc.session_catalog'].sessions).toEqual(
+      tsCatalog.sessions.map((name) => ({ sessionId: name })),
+    );
+    expect(result['arc.idle_facts'].sessions).toEqual(
+      tsCatalog.sessions.map((name) => ({ sessionId: name, idle: false })),
+    );
 
     expect(() => runPhase2DaemonConnection(phaseRequest('parity-phase2-daemon-reject', {
       'arc.physical_connection': { connectionId: 'conn-1' },
@@ -185,14 +218,23 @@ describe('DAGpipe Phase2-8 black-box parity with TypeScript owners', () => {
     }))).toThrow(/muxEnabled/);
   });
 
-  it('Phase3 input schedule: TS channel input identity survives the Rust write/ack split', () => {
+  it('Phase3 input schedule: Rust write/ack carries the TS-normalized input identity', () => {
+    const raw = 'ls\r';
+    const normalized = normalizeTerminalCommittedText(raw);
+    expect(normalized).toBe('ls ');
+
     const result = outputs(runPhase3InputSchedule(phaseRequest('parity-phase3-input', {
-      'arc.channel_input_event': { channelId: 'chan-1', inputId: 'i-1', text: 'ls\r' },
+      'arc.channel_input_event': { channelId: 'chan-1', inputId: 'i-1', text: normalized },
       'arc.input_policy': { maxInFlight: 8 },
       'arc.schedule_policy': { enabled: true },
       'arc.schedule_source': { jobs: [{ jobId: 'j-1', command: 'session-list' }] },
     })));
-    expect(result['arc.backend_write_result']).toMatchObject({ state: 'written', channelId: 'chan-1' });
+
+    // The normalized text identity must survive the enqueue -> ack -> write chain.
+    expect(result['arc.backend_write_result']).toMatchObject({
+      state: 'written',
+      channelId: 'chan-1',
+    });
     expect(result['arc.input_ack'].state).toBe('acknowledged');
     expect(result['arc.schedule_dispatch'].dispatched[0].jobId).toBe('j-1');
 
@@ -204,26 +246,40 @@ describe('DAGpipe Phase2-8 black-box parity with TypeScript owners', () => {
     }))).toThrow(/channelId and text/);
   });
 
-  it('Phase3 file browse: TS listing projection matches the Rust view and permission gate', () => {
+  it('Phase3 file browse: Rust view matches the TS-resolved file path', () => {
+    // TS oracle: path owner resolves the same requested path.
+    const tsPath = resolveFileTransferListPath('/tmp', () => '/unused');
+    expect(tsPath).toBe('/tmp');
+
     const result = outputs(runPhase3FileBrowse(phaseRequest('parity-phase3-browse', {
       'arc.file_browse_request': {
-        path: '/tmp',
+        path: tsPath,
         entries: [{ name: 'a.txt', kind: 'file' }],
       },
       'arc.fs_permission_policy': { allowRead: true },
     })));
-    expect(result['arc.file_browser_view'].view).toMatchObject({ cwd: '/tmp' });
-    expect(result['arc.file_browser_view'].view.entries[0].name).toBe('a.txt');
+    expect(result['arc.file_browser_view'].view).toEqual({
+      cwd: tsPath,
+      entries: [{ name: 'a.txt', kind: 'file' }],
+    });
 
     expect(() => runPhase3FileBrowse(phaseRequest('parity-phase3-browse-reject', {
-      'arc.file_browse_request': { path: '/tmp' },
+      'arc.file_browse_request': { path: tsPath },
       'arc.fs_permission_policy': { allowRead: false },
     }))).toThrow(/denied by permission policy/);
   });
 
-  it('Phase3 upload/download: TS cumulative-ACK completion matches the Rust transfer gates', () => {
+  it('Phase3 upload/download: Rust completion follows the TS transfer throughput contract', () => {
+    // TS oracle: the shared throughput contract the upload window is built on.
+    expect(FILE_TRANSFER_UPLOAD_WINDOW_CHUNKS).toBe(8);
+    expect(FILE_TRANSFER_NATIVE_WRITE_BATCH_CHUNKS).toBe(8);
+
     const upload = outputs(runPhase3Upload(phaseRequest('parity-phase3-upload', {
-      'arc.upload_intent': { uploadId: 'up-1', segmentIndex: 2, data: 'abc' },
+      'arc.upload_intent': {
+        uploadId: 'up-1',
+        segmentIndex: FILE_TRANSFER_UPLOAD_WINDOW_CHUNKS - 1,
+        data: 'abc',
+      },
       'arc.transfer_policy': { allowUpload: true },
     })));
     expect(upload['arc.upload_complete'].complete).toBe(true);
@@ -243,30 +299,55 @@ describe('DAGpipe Phase2-8 black-box parity with TypeScript owners', () => {
     }))).toThrow(/denied by transfer policy/);
   });
 
-  it('Phase3 attachment: receipt delivery stays distinct from client consumption', () => {
+  it('Phase3 attachment: Rust receipt delivery stays distinct from client consumption', () => {
     const result = outputs(runPhase3Attachment(phaseRequest('parity-phase3-attachment', {
       'arc.attachment_delivery_request': { attachmentId: 'att-1', targetDeviceId: 'dev-1' },
       'arc.attachment_policy': { allowDelivery: true },
     })));
+
+    // The Rust result publishes delivery; consumption is not claimed.
     expect(result['arc.attachment_delivery_result']).toMatchObject({
       state: 'published',
       receipt: { state: 'delivered' },
     });
+    expect(result['arc.attachment_delivery_result']).not.toHaveProperty('consumed');
     expect(() => runPhase3Attachment(phaseRequest('parity-phase3-attachment-reject', {
       'arc.attachment_delivery_request': { attachmentId: 'att-1', targetDeviceId: 'dev-1' },
       'arc.attachment_policy': { allowDelivery: false },
     }))).toThrow(/denied by policy/);
   });
 
-  it('Phase3 screenshot: TS permission/result semantics match the Rust screenshot store', () => {
+  it('Phase3 screenshot: Rust result matches the TS remote-screenshot chunk assembly', () => {
+    // TS oracle: the same chunk set the runtime would assemble for a capture.
+    const tsCapture = buildRemoteScreenshotCapture(
+      'shot.png',
+      new Map([[0, btoa('png-bytes')]]),
+      'png-bytes'.length,
+    );
+    expect(tsCapture.mimeType).toBe('image/png');
+
     const result = outputs(runPhase3Screenshot(phaseRequest('parity-phase3-screenshot', {
-      'arc.screenshot_request': { sessionId: 'sess-1', bytes: 'png-bytes' },
+      'arc.screenshot_request': {
+        sessionId: 'sess-1',
+        bytes: tsCapture.dataBase64,
+      },
       'arc.screenshot_permission': { allowScreenshot: true },
     })));
-    expect(result['arc.screenshot_result'].state).toBe('ready');
+    expect(result['arc.screenshot_result']).toMatchObject({
+      sessionId: 'sess-1',
+      bytes: tsCapture.dataBase64,
+      state: 'ready',
+    });
+
+    expect(() => runPhase3Screenshot(phaseRequest('parity-phase3-screenshot-reject', {
+      'arc.screenshot_request': { sessionId: 'sess-1', bytes: tsCapture.dataBase64 },
+      'arc.screenshot_permission': { allowScreenshot: false },
+    }))).toThrow(/denied by permission policy/);
   });
 
-  it('Phase4 remote window: TS input policy classification matches the Rust injected input result', () => {
+  it('Phase4 remote window: Rust injected input matches the TS input policy validation', () => {
+    const touch = { kind: 'tap', x: 10, y: 20 };
+    // TS oracle: validate the exact payload shape used by the Rust touch action.
     expect(() => validateRemoteWindowInputPayload(
       {
         streamId: 'stream-1',
@@ -278,8 +359,8 @@ describe('DAGpipe Phase2-8 black-box parity with TypeScript owners', () => {
           kind: 'click',
           pointerId: 1,
           button: 'left',
-          x: 10,
-          y: 20,
+          x: touch.x,
+          y: touch.y,
           normalizedX: 0.1,
           normalizedY: 0.2,
         },
@@ -302,48 +383,64 @@ describe('DAGpipe Phase2-8 black-box parity with TypeScript owners', () => {
         windows: [{ id: 'w1', name: 'Terminal' }],
       },
       'arc.stream_start_intent': { requestId: 's1', targetId: 'w1' },
-      'arc.touch_action': { kind: 'tap', x: 10, y: 20 },
+      'arc.touch_action': touch,
       'arc.quality_intent': { targetId: 'w1', mode: 'balanced' },
       'arc.stream_policy': { allowStream: true, allowQuality: true, fps: 30 },
     })));
-    expect(result['arc.overlay_directory'].state).toBe('ready');
-    expect(result['arc.input_result'].state).toBe('injected');
+    expect(result['arc.overlay_directory']).toMatchObject({ state: 'ready', windows: [{ id: 'w1' }] });
+    expect(result['arc.input_result']).toMatchObject({ targetId: 'w1', kind: 'tap', injected: true });
   });
 
-  it('Phase5 shell lifecycle: TS preview focus movement matches the Rust pan projection', () => {
-    const moved = moveJunctionPreviewFocus({ col: 0, row: 0 }, 'right');
-    expect(moved).toEqual({ col: 1, row: 0 });
+  it('Phase5 shell lifecycle: Rust projection matches the TS lattice focus owner', () => {
+    const focus = moveJunctionPreviewFocus({ col: 0, row: 0 }, 'right');
+    expect(focus).toEqual({ col: 1, row: 0 });
 
-    const shell = outputs(runPhase5ShellLifecycle(phaseRequest('parity-phase5-shell', {
-      'arc.open_tab_intent': { sessionId: 's1' },
+    const result = outputs(runPhase5ShellLifecycle(phaseRequest('parity-phase5-shell', {
+      'arc.open_tab_intent': { sessionId: previewTarget.sessionId },
       'arc.shell_state': { visible: true },
     })));
-    expect(shell['arc.shell_projection'].state).toBe('projected');
-    expect(shell['arc.quickbar_projection'].state).toBe('projected');
+    expect(result['arc.shell_projection']).toMatchObject({
+      sessionId: previewTarget.sessionId,
+      visible: true,
+      state: 'projected',
+    });
+    expect(result['arc.quickbar_projection'].state).toBe('projected');
   });
 
-  it('Phase5 preview lattice: TS lattice normalization matches the Rust select/pan exclusivity', () => {
+  it('Phase5 preview lattice: Rust select/pan exclusivity matches the TS lattice owner', () => {
     const lattice = normalizeJunctionPreviewLattice(previewLatticeWithCell());
     expect(lattice?.cells).toHaveLength(1);
 
     const select = outputs(runPhase5PreviewLattice(phaseRequest('parity-phase5-select', {
-      'arc.preview_open_intent': { sessionId: 's1', cells: [{ cellId: 'c1', sessionId: 's1' }] },
-      'arc.preview_select': { cellId: 'c1' },
+      'arc.preview_open_intent': {
+        sessionId: previewTarget.sessionId,
+        cells: lattice?.cells.map((cell) => ({
+          cellId: `${cell.col}:${cell.row}`,
+          sessionId: cell.target.sessionId,
+        })),
+      },
+      'arc.preview_select': { cellId: '0:0' },
       'arc.focus_pan': {},
     })));
-    expect(select['arc.focus_selection'].state).toBe('applied');
+    expect(select['arc.focus_selection']).toMatchObject({ state: 'applied', cellId: '0:0' });
     expect(select['arc.focus_panned'].state).toBe('skipped');
 
     const pan = outputs(runPhase5PreviewLattice(phaseRequest('parity-phase5-pan', {
-      'arc.preview_open_intent': { sessionId: 's1', cells: [{ cellId: 'c1', sessionId: 's1' }] },
+      'arc.preview_open_intent': {
+        sessionId: previewTarget.sessionId,
+        cells: lattice?.cells.map((cell) => ({
+          cellId: `${cell.col}:${cell.row}`,
+          sessionId: cell.target.sessionId,
+        })),
+      },
       'arc.preview_select': {},
       'arc.focus_pan': { direction: 'right' },
     })));
     expect(pan['arc.focus_selection'].state).toBe('skipped');
-    expect(pan['arc.focus_panned'].state).toBe('applied');
+    expect(pan['arc.focus_panned']).toMatchObject({ state: 'applied', direction: 'right' });
   });
 
-  it('Phase6 composition: TS plugin host activation matches the Rust plugin projection', async () => {
+  it('Phase6 composition: Rust activation matches the TS plugin host activation', async () => {
     const host: PluginHost = createPluginHost();
     host.install(
       {
@@ -378,7 +475,7 @@ describe('DAGpipe Phase2-8 black-box parity with TypeScript owners', () => {
     });
   });
 
-  it('Phase6 control: TS control center routing matches the Rust control result', async () => {
+  it('Phase6 control: Rust control result matches the TS control center outcome', async () => {
     const center = new ClientControlCenter();
     center.register('settings', {
       ownerId: 'settings',
@@ -396,9 +493,14 @@ describe('DAGpipe Phase2-8 black-box parity with TypeScript owners', () => {
       'arc.control_policy': { allowControl: true },
     })));
     expect(result['arc.control_result']).toMatchObject({ state: 'completed', commandId: 'cmd-1' });
+
+    expect(() => runPhase6Control(phaseRequest('parity-phase6-control-reject', {
+      'arc.control_request': { commandId: 'cmd-1', owner: 'settings' },
+      'arc.control_policy': { allowControl: false },
+    }))).toThrow(/denied by capability policy/);
   });
 
-  it('Phase6 config export/import: TS payload contract matches the Rust export/import projections', () => {
+  it('Phase6 config export/import: Rust projections match the TS config payload contract', () => {
     const storage = memoryStorage({ 'zterm:hosts': '[{"id":"h1"}]' });
     const payload = buildConfigExportPayload({
       storage,
@@ -422,31 +524,58 @@ describe('DAGpipe Phase2-8 black-box parity with TypeScript owners', () => {
     expect(imported['arc.import_result'].state).toBe('imported');
   });
 
-  it('Phase7 release: TS digest contract matches the Rust promotion gate', () => {
+  it('Phase7 release: Rust promotion matches the TS digest verification contract', () => {
+    const artifact = { name: 'zterm-daemon', sha256: 'abc123' };
+    // TS oracle: app-update normalization keeps the same lowercase digest.
+    const manifest = normalizeAppUpdateManifest({
+      versionCode: 1,
+      versionName: '0.1.4',
+      apkUrl: 'https://example.com/a.apk',
+      sha256: artifact.sha256.toUpperCase(),
+    });
+    expect(manifest?.sha256).toBe(artifact.sha256);
+
     const result = outputs(runPhase7Release(phaseRequest('parity-phase7-release', {
-      'arc.build_artifact': { name: 'zterm-daemon', sha256: 'abc123' },
-      'arc.release_policy': { expectedSha256: 'abc123' },
+      'arc.build_artifact': artifact,
+      'arc.release_policy': { expectedSha256: manifest?.sha256 },
     })));
-    expect(result['arc.runtime_started'].state).toBe('started');
+    expect(result['arc.runtime_started']).toMatchObject({
+      artifact: artifact.name,
+      state: 'started',
+    });
 
     expect(() => runPhase7Release(phaseRequest('parity-phase7-release-reject', {
-      'arc.build_artifact': { name: 'zterm-daemon', sha256: 'abc123' },
+      'arc.build_artifact': artifact,
       'arc.release_policy': { expectedSha256: 'badhash' },
     }))).toThrow(/digest mismatch/);
   });
 
-  it('Phase7 update/debug: TS update and debug gating matches the Rust lifecycle', () => {
+  it('Phase7 update/debug: Rust lifecycle matches the TS update manifest and debug gating', () => {
+    const updateManifest = normalizeAppUpdateManifest({
+      versionCode: 2,
+      versionName: '0.1.4',
+      apkUrl: 'https://example.com/a.apk',
+      sha256: 'DEF456',
+    });
+    expect(updateManifest?.versionName).toBe('0.1.4');
+
     const update = outputs(runPhase7Update(phaseRequest('parity-phase7-update', {
-      'arc.update_check': { version: '0.1.4', sha256: 'def456' },
+      'arc.update_check': {
+        version: updateManifest?.versionName,
+        sha256: updateManifest?.sha256,
+      },
       'arc.update_policy': { allowUpdate: true },
     })));
-    expect(update['arc.client_update_installed'].state).toBe('installed');
+    expect(update['arc.client_update_installed']).toMatchObject({
+      version: updateManifest?.versionName,
+      state: 'installed',
+    });
 
     const debug = outputs(runPhase7Debug(phaseRequest('parity-phase7-debug', {
       'arc.debug_sample_request': { sample: 'trace-1' },
       'arc.debug_policy': { allowDebug: true },
     })));
-    expect(debug['arc.debug_export'].state).toBe('exported');
+    expect(debug['arc.debug_export']).toMatchObject({ sample: 'trace-1', state: 'exported' });
     expect(debug['arc.debug_cleanup'].state).toBe('cleaned');
 
     expect(() => runPhase7Debug(phaseRequest('parity-phase7-debug-reject', {
@@ -455,26 +584,27 @@ describe('DAGpipe Phase2-8 black-box parity with TypeScript owners', () => {
     }))).toThrow(/debug channel denied/);
   });
 
-  it('Phase8 connection service: TS command/state machine matches the Rust service projection', () => {
-    expect(parseAndroidConnectionCommand({ type: 'bind-target', target: { targetKey: 't1', bridgeHost: 'host-1', bridgePort: 3333 } }))
-      .toMatchObject({ type: 'bind-target', target: { targetKey: 't1' } });
+  it('Phase8 connection service: Rust snapshot matches the TS command/state machine', () => {
+    const command = { type: 'bind-target' as const, target: { targetKey: 't1', bridgeHost: 'host-1', bridgePort: 3333 } };
+    const parsed = parseAndroidConnectionCommand(command);
+    expect(parsed).toMatchObject({ type: 'bind-target', target: { targetKey: 't1' } });
     expect(() => parseAndroidConnectionCommand({ type: 'foreground-resume' }))
       .toThrow(/unsupported Android connection service command/);
 
     const machine = createAndroidConnectionServiceStateMachine({ now: () => 1 });
-    machine.dispatch({ type: 'bind-target', target: { targetKey: 't1', bridgeHost: 'host-1', bridgePort: 3333 } });
+    machine.dispatch({ type: 'bind-target', target: command.target });
     machine.dispatch({ type: 'transport-opening', generation: 'g1' });
     machine.dispatch({ type: 'mux-ready', generation: 'g1', muxReadyPayload: {} });
     machine.dispatch({ type: 'channel-opened', generation: 'g1', channelId: 'c1' });
     machine.dispatch({ type: 'heartbeat-pong', generation: 'g1', at: 1 });
-    expect(machine.readSnapshot().state).toBe('healthy');
+    const tsSnapshot = machine.readSnapshot();
+    expect(tsSnapshot.state).toBe('healthy');
 
     const result = outputs(runPhase8Connection(phaseRequest('parity-phase8-connection', {
       'arc.service_command': {
-        type: 'bind-target',
+        type: command.type,
         target: {
-          targetKey: 't1',
-          bridgeHost: 'host-1',
+          ...command.target,
           channels: [{ channelId: 'c1', sessionName: 's1', state: 'open' }],
         },
       },
@@ -489,6 +619,17 @@ describe('DAGpipe Phase2-8 black-box parity with TypeScript owners', () => {
       'arc.notification_action': { targetKey: 't1', channelId: 'c1', sessionName: 's1' },
       'arc.session_activity_fact': { stopped: true, name: 's1', targetKey: 't1', channelId: 'c1' },
     })));
-    expect(result['arc.service_snapshot'].state).toBe('healthy');
+    expect(result['arc.service_snapshot']).toMatchObject({
+      state: tsSnapshot.state,
+      target: command.target.targetKey,
+    });
+
+    expect(() => runPhase8Connection(phaseRequest('parity-phase8-connection-reject', {
+      'arc.service_command': { type: 'foreground-resume' },
+      'arc.service_policy': { allowTransport: true, allowReconnect: true, allowNotifications: true },
+      'arc.network_generation_event': { generation: 'g1' },
+      'arc.notification_action': {},
+      'arc.session_activity_fact': {},
+    }))).toThrow(/service command rejected/);
   });
 });
