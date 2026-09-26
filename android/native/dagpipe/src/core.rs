@@ -517,7 +517,9 @@ impl Operator for ConnectionResolveRoutes {
             } else if health_status == "failure" {
                 500
             } else if health_status == "success" {
-                -1000 + (get_u64(&health_obj, "rttMs").min(100) as i64 / 10)
+                // Parity with TypeScript `healthCost`: floor rtt/10 first, then
+                // cap the bonus at 100, so rtt > 100ms cannot drift.
+                -1000 + std::cmp::min(100, get_u64(&health_obj, "rttMs") / 10) as i64
             } else {
                 20
             };
@@ -529,14 +531,21 @@ impl Operator for ConnectionResolveRoutes {
                 "selectable": selectable,
                 "score": score,
                 "priority": priority_index as u64,
+                "healthScore": health_score,
             }));
         }
         let diagnostics = routes.clone();
         routes.retain(|route| get_bool(&obj_ref(route), "selectable"));
         routes.sort_by(|left, right| {
-            let left_score = as_i64(left.get("score"));
-            let right_score = as_i64(right.get("score"));
-            left_score.cmp(&right_score)
+            let left_priority = as_i64(left.get("priority"));
+            let right_priority = as_i64(right.get("priority"));
+            let tier_cmp = left_priority.cmp(&right_priority);
+            if tier_cmp != std::cmp::Ordering::Equal {
+                return tier_cmp;
+            }
+            let left_health = as_i64(left.get("healthScore"));
+            let right_health = as_i64(right.get("healthScore"));
+            left_health.cmp(&right_health)
         });
         let selected = routes.first().cloned();
         Ok(json!({

@@ -1429,7 +1429,7 @@ function TerminalPageComponent({
           ...(canonicalDaemonHostId ? { daemonHostId: canonicalDaemonHostId, relayHostId: canonicalDaemonHostId } : {}),
           authToken: liveDirectEndpoint?.authToken || group.authToken,
           ...(relayEndpointCandidates?.length ? { relayEndpointCandidates } : {}),
-          ...(relayDevice && relayRtcCandidates.length > 0 ? { transportMode: 'webrtc' as const } : {}),
+          ...(relayDevice ? { transportMode: 'auto' as const } : {}),
           sessionNames: group.sessionNames,
         };
         const canonicalSessionRowKey = `${serverIdentity.key}::session:${sessionName}`;
