@@ -6,6 +6,7 @@ import { buildTransportTargetKey } from './session-transport-runtime';
 import { AndroidConnectionServiceTransportSocket } from './android-connection-service-socket';
 import type { AndroidConnectionServiceTarget } from './android-connection-service-commands';
 import type { BridgeTransportSocket } from './traversal/types';
+import { runDagpipePhase8Connection } from './dagpipe-native-client';
 
 export function buildAndroidConnectionServiceTarget(host: Host): AndroidConnectionServiceTarget {
   return {
@@ -32,15 +33,36 @@ export function openAndroidConnectionServiceTransportSocket(
   const socket = new AndroidConnectionServiceTransportSocket(target);
   const startup = socket.start();
   startup.then(
-    () => {
-      sendAndroidConnectionCommand({ type: 'bind-target', target }).then(
-        (result) => {
-          if (!result?.ok) socket.reportFailure('bind-target rejected by connection service');
-        },
-        (error) => socket.reportFailure(`bind-target rejected: ${String(error?.message ?? error)}`),
-      );
+    async () => {
+      try {
+        const validated = await runDagpipePhase8Connection({
+          execution_id: 'android-connection-service-bind',
+          attempt_id: '1',
+          inputs: {
+            'arc.service_command': { type: 'bind-target', target },
+            'arc.service_policy': {
+              allowTransport: true,
+              allowReconnect: true,
+              allowNotifications: true,
+              maxNotificationActions: 3,
+              maxReplayChannels: 3,
+            },
+            'arc.network_generation_event': { generation: 'local-probe' },
+            'arc.notification_action': {},
+            'arc.session_activity_fact': {},
+          },
+        });
+        if (!validated.ok) {
+          socket.reportFailure('bind-target rejected by dagpipe connection service gate');
+          return;
+        }
+        const result = await sendAndroidConnectionCommand({ type: 'bind-target', target });
+        if (!result?.ok) socket.reportFailure('bind-target rejected by connection service');
+      } catch (error) {
+        socket.reportFailure(`bind-target rejected: ${String(error instanceof Error ? error.message : error)}`);
+      }
     },
-    (error) => socket.reportFailure(`connection service startup failed: ${String(error?.message ?? error)}`),
+    (error) => socket.reportFailure(`connection service startup failed: ${String(error instanceof Error ? error.message : error)}`),
   );
   return socket;
 }

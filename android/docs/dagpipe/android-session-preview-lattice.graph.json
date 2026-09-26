@@ -1,0 +1,79 @@
+{
+  "id": "android.session_preview_lattice",
+  "version": "0.1",
+  "inputs": [
+    { "id": "arc.preview_open_intent", "schema": "Object" },
+    { "id": "arc.preview_select", "schema": "Object" },
+    { "id": "arc.focus_pan", "schema": "Object" }
+  ],
+  "nodes": [
+    {
+      "id": "open_preview",
+      "operator": "client.session_drawer_preview.open",
+      "operator_version": "0.1",
+      "inputs": ["arc.preview_open_intent"],
+      "output": { "id": "arc.preview_request", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "project_lattice",
+      "operator": "client.session_drawer_preview.project_lattice",
+      "operator_version": "0.1",
+      "inputs": ["arc.preview_request"],
+      "output": { "id": "arc.preview_lattice", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "select_cell",
+      "operator": "client.session_drawer_preview.select_cell",
+      "operator_version": "0.1",
+      "inputs": ["arc.preview_lattice", "arc.preview_select"],
+      "output": { "id": "arc.selected_cell", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "apply_selected_cell",
+      "operator": "client.session_drawer_preview.apply_selected_cell",
+      "operator_version": "0.1",
+      "inputs": ["arc.selected_cell"],
+      "output": { "id": "arc.focus_selection", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "pan_focus",
+      "operator": "client.session_drawer_preview.pan_focus",
+      "operator_version": "0.1",
+      "inputs": ["arc.preview_lattice", "arc.focus_pan"],
+      "output": { "id": "arc.panned_focus", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "apply_panned_focus",
+      "operator": "client.session_drawer_preview.apply_panned_focus",
+      "operator_version": "0.1",
+      "inputs": ["arc.panned_focus"],
+      "output": { "id": "arc.focus_panned", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    { "from": "open_preview", "to": "project_lattice", "arc_id": "arc.preview_request" },
+    { "from": "project_lattice", "to": "select_cell", "arc_id": "arc.preview_lattice" },
+    { "from": "select_cell", "to": "apply_selected_cell", "arc_id": "arc.selected_cell" },
+    { "from": "project_lattice", "to": "pan_focus", "arc_id": "arc.preview_lattice" },
+    { "from": "pan_focus", "to": "apply_panned_focus", "arc_id": "arc.panned_focus" }
+  ],
+  "outputs": ["arc.focus_selection", "arc.focus_panned"]
+}

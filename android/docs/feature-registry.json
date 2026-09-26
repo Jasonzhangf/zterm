@@ -1298,6 +1298,44 @@
       ]
     },
     {
+      "feature_id": "daemon.dagpipe_bridge",
+      "title": "Daemon DAGpipe native bridge and graph execution gates",
+      "domain": "daemon-runtime",
+      "owners": [
+        "src/server/dagpipe-bridge.ts",
+        "src/server/dagpipe-bridge.test.ts",
+        "android/native/dagpipe/src/lib.rs",
+        "android/native/dagpipe/src/core.rs",
+        "android/native/dagpipe/src/daemon_core.rs"
+      ],
+      "allowed_paths": [
+        "src/server/dagpipe-bridge.ts",
+        "src/server/dagpipe-bridge.test.ts",
+        "android/native/dagpipe/",
+        "docs/dagpipe/",
+        "docs/module-registry.json",
+        "docs/edge-registry.json",
+        "docs/feature-registry.json"
+      ],
+      "forbidden_paths": [
+        "packages/shared/src/connection/",
+        "src/contexts/SessionContext.tsx",
+        "src/lib/session-buffer-store.ts"
+      ],
+      "required_gates": [
+        "src/server/dagpipe-bridge.test.ts",
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/module-import-graph-truth.test.ts",
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/feature-registry-truth.test.ts"
+      ],
+      "truth_sources": [
+        "docs/dagpipe/phase0-design-slice.md",
+        "docs/wiki/daemon.md",
+        "docs/dagpipe/README.md"
+      ]
+    },
+    {
       "feature_id": "daemon.windows_wezterm_backend",
       "title": "Windows WezTerm mux adapter and buffer contract",
       "domain": "daemon-windows",

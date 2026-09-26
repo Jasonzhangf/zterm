@@ -1,0 +1,158 @@
+{
+  "id": "remote.window_stream_overlay",
+  "version": "0.1",
+  "inputs": [
+    { "id": "arc.catalog_request", "schema": "Object" },
+    { "id": "arc.stream_start_intent", "schema": "Object" },
+    { "id": "arc.touch_action", "schema": "Object" },
+    { "id": "arc.quality_intent", "schema": "Object" },
+    { "id": "arc.stream_policy", "schema": "Object" }
+  ],
+  "nodes": [
+    {
+      "id": "request_window_catalog",
+      "operator": "client.remote_window_overlay.request_catalog",
+      "operator_version": "0.1",
+      "inputs": ["arc.catalog_request"],
+      "output": { "id": "arc.window_catalog_request", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "list_desktop_windows",
+      "operator": "daemon.remote_window_stream.list_windows",
+      "operator_version": "0.1",
+      "inputs": ["arc.window_catalog_request"],
+      "output": { "id": "arc.desktop_window_catalog", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "project_overlay_directory",
+      "operator": "client.remote_window_overlay.project_directory",
+      "operator_version": "0.1",
+      "inputs": ["arc.desktop_window_catalog"],
+      "output": { "id": "arc.overlay_directory", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "start_stream",
+      "operator": "client.remote_window_overlay.start_stream",
+      "operator_version": "0.1",
+      "inputs": ["arc.stream_start_intent", "arc.overlay_directory", "arc.stream_policy"],
+      "output": { "id": "arc.stream_start_command", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "adjust_quality",
+      "operator": "client.remote_window_overlay.adjust_quality",
+      "operator_version": "0.1",
+      "inputs": ["arc.quality_intent", "arc.stream_policy"],
+      "output": { "id": "arc.quality_request", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "plan_capture_budget",
+      "operator": "daemon.remote_window_stream.plan_budget",
+      "operator_version": "0.1",
+      "inputs": ["arc.quality_request", "arc.stream_policy"],
+      "output": { "id": "arc.capture_budget", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "start_capture",
+      "operator": "daemon.remote_window_stream.start_capture",
+      "operator_version": "0.1",
+      "inputs": ["arc.stream_start_command", "arc.capture_budget"],
+      "output": { "id": "arc.capture_ready", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "encode_and_send",
+      "operator": "daemon.remote_window_stream.encode_send",
+      "operator_version": "0.1",
+      "inputs": ["arc.capture_ready", "arc.stream_policy"],
+      "output": { "id": "arc.video_frames", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "receive_decoded_frames",
+      "operator": "client.remote_window_overlay.receive_frames",
+      "operator_version": "0.1",
+      "inputs": ["arc.video_frames"],
+      "output": { "id": "arc.decoded_frame", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "project_overlay",
+      "operator": "client.remote_window_overlay.project_overlay",
+      "operator_version": "0.1",
+      "inputs": ["arc.decoded_frame"],
+      "output": { "id": "arc.overlay_projection", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "classify_touch_action",
+      "operator": "client.remote_window_overlay.classify_touch",
+      "operator_version": "0.1",
+      "inputs": ["arc.touch_action"],
+      "output": { "id": "arc.action_class", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "map_source_coordinates",
+      "operator": "daemon.remote_window_stream.map_input",
+      "operator_version": "0.1",
+      "inputs": ["arc.action_class", "arc.capture_ready"],
+      "output": { "id": "arc.source_input", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "inject_input",
+      "operator": "daemon.remote_window_stream.inject_input",
+      "operator_version": "0.1",
+      "inputs": ["arc.source_input"],
+      "output": { "id": "arc.input_result", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    { "from": "request_window_catalog", "to": "list_desktop_windows", "arc_id": "arc.window_catalog_request" },
+    { "from": "list_desktop_windows", "to": "project_overlay_directory", "arc_id": "arc.desktop_window_catalog" },
+    { "from": "project_overlay_directory", "to": "start_stream", "arc_id": "arc.overlay_directory" },
+    { "from": "start_stream", "to": "start_capture", "arc_id": "arc.stream_start_command" },
+    { "from": "adjust_quality", "to": "plan_capture_budget", "arc_id": "arc.quality_request" },
+    { "from": "plan_capture_budget", "to": "start_capture", "arc_id": "arc.capture_budget" },
+    { "from": "start_capture", "to": "encode_and_send", "arc_id": "arc.capture_ready" },
+    { "from": "start_capture", "to": "map_source_coordinates", "arc_id": "arc.capture_ready" },
+    { "from": "encode_and_send", "to": "receive_decoded_frames", "arc_id": "arc.video_frames" },
+    { "from": "receive_decoded_frames", "to": "project_overlay", "arc_id": "arc.decoded_frame" },
+    { "from": "classify_touch_action", "to": "map_source_coordinates", "arc_id": "arc.action_class" },
+    { "from": "map_source_coordinates", "to": "inject_input", "arc_id": "arc.source_input" }
+  ],
+  "outputs": ["arc.overlay_directory", "arc.overlay_projection", "arc.input_result"]
+}

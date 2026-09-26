@@ -42,6 +42,313 @@ pub extern "system" fn Java_com_zterm_android_DagpipeCoreBridge_compilePhase0(
 }
 
 #[no_mangle]
+pub extern "system" fn Java_com_zterm_android_DagpipeCoreBridge_compileAllDagpipePhases(
+    env: JNIEnv,
+    _class: JClass,
+) -> jstring {
+    let result = match crate::compile_all_dagpipe_phases_result() {
+        Ok(graphs) => serde_json::to_string(&serde_json::json!({
+            "ok": true,
+            "graphs": graphs,
+        }))
+        .unwrap_or_else(|_| r#"{"ok":false,"error":"json encode failed"}"#.into()),
+        Err(error) => serde_json::json!({
+            "ok": false,
+            "error": error,
+        })
+        .to_string(),
+    };
+    env.new_string(result)
+        .expect("jni new_string compile_all_dagpipe_phases")
+        .into_raw()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_zterm_android_DagpipeCoreBridge_runPhase8Connection(
+    mut env: JNIEnv,
+    _class: JClass,
+    input_json: jstring,
+) -> jstring {
+    let input = read_string(&mut env, input_json);
+    let result = string_result(
+        crate::phase8_core::run_phase8_connection_json(input).map(|value| value.to_string()),
+    );
+    env.new_string(result)
+        .expect("jni new_string run_phase8_connection")
+        .into_raw()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_zterm_android_DagpipeCoreBridge_runPhase6Control(
+    mut env: JNIEnv,
+    _class: JClass,
+    input_json: jstring,
+) -> jstring {
+    let input = read_string(&mut env, input_json);
+    let result = string_result(
+        crate::phase6_core::run_phase6_control_json(input).map(|value| value.to_string()),
+    );
+    env.new_string(result)
+        .expect("jni new_string run_phase6_control")
+        .into_raw()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_zterm_android_DagpipeCoreBridge_runPhase7Update(
+    mut env: JNIEnv,
+    _class: JClass,
+    input_json: jstring,
+) -> jstring {
+    let input = read_string(&mut env, input_json);
+    let result = string_result(
+        crate::phase7_core::run_phase7_update_json(input).map(|value| value.to_string()),
+    );
+    env.new_string(result)
+        .expect("jni new_string run_phase7_update")
+        .into_raw()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_zterm_android_DagpipeCoreBridge_runPhase4RemoteWindow(
+    mut env: JNIEnv,
+    _class: JClass,
+    input_json: jstring,
+) -> jstring {
+    let input = read_string(&mut env, input_json);
+    let result = string_result(
+        crate::phase4_core::run_phase4_remote_window_json(input).map(|value| value.to_string()),
+    );
+    env.new_string(result)
+        .expect("jni new_string run_phase4_remote_window")
+        .into_raw()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_zterm_android_DagpipeCoreBridge_runPhase5ShellLifecycle(
+    mut env: JNIEnv,
+    _class: JClass,
+    input_json: jstring,
+) -> jstring {
+    let input = read_string(&mut env, input_json);
+    let result = string_result(
+        crate::phase5_core::run_phase5_shell_lifecycle_json(input).map(|value| value.to_string()),
+    );
+    env.new_string(result)
+        .expect("jni new_string run_phase5_shell_lifecycle")
+        .into_raw()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_zterm_android_DagpipeCoreBridge_runPhase3InputSchedule(
+    mut env: JNIEnv,
+    _class: JClass,
+    input_json: jstring,
+) -> jstring {
+    let input = read_string(&mut env, input_json);
+    let result = string_result(
+        crate::phase3_core::run_phase3_input_schedule_json(input).map(|value| value.to_string()),
+    );
+    env.new_string(result)
+        .expect("jni new_string run_phase3_input_schedule")
+        .into_raw()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_zterm_android_DagpipeCoreBridge_runPhase2DaemonConnection(
+    mut env: JNIEnv,
+    _class: JClass,
+    input_json: jstring,
+) -> jstring {
+    let input = read_string(&mut env, input_json);
+    let result = string_result(
+        crate::phase2_core::run_phase2_daemon_connection_json(input).map(|value| value.to_string()),
+    );
+    env.new_string(result)
+        .expect("jni new_string run_phase2_daemon_connection")
+        .into_raw()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_zterm_android_DagpipeCoreBridge_runPhase5PreviewLattice(
+    mut env: JNIEnv,
+    _class: JClass,
+    input_json: jstring,
+) -> jstring {
+    let input = read_string(&mut env, input_json);
+    let result = string_result(
+        crate::phase5_core::run_phase5_preview_lattice_json(input).map(|value| value.to_string()),
+    );
+    env.new_string(result)
+        .expect("jni new_string run_phase5_preview_lattice")
+        .into_raw()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_zterm_android_DagpipeCoreBridge_runPhase6ConfigExport(
+    mut env: JNIEnv,
+    _class: JClass,
+    input_json: jstring,
+) -> jstring {
+    let input = read_string(&mut env, input_json);
+    let result = string_result(
+        crate::phase6_core::run_phase6_config_export_json(input).map(|value| value.to_string()),
+    );
+    env.new_string(result)
+        .expect("jni new_string run_phase6_config_export")
+        .into_raw()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_zterm_android_DagpipeCoreBridge_runPhase6ConfigImport(
+    mut env: JNIEnv,
+    _class: JClass,
+    input_json: jstring,
+) -> jstring {
+    let input = read_string(&mut env, input_json);
+    let result = string_result(
+        crate::phase6_core::run_phase6_config_import_json(input).map(|value| value.to_string()),
+    );
+    env.new_string(result)
+        .expect("jni new_string run_phase6_config_import")
+        .into_raw()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_zterm_android_DagpipeCoreBridge_runPhase6Composition(
+    mut env: JNIEnv,
+    _class: JClass,
+    input_json: jstring,
+) -> jstring {
+    let input = read_string(&mut env, input_json);
+    let result = string_result(
+        crate::phase6_core::run_phase6_composition_json(input).map(|value| value.to_string()),
+    );
+    env.new_string(result)
+        .expect("jni new_string run_phase6_composition")
+        .into_raw()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_zterm_android_DagpipeCoreBridge_runPhase7Release(
+    mut env: JNIEnv,
+    _class: JClass,
+    input_json: jstring,
+) -> jstring {
+    let input = read_string(&mut env, input_json);
+    let result = string_result(
+        crate::phase7_core::run_phase7_release_json(input).map(|value| value.to_string()),
+    );
+    env.new_string(result)
+        .expect("jni new_string run_phase7_release")
+        .into_raw()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_zterm_android_DagpipeCoreBridge_runPhase7Debug(
+    mut env: JNIEnv,
+    _class: JClass,
+    input_json: jstring,
+) -> jstring {
+    let input = read_string(&mut env, input_json);
+    let result = string_result(
+        crate::phase7_core::run_phase7_debug_json(input).map(|value| value.to_string()),
+    );
+    env.new_string(result)
+        .expect("jni new_string run_phase7_debug")
+        .into_raw()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_zterm_android_DagpipeCoreBridge_runPhase2Relay(
+    mut env: JNIEnv,
+    _class: JClass,
+    input_json: jstring,
+) -> jstring {
+    let input = read_string(&mut env, input_json);
+    let result = string_result(
+        crate::phase2_core::run_phase2_relay_json(input).map(|value| value.to_string()),
+    );
+    env.new_string(result)
+        .expect("jni new_string run_phase2_relay")
+        .into_raw()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_zterm_android_DagpipeCoreBridge_runPhase3FileBrowse(
+    mut env: JNIEnv,
+    _class: JClass,
+    input_json: jstring,
+) -> jstring {
+    let input = read_string(&mut env, input_json);
+    let result = string_result(
+        crate::phase3_core::run_phase3_file_browse_json(input).map(|value| value.to_string()),
+    );
+    env.new_string(result)
+        .expect("jni new_string run_phase3_file_browse")
+        .into_raw()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_zterm_android_DagpipeCoreBridge_runPhase3Upload(
+    mut env: JNIEnv,
+    _class: JClass,
+    input_json: jstring,
+) -> jstring {
+    let input = read_string(&mut env, input_json);
+    let result = string_result(
+        crate::phase3_core::run_phase3_upload_json(input).map(|value| value.to_string()),
+    );
+    env.new_string(result)
+        .expect("jni new_string run_phase3_upload")
+        .into_raw()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_zterm_android_DagpipeCoreBridge_runPhase3Download(
+    mut env: JNIEnv,
+    _class: JClass,
+    input_json: jstring,
+) -> jstring {
+    let input = read_string(&mut env, input_json);
+    let result = string_result(
+        crate::phase3_core::run_phase3_download_json(input).map(|value| value.to_string()),
+    );
+    env.new_string(result)
+        .expect("jni new_string run_phase3_download")
+        .into_raw()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_zterm_android_DagpipeCoreBridge_runPhase3Attachment(
+    mut env: JNIEnv,
+    _class: JClass,
+    input_json: jstring,
+) -> jstring {
+    let input = read_string(&mut env, input_json);
+    let result = string_result(
+        crate::phase3_core::run_phase3_attachment_json(input).map(|value| value.to_string()),
+    );
+    env.new_string(result)
+        .expect("jni new_string run_phase3_attachment")
+        .into_raw()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_zterm_android_DagpipeCoreBridge_runPhase3Screenshot(
+    mut env: JNIEnv,
+    _class: JClass,
+    input_json: jstring,
+) -> jstring {
+    let input = read_string(&mut env, input_json);
+    let result = string_result(
+        crate::phase3_core::run_phase3_screenshot_json(input).map(|value| value.to_string()),
+    );
+    env.new_string(result)
+        .expect("jni new_string run_phase3_screenshot")
+        .into_raw()
+}
+
+#[no_mangle]
 pub extern "system" fn Java_com_zterm_android_DagpipeCoreBridge_runConnectionLifecycle(
     mut env: JNIEnv,
     _class: JClass,

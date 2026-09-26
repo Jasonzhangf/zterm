@@ -1,7 +1,8 @@
 # Android DAGpipe Phase2 设计切片
 
-状态：静态治理设计稿，未进入 Rust 运行时接线。Phase2 先通过静态
-validate/inspect 与独立 review，再实现 Operator/parity/接线。
+状态：静态治理设计稿已通过 graph validate/inspect，Rust core 已实现
+`phase2_core` 的 Operator 注册与 black-box 测试；尚未接入 daemon/client 真实
+入口，也未切换旧 TS 实现。
 
 ## 范围
 

@@ -28,6 +28,41 @@ Phase 2 static graphs:
 - `relay-account-peer-route.graph.json`
 - `daemon-connection-channel-catalog.graph.json`
 
+Phase 3 static graphs:
+
+- `daemon-input-schedule.graph.json`
+- `daemon-file-transfer-browse.graph.json`
+- `daemon-file-transfer-upload.graph.json`
+- `daemon-file-transfer-download.graph.json`
+- `daemon-attachment-delivery.graph.json`
+- `terminal-remote-screenshot.graph.json`
+
+Phase 4 static graphs:
+
+- `remote-window-stream-overlay.graph.json`
+
+Phase 5 static graphs:
+
+- `android-session-shell-lifecycle.graph.json`
+- `android-session-preview-lattice.graph.json`
+
+Phase 6 static graphs:
+
+- `android-composition-plugin.graph.json`
+- `android-control-command.graph.json`
+- `android-config-export.graph.json`
+- `android-config-import.graph.json`
+
+Phase 7 static graphs:
+
+- `release-runtime-promotion.graph.json`
+- `release-update-lifecycle.graph.json`
+- `observability-debug.graph.json`
+
+Phase 8 static graphs:
+
+- `android-connection-service.graph.json`
+
 Validation:
 
 ```sh

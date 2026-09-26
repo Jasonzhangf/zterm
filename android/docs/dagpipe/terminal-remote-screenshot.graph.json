@@ -1,0 +1,45 @@
+{
+  "id": "terminal.remote_screenshot",
+  "version": "0.1",
+  "inputs": [
+    { "id": "arc.screenshot_request", "schema": "Object" },
+    { "id": "arc.screenshot_permission", "schema": "Object" }
+  ],
+  "nodes": [
+    {
+      "id": "validate_screenshot_request",
+      "operator": "terminal.remote_screenshot.validate",
+      "operator_version": "0.1",
+      "inputs": ["arc.screenshot_request", "arc.screenshot_permission"],
+      "output": { "id": "arc.screenshot_validation", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "capture_remote_screenshot",
+      "operator": "terminal.remote_screenshot.capture",
+      "operator_version": "0.1",
+      "inputs": ["arc.screenshot_validation"],
+      "output": { "id": "arc.screenshot_bytes", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "store_screenshot_result",
+      "operator": "terminal.remote_screenshot.store",
+      "operator_version": "0.1",
+      "inputs": ["arc.screenshot_bytes"],
+      "output": { "id": "arc.screenshot_result", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    { "from": "validate_screenshot_request", "to": "capture_remote_screenshot", "arc_id": "arc.screenshot_validation" },
+    { "from": "capture_remote_screenshot", "to": "store_screenshot_result", "arc_id": "arc.screenshot_bytes" }
+  ],
+  "outputs": ["arc.screenshot_result"]
+}

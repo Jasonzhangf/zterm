@@ -89,7 +89,7 @@ import {
 } from './remote-window-stream-daemon';
 import { createTerminalPerformanceTraceStore } from '@zterm/shared/terminal/performance-trace';
 import { createAdaptiveWidthOwnershipStore } from './adaptive-width-ownership-store';
-import { compilePhase0, mirrorPublishChangedRanges, runControlDispatch } from './dagpipe-bridge';
+import { compileAllDagpipePhases, mirrorPublishChangedRanges, runControlDispatch } from './dagpipe-bridge';
 
 const DAEMON_CONFIG = resolveDaemonRuntimeConfig();
 const PORT = DAEMON_CONFIG.port || DEFAULT_BRIDGE_PORT;
@@ -176,11 +176,11 @@ const readDaemonProcessGroup = (pid: string) => new Promise<{
 const MEMORY_GUARD_MAX_RSS_BYTES = 2.5 * 1024 * 1024 * 1024;
 const MEMORY_GUARD_MAX_HEAP_USED_BYTES = 1.5 * 1024 * 1024 * 1024;
 
-const DAGPIPE_COMPILE_RESULT = compilePhase0();
+const DAGPIPE_COMPILE_RESULT = compileAllDagpipePhases();
 if (!DAGPIPE_COMPILE_RESULT.ok) {
-  throw new Error(`DAGpipe phase0 compile failed: ${DAGPIPE_COMPILE_RESULT.error}`);
+  throw new Error(`DAGpipe all-phase compile failed: ${DAGPIPE_COMPILE_RESULT.error}`);
 }
-console.log('[server] DAGpipe phase0 operators compiled: native runtime active');
+console.log('[server] DAGpipe all-phase operators compiled: native runtime active');
 
 function dispatchControlRequest(request: {
   commandType: string;

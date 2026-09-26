@@ -1,0 +1,45 @@
+{
+  "id": "daemon.file_transfer_download",
+  "version": "0.1",
+  "inputs": [
+    { "id": "arc.download_intent", "schema": "Object" },
+    { "id": "arc.transfer_policy", "schema": "Object" }
+  ],
+  "nodes": [
+    {
+      "id": "validate_download",
+      "operator": "daemon.file_transfer.validate_download",
+      "operator_version": "0.1",
+      "inputs": ["arc.download_intent", "arc.transfer_policy"],
+      "output": { "id": "arc.download_validation", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "download_segment",
+      "operator": "daemon.file_transfer.download_segment",
+      "operator_version": "0.1",
+      "inputs": ["arc.download_validation"],
+      "output": { "id": "arc.download_chunk", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "ack_download_chunk",
+      "operator": "daemon.file_transfer.download_ack",
+      "operator_version": "0.1",
+      "inputs": ["arc.download_chunk"],
+      "output": { "id": "arc.download_complete", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    { "from": "validate_download", "to": "download_segment", "arc_id": "arc.download_validation" },
+    { "from": "download_segment", "to": "ack_download_chunk", "arc_id": "arc.download_chunk" }
+  ],
+  "outputs": ["arc.download_complete"]
+}

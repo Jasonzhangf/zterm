@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  compileAllDagpipePhases,
   compilePhase0,
   mirrorPublishChangedRanges,
   runMirrorPublish,
@@ -54,6 +55,10 @@ function frameRanges(result: ReturnType<typeof runMirrorPublish>) {
 describe('dagpipe bridge parity', () => {
   it('compiles phase0 daemon graphs', () => {
     expect(compilePhase0()).toMatchObject({ ok: true });
+  });
+
+  it('compiles all DAGpipe phase graphs from the native core', () => {
+    expect(compileAllDagpipePhases()).toMatchObject({ ok: true });
   });
 
   it('publishes appended tail without holes', () => {

@@ -8,6 +8,7 @@ import type {
   TerminalTransportConnection,
 } from './terminal-runtime-types';
 import { publishSessionActivitiesRuntime } from './terminal-session-activity-runtime';
+import { runPhase2DaemonConnection } from './dagpipe-bridge';
 import {
   readDaemonSessionObservations,
   type DaemonProcessGroupObservation,
@@ -254,6 +255,31 @@ export function handleListSessionsMessageRuntime(
   message: { type: 'list-sessions'; payload?: { terminalBackend?: 'tmux' | 'herdr' } } = { type: 'list-sessions' },
 ) {
   try {
+    const gate = runPhase2DaemonConnection({
+      execution_id: `list-sessions:${connection.transportId}`,
+      attempt_id: '1',
+      inputs: {
+        'arc.physical_connection': {
+          connectionId: connection.transportId ?? 'daemon-connection',
+          transportId: connection.transportId ?? 'daemon-connection',
+        },
+        'arc.mux_capabilities': { muxEnabled: true },
+        'arc.session_catalog_request': {
+          terminalBackend: message.payload?.terminalBackend ?? 'tmux',
+        },
+        'arc.idle_facts_request': {},
+      },
+    });
+    if (!gate.ok) {
+      deps.sendTransportMessage(connection.transport, {
+        type: 'error',
+        payload: {
+          message: `list-sessions rejected by dagpipe gateway: ${gate.error}`,
+          code: 'list_sessions_failed',
+        },
+      });
+      return;
+    }
     const payload = buildSessionsCatalogPayload(deps, message.payload?.terminalBackend);
     deps.sendTransportMessage(connection.transport, { type: 'sessions', payload });
     publishSessionActivitiesRuntime({

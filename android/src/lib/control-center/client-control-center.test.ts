@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   createControlCommand,
   type ControlCommand,
@@ -109,6 +109,78 @@ describe('client control center', () => {
     });
     expect(owner.executions).toHaveLength(0);
     expect(center.getAuditEntries()[0]?.result).toBe('denied');
+  });
+
+  it('routes through a passing dagpipe gate before the owner runs', async () => {
+    const gate = vi.fn(async (_request: unknown) => ({ ok: true }));
+    const center = new ClientControlCenter({
+      dagpipeGate: async (gateRequest) => {
+        await gate(gateRequest);
+        return { ok: true };
+      },
+    });
+    const owner = new RecordingOwner(() => ({ ok: true, value: { gated: true } }));
+    center.register('test.command', owner);
+
+    const result = await center.execute(request('test.command', { value: 1 }));
+
+    expect(result).toEqual({ ok: true, value: { gated: true } });
+    expect(owner.executions).toHaveLength(1);
+    expect(gate).toHaveBeenCalledWith(expect.objectContaining({
+      commandId: 'command-test.command',
+      commandType: 'test.command',
+      owner: 'recording-owner',
+    }));
+  });
+
+  it('denies commands rejected by the dagpipe gate before the owner runs', async () => {
+    const center = new ClientControlCenter({
+      dagpipeGate: async () => ({ ok: false, error: 'dagpipe denied' }),
+    });
+    const owner = new RecordingOwner(() => ({ ok: true, value: undefined }));
+    center.register('test.command', owner);
+
+    const result = await center.execute(request('test.command', {}));
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: 'capability_denied',
+        commandType: 'test.command',
+        requiredCapability: 'dagpipe',
+        message: 'dagpipe denied',
+      },
+    });
+    expect(owner.executions).toHaveLength(0);
+    expect(center.getAuditEntries()[0]?.result).toBe('denied');
+  });
+
+  it('projects a throwing dagpipe gate into an explicit gate_failed outcome', async () => {
+    const center = new ClientControlCenter({
+      dagpipeGate: async () => {
+        throw new Error('native gate rejected');
+      },
+    });
+    const owner = new RecordingOwner(() => ({ ok: true, value: undefined }));
+    center.register('test.command', owner);
+
+    const result = await center.execute(request('test.command', {}));
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: 'gate_failed',
+        commandType: 'test.command',
+        message: 'native gate rejected',
+        chain: [{
+          code: 'gate_failed',
+          message: 'native gate rejected',
+          source: 'client.control_center',
+        }],
+      },
+    });
+    expect(owner.executions).toHaveLength(0);
+    expect(center.getAuditEntries()[0]?.result).toBe('error');
   });
 
   it('returns the first outcome for an idempotency key and never re-runs the owner', async () => {

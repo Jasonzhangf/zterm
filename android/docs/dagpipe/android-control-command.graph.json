@@ -1,0 +1,56 @@
+{
+  "id": "android.control_command",
+  "version": "0.1",
+  "inputs": [
+    { "id": "arc.control_request", "schema": "Object" },
+    { "id": "arc.control_policy", "schema": "Object" }
+  ],
+  "nodes": [
+    {
+      "id": "authenticate_control",
+      "operator": "client.control_center.authenticate",
+      "operator_version": "0.1",
+      "inputs": ["arc.control_request", "arc.control_policy"],
+      "output": { "id": "arc.authenticated_command", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "gate_capability",
+      "operator": "client.control_center.gate",
+      "operator_version": "0.1",
+      "inputs": ["arc.authenticated_command", "arc.control_policy"],
+      "output": { "id": "arc.gated_command", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "route_owner",
+      "operator": "client.control_center.route",
+      "operator_version": "0.1",
+      "inputs": ["arc.gated_command"],
+      "output": { "id": "arc.routed_command", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "execute_control",
+      "operator": "client.control_center.execute",
+      "operator_version": "0.1",
+      "inputs": ["arc.routed_command"],
+      "output": { "id": "arc.control_result", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    { "from": "authenticate_control", "to": "gate_capability", "arc_id": "arc.authenticated_command" },
+    { "from": "gate_capability", "to": "route_owner", "arc_id": "arc.gated_command" },
+    { "from": "route_owner", "to": "execute_control", "arc_id": "arc.routed_command" }
+  ],
+  "outputs": ["arc.control_result"]
+}

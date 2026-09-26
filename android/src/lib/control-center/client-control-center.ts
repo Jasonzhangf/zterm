@@ -27,6 +27,13 @@ export interface ClientControlCenterOptions {
   readonly now?: () => number;
   readonly defaultDeadlineMs?: number;
   readonly maxAuditEntries?: number;
+  readonly dagpipeGate?: (request: {
+    commandId: string;
+    commandType: string;
+    owner: string;
+    subject: string;
+    payload: unknown;
+  }) => Promise<{ ok: boolean; error?: string }>;
 }
 
 class ControlDeadlineError extends Error {
@@ -49,11 +56,13 @@ export class ClientControlCenter {
   private readonly now: () => number;
   private readonly defaultDeadlineMs: number;
   private readonly maxAuditEntries: number;
+  private readonly dagpipeGate?: ClientControlCenterOptions['dagpipeGate'];
 
   constructor(options: ClientControlCenterOptions = {}) {
     this.now = options.now ?? Date.now;
     this.defaultDeadlineMs = options.defaultDeadlineMs ?? 30_000;
     this.maxAuditEntries = Math.max(1, Math.floor(options.maxAuditEntries ?? 1_000));
+    this.dagpipeGate = options.dagpipeGate;
   }
 
   register<R, E>(
@@ -104,6 +113,41 @@ export class ClientControlCenter {
         code: 'unknown_command',
         commandType,
       });
+    }
+
+    if (this.dagpipeGate) {
+      let gate: { ok: boolean; error?: string };
+      try {
+        gate = await this.dagpipeGate({
+          commandId: command.commandId,
+          commandType,
+          owner: owner.ownerId,
+          subject,
+          payload: command.params ?? {},
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.recordAudit(command, subject, 'error', startedAtMs);
+        return errorControlOutcome({
+          code: 'gate_failed',
+          commandType,
+          message,
+          chain: createControlErrorChain(
+            'gate_failed',
+            message,
+            'client.control_center',
+          ),
+        });
+      }
+      if (!gate.ok) {
+        this.recordAudit(command, subject, 'denied', startedAtMs);
+        return errorControlOutcome({
+          code: 'capability_denied',
+          commandType,
+          requiredCapability: 'dagpipe',
+          message: gate.error || 'control command denied by dagpipe gate',
+        });
+      }
     }
 
     const requiredCapability = this.requiredCapabilities.get(commandType) ?? '';

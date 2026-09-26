@@ -1,0 +1,45 @@
+{
+  "id": "daemon.file_transfer_upload",
+  "version": "0.1",
+  "inputs": [
+    { "id": "arc.upload_intent", "schema": "Object" },
+    { "id": "arc.transfer_policy", "schema": "Object" }
+  ],
+  "nodes": [
+    {
+      "id": "validate_upload",
+      "operator": "daemon.file_transfer.validate_upload",
+      "operator_version": "0.1",
+      "inputs": ["arc.upload_intent", "arc.transfer_policy"],
+      "output": { "id": "arc.upload_validation", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dispatch_upload_segment",
+      "operator": "daemon.file_transfer.upload_segment",
+      "operator_version": "0.1",
+      "inputs": ["arc.upload_validation"],
+      "output": { "id": "arc.upload_ack", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "ack_upload_segment",
+      "operator": "daemon.file_transfer.upload_ack",
+      "operator_version": "0.1",
+      "inputs": ["arc.upload_ack"],
+      "output": { "id": "arc.upload_complete", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    { "from": "validate_upload", "to": "dispatch_upload_segment", "arc_id": "arc.upload_validation" },
+    { "from": "dispatch_upload_segment", "to": "ack_upload_segment", "arc_id": "arc.upload_ack" }
+  ],
+  "outputs": ["arc.upload_complete"]
+}

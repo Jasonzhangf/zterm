@@ -18,6 +18,46 @@ public final class DagpipeCoreBridge {
 
     public static native String compilePhase0();
 
+    public static native String compileAllDagpipePhases();
+
+    public static native String runPhase8Connection(String inputJson);
+
+    public static native String runPhase6Control(String inputJson);
+
+    public static native String runPhase7Update(String inputJson);
+
+    public static native String runPhase4RemoteWindow(String inputJson);
+
+    public static native String runPhase5ShellLifecycle(String inputJson);
+
+    public static native String runPhase3InputSchedule(String inputJson);
+
+    public static native String runPhase2DaemonConnection(String inputJson);
+
+    public static native String runPhase5PreviewLattice(String inputJson);
+
+    public static native String runPhase6ConfigExport(String inputJson);
+
+    public static native String runPhase6ConfigImport(String inputJson);
+
+    public static native String runPhase6Composition(String inputJson);
+
+    public static native String runPhase7Release(String inputJson);
+
+    public static native String runPhase7Debug(String inputJson);
+
+    public static native String runPhase2Relay(String inputJson);
+
+    public static native String runPhase3FileBrowse(String inputJson);
+
+    public static native String runPhase3Upload(String inputJson);
+
+    public static native String runPhase3Download(String inputJson);
+
+    public static native String runPhase3Attachment(String inputJson);
+
+    public static native String runPhase3Screenshot(String inputJson);
+
     public static native String runConnectionLifecycle(String inputJson);
 
     public static native String runBufferManagement(String inputJson);
