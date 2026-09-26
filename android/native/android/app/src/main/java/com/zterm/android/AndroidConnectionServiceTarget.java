@@ -22,6 +22,7 @@ import java.util.Objects;
  *   ipv4Host      — optional IPv4 endpoint host.
  *   signalUrl     — optional WebRTC signal URL.
  *   signalToken   — optional auth token for Relay signaling URL only.
+ *   signalUrlFromRelay — true only when signalUrl came from traversalRelay.wsClientUrl.
  *   relayDeviceId — optional client device identity for Relay signaling.
  *   turnUrl       — optional TURN relay endpoint.
  *   turnUsername  — optional TURN username.
@@ -40,6 +41,7 @@ public final class AndroidConnectionServiceTarget {
     public final String ipv4Host;
     public final String signalUrl;
     public final String signalToken;
+    public final boolean signalUrlFromRelay;
     public final String relayDeviceId;
     public final String turnUrl;
     public final String turnUsername;
@@ -58,6 +60,7 @@ public final class AndroidConnectionServiceTarget {
         this.ipv4Host = b.ipv4Host;
         this.signalUrl = b.signalUrl;
         this.signalToken = b.signalToken;
+        this.signalUrlFromRelay = b.signalUrlFromRelay;
         this.relayDeviceId = b.relayDeviceId;
         this.turnUrl = b.turnUrl;
         this.turnUsername = b.turnUsername;
@@ -78,6 +81,7 @@ public final class AndroidConnectionServiceTarget {
         if (ipv4Host != null) json.put("ipv4Host", ipv4Host);
         if (signalUrl != null) json.put("signalUrl", signalUrl);
         if (signalToken != null) json.put("signalToken", signalToken);
+        if (signalUrlFromRelay) json.put("signalUrlFromRelay", true);
         if (relayDeviceId != null) json.put("relayDeviceId", relayDeviceId);
         if (turnUrl != null) json.put("turnUrl", turnUrl);
         if (turnUsername != null) json.put("turnUsername", turnUsername);
@@ -110,6 +114,7 @@ public final class AndroidConnectionServiceTarget {
             .ipv4Host(optTrim(json, "ipv4Host"))
             .signalUrl(optTrim(json, "signalUrl"))
             .signalToken(optTrim(json, "signalToken"))
+            .signalUrlFromRelay(json.optBoolean("signalUrlFromRelay", false))
             .relayDeviceId(optTrim(json, "relayDeviceId"))
             .turnUrl(optTrim(json, "turnUrl"))
             .turnUsername(optTrim(json, "turnUsername"))
@@ -139,6 +144,7 @@ public final class AndroidConnectionServiceTarget {
             && Objects.equals(ipv4Host, that.ipv4Host)
             && Objects.equals(signalUrl, that.signalUrl)
             && Objects.equals(signalToken, that.signalToken)
+            && signalUrlFromRelay == that.signalUrlFromRelay
             && Objects.equals(relayDeviceId, that.relayDeviceId)
             && Objects.equals(turnUrl, that.turnUrl)
             && Objects.equals(turnUsername, that.turnUsername)
@@ -149,6 +155,7 @@ public final class AndroidConnectionServiceTarget {
     public int hashCode() {
         return Objects.hash(targetKey, bridgeHost, bridgePort, lanHost, authToken, daemonHostId,
             relayHostId, tailscaleHost, ipv6Host, ipv4Host, signalUrl, signalToken,
+            signalUrlFromRelay,
             relayDeviceId, turnUrl, turnUsername, turnCredential);
     }
 
@@ -165,6 +172,7 @@ public final class AndroidConnectionServiceTarget {
         private String ipv4Host;
         private String signalUrl;
         private String signalToken;
+        private boolean signalUrlFromRelay;
         private String relayDeviceId;
         private String turnUrl;
         private String turnUsername;
@@ -182,6 +190,7 @@ public final class AndroidConnectionServiceTarget {
         public Builder ipv4Host(String v) { this.ipv4Host = v; return this; }
         public Builder signalUrl(String v) { this.signalUrl = v; return this; }
         public Builder signalToken(String v) { this.signalToken = v; return this; }
+        public Builder signalUrlFromRelay(boolean v) { this.signalUrlFromRelay = v; return this; }
         public Builder relayDeviceId(String v) { this.relayDeviceId = v; return this; }
         public Builder turnUrl(String v) { this.turnUrl = v; return this; }
         public Builder turnUsername(String v) { this.turnUsername = v; return this; }

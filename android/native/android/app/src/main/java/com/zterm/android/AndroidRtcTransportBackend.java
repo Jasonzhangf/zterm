@@ -420,6 +420,9 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
 
         @Override
         public void onSetSuccess() {
+            if (disposed || peerConnection == null) {
+                return;
+            }
             try {
                 SessionDescription description = peerConnection.getLocalDescription();
                 boolean sent = sendSignal("rtc-offer", payload -> {

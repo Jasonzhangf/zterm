@@ -54,6 +54,7 @@ export function buildAndroidConnectionServiceTarget(
     ...(host.ipv4Host ? { ipv4Host: host.ipv4Host } : {}),
     ...(signalUrl ? { signalUrl } : {}),
     ...(signalToken ? { signalToken } : {}),
+    ...(signalFromRelay ? { signalUrlFromRelay: true } : {}),
     ...(relayDeviceId ? { relayDeviceId } : {}),
     ...(turnUrl ? { turnUrl } : {}),
     ...(turnUsername ? { turnUsername } : {}),

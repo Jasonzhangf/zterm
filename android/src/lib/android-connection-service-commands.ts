@@ -39,6 +39,7 @@ export interface AndroidConnectionServiceTarget {
   ipv4Host?: string;
   signalUrl?: string;
   signalToken?: string;
+  signalUrlFromRelay?: boolean;
   relayDeviceId?: string;
   turnUrl?: string;
   turnUsername?: string;
@@ -155,6 +156,7 @@ function parseTarget(value: unknown): AndroidConnectionServiceTarget {
     ...(optionalString(value.ipv4Host) ? { ipv4Host: optionalString(value.ipv4Host) } : {}),
     ...(optionalString(value.signalUrl) ? { signalUrl: optionalString(value.signalUrl) } : {}),
     ...(optionalString(value.signalToken) ? { signalToken: optionalString(value.signalToken) } : {}),
+    ...(value.signalUrlFromRelay === true ? { signalUrlFromRelay: true } : {}),
     ...(optionalString(value.relayDeviceId) ? { relayDeviceId: optionalString(value.relayDeviceId) } : {}),
     ...(optionalString(value.turnUrl) ? { turnUrl: optionalString(value.turnUrl) } : {}),
     ...(optionalString(value.turnUsername) ? { turnUsername: optionalString(value.turnUsername) } : {}),

@@ -9,6 +9,7 @@ import org.json.JSONArray;
 import org.junit.Test;
 import org.webrtc.DataChannel;
 import org.webrtc.PeerConnection;
+import org.webrtc.SdpObserver;
 import org.webrtc.SessionDescription;
 import okhttp3.WebSocket;
 
@@ -19,9 +20,47 @@ import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 
 public final class AndroidRtcTransportBackendTest {
+    /**
+     * PeerConnection is a concrete class, so java.lang.reflect.Proxy cannot
+     * stand in for it. This subclass overrides the two methods the backend
+     * touches during the local-offer and remote-answer callbacks.
+     */
+    private static final class FakePeerConnection extends PeerConnection {
+        private SessionDescription localDescription;
+        private SessionDescription remoteDescription;
+        private SessionDescription lastRemoteSet;
+
+        FakePeerConnection() {
+            super(() -> 0L);
+        }
+
+        @Override
+        public SessionDescription getLocalDescription() {
+            return localDescription;
+        }
+
+        @Override
+        public SessionDescription getRemoteDescription() {
+            return remoteDescription;
+        }
+
+        @Override
+        public void setRemoteDescription(SdpObserver observer, SessionDescription description) {
+            lastRemoteSet = description;
+            remoteDescription = description;
+        }
+
+        @Override
+        public void close() {
+        }
+
+        @Override
+        public void dispose() {
+        }
+    }
+
     private static final class RecordingListener
         implements AndroidRtcTransportBackend.Listener {
         final List<String> events = Collections.synchronizedList(new ArrayList<>());
@@ -47,6 +86,30 @@ public final class AndroidRtcTransportBackendTest {
             closedCodes.add(code);
             events.add("closed:" + code + ":" + reason);
         }
+    }
+
+    private static WebSocket fakeWebSocket() {
+        return (WebSocket) Proxy.newProxyInstance(
+            WebSocket.class.getClassLoader(),
+            new Class<?>[] { WebSocket.class },
+            (proxy, method, args) -> {
+                if ("toString".equals(method.getName())) {
+                    return "fake-signal-websocket";
+                }
+                if (method.getReturnType() == boolean.class) {
+                    return false;
+                }
+                if (method.getReturnType() == int.class) {
+                    return 0;
+                }
+                return null;
+            });
+    }
+
+    private static void setField(Object target, String name, Object value) throws Exception {
+        Field field = target.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        field.set(target, value);
     }
 
     @Test
@@ -168,6 +231,32 @@ public final class AndroidRtcTransportBackendTest {
     }
 
     @Test
+    public void setLocalObserverAfterCloseDoesNotPublishOffer() throws Exception {
+        RecordingListener listener = new RecordingListener();
+        AndroidRtcTransportBackend backend = new AndroidRtcTransportBackend(
+            null, null, "wss://relay.example/client", new JSONArray(), "all",
+            true, 1_000L, listener);
+        FakePeerConnection fakePeer = new FakePeerConnection();
+        fakePeer.localDescription =
+            new SessionDescription(SessionDescription.Type.OFFER, "v=0");
+        Field peerField = AndroidRtcTransportBackend.class
+            .getDeclaredField("peerConnection");
+        peerField.setAccessible(true);
+        peerField.set(backend, fakePeer);
+        setField(backend, "signalSocket", fakeWebSocket());
+        backend.closeQuietly("test");
+
+        Field observerField = AndroidRtcTransportBackend.class
+            .getDeclaredField("setLocalObserver");
+        observerField.setAccessible(true);
+        SdpObserver observer = (SdpObserver) observerField.get(backend);
+        observer.onSetSuccess();
+
+        assertTrue("close-before-local-offer-publish must be ignored",
+            listener.events.isEmpty());
+    }
+
+    @Test
     public void answerBeforePeerInitIsTypedError() {
         RecordingListener listener = new RecordingListener();
         AndroidRtcTransportBackend backend = new AndroidRtcTransportBackend(
@@ -213,29 +302,9 @@ public final class AndroidRtcTransportBackendTest {
         AndroidRtcTransportBackend backend = new AndroidRtcTransportBackend(
             null, null, "wss://relay.example/client", new JSONArray(), "all",
             true, 1_000L, listener);
-        AtomicReference<SessionDescription> remoteDescription = new AtomicReference<>();
-        PeerConnection fakePeer = (PeerConnection) Proxy.newProxyInstance(
-            PeerConnection.class.getClassLoader(),
-            new Class<?>[] { PeerConnection.class },
-            (proxy, method, args) -> {
-                if ("setRemoteDescription".equals(method.getName())) {
-                    remoteDescription.set((SessionDescription) args[1]);
-                    return null;
-                }
-                if ("getRemoteDescription".equals(method.getName())) {
-                    return new SessionDescription(SessionDescription.Type.ANSWER, "v=0");
-                }
-                if ("toString".equals(method.getName())) {
-                    return "fake-peer-connection";
-                }
-                if (method.getReturnType() == boolean.class) {
-                    return false;
-                }
-                if (method.getReturnType() == int.class) {
-                    return 0;
-                }
-                return null;
-            });
+        FakePeerConnection fakePeer = new FakePeerConnection();
+        fakePeer.remoteDescription =
+            new SessionDescription(SessionDescription.Type.ANSWER, "v=0");
         Field peerField = AndroidRtcTransportBackend.class
             .getDeclaredField("peerConnection");
         peerField.setAccessible(true);
@@ -250,13 +319,13 @@ public final class AndroidRtcTransportBackendTest {
         backend.handleSignalMessage(
             "{\"type\":\"rtc-answer\",\"payload\":{\"sdp\":\"" + escaped + "\"}}");
 
-        assertNotNull("direct answer must set a remote description", remoteDescription.get());
+        assertNotNull("direct answer must set a remote description", fakePeer.lastRemoteSet);
         assertFalse("direct answer must strip host candidates",
-            remoteDescription.get().description.contains("192.0.2.1"));
+            fakePeer.lastRemoteSet.description.contains("192.0.2.1"));
         assertFalse("direct answer must strip Tailscale candidates",
-            remoteDescription.get().description.contains("100.64.0.2"));
+            fakePeer.lastRemoteSet.description.contains("100.64.0.2"));
         assertTrue("direct answer must keep srflx candidates",
-            remoteDescription.get().description.contains("203.0.113.1"));
+            fakePeer.lastRemoteSet.description.contains("203.0.113.1"));
         backend.closeQuietly("test");
     }
 

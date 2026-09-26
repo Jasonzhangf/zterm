@@ -594,6 +594,7 @@ public final class AndroidConnectionServiceTransportTest {
             .relayDeviceId("android-1")
             .authToken("token-a")
             .signalToken("relay-token")
+            .signalUrlFromRelay(true)
             .turnUrl("turn:relay.example:3478?transport=udp")
             .turnUsername("ztermturn")
             .turnCredential("turn-pass")
@@ -645,6 +646,31 @@ public final class AndroidConnectionServiceTransportTest {
         Object direct = candidateByPath(candidates, "rtc-direct");
         assertTrue("rtc-direct non-relay signal must keep daemon auth token",
             String.valueOf(candidateField(direct, "signalUrl")).contains("token=token-a"));
+    }
+
+    @Test
+    public void rtcDirectSignalIgnoresRelaySignalTokenWithoutRelaySource()
+        throws Exception {
+        AndroidConnectionService service = new AndroidConnectionService();
+        AndroidConnectionServiceTarget target = new AndroidConnectionServiceTarget.Builder()
+            .targetKey("target-rtc-direct-untrusted-signal-token")
+            .bridgeHost("signal.example")
+            .bridgePort(3333)
+            .relayHostId("relay-1")
+            .signalUrl("wss://signal.example/rtc")
+            .relayDeviceId("android-1")
+            .authToken("token-a")
+            .signalToken("relay-token")
+            .build();
+
+        Object runtime = newRuntime(service, target);
+        List<?> candidates = buildCandidates(runtime);
+        Object direct = candidateByPath(candidates, "rtc-direct");
+        String signalUrl = String.valueOf(candidateField(direct, "signalUrl"));
+        assertTrue("non-relay signal URL must reuse daemon auth token",
+            signalUrl.contains("token=token-a"));
+        assertFalse("non-relay signal URL must not leak relay signal token",
+            signalUrl.contains("token=relay-token"));
     }
 
     @Test
