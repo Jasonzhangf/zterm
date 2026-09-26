@@ -19,9 +19,9 @@ export interface RuntimeSequenceAnomaly {
   sessionId: string | null;
   seq: number;
   scope: string;
-  previousBufferSyncSeq: number;
-  previousBufferSyncRevision: number;
-  previousBufferSyncEndIndex: number;
+  previousAppliedSeq: number;
+  previousAppliedRevision: number;
+  previousAppliedEndIndex: number;
   observedLocalRevision: number;
   observedLocalEndIndex: number;
 }
@@ -77,7 +77,7 @@ export function parseRuntimeSequenceEntries(entries: RuntimeDebugLogEntryLike[])
 
 export function detectRuntimeSequenceAnomalies(events: ParsedRuntimeSequenceEvent[]) {
   const anomalies: RuntimeSequenceAnomaly[] = [];
-  const lastBufferSyncBySession = new Map<string, {
+  const lastAppliedBySession = new Map<string, {
     seq: number;
     revision: number;
     endIndex: number;
@@ -85,16 +85,24 @@ export function detectRuntimeSequenceAnomalies(events: ParsedRuntimeSequenceEven
 
   for (const event of events) {
     const sessionKey = event.sessionId || '__unknown__';
-    if (event.kind === 'buffer-sync') {
-      const payload = event.payload?.payload;
-      if (payload && typeof payload === 'object') {
-        lastBufferSyncBySession.set(sessionKey, {
+    if (event.kind === 'buffer-applied' || event.kind === 'buffer-apply-noop') {
+      const payload = event.payload;
+      if (payload) {
+        lastAppliedBySession.set(sessionKey, {
           seq: event.seq,
-          revision: Number.isFinite((payload as { revision?: number }).revision)
-            ? Math.max(0, Math.floor((payload as { revision?: number }).revision || 0))
+          revision: Number.isFinite((payload as { nextRevision?: number }).nextRevision)
+            ? Math.max(0, Math.floor((payload as { nextRevision?: number }).nextRevision || 0))
+            : Number.isFinite((payload as { revision?: number }).revision)
+              ? Math.max(0, Math.floor((payload as { revision?: number }).revision || 0))
+              : Number.isFinite((payload as { localRevision?: number }).localRevision)
+                ? Math.max(0, Math.floor((payload as { localRevision?: number }).localRevision || 0))
             : 0,
-          endIndex: Number.isFinite((payload as { endIndex?: number }).endIndex)
-            ? Math.max(0, Math.floor((payload as { endIndex?: number }).endIndex || 0))
+          endIndex: Number.isFinite((payload as { nextEndIndex?: number }).nextEndIndex)
+            ? Math.max(0, Math.floor((payload as { nextEndIndex?: number }).nextEndIndex || 0))
+            : Number.isFinite((payload as { endIndex?: number }).endIndex)
+              ? Math.max(0, Math.floor((payload as { endIndex?: number }).endIndex || 0))
+              : Number.isFinite((payload as { localEndIndex?: number }).localEndIndex)
+                ? Math.max(0, Math.floor((payload as { localEndIndex?: number }).localEndIndex || 0))
             : 0,
         });
       }
@@ -105,8 +113,8 @@ export function detectRuntimeSequenceAnomalies(events: ParsedRuntimeSequenceEven
       continue;
     }
 
-    const lastBufferSync = lastBufferSyncBySession.get(sessionKey);
-    if (!lastBufferSync) {
+    const lastApplied = lastAppliedBySession.get(sessionKey);
+    if (!lastApplied) {
       continue;
     }
 
@@ -128,17 +136,17 @@ export function detectRuntimeSequenceAnomalies(events: ParsedRuntimeSequenceEven
         : 0;
 
     if (
-      observedLocalRevision < lastBufferSync.revision
-      || observedLocalEndIndex < lastBufferSync.endIndex
+      observedLocalRevision < lastApplied.revision
+      || observedLocalEndIndex < lastApplied.endIndex
     ) {
       anomalies.push({
         kind: 'local-truth-stalled-after-buffer-sync',
         sessionId: event.sessionId,
         seq: event.seq,
         scope: event.scope,
-        previousBufferSyncSeq: lastBufferSync.seq,
-        previousBufferSyncRevision: lastBufferSync.revision,
-        previousBufferSyncEndIndex: lastBufferSync.endIndex,
+        previousAppliedSeq: lastApplied.seq,
+        previousAppliedRevision: lastApplied.revision,
+        previousAppliedEndIndex: lastApplied.endIndex,
         observedLocalRevision,
         observedLocalEndIndex,
       });

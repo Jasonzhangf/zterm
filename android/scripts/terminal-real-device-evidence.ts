@@ -569,6 +569,7 @@ async function ensureWebViewTerminalPage(
           const buttons = Array.from(document.querySelectorAll('button[aria-label]'));
           const button = buttons.find((candidate) => (
             candidate.getAttribute('aria-label')?.startsWith('Resume ')
+            || candidate.getAttribute('aria-label')?.startsWith('恢复 ')
           ));
           if (button instanceof HTMLButtonElement) {
             button.click();
