@@ -18,6 +18,7 @@ import type {
 } from '@zterm/shared/protocol';
 import { resolveFileTransferListPath } from './file-transfer-path';
 import { resolveRemoteScreenshotErrorMessage } from './remote-screenshot';
+import { runPhase3FileBrowse, runPhase3Download } from './dagpipe-bridge';
 import type { TerminalSession } from './terminal-runtime-types';
 import {
   FILE_CHUNK_SIZE,
@@ -339,11 +340,39 @@ export function createTerminalFileTransferListRuntime(
   function handleFileListRequest(session: TerminalSession, payload: FileListRequestPayload) {
     const { requestId, path: requestedPath, showHidden } = payload;
 
+    let resolvedPath: string;
     try {
-      const resolvedPath = resolveFileTransferListPath(
+      resolvedPath = resolveFileTransferListPath(
         requestedPath,
         () => deps.readTmuxPaneCurrentPath(session.sessionName, session.backend),
       );
+    } catch (error) {
+      deps.sendMessage(session, {
+        type: 'file-list-error',
+        payload: { requestId, error: error instanceof Error ? error.message : String(error) },
+      });
+      return;
+    }
+
+    // Thin Phase3 admission gate: policy inputs stay always-allow until the Rust
+    // graph owns real permission truth; TS remains the behavior owner on PASS.
+    const browseGate = runPhase3FileBrowse({
+      execution_id: 'daemon-file-browse',
+      attempt_id: '1',
+      inputs: {
+        'arc.file_browse_request': { path: resolvedPath },
+        'arc.fs_permission_policy': { allowRead: true },
+      },
+    });
+    if (!browseGate.ok) {
+      deps.sendMessage(session, {
+        type: 'file-list-error',
+        payload: { requestId, error: `dagpipe_file_browse_rejected: ${browseGate.error}` },
+      });
+      return;
+    }
+
+    try {
       const cacheEntry = getDirectoryCache(resolvedPath);
 
       deps.sendMessage(session, {
@@ -401,6 +430,24 @@ export function createTerminalFileTransferListRuntime(
 
   function handleFileDownloadRequest(session: TerminalSession, payload: FileDownloadRequestPayload) {
     const { requestId, remotePath, fileName } = payload;
+
+    // Thin Phase3 admission gate: policy inputs stay always-allow until the Rust
+    // graph owns real permission truth; TS remains the behavior owner on PASS.
+    const downloadGate = runPhase3Download({
+      execution_id: 'daemon-file-download',
+      attempt_id: '1',
+      inputs: {
+        'arc.download_intent': { downloadId: requestId, path: remotePath },
+        'arc.transfer_policy': { allowDownload: true },
+      },
+    });
+    if (!downloadGate.ok) {
+      deps.sendMessage(session, {
+        type: 'file-download-error',
+        payload: { requestId, error: `dagpipe_file_download_rejected: ${downloadGate.error}` },
+      });
+      return;
+    }
 
     try {
       if (!existsSync(remotePath)) {

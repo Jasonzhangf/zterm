@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'fs';
 import { extname, join } from 'path';
+import { runPhase3Upload } from './dagpipe-bridge';
 import type {
   AttachFileStartPayload,
   FileUploadChunkPayload,
@@ -265,6 +266,24 @@ export function createTerminalFileTransferBinaryRuntime(
 
   function handleFileUploadStart(session: TerminalSession, payload: FileUploadStartPayload) {
     const { requestId, targetDir, fileName, fileSize, chunkCount } = payload;
+
+    // Thin Phase3 admission gate: policy inputs stay always-allow until the Rust
+    // graph owns real permission truth; TS remains the behavior owner on PASS.
+    const uploadGate = runPhase3Upload({
+      execution_id: 'daemon-file-upload',
+      attempt_id: '1',
+      inputs: {
+        'arc.upload_intent': { uploadId: requestId },
+        'arc.transfer_policy': { allowUpload: true },
+      },
+    });
+    if (!uploadGate.ok) {
+      deps.sendMessage(session, {
+        type: 'file-upload-error',
+        payload: { requestId, error: `dagpipe_file_upload_rejected: ${uploadGate.error}` },
+      });
+      return;
+    }
 
     const isPasteUpload = Boolean(payload.pasteImage);
     const resolvedTargetDir = isPasteUpload ? getStagingDir() : targetDir;

@@ -7,12 +7,17 @@ import type { SessionMirror, TerminalSession } from './terminal-runtime-types';
 import type { ServerMessage } from '../lib/types';
 
 const { statSyncMock } = vi.hoisted(() => ({ statSyncMock: vi.fn() }));
+const { uploadGateMock } = vi.hoisted(() => ({ uploadGateMock: vi.fn(() => ({ ok: true, outputs: {} })) }));
 
 vi.mock('fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('fs')>();
   statSyncMock.mockImplementation(actual.statSync);
   return { ...actual, statSync: statSyncMock };
 });
+
+vi.mock('./dagpipe-bridge', () => ({
+  runPhase3Upload: uploadGateMock,
+}));
 
 function makeSession(): TerminalSession {
   return {
@@ -119,6 +124,43 @@ describe('terminal-file-transfer-binary-runtime', () => {
     expect(sentMessages).toContainEqual({
       type: 'file-upload-complete',
       payload: { requestId: 'upload-1', filePath, bytes: 5 },
+    });
+  });
+
+  it('rejects file upload start when the Phase3 upload gate fails', () => {
+    uploadGateMock.mockReturnValueOnce({ ok: false, error: 'upload denied by transfer policy' } as any);
+    uploadDir = mkdtempSync(join(tmpdir(), 'zterm-upload-gate-'));
+    const session = makeSession();
+    const sentMessages: ServerMessage[] = [];
+    const runtime = createTerminalFileTransferBinaryRuntime({
+      uploadDir,
+      downloadsDir: uploadDir,
+      wtermHomeDir: uploadDir,
+      platform: 'darwin',
+      sendMessage: (_session, message) => sentMessages.push(message),
+      getSessionMirror: vi.fn(() => null),
+      scheduleMirrorLiveSync: vi.fn(),
+      enqueueBackendInput: vi.fn(async () => false),
+      readTmuxPaneCurrentPath: vi.fn(() => uploadDir!),
+      runCommand: vi.fn(),
+      captureRemoteScreenshot: vi.fn(async ({ outputPath }) => ({ outputPath })),
+      logTimePrefix: () => '2026-05-23 00:00:00',
+    });
+
+    runtime.handleFileUploadStart(session, {
+      requestId: 'upload-gate',
+      targetDir: uploadDir,
+      fileName: 'up.txt',
+      fileSize: 2,
+      chunkCount: 1,
+    });
+
+    expect(sentMessages[sentMessages.length - 1]).toMatchObject({
+      type: 'file-upload-error',
+      payload: {
+        requestId: 'upload-gate',
+        error: expect.stringContaining('dagpipe_file_upload_rejected'),
+      },
     });
   });
 
