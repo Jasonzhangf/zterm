@@ -9,15 +9,15 @@ fn run_connection(input: Value) -> Value {
 fn compiles_all_dagpipe_phases() {
     let graphs = zterm_dagpipe::compile_all_dagpipe_phases_result().unwrap();
     assert!(
-        graphs.len() >= 23,
-        "expected all compiled phase graphs, got {}",
+        graphs.len() >= 25,
+        "expected all phase graphs, got {}",
         graphs.len()
     );
     assert!(graphs
         .iter()
         .any(|id| id == "android.connection_service@0.1"));
-    assert!(!graphs.iter().any(|id| id == "relay.account_peer_route@0.1"));
-    assert!(!graphs
+    assert!(graphs.iter().any(|id| id == "relay.account_peer_route@0.1"));
+    assert!(graphs
         .iter()
         .any(|id| id == "daemon.connection_channel_catalog@0.1"));
 }

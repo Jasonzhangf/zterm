@@ -4,6 +4,12 @@
 
 use pipeline_runtime::*;
 use serde_json::{json, Map, Value};
+use std::collections::{BTreeSet, HashMap};
+
+const RELAY_GRAPH_JSON: &str =
+    include_str!("../../../docs/dagpipe/relay-account-peer-route.graph.json");
+const DAEMON_CONNECTION_GRAPH_JSON: &str =
+    include_str!("../../../docs/dagpipe/daemon-connection-channel-catalog.graph.json");
 
 pub const RELAY_GRAPH_ID: &str = "relay.account_peer_route";
 pub const DAEMON_CONNECTION_CATALOG_GRAPH_ID: &str = "daemon.connection_channel_catalog";
@@ -29,6 +35,18 @@ fn get_str<'a>(object: &'a Map<String, Value>, key: &str) -> &'a str {
 
 fn get_bool(object: &Map<String, Value>, key: &str) -> bool {
     object.get(key).and_then(Value::as_bool).unwrap_or(false)
+}
+
+fn subscription_map(channels: &Value) -> Map<String, Value> {
+    let mut map = Map::new();
+    if let Some(items) = channels.as_array() {
+        for channel in items {
+            if let Some(channel_id) = channel.get("channelId").and_then(Value::as_str) {
+                map.insert(channel_id.to_string(), Value::Bool(true));
+            }
+        }
+    }
+    map
 }
 
 fn array_of_strings(value: Option<&Value>) -> Vec<Value> {
@@ -61,31 +79,110 @@ fn make_registry() -> Registry {
     register!(DaemonBindBodySubscription);
     register!(DaemonBuildSessionCatalog);
     register!(DaemonPublishIdleFacts);
+    register!(DaemonUnregisterChannel);
+    register!(DaemonReleaseBodySubscription);
     crate::sese_core::register_sese_operators(&mut registry);
     registry
 }
 
+fn run_graph(
+    request: Value,
+    graph_json: &str,
+    graph_id: &str,
+    graph_version: &str,
+) -> serde_json::Result<Value> {
+    let request_obj = match request {
+        Value::Object(map) => map,
+        other => obj(other),
+    };
+    let execution_id = get_str(&request_obj, "execution_id").to_string();
+    let attempt_id = get_str(&request_obj, "attempt_id").to_string();
+    let mut inputs_map = request_obj
+        .get("inputs")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .collect::<HashMap<String, Value>>();
+    if let Ok(graph_value) = serde_json::from_str::<Value>(graph_json) {
+        crate::sese_core::wrap_request_inputs(&graph_value, &mut inputs_map);
+    }
+    let registry = make_registry();
+    let capabilities = BTreeSet::new();
+    let compiled = match parse_graph_json(graph_json)
+        .and_then(|graph| compile(graph, &registry, &capabilities))
+    {
+        Ok(compiled) => compiled,
+        Err(error) => {
+            return Ok(json!({ "ok": false, "error": error.message }));
+        }
+    };
+    let identity = Identity {
+        project_id: "zterm".into(),
+        graph_id: graph_id.into(),
+        graph_version: graph_version.into(),
+        execution_id: if execution_id.is_empty() {
+            "execution".into()
+        } else {
+            execution_id
+        },
+        attempt_id: if attempt_id.is_empty() {
+            "attempt".into()
+        } else {
+            attempt_id
+        },
+    };
+    let runtime = Runtime::new(capabilities);
+    match runtime.run(&compiled, identity, inputs_map, &Cancellation::default()) {
+        Ok(result) => {
+            let mut outputs = serde_json::Map::new();
+            for (arc_id, arc) in crate::sese_core::unwrap_result_outputs(&result.outputs) {
+                outputs.insert(arc_id, arc.payload.clone());
+            }
+            Ok(json!({ "ok": true, "outputs": Value::Object(outputs) }))
+        }
+        Err(failure) => Ok(json!({
+            "ok": false,
+            "error": failure.error.message,
+        })),
+    }
+}
+
 pub fn compile_phase2_graphs() -> Result<Vec<String>, CompileError> {
-    // Static-only branch: relay/daemon phase2 graphs are validated independently by
-    // dagpipe graph validate/inspect and are compiled by the phase2-runtime task.
-    let _registry = make_registry();
-    Ok(Vec::new())
+    let registry = make_registry();
+    let capabilities = BTreeSet::new();
+    compile(
+        parse_graph_json(RELAY_GRAPH_JSON)?,
+        &registry,
+        &capabilities,
+    )?;
+    compile(
+        parse_graph_json(DAEMON_CONNECTION_GRAPH_JSON)?,
+        &registry,
+        &capabilities,
+    )?;
+    Ok(vec![
+        format!("{RELAY_GRAPH_ID}@{PHASE2_GRAPH_VERSION}"),
+        format!("{DAEMON_CONNECTION_CATALOG_GRAPH_ID}@{PHASE2_GRAPH_VERSION}"),
+    ])
 }
 
-pub fn run_phase2_relay_json(_input_json: String) -> serde_json::Result<Value> {
-    Ok(json!({
-        "ok": false,
-        "error": format!("{RELAY_GRAPH_ID} runtime deferred to phase2-runtime task"),
-    }))
+pub fn run_phase2_relay_json(input_json: String) -> serde_json::Result<Value> {
+    run_graph(
+        serde_json::from_str(&input_json)?,
+        RELAY_GRAPH_JSON,
+        RELAY_GRAPH_ID,
+        PHASE2_GRAPH_VERSION,
+    )
 }
 
-pub fn run_phase2_daemon_connection_json(_input_json: String) -> serde_json::Result<Value> {
-    Ok(json!({
-        "ok": false,
-        "error": format!(
-            "{DAEMON_CONNECTION_CATALOG_GRAPH_ID} runtime deferred to phase2-runtime task"
-        ),
-    }))
+pub fn run_phase2_daemon_connection_json(input_json: String) -> serde_json::Result<Value> {
+    run_graph(
+        serde_json::from_str(&input_json)?,
+        DAEMON_CONNECTION_GRAPH_JSON,
+        DAEMON_CONNECTION_CATALOG_GRAPH_ID,
+        PHASE2_GRAPH_VERSION,
+    )
 }
 
 struct RelayLogin;
@@ -377,8 +474,13 @@ impl Operator for DaemonAcceptConnection {
         if connection_id.is_empty() {
             return Err("physical connection requires connectionId".into());
         }
+        let channels = connection
+            .get("channels")
+            .cloned()
+            .unwrap_or_else(|| Value::Array(Vec::new()));
         Ok(json!({
             "connectionId": connection_id,
+            "channels": channels,
             "state": "accepted",
         }))
     }
@@ -406,8 +508,13 @@ impl Operator for DaemonNegotiateMux {
         if !get_bool(&caps, "muxEnabled") {
             return Err("mux negotiation requires muxEnabled".into());
         }
+        let channels = accepted
+            .get("channels")
+            .cloned()
+            .unwrap_or_else(|| Value::Array(Vec::new()));
         Ok(json!({
             "muxSessionId": format!("mux-{}", get_str(&accepted, "connectionId")),
+            "channels": channels,
             "state": "mux-ready",
         }))
     }
@@ -430,9 +537,13 @@ impl Operator for DaemonRegisterChannel {
 
     fn execute(&self, input: Value, _context: &OperatorContext) -> Result<Value, String> {
         let mux = obj(inputs(input).first().cloned().unwrap_or_default());
+        let channels = mux
+            .get("channels")
+            .cloned()
+            .unwrap_or_else(|| Value::Array(Vec::new()));
         Ok(json!({
             "muxSessionId": get_str(&mux, "muxSessionId"),
-            "channels": [],
+            "channels": channels,
             "state": "registered",
         }))
     }
@@ -455,10 +566,136 @@ impl Operator for DaemonBindBodySubscription {
 
     fn execute(&self, input: Value, _context: &OperatorContext) -> Result<Value, String> {
         let registry = obj(inputs(input).first().cloned().unwrap_or_default());
+        let channels = registry
+            .get("channels")
+            .cloned()
+            .unwrap_or_else(|| Value::Array(Vec::new()));
+        let by_channel = subscription_map(&channels);
         Ok(json!({
             "muxSessionId": get_str(&registry, "muxSessionId"),
-            "bodySubscribed": true,
+            "bodySubscribed": !by_channel.is_empty(),
+            "bodySubscribedByChannel": Value::Object(by_channel),
             "state": "bound",
+        }))
+    }
+}
+
+struct DaemonUnregisterChannel;
+
+impl Operator for DaemonUnregisterChannel {
+    fn name(&self) -> &'static str {
+        "daemon.channel_mux.unregister"
+    }
+
+    fn version(&self) -> &'static str {
+        "0.1"
+    }
+
+    fn output_type(&self) -> ValueType {
+        ValueType::Object
+    }
+
+    fn execute(&self, input: Value, _context: &OperatorContext) -> Result<Value, String> {
+        let values = inputs(input);
+        let registry = obj(values.first().cloned().unwrap_or_default());
+        let removal = obj(values.get(1).cloned().unwrap_or_default());
+        let channels = registry
+            .get("channels")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let removed_channel = removal
+            .get("removedChannelId")
+            .cloned()
+            .unwrap_or(Value::Null);
+        if removed_channel.is_null() || removed_channel.as_str().unwrap_or("").is_empty() {
+            return Ok(json!({
+                "muxSessionId": get_str(&registry, "muxSessionId"),
+                "removedChannelId": Value::Null,
+                "channels": channels,
+                "state": "noop",
+                "reason": "no removedChannelId requested",
+            }));
+        }
+        let removed_channel_id = removed_channel.as_str().unwrap_or("");
+        let registered = channels.iter().any(|channel| {
+            channel.get("channelId").and_then(Value::as_str) == Some(removed_channel_id)
+        });
+        if !registered {
+            return Err(format!(
+                "channel {} is not registered on mux session",
+                removed_channel_id
+            ));
+        }
+        let remaining = channels
+            .into_iter()
+            .filter(|channel| {
+                channel.get("channelId").and_then(Value::as_str) != Some(removed_channel_id)
+            })
+            .collect::<Vec<_>>();
+        Ok(json!({
+            "muxSessionId": get_str(&registry, "muxSessionId"),
+            "removedChannelId": removed_channel,
+            "channels": remaining,
+            "state": "unregistered",
+        }))
+    }
+}
+
+struct DaemonReleaseBodySubscription;
+
+impl Operator for DaemonReleaseBodySubscription {
+    fn name(&self) -> &'static str {
+        "daemon.transport_subscriber.release"
+    }
+
+    fn version(&self) -> &'static str {
+        "0.1"
+    }
+
+    fn output_type(&self) -> ValueType {
+        ValueType::Object
+    }
+
+    fn execute(&self, input: Value, _context: &OperatorContext) -> Result<Value, String> {
+        let removed = obj(inputs(input).first().cloned().unwrap_or_default());
+        match get_str(&removed, "state") {
+            "unregistered" => {}
+            "noop" => {
+                let channels = removed
+                    .get("channels")
+                    .cloned()
+                    .unwrap_or_else(|| Value::Array(Vec::new()));
+                let by_channel = subscription_map(&channels);
+                return Ok(json!({
+                    "muxSessionId": get_str(&removed, "muxSessionId"),
+                    "removedChannelId": Value::Null,
+                    "channels": channels,
+                    "bodySubscribed": !by_channel.is_empty(),
+                    "bodySubscribedByChannel": Value::Object(by_channel),
+                    "state": "not-requested",
+                }));
+            }
+            _ => {
+                return Err("body subscription release requires an unregistered channel".into());
+            }
+        }
+        let removed_channel = removed
+            .get("removedChannelId")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let channels = removed
+            .get("channels")
+            .cloned()
+            .unwrap_or_else(|| Value::Array(Vec::new()));
+        let by_channel = subscription_map(&channels);
+        Ok(json!({
+            "muxSessionId": get_str(&removed, "muxSessionId"),
+            "removedChannelId": removed_channel,
+            "channels": channels,
+            "bodySubscribed": !by_channel.is_empty(),
+            "bodySubscribedByChannel": Value::Object(by_channel),
+            "state": "released",
         }))
     }
 }
