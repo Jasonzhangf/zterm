@@ -65,6 +65,14 @@ Diff policy:
   changed-span policy, and the full-resync thresholds.
 - The default target is no-hole updates: a publish frame must cover every row
   from `startIndex` through `endIndex - 1`. Sparse holes are not sent.
+- Incoming changed ranges are diff truth only: `daemon.mirror_store.diff`
+  returns them unchanged, and the bridge must return exactly the ranges
+  computed by `src/server/canonical-buffer.ts#findChangedIndexedRanges`.
+  Subscriber pending bounds stay in `daemon.buffer_publisher`.
+- The live daemon mirror range decision is routed through
+  `mirrorPublishChangedRanges`/`runMirrorPublish`; the old TS
+  `findChangedIndexedRanges` remains only as the parity/test source contract
+  for the bridge.
 - Configurable rules may decide between tail append, contiguous rewrite span,
   window-shift prefix/tail, or full-window resync.
 
@@ -131,3 +139,7 @@ Phase 1 current status:
 - Black-box parity tests run through the N-API bridge and a JNI `.so`.
 - The client production path still needs a non-raw-input thin bridge before
   Phase 1 is considered runtime-closed.
+- `dagpipe graph validate` passes for both graphs.
+- `dagpipe graph inspect` prints waves and operator bindings for both graphs.
+- Runtime is wired through the DAGpipe native bridge and live daemon mirror
+  routing; this phase does not by itself request OTA/APK publish.
