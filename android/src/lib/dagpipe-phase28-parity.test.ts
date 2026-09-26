@@ -792,4 +792,76 @@ describe('DAGpipe Phase2-8 black-box parity and smoke with TypeScript owners', (
       'arc.session_activity_fact': {},
     }))).toThrow(/service command rejected/);
   });
+
+  it('Phase8 connection service: multi-session channel projection isolates open channels', () => {
+    const result = outputs(runPhase8Connection(phaseRequest('parity-phase8-multi-channel', {
+      'arc.service_command': {
+        type: 'bind-target',
+        target: {
+          targetKey: 't1',
+          bridgeHost: 'host-1',
+          channels: [
+            { channelId: 'c1', sessionName: 's1', state: 'open' },
+            { channelId: 'c2', sessionName: 's2', state: 'open' },
+            { channelId: 'c3', sessionName: 's3', state: 'closed' },
+          ],
+        },
+      },
+      'arc.service_policy': {
+        allowTransport: true,
+        allowReconnect: true,
+        allowNotifications: true,
+        maxNotificationActions: 3,
+        maxReplayChannels: 3,
+      },
+      'arc.network_generation_event': { generation: 'g1' },
+      'arc.notification_action': {
+        targetKey: 't1',
+        channelId: 'c1',
+        sessionName: 's1',
+      },
+      'arc.session_activity_fact': {
+        stopped: true,
+        name: 's1',
+        targetKey: 't1',
+        channelId: 'c1',
+      },
+    })));
+    expect(result['arc.service_snapshot']).toMatchObject({ state: 'healthy', target: 't1' });
+    expect(result['arc.notification_actions'].actions).toEqual([
+      expect.objectContaining({ channelId: 'c1', state: 'open' }),
+      expect.objectContaining({ channelId: 'c2', state: 'open' }),
+    ]);
+    expect(result['arc.session_open_request']).toMatchObject({
+      state: 'session-open-deep-link-ready',
+    });
+  });
+
+  it('Phase8 connection service: heartbeat miss schedules backoff without dropping target', () => {
+    const result = outputs(runPhase8Connection(phaseRequest('parity-phase8-backoff', {
+      'arc.service_command': {
+        type: 'bind-target',
+        target: {
+          targetKey: 't1',
+          bridgeHost: 'host-1',
+          channels: [{ channelId: 'c1', sessionName: 's1', state: 'open' }],
+        },
+      },
+      'arc.service_policy': {
+        allowTransport: true,
+        allowReconnect: true,
+        allowNotifications: true,
+        maxNotificationActions: 3,
+        maxReplayChannels: 3,
+        simulateHeartbeatMiss: true,
+      },
+      'arc.network_generation_event': { generation: 'g1' },
+      'arc.notification_action': {},
+      'arc.session_activity_fact': {},
+    })));
+    expect(result['arc.service_snapshot']).toMatchObject({
+      state: 'backoff-reconnect',
+      target: 't1',
+    });
+  });
 });
