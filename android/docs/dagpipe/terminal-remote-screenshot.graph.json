@@ -123,29 +123,6 @@
         "predicate": null
       },
       "iterator": "Whole"
-    },
-    {
-      "id": "dagpipe.collect.arc.screenshot_result",
-      "operator": "dagpipe.result.collect",
-      "operator_version": "0.1",
-      "inputs": [
-        "arc.screenshot_result"
-      ],
-      "output": {
-        "id": "arc.result",
-        "schema": "Object"
-      },
-      "input_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "output_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "iterator": "Whole"
     }
   ],
   "edges": [
@@ -168,14 +145,9 @@
       "from": "dagpipe.extract.arc.screenshot_permission",
       "to": "validate_screenshot_request",
       "arc_id": "arc.screenshot_permission"
-    },
-    {
-      "from": "store_screenshot_result",
-      "to": "dagpipe.collect.arc.screenshot_result",
-      "arc_id": "arc.screenshot_result"
     }
   ],
   "outputs": [
-    "arc.result"
+    "arc.screenshot_result"
   ]
 }

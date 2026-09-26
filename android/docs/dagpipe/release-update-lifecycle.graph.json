@@ -146,29 +146,6 @@
         "predicate": null
       },
       "iterator": "Whole"
-    },
-    {
-      "id": "dagpipe.collect.arc.client_update_installed",
-      "operator": "dagpipe.result.collect",
-      "operator_version": "0.1",
-      "inputs": [
-        "arc.client_update_installed"
-      ],
-      "output": {
-        "id": "arc.result",
-        "schema": "Object"
-      },
-      "input_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "output_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "iterator": "Whole"
     }
   ],
   "edges": [
@@ -196,14 +173,9 @@
       "from": "dagpipe.extract.arc.update_policy",
       "to": "check_update",
       "arc_id": "arc.update_policy"
-    },
-    {
-      "from": "install_client_update",
-      "to": "dagpipe.collect.arc.client_update_installed",
-      "arc_id": "arc.client_update_installed"
     }
   ],
   "outputs": [
-    "arc.result"
+    "arc.client_update_installed"
   ]
 }

@@ -268,29 +268,6 @@
         "predicate": null
       },
       "iterator": "Whole"
-    },
-    {
-      "id": "dagpipe.collect.arc.wire_frames",
-      "operator": "dagpipe.result.collect",
-      "operator_version": "0.1",
-      "inputs": [
-        "arc.wire_frames"
-      ],
-      "output": {
-        "id": "arc.result",
-        "schema": "Object"
-      },
-      "input_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "output_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "iterator": "Whole"
     }
   ],
   "edges": [
@@ -368,14 +345,9 @@
       "from": "dagpipe.extract.arc.subscriber_facts",
       "to": "plan_refresh",
       "arc_id": "arc.subscriber_facts"
-    },
-    {
-      "from": "emit_wire_frames",
-      "to": "dagpipe.collect.arc.wire_frames",
-      "arc_id": "arc.wire_frames"
     }
   ],
   "outputs": [
-    "arc.result"
+    "arc.wire_frames"
   ]
 }

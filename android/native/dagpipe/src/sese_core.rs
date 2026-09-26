@@ -60,7 +60,7 @@ impl Operator for ResultCollect {
     }
 
     fn input_type(&self) -> ValueType {
-        ValueType::Any
+        ValueType::Array
     }
 
     fn output_type(&self) -> ValueType {
@@ -68,10 +68,10 @@ impl Operator for ResultCollect {
     }
 
     fn execute(&self, input: Value, context: &OperatorContext) -> Result<Value, String> {
-        let values = match input {
-            Value::Array(items) => items,
-            other => vec![other],
-        };
+        let values = input
+            .as_array()
+            .cloned()
+            .ok_or("dagpipe result collect requires an array input")?;
         let keys: Vec<&str> = context
             .node_id
             .strip_prefix(COLLECT_PREFIX)
