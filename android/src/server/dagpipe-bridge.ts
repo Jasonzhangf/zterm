@@ -10,6 +10,10 @@ interface DagpipeNativeModule {
   compileAllDagpipePhases: () => string;
   runPhase2DaemonConnection: (inputJson: string) => string;
   runPhase3InputSchedule: (inputJson: string) => string;
+  runPhase3FileBrowse: (inputJson: string) => string;
+  runPhase3Upload: (inputJson: string) => string;
+  runPhase3Download: (inputJson: string) => string;
+  runPhase3Attachment: (inputJson: string) => string;
   runPhase3Screenshot: (inputJson: string) => string;
   runPhase4RemoteWindow: (inputJson: string) => string;
   runMirrorPublish: (inputJson: string) => string;
@@ -93,6 +97,30 @@ export function runPhase2DaemonConnection(input: Record<string, unknown>): Dagpi
 export function runPhase3InputSchedule(input: Record<string, unknown>): DagpipeResult {
   return JSON.parse(
     loadDagpipeNative().runPhase3InputSchedule(JSON.stringify(input)),
+  ) as DagpipeResult;
+}
+
+export function runPhase3FileBrowse(input: Record<string, unknown>): DagpipeResult {
+  return JSON.parse(
+    loadDagpipeNative().runPhase3FileBrowse(JSON.stringify(input)),
+  ) as DagpipeResult;
+}
+
+export function runPhase3Upload(input: Record<string, unknown>): DagpipeResult {
+  return JSON.parse(
+    loadDagpipeNative().runPhase3Upload(JSON.stringify(input)),
+  ) as DagpipeResult;
+}
+
+export function runPhase3Download(input: Record<string, unknown>): DagpipeResult {
+  return JSON.parse(
+    loadDagpipeNative().runPhase3Download(JSON.stringify(input)),
+  ) as DagpipeResult;
+}
+
+export function runPhase3Attachment(input: Record<string, unknown>): DagpipeResult {
+  return JSON.parse(
+    loadDagpipeNative().runPhase3Attachment(JSON.stringify(input)),
   ) as DagpipeResult;
 }
 
