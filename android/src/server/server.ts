@@ -89,7 +89,6 @@ import {
 } from './remote-window-stream-daemon';
 import { createTerminalPerformanceTraceStore } from '@zterm/shared/terminal/performance-trace';
 import { createAdaptiveWidthOwnershipStore } from './adaptive-width-ownership-store';
-import { findChangedIndexedRanges } from './canonical-buffer';
 import { compileAllDagpipePhases, mirrorPublishChangedRanges, runControlDispatch } from './dagpipe-bridge';
 
 const DAEMON_CONFIG = resolveDaemonRuntimeConfig();
