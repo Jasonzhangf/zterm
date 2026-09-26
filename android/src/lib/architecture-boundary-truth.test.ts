@@ -222,6 +222,41 @@ describe('architecture boundary truth gate', () => {
     expect(sessionRuntimeSource).toContain('cleanupControlSocket?.(options.sessionId, true)');
   });
 
+  it('keeps UI lifecycle refresh data-only instead of owning reconnect or channel reopen', () => {
+    const lifecycleSource = stripComments(read('src/contexts/session-context-lifecycle.ts'));
+    const activityRuntimeSource = stripComments(read('src/contexts/session-context-activity-runtime.ts'));
+    const infraFacadeSource = stripComments(read('src/contexts/session-context-infra-facade-runtime.ts'));
+    const orchestrationSource = stripComments(read('src/contexts/session-context-transport-orchestration-runtime.ts'));
+
+    // Foreground/background, tab reentry, and refresh ticks are data-refresh
+    // sources. Only an explicit user resume may open or rebuild a transport.
+    expect(lifecycleSource).not.toContain('allowReconnectIfUnavailable');
+    expect(lifecycleSource).not.toMatch(/\breconnectSession\s*\(/);
+    expect(lifecycleSource).not.toContain("source: 'explicit-resume',");
+    expect(lifecycleSource).toContain("source: 'foreground-resume'");
+
+    // The refresh runtime may only reach reconnect when the source is the
+    // explicit user resume intent, never for lifecycle/tick sources.
+    expect(activityRuntimeSource).toContain("options.refreshOptions.source === 'explicit-resume'");
+    expect(activityRuntimeSource).not.toContain('allowReconnectIfUnavailable');
+
+    // Body demand reconciliation must not reopen closed channels by itself; it
+    // only projects body-subscribed state onto an existing open channel.
+    expect(infraFacadeSource).not.toContain('reopenSessionTerminalChannelRef');
+    expect(infraFacadeSource).not.toContain("channel?.state === 'closed'");
+
+    // A UI foreground-resume projection is data-only; it may not wake
+    // transport scheduled reconnects.
+    const foregroundGuardIndex = orchestrationSource.indexOf("options.signal.source === 'foreground-resume'");
+    const wakeReconnectsIndex = orchestrationSource.indexOf('const shouldWakeReconnects =');
+    expect(foregroundGuardIndex).toBeGreaterThanOrEqual(0);
+    expect(wakeReconnectsIndex).toBeGreaterThan(foregroundGuardIndex);
+    expect(orchestrationSource).toContain('options.signal.connected === true');
+    expect(orchestrationSource).not.toMatch(
+      /shouldWakeReconnects\s*=\s*options\.signal\.source\s*===\s*'foreground-resume'/,
+    );
+  });
+
   it('keeps traversal sockets from owning a second default reconnect state machine', () => {
     const source = stripComments(read('src/lib/traversal/socket.ts'));
 

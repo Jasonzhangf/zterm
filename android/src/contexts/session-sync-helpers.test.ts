@@ -97,7 +97,6 @@ describe('session sync helper refresh planner', () => {
       wsReadyState: WebSocket.OPEN,
       reconnectInFlight: false,
       pendingTransportOpen: false,
-      allowReconnectIfUnavailable: true,
       transportStale: false,
       source: 'explicit-resume',
     })).toEqual({
@@ -114,7 +113,6 @@ describe('session sync helper refresh planner', () => {
       wsReadyState: WebSocket.OPEN,
       reconnectInFlight: false,
       pendingTransportOpen: false,
-      allowReconnectIfUnavailable: true,
       transportStale: true,
       source: 'active-tick',
     })).toEqual({
@@ -131,7 +129,6 @@ describe('session sync helper refresh planner', () => {
       wsReadyState: WebSocket.OPEN,
       reconnectInFlight: false,
       pendingTransportOpen: false,
-      allowReconnectIfUnavailable: true,
       transportStale: true,
       source: 'active-reentry',
     })).toEqual({
@@ -148,7 +145,6 @@ describe('session sync helper refresh planner', () => {
       wsReadyState: WebSocket.OPEN,
       reconnectInFlight: false,
       pendingTransportOpen: false,
-      allowReconnectIfUnavailable: true,
       transportStale: true,
       source: 'explicit-resume',
     })).toEqual({
@@ -165,7 +161,6 @@ describe('session sync helper refresh planner', () => {
       wsReadyState: WebSocket.CLOSED,
       reconnectInFlight: false,
       pendingTransportOpen: false,
-      allowReconnectIfUnavailable: true,
       transportStale: false,
       source: 'explicit-resume',
     })).toEqual({ action: 'reconnect' });
@@ -179,7 +174,6 @@ describe('session sync helper refresh planner', () => {
       wsReadyState: WebSocket.CLOSED,
       reconnectInFlight: true,
       pendingTransportOpen: false,
-      allowReconnectIfUnavailable: true,
       transportStale: false,
       source: 'active-tick',
     })).toEqual({ action: 'skip', reason: 'tick-blocked-by-reconnect' });
@@ -193,7 +187,6 @@ describe('session sync helper refresh planner', () => {
       wsReadyState: WebSocket.OPEN,
       reconnectInFlight: false,
       pendingTransportOpen: false,
-      allowReconnectIfUnavailable: false,
       transportStale: false,
       source: 'active-tick',
     })).toEqual({
@@ -210,7 +203,6 @@ describe('session sync helper refresh planner', () => {
       wsReadyState: WebSocket.OPEN,
       reconnectInFlight: false,
       pendingTransportOpen: false,
-      allowReconnectIfUnavailable: false,
       transportStale: false,
       source: 'active-tick',
     })).toEqual({
@@ -228,7 +220,6 @@ describe('session sync helper refresh planner', () => {
       wsReadyState: WebSocket.OPEN,
       reconnectInFlight: false,
       pendingTransportOpen: false,
-      allowReconnectIfUnavailable: false,
       transportStale: false,
       source: 'active-tick',
     })).toEqual({
@@ -245,7 +236,6 @@ describe('session sync helper refresh planner', () => {
       wsReadyState: WebSocket.OPEN,
       reconnectInFlight: false,
       pendingTransportOpen: false,
-      allowReconnectIfUnavailable: false,
       transportStale: false,
       source: 'active-tick',
     })).toEqual({
@@ -254,7 +244,7 @@ describe('session sync helper refresh planner', () => {
     });
   });
 
-  it('lets the transport owner rebuild stale pending transport-open bookkeeping', () => {
+  it('keeps lifecycle refresh from rebuilding stale pending transport-open bookkeeping', () => {
     expect(buildActiveSessionRefreshPlan({
       hasSession: true,
       isRefreshTarget: true,
@@ -263,10 +253,9 @@ describe('session sync helper refresh planner', () => {
       reconnectInFlight: false,
       pendingTransportOpen: true,
       pendingTransportOpenStale: true,
-      allowReconnectIfUnavailable: true,
       transportStale: false,
       source: 'active-reentry',
-    })).toEqual({ action: 'reconnect' });
+    })).toEqual({ action: 'skip', reason: 'transport-unavailable' });
   });
 
   it('lets explicit resume rebuild an orphaned pending transport-open that has no live socket', () => {
@@ -278,7 +267,6 @@ describe('session sync helper refresh planner', () => {
       reconnectInFlight: false,
       pendingTransportOpen: true,
       pendingTransportOpenStale: false,
-      allowReconnectIfUnavailable: true,
       transportStale: false,
       source: 'explicit-resume',
     })).toEqual({ action: 'reconnect' });
@@ -293,7 +281,6 @@ describe('session sync helper refresh planner', () => {
       reconnectInFlight: true,
       pendingTransportOpen: true,
       pendingTransportOpenStale: false,
-      allowReconnectIfUnavailable: true,
       transportStale: false,
       source: 'active-tick',
     })).toEqual({ action: 'skip', reason: 'tick-blocked-by-reconnect' });
@@ -308,7 +295,6 @@ describe('session sync helper refresh planner', () => {
       reconnectInFlight: true,
       pendingTransportOpen: true,
       pendingTransportOpenStale: true,
-      allowReconnectIfUnavailable: true,
       transportStale: false,
       source: 'explicit-resume',
     })).toEqual({ action: 'skip', reason: 'transport-open-pending' });
@@ -323,7 +309,6 @@ describe('session sync helper refresh planner', () => {
       reconnectInFlight: false,
       pendingTransportOpen: false,
       pendingTransportOpenStale: false,
-      allowReconnectIfUnavailable: true,
       transportStale: false,
       source: 'explicit-resume',
     })).toEqual({ action: 'skip', reason: 'transport-open-pending' });
@@ -338,7 +323,6 @@ describe('session sync helper refresh planner', () => {
       reconnectInFlight: false,
       pendingTransportOpen: false,
       pendingTransportOpenStale: false,
-      allowReconnectIfUnavailable: true,
       transportStale: false,
       source: 'explicit-resume',
     })).toEqual({ action: 'skip', reason: 'transport-open-pending' });
@@ -353,7 +337,6 @@ describe('session sync helper refresh planner', () => {
       reconnectInFlight: true,
       pendingTransportOpen: false,
       pendingTransportOpenStale: false,
-      allowReconnectIfUnavailable: true,
       transportStale: false,
       source: 'explicit-resume',
     })).toEqual({ action: 'skip', reason: 'transport-unavailable' });
@@ -367,7 +350,6 @@ describe('session sync helper refresh planner', () => {
       wsReadyState: WebSocket.CLOSED,
       reconnectInFlight: false,
       pendingTransportOpen: false,
-      allowReconnectIfUnavailable: true,
       keepaliveGraceActive: true,
       transportStale: false,
       source: 'explicit-resume',
@@ -382,7 +364,6 @@ describe('session sync helper refresh planner', () => {
       wsReadyState: WebSocket.CLOSED,
       reconnectInFlight: false,
       pendingTransportOpen: false,
-      allowReconnectIfUnavailable: true,
       keepaliveGraceActive: false,
       transportStale: true,
       source: 'explicit-resume',
