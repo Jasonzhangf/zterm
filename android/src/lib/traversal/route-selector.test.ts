@@ -252,4 +252,35 @@ describe('selectBestTraversalRoute', () => {
     expect(selection.selected).toMatchObject({ id: 'rtc-direct:daemon-a', path: 'rtc-direct' });
     expect(selection.selected?.path).not.toBe('rtc-relay');
   });
+
+  it('orders same-tier successes with rtt > 100 by floored rttMs/10', () => {
+    const cache = new TraversalRouteHealthCache({ now: () => 1000 });
+    const scope = { accountId: 'u1', daemonHostId: 'daemon-a' };
+    const slow: TraversalPlanCandidate = {
+      id: 'direct:tailscale:slow',
+      kind: 'ws',
+      path: 'tailscale',
+      endpoint: 'slow.tailnet.ts.net:3333',
+      url: 'ws://slow.tailnet.ts.net:3333',
+    };
+    const fast: TraversalPlanCandidate = {
+      ...candidates[2]!,
+      id: 'direct:tailscale:fast',
+    };
+    cache.recordSuccess(scope, slow, 250);
+    cache.recordSuccess(scope, fast, 150);
+
+    const selection = selectBestTraversalRoute({
+      candidates: [slow, fast],
+      healthCache: cache,
+      scope,
+    });
+
+    expect(selection.selected).toMatchObject({ id: 'direct:tailscale:fast', path: 'tailscale' });
+    const diagnostics = Object.fromEntries(
+      selection.diagnostics.map((item) => [item.candidateId, item]),
+    );
+    expect(diagnostics['direct:tailscale:fast']?.healthCost).toBe(-985);
+    expect(diagnostics['direct:tailscale:slow']?.healthCost).toBe(-975);
+  });
 });

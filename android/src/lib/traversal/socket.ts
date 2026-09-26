@@ -857,28 +857,29 @@ export class TraversalSocket implements BridgeTransportSocket {
       this.finishFailure(this.diagnostics.reason || 'No traversal path succeeded');
       return;
     }
-    // Parallel batch: every selectable ws candidate races with the head of the
-    // rtc queue (rtc-direct before rtc-relay, preserving the signal-session
-    // ordering). The first onopen wins and closes the rest. Failed ws
-    // candidates retire within the batch; rtc candidates stay ordered.
+    const selected = selection.selected;
     const selectableDiagnostics = selection.diagnostics.filter((item) => item.selectable);
     const pool = selectableDiagnostics.length > 0 ? selectableDiagnostics : selection.diagnostics;
     const poolIds = new Set(pool.map((item) => item.candidateId));
     const poolCandidates = remainingCandidates.filter((item) => poolIds.has(item.id));
-    const wsBatch = poolCandidates.filter((item) => item.kind === 'ws');
-    const rtcQueue = poolCandidates.filter((item) => item.kind === 'rtc');
-    // TURN/Relay is the last route tier. It must not race a still-selectable
-    // Tailscale/direct WebSocket candidate once WebRTC-direct has failed;
-    // only the selected rtc-direct candidate races alongside the direct ws
-    // batch, and rtc-relay enters only when no higher-tier route is selected.
-    const rtcDirectHead = selection.selected?.path === 'rtc-direct'
-      ? rtcQueue.find((item) => item.path === 'rtc-direct') ?? null
-      : null;
-    const rtcRelayHead = selection.selected?.path === 'rtc-relay'
-      ? rtcQueue.find((item) => item.path === 'rtc-relay') ?? null
-      : null;
-    const rtcHead = rtcDirectHead ?? rtcRelayHead;
-    const batch = rtcHead ? [...wsBatch, rtcHead] : wsBatch;
+    // Tier-first: the parallel batch is limited to the selected tier. A lower
+    // tier (for example Tailscale/public WS when rtc-direct is selected) may
+    // not race a higher tier and steal the resolved path via first-onopen; it
+    // only enters after this batch fully fails and connectNext re-selects.
+    const selectedDiagnostic = selection.diagnostics.find((item) =>
+      item.candidateId === selected.id
+      && item.path === selected.path
+      && item.endpoint === selected.endpoint);
+    const selectedTierCost = selectedDiagnostic?.tierCost;
+    const batch = selectedTierCost === undefined
+      ? poolCandidates.filter((item) => item.id === selected.id)
+      : poolCandidates.filter((item) => {
+          const diagnostic = selection.diagnostics.find((d) =>
+            d.candidateId === item.id
+            && d.path === item.path
+            && d.endpoint === item.endpoint);
+          return diagnostic?.tierCost === selectedTierCost;
+        });
     if (batch.length === 0) {
       this.finishFailure(this.diagnostics.reason || 'No traversal path succeeded');
       return;

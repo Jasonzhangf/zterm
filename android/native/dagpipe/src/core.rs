@@ -517,7 +517,9 @@ impl Operator for ConnectionResolveRoutes {
             } else if health_status == "failure" {
                 500
             } else if health_status == "success" {
-                -1000 + (get_u64(&health_obj, "rttMs").min(100) as i64 / 10)
+                // Parity with TypeScript `healthCost`: floor rtt/10 first, then
+                // cap the bonus at 100, so rtt > 100ms cannot drift.
+                -1000 + std::cmp::min(100, get_u64(&health_obj, "rttMs") / 10) as i64
             } else {
                 20
             };

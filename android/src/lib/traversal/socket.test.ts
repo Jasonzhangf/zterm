@@ -310,9 +310,11 @@ describe('TraversalSocket reconnect', () => {
     });
     await flushMicrotasks();
 
-    // ws candidates race in parallel; the Tailscale candidate is one of them.
-    expect(MockWebSocket.instances.length).toBeGreaterThanOrEqual(2);
-    expect(MockWebSocket.instances.some((ws) => ws.url.includes('100.66.1.82'))).toBe(true);
+    // Tier-first: the higher-tier Tailscale candidate is attempted first and
+    // the lower-tier public IPv4 candidate must not race it in the same batch.
+    expect(MockWebSocket.instances).toHaveLength(1);
+    expect(MockWebSocket.instances[0].url).toContain('100.66.1.82');
+    expect(MockWebSocket.instances.some((ws) => ws.url.includes('203.0.113.10'))).toBe(false);
   });
 
   it('does not open a LAN endpoint and uses Tailscale for remote websocket connection', async () => {
@@ -966,11 +968,11 @@ describe('TraversalSocket reconnect', () => {
     socket.onopen = onopen;
     await flushMicrotasks();
 
-    const tailscaleWs = MockWebSocket.instances.find((ws) => ws.url.includes('100.66.1.82'));
-    expect(tailscaleWs).toBeDefined();
-    expect(MockWebSocket.instances).toHaveLength(2);
-
-    const directSignal = MockWebSocket.instances.find((ws) => !ws.url.includes('100.66.1.82'));
+    // Tier-first: rtc-direct is the selected tier, so the lower-tier Tailscale
+    // websocket is not admitted into this batch at all.
+    expect(MockWebSocket.instances).toHaveLength(1);
+    const directSignal = MockWebSocket.instances[0];
+    expect(directSignal.url).not.toContain('100.66.1.82');
     directSignal?.triggerOpen();
     await flushMicrotasks();
     expect(MockRTCPeerConnection.instances).toHaveLength(1);
@@ -982,11 +984,13 @@ describe('TraversalSocket reconnect', () => {
     } as MessageEvent);
     await flushMicrotasks();
 
-    // The rtc-direct failure advances the batch, but TURN must wait for the
-    // still-selectable Tailscale websocket to fail before it can be tried.
+    // The rtc-direct failure advances the batch: Tailscale (the next tier) is
+    // now attempted, but TURN must still wait for it to fail before starting.
     expect(MockWebSocket.instances).toHaveLength(2);
     expect(MockRTCPeerConnection.instances).toHaveLength(1);
 
+    const tailscaleWs = MockWebSocket.instances.find((ws) => ws.url.includes('100.66.1.82'));
+    expect(tailscaleWs).toBeDefined();
     tailscaleWs?.triggerOpen();
     await flushMicrotasks();
     expect(onopen).toHaveBeenCalledTimes(1);
@@ -994,6 +998,80 @@ describe('TraversalSocket reconnect', () => {
       stage: 'open',
       resolvedPath: 'tailscale',
     });
+    socket.close();
+  });
+
+  it('does not admit a lower-tier Tailscale websocket into the selected rtc-direct batch', async () => {
+    const socket = new TraversalSocket(
+      {
+        bridgeHost: '100.66.1.82',
+        bridgePort: 3333,
+        authToken: 'token',
+        daemonHostId: 'daemon-host-a',
+        relayHostId: 'daemon-host-a',
+        transportMode: 'auto',
+        relayEndpointCandidates: [
+          {
+            id: 'direct:tailscale:daemon-host-a',
+            kind: 'tailscale',
+            host: '100.66.1.82',
+            port: 3333,
+            authToken: 'token',
+            authRequired: true,
+            lastSeenAt: '2026-07-16T00:00:00.000Z',
+          },
+        ],
+      },
+      {
+        signalUrl: '',
+        turnServerUrl: '',
+        turnUsername: '',
+        turnCredential: '',
+        transportMode: 'auto',
+        traversalRelay: {
+          relayBaseUrl: 'https://relay.example.test/relay/',
+          accessToken: 'relay-access',
+          userId: 'user-1',
+          username: 'jason',
+          deviceId: 'android-1',
+          deviceName: 'Android',
+          platform: 'android',
+          wsDevicesUrl: 'wss://relay.example.test/relay/ws/devices',
+          wsHostUrl: 'wss://relay.example.test/relay/ws/host',
+          wsClientUrl: 'wss://relay.example.test/relay/ws/client',
+          turnUrl: 'turn:relay.example.test:3478?transport=udp',
+          turnUsername: 'turn-user',
+          turnCredential: 'turn-secret',
+          updatedAt: 1,
+        },
+      },
+      { routeHealthCache: new TraversalRouteHealthCache() },
+    );
+    const onopen = vi.fn();
+    socket.onopen = onopen;
+    await flushMicrotasks();
+
+    // The selected tier is rtc-direct: only its signaling socket starts, and
+    // the lower-tier Tailscale websocket must not be admitted to the race.
+    expect(MockWebSocket.instances).toHaveLength(1);
+    expect(MockWebSocket.instances.some((ws) => ws.url.includes('100.66.1.82'))).toBe(false);
+
+    MockWebSocket.instances[0].triggerOpen();
+    await flushMicrotasks();
+    await flushMicrotasks();
+    MockRTCPeerConnection.instances[0].channel.triggerOpen();
+    await flushMicrotasks();
+    await vi.advanceTimersByTimeAsync(1000);
+    await flushMicrotasks();
+
+    expect(onopen).toHaveBeenCalledTimes(1);
+    expect(socket.getDiagnostics()).toMatchObject({
+      stage: 'open',
+      resolvedPath: 'rtc-direct',
+      resolvedEndpoint: 'rtc-direct:daemon-host-a',
+    });
+    // Tailscale never entered the batch, so it could not steal resolvedPath.
+    expect(MockWebSocket.instances.some((ws) => ws.url.includes('100.66.1.82'))).toBe(false);
     socket.close();
   });
 
@@ -1400,7 +1478,7 @@ describe('TraversalSocket reconnect', () => {
       bridgeHost: '203.0.113.10',
       bridgePort: 3333,
       authToken: 'token',
-      tailscaleHost: '100.66.1.82',
+      ipv6Host: '240e:1234::10',
       ipv4Host: '203.0.113.10',
       transportMode: 'websocket',
     }, settings, {
@@ -1430,7 +1508,7 @@ describe('TraversalSocket reconnect', () => {
       bridgeHost: '203.0.113.10',
       bridgePort: 3333,
       authToken: 'token',
-      tailscaleHost: '100.66.1.82',
+      ipv6Host: '240e:1234::10',
       ipv4Host: '203.0.113.10',
       transportMode: 'websocket',
     }, settings, {
@@ -1463,7 +1541,7 @@ describe('TraversalSocket reconnect', () => {
       bridgeHost: '203.0.113.10',
       bridgePort: 3333,
       authToken: 'token',
-      tailscaleHost: '100.66.1.82',
+      ipv6Host: '240e:1234::10',
       ipv4Host: '203.0.113.10',
       transportMode: 'websocket',
     }, settings, {
@@ -1766,8 +1844,19 @@ describe('tailscale candidate dynamic verification', () => {
     await vi.advanceTimersByTimeAsync(1800);
     await flushMicrotasks();
 
-    expect(socket.getDiagnostics().attempts.filter((item) => item.stage === 'error')).toHaveLength(2);
+    // Tier-first: the higher-tier Tailscale candidate is probed first. After
+    // it times out, the batch advances to the lower-tier public IPv4 candidate
+    // instead of admitting it into the same earlier race.
+    expect(socket.getDiagnostics().attempts.filter((item) => item.stage === 'error')).toHaveLength(1);
     expect(socket.getDiagnostics().attempts.some((item) => item.path === 'tailscale' && item.stage === 'error')).toBe(true);
+    expect(socket.getDiagnostics().attempts.some((item) => item.path === 'ipv4' && item.stage === 'connecting')).toBe(true);
+    expect(onclose).toHaveBeenCalledTimes(0);
+
+    await vi.advanceTimersByTimeAsync(1800);
+    await flushMicrotasks();
+
+    expect(socket.getDiagnostics().attempts.filter((item) => item.stage === 'error')).toHaveLength(2);
+    expect(socket.getDiagnostics().attempts.some((item) => item.path === 'ipv4' && item.stage === 'error')).toBe(true);
     expect(onclose).toHaveBeenCalledTimes(1);
     socket.close();
   });

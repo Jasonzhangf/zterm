@@ -479,6 +479,36 @@ fn connection_lifecycle_does_not_select_auth_failure_route() {
 }
 
 #[test]
+fn connection_lifecycle_success_health_score_matches_ts_for_rtt_over_100() {
+    let request = json!({
+        "execution_id": "health-parity",
+        "attempt_id": "1",
+        "inputs": {
+            "arc.account_credentials": { "accountId": "u1", "authToken": "tok" },
+            "arc.relay_settings": { "relayEnabled": true },
+            "arc.target_candidates": {
+                "candidates": [
+                    { "id": "slow", "path": "Tailscale", "endpoint": "slow.tailnet", "health": { "status": "success", "rttMs": 250 } },
+                    { "id": "fast", "path": "Tailscale", "endpoint": "fast.tailnet", "health": { "status": "success", "rttMs": 150 } }
+                ]
+            },
+            "arc.session_demand_set": { "sessions": [ { "sessionId": "s1", "sessionName": "one" } ] },
+            "arc.connection_policy": { "pathPriority": ["Tailscale"], "expectedGeneration": 1 }
+        },
+    });
+    let result = run_connection(request);
+    assert_eq!(result["ok"], true);
+    // Same tier here means both candidates share the same path. With the old
+    // Rust health formula both rttMs values saturate at -1000 + 100/10, so the
+    // first (slower) candidate wins by input order. The floored rttMs/10
+    // formula matches TypeScript and selects the faster candidate instead.
+    assert_eq!(
+        result["outputs"]["arc.connection_health"]["targetKey"],
+        "fast"
+    );
+}
+
+#[test]
 fn connection_lifecycle_mux_negotiation_requires_established_transport() {
     let request = json!({
         "execution_id": "mux-connect",

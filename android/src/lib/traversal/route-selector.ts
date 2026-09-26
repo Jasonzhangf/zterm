@@ -27,16 +27,28 @@ const SUCCESS_ROUTE_LEASE_BONUS = -1000;
 const ROUTE_TIER_SPAN = 100;
 const HEALTH_BONUS_SCALE = 10;
 
-function priorityCost(path: TraversalResolvedPath, priority: TraversalResolvedPath[]) {
+function routeTierIndex(path: TraversalResolvedPath, priority: TraversalResolvedPath[]) {
+  // IPv4 and IPv6 are the same UDP-direct tier. Use the earliest position of
+  // either family so both share a tier without reordering unrelated paths.
+  if (path === 'ipv4' || path === 'ipv6') {
+    const ipv6Index = priority.indexOf('ipv6');
+    const ipv4Index = priority.indexOf('ipv4');
+    const familyIndex = ipv6Index >= 0 && ipv4Index >= 0
+      ? Math.min(ipv6Index, ipv4Index)
+      : ipv6Index >= 0
+        ? ipv6Index
+        : ipv4Index;
+    return familyIndex >= 0 ? familyIndex : priority.length;
+  }
   const index = priority.indexOf(path);
-  return (index >= 0 ? index : priority.length) * ROUTE_TIER_SPAN;
+  return index >= 0 ? index : priority.length;
 }
 
 function pathCost(
   candidate: TraversalPlanCandidate,
   priority: TraversalResolvedPath[],
 ) {
-  const tierCost = priorityCost(candidate.path, priority);
+  const tierCost = routeTierIndex(candidate.path, priority) * ROUTE_TIER_SPAN;
   return tierCost;
 }
 
@@ -56,7 +68,7 @@ function healthCost(record: TraversalRouteHealthRecord | null, reasons: string[]
   reasons.push('health:recent-success');
   if (typeof record.rttMs === 'number' && Number.isFinite(record.rttMs)) {
     reasons.push(`rtt:${record.rttMs}`);
-    return SUCCESS_ROUTE_LEASE_BONUS + Math.max(0, Math.min(100, record.rttMs / HEALTH_BONUS_SCALE));
+    return SUCCESS_ROUTE_LEASE_BONUS + Math.max(0, Math.min(100, Math.floor(record.rttMs / HEALTH_BONUS_SCALE)));
   }
   return SUCCESS_ROUTE_LEASE_BONUS;
 }
@@ -104,6 +116,7 @@ export function selectBestTraversalRoute(options: SelectTraversalRouteOptions): 
       (left, right) =>
         (left.tierCost ?? left.score) - (right.tierCost ?? right.score)
         || left.healthCost! - right.healthCost!
+        || priority.indexOf(left.path) - priority.indexOf(right.path)
         || left.endpoint.localeCompare(right.endpoint),
     )[0] || null;
   const selected = selectedDiagnostic
