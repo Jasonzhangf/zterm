@@ -867,7 +867,17 @@ export class TraversalSocket implements BridgeTransportSocket {
     const poolCandidates = remainingCandidates.filter((item) => poolIds.has(item.id));
     const wsBatch = poolCandidates.filter((item) => item.kind === 'ws');
     const rtcQueue = poolCandidates.filter((item) => item.kind === 'rtc');
-    const rtcHead = rtcQueue[0] ?? null;
+    // TURN/Relay is the last route tier. It must not race a still-selectable
+    // Tailscale/direct WebSocket candidate once WebRTC-direct has failed;
+    // only the selected rtc-direct candidate races alongside the direct ws
+    // batch, and rtc-relay enters only when no higher-tier route is selected.
+    const rtcDirectHead = selection.selected?.path === 'rtc-direct'
+      ? rtcQueue.find((item) => item.path === 'rtc-direct') ?? null
+      : null;
+    const rtcRelayHead = selection.selected?.path === 'rtc-relay'
+      ? rtcQueue.find((item) => item.path === 'rtc-relay') ?? null
+      : null;
+    const rtcHead = rtcDirectHead ?? rtcRelayHead;
     const batch = rtcHead ? [...wsBatch, rtcHead] : wsBatch;
     if (batch.length === 0) {
       this.finishFailure(this.diagnostics.reason || 'No traversal path succeeded');

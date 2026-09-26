@@ -99,6 +99,8 @@ export interface TraversalRouteSelectionDiagnostic {
   endpoint: string;
   selectable: boolean;
   score: number;
+  tierCost?: number;
+  healthCost?: number;
   reasons: string[];
   health?: TraversalRouteHealthRecord;
 }

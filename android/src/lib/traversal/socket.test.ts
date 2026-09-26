@@ -772,6 +772,71 @@ describe('TraversalSocket reconnect', () => {
     socket.close();
   });
 
+  it('starts only the selected rtc-relay when a non-auto priority places it first', async () => {
+    const socket = new TraversalSocket(
+      {
+        bridgeHost: '',
+        bridgePort: 3333,
+        authToken: 'token',
+        relayHostId: 'daemon-host-a',
+        transportMode: 'webrtc',
+        relayEndpointCandidates: [{
+          id: 'relay-rtc:daemon-host-a',
+          kind: 'relay-rtc',
+          relayHostId: 'daemon-host-a',
+          authRequired: true,
+          lastSeenAt: '2026-07-16T00:00:00.000Z',
+        }],
+      },
+      {
+        signalUrl: '',
+        turnServerUrl: '',
+        turnUsername: '',
+        turnCredential: '',
+        transportMode: 'webrtc',
+        traversalPathPriority: ['rtc-relay', 'rtc-direct'],
+        traversalRelay: {
+          relayBaseUrl: 'https://relay.example.test/relay/',
+          accessToken: 'relay-access',
+          userId: 'user-1',
+          username: 'jason',
+          deviceId: 'android-1',
+          deviceName: 'Android',
+          platform: 'android',
+          wsDevicesUrl: 'wss://relay.example.test/relay/ws/devices',
+          wsHostUrl: 'wss://relay.example.test/relay/ws/host',
+          wsClientUrl: 'wss://relay.example.test/relay/ws/client',
+          turnUrl: 'turn:relay.example.test:3478?transport=udp',
+          turnUsername: 'turn-user',
+          turnCredential: 'turn-secret',
+          updatedAt: 1,
+        },
+      },
+      { routeHealthCache: new TraversalRouteHealthCache() },
+    );
+    await flushMicrotasks();
+
+    expect(MockWebSocket.instances).toHaveLength(1);
+    MockWebSocket.instances[0].triggerOpen();
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    expect(MockRTCPeerConnection.instances).toHaveLength(1);
+    expect(MockRTCPeerConnection.instances[0].config).toMatchObject({
+      iceTransportPolicy: 'relay',
+      iceServers: [{
+        urls: 'turn:relay.example.test:3478?transport=udp',
+        username: 'turn-user',
+        credential: 'turn-secret',
+      }],
+    });
+    expect(socket.getDiagnostics().attempts[0]).toMatchObject({
+      path: 'rtc-relay',
+    });
+
+    socket.close();
+  });
+
   it('disposes the failed rtc-direct generation before Auto starts TURN', async () => {
     const socket = createRelayRtcSocket();
     const onopen = vi.fn();
@@ -841,6 +906,94 @@ describe('TraversalSocket reconnect', () => {
       reason: expect.stringContaining('connect timeout'),
     });
 
+    socket.close();
+  });
+
+  it('does not start TURN relay while a selectable Tailscale websocket is still racing', async () => {
+    const socket = new TraversalSocket(
+      {
+        bridgeHost: '100.66.1.82',
+        bridgePort: 3333,
+        authToken: 'token',
+        daemonHostId: 'daemon-host-a',
+        relayHostId: 'daemon-host-a',
+        transportMode: 'auto',
+        relayEndpointCandidates: [
+          {
+            id: 'direct:tailscale:daemon-host-a',
+            kind: 'tailscale',
+            host: '100.66.1.82',
+            port: 3333,
+            authToken: 'token',
+            authRequired: true,
+            lastSeenAt: '2026-07-16T00:00:00.000Z',
+          },
+          {
+            id: 'relay-rtc:daemon-host-a',
+            kind: 'relay-rtc',
+            relayHostId: 'daemon-host-a',
+            authRequired: true,
+            lastSeenAt: '2026-07-16T00:00:00.000Z',
+          },
+        ],
+      },
+      {
+        signalUrl: '',
+        turnServerUrl: '',
+        turnUsername: '',
+        turnCredential: '',
+        transportMode: 'auto',
+        traversalRelay: {
+          relayBaseUrl: 'https://relay.example.test/relay/',
+          accessToken: 'relay-access',
+          userId: 'user-1',
+          username: 'jason',
+          deviceId: 'android-1',
+          deviceName: 'Android',
+          platform: 'android',
+          wsDevicesUrl: 'wss://relay.example.test/relay/ws/devices',
+          wsHostUrl: 'wss://relay.example.test/relay/ws/host',
+          wsClientUrl: 'wss://relay.example.test/relay/ws/client',
+          turnUrl: 'turn:relay.example.test:3478?transport=udp',
+          turnUsername: 'turn-user',
+          turnCredential: 'turn-secret',
+          updatedAt: 1,
+        },
+      },
+      { routeHealthCache: new TraversalRouteHealthCache() },
+    );
+    const onopen = vi.fn();
+    socket.onopen = onopen;
+    await flushMicrotasks();
+
+    const tailscaleWs = MockWebSocket.instances.find((ws) => ws.url.includes('100.66.1.82'));
+    expect(tailscaleWs).toBeDefined();
+    expect(MockWebSocket.instances).toHaveLength(2);
+
+    const directSignal = MockWebSocket.instances.find((ws) => !ws.url.includes('100.66.1.82'));
+    directSignal?.triggerOpen();
+    await flushMicrotasks();
+    expect(MockRTCPeerConnection.instances).toHaveLength(1);
+    directSignal?.onmessage?.({
+      data: JSON.stringify({
+        type: 'rtc-error',
+        payload: { message: 'direct ICE failed' },
+      }),
+    } as MessageEvent);
+    await flushMicrotasks();
+
+    // The rtc-direct failure advances the batch, but TURN must wait for the
+    // still-selectable Tailscale websocket to fail before it can be tried.
+    expect(MockWebSocket.instances).toHaveLength(2);
+    expect(MockRTCPeerConnection.instances).toHaveLength(1);
+
+    tailscaleWs?.triggerOpen();
+    await flushMicrotasks();
+    expect(onopen).toHaveBeenCalledTimes(1);
+    expect(socket.getDiagnostics()).toMatchObject({
+      stage: 'open',
+      resolvedPath: 'tailscale',
+    });
     socket.close();
   });
 

@@ -529,14 +529,21 @@ impl Operator for ConnectionResolveRoutes {
                 "selectable": selectable,
                 "score": score,
                 "priority": priority_index as u64,
+                "healthScore": health_score,
             }));
         }
         let diagnostics = routes.clone();
         routes.retain(|route| get_bool(&obj_ref(route), "selectable"));
         routes.sort_by(|left, right| {
-            let left_score = as_i64(left.get("score"));
-            let right_score = as_i64(right.get("score"));
-            left_score.cmp(&right_score)
+            let left_priority = as_i64(left.get("priority"));
+            let right_priority = as_i64(right.get("priority"));
+            let tier_cmp = left_priority.cmp(&right_priority);
+            if tier_cmp != std::cmp::Ordering::Equal {
+                return tier_cmp;
+            }
+            let left_health = as_i64(left.get("healthScore"));
+            let right_health = as_i64(right.get("healthScore"));
+            left_health.cmp(&right_health)
         });
         let selected = routes.first().cloned();
         Ok(json!({
