@@ -1,6 +1,8 @@
 package com.zterm.android;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 import java.lang.reflect.Constructor;
@@ -615,6 +617,68 @@ public final class AndroidConnectionServiceTransportTest {
             String.valueOf(candidateField(direct, "signalUrl")).contains("deviceId=android-1"));
         assertTrue("rtc-direct signal must include auth token",
             String.valueOf(candidateField(direct, "signalUrl")).contains("token=token-a"));
+    }
+
+    @Test
+    public void rtcDirectCandidateTimeoutAdvancesToNextAutoTier()
+        throws Exception {
+        AndroidConnectionService.resetForTests();
+        try {
+            AndroidConnectionService service = new AndroidConnectionService();
+            AndroidConnectionServiceTarget target = new AndroidConnectionServiceTarget.Builder()
+                .targetKey("target-rtc-timeout")
+                .bridgeHost("100.64.0.2")
+                .bridgePort(3333)
+                .tailscaleHost("100.64.0.2")
+                .ipv4Host("203.0.113.10")
+                .relayHostId("relay-1")
+                .signalUrl("wss://relay.example/client")
+                .relayDeviceId("android-1")
+                .build();
+            Object runtime = newRuntime(service, target);
+            setField(runtime, "stateMachine",
+                connectingStateMachine(target));
+            setField(runtime, "generation", "gen-1");
+            setField(runtime, "transportNetworkGeneration", 0L);
+            setField(service, "networkGeneration", 0L);
+            setField(service, "workerHandler", new Handler(Looper.getMainLooper()));
+
+            List<String> openedUrls = new ArrayList<>();
+            setField(service, "httpClient", newWebSocketFactory(request -> {
+                openedUrls.add(request.url().toString());
+                return fakeSocket(new ArrayList<>(), true);
+            }));
+
+            Method openCandidate = runtime.getClass().getDeclaredMethod("openCandidate");
+            openCandidate.setAccessible(true);
+            openCandidate.invoke(runtime);
+
+            assertEquals("rtc-direct must be the first opened RTC signal socket",
+                1, openedUrls.size());
+            assertTrue("opened=" + openedUrls,
+                openedUrls.get(0).contains("relay.example/client"));
+
+            Field timeoutField = runtime.getClass().getDeclaredField("candidateTimeout");
+            timeoutField.setAccessible(true);
+            Runnable timeout = (Runnable) timeoutField.get(runtime);
+            assertNotNull("candidate timeout must be scheduled for rtc-direct", timeout);
+            timeout.run();
+
+            assertEquals("timeout must advance to the next auto tier",
+                2, openedUrls.size());
+            assertTrue("next tier must be tailscale",
+                openedUrls.get(1).contains("100.64.0.2"));
+
+            Field stateMachineField = runtime.getClass().getDeclaredField("stateMachine");
+            stateMachineField.setAccessible(true);
+            AndroidConnectionStateMachine stateMachine =
+                (AndroidConnectionStateMachine) stateMachineField.get(runtime);
+            assertEquals("fallback stays inside the same attempt",
+                AndroidConnectionServiceSnapshot.State.CONNECTING,
+                stateMachine.readSnapshot().state);
+        } finally {
+            AndroidConnectionService.resetForTests();
+        }
     }
 
     @Test

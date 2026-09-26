@@ -96,6 +96,9 @@ public class AndroidConnectionService extends Service {
     static final int SEND_RETRY_MAX = 3;
     static final long SEND_RETRY_DELAY_MS = 200L;
     static final long PHYSICAL_ERROR_DEBOUNCE_MS = 5_000L;
+    static final long WEBSOCKET_CANDIDATE_TIMEOUT_MS = 1_800L;
+    static final long RTC_DIRECT_CANDIDATE_TIMEOUT_MS = 6_000L;
+    static final long RTC_RELAY_CANDIDATE_TIMEOUT_MS = 2_500L;
     private static final int MUX_PROTOCOL_VERSION = 1;
     private static final int MAX_NOTIFICATION_SESSION_ACTIONS = 3;
     private static final int NOTIFICATION_PULSE_UPDATES = 6;
@@ -858,6 +861,7 @@ public class AndroidConnectionService extends Service {
         volatile long transportNetworkGeneration;
         volatile boolean stopped;
         volatile boolean sendRetryPending;
+        volatile Runnable candidateTimeout;
         private final java.util.Set<String> drainingPendingFrames =
             new java.util.HashSet<>();
         private final java.util.ArrayDeque<DeferredSend> retryDeferredFrames =
@@ -948,6 +952,7 @@ public class AndroidConnectionService extends Service {
                 transportFailure("no-route-candidates", "no usable route candidate");
                 return;
             }
+            scheduleCandidateTimeout(candidate);
             if (candidate.rtc) {
                 openRtcCandidate(candidate);
                 return;
@@ -961,6 +966,39 @@ public class AndroidConnectionService extends Service {
             }
         }
 
+        private void scheduleCandidateTimeout(RouteCandidate candidate) {
+            clearCandidateTimeout();
+            final String timeoutGeneration = generation;
+            final long timeoutNetworkGeneration = networkGeneration;
+            Runnable timeout = () -> {
+                if (stopped || generation == null || !generation.equals(timeoutGeneration)
+                    || transportNetworkGeneration != timeoutNetworkGeneration
+                    || !isConnectingState()) {
+                    return;
+                }
+                transportFailure("candidate-timeout", candidate.path + " candidate timeout");
+            };
+            candidateTimeout = timeout;
+            workerHandler.postDelayed(timeout, candidateTimeoutMs(candidate));
+        }
+
+        private void clearCandidateTimeout() {
+            Runnable timeout = candidateTimeout;
+            candidateTimeout = null;
+            if (timeout != null) {
+                workerHandler.removeCallbacks(timeout);
+            }
+        }
+
+        private long candidateTimeoutMs(RouteCandidate candidate) {
+            if (!candidate.rtc) {
+                return WEBSOCKET_CANDIDATE_TIMEOUT_MS;
+            }
+            return "rtc-relay".equals(candidate.path)
+                ? RTC_RELAY_CANDIDATE_TIMEOUT_MS
+                : RTC_DIRECT_CANDIDATE_TIMEOUT_MS;
+        }
+
         private void openRtcCandidate(RouteCandidate candidate) {
             final AndroidRtcTransportBackend[] holder = new AndroidRtcTransportBackend[1];
             AndroidRtcTransportBackend backend = new AndroidRtcTransportBackend(
@@ -969,6 +1007,7 @@ public class AndroidConnectionService extends Service {
                 candidate.signalUrl,
                 candidate.iceServers,
                 candidate.iceTransportPolicy,
+                !"rtc-relay".equals(candidate.path),
                 new AndroidRtcTransportBackend.Listener() {
                     private AndroidRtcTransportBackend self() {
                         return holder[0];
@@ -981,6 +1020,7 @@ public class AndroidConnectionService extends Service {
                                 || transportNetworkGeneration != networkGeneration) {
                                 return;
                             }
+                            clearCandidateTimeout();
                             sendMuxHello();
                             scheduleHeartbeat();
                             scheduleBackoffReset();
@@ -1277,6 +1317,7 @@ public class AndroidConnectionService extends Service {
                 closeQuietly(webSocket);
                 return;
             }
+            clearCandidateTimeout();
             sendMuxHello();
             scheduleHeartbeat();
             scheduleBackoffReset();
@@ -2127,6 +2168,7 @@ public class AndroidConnectionService extends Service {
             if (stopped || generation == null) {
                 return;
             }
+            clearCandidateTimeout();
             long nowMillis = System.currentTimeMillis();
             if (physicalErrorFirstAtMillis == 0L) {
                 physicalErrorFirstAtMillis = nowMillis;
@@ -2182,6 +2224,7 @@ public class AndroidConnectionService extends Service {
             if (stopped || generation == null) {
                 return;
             }
+            clearCandidateTimeout();
             closeQuietly(socket);
             socket = null;
             closeRtcQuietly();
@@ -2197,6 +2240,7 @@ public class AndroidConnectionService extends Service {
             if (stopped || generation == null) {
                 return;
             }
+            clearCandidateTimeout();
             closeQuietly(socket);
             socket = null;
             closeRtcQuietly();
@@ -2219,6 +2263,7 @@ public class AndroidConnectionService extends Service {
         }
 
         private void resetAttemptState() {
+            clearCandidateTimeout();
             generation = null;
             socket = null;
             rtcBackend = null;
@@ -2234,6 +2279,7 @@ public class AndroidConnectionService extends Service {
 
         void close(String reason) {
             stopped = true;
+            clearCandidateTimeout();
             desiredChannels.clear();
             pendingFrames.clear();
             retryDeferredFrames.clear();
@@ -2245,6 +2291,7 @@ public class AndroidConnectionService extends Service {
         }
 
         private void closeCurrent(String reason) {
+            clearCandidateTimeout();
             WebSocket current = socket;
             socket = null;
             if (current != null) {

@@ -161,9 +161,21 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
   }
 
   getDiagnostics() {
+    const route = this.readySnapshot?.route;
+    const resolvedPath = route?.mode === 'manual'
+      && (route.path === 'rtc-direct' || route.path === 'rtc-relay'
+        || route.path === 'lan' || route.path === 'tailscale'
+        || route.path === 'ipv4' || route.path === 'ipv6')
+      ? route.path
+      : undefined;
+    const mode: 'auto' | 'websocket' | 'webrtc' = route?.mode === 'manual'
+      ? resolvedPath === 'rtc-direct' || resolvedPath === 'rtc-relay'
+        ? 'webrtc'
+        : 'websocket'
+      : 'auto';
     return {
-      mode: 'websocket' as const,
-      resolvedPath: 'tailscale' as const,
+      mode,
+      ...(resolvedPath ? { resolvedPath } : {}),
       resolvedEndpoint: '',
       stage: this.readyState === WebSocket.OPEN ? 'open' as const : 'closed' as const,
       attempts: [],

@@ -21,6 +21,10 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -39,6 +43,7 @@ import okio.ByteString;
  */
 public final class AndroidRtcTransportBackend extends WebSocketListener {
     private static final String TAG = "ZTermRtcBackend";
+    static final long RTC_DIRECT_OPEN_STABILITY_MS = 1_000L;
 
     public interface Listener {
         void onRtcOpen();
@@ -52,14 +57,19 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
     private final String signalUrl;
     private final JSONArray iceServers;
     private final String iceTransportPolicy;
+    private final boolean direct;
+    private final long directOpenStabilityMs;
     private final Listener listener;
+    private final ScheduledExecutorService stabilityScheduler;
 
     private WebSocket signalSocket;
     private PeerConnectionFactory peerConnectionFactory;
     private PeerConnection peerConnection;
     private DataChannel dataChannel;
+    private volatile DataChannel.State dataChannelState = DataChannel.State.CONNECTING;
     private boolean disposed;
     private boolean openPublished;
+    private ScheduledFuture<?> stabilityFuture;
     private static final int MAX_PENDING_REMOTE_ICE_CANDIDATES = 64;
     private final List<IceCandidate> pendingRemoteIceCandidates = new ArrayList<>();
 
@@ -69,6 +79,21 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
         String signalUrl,
         JSONArray iceServers,
         String iceTransportPolicy,
+        boolean direct,
+        Listener listener
+    ) {
+        this(context, httpClient, signalUrl, iceServers, iceTransportPolicy, direct,
+            RTC_DIRECT_OPEN_STABILITY_MS, listener);
+    }
+
+    AndroidRtcTransportBackend(
+        Context context,
+        OkHttpClient httpClient,
+        String signalUrl,
+        JSONArray iceServers,
+        String iceTransportPolicy,
+        boolean direct,
+        long directOpenStabilityMs,
         Listener listener
     ) {
         this.context = context;
@@ -77,7 +102,14 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
         this.iceServers = iceServers == null ? new JSONArray() : iceServers;
         this.iceTransportPolicy = iceTransportPolicy == null || iceTransportPolicy.trim().isEmpty()
             ? "all" : iceTransportPolicy.trim().toLowerCase(Locale.ROOT);
+        this.direct = direct;
+        this.directOpenStabilityMs = Math.max(0L, directOpenStabilityMs);
         this.listener = listener;
+        this.stabilityScheduler = Executors.newSingleThreadScheduledExecutor(runnable -> {
+            Thread thread = new Thread(runnable, "zterm-rtc-stability");
+            thread.setDaemon(true);
+            return thread;
+        });
     }
 
     public void open() {
@@ -94,12 +126,14 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
     }
 
     public boolean isOpen() {
-        return !disposed && openPublished && dataChannel != null
-            && dataChannel.state() == DataChannel.State.OPEN;
+        return !disposed && openPublished && dataChannelState == DataChannel.State.OPEN;
     }
 
     public boolean sendText(String text) {
         if (!isOpen()) {
+            return false;
+        }
+        if (dataChannel == null) {
             return false;
         }
         return dataChannel.send(new DataChannel.Buffer(
@@ -112,6 +146,8 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
         }
         disposed = true;
         openPublished = false;
+        cancelStabilityFuture();
+        stabilityScheduler.shutdownNow();
         DataChannel channel = dataChannel;
         PeerConnection peer = peerConnection;
         WebSocket signal = signalSocket;
@@ -194,9 +230,7 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
 
             PeerConnection.RTCConfiguration configuration =
                 new PeerConnection.RTCConfiguration(parseIceServers());
-            configuration.iceTransportsType = "relay".equals(iceTransportPolicy)
-                ? PeerConnection.IceTransportsType.RELAY
-                : PeerConnection.IceTransportsType.ALL;
+            configuration.iceTransportsType = resolveIceTransportsType(iceTransportPolicy);
             peerConnection = peerConnectionFactory.createPeerConnection(configuration, peerObserver);
             if (peerConnection == null) {
                 throw new IllegalStateException("peer connection factory returned null");
@@ -222,7 +256,7 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
         }
     }
 
-    private void handleSignalMessage(String raw) {
+    void handleSignalMessage(String raw) {
         try {
             JSONObject message = new JSONObject(raw);
             String type = message.optString("type", "");
@@ -500,17 +534,11 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
 
         @Override
         public void onStateChange() {
-            if (disposed || dataChannel == null) {
+            DataChannel channel = dataChannel;
+            if (channel == null) {
                 return;
             }
-            if (dataChannel.state() == DataChannel.State.OPEN && !openPublished) {
-                openPublished = true;
-                listener.onRtcOpen();
-            }
-            if (dataChannel.state() == DataChannel.State.CLOSED) {
-                listener.onRtcClosed(1000, "rtc data channel closed");
-                closeQuietly("rtc data channel closed");
-            }
+            handleDataChannelState(channel.state());
         }
 
         @Override
@@ -527,19 +555,76 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
         }
     };
 
+    /** Test seam: drive the data-channel state machine without native WebRTC. */
+    void simulateDataChannelStateForTests(DataChannel.State state) {
+        handleDataChannelState(state);
+    }
+
+    private void handleDataChannelState(DataChannel.State state) {
+        dataChannelState = state;
+        if (disposed) {
+            return;
+        }
+        if (state == DataChannel.State.OPEN && !openPublished) {
+            if (direct) {
+                scheduleDirectOpenPublish();
+            } else {
+                publishOpen();
+            }
+            return;
+        }
+        if (state == DataChannel.State.CLOSED) {
+            cancelStabilityFuture();
+            listener.onRtcClosed(1000, "rtc data channel closed");
+            closeQuietly("rtc data channel closed");
+        }
+    }
+
+    private void scheduleDirectOpenPublish() {
+        cancelStabilityFuture();
+        stabilityFuture = stabilityScheduler.schedule(() -> {
+            if (disposed || openPublished || dataChannelState != DataChannel.State.OPEN) {
+                return;
+            }
+            publishOpen();
+        }, directOpenStabilityMs, TimeUnit.MILLISECONDS);
+    }
+
+    private void publishOpen() {
+        if (disposed || openPublished || dataChannelState != DataChannel.State.OPEN) {
+            return;
+        }
+        openPublished = true;
+        listener.onRtcOpen();
+    }
+
+    private void cancelStabilityFuture() {
+        ScheduledFuture<?> future = stabilityFuture;
+        stabilityFuture = null;
+        if (future != null) {
+            future.cancel(false);
+        }
+    }
+
     private boolean isRelay() {
         return "relay".equals(iceTransportPolicy);
     }
 
-    private static boolean shouldSignalIceCandidate(IceCandidate candidate) {
+    static PeerConnection.IceTransportsType resolveIceTransportsType(String iceTransportPolicy) {
+        return "relay".equals(iceTransportPolicy)
+            ? PeerConnection.IceTransportsType.RELAY
+            : PeerConnection.IceTransportsType.ALL;
+    }
+
+    static boolean shouldSignalIceCandidate(IceCandidate candidate) {
         return shouldPublishDirectCandidate(candidate.sdp);
     }
 
-    private static boolean shouldAcceptIceCandidate(String candidateSdp) {
+    static boolean shouldAcceptIceCandidate(String candidateSdp) {
         return shouldPublishDirectCandidate(candidateSdp);
     }
 
-    private static boolean shouldPublishDirectCandidate(String candidateSdp) {
+    static boolean shouldPublishDirectCandidate(String candidateSdp) {
         String type = iceCandidateType(candidateSdp);
         if (!"srflx".equals(type) && !"prflx".equals(type)) {
             return false;
@@ -547,7 +632,7 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
         return !isTailscaleIceCandidate(candidateSdp);
     }
 
-    private static boolean isTailscaleIceCandidate(String candidateSdp) {
+    static boolean isTailscaleIceCandidate(String candidateSdp) {
         return candidateSdp.contains("100.6")
             || candidateSdp.contains("100.7")
             || candidateSdp.contains("100.8")
@@ -558,7 +643,7 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
             || candidateSdp.contains("fd7a:115c:a1e0:");
     }
 
-    private static String iceCandidateType(String candidateSdp) {
+    static String iceCandidateType(String candidateSdp) {
         String[] parts = candidateSdp.split(" ");
         for (int i = 0; i + 1 < parts.length; i++) {
             if ("typ".equals(parts[i])) {
@@ -568,7 +653,7 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
         return "";
     }
 
-    private static String stripDirectSdp(String sdp) {
+    static String stripDirectSdp(String sdp) {
         if (sdp == null) {
             return "";
         }

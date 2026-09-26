@@ -17,7 +17,6 @@ import {
 import type { Host } from '../lib/types';
 import {
   createSessionInfraFacadeRuntime,
-  shouldRouteAndroidHostToTraversalSocket,
   wrapSessionPayloadForTargetMuxRuntime,
 } from './session-context-infra-facade-runtime';
 
@@ -67,23 +66,6 @@ function unwrap(data: string | ArrayBuffer) {
 }
 
 describe('Android connection service platform wiring', () => {
-  it('uses the native service projection for ordinary Android WebSocket targets', () => {
-    expect(shouldRouteAndroidHostToTraversalSocket(makeHost())).toBe(false);
-  });
-
-  it('routes explicit WebRTC and relay-rtc certified Android hosts through the traversal transport', () => {
-    expect(shouldRouteAndroidHostToTraversalSocket(makeHost({ transportMode: 'webrtc' }))).toBe(true);
-    expect(shouldRouteAndroidHostToTraversalSocket(makeHost({
-      relayEndpointCandidates: [{
-        id: 'relay-rtc:daemon-host-a',
-        kind: 'relay-rtc',
-        relayHostId: 'daemon-host-a',
-        authRequired: true,
-        lastSeenAt: '2026-09-10T00:00:00.000Z',
-      }],
-    }))).toBe(true);
-  });
-
   it('routes Android daemon target sockets through the native service projection factory', () => {
     const source = readFileSync(resolve(import.meta.dirname, 'session-context-infra-facade-runtime.ts'), 'utf8');
 
@@ -92,10 +74,11 @@ describe('Android connection service platform wiring', () => {
     expect(source).toContain('openAndroidConnectionServiceTransportSocket(host, {');
   });
 
-  it('routes explicit WebRTC and relay-rtc Android targets through the traversal transport', () => {
+  it('does not bypass the native service for WebRTC or relay-rtc Android hosts', () => {
     const source = readFileSync(resolve(import.meta.dirname, 'session-context-infra-facade-runtime.ts'), 'utf8');
 
-    expect(source).toContain('shouldRouteAndroidHostToTraversalSocket(host)');
+    expect(source).not.toContain('shouldRouteAndroidHostToTraversalSocket');
+    expect(source).not.toContain("host.transportMode === 'webrtc'");
     expect(source).toContain("transportRole: 'session'");
     expect(source).toContain('buildTraversalSocketForHostRuntime({');
   });
