@@ -166,6 +166,8 @@ describe('dagpipe native bridge', () => {
     const outputs = (result as { outputs: Record<string, { state: string }> }).outputs;
     expect(outputs['arc.shell_projection'].state).toBe('projected');
     expect(outputs['arc.quickbar_projection'].state).toBe('projected');
+    expect(outputs['arc.copy_projection'].state).toBe('projected');
+    expect(outputs['arc.keyboard_lift'].state).toBe('projected');
   });
 
   it('routes Phase5 preview lattice select and pan without forced join', () => {

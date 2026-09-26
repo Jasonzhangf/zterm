@@ -550,12 +550,19 @@ describe('DAGpipe Phase2-8 black-box parity and smoke with TypeScript owners', (
       'arc.open_tab_intent': { sessionId },
       'arc.shell_state': { visible: true },
     })));
+    expect(result['arc.body_subscription']).toMatchObject({
+      sessionId,
+      bodySubscribed: true,
+      state: 'subscribed',
+    });
     expect(result['arc.shell_projection']).toMatchObject({
       sessionId,
       visible: true,
       state: 'projected',
     });
     expect(result['arc.quickbar_projection'].state).toBe('projected');
+    expect(result['arc.copy_projection'].state).toBe('projected');
+    expect(result['arc.keyboard_lift'].state).toBe('projected');
   });
 
   it('Phase5 preview lattice: Rust select/pan exclusivity matches the TS lattice owner', () => {
