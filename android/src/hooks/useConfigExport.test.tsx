@@ -7,6 +7,12 @@ import { STORAGE_KEYS } from '../lib/types';
 import { APP_UPDATE_STORAGE_KEY } from '../lib/app-update';
 import { useConfigExport } from './useConfigExport';
 
+vi.mock('../lib/dagpipe-native-client', () => ({
+  isDagpipeNativeCapable: () => false,
+  runDagpipePhase6ConfigExport: async () => ({ ok: true, outputs: {} }),
+  runDagpipePhase6ConfigImport: async () => ({ ok: true, outputs: {} }),
+}));
+
 vi.mock('@capacitor/filesystem', () => ({
   Directory: {
     Data: 'DATA',

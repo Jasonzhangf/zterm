@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { TraversalRelayClientSettings } from '../lib/bridge-settings';
+import { isDagpipeNativeCapable, runDagpipePhase2Relay } from '../lib/dagpipe-native-client';
 import {
   readTraversalRelayAccountState,
   getDefaultTraversalRelayBaseUrl,
@@ -83,6 +84,35 @@ export function useTraversalRelayAccount(initialRelaySettings?: TraversalRelayCl
     setRelayBusy(mode);
     setRelayStatus(mode === 'register' ? '注册中…' : mode === 'login' ? '登录中…' : '刷新中…');
     try {
+      const storedAccount = readTraversalRelayAccountState();
+      if (isDagpipeNativeCapable()) {
+        const relayGate = await runDagpipePhase2Relay({
+          execution_id: `relay-${mode}`,
+          attempt_id: '1',
+          inputs: {
+            'arc.account_credentials': {
+              accountId: mode === 'refresh'
+                ? (storedAccount?.username || draft.username).trim()
+                : draft.username.trim(),
+              authToken: mode === 'refresh'
+                ? (relaySettings?.accessToken || storedAccount?.accessToken || '').trim()
+                : draft.password,
+            },
+            'arc.relay_settings': { relayEnabled: true },
+            'arc.device_capabilities': {
+              deviceId: relaySettings?.deviceId || 'zterm-android',
+              platform: 'android',
+              routes: ['relay'],
+            },
+            'arc.route_policy': {
+              pathPriority: ['relay'],
+            },
+          },
+        });
+        if (!relayGate.ok) {
+          throw new Error(`DAGpipe relay gate rejected: ${relayGate.error}`);
+        }
+      }
       if (mode === 'register') {
         if (!draft.username.trim() || !draft.password.trim()) {
           throw new Error('先填写用户名和密码');
