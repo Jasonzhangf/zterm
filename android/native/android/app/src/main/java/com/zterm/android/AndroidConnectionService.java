@@ -1104,10 +1104,10 @@ public class AndroidConnectionService extends Service {
             if (isLocalLanHost(target.lanHost)) {
                 addCandidate(candidates, seenUrls, AndroidConnectionServiceRoutePolicy.Path.LAN);
             }
-            addRtcCandidate(candidates, AndroidConnectionServiceRoutePolicy.Path.RTC_DIRECT);
             addCandidate(candidates, seenUrls, AndroidConnectionServiceRoutePolicy.Path.TAILSCALE);
             addCandidate(candidates, seenUrls, AndroidConnectionServiceRoutePolicy.Path.IPV6);
             addCandidate(candidates, seenUrls, AndroidConnectionServiceRoutePolicy.Path.IPV4);
+            addRtcCandidate(candidates, AndroidConnectionServiceRoutePolicy.Path.RTC_DIRECT);
             addRtcCandidate(candidates, AndroidConnectionServiceRoutePolicy.Path.RTC_RELAY);
             return candidates;
         }
@@ -1683,7 +1683,7 @@ public class AndroidConnectionService extends Service {
             boolean channelRetired = safeRetryChannelId != null && !safeRetryChannelId.isEmpty()
                 && !java.util.Objects.equals(retryLifecycleEpoch, currentLifecycleEpoch);
             if (stopped || channelRetired
-                || (socket != retrySocket && rtcBackend != retryRtcBackend)
+                || (socket != retrySocket || rtcBackend != retryRtcBackend)
                 || generation == null
                 || !retryGeneration.equals(generation)
                 || retryNetworkGeneration != transportNetworkGeneration

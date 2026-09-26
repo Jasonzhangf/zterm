@@ -508,7 +508,7 @@ public final class AndroidConnectionServiceTransportTest {
             .build();
 
         assertEquals(
-            java.util.Arrays.asList("lan", "rtc-direct", "tailscale", "ipv6", "ipv4", "rtc-relay"),
+            java.util.Arrays.asList("lan", "tailscale", "ipv6", "ipv4", "rtc-direct", "rtc-relay"),
             candidatePaths(newRuntime(service, target)));
     }
 
@@ -620,7 +620,7 @@ public final class AndroidConnectionServiceTransportTest {
     }
 
     @Test
-    public void rtcDirectCandidateTimeoutAdvancesToNextAutoTier()
+    public void rtcDirectCandidateTimeoutAdvancesToRtcRelayWhenPresent()
         throws Exception {
         AndroidConnectionService.resetForTests();
         try {
@@ -634,6 +634,9 @@ public final class AndroidConnectionServiceTransportTest {
                 .relayHostId("relay-1")
                 .signalUrl("wss://relay.example/client")
                 .relayDeviceId("android-1")
+                .turnUrl("turn:relay.example:3478?transport=udp")
+                .turnUsername("ztermturn")
+                .turnCredential("turn-pass")
                 .build();
             Object runtime = newRuntime(service, target);
             setField(runtime, "stateMachine",
@@ -652,11 +655,12 @@ public final class AndroidConnectionServiceTransportTest {
             Method openCandidate = runtime.getClass().getDeclaredMethod("openCandidate");
             openCandidate.setAccessible(true);
             openCandidate.invoke(runtime);
+            openCandidate.invoke(runtime);
+            openCandidate.invoke(runtime);
 
-            assertEquals("rtc-direct must be the first opened RTC signal socket",
-                1, openedUrls.size());
+            assertEquals(3, openedUrls.size());
             assertTrue("opened=" + openedUrls,
-                openedUrls.get(0).contains("relay.example/client"));
+                openedUrls.get(2).contains("relay.example/client"));
 
             Field timeoutField = runtime.getClass().getDeclaredField("candidateTimeout");
             timeoutField.setAccessible(true);
@@ -664,10 +668,10 @@ public final class AndroidConnectionServiceTransportTest {
             assertNotNull("candidate timeout must be scheduled for rtc-direct", timeout);
             timeout.run();
 
-            assertEquals("timeout must advance to the next auto tier",
-                2, openedUrls.size());
-            assertTrue("next tier must be tailscale",
-                openedUrls.get(1).contains("100.64.0.2"));
+            assertEquals("timeout must advance to rtc-relay",
+                4, openedUrls.size());
+            assertTrue("next tier must be rtc-relay",
+                openedUrls.get(3).contains("relay.example/client"));
 
             Field stateMachineField = runtime.getClass().getDeclaredField("stateMachine");
             stateMachineField.setAccessible(true);
@@ -1150,6 +1154,49 @@ public final class AndroidConnectionServiceTransportTest {
             scheduledRetry.get().run();
 
             assertEquals(1, sent.size());
+        } finally {
+            AndroidConnectionService.resetForTests();
+        }
+    }
+
+    @Test
+    public void delayedRetryDoesNotSendAfterWebSocketReplaced() throws Exception {
+        AndroidConnectionService.resetForTests();
+        AtomicReference<Runnable> scheduledRetry = new AtomicReference<>();
+        try {
+            AndroidConnectionService service = new AndroidConnectionService();
+            setField(service, "sendRetryScheduler",
+                (java.util.function.BiConsumer<Runnable, Long>) (runnable, delayMillis) ->
+                    scheduledRetry.set(runnable));
+            Object runtime = newRuntime(service);
+            setField(runtime, "stateMachine", readyStateMachine());
+            setField(runtime, "generation", "gen-1");
+            setField(runtime, "transportNetworkGeneration", 0L);
+            setField(service, "networkGeneration", 0L);
+            List<String> oldSent = new ArrayList<>();
+            WebSocket oldSocket = fakeSocketWithSendResults(oldSent, new boolean[]{false});
+            setField(runtime, "socket", oldSocket);
+            Method sendOrQueue = runtime.getClass().getDeclaredMethod(
+                "sendOrQueue", JSONObject.class, String.class,
+                AndroidConnectionCommand.class, boolean.class);
+            sendOrQueue.setAccessible(true);
+
+            sendOrQueue.invoke(runtime, new JSONObject().put("type", "mux-ping"),
+                null, (AndroidConnectionCommand) null, false);
+
+            assertEquals(1, oldSent.size());
+            assertNotNull(scheduledRetry.get());
+
+            List<String> newSent = new ArrayList<>();
+            setField(runtime, "socket",
+                fakeSocketWithSendResults(newSent, new boolean[]{true}));
+
+            scheduledRetry.get().run();
+
+            assertEquals("old socket only saw the original failed send",
+                1, oldSent.size());
+            assertEquals("replacement WebSocket must not receive the stale retry",
+                0, newSent.size());
         } finally {
             AndroidConnectionService.resetForTests();
         }
