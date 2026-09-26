@@ -6,6 +6,7 @@ import type {
 } from '@zterm/shared/protocol';
 import type { AttachmentDeliveryRuntime } from './attachment-delivery-runtime';
 import type { TerminalTransportConnection, TerminalSessionTransport } from './terminal-runtime-types';
+import { runPhase3Attachment } from './dagpipe-bridge';
 
 export type TerminalAttachmentClientMessage = Extract<
   BridgeClientMessage,
@@ -122,6 +123,20 @@ export function createTerminalAttachmentMessageRuntime(
         ).payload || {};
         if (!attachmentId || !asset || !deviceId) {
           sendError(connection, 'invalid_payload', 'attachment-asset-request requires attachmentId, asset, and deviceId');
+          break;
+        }
+        // Thin Phase3 admission gate: policy inputs stay always-allow until the Rust
+        // graph owns real permission truth; TS remains the behavior owner on PASS.
+        const deliveryGate = runPhase3Attachment({
+          execution_id: 'daemon-attachment-delivery',
+          attempt_id: '1',
+          inputs: {
+            'arc.attachment_delivery_request': { attachmentId, targetDeviceId: deviceId },
+            'arc.attachment_policy': { allowDelivery: true },
+          },
+        });
+        if (!deliveryGate.ok) {
+          sendError(connection, 'attachment_delivery_rejected', `dagpipe attachment gate rejected delivery: ${deliveryGate.error}`);
           break;
         }
         try {
