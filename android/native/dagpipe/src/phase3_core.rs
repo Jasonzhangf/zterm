@@ -7,6 +7,7 @@
 use pipeline_runtime::*;
 use serde_json::{json, Map, Value};
 use std::collections::{BTreeSet, HashMap};
+use std::sync::OnceLock;
 
 const INPUT_SCHEDULE_GRAPH_JSON: &str =
     include_str!("../../../docs/dagpipe/daemon-input-schedule.graph.json");
@@ -20,6 +21,28 @@ const ATTACHMENT_GRAPH_JSON: &str =
     include_str!("../../../docs/dagpipe/daemon-attachment-delivery.graph.json");
 const SCREENSHOT_GRAPH_JSON: &str =
     include_str!("../../../docs/dagpipe/terminal-remote-screenshot.graph.json");
+
+const FILE_TRANSFER_THROUGHPUT_CONTRACT_JSON: &str =
+    include_str!("../../../contracts/file-transfer-throughput.json");
+
+fn file_transfer_threshold(key: &str) -> u64 {
+    static CONTRACT: OnceLock<Value> = OnceLock::new();
+    CONTRACT
+        .get_or_init(|| {
+            serde_json::from_str(FILE_TRANSFER_THROUGHPUT_CONTRACT_JSON).unwrap_or(Value::Null)
+        })
+        .get(key)
+        .and_then(Value::as_u64)
+        .unwrap_or(0)
+}
+
+fn file_transfer_upload_window_chunks() -> u64 {
+    file_transfer_threshold("upload_window_chunks")
+}
+
+fn file_transfer_native_write_batch_chunks() -> u64 {
+    file_transfer_threshold("native_write_batch_chunks")
+}
 
 pub const INPUT_SCHEDULE_GRAPH_ID: &str = "daemon.input_schedule";
 pub const FILE_BROWSE_GRAPH_ID: &str = "daemon.file_transfer_browse";
@@ -51,11 +74,31 @@ fn get_bool(object: &Map<String, Value>, key: &str) -> bool {
     object.get(key).and_then(Value::as_bool).unwrap_or(false)
 }
 
+fn get_u64(object: &Map<String, Value>, key: &str) -> u64 {
+    object.get(key).and_then(Value::as_u64).unwrap_or(0)
+}
+
 fn json_array(value: Option<&Value>) -> Vec<Value> {
     match value {
         Some(Value::Array(items)) => items.clone(),
         _ => Vec::new(),
     }
+}
+
+fn is_valid_attachment_id(value: &str) -> bool {
+    let trimmed = value.trim();
+    let hex_part = trimmed.strip_prefix("att_");
+    let Some(hex_part) = hex_part else {
+        return false;
+    };
+    let groups: Vec<&str> = hex_part.split('-').collect();
+    let expected_lengths = [8usize, 4, 4, 4, 12];
+    if groups.len() != expected_lengths.len() {
+        return false;
+    }
+    groups.iter().enumerate().all(|(index, group)| {
+        group.len() == expected_lengths[index] && group.chars().all(|c| c.is_ascii_hexdigit())
+    })
 }
 
 fn make_registry() -> Registry {
@@ -565,10 +608,13 @@ impl Operator for FileTransferUploadAck {
         if !get_bool(&ack, "acked") {
             return Err("upload segment was not acked".into());
         }
+        let segment_index = get_u64(&ack, "segmentIndex");
+        let complete = segment_index.saturating_add(1) >= file_transfer_upload_window_chunks();
         Ok(json!({
             "uploadId": get_str(&ack, "uploadId"),
-            "complete": true,
-            "state": "complete",
+            "segmentIndex": segment_index,
+            "complete": complete,
+            "state": if complete { "complete" } else { "in-progress" },
         }))
     }
 }
@@ -604,6 +650,7 @@ impl Operator for FileTransferValidateDownload {
             "downloadId": download_id,
             "path": path,
             "chunk": intent.get("chunk").cloned().unwrap_or_else(|| json!("")),
+            "segmentIndex": intent.get("segmentIndex").cloned().unwrap_or_else(|| json!(0)),
             "state": "validated",
         }))
     }
@@ -630,6 +677,7 @@ impl Operator for FileTransferDownloadSegment {
             "downloadId": get_str(&validation, "downloadId"),
             "path": get_str(&validation, "path"),
             "chunk": validation.get("chunk").cloned().unwrap_or_else(|| json!("")),
+            "segmentIndex": validation.get("segmentIndex").cloned().unwrap_or_else(|| json!(0)),
             "state": "chunked",
         }))
     }
@@ -652,10 +700,13 @@ impl Operator for FileTransferDownloadAck {
 
     fn execute(&self, input: Value, _context: &OperatorContext) -> Result<Value, String> {
         let chunk = obj(inputs(input).first().cloned().unwrap_or_default());
+        let segment_index = get_u64(&chunk, "segmentIndex");
+        let complete = segment_index.saturating_add(1) >= file_transfer_native_write_batch_chunks();
         Ok(json!({
             "downloadId": get_str(&chunk, "downloadId"),
-            "complete": true,
-            "state": "complete",
+            "segmentIndex": segment_index,
+            "complete": complete,
+            "state": if complete { "complete" } else { "in-progress" },
         }))
     }
 }
@@ -684,11 +735,14 @@ impl Operator for AttachmentValidate {
         if attachment_id.is_empty() || target_device_id.is_empty() {
             return Err("attachment request requires attachmentId and targetDeviceId".into());
         }
+        if !is_valid_attachment_id(&attachment_id) {
+            return Err("invalid attachment id".into());
+        }
         if !get_bool(&policy, "allowDelivery") {
             return Err("attachment delivery denied by policy".into());
         }
         Ok(json!({
-            "attachmentId": attachment_id,
+            "attachmentId": attachment_id.trim(),
             "targetDeviceId": target_device_id,
             "state": "validated",
         }))

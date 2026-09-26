@@ -354,7 +354,7 @@ describe('dagpipe native bridge', () => {
       execution_id: 'bridge-phase3-upload',
       attempt_id: '1',
       inputs: {
-        'arc.upload_intent': { uploadId: 'up-1', segmentIndex: 1 },
+        'arc.upload_intent': { uploadId: 'up-1', segmentIndex: 7 },
         'arc.transfer_policy': { allowUpload: true },
       },
     });
@@ -367,7 +367,7 @@ describe('dagpipe native bridge', () => {
       execution_id: 'bridge-phase3-download',
       attempt_id: '1',
       inputs: {
-        'arc.download_intent': { downloadId: 'dl-1', path: '/tmp/a.txt' },
+        'arc.download_intent': { downloadId: 'dl-1', path: '/tmp/a.txt', segmentIndex: 7 },
         'arc.transfer_policy': { allowDownload: true },
       },
     });
@@ -381,7 +381,7 @@ describe('dagpipe native bridge', () => {
       attempt_id: '1',
       inputs: {
         'arc.attachment_delivery_request': {
-          attachmentId: 'att-1',
+          attachmentId: 'att_12345678-1234-1234-1234-123456789abc',
           targetDeviceId: 'dev-1',
         },
         'arc.attachment_policy': { allowDelivery: true },

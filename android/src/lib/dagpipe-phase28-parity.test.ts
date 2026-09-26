@@ -1,16 +1,12 @@
-// Phase2-8 black-box parity, divergence, and smoke harness.
+// Phase2-8 black-box parity and smoke harness.
 //
 // Where the Rust graph and the TypeScript owner consume the same fixture and
 // project the same contract, the case computes the expected value through the
 // real TypeScript owner, passes the *same* fixture to the DAGpipe Rust core via
 // `dagpipe-bridge`, and asserts the Rust output equals that TS-derived value.
 //
-// Two classes of case are deliberately NOT claimed as parity:
-//   * `[divergence]` cases record a known, verified behavioral gap between the
-//     TypeScript owner and the Rust graph (the assertion pins the current Rust
-//     behavior so the gap cannot silently change).
-//   * `[smoke]` cases exercise the Rust graph alone where no equivalent TS
-//     owner output exists to compare against.
+// `[smoke]` cases exercise the Rust graph alone where no equivalent TS owner
+// output exists to compare against.
 // The old TypeScript implementation is kept as the oracle; nothing is deleted.
 //
 // Phase -> TypeScript owner used as oracle:
@@ -18,8 +14,8 @@
 //   Phase2 daemon connection -> daemon session catalog projection
 //   Phase3 input schedule -> shared input-chunking normalization
 //   Phase3 file browse -> server file-transfer path resolution
-//   Phase3 upload/download -> file-transfer-throughput contract [divergence]
-//   Phase3 attachment -> attachment id validation + delivery status [divergence]
+//   Phase3 upload/download -> file-transfer-throughput contract
+//   Phase3 attachment -> attachment id validation + delivery status
 //   Phase3 screenshot -> remote-screenshot chunk assembly
 //   Phase4 remote window -> remote-window input policy validation
 //   Phase5 shell lifecycle -> junction-preview-lattice normalization [smoke]
@@ -166,7 +162,7 @@ function previewLatticeWithCell(): JunctionPreviewLatticeV1 {
   return created.lattice;
 }
 
-describe('DAGpipe Phase2-8 black-box parity, divergence, and smoke with TypeScript owners', () => {
+describe('DAGpipe Phase2-8 black-box parity and smoke with TypeScript owners', () => {
   it('Phase2 relay: Rust route carrier matches the TS-projected relay identity fixture', () => {
     // TS oracle: normalize the directory and then project its daemon snapshots.
     const directory = normalizeRelayAccountDirectory(relayDirectoryPayload);
@@ -292,15 +288,15 @@ describe('DAGpipe Phase2-8 black-box parity, divergence, and smoke with TypeScri
     }))).toThrow(/denied by permission policy/);
   });
 
-  it('[divergence] Phase3 upload/download: Rust ack always completes and ignores the TS threshold contract', () => {
+  it('Phase3 upload/download: Rust ack matches the TS window and native batch contract', () => {
     // TS oracle: the shared throughput contract says an upload window can send
     // up to FILE_TRANSFER_UPLOAD_WINDOW_CHUNKS chunks before it needs progress.
     expect(FILE_TRANSFER_UPLOAD_WINDOW_CHUNKS).toBe(8);
     expect(FILE_TRANSFER_NATIVE_WRITE_BATCH_CHUNKS).toBe(8);
 
     // Exercise below-boundary, boundary, and above-boundary indices. The TS
-    // contract uses the window for backpressure; Rust's FileTransferUploadAck
-    // only checks "acked" and publishes complete=true for every segment.
+    // contract uses the window for backpressure; Rust mirrors that threshold
+    // while retaining the segment index in its ack projection.
     for (const segmentIndex of [
       0,
       FILE_TRANSFER_UPLOAD_WINDOW_CHUNKS - 2,
@@ -315,30 +311,47 @@ describe('DAGpipe Phase2-8 black-box parity, divergence, and smoke with TypeScri
         },
         'arc.transfer_policy': { allowUpload: true },
       })));
-      expect(upload['arc.upload_complete']).toEqual({
+      expect(upload['arc.upload_complete']).toMatchObject({
         uploadId: 'up-1',
-        complete: true,
-        state: 'complete',
+        segmentIndex,
+        complete: segmentIndex + 1 >= FILE_TRANSFER_UPLOAD_WINDOW_CHUNKS,
+        state: segmentIndex + 1 >= FILE_TRANSFER_UPLOAD_WINDOW_CHUNKS
+          ? 'complete'
+          : 'in-progress',
       });
     }
 
-    // Download ack is also unconditional in Rust; policy denial is preserved.
-    const download = outputs(runPhase3Download(phaseRequest('parity-phase3-download', {
-      'arc.download_intent': { downloadId: 'dl-1', path: '/tmp/a.txt', chunk: 'abc' },
-      'arc.transfer_policy': { allowDownload: true },
-    })));
-    expect(download['arc.download_complete']).toEqual({
-      downloadId: 'dl-1',
-      complete: true,
-      state: 'complete',
-    });
+    for (const segmentIndex of [
+      0,
+      FILE_TRANSFER_NATIVE_WRITE_BATCH_CHUNKS - 2,
+      FILE_TRANSFER_NATIVE_WRITE_BATCH_CHUNKS - 1,
+      FILE_TRANSFER_NATIVE_WRITE_BATCH_CHUNKS + 1,
+    ]) {
+      const download = outputs(runPhase3Download(phaseRequest(`parity-phase3-download-${segmentIndex}`, {
+        'arc.download_intent': {
+          downloadId: 'dl-1',
+          path: '/tmp/a.txt',
+          chunk: 'abc',
+          segmentIndex,
+        },
+        'arc.transfer_policy': { allowDownload: true },
+      })));
+      expect(download['arc.download_complete']).toMatchObject({
+        downloadId: 'dl-1',
+        segmentIndex,
+        complete: segmentIndex + 1 >= FILE_TRANSFER_NATIVE_WRITE_BATCH_CHUNKS,
+        state: segmentIndex + 1 >= FILE_TRANSFER_NATIVE_WRITE_BATCH_CHUNKS
+          ? 'complete'
+          : 'in-progress',
+      });
+    }
     expect(() => runPhase3Download(phaseRequest('parity-phase3-download-reject', {
       'arc.download_intent': { downloadId: 'dl-1', path: '/tmp/a.txt' },
       'arc.transfer_policy': { allowDownload: false },
     }))).toThrow(/denied by transfer policy/);
   });
 
-  it('Phase3 attachment: Rust and TS agree on a real UUID id while Rust still diverges on invalid ids', () => {
+  it('Phase3 attachment: Rust and TS agree on valid and malformed attachment ids', () => {
     const validAttachmentId = 'att_12345678-1234-1234-1234-123456789abc';
     const invalidAttachmentId = 'att-1';
 
@@ -356,16 +369,10 @@ describe('DAGpipe Phase2-8 black-box parity, divergence, and smoke with TypeScri
     });
     expect(result['arc.attachment_delivery_result']).not.toHaveProperty('consumed');
 
-    // This divergence is explicit: TS rejects att-1, but the current Rust
-    // AttachmentValidate operator only rejects an empty attachmentId.
-    const invalidRust = outputs(runPhase3Attachment(phaseRequest('parity-phase3-attachment-invalid-id', {
+    expect(() => runPhase3Attachment(phaseRequest('parity-phase3-attachment-invalid-id', {
       'arc.attachment_delivery_request': { attachmentId: invalidAttachmentId, targetDeviceId: 'dev-1' },
       'arc.attachment_policy': { allowDelivery: true },
-    })));
-    expect(invalidRust['arc.attachment_delivery_result']).toMatchObject({
-      state: 'published',
-      receipt: { state: 'delivered' },
-    });
+    }))).toThrow(/invalid attachment id/);
     expect(() => runPhase3Attachment(phaseRequest('parity-phase3-attachment-reject', {
       'arc.attachment_delivery_request': { attachmentId: validAttachmentId, targetDeviceId: 'dev-1' },
       'arc.attachment_policy': { allowDelivery: false },
