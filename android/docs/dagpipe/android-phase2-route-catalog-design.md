@@ -121,8 +121,8 @@ stateDiagram-v2
   2. channel 注册同时流向 body 订阅绑定、session catalog 构建与 channel 注销。
   3. body 订阅绑定后构建 session catalog，再发布 idle facts。
   4. channel 注销完成后释放 body 订阅。
-  5. `dagpipe.collect` 要求 `arc.session_catalog`、`arc.idle_facts` 与 `arc.subscriber_released` 三个输出同时到达；这不是独立 release 分支，而是同一次生命周期的收口。
-  - catalog-only 查询可以不带移除请求；此时 channel 注销节点输出显式 `no-removal`，订阅释放节点仍产出 released 收口，保证同一次执行仍满足 SESE。
+  5. `dagpipe.collect` 要求 `arc.session_catalog`、`arc.idle_facts` 与 `arc.subscriber_released` 三个输出同时到达；这不是独立 release 分支，而是同一次生命周期的收口。catalog-only 查询的 no-removal/失败语义由后续 phase2-runtime 任务按 graph 契约实现，不在本静态分支写 runtime。
+  - 后续 phase2-runtime 任务必须遵守：`daemon.channel_mux.unregister` 只看 graph schema 声明的 `removedChannelId`，不接受 `channelId` fallback；不存在的 channel 不得宣称 `unregistered` 成功，必须走显式失败或 `noop`；`daemon.transport_subscriber.release` 只有在已确认 bound+unregister 状态下才释放，不得无条件返回 released。
 - 建立与释放之间通过 channel registry 保持 SESE；任一失败路径都显式进入失败终点，不跨节点回边。
 - session catalog 只由 daemon 侧 backend/channel/subscriber 事实构建，不依赖客户端活跃状态。
 
@@ -133,8 +133,9 @@ stateDiagram-v2
   - `android/docs/dagpipe/daemon-connection-channel-catalog.graph.json`
   - `android/docs/dagpipe/android-phase2-route-catalog-design.md`
   - 仅当 registry/function map 与 graph 不一致时才同步对应条目。
+- 本分支是静态管理面切片：只交付 graph JSON 与 design doc，不包含 runtime operator、Rust/TS 测试或注册表变更；channel 注销/订阅释放的 operator 与测试放入独立 phase2-runtime 任务。
 - 禁止：触碰 native-rtc lane 文件、任何 runtime 代码、已有 graph 的无关修改、删除既有 graph/docs。
-- 不接 Rust core、不接 TypeScript runtime、不重建 APK/daemon，不 bump 版本、不 OTA。
+- 本分支不接 Rust core、不接 TypeScript runtime、不重建 APK/daemon，不 bump 版本、不 OTA；不 merge/push，不重启 daemon。
 
 ## 6. 单/多 session 语义
 
