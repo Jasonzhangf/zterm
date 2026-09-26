@@ -31,8 +31,7 @@ export interface AndroidConnectionServiceError {
     | 'transport'
     | 'heartbeat-timeout'
     | 'authentication'
-    | 'terminal'
-    | 'webrtc-not-supported';
+    | 'terminal';
   message: string;
 }
 
@@ -67,7 +66,6 @@ export type AndroidConnectionServiceEvent =
   | { type: 'transport-failure'; generation: string; message: string }
   | { type: 'authentication-failure'; generation: string; message: string }
   | { type: 'terminal-failure'; generation: string; message: string }
-  | { type: 'webrtc-not-supported'; generation: string; message: string }
   | { type: 'reconnect-attempt'; generation: string; at: number };
 
 export interface AndroidConnectionServiceStateMachineOptions {
@@ -320,16 +318,6 @@ export function createAndroidConnectionServiceStateMachine(options: AndroidConne
           generation: null,
           nextRetryAt: null,
           error: { code: 'terminal', message: event.message },
-        };
-        return true;
-      case 'webrtc-not-supported':
-        retiredGenerations.add(event.generation);
-        snapshot = {
-          ...snapshot,
-          state: 'terminal-error',
-          generation: null,
-          nextRetryAt: null,
-          error: { code: 'webrtc-not-supported', message: event.message },
         };
         return true;
       case 'reconnect-attempt':

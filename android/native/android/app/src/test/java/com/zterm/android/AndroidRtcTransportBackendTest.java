@@ -235,6 +235,22 @@ public final class AndroidRtcTransportBackendTest {
     }
 
     @Test
+    public void malformedSignalUrlReportsExplicitErrorWithoutThrowing() {
+        RecordingListener listener = new RecordingListener();
+        AndroidRtcTransportBackend backend = new AndroidRtcTransportBackend(
+            null, null, "not a valid url", new JSONArray(), "all",
+            true, 1_000L, listener);
+
+        backend.open();
+
+        assertTrue("malformed signal url must publish an explicit open error",
+            listener.events.stream().anyMatch(event ->
+                event.startsWith("error:rtc signal websocket open rejected:")));
+        assertTrue("malformed signal url must not publish a closed event",
+            listener.closedCodes.isEmpty());
+    }
+
+    @Test
     public void signalingErrorPreservesUnauthorizedBridgeTokenCloseCode() {
         RecordingListener listener = new RecordingListener();
         AndroidRtcTransportBackend backend = new AndroidRtcTransportBackend(

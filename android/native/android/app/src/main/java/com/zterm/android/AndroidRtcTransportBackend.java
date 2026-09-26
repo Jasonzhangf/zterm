@@ -127,11 +127,13 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
             listener.onRtcError("rtc signal url missing");
             return;
         }
-        Request request = new Request.Builder().url(signalUrl.trim()).build();
         try {
+            Request request = new Request.Builder().url(signalUrl.trim()).build();
             signalSocket = httpClient.newWebSocket(request, this);
         } catch (RuntimeException error) {
-            listener.onRtcError("rtc signal websocket open rejected: " + error.getMessage());
+            listener.onRtcError("rtc signal websocket open rejected: "
+                + (error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage()));
+            closeQuietly("rtc signal websocket open rejected");
         }
     }
 

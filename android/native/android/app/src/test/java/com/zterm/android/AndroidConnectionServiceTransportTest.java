@@ -708,6 +708,38 @@ public final class AndroidConnectionServiceTransportTest {
     }
 
     @Test
+    public void malformedRtcSignalUrlOpenDoesNotLeakToWorkerHandler()
+        throws Exception {
+        AndroidConnectionService.resetForTests();
+        try {
+            AndroidConnectionService service = new AndroidConnectionService();
+            AndroidConnectionServiceTarget target = new AndroidConnectionServiceTarget.Builder()
+                .targetKey("target-rtc-malformed-signal")
+                .bridgeHost("relay.example")
+                .bridgePort(3333)
+                .relayHostId("relay-1")
+                .signalUrl("not a valid url")
+                .authToken("token-a")
+                .build();
+            Object runtime = newRuntime(service, target,
+                AndroidConnectionServiceRoutePolicy.manual(
+                    AndroidConnectionServiceRoutePolicy.Path.RTC_DIRECT));
+            setField(runtime, "stateMachine",
+                connectingStateMachine(target));
+            setField(runtime, "generation", "gen-1");
+            setField(runtime, "transportNetworkGeneration", 0L);
+            setField(service, "networkGeneration", 0L);
+            setField(service, "workerHandler", new Handler(Looper.getMainLooper()));
+
+            Method openCandidate = runtime.getClass().getDeclaredMethod("openCandidate");
+            openCandidate.setAccessible(true);
+            openCandidate.invoke(runtime);
+        } finally {
+            AndroidConnectionService.resetForTests();
+        }
+    }
+
+    @Test
     public void rtcDirectCandidateTimeoutAdvancesToTailscaleInDeclaredOrder()
         throws Exception {
         AndroidConnectionService.resetForTests();

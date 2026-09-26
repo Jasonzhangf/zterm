@@ -1093,7 +1093,17 @@ public class AndroidConnectionService extends Service {
             holder[0] = backend;
             rtcBackend = backend;
             Log.i(TAG, "opening " + candidate.path + " rtc for " + target.targetKey);
-            backend.open();
+            try {
+                backend.open();
+            } catch (RuntimeException error) {
+                workerHandler.post(() -> {
+                    if (stopped || rtcBackend != backend || generation == null
+                        || transportNetworkGeneration != networkGeneration) {
+                        return;
+                    }
+                    transportFailure("rtc-open-rejected", String.valueOf(error.getMessage()));
+                });
+            }
         }
 
         /** True while this attempt still has an unopened route candidate. */
