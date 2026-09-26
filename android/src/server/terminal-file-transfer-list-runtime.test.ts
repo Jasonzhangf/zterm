@@ -334,6 +334,30 @@ describe('terminal-file-transfer-list-runtime remote screenshot target capture',
     });
   });
 
+  it('resolves an empty-path file list request to the tmux pane cwd before the Phase3 browse gate', () => {
+    browseGateMock.mockClear();
+    const sentMessages: ServerMessage[] = [];
+    const { runtime } = createRuntime(sentMessages);
+
+    runtime.handleFileListRequest(makeSession(), {
+      requestId: 'list-empty-path',
+      path: '',
+      showHidden: true,
+    });
+
+    expect(browseGateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        inputs: expect.objectContaining({
+          'arc.file_browse_request': { path: tempDir! },
+        }),
+      }),
+    );
+    expect(sentMessages[sentMessages.length - 1]).toMatchObject({
+      type: 'file-list-response',
+      payload: { requestId: 'list-empty-path', path: tempDir! },
+    });
+  });
+
   it('rejects file download when the Phase3 download gate fails', () => {
     downloadGateMock.mockReturnValueOnce({ ok: false, error: 'download denied by transfer policy' } as any);
     const sentMessages: ServerMessage[] = [];

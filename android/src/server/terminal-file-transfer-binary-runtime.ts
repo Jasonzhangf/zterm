@@ -267,6 +267,8 @@ export function createTerminalFileTransferBinaryRuntime(
   function handleFileUploadStart(session: TerminalSession, payload: FileUploadStartPayload) {
     const { requestId, targetDir, fileName, fileSize, chunkCount } = payload;
 
+    // Thin Phase3 admission gate: policy inputs stay always-allow until the Rust
+    // graph owns real permission truth; TS remains the behavior owner on PASS.
     const uploadGate = runPhase3Upload({
       execution_id: 'daemon-file-upload',
       attempt_id: '1',

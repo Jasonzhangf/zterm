@@ -340,11 +340,27 @@ export function createTerminalFileTransferListRuntime(
   function handleFileListRequest(session: TerminalSession, payload: FileListRequestPayload) {
     const { requestId, path: requestedPath, showHidden } = payload;
 
+    let resolvedPath: string;
+    try {
+      resolvedPath = resolveFileTransferListPath(
+        requestedPath,
+        () => deps.readTmuxPaneCurrentPath(session.sessionName, session.backend),
+      );
+    } catch (error) {
+      deps.sendMessage(session, {
+        type: 'file-list-error',
+        payload: { requestId, error: error instanceof Error ? error.message : String(error) },
+      });
+      return;
+    }
+
+    // Thin Phase3 admission gate: policy inputs stay always-allow until the Rust
+    // graph owns real permission truth; TS remains the behavior owner on PASS.
     const browseGate = runPhase3FileBrowse({
       execution_id: 'daemon-file-browse',
       attempt_id: '1',
       inputs: {
-        'arc.file_browse_request': { path: requestedPath },
+        'arc.file_browse_request': { path: resolvedPath },
         'arc.fs_permission_policy': { allowRead: true },
       },
     });
@@ -357,10 +373,6 @@ export function createTerminalFileTransferListRuntime(
     }
 
     try {
-      const resolvedPath = resolveFileTransferListPath(
-        requestedPath,
-        () => deps.readTmuxPaneCurrentPath(session.sessionName, session.backend),
-      );
       const cacheEntry = getDirectoryCache(resolvedPath);
 
       deps.sendMessage(session, {
@@ -419,6 +431,8 @@ export function createTerminalFileTransferListRuntime(
   function handleFileDownloadRequest(session: TerminalSession, payload: FileDownloadRequestPayload) {
     const { requestId, remotePath, fileName } = payload;
 
+    // Thin Phase3 admission gate: policy inputs stay always-allow until the Rust
+    // graph owns real permission truth; TS remains the behavior owner on PASS.
     const downloadGate = runPhase3Download({
       execution_id: 'daemon-file-download',
       attempt_id: '1',

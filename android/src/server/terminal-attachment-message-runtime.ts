@@ -125,6 +125,8 @@ export function createTerminalAttachmentMessageRuntime(
           sendError(connection, 'invalid_payload', 'attachment-asset-request requires attachmentId, asset, and deviceId');
           break;
         }
+        // Thin Phase3 admission gate: policy inputs stay always-allow until the Rust
+        // graph owns real permission truth; TS remains the behavior owner on PASS.
         const deliveryGate = runPhase3Attachment({
           execution_id: 'daemon-attachment-delivery',
           attempt_id: '1',
