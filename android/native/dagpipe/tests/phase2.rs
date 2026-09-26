@@ -102,6 +102,10 @@ fn daemon_connection_builds_catalog_and_publishes_idle_facts() {
         result["outputs"]["arc.subscriber_released"]["removedChannelId"],
         "s1"
     );
+    assert_eq!(
+        result["outputs"]["arc.subscriber_released"]["channels"],
+        serde_json::Value::Array(vec![])
+    );
 }
 
 #[test]
@@ -128,6 +132,10 @@ fn daemon_connection_without_removal_is_explicit_noop() {
         result["outputs"]["arc.subscriber_released"]["removedChannelId"],
         serde_json::Value::Null
     );
+    assert_eq!(
+        result["outputs"]["arc.subscriber_released"]["channels"],
+        json!([{ "channelId": "s1", "sessionName": "s1" }])
+    );
 }
 
 #[test]
@@ -151,5 +159,9 @@ fn daemon_connection_rejects_channel_id_fallback() {
     assert_eq!(
         result["outputs"]["arc.subscriber_released"]["removedChannelId"],
         serde_json::Value::Null
+    );
+    assert_eq!(
+        result["outputs"]["arc.subscriber_released"]["channels"],
+        json!([{ "channelId": "s1", "sessionName": "s1" }])
     );
 }

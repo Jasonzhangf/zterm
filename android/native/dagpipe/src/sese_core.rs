@@ -107,6 +107,9 @@ pub fn register_sese_operators(registry: &mut Registry) {
 /// the graph contains request-extract nodes. Returns true when wrapping was
 /// applied; callers leave `inputs` otherwise untouched.
 pub fn wrap_request_inputs(graph_json: &Value, inputs: &mut HashMap<String, Value>) -> bool {
+    if inputs.contains_key("arc.request") {
+        return false;
+    }
     let Some(nodes) = graph_json.get("nodes").and_then(Value::as_array) else {
         return false;
     };

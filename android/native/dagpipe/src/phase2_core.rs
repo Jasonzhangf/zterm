@@ -581,6 +581,11 @@ impl Operator for DaemonUnregisterChannel {
         let values = inputs(input);
         let registry = obj(values.first().cloned().unwrap_or_default());
         let removal = obj(values.get(1).cloned().unwrap_or_default());
+        let channels = registry
+            .get("channels")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
         let removed_channel = removal
             .get("removedChannelId")
             .cloned()
@@ -589,29 +594,31 @@ impl Operator for DaemonUnregisterChannel {
             return Ok(json!({
                 "muxSessionId": get_str(&registry, "muxSessionId"),
                 "removedChannelId": Value::Null,
+                "channels": channels,
                 "state": "noop",
                 "reason": "no removedChannelId requested",
             }));
         }
-        let registered = registry
-            .get("channels")
-            .and_then(Value::as_array)
-            .map(|channels| {
-                channels.iter().any(|channel| {
-                    channel.get("channelId").and_then(Value::as_str)
-                        == Some(removed_channel.as_str().unwrap_or(""))
-                })
-            })
-            .unwrap_or(false);
+        let removed_channel_id = removed_channel.as_str().unwrap_or("");
+        let registered = channels.iter().any(|channel| {
+            channel.get("channelId").and_then(Value::as_str) == Some(removed_channel_id)
+        });
         if !registered {
             return Err(format!(
                 "channel {} is not registered on mux session",
-                removed_channel.as_str().unwrap_or("")
+                removed_channel_id
             ));
         }
+        let remaining = channels
+            .into_iter()
+            .filter(|channel| {
+                channel.get("channelId").and_then(Value::as_str) != Some(removed_channel_id)
+            })
+            .collect::<Vec<_>>();
         Ok(json!({
             "muxSessionId": get_str(&registry, "muxSessionId"),
             "removedChannelId": removed_channel,
+            "channels": remaining,
             "state": "unregistered",
         }))
     }
@@ -640,6 +647,10 @@ impl Operator for DaemonReleaseBodySubscription {
                 return Ok(json!({
                     "muxSessionId": get_str(&removed, "muxSessionId"),
                     "removedChannelId": Value::Null,
+                    "channels": removed
+                        .get("channels")
+                        .cloned()
+                        .unwrap_or_else(|| Value::Array(Vec::new())),
                     "bodySubscribed": false,
                     "state": "not-requested",
                 }));
@@ -655,6 +666,10 @@ impl Operator for DaemonReleaseBodySubscription {
         Ok(json!({
             "muxSessionId": get_str(&removed, "muxSessionId"),
             "removedChannelId": removed_channel,
+            "channels": removed
+                .get("channels")
+                .cloned()
+                .unwrap_or_else(|| Value::Array(Vec::new())),
             "bodySubscribed": false,
             "state": "released",
         }))
