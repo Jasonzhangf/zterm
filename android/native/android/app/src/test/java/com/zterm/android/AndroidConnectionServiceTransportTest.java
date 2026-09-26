@@ -463,7 +463,7 @@ public final class AndroidConnectionServiceTransportTest {
             .build();
 
         assertEquals(
-            java.util.Arrays.asList("lan", "tailscale", "ipv4"),
+            java.util.Arrays.asList("lan", "ipv4", "tailscale"),
             candidatePaths(newRuntime(service, target)));
     }
 
@@ -481,8 +481,65 @@ public final class AndroidConnectionServiceTransportTest {
             .build();
 
         assertEquals(
-            java.util.Arrays.asList("tailscale", "ipv4"),
+            java.util.Arrays.asList("ipv4", "tailscale"),
             candidatePaths(newRuntime(service, target)));
+    }
+
+    @Test
+    public void autoCandidatesPutSameSubnetLanBeforeUdpDirectTailscaleAndRelay()
+        throws Exception {
+        AndroidConnectionService service = new AndroidConnectionService();
+        AndroidConnectionServiceTarget target = new AndroidConnectionServiceTarget.Builder()
+            .targetKey("target-auto-full")
+            .bridgeHost("relay.example")
+            .bridgePort(3333)
+            .lanHost("127.0.0.2")
+            .ipv4Host("203.0.113.10")
+            .ipv6Host("2001:db8::10")
+            .tailscaleHost("100.64.0.2")
+            .relayHostId("relay-1")
+            .build();
+
+        assertEquals(
+            java.util.Arrays.asList("lan", "ipv4", "ipv6", "tailscale", "rtc-relay"),
+            candidatePaths(newRuntime(service, target)));
+    }
+
+    @Test
+    public void manualRtcDirectSelectsUdpDirectIpFamilyTierInsteadOfTerminalFailure()
+        throws Exception {
+        AndroidConnectionService service = new AndroidConnectionService();
+        AndroidConnectionServiceTarget target = new AndroidConnectionServiceTarget.Builder()
+            .targetKey("target-rtc-direct")
+            .bridgeHost("203.0.113.5")
+            .bridgePort(3333)
+            .ipv4Host("203.0.113.5")
+            .ipv6Host("2001:db8::5")
+            .build();
+
+        assertEquals(
+            java.util.Arrays.asList("ipv4", "ipv6"),
+            candidatePaths(newRuntime(service, target,
+                AndroidConnectionServiceRoutePolicy.manual(
+                    AndroidConnectionServiceRoutePolicy.Path.RTC_DIRECT))));
+    }
+
+    @Test
+    public void manualRtcRelaySelectsRelayBridgeWhenRelayIdentityIsPresent()
+        throws Exception {
+        AndroidConnectionService service = new AndroidConnectionService();
+        AndroidConnectionServiceTarget target = new AndroidConnectionServiceTarget.Builder()
+            .targetKey("target-rtc-relay")
+            .bridgeHost("relay.example")
+            .bridgePort(3333)
+            .relayHostId("relay-1")
+            .build();
+
+        assertEquals(
+            java.util.Collections.singletonList("rtc-relay"),
+            candidatePaths(newRuntime(service, target,
+                AndroidConnectionServiceRoutePolicy.manual(
+                    AndroidConnectionServiceRoutePolicy.Path.RTC_RELAY))));
     }
 
     @Test
@@ -524,8 +581,8 @@ public final class AndroidConnectionServiceTransportTest {
             assertEquals(2, openedUrls.size());
             assertTrue("first candidate must be the same-subnet LAN url",
                 openedUrls.get(0).contains("127.0.0.2"));
-            assertTrue("failure must fall through to the next auto candidate",
-                openedUrls.get(1).contains("100.64.0.2"));
+            assertTrue("failure must fall through to the next auto UDP-direct candidate",
+                openedUrls.get(1).contains("203.0.113.10"));
 
             Field stateMachineField = runtime.getClass().getDeclaredField("stateMachine");
             stateMachineField.setAccessible(true);
@@ -687,6 +744,14 @@ public final class AndroidConnectionServiceTransportTest {
         AndroidConnectionService service,
         AndroidConnectionServiceTarget target
     ) throws Exception {
+        return newRuntime(service, target, AndroidConnectionServiceRoutePolicy.auto());
+    }
+
+    private static Object newRuntime(
+        AndroidConnectionService service,
+        AndroidConnectionServiceTarget target,
+        AndroidConnectionServiceRoutePolicy policy
+    ) throws Exception {
         Class<?> runtimeClass = Class.forName(
             "com.zterm.android.AndroidConnectionService$TargetRuntime");
         Constructor<?> constructor = runtimeClass.getDeclaredConstructor(
@@ -694,7 +759,7 @@ public final class AndroidConnectionServiceTransportTest {
             AndroidConnectionServiceTarget.class,
             AndroidConnectionServiceRoutePolicy.class);
         constructor.setAccessible(true);
-        return constructor.newInstance(service, target, AndroidConnectionServiceRoutePolicy.auto());
+        return constructor.newInstance(service, target, policy);
     }
 
     private static List<String> candidatePaths(Object runtime) throws Exception {

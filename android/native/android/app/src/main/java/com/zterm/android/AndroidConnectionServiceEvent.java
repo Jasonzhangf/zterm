@@ -21,7 +21,6 @@ public final class AndroidConnectionServiceEvent {
         TRANSPORT_FAILURE,
         AUTHENTICATION_FAILURE,
         TERMINAL_FAILURE,
-        WEBRTC_NOT_SUPPORTED,
         RECONNECT_ATTEMPT,
         BACKOFF_TIMER_FIRED
     }
@@ -105,10 +104,6 @@ public final class AndroidConnectionServiceEvent {
         return new Builder(Type.TERMINAL_FAILURE).generation(generation).message(message).build();
     }
 
-    public static AndroidConnectionServiceEvent webrtcNotSupported(String generation, String message) {
-        return new Builder(Type.WEBRTC_NOT_SUPPORTED).generation(generation).message(message).build();
-    }
-
     public static AndroidConnectionServiceEvent reconnectAttempt(String generation, long at) {
         return new Builder(Type.RECONNECT_ATTEMPT).generation(generation).at(at).build();
     }
@@ -152,7 +147,6 @@ public final class AndroidConnectionServiceEvent {
                 || type == Type.TRANSPORT_FAILURE
                 || type == Type.AUTHENTICATION_FAILURE
                 || type == Type.TERMINAL_FAILURE
-                || type == Type.WEBRTC_NOT_SUPPORTED
                 || type == Type.RECONNECT_ATTEMPT)) {
                 throw new IllegalArgumentException("event " + type + " requires generation");
             }

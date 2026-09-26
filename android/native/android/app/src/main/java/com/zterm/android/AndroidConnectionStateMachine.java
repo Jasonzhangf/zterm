@@ -224,16 +224,13 @@ public final class AndroidConnectionStateMachine {
                 return true;
 
             case TERMINAL_FAILURE:
-            case WEBRTC_NOT_SUPPORTED:
                 retiredGenerations.add(event.generation);
                 consecutiveHeartbeatMisses = 0;
-                String errorCode = event.type == AndroidConnectionServiceEvent.Type.WEBRTC_NOT_SUPPORTED
-                    ? "webrtc-not-supported" : "terminal";
                 snapshot = copyWithState(snapshot.toBuilder()
                     .generation(null)
                     .nextRetryAt(null)
                     .error(new AndroidConnectionServiceSnapshot.ErrorValue(
-                        errorCode, safeMessage(event.message, "terminal failure")))
+                        "terminal", safeMessage(event.message, "terminal failure")))
                     .build(), AndroidConnectionServiceSnapshot.State.TERMINAL_ERROR);
                 publish();
                 return true;
@@ -264,7 +261,6 @@ public final class AndroidConnectionStateMachine {
             case TRANSPORT_FAILURE:
             case AUTHENTICATION_FAILURE:
             case TERMINAL_FAILURE:
-            case WEBRTC_NOT_SUPPORTED:
                 return true;
             default:
                 return false;

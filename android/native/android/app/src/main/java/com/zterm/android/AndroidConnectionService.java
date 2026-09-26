@@ -30,11 +30,13 @@ import java.net.InterfaceAddress;
 import java.net.NetworkInterface;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -64,7 +66,6 @@ import okio.ByteString;
  *   - Activity/WebView lifecycle
  *   - terminal channel business payload
  *   - buffer/render/input/file/remote-window semantics
- *   - WebRTC native signaling (explicit webrtc-not-supported error)
  *
  * UI/React consumes snapshots and typed server-frame/channel events. The only
  * UI command that may change route behavior is
@@ -911,13 +912,6 @@ public class AndroidConnectionService extends Service {
                 return;
             }
             ensureStateMachine();
-            if (routePolicy.mode == AndroidConnectionServiceRoutePolicy.Mode.MANUAL
-                && (routePolicy.path == AndroidConnectionServiceRoutePolicy.Path.RTC_DIRECT
-                    || routePolicy.path == AndroidConnectionServiceRoutePolicy.Path.RTC_RELAY)) {
-                terminalFailure("webrtc-not-supported",
-                    "WebRTC route requires a separate native WebRTC owner slice");
-                return;
-            }
             String nextGeneration = "gen-" + UUID.randomUUID();
             if (!stateMachine.dispatch(AndroidConnectionServiceEvent.transportOpening(nextGeneration),
                 System.currentTimeMillis())) {
@@ -983,27 +977,35 @@ public class AndroidConnectionService extends Service {
 
         private List<RouteCandidate> buildCandidates() {
             List<RouteCandidate> candidates = new ArrayList<>();
+            Set<String> seenUrls = new HashSet<>();
             if (routePolicy.mode == AndroidConnectionServiceRoutePolicy.Mode.MANUAL) {
-                addCandidate(candidates, routePolicy.path);
+                if (routePolicy.path == AndroidConnectionServiceRoutePolicy.Path.RTC_DIRECT) {
+                    addCandidate(candidates, seenUrls, AndroidConnectionServiceRoutePolicy.Path.IPV4);
+                    addCandidate(candidates, seenUrls, AndroidConnectionServiceRoutePolicy.Path.IPV6);
+                } else {
+                    addCandidate(candidates, seenUrls, routePolicy.path);
+                }
                 return candidates;
             }
             if (isLocalLanHost(target.lanHost)) {
-                addCandidate(candidates, AndroidConnectionServiceRoutePolicy.Path.LAN);
+                addCandidate(candidates, seenUrls, AndroidConnectionServiceRoutePolicy.Path.LAN);
             }
-            addCandidate(candidates, AndroidConnectionServiceRoutePolicy.Path.TAILSCALE);
-            addCandidate(candidates, AndroidConnectionServiceRoutePolicy.Path.IPV6);
-            addCandidate(candidates, AndroidConnectionServiceRoutePolicy.Path.IPV4);
+            addCandidate(candidates, seenUrls, AndroidConnectionServiceRoutePolicy.Path.IPV4);
+            addCandidate(candidates, seenUrls, AndroidConnectionServiceRoutePolicy.Path.IPV6);
+            addCandidate(candidates, seenUrls, AndroidConnectionServiceRoutePolicy.Path.TAILSCALE);
+            addCandidate(candidates, seenUrls, AndroidConnectionServiceRoutePolicy.Path.RTC_RELAY);
             return candidates;
         }
 
         private void addCandidate(List<RouteCandidate> candidates,
+                                  Set<String> seenUrls,
                                   AndroidConnectionServiceRoutePolicy.Path path) {
             String host = hostFor(path);
             if (host == null || host.trim().isEmpty()) {
                 return;
             }
             String url = buildWebSocketUrl(host, target.bridgePort, target.authToken);
-            if (url != null) {
+            if (url != null && seenUrls.add(url)) {
                 candidates.add(new RouteCandidate(path.wireName(), url));
             }
         }
@@ -1023,6 +1025,13 @@ public class AndroidConnectionService extends Service {
                 case IPV4:
                     if (nonEmpty(target.ipv4Host)) return target.ipv4Host;
                     if (!isLikelyTailscale(target.bridgeHost) && !isLikelyIpv6(target.bridgeHost)) {
+                        return target.bridgeHost;
+                    }
+                    return null;
+                case RTC_DIRECT:
+                    return null;
+                case RTC_RELAY:
+                    if (nonEmpty(target.relayHostId) && nonEmpty(target.bridgeHost)) {
                         return target.bridgeHost;
                     }
                     return null;
@@ -2003,13 +2012,8 @@ public class AndroidConnectionService extends Service {
             socket = null;
             String failedGeneration = generation;
             generation = null;
-            if ("webrtc-not-supported".equals(code)) {
-                stateMachine.dispatch(AndroidConnectionServiceEvent.webrtcNotSupported(
-                    failedGeneration, message), System.currentTimeMillis());
-            } else {
-                stateMachine.dispatch(AndroidConnectionServiceEvent.terminalFailure(
-                    failedGeneration, message), System.currentTimeMillis());
-            }
+            stateMachine.dispatch(AndroidConnectionServiceEvent.terminalFailure(
+                failedGeneration, message), System.currentTimeMillis());
             publishPhysicalError(code, message);
         }
 
