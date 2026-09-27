@@ -3,23 +3,103 @@
   "version": "0.1",
   "inputs": [
     {
-      "id": "arc.daemon_wire_frame",
-      "schema": "Object"
-    },
-    {
-      "id": "arc.visible_range_demand",
-      "schema": "Object"
-    },
-    {
-      "id": "arc.local_sparse_state",
-      "schema": "Object"
-    },
-    {
-      "id": "arc.buffer_policy",
+      "id": "arc.request",
       "schema": "Object"
     }
   ],
   "nodes": [
+    {
+      "id": "dagpipe.extract.arc.daemon_wire_frame",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.daemon_wire_frame",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.visible_range_demand",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.visible_range_demand",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.local_sparse_state",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.local_sparse_state",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.buffer_policy",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.buffer_policy",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
     {
       "id": "normalize_wire_frame",
       "operator": "client.wire_ingress.normalize",
@@ -185,6 +265,30 @@
         "predicate": null
       },
       "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.collect.arc.buffer_sync_request,arc.dom_commit",
+      "operator": "dagpipe.result.collect",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.buffer_sync_request",
+        "arc.dom_commit"
+      ],
+      "output": {
+        "id": "arc.result",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
     }
   ],
   "edges": [
@@ -217,10 +321,49 @@
       "from": "commit_render_snapshot",
       "to": "project_dom",
       "arc_id": "arc.render_snapshot"
+    },
+    {
+      "from": "dagpipe.extract.arc.daemon_wire_frame",
+      "to": "normalize_wire_frame",
+      "arc_id": "arc.daemon_wire_frame"
+    },
+    {
+      "from": "dagpipe.extract.arc.buffer_policy",
+      "to": "assemble_frame",
+      "arc_id": "arc.buffer_policy"
+    },
+    {
+      "from": "dagpipe.extract.arc.local_sparse_state",
+      "to": "plan_sparse_apply",
+      "arc_id": "arc.local_sparse_state"
+    },
+    {
+      "from": "dagpipe.extract.arc.visible_range_demand",
+      "to": "plan_sparse_apply",
+      "arc_id": "arc.visible_range_demand"
+    },
+    {
+      "from": "dagpipe.extract.arc.buffer_policy",
+      "to": "plan_sparse_apply",
+      "arc_id": "arc.buffer_policy"
+    },
+    {
+      "from": "dagpipe.extract.arc.visible_range_demand",
+      "to": "commit_render_snapshot",
+      "arc_id": "arc.visible_range_demand"
+    },
+    {
+      "from": "emit_repair_request",
+      "to": "dagpipe.collect.arc.buffer_sync_request,arc.dom_commit",
+      "arc_id": "arc.buffer_sync_request"
+    },
+    {
+      "from": "project_dom",
+      "to": "dagpipe.collect.arc.buffer_sync_request,arc.dom_commit",
+      "arc_id": "arc.dom_commit"
     }
   ],
   "outputs": [
-    "arc.buffer_sync_request",
-    "arc.dom_commit"
+    "arc.result"
   ]
 }

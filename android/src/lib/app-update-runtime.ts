@@ -16,6 +16,7 @@ import {
   type AppUpdateRollbackEntry,
 } from './app-update';
 import { buildRelayInjectedAppUpdatePreferences, isTailscaleManifestCandidate } from './app-update-relay-manifest';
+import { runDagpipePhase7Update } from './dagpipe-native-client';
 import type { DownloadAndInstallOptions } from '../plugins/AppUpdatePlugin';
 
 export type AppUpdateStage =
@@ -744,6 +745,53 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
             sha256Expected: target.sha256,
             capturedAt: deps.now(),
             reason: '当前环境不支持应用内安装',
+          },
+        }));
+        return false;
+      }
+
+      try {
+        const updateGate = await runDagpipePhase7Update({
+          execution_id: `app-update:${installTarget.versionCode}`,
+          attempt_id: '1',
+          inputs: {
+            'arc.update_check': {
+              version: installTarget.versionName,
+              sha256: installTarget.sha256,
+            },
+            'arc.update_policy': { allowUpdate: true },
+          },
+        });
+        if (!updateGate.ok) {
+          setSnapshot((current) => ({
+            ...current,
+            lastError: updateGate.error,
+            updateStage: 'failed',
+            lastInstallContext: {
+              manifestUrl: activeManifestUrl,
+              apkUrl: installTarget.apkUrl,
+              versionCode: installTarget.versionCode,
+              versionName: installTarget.versionName,
+              sha256Expected: installTarget.sha256,
+              capturedAt: deps.now(),
+              reason: updateGate.error,
+            },
+          }));
+          return false;
+        }
+      } catch (error) {
+        setSnapshot((current) => ({
+          ...current,
+          lastError: error instanceof Error ? error.message : 'DAGpipe 更新 gate 失败',
+          updateStage: 'failed',
+          lastInstallContext: {
+            manifestUrl: activeManifestUrl,
+            apkUrl: installTarget.apkUrl,
+            versionCode: installTarget.versionCode,
+            versionName: installTarget.versionName,
+            sha256Expected: installTarget.sha256,
+            capturedAt: deps.now(),
+            reason: error instanceof Error ? error.message : 'DAGpipe 更新 gate 失败',
           },
         }));
         return false;

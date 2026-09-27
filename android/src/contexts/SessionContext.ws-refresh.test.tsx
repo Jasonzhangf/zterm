@@ -1992,7 +1992,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     expect(readSentMessages(ws).some((item) => item.type === 'buffer-sync-request')).toBe(false);
   });
 
-  it('reconnects a recently alive closed websocket on session switch because the old socket cannot be reused', async () => {
+  it('keeps a session switch with a closed websocket data-only instead of rebuilding the transport', async () => {
     const nowSpy = vi.spyOn(Date, 'now');
     let now = new Date('2026-07-18T00:00:00.000Z').getTime();
     nowSpy.mockImplementation(() => now);
@@ -2025,14 +2025,14 @@ describe('SessionContext websocket dynamic refresh', () => {
       fireEvent.click(screen.getByText('switch-second'));
 
       await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-2'));
-      await waitFor(() => expect(screen.getByTestId('session-2-state').textContent).toBe('reconnecting'));
-      await waitForAtLeastMockSessionInstances(3);
+      expect(screen.getByTestId('session-2-state').textContent).not.toBe('reconnecting');
+      expect(MockWebSocket.physicalInstances).toHaveLength(1);
     } finally {
       nowSpy.mockRestore();
     }
   });
 
-  it('reconnects the switched-to closed websocket after the keepalive grace window expires', async () => {
+  it('does not rebuild a switched-to closed websocket after the keepalive grace window expires', async () => {
     const nowSpy = vi.spyOn(Date, 'now');
     let now = new Date('2026-07-18T00:00:00.000Z').getTime();
     nowSpy.mockImplementation(() => now);
@@ -2059,8 +2059,8 @@ describe('SessionContext websocket dynamic refresh', () => {
       fireEvent.click(screen.getByText('switch-second'));
 
       await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-2'));
-      await waitFor(() => expect(screen.getByTestId('session-2-state').textContent).toBe('reconnecting'));
-      await waitForAtLeastMockSessionInstances(3);
+      expect(screen.getByTestId('session-2-state').textContent).not.toBe('reconnecting');
+      expect(MockWebSocket.physicalInstances).toHaveLength(1);
     } finally {
       nowSpy.mockRestore();
     }
@@ -7054,7 +7054,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     expect(MockWebSocket.physicalInstances).toHaveLength(1);
   });
 
-  it('reopens a closed inactive mux channel on the same physical socket when switching back', async () => {
+  it('does not reopen a closed inactive mux channel on automatic active-reentry', async () => {
     render(
       <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
         <MultiSessionHarness />
@@ -7083,17 +7083,16 @@ describe('SessionContext websocket dynamic refresh', () => {
 
     fireEvent.click(screen.getByText('switch-second'));
 
-    await waitFor(() => {
-      expect(readMuxChannelOpenMessages(rootSocket, sentBeforeClose).some((item) => (
-        item.payload?.channelId === secondChannelId
-      ))).toBe(true);
-    });
-    await waitFor(() => expect(screen.getByTestId('session-2-state').textContent).toBe('connected'));
+    await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-2'));
+    expect(readMuxChannelOpenMessages(rootSocket, sentBeforeClose).some((item) => (
+      item.payload?.channelId === secondChannelId
+    ))).toBe(false);
+    expect(screen.getByTestId('session-2-state').textContent).toBe('idle');
     expect(MockWebSocket.physicalInstances).toHaveLength(1);
     expect(MockWebSocket.instances).toHaveLength(2);
   });
 
-  it('reopens a closed inactive mux channel when preview adds it to the live set', async () => {
+  it('does not reopen a closed inactive mux channel when a UI live-set projection adds it', async () => {
     render(
       <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
         <MultiSessionHarness />
@@ -7119,14 +7118,13 @@ describe('SessionContext websocket dynamic refresh', () => {
 
     fireEvent.click(screen.getByText('live-both'));
 
-    await waitFor(() => {
-      expect(readMuxChannelOpenMessages(rootSocket, sentBeforeClose).some((item) => (
-        item.payload?.channelId === secondChannelId
-        && item.payload?.bodySubscribed === true
-      ))).toBe(true);
-    });
+    expect(readMuxChannelOpenMessages(rootSocket, sentBeforeClose).some((item) => (
+      item.payload?.channelId === secondChannelId
+      && item.payload?.bodySubscribed === true
+    ))).toBe(false);
     expect(MockWebSocket.physicalInstances).toHaveLength(1);
     expect(screen.getByTestId('active-session').textContent).toBe('session-1');
+    expect(screen.getByTestId('session-2-state').textContent).toBe('idle');
   });
 
   it('lets the second tab continue scrolling deeper while an older reading repair is still in flight', async () => {

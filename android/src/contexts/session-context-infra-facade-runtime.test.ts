@@ -17,7 +17,6 @@ import {
 import type { Host } from '../lib/types';
 import {
   createSessionInfraFacadeRuntime,
-  shouldRouteAndroidHostToTraversalSocket,
   wrapSessionPayloadForTargetMuxRuntime,
 } from './session-context-infra-facade-runtime';
 
@@ -67,49 +66,32 @@ function unwrap(data: string | ArrayBuffer) {
 }
 
 describe('Android connection service platform wiring', () => {
-  it('uses the native service projection for ordinary Android WebSocket targets', () => {
-    expect(shouldRouteAndroidHostToTraversalSocket(makeHost())).toBe(false);
-  });
-
-  it('routes explicit WebRTC and relay-rtc certified Android hosts through the traversal transport', () => {
-    expect(shouldRouteAndroidHostToTraversalSocket(makeHost({ transportMode: 'webrtc' }))).toBe(true);
-    expect(shouldRouteAndroidHostToTraversalSocket(makeHost({
-      relayEndpointCandidates: [{
-        id: 'relay-rtc:daemon-host-a',
-        kind: 'relay-rtc',
-        relayHostId: 'daemon-host-a',
-        authRequired: true,
-        lastSeenAt: '2026-09-10T00:00:00.000Z',
-      }],
-    }))).toBe(true);
-  });
-
   it('routes Android daemon target sockets through the native service projection factory', () => {
     const source = readFileSync(resolve(import.meta.dirname, 'session-context-infra-facade-runtime.ts'), 'utf8');
 
     expect(source).toContain('Capacitor.isNativePlatform()');
     expect(source).toContain("Capacitor.getPlatform() === 'android'");
-    expect(source).toContain('openAndroidConnectionServiceTransportSocket(host)');
+    expect(source).toContain('openAndroidConnectionServiceTransportSocket(host, {');
   });
 
-  it('routes explicit WebRTC and relay-rtc Android targets through the traversal transport', () => {
+  it('does not bypass the native service for WebRTC or relay-rtc Android hosts', () => {
     const source = readFileSync(resolve(import.meta.dirname, 'session-context-infra-facade-runtime.ts'), 'utf8');
 
-    expect(source).toContain('shouldRouteAndroidHostToTraversalSocket(host)');
+    expect(source).not.toContain('shouldRouteAndroidHostToTraversalSocket');
+    expect(source).not.toContain("host.transportMode === 'webrtc'");
     expect(source).toContain("transportRole: 'session'");
     expect(source).toContain('buildTraversalSocketForHostRuntime({');
   });
 });
 
 describe('body demand reconciliation', () => {
-  it('reopens a closed mux channel when the session becomes body-subscribed again', () => {
+  it('never reopens a closed mux channel from body demand reconciliation', () => {
     const { store } = createMuxStore();
     const channel = getSessionTerminalChannel(store.terminalChannels, 'session-1');
     if (!channel) {
       throw new Error('channel not initialized');
     }
     channel.state = 'closed';
-    const reopenSessionTerminalChannel = vi.fn();
     const stateRef = {
       current: {
         activeSessionId: null,
@@ -131,7 +113,6 @@ describe('body demand reconciliation', () => {
       sessionAttachTokensRef: { current: new Map() },
       pendingSessionTransportOpenIntentsRef: { current: new Map() },
       activeBodySubscriptionSuppressedRef: { current: false },
-      reopenSessionTerminalChannelRef: { current: reopenSessionTerminalChannel },
       reconnectStore: {},
       tailRefreshStore: {},
       bufferFrameAssemblyRef: { current: new Map() },
@@ -149,7 +130,8 @@ describe('body demand reconciliation', () => {
 
     runtime.reconcilePhysicalBodySubscriptions('live-sessions');
 
-    expect(reopenSessionTerminalChannel).toHaveBeenCalledWith('session-1');
+    expect(channel.state).toBe('closed');
+    expect(channel.bodySubscribed).toBe(true);
   });
 
   it('sends the current adaptive-phone geometry with a foreground body-subscription so reattach restores the lease', () => {
@@ -179,7 +161,6 @@ describe('body demand reconciliation', () => {
       sessionAttachTokensRef: { current: new Map() },
       pendingSessionTransportOpenIntentsRef: { current: new Map() },
       activeBodySubscriptionSuppressedRef: { current: false },
-      reopenSessionTerminalChannelRef: { current: vi.fn() },
       reconnectStore: {},
       tailRefreshStore: {},
       bufferFrameAssemblyRef: { current: new Map() },

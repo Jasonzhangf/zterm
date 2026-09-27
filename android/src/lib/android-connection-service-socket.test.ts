@@ -7,12 +7,24 @@ const plugin = vi.hoisted(() => ({
   sendCommand: vi.fn(),
 }));
 
+const dagpipe = vi.hoisted(() => ({
+  runDagpipeConnection: vi.fn(),
+  runDagpipeBufferManagement: vi.fn(),
+  runDagpipeBufferRender: vi.fn(),
+  runDagpipeInputDispatch: vi.fn(),
+  runDagpipePhase8Connection: vi.fn(),
+}));
+
 vi.mock('../plugins/AndroidConnectionServicePlugin', () => ({
   readAndroidConnectionServiceSnapshot: (targetKey: string) => plugin.readSnapshot(targetKey),
   addAndroidConnectionServiceListener: (eventName: string, callback: (event: unknown) => void) => (
     plugin.addListener(eventName, callback)
   ),
   sendAndroidConnectionCommand: (command: unknown) => plugin.sendCommand(command),
+}));
+
+vi.mock('../lib/dagpipe-native-client', () => ({
+  ...dagpipe,
 }));
 
 import {
@@ -48,6 +60,16 @@ describe('AndroidConnectionServiceTransportSocket', () => {
     plugin.readSnapshot.mockReset();
     plugin.addListener.mockReset();
     plugin.sendCommand.mockReset();
+    dagpipe.runDagpipeBufferManagement.mockReset();
+    dagpipe.runDagpipeBufferRender.mockReset();
+    dagpipe.runDagpipeConnection.mockReset();
+    dagpipe.runDagpipeInputDispatch.mockReset();
+    dagpipe.runDagpipePhase8Connection.mockReset();
+    dagpipe.runDagpipeConnection.mockResolvedValue({ ok: true, outputs: {} });
+    dagpipe.runDagpipeBufferManagement.mockResolvedValue({ ok: true, outputs: {} });
+    dagpipe.runDagpipeBufferRender.mockResolvedValue({ ok: true, outputs: {} });
+    dagpipe.runDagpipeInputDispatch.mockResolvedValue({ ok: true, outputs: {} });
+    dagpipe.runDagpipePhase8Connection.mockResolvedValue({ ok: true, outputs: {} });
     plugin.readSnapshot.mockResolvedValue({
       state: 'connecting',
       generation: null,
@@ -865,6 +887,150 @@ describe('AndroidConnectionServiceTransportSocket', () => {
     }));
   });
 
+  it('stops before bind when the connection admission gate rejects', async () => {
+    const { add } = listenerMock();
+    plugin.addListener.mockImplementation(add);
+    dagpipe.runDagpipeConnection.mockResolvedValue({
+      ok: false,
+      error: 'connection admission denied',
+    });
+    const socket = openAndroidConnectionServiceTransportSocket({
+      id: 'host-1',
+      createdAt: 1,
+      name: 'mac-studio',
+      bridgeHost: target.bridgeHost,
+      bridgePort: target.bridgePort,
+      authToken: target.authToken,
+      daemonHostId: 'mac-studio',
+      sessionName: 'shell',
+      authType: 'password',
+      tags: [],
+      pinned: false,
+    });
+    const closed = vi.fn();
+    socket.onclose = closed;
+    socket.onerror = vi.fn();
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await Promise.resolve();
+
+    expect(plugin.sendCommand).not.toHaveBeenCalledWith(expect.objectContaining({
+      type: 'bind-target',
+    }));
+    expect(closed).toHaveBeenCalledWith(expect.objectContaining({
+      code: 4000,
+      reason: 'dagpipe client admission rejected: connection admission denied',
+    }));
+  });
+
+  it('stops before bind when the buffer management admission gate rejects', async () => {
+    const { add } = listenerMock();
+    plugin.addListener.mockImplementation(add);
+    dagpipe.runDagpipeBufferManagement.mockResolvedValue({
+      ok: false,
+      error: 'buffer management admission denied',
+    });
+    const socket = openAndroidConnectionServiceTransportSocket({
+      id: 'host-1',
+      createdAt: 1,
+      name: 'mac-studio',
+      bridgeHost: target.bridgeHost,
+      bridgePort: target.bridgePort,
+      authToken: target.authToken,
+      daemonHostId: 'mac-studio',
+      sessionName: 'shell',
+      authType: 'password',
+      tags: [],
+      pinned: false,
+    });
+    const closed = vi.fn();
+    socket.onclose = closed;
+    socket.onerror = vi.fn();
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await Promise.resolve();
+
+    expect(plugin.sendCommand).not.toHaveBeenCalledWith(expect.objectContaining({
+      type: 'bind-target',
+    }));
+    expect(closed).toHaveBeenCalledWith(expect.objectContaining({
+      code: 4000,
+      reason: 'dagpipe client admission rejected: buffer management admission denied',
+    }));
+  });
+
+  it('stops before bind when the buffer render admission gate rejects', async () => {
+    const { add } = listenerMock();
+    plugin.addListener.mockImplementation(add);
+    dagpipe.runDagpipeBufferRender.mockResolvedValue({
+      ok: false,
+      error: 'buffer render admission denied',
+    });
+    const socket = openAndroidConnectionServiceTransportSocket({
+      id: 'host-1',
+      createdAt: 1,
+      name: 'mac-studio',
+      bridgeHost: target.bridgeHost,
+      bridgePort: target.bridgePort,
+      authToken: target.authToken,
+      daemonHostId: 'mac-studio',
+      sessionName: 'shell',
+      authType: 'password',
+      tags: [],
+      pinned: false,
+    });
+    const closed = vi.fn();
+    socket.onclose = closed;
+    socket.onerror = vi.fn();
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await Promise.resolve();
+
+    expect(plugin.sendCommand).not.toHaveBeenCalledWith(expect.objectContaining({
+      type: 'bind-target',
+    }));
+    expect(closed).toHaveBeenCalledWith(expect.objectContaining({
+      code: 4000,
+      reason: 'dagpipe client admission rejected: buffer render admission denied',
+    }));
+  });
+
+  it('stops before bind when the input dispatch admission gate rejects', async () => {
+    const { add } = listenerMock();
+    plugin.addListener.mockImplementation(add);
+    dagpipe.runDagpipeInputDispatch.mockResolvedValue({
+      ok: false,
+      error: 'input dispatch admission denied',
+    });
+    const socket = openAndroidConnectionServiceTransportSocket({
+      id: 'host-1',
+      createdAt: 1,
+      name: 'mac-studio',
+      bridgeHost: target.bridgeHost,
+      bridgePort: target.bridgePort,
+      authToken: target.authToken,
+      daemonHostId: 'mac-studio',
+      sessionName: 'shell',
+      authType: 'password',
+      tags: [],
+      pinned: false,
+    });
+    const closed = vi.fn();
+    socket.onclose = closed;
+    socket.onerror = vi.fn();
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await Promise.resolve();
+
+    expect(plugin.sendCommand).not.toHaveBeenCalledWith(expect.objectContaining({
+      type: 'bind-target',
+    }));
+    expect(closed).toHaveBeenCalledWith(expect.objectContaining({
+      code: 4000,
+      reason: 'dagpipe client admission rejected: input dispatch admission denied',
+    }));
+  });
+
   it('projects startup failure into the service socket error chain', async () => {
     plugin.addListener.mockRejectedValue(new Error('bridge unavailable'));
     const socket = openAndroidConnectionServiceTransportSocket({
@@ -890,6 +1056,85 @@ describe('AndroidConnectionServiceTransportSocket', () => {
     expect(closed).toHaveBeenCalledWith(expect.objectContaining({
       code: 4000,
       reason: 'connection service startup failed: bridge unavailable',
+    }));
+  });
+
+  it('projects auto rtc-direct path, endpoint and selected ICE pair from native snapshot', async () => {
+    const { add } = listenerMock();
+    plugin.addListener.mockImplementation(add);
+    plugin.readSnapshot.mockResolvedValue({
+      state: 'healthy',
+      generation: 'g-rtc-direct-diag',
+      target,
+      route: { mode: 'auto' },
+      channels: [],
+      lastHeartbeatAt: 12,
+      lastActivityAt: 12,
+      nextRetryAt: null,
+      error: null,
+      muxReadyPayload,
+      resolvedPath: 'rtc-direct',
+      resolvedRelayTransport: 'direct',
+      resolvedEndpoint: 'relay.example',
+      selectedIcePair: {
+        roundTripTimeMs: 12,
+        local: { candidateType: 'srflx', address: '203.0.113.5', port: 5000, protocol: 'udp' },
+        remote: { candidateType: 'srflx', address: '198.51.100.7', port: 4000, protocol: 'udp' },
+      },
+    });
+    const socket = new AndroidConnectionServiceTransportSocket(target);
+    await socket.start();
+    socket.onopen = vi.fn();
+    await Promise.resolve();
+
+    expect(socket.getDiagnostics()).toEqual(expect.objectContaining({
+      mode: 'webrtc',
+      resolvedPath: 'rtc-direct',
+      resolvedRelayTransport: 'direct',
+      resolvedEndpoint: 'relay.example',
+      selectedIcePair: expect.objectContaining({
+        local: expect.objectContaining({ candidateType: 'srflx', address: '203.0.113.5' }),
+        remote: expect.objectContaining({ candidateType: 'srflx', address: '198.51.100.7' }),
+      }),
+    }));
+  });
+
+  it('projects auto rtc-relay path and turn metadata from native snapshot', async () => {
+    const { add } = listenerMock();
+    plugin.addListener.mockImplementation(add);
+    plugin.readSnapshot.mockResolvedValue({
+      state: 'healthy',
+      generation: 'g-rtc-relay-diag',
+      target,
+      route: { mode: 'auto' },
+      channels: [],
+      lastHeartbeatAt: 13,
+      lastActivityAt: 13,
+      nextRetryAt: null,
+      error: null,
+      muxReadyPayload,
+      resolvedPath: 'rtc-relay',
+      resolvedRelayTransport: 'turn',
+      resolvedEndpoint: 'relay.example',
+      selectedIcePair: {
+        local: { candidateType: 'relay', address: '203.0.113.6', port: 5011, protocol: 'udp', relayProtocol: 'turn' },
+        remote: { candidateType: 'relay', address: '198.51.100.8', port: 3478, protocol: 'udp', relayProtocol: 'turn' },
+      },
+    });
+    const socket = new AndroidConnectionServiceTransportSocket(target);
+    await socket.start();
+    socket.onopen = vi.fn();
+    await Promise.resolve();
+
+    expect(socket.getDiagnostics()).toEqual(expect.objectContaining({
+      mode: 'webrtc',
+      resolvedPath: 'rtc-relay',
+      resolvedRelayTransport: 'turn',
+      resolvedEndpoint: 'relay.example',
+      selectedIcePair: expect.objectContaining({
+        local: expect.objectContaining({ candidateType: 'relay', relayProtocol: 'turn' }),
+        remote: expect.objectContaining({ candidateType: 'relay', relayProtocol: 'turn' }),
+      }),
     }));
   });
 });

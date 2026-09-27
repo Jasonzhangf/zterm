@@ -8,6 +8,12 @@ import {
   type TerminalAttachmentClientMessage,
 } from './terminal-attachment-message-runtime';
 
+const { attachmentGateMock } = vi.hoisted(() => ({ attachmentGateMock: vi.fn(() => ({ ok: true, outputs: {} })) }));
+
+vi.mock('./dagpipe-bridge', () => ({
+  runPhase3Attachment: attachmentGateMock,
+}));
+
 function createTransport(): TerminalSessionTransport {
   return {
     kind: 'ws',
@@ -249,6 +255,29 @@ describe('terminal attachment message runtime', () => {
       payload: {
         message: 'attachment-asset-request requires attachmentId, asset, and deviceId',
         code: 'invalid_payload',
+      },
+    });
+  });
+
+  it('rejects asset delivery when the Phase3 attachment gate fails', async () => {
+    attachmentGateMock.mockReturnValueOnce({ ok: false, error: 'attachment delivery denied by policy' } as any);
+    const { runtime, connection, attachmentDeliveryRuntime, sendTransportMessage } = createRuntime();
+
+    await handleMessage(runtime, connection, {
+      type: 'attachment-asset-request',
+      payload: {
+        attachmentId: 'att_00000000-0000-4000-8000-000000000001',
+        asset: 'original',
+        deviceId: 'phone-a',
+      },
+    });
+
+    expect(attachmentDeliveryRuntime.readAsset).not.toHaveBeenCalled();
+    expect(sentMessages(sendTransportMessage)).toContainEqual({
+      type: 'error',
+      payload: {
+        message: expect.stringContaining('attachment gate rejected delivery'),
+        code: 'attachment_delivery_rejected',
       },
     });
   });

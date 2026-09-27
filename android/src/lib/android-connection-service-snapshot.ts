@@ -2,6 +2,11 @@ import type {
   AndroidConnectionServiceRoutePolicy,
   AndroidConnectionServiceTarget,
 } from './android-connection-service-commands';
+import type {
+  TraversalResolvedPath,
+  TraversalResolvedRelayTransport,
+  TraversalSelectedIcePairDiagnostic,
+} from './traversal/types';
 
 export type AndroidConnectionServiceState =
   | 'idle'
@@ -26,8 +31,7 @@ export interface AndroidConnectionServiceError {
     | 'transport'
     | 'heartbeat-timeout'
     | 'authentication'
-    | 'terminal'
-    | 'webrtc-not-supported';
+    | 'terminal';
   message: string;
 }
 
@@ -42,6 +46,10 @@ export interface AndroidConnectionServiceSnapshot {
   nextRetryAt: number | null;
   error: AndroidConnectionServiceError | null;
   muxReadyPayload: Record<string, unknown> | null;
+  resolvedPath?: TraversalResolvedPath | null;
+  resolvedRelayTransport?: TraversalResolvedRelayTransport | null;
+  resolvedEndpoint?: string | null;
+  selectedIcePair?: TraversalSelectedIcePairDiagnostic | null;
 }
 
 export type AndroidConnectionServiceEvent =
@@ -58,7 +66,6 @@ export type AndroidConnectionServiceEvent =
   | { type: 'transport-failure'; generation: string; message: string }
   | { type: 'authentication-failure'; generation: string; message: string }
   | { type: 'terminal-failure'; generation: string; message: string }
-  | { type: 'webrtc-not-supported'; generation: string; message: string }
   | { type: 'reconnect-attempt'; generation: string; at: number };
 
 export interface AndroidConnectionServiceStateMachineOptions {
@@ -87,6 +94,10 @@ function readonlySnapshot(snapshot: AndroidConnectionServiceSnapshot): AndroidCo
     channels: snapshot.channels.map((channel) => ({ ...channel })),
     error: snapshot.error ? { ...snapshot.error } : null,
     muxReadyPayload: snapshot.muxReadyPayload ? { ...snapshot.muxReadyPayload } : null,
+    resolvedPath: snapshot.resolvedPath ?? null,
+    resolvedRelayTransport: snapshot.resolvedRelayTransport ?? null,
+    resolvedEndpoint: snapshot.resolvedEndpoint ?? null,
+    selectedIcePair: snapshot.selectedIcePair ? { ...snapshot.selectedIcePair } : null,
   };
 }
 
@@ -119,10 +130,14 @@ export function createAndroidConnectionServiceStateMachine(options: AndroidConne
         channels: [],
         lastHeartbeatAt: null,
         lastActivityAt: null,
-        nextRetryAt: null,
-        error: null,
-        muxReadyPayload: null,
-      };
+  nextRetryAt: null,
+  error: null,
+  muxReadyPayload: null,
+  resolvedPath: null,
+  resolvedRelayTransport: null,
+  resolvedEndpoint: null,
+  selectedIcePair: null,
+};
       retiredGenerations = new Set();
       consecutiveHeartbeatMisses = 0;
       return true;
@@ -303,16 +318,6 @@ export function createAndroidConnectionServiceStateMachine(options: AndroidConne
           generation: null,
           nextRetryAt: null,
           error: { code: 'terminal', message: event.message },
-        };
-        return true;
-      case 'webrtc-not-supported':
-        retiredGenerations.add(event.generation);
-        snapshot = {
-          ...snapshot,
-          state: 'terminal-error',
-          generation: null,
-          nextRetryAt: null,
-          error: { code: 'webrtc-not-supported', message: event.message },
         };
         return true;
       case 'reconnect-attempt':

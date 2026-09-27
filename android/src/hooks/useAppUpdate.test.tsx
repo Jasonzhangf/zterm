@@ -16,6 +16,10 @@ vi.mock('../plugins/AppUpdatePlugin', () => ({
   isNativeAppUpdateSupported: () => true,
 }));
 
+vi.mock('../lib/dagpipe-native-client', () => ({
+  runDagpipePhase7Update: async () => ({ ok: true, outputs: {} }),
+}));
+
 vi.stubGlobal('__APP_VERSION__', '0.1.1.1491');
 vi.stubGlobal('__APP_BASE_VERSION__', '0.1.1');
 vi.stubGlobal('__APP_BUILD_NUMBER__', '1491');

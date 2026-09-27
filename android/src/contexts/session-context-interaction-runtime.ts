@@ -38,6 +38,7 @@ import type {
   Session,
 } from '../lib/types';
 import type { RemoteWindowReceiverStartResult } from '../lib/remote-window-receiver-runtime';
+import { isDagpipeNativeCapable, runDagpipePhase4RemoteWindow } from '../lib/dagpipe-native-client';
 
 interface StateRefLike {
   current: {
@@ -209,6 +210,36 @@ export function createSessionInteractionRuntime(options: {
     streamId: string,
     startOptions: { videoProfile: RemoteWindowVideoProfile; purpose?: RemoteWindowStreamPurpose },
   ) => {
+    if (isDagpipeNativeCapable()) {
+      const remoteWindowGate = await runDagpipePhase4RemoteWindow({
+        execution_id: 'client-remote-window-stream-start',
+        attempt_id: '1',
+        inputs: {
+          'arc.stream_start_intent': { requestId: streamId, targetId: target.streamTargetId },
+          'arc.catalog_request': {
+            requestId: streamId,
+            windows: [{ id: target.streamTargetId }],
+          },
+          'arc.stream_policy': {
+            allowStream: true,
+            allowQuality: true,
+            allowInput: true,
+          },
+          'arc.touch_action': {
+            kind: 'none',
+            x: 0,
+            y: 0,
+          },
+          'arc.quality_intent': {
+            targetId: target.streamTargetId,
+            mode: startOptions.videoProfile.preference,
+          },
+        },
+      });
+      if (!remoteWindowGate.ok) {
+        throw new Error(`DAGpipe remote window gate rejected: ${remoteWindowGate.error}`);
+      }
+    }
     return requestRemoteWindowStreamStartRuntime({
       sessionId,
       streamId,

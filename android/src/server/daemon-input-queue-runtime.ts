@@ -17,6 +17,7 @@ import type {
   TerminalTransportConnection,
 } from './terminal-runtime-types';
 import { createReliableInputAckCache } from './terminal-reliable-input-ack';
+import { runPhase3InputSchedule } from './dagpipe-bridge';
 
 export type DaemonInputBackendKind = 'tmux' | 'herdr' | 'wezterm';
 
@@ -244,6 +245,52 @@ export function createDaemonInputQueueRuntime(
         });
         return;
       }
+    }
+    const gate = runPhase3InputSchedule({
+      execution_id: 'daemon-input-schedule',
+      attempt_id: '1',
+      inputs: {
+        'arc.channel_input_event': {
+          channelId: inputSession.id,
+          inputId: ackSeq || `${Date.now()}`,
+          text: data,
+        },
+        'arc.input_policy': {
+          allowWrite: true,
+          allowSchedule: false,
+        },
+        'arc.schedule_policy': {
+          enabled: false,
+        },
+        'arc.schedule_source': {
+          jobs: [],
+        },
+      },
+    });
+    if (!gate.ok) {
+      debugInput('drop', {
+        transportId: connection.transportId,
+        sessionId: inputSession.id,
+        sessionName: inputSession.sessionName,
+        reason: 'dagpipe_input_schedule_rejected',
+        bytes,
+        error: gate.error,
+        queueDepth: 0,
+      });
+      if (ackSeq) {
+        sendInputAck(connection, {
+          version: 1,
+          seq: ackSeq,
+          accepted: false,
+          bytes,
+          error: 'dagpipe_input_schedule_rejected',
+        });
+      }
+      deps.sendTransportMessage(connection.transport, {
+        type: 'error',
+        payload: { message: `DAGpipe input schedule gate rejected input: ${gate.error}`, code: 'dagpipe_input_schedule_rejected' },
+      });
+      return;
     }
     const startedAt = Date.now();
     const wrote = await deps.handleInput(inputSession, data, () => {

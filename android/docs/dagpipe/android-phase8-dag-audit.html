@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>zterm Android DAGpipe Phase 8 独立审查</title>
+    <style>
+      :root { color-scheme: light; --bg:#f7f7f5; --panel:#ffffff; --ink:#1f2933; --muted:#5b6b79; --line:#d8dee6; --ok:#0f766e; --ok-bg:#ecfdf5; }
+      * { box-sizing:border-box; }
+      body { margin:0; background:var(--bg); color:var(--ink); font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; line-height:1.55; }
+      main { max-width:1100px; margin:0 auto; padding:32px 20px 64px; }
+      header { border-bottom:1px solid var(--line); padding-bottom:20px; margin-bottom:28px; }
+      h1 { font-size:26px; margin:0 0 8px; letter-spacing:0; }
+      h2 { font-size:18px; margin:0 0 12px; letter-spacing:0; }
+      .muted { color:var(--muted); }
+      section { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:18px; margin-bottom:18px; }
+      table { width:100%; border-collapse:collapse; font-size:14px; }
+      th, td { border:1px solid var(--line); padding:8px 10px; text-align:left; vertical-align:top; }
+      th { background:#f0f3f6; }
+      .pass-badge { display:inline-block; background:var(--ok-bg); color:var(--ok); border:1px solid #99f6e4; border-radius:999px; padding:3px 10px; font-size:12px; font-weight:700; }
+      code, pre { font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:0.92em; }
+      .chain { border:1px solid var(--line); border-radius:8px; padding:12px; margin:10px 0; }
+      ol { margin:8px 0 0; padding-left:22px; }
+      ul { margin:8px 0; padding-left:22px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p><span class="pass-badge">独立审查 PASS</span></p>
+        <h1>zterm Android DAGpipe Phase 8 审计：Android Connection Service</h1>
+        <p class="muted">审查范围：android-connection-service 单张静态图与 Phase8 Rust/bridge。</p>
+      </header>
+
+      <section>
+        <h2>Review 结论</h2>
+        <table>
+          <tbody>
+            <tr><th>静态 review</th><td>PASS (20260925T123000Z-review-phase8-static)</td></tr>
+            <tr><th>runtime review</th><td>PASS (20260925T123500Z-review-phase8-runtime-v2)</td></tr>
+            <tr><th>findings</th><td>[]</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>DAG 链路（中文业务语义）</h2>
+        <div class="chain">
+          Connection Service
+          <ol>
+            <li>校验 typed 服务命令</li>
+            <li>绑定 desired target 或 release 计划</li>
+            <li>校验网络代际</li>
+            <li>重放 desired channels</li>
+            <li>建立物理 transport</li>
+            <li>维护心跳与 backoff 重连计划</li>
+            <li>投影服务快照</li>
+          </ol>
+        </div>
+        <div class="chain">
+          Notification Sessions
+          <ol>
+            <li>投影最多 3 个 connected channel action</li>
+            <li>解析 session open 深链</li>
+            <li>停止会话只脉冲匹配 action</li>
+          </ol>
+        </div>
+      </section>
+
+      <section>
+        <h2>状态机</h2>
+        <ul>
+          <li>服务：idle → resolving-target → connecting → mux-ready → channels-ready → healthy；backoff-reconnect / auth-error / terminal-error 为失败终态。</li>
+          <li>网络代际：旧 generation 事件拒绝；route 变更、物理关闭或认证失败终结当前 generation。</li>
+          <li>通知：只投影 open 且 body 订阅的 connected channel；未知深链和未匹配停止会话保持 idle/unmatched，不阻断主连接链。</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>验证证据</h2>
+        <ul>
+          <li><code>bash android/scripts/run-dagpipe-phase1-tests.sh</code> 通过：Rust 全部 phase 绿 + clippy + bridge vitest + 25 graph 校验。</li>
+          <li><code>pnpm exec tsc --noEmit</code> 通过。</li>
+          <li>Phase8 Rust 新增 7 个测试覆盖绑定/release、通知深链、停止脉冲、失败路径。</li>
+        </ul>
+      </section>
+    </main>
+  </body>
+</html>

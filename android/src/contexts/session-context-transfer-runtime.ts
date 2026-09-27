@@ -17,6 +17,12 @@ import {
   sendInputThroughSessionTransport,
 } from './session-context-input-runtime';
 import type { FileTransferMessage } from '../lib/file-transfer-message-runtime';
+import {
+  isDagpipeNativeCapable,
+  runDagpipePhase3Attachment,
+  runDagpipePhase3Screenshot,
+  runDagpipePhase3Upload,
+} from '../lib/dagpipe-native-client';
 
 interface MutableRefObject<T> {
   current: T;
@@ -331,6 +337,19 @@ export async function sendImagePasteRuntime(options: {
   if (!targetSessionId) {
     throw new Error('No target session for image paste');
   }
+  if (isDagpipeNativeCapable()) {
+    const uploadGate = await runDagpipePhase3Upload({
+      execution_id: 'client-image-paste-upload',
+      attempt_id: '1',
+      inputs: {
+        'arc.upload_intent': { uploadId: `${targetSessionId}-paste` },
+        'arc.transfer_policy': { allowUpload: true },
+      },
+    });
+    if (!uploadGate.ok) {
+      throw new Error(`DAGpipe image paste upload gate rejected: ${uploadGate.error}`);
+    }
+  }
 
   const requestId = `paste-image-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const metadata: PasteImageStartPayload = {
@@ -409,6 +428,22 @@ export async function sendFileAttachRuntime(options: {
   if (!targetSessionId) {
     throw new Error('No target session for file attach');
   }
+  if (isDagpipeNativeCapable()) {
+    const attachmentGate = await runDagpipePhase3Attachment({
+      execution_id: 'client-file-attach',
+      attempt_id: '1',
+      inputs: {
+        'arc.attachment_delivery_request': {
+          attachmentId: options.file.name || targetSessionId,
+          targetDeviceId: targetSessionId,
+        },
+        'arc.attachment_policy': { allowDelivery: true },
+      },
+    });
+    if (!attachmentGate.ok) {
+      throw new Error(`DAGpipe file attach gate rejected: ${attachmentGate.error}`);
+    }
+  }
 
   const ws = await options.ensureSessionReadyForPaste(targetSessionId);
   const fileBuffer = await options.file.arrayBuffer();
@@ -436,6 +471,19 @@ export async function requestRemoteScreenshotRuntime(options: {
   const targetSessionId = options.sessionId.trim();
   if (!targetSessionId) {
     throw new Error('No target session for remote screenshot');
+  }
+  if (isDagpipeNativeCapable()) {
+    const screenshotGate = await runDagpipePhase3Screenshot({
+      execution_id: 'client-remote-screenshot',
+      attempt_id: '1',
+      inputs: {
+        'arc.screenshot_request': { sessionId: targetSessionId },
+        'arc.screenshot_permission': { allowScreenshot: true },
+      },
+    });
+    if (!screenshotGate.ok) {
+      throw new Error(`DAGpipe remote screenshot gate rejected: ${screenshotGate.error}`);
+    }
   }
 
   const ws = await options.ensureSessionReadyForPaste(targetSessionId);

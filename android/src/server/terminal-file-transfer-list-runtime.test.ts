@@ -8,6 +8,18 @@ import type { ServerMessage } from '../lib/types';
 import type { TerminalSession } from './terminal-runtime-types';
 import type { RemoteScreenshotCaptureOptions } from './terminal-file-transfer-types';
 
+const { browseGateMock, downloadGateMock, uploadGateMock } = vi.hoisted(() => ({
+  browseGateMock: vi.fn(() => ({ ok: true, outputs: {} })),
+  downloadGateMock: vi.fn(() => ({ ok: true, outputs: {} })),
+  uploadGateMock: vi.fn(() => ({ ok: true, outputs: {} })),
+}));
+
+vi.mock('./dagpipe-bridge', () => ({
+  runPhase3FileBrowse: browseGateMock,
+  runPhase3Download: downloadGateMock,
+  runPhase3Upload: uploadGateMock,
+}));
+
 function makeSession(overrides?: Partial<Pick<TerminalSession, 'backend'>>): TerminalSession {
   return {
     id: 'session-1',
@@ -298,6 +310,71 @@ describe('terminal-file-transfer-list-runtime remote screenshot target capture',
       payload: {
         requestId: 'rs-3',
         error: 'remote window screenshot requires a numeric macOS window id',
+      },
+    });
+  });
+
+  it('rejects file list when the Phase3 browse gate fails', () => {
+    browseGateMock.mockReturnValueOnce({ ok: false, error: 'file browse denied by permission policy' } as any);
+    const sentMessages: ServerMessage[] = [];
+    const { runtime } = createRuntime(sentMessages);
+
+    runtime.handleFileListRequest(makeSession(), {
+      requestId: 'list-gate',
+      path: tempDir!,
+      showHidden: true,
+    });
+
+    expect(sentMessages[sentMessages.length - 1]).toMatchObject({
+      type: 'file-list-error',
+      payload: {
+        requestId: 'list-gate',
+        error: expect.stringContaining('dagpipe_file_browse_rejected'),
+      },
+    });
+  });
+
+  it('resolves an empty-path file list request to the tmux pane cwd before the Phase3 browse gate', () => {
+    browseGateMock.mockClear();
+    const sentMessages: ServerMessage[] = [];
+    const { runtime } = createRuntime(sentMessages);
+
+    runtime.handleFileListRequest(makeSession(), {
+      requestId: 'list-empty-path',
+      path: '',
+      showHidden: true,
+    });
+
+    expect(browseGateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        inputs: expect.objectContaining({
+          'arc.file_browse_request': { path: tempDir! },
+        }),
+      }),
+    );
+    expect(sentMessages[sentMessages.length - 1]).toMatchObject({
+      type: 'file-list-response',
+      payload: { requestId: 'list-empty-path', path: tempDir! },
+    });
+  });
+
+  it('rejects file download when the Phase3 download gate fails', () => {
+    downloadGateMock.mockReturnValueOnce({ ok: false, error: 'download denied by transfer policy' } as any);
+    const sentMessages: ServerMessage[] = [];
+    const { runtime } = createRuntime(sentMessages);
+
+    runtime.handleFileDownloadRequest(makeSession(), {
+      requestId: 'download-gate',
+      remotePath: join(tempDir!, 'missing.txt'),
+      fileName: 'missing.txt',
+      totalBytes: 0,
+    });
+
+    expect(sentMessages[sentMessages.length - 1]).toMatchObject({
+      type: 'file-download-error',
+      payload: {
+        requestId: 'download-gate',
+        error: expect.stringContaining('dagpipe_file_download_rejected'),
       },
     });
   });

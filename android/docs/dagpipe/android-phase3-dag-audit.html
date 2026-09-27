@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>zterm Android DAGpipe Phase 3 独立审查</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f7f7f5;
+        --panel: #ffffff;
+        --ink: #1f2933;
+        --muted: #5b6b79;
+        --line: #d8dee6;
+        --ok: #0f766e;
+        --ok-bg: #ecfdf5;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+          "Microsoft YaHei", sans-serif;
+        line-height: 1.55;
+      }
+      main {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 32px 20px 64px;
+      }
+      header {
+        border-bottom: 1px solid var(--line);
+        padding-bottom: 20px;
+        margin-bottom: 28px;
+      }
+      h1 { font-size: 26px; margin: 0 0 8px; letter-spacing: 0; }
+      h2 { font-size: 18px; margin: 0 0 12px; letter-spacing: 0; }
+      .muted { color: var(--muted); }
+      section {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 18px;
+        margin-bottom: 18px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 14px;
+      }
+      th, td {
+        border: 1px solid var(--line);
+        padding: 8px 10px;
+        text-align: left;
+        vertical-align: top;
+      }
+      th { background: #f0f3f6; }
+      .pass-badge {
+        display: inline-block;
+        background: var(--ok-bg);
+        color: var(--ok);
+        border: 1px solid #99f6e4;
+        border-radius: 999px;
+        padding: 3px 10px;
+        font-size: 12px;
+        font-weight: 700;
+      }
+      code, pre {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.92em;
+      }
+      pre {
+        background: #f4f6f8;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 12px;
+        overflow: auto;
+      }
+      .chain {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 12px;
+        margin: 10px 0;
+      }
+      .chain ol {
+        margin: 8px 0 0;
+        padding-left: 22px;
+      }
+      ul { margin: 8px 0; padding-left: 22px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p><span class="pass-badge">独立审查 PASS</span></p>
+        <h1>zterm Android DAGpipe Phase 3 审计</h1>
+        <p class="muted">
+          审查范围：Phase3 静态图、Rust-core Operator、NAPI/TS bridge。结论：无可阻断 finding。
+        </p>
+      </header>
+
+      <section>
+        <h2>Review 结论</h2>
+        <table>
+          <tbody>
+            <tr><th>静态图 review</th><td>PASS (20260925T163725Z-review-3825-idtd2m)</td></tr>
+            <tr><th>Rust core + bridge review</th><td>PASS (20260925T165749Z-review-5260-o4uzy3)</td></tr>
+            <tr><th>最终 negative-tests review</th><td>PASS (20260925T171850Z-review-89909-bsyyo8)</td></tr>
+            <tr><th>outcome_reason</th><td><code>controller_no_blocking_findings</code></td></tr>
+            <tr><th>Phase3 graphs</th><td>14 张 graph file 全部 validate/inspect 通过，其中 Phase3 为 6 张。</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>DAG 链路（中文业务语义）</h2>
+        <div class="chain">
+          输入执行链（daemon.input_schedule）
+          <ol>
+            <li>频道输入到达</li>
+            <li>入队去重并确认</li>
+            <li>写回后端正交执行</li>
+          </ol>
+        </div>
+        <div class="chain">
+          定时调度链（daemon.input_schedule）
+          <ol>
+            <li>读取调度源与调度策略</li>
+            <li>排定可执行计划</li>
+            <li>触发调度</li>
+            <li>分派到后端正交执行</li>
+          </ol>
+        </div>
+        <div class="chain">
+          文件浏览（daemon.file_transfer_browse）
+          <ol>
+            <li>校验目录浏览权限与路径</li>
+            <li>读取远端目录列表</li>
+            <li>投影为客户端浏览视图</li>
+          </ol>
+        </div>
+        <div class="chain">
+          文件上传（daemon.file_transfer_upload）
+          <ol>
+            <li>校验上传意图与传输策略</li>
+            <li>上传一个分段</li>
+            <li>返回分段回执</li>
+            <li>标记上传完成或失败</li>
+          </ol>
+        </div>
+        <div class="chain">
+          文件下载（daemon.file_transfer_download）
+          <ol>
+            <li>校验下载意图与传输策略</li>
+            <li>读取一个远端分段</li>
+            <li>返回分段回执</li>
+            <li>标记下载完成或失败</li>
+          </ol>
+        </div>
+        <div class="chain">
+          附件投递（daemon.attachment_delivery）
+          <ol>
+            <li>校验附件请求与投递策略</li>
+            <li>入队附件</li>
+            <li>投递到目标设备</li>
+            <li>发布投递回执；回执不等于目标消费</li>
+          </ol>
+        </div>
+        <div class="chain">
+          远端截图（terminal.remote_screenshot）
+          <ol>
+            <li>校验截图请求与权限</li>
+            <li>捕获远端截图</li>
+            <li>保存截图结果</li>
+          </ol>
+        </div>
+      </section>
+
+      <section>
+        <h2>状态机与失败终点</h2>
+        <ul>
+          <li>输入项：pending → acknowledged → written，或 pending → nack；一次写后端一次。</li>
+          <li>上传：validating → uploading → ack-segment → complete / failed。</li>
+          <li>下载：validating → downloading → chunk-received → complete / failed。</li>
+          <li>附件：validated → enqueued → delivered → receipt published；delivered 不代表客户端已消费。</li>
+          <li>截图：validated → captured → result ready / failed。</li>
+          <li>调度：planned → fired → dispatched；交互输入与定时调度互不串联。</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>验证证据</h2>
+        <ul>
+          <li><code>node ./scripts/validate-dagpipe-graphs.mjs</code> 通过，Graph 数 14。</li>
+          <li><code>bash scripts/run-dagpipe-phase1-tests.sh</code> 通过：Rust phase0 22 + phase2 5 + phase3 13，TS 29。</li>
+          <li><code>pnpm exec tsc --noEmit</code> 通过。</li>
+          <li>Phase3 Rust core：<code>native/dagpipe/src/phase3_core.rs</code> + <code>tests/phase3.rs</code>。</li>
+          <li>TS bridge：<code>src/lib/dagpipe-bridge.ts</code> + <code>src/lib/dagpipe-bridge.test.ts</code>。</li>
+        </ul>
+      </section>
+    </main>
+  </body>
+</html>

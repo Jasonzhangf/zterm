@@ -103,7 +103,39 @@ stage_runtime() {
   rm -rf "${RUNTIME_DIR}/node_modules/@roamhq/wrtc" "${RUNTIME_DIR}/node_modules/@roamhq/${wrtc_platform_package_name##*/}"
   cp -RL "${wrtc_package_dir}" "${RUNTIME_DIR}/node_modules/@roamhq/wrtc"
   cp -RL "${wrtc_platform_package_dir}" "${RUNTIME_DIR}/node_modules/@roamhq/${wrtc_platform_package_name##*/}"
+  DAGPIPE_PROFILE=release bash "${ROOT_DIR}/scripts/build-dagpipe-native.sh"
+  cp "${ROOT_DIR}/native/dagpipe/index.node" "${RUNTIME_DIR}/dagpipe.node"
   chmod +x "${RUNTIME_DIR}"/node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null || true
+}
+
+run_phase7_release_gate() {
+  local artifact_name="$1"
+  local expected_sha="$2"
+  "$NODE_BIN" - "$ROOT_DIR" "$artifact_name" "$expected_sha" <<'NODE'
+const path = require('path');
+const [rootDir, artifactName, expectedSha] = process.argv.slice(2);
+const dagpipe = require(path.join(rootDir, 'native', 'dagpipe', 'index.node'));
+const inputJson = JSON.stringify({
+  execution_id: `release:${artifactName}`,
+  attempt_id: '1',
+  inputs: {
+    'arc.build_artifact': { name: artifactName, sha256: expectedSha },
+    'arc.release_policy': { expectedSha256: expectedSha },
+  },
+});
+const raw = dagpipe.runPhase7Release(inputJson);
+const result = JSON.parse(raw);
+if (!result.ok) {
+  console.error('[prepare-global-daemon-release] phase7 release gate failed:', result.error || 'unknown');
+  process.exit(1);
+}
+const started = result.outputs && result.outputs['arc.runtime_started'];
+if (!started || started.state !== 'started') {
+  console.error('[prepare-global-daemon-release] phase7 release gate did not reach runtime_started');
+  process.exit(1);
+}
+console.log(`[prepare-global-daemon-release] phase7 release gate passed artifact=${artifactName} sha256=${expectedSha}`);
+NODE
 }
 
 stage_native_daemon_binary() {
@@ -155,6 +187,7 @@ LEGACY_LAUNCH_AGENT_PATH="${HOME}/Library/LaunchAgents/${LEGACY_LAUNCH_AGENT_LAB
 STAGED_DAEMON_ENTRY="${RUNTIME_DIR}/server.cjs"
 STAGED_NODE_PTY_HELPER_GLOB="${RUNTIME_DIR}/node_modules/node-pty/prebuilds/darwin-*/spawn-helper"
 NATIVE_DAEMON_BIN="${PACKAGE_ROOT}/support/zterm-daemon"
+DAGPIPE_NATIVE_BIN="${RUNTIME_DIR}/dagpipe.node"
 ITERM2_PYTHON_VENV="${WTERM_HOME}/python/iterm2"
 ITERM2_PYTHON_BIN="${ITERM2_PYTHON_VENV}/bin/python3"
 
@@ -463,7 +496,7 @@ run_foreground() {
   mkdir -p "$LOG_DIR"
   chmod +x ${STAGED_NODE_PTY_HELPER_GLOB} 2>/dev/null || true
   cd "${HOME}"
-  exec env -u TMUX -u TMUX_PANE HOST="$HOST" PORT="$PORT" ZTERM_HOST="$HOST" ZTERM_PORT="$PORT" ZTERM_AUTH_TOKEN="${ZTERM_AUTH_TOKEN:-}" ZTERM_DAEMON_NATIVE="$NATIVE_DAEMON_BIN" "$NODE_BIN" "$STAGED_DAEMON_ENTRY"
+  exec env -u TMUX -u TMUX_PANE HOST="$HOST" PORT="$PORT" ZTERM_HOST="$HOST" ZTERM_PORT="$PORT" ZTERM_AUTH_TOKEN="${ZTERM_AUTH_TOKEN:-}" ZTERM_DAEMON_NATIVE="$NATIVE_DAEMON_BIN" ZTERM_DAGPIPE_NATIVE="${DAGPIPE_NATIVE_BIN}" "$NODE_BIN" "$STAGED_DAEMON_ENTRY"
 }
 
 status_direct() {
@@ -646,7 +679,7 @@ set -euo pipefail
 cd "${HOME}"
 export PATH="${HOME}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 chmod +x ${STAGED_NODE_PTY_HELPER_GLOB} 2>/dev/null || true
-exec env -u TMUX -u TMUX_PANE ZTERM_ITERM2_PYTHON="${ITERM2_PYTHON_BIN}" ZTERM_DAEMON_NATIVE="${NATIVE_DAEMON_BIN}" "${NODE_BIN}" "${STAGED_DAEMON_ENTRY}"
+exec env -u TMUX -u TMUX_PANE ZTERM_ITERM2_PYTHON="${ITERM2_PYTHON_BIN}" ZTERM_DAEMON_NATIVE="${NATIVE_DAEMON_BIN}" ZTERM_DAGPIPE_NATIVE="${DAGPIPE_NATIVE_BIN}" "${NODE_BIN}" "${STAGED_DAEMON_ENTRY}"
 RUNNER
   chmod +x "$DIRECT_RUNNER"
 
@@ -714,7 +747,7 @@ cleanup_child() {
   terminate_child
 }
 trap cleanup_child TERM INT
-env -u TMUX -u TMUX_PANE ZTERM_ITERM2_PYTHON="${ITERM2_PYTHON_BIN}" ZTERM_DAEMON_NATIVE="${NATIVE_DAEMON_BIN}" "${NODE_BIN}" "${STAGED_DAEMON_ENTRY}" &
+env -u TMUX -u TMUX_PANE ZTERM_ITERM2_PYTHON="${ITERM2_PYTHON_BIN}" ZTERM_DAEMON_NATIVE="${NATIVE_DAEMON_BIN}" ZTERM_DAGPIPE_NATIVE="${DAGPIPE_NATIVE_BIN}" "${NODE_BIN}" "${STAGED_DAEMON_ENTRY}" &
 child_pid="\$!"
 missed_health_checks=0
 child_start_epoch="\$(date +%s)"
@@ -1108,6 +1141,8 @@ write_readme
 
 verify_deterministic_archive
 shasum -a 256 "${ARCHIVE_PATH}" > "${SHA_PATH}"
+EXPECTED_RELEASE_SHA="$(awk '{print $1}' "${SHA_PATH}")"
+run_phase7_release_gate "${RELEASE_NAME}.tar.gz" "${EXPECTED_RELEASE_SHA}"
 
 echo "[prepare-global-daemon-release] ready"
 echo "- dir: ${RELEASE_DIR}"

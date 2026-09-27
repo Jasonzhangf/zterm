@@ -92,10 +92,9 @@ export function resolveBackgroundResumeGrace(options: {
 export function ensureActiveSessionFreshRuntime(options: {
   refreshOptions: {
     sessionId: string;
-    source: 'explicit-resume' | 'active-reentry' | 'active-tick';
+    source: 'explicit-resume' | 'foreground-resume' | 'active-reentry' | 'active-tick';
     forceHead?: boolean;
     markResumeTail?: boolean;
-    allowReconnectIfUnavailable?: boolean;
   };
   refs: {
     stateRef: MutableRefObject<{ sessions: Session[]; activeSessionId: string | null; liveSessionIds?: string[] }>;
@@ -146,7 +145,7 @@ export function ensureActiveSessionFreshRuntime(options: {
   const isActiveReentryTarget = options.refreshOptions.source === 'active-reentry';
   const isRefreshTarget = isExplicitResumeTarget || isActiveReentryTarget || isActive || isLive;
   if (muxChannelUnavailableOnOpenTarget && isRefreshTarget) {
-    if (options.refreshOptions.allowReconnectIfUnavailable !== true) {
+    if (options.refreshOptions.source !== 'explicit-resume') {
       options.runtimeDebug(`session.transport.${options.refreshOptions.source}.data-refresh-only-skip`, {
         sessionId: options.refreshOptions.sessionId,
         activeSessionId: options.refs.stateRef.current.activeSessionId,
@@ -170,9 +169,6 @@ export function ensureActiveSessionFreshRuntime(options: {
     });
     if (options.refreshOptions.markResumeTail) {
       options.refs.tailRefreshStore.markPendingResumeTailRefresh(options.refreshOptions.sessionId);
-    }
-    if (options.refreshOptions.source === 'active-reentry') {
-      options.refs.lastActiveReentryAtRef.current.set(options.refreshOptions.sessionId, Date.now());
     }
     if (options.reopenSessionTerminalChannel) {
       options.reopenSessionTerminalChannel(options.refreshOptions.sessionId);
@@ -239,7 +235,6 @@ export function ensureActiveSessionFreshRuntime(options: {
     reconnectInFlight,
     pendingTransportOpen,
     pendingTransportOpenStale,
-    allowReconnectIfUnavailable: options.refreshOptions.allowReconnectIfUnavailable,
     keepaliveGraceActive: keepaliveGraceActiveForLifecycle,
     transportStale,
     source: options.refreshOptions.source,
@@ -337,23 +332,20 @@ export function ensureActiveSessionFreshRuntime(options: {
       pendingProbeAgeMs,
       wsReadyState: ws?.readyState ?? null,
     });
-    if (options.refreshOptions.allowReconnectIfUnavailable) {
-      // The physical socket is still OPEN — only the head probe did not answer
-      // in time. Re-issue the head request on the existing socket instead of
-      // rebuilding the transport (a healthy ws must not be torn down just
-      // because one head response was slow).
-      options.refs.reconnectStore.clearStaleTransportProbe(options.refreshOptions.sessionId);
-      const requested = options.requestSessionBufferHead(
-        options.refreshOptions.sessionId,
-        ws,
-        { force: options.refreshOptions.forceHead },
-      );
-      if (requested) {
-        options.refs.reconnectStore.markStaleTransportProbeIfAbsent(options.refreshOptions.sessionId, now);
-      }
-      return requested;
+    // The physical socket is still OPEN — only the head probe did not answer in
+    // time. Re-issue the head request on the existing socket instead of
+    // rebuilding the transport (a healthy ws must not be torn down just because
+    // one head response was slow). This is data refresh, not connection policy.
+    options.refs.reconnectStore.clearStaleTransportProbe(options.refreshOptions.sessionId);
+    const requested = options.requestSessionBufferHead(
+      options.refreshOptions.sessionId,
+      ws,
+      { force: options.refreshOptions.forceHead },
+    );
+    if (requested) {
+      options.refs.reconnectStore.markStaleTransportProbeIfAbsent(options.refreshOptions.sessionId, now);
     }
-    return false;
+    return requested;
   }
 
   if (refreshPlan.action === 'request-head') {
