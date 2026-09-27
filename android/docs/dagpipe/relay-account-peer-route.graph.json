@@ -102,7 +102,7 @@
     },
     {
       "id": "login_relay_account",
-      "operator": "relay.account_directory.login",
+      "operator": "client.relay_account.login",
       "operator_version": "0.1",
       "inputs": [
         "arc.account_credentials",
@@ -126,7 +126,7 @@
     },
     {
       "id": "publish_client_device",
-      "operator": "relay.account_directory.publish_device",
+      "operator": "client.relay_account.publish_device",
       "operator_version": "0.1",
       "inputs": [
         "arc.relay_session",

@@ -101,10 +101,12 @@ describe('DAGpipe Phase1 black-box parity with TypeScript owners', () => {
       execution_id: 'parity-connection-multi',
       attempt_id: '1',
       inputs: {
-        'arc.account_credentials': { accountId: 'u1', authToken: 'tok' },
-        'arc.relay_settings': { relayEnabled: false },
-        'arc.target_candidates': {
-          candidates: [{ id: 'lan', path: 'LAN', endpoint: '10.0.0.1:3333' }],
+        'arc.route_plan': {
+          selected: { candidateId: 'lan', id: 'lan', path: 'LAN', endpoint: '10.0.0.1:3333' },
+        },
+        'arc.resume_plan': {
+          targetKey: 'lan',
+          state: 'ready',
         },
         'arc.session_demand_set': {
           sessions: [

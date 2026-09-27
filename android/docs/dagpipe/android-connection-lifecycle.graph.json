@@ -9,75 +9,6 @@
   ],
   "nodes": [
     {
-      "id": "dagpipe.extract.arc.account_credentials",
-      "operator": "dagpipe.request.extract",
-      "operator_version": "0.1",
-      "inputs": [
-        "arc.request"
-      ],
-      "output": {
-        "id": "arc.account_credentials",
-        "schema": "Object"
-      },
-      "input_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "output_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "iterator": "Whole"
-    },
-    {
-      "id": "dagpipe.extract.arc.relay_settings",
-      "operator": "dagpipe.request.extract",
-      "operator_version": "0.1",
-      "inputs": [
-        "arc.request"
-      ],
-      "output": {
-        "id": "arc.relay_settings",
-        "schema": "Object"
-      },
-      "input_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "output_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "iterator": "Whole"
-    },
-    {
-      "id": "dagpipe.extract.arc.target_candidates",
-      "operator": "dagpipe.request.extract",
-      "operator_version": "0.1",
-      "inputs": [
-        "arc.request"
-      ],
-      "output": {
-        "id": "arc.target_candidates",
-        "schema": "Object"
-      },
-      "input_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "output_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "iterator": "Whole"
-    },
-    {
       "id": "dagpipe.extract.arc.session_demand_set",
       "operator": "dagpipe.request.extract",
       "operator_version": "0.1",
@@ -109,79 +40,6 @@
       ],
       "output": {
         "id": "arc.connection_policy",
-        "schema": "Object"
-      },
-      "input_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "output_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "iterator": "Whole"
-    },
-    {
-      "id": "login_relay_account",
-      "operator": "client.relay_account.login",
-      "operator_version": "0.1",
-      "inputs": [
-        "arc.account_credentials",
-        "arc.relay_settings"
-      ],
-      "output": {
-        "id": "arc.relay_session",
-        "schema": "Object"
-      },
-      "input_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "output_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "iterator": "Whole"
-    },
-    {
-      "id": "publish_client_device",
-      "operator": "client.relay_account.publish_device",
-      "operator_version": "0.1",
-      "inputs": [
-        "arc.relay_session"
-      ],
-      "output": {
-        "id": "arc.device_presence",
-        "schema": "Object"
-      },
-      "input_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "output_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "iterator": "Whole"
-    },
-    {
-      "id": "resolve_target_routes",
-      "operator": "client.connection.resolve_routes",
-      "operator_version": "0.1",
-      "inputs": [
-        "arc.target_candidates",
-        "arc.device_presence",
-        "arc.relay_session",
-        "arc.connection_policy"
-      ],
-      "output": {
-        "id": "arc.route_plan",
         "schema": "Object"
       },
       "input_selector": {
@@ -324,7 +182,7 @@
       "operator_version": "0.1",
       "inputs": [
         "arc.connection_health",
-        "arc.route_plan",
+        "arc.resume_plan",
         "arc.connection_policy"
       ],
       "output": {
@@ -367,29 +225,55 @@
         "predicate": null
       },
       "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.route_plan",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.route_plan",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.resume_plan",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.resume_plan",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
     }
   ],
   "edges": [
-    {
-      "from": "login_relay_account",
-      "to": "publish_client_device",
-      "arc_id": "arc.relay_session"
-    },
-    {
-      "from": "login_relay_account",
-      "to": "resolve_target_routes",
-      "arc_id": "arc.relay_session"
-    },
-    {
-      "from": "publish_client_device",
-      "to": "resolve_target_routes",
-      "arc_id": "arc.device_presence"
-    },
-    {
-      "from": "resolve_target_routes",
-      "to": "establish_target_transport",
-      "arc_id": "arc.route_plan"
-    },
     {
       "from": "establish_target_transport",
       "to": "negotiate_mux",
@@ -424,31 +308,6 @@
       "from": "maintain_connection",
       "to": "plan_recovery",
       "arc_id": "arc.connection_health"
-    },
-    {
-      "from": "resolve_target_routes",
-      "to": "plan_recovery",
-      "arc_id": "arc.route_plan"
-    },
-    {
-      "from": "dagpipe.extract.arc.account_credentials",
-      "to": "login_relay_account",
-      "arc_id": "arc.account_credentials"
-    },
-    {
-      "from": "dagpipe.extract.arc.relay_settings",
-      "to": "login_relay_account",
-      "arc_id": "arc.relay_settings"
-    },
-    {
-      "from": "dagpipe.extract.arc.target_candidates",
-      "to": "resolve_target_routes",
-      "arc_id": "arc.target_candidates"
-    },
-    {
-      "from": "dagpipe.extract.arc.connection_policy",
-      "to": "resolve_target_routes",
-      "arc_id": "arc.connection_policy"
     },
     {
       "from": "dagpipe.extract.arc.connection_policy",
@@ -494,6 +353,16 @@
       "from": "subscribe_session_bodies",
       "to": "dagpipe.collect.arc.connection_health,arc.recovery_plan,arc.body_subscriptions",
       "arc_id": "arc.body_subscriptions"
+    },
+    {
+      "from": "dagpipe.extract.arc.route_plan",
+      "to": "establish_target_transport",
+      "arc_id": "arc.route_plan"
+    },
+    {
+      "from": "dagpipe.extract.arc.resume_plan",
+      "to": "plan_recovery",
+      "arc_id": "arc.resume_plan"
     }
   ],
   "outputs": [

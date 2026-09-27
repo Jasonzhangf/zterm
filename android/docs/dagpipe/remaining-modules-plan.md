@@ -196,3 +196,24 @@ allowed / forbidden paths，再开独立 worktree。
 - 不删除旧 TS 实现，直到对应 parity gate 证据存在。
 - 未获发布授权前不 bump APK、不生成/发放 OTA。
 - UI 层只按业务意图和投影建模，不把 React/Java 调用关系当作业务 DAG。
+
+## 8. 消融合并前置任务（2026-09-26 已批准）
+
+在继续新增 Phase 图前，先按 `2026-09-26-dagpipe-ablation-audit.md` 收敛已有
+重复语义：
+
+1. Phase2 relay 图已把 `client.relay_account.login` /
+   `client.relay_account.publish_device` 固定为 relay 前缀唯一 owner；
+   `android.connection_lifecycle` 的 relay 前缀不得再作为第二套真源。
+2. `android.connection_lifecycle` 后续改为消费 `arc.route_plan` /
+   `arc.resume_plan`，移除重复的登录/发布/线路解析节点；调用方先通过 relay
+   gate 拿到线路计划再进入连接建立。当前候选已执行该收敛，并将
+   `selected.candidateId` 作为连接建立入参契约。
+3. 只有第 1、2 步完成并通过 phase2 parity 后，才允许删除
+   `relay-account-peer-route.graph.json` 并更新 `include_str!` / `graphs.len()`
+   断言。当前候选保留独立 relay 图，因为 phase2 bridge / TS parity 仍消费
+   `account_directory` / `validated_lease` / `resume_plan` 输出契约；删除的
+   前置阻断条件是先把这些输出迁入 connection lifecycle 或等价 relay gate
+   graph，并同步更新 `compilePhase2` / native bridge / parity 入口。
+4. `android-connection-service` 只投影服务快照、desired channel 重放、通知
+   action 与 session activity，不重复实现物理连接/维持/恢复。

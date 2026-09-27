@@ -559,10 +559,12 @@ describe('dagpipe native bridge', () => {
       execution_id: 'bridge-connection',
       attempt_id: '1',
       inputs: {
-        'arc.account_credentials': { accountId: 'u1', authToken: 'tok' },
-        'arc.relay_settings': { relayEnabled: true },
-        'arc.target_candidates': {
-          candidates: [{ id: 'lan', path: 'LAN', endpoint: '10.0.0.1' }],
+        'arc.route_plan': {
+          selected: { candidateId: 'lan', id: 'lan', path: 'LAN', endpoint: '10.0.0.1' },
+        },
+        'arc.resume_plan': {
+          targetKey: 'lan',
+          state: 'ready',
         },
         'arc.session_demand_set': {
           sessions: [

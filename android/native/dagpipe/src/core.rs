@@ -61,10 +61,6 @@ fn as_u64(value: Option<&Value>) -> u64 {
     value.and_then(Value::as_u64).unwrap_or(0)
 }
 
-fn as_i64(value: Option<&Value>) -> i64 {
-    value.and_then(Value::as_i64).unwrap_or(0)
-}
-
 fn as_bool(value: Option<&Value>) -> bool {
     value.and_then(Value::as_bool).unwrap_or(false)
 }
@@ -206,7 +202,6 @@ fn register_all(registry: &mut Registry) {
     // android.connection_lifecycle
     register!(RelayAccountLogin);
     register!(RelayAccountPublishDevice);
-    register!(ConnectionResolveRoutes);
     register!(ConnectionEstablishTransport);
     register!(ConnectionNegotiateMux);
     register!(SessionChannelOpenAll);
@@ -357,7 +352,7 @@ pub fn run_input_dispatch_json(input_json: String) -> serde_json::Result<Value> 
 // Operators: android.connection_lifecycle
 // ---------------------------------------------------------------------------
 
-struct RelayAccountLogin;
+pub(crate) struct RelayAccountLogin;
 
 impl Operator for RelayAccountLogin {
     fn name(&self) -> &'static str {
@@ -397,7 +392,7 @@ impl Operator for RelayAccountLogin {
     }
 }
 
-struct RelayAccountPublishDevice;
+pub(crate) struct RelayAccountPublishDevice;
 
 impl Operator for RelayAccountPublishDevice {
     fn name(&self) -> &'static str {
@@ -409,59 +404,7 @@ impl Operator for RelayAccountPublishDevice {
     }
 
     fn input_type(&self) -> ValueType {
-        ValueType::Object
-    }
-
-    fn output_type(&self) -> ValueType {
-        ValueType::Object
-    }
-
-    fn execute(&self, input: Value, _context: &OperatorContext) -> Result<Value, String> {
-        let session = obj(input);
-        if get_str(&session, "state") != "logged-in" {
-            return Err("cannot publish device before relay login".into());
-        }
-        let device_id = get_str(&session, "deviceId")
-            .to_string()
-            .pipe_default("zterm-android-client");
-        Ok(json!({
-            "deviceId": device_id,
-            "connected": true,
-            "platform": "android",
-            "accountId": get_str(&session, "accountId"),
-            "published": true,
-            "role": "client.relay_account.publish_device",
-        }))
-    }
-}
-
-trait PipeDefault {
-    fn pipe_default(self, default: &str) -> String;
-}
-
-impl PipeDefault for String {
-    fn pipe_default(self, default: &str) -> String {
-        if self.is_empty() {
-            default.to_string()
-        } else {
-            self
-        }
-    }
-}
-
-struct ConnectionResolveRoutes;
-
-impl Operator for ConnectionResolveRoutes {
-    fn name(&self) -> &'static str {
-        "client.connection.resolve_routes"
-    }
-
-    fn version(&self) -> &'static str {
-        "0.1"
-    }
-
-    fn input_type(&self) -> ValueType {
-        ValueType::Array
+        ValueType::Any
     }
 
     fn output_type(&self) -> ValueType {
@@ -470,88 +413,42 @@ impl Operator for ConnectionResolveRoutes {
 
     fn execute(&self, input: Value, _context: &OperatorContext) -> Result<Value, String> {
         let values = inputs(input);
-        let candidates = values
-            .first()
-            .and_then(|value| value.get("candidates"))
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
-        let policy = values.get(3).cloned().unwrap_or_else(|| json!({}));
-        let priority = policy
-            .get("pathPriority")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_else(|| {
-                json!(["LAN", "UDP direct", "Tailscale", "Relay"])
-                    .as_array()
-                    .cloned()
-                    .unwrap()
-            })
-            .into_iter()
-            .filter_map(|value| value.as_str().map(|s| s.to_string()))
-            .collect::<Vec<_>>();
-        let default_priority = ["LAN", "UDP direct", "Tailscale", "Relay"];
-        let mut routes = Vec::new();
-        for candidate in candidates {
-            let path = get_str(&obj(candidate.clone()), "path").to_string();
-            let endpoint = get_str(&obj(candidate.clone()), "endpoint").to_string();
-            let id = get_str(&obj(candidate.clone()), "id").to_string();
-            let candidate_obj = obj(candidate.clone());
-            let health = candidate_obj.get("health").cloned().unwrap_or_default();
-            let health_obj = obj_ref(&health);
-            let health_status = get_str(&health_obj, "status").to_string();
-            let selectable = health_status.is_empty() || health_status == "success";
-            let priority_index = if priority.is_empty() {
-                default_priority
-                    .iter()
-                    .position(|p| p == &path)
-                    .unwrap_or(default_priority.len())
-            } else {
-                priority
-                    .iter()
-                    .position(|p| p == &path)
-                    .unwrap_or(priority.len())
-            };
-            let health_score = if health_status == "auth-failure" {
-                900
-            } else if health_status == "failure" {
-                500
-            } else if health_status == "success" {
-                // Parity with TypeScript `healthCost`: floor rtt/10 first, then
-                // cap the bonus at 100, so rtt > 100ms cannot drift.
-                -1000 + std::cmp::min(100, get_u64(&health_obj, "rttMs") / 10) as i64
-            } else {
-                20
-            };
-            let score = (priority_index * 100) as i64 + health_score;
-            routes.push(json!({
-                "candidateId": id,
-                "path": path,
-                "endpoint": endpoint,
-                "selectable": selectable,
-                "score": score,
-                "priority": priority_index as u64,
-                "healthScore": health_score,
-            }));
+        let session = obj(values.first().cloned().unwrap_or_default());
+        if get_str(&session, "state") != "logged-in" {
+            return Err("cannot publish device before relay login".into());
         }
-        let diagnostics = routes.clone();
-        routes.retain(|route| get_bool(&obj_ref(route), "selectable"));
-        routes.sort_by(|left, right| {
-            let left_priority = as_i64(left.get("priority"));
-            let right_priority = as_i64(right.get("priority"));
-            let tier_cmp = left_priority.cmp(&right_priority);
-            if tier_cmp != std::cmp::Ordering::Equal {
-                return tier_cmp;
+        let capabilities = obj(values.get(1).cloned().unwrap_or_default());
+        let capabilities_device_id = get_str(&capabilities, "deviceId").to_string();
+        let session_device_id = get_str(&session, "deviceId").to_string();
+        let device_id = if capabilities_device_id.is_empty() {
+            if session_device_id.is_empty() {
+                "zterm-android-client".to_string()
+            } else {
+                session_device_id
             }
-            let left_health = as_i64(left.get("healthScore"));
-            let right_health = as_i64(right.get("healthScore"));
-            left_health.cmp(&right_health)
-        });
-        let selected = routes.first().cloned();
+        } else {
+            capabilities_device_id
+        };
+        let routes = capabilities
+            .get("routes")
+            .cloned()
+            .unwrap_or(Value::Array(Vec::new()));
+        let platform = if get_str(&capabilities, "platform").is_empty() {
+            "android"
+        } else {
+            get_str(&capabilities, "platform")
+        };
         Ok(json!({
-            "selected": selected,
-            "diagnostics": diagnostics,
-            "role": "client.connection.resolve_routes",
+            "deviceId": device_id,
+            "id": device_id,
+            "connected": true,
+            "platform": platform,
+            "accountId": get_str(&session, "accountId"),
+            "published": true,
+            "state": "published",
+            "routes": routes,
+            "capabilities": capabilities,
+            "role": "client.relay_account.publish_device",
         }))
     }
 }
@@ -585,9 +482,10 @@ impl Operator for ConnectionEstablishTransport {
         if endpoint.is_empty() {
             return Err("cannot establish transport without a resolved route".into());
         }
-        let target_key = get_str(&selected_obj, "candidateId")
-            .to_string()
-            .pipe_default(&endpoint);
+        let target_key = get_str(&selected_obj, "candidateId").to_string();
+        if target_key.is_empty() {
+            return Err("cannot establish transport without a selected candidateId".into());
+        }
         let expected_generation = get_u64(&policy, "expectedGeneration");
         Ok(json!({
             "targetKey": target_key,

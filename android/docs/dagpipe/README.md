@@ -219,3 +219,25 @@ client wrapper entries are N/A on the client side by ownership:
 - `runDagpipePhase7Debug`: `src/hooks/useRelayDeviceStream.ts` relay debug
   request gate. The native gate runs only when the client platform is native;
   the legacy bounded HTTP upload path remains read-only metadata export.
+
+## DAGpipe 消融合并口径（2026-09-26）
+
+详见 `2026-09-26-dagpipe-ablation-audit.md`。当前口径：
+
+- `dagpipe.request.extract` / `dagpipe.result.collect` 是 SDK 的 SESE 管道节点，
+  不是业务步骤；在 SDK 支持类型化输入声明前不消融。
+- `relay-account-peer-route` 与 `android-connection-lifecycle` 的 relay 前缀
+  重复。正确消融顺序是先固定 `client.relay_account.login` /
+  `client.relay_account.publish_device` 为 relay 前缀唯一 owner，再让
+  `android.connection_lifecycle` 消费 `arc.route_plan` / `arc.resume_plan`。
+  当前候选完成后已收敛 relay 登录/发布唯一 owner；独立 relay 图仍保留，
+  等待 `arc.account_directory` / `arc.validated_lease` / `arc.resume_plan`
+  bridge 契约迁出后删除，不能先删图留断链。
+- `android.connection_lifecycle` 现在只消费上游 route plan / resume plan；
+  route plan 的候选身份契约是 `selected.candidateId`，连接建立不得再从
+  endpoint 推导 targetKey。
+- `android-connection-service` 不复制 `android.connection_lifecycle` 的物理
+  连接/维持/恢复为第二套 truth owner；它只投影服务快照、重放意图与通知 action。
+- `daemon-connection-channel-catalog` 与客户端连接图不合并，owner 边界不同。
+- file-transfer / attachment / screenshot / remote-window 不是死图，当前作为
+  admission gate 保留，等 parity 后再消融对应 TS 重复 owner。

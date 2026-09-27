@@ -210,13 +210,8 @@ fn connection_lifecycle_keeps_single_physical_transport_for_multi_session() {
         "execution_id": "conn-test",
         "attempt_id": "1",
         "inputs": {
-            "arc.account_credentials": { "accountId": "u1", "authToken": "tok" },
-            "arc.relay_settings": { "relayEnabled": true },
-            "arc.target_candidates": {
-                "candidates": [
-                    { "id": "lan", "path": "LAN", "endpoint": "10.0.0.1" },
-                    { "id": "relay", "path": "Relay", "endpoint": "relay.example" }
-                ]
+            "arc.route_plan": {
+                "selected": { "candidateId": "lan", "path": "LAN", "endpoint": "10.0.0.1" }
             },
             "arc.session_demand_set": {
                 "sessions": [
@@ -453,18 +448,13 @@ fn buffer_render_rejects_stale_frame_and_preserves_local_truth() {
 }
 
 #[test]
-fn connection_lifecycle_does_not_select_auth_failure_route() {
+fn connection_lifecycle_preserves_upstream_route_plan_candidate() {
     let request = json!({
         "execution_id": "auth-route",
         "attempt_id": "1",
         "inputs": {
-            "arc.account_credentials": { "accountId": "u1", "authToken": "tok" },
-            "arc.relay_settings": { "relayEnabled": true },
-            "arc.target_candidates": {
-                "candidates": [
-                    { "id": "relay", "path": "Relay", "endpoint": "relay.example", "health": { "status": "auth-failure", "rttMs": 0 } },
-                    { "id": "lan", "path": "LAN", "endpoint": "10.0.0.1", "health": { "status": "success", "rttMs": 10 } }
-                ]
+            "arc.route_plan": {
+                "selected": { "candidateId": "lan", "id": "lan", "path": "LAN", "endpoint": "10.0.0.1" }
             },
             "arc.session_demand_set": { "sessions": [ { "sessionId": "s1", "sessionName": "one" } ] },
             "arc.connection_policy": { "pathPriority": ["Relay", "LAN"], "expectedGeneration": 1 }
@@ -479,18 +469,13 @@ fn connection_lifecycle_does_not_select_auth_failure_route() {
 }
 
 #[test]
-fn connection_lifecycle_success_health_score_matches_ts_for_rtt_over_100() {
+fn connection_lifecycle_consumes_route_plan_without_re_scoring_candidates() {
     let request = json!({
         "execution_id": "health-parity",
         "attempt_id": "1",
         "inputs": {
-            "arc.account_credentials": { "accountId": "u1", "authToken": "tok" },
-            "arc.relay_settings": { "relayEnabled": true },
-            "arc.target_candidates": {
-                "candidates": [
-                    { "id": "slow", "path": "Tailscale", "endpoint": "slow.tailnet", "health": { "status": "success", "rttMs": 250 } },
-                    { "id": "fast", "path": "Tailscale", "endpoint": "fast.tailnet", "health": { "status": "success", "rttMs": 150 } }
-                ]
+            "arc.route_plan": {
+                "selected": { "candidateId": "fast", "path": "Tailscale", "endpoint": "fast.tailnet" }
             },
             "arc.session_demand_set": { "sessions": [ { "sessionId": "s1", "sessionName": "one" } ] },
             "arc.connection_policy": { "pathPriority": ["Tailscale"], "expectedGeneration": 1 }
@@ -514,12 +499,8 @@ fn connection_lifecycle_mux_negotiation_requires_established_transport() {
         "execution_id": "mux-connect",
         "attempt_id": "1",
         "inputs": {
-            "arc.account_credentials": { "accountId": "u1", "authToken": "tok" },
-            "arc.relay_settings": { "relayEnabled": true },
-            "arc.target_candidates": {
-                "candidates": [
-                    { "id": "lan", "path": "LAN", "endpoint": "10.0.0.1", "health": { "status": "success", "rttMs": 10 } }
-                ]
+            "arc.route_plan": {
+                "selected": { "candidateId": "lan", "id": "lan", "path": "LAN", "endpoint": "10.0.0.1" }
             },
             "arc.session_demand_set": { "sessions": [ { "sessionId": "s1", "sessionName": "one" } ] },
             "arc.connection_policy": { "pathPriority": ["LAN"] }
