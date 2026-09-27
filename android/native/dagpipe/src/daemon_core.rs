@@ -238,6 +238,14 @@ fn changed_ranges_for_window(prev: &Value, next: &Value, full_resync: bool) -> V
     changed
 }
 
+fn compute_changed_ranges(diff_policy: &Value, prev: &Value, next: &Value) -> Vec<(u64, u64)> {
+    let full_resync = diff_policy
+        .get("fullResync")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    changed_ranges_for_window(prev, next, full_resync)
+}
+
 fn collapse_ranges(ranges: &[(u64, u64)]) -> Vec<(u64, u64)> {
     if ranges.is_empty() {
         return Vec::new();
@@ -331,11 +339,7 @@ impl Operator for MirrorStoreDiff {
         let diff_policy = inputs.first().cloned().unwrap_or_default();
         let prev = inputs.get(1).cloned().unwrap_or_default();
         let truth = inputs.get(2).cloned().unwrap_or_default();
-        let full_resync = diff_policy
-            .get("fullResync")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        let ranges = changed_ranges_for_window(&prev, &truth, full_resync);
+        let ranges = compute_changed_ranges(&diff_policy, &prev, &truth);
         Ok(json!({ "ranges": ranges.into_iter().map(range_to_json).collect::<Vec<_>>() }))
     }
 }
@@ -380,7 +384,7 @@ impl Operator for MirrorStoreClassify {
             "reset"
         } else if ranges.is_empty() {
             "head-only"
-        } else if prev_end <= truth_start || truth_end <= prev_start || truth_start > prev_start {
+        } else if prev_end <= truth_start || truth_end <= prev_start || truth_start != prev_start {
             "window-shift"
         } else if truth_start == prev_start && truth_len > prev_len {
             "append"
@@ -696,5 +700,128 @@ impl Operator for ControlOwnerDispatch {
             "ownerId": owner_id,
             "commandType": command.get("commandType").cloned().unwrap_or(Value::Null),
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cells(text: &str) -> Value {
+        json!(text
+            .chars()
+            .map(|ch| {
+                json!({ "char": ch.to_string(), "fg": 256, "bg": 256, "flags": 0, "width": 1 })
+            })
+            .collect::<Vec<_>>())
+    }
+
+    fn lines(texts: &[&str]) -> Value {
+        json!(texts.iter().map(|text| cells(text)).collect::<Vec<_>>())
+    }
+
+    fn snapshot(start: u64, texts: &[&str], revision: u64) -> Value {
+        json!({
+            "revision": revision,
+            "bufferStartIndex": start,
+            "bufferLines": lines(texts),
+        })
+    }
+
+    fn mirror_publish(prev: Value, next: Value, policy: Value, available_end: u64) -> Value {
+        let input = json!({
+            "execution_id": "daemon-core-mirror-test",
+            "attempt_id": "1",
+            "inputs": {
+                "arc.source_readback": next,
+                "arc.diff_policy": policy,
+                "arc.prev_mirror_snapshot": prev,
+                "arc.subscriber_facts": {
+                    "availableStartIndex": 0,
+                    "availableEndIndex": available_end,
+                    "subscribers": [{ "id": "live" }],
+                },
+            },
+        });
+        let result = run_mirror_publish_json(input.to_string()).expect("mirror publish parse");
+        assert_eq!(
+            result["ok"],
+            json!(true),
+            "mirror publish should be ok: {result}"
+        );
+        result["outputs"]["arc.wire_frames"].clone()
+    }
+
+    fn first_frame(publish: &Value) -> Value {
+        publish["frames"][0].clone()
+    }
+
+    #[test]
+    fn mirror_publish_append_is_no_hole_tail() {
+        let publish = mirror_publish(
+            snapshot(0, &["a", "b"], 1),
+            snapshot(0, &["a", "b", "c"], 2),
+            json!({}),
+            3,
+        );
+        let frame = first_frame(&publish);
+        assert_eq!(frame["changeKind"], json!("append"));
+        assert_eq!(frame["ranges"], json!([{ "startIndex": 2, "endIndex": 3 }]));
+    }
+
+    #[test]
+    fn mirror_publish_rewrite_is_no_hole_span() {
+        let publish = mirror_publish(
+            snapshot(0, &["a", "b", "c"], 1),
+            snapshot(0, &["a", "X", "c"], 2),
+            json!({}),
+            3,
+        );
+        let frame = first_frame(&publish);
+        assert_eq!(frame["changeKind"], json!("rewrite"));
+        assert_eq!(frame["ranges"], json!([{ "startIndex": 1, "endIndex": 2 }]));
+    }
+
+    #[test]
+    fn mirror_publish_window_shift_is_contiguous() {
+        let publish = mirror_publish(
+            snapshot(10, &["a", "b", "c"], 1),
+            snapshot(8, &["x", "a", "b", "c", "y"], 2),
+            json!({}),
+            13,
+        );
+        let frame = first_frame(&publish);
+        assert_eq!(frame["changeKind"], json!("window-shift"));
+        assert_eq!(
+            frame["ranges"],
+            json!([{ "startIndex": 8, "endIndex": 13 }])
+        );
+    }
+
+    #[test]
+    fn mirror_publish_reset_policy_sends_full_window() {
+        let publish = mirror_publish(
+            snapshot(0, &["a", "b"], 1),
+            snapshot(0, &["x", "y", "z"], 2),
+            json!({ "fullResync": true }),
+            3,
+        );
+        let frame = first_frame(&publish);
+        assert_eq!(frame["changeKind"], json!("reset"));
+        assert_eq!(frame["action"], json!("resync"));
+        assert_eq!(frame["ranges"], json!([{ "startIndex": 0, "endIndex": 3 }]));
+    }
+
+    #[test]
+    fn mirror_publish_head_only_when_body_unchanged() {
+        let publish = mirror_publish(
+            snapshot(0, &["a", "b"], 1),
+            snapshot(0, &["a", "b"], 2),
+            json!({}),
+            2,
+        );
+        let frame = first_frame(&publish);
+        assert_eq!(frame["changeKind"], json!("head-only"));
+        assert_eq!(frame["action"], json!("head-only"));
     }
 }

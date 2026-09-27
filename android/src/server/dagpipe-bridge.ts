@@ -50,6 +50,14 @@ export interface MirrorChangedRangesInput {
   subscriberFacts?: Record<string, unknown>;
 }
 
+export const DEFAULT_MIRROR_NO_HOLE_DIFF_POLICY = {
+  fullResync: false,
+  noHole: true,
+  maxPendingRanges: 64,
+  maxPendingSpanLines: 4096,
+  maxPendingAgeMs: 15_000,
+};
+
 function sourceIndexNode() {
   const base = typeof __dirname !== 'undefined'
     ? __dirname
@@ -155,12 +163,16 @@ export function runControlDispatch(input: Record<string, unknown>): DagpipeResul
 export function mirrorPublishChangedRanges(
   input: MirrorChangedRangesInput,
 ): { ok: true; ranges: MirrorChangedRange[] } | { ok: false; error: string } {
+  const diffPolicy = {
+    ...DEFAULT_MIRROR_NO_HOLE_DIFF_POLICY,
+    ...(input.diffPolicy ?? {}),
+  };
   const result = runMirrorPublish({
     execution_id: 'mirror-runtime',
     attempt_id: 'mirror-runtime',
     inputs: {
       'arc.source_readback': input.sourceReadback,
-      'arc.diff_policy': input.diffPolicy ?? {},
+      'arc.diff_policy': diffPolicy,
       'arc.prev_mirror_snapshot': input.prevMirrorSnapshot,
       'arc.subscriber_facts': input.subscriberFacts ?? {
         subscribers: [{ id: 'live' }],

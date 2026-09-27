@@ -98,6 +98,10 @@ Diff policy:
 - `arc.diff_policy` is an explicit graph input, not hard-coded operator state.
   It configures rewrite handling for TUI apps that update older rows, max
   changed-span policy, and the full-resync thresholds.
+- Daemon bridge defaults to `DEFAULT_MIRROR_NO_HOLE_DIFF_POLICY`: `fullResync=false`,
+  `noHole=true`, `maxPendingRanges=64`, `maxPendingSpanLines=4096`,
+  `maxPendingAgeMs=15000`. Production `server.ts` passes this policy explicitly to
+  `mirrorPublishChangedRanges` for every mirror commit.
 - The default target is no-hole updates: a publish frame must cover every row
   from `startIndex` through `endIndex - 1`. Sparse holes are not sent.
 - Incoming changed ranges are diff truth only: `daemon.mirror_store.diff`
@@ -172,6 +176,10 @@ Phase 1 current status:
 - Rust crate `android/native/dagpipe` compiles and runs the Android graphs
   through `pipeline_runtime`.
 - Black-box parity tests run through the N-API bridge and a JNI `.so`.
+- `daemon.mirror_publish` range closure covers append, rewrite, window-shift,
+  reset, and head-only through the Rust core and TS bridge parity tests.
+- Mirror diff runs only after authoritative mirror capture/commit (server
+  `mirrorBufferChanged`), not on `buffer-head-request` or client reads.
 - The client production path still needs a non-raw-input thin bridge before
   Phase 1 is considered runtime-closed.
 - `dagpipe graph validate` passes for both graphs.

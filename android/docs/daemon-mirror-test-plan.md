@@ -204,6 +204,19 @@ tmux truth
    - 安装态输入与刷新
    - 安装态恢复连接
 
+### daemon mirror no-hole diff 回归
+
+每次改动 daemon mirror diff/classify/plan 或 Rust bridge 后，必须额外覆盖：
+
+- `compute_changed_ranges` 对 append / rewrite / window-shift / reset / head-only
+  的确定性输出。
+- `buffer-sync` 的每个 range 都满足 `startIndex < endIndex`，相邻/重叠 range
+  在 bridge 阶段合并，不得产生带洞 sparse range。
+- diff 只在 authoritative mirror commit 后触发；`buffer-head-request` 和客户端
+  读请求不得触发 body diff。
+- Rust bridge 与 `findChangedIndexedRanges` parity 覆盖 growth、rewrite、
+  4096 行宽改写、64+ 稀疏 range。
+
 6. **session / transport lifecycle**
    - same `clientSessionId` reconnect 复用 daemon logical session
    - inactive tab 只停取数，不 close session / transport
