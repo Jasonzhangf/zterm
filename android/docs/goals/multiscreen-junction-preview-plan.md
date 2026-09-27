@@ -465,7 +465,7 @@ centerRows = floor((viewHeight - edgeRows - gaps - railH) / rowH)
 | D3 | **删除**契约中的 preview 多选字段 | `src/lib/plugin-session-drawer/session-drawer-contract.ts` | 契约与实现一致；`TerminalSessionDrawer.test.tsx` 全绿 |
 | D4 | **删除**抽屉多选相关 props 与 handler | `src/pages/TerminalPage.tsx` | `onPreviewSelectionModeChange` / `onTogglePreviewSession` / `onClearPreviewSelection` / `onPreviewFolder` 全部消失 |
 | D5 | **保留**`WindowGroupLayout`（`RemoteWindowOverlayController` 仍在用），只移除预览路径依赖 | `src/components/terminal/WindowGroupLayout.tsx` | 预览不 import；RemoteWindow 测试全绿 |
-| D6 | **保留**`TerminalPreviewRow`（`TerminalView` 的 secondary 行投影仍在用），只移除预览 tile 的引用 | `src/components/terminal/TerminalPreviewRow.tsx` | `TerminalView` 相关测试全绿 |
+| D6 | **删除**`TerminalPreviewRow`（secondary 行投影已随旧 preview-secondary 一并消融） | `src/components/terminal/TerminalPreviewRow.tsx` | `TerminalView` 相关测试全绿 |
 
 ### 12.5 阶段 E · 治理与门禁
 

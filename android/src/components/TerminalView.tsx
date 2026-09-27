@@ -81,7 +81,6 @@ import type {
 import { SESSION_PREVIEW_RIGHT_EDGE_PX } from "../lib/session-preview-gesture";
 
 import { VisibleRow } from "./terminal/VisibleRow";
-import { TerminalPreviewRow } from "./terminal/TerminalPreviewRow";
 import {
   useMirrorFixedZoomPan,
   type MirrorFixedWheelStep,
@@ -121,7 +120,7 @@ interface TerminalViewProps {
   onCopySelectionDismiss?: () => void;
   splitVisible?: boolean;
   reserveRightEdgeSwipe?: boolean;
-  projectionMode?: "terminal" | "preview-primary" | "preview-secondary";
+  projectionMode?: "terminal" | "preview-primary";
 }
 
 function terminalCellToText(
@@ -234,8 +233,6 @@ function TerminalViewComponent({
 }: TerminalViewProps) {
   const theme = getTerminalThemePreset(themeId);
   const previewProjection = projectionMode !== "terminal";
-  const passivePreviewProjection = projectionMode === "preview-secondary";
-  // Secondary previews are read-only, but their render-store snapshots stay live.
   const refreshActive = live ?? active;
   const sessionBufferSnapshot = useSessionRenderBufferSnapshot(
     sessionBufferStore,
@@ -449,12 +446,7 @@ function TerminalViewComponent({
         clientHeightPx,
         measuredViewportRows,
         minViewportRows: DEFAULT_ROWS,
-        // Secondary previews are passive tail projections. Their visible window
-        // must follow the latest buffer revision without starting interactive
-        // scroll/follow state or a per-tile viewport demand loop.
-        renderBottomIndex: passivePreviewProjection
-          ? effectiveBufferEndIndex
-          : renderBottomIndex,
+        renderBottomIndex,
         followDemandAnchorEndIndex,
         readingMode,
         overscanRows: OVERSCAN_ROWS,
@@ -466,7 +458,6 @@ function TerminalViewComponent({
       effectiveBufferEndIndex,
       followDemandAnchorEndIndex,
       measuredViewportRows,
-      passivePreviewProjection,
       readingMode,
       renderBuffer.gapRanges,
       renderBuffer.revision,
@@ -1360,13 +1351,6 @@ function TerminalViewComponent({
   ]);
 
   useLayoutEffect(() => {
-    if (!passivePreviewProjection || renderBottomIndex === followVisualBottomIndex) {
-      return;
-    }
-    setRenderBottom(followVisualBottomIndex);
-  }, [followVisualBottomIndex, passivePreviewProjection, renderBottomIndex, setRenderBottom]);
-
-  useLayoutEffect(() => {
     if (!consumeFollowResetTrigger()) {
       return;
     }
@@ -1873,23 +1857,7 @@ function TerminalViewComponent({
                 : undefined,
           }}
       >
-        {passivePreviewProjection
-          ? renderRowsWithSignatures.map(({ absoluteIndex, row, isGap }) => {
-              const plainText = terminalRowToText(row);
-              return (
-                <TerminalPreviewRow
-                  key={`preview-row-${absoluteIndex}`}
-                  absoluteIndex={absoluteIndex}
-                  row={row}
-                  isGap={isGap}
-                  rowHeight={resolvedRowHeight || rowHeight}
-                  cellWidthPx={resolvedCellWidthPx}
-                  theme={theme}
-                  plainText={plainText}
-                />
-              );
-            })
-          : renderRowsWithSignatures.map(({ absoluteIndex, row, isGap, renderSignature }, rowIndex) =>
+        {renderRowsWithSignatures.map(({ absoluteIndex, row, isGap, renderSignature }, rowIndex) =>
             (() => {
             const cursorOverlay = resolveCursorOverlay({
               row,

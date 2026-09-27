@@ -215,7 +215,7 @@ Exit: plugins/UI cannot access raw transport/store; no duplicate session/transpo
 
 Production progress:
 - `client.wire_ingress` and `client.buffer_frame_assembly` are active physical owners; `client.sparse_buffer` now owns `src/lib/session-buffer-store.ts` and `client.renderer_window` owns the immutable render projection store. `client.buffer_store` remains the planner/pull/repair orchestrator and no longer owns sparse body or render projection paths.
-- `client.dom_renderer` now owns `TerminalView`, `VisibleRow`, `TerminalPreviewRow`, `useMirrorFixedZoomPan`, `cell-render.ts`, and `theme.ts`; `client.terminal_shell` now owns `TerminalPageStageShell.tsx`, shell skin, status/quickbar/copy/keyboard-lift shell files. Registry/docs/AppSDK maps and the v2 test design are updated in lockstep.
+- `client.dom_renderer` now owns `TerminalView`, `VisibleRow`, `useMirrorFixedZoomPan`, `cell-render.ts`, and `theme.ts`; `client.terminal_shell` now owns `TerminalPageStageShell.tsx`, shell skin, status/quickbar/copy/keyboard-lift shell files. Registry/docs/AppSDK maps and the v2 test design are updated in lockstep.
 - `client.input_normalizer` now owns `src/lib/terminal-input-normalization.ts` and its tests; TerminalPage and TerminalView consume the pure normalizer through registered `client.app_shell -> client.input_normalizer` and `client.dom_renderer -> client.input_normalizer` edges. Registry/docs/wiki/AppSDK maps, ownership tests, prebuild, and CI are updated in lockstep. Review and promotion remain pending; this is a `production_pending_review` slice, not Phase 4 completion.
 
 Exit: source-to-DOM parity passes with no cyclic owner edge.

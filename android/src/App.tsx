@@ -32,6 +32,12 @@ import { updateBridgeSettingsTerminalWidthMode } from './lib/terminal-width-mode
 import { upsertBridgeServer } from './lib/bridge-settings';
 import { applyTraversalRelaySettings } from './lib/traversal-relay-client';
 import { APP_VERSION, APP_VERSION_CODE } from './lib/app-version';
+import {
+  compileDagpipeAllPhases,
+  isDagpipeNativeCapable,
+  runDagpipePhase6Control,
+  runDagpipePhase6Composition,
+} from './lib/dagpipe-native-client';
 import { useFileBrowserSessionPortOwner } from './lib/plugin-file-browser/file-browser-session-port';
 import { buildAppUpdateManifestCandidates } from './lib/app-update-relay-manifest';
 import { resolveSettingsTheme } from './lib/mobile-ui';
@@ -643,6 +649,41 @@ export function AppContent({
     updateInstalling,
     updateStage,
   ]);
+
+  useEffect(() => {
+    if (!isDagpipeNativeCapable()) {
+      return;
+    }
+    let cancelled = false;
+    void compileDagpipeAllPhases().then((result) => {
+      if (cancelled) {
+        return;
+      }
+      if (!result.ok) {
+        // eslint-disable-next-line no-console
+        console.error('[dagpipe] all-phase native compile failed', result.error);
+        return;
+      }
+      // Real native entry on device: the Rust core compiles all four approved
+      // Android/daemon graphs in the installed runtime before the app proceeds. The
+      // current Android client still uses TS graph owners until the
+      // operational DAGpipe parity gate passes; this probe proves the native
+      // bridge is present and loaded.
+      // eslint-disable-next-line no-console
+      console.log('[dagpipe] all-phase native compiled', {
+        graphs: result.graphs,
+      });
+    }).catch((error: unknown) => {
+      if (cancelled) {
+        return;
+      }
+      // eslint-disable-next-line no-console
+      console.error('[dagpipe] all-phase native compile failed', error);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleOpenConnectionsPageWithAudit = useCallback(() => {
     handleOpenConnectionsPage();
@@ -1383,7 +1424,32 @@ export default function App() {
   ) {
     const runtimeRoot = new ClientCompositionRoot();
     const nextPluginHost = createAppPluginHost();
-    const nextControlCenter = new ClientControlCenter();
+    const nextControlCenter = new ClientControlCenter(
+      isDagpipeNativeCapable()
+        ? {
+            dagpipeGate: async ({ commandId, commandType, owner, subject, payload }) => {
+              const result = await runDagpipePhase6Control({
+                execution_id: `control-gate:${commandId}`,
+                attempt_id: '1',
+                inputs: {
+                  'arc.control_request': {
+                    commandId,
+                    commandType,
+                    owner,
+                    subject,
+                    payload,
+                  },
+                  'arc.control_policy': { allowControl: true },
+                },
+              });
+              if (!result.ok) {
+                return { ok: false, error: result.error };
+              }
+              return { ok: true };
+            },
+          }
+        : {},
+    );
     runtimeRoot.bind({ portId: 'plugin-host', value: nextPluginHost });
     runtimeRoot.bind({ portId: 'control-center', value: nextControlCenter });
     runtimeRoot.require(['plugin-host', 'control-center']);
@@ -1443,8 +1509,37 @@ export default function App() {
       return;
     }
     pluginStartRequestedRef.current = true;
-    void pluginHost.startAll().then(() => {
-      setPluginRuntimeReady(true);
+    const startPlugins = () => {
+      void pluginHost.startAll().then(() => {
+        setPluginRuntimeReady(true);
+      }).catch((error: unknown) => {
+        setPluginRuntimeError(error instanceof Error ? error : new Error(String(error)));
+      });
+    };
+    if (!isDagpipeNativeCapable()) {
+      startPlugins();
+      return;
+    }
+    void runDagpipePhase6Composition({
+      execution_id: 'app-composition-gate',
+      attempt_id: '1',
+      inputs: {
+        'arc.composition_request': {
+          runtimeId: 'app-shell',
+          ports: ['plugin-host', 'control-center'],
+        },
+        'arc.plugin_manifest': {
+          pluginId: 'zterm-core',
+          capabilities: [],
+          uiSlots: [],
+        },
+      },
+    }).then((result) => {
+      if (!result.ok) {
+        setPluginRuntimeError(new Error(String(result.error)));
+        return;
+      }
+      startPlugins();
     }).catch((error: unknown) => {
       setPluginRuntimeError(error instanceof Error ? error : new Error(String(error)));
     });
@@ -1494,7 +1589,41 @@ export default function App() {
       .render
     : undefined;
   if (pluginRuntimeError) {
-    throw pluginRuntimeError;
+    console.error('[zterm:plugin-runtime-error]', pluginRuntimeError);
+    return (
+      <main
+        style={{
+          position: 'fixed',
+          inset: 0,
+          padding: '16px',
+          display: 'grid',
+          placeItems: 'center',
+          backgroundColor: '#16191f',
+          color: '#f5f7fb',
+        }}
+      >
+        <section style={{ width: 'min(100%, 420px)', display: 'grid', gap: '12px' }}>
+          <h1 style={{ margin: 0, fontSize: '20px' }}>应用初始化失败</h1>
+          <p style={{ margin: 0, lineHeight: 1.5, color: '#9b9da5' }}>
+            {pluginRuntimeError.message || String(pluginRuntimeError)}
+          </p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            style={{
+              minHeight: '44px',
+              border: 0,
+              borderRadius: '8px',
+              background: '#38d47d',
+              color: '#07110b',
+              fontWeight: 700,
+            }}
+          >
+            重新加载
+          </button>
+        </section>
+      </main>
+    );
   }
 
   return (

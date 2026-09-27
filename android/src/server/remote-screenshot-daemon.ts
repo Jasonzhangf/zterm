@@ -1,10 +1,12 @@
 import { execFile } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { runPhase3Screenshot } from './dagpipe-bridge';
 
 export interface CaptureRemoteScreenshotWithDaemonOptions {
   outputPath: string;
   timeoutMs: number;
+  sessionId?: string;
   windowId?: string;
   rect?: {
     x: number;
@@ -17,6 +19,20 @@ export interface CaptureRemoteScreenshotWithDaemonOptions {
 export async function captureRemoteScreenshotWithDaemon(
   options: CaptureRemoteScreenshotWithDaemonOptions,
 ): Promise<{ outputPath: string }> {
+  const gate = runPhase3Screenshot({
+    execution_id: `remote-screenshot:${Date.now()}`,
+    attempt_id: '1',
+    inputs: {
+      'arc.screenshot_request': {
+        sessionId: options.sessionId || 'daemon-screenshot',
+        outputPath: options.outputPath,
+      },
+      'arc.screenshot_permission': { allowScreenshot: true },
+    },
+  });
+  if (!gate.ok) {
+    throw new Error(`dagpipe screenshot gate rejected capture: ${gate.error}`);
+  }
   return await new Promise<{ outputPath: string }>((resolve, reject) => {
     const daemonBinary = (process.env.ZTERM_DAEMON_NATIVE || '').trim()
       || join(homedir(), '.zterm', 'bin', 'zterm-daemon');

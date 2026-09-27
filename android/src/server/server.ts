@@ -29,7 +29,6 @@ import {
   resolveDaemonTailscaleUpdateManifestUrl,
 } from './daemon-connection-endpoint-runtime';
 import { createTraversalRelayHostClient } from './relay-client';
-import { findChangedIndexedRanges } from './canonical-buffer';
 import { buildBufferHeadPayload, buildChangedRangesBufferSyncPayload } from './buffer-sync-contract';
 import { DEFAULT_TERMINAL_SESSION_VIEWPORT, resolveAttachGeometry } from './mirror-geometry';
 import { createTerminalMirrorCaptureRuntime } from './terminal-mirror-capture';
@@ -90,6 +89,7 @@ import {
 } from './remote-window-stream-daemon';
 import { createTerminalPerformanceTraceStore } from '@zterm/shared/terminal/performance-trace';
 import { createAdaptiveWidthOwnershipStore } from './adaptive-width-ownership-store';
+import { compileAllDagpipePhases, mirrorPublishChangedRanges, runControlDispatch } from './dagpipe-bridge';
 
 const DAEMON_CONFIG = resolveDaemonRuntimeConfig();
 const PORT = DAEMON_CONFIG.port || DEFAULT_BRIDGE_PORT;
@@ -175,6 +175,48 @@ const readDaemonProcessGroup = (pid: string) => new Promise<{
 });
 const MEMORY_GUARD_MAX_RSS_BYTES = 2.5 * 1024 * 1024 * 1024;
 const MEMORY_GUARD_MAX_HEAP_USED_BYTES = 1.5 * 1024 * 1024 * 1024;
+
+const DAGPIPE_COMPILE_RESULT = compileAllDagpipePhases();
+if (!DAGPIPE_COMPILE_RESULT.ok) {
+  throw new Error(`DAGpipe all-phase compile failed: ${DAGPIPE_COMPILE_RESULT.error}`);
+}
+console.log('[server] DAGpipe all-phase operators compiled: native runtime active');
+
+function dispatchControlRequest(request: {
+  commandType: string;
+  commandId: string;
+  correlationId: string;
+  subject: string;
+  capabilities: readonly string[];
+  params: unknown;
+  ownerByCommand: Record<string, string>;
+}): { ok: true; ownerId: string } | { ok: false; code: string; message: string } {
+  const result = runControlDispatch({
+    execution_id: `control-dispatch:${request.commandType}:${Date.now()}`,
+    attempt_id: '1',
+    inputs: {
+      'arc.control_ingress': {
+        commandId: request.commandId,
+        correlationId: request.correlationId,
+        commandType: request.commandType,
+        subject: request.subject,
+        capabilities: request.capabilities,
+        params: request.params,
+      },
+      'arc.capability_policy': {
+        ownerByCommand: request.ownerByCommand,
+      },
+    },
+  });
+  if (!result.ok) {
+    return { ok: false, code: 'dagpipe_control_failed', message: result.error };
+  }
+  const output = result.outputs['arc.control_result'] as { ok: boolean; ownerId?: string };
+  if (!output?.ok || !output.ownerId) {
+    return { ok: false, code: 'dagpipe_control_route_failed', message: 'control dispatch did not produce an owner' };
+  }
+  return { ok: true, ownerId: output.ownerId };
+}
 
 const sessions = new Map<string, TerminalTransportSubscriber>();
 const connections = new Map<string, DaemonTransportConnection>();
@@ -307,12 +349,28 @@ const terminalRuntime = createTerminalRuntime({
   },
   resolveTerminalSessionBackend: (sessionName) => terminalControlRuntime.resolveTerminalSessionBackend(sessionName),
   captureMirrorAuthoritativeBufferFromTmux: terminalMirrorCapture.captureMirrorAuthoritativeBufferFromTmux,
-  mirrorBufferChanged: (mirror, previousStartIndex, previousLines) => findChangedIndexedRanges({
-    previousStartIndex,
-    previousLines,
-    nextStartIndex: mirror.bufferStartIndex,
-    nextLines: mirror.bufferLines,
-  }),
+  mirrorBufferChanged: (mirror, previousStartIndex, previousLines) => {
+    const result = mirrorPublishChangedRanges({
+      sourceReadback: {
+        revision: mirror.revision + 1,
+        bufferStartIndex: mirror.bufferStartIndex,
+        bufferLines: mirror.bufferLines,
+        rows: mirror.rows,
+        cols: mirror.cols,
+        cursorKeysApp: mirror.cursorKeysApp,
+        cursor: mirror.cursor ?? null,
+      },
+      prevMirrorSnapshot: {
+        revision: mirror.revision,
+        bufferStartIndex: previousStartIndex,
+        bufferLines: previousLines,
+      },
+    });
+    if (!result.ok) {
+      throw new Error(`DAGpipe mirror publish failed: ${result.error}`);
+    }
+    return result.ranges;
+  },
   mirrorCursorEqual,
   daemonInputQueue: daemonInputQueueRuntimeProxy,
   autoCommandDelayMs: AUTO_COMMAND_DELAY_MS,
@@ -574,6 +632,7 @@ const terminalMessageRuntime = createTerminalMessageRuntime({
     attachTmux: terminalRuntime.attachTmux,
     handleAdaptiveResize: terminalRuntime.handleAdaptiveResize,
     destroyMirror: terminalRuntime.destroyMirror,
+    dispatchControl: dispatchControlRequest,
   },
 });
 

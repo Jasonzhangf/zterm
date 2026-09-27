@@ -109,4 +109,59 @@ describe('daemon control gateway outcome truth', () => {
     expect(deps.createDetachedTmuxSession).toHaveBeenCalledWith('new-session', undefined, 'tmux');
     expect(gateway.getAuditEntries()[0]?.result).toBe('ok');
   });
+
+  it('returns handler_failed when the DAGpipe dispatch gate rejects the command', async () => {
+    const deps = makeDeps({
+      dispatchControl: () => ({
+        ok: false,
+        code: 'dagpipe_control_failed',
+        message: 'unknown control command unknown-command',
+      }),
+    });
+    const gateway = createDaemonControlGateway(deps);
+
+    const outcome = await gateway.handleScheduleControl(null, {
+      type: 'schedule-delete',
+      payload: { jobId: 'missing-job' },
+    }, null, 'subject-1');
+
+    expect(outcome).toEqual({
+      ok: false,
+      error: {
+        code: 'handler_failed',
+        commandType: 'schedule-delete',
+        message: 'unknown control command unknown-command',
+      },
+    });
+    expect(gateway.getAuditEntries()).toHaveLength(1);
+    expect(gateway.getAuditEntries()[0]?.result).toBe('error');
+    expect(gateway.getAuditEntries()[0]?.commandType).toBe('schedule-delete');
+  });
+
+  it('returns handler_failed when the DAGpipe owner does not match the registered owner', async () => {
+    const deps = makeDeps({
+      dispatchControl: ({ commandType }) => ({
+        ok: true,
+        ownerId: `stale.owner:${commandType}`,
+      }),
+    });
+    const gateway = createDaemonControlGateway(deps);
+
+    const outcome = await gateway.handleTmuxControl(makeConnection(), {
+      type: 'tmux-create-session',
+      payload: { sessionName: 'new-session' },
+    });
+
+    expect(outcome).toEqual({
+      ok: false,
+      error: {
+        code: 'handler_failed',
+        commandType: 'tmux-create-session',
+        message: 'dagpipe route owner mismatch: expected daemon.control_center:tmux-create-session, got stale.owner:tmux-create-session',
+      },
+    });
+    expect(gateway.getAuditEntries()).toHaveLength(1);
+    expect(gateway.getAuditEntries()[0]?.result).toBe('error');
+    expect(gateway.getAuditEntries()[0]?.commandType).toBe('tmux-create-session');
+  });
 });

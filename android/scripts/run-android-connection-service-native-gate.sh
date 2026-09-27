@@ -12,5 +12,6 @@ cd native/android
 source "${ANDROID_ROOT}/scripts/setup-android-java.sh"
 ./gradlew app:testDebugUnitTest \
   --tests com.zterm.android.AndroidConnectionServiceTransportTest \
+  --tests com.zterm.android.AndroidRtcTransportBackendTest \
   assembleDebug \
   --no-daemon

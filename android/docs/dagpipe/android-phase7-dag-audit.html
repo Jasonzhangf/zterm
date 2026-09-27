@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>zterm Android DAGpipe Phase 7 独立审查</title>
+    <style>
+      :root { color-scheme: light; --bg:#f7f7f5; --panel:#ffffff; --ink:#1f2933; --muted:#5b6b79; --line:#d8dee6; --ok:#0f766e; --ok-bg:#ecfdf5; }
+      * { box-sizing:border-box; }
+      body { margin:0; background:var(--bg); color:var(--ink); font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; line-height:1.55; }
+      main { max-width:1100px; margin:0 auto; padding:32px 20px 64px; }
+      header { border-bottom:1px solid var(--line); padding-bottom:20px; margin-bottom:28px; }
+      h1 { font-size:26px; margin:0 0 8px; letter-spacing:0; }
+      h2 { font-size:18px; margin:0 0 12px; letter-spacing:0; }
+      .muted { color:var(--muted); }
+      section { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:18px; margin-bottom:18px; }
+      table { width:100%; border-collapse:collapse; font-size:14px; }
+      th, td { border:1px solid var(--line); padding:8px 10px; text-align:left; vertical-align:top; }
+      th { background:#f0f3f6; }
+      .pass-badge { display:inline-block; background:var(--ok-bg); color:var(--ok); border:1px solid #99f6e4; border-radius:999px; padding:3px 10px; font-size:12px; font-weight:700; }
+      code, pre { font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:0.92em; }
+      .chain { border:1px solid var(--line); border-radius:8px; padding:12px; margin:10px 0; }
+      ol { margin:8px 0 0; padding-left:22px; }
+      ul { margin:8px 0; padding-left:22px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p><span class="pass-badge">独立审查 PASS</span></p>
+        <h1>zterm Android DAGpipe Phase 7 审计：Release / Update / Observability</h1>
+        <p class="muted">审查范围：release-runtime-promotion、release-update-lifecycle、observability-debug 三张图 与 Phase7 Rust/bridge。</p>
+      </header>
+
+      <section>
+        <h2>Review 结论</h2>
+        <table>
+          <tbody>
+            <tr><th>静态 review</th><td>PASS (20260925T185210Z-review-14118-6i2e5x)</td></tr>
+            <tr><th>runtime review</th><td>PASS (20260925T121000Z-review-phase7-runtime-v2)</td></tr>
+            <tr><th>findings</th><td>[]</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>DAG 链路（中文业务语义）</h2>
+        <div class="chain">
+          Release runtime promotion
+          <ol>
+            <li>校验 daemon artifact 摘要</li>
+            <li>提升 daemon artifact</li>
+            <li>安装 runtime home</li>
+            <li>启动 daemon runtime</li>
+          </ol>
+        </div>
+        <div class="chain">
+          Update lifecycle
+          <ol>
+            <li>检查更新</li>
+            <li>下载客户端更新</li>
+            <li>校验下载摘要</li>
+            <li>安装客户端更新</li>
+          </ol>
+        </div>
+        <div class="chain">
+          Observability / Debug
+          <ol>
+            <li>授权 debug 通道</li>
+            <li>采样</li>
+            <li>有界存储</li>
+            <li>导出 / 清理</li>
+          </ol>
+        </div>
+      </section>
+
+      <section>
+        <h2>状态机</h2>
+        <ul>
+          <li>release：构建产物 → 已校验 → 已提升 → 已安装 → 已启动；摘要缺失/不匹配进失败。</li>
+          <li>update：空闲 → 检查中 → 可更新 → 已下载 → 已校验 → 已安装；未授权或摘要缺失进失败。</li>
+          <li>debug：关闭 → 待授权 → 已开启；授权拒绝/会话清理回关闭。</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>验证证据</h2>
+        <ul>
+          <li><code>node android/scripts/validate-dagpipe-graphs.mjs</code> 通过：24 张 graph file。</li>
+          <li><code>cargo test --no-default-features</code> 通过：phase7 10 tests，全部 phase 绿。</li>
+          <li><code>pnpm exec tsc --noEmit</code> 通过。</li>
+          <li><code>pnpm vitest run src/lib/dagpipe-bridge.test.ts</code> 通过：20 tests。</li>
+          <li><code>cargo clippy --no-default-features -- -D warnings</code> 通过。</li>
+        </ul>
+      </section>
+    </main>
+  </body>
+</html>

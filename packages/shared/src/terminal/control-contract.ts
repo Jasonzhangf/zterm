@@ -97,6 +97,11 @@ export type ControlCenterError = (
       readonly commandType: string;
       readonly message: string;
     }
+  | {
+      readonly code: 'gate_failed';
+      readonly commandType: string;
+      readonly message: string;
+    }
 ) & {
   readonly chain?: ControlErrorChain;
 };

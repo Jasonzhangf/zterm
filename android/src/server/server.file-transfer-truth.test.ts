@@ -22,6 +22,10 @@ function readFileTransferBinaryRuntimeSource() {
   return readFileSync(join(process.cwd(), 'src', 'server', 'terminal-file-transfer-binary-runtime.ts'), 'utf8');
 }
 
+function readAttachmentMessageRuntimeSource() {
+  return readFileSync(join(process.cwd(), 'src', 'server', 'terminal-attachment-message-runtime.ts'), 'utf8');
+}
+
 function extractBlock(source: string, anchor: string, length = 1200) {
   const start = source.indexOf(anchor);
   expect(start).toBeGreaterThanOrEqual(0);
@@ -112,5 +116,19 @@ describe('server file-transfer truth gates', () => {
     expect(block).not.toContain('requestRemoteScreenshotViaHelper');
     expect(block).toContain("type: 'file-download-error'");
     expect(block).toContain("logFileTransferRuntimeError('remote screenshot cleanup failed'");
+  });
+
+  it('wires Phase3 file-transfer and attachment gates as thin admission gates', () => {
+    const listSource = readFileTransferListRuntimeSource();
+    const binarySource = readFileTransferBinaryRuntimeSource();
+    const attachmentSource = readAttachmentMessageRuntimeSource();
+
+    expect(listSource).toContain("import { runPhase3FileBrowse, runPhase3Download } from './dagpipe-bridge'");
+    expect(listSource).toContain('dagpipe_file_browse_rejected');
+    expect(listSource).toContain('dagpipe_file_download_rejected');
+    expect(binarySource).toContain("import { runPhase3Upload } from './dagpipe-bridge'");
+    expect(binarySource).toContain('dagpipe_file_upload_rejected');
+    expect(attachmentSource).toContain("import { runPhase3Attachment } from './dagpipe-bridge'");
+    expect(attachmentSource).toContain('attachment_delivery_rejected');
   });
 });

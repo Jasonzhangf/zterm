@@ -3,23 +3,103 @@
   "version": "0.1",
   "inputs": [
     {
-      "id": "arc.account_credentials",
-      "schema": "Object"
-    },
-    {
-      "id": "arc.relay_settings",
-      "schema": "Object"
-    },
-    {
-      "id": "arc.device_capabilities",
-      "schema": "Object"
-    },
-    {
-      "id": "arc.route_policy",
+      "id": "arc.request",
       "schema": "Object"
     }
   ],
   "nodes": [
+    {
+      "id": "dagpipe.extract.arc.account_credentials",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.account_credentials",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.relay_settings",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.relay_settings",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.device_capabilities",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.device_capabilities",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.route_policy",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.route_policy",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
     {
       "id": "login_relay_account",
       "operator": "relay.account_directory.login",
@@ -211,6 +291,31 @@
         "predicate": null
       },
       "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.collect.arc.account_directory,arc.validated_lease,arc.resume_plan",
+      "operator": "dagpipe.result.collect",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.account_directory",
+        "arc.validated_lease",
+        "arc.resume_plan"
+      ],
+      "output": {
+        "id": "arc.result",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
     }
   ],
   "edges": [
@@ -273,11 +378,44 @@
       "from": "bind_daemon_target",
       "to": "resume_bound_target",
       "arc_id": "arc.bound_daemon_target"
+    },
+    {
+      "from": "dagpipe.extract.arc.account_credentials",
+      "to": "login_relay_account",
+      "arc_id": "arc.account_credentials"
+    },
+    {
+      "from": "dagpipe.extract.arc.relay_settings",
+      "to": "login_relay_account",
+      "arc_id": "arc.relay_settings"
+    },
+    {
+      "from": "dagpipe.extract.arc.device_capabilities",
+      "to": "publish_client_device",
+      "arc_id": "arc.device_capabilities"
+    },
+    {
+      "from": "dagpipe.extract.arc.route_policy",
+      "to": "resolve_candidate_routes",
+      "arc_id": "arc.route_policy"
+    },
+    {
+      "from": "project_account_directory",
+      "to": "dagpipe.collect.arc.account_directory,arc.validated_lease,arc.resume_plan",
+      "arc_id": "arc.account_directory"
+    },
+    {
+      "from": "validate_peer_lease",
+      "to": "dagpipe.collect.arc.account_directory,arc.validated_lease,arc.resume_plan",
+      "arc_id": "arc.validated_lease"
+    },
+    {
+      "from": "resume_bound_target",
+      "to": "dagpipe.collect.arc.account_directory,arc.validated_lease,arc.resume_plan",
+      "arc_id": "arc.resume_plan"
     }
   ],
   "outputs": [
-    "arc.account_directory",
-    "arc.validated_lease",
-    "arc.resume_plan"
+    "arc.result"
   ]
 }

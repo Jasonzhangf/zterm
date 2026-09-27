@@ -273,10 +273,9 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
 
   const ensureActiveSessionFresh = (refreshOptions: {
     sessionId: string;
-    source: 'explicit-resume' | 'active-reentry' | 'active-tick';
+    source: 'explicit-resume' | 'foreground-resume' | 'active-reentry' | 'active-tick';
     forceHead?: boolean;
     markResumeTail?: boolean;
-    allowReconnectIfUnavailable?: boolean;
   }) => {
     return ensureActiveSessionFreshRuntime({
       refreshOptions,

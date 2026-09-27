@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>zterm Android 连接逻辑 方案A 单源单汇审批</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f7f7f5;
+        --panel: #ffffff;
+        --ink: #1f2933;
+        --muted: #5b6b79;
+        --line: #d8dee6;
+        --accent: #0f766e;
+        --accent-soft: #ecfdf5;
+        --warn: #b45309;
+        --warn-soft: #fffbeb;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+        line-height: 1.55;
+      }
+      main { max-width: 1180px; margin: 0 auto; padding: 32px 20px 64px; }
+      header { border-bottom: 1px solid var(--line); padding-bottom: 20px; margin-bottom: 28px; }
+      h1 { font-size: 26px; margin: 0 0 8px; letter-spacing: 0; }
+      h2 { font-size: 18px; margin: 0 0 12px; letter-spacing: 0; }
+      .muted { color: var(--muted); }
+      section {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 18px;
+        margin-bottom: 18px;
+      }
+      .mermaid { text-align: center; overflow-x: auto; }
+      .mermaid svg { max-width: 100%; height: auto; }
+      table { width: 100%; border-collapse: collapse; font-size: 14px; }
+      th, td { border: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; }
+      th { background: #f0f3f6; }
+      .badge {
+        display: inline-block;
+        background: var(--accent-soft);
+        color: var(--accent);
+        border: 1px solid #99f6e4;
+        border-radius: 999px;
+        padding: 3px 10px;
+        font-size: 12px;
+        font-weight: 600;
+      }
+      .warn-badge {
+        display: inline-block;
+        background: var(--warn-soft);
+        color: var(--warn);
+        border: 1px solid #fcd34d;
+        border-radius: 999px;
+        padding: 3px 10px;
+        font-size: 12px;
+        font-weight: 600;
+      }
+      ul, ol { margin: 8px 0; padding-left: 22px; }
+      .check { color: var(--accent); font-weight: 700; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p><span class="badge">方案A 设计审批</span> <span class="warn-badge">RTC 基础模块可用</span></p>
+        <h1>zterm Android 连接逻辑：单源单汇与 RTC 基础模块</h1>
+        <p class="muted">
+          本页审批的是连接逻辑的单源单汇结构：一个连接请求进入，一个连接结果退出；
+          路由层级为 LAN &gt; UDP direct &gt; Tailscale &gt; Relay；
+          RTC 作为可用的基础传输模块，不能退回 webrtc-not-supported。
+        </p>
+      </header>
+
+      <section>
+        <h2>单源单汇连接逻辑（竖向）</h2>
+        <div class="mermaid">
+          flowchart TB
+            entry["单源：客户端连接请求"]
+            creds["提取账号凭据"]
+            relay["提取 Relay 设置"]
+            targets["提取目标候选"]
+            demands["提取会话需求集合"]
+            policy["提取连接策略"]
+            login["登录 Relay 账号"]
+            publish["发布本机设备"]
+            resolve["解析目标线路并按 LAN / UDP direct / Tailscale / Relay 分层"]
+            establish["建立物理连接（WebSocket 或 RTC）"]
+            mux["协商 mux"]
+            channels["打开会话通道"]
+            subscribe["订阅会话正文"]
+            maintain["维持连接健康与网络代际"]
+            recover["规划恢复 / 重连"]
+            out["单汇：连接结果（健康 / 恢复计划 / 订阅事实）"]
+            entry --> creds
+            entry --> relay
+            entry --> targets
+            entry --> demands
+            entry --> policy
+            creds --> login
+            relay --> login
+            login --> publish
+            publish --> resolve
+            targets --> resolve
+            policy --> resolve
+            resolve --> establish
+            establish --> mux
+            mux --> channels
+            demands --> channels
+            policy --> channels
+            channels --> subscribe
+            demands --> subscribe
+            subscribe --> maintain
+            establish --> maintain
+            mux --> maintain
+            policy --> maintain
+            maintain --> recover
+            resolve --> recover
+            policy --> recover
+            maintain --> out
+            recover --> out
+            subscribe --> out
+        </div>
+        <table>
+          <thead>
+            <tr><th>规则</th><th>语义</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>单源</td>
+              <td>唯一入口是客户端连接请求；账号、目标、策略、会话需求都从同一请求提取，不从 UI 生命周期另开入口。</td>
+            </tr>
+            <tr>
+              <td>单汇</td>
+              <td>唯一出口是连接结果；维持、恢复、订阅都投影到同一个结果，UI 不直接持有 transport 真源。</td>
+            </tr>
+            <tr>
+              <td>路由层级</td>
+              <td>目标 Auto 顺序为 LAN &gt; UDP direct &gt; Tailscale &gt; Relay；IPv4/IPv6 是 UDP direct 内部地址族，不是独立层级。</td>
+            </tr>
+            <tr>
+              <td>健康只做同层排序</td>
+              <td>持久化成功不能越过更高层级；只有同一层级内才按健康分和 RTT 排序。</td>
+            </tr>
+            <tr>
+              <td>RTC 基础模块</td>
+              <td>RTC direct / TURN relay 是已实现且可运行的传输模块；Native Service 不能以 webrtc-not-supported 拒绝 RTC 目标。</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>RTC 与 WebSocket 候选推进（竖向）</h2>
+        <div class="mermaid">
+          flowchart TB
+            plan["候选线路计划"]
+            tier["按层级取最高可尝试层"]
+            race["WebSocket 批 + rtc-direct 并行竞速"]
+            direct_ws["LAN / Tailscale WebSocket"]
+            rtc_direct["UDP direct RTC"]
+            check["首个 open 胜出，其余关闭"]
+            fail["整批失败后推进下一层"]
+            tailscale["Tailscale 仍可尝试时不得启动 Relay"]
+            relay["TURN Relay / rtc-relay"]
+            open["连接已建立"]
+            plan --> tier
+            tier --> race
+            race --> direct_ws
+            race --> rtc_direct
+            direct_ws --> check
+            rtc_direct --> check
+            check --> open
+            check --> fail
+            fail --> tailscale
+            tailscale --> relay
+            relay --> open
+            relay --> fail
+        </div>
+        <p class="muted">
+          关键约束：rtc-direct 失败只推进候选批次，不直接跳到 Relay；
+          Tailscale WebSocket 仍可尝试时 Relay 必须等待，避免“Tailscale 已连上仍选 Relay”。
+        </p>
+      </section>
+
+      <section>
+        <h2>连接状态机（竖向）</h2>
+        <div class="mermaid">
+          stateDiagram-v2
+            [*] --> idle
+            idle --> resolving_target : 绑定目标 / 服务启动
+            resolving_target --> connecting : 路由分层完成
+            connecting --> mux_ready : 物理连接 open
+            mux_ready --> channels_ready : mux 协商完成
+            channels_ready --> healthy : 通道打开并订阅正文
+            healthy --> backoff_reconnect : 心跳丢失 / 物理关闭
+            connecting --> backoff_reconnect : 候选全部失败
+            mux_ready --> backoff_reconnect : 确认超时
+            backoff_reconnect --> connecting : backoff 定时器触发
+            connecting --> authentication_error : 认证失败
+            connecting --> terminal_error : 不可恢复物理错误
+            authentication_error --> [*]
+            terminal_error --> [*]
+            healthy --> [*] : 显式 release
+            channels_ready --> [*] : 显式 release
+        </div>
+        <p class="muted">
+          backoff-reconnect 由连接服务 timer 驱动，不依赖 UI 生命周期；
+          认证失败停止自动重连；显式 release 是唯一回到 idle / 终态的 UI 入口。
+        </p>
+      </section>
+
+      <section>
+        <h2>验证证据</h2>
+        <ul>
+          <li>TS 路由层级修复：`route-selector.ts` tier 优先排序，`socket.ts` Relay 不抢跑。</li>
+          <li>回归测试：`does not start TURN relay while a selectable Tailscale websocket is still racing`。</li>
+          <li>Rust core parity：`resolve_routes` 同层排序，phase1 通过。</li>
+          <li>门禁：`test:traversal` 76 passed；`test:dagpipe-phase1` Rust + vitest + phase0 通过。</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>待实现</h2>
+        <ul>
+          <li>Native AndroidConnectionService 增加可用的 RTC backend，消除 webrtc-not-supported 终端错误。</li>
+          <li>Native Auto 候选顺序收敛到 LAN &gt; UDP direct &gt; Tailscale &gt; Relay，与 TS 同源。</li>
+          <li>方案A接线后，Android 原生连接服务成为唯一物理连接 owner；TS TraversalSocket 仅保留非 Android / 过渡路径。</li>
+        </ul>
+      </section>
+
+      <script type="module">
+        import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+        mermaid.initialize({
+          startOnLoad: true,
+          securityLevel: "loose",
+          theme: "neutral",
+          flowchart: {
+            curve: "basis",
+            nodeSpacing: 34,
+            rankSpacing: 52,
+          },
+          themeVariables: {
+            primaryColor: "#ecfdf5",
+            primaryBorderColor: "#99f6e4",
+            primaryTextColor: "#1f2933",
+            lineColor: "#94a3b8",
+          },
+        });
+      </script>
+    </main>
+  </body>
+</html>

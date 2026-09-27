@@ -30,11 +30,13 @@ import java.net.InterfaceAddress;
 import java.net.NetworkInterface;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -64,7 +66,6 @@ import okio.ByteString;
  *   - Activity/WebView lifecycle
  *   - terminal channel business payload
  *   - buffer/render/input/file/remote-window semantics
- *   - WebRTC native signaling (explicit webrtc-not-supported error)
  *
  * UI/React consumes snapshots and typed server-frame/channel events. The only
  * UI command that may change route behavior is
@@ -95,6 +96,9 @@ public class AndroidConnectionService extends Service {
     static final int SEND_RETRY_MAX = 3;
     static final long SEND_RETRY_DELAY_MS = 200L;
     static final long PHYSICAL_ERROR_DEBOUNCE_MS = 5_000L;
+    static final long WEBSOCKET_CANDIDATE_TIMEOUT_MS = 1_800L;
+    static final long RTC_DIRECT_CANDIDATE_TIMEOUT_MS = 6_000L;
+    static final long RTC_RELAY_CANDIDATE_TIMEOUT_MS = 2_500L;
     private static final int MUX_PROTOCOL_VERSION = 1;
     private static final int MAX_NOTIFICATION_SESSION_ACTIONS = 3;
     private static final int NOTIFICATION_PULSE_UPDATES = 6;
@@ -844,6 +848,7 @@ public class AndroidConnectionService extends Service {
         volatile AndroidConnectionServiceRoutePolicy routePolicy;
         volatile AndroidConnectionStateMachine stateMachine;
         volatile WebSocket socket;
+        volatile AndroidRtcTransportBackend rtcBackend;
         volatile String generation;
         volatile int candidateIndex;
         volatile long nextRetryAt;
@@ -856,6 +861,7 @@ public class AndroidConnectionService extends Service {
         volatile long transportNetworkGeneration;
         volatile boolean stopped;
         volatile boolean sendRetryPending;
+        volatile Runnable candidateTimeout;
         private final java.util.Set<String> drainingPendingFrames =
             new java.util.HashSet<>();
         private final java.util.ArrayDeque<DeferredSend> retryDeferredFrames =
@@ -911,13 +917,6 @@ public class AndroidConnectionService extends Service {
                 return;
             }
             ensureStateMachine();
-            if (routePolicy.mode == AndroidConnectionServiceRoutePolicy.Mode.MANUAL
-                && (routePolicy.path == AndroidConnectionServiceRoutePolicy.Path.RTC_DIRECT
-                    || routePolicy.path == AndroidConnectionServiceRoutePolicy.Path.RTC_RELAY)) {
-                terminalFailure("webrtc-not-supported",
-                    "WebRTC route requires a separate native WebRTC owner slice");
-                return;
-            }
             String nextGeneration = "gen-" + UUID.randomUUID();
             if (!stateMachine.dispatch(AndroidConnectionServiceEvent.transportOpening(nextGeneration),
                 System.currentTimeMillis())) {
@@ -953,12 +952,157 @@ public class AndroidConnectionService extends Service {
                 transportFailure("no-route-candidates", "no usable route candidate");
                 return;
             }
+            scheduleCandidateTimeout(candidate);
+            if (candidate.rtc) {
+                openRtcCandidate(candidate);
+                return;
+            }
             Request request = new Request.Builder().url(candidate.url).build();
             try {
                 socket = httpClient.newWebSocket(request, this);
                 Log.i(TAG, "opening " + candidate.path + " for " + target.targetKey);
             } catch (RuntimeException error) {
                 transportFailure("websocket-open-rejected", String.valueOf(error.getMessage()));
+            }
+        }
+
+        private void scheduleCandidateTimeout(RouteCandidate candidate) {
+            clearCandidateTimeout();
+            final String timeoutGeneration = generation;
+            final long timeoutNetworkGeneration = networkGeneration;
+            Runnable timeout = () -> {
+                if (stopped || generation == null || !generation.equals(timeoutGeneration)
+                    || transportNetworkGeneration != timeoutNetworkGeneration
+                    || !isConnectingState()) {
+                    return;
+                }
+                transportFailure("candidate-timeout", candidate.path + " candidate timeout");
+            };
+            candidateTimeout = timeout;
+            workerHandler.postDelayed(timeout, candidateTimeoutMs(candidate));
+        }
+
+        private void clearCandidateTimeout() {
+            Runnable timeout = candidateTimeout;
+            candidateTimeout = null;
+            if (timeout != null) {
+                workerHandler.removeCallbacks(timeout);
+            }
+        }
+
+        private long candidateTimeoutMs(RouteCandidate candidate) {
+            if (!candidate.rtc) {
+                return WEBSOCKET_CANDIDATE_TIMEOUT_MS;
+            }
+            return "rtc-relay".equals(candidate.path)
+                ? RTC_RELAY_CANDIDATE_TIMEOUT_MS
+                : RTC_DIRECT_CANDIDATE_TIMEOUT_MS;
+        }
+
+        private void openRtcCandidate(RouteCandidate candidate) {
+            final AndroidRtcTransportBackend[] holder = new AndroidRtcTransportBackend[1];
+            AndroidRtcTransportBackend backend = new AndroidRtcTransportBackend(
+                AndroidConnectionService.this,
+                httpClient,
+                candidate.signalUrl,
+                candidate.iceServers,
+                candidate.iceTransportPolicy,
+                !"rtc-relay".equals(candidate.path),
+                new AndroidRtcTransportBackend.Listener() {
+                    private AndroidRtcTransportBackend self() {
+                        return holder[0];
+                    }
+
+                    @Override
+                    public void onRtcOpen() {
+                        workerHandler.post(() -> {
+                            if (stopped || rtcBackend != self() || generation == null
+                                || transportNetworkGeneration != networkGeneration) {
+                                return;
+                            }
+                            clearCandidateTimeout();
+                            stateMachine.dispatch(AndroidConnectionServiceEvent.transportResolved(
+                                generation,
+                                candidate.path,
+                                resolvedRelayTransportFor(candidate),
+                                endpointFor(candidate),
+                                null), System.currentTimeMillis());
+                            sendMuxHello();
+                            scheduleHeartbeat();
+                            scheduleBackoffReset();
+                        });
+                    }
+
+                    @Override
+                    public void onRtcText(String text) {
+                        workerHandler.post(() -> {
+                            if (stopped || rtcBackend != self() || generation == null
+                                || transportNetworkGeneration != networkGeneration) {
+                                return;
+                            }
+                            try {
+                                handleServerText(text);
+                            } catch (JSONException | IllegalArgumentException error) {
+                                transportFailure("invalid-mux-frame", String.valueOf(error.getMessage()));
+                            }
+                        });
+                    }
+
+                    @Override
+                    public void onRtcError(String message) {
+                        workerHandler.post(() -> {
+                            if (stopped || rtcBackend != self() || generation == null
+                                || transportNetworkGeneration != networkGeneration) {
+                                return;
+                            }
+                            transportFailure("rtc", message);
+                        });
+                    }
+
+                    @Override
+                    public void onRtcClosed(int code, String reason) {
+                        workerHandler.post(() -> {
+                            if (stopped || rtcBackend != self() || generation == null
+                                || transportNetworkGeneration != networkGeneration) {
+                                return;
+                            }
+                            if (isAuthRtcClose(code, reason)) {
+                                authFailure("auth-close-" + code, reason == null ? "rtc signaling auth closed" : reason);
+                            } else {
+                                transportFailure("rtc-closed-" + code, reason);
+                            }
+                        });
+                    }
+
+                    @Override
+                    public void onRtcSelectedIcePair(String json) {
+                        workerHandler.post(() -> {
+                            if (stopped || rtcBackend != self() || generation == null
+                                || transportNetworkGeneration != networkGeneration) {
+                                return;
+                            }
+                            stateMachine.dispatch(AndroidConnectionServiceEvent.transportResolved(
+                                generation,
+                                candidate.path,
+                                resolvedRelayTransportFor(candidate),
+                                endpointFor(candidate),
+                                json), System.currentTimeMillis());
+                        });
+                    }
+                });
+            holder[0] = backend;
+            rtcBackend = backend;
+            Log.i(TAG, "opening " + candidate.path + " rtc for " + target.targetKey);
+            try {
+                backend.open();
+            } catch (RuntimeException error) {
+                workerHandler.post(() -> {
+                    if (stopped || rtcBackend != backend || generation == null
+                        || transportNetworkGeneration != networkGeneration) {
+                        return;
+                    }
+                    transportFailure("rtc-open-rejected", String.valueOf(error.getMessage()));
+                });
             }
         }
 
@@ -983,27 +1127,126 @@ public class AndroidConnectionService extends Service {
 
         private List<RouteCandidate> buildCandidates() {
             List<RouteCandidate> candidates = new ArrayList<>();
+            Set<String> seenUrls = new HashSet<>();
             if (routePolicy.mode == AndroidConnectionServiceRoutePolicy.Mode.MANUAL) {
-                addCandidate(candidates, routePolicy.path);
+                if (routePolicy.path == AndroidConnectionServiceRoutePolicy.Path.RTC_DIRECT
+                    || routePolicy.path == AndroidConnectionServiceRoutePolicy.Path.RTC_RELAY) {
+                    addRtcCandidate(candidates, routePolicy.path);
+                } else {
+                    addCandidate(candidates, seenUrls, routePolicy.path);
+                }
                 return candidates;
             }
             if (isLocalLanHost(target.lanHost)) {
-                addCandidate(candidates, AndroidConnectionServiceRoutePolicy.Path.LAN);
+                addCandidate(candidates, seenUrls, AndroidConnectionServiceRoutePolicy.Path.LAN);
             }
-            addCandidate(candidates, AndroidConnectionServiceRoutePolicy.Path.TAILSCALE);
-            addCandidate(candidates, AndroidConnectionServiceRoutePolicy.Path.IPV6);
-            addCandidate(candidates, AndroidConnectionServiceRoutePolicy.Path.IPV4);
+            addCandidate(candidates, seenUrls, AndroidConnectionServiceRoutePolicy.Path.IPV4);
+            addCandidate(candidates, seenUrls, AndroidConnectionServiceRoutePolicy.Path.IPV6);
+            addRtcCandidate(candidates, AndroidConnectionServiceRoutePolicy.Path.RTC_DIRECT);
+            addCandidate(candidates, seenUrls, AndroidConnectionServiceRoutePolicy.Path.TAILSCALE);
+            addRtcCandidate(candidates, AndroidConnectionServiceRoutePolicy.Path.RTC_RELAY);
             return candidates;
         }
 
+        private void addRtcCandidate(List<RouteCandidate> candidates,
+                                     AndroidConnectionServiceRoutePolicy.Path path) {
+            String rtcHostId = rtcHostId();
+            if (!nonEmpty(target.signalUrl) || !nonEmpty(rtcHostId)) {
+                return;
+            }
+            JSONArray servers = new JSONArray();
+            String policy = "all";
+            if (path == AndroidConnectionServiceRoutePolicy.Path.RTC_RELAY) {
+                policy = "relay";
+                try {
+                    if (nonEmpty(target.turnUrl)) {
+                        JSONObject server = new JSONObject();
+                        server.put("urls", new JSONArray().put(target.turnUrl));
+                        if (nonEmpty(target.turnUsername)) {
+                            server.put("username", target.turnUsername);
+                        }
+                        if (nonEmpty(target.turnCredential)) {
+                            server.put("credential", target.turnCredential);
+                        }
+                        servers.put(server);
+                    } else {
+                        return;
+                    }
+                } catch (JSONException error) {
+                    Log.w(TAG, "invalid relay turn configuration", error);
+                    return;
+                }
+            } else {
+                try {
+                    addDirectIceServers(servers);
+                } catch (JSONException error) {
+                    Log.w(TAG, "invalid default stun configuration", error);
+                    return;
+                }
+            }
+            String signal = appendQuery(target.signalUrl, "hostId", rtcHostId);
+            if (nonEmpty(target.relayDeviceId)) {
+                signal = appendQuery(signal, "deviceId", target.relayDeviceId);
+            }
+            if (target.signalUrlFromRelay) {
+                if (nonEmpty(target.signalToken)) {
+                    signal = appendQuery(signal, "token", target.signalToken);
+                }
+            } else if (nonEmpty(target.authToken)) {
+                signal = appendQuery(signal, "token", target.authToken);
+            }
+            candidates.add(new RouteCandidate(path.wireName(), signal, true, signal,
+                servers, policy));
+        }
+
+        private String rtcHostId() {
+            return nonEmpty(target.relayHostId) ? target.relayHostId : target.daemonHostId;
+        }
+
+        private void addDirectIceServers(JSONArray servers) throws JSONException {
+            if (nonEmpty(target.turnUrl)) {
+                String stunUrl = target.turnUrl
+                    .replaceFirst("(?i)^turns:", "stuns:")
+                    .replaceFirst("(?i)^turn:", "stun:")
+                    .replaceFirst("\\?.*$", "");
+                if (!stunUrl.equals(target.turnUrl)
+                    && (stunUrl.startsWith("stun:") || stunUrl.startsWith("stuns:"))) {
+                    servers.put(new JSONObject().put("urls", new JSONArray().put(stunUrl)));
+                }
+            }
+            for (String url : java.util.Arrays.asList(
+                "stun:stun.l.google.com:19302",
+                "stun:stun1.l.google.com:19302",
+                "stun:stun2.l.google.com:19302",
+                "stun:stun.cloudflare.com:3478")) {
+                servers.put(new JSONObject().put("urls", new JSONArray().put(url)));
+            }
+        }
+
+        private String appendQuery(String url, String key, String value) {
+            try {
+                URI uri = new URI(url);
+                String query = uri.getRawQuery();
+                String encoded = encodeQuery(value);
+                String nextQuery = query == null || query.isEmpty()
+                    ? key + "=" + encoded : query + "&" + key + "=" + encoded;
+                return new URI(uri.getScheme(), uri.getUserInfo(), uri.getHost(), uri.getPort(),
+                    uri.getPath(), nextQuery, uri.getFragment()).toString();
+            } catch (URISyntaxException error) {
+                Log.w(TAG, "invalid rtc signal url: " + error.getMessage());
+                return url;
+            }
+        }
+
         private void addCandidate(List<RouteCandidate> candidates,
+                                  Set<String> seenUrls,
                                   AndroidConnectionServiceRoutePolicy.Path path) {
             String host = hostFor(path);
             if (host == null || host.trim().isEmpty()) {
                 return;
             }
             String url = buildWebSocketUrl(host, target.bridgePort, target.authToken);
-            if (url != null) {
+            if (url != null && seenUrls.add(url)) {
                 candidates.add(new RouteCandidate(path.wireName(), url));
             }
         }
@@ -1023,6 +1266,13 @@ public class AndroidConnectionService extends Service {
                 case IPV4:
                     if (nonEmpty(target.ipv4Host)) return target.ipv4Host;
                     if (!isLikelyTailscale(target.bridgeHost) && !isLikelyIpv6(target.bridgeHost)) {
+                        return target.bridgeHost;
+                    }
+                    return null;
+                case RTC_DIRECT:
+                    return null;
+                case RTC_RELAY:
+                    if (nonEmpty(target.relayHostId) && nonEmpty(target.bridgeHost)) {
                         return target.bridgeHost;
                     }
                     return null;
@@ -1107,6 +1357,7 @@ public class AndroidConnectionService extends Service {
                 closeQuietly(webSocket);
                 return;
             }
+            clearCandidateTimeout();
             sendMuxHello();
             scheduleHeartbeat();
             scheduleBackoffReset();
@@ -1159,8 +1410,7 @@ public class AndroidConnectionService extends Service {
             }
             String reasonText = reason == null ? "closed" : reason;
             // Auth close codes: 4001=bridge token, 4003=auth, 4401=unauthorized, 4403=forbidden
-            if (code == 4001 || code == 4003 || code == 4401 || code == 4403
-                    || reasonText.toLowerCase(java.util.Locale.ROOT).matches(".*(unauthorized|forbidden|token.*invalid|auth.*fail).*")) {
+            if (isAuthRtcClose(code, reasonText)) {
                 authFailure("auth-close-" + code, reasonText);
                 return;
             }
@@ -1188,7 +1438,7 @@ public class AndroidConnectionService extends Service {
 
         private void scheduleHeartbeat() {
             workerHandler.postDelayed(() -> {
-                if (stopped || generation == null || socket == null) {
+                if (stopped || generation == null || (socket == null && rtcBackend == null)) {
                     return;
                 }
                 heartbeatTick();
@@ -1362,8 +1612,9 @@ public class AndroidConnectionService extends Service {
 
         private void send(JSONObject frame, SendGate gate) {
             WebSocket current = socket;
-            if (current == null || generation == null
-                || transportNetworkGeneration != networkGeneration) {
+            AndroidRtcTransportBackend currentRtc = rtcBackend;
+            if (generation == null || transportNetworkGeneration != networkGeneration
+                || (current == null && currentRtc == null)) {
                 return;
             }
             // Route all target-level sends through the generation-fenced retry owner.
@@ -1371,7 +1622,7 @@ public class AndroidConnectionService extends Service {
             // before escalating to transportFailure. This means mux hello, heartbeat,
             // and any other target-level frames all receive the same retry treatment.
             attemptSendWithRetry(frame, null, null, false, gate,
-                current, generation, transportNetworkGeneration, null, 1);
+                current, currentRtc, generation, transportNetworkGeneration, null, 1);
         }
 
         private void sendOrQueue(JSONObject frame, String channelId,
@@ -1383,11 +1634,12 @@ public class AndroidConnectionService extends Service {
                                  AndroidConnectionCommand source,
                                  boolean requireOpenedChannel) {
             WebSocket current = socket;
+            AndroidRtcTransportBackend currentRtc = rtcBackend;
             if (stopped) {
                 publishFrameRejected(source, "frame-dropped-transport-retired", "target stopped");
                 return;
             }
-            if (current != null && generation != null
+            if ((current != null || currentRtc != null) && generation != null
                 && transportNetworkGeneration == networkGeneration
                 && isMuxReady()
                 && (channelId == null
@@ -1396,7 +1648,7 @@ public class AndroidConnectionService extends Service {
                     && source.type == AndroidConnectionCommand.Type.CLOSE_CHANNEL;
                 if (!sendRetryPending || isChannelClose) {
                     attemptSendWithRetry(frame, channelId, source, requireOpenedChannel, SendGate.MUX_READY,
-                        current, generation, transportNetworkGeneration,
+                        current, currentRtc, generation, transportNetworkGeneration,
                         channelLifecycleEpoch(channelId), 1);
                     return;
                 }
@@ -1459,6 +1711,7 @@ public class AndroidConnectionService extends Service {
             boolean requireOpenedChannel,
             SendGate gate,
             WebSocket retrySocket,
+            AndroidRtcTransportBackend retryRtcBackend,
             String retryGeneration,
             long retryNetworkGeneration,
             Long retryLifecycleEpoch,
@@ -1468,7 +1721,9 @@ public class AndroidConnectionService extends Service {
             Long currentLifecycleEpoch = channelLifecycleEpoch(channelId);
             boolean channelRetired = safeRetryChannelId != null && !safeRetryChannelId.isEmpty()
                 && !java.util.Objects.equals(retryLifecycleEpoch, currentLifecycleEpoch);
-            if (stopped || channelRetired || socket != retrySocket || generation == null
+            if (stopped || channelRetired
+                || (socket != retrySocket || rtcBackend != retryRtcBackend)
+                || generation == null
                 || !retryGeneration.equals(generation)
                 || retryNetworkGeneration != transportNetworkGeneration
                 || retryNetworkGeneration != networkGeneration
@@ -1491,7 +1746,10 @@ public class AndroidConnectionService extends Service {
                 return;
             }
             try {
-                if (retrySocket.send(frame.toString())) {
+                boolean sent = retryRtcBackend != null
+                    ? retryRtcBackend.sendText(frame.toString())
+                    : retrySocket != null && retrySocket.send(frame.toString());
+                if (sent) {
                     sendRetryPending = false;
                     consumeSuccessfulRetryFrame(frame, safeRetryChannelId);
                     java.util.ArrayDeque<JSONObject> sameChannelQueue =
@@ -1517,6 +1775,7 @@ public class AndroidConnectionService extends Service {
                             deferred.requireOpenedChannel,
                             deferred.gate,
                             retrySocket,
+                            retryRtcBackend,
                             retryGeneration,
                             retryNetworkGeneration,
                                 deferred.lifecycleEpoch,
@@ -1558,6 +1817,7 @@ public class AndroidConnectionService extends Service {
                 requireOpenedChannel,
                 gate,
                 retrySocket,
+                retryRtcBackend,
                 retryGeneration,
                 retryNetworkGeneration,
                 scheduledLifecycleEpoch,
@@ -1649,7 +1909,8 @@ public class AndroidConnectionService extends Service {
 
         private void drainPendingFrames(String channelId) {
             WebSocket current = socket;
-            if (current == null || generation == null
+            AndroidRtcTransportBackend currentRtc = rtcBackend;
+            if ((current == null && currentRtc == null) || generation == null
                 || transportNetworkGeneration != networkGeneration) {
                 return;
             }
@@ -1664,7 +1925,7 @@ public class AndroidConnectionService extends Service {
                 while (!queue.isEmpty()) {
                     JSONObject frame = queue.peekFirst();
                     attemptSendWithRetry(frame, channelId, null, false, SendGate.MUX_READY,
-                        current, generation, transportNetworkGeneration,
+                        current, currentRtc, generation, transportNetworkGeneration,
                         channelLifecycleEpoch(channelId), 1);
                     if (sendRetryPending) {
                         // Retry scheduled; keep frame at head of queue for next drain.
@@ -1946,6 +2207,7 @@ public class AndroidConnectionService extends Service {
             if (stopped || generation == null) {
                 return;
             }
+            clearCandidateTimeout();
             long nowMillis = System.currentTimeMillis();
             if (physicalErrorFirstAtMillis == 0L) {
                 physicalErrorFirstAtMillis = nowMillis;
@@ -1956,11 +2218,13 @@ public class AndroidConnectionService extends Service {
             if (isConnectingState() && hasNextCandidate()) {
                 closeQuietly(socket);
                 socket = null;
+                closeRtcQuietly();
                 openCandidate();
                 return;
             }
             closeQuietly(socket);
             socket = null;
+            closeRtcQuietly();
             String failedGeneration = generation;
             generation = null;
             stateMachine.dispatch(AndroidConnectionServiceEvent.transportFailure(
@@ -1999,8 +2263,10 @@ public class AndroidConnectionService extends Service {
             if (stopped || generation == null) {
                 return;
             }
+            clearCandidateTimeout();
             closeQuietly(socket);
             socket = null;
+            closeRtcQuietly();
             String failedGeneration = generation;
             generation = null;
             stateMachine.dispatch(AndroidConnectionServiceEvent.terminalFailure(
@@ -2013,8 +2279,10 @@ public class AndroidConnectionService extends Service {
             if (stopped || generation == null) {
                 return;
             }
+            clearCandidateTimeout();
             closeQuietly(socket);
             socket = null;
+            closeRtcQuietly();
             String failedGeneration = generation;
             generation = null;
             stateMachine.dispatch(AndroidConnectionServiceEvent.authenticationFailure(
@@ -2034,8 +2302,10 @@ public class AndroidConnectionService extends Service {
         }
 
         private void resetAttemptState() {
+            clearCandidateTimeout();
             generation = null;
             socket = null;
+            rtcBackend = null;
             candidateIndex = 0;
             backoffIndex = 0;
             heartbeatMisses = 0;
@@ -2048,16 +2318,19 @@ public class AndroidConnectionService extends Service {
 
         void close(String reason) {
             stopped = true;
+            clearCandidateTimeout();
             desiredChannels.clear();
             pendingFrames.clear();
             retryDeferredFrames.clear();
             droppedFrames.clear();
             closeQuietly(socket);
             socket = null;
+            closeRtcQuietly();
             generation = null;
         }
 
         private void closeCurrent(String reason) {
+            clearCandidateTimeout();
             WebSocket current = socket;
             socket = null;
             if (current != null) {
@@ -2066,6 +2339,15 @@ public class AndroidConnectionService extends Service {
                 } catch (RuntimeException ignored) {
                     current.cancel();
                 }
+            }
+            closeRtcQuietly();
+        }
+
+        private void closeRtcQuietly() {
+            AndroidRtcTransportBackend current = rtcBackend;
+            rtcBackend = null;
+            if (current != null) {
+                current.closeQuietly("service close");
             }
         }
 
@@ -2114,10 +2396,23 @@ public class AndroidConnectionService extends Service {
     private static final class RouteCandidate {
         final String path;
         final String url;
+        final boolean rtc;
+        final String signalUrl;
+        final JSONArray iceServers;
+        final String iceTransportPolicy;
 
         RouteCandidate(String path, String url) {
+            this(path, url, false, null, null, null);
+        }
+
+        RouteCandidate(String path, String url, boolean rtc, String signalUrl,
+                       JSONArray iceServers, String iceTransportPolicy) {
             this.path = path;
             this.url = url;
+            this.rtc = rtc;
+            this.signalUrl = signalUrl;
+            this.iceServers = iceServers;
+            this.iceTransportPolicy = iceTransportPolicy;
         }
     }
 
@@ -2129,6 +2424,56 @@ public class AndroidConnectionService extends Service {
 
     private static boolean nonEmpty(String value) {
         return value != null && !value.trim().isEmpty();
+    }
+
+    private static boolean isAuthCloseCode(int code) {
+        return code == 4001 || code == 4003 || code == 4401 || code == 4403
+            || code == 401 || code == 403;
+    }
+
+    static boolean isAuthRtcClose(int code, String reason) {
+        return isAuthCloseCode(code) || isAuthLikeReason(reason);
+    }
+
+    private static boolean isAuthLikeReason(String reason) {
+        if (reason == null || reason.trim().isEmpty()) {
+            return false;
+        }
+        return reason.toLowerCase(Locale.ROOT).matches(
+            ".*(unauthorized|forbidden|token.*invalid|auth.*fail).*");
+    }
+
+    private static String resolvedRelayTransportFor(RouteCandidate candidate) {
+        if (candidate == null || !candidate.rtc) {
+            return null;
+        }
+        if ("rtc-relay".equals(candidate.path)) {
+            return "turn";
+        }
+        if ("rtc-direct".equals(candidate.path)) {
+            return "direct";
+        }
+        return null;
+    }
+
+    private static String endpointFor(RouteCandidate candidate) {
+        if (candidate == null) {
+            return null;
+        }
+        String url = candidate.rtc ? candidate.signalUrl : candidate.url;
+        if (url == null || url.trim().isEmpty()) {
+            return null;
+        }
+        try {
+            URI uri = new URI(url);
+            if (uri.getHost() == null || uri.getHost().trim().isEmpty()) {
+                return null;
+            }
+            return uri.getPort() >= 0 ? uri.getHost() + ":" + uri.getPort() : uri.getHost();
+        } catch (URISyntaxException error) {
+            Log.d(TAG, "invalid resolved endpoint url: " + error.getMessage());
+            return null;
+        }
     }
 
     private static boolean isLikelyTailscale(String host) {

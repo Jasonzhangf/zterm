@@ -3,6 +3,11 @@
 import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('../lib/dagpipe-native-client', () => ({
+  isDagpipeNativeCapable: () => false,
+  runDagpipePhase2Relay: async () => ({ ok: true, outputs: {} }),
+}));
+
 vi.mock('../lib/traversal-relay-client', async () => {
   const actual = await vi.importActual<typeof import('../lib/traversal-relay-client')>('../lib/traversal-relay-client');
   return {

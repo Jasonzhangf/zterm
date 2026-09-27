@@ -484,7 +484,7 @@ buffer manager 不得自行反推 renderer 当前窗口。
 
 ### 3.1.1 DOM renderer projection
 
-- `client.dom_renderer` 只把 `resource.renderer_window` 的 immutable snapshot 投影成 `TerminalView` / `VisibleRow` / `TerminalPreviewRow` / mirror-fixed zoom-pan / cell render / theme DOM。
+- `client.dom_renderer` 只把 `resource.renderer_window` 的 immutable snapshot 投影成 `TerminalView` / `VisibleRow` / mirror-fixed zoom-pan / cell render / theme DOM。
 - 它不持有 `follow / reading / renderBottomIndex / visible range / request policy`，不得修改 sparse truth 或请求 transport。
 - `client.renderer_window` 的 window controller/hook 持有 follow/reading transitions、renderBottomIndex 和 reset；`TerminalView` 只执行 DOM 测量、事件采集、scroll effect 和 immutable render projection。
 

@@ -446,7 +446,7 @@ daemon server
         └─ immutable render snapshot
                 ↓
       DOM renderer
-        └─ TerminalView / VisibleRow / TerminalPreviewRow / mirror-fixed zoom-pan / cell render / theme
+        └─ TerminalView / VisibleRow / mirror-fixed zoom-pan / cell render / theme
                 ↓
       terminal shell
         └─ stage shell / status / quickbar assembly / copy menu / keyboard lift

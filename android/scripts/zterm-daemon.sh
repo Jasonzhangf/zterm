@@ -25,6 +25,7 @@ ROOT_NODE_PTY_HELPER_GLOB="${ROOT_DIR}/node_modules/node-pty/prebuilds/darwin-*/
 WORKSPACE_NODE_PTY_HELPER_GLOB="${WORKSPACE_ROOT}/node_modules/node-pty/prebuilds/darwin-*/spawn-helper"
 STAGED_NODE_PTY_HELPER_GLOB="${DAEMON_RUNTIME_DIR}/node_modules/node-pty/prebuilds/darwin-*/spawn-helper"
 STAGED_DAEMON_ENTRY="${DAEMON_RUNTIME_DIR}/server.cjs"
+STAGED_DAGPIPE_NATIVE="${DAEMON_RUNTIME_DIR}/dagpipe.node"
 NATIVE_DAEMON_BIN="${WTERM_BIN_DIR}/zterm-daemon"
 NATIVE_DAEMON_SOURCE="${ROOT_DIR}/scripts/native/zterm-daemon.swift"
 REMOTE_WINDOW_CAPTURE_SOURCE="${ROOT_DIR}/src/server/remote-window-screen-capture-script.ts"
@@ -428,6 +429,8 @@ stage_daemon_runtime() {
   rm -rf "${DAEMON_RUNTIME_DIR}/node_modules/@roamhq/wrtc" "${DAEMON_RUNTIME_DIR}/node_modules/@roamhq/${wrtc_platform_package_name##*/}"
   cp -RL "${wrtc_package_dir}" "${DAEMON_RUNTIME_DIR}/node_modules/@roamhq/wrtc"
   cp -RL "${wrtc_platform_package_dir}" "${DAEMON_RUNTIME_DIR}/node_modules/@roamhq/${wrtc_platform_package_name##*/}"
+  bash "${ROOT_DIR}/scripts/build-dagpipe-native.sh"
+  cp "${ROOT_DIR}/native/dagpipe/index.node" "${STAGED_DAGPIPE_NATIVE}"
   chmod +x ${STAGED_NODE_PTY_HELPER_GLOB} 2>/dev/null || true
 }
 
@@ -455,7 +458,7 @@ run_foreground() {
   stage_native_daemon_binary
   chmod +x ${ROOT_NODE_PTY_HELPER_GLOB} ${WORKSPACE_NODE_PTY_HELPER_GLOB} ${STAGED_NODE_PTY_HELPER_GLOB} 2>/dev/null || true
   cd "${HOME}"
-  exec env -u TMUX -u TMUX_PANE HOST="$HOST" PORT="$PORT" ZTERM_HOST="$HOST" ZTERM_PORT="$PORT" ZTERM_AUTH_TOKEN="${ZTERM_AUTH_TOKEN:-}" ZTERM_DAEMON_NATIVE="$NATIVE_DAEMON_BIN" "$NODE_BIN" "$STAGED_DAEMON_ENTRY"
+  exec env -u TMUX -u TMUX_PANE HOST="$HOST" PORT="$PORT" ZTERM_HOST="$HOST" ZTERM_PORT="$PORT" ZTERM_AUTH_TOKEN="${ZTERM_AUTH_TOKEN:-}" ZTERM_DAEMON_NATIVE="$NATIVE_DAEMON_BIN" ZTERM_DAGPIPE_NATIVE="$STAGED_DAGPIPE_NATIVE" "$NODE_BIN" "$STAGED_DAEMON_ENTRY"
 }
 
 status_direct() {
@@ -544,7 +547,7 @@ start_direct() {
 
   (
     cd "${HOME}"
-    env -u TMUX -u TMUX_PANE HOST="$HOST" PORT="$PORT" ZTERM_HOST="$HOST" ZTERM_PORT="$PORT" ZTERM_AUTH_TOKEN="${ZTERM_AUTH_TOKEN:-}" ZTERM_DAEMON_NATIVE="$NATIVE_DAEMON_BIN" \
+    env -u TMUX -u TMUX_PANE HOST="$HOST" PORT="$PORT" ZTERM_HOST="$HOST" ZTERM_PORT="$PORT" ZTERM_AUTH_TOKEN="${ZTERM_AUTH_TOKEN:-}" ZTERM_DAEMON_NATIVE="$NATIVE_DAEMON_BIN" ZTERM_DAGPIPE_NATIVE="$STAGED_DAGPIPE_NATIVE" \
       "$NODE_BIN" "$STAGED_DAEMON_ENTRY" >>"$log_file" 2>&1
   ) &
   local daemon_pid=$!
@@ -634,7 +637,7 @@ set -euo pipefail
 cd "${HOME}"
 chmod +x ${STAGED_NODE_PTY_HELPER_GLOB} 2>/dev/null || true
 export PATH="${HOME}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
-exec env -u TMUX -u TMUX_PANE ZTERM_ITERM2_PYTHON="${ITERM2_PYTHON_BIN}" ZTERM_DAEMON_NATIVE="${NATIVE_DAEMON_BIN}" "${NODE_BIN}" "${STAGED_DAEMON_ENTRY}"
+exec env -u TMUX -u TMUX_PANE ZTERM_ITERM2_PYTHON="${ITERM2_PYTHON_BIN}" ZTERM_DAEMON_NATIVE="${NATIVE_DAEMON_BIN}" ZTERM_DAGPIPE_NATIVE="${STAGED_DAGPIPE_NATIVE}" "${NODE_BIN}" "${STAGED_DAEMON_ENTRY}"
 EOF
   chmod +x "$DIRECT_RUNNER"
 cat > "$LAUNCH_RUNNER" <<EOF
@@ -707,7 +710,7 @@ cleanup_child() {
   terminate_child
 }
 trap cleanup_child TERM INT
-env -u TMUX -u TMUX_PANE ZTERM_ITERM2_PYTHON="${ITERM2_PYTHON_BIN}" ZTERM_DAEMON_NATIVE="${NATIVE_DAEMON_BIN}" "${NODE_BIN}" "${STAGED_DAEMON_ENTRY}" &
+env -u TMUX -u TMUX_PANE ZTERM_ITERM2_PYTHON="${ITERM2_PYTHON_BIN}" ZTERM_DAEMON_NATIVE="${NATIVE_DAEMON_BIN}" ZTERM_DAGPIPE_NATIVE="${STAGED_DAGPIPE_NATIVE}" "${NODE_BIN}" "${STAGED_DAEMON_ENTRY}" &
 child_pid="\$!"
 missed_health_checks=0
 child_start_epoch="\$(date +%s)"

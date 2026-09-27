@@ -44,6 +44,7 @@ pnpm run daemon:prepare-release
 pnpm build
 node ./scripts/verify-web-assets-version.mjs dist "$BUILD_NUMBER"
 rm -rf "$ROOT_DIR/native/android/app/src/main/assets/public/assets"
+bash "$ROOT_DIR/scripts/build-dagpipe-android.sh"
 npx cap sync android
 node ./scripts/verify-web-assets-version.mjs native/android/app/src/main/assets/public "$BUILD_NUMBER"
 cd "$ROOT_DIR/native/android"
@@ -53,6 +54,10 @@ node "$ROOT_DIR/scripts/verify-web-assets-version.mjs" "$ROOT_DIR/native/android
 cp "$APK_PATH" "$NORMAL_APK_PATH"
 ./gradlew :app:assembleDebug -PztermRollbackVariant=true
 cp "$APK_PATH" "$ROLLBACK_APK_PATH"
+if ! unzip -l "$NORMAL_APK_PATH" | grep -q 'lib/arm64-v8a/libzterm_dagpipe.so'; then
+  echo "[build-android-debug] missing native libzterm_dagpipe.so in APK" >&2
+  exit 1
+fi
 cp "$NORMAL_APK_PATH" "$APK_PATH"
 
 cd "$ROOT_DIR"

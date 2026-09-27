@@ -118,8 +118,7 @@ main checkout of the project, not a worktree. Run those initialization
 commands only from the canonical root. A worktree does not need a second
 registration: run `collab context` directly there. Global Collab state
 resolves the current Codex sessionID/App Server thread to the canonical route
-and reports the inherited identity, liveness, tasks, inbox, `next_actions`,
-and master/authority state.
+and reports the inherited peer, liveness, tasks, and peers.
 
 Use `collab master status` as the authoritative live-master query. A live
 master exists iff the returned `master` is an object with
@@ -138,14 +137,11 @@ authoritative query first:
 collab context
 ```
 
-`collab context` is the registration truth for `authority`, `identity`,
-`inbox`, `liveness`, `master`, `next_actions`, `role_brief`, `tasks`, and
-`truth`. Registration returns the brief effective at registration; `collab
-context` and `collab who` project the current brief, and promotion or
-delegation returns the replacement brief. `collab who` is the peer-list
-command. `collab master status` is the separate live-master truth. Do not
-inspect journal, mailbox, `routes.jsonl`, or `~/.collab` paths to prove
-registration. Missing or failed identity prevents claiming registration.
+`collab context` is the registration truth: current Codex sessionID binding,
+role, identity, App Server transport, liveness, tasks, and peers. `collab
+master status` is the separate live-master truth. Do not inspect journal,
+mailbox, `routes.jsonl`, or `~/.collab` paths to prove registration. Missing
+or failed identity prevents claiming registration.
 
 If `collab context` fails with `PROJECT_SCOPE_UNKNOWN` or `token mismatch`,
 preserve the exact error and stop registration repair. Do not infer worktree

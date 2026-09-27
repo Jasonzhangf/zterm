@@ -51,6 +51,7 @@ requirePath(
   `daemon release directory not found: ${releaseDir}\nRun: pnpm --dir android run daemon:prepare-release`,
 );
 requirePath(resolve(releaseDir, 'runtime/server.cjs'), `missing staged daemon runtime under ${releaseDir}`);
+requirePath(resolve(releaseDir, 'runtime/dagpipe.node'), `missing staged daemon DAGpipe native runtime under ${releaseDir}\nBuild with the DAGpipe SDK, for example: DAGPIPE_SDK_PATH=/path/to/DAGpipe bash android/scripts/build-dagpipe-native.sh`);
 requirePath(resolve(releaseDir, 'runtime/node_modules/node-pty'), `missing staged node-pty runtime under ${releaseDir}`);
 requirePath(resolve(releaseDir, 'runtime/node_modules/@roamhq/wrtc'), `missing staged @roamhq/wrtc runtime under ${releaseDir}`);
 requirePath(

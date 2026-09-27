@@ -23,6 +23,10 @@ import { runtimeDebug } from '../lib/runtime-debug';
 import { projectOnlineTraversalRelayDaemonDevicesFromAccount } from '../lib/traversal-relay-devices';
 import type { TraversalRelayDeviceSnapshot } from '../lib/types';
 import { defaultClientControlDirectoryRuntime } from '../lib/client-control-directory-runtime';
+import {
+  isDagpipeNativeCapable,
+  runDagpipePhase7Debug,
+} from '../lib/dagpipe-native-client';
 import type { BridgeSettingsWriteResult } from '@zterm/shared';
 
 type SetBridgeSettings = (
@@ -31,6 +35,23 @@ type SetBridgeSettings = (
 
 function projectRelayDevicesFromAccountState(account: TraversalRelayAccountState | null | undefined) {
   return projectOnlineTraversalRelayDaemonDevicesFromAccount(account);
+}
+
+async function assertPhase7DebugAllowed() {
+  if (!isDagpipeNativeCapable()) {
+    return;
+  }
+  const gate = await runDagpipePhase7Debug({
+    execution_id: 'relay-debug-request',
+    attempt_id: '1',
+    inputs: {
+      'arc.debug_sample_request': { sample: 'relay-debug-request' },
+      'arc.debug_policy': { allowDebug: true },
+    },
+  });
+  if (!gate.ok) {
+    throw new Error(gate.error);
+  }
 }
 
 export function useRelayDeviceStream(options: {
@@ -157,25 +178,32 @@ export function useRelayDeviceStream(options: {
       },
       onDebugRequest: (payload, liveSocket, account) => {
         const typedAccount = account as TraversalRelayAccountState;
-        if (payload.includeSnapshot !== false) {
-          sendTraversalRelayClientDebugSnapshot({
-            socket: liveSocket,
-            account: typedAccount,
-            requestId: payload.requestId,
-            reason: payload.reason || 'remote-request',
-            snapshot: collectClientDebugSnapshot({
-              requestId: payload.requestId || null,
-              reason: payload.reason || null,
-            }),
-          });
-        }
-        if (payload.includeLogs !== false) {
-          sendTraversalRelayClientDebugLogs({
-            socket: liveSocket,
-            account: typedAccount,
-            limit: payload.logLimit || 120,
-          });
-        }
+        void (async () => {
+          try {
+            await assertPhase7DebugAllowed();
+            if (payload.includeSnapshot !== false) {
+              sendTraversalRelayClientDebugSnapshot({
+                socket: liveSocket,
+                account: typedAccount,
+                requestId: payload.requestId,
+                reason: payload.reason || 'remote-request',
+                snapshot: collectClientDebugSnapshot({
+                  requestId: payload.requestId || null,
+                  reason: payload.reason || null,
+                }),
+              });
+            }
+            if (payload.includeLogs !== false) {
+              sendTraversalRelayClientDebugLogs({
+                socket: liveSocket,
+                account: typedAccount,
+                limit: payload.logLimit || 120,
+              });
+            }
+          } catch (error) {
+            console.warn('[relay-device-stream] Phase7 debug gate blocked remote debug request:', error);
+          }
+        })();
       },
     });
 
