@@ -155,6 +155,25 @@ stateDiagram-v2
   catalog 关闭/移除只由 backend-qualified channel/session 事实触发。
 - Relay peer lease 按账户 + daemon 目标 + 具体客户端设备签发；另一台设备获得独立 lease，不替换他人。
 
+### Relay 连接维护/恢复与 buffer 角色闭合
+
+连接建立/维持/恢复以“每目标一条物理 transport、每 session 一条逻辑 channel”
+为唯一结构：
+
+| 生命周期 | 唯一 owner | 终态/释放边界 |
+| --- | --- | --- |
+| 账号登录/刷新 | `client.connection_home` 与 `relay.account_directory` | `login-failed`/`lease-expired` 后不再复用旧 token；用户显式重新登录 |
+| 目标绑定 | `client.connection_home` | 只投影恢复意图，不拥有 daemon channel/mirror 真源 |
+| 物理连接建立/恢复 | `client.android_connection_service` | 新代际开始后旧代际事件拒绝；transport 销毁不 kill tmux |
+| channel 开/关 | `daemon.channel_mux` | `channel-closed` 只释放该 channel 的 body 订阅与 buffer 资源，sibling 不受影响 |
+| body 订阅释放 | `daemon.transport_subscriber` | `bodySubscribed=false` 仍是物理连接；最后一个 subscriber 消失才释放 mirror/input/timer |
+| buffer sparse/repair | 客户端每 session buffer manager | 只有完整无洞 frame 可 sparse apply；repair 未写 wire 前保持 `pending` |
+| render 可见窗口 | 客户端 renderer | 只投影 snapshot，不请求 transport |
+
+单/多 session 的非法转移都不得把 UI 活跃状态变成 daemon 关闭依据，也不得在
+channel 未注销时跳过订阅释放。inactive/tab switch/foreground-background 只改变
+客户端取数频率，不关闭 transport、不清 buffer truth。
+
 ## 7. 资源
 
 参与本静态面的资源：

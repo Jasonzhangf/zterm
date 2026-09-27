@@ -65,6 +65,29 @@ Relay 登录：
 - 禁止 daemon 读取客户端 active tab/foreground/viewport 决定关闭 session
   channel；禁止客户端从 service 快照重建终端正文/渲染真源。
 
+## 连接维护与 buffer 角色边界
+
+连接建立/维持/恢复归客户端连接服务与 daemon 网关共同闭合，但两者职责分层：
+
+- 客户端连接服务负责建立、心跳、恢复代际、单/多 session 需求投影；每次物理失败都
+  产生新代际，旧代际事件不得再影响当前快照。
+- daemon 网关只负责物理 transport 入站、mux 协商、channel registry 与 body
+  订阅绑定；不持有 active/foreground/viewport、逻辑 client session 或
+  renderer 可见窗口。
+- 单个 session 对应一条逻辑 channel；多个 session 共享同一物理 transport。
+  一个 channel 关闭只释放该 channel 的 body 订阅、pending 请求与 buffer 资源，
+  不关闭 sibling channel，也不 kill tmux session。
+
+Android buffer 管理与渲染角色保持独立：
+
+- buffer 管理按 session 维护 sparse truth、revision epoch、repair ledger；
+  renderer 只声明可见范围，不发起 transport。
+- 只有完整、连续、无洞 frame 可以被 sparse apply 并触发正文 repaint；frame
+  拒绝时保留 exact repair range，未实际写入 wire 前始终保持 `pending`。
+- inactive/tab switch/foreground-background 不销毁 buffer truth，也不关闭
+  transport；session 显式关闭或物理 transport 销毁时才释放对应 buffer/body
+  订阅资源。
+
 ## 数据契约
 
 - `resource.relay_account_directory`

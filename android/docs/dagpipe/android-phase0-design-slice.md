@@ -210,6 +210,101 @@ IME 弹起、容器 relayout 不进入 reading。
 - `(在途/排队, 窗口满或高水位) -> 背压`
 - `(背压, 排空/低水位) -> 在途`
 
+## 角色/状态机细化闭合（Relay 连接维护与 Buffer 管理）
+
+### Relay 连接维护角色
+
+| 角色 | 允许职责 | 禁止职责 |
+| --- | --- | --- |
+| `client.connection_home` | 把已绑定 daemon target 投影为客户端恢复意图 | 修改 daemon 状态、持有 channel/mirror/renderer 真源 |
+| `client.android_connection_service` | 连接建立、恢复、心跳、通知动作投影 | 用 foreground/background/tab 切换重建 transport |
+| `daemon.connection_gateway` | 物理连接入站与鉴权边界 | 持有 logical client session 或客户端身份真源 |
+| `daemon.channel_mux` | 同一物理连接上的逻辑 channel 注册表与开闭 | 让一个 channel 失败连坐 sibling channel |
+| `daemon.transport_subscriber` | per-subscriber body 订阅绑定与释放 | 把 `bodySubscribed=false` 当物理连接释放 |
+
+### Relay 连接建立/维持/恢复状态机
+
+```mermaid
+stateDiagram-v2
+    [*] --> 空闲
+    空闲 --> 解析线路: 目标/策略需求出现
+    解析线路 --> 建立物理连接: 选定候选线路
+    建立物理连接 --> mux协商: transport-open
+    mux协商 --> 就绪: mux-ready
+    就绪 --> 恢复: 心跳超时/物理失败
+    恢复 --> 解析线路: reconnect-attempt/新代际
+    就绪 --> 鉴权失败: 鉴权拒绝
+    解析线路 --> 鉴权失败: 凭据/lease 拒绝
+    鉴权失败 --> [*]
+    空闲 --> [*]: 显式断开
+```
+
+| 状态 | 进入条件 | 维持条件 | 可恢复/终态 | 资源边界 |
+| --- | --- | --- | --- | --- |
+| 空闲 | 无需要维持的目标 | 无 | 可恢复；`bind-target` 重新进入解析线路 | 无 transport、心跳、channel registry |
+| 解析线路 | `bind-target` 或恢复计划 | 只决定候选，不打开连接 | 可恢复；失败进入错误终态 | 只持有候选线路计划，不持有 channel |
+| 建立物理连接 | 选定候选 | transport 未打开期间不提前声明就绪 | 可恢复；失败抛旧代际 | 只持有物理 transport 的一次代际 |
+| mux 协商 | transport open | 等待 hello/ready | 可恢复；协商失败进入恢复 | mux 会话事实，不写正文真源 |
+| 就绪 | mux-ready | 心跳正常、server activity 刷新 | 可恢复；心跳超时进入恢复 | 每 target 一个 transport，channel 列表可多 |
+| 恢复 | 心跳超时/物理失败/协商失败 | 以新代际重试 | 不可无限重试；鉴权失败停止自动重连 | 旧代际事件一律拒绝 |
+| 鉴权失败 | 凭据/lease 拒绝 | 停止自动重连，保留 direct/Tailscale target | 用户显式重新登录后才重建 | 不再使用旧 token；不清除健康的直连目标 |
+
+单 session：一条物理 transport 可以只开一条逻辑 channel，任何失败只影响该 channel。
+多 sessions：同一 daemon target 只维护一条物理 transport；多 session 是 mux 上的逻辑
+channel，各自拥有 channel registry、body 订阅和 buffer 真源。一个 channel 关闭不得
+关闭 sibling，也不得触发 `tmux kill-session`。
+
+### Android buffer 管理状态机
+
+每个 session 独立运行，不持有 renderer 的 `follow / reading / renderBottomIndex`。
+
+```mermaid
+stateDiagram-v2
+    [*] --> 未初始化
+    未初始化 --> head已观察: daemon head 到达
+    head已观察 --> 在线: tail 拉取成功
+    在线 --> 缺口修复: 可见 gap / frame 拒绝
+    缺口修复 --> 在线: 权威覆盖
+    在线 --> head已观察: daemon revision 重置
+    未初始化 --> 已销毁: session 关闭
+    head已观察 --> 已销毁: session 关闭
+    在线 --> 已销毁: session 关闭
+    缺口修复 --> 已销毁: session 关闭
+```
+
+### Buffer frame assembly / repair ledger 状态机
+
+```mermaid
+stateDiagram-v2
+    [*] --> 无pending
+    无pending --> 组装中: chunk 到达
+    组装中 --> frame就绪: 完整无洞
+    frame就绪 --> 无pending: sparse apply
+    组装中 --> repairPending: frame 拒绝/有洞
+    repairPending --> repairDispatched: repair 请求实际写入 wire
+    repairDispatched --> 无pending: 权威 apply 覆盖
+    repairPending --> 无pending: revision epoch 重置
+```
+
+| 状态 | 进入条件 | 结束条件 | 释放/资源边界 |
+| --- | --- | --- | --- |
+| 无 pending | 无 frame/repair 需求 | chunk 到达 | 保留 sparse truth 和 revision |
+| 组装中 | 多 chunk frame 的任一 chunk 到达 | 完整无洞 -> frame 就绪；拒绝 -> repair pending；epoch 重置 -> 无 pending | 只保留 frame identity 与 chunk 集合，不发布 DOM |
+| frame 就绪 | 完整、连续、无洞 frame | sparse apply -> 无 pending | 只允许在此状态触发正文 repaint |
+| repair pending | frame 拒绝或可见 gap | repair 请求实际写入 wire -> dispatched；权威覆盖 -> 无 pending | 必须保存 exact repair range；未写 wire 前不得记 dispatched |
+| repair dispatched | repair 请求写入 wire | 权威 apply 覆盖 -> 无 pending | 保留 exact range；后续 revise 不得复用旧 dispatched 伪装成功 |
+
+### 状态机终态闭合
+
+- `已销毁` 是 connection/buffer 唯一强制收口终态：关闭对应 body 订阅、pending
+  frame assembly、repair ledger、sparse truth 与 render scope；不关闭 sibling。
+- `鉴权失败` / `login-failed` / `lease-expired` 是 Relay/连接侧的不可自动恢复终态；
+  旧 token 不得复用，用户显式重新登录后才能进入新执行。
+- `channel-closed` / `transport-detached` 只释放对应物理/channel 资源，不伪造
+  tmux session 已关闭。
+- inactive、tab switch、foreground/background 只改变取数频率或可见范围，不关闭
+  transport、不销毁 buffer truth。
+
 ## DAG 与数据契约
 
 ### android.connection_lifecycle@0.1
