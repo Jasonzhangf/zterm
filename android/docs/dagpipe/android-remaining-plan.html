@@ -1,0 +1,800 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>zterm DAGpipe 剩余改造计划审批</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f7f7f5;
+        --panel: #ffffff;
+        --ink: #1f2933;
+        --muted: #5b6b79;
+        --line: #d8dee6;
+        --accent: #0f766e;
+        --accent-soft: #ecfdf5;
+        --warn: #b45309;
+        --warn-soft: #fffbeb;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+          "Microsoft YaHei", sans-serif;
+        line-height: 1.55;
+      }
+      main {
+        max-width: 1080px;
+        margin: 0 auto;
+        padding: 32px 20px 64px;
+      }
+      header {
+        border-bottom: 1px solid var(--line);
+        padding-bottom: 20px;
+        margin-bottom: 28px;
+      }
+      h1 {
+        font-size: 26px;
+        margin: 0 0 8px;
+        letter-spacing: 0;
+      }
+      h2 {
+        font-size: 18px;
+        margin: 0 0 12px;
+        letter-spacing: 0;
+      }
+      h3 {
+        font-size: 15px;
+        margin: 18px 0 8px;
+        letter-spacing: 0;
+        color: var(--muted);
+      }
+      .muted {
+        color: var(--muted);
+      }
+      section {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 18px;
+        margin-bottom: 18px;
+      }
+      .phase {
+        border-left: 4px solid var(--accent);
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 14px;
+      }
+      th,
+      td {
+        border: 1px solid var(--line);
+        padding: 8px 10px;
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        background: #f0f3f6;
+      }
+      .badge {
+        display: inline-block;
+        background: var(--accent-soft);
+        color: var(--accent);
+        border: 1px solid #99f6e4;
+        border-radius: 999px;
+        padding: 3px 10px;
+        font-size: 12px;
+        font-weight: 600;
+      }
+      .warn {
+        display: inline-block;
+        background: var(--warn-soft);
+        color: var(--warn);
+        border: 1px solid #fde68a;
+        border-radius: 999px;
+        padding: 3px 10px;
+        font-size: 12px;
+        font-weight: 600;
+      }
+      ul,
+      ol {
+        margin: 8px 0;
+        padding-left: 22px;
+      }
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        background: #f4f6f8;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 1px 5px;
+        font-size: 0.92em;
+      }
+      .mermaid {
+        text-align: center;
+        font-size: 18px;
+        overflow-x: auto;
+      }
+      .mermaid svg {
+        max-width: 100%;
+        height: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p><span class="badge">剩余改造计划</span> <span class="warn">尚未执行</span></p>
+        <h1>zterm DAGpipe 剩余改造计划审批</h1>
+        <p class="muted">
+          在 Phase 0 六张静态图基础上，继续覆盖 Relay/daemon 通道、输入调度、文件附件、
+          remote window、session/shell UI 业务边、plugin/control/settings、release/update、
+          observability 与 Android 原生连接服务。本页给出每个阶段的中文业务语义 DAG 和
+          状态迁移图，只审批分期计划，不审批代码改动。
+        </p>
+      </header>
+
+      <section>
+        <h2>当前基线</h2>
+        <ul>
+          <li><code>pnpm --dir android test:dagpipe-phase0</code> 通过，6 张图 validate / inspect 全绿。</li>
+          <li>已有中文语义设计切片和独立 review PASS，但未 merge / push / 发布。</li>
+          <li>未新增 Rust crate，未接线，未改 daemon/client runtime，未 bump APK/OTA。</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>已覆盖与剩余覆盖</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>领域</th>
+              <th>已有 DAGpipe</th>
+              <th>剩余范围</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Daemon mirror / control</td>
+              <td>source adapter、mirror writer、mirror store、buffer publisher、control gateway / center</td>
+              <td>channel mux、transport subscriber、session catalog、session idle、connection gateway</td>
+            </tr>
+            <tr>
+              <td>Relay / 路由</td>
+              <td>Android login / route 投影入口</td>
+              <td>account directory、peer lease、route selection 的完整状态机</td>
+            </tr>
+            <tr>
+              <td>Android terminal</td>
+              <td>connection lifecycle、buffer management/render、input dispatch</td>
+              <td>输入 ACK/写队（daemon）、schedule、文件/screenshot/attachment、remote window、session/shell/preview UI</td>
+            </tr>
+            <tr>
+              <td>Plugin / settings / update / observable</td>
+              <td>未覆盖</td>
+              <td>composition、control center、plugin host、settings/config share、release artifact、OTA、debug</td>
+            </tr>
+            <tr>
+              <td>Android 原生连接服务</td>
+              <td>未覆盖</td>
+              <td>IPC、desired channel replay、网络代际、通知深链、服务快照</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>总体分期依赖（竖向）</h2>
+        <div class="mermaid">
+          flowchart TB
+            p1["Phase 1: 核心 6 图 Rust core 执行"]
+            p2["Phase 2: Relay / daemon 通道 / 会话目录"]
+            p3["Phase 3: 输入 / 调度 / 文件附件 / 截图"]
+            p4["Phase 4: Remote window 流"]
+            p5["Phase 5: Session / shell / preview UI"]
+            p6["Phase 6: Plugin / control / settings"]
+            p7["Phase 7: Release / update / observability"]
+            p8["Phase 8: Android 原生连接服务"]
+            p1 --> p2
+            p2 --> p3
+            p2 --> p4
+            p2 --> p5
+            p2 --> p8
+            p3 --> p6
+            p4 --> p6
+            p5 --> p6
+            p6 --> p7
+        </div>
+        <p class="muted">
+          依赖原则：Phase 1 先跑通 Rust core / compile() / parity / 接线模式；Phase 2 冻结
+          daemon 通道与目录真源；其后输入、媒体、UI 业务边各自独立，再收口到 plugin /
+          release / 原生服务。
+        </p>
+      </section>
+
+      <section class="phase">
+        <h2>Phase 1：现有 6 张图的 Rust core 执行</h2>
+        <p class="muted">
+          这是剩余模块运行时接线的依赖基础，必须先跑通同一套编译 / parity / 接线模式。
+          静态图与状态机已在 <code>android-dag-approval.html</code>、
+          <code>daemon-dag-approval.html</code> 审批。
+        </p>
+        <h3>状态迁移：目标物理连接</h3>
+        <div class="mermaid">
+          stateDiagram-v2
+            [*] --> ConnIdle
+            state "空闲" as ConnIdle
+            state "解析线路" as Resolve
+            state "建立连接" as Establish
+            state "mux 协商" as Mux
+            state "就绪" as Ready
+            state "恢复" as Recover
+            state "终态" as Dead
+            ConnIdle --> Resolve: 目标与策略
+            Resolve --> Establish: 选定线路
+            Establish --> Mux: transport open
+            Mux --> Ready: mux ready
+            Ready --> Recover: 心跳超时或物理失败
+            Recover --> Ready: 新代际成功
+            Recover --> Dead: 鉴权失败
+            Ready --> Dead: 用户断开且无存活通道
+            Dead --> [*]
+        </div>
+        <h3>状态迁移：每 session buffer 管理</h3>
+        <div class="mermaid">
+          stateDiagram-v2
+            [*] --> BufInit
+            state "未初始化" as BufInit
+            state "head 已观察" as Head
+            state "在线" as Online
+            state "缺口修复" as Repair
+            state "已销毁" as Destroyed
+            BufInit --> Head: head 到达
+            Head --> Online: tail 拉取成功
+            Online --> Repair: 可见 gap 或 frame 拒绝
+            Repair --> Online: 权威覆盖
+            Online --> Head: revision 重置
+            Repair --> Head: revision 重置
+            Online --> Destroyed: 用户关闭 session
+            Repair --> Destroyed: 用户关闭 session
+            Destroyed --> [*]
+        </div>
+        <h3>状态迁移：Frame assembly / repair ledger</h3>
+        <div class="mermaid">
+          stateDiagram-v2
+            [*] --> NoFrame
+            state "无 pending frame" as NoFrame
+            state "组装中" as Assembling
+            state "frame 就绪" as ReadyFrame
+            state "repair pending" as Pending
+            state "repair dispatched" as Dispatched
+            NoFrame --> Assembling: chunk 到达
+            Assembling --> ReadyFrame: 完整无洞
+            ReadyFrame --> NoFrame: sparse apply
+            Assembling --> Pending: 拒绝
+            Pending --> Dispatched: 实际写 wire
+            Dispatched --> NoFrame: 权威 apply 覆盖
+            Assembling --> NoFrame: revision epoch 重置
+            Pending --> NoFrame: revision epoch 重置
+            Dispatched --> NoFrame: revision epoch 重置
+        </div>
+      </section>
+
+      <section class="phase">
+        <h2>Phase 2：Relay / daemon 连接通道 / 会话目录</h2>
+        <p>新增图：<code>relay-account-peer-route.graph.json</code>、<code>daemon-connection-channel-catalog.graph.json</code>。</p>
+        <h3>DAG：Relay 账号 / peer lease / 线路解析（竖向）</h3>
+        <div class="mermaid">
+          flowchart TB
+            creds["账号凭据"]
+            login["登录 Relay 账号"]
+            publish["发布本机设备目录"]
+            directory["投影账号设备目录"]
+            resolve["解析候选线路"]
+            lease["发放 / 校验 peer lease"]
+            resume["恢复已绑定 daemon 目标"]
+            target["目标线路计划"]
+            creds --> login
+            login --> publish
+            publish --> directory
+            directory --> resolve
+            resolve --> lease
+            lease --> resume
+            resume --> target
+        </div>
+        <h3>DAG：daemon 连接通道 / 会话目录（竖向）</h3>
+        <div class="mermaid">
+          flowchart TB
+            ingress["接受物理连接"]
+            mux["协商 mux"]
+            register["注册 session 通道"]
+            subscribe["绑定 body 订阅"]
+            catalog["构建会话目录"]
+            idle["发布会话空闲事实"]
+            ingress --> mux
+            mux --> register
+            register --> subscribe
+            register --> catalog
+            catalog --> idle
+        </div>
+        <h3>状态迁移：Relay 账号</h3>
+        <div class="mermaid">
+          stateDiagram-v2
+            [*] --> RelayIdle
+            state "未登录" as RelayIdle
+            state "鉴权中" as Authing
+            state "已登录" as LoggedIn
+            RelayIdle --> Authing: 提交账号
+            Authing --> LoggedIn: 登录成功
+            Authing --> RelayIdle: 鉴权拒绝
+            LoggedIn --> RelayIdle: 退出或 token 失效
+        </div>
+        <h3>状态迁移：peer lease</h3>
+        <div class="mermaid">
+          stateDiagram-v2
+            [*] --> NoLease
+            state "无 lease" as NoLease
+            state "已发放" as Issued
+            state "已续用" as Renewed
+            state "已释放" as Released
+            NoLease --> Issued: 客户端信令
+            Issued --> Renewed: 信令重连且未过期
+            Issued --> Released: 过期或设备不匹配
+            Renewed --> Released: 过期或设备不匹配
+            Released --> [*]
+        </div>
+        <h3>状态迁移：session 通道注册</h3>
+        <div class="mermaid">
+          stateDiagram-v2
+            [*] --> Unregistered
+            state "未注册" as Unregistered
+            state "已注册" as Registered
+            state "已订阅" as Subscribed
+            state "已释放" as ReleasedChannel
+            Unregistered --> Registered: 通道打开
+            Registered --> Subscribed: 绑定 body 订阅
+            Subscribed --> Registered: 暂停订阅
+            Registered --> ReleasedChannel: 通道关闭
+            Subscribed --> ReleasedChannel: 通道关闭
+            ReleasedChannel --> [*]
+        </div>
+        <ul>
+          <li>覆盖 <code>relay.account_directory</code>、<code>relay.peer_lease</code>、<code>relay.route_selection</code>、<code>daemon.connection_gateway</code>、<code>daemon.channel_mux</code>、<code>daemon.transport_subscriber</code>、<code>daemon.session_catalog</code>、<code>daemon.session_idle_detection</code>。</li>
+          <li>约束：Relay / peer lease 不存终端正文、channel、tmux、active tab；daemon 不持有客户端活跃状态。</li>
+        </ul>
+      </section>
+
+      <section class="phase">
+        <h2>Phase 3：Daemon 输入 / 调度 / 文件截图 / 附件</h2>
+        <p>新增图：<code>daemon-input-schedule.graph.json</code>、<code>file-transfer-attachment-screenshot.graph.json</code>。</p>
+        <h3>DAG：daemon 输入 / 调度（竖向）</h3>
+        <div class="mermaid">
+          flowchart TB
+            frame["接收输入帧"]
+            dedupe["去重 / 排序"]
+            write["写入后端会话"]
+            ack["回 ACK / NACK"]
+            jobdef["注册调度任务"]
+            nextfire["计算下次触发"]
+            dispatch["派发后端命令"]
+            idlefact["发布会话空闲事实"]
+            frame --> dedupe
+            dedupe --> write
+            write --> ack
+            jobdef --> nextfire
+            nextfire --> dispatch
+            dispatch --> idlefact
+        </div>
+        <h3>DAG：文件 / 附件 / 截图（竖向）</h3>
+        <div class="mermaid">
+          flowchart TB
+            listreq["请求目录列表"]
+            listresp["返回目录事实"]
+            upload["接收上传分片"]
+            contiguous["校验连续性"]
+            complete["完成上传"]
+            download["读取文件分块"]
+            outbox["写入附件 outbox"]
+            receipt["记录设备回执"]
+            shotreq["请求远端截图"]
+            capture["解析窗口并捕获"]
+            shotresp["返回截图结果"]
+            listreq --> listresp
+            upload --> contiguous
+            contiguous --> complete
+            download --> outbox
+            outbox --> receipt
+            shotreq --> capture
+            capture --> shotresp
+        </div>
+        <h3>状态迁移：daemon 输入队列</h3>
+        <div class="mermaid">
+          stateDiagram-v2
+            [*] --> QueueIdle
+            state "空闲" as QueueIdle
+            state "排队" as Queued
+            state "写入中" as Writing
+            state "已确认" as Acked
+            state "已拒绝" as Rejected
+            QueueIdle --> Queued: 输入帧到达
+            Queued --> Writing: 取得写槽
+            Writing --> Acked: 后端写成功
+            Writing --> Rejected: 后端失败或非法
+            Acked --> QueueIdle: ACK 发出
+            Rejected --> QueueIdle: NACK 发出
+        </div>
+        <h3>状态迁移：调度任务</h3>
+        <div class="mermaid">
+          stateDiagram-v2
+            [*] --> Unscheduled
+            state "未调度" as Unscheduled
+            state "已调度" as Scheduled
+            state "派发中" as Dispatching
+            state "已取消" as CancelledJob
+            Unscheduled --> Scheduled: 注册任务
+            Scheduled --> Dispatching: 到达触发点
+            Dispatching --> Scheduled: 派发完成
+            Scheduled --> CancelledJob: 取消
+            CancelledJob --> [*]
+        </div>
+        <h3>状态迁移：上传传输</h3>
+        <div class="mermaid">
+          stateDiagram-v2
+            [*] --> NotStarted
+            state "未开始" as NotStarted
+            state "接收中" as Receiving
+            state "已完成" as Done
+            state "已取消" as CancelledUpload
+            NotStarted --> Receiving: 开始上传
+            Receiving --> Receiving: 连续分片推进
+            Receiving --> Receiving: 乱序拒绝并请求重传
+            Receiving --> Done: 连续覆盖完整
+            Receiving --> CancelledUpload: 用户取消
+            CancelledUpload --> [*]
+        </div>
+        <h3>状态迁移：附件投递</h3>
+        <div class="mermaid">
+          stateDiagram-v2
+            [*] --> Pending
+            state "未投递" as Pending
+            state "已入队" as Enqueued
+            state "已持久化" as Persisted
+            state "已读取" as Read
+            state "已送达" as Delivered
+            Pending --> Enqueued: 入队
+            Enqueued --> Persisted: 写入 outbox
+            Persisted --> Read: 设备读取
+            Read --> Delivered: 设备回执
+        </div>
+        <ul>
+          <li>覆盖 <code>daemon.input_queue</code>、<code>daemon.schedule_runtime</code>、<code>daemon.file_transfer</code>、<code>daemon.attachment_delivery</code>、<code>terminal.remote_screenshot</code>、<code>client.file_browser</code>。</li>
+          <li>约束：客户端不猜 daemon 文件系统；不以逐 chunk 停等换流量控制；附件回执不等于目标消费。</li>
+        </ul>
+      </section>
+
+      <section class="phase">
+        <h2>Phase 4：Remote window 流</h2>
+        <p>新增图：<code>remote-window-stream-overlay.graph.json</code>。</p>
+        <h3>DAG：目标目录 / 流 / 动作 / 质量（竖向）</h3>
+        <div class="mermaid">
+          flowchart TB
+            catalogreq["请求目标目录"]
+            catalogresp["返回窗口清单"]
+            start["请求开始流"]
+            capture["捕获桌面帧"]
+            encode["编码并 WebRTC 发送"]
+            receive["客户端接收"]
+            project["浮层投影"]
+            touch["触摸 / 鼠标动作"]
+            map["源坐标映射"]
+            inject["daemon 注入输入"]
+            quality["质量请求"]
+            budget["调整捕获预算"]
+            catalogreq --> catalogresp
+            start --> capture
+            capture --> encode
+            encode --> receive
+            receive --> project
+            touch --> map
+            map --> inject
+            quality --> budget
+            budget --> capture
+        </div>
+        <h3>状态迁移：remote window 流</h3>
+        <div class="mermaid">
+          stateDiagram-v2
+            [*] --> StreamIdle
+            state "空闲" as StreamIdle
+            state "建立中" as Connecting
+            state "推流中" as Streaming
+            state "重布局中" as Relayout
+            state "已停止" as Stopped
+            StreamIdle --> Connecting: 请求开始
+            Connecting --> Streaming: WebRTC 就绪
+            Streaming --> Relayout: 窗口变化
+            Relayout --> Streaming: 新布局就绪
+            Streaming --> Stopped: 停止或超时
+            Connecting --> Stopped: 建立失败
+            Stopped --> [*]
+        </div>
+        <h3>状态迁移：overlay 投影</h3>
+        <div class="mermaid">
+          stateDiagram-v2
+            [*] --> OverlayClosed
+            state "关闭" as OverlayClosed
+            state "目录加载中" as Loading
+            state "已就绪" as ReadyOverlay
+            state "连接中" as Attaching
+            state "投影中" as Projecting
+            OverlayClosed --> Loading: 打开浮层
+            Loading --> ReadyOverlay: 目录就绪
+            ReadyOverlay --> Attaching: 选择目标
+            Attaching --> Projecting: 流就绪
+            Projecting --> OverlayClosed: 关闭或失败
+        </div>
+        <ul>
+          <li>覆盖 <code>daemon.remote_window_stream</code>、<code>client.remote_window_overlay</code>、<code>client.remote_window_dual_stream_switch</code>、<code>desktop.remote_window_stream</code>。</li>
+          <li>约束：不用 terminal mirror rows 当视频真相；overlay 不请求 transport；daemon 独占 capture / layout / input 真相。</li>
+        </ul>
+      </section>
+
+      <section class="phase">
+        <h2>Phase 5：Session / shell / preview UI 业务边</h2>
+        <p>新增图：<code>android-session-shell-preview.graph.json</code>。</p>
+        <h3>DAG：open tab / 预览 / shell（竖向）</h3>
+        <div class="mermaid">
+          flowchart TB
+            openintent["用户打开 tab"]
+            opentab["创建 open tab"]
+            activate["激活 session"]
+            subscribe["订阅 body"]
+            previewopen["打开 session 预览"]
+            lattice["投影 lattice"]
+            selectcell["选择坐标格"]
+            focus["平移焦点"]
+            input["用户输入"]
+            normalize["归一提交文本"]
+            send["发送到当前通道"]
+            render["shell 投影"]
+            openintent --> opentab
+            opentab --> activate
+            activate --> subscribe
+            previewopen --> lattice
+            lattice --> selectcell
+            selectcell --> focus
+            input --> normalize
+            normalize --> send
+            subscribe --> render
+        </div>
+        <h3>状态迁移：preview 模式</h3>
+        <div class="mermaid">
+          stateDiagram-v2
+            [*] --> PreviewClosed
+            state "关闭" as PreviewClosed
+            state "已打开" as PreviewOpen
+            PreviewClosed --> PreviewOpen: 打开预览
+            PreviewOpen --> PreviewOpen: 选择格子替换 focus
+            PreviewOpen --> PreviewOpen: 边缘手势平移 focus
+            PreviewOpen --> PreviewClosed: Back 取消并恢复入口投影
+        </div>
+        <ul>
+          <li>覆盖 tab、preview lattice、drawer、group layout、workspace panes、copy / quickbar / IME / shell 投影。</li>
+          <li>只建模业务意图和投影，不把 React / Java 调用关系当成业务 DAG。</li>
+        </ul>
+      </section>
+
+      <section class="phase">
+        <h2>Phase 6：Plugin / control / settings / config share</h2>
+        <p>新增图：<code>android-control-plugin-settings.graph.json</code>。</p>
+        <h3>DAG：合成 / 控制 / 插件 / 设置（竖向）</h3>
+        <div class="mermaid">
+          flowchart TB
+            compose["App 合成"]
+            ports["校验并绑定 runtime ports"]
+            intent["控制意图"]
+            capability["能力门禁"]
+            route["路由到 owner"]
+            result["返回结果 / 错误"]
+            manifest["读取 plugin manifest"]
+            capreg["注册能力"]
+            slotreg["注册 UI slot"]
+            updatecheck["检查更新"]
+            updateinstall["安装更新"]
+            configout["导出配置"]
+            configin["导入配置"]
+            compose --> ports
+            ports --> manifest
+            manifest --> capreg
+            capreg --> slotreg
+            intent --> capability
+            capability --> route
+            route --> result
+            updatecheck --> updateinstall
+            configout --> configin
+        </div>
+        <h3>状态迁移：plugin 生命周期</h3>
+        <div class="mermaid">
+          stateDiagram-v2
+            [*] --> Discovered
+            state "未加载" as Unloaded
+            state "已发现" as Discovered
+            state "已激活" as ActivePlugin
+            state "已停用" as Disabled
+            state "失败" as FailedPlugin
+            Unloaded --> Discovered: 发现 manifest
+            Discovered --> ActivePlugin: 激活
+            ActivePlugin --> Disabled: 停用
+            ActivePlugin --> FailedPlugin: 激活错误
+            FailedPlugin --> Disabled: 显式清理
+        </div>
+        <h3>状态迁移：控制命令</h3>
+        <div class="mermaid">
+          stateDiagram-v2
+            [*] --> Received
+            state "已接收" as Received
+            state "已授权" as Authorized
+            state "执行中" as Executing
+            state "已完成" as Completed
+            state "失败" as FailedCommand
+            Received --> Authorized: 能力校验通过
+            Received --> FailedCommand: 能力拒绝或过期
+            Authorized --> Executing: 派发 owner
+            Executing --> Completed: 执行成功
+            Executing --> FailedCommand: 执行失败或超时
+            Completed --> [*]
+        </div>
+        <ul>
+          <li>覆盖 composition、control center、plugin host、settings / config transfer、connections history projection。</li>
+          <li>禁止 plugin / control 持有 terminal body、session transport、renderer truth。</li>
+        </ul>
+      </section>
+
+      <section class="phase">
+        <h2>Phase 7：Release / update / observability</h2>
+        <p>新增图：<code>release-update-observability.graph.json</code>。</p>
+        <h3>DAG：构建产物 / 更新 / debug（竖向）</h3>
+        <div class="mermaid">
+          flowchart TB
+            build["构建产物"]
+            verify["校验哈希"]
+            promote["提升 daemon artifact"]
+            install["安装到 runtime home"]
+            start["启动 daemon"]
+            check["检查更新"]
+            download["下载更新"]
+            installclient["安装客户端更新"]
+            sample["debug 采样"]
+            store["有界存储"]
+            export["导出 debug"]
+            cleanup["过期清理"]
+            build --> verify
+            verify --> promote
+            promote --> install
+            install --> start
+            check --> download
+            download --> installclient
+            sample --> store
+            store --> export
+            store --> cleanup
+        </div>
+        <h3>状态迁移：更新</h3>
+        <div class="mermaid">
+          stateDiagram-v2
+            [*] --> UpdateIdle
+            state "空闲" as UpdateIdle
+            state "检查中" as Checking
+            state "可更新" as Available
+            state "已下载" as Downloaded
+            state "已校验" as Verified
+            state "已安装" as Installed
+            state "失败" as UpdateFailed
+            UpdateIdle --> Checking: 检查更新
+            Checking --> Available: 有更新
+            Checking --> UpdateIdle: 无更新
+            Available --> Downloaded: 下载完成
+            Downloaded --> Verified: 哈希校验通过
+            Downloaded --> UpdateFailed: 校验失败
+            Verified --> Installed: 安装完成
+            Installed --> [*]
+        </div>
+        <h3>状态迁移：debug 通道</h3>
+        <div class="mermaid">
+          stateDiagram-v2
+            [*] --> DebugClosed
+            state "关闭" as DebugClosed
+            state "待授权" as PendingAuth
+            state "已开启" as DebugOpen
+            DebugClosed --> PendingAuth: 申请权限
+            PendingAuth --> DebugOpen: 授权通过
+            PendingAuth --> DebugClosed: 授权拒绝
+            DebugOpen --> DebugClosed: 权限过期或显式关闭
+        </div>
+        <ul>
+          <li>覆盖 runtime home、daemon artifact、update artifact、debug channel、debug console、observability。</li>
+          <li>禁止 src 直接作为 runtime 执行；debug 不能成为业务控制真源。</li>
+        </ul>
+      </section>
+
+      <section class="phase">
+        <h2>Phase 8：Android 原生连接服务</h2>
+        <p>新增图：<code>android-connection-service.graph.json</code>。</p>
+        <h3>DAG：服务 / 快照 / 通知（竖向）</h3>
+        <div class="mermaid">
+          flowchart TB
+            svcstart["启动前台服务"]
+            restore["恢复 desired channels"]
+            gencheck["校验网络代际"]
+            connect["建立目标连接"]
+            replay["重放 session 通道"]
+            snapshot["生成服务快照"]
+            project["投影到 UI"]
+            notify["生成通知 action"]
+            deeplink["深链打开 session"]
+            svcstart --> restore
+            restore --> gencheck
+            gencheck --> connect
+            connect --> replay
+            replay --> snapshot
+            snapshot --> project
+            notify --> deeplink
+        </div>
+        <h3>状态迁移：连接服务</h3>
+        <div class="mermaid">
+          stateDiagram-v2
+            [*] --> SvcStopped
+            state "已停止" as SvcStopped
+            state "启动中" as Starting
+            state "运行中" as Running
+            state "校验代际" as GenCheck
+            state "重连中" as Reconnecting
+            SvcStopped --> Starting: 启动服务
+            Starting --> Running: 服务就绪
+            Running --> GenCheck: 网络变化
+            GenCheck --> Running: 代际有效
+            GenCheck --> Reconnecting: 代际失效
+            Reconnecting --> Running: 重连成功
+            Running --> SvcStopped: 停止服务
+        </div>
+        <ul>
+          <li>覆盖前台服务 IPC、desired channel replay、网络代际校验、通知深链、服务快照投影。</li>
+          <li>禁止 WebView / Activity 生命周期直接重连服务；服务快照不持有终端正文 / 渲染真源。</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>统一 gate</h2>
+        <ol>
+          <li>先是静态治理：<code>dagpipe graph validate</code> / <code>inspect</code> 通过，中文语义设计切片和独立 review PASS。</li>
+          <li>再是运行时接线：Rust crate、<code>compile()</code>、black-box parity、薄 bridge、重建 / 重启验证。</li>
+          <li>旧 TS 实现保留到 parity gate 通过；未获发布授权前不 bump APK、不发放 OTA。</li>
+        </ol>
+        <p class="muted">
+          本 HTML 仅供审批参考；审批通过前不会进入 Cargo.toml、runtime、APK 或 OTA。
+        </p>
+      </section>
+    </main>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({
+        startOnLoad: true,
+        theme: "default",
+        securityLevel: "strict",
+        flowchart: {
+          curve: "basis",
+          padding: 12,
+          nodeSpacing: 40,
+          rankSpacing: 56,
+          useMaxWidth: true,
+        },
+        themeVariables: {
+          fontSize: "18px",
+        },
+      });
+    </script>
+  </body>
+</html>

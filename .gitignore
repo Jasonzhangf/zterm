@@ -2,7 +2,12 @@
 *.swp
 .agent-state/
 .agent-collab/
+.appsdk-control/
+.claude/
+.codex/
+.crew/
 .cursor/
+.mcp.json
 .local-index/
 .mempalace/
 .reasonix/
@@ -23,6 +28,9 @@ docs/file_*.png
 android/node_modules/
 android/dist/
 android/.turbo/
+android/.claude/
+android/.codex/
+android/.mcp.json
 /.build-meta.json
 android/update-dist/
 android/note.md
