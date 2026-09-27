@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   compileAllDagpipePhases,
   compilePhase0,
+  DEFAULT_MIRROR_NO_HOLE_DIFF_POLICY,
   mirrorPublishChangedRanges,
   runMirrorPublish,
   runControlDispatch,
@@ -46,6 +47,43 @@ function mirrorRequest(prevLines: string[], nextLines: string[], diffPolicy = {}
   };
 }
 
+function customMirrorRequest(
+  previousStartIndex: number,
+  prevLines: string[],
+  nextStartIndex: number,
+  nextLines: string[],
+  diffPolicy = {},
+  subscriberFacts = {},
+) {
+  const nextEndIndex = nextStartIndex + nextLines.length;
+  return {
+    execution_id: 'client-bridge-test',
+    attempt_id: 'custom',
+    inputs: {
+      'arc.source_readback': {
+        revision: 4,
+        bufferStartIndex: nextStartIndex,
+        bufferLines: nextLines.map(line),
+        rows: Math.max(3, nextLines.length),
+        cols: 20,
+        cursorKeysApp: false,
+        cursor: null,
+      },
+      'arc.diff_policy': diffPolicy,
+      'arc.prev_mirror_snapshot': {
+        revision: 3,
+        bufferStartIndex: previousStartIndex,
+        bufferLines: prevLines.map(line),
+      },
+      'arc.subscriber_facts': {
+        availableStartIndex: nextStartIndex,
+        availableEndIndex: nextEndIndex,
+        ...subscriberFacts,
+      },
+    },
+  };
+}
+
 function frameRanges(result: ReturnType<typeof runMirrorPublish>) {
   const frames = (result as { ok: true; outputs: Record<string, { frames: Array<{ ranges: Array<{ startIndex: number; endIndex: number }> }> }> })
     .outputs['arc.wire_frames'].frames;
@@ -53,6 +91,16 @@ function frameRanges(result: ReturnType<typeof runMirrorPublish>) {
 }
 
 describe('dagpipe bridge parity', () => {
+  it('uses an explicit no-hole diff policy by default', () => {
+    expect(DEFAULT_MIRROR_NO_HOLE_DIFF_POLICY).toMatchObject({
+      fullResync: false,
+      noHole: true,
+      maxPendingRanges: 64,
+      maxPendingSpanLines: 4096,
+      maxPendingAgeMs: 15_000,
+    });
+  });
+
   it('compiles phase0 daemon graphs', () => {
     expect(compilePhase0()).toMatchObject({ ok: true });
   });
@@ -88,6 +136,37 @@ describe('dagpipe bridge parity', () => {
       .outputs['arc.wire_frames'].frames;
     expect(frames[0]?.changeKind).toBe('rewrite');
     expect(frames[0]?.ranges).toEqual([{ startIndex: 1, endIndex: 2 }]);
+  });
+
+  it('classifies a shifted absolute window and matches findChangedIndexedRanges', () => {
+    const prevLines = ['a', 'b', 'c'];
+    const nextLines = ['x', 'a', 'b', 'c', 'y'];
+    const expected = findChangedIndexedRanges({
+      previousStartIndex: 10,
+      previousLines: prevLines.map(line),
+      nextStartIndex: 8,
+      nextLines: nextLines.map(line),
+    });
+    const result = runMirrorPublish(customMirrorRequest(10, prevLines, 8, nextLines));
+    expect(result.ok).toBe(true);
+    const frames = (result as { ok: true; outputs: Record<string, { frames: Array<Record<string, any>> }> })
+      .outputs['arc.wire_frames'].frames;
+    expect(frames[0]?.changeKind).toBe('window-shift');
+    expect(frames[0]?.ranges).toEqual(expected);
+  });
+
+  it('emits a full-window resync when diff policy requests reset', () => {
+    const result = runMirrorPublish(mirrorRequest(
+      ['a', 'b'],
+      ['x', 'y', 'z'],
+      { fullResync: true },
+    ));
+    expect(result.ok).toBe(true);
+    const frames = (result as { ok: true; outputs: Record<string, { frames: Array<Record<string, any>> }> })
+      .outputs['arc.wire_frames'].frames;
+    expect(frames[0]?.changeKind).toBe('reset');
+    expect(frames[0]?.action).toBe('resync');
+    expect(frames[0]?.ranges).toEqual([{ startIndex: 0, endIndex: 3 }]);
   });
 
   it('emits head-only frames when body is unchanged', () => {

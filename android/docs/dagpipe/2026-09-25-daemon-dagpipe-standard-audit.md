@@ -263,6 +263,24 @@ stateDiagram-v2
 - daemon file-transfer/attachment graph 和 Rust operator 如果短期不接线，可先保留编译门禁，也可在审批后删除，避免死重量。
 - `canonical-buffer.ts#findChangedIndexedRanges` 可作为 parity/test oracle 保留；若 bridge 测试足够稳定，可改为测试内 fixture，不再作为生产模块导出。
 
+## 2026-09-26 no-hole diff 闭环更新
+
+本轮将 daemon mirror 的 diff/classify/plan 语义收口，不再停留在只读审计：
+
+1. `compute_changed_ranges`（等价实现：`changed_ranges_for_window` +
+   `compute_changed_ranges`）对 append、rewrite、window-shift、reset 输出连续
+   无洞范围；classify 对 `bufferStartIndex` 变化归类为 `window-shift`。
+2. `BufferPublisherPlan` 使用 `arc.diff_policy` 的
+   `maxPendingRanges` / `maxPendingSpanLines` / `maxPendingAgeMs` 决定是否升级
+   为 full-window resync；backpressure 只影响 per-subscriber plan，不写入
+   mirror store。
+3. 生产 `server.ts` 显式传入 `DEFAULT_MIRROR_NO_HOLE_DIFF_POLICY`，
+   `mirrorPublishChangedRanges` 只在上游 mirror commit 后调用。
+4. Rust 单测覆盖 append/rewrite/window-shift/reset/head-only；TS bridge parity
+   覆盖 growth、rewrite、4096 行宽改写、64+ 稀疏 range、window-shift 和 reset。
+
+这个 loop 以 Rust bridge + TS parity + daemon restart 为准，不含 UI/连接/OTA。
+
 ## root 工作树残留
 
 `git status --short --untracked-files=no` 显示 root 存在一批未提交 DAGpipe 删除/修改，包括但不限于：
