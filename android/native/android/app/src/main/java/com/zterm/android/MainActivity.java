@@ -38,7 +38,6 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(DebugInputPlugin.class);
         registerPlugin(StoragePermissionPlugin.class);
         registerPlugin(AndroidConnectionServicePlugin.class);
-        registerPlugin(DagpipeCorePlugin.class);
         registerPlugin(ScreenOrientationPlugin.class);
         registerPlugin(NetworkIdentityPlugin.class);
         super.onCreate(savedInstanceState);

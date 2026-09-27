@@ -7,7 +7,7 @@ export interface SessionReconnectDecisionOptions {
   reconnectInFlight: boolean;
 }
 
-export type ActiveRefreshSource = 'explicit-resume' | 'foreground-resume' | 'active-reentry' | 'active-tick';
+export type ActiveRefreshSource = 'explicit-resume' | 'active-reentry' | 'active-tick';
 
 export interface ActiveSessionRefreshPlanOptions {
   hasSession: boolean;
@@ -17,6 +17,7 @@ export interface ActiveSessionRefreshPlanOptions {
   reconnectInFlight: boolean;
   pendingTransportOpen: boolean;
   pendingTransportOpenStale?: boolean;
+  allowReconnectIfUnavailable?: boolean;
   keepaliveGraceActive?: boolean;
   transportStale: boolean;
   source: ActiveRefreshSource;
@@ -523,7 +524,7 @@ export function buildActiveSessionRefreshPlan(options: ActiveSessionRefreshPlanO
     };
   }
 
-  if (options.source !== 'explicit-resume') {
+  if (!options.allowReconnectIfUnavailable) {
     return { action: 'skip', reason: 'transport-unavailable' };
   }
 
@@ -549,7 +550,7 @@ export function buildActiveSessionRefreshPlan(options: ActiveSessionRefreshPlanO
     return { action: 'skip', reason: 'transport-open-pending' };
   }
 
-  if (options.wsReadyState === WebSocket.CONNECTING) {
+  if (options.wsReadyState === WebSocket.CONNECTING && options.source !== 'active-tick') {
     return { action: 'skip', reason: 'transport-open-pending' };
   }
 

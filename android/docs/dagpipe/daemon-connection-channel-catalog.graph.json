@@ -3,126 +3,23 @@
   "version": "0.1",
   "inputs": [
     {
-      "id": "arc.request",
+      "id": "arc.physical_connection",
+      "schema": "Object"
+    },
+    {
+      "id": "arc.mux_capabilities",
+      "schema": "Object"
+    },
+    {
+      "id": "arc.session_catalog_request",
+      "schema": "Object"
+    },
+    {
+      "id": "arc.idle_facts_request",
       "schema": "Object"
     }
   ],
   "nodes": [
-    {
-      "id": "dagpipe.extract.arc.physical_connection",
-      "operator": "dagpipe.request.extract",
-      "operator_version": "0.1",
-      "inputs": [
-        "arc.request"
-      ],
-      "output": {
-        "id": "arc.physical_connection",
-        "schema": "Object"
-      },
-      "input_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "output_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "iterator": "Whole"
-    },
-    {
-      "id": "dagpipe.extract.arc.mux_capabilities",
-      "operator": "dagpipe.request.extract",
-      "operator_version": "0.1",
-      "inputs": [
-        "arc.request"
-      ],
-      "output": {
-        "id": "arc.mux_capabilities",
-        "schema": "Object"
-      },
-      "input_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "output_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "iterator": "Whole"
-    },
-    {
-      "id": "dagpipe.extract.arc.session_catalog_request",
-      "operator": "dagpipe.request.extract",
-      "operator_version": "0.1",
-      "inputs": [
-        "arc.request"
-      ],
-      "output": {
-        "id": "arc.session_catalog_request",
-        "schema": "Object"
-      },
-      "input_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "output_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "iterator": "Whole"
-    },
-    {
-      "id": "dagpipe.extract.arc.idle_facts_request",
-      "operator": "dagpipe.request.extract",
-      "operator_version": "0.1",
-      "inputs": [
-        "arc.request"
-      ],
-      "output": {
-        "id": "arc.idle_facts_request",
-        "schema": "Object"
-      },
-      "input_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "output_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "iterator": "Whole"
-    },
-    {
-      "id": "dagpipe.extract.arc.channel_removal_request",
-      "operator": "dagpipe.request.extract",
-      "operator_version": "0.1",
-      "inputs": [
-        "arc.request"
-      ],
-      "output": {
-        "id": "arc.channel_removal_request",
-        "schema": "Object"
-      },
-      "input_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "output_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "iterator": "Whole"
-    },
     {
       "id": "accept_physical_connection",
       "operator": "daemon.connection_gateway.accept",
@@ -264,78 +161,6 @@
         "predicate": null
       },
       "iterator": "Whole"
-    },
-    {
-      "id": "remove_session_channel",
-      "operator": "daemon.channel_mux.unregister",
-      "operator_version": "0.1",
-      "inputs": [
-        "arc.channel_registry",
-        "arc.channel_removal_request"
-      ],
-      "output": {
-        "id": "arc.removed_channel",
-        "schema": "Object"
-      },
-      "input_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "output_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "iterator": "Whole"
-    },
-    {
-      "id": "release_body_subscription",
-      "operator": "daemon.transport_subscriber.release",
-      "operator_version": "0.1",
-      "inputs": [
-        "arc.removed_channel"
-      ],
-      "output": {
-        "id": "arc.subscriber_released",
-        "schema": "Object"
-      },
-      "input_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "output_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "iterator": "Whole"
-    },
-    {
-      "id": "dagpipe.collect.arc.session_catalog,arc.idle_facts,arc.subscriber_released",
-      "operator": "dagpipe.result.collect",
-      "operator_version": "0.1",
-      "inputs": [
-        "arc.session_catalog",
-        "arc.idle_facts",
-        "arc.subscriber_released"
-      ],
-      "output": {
-        "id": "arc.result",
-        "schema": "Object"
-      },
-      "input_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "output_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "iterator": "Whole"
     }
   ],
   "edges": [
@@ -368,59 +193,10 @@
       "from": "build_session_catalog",
       "to": "publish_idle_facts",
       "arc_id": "arc.session_catalog"
-    },
-    {
-      "from": "dagpipe.extract.arc.physical_connection",
-      "to": "accept_physical_connection",
-      "arc_id": "arc.physical_connection"
-    },
-    {
-      "from": "dagpipe.extract.arc.mux_capabilities",
-      "to": "negotiate_mux",
-      "arc_id": "arc.mux_capabilities"
-    },
-    {
-      "from": "dagpipe.extract.arc.session_catalog_request",
-      "to": "build_session_catalog",
-      "arc_id": "arc.session_catalog_request"
-    },
-    {
-      "from": "dagpipe.extract.arc.idle_facts_request",
-      "to": "publish_idle_facts",
-      "arc_id": "arc.idle_facts_request"
-    },
-    {
-      "from": "dagpipe.extract.arc.channel_removal_request",
-      "to": "remove_session_channel",
-      "arc_id": "arc.channel_removal_request"
-    },
-    {
-      "from": "register_session_channel",
-      "to": "remove_session_channel",
-      "arc_id": "arc.channel_registry"
-    },
-    {
-      "from": "remove_session_channel",
-      "to": "release_body_subscription",
-      "arc_id": "arc.removed_channel"
-    },
-    {
-      "from": "build_session_catalog",
-      "to": "dagpipe.collect.arc.session_catalog,arc.idle_facts,arc.subscriber_released",
-      "arc_id": "arc.session_catalog"
-    },
-    {
-      "from": "publish_idle_facts",
-      "to": "dagpipe.collect.arc.session_catalog,arc.idle_facts,arc.subscriber_released",
-      "arc_id": "arc.idle_facts"
-    },
-    {
-      "from": "release_body_subscription",
-      "to": "dagpipe.collect.arc.session_catalog,arc.idle_facts,arc.subscriber_released",
-      "arc_id": "arc.subscriber_released"
     }
   ],
   "outputs": [
-    "arc.result"
+    "arc.session_catalog",
+    "arc.idle_facts"
   ]
 }

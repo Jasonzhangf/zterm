@@ -1,9 +1,17 @@
-# DAGpipe Phase 0 + Phase 1: Android static and Rust-core DAG governance
+# DAGpipe Phase 0: static DAG governance
 
-Scope: static DAG graphs, CLI validation, and the Android Rust-core parity
-gate. Phase 0 covers graph JSON and CLI validation only. Phase 1 registers the
-Android operators, compiles the approved graphs through `pipeline_runtime`,
-and proves black-box parity before production wiring.
+Scope: static DAG graphs and CLI validation for the daemon-side and Android
+client rewrite targets. Phase 0 does not add a Rust crate, does not add
+`pipeline_runtime` to `Cargo.toml`, does not touch daemon or client runtime
+code, and does not publish an APK or OTA update.
+
+Remaining project plan:
+
+- `remaining-modules-plan.md` - covers the remaining daemon, relay, Android
+  client, release, and observability modules and splits them into staged DAGpipe
+  slices.
+- `android-remaining-plan.html` - approval view for the remaining transformation
+  plan.
 
 Graphs:
 
@@ -23,62 +31,25 @@ Graphs:
   window planning -> range request dispatch -> response ingest -> sparse merge
   -> repair ledger -> render scope publication
 
-Phase 2 static graphs:
+Validation (requires the locally installed `dagpipe` CLI):
 
-- `relay-account-peer-route.graph.json`
-- `daemon-connection-channel-catalog.graph.json`
+Design slice:
 
-Phase 3 static graphs:
-
-- `daemon-input-schedule.graph.json`
-- `daemon-file-transfer-browse.graph.json`
-- `daemon-file-transfer-upload.graph.json`
-- `daemon-file-transfer-download.graph.json`
-- `daemon-attachment-delivery.graph.json`
-- `terminal-remote-screenshot.graph.json`
-
-Phase 4 static graphs:
-
-- `remote-window-stream-overlay.graph.json`
-
-Phase 5 static graphs:
-
-- `android-session-shell-lifecycle.graph.json`
-- `android-session-preview-lattice.graph.json`
-
-Phase 6 static graphs:
-
-- `android-composition-plugin.graph.json`
-- `android-control-command.graph.json`
-- `android-config-export.graph.json`
-- `android-config-import.graph.json`
-
-Phase 7 static graphs:
-
-- `release-runtime-promotion.graph.json`
-- `release-update-lifecycle.graph.json`
-- `observability-debug.graph.json`
-
-Phase 8 static graphs:
-
-- `android-connection-service.graph.json`
-
-Validation:
+- See `phase0-design-slice.md` for the daemon identities, roles, events, state
+  machines, node contracts, and change boundary.
+- See `android-phase0-design-slice.md` for the Android connection, buffer
+  management, buffer/render, and input design slice. It describes semantics in
+  Chinese and keeps Phase 1 gate evidence separated from Phase 0 static DAG
+  validation.
 
 ```sh
 pnpm --dir android test:dagpipe-phase0
 ```
 
-Phase 1 gate:
-
-```sh
-pnpm --dir android test:dagpipe-phase1
-```
-
 The CLI validates acyclicity, output reachability, and syntactic operator
 version bindings. It is not authoritative for project Operator resolution,
 ARC schema compatibility, or effect capability checks; those remain the SDK
-`compile()` gate.
+`compile()` gate and are intentionally deferred to Phase 1.
 
 Mirror update semantics captured in the DAG:
 
@@ -100,14 +71,6 @@ Diff policy:
   changed-span policy, and the full-resync thresholds.
 - The default target is no-hole updates: a publish frame must cover every row
   from `startIndex` through `endIndex - 1`. Sparse holes are not sent.
-- Incoming changed ranges are diff truth only: `daemon.mirror_store.diff`
-  returns them unchanged, and the bridge must return exactly the ranges
-  computed by `src/server/canonical-buffer.ts#findChangedIndexedRanges`.
-  Subscriber pending bounds stay in `daemon.buffer_publisher`.
-- The live daemon mirror range decision is routed through
-  `mirrorPublishChangedRanges`/`runMirrorPublish`; the old TS
-  `findChangedIndexedRanges` remains only as the parity/test source contract
-  for the bridge.
 - Configurable rules may decide between tail append, contiguous rewrite span,
   window-shift prefix/tail, or full-window resync.
 
@@ -143,6 +106,13 @@ Roles:
 - `daemon.control_gateway/control_center/control_owner`: control only, no body
   truth.
 
+Acceptance for this phase:
+
+- `dagpipe graph validate` passes for all six graphs.
+- `dagpipe graph inspect` prints waves and operator bindings for all six
+  graphs.
+- No runtime code or dependency change.
+
 Android client boundaries frozen by these graphs:
 
 - Relay account login is account-scoped with token-per-login; it never hides
@@ -166,56 +136,3 @@ Android client boundaries frozen by these graphs:
 - `client.reliable_input` owns ordered in-flight/ACK/retry planning and the
   only client terminal-input queue; transport lifecycle remains outside this
   graph.
-
-Phase 1 current status:
-
-- Rust crate `android/native/dagpipe` compiles and runs the Android graphs
-  through `pipeline_runtime`.
-- Black-box parity tests run through the N-API bridge and a JNI `.so`.
-- The client production path still needs a non-raw-input thin bridge before
-  Phase 1 is considered runtime-closed.
-- `dagpipe graph validate` passes for both graphs.
-- `dagpipe graph inspect` prints waves and operator bindings for both graphs.
-- Runtime is wired through the DAGpipe native bridge and live daemon mirror
-  routing; this phase does not by itself request OTA/APK publish.
-
-## Native client and daemon bridge wiring
-
-`src/lib/dagpipe-native-client.ts` exposes Capacitor-bound `runDagpipe*`
-entrypoints. Production callers are wired as thin admission gates at their
-owning entry points; they do not replace the legacy TypeScript runtime.
-
-- `runDagpipeConnection`, `runDagpipeBufferManagement`,
-  `runDagpipeBufferRender`, `runDagpipeInputDispatch`,
-  `runDagpipePhase8Connection`: `src/lib/android-connection-service-factory.ts`
-  socket bind entry. The buffer/render/input calls are documented as startup-
-  only admission on that entry; they are not owner wiring for
-  `client.buffer_store` / `client.renderer_window` / `client.input_runtime`.
-- `runDagpipePhase2Relay`: `src/hooks/useTraversalRelayAccount.ts`.
-- `runDagpipePhase3Upload`, `runDagpipePhase3Attachment`,
-  `runDagpipePhase3Screenshot`: `src/contexts/session-context-transfer-runtime.ts`.
-- `runDagpipePhase4RemoteWindow`: `src/contexts/session-context-interaction-runtime.ts`.
-- `runDagpipePhase5ShellLifecycle`: `src/hooks/useOpenTabRestoreRuntimeSync.ts`
-  cold restore path.
-- `runDagpipePhase5PreviewLattice`: `src/pages/TerminalPage.tsx`.
-- `runDagpipePhase6Control`, `runDagpipePhase6Composition`: `src/App.tsx`.
-- `runDagpipePhase6ConfigExport`, `runDagpipePhase6ConfigImport`:
-  `src/hooks/useConfigExport.ts`.
-- `runDagpipePhase7Update`: `src/lib/app-update-runtime.ts`.
-
-Daemon-owned graphs run through `src/server/dagpipe-bridge.ts`; their native
-client wrapper entries are N/A on the client side by ownership:
-
-- `runDagpipePhase2DaemonConnection` -> native bridge/plugin test parity only;
-  production `daemon.session_catalog` currently uses
-  `src/server/daemon-session-catalog-runtime.ts` directly without this native
-  gate. This runtime is not wired as a production daemon session catalog owner.
-- `runDagpipePhase3InputSchedule` -> `daemon.input_queue`
-  (`src/server/daemon-input-queue-runtime.ts`).
-- `runDagpipePhase3FileBrowse`, `runDagpipePhase3Download` -> `daemon.file_transfer`
-  (`src/server/terminal-file-transfer-list-runtime.ts`).
-- `runDagpipePhase7Release`: `scripts/prepare-global-daemon-release.sh`
-  release gate after deterministic archive + sha256 verification.
-- `runDagpipePhase7Debug`: `src/hooks/useRelayDeviceStream.ts` relay debug
-  request gate. The native gate runs only when the client platform is native;
-  the legacy bounded HTTP upload path remains read-only metadata export.

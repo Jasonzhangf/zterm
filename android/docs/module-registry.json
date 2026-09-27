@@ -121,11 +121,7 @@
         "src/components/terminal/attachment-drawer-helpers.ts",
         "src/components/terminal/terminal-copy-gesture.ts",
         "src/lib/terminal-mouse-wheel-sgr.ts",
-        "src/lib/terminal-viewport-metrics.ts",
-        "src/lib/dagpipe-native-client.ts",
-        "src/lib/dagpipe-input-chunks.ts",
-        "src/lib/dagpipe-bridge.ts",
-        "src/lib/dagpipe-types.ts"
+        "src/lib/terminal-viewport-metrics.ts"
       ]
     },
     {
@@ -523,41 +519,6 @@
         "src/server/terminal-core-support.ts",
         "src/server/terminal-daemon-runtime.ts",
         "src/server/terminal-http-runtime.ts"
-      ]
-    },
-    {
-      "module_id": "daemon.dagpipe_bridge",
-      "runtime_side": "daemon",
-      "level": 1,
-      "parent_module_id": "daemon.runtime",
-      "owner_feature": "daemon.dagpipe_bridge",
-      "responsibility": "Native DAGpipe load boundary and thin TS bridge for daemon-side graph execution gates.",
-      "owned_resources": [
-      ],
-      "consumed_resources": [],
-      "pending_resources": [],
-      "public_interfaces": [
-        "src/server/dagpipe-bridge.ts"
-      ],
-      "forbidden_resources": [
-        "resource.open_tab",
-        "resource.active_session",
-        "resource.renderer_window",
-        "resource.ui_projection"
-      ],
-      "canonical_docs": [
-        "docs/modules/project-modules.md",
-        "docs/dagpipe/phase0-design-slice.md",
-        "docs/wiki/mainline-source.md"
-      ],
-      "required_gates": [
-        "src/lib/module-registry-truth.test.ts",
-        "src/server/dagpipe-bridge.test.ts"
-      ],
-      "status": "active",
-      "owned_paths": [
-        "src/server/dagpipe-bridge.ts",
-        "src/server/dagpipe-bridge.test.ts"
       ]
     },
     {
@@ -3392,7 +3353,6 @@
         "native/android/app/src/main/java/com/zterm/android/AndroidConnectionCommand.java",
         "native/android/app/src/main/java/com/zterm/android/AndroidConnectionServiceRoutePolicy.java",
         "native/android/app/src/main/java/com/zterm/android/AndroidConnectionServiceTarget.java",
-        "native/android/app/src/main/java/com/zterm/android/AndroidRtcTransportBackend.java",
         "docs/testing/android-notification-session-actions-test-design.md"
       ]
     }

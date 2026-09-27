@@ -228,16 +228,6 @@ describe('zterm daemon service script truth gates', () => {
     expect(body.indexOf('wait_for_service_unloaded')).toBeLessThan(body.indexOf('bootstrap_service'));
   });
 
-  it('stages the DAGpipe native module and passes it to every daemon exec path', () => {
-    const script = readDaemonScript();
-    const stageBody = extractBlock(script, 'stage_daemon_runtime() {', 1800);
-
-    expect(script).toContain('STAGED_DAGPIPE_NATIVE="${DAEMON_RUNTIME_DIR}/dagpipe.node"');
-    expect(stageBody).toContain('bash "${ROOT_DIR}/scripts/build-dagpipe-native.sh"');
-    expect(stageBody).toContain('cp "${ROOT_DIR}/native/dagpipe/index.node" "${STAGED_DAGPIPE_NATIVE}"');
-    expect(script.match(/ZTERM_DAGPIPE_NATIVE=/g)?.length).toBeGreaterThanOrEqual(4);
-  });
-
   it('requires HTTP health for service readiness, status, and launchd preflight', () => {
     const script = readDaemonScript();
     const releaseScript = readReleaseScript();
@@ -480,12 +470,5 @@ describe('zterm daemon service script truth gates', () => {
     expect(script).not.toContain('status_tmux() {');
     expect(script).not.toContain('tmux new-session -d -s "$SESSION_NAME"');
     expect(script).not.toContain('tmux kill-session -t "$SESSION_NAME"');
-  });
-
-  it('keeps live mirror diff wired through the DAGpipe bridge instead of TS changed ranges', () => {
-    const serverSource = readFileSync(join(process.cwd(), 'src', 'server', 'server.ts'), 'utf8');
-    expect(serverSource).toContain('mirrorPublishChangedRanges');
-    expect(serverSource).toContain("from './dagpipe-bridge'");
-    expect(serverSource).not.toContain('findChangedIndexedRanges');
   });
 });

@@ -607,10 +607,6 @@
           "label": "native/android/app/src/main/java/com/zterm/android/AndroidConnectionServicePlugin.java (typed IPC projection)"
         },
         {
-          "id": "AndroidRtcTransportBackend",
-          "label": "native/android/app/src/main/java/com/zterm/android/AndroidRtcTransportBackend.java (candidate signaling/ICE/DataChannel owner)"
-        },
-        {
           "id": "AndroidConnectionServiceSnapshot",
           "label": "src/lib/android-connection-service-snapshot.ts (target-scoped projection)"
         },
@@ -3312,19 +3308,6 @@
           "resource_from": "resource.client_connection_service_ipc",
           "resource_to": "resource.android_connection_service",
           "via_resources": ["resource.client_connection_service_ipc"],
-          "relation_status": "via"
-        },
-        {
-          "from": "AndroidConnectionService",
-          "to": "AndroidRtcTransportBackend",
-          "owner_feature": "client.android_connection_service",
-          "semantic_input": "rtc candidate signal/auth and policy",
-          "semantic_output": "candidate-scoped signaling/ICE/DataChannel backend",
-          "status": "partial",
-          "edge_id": "android_mainline:AndroidConnectionService->AndroidRtcTransportBackend",
-          "resource_from": "resource.android_connection_service",
-          "resource_to": "resource.android_connection_service",
-          "via_resources": ["resource.android_connection_service"],
           "relation_status": "via"
         },
         {

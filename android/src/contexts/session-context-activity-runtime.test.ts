@@ -35,6 +35,7 @@ function createBaseOptions(overrides: Partial<Parameters<typeof ensureActiveSess
     refreshOptions: {
       sessionId: 'session-1',
       source: 'active-reentry',
+      allowReconnectIfUnavailable: true,
     },
     refs: {
       stateRef,
@@ -107,16 +108,12 @@ describe('ensureActiveSessionFreshRuntime', () => {
     expect(reconnectSession).not.toHaveBeenCalled();
   });
 
-  it('reopens a closed mux channel on an open target transport only for explicit resume', () => {
+  it('reopens a closed mux channel on an open target transport instead of sending head to the dead channel', () => {
     const targetSocket = { readyState: WebSocket.OPEN } as any;
     const requestSessionBufferHead = vi.fn(() => true);
     const reconnectSession = vi.fn();
     const reopenSessionTerminalChannel = vi.fn();
     const options = createBaseOptions({
-      refreshOptions: {
-        sessionId: 'session-1',
-        source: 'explicit-resume',
-      },
       daemonConnection: makeDaemonConnection(targetSocket),
       readSessionTerminalChannel: () => ({ state: 'closed' }),
       requestSessionBufferHead,
@@ -138,9 +135,10 @@ describe('ensureActiveSessionFreshRuntime', () => {
     const options = createBaseOptions({
       refreshOptions: {
         sessionId: 'session-1',
-        source: 'foreground-resume',
+        source: 'explicit-resume',
         forceHead: true,
         markResumeTail: true,
+        allowReconnectIfUnavailable: false,
       },
       daemonConnection: makeDaemonConnection(targetSocket),
       readSessionTerminalChannel: () => ({ state: 'closed' }),
@@ -161,9 +159,10 @@ describe('ensureActiveSessionFreshRuntime', () => {
     const options = createBaseOptions({
       refreshOptions: {
         sessionId: 'session-1',
-        source: 'foreground-resume',
+        source: 'explicit-resume',
         forceHead: true,
         markResumeTail: true,
+        allowReconnectIfUnavailable: false,
       },
       daemonConnection: makeDaemonConnection(null),
       requestSessionBufferHead,
@@ -200,6 +199,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
         source: 'active-reentry',
         forceHead: true,
         markResumeTail: true,
+        allowReconnectIfUnavailable: true,
       },
       refs,
       daemonConnection: makeDaemonConnection(ws),
@@ -226,6 +226,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
         source: 'explicit-resume',
         forceHead: true,
         markResumeTail: true,
+        allowReconnectIfUnavailable: true,
       },
       refs,
       daemonConnection: makeDaemonConnection(ws),
@@ -265,6 +266,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
       refreshOptions: {
         sessionId: 'session-1',
         source: 'explicit-resume',
+        allowReconnectIfUnavailable: true,
       },
       daemonConnection: makeDaemonConnection(null),
       hasPendingSessionTransportOpen: () => true,
@@ -302,6 +304,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
         source: 'explicit-resume',
         forceHead: true,
         markResumeTail: true,
+        allowReconnectIfUnavailable: true,
       },
       refs,
       daemonConnection: makeDaemonConnection(null),
@@ -320,6 +323,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
       refreshOptions: {
         sessionId: 'session-1',
         source: 'explicit-resume',
+        allowReconnectIfUnavailable: true,
       },
       daemonConnection: makeDaemonConnection({ readyState: WebSocket.CONNECTING }),
       hasPendingSessionTransportOpen: () => true,
@@ -352,6 +356,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
       refreshOptions: {
         sessionId: 'session-1',
         source: 'explicit-resume',
+        allowReconnectIfUnavailable: true,
       },
       daemonConnection: makeDaemonConnection(null),
       hasPendingSessionTransportOpen: () => true,
@@ -379,6 +384,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
       refreshOptions: {
         sessionId: 'session-1',
         source: 'explicit-resume',
+        allowReconnectIfUnavailable: true,
       },
       daemonConnection: makeDaemonConnection({ readyState: WebSocket.CLOSED }),
       hasPendingSessionTransportOpen: () => true,
@@ -427,6 +433,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
       refreshOptions: {
         sessionId: 'session-1',
         source: 'explicit-resume',
+        allowReconnectIfUnavailable: true,
       },
       daemonConnection: makeDaemonConnection(null),
       reconnectSession,
@@ -457,6 +464,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
       refreshOptions: {
         sessionId: 'session-1',
         source: 'explicit-resume',
+        allowReconnectIfUnavailable: true,
       },
       refs,
       daemonConnection: makeDaemonConnection({ readyState: WebSocket.CONNECTING }),
@@ -476,7 +484,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
     }
   });
 
-  it('does not reconnect active tick recovery even after keepalive grace expires', () => {
+  it('does not apply keepalive grace to active tick recovery', () => {
     const now = 100_000;
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
     const reconnectSession = vi.fn();
@@ -486,6 +494,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
       refreshOptions: {
         sessionId: 'session-1',
         source: 'active-tick',
+        allowReconnectIfUnavailable: true,
       },
       refs,
       daemonConnection: makeDaemonConnection({ readyState: WebSocket.CLOSED }),
@@ -493,8 +502,8 @@ describe('ensureActiveSessionFreshRuntime', () => {
     });
 
     try {
-      expect(ensureActiveSessionFreshRuntime(options)).toBe(false);
-      expect(reconnectSession).not.toHaveBeenCalled();
+      expect(ensureActiveSessionFreshRuntime(options)).toBe(true);
+      expect(reconnectSession).toHaveBeenCalledWith('session-1');
     } finally {
       nowSpy.mockRestore();
     }
@@ -509,7 +518,8 @@ describe('ensureActiveSessionFreshRuntime', () => {
     const options = createBaseOptions({
       refreshOptions: {
         sessionId: 'session-1',
-        source: 'explicit-resume',
+        source: 'active-reentry',
+        allowReconnectIfUnavailable: true,
       },
       refs,
       daemonConnection: makeDaemonConnection(null),
@@ -534,6 +544,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
       refreshOptions: {
         sessionId: 'session-1',
         source: 'explicit-resume',
+        allowReconnectIfUnavailable: true,
       },
       refs,
       daemonConnection: makeDaemonConnection(null),
@@ -635,6 +646,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
       refreshOptions: {
         sessionId: 'session-1',
         source: 'active-tick',
+        allowReconnectIfUnavailable: true,
       },
       refs,
       daemonConnection: makeDaemonConnection(ws),

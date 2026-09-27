@@ -387,18 +387,8 @@ export function notifyTargetNetworkSignalRuntime(options: {
   runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
 }) {
   const outcomes: TargetNetworkProbeOutcome[] = [];
-  if (options.signal.source === 'foreground-resume') {
-    // Foreground resume is a data-refresh projection. It must not probe,
-    // retire a physical transport, or wake a scheduled reconnect; recovery is
-    // owned by the Android connection service / DAGpipe reconnect owner.
-    options.runtimeDebug('session.target-network-probe.signal', {
-      source: options.signal.source,
-      mode: 'data-refresh-only',
-    });
-    return outcomes;
-  }
-  // Only a real network-recovery signal may wake a scheduled reconnect.
-  const shouldWakeReconnects = options.signal.connected === true;
+  const shouldWakeReconnects = options.signal.source === 'foreground-resume'
+    || options.signal.connected === true;
   if (shouldWakeReconnects) {
     options.wakeScheduledReconnects?.();
   }
@@ -472,11 +462,13 @@ export function notifyTargetNetworkSignalRuntime(options: {
       result,
     };
     outcomes.push(outcome);
-    const signalMetadata = {
-      source: options.signal.source,
-      connected: options.signal.connected,
-      connectionType: options.signal.connectionType,
-    };
+    const signalMetadata = options.signal.source === 'foreground-resume'
+      ? { source: options.signal.source }
+      : {
+        source: options.signal.source,
+        connected: options.signal.connected,
+        connectionType: options.signal.connectionType,
+      };
     options.runtimeDebug('session.target-network-probe.signal', {
       ...outcome,
       ...signalMetadata,

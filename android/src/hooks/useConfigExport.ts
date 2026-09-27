@@ -3,11 +3,6 @@ import { Directory, Encoding, Filesystem } from '@capacitor/filesystem';
 import { getBrowserStorage } from '../lib/browser-storage';
 import { APP_VERSION } from '../lib/app-version';
 import {
-  isDagpipeNativeCapable,
-  runDagpipePhase6ConfigExport,
-  runDagpipePhase6ConfigImport,
-} from '../lib/dagpipe-native-client';
-import {
   buildConfigExportPayload,
   validateConfigExportPayload,
   applyConfigImportPayload,
@@ -45,18 +40,6 @@ export function useConfigExport() {
     setExporting(true);
     setLastError(null);
     try {
-      if (isDagpipeNativeCapable()) {
-        const exportGate = await runDagpipePhase6ConfigExport({
-          execution_id: 'config-export',
-          attempt_id: '1',
-          inputs: {
-            'arc.config_export_request': { configId: CONFIG_EXPORT_PATH },
-          },
-        });
-        if (!exportGate.ok) {
-          throw new Error(`DAGpipe config export gate rejected: ${exportGate.error}`);
-        }
-      }
       const storage = getBrowserStorage();
       if (!storage) {
         throw new Error('Storage not available');
@@ -88,18 +71,6 @@ export function useConfigExport() {
     setImporting(true);
     setLastError(null);
     try {
-      if (isDagpipeNativeCapable()) {
-        const importGate = await runDagpipePhase6ConfigImport({
-          execution_id: 'config-import',
-          attempt_id: '1',
-          inputs: {
-            'arc.config_import_request': { configId: CONFIG_EXPORT_PATH },
-          },
-        });
-        if (!importGate.ok) {
-          throw new Error(`DAGpipe config import gate rejected: ${importGate.error}`);
-        }
-      }
       const storage = getBrowserStorage();
       if (!storage) {
         throw new Error('Storage not available');
