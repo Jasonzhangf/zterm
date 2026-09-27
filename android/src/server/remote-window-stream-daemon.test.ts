@@ -71,15 +71,6 @@ describe('remote window stream daemon v2 contract', () => {
     expect(source).not.toContain('peerConnection.addTransceiver(streamEntry.overviewVideoTrack');
   });
 
-  it('routes catalog, quality, and touch entries through the phase4 bridge', () => {
-    const source = readFileSync(new URL('./remote-window-stream-daemon.ts', import.meta.url), 'utf8');
-    expect(source).toContain('runRemoteWindowDagpipeGate');
-    expect(source).toContain('listTargets: async (payload) => {');
-    expect(source).toContain('const qualityGate = runRemoteWindowDagpipeGate');
-    expect(source).toContain('const inputGate = runRemoteWindowDagpipeGate');
-    expect(source).toContain('DAGpipe remote window catalog gate rejected');
-  });
-
   it('does not feed captured frames before the ICE-connected streaming milestone', () => {
     const source = readFileSync(new URL('./remote-window-stream-daemon.ts', import.meta.url), 'utf8');
     expect(source).toContain("entry.remoteDescriptionApplied");

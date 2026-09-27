@@ -307,9 +307,10 @@ describe('session-context-lifecycle', () => {
     expect(ensureActiveSessionFresh).toHaveBeenCalledTimes(1);
     expect(ensureActiveSessionFresh).toHaveBeenCalledWith({
       sessionId: 's1',
-      source: 'foreground-resume',
+      source: 'explicit-resume',
       forceHead: true,
       markResumeTail: true,
+      allowReconnectIfUnavailable: false,
     });
 
     view.rerender(<Harness appForegroundActive />);
@@ -386,9 +387,10 @@ describe('session-context-lifecycle', () => {
     expect(ensureActiveSessionFresh).toHaveBeenCalledTimes(1);
     expect(ensureActiveSessionFresh).toHaveBeenCalledWith({
       sessionId: 's1',
-      source: 'foreground-resume',
+      source: 'explicit-resume',
       forceHead: true,
       markResumeTail: true,
+      allowReconnectIfUnavailable: false,
     });
 
     view.rerender(<Harness foregroundResumeEpoch={1} />);
@@ -481,9 +483,10 @@ describe('session-context-lifecycle', () => {
     expect(ensureActiveSessionFresh).toHaveBeenCalledTimes(1);
     expect(ensureActiveSessionFresh).toHaveBeenCalledWith({
       sessionId: 's1',
-      source: 'foreground-resume',
+      source: 'explicit-resume',
       forceHead: true,
       markResumeTail: true,
+      allowReconnectIfUnavailable: false,
     });
 
     view.rerender(<Harness appForegroundActive liveSessionIds={['s1', 's2']} />);
@@ -494,12 +497,13 @@ describe('session-context-lifecycle', () => {
     expect(ensureActiveSessionFresh).toHaveBeenCalledTimes(2);
     expect(ensureActiveSessionFresh).toHaveBeenNthCalledWith(2, {
       sessionId: 's2',
-      source: 'active-reentry',
+      source: 'explicit-resume',
       forceHead: true,
+      allowReconnectIfUnavailable: false,
     });
   });
 
-  it('keeps passive sessions materialized after a foreground resume data-refresh-only', async () => {
+  it('allows reconnect for passive sessions materialized after a foreground resume', async () => {
     vi.useFakeTimers();
     const ensureActiveSessionFresh = vi.fn(() => true);
     const stateRef = {
@@ -582,9 +586,10 @@ describe('session-context-lifecycle', () => {
     expect(ensureActiveSessionFresh).toHaveBeenCalledTimes(1);
     expect(ensureActiveSessionFresh).toHaveBeenCalledWith({
       sessionId: 's1',
-      source: 'foreground-resume',
+      source: 'explicit-resume',
       forceHead: true,
       markResumeTail: true,
+      allowReconnectIfUnavailable: false,
     });
 
     view.rerender(
@@ -597,8 +602,9 @@ describe('session-context-lifecycle', () => {
     expect(ensureActiveSessionFresh).toHaveBeenCalledTimes(2);
     expect(ensureActiveSessionFresh).toHaveBeenNthCalledWith(2, {
       sessionId: 's2',
-      source: 'active-reentry',
+      source: 'explicit-resume',
       forceHead: true,
+      allowReconnectIfUnavailable: true,
     });
   });
 
@@ -772,6 +778,7 @@ describe('session-context-lifecycle', () => {
       sessionId: 's2',
       source: 'active-reentry',
       forceHead: true,
+      allowReconnectIfUnavailable: true,
     });
   });
 

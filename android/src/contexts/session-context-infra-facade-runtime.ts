@@ -78,6 +78,16 @@ import {
   writeSessionTransportTokenRuntime,
 } from './session-context-infra-runtime';
 
+export function shouldRouteAndroidHostToTraversalSocket(host: Host) {
+  if (host.transportMode === 'webrtc') {
+    return true;
+  }
+  return (host.relayEndpointCandidates || []).some((candidate) => (
+    candidate.kind === 'relay-rtc'
+    && candidate.relayHostId?.trim()
+  ));
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -524,14 +534,12 @@ export function createSessionInfraFacadeRuntime(options: {
   };
 
   const openDaemonTargetTransportSocket = (host: Host) => {
-    if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
-      return openAndroidConnectionServiceTransportSocket(host, {
-        signalUrl: options.bridgeSettings.signalUrl,
-        turnServerUrl: options.bridgeSettings.turnServerUrl,
-        turnUsername: options.bridgeSettings.turnUsername,
-        turnCredential: options.bridgeSettings.turnCredential,
-        traversalRelay: options.bridgeSettings.traversalRelay,
-      });
+    if (
+      Capacitor.isNativePlatform()
+      && Capacitor.getPlatform() === 'android'
+      && !shouldRouteAndroidHostToTraversalSocket(host)
+    ) {
+      return openAndroidConnectionServiceTransportSocket(host);
     }
     return buildTraversalSocketForHostRuntime({
       host,

@@ -125,25 +125,6 @@ describe('notifyTargetNetworkSignalRuntime', () => {
     targetNetworkProbeRuntime.dispose();
   });
 
-  it('does not wake scheduled reconnects from a UI foreground-resume projection', () => {
-    const wakeScheduledReconnects = vi.fn();
-    const targetNetworkProbeRuntime = createSessionTargetNetworkProbeRuntime({ probeTimeoutMs: 2_500, now: Date.now });
-
-    expect(notifyTargetNetworkSignalRuntime({
-      signal: { source: 'foreground-resume' },
-      targetRuntimes: [],
-      targetNetworkProbeRuntime,
-      sendTargetProbe: vi.fn(),
-      submitTargetSocketFailure: vi.fn(),
-      submitTargetNetworkProbeError: vi.fn(),
-      wakeScheduledReconnects,
-      runtimeDebug: vi.fn(),
-    })).toEqual([]);
-
-    expect(wakeScheduledReconnects).not.toHaveBeenCalled();
-    targetNetworkProbeRuntime.dispose();
-  });
-
   it('does not wake scheduled reconnects on a negative network signal', () => {
     const wakeScheduledReconnects = vi.fn();
     const targetNetworkProbeRuntime = createSessionTargetNetworkProbeRuntime({ probeTimeoutMs: 2_500, now: Date.now });
@@ -329,7 +310,7 @@ describe('notifyTargetNetworkSignalRuntime', () => {
     targetNetworkProbeRuntime.dispose();
   });
 
-  it('never probes a non-service transport from a foreground-resume projection', () => {
+  it('still probes a non-service transport', () => {
     const socket = Object.assign(makeFailedSocket(WebSocket.OPEN), {
       transportOwnership: 'client' as const,
     });
@@ -347,9 +328,8 @@ describe('notifyTargetNetworkSignalRuntime', () => {
       submitTargetSocketFailure: vi.fn(),
       submitTargetNetworkProbeError: vi.fn(),
       runtimeDebug: vi.fn(),
-    })).toEqual([]);
-    expect(sendTargetProbe).not.toHaveBeenCalled();
-    expect(socket.reportFailure).not.toHaveBeenCalled();
+    })).toEqual([{ targetKey: 'daemon-client', result: 'started' }]);
+    expect(sendTargetProbe).toHaveBeenCalledWith('daemon-client', socket, 1_000);
     targetNetworkProbeRuntime.dispose();
   });
 
@@ -381,7 +361,7 @@ describe('notifyTargetNetworkSignalRuntime', () => {
     targetNetworkProbeRuntime.dispose();
   });
 
-  it('skips a foreground-resume closed target entirely as data-refresh-only', () => {
+  it('routes a foreground-resume closed target through the typed probe failure owner', () => {
     const socket = makeFailedSocket(WebSocket.CLOSED);
     const targetNetworkProbeRuntime = createSessionTargetNetworkProbeRuntime({ probeTimeoutMs: 2_500, now: Date.now });
     const sendTargetProbe = vi.fn();
@@ -397,13 +377,19 @@ describe('notifyTargetNetworkSignalRuntime', () => {
       submitTargetSocketFailure,
       submitTargetNetworkProbeError: vi.fn(),
       runtimeDebug: vi.fn(),
-    })).toEqual([]);
+    })).toEqual([
+      { targetKey: 'daemon-a', result: 'terminal-socket' },
+    ]);
     expect(sendTargetProbe).not.toHaveBeenCalled();
-    expect(submitTargetSocketFailure).not.toHaveBeenCalled();
+    expect(submitTargetSocketFailure).toHaveBeenCalledWith(
+      'daemon-a',
+      socket,
+      `network generation target transport terminal state ${WebSocket.CLOSED}`,
+    );
     targetNetworkProbeRuntime.dispose();
   });
 
-  it('skips a foreground-resume target that is still connecting', () => {
+  it('retains a foreground-resume target that is still connecting', () => {
     const socket = makeFailedSocket(WebSocket.CONNECTING);
     const targetNetworkProbeRuntime = createSessionTargetNetworkProbeRuntime({ probeTimeoutMs: 2_500, now: Date.now });
     const sendTargetProbe = vi.fn();
@@ -419,47 +405,25 @@ describe('notifyTargetNetworkSignalRuntime', () => {
       submitTargetSocketFailure,
       submitTargetNetworkProbeError: vi.fn(),
       runtimeDebug: vi.fn(),
-    })).toEqual([]);
+    })).toEqual([
+      { targetKey: 'daemon-a', result: 'still-connecting' },
+    ]);
     expect(sendTargetProbe).not.toHaveBeenCalled();
     expect(submitTargetSocketFailure).not.toHaveBeenCalled();
     targetNetworkProbeRuntime.dispose();
   });
 
-  it('never probes an OPEN target on foreground-resume', () => {
+  it('keeps an OPEN target after one inconclusive foreground probe timeout', () => {
+    vi.useFakeTimers();
     const socket = makeFailedSocket(WebSocket.OPEN);
     const targetNetworkProbeRuntime = createSessionTargetNetworkProbeRuntime({
       probeTimeoutMs: 2_500,
       now: () => 1_000,
     });
     const submitTargetSocketFailure = vi.fn();
-    const sendTargetProbe = vi.fn();
 
     expect(notifyTargetNetworkSignalRuntime({
       signal: { source: 'foreground-resume' },
-      targetRuntimes: [
-        { key: 'daemon-a', sessionIds: ['session-a1'], terminalTransport: socket },
-      ],
-      targetNetworkProbeRuntime,
-      sendTargetProbe,
-      submitTargetSocketFailure,
-      submitTargetNetworkProbeError: vi.fn(),
-      runtimeDebug: vi.fn(),
-    })).toEqual([]);
-    expect(sendTargetProbe).not.toHaveBeenCalled();
-    expect(submitTargetSocketFailure).not.toHaveBeenCalled();
-    targetNetworkProbeRuntime.dispose();
-  });
-
-  it('does not retire a physical transport when foreground-resume carries fingerprintChanged', () => {
-    const socket = makeFailedSocket(WebSocket.OPEN);
-    const targetNetworkProbeRuntime = createSessionTargetNetworkProbeRuntime({
-      probeTimeoutMs: 2_500,
-      now: Date.now,
-    });
-    const submitTargetSocketFailure = vi.fn();
-
-    expect(notifyTargetNetworkSignalRuntime({
-      signal: { source: 'foreground-resume', fingerprintChanged: true, networkGeneration: 99 },
       targetRuntimes: [
         { key: 'daemon-a', sessionIds: ['session-a1'], terminalTransport: socket },
       ],
@@ -468,10 +432,14 @@ describe('notifyTargetNetworkSignalRuntime', () => {
       submitTargetSocketFailure,
       submitTargetNetworkProbeError: vi.fn(),
       runtimeDebug: vi.fn(),
-    })).toEqual([]);
+    })).toEqual([
+      { targetKey: 'daemon-a', result: 'started' },
+    ]);
+
+    vi.advanceTimersByTime(2_500);
     expect(submitTargetSocketFailure).not.toHaveBeenCalled();
-    expect(socket.close).not.toHaveBeenCalled();
     targetNetworkProbeRuntime.dispose();
+    vi.useRealTimers();
   });
 });
 

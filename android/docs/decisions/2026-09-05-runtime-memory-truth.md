@@ -76,10 +76,9 @@ client
 
 AndroidConnectionService
   -> native WebSocket / mux / heartbeat / reconnect
-  -> native RTC direct / TURN relay candidates
 
 TypeScript TraversalSocket
-  -> shared traversal/configuration projection only
+  -> RTC direct / TURN traversal paths
 ```
 
 - The daemon reads Relay credentials and URL from environment or the current
@@ -87,15 +86,12 @@ TypeScript TraversalSocket
 - The client currently persists username, access token, and Relay settings, but
   not the plaintext password.
 - Production client code still contains a fixed default Relay URL.
-- `AndroidConnectionService` currently owns the WebSocket/mux physical
-  lifecycle and candidate-scoped native WebRTC through
-  `AndroidRtcTransportBackend`; UDP/WebRTC/TURN traversal is no longer executed
-  by the TypeScript traversal path.
-- The native Auto order is
-  `LAN -> UDP direct (IPv4/IPv6) -> rtc-direct -> Tailscale -> rtc-relay`.
-- The native target contract keeps the Relay access token (`signalToken`,
-  valid only when `signalUrlFromRelay` proves the URL came from
-  `traversalRelay.wsClientUrl`) separate from the daemon `authToken`.
+- `AndroidConnectionService` currently owns WebSocket/mux physical lifecycle
+  but explicitly rejects native WebRTC. UDP/WebRTC traversal remains in
+  TypeScript.
+- The TypeScript Auto order currently begins
+  `LAN -> RTC direct -> Tailscale`; the native Service currently begins
+  `LAN -> Tailscale`.
 
 ## Confirmed Target Design
 
@@ -213,12 +209,9 @@ The following are target migrations, not completed runtime facts:
    synchronization head/tail plus at most three screens.
 3. Replace the production local composition path with the confirmed Cordis
    fixed-service model.
-4. Extend the already-native UDP/WebRTC/Relay physical ownership with the
-   remaining migration work for any non-Android traversal clients; Android
-   Service owns the implemented native RTC direct/relay path.
-5. Keep the normalized route tiers aligned to
-   `LAN -> UDP direct -> rtc-direct -> Tailscale -> rtc-relay`, with IPv4/IPv6
-   inside UDP direct and `signalToken` gated by `signalUrlFromRelay`.
+4. Move UDP/WebRTC/Relay physical connection ownership into Android Service.
+5. Normalize route tiers to
+   `LAN -> UDP direct -> Tailscale -> Relay`, with IPv4/IPv6 inside UDP direct.
 6. Add validated JSON-to-TOML migration, remove fixed Relay defaults, and make
    `~/.zterm/config.toml` the sole runtime configuration source.
 7. Design and migrate the non-replayable password-derived credential protocol.

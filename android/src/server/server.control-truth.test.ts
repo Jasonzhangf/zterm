@@ -20,13 +20,6 @@ function extractBlock(source: string, anchor: string, length = 2200) {
   return source.slice(start, start + length);
 }
 
-function extractFunctionBlock(source: string, anchor: string) {
-  const start = source.indexOf(anchor);
-  expect(start).toBeGreaterThanOrEqual(0);
-  const nextBoundary = source.indexOf('\n  async function ', start + anchor.length);
-  return source.slice(start, nextBoundary === -1 ? source.length : nextBoundary);
-}
-
 describe('server control runtime truth gates', () => {
   it('keeps server glue delegating tmux and shell control to dedicated runtime', () => {
     const source = readServerSource();
@@ -107,7 +100,7 @@ describe('server control runtime truth gates', () => {
     const source = readDaemonInputQueueRuntimeSource();
     const queueBlock = extractBlock(source, 'const liveMirrorInputBatches = new Map<string, {');
     const enqueueWriteBlock = extractBlock(source, 'function enqueueLiveMirrorInput(');
-    const backendWriteBlock = extractFunctionBlock(source, 'async function handleTransportInput(');
+    const backendWriteBlock = extractBlock(source, 'async function handleTransportInput(');
 
     expect(source).toContain('function normalizeReliableInputPayload(');
     expect(source).toContain('function sendInputAck(');

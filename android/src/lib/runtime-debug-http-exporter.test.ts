@@ -16,7 +16,8 @@ import {
 } from './runtime-debug';
 
 describe('runtime debug observability exporter', () => {
-  beforeEach(() => {
+  // patch probe
+  beforeEach(async () => {
     const storage = new Map<string, string>();
     Object.defineProperty(window, 'localStorage', {
       configurable: true,
@@ -35,6 +36,7 @@ describe('runtime debug observability exporter', () => {
     }
     resetRuntimeDebugStateForTests();
     resetRuntimeDebugExporterStateForTests();
+    await new Promise<void>((resolve) => setImmediate(resolve));
   });
 
   function fakeTransport() {

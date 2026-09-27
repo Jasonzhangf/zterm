@@ -85,5 +85,5 @@
 - Android 原生工程路径：`android/native/android`
 - npm 依赖真源：发布后的 `@jsonstudio/wtermmod-*`
 - 新 APK 交付必须同步 OTA。构建/发布流程唯一执行入口为 `pnpm --dir android run build:android`；具体步骤、授权范围及包身份验证见 mobile skill。该入口会分配 buildNumber、构建 normal/rollback APK，并写入本地 OTA；不能把它当只读 build 检查。
-- 纯审计/文档修复不 bump、不构建 APK、不发布。已授权的新版本交付需同时证明包、安装态与适用 OTA 通道；没有发布授权时先完成可审阅变更与适用检查，再报告发布缺口，不能宣称已交付。
+- 纯审计/文档修复不 bump、不构建 APK、不发布。用户已授权目标项目常规交付的 **OTA 发布、git 提交、merge、push 不须逐步询问**；只要适用验证和 review PASS，交付 agent 直接完成并出示包、安装态、OTA manifest、设备入口和清理证据。没有授权范围之外的动作仍只报告发布缺口，不宣称已交付。
 - 设备端 OTA 检查的是 daemon 的 `~/.zterm/updates/latest.json`；手工 `adb install` 只影响单台设备，不替代 OTA 发布

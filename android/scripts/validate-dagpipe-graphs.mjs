@@ -10,6 +10,18 @@ const graphFiles = readdirSync(dagpipeDir)
   .sort()
   .map((name) => join(dagpipeDir, name));
 
+const expectedCore = [
+  'daemon-mirror-publish.graph.json',
+  'daemon-control-dispatch.graph.json',
+  'android-connection-lifecycle.graph.json',
+  'android-buffer-management.graph.json',
+  'android-buffer-render.graph.json',
+  'android-input-dispatch.graph.json',
+];
+const missingCore = expectedCore.filter(
+  (name) => !graphFiles.some((fullPath) => fullPath.endsWith(`/${name}`)),
+);
+
 function runDagpipe(args) {
   return spawnSync('dagpipe', args, { cwd: androidRoot, stdio: 'inherit' });
 }
@@ -25,7 +37,13 @@ for (const graphFile of graphFiles) {
   }
 }
 
-if (failed) {
+if (graphFiles.length === 0 || missingCore.length > 0 || failed) {
+  if (graphFiles.length === 0) {
+    console.error(`DAGpipe Phase0 gate: no graph files found in ${dagpipeDir}`);
+  }
+  if (missingCore.length > 0) {
+    console.error(`DAGpipe Phase0 gate: missing expected core graph(s): ${missingCore.join(', ')}`);
+  }
   process.exitCode = 1;
 } else {
   console.log(`DAGpipe Phase0 gate: validated ${graphFiles.length} graph file(s)`);

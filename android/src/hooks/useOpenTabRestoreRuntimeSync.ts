@@ -11,7 +11,6 @@ import {
   deriveRuntimeOpenTabSyncDecision,
   normalizeOpenTabIntentState,
 } from '../lib/open-tab-intent';
-import { isDagpipeNativeCapable, runDagpipePhase5ShellLifecycle } from '../lib/dagpipe-native-client';
 import { runtimeDebug } from '../lib/runtime-debug';
 import type { OpenTabRuntimeSwitchReason } from '../lib/open-tab-runtime-switch';
 import type { BridgeSettings } from '../lib/bridge-settings';
@@ -200,19 +199,6 @@ export function useOpenTabRestoreRuntimeSync(options: UseOpenTabRestoreRuntimeSy
 
       const restoredRuntimeTabs: PersistedOpenTab[] = [];
       for (const tab of remoteRestoreState.tabs) {
-        if (isDagpipeNativeCapable()) {
-          const shellGate = await runDagpipePhase5ShellLifecycle({
-            execution_id: `cold-restore:${tab.sessionId}`,
-            attempt_id: '1',
-            inputs: {
-              'arc.open_tab_intent': { sessionId: tab.sessionId },
-              'arc.shell_state': { visible: true },
-            },
-          });
-          if (!shellGate.ok) {
-            throw new Error(`DAGpipe shell lifecycle gate rejected: ${shellGate.error}`);
-          }
-        }
         const createdSessionId = createSession(
           resolveHostForPersistedOpenTab({
             tab,
