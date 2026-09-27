@@ -85,6 +85,8 @@ import {
   runPhase7Release,
   runPhase7Update,
   runPhase8Connection,
+  runBufferManagement,
+  runBufferRender,
 } from './dagpipe-bridge';
 
 type Outputs = Record<string, any>;
@@ -109,6 +111,20 @@ function memoryStorage(initial: Record<string, string> = {}) {
     },
     dump: () => Object.fromEntries(values),
   };
+}
+
+function protocolCell(ch: string) {
+  return {
+    char: ch.codePointAt(0) ?? 32,
+    fg: 256,
+    bg: 256,
+    flags: 0,
+    width: 1,
+  };
+}
+
+function protocolLine(text: string, index: number) {
+  return { index, cells: Array.from(text).map(protocolCell) };
 }
 
 const relayDirectoryPayload = {
@@ -885,5 +901,240 @@ describe('DAGpipe Phase2-8 black-box parity and smoke with TypeScript owners', (
       state: 'backoff-reconnect',
       target: 't1',
     });
+  });
+
+  it('Phase8 TS connection state machine: channel close keeps sibling channels open', () => {
+    const machine = createAndroidConnectionServiceStateMachine({ now: () => 1 });
+    machine.dispatch({
+      type: 'bind-target',
+      target: { targetKey: 't1', bridgeHost: 'host-1', bridgePort: 3333 },
+    });
+    machine.dispatch({ type: 'transport-opening', generation: 'g1' });
+    machine.dispatch({ type: 'mux-ready', generation: 'g1', muxReadyPayload: {} });
+    machine.dispatch({ type: 'channel-opened', generation: 'g1', channelId: 'c1' });
+    machine.dispatch({ type: 'channel-opened', generation: 'g1', channelId: 'c2' });
+    machine.dispatch({ type: 'channel-closed', generation: 'g1', channelId: 'c1', reason: 'user-close' });
+
+    const tsSnapshot = machine.readSnapshot();
+    expect(tsSnapshot.channels).toEqual([
+      { channelId: 'c1', state: 'closed' },
+      { channelId: 'c2', state: 'open' },
+    ]);
+  });
+
+  it('Phase8 connection service: closed desired-channel projection keeps open sibling actions', () => {
+    const result = outputs(runPhase8Connection(phaseRequest('parity-phase8-channel-close-sibling', {
+      'arc.service_command': {
+        type: 'bind-target',
+        target: {
+          targetKey: 't1',
+          bridgeHost: 'host-1',
+          channels: [
+            { channelId: 'c1', sessionName: 's1', state: 'closed' },
+            { channelId: 'c2', sessionName: 's2', state: 'open' },
+          ],
+        },
+      },
+      'arc.service_policy': {
+        allowTransport: true,
+        allowReconnect: true,
+        allowNotifications: true,
+        maxNotificationActions: 3,
+        maxReplayChannels: 3,
+      },
+      'arc.network_generation_event': { generation: 'g1' },
+      'arc.notification_action': {
+        targetKey: 't1',
+        channelId: 'c1',
+        sessionName: 's1',
+      },
+      'arc.session_activity_fact': {
+        stopped: true,
+        name: 's1',
+        targetKey: 't1',
+        channelId: 'c1',
+      },
+    })));
+    expect(result['arc.service_snapshot']).toMatchObject({ state: 'healthy', target: 't1' });
+    expect(result['arc.notification_actions'].actions).toEqual([
+      expect.objectContaining({ channelId: 'c2', state: 'open' }),
+    ]);
+  });
+
+  it('Phase8 TS connection state machine: transport failure retires generation and new generation recovers', () => {
+    const machine = createAndroidConnectionServiceStateMachine({ now: () => 1 });
+    machine.dispatch({
+      type: 'bind-target',
+      target: { targetKey: 't1', bridgeHost: 'host-1', bridgePort: 3333 },
+    });
+    machine.dispatch({ type: 'transport-opening', generation: 'g1' });
+    machine.dispatch({ type: 'transport-failure', generation: 'g1', message: 'socket lost' });
+    expect(machine.readSnapshot().state).toBe('backoff-reconnect');
+    expect(machine.dispatch({ type: 'mux-ready', generation: 'g1', muxReadyPayload: {} })).toBe(false);
+
+    machine.dispatch({ type: 'transport-opening', generation: 'g2' });
+    machine.dispatch({ type: 'mux-ready', generation: 'g2', muxReadyPayload: {} });
+    machine.dispatch({ type: 'channel-opened', generation: 'g2', channelId: 'c1' });
+    expect(machine.readSnapshot().state).toBe('channels-ready');
+  });
+
+  it('Phase8 connection service: heartbeat-backed snapshot stays healthy and backoff schedules without dropping target', () => {
+    const healthy = outputs(runPhase8Connection(phaseRequest('parity-phase8-healthy', {
+      'arc.service_command': {
+        type: 'bind-target',
+        target: {
+          targetKey: 't1',
+          bridgeHost: 'host-1',
+          channels: [{ channelId: 'c1', sessionName: 's1', state: 'open' }],
+        },
+      },
+      'arc.service_policy': {
+        allowTransport: true,
+        allowReconnect: true,
+        allowNotifications: true,
+        maxNotificationActions: 3,
+        maxReplayChannels: 3,
+      },
+      'arc.network_generation_event': { generation: 'g1' },
+      'arc.notification_action': {},
+      'arc.session_activity_fact': {},
+    })));
+    expect(healthy['arc.service_snapshot']).toMatchObject({ state: 'healthy', target: 't1' });
+
+    const backoff = outputs(runPhase8Connection(phaseRequest('parity-phase8-backoff-rust', {
+      'arc.service_command': {
+        type: 'bind-target',
+        target: {
+          targetKey: 't1',
+          bridgeHost: 'host-1',
+          channels: [{ channelId: 'c1', sessionName: 's1', state: 'open' }],
+        },
+      },
+      'arc.service_policy': {
+        allowTransport: true,
+        allowReconnect: true,
+        allowNotifications: true,
+        maxNotificationActions: 3,
+        maxReplayChannels: 3,
+        simulateHeartbeatMiss: true,
+      },
+      'arc.network_generation_event': { generation: 'g1' },
+      'arc.notification_action': {},
+      'arc.session_activity_fact': {},
+    })));
+    expect(backoff['arc.service_snapshot']).toMatchObject({
+      state: 'backoff-reconnect',
+      target: 't1',
+    });
+  });
+
+  it('Phase0 buffer render: full frame applies once, incomplete frame stays pending', () => {
+    const complete = outputs(runBufferRender(phaseRequest('parity-buffer-atomic-apply', {
+      'arc.daemon_wire_frame': {
+        revision: 5,
+        startIndex: 0,
+        endIndex: 3,
+        rows: 24,
+        cols: 80,
+        lines: [protocolLine('a', 0), protocolLine('b', 1), protocolLine('c', 2)],
+        cursor: null,
+        cursorKeysApp: false,
+      },
+      'arc.visible_range_demand': { startIndex: 0, endIndex: 3, viewportRows: 24, mode: 'follow' },
+      'arc.local_sparse_state': { startIndex: 0, endIndex: 0, gapRanges: [] },
+      'arc.buffer_policy': {},
+    })));
+    expect(complete['arc.dom_commit']).toMatchObject({
+      revision: 5,
+      rows: ['a', 'b', 'c'],
+    });
+
+    const partial = outputs(runBufferRender(phaseRequest('buffer-incomplete-frame', {
+      'arc.daemon_wire_frame': {
+        revision: 6,
+        startIndex: 1,
+        endIndex: 2,
+        frameStartIndex: 0,
+        frameEndIndex: 3,
+        frameChunkIndex: 0,
+        frameChunkCount: 2,
+        rows: 24,
+        cols: 80,
+        lines: [protocolLine('b', 1)],
+        cursor: null,
+        cursorKeysApp: false,
+      },
+      'arc.visible_range_demand': { startIndex: 0, endIndex: 3, viewportRows: 24, mode: 'follow' },
+      'arc.local_sparse_state': { startIndex: 0, endIndex: 0, gapRanges: [] },
+      'arc.buffer_policy': {
+        frameAssembly: {
+          chunks: [{
+            revision: 6,
+            startIndex: 0,
+            endIndex: 1,
+            frameStartIndex: 0,
+            frameEndIndex: 3,
+            frameChunkIndex: 0,
+            frameChunkCount: 2,
+            rows: 24,
+            cols: 80,
+            lines: [protocolLine('a', 0)],
+            cursor: null,
+            cursorKeysApp: false,
+          }],
+        },
+      },
+    })));
+    expect(partial['arc.buffer_sync_request'].status).toBe('pending');
+    expect(partial['arc.dom_commit'].rows).not.toContain('b');
+  });
+
+  it('Phase8 buffer repair ledger: local gap stays pending and a covering wire response clears it', () => {
+    const withGap = outputs(runBufferManagement(phaseRequest('buffer-repair-pending', {
+      'arc.daemon_head_facts': {
+        sessions: [{ sessionId: 's1', revision: 2, latestEndIndex: 5 }],
+      },
+      'arc.session_buffer_demand': {
+        sessions: [{ sessionId: 's1', mode: 'active', viewportRows: 24 }],
+      },
+      'arc.local_buffer_state': {
+        sessions: [{
+          sessionId: 's1',
+          revision: 1,
+          startIndex: 0,
+          endIndex: 5,
+          gapRanges: [{ startIndex: 1, endIndex: 4 }],
+        }],
+      },
+      'arc.buffer_policy': { cacheLines: 100, dispatchBudget: 4 },
+    })));
+    expect(withGap['arc.repair_ledger'].ledger).toContainEqual({
+      sessionId: 's1',
+      pendingRanges: [{ startIndex: 1, endIndex: 4 }],
+      status: 'pending',
+    });
+
+    const cleared = outputs(runBufferManagement(phaseRequest('buffer-repair-cleared', {
+      'arc.daemon_head_facts': {
+        sessions: [{ sessionId: 's1', revision: 2, latestEndIndex: 5 }],
+      },
+      'arc.session_buffer_demand': {
+        sessions: [{ sessionId: 's1', mode: 'active', viewportRows: 24 }],
+      },
+      'arc.local_buffer_state': {
+        sessions: [{
+          sessionId: 's1',
+          revision: 1,
+          startIndex: 0,
+          endIndex: 5,
+          gapRanges: [{ startIndex: 1, endIndex: 4 }],
+        }],
+      },
+      'arc.buffer_policy': { cacheLines: 100, dispatchBudget: 4 },
+      'arc.wire_range_responses': {
+        responses: [{ sessionId: 's1', startIndex: 0, endIndex: 5, revision: 2, received: true }],
+      },
+    })));
+    expect(cleared['arc.repair_ledger'].ledger?.[0]?.status).toBe('none');
   });
 });
