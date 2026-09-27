@@ -80,19 +80,17 @@ export function openAndroidConnectionServiceTransportSocket(
             execution_id: 'android-connection-lifecycle',
             attempt_id: '1',
             inputs: {
-              'arc.account_credentials': {
-                accountId: host.daemonHostId || host.relayHostId || 'client',
-                authToken: host.authToken || '',
-              },
-              'arc.relay_settings': {
-                relayEnabled: Boolean(host.relayHostId || host.relayEndpointCandidates?.length),
-              },
-              'arc.target_candidates': {
-                candidates: [{
+              'arc.route_plan': {
+                selected: {
+                  candidateId: target.targetKey,
                   id: target.targetKey,
                   path: host.relayHostId ? 'Relay' : 'LAN',
                   endpoint: `${host.bridgeHost}:${host.bridgePort}`,
-                }],
+                },
+              },
+              'arc.resume_plan': {
+                targetKey: target.targetKey,
+                state: 'ready',
               },
               'arc.session_demand_set': {
                 sessions: [{
