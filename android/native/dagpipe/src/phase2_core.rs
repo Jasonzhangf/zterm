@@ -63,9 +63,10 @@ fn make_registry() -> Registry {
             registry.register($op).expect("register operator")
         };
     }
-    // relay.account_peer_route
-    register!(RelayLogin);
-    register!(RelayPublishDevice);
+    // relay.account_peer_route uses the shared client.relay_account owner from
+    // core.rs; the old duplicated relay.account_directory operators are gone.
+    register!(crate::core::RelayAccountLogin);
+    register!(crate::core::RelayAccountPublishDevice);
     register!(RelayProjectDirectory);
     register!(RelayResolveRoutes);
     register!(RelayIssueLease);
@@ -183,74 +184,6 @@ pub fn run_phase2_daemon_connection_json(input_json: String) -> serde_json::Resu
         DAEMON_CONNECTION_CATALOG_GRAPH_ID,
         PHASE2_GRAPH_VERSION,
     )
-}
-
-struct RelayLogin;
-
-impl Operator for RelayLogin {
-    fn name(&self) -> &'static str {
-        "relay.account_directory.login"
-    }
-
-    fn version(&self) -> &'static str {
-        "0.1"
-    }
-
-    fn input_type(&self) -> ValueType {
-        ValueType::Array
-    }
-
-    fn output_type(&self) -> ValueType {
-        ValueType::Object
-    }
-
-    fn execute(&self, input: Value, _context: &OperatorContext) -> Result<Value, String> {
-        let values = inputs(input);
-        let credentials = obj(values.first().cloned().unwrap_or_default());
-        let settings = obj(values.get(1).cloned().unwrap_or_default());
-        let account_id = get_str(&credentials, "accountId").to_string();
-        let auth_token = get_str(&credentials, "authToken").to_string();
-        if account_id.is_empty() && auth_token.is_empty() {
-            return Err("relay login requires account credentials".into());
-        }
-        Ok(json!({
-            "state": "logged-in",
-            "accountId": account_id,
-            "authToken": auth_token,
-            "relayEnabled": get_bool(&settings, "relayEnabled"),
-            "tokenPerLogin": true,
-        }))
-    }
-}
-
-struct RelayPublishDevice;
-
-impl Operator for RelayPublishDevice {
-    fn name(&self) -> &'static str {
-        "relay.account_directory.publish_device"
-    }
-
-    fn version(&self) -> &'static str {
-        "0.1"
-    }
-
-    fn output_type(&self) -> ValueType {
-        ValueType::Object
-    }
-
-    fn execute(&self, input: Value, _context: &OperatorContext) -> Result<Value, String> {
-        let values = inputs(input);
-        let session = obj(values.first().cloned().unwrap_or_default());
-        let capabilities = obj(values.get(1).cloned().unwrap_or_default());
-        Ok(json!({
-            "accountId": get_str(&session, "accountId"),
-            "deviceId": get_str(&capabilities, "deviceId"),
-            "id": get_str(&capabilities, "deviceId"),
-            "routes": capabilities.get("routes").cloned().unwrap_or(Value::Array(Vec::new())),
-            "capabilities": capabilities,
-            "state": "published",
-        }))
-    }
 }
 
 struct RelayProjectDirectory;
