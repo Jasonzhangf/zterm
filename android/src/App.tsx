@@ -1589,7 +1589,41 @@ export default function App() {
       .render
     : undefined;
   if (pluginRuntimeError) {
-    throw pluginRuntimeError;
+    console.error('[zterm:plugin-runtime-error]', pluginRuntimeError);
+    return (
+      <main
+        style={{
+          position: 'fixed',
+          inset: 0,
+          padding: '16px',
+          display: 'grid',
+          placeItems: 'center',
+          backgroundColor: '#16191f',
+          color: '#f5f7fb',
+        }}
+      >
+        <section style={{ width: 'min(100%, 420px)', display: 'grid', gap: '12px' }}>
+          <h1 style={{ margin: 0, fontSize: '20px' }}>应用初始化失败</h1>
+          <p style={{ margin: 0, lineHeight: 1.5, color: '#9b9da5' }}>
+            {pluginRuntimeError.message || String(pluginRuntimeError)}
+          </p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            style={{
+              minHeight: '44px',
+              border: 0,
+              borderRadius: '8px',
+              background: '#38d47d',
+              color: '#07110b',
+              fontWeight: 700,
+            }}
+          >
+            重新加载
+          </button>
+        </section>
+      </main>
+    );
   }
 
   return (

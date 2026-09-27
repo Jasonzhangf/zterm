@@ -693,7 +693,7 @@ Experiment: production ownership slice in `src/components/`,
 
 Whitebox:
 - `client.dom_renderer` owns immutable render snapshot to DOM projection:
-  `TerminalView`, `VisibleRow`, `TerminalPreviewRow`, mirror-fixed zoom/pan,
+  `TerminalView`, `VisibleRow`, mirror-fixed zoom/pan,
   cell render helpers, and terminal theme. It consumes
   `resource.renderer_window`, `resource.ui_projection`, and
   `resource.shared_terminal_types`; it does not own follow/reading/

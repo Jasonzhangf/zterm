@@ -114,7 +114,6 @@ Owner:
 - `src/lib/session-render-buffer-store.ts`
 - `src/components/TerminalView.tsx`
 - `src/components/terminal/VisibleRow.tsx`
-- `src/components/terminal/TerminalPreviewRow.tsx`
 - `src/components/useMirrorFixedZoomPan.ts`
 - `packages/shared/src/terminal/cell-render.ts`
 - `packages/shared/src/terminal/theme.ts`

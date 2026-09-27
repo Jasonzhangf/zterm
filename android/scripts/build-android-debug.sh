@@ -51,13 +51,13 @@ cd "$ROOT_DIR/native/android"
 ./gradlew :capacitor-cordova-android-plugins:parseDebugLocalResources
 ./gradlew :capacitor-cordova-android-plugins:processDebugManifest assembleDebug
 node "$ROOT_DIR/scripts/verify-web-assets-version.mjs" "$ROOT_DIR/native/android/app/build/outputs/apk/debug/app-debug.apk" "$BUILD_NUMBER"
-if ! unzip -l "$APK_PATH" | grep -q 'lib/arm64-v8a/libzterm_dagpipe.so'; then
-  echo "[build-android-debug] missing native libzterm_dagpipe.so in APK" >&2
-  exit 1
-fi
 cp "$APK_PATH" "$NORMAL_APK_PATH"
 ./gradlew :app:assembleDebug -PztermRollbackVariant=true
 cp "$APK_PATH" "$ROLLBACK_APK_PATH"
+if ! unzip -l "$NORMAL_APK_PATH" | grep -q 'lib/arm64-v8a/libzterm_dagpipe.so'; then
+  echo "[build-android-debug] missing native libzterm_dagpipe.so in APK" >&2
+  exit 1
+fi
 cp "$NORMAL_APK_PATH" "$APK_PATH"
 
 cd "$ROOT_DIR"

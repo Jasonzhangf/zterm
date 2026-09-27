@@ -2172,7 +2172,6 @@
         "packages/shared/src/terminal/theme.ts",
         "src/components/TerminalView.tsx",
         "src/components/terminal/VisibleRow.tsx",
-        "src/components/terminal/TerminalPreviewRow.tsx",
         "src/components/useMirrorFixedZoomPan.ts",
         "src/lib/terminal-mirror-fixed-pan-storage.ts"
       ]

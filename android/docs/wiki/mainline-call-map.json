@@ -288,7 +288,7 @@
         },
         {
           "id": "TerminalView",
-          "label": "src/components/TerminalView.tsx + src/components/terminal/VisibleRow.tsx + src/components/terminal/TerminalPreviewRow.tsx + src/components/useMirrorFixedZoomPan.ts + packages/shared/src/terminal/cell-render.ts + packages/shared/src/terminal/theme.ts"
+          "label": "src/components/TerminalView.tsx + src/components/terminal/VisibleRow.tsx + src/components/useMirrorFixedZoomPan.ts + packages/shared/src/terminal/cell-render.ts + packages/shared/src/terminal/theme.ts"
         },
         {
           "id": "InputNormalizerIn01CommittedText",
