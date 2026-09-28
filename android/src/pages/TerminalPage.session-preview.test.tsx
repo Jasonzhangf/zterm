@@ -269,7 +269,9 @@ describe('TerminalPage junction preview integration', () => {
     await waitFor(() => expect(onLiveSessionIdsChange.mock.calls.at(-1)?.[0]).toEqual(
       expect.arrayContaining(['s1', 's2', 's3', 's4']),
     ));
-    expect(onLiveSessionIdsChange.mock.calls.at(-1)?.[0]).not.toContain('s5');
+    // s5 (right side cell) is now included in the live-set projection because
+    // all 4 neighbor cells around the focus receive live buffer.
+    expect(onLiveSessionIdsChange.mock.calls.at(-1)?.[0]).toContain('s5');
   });
 
   it('subscribes the full lattice while overview is active and restores the junction view on 1x', async () => {
@@ -284,7 +286,7 @@ describe('TerminalPage junction preview integration', () => {
 
     const stage = screen.getByTestId('terminal-stage-shell');
     await openPreview(stage);
-    expect(onLiveSessionIdsChange.mock.calls.at(-1)?.[0]).not.toContain('s5');
+    expect(onLiveSessionIdsChange.mock.calls.at(-1)?.[0]).toContain('s5');
 
     const grid = screen.getByTestId('terminal-preview-grid');
     fireEvent.touchStart(grid, {
@@ -315,7 +317,9 @@ describe('TerminalPage junction preview integration', () => {
         { clientX: 225, clientY: 180 },
       ],
     });
-    await waitFor(() => expect(onLiveSessionIdsChange.mock.calls.at(-1)?.[0]).not.toContain('s5'));
+    // After restoring 1x, s5 remains in the live-set because the neighbor
+    // projection includes all 4 directional cells around the focus.
+    expect(onLiveSessionIdsChange.mock.calls.at(-1)?.[0]).toContain('s5');
   });
 
   it('pans focus to an edge cell without switching the active shell session', async () => {
@@ -638,5 +642,40 @@ describe('TerminalPage junction preview integration', () => {
     expect(appListenerMock.backButton).not.toBeNull();
     act(() => appListenerMock.backButton?.());
     await waitFor(() => expect(screen.queryByTestId('terminal-preview-grid')).toBeNull());
+  });
+
+  it('includes all 4 neighbor sessions in live-set even when only one side edge is visible', async () => {
+    const sessions = Array.from({ length: 5 }, (_, index) => makeSession(`s${index + 1}`));
+    writeLattice(sessions);
+    const onLiveSessionIdsChange = vi.fn();
+    renderPage({
+      sessions,
+      activeSession: sessions[0],
+      onLiveSessionIdsChange,
+    });
+    const stage = screen.getByTestId('terminal-stage-shell');
+    await openPreview(stage);
+
+    await waitFor(() => expect(onLiveSessionIdsChange.mock.calls.at(-1)?.[0]).toEqual(
+      expect.arrayContaining(['s1', 's2', 's3', 's4', 's5']),
+    ));
+  });
+
+  it('restores to the current focus session when exiting preview, not the entry session', async () => {
+    const sessions = [makeSession('s1'), makeSession('s2'), makeSession('s3')];
+    writeLattice([sessions[0], sessions[1]]);
+    const { onSwitchSession } = renderPage({ sessions, activeSession: sessions[0] });
+    const stage = screen.getByTestId('terminal-stage-shell');
+    await openPreview(stage);
+
+    fireEvent.click(screen.getByTestId('terminal-preview-tile-s2'));
+    await waitFor(() => expect(screen.getByTestId('terminal-preview-tile-s2').dataset.previewFocus).toBe('true'));
+
+    const grid = screen.getByTestId('terminal-preview-grid');
+    fireEvent.touchStart(grid, { touches: [{ clientX: 80, clientY: 200 }] });
+    fireEvent.touchEnd(grid, { changedTouches: [{ clientX: 160, clientY: 204 }] });
+
+    await waitFor(() => expect(screen.queryByTestId('terminal-preview-grid')).toBeNull());
+    expect(onSwitchSession).toHaveBeenCalledWith('s2');
   });
 });
