@@ -14,6 +14,7 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 APK_PATH="$ROOT_DIR/native/android/app/build/outputs/apk/debug/app-debug.apk"
 APK_WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/zterm-apk.XXXXXX")"
 NORMAL_APK_PATH="$APK_WORK_DIR/app-normal-debug.apk"
+APK_CONTENTS_PATH="$APK_WORK_DIR/app-normal-debug-contents.txt"
 ROLLBACK_APK_PATH="$APK_WORK_DIR/app-rollback-debug.apk"
 UPDATES_DIR_DEFAULT="$HOME/.zterm/updates"
 UPDATES_DIR="${WTERM_UPDATES_DIR:-$UPDATES_DIR_DEFAULT}"
@@ -54,7 +55,8 @@ node "$ROOT_DIR/scripts/verify-web-assets-version.mjs" "$ROOT_DIR/native/android
 cp "$APK_PATH" "$NORMAL_APK_PATH"
 ./gradlew :app:assembleDebug -PztermRollbackVariant=true
 cp "$APK_PATH" "$ROLLBACK_APK_PATH"
-if ! unzip -l "$NORMAL_APK_PATH" | grep -q 'lib/arm64-v8a/libzterm_dagpipe.so'; then
+unzip -l "$NORMAL_APK_PATH" > "$APK_CONTENTS_PATH"
+if ! grep -Fq 'lib/arm64-v8a/libzterm_dagpipe.so' "$APK_CONTENTS_PATH"; then
   echo "[build-android-debug] missing native libzterm_dagpipe.so in APK" >&2
   exit 1
 fi

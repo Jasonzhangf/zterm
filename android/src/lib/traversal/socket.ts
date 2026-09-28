@@ -94,8 +94,11 @@ function shouldSignalIceCandidate(plan: TraversalPlanCandidate, payload: { candi
   if (isTailscaleIceCandidate(payload)) {
     return false;
   }
+  // Allow host, srflx, and prflx candidates for rtc-direct. Filtering host
+  // candidates breaks same-NAT direct connections where host-to-host is the
+  // only viable path (STUN srflx may be unreachable or slow).
   const type = rtcCandidateType(payload);
-  if (type && type !== 'srflx' && type !== 'prflx') {
+  if (type && type !== 'host' && type !== 'srflx' && type !== 'prflx') {
     return false;
   }
   return true;
@@ -109,7 +112,7 @@ function shouldAcceptIceCandidate(plan: TraversalPlanCandidate, payload: { candi
     return false;
   }
   const type = rtcCandidateType(payload);
-  if (type && type !== 'srflx' && type !== 'prflx') {
+  if (type && type !== 'host' && type !== 'srflx' && type !== 'prflx') {
     return false;
   }
   return true;
@@ -128,7 +131,7 @@ function stripRtcDirectSdp(sdp: string) {
       return false;
     }
     const type = rtcCandidateType(payload);
-    if (type && type !== 'srflx' && type !== 'prflx') {
+    if (type && type !== 'host' && type !== 'srflx' && type !== 'prflx') {
       return false;
     }
     return true;

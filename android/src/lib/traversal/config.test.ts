@@ -610,7 +610,13 @@ describe('buildTraversalPlan', () => {
       },
     );
 
-    expect(plan.candidates.some((candidate) => candidate.endpoint === '192.168.50.20:3333')).toBe(false);
+    // LAN directory endpoint is now included as a candidate (tier 0).
+    expect(plan.candidates).toContainEqual(expect.objectContaining({
+      id: 'lan:192.168.50.20:3333',
+      kind: 'ws',
+      path: 'lan',
+      endpoint: '192.168.50.20:3333',
+    }));
     expect(plan.candidates).toContainEqual(expect.objectContaining({
       id: 'direct:tailscale:daemon-host-a',
       kind: 'ws',
