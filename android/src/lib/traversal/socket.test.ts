@@ -317,7 +317,7 @@ describe('TraversalSocket reconnect', () => {
     expect(MockWebSocket.instances.some((ws) => ws.url.includes('203.0.113.10'))).toBe(false);
   });
 
-  it('does not open a LAN endpoint and uses Tailscale for remote websocket connection', async () => {
+  it('attempts LAN endpoint before Tailscale when directory provides both', async () => {
     const routeHealthCache = new TraversalRouteHealthCache();
     const socket = new TraversalSocket({
       bridgeHost: '',
@@ -348,22 +348,24 @@ describe('TraversalSocket reconnect', () => {
     });
     await flushMicrotasks();
 
-    const tailscaleWs = MockWebSocket.instances.find((ws) => ws.url.includes('100.66.1.82'));
-    expect(MockWebSocket.instances.some((ws) => ws.url.includes('192.168.50.20'))).toBe(false);
-    expect(tailscaleWs).toBeDefined();
+    // LAN is tier 0 (highest priority); it must be attempted first.
+    const lanWs = MockWebSocket.instances.find((ws) => ws.url.includes('192.168.50.20'));
+    expect(lanWs).toBeDefined();
+    // Tailscale is tier 2; it must not race LAN in the same batch.
+    expect(MockWebSocket.instances.some((ws) => ws.url.includes('100.66.1.82'))).toBe(false);
 
-    tailscaleWs?.triggerOpen();
+    lanWs?.triggerOpen();
     expect(socket.getDiagnostics()).toMatchObject({
       stage: 'open',
-      resolvedPath: 'tailscale',
-      resolvedEndpoint: '100.66.1.82:3333',
+      resolvedPath: 'lan',
+      resolvedEndpoint: '192.168.50.20:3333',
     });
-    expect(socket.getDiagnostics().attempts.map((item) => item.path)).toEqual(['tailscale']);
+    expect(socket.getDiagnostics().attempts.map((item) => item.path)).toEqual(['lan']);
 
     socket.close();
   });
 
-  it('does not treat a reachable LAN endpoint as a remote connection route', async () => {
+  it('falls back to Tailscale when LAN directory endpoint fails', async () => {
     const socket = new TraversalSocket({
       bridgeHost: '',
       bridgePort: 3333,
@@ -387,7 +389,17 @@ describe('TraversalSocket reconnect', () => {
     }, settings);
     await flushMicrotasks();
 
+    // LAN is attempted first (tier 0).
+    const lanWs = MockWebSocket.instances.find((ws) => ws.url.includes('192.168.50.20'));
+    expect(lanWs).toBeDefined();
+
+    // Simulate LAN failure, then flush to allow Tailscale to be attempted.
+    lanWs?.triggerError();
+    lanWs?.triggerClose(1006, 'connection refused');
+    await flushMicrotasks();
+
     const tailscaleWs = MockWebSocket.instances.find((ws) => ws.url.includes('100.66.1.82'));
+    expect(tailscaleWs).toBeDefined();
     tailscaleWs?.triggerOpen();
 
     expect(socket.getDiagnostics()).toMatchObject({
@@ -395,7 +407,6 @@ describe('TraversalSocket reconnect', () => {
       resolvedPath: 'tailscale',
       resolvedEndpoint: '100.66.1.82:3333',
     });
-    expect(MockWebSocket.instances.some((ws) => ws.url.includes('192.168.50.20'))).toBe(false);
 
     socket.close();
   });
