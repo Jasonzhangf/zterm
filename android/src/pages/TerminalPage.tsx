@@ -228,6 +228,13 @@ function createRemoteWindowInputDebugCounts(): RemoteWindowInputDebugSnapshot['c
   };
 }
 
+const PREVIEW_NEIGHBOR_DELTAS = [
+  { col: -1, row: 0 },
+  { col: 1, row: 0 },
+  { col: 0, row: -1 },
+  { col: 0, row: 1 },
+] as const;
+
 function createRemoteWindowInputDebugSnapshot(): RemoteWindowInputDebugSnapshot {
   return {
     contextActive: false,
@@ -1141,10 +1148,34 @@ function TerminalPageComponent({
     ],
   );
   const sessionPreviewVisibleSessions = useMemo(
-    () => (sessionPreviewOverviewCoordinates || sessionPreviewLayout?.visibleCells || [])
-      .map((cell) => resolveJunctionPreviewCell(sessionPreviewLattice, cell, sessions))
-      .filter((session): session is NonNullable<typeof session> => Boolean(session)),
-    [sessionPreviewLayout, sessionPreviewLattice, sessionPreviewOverviewCoordinates, sessions],
+    () => {
+      if (sessionPreviewOverviewCoordinates) {
+        return sessionPreviewOverviewCoordinates
+          .map((cell) => resolveJunctionPreviewCell(sessionPreviewLattice, cell, sessions))
+          .filter((session): session is NonNullable<typeof session> => Boolean(session));
+      }
+      // Live-set projection must include all 4 neighbor cells around the focus
+      // so sessions assigned to the non-side edge (e.g. right side when
+      // sideEdge='left') still receive live buffer while preview is open.
+      const layoutCells = sessionPreviewLayout?.visibleCells || [];
+      const neighborCells = sessionPreviewOpen
+        ? PREVIEW_NEIGHBOR_DELTAS.map((delta) => ({
+            col: sessionPreviewFocus.col + delta.col,
+            row: sessionPreviewFocus.row + delta.row,
+          }))
+        : [];
+      const seen = new Set<string>();
+      return [...layoutCells, ...neighborCells]
+        .filter((cell) => {
+          const key = `${cell.col}:${cell.row}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        })
+        .map((cell) => resolveJunctionPreviewCell(sessionPreviewLattice, cell, sessions))
+        .filter((session): session is NonNullable<typeof session> => Boolean(session));
+    },
+    [sessionPreviewLayout, sessionPreviewLattice, sessionPreviewOverviewCoordinates, sessionPreviewOpen, sessionPreviewFocus, sessions],
   );
   const sessionPreviewFocusSession = sessionPreviewOpen
     ? resolveJunctionPreviewCell(sessionPreviewLattice, sessionPreviewFocus, sessions)
@@ -3186,15 +3217,18 @@ function TerminalPageComponent({
     if (!entry) return;
     setSessionGroupSlotIds(entry.slotIds);
     setSessionGroupFocusSlot(entry.focusSlot);
-    if (entry.activeSessionId && entry.activeSessionId !== activeSession?.id) {
-      const entryStillOpen = sessions.some((session) => session.id === entry.activeSessionId);
-      if (!entryStillOpen) {
+    // Restore to the current focus session (the center cell the user is
+    // looking at), not the session that was active before entering preview.
+    const restoreSessionId = sessionPreviewFocusSession?.id || entry.activeSessionId || null;
+    if (restoreSessionId && restoreSessionId !== activeSession?.id) {
+      const restoreStillOpen = sessions.some((session) => session.id === restoreSessionId);
+      if (!restoreStillOpen) {
         showSessionPreviewError('进入预览前的 session 已关闭，无法恢复。');
         return;
       }
-      handleSwitchSessionFromChrome(entry.activeSessionId);
+      handleSwitchSessionFromChrome(restoreSessionId);
     }
-  }, [activeSession?.id, handleSwitchSessionFromChrome, sessions]);
+  }, [activeSession?.id, handleSwitchSessionFromChrome, sessionPreviewFocusSession, sessions]);
   handleCancelSessionPreviewRef.current = handleCancelSessionPreview;
 
   useEffect(() => {
