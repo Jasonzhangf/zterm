@@ -2107,6 +2107,13 @@ function TerminalPageComponent({
   }, []);
 
   useEffect(() => {
+    window.dispatchEvent(new CustomEvent('zterm:terminal-page-visible'));
+    return () => {
+      window.dispatchEvent(new CustomEvent('zterm:terminal-page-closed'));
+    };
+  }, []);
+
+  useEffect(() => {
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<{ mode?: 'browser' | 'sync'; remoteCwd?: string }>).detail;
       if (!detail) return;

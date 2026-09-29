@@ -393,6 +393,16 @@ export function AppContent({
   useEffect(() => {
     let disposed = false;
     let listenerHandle: { remove: () => Promise<void> | void } | null = null;
+    let pendingFileDownloadTarget = false;
+    const flushPendingFileDownloadTarget = () => {
+      window.dispatchEvent(new CustomEvent('zterm:open-file-transfer', { detail: { mode: 'browser', remoteCwd: '/tmp' } }));
+    };
+    const handleTerminalPageVisible = () => {
+      if (disposed || !pendingFileDownloadTarget) return;
+      pendingFileDownloadTarget = false;
+      void flushPendingFileDownloadTarget();
+    };
+    window.addEventListener('zterm:terminal-page-visible', handleTerminalPageVisible);
     const handleAppUrl = (url: unknown) => {
       if (typeof url !== 'string' || !url.trim()) {
         return;
@@ -409,6 +419,7 @@ export function AppContent({
           fileName: fileName || '',
           size,
         });
+        pendingFileDownloadTarget = true;
         window.dispatchEvent(new CustomEvent('zterm:open-file-transfer', { detail: { mode: 'browser', remoteCwd: params.get('path') || '/tmp' } }));
         window.dispatchEvent(new CustomEvent('zterm:file-transfer-download', { detail: { remotePath: remoteCwd, fileName, size } }));
         return;
@@ -484,6 +495,7 @@ export function AppContent({
     });
     return () => {
       disposed = true;
+      window.removeEventListener('zterm:terminal-page-visible', handleTerminalPageVisible);
       if (listenerHandle) {
         void listenerHandle.remove();
       }
