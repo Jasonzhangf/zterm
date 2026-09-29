@@ -1214,7 +1214,7 @@ export function FileTransferSheet({
   }, [open, remoteCwd]);
 
   useEffect(() => {
-    if (!open || !fastPathTarget || remoteLoading) {
+    if (!open || !fastPathTarget) {
       return;
     }
     if (typeof fastPathTarget.size === 'number') {
@@ -1288,7 +1288,6 @@ export function FileTransferSheet({
     fastPathTarget,
     open,
     remoteEntries,
-    remoteLoading,
     remotePath,
     requestRemoteList,
     sendJson,

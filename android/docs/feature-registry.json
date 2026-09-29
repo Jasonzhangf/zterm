@@ -1212,6 +1212,8 @@
         "src/lib/file-transfer-throughput-contract.test.ts",
         "src/lib/zterm-verification-queue.ts",
         "src/lib/zterm-verification-queue.test.ts",
+        "src/lib/zterm-verification-download-link.ts",
+        "src/lib/zterm-verification-download-link.test.ts",
         "src/lib/file-transfer-throughput-runtime.ts",
         "src/plugins/StoragePermissionPlugin.ts",
         "src/components/terminal/FileTransferSheet.tsx",

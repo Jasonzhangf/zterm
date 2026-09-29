@@ -31,6 +31,7 @@ import { useRelayDeviceStream } from './hooks/useRelayDeviceStream';
 import { updateBridgeSettingsTerminalWidthMode } from './lib/terminal-width-mode-manager';
 import { upsertBridgeServer } from './lib/bridge-settings';
 import { setZtermVerificationDownload } from './lib/zterm-verification-queue';
+import { parseZtermVerificationDownloadLink } from './lib/zterm-verification-download-link';
 import { applyTraversalRelaySettings } from './lib/traversal-relay-client';
 import { APP_VERSION, APP_VERSION_CODE } from './lib/app-version';
 import {
@@ -408,11 +409,11 @@ export function AppContent({
         return;
       }
       if (url.startsWith('zterm://file-download-verification')) {
-        const params = new URL(url).searchParams;
-        const remoteCwd = params.get('path') || '/tmp';
-        const fileName = params.get('file');
-        const sizeRaw = params.get('size');
-        const size = sizeRaw && /^[0-9]+$/.test(sizeRaw) ? Number.parseInt(sizeRaw, 10) : undefined;
+        const parsed = parseZtermVerificationDownloadLink(url);
+        const remoteCwd = parsed.remotePath;
+        const fileName = parsed.fileName;
+        const size = parsed.size;
+        console.log('[zterm:file-download-verification]', { remoteCwd, fileName, size, url });
         ensureTerminalPageVisible();
         setZtermVerificationDownload({
           remotePath: remoteCwd,
@@ -420,7 +421,7 @@ export function AppContent({
           size,
         });
         pendingFileDownloadTarget = true;
-        window.dispatchEvent(new CustomEvent('zterm:open-file-transfer', { detail: { mode: 'browser', remoteCwd: params.get('path') || '/tmp' } }));
+        window.dispatchEvent(new CustomEvent('zterm:open-file-transfer', { detail: { mode: 'browser', remoteCwd } }));
         window.dispatchEvent(new CustomEvent('zterm:file-transfer-download', { detail: { remotePath: remoteCwd, fileName, size } }));
         return;
       }

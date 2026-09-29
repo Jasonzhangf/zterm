@@ -2554,6 +2554,8 @@
         "src/lib/file-transfer-binary-download-runtime.ts",
         "src/lib/zterm-verification-queue.ts",
         "src/lib/zterm-verification-queue.test.ts",
+        "src/lib/zterm-verification-download-link.ts",
+        "src/lib/zterm-verification-download-link.test.ts",
         "src/lib/plugin-file-browser/"
       ]
     },
