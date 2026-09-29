@@ -130,7 +130,18 @@ describe('windows terminal visible range request gate', () => {
       status: 'connected',
       error: '',
       sessionId: 's1',
-      buffer: { ...emptyBuffer, revision: 1 },
+      buffer: {
+        ...emptyBuffer,
+        revision: 1,
+        lines: [{
+          i: 0,
+          cells: [],
+          width: 0,
+          scrollable: false,
+          erasable: false,
+          continuation: false,
+        }],
+      },
     };
 
     expect(canRequestWindowsVisibleRange(connecting)).toBe(false);

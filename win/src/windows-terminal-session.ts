@@ -22,6 +22,7 @@ export interface WindowsTerminalSnapshot {
   error: string;
   sessionId: string;
   buffer: SessionBufferState;
+  lastRequestKey?: string;
 }
 
 export interface WindowsTerminalSession {
@@ -69,7 +70,11 @@ export function projectWindowsTerminalBuffer(buffer: SessionBufferState): Termin
 }
 
 export function canRequestWindowsVisibleRange(snapshot: WindowsTerminalSnapshot) {
-  return snapshot.status === 'connected' && snapshot.buffer.revision > 0;
+  return snapshot.status === 'connected' && snapshot.buffer.revision > 0 && snapshot.buffer.lines.length > 0;
+}
+
+function visibleRangeRequestKey(snapshot: WindowsTerminalSnapshot, requestStartIndex: number, requestEndIndex: number): string {
+  return `${snapshot.buffer.revision}:${requestStartIndex}:${requestEndIndex}:${snapshot.buffer.gapRanges.map((range) => `${range.startIndex}:${range.endIndex}`).join(',')}`;
 }
 
 function sortSessions(sessions: string[]) {
@@ -149,7 +154,7 @@ export function createWindowsTerminalSession(): WindowsTerminalSession {
   };
   const handleMessage = (message: BridgeServerMessage) => {
     if (message.type !== 'buffer-sync') return;
-    update({ buffer: applyBufferSyncToSessionBuffer(snapshot.buffer, message.payload, CACHE_LINES) });
+    update({ buffer: applyBufferSyncToSessionBuffer(snapshot.buffer, message.payload, CACHE_LINES), lastRequestKey: undefined });
   };
 
   return {
@@ -163,7 +168,7 @@ export function createWindowsTerminalSession(): WindowsTerminalSession {
       const currentGeneration = generation;
       update({ status: 'connecting' });
       const openRequestId = crypto.randomUUID();
-      socket = openBridgeConnection({
+      const connectionSocket = openBridgeConnection({
         bridgeHost: target.bridgeHost,
         bridgePort: target.bridgePort,
         authToken: target.authToken,
@@ -176,6 +181,7 @@ export function createWindowsTerminalSession(): WindowsTerminalSession {
         onConnected: ({ sessionId }) => {
           if (generation !== currentGeneration) return;
           update({ status: 'connected', error: '', sessionId });
+          connectionSocket.send(JSON.stringify({ type: 'buffer-head-request' }));
         },
         onMessage: (message) => {
           if (generation === currentGeneration) handleMessage(message);
@@ -199,6 +205,9 @@ export function createWindowsTerminalSession(): WindowsTerminalSession {
       if (!canRequestWindowsVisibleRange(snapshot)) return false;
       const requestStartIndex = Math.max(0, Math.floor(startIndex ?? snapshot.buffer.startIndex));
       const requestEndIndex = Math.max(requestStartIndex, Math.floor(endIndex ?? snapshot.buffer.endIndex));
+      const requestKey = visibleRangeRequestKey(snapshot, requestStartIndex, requestEndIndex);
+      if (snapshot.lastRequestKey === requestKey) return false;
+      update({ lastRequestKey: requestKey });
       socket.send(JSON.stringify({
         type: 'buffer-sync-request',
         payload: {
@@ -215,6 +224,6 @@ export function createWindowsTerminalSession(): WindowsTerminalSession {
     dispose: () => {
       disconnect();
       listeners.clear();
-    },
+  },
   };
 }
