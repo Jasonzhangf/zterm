@@ -153,7 +153,6 @@ describe('terminal daemon runtime transport liveness', () => {
       memoryGuardMaxRssBytes: Number.MAX_SAFE_INTEGER,
       memoryGuardMaxExternalBytes: Number.MAX_SAFE_INTEGER,
       memoryGuardMaxHeapUsedBytes: Number.MAX_SAFE_INTEGER,
-      memoryGuardMaxExternalBytes: Number.MAX_SAFE_INTEGER,
       startupPortConflictExitCode: 78,
       sessions: new Map(),
       connections: new Map(),
