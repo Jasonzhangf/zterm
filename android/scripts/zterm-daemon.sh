@@ -429,7 +429,7 @@ stage_daemon_runtime() {
   rm -rf "${DAEMON_RUNTIME_DIR}/node_modules/@roamhq/wrtc" "${DAEMON_RUNTIME_DIR}/node_modules/@roamhq/${wrtc_platform_package_name##*/}"
   cp -RL "${wrtc_package_dir}" "${DAEMON_RUNTIME_DIR}/node_modules/@roamhq/wrtc"
   cp -RL "${wrtc_platform_package_dir}" "${DAEMON_RUNTIME_DIR}/node_modules/@roamhq/${wrtc_platform_package_name##*/}"
-  bash "${ROOT_DIR}/scripts/build-dagpipe-native.sh"
+  DAGPIPE_PROFILE=release bash "${ROOT_DIR}/scripts/build-dagpipe-native.sh"
   cp "${ROOT_DIR}/native/dagpipe/index.node" "${STAGED_DAGPIPE_NATIVE}"
   chmod +x ${STAGED_NODE_PTY_HELPER_GLOB} 2>/dev/null || true
 }

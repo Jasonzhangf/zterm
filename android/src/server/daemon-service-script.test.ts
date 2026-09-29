@@ -233,7 +233,7 @@ describe('zterm daemon service script truth gates', () => {
     const stageBody = extractBlock(script, 'stage_daemon_runtime() {', 1800);
 
     expect(script).toContain('STAGED_DAGPIPE_NATIVE="${DAEMON_RUNTIME_DIR}/dagpipe.node"');
-    expect(stageBody).toContain('bash "${ROOT_DIR}/scripts/build-dagpipe-native.sh"');
+    expect(stageBody).toContain('DAGPIPE_PROFILE=release bash "${ROOT_DIR}/scripts/build-dagpipe-native.sh"');
     expect(stageBody).toContain('cp "${ROOT_DIR}/native/dagpipe/index.node" "${STAGED_DAGPIPE_NATIVE}"');
     expect(script.match(/ZTERM_DAGPIPE_NATIVE=/g)?.length).toBeGreaterThanOrEqual(4);
   });
