@@ -3,6 +3,20 @@
 html, body, #root { width: 100%; height: 100%; margin: 0; overflow: hidden; }
 button, input { font: inherit; letter-spacing: 0; }
 .windows-shell { width: 100%; height: 100%; display: grid; grid-template-rows: 42px 1fr; background: #111318; position: relative; }
+.windows-body { display: grid; grid-template-columns: 260px minmax(0, 1fr) auto; grid-template-rows: minmax(0,1fr) 26px; gap: 8px; padding: 8px; min-height: 0; }
+.windows-sidebar { grid-row: 1 / span 2; display: grid; grid-template-rows: auto auto; gap: 12px; overflow: auto; padding: 10px; border: 1px solid #303640; border-radius: 8px; background: #151922; }
+.sidebar-section { display: grid; gap: 7px; }
+.sidebar-title { display: flex; justify-content: space-between; align-items: center; color: #aeb4be; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+.profile-row { display: grid; grid-template-columns: auto minmax(0,1fr) auto; gap: 8px; align-items: center; padding: 8px; border: 1px solid #303640; border-radius: 7px; background: #11141a; color: #d8dbe0; font-size: 12px; }
+.profile-row.active { border-color: #5e8ed7; background: #1d283c; }
+.profile-row input[type=radio] { accent-color: #5e8ed7; }
+.profile-row span:last-child { color: #8f98a6; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.windows-statusbar { grid-column: 2; display: flex; align-items: center; gap: 8px; padding: 0 8px; border-top: 1px solid #303640; color: #9aa0aa; font-size: 11px; overflow: hidden; white-space: nowrap; }
+.statusbar-segment { padding: 4px 7px; border-radius: 6px; background: #20252e; overflow: hidden; text-overflow: ellipsis; }
+.statusbar-error { border: 1px solid #713d3d; background: #3b2325; color: #ffd9d9; }
+.windows-sidebar .session-create-row { grid-column: 1; }
+.windows-sidebar .session-list { max-height: none; }
+.windows-sidebar .session-row { grid-template-columns: minmax(0,1fr) 28px; }
 .titlebar { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 14px; padding: 0 10px 0 16px; border-bottom: 1px solid #2a2e35; background: #171a20; }
 .brand { font-size: 14px; font-weight: 650; }
 .connection-state { display: flex; align-items: center; gap: 7px; color: #9aa0aa; font-size: 12px; }

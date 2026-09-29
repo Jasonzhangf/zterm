@@ -1,0 +1,604 @@
+{
+  "id": "windows.remote_access_client",
+  "version": "0.2",
+  "inputs": [
+    {
+      "id": "arc.request",
+      "schema": "Object"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "dagpipe.extract.arc.profile_demand",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.profile_demand",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.session_intent",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.session_intent",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.workspace_intent",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.workspace_intent",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.sidebar_policy",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.sidebar_policy",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "select_profile",
+      "operator": "windows.profile_store.select",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.profile_demand"
+      ],
+      "output": {
+        "id": "arc.selected_profile",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "resolve_target",
+      "operator": "windows.profile_store.resolve_target",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.selected_profile"
+      ],
+      "output": {
+        "id": "arc.daemon_target",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "list_sessions",
+      "operator": "windows.session_catalog.list",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.daemon_target"
+      ],
+      "output": {
+        "id": "arc.session_catalog",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "project_sidebar",
+      "operator": "windows.sidebar.project",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.selected_profile",
+        "arc.session_catalog",
+        "arc.sidebar_policy"
+      ],
+      "output": {
+        "id": "arc.sidebar_projection",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "bind_transport",
+      "operator": "windows.session_transport.bind_shared",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.daemon_target",
+        "arc.session_intent"
+      ],
+      "output": {
+        "id": "arc.terminal_session",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "compose_workspace",
+      "operator": "windows.workspace.compose",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.workspace_intent",
+        "arc.terminal_session"
+      ],
+      "output": {
+        "id": "arc.workspace_projection",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "render_shared_terminal",
+      "operator": "windows.shell.render_shared_terminal",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.workspace_projection",
+        "arc.terminal_session"
+      ],
+      "output": {
+        "id": "arc.terminal_projection",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "project_statusbar",
+      "operator": "windows.statusbar.project",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.daemon_target",
+        "arc.terminal_session",
+        "arc.workspace_projection"
+      ],
+      "output": {
+        "id": "arc.statusbar_projection",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "collect_success",
+      "operator": "dagpipe.result.collect",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.sidebar_projection",
+        "arc.terminal_projection",
+        "arc.statusbar_projection",
+        "arc.file_browser_projection"
+      ],
+      "output": {
+        "id": "arc.windows_remote_access_success",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "collect_failure",
+      "operator": "dagpipe.result.collect",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.sidebar_projection",
+        "arc.statusbar_projection",
+        "arc.terminal_session",
+        "arc.file_browser_projection"
+      ],
+      "output": {
+        "id": "arc.windows_remote_access_failure",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "cleanup_runtime",
+      "operator": "windows.workspace.cleanup_runtime",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.workspace_projection",
+        "arc.terminal_session"
+      ],
+      "output": {
+        "id": "arc.cleanup_result",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "windows.result.collect.arc.windows_remote_access_success,arc.windows_remote_access_failure,arc.cleanup_result",
+      "operator": "dagpipe.result.collect",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.windows_remote_access_success",
+        "arc.windows_remote_access_failure",
+        "arc.cleanup_result"
+      ],
+      "output": {
+        "id": "arc.windows_remote_access_result",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.file_browser_intent",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.file_browser_intent",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "project_file_browser",
+      "operator": "windows.file_browser.project",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.file_browser_intent",
+        "arc.daemon_target",
+        "arc.workspace_projection"
+      ],
+      "output": {
+        "id": "arc.file_browser_projection",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    {
+      "from": "dagpipe.extract.arc.profile_demand",
+      "to": "select_profile",
+      "arc_id": "arc.profile_demand"
+    },
+    {
+      "from": "dagpipe.extract.arc.session_intent",
+      "to": "bind_transport",
+      "arc_id": "arc.session_intent"
+    },
+    {
+      "from": "dagpipe.extract.arc.workspace_intent",
+      "to": "compose_workspace",
+      "arc_id": "arc.workspace_intent"
+    },
+    {
+      "from": "dagpipe.extract.arc.sidebar_policy",
+      "to": "project_sidebar",
+      "arc_id": "arc.sidebar_policy"
+    },
+    {
+      "from": "select_profile",
+      "to": "resolve_target",
+      "arc_id": "arc.selected_profile"
+    },
+    {
+      "from": "select_profile",
+      "to": "project_sidebar",
+      "arc_id": "arc.selected_profile"
+    },
+    {
+      "from": "resolve_target",
+      "to": "list_sessions",
+      "arc_id": "arc.daemon_target"
+    },
+    {
+      "from": "resolve_target",
+      "to": "bind_transport",
+      "arc_id": "arc.daemon_target"
+    },
+    {
+      "from": "resolve_target",
+      "to": "project_statusbar",
+      "arc_id": "arc.daemon_target"
+    },
+    {
+      "from": "list_sessions",
+      "to": "project_sidebar",
+      "arc_id": "arc.session_catalog"
+    },
+    {
+      "from": "bind_transport",
+      "to": "compose_workspace",
+      "arc_id": "arc.terminal_session"
+    },
+    {
+      "from": "bind_transport",
+      "to": "render_shared_terminal",
+      "arc_id": "arc.terminal_session"
+    },
+    {
+      "from": "bind_transport",
+      "to": "project_statusbar",
+      "arc_id": "arc.terminal_session"
+    },
+    {
+      "from": "compose_workspace",
+      "to": "render_shared_terminal",
+      "arc_id": "arc.workspace_projection"
+    },
+    {
+      "from": "compose_workspace",
+      "to": "project_statusbar",
+      "arc_id": "arc.workspace_projection"
+    },
+    {
+      "from": "project_sidebar",
+      "to": "collect_success",
+      "arc_id": "arc.sidebar_projection"
+    },
+    {
+      "from": "project_sidebar",
+      "to": "collect_failure",
+      "arc_id": "arc.sidebar_projection"
+    },
+    {
+      "from": "render_shared_terminal",
+      "to": "collect_success",
+      "arc_id": "arc.terminal_projection"
+    },
+    {
+      "from": "project_statusbar",
+      "to": "collect_success",
+      "arc_id": "arc.statusbar_projection"
+    },
+    {
+      "from": "project_statusbar",
+      "to": "collect_failure",
+      "arc_id": "arc.statusbar_projection"
+    },
+    {
+      "from": "bind_transport",
+      "to": "collect_failure",
+      "arc_id": "arc.terminal_session"
+    },
+    {
+      "from": "compose_workspace",
+      "to": "cleanup_runtime",
+      "arc_id": "arc.workspace_projection"
+    },
+    {
+      "from": "bind_transport",
+      "to": "cleanup_runtime",
+      "arc_id": "arc.terminal_session"
+    },
+    {
+      "from": "collect_success",
+      "to": "windows.result.collect.arc.windows_remote_access_success,arc.windows_remote_access_failure,arc.cleanup_result",
+      "arc_id": "arc.windows_remote_access_success"
+    },
+    {
+      "from": "collect_failure",
+      "to": "windows.result.collect.arc.windows_remote_access_success,arc.windows_remote_access_failure,arc.cleanup_result",
+      "arc_id": "arc.windows_remote_access_failure"
+    },
+    {
+      "from": "cleanup_runtime",
+      "to": "windows.result.collect.arc.windows_remote_access_success,arc.windows_remote_access_failure,arc.cleanup_result",
+      "arc_id": "arc.cleanup_result"
+    },
+    {
+      "from": "dagpipe.extract.arc.file_browser_intent",
+      "to": "project_file_browser",
+      "arc_id": "arc.file_browser_intent"
+    },
+    {
+      "from": "resolve_target",
+      "to": "project_file_browser",
+      "arc_id": "arc.daemon_target"
+    },
+    {
+      "from": "compose_workspace",
+      "to": "project_file_browser",
+      "arc_id": "arc.workspace_projection"
+    },
+    {
+      "from": "project_file_browser",
+      "to": "collect_success",
+      "arc_id": "arc.file_browser_projection"
+    },
+    {
+      "from": "project_file_browser",
+      "to": "collect_failure",
+      "arc_id": "arc.file_browser_projection"
+    }
+  ],
+  "outputs": [
+    "arc.windows_remote_access_result"
+  ]
+}

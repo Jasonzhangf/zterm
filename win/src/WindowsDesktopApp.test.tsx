@@ -65,6 +65,7 @@ describe('WindowsDesktopApp pane/session UX', () => {
   it('lets an empty split pane choose a session from the session list', async () => {
     const { container } = render(<WindowsDesktopApp />);
 
+    fireEvent.click(screen.getByTitle('连接设置'));
     fireEvent.click(screen.getByRole('button', { name: '空分屏' }));
     expect(container.querySelectorAll('[data-testid="pane-stage-frame"]')).toHaveLength(2);
     const emptyPaneButton = container.querySelector('[data-testid^="windows-empty-pane-select-"]') as HTMLButtonElement;
@@ -80,6 +81,7 @@ describe('WindowsDesktopApp pane/session UX', () => {
     const { container } = render(<WindowsDesktopApp />);
     fireEvent.click(screen.getByRole('button', { name: 'alpha' }));
     fireEvent.click(screen.getByRole('button', { name: '连接设置' }));
+    fireEvent.click(screen.getByTitle('连接设置'));
     fireEvent.click(screen.getByRole('button', { name: '空分屏' }));
 
     await screen.findAllByTitle('Click: switch · Right-click: pane menu · Double-click: rename');
@@ -144,7 +146,7 @@ describe('WindowsDesktopApp pane/session UX', () => {
     fireEvent.click(screen.getByRole('button', { name: 'beta' }));
 
     await waitFor(() => expect(ensureMock).toHaveBeenCalledWith(expect.objectContaining({ title: 'beta' })));
-    expect(screen.queryByText('alpha')).not.toBeInTheDocument();
+    expect(screen.queryAllByTitle('Click: switch · Right-click: pane menu · Double-click: rename').map((node) => node.textContent).join('\n')).not.toContain('alpha');
   });
 
   it('opens the replacement chooser even when the current form target is invalid', async () => {
@@ -177,7 +179,7 @@ describe('WindowsDesktopApp pane/session UX', () => {
     fireEvent.click(screen.getByRole('button', { name: '连接' }));
 
     await waitFor(() => expect(ensureMock).toHaveBeenCalledWith(expect.objectContaining({ title: 'beta' })));
-    expect(screen.queryByText('alpha')).not.toBeInTheDocument();
+    expect(screen.queryAllByTitle('Click: switch · Right-click: pane menu · Double-click: rename').map((node) => node.textContent).join('\n')).not.toContain('alpha');
   });
 
   it('cancels a scoped replacement intent when the chooser is dismissed', async () => {
@@ -214,6 +216,34 @@ describe('WindowsDesktopApp pane/session UX', () => {
     fireEvent.click(screen.getByRole('button', { name: 'beta' }));
 
     await waitFor(() => expect(ensureMock).toHaveBeenCalledWith(expect.objectContaining({ title: 'beta' })));
-    expect(screen.queryByRole('complementary', { name: '连接设置' })).not.toBeInTheDocument();
+  });
+});
+
+describe('WindowsDesktopApp profile/statusbar', () => {
+  it('shows an iTerm2-style profile/session sidebar and statusbar projection', async () => {
+    render(<WindowsDesktopApp />);
+
+    expect(screen.getByTestId('windows-sidebar')).toBeInTheDocument();
+    expect(screen.getByText('Hosts')).toBeInTheDocument();
+    expect(screen.getByText('Sessions')).toBeInTheDocument();
+    expect(screen.getByText('local', { selector: '.profile-row span' })).toBeInTheDocument();
+    expect(screen.getByText('127.0.0.1:3333')).toBeInTheDocument();
+    expect(screen.getByTestId('windows-statusbar')).toBeInTheDocument();
+    expect(screen.getByTestId('windows-statusbar').textContent).toContain('local');
+    expect(screen.getByTestId('windows-statusbar').textContent).toContain('idle');
+  });
+
+  it('shows profile edits in the gear panel draft', async () => {
+    render(<WindowsDesktopApp />);
+
+    fireEvent.click(screen.getByTitle('连接设置'));
+    fireEvent.change(screen.getByDisplayValue('local'), { target: { value: 'dev' } });
+    fireEvent.change(screen.getByDisplayValue('127.0.0.1'), { target: { value: '10.0.0.2' } });
+    fireEvent.change(screen.getByDisplayValue('3333'), { target: { value: '4444' } });
+    fireEvent.change(screen.getByDisplayValue('zterm'), { target: { value: 'dev-shell' } });
+    expect(screen.getByDisplayValue('dev')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('10.0.0.2')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('4444')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('dev-shell')).toBeInTheDocument();
   });
 });

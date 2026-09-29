@@ -18,8 +18,8 @@ In scope：
 
 - 收口 `daemon.windows_wezterm_backend`：backend selection、WezTerm runtime、snapshot/input/close lifecycle、错误语义、远程 smoke。
 - 校准 `android/docs/decisions/2026-06-29-windows-wezterm-backend-contract.md`、`android/docs/feature-registry.json`、`android/docs/function-map.md`、`android/docs/feature-gates.md`。
-- 建立 `win/` 最小文档骨架：`win/docs/spec.md`、`win/docs/architecture.md`、`win/docs/function-map.md`、`win/task.md`、`win/MEMORY.md`。
-- 明确 Windows client shell 的后续 owner 和禁止路径。
+- 建立 `win/` 最小文档骨架：`win/docs/spec.md`、`win/docs/architecture.md`、`win/task.md`、`win/MEMORY.md`。
+- Windows client shell 的当前 owner 和禁止路径以 `windows.remote_access_client` DAG/graph、feature registry 和 Windows skill 为准。
 
 Out of scope：
 
@@ -61,7 +61,7 @@ Out of scope：
 - 补 `feature-registry.json` gate：unit、runtime、mock protocol、remote smoke、input smoke、typecheck。
 - 补 `function-map.md` / wiki call map 绑定：backend selection -> WezTerm runtime -> mirror snapshot -> buffer protocol。
 - 增加必要红测：不 fallback 到 tmux、缺 pane 显式错误、send-text 不走 shell args、closeSession 清理失败显式暴露。
-- 建立 `win/` 文档骨架，声明 Windows client shell 只复用 shared/Mac desktop pane stage 和 renderer。
+- Windows remote-access client 的当前真源迁至 `android/docs/dagpipe/windows-remote-access-client.graph.json`；本计划不再声明 Windows function-map 或 shell manifest。
 
 ## 风险与规避
 
