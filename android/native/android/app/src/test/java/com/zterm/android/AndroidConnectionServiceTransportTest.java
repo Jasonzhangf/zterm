@@ -631,6 +631,9 @@ public final class AndroidConnectionServiceTransportTest {
                 .lanHost("127.0.0.1")
                 .tailscaleHost("100.64.0.2")
                 .ipv4Host("203.0.113.10")
+                .ipv6Host("2001:db8::10")
+                .ipv4Host("203.0.113.10")
+                .ipv6Host("2001:db8::10")
                 .relayHostId("relay-1")
                 .signalUrl("wss://relay.example/client")
                 .relayDeviceId("android-1")
@@ -646,58 +649,49 @@ public final class AndroidConnectionServiceTransportTest {
             setField(service, "workerHandler", new Handler(Looper.getMainLooper()));
 
             assertEquals(
-                java.util.Arrays.asList("lan", "tailscale", "ipv4"),
+                java.util.Arrays.asList("lan", "tailscale", "ipv6", "ipv4"),
                 candidatePaths(runtime));
 
             List<String> openedUrls = new ArrayList<>();
+            java.util.Map<String, WebSocket> byUrl = new java.util.LinkedHashMap<>();
             setField(service, "httpClient", newWebSocketFactory(request -> {
                 openedUrls.add(request.url().toString());
-                if (openedUrls.size() == 1) {
-                    throw new IllegalStateException("lan refused");
-                }
-                return fakeSocket(new ArrayList<>(), true);
+                WebSocket socket = fakeSocket(new ArrayList<>(), true);
+                byUrl.put(request.url().toString(), socket);
+                return socket;
             }));
 
             Method openCandidate = runtime.getClass().getDeclaredMethod("openCandidate");
             openCandidate.setAccessible(true);
-            setField(runtime, "candidateIndex", 0);
             openCandidate.invoke(runtime);
             Method handleMuxReady = runtime.getClass().getDeclaredMethod(
-                "handleMuxReady", JSONObject.class);
+                "handleMuxReady", JSONObject.class, WebSocket.class);
             handleMuxReady.setAccessible(true);
-            handleMuxReady.invoke(runtime, new JSONObject()
-                .put("version", 1)
-                .put("capabilities", new JSONObject()
-                    .put("channelEnvelope", true)
-                    .put("targetMessages", true)));
+            handleMuxReady.invoke(runtime, muxReadyPayload(),
+                byUrl.get("ws://127.0.0.1:3333/mux?token=" + null));
+            assertEquals(4, openedUrls.size());
             Field stateMachineField = runtime.getClass().getDeclaredField("stateMachine");
             stateMachineField.setAccessible(true);
             AndroidConnectionStateMachine stateMachine = (AndroidConnectionStateMachine) stateMachineField.get(runtime);
-            stateMachine.dispatch(AndroidConnectionServiceEvent.transportResolved(
-                "gen-1", "tailscale", null, "100.64.0.2:3333", null), 4L);
 
             assertTrue("LAN candidate must start first", openedUrls.get(0).contains("127.0.0.1"));
-            assertTrue("failure must retry Tailscale, not WebRTC", openedUrls.toString().contains("100.64.0.2"));
+            assertTrue("tailscale must race in parallel", openedUrls.get(1).contains("100.64.0.2"));
+            assertTrue("ipv6 must race in parallel", openedUrls.get(2).contains("[2001:db8::10]:3333"));
+            assertTrue("ipv4 must race in parallel", openedUrls.get(3).contains("203.0.113.10"));
             assertFalse(openedUrls.toString(), openedUrls.toString().contains("relay.example/client"));
 
             AndroidConnectionServiceSnapshot snapshot = ((AndroidConnectionStateMachine) stateMachineField.get(runtime))
                 .readSnapshot();
             JSONArray diagnostics = snapshot.toJson().optJSONArray("routeDiagnostics");
             assertNotNull("native snapshot must expose route diagnostics", diagnostics);
-            JSONObject failed = diagnostics.getJSONObject(0);
-            assertEquals("lan", failed.getString("path"));
-            assertEquals("ws:lan:target-auto-webrtc-skipped", failed.getString("candidateId"));
-            assertEquals("127.0.0.1:3333", failed.getString("endpoint"));
-            assertEquals(true, failed.has("startedAt"));
-            assertEquals(true, failed.has("endedAt"));
-            assertEquals(true, failed.has("elapsedMs"));
-            assertEquals("websocket-open-rejected", failed.getString("failureCode"));
-            assertEquals(false, failed.optBoolean("selected"));
-            JSONObject selected = diagnostics.getJSONObject(1);
-            assertEquals("tailscale", selected.getString("path"));
-            assertEquals("ws:tailscale:target-auto-webrtc-skipped", selected.getString("candidateId"));
-            assertEquals("100.64.0.2:3333", selected.getString("endpoint"));
-            assertEquals(true, selected.optBoolean("selected"));
+            JSONObject selected = diagnostics.getJSONObject(0);
+            assertEquals("lan", selected.getString("path"));
+            assertEquals("ws:lan:target-auto-webrtc-skipped", selected.getString("candidateId"));
+            assertEquals("127.0.0.1:3333", selected.getString("endpoint"));
+            assertEquals(true, selected.has("startedAt"));
+            assertEquals(true, selected.has("endedAt"));
+            assertEquals(true, selected.has("elapsedMs"));
+            assertEquals(4, diagnostics.length());
         } finally {
             AndroidConnectionService.resetForTests();
         }
@@ -874,8 +868,10 @@ public final class AndroidConnectionServiceTransportTest {
                 .targetKey("target-rtc-timeout")
                 .bridgeHost("100.64.0.2")
                 .bridgePort(3333)
+                .lanHost("127.0.0.2")
                 .tailscaleHost("100.64.0.2")
                 .ipv4Host("203.0.113.10")
+                .ipv6Host("2001:db8::10")
                 .relayHostId("relay-1")
                 .signalUrl("wss://relay.example/client")
                 .relayDeviceId("android-1")
@@ -900,27 +896,33 @@ public final class AndroidConnectionServiceTransportTest {
             Method openCandidate = runtime.getClass().getDeclaredMethod("openCandidate");
             openCandidate.setAccessible(true);
             openCandidate.invoke(runtime);
-            openCandidate.invoke(runtime);
 
-            assertEquals(2, openedUrls.size());
+            assertEquals(4, openedUrls.size());
             assertTrue("opened=" + openedUrls,
-                openedUrls.get(1).contains("203.0.113.10"));
+                openedUrls.get(0).contains("127.0.0.2"));
+            assertTrue("opened=" + openedUrls,
+                openedUrls.get(2).contains("[2001:db8::10]:3333"));
+            assertTrue("opened=" + openedUrls,
+                openedUrls.get(3).contains("203.0.113.10"));
 
-            Field timeoutField = runtime.getClass().getDeclaredField("candidateTimeout");
-            timeoutField.setAccessible(true);
-            Runnable timeout = (Runnable) timeoutField.get(runtime);
-            assertNotNull("candidate timeout must be scheduled for public direct", timeout);
-            timeout.run();
-            assertEquals("timeout must stay inside the same attempt until no candidate remains",
-                2, openedUrls.size());
+            java.util.Map<String, Runnable> timeouts = (java.util.Map<String, Runnable>) field(runtime, "candidateTimeouts");
+            assertEquals(4, timeouts.size());
+            ((Runnable) timeouts.values().toArray()[3]).run();
+            assertEquals("timeout must not open relay while other direct candidates remain",
+                4, openedUrls.size());
             assertFalse(openedUrls.toString(), openedUrls.toString().contains("relay.example/client"));
 
             Field stateMachineField = runtime.getClass().getDeclaredField("stateMachine");
             stateMachineField.setAccessible(true);
             AndroidConnectionStateMachine stateMachine =
                 (AndroidConnectionStateMachine) stateMachineField.get(runtime);
-            assertEquals("direct failure without relay fallback enters backoff reconnect",
-                AndroidConnectionServiceSnapshot.State.BACKOFF_RECONNECT,
+            assertEquals("one direct timeout must not retire while other direct candidates remain open",
+                AndroidConnectionServiceSnapshot.State.CONNECTING,
+                stateMachine.readSnapshot().state);
+            ((Runnable) timeouts.values().toArray()[1]).run();
+            ((Runnable) timeouts.values().toArray()[0]).run();
+            assertEquals("after all direct candidates fail the attempt must stay inside the same attempt and reach relay",
+                AndroidConnectionServiceSnapshot.State.CONNECTING,
                 stateMachine.readSnapshot().state);
         } finally {
             AndroidConnectionService.resetForTests();
@@ -937,7 +939,7 @@ public final class AndroidConnectionServiceTransportTest {
                 .targetKey("target-fallback")
                 .bridgeHost("100.64.0.2")
                 .bridgePort(3333)
-                .lanHost("127.0.0.2")
+                .lanHost("127.0.0.1")
                 .tailscaleHost("100.64.0.2")
                 .ipv4Host("203.0.113.10")
                 .build();
@@ -963,11 +965,13 @@ public final class AndroidConnectionServiceTransportTest {
             openCandidate.setAccessible(true);
             openCandidate.invoke(runtime);
 
-            assertEquals(2, openedUrls.size());
+            assertEquals(3, openedUrls.size());
             assertTrue("first candidate must be the same-subnet LAN url",
-                openedUrls.get(0).contains("127.0.0.2"));
+                openedUrls.get(0).contains("127.0.0.1"));
             assertTrue("failure must fall through to Tailscale",
                 openedUrls.get(1).contains("100.64.0.2"));
+            assertTrue("public direct must race in parallel",
+                openedUrls.get(2).contains("203.0.113.10"));
 
             Field stateMachineField = runtime.getClass().getDeclaredField("stateMachine");
             stateMachineField.setAccessible(true);
@@ -1220,6 +1224,22 @@ public final class AndroidConnectionServiceTransportTest {
             : target.getClass().getDeclaredField(name);
         field.setAccessible(true);
         field.set(target, value);
+    }
+
+    private static Object field(Object target, String name) throws Exception {
+        Field field = target instanceof AndroidConnectionService
+            ? AndroidConnectionService.class.getDeclaredField(name)
+            : target.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        return field.get(target);
+    }
+
+    private static JSONObject muxReadyPayload() throws Exception {
+        return new JSONObject()
+            .put("version", 1)
+            .put("capabilities", new JSONObject()
+                .put("channelEnvelope", true)
+                .put("targetMessages", true));
     }
 
     private static Object newDebouncedFailureRuntime(AndroidConnectionService service)

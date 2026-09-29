@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  peekZtermVerificationDownload,
   setZtermVerificationDownload,
   takeZtermVerificationDownload,
 } from './zterm-verification-queue';
@@ -14,6 +15,26 @@ describe('zterm verification queue', () => {
 
     const target = takeZtermVerificationDownload();
     expect(target).toEqual({
+      remotePath: '/tmp',
+      fileName: 'zterm-rtfp-50mb-3112.bin',
+      size: 52428800,
+    });
+    expect(takeZtermVerificationDownload()).toBeNull();
+  });
+
+  it('peeks without consuming so the sheet can skip the mux list request and still consume it later', () => {
+    setZtermVerificationDownload({
+      remotePath: '/tmp',
+      fileName: 'zterm-rtfp-50mb-3112.bin',
+      size: 52428800,
+    });
+
+    expect(peekZtermVerificationDownload()).toEqual({
+      remotePath: '/tmp',
+      fileName: 'zterm-rtfp-50mb-3112.bin',
+      size: 52428800,
+    });
+    expect(takeZtermVerificationDownload()).toEqual({
       remotePath: '/tmp',
       fileName: 'zterm-rtfp-50mb-3112.bin',
       size: 52428800,

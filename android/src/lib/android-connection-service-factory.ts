@@ -7,7 +7,7 @@ import { AndroidConnectionServiceTransportSocket } from './android-connection-se
 import type { AndroidConnectionServiceTarget } from './android-connection-service-commands';
 import type { BridgeSettings } from './bridge-settings';
 import type { BridgeTransportSocket } from './traversal/types';
-import { isPrivateLanIpv4Host, parseEndpointHost } from './network-target';
+import { isLikelyTailscaleHost, isPrivateLanIpv4Host, parseEndpointHost } from './network-target';
 import {
   runDagpipeBufferManagement,
   runDagpipeBufferRender,
@@ -90,7 +90,7 @@ export function openAndroidConnectionServiceTransportSocket(
                 selected: {
                   candidateId: target.targetKey,
                   id: target.targetKey,
-                  path: host.relayHostId ? 'Relay' : 'LAN',
+                  path: resolveRoutePlanPath(host),
                   endpoint: `${host.bridgeHost}:${host.bridgePort}`,
                 },
               },
@@ -106,7 +106,7 @@ export function openAndroidConnectionServiceTransportSocket(
                 }],
               },
               'arc.connection_policy': {
-                pathPriority: ['LAN', 'UDP direct', 'Tailscale', 'Relay'],
+                pathPriority: ['LAN', 'Tailscale', 'IPv6', 'IPv4', 'Relay'],
                 expectedGeneration: 1,
               },
             },
@@ -211,4 +211,18 @@ export function openAndroidConnectionServiceTransportSocket(
     (error) => socket.reportFailure(`connection service startup failed: ${String(error instanceof Error ? error.message : error)}`),
   );
   return socket;
+}
+
+export function resolveRoutePlanPath(host: Host): 'LAN' | 'Tailscale' | 'IPv6' | 'IPv4' {
+  const bridge = host.bridgeHost?.trim() || '';
+  if (isLikelyTailscaleHost(bridge)) {
+    return 'Tailscale';
+  }
+  if (isPrivateLanIpv4Host(parseEndpointHost(bridge))) {
+    return 'LAN';
+  }
+  if (bridge.includes(':') && !bridge.includes('.')) {
+    return 'IPv6';
+  }
+  return 'IPv4';
 }

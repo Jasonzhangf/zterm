@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { TraversalRouteHealthCache } from './route-health-cache';
 import { selectBestTraversalRoute } from './route-selector';
+import { DEFAULT_TRAVERSAL_PATH_PRIORITY } from '../bridge-settings';
 import type { TraversalPlanCandidate } from './types';
 
 const candidates = [
@@ -46,6 +47,26 @@ const candidates = [
 ] satisfies TraversalPlanCandidate[];
 
 describe('selectBestTraversalRoute', () => {
+  it('keeps experimental WebRTC out of the default Auto critical path', () => {
+    expect(DEFAULT_TRAVERSAL_PATH_PRIORITY).toEqual([
+      'lan',
+      'tailscale',
+      'ipv6',
+      'ipv4',
+      'rtc-relay',
+      'rtc-direct',
+    ]);
+
+    const selection = selectBestTraversalRoute({
+      candidates: [
+        candidates[4]!,
+        candidates[2]!,
+      ],
+    });
+
+    expect(selection.selected).toMatchObject({ id: 'direct:tailscale', path: 'tailscale' });
+  });
+
   it('defaults Auto selection to Tailscale before RTC direct and Relay when no LAN route exists', () => {
     const selection = selectBestTraversalRoute({
       candidates: [

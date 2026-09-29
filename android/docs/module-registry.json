@@ -2552,6 +2552,7 @@
         "src/lib/file-transfer-native-store-port.ts",
         "src/lib/file-transfer-path-runtime.ts",
         "src/lib/file-transfer-binary-download-runtime.ts",
+        "src/hooks/useZtermVerificationIntent.ts",
         "src/lib/zterm-verification-queue.ts",
         "src/lib/zterm-verification-queue.test.ts",
         "src/lib/zterm-verification-download-link.ts",

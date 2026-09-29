@@ -8,7 +8,7 @@ import type { MutableRefObject } from 'react';
 import { App as CapacitorApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
-import { parseConnectionConfigShareLink } from '@zterm/shared';
+import { parseConnectionConfigShareLink, type EditableHost } from '@zterm/shared';
 import { TmuxSessionPickerSheet } from './components/tmux/TmuxSessionPickerSheet';
 import { ZtermDialog } from './components/terminal/ZtermDialog';
 import { SessionProvider, useSession } from './contexts/SessionContext';
@@ -28,6 +28,7 @@ import { useSessionOpenActions } from './hooks/useSessionOpenActions';
 import { useAppPageState } from './hooks/useAppPageState';
 import { useTerminalShellActions } from './hooks/useTerminalShellActions';
 import { useRelayDeviceStream } from './hooks/useRelayDeviceStream';
+import { useZtermVerificationIntent } from './hooks/useZtermVerificationIntent';
 import { updateBridgeSettingsTerminalWidthMode } from './lib/terminal-width-mode-manager';
 import { upsertBridgeServer } from './lib/bridge-settings';
 import { setZtermVerificationDownload } from './lib/zterm-verification-queue';
@@ -394,16 +395,6 @@ export function AppContent({
   useEffect(() => {
     let disposed = false;
     let listenerHandle: { remove: () => Promise<void> | void } | null = null;
-    let pendingFileDownloadTarget = false;
-    const flushPendingFileDownloadTarget = () => {
-      window.dispatchEvent(new CustomEvent('zterm:open-file-transfer', { detail: { mode: 'browser', remoteCwd: '/tmp' } }));
-    };
-    const handleTerminalPageVisible = () => {
-      if (disposed || !pendingFileDownloadTarget) return;
-      pendingFileDownloadTarget = false;
-      void flushPendingFileDownloadTarget();
-    };
-    window.addEventListener('zterm:terminal-page-visible', handleTerminalPageVisible);
     const handleAppUrl = (url: unknown) => {
       if (typeof url !== 'string' || !url.trim()) {
         return;
@@ -414,15 +405,42 @@ export function AppContent({
         const fileName = parsed.fileName;
         const size = parsed.size;
         console.log('[zterm:file-download-verification]', { remoteCwd, fileName, size, url });
-        ensureTerminalPageVisible();
         setZtermVerificationDownload({
           remotePath: remoteCwd,
           fileName: fileName || '',
           size,
         });
-        pendingFileDownloadTarget = true;
-        window.dispatchEvent(new CustomEvent('zterm:open-file-transfer', { detail: { mode: 'browser', remoteCwd } }));
-        window.dispatchEvent(new CustomEvent('zterm:file-transfer-download', { detail: { remotePath: remoteCwd, fileName, size } }));
+        const recentHost = [...hosts]
+          .sort((left, right) => (right.lastConnected ?? 0) - (left.lastConnected ?? 0))
+          .find((host) => (host.lastConnected ?? 0) > 0)
+          || hosts[0];
+        let sessionHost = recentHost;
+        if (!sessionHost) {
+          const fallbackHost: EditableHost = {
+            name: 'Local daemon',
+            bridgeHost: '10.0.2.2',
+            bridgePort: 3333,
+            daemonHostId: 'mac-studio',
+            relayHostId: 'mac-studio',
+            authToken: 'wterm-4123456',
+            sessionName: 'default',
+            authType: 'password',
+            tags: [],
+            pinned: false,
+            terminalBackend: 'tmux',
+            transportMode: 'auto',
+          };
+          sessionHost = upsertHost(fallbackHost);
+          verificationFallbackHostRef.current = sessionHost;
+        }
+        window.dispatchEvent(new CustomEvent('zterm:verification-open-request', {
+          detail: {
+            targetKey: buildTransportTargetKey(sessionHost),
+            channelId: 'verification',
+            sessionName: sessionHost.sessionName || 'default',
+          },
+        }));
+        ensureTerminalPageVisible();
         return;
       }
       const deepLink = parseAndroidNotificationDeepLink(url);
@@ -494,13 +512,12 @@ export function AppContent({
         });
       }
     });
-    return () => {
-      disposed = true;
-      window.removeEventListener('zterm:terminal-page-visible', handleTerminalPageVisible);
-      if (listenerHandle) {
-        void listenerHandle.remove();
-      }
-    };
+      return () => {
+        disposed = true;
+        if (listenerHandle) {
+          void listenerHandle.remove();
+        }
+      };
   }, [handleImportConnectionShareLink]);
 
   // Notification tap: open the attachment drawer when the user taps an
@@ -509,6 +526,13 @@ export function AppContent({
   // session-stopped notification jumps straight into that tmux session.
   const handleStoppedSessionNotificationRef = useRef<((sessionName: string) => void) | null>(null);
   const openSessionDeepLinkRef = useRef<((targetKey: string, channelId: string, sessionName: string) => void) | null>(null);
+  const verificationFallbackHostRef = useRef<Host | null>(null);
+  useZtermVerificationIntent({
+    onOpenSession: (targetKey, channelId, sessionName) => {
+      openSessionDeepLinkRef.current?.(targetKey, channelId, sessionName);
+    },
+  });
+
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) {
       return;
@@ -859,7 +883,8 @@ export function AppContent({
       ensureTerminalPageVisible();
       return;
     }
-    const matchingHost = hosts.find((host) => buildKey(host) === targetKey.trim());
+    const matchingHost = hosts.find((host) => buildKey(host) === targetKey.trim())
+      || verificationFallbackHostRef.current;
     if (matchingHost) {
       handleOpenSingleTmuxSession(buildBridgeTargetFromHost(matchingHost), sessionName.trim());
       return;

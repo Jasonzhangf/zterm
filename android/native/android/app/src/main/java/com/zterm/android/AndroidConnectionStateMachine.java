@@ -200,10 +200,11 @@ public final class AndroidConnectionStateMachine {
 
             case TRANSPORT_RESOLVED:
                 snapshot = snapshot.toBuilder()
-                    .resolvedPath(event.resolvedPath)
-                    .resolvedRelayTransport(event.resolvedRelayTransport)
-                    .resolvedEndpoint(event.resolvedEndpoint)
-                    .selectedIcePairJson(event.selectedIcePairJson)
+                .resolvedPath(event.resolvedPath)
+                .resolvedRelayTransport(event.resolvedRelayTransport)
+                .resolvedEndpoint(event.resolvedEndpoint)
+                .routeDiagnostics(snapshot.routeDiagnostics)
+                .selectedIcePairJson(event.selectedIcePairJson)
                     .build();
                 publish();
                 return true;

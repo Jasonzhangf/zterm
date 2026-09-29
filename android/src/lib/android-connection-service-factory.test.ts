@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildAndroidConnectionServiceTarget } from './android-connection-service-factory';
+import { buildAndroidConnectionServiceTarget, resolveRoutePlanPath } from './android-connection-service-factory';
 
 describe('buildAndroidConnectionServiceTarget', () => {
   it('keeps Relay directory LAN candidate authoritative', () => {
@@ -72,5 +72,25 @@ describe('buildAndroidConnectionServiceTarget', () => {
     } as any);
 
     expect(target.lanHost).toBeUndefined();
+  });
+
+  it('classifies route plan path by real bridge host, not relayHostId', () => {
+    const base = {
+      id: 'host-route-plan',
+      createdAt: 1,
+      name: 'Route plan',
+      bridgePort: 3333,
+      sessionName: 'default',
+      authType: 'password',
+      tags: [],
+      pinned: false,
+      relayHostId: 'mac-studio',
+    } as any;
+
+    expect(resolveRoutePlanPath({ ...base, bridgeHost: '10.0.2.2' })).toBe('LAN');
+    expect(resolveRoutePlanPath({ ...base, bridgeHost: '192.168.1.10' })).toBe('LAN');
+    expect(resolveRoutePlanPath({ ...base, bridgeHost: '100.66.1.82' })).toBe('Tailscale');
+    expect(resolveRoutePlanPath({ ...base, bridgeHost: '2001:db8::1' })).toBe('IPv6');
+    expect(resolveRoutePlanPath({ ...base, bridgeHost: '203.0.113.10' })).toBe('IPv4');
   });
 });

@@ -2107,13 +2107,6 @@ function TerminalPageComponent({
   }, []);
 
   useEffect(() => {
-    window.dispatchEvent(new CustomEvent('zterm:terminal-page-visible'));
-    return () => {
-      window.dispatchEvent(new CustomEvent('zterm:terminal-page-closed'));
-    };
-  }, []);
-
-  useEffect(() => {
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<{ mode?: 'browser' | 'sync'; remoteCwd?: string }>).detail;
       if (!detail) return;
@@ -2122,6 +2115,13 @@ function TerminalPageComponent({
     window.addEventListener('zterm:open-file-transfer', handler);
     return () => window.removeEventListener('zterm:open-file-transfer', handler);
   }, [handleQuickBarOpenFileTransfer]);
+
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('zterm:terminal-page-visible'));
+    return () => {
+      window.dispatchEvent(new CustomEvent('zterm:terminal-page-closed'));
+    };
+  }, []);
 
   const handleOpenResourceDrawer = useCallback((tab: 'web' | 'stream') => {
     setResourceInitialTab(tab);

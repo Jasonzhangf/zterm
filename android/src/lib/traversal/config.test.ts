@@ -254,6 +254,8 @@ describe('buildTraversalPlan', () => {
       'ipv6',
       'ipv4',
     ]);
+    expect(plan.candidates.map((candidate) => candidate.path)).not.toContain('rtc-direct');
+    expect(plan.candidates.map((candidate) => candidate.path)).not.toContain('rtc-relay');
     expect(plan.candidates.every((candidate) => candidate.kind === 'ws')).toBe(true);
     expect(JSON.stringify(plan.candidates)).not.toContain('secret');
   });
@@ -469,7 +471,7 @@ describe('buildTraversalPlan', () => {
         { urls: 'stun:stun.l.google.com:19302' },
       ]),
     }));
-    expect(plan.candidates.map((candidate) => candidate.path)).toEqual(['rtc-direct', 'rtc-relay']);
+    expect(plan.candidates.map((candidate) => candidate.path)).toEqual(['rtc-relay', 'rtc-direct']);
     expect(plan.candidates).toContainEqual(expect.objectContaining({
       kind: 'rtc',
       path: 'rtc-relay',

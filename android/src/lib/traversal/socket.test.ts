@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TraversalSocket } from './socket';
 import { clearTraversalPlanCache } from './config';
+import type { TraversalPath } from '../bridge-settings';
 import { defaultTraversalRouteHealthCache, TraversalRouteHealthCache } from './route-health-cache';
 
 class MockWebSocket {
@@ -244,7 +245,7 @@ function createRelayRtcSocket() {
       turnUsername: '',
       turnCredential: '',
       transportMode: 'webrtc',
-      traversalPathPriority: ['rtc-direct', 'rtc-relay'],
+      traversalPathPriority: ['rtc-direct', 'rtc-relay'] as TraversalPath[],
       traversalRelay: {
         relayBaseUrl: 'https://relay.example.test/relay/',
         accessToken: 'relay-access',
@@ -1578,6 +1579,7 @@ describe('TraversalSocket reconnect', () => {
       turnUsername: '',
       turnCredential: '',
       transportMode: 'webrtc' as const,
+      traversalPathPriority: ['rtc-direct', 'rtc-relay'] as TraversalPath[],
       traversalRelay: {
         relayBaseUrl: 'https://relay.example.test/relay/',
         accessToken: 'relay-access',

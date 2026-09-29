@@ -27,7 +27,7 @@ function resolveTraversalPathOrder(
   settings: TraversalSettingsSource,
 ) {
   if (mode === 'auto') {
-    return AUTO_TRIAL_WEBSOCKET_PATH_PRIORITY;
+    return DEFAULT_TRAVERSAL_PATH_PRIORITY;
   }
   return normalizeTraversalPathPriority(settings.traversalPathPriority || DEFAULT_TRAVERSAL_PATH_PRIORITY);
 }
@@ -67,6 +67,10 @@ function inferDirectPath(host?: string | null): 'lan' | 'tailscale' | 'ipv6' | '
     return 'ipv6';
   }
   return 'ipv4';
+}
+
+function isLikelyLanBridgeHost(host?: string | null) {
+  return inferDirectPath(host) === 'lan';
 }
 
 function normalizeTraversalTransportMode(
@@ -264,6 +268,12 @@ export function buildTraversalPlan(
       ipv6: target.ipv6Host || '',
       ipv4: target.ipv4Host || '',
     };
+    if (mode === 'auto' && !directCandidates.tailscale && isLikelyTailscaleHost(target.bridgeHost)) {
+      directCandidates.tailscale = target.bridgeHost;
+    }
+    if (mode === 'auto' && !directCandidates.lan && isLikelyLanBridgeHost(target.bridgeHost)) {
+      directCandidates.lan = target.bridgeHost;
+    }
     for (const path of resolveTraversalPathOrder(mode, settings)) {
       if (path === 'rtc-direct' || path === 'rtc-relay') {
         continue;
@@ -278,13 +288,15 @@ export function buildTraversalPlan(
       addDirectCandidate(wsCandidates, seenWsUrls, directoryEndpointLocations, path, directCandidates[path as keyof typeof directCandidates] || '', target.bridgePort, target.authToken);
     }
     const legacyPath = inferDirectPath(target.bridgeHost);
-    if (legacyPath) {
+    if (mode !== 'auto' && legacyPath) {
       addDirectCandidate(wsCandidates, seenWsUrls, directoryEndpointLocations, legacyPath, target.bridgeHost, target.bridgePort, target.authToken);
     }
   }
 
-  const rtcCandidates: RtcTraversalCandidate[] = [];
-  if (mode !== 'websocket') {
+  let rtcCandidates: RtcTraversalCandidate[] = [];
+  const shouldBuildRtcCandidates = mode !== 'websocket'
+    && (mode !== 'auto' || wsCandidates.length === 0);
+  if (shouldBuildRtcCandidates) {
     const relaySignalUrl = settings.traversalRelay?.wsClientUrl?.trim() || '';
     const relayAccessToken = settings.traversalRelay?.accessToken?.trim() || '';
     const relayDeviceId = settings.traversalRelay?.deviceId?.trim() || '';

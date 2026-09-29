@@ -35,6 +35,7 @@ import java.util.List;
 @CapacitorPlugin(name = "StoragePermission")
 public class StoragePermissionPlugin extends Plugin {
     private static final int STORAGE_PERMISSION_REQUEST_CODE = 1001;
+    private static final String PRIVATE_DOWNLOAD_ROOT = "/data/data/com.zterm.android/files/zterm-verification";
 
     private boolean hasStoragePermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -53,6 +54,9 @@ public class StoragePermissionPlugin extends Plugin {
 
     private File resolveExternalStoragePath(String inputPath) throws IOException {
         String path = inputPath == null ? "" : inputPath.trim();
+        if (isPrivateDownloadPath(path)) {
+            return resolvePrivateDownloadPath(path);
+        }
         File root = Environment.getExternalStorageDirectory().getCanonicalFile();
         File target;
         if (path.length() == 0 || "/".equals(path)) {
@@ -76,6 +80,44 @@ public class StoragePermissionPlugin extends Plugin {
         }
         call.reject("Storage permission is not granted");
         return false;
+    }
+
+    private boolean isPrivateDownloadPath(String inputPath) {
+        return inputPath != null && inputPath.startsWith(PRIVATE_DOWNLOAD_ROOT);
+    }
+
+    private File resolvePrivateDownloadPath(String inputPath) throws IOException {
+        String path = inputPath.trim();
+        File root = new File(PRIVATE_DOWNLOAD_ROOT);
+        File target;
+        if (PRIVATE_DOWNLOAD_ROOT.equals(path)) {
+            target = root;
+        } else {
+            target = new File(root, path.substring(PRIVATE_DOWNLOAD_ROOT.length() + 1));
+        }
+        File canonicalTarget = target.getCanonicalFile();
+        String rootPath = root.getCanonicalFile().getPath();
+        String targetPath = canonicalTarget.getPath();
+        if (!targetPath.equals(rootPath) && !targetPath.startsWith(rootPath + File.separator)) {
+            throw new IOException("Path is outside private download root: " + inputPath);
+        }
+        return canonicalTarget;
+    }
+
+    private boolean ensureStoragePermission(PluginCall call, String path) {
+        if (isPrivateDownloadPath(path)) {
+            return true;
+        }
+        return ensureStoragePermission(call);
+    }
+
+    private boolean ensureStoragePermissionForAnyPath(PluginCall call, String... paths) {
+        for (String path : paths) {
+            if (isPrivateDownloadPath(path)) {
+                return true;
+            }
+        }
+        return ensureStoragePermission(call);
     }
 
     private long readLongOption(PluginCall call, String name, long defaultValue) throws IOException {
@@ -183,10 +225,10 @@ public class StoragePermissionPlugin extends Plugin {
 
     @PluginMethod
     public void readdir(PluginCall call) {
-        if (!ensureStoragePermission(call)) {
+        String path = call.getString("path", "");
+        if (!ensureStoragePermission(call, path)) {
             return;
         }
-        String path = call.getString("path", "");
         try {
             File dir = resolveExternalStoragePath(path);
             if (!dir.exists()) {
@@ -219,11 +261,12 @@ public class StoragePermissionPlugin extends Plugin {
 
     @PluginMethod
     public void stat(PluginCall call) {
-        if (!ensureStoragePermission(call)) {
+        String path = call.getString("path", "");
+        if (!ensureStoragePermission(call, path)) {
             return;
         }
         try {
-            File target = resolveExternalStoragePath(call.getString("path", ""));
+            File target = resolveExternalStoragePath(path);
             if (!target.exists()) {
                 call.reject("Path does not exist: " + target.getPath());
                 return;
@@ -236,11 +279,12 @@ public class StoragePermissionPlugin extends Plugin {
 
     @PluginMethod
     public void readFile(PluginCall call) {
-        if (!ensureStoragePermission(call)) {
+        String path = call.getString("path", "");
+        if (!ensureStoragePermission(call, path)) {
             return;
         }
         try {
-            File target = resolveExternalStoragePath(call.getString("path", ""));
+            File target = resolveExternalStoragePath(path);
             if (!target.exists() || !target.isFile()) {
                 call.reject("Path is not a file: " + target.getPath());
                 return;
@@ -263,11 +307,12 @@ public class StoragePermissionPlugin extends Plugin {
 
     @PluginMethod
     public void readFileChunk(PluginCall call) {
-        if (!ensureStoragePermission(call)) {
+        String path = call.getString("path", "");
+        if (!ensureStoragePermission(call, path)) {
             return;
         }
         try {
-            File target = resolveExternalStoragePath(call.getString("path", ""));
+            File target = resolveExternalStoragePath(path);
             StorageFileReadLogic.Chunk chunk = StorageFileReadLogic.readChunk(
                 target,
                 readLongOption(call, "offset", 0L),
@@ -285,11 +330,12 @@ public class StoragePermissionPlugin extends Plugin {
 
     @PluginMethod
     public void writeFile(PluginCall call) {
-        if (!ensureStoragePermission(call)) {
+        String path = call.getString("path", "");
+        if (!ensureStoragePermission(call, path)) {
             return;
         }
         try {
-            File target = resolveExternalStoragePath(call.getString("path", ""));
+            File target = resolveExternalStoragePath(path);
             File parent = target.getParentFile();
             if (parent == null || (!parent.exists() && !parent.mkdirs())) {
                 call.reject("Unable to create parent directory: " + target.getPath());
@@ -317,11 +363,12 @@ public class StoragePermissionPlugin extends Plugin {
 
     @PluginMethod
     public void writeFileChunks(PluginCall call) {
-        if (!ensureStoragePermission(call)) {
+        String path = call.getString("path", "");
+        if (!ensureStoragePermission(call, path)) {
             return;
         }
         try {
-            File target = resolveExternalStoragePath(call.getString("path", ""));
+            File target = resolveExternalStoragePath(path);
             JSArray encodedChunks = call.getArray("chunks");
             if (encodedChunks == null) {
                 call.reject("write batch requires chunks");
@@ -347,12 +394,14 @@ public class StoragePermissionPlugin extends Plugin {
 
     @PluginMethod
     public void publishFile(PluginCall call) {
-        if (!ensureStoragePermission(call)) {
+        String sourcePath = call.getString("sourcePath", "");
+        String targetPath = call.getString("targetPath", "");
+        if (!ensureStoragePermissionForAnyPath(call, sourcePath, targetPath)) {
             return;
         }
         try {
-            File source = resolveExternalStoragePath(call.getString("sourcePath", ""));
-            File target = resolveExternalStoragePath(call.getString("targetPath", ""));
+            File source = resolveExternalStoragePath(sourcePath);
+            File target = resolveExternalStoragePath(targetPath);
             long expectedBytes = readLongOption(call, "expectedBytes", -1L);
             if (!source.exists() || !source.isFile()) {
                 call.reject("Source path is not a file: " + source.getPath());
@@ -445,11 +494,12 @@ public class StoragePermissionPlugin extends Plugin {
 
     @PluginMethod
     public void deleteFile(PluginCall call) {
-        if (!ensureStoragePermission(call)) {
+        String path = call.getString("path", "");
+        if (!ensureStoragePermission(call, path)) {
             return;
         }
         try {
-            File target = resolveExternalStoragePath(call.getString("path", ""));
+            File target = resolveExternalStoragePath(path);
             if (!target.exists()) {
                 call.resolve();
                 return;
@@ -515,12 +565,13 @@ public class StoragePermissionPlugin extends Plugin {
 
     @PluginMethod
     public void mkdir(PluginCall call) {
-        if (!ensureStoragePermission(call)) {
+        String path = call.getString("path", "");
+        if (!ensureStoragePermission(call, path)) {
             return;
         }
         boolean recursive = Boolean.TRUE.equals(call.getBoolean("recursive", false));
         try {
-            File target = resolveExternalStoragePath(call.getString("path", ""));
+            File target = resolveExternalStoragePath(path);
             if (target.exists()) {
                 if (target.isDirectory()) {
                     call.resolve();

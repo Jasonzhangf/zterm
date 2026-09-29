@@ -15,3 +15,7 @@ export function takeZtermVerificationDownload(): ZtermVerificationDownloadTarget
   pendingDownloadTarget = null;
   return target;
 }
+
+export function peekZtermVerificationDownload(): ZtermVerificationDownloadTarget | null {
+  return pendingDownloadTarget;
+}

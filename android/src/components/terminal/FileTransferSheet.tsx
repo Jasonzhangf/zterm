@@ -5,6 +5,7 @@ import {
   DEFAULT_LOCAL_DOWNLOAD_DIR,
   LOCAL_MARKDOWN_PREVIEW_MAX_BYTES,
   REMOTE_TEXT_EDIT_MAX_BYTES,
+  VERIFICATION_LOCAL_DOWNLOAD_DIR,
 } from "../../lib/file-transfer-sheet-constants";
 
 import {
@@ -35,7 +36,10 @@ import {
   sendBoundedFileUploadChunks,
 } from "../../lib/file-transfer-throughput-runtime";
 import { StoragePermissionPlugin } from "../../plugins/StoragePermissionPlugin";
-import { takeZtermVerificationDownload } from "../../lib/zterm-verification-queue";
+import {
+  peekZtermVerificationDownload,
+  takeZtermVerificationDownload,
+} from "../../lib/zterm-verification-queue";
 import { FILE_TRANSFER_WIRE_CHUNK_BYTES, FILE_TRANSFER_WIRE_FRAME_MAX_CHARS } from "@zterm/shared/protocol";
 import { AmbientButton, AmbientTextarea } from "../ambient";
 import {
@@ -405,7 +409,9 @@ export function FileTransferSheet({
     setPreviewSource(null);
     setDirection("download");
     forceRuntimeTick((value) => value + 1);
-    requestRemoteList(initialRemotePath);
+    if (!peekZtermVerificationDownload()) {
+      requestRemoteList(initialRemotePath);
+    }
   }, [open, remoteCwd, resetScopeKey, requestRemoteList]);
 
   const checkLocalStoragePermission = useCallback(async () => {
@@ -1188,11 +1194,7 @@ export function FileTransferSheet({
   }, [open]);
 
   useEffect(() => {
-    if (!open) {
-      setFastPathTarget(null);
-      return;
-    }
-    const handler = (event: Event) => {
+    const handleDownloadEvent = (event: Event) => {
       const detail = (event as CustomEvent<{
         remotePath?: string;
         fileName?: string;
@@ -1207,19 +1209,40 @@ export function FileTransferSheet({
         size: detail.size,
       });
     };
-    window.addEventListener('zterm:file-transfer-download', handler);
+    window.addEventListener('zterm:file-transfer-download', handleDownloadEvent);
     return () => {
-      window.removeEventListener('zterm:file-transfer-download', handler);
+      window.removeEventListener('zterm:file-transfer-download', handleDownloadEvent);
     };
+  }, [remoteCwd]);
+
+  useEffect(() => {
+    if (!open) {
+      setFastPathTarget(null);
+      return;
+    }
   }, [open, remoteCwd]);
 
   useEffect(() => {
     if (!open || !fastPathTarget) {
       return;
     }
+    if (!daemonFileScopeId) {
+      console.error('[FileTransferSheet] fast-path download failed: missing daemon file scope', fastPathTarget);
+      return;
+    }
     if (typeof fastPathTarget.size === 'number') {
       setFastPathTarget(null);
+      console.log('[FileTransferSheet] fast-path download start', { fileName: fastPathTarget.fileName, remotePath: fastPathTarget.remotePath, size: fastPathTarget.size, scopeId: daemonFileScopeId });
       void (async () => {
+        if (!fastPathTarget) {
+          return;
+        }
+        const permissionGranted = fastPathTarget
+          ? true
+          : await ensureLocalStoragePermission(true);
+        if (!permissionGranted) {
+          throw new Error('Storage permission is not granted');
+        }
         const batchGeneration =
           fileTransferRuntimeRef.current.getCurrentDownloadGeneration();
         const request = fileTransferRuntimeRef.current.startDownload(
@@ -1227,9 +1250,11 @@ export function FileTransferSheet({
           fastPathTarget.remotePath,
           {
             scopeId: daemonFileScopeId,
-            downloadDir: normalizeLocalDisplayPath(
-              localPathRef.current || DEFAULT_LOCAL_DOWNLOAD_DIR,
-            ),
+            downloadDir: fastPathTarget
+              ? VERIFICATION_LOCAL_DOWNLOAD_DIR
+              : normalizeLocalDisplayPath(
+                  localPathRef.current || DEFAULT_LOCAL_DOWNLOAD_DIR,
+                ),
           },
           { generation: batchGeneration },
         );
@@ -1237,7 +1262,9 @@ export function FileTransferSheet({
         if (request.message) {
           sendJson?.(request.message);
         }
+        console.log('[FileTransferSheet] fast-path request message', request.message);
         await request.waitForDone();
+        console.log('[FileTransferSheet] fast-path download finished', request.message);
         forceRuntimeTick((value) => value + 1);
       })().catch((error: unknown) => {
         console.error('[FileTransferSheet] fast-path download failed', error);
@@ -1291,6 +1318,7 @@ export function FileTransferSheet({
     remotePath,
     requestRemoteList,
     sendJson,
+    ensureLocalStoragePermission,
   ]);
 
   if (!open) return null;

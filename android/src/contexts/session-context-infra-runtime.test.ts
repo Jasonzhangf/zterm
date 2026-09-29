@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { DEFAULT_BRIDGE_SETTINGS, type BridgeSettings } from '../lib/bridge-settings';
+import { DEFAULT_BRIDGE_SETTINGS, DEFAULT_TRAVERSAL_PATH_PRIORITY, type BridgeSettings } from '../lib/bridge-settings';
 import { buildTraversalPlan } from '../lib/traversal/config';
 import { TraversalSocket } from '../lib/traversal/socket';
 import { defaultClientControlDirectoryRuntime } from '../lib/client-control-directory-runtime';
@@ -79,8 +79,8 @@ function buildHost(overrides: Partial<Host> = {}): Host {
 function buildRelayBridgeSettings(): BridgeSettings {
   return {
     ...DEFAULT_BRIDGE_SETTINGS,
-    transportMode: 'auto',
-    traversalPathPriority: ['rtc-direct', 'tailscale', 'ipv6', 'ipv4', 'rtc-relay'],
+      transportMode: 'auto',
+      traversalPathPriority: DEFAULT_TRAVERSAL_PATH_PRIORITY,
     traversalRelay: {
       relayBaseUrl: 'https://relay.codewhisper.cc:18443/relay',
       accessToken: 'access-1',
@@ -194,17 +194,15 @@ describe('applySessionActionRuntime', () => {
     });
     const plan = buildTraversalPlan(target, settings, options?.overrideUrl);
     expect(plan.candidates.map((candidate) => candidate.path)).toEqual([
-      'rtc-direct',
       'tailscale',
       'tailscale',
-      'rtc-relay',
     ]);
-    expect(plan.candidates[1]).toMatchObject({
+    expect(plan.candidates[0]).toMatchObject({
       kind: 'ws',
       path: 'tailscale',
       endpoint: '100.66.1.83:3333',
     });
-    expect(plan.candidates[2]).toMatchObject({
+    expect(plan.candidates[1]).toMatchObject({
       kind: 'ws',
       path: 'tailscale',
       endpoint: '100.66.1.82:3333',
@@ -266,15 +264,15 @@ describe('applySessionActionRuntime', () => {
     });
     const plan = buildTraversalPlan(target, settings, options?.overrideUrl);
     expect(plan.candidates.map((candidate) => candidate.path)).toEqual([
-      'rtc-direct',
       'rtc-relay',
+      'rtc-direct',
     ]);
-    expect(plan.candidates[0]).toMatchObject({
+    expect(plan.candidates[1]).toMatchObject({
       kind: 'rtc',
       path: 'rtc-direct',
       endpoint: 'rtc-direct:mac-studio',
       iceTransportPolicy: 'all',
-      iceServers: [{ urls: 'stun:relay.codewhisper.cc:3479' }],
+      iceServers: expect.arrayContaining([{ urls: 'stun:relay.codewhisper.cc:3479' }]),
     });
   });
 
