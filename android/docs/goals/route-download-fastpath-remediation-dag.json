@@ -1,0 +1,85 @@
+{
+  "id": "route_download_fastpath_remediation",
+  "version": "1",
+  "entry": "candidate_discovery",
+  "exit": "delivery_cleanup_complete",
+  "nodes": [
+    {
+      "id": "candidate_discovery",
+      "owner": "traversal_config_and_android_connection_service_factory",
+      "emits": ["route_candidate_intents"],
+      "acceptance": "LAN directory, saved bridge LAN/loopback, Tailscale, IPv6, IPv4, and Relay RTC candidates are represented by one typed target/plan owner each"
+    },
+    {
+      "id": "eligibility",
+      "owner": "android_connection_service",
+      "emits": ["eligible_route_candidates"],
+      "acceptance": "same-subnet and loopback LAN is admitted by native interface truth; public non-LAN lanHost is rejected; Tailscale/direct public candidates remain separate"
+    },
+    {
+      "id": "bounded_probing",
+      "owner": "traversal_socket_and_android_connection_service",
+      "emits": ["route_attempt_results"],
+      "acceptance": "Auto probes LAN/Tailscale/IPv6/IPv4 WebSocket direct tiers before rtc-relay and never includes unvalidated WebRTC in the default critical path"
+    },
+    {
+      "id": "authenticated_mux_handshake",
+      "owner": "daemon_connection_gateway",
+      "emits": ["mux_ready_routes"],
+      "acceptance": "route is healthy only after authenticated WebSocket/RPC handshake and mux-ready, not merely IP reachability"
+    },
+    {
+      "id": "route_commit",
+      "owner": "transport_route_selector",
+      "emits": ["committed_route"],
+      "acceptance": "first direct tier with mux-ready is committed; Relay success is degraded fallback only"
+    },
+    {
+      "id": "diagnostics",
+      "owner": "route_diagnostics",
+      "emits": ["route_diagnostics"],
+      "acceptance": "diagnostics expose candidateId, path, endpoint, reason, startedAt, endedAt, elapsedMs, selected, and failureCode where implemented"
+    },
+    {
+      "id": "failure_fallback",
+      "owner": "transport_route_selector",
+      "emits": ["fallback_or_terminal_error"],
+      "acceptance": "direct tiers fail before Relay is admitted; rtc-relay success remains degraded"
+    },
+    {
+      "id": "retry_resume_cleanup",
+      "owner": "connection_service_lifecycle",
+      "emits": ["retry_generation_or_closed_run"],
+      "acceptance": "backoff/retry remains owned by service/traversal owners; abandoned attempts close sockets/timers without dangling resources"
+    },
+    {
+      "id": "http_binary_download",
+      "owner": "terminal_http_runtime_and_file_transfer_binary_download_runtime",
+      "emits": ["binary_download_result"],
+      "acceptance": "LAN/Tailscale files stream raw HTTP octets with auth, Content-Length, progress, abort, size validation, and native store persistence"
+    },
+    {
+      "id": "relay_chunk_fallback",
+      "owner": "file_transfer_session_runtime",
+      "emits": ["chunk_download_result"],
+      "acceptance": "Relay/degraded paths may use file-download-chunk fallback, never as default LAN/Tailscale speed-validation path"
+    },
+    {
+      "id": "route_ui_truth_separation",
+      "owner": "ui_projection",
+      "emits": ["route_ui_status"],
+      "acceptance": "UI distinguishes lan/tailscale/direct from relay-degraded and does not feed UI state back into daemon route truth"
+    },
+    {
+      "id": "runtime_install_restart_replay",
+      "owner": "delivery_owner",
+      "emits": ["runtime_replay_evidence"],
+      "acceptance": "APK is rebuilt/installed, daemon runtime is restarted when changed, and installed app proves resolvedPath plus download metrics"
+    },
+    {
+      "id": "delivery_cleanup_complete",
+      "owner": "delivery_owner",
+      "acceptance": "evidence paths, cleanup, candidate SHA, test results, APK/daemon facts, and blockers are reported"
+    }
+  ]
+}

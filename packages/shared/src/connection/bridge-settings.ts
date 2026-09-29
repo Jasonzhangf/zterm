@@ -110,7 +110,7 @@ export interface BridgeSettings {
   servers: BridgeServerPreset[];
   defaultServerId?: string;
   traversalRelay?: TraversalRelayClientSettings;
-  traversalPathPriority?: ('rtc-direct' | 'tailscale' | 'ipv6' | 'ipv4' | 'rtc-relay')[];
+  traversalPathPriority?: ('lan' | 'tailscale' | 'ipv6' | 'ipv4' | 'rtc-direct' | 'rtc-relay')[];
   sessionDrawerFilter?: SessionDrawerFilterSettings;
 }
 
@@ -661,7 +661,8 @@ export function normalizeBridgeSettings(input: unknown): BridgeSettings {
       : 'auto';
   const traversalPathPriority = Array.isArray(candidate.traversalPathPriority)
     ? candidate.traversalPathPriority.filter((item): item is NonNullable<BridgeSettings['traversalPathPriority']>[number] => (
-      item === 'rtc-direct'
+      item === 'lan'
+      || item === 'rtc-direct'
       || item === 'tailscale'
       || item === 'ipv6'
       || item === 'ipv4'

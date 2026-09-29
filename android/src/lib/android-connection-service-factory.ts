@@ -7,6 +7,7 @@ import { AndroidConnectionServiceTransportSocket } from './android-connection-se
 import type { AndroidConnectionServiceTarget } from './android-connection-service-commands';
 import type { BridgeSettings } from './bridge-settings';
 import type { BridgeTransportSocket } from './traversal/types';
+import { isPrivateLanIpv4Host, parseEndpointHost } from './network-target';
 import {
   runDagpipeBufferManagement,
   runDagpipeBufferRender,
@@ -39,12 +40,17 @@ export function buildAndroidConnectionServiceTarget(
   const relayDeviceId = host.relayDeviceId?.trim()
     || settings?.traversalRelay?.deviceId?.trim()
     || '';
+  const directoryLanHost = host.relayEndpointCandidates
+    ?.find((candidate) => candidate.kind === 'lan' && candidate.host)?.host;
+  const bridgeLanHost = isPrivateLanIpv4Host(parseEndpointHost(host.bridgeHost))
+    ? host.bridgeHost
+    : '';
   return {
     targetKey: buildTransportTargetKey(host),
     bridgeHost: host.bridgeHost,
     bridgePort: host.bridgePort,
-    ...(host.relayEndpointCandidates?.find((candidate) => candidate.kind === 'lan' && candidate.host)?.host
-      ? { lanHost: host.relayEndpointCandidates.find((candidate) => candidate.kind === 'lan' && candidate.host)?.host }
+    ...((directoryLanHost || bridgeLanHost)
+      ? { lanHost: directoryLanHost || bridgeLanHost }
       : {}),
     ...(host.authToken ? { authToken: host.authToken } : {}),
     ...(host.daemonHostId ? { daemonHostId: host.daemonHostId } : {}),

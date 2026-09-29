@@ -1,4 +1,4 @@
-import { createReadStream, existsSync, readFileSync } from 'fs';
+import { createReadStream, existsSync, readFileSync, statSync } from 'fs';
 import type { IncomingMessage, ServerResponse } from 'http';
 import { basename, join, resolve } from 'path';
 import type { RuntimeDebugSourceMeta, RuntimeDebugStore } from './runtime-debug-store';
@@ -39,6 +39,7 @@ export interface TerminalHttpRuntimeDeps {
   handleClientDebugSnapshot: (source: RuntimeDebugSourceMeta, payload: { snapshot?: unknown }) => void;
   logTimePrefix: (date?: Date) => string;
   attachmentDeliveryRuntime?: AttachmentDeliveryRuntime;
+  resolveFileTransferDownloadPath?: (requestedPath: string) => string;
   connections: Map<string, { deviceId?: string; transport: TerminalSessionTransport }>;
   sendTransportMessage: (transport: TerminalSessionTransport | null | undefined, message: TerminalTransportServerFrame) => void;
 }
@@ -206,7 +207,7 @@ export function createTerminalHttpRuntime(deps: TerminalHttpRuntimeDeps): Termin
     if (!deps.requiredAuthToken) return true;
     const providedToken = extractHttpDebugToken(request, url);
     if (providedToken === deps.requiredAuthToken) return true;
-    serveJson(response, { message: 'unauthorized attachment access' }, 401);
+    serveJson(response, { message: 'unauthorized access' }, 401);
     return false;
   }
 
@@ -473,6 +474,35 @@ export function createTerminalHttpRuntime(deps: TerminalHttpRuntimeDeps): Termin
           return;
         }
         serveJson(response, { message: 'method not allowed' }, 405);
+      } catch (error) {
+        serveJson(response, { message: error instanceof Error ? error.message : String(error) }, 400);
+      }
+      return;
+    }
+
+    if (url.pathname === '/api/v1/files/download') {
+      if (!ensureAttachmentAuthorized(request, response, url)) {
+        return;
+      }
+      if (request.method !== 'GET') {
+        serveJson(response, { message: 'method not allowed' }, 405);
+        return;
+      }
+      if (!deps.resolveFileTransferDownloadPath) {
+        serveJson(response, { message: 'file download is unavailable' }, 501);
+        return;
+      }
+      try {
+        const requestedPath = url.searchParams.get('path')?.trim() || '';
+        if (!requestedPath) throw new Error('path is required');
+        const filePath = resolve(deps.resolveFileTransferDownloadPath(requestedPath));
+        const stats = statSync(filePath);
+        if (!stats.isFile()) throw new Error('download path is not a file');
+        response.statusCode = 200;
+        response.setHeader('Content-Type', 'application/octet-stream');
+        response.setHeader('Content-Length', stats.size);
+        response.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(basename(filePath))}"`);
+        createReadStream(filePath).pipe(response);
       } catch (error) {
         serveJson(response, { message: error instanceof Error ? error.message : String(error) }, 400);
       }

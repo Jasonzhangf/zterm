@@ -15,12 +15,19 @@ import type {
 } from './types';
 import type { RelayEndpointCandidate } from '@zterm/shared/relay-directory';
 
+export const AUTO_TRIAL_WEBSOCKET_PATH_PRIORITY: TraversalResolvedPath[] = [
+  'lan',
+  'tailscale',
+  'ipv6',
+  'ipv4',
+];
+
 function resolveTraversalPathOrder(
   mode: TraversalTransportMode,
   settings: TraversalSettingsSource,
 ) {
   if (mode === 'auto') {
-    return DEFAULT_TRAVERSAL_PATH_PRIORITY;
+    return AUTO_TRIAL_WEBSOCKET_PATH_PRIORITY;
   }
   return normalizeTraversalPathPriority(settings.traversalPathPriority || DEFAULT_TRAVERSAL_PATH_PRIORITY);
 }

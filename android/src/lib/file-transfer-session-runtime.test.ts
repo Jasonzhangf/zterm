@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createFileTransferSessionRuntime } from './file-transfer-session-runtime';
+import type { FileTransferDownloadDestination } from './file-transfer-native-store-port';
 import {
   FILE_TRANSFER_UPLOAD_RESUME_RETRY_DELAY_MS,
   FILE_TRANSFER_UPLOAD_RESUME_RETRY_LIMIT,
@@ -205,6 +206,132 @@ describe('file-transfer-session-runtime', () => {
       error: 'download size mismatch: wrote 0 bytes, expected 5',
     });
     expect(store.abort).toHaveBeenCalledTimes(1);
+  });
+
+  it('downloads through the injected binary fast path and completes the native destination', async () => {
+    const store = createDownloadStore();
+    const fetchBinaryFile = vi.fn(async (options: { requestId: string; remotePath: string; destination: FileTransferDownloadDestination }) => {
+      store.persist({
+        requestId: options.requestId,
+        fileName: 'photo.bin',
+        totalBytes: 7,
+        chunksBase64: [],
+        destination: options.destination,
+      });
+    });
+    const runtime = createFileTransferSessionRuntime({
+      now: () => 300,
+      randomId: () => 'bin',
+      binaryPath: 'lan',
+      downloadStore: store,
+      fetchBinaryFile,
+    });
+
+    runtime.open('/remote/home');
+    const download = runtime.startDownload(
+      { name: 'photo.bin', size: 7 },
+      '/remote/home',
+      { scopeId: '', downloadDir: '/storage/emulated/0/Download' },
+    );
+    expect(download.message).toBeUndefined();
+
+    await download.waitForDone();
+
+    expect(fetchBinaryFile).toHaveBeenCalledWith(expect.objectContaining({
+      remotePath: '/remote/home/photo.bin',
+      totalBytes: 7,
+    }));
+    expect(store.complete).toHaveBeenCalledWith(expect.objectContaining({ totalBytes: 7 }));
+    expect(runtime.getState().transfers[0]).toMatchObject({
+      status: 'done',
+      transferredBytes: 7,
+    });
+  });
+
+  it('streams binary download progress into transfer state', async () => {
+    const store = createDownloadStore();
+    const fetchBinaryFile = vi.fn(async (options: { requestId: string; remotePath: string; destination: FileTransferDownloadDestination; signal: AbortSignal; onProgress: (progress: { receivedBytes: number; expectedBytes: number }) => void }) => {
+      expect(options.signal.aborted).toBe(false);
+      options.onProgress({ receivedBytes: 3, expectedBytes: 7 });
+      store.persist({
+        requestId: options.requestId,
+        fileName: 'photo.bin',
+        totalBytes: 7,
+        chunksBase64: [],
+        destination: options.destination,
+      });
+    });
+    const runtime = createFileTransferSessionRuntime({
+      now: () => 300,
+      randomId: () => 'bin-progress',
+      binaryPath: 'tailscale',
+      downloadStore: store,
+      fetchBinaryFile,
+    });
+
+    runtime.open('/remote/home');
+    const download = runtime.startDownload(
+      { name: 'photo.bin', size: 7 },
+      '/remote/home',
+      { scopeId: '', downloadDir: '/storage/emulated/0/Download' },
+    );
+
+    await download.waitForDone();
+
+    expect(runtime.getState().transfers[0]).toMatchObject({
+      status: 'done',
+      transferredBytes: 7,
+    });
+  });
+
+  it('keeps relay/rtc downloads on mux chunk fallback instead of invoking the direct HTTP fast path', async () => {
+    const store = createDownloadStore();
+    const fetchBinaryFile = vi.fn(async () => {
+      throw new Error('direct HTTP fast path must not be used for relay/rtc');
+    });
+    const runtime = createFileTransferSessionRuntime({
+      now: () => 211,
+      randomId: () => 'rtc-gate',
+      binaryPath: undefined,
+      downloadStore: store,
+      fetchBinaryFile,
+    });
+
+    runtime.open('/remote/home', 'session-rtc');
+    const download = runtime.startDownload(
+      { name: 'relay.bin', size: 3 },
+      '/remote/home',
+      {
+        scopeId: 'session-rtc',
+        downloadDir: '/storage/emulated/0/Download',
+      },
+    );
+
+    expect(download.message?.type).toBe('file-download-request');
+    expect(fetchBinaryFile).not.toHaveBeenCalled();
+
+    await runtime.applyMessage({
+      type: 'file-download-chunk',
+      payload: {
+        requestId: download.requestId,
+        fileName: 'relay.bin',
+        chunkIndex: 0,
+        totalChunks: 1,
+        dataBase64: 'cmVs',
+      },
+    });
+    await runtime.applyMessage({
+      type: 'file-download-complete',
+      payload: {
+        requestId: download.requestId,
+        fileName: 'relay.bin',
+        totalBytes: 3,
+      },
+    });
+
+    await download.waitForDone();
+    expect(store.complete).toHaveBeenCalledTimes(1);
+    expect(runtime.getState().transfers[0]).toMatchObject({ status: 'done' });
   });
 
   it('delegates the native download transaction to the request-bound store', async () => {

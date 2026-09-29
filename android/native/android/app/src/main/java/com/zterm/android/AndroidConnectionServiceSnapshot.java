@@ -79,6 +79,48 @@ public final class AndroidConnectionServiceSnapshot {
         }
     }
 
+    public static final class RouteDiagnostic {
+        public final String candidateId;
+        public final String path;
+        public final String endpoint;
+        public final String reason;
+        public final Long startedAt;
+        public final Long endedAt;
+        public final Long elapsedMs;
+        public final boolean selected;
+        public final String failureCode;
+
+        public RouteDiagnostic(
+            String candidateId, String path, String endpoint, String reason,
+            Long startedAt, Long endedAt, Long elapsedMs, boolean selected, String failureCode) {
+            this.candidateId = candidateId == null ? "" : candidateId;
+            this.path = path == null ? "" : path;
+            this.endpoint = endpoint == null ? "" : endpoint;
+            this.reason = reason == null ? "" : reason;
+            this.startedAt = startedAt;
+            this.endedAt = endedAt;
+            this.elapsedMs = elapsedMs;
+            this.selected = selected;
+            this.failureCode = failureCode;
+        }
+
+        public JSONObject toJson() throws JSONException {
+            JSONObject json = new JSONObject();
+            json.put("candidateId", candidateId);
+            json.put("path", path);
+            json.put("endpoint", endpoint);
+            json.put("reason", reason);
+            json.put("startedAt", startedAt == null ? JSONObject.NULL : startedAt);
+            json.put("endedAt", endedAt == null ? JSONObject.NULL : endedAt);
+            json.put("elapsedMs", elapsedMs == null ? JSONObject.NULL : elapsedMs);
+            json.put("selected", selected);
+            if (failureCode != null && !failureCode.isEmpty()) {
+                json.put("failureCode", failureCode);
+            }
+            return json;
+        }
+    }
+
     public final State state;
     public final String generation;
     public final AndroidConnectionServiceTarget target;
@@ -93,6 +135,7 @@ public final class AndroidConnectionServiceSnapshot {
     public final String resolvedRelayTransport;
     public final String resolvedEndpoint;
     public final String selectedIcePairJson;
+    public final List<RouteDiagnostic> routeDiagnostics;
 
     private AndroidConnectionServiceSnapshot(Builder b) {
         this.state = b.state;
@@ -109,6 +152,7 @@ public final class AndroidConnectionServiceSnapshot {
         this.resolvedRelayTransport = b.resolvedRelayTransport;
         this.resolvedEndpoint = b.resolvedEndpoint;
         this.selectedIcePairJson = b.selectedIcePairJson;
+        this.routeDiagnostics = Collections.unmodifiableList(new ArrayList<>(b.routeDiagnostics));
     }
 
     public static AndroidConnectionServiceSnapshot empty() {
@@ -133,7 +177,8 @@ public final class AndroidConnectionServiceSnapshot {
             .resolvedPath(resolvedPath)
             .resolvedRelayTransport(resolvedRelayTransport)
             .resolvedEndpoint(resolvedEndpoint)
-            .selectedIcePairJson(selectedIcePairJson);
+            .selectedIcePairJson(selectedIcePairJson)
+            .routeDiagnostics(routeDiagnostics);
     }
 
     public JSONObject toJson() throws JSONException {
@@ -157,6 +202,9 @@ public final class AndroidConnectionServiceSnapshot {
         json.put("resolvedEndpoint", resolvedEndpoint == null ? JSONObject.NULL : resolvedEndpoint);
         json.put("selectedIcePair", selectedIcePairJson == null
             ? JSONObject.NULL : new JSONObject(selectedIcePairJson));
+        JSONArray routeDiagnosticArray = new JSONArray();
+        for (RouteDiagnostic diagnostic : routeDiagnostics) routeDiagnosticArray.put(diagnostic.toJson());
+        json.put("routeDiagnostics", routeDiagnosticArray);
         return json;
     }
 
@@ -179,7 +227,8 @@ public final class AndroidConnectionServiceSnapshot {
             && Objects.equals(resolvedPath, that.resolvedPath)
             && Objects.equals(resolvedRelayTransport, that.resolvedRelayTransport)
             && Objects.equals(resolvedEndpoint, that.resolvedEndpoint)
-            && Objects.equals(selectedIcePairJson, that.selectedIcePairJson);
+            && Objects.equals(selectedIcePairJson, that.selectedIcePairJson)
+            && Objects.equals(routeDiagnostics.size(), that.routeDiagnostics.size());
     }
 
     private static boolean channelsEqual(List<Channel> a, List<Channel> b) {
@@ -196,11 +245,16 @@ public final class AndroidConnectionServiceSnapshot {
     public int hashCode() {
         int channelHash = 0;
         for (Channel channel : channels) channelHash = 31 * channelHash + Objects.hashCode(channel.sessionName);
+        int routeDiagnosticHash = 0;
+        for (RouteDiagnostic diagnostic : routeDiagnostics) routeDiagnosticHash = 31 * routeDiagnosticHash + Objects.hash(
+            diagnostic.candidateId, diagnostic.path, diagnostic.endpoint, diagnostic.reason, diagnostic.startedAt,
+            diagnostic.endedAt, diagnostic.elapsedMs, diagnostic.selected, diagnostic.failureCode);
         return Objects.hash(state, generation, target, route == null ? null : route.mode,
             route == null ? null : route.path, channels.size(), lastHeartbeatAt,
             lastActivityAt, nextRetryAt, error == null ? null : error.code,
             error == null ? null : error.message, muxReadyPayloadJson, channelHash,
-            resolvedPath, resolvedRelayTransport, resolvedEndpoint, selectedIcePairJson);
+            resolvedPath, resolvedRelayTransport, resolvedEndpoint, selectedIcePairJson,
+            routeDiagnosticHash, routeDiagnostics.size());
     }
 
     public static final class Builder {
@@ -218,6 +272,7 @@ public final class AndroidConnectionServiceSnapshot {
         private String resolvedRelayTransport;
         private String resolvedEndpoint;
         private String selectedIcePairJson;
+        private List<RouteDiagnostic> routeDiagnostics = new ArrayList<>();
 
         public Builder(State state) { this.state = state; }
         public Builder generation(String v) { this.generation = v; return this; }
@@ -233,6 +288,10 @@ public final class AndroidConnectionServiceSnapshot {
         public Builder resolvedRelayTransport(String v) { this.resolvedRelayTransport = v; return this; }
         public Builder resolvedEndpoint(String v) { this.resolvedEndpoint = v; return this; }
         public Builder selectedIcePairJson(String v) { this.selectedIcePairJson = v; return this; }
+        public Builder routeDiagnostics(List<RouteDiagnostic> v) {
+            this.routeDiagnostics = v == null ? new ArrayList<>() : new ArrayList<>(v);
+            return this;
+        }
         public AndroidConnectionServiceSnapshot build() { return new AndroidConnectionServiceSnapshot(this); }
     }
 }

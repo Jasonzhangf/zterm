@@ -30,6 +30,7 @@ import { useTerminalShellActions } from './hooks/useTerminalShellActions';
 import { useRelayDeviceStream } from './hooks/useRelayDeviceStream';
 import { updateBridgeSettingsTerminalWidthMode } from './lib/terminal-width-mode-manager';
 import { upsertBridgeServer } from './lib/bridge-settings';
+import { setZtermVerificationDownload } from './lib/zterm-verification-queue';
 import { applyTraversalRelaySettings } from './lib/traversal-relay-client';
 import { APP_VERSION, APP_VERSION_CODE } from './lib/app-version';
 import {
@@ -394,6 +395,22 @@ export function AppContent({
     let listenerHandle: { remove: () => Promise<void> | void } | null = null;
     const handleAppUrl = (url: unknown) => {
       if (typeof url !== 'string' || !url.trim()) {
+        return;
+      }
+      if (url.startsWith('zterm://file-download-verification')) {
+        const params = new URL(url).searchParams;
+        const remoteCwd = params.get('path') || '/tmp';
+        const fileName = params.get('file');
+        const sizeRaw = params.get('size');
+        const size = sizeRaw && /^[0-9]+$/.test(sizeRaw) ? Number.parseInt(sizeRaw, 10) : undefined;
+        ensureTerminalPageVisible();
+        setZtermVerificationDownload({
+          remotePath: remoteCwd,
+          fileName: fileName || '',
+          size,
+        });
+        window.dispatchEvent(new CustomEvent('zterm:open-file-transfer', { detail: { mode: 'browser', remoteCwd: params.get('path') || '/tmp' } }));
+        window.dispatchEvent(new CustomEvent('zterm:file-transfer-download', { detail: { remotePath: remoteCwd, fileName, size } }));
         return;
       }
       const deepLink = parseAndroidNotificationDeepLink(url);

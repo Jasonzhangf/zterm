@@ -2507,6 +2507,7 @@
         "src/components/terminal/FileTransferSheet.tsx",
         "src/lib/file-transfer-session-runtime.ts",
         "src/lib/file-transfer-message-runtime.ts",
+        "src/lib/file-transfer-binary-download-runtime.ts",
         "src/lib/plugin-file-browser/file-browser-contract.ts"
       ],
       "forbidden_resources": [
@@ -2550,6 +2551,9 @@
         "src/lib/file-transfer-sheet-constants.ts",
         "src/lib/file-transfer-native-store-port.ts",
         "src/lib/file-transfer-path-runtime.ts",
+        "src/lib/file-transfer-binary-download-runtime.ts",
+        "src/lib/zterm-verification-queue.ts",
+        "src/lib/zterm-verification-queue.test.ts",
         "src/lib/plugin-file-browser/"
       ]
     },

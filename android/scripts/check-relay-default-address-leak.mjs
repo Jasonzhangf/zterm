@@ -42,7 +42,7 @@ function scanApk(apkPath, needle) {
   if (!existsSync(apkPath)) {
     throw new Error(`APK not found: ${apkPath}`);
   }
-  const unzip = spawnSync('unzip', ['-p', apkPath], { encoding: 'buffer', maxBuffer: 64 * 1024 * 1024 });
+  const unzip = spawnSync('unzip', ['-p', apkPath], { encoding: 'buffer', maxBuffer: 256 * 1024 * 1024 });
   if (unzip.status !== 0) {
     throw new Error(unzip.stderr?.toString() || `unzip failed for ${apkPath}`);
   }

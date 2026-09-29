@@ -184,7 +184,7 @@ describe('file transfer bounded-throughput loopback', () => {
     const daemon = createTerminalFileTransferListRuntime(deps);
 
     const done = download.waitForDone();
-    daemon.handleFileDownloadRequest(session, download.message.payload);
+    daemon.handleFileDownloadRequest(session, download.message!.payload);
     await done;
     await Promise.all(deliveryPromises);
 
