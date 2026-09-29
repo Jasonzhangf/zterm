@@ -31,6 +31,7 @@ export interface TerminalDaemonRuntimeDeps {
   memoryGuardIntervalMs: number;
   memoryGuardMaxRssBytes: number;
   memoryGuardMaxHeapUsedBytes: number;
+  memoryGuardMaxExternalBytes: number;
   startupPortConflictExitCode: number;
   sessions: Map<string, TerminalSession>;
   connections: Map<string, DaemonTransportConnection>;
@@ -231,12 +232,16 @@ export function createTerminalDaemonRuntime(
     }
     memoryGuardTimer = setInterval(() => {
       const usage = process.memoryUsage();
-      if (usage.rss < deps.memoryGuardMaxRssBytes && usage.heapUsed < deps.memoryGuardMaxHeapUsedBytes) {
+      const totalTrackedBytes = usage.heapUsed + usage.external + usage.arrayBuffers;
+      if (
+        usage.heapUsed < deps.memoryGuardMaxHeapUsedBytes
+        && totalTrackedBytes < deps.memoryGuardMaxExternalBytes
+      ) {
         return;
       }
 
       console.error(
-        `[${deps.logTimePrefix()}] daemon memory guard tripped: rss=${usage.rss} heapUsed=${usage.heapUsed} sessions=${deps.sessions.size} mirrors=${deps.mirrors.size}`,
+        `[${deps.logTimePrefix()}] daemon memory guard tripped: rss=${usage.rss} heapUsed=${usage.heapUsed} external=${usage.external} arrayBuffers=${usage.arrayBuffers} sessions=${deps.sessions.size} mirrors=${deps.mirrors.size}`,
       );
       shutdownDaemon('memory guard', 70);
     }, deps.memoryGuardIntervalMs);

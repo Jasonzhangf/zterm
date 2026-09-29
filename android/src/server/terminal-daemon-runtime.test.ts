@@ -50,7 +50,7 @@ function createConnection(
   return connection;
 }
 
-function createRuntimeHarness() {
+function createRuntimeHarness(options: { memoryGuardMaxRssBytes?: number; memoryGuardMaxHeapUsedBytes?: number; memoryGuardMaxExternalBytes?: number } = {}) {
   const sessions = new Map<string, TerminalTransportSubscriber>();
   const connections = new Map<string, DaemonTransportConnection>();
   const connection = createConnection();
@@ -81,8 +81,9 @@ function createRuntimeHarness() {
     terminalCacheLines: 1000,
     wsHeartbeatIntervalMs: 1000,
     memoryGuardIntervalMs: 60000,
-    memoryGuardMaxRssBytes: Number.MAX_SAFE_INTEGER,
-    memoryGuardMaxHeapUsedBytes: Number.MAX_SAFE_INTEGER,
+    memoryGuardMaxRssBytes: options.memoryGuardMaxRssBytes ?? Number.MAX_SAFE_INTEGER,
+    memoryGuardMaxHeapUsedBytes: options.memoryGuardMaxHeapUsedBytes ?? Number.MAX_SAFE_INTEGER,
+    memoryGuardMaxExternalBytes: options.memoryGuardMaxExternalBytes ?? Number.MAX_SAFE_INTEGER,
     startupPortConflictExitCode: 78,
     sessions,
     connections,
@@ -324,5 +325,51 @@ describe('terminal daemon runtime transport liveness', () => {
       connection.transport,
       expect.objectContaining({ type: 'mux-target-message' }),
     );
+  });
+});
+
+describe('terminal daemon runtime memory guard', () => {
+  function mockMemoryUsage(overrides: Partial<ReturnType<typeof process.memoryUsage>> = {}) {
+    const spy = vi.spyOn(process, 'memoryUsage').mockReturnValue({
+      rss: 3_246_735_360,
+      heapTotal: 60 * 1024 * 1024,
+      heapUsed: 30 * 1024 * 1024,
+      external: 9 * 1024 * 1024,
+      arrayBuffers: 256 * 1024,
+      ...overrides,
+    } as ReturnType<typeof process.memoryUsage>);
+    return spy;
+  }
+
+  it('does not trip on high RSS when tracked heap/external stay under limits', () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const harness = createRuntimeHarness({
+      memoryGuardMaxRssBytes: 2_500_000_000,
+      memoryGuardMaxHeapUsedBytes: 8_000_000_000,
+      memoryGuardMaxExternalBytes: 8_000_000_000,
+    });
+    mockMemoryUsage({ rss: 3_246_735_360, heapUsed: 30 * 1024 * 1024, external: 9 * 1024 * 1024 });
+
+    harness.runtime.startMemoryGuardLoop();
+    vi.advanceTimersByTime(60_000);
+
+    expect(error).not.toHaveBeenCalledWith(expect.stringContaining('daemon memory guard tripped'));
+    error.mockRestore();
+  });
+
+  it('trips when tracked native memory exceeds the external limit even with moderate RSS', () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const harness = createRuntimeHarness({
+      memoryGuardMaxRssBytes: 8_000_000_000,
+      memoryGuardMaxHeapUsedBytes: 8_000_000_000,
+      memoryGuardMaxExternalBytes: 1_000,
+    });
+    mockMemoryUsage({ rss: 500 * 1024 * 1024, heapUsed: 10 * 1024 * 1024, external: 2 * 1024 * 1024 });
+
+    harness.runtime.startMemoryGuardLoop();
+    vi.advanceTimersByTime(60_000);
+
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('daemon memory guard tripped'));
+    error.mockRestore();
   });
 });
