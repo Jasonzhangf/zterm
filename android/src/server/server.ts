@@ -180,6 +180,7 @@ const readDaemonProcessGroup = (pid: string) => new Promise<{
 });
 const MEMORY_GUARD_MAX_RSS_BYTES = 2.5 * 1024 * 1024 * 1024;
 const MEMORY_GUARD_MAX_HEAP_USED_BYTES = 1.5 * 1024 * 1024 * 1024;
+const MEMORY_GUARD_MAX_EXTERNAL_BYTES = 1.5 * 1024 * 1024 * 1024;
 const MIRROR_NO_HOLE_DIFF_POLICY = DEFAULT_MIRROR_NO_HOLE_DIFF_POLICY;
 
 const DAGPIPE_COMPILE_RESULT = compileAllDagpipePhases();
@@ -670,6 +671,7 @@ const terminalDaemonRuntime = createTerminalDaemonRuntime({
   memoryGuardIntervalMs: MEMORY_GUARD_INTERVAL_MS,
   memoryGuardMaxRssBytes: MEMORY_GUARD_MAX_RSS_BYTES,
   memoryGuardMaxHeapUsedBytes: MEMORY_GUARD_MAX_HEAP_USED_BYTES,
+  memoryGuardMaxExternalBytes: MEMORY_GUARD_MAX_EXTERNAL_BYTES,
   startupPortConflictExitCode: STARTUP_PORT_CONFLICT_EXIT_CODE,
   sessions,
   connections,
