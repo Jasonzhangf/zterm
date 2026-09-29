@@ -52,6 +52,7 @@ export interface TerminalDaemonRuntimeDeps {
   disposeSessionCatalogRuntime: () => void;
   startRelayHostClient: () => void;
   disposeRelayHostClient: () => void;
+  disposeRemoteWindowStreamRuntime: () => void;
   disposeRtcBridgeServer: () => void;
 }
 
@@ -255,6 +256,7 @@ export function createTerminalDaemonRuntime(
     deps.disposeScheduleRuntime();
     deps.disposeSessionCatalogRuntime();
     deps.disposeRelayHostClient();
+    deps.disposeRemoteWindowStreamRuntime();
 
     for (const connection of deps.connections.values()) {
       try {
@@ -303,6 +305,7 @@ export function createTerminalDaemonRuntime(
     deps.disposeScheduleRuntime();
     deps.disposeSessionCatalogRuntime();
     deps.disposeRelayHostClient();
+    deps.disposeRemoteWindowStreamRuntime();
     deps.disposeRtcBridgeServer();
   }
 

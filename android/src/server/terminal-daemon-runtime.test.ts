@@ -96,6 +96,7 @@ function createRuntimeHarness() {
     disposeSessionCatalogRuntime: vi.fn(),
     startRelayHostClient: vi.fn(),
     disposeRelayHostClient: vi.fn(),
+    disposeRemoteWindowStreamRuntime: vi.fn(),
     disposeRtcBridgeServer: vi.fn(),
     detachSubscriberTransportOnly,
     releaseSessionAttachLease,
@@ -132,6 +133,51 @@ afterEach(() => {
 });
 
 describe('terminal daemon runtime transport liveness', () => {
+  it('disposes remote window streams during daemon shutdown', () => {
+    const disposeRemoteWindowStreamRuntime = vi.fn();
+    const runtime = createTerminalDaemonRuntime({
+      host: '127.0.0.1',
+      port: 3333,
+      requiredAuthToken: '',
+      updatesDir: '/tmp/updates',
+      tmuxBinary: 'tmux',
+      defaultSessionName: 'zterm',
+      logDir: '/tmp/logs',
+      configDisplayPath: '/tmp/config.json',
+      authLabel: 'disabled',
+      relayLabel: 'disabled',
+      terminalCacheLines: 1000,
+      wsHeartbeatIntervalMs: 1000,
+      memoryGuardIntervalMs: 60000,
+      memoryGuardMaxRssBytes: Number.MAX_SAFE_INTEGER,
+      memoryGuardMaxHeapUsedBytes: Number.MAX_SAFE_INTEGER,
+      startupPortConflictExitCode: 78,
+      sessions: new Map(),
+      connections: new Map(),
+      mirrors: new Map(),
+      server: { close: vi.fn() } as never,
+      wss: { close: vi.fn() } as never,
+      logTimePrefix: () => '2026-07-20 00:00:00',
+      shutdownTerminalSessions: vi.fn(),
+      detachSubscriberTransportOnly: vi.fn(),
+      releaseSessionAttachLease: vi.fn(),
+      listMuxChannelSubscriberIds: vi.fn(),
+      releaseAllMuxChannelSubscribers: vi.fn(),
+      destroyMirror: vi.fn(),
+      disposeScheduleRuntime: vi.fn(),
+      disposeSessionCatalogRuntime: vi.fn(),
+      startRelayHostClient: vi.fn(),
+      disposeRelayHostClient: vi.fn(),
+      disposeRemoteWindowStreamRuntime,
+      disposeRtcBridgeServer: vi.fn(),
+      sendTransportMessage: vi.fn(),
+    } as Parameters<typeof createTerminalDaemonRuntime>[0]);
+
+    runtime.shutdownDaemon('memory guard', 70);
+
+    expect(disposeRemoteWindowStreamRuntime).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps quiet rtc session transports before the client heartbeat can run', () => {
     const { connection, connections, detachSubscriberTransportOnly, runtime } =
       createRuntimeHarness();
