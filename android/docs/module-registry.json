@@ -1866,6 +1866,7 @@
         "src/hooks/useSessionDraftStorage.ts",
         "src/hooks/useSessionHistoryStorage.ts",
         "src/hooks/useSessionOpenActions.ts",
+        "src/hooks/useVerificationSessionOpen.ts",
         "src/lib/open-tab-intent.ts",
         "src/lib/open-tab-open-policy.ts",
         "src/lib/open-tab-persistence.ts",
