@@ -510,9 +510,9 @@ export function AppContent({
   // a window event (same pattern as SESSION_STATUS_EVENT). Tapping a
   // session-stopped notification jumps straight into that tmux session.
   const handleStoppedSessionNotificationRef = useRef<((sessionName: string) => void) | null>(null);
-const openSessionDeepLinkRef = useRef<((targetKey: string, channelId: string, sessionName: string) => void) | null>(null);
-const handleOpenSingleTmuxSessionRef = useRef<((target: BridgeTarget, sessionName: string) => void) | null>(null);
-const openVerificationSessionRef = useRef<((options: VerificationSessionOpenOptions) => void) | null>(null);
+  const openSessionDeepLinkRef = useRef<((targetKey: string, channelId: string, sessionName: string) => void) | null>(null);
+  const handleOpenSingleTmuxSessionRef = useRef<((target: BridgeTarget, sessionName: string) => void) | null>(null);
+  const openVerificationSessionRef = useRef<((options: VerificationSessionOpenOptions) => void) | null>(null);
   useZtermVerificationIntent();
 
   useEffect(() => {

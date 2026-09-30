@@ -1,5 +1,8 @@
 import { useEffect } from 'react';
-import { claimZtermVerificationDownload } from '../lib/zterm-verification-queue';
+import {
+  claimZtermVerificationDownload,
+  onZtermVerificationDownload,
+} from '../lib/zterm-verification-queue';
 
 export function useZtermVerificationIntent(): void {
   useEffect(() => {
@@ -19,8 +22,10 @@ export function useZtermVerificationIntent(): void {
     };
     const handleTerminalPageVisible = () => flush();
     window.addEventListener('zterm:terminal-page-visible', handleTerminalPageVisible);
+    const unsubscribeDownload = onZtermVerificationDownload(flush);
     return () => {
       window.removeEventListener('zterm:terminal-page-visible', handleTerminalPageVisible);
+      unsubscribeDownload();
     };
   }, []);
 }
