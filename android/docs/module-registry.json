@@ -2379,6 +2379,7 @@
         "src/components/terminal/TerminalSessionDrawerSlotMenu.tsx",
         "src/components/terminal/TerminalTabSwipeSurface.tsx",
         "src/lib/junction-preview-lattice.ts",
+        "src/lib/junction-preview-navigation.ts",
         "src/lib/junction-preview-layout.ts",
         "src/lib/terminal-tab-swipe-gesture.ts",
         "src/components/terminal/terminal-session-drawer-helpers.ts"

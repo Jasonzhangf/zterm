@@ -38,16 +38,31 @@ function scanDirectory(dirPath, needle) {
   }
 }
 
+const MAX_APK_MEMBER_BYTES = 32 * 1024 * 1024;
+
 function scanApk(apkPath, needle) {
   if (!existsSync(apkPath)) {
     throw new Error(`APK not found: ${apkPath}`);
   }
-  const unzip = spawnSync('unzip', ['-p', apkPath], { encoding: 'buffer', maxBuffer: 64 * 1024 * 1024 });
-  if (unzip.status !== 0) {
-    throw new Error(unzip.stderr?.toString() || `unzip failed for ${apkPath}`);
+
+  const list = spawnSync('unzip', ['-Z1', apkPath], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+  if (list.status !== 0) {
+    throw new Error(list.stderr || `failed to list zip entries for ${apkPath}`);
   }
-  if (unzip.stdout.includes(Buffer.from(needle, 'utf8'))) {
-    throw new Error(`relay default address leak found in APK ${apkPath} for needle: ${needle}`);
+
+  const entries = list.stdout.split('\n').map((line) => line.trim()).filter(Boolean);
+  const needleBuffer = Buffer.from(needle, 'utf8');
+
+  for (const entry of entries) {
+    if (entry.endsWith('/')) continue;
+
+    const unzip = spawnSync('unzip', ['-p', apkPath, entry], { encoding: 'buffer', maxBuffer: MAX_APK_MEMBER_BYTES });
+    if (unzip.status !== 0) {
+      throw new Error(unzip.stderr?.toString() || `unzip failed for ${entry} in ${apkPath}`);
+    }
+    if (unzip.stdout.includes(needleBuffer)) {
+      throw new Error(`relay default address leak found in APK entry ${entry} of ${apkPath} for needle: ${needle}`);
+    }
   }
 }
 

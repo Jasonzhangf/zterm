@@ -79,6 +79,35 @@ describe('resolveEffectiveConnectionStatus', () => {
     expect(status).toBe('connected');
     expect(resolveConnectionActivityLabel(session, status)).toBeNull();
   });
+
+  it('does not show connecting activity while live buffer traffic is present', () => {
+    const status = resolveEffectiveConnectionStatus(
+      makeStatusSession({ state: 'connecting' }),
+      makeConnectingMetrics(),
+    );
+
+    expect(resolveConnectionActivityLabel(makeStatusSession({ state: 'connecting' }), status)).toBeNull();
+  });
+
+  it('promotes reconnecting state to connected once live buffer traffic is present', () => {
+    const status = resolveEffectiveConnectionStatus(
+      makeStatusSession({ state: 'reconnecting' }),
+      { ...makeConnectingMetrics(), status: 'reconnecting' as const },
+    );
+
+    expect(status).toBe('connected');
+    expect(resolveConnectionActivityLabel(makeStatusSession({ state: 'reconnecting' }), status)).toBeNull();
+  });
+
+  it('promotes waiting state to connected once live buffer traffic is present', () => {
+    const status = resolveEffectiveConnectionStatus(
+      makeStatusSession({ state: 'connecting' }),
+      { ...makeConnectingMetrics(), status: 'waiting' as const },
+    );
+
+    expect(status).toBe('connected');
+    expect(resolveConnectionActivityLabel(makeStatusSession({ state: 'connecting' }), status)).toBeNull();
+  });
 });
 
 describe('resolveTerminalQuickBarCapabilityProjection', () => {

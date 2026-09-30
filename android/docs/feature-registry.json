@@ -218,9 +218,9 @@
       "feature_id": "desktop.remote_window_stream",
       "title": "Remote app/window and iTerm2 pane video stream",
       "domain": "remote-desktop",
-    "owners": [
-      "docs/decisions/2026-08-30-remote-window-quality-gesture-control-amendment.md",
-      "docs/decisions/2026-07-19-remote-window-stream-truth.md",
+      "owners": [
+        "docs/decisions/2026-08-30-remote-window-quality-gesture-control-amendment.md",
+        "docs/decisions/2026-07-19-remote-window-stream-truth.md",
         "src/server/remote-window-stream-daemon.ts",
         "src/server/remote-window-catalog-runtime.ts",
         "src/server/remote-window-canvas-layout.ts",
@@ -248,10 +248,10 @@
         "src/lib/remote-window-receiver-runtime.ts",
         "src/contexts/session-context-remote-window-runtime.ts"
       ],
-    "allowed_paths": [
-      "docs/decisions/2026-08-30-remote-window-quality-gesture-control-amendment.md",
-      "docs/goals/remote-window-quality-gesture-remediation-plan.md",
-      "docs/goals/remote-window-quality-gesture-remediation.goal.md",
+      "allowed_paths": [
+        "docs/decisions/2026-08-30-remote-window-quality-gesture-control-amendment.md",
+        "docs/goals/remote-window-quality-gesture-remediation-plan.md",
+        "docs/goals/remote-window-quality-gesture-remediation.goal.md",
         "docs/decisions/2026-07-19-remote-window-stream-truth.md",
         "docs/decisions/2026-07-29-remote-window-canvas-pipeline.md",
         "docs/decisions/2026-08-09-remote-window-dual-stream-design.md",
@@ -419,11 +419,11 @@
         "docs/testing/remote-window-dual-stream-test-design.md",
         "scripts/remote-window-live-input-probe.ts"
       ],
-    "truth_sources": [
-      "docs/architecture.md",
-      "docs/dev-workflow.md",
-      "docs/decisions/2026-08-30-remote-window-quality-gesture-control-amendment.md",
-      "docs/decisions/2026-07-19-remote-window-stream-truth.md",
+      "truth_sources": [
+        "docs/architecture.md",
+        "docs/dev-workflow.md",
+        "docs/decisions/2026-08-30-remote-window-quality-gesture-control-amendment.md",
+        "docs/decisions/2026-07-19-remote-window-stream-truth.md",
         "docs/decisions/2026-07-29-remote-window-canvas-pipeline.md",
         "docs/decisions/2026-08-09-remote-window-dual-stream-design.md"
       ]
@@ -1849,7 +1849,8 @@
         "src/lib/session-preview-gesture.ts",
         "src/components/terminal/TerminalPreviewGrid.tsx",
         "src/pages/TerminalPageStageShell.tsx",
-        "src/pages/TerminalPage.tsx"
+        "src/pages/TerminalPage.tsx",
+        "src/lib/junction-preview-navigation.ts"
       ],
       "allowed_paths": [
         "src/lib/junction-preview-lattice.ts",
@@ -1875,7 +1876,9 @@
         "src/pages/TerminalPageStageShell.pane-stage.test.tsx",
         "src/lib/types.ts",
         "docs/testing/terminal-session-preview-test-design.md",
-        "docs/goals/multiscreen-junction-preview-plan.md"
+        "docs/goals/multiscreen-junction-preview-plan.md",
+        "src/lib/junction-preview-navigation.ts",
+        "src/lib/junction-preview-navigation.test.ts"
       ],
       "forbidden_paths": [
         "src/server/",
@@ -1892,7 +1895,8 @@
         "src/hooks/useSessionOpenActions.test.tsx",
         "src/lib/feature-registry-truth.test.ts",
         "src/lib/resource-registry-truth.test.ts",
-        "src/lib/function-wiki-truth.test.ts"
+        "src/lib/function-wiki-truth.test.ts",
+        "src/lib/junction-preview-navigation.test.ts"
       ],
       "truth_sources": [
         "docs/goals/multiscreen-junction-preview-plan.md",

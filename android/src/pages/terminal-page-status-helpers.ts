@@ -52,6 +52,7 @@ export function resolveEffectiveConnectionStatus(
   }
   return status;
 }
+
 export function formatConnectionRouteLabel(session: Session) {
   switch (session.resolvedPath) {
     case 'lan':

@@ -22,12 +22,15 @@ function formatDebugHz(value: number): string {
 function resolveDebugStatus(
   session: Pick<Session, 'state'> | null,
   metrics?: SessionDebugOverlayMetrics,
-): SessionDebugOverlayMetrics["status"] {
+): SessionDebugOverlayMetrics["status"] | "connected" {
   if (metrics?.status) {
     return metrics.status;
   }
   if (!session) {
     return "waiting";
+  }
+  if (session.state === "connected") {
+    return "connected";
   }
   switch (session.state) {
     case "error":
