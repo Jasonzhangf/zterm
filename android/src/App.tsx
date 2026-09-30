@@ -8,7 +8,7 @@ import type { MutableRefObject } from 'react';
 import { App as CapacitorApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
-import { parseConnectionConfigShareLink, type EditableHost } from '@zterm/shared';
+import { parseConnectionConfigShareLink } from '@zterm/shared';
 import { TmuxSessionPickerSheet } from './components/tmux/TmuxSessionPickerSheet';
 import { ZtermDialog } from './components/terminal/ZtermDialog';
 import { SessionProvider, useSession } from './contexts/SessionContext';
@@ -16,7 +16,7 @@ import { useAppUpdate } from './hooks/useAppUpdate';
 import { useScreenOrientationLock } from './hooks/useScreenOrientationLock';
 import { useConfigExport } from './hooks/useConfigExport';
 import { useBridgeSettingsStorage } from './hooks/useBridgeSettingsStorage';
-import { buildBridgeTargetFromHost } from './lib/session-picker';
+import { buildBridgeTargetFromHost, type BridgeTarget } from './lib/session-picker';
 import { useHostStorage } from './hooks/useHostStorage';
 import { useQuickActionStorage } from './hooks/useQuickActionStorage';
 import { useShortcutActionStorage } from './hooks/useShortcutActionStorage';
@@ -29,6 +29,7 @@ import { useAppPageState } from './hooks/useAppPageState';
 import { useTerminalShellActions } from './hooks/useTerminalShellActions';
 import { useRelayDeviceStream } from './hooks/useRelayDeviceStream';
 import { useZtermVerificationIntent } from './hooks/useZtermVerificationIntent';
+import { buildVerificationSessionTarget, useVerificationSessionOpen, type VerificationSessionOpenOptions } from './hooks/useVerificationSessionOpen';
 import { updateBridgeSettingsTerminalWidthMode } from './lib/terminal-width-mode-manager';
 import { upsertBridgeServer } from './lib/bridge-settings';
 import { setZtermVerificationDownload } from './lib/zterm-verification-queue';
@@ -410,36 +411,20 @@ export function AppContent({
           fileName: fileName || '',
           size,
         });
-        const recentHost = [...hosts]
-          .sort((left, right) => (right.lastConnected ?? 0) - (left.lastConnected ?? 0))
-          .find((host) => (host.lastConnected ?? 0) > 0)
-          || hosts[0];
-        let sessionHost = recentHost;
-        if (!sessionHost) {
-          const fallbackHost: EditableHost = {
-            name: 'Local daemon',
-            bridgeHost: '10.0.2.2',
-            bridgePort: 3333,
-            daemonHostId: 'mac-studio',
-            relayHostId: 'mac-studio',
-            authToken: 'wterm-4123456',
-            sessionName: 'default',
-            authType: 'password',
-            tags: [],
-            pinned: false,
-            terminalBackend: 'tmux',
-            transportMode: 'auto',
-          };
-          sessionHost = upsertHost(fallbackHost);
-          verificationFallbackHostRef.current = sessionHost;
-        }
-        window.dispatchEvent(new CustomEvent('zterm:verification-open-request', {
-          detail: {
-            targetKey: buildTransportTargetKey(sessionHost),
-            channelId: 'verification',
-            sessionName: sessionHost.sessionName || 'default',
+        openVerificationSessionRef.current?.({
+          hosts,
+          sessionName: 'default',
+          onOpenSession: (host, sessionName) => {
+            handleOpenSingleTmuxSessionRef.current?.(buildVerificationSessionTarget(host), sessionName);
           },
-        }));
+          onError: (message) => {
+            setAppDialog({
+              tone: 'error',
+              title: '验证下载失败',
+              message,
+            });
+          },
+        });
         ensureTerminalPageVisible();
         return;
       }
@@ -525,13 +510,10 @@ export function AppContent({
   // a window event (same pattern as SESSION_STATUS_EVENT). Tapping a
   // session-stopped notification jumps straight into that tmux session.
   const handleStoppedSessionNotificationRef = useRef<((sessionName: string) => void) | null>(null);
-  const openSessionDeepLinkRef = useRef<((targetKey: string, channelId: string, sessionName: string) => void) | null>(null);
-  const verificationFallbackHostRef = useRef<Host | null>(null);
-  useZtermVerificationIntent({
-    onOpenSession: (targetKey, channelId, sessionName) => {
-      openSessionDeepLinkRef.current?.(targetKey, channelId, sessionName);
-    },
-  });
+const openSessionDeepLinkRef = useRef<((targetKey: string, channelId: string, sessionName: string) => void) | null>(null);
+const handleOpenSingleTmuxSessionRef = useRef<((target: BridgeTarget, sessionName: string) => void) | null>(null);
+const openVerificationSessionRef = useRef<((options: VerificationSessionOpenOptions) => void) | null>(null);
+  useZtermVerificationIntent();
 
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) {
@@ -849,6 +831,9 @@ export function AppContent({
     setPageState,
     auditOpenTabsAgainstRemoteSessions,
   });
+  const { openVerificationSession } = useVerificationSessionOpen();
+  openVerificationSessionRef.current = openVerificationSession;
+  handleOpenSingleTmuxSessionRef.current = handleOpenSingleTmuxSession;
 
   // Wire the session-stopped notification tap handler to the latest
   // session-open actions (avoid stale closures from the mount-only listener).
@@ -883,8 +868,7 @@ export function AppContent({
       ensureTerminalPageVisible();
       return;
     }
-    const matchingHost = hosts.find((host) => buildKey(host) === targetKey.trim())
-      || verificationFallbackHostRef.current;
+    const matchingHost = hosts.find((host) => buildKey(host) === targetKey.trim());
     if (matchingHost) {
       handleOpenSingleTmuxSession(buildBridgeTargetFromHost(matchingHost), sessionName.trim());
       return;

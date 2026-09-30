@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  peekZtermVerificationDownload,
+  claimZtermVerificationDownload,
   setZtermVerificationDownload,
-  takeZtermVerificationDownload,
 } from './zterm-verification-queue';
 
 describe('zterm verification queue', () => {
@@ -13,33 +12,28 @@ describe('zterm verification queue', () => {
       size: 52428800,
     });
 
-    const target = takeZtermVerificationDownload();
+    const target = claimZtermVerificationDownload();
     expect(target).toEqual({
       remotePath: '/tmp',
       fileName: 'zterm-rtfp-50mb-3112.bin',
       size: 52428800,
     });
-    expect(takeZtermVerificationDownload()).toBeNull();
+    expect(claimZtermVerificationDownload()).toBeNull();
   });
 
-  it('peeks without consuming so the sheet can skip the mux list request and still consume it later', () => {
+  it('claims exactly once so the verification intent has a single owner', () => {
     setZtermVerificationDownload({
       remotePath: '/tmp',
       fileName: 'zterm-rtfp-50mb-3112.bin',
       size: 52428800,
     });
 
-    expect(peekZtermVerificationDownload()).toEqual({
+    expect(claimZtermVerificationDownload()).toEqual({
       remotePath: '/tmp',
       fileName: 'zterm-rtfp-50mb-3112.bin',
       size: 52428800,
     });
-    expect(takeZtermVerificationDownload()).toEqual({
-      remotePath: '/tmp',
-      fileName: 'zterm-rtfp-50mb-3112.bin',
-      size: 52428800,
-    });
-    expect(takeZtermVerificationDownload()).toBeNull();
+    expect(claimZtermVerificationDownload()).toBeNull();
   });
 
   it('clears explicit null and does not leak to the next sheet open', () => {
@@ -50,6 +44,6 @@ describe('zterm verification queue', () => {
     });
     setZtermVerificationDownload(null);
 
-    expect(takeZtermVerificationDownload()).toBeNull();
+    expect(claimZtermVerificationDownload()).toBeNull();
   });
 });

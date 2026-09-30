@@ -10,12 +10,8 @@ export function setZtermVerificationDownload(target: ZtermVerificationDownloadTa
   pendingDownloadTarget = target;
 }
 
-export function takeZtermVerificationDownload(): ZtermVerificationDownloadTarget | null {
+export function claimZtermVerificationDownload(): ZtermVerificationDownloadTarget | null {
   const target = pendingDownloadTarget;
   pendingDownloadTarget = null;
   return target;
-}
-
-export function peekZtermVerificationDownload(): ZtermVerificationDownloadTarget | null {
-  return pendingDownloadTarget;
 }

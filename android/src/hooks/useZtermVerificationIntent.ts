@@ -1,41 +1,26 @@
-import { useEffect, useRef } from 'react';
-import { peekZtermVerificationDownload } from '../lib/zterm-verification-queue';
+import { useEffect } from 'react';
+import { claimZtermVerificationDownload } from '../lib/zterm-verification-queue';
 
-export interface ZtermVerificationIntentHost {
-  onOpenSession(targetKey: string, channelId: string, sessionName: string): void;
-}
-
-export function useZtermVerificationIntent(host: ZtermVerificationIntentHost): void {
-  const onOpenSessionRef = useRef(host.onOpenSession);
-  onOpenSessionRef.current = host.onOpenSession;
-
+export function useZtermVerificationIntent(): void {
   useEffect(() => {
-    let pending = false;
     const flush = () => {
-      if (!pending) return;
-      pending = false;
-      const target = peekZtermVerificationDownload();
+      const target = claimZtermVerificationDownload();
       if (!target?.fileName) return;
       window.dispatchEvent(new CustomEvent('zterm:open-file-transfer', {
         detail: { mode: 'browser', remoteCwd: target.remotePath || '/tmp' },
       }));
+      window.dispatchEvent(new CustomEvent('zterm:file-transfer-download', {
+        detail: {
+          remotePath: target.remotePath,
+          fileName: target.fileName,
+          size: target.size,
+        },
+      }));
     };
     const handleTerminalPageVisible = () => flush();
-    const handleOpenRequest = (event: Event) => {
-      const detail = (event as CustomEvent<{
-        targetKey?: string;
-        channelId?: string;
-        sessionName?: string;
-      }>).detail;
-      if (!detail?.targetKey || !detail?.sessionName) return;
-      pending = true;
-      onOpenSessionRef.current(detail.targetKey, detail.channelId || 'verification', detail.sessionName);
-    };
     window.addEventListener('zterm:terminal-page-visible', handleTerminalPageVisible);
-    window.addEventListener('zterm:verification-open-request', handleOpenRequest);
     return () => {
       window.removeEventListener('zterm:terminal-page-visible', handleTerminalPageVisible);
-      window.removeEventListener('zterm:verification-open-request', handleOpenRequest);
     };
   }, []);
 }

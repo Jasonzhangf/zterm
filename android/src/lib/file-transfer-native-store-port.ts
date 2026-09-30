@@ -1,6 +1,5 @@
 import { writeFileTransferChunkBatches } from './file-transfer-throughput-runtime';
 import { joinLocalDisplayPath } from './file-transfer-path-runtime';
-import { VERIFICATION_LOCAL_DOWNLOAD_DIR } from './file-transfer-sheet-constants';
 
 export interface FileTransferDownloadDestination {
   requestId: string;
@@ -65,9 +64,6 @@ function formatError(error: unknown) {
 }
 
 function joinDownloadPath(parentPath: string, childName: string) {
-  if (parentPath.startsWith(VERIFICATION_LOCAL_DOWNLOAD_DIR)) {
-    return `${parentPath}/${childName}`;
-  }
   return joinLocalDisplayPath(parentPath, childName);
 }
 

@@ -36,10 +36,6 @@ import {
   sendBoundedFileUploadChunks,
 } from "../../lib/file-transfer-throughput-runtime";
 import { StoragePermissionPlugin } from "../../plugins/StoragePermissionPlugin";
-import {
-  peekZtermVerificationDownload,
-  takeZtermVerificationDownload,
-} from "../../lib/zterm-verification-queue";
 import { FILE_TRANSFER_WIRE_CHUNK_BYTES, FILE_TRANSFER_WIRE_FRAME_MAX_CHARS } from "@zterm/shared/protocol";
 import { AmbientButton, AmbientTextarea } from "../ambient";
 import {
@@ -409,9 +405,7 @@ export function FileTransferSheet({
     setPreviewSource(null);
     setDirection("download");
     forceRuntimeTick((value) => value + 1);
-    if (!peekZtermVerificationDownload()) {
-      requestRemoteList(initialRemotePath);
-    }
+    requestRemoteList(initialRemotePath);
   }, [open, remoteCwd, resetScopeKey, requestRemoteList]);
 
   const checkLocalStoragePermission = useCallback(async () => {
@@ -1183,15 +1177,6 @@ export function FileTransferSheet({
     fileName: string;
     size?: number;
   } | null>(null);
-
-  useEffect(() => {
-    if (open) {
-      const pending = takeZtermVerificationDownload();
-      if (pending?.fileName) {
-        setFastPathTarget(pending);
-      }
-    }
-  }, [open]);
 
   useEffect(() => {
     const handleDownloadEvent = (event: Event) => {
