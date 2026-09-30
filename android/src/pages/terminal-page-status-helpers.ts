@@ -17,8 +17,11 @@ export function hasLiveSessionTraffic(
 
 export function resolveConnectionActivityLabel(
   session: Session,
-  status: SessionDebugOverlayMetrics['status'],
+  status: EffectiveConnectionStatus,
 ) {
+  if (session.state === 'connected') {
+    return null;
+  }
   if (
     session.lastError === 'waiting for confirmed control directory'
     || session.lastError === 'control directory confirmation timeout'
@@ -34,13 +37,18 @@ export function resolveConnectionActivityLabel(
   return null;
 }
 
+export type EffectiveConnectionStatus = SessionDebugOverlayMetrics['status'] | 'connected';
+
 export function resolveEffectiveConnectionStatus(
   session: Session,
   metrics: SessionDebugOverlayMetrics | null | undefined,
-) {
+): EffectiveConnectionStatus {
   const status = resolveDebugStatus(session, metrics || undefined);
-  if ((status === 'reconnecting' || status === 'connecting') && hasLiveSessionTraffic(metrics)) {
-    return 'waiting';
+  if (session.state === 'connected') {
+    return 'connected';
+  }
+  if ((status === 'reconnecting' || status === 'connecting' || status === 'waiting') && hasLiveSessionTraffic(metrics)) {
+    return 'connected';
   }
   return status;
 }
@@ -63,7 +71,7 @@ export function formatConnectionRouteLabel(session: Session) {
     case 'rtc-relay':
       return session.resolvedRelayTransport === 'turn' ? 'Relay/TURN' : 'Relay';
     default:
-      return session.state === 'connected' ? '连接中' : '未连接';
+      return session.state === 'connected' ? '已连接' : '未连接';
   }
 }
 
