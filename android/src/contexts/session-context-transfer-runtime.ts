@@ -297,11 +297,12 @@ export async function ensureSessionReadyForPasteRuntime(options: {
 }) {
   const sessionId = options.sessionId;
   const readSocket = () => {
-    const ws = options.daemonConnection.readSessionSocket(sessionId) || null;
-    if (!ws) return null;
-    if (ws.readyState === WebSocket.OPEN) return ws;
-    if (ws.readyState === WebSocket.CONNECTING) return ws;
-    return null;
+    try {
+      const ws = options.daemonConnection.readOpenSessionSocket(sessionId, 'image paste');
+      return ws.readyState === WebSocket.OPEN ? ws : null;
+    } catch {
+      return null;
+    }
   };
   const initial = readSocket();
   if (initial) return initial;
@@ -336,6 +337,9 @@ export async function sendImagePasteRuntime(options: {
   const targetSessionId = options.sessionId.trim();
   if (!targetSessionId) {
     throw new Error('No target session for image paste');
+  }
+  if (options.file.size <= 0) {
+    throw new Error('Image must contain at least 1 byte');
   }
   if (isDagpipeNativeCapable()) {
     const uploadGate = await runDagpipePhase3Upload({

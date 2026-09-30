@@ -74,6 +74,28 @@ describe('session-context-transfer-runtime', () => {
     })).resolves.toBe(ws);
   });
 
+  it('rejects zero-byte image files before opening an upload wire', async () => {
+    const ws = { readyState: WebSocket.OPEN } as any;
+    const sendSocketPayload = vi.fn();
+    const imagePasteWaiterRuntime = {
+      wait: vi.fn(async () => undefined),
+      resolve: vi.fn(),
+      reject: vi.fn(),
+      dispose: vi.fn(),
+    } as any;
+
+    await expect(sendImagePasteRuntime({
+      sessionId: 'session-1',
+      file: makeFile('empty.png', 0),
+      imagePasteWaiterRuntime,
+      ensureSessionReadyForPaste: vi.fn(async () => ws),
+      subscribeFileTransferMessages: vi.fn(() => () => {}),
+      sendSocketPayload,
+    })).rejects.toThrow('Image must contain at least 1 byte');
+
+    expect(sendSocketPayload).not.toHaveBeenCalled();
+  });
+
   it('chunks image paste binary payloads so RTC relay does not send one oversized datachannel frame', async () => {
     const ws = { readyState: WebSocket.OPEN } as any;
     const sendSocketPayload = vi.fn();
@@ -134,7 +156,7 @@ describe('session-context-transfer-runtime', () => {
       timeoutMs: 10,
       sessions: [{ id: 'session-1', state: 'reconnecting' } as any],
       daemonConnection: {
-        readSessionSocket: vi.fn(() => ws),
+        readOpenSessionSocket: vi.fn(() => ws),
       } as any,
     })).resolves.toBe(ws);
   });
@@ -150,7 +172,7 @@ describe('session-context-transfer-runtime', () => {
       timeoutMs: 300,
       sessions: [{ id: 'session-1', state: 'disconnected' } as any],
       daemonConnection: {
-        readSessionSocket: vi.fn(() => sockets.shift() || openSocket),
+        readOpenSessionSocket: vi.fn(() => sockets.shift() || openSocket),
       } as any,
       requestReconnect,
     })).resolves.toBe(openSocket);
