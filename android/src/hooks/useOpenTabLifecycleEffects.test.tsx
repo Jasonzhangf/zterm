@@ -92,14 +92,12 @@ const baseSession = {
 function LifecycleHarness({
   onForegroundResume,
   auditOpenTabsAgainstRemoteSessions,
-  resumeActiveSessionTransport = vi.fn(),
   onForegroundActiveChange = vi.fn(),
   reportTargetNetworkProbeError = vi.fn(),
   sessions = [baseSession],
 }: {
   onForegroundResume: (reason: 'visibilitychange' | 'resume' | 'appStateChange') => void;
   auditOpenTabsAgainstRemoteSessions: (reason: any) => Promise<void>;
-  resumeActiveSessionTransport?: (sessionId: string) => boolean;
   onForegroundActiveChange?: (active: boolean) => void;
   reportTargetNetworkProbeError?: (failure: SessionTargetNetworkProbeFailure) => void;
   sessions?: Session[];
@@ -118,7 +116,6 @@ function LifecycleHarness({
     onForegroundActiveChange,
     onForegroundResume,
     auditOpenTabsAgainstRemoteSessions,
-    resumeActiveSessionTransport,
     notifyTargetNetworkSignal: vi.fn(),
     reportTargetNetworkProbeError,
     bumpFollowResetEpoch: vi.fn(),
@@ -204,23 +201,6 @@ describe('useOpenTabLifecycleEffects', () => {
     capacitorAppHarness.emit('appStateChange', { isActive: false });
 
     expect(onForegroundResume).toHaveBeenCalled();
-  });
-
-  it('explicitly resumes the active terminal transport on foreground resume', () => {
-    const onForegroundResume = vi.fn();
-    const resumeActiveSessionTransport = vi.fn(() => true);
-    render(
-      <LifecycleHarness
-        onForegroundResume={onForegroundResume}
-        auditOpenTabsAgainstRemoteSessions={vi.fn(async () => undefined)}
-        resumeActiveSessionTransport={resumeActiveSessionTransport}
-      />,
-    );
-
-    capacitorAppHarness.emit('appStateChange', { isActive: false });
-    capacitorAppHarness.emit('appStateChange', { isActive: true });
-
-    expect(resumeActiveSessionTransport).toHaveBeenCalledWith('s1');
   });
 
   it('does not start native background execution when no retained session exists', async () => {
