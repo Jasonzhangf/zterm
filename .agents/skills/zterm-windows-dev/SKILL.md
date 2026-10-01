@@ -8,16 +8,17 @@ description: zterm Windows Electron 客户端与 WezTerm daemon 开发闭环，�
 ## 必读
 
 1. `win/docs/architecture.md`
-2. `win/docs/function-map.md`
-3. `win/docs/windows-desktop-shell-manifest.json`
+2. `android/docs/dagpipe/windows-remote-access-client.graph.json`
+3. `android/docs/dagpipe/README.md`
 4. `win/docs/testing/windows-desktop-shell-test-design.md`
 5. `win/MEMORY.md`
 
 ## 边界
 
-- `win/` 只拥有 Electron 窗口、preload、Windows 平台适配、桌面组合和打包。
+- `win/` 只拥有 Electron 窗口、preload、Windows 平台适配、iTerm2 风格 sidebar/workspace/statusbar 目标 UI、桌面组合和打包。
 - 复用 shared transport、sparse buffer、renderer；禁止复制 daemon、mirror、renderer、Mac IPC 或 local tmux。
 - daemon backend 变更仍由 `daemon.windows_wezterm_backend` owner 处理。
+- DAGPipe 当前真源是 `android/docs/dagpipe/windows-remote-access-client.graph.json`；旧 Windows function map / mainline map / shell manifest 已删除，不再作为 owner 真源。
 
 ## Packaged 门禁
 
@@ -40,3 +41,10 @@ pnpm --dir win run package
 ```
 
 随后部署真实 Windows 包并跑 source-to-DOM marker gate；只完成本地命令不得宣称 packaged alpha 闭环。
+
+## iTerm2-style Remote Access Gate
+
+- 先更新 `android/docs/dagpipe/windows-remote-access-client.graph.json`，确认 host/profile、session catalog、sidebar projection、workspace projection、shared terminal rendering、statusbar projection 的入口、依赖、success/failure/cleanup 终点。
+- 当前静态 DAG 已通过 Phase 0；它只证明 Windows remote-access composition 的形状，不证明 profile/sidebar/statusbar 已实现，也不证明 shared renderer 内部 graph。
+- 再改 `win/src` / `win/electron` / `win/docs`。禁止在 Windows UI fork daemon session truth、transport、buffer、renderer、mirror 或 file preview policy。
+- Packaged smoke 必须证明：sidebar profile/session projection、workspace split/tab projection、terminal marker source-to-DOM、statusbar projection、file browser fixture、daemon session cleanup。

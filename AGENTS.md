@@ -11,6 +11,7 @@
 - `android/docs/decisions/2026-04-23-terminal-head-buffer-render-truth.md`：terminal server / buffer manager / renderer / UI shell 唯一真源
 - `android/docs/decisions/2026-09-05-runtime-memory-truth.md`：代码核实的当前实现、用户确认的目标架构及待迁移差距；禁止把目标态冒充当前实现
 - `android/docs/decisions/2026-08-07-opencode-transcript-mirror-truth.md`：opencode transcript 数据导出 / daemon 只读服务 / client 历史投影边界（独立于 mirror store；数据与控制分离；不写入 mirror/sparse buffer）
+- `android/docs/dagpipe/README.md` 与 `android/docs/dagpipe/*.graph.json`：当前业务/执行 DAG 真源；feature/debug 先核图，再改实现
 - `android/docs/dev-workflow.md`：执行顺序、验证门禁、证据要求
 - `android/docs/loops/LOOP.md`：项目 recurring loop 治理入口；当前只启用 L1 report-only 初始化，不启用自动修复
 - `android/docs/ui-slices.md`：页面级切片与文件 ownership
@@ -26,22 +27,22 @@
 ## Workspace Layout
 - `android/`：当前 Android 客户端
 - `mac/`：未来 macOS 客户端骨架
-- `win/`：未来 Windows 客户端骨架
+- `win/`：Windows remote-access 客户端 alpha；DAGPipe 真源为 `android/docs/dagpipe/windows-remote-access-client.graph.json`
 
 ## Hard Rules
 - 不在本仓库复制或内嵌 runtime 源码
 - runtime 问题改 `../wterm`，app 问题改 `zterm`
 - 先验证，后结论；无证据不宣称完成
+- Android APK / terminal / renderer / IME / session transport / OTA 任一影响真机行为的改动，必须先跑 `.agents/skills/zterm-mobile-dev/SKILL.md` 的 Android L5 真机硬门禁；单测、`vitest`、`tsc`、`daemon:mirror:close-loop`、本机 `dev` 浏览器或 local daemon preview 都不能冒充真机交付。缺 emulator/15T 截图、logcat、buildNumber 或 OTA/安装态证据时，按 `UNVERIFIED`/`INCOMPLETE` 处理。
 - 每次开发 / 修复 / 重构必须先读架构真源，再读代码：
   - 先读 `android/docs/architecture.md`
   - 再读 `android/docs/audits/2026-07-02-architecture-boundary-remediation.md`
-  - 再按任务域读对应 decision / feature registry / function map / skill
+  - 再按任务域读对应 decision / DAGPipe graph / skill
   - 然后才读代码定位实现点
 - 改代码前必须写清楚“本次方法如何对应架构”：
-  - 属于哪个功能块
-  - 唯一 owner 是谁
-  - 当前越界项是 **物理移除 / 分离下沉 / 显式兼容保留** 哪一类
-  - allowed paths / forbidden paths 是否匹配
+  - 属于哪条 DAGPipe 业务/执行图
+  - 唯一 owner 节点/owner 是谁
+  - 当前缺口是 **补链 / 修图 / 物理移除 / 显式兼容保留** 哪一类
   - 必跑 gate 是什么
 - 未完成上述架构映射前，不得直接改实现代码；禁止靠 grep 命中点直接补 patch。
 - 客户端目标及迁移状态以 `android/docs/decisions/2026-09-05-runtime-memory-truth.md` 为准；旧架构文档中的 implemented/active 只描述原切片，不证明新目标完成。
@@ -87,3 +88,4 @@
 - 新 APK 交付必须同步 OTA。构建/发布流程唯一执行入口为 `pnpm --dir android run build:android`；具体步骤、授权范围及包身份验证见 mobile skill。该入口会分配 buildNumber、构建 normal/rollback APK，并写入本地 OTA；不能把它当只读 build 检查。
 - 纯审计/文档修复不 bump、不构建 APK、不发布。已授权的新版本交付需同时证明包、安装态与适用 OTA 通道；没有发布授权时先完成可审阅变更与适用检查，再报告发布缺口，不能宣称已交付。
 - 设备端 OTA 检查的是 daemon 的 `~/.zterm/updates/latest.json`；手工 `adb install` 只影响单台设备，不替代 OTA 发布
+- Android 真机交付口径按 `.agents/skills/zterm-mobile-dev/SKILL.md` 执行；没有 online ADB 真机或 Android Emulator 的 L5 smoke、截图与 logcat 落点，不能报告“已修复/已交付”。

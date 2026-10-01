@@ -199,6 +199,10 @@ describe('zterm daemon service script truth gates', () => {
     expect(windowsScript).toContain('New-NetFirewallRule -DisplayName $FirewallRuleName');
     expect(windowsScript.indexOf('Ensure-FirewallRule')).toBeLessThan(windowsScript.indexOf('Register-ScheduledTask -TaskName $TaskName'));
     expect(windowsScript).toContain('Register-ScheduledTask -TaskName $TaskName');
+    expect(windowsScript).toContain('$taskUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name');
+    expect(windowsScript).toContain('New-ScheduledTaskPrincipal -UserId $taskUser -LogonType S4U -RunLevel Highest');
+    expect(windowsScript).toContain('-Principal $principal');
+    expect(windowsScript).toContain('New-ScheduledTaskTrigger -AtStartup');
     expect(windowsScript).toContain('New-ScheduledTaskTrigger -AtLogOn');
     expect(windowsScript).toContain('Start-Process -FilePath $NodeExe');
     expect(windowsScript).toContain('Stop-Process -Id $daemonPid');

@@ -63,6 +63,10 @@ Phase 8 static graphs:
 
 - `android-connection-service.graph.json`
 
+Phase 9 static graphs:
+
+- `windows-remote-access-client.graph.json`
+
 Validation:
 
 ```sh

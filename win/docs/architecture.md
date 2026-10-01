@@ -10,14 +10,15 @@ Windows is split into two layers:
    - Treats WezTerm CLI output as input material only.
    - Produces ZTerm-owned absolute mirror snapshots and buffer protocol data.
 
-2. Windows desktop shell: `windows.desktop_shell`
-   - Owner surface: `win/`
-   - Owns window/menu/package/platform integration only.
-   - Reuses shared pane stage, app-layer workspace semantics, and terminal renderer.
+2. Windows remote-access client target: `windows.remote_access_client`
+  - Owner surface: `win/`
+  - Owns Electron window, typed platform bridge, planned iTerm2-style shell layout, host/profile sidebar, session catalog projection, workspace projection, status bar, file browser projection, package integration, and Windows smoke evidence.
+  - Reuses shared pane stage, app-layer workspace semantics, and terminal renderer.
+  - DAGPipe graph: `android/docs/dagpipe/windows-remote-access-client.graph.json`.
 
 ## Allowed Paths
 
-- Add Windows shell docs, package metadata, launcher, installer, and platform integration under `win/`.
+- Add Windows shell docs, profile/session/sidebar/workspace/status UI, package metadata, launcher, installer, and platform integration under `win/`.
 - Keep Windows package-channel metadata under `win/package.json`, `win/build/`, and verifier scripts; internal alpha artifacts are unsigned unless a certificate-backed gate is added.
 - Add Windows filesystem IO only behind the typed preload adapter; path/sort/preview decisions remain in shared `FileBrowserCore`.
 - Update shared desktop pane/shell components only when the same behavior is intentionally shared with Mac.
@@ -41,11 +42,11 @@ Windows backend completion requires:
 - Real Windows WezTerm remote and input smoke.
 - Typecheck.
 
-Windows desktop shell completion will require separate packaged Windows app smoke after the shell exists.
+Windows remote-access client completion requires packaged Windows app smoke for sidebar profile selection, session catalog projection, split/tab workspace behavior, terminal source-to-DOM marker, file browser fixture, status bar projection, explicit failure projection, and runtime cleanup. Current static DAG coverage does not by itself prove these packaged gates.
 
 ## Desktop shell initialization
 
+- DAGPipe graph: `android/docs/dagpipe/windows-remote-access-client.graph.json`
 - Test design: `win/docs/testing/windows-desktop-shell-test-design.md`
-- Machine lifecycle: `win/docs/windows-desktop-shell-manifest.json`
-- Electron main, CommonJS preload artifact, renderer, shell, shared transport binding, and shared renderer bindings are anchored in `win/docs/windows-desktop-shell-manifest.json`.
+- Electron main, CommonJS preload artifact, renderer, shell, profile/session sidebar, workspace, shared transport binding, shared renderer, and status bar bindings are anchored in the DAGPipe graph above.
 - First extraction boundary: introduce a platform-neutral desktop bridge/runtime composition contract. Keep Mac local-tmux, filesystem, window-manager, and screenshot-helper IPC behind Mac adapters; Windows receives its own typed platform adapter.
