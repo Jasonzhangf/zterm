@@ -44,6 +44,21 @@ vi.mock("../../plugins/ScreenOrientationPlugin", () => ({
   isScreenOrientationSupported: () => false,
 }));
 
+vi.mock("../../plugins/PickedImageUriPlugin", () => ({
+  PickedImageUriPlugin: {
+    pickImage: vi.fn(async () => null),
+    readContentUri: vi.fn(async () => ({
+      dataBase64: "",
+      mime: "image/png",
+      name: "photo.png",
+      size: 0,
+    })),
+  },
+  isPickedImageUriReadSupported: () => false,
+  pickPickedImage: vi.fn(async () => null),
+  readPickedImageFile: vi.fn(async () => null),
+}));
+
 class ResizeObserverMock {
   observe() {}
   disconnect() {}
@@ -1404,6 +1419,28 @@ describe("TerminalQuickBar", () => {
     expect(screen.queryByTestId("terminal-quickbar-image-upload-progress")).toBeNull();
     expect(alertSpy).not.toHaveBeenCalled();
     alertSpy.mockRestore();
+  });
+
+  it("does not send zero-byte picked images", async () => {
+    const onImagePaste = vi.fn();
+    renderQuickBar({ onImagePaste });
+
+    const imageInput = Array.from(
+      document.querySelectorAll<HTMLInputElement>('input[type="file"]'),
+    ).find((input) => input.accept === "image/*");
+    expect(imageInput).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.change(imageInput!, {
+        target: {
+          files: [new File([], "photo.png", { type: "image/png" })],
+        },
+      });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(screen.getByText("未读取到可发送的图片内容")).toBeTruthy());
+    expect(onImagePaste).not.toHaveBeenCalled();
   });
 
   it("keeps native image and file picker clicks synchronous before keyboard hide resolves", async () => {

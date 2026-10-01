@@ -84,6 +84,8 @@ const TerminalStageShell = ReactMemo(
     onPreviewFocusChange,
     onSetPreviewCell,
     onClearPreviewCell,
+    onCycleSession,
+    onPinchVerticalCwdStep,
     onPreviewOverviewChange,
     onOpenSessionDrawer,
   }: {
@@ -148,6 +150,8 @@ const TerminalStageShell = ReactMemo(
     onPreviewFocusChange?: (coordinate: JunctionPreviewCoordinate) => void;
     onSetPreviewCell?: (coordinate: JunctionPreviewCoordinate, sessionId: string) => void;
     onClearPreviewCell?: (coordinate: JunctionPreviewCoordinate) => void;
+    onCycleSession?: (direction: 'next' | 'previous') => void;
+    onPinchVerticalCwdStep?: (direction: 'next' | 'previous') => void;
     onPreviewOverviewChange?: (coordinates: JunctionPreviewCoordinate[] | null) => void;
     onOpenSessionDrawer?: () => void;
   }) {
@@ -660,6 +664,8 @@ const TerminalStageShell = ReactMemo(
               onFocusChange={(coordinate) => onPreviewFocusChange?.(coordinate)}
               onSetCell={(coordinate, sessionId) => onSetPreviewCell?.(coordinate, sessionId)}
               onClearCell={(coordinate) => onClearPreviewCell?.(coordinate)}
+              onCycleSession={onCycleSession}
+              onPinchVerticalCwdStep={onPinchVerticalCwdStep}
               onOverviewChange={onPreviewOverviewChange}
               onClose={() => onCloseSessionPreview?.()}
             />

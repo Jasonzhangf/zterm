@@ -6,6 +6,11 @@ import {
   DeviceClipboardPlugin,
   isNativeClipboardSupported,
 } from "../../plugins/DeviceClipboardPlugin";
+import {
+  isPickedImageUriReadSupported,
+  pickPickedImage,
+  readPickedImageFile,
+} from "../../plugins/PickedImageUriPlugin";
 import { encodeTerminalSgrMouseWheel } from "../../lib/terminal-mouse-wheel-sgr";
 import type { QuickAction, TerminalShortcutAction } from "../../lib/types";
 import {
@@ -850,47 +855,20 @@ function TerminalQuickBarComponent({
     }
   }, [remoteScreenshotStatus]);
 
-  const handleImagePickerButtonClick = useCallback(() => {
-    const input = imageInputRef.current;
-    if (!input) {
-      return;
-    }
-    const pickerInput = input as HTMLInputElement & { showPicker?: () => void };
-    try {
-      if (typeof pickerInput.showPicker === "function") {
-        pickerInput.showPicker();
-      } else {
-        input.click();
-      }
-    } catch {
-      input.click();
-    }
-    if (Capacitor.isNativePlatform() && keyboardVisible) {
-      void Keyboard.hide().catch(() => {});
-    }
-  }, [keyboardVisible]);
-
-  const handleImageInputChange = useCallback(
-    async (event: ChangeEvent<HTMLInputElement>) => {
-      const selectedFiles = Array.from(event.target.files || []);
-      event.currentTarget.value = "";
-      if (selectedFiles.length === 0) {
-        return;
-      }
-      const imageFiles = selectedFiles.filter((file) =>
-        (file.type || "").startsWith("image/"),
-      );
-      if (imageFiles.length === 0) {
-        showToast("未选择可发送的图片");
-        return;
-      }
+  const sendImageFiles = useCallback(
+    async (imageFiles: File[]) => {
       const targetSessionId = activeSessionId || null;
       if (!targetSessionId) {
         showToast("当前没有可用的目标 session");
         return;
       }
-      const uploadFiles = imageFiles.slice(0, 9);
-      if (imageFiles.length > 9) {
+      const readableFiles = imageFiles.filter((file) => file.size > 0);
+      if (readableFiles.length === 0) {
+        showToast("未读取到可发送的图片内容");
+        return;
+      }
+      const uploadFiles = readableFiles.slice(0, 9);
+      if (readableFiles.length > 9) {
         showToast("一次最多发送 9 张图片");
       }
       setImageUploadBatch({
@@ -924,6 +902,71 @@ function TerminalQuickBarComponent({
       }
     },
     [activeSessionId, onImagePaste, showToast],
+  );
+
+  const handleImagePickerButtonClick = useCallback(() => {
+    const input = imageInputRef.current;
+    if (!input) {
+      return;
+    }
+    if (Capacitor.isNativePlatform() && isPickedImageUriReadSupported()) {
+      if (keyboardVisible) {
+        void Keyboard.hide().catch(() => {});
+      }
+      void (async () => {
+        try {
+          const selection = await pickPickedImage();
+          if (!selection) {
+            return;
+          }
+          const file = await readPickedImageFile(selection);
+          if (!file) {
+            showToast("未读取到可发送的图片内容");
+            return;
+          }
+          void sendImageFiles([file]);
+        } catch (error) {
+          showToast(
+            error instanceof Error
+              ? `图片发送失败：${error.message}`
+              : "图片发送失败",
+          );
+        }
+      })();
+      return;
+    }
+    const pickerInput = input as HTMLInputElement & { showPicker?: () => void };
+    try {
+      if (typeof pickerInput.showPicker === "function") {
+        pickerInput.showPicker();
+      } else {
+        input.click();
+      }
+    } catch {
+      input.click();
+    }
+    if (Capacitor.isNativePlatform() && keyboardVisible) {
+      void Keyboard.hide().catch(() => {});
+    }
+  }, [keyboardVisible, sendImageFiles, showToast]);
+
+  const handleImageInputChange = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const selectedFiles = Array.from(event.target.files || []);
+      event.currentTarget.value = "";
+      if (selectedFiles.length === 0) {
+        return;
+      }
+      const imageFiles = selectedFiles.filter((file) =>
+        (file.type || "").startsWith("image/"),
+      );
+      if (imageFiles.length === 0) {
+        showToast("未选择可发送的图片");
+        return;
+      }
+      void sendImageFiles(imageFiles);
+    },
+    [sendImageFiles],
   );
 
   const handleFilePickerButtonClick = useCallback(() => {

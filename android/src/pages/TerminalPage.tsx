@@ -139,6 +139,10 @@ import {
   type JunctionPreviewLatticeV1,
   type JunctionPreviewTarget,
 } from '../lib/junction-preview-lattice';
+import {
+  resolveCyclePreviewSession,
+  resolvePinchVerticalCwdStep,
+} from '../lib/junction-preview-navigation';
 export {
   resolveTerminalSessionGroupSlotReplacement,
   resolveTerminalSessionGroupViewportSlots,
@@ -3022,6 +3026,11 @@ function TerminalPageComponent({
     if (!result.ok) showSessionPreviewError('保存预览格子失败。');
   }, [showSessionPreviewError]);
 
+  const previewDrawerSessions = useMemo(
+    () => drawerRemoteSessions.items.map((item) => ({ id: item.id, cwd: item.cwd })),
+    [drawerRemoteSessions.items],
+  );
+
   const resolveSessionPreviewTargetFromDrawerSelection = useCallback((sessionId: string): JunctionPreviewTarget | null => {
     const openSession = sessions.find((candidate) =>
       candidate.id === sessionId
@@ -3102,6 +3111,28 @@ function TerminalPageComponent({
     });
     setSessionPreviewFocus(coordinate);
   }, [sessionPreviewFocus]);
+
+  const handleCyclePreviewSession = useCallback((direction: 'next' | 'previous') => {
+    const result = resolveCyclePreviewSession({
+      focus: sessionPreviewFocus,
+      cells: sessionPreviewLattice.cells,
+      sessions: previewDrawerSessions,
+      direction,
+    });
+    if (result.action !== 'focus') return;
+    handlePreviewFocusChange(result.coordinate);
+  }, [handlePreviewFocusChange, previewDrawerSessions, sessionPreviewFocus, sessionPreviewLattice.cells]);
+
+  const handlePinchVerticalCwdStep = useCallback((direction: 'next' | 'previous') => {
+    const result = resolvePinchVerticalCwdStep({
+      focus: sessionPreviewFocus,
+      cells: sessionPreviewLattice.cells,
+      sessions: previewDrawerSessions,
+      direction,
+    });
+    if (result.action === 'none') return;
+    handleSetSessionPreviewCell(result.coordinate, result.sessionId);
+  }, [handleSetSessionPreviewCell, previewDrawerSessions, sessionPreviewFocus, sessionPreviewLattice.cells]);
 
   const handleOpenSessionDrawer = useCallback(() => {
     setSessionDrawerOpen(true);
@@ -3803,6 +3834,8 @@ function TerminalPageComponent({
           onPreviewFocusChange: handlePreviewFocusChange,
           onSetPreviewCell: handleSetSessionPreviewCell,
           onClearPreviewCell: handleClearSessionPreviewCell,
+          onCycleSession: handleCyclePreviewSession,
+          onPinchVerticalCwdStep: handlePinchVerticalCwdStep,
           onPreviewOverviewChange: setSessionPreviewOverviewCoordinates,
           onOpenSessionDrawer: sessionDrawerGestureEnabled ? handleOpenSessionDrawer : undefined,
         },

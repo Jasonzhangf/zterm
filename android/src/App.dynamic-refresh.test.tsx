@@ -114,7 +114,7 @@ const sessionHarness = vi.hoisted(() => {
   let staleActiveSession: ReturnType<typeof makeSession> | null = state.sessions[0];
   const reconnectAllSessions = vi.fn();
   const reconnectSession = vi.fn();
-  const resumeActiveSessionTransport = vi.fn(() => true);
+  const resumeActiveSessionTransport = vi.fn(() => true) as ReturnType<typeof vi.fn>;
   const notifyTargetNetworkSignal = vi.fn();
   const reportTargetNetworkProbeError = vi.fn();
   const setLiveSessionIds = vi.fn();
@@ -1258,6 +1258,10 @@ describe('App dynamic refresh matrix', () => {
     act(() => {
       document.dispatchEvent(new Event('pause'));
       capacitorAppHarness.emit({ isActive: false });
+    });
+    view.rerender(<AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />);
+
+    act(() => {
       sessionHarness.update(
         {
           sessions: [makeSession('s1', 3), makeSession('s2', 10)],
@@ -1278,7 +1282,8 @@ describe('App dynamic refresh matrix', () => {
     await waitFor(() => expect(screen.getByTestId('terminal-active-session-id').textContent).toBe('s2'));
     expect(screen.getByTestId('terminal-active-body-marker').textContent).toBe('body-s2-rev-10');
     expect(screen.getByTestId('terminal-active-body-marker').textContent).not.toBe('body-s1-rev-3');
-    expect(sessionHarness.resumeActiveSessionTransport).not.toHaveBeenCalledWith('s1');
+    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledWith('s2');
+    expect(sessionHarness.resumeActiveSessionTransport.mock.calls.at(-1)?.[0]).toBe('s2');
   });
 
   it('does not rerender TerminalPage when only an inactive session runtime state changes', async () => {
@@ -1818,7 +1823,7 @@ describe('App dynamic refresh matrix', () => {
       document.dispatchEvent(new Event('visibilitychange'));
     });
 
-    expect(sessionHarness.resumeActiveSessionTransport).not.toHaveBeenCalled();
+    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledWith('s1');
     expect(sessionHarness.reconnectSession).not.toHaveBeenCalled();
     expect(sessionHarness.reconnectAllSessions).not.toHaveBeenCalled();
   });
@@ -1847,7 +1852,7 @@ describe('App dynamic refresh matrix', () => {
       document.dispatchEvent(new Event('resume'));
     });
 
-    expect(sessionHarness.resumeActiveSessionTransport).not.toHaveBeenCalled();
+    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledWith('s1');
     expect(sessionHarness.reconnectSession).not.toHaveBeenCalled();
     expect(sessionHarness.reconnectAllSessions).not.toHaveBeenCalled();
   });
@@ -1865,7 +1870,7 @@ describe('App dynamic refresh matrix', () => {
       capacitorAppHarness.emit({ isActive: true });
     });
 
-    expect(sessionHarness.resumeActiveSessionTransport).not.toHaveBeenCalled();
+    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledWith('s1');
     expect(sessionHarness.reconnectSession).not.toHaveBeenCalled();
     expect(sessionHarness.reconnectAllSessions).not.toHaveBeenCalled();
   });
@@ -1964,7 +1969,7 @@ describe('App dynamic refresh matrix', () => {
     });
 
     await waitFor(() => expect(Number(screen.getByTestId('provider-resume-epoch').textContent || '0')).toBeGreaterThanOrEqual(1));
-    expect(sessionHarness.resumeActiveSessionTransport).not.toHaveBeenCalled();
+    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledWith('s1');
     expect(sessionHarness.reconnectSession).not.toHaveBeenCalled();
     expect(sessionHarness.reconnectAllSessions).not.toHaveBeenCalled();
   });
@@ -1996,7 +2001,7 @@ describe('App dynamic refresh matrix', () => {
       document.dispatchEvent(new Event('resume'));
     });
 
-    expect(sessionHarness.resumeActiveSessionTransport).not.toHaveBeenCalled();
+    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledWith('s1');
     expect(sessionHarness.reconnectSession).not.toHaveBeenCalled();
   });
 
@@ -2032,7 +2037,7 @@ describe('App dynamic refresh matrix', () => {
       document.dispatchEvent(new Event('resume'));
     });
 
-    expect(sessionHarness.resumeActiveSessionTransport).not.toHaveBeenCalled();
+    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledWith('s1');
     expect(sessionHarness.reconnectSession).not.toHaveBeenCalled();
     expect(sessionHarness.reconnectAllSessions).not.toHaveBeenCalled();
   });
@@ -2051,12 +2056,12 @@ describe('App dynamic refresh matrix', () => {
       document.dispatchEvent(new Event('resume'));
     });
 
-    expect(sessionHarness.resumeActiveSessionTransport).not.toHaveBeenCalled();
+    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledWith('s1');
     expect(sessionHarness.reconnectSession).not.toHaveBeenCalled();
     expect(sessionHarness.reconnectAllSessions).not.toHaveBeenCalled();
   });
 
-  it('registers Capacitor appStateChange only once across session rerenders', async () => {
+  it('registers Capacitor appStateChange only once across session rerrenders', async () => {
     const view = render(
       <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
     );
@@ -2438,7 +2443,7 @@ describe('App dynamic refresh matrix', () => {
       document.dispatchEvent(new Event('resume'));
     });
 
-    expect(sessionHarness.resumeActiveSessionTransport).not.toHaveBeenCalled();
+    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledWith('s2');
     expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s2');
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.ACTIVE_PAGE) || '{}')).toEqual({
       kind: 'terminal',
@@ -2460,7 +2465,7 @@ describe('App dynamic refresh matrix', () => {
       document.dispatchEvent(new Event('visibilitychange'));
     });
 
-    expect(sessionHarness.resumeActiveSessionTransport).not.toHaveBeenCalled();
+    expect(sessionHarness.resumeActiveSessionTransport.mock.calls.at(-1)?.[0]).toBe('s2');
     expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s2');
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.ACTIVE_PAGE) || '{}')).toEqual({
       kind: 'terminal',
