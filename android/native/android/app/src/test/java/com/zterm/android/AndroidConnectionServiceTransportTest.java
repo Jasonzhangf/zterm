@@ -38,6 +38,7 @@ public final class AndroidConnectionServiceTransportTest {
         sendChannelMessage.setAccessible(true);
         Method pendingCount = runtime.getClass().getDeclaredMethod("pendingFrameCountForTests");
         pendingCount.setAccessible(true);
+        setDesiredChannel(runtime, "channel-a", "shell");
 
         sendChannelMessage.invoke(runtime, "channel-a", new JSONObject().put("text", "hello"));
         assertEquals(1, pendingCount.invoke(runtime));
@@ -107,6 +108,7 @@ public final class AndroidConnectionServiceTransportTest {
         sendChannelMessage.setAccessible(true);
         Method pendingCount = runtime.getClass().getDeclaredMethod("pendingFrameCountForTests");
         pendingCount.setAccessible(true);
+        setDesiredChannel(runtime, "channel-a", "shell");
 
         setField(runtime, "socket", fakeSocket(new ArrayList<>(), true));
         setField(runtime, "generation", "gen-1");
@@ -401,6 +403,7 @@ public final class AndroidConnectionServiceTransportTest {
             sendChannelOpen.invoke(runtime, AndroidConnectionCommand.openChannel(
                 "target-a", "channel-original", "shell", null));
             setDesiredChannelOpened(runtime, "channel-original", true);
+            setDesiredChannel(runtime, "channel-recreated", "shell");
 
             // WebView recreation: new channelId requested for same session.
             // Queue a frame under the requested id first so we can verify the
@@ -447,6 +450,46 @@ public final class AndroidConnectionServiceTransportTest {
                     return false;
                 }
             }));
+        } finally {
+            AndroidConnectionService.resetForTests();
+        }
+    }
+
+    @Test
+    public void channelMessageRejectsWhenChannelIsNotDesiredOrOpen() throws Exception {
+        AndroidConnectionService.resetForTests();
+        List<AndroidConnectionServiceEventEnvelope> events = new ArrayList<>();
+        AndroidConnectionService.registerListenerForTests(new AndroidConnectionServiceListener() {
+            @Override
+            public void onSnapshot(AndroidConnectionServiceSnapshot snapshot) {
+            }
+
+            @Override
+            public void onEvent(AndroidConnectionServiceEventEnvelope event) {
+                events.add(event);
+            }
+        });
+        try {
+            AndroidConnectionService service = new AndroidConnectionService();
+            setField(service, "workerHandler", new Handler(Looper.getMainLooper()));
+            Object runtime = newRuntime(service);
+            setField(runtime, "socket", fakeSocket(new ArrayList<>(), true));
+            setField(runtime, "generation", "gen-1");
+            setField(runtime, "transportNetworkGeneration", 0L);
+            setField(service, "networkGeneration", 0L);
+            setField(runtime, "stateMachine", readyStateMachine());
+            Method sendChannelMessage = runtime.getClass().getDeclaredMethod(
+                "sendChannelMessage", String.class, JSONObject.class);
+            sendChannelMessage.setAccessible(true);
+            Method pendingCount = runtime.getClass().getDeclaredMethod("pendingFrameCountForTests");
+            pendingCount.setAccessible(true);
+
+            sendChannelMessage.invoke(runtime, "channel-unknown", new JSONObject().put("text", "hello"));
+
+            assertEquals(0, pendingCount.invoke(runtime));
+            assertTrue(events.stream().anyMatch(event ->
+                event.kind == AndroidConnectionServiceEventEnvelope.Kind.COMMAND_REJECTED
+                    && "frame-dropped-channel-not-open".equals(event.errorCode)));
         } finally {
             AndroidConnectionService.resetForTests();
         }

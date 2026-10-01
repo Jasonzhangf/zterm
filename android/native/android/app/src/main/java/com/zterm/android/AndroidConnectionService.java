@@ -1941,6 +1941,15 @@ public class AndroidConnectionService extends Service {
                 publishFrameRejected(source, "frame-dropped-transport-retired", "target stopped");
                 return;
             }
+            if (requireOpenedChannel) {
+                String safeChannelId = channelId == null ? null : channelId.trim();
+                if (safeChannelId == null || safeChannelId.isEmpty()
+                    || !desiredChannels.containsKey(safeChannelId)) {
+                    publishFrameRejected(source, "frame-dropped-channel-not-open",
+                        "terminal channel is not open");
+                    return;
+                }
+            }
             if ((current != null || currentRtc != null) && generation != null
                 && transportNetworkGeneration == networkGeneration
                 && isMuxReady()

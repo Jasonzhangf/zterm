@@ -261,6 +261,13 @@ export function setSessionChannelBodySubscribed(
   return channel;
 }
 
+export class TerminalMuxChannelNotOpenError extends Error {
+  constructor(sessionId: string) {
+    super(`terminal mux channel is not open for session ${sessionId}`);
+    this.name = 'TerminalMuxChannelNotOpenError';
+  }
+}
+
 export function removeSessionTerminalChannel(
   store: TerminalChannelMuxStore,
   sessionId: string,

@@ -677,6 +677,99 @@ describe('AndroidConnectionServiceTransportSocket', () => {
     expect(messages).toEqual([]);
   });
 
+  it('closes projected channels when the healthy native snapshot reports them closed', async () => {
+    const { listeners, add } = listenerMock();
+    plugin.addListener.mockImplementation(add);
+    const socket = new AndroidConnectionServiceTransportSocket(target);
+    const messages: string[] = [];
+    socket.onopen = vi.fn();
+    socket.onmessage = (event) => messages.push(String(event.data));
+
+    await socket.start();
+    listeners.get('androidConnectionSnapshot')?.({
+      state: 'healthy',
+      generation: 'g-channel-truth',
+      target,
+      route: { mode: 'auto' },
+      channels: [{ channelId: 'channel-1', state: 'open', sessionName: 'shell' }],
+      lastHeartbeatAt: 20,
+      lastActivityAt: 20,
+      nextRetryAt: null,
+      error: null,
+      muxReadyPayload,
+    });
+    await Promise.resolve();
+    messages.length = 0;
+
+    listeners.get('androidConnectionSnapshot')?.({
+      state: 'healthy',
+      generation: 'g-channel-truth',
+      target,
+      route: { mode: 'auto' },
+      channels: [{ channelId: 'channel-1', state: 'closed', sessionName: 'shell' }],
+      lastHeartbeatAt: 21,
+      lastActivityAt: 21,
+      nextRetryAt: null,
+      error: null,
+      muxReadyPayload,
+    });
+
+    expect(messages.map((message) => JSON.parse(message))).toEqual([{
+      type: 'mux-channel-closed',
+      payload: {
+        channelId: 'channel-1',
+        reason: 'native-snapshot-channel-closed',
+        code: 'native_channel_closed',
+      },
+    }]);
+  });
+
+  it('closes the affected projected channel when native rejects its command', async () => {
+    const { listeners, add } = listenerMock();
+    plugin.addListener.mockImplementation(add);
+    const socket = new AndroidConnectionServiceTransportSocket(target);
+    const messages: string[] = [];
+    socket.onopen = vi.fn();
+    socket.onmessage = (event) => messages.push(String(event.data));
+
+    await socket.start();
+    listeners.get('androidConnectionSnapshot')?.({
+      state: 'healthy',
+      generation: 'g-command-rejected',
+      target,
+      route: { mode: 'auto' },
+      channels: [{ channelId: 'channel-1', state: 'open', sessionName: 'shell' }],
+      lastHeartbeatAt: 22,
+      lastActivityAt: 22,
+      nextRetryAt: null,
+      error: null,
+      muxReadyPayload,
+    });
+    await Promise.resolve();
+    messages.length = 0;
+
+    listeners.get('androidConnectionError')?.({
+      kind: 'command-rejected',
+      targetKey: target.targetKey,
+      errorCode: 'frame-dropped-channel-not-open',
+      errorMessage: 'terminal channel is not open',
+      command: {
+        type: 'channel-message',
+        channelId: 'channel-1',
+        message: { type: 'buffer-head-request' },
+      },
+    });
+
+    expect(messages.map((message) => JSON.parse(message))).toEqual([{
+      type: 'mux-channel-closed',
+      payload: {
+        channelId: 'channel-1',
+        reason: 'frame-dropped-channel-not-open',
+        code: 'frame-dropped-channel-not-open',
+      },
+    }]);
+  });
+
   it('forwards native channel-close reason and code into the mux frame', async () => {
     const { listeners, add } = listenerMock();
     plugin.addListener.mockImplementation(add);
@@ -900,6 +993,34 @@ describe('AndroidConnectionServiceTransportSocket', () => {
       message: { type: 'list-sessions' },
     });
     expect(socket.readyState).not.toBe(WebSocket.CLOSED);
+  });
+
+  it('carries inline mux-channel-open options into the native open-channel command', () => {
+    const socket = new AndroidConnectionServiceTransportSocket(target);
+    socket.send(JSON.stringify({
+      type: 'mux-channel-open',
+      payload: {
+        channelId: 'channel-1',
+        sessionName: 'default',
+        backend: 'tmux',
+        cols: 56,
+        widthMode: 'adaptive-phone',
+        bodySubscribed: true,
+      },
+    }));
+
+    expect(plugin.sendCommand).toHaveBeenCalledWith({
+      type: 'open-channel',
+      targetKey: 'daemon:mac-studio',
+      channelId: 'channel-1',
+      sessionName: 'default',
+      options: {
+        backend: 'tmux',
+        cols: 56,
+        widthMode: 'adaptive-phone',
+        bodySubscribed: true,
+      },
+    });
   });
 
   it('ignores events projected for a different target', async () => {

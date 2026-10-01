@@ -8,6 +8,7 @@ import {
   getSessionTerminalChannel,
   updateSessionTerminalChannelName,
   updateSessionTerminalChannelState,
+  TerminalMuxChannelNotOpenError,
 } from '../lib/terminal-channel-mux-runtime';
 import {
   clearSessionSupersededSockets,
@@ -517,6 +518,17 @@ export function bindTargetMuxTransportSocketLifecycleRuntime(options: {
       }
       options.handleTargetMuxServerFrame(parsed, rawFrameBytes, event.data);
     } catch (error) {
+      if (error instanceof TerminalMuxChannelNotOpenError) {
+        // A closed mux channel is a channel fact, not a physical transport
+        // failure. The channel owner handles closure and reopening on the
+        // same socket; retiring the target transport here leaves the session
+        // with no socket while its state still says connected.
+        options.runtimeDebug('session.mux.channel-frame.channel-not-open', {
+          sessionId: options.sessionId,
+          channelMessage: error.message,
+        });
+        return;
+      }
       finalizeTargetFailure(error instanceof Error ? error.message : 'terminal mux parse error', true);
     }
   };
