@@ -1,5 +1,4 @@
 import { writeFileTransferChunkBatches } from './file-transfer-throughput-runtime';
-import { joinLocalDisplayPath } from './file-transfer-path-runtime';
 
 export interface FileTransferDownloadDestination {
   requestId: string;
@@ -64,7 +63,7 @@ function formatError(error: unknown) {
 }
 
 function joinDownloadPath(parentPath: string, childName: string) {
-  return joinLocalDisplayPath(parentPath, childName);
+  return parentPath.replace(/\/+$/, '') + '/' + childName;
 }
 
 export function createFileTransferDownloadStore(

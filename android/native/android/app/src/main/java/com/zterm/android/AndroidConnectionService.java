@@ -1281,7 +1281,8 @@ public class AndroidConnectionService extends Service {
                 }
                 return candidates;
             }
-            if (isLocalLanHost(target.lanHost)) {
+            String bridgeLanHost = nonEmpty(target.lanHost) ? target.lanHost : target.bridgeHost;
+            if (nonEmpty(bridgeLanHost) && isLocalLanHost(bridgeLanHost)) {
                 addCandidate(candidates, seenUrls, AndroidConnectionServiceRoutePolicy.Path.LAN);
             }
             addCandidate(candidates, seenUrls, AndroidConnectionServiceRoutePolicy.Path.TAILSCALE);
@@ -1399,7 +1400,11 @@ public class AndroidConnectionService extends Service {
         private String hostFor(AndroidConnectionServiceRoutePolicy.Path path) {
             switch (path) {
                 case LAN:
-                    return target.lanHost;
+                    if (nonEmpty(target.lanHost)) return target.lanHost;
+                    if (nonEmpty(target.bridgeHost) && isLocalLanHost(target.bridgeHost)) {
+                        return target.bridgeHost;
+                    }
+                    return null;
                 case TAILSCALE:
                     if (nonEmpty(target.tailscaleHost)) return target.tailscaleHost;
                     if (isLikelyTailscale(target.bridgeHost)) return target.bridgeHost;

@@ -51,6 +51,24 @@ describe('file-transfer-native-store-port', () => {
     expect(first.stagingPath).toContain('.zterm-download-fdl-one.part');
   });
 
+  it('keeps an app-private verification download dir out of external storage', () => {
+    const store = createFileTransferDownloadStore(createNativeStore());
+
+    const destination = store.createDestination({
+      requestId: 'fdl-private',
+      scopeId: 'scope-a',
+      downloadDir: '/data/data/com.zterm.android/files/zterm-verification',
+      fileName: 'private.bin',
+    });
+
+    expect(destination.targetPath).toBe(
+      '/data/data/com.zterm.android/files/zterm-verification/private.bin',
+    );
+    expect(destination.stagingPath).toBe(
+      '/data/data/com.zterm.android/files/zterm-verification/.zterm-download-fdl-private.part',
+    );
+  });
+
   it('persists ordered chunks through bounded native batches', async () => {
     const nativeStore = createNativeStore();
     const store = createFileTransferDownloadStore(nativeStore);

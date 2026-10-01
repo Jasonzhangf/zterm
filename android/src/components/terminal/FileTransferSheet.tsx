@@ -1221,12 +1221,6 @@ export function FileTransferSheet({
         if (!fastPathTarget) {
           return;
         }
-        const permissionGranted = fastPathTarget
-          ? true
-          : await ensureLocalStoragePermission(true);
-        if (!permissionGranted) {
-          throw new Error('Storage permission is not granted');
-        }
         const batchGeneration =
           fileTransferRuntimeRef.current.getCurrentDownloadGeneration();
         const request = fileTransferRuntimeRef.current.startDownload(
