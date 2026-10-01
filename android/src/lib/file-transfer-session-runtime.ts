@@ -513,6 +513,41 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
       };
       if (resolvedDestination && binaryDownloadEnabled && deps?.fetchBinaryFile) {
         const binaryController = new AbortController();
+        let binarySettled = false;
+        const finishBinaryFailure = (error: unknown) => {
+          binarySettled = true;
+          if (!binaryController.signal.aborted) {
+            binaryController.abort();
+          }
+          const message = error instanceof Error ? error.message : String(error);
+          return void (async () => {
+            let effectiveMessage = message;
+            if (resolvedDestination) {
+              try {
+                await deps.downloadStore?.abort({
+                  destination: resolvedDestination,
+                });
+              } catch (cleanupError) {
+                const cleanupMessage = cleanupError instanceof Error
+                  ? cleanupError.message
+                  : String(cleanupError);
+                effectiveMessage = `${message}; cleanup failed: ${cleanupMessage}`;
+              }
+            }
+            if (sessionGeneration === sessionGenerationAtStart && sessionScopeId === intent.scopeId) {
+              state = {
+                ...state,
+                transfers: updateTransfer(state.transfers, requestId, (current) => ({
+                  ...current,
+                  status: 'error',
+                  error: effectiveMessage,
+                })),
+              };
+              emitStateChange();
+              settleDownloadWaiter(requestId, new Error(effectiveMessage));
+            }
+          })();
+        };
         void deps.fetchBinaryFile({
           requestId,
           remotePath: downloadPath,
@@ -531,7 +566,13 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
             emitStateChange();
           },
         }).then(() => {
+          binarySettled = true;
           if (sessionGeneration !== sessionGenerationAtStart || sessionScopeId !== intent.scopeId) {
+            if (resolvedDestination) {
+              void deps.downloadStore?.abort({
+                destination: resolvedDestination,
+              });
+            }
             return;
           }
           void deps.downloadStore?.complete({
@@ -552,31 +593,11 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
             emitStateChange();
             settleDownloadWaiter(requestId);
           }).catch((completeError) => {
-            const message = completeError instanceof Error ? completeError.message : String(completeError);
-            state = {
-              ...state,
-              transfers: updateTransfer(state.transfers, requestId, (current) => ({
-                ...current,
-                status: 'error',
-                error: message,
-              })),
-            };
-            emitStateChange();
-            settleDownloadWaiter(requestId, new Error(message));
+            finishBinaryFailure(completeError);
           });
         }).catch((error) => {
-          if (sessionGeneration === sessionGenerationAtStart && sessionScopeId === intent.scopeId) {
-            const message = error instanceof Error ? error.message : String(error);
-            state = {
-              ...state,
-              transfers: updateTransfer(state.transfers, requestId, (current) => ({
-                ...current,
-                status: 'error',
-                error: message,
-              })),
-            };
-            emitStateChange();
-            settleDownloadWaiter(requestId, new Error(message));
+          if (!binarySettled) {
+            finishBinaryFailure(error);
           }
         });
         return requestBase;

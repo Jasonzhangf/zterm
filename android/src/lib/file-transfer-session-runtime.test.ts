@@ -284,6 +284,45 @@ describe('file-transfer-session-runtime', () => {
     });
   });
 
+  it('aborts the binary download staging file when the fast path fails', async () => {
+    const abort = vi.fn(async () => undefined);
+    const store = createDownloadStore({ abort });
+    const fetchBinaryFile = vi.fn(async () => {
+      throw new Error('HTTP 500');
+    });
+    const runtime = createFileTransferSessionRuntime({
+      now: () => 301,
+      randomId: () => 'bin-abort',
+      binaryPath: 'lan',
+      downloadStore: store,
+      fetchBinaryFile,
+    });
+
+    runtime.open('/remote/home', 'session-abort');
+    const download = runtime.startDownload(
+      { name: 'broken.bin', size: 7 },
+      '/remote/home',
+      {
+        scopeId: 'session-abort',
+        downloadDir: '/storage/emulated/0/Download/abort-path',
+      },
+    );
+
+    await expect(download.waitForDone()).rejects.toThrow(/HTTP 500/i);
+    expect(abort).toHaveBeenCalledWith({
+      destination: expect.objectContaining({
+        requestId: download.requestId,
+        scopeId: 'session-abort',
+        fileName: 'broken.bin',
+        downloadDir: '/storage/emulated/0/Download/abort-path',
+      }),
+    });
+    expect(runtime.getState().transfers[0]).toMatchObject({
+      status: 'error',
+      error: 'HTTP 500',
+    });
+  });
+
   it('keeps relay/rtc downloads on mux chunk fallback instead of invoking the direct HTTP fast path', async () => {
     const store = createDownloadStore();
     const fetchBinaryFile = vi.fn(async () => {

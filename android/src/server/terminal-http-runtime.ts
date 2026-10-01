@@ -211,6 +211,20 @@ export function createTerminalHttpRuntime(deps: TerminalHttpRuntimeDeps): Termin
     return false;
   }
 
+  function ensureFileDownloadAuthorized(request: IncomingMessage, response: ServerResponse, url: URL) {
+    if (!deps.requiredAuthToken && !isLoopbackHost(deps.host)) {
+      serveJson(response, { message: 'file download requires daemon token' }, 401);
+      return false;
+    }
+    if (!deps.requiredAuthToken) {
+      return true;
+    }
+    const providedToken = extractHttpDebugToken(request, url);
+    if (providedToken === deps.requiredAuthToken) return true;
+    serveJson(response, { message: 'unauthorized file download access' }, 401);
+    return false;
+  }
+
   function readRequestBody(request: IncomingMessage) {
     return new Promise<Buffer>((resolve, reject) => {
       const chunks: Buffer[] = [];
@@ -481,7 +495,7 @@ export function createTerminalHttpRuntime(deps: TerminalHttpRuntimeDeps): Termin
     }
 
     if (url.pathname === '/api/v1/files/download') {
-      if (!ensureAttachmentAuthorized(request, response, url)) {
+      if (!ensureFileDownloadAuthorized(request, response, url)) {
         return;
       }
       if (request.method !== 'GET') {

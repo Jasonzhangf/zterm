@@ -1270,9 +1270,7 @@ export function FileTransferSheet({
         remotePath,
         {
           scopeId: daemonFileScopeId,
-          downloadDir: normalizeLocalDisplayPath(
-            localPathRef.current || DEFAULT_LOCAL_DOWNLOAD_DIR,
-          ),
+          downloadDir: VERIFICATION_LOCAL_DOWNLOAD_DIR,
         },
         { generation: batchGeneration },
       );

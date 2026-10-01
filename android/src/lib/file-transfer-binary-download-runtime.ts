@@ -96,6 +96,9 @@ export function createFileTransferBinaryDownload(input: {
             throw new Error(`binary download exceeded expected size: received ${receivedBytes}, expected ${expectedBytes}`);
           }
         }
+        if (receivedBytes !== expectedBytes) {
+          throw new Error(`binary download size mismatch: received ${receivedBytes}, expected ${expectedBytes}`);
+        }
         await input.store.persist({
           requestId: options.requestId,
           fileName: options.fileName,
@@ -103,9 +106,6 @@ export function createFileTransferBinaryDownload(input: {
           chunksBase64,
           destination: options.destination,
         });
-        if (receivedBytes !== expectedBytes) {
-          throw new Error(`binary download size mismatch: received ${receivedBytes}, expected ${expectedBytes}`);
-        }
         return { bytes: receivedBytes };
       } finally {
         reader.releaseLock();
@@ -116,6 +116,9 @@ export function createFileTransferBinaryDownload(input: {
     if (receivedBytes.byteLength > expectedBytes) {
       throw new Error(`binary download exceeded expected size: received ${receivedBytes.byteLength}, expected ${expectedBytes}`);
     }
+    if (receivedBytes.byteLength !== expectedBytes) {
+      throw new Error(`binary download size mismatch: received ${receivedBytes.byteLength}, expected ${expectedBytes}`);
+    }
     await input.store.persist({
       requestId: options.requestId,
       fileName: options.fileName,
@@ -123,9 +126,6 @@ export function createFileTransferBinaryDownload(input: {
       chunksBase64: receivedBytes.byteLength > 0 ? [bytesToBase64(receivedBytes)] : [],
       destination: options.destination,
     });
-    if (receivedBytes.byteLength !== expectedBytes) {
-      throw new Error(`binary download size mismatch: received ${receivedBytes.byteLength}, expected ${expectedBytes}`);
-    }
     return { bytes: receivedBytes.byteLength };
   };
 }

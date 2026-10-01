@@ -866,6 +866,7 @@ public class AndroidConnectionService extends Service {
         private final java.util.ArrayList<Runnable> pendingDirectOpenFailures =
             new java.util.ArrayList<>();
         volatile RouteCandidateDiagnostic activeMuxReadyCandidate;
+        volatile RouteCandidateDiagnostic activeRtcCandidate;
         private final java.util.Map<String, Runnable> candidateTimeouts =
             new java.util.LinkedHashMap<>();
         private final java.util.Map<String, WebSocket> candidateSockets =
@@ -937,6 +938,7 @@ public class AndroidConnectionService extends Service {
             routeDiagnostics = new ArrayList<>();
             committedCandidate = null;
             activeMuxReadyCandidate = null;
+            activeRtcCandidate = null;
             directLaunchFinished = false;
             sendRetryPending = false;
             heartbeatMisses = 0;
@@ -1049,6 +1051,11 @@ public class AndroidConnectionService extends Service {
             injectRouteDiagnostics();
         }
 
+        private void handleRtcOpen(RouteCandidateDiagnostic diagnostic, RouteCandidate candidate) {
+            activeRtcCandidate = diagnostic;
+            sendMuxHello();
+        }
+
         private void candidateFailure(String code, String message, RouteCandidateDiagnostic diagnostic,
                                       Map<String, Runnable> candidateTimeouts,
                                       Map<String, WebSocket> candidateSockets,
@@ -1089,6 +1096,10 @@ public class AndroidConnectionService extends Service {
                 return;
             }
             diagnostic.fail(code, message, System.currentTimeMillis());
+            if (activeRtcCandidate != null
+                && activeRtcCandidate.candidateId.equals(diagnostic.candidateId)) {
+                activeRtcCandidate = null;
+            }
             Runnable timeout = candidateTimeouts.remove(diagnostic.candidateId);
             if (timeout != null) workerHandler.removeCallbacks(timeout);
             WebSocket candidateSocket = candidateSockets.remove(diagnostic.candidateId);
@@ -1196,10 +1207,7 @@ public class AndroidConnectionService extends Service {
                                 || transportNetworkGeneration != networkGeneration) {
                                 return;
                             }
-                            commitCandidate(diagnostic, candidate);
-                            sendMuxHello();
-                            scheduleHeartbeat();
-                            scheduleBackoffReset();
+                            handleRtcOpen(diagnostic, candidate);
                         });
                     }
 
@@ -1733,7 +1741,10 @@ public class AndroidConnectionService extends Service {
                     diagnosticForSocket(webSocket), candidateTimeouts, candidateSockets, candidateDiagnostics);
                 return;
             }
-            RouteCandidateDiagnostic active = diagnosticForSocket(webSocket);
+            RouteCandidateDiagnostic active = webSocket != null
+                ? diagnosticForSocket(webSocket)
+                : activeRtcCandidate;
+            activeRtcCandidate = null;
             if (active == null) {
                 transportFailure("mux-ready-without-active-candidate", "mux-ready arrived without active candidate");
                 return;
@@ -2564,6 +2575,7 @@ public class AndroidConnectionService extends Service {
             generation = null;
             socket = null;
             rtcBackend = null;
+            activeRtcCandidate = null;
             backoffIndex = 0;
             heartbeatMisses = 0;
             lastPingAt = 0L;
@@ -2613,6 +2625,7 @@ public class AndroidConnectionService extends Service {
         private void closeRtcQuietly() {
             AndroidRtcTransportBackend current = rtcBackend;
             rtcBackend = null;
+            activeRtcCandidate = null;
             if (current != null) {
                 current.closeQuietly("service close");
             }

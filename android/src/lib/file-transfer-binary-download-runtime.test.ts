@@ -160,4 +160,33 @@ describe('file transfer binary download runtime', () => {
     expect(fetch).not.toHaveBeenCalled();
     expect(persist).not.toHaveBeenCalled();
   });
+
+  it('does not persist before validating received bytes against the expected size', async () => {
+    const fetch = vi.fn(async () => new Response(
+      new Blob(['123'], { type: 'application/octet-stream' }),
+      { status: 200 },
+    ));
+    const persist = vi.fn(async () => undefined);
+    const downloader = createFileTransferBinaryDownload({
+      resolvedPath: 'lan',
+      host: '127.0.0.1',
+      port: 3333,
+      store: {
+        persist,
+        complete: vi.fn(async () => undefined),
+        abort: vi.fn(async () => undefined),
+        createDestination: vi.fn(),
+      } as FileTransferDownloadStore,
+      fetch: fetch as unknown as typeof fetch,
+    });
+
+    await expect(downloader({
+      requestId: 'req-size-mismatch',
+      remotePath: '/remote/photo.bin',
+      fileName: 'photo.bin',
+      totalBytes: 7,
+      destination: { stagingPath: join(tmpDir, 'size-mismatch.part') } as any,
+    })).rejects.toThrow(/size mismatch: received 3, expected 7/i);
+    expect(persist).not.toHaveBeenCalled();
+  });
 });

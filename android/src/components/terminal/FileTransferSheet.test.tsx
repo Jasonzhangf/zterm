@@ -270,6 +270,108 @@ describe("FileTransferSheet", () => {
     expect(claimZtermVerificationDownload()).toBeNull();
   });
 
+  it("downloads no-size verification targets into the app-private verification directory", async () => {
+    const sendJson = vi.fn();
+    const handlerRef: { current: ((msg: any) => void) | null } = {
+      current: null,
+    };
+    setZtermVerificationDownload({
+      remotePath: "/tmp",
+      fileName: "zterm-rtfp-no-size.bin",
+    });
+    vi.mocked(StoragePermissionPlugin.stat).mockResolvedValue({
+      size: 7,
+      modified: 0,
+      uri: "file:///data/data/com.zterm.android/files/zterm-verification/zterm-rtfp-no-size.bin",
+      type: "file",
+    } as any);
+    vi.mocked(StoragePermissionPlugin.writeFileChunks).mockResolvedValue({
+      bytesWritten: 7,
+    } as any);
+    vi.mocked(StoragePermissionPlugin.publishFile).mockResolvedValue({
+      bytesPublished: 7,
+    } as any);
+
+    render(
+      <FileTransferSheet
+        open
+        mode="browser"
+        remoteCwd="/tmp"
+        daemonFileScopeId="verification-scope"
+        onClose={vi.fn()}
+        sendJson={sendJson}
+        onFileTransferMessage={vi.fn((nextHandler: (msg: any) => void) => {
+          handlerRef.current = nextHandler;
+          return () => {};
+        })}
+      />,
+    );
+
+    await waitFor(() => expect(handlerRef.current).toBeTruthy());
+    handlerRef.current?.({
+      type: "file-list-response",
+      payload: {
+        requestId: sendJson.mock.calls[0][0].payload.requestId,
+        path: "/tmp",
+        parentPath: "/",
+        entries: [{ name: "zterm-rtfp-no-size.bin", type: "file", size: 7, modified: 1 }],
+      },
+    });
+
+    await waitFor(() => {
+      expect(
+        sendJson.mock.calls.find(([message]) => message?.type === "file-download-request"),
+      ).toBeTruthy();
+    });
+
+    const request = sendJson.mock.calls.find(
+      ([message]) => message?.type === "file-download-request",
+    )?.[0];
+    expect(request.payload).toMatchObject({
+      remotePath: "/tmp/zterm-rtfp-no-size.bin",
+      fileName: "zterm-rtfp-no-size.bin",
+      totalBytes: 7,
+    });
+
+    await handlerRef.current?.({
+      type: "file-download-chunk",
+      payload: {
+        requestId: request.payload.requestId,
+        fileName: "zterm-rtfp-no-size.bin",
+        chunkIndex: 0,
+        totalChunks: 1,
+        dataBase64: "MTIzNDU2Nw==",
+      },
+    });
+    await handlerRef.current?.({
+      type: "file-download-complete",
+      payload: {
+        requestId: request.payload.requestId,
+        fileName: "zterm-rtfp-no-size.bin",
+        totalBytes: 7,
+      },
+    });
+
+    await waitFor(() => {
+      expect(StoragePermissionPlugin.mkdir).toHaveBeenCalledWith({
+        path: "/data/data/com.zterm.android/files/zterm-verification",
+        recursive: true,
+      });
+      expect(StoragePermissionPlugin.writeFileChunks).toHaveBeenCalledWith({
+        path: expect.stringMatching(
+          /\/data\/data\/com\.zterm\.android\/files\/zterm-verification\/\.zterm-download-fdl-.+\.part$/,
+        ),
+        chunks: ["MTIzNDU2Nw=="],
+        append: false,
+      });
+      expect(StoragePermissionPlugin.publishFile).toHaveBeenCalledWith(expect.objectContaining({
+        sourcePath: expect.stringContaining("zterm-verification"),
+        targetPath: "/data/data/com.zterm.android/files/zterm-verification/zterm-rtfp-no-size.bin",
+        expectedBytes: 7,
+      }));
+    });
+  });
+
   it("does not re-request the same remote directory only because parent passed a new sendJson callback identity", async () => {
     const sendJsonA = vi.fn();
     const sendJsonB = vi.fn();

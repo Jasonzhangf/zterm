@@ -1118,6 +1118,65 @@ public final class AndroidConnectionServiceTransportTest {
     }
 
     @Test
+    public void rtcOpenDoesNotCommitUntilAuthenticatedMuxReady() throws Exception {
+        AndroidConnectionService.resetForTests();
+        try {
+            AndroidConnectionService service = new AndroidConnectionService();
+            AndroidConnectionServiceTarget target = new AndroidConnectionServiceTarget.Builder()
+                .targetKey("target-rtc-ready")
+                .bridgeHost("relay.example")
+                .bridgePort(3333)
+                .relayHostId("relay-1")
+                .signalUrl("wss://relay.example/client")
+                .relayDeviceId("android-1")
+                .signalToken("relay-token")
+                .turnUrl("turn:relay.example:3478?transport=udp")
+                .turnUsername("ztermturn")
+                .turnCredential("turn-pass")
+                .build();
+            Object runtime = newRuntime(service, target,
+                AndroidConnectionServiceRoutePolicy.manual(
+                    AndroidConnectionServiceRoutePolicy.Path.RTC_RELAY));
+            setField(runtime, "stateMachine", connectingStateMachine(target));
+            setField(runtime, "generation", "gen-1");
+            setField(runtime, "transportNetworkGeneration", 0L);
+            setField(service, "networkGeneration", 0L);
+            setField(service, "workerHandler", new Handler(Looper.getMainLooper()));
+
+            Object diagnostic = candidateDiagnostic(runtime, "rtc-relay");
+            Object candidate = candidateByPath(buildCandidates(runtime), "rtc-relay");
+            Class<?> diagnosticClass = nestedRuntimeClass(runtime, "RouteCandidateDiagnostic");
+            Class<?> candidateClass = nestedRuntimeClass(runtime, "RouteCandidate");
+            Method handleRtcOpen = runtime.getClass().getDeclaredMethod(
+                "handleRtcOpen", diagnosticClass, candidateClass);
+            handleRtcOpen.setAccessible(true);
+            handleRtcOpen.invoke(runtime, diagnostic, candidate);
+
+            assertEquals("RTC open alone must not commit the route",
+                null, field(runtime, "committedCandidate"));
+            assertNotNull("RTC open must register the candidate until mux-ready is authenticated",
+                field(runtime, "activeRtcCandidate"));
+            AndroidConnectionStateMachine stateMachine =
+                (AndroidConnectionStateMachine) field(runtime, "stateMachine");
+            assertEquals(AndroidConnectionServiceSnapshot.State.CONNECTING,
+                stateMachine.readSnapshot().state);
+
+            Method handleMuxReady = runtime.getClass().getDeclaredMethod(
+                "handleMuxReady", JSONObject.class, WebSocket.class);
+            handleMuxReady.setAccessible(true);
+            handleMuxReady.invoke(runtime, muxReadyPayload(), null);
+
+            assertNotNull("only authenticated mux-ready may commit the RTC candidate",
+                field(runtime, "committedCandidate"));
+            assertEquals(null, field(runtime, "activeRtcCandidate"));
+            assertEquals(AndroidConnectionServiceSnapshot.State.MUX_READY,
+                stateMachine.readSnapshot().state);
+        } finally {
+            AndroidConnectionService.resetForTests();
+        }
+    }
+
+    @Test
     public void rtcAuthCloseClassificationMatchesRelayAndBridgeAuthCodes() {
         assertTrue(AndroidConnectionService.isAuthRtcClose(4001, "bridge token unauthorized"));
         assertTrue(AndroidConnectionService.isAuthRtcClose(4401, "relay client unauthorized"));
@@ -1270,6 +1329,15 @@ public final class AndroidConnectionServiceTransportTest {
             runtime.getClass(), candidate.getClass());
         constructor.setAccessible(true);
         return constructor.newInstance(runtime, candidate);
+    }
+
+    private static Class<?> nestedRuntimeClass(Object runtime, String simpleName) throws Exception {
+        for (Class<?> declared : runtime.getClass().getDeclaredClasses()) {
+            if (declared.getSimpleName().equals(simpleName)) {
+                return declared;
+            }
+        }
+        throw new IllegalStateException(simpleName + " class not found");
     }
 
     private static org.json.JSONArray candidateIceJson(Object candidate) throws Exception {
