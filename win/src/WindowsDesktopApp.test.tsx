@@ -2,12 +2,16 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
+import { createSessionBufferState } from '@zterm/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WindowsDesktopApp } from './WindowsDesktopApp';
+import { WindowsConnectionStateIndicator } from './WindowsStatusBar';
+import { createWindowsWorkspaceState, openWindowsWorkspaceTab } from './windows-workspace';
 
 const ensureMock = vi.fn();
 const retainMock = vi.fn();
 const disposeMock = vi.fn();
+const getMock = vi.fn(() => null);
 const controlSnapshot = {
   status: 'idle' as const,
   error: '',
@@ -17,7 +21,7 @@ const controlSnapshot = {
 vi.mock('./windows-terminal-registry', () => ({
   createWindowsTerminalRegistry: () => ({
     ensure: ensureMock,
-    get: vi.fn(() => null),
+    get: getMock,
     release: vi.fn(),
     retain: retainMock,
     dispose: disposeMock,
@@ -44,6 +48,8 @@ beforeEach(() => {
   ensureMock.mockClear();
   retainMock.mockClear();
   disposeMock.mockClear();
+  getMock.mockReset();
+  getMock.mockReturnValue(null);
 });
 
 afterEach(() => {
@@ -51,6 +57,38 @@ afterEach(() => {
   window.localStorage.clear();
   delete (window as any).ztermWindows;
 });
+
+type WindowsSessionStatus = 'idle' | 'connecting' | 'connected' | 'error';
+
+function sessionStub(initialStatus: WindowsSessionStatus) {
+  const listeners = new Set<() => void>();
+  const buildSnapshot = (status: WindowsSessionStatus) => ({
+    status,
+    error: status === 'error' ? 'boom' : '',
+    sessionId: 'stub-session',
+    buffer: createSessionBufferState({ lines: [], cols: 80, rows: 24, cacheLines: 3000, revision: 1 }),
+  });
+  let snapshot = buildSnapshot(initialStatus);
+  const session = {
+    getSnapshot: () => snapshot,
+    subscribe: (listener: () => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    connect: vi.fn(),
+    disconnect: vi.fn(),
+    sendInput: vi.fn(() => true),
+    requestVisibleRange: vi.fn(() => true),
+    dispose: vi.fn(),
+  };
+  return {
+    session,
+    setStatus(next: WindowsSessionStatus) {
+      snapshot = buildSnapshot(next);
+      listeners.forEach((listener) => listener());
+    },
+  };
+}
 
 describe('WindowsDesktopApp pane/session UX', () => {
   it('opens a session-list row directly into the active pane', async () => {
@@ -271,5 +309,61 @@ describe('WindowsDesktopApp profile/statusbar', () => {
     expect(screen.getByDisplayValue('10.0.0.2')).toBeInTheDocument();
     expect(screen.getByDisplayValue('4444')).toBeInTheDocument();
     expect(screen.getByDisplayValue('dev-shell')).toBeInTheDocument();
+  });
+
+  it('persists the edited draft profile before connecting so projection matches the real target', async () => {
+    render(<WindowsDesktopApp />);
+
+    fireEvent.click(screen.getByTitle('连接设置'));
+    fireEvent.change(screen.getByLabelText('主机'), { target: { value: '10.1.2.3' } });
+    fireEvent.change(screen.getByLabelText('Session'), { target: { value: 'alpha' } });
+    fireEvent.click(screen.getByRole('button', { name: '连接' }));
+
+    await waitFor(() => expect(ensureMock).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'alpha',
+      target: expect.objectContaining({ bridgeHost: '10.1.2.3', bridgePort: 3333, sessionName: 'alpha' }),
+    })));
+    expect(screen.queryByRole('complementary', { name: '连接设置' })).not.toBeInTheDocument();
+    expect(screen.getByText('10.1.2.3:3333', { selector: '.profile-row span:last-child' })).toBeInTheDocument();
+    expect(screen.getByTestId('windows-statusbar').textContent).toContain('10.1.2.3:3333');
+  });
+
+  it('blocks saving or connecting an invalid profile draft', () => {
+    render(<WindowsDesktopApp />);
+
+    fireEvent.click(screen.getByTitle('连接设置'));
+    fireEvent.change(screen.getByLabelText('主机'), { target: { value: '' } });
+    expect(screen.getByRole('button', { name: '保存' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '连接' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '分屏连接' })).toBeDisabled();
+    expect(screen.getByText('主机不能为空')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('主机'), { target: { value: '127.0.0.1' } });
+    fireEvent.change(screen.getByLabelText('端口'), { target: { value: '70000' } });
+    expect(screen.getByRole('button', { name: '保存' })).toBeDisabled();
+    expect(screen.getByText('端口必须是 1-65535 的整数')).toBeInTheDocument();
+  });
+
+  it('drives the titlebar connection state from the active tab session, not the profile', async () => {
+    const target = { bridgeHost: '10.0.0.9', bridgePort: 3333, sessionName: 'alpha' };
+    const workspace = openWindowsWorkspaceTab(createWindowsWorkspaceState(), target);
+    const stub = sessionStub('connecting');
+    const registry = {
+      ensure: vi.fn(),
+      get: vi.fn(() => stub.session),
+      release: vi.fn(),
+      retain: vi.fn(),
+      dispose: vi.fn(),
+    } as unknown as ReturnType<typeof import('./windows-terminal-registry').createWindowsTerminalRegistry>;
+
+    render(<WindowsConnectionStateIndicator registry={registry} workspace={workspace} />);
+    const indicator = screen.getByTestId('windows-connection-state');
+    expect(indicator.getAttribute('data-status')).toBe('connecting');
+    expect(indicator.className).toContain('connection-state--connecting');
+    expect(indicator.textContent).toContain('alpha');
+
+    stub.setStatus('connected');
+    await waitFor(() => expect(screen.getByTestId('windows-connection-state').getAttribute('data-status')).toBe('connected'));
+    expect(screen.getByTestId('windows-connection-state').className).toContain('connection-state--connected');
   });
 });

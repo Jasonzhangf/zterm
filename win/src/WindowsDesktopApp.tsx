@@ -3,7 +3,6 @@ import {
   MacTerminalView,
   PaneStage,
   PaneTabs,
-  resolveActiveTab,
   resolvePaneProfile,
   type PaneSlotDefinition,
   type PaneTabDescriptor,
@@ -35,8 +34,8 @@ import {
   type WindowsWorkspaceState,
   type WindowsWorkspaceTab,
 } from './windows-workspace';
-import { WindowsStatusBar } from './WindowsStatusBar';
-import { createWindowsProfileStore, type WindowsConnectionProfile } from './windows-profile-store';
+import { WindowsConnectionStateIndicator, WindowsStatusBar } from './WindowsStatusBar';
+import { createWindowsProfileStore, validateWindowsProfile, type WindowsConnectionProfile } from './windows-profile-store';
 
 interface WindowsPaneContextMenuState {
   paneId: string;
@@ -330,18 +329,26 @@ export function WindowsDesktopApp() {
     }
   }, [pendingSessionReplacement, workspace]);
 
-  const activeTab = resolveActiveTab(workspace);
   const activeProfile = profileSnapshot.profiles.find((profile) => profile.id === profileSnapshot.activeProfileId)
     ?? profileSnapshot.profiles[0]
     ?? null;
   const target = activeProfile ? profileStore.resolveTarget(activeProfile) : null;
-  const draftTarget = profileDraft ? profileStore.resolveTarget(profileDraft) : null;
   const controlTarget = target ? { bridgeHost: target.bridgeHost, bridgePort: target.bridgePort, authToken: target.authToken } : null;
-  const validTarget = Boolean(target?.bridgeHost.trim() && target.sessionName.trim() && target.bridgePort > 0);
+  const validTarget = Boolean(target && !validateWindowsProfile(target));
+  const draftError = profileDraft ? validateWindowsProfile(profileDraft) : null;
+  const canConnect = profileDraft ? !draftError : validTarget;
   const targetForSession = (sessionName: string): WindowsTerminalTarget => target ? { ...target, sessionName } : target!;
   const openTarget = (split: boolean) => {
-    const selectedTarget = draftTarget ?? target;
-    if (!selectedTarget || !selectedTarget.bridgeHost.trim() || !selectedTarget.sessionName.trim() || selectedTarget.bridgePort <= 0) return;
+    let selectedTarget: WindowsTerminalTarget | null = null;
+    if (profileDraft) {
+      if (validateWindowsProfile(profileDraft)) return;
+      const saved = profileStore.saveProfile(profileDraft);
+      selectedTarget = profileStore.resolveTarget(saved);
+      setProfileDraft(null);
+    } else if (target) {
+      selectedTarget = target;
+    }
+    if (!selectedTarget || validateWindowsProfile(selectedTarget)) return;
     setWorkspace((current) => {
       if (!split && hasWindowsWorkspaceTab(current, pendingSessionReplacement)) {
         return changeWindowsWorkspaceTabSession(
@@ -408,15 +415,11 @@ export function WindowsDesktopApp() {
       setWorkspace((current) => closeWindowsWorkspaceTarget(current, { ...target, sessionName }));
     });
   };
-  const status = activeProfile?.name ? 'connected' : 'idle';
   return (
     <main className="windows-shell" data-platform={window.ztermWindows?.platform || 'browser'}>
       <header className="titlebar">
         <div className="brand">ZTerm</div>
-        <div className={`connection-state connection-state--${status}`}>
-          <span className="state-dot" />
-          {activeTab?.target?.sessionName ?? 'No session'}
-        </div>
+        <WindowsConnectionStateIndicator registry={registry} workspace={workspace} />
         <div className="titlebar-actions">
           <button className="title-command" onClick={() => setFileBrowserOpen((open) => !open)}>Files</button>
           <button className="icon-button" title="连接设置" aria-label="连接设置" onClick={() => setProfileDraft(activeProfile)}>⚙</button>
@@ -490,12 +493,13 @@ export function WindowsDesktopApp() {
           <label>端口<input type="number" value={profileDraft.bridgePort} onChange={(event) => setProfileDraft({ ...profileDraft, bridgePort: Number(event.target.value) })} /></label>
           <label>Session<input value={profileDraft.sessionName} onChange={(event) => setProfileDraft({ ...profileDraft, sessionName: event.target.value })} /></label>
           <label>Token<input type="password" value={profileDraft.authToken || ''} onChange={(event) => setProfileDraft({ ...profileDraft, authToken: event.target.value || undefined })} /></label>
+          {draftError ? <div className="control-error">{draftError}</div> : null}
           <div className="panel-actions">
             <button className="secondary" type="button" onClick={() => setWorkspace((current) => splitWindowsWorkspaceEmpty(current))}>空分屏</button>
-            <button className="secondary" disabled={!validTarget} onClick={() => openTarget(true)}>分屏连接</button>
-            <button className="primary" disabled={!validTarget} onClick={() => openTarget(false)}>连接</button>
+            <button className="secondary" disabled={!canConnect} onClick={() => openTarget(true)}>分屏连接</button>
+            <button className="primary" disabled={!canConnect} onClick={() => openTarget(false)}>连接</button>
             <button className="secondary" type="button" onClick={() => setProfileDraft(null)}>取消</button>
-            <button className="primary" onClick={() => { profileStore.saveProfile(profileDraft); setProfileDraft(null); }}>保存</button>
+            <button className="primary" disabled={Boolean(draftError)} onClick={() => { if (draftError) return; profileStore.saveProfile(profileDraft); setProfileDraft(null); }}>保存</button>
           </div>
         </aside>
       ) : null}

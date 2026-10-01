@@ -69,6 +69,44 @@ describe('windows desktop shell architecture truth', () => {
     expect(packageJson.build.nsis.oneClick).toBe(false);
     expect(packageJson.build.nsis.allowToChangeInstallationDirectory).toBe(true);
     expect(packageJson.build.publish[0].provider).toBe('generic');
-    expect(read('scripts/verify-windows-package.mjs')).toContain('alpha.yml');
+    const verifyScript = read('scripts/verify-windows-package.mjs');
+    expect(verifyScript).toContain('alpha.yml');
+    // The asar header pickle length is authoritative; a padding-byte heuristic
+    // misreads 3-byte padding and shifts every packed file by one byte.
+    expect(verifyScript).toContain('8 + headerPickleSize');
+    expect(verifyScript).not.toContain('paddingBytes');
+  });
+
+  it('binds the DAGPipe windows remote-access graph to win owners and the phase0 gate', () => {
+    const graph = JSON.parse(readFileSync(
+      path.join(root, '..', 'android', 'docs', 'dagpipe', 'windows-remote-access-client.graph.json'),
+      'utf8',
+    ));
+    expect(graph.id).toBe('windows.remote_access_client');
+    expect(graph.inputs.map((input: { id: string }) => input.id)).toEqual(['arc.request']);
+    expect(graph.outputs).toEqual(['arc.windows_remote_access_result']);
+
+    const operators = new Set(graph.nodes.map((node: { operator: string }) => node.operator));
+    const ownerBindings: Array<[string, string, string]> = [
+      ['windows.profile_store.select', 'src/windows-profile-store.ts', 'createWindowsProfileStore'],
+      ['windows.profile_store.resolve_target', 'src/windows-profile-store.ts', 'resolveTarget'],
+      ['windows.session_catalog.list', 'src/windows-terminal-session.ts', 'createWindowsSessionControl'],
+      ['windows.sidebar.project', 'src/WindowsDesktopApp.tsx', 'WindowsSidebar'],
+      ['windows.session_transport.bind_shared', 'src/windows-terminal-session.ts', 'openBridgeConnection'],
+      ['windows.workspace.compose', 'src/windows-workspace.ts', 'splitWindowsWorkspace'],
+      ['windows.shell.render_shared_terminal', 'src/WindowsDesktopApp.tsx', 'MacTerminalView'],
+      ['windows.statusbar.project', 'src/WindowsStatusBar.tsx', 'WindowsSessionStatus'],
+      ['windows.file_browser.project', 'src/WindowsFileBrowserPanel.tsx', 'WindowsFileBrowserPanel'],
+      ['windows.workspace.cleanup_runtime', 'src/windows-workspace.ts', 'closeWindowsWorkspaceTarget'],
+    ];
+    for (const [operator, file, marker] of ownerBindings) {
+      expect(operators.has(operator), operator).toBe(true);
+      expect(read(file), `${operator} -> ${marker}`).toContain(marker);
+    }
+
+    const androidPackage = JSON.parse(readFileSync(path.join(root, '..', 'android', 'package.json'), 'utf8'));
+    expect(androidPackage.scripts['test:dagpipe-phase0']).toContain('validate-dagpipe-graphs.mjs');
+    const validator = readFileSync(path.join(root, '..', 'android', 'scripts', 'validate-dagpipe-graphs.mjs'), 'utf8');
+    expect(validator).toContain('.graph.json');
   });
 });

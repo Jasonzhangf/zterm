@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createWindowsProfileStore,
   normalizeWindowsProfile,
+  validateWindowsProfile,
 } from './windows-profile-store';
 
 function storageStub(initial: Record<string, string> = {}) {
@@ -56,5 +57,20 @@ describe('windows profile store', () => {
     expect(profile.bridgeHost).toBe('localhost');
     expect(profile.bridgePort).toBe(3333);
     expect(profile.sessionName).toBe('zterm');
+  });
+
+  it('rejects invalid profiles instead of persisting unusable connection state', () => {
+    const storage = storageStub();
+    const store = createWindowsProfileStore(storage);
+
+    expect(() => store.saveProfile({ name: 'x', bridgeHost: '  ', bridgePort: 3333, sessionName: 'zterm' })).toThrow();
+    expect(() => store.saveProfile({ name: 'x', bridgeHost: '10.0.0.2', bridgePort: 70000, sessionName: 'zterm' })).toThrow();
+    expect(() => store.saveProfile({ name: 'x', bridgeHost: '10.0.0.2', bridgePort: 3333, sessionName: '  ' })).toThrow();
+    expect(store.getSnapshot().profiles).toHaveLength(1);
+
+    expect(validateWindowsProfile({ bridgeHost: '10.0.0.2', bridgePort: 3333, sessionName: 'zterm' })).toBeNull();
+    expect(validateWindowsProfile({ bridgeHost: '10.0.0.2', bridgePort: 0, sessionName: 'zterm' })).not.toBeNull();
+    expect(validateWindowsProfile({ bridgeHost: '', bridgePort: 3333, sessionName: 'zterm' })).not.toBeNull();
+    expect(validateWindowsProfile({ bridgeHost: '10.0.0.2', bridgePort: 3333, sessionName: '' })).not.toBeNull();
   });
 });

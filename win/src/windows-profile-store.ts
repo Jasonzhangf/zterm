@@ -56,10 +56,19 @@ export function normalizeWindowsProfile(input: Partial<WindowsConnectionProfile>
     id: input.id || createWindowsProfileId(),
     name: input.name.trim() || 'local',
     bridgeHost: input.bridgeHost.trim(),
-    bridgePort: input.bridgePort > 0 ? Math.floor(input.bridgePort) : 3333,
+    bridgePort: input.bridgePort > 0 && input.bridgePort <= 65535 ? Math.floor(input.bridgePort) : 3333,
     authToken: input.authToken || undefined,
     sessionName: input.sessionName.trim(),
   };
+}
+
+export function validateWindowsProfile(profile: Pick<WindowsConnectionProfile, 'bridgeHost' | 'bridgePort' | 'sessionName'>): string | null {
+  if (!profile.bridgeHost.trim()) return '主机不能为空';
+  if (!Number.isInteger(profile.bridgePort) || profile.bridgePort < 1 || profile.bridgePort > 65535) {
+    return '端口必须是 1-65535 的整数';
+  }
+  if (!profile.sessionName.trim()) return 'Session 不能为空';
+  return null;
 }
 
 export function createWindowsProfileStore(storage: Storage = window.localStorage): WindowsProfileStore {
@@ -81,6 +90,8 @@ export function createWindowsProfileStore(storage: Storage = window.localStorage
       return () => listeners.delete(listener);
     },
     saveProfile(input) {
+      const error = validateWindowsProfile(input);
+      if (error) throw new Error(`invalid windows profile: ${error}`);
       const profile = normalizeWindowsProfile(input);
       const exists = snapshot.profiles.some((candidate) => candidate.id === profile.id);
       const profiles = exists

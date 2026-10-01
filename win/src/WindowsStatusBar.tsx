@@ -79,3 +79,26 @@ export function WindowsStatusBar({
 }) {
   return <WindowsSessionStatus registry={registry} workspace={workspace} controlError={controlError} profile={profile} />;
 }
+
+export function WindowsConnectionStateIndicator({
+  registry,
+  workspace,
+}: {
+  registry: WindowsTerminalRegistry;
+  workspace: WindowsWorkspaceState;
+}) {
+  const activeTab = resolveActiveTab(workspace);
+  const session = activeTab ? registry.get(activeTab.id) : null;
+  useSyncExternalStore(
+    session?.subscribe ?? (() => () => undefined),
+    session?.getSnapshot ?? (() => null),
+    session?.getSnapshot ?? (() => null),
+  );
+  const status = statusFor(registry, workspace);
+  return (
+    <div className={`connection-state connection-state--${status.state}`} data-status={status.state} data-testid="windows-connection-state">
+      <span className="state-dot" />
+      {status.sessionName}
+    </div>
+  );
+}

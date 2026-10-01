@@ -70,17 +70,17 @@ function readAsarHeader(asarPath) {
   try {
     const prefix = Buffer.alloc(16);
     readSync(fd, prefix, 0, 16, 0);
-    const headerSize = prefix.readUInt32LE(12);
-    const header = Buffer.alloc(headerSize);
-    readSync(fd, header, 0, headerSize, 16);
-    // The archive header is a Pickle: the JSON blob is padded to a 4-byte
-    // boundary, so the file payload starts after that padding.
-    const padding = Buffer.alloc(4);
-    readSync(fd, padding, 0, 4, 16 + headerSize);
-    const paddingBytes = padding[0] === 0 ? (padding[1] === 0 ? 2 : 1) : 0;
+    // The archive header is two Pickles: an 8-byte size pickle carrying the
+    // header pickle length, then the header pickle itself, whose payload is a
+    // 4-byte JSON length plus the JSON padded to a 4-byte boundary. The padded
+    // pickle length is authoritative, so file payload starts right after it.
+    const headerPickleSize = prefix.readUInt32LE(4);
+    const jsonSize = prefix.readUInt32LE(12);
+    const header = Buffer.alloc(jsonSize);
+    readSync(fd, header, 0, jsonSize, 16);
     return {
-      header: JSON.parse(header.toString('utf8').replace(/\0+$/, '')),
-      dataStart: 16 + headerSize + paddingBytes,
+      header: JSON.parse(header.toString('utf8')),
+      dataStart: 8 + headerPickleSize,
     };
   } finally {
     closeSync(fd);
@@ -131,7 +131,7 @@ function resolveDependencyEntry(header, name) {
     try {
       const buffer = Buffer.alloc(entry.size);
       readSync(fd, buffer, 0, entry.size, dataStart + Number(entry.offset));
-      return Buffer.from(buffer.toString('latin1').replace(/^\0+/, ''), 'latin1');
+      return buffer;
     } finally {
       closeSync(fd);
     }
