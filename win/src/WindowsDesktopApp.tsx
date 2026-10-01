@@ -59,8 +59,10 @@ export function WindowsSidebar({
   controlSnapshot,
   activeProfileId,
   newSessionName,
+  filter,
   onActiveProfileChange,
   onNewSessionNameChange,
+  onFilterChange,
   onRefresh,
   onCreateSession,
   onOpenSession,
@@ -70,13 +72,18 @@ export function WindowsSidebar({
   controlSnapshot: { status: 'idle' | 'loading' | 'error'; error: string; sessions: string[] };
   activeProfileId: string | null;
   newSessionName: string;
+  filter: string;
   onActiveProfileChange: (profileId: string) => void;
   onNewSessionNameChange: (value: string) => void;
+  onFilterChange: (value: string) => void;
   onRefresh: () => void;
   onCreateSession: () => void;
   onOpenSession: (sessionName: string) => void;
   onCloseSession: (sessionName: string) => void;
 }) {
+  const visibleSessions = controlSnapshot.sessions.filter((sessionName) =>
+    sessionName.toLowerCase().includes(filter.trim().toLowerCase()),
+  );
   return (
     <aside className="windows-sidebar" aria-label="连接与 Session" data-testid="windows-sidebar">
       <div className="sidebar-section">
@@ -100,13 +107,14 @@ export function WindowsSidebar({
           <button className="secondary small" disabled={controlSnapshot.status === 'loading'} onClick={onRefresh}>刷新</button>
         </div>
         {controlSnapshot.error ? <div className="control-error">{controlSnapshot.error}</div> : null}
+        <input aria-label="搜索 Session" placeholder="filter sessions" value={filter} onChange={(event) => onFilterChange(event.target.value)} />
         <div className="session-create-row">
           <input aria-label="新建 Session" placeholder="new-session" value={newSessionName} onChange={(event) => onNewSessionNameChange(event.target.value)} />
           <button className="secondary small" disabled={!normalizeWindowsNewSessionName(newSessionName) || controlSnapshot.status === 'loading'} onClick={onCreateSession}>新建</button>
         </div>
         <div className="session-list" aria-label="Session 列表">
-          {controlSnapshot.sessions.length === 0 ? <div className="session-empty">{controlSnapshot.status === 'loading' ? '加载中' : '未加载'}</div> : null}
-          {controlSnapshot.sessions.map((sessionName) => (
+          {visibleSessions.length === 0 ? <div className="session-empty">{controlSnapshot.status === 'loading' ? '加载中' : '未加载'}</div> : null}
+          {visibleSessions.map((sessionName) => (
             <div className="session-row" key={sessionName}>
               <button className="session-name" onClick={() => onOpenSession(sessionName)}>{sessionName}</button>
               <button className="session-close" aria-label={`关闭 ${sessionName}`} onClick={() => onCloseSession(sessionName)}>×</button>
@@ -129,6 +137,7 @@ function WindowsTerminalPane({
   onActivatePane,
   onEmptyPaneClick,
   onContextMenuTab,
+  onNewPaneTab,
 }: {
   pane: WorkspacePane<WindowsWorkspaceTab>;
   paneIndex: number;
@@ -140,6 +149,7 @@ function WindowsTerminalPane({
   onActivatePane: () => void;
   onEmptyPaneClick: () => void;
   onContextMenuTab: (tabId: string, anchor: { left: number; top: number }) => void;
+  onNewPaneTab: () => void;
 }) {
   const profile = resolvePaneProfile({ platform: 'desktop', splitVisible });
   const snapshot = useSyncExternalStore(
@@ -167,6 +177,7 @@ function WindowsTerminalPane({
         onCloseTab={onCloseTab}
         onActivatePane={onActivatePane}
         onContextMenuTab={onContextMenuTab}
+        plusButton={{ onQuickNew: onNewPaneTab, onOpenTabManager: onNewPaneTab }}
       />
       <div className="terminal-stage">
         {snapshot?.error ? <div className="error-banner">{snapshot.error}</div> : null}
@@ -195,12 +206,18 @@ export function WindowsWorkspaceStage({
   onChange,
   onEmptyPaneSelect,
   onTabContextMenu,
+  onSplitCurrentTab,
+  onSplitNewSession,
+  onNewPaneTab,
 }: {
   workspace: WindowsWorkspaceState;
   registry: ReturnType<typeof createWindowsTerminalRegistry>;
   onChange: (next: WindowsWorkspaceState) => void;
   onEmptyPaneSelect: (paneId: string) => void;
   onTabContextMenu: (paneId: string, tabId: string, anchor: { left: number; top: number }) => void;
+  onSplitCurrentTab: (paneId: string, tabId: string) => void;
+  onSplitNewSession: () => void;
+  onNewPaneTab: (paneId: string) => void;
 }) {
   const slots: PaneSlotDefinition[] = workspace.panes.map((pane, paneIndex) => {
     const activeTab = pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0]!;
@@ -223,19 +240,29 @@ export function WindowsWorkspaceStage({
           onActivatePane={() => onChange(activateWindowsWorkspacePane(workspace, pane.id))}
           onEmptyPaneClick={() => onEmptyPaneSelect(pane.id)}
           onContextMenuTab={(tabId, anchor) => onTabContextMenu(pane.id, tabId, anchor)}
+          onNewPaneTab={() => onNewPaneTab(pane.id)}
         />
       ),
     };
   });
   return (
-    <PaneStage
-      platform="desktop"
-      splitVisible={workspace.panes.length > 1}
-      slots={slots}
-      onActivatePane={(paneId) => onChange(activateWindowsWorkspacePane(workspace, paneId))}
-      onPaneRatioChange={({ sourcePaneId, targetPaneId, ratio }) =>
-        onChange(resizeWindowsWorkspacePanes(workspace, sourcePaneId, targetPaneId, ratio))}
-    />
+    <section className="windows-workspace" data-testid="windows-workspace">
+      <div className="windows-pane-toolbar">
+        <span className="workspace-toolbar-label">Panes</span>
+        <div className="workspace-toolbar-actions">
+          <button type="button" className="secondary small" data-testid="windows-split-current-tab" title="Split current session into a new pane" aria-label="Split current session into a new pane" disabled={!workspace.panes.some((pane) => pane.id === workspace.activePaneId && pane.tabs.some((tab) => tab.id === pane.activeTabId && tab.target))} onClick={() => { const pane = workspace.panes.find((candidate) => candidate.id === workspace.activePaneId)!; const tab = pane.tabs.find((candidate) => candidate.id === pane.activeTabId && candidate.target); if (tab) onSplitCurrentTab(pane.id, tab.id); }}>分屏当前 Session</button>
+          <button type="button" className="secondary small" data-testid="windows-split-new-session" title="Open a new empty pane and choose a session" aria-label="Open a new empty pane and choose a session" onClick={onSplitNewSession}>新建分屏</button>
+        </div>
+      </div>
+      <PaneStage
+        platform="desktop"
+        splitVisible={workspace.panes.length > 1}
+        slots={slots}
+        onActivatePane={(paneId) => onChange(activateWindowsWorkspacePane(workspace, paneId))}
+        onPaneRatioChange={({ sourcePaneId, targetPaneId, ratio }) =>
+          onChange(resizeWindowsWorkspacePanes(workspace, sourcePaneId, targetPaneId, ratio))}
+      />
+    </section>
   );
 }
 
@@ -248,6 +275,7 @@ export function WindowsDesktopApp() {
   const [workspace, setWorkspace] = useState(createWindowsWorkspaceState);
   const [registryRevision, setRegistryRevision] = useState(0);
   const [newSessionName, setNewSessionName] = useState('');
+  const [sessionFilter, setSessionFilter] = useState('');
   const [profileDraft, setProfileDraft] = useState<WindowsConnectionProfile | null>(null);
   const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<WindowsPaneContextMenuState | null>(null);
@@ -400,8 +428,10 @@ export function WindowsDesktopApp() {
           controlSnapshot={controlSnapshot}
           activeProfileId={profileSnapshot.activeProfileId}
           newSessionName={newSessionName}
+          filter={sessionFilter}
           onActiveProfileChange={profileStore.setActiveProfile}
           onNewSessionNameChange={setNewSessionName}
+          onFilterChange={setSessionFilter}
           onRefresh={refreshSessions}
           onCreateSession={createSession}
           onOpenSession={openSessionInActivePane}
@@ -413,6 +443,22 @@ export function WindowsDesktopApp() {
         onChange={setWorkspace}
         onEmptyPaneSelect={handleEmptyPaneSelect}
         onTabContextMenu={(paneId, tabId, anchor) => setContextMenu({ paneId, tabId, left: anchor.left, top: anchor.top })}
+        onSplitCurrentTab={(paneId, tabId) => {
+          const pane = workspace.panes.find((candidate) => candidate.id === paneId);
+          const tab = pane?.tabs.find((candidate) => candidate.id === tabId);
+          const target = tab?.target;
+          if (pane && target) {
+            setWorkspace((current) => splitWindowsWorkspace(current, target));
+          }
+        }}
+        onSplitNewSession={() => {
+          setPendingSessionReplacement(null);
+          setWorkspace((current) => splitWindowsWorkspaceEmpty(current));
+        }}
+        onNewPaneTab={(paneId) => {
+          setPendingSessionReplacement(null);
+          setWorkspace((current) => activateWindowsWorkspacePane(current, paneId));
+        }}
         />
       {contextMenu ? (
         <div ref={contextMenuRef} className="windows-pane-context-menu" data-testid="windows-pane-context-menu" role="menu" style={{ left: contextMenu.left, top: contextMenu.top }}>

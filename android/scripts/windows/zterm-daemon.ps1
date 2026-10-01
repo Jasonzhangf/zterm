@@ -282,10 +282,15 @@ function Invoke-InstallService {
   if (Test-TaskInstalled) {
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
   }
+  $taskUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
   $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" run"
-  $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+  $triggers = @(
+    (New-ScheduledTaskTrigger -AtStartup),
+    (New-ScheduledTaskTrigger -AtLogOn -User $taskUser)
+  )
+  $principal = New-ScheduledTaskPrincipal -UserId $taskUser -LogonType S4U -RunLevel Highest
   $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -MultipleInstances IgnoreNew -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
-  Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Description "ZTerm Windows daemon" | Out-Null
+  Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $triggers -Principal $principal -Settings $settings -Description "ZTerm Windows daemon" | Out-Null
   Start-ScheduledTask -TaskName $TaskName
   $config = Read-DaemonConfig
   if (-not (Wait-PortListening $config.Port)) {

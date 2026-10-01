@@ -48,7 +48,6 @@ function createMainWindow() {
   return window;
 }
 
-
 const localFileSystem = createWindowsLocalFileSystemService();
 desktopCommandHandler.register('desktop.listDir', async (params) => {
   if (!isDirParams(params)) throw new DesktopGatewayError('INVALID_PARAMS', 'dirPath required');

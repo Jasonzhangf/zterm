@@ -77,6 +77,32 @@ describe('WindowsDesktopApp pane/session UX', () => {
     expect(container.querySelectorAll('[data-testid="pane-stage-frame"]')).toHaveLength(2);
   });
 
+  it('exposes an iTerm2-style split control and pane tab add button', async () => {
+    const { container } = render(<WindowsDesktopApp />);
+
+    expect(screen.getByTestId('windows-workspace')).toBeInTheDocument();
+    expect(screen.getByTestId('windows-split-new-session')).toBeEnabled();
+    expect(screen.getByTestId('windows-split-current-tab')).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'alpha' }));
+    await waitFor(() => expect(screen.getByTestId('windows-split-current-tab')).toBeEnabled());
+    expect(container.querySelector('[data-testid^="pane-plus-"]')).toBeTruthy();
+    fireEvent.click(container.querySelector('[data-testid^="pane-plus-"]')!);
+
+    expect(container.querySelector('[data-testid^="windows-empty-pane-select-"]')).toBeTruthy();
+  });
+
+  it('filters session catalog rows from the sidebar', async () => {
+    render(<WindowsDesktopApp />);
+
+    expect(screen.getByRole('button', { name: 'alpha' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'beta' })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('搜索 Session'), { target: { value: 'al' } });
+
+    expect(screen.getByRole('button', { name: 'alpha' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'beta' })).not.toBeInTheDocument();
+  });
+
   it('shows tab context menu actions for changing and moving sessions to numbered panes', async () => {
     const { container } = render(<WindowsDesktopApp />);
     fireEvent.click(screen.getByRole('button', { name: 'alpha' }));
@@ -227,7 +253,7 @@ describe('WindowsDesktopApp profile/statusbar', () => {
     expect(screen.getByText('Hosts')).toBeInTheDocument();
     expect(screen.getByText('Sessions')).toBeInTheDocument();
     expect(screen.getByText('local', { selector: '.profile-row span' })).toBeInTheDocument();
-    expect(screen.getByText('127.0.0.1:3333')).toBeInTheDocument();
+    expect(screen.getByText('127.0.0.1:3333', { selector: '.profile-row span:last-child' })).toBeInTheDocument();
     expect(screen.getByTestId('windows-statusbar')).toBeInTheDocument();
     expect(screen.getByTestId('windows-statusbar').textContent).toContain('local');
     expect(screen.getByTestId('windows-statusbar').textContent).toContain('idle');
