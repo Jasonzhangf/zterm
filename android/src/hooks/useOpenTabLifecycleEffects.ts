@@ -33,6 +33,9 @@ interface UseOpenTabLifecycleEffectsOptions {
     tabs: any[];
     activeSessionId: string | null;
   }>;
+  /** Runtime/UI active session can change before the open-tab projection ref
+   * syncs, so foreground resume reads this first and falls back to open-tab truth. */
+  runtimeActiveSessionIdRef?: MutableRefObject<string | null>;
   foregroundRefreshRuntimeRef: MutableRefObject<ReturnType<typeof createForegroundRefreshRuntime>>;
   onForegroundActiveChange?: (active: boolean) => void;
   onForegroundResume?: (reason: ForegroundResumeSignalReason) => void;
@@ -41,6 +44,7 @@ interface UseOpenTabLifecycleEffectsOptions {
    *  context's own ref so the resume grace decision reads the same instance. */
   recordBackgroundEnteredAt?: (sessionIds: string[], at: number) => void;
   auditOpenTabsAgainstRemoteSessions: (reason: OpenTabAuditReason) => Promise<void>;
+  resumeActiveSessionTransport?: (sessionId: string) => boolean;
   notifyTargetNetworkSignal: (
     signal: SessionTargetNetworkSignal,
   ) => void;
@@ -94,11 +98,13 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
   const {
     sessionsRef,
     openTabStateRef,
+    runtimeActiveSessionIdRef,
     foregroundRefreshRuntimeRef,
     onForegroundActiveChange,
     onForegroundResume,
     auditOpenTabsAgainstRemoteSessions,
     notifyTargetNetworkSignal,
+    resumeActiveSessionTransport,
     reportTargetNetworkProbeError,
     bumpFollowResetEpoch,
     networkIdentity,
@@ -110,6 +116,7 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
     onForegroundResume,
     auditOpenTabsAgainstRemoteSessions,
     notifyTargetNetworkSignal,
+    resumeActiveSessionTransport,
     reportTargetNetworkProbeError,
     bumpFollowResetEpoch,
     networkIdentity,
@@ -120,6 +127,7 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
     onForegroundResume,
     auditOpenTabsAgainstRemoteSessions,
     notifyTargetNetworkSignal,
+    resumeActiveSessionTransport,
     reportTargetNetworkProbeError,
     bumpFollowResetEpoch,
     networkIdentity,
@@ -190,7 +198,8 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
       void refreshNetworkIdentityForForeground();
     }
     const hasSessions = sessionsRef.current.length > 0;
-    const hasActiveSession = Boolean(openTabStateRef.current.activeSessionId);
+    const runtimeActiveSessionId = runtimeActiveSessionIdRef?.current;
+    const hasActiveSession = Boolean(runtimeActiveSessionId || openTabStateRef.current.activeSessionId);
     const wasHiddenForDecision = (
       foregroundRefreshRuntimeRef.current.wasHidden
       || reason === 'resume'
@@ -222,7 +231,11 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
     void callbacksRef.current.auditOpenTabsAgainstRemoteSessions(reason).catch((error) => {
       console.error('[App] Failed to audit remote session truth on foreground resume:', error);
     });
-  }, [foregroundRefreshRuntimeRef, openTabStateRef, sessionsRef, refreshNetworkIdentityForForeground]);
+    const nextActiveSessionId = runtimeActiveSessionIdRef?.current || openTabStateRef.current.activeSessionId;
+    if (nextActiveSessionId) {
+      callbacksRef.current.resumeActiveSessionTransport?.(nextActiveSessionId);
+    }
+  }, [foregroundRefreshRuntimeRef, openTabStateRef, runtimeActiveSessionIdRef, sessionsRef, refreshNetworkIdentityForForeground]);
 
   useEffect(() => {
     let foregroundProjectionActive = true;

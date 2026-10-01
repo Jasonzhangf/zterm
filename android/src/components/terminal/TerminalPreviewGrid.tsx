@@ -40,6 +40,8 @@ export interface TerminalPreviewGridProps {
   onFocusChange: (coordinate: JunctionPreviewCoordinate) => void;
   onSetCell: (coordinate: JunctionPreviewCoordinate, sessionId: string) => void;
   onClearCell: (coordinate: JunctionPreviewCoordinate) => void;
+  onCycleSession?: (direction: 'next' | 'previous') => void;
+  onPinchVerticalCwdStep?: (direction: 'next' | 'previous') => void;
   onOverviewChange?: (coordinates: JunctionPreviewCoordinate[] | null) => void;
   onClose: () => void;
 }
@@ -48,6 +50,9 @@ const PREVIEW_LONG_PRESS_MS = 420;
 const PREVIEW_LONG_PRESS_CLICK_SUPPRESSION_MS = 1_000;
 const PREVIEW_MIN_SCALE = 0.35;
 const PREVIEW_PAN_LOCK_PX = 4;
+const PREVIEW_SESSION_SWIPE_LOCK_PX = 12;
+const PREVIEW_SESSION_SWIPE_MIN_DX = 48;
+const PREVIEW_CWD_PINCH_LOCK_PX = 48;
 
 type TerminalPreviewSlotMenuCandidate = {
   id: string;
@@ -135,6 +140,8 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
   onFocusChange,
   onSetCell,
   onClearCell,
+  onCycleSession,
+  onPinchVerticalCwdStep,
   onOverviewChange,
   onClose,
 }: TerminalPreviewGridProps) {
@@ -186,7 +193,13 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
   const suppressClickTimerRef = useRef<number | null>(null);
   const suppressPreviewClickRef = useRef(false);
   const suppressPreviewClickTimerRef = useRef<number | null>(null);
-  const pinchGestureRef = useRef<{ startSpan: number; startScale: number } | null>(null);
+  const pinchGestureRef = useRef<{ startSpan: number; startScale: number; startY: number; cwdStepFired: boolean } | null>(null);
+  const previewHorizontalSwipeRef = useRef<{
+    startX: number;
+    startY: number;
+    locked: 'none' | 'session' | 'exit';
+    fired: boolean;
+  } | null>(null);
   const panGestureRef = useRef<{
     startX: number;
     startY: number;
@@ -423,13 +436,23 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
       pinchGestureRef.current = {
         startSpan: Math.max(1, touchSpan(touches)),
         startScale: previewScaleRef.current,
+        startY: (touches[0]?.clientY + touches[1]?.clientY) / 2,
+        cwdStepFired: false,
       };
       panGestureRef.current = null;
       event.preventDefault();
       event.stopPropagation();
       return;
     }
-    if (touches.length === 1 && previewScaleRef.current < 1) {
+    if (touches.length === 1 && previewScaleRef.current >= 1) {
+      const touch = touches[0];
+      previewHorizontalSwipeRef.current = {
+        startX: touch.clientX,
+        startY: touch.clientY,
+        locked: 'none',
+        fired: false,
+      };
+    } else if (touches.length === 1 && previewScaleRef.current < 1) {
       clearLongPress();
       exitGestureRef.current = null;
       const touch = touches[0];
@@ -449,9 +472,42 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
     if (pinch && touches.length >= 2) {
       const ratio = touchSpan(touches) / pinch.startSpan;
       applyPreviewScale(pinch.startScale * ratio);
+      const dy = ((touches[0]?.clientY + touches[1]?.clientY) / 2) - pinch.startY;
+      if (!pinch.cwdStepFired && Math.abs(dy) >= PREVIEW_CWD_PINCH_LOCK_PX) {
+        pinch.cwdStepFired = true;
+        onPinchVerticalCwdStep?.(dy > 0 ? 'next' : 'previous');
+      }
       suppressNextPreviewClick();
       event.preventDefault();
       event.stopPropagation();
+      return;
+    }
+
+    const horizontalSwipe = previewHorizontalSwipeRef.current;
+    if (horizontalSwipe && touches.length === 1 && previewScaleRef.current >= 1) {
+      const touch = touches[0];
+      const dx = touch.clientX - horizontalSwipe.startX;
+      const dy = touch.clientY - horizontalSwipe.startY;
+      if (horizontalSwipe.locked === 'none' && Math.hypot(dx, dy) >= PREVIEW_SESSION_SWIPE_LOCK_PX) {
+        if (Math.abs(dx) <= Math.abs(dy)) return;
+        if (
+          horizontalSwipe.startX <= TERMINAL_DRAWER_EDGE_SWIPE_START_PX
+          || (event.target as HTMLElement | null)?.closest(
+            '[data-preview-scroll-surface="true"], [data-preview-menu-surface="true"]',
+          )
+        ) {
+          horizontalSwipe.locked = 'exit';
+          return;
+        }
+        horizontalSwipe.locked = 'session';
+      }
+      if (horizontalSwipe.locked === 'session' && !horizontalSwipe.fired && Math.abs(dx) >= PREVIEW_SESSION_SWIPE_MIN_DX) {
+        horizontalSwipe.fired = true;
+        onCycleSession?.(dx < 0 ? 'next' : 'previous');
+        suppressNextPreviewClick();
+        event.preventDefault();
+        event.stopPropagation();
+      }
       return;
     }
 
@@ -486,6 +542,7 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
       event.stopPropagation();
       return;
     }
+    previewHorizontalSwipeRef.current = null;
     const pan = panGestureRef.current;
     if (!pan) return;
     panGestureRef.current = null;
@@ -496,6 +553,7 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
 
   const onPreviewTouchCancelCapture = () => {
     pinchGestureRef.current = null;
+    previewHorizontalSwipeRef.current = null;
     panGestureRef.current = null;
   };
 

@@ -5,6 +5,7 @@ import {
   DEFAULT_LOCAL_DOWNLOAD_DIR,
   LOCAL_MARKDOWN_PREVIEW_MAX_BYTES,
   REMOTE_TEXT_EDIT_MAX_BYTES,
+  VERIFICATION_LOCAL_DOWNLOAD_DIR,
 } from "../../lib/file-transfer-sheet-constants";
 
 import {
@@ -31,6 +32,10 @@ import {
   readLocalEditCopyState,
   writeLocalEditCopyState,
 } from "../../lib/file-transfer-local-edit-copy-storage";
+import {
+  claimZtermVerificationDownload,
+  onZtermVerificationDownload,
+} from "../../lib/zterm-verification-queue";
 import {
   sendBoundedFileUploadChunks,
 } from "../../lib/file-transfer-throughput-runtime";
@@ -1052,7 +1057,7 @@ export function FileTransferSheet({
           { generation: batchGeneration },
         );
         forceRuntimeTick((value) => value + 1);
-        sendJson?.(request.message);
+        if (request.message) sendJson?.(request.message);
         try {
           await request.waitForDone();
         } catch (error) {
@@ -1166,6 +1171,127 @@ export function FileTransferSheet({
     localPath,
     sendJson,
     requestRemoteList,
+  ]);
+
+  // Verification fast-path automation used only for installed-app download
+  // replay evidence. The sheet owns the one-shot claim so launch-time intent
+  // cannot be consumed before the file browser is mounted.
+  const [fastPathTarget, setFastPathTarget] = useState<{
+    remotePath: string;
+    fileName: string;
+    size?: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      setFastPathTarget(null);
+      return;
+    }
+  }, [open, remoteCwd]);
+
+  useEffect(() => {
+    const handleVerificationIntent = () => {
+      const target = claimZtermVerificationDownload();
+      if (!target?.fileName) {
+        return;
+      }
+      setFastPathTarget({
+        remotePath: target.remotePath || remoteCwd,
+        fileName: target.fileName,
+        size: target.size,
+      });
+    };
+
+    handleVerificationIntent();
+    return onZtermVerificationDownload(handleVerificationIntent);
+  }, [remoteCwd]);
+
+  useEffect(() => {
+    if (!open || !fastPathTarget) {
+      return;
+    }
+    if (!daemonFileScopeId) {
+      console.error('[FileTransferSheet] fast-path download failed: missing daemon file scope', fastPathTarget);
+      return;
+    }
+    if (typeof fastPathTarget.size === 'number') {
+      setFastPathTarget(null);
+      void (async () => {
+        if (!fastPathTarget) {
+          return;
+        }
+        const batchGeneration =
+          fileTransferRuntimeRef.current.getCurrentDownloadGeneration();
+        const request = fileTransferRuntimeRef.current.startDownload(
+          { name: fastPathTarget.fileName, size: fastPathTarget.size! },
+          fastPathTarget.remotePath,
+          {
+            scopeId: daemonFileScopeId,
+            downloadDir: fastPathTarget
+              ? VERIFICATION_LOCAL_DOWNLOAD_DIR
+              : normalizeLocalDisplayPath(
+                  localPathRef.current || DEFAULT_LOCAL_DOWNLOAD_DIR,
+                ),
+          },
+          { generation: batchGeneration },
+        );
+        forceRuntimeTick((value) => value + 1);
+        if (request.message) {
+          sendJson?.(request.message);
+        }
+        await request.waitForDone();
+        forceRuntimeTick((value) => value + 1);
+      })().catch((error: unknown) => {
+        console.error('[FileTransferSheet] fast-path download failed', error);
+      });
+      return;
+    }
+    if (fastPathTarget.remotePath !== remotePath) {
+      requestRemoteList(fastPathTarget.remotePath);
+      return;
+    }
+    const entry = remoteEntries.find((candidate) => (
+      candidate.name === fastPathTarget.fileName
+    ));
+    if (!entry || entry.type !== 'file') {
+      const retry = window.setTimeout(() => {
+        requestRemoteList(remotePath);
+      }, 350);
+      return () => {
+        window.clearTimeout(retry);
+      };
+    }
+    setFastPathTarget(null);
+    void (async () => {
+      const batchGeneration =
+        fileTransferRuntimeRef.current.getCurrentDownloadGeneration();
+      const request = fileTransferRuntimeRef.current.startDownload(
+        { name: entry.name, size: entry.size },
+        remotePath,
+        {
+          scopeId: daemonFileScopeId,
+          downloadDir: VERIFICATION_LOCAL_DOWNLOAD_DIR,
+        },
+        { generation: batchGeneration },
+      );
+      forceRuntimeTick((value) => value + 1);
+      if (request.message) {
+        sendJson?.(request.message);
+      }
+      await request.waitForDone();
+      forceRuntimeTick((value) => value + 1);
+    })().catch((error: unknown) => {
+      console.error('[FileTransferSheet] fast-path download failed', error);
+    });
+  }, [
+    daemonFileScopeId,
+    fastPathTarget,
+    open,
+    remoteEntries,
+    remotePath,
+    requestRemoteList,
+    sendJson,
+    ensureLocalStoragePermission,
   ]);
 
   if (!open) return null;

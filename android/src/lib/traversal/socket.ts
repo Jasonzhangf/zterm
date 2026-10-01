@@ -866,7 +866,7 @@ export class TraversalSocket implements BridgeTransportSocket {
     const poolIds = new Set(pool.map((item) => item.candidateId));
     const poolCandidates = remainingCandidates.filter((item) => poolIds.has(item.id));
     // Tier-first: the parallel batch is limited to the selected tier. A lower
-    // tier (for example Tailscale/public WS when rtc-direct is selected) may
+    // tier (for example public WS/rtc-direct when Tailscale is selected) may
     // not race a higher tier and steal the resolved path via first-onopen; it
     // only enters after this batch fully fails and connectNext re-selects.
     const selectedDiagnostic = selection.diagnostics.find((item) =>

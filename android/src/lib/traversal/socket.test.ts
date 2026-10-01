@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TraversalSocket } from './socket';
 import { clearTraversalPlanCache } from './config';
+import type { TraversalPath } from '../bridge-settings';
 import { defaultTraversalRouteHealthCache, TraversalRouteHealthCache } from './route-health-cache';
 
 class MockWebSocket {
@@ -229,7 +230,7 @@ function createRelayRtcSocket() {
       bridgePort: 3333,
       authToken: 'token',
       relayHostId: 'daemon-host-a',
-      transportMode: 'auto',
+      transportMode: 'webrtc',
       relayEndpointCandidates: [{
         id: 'relay-rtc:daemon-host-a',
         kind: 'relay-rtc',
@@ -243,7 +244,8 @@ function createRelayRtcSocket() {
       turnServerUrl: '',
       turnUsername: '',
       turnCredential: '',
-      transportMode: 'auto',
+      transportMode: 'webrtc',
+      traversalPathPriority: ['rtc-direct', 'rtc-relay'] as TraversalPath[],
       traversalRelay: {
         relayBaseUrl: 'https://relay.example.test/relay/',
         accessToken: 'relay-access',
@@ -979,40 +981,17 @@ describe('TraversalSocket reconnect', () => {
     socket.onopen = onopen;
     await flushMicrotasks();
 
-    // Tier-first: rtc-direct is the selected tier, so the lower-tier Tailscale
-    // websocket is not admitted into this batch at all.
+    // Tier-first: Tailscale is the selected tier, so TURN relay is not admitted
+    // into this batch at all.
     expect(MockWebSocket.instances).toHaveLength(1);
-    const directSignal = MockWebSocket.instances[0];
-    expect(directSignal.url).not.toContain('100.66.1.82');
-    directSignal?.triggerOpen();
-    await flushMicrotasks();
-    expect(MockRTCPeerConnection.instances).toHaveLength(1);
-    directSignal?.onmessage?.({
-      data: JSON.stringify({
-        type: 'rtc-error',
-        payload: { message: 'direct ICE failed' },
-      }),
-    } as MessageEvent);
-    await flushMicrotasks();
-
-    // The rtc-direct failure advances the batch: Tailscale (the next tier) is
-    // now attempted, but TURN must still wait for it to fail before starting.
-    expect(MockWebSocket.instances).toHaveLength(2);
-    expect(MockRTCPeerConnection.instances).toHaveLength(1);
-
-    const tailscaleWs = MockWebSocket.instances.find((ws) => ws.url.includes('100.66.1.82'));
-    expect(tailscaleWs).toBeDefined();
+    const tailscaleWs = MockWebSocket.instances[0];
+    expect(tailscaleWs.url).toContain('100.66.1.82');
     tailscaleWs?.triggerOpen();
     await flushMicrotasks();
-    expect(onopen).toHaveBeenCalledTimes(1);
-    expect(socket.getDiagnostics()).toMatchObject({
-      stage: 'open',
-      resolvedPath: 'tailscale',
-    });
     socket.close();
   });
 
-  it('does not admit a lower-tier Tailscale websocket into the selected rtc-direct batch', async () => {
+  it('does not admit TURN relay into the selected Tailscale websocket batch', async () => {
     const socket = new TraversalSocket(
       {
         bridgeHost: '100.66.1.82',
@@ -1062,27 +1041,22 @@ describe('TraversalSocket reconnect', () => {
     socket.onopen = onopen;
     await flushMicrotasks();
 
-    // The selected tier is rtc-direct: only its signaling socket starts, and
-    // the lower-tier Tailscale websocket must not be admitted to the race.
+    // The selected tier is Tailscale: only its websocket starts, and TURN
+    // relay must not be admitted to the race.
     expect(MockWebSocket.instances).toHaveLength(1);
-    expect(MockWebSocket.instances.some((ws) => ws.url.includes('100.66.1.82'))).toBe(false);
+    expect(MockWebSocket.instances.some((ws) => ws.url.includes('100.66.1.82'))).toBe(true);
 
     MockWebSocket.instances[0].triggerOpen();
-    await flushMicrotasks();
-    await flushMicrotasks();
-    MockRTCPeerConnection.instances[0].channel.triggerOpen();
-    await flushMicrotasks();
-    await vi.advanceTimersByTimeAsync(1000);
     await flushMicrotasks();
 
     expect(onopen).toHaveBeenCalledTimes(1);
     expect(socket.getDiagnostics()).toMatchObject({
       stage: 'open',
-      resolvedPath: 'rtc-direct',
-      resolvedEndpoint: 'rtc-direct:daemon-host-a',
+      resolvedPath: 'tailscale',
+      resolvedEndpoint: '100.66.1.82:3333',
     });
-    // Tailscale never entered the batch, so it could not steal resolvedPath.
-    expect(MockWebSocket.instances.some((ws) => ws.url.includes('100.66.1.82'))).toBe(false);
+    // TURN relay never entered the batch, so it could not become resolved.
+    expect(MockRTCPeerConnection.instances).toHaveLength(0);
     socket.close();
   });
 
@@ -1605,6 +1579,7 @@ describe('TraversalSocket reconnect', () => {
       turnUsername: '',
       turnCredential: '',
       transportMode: 'webrtc' as const,
+      traversalPathPriority: ['rtc-direct', 'rtc-relay'] as TraversalPath[],
       traversalRelay: {
         relayBaseUrl: 'https://relay.example.test/relay/',
         accessToken: 'relay-access',

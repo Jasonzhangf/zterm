@@ -16,7 +16,7 @@ import { useAppUpdate } from './hooks/useAppUpdate';
 import { useScreenOrientationLock } from './hooks/useScreenOrientationLock';
 import { useConfigExport } from './hooks/useConfigExport';
 import { useBridgeSettingsStorage } from './hooks/useBridgeSettingsStorage';
-import { buildBridgeTargetFromHost } from './lib/session-picker';
+import { buildBridgeTargetFromHost, type BridgeTarget } from './lib/session-picker';
 import { useHostStorage } from './hooks/useHostStorage';
 import { useQuickActionStorage } from './hooks/useQuickActionStorage';
 import { useShortcutActionStorage } from './hooks/useShortcutActionStorage';
@@ -28,8 +28,14 @@ import { useSessionOpenActions } from './hooks/useSessionOpenActions';
 import { useAppPageState } from './hooks/useAppPageState';
 import { useTerminalShellActions } from './hooks/useTerminalShellActions';
 import { useRelayDeviceStream } from './hooks/useRelayDeviceStream';
+import { buildVerificationSessionTarget, useVerificationSessionOpen, type VerificationSessionOpenOptions } from './hooks/useVerificationSessionOpen';
 import { updateBridgeSettingsTerminalWidthMode } from './lib/terminal-width-mode-manager';
 import { upsertBridgeServer } from './lib/bridge-settings';
+import {
+  setZtermVerificationDownload,
+  type ZtermVerificationDownloadTarget,
+} from './lib/zterm-verification-queue';
+import { parseZtermVerificationDownloadLink } from './lib/zterm-verification-download-link';
 import { applyTraversalRelaySettings } from './lib/traversal-relay-client';
 import { APP_VERSION, APP_VERSION_CODE } from './lib/app-version';
 import {
@@ -396,6 +402,33 @@ export function AppContent({
       if (typeof url !== 'string' || !url.trim()) {
         return;
       }
+      if (url.startsWith('zterm://file-download-verification')) {
+        const parsed = parseZtermVerificationDownloadLink(url);
+        const remoteCwd = parsed.remotePath;
+        const fileName = parsed.fileName;
+        const size = parsed.size;
+        console.log('[zterm:file-download-verification]', { remoteCwd, fileName, size, url });
+        setZtermVerificationDownload({
+          remotePath: remoteCwd,
+          fileName: fileName || '',
+          size,
+        });
+        setPendingVerificationSessionTarget((current) => {
+          if (
+            current?.remotePath === remoteCwd
+            && current.fileName === fileName
+            && current.size === size
+          ) {
+            return current;
+          }
+          return {
+            remotePath: remoteCwd,
+            fileName: fileName || '',
+            size,
+          };
+        });
+        return;
+      }
       const deepLink = parseAndroidNotificationDeepLink(url);
       if (deepLink.kind === 'session-open') {
         openSessionDeepLinkRef.current?.(
@@ -465,12 +498,12 @@ export function AppContent({
         });
       }
     });
-    return () => {
-      disposed = true;
-      if (listenerHandle) {
-        void listenerHandle.remove();
-      }
-    };
+      return () => {
+        disposed = true;
+        if (listenerHandle) {
+          void listenerHandle.remove();
+        }
+      };
   }, [handleImportConnectionShareLink]);
 
   // Notification tap: open the attachment drawer when the user taps an
@@ -479,6 +512,10 @@ export function AppContent({
   // session-stopped notification jumps straight into that tmux session.
   const handleStoppedSessionNotificationRef = useRef<((sessionName: string) => void) | null>(null);
   const openSessionDeepLinkRef = useRef<((targetKey: string, channelId: string, sessionName: string) => void) | null>(null);
+  const handleOpenSingleTmuxSessionRef = useRef<((target: BridgeTarget, sessionName: string) => void) | null>(null);
+  const openVerificationSessionRef = useRef<((options: VerificationSessionOpenOptions) => void) | null>(null);
+  const [pendingVerificationSessionTarget, setPendingVerificationSessionTarget] = useState<ZtermVerificationDownloadTarget | null>(null);
+
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) {
       return;
@@ -795,6 +832,40 @@ export function AppContent({
     setPageState,
     auditOpenTabsAgainstRemoteSessions,
   });
+  const { openVerificationSession } = useVerificationSessionOpen();
+  openVerificationSessionRef.current = openVerificationSession;
+  handleOpenSingleTmuxSessionRef.current = handleOpenSingleTmuxSession;
+
+  useEffect(() => {
+    if (!hostsLoaded || !pendingVerificationSessionTarget?.fileName) {
+      return;
+    }
+    const openVerificationSession = openVerificationSessionRef.current;
+    if (!openVerificationSession) {
+      return;
+    }
+    setPendingVerificationSessionTarget(null);
+    openVerificationSession({
+      hosts,
+      sessionName: 'default',
+      onOpenSession: (host, sessionName) => {
+        handleOpenSingleTmuxSessionRef.current?.(buildVerificationSessionTarget(host), sessionName);
+      },
+      onError: (message) => {
+        setAppDialog({
+          tone: 'error',
+          title: '验证下载失败',
+          message,
+        });
+      },
+    });
+    ensureTerminalPageVisible();
+  }, [
+    ensureTerminalPageVisible,
+    hosts,
+    hostsLoaded,
+    pendingVerificationSessionTarget,
+  ]);
 
   // Wire the session-stopped notification tap handler to the latest
   // session-open actions (avoid stale closures from the mount-only listener).

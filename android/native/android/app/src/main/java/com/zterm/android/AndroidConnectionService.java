@@ -844,13 +844,14 @@ public class AndroidConnectionService extends Service {
     }
 
     private final class TargetRuntime extends WebSocketListener {
+        private static final String[] DIRECT_TIER_ORDER = {"lan", "tailscale", "ipv6", "ipv4"};
         final AndroidConnectionServiceTarget target;
         volatile AndroidConnectionServiceRoutePolicy routePolicy;
+        volatile List<RouteCandidateDiagnostic> routeDiagnostics;
         volatile AndroidConnectionStateMachine stateMachine;
         volatile WebSocket socket;
         volatile AndroidRtcTransportBackend rtcBackend;
         volatile String generation;
-        volatile int candidateIndex;
         volatile long nextRetryAt;
         volatile int backoffIndex;
         volatile long physicalErrorFirstAtMillis;
@@ -861,7 +862,23 @@ public class AndroidConnectionService extends Service {
         volatile long transportNetworkGeneration;
         volatile boolean stopped;
         volatile boolean sendRetryPending;
-        volatile Runnable candidateTimeout;
+        volatile RouteCandidateDiagnostic committedCandidate;
+        /**
+         * Index of the direct tier currently probing, or -1 for manual route
+         * policy (single explicit candidate, never tier-escalated).
+         */
+        volatile int activeDirectTier = -1;
+        private boolean relayStartedThisAttempt = false;
+        private final java.util.ArrayList<Runnable> pendingDirectOpenFailures =
+            new java.util.ArrayList<>();
+        volatile RouteCandidateDiagnostic activeMuxReadyCandidate;
+        volatile RouteCandidateDiagnostic activeRtcCandidate;
+        private final java.util.Map<String, Runnable> candidateTimeouts =
+            new java.util.LinkedHashMap<>();
+        private final java.util.Map<String, WebSocket> candidateSockets =
+            new java.util.LinkedHashMap<>();
+        private final java.util.Map<String, RouteCandidateDiagnostic> candidateDiagnostics =
+            new java.util.LinkedHashMap<>();
         private final java.util.Set<String> drainingPendingFrames =
             new java.util.HashSet<>();
         private final java.util.ArrayDeque<DeferredSend> retryDeferredFrames =
@@ -924,7 +941,12 @@ public class AndroidConnectionService extends Service {
             }
             generation = nextGeneration;
             transportNetworkGeneration = networkGeneration;
-            candidateIndex = 0;
+            routeDiagnostics = new ArrayList<>();
+            committedCandidate = null;
+            activeMuxReadyCandidate = null;
+            activeRtcCandidate = null;
+            activeDirectTier = -1;
+            relayStartedThisAttempt = false;
             sendRetryPending = false;
             heartbeatMisses = 0;
             lastActivityAt = System.currentTimeMillis();
@@ -947,47 +969,273 @@ public class AndroidConnectionService extends Service {
             if (stopped || generation == null) {
                 return;
             }
-            RouteCandidate candidate = nextCandidate();
-            if (candidate == null) {
+            List<RouteCandidate> candidates = buildCandidates();
+            if (candidates.isEmpty()) {
                 transportFailure("no-route-candidates", "no usable route candidate");
                 return;
             }
-            scheduleCandidateTimeout(candidate);
+            pendingDirectOpenFailures.clear();
+            if (routePolicy.mode == AndroidConnectionServiceRoutePolicy.Mode.MANUAL) {
+                activeDirectTier = -1;
+                for (RouteCandidate candidate : candidates) {
+                    runCandidate(candidate, candidateTimeouts, candidateSockets, candidateDiagnostics);
+                }
+                processPendingDirectOpenFailures(candidateTimeouts, candidateSockets, candidateDiagnostics);
+                return;
+            }
+            activeDirectTier = 0;
+            if (launchDirectTier(activeDirectTier, candidateTimeouts, candidateSockets, candidateDiagnostics)) {
+                processPendingDirectOpenFailures(candidateTimeouts, candidateSockets, candidateDiagnostics);
+                return;
+            }
+            advanceDirectTier(candidateTimeouts, candidateSockets, candidateDiagnostics);
+        }
+
+        private boolean launchDirectTier(int tier,
+                                         Map<String, Runnable> candidateTimeouts,
+                                         Map<String, WebSocket> candidateSockets,
+                                         Map<String, RouteCandidateDiagnostic> candidateDiagnostics) {
+            if (tier < 0 || tier >= DIRECT_TIER_ORDER.length) {
+                return false;
+            }
+            List<RouteCandidate> candidates = buildCandidates();
+            boolean launched = false;
+            for (RouteCandidate candidate : candidates) {
+                if (!DIRECT_TIER_ORDER[tier].equals(candidate.path)) {
+                    continue;
+                }
+                runCandidate(candidate, candidateTimeouts, candidateSockets, candidateDiagnostics);
+                launched = true;
+            }
+            return launched;
+        }
+
+        private void advanceDirectTier(Map<String, Runnable> candidateTimeouts,
+                                       Map<String, WebSocket> candidateSockets,
+                                       Map<String, RouteCandidateDiagnostic> candidateDiagnostics) {
+            if (stopped || generation == null || committedCandidate != null) {
+                return;
+            }
+            for (int tier = activeDirectTier + 1; tier < DIRECT_TIER_ORDER.length; tier += 1) {
+                activeDirectTier = tier;
+                if (launchDirectTier(tier, candidateTimeouts, candidateSockets, candidateDiagnostics)) {
+                    processPendingDirectOpenFailures(candidateTimeouts, candidateSockets, candidateDiagnostics);
+                    return;
+                }
+            }
+            activeDirectTier = DIRECT_TIER_ORDER.length;
+            maybeStartRelay(candidateTimeouts, candidateSockets, candidateDiagnostics);
+        }
+
+        private void runCandidate(RouteCandidate candidate, Map<String, Runnable> candidateTimeouts,
+                                  Map<String, WebSocket> candidateSockets,
+                                  Map<String, RouteCandidateDiagnostic> candidateDiagnostics) {
+            if (stopped || generation == null || committedCandidate != null) return;
+            RouteCandidateDiagnostic diagnostic = new RouteCandidateDiagnostic(candidate);
+            ensureRouteDiagnostics().add(diagnostic);
+            candidateDiagnostics.put(diagnostic.candidateId, diagnostic);
+            injectRouteDiagnostics();
+            scheduleCandidateTimeout(candidate, diagnostic, candidateTimeouts);
             if (candidate.rtc) {
-                openRtcCandidate(candidate);
+                openRtcCandidate(candidate, diagnostic);
                 return;
             }
             Request request = new Request.Builder().url(candidate.url).build();
             try {
-                socket = httpClient.newWebSocket(request, this);
+                WebSocket candidateSocket = httpClient.newWebSocket(request, this);
+                candidateSockets.put(diagnostic.candidateId, candidateSocket);
                 Log.i(TAG, "opening " + candidate.path + " for " + target.targetKey);
             } catch (RuntimeException error) {
-                transportFailure("websocket-open-rejected", String.valueOf(error.getMessage()));
+                candidateFailure("websocket-open-rejected", String.valueOf(error.getMessage()),
+                    diagnostic, candidateTimeouts, candidateSockets, candidateDiagnostics);
             }
         }
 
-        private void scheduleCandidateTimeout(RouteCandidate candidate) {
-            clearCandidateTimeout();
+        private boolean isRelayCandidate(RouteCandidate candidate) {
+            return candidate != null && "rtc-relay".equals(candidate.path);
+        }
+
+        private void maybeStartRelay(Map<String, Runnable> candidateTimeouts,
+                                     Map<String, WebSocket> candidateSockets,
+                                     Map<String, RouteCandidateDiagnostic> candidateDiagnostics) {
+            if (stopped || generation == null || committedCandidate != null) return;
+            if (routePolicy.mode == AndroidConnectionServiceRoutePolicy.Mode.MANUAL) {
+                transportFailure("route-exhausted", "manual route candidate exhausted");
+                return;
+            }
+            if (relayStartedThisAttempt) {
+                transportFailure("route-exhausted", "all route candidates exhausted");
+                return;
+            }
+            RouteCandidate relayCandidate = null;
+            for (RouteCandidate candidate : buildCandidates()) {
+                if (isRelayCandidate(candidate)) {
+                    relayCandidate = candidate;
+                    break;
+                }
+            }
+            if (relayCandidate == null) {
+                List<RouteCandidate> relayOnly = new ArrayList<>();
+                addRtcCandidate(relayOnly, AndroidConnectionServiceRoutePolicy.Path.RTC_RELAY);
+                if (!relayOnly.isEmpty()) {
+                    relayCandidate = relayOnly.get(0);
+                }
+            }
+            if (relayCandidate == null) {
+                transportFailure("no-route-candidates", "direct route tier exhausted without usable candidate");
+                return;
+            }
+            relayStartedThisAttempt = true;
+            runCandidate(relayCandidate, candidateTimeouts, candidateSockets, candidateDiagnostics);
+            processPendingDirectOpenFailures(candidateTimeouts, candidateSockets, candidateDiagnostics);
+        }
+
+        private void commitCandidate(RouteCandidateDiagnostic diagnostic, RouteCandidate candidate) {
+            if (diagnostic == null || committedCandidate != null) return;
+            committedCandidate = diagnostic;
+            diagnostic.selected = true;
+            diagnostic.succeed(System.currentTimeMillis());
+            stateMachine.dispatch(AndroidConnectionServiceEvent.transportResolved(
+                generation,
+                candidate.path,
+                resolvedRelayTransportFor(candidate),
+                endpointFor(candidate),
+                null), System.currentTimeMillis());
+            injectRouteDiagnostics();
+        }
+
+        private void handleRtcOpen(RouteCandidateDiagnostic diagnostic, RouteCandidate candidate) {
+            activeRtcCandidate = diagnostic;
+            sendMuxHello();
+        }
+
+        private void candidateFailure(String code, String message, RouteCandidateDiagnostic diagnostic,
+                                      Map<String, Runnable> candidateTimeouts,
+                                      Map<String, WebSocket> candidateSockets,
+                                      Map<String, RouteCandidateDiagnostic> candidateDiagnostics) {
+            if (stopped || generation == null || diagnostic == null) return;
+            if (committedCandidate != null && !committedCandidate.candidateId.equals(diagnostic.candidateId)) return;
+            candidateFailureAfterDirectLaunch(code, message, diagnostic,
+                candidateTimeouts, candidateSockets, candidateDiagnostics);
+        }
+
+        private void processPendingDirectOpenFailures(Map<String, Runnable> candidateTimeouts,
+                                                     Map<String, WebSocket> candidateSockets,
+                                                     Map<String, RouteCandidateDiagnostic> candidateDiagnostics) {
+            for (Runnable pendingDirectOpenFailure : pendingDirectOpenFailures) {
+                pendingDirectOpenFailure.run();
+            }
+            pendingDirectOpenFailures.clear();
+        }
+
+        private void candidateFailureAfterDirectLaunch(String code, String message,
+                                                        RouteCandidateDiagnostic diagnostic,
+                                                        Map<String, Runnable> candidateTimeouts,
+                                                        Map<String, WebSocket> candidateSockets,
+                                                        Map<String, RouteCandidateDiagnostic> candidateDiagnostics) {
+            if (stopped || generation == null || diagnostic == null) return;
+            if (committedCandidate != null && !committedCandidate.candidateId.equals(diagnostic.candidateId)) return;
+            if (activeMuxReadyCandidate != null
+                && activeMuxReadyCandidate.candidateId.equals(diagnostic.candidateId)) {
+                transportFailure("active-route-" + code, message);
+                return;
+            }
+            diagnostic.fail(code, message, System.currentTimeMillis());
+            if (activeRtcCandidate != null
+                && activeRtcCandidate.candidateId.equals(diagnostic.candidateId)) {
+                activeRtcCandidate = null;
+            }
+            Runnable timeout = candidateTimeouts.remove(diagnostic.candidateId);
+            if (timeout != null) workerHandler.removeCallbacks(timeout);
+            WebSocket candidateSocket = candidateSockets.remove(diagnostic.candidateId);
+            closeQuietly(candidateSocket);
+            candidateDiagnostics.remove(diagnostic.candidateId);
+            injectRouteDiagnostics();
+            if (committedCandidate != null) {
+                return;
+            }
+            if (routePolicy.mode == AndroidConnectionServiceRoutePolicy.Mode.MANUAL) {
+                transportFailure("route-exhausted", "manual route candidate failed");
+                return;
+            }
+            if (isRelayCandidate(diagnostic.candidate)) {
+                transportFailure("route-exhausted", "relay candidate failed after all direct tiers");
+                return;
+            }
+            int diagnosticTier = directTierIndex(diagnostic.path);
+            if (diagnosticTier >= 0 && diagnosticTier != activeDirectTier) {
+                // A later tier must not be reached until the active tier drains.
+                return;
+            }
+            advanceDirectTier(candidateTimeouts, candidateSockets, candidateDiagnostics);
+        }
+
+        private int directTierIndex(String path) {
+            if (path == null) {
+                return -1;
+            }
+            for (int tier = 0; tier < DIRECT_TIER_ORDER.length; tier += 1) {
+                if (DIRECT_TIER_ORDER[tier].equals(path)) {
+                    return tier;
+                }
+            }
+            return -1;
+        }
+
+        private void closeUncommittedCandidates(String reason, String committedCandidateId) {
+            // Attempt-local timeout/socket maps are passed by the racing open
+            // callback. Clearing them here is the resource release step for the
+            // uncommitted probes that lost the race.
+            if (committedCandidateId != null) {
+                java.util.List<String> loserIds = new ArrayList<>();
+                for (String id : candidateDiagnostics.keySet()) {
+                    if (id.equals(committedCandidateId)) continue;
+                    loserIds.add(id);
+                }
+                for (String id : loserIds) {
+                    RouteCandidateDiagnostic loser = candidateDiagnostics.get(id);
+                    if (loser != null) {
+                        loser.fail("route-lost-race", "lost to committed candidate", System.currentTimeMillis());
+                    }
+                    closeQuietly(candidateSockets.remove(id));
+                    Runnable timeout = candidateTimeouts.remove(id);
+                    if (timeout != null) workerHandler.removeCallbacks(timeout);
+                    candidateDiagnostics.remove(id);
+                }
+            } else {
+                for (WebSocket candidateSocket : candidateSockets.values()) closeQuietly(candidateSocket);
+                for (Runnable timeout : candidateTimeouts.values()) workerHandler.removeCallbacks(timeout);
+                candidateSockets.clear();
+                candidateTimeouts.clear();
+                candidateDiagnostics.clear();
+            }
+        }
+        private RouteCandidateDiagnostic diagnosticForSocket(WebSocket webSocket) {
+            if (webSocket == null) return null;
+            for (Map.Entry<String, WebSocket> entry : candidateSockets.entrySet()) {
+                if (entry.getValue() == webSocket) {
+                    return candidateDiagnostics.get(entry.getKey());
+                }
+            }
+            return null;
+        }
+
+        private void scheduleCandidateTimeout(RouteCandidate candidate, RouteCandidateDiagnostic diagnostic,
+                                             Map<String, Runnable> candidateTimeouts) {
             final String timeoutGeneration = generation;
             final long timeoutNetworkGeneration = networkGeneration;
+            final RouteCandidateDiagnostic timeoutDiagnostic = diagnostic;
             Runnable timeout = () -> {
                 if (stopped || generation == null || !generation.equals(timeoutGeneration)
                     || transportNetworkGeneration != timeoutNetworkGeneration
                     || !isConnectingState()) {
                     return;
                 }
-                transportFailure("candidate-timeout", candidate.path + " candidate timeout");
+                candidateFailure("candidate-timeout", candidate.path + " candidate timeout",
+                    timeoutDiagnostic, candidateTimeouts, candidateSockets, candidateDiagnostics);
             };
-            candidateTimeout = timeout;
+            candidateTimeouts.put(timeoutDiagnostic.candidateId, timeout);
             workerHandler.postDelayed(timeout, candidateTimeoutMs(candidate));
-        }
-
-        private void clearCandidateTimeout() {
-            Runnable timeout = candidateTimeout;
-            candidateTimeout = null;
-            if (timeout != null) {
-                workerHandler.removeCallbacks(timeout);
-            }
         }
 
         private long candidateTimeoutMs(RouteCandidate candidate) {
@@ -999,7 +1247,7 @@ public class AndroidConnectionService extends Service {
                 : RTC_DIRECT_CANDIDATE_TIMEOUT_MS;
         }
 
-        private void openRtcCandidate(RouteCandidate candidate) {
+        private void openRtcCandidate(RouteCandidate candidate, RouteCandidateDiagnostic diagnostic) {
             final AndroidRtcTransportBackend[] holder = new AndroidRtcTransportBackend[1];
             AndroidRtcTransportBackend backend = new AndroidRtcTransportBackend(
                 AndroidConnectionService.this,
@@ -1020,16 +1268,7 @@ public class AndroidConnectionService extends Service {
                                 || transportNetworkGeneration != networkGeneration) {
                                 return;
                             }
-                            clearCandidateTimeout();
-                            stateMachine.dispatch(AndroidConnectionServiceEvent.transportResolved(
-                                generation,
-                                candidate.path,
-                                resolvedRelayTransportFor(candidate),
-                                endpointFor(candidate),
-                                null), System.currentTimeMillis());
-                            sendMuxHello();
-                            scheduleHeartbeat();
-                            scheduleBackoffReset();
+                            handleRtcOpen(diagnostic, candidate);
                         });
                     }
 
@@ -1041,7 +1280,7 @@ public class AndroidConnectionService extends Service {
                                 return;
                             }
                             try {
-                                handleServerText(text);
+                                handleServerText(text, null);
                             } catch (JSONException | IllegalArgumentException error) {
                                 transportFailure("invalid-mux-frame", String.valueOf(error.getMessage()));
                             }
@@ -1101,28 +1340,10 @@ public class AndroidConnectionService extends Service {
                         || transportNetworkGeneration != networkGeneration) {
                         return;
                     }
-                    transportFailure("rtc-open-rejected", String.valueOf(error.getMessage()));
+            candidateFailure("rtc-open-rejected", String.valueOf(error.getMessage()), diagnostic,
+                        candidateTimeouts, candidateSockets, candidateDiagnostics);
                 });
             }
-        }
-
-        /** True while this attempt still has an unopened route candidate. */
-        private boolean hasNextCandidate() {
-            List<RouteCandidate> candidates = buildCandidates();
-            return candidateIndex < candidates.size();
-        }
-
-        private RouteCandidate nextCandidate() {
-            List<RouteCandidate> candidates = buildCandidates();
-            if (candidates.isEmpty()) {
-                return null;
-            }
-            if (candidateIndex >= candidates.size()) {
-                candidateIndex = 0;
-            }
-            int index = candidateIndex % candidates.size();
-            candidateIndex += 1;
-            return candidates.get(index);
         }
 
         private List<RouteCandidate> buildCandidates() {
@@ -1137,14 +1358,16 @@ public class AndroidConnectionService extends Service {
                 }
                 return candidates;
             }
-            if (isLocalLanHost(target.lanHost)) {
+            String bridgeLanHost = nonEmpty(target.lanHost) ? target.lanHost : target.bridgeHost;
+            if (nonEmpty(bridgeLanHost) && isLocalLanHost(bridgeLanHost)) {
                 addCandidate(candidates, seenUrls, AndroidConnectionServiceRoutePolicy.Path.LAN);
             }
-            addCandidate(candidates, seenUrls, AndroidConnectionServiceRoutePolicy.Path.IPV4);
-            addCandidate(candidates, seenUrls, AndroidConnectionServiceRoutePolicy.Path.IPV6);
-            addRtcCandidate(candidates, AndroidConnectionServiceRoutePolicy.Path.RTC_DIRECT);
             addCandidate(candidates, seenUrls, AndroidConnectionServiceRoutePolicy.Path.TAILSCALE);
-            addRtcCandidate(candidates, AndroidConnectionServiceRoutePolicy.Path.RTC_RELAY);
+            addCandidate(candidates, seenUrls, AndroidConnectionServiceRoutePolicy.Path.IPV6);
+            addCandidate(candidates, seenUrls, AndroidConnectionServiceRoutePolicy.Path.IPV4);
+            if (candidates.isEmpty()) {
+                addRtcCandidate(candidates, AndroidConnectionServiceRoutePolicy.Path.RTC_RELAY);
+            }
             return candidates;
         }
 
@@ -1254,7 +1477,11 @@ public class AndroidConnectionService extends Service {
         private String hostFor(AndroidConnectionServiceRoutePolicy.Path path) {
             switch (path) {
                 case LAN:
-                    return target.lanHost;
+                    if (nonEmpty(target.lanHost)) return target.lanHost;
+                    if (nonEmpty(target.bridgeHost) && isLocalLanHost(target.bridgeHost)) {
+                        return target.bridgeHost;
+                    }
+                    return null;
                 case TAILSCALE:
                     if (nonEmpty(target.tailscaleHost)) return target.tailscaleHost;
                     if (isLikelyTailscale(target.bridgeHost)) return target.bridgeHost;
@@ -1285,6 +1512,7 @@ public class AndroidConnectionService extends Service {
             if (host == null || host.trim().isEmpty()) return false;
             try {
                 InetAddress remote = InetAddress.getByName(host.trim());
+                if (remote.isLoopbackAddress()) return true;
                 if (!(remote instanceof Inet4Address)) return false;
                 java.util.Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
                 while (interfaces != null && interfaces.hasMoreElements()) {
@@ -1316,7 +1544,7 @@ public class AndroidConnectionService extends Service {
                 if (isLikelyIpv6(hostPart) && !hostPart.startsWith("[")) {
                     hostPart = "[" + hostPart + "]";
                 }
-                hostPart = scheme + "://" + hostPart + ":" + port;
+                hostPart = String.format("%s://%s:%s", scheme, hostPart, port);
             }
             try {
                 URI uri = new URI(hostPart);
@@ -1350,27 +1578,30 @@ public class AndroidConnectionService extends Service {
             return out.toString();
         }
 
-        @Override
-        public void onOpen(WebSocket webSocket, Response response) {
-            if (stopped || socket != webSocket || generation == null
+    @Override
+    public void onOpen(WebSocket webSocket, Response response) {
+            if (stopped || generation == null
                 || transportNetworkGeneration != networkGeneration) {
                 closeQuietly(webSocket);
                 return;
             }
-            clearCandidateTimeout();
-            sendMuxHello();
-            scheduleHeartbeat();
-            scheduleBackoffReset();
+            RouteCandidateDiagnostic diagnostic = diagnosticForSocket(webSocket);
+            if (diagnostic == null) {
+                closeQuietly(webSocket);
+                return;
+            }
+            sendCandidateHello(webSocket, diagnostic.candidateId);
         }
 
         @Override
         public void onMessage(WebSocket webSocket, String text) {
-            if (stopped || socket != webSocket || generation == null
+            if (stopped || generation == null
                 || transportNetworkGeneration != networkGeneration) {
                 return;
             }
+            if (diagnosticForSocket(webSocket) == null) return;
             try {
-                handleServerText(text);
+                handleServerText(text, webSocket);
             } catch (JSONException | IllegalArgumentException error) {
                 transportFailure("invalid-mux-frame", String.valueOf(error.getMessage()));
             }
@@ -1378,19 +1609,22 @@ public class AndroidConnectionService extends Service {
 
         @Override
         public void onMessage(WebSocket webSocket, ByteString bytes) {
-            if (stopped || socket != webSocket || generation == null
+            if (stopped || generation == null
                 || transportNetworkGeneration != networkGeneration) {
                 return;
             }
+            if (diagnosticForSocket(webSocket) == null) return;
             transportFailure("binary-server-frame-not-supported",
                 "mux server frames must be JSON text");
         }
 
         @Override
         public void onFailure(WebSocket webSocket, Throwable throwable, @Nullable Response response) {
-            if (stopped || socket != webSocket || transportNetworkGeneration != networkGeneration) {
+            if (stopped || generation == null || transportNetworkGeneration != networkGeneration) {
                 return;
             }
+            RouteCandidateDiagnostic diagnostic = diagnosticForSocket(webSocket);
+            if (diagnostic == null) return;
             String message = throwable == null ? "websocket failure" : String.valueOf(throwable.getMessage());
             // Auth failure from HTTP 401/403 response body
             if (response != null) {
@@ -1400,21 +1634,25 @@ public class AndroidConnectionService extends Service {
                     return;
                 }
             }
-            transportFailure("websocket", message);
+            candidateFailure("websocket", message, diagnostic,
+                candidateTimeouts, candidateSockets, candidateDiagnostics);
         }
 
         @Override
         public void onClosed(WebSocket webSocket, int code, String reason) {
-            if (stopped || socket != webSocket || transportNetworkGeneration != networkGeneration) {
+            if (stopped || generation == null || transportNetworkGeneration != networkGeneration) {
                 return;
             }
+            RouteCandidateDiagnostic diagnostic = diagnosticForSocket(webSocket);
+            if (diagnostic == null) return;
             String reasonText = reason == null ? "closed" : reason;
             // Auth close codes: 4001=bridge token, 4003=auth, 4401=unauthorized, 4403=forbidden
             if (isAuthRtcClose(code, reasonText)) {
                 authFailure("auth-close-" + code, reasonText);
                 return;
             }
-            transportFailure("websocket-closed", reasonText);
+            candidateFailure("websocket-closed", reasonText, diagnostic,
+                candidateTimeouts, candidateSockets, candidateDiagnostics);
         }
 
         private void sendMuxHello() {
@@ -1434,6 +1672,38 @@ public class AndroidConnectionService extends Service {
                 return;
             }
             send(frame, SendGate.HANDSHAKE);
+        }
+
+        private void sendCandidateHello(WebSocket webSocket, String candidateId) {
+            JSONObject payload = new JSONObject();
+            try {
+                payload.put("version", MUX_PROTOCOL_VERSION);
+                payload.put("clientInstanceId", clientInstanceId);
+            } catch (JSONException ignored) {
+                // JSON primitive put cannot fail for these values.
+            }
+            JSONObject frame = new JSONObject();
+            try {
+                frame.put("type", "mux-hello");
+                frame.put("payload", payload);
+            } catch (JSONException error) {
+                candidateFailure("mux-hello", String.valueOf(error.getMessage()),
+                    candidateDiagnostics.get(candidateId),
+                    candidateTimeouts, candidateSockets, candidateDiagnostics);
+                return;
+            }
+            try {
+                boolean sent = webSocket.send(frame.toString());
+                if (!sent) {
+                    candidateFailure("websocket-send", "mux-hello send returned false",
+                        candidateDiagnostics.get(candidateId),
+                        candidateTimeouts, candidateSockets, candidateDiagnostics);
+                }
+            } catch (RuntimeException error) {
+                candidateFailure("websocket-send", String.valueOf(error.getMessage()),
+                    candidateDiagnostics.get(candidateId),
+                    candidateTimeouts, candidateSockets, candidateDiagnostics);
+            }
         }
 
         private void scheduleHeartbeat() {
@@ -1472,7 +1742,7 @@ public class AndroidConnectionService extends Service {
             scheduleHeartbeat();
         }
 
-        private void handleServerText(String text) throws JSONException {
+        private void handleServerText(String text, WebSocket webSocket) throws JSONException {
             JSONObject frame = new JSONObject(text);
             String type = frame.optString("type", "");
             JSONObject payload = frame.optJSONObject("payload");
@@ -1482,7 +1752,7 @@ public class AndroidConnectionService extends Service {
             recordServerActivity();
             switch (type) {
                 case "mux-ready":
-                    handleMuxReady(payload);
+                    handleMuxReady(payload, webSocket);
                     break;
                 case "mux-pong":
                     heartbeatMisses = 0;
@@ -1510,17 +1780,45 @@ public class AndroidConnectionService extends Service {
             }
         }
 
-        private void handleMuxReady(JSONObject payload) throws JSONException {
+        private void handleMuxReady(JSONObject payload, WebSocket webSocket) throws JSONException {
             if (payload.optInt("version", -1) != MUX_PROTOCOL_VERSION) {
-                transportFailure("mux-version", "unsupported mux protocol version");
+                if (webSocket == null) {
+                    transportFailure("mux-version", "unsupported mux protocol version");
+                    return;
+                }
+                candidateFailureAfterDirectLaunch("mux-version", "unsupported mux protocol version",
+                    diagnosticForSocket(webSocket), candidateTimeouts, candidateSockets, candidateDiagnostics);
                 return;
             }
             JSONObject capabilities = payload.optJSONObject("capabilities");
             if (capabilities == null
                 || capabilities.optBoolean("channelEnvelope", false) == false
                 || capabilities.optBoolean("targetMessages", false) == false) {
-                transportFailure("mux-capabilities", "mux capabilities missing");
+                if (webSocket == null) {
+                    transportFailure("mux-capabilities", "mux capabilities missing");
+                    return;
+                }
+                candidateFailureAfterDirectLaunch("mux-capabilities", "mux capabilities missing",
+                    diagnosticForSocket(webSocket), candidateTimeouts, candidateSockets, candidateDiagnostics);
                 return;
+            }
+            RouteCandidateDiagnostic active = webSocket != null
+                ? diagnosticForSocket(webSocket)
+                : activeRtcCandidate;
+            activeRtcCandidate = null;
+            if (active == null) {
+                transportFailure("mux-ready-without-active-candidate", "mux-ready arrived without active candidate");
+                return;
+            }
+            boolean shouldScheduleHeartbeat = activeMuxReadyCandidate == null;
+            activeMuxReadyCandidate = active;
+            Runnable timeout = candidateTimeouts.remove(active.candidateId);
+            if (timeout != null) workerHandler.removeCallbacks(timeout);
+            commitCandidate(active, active.candidate);
+            closeUncommittedCandidates("route-committed", active.candidateId);
+            injectRouteDiagnostics();
+            if (webSocket != null) {
+                socket = webSocket;
             }
             stateMachine.dispatch(AndroidConnectionServiceEvent.muxReady(
                 generation, payload.toString()),
@@ -1528,6 +1826,10 @@ public class AndroidConnectionService extends Service {
             publishServerFrame(AndroidConnectionServiceServerFrameEvent.Kind.MUX_READY, payload);
             replayDesiredChannels();
             refreshNotification();
+            if (shouldScheduleHeartbeat) {
+                scheduleHeartbeat();
+                scheduleBackoffReset();
+            }
         }
 
         private void handleChannelOpened(JSONObject payload) throws JSONException {
@@ -2203,32 +2505,45 @@ public class AndroidConnectionService extends Service {
             workerHandler.postDelayed(() -> backoffIndex = 0, HEARTBEAT_INTERVAL_MS);
         }
 
+        private List<RouteCandidateDiagnostic> ensureRouteDiagnostics() {
+            if (routeDiagnostics == null) {
+                routeDiagnostics = new ArrayList<>();
+            }
+            return routeDiagnostics;
+        }
+
+        private void injectRouteDiagnostics() {
+            if (stateMachine == null) return;
+            if (routeDiagnostics == null) routeDiagnostics = new ArrayList<>();
+            stateMachine.injectRouteDiagnostics(
+                diagnosticsToSnapshot(new ArrayList<>()));
+        }
+
         private void transportFailure(String code, String message) {
+            transportFailure(code, message, null);
+        }
+
+        private void transportFailure(String code, String message, RouteCandidateDiagnostic failed) {
             if (stopped || generation == null) {
                 return;
             }
-            clearCandidateTimeout();
             long nowMillis = System.currentTimeMillis();
             if (physicalErrorFirstAtMillis == 0L) {
                 physicalErrorFirstAtMillis = nowMillis;
             }
-            // Auto route fallback stays within one attempt: before the mux
-            // handshake completes, advance to the next candidate instead of
-            // retiring the generation and entering backoff.
-            if (isConnectingState() && hasNextCandidate()) {
-                closeQuietly(socket);
-                socket = null;
-                closeRtcQuietly();
-                openCandidate();
-                return;
-            }
             closeQuietly(socket);
             socket = null;
             closeRtcQuietly();
+            closeUncommittedCandidates("transport-failure",
+                committedCandidate == null ? null : committedCandidate.candidateId);
             String failedGeneration = generation;
             generation = null;
+            AndroidConnectionServiceSnapshot snapshot = stateMachine == null
+                ? AndroidConnectionServiceSnapshot.empty() : stateMachine.readSnapshot();
+            List<AndroidConnectionServiceSnapshot.RouteDiagnostic> diagnostics =
+                diagnosticsToSnapshot(snapshot.routeDiagnostics);
             stateMachine.dispatch(AndroidConnectionServiceEvent.transportFailure(
-                failedGeneration, message), nowMillis);
+                failedGeneration, message, diagnostics), nowMillis);
             if (!physicalErrorProjected
                 && nowMillis - physicalErrorFirstAtMillis >= PHYSICAL_ERROR_DEBOUNCE_MS) {
                 physicalErrorProjected = true;
@@ -2254,16 +2569,31 @@ public class AndroidConnectionService extends Service {
             }
             String failedGeneration = generation;
             generation = null;
+            AndroidConnectionServiceSnapshot currentSnapshot = stateMachine == null
+                ? AndroidConnectionServiceSnapshot.empty() : stateMachine.readSnapshot();
             stateMachine.dispatch(AndroidConnectionServiceEvent.transportFailure(
-                failedGeneration, reason), System.currentTimeMillis());
+                failedGeneration, reason, diagnosticsToSnapshot(currentSnapshot.routeDiagnostics)),
+                System.currentTimeMillis());
             scheduleBackoff();
+        }
+
+        private List<AndroidConnectionServiceSnapshot.RouteDiagnostic> diagnosticsToSnapshot(
+            List<AndroidConnectionServiceSnapshot.RouteDiagnostic> existing) {
+            List<AndroidConnectionServiceSnapshot.RouteDiagnostic> diagnostics = existing == null
+                ? new ArrayList<>() : new ArrayList<>(existing);
+            if (routeDiagnostics == null) {
+                return diagnostics;
+            }
+            for (RouteCandidateDiagnostic diagnostic : routeDiagnostics) {
+                diagnostics = diagnostic.toJson(diagnostics);
+            }
+            return diagnostics;
         }
 
         private void terminalFailure(String code, String message) {
             if (stopped || generation == null) {
                 return;
             }
-            clearCandidateTimeout();
             closeQuietly(socket);
             socket = null;
             closeRtcQuietly();
@@ -2279,7 +2609,6 @@ public class AndroidConnectionService extends Service {
             if (stopped || generation == null) {
                 return;
             }
-            clearCandidateTimeout();
             closeQuietly(socket);
             socket = null;
             closeRtcQuietly();
@@ -2302,11 +2631,12 @@ public class AndroidConnectionService extends Service {
         }
 
         private void resetAttemptState() {
-            clearCandidateTimeout();
+            closeUncommittedCandidates("reset-attempt",
+                committedCandidate == null ? null : committedCandidate.candidateId);
             generation = null;
             socket = null;
             rtcBackend = null;
-            candidateIndex = 0;
+            activeRtcCandidate = null;
             backoffIndex = 0;
             heartbeatMisses = 0;
             lastPingAt = 0L;
@@ -2318,7 +2648,8 @@ public class AndroidConnectionService extends Service {
 
         void close(String reason) {
             stopped = true;
-            clearCandidateTimeout();
+            closeUncommittedCandidates("service-close",
+                committedCandidate == null ? null : committedCandidate.candidateId);
             desiredChannels.clear();
             pendingFrames.clear();
             retryDeferredFrames.clear();
@@ -2329,8 +2660,17 @@ public class AndroidConnectionService extends Service {
             generation = null;
         }
 
+        synchronized void setTestRouteDiagnostics(List<RouteCandidateDiagnostic> diagnostics) {
+            routeDiagnostics = diagnostics;
+        }
+
+        synchronized List<RouteCandidateDiagnostic> testRouteDiagnostics() {
+            return routeDiagnostics;
+        }
+
         private void closeCurrent(String reason) {
-            clearCandidateTimeout();
+            closeUncommittedCandidates(reason,
+                committedCandidate == null ? null : committedCandidate.candidateId);
             WebSocket current = socket;
             socket = null;
             if (current != null) {
@@ -2346,6 +2686,7 @@ public class AndroidConnectionService extends Service {
         private void closeRtcQuietly() {
             AndroidRtcTransportBackend current = rtcBackend;
             rtcBackend = null;
+            activeRtcCandidate = null;
             if (current != null) {
                 current.closeQuietly("service close");
             }
@@ -2391,28 +2732,113 @@ public class AndroidConnectionService extends Service {
             ChannelIntent channel = desiredChannels.get(channelId);
             return channel != null && channel.opened && isMuxReady();
         }
-    }
 
-    private static final class RouteCandidate {
-        final String path;
-        final String url;
-        final boolean rtc;
-        final String signalUrl;
-        final JSONArray iceServers;
-        final String iceTransportPolicy;
+        private static final class RouteCandidate {
+            final String path;
+            final String url;
+            final boolean rtc;
+            final String signalUrl;
+            final JSONArray iceServers;
+            final String iceTransportPolicy;
 
-        RouteCandidate(String path, String url) {
-            this(path, url, false, null, null, null);
+            RouteCandidate(String path, String url) {
+                this(path, url, false, null, null, null);
+            }
+
+            RouteCandidate(String path, String url, boolean rtc, String signalUrl,
+                           JSONArray iceServers, String iceTransportPolicy) {
+                this.path = path;
+                this.url = url;
+                this.rtc = rtc;
+                this.signalUrl = signalUrl;
+                this.iceServers = iceServers;
+                this.iceTransportPolicy = iceTransportPolicy;
+            }
         }
 
-        RouteCandidate(String path, String url, boolean rtc, String signalUrl,
-                       JSONArray iceServers, String iceTransportPolicy) {
-            this.path = path;
-            this.url = url;
-            this.rtc = rtc;
-            this.signalUrl = signalUrl;
-            this.iceServers = iceServers;
-            this.iceTransportPolicy = iceTransportPolicy;
+        private static String resolvedRelayTransportFor(RouteCandidate candidate) {
+            if (candidate == null || !candidate.rtc) {
+                return null;
+            }
+            if ("rtc-relay".equals(candidate.path)) {
+                return "turn";
+            }
+            if ("rtc-direct".equals(candidate.path)) {
+                return "direct";
+            }
+            return null;
+        }
+
+        private static String endpointFor(RouteCandidate candidate) {
+            if (candidate == null) {
+                return null;
+            }
+            String url = candidate.rtc ? candidate.signalUrl : candidate.url;
+            if (url == null || url.trim().isEmpty()) {
+                return null;
+            }
+            try {
+                URI uri = new URI(url);
+                if (uri.getHost() == null || uri.getHost().trim().isEmpty()) {
+                    return null;
+                }
+                return uri.getPort() >= 0 ? uri.getHost() + ":" + uri.getPort() : uri.getHost();
+            } catch (URISyntaxException error) {
+                Log.d(TAG, "invalid resolved endpoint url: " + error.getMessage());
+                return null;
+            }
+        }
+
+        private final class RouteCandidateDiagnostic {
+            final String candidateId;
+            final String path;
+            final String endpoint;
+            final RouteCandidate candidate;
+            long startedAt;
+            long endedAt;
+            boolean done;
+            boolean selected;
+            String failureCode;
+            String failureMessage;
+
+            RouteCandidateDiagnostic(RouteCandidate candidate) {
+                this.candidateId = (candidate.rtc ? "rtc:" : "ws:") + candidate.path + ":" + target.targetKey;
+                this.path = candidate.path;
+                this.endpoint = endpointFor(candidate);
+                this.candidate = candidate;
+                this.startedAt = System.currentTimeMillis();
+            }
+
+            void fail(String code, String message, long nowMillis) {
+                if (done) return;
+                endedAt = nowMillis;
+                failureCode = code;
+                failureMessage = message;
+                done = true;
+            }
+
+            void succeed(long nowMillis) {
+                if (done) return;
+                endedAt = nowMillis;
+                done = true;
+            }
+
+            List<AndroidConnectionServiceSnapshot.RouteDiagnostic> toJson(List<AndroidConnectionServiceSnapshot.RouteDiagnostic> existing) {
+                Long elapsedMs = done ? endedAt - startedAt : null;
+                AndroidConnectionServiceSnapshot.RouteDiagnostic diagnostic = new AndroidConnectionServiceSnapshot.RouteDiagnostic(
+                    candidateId, path, endpoint, done ?
+                        (failureCode == null ? "connected" : failureMessage) : "connecting",
+                    startedAt, done ? endedAt : null, elapsedMs, selected && failureCode == null, failureCode);
+                if (existing == null) existing = new ArrayList<>();
+                for (int i = 0; i < existing.size(); i++) {
+                    if (existing.get(i).candidateId.equals(candidateId)) {
+                        existing.set(i, diagnostic);
+                        return existing;
+                    }
+                }
+                existing.add(diagnostic);
+                return existing;
+            }
         }
     }
 
@@ -2441,39 +2867,6 @@ public class AndroidConnectionService extends Service {
         }
         return reason.toLowerCase(Locale.ROOT).matches(
             ".*(unauthorized|forbidden|token.*invalid|auth.*fail).*");
-    }
-
-    private static String resolvedRelayTransportFor(RouteCandidate candidate) {
-        if (candidate == null || !candidate.rtc) {
-            return null;
-        }
-        if ("rtc-relay".equals(candidate.path)) {
-            return "turn";
-        }
-        if ("rtc-direct".equals(candidate.path)) {
-            return "direct";
-        }
-        return null;
-    }
-
-    private static String endpointFor(RouteCandidate candidate) {
-        if (candidate == null) {
-            return null;
-        }
-        String url = candidate.rtc ? candidate.signalUrl : candidate.url;
-        if (url == null || url.trim().isEmpty()) {
-            return null;
-        }
-        try {
-            URI uri = new URI(url);
-            if (uri.getHost() == null || uri.getHost().trim().isEmpty()) {
-                return null;
-            }
-            return uri.getPort() >= 0 ? uri.getHost() + ":" + uri.getPort() : uri.getHost();
-        } catch (URISyntaxException error) {
-            Log.d(TAG, "invalid resolved endpoint url: " + error.getMessage());
-            return null;
-        }
     }
 
     private static boolean isLikelyTailscale(String host) {

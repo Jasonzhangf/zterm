@@ -36,6 +36,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(AppUpdatePlugin.class);
         registerPlugin(DeviceClipboardPlugin.class);
         registerPlugin(DebugInputPlugin.class);
+        registerPlugin(PickedImageUriPlugin.class);
         registerPlugin(StoragePermissionPlugin.class);
         registerPlugin(AndroidConnectionServicePlugin.class);
         registerPlugin(DagpipeCorePlugin.class);

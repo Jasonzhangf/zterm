@@ -1,5 +1,4 @@
 import { writeFileTransferChunkBatches } from './file-transfer-throughput-runtime';
-import { joinLocalDisplayPath } from './file-transfer-path-runtime';
 
 export interface FileTransferDownloadDestination {
   requestId: string;
@@ -63,6 +62,10 @@ function formatError(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
+function joinDownloadPath(parentPath: string, childName: string) {
+  return parentPath.replace(/\/+$/, '') + '/' + childName;
+}
+
 export function createFileTransferDownloadStore(
   nativeStore: FileTransferNativeStorePort,
 ): FileTransferDownloadStore {
@@ -82,14 +85,14 @@ export function createFileTransferDownloadStore(
 
   return {
     createDestination(input) {
-      const targetPath = joinLocalDisplayPath(input.downloadDir, input.fileName);
+      const targetPath = joinDownloadPath(input.downloadDir, input.fileName);
       return {
         requestId: input.requestId,
         scopeId: input.scopeId,
         fileName: input.fileName,
         downloadDir: input.downloadDir,
         targetPath,
-        stagingPath: joinLocalDisplayPath(
+        stagingPath: joinDownloadPath(
           input.downloadDir,
           `.zterm-download-${input.requestId}.part`,
         ),

@@ -32,6 +32,17 @@ public final class AndroidConnectionStateMachine {
         return snapshot;
     }
 
+    public synchronized void injectRouteDiagnostics(
+        List<AndroidConnectionServiceSnapshot.RouteDiagnostic> diagnostics) {
+        if (diagnostics == null) return;
+        snapshot = snapshot.toBuilder().routeDiagnostics(diagnostics).build();
+        publish();
+    }
+
+    public synchronized List<AndroidConnectionServiceSnapshot.RouteDiagnostic> routeDiagnostics() {
+        return snapshot.routeDiagnostics;
+    }
+
     /**
      * @return true if the event was accepted; false when it was stale or
      *         invalid for the current state.
@@ -189,10 +200,11 @@ public final class AndroidConnectionStateMachine {
 
             case TRANSPORT_RESOLVED:
                 snapshot = snapshot.toBuilder()
-                    .resolvedPath(event.resolvedPath)
-                    .resolvedRelayTransport(event.resolvedRelayTransport)
-                    .resolvedEndpoint(event.resolvedEndpoint)
-                    .selectedIcePairJson(event.selectedIcePairJson)
+                .resolvedPath(event.resolvedPath)
+                .resolvedRelayTransport(event.resolvedRelayTransport)
+                .resolvedEndpoint(event.resolvedEndpoint)
+                .routeDiagnostics(snapshot.routeDiagnostics)
+                .selectedIcePairJson(event.selectedIcePairJson)
                     .build();
                 publish();
                 return true;
@@ -229,6 +241,7 @@ public final class AndroidConnectionStateMachine {
                     .nextRetryAt(nowMillis + INITIAL_BACKOFF_MS)
                     .error(new AndroidConnectionServiceSnapshot.ErrorValue(
                         "transport", safeMessage(event.message, "physical transport failed")))
+                    .routeDiagnostics(event.routeDiagnostics)
                     .build();
                 publish();
                 return true;
@@ -306,10 +319,11 @@ public final class AndroidConnectionStateMachine {
             .channels(source.channels)
             .lastHeartbeatAt(source.lastHeartbeatAt)
             .lastActivityAt(source.lastActivityAt)
-            .nextRetryAt(source.nextRetryAt)
-            .error(source.error)
-            .muxReadyPayloadJson(source.muxReadyPayloadJson)
-            .resolvedPath(source.resolvedPath)
+                    .nextRetryAt(source.nextRetryAt)
+                    .error(source.error)
+                    .muxReadyPayloadJson(source.muxReadyPayloadJson)
+                    .routeDiagnostics(source.routeDiagnostics)
+                    .resolvedPath(source.resolvedPath)
             .resolvedRelayTransport(source.resolvedRelayTransport)
             .resolvedEndpoint(source.resolvedEndpoint)
             .selectedIcePairJson(source.selectedIcePairJson)

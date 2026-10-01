@@ -198,4 +198,220 @@ describe('file browser session port', () => {
     await expect(done).resolves.toBeUndefined();
     await owner.dispose();
   });
+
+  it('keeps explicit rtc-relay downloads on the mux chunk path despite a private bridgeHost', () => {
+    const downloadStore: FileTransferDownloadStore = {
+      createDestination: vi.fn((input) => ({
+        ...input,
+        targetPath: `${input.downloadDir}/${input.fileName}`,
+        stagingPath: `${input.downloadDir}/.${input.requestId}.part`,
+      })),
+      persist: vi.fn(async () => undefined),
+      complete: vi.fn(async () => undefined),
+      abort: vi.fn(async () => undefined),
+    };
+    const port = createFileBrowserSessionPort({
+      session: {
+        id: 's1',
+        daemonHostId: 'daemon-1',
+        bridgeHost: '192.168.1.7',
+        bridgePort: 3333,
+        authToken: 'token',
+        resolvedPath: 'rtc-relay',
+      },
+      send: vi.fn(),
+      subscribe: vi.fn(() => vi.fn()),
+      downloadStore,
+    });
+    port.fileTransferRuntime.open('/remote/home', 'daemon:daemon-1');
+    const request = port.fileTransferRuntime.startDownload(
+      { name: 'relay.bin', size: 64 },
+      '/remote/home',
+      { scopeId: 'daemon:daemon-1', downloadDir: '/storage/emulated/0/Download' },
+    );
+    expect(request.message?.type).toBe('file-download-request');
+    expect(downloadStore.persist).not.toHaveBeenCalled();
+  });
+
+  it('keeps binary fast path for explicit lan and private-host fallback only when route is unknown', () => {
+    const downloadStore: FileTransferDownloadStore = {
+      createDestination: vi.fn((input) => ({
+        ...input,
+        targetPath: `${input.downloadDir}/${input.fileName}`,
+        stagingPath: `${input.downloadDir}/.${input.requestId}.part`,
+      })),
+      persist: vi.fn(async () => undefined),
+      complete: vi.fn(async () => undefined),
+      abort: vi.fn(async () => undefined),
+    };
+    const lan = createFileBrowserSessionPort({
+      session: {
+        id: 's1',
+        daemonHostId: 'daemon-1',
+        bridgeHost: '192.168.1.7',
+        bridgePort: 3333,
+        authToken: 'token',
+        resolvedPath: 'lan',
+      },
+      send: vi.fn(),
+      subscribe: vi.fn(() => vi.fn()),
+      downloadStore,
+    });
+    lan.fileTransferRuntime.open('/remote/home', 'daemon:daemon-1');
+    const lanRequest = lan.fileTransferRuntime.startDownload(
+      { name: 'lan.bin', size: 64 },
+      '/remote/home',
+      { scopeId: 'daemon:daemon-1', downloadDir: '/storage/emulated/0/Download' },
+    );
+    expect(lanRequest.message).toBeUndefined();
+
+    const unknown = createFileBrowserSessionPort({
+      session: {
+        id: 's2',
+        daemonHostId: 'daemon-2',
+        bridgeHost: '192.168.1.8',
+        bridgePort: 3333,
+        authToken: 'token',
+      },
+      send: vi.fn(),
+      subscribe: vi.fn(() => vi.fn()),
+      downloadStore,
+    });
+    unknown.fileTransferRuntime.open('/remote/home', 'daemon:daemon-2');
+    const unknownRequest = unknown.fileTransferRuntime.startDownload(
+      { name: 'fallback.bin', size: 64 },
+      '/remote/home',
+      { scopeId: 'daemon:daemon-2', downloadDir: '/storage/emulated/0/Download' },
+    );
+    expect(unknownRequest.message).toBeUndefined();
+  });
+
+  it('binds binary HTTP downloads to the active resolvedEndpoint host and port', async () => {
+    const downloadStore: FileTransferDownloadStore = {
+      createDestination: vi.fn((input) => ({
+        ...input,
+        targetPath: `${input.downloadDir}/${input.fileName}`,
+        stagingPath: `${input.downloadDir}/.${input.requestId}.part`,
+      })),
+      persist: vi.fn(async () => undefined),
+      complete: vi.fn(async () => undefined),
+      abort: vi.fn(async () => undefined),
+    };
+    const fetchBinary = vi.fn(async (_input: RequestInfo | URL) => new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array([1, 2, 3, 4]));
+          controller.close();
+        },
+      }),
+      { status: 200, headers: { 'content-length': '4' } },
+    ));
+    const port = createFileBrowserSessionPort({
+      session: {
+        id: 's1',
+        daemonHostId: 'daemon-1',
+        bridgeHost: '100.64.0.2',
+        bridgePort: 3333,
+        authToken: 'token',
+        resolvedPath: 'lan',
+        resolvedEndpoint: '192.168.1.50:3444',
+      },
+      send: vi.fn(),
+      subscribe: vi.fn(() => vi.fn()),
+      downloadStore,
+      fetchBinary: fetchBinary as unknown as typeof fetch,
+    });
+    port.fileTransferRuntime.open('/remote/home', 'daemon:daemon-1');
+    const request = port.fileTransferRuntime.startDownload(
+      { name: 'photo.bin', size: 4 },
+      '/remote/home',
+      { scopeId: 'daemon:daemon-1', downloadDir: '/storage/emulated/0/Download' },
+    );
+    expect(request.message).toBeUndefined();
+    await request.waitForDone();
+
+    expect(fetchBinary).toHaveBeenCalledTimes(1);
+    const requested = String(fetchBinary.mock.calls[0]?.[0]);
+    expect(requested).toContain('192.168.1.50:3444');
+    expect(requested).not.toContain('100.64.0.2');
+    expect(downloadStore.complete).toHaveBeenCalledWith(expect.objectContaining({ totalBytes: 4 }));
+  });
+
+  it('rebuilds the owner cache when only resolvedEndpoint changes', async () => {
+    const downloadStore: FileTransferDownloadStore = {
+      createDestination: vi.fn((input) => ({
+        ...input,
+        targetPath: `${input.downloadDir}/${input.fileName}`,
+        stagingPath: `${input.downloadDir}/.${input.requestId}.part`,
+      })),
+      persist: vi.fn(async () => undefined),
+      complete: vi.fn(async () => undefined),
+      abort: vi.fn(async () => undefined),
+    };
+    const owner = createFileBrowserSessionPortOwner({
+      send: vi.fn(),
+      subscribe: vi.fn(() => vi.fn()),
+      downloadStore,
+    });
+    const sessionA = {
+      id: 's1',
+      daemonHostId: 'daemon-1',
+      bridgeHost: '100.64.0.2',
+      bridgePort: 3333,
+      authToken: 'token-a',
+      resolvedPath: 'lan' as const,
+      resolvedEndpoint: '192.168.1.50:3444',
+    };
+    const portA = owner.resolve({ session: sessionA });
+    expect(portA).toBe(owner.resolve({ session: sessionA }));
+
+    const portB = owner.resolve({
+      session: { ...sessionA, resolvedEndpoint: '192.168.1.51:3444' },
+    });
+    expect(portB).not.toBe(portA);
+    await owner.dispose();
+  });
+
+  it('rebuilds the owner cache when route/auth/bridge identity changes for the same session id', async () => {
+    const downloadStore: FileTransferDownloadStore = {
+      createDestination: vi.fn((input) => ({
+        ...input,
+        targetPath: `${input.downloadDir}/${input.fileName}`,
+        stagingPath: `${input.downloadDir}/.${input.requestId}.part`,
+      })),
+      persist: vi.fn(async () => undefined),
+      complete: vi.fn(async () => undefined),
+      abort: vi.fn(async () => undefined),
+    };
+    const owner = createFileBrowserSessionPortOwner({
+      send: vi.fn(),
+      subscribe: vi.fn(() => vi.fn()),
+      downloadStore,
+    });
+    const lanSession = {
+      id: 's1',
+      daemonHostId: 'daemon-1',
+      bridgeHost: '100.64.0.2',
+      bridgePort: 3333,
+      authToken: 'token-a',
+      resolvedPath: 'lan' as const,
+    };
+    const lanPort = owner.resolve({ session: lanSession });
+    expect(lanPort).toBe(owner.resolve({ session: lanSession }));
+
+    const relaySession = {
+      ...lanSession,
+      resolvedPath: 'rtc-relay' as const,
+    };
+    const relayPort = owner.resolve({ session: relaySession });
+    expect(relayPort).not.toBe(lanPort);
+    relayPort.fileTransferRuntime.open('/remote/home', 'daemon:daemon-1');
+    const relayRequest = relayPort.fileTransferRuntime.startDownload(
+      { name: 'relay-cache.bin', size: 64 },
+      '/remote/home',
+      { scopeId: 'daemon:daemon-1', downloadDir: '/storage/emulated/0/Download' },
+    );
+    expect(relayRequest.message?.type).toBe('file-download-request');
+    await owner.dispose();
+  });
 });

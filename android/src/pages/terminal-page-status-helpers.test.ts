@@ -1,5 +1,84 @@
 import { describe, expect, it } from 'vitest';
-import { resolveTerminalQuickBarCapabilityProjection } from './terminal-page-status-helpers';
+import {
+  formatConnectionRouteLabel,
+  resolveConnectionActivityLabel,
+  resolveEffectiveConnectionStatus,
+  resolveTerminalQuickBarCapabilityProjection,
+} from './terminal-page-status-helpers';
+
+type TestSession = Parameters<typeof formatConnectionRouteLabel>[0];
+
+function makeStatusSession(overrides: Partial<TestSession> = {}): TestSession {
+  return {
+    id: 'session-status-fallback',
+    hostId: 'host-status-fallback',
+    connectionName: 'zterm',
+    bridgeHost: '127.0.0.1',
+    bridgePort: 3333,
+    state: 'connected',
+    sessionName: 'zterm-2',
+    title: 'zterm-2',
+    hasUnread: false,
+    createdAt: 0,
+    ws: null,
+    terminalBackend: 'tmux',
+    ...overrides,
+  };
+}
+
+function makeConnectingMetrics() {
+  return {
+    uplinkBps: 0,
+    downlinkBps: 1,
+    renderHz: 0,
+    pullHz: 0,
+    transportBufferedBytes: 0,
+    transportBackpressured: false,
+    lastRenderCommitAt: 0,
+    bufferPullActive: true,
+    status: 'connecting' as const,
+    active: true,
+    updatedAt: 0,
+  };
+}
+
+describe('formatConnectionRouteLabel', () => {
+  it('labels a connected fallback route as connected, not connecting', () => {
+    expect(formatConnectionRouteLabel(makeStatusSession())).toBe('已连接');
+  });
+
+  it('labels a non-connected fallback route as disconnected', () => {
+    expect(formatConnectionRouteLabel(makeStatusSession({ state: 'connecting' }))).toBe('未连接');
+  });
+});
+
+describe('resolveEffectiveConnectionStatus', () => {
+  it('promotes stale connecting state to connected once live buffer traffic is present', () => {
+    expect(resolveEffectiveConnectionStatus(
+      makeStatusSession({ state: 'connecting' }),
+      makeConnectingMetrics(),
+    )).toBe('connected');
+  });
+
+  it('does not show connecting activity when session truth is connected', () => {
+    const status = resolveEffectiveConnectionStatus(
+      makeStatusSession(),
+      makeConnectingMetrics(),
+    );
+
+    expect(status).toBe('connected');
+    expect(resolveConnectionActivityLabel(makeStatusSession(), status)).toBeNull();
+  });
+
+  it('does not show connecting activity while live buffer traffic is present', () => {
+    const status = resolveEffectiveConnectionStatus(
+      makeStatusSession({ state: 'connecting' }),
+      makeConnectingMetrics(),
+    );
+
+    expect(resolveConnectionActivityLabel(makeStatusSession({ state: 'connecting' }), status)).toBeNull();
+  });
+});
 
 describe('resolveTerminalQuickBarCapabilityProjection', () => {
   it('keeps tmux file, image paste, and remote screenshot capabilities enabled', () => {

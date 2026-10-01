@@ -17,7 +17,7 @@ export function hasLiveSessionTraffic(
 
 export function resolveConnectionActivityLabel(
   session: Session,
-  status: SessionDebugOverlayMetrics['status'],
+  status: EffectiveConnectionStatus,
 ) {
   if (
     session.lastError === 'waiting for confirmed control directory'
@@ -34,16 +34,25 @@ export function resolveConnectionActivityLabel(
   return null;
 }
 
+export type EffectiveConnectionStatus = SessionDebugOverlayMetrics['status'] | 'connected';
+
 export function resolveEffectiveConnectionStatus(
   session: Session,
   metrics: SessionDebugOverlayMetrics | null | undefined,
-) {
+): EffectiveConnectionStatus {
   const status = resolveDebugStatus(session, metrics || undefined);
-  if ((status === 'reconnecting' || status === 'connecting') && hasLiveSessionTraffic(metrics)) {
+  if (session.state === 'connected') {
+    return 'connected';
+  }
+  if (status === 'reconnecting' && hasLiveSessionTraffic(metrics)) {
     return 'waiting';
+  }
+  if ((status === 'connecting' || status === 'waiting') && hasLiveSessionTraffic(metrics)) {
+    return 'connected';
   }
   return status;
 }
+
 export function formatConnectionRouteLabel(session: Session) {
   switch (session.resolvedPath) {
     case 'lan':
@@ -61,9 +70,9 @@ export function formatConnectionRouteLabel(session: Session) {
       return isPrivateLanIpv4Host(endpointHost) ? '局域网' : 'IPv4';
     }
     case 'rtc-relay':
-      return session.resolvedRelayTransport === 'turn' ? 'Relay/TURN' : 'Relay';
+      return session.resolvedRelayTransport === 'turn' ? 'Relay/TURN（降级）' : 'Relay（降级）';
     default:
-      return session.state === 'connected' ? '连接中' : '未连接';
+      return session.state === 'connected' ? '已连接' : '未连接';
   }
 }
 

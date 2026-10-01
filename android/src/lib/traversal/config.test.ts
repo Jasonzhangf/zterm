@@ -42,9 +42,7 @@ describe('buildTraversalPlan', () => {
     );
 
     expect(plan.candidates.map((candidate) => candidate.path)).toEqual([
-      'rtc-direct',
       'tailscale',
-      'rtc-relay',
     ]);
     expect(plan.candidates.find((candidate) => candidate.path === 'tailscale')).toMatchObject({
       kind: 'ws',
@@ -111,9 +109,7 @@ describe('buildTraversalPlan', () => {
       url: 'ws://100.66.1.82:3333/?token=daemon-token',
     });
     expect(plan.candidates.map((candidate) => candidate.path)).toEqual([
-      'rtc-direct',
       'tailscale',
-      'rtc-relay',
     ]);
   });
 
@@ -214,11 +210,12 @@ describe('buildTraversalPlan', () => {
       endpoint: '100.66.1.82:3333',
       url: 'ws://100.66.1.82:3333/?token=fresh-directory-token',
     });
+    expect(plan.candidates.map((candidate) => candidate.path)).toEqual(['tailscale']);
     expect(plan.candidates.map((candidate) => candidate.kind === 'ws' ? candidate.url : candidate.endpoint))
       .not.toContain('ws://100.66.1.82:3333/?token=stale-saved-token');
   });
 
-  it('orders logged-in auto candidates as Tailscale -> public direct -> RTC direct -> TURN Relay', () => {
+  it('keeps auto candidates to direct websocket tiers and skips unvalidated WebRTC', () => {
     const plan = buildTraversalPlan(
       {
         bridgeHost: '203.0.113.10',
@@ -253,23 +250,58 @@ describe('buildTraversalPlan', () => {
     );
 
     expect(plan.candidates.map((candidate) => candidate.path)).toEqual([
-      'rtc-direct',
       'tailscale',
       'ipv6',
       'ipv4',
-      'rtc-relay',
     ]);
-    expect(plan.candidates.find((candidate) => candidate.path === 'rtc-direct')).toMatchObject({
+    expect(plan.candidates.map((candidate) => candidate.path)).not.toContain('rtc-direct');
+    expect(plan.candidates.map((candidate) => candidate.path)).not.toContain('rtc-relay');
+    expect(plan.candidates.every((candidate) => candidate.kind === 'ws')).toBe(true);
+    expect(JSON.stringify(plan.candidates)).not.toContain('secret');
+  });
+
+  it('does not build rtc-direct in auto when only relay candidates are available', () => {
+    const plan = buildTraversalPlan(
+      {
+        bridgeHost: '',
+        bridgePort: 3333,
+        authToken: 'token-a',
+        daemonHostId: 'daemon-host-a',
+        relayHostId: 'daemon-host-a',
+        transportMode: 'auto',
+      },
+      {
+        ...DEFAULT_BRIDGE_SETTINGS,
+        signalUrl: '',
+        turnServerUrl: 'turn:turn.example.com:3478?transport=udp',
+        turnUsername: 'ztermturn',
+        turnCredential: 'turn-pass',
+        transportMode: 'auto',
+        traversalRelay: {
+          relayBaseUrl: 'http://159.75.134.56/relay/',
+          accessToken: 'access-1',
+          userId: 'user-1',
+          username: 'jason',
+          deviceId: 'device-a',
+          deviceName: 'Android',
+          platform: 'android',
+          wsDevicesUrl: 'ws://159.75.134.56/relay/ws/devices',
+          wsHostUrl: 'ws://159.75.134.56/relay/ws/host',
+          wsClientUrl: 'ws://159.75.134.56/relay/ws/client',
+          turnUrl: 'turn:turn.example.com:3478?transport=udp',
+          turnUsername: 'ztermturn',
+          turnCredential: 'turn-pass',
+          updatedAt: 1,
+        },
+      },
+    );
+
+    expect(plan.candidates.map((candidate) => candidate.path)).not.toContain('rtc-direct');
+    expect(plan.candidates).toContainEqual(expect.objectContaining({
       kind: 'rtc',
-      path: 'rtc-direct',
-      endpoint: 'rtc-direct:daemon-host-a',
-      iceTransportPolicy: 'all',
-      iceServers: expect.arrayContaining([
-        { urls: 'stun:turn.example.com:3478' },
-        { urls: 'stun:stun.l.google.com:19302' },
-      ]),
-    });
-    expect(JSON.stringify(plan.candidates.find((candidate) => candidate.path === 'rtc-direct'))).not.toContain('secret');
+      path: 'rtc-relay',
+      iceTransportPolicy: 'relay',
+    }));
   });
 
   it('ignores stale saved traversal priority in auto mode', () => {
@@ -312,11 +344,9 @@ describe('buildTraversalPlan', () => {
     );
 
     expect(plan.candidates.map((candidate) => candidate.path)).toEqual([
-      'rtc-direct',
       'tailscale',
       'ipv6',
       'ipv4',
-      'rtc-relay',
     ]);
   });
 
@@ -485,7 +515,7 @@ describe('buildTraversalPlan', () => {
         { urls: 'stun:stun.l.google.com:19302' },
       ]),
     }));
-    expect(plan.candidates.map((candidate) => candidate.path)).toEqual(['rtc-direct', 'rtc-relay']);
+    expect(plan.candidates.map((candidate) => candidate.path)).toEqual(['rtc-relay', 'rtc-direct']);
     expect(plan.candidates).toContainEqual(expect.objectContaining({
       kind: 'rtc',
       path: 'rtc-relay',
@@ -507,14 +537,14 @@ describe('buildTraversalPlan', () => {
         bridgePort: 3333,
         authToken: 'token-a',
         daemonHostId: 'daemon-host-a',
-        transportMode: 'auto',
+        transportMode: 'webrtc',
       },
       {
         signalUrl: '',
         turnServerUrl: '',
         turnUsername: '',
         turnCredential: '',
-        transportMode: 'auto',
+        transportMode: 'webrtc',
         traversalPathPriority: ['ipv4', 'tailscale', 'rtc-direct', 'ipv6', 'rtc-relay'],
         traversalRelay: {
           relayBaseUrl: 'http://159.75.134.56/relay/',
@@ -544,7 +574,7 @@ describe('buildTraversalPlan', () => {
     }));
   });
 
-  it('builds route candidates from relay directory endpoints without local bridge preset', () => {
+  it('builds direct route candidates from relay directory endpoints without local bridge preset', () => {
     const plan = buildTraversalPlan(
       {
         bridgeHost: '',
@@ -561,24 +591,10 @@ describe('buildTraversalPlan', () => {
             lastSeenAt: '2026-06-28T10:00:00.000Z',
           },
           {
-            id: 'rtc-direct:daemon-host-a',
-            kind: 'rtc-direct',
-            relayHostId: 'daemon-host-a',
-            authRequired: true,
-            lastSeenAt: '2026-06-28T10:00:00.000Z',
-          },
-          {
             id: 'direct:tailscale:daemon-host-a',
             kind: 'tailscale',
             host: 'mac.tailnet.ts.net',
             port: 3333,
-            authRequired: true,
-            lastSeenAt: '2026-06-28T10:00:00.000Z',
-          },
-          {
-            id: 'relay-rtc:daemon-host-a',
-            kind: 'relay-rtc',
-            relayHostId: 'daemon-host-a',
             authRequired: true,
             lastSeenAt: '2026-06-28T10:00:00.000Z',
           },
@@ -590,23 +606,8 @@ describe('buildTraversalPlan', () => {
         turnUsername: '',
         turnCredential: '',
         transportMode: 'auto',
-        traversalPathPriority: ['ipv4', 'tailscale', 'rtc-direct', 'ipv6', 'rtc-relay'],
-        traversalRelay: {
-          relayBaseUrl: 'http://159.75.134.56/relay/',
-          accessToken: 'access-1',
-          userId: 'user-1',
-          username: 'jason',
-          deviceId: 'tablet-1',
-          deviceName: 'Jason Tablet',
-          platform: 'android',
-          wsDevicesUrl: 'ws://159.75.134.56/relay/ws/devices',
-          wsHostUrl: 'ws://159.75.134.56/relay/ws/host',
-          wsClientUrl: 'ws://159.75.134.56/relay/ws/client',
-          turnUrl: 'turn:claw.codewhisper.cc:3479?transport=udp',
-          turnUsername: 'ztermturn',
-          turnCredential: 'turn-pass',
-          updatedAt: 1,
-        },
+        traversalPathPriority: ['lan', 'tailscale', 'ipv6', 'ipv4'],
+        traversalRelay: undefined,
       },
     );
 
@@ -624,22 +625,8 @@ describe('buildTraversalPlan', () => {
       endpoint: 'mac.tailnet.ts.net:3333',
       url: 'ws://mac.tailnet.ts.net:3333/?token=token-a',
     }));
-    expect(plan.candidates).toContainEqual(expect.objectContaining({
-      id: 'rtc-direct:daemon-host-a',
-      kind: 'rtc',
-      path: 'rtc-direct',
-      signalUrl: 'ws://159.75.134.56/relay/ws/client?token=access-1&hostId=daemon-host-a&deviceId=tablet-1',
-      endpoint: 'rtc-direct:daemon-host-a',
-      iceTransportPolicy: 'all',
-    }));
-    expect(plan.candidates).toContainEqual(expect.objectContaining({
-      id: 'relay-rtc:daemon-host-a',
-      kind: 'rtc',
-      path: 'rtc-relay',
-      signalUrl: 'ws://159.75.134.56/relay/ws/client?token=access-1&hostId=daemon-host-a&deviceId=tablet-1',
-      endpoint: 'relay:daemon-host-a',
-      iceTransportPolicy: 'relay',
-    }));
+    expect(plan.candidates.map((candidate) => candidate.path)).toEqual(['lan', 'tailscale']);
+    expect(plan.candidates.every((candidate) => candidate.kind === 'ws')).toBe(true);
   });
 
   it('preserves relay directory endpoint candidates when resolving traversal config from a saved host draft', () => {

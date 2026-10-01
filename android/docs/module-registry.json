@@ -1866,6 +1866,7 @@
         "src/hooks/useSessionDraftStorage.ts",
         "src/hooks/useSessionHistoryStorage.ts",
         "src/hooks/useSessionOpenActions.ts",
+        "src/hooks/useVerificationSessionOpen.ts",
         "src/lib/open-tab-intent.ts",
         "src/lib/open-tab-open-policy.ts",
         "src/lib/open-tab-persistence.ts",
@@ -2379,6 +2380,7 @@
         "src/components/terminal/TerminalSessionDrawerSlotMenu.tsx",
         "src/components/terminal/TerminalTabSwipeSurface.tsx",
         "src/lib/junction-preview-lattice.ts",
+        "src/lib/junction-preview-navigation.ts",
         "src/lib/junction-preview-layout.ts",
         "src/lib/terminal-tab-swipe-gesture.ts",
         "src/components/terminal/terminal-session-drawer-helpers.ts"
@@ -2507,6 +2509,7 @@
         "src/components/terminal/FileTransferSheet.tsx",
         "src/lib/file-transfer-session-runtime.ts",
         "src/lib/file-transfer-message-runtime.ts",
+        "src/lib/file-transfer-binary-download-runtime.ts",
         "src/lib/plugin-file-browser/file-browser-contract.ts"
       ],
       "forbidden_resources": [
@@ -2550,6 +2553,12 @@
         "src/lib/file-transfer-sheet-constants.ts",
         "src/lib/file-transfer-native-store-port.ts",
         "src/lib/file-transfer-path-runtime.ts",
+        "src/lib/file-transfer-binary-download-runtime.ts",
+        "src/hooks/useZtermVerificationIntent.ts",
+        "src/lib/zterm-verification-queue.ts",
+        "src/lib/zterm-verification-queue.test.ts",
+        "src/lib/zterm-verification-download-link.ts",
+        "src/lib/zterm-verification-download-link.test.ts",
         "src/lib/plugin-file-browser/"
       ]
     },

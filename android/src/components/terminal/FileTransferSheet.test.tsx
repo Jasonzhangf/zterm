@@ -14,6 +14,10 @@ import { createFileBrowserSessionPort } from "../../lib/plugin-file-browser/file
 import { createFileTransferSessionRuntime } from "../../lib/file-transfer-session-runtime";
 import { createFileTransferDownloadStore } from "../../lib/file-transfer-native-store-port";
 import type { FileTransferDownloadStore } from "../../lib/file-transfer-native-store-port";
+import {
+  claimZtermVerificationDownload,
+  setZtermVerificationDownload,
+} from "../../lib/zterm-verification-queue";
 import type { ReactElement } from "react";
 
 const FileTransferSheet = ProductionFileTransferSheet as any;
@@ -114,6 +118,7 @@ if (!HTMLElement.prototype.scrollIntoView) {
 
 afterEach(() => {
   cleanup();
+  claimZtermVerificationDownload();
   window.localStorage.clear();
   vi.mocked(StoragePermissionPlugin.check).mockResolvedValue({
     granted: true,
@@ -225,6 +230,145 @@ describe("FileTransferSheet", () => {
           showHidden: true,
         }),
       });
+    });
+  });
+
+  it("claims a pending verification download when the sheet mounts and starts it once", async () => {
+    const sendJson = vi.fn();
+    setZtermVerificationDownload({
+      remotePath: "/tmp",
+      fileName: "zterm-rtfp-50mb-3171.bin",
+      size: 52428800,
+    });
+
+    render(
+      <FileTransferSheet
+        open
+        mode="browser"
+        remoteCwd="/tmp"
+        daemonFileScopeId="verification-scope"
+        onClose={vi.fn()}
+        sendJson={sendJson}
+        onFileTransferMessage={vi.fn(() => () => {})}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(
+        sendJson.mock.calls.filter(([message]) => message?.type === "file-download-request"),
+      ).toHaveLength(1);
+    });
+
+    const request = sendJson.mock.calls.find(
+      ([message]) => message?.type === "file-download-request",
+    )?.[0];
+    expect(request.payload).toMatchObject({
+      remotePath: "/tmp/zterm-rtfp-50mb-3171.bin",
+      fileName: "zterm-rtfp-50mb-3171.bin",
+      totalBytes: 52428800,
+    });
+    expect(claimZtermVerificationDownload()).toBeNull();
+  });
+
+  it("downloads no-size verification targets into the app-private verification directory", async () => {
+    const sendJson = vi.fn();
+    const handlerRef: { current: ((msg: any) => void) | null } = {
+      current: null,
+    };
+    setZtermVerificationDownload({
+      remotePath: "/tmp",
+      fileName: "zterm-rtfp-no-size.bin",
+    });
+    vi.mocked(StoragePermissionPlugin.stat).mockResolvedValue({
+      size: 7,
+      modified: 0,
+      uri: "file:///data/data/com.zterm.android/files/zterm-verification/zterm-rtfp-no-size.bin",
+      type: "file",
+    } as any);
+    vi.mocked(StoragePermissionPlugin.writeFileChunks).mockResolvedValue({
+      bytesWritten: 7,
+    } as any);
+    vi.mocked(StoragePermissionPlugin.publishFile).mockResolvedValue({
+      bytesPublished: 7,
+    } as any);
+
+    render(
+      <FileTransferSheet
+        open
+        mode="browser"
+        remoteCwd="/tmp"
+        daemonFileScopeId="verification-scope"
+        onClose={vi.fn()}
+        sendJson={sendJson}
+        onFileTransferMessage={vi.fn((nextHandler: (msg: any) => void) => {
+          handlerRef.current = nextHandler;
+          return () => {};
+        })}
+      />,
+    );
+
+    await waitFor(() => expect(handlerRef.current).toBeTruthy());
+    handlerRef.current?.({
+      type: "file-list-response",
+      payload: {
+        requestId: sendJson.mock.calls[0][0].payload.requestId,
+        path: "/tmp",
+        parentPath: "/",
+        entries: [{ name: "zterm-rtfp-no-size.bin", type: "file", size: 7, modified: 1 }],
+      },
+    });
+
+    await waitFor(() => {
+      expect(
+        sendJson.mock.calls.find(([message]) => message?.type === "file-download-request"),
+      ).toBeTruthy();
+    });
+
+    const request = sendJson.mock.calls.find(
+      ([message]) => message?.type === "file-download-request",
+    )?.[0];
+    expect(request.payload).toMatchObject({
+      remotePath: "/tmp/zterm-rtfp-no-size.bin",
+      fileName: "zterm-rtfp-no-size.bin",
+      totalBytes: 7,
+    });
+
+    await handlerRef.current?.({
+      type: "file-download-chunk",
+      payload: {
+        requestId: request.payload.requestId,
+        fileName: "zterm-rtfp-no-size.bin",
+        chunkIndex: 0,
+        totalChunks: 1,
+        dataBase64: "MTIzNDU2Nw==",
+      },
+    });
+    await handlerRef.current?.({
+      type: "file-download-complete",
+      payload: {
+        requestId: request.payload.requestId,
+        fileName: "zterm-rtfp-no-size.bin",
+        totalBytes: 7,
+      },
+    });
+
+    await waitFor(() => {
+      expect(StoragePermissionPlugin.mkdir).toHaveBeenCalledWith({
+        path: "/data/data/com.zterm.android/files/zterm-verification",
+        recursive: true,
+      });
+      expect(StoragePermissionPlugin.writeFileChunks).toHaveBeenCalledWith({
+        path: expect.stringMatching(
+          /\/data\/data\/com\.zterm\.android\/files\/zterm-verification\/\.zterm-download-fdl-.+\.part$/,
+        ),
+        chunks: ["MTIzNDU2Nw=="],
+        append: false,
+      });
+      expect(StoragePermissionPlugin.publishFile).toHaveBeenCalledWith(expect.objectContaining({
+        sourcePath: expect.stringContaining("zterm-verification"),
+        targetPath: "/data/data/com.zterm.android/files/zterm-verification/zterm-rtfp-no-size.bin",
+        expectedBytes: 7,
+      }));
     });
   });
 
@@ -613,8 +757,13 @@ describe("FileTransferSheet", () => {
 
   it("keeps an in-flight download alive across sheet unmount and remount through the stable session port", async () => {
     let dispatch: ((message: any) => void) | undefined;
-    let releasePersist: (() => void) | undefined;
     const sendJson = vi.fn();
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn(async () => new Response(new Uint8Array([111, 108, 100]), {
+      status: 200,
+      headers: { "content-length": "3" },
+    })) as unknown as typeof fetch;
+    globalThis.fetch = fetchMock as typeof fetch;
     const subscribe = vi.fn((handler: (message: any) => void) => {
       dispatch = handler;
       return vi.fn();
@@ -625,9 +774,9 @@ describe("FileTransferSheet", () => {
         targetPath: `${input.downloadDir}/${input.fileName}`,
         stagingPath: `${input.downloadDir}/.${input.requestId}.part`,
       })),
-      persist: vi.fn(() => new Promise<void>((resolve) => {
-        releasePersist = resolve;
-      })),
+      persist: vi.fn(async ({ chunksBase64 }) => {
+        expect(chunksBase64).toEqual(["b2xk"]);
+      }),
       complete: vi.fn(async () => undefined),
       abort: vi.fn(async () => undefined),
     };
@@ -637,6 +786,7 @@ describe("FileTransferSheet", () => {
         daemonHostId: "daemon-sheet",
         bridgeHost: "127.0.0.1",
         bridgePort: 3333,
+        resolvedPath: "tailscale",
       },
       send: sendJson,
       subscribe,
@@ -669,41 +819,17 @@ describe("FileTransferSheet", () => {
     await waitFor(() => expect(screen.getByText("old.bin")).toBeTruthy());
     fireEvent.click(screen.getByText("old.bin"));
     fireEvent.click(screen.getByText("下载 1 项"));
-
-    const downloadRequest = sendJson.mock.calls.find(
-      (call) => call[1]?.type === "file-download-request",
-    )?.[1];
-    expect(downloadRequest).toBeTruthy();
     cleanup();
 
-    dispatch?.({
-      type: "file-download-chunk",
-      payload: {
-        requestId: downloadRequest.payload.requestId,
-        fileName: "old.bin",
-        chunkIndex: 0,
-        totalChunks: 1,
-        dataBase64: "b2xk",
-      },
-    });
-    dispatch?.({
-      type: "file-download-complete",
-      payload: {
-        requestId: downloadRequest.payload.requestId,
-        fileName: "old.bin",
-        totalBytes: 3,
-      },
-    });
-    await Promise.resolve();
-    expect(store.persist).toHaveBeenCalledTimes(1);
-    expect(store.complete).not.toHaveBeenCalled();
-
-    releasePersist?.();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(store.persist).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(store.complete).toHaveBeenCalledTimes(1));
 
     renderSheet();
     await waitFor(() => expect(subscribe).toHaveBeenCalledTimes(1));
     await port.dispose();
+    globalThis.fetch = originalFetch;
+
   });
 
   it("uploads local files by reading native file chunks without materializing the whole file in WebView", async () => {

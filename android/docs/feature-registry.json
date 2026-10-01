@@ -1210,6 +1210,10 @@
         "src/lib/file-transfer-message-runtime.ts",
         "src/lib/file-transfer-session-runtime.ts",
         "src/lib/file-transfer-throughput-contract.test.ts",
+        "src/lib/zterm-verification-queue.ts",
+        "src/lib/zterm-verification-queue.test.ts",
+        "src/lib/zterm-verification-download-link.ts",
+        "src/lib/zterm-verification-download-link.test.ts",
         "src/lib/file-transfer-throughput-runtime.ts",
         "src/plugins/StoragePermissionPlugin.ts",
         "src/components/terminal/FileTransferSheet.tsx",
@@ -1844,7 +1848,8 @@
         "src/lib/session-preview-gesture.ts",
         "src/components/terminal/TerminalPreviewGrid.tsx",
         "src/pages/TerminalPageStageShell.tsx",
-        "src/pages/TerminalPage.tsx"
+        "src/pages/TerminalPage.tsx",
+        "src/lib/junction-preview-navigation.ts"
       ],
       "allowed_paths": [
         "src/lib/junction-preview-lattice.ts",
@@ -1870,7 +1875,9 @@
         "src/pages/TerminalPageStageShell.pane-stage.test.tsx",
         "src/lib/types.ts",
         "docs/testing/terminal-session-preview-test-design.md",
-        "docs/goals/multiscreen-junction-preview-plan.md"
+        "docs/goals/multiscreen-junction-preview-plan.md",
+        "src/lib/junction-preview-navigation.ts",
+        "src/lib/junction-preview-navigation.test.ts"
       ],
       "forbidden_paths": [
         "src/server/",
@@ -1887,7 +1894,8 @@
         "src/hooks/useSessionOpenActions.test.tsx",
         "src/lib/feature-registry-truth.test.ts",
         "src/lib/resource-registry-truth.test.ts",
-        "src/lib/function-wiki-truth.test.ts"
+        "src/lib/function-wiki-truth.test.ts",
+        "src/lib/junction-preview-navigation.test.ts"
       ],
       "truth_sources": [
         "docs/goals/multiscreen-junction-preview-plan.md",

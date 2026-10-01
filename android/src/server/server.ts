@@ -49,6 +49,7 @@ import { createTerminalAttachmentMessageRuntime } from './terminal-attachment-me
 import { createTerminalChannelMuxRuntime } from './terminal-channel-mux-runtime';
 import { createDaemonInputQueueRuntime } from './daemon-input-queue-runtime';
 import { createTerminalHttpRuntime } from './terminal-http-runtime';
+import { resolveFileTransferListPath } from './file-transfer-path';
 import { createAttachmentDeliveryRuntime } from './attachment-delivery-runtime';
 import {
   createTerminalScheduleRuntime,
@@ -180,7 +181,7 @@ const readDaemonProcessGroup = (pid: string) => new Promise<{
 });
 const MEMORY_GUARD_MAX_RSS_BYTES = 2.5 * 1024 * 1024 * 1024;
 const MEMORY_GUARD_MAX_HEAP_USED_BYTES = 1.5 * 1024 * 1024 * 1024;
-const MEMORY_GUARD_MAX_EXTERNAL_BYTES = 1.5 * 1024 * 1024 * 1024;
+const MEMORY_GUARD_MAX_EXTERNAL_BYTES = 1 * 1024 * 1024 * 1024;
 const MIRROR_NO_HOLE_DIFF_POLICY = DEFAULT_MIRROR_NO_HOLE_DIFF_POLICY;
 
 const DAGPIPE_COMPILE_RESULT = compileAllDagpipePhases();
@@ -593,6 +594,7 @@ const terminalHttpRuntime = createTerminalHttpRuntime({
   handleClientDebugSnapshot,
   logTimePrefix,
   attachmentDeliveryRuntime,
+  resolveFileTransferDownloadPath: (requestedPath) => resolveFileTransferListPath(requestedPath, () => ''),
   connections,
   sendTransportMessage,
 });

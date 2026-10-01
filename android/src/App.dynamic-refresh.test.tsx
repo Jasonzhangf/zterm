@@ -7,6 +7,7 @@ import { buildConnectionConfigShareLink } from '@zterm/shared';
 import App from './App';
 import { STORAGE_KEYS } from './lib/types';
 import { createNetworkIdentityRuntime } from './lib/network-identity';
+import { claimZtermVerificationDownload } from './lib/zterm-verification-queue';
 
 function makeSession(id: string, revision: number) {
   return {
@@ -113,7 +114,7 @@ const sessionHarness = vi.hoisted(() => {
   let staleActiveSession: ReturnType<typeof makeSession> | null = state.sessions[0];
   const reconnectAllSessions = vi.fn();
   const reconnectSession = vi.fn();
-  const resumeActiveSessionTransport = vi.fn(() => true);
+  const resumeActiveSessionTransport = vi.fn(() => true) as ReturnType<typeof vi.fn>;
   const notifyTargetNetworkSignal = vi.fn();
   const reportTargetNetworkProbeError = vi.fn();
   const setLiveSessionIds = vi.fn();
@@ -930,6 +931,7 @@ describe('App dynamic refresh matrix', () => {
   afterEach(() => {
     vi.useRealTimers();
     cleanup();
+    claimZtermVerificationDownload();
     if (originalVisibilityState) {
       Object.defineProperty(document, 'visibilityState', originalVisibilityState);
     }
@@ -1256,6 +1258,10 @@ describe('App dynamic refresh matrix', () => {
     act(() => {
       document.dispatchEvent(new Event('pause'));
       capacitorAppHarness.emit({ isActive: false });
+    });
+    view.rerender(<AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />);
+
+    act(() => {
       sessionHarness.update(
         {
           sessions: [makeSession('s1', 3), makeSession('s2', 10)],
@@ -1276,7 +1282,8 @@ describe('App dynamic refresh matrix', () => {
     await waitFor(() => expect(screen.getByTestId('terminal-active-session-id').textContent).toBe('s2'));
     expect(screen.getByTestId('terminal-active-body-marker').textContent).toBe('body-s2-rev-10');
     expect(screen.getByTestId('terminal-active-body-marker').textContent).not.toBe('body-s1-rev-3');
-    expect(sessionHarness.resumeActiveSessionTransport).not.toHaveBeenCalledWith('s1');
+    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledWith('s2');
+    expect(sessionHarness.resumeActiveSessionTransport.mock.calls.at(-1)?.[0]).toBe('s2');
   });
 
   it('does not rerender TerminalPage when only an inactive session runtime state changes', async () => {
@@ -1397,7 +1404,7 @@ describe('App dynamic refresh matrix', () => {
     expect(sessionHarness.switchSession).toHaveBeenCalledTimes(1);
     expect(sessionHarness.switchSession).toHaveBeenCalledWith('s2', { refreshSource: 'explicit-resume' });
     expect(sessionHarness.resumeActiveSessionTransport).not.toHaveBeenCalled();
-    expect(openTerminalPageSpy).not.toHaveBeenCalled();
+    expect(fetchTmuxSessionsMock).not.toHaveBeenCalled();
   });
 
   it('projects active Sessions on Home without reviving group management or tab persistence', async () => {
@@ -1816,7 +1823,7 @@ describe('App dynamic refresh matrix', () => {
       document.dispatchEvent(new Event('visibilitychange'));
     });
 
-    expect(sessionHarness.resumeActiveSessionTransport).not.toHaveBeenCalled();
+    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledWith('s1');
     expect(sessionHarness.reconnectSession).not.toHaveBeenCalled();
     expect(sessionHarness.reconnectAllSessions).not.toHaveBeenCalled();
   });
@@ -1845,7 +1852,7 @@ describe('App dynamic refresh matrix', () => {
       document.dispatchEvent(new Event('resume'));
     });
 
-    expect(sessionHarness.resumeActiveSessionTransport).not.toHaveBeenCalled();
+    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledWith('s1');
     expect(sessionHarness.reconnectSession).not.toHaveBeenCalled();
     expect(sessionHarness.reconnectAllSessions).not.toHaveBeenCalled();
   });
@@ -1863,7 +1870,7 @@ describe('App dynamic refresh matrix', () => {
       capacitorAppHarness.emit({ isActive: true });
     });
 
-    expect(sessionHarness.resumeActiveSessionTransport).not.toHaveBeenCalled();
+    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledWith('s1');
     expect(sessionHarness.reconnectSession).not.toHaveBeenCalled();
     expect(sessionHarness.reconnectAllSessions).not.toHaveBeenCalled();
   });
@@ -1962,7 +1969,7 @@ describe('App dynamic refresh matrix', () => {
     });
 
     await waitFor(() => expect(Number(screen.getByTestId('provider-resume-epoch').textContent || '0')).toBeGreaterThanOrEqual(1));
-    expect(sessionHarness.resumeActiveSessionTransport).not.toHaveBeenCalled();
+    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledWith('s1');
     expect(sessionHarness.reconnectSession).not.toHaveBeenCalled();
     expect(sessionHarness.reconnectAllSessions).not.toHaveBeenCalled();
   });
@@ -1994,7 +2001,7 @@ describe('App dynamic refresh matrix', () => {
       document.dispatchEvent(new Event('resume'));
     });
 
-    expect(sessionHarness.resumeActiveSessionTransport).not.toHaveBeenCalled();
+    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledWith('s1');
     expect(sessionHarness.reconnectSession).not.toHaveBeenCalled();
   });
 
@@ -2030,7 +2037,7 @@ describe('App dynamic refresh matrix', () => {
       document.dispatchEvent(new Event('resume'));
     });
 
-    expect(sessionHarness.resumeActiveSessionTransport).not.toHaveBeenCalled();
+    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledWith('s1');
     expect(sessionHarness.reconnectSession).not.toHaveBeenCalled();
     expect(sessionHarness.reconnectAllSessions).not.toHaveBeenCalled();
   });
@@ -2049,12 +2056,12 @@ describe('App dynamic refresh matrix', () => {
       document.dispatchEvent(new Event('resume'));
     });
 
-    expect(sessionHarness.resumeActiveSessionTransport).not.toHaveBeenCalled();
+    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledWith('s1');
     expect(sessionHarness.reconnectSession).not.toHaveBeenCalled();
     expect(sessionHarness.reconnectAllSessions).not.toHaveBeenCalled();
   });
 
-  it('registers Capacitor appStateChange only once across session rerenders', async () => {
+  it('registers Capacitor appStateChange only once across session rerrenders', async () => {
     const view = render(
       <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
     );
@@ -2135,6 +2142,54 @@ describe('App dynamic refresh matrix', () => {
       { id: 'sc-1', label: 'Ctrl+C', sequence: '\x03', order: 0, row: 'bottom-scroll' },
     ]);
     await waitFor(() => expect(screen.getByTestId('zterm-dialog-message').textContent).toContain('Imported Mac'));
+  });
+
+  it('defers verification deep-link session open until saved hosts are loaded', async () => {
+    capacitorCoreHarness.setNative(true);
+    hostHarness.setLoaded(false);
+    hostHarness.setHosts([]);
+    const setBridgeSettings = makeBridgeSettingsSetter();
+
+    const view = render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={setBridgeSettings} />,
+    );
+
+    await waitFor(() => expect(capacitorAppHarness.eventCallCount('appUrlOpen')).toBeGreaterThan(0));
+    sessionHarness.createSession.mockClear();
+    act(() => {
+      capacitorAppHarness.emitUrlOpen(
+        'zterm://file-download-verification/p/tmp/zterm-rtfp-50mb-3172.bin/52428800',
+      );
+    });
+
+    expect(sessionHarness.createSession).not.toHaveBeenCalled();
+
+    hostHarness.setHosts([{
+      id: 'verification-host',
+      createdAt: 1,
+      name: 'Verification host',
+      bridgeHost: '192.168.0.3',
+      bridgePort: 3333,
+      sessionName: 'default',
+      authToken: 'token-a',
+      authType: 'password',
+      tags: [],
+      pinned: false,
+      autoCommand: '',
+    }]);
+    hostHarness.setLoaded(true);
+    view.rerender(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={setBridgeSettings} />,
+    );
+
+    await waitFor(() => expect(sessionHarness.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bridgeHost: '192.168.0.3',
+        bridgePort: 3333,
+        authToken: 'token-a',
+      }),
+      expect.objectContaining({ activate: false }),
+    ));
   });
 
   it('does not report connection import success when bridge persistence fails', async () => {
@@ -2388,7 +2443,7 @@ describe('App dynamic refresh matrix', () => {
       document.dispatchEvent(new Event('resume'));
     });
 
-    expect(sessionHarness.resumeActiveSessionTransport).not.toHaveBeenCalled();
+    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledWith('s2');
     expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s2');
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.ACTIVE_PAGE) || '{}')).toEqual({
       kind: 'terminal',
@@ -2410,7 +2465,7 @@ describe('App dynamic refresh matrix', () => {
       document.dispatchEvent(new Event('visibilitychange'));
     });
 
-    expect(sessionHarness.resumeActiveSessionTransport).not.toHaveBeenCalled();
+    expect(sessionHarness.resumeActiveSessionTransport.mock.calls.at(-1)?.[0]).toBe('s2');
     expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s2');
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.ACTIVE_PAGE) || '{}')).toEqual({
       kind: 'terminal',

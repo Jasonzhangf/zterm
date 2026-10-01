@@ -68,6 +68,7 @@ import {
   type TerminalDebugOverlaySlot,
 } from '../lib/plugin-debug-console/debug-console-contract';
 import { useTerminalPageCopyRuntime } from './useTerminalPageCopyRuntime';
+import { useZtermVerificationIntent } from '../hooks/useZtermVerificationIntent';
 import { getBrowserStorage } from '../lib/browser-storage';
 import { resolveTerminalFontSizePx, type TerminalFontSize, type TerminalShellSkin } from '../lib/bridge-settings';
 import {
@@ -138,6 +139,10 @@ import {
   type JunctionPreviewLatticeV1,
   type JunctionPreviewTarget,
 } from '../lib/junction-preview-lattice';
+import {
+  resolveCyclePreviewSession,
+  resolvePinchVerticalCwdStep,
+} from '../lib/junction-preview-navigation';
 export {
   resolveTerminalSessionGroupSlotReplacement,
   resolveTerminalSessionGroupViewportSlots,
@@ -754,6 +759,7 @@ function TerminalPageComponent({
   const [fileTransferOpen, setFileTransferOpen] = useState(false);
   const [resourceInitialTab, setResourceInitialTab] = useState<'files' | 'web' | 'stream'>('files');
   const [fileTransferMode, setFileTransferMode] = useState<"browser" | "sync">("browser");
+  const [fileTransferRemoteCwd, setFileTransferRemoteCwd] = useState('');
   const [resourceWebUrl, setResourceWebUrl] = useState('');
   const [remoteWindowQuickBarSuppressed, setRemoteWindowQuickBarSuppressed] = useState(false);
   const [remoteScreenshotPreview, setRemoteScreenshotPreview] = useState<RemoteScreenshotPreviewState | null>(null);
@@ -2098,11 +2104,34 @@ function TerminalPageComponent({
     });
   }, [onRequestScheduleList, terminalActionSessionId]);
 
-  const handleQuickBarOpenFileTransfer = useCallback((mode: "browser" | "sync" = "browser") => {
+  const handleQuickBarOpenFileTransfer = useCallback((mode: "browser" | "sync" = "browser", remoteCwd = '') => {
     setResourceInitialTab('files');
     setFileTransferMode(mode);
-    setFileTransferOpen((current) => (current && fileTransferMode === mode ? false : true));
-  }, [fileTransferMode]);
+    setFileTransferRemoteCwd(remoteCwd);
+    setFileTransferOpen(true);
+  }, []);
+
+  const handleVerificationIntent = useCallback((target: { remotePath: string }) => {
+    handleQuickBarOpenFileTransfer('browser', target.remotePath || '/tmp');
+  }, [handleQuickBarOpenFileTransfer]);
+  useZtermVerificationIntent(handleVerificationIntent);
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ mode?: 'browser' | 'sync'; remoteCwd?: string }>).detail;
+      if (!detail) return;
+      handleQuickBarOpenFileTransfer(detail.mode ?? 'browser', detail.remoteCwd ?? '');
+    };
+    window.addEventListener('zterm:open-file-transfer', handler);
+    return () => window.removeEventListener('zterm:open-file-transfer', handler);
+  }, [handleQuickBarOpenFileTransfer]);
+
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('zterm:terminal-page-visible'));
+    return () => {
+      window.dispatchEvent(new CustomEvent('zterm:terminal-page-closed'));
+    };
+  }, []);
 
   const handleOpenResourceDrawer = useCallback((tab: 'web' | 'stream') => {
     setResourceInitialTab(tab);
@@ -2997,6 +3026,11 @@ function TerminalPageComponent({
     if (!result.ok) showSessionPreviewError('保存预览格子失败。');
   }, [showSessionPreviewError]);
 
+  const previewDrawerSessions = useMemo(
+    () => drawerRemoteSessions.items.map((item) => ({ id: item.id, cwd: item.cwd })),
+    [drawerRemoteSessions.items],
+  );
+
   const resolveSessionPreviewTargetFromDrawerSelection = useCallback((sessionId: string): JunctionPreviewTarget | null => {
     const openSession = sessions.find((candidate) =>
       candidate.id === sessionId
@@ -3077,6 +3111,28 @@ function TerminalPageComponent({
     });
     setSessionPreviewFocus(coordinate);
   }, [sessionPreviewFocus]);
+
+  const handleCyclePreviewSession = useCallback((direction: 'next' | 'previous') => {
+    const result = resolveCyclePreviewSession({
+      focus: sessionPreviewFocus,
+      cells: sessionPreviewLattice.cells,
+      sessions: previewDrawerSessions,
+      direction,
+    });
+    if (result.action !== 'focus') return;
+    handlePreviewFocusChange(result.coordinate);
+  }, [handlePreviewFocusChange, previewDrawerSessions, sessionPreviewFocus, sessionPreviewLattice.cells]);
+
+  const handlePinchVerticalCwdStep = useCallback((direction: 'next' | 'previous') => {
+    const result = resolvePinchVerticalCwdStep({
+      focus: sessionPreviewFocus,
+      cells: sessionPreviewLattice.cells,
+      sessions: previewDrawerSessions,
+      direction,
+    });
+    if (result.action === 'none') return;
+    handleSetSessionPreviewCell(result.coordinate, result.sessionId);
+  }, [handleSetSessionPreviewCell, previewDrawerSessions, sessionPreviewFocus, sessionPreviewLattice.cells]);
 
   const handleOpenSessionDrawer = useCallback(() => {
     setSessionDrawerOpen(true);
@@ -3778,6 +3834,8 @@ function TerminalPageComponent({
           onPreviewFocusChange: handlePreviewFocusChange,
           onSetPreviewCell: handleSetSessionPreviewCell,
           onClearPreviewCell: handleClearSessionPreviewCell,
+          onCycleSession: handleCyclePreviewSession,
+          onPinchVerticalCwdStep: handlePinchVerticalCwdStep,
           onPreviewOverviewChange: setSessionPreviewOverviewCoordinates,
           onOpenSessionDrawer: sessionDrawerGestureEnabled ? handleOpenSessionDrawer : undefined,
         },
@@ -3917,7 +3975,7 @@ function TerminalPageComponent({
           }) : null}
           renderFileBrowser={(open) => renderFileBrowser({
             open,
-            remoteCwd: '',
+            remoteCwd: fileTransferRemoteCwd,
             mode: fileTransferMode,
             embedded: true,
             daemonFileScopeId: fileBrowserSessionPort.daemonFileScopeId,

@@ -253,7 +253,7 @@ describe('home connection projection relay route visibility', () => {
         },
       },
     ).candidates.map((candidate) => candidate.path);
-    expect(routePaths.slice(0, 3)).toEqual(['rtc-direct', 'tailscale', 'tailscale']);
+    expect(routePaths.slice(0, 3)).toEqual(['tailscale', 'tailscale']);
   });
 
   it('projects logged-in relay directory daemon as Auto route with direct auth on a new device', () => {
@@ -296,9 +296,7 @@ describe('home connection projection relay route visibility', () => {
       },
     );
     expect(plan.candidates.map((candidate) => candidate.path)).toEqual([
-      'rtc-direct',
       'tailscale',
-      'rtc-relay',
     ]);
   });
 
