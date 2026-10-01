@@ -502,13 +502,11 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
   useOpenTabLifecycleEffects({
     sessionsRef,
     openTabStateRef,
-    runtimeActiveSessionIdRef,
     foregroundRefreshRuntimeRef,
     onForegroundActiveChange,
     onForegroundResume,
     recordBackgroundEnteredAt: options.recordBackgroundEnteredAt,
     auditOpenTabsAgainstRemoteSessions,
-    resumeActiveSessionTransport,
     notifyTargetNetworkSignal,
     reportTargetNetworkProbeError,
     bumpFollowResetEpoch,

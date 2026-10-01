@@ -20,6 +20,7 @@ import java.io.InputStream;
 @CapacitorPlugin(name = "PickedImageUri")
 public class PickedImageUriPlugin extends Plugin {
     private static final String TAG = "PickedImageUriPlugin";
+    private static final long MAX_PICKED_IMAGE_BYTES = 25L * 1024 * 1024;
     private String pickerCallId;
 
     @PluginMethod
@@ -96,19 +97,31 @@ public class PickedImageUriPlugin extends Plugin {
         try {
             Uri uri = Uri.parse(uriText);
             Log.i(TAG, "readContentUri start uri=" + uri);
-            InputStream inputStream = getContext().getContentResolver().openInputStream(uri);
-            if (inputStream == null) {
-                call.reject("无法打开所选图片");
+            long declaredSize = queryDeclaredSize(uri);
+            if (declaredSize > MAX_PICKED_IMAGE_BYTES) {
+                call.reject(oversizedImageMessage());
                 return;
             }
-            ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-            byte[] chunk = new byte[64 * 1024];
-            int read;
-            while ((read = inputStream.read(chunk)) != -1) {
-                buffer.write(chunk, 0, read);
+            byte[] bytes;
+            try (InputStream inputStream = getContext().getContentResolver().openInputStream(uri)) {
+                if (inputStream == null) {
+                    call.reject("无法打开所选图片");
+                    return;
+                }
+                ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+                byte[] chunk = new byte[64 * 1024];
+                int read;
+                long total = 0;
+                while ((read = inputStream.read(chunk)) != -1) {
+                    total += read;
+                    if (total > MAX_PICKED_IMAGE_BYTES) {
+                        call.reject(oversizedImageMessage());
+                        return;
+                    }
+                    buffer.write(chunk, 0, read);
+                }
+                bytes = buffer.toByteArray();
             }
-            inputStream.close();
-            byte[] bytes = buffer.toByteArray();
             Log.i(TAG, "readContentUri bytes=" + bytes.length);
             if (bytes.length == 0) {
                 call.reject("所选图片内容为空");
@@ -136,6 +149,29 @@ public class PickedImageUriPlugin extends Plugin {
             Log.e(TAG, "failed to read picked image", error);
             call.reject("读取所选图片失败: " + error.getMessage());
         }
+    }
+
+    private String oversizedImageMessage() {
+        return "所选图片超过 " + (MAX_PICKED_IMAGE_BYTES / (1024 * 1024)) + " MB 上限";
+    }
+
+    private long queryDeclaredSize(Uri uri) {
+        try (Cursor cursor = getContext().getContentResolver().query(
+                uri,
+                new String[] { OpenableColumns.SIZE },
+                null,
+                null,
+                null)) {
+            if (cursor != null && cursor.moveToFirst()) {
+                int sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE);
+                if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) {
+                    return cursor.getLong(sizeIndex);
+                }
+            }
+        } catch (Exception error) {
+            Log.w(TAG, "query declared size failed", error);
+        }
+        return -1L;
     }
 
     private String queryDisplayName(Uri uri) {

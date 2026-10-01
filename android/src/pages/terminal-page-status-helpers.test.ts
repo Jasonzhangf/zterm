@@ -53,14 +53,7 @@ describe('formatConnectionRouteLabel', () => {
 });
 
 describe('resolveEffectiveConnectionStatus', () => {
-  it('promotes stale connecting state to connected once live buffer traffic is present', () => {
-    expect(resolveEffectiveConnectionStatus(
-      makeStatusSession({ state: 'connecting' }),
-      makeConnectingMetrics(),
-    )).toBe('connected');
-  });
-
-  it('does not show connecting activity when session truth is connected', () => {
+  it('keeps connected session truth authoritative even when metrics are stale', () => {
     const status = resolveEffectiveConnectionStatus(
       makeStatusSession(),
       makeConnectingMetrics(),
@@ -80,33 +73,37 @@ describe('resolveEffectiveConnectionStatus', () => {
     expect(resolveConnectionActivityLabel(session, status)).toBeNull();
   });
 
-  it('does not show connecting activity while live buffer traffic is present', () => {
+  it('never promotes byte-rate traffic to connected while the session is still connecting', () => {
+    const session = makeStatusSession({ state: 'connecting' });
     const status = resolveEffectiveConnectionStatus(
-      makeStatusSession({ state: 'connecting' }),
+      session,
       makeConnectingMetrics(),
     );
 
-    expect(resolveConnectionActivityLabel(makeStatusSession({ state: 'connecting' }), status)).toBeNull();
+    expect(status).toBe('connecting');
+    expect(resolveConnectionActivityLabel(session, status)).toBe('正在连接');
   });
 
-  it('promotes reconnecting state to connected once live buffer traffic is present', () => {
+  it('never promotes pong-only downlink traffic to connected while reconnecting', () => {
+    const session = makeStatusSession({ state: 'reconnecting' });
     const status = resolveEffectiveConnectionStatus(
-      makeStatusSession({ state: 'reconnecting' }),
+      session,
       { ...makeConnectingMetrics(), status: 'reconnecting' as const },
     );
 
-    expect(status).toBe('connected');
-    expect(resolveConnectionActivityLabel(makeStatusSession({ state: 'reconnecting' }), status)).toBeNull();
+    expect(status).toBe('reconnecting');
+    expect(resolveConnectionActivityLabel(session, status)).toBe('正在重连');
   });
 
-  it('promotes waiting state to connected once live buffer traffic is present', () => {
+  it('never promotes a waiting session from raw byte rates', () => {
+    const session = makeStatusSession({ state: 'connecting' });
     const status = resolveEffectiveConnectionStatus(
-      makeStatusSession({ state: 'connecting' }),
+      session,
       { ...makeConnectingMetrics(), status: 'waiting' as const },
     );
 
-    expect(status).toBe('connected');
-    expect(resolveConnectionActivityLabel(makeStatusSession({ state: 'connecting' }), status)).toBeNull();
+    expect(status).toBe('waiting');
+    expect(resolveConnectionActivityLabel(session, status)).toBeNull();
   });
 });
 
