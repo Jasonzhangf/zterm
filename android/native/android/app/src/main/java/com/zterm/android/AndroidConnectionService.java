@@ -936,6 +936,7 @@ public class AndroidConnectionService extends Service {
             transportNetworkGeneration = networkGeneration;
             routeDiagnostics = new ArrayList<>();
             committedCandidate = null;
+            activeMuxReadyCandidate = null;
             directLaunchFinished = false;
             sendRetryPending = false;
             heartbeatMisses = 0;
@@ -1025,6 +1026,12 @@ public class AndroidConnectionService extends Service {
                     return;
                 }
             }
+            List<RouteCandidate> relayOnly = new ArrayList<>();
+            addRtcCandidate(relayOnly, AndroidConnectionServiceRoutePolicy.Path.RTC_RELAY);
+            for (RouteCandidate candidate : relayOnly) {
+                runCandidate(candidate, candidateTimeouts, candidateSockets, candidateDiagnostics);
+                return;
+            }
             transportFailure("no-route-candidates", "direct route tier exhausted without usable candidate");
         }
 
@@ -1091,7 +1098,8 @@ public class AndroidConnectionService extends Service {
             if (committedCandidate != null) {
                 return;
             }
-            if (diagnostic.path == null || diagnostic.path.startsWith("rtc-")) {
+            if (diagnostic.path == null || diagnostic.path.startsWith("rtc-")
+                || candidateDiagnostics.isEmpty()) {
                 maybeStartRelay(candidateTimeouts, candidateSockets, candidateDiagnostics);
                 return;
             }
@@ -1730,6 +1738,7 @@ public class AndroidConnectionService extends Service {
                 transportFailure("mux-ready-without-active-candidate", "mux-ready arrived without active candidate");
                 return;
             }
+            boolean shouldScheduleHeartbeat = activeMuxReadyCandidate == null;
             activeMuxReadyCandidate = active;
             Runnable timeout = candidateTimeouts.remove(active.candidateId);
             if (timeout != null) workerHandler.removeCallbacks(timeout);
@@ -1745,6 +1754,10 @@ public class AndroidConnectionService extends Service {
             publishServerFrame(AndroidConnectionServiceServerFrameEvent.Kind.MUX_READY, payload);
             replayDesiredChannels();
             refreshNotification();
+            if (shouldScheduleHeartbeat) {
+                scheduleHeartbeat();
+                scheduleBackoffReset();
+            }
         }
 
         private void handleChannelOpened(JSONObject payload) throws JSONException {

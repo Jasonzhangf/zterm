@@ -907,7 +907,8 @@ public final class AndroidConnectionServiceTransportTest {
 
             java.util.Map<String, Runnable> timeouts = (java.util.Map<String, Runnable>) field(runtime, "candidateTimeouts");
             assertEquals(4, timeouts.size());
-            ((Runnable) timeouts.values().toArray()[3]).run();
+            List<Runnable> timeoutList = new ArrayList<>(timeouts.values());
+            timeoutList.get(3).run();
             assertEquals("timeout must not open relay while other direct candidates remain",
                 4, openedUrls.size());
             assertFalse(openedUrls.toString(), openedUrls.toString().contains("relay.example/client"));
@@ -919,11 +920,16 @@ public final class AndroidConnectionServiceTransportTest {
             assertEquals("one direct timeout must not retire while other direct candidates remain open",
                 AndroidConnectionServiceSnapshot.State.CONNECTING,
                 stateMachine.readSnapshot().state);
-            ((Runnable) timeouts.values().toArray()[1]).run();
-            ((Runnable) timeouts.values().toArray()[0]).run();
+            timeoutList.get(1).run();
+            timeoutList.get(2).run();
+            timeoutList.get(0).run();
             assertEquals("after all direct candidates fail the attempt must stay inside the same attempt and reach relay",
                 AndroidConnectionServiceSnapshot.State.CONNECTING,
                 stateMachine.readSnapshot().state);
+            assertEquals("after all direct candidates fail the attempt must open rtc-relay",
+                5, openedUrls.size());
+            assertTrue("opened=" + openedUrls,
+                openedUrls.get(4).contains("relay.example/client"));
         } finally {
             AndroidConnectionService.resetForTests();
         }
@@ -1048,6 +1054,64 @@ public final class AndroidConnectionServiceTransportTest {
                 stateMachine.readSnapshot().state);
             assertEquals("no usable route candidate",
                 stateMachine.readSnapshot().error.message);
+        } finally {
+            AndroidConnectionService.resetForTests();
+        }
+    }
+
+    @Test
+    public void muxReadySchedulesHeartbeatAndNextAttemptResetsMuxReadyGuard()
+        throws Exception {
+        AndroidConnectionService.resetForTests();
+        try {
+            AndroidConnectionService service = new AndroidConnectionService();
+            AndroidConnectionServiceTarget target = new AndroidConnectionServiceTarget.Builder()
+                .targetKey("target-heartbeat-reset")
+                .bridgeHost("127.0.0.1")
+                .bridgePort(3333)
+                .build();
+            Object runtime = newRuntime(service, target);
+            setField(runtime, "stateMachine", connectingStateMachine(target));
+            setField(runtime, "generation", "gen-1");
+            setField(runtime, "transportNetworkGeneration", 0L);
+            setField(service, "networkGeneration", 0L);
+            setField(service, "workerHandler", new Handler(Looper.getMainLooper()));
+
+            List<String> sent = new ArrayList<>();
+            WebSocket socket = fakeSocket(sent, true);
+            java.util.Map<String, WebSocket> candidateSockets =
+                (java.util.Map<String, WebSocket>) field(runtime, "candidateSockets");
+            java.util.Map<String, Object> candidateDiagnostics =
+                (java.util.Map<String, Object>) field(runtime, "candidateDiagnostics");
+            Object diagnostic = candidateDiagnostic(runtime, "lan");
+            String candidateId = (String) candidateField(diagnostic, "candidateId");
+            candidateSockets.put(candidateId, socket);
+            candidateDiagnostics.put(candidateId, diagnostic);
+
+            Method handleMuxReady = runtime.getClass().getDeclaredMethod(
+                "handleMuxReady", JSONObject.class, WebSocket.class);
+            handleMuxReady.setAccessible(true);
+            handleMuxReady.invoke(runtime, muxReadyPayload(), socket);
+
+            Method heartbeatTick = runtime.getClass().getDeclaredMethod("heartbeatTick");
+            heartbeatTick.setAccessible(true);
+            heartbeatTick.invoke(runtime);
+            heartbeatTick.invoke(runtime);
+            long pings = sent.stream()
+                .filter(frame -> frame.contains("\"type\":\"mux-ping\""))
+                .count();
+            assertTrue("heartbeat ticks after mux-ready must emit mux-ping", pings >= 2);
+            assertNotNull(field(runtime, "activeMuxReadyCandidate"));
+
+            Method startAttempt = runtime.getClass().getDeclaredMethod("startAttempt");
+            startAttempt.setAccessible(true);
+            Method resetAttemptState = runtime.getClass().getDeclaredMethod("resetAttemptState");
+            resetAttemptState.setAccessible(true);
+            setField(runtime, "committedCandidate", null);
+            resetAttemptState.invoke(runtime);
+            startAttempt.invoke(runtime);
+            assertEquals("a new attempt must clear the prior mux-ready candidate guard",
+                null, field(runtime, "activeMuxReadyCandidate"));
         } finally {
             AndroidConnectionService.resetForTests();
         }
@@ -1188,6 +1252,24 @@ public final class AndroidConnectionServiceTransportTest {
         Field field = candidate.getClass().getDeclaredField(name);
         field.setAccessible(true);
         return field.get(candidate);
+    }
+
+    private static Object candidateDiagnostic(Object runtime, String path) throws Exception {
+        Object candidate = candidateByPath(buildCandidates(runtime), path);
+        Class<?> diagnosticClass = null;
+        for (Class<?> declared : runtime.getClass().getDeclaredClasses()) {
+            if (declared.getSimpleName().equals("RouteCandidateDiagnostic")) {
+                diagnosticClass = declared;
+                break;
+            }
+        }
+        if (diagnosticClass == null) {
+            throw new IllegalStateException("RouteCandidateDiagnostic class not found");
+        }
+        Constructor<?> constructor = diagnosticClass.getDeclaredConstructor(
+            runtime.getClass(), candidate.getClass());
+        constructor.setAccessible(true);
+        return constructor.newInstance(runtime, candidate);
     }
 
     private static org.json.JSONArray candidateIceJson(Object candidate) throws Exception {

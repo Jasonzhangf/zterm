@@ -1216,7 +1216,6 @@ export function FileTransferSheet({
     }
     if (typeof fastPathTarget.size === 'number') {
       setFastPathTarget(null);
-      console.log('[FileTransferSheet] fast-path download start', { fileName: fastPathTarget.fileName, remotePath: fastPathTarget.remotePath, size: fastPathTarget.size, scopeId: daemonFileScopeId });
       void (async () => {
         if (!fastPathTarget) {
           return;
@@ -1240,9 +1239,7 @@ export function FileTransferSheet({
         if (request.message) {
           sendJson?.(request.message);
         }
-        console.log('[FileTransferSheet] fast-path request message', request.message);
         await request.waitForDone();
-        console.log('[FileTransferSheet] fast-path download finished', request.message);
         forceRuntimeTick((value) => value + 1);
       })().catch((error: unknown) => {
         console.error('[FileTransferSheet] fast-path download failed', error);
@@ -1399,32 +1396,6 @@ export function FileTransferSheet({
               flex: "none",
             }}
           >
-            <div
-              role="button"
-              tabIndex={0}
-              aria-label="进入 /tmp"
-              data-testid="file-transfer-remote-cwd-nav"
-              onClick={() => requestRemoteList("/tmp")}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  requestRemoteList("/tmp");
-                }
-              }}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                padding: "10px 12px",
-                borderRadius: 12,
-                border: "1px solid var(--zterm-skeu-divider)",
-                background: "var(--zterm-panel-muted)",
-                color: SHEET_TEXT,
-              }}
-            >
-              <span aria-hidden="true">📁</span>
-              <span style={{ fontWeight: 700 }}>进入 /tmp</span>
-            </div>
             {remoteLoading ? (
               <div
                 style={{
