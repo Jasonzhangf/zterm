@@ -316,7 +316,7 @@ export function buildTraversalPlan(
     if (relaySignalUrl && mode === 'webrtc' && !relayHostId) {
       throw new Error('WebRTC relay mode requires selecting an online relay daemon device');
     }
-    if (signalUrl && (!relaySignalUrl || relayHostId)) {
+    if (mode !== 'auto' && signalUrl && (!relaySignalUrl || relayHostId)) {
       const parsedSignalUrl = new URL(signalUrl);
       if (relaySignalUrl && relayHostId) {
         parsedSignalUrl.searchParams.set('hostId', relayHostId);

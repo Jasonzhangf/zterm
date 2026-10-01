@@ -260,6 +260,50 @@ describe('buildTraversalPlan', () => {
     expect(JSON.stringify(plan.candidates)).not.toContain('secret');
   });
 
+  it('does not build rtc-direct in auto when only relay candidates are available', () => {
+    const plan = buildTraversalPlan(
+      {
+        bridgeHost: '',
+        bridgePort: 3333,
+        authToken: 'token-a',
+        daemonHostId: 'daemon-host-a',
+        relayHostId: 'daemon-host-a',
+        transportMode: 'auto',
+      },
+      {
+        ...DEFAULT_BRIDGE_SETTINGS,
+        signalUrl: '',
+        turnServerUrl: 'turn:turn.example.com:3478?transport=udp',
+        turnUsername: 'ztermturn',
+        turnCredential: 'turn-pass',
+        transportMode: 'auto',
+        traversalRelay: {
+          relayBaseUrl: 'http://159.75.134.56/relay/',
+          accessToken: 'access-1',
+          userId: 'user-1',
+          username: 'jason',
+          deviceId: 'device-a',
+          deviceName: 'Android',
+          platform: 'android',
+          wsDevicesUrl: 'ws://159.75.134.56/relay/ws/devices',
+          wsHostUrl: 'ws://159.75.134.56/relay/ws/host',
+          wsClientUrl: 'ws://159.75.134.56/relay/ws/client',
+          turnUrl: 'turn:turn.example.com:3478?transport=udp',
+          turnUsername: 'ztermturn',
+          turnCredential: 'turn-pass',
+          updatedAt: 1,
+        },
+      },
+    );
+
+    expect(plan.candidates.map((candidate) => candidate.path)).not.toContain('rtc-direct');
+    expect(plan.candidates).toContainEqual(expect.objectContaining({
+      kind: 'rtc',
+      path: 'rtc-relay',
+      iceTransportPolicy: 'relay',
+    }));
+  });
+
   it('ignores stale saved traversal priority in auto mode', () => {
     const plan = buildTraversalPlan(
       {
