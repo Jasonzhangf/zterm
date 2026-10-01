@@ -42,6 +42,7 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
 
   private readonly targetKey: string;
   private disposed = false;
+  private projectionDetached = false;
   private removeListeners: Array<() => Promise<void>> = [];
   private readyGeneration: string | null = null;
   private pendingGeneration: string | null = null;
@@ -65,6 +66,32 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
     if (this.disposed) {
       throw new Error('AndroidConnectionServiceTransportSocket is disposed');
     }
+    this.projectionDetached = false;
+    await this.attachNativeListeners();
+    const snapshot = await readAndroidConnectionServiceSnapshot(this.targetKey);
+    this.applySnapshot(snapshot);
+  }
+
+  /**
+   * Re-attach the JS projection to the still-owned native transport after a UI
+   * detach. This reads the native snapshot again and never binds/reconnects or
+   * releases the service-owned target. Returns false when nothing was detached.
+   */
+  async reattach(): Promise<boolean> {
+    if (this.disposed) {
+      throw new Error('AndroidConnectionServiceTransportSocket is disposed');
+    }
+    if (!this.projectionDetached) {
+      return false;
+    }
+    this.projectionDetached = false;
+    await this.attachNativeListeners();
+    const snapshot = await readAndroidConnectionServiceSnapshot(this.targetKey);
+    this.applySnapshot(snapshot);
+    return true;
+  }
+
+  private async attachNativeListeners(): Promise<void> {
     const handles = await Promise.all([
       addAndroidConnectionServiceListener('androidConnectionSnapshot', (snapshot) => {
         if (this.disposed) {
@@ -109,8 +136,6 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
       }),
     ]);
     this.removeListeners.push(...handles.map((handle) => () => handle.remove()));
-    const snapshot = await readAndroidConnectionServiceSnapshot(this.targetKey);
-    this.applySnapshot(snapshot);
   }
 
   send(data: string | ArrayBuffer): void {
@@ -140,9 +165,17 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
   }
 
   close(_code?: number, _reason?: string): void {
-    // A UI-originated close is projection-only. The service owns transport
-    // release policy; this adapter only marks the local projection detached.
-    this.dispose('ui-detach');
+    // A UI-originated close is projection-only and reversible. The service
+    // owns transport release policy, so this adapter only detaches its local
+    // listeners and stays re-attachable via `reattach()`; a permanent
+    // disposition is reserved for projection failure (see `reportFailure`).
+    if (this.disposed) {
+      return;
+    }
+    this.projectionDetached = true;
+    this.readyState = WebSocket.CLOSED;
+    this.removeNativeListeners();
+    this.onclose?.({ code: 1000, reason: 'ui-detach' });
   }
 
   reportFailure(reason: string, options?: { authFailure?: boolean }): void {
@@ -340,16 +373,6 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
         },
       }),
     });
-  }
-
-  private dispose(reason: string) {
-    if (this.disposed) {
-      return;
-    }
-    this.disposed = true;
-    this.readyState = WebSocket.CLOSED;
-    this.removeNativeListeners();
-    this.onclose?.({ code: 1000, reason });
   }
 
   private removeNativeListeners() {

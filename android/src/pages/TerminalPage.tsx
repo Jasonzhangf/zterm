@@ -132,6 +132,7 @@ import {
   findNearestJunctionPreviewCell,
   projectJunctionPreviewLiveIds,
   readJunctionPreviewLattice,
+  replaceJunctionPreviewFocusCell,
   resolveJunctionPreviewCell,
   setJunctionPreviewCell,
   writeJunctionPreviewLattice,
@@ -731,9 +732,6 @@ function TerminalPageComponent({
   const [sessionPreviewOpen, setSessionPreviewOpen] = useState(false);
   const [sessionPreviewFocus, setSessionPreviewFocus] = useState<JunctionPreviewCoordinate>({ col: 0, row: 0 });
   const [sessionPreviewSideEdge, setSessionPreviewSideEdge] = useState<'left' | 'right'>('left');
-  const [sessionPreviewOverviewCoordinates, setSessionPreviewOverviewCoordinates] = useState<
-    JunctionPreviewCoordinate[] | null
-  >(null);
   const showSessionPreviewError = useCallback((message: string, detail?: string) => {
     setTerminalDialog({
       tone: 'error',
@@ -1155,11 +1153,6 @@ function TerminalPageComponent({
   );
   const sessionPreviewVisibleSessions = useMemo(
     () => {
-      if (sessionPreviewOverviewCoordinates) {
-        return sessionPreviewOverviewCoordinates
-          .map((cell) => resolveJunctionPreviewCell(sessionPreviewLattice, cell, sessions))
-          .filter((session): session is NonNullable<typeof session> => Boolean(session));
-      }
       // Live-set projection must include all 4 neighbor cells around the focus
       // so sessions assigned to the non-side edge (e.g. right side when
       // sideEdge='left') still receive live buffer while preview is open.
@@ -1181,7 +1174,7 @@ function TerminalPageComponent({
         .map((cell) => resolveJunctionPreviewCell(sessionPreviewLattice, cell, sessions))
         .filter((session): session is NonNullable<typeof session> => Boolean(session));
     },
-    [sessionPreviewLayout, sessionPreviewLattice, sessionPreviewOverviewCoordinates, sessionPreviewOpen, sessionPreviewFocus, sessions],
+    [sessionPreviewLayout, sessionPreviewLattice, sessionPreviewOpen, sessionPreviewFocus, sessions],
   );
   const sessionPreviewFocusSession = sessionPreviewOpen
     ? resolveJunctionPreviewCell(sessionPreviewLattice, sessionPreviewFocus, sessions)
@@ -3130,9 +3123,27 @@ function TerminalPageComponent({
       sessions: previewDrawerSessions,
       direction,
     });
-    if (result.action === 'none') return;
-    handleSetSessionPreviewCell(result.coordinate, result.sessionId);
-  }, [handleSetSessionPreviewCell, previewDrawerSessions, sessionPreviewFocus, sessionPreviewLattice.cells]);
+    if (result.action !== 'replace') return;
+    const target = resolveSessionPreviewTargetFromDrawerSelection(result.sessionId);
+    if (!target) return;
+    const replaceResult = replaceJunctionPreviewFocusCell(
+      sessionPreviewLattice,
+      result.coordinate,
+      target,
+    );
+    if (!replaceResult.ok) {
+      showSessionPreviewError('该格无法指定 session。');
+      return;
+    }
+    persistSessionPreviewLattice(replaceResult.lattice);
+  }, [
+    persistSessionPreviewLattice,
+    previewDrawerSessions,
+    resolveSessionPreviewTargetFromDrawerSelection,
+    sessionPreviewFocus,
+    sessionPreviewLattice,
+    showSessionPreviewError,
+  ]);
 
   const handleOpenSessionDrawer = useCallback(() => {
     setSessionDrawerOpen(true);
@@ -3226,7 +3237,6 @@ function TerminalPageComponent({
       ) !== null
       : false;
     if (activeCoordinate && activeCoordinateHasCurrentIdentity) {
-      setSessionPreviewOverviewCoordinates(null);
       setSessionPreviewFocus(activeCoordinate);
       setSessionPreviewSideEdge(activeCoordinate.col < 0 ? 'right' : 'left');
       setSessionPreviewOpen(true);
@@ -3247,7 +3257,6 @@ function TerminalPageComponent({
       return;
     }
     persistSessionPreviewLattice(result.lattice);
-    setSessionPreviewOverviewCoordinates(null);
     setSessionPreviewFocus(coordinate);
     setSessionPreviewSideEdge('left');
     setSessionPreviewOpen(true);
@@ -3268,7 +3277,6 @@ function TerminalPageComponent({
   const handleCancelSessionPreview = useCallback(() => {
     const entry = sessionPreviewEntryRef.current;
     sessionPreviewEntryRef.current = null;
-    setSessionPreviewOverviewCoordinates(null);
     setSessionPreviewOpen(false);
     if (!entry) return;
     setSessionGroupSlotIds(entry.slotIds);
@@ -3836,7 +3844,6 @@ function TerminalPageComponent({
           onClearPreviewCell: handleClearSessionPreviewCell,
           onCycleSession: handleCyclePreviewSession,
           onPinchVerticalCwdStep: handlePinchVerticalCwdStep,
-          onPreviewOverviewChange: setSessionPreviewOverviewCoordinates,
           onOpenSessionDrawer: sessionDrawerGestureEnabled ? handleOpenSessionDrawer : undefined,
         },
         copyMenu: copySelection.menu && !sessionDrawerOpen

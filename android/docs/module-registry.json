@@ -2281,6 +2281,8 @@
         "src/hooks/useShortcutFrequencyStorage.ts",
         "src/lib/key-sequence.ts",
         "src/plugins/ScreenOrientationPlugin.ts",
+        "src/plugins/PickedImageUriPlugin.ts",
+        "native/android/app/src/main/java/com/zterm/android/PickedImageUriPlugin.java",
         "src/lib/terminal-quickbar-logic.ts",
         "src/lib/terminal-quickbar-storage.ts"
       ]

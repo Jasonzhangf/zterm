@@ -155,7 +155,10 @@ describe('ensureActiveSessionFreshRuntime', () => {
     expect(reconnectSession).not.toHaveBeenCalled();
   });
 
-  it('keeps foreground data refresh from reconnecting a missing transport', () => {
+  it('reattaches a missing transport on foreground resume instead of leaving it detached', () => {
+    // A UI-detached connection-service projection leaves no JS socket while the
+    // native owner still holds the target; foreground resume must re-attach the
+    // projection (snapshot replay) rather than staying permanently detached.
     const requestSessionBufferHead = vi.fn();
     const reconnectSession = vi.fn();
     const options = createBaseOptions({
@@ -170,9 +173,9 @@ describe('ensureActiveSessionFreshRuntime', () => {
       reconnectSession,
     });
 
-    expect(ensureActiveSessionFreshRuntime(options)).toBe(false);
+    expect(ensureActiveSessionFreshRuntime(options)).toBe(true);
     expect(requestSessionBufferHead).not.toHaveBeenCalled();
-    expect(reconnectSession).not.toHaveBeenCalled();
+    expect(reconnectSession).toHaveBeenCalledWith('session-1');
   });
 
   it('does not treat a missing channel handle as a closed mux channel while the socket is open', () => {

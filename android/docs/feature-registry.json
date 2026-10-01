@@ -44,12 +44,17 @@
         "src/lib/terminal-shortcut-actions.ts",
         "src/lib/plugin-quickbar/quickbar-contract.ts",
         "src/lib/plugin-host/quickbar-ui-plugin.tsx",
+        "src/plugins/PickedImageUriPlugin.ts",
+        "native/android/app/src/main/java/com/zterm/android/PickedImageUriPlugin.java",
         "packages/shared/src/shortcuts/terminal-shortcut-composer.ts"
       ],
       "allowed_paths": [
         "src/components/terminal/TerminalQuickBar.tsx",
         "src/components/terminal/TerminalQuickBar.test.tsx",
         "src/components/terminal/terminal-quickbar-helpers.tsx",
+        "src/plugins/PickedImageUriPlugin.ts",
+        "native/android/app/src/main/java/com/zterm/android/PickedImageUriPlugin.java",
+        "native/android/app/src/main/java/com/zterm/android/MainActivity.java",
         "src/lib/plugin-quickbar/",
         "src/lib/plugin-host/quickbar-ui-plugin.tsx",
         "src/lib/plugin-host/plugin-host-runtime.test.ts",
@@ -75,6 +80,7 @@
       ],
       "required_gates": [
         "src/components/terminal/TerminalQuickBar.test.tsx",
+        "src/contexts/session-context-transfer-runtime.test.ts",
         "src/pages/terminal-page-status-helpers.test.ts",
         "src/lib/plugin-quickbar/quickbar-ui-ownership.test.ts",
         "src/lib/plugin-host/plugin-host-runtime.test.ts",

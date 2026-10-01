@@ -744,6 +744,31 @@ describe('AndroidConnectionServiceTransportSocket', () => {
     }));
   });
 
+  it('re-attaches the projection after a UI detach without recreating the transport', async () => {
+    const { listeners, add, removes } = listenerMock();
+    plugin.addListener.mockImplementation(add);
+    const socket = new AndroidConnectionServiceTransportSocket(target);
+
+    await socket.start();
+    expect(add).toHaveBeenCalledTimes(6);
+
+    socket.close(1000, 'ui-detach');
+    await Promise.resolve();
+    expect([...removes.values()]).toHaveLength(6);
+    expect(socket.readyState).toBe(WebSocket.CLOSED);
+
+    const reattached = await socket.reattach();
+
+    expect(reattached).toBe(true);
+    expect(add).toHaveBeenCalledTimes(12);
+    expect(listeners.get('androidConnectionSnapshot')).toBeTruthy();
+    expect(plugin.sendCommand).not.toHaveBeenCalledWith(expect.objectContaining({
+      type: 'bind-target',
+    }));
+    // A second reattach is a no-op while the projection is attached.
+    expect(await socket.reattach()).toBe(false);
+  });
+
   it('maps channel frames to typed service commands without owning transport', () => {
     const socket = new AndroidConnectionServiceTransportSocket(target);
     socket.send(JSON.stringify({

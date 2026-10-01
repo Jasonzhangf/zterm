@@ -274,7 +274,7 @@ describe('TerminalPage junction preview integration', () => {
     expect(onLiveSessionIdsChange.mock.calls.at(-1)?.[0]).toContain('s5');
   });
 
-  it('subscribes the full lattice while overview is active and restores the junction view on 1x', async () => {
+  it('keeps the junction live projection stable because preview is not zoomable', async () => {
     const sessions = Array.from({ length: 5 }, (_, index) => makeSession(`s${index + 1}`));
     writeLattice(sessions);
     const onLiveSessionIdsChange = vi.fn();
@@ -297,29 +297,23 @@ describe('TerminalPage junction preview integration', () => {
     });
     fireEvent.touchMove(grid, {
       touches: [
-        { clientX: 125, clientY: 200 },
-        { clientX: 175, clientY: 200 },
+        { clientX: 125, clientY: 220 },
+        { clientX: 175, clientY: 220 },
       ],
     });
-    await waitFor(() => expect(onLiveSessionIdsChange.mock.calls.at(-1)?.[0]).toEqual(
-      expect.arrayContaining(['s1', 's2', 's3', 's4', 's5']),
-    ));
+    fireEvent.touchEnd(grid, {
+      changedTouches: [
+        { clientX: 125, clientY: 220 },
+        { clientX: 175, clientY: 220 },
+      ],
+    });
 
-    fireEvent.touchMove(grid, {
-      touches: [
-        { clientX: 90, clientY: 190 },
-        { clientX: 210, clientY: 190 },
-      ],
-    });
-    fireEvent.touchMove(grid, {
-      touches: [
-        { clientX: 75, clientY: 180 },
-        { clientX: 225, clientY: 180 },
-      ],
-    });
-    // After restoring 1x, s5 remains in the live-set because the neighbor
-    // projection includes all 4 directional cells around the focus.
-    expect(onLiveSessionIdsChange.mock.calls.at(-1)?.[0]).toContain('s5');
+    // A pinch must not expand the live set to a whole-lattice overview; the
+    // junction neighbor projection (focus + 4 neighbors) stays in force.
+    await waitFor(() => expect(screen.queryByTestId('terminal-preview-scaler')).toBeNull());
+    expect(onLiveSessionIdsChange.mock.calls.at(-1)?.[0]).toEqual(
+      expect.arrayContaining(['s1', 's2', 's3', 's4', 's5']),
+    );
   });
 
   it('pans focus to an edge cell without switching the active shell session', async () => {
@@ -672,8 +666,9 @@ describe('TerminalPage junction preview integration', () => {
     await waitFor(() => expect(screen.getByTestId('terminal-preview-tile-s2').dataset.previewFocus).toBe('true'));
 
     const grid = screen.getByTestId('terminal-preview-grid');
-    fireEvent.touchStart(grid, { touches: [{ clientX: 80, clientY: 200 }] });
-    fireEvent.touchEnd(grid, { changedTouches: [{ clientX: 160, clientY: 204 }] });
+    fireEvent.touchStart(grid, { touches: [{ clientX: 330, clientY: 200 }] });
+    fireEvent.touchMove(grid, { touches: [{ clientX: 410, clientY: 204 }] });
+    fireEvent.touchEnd(grid, { changedTouches: [{ clientX: 410, clientY: 204 }] });
 
     await waitFor(() => expect(screen.queryByTestId('terminal-preview-grid')).toBeNull());
     expect(onSwitchSession).toHaveBeenCalledWith('s2');

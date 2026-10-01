@@ -293,237 +293,123 @@ describe('TerminalPreviewGrid', () => {
     expect(screen.getByTestId(`terminal-preview-assign-${unopenedId}`)).toBeTruthy();
   });
 
-  it('pinches to overview scale, pans locally, and restores to 1x with cleared pan', () => {
+  it('renders no scale/pan projection because preview is not zoomable', () => {
     setViewport(374, 706);
     renderGrid();
 
-    const grid = screen.getByTestId('terminal-preview-grid');
-    const scaler = screen.getByTestId('terminal-preview-scaler');
-    expect(scaler.dataset.previewScale).toBe('1');
-
-    fireEvent.touchStart(grid, {
-      touches: [
-        { clientX: 100, clientY: 200 },
-        { clientX: 200, clientY: 200 },
-      ],
-    });
-    fireEvent.touchMove(grid, {
-      touches: [
-        { clientX: 125, clientY: 220 },
-        { clientX: 175, clientY: 220 },
-      ],
-    });
-    expect(Number(scaler.dataset.previewScale)).toBeLessThan(1);
-    expect(Number(scaler.dataset.previewPanX)).toBe(0);
-    expect(Number(scaler.dataset.previewPanY)).toBe(0);
-
-    fireEvent.touchEnd(grid, {
-      changedTouches: [
-        { clientX: 125, clientY: 220 },
-        { clientX: 175, clientY: 220 },
-      ],
-    });
-    fireEvent.touchStart(grid, { touches: [{ clientX: 160, clientY: 260 }] });
-    fireEvent.touchMove(grid, { touches: [{ clientX: 190, clientY: 280 }] });
-    fireEvent.touchEnd(grid, { changedTouches: [{ clientX: 190, clientY: 280 }] });
-
-    expect(Number(scaler.dataset.previewPanX)).toBeGreaterThan(0);
-    expect(Number(scaler.dataset.previewPanY)).toBeGreaterThan(0);
-
-    fireEvent.touchStart(grid, {
-      touches: [
-        { clientX: 120, clientY: 220 },
-        { clientX: 180, clientY: 220 },
-      ],
-    });
-    fireEvent.touchMove(grid, {
-      touches: [
-        { clientX: 90, clientY: 200 },
-        { clientX: 210, clientY: 200 },
-      ],
-    });
-    fireEvent.touchEnd(grid, {
-      changedTouches: [
-        { clientX: 90, clientY: 200 },
-        { clientX: 210, clientY: 200 },
-      ],
-    });
-
-    expect(scaler.dataset.previewScale).toBe('1');
-    expect(scaler.dataset.previewPanX).toBe('0');
-    expect(scaler.dataset.previewPanY).toBe('0');
-  });
-
-  it('renders the whole lattice in overview and lets a distant tile become focus', () => {
-    setViewport(374, 706);
-    const onFocusChange = vi.fn();
-    renderGrid({
-      lattice: latticeFor([
-        { col: 0, row: 0, session: sessions[2] },
-        { col: 4, row: 0, session: sessions[7] },
-      ]),
-      onFocusChange,
-    });
-
-    expect(screen.queryByTestId('terminal-preview-tile-s8')).toBeNull();
-    const grid = screen.getByTestId('terminal-preview-grid');
-    fireEvent.touchStart(grid, {
-      touches: [
-        { clientX: 100, clientY: 200 },
-        { clientX: 200, clientY: 200 },
-      ],
-    });
-    fireEvent.touchMove(grid, {
-      touches: [
-        { clientX: 125, clientY: 220 },
-        { clientX: 175, clientY: 220 },
-      ],
-    });
-    fireEvent.touchEnd(grid, {
-      changedTouches: [
-        { clientX: 125, clientY: 220 },
-        { clientX: 175, clientY: 220 },
-      ],
-    });
-
-    const distantTile = screen.getByTestId('terminal-preview-tile-s8');
-    expect(distantTile.dataset.previewFocus).toBe('false');
-    expect(Number.parseFloat(distantTile.style.width)).toBeGreaterThan(100);
-    fireEvent.touchStart(distantTile, { touches: [{ clientX: 40, clientY: 300 }] });
-    fireEvent.touchEnd(distantTile, { changedTouches: [{ clientX: 40, clientY: 300 }] });
-    fireEvent.click(distantTile);
-    expect(onFocusChange).toHaveBeenCalledWith({ col: 4, row: 0 });
-  });
-
-  it('reports the full populated lattice to the live projection while overview is active', () => {
-    setViewport(374, 706);
-    const onOverviewChange = vi.fn();
-    renderGrid({
-      lattice: latticeFor([
-        { col: 0, row: 0, session: sessions[2] },
-        { col: 4, row: 0, session: sessions[7] },
-      ]),
-      onOverviewChange,
-    });
-
-    const grid = screen.getByTestId('terminal-preview-grid');
-    fireEvent.touchStart(grid, {
-      touches: [
-        { clientX: 100, clientY: 200 },
-        { clientX: 200, clientY: 200 },
-      ],
-    });
-    fireEvent.touchMove(grid, {
-      touches: [
-        { clientX: 125, clientY: 200 },
-        { clientX: 175, clientY: 200 },
-      ],
-    });
-
-    expect(onOverviewChange).toHaveBeenLastCalledWith([
-      { col: 0, row: 0 },
-      { col: 4, row: 0 },
-    ]);
-  });
-
-  it('scales the overview projection without changing the renderer pane dimensions', () => {
-    setViewport(374, 706);
-    renderGrid();
-
-    const focusTile = screen.getByTestId('terminal-preview-tile-s3');
-    const focusBody = screen.getByTestId('terminal-preview-body-s3');
-    const focusWidth = focusTile.style.width;
-    const focusHeight = focusTile.style.height;
-    const bodyWidth = focusBody.style.width;
-    const bodyHeight = focusBody.style.height;
-
-    const grid = screen.getByTestId('terminal-preview-grid');
-    fireEvent.touchStart(grid, {
-      touches: [
-        { clientX: 100, clientY: 200 },
-        { clientX: 200, clientY: 200 },
-      ],
-    });
-    fireEvent.touchMove(grid, {
-      touches: [
-        { clientX: 125, clientY: 200 },
-        { clientX: 175, clientY: 200 },
-      ],
-    });
-
-    const overviewFocusTile = screen.getByTestId('terminal-preview-tile-s3');
-    const overviewFocusBody = screen.getByTestId('terminal-preview-body-s3');
-    expect(overviewFocusTile.style.width).toBe(focusWidth);
-    expect(overviewFocusTile.style.height).toBe(focusHeight);
-    expect(overviewFocusBody.style.width).toBe(bodyWidth);
-    expect(overviewFocusBody.style.height).toBe(bodyHeight);
-  });
-
-  it('fits and centers the overview projection inside the preview viewport', () => {
-    setViewport(374, 706);
-    renderGrid();
-
+    expect(screen.queryByTestId('terminal-preview-scaler')).toBeNull();
     const grid = screen.getByTestId('terminal-preview-grid');
     const content = grid.lastElementChild as HTMLElement;
-    const contentRect = {
-      x: 0,
-      y: 0,
-      width: 374,
-      height: 706 - JUNCTION_PREVIEW_HEADER_HEIGHT_PX,
-      top: 0,
-      right: 374,
-      bottom: 706 - JUNCTION_PREVIEW_HEADER_HEIGHT_PX,
-      left: 0,
-      toJSON: () => ({}),
-    };
-    const resizeObservers: Array<() => void> = [];
-    const originalResizeObserver = globalThis.ResizeObserver;
-    globalThis.ResizeObserver = class ResizeObserverMock {
-      private readonly callback: ResizeObserverCallback;
+    expect(content.style.transform).toBe('');
+  });
 
-      constructor(callback: ResizeObserverCallback) {
-        this.callback = callback;
-        resizeObservers.push(() => this.callback([], this as unknown as ResizeObserver));
-      }
+  it('cycles the focus across same-cwd cells on a middle horizontal swipe', () => {
+    setViewport(374, 706);
+    const onCycleSession = vi.fn();
+    const onClose = vi.fn();
+    renderGrid({ onCycleSession, onClose });
+    const grid = screen.getByTestId('terminal-preview-grid');
 
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    } as unknown as typeof ResizeObserver;
-    content.getBoundingClientRect = () => contentRect as DOMRect;
-    act(() => {
-      for (const trigger of resizeObservers) trigger();
-    });
-    globalThis.ResizeObserver = originalResizeObserver;
+    fireEvent.touchStart(grid, { touches: [{ clientX: 200, clientY: 300 }] });
+    fireEvent.touchMove(grid, { touches: [{ clientX: 100, clientY: 304 }] });
+    fireEvent.touchEnd(grid, { changedTouches: [{ clientX: 100, clientY: 304 }] });
+
+    expect(onCycleSession).toHaveBeenCalledTimes(1);
+    expect(onCycleSession).toHaveBeenCalledWith('next');
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('moves focus the other way on a middle rightward swipe without exiting', () => {
+    setViewport(374, 706);
+    const onCycleSession = vi.fn();
+    const onClose = vi.fn();
+    renderGrid({ onCycleSession, onClose });
+    const grid = screen.getByTestId('terminal-preview-grid');
+
+    fireEvent.touchStart(grid, { touches: [{ clientX: 120, clientY: 300 }] });
+    fireEvent.touchMove(grid, { touches: [{ clientX: 220, clientY: 302 }] });
+    fireEvent.touchEnd(grid, { changedTouches: [{ clientX: 220, clientY: 302 }] });
+
+    expect(onCycleSession).toHaveBeenCalledWith('previous');
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('closes only on a rightward swipe that starts inside the right-edge band', () => {
+    setViewport(374, 706);
+    const onCycleSession = vi.fn();
+    const onClose = vi.fn();
+    renderGrid({ onCycleSession, onClose });
+    const grid = screen.getByTestId('terminal-preview-grid');
+
+    // Right-edge band for a 374px viewport is clientX >= 310.
+    fireEvent.touchStart(grid, { touches: [{ clientX: 340, clientY: 300 }] });
+    fireEvent.touchMove(grid, { touches: [{ clientX: 410, clientY: 302 }] });
+    fireEvent.touchEnd(grid, { changedTouches: [{ clientX: 410, clientY: 302 }] });
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onCycleSession).not.toHaveBeenCalled();
+  });
+
+  it('keeps a leftward right-edge gesture as a cycle rather than an exit', () => {
+    setViewport(374, 706);
+    const onCycleSession = vi.fn();
+    const onClose = vi.fn();
+    renderGrid({ onCycleSession, onClose });
+    const grid = screen.getByTestId('terminal-preview-grid');
+
+    fireEvent.touchStart(grid, { touches: [{ clientX: 350, clientY: 300 }] });
+    fireEvent.touchMove(grid, { touches: [{ clientX: 250, clientY: 302 }] });
+    fireEvent.touchEnd(grid, { changedTouches: [{ clientX: 250, clientY: 302 }] });
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(onCycleSession).toHaveBeenCalledWith('next');
+  });
+
+  it('steps to the adjacent cwd on a two-finger vertical swipe', () => {
+    setViewport(374, 706);
+    const onPinchVerticalCwdStep = vi.fn();
+    const onCycleSession = vi.fn();
+    renderGrid({ onPinchVerticalCwdStep, onCycleSession });
+    const grid = screen.getByTestId('terminal-preview-grid');
 
     fireEvent.touchStart(grid, {
       touches: [
-        { clientX: 100, clientY: 200 },
-        { clientX: 200, clientY: 200 },
+        { clientX: 140, clientY: 240 },
+        { clientX: 220, clientY: 240 },
       ],
     });
     fireEvent.touchMove(grid, {
       touches: [
-        { clientX: 125, clientY: 200 },
-        { clientX: 175, clientY: 200 },
+        { clientX: 140, clientY: 320 },
+        { clientX: 220, clientY: 320 },
+      ],
+    });
+    fireEvent.touchEnd(grid, {
+      changedTouches: [
+        { clientX: 140, clientY: 320 },
+        { clientX: 220, clientY: 320 },
       ],
     });
 
-    const scaler = screen.getByTestId('terminal-preview-scaler');
-    const fitScale = Number(scaler.dataset.previewEffectiveScale);
-    const contentWidth = Number(scaler.dataset.previewContentWidth);
-    const contentHeight = Number(scaler.dataset.previewContentHeight);
-    const translateX = Number(scaler.dataset.previewTranslateX);
-    const translateY = Number(scaler.dataset.previewTranslateY);
+    expect(onPinchVerticalCwdStep).toHaveBeenCalledWith('next');
+    expect(onCycleSession).not.toHaveBeenCalled();
+  });
 
-    expect(fitScale).toBeGreaterThan(0);
-    expect(fitScale).toBeLessThanOrEqual(1);
-    expect(translateX).toBeGreaterThanOrEqual(0);
-    expect(translateY).toBeGreaterThanOrEqual(0);
-    expect(translateX + contentWidth * fitScale).toBeLessThanOrEqual(contentRect.width);
-    expect(translateY + contentHeight * fitScale).toBeLessThanOrEqual(contentRect.height);
-    expect(translateX).toBeCloseTo((contentRect.width - contentWidth * fitScale) / 2, 5);
-    expect(translateY).toBeCloseTo((contentRect.height - contentHeight * fitScale) / 2, 5);
+  it('does not move focus, cycle, or exit on a single-finger vertical drag', () => {
+    setViewport(374, 706);
+    const onFocusChange = vi.fn();
+    const onCycleSession = vi.fn();
+    const onClose = vi.fn();
+    renderGrid({ onFocusChange, onCycleSession, onClose });
+    const grid = screen.getByTestId('terminal-preview-grid');
+
+    fireEvent.touchStart(grid, { touches: [{ clientX: 200, clientY: 200 }] });
+    fireEvent.touchMove(grid, { touches: [{ clientX: 204, clientY: 300 }] });
+    fireEvent.touchEnd(grid, { changedTouches: [{ clientX: 204, clientY: 300 }] });
+
+    expect(onFocusChange).not.toHaveBeenCalled();
+    expect(onCycleSession).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it('allows an empty-cell tap immediately after a pinch gesture', () => {
@@ -637,18 +523,20 @@ describe('TerminalPreviewGrid', () => {
     expect(onFocusChange).toHaveBeenCalledWith({ col: 1, row: 0 });
   });
 
-  it('exits on a horizontal right swipe but not a vertical gesture', () => {
+  it('does not exit on a vertical gesture and only exits from the right-edge band', () => {
     setViewport(374, 706);
     const onClose = vi.fn();
     renderGrid({ onClose });
     const grid = screen.getByTestId('terminal-preview-grid');
 
-    fireEvent.touchStart(grid, { touches: [{ clientX: 80, clientY: 200 }] });
-    fireEvent.touchEnd(grid, { changedTouches: [{ clientX: 160, clientY: 204 }] });
+    fireEvent.touchStart(grid, { touches: [{ clientX: 340, clientY: 200 }] });
+    fireEvent.touchMove(grid, { touches: [{ clientX: 420, clientY: 204 }] });
+    fireEvent.touchEnd(grid, { changedTouches: [{ clientX: 420, clientY: 204 }] });
     expect(onClose).toHaveBeenCalledTimes(1);
 
-    fireEvent.touchStart(grid, { touches: [{ clientX: 80, clientY: 200 }] });
-    fireEvent.touchEnd(grid, { changedTouches: [{ clientX: 84, clientY: 280 }] });
+    fireEvent.touchStart(grid, { touches: [{ clientX: 340, clientY: 200 }] });
+    fireEvent.touchMove(grid, { touches: [{ clientX: 344, clientY: 300 }] });
+    fireEvent.touchEnd(grid, { changedTouches: [{ clientX: 344, clientY: 300 }] });
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
