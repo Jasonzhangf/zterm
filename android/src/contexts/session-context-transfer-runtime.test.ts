@@ -172,6 +172,12 @@ describe('session-context-transfer-runtime', () => {
       timeoutMs: 300,
       sessions: [{ id: 'session-1', state: 'disconnected' } as any],
       daemonConnection: {
+        readSessionResource: () => ({
+          sessionId: 'session-1',
+          terminalSocket: closedSocket,
+          socket: closedSocket,
+          channel: null,
+        }),
         readOpenSessionSocket: vi.fn(() => sockets.shift() || openSocket),
       } as any,
       requestReconnect,
@@ -182,6 +188,44 @@ describe('session-context-transfer-runtime', () => {
       'session-1',
       'transfer transport unavailable',
     );
+  });
+
+  it('reopens the terminal mux channel instead of rebuilding transport when the physical target socket is open', async () => {
+    const physicalSocket = { readyState: WebSocket.OPEN } as any;
+    let throwClosedChannel = true;
+    const requestReopen = vi.fn((_sessionId: string, _reason: string) => {
+      throwClosedChannel = false;
+    });
+    const requestReconnect = vi.fn();
+
+    await expect(ensureSessionReadyForPasteRuntime({
+      sessionId: 'session-1',
+      timeoutMs: 300,
+      sessions: [{ id: 'session-1', state: 'disconnected' } as any],
+      daemonConnection: {
+        readSessionResource: () => ({
+          sessionId: 'session-1',
+          terminalSocket: physicalSocket,
+          socket: physicalSocket,
+          channel: { state: 'closed' },
+        }),
+        readOpenSessionSocket: () => {
+          if (throwClosedChannel) {
+            throw new Error('image paste requires an open terminal mux channel');
+          }
+          return physicalSocket;
+        },
+      } as any,
+      requestReopen,
+      requestReconnect,
+    })).resolves.toBe(physicalSocket);
+
+    expect(requestReopen).toHaveBeenCalledTimes(1);
+    expect(requestReopen).toHaveBeenCalledWith(
+      'session-1',
+      'transfer terminal channel unavailable',
+    );
+    expect(requestReconnect).not.toHaveBeenCalled();
   });
 
   it('serializes remote-window paste target without terminal Ctrl+V sequence', async () => {

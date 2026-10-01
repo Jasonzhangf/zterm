@@ -138,6 +138,28 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
     this.removeListeners.push(...handles.map((handle) => () => handle.remove()));
   }
 
+  private clearProjectedChannels(reason: string, code: string) {
+    const channelIds = Array.from(this.projectedChannelIds);
+    if (channelIds.length === 0) {
+      this.readyChannelIds.clear();
+      return;
+    }
+    for (const channelId of channelIds) {
+      this.readyChannelIds.delete(channelId);
+      this.projectedChannelIds.delete(channelId);
+      this.onmessage?.({
+        data: JSON.stringify({
+          type: 'mux-channel-closed',
+          payload: {
+            channelId,
+            reason,
+            code,
+          },
+        }),
+      });
+    }
+  }
+
   send(data: string | ArrayBuffer): void {
     if (this.disposed) {
       throw new Error('AndroidConnectionServiceTransportSocket is disposed');
@@ -236,6 +258,7 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
       if (snapshot.generation && this.retiredGenerations.has(snapshot.generation)) return;
       if (this.readyGeneration) {
         if (!snapshot.generation || snapshot.generation === this.readyGeneration) return;
+        this.clearProjectedChannels('service-reconnect', 'native_reconnect');
         this.retiredGenerations.add(this.readyGeneration);
         this.readyGeneration = null;
         this.muxReadyGeneration = null;
@@ -283,6 +306,7 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
     if (snapshot.state === 'backoff-reconnect') {
       const hadReadyGeneration = Boolean(this.readyGeneration);
       if (snapshot.generation && this.readyGeneration && snapshot.generation !== this.readyGeneration) return;
+      this.clearProjectedChannels('service-reconnect', 'native_reconnect');
       this.readyState = WebSocket.CLOSED;
       const retiredGeneration = snapshot.generation || this.readyGeneration || this.pendingGeneration;
       if (retiredGeneration) this.retiredGenerations.add(retiredGeneration);

@@ -95,6 +95,12 @@ export function createClientDaemonConnection(options: {
             : null)
       : resource.socket;
     if (ws && ws.readyState === WebSocket.OPEN) {
+      if (resource.terminalSocket && resource.terminalSocket === ws) {
+        const channelReady = channelState === 'open' || channelState === 'opening';
+        if (!channelReady) {
+          throw new Error(`${purpose} requires an open terminal mux channel (socket=${formatSocketReadyState(ws)}, target=${resource.targetKey || 'missing'}, channel=${channelState || 'missing'})`);
+        }
+      }
       return ws;
     }
     throw new Error(`${purpose} requires an open daemon connection (socket=${formatSocketReadyState(ws)}, target=${resource.targetKey || 'missing'}, channel=${channelState || 'missing'})`);

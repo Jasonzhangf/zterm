@@ -83,6 +83,20 @@ describe('client.daemon_connection interface', () => {
     );
   });
 
+  it('rejects an open mux target socket before a terminal channel has been bound', () => {
+    const targetSocket = { readyState: WebSocket.OPEN };
+    const connection = createClientDaemonConnection({
+      readSessionTransportResource: () => createResource(targetSocket, {
+        channel: null,
+      }),
+      sendSocketPayload: vi.fn(),
+    });
+
+    expect(() => connection.readOpenSessionSocket('session-1', 'image paste')).toThrow(
+      'image paste requires an open terminal mux channel',
+    );
+  });
+
   it('opens target transports through the daemon connection owner hook', () => {
     const openedSocket = { readyState: WebSocket.CONNECTING };
     const openSessionTargetTransport = vi.fn(() => openedSocket as any);

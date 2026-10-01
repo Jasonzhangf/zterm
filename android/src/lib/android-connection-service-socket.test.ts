@@ -482,6 +482,100 @@ describe('AndroidConnectionServiceTransportSocket', () => {
     expect(messages).toHaveLength(2);
   });
 
+  it('closes projected channels before retiring a native generation during reconnect', async () => {
+    const { listeners, add } = listenerMock();
+    plugin.addListener.mockImplementation(add);
+    const socket = new AndroidConnectionServiceTransportSocket(target);
+    const messages: string[] = [];
+    socket.onopen = vi.fn();
+    socket.onmessage = (event) => messages.push(String(event.data));
+
+    await socket.start();
+    listeners.get('androidConnectionSnapshot')?.({
+      state: 'healthy',
+      generation: 'g-ready',
+      target,
+      route: { mode: 'auto' },
+      channels: [{ channelId: 'channel-1', state: 'open', sessionName: 'shell' }],
+      lastHeartbeatAt: 10,
+      lastActivityAt: 10,
+      nextRetryAt: null,
+      error: null,
+      muxReadyPayload,
+    });
+    await Promise.resolve();
+    messages.length = 0;
+
+    listeners.get('androidConnectionSnapshot')?.({
+      state: 'connecting',
+      generation: 'g-reconnecting',
+      target,
+      route: { mode: 'auto' },
+      channels: [],
+      lastHeartbeatAt: null,
+      lastActivityAt: 11,
+      nextRetryAt: null,
+      error: null,
+      muxReadyPayload: null,
+    });
+
+    expect(messages.map((message) => JSON.parse(message))).toEqual([{
+      type: 'mux-channel-closed',
+      payload: {
+        channelId: 'channel-1',
+        reason: 'service-reconnect',
+        code: 'native_reconnect',
+      },
+    }]);
+  });
+
+  it('closes projected channels when the native service enters backoff reconnect', async () => {
+    const { listeners, add } = listenerMock();
+    plugin.addListener.mockImplementation(add);
+    const socket = new AndroidConnectionServiceTransportSocket(target);
+    const messages: string[] = [];
+    socket.onopen = vi.fn();
+    socket.onmessage = (event) => messages.push(String(event.data));
+
+    await socket.start();
+    listeners.get('androidConnectionSnapshot')?.({
+      state: 'healthy',
+      generation: 'g-ready',
+      target,
+      route: { mode: 'auto' },
+      channels: [{ channelId: 'channel-1', state: 'open', sessionName: 'shell' }],
+      lastHeartbeatAt: 10,
+      lastActivityAt: 10,
+      nextRetryAt: null,
+      error: null,
+      muxReadyPayload,
+    });
+    await Promise.resolve();
+    messages.length = 0;
+
+    listeners.get('androidConnectionSnapshot')?.({
+      state: 'backoff-reconnect',
+      generation: null,
+      target,
+      route: { mode: 'auto' },
+      channels: [],
+      lastHeartbeatAt: null,
+      lastActivityAt: 11,
+      nextRetryAt: 12,
+      error: null,
+      muxReadyPayload: null,
+    });
+
+    expect(messages.map((message) => JSON.parse(message))).toEqual([{
+      type: 'mux-channel-closed',
+      payload: {
+        channelId: 'channel-1',
+        reason: 'service-reconnect',
+        code: 'native_reconnect',
+      },
+    }]);
+  });
+
   it('rejects stale mux-ready and payload frames after a new generation is ready', async () => {
     const { listeners, add } = listenerMock();
     plugin.addListener.mockImplementation(add);

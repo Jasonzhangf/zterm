@@ -235,10 +235,12 @@ export function useSessionProviderFacadeAssemblies(
     isReconnectInFlight: core.isReconnectInFlight,
     hasPendingSessionTransportOpen: core.hasPendingSessionTransportOpen,
     isPendingSessionTransportOpenStale: core.isPendingSessionTransportOpenStale,
+    resumeActiveSessionTransport,
     scheduleReconnect: core.scheduleReconnect,
   }), [
     core,
     core.daemonConnection,
+    resumeActiveSessionTransport,
     options.bridgeSettings,
     options.refs.imagePasteWaiterRuntimeRef,
     options.refs.fileTransferMessageRuntimeRef,
