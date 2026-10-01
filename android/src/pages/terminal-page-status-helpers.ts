@@ -19,6 +19,9 @@ export function resolveConnectionActivityLabel(
   session: Session,
   status: EffectiveConnectionStatus,
 ) {
+  if (session.state === 'connected') {
+    return null;
+  }
   if (
     session.lastError === 'waiting for confirmed control directory'
     || session.lastError === 'control directory confirmation timeout'
@@ -44,10 +47,7 @@ export function resolveEffectiveConnectionStatus(
   if (session.state === 'connected') {
     return 'connected';
   }
-  if (status === 'reconnecting' && hasLiveSessionTraffic(metrics)) {
-    return 'waiting';
-  }
-  if ((status === 'connecting' || status === 'waiting') && hasLiveSessionTraffic(metrics)) {
+  if ((status === 'reconnecting' || status === 'connecting' || status === 'waiting') && hasLiveSessionTraffic(metrics)) {
     return 'connected';
   }
   return status;

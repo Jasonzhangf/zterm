@@ -78,6 +78,16 @@ describe('resolveEffectiveConnectionStatus', () => {
 
     expect(resolveConnectionActivityLabel(makeStatusSession({ state: 'connecting' }), status)).toBeNull();
   });
+
+  it('does not show control-directory activity when session truth is connected', () => {
+    const session = makeStatusSession({
+      lastError: 'waiting for confirmed control directory',
+    });
+    const status = resolveEffectiveConnectionStatus(session, makeConnectingMetrics());
+
+    expect(status).toBe('connected');
+    expect(resolveConnectionActivityLabel(session, status)).toBeNull();
+  });
 });
 
 describe('resolveTerminalQuickBarCapabilityProjection', () => {
