@@ -677,7 +677,7 @@ describe('AndroidConnectionServiceTransportSocket', () => {
     expect(messages).toEqual([]);
   });
 
-  it('closes projected channels when the healthy native snapshot reports them closed', async () => {
+  it('keeps a projected channel open when a healthy native snapshot is stale', async () => {
     const { listeners, add } = listenerMock();
     plugin.addListener.mockImplementation(add);
     const socket = new AndroidConnectionServiceTransportSocket(target);
@@ -714,14 +714,7 @@ describe('AndroidConnectionServiceTransportSocket', () => {
       muxReadyPayload,
     });
 
-    expect(messages.map((message) => JSON.parse(message))).toEqual([{
-      type: 'mux-channel-closed',
-      payload: {
-        channelId: 'channel-1',
-        reason: 'native-snapshot-channel-closed',
-        code: 'native_channel_closed',
-      },
-    }]);
+    expect(messages).toEqual([]);
   });
 
   it('closes the affected projected channel when native rejects its command', async () => {

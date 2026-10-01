@@ -437,7 +437,7 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
       .filter((channel) => channel.state === 'open')
       .map((channel) => channel.channelId));
     for (const channelId of Array.from(this.readyChannelIds)) {
-      if (!openChannelIds.has(channelId)) {
+      if (!openChannelIds.has(channelId) && !this.projectedChannelIds.has(channelId)) {
         this.dispatchProjectedChannelClosed(
           channelId,
           'native-snapshot-channel-closed',
@@ -445,7 +445,10 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
         );
       }
     }
-    this.readyChannelIds = openChannelIds;
+    this.readyChannelIds = new Set([
+      ...openChannelIds,
+      ...Array.from(this.readyChannelIds).filter((channelId) => this.projectedChannelIds.has(channelId)),
+    ]);
     this.scheduleOpenProjection();
   }
 
