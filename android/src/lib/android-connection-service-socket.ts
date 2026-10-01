@@ -42,6 +42,7 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
 
   private readonly targetKey: string;
   private disposed = false;
+  private projectionDetached = false;
   private removeListeners: Array<() => Promise<void>> = [];
   private readyGeneration: string | null = null;
   private pendingGeneration: string | null = null;
@@ -65,6 +66,32 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
     if (this.disposed) {
       throw new Error('AndroidConnectionServiceTransportSocket is disposed');
     }
+    this.projectionDetached = false;
+    await this.attachNativeListeners();
+    const snapshot = await readAndroidConnectionServiceSnapshot(this.targetKey);
+    this.applySnapshot(snapshot);
+  }
+
+  /**
+   * Re-attach the JS projection to the still-owned native transport after a UI
+   * detach. This reads the native snapshot again and never binds/reconnects or
+   * releases the service-owned target. Returns false when nothing was detached.
+   */
+  async reattach(): Promise<boolean> {
+    if (this.disposed) {
+      throw new Error('AndroidConnectionServiceTransportSocket is disposed');
+    }
+    if (!this.projectionDetached) {
+      return false;
+    }
+    this.projectionDetached = false;
+    await this.attachNativeListeners();
+    const snapshot = await readAndroidConnectionServiceSnapshot(this.targetKey);
+    this.applySnapshot(snapshot);
+    return true;
+  }
+
+  private async attachNativeListeners(): Promise<void> {
     const handles = await Promise.all([
       addAndroidConnectionServiceListener('androidConnectionSnapshot', (snapshot) => {
         if (this.disposed) {
@@ -103,14 +130,54 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
         if (error.targetKey !== this.targetKey) {
           return;
         }
+        if (error.kind === 'command-rejected') {
+          // Native service rejected a command for this target while the JS
+          // adapter still projected the channel as usable. Rejecting one
+          // channel is a channel fact, not a physical transport fact. Tell
+          // the session owner so it can query tmux truth and reopen the exact
+          // mux channel before the next frame is sent.
+          const command = isRecord(error.command) ? error.command : null;
+          const channelId = typeof command?.channelId === 'string' ? command.channelId : '';
+          if (
+            channelId
+            && (this.projectedChannelIds.has(channelId) || this.readyChannelIds.has(channelId))
+          ) {
+            this.dispatchProjectedChannelClosed(
+              channelId,
+              error.errorCode || 'native-command-rejected',
+              error.errorCode || 'native_command_rejected',
+            );
+          }
+          return;
+        }
         // Physical errors are retryable native-service facts. Snapshot
         // backoff/reconnect owns projection retirement so a transient error
         // cannot tear down channels while the service is still recovering.
       }),
     ]);
     this.removeListeners.push(...handles.map((handle) => () => handle.remove()));
-    const snapshot = await readAndroidConnectionServiceSnapshot(this.targetKey);
-    this.applySnapshot(snapshot);
+  }
+
+  private clearProjectedChannels(reason: string, code: string) {
+    const channelIds = Array.from(this.projectedChannelIds);
+    if (channelIds.length === 0) {
+      this.readyChannelIds.clear();
+      return;
+    }
+    for (const channelId of channelIds) {
+      this.readyChannelIds.delete(channelId);
+      this.projectedChannelIds.delete(channelId);
+      this.onmessage?.({
+        data: JSON.stringify({
+          type: 'mux-channel-closed',
+          payload: {
+            channelId,
+            reason,
+            code,
+          },
+        }),
+      });
+    }
   }
 
   send(data: string | ArrayBuffer): void {
@@ -136,13 +203,28 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
       this.reportFailure(`unsupported terminal channel frame: ${parsed.type}`, { authFailure: false });
       return;
     }
-    void sendAndroidConnectionCommand({ ...command, targetKey: this.targetKey });
+    void Promise.resolve(sendAndroidConnectionCommand({ ...command, targetKey: this.targetKey })).catch((error) => {
+      if (this.disposed) {
+        return;
+      }
+      this.reportFailure(
+        `AndroidConnectionService command rejected: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    });
   }
 
   close(_code?: number, _reason?: string): void {
-    // A UI-originated close is projection-only. The service owns transport
-    // release policy; this adapter only marks the local projection detached.
-    this.dispose('ui-detach');
+    // A UI-originated close is projection-only and reversible. The service
+    // owns transport release policy, so this adapter only detaches its local
+    // listeners and stays re-attachable via `reattach()`; a permanent
+    // disposition is reserved for projection failure (see `reportFailure`).
+    if (this.disposed) {
+      return;
+    }
+    this.projectionDetached = true;
+    this.readyState = WebSocket.CLOSED;
+    this.removeNativeListeners();
+    this.onclose?.({ code: 1000, reason: 'ui-detach' });
   }
 
   reportFailure(reason: string, options?: { authFailure?: boolean }): void {
@@ -203,6 +285,7 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
       if (snapshot.generation && this.retiredGenerations.has(snapshot.generation)) return;
       if (this.readyGeneration) {
         if (!snapshot.generation || snapshot.generation === this.readyGeneration) return;
+        this.clearProjectedChannels('service-reconnect', 'native_reconnect');
         this.retiredGenerations.add(this.readyGeneration);
         this.readyGeneration = null;
         this.muxReadyGeneration = null;
@@ -232,13 +315,10 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
       this.muxReadyPayload = { ...payload };
       this.muxReadyPayloadGeneration = snapshot.generation;
       this.readySnapshot = snapshot;
-      this.readyChannelIds = new Set(snapshot.channels
-        .filter((channel) => channel.state === 'open')
-        .map((channel) => channel.channelId));
       if (this.readyState !== WebSocket.OPEN) {
         this.readyState = WebSocket.OPEN;
       }
-      this.scheduleOpenProjection();
+      this.reconcileSnapshotChannels(snapshot);
       return;
     }
     if (snapshot.state === 'authentication-error' || snapshot.state === 'terminal-error') {
@@ -250,6 +330,7 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
     if (snapshot.state === 'backoff-reconnect') {
       const hadReadyGeneration = Boolean(this.readyGeneration);
       if (snapshot.generation && this.readyGeneration && snapshot.generation !== this.readyGeneration) return;
+      this.clearProjectedChannels('service-reconnect', 'native_reconnect');
       this.readyState = WebSocket.CLOSED;
       const retiredGeneration = snapshot.generation || this.readyGeneration || this.pendingGeneration;
       if (retiredGeneration) this.retiredGenerations.add(retiredGeneration);
@@ -328,28 +409,47 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
     if (!this.acceptsReadyGeneration(event.targetKey, event.generation)) {
       return;
     }
-    this.readyChannelIds.delete(event.channelId);
-    this.projectedChannelIds.delete(event.channelId);
+    this.dispatchProjectedChannelClosed(
+      event.channelId,
+      event.reason || 'service-channel-closed',
+      event.code,
+    );
+  }
+
+  private dispatchProjectedChannelClosed(channelId: string, reason: string, code?: string) {
+    this.readyChannelIds.delete(channelId);
+    this.projectedChannelIds.delete(channelId);
     this.onmessage?.({
       data: JSON.stringify({
         type: 'mux-channel-closed',
         payload: {
-          channelId: event.channelId,
-          reason: event.reason || 'service-channel-closed',
-          ...(event.code ? { code: event.code } : {}),
+          channelId,
+          reason,
+          ...(code ? { code } : {}),
         },
       }),
     });
   }
 
-  private dispose(reason: string) {
-    if (this.disposed) {
-      return;
+  private reconcileSnapshotChannels(snapshot: AndroidConnectionServiceSnapshot) {
+    if (!this.readyGeneration || snapshot.generation !== this.readyGeneration) return;
+    const openChannelIds = new Set(snapshot.channels
+      .filter((channel) => channel.state === 'open')
+      .map((channel) => channel.channelId));
+    for (const channelId of Array.from(this.readyChannelIds)) {
+      if (!openChannelIds.has(channelId) && !this.projectedChannelIds.has(channelId)) {
+        this.dispatchProjectedChannelClosed(
+          channelId,
+          'native-snapshot-channel-closed',
+          'native_channel_closed',
+        );
+      }
     }
-    this.disposed = true;
-    this.readyState = WebSocket.CLOSED;
-    this.removeNativeListeners();
-    this.onclose?.({ code: 1000, reason });
+    this.readyChannelIds = new Set([
+      ...openChannelIds,
+      ...Array.from(this.readyChannelIds).filter((channelId) => this.projectedChannelIds.has(channelId)),
+    ]);
+    this.scheduleOpenProjection();
   }
 
   private removeNativeListeners() {
@@ -436,11 +536,12 @@ function mapFrameToCommand(frame: Record<string, unknown>) {
       if (!channelId || !sessionName) {
         return null;
       }
+      const options = collectMuxChannelOpenOptions(payload);
       return {
         type: 'open-channel' as const,
         channelId,
         sessionName,
-        ...(isRecord(payload.options) ? { options: payload.options } : {}),
+        ...(options ? { options } : {}),
       };
     }
     case 'mux-channel-message': {
@@ -492,4 +593,29 @@ function mapFrameToCommand(frame: Record<string, unknown>) {
     default:
       return null;
   }
+}
+
+// The mux `mux-channel-open` payload carries its channel options inline
+// (`bodySubscribed`, geometry, backend, autoCommand). The native command shape
+// groups them under `options`, and the native channel-open frame replays that
+// group verbatim. Dropping the group silently strips body demand, requested
+// width and backend from every channel-open, so the daemon releases the mirror
+// with `no_body_demand` and the session never reaches `connected`.
+const MUX_CHANNEL_OPEN_OPTION_KEYS = [
+  'backend',
+  'cols',
+  'rows',
+  'widthMode',
+  'autoCommand',
+  'bodySubscribed',
+] as const;
+
+function collectMuxChannelOpenOptions(payload: Record<string, unknown>) {
+  const options: Record<string, unknown> = {};
+  for (const key of MUX_CHANNEL_OPEN_OPTION_KEYS) {
+    if (payload[key] !== undefined) {
+      options[key] = payload[key];
+    }
+  }
+  return Object.keys(options).length > 0 ? options : null;
 }

@@ -130,7 +130,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
     expect(reconnectSession).not.toHaveBeenCalled();
   });
 
-  it('keeps foreground data refresh from reopening a closed channel or reconnecting', () => {
+  it('reopens a closed mux channel on an open target transport during foreground resume', () => {
     const targetSocket = { readyState: WebSocket.OPEN } as any;
     const requestSessionBufferHead = vi.fn(() => true);
     const reconnectSession = vi.fn();
@@ -149,13 +149,121 @@ describe('ensureActiveSessionFreshRuntime', () => {
       reopenSessionTerminalChannel,
     });
 
+    expect(ensureActiveSessionFreshRuntime(options)).toBe(true);
+    expect(requestSessionBufferHead).not.toHaveBeenCalled();
+    expect(reopenSessionTerminalChannel).toHaveBeenCalledWith('session-1');
+    expect(reconnectSession).not.toHaveBeenCalled();
+  });
+
+  it('reopens a closed mux channel when the projected session socket is null but the target transport is open', () => {
+    const targetSocket = { readyState: WebSocket.OPEN } as any;
+    const requestSessionBufferHead = vi.fn(() => true);
+    const reconnectSession = vi.fn();
+    const reopenSessionTerminalChannel = vi.fn();
+    const options = createBaseOptions({
+      refreshOptions: {
+        sessionId: 'session-1',
+        source: 'foreground-resume',
+        forceHead: true,
+        markResumeTail: true,
+      },
+      daemonConnection: {
+        readSessionResource: () => ({
+          sessionId: 'session-1',
+          socket: null,
+          terminalSocket: targetSocket,
+          channel: { state: 'closed' },
+        }),
+        readSessionSocket: () => null,
+        readSessionTargetSocket: () => targetSocket,
+        readOpenSessionSocket: () => {
+          throw new Error('image paste requires an open terminal mux channel');
+        },
+        sendSessionRaw: vi.fn(),
+        sendSessionMessage: vi.fn(),
+      } as any,
+      readSessionTerminalChannel: () => ({ state: 'closed' }),
+      readSessionTargetRuntime: () => ({ sessionIds: ['session-1'], terminalMuxReady: true }),
+      requestSessionBufferHead,
+      reconnectSession,
+      reopenSessionTerminalChannel,
+    });
+
+    expect(ensureActiveSessionFreshRuntime(options)).toBe(true);
+    expect(requestSessionBufferHead).not.toHaveBeenCalled();
+    expect(reopenSessionTerminalChannel).toHaveBeenCalledWith('session-1');
+    expect(reconnectSession).not.toHaveBeenCalled();
+  });
+
+  it('keeps active reentry from reopening a closed channel or reconnecting', () => {
+    const targetSocket = { readyState: WebSocket.OPEN } as any;
+    const requestSessionBufferHead = vi.fn(() => true);
+    const reconnectSession = vi.fn();
+    const reopenSessionTerminalChannel = vi.fn();
+    const options = createBaseOptions({
+      refreshOptions: {
+        sessionId: 'session-1',
+        source: 'active-reentry',
+        forceHead: true,
+        markResumeTail: true,
+      },
+      daemonConnection: makeDaemonConnection(targetSocket),
+      readSessionTerminalChannel: () => ({ state: 'closed' }),
+      requestSessionBufferHead,
+      reconnectSession,
+      reopenSessionTerminalChannel,
+    });
+
     expect(ensureActiveSessionFreshRuntime(options)).toBe(false);
     expect(requestSessionBufferHead).not.toHaveBeenCalled();
     expect(reopenSessionTerminalChannel).not.toHaveBeenCalled();
     expect(reconnectSession).not.toHaveBeenCalled();
   });
 
-  it('keeps foreground data refresh from reconnecting a missing transport', () => {
+  it('keeps active reentry data-refresh-only when the session socket projection is null but the target transport is open', () => {
+    const targetSocket = { readyState: WebSocket.OPEN } as any;
+    const requestSessionBufferHead = vi.fn(() => true);
+    const reconnectSession = vi.fn();
+    const reopenSessionTerminalChannel = vi.fn();
+    const options = createBaseOptions({
+      refreshOptions: {
+        sessionId: 'session-1',
+        source: 'active-reentry',
+        forceHead: true,
+        markResumeTail: true,
+      },
+      daemonConnection: {
+        readSessionResource: () => ({
+          sessionId: 'session-1',
+          socket: null,
+          terminalSocket: targetSocket,
+          channel: { state: 'closed' },
+        }),
+        readSessionSocket: () => null,
+        readSessionTargetSocket: () => targetSocket,
+        readOpenSessionSocket: () => {
+          throw new Error('image paste requires an open terminal mux channel');
+        },
+        sendSessionRaw: vi.fn(),
+        sendSessionMessage: vi.fn(),
+      } as any,
+      readSessionTerminalChannel: () => ({ state: 'closed' }),
+      readSessionTargetRuntime: () => ({ sessionIds: ['session-1'], terminalMuxReady: true }),
+      requestSessionBufferHead,
+      reconnectSession,
+      reopenSessionTerminalChannel,
+    });
+
+    expect(ensureActiveSessionFreshRuntime(options)).toBe(false);
+    expect(requestSessionBufferHead).not.toHaveBeenCalled();
+    expect(reopenSessionTerminalChannel).not.toHaveBeenCalled();
+    expect(reconnectSession).not.toHaveBeenCalled();
+  });
+
+  it('reattaches a missing transport on foreground resume instead of leaving it detached', () => {
+    // A UI-detached connection-service projection leaves no JS socket while the
+    // native owner still holds the target; foreground resume must re-attach the
+    // projection (snapshot replay) rather than staying permanently detached.
     const requestSessionBufferHead = vi.fn();
     const reconnectSession = vi.fn();
     const options = createBaseOptions({
@@ -170,9 +278,9 @@ describe('ensureActiveSessionFreshRuntime', () => {
       reconnectSession,
     });
 
-    expect(ensureActiveSessionFreshRuntime(options)).toBe(false);
+    expect(ensureActiveSessionFreshRuntime(options)).toBe(true);
     expect(requestSessionBufferHead).not.toHaveBeenCalled();
-    expect(reconnectSession).not.toHaveBeenCalled();
+    expect(reconnectSession).toHaveBeenCalledWith('session-1');
   });
 
   it('does not treat a missing channel handle as a closed mux channel while the socket is open', () => {

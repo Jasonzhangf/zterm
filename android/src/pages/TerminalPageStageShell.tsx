@@ -86,7 +86,6 @@ const TerminalStageShell = ReactMemo(
     onClearPreviewCell,
     onCycleSession,
     onPinchVerticalCwdStep,
-    onPreviewOverviewChange,
     onOpenSessionDrawer,
   }: {
     interactiveSession: Session | null;
@@ -152,7 +151,6 @@ const TerminalStageShell = ReactMemo(
     onClearPreviewCell?: (coordinate: JunctionPreviewCoordinate) => void;
     onCycleSession?: (direction: 'next' | 'previous') => void;
     onPinchVerticalCwdStep?: (direction: 'next' | 'previous') => void;
-    onPreviewOverviewChange?: (coordinates: JunctionPreviewCoordinate[] | null) => void;
     onOpenSessionDrawer?: () => void;
   }) {
     const previewGestureRef = useRef(createSessionPreviewGestureState());
@@ -666,7 +664,6 @@ const TerminalStageShell = ReactMemo(
               onClearCell={(coordinate) => onClearPreviewCell?.(coordinate)}
               onCycleSession={onCycleSession}
               onPinchVerticalCwdStep={onPinchVerticalCwdStep}
-              onOverviewChange={onPreviewOverviewChange}
               onClose={() => onCloseSessionPreview?.()}
             />
           ) : sessionGroup ? (
@@ -808,7 +805,6 @@ const TerminalStageShell = ReactMemo(
     prev.onPreviewFocusChange === next.onPreviewFocusChange &&
     prev.onSetPreviewCell === next.onSetPreviewCell &&
     prev.onClearPreviewCell === next.onClearPreviewCell &&
-    prev.onPreviewOverviewChange === next.onPreviewOverviewChange &&
     prev.onOpenSessionDrawer === next.onOpenSessionDrawer &&
     prev.visiblePaneEntries
       .map((entry) => `${entry.pane.id}:${entry.session?.id || ""}`)

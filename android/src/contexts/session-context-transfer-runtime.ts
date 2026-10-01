@@ -294,6 +294,7 @@ export async function ensureSessionReadyForPasteRuntime(options: {
   sessions: Session[];
   daemonConnection: ClientDaemonConnection;
   requestReconnect?: (sessionId: string, reason: string) => void;
+  requestReopen?: (sessionId: string, reason: string) => void;
 }) {
   const sessionId = options.sessionId;
   const readSocket = () => {
@@ -310,7 +311,11 @@ export async function ensureSessionReadyForPasteRuntime(options: {
   if (!session) {
     throw new Error('Active session no longer exists');
   }
-  if (options.requestReconnect) {
+  const resource = options.daemonConnection.readSessionResource(sessionId) || null;
+  const physicalOpen = resource?.terminalSocket?.readyState === WebSocket.OPEN;
+  if (options.requestReopen && physicalOpen) {
+    options.requestReopen(sessionId, 'transfer terminal channel unavailable');
+  } else if (options.requestReconnect) {
     options.requestReconnect(sessionId, 'transfer transport unavailable');
   }
   const startedAt = Date.now();

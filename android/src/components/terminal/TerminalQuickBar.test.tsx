@@ -44,6 +44,18 @@ vi.mock("../../plugins/ScreenOrientationPlugin", () => ({
   isScreenOrientationSupported: () => false,
 }));
 
+const pickedImageMock = vi.hoisted(() => ({
+  nativeReadSupported: { value: false },
+  pickPickedImage: vi.fn<[], Promise<{
+    uri: string;
+    mimeType: string;
+    name: string;
+  } | null>>(async () => null),
+  readPickedImageFile: vi.fn<[{ uri: string; mimeType: string; name: string }], Promise<File | null>>(
+    async () => null,
+  ),
+}));
+
 vi.mock("../../plugins/PickedImageUriPlugin", () => ({
   PickedImageUriPlugin: {
     pickImage: vi.fn(async () => null),
@@ -54,9 +66,9 @@ vi.mock("../../plugins/PickedImageUriPlugin", () => ({
       size: 0,
     })),
   },
-  isPickedImageUriReadSupported: () => false,
-  pickPickedImage: vi.fn(async () => null),
-  readPickedImageFile: vi.fn(async () => null),
+  isPickedImageUriReadSupported: () => pickedImageMock.nativeReadSupported.value,
+  pickPickedImage: pickedImageMock.pickPickedImage,
+  readPickedImageFile: pickedImageMock.readPickedImageFile,
 }));
 
 class ResizeObserverMock {
@@ -140,6 +152,12 @@ function createDeferred<T>() {
 describe("TerminalQuickBar", () => {
   beforeEach(() => {
     cleanup();
+    pickedImageMock.nativeReadSupported.value = false;
+    pickedImageMock.pickPickedImage.mockReset();
+    pickedImageMock.pickPickedImage.mockResolvedValue(null);
+    pickedImageMock.readPickedImageFile.mockReset();
+    pickedImageMock.readPickedImageFile.mockResolvedValue(null);
+    vi.mocked(Capacitor.isNativePlatform).mockReturnValue(false);
     const storageBacking = new Map<string, string>();
     const storageShim = {
       get length() {
@@ -1340,6 +1358,32 @@ describe("TerminalQuickBar", () => {
     expect(onImagePaste.mock.calls[0][1].name).toBe("photo.png");
     expect(onFileAttach).toHaveBeenCalledWith("session-1", expect.any(File));
     expect(onFileAttach.mock.calls[0][1].name).toBe("archive.zip");
+  });
+
+  it("reads a native Android content URI through the picker and sends the decoded file", async () => {
+    vi.mocked(Capacitor.isNativePlatform).mockReturnValue(true);
+    pickedImageMock.nativeReadSupported.value = true;
+    pickedImageMock.pickPickedImage.mockResolvedValue({
+      uri: "content://media/picked/42",
+      mimeType: "image/png",
+      name: "photo.png",
+    });
+    const pickedFile = new File(["image-bytes"], "photo.png", { type: "image/png" });
+    pickedImageMock.readPickedImageFile.mockResolvedValue(pickedFile);
+    const onImagePaste = vi.fn();
+    renderQuickBar({ onImagePaste });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "图片" }));
+    });
+
+    await waitFor(() => expect(onImagePaste).toHaveBeenCalledWith("session-1", pickedFile));
+    expect(pickedImageMock.pickPickedImage).toHaveBeenCalledTimes(1);
+    expect(pickedImageMock.readPickedImageFile).toHaveBeenCalledWith({
+      uri: "content://media/picked/42",
+      mimeType: "image/png",
+      name: "photo.png",
+    });
   });
 
   it("uploads multiple images sequentially, caps the batch at 9, and shows progress feedback", async () => {

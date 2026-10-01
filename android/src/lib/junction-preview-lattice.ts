@@ -149,6 +149,35 @@ export function setJunctionPreviewCell(
   };
 }
 
+export function replaceJunctionPreviewFocusCell(
+  lattice: JunctionPreviewLatticeV1,
+  coordinate: JunctionPreviewCoordinate,
+  rawTarget: JunctionPreviewTarget,
+): { ok: true; lattice: JunctionPreviewLatticeV1 } | {
+  ok: false;
+  reason: 'invalid-coordinate' | 'invalid-target';
+  lattice: JunctionPreviewLatticeV1;
+} {
+  if (!isCoordinate(coordinate)) {
+    return { ok: false, reason: 'invalid-coordinate', lattice };
+  }
+  const target = normalizeJunctionPreviewTarget(rawTarget);
+  if (!target) return { ok: false, reason: 'invalid-target', lattice };
+  return {
+    ok: true,
+    lattice: {
+      version: 1,
+      cells: [
+        ...lattice.cells.filter((cell) => (
+          (cell.col !== coordinate.col || cell.row !== coordinate.row)
+          && cell.target.sessionId !== target.sessionId
+        )),
+        { col: coordinate.col, row: coordinate.row, target },
+      ],
+    },
+  };
+}
+
 export function clearJunctionPreviewCell(
   lattice: JunctionPreviewLatticeV1,
   coordinate: JunctionPreviewCoordinate,

@@ -15,7 +15,19 @@ import {
 } from './session-context-lifecycle';
 import { createSessionHeartbeatStore } from '../lib/session-heartbeat-store';
 import { createSessionReconnectStore } from '../lib/session-reconnect-store';
-import { createTerminalChannelMuxStore } from '../lib/terminal-channel-mux-runtime';
+import {
+  createSessionTransportRuntimeStore,
+  getSessionTransportRuntime,
+  setTargetTerminalTransport,
+  upsertSessionTransportRuntime,
+} from '../lib/session-transport-runtime';
+import {
+  createTerminalChannelMuxStore,
+  ensureSessionTerminalChannel,
+  updateSessionTerminalChannelState,
+} from '../lib/terminal-channel-mux-runtime';
+
+type EnsureActiveSessionFreshFn = Parameters<typeof useSessionContextLifecycle>[0]['ensureActiveSessionFresh'];
 
 describe('session-context-lifecycle', () => {
   afterEach(() => {
@@ -848,6 +860,164 @@ describe('session-context-lifecycle', () => {
     // Background keeps the physical transport but must stop renewing the
     // session attach lease so the daemon releases every tmux mirror.
     expect(renewForegroundSessionAttachLease).not.toHaveBeenCalled();
+  });
+
+  it('keeps the foreground attach-lease interval across re-renders that swap the renewal callback', async () => {
+    vi.useFakeTimers();
+    const renewFirst = vi.fn();
+    const renewSecond = vi.fn();
+    const ensureActiveSessionFresh = vi.fn(() => true);
+    const lifecycleRefs = {
+      foregroundActiveRef: { current: true },
+      stateRef: {
+        current: {
+          sessions: [{ id: 's1', state: 'connected' } as any],
+          activeSessionId: 's1',
+          liveSessionIds: [],
+        } as any,
+      },
+      scheduleStatesRef: { current: {} },
+      sessionDebugMetricsStoreRef: { current: { refresh: () => ({}) } },
+      transportRuntimeStoreRef: {
+        current: {
+          targets: new Map(),
+          sessions: new Map(),
+          terminalChannels: createTerminalChannelMuxStore(),
+        },
+      },
+      sessionPullStateRef: { current: new Map() },
+      lastActivatedSessionIdRef: { current: 's1' },
+      lastActiveReentryAtRef: { current: new Map() },
+      lastConnectedBaselineAtRef: { current: new Map() },
+      heartbeatStore: createSessionHeartbeatStore(),
+      remoteScreenshotRuntimeRef: { current: { dispose: () => undefined } },
+      remoteWindowMessageRuntimeRef: { current: { dispose: () => undefined } },
+      handshakeTimeoutsRef: { current: new Map() },
+      reconnectStore: createSessionReconnectStore(),
+    };
+
+    function Harness({ renew }: { renew: () => void }) {
+      lifecycleRefs.foregroundActiveRef.current = true;
+      useSessionContextLifecycle({
+        appForegroundActive: true,
+        state: {
+          sessions: [{ id: 's1', state: 'connected' } as any],
+          activeSessionId: 's1',
+          liveSessionIds: [],
+        } as any,
+        scheduleStates: {},
+        refs: lifecycleRefs,
+        flushRuntimeDebugLogs: () => undefined,
+        clientRuntimeDebugFlushIntervalMs: 10_000,
+        ensureActiveSessionFresh,
+        renewForegroundSessionAttachLease: renew,
+        resolveActiveHeadRefreshTickMs: () => 10_000,
+        resolveHeadStalePingMs: () => 10_000,
+        clearSessionHandshakeTimeout: () => undefined,
+        cleanupSocket: () => undefined,
+        cleanupControlSocket: () => undefined,
+      });
+      return null;
+    }
+
+    const view = render(<Harness renew={renewFirst} />);
+    // A parent re-render hands down a fresh callback identity before the
+    // interval is due. The lease timer must not restart, otherwise a busy
+    // provider can starve the renewal forever and the daemon drops the mirror.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(FOREGROUND_ATTACH_LEASE_RENEW_INTERVAL_MS - 10_000);
+    });
+    view.rerender(<Harness renew={renewSecond} />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+
+    // The interval kept its original 30s deadline and fired once, reading the
+    // latest callback through the ref. A reset would have produced zero calls.
+    expect(renewFirst.mock.calls.length + renewSecond.mock.calls.length).toBe(1);
+    expect(renewSecond).toHaveBeenCalledWith('foreground-attach-heartbeat');
+  });
+
+  it('reopens closed mux channels on the foreground attach-lease heartbeat', async () => {
+    vi.useFakeTimers();
+    const renewForegroundSessionAttachLease = vi.fn();
+    const ensureActiveSessionFresh = vi.fn<Parameters<EnsureActiveSessionFreshFn>, ReturnType<EnsureActiveSessionFreshFn>>(() => true);
+    const transportStore = createSessionTransportRuntimeStore();
+    const socket = { readyState: WebSocket.OPEN };
+    const host = {
+      id: 'host-1',
+      createdAt: 1,
+      name: 'conn',
+      bridgeHost: '100.64.0.1',
+      bridgePort: 3333,
+      sessionName: 'alpha',
+      authToken: 'token-a',
+      authType: 'password' as const,
+      tags: [],
+      pinned: false,
+    } as any;
+    const state = {
+      sessions: [{ id: 's1', state: 'connected' } as any],
+      activeSessionId: 's1',
+      liveSessionIds: [],
+    } as any;
+
+    upsertSessionTransportRuntime(transportStore, 's1', host);
+    setTargetTerminalTransport(transportStore, getSessionTransportRuntime(transportStore, 's1')!.targetKey, socket as any);
+    ensureSessionTerminalChannel(transportStore.terminalChannels, 's1');
+    updateSessionTerminalChannelState(transportStore.terminalChannels, 's1', 'closed');
+
+    const lifecycleRefs = {
+      foregroundActiveRef: { current: true },
+      stateRef: { current: state },
+      scheduleStatesRef: { current: {} },
+      sessionDebugMetricsStoreRef: { current: { refresh: () => ({}) } },
+      transportRuntimeStoreRef: { current: transportStore },
+      sessionPullStateRef: { current: new Map() },
+      lastActivatedSessionIdRef: { current: 's1' },
+      lastActiveReentryAtRef: { current: new Map() },
+      lastConnectedBaselineAtRef: { current: new Map() },
+      heartbeatStore: createSessionHeartbeatStore(),
+      remoteScreenshotRuntimeRef: { current: { dispose: () => undefined } },
+      remoteWindowMessageRuntimeRef: { current: { dispose: () => undefined } },
+      handshakeTimeoutsRef: { current: new Map() },
+      reconnectStore: createSessionReconnectStore(),
+    };
+
+    function Harness() {
+      useSessionContextLifecycle({
+        appForegroundActive: true,
+        state,
+        scheduleStates: {},
+        refs: lifecycleRefs,
+        flushRuntimeDebugLogs: () => undefined,
+        clientRuntimeDebugFlushIntervalMs: 10_000,
+        ensureActiveSessionFresh,
+        renewForegroundSessionAttachLease,
+        resolveActiveHeadRefreshTickMs: () => 10_000,
+        resolveHeadStalePingMs: () => 10_000,
+        clearSessionHandshakeTimeout: () => undefined,
+        cleanupSocket: () => undefined,
+        cleanupControlSocket: () => undefined,
+      });
+      return null;
+    }
+
+    render(<Harness />);
+    ensureActiveSessionFresh.mockClear();
+    renewForegroundSessionAttachLease.mockClear();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(FOREGROUND_ATTACH_LEASE_RENEW_INTERVAL_MS);
+    });
+
+    const foregroundResumeCalls = ensureActiveSessionFresh.mock.calls.filter((call) => call[0]?.source === 'foreground-resume');
+    expect(foregroundResumeCalls).toHaveLength(1);
+    expect(ensureActiveSessionFresh).toHaveBeenCalledWith({
+      sessionId: 's1',
+      source: 'foreground-resume',
+      forceHead: true,
+    });
+    expect(renewForegroundSessionAttachLease).toHaveBeenCalledWith('foreground-attach-heartbeat');
   });
 
   it('does not start debug or refresh timers while app foreground truth is false', () => {

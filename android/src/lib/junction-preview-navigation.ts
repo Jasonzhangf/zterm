@@ -91,15 +91,19 @@ export function resolvePinchVerticalCwdStep(input: JunctionPreviewNavigationInpu
     : (currentIndex - 1 + orderedCwds.length) % orderedCwds.length;
   const targetCwd = orderedCwds[nextIndex];
   const targetGroups = groups.filter((group) => group.cwd === targetCwd);
-  let target = targetGroups[0];
-  for (const group of targetGroups) {
-    if (
-      group.coordinate.col === focusGroup.coordinate.col
-      && Math.abs(group.coordinate.row - focusGroup.coordinate.row) < Math.abs(target.coordinate.row - focusGroup.coordinate.row)
-    ) {
-      target = group;
-    }
-  }
+  const target = targetGroups
+    .slice()
+    .sort((left, right) => {
+      const leftDistance = Math.abs(left.coordinate.col - focusGroup.coordinate.col)
+        + Math.abs(left.coordinate.row - focusGroup.coordinate.row);
+      const rightDistance = Math.abs(right.coordinate.col - focusGroup.coordinate.col)
+        + Math.abs(right.coordinate.row - focusGroup.coordinate.row);
+      if (leftDistance !== rightDistance) return leftDistance - rightDistance;
+      if (left.coordinate.col !== right.coordinate.col) {
+        return left.coordinate.col - right.coordinate.col;
+      }
+      return left.coordinate.row - right.coordinate.row;
+    })[0];
   if (!target) return { action: 'none' };
   return {
     action: 'replace',

@@ -503,9 +503,16 @@ export function buildActiveSessionRefreshPlan(options: ActiveSessionRefreshPlanO
   const unavailableState = options.sessionState === 'closed'
     || options.sessionState === 'disconnected'
     || options.sessionState === 'error';
+  // `foreground-resume` may recover an unavailable transport: a UI-detached
+  // connection-service projection leaves no JS socket even though the native
+  // owner still holds the target, and only a re-attach replays its snapshot.
+  // `active-reentry`/`active-tick` stay data-refresh-only so a routine tab
+  // change never rebuilds a transport.
+  const canRecoverTransport = options.source === 'explicit-resume'
+    || options.source === 'foreground-resume';
 
   if (unavailableState) {
-    if (options.source !== 'explicit-resume') {
+    if (!canRecoverTransport) {
       return { action: 'skip', reason: 'closed-session-requires-explicit-open' };
     }
   }
@@ -523,7 +530,7 @@ export function buildActiveSessionRefreshPlan(options: ActiveSessionRefreshPlanO
     };
   }
 
-  if (options.source !== 'explicit-resume') {
+  if (!canRecoverTransport) {
     return { action: 'skip', reason: 'transport-unavailable' };
   }
 

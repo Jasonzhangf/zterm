@@ -73,4 +73,25 @@ describe('junction preview navigation', () => {
       sessionId: 's3',
     });
   });
+
+  it('uses the nearest target-cwd cell when no cell shares the focus column', () => {
+    expect(resolvePinchVerticalCwdStep({
+      focus: { col: 4, row: 4 },
+      cells: [
+        { col: 4, row: 4, target: { sessionId: 'focus' } },
+        { col: 0, row: 8, target: { sessionId: 'far' } },
+        { col: 2, row: 3, target: { sessionId: 'near' } },
+      ],
+      sessions: [
+        { id: 'focus', cwd: '/a' },
+        { id: 'far', cwd: '/b' },
+        { id: 'near', cwd: '/b' },
+      ],
+      direction: 'next',
+    })).toEqual({
+      action: 'replace',
+      coordinate: { col: 4, row: 4 },
+      sessionId: 'near',
+    });
+  });
 });

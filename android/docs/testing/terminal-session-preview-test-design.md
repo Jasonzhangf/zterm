@@ -13,7 +13,7 @@
 - Preview entry captures the current active session plus focused session-group projection. System Back is a cancel intent: it closes preview and restores that exact entry projection without selecting a preview tile.
 - Long-pressing one populated edge cell opens a coordinate-scoped menu that can clear the cell or assign any unassigned session from the complete visible drawer catalog, including unopened remote rows. Clicking an empty/stale `+` cell opens the same set menu. Selecting an unopened row materializes it through the existing drawer remote-open owner; the lattice stores only the returned local session id. Long press must suppress the synthetic click.
 - Preview geometry is a pure projection through `resolveJunctionPreviewLayout`: portrait shows focus + one side strip + top/bottom strips, landscape shows two center panes + top/bottom strips, and wide/tablet shows focus + left/right/top/bottom strips.
-- Populated cells render through the read-only shared renderer and are clipped by the viewport edge; empty/stale cells render `+`. Pinch changes only the grid's local projection scale, and single-finger pan moves only that projection while scaled below `1x`; renderer, lattice, focus, transport, resize, and tmux geometry are unchanged. Restoring `1x` clears local pan.
+- Populated cells render through the read-only shared renderer and are clipped by the viewport edge; empty/stale cells render `+`. There is no scale projection. Single-finger drag scrolls/pans local content only; a two-finger vertical swipe steps the focus cell to the next cwd; a middle horizontal swipe cycles the focus across cells that share the focus cell's cwd. Renderer, lattice ownership, active shell session, transport, resize, and tmux geometry are unchanged by any of them.
 - The drawer remains reachable by a left-edge right swipe while preview is open. Drawer selection replaces only the focus-cell target and leaves every other coordinate unchanged.
 - Preview focus pan and cell edits are renderer projection only: no resize, width-mode, viewport callback, tmux geometry, daemon mirror, transport, or reconnect change is allowed.
 - Preview bodies accept local vertical scroll and horizontal fixed-width crop while remaining input/resize/viewport inert.
@@ -25,8 +25,9 @@
 - Project normal live ids union visible populated cell ids while preview is open.
 - Admit a leftward swipe beginning in the right-edge band.
 - Render every tile from its own immutable render-store snapshot.
-- Pinch below `1x` scales the grid projection and all rendered text together without changing renderer snapshots; restore to `1x` clears local pan.
-- Pan locally while scaled below `1x`; the pan is not persisted and never moves lattice targets or focus.
+- A two-finger vertical swipe of at least 48px switches the focus cell to the adjacent cwd (ordered by distinct cwd) and picks that cwd's cell nearest the focus coordinate, without changing renderer snapshots, the active shell session, transport, resize, or tmux geometry.
+- A middle horizontal swipe of at least 48px cycles focus across the cells that share the focus cell's cwd; it is a no-op when that cwd has fewer than two cells.
+- Single-finger local drag/scroll never moves lattice targets or focus.
 - Pan focus from one populated cell to another without changing lattice ownership or active shell session.
 - Replace only the focus-cell target from the drawer and preserve every other coordinate.
 - Android system Back closes preview and restores the entry active session and session-group projection.
@@ -53,13 +54,14 @@
 - System Back outside preview must not be consumed by the preview owner.
 - Never pad visible cells or create sessions for stale coordinates.
 - Edge-cell pan must not activate or close a Session. Body pan/scroll must not move focus, trigger preview exit, or emit terminal mutation callbacks.
-- Preview pinch/pan must not change lattice targets, active session, focus, transport, resize, width mode, viewport, daemon mirror, or tmux geometry.
+- Preview single-finger drag/scroll must not change lattice targets, active session, focus, transport, resize, width mode, viewport, daemon mirror, or tmux geometry.
+- Preview cwd step (`replace` on the focus cell) and same-cwd cycle (`focus` move) must not change the active shell session, lattice ownership, transport, resize, width mode, viewport, daemon mirror, or tmux geometry.
 
 ## Module Black-Box
 
 - Drawer normal row tap switches. While preview is open, drawer row tap replaces only the focus-cell target and never switches the active shell session.
 - Drawer accepts remote catalog rows by calling the existing remote-open owner in background materialize mode, then assigning the returned local open-session target to the focus cell.
-- Left-edge right swipe opens drawer, middle horizontal swipe remains fixed crop, right-edge left swipe opens preview.
+- Left-edge right swipe opens drawer, middle horizontal swipe cycles focus across sessions in the focus cell's cwd, right-edge left swipe opens preview, right-edge right swipe exits.
 - Portrait uses focus + one side strip + top/bottom strips, landscape uses two center panes + top/bottom strips, and wide/tablet uses focus + left/right/top/bottom strips. Edge-cell tap pans focus; empty `+` and long press open coordinate-scoped set/clear; body drag scrolls/pans locally without focus movement; Back/right swipe cancels and restores the entry shell projection.
 
 ## Project Black-Box

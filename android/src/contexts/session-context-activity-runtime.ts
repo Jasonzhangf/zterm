@@ -24,6 +24,7 @@ interface SessionTransportRuntimeLike {
 
 interface SessionTargetRuntimeLike {
   sessionIds: string[];
+  terminalMuxReady?: boolean;
 }
 
 interface SessionTerminalChannelLike {
@@ -129,12 +130,19 @@ export function ensureActiveSessionFreshRuntime(options: {
   const targetRuntime = options.readSessionTargetRuntime(options.refreshOptions.sessionId);
   const ws = options.daemonConnection.readSessionSocket(options.refreshOptions.sessionId);
   const terminalChannel = options.readSessionTerminalChannel?.(options.refreshOptions.sessionId) || null;
+  const physicalTargetSocket = options.daemonConnection.readSessionTargetSocket?.(options.refreshOptions.sessionId)
+    || options.daemonConnection.readSessionResource(options.refreshOptions.sessionId).terminalSocket
+    || null;
+  const terminalChannelUnavailable = terminalChannel
+    ? (terminalChannel.state === 'closed' || terminalChannel.state === 'closing')
+    : targetRuntime?.terminalMuxReady === true;
   const muxChannelUnavailableOnOpenTarget = Boolean(
     targetRuntime
-    && ws?.readyState === WebSocket.OPEN
-    && terminalChannel
-    && (terminalChannel.state === 'closed' || terminalChannel.state === 'closing')
+    && physicalTargetSocket?.readyState === WebSocket.OPEN
+    && terminalChannelUnavailable
   );
+  const canReopenMuxChannel = options.refreshOptions.source === 'explicit-resume'
+    || options.refreshOptions.source === 'foreground-resume';
   const effectiveWsReadyState = muxChannelUnavailableOnOpenTarget
     ? WebSocket.CLOSED
     : (ws?.readyState ?? null);
@@ -145,11 +153,11 @@ export function ensureActiveSessionFreshRuntime(options: {
   const isActiveReentryTarget = options.refreshOptions.source === 'active-reentry';
   const isRefreshTarget = isExplicitResumeTarget || isActiveReentryTarget || isActive || isLive;
   if (muxChannelUnavailableOnOpenTarget && isRefreshTarget) {
-    if (options.refreshOptions.source !== 'explicit-resume') {
+    if (!canReopenMuxChannel) {
       options.runtimeDebug(`session.transport.${options.refreshOptions.source}.data-refresh-only-skip`, {
         sessionId: options.refreshOptions.sessionId,
         activeSessionId: options.refs.stateRef.current.activeSessionId,
-        physicalWsReadyState: ws?.readyState ?? null,
+        physicalWsReadyState: physicalTargetSocket?.readyState ?? null,
         terminalChannelState: terminalChannel?.state || null,
         targetKey: transportRuntime?.targetKey || null,
       });
@@ -162,7 +170,7 @@ export function ensureActiveSessionFreshRuntime(options: {
       isLive,
       isExplicitResumeTarget,
       isActiveReentryTarget,
-      physicalWsReadyState: ws?.readyState ?? null,
+      physicalWsReadyState: physicalTargetSocket?.readyState ?? null,
       terminalChannelState: terminalChannel?.state || null,
       targetKey: transportRuntime?.targetKey || null,
       targetSessionCount: targetRuntime?.sessionIds.length || 0,

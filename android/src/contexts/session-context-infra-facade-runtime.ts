@@ -9,6 +9,7 @@ import type { BridgeSettings } from '../lib/bridge-settings';
 import {
   getSessionTerminalChannel,
   setSessionChannelBodySubscribed,
+  TerminalMuxChannelNotOpenError,
 } from '../lib/terminal-channel-mux-runtime';
 import {
   getSessionTargetTerminalTransport,
@@ -107,7 +108,7 @@ function requireTerminalMuxChannel(
 ) {
   const channel = getSessionTerminalChannel(store.terminalChannels, sessionId);
   if (!channel || (channel.state !== 'opening' && channel.state !== 'open')) {
-    throw new Error(`terminal mux channel is not open for session ${sessionId}`);
+    throw new TerminalMuxChannelNotOpenError(sessionId);
   }
   return channel;
 }

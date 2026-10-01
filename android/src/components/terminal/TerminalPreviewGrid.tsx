@@ -42,14 +42,11 @@ export interface TerminalPreviewGridProps {
   onClearCell: (coordinate: JunctionPreviewCoordinate) => void;
   onCycleSession?: (direction: 'next' | 'previous') => void;
   onPinchVerticalCwdStep?: (direction: 'next' | 'previous') => void;
-  onOverviewChange?: (coordinates: JunctionPreviewCoordinate[] | null) => void;
   onClose: () => void;
 }
 
 const PREVIEW_LONG_PRESS_MS = 420;
 const PREVIEW_LONG_PRESS_CLICK_SUPPRESSION_MS = 1_000;
-const PREVIEW_MIN_SCALE = 0.35;
-const PREVIEW_PAN_LOCK_PX = 4;
 const PREVIEW_SESSION_SWIPE_LOCK_PX = 12;
 const PREVIEW_SESSION_SWIPE_MIN_DX = 48;
 const PREVIEW_CWD_PINCH_LOCK_PX = 48;
@@ -94,36 +91,8 @@ function coordinateKey(coord: JunctionPreviewCoordinate) {
   return `${coord.col}:${coord.row}`;
 }
 
-function resolveOverviewBounds(coordinates: JunctionPreviewCoordinate[]) {
-  if (coordinates.length === 0) return null;
-  let minCol = coordinates[0].col;
-  let maxCol = coordinates[0].col;
-  let minRow = coordinates[0].row;
-  let maxRow = coordinates[0].row;
-  for (const coordinate of coordinates) {
-    minCol = Math.min(minCol, coordinate.col);
-    maxCol = Math.max(maxCol, coordinate.col);
-    minRow = Math.min(minRow, coordinate.row);
-    maxRow = Math.max(maxRow, coordinate.row);
-  }
-  return { minCol, maxCol, minRow, maxRow };
-}
-
-function buildOverviewGrid(
-  lattice: JunctionPreviewLatticeV1,
-  focus: JunctionPreviewCoordinate,
-): JunctionPreviewCoordinate[] | null {
-  const coordinates = lattice.cells.map((cell) => ({ col: cell.col, row: cell.row }));
-  coordinates.push({ col: focus.col, row: focus.row });
-  const bounds = resolveOverviewBounds(coordinates);
-  if (!bounds) return null;
-  const cells: JunctionPreviewCoordinate[] = [];
-  for (let col = bounds.minCol - 1; col <= bounds.maxCol + 1; col += 1) {
-    for (let row = bounds.minRow - 1; row <= bounds.maxRow + 1; row += 1) {
-      cells.push({ col, row });
-    }
-  }
-  return cells;
+function isPreviewEdgeExitGesture(startX: number) {
+  return startX >= Math.max(0, window.innerWidth - TERMINAL_DRAWER_EDGE_SWIPE_START_PX);
 }
 
 export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
@@ -142,7 +111,6 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
   onClearCell,
   onCycleSession,
   onPinchVerticalCwdStep,
-  onOverviewChange,
   onClose,
 }: TerminalPreviewGridProps) {
   const resolvedViewportWidth = Math.max(
@@ -186,31 +154,20 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
     sideEdge,
   });
   const rowHeightPx = Math.max(fontSize + 4, Math.ceil(fontSize * 1.5));
-  const exitGestureRef = useRef<{ x: number; y: number } | null>(null);
   const longPressTimerRef = useRef<number | null>(null);
   const longPressStartRef = useRef<{ x: number; y: number } | null>(null);
   const suppressClickRef = useRef<JunctionPreviewCoordinate | null>(null);
   const suppressClickTimerRef = useRef<number | null>(null);
   const suppressPreviewClickRef = useRef(false);
   const suppressPreviewClickTimerRef = useRef<number | null>(null);
-  const pinchGestureRef = useRef<{ startSpan: number; startScale: number; startY: number; cwdStepFired: boolean } | null>(null);
+  const pinchGestureRef = useRef<{ startSpan: number; startY: number; cwdStepFired: boolean } | null>(null);
   const previewHorizontalSwipeRef = useRef<{
     startX: number;
     startY: number;
     locked: 'none' | 'session' | 'exit';
     fired: boolean;
+    exitArmed: boolean;
   } | null>(null);
-  const panGestureRef = useRef<{
-    startX: number;
-    startY: number;
-    startPanX: number;
-    startPanY: number;
-    moved: boolean;
-  } | null>(null);
-  const previewScaleRef = useRef(1);
-  const previewPanRef = useRef({ x: 0, y: 0 });
-  const [previewScale, setPreviewScale] = useState(1);
-  const [previewPan, setPreviewPan] = useState({ x: 0, y: 0 });
   const [slotMenu, setSlotMenu] = useState<{
     coordinate: JunctionPreviewCoordinate;
     existingSessionId?: string;
@@ -227,13 +184,6 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
       window.clearTimeout(suppressPreviewClickTimerRef.current);
     }
   }, []);
-
-  useEffect(() => {
-    if (!onOverviewChange) return;
-    onOverviewChange(previewScale < 1
-      ? lattice.cells.map((cell) => ({ col: cell.col, row: cell.row }))
-      : null);
-  }, [lattice.cells, onOverviewChange, previewScale]);
 
   const suppressNextPreviewClick = () => {
     suppressPreviewClickRef.current = true;
@@ -258,17 +208,6 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
     if (!suppressPreviewClickRef.current) return false;
     clearSuppressedPreviewClick();
     return true;
-  };
-
-  const applyPreviewScale = (nextScale: number) => {
-    const clamped = Math.min(1, Math.max(PREVIEW_MIN_SCALE, nextScale));
-    const resolved = clamped >= 0.995 ? 1 : clamped;
-    previewScaleRef.current = resolved;
-    if (resolved >= 1) {
-      previewPanRef.current = { x: 0, y: 0 };
-      setPreviewPan({ x: 0, y: 0 });
-    }
-    setPreviewScale(resolved);
   };
 
   const clearLongPress = () => {
@@ -369,48 +308,6 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
     cellRects.set(coordinateKey(cell), { clip, pane, isFocus });
   }
 
-  const overviewCells = previewScale < 1
-    ? buildOverviewGrid(lattice, focus)
-    : null;
-  const overviewBounds = overviewCells ? resolveOverviewBounds(overviewCells) : null;
-  const overviewCellRects = new Map<string, {
-    left: number;
-    top: number;
-    width: number;
-    height: number;
-    isFocus: boolean;
-  }>();
-  let overviewWidth = 0;
-  let overviewHeight = 0;
-  let overviewFitScale = 1;
-  let overviewScale = 1;
-  let overviewTranslateX = 0;
-  let overviewTranslateY = 0;
-  if (overviewBounds && overviewCells) {
-    const columnCount = overviewBounds.maxCol - overviewBounds.minCol + 1;
-    const rowCount = overviewBounds.maxRow - overviewBounds.minRow + 1;
-    const overviewCellWidth = layout.focusSizePx.width;
-    const overviewCellHeight = layout.focusSizePx.height;
-    overviewWidth = columnCount * overviewCellWidth + Math.max(0, columnCount - 1) * JUNCTION_PREVIEW_GAP_PX;
-    overviewHeight = rowCount * overviewCellHeight + Math.max(0, rowCount - 1) * JUNCTION_PREVIEW_GAP_PX;
-    overviewFitScale = Math.min(
-      1,
-      layoutViewportWidth / overviewWidth,
-      resolvedViewportHeight / overviewHeight,
-    );
-    overviewScale = Math.min(1, previewScale, overviewFitScale);
-    overviewTranslateX = (layoutViewportWidth - overviewWidth * overviewScale) / 2;
-    overviewTranslateY = (resolvedViewportHeight - overviewHeight * overviewScale) / 2;
-    for (const cell of overviewCells) {
-      overviewCellRects.set(coordinateKey(cell), {
-        left: (cell.col - overviewBounds.minCol) * (overviewCellWidth + JUNCTION_PREVIEW_GAP_PX),
-        top: (cell.row - overviewBounds.minRow) * (overviewCellHeight + JUNCTION_PREVIEW_GAP_PX),
-        width: overviewCellWidth,
-        height: overviewCellHeight,
-        isFocus: cell.col === focus.col && cell.row === focus.row,
-      });
-    }
-  }
   const usedSessionIds = new Set(
     lattice.cells
       .filter((candidate) => (
@@ -432,36 +329,23 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
     clearSuppressedPreviewClick();
     if (touches.length >= 2) {
       clearLongPress();
-      exitGestureRef.current = null;
       pinchGestureRef.current = {
         startSpan: Math.max(1, touchSpan(touches)),
-        startScale: previewScaleRef.current,
         startY: (touches[0]?.clientY + touches[1]?.clientY) / 2,
         cwdStepFired: false,
       };
-      panGestureRef.current = null;
       event.preventDefault();
       event.stopPropagation();
       return;
     }
-    if (touches.length === 1 && previewScaleRef.current >= 1) {
+    if (touches.length === 1) {
       const touch = touches[0];
       previewHorizontalSwipeRef.current = {
         startX: touch.clientX,
         startY: touch.clientY,
         locked: 'none',
         fired: false,
-      };
-    } else if (touches.length === 1 && previewScaleRef.current < 1) {
-      clearLongPress();
-      exitGestureRef.current = null;
-      const touch = touches[0];
-      panGestureRef.current = {
-        startX: touch.clientX,
-        startY: touch.clientY,
-        startPanX: previewPanRef.current.x,
-        startPanY: previewPanRef.current.y,
-        moved: false,
+        exitArmed: isPreviewEdgeExitGesture(touch.clientX),
       };
     }
   };
@@ -470,8 +354,6 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
     const touches = event.touches;
     const pinch = pinchGestureRef.current;
     if (pinch && touches.length >= 2) {
-      const ratio = touchSpan(touches) / pinch.startSpan;
-      applyPreviewScale(pinch.startScale * ratio);
       const dy = ((touches[0]?.clientY + touches[1]?.clientY) / 2) - pinch.startY;
       if (!pinch.cwdStepFired && Math.abs(dy) >= PREVIEW_CWD_PINCH_LOCK_PX) {
         pinch.cwdStepFired = true;
@@ -484,17 +366,15 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
     }
 
     const horizontalSwipe = previewHorizontalSwipeRef.current;
-    if (horizontalSwipe && touches.length === 1 && previewScaleRef.current >= 1) {
+    if (horizontalSwipe && touches.length === 1) {
       const touch = touches[0];
       const dx = touch.clientX - horizontalSwipe.startX;
       const dy = touch.clientY - horizontalSwipe.startY;
       if (horizontalSwipe.locked === 'none' && Math.hypot(dx, dy) >= PREVIEW_SESSION_SWIPE_LOCK_PX) {
         if (Math.abs(dx) <= Math.abs(dy)) return;
         if (
-          horizontalSwipe.startX <= TERMINAL_DRAWER_EDGE_SWIPE_START_PX
-          || (event.target as HTMLElement | null)?.closest(
-            '[data-preview-scroll-surface="true"], [data-preview-menu-surface="true"]',
-          )
+          horizontalSwipe.exitArmed
+          && dx > 0
         ) {
           horizontalSwipe.locked = 'exit';
           return;
@@ -510,30 +390,10 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
       }
       return;
     }
-
-    const pan = panGestureRef.current;
-    if (!pan || touches.length !== 1 || previewScaleRef.current >= 1) {
-      return;
-    }
-    const touch = touches[0];
-    const dx = touch.clientX - pan.startX;
-    const dy = touch.clientY - pan.startY;
-    if (!pan.moved && Math.hypot(dx, dy) < PREVIEW_PAN_LOCK_PX) {
-      return;
-    }
-    pan.moved = true;
-    const nextPan = {
-      x: pan.startPanX + dx,
-      y: pan.startPanY + dy,
-    };
-    previewPanRef.current = nextPan;
-    setPreviewPan(nextPan);
-    suppressNextPreviewClick();
-    event.preventDefault();
-    event.stopPropagation();
   };
 
   const onPreviewTouchEndCapture = (event: TouchEvent<HTMLElement>) => {
+    const horizontalSwipe = previewHorizontalSwipeRef.current;
     if (pinchGestureRef.current) {
       if (event.touches.length < 2) {
         pinchGestureRef.current = null;
@@ -543,18 +403,23 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
       return;
     }
     previewHorizontalSwipeRef.current = null;
-    const pan = panGestureRef.current;
-    if (!pan) return;
-    panGestureRef.current = null;
-    if (!pan.moved) return;
-    event.preventDefault();
-    event.stopPropagation();
+    if (horizontalSwipe?.locked === 'exit' && event.changedTouches.length > 0) {
+      const touch = event.changedTouches[0];
+      const dx = touch.clientX - horizontalSwipe.startX;
+      const dy = touch.clientY - horizontalSwipe.startY;
+      if (dx >= PREVIEW_SESSION_SWIPE_MIN_DX && Math.abs(dx) > Math.abs(dy)) {
+        suppressNextPreviewClick();
+        event.preventDefault();
+        event.stopPropagation();
+        onClose();
+      }
+      return;
+    }
   };
 
   const onPreviewTouchCancelCapture = () => {
     pinchGestureRef.current = null;
     previewHorizontalSwipeRef.current = null;
-    panGestureRef.current = null;
   };
 
   const renderPreviewCell = (
@@ -722,34 +587,6 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
       onTouchMoveCapture={onPreviewTouchMoveCapture}
       onTouchEndCapture={onPreviewTouchEndCapture}
       onTouchCancelCapture={onPreviewTouchCancelCapture}
-      onTouchStart={(event) => {
-        const touch = event.touches[0];
-        const viewportWidth = typeof window !== 'undefined' ? window.innerWidth || 0 : 0;
-        if (event.touches.length !== 1 || previewScaleRef.current < 1) {
-          exitGestureRef.current = null;
-          return;
-        }
-        if (touch && viewportWidth > 0 && touch.clientX <= TERMINAL_DRAWER_EDGE_SWIPE_START_PX) {
-          exitGestureRef.current = null;
-          return;
-        }
-        if ((event.target as HTMLElement | null)?.closest(
-          '[data-preview-scroll-surface="true"], [data-preview-menu-surface="true"]',
-        )) {
-          exitGestureRef.current = null;
-          return;
-        }
-        exitGestureRef.current = touch ? { x: touch.clientX, y: touch.clientY } : null;
-      }}
-      onTouchEnd={(event) => {
-        const start = exitGestureRef.current;
-        exitGestureRef.current = null;
-        const touch = event.changedTouches[0];
-        if (!start || !touch || event.touches.length > 0 || previewScaleRef.current < 1) return;
-        const dx = touch.clientX - start.x;
-        const dy = touch.clientY - start.y;
-        if (dx >= 48 && Math.abs(dx) > Math.abs(dy)) onClose();
-      }}
       style={{
         position: 'absolute',
         inset: 0,
@@ -796,37 +633,15 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
 
       <div ref={contentRef} style={{ flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden' }}>
         <div
-          data-testid="terminal-preview-scaler"
-          data-preview-scale={String(previewScale)}
-          data-preview-pan-x={String(previewPan.x)}
-          data-preview-pan-y={String(previewPan.y)}
-          data-preview-fit-scale={String(overviewFitScale)}
-          data-preview-effective-scale={String(overviewScale)}
-          data-preview-content-width={String(overviewWidth)}
-          data-preview-content-height={String(overviewHeight)}
-          data-preview-translate-x={String(overviewTranslateX)}
-          data-preview-translate-y={String(overviewTranslateY)}
           style={{
             position: 'absolute',
             inset: 0,
-            transform: overviewCells
-              ? `translate3d(${overviewTranslateX + previewPan.x}px, ${overviewTranslateY + previewPan.y}px, 0) scale(${overviewScale})`
-              : `translate3d(${previewPan.x}px, ${previewPan.y}px, 0) scale(${previewScale})`,
-            transformOrigin: '0 0',
-            willChange: previewScale < 1 || previewPan.x !== 0 || previewPan.y !== 0
-              ? 'transform'
-              : undefined,
           }}
         >
-          {overviewCells
-            ? overviewCells.map((cell) => {
-              const rect = overviewCellRects.get(coordinateKey(cell));
-              return rect ? renderPreviewCell(cell, rect) : null;
-            })
-            : layout.visibleCells.map((cell) => {
-              const rect = cellRects.get(coordinateKey(cell));
-              return rect ? renderPreviewCell(cell, rect) : null;
-            })}
+          {layout.visibleCells.map((cell) => {
+            const rect = cellRects.get(coordinateKey(cell));
+            return rect ? renderPreviewCell(cell, rect) : null;
+          })}
         </div>
 
         {slotMenu ? (

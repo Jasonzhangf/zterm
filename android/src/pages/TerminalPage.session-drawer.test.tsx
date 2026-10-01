@@ -634,7 +634,7 @@ describe('TerminalPage portrait session drawer', () => {
     expect(screen.getByTestId('terminal-connection-status-strip').style.boxShadow).toBe('none');
   });
 
-  it('does not show recovery banner when a stale reconnecting label still has live traffic', () => {
+  it('does not show recovery banner while a reconnecting session still has wire traffic', () => {
     vi.useFakeTimers();
     const sessions = [makeSession('s1')];
     sessions[0]!.state = 'reconnecting';
@@ -675,8 +675,8 @@ describe('TerminalPage portrait session drawer', () => {
     );
 
     expect(screen.queryByTestId('terminal-network-banner')).toBeNull();
-    expect(screen.queryByTestId('terminal-connection-status-activity')).toBeNull();
-    expect(screen.getByTestId('terminal-connection-status-route').textContent).toBe('Tailscale');
+    expect(screen.getByTestId('terminal-connection-status-activity').textContent).toBe('正在重连');
+    expect(screen.getByTestId('terminal-connection-status-route').textContent).toBe('正在重连');
     expect(screen.getByTestId('terminal-connection-status-uplink').textContent).toBe('↑ 725 B/s');
     expect(screen.getByTestId('terminal-connection-status-downlink').textContent).toBe('↓ 6.1 KB/s');
 

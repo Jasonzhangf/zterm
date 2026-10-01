@@ -6,19 +6,13 @@ import { isPrivateLanIpv4Host, parseEndpointHost } from '../lib/network-target';
 import { resolveDebugStatus } from './terminal-page-debug-helpers';
 import type { Session, SessionDebugOverlayMetrics } from '../lib/types';
 
-export function hasLiveSessionTraffic(
-  metrics: SessionDebugOverlayMetrics | null | undefined,
-) {
-  if (!metrics?.active) {
-    return false;
-  }
-  return (metrics.uplinkBps || 0) > 0 || (metrics.downlinkBps || 0) > 0;
-}
-
 export function resolveConnectionActivityLabel(
   session: Session,
   status: EffectiveConnectionStatus,
 ) {
+  if (session.state === 'connected') {
+    return null;
+  }
   if (
     session.lastError === 'waiting for confirmed control directory'
     || session.lastError === 'control directory confirmation timeout'
@@ -40,17 +34,14 @@ export function resolveEffectiveConnectionStatus(
   session: Session,
   metrics: SessionDebugOverlayMetrics | null | undefined,
 ): EffectiveConnectionStatus {
-  const status = resolveDebugStatus(session, metrics || undefined);
   if (session.state === 'connected') {
     return 'connected';
   }
-  if (status === 'reconnecting' && hasLiveSessionTraffic(metrics)) {
-    return 'waiting';
-  }
-  if ((status === 'connecting' || status === 'waiting') && hasLiveSessionTraffic(metrics)) {
-    return 'connected';
-  }
-  return status;
+  // Connected truth comes only from the session/channel lifecycle
+  // (`connected` or an accepted `buffer-sync`/`buffer-head` promoting the
+  // session), never from raw wire byte rates: rx/tx counters also include
+  // pong, title, schedule and local echo traffic.
+  return resolveDebugStatus(session, metrics || undefined);
 }
 
 export function formatConnectionRouteLabel(session: Session) {

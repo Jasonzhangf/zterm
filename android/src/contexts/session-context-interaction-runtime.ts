@@ -102,6 +102,7 @@ export function createSessionInteractionRuntime(options: {
   isReconnectInFlight: (sessionId: string) => boolean;
   hasPendingSessionTransportOpen: (sessionId: string) => boolean;
   isPendingSessionTransportOpenStale: (sessionId: string) => boolean;
+  resumeActiveSessionTransport?: (sessionId: string) => boolean;
   scheduleReconnect?: (
     sessionId: string,
     message: string,
@@ -141,6 +142,15 @@ export function createSessionInteractionRuntime(options: {
       timeoutMs,
       sessions: options.refs.stateRef.current.sessions,
       daemonConnection,
+      requestReopen: options.resumeActiveSessionTransport
+        ? (sessionId, reason) => {
+          options.resumeActiveSessionTransport?.(sessionId);
+          options.runtimeDebug('session.transfer.request-reopen', {
+            sessionId,
+            reason,
+          });
+        }
+        : undefined,
       requestReconnect: options.scheduleReconnect
         ? (sessionId, reason) => options.scheduleReconnect?.(sessionId, reason, true, {
           immediate: true,
