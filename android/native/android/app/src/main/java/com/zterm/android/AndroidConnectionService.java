@@ -844,6 +844,7 @@ public class AndroidConnectionService extends Service {
     }
 
     private final class TargetRuntime extends WebSocketListener {
+        private static final String[] DIRECT_TIER_ORDER = {"lan", "tailscale", "ipv6", "ipv4"};
         final AndroidConnectionServiceTarget target;
         volatile AndroidConnectionServiceRoutePolicy routePolicy;
         volatile List<RouteCandidateDiagnostic> routeDiagnostics;
@@ -862,7 +863,12 @@ public class AndroidConnectionService extends Service {
         volatile boolean stopped;
         volatile boolean sendRetryPending;
         volatile RouteCandidateDiagnostic committedCandidate;
-        volatile boolean directLaunchFinished;
+        /**
+         * Index of the direct tier currently probing, or -1 for manual route
+         * policy (single explicit candidate, never tier-escalated).
+         */
+        volatile int activeDirectTier = -1;
+        private boolean relayStartedThisAttempt = false;
         private final java.util.ArrayList<Runnable> pendingDirectOpenFailures =
             new java.util.ArrayList<>();
         volatile RouteCandidateDiagnostic activeMuxReadyCandidate;
@@ -939,7 +945,8 @@ public class AndroidConnectionService extends Service {
             committedCandidate = null;
             activeMuxReadyCandidate = null;
             activeRtcCandidate = null;
-            directLaunchFinished = false;
+            activeDirectTier = -1;
+            relayStartedThisAttempt = false;
             sendRetryPending = false;
             heartbeatMisses = 0;
             lastActivityAt = System.currentTimeMillis();
@@ -967,22 +974,57 @@ public class AndroidConnectionService extends Service {
                 transportFailure("no-route-candidates", "no usable route candidate");
                 return;
             }
-            directLaunchFinished = false;
             pendingDirectOpenFailures.clear();
-            int directCount = 0;
-            for (RouteCandidate candidate : candidates) {
-                if (!isDirectCandidate(candidate)) continue;
-                runCandidate(candidate, candidateTimeouts, candidateSockets, candidateDiagnostics);
-                directCount += 1;
-            }
-            directLaunchFinished = true;
-            processPendingDirectOpenFailures(candidateTimeouts, candidateSockets, candidateDiagnostics);
-            if (!candidateDiagnostics.isEmpty()) {
+            if (routePolicy.mode == AndroidConnectionServiceRoutePolicy.Mode.MANUAL) {
+                activeDirectTier = -1;
+                for (RouteCandidate candidate : candidates) {
+                    runCandidate(candidate, candidateTimeouts, candidateSockets, candidateDiagnostics);
+                }
+                processPendingDirectOpenFailures(candidateTimeouts, candidateSockets, candidateDiagnostics);
                 return;
             }
-            if (directCount == 0) {
-                maybeStartRelay(candidateTimeouts, candidateSockets, candidateDiagnostics);
+            activeDirectTier = 0;
+            if (launchDirectTier(activeDirectTier, candidateTimeouts, candidateSockets, candidateDiagnostics)) {
+                processPendingDirectOpenFailures(candidateTimeouts, candidateSockets, candidateDiagnostics);
+                return;
             }
+            advanceDirectTier(candidateTimeouts, candidateSockets, candidateDiagnostics);
+        }
+
+        private boolean launchDirectTier(int tier,
+                                         Map<String, Runnable> candidateTimeouts,
+                                         Map<String, WebSocket> candidateSockets,
+                                         Map<String, RouteCandidateDiagnostic> candidateDiagnostics) {
+            if (tier < 0 || tier >= DIRECT_TIER_ORDER.length) {
+                return false;
+            }
+            List<RouteCandidate> candidates = buildCandidates();
+            boolean launched = false;
+            for (RouteCandidate candidate : candidates) {
+                if (!DIRECT_TIER_ORDER[tier].equals(candidate.path)) {
+                    continue;
+                }
+                runCandidate(candidate, candidateTimeouts, candidateSockets, candidateDiagnostics);
+                launched = true;
+            }
+            return launched;
+        }
+
+        private void advanceDirectTier(Map<String, Runnable> candidateTimeouts,
+                                       Map<String, WebSocket> candidateSockets,
+                                       Map<String, RouteCandidateDiagnostic> candidateDiagnostics) {
+            if (stopped || generation == null || committedCandidate != null) {
+                return;
+            }
+            for (int tier = activeDirectTier + 1; tier < DIRECT_TIER_ORDER.length; tier += 1) {
+                activeDirectTier = tier;
+                if (launchDirectTier(tier, candidateTimeouts, candidateSockets, candidateDiagnostics)) {
+                    processPendingDirectOpenFailures(candidateTimeouts, candidateSockets, candidateDiagnostics);
+                    return;
+                }
+            }
+            activeDirectTier = DIRECT_TIER_ORDER.length;
+            maybeStartRelay(candidateTimeouts, candidateSockets, candidateDiagnostics);
         }
 
         private void runCandidate(RouteCandidate candidate, Map<String, Runnable> candidateTimeouts,
@@ -1009,11 +1051,6 @@ public class AndroidConnectionService extends Service {
             }
         }
 
-        private boolean isDirectCandidate(RouteCandidate candidate) {
-            return candidate != null && !"rtc-relay".equals(candidate.path)
-                && !"rtc-direct".equals(candidate.path);
-        }
-
         private boolean isRelayCandidate(RouteCandidate candidate) {
             return candidate != null && "rtc-relay".equals(candidate.path);
         }
@@ -1022,19 +1059,35 @@ public class AndroidConnectionService extends Service {
                                      Map<String, WebSocket> candidateSockets,
                                      Map<String, RouteCandidateDiagnostic> candidateDiagnostics) {
             if (stopped || generation == null || committedCandidate != null) return;
-            for (RouteCandidate candidate : buildCandidates()) {
-                if (isRelayCandidate(candidate)) {
-                    runCandidate(candidate, candidateTimeouts, candidateSockets, candidateDiagnostics);
-                    return;
-                }
-            }
-            List<RouteCandidate> relayOnly = new ArrayList<>();
-            addRtcCandidate(relayOnly, AndroidConnectionServiceRoutePolicy.Path.RTC_RELAY);
-            for (RouteCandidate candidate : relayOnly) {
-                runCandidate(candidate, candidateTimeouts, candidateSockets, candidateDiagnostics);
+            if (routePolicy.mode == AndroidConnectionServiceRoutePolicy.Mode.MANUAL) {
+                transportFailure("route-exhausted", "manual route candidate exhausted");
                 return;
             }
-            transportFailure("no-route-candidates", "direct route tier exhausted without usable candidate");
+            if (relayStartedThisAttempt) {
+                transportFailure("route-exhausted", "all route candidates exhausted");
+                return;
+            }
+            RouteCandidate relayCandidate = null;
+            for (RouteCandidate candidate : buildCandidates()) {
+                if (isRelayCandidate(candidate)) {
+                    relayCandidate = candidate;
+                    break;
+                }
+            }
+            if (relayCandidate == null) {
+                List<RouteCandidate> relayOnly = new ArrayList<>();
+                addRtcCandidate(relayOnly, AndroidConnectionServiceRoutePolicy.Path.RTC_RELAY);
+                if (!relayOnly.isEmpty()) {
+                    relayCandidate = relayOnly.get(0);
+                }
+            }
+            if (relayCandidate == null) {
+                transportFailure("no-route-candidates", "direct route tier exhausted without usable candidate");
+                return;
+            }
+            relayStartedThisAttempt = true;
+            runCandidate(relayCandidate, candidateTimeouts, candidateSockets, candidateDiagnostics);
+            processPendingDirectOpenFailures(candidateTimeouts, candidateSockets, candidateDiagnostics);
         }
 
         private void commitCandidate(RouteCandidateDiagnostic diagnostic, RouteCandidate candidate) {
@@ -1062,17 +1115,8 @@ public class AndroidConnectionService extends Service {
                                       Map<String, RouteCandidateDiagnostic> candidateDiagnostics) {
             if (stopped || generation == null || diagnostic == null) return;
             if (committedCandidate != null && !committedCandidate.candidateId.equals(diagnostic.candidateId)) return;
-            if (activeMuxReadyCandidate != null
-                && activeMuxReadyCandidate.candidateId.equals(diagnostic.candidateId)) {
-                return;
-            }
-            if (directLaunchFinished) {
-                candidateFailureAfterDirectLaunch(code, message, diagnostic,
-                    candidateTimeouts, candidateSockets, candidateDiagnostics);
-            } else {
-                pendingDirectOpenFailures.add(() -> candidateFailureAfterDirectLaunch(
-                    code, message, diagnostic, candidateTimeouts, candidateSockets, candidateDiagnostics));
-            }
+            candidateFailureAfterDirectLaunch(code, message, diagnostic,
+                candidateTimeouts, candidateSockets, candidateDiagnostics);
         }
 
         private void processPendingDirectOpenFailures(Map<String, Runnable> candidateTimeouts,
@@ -1093,6 +1137,7 @@ public class AndroidConnectionService extends Service {
             if (committedCandidate != null && !committedCandidate.candidateId.equals(diagnostic.candidateId)) return;
             if (activeMuxReadyCandidate != null
                 && activeMuxReadyCandidate.candidateId.equals(diagnostic.candidateId)) {
+                transportFailure("active-route-" + code, message);
                 return;
             }
             diagnostic.fail(code, message, System.currentTimeMillis());
@@ -1109,16 +1154,32 @@ public class AndroidConnectionService extends Service {
             if (committedCandidate != null) {
                 return;
             }
-            if (diagnostic.path == null || diagnostic.path.startsWith("rtc-")
-                || candidateDiagnostics.isEmpty()) {
-                maybeStartRelay(candidateTimeouts, candidateSockets, candidateDiagnostics);
+            if (routePolicy.mode == AndroidConnectionServiceRoutePolicy.Mode.MANUAL) {
+                transportFailure("route-exhausted", "manual route candidate failed");
                 return;
             }
+            if (isRelayCandidate(diagnostic.candidate)) {
+                transportFailure("route-exhausted", "relay candidate failed after all direct tiers");
+                return;
+            }
+            int diagnosticTier = directTierIndex(diagnostic.path);
+            if (diagnosticTier >= 0 && diagnosticTier != activeDirectTier) {
+                // A later tier must not be reached until the active tier drains.
+                return;
+            }
+            advanceDirectTier(candidateTimeouts, candidateSockets, candidateDiagnostics);
         }
 
-        private boolean isDirectCandidateByPath(String path) {
-            return "lan".equals(path) || "tailscale".equals(path)
-                || "ipv6".equals(path) || "ipv4".equals(path);
+        private int directTierIndex(String path) {
+            if (path == null) {
+                return -1;
+            }
+            for (int tier = 0; tier < DIRECT_TIER_ORDER.length; tier += 1) {
+                if (DIRECT_TIER_ORDER[tier].equals(path)) {
+                    return tier;
+                }
+            }
+            return -1;
         }
 
         private void closeUncommittedCandidates(String reason, String committedCandidateId) {

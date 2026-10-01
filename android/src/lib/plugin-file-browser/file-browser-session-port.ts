@@ -20,6 +20,25 @@ function parseBridgeHost(value: string): string {
   return raw.split(':').shift()!;
 }
 
+function parseResolvedEndpoint(value: string | undefined): { host: string; port: number } | undefined {
+  if (typeof value !== 'string') return undefined;
+  const raw = value.trim();
+  if (!raw) return undefined;
+  const bracketMatch = raw.match(/^\[([^\]]+)\]:(\d+)$/u);
+  if (bracketMatch) {
+    const port = Number(bracketMatch[2]);
+    return Number.isInteger(port) && port > 0
+      ? { host: bracketMatch[1]!, port }
+      : undefined;
+  }
+  const separatorIndex = raw.lastIndexOf(':');
+  if (separatorIndex <= 0 || raw.indexOf(':') !== separatorIndex) return undefined;
+  const host = raw.slice(0, separatorIndex).trim();
+  const port = Number(raw.slice(separatorIndex + 1));
+  if (!host || !Number.isInteger(port) || port <= 0 || port > 65535) return undefined;
+  return { host, port };
+}
+
 function isPrivateLanBridgeHost(value: string): boolean {
   const host = parseBridgeHost(value);
   const parts = host.split('.').map((part) => Number(part));
@@ -35,15 +54,19 @@ function isPrivateLanBridgeHost(value: string): boolean {
 }
 
 export function createFileBrowserSessionPort(input: {
-  session: Pick<Session, 'id' | 'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'authToken' | 'resolvedPath'> | undefined;
+  session: Pick<
+    Session,
+    'id' | 'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'authToken' | 'resolvedPath' | 'resolvedEndpoint'
+  > | undefined;
   send: (sessionId: string, message: FileBrowserCommand) => void;
   subscribe: FileBrowserSessionPort['onFileTransferMessage'];
   downloadStore?: FileTransferDownloadStore;
+  fetchBinary?: typeof fetch;
 }): FileBrowserSessionPort {
   if (!input.session?.id.trim()) throw new Error('file browser session is required');
   if (typeof input.send !== 'function') throw new Error('file browser send capability is required');
   if (typeof input.subscribe !== 'function') throw new Error('file browser subscription capability is required');
-  const { id, daemonHostId, bridgeHost, bridgePort, authToken, resolvedPath } = input.session;
+  const { id, daemonHostId, bridgeHost, bridgePort, authToken, resolvedPath, resolvedEndpoint } = input.session;
   const directDownloadPath = resolvedPath === 'lan' || resolvedPath === 'tailscale'
     ? resolvedPath
     : undefined;
@@ -51,14 +74,16 @@ export function createFileBrowserSessionPort(input: {
     || (!resolvedPath && bridgeHost && isPrivateLanBridgeHost(bridgeHost)
       ? 'lan' as const
       : undefined);
+  const endpoint = directDownloadPath ? parseResolvedEndpoint(resolvedEndpoint) : undefined;
   const { send, subscribe } = input;
   const downloadStore = input.downloadStore ?? createFileTransferDownloadStore(StoragePermissionPlugin);
   const binaryDownloader = createFileTransferBinaryDownload({
     resolvedPath: effectiveBinaryPath,
-    host: bridgeHost,
-    port: bridgePort,
+    host: endpoint?.host ?? bridgeHost,
+    port: endpoint?.port ?? bridgePort,
     token: authToken,
     store: downloadStore,
+    fetch: input.fetchBinary,
   });
   const runtime = createFileTransferSessionRuntime({
     binaryPath: effectiveBinaryPath,
@@ -117,6 +142,7 @@ export function createFileBrowserSessionPortOwner(input: {
   send: (sessionId: string, message: FileBrowserCommand) => void;
   subscribe: FileBrowserSessionPort['onFileTransferMessage'];
   downloadStore?: FileTransferDownloadStore;
+  fetchBinary?: typeof fetch;
 }): FileBrowserSessionPortOwner {
   const ports = new Map<string, FileBrowserSessionPort>();
   const portKeys = new Map<string, string>();
@@ -128,6 +154,7 @@ export function createFileBrowserSessionPortOwner(input: {
     return [
       session?.id.trim() ?? '',
       session?.resolvedPath ?? '',
+      session?.resolvedEndpoint ?? '',
       session?.authToken ?? '',
       session?.bridgeHost ?? '',
       String(session?.bridgePort ?? ''),
@@ -159,6 +186,7 @@ export function createFileBrowserSessionPortOwner(input: {
         send: input.send,
         subscribe: input.subscribe,
         downloadStore: input.downloadStore,
+        fetchBinary: input.fetchBinary,
       });
       ports.set(sessionId, port);
       portKeys.set(sessionId, nextKey);

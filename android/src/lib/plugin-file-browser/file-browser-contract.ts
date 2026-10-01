@@ -19,7 +19,7 @@ export interface FileBrowserSessionPortOwner {
   resolve(input: {
     session: Pick<
       Session,
-      'id' | 'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'authToken' | 'resolvedPath'
+      'id' | 'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'authToken' | 'resolvedPath' | 'resolvedEndpoint'
     > | undefined;
   }): FileBrowserSessionPort;
   reconcile(liveSessionIds: Iterable<string>): void;

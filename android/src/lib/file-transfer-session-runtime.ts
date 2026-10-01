@@ -204,6 +204,8 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
     error?: string;
   }>();
   let openDownloadGeneration = 0;
+  let disposing = false;
+  const activeBinaryDownloadControllers = new Map<string, AbortController>();
 
   const clearPreviewAssembly = () => {
     activePreviewRequestId = null;
@@ -390,6 +392,14 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
       if (disposed) {
         throw new Error('file transfer session runtime is disposed');
       }
+      for (const requestId of activeBinaryDownloadControllers.keys()) {
+        settleDownloadWaiter(requestId, new Error('file transfer session reopened'));
+      }
+      for (const controller of activeBinaryDownloadControllers.values()) {
+        controller.abort();
+      }
+      activeBinaryDownloadControllers.clear();
+      sessionDownloads.clear();
       sessionGeneration += 1;
       for (const requestId of uploadWaiters.keys()) {
         settleUploadWaiter(requestId, new Error('file transfer sheet reopened'));
@@ -513,9 +523,24 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
       };
       if (resolvedDestination && binaryDownloadEnabled && deps?.fetchBinaryFile) {
         const binaryController = new AbortController();
+        activeBinaryDownloadControllers.set(requestId, binaryController);
         let binarySettled = false;
+        const isBinaryCurrent = () => (
+          !disposed
+          && sessionGeneration === sessionGenerationAtStart
+          && sessionScopeId === intent.scopeId
+        );
+        const releaseBinaryController = () => {
+          if (activeBinaryDownloadControllers.get(requestId) === binaryController) {
+            activeBinaryDownloadControllers.delete(requestId);
+          }
+        };
         const finishBinaryFailure = (error: unknown) => {
+          if (binarySettled) {
+            return;
+          }
           binarySettled = true;
+          releaseBinaryController();
           if (!binaryController.signal.aborted) {
             binaryController.abort();
           }
@@ -534,7 +559,7 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
                 effectiveMessage = `${message}; cleanup failed: ${cleanupMessage}`;
               }
             }
-            if (sessionGeneration === sessionGenerationAtStart && sessionScopeId === intent.scopeId) {
+            if (isBinaryCurrent()) {
               state = {
                 ...state,
                 transfers: updateTransfer(state.transfers, requestId, (current) => ({
@@ -546,8 +571,17 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
               emitStateChange();
               settleDownloadWaiter(requestId, new Error(effectiveMessage));
             }
+            sessionDownloads.delete(requestId);
           })();
         };
+        binaryController.signal.addEventListener('abort', () => {
+          if (disposing) {
+            return;
+          }
+          if (!binarySettled && !isBinaryCurrent()) {
+            finishBinaryFailure(new DOMException('Binary download aborted', 'AbortError'));
+          }
+        });
         void deps.fetchBinaryFile({
           requestId,
           remotePath: downloadPath,
@@ -556,6 +590,9 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
           destination: resolvedDestination,
           signal: binaryController.signal,
           onProgress: ({ receivedBytes }) => {
+            if (!isBinaryCurrent()) {
+              return;
+            }
             state = {
               ...state,
               transfers: updateTransfer(state.transfers, requestId, (current) => ({
@@ -567,19 +604,22 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
           },
         }).then(() => {
           binarySettled = true;
-          if (sessionGeneration !== sessionGenerationAtStart || sessionScopeId !== intent.scopeId) {
+          releaseBinaryController();
+          if (!isBinaryCurrent()) {
             if (resolvedDestination) {
               void deps.downloadStore?.abort({
                 destination: resolvedDestination,
               });
             }
+            sessionDownloads.delete(requestId);
             return;
           }
           void deps.downloadStore?.complete({
             destination: resolvedDestination,
             totalBytes: entry.size,
           }).then(() => {
-            if (sessionGeneration !== sessionGenerationAtStart || sessionScopeId !== intent.scopeId) {
+            if (!isBinaryCurrent()) {
+              sessionDownloads.delete(requestId);
               return;
             }
             state = {
@@ -592,7 +632,9 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
             };
             emitStateChange();
             settleDownloadWaiter(requestId);
+            sessionDownloads.delete(requestId);
           }).catch((completeError) => {
+            binarySettled = false;
             finishBinaryFailure(completeError);
           });
         }).catch((error) => {
@@ -1180,11 +1222,14 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
         return;
       }
       disposed = true;
+      disposing = true;
       const disposeError = new Error('file transfer session closed');
-      for (const [requestId, download] of sessionDownloads) {
-        if (download.status !== 'receiving') {
-          continue;
+      for (const [requestId, download] of Array.from(sessionDownloads.entries())) {
+        const controller = activeBinaryDownloadControllers.get(requestId);
+        if (controller && !controller.signal.aborted) {
+          controller.abort();
         }
+        activeBinaryDownloadControllers.delete(requestId);
         download.status = 'error';
         download.error = disposeError.message;
         if (download.destination && deps?.downloadStore) {
@@ -1199,7 +1244,17 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
         settleDownloadWaiter(requestId, new Error(download.error));
         clearDownloadAssembly(requestId, download);
       }
+      state = {
+        ...state,
+        transfers: state.transfers.map((item) => (
+          item.status === 'transferring'
+            ? { ...item, status: 'error' as const, error: disposeError.message }
+            : item
+        )),
+      };
+      emitStateChange();
       stateListeners.clear();
+      disposing = false;
     },
   };
 }

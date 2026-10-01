@@ -323,6 +323,52 @@ describe('file-transfer-session-runtime', () => {
     });
   });
 
+  it('aborts an in-flight binary download and settles its waiter on dispose', async () => {
+    const abort = vi.fn(async () => undefined);
+    const store = createDownloadStore({ abort });
+    let capturedSignal: AbortSignal | undefined;
+    const fetchBinaryFile = vi.fn(async (options: { signal: AbortSignal }) => {
+      capturedSignal = options.signal;
+      await new Promise<void>((_resolve, reject) => {
+        options.signal.addEventListener('abort', () => {
+          reject(new DOMException('Binary download aborted', 'AbortError'));
+        });
+      });
+    });
+    const runtime = createFileTransferSessionRuntime({
+      now: () => 302,
+      randomId: () => 'bin-dispose',
+      binaryPath: 'lan',
+      downloadStore: store,
+      fetchBinaryFile,
+    });
+
+    runtime.open('/remote/home', 'session-dispose');
+    const download = runtime.startDownload(
+      { name: 'slow.bin', size: 9 },
+      '/remote/home',
+      {
+        scopeId: 'session-dispose',
+        downloadDir: '/storage/emulated/0/Download/dispose-path',
+      },
+    );
+    await Promise.resolve();
+    expect(capturedSignal?.aborted).toBe(false);
+
+    await runtime.dispose();
+
+    expect(capturedSignal?.aborted).toBe(true);
+    await expect(download.waitForDone()).rejects.toThrow(/file transfer session closed/i);
+    expect(abort).toHaveBeenCalledWith({
+      destination: expect.objectContaining({
+        requestId: download.requestId,
+        scopeId: 'session-dispose',
+        fileName: 'slow.bin',
+      }),
+    });
+    expect(runtime.getState().transfers[0]).toMatchObject({ status: 'error' });
+  });
+
   it('keeps relay/rtc downloads on mux chunk fallback instead of invoking the direct HTTP fast path', async () => {
     const store = createDownloadStore();
     const fetchBinaryFile = vi.fn(async () => {
