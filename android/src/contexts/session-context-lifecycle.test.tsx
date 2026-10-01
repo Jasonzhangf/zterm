@@ -16,7 +16,6 @@ import {
 import { createSessionHeartbeatStore } from '../lib/session-heartbeat-store';
 import { createSessionReconnectStore } from '../lib/session-reconnect-store';
 import {
-  getSessionTransportResource,
   createSessionTransportRuntimeStore,
   getSessionTransportRuntime,
   setTargetTerminalTransport,
@@ -27,6 +26,8 @@ import {
   ensureSessionTerminalChannel,
   updateSessionTerminalChannelState,
 } from '../lib/terminal-channel-mux-runtime';
+
+type EnsureActiveSessionFreshFn = Parameters<typeof useSessionContextLifecycle>[0]['ensureActiveSessionFresh'];
 
 describe('session-context-lifecycle', () => {
   afterEach(() => {
@@ -940,7 +941,7 @@ describe('session-context-lifecycle', () => {
   it('reopens closed mux channels on the foreground attach-lease heartbeat', async () => {
     vi.useFakeTimers();
     const renewForegroundSessionAttachLease = vi.fn();
-    const ensureActiveSessionFresh = vi.fn(() => true);
+    const ensureActiveSessionFresh = vi.fn<Parameters<EnsureActiveSessionFreshFn>, ReturnType<EnsureActiveSessionFreshFn>>(() => true);
     const transportStore = createSessionTransportRuntimeStore();
     const socket = { readyState: WebSocket.OPEN };
     const host = {
@@ -1009,9 +1010,8 @@ describe('session-context-lifecycle', () => {
       await vi.advanceTimersByTimeAsync(FOREGROUND_ATTACH_LEASE_RENEW_INTERVAL_MS);
     });
 
-    expect(
-      ensureActiveSessionFresh.mock.calls.filter((call) => call[0].source === 'foreground-resume'),
-    ).toHaveLength(1);
+    const foregroundResumeCalls = ensureActiveSessionFresh.mock.calls.filter((call) => call[0]?.source === 'foreground-resume');
+    expect(foregroundResumeCalls).toHaveLength(1);
     expect(ensureActiveSessionFresh).toHaveBeenCalledWith({
       sessionId: 's1',
       source: 'foreground-resume',
