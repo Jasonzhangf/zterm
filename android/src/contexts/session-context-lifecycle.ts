@@ -273,6 +273,11 @@ export function useSessionContextLifecycle(options: {
   const cleanupSocketRef = useRef(options.cleanupSocket);
   const cleanupControlSocketRef = useRef(options.cleanupControlSocket);
   const clearSessionHandshakeTimeoutRef = useRef(options.clearSessionHandshakeTimeout);
+  const renewForegroundSessionAttachLeaseRef = useRef(
+    options.renewForegroundSessionAttachLease,
+  );
+
+  renewForegroundSessionAttachLeaseRef.current = options.renewForegroundSessionAttachLease;
 
   useEffect(() => {
     cleanupSocketRef.current = options.cleanupSocket;
@@ -413,10 +418,10 @@ export function useSessionContextLifecycle(options: {
       return;
     }
     const timer = window.setInterval(() => {
-      options.renewForegroundSessionAttachLease('foreground-attach-heartbeat');
+      renewForegroundSessionAttachLeaseRef.current('foreground-attach-heartbeat');
     }, FOREGROUND_ATTACH_LEASE_RENEW_INTERVAL_MS);
     return () => window.clearInterval(timer);
-  }, [options.appForegroundActive, options.renewForegroundSessionAttachLease]);
+  }, [options.appForegroundActive]);
 
   useEffect(() => {
     if (options.appForegroundActive === false) {
