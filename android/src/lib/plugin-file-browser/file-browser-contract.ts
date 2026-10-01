@@ -17,7 +17,10 @@ export interface FileBrowserSessionPort {
 
 export interface FileBrowserSessionPortOwner {
   resolve(input: {
-    session: Pick<Session, 'id' | 'daemonHostId' | 'bridgeHost' | 'bridgePort'> | undefined;
+    session: Pick<
+      Session,
+      'id' | 'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'authToken' | 'resolvedPath'
+    > | undefined;
   }): FileBrowserSessionPort;
   reconcile(liveSessionIds: Iterable<string>): void;
   dispose(): Promise<void>;

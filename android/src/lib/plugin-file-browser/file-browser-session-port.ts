@@ -48,7 +48,9 @@ export function createFileBrowserSessionPort(input: {
     ? resolvedPath
     : undefined;
   const effectiveBinaryPath = directDownloadPath
-    || (bridgeHost && isPrivateLanBridgeHost(bridgeHost) ? 'lan' as const : undefined);
+    || (!resolvedPath && bridgeHost && isPrivateLanBridgeHost(bridgeHost)
+      ? 'lan' as const
+      : undefined);
   const { send, subscribe } = input;
   const downloadStore = input.downloadStore ?? createFileTransferDownloadStore(StoragePermissionPlugin);
   const binaryDownloader = createFileTransferBinaryDownload({
@@ -117,7 +119,21 @@ export function createFileBrowserSessionPortOwner(input: {
   downloadStore?: FileTransferDownloadStore;
 }): FileBrowserSessionPortOwner {
   const ports = new Map<string, FileBrowserSessionPort>();
+  const portKeys = new Map<string, string>();
   let disposed = false;
+
+  function buildPortKey(
+    session: Parameters<FileBrowserSessionPortOwner['resolve']>[0]['session'],
+  ): string {
+    return [
+      session?.id.trim() ?? '',
+      session?.resolvedPath ?? '',
+      session?.authToken ?? '',
+      session?.bridgeHost ?? '',
+      String(session?.bridgePort ?? ''),
+      session?.daemonHostId ?? '',
+    ].join('|');
+  }
 
   return {
     resolve({ session }) {
@@ -128,9 +144,15 @@ export function createFileBrowserSessionPortOwner(input: {
       if (!sessionId) {
         throw new Error('file browser session is required');
       }
+      const nextKey = buildPortKey(session);
       const cached = ports.get(sessionId);
-      if (cached) {
+      if (cached && portKeys.get(sessionId) === nextKey) {
         return cached;
+      }
+      if (cached) {
+        ports.delete(sessionId);
+        portKeys.delete(sessionId);
+        void cached.dispose();
       }
       const port = createFileBrowserSessionPort({
         session,
@@ -139,6 +161,7 @@ export function createFileBrowserSessionPortOwner(input: {
         downloadStore: input.downloadStore,
       });
       ports.set(sessionId, port);
+      portKeys.set(sessionId, nextKey);
       return port;
     },
 
@@ -149,6 +172,7 @@ export function createFileBrowserSessionPortOwner(input: {
           continue;
         }
         ports.delete(sessionId);
+        portKeys.delete(sessionId);
         void port.dispose();
       }
     },
@@ -160,6 +184,7 @@ export function createFileBrowserSessionPortOwner(input: {
       disposed = true;
       const pending = Array.from(ports.values(), (port) => port.dispose());
       ports.clear();
+      portKeys.clear();
       await Promise.all(pending);
     },
   };
